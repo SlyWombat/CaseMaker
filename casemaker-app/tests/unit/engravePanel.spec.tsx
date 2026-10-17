@@ -434,6 +434,7 @@ describe('EngravePanel — the run sheet mount (#207)', () => {
       stage: 'done',
       findings: [],
       feeds: null,
+      threads: null,
       cam: { operations: 1, cuttingMoves: 10, estimatedSeconds: 5, passes: 2 },
       nc,
       verify: {

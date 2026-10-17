@@ -44,6 +44,8 @@ import { cuttingDiameter, cuttingForTrace, drillPointAngle, type Tool } from '@/
 import type { NodeMeshOutput } from './meshOutput';
 import type { SweepDiagnostic, SweepStats } from './sweep';
 import { MAX_AIR_CHECKS, MAX_GOUGES, holderGate } from './sweep';
+// Type-only (erased): the CAM module is not pulled into the worker graph (§4's plain-data rule).
+import type { SimThreadSpec } from '@/engine/cnc/cam/threadMill';
 
 /**
  * The cutter a column sweep removes material with (#405).
@@ -331,6 +333,14 @@ export interface ColumnSweepOpts {
    * millimetres) and when `resolution` overrides the whole grid.
    */
   rotaryPitchDeg?: number | null;
+  /**
+   * The threads the program mills (#445 §4), as the CAM planned them: plain numbers, type-only so
+   * this worker does not import the CAM module. With these present the generic envelope warning is
+   * replaced by one line per thread, and each thread is checked against the cutting diameter. A
+   * ROTARY job with them is refused by name (`thread-flat-only`): a thread is cut on a flat face,
+   * and a single-valued radius column has no form for it.
+   */
+  threads?: readonly SimThreadSpec[] | null;
 }
 
 export interface ColumnSweepOk {
@@ -923,6 +933,21 @@ function zeroStats(): SweepStats {
 export function columnSweep(timeline: Timeline, tool: Tool, setup: Setup, opts?: ColumnSweepOpts): ColumnOutcome {
   const t0 = performance.now();
   const rotary = timeline.summary.rotary;
+  // A thread job is a FLAT job, and says so by name (#445 §4): the rotary grid is one radius per
+  // (θ, X) column, and the thread's crest/groove is multi-valued in the radius it would need. The
+  // refusal comes before the cutter check so the message names the thread, not the tool.
+  if (rotary && (opts?.threads?.length ?? 0) > 0) {
+    return {
+      ok: false,
+      diagnostics: [
+        {
+          severity: 'error',
+          code: 'thread-flat-only',
+          message: `this program cuts ${opts?.threads?.length} milled thread(s), and a thread is simulated on a flat face only: the rotary column grid is a single-valued radius per (θ, X) column, which has no form for a thread, so nothing is claimed about this job (/Rotary.md, #445 §4)`,
+        },
+      ],
+    };
+  }
   // The cutter, in the parameterisation's terms. The FLAT engine takes a V-bit's cone (#405), a
   // drill's bounded point and a thread mill's envelope (#382); ROTARY takes a flat end mill only, and
   // refuses the rest by name rather than sweeping them as one — a V-bit on a turntable is #221's
@@ -984,8 +1009,46 @@ export function columnSweep(timeline: Timeline, tool: Tool, setup: Setup, opts?:
   const stats = zeroStats();
   stats.resolution = { dx: grid.du, dThetaDeg: grid.dv };
   // The cutter's own notes first: the drill's point and where its angle came from, the thread mill's
-  // envelope (#382) — said wherever the result is read, never only in a comment.
-  const diagnostics: SweepDiagnostic[] = [...resolved.diagnostics];
+  // envelope (#382) — said wherever the result is read, never only in a comment. A thread job that
+  // brought its dimensions (#445 §4) replaces the generic envelope warning below with one line per
+  // thread, so the reader learns which thread the envelope stands for and how much it over-removes.
+  const threadSpecs = resolved.kind === 'thread-envelope' ? (opts?.threads ?? []) : [];
+  const diagnostics: SweepDiagnostic[] =
+    threadSpecs.length > 0 ? resolved.diagnostics.filter((d) => d.code !== 'thread-envelope') : [...resolved.diagnostics];
+  if (threadSpecs.length > 0) {
+    // The fit checks: the same two the CAM refuses on (#445 D2), restated here because this is the
+    // simulation of a FILE — a program loaded from elsewhere never met the CAM's own gate. An
+    // `error` does not stop the sweep: the moves are still swept as the envelope says, and the
+    // removal picture is what this program would make, but the thread it is meant to cut is not
+    // the thread it leaves.
+    const d = resolved.cutter.radius * 2;
+    for (const s of threadSpecs) {
+      const radialDepth = (s.majorMm - s.minorMm) / 2;
+      if (d >= s.minorMm) {
+        diagnostics.push({
+          severity: 'error',
+          code: 'thread-cutter-fit',
+          message: `thread at (${s.x}, ${s.y}): the ${d} mm cutting diameter cannot enter the ⌀${s.minorMm} mm pilot (a thread mill must be smaller than the thread's minor diameter), so this program cannot cut the ⌀${s.majorMm} × ${s.pitchMm} thread`,
+        });
+      } else if (d < radialDepth) {
+        diagnostics.push({
+          severity: 'error',
+          code: 'thread-cutter-fit',
+          message: `thread at (${s.x}, ${s.y}): the ${d} mm cutting diameter spans only ${d.toFixed(3)} mm, less than the ${radialDepth.toFixed(3)} mm radial depth of the ⌀${s.majorMm} over ⌀${s.minorMm} thread, so the cutter cannot reach the major diameter`,
+        });
+      }
+      // The envelope's over-removal as an UPPER bound: the annular band between the basic minor and
+      // the major, `π/4 (D² − D1²) L`. It needs no thread-profile coefficient, so it cannot be
+      // optimistic. The pilot is not an initial condition — the sweep starts from the solid blank,
+      // and pre-lowering the pilot would count a cut this program did not make.
+      const band = (Math.PI / 4) * (s.majorMm ** 2 - s.minorMm ** 2) * s.threadDepthMm;
+      diagnostics.push({
+        severity: 'warning',
+        code: 'thread-envelope',
+        message: `thread at (${s.x}, ${s.y}): ⌀${s.majorMm} × ${s.pitchMm}, ⌀${s.minorMm} pilot, ${s.threadDepthMm} mm; the envelope removes the whole ⌀${s.majorMm} bore (the annular band from ⌀${s.minorMm} to ⌀${s.majorMm} is ${band.toFixed(2)} mm³); the true thread leaves its ridges, so the picture over-removes by less than that; the helical form is not drawn; the pilot is assumed and is not simulated`,
+      });
+    }
+  }
   // The thread mill's NECK (#382 review): the envelope is its cutting diameter all the way up, which
   // is honest only as deep as the neck reaches. Past it the shank is wider and would rub, so the
   // exact sweeper's own holder gate is asked — `holder-collision` past a stated shoulder/flute

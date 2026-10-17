@@ -898,6 +898,69 @@
       "unit": "rpm",
       "note": "placeholder, not measured; not a vendor number: the drilling spindle speed until a measured row replaces it"
     },
+    "thread.radialStepoverMm": {
+      "value": 0.2,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm",
+      "note": "chosen, not measured: the most radial depth one thread pass takes; the last pass always lands on the major radius"
+    },
+    "thread.entryRampMm": {
+      "value": 0.5,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm",
+      "note": "chosen, not measured: the axial drop over which the entry ramp reaches the pass radius; 0 is a flat radial entry"
+    },
+    "thread.bottomClearancePitches": {
+      "value": 1.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "x",
+      "note": "chosen, not measured: how many pitches the tool tip runs below the last full thread"
+    },
+    "thread.pilotTipClearanceMm": {
+      "value": 0.5,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm",
+      "note": "chosen, not measured: the pilot floor must sit this far below the tool tip so the tip does not bottom"
+    },
+    "thread.feed": {
+      "value": 300.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm/min",
+      "note": "placeholder, not measured; not a vendor number: the helical cutting feed until a measured row replaces it"
+    },
+    "thread.plungeFeed": {
+      "value": 100.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm/min",
+      "note": "placeholder, not measured; not a vendor number: the feed down the open pilot and the entry ramp until a measured row replaces it"
+    },
+    "thread.spindleRpm": {
+      "value": 10000.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "rpm",
+      "note": "placeholder, not measured; not a vendor number: the thread-milling spindle speed until a measured row replaces it"
+    },
+    "thread.chordToleranceMm": {
+      "value": 0.01,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm",
+      "note": "chosen, not measured: the most a G1 chord may stray from the true helix; it sets the move count and the file size"
+    },
+    "engrave.newThreadDepthMm": {
+      "value": 5.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm",
+      "note": "chosen, not measured: the threaded length a new thread item starts at"
+    },
     "adaptive.engagementFraction": {
       "value": 0.1,
       "source": "seeded",

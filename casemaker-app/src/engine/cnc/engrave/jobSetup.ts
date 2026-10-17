@@ -1,7 +1,7 @@
 import { rectProfile } from '@/engine/compiler/profile';
 import type { MillProfile } from '@/engine/cnc/machine';
 import { getTools, toolForJob } from '@/engine/cnc/toolRegistry';
-import { cuttingRadiusForSweep, traceRadiusAt, type Tool } from '@/engine/cnc/tool';
+import { cuttingDiameter, cuttingRadiusForSweep, traceRadiusAt, type Tool } from '@/engine/cnc/tool';
 import { viseEnvelope } from '@/engine/cnc/fixture';
 import { validateSacrificial, viseJawShift } from '@/engine/cnc/sacrificial';
 import { stubSetup, type Setup, type Workholding } from '@/engine/cnc/setup';
@@ -11,15 +11,18 @@ import {
   idJawReach,
   polygonSelfIntersects,
   resolveItems,
+  threadOperationName,
   traceOperationName,
   traceSelfOverlapFindings,
   type JawReach,
 } from '@/engine/cnc/engrave/partPlan';
+import { FASTENERS } from '@/engine/compiler/fasteners';
 import type {
   EngraveAnyItem,
   EngraveDrill,
   EngraveJob,
   EngraveKeepOut,
+  EngraveThread,
   EngraveTraceItem,
   JobSetup,
 } from '@/types/engraveJob';
@@ -97,7 +100,17 @@ export type JobFindingCode =
   | 'drill-outside-stock'
   | 'plunge-unproven'
   | 'drill-too-deep'
-  | 'drill-through-unavailable';
+  | 'drill-through-unavailable'
+  // Milled threads (#445, #434 phase 2). The same shape of data-plus-tool checks as the drills,
+  // with the tool's own fit against the ISO thread added.
+  | 'thread-wrong-tool'
+  | 'thread-mixed-tools'
+  | 'thread-cutter-fit'
+  | 'thread-off-stock'
+  | 'thread-too-deep'
+  | 'thread-through-unavailable'
+  | 'thread-pilot-unproven'
+  | 'thread-flute-unproven';
 
 export interface JobFinding {
   severity: 'error' | 'warning';
@@ -137,7 +150,7 @@ export function itemLabel(item: EngraveAnyItem): string {
  * traces, the drills and the under-surface voids each have a line of their own there even though a
  * combined shape cannot reference one.
  */
-export type EngraveNamedItem = EngraveAnyItem | EngraveTraceItem | EngraveDrill | EngraveKeepOut;
+export type EngraveNamedItem = EngraveAnyItem | EngraveTraceItem | EngraveDrill | EngraveThread | EngraveKeepOut;
 
 /**
  * The KIND in a word — "Rectangle", "Cut-away", "Single-line text", "Hole array" (#411).
@@ -177,6 +190,8 @@ export function itemKindWord(item: EngraveNamedItem): string {
       return 'Hole';
     case 'drill-array':
       return 'Hole array';
+    case 'thread':
+      return 'Thread';
   }
 }
 
@@ -297,6 +312,7 @@ export function jobSetups(job: EngraveJob): JobSetup[] {
     ...(job.traces ?? []),
     ...(job.vectors ?? []),
     ...(job.drills ?? []),
+    ...(job.threads ?? []),
   ];
   const itemIds = items
     .filter((item) => item.enabled && item.construction !== true)
@@ -357,6 +373,9 @@ export function validateJob(job: EngraveJob): JobFinding[] {
   // Plunge drills (#220) are a third list. A drill has no `construction`; a disabled one does
   // nothing.
   const enabledDrills: EngraveDrill[] = (job.drills ?? []).filter((d) => d.enabled);
+  // Milled threads (#445) are a fourth list. A thread has no `construction`; a disabled one does
+  // nothing.
+  const enabledThreads: EngraveThread[] = (job.threads ?? []).filter((t) => t.enabled);
   const { thickness } = job.stock;
   const floorAllowed = thickness - job.minFloor;
 
@@ -438,6 +457,151 @@ export function validateJob(job: EngraveJob): JobFinding[] {
     }
   }
 
+  // MILLED THREADS (#445, #434 phase 2). A thread mill does not drill (D1): every check here
+  // assumes the pilot, and the pilot's existence is a WARNING with the uncertainty named, because
+  // no program in this app cut it and no document proves it. The CAM is the exact gate for the
+  // fit; these checks report the same rules on the document as data, so a bad job is refused
+  // before a toolpath exists.
+  //
+  // The run-out charged below is ONE PITCH. `validateJob` is pure and cannot read the location's
+  // `thread.bottomClearancePitches`, so it takes the smallest run-out the CAM may use from the
+  // thread itself; the CAM's plan and the verifier's `cut-too-deep` carry the exact number when
+  // the setting says otherwise. The floor check therefore errs toward the user, not away.
+  if (enabledThreads.length > 0) {
+    const threadTool = jobTool(job);
+    const threadDiameter = threadTool === null ? null : cuttingDiameter(threadTool);
+    if (threadTool !== null && threadTool.shape !== 'thread') {
+      findings.push({
+        severity: 'error',
+        code: 'thread-wrong-tool',
+        labelId: enabledThreads[0]!.id,
+        message:
+          `The job has a thread, but the tool is "${threadTool.name}" (${threadTool.shape}), not a ` +
+          `thread mill. A thread is cut by orbiting a small cutter inside the pilot; a flat end mill ` +
+          `cannot cut one.`,
+      });
+    }
+    // One program has one tool (D1). A thread beside any other enabled cut would need a tool
+    // change mid-program, which `ToolpathIR` cannot describe.
+    const otherWork: string[] = [
+      ...enabled.filter(itemHasWork).map(itemLabel),
+      ...enabledTraces.filter(traceHasWork).map(traceOperationName),
+      ...enabledDrills.map(drillOperationName),
+    ];
+    if (otherWork.length > 0) {
+      findings.push({
+        severity: 'error',
+        code: 'thread-mixed-tools',
+        labelId: enabledThreads[0]!.id,
+        message:
+          `A thread program has ONE tool (the thread mill), but this job also cuts ` +
+          `${otherWork[0]}${otherWork.length > 1 ? ` and ${otherWork.length - 1} other item(s)` : ''}. ` +
+          `Cut the thread in its own program, after the pilot and any other work is done.`,
+      });
+    }
+
+    for (const thread of enabledThreads) {
+      const who = threadOperationName(thread);
+      const { major, pitch, minor } = FASTENERS[thread.size];
+      const runOut = pitch;
+
+      if (thread.through) {
+        findings.push({
+          severity: 'error',
+          code: 'thread-through-unavailable',
+          labelId: thread.id,
+          message:
+            `${who} asks to thread through the blank, which needs a sacrificial board (#213) and ` +
+            `the through-cut depth rules (#218); neither is in yet, so the thread is refused rather ` +
+            `than cut into the vise.`,
+        });
+      } else {
+        const tipDepth = thread.depth + runOut;
+        if (tipDepth > floorAllowed) {
+          findings.push({
+            severity: 'error',
+            code: 'thread-too-deep',
+            labelId: thread.id,
+            message:
+              `${who} threads ${thread.depth} mm, and its tip runs about ${Number(runOut.toFixed(3))} mm ` +
+              `below the last full thread; on a ${thickness} mm stock that leaves less than the ` +
+              `${job.minFloor} mm minimum floor.`,
+          });
+        }
+        if (threadTool !== null && threadTool.fluteLength !== null && threadTool.fluteLength > 0 && tipDepth > threadTool.fluteLength) {
+          findings.push({
+            severity: 'error',
+            code: 'thread-too-deep',
+            labelId: thread.id,
+            message:
+              `${who} needs ${Number(tipDepth.toFixed(3))} mm of flute (the thread plus its run-out), ` +
+              `past the ${threadTool.fluteLength} mm flute of "${threadTool.name}".`,
+          });
+        }
+      }
+
+      // The two physical checks D2 says the planner can make from the item and the tool alone:
+      // the cutter must enter the pilot, and its radius must span the thread's radial depth.
+      if (threadTool !== null && threadTool.shape === 'thread' && threadDiameter !== null) {
+        if (threadDiameter >= minor) {
+          findings.push({
+            severity: 'error',
+            code: 'thread-cutter-fit',
+            labelId: thread.id,
+            message:
+              `${who}: the ${threadDiameter} mm cutting diameter cannot enter the ⌀${minor} mm pilot ` +
+              `of ${thread.size} (the tool must be smaller than the thread's minor diameter).`,
+          });
+        } else if (threadDiameter < (major - minor) / 2) {
+          findings.push({
+            severity: 'error',
+            code: 'thread-cutter-fit',
+            labelId: thread.id,
+            message:
+              `${who}: the ${threadDiameter} mm cutting diameter spans less than the ` +
+              `${Number(((major - minor) / 2).toFixed(3))} mm radial depth of ${thread.size} ` +
+              `(⌀${major} over ⌀${minor}); the tooth cannot reach the major diameter.`,
+          });
+        }
+      }
+
+      // The thread is a disc of the MAJOR radius — the widest the orbit reaches — so it is off
+      // the stock when that rim crosses an edge, not just its axis.
+      const r = major / 2;
+      if (thread.position.x - r < 0 || thread.position.x + r > length || thread.position.y - r < 0 || thread.position.y + r > width) {
+        findings.push({
+          severity: 'error',
+          code: 'thread-off-stock',
+          labelId: thread.id,
+          message:
+            `${who} is centred at (${thread.position.x}, ${thread.position.y}) mm and its ` +
+            `⌀${major} mm thread reaches past the stock edge; the thread must stay on the blank.`,
+        });
+      }
+
+      findings.push({
+        severity: 'warning',
+        code: 'thread-pilot-unproven',
+        labelId: thread.id,
+        message:
+          `${who} assumes a ⌀${minor} mm pilot (${thread.size} basic minor) at least ` +
+          `${Number((thread.depth + pitch).toFixed(3))} mm deep is ALREADY in the blank. This program ` +
+          `cuts the thread only and never the pilot (D1); drill and measure the pilot first.`,
+      });
+
+      if (threadTool !== null && threadTool.fluteLength === null) {
+        findings.push({
+          severity: 'warning',
+          code: 'thread-flute-unproven',
+          labelId: thread.id,
+          message:
+            `Nothing recorded for "${threadTool.name}" states its flute length, so the run-out has ` +
+            `not been shown to clear the flutes (#208 records the owned cutters' lengths).`,
+        });
+      }
+    }
+  }
+
   // A plunge needs a CENTRE-CUTTING cutter. The tool record does not carry the field (#220), so
   // a parsed or generic tool is `null` — unknown. That is a WARNING with the uncertainty named,
   // never a silent plunge; a tool explicitly recorded as not centre-cutting is an ERROR.
@@ -513,11 +677,11 @@ export function validateJob(job: EngraveJob): JobFinding[] {
     }
   }
 
-  if (!enabled.some(itemHasWork) && !enabledTraces.some(traceHasWork) && enabledDrills.length === 0) {
+  if (!enabled.some(itemHasWork) && !enabledTraces.some(traceHasWork) && enabledDrills.length === 0 && enabledThreads.length === 0) {
     findings.push({
       severity: 'error',
       code: 'no-items',
-      message: 'The job has no enabled label with text, shape, trace or drilled hole.',
+      message: 'The job has no enabled label with text, shape, trace, drilled hole or thread.',
     });
   }
 
@@ -549,7 +713,7 @@ export function validateJob(job: EngraveJob): JobFinding[] {
   // review): a cut that only enters the BAND has not been shown to come over a jaw at all, and the
   // message may not say it does. `overJaw` is the cutter's own disc, so the sentence below picks
   // "would" or "could" off the same reading the run sheet's stop line uses.
-  const reachingDepths = (items: readonly (EngraveAnyItem | EngraveTraceItem | EngraveDrill)[]) =>
+  const reachingDepths = (items: readonly (EngraveAnyItem | EngraveTraceItem | EngraveDrill | EngraveThread)[]) =>
     items
       .map((item) => ({ id: item.id, depth: item.depth, reach: idJawReach(job, item.id) }))
       .filter((item) => item.reach.reaches);
@@ -557,6 +721,7 @@ export function validateJob(job: EngraveJob): JobFinding[] {
     ...reachingDepths(enabled),
     ...reachingDepths(enabledTraces),
     ...reachingDepths(enabledDrills),
+    ...reachingDepths(enabledThreads),
   ];
   const deepestItem = candidateDepths.reduce<{ id: string; depth: number; reach: JawReach } | null>(
     (deepestSoFar, item) => (!deepestSoFar || item.depth > deepestSoFar.depth ? item : deepestSoFar),

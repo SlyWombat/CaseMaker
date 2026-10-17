@@ -441,3 +441,76 @@ describe('a V-bit cone on the flat engine (#405)', () => {
     expect(out.diagnostics[0]?.message).toMatch(/V-bit|cone/i);
   });
 });
+
+/**
+ * Thread milling on the flat engine (#445 §4). The removal model does NOT change — the cutting
+ * diameter is swept as a cylinder, as #382 left it — but when the load brings the thread's own
+ * dimensions the generic envelope warning is replaced by one line per thread, and the cutter is
+ * checked against each thread it claims to cut.
+ */
+describe('a milled thread on the flat engine (#445)', () => {
+  /** A 4 mm thread mill: fits M5's ⌀4.134 pilot and spans its radial depth. */
+  const MILL = (over: Partial<Tool> = {}): Tool =>
+    flatEndMill(4, { name: '4 mm thread mill', typeText: 'Thread Mill', shape: 'thread', tipDiameter: 4, diameter: 4, fluteLength: 20, ...over });
+  const M5 = { x: 20, y: 15, majorMm: 5, minorMm: 4.134, pitchMm: 0.8, threadDepthMm: 5, through: false };
+  const flat = (z = -5.8) => fakeTimeline([move({ u0: 20, u1: 20, v0: 15, v1: 15, z })], false, 15);
+  const tiny = { dx: 0.2, dThetaDeg: 0.2 };
+
+  it('replaces the generic envelope warning with one line per thread, and states the band', () => {
+    const out = columnSweep(flat(), MILL(), prism(40, 30, 8), { resolution: tiny, threads: [M5] });
+    expect(out.ok).toBe(true);
+    if (!out.ok) return;
+    const envelope = out.diagnostics.filter((d) => d.code === 'thread-envelope');
+    expect(envelope).toHaveLength(1);
+    expect(envelope[0]!.message).not.toMatch(/simulated as a/);
+    // The analytic upper bound: π/4 (D² − D1²) L = 31.06 mm³ for M5 × 5 mm.
+    const band = (Math.PI / 4) * (M5.majorMm ** 2 - M5.minorMm ** 2) * M5.threadDepthMm;
+    expect(band).toBeCloseTo(31.0627, 3);
+    expect(envelope[0]!.message).toContain('31.06 mm³');
+    expect(envelope[0]!.message).toMatch(/the pilot is assumed and is not simulated/);
+    expect(envelope[0]!.message).toMatch(/helical form is not drawn/);
+  });
+
+  it('keeps the old envelope warning when no thread dimensions are passed', () => {
+    const out = columnSweep(flat(), MILL(), prism(40, 30, 8), { resolution: tiny });
+    expect(out.ok).toBe(true);
+    if (!out.ok) return;
+    const envelope = out.diagnostics.filter((d) => d.code === 'thread-envelope');
+    expect(envelope).toHaveLength(1);
+    expect(envelope[0]!.message).toMatch(/simulated as a ⌀4 mm cylinder/);
+  });
+
+  it('refuses a cutter whose diameter does not enter the pilot — an error, naming both numbers', () => {
+    // ⌀4.5 into M3's ⌀2.459 pilot: the program cannot cut this thread at all.
+    const spec = { ...M5, majorMm: 3, minorMm: 2.459, pitchMm: 0.5 };
+    const out = columnSweep(flat(), MILL({ tipDiameter: 4.5, diameter: 4.5 }), prism(40, 30, 8), { resolution: tiny, threads: [spec] });
+    expect(out.ok).toBe(true);
+    if (!out.ok) return;
+    const fit = out.diagnostics.find((d) => d.code === 'thread-cutter-fit')!;
+    expect(fit.severity).toBe('error');
+    expect(fit.message).toMatch(/4\.5 mm cutting diameter cannot enter the ⌀2\.459 mm pilot/);
+  });
+
+  it('refuses a cutter too small to reach the major', () => {
+    const out = columnSweep(flat(), MILL({ tipDiameter: 0.3, diameter: 0.3 }), prism(40, 30, 8), { resolution: tiny, threads: [M5] });
+    expect(out.ok).toBe(true);
+    if (!out.ok) return;
+    expect(out.diagnostics.find((d) => d.code === 'thread-cutter-fit')?.message).toMatch(/radial depth/);
+  });
+
+  it('still asks the holder gate — the envelope is honest only as deep as the neck', () => {
+    const noNeck = MILL({ fluteLength: null, shoulderLength: null });
+    const out = columnSweep(flat(), noNeck, prism(40, 30, 8), { resolution: tiny, threads: [M5] });
+    expect(out.ok).toBe(true);
+    if (!out.ok) return;
+    expect(out.diagnostics.map((d) => d.code)).toContain('holder-unproven');
+  });
+
+  it('REFUSES a rotary job with thread dimensions by name — thread-flat-only', () => {
+    const out = columnSweep(fakeTimeline([move({ u0: 0, u1: 0, v0: 0, v1: 360, z: 5 })]), MILL(), cyl(10, 30), { threads: [M5] });
+    expect(out.ok).toBe(false);
+    if (out.ok) return;
+    expect(out.diagnostics[0]?.code).toBe('thread-flat-only');
+    expect(out.diagnostics[0]?.message).toMatch(/flat face/);
+  });
+});

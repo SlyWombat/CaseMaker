@@ -27,6 +27,8 @@ import { checkpointAtStep } from '@/components/viewport/simGeometry';
 import type { SimDiagnostic, SimFrame, SimLoadOk, SimPath } from '@/workers/sim/session';
 // Type-only: erased at build time, so it does not pull the worker client into the graph.
 import type { SimLoadPhase } from '@/engine/jobs/simClient';
+// Type-only, like `SimLoadPhase`: the thread dimensions travel as plain numbers (#445 §4).
+import type { SimThreadSpec } from '@/engine/cnc/cam/threadMill';
 
 export type SimStatus = 'idle' | 'loading' | 'ready' | 'refused' | 'error';
 
@@ -131,7 +133,15 @@ export interface SimState {
    * and the store reads the settings itself, once; pass it (including `null`, meaning "none") and that
    * exact answer is the one simulated, so a caller that also generated against it cannot be split.
    */
-  loadProgram(gcodeText: string, setup: Setup, tool: Tool, machineId: string | null, calibration?: MachineCalibration | null): Promise<void>;
+  loadProgram(
+    gcodeText: string,
+    setup: Setup,
+    tool: Tool,
+    machineId: string | null,
+    calibration?: MachineCalibration | null,
+    /** The threads the program mills (#445 §4), as the CAM planned them; plain data, consumed by the sweep. */
+    threads?: readonly SimThreadSpec[],
+  ): Promise<void>;
   /** Run the last load again with twice the time limit (#194). No-op when nothing has been loaded. */
   retryWithLongerBudget(): Promise<void>;
   /**
@@ -233,6 +243,11 @@ interface LoadArgs {
   rotaryPitchDeg: number;
   /** The shop's `sim.spindleOffProximityMm` (#451), read once at the load. */
   spindleOffProximityMm: number;
+  /**
+   * The threads the program mills (#445 §4), as plain data. Kept with the load so a retry (and
+   * the restart's verify) sees the same threads, like the machine frame.
+   */
+  threads: readonly SimThreadSpec[];
 }
 let lastLoad: LoadArgs | null = null;
 
@@ -264,6 +279,7 @@ export const useSimStore = create<SimState>()((set, get) => {
         columnPitchXMm: args.columnPitchXMm,
         rotaryPitchDeg: args.rotaryPitchDeg,
         spindleOffProximityMm: args.spindleOffProximityMm,
+        threads: args.threads,
       });
       if (mine !== loadSeq) return; // superseded by a newer load or a dispose
       if (!r.ok) {
@@ -310,7 +326,7 @@ export const useSimStore = create<SimState>()((set, get) => {
   return {
     ...EMPTY,
     budgetMs: DEFAULT_SIM_BUDGET_MS,
-    async loadProgram(gcodeText, setup, tool, machineId, calibrationOverride) {
+    async loadProgram(gcodeText, setup, tool, machineId, calibrationOverride, threads = []) {
       // The saved read of the machine's own frame, if the user has one (#279). Resolved HERE so
       // every load path — a panel, the engrave run, the QA harness — simulates the same machine,
       // and so a retry or a restart cannot drift onto a different frame than the job was loaded on.
@@ -334,6 +350,7 @@ export const useSimStore = create<SimState>()((set, get) => {
         columnPitchXMm: pitchX.value,
         rotaryPitchDeg: rotaryPitch.value,
         spindleOffProximityMm: proximity.value,
+        threads,
       };
       await run(lastLoad, get().budgetMs);
     },

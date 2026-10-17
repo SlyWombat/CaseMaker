@@ -39,7 +39,9 @@ import { version as CAM_VERSION } from '../../../package.json';
 import type { MillProfile } from '@/engine/cnc/machine';
 import { jobMachine, type MachineCalibration } from '@/engine/cnc/calibration';
 import { feedsFor, type FeedsResult, type FeedCatalogueRow } from '@/engine/cnc/feeds';
-import { cuttingForTrace, isVTraceTool, traceRadiusAt, type Tool } from '@/engine/cnc/tool';
+import { cuttingDiameter, cuttingForTrace, isVTraceTool, traceRadiusAt, type Tool } from '@/engine/cnc/tool';
+import { threadMillIR, threadSettings, type ThreadMillPlan } from '@/engine/cnc/cam/threadMill';
+import type { ShopDefaults } from '@/platform/defaultsClient';
 import { vCone } from '@/engine/cnc/vProfile';
 import { isMetalTool } from '@/engine/cnc/registerCutter';
 import { MATERIAL_LABELS, isMetalMaterial } from '@/engine/cnc/materials';
@@ -89,6 +91,13 @@ export type EngraveStage = 'findings' | 'feeds' | 'cam' | 'post' | 'verify' | 'd
 export interface EngraveShopOpts {
   lostDetailWarnRatio?: number | null;
   peckClearanceMm?: number | null;
+  /**
+   * #445 — the whole shop-defaults map, because the thread settings carry a SOURCE per key and
+   * `readDefault` resolves each one against the location. `engraveRunStore` passes the same map
+   * it reads the two numbers above from, so a run's thread numbers and its peck clearance are one
+   * snapshot. `null`/absent means no location: `readDefault` then labels each fallback.
+   */
+  defaults?: ShopDefaults | null;
 }
 
 /** A stage refusal with its reason, so the panel can list it under the right row. */
@@ -114,6 +123,12 @@ export interface EngraveGenerated {
   findings: JobFinding[];
   /** #202. */
   feeds: FeedsResult | null;
+  /**
+   * #445 — one plan per thread item, in document order: the pass radii, the run-out and the plain
+   * `simThreads` the simulator load needs. `null` for every job with no thread, so a job before
+   * #445 reads exactly as it did.
+   */
+  threads: ThreadMillPlan[] | null;
   cam: EngraveCamSummary | null;
   /** The exact text to be saved. */
   nc: string | null;
@@ -506,8 +521,12 @@ function frameProgram(
   // not the tip's 0.3 mm. `traceRadiusAt` answers both shapes, so a flat end mill's frame is
   // unchanged to the last digit.
   const deepestCut = ir.operations.reduce((deepest, op) => Math.max(deepest, op.depth), 0);
-  const radius = traceRadiusAt(tool, deepestCut);
-  const moves = frameCorners(ir, radius ?? 0, FRAME_Z);
+  // A flat end mill or a V-bit answers here. A THREAD MILL does not trace (#445): its cut is the
+  // annulus around the orbit, and `traceRadiusAt` refuses the shape by name, so the frame would
+  // otherwise trace the tool's CENTRE path and miss the cutter's own radius. Growing by the
+  // cutting radius is the same rule the disc gets; it is an air trace, so nothing else changes.
+  const radius = traceRadiusAt(tool, deepestCut) ?? (tool.shape === 'thread' ? (cuttingDiameter(tool) ?? 0) / 2 : 0);
+  const moves = frameCorners(ir, radius, FRAME_Z);
   if (moves === null) return { error: 'the toolpath has no positioned move to trace' };
   const frameIr: ToolpathIR = {
     frame: 'flat', // the frame trace is a flat-frame air move; no rotary frame exists yet (#237)
@@ -607,13 +626,14 @@ export function engraveGenerate(
   const { plan, regions, predicted, findings } = engraveRegions(tl, job, tool, margins, shop);
   const errors: EngraveFailure[] = [];
 
-  const stop = (stage: EngraveStage, extra?: { feeds?: FeedsResult | null; message?: string }): EngraveGenerated => {
+  const stop = (stage: EngraveStage, extra?: { feeds?: FeedsResult | null; message?: string; threads?: ThreadMillPlan[] | null }): EngraveGenerated => {
     if (extra?.message !== undefined) errors.push({ stage, message: extra.message });
     return {
       ok: false,
       stage,
       findings,
       feeds: extra?.feeds ?? null,
+      threads: extra?.threads ?? null,
       cam: null,
       nc: null,
       verify: null,
@@ -627,44 +647,89 @@ export function engraveGenerate(
   // 1. findings (#200/#201/#203). Any error stops before feeds are even resolved.
   if (findings.some((f) => f.severity === 'error')) return stop('findings');
 
-  // 2. feeds (#202). A tool the library cannot resolve reads as `tool-missing` above; a tool with
-  // no row, or a step-over past the radius (#191), refuses here. A V-BIT passes this gate since
-  // #405 — it is a cutter this CAM can trace with, and `radius` being null only says it opens no
-  // region — so the refusal is the trace path's own (`cuttingForTrace`), which names a ball nose,
-  // a bull nose, or a cone whose header states no tip or angle.
+  // 2. feeds (#202) — OR, for a thread job, the thread settings (#445 D6). A tool the library
+  // cannot resolve reads as `tool-missing` above; a tool with no row, or a step-over past the
+  // radius (#191), refuses here. A V-BIT passes this gate since #405 — it is a cutter this CAM
+  // can trace with, and `radius` being null only says it opens no region — so the refusal is the
+  // trace path's own (`cuttingForTrace`), which names a ball nose, a bull nose, or a cone whose
+  // header states no tip or angle.
+  //
+  // A THREAD MILL is refused by `cuttingForTrace` and by `feedsFor` at the same gate, correctly
+  // for the region/trace CAM. The thread branch therefore goes BEFORE both and resolves
+  // `threadSettings`, which asks the catalogue for a row itself (`catalogueCoverageFor`) and never
+  // calls `feedsFor`. A thread-only job is the only job that reaches CAM with a thread mill:
+  // `thread-mixed-tools` refuses a thread beside any other cut, because one program has one tool.
   if (tool === null) return stop('feeds', { message: 'the job has no usable cutter' });
-  const usable = cuttingForTrace(tool);
-  if (!usable.ok) return stop('feeds', { message: usable.reason });
-  const feeds = feedsFor(catalogue, job.stock.material, tool, mill, job.cutOverride);
-  if (!feeds.ok) return stop('feeds', { feeds, message: feeds.reason });
-
-  // 3. the CAM core (#172), on the SAME opened polygons stage 1 measured.
+  let feeds: FeedsResult | null = null;
+  let threadPlans: ThreadMillPlan[] | null = null;
   let ir: ToolpathIR;
-  try {
-    // A job with no REGION item has nothing for the region CAM to open — and since #405 it must not
-    // be handed an empty list either: a trace-only job can now reach this line with a CONE for a
-    // tool, and `generateEngrave` refuses a V-bit by name (rightly: opening a region needs the
-    // offset radius). The two CAMs return IRs describing the same machine state, so a job with no
-    // regions simply IS the trace IR, and its `.nc` is unchanged.
-    const regionIr = regions.length === 0 ? null : generateEngrave(tl, regions, tool, feeds.params, mill.rapidEstimate, 'nearest', shop.peckClearanceMm ?? null);
-    // #287 — single-line traces (#219) are their own CAM: the cutter's centre follows the path,
-    // so there is no region to open, no offset and no pocketing. They are appended AFTER the
-    // region operations, so a trace can shift no pocket's ordering, and a job with none joins an
-    // empty list — the renumbering is a no-op, so its `.nc` is byte-identical to before. Both
-    // calls are inside this `try` so a trace CAM refusal reports the same `cam` stage a region
-    // refusal does.
-    //
-    // ORDERING, for whoever adds a class inside `generateEngrave` next (#218's cut-outs are the
-    // one already planned): the classes here end up drills → pockets → cut-outs → traces. Drills
-    // lead for the reason `generateEngrave` states (#220: a peck cycle leaves the blank
-    // unweakened). A trace wants to be cut BEFORE a cut-out releases the part, so #218 should
-    // place traces ahead of its cut-out class rather than leaving this append at the end — a
-    // released part can shift under the tape, which is exactly what the drills-first rule avoids.
-    const traceIr = generateTrace(plan.traces, tool, feeds.params, mill.rapidEstimate);
-    if (regionIr === null) ir = traceIr;
-    else ir = traceIr.operations.length > 0 ? concatToolpathIR(regionIr, traceIr) : regionIr;
-  } catch (e) {
-    return stop('cam', { feeds, message: e instanceof Error ? e.message : String(e) });
+  if (plan.threads.length > 0) {
+    const resolved = threadSettings(shop.defaults ?? null, catalogue, job.stock.material, tool, mill);
+    const refused = resolved.diagnostics.filter((d) => d.severity === 'error');
+    if (refused.length > 0) return stop('feeds', { message: refused.map((d) => d.message).join('; ') });
+    try {
+      const plans: ThreadMillPlan[] = [];
+      const irs: ToolpathIR[] = [];
+      for (const item of plan.threads) {
+        const r = threadMillIR({
+          tool,
+          position: item.position,
+          size: item.size,
+          depth: item.depth,
+          through: item.through,
+          settings: resolved.settings,
+          stock: { length: job.stock.length, width: job.stock.width },
+          descriptor: item.name,
+          labelId: item.id,
+          // Every cut in this app runs with the vacuum on (#283); `cutOverride.air` is the job's
+          // own say, and the feeds table never states anything else.
+          air: job.cutOverride?.air ?? true,
+          rapid: mill.rapidEstimate,
+        });
+        if (!r.ok) return stop('cam', { message: r.reason });
+        plans.push(r.plan);
+        irs.push(r.ir);
+      }
+      // `concatToolpathIR` renumbers the operations from 1, which is its contract (#287).
+      ir = irs.slice(1).reduce((a, b) => concatToolpathIR(a, b), irs[0]!);
+      threadPlans = plans;
+    } catch (e) {
+      return stop('cam', { message: e instanceof Error ? e.message : String(e) });
+    }
+  } else {
+    const usable = cuttingForTrace(tool);
+    if (!usable.ok) return stop('feeds', { message: usable.reason });
+    const resolved = feedsFor(catalogue, job.stock.material, tool, mill, job.cutOverride);
+    if (!resolved.ok) return stop('feeds', { feeds: resolved, message: resolved.reason });
+    feeds = resolved;
+
+    // 3. the CAM core (#172), on the SAME opened polygons stage 1 measured.
+    try {
+      // A job with no REGION item has nothing for the region CAM to open — and since #405 it must not
+      // be handed an empty list either: a trace-only job can now reach this line with a CONE for a
+      // tool, and `generateEngrave` refuses a V-bit by name (rightly: opening a region needs the
+      // offset radius). The two CAMs return IRs describing the same machine state, so a job with no
+      // regions simply IS the trace IR, and its `.nc` is unchanged.
+      const regionIr = regions.length === 0 ? null : generateEngrave(tl, regions, tool, resolved.params, mill.rapidEstimate, 'nearest', shop.peckClearanceMm ?? null);
+      // #287 — single-line traces (#219) are their own CAM: the cutter's centre follows the path,
+      // so there is no region to open, no offset and no pocketing. They are appended AFTER the
+      // region operations, so a trace can shift no pocket's ordering, and a job with none joins an
+      // empty list — the renumbering is a no-op, so its `.nc` is byte-identical to before. Both
+      // calls are inside this `try` so a trace CAM refusal reports the same `cam` stage a region
+      // refusal does.
+      //
+      // ORDERING, for whoever adds a class inside `generateEngrave` next (#218's cut-outs are the
+      // one already planned): the classes here end up drills → pockets → cut-outs → traces. Drills
+      // lead for the reason `generateEngrave` states (#220: a peck cycle leaves the blank
+      // unweakened). A trace wants to be cut BEFORE a cut-out releases the part, so #218 should
+      // place traces ahead of its cut-out class rather than leaving this append at the end — a
+      // released part can shift under the tape, which is exactly what the drills-first rule avoids.
+      const traceIr = generateTrace(plan.traces, tool, resolved.params, mill.rapidEstimate);
+      if (regionIr === null) ir = traceIr;
+      else ir = traceIr.operations.length > 0 ? concatToolpathIR(regionIr, traceIr) : regionIr;
+    } catch (e) {
+      return stop('cam', { feeds, message: e instanceof Error ? e.message : String(e) });
+    }
   }
   const cam = summarize(ir);
 
@@ -705,7 +770,7 @@ export function engraveGenerate(
     const verify = verifyProgram(nc, { setup, machine: mill, tool, depthLimit: limit, minRapidZ: ir.hopZ, ...(limitReasonAt ? { limitReasonAt } : {}) });
     if (verify.findings.some((f) => f.severity === 'error')) {
       errors.push({ stage: 'verify', message: `${verify.findings.filter((f) => f.severity === 'error').length} verifier error(s)` });
-      return { ok: false, stage: 'verify', findings, feeds, cam, nc, verify, frameNc: null, frameVerify: null, predicted, errors };
+      return { ok: false, stage: 'verify', findings, feeds, threads: threadPlans, cam, nc, verify, frameNc: null, frameVerify: null, predicted, errors };
     }
 
     // 6. the frame file (#244): the job's XY extent traced in the air, beside the job. Produced by
@@ -714,12 +779,12 @@ export function engraveGenerate(
     const frame = frameProgram(ir, ctx, mill, setup, tool, limit);
     if ('error' in frame) {
       errors.push({ stage: 'verify', message: `the frame file could not be produced: ${frame.error}` });
-      return { ok: false, stage: 'verify', findings, feeds, cam, nc, verify, frameNc: null, frameVerify: null, predicted, errors };
+      return { ok: false, stage: 'verify', findings, feeds, threads: threadPlans, cam, nc, verify, frameNc: null, frameVerify: null, predicted, errors };
     }
     const frameErrors = frame.verify.findings.filter((f) => f.severity === 'error');
     if (frameErrors.length > 0) {
       errors.push({ stage: 'verify', message: `the frame file has ${frameErrors.length} verifier error(s)` });
-      return { ok: false, stage: 'verify', findings, feeds, cam, nc, verify, frameNc: frame.nc, frameVerify: frame.verify, predicted, errors };
+      return { ok: false, stage: 'verify', findings, feeds, threads: threadPlans, cam, nc, verify, frameNc: frame.nc, frameVerify: frame.verify, predicted, errors };
     }
 
     return {
@@ -727,6 +792,7 @@ export function engraveGenerate(
       stage: 'done',
       findings,
       feeds,
+      threads: threadPlans,
       cam,
       nc,
       verify,

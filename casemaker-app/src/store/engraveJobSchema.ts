@@ -293,6 +293,28 @@ const drillSchema = z.discriminatedUnion('kind', [
   }),
 ]);
 
+/**
+ * A milled thread (#445, #434 phase 2), a sibling of a drill and never a region.
+ *
+ * The size enum is the `FastenerSize` union — the ISO 261 table in `engine/compiler/fasteners.ts`
+ * is the one place those names live, and a size added there must be added here too (the same
+ * type/schema trap this file's header documents for every field). `standard` and `classFit` are
+ * literals, not enums: the CAM knows exactly the one value each may take in phase 2 (D5), and a
+ * value outside it is a document this version does not understand rather than one to approximate.
+ */
+const threadSchema = z.object({
+  kind: z.literal('thread'),
+  id: z.string().min(1),
+  name: z.string().optional(),
+  position: positionSchema,
+  enabled: z.boolean(),
+  size: z.enum(['M2', 'M2.5', 'M3', 'M4', 'M5', 'M6']),
+  standard: z.literal('metric'),
+  classFit: z.literal('6H'),
+  depth: z.number().finite().positive(),
+  through: z.boolean(),
+});
+
 const keepOutSchema = z
   .discriminatedUnion('kind', [
     keepOutBaseSchema.extend({
@@ -729,6 +751,8 @@ const engraveJobV2Schema = engraveJobV1Schema.extend({
   keepOuts: z.array(keepOutSchema).optional(),
   // #220's plunge drills. OPTIONAL for the same byte-for-byte reason as `combined`.
   drills: z.array(drillSchema).optional(),
+  // #445's milled threads. OPTIONAL for the same byte-for-byte reason as `combined`.
+  threads: z.array(threadSchema).optional(),
   // #246/#254's per-field provenance. OPTIONAL, not defaulted: a job that has never had a
   // cutting override or a guided setup applied carries no key.
   sources: jobSourcesSchema.optional(),

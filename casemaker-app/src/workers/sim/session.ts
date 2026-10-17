@@ -48,6 +48,7 @@ import { meshOutputOf, type NodeMeshOutput } from '../geometry/meshOutput';
 import { createPlayback, type Playback } from '../geometry/playback';
 import { boxSolid, sweepTimeline, type SweepDiagnostic, type SweepResult, type SweepStats } from '../geometry/sweep';
 import { columnSweep, type ColumnSweepOk, type DrillPointDefault } from '../geometry/columnEngine';
+import type { SimThreadSpec } from '@/engine/cnc/cam/threadMill';
 
 export type DiagnosticSource = 'parser' | 'runner' | 'sweep';
 
@@ -261,6 +262,12 @@ export interface SimLoadOpts {
    * may come to material or the bed, mm. Absent: `SPINDLE_OFF_PROXIMITY_FALLBACK_MM`.
    */
   spindleOffProximityMm?: number | null;
+  /**
+   * The threads the program mills (#445 §4), as the CAM planned them. Passed straight through to
+   * the column engine, which checks each against the cutting diameter and reports the annular
+   * band instead of the generic envelope warning. A rotary job is refused by name.
+   */
+  threads?: readonly SimThreadSpec[] | null;
 }
 
 /**

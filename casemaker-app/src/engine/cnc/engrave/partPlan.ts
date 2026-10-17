@@ -25,10 +25,12 @@ import type {
   EngraveLabel,
   EngraveShape,
   EngraveStrokeLabelItem,
+  EngraveThread,
   EngraveTraceItem,
   EngraveVectorShape,
 } from '@/types/engraveJob';
 import type { CustomFont } from '@/types/textLabel';
+import { FASTENERS } from '@/engine/compiler/fasteners';
 import type { Mm } from '@/types/units';
 import { viseEnvelope } from '@/engine/cnc/fixture';
 import { supportedFootprint } from '@/engine/cnc/sacrificial';
@@ -103,6 +105,20 @@ export interface PartPlan {
    * which only it knows, the way it already appends the depth.
    */
   drills: { id: string; name: string; holes: [Mm, Mm][]; depth: Mm; through: boolean }[];
+  /**
+   * MILLED THREADS (#445, #434 phase 2), a fourth sibling. A thread is not a region either: the
+   * thread mill orbits inside a pilot that already exists, so there is no profile to carry — the
+   * axis, the ISO size the geometry is derived from, and the threaded length. `name` is the
+   * tool-independent operation name (`Thread "port" M5×0.8`); the CAM composes the rest.
+   */
+  threads: {
+    id: string;
+    name: string;
+    position: [Mm, Mm];
+    size: EngraveThread['size'];
+    depth: Mm;
+    through: boolean;
+  }[];
 }
 
 /**
@@ -704,6 +720,21 @@ export function drillOperationName(drill: EngraveDrill): string {
   const named = drill.name ? ` "${drill.name}"` : '';
   if (drill.kind === 'drill') return `Drill${named}`;
   return `Drill${named} ${drill.count.x}×${drill.count.y} @${drill.pitch.x}×${drill.pitch.y}`;
+}
+
+/* ---------------------------------------------------------------------------------------------
+ * Milled threads (#445)
+ * -------------------------------------------------------------------------------------------*/
+
+/**
+ * The operation's display name for a thread — the DESCRIPTOR only, without the `[T#]` prefix and
+ * the depth suffix, exactly as `itemOperationName` contracts. The THREAD is the item's own fact
+ * (`M5×0.8`), so the size and its ISO 261 coarse pitch are named here; the cutter's diameter is
+ * not, because D2 makes the item the authority and the cutter only supplies its own geometry.
+ */
+export function threadOperationName(thread: EngraveThread): string {
+  const named = thread.name ? ` "${thread.name}"` : '';
+  return `Thread${named} ${thread.size}×${FASTENERS[thread.size].pitch}`;
 }
 
 /**
@@ -1571,6 +1602,22 @@ export function toPartPlan(job: EngraveJob): PartPlan {
     });
   }
 
+  // Milled threads (#445) are a fourth sibling list: one axis each, no profile and no region
+  // pipeline. A disabled thread is skipped, like a disabled region item; `through` is carried
+  // through for the CAM, which refuses it by name until the through-cut gate lands (#213/#218).
+  const threads: PartPlan['threads'] = [];
+  for (const item of job.threads ?? []) {
+    if (!item.enabled) continue;
+    threads.push({
+      id: item.id,
+      name: threadOperationName(item),
+      position: [item.position.x, item.position.y],
+      size: item.size,
+      depth: item.depth,
+      through: item.through,
+    });
+  }
+
   // Under-surface voids (#231): a disabled void reserves nothing. `zCeiling` is copied straight
   // through in the frame #178's layer stack reads (PART-frame z from the bottom face).
   const keepOuts: PartPlan['stock']['keepOuts'] = [];
@@ -1597,5 +1644,6 @@ export function toPartPlan(job: EngraveJob): PartPlan {
     engraves,
     traces,
     drills,
+    threads,
   };
 }

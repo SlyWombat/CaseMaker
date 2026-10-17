@@ -221,6 +221,17 @@ pub const UNMEASURED_SEEDS: &[(&str, f64, &str, &str)] = &[
     ("drill.pointAngleDeg", 118.0, "deg", "chosen, not measured: a twist drill's included point angle, used only when the drill's own record states none"),
     ("drill.plungeFeed", 100.0, "mm/min", "placeholder, not measured; not a vendor number: the drilling feed until a measured row replaces it"),
     ("drill.spindleRpm", 10000.0, "rpm", "placeholder, not measured; not a vendor number: the drilling spindle speed until a measured row replaces it"),
+    // #445 — thread milling: the pass, the ramp, the run-out and the chord chosen, the feeds and the
+    // spindle speed placeholders. None measured, none a vendor number.
+    ("thread.radialStepoverMm", 0.2, "mm", "chosen, not measured: the most radial depth one thread pass takes; the last pass always lands on the major radius"),
+    ("thread.entryRampMm", 0.5, "mm", "chosen, not measured: the axial drop over which the entry ramp reaches the pass radius; 0 is a flat radial entry"),
+    ("thread.bottomClearancePitches", 1.0, "x", "chosen, not measured: how many pitches the tool tip runs below the last full thread"),
+    ("thread.pilotTipClearanceMm", 0.5, "mm", "chosen, not measured: the pilot floor must sit this far below the tool tip so the tip does not bottom"),
+    ("thread.feed", 300.0, "mm/min", "placeholder, not measured; not a vendor number: the helical cutting feed until a measured row replaces it"),
+    ("thread.plungeFeed", 100.0, "mm/min", "placeholder, not measured; not a vendor number: the feed down the open pilot and the entry ramp until a measured row replaces it"),
+    ("thread.spindleRpm", 10000.0, "rpm", "placeholder, not measured; not a vendor number: the thread-milling spindle speed until a measured row replaces it"),
+    ("thread.chordToleranceMm", 0.01, "mm", "chosen, not measured: the most a G1 chord may stray from the true helix; it sets the move count and the file size"),
+    ("engrave.newThreadDepthMm", 5.0, "mm", "chosen, not measured: the threaded length a new thread item starts at"),
     // #433 — adaptive clearing for metal pockets: the engagement, step-down, helix and ramp chosen, the
     // feeds and the spindle speed placeholders. None measured, none a vendor number.
     ("adaptive.engagementFraction", 0.1, "x", "chosen, not measured: the most new material a clearing move may take per mm of travel, as a fraction of the cutter diameter"),
@@ -707,6 +718,44 @@ fn known_rule(key: &str, n: Option<f64>) -> Option<Result<(), String>> {
             n.is_some_and(|v| (1000.0..=30000.0).contains(&v)),
             "1000 to 30000 rpm",
         )),
+        // ── #445 thread milling (begin)
+        "thread.radialStepoverMm" => Some(need(
+            n.is_some_and(|v| (0.02..=2.0).contains(&v)),
+            "0.02 to 2 mm",
+        )),
+        "thread.entryRampMm" => Some(need(
+            n.is_some_and(|v| (0.0..=5.0).contains(&v)),
+            "0 to 5 mm",
+        )),
+        "thread.bottomClearancePitches" => Some(need(
+            n.is_some_and(|v| (0.0..=5.0).contains(&v)),
+            "0 to 5 pitches",
+        )),
+        "thread.pilotTipClearanceMm" => Some(need(
+            n.is_some_and(|v| (0.0..=5.0).contains(&v)),
+            "0 to 5 mm",
+        )),
+        "thread.feed" => Some(need(
+            n.is_some_and(|v| (5.0..=1200.0).contains(&v)),
+            "5 to 1200 mm/min",
+        )),
+        "thread.plungeFeed" => Some(need(
+            n.is_some_and(|v| (5.0..=1200.0).contains(&v)),
+            "5 to 1200 mm/min",
+        )),
+        "thread.spindleRpm" => Some(need(
+            n.is_some_and(|v| (1000.0..=30000.0).contains(&v)),
+            "1000 to 30000 rpm",
+        )),
+        "thread.chordToleranceMm" => Some(need(
+            n.is_some_and(|v| (0.001..=0.1).contains(&v)),
+            "0.001 to 0.1 mm",
+        )),
+        "engrave.newThreadDepthMm" => Some(need(
+            n.is_some_and(|v| (0.05..=20.0).contains(&v)),
+            "0.05 to 20 mm",
+        )),
+        // ── #445 thread milling (end)
         // ── #438 (begin)
         // ── #451 (begin)
         "import.dxfChordToleranceMm" => Some(need(

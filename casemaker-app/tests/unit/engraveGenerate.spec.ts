@@ -8,7 +8,8 @@ import { readFileSync } from 'node:fs';
 import { parseEngraveJob } from '@/store/engraveJobSchema';
 import { tl } from './helpers/manifoldExec';
 import { generate, regions } from './helpers/engravePipeline';
-import { frameCorners } from '@/workers/sim/engraveGenerate';
+import { frameCorners, engraveGenerate } from '@/workers/sim/engraveGenerate';
+import type { ShopDefaults } from '@/platform/defaultsClient';
 import { UNMEASURED_FEEDS_TABLE, type FeedCatalogueRow } from '@/engine/cnc/feeds';
 import { buildRunSheet } from '@/engine/cnc/engrave/runSheet';
 import { defaultBoundaryMargin } from '@/engine/cnc/engrave/depthBounds';
@@ -28,7 +29,7 @@ import { viseForNewJob } from '@/engine/cnc/fixture';
 import { defaultBadgeParams } from '@/types/badge';
 import type { ToolpathIR } from '@/engine/cnc/cam/ir';
 import { cuttingForTrace, cuttingRadiusForSweep, flatEndMill, isVTraceTool, traceRadiusAt, type Tool } from '@/engine/cnc/tool';
-import type { EngraveDrill, EngraveJob, EngraveKeepOut, EngraveLabel, EngraveLineItem, EngraveStrokeLabelItem, EngraveTraceItem } from '@/types/engraveJob';
+import type { EngraveDrill, EngraveJob, EngraveKeepOut, EngraveLabel, EngraveLineItem, EngraveStrokeLabelItem, EngraveThreadItem, EngraveTraceItem } from '@/types/engraveJob';
 
 describe('engraveGenerate with a saved machine frame (#297)', () => {
   const read = calibrationFromReplies(new Map(Object.entries(Z1_FRAME_REPLIES)), {
@@ -1087,5 +1088,94 @@ describe('a V-bit trace job (#405)', () => {
     // A flat end mill's opening does not depend on the depth, which is why one number used to do.
     expect(traceRadiusAt(flatEndMill(1.0), 1)).toBe(0.5);
     expect(traceRadiusAt(flatEndMill(1.0), 2.5)).toBe(0.5);
+  });
+});
+
+/**
+ * A milled thread through the whole pipeline (#445, #434 phase 2). The thread branch sits BEFORE
+ * `cuttingForTrace` and `feedsFor` — a thread mill is refused by both, correctly for the
+ * region/trace CAM — and resolves `threadSettings` instead. The `thread.*` seeds are not registered
+ * yet, so the settings are the caller's: a stored map, which `readDefault` accepts without asking
+ * `KNOWN_DEFAULTS` (that registry is the coordinator's to land).
+ */
+describe('engraveGenerate with a milled thread (#445)', () => {
+  const MILL: Tool = flatEndMill(4, {
+    name: '4 mm thread mill',
+    typeText: 'Thread Mill',
+    shape: 'thread',
+    tipDiameter: 4,
+    diameter: 4,
+    fluteLength: 20,
+  });
+  const THREAD = (over: Partial<EngraveThreadItem> = {}): EngraveThreadItem => ({
+    kind: 'thread',
+    id: 'thr-a',
+    position: { x: 50, y: 30 },
+    enabled: true,
+    size: 'M5',
+    standard: 'metric',
+    classFit: '6H',
+    depth: 5,
+    through: false,
+    ...over,
+  });
+  const DEFAULTS = {
+    'thread.radialStepoverMm': { value: 0.2, source: 'seeded' },
+    'thread.entryRampMm': { value: 0.5, source: 'seeded' },
+    'thread.bottomClearancePitches': { value: 1, source: 'seeded' },
+    'thread.pilotTipClearanceMm': { value: 0.5, source: 'seeded' },
+    'thread.feed': { value: 300, source: 'seeded' },
+    'thread.plungeFeed': { value: 100, source: 'seeded' },
+    'thread.spindleRpm': { value: 10000, source: 'seeded' },
+    'thread.chordToleranceMm': { value: 0.01, source: 'seeded' },
+  } as unknown as ShopDefaults;
+  const job = (threads: EngraveThreadItem[]): EngraveJob => ({
+    ...defaultEngraveJob(),
+    labels: [],
+    shapes: [],
+    traces: [],
+    drills: [],
+    tool: MILL,
+    threads,
+  });
+  const gen = (threads: EngraveThreadItem[]) => engraveGenerate(tl, job(threads), MILL, [], null, undefined, { defaults: DEFAULTS });
+
+  it('takes a thread-only job all the way to a clean .nc', () => {
+    const g = gen([THREAD()]);
+    expect(g.stage).toBe('done');
+    expect(g.ok).toBe(true);
+    // The thread's plan is what the panel and the sim's load read — not a fabricated disc.
+    expect(g.threads).toHaveLength(1);
+    expect(g.threads![0]!.simThreads).toEqual([{ x: 50, y: 30, majorMm: 5, minorMm: 4.134, pitchMm: 0.8, threadDepthMm: 5, through: false }]);
+    expect(g.cam!.operations).toBe(1);
+    expect(g.nc).not.toBeNull();
+    expect(g.verify!.findings.filter((f) => f.severity === 'error')).toEqual([]);
+    // The helical cutting moves are on the wire; the tip runs a pitch of run-out past the thread.
+    expect(g.verify!.stats.deepestZ).toBeCloseTo(-5.8, 3);
+  });
+
+  it('two threads are ONE program, one tool, and operations renumbered', () => {
+    const g = gen([THREAD(), THREAD({ id: 'thr-b', position: { x: 70, y: 30 } })]);
+    expect(g.ok).toBe(true);
+    expect(g.threads).toHaveLength(2);
+    expect(g.cam!.operations).toBe(2);
+    expect(g.verify!.findings.filter((f) => f.severity === 'error')).toEqual([]);
+  });
+
+  it('a thread beside another cut is refused by the findings gate before any CAM', () => {
+    const g = gen([THREAD()]);
+    const mixed: EngraveJob = { ...job([THREAD()]), labels: defaultEngraveJob().labels };
+    const out = engraveGenerate(tl, mixed, MILL, [], null, undefined, { defaults: DEFAULTS });
+    expect(out.ok).toBe(false);
+    expect(out.stage).toBe('findings');
+    expect(out.threads).toBeNull();
+    expect(g.ok).toBe(true); // the thread alone still passes — the refusal is the mixing
+  });
+
+  it('a tool that is not a thread mill is refused before the branch is taken', () => {
+    const out = engraveGenerate(tl, { ...job([THREAD()]), tool: flatEndMill(4) }, flatEndMill(4), [], null, undefined, { defaults: DEFAULTS });
+    expect(out.ok).toBe(false);
+    expect(out.stage).toBe('findings');
+    expect(out.findings.some((f) => f.code === 'thread-wrong-tool')).toBe(true);
   });
 });

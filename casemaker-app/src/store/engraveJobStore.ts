@@ -8,6 +8,7 @@ import {
   newEngraveKeepOutId,
   newEngraveLabelId,
   newEngraveShapeId,
+  newEngraveThreadId,
   newEngraveTraceId,
 } from '@/engine/cnc/engrave/defaults';
 import { defaultStockProud, todayISODate, viseForNewJob } from '@/engine/cnc/fixture';
@@ -57,6 +58,7 @@ import type {
   EngraveShapeBase,
   EngraveSlotShape,
   EngraveStrokeLabelItem,
+  EngraveThread,
   EngraveTraceItem,
   EngraveVectorShape,
   FieldSource,
@@ -121,6 +123,13 @@ export type VectorPatch = Partial<
  */
 export type DrillPatch = Partial<Omit<EngraveDrillItem, 'kind'>> &
   Partial<Omit<EngraveDrillArrayItem, 'kind'>>;
+
+/**
+ * A hand edit to one milled thread (#445). The whole item minus its discriminant, so a row can
+ * patch just what it changed — the same shape as `DrillPatch`, and one object rather than a union
+ * because phase 2 has exactly one thread kind.
+ */
+export type ThreadPatch = Partial<Omit<EngraveThread, 'kind'>>;
 
 /**
  * A hand edit to one under-surface void (#271). The same shape as `ShapePatch` — every optional
@@ -204,6 +213,7 @@ function loadJob(): EngraveJob {
  */
 export const NEW_ITEM_DEPTH_KEY = 'engrave.newItemDepthMm';
 export const NEW_DRILL_DEPTH_KEY = 'engrave.newDrillDepthMm';
+export const NEW_THREAD_DEPTH_KEY = 'engrave.newThreadDepthMm';
 
 /** The depth a new item of any kind but a hole starts at, mm. */
 export function newItemDepthMm(): number {
@@ -213,6 +223,11 @@ export function newItemDepthMm(): number {
 /** The depth a new hole starts at, mm — its own starting point, and the reason is in `newDrill`. */
 export function newDrillDepthMm(): number {
   return shopDefault(NEW_DRILL_DEPTH_KEY).value;
+}
+
+/** The threaded length a new thread item starts at, mm (#445); its own key, see `newThread`. */
+export function newThreadDepthMm(): number {
+  return shopDefault(NEW_THREAD_DEPTH_KEY).value;
 }
 
 function newLabel(job: EngraveJob, depth: number): EngraveLabel {
@@ -419,6 +434,28 @@ function newDrill(kind: EngraveDrill['kind'], job: EngraveJob, depth: number): E
 }
 
 /**
+ * A brand-new milled thread (#445), centred on the stock like a new drill.
+ *
+ * `M3` is the starting size for the reason the bench plan gives (its pilot is the 2.5 mm drill
+ * the shop owns) and not because M3 is special to the code. Its threaded length is its OWN shop
+ * default (`engrave.newThreadDepthMm`), read in `addThread`: a thread that begins as deep as a
+ * label shows a hole, not a thread, and the depth is the number the user is about to set anyway.
+ */
+function newThread(job: EngraveJob, depth: number): EngraveThread {
+  return {
+    kind: 'thread',
+    id: newEngraveThreadId(),
+    position: { x: job.stock.length / 2, y: job.stock.width / 2 },
+    enabled: true,
+    size: 'M3',
+    standard: 'metric',
+    classFit: '6H',
+    depth,
+    through: false,
+  };
+}
+
+/**
  * A default under-surface void of the given kind (#271), centred on the stock like a new shape.
  *
  * `zCeiling` is HALF the blank's thickness, rounded to 0.1 mm: a neutral place to start that
@@ -543,6 +580,11 @@ export interface EngraveJobState {
   /** Merge a hand edit into one drill (#220). A partial `position` is merged, not replaced. */
   updateDrill: (id: string, patch: DrillPatch) => void;
   removeDrill: (id: string) => void;
+  /** Add a default milled thread (#445) and return its id. */
+  addThread: () => string;
+  /** Merge a hand edit into one thread (#445). A partial `position` is merged, not replaced. */
+  updateThread: (id: string, patch: ThreadPatch) => void;
+  removeThread: (id: string) => void;
   /**
    * Declare an under-surface void of `kind` (#271) and return its id. A void is a fact about the
    * blank, not an item: it is never cut, and it is what `jobDepthLimit` reads to refuse a cut
@@ -1002,6 +1044,39 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
         (job) => ({ ...job, drills: (job.drills ?? []).filter((d) => d.id !== id) }),
         removalWhat(drill),
         (job) => ({ ...job, drills: insertAt(job.drills ?? [], at, drill) }),
+      );
+    },
+
+    addThread: () => {
+      const thread = newThread(get().job, newThreadDepthMm());
+      apply((job) => ({ ...job, threads: [...(job.threads ?? []), thread] }));
+      return thread.id;
+    },
+
+    updateThread: (id, patch) =>
+      apply((job) => ({
+        ...job,
+        threads: (job.threads ?? []).map((thread) =>
+          thread.id === id
+            ? ({
+                ...thread,
+                ...patch,
+                // Merge a partial position rather than replacing the whole object.
+                position: patch.position ? { ...thread.position, ...patch.position } : thread.position,
+              } as EngraveThread)
+            : thread,
+        ),
+      })),
+
+    removeThread: (id) => {
+      const list = get().job.threads ?? [];
+      const at = list.findIndex((t) => t.id === id);
+      const thread = list[at];
+      if (!thread) return;
+      removeWithUndo(
+        (job) => ({ ...job, threads: (job.threads ?? []).filter((t) => t.id !== id) }),
+        removalWhat(thread),
+        (job) => ({ ...job, threads: insertAt(job.threads ?? [], at, thread) }),
       );
     },
 

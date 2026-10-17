@@ -37,6 +37,11 @@ export function newEngraveDrillId(): string {
   return newId('drl');
 }
 
+/** Fresh thread id (#445). A thread is its own kind of item, so it gets its own prefix. */
+export function newEngraveThreadId(): string {
+  return newId('thr');
+}
+
 /**
  * Fresh under-surface void id (#271). A void is NOT an item — it is a fact about the blank, so it
  * lives in its own list with its own prefix and never reaches the `engraves` pipeline.

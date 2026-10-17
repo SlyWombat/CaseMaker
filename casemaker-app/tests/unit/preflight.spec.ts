@@ -58,6 +58,7 @@ function generatedWith(over: Partial<EngraveGenerated>): EngraveGenerated {
     stage: 'done',
     findings: [],
     feeds: null,
+    threads: null,
     cam: null,
     nc: 'G90 G21\n',
     verify: null,

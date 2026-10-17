@@ -31,7 +31,7 @@ import { effectiveMargins } from '@/engine/cnc/engrave/depthBounds';
 import { useSettingsStore } from './settingsStore';
 import { useEngraveJobStore } from './engraveJobStore';
 import { useSimStore } from './simStore';
-import { shopDefault } from './shopDefaultsStore';
+import { shopDefault, useShopDefaultsStore } from './shopDefaultsStore';
 import type { EngraveRunPhase } from './engraveRunGate';
 
 /**
@@ -145,13 +145,15 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
     const margins = effectiveMargins(job, useSettingsStore.getState().margins);
 
     // The engrave pipeline's shop defaults (#451), read ONCE here beside the margins and for the same
-    // reason: the worker cannot see the location, and these two numbers gate the program it posts —
-    // the warn ratio decides which items fail `item-detail-lost`, and the peck clearance decides the
-    // Z each drill's re-entry rapid stops at. Reading them before the await keeps the run's inputs
-    // one snapshot.
+    // reason: the worker cannot see the location, and these numbers gate the program it posts —
+    // the warn ratio decides which items fail `item-detail-lost`, the peck clearance decides the
+    // Z each drill's re-entry rapid stops at, and the whole location crosses as `defaults` so the
+    // worker can read the `thread.*` set (#445 D6) without a second IPC. Reading them before the
+    // await keeps the run's inputs one snapshot.
     const shop: EngraveShopOpts = {
       lostDetailWarnRatio: shopDefault('engrave.lostDetailWarnRatio').value,
       peckClearanceMm: shopDefault('drill.peckClearanceMm').value,
+      defaults: useShopDefaultsStore.getState().defaults,
     };
 
     // The cutter, resolved ONCE on this side (#305): the sim worker cannot see the registry, so
@@ -205,7 +207,18 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
 
     set({ phase: 'simulating' });
     try {
-      await useSimStore.getState().loadProgram(generated.nc, toSetup(job, jobMachine(job, calibration)), tool, job.machineId, calibration);
+      await useSimStore
+        .getState()
+        .loadProgram(
+          generated.nc,
+          toSetup(job, jobMachine(job, calibration)),
+          tool,
+          job.machineId,
+          calibration,
+          // The threads this program mills (#445 §4): plain dimensions the column engine can state
+          // the annular band from. Empty for every non-thread job, leaving today's behaviour.
+          generated.threads?.flatMap((t) => t.simThreads) ?? [],
+        );
     } catch (e) {
       if (mine === seq) set({ phase: 'blocked', error: e instanceof Error ? e.message : String(e) });
       return;

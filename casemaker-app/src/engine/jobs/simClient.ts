@@ -10,6 +10,7 @@
 import * as Comlink from 'comlink';
 import type { MachineCalibration, Setup } from '@/engine/cnc';
 import type { Tool } from '@/engine/cnc/tool';
+import type { SimThreadSpec } from '@/engine/cnc/cam/threadMill';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import type { FeedCatalogueRow } from '@/engine/cnc/feeds';
 import type { ConditionSummary } from '@/engine/cnc/toolCondition';
@@ -97,6 +98,11 @@ export interface SimLoadOpts {
   rotaryPitchDeg?: number | null;
   /** The shop's `sim.spindleOffProximityMm` (#451): the spindle-off move's clearance to material or the bed, mm. Read by the caller. */
   spindleOffProximityMm?: number | null;
+  /**
+   * The threads this program mills (#445 §4), as the CAM planned them: plain numbers, so the
+   * column engine can state the annular band and the over-removal instead of a cylinder.
+   */
+  threads?: readonly SimThreadSpec[] | null;
 }
 
 /** The two stages of a load (#224). */
@@ -154,6 +160,7 @@ export async function loadSim(gcodeText: string, setup: Setup, tool: Tool, machi
             columnPitchXMm: opts?.columnPitchXMm ?? null,
             rotaryPitchDeg: opts?.rotaryPitchDeg ?? null,
             spindleOffProximityMm: opts?.spindleOffProximityMm ?? null,
+            threads: opts?.threads ?? null,
           },
           opts?.onProgress ? Comlink.proxy(opts.onProgress) : undefined,
         )

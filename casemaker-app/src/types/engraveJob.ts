@@ -1,6 +1,7 @@
 import type { Mm } from './units';
 import type { TextFont, TextWeight, CustomFont } from './textLabel';
 import type { CutParams } from '@/engine/cnc/feeds';
+import type { FastenerSize } from '@/engine/compiler/fasteners';
 import type { Tool } from '@/engine/cnc/tool';
 import type { Mount, MountSpec, Orientation, RemountStep } from '@/engine/cnc/setups/types';
 import type { RegistrationPlan } from '@/engine/cnc/registration/plan';
@@ -257,6 +258,43 @@ export interface EngraveDrillArrayItem extends EngraveDrillBase {
 }
 
 export type EngraveDrill = EngraveDrillItem | EngraveDrillArrayItem;
+
+/**
+ * One MILLED THREAD (#445, #434 phase 2), a sibling of `EngraveDrill` and never a region.
+ *
+ * A thread mill cuts a thread in a hole that already exists: the item assumes a pilot at the
+ * thread's basic minor diameter, and the program never plunges into solid (D1). The ITEM states
+ * the thread — its size carries the ISO 261 coarse pitch and minor through `FASTENERS` — because
+ * the catalogue's own pitch/thread-angle extras are stripped before the wire (D2). One hole per
+ * item: there is no array kind in phase 2.
+ *
+ * `position` is the hole's axis. There is no `rotation`: a round feature has no orientation, and
+ * adding one now would be a field nothing reads. `standard` and `classFit` are single-valued on
+ * purpose (D5): the repo has no UNC/UNF table and no 6G allowance table, so the CAM refuses those
+ * by name rather than approximating them.
+ */
+export interface EngraveThreadItem {
+  kind: 'thread';
+  id: string;
+  /** Optional human name, shown in operations and findings. */
+  name?: string;
+  /** The hole's axis, work XY — one hole. */
+  position: { x: Mm; y: Mm };
+  enabled: boolean;
+  /** ISO metric coarse size; pitch and basic minor come from `FASTENERS`. */
+  size: FastenerSize;
+  /** One value: the repo's table is ISO 261. UNC/UNF are refused by the absent table. */
+  standard: 'metric';
+  /** One value: 6H is the basic internal thread (no allowance). 6G needs an allowance table. */
+  classFit: '6H';
+  /** Threaded length below the top face, mm. Positive; ignored when `through`. */
+  depth: Mm;
+  /** Through the blank. Gated like a drill: `thread-through-unavailable` until #213/#218. */
+  through: boolean;
+}
+
+/** The one thread kind, named both ways the plan's prose uses: item and list entry. */
+export type EngraveThread = EngraveThreadItem;
 
 /** The winding a vector outline's contours are read with (#217) — Manifold's two fill rules. */
 export type VectorFillRule = 'NonZero' | 'EvenOdd';
@@ -808,6 +846,15 @@ export interface EngraveJob {
    * read `job.drills ?? []`.
    */
   drills?: EngraveDrill[];
+  /**
+   * Milled threads (#445, #434 phase 2). A separate list, like `combined`/`traces`/`vectors`/
+   * `keepOuts`/`drills`, so the region pipelines and every exhaustive item switch are untouched;
+   * `toPartPlan` carries them to `PartPlan.threads` and CAM writes one helical operation each.
+   *
+   * Optional, so a pre-#445 document round-trips byte-for-byte; the schema keeps it absent (not
+   * defaulted) for the same reason as every list above it. Consumers read `job.threads ?? []`.
+   */
+  threads?: EngraveThread[];
   /**
    * The key of the cutter this job is written for — a builtin (`flat-1.0`), or a later registry
    * tier's key (`cat:`, `user:`, `inv:`). A PLAIN STRING, so no saved job has ever needed

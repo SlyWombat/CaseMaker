@@ -199,6 +199,17 @@ export const KNOWN_DEFAULTS: Readonly<Record<string, KnownDefault>> = {
   'drill.pointAngleDeg': { label: 'drill point angle when unstated (chosen)', unit: 'deg', rule: z.number().min(60).max(150), fallback: 118 },
   'drill.plungeFeed': { label: 'drilling feed (placeholder)', unit: 'mm/min', rule: z.number().min(5).max(2000), fallback: 100 },
   'drill.spindleRpm': { label: 'drilling spindle speed (placeholder)', unit: 'rpm', rule: z.number().min(1000).max(30000), fallback: 10000 },
+  // #445 — thread milling. The pass, the ramp, the run-out and the chord are chosen; the feeds and
+  // the spindle speed are our own placeholders. None measured, none a vendor number.
+  'thread.radialStepoverMm': { label: 'thread radial stepover (chosen)', unit: 'mm', rule: z.number().min(0.02).max(2), fallback: 0.2 },
+  'thread.entryRampMm': { label: 'thread entry ramp (chosen)', unit: 'mm', rule: z.number().min(0).max(5), fallback: 0.5 },
+  'thread.bottomClearancePitches': { label: 'thread bottom clearance, in pitches (chosen)', unit: 'x', rule: z.number().min(0).max(5), fallback: 1 },
+  'thread.pilotTipClearanceMm': { label: 'thread pilot tip clearance (chosen)', unit: 'mm', rule: z.number().min(0).max(5), fallback: 0.5 },
+  'thread.feed': { label: 'thread milling feed (placeholder)', unit: 'mm/min', rule: z.number().min(5).max(1200), fallback: 300 },
+  'thread.plungeFeed': { label: 'thread entry feed (placeholder)', unit: 'mm/min', rule: z.number().min(5).max(1200), fallback: 100 },
+  'thread.spindleRpm': { label: 'thread milling spindle speed (placeholder)', unit: 'rpm', rule: z.number().min(1000).max(30000), fallback: 10000 },
+  'thread.chordToleranceMm': { label: 'thread helix chord tolerance (chosen)', unit: 'mm', rule: z.number().min(0.001).max(0.1), fallback: 0.01 },
+  'engrave.newThreadDepthMm': { label: 'new thread depth (chosen)', unit: 'mm', rule: z.number().min(0.05).max(20), fallback: 5 },
   // #431 — the laser point-to-origin's accuracy: ±1 mm, chosen, not measured.
   // #433 — adaptive clearing for metal pockets. The engagement, step-down, helix and ramp are chosen; the
   // feeds and the spindle speed are our own placeholders. None measured, none a vendor number.
