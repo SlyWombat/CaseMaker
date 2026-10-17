@@ -36,6 +36,7 @@ import { z } from 'zod';
 import { isMetalTool } from './registerCutter';
 import { cuttingDiameter, type Tool } from './tool';
 import type { ToolLibraryEntry } from './toolLibrary';
+import { caseColourWord, caseSwatch, CopyCaseSchema, type CopyCase } from './caseColour';
 
 export const CONDITIONS = ['new', 'used', 'worn', 'broken'] as const;
 export type Condition = (typeof CONDITIONS)[number];
@@ -52,14 +53,24 @@ export const MAX_WARN_MINUTES = 100_000;
 export const MAX_RUNTIME_MINUTES = 10_000_000;
 
 export const WhereaboutsSchema = z.discriminatedUnion('kind', [
-  z.object({ kind: z.literal('box') }).strict(),
+  /**
+   * In its box. `case` (#491) is the colour of THAT case: `{ colour, label? }`, absent on a copy
+   * nobody described. A machine whereabouts has no case field — the case is where the bit lives
+   * when it is not in a spindle.
+   */
+  z.object({ kind: z.literal('box'), case: CopyCaseSchema.nullish() }).strict(),
   z.object({ kind: z.literal('machine'), machineId: machineIdText }).strict(),
 ]);
 
 export const ToolCopySchema = z
   .object({
     id: z.string().refine((v) => v.trim().length > 0 && v === v.trim() && !CONTROL.test(v), 'is not a usable id'),
-    condition: z.enum(CONDITIONS),
+    /**
+     * The operator's condition, or null when nobody described this copy. Nullable since #491: a
+     * copy entered only to record its case ("the yellow one is the 2 mm flat") states a case and
+     * no condition, and guessing "new" for it would be exactly the guess #415 refused.
+     */
+    condition: z.enum(CONDITIONS).nullable().default(null),
     whereabouts: WhereaboutsSchema,
     /** This cutter's own runtime-warning threshold, minutes; overrides `tools.runtimeWarnMinutes`. */
     runtimeWarnMinutes: z.number().finite().positive().max(MAX_WARN_MINUTES).nullable().default(null),
@@ -195,6 +206,31 @@ export function runtimeWarning(
 // — the lookup tool choice reads -------------------------------------------------------------------
 
 let summaries = new Map<string, ConditionSummary>();
+/**
+ * The copies behind each registry key (#491): the same pools {@link setInventoryConditions} ranks,
+ * kept because the CASE lives on a copy and the category "best usable" does not. An adopted
+ * built-in/`cat:` key holds its corresponding items' copies, exactly as its summary pools them.
+ */
+let pools = new Map<string, CopyRef[]>();
+
+/** One physical copy, reduced to what the case rule needs. */
+export interface CopyRef {
+  condition: CopyCondition;
+  /** The case of a boxed copy, or null when the copy is in a machine or nobody described it. */
+  case: CopyCase | null;
+}
+
+/** A copy's case, never a machine copy's. */
+function caseOf(copy: ToolCopy): CopyCase | null {
+  return copy.whereabouts.kind === 'box' ? (copy.whereabouts.case ?? null) : null;
+}
+
+/** Every physical copy of an item: the described ones, then `null` for each undescribed one. */
+function poolOf(item: ItemWithCopies): CopyRef[] {
+  const described = item.copies.map((c) => ({ condition: c.condition, case: caseOf(c) }));
+  const rest = Math.max(0, item.quantity - described.length);
+  return [...described, ...Array<CopyRef>(rest).fill({ condition: null, case: null })];
+}
 
 /**
  * Whether a DEFINITION is on Makera's "for Metal" line (#454). The row rule is
@@ -237,6 +273,7 @@ export function setInventoryConditions(
   entries: readonly ToolLibraryEntry[] = [],
 ): void {
   summaries = new Map(items.map((i) => [keyOf(i.id), itemConditionSummary(i)]));
+  pools = new Map(items.map((i) => [keyOf(i.id), poolOf(i)]));
   for (const entry of entries) {
     // A possession's own summary is never replaced by an adoption; the guard is here because the
     // caller passes a LIST of entries, and a list that accidentally carried an `inv:` row would
@@ -254,12 +291,95 @@ export function setInventoryConditions(
           ? null
           : `the condition comes from the shop’s own copies of it: ${summary.note}`,
     });
+    // The case follows the same pool: a built-in the shop owns in a yellow case is yellow here too.
+    pools.set(entry.key, held.flatMap(poolOf));
   }
 }
 
 /** The condition summary for a registry key, or null for a cutter with no copies behind it. */
 export function conditionForKey(key: string): ConditionSummary | null {
   return summaries.get(key) ?? null;
+}
+
+/**
+ * The copies a pick of this cutter may choose between, at the best condition rank — or null when
+ * the registry knows no copies for the key, and `[]` when every copy is broken (#491).
+ *
+ * This is the "pick" the presentation rules speak of: new and used tie, an unexplained copy comes
+ * next, and worn is last. When it returns more than one copy the pick is INDIFFERENT — the bench
+ * instruction then names every case in that tie, in copy order.
+ */
+export function pickedCopiesForKey(key: string): CopyRef[] | null {
+  const pool = pools.get(key);
+  if (pool === undefined) return null;
+  const usable = pool.filter((c) => c.condition !== 'broken');
+  if (usable.length === 0) return [];
+  const best = Math.min(...usable.map((c) => conditionRank(c.condition)));
+  return usable.filter((c) => conditionRank(c.condition) === best);
+}
+
+/**
+ * The distinct cases among the picked copies, in pick order — null when the pick is unknown, empty
+ * when every copy is broken, and null from {@link casesForKey} when ANY picked copy has no case.
+ * One unknown copy in a tie is enough to stop the whole answer: printing the other colour would be
+ * saying the pick is that case, which nobody stated.
+ */
+export interface PickedCase {
+  colour: string;
+  condition: CopyCondition;
+  label: string | null;
+}
+
+export function casesForKey(key: string): PickedCase[] | null {
+  const picked = pickedCopiesForKey(key);
+  if (picked === null || picked.length === 0) return null;
+  const out: PickedCase[] = [];
+  for (const copy of picked) {
+    if (copy.case === null) return null;
+    const colour = copy.case.colour;
+    if (!out.some((c) => c.colour.toLowerCase() === colour.toLowerCase())) {
+      out.push({ colour, condition: copy.condition, label: copy.case.label });
+    }
+  }
+  return out;
+}
+
+/**
+ * The colour word(s) a presentation should print for a registry key (#491), or null when it must
+ * print none. One case: `Yellow case`. An indifferent pick between two: `Yellow case (new) or
+ * green case (used)`. A colour word is the operator's — never inferred from the other copies.
+ */
+export function casePhraseForKey(key: string): string | null {
+  const cases = casesForKey(key);
+  if (cases === null) return null;
+  if (cases.length === 1) return caseColourWord(cases[0]!.colour);
+  // Sentence case: the first colour is capitalised, the alternatives are not — `Yellow case (new)
+  // or green case (used)`, the bench form in #491.
+  return cases
+    .map((c, i) => {
+      const word = caseColourWord(c.colour);
+      return `${i === 0 ? word : word.charAt(0).toLowerCase() + word.slice(1)} (${c.condition ?? 'not set'})`;
+    })
+    .join(' or ');
+}
+
+/**
+ * The run sheet's name for {@link casePhraseForKey}: the colour word(s) its "The cutter" step
+ * prints. Null (no case recorded) leaves the step exactly as it was before #491.
+ */
+export function caseWordsForKey(key: string): string | null {
+  return casePhraseForKey(key);
+}
+
+/**
+ * The shank-band colour for a registry key (#489's `labelColor` seam), or null. Only a pick that
+ * resolves to ONE known palette colour gets a band: an indifferent pick between two, an unknown
+ * colour word, or any copy with no case answers null, so nothing is painted a colour nobody stated.
+ */
+export function caseBandColorForKey(key: string): string | null {
+  const cases = casesForKey(key);
+  if (cases === null || cases.length !== 1) return null;
+  return caseSwatch(cases[0]!.colour);
 }
 
 /**
@@ -278,6 +398,7 @@ export function inventoryConditions(): ReadonlyMap<string, ConditionSummary> {
 /** Test seam. */
 export function resetInventoryConditions(): void {
   summaries = new Map();
+  pools = new Map();
 }
 
 /**

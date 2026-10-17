@@ -6,10 +6,15 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
+  caseBandColorForKey,
+  casePhraseForKey,
+  caseWordsForKey,
+  casesForKey,
   conditionForKey,
   conditionRank,
   inventoryConditions,
   itemConditionSummary,
+  pickedCopiesForKey,
   resetInventoryConditions,
   runtimeWarning,
   setInventoryConditions,
@@ -247,5 +252,131 @@ describe('#454 a definition adopts the condition of the copies that are the same
     // a 1 is only “rated for metal”, so the name decides.
     expect(conditionForKey(plain.key)).toBeNull();
     expect(conditionForKey(metal.key)).not.toBeNull();
+  });
+});
+
+// #491 — the CASE is the copy's, not the item's. It round-trips on a box whereabouts, a copy may
+// state a case and no condition, and the presentation rules resolve the case of the copy the pick
+// would choose — or both cases when the pick is indifferent — and never invent one.
+describe('#491 the case on a boxed copy', () => {
+  const cased = (
+    id: string,
+    condition: ToolCopy['condition'],
+    colour: string,
+    label: string | null = null,
+  ): ToolCopy => ({
+    ...copy(id, condition),
+    whereabouts: { kind: 'box', case: { colour, label } },
+  });
+  const keyOf = (id: string) => `inv:${id}`;
+
+  it('round-trips with and without a case, and a bare copy parses with no condition', () => {
+    const base = DOC.inventory[0] as Record<string, unknown>;
+    const raw = {
+      ...base,
+      quantity: 3,
+      copies: [
+        { id: 'a', whereabouts: { kind: 'box', case: { colour: 'yellow', label: 'yellow base, clear tube' } } },
+        { id: 'b', condition: 'worn', whereabouts: { kind: 'box' } },
+        { id: 'c', condition: 'used', whereabouts: { kind: 'machine', machineId: 'm-2' } },
+      ],
+    };
+    const parsed = InventoryItemSchema.parse(raw);
+    expect(parsed.copies[0]).toEqual({
+      id: 'a',
+      condition: null,
+      whereabouts: { kind: 'box', case: { colour: 'yellow', label: 'yellow base, clear tube' } },
+      runtimeWarnMinutes: null,
+      notes: null,
+      runtimeMinutes: null,
+    });
+    expect(parsed.copies[1]!.whereabouts).toEqual({ kind: 'box' });
+    // Serialise and read back: the wire form is the stored form.
+    expect(InventoryItemSchema.parse(JSON.parse(JSON.stringify(parsed)))).toEqual(parsed);
+  });
+
+  it('refuses a case on a machine, unknown keys, and blank or oversized case text', () => {
+    const base = DOC.inventory[0] as Record<string, unknown>;
+    for (const bad of [
+      { id: 'a', condition: 'new', whereabouts: { kind: 'machine', machineId: 'm-1', case: { colour: 'yellow' } } },
+      { id: 'a', whereabouts: { kind: 'box', case: { colour: 'yellow', x: 1 } } },
+      { id: 'a', whereabouts: { kind: 'box', case: { colour: '   ' } } },
+      { id: 'a', whereabouts: { kind: 'box', case: { colour: ' yellow' } } },
+      { id: 'a', whereabouts: { kind: 'box', case: { colour: 'x'.repeat(41) } } },
+      { id: 'a', whereabouts: { kind: 'box', case: { colour: 'yellow', label: '' } } },
+    ]) {
+      expect(
+        InventoryItemSchema.safeParse({ ...base, quantity: 1, copies: [bad] }).success,
+        JSON.stringify(bad),
+      ).toBe(false);
+    }
+  });
+
+  it('resolves the picked copy’s case, both cases on a tie, and no case when one is unstated', () => {
+    // Two new copies in different cases: the pick is indifferent, so both are named in copy order.
+    setInventoryConditions(
+      [
+        {
+          id: 'x',
+          quantity: 2,
+          copies: [cased('a', 'new', 'yellow'), cased('b', 'used', 'green')],
+        },
+      ],
+      keyOf,
+    );
+    expect(pickedCopiesForKey('inv:x')).toEqual([
+      { condition: 'new', case: { colour: 'yellow', label: null } },
+      { condition: 'used', case: { colour: 'green', label: null } },
+    ]);
+    expect(casesForKey('inv:x')).toEqual([
+      { colour: 'yellow', condition: 'new', label: null },
+      { colour: 'green', condition: 'used', label: null },
+    ]);
+    expect(casePhraseForKey('inv:x')).toBe('Yellow case (new) or green case (used)');
+    expect(caseWordsForKey('inv:x')).toBe('Yellow case (new) or green case (used)');
+    // Two cases mean no single shank band.
+    expect(caseBandColorForKey('inv:x')).toBeNull();
+
+    // One new yellow and one worn green: only the yellow copy is picked.
+    setInventoryConditions(
+      [{ id: 'y', quantity: 2, copies: [cased('a', 'new', 'yellow'), cased('b', 'worn', 'green')] }],
+      keyOf,
+    );
+    expect(casePhraseForKey('inv:y')).toBe('Yellow case');
+    expect(caseBandColorForKey('inv:y')).toBe('#d8b52a');
+
+    // A picked copy nobody gave a case stops the answer; the OTHER copy's colour is not printed
+    // in its place. An implicit (undescribed) copy has the same effect when it is the pick.
+    setInventoryConditions(
+      [{ id: 'z', quantity: 2, copies: [cased('a', 'new', 'yellow'), copy('b', 'new')] }],
+      keyOf,
+    );
+    expect(casePhraseForKey('inv:z')).toBeNull();
+    setInventoryConditions([{ id: 'w', quantity: 2, copies: [cased('a', 'worn', 'yellow')] }], keyOf);
+    expect(casePhraseForKey('inv:w')).toBeNull(); // the pick is the unstated spare
+  });
+
+  it('prints an unknown colour word but paints no swatch, and pools an adopted definition’s cases', () => {
+    setInventoryConditions([{ id: 'u', quantity: 1, copies: [cased('a', 'new', 'magenta')] }], keyOf);
+    expect(casePhraseForKey('inv:u')).toBe('Magenta case');
+    expect(caseBandColorForKey('inv:u')).toBeNull();
+    expect(caseWordsForKey('cat:none')).toBeNull();
+
+    // #454 correspondence carries the case too: the built-in is the same physical yellow 1 mm bit.
+    const oneMm = flatEndMill(1, { name: '1 mm flat end' });
+    setInventoryConditions(
+      [{ id: 'owned', quantity: 1, copies: [cased('a', 'new', 'yellow')], tool: oneMm }],
+      keyOf,
+      TOOL_LIBRARY,
+    );
+    expect(casePhraseForKey('flat-1.0')).toBe('Yellow case');
+    expect(caseBandColorForKey('flat-1.0')).toBe('#d8b52a');
+  });
+
+  it('answers nothing for a cutter with no copies behind it', () => {
+    setInventoryConditions([], keyOf);
+    expect(pickedCopiesForKey('inv:none')).toBeNull();
+    expect(casesForKey('inv:none')).toBeNull();
+    expect(casePhraseForKey('inv:none')).toBeNull();
   });
 });

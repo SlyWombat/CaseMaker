@@ -4262,7 +4262,7 @@ mod tests {
         item.quantity = 2;
         item.copies = vec![ToolCopy {
             id: "c-1".into(),
-            condition: Condition::Worn,
+            condition: Some(Condition::Worn),
             whereabouts: Whereabouts::Machine { machine_id: "m-1".into() },
             runtime_warn_minutes: Some(120.0),
             notes: None,
@@ -4280,8 +4280,8 @@ mod tests {
         too_many.quantity = 1;
         too_many.copies.push(ToolCopy {
             id: "c-2".into(),
-            condition: Condition::New,
-            whereabouts: Whereabouts::Box {},
+            condition: Some(Condition::New),
+            whereabouts: Whereabouts::Box { case: None },
             runtime_warn_minutes: None,
             notes: None,
             runtime_minutes: None,
@@ -4300,10 +4300,10 @@ mod tests {
     fn a_copy(id: &str, machine: Option<&str>) -> crate::tool_copy::ToolCopy {
         crate::tool_copy::ToolCopy {
             id: id.into(),
-            condition: crate::tool_copy::Condition::Worn,
+            condition: Some(crate::tool_copy::Condition::Worn),
             whereabouts: match machine {
                 Some(m) => crate::tool_copy::Whereabouts::Machine { machine_id: m.into() },
-                None => crate::tool_copy::Whereabouts::Box {},
+                None => crate::tool_copy::Whereabouts::Box { case: None },
             },
             runtime_warn_minutes: None,
             notes: None,
@@ -4337,7 +4337,33 @@ mod tests {
         let served: Vec<InventoryItem> = serde_json::from_slice(&store.inventory().await.unwrap().0).unwrap();
         assert_eq!(served[0].copies.iter().map(|c| c.id.as_str()).collect::<Vec<_>>(), ["in-spindle"]);
 
-        // A file that STATES copies is the authority for them.
+        // #491: the label import states ONE BARE COPY PER BOX — its case, and no condition. Same
+        // length, so the old operator fields ride along by position and the case is the file's.
+        rebuilt.inventory[0].quantity = 1;
+        rebuilt.inventory[0].copies = vec![ToolCopy {
+            id: "boxed-case".into(),
+            condition: None,
+            whereabouts: Whereabouts::Box {
+                case: Some(crate::tool_copy::CopyCase { colour: "yellow".into(), label: None }),
+            },
+            runtime_warn_minutes: None,
+            notes: None,
+            runtime_minutes: None,
+        }];
+        store.import(&serde_json::to_vec(&rebuilt).unwrap()).await.unwrap();
+        let served: Vec<InventoryItem> = serde_json::from_slice(&store.inventory().await.unwrap().0).unwrap();
+        assert_eq!(served[0].copies.len(), 1);
+        assert_eq!(served[0].copies[0].condition, Some(Condition::Worn), "the old condition carried");
+        assert_eq!(
+            served[0].copies[0].whereabouts,
+            Whereabouts::Box {
+                case: Some(crate::tool_copy::CopyCase { colour: "yellow".into(), label: None })
+            },
+            "the file's case is kept"
+        );
+        assert_eq!(served[0].collet_fits, Some(vec!["m-1".into()]), "the old fits carried");
+
+        // A file that STATES copies with a condition is the authority for them.
         rebuilt.inventory[0].quantity = 2;
         rebuilt.inventory[0].copies = vec![a_copy("from-file", None)];
         store.import(&serde_json::to_vec(&rebuilt).unwrap()).await.unwrap();
