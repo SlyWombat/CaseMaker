@@ -23,6 +23,10 @@ function fakeShelf() {
   const sent: Array<{ method: string; path: string; body: unknown }> = [];
   const client = {
     call: async (method: string, path: string, body?: unknown, opts?: { ifMatch?: string | null }): Promise<HouseCall> => {
+      // A service from before #446: no vendor sizes to offer, and the add form is the #413 one.
+      if (method === 'GET' && path === '/material-specs') {
+        return { kind: 'refused', status: 404, message: 'no sizes on this service' };
+      }
       if (method === 'GET') return { kind: 'ok', text: JSON.stringify(items), etag: `"${version}"` };
       sent.push({ method, path, body });
       if (method !== 'POST' && opts?.ifMatch !== `"${version}"`) return { kind: 'refused', status: 412, message: 'stale' };

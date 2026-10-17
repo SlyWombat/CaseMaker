@@ -32,9 +32,15 @@ import {
   type StockForm,
   type StockItem,
 } from '@/platform/stockClient';
+import {
+  houseMaterialSpecs,
+  type MaterialSpec,
+  type MaterialSpecsRead,
+} from '@/platform/materialSpecsClient';
 import { available, newStockId, useStockStore } from '@/store/stockStore';
 import { useToolRegistryStore } from '@/store/toolRegistryStore';
 import { formatDay, mm } from './display';
+import { specSizeFields } from './vendorSizes';
 
 const FORM_LABELS: Record<StockForm, string> = {
   sheet: 'sheet',
@@ -317,6 +323,121 @@ export function MaterialsScope() {
   );
 }
 
+/**
+ * The vendor's purchasable sizes as a picker on the ADD form (#466), grouped by the vendor's own
+ * material word and labelled with the vendor's own name. Choosing a row calls `onPick` with it; the
+ * form then fills the dimensions the row states and NOTHING else — the material, form, finish and
+ * quantity stay the user's own choices, because no vendor word is mapped onto `STOCK_MATERIALS` yet.
+ *
+ * ABSENT IS NOT AN ERROR. A service from before #446 answers 404 and this renders nothing at all:
+ * the add form is exactly the one that shipped with #413. A row this build cannot read is set aside
+ * with its reason while the readable rows are still offered — the same posture the shelf itself has
+ * for an entry it cannot parse. An error on the read is a hint, never a broken form.
+ */
+function VendorSizePicker({
+  form,
+  onPick,
+}: {
+  form: StockForm;
+  onPick: (spec: MaterialSpec) => void;
+}) {
+  const [read, setRead] = useState<MaterialSpecsRead | null>(null);
+  const [picked, setPicked] = useState('');
+
+  useEffect(() => {
+    // Held so a reply that lands after the editor closed does not set state on an unmounted form.
+    let live = true;
+    void houseMaterialSpecs().then((next) => {
+      if (live) setRead(next);
+    });
+    return () => {
+      live = false;
+    };
+  }, []);
+
+  if (read === null || read.kind === 'absent') return null;
+  if (read.kind === 'error') {
+    return (
+      <p className="hint" data-testid="manage-stock-vendor-error" data-status="error">
+        The vendor’s sizes could not be read: {read.detail}. Type the size in below.
+      </p>
+    );
+  }
+
+  // Grouped in the order the service sent them, under the vendor's word verbatim — the word is a
+  // LABEL here, not a claim about which shelf material this is.
+  const groups = new Map<string, MaterialSpec[]>();
+  for (const spec of read.specs) {
+    const rows = groups.get(spec.material);
+    if (rows) rows.push(spec);
+    else groups.set(spec.material, [spec]);
+  }
+  const specById = new Map(read.specs.map((spec) => [spec.id, spec]));
+  if (groups.size === 0 && read.unreadable.length === 0) return null;
+
+  const pickedSpec = specById.get(picked) ?? null;
+  const unstated = pickedSpec === null
+    ? []
+    : (Object.keys(specSizeFields(pickedSpec)) as SizeField[]).filter((f) => !SIZE_FIELDS[form].includes(f));
+
+  return (
+    <>
+      {groups.size > 0 && (
+        <>
+          <div className="panel-subhead">Vendor sizes</div>
+          <label className="lf">
+            <span>
+              pick a size <em>fills its dimensions below</em>
+            </span>
+            <select
+              className="fld"
+              value={picked}
+              data-testid="manage-stock-vendor-size"
+              onChange={(e) => {
+                setPicked(e.target.value);
+                const spec = specById.get(e.target.value);
+                if (spec !== undefined) onPick(spec);
+              }}
+            >
+              <option value="">type the size yourself…</option>
+              {[...groups].map(([material, rows]) => (
+                <optgroup key={material} label={material}>
+                  {rows.map((spec) => (
+                    <option
+                      key={spec.id}
+                      value={spec.id}
+                      data-testid={`manage-stock-vendor-option-${spec.id}`}
+                    >
+                      {spec.name}
+                    </option>
+                  ))}
+                </optgroup>
+              ))}
+            </select>
+          </label>
+          {pickedSpec !== null && unstated.length > 0 && (
+            <p className="hint" data-testid="manage-stock-vendor-form-hint">
+              This is a {pickedSpec.shape === 'R' ? 'rectangular' : 'round'} size, but the{' '}
+              {FORM_LABELS[form]} form has no {unstated.map((f) => SIZE_LABELS[f]).join(' or ')}. Its
+              dimensions were filled in — choose a form that carries them to use them.
+            </p>
+          )}
+        </>
+      )}
+      {read.unreadable.map((u, i) => (
+        <p
+          key={u.id ?? i}
+          className="hint"
+          data-testid="manage-stock-vendor-unreadable"
+          data-status="error"
+        >
+          Vendor size {u.id ?? '(no id)'} cannot be offered here: {u.reason}.
+        </p>
+      ))}
+    </>
+  );
+}
+
 function StockEditor({
   item,
   onClose,
@@ -355,6 +476,18 @@ function StockEditor({
     ? 'this entry changed since you opened it — load the current one before saving'
     : stockProblem(candidate);
   const patch = (p: Partial<Draft>) => setDraft((d) => ({ ...d, ...p }));
+
+  /** A vendor row fills the dimensions it states; every other field of the draft stays the user's. */
+  const pickVendorSize = (spec: MaterialSpec) => {
+    const fields = specSizeFields(spec);
+    setDraft((d) => {
+      const size = { ...d.size };
+      for (const [field, value] of Object.entries(fields)) {
+        if (value !== undefined) size[field as SizeField] = String(value);
+      }
+      return { ...d, size };
+    });
+  };
 
   const save = async () => {
     const ok = item === null ? await add(candidate) : await replace(candidate);
@@ -409,6 +542,8 @@ function StockEditor({
           </select>
         </label>
       </div>
+
+      {item === null && <VendorSizePicker form={draft.form} onPick={pickVendorSize} />}
 
       <div className="panel-subhead">Size, mm</div>
       <div className="grid2">
