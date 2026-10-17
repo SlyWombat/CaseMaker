@@ -544,10 +544,12 @@ the failing row says which.
 Nothing is re-derived at save time: the frame is the one the verifier already passed, and the
 facing file is the one it checked.
 
-**Facing — skim the finish off before engraving (#432, #474).** Facing is offered on wood and
-metal only. On a printed plastic it is never offered, whatever finish the blank states:
-facing is not offered on printed plastic: a flat cutter smears a thermoplastic top. For wood
-and metal the **Finish** the blank states decides whether facing is offered and how deep it
+**Facing — skim the finish off before engraving (#432, #474, #493).** Facing is offered on wood
+and metal only. On any plastic it is never offered, whatever finish the blank states — printed
+PLA or PETG, a purchased acrylic or ABS sheet, or a two-colour engraving laminate. The refusal
+names the material ("facing is not offered on Acrylic: a flat cutter smears a plastic top") and
+the way out: cut it as it is, or use wood or metal if the top must be skimmed. For wood and
+metal the **Finish** the blank states decides whether facing is offered and how deep it
 defaults: the panel fills in a depth with a sentence saying why, and you can type your own. A facing job is **two programs** — a facing
 pass with a flat cutter, then the engraving program from the faced top — each with its own
 tool-length calibration and its own Z0. The run sheet orders them probe → face → re-touch →

@@ -191,8 +191,8 @@ export function StartStockStep({
   // #432 slice 4 — the same two readers the wizard seeds the job with, so the sentence here and the
   // choice written on the job can never disagree.
   const shopDefaults = useShopDefaultsStore((s) => s.defaults);
-  // #474 — a printed plastic is never faced, so the wizard says that and does not offer a depth,
-  // even on a piece whose finish nobody has stated: the material alone refuses it.
+  // #474/#493 — no plastic is faced (wood and metal only), so the wizard says that and does not
+  // offer a depth, even on a piece whose finish nobody has stated: the material alone refuses it.
   const facingRefused = facingRefusal(material) !== null;
   const facing =
     facingRefused || outcome.finish !== null

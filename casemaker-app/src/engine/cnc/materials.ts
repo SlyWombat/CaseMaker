@@ -114,6 +114,22 @@ export function isMetalMaterial(material: StockMaterial): boolean {
 }
 
 /**
+ * The woods this app can name: the two timbers and MDF. Listed rather than derived, for the same
+ * reason as {@link isMetalMaterial} — a name is not a category.
+ *
+ * It exists because ONE rule is stated in these two poles: facing is for wood and metal only
+ * (#474, widened by #493), so everything that is neither is refused. A material added to
+ * {@link STOCK_MATERIALS} later is therefore refused by default unless someone deliberately says it
+ * is a wood — the safe direction for a rule about what a flat cutter may be pushed into.
+ */
+export const WOOD_MATERIALS = ['softwood', 'hardwood', 'mdf'] as const satisfies readonly StockMaterial[];
+
+/** Is this stock a wood (softwood, hardwood or MDF)? See {@link WOOD_MATERIALS}. */
+export function isWoodMaterial(material: StockMaterial): boolean {
+  return WOOD_MATERIALS.some((wood) => wood === material);
+}
+
+/**
  * The classes a slicer can produce: the printed-blank materials (#456), listed rather than derived
  * from the string. A name is not a category — the same reason {@link isMetalMaterial} gives — and a
  * new class must answer this question here instead of being silently under-covered by a heuristic.

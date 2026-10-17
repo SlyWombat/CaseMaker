@@ -7,6 +7,7 @@ import { Z1 } from '@/engine/cnc/machine';
 import {
   boxProblem,
   facingDefault,
+  facingRefusal,
   facingSeed,
   facingShopFrom,
   finishOf,
@@ -25,8 +26,9 @@ import { strToU8, zipSync } from 'fflate';
 import type { ParsedMesh } from '@/engine/import/stlParser';
 import { StockItemSchema, stockProblem, type StockItem } from '@/platform/stockClient';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
+import { STOCK_MATERIALS } from '@/engine/cnc/materials';
 import { parseEngraveJob } from '@/store/engraveJobSchema';
-import type { JobStockEntry } from '@/types/engraveJob';
+import type { JobStockEntry, StockMaterial } from '@/types/engraveJob';
 
 const SHELF: StockItem[] = (locationDoc as { stock: unknown[] }).stock.map((s) => StockItemSchema.parse(s));
 const PLATE = SHELF.find((s) => s.id === 'stock-plate1')!;
@@ -137,18 +139,61 @@ describe('the facing default comes from the finish (decision Q6)', () => {
     expect(facingDefault('printed', 'softwood').on).toBe(false);
   });
 
-  // #474 — the maintainer, 2026-10-17: a flat cutter smears a thermoplastic top, so facing is for
-  // wood and metal only. The material refuses it whatever the finish says.
-  it('never offers facing on printed plastic, whatever the finish', () => {
-    for (const material of ['pla', 'petg', 'pa-gf'] as const) {
+  /** The refusal's words for a material, which must name it and give the way out. */
+  const refusalFor = (label: string): string =>
+    `facing is not offered on ${label}: a flat cutter smears a plastic top. ` +
+    'Cut the blank as it is, or use wood or metal if the top must be skimmed.';
+
+  // #474/#493 — the maintainer, 2026-10-17: a flat cutter smears a plastic top, so facing is for
+  // wood and metal only. #493 widened the rule from the printed blanks to the CLASS: a purchased
+  // acrylic or ABS sheet is refused exactly as printed PETG is, and a laminate (#492) is caught
+  // through its acrylic/ABS material without a stock kind of its own.
+  it('never offers facing on any plastic, whatever the finish', () => {
+    const plastics = [
+      ['pla', 'PLA'],
+      ['petg', 'PETG'],
+      ['pa-gf', 'PA-GF'],
+      ['abs', 'ABS'],
+      ['pc', 'PC'],
+      ['pp', 'PP'],
+      ['tpu', 'TPU'],
+      ['acrylic', 'Acrylic'],
+    ] as const;
+    for (const [material, label] of plastics) {
       for (const finish of ['rough', 'unknown', 'finished', 'printed'] as const) {
         const def = facingDefault(finish, material);
-        expect(def.on).toBe(false);
-        expect(def.reason).toBe(
-          'facing is not offered on printed plastic: a flat cutter smears a thermoplastic top',
-        );
+        expect(def.on, `${material}/${finish}`).toBe(false);
+        expect(def.reason, `${material}/${finish}`).toBe(refusalFor(label));
       }
     }
+  });
+
+  it('refuses every material in the vocabulary that is not a wood or a metal', () => {
+    // The woods the maintainer named, plus the four metals; everything else is refused, so a class
+    // added to `STOCK_MATERIALS` later cannot slip through by not being listed here.
+    const woodOrMetal = new Set<StockMaterial>([
+      'softwood',
+      'hardwood',
+      'mdf',
+      'aluminium-6061',
+      'aluminium-7075',
+      'brass',
+      'copper',
+    ]);
+    for (const material of STOCK_MATERIALS) {
+      expect(facingRefusal(material) === null, material).toBe(woodOrMetal.has(material));
+    }
+  });
+
+  it('keeps the wood and metal seeds exactly as they were', () => {
+    expect(facingRefusal('softwood')).toBeNull();
+    expect(facingRefusal('hardwood')).toBeNull();
+    expect(facingRefusal('mdf')).toBeNull();
+    for (const metal of ['aluminium-6061', 'aluminium-7075', 'brass', 'copper'] as const) {
+      expect(facingRefusal(metal), metal).toBeNull();
+    }
+    expect(facingSeed('rough', 'softwood')).toEqual({ enabled: true, depth: 0.5 });
+    expect(facingSeed('unknown', 'copper')).toEqual({ enabled: true, depth: 0.2 });
   });
 });
 
@@ -189,12 +234,14 @@ describe('the facing choice a new job starts with (#432 slice 4)', () => {
     expect(facingSeed(null, 'softwood')).toEqual({ enabled: true, depth: 0.2 });
   });
 
-  // #474 — a PETG job starts off with no depth to fill in: the material is the refusal, not the
-  // finish, so the rough/unknown seeds never apply.
-  it('seeds a printed plastic off with no depth, whatever the finish', () => {
+  // #474/#493 — a plastic job starts off with no depth to fill in: the material is the refusal, not
+  // the finish, so the rough/unknown seeds never apply. Purchased acrylic is caught the same way.
+  it('seeds any plastic off with no depth, whatever the finish', () => {
     expect(facingSeed('rough', 'petg')).toEqual({ enabled: false, depth: 0 });
     expect(facingSeed('printed', 'petg')).toEqual({ enabled: false, depth: 0 });
     expect(facingSeed(null, 'pa-gf')).toEqual({ enabled: false, depth: 0 });
+    expect(facingSeed('rough', 'acrylic')).toEqual({ enabled: false, depth: 0 });
+    expect(facingSeed('finished', 'abs')).toEqual({ enabled: false, depth: 0 });
   });
 
   it('fills the depth from the shop’s own figures, and falls back to the labelled seeds', () => {

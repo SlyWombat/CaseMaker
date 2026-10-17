@@ -1472,15 +1472,20 @@ describe('facing the stock’s top (#432 slices 1–2)', () => {
     }
   });
 
-  // #474 — the rule lives in the worker too: the panel and the seed only keep honest jobs honest,
-  // and a legacy or hand-edited job with facing on must not get a face file for a plastic.
-  it('refuses the facing file on printed plastic, whatever the job says, and keeps it for wood', () => {
+  // #474/#493 — the rule lives in the worker too: the panel and the seed only keep honest jobs
+  // honest, and a legacy or hand-edited job with facing on must not get a face file for a plastic.
+  // #493 widened the rule to the class; `facingRefusal`'s own spec covers acrylic and ABS, and the
+  // panel/sheet/wizard specs prove their surfaces. The worker case runs PLA because it is the one
+  // plastic the starting feed table covers — an acrylic job is refused earlier for feeds, which
+  // would mask the facing half under test.
+  it('refuses the facing file on a plastic, whatever the job says, and keeps it for wood', () => {
     const plastic = faced({ stock: { ...defaultEngraveJob().stock, material: 'pla' } });
     const g = generate(tl, plastic, null, [], undefined, SHOP);
     expect(g.ok).toBe(true);
     expect(g.facingNc).toBeNull();
     expect(g.facingError).toBe(
-      'facing is not offered on printed plastic: a flat cutter smears a thermoplastic top',
+      'facing is not offered on PLA: a flat cutter smears a plastic top. ' +
+        'Cut the blank as it is, or use wood or metal if the top must be skimmed.',
     );
     // A wood job with the same facing choice still gets its file: the material is the rule.
     const wood = generate(tl, faced(), null, [], undefined, SHOP);

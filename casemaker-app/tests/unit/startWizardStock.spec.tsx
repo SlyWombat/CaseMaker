@@ -230,12 +230,16 @@ describe('the material-first start (#418)', () => {
     expect(useEngraveJobStore.getState().job.stockEntry).toMatchObject({ kind: 'made', shelfId: saved.id, form: 'block' });
   });
 
-  // #474 — the maintainer, 2026-10-17: facing plastic will never work. A PETG blank seeds off with
-  // no depth even when it says it is rough, and the wizard says why rather than staying silent.
-  it('a printed plastic seeds facing off with no depth, whatever the finish (#474)', async () => {
+  // #474/#493 — the maintainer, 2026-10-17: facing plastic will never work. Any plastic blank seeds
+  // off with no depth even when it says it is rough — printed PETG and purchased acrylic alike — and
+  // the wizard says why rather than staying silent.
+  it.each([
+    ['petg', 'PETG'],
+    ['acrylic', 'Acrylic'],
+  ] as const)('a plastic seeds facing off with no depth, whatever the finish (#474, #493)', async (material, label) => {
     fakeShelf(SHELF);
     await toStockStep();
-    chooseMaterial('petg');
+    chooseMaterial(material);
     fireEvent.click(screen.getByTestId('start-wizard-stock-door-make'));
     fireEvent.change(screen.getByTestId('start-wizard-make-length'), { target: { value: '60' } });
     fireEvent.change(screen.getByTestId('start-wizard-make-width'), { target: { value: '40' } });
@@ -244,15 +248,13 @@ describe('the material-first start (#418)', () => {
 
     const line = screen.getByTestId('start-wizard-stock-facing');
     expect(line.getAttribute('data-state')).toBe('off');
-    expect(line.textContent).toContain(
-      'facing is not offered on printed plastic: a flat cutter smears a thermoplastic top',
-    );
+    expect(line.textContent).toContain(`facing is not offered on ${label}: a flat cutter smears a plastic top`);
 
     await act(async () => {
       fireEvent.click(screen.getByTestId('start-wizard-stock-next'));
     });
     await screen.findByTestId('engrave-setup-flow');
-    expect(useEngraveJobStore.getState().job.stock.material).toBe('petg');
+    expect(useEngraveJobStore.getState().job.stock.material).toBe(material);
     expect(useEngraveJobStore.getState().job.facing).toEqual({ enabled: false, depth: 0 });
   });
 

@@ -790,8 +790,8 @@ function facingProgram(
   error: string | null;
   cam: FacingCamSummary | null;
 } {
-  // #474 — the rule is the MATERIAL's, not the panel's. A legacy or hand-edited job that still turns
-  // facing on for a printed plastic must not get a face file either: the worker refuses it by name,
+  // #474/#493 — the rule is the MATERIAL's, not the panel's. A legacy or hand-edited job that still
+  // turns facing on for a plastic must not get a face file either: the worker refuses it by name,
   // so the R11 Facing row and the run sheet say why rather than walking the operator through a pass
   // the app will not produce.
   const refusal = facingRefusal(job.stock.material);

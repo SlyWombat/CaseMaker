@@ -1785,22 +1785,27 @@ describe('EngravePanel (#432 slice 4) — the facing choice', () => {
     expect(job().facing).toEqual({ enabled: true, depth: 0.2 });
   });
 
-  // #474 — the maintainer, 2026-10-17: facing plastic will never work. The material withholds the
-  // choice, so a rough PETG blank does not even get the "face it" button, and the sentence says why.
-  it('withholds facing on printed plastic, whatever the finish says', () => {
+  // #474/#493 — the maintainer, 2026-10-17: facing plastic will never work. The material withholds
+  // the choice, so neither a rough printed PETG blank nor a purchased acrylic sheet gets the "face
+  // it" button, and the sentence names the material and says why.
+  it.each([
+    ['petg', 'PETG'],
+    ['abs', 'ABS'],
+    ['acrylic', 'Acrylic'],
+  ] as const)('withholds facing on %s, whatever the finish says', (material, label) => {
     act(() => {
       const base = defaultEngraveJob();
       useEngraveJobStore.setState({
         job: {
           ...base,
-          stock: { ...base.stock, material: 'petg' },
+          stock: { ...base.stock, material },
           stockEntry: { kind: 'made', shelfId: null, file: null, form: 'plate', finish: 'rough', conductive: false },
         },
       });
     });
     render(<EngravePanel />);
     expect(screen.getByTestId('engrave-facing-why').textContent).toContain(
-      'facing is not offered on printed plastic: a flat cutter smears a thermoplastic top',
+      `facing is not offered on ${label}: a flat cutter smears a plastic top`,
     );
     expect(screen.queryByTestId('engrave-facing-on')).toBeNull();
     expect(screen.queryByTestId('engrave-facing-off')).toBeNull();

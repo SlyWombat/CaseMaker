@@ -634,8 +634,8 @@ export function EngravePanel(): JSX.Element {
   // the sentence under it come from the same `facingDepthDefault` call the wizard's seed makes.
   const shopDefaults = useShopDefaultsStore((s) => s.defaults);
   const finish = finishOf(job);
-  // #474 — printed plastic is never faced, so the material refuses it whatever the finish says; the
-  // panel withholds the choice rather than merely seeding it off.
+  // #474/#493 — no plastic is faced (wood and metal only), so the material refuses it whatever the
+  // finish says; the panel withholds the choice rather than merely seeding it off.
   const facingRefused = facingRefusal(job.stock.material) !== null;
   const facingDef = facingDefault(finish ?? 'unknown', job.stock.material);
   const facing = job.facing ?? null;

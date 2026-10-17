@@ -26,7 +26,7 @@ import { readDefault, type ShopDefaults } from '@/platform/defaultsClient';
 import type { StockItem } from '@/platform/stockClient';
 import { isShippedDemoLabelSet } from './engrave/blankLabelSeed';
 import type { MillProfile } from './machine';
-import { isMetalMaterial, isPrintedBlankMaterial, MATERIAL_LABELS } from './materials';
+import { isMetalMaterial, isWoodMaterial, MATERIAL_LABELS } from './materials';
 import type { EngraveFacing, EngraveJob, JobStockEntry, JobStockFinish, JobStockForm, StockMaterial } from '@/types/engraveJob';
 
 /** The rectangular forms a job's stock can take, in the order the wizard offers them. */
@@ -266,16 +266,22 @@ export function finishOf(job: Pick<EngraveJob, 'stockEntry' | 'stock'>): JobStoc
 }
 
 /**
- * Why this material is never faced, or null (#474). The maintainer's rule of 2026-10-17: facing is
- * for wood and metal only. A flat cutter pushed into a thermoplastic smears the top rather than
- * cutting it, so no finish, no depth and no cutter choice makes a facing pass work on a printed
- * blank — the material alone refuses it. Non-plastic materials (the woods, MDF, acrylic, the metals)
- * are not refused here; for them the finish decides as it always has.
+ * Why this material is never faced, or null (#474, widened by #493). The maintainer's rule of
+ * 2026-10-17: facing is for **wood and metal only**. A flat cutter pushed into a plastic smears the
+ * top rather than cutting it, so no finish, no depth and no cutter choice makes a facing pass work
+ * — the material alone refuses it, and the refusal names it and says the way out.
+ *
+ * #474 refused the printed blanks (the slicer's materials). #493 widened it to the CLASS: anything
+ * that is neither wood (softwood, hardwood, MDF) nor metal is refused, which covers purchased
+ * acrylic, ABS, PC, PP, TPU and the acrylic/ABS-based engraving laminates of #492 — a laminate does
+ * not need a stock kind of its own to be caught, because its material is a plastic.
  */
 export function facingRefusal(material: StockMaterial): string | null {
-  return isPrintedBlankMaterial(material)
-    ? 'facing is not offered on printed plastic: a flat cutter smears a thermoplastic top'
-    : null;
+  if (isWoodMaterial(material) || isMetalMaterial(material)) return null;
+  return (
+    `facing is not offered on ${MATERIAL_LABELS[material]}: a flat cutter smears a plastic top. ` +
+    'Cut the blank as it is, or use wood or metal if the top must be skimmed.'
+  );
 }
 
 /**
@@ -288,8 +294,9 @@ export function facingRefusal(material: StockMaterial): string | null {
  * when the job is made. An absent key means nobody has asked, and the panel offers the default with
  * its reason instead of acting on it.
  *
- * A printed plastic always seeds OFF with a zero depth (#474): the refusal is not a finish default
- * that a finish could override, so there is no number to fill in either.
+ * Any plastic always seeds OFF with a zero depth (#474, #493): the refusal is not a finish default
+ * that a finish could override, so there is no number to fill in either. Wood and metal keep the
+ * rough/unknown seeds.
  */
 export function facingSeed(
   finish: JobStockFinish | null,
@@ -302,10 +309,10 @@ export function facingSeed(
 }
 
 /**
- * Whether the job should face the stock first, from its material and finish (decision Q6): a printed
- * plastic is never faced (#474); otherwise rough or unknown → on, a finished sheet or a printed
- * blank → off. Always overridable where it is offered — this is the DEFAULT, and the reason is part
- * of the answer so the screen can say why.
+ * Whether the job should face the stock first, from its material and finish (decision Q6): a plastic
+ * is never faced (#474, #493); for wood and metal, rough or unknown → on and a finished sheet → off.
+ * Always overridable where it is offered — this is the DEFAULT, and the reason is part of the answer
+ * so the screen can say why.
  */
 export function facingDefault(finish: JobStockFinish, material: StockMaterial): { on: boolean; reason: string } {
   const refused = facingRefusal(material);

@@ -1362,16 +1362,19 @@ describe('runSheet — the facing phase (#432 slice 3)', () => {
     expect(steps[0]!.value).toBe('facing off');
   });
 
-  // #474 — facing is for wood and metal only. A plastic job's sheet says that rather than quoting a
-  // finish default, and a job that still carries a pass is called out instead of walked through.
-  it('says facing is not offered on printed plastic', () => {
+  // #474/#493 — facing is for wood and metal only. A plastic job's sheet says that rather than
+  // quoting a finish default, and a job that still carries a pass is called out instead of walked
+  // through. #493 widened it to every plastic, printed or purchased.
+  it.each([
+    ['petg', 'PETG'],
+    ['abs', 'ABS'],
+    ['acrylic', 'Acrylic'],
+  ] as const)('says facing is not offered on %s', (material, label) => {
     const base = facingJob({ enabled: false, depth: 0 });
-    const job = { ...base, stock: { ...base.stock, material: 'petg' as const } };
+    const job = { ...base, stock: { ...base.stock, material } };
     const steps = section(buildRunSheet(job, generatedWithFacing(job), NO_SIM, NOW), 'facing').steps;
     expect(steps).toHaveLength(1);
-    expect(steps[0]!.text).toContain(
-      'facing is not offered on printed plastic: a flat cutter smears a thermoplastic top',
-    );
+    expect(steps[0]!.text).toContain(`facing is not offered on ${label}: a flat cutter smears a plastic top`);
     expect(steps[0]!.value).toBe('facing off');
   });
 
@@ -1383,7 +1386,7 @@ describe('runSheet — the facing phase (#432 slice 3)', () => {
     expect(steps).toHaveLength(1);
     expect(steps[0]!.text).toContain('still has a 0.5 mm facing pass');
     expect(steps[0]!.text).toContain('The facing program was not produced');
-    expect(steps[0]!.text).toContain('facing is not offered on printed plastic');
+    expect(steps[0]!.text).toContain('facing is not offered on PLA');
     expect(steps[0]!.text).toContain('turn facing off in the Engrave panel');
     expect(steps[0]!.value).toBe('facing on, not offered');
     expect(steps[0]!.bold).toBe(true);

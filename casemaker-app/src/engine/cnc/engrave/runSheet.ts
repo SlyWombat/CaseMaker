@@ -1000,8 +1000,8 @@ function facingSteps(
   const stockWords = finish === null ? 'stock whose finish is not recorded' : `${FINISH_WORDS[finish]} stock`;
   const steps: RunSheetStep[] = [];
 
-  // #474 — a printed plastic is never faced. A job that still carries a pass (written before the
-  // rule, or edited elsewhere) is called out rather than presented as a step to run.
+  // #474/#493 — no plastic is faced (wood and metal only). A job that still carries a pass (written
+  // before the rule, or edited elsewhere) is called out rather than presented as a step to run.
   const refusal = facingRefusal(job.stock.material);
   if (refusal !== null) {
     const on = facing.enabled && facing.depth > 0;
