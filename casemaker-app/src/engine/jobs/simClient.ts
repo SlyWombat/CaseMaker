@@ -90,6 +90,12 @@ export interface SimLoadOpts {
   drillPointDefault?: { deg: number; source: string } | null;
   /** The shop's `sim.columnFlatPitchYMm` (#438): the flat column grid's Y pitch, mm. Read by the caller, like the drill point. */
   flatPitchYMm?: number | null;
+  /** The shop's `sim.columnPitchXMm` (#451): the column grid's X pitch, mm. Read by the caller, like the drill point. */
+  columnPitchXMm?: number | null;
+  /** The shop's `sim.rotaryPitchDeg` (#451): the rotary column grid's θ pitch, degrees. Read by the caller. */
+  rotaryPitchDeg?: number | null;
+  /** The shop's `sim.spindleOffProximityMm` (#451): the spindle-off move's clearance to material or the bed, mm. Read by the caller. */
+  spindleOffProximityMm?: number | null;
 }
 
 /** The two stages of a load (#224). */
@@ -139,7 +145,15 @@ export async function loadSim(gcodeText: string, setup: Setup, tool: Tool, machi
           // (comlink.mjs:310), so a proxy nested in a plain object is never recognised, falls
           // through as RAW, and the raw function reaches `postMessage`: "could not be cloned".
           // Only a TOP-LEVEL argument can carry a proxy, which is why `onProgress` is its own.
-          { budgetMs: sweepBudget, calibration: opts?.calibration ?? null, drillPointDefault: opts?.drillPointDefault ?? null, flatPitchYMm: opts?.flatPitchYMm ?? null },
+          {
+            budgetMs: sweepBudget,
+            calibration: opts?.calibration ?? null,
+            drillPointDefault: opts?.drillPointDefault ?? null,
+            flatPitchYMm: opts?.flatPitchYMm ?? null,
+            columnPitchXMm: opts?.columnPitchXMm ?? null,
+            rotaryPitchDeg: opts?.rotaryPitchDeg ?? null,
+            spindleOffProximityMm: opts?.spindleOffProximityMm ?? null,
+          },
           opts?.onProgress ? Comlink.proxy(opts.onProgress) : undefined,
         )
         .then(async (r) => {

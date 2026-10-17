@@ -446,6 +446,23 @@ describe('the must-FAIL list (§7.1): refusals and the gates that need the stock
     expect(into.out.value.stats.removedVolume).toBeCloseTo(0, 6);
   });
 
+  it('the proximity margin is the caller’s (#451): the shop default, else the labelled fallback', () => {
+    // 0.5 mm above the top is within the fallback's 1 mm and outside a 0.25 mm margin.
+    const tight = sweep('G0 X20 Y30 Z0.5\nG1 X40 F100\n', tool, setup(), { spindleOffProximityMm: 0.25 });
+    if (!tight.out.ok) throw new Error('refused');
+    expect(tight.out.value.diagnostics.filter((d) => d.severity === 'error')).toEqual([]);
+
+    // Absent: the labelled fallback, which is what the existing RULE case pins at this height.
+    const fallback = sweep('G0 X20 Y30 Z0.5\nG1 X40 F100\n');
+    if (!fallback.out.ok) throw new Error('refused');
+    expect(fallback.out.value.diagnostics.map((d) => d.code)).toContain('spindle-off-near-stock');
+
+    // Nothing usable: the fallback, never a sweep with no margin at all.
+    const bad = sweep('G0 X20 Y30 Z0.5\nG1 X40 F100\n', tool, setup(), { spindleOffProximityMm: 0 });
+    if (!bad.out.ok) throw new Error('refused');
+    expect(bad.out.value.diagnostics.map((d) => d.code)).toContain('spindle-off-near-stock');
+  });
+
   it('THE RULE: a spindle-off feed move near the BED is an error', () => {
     // The slab's bottom is at -5; a feed at -4.5 is within 1 mm of it. (It is also inside the
     // stock; the bed check fires first and that is the one named.)

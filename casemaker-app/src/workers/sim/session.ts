@@ -246,6 +246,21 @@ export interface SimLoadOpts {
    * pitch, mm. Absent: `COLUMN_FLAT_PITCH_Y_FALLBACK_MM`. A rotary job ignores it.
    */
   flatPitchYMm?: number | null;
+  /**
+   * The shop's `sim.columnPitchXMm` as the app read it (#451): the column grid's X pitch, mm.
+   * Absent: `COLUMN_PITCH_X_FALLBACK_MM`. An explicit `resolution` overrides it.
+   */
+  columnPitchXMm?: number | null;
+  /**
+   * The shop's `sim.rotaryPitchDeg` as the app read it (#451): the ROTARY column grid's θ pitch,
+   * degrees. Absent: `COLUMN_ROTARY_PITCH_FALLBACK_DEG`. A flat job ignores it.
+   */
+  rotaryPitchDeg?: number | null;
+  /**
+   * The shop's `sim.spindleOffProximityMm` as the app read it (#451): how close a spindle-off move
+   * may come to material or the bed, mm. Absent: `SPINDLE_OFF_PROXIMITY_FALLBACK_MM`.
+   */
+  spindleOffProximityMm?: number | null;
 }
 
 /**

@@ -203,6 +203,15 @@ export const KNOWN_DEFAULTS: Readonly<Record<string, KnownDefault>> = {
   // ── #451 (end)
   'sim.columnFlatPitchYMm': { label: 'flat simulation grid Y pitch (chosen)', unit: 'mm', rule: z.number().min(0.05).max(0.5), fallback: 0.1 },
   // ── #438 (end)
+  // ── #451 sim resolutions (begin) — the exact sweeper's spindle-off clearance and the column
+  // engine's X and rotary pitches. Each is CHOSEN, not measured: the oracle's band grows with the
+  // cell and the sim's memory and time with 1/pitch. Read by simStore at a load; the worker gets
+  // the numbers, never this module. Fallbacks = sweep.ts's SPINDLE_OFF_PROXIMITY_FALLBACK_MM and
+  // columnEngine's COLUMN_PITCH_X_FALLBACK_MM / COLUMN_ROTARY_PITCH_FALLBACK_DEG.
+  'sim.spindleOffProximityMm': { label: 'spindle-off clearance to material (chosen)', unit: 'mm', rule: z.number().min(0.05).max(5), fallback: 1.0 },
+  'sim.columnPitchXMm': { label: 'simulation grid X pitch (chosen)', unit: 'mm', rule: z.number().min(0.05).max(0.5), fallback: 0.1 },
+  'sim.rotaryPitchDeg': { label: 'rotary simulation grid pitch (chosen)', unit: 'deg', rule: z.number().min(0.05).max(5), fallback: 0.25 },
+  // ── #451 sim resolutions (end)
   // ── #451 new-item starting depths (begin) — where an item the panel just added begins. CHOSEN,
   // not measured: nobody measured what depth a new item should start at, and the person who asked
   // for it is about to set the number that matters. Read by `engraveJobStore` (its `newItemDepthMm`

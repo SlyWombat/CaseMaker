@@ -256,10 +256,23 @@ export interface ColumnResolution {
 }
 
 /**
- * The §4.4 estimate for the ENVELOPE, to be measured against a real load. The ROTARY grid's (X mm ×
- * θ degrees); a FLAT job takes only its `dx` and its own Y pitch (#438, below).
+ * The X pitch, mm, when the caller passes none (#451) — the LABELLED FALLBACK for the shop's
+ * `sim.columnPitchXMm`, and the same number it is seeded with. Rotary and flat share it: the grid's
+ * first axis is work X either way, and the sim's memory and time grow as 1/pitch.
  */
-export const COLUMN_SIM_RESOLUTION: ColumnResolution = { dx: 0.1, dThetaDeg: 0.25 };
+export const COLUMN_PITCH_X_FALLBACK_MM = 0.1;
+/**
+ * The ROTARY grid's θ pitch, degrees, when the caller passes none (#451) — the LABELLED FALLBACK
+ * for the shop's `sim.rotaryPitchDeg`, and the same number it is seeded with. A FLAT job never
+ * reads it: its second axis is Y millimetres and takes the pitch below (#438).
+ */
+export const COLUMN_ROTARY_PITCH_FALLBACK_DEG = 0.25;
+/**
+ * The §4.4 estimate for the ENVELOPE, to be measured against a real load: the ROTARY grid's X mm ×
+ * θ degrees, built from the two labelled fallbacks above. It is also the `resolution` a caller may
+ * pass explicitly; a FLAT job otherwise takes its `dx` and its own Y pitch (#438, below).
+ */
+export const COLUMN_SIM_RESOLUTION: ColumnResolution = { dx: COLUMN_PITCH_X_FALLBACK_MM, dThetaDeg: COLUMN_ROTARY_PITCH_FALLBACK_DEG };
 /**
  * The FLAT grid's Y pitch, mm, when the caller passes none (#438) — the LABELLED FALLBACK for the
  * shop's `sim.columnFlatPitchYMm`, and the same number it is seeded with. Before #438 a flat job
@@ -306,6 +319,18 @@ export interface ColumnSweepOpts {
    * a rotary job (its second axis is degrees) and when `resolution` overrides the whole grid.
    */
   flatPitchYMm?: number | null;
+  /**
+   * The grid's X pitch, mm: the shop's `sim.columnPitchXMm`, read by the caller (#451) — the worker
+   * cannot read the location. Absent: {@link COLUMN_PITCH_X_FALLBACK_MM}. Ignored when `resolution`
+   * overrides the whole grid.
+   */
+  columnPitchXMm?: number | null;
+  /**
+   * The ROTARY grid's θ pitch, degrees: the shop's `sim.rotaryPitchDeg`, read by the caller (#451).
+   * Absent: {@link COLUMN_ROTARY_PITCH_FALLBACK_DEG}. Ignored by a flat job (its second axis is
+   * millimetres) and when `resolution` overrides the whole grid.
+   */
+  rotaryPitchDeg?: number | null;
 }
 
 export interface ColumnSweepOk {
@@ -923,14 +948,19 @@ export function columnSweep(timeline: Timeline, tool: Tool, setup: Setup, opts?:
   if (!rotary && setup.part.kind !== 'prism') {
     return { ok: false, diagnostics: [{ severity: 'error', code: 'flat-stock', message: `the flat column engine sweeps a prism stock; the setup's part is a ${setup.part.kind}` }] };
   }
-  // A flat job's Y is millimetres, not the rotary's degrees, so it takes its own pitch (#438): the
-  // caller's (the shop default), else the labelled fallback. An explicit `resolution` still wins.
-  // A pitch that is not a positive number (the location validates it; a hand-built caller may not)
-  // falls back too, rather than building a grid of zero or infinite rows.
-  const asked = opts?.flatPitchYMm;
-  const flatPitch = typeof asked === 'number' && Number.isFinite(asked) && asked > 0 ? asked : COLUMN_FLAT_PITCH_Y_FALLBACK_MM;
+  // The grid's pitches are the shop's (#438, #451): the caller reads `sim.columnPitchXMm`,
+  // `sim.rotaryPitchDeg` and `sim.columnFlatPitchYMm` from the location because the worker cannot,
+  // and each falls back to its labelled constant when absent. A FLAT job's second axis is
+  // millimetres, not the rotary's degrees, so it takes the flat Y pitch. An explicit `resolution`
+  // still wins over all three. A pitch that is not a positive number (the location validates it; a
+  // hand-built caller may not) falls back too, rather than building a grid of zero or infinite rows.
+  const positive = (asked: number | null | undefined, fallback: number): number =>
+    typeof asked === 'number' && Number.isFinite(asked) && asked > 0 ? asked : fallback;
+  const pitchX = positive(opts?.columnPitchXMm, COLUMN_PITCH_X_FALLBACK_MM);
+  const rotaryPitch = positive(opts?.rotaryPitchDeg, COLUMN_ROTARY_PITCH_FALLBACK_DEG);
+  const flatPitch = positive(opts?.flatPitchYMm, COLUMN_FLAT_PITCH_Y_FALLBACK_MM);
   const res: ColumnResolution =
-    opts?.resolution ?? (rotary ? COLUMN_SIM_RESOLUTION : { dx: COLUMN_SIM_RESOLUTION.dx, dThetaDeg: flatPitch });
+    opts?.resolution ?? (rotary ? { dx: pitchX, dThetaDeg: rotaryPitch } : { dx: pitchX, dThetaDeg: flatPitch });
   // A thread mill's ENVELOPE is widened by half a cell diagonal (#382 review): a column is cut when
   // its CENTRE is within the radius, so at the 0.1 mm default a small radius can lose up to half a
   // cell around its edge. Widened, every column whose cell the true cylinder touches is cut — the

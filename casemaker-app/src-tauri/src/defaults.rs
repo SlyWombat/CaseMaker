@@ -236,6 +236,12 @@ pub const UNMEASURED_SEEDS: &[(&str, f64, &str, &str)] = &[
     // ── #451 (end)
     ("sim.columnFlatPitchYMm", 0.1, "mm", "chosen, not measured: the flat simulation grid's Y pitch; the oracle's band grows with the cell and the sim's memory and time with 1/pitch"),
     // ── #438 (end)
+    // ── #451 sim resolutions (begin) — the exact sweeper's spindle-off clearance and the column
+    // engine's X and rotary pitches: chosen, not measured.
+    ("sim.spindleOffProximityMm", 1.0, "mm", "chosen, not measured: how close a feed move with the spindle off may come to material still present at that point, or to the bed, before it is a fault"),
+    ("sim.columnPitchXMm", 0.1, "mm", "chosen, not measured: the simulation grid's X pitch; the sim's memory and time grow with 1/pitch"),
+    ("sim.rotaryPitchDeg", 0.25, "deg", "chosen, not measured: the rotary simulation grid's theta pitch; the sim's memory and time grow with 1/pitch"),
+    // ── #451 sim resolutions (end)
     // ── #451 new-item starting depths (begin) — where an item the Engrave panel just added begins.
     // CHOSEN, not measured: nobody measured what depth a new item should start at, and the person who
     // asked for it is about to set the number that matters. A hole starts deeper than an item because
@@ -669,6 +675,20 @@ fn known_rule(key: &str, n: Option<f64>) -> Option<Result<(), String>> {
             "0.05 to 0.5 mm",
         )),
         // ── #438 (end)
+        // ── #451 sim resolutions (begin) — `defaultsClient.ts` states the same bounds.
+        "sim.spindleOffProximityMm" => Some(need(
+            n.is_some_and(|v| (0.05..=5.0).contains(&v)),
+            "0.05 to 5 mm",
+        )),
+        "sim.columnPitchXMm" => Some(need(
+            n.is_some_and(|v| (0.05..=0.5).contains(&v)),
+            "0.05 to 0.5 mm",
+        )),
+        "sim.rotaryPitchDeg" => Some(need(
+            n.is_some_and(|v| (0.05..=5.0).contains(&v)),
+            "0.05 to 5 degrees",
+        )),
+        // ── #451 sim resolutions (end)
         // ── #451 new-item starting depths (begin) — `defaultsClient.ts` states the same bounds. Not
         // 0: the job's schema refuses a depth of zero or less, so a starting depth under this would
         // be an item that cannot be added.

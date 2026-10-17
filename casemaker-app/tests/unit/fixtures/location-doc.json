@@ -730,6 +730,27 @@
       "unit": "mm",
       "note": "chosen, not measured: the flat simulation grid's Y pitch; the oracle's band grows with the cell and the sim's memory and time with 1/pitch"
     },
+    "sim.spindleOffProximityMm": {
+      "value": 1.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm",
+      "note": "chosen, not measured: how close a feed move with the spindle off may come to material still present at that point, or to the bed, before it is a fault"
+    },
+    "sim.columnPitchXMm": {
+      "value": 0.1,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm",
+      "note": "chosen, not measured: the simulation grid's X pitch; the sim's memory and time grow with 1/pitch"
+    },
+    "sim.rotaryPitchDeg": {
+      "value": 0.25,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "deg",
+      "note": "chosen, not measured: the rotary simulation grid's theta pitch; the sim's memory and time grow with 1/pitch"
+    },
     "plan.homeSeconds": {
       "value": 27.5,
       "source": "measured",

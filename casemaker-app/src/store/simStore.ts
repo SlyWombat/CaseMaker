@@ -228,6 +228,11 @@ interface LoadArgs {
   drillPointDefault: { deg: number; source: string };
   /** The shop's `sim.columnFlatPitchYMm`, read once at the load for the same reason (#438). */
   flatPitchYMm: number;
+  /** The shop's `sim.columnPitchXMm` and `sim.rotaryPitchDeg` (#451), read once at the load. */
+  columnPitchXMm: number;
+  rotaryPitchDeg: number;
+  /** The shop's `sim.spindleOffProximityMm` (#451), read once at the load. */
+  spindleOffProximityMm: number;
 }
 let lastLoad: LoadArgs | null = null;
 
@@ -256,6 +261,9 @@ export const useSimStore = create<SimState>()((set, get) => {
         calibration: args.calibration,
         drillPointDefault: args.drillPointDefault,
         flatPitchYMm: args.flatPitchYMm,
+        columnPitchXMm: args.columnPitchXMm,
+        rotaryPitchDeg: args.rotaryPitchDeg,
+        spindleOffProximityMm: args.spindleOffProximityMm,
       });
       if (mine !== loadSeq) return; // superseded by a newer load or a dispose
       if (!r.ok) {
@@ -310,6 +318,11 @@ export const useSimStore = create<SimState>()((set, get) => {
         calibrationOverride !== undefined ? calibrationOverride : (useSettingsStore.getState().machineCalibration ?? null);
       const point = shopDefault('drill.pointAngleDeg');
       const flatPitch = shopDefault('sim.columnFlatPitchYMm');
+      // The rest of the sim's chosen numbers (#451), read at the same moment as the flat pitch:
+      // the worker cannot read the location, so these are the caller's to send.
+      const pitchX = shopDefault('sim.columnPitchXMm');
+      const rotaryPitch = shopDefault('sim.rotaryPitchDeg');
+      const proximity = shopDefault('sim.spindleOffProximityMm');
       lastLoad = {
         gcodeText,
         setup,
@@ -318,6 +331,9 @@ export const useSimStore = create<SimState>()((set, get) => {
         calibration,
         drillPointDefault: { deg: point.value, source: point.source },
         flatPitchYMm: flatPitch.value,
+        columnPitchXMm: pitchX.value,
+        rotaryPitchDeg: rotaryPitch.value,
+        spindleOffProximityMm: proximity.value,
       };
       await run(lastLoad, get().budgetMs);
     },

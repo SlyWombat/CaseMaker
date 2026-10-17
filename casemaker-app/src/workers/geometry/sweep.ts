@@ -61,10 +61,15 @@ export const FANOUT = 8;
 export const OVERSHOOT_MM = 0.01;
 /**
  * How close a spindle-off move may come to the material or the bed before it is a fault
- * (the maintainer's rule, 2026-10-03: "unless getting near the material or vise/clamps/bed").
- * Applied around the tool's radius and above and below the move's Z.
+ * (the maintainer's rule, 2026-10-03: "unless getting near the material or vise/clamps/bed"),
+ * in mm — the LABELLED FALLBACK for the shop's `sim.spindleOffProximityMm`, and the same number
+ * it is seeded with (#451). Applied around the tool's radius and above and below the move's Z.
+ *
+ * A caller sends the shop's own number (#451's working rule: a chosen value lives in the location
+ * database, not in the code); this fallback is what is left for the no-service build, the hosted
+ * web app, and is named `fallback` wherever it is shown.
  */
-export const PROXIMITY_MARGIN_MM = 1.0;
+export const SPINDLE_OFF_PROXIMITY_FALLBACK_MM = 1.0;
 /** Air moves checked individually; beyond this a job is summarised instead (each is a boolean). */
 export const MAX_AIR_CHECKS = 4000;
 /** Gouge solids kept; beyond this a rapid is still reported, just not drawn (memory, and the transfer to the viewport). */
@@ -238,6 +243,13 @@ export interface SweepOpts {
    * Unsupported by the column engine (a V-bit or a rotary job), which refuses it by name.
    */
   priorRemoval?: NodeMeshOutput;
+  /**
+   * How close a spindle-off move may come to material or the bed, mm: the shop's
+   * `sim.spindleOffProximityMm`, read by the caller (#451) — the worker cannot read the location.
+   * Absent, or not a positive finite number: {@link SPINDLE_OFF_PROXIMITY_FALLBACK_MM}, reported
+   * by the caller as `fallback`.
+   */
+  spindleOffProximityMm?: number | null;
 }
 
 /** A counter-clockwise n-gon inscribed in the circle of radius r about (cx, cy). */
@@ -398,7 +410,7 @@ export function boxSolid(tl: ManifoldToplevel, box: ObstacleBox): ManifoldInstan
  * Check the moves that cut nothing but can still be wrong (`/Simulation.md` §7.1):
  *
  *   rapid             through material, or below the bed             -> error
- *   feed, spindle off within PROXIMITY_MARGIN_MM of material or bed  -> error (the rule)
+ *   feed, spindle off within `proximityMm` of material or bed        -> error (the rule)
  *
  * "Material" means THE STOCK AS IT IS AT THAT STEP, not the uncut blank. The first version
  * tested against the uncut blank and flagged every retract in a real vendor job: a `G0 Z2`
@@ -470,11 +482,16 @@ export function checkAirMoves(
   fixtureTop = Number.NEGATIVE_INFINITY,
   /** Where fixture diagnostics go, so they fold with the checkpoint and holder codes (#204). */
   pushFixture: (d: SweepDiagnostic) => void = () => {},
+  /**
+   * How close a spindle-off move may come to the material or the bed, mm (#451): the shop's
+   * `sim.spindleOffProximityMm`, resolved by the caller. Absent: the labelled fallback.
+   */
+  proximityMm: number = SPINDLE_OFF_PROXIMITY_FALLBACK_MM,
 ): { diagnostics: SweepDiagnostic[]; gouges: Gouge[]; checked: number; rechecked: number; cleared: number; budgetExceeded: boolean } {
   const diagnostics: SweepDiagnostic[] = [];
   const gouges: Gouge[] = [];
   const nCap = segmentsForRadius(radius);
-  const nMargin = segmentsForRadius(radius + PROXIMITY_MARGIN_MM);
+  const nMargin = segmentsForRadius(radius + proximityMm);
   // Rise to whatever is taller, the stock top or the fixture (#204): a jaw below the top needs
   // no extra height, but a box above it does, or the body would stop short of the collision.
   const zTop = Math.max(topZ, fixtureTop) + OVERSHOOT_MM;
@@ -608,12 +625,12 @@ export function checkAirMoves(
     }
     checked++;
     const spindleOff = mv.kind === 'feed-spindle-off';
-    const margin = spindleOff ? PROXIMITY_MARGIN_MM : 0;
+    const margin = spindleOff ? proximityMm : 0;
     const zLo = Math.min(mv.from[2], mv.to[2]) - margin;
     if (zLo < bedZ) {
       diagnostics.push(
         spindleOff
-          ? { severity: 'error', code: 'spindle-off-near-bed', message: `line ${mv.line}: a feed move with the spindle off within ${PROXIMITY_MARGIN_MM} mm of the bed` }
+          ? { severity: 'error', code: 'spindle-off-near-bed', message: `line ${mv.line}: a feed move with the spindle off within ${proximityMm} mm of the bed` }
           : { severity: 'error', code: 'rapid-below-bed', message: `line ${mv.line}: a rapid to Z ${Math.min(mv.from[2], mv.to[2]).toFixed(3)}, below the bed at ${bedZ.toFixed(3)}` },
       );
       continue;
@@ -699,7 +716,7 @@ export function checkAirMoves(
     if (vol > 0) {
       diagnostics.push(
         spindleOff
-          ? { severity: 'error', code: 'spindle-off-near-stock', message: `line ${mv.line}: a feed move with the spindle off comes within ${PROXIMITY_MARGIN_MM} mm of material still present at that point in the program` }
+          ? { severity: 'error', code: 'spindle-off-near-stock', message: `line ${mv.line}: a feed move with the spindle off comes within ${proximityMm} mm of material still present at that point in the program` }
           : { severity: 'error', code: 'rapid-through-stock', message: `line ${mv.line}: a rapid passes through material still present at that point in the program (${vol >= 0.01 ? vol.toFixed(3) : vol.toExponential(2)} mm³)` },
       );
     }
@@ -1077,8 +1094,14 @@ export function sweepTimeline(tl: ManifoldToplevel, timeline: Timeline, tool: To
   // "The bed" is what the bodies rest on: with an under-board that is the board's underside,
   // so a rapid below IT is `rapid-below-bed` and one inside the board is `rapid-through-stock`.
   const bb = airMaterial.boundingBox();
+  // The spindle-off proximity margin is the shop's (`sim.spindleOffProximityMm`, #451): the caller
+  // read it from the location, because the worker cannot. Absent — or not a positive finite number,
+  // which a hand-built caller may pass — the labelled fallback stands in, exactly as a flat
+  // job's Y pitch does (#438). A zero would mean "touching counts as near", which is not the rule.
+  const askedProximity = opts?.spindleOffProximityMm;
+  const proximity = typeof askedProximity === 'number' && Number.isFinite(askedProximity) && askedProximity > 0 ? askedProximity : SPINDLE_OFF_PROXIMITY_FALLBACK_MM;
   const a0 = performance.now();
-  const air = checkAirMoves(tl, airMaterial, topZ, bb.min[2], timeline.airMoves, timeline.checkpoints, radius, deadline, fixture, fixtureTop, (d) => fixtureDiag.push(d));
+  const air = checkAirMoves(tl, airMaterial, topZ, bb.min[2], timeline.airMoves, timeline.checkpoints, radius, deadline, fixture, fixtureTop, (d) => fixtureDiag.push(d), proximity);
   if (airMaterial !== stock) airMaterial.delete();
   const msAir = performance.now() - a0;
   if (air.budgetExceeded) {
