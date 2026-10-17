@@ -1465,6 +1465,23 @@ describe('facing the stock’s top (#432 slices 1–2)', () => {
     expect(g.facingVerify!.findings.filter((f) => f.severity === 'error')).toEqual([]);
     // The skim really removes 0.5 mm, from the probed top down.
     expect(g.facingVerify!.stats.deepestZ).toBeCloseTo(-0.5, 6);
+
+    // #473 — the face file is PROGRAM 1 of the run, not a file beside it: the release step plays
+    // `generated.programs` in order, so the skim has to be in that list for the engraving that
+    // follows to be posted to a faced top. Its kind is `'facing'` and it is the file that carried
+    // the run's `M331`; the engraving entry is the job's own program and is posted `M332` (last).
+    expect(g.programs).toHaveLength(2);
+    expect(g.programs[0]!.kind).toBe('facing');
+    expect(g.programs[0]!.nc).toBe(g.facingNc);
+    expect(g.programs[0]!.verify).toBe(g.facingVerify);
+    expect(g.programs[0]!.toolKey).toBe(g.facingToolKey);
+    expect(g.programs[0]!.setupIndex).toBe(1);
+    expect(g.programs[1]!.kind).toBe('engrave');
+    expect(g.programs[1]!.nc).toBe(g.nc);
+    expect(g.programs[1]!.verify).toBe(g.verify);
+    expect(g.programs[1]!.programHash).not.toBe(g.programs[0]!.programHash);
+    expect(vacuumWords(g.programs[0]!.nc)).toEqual(['M331']);
+    expect(vacuumWords(g.programs[1]!.nc)).toEqual(['M332']);
   });
 
   // #432 review R3 — the vacuum words belong to the RUN (#419 decision 4), and the facing file is
@@ -1561,24 +1578,40 @@ describe('facing the stock’s top (#432 slices 1–2)', () => {
     }
   });
 
-  // #474/#493 — the rule lives in the worker too: the panel and the seed only keep honest jobs
-  // honest, and a legacy or hand-edited job with facing on must not get a face file for a plastic.
-  // #493 widened the rule to the class; `facingRefusal`'s own spec covers acrylic and ABS, and the
-  // panel/sheet/wizard specs prove their surfaces. The worker case runs PLA because it is the one
-  // plastic the starting feed table covers — an acrylic job is refused earlier for feeds, which
-  // would mask the facing half under test.
-  it('refuses the facing file on a plastic, whatever the job says, and keeps it for wood', () => {
+  // #474/#493/#473 — the class-wide rule is the worker's too: the panel and the seed only keep
+  // honest jobs honest, and a legacy or hand-edited job with facing on must not get a face file for
+  // ANY non-wood, non-metal material. #473 makes that a refusal of the RUN: a face file that exists
+  // would be program 1, and every later program is posted from the top it leaves. So the job stops
+  // before the setups and the CAM, and the finding names the material, the rule and the way out.
+  // The worker case runs PLA because it is the one plastic the starting feed table covers — an
+  // acrylic job is refused earlier for feeds, which would mask the facing half under test.
+  it('refuses the whole run on a material facing is not offered for, and keeps facing for wood', () => {
     const plastic = faced({ stock: { ...defaultEngraveJob().stock, material: 'pla' } });
     const g = generate(tl, plastic, null, [], undefined, SHOP);
-    expect(g.ok).toBe(true);
-    expect(g.facingNc).toBeNull();
-    expect(g.facingError).toBe(
+    expect(g.ok).toBe(false);
+    expect(g.stage).toBe('findings');
+    const finding = g.findings.find((f) => f.code === 'facing-plastic');
+    expect(finding?.severity).toBe('error');
+    expect(finding?.message).toBe(
       'facing is not offered on PLA: a flat cutter smears a plastic top. ' +
-        'Cut the blank as it is, or use wood or metal if the top must be skimmed.',
+        'Turn facing off in the Engrave panel and generate again.',
     );
-    // A wood job with the same facing choice still gets its file: the material is the rule.
+    // Nothing was posted: not the face file, not the engraving, and no program list to release.
+    expect(g.facingNc).toBeNull();
+    expect(g.nc).toBeNull();
+    expect(g.cam).toBeNull();
+    expect(g.programs).toEqual([]);
+
+    // The material is the rule, not the plastic job: with facing OFF the same stock generates.
+    const off = generate(tl, { ...plastic, facing: undefined }, null, [], undefined, SHOP);
+    expect(off.ok, JSON.stringify(off.errors)).toBe(true);
+    expect(off.nc).not.toBeNull();
+    expect(off.facingNc).toBeNull();
+
+    // A wood job with the same facing choice still gets its file, first in the run.
     const wood = generate(tl, faced(), null, [], undefined, SHOP);
     expect(wood.facingNc).not.toBeNull();
+    expect(wood.programs[0]!.kind).toBe('facing');
   });
 
   it('refuses a facing depth that eats the minimum floor, before any CAM', () => {

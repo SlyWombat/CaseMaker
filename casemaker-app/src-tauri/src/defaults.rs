@@ -311,6 +311,7 @@ pub const UNMEASURED_SEEDS: &[(&str, f64, &str, &str)] = &[
     ("facing.roughMm", 0.5, "mm", "chosen, not measured: the facing depth filled in for rough stock — the heavy end of the 0.2 to 0.5 mm skim general practice uses; the person is asked and can change it"),
     ("facing.unknownMm", 0.2, "mm", "chosen, not measured: the facing depth filled in when the stock's finish is unknown — the light end of the same 0.2 to 0.5 mm skim"),
     ("facing.marginMm", 0.1, "mm", "chosen, not measured: added to a probed top's high-to-low spread to fill in the facing depth, so the skim clears the highest point of the face"),
+    ("facing.retouchToleranceMm", 0.1, "mm", "chosen, not measured: the +/- band around the top a facing skim was posted to leave; the post-facing re-touch accepts a measurement inside it, because a skim never removes exactly its nominal depth"),
     // ── #432 facing (end)
     // ── #421 (begin) — the run plan's phase times that the app has not timed: chosen.
     ("plan.touchSeconds", 15.0, "s", "chosen, not measured as the app's runner would take it: 15 s a touch, from the 2026-10-15 console trace's edge scans, driven by a console script, not the app runner. 32 touch-to-touch intervals under 20 s (G38.2 Z-5, 16:35:59 to 16:50:34): median 13.3 s, mean 14.0 s, range 10.4 to 19.7 s; the round trips between touches are included"),
@@ -904,6 +905,12 @@ fn known_rule(key: &str, n: Option<f64>) -> Option<Result<(), String>> {
         "facing.marginMm" => Some(need(
             n.is_some_and(|v| (0.0..=2.0).contains(&v)),
             "0 to 2 mm",
+        )),
+        // ── #473 — the re-touch band; `defaultsClient.ts` states the same bounds. Above 0: a band
+        // of zero would accept only an exact nominal removal, which a real skim never makes.
+        "facing.retouchToleranceMm" => Some(need(
+            n.is_some_and(|v| (0.01..=1.0).contains(&v)),
+            "0.01 to 1 mm",
         )),
         // ── #421 (begin) — the run plan's phase times (`defaultsClient.ts` states the same bounds).
         "plan.homeSeconds" | "plan.toolLengthSeconds" => Some(need(

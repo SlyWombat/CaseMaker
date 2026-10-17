@@ -15,7 +15,7 @@
  * single-file job uploads under the name every existing surface already prints.
  */
 
-import type { EngraveProgram } from '@/workers/sim/engraveGenerate';
+import type { EngraveProgram, EngraveProgramKind } from '@/workers/sim/engraveGenerate';
 import { runSheetFileName } from './runSheet';
 
 /** The stem of a job's file names — `runSheetFileName` without its `.nc`. */
@@ -43,6 +43,8 @@ export interface ReleaseProgram {
   total: number;
   setupIndex: number;
   toolKey: string;
+  /** #473 — `'facing'` for the run's first (blank-skim) file; absent reads as `'engrave'`. */
+  kind?: EngraveProgramKind;
   filename: string;
   hash: string;
   nc: string;
@@ -71,6 +73,7 @@ export function releasePrograms(
     total,
     setupIndex: p.setupIndex,
     toolKey: p.toolKey,
+    kind: p.kind,
     filename: releaseFileName(jobName, i + 1, total),
     hash: p.programHash,
     nc: p.nc,

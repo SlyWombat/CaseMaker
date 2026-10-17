@@ -129,6 +129,9 @@ export type JobFindingCode =
   // An item over-deep once the skim is counted is still `depth-exceeds-stock`, whose own check
   // measures from the faced surface.
   | 'facing-too-deep'
+  // #473 — a printed plastic is never faced (#474). The worker refuses a job that still carries
+  // the pass before any program is posted, because the engraving file's Z0 is the faced top.
+  | 'facing-printed-plastic'
   // Programs (#419 J3). One program is one setup cut with ONE cutter; a setup that names none has
   // nothing to post, and one that names several cannot say which items belong to which cutter
   // (#410's assignment), so cutting it as one program per cutter would cut every item twice.

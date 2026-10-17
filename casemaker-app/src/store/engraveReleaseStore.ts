@@ -112,8 +112,6 @@ export interface ReleaseRecord {
    * needs a fresh tick from the operator standing there.
    */
   atMachine: boolean;
-  /** The job faces first; the operator has said the face file was run. */
-  facingConfirmed: boolean;
   /** The file being written right now, 1-based. */
   uploading: number | null;
   /**
@@ -151,7 +149,6 @@ interface ReleaseState {
   /** Stop: a running program through the run store; a pause between programs by closing the span. */
   stop: (target: { host: string; port: number }) => void;
   setAtMachine: (target: { host: string; port: number }, at: boolean) => void;
-  setFacingConfirmed: (target: { host: string; port: number }, done: boolean) => void;
   /** Forget this machine's release (the machine entry, with its end, is left alone). */
   reset: (target: { host: string; port: number }) => void;
 }
@@ -203,10 +200,10 @@ export const useEngraveReleaseStore = create<ReleaseState>((set, get) => {
     patch(machine, { phase: 'starting', active: index, next: null, stopAsked: false, settled: false, stoppedBetween: false });
     const span = programVacuumSpan(file.nc, jobCarriesVacuumWords(rec.files));
     let vacuum = rec.vacuum;
-    // The face file, when the operator says it ran, left the vacuum on. Otherwise a file with no
-    // M331 (a resumed middle/last program, or an `air: false` file) needs the release step to
-    // switch it on — the one place this store sends an ON word.
-    if (rec.facingConfirmed && vacuum === 'unknown') vacuum = 'on';
+    // #473 — the face file is program 1 and carries the span's `M331`, so by the time a later program
+    // starts this store's reading is `on`. A file with no `M331` (a resumed middle/last program, or
+    // an `air: false` file) still needs the release step to switch it on — the one place this store
+    // sends an ON word.
     const needOn = rec.airOn && !carriesVacuumOn(file.nc) && vacuum !== 'on';
     if (needOn) {
       const r = await switchVacuumOn(rec.target);
@@ -359,7 +356,7 @@ export const useEngraveReleaseStore = create<ReleaseState>((set, get) => {
       const planned = releasePrograms(job.name, generated.programs, done);
       if (current !== undefined && current.jobId === job.id && sameHashes(current.files, planned)) {
         // A remount, or a refresh after a run finished elsewhere: keep the upload results and the
-        // confirmations (the at-machine tick, the face file), and read the finished list again.
+        // at-machine confirmation, and read the finished list again.
         const merged = releasePrograms(job.name, generated.programs, done).map((f, i) => ({
           ...f,
           upload: current.files[i]!.upload,
@@ -390,7 +387,6 @@ export const useEngraveReleaseStore = create<ReleaseState>((set, get) => {
             active: null,
             next: null,
             atMachine: false,
-            facingConfirmed: false,
             uploading: null,
             vacuum: 'unknown',
             stopAsked: false,
@@ -513,7 +509,6 @@ export const useEngraveReleaseStore = create<ReleaseState>((set, get) => {
     },
 
     setAtMachine: (target, at) => patch(machineKey(target), { atMachine: at }),
-    setFacingConfirmed: (target, done) => patch(machineKey(target), { facingConfirmed: done }),
 
     reset: (target) => {
       const machine = machineKey(target);

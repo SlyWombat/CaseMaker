@@ -347,7 +347,25 @@ export const FACING_DEPTH_FALLBACK_MM = { rough: 0.5, unknown: 0.2, margin: 0.1 
  */
 export const FACING_DEPTH_MAX_MM = 10;
 
-/** The shop's three facing figures, as the caller reads them from the location. */
+/**
+ * #473 — the fallback tolerance of the post-facing re-touch, mm. The shop setting
+ * (`facing.retouchToleranceMm`) is the number used; this is what a build with no house service
+ * reads. A skim never removes exactly its nominal depth (spindle growth, deflection, a blank
+ * clamped a little tilted), so the re-touch's measurement is checked against the expected top
+ * ± this band rather than assumed to equal it.
+ */
+export const FACING_RETOUCH_TOLERANCE_FALLBACK_MM = 0.1;
+
+/**
+ * #473 — the ± band the post-facing re-touch accepts, from the location's
+ * `facing.retouchToleranceMm`. One reader, so the executor and the screen that explains the band
+ * cannot come from two different numbers.
+ */
+export function facingRetouchTolerance(defaults: ShopDefaults | null): number {
+  return readDefault(defaults, 'facing.retouchToleranceMm').value;
+}
+
+/** The shop's three facing depth figures, as the caller reads them from the location. */
 export interface FacingDepthShop {
   rough: number;
   unknown: number;

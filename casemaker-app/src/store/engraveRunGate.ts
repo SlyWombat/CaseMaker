@@ -116,10 +116,10 @@ export function saveBlocker(v: EngraveRunView): string | null {
  * The clauses it adds are about the UPLOAD, not about the program's trust:
  *
  *   - **one file only (#469, review R2).** The app uploads and plays a single program, so a job
- *     with more than one (a job stating `setups[]`, or a facing job whose face file is its own) has
- *     files nothing here can play. Uploading file one would leave the machine with half the job and
- *     — on a `'first'` span — the vacuum on. Until the #419 §3 release step plays the list, this
- *     refuses by name rather than sending the first file and hoping.
+ *     with more than one (a job stating `setups[]`, or a facing job, whose face file is program 1)
+ *     has files nothing here can play. Uploading file one would leave the machine with half the job
+ *     and — on a `'first'` span — the vacuum on. The #419 §3 release step plays the list instead;
+ *     this refuses by name rather than sending the first file and hoping.
  *   - **the verifier's report having to EXIST.** `saveBlocker` does not need it —
  *     `runErrorCodes` reads `generated.verify?.findings ?? []`, so an absent report contributes no
  *     errors and a program with no report would slip through. Uploading does need it: the upload
@@ -148,11 +148,11 @@ export function uploadBlocker(v: EngraveRunView): string | null {
  * a separate cut, and `generated.verify` describes only program 1 (the adapter the single-file
  * surfaces read). A list is runnable only when every entry carries a report that passed.
  *
- * A FACED JOB is refused for now. The face file is its own program (`generated.facingNc`) and the
- * generator moves the run's `M331` into it; the release step plays `generated.programs`, which does
- * not include the face file. Uploading the engraving files alone would start a run whose first file
- * carries no vacuum-on and whose Z0 assumes a surface nobody skimmed. The sentence sends the
- * operator to the run sheet's facing section, which is where that file is downloaded and run today.
+ * A FACED JOB (#473) plays its face file as program 1. The generator puts it FIRST in
+ * `generated.programs` (`kind: 'facing'`, posted `'first'` so the vacuum stays on across the bit
+ * change), so the release step plays it like any other file. What this gate still refuses is a run
+ * order that cannot be played whole: a face file the worker could not produce, or a stored result
+ * from before the face file joined the list.
  */
 export function releaseBlocker(v: EngraveRunView): string | null {
   const save = saveBlocker(v);
@@ -160,8 +160,15 @@ export function releaseBlocker(v: EngraveRunView): string | null {
   const programs = v.generated?.programs ?? [];
   if (programs.length === 0) return 'no program was produced';
   if (programs.some((p) => !p.verify?.ok)) return 'a program did not pass the verifier';
-  if (v.generated?.facingNc !== null && v.generated?.facingNc !== undefined) {
-    return 'this job faces the stock first, and the release step does not play the face program yet — run the face file from the run sheet, then its engraving file here';
+  const generated = v.generated!;
+  // #473 — a face file that exists on the result but could not join the list leaves the engraving
+  // assuming a surface nobody will skim. Refuse rather than play program 1 as if it were the run.
+  // (`!= null` covers both: a result stored before #432 has neither field, and must stay playable.)
+  if (generated.facingError != null) {
+    return `this job faces the stock first, but the face program was not produced — ${generated.facingError}`;
+  }
+  if (generated.facingNc != null && programs[0]?.kind !== 'facing') {
+    return 'this job faces the stock first, but the face program is not in the run order — generate again';
   }
   return null;
 }

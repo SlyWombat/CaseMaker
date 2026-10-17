@@ -309,6 +309,12 @@ export const KNOWN_DEFAULTS: Readonly<Record<string, KnownDefault>> = {
   'facing.roughMm': { label: 'facing depth, rough stock (chosen)', unit: 'mm', rule: z.number().min(0.05).max(5), fallback: 0.5 },
   'facing.unknownMm': { label: 'facing depth, finish unknown (chosen)', unit: 'mm', rule: z.number().min(0.05).max(5), fallback: 0.2 },
   'facing.marginMm': { label: 'facing margin over a probed spread (chosen)', unit: 'mm', rule: z.number().min(0).max(2), fallback: 0.1 },
+  // ── #473 (begin) — the band the post-facing re-touch accepts around the top the skim was posted
+  // to leave. CHOSEN, not measured: a skim never removes exactly its nominal depth, so the
+  // measurement is checked against the expected top ± this. Fallback =
+  // `stockStart.ts`'s FACING_RETOUCH_TOLERANCE_FALLBACK_MM.
+  'facing.retouchToleranceMm': { label: 'facing re-touch tolerance (chosen)', unit: 'mm', rule: z.number().min(0.01).max(1), fallback: 0.1 },
+  // ── #473 (end)
   // ── #432 facing (end)
   // ── #421 (begin) — the run plan's phase times (§5.8). Two were TIMED in the 2026-10-15 console
   // trace and are seeded `measured` with a note (`defaults.rs`'s MEASURED_SEEDS): `$H` and `M491`. The

@@ -1170,6 +1170,13 @@
       "setAt": null,
       "unit": "mm",
       "note": "chosen, not measured: added to a probed top's high-to-low spread to fill in the facing depth, so the skim clears the highest point of the face"
+    },
+    "facing.retouchToleranceMm": {
+      "value": 0.1,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm",
+      "note": "chosen, not measured: the +/- band around the top a facing skim was posted to leave; the post-facing re-touch accepts a measurement inside it, because a skim never removes exactly its nominal depth"
     }
   }
 }

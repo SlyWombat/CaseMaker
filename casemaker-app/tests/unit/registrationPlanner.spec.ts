@@ -20,6 +20,7 @@ import {
   parsePrbs,
   planRegistration,
   registrationSettings,
+  retouchAndCorrectAfterFacing,
   retouchSurface,
   runRegistration,
   scanPositions,
@@ -610,6 +611,99 @@ describe('#430 a Z-chain replay of the bench’s own answers (2026-10-15)', () =
     const rt = await retouchSurface(p, outcome, { removedMm: 0, toleranceMm: 0.25 }, { console: z1.console, operator: yes });
     expect(rt.ok).toBe(false);
     expect(z1.lines).toEqual([]);
+  });
+
+  // #473 — THE RUN ORDER'S MIDDLE, as one executor: the face program has finished, so the top is
+  // measured and the origin written for the ENGRAVING cutter before its program runs. The two steps
+  // are not called side by side by a caller that could swap them: this is the order.
+  const DEFAULTS = ShopDefaultsSchema.parse(DOC.defaults);
+
+  it('re-touches the measured top, then writes the origin for the ENGRAVING cutter', async () => {
+    const { p, outcome } = await registered();
+    const z1 = retouchZ1(-56.666);
+    const asked: string[] = [];
+    const operator = async (step: { kind: string; text: string }) => (asked.push(`${step.kind}: ${step.text}`), true);
+
+    const r = await retouchAndCorrectAfterFacing(
+      p,
+      outcome,
+      { removedMm: 0.5, defaults: DEFAULTS, engravingCutter: 'flat-1.0' },
+      { console: z1.console, operator },
+      { confirmed: true },
+    );
+    if (!r.ok) throw new Error(r.reason);
+
+    // The write is from the MEASUREMENT (−56.666), not the skim's nominal −56.616.
+    expect(r.surface.z).toBe(-56.666);
+    expect(r.outcome.surfaceZ).toBe(-56.666);
+    expect(r.correction).toBe('G10 L2 P1 X-181.550 Y-184.800 Z-59.763');
+
+    // Probe in first, engraving cutter second — and the fit sentence sends the facing cutter back out.
+    expect(asked.map((s) => s.split(':')[0])).toEqual(['fit-probe', 'fit-cutter']);
+    expect(asked[0]).toContain('faced top');
+    expect(asked[1]).toContain('fit the ENGRAVING cutter — flat-1.0 — not the facing cutter');
+
+    // The measurement happens before anything writes an origin, and the G10 write is last.
+    const g10 = z1.lines.findIndex((l) => l.startsWith('G10 L2'));
+    const touch = z1.lines.findIndex((l) => l.startsWith('G38.2 Z-2 '));
+    expect(touch).toBeGreaterThan(-1);
+    expect(g10).toBeGreaterThan(touch);
+    expect(z1.lines.filter((l) => l.startsWith('G10 L2'))).toHaveLength(1);
+    expect(z1.lines.slice(g10 + 1)).toEqual(['$H']);
+
+    // The transcript is the two conversations' lines, in the order they were sent.
+    expect(r.transcript.map((t) => t.line)).toEqual(z1.lines);
+  });
+
+  it('takes the re-touch band from the shop seed, not a constant', async () => {
+    const { p, outcome } = await registered();
+    // Expected −56.616. −56.75 is 0.134 mm deeper — outside the seeded ±0.1, inside ±0.25.
+    const narrow = retouchZ1(-56.75);
+    const denied = await retouchAndCorrectAfterFacing(
+      p,
+      outcome,
+      { removedMm: 0.5, defaults: DEFAULTS, engravingCutter: 'flat-1.0' },
+      { console: narrow.console, operator: yes },
+      { confirmed: true },
+    );
+    expect(denied.ok).toBe(false);
+    if (denied.ok) return;
+    expect(denied.step).toBe('re-touch');
+    expect(denied.reason).toContain('outside the expected -56.716 to -56.516');
+    expect(narrow.lines.some((l) => l.startsWith('G10 L2'))).toBe(false);
+
+    // The same reading is accepted when the location's own key says the band is 0.25.
+    const wider = structuredClone(DEFAULTS);
+    wider['facing.retouchToleranceMm'] = { ...wider['facing.retouchToleranceMm']!, value: 0.25 };
+    const wide = retouchZ1(-56.75);
+    const accepted = await retouchAndCorrectAfterFacing(
+      p,
+      outcome,
+      { removedMm: 0.5, defaults: wider, engravingCutter: 'flat-1.0' },
+      { console: wide.console, operator: yes },
+      { confirmed: true },
+    );
+    if (!accepted.ok) throw new Error(accepted.reason);
+    expect(accepted.surface.z).toBe(-56.75);
+    expect(accepted.correction).toBe('G10 L2 P1 X-181.550 Y-184.800 Z-59.847');
+  });
+
+  it('measures before asking for consent, and writes nothing when it is not given', async () => {
+    const { p, outcome } = await registered();
+    const z1 = retouchZ1(-56.666);
+    const r = await retouchAndCorrectAfterFacing(
+      p,
+      outcome,
+      { removedMm: 0.5, defaults: DEFAULTS, engravingCutter: 'flat-1.0' },
+      { console: z1.console, operator: yes },
+      { confirmed: false },
+    );
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.step).toBe('correction');
+    // The re-touch ran and measured; the origin was not written.
+    expect(r.transcript.some((t) => t.line.startsWith('G38.2 Z-2 '))).toBe(true);
+    expect(z1.lines.some((l) => l.startsWith('G10 L2'))).toBe(false);
   });
 });
 

@@ -6,8 +6,10 @@ import locationDoc from './fixtures/location-doc.json';
 import { Z1 } from '@/engine/cnc/machine';
 import {
   boxProblem,
+  FACING_RETOUCH_TOLERANCE_FALLBACK_MM,
   facingDefault,
   facingRefusal,
+  facingRetouchTolerance,
   facingSeed,
   facingShopFrom,
   finishOf,
@@ -25,6 +27,7 @@ import { meshAsStock, plain3mfProblem, readStockFile, sha256Hex } from '@/engine
 import { strToU8, zipSync } from 'fflate';
 import type { ParsedMesh } from '@/engine/import/stlParser';
 import { StockItemSchema, stockProblem, type StockItem } from '@/platform/stockClient';
+import { ShopDefaultsSchema } from '@/platform/defaultsClient';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { STOCK_MATERIALS } from '@/engine/cnc/materials';
 import { parseEngraveJob } from '@/store/engraveJobSchema';
@@ -194,6 +197,28 @@ describe('the facing default comes from the finish (decision Q6)', () => {
     }
     expect(facingSeed('rough', 'softwood')).toEqual({ enabled: true, depth: 0.5 });
     expect(facingSeed('unknown', 'copper')).toEqual({ enabled: true, depth: 0.2 });
+  });
+});
+
+// #473 — the post-facing re-touch checks the measured top against the top the skim was posted to
+// leave, ± this band. It is a CHOSEN shop seed, not a measured constant, so the reader is the only
+// place the number comes from.
+describe('the post-facing re-touch band (#473)', () => {
+  const defaults = ShopDefaultsSchema.parse((locationDoc as { defaults: unknown }).defaults);
+
+  it('reads the shop seed and falls back to the shipped tolerance without one', () => {
+    expect(defaults['facing.retouchToleranceMm']?.value).toBe(FACING_RETOUCH_TOLERANCE_FALLBACK_MM);
+    expect(facingRetouchTolerance(defaults)).toBe(0.1);
+    expect(facingRetouchTolerance(null)).toBe(FACING_RETOUCH_TOLERANCE_FALLBACK_MM);
+
+    const set = structuredClone(defaults);
+    set['facing.retouchToleranceMm'] = { ...set['facing.retouchToleranceMm']!, value: 0.25 };
+    expect(facingRetouchTolerance(set)).toBe(0.25);
+
+    // A stored value outside the registry's rule is not a band: fall back rather than re-touch with 0.
+    const zero = structuredClone(defaults);
+    zero['facing.retouchToleranceMm'] = { ...zero['facing.retouchToleranceMm']!, value: 0 };
+    expect(facingRetouchTolerance(zero)).toBe(FACING_RETOUCH_TOLERANCE_FALLBACK_MM);
   });
 });
 

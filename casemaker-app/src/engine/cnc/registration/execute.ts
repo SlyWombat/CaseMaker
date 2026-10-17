@@ -40,6 +40,8 @@
 
 import { controllerState } from '@/platform/machineUpload';
 import type { ConsoleSendResult } from '@/platform/machineConsole';
+import type { ShopDefaults } from '@/platform/defaultsClient';
+import { facingRetouchTolerance } from '@/engine/cnc/stockStart';
 import { scanPositions, type EdgeScan, type RegistrationPlan } from './plan';
 import { classifyTouch, lastPrb, type Prb } from './readings';
 import { computeOutcome, correctionLine, type RegistrationOutcome, type RunData, type ScanRecord, type ScanTouch } from './outcome';
@@ -400,7 +402,16 @@ export type ApplyResult =
 export async function applyCorrection(
   outcome: RegistrationOutcome,
   deps: ExecDeps,
-  consent: { confirmed: boolean },
+  consent: {
+    confirmed: boolean;
+    /**
+     * #473 — the cutter the G10 write is for, by the name the screen shows. The post-facing flow
+     * passes the ENGRAVING cutter: the facing cutter is still in the spindle from the skim, and the
+     * whole point of the `M491` below is to calibrate the cutter the next program runs. Omitted on
+     * the registration path, whose sentence stays the generic one.
+     */
+    cutter?: string;
+  },
 ): Promise<ApplyResult> {
   const io = session(deps, outcome.seekFromMachineZ);
   if (!outcome.usable) {
@@ -411,7 +422,11 @@ export async function applyCorrection(
   }
   try {
     await io.send('$H');
-    if (!(await deps.operator({ kind: 'fit-cutter', text: 'Take the probe out, fit the cutter, then continue.' }))) {
+    const fit =
+      consent.cutter === undefined
+        ? 'Take the probe out, fit the cutter, then continue.'
+        : `Take the probe out, fit the ENGRAVING cutter — ${consent.cutter} — not the facing cutter, then continue.`;
+    if (!(await deps.operator({ kind: 'fit-cutter', text: fit }))) {
       throw new Stop('stopped: the cutter was not fitted');
     }
     const ref = lastPrb(await io.send('M491'));
@@ -424,4 +439,76 @@ export async function applyCorrection(
     if (e instanceof Stop) return { ok: false, reason: await io.stopped(e.message), transcript: io.transcript };
     throw e;
   }
+}
+
+export type AfterFacingResult =
+  | {
+      ok: true;
+      /** The re-touch's measured reading on the faced top. */
+      surface: Prb;
+      /** The first outcome with `surfaceZ` replaced by that measurement. */
+      outcome: RegistrationOutcome;
+      /** The `G10 L2` line written for the engraving cutter. */
+      correction: string;
+      transcript: Transcript[];
+    }
+  | { ok: false; step: 're-touch' | 'correction'; reason: string; transcript: Transcript[] };
+
+/**
+ * #473 — the run order's middle: the face program finished, and the next program is the engraving.
+ * In the one order decision 4 fixed (probe → face → re-touch → engrave):
+ *
+ *   1. {@link retouchSurface} MEASURES the top the facing program left. `removedMm` is `facing.depth`
+ *      and is only the expectation the reading is checked against; the number the origin is written
+ *      from is the measurement. The band comes from the shop's `facing.retouchToleranceMm` — never a
+ *      fixed depth, never a constant.
+ *   2. {@link applyCorrection} writes Z0 for the ENGRAVING cutter. The facing cutter is what ran the
+ *      skim and is still in the spindle; the `M491` below has to be the cutter the next program runs,
+ *      so the operator is told to fit that one and is told not to refit the facing cutter.
+ *
+ * Nothing is written when the re-touch's reading is outside the band: a top that is not where the
+ * skim could have left it means the skim did not run or did not take what it was posted to, and the
+ * caller must stop rather than engrave from a guess.
+ *
+ * `defaults` is the location's defaults map. It is read HERE rather than accepting a tolerance so
+ * there is one reader of the key and no second statement of the seed.
+ */
+export async function retouchAndCorrectAfterFacing(
+  plan: RegistrationPlan,
+  first: RegistrationOutcome,
+  opts: {
+    /** The depth the facing program removed, mm (`job.facing.depth`). */
+    removedMm: number;
+    /** The location's defaults; the re-touch band is `facing.retouchToleranceMm`. */
+    defaults: ShopDefaults | null;
+    /** The engraving cutter, named in the fit step so the facing cutter is never refitted for the write. */
+    engravingCutter: string;
+  },
+  deps: ExecDeps,
+  consent: { confirmed: boolean },
+): Promise<AfterFacingResult> {
+  const toleranceMm = facingRetouchTolerance(opts.defaults);
+  const retouch = await retouchSurface(
+    plan,
+    first,
+    { removedMm: opts.removedMm, toleranceMm },
+    deps,
+  );
+  if (!retouch.ok) {
+    return { ok: false, step: 're-touch', reason: retouch.reason, transcript: retouch.transcript };
+  }
+  const applied = await applyCorrection(
+    retouch.outcome,
+    deps,
+    { confirmed: consent.confirmed, cutter: opts.engravingCutter },
+  );
+  const transcript = [...retouch.transcript, ...applied.transcript];
+  if (!applied.ok) return { ok: false, step: 'correction', reason: applied.reason, transcript };
+  return {
+    ok: true,
+    surface: retouch.surface,
+    outcome: retouch.outcome,
+    correction: applied.line,
+    transcript,
+  };
 }

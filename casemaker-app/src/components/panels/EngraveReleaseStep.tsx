@@ -130,9 +130,18 @@ function ChangePanel({
           This is a reading of THIS cutter alone.
         </li>
         <li>
-          Set Z0 for program {next.index} from those two readings, NOT by touching the surface again:{' '}
-          <code>Z0 = surface + (cutter PRB − reference PRB)</code>. The surface has been cut since the origin
-          was set, so re-touching it would sink this program’s floors by the last program’s depth.
+          {previous.kind === 'facing' ? (
+            <>
+              Re-touch the FACED surface with the probe — a measured seek, never a fixed depth — and set Z0 from that
+              reading. The face file cut the top away, so Z0 measured before it no longer describes the stock.
+            </>
+          ) : (
+            <>
+              Set Z0 for program {next.index} from those two readings, NOT by touching the surface again:{' '}
+              <code>Z0 = surface + (cutter PRB − reference PRB)</code>. The surface has been cut since the origin
+              was set, so re-touching it would sink this program’s floors by the last program’s depth.
+            </>
+          )}
         </li>
       </ol>
       <label style={MUTED}>
@@ -142,7 +151,9 @@ function ChangePanel({
           data-testid="engrave-release-change-ok"
           onChange={(e) => setOk(e.target.checked)}
         />{' '}
-        The cutter is changed, calibrated (M491), and Z0 is set from the two readings.
+        {previous.kind === 'facing'
+          ? 'The ENGRAVING cutter is fitted and calibrated (M491), the faced top is re-touched, and Z0 is set from that measurement.'
+          : 'The cutter is changed, calibrated (M491), and Z0 is set from the two readings.'}
       </label>
       {/* D-17 — the at-machine tick is per PROGRAM: the bit-change pause cleared it, and program
           {next.index} does not start until the operator standing there says it again. */}
@@ -268,10 +279,12 @@ export function EngraveReleaseStep({
         The vacuum goes on with the job’s first program and stays on across every bit change; only the job’s last
         program turns it off. A Stop between programs sends M332 and homes.
       </p>
-      {generated.facingNc !== null && (
+      {generated.facingNc != null && (
         <p style={{ ...MUTED, color: '#f0d79b' }} data-testid="engrave-release-facing-note">
-          This job’s face program is not in the release step’s list. Run it from the run sheet first: the engraving
-          files below assume the faced surface, and the face file is what switches the vacuum on.
+          This job faces the stock first: program 1 is the face file, posted to the probed top and carrying the
+          vacuum’s ON word. After it, change to the ENGRAVING cutter — not the facing cutter — and re-touch the faced
+          surface with the probe: the engraving programs assume the surface the skim left, and are posted to it, not
+          to the surface the face file found.
         </p>
       )}
 

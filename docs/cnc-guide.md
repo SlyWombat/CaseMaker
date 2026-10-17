@@ -561,8 +561,11 @@ metal the **Finish** the blank states decides whether facing is offered and how 
 defaults: the panel fills in a depth with a sentence saying why, and you can type your own. A facing job is **two programs** — a facing
 pass with a flat cutter, then the engraving program from the faced top — each with its own
 tool-length calibration and its own Z0. The run sheet orders them probe → face → re-touch →
-engrave. The app's own upload refuses a job of more than one program until the release step
-exists, so on a facing job you save both files and play them in that order at the machine.
+engrave. The release step plays the same order: the face file is program 1 of the list (it is
+what switches the vacuum on), and after it the change step tells you to fit the **engraving**
+cutter and re-touch the faced top. The re-touch is a measurement, not a fixed depth: it checks
+the reading against the top the skim was posted to leave, ± the shop's
+`facing.retouchToleranceMm`, and writes nothing when the reading is outside that band.
 
 ![All four checks passed; Save and Run sheet are enabled](https://raw.githubusercontent.com/SlyWombat/CaseMaker/main/docs/assets/cnc/cnc-mockup-engrave-generated.png)
 
@@ -1019,6 +1022,7 @@ simulation does report about one is the sweep's own list, next:
 |---|---|---|---|
 | `depth-exceeds-stock` | error | An item cuts so deep the floor left under it is below the minimum. | Make it shallower or use thicker stock. |
 | `facing-too-deep` | error | The job asks to face its stock's top, and the depth asked is more than the blank has spare above the minimum floor — so the skim alone would break through. Facing also LOWERS every item's own limit, because the floor is measured from the faced surface: an item that just fitted the blank may be refused as `depth-exceeds-stock` once facing is on. | Ask for a lighter skim, or use thicker stock. |
+| `facing-printed-plastic` | error | The job asks for a facing pass on printed plastic. A flat cutter smears a thermoplastic top, so facing is not offered there at all (#474), and a job that still carries the choice is refused before any program is written: every later program is posted from the top a skim would leave, and there will be no such top. | Turn facing off in the Engrave panel and generate again. |
 | `no-items` | error | The job has no enabled label with text or shape. Formerly `no-labels`. | Add one. |
 | `setup-no-tool` | error | A saved setup names no cutter, so there is no program to write for it (#419). Every setup is one program, and a program is one tool. | Name a cutter on that setup. |
 | `setup-tools-unassigned` | error | A saved setup names more than one cutter, but nothing says which items each one cuts, so one program per cutter would cut every item of that setup twice (#419, waiting on #410's assignment). | Name one cutter per setup, or give the second cutter its own setup. |

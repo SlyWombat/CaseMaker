@@ -78,6 +78,19 @@ const P2: EngraveProgram = {
   programHash: programHash(NC2),
   cam: null,
 };
+const NC_FACE = 'M331\nG1 Z-0.5\nM02\n';
+const FACE: EngraveProgram = {
+  kind: 'facing',
+  setupIndex: 1,
+  setupId: 'setup-1',
+  toolKey: 'user:facing-3.175',
+  nc: NC_FACE,
+  verify: VERIFY,
+  frameNc: null,
+  frameVerify: null,
+  programHash: programHash(NC_FACE),
+  cam: null,
+};
 
 /** The generated result the release step reads: two programs, no facing, no feeds row (air on). */
 function generated(programs: EngraveProgram[] = [P1, P2], facingNc: string | null = null): EngraveGenerated {
@@ -264,7 +277,7 @@ describe('#469 the release step', () => {
     expect(programVacuumSpan('G0 X0\n', false)).toBe('none');
   });
 
-  it('lifts the single-file refusal for the release step only, and refuses a faced job by name', () => {
+  it('lifts the single-file refusal for the release step only, and refuses a faced run whose face file is not playable', () => {
     const view = {
       generated: generated(),
       oracle: { ok: true, band: 0, levels: [], worst: { underCut: 0, overCut: 0 } },
@@ -277,7 +290,24 @@ describe('#469 the release step', () => {
     };
     expect(uploadBlocker(view)).toBe('this job is 2 programs; the app plays one');
     expect(releaseBlocker(view)).toBeNull();
-    expect(releaseBlocker({ ...view, generated: generated([P1, P2], 'M02\n') })).toContain('faces the stock first');
+
+    // #473 — a faced run is a normal run: the face file is program 1 of the list.
+    expect(releaseBlocker({ ...view, generated: generated([FACE, P1], NC_FACE) })).toBeNull();
+    // A stored result from before the face file joined the list cannot be played as the run.
+    expect(releaseBlocker({ ...view, generated: generated([P1, P2], 'M02\n') })).toContain(
+      'the face program is not in the run order',
+    );
+    // A face program the worker could not produce refuses by its own reason.
+    const withheld = { ...generated(), facingNc: 'M02\n', facingError: 'the clamp on the back edge stands over it' };
+    expect(releaseBlocker({ ...view, generated: withheld })).toContain(
+      'the face program was not produced — the clamp on the back edge stands over it',
+    );
+
+    // A result stored before #432 has neither field: absent is "no facing", not a refusal.
+    const old = { ...generated() } as unknown as Record<string, unknown>;
+    delete old.facingNc;
+    delete old.facingError;
+    expect(releaseBlocker({ ...view, generated: old as unknown as EngraveGenerated })).toBeNull();
   });
 
   it('uploads every program, plays them in order, and sends no vacuum word between them', async () => {
@@ -309,6 +339,28 @@ describe('#469 the release step', () => {
     ]);
     // M332 was in program 2's own text, not sent by the release step between files.
     expect(sent.filter((l) => l === 'M332')).toHaveLength(0);
+  }, 30000);
+
+  it('plays a faced run as face file then engraving, and asks for the engraving cutter and a measured re-touch', async () => {
+    // #473 — the face file is program 1 of the same list. The bit change after it is the one place
+    // the order becomes physical: the engraving cutter goes in, and the faced top is measured.
+    const NC_EN = 'G0 X1 Y1\nM332\nM02\n';
+    const EN: EngraveProgram = { ...P1, nc: NC_EN, programHash: programHash(NC_EN) };
+    const job = defaultEngraveJob();
+    job.name = 'Faced job';
+    render(<EngraveReleaseStep target={TARGET} job={job} generated={generated([FACE, EN], NC_FACE)} blocker={null} />);
+
+    expect((await screen.findByTestId('engrave-release-facing-note')).textContent).toContain('program 1 is the face file');
+    await uploadAndStart();
+
+    await screen.findByTestId('engrave-release-change', undefined, { timeout: 10000 });
+    expect(uploaded).toEqual(['Faced-job-p1.nc', 'Faced-job-p2.nc']);
+    expect(sent.filter((l) => l.startsWith('play'))).toEqual(['play /sd/gcodes/Faced-job-p1.nc']);
+    const change = screen.getByTestId('engrave-release-change').textContent ?? '';
+    expect(change).toContain('ENGRAVING cutter');
+    expect(change).toContain('Re-touch the FACED surface with the probe');
+    // The facing cutter was program 1's; the change names the engraving cutter for program 2.
+    expect(change).toContain('flat-1.0');
   }, 30000);
 
   it('asks “I am at the machine” again for every program: the bit change clears the tick (D-17)', async () => {

@@ -175,9 +175,20 @@ export interface EngraveCamSummary {
 }
 
 /**
+ * #473 — what a program IS, so the run order can name the blank's skim as the first file rather
+ * than calling it "setup 1". Absent on a result stored by a build before this field existed, and
+ * read as `'engrave'`.
+ */
+export type EngraveProgramKind = 'facing' | 'engrave';
+
+/**
  * ONE program of the job (#419 J3): a single setup cut with a single cutter, posted, verified and
  * keyed. The job's programs are a LIST because the run is a list — one file per tool, loaded and
  * played in order, with the vacuum left on across the changes between them.
+ *
+ * #473 — a facing pass adds ONE file BEFORE the setups: its own program, cut with its own flat
+ * cutter and posted with the run's first vacuum word. It is `kind: 'facing'`; the setup programs
+ * that follow are `kind: 'engrave'`.
  *
  * `programHash` is FNV over `nc` (decision 3) — the same key the run confirmation and
  * `finishedHashes` use, so a program that finished on this machine is recognised across reloads.
@@ -186,7 +197,9 @@ export interface EngraveCamSummary {
  * and `EngraveGenerated.ok` is false whenever one is missing from the list it should have been in.
  */
 export interface EngraveProgram {
-  /** 1-based, the operator's "Setup 2". */
+  /** #473 — `'facing'` for the blank's skim; absent or `'engrave'` for a setup's program. */
+  kind?: EngraveProgramKind;
+  /** 1-based, the operator's "Setup 2". The facing program shares the first setup's index. */
   setupIndex: number;
   setupId: string;
   /** The cutter this file runs — the setup's tool, and the header's `;@CM|TOOL|key=` line. */
@@ -280,6 +293,12 @@ export interface EngraveGenerated {
    * report, frame file and FNV key. A single-setup job has exactly one, and the top-level `nc` /
    * `verify` / `cam` fields above are that same program — the adapter the panels and the bench
    * scripts read today.
+   *
+   * #473 — a job that faces has its face file FIRST (`kind: 'facing'`), before every setup's
+   * program: upload it with the list and play it first so the vacuum is already on across the bit
+   * change to the engraving cutter. The face file's own span is `'first'`; the engraving program
+   * that follows carries the run's last word. The top-level `nc`/`verify`/`cam` still describe the
+   * first ENGRAVING program, not the face file.
    *
    * Empty when nothing was posted (a refusal before the CAM, or a withheld file). Callers that need
    * the whole run — the package freeze, the run plan — must check `ok` first: a partial list is a
@@ -1200,6 +1219,47 @@ export function engraveGenerate(
   margins: EngraveMargins = effectiveMargins(job, MARGIN_DEFAULTS),
   shop: EngraveShopOpts = {},
 ): EngraveGenerated {
+  // #473 — A PRINTED PLASTIC IS REFUSED OUTRIGHT, BEFORE ANY PROGRAM IS POSTED.
+  //
+  // #474 settled that facing is offered for wood and metal only: a flat cutter smears a
+  // thermoplastic top. The panel and the seed keep honest jobs honest, but a legacy or hand-edited
+  // document can still carry the pass. It must not reach the run order: the engraving program is
+  // posted in the document frame, whose Z0 is the FACED top, so a run whose skim will not happen
+  // would cut every depth from the wrong surface. The refusal names the material's rule and the way
+  // out, and it happens here — before the setups, the CAM and either program — rather than at the
+  // face file alone.
+  const facingWanted = job.facing !== undefined && job.facing.enabled && job.facing.depth > 0;
+  const facingMaterialRefusal = facingWanted ? facingRefusal(job.stock.material) : null;
+  if (facingMaterialRefusal !== null) {
+    return {
+      ok: false,
+      stage: 'findings',
+      findings: [
+        {
+          severity: 'error',
+          code: 'facing-printed-plastic',
+          message: `${facingMaterialRefusal}. Turn facing off in the Engrave panel and generate again.`,
+        },
+      ],
+      feeds: null,
+      threads: null,
+      threadMachining: null,
+      cam: null,
+      nc: null,
+      verify: null,
+      frameNc: null,
+      frameVerify: null,
+      facingNc: null,
+      facingVerify: null,
+      facingToolKey: null,
+      facingError: facingMaterialRefusal,
+      facingCam: null,
+      predicted: [],
+      programs: [],
+      errors: [],
+    };
+  }
+
   // #419 J3 — A JOB IS A LIST OF PROGRAMS.
   //
   // The job document says how many: one per setup (J2's `setups[]`), each cut with that setup's own
@@ -1219,7 +1279,9 @@ export function engraveGenerate(
       toolKey: job.toolKey,
       itemIds: [],
     };
-    return { ...one, programs: one.ok && one.nc !== null && one.verify !== null ? [programOf(one, ref)] : [] };
+    const face = facingProgramOf(one, ref);
+    const engraved = one.ok && one.nc !== null && one.verify !== null ? [programOf(one, ref)] : [];
+    return { ...one, programs: [...(face === null ? [] : [face]), ...engraved] };
   }
 
   // A setup that cannot become exactly one program is refused BEFORE anything is cut: the panel's
@@ -1269,7 +1331,15 @@ export function engraveGenerate(
     stage: stopped?.one.stage ?? 'done',
     findings: dedupeFindings(results.flatMap((r) => r.one.findings)),
     errors: results.flatMap((r) => r.one.errors),
-    programs: results.flatMap((r) => (r.one.ok && r.one.nc !== null && r.one.verify !== null ? [programOf(r.one, r.ref)] : [])),
+    programs: results.flatMap((r) => {
+      // #473 — the face file is the run's first program, then the setup's own. Only the first
+      // program builds it (`generateOneProgram`'s `withFacing`), so only `results[0]` can add one.
+      const face = facingProgramOf(r.one, r.ref);
+      return [
+        ...(face === null ? [] : [face]),
+        ...(r.one.ok && r.one.nc !== null && r.one.verify !== null ? [programOf(r.one, r.ref)] : []),
+      ];
+    }),
   };
 }
 
@@ -1277,6 +1347,7 @@ export function engraveGenerate(
 function programOf(one: Omit<EngraveGenerated, 'programs'>, ref: JobProgramRef): EngraveProgram {
   const nc = one.nc!;
   return {
+    kind: 'engrave',
     setupIndex: ref.setupIndex,
     setupId: ref.setupId,
     toolKey: ref.toolKey,
@@ -1286,6 +1357,32 @@ function programOf(one: Omit<EngraveGenerated, 'programs'>, ref: JobProgramRef):
     frameVerify: one.frameVerify,
     programHash: programHash(nc),
     cam: one.cam,
+  };
+}
+
+/**
+ * #473 — the FACING file as the run order's first entry, or null when no face file was produced.
+ *
+ * It shares the first setup's index (there is one blank, so one skim, and it happens before setup
+ * 1) but carries the FACING cutter's key, so the release step loads and runs it exactly as it does
+ * any other file. It has no frame file: the face program is its own dry-run subject on the sheet.
+ */
+function facingProgramOf(
+  one: Omit<EngraveGenerated, 'programs'>,
+  ref: JobProgramRef,
+): EngraveProgram | null {
+  if (one.facingNc === null || one.facingVerify === null || one.facingToolKey === null) return null;
+  return {
+    kind: 'facing',
+    setupIndex: ref.setupIndex,
+    setupId: ref.setupId,
+    toolKey: one.facingToolKey,
+    nc: one.facingNc,
+    verify: one.facingVerify,
+    frameNc: null,
+    frameVerify: null,
+    programHash: programHash(one.facingNc),
+    cam: null,
   };
 }
 

@@ -1054,7 +1054,8 @@ function facingSteps(
       // section above, so this step names the file and says WHICH cutter runs it, not "fit this".
       text:
         `The skim runs with the facing cutter fitted above — ${cam.toolName}, ⌀ ` +
-        `${fmtNum(cam.diameterMm)} mm flat — not the engraving bit. Load ${faceFile} for this pass alone.`,
+        `${fmtNum(cam.diameterMm)} mm flat — not the engraving bit. The release step uploads ` +
+        `${faceFile} with the run and plays it FIRST, before the engraving program (#473).`,
       value: `⌀ ${fmtNum(cam.diameterMm)} mm`,
     });
     steps.push({
