@@ -1774,3 +1774,106 @@ describe('EngravePanel (#432 slice 4) — the facing choice', () => {
     expect(job().facing).toEqual({ enabled: true, depth: 0.2 });
   });
 });
+
+// #432 review R11 — a withheld facing file used to be invisible in the panel: Save wrote one file
+// fewer than the sheet named and only the printed sheet said why. A facing job now carries a
+// Facing row in the Generate list: the cutter the file runs, or `facingError` when there is no
+// file. Facing off adds no row at all.
+describe('EngravePanel (#432 review R11) — the facing row', () => {
+  const FACE_TOOL = '3.175 mm flat (facing)';
+
+  /** A generated run, with the facing half the case wants; the other half is a clean skip. */
+  function generated(over: Partial<EngraveGenerated> = {}): EngraveGenerated {
+    return {
+      ok: true,
+      stage: 'done',
+      findings: [],
+      feeds: null,
+      threads: null,
+      cam: { operations: 1, cuttingMoves: 10, estimatedSeconds: 5, passes: 2 },
+      nc: 'G90\nM02',
+      verify: {
+        ok: true,
+        findings: [],
+        stats: { lines: 2, cuttingMoves: 1, deepestZ: -2, bbox: { min: [0, 0, -2], max: [1, 1, 0] } },
+      },
+      frameNc: null,
+      frameVerify: null,
+      facingNc: ';@MKR|BEGIN\nM02',
+      facingVerify: null,
+      facingToolKey: 'user:facing-3.175',
+      facingError: null,
+      facingCam: {
+        toolName: FACE_TOOL,
+        diameterMm: 3.175,
+        passes: 2,
+        stepDown: 0.25,
+        stepOver: 2.8,
+        rpm: 12000,
+        feed: 500,
+        plungeFeed: 200,
+        air: true,
+      },
+      predicted: [],
+      programs: [],
+      errors: [],
+      ...over,
+    };
+  }
+
+  function faceJob(facing: { enabled: boolean; depth: number } | undefined): void {
+    act(() => {
+      useEngraveJobStore.setState({ job: { ...defaultEngraveJob(), facing } });
+    });
+  }
+
+  function show(result: EngraveGenerated): void {
+    act(() => {
+      useEngraveRunStore.setState({ generated: result, phase: 'ready', simStatus: null });
+    });
+    render(<EngravePanel />);
+  }
+
+  beforeEach(() => {
+    useEngraveRunStore.getState().reset();
+  });
+
+  it('names the cutter the facing file runs, in the sheet’s words', () => {
+    faceJob({ enabled: true, depth: 0.5 });
+    show(generated());
+
+    const row = screen.getByTestId('engrave-run-facing');
+    expect(row.textContent).toContain(FACE_TOOL);
+    expect(row.textContent).toContain('⌀ 3.175 mm flat');
+    expect(row.getAttribute('data-state')).toBe('tick');
+  });
+
+  it('shows the withheld reason when no facing file was produced', () => {
+    faceJob({ enabled: true, depth: 0.5 });
+    const error = 'the tool list has no flat end mill the catalogue recommends for PLA';
+    show(generated({ facingNc: null, facingVerify: null, facingToolKey: null, facingCam: null, facingError: error }));
+
+    const row = screen.getByTestId('engrave-run-facing');
+    // The sheet's vocabulary, so the screen and the printed page say the same thing.
+    expect(row.textContent).toContain('the facing program was not produced');
+    expect(row.textContent).toContain(error);
+    expect(row.textContent).toContain('the top will not be skimmed');
+    expect(row.getAttribute('data-state')).toBe('cross');
+  });
+
+  it('adds no row when the job does not face', () => {
+    faceJob(undefined);
+    show(generated());
+    expect(screen.queryByTestId('engrave-run-facing')).toBeNull();
+  });
+
+  it('adds no row when facing is turned off or its depth is zero', () => {
+    faceJob({ enabled: false, depth: 0.5 });
+    show(generated());
+    expect(screen.queryByTestId('engrave-run-facing')).toBeNull();
+    cleanup();
+    faceJob({ enabled: true, depth: 0 });
+    show(generated());
+    expect(screen.queryByTestId('engrave-run-facing')).toBeNull();
+  });
+});

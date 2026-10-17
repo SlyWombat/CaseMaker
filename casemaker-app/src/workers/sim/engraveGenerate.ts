@@ -47,6 +47,7 @@ import { cuttingDiameter, cuttingForTrace, isVTraceTool, traceRadiusAt, type Too
 import { threadMillIR, threadSettings, type ThreadMillPlan, type ThreadSettingsResult } from '@/engine/cnc/cam/threadMill';
 import type { ShopDefaults } from '@/platform/defaultsClient';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
+import type { ConditionSummary } from '@/engine/cnc/toolCondition';
 import { vCone } from '@/engine/cnc/vProfile';
 import { isMetalTool } from '@/engine/cnc/registerCutter';
 import { MATERIAL_LABELS, isMetalMaterial } from '@/engine/cnc/materials';
@@ -123,6 +124,14 @@ export interface EngraveShopOpts {
    * reason — the engraving still generates.
    */
   tools?: readonly ToolLibraryEntry[] | null;
+  /**
+   * #432 review R10 — the inventory's condition summaries (`inventoryConditions()`), handed in for
+   * the same reason `tools` is: `toolCondition`'s map is main-thread module state, and the sim
+   * worker's copy is empty. The facing pick skips a cutter every copy of which is marked broken and
+   * prefers a fresher copy only on an equal diameter. Absent/null is "nothing known": no cutter is
+   * excluded as broken and a worn one stays eligible, exactly as before the table was passed.
+   */
+  conditions?: ReadonlyMap<string, ConditionSummary> | null;
   /**
    * #442's #427 item — the mount's obstacles (the bracket's arms and the top clamps, with the fit),
    * or `null` when the job is held in the vise. Resolved on the CALLER's side for the same reason
@@ -728,6 +737,11 @@ function facingProgram(
   limit: DepthLimit,
   mount: MountObstacles | null | undefined,
   tools: readonly ToolLibraryEntry[],
+  /**
+   * #432 review R10 — the bench's condition summaries, handed in from `shop.conditions` for the
+   * same worker-realm reason as `tools` (see `EngraveShopOpts`). Null: nothing is known broken.
+   */
+  conditions: ReadonlyMap<string, ConditionSummary> | null | undefined,
   catalogue: readonly FeedCatalogueRow[],
   table: readonly FeedsEntry[] | undefined,
   /**
@@ -744,7 +758,13 @@ function facingProgram(
   error: string | null;
   cam: FacingCamSummary | null;
 } {
-  const pick = chooseFacingTool(tools, catalogue, job.stock.material, job.facing?.toolKey ?? null);
+  const pick = chooseFacingTool(
+    tools,
+    catalogue,
+    job.stock.material,
+    job.facing?.toolKey ?? null,
+    conditions,
+  );
   if (pick.entry === null) return { nc: null, verify: null, toolKey: null, error: pick.reason, cam: null };
   const tool = pick.entry.tool;
   const toolKey = pick.entry.key;
@@ -1264,6 +1284,7 @@ function generateOneProgram(
           limit,
           shop.mount,
           shop.tools ?? [],
+          shop.conditions ?? null,
           catalogue,
           shop.feeds ?? undefined,
           span === 'none' ? 'none' : 'first',

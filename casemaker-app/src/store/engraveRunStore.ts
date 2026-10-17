@@ -28,6 +28,7 @@ import { feedCatalogueRows, resolvedFeedsTable } from '@/engine/cnc/feeds';
 import type { FeedCatalogueRow } from '@/engine/cnc/feeds';
 import { jobMachine } from '@/engine/cnc/calibration';
 import { getTools } from '@/engine/cnc/toolRegistry';
+import { inventoryConditions } from '@/engine/cnc/toolCondition';
 import type { MachineCalibration } from '@/engine/cnc';
 import { effectiveMargins } from '@/engine/cnc/engrave/depthBounds';
 import { useSettingsStore } from './settingsStore';
@@ -176,6 +177,11 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
       // catalogue is (the worker's registry is empty). The snapshotted list, not a re-read after the
       // await: the facing tool must be one the picker this run was started from shows.
       tools: getTools(),
+      // #432 review R10 — the bench's condition summaries, read in the SAME snapshot as the cutter
+      // list and for the same worker-realm reason: `toolCondition`'s map is main-thread state, and
+      // the worker's copy is empty. A broken cutter must be skipped by the pick the worker makes,
+      // not only by the one the panel shows.
+      conditions: inventoryConditions(),
       mount,
     };
 

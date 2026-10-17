@@ -21,6 +21,12 @@ import { bindingVoidsByRegion } from '@/workers/sim/engraveGeometry';
 import { createSimSession } from '@/workers/sim/session';
 import { jobTool, toSetup } from '@/engine/cnc/engrave/jobSetup';
 import { Z1 } from '@/engine/cnc/machine';
+import {
+  itemConditionSummary,
+  type Condition,
+  type ConditionSummary,
+  type ToolCopy,
+} from '@/engine/cnc/toolCondition';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { CAM_ID, CAM_NAME } from '@/engine/cnc/post/z1';
 import { programHash } from '@/engine/cnc/programHash';
@@ -1302,6 +1308,26 @@ describe('facing the stock’s top (#432 slices 1–2)', () => {
   };
   const SHOP: EngraveShopOpts = { tools: [FACING, ...TOOL_LIBRARY] };
 
+  /** One described copy, and the summary table the run store hands the worker (#442's pattern). */
+  function copy(condition: Condition): ToolCopy {
+    return {
+      id: `copy-${condition}`,
+      condition,
+      whereabouts: { kind: 'box' },
+      runtimeWarnMinutes: null,
+      notes: null,
+      runtimeMinutes: null,
+    };
+  }
+  function conditionsOf(...rows: [string, Condition][]): ReadonlyMap<string, ConditionSummary> {
+    return new Map(
+      rows.map(([key, condition]) => [
+        key,
+        itemConditionSummary({ id: key, quantity: 1, copies: [copy(condition)] }),
+      ]),
+    );
+  }
+
   it('emits the facing pass as its own verified program and leaves the engraving byte-identical', () => {
     const plain = generate(tl, defaultEngraveJob());
     const g = generate(tl, faced(), null, [], undefined, SHOP);
@@ -1486,6 +1512,45 @@ describe('facing the stock’s top (#432 slices 1–2)', () => {
     expect(g.ok).toBe(true);
     expect(g.facingNc).toBeNull();
     expect(g.facingError).toMatch(/for Metal/);
+  });
+
+  // #432 review R10 — the condition table reaches the pick THROUGH the shop options. The store
+  // reads `inventoryConditions()` on the main thread (the worker's map is empty), so these cases
+  // pass it the way `engraveRunStore` does and read the file the worker actually posted.
+  it('skips the facing cutter the bench marks broken, through `shop.conditions`', () => {
+    const g = generate(tl, faced(), null, [], undefined, {
+      tools: [FACING, ...TOOL_LIBRARY],
+      conditions: conditionsOf(['user:facing-3.175', 'broken']),
+    });
+    expect(g.ok, JSON.stringify({ errors: g.errors, facingError: g.facingError })).toBe(true);
+    expect(g.facingNc, g.facingError ?? '').not.toBeNull();
+    // The 3.175 mm facing cutter is skipped; the 1 mm built-in is the only other non-metal flat.
+    expect(g.facingToolKey).toBe('flat-1.0');
+    expect(g.facingError).toBeNull();
+  });
+
+  it('still faces with a worn cutter — the condition is not a priority', () => {
+    const g = generate(tl, faced(), null, [], undefined, {
+      ...SHOP,
+      conditions: conditionsOf(['user:facing-3.175', 'worn']),
+    });
+    expect(g.ok, JSON.stringify({ errors: g.errors, facingError: g.facingError })).toBe(true);
+    expect(g.facingNc, g.facingError ?? '').not.toBeNull();
+    expect(g.facingToolKey).toBe('user:facing-3.175');
+  });
+
+  it('withholds the facing file, naming broken, when every flat has no usable copy', () => {
+    const g = generate(tl, faced(), null, [], undefined, {
+      tools: [FACING],
+      conditions: conditionsOf(['user:facing-3.175', 'broken']),
+    });
+    // The engraving still generates: a skim that cannot be cut does not stop the job.
+    expect(g.ok).toBe(true);
+    expect(g.stage).toBe('done');
+    expect(g.facingNc).toBeNull();
+    expect(g.facingToolKey).toBeNull();
+    expect(g.facingError).toMatch(/marked broken/);
+    expect(g.facingError).toContain('3.175 mm flat (facing)');
   });
 
   it('faces a thread job with its own flat, and leaves the thread program to the thread mill', () => {

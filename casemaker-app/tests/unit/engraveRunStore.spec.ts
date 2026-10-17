@@ -1,7 +1,7 @@
 // The engrave RUN state (#206): the save gate and the staleness rule. No wasm, no worker — the
 // client is faked, so this is the pure half of the store.
 
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -18,7 +18,13 @@ import {
 } from '@/store/engraveRunStore';
 import { useEngraveJobStore } from '@/store/engraveJobStore';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
-import type { EngraveGenerated } from '@/workers/sim/engraveGenerate';
+import type { EngraveGenerated, EngraveShopOpts } from '@/workers/sim/engraveGenerate';
+import {
+  conditionForKey,
+  resetInventoryConditions,
+  setInventoryConditions,
+  type ToolCopy,
+} from '@/engine/cnc/toolCondition';
 import { useSimStore } from '@/store/simStore';
 import { useSettingsStore } from '@/store/settingsStore';
 import { calibrationFromReplies, type MachineCalibration } from '@/engine/cnc';
@@ -396,6 +402,59 @@ describe('engraveRunStore (#206)', () => {
     }
     expect(generatedWith).toBeNull();
     expect(loadedWith).toBeNull();
+  });
+});
+
+// #432 review R10 — the facing pick runs in the worker, where `toolCondition`'s summary map is
+// empty. The store therefore has to hand `inventoryConditions()` across in the same snapshot as
+// `getTools()`; a wiring bug is invisible in the result (the worker just faces with a cutter the
+// bench marked broken). This pins the hand-over itself; `facingTool.spec.ts` pins the rule it feeds.
+describe('engraveRunStore (#432 R10) — the facing pick’s condition table', () => {
+  function copy(id: string, condition: ToolCopy['condition']): ToolCopy {
+    return {
+      id,
+      condition,
+      whereabouts: { kind: 'box' },
+      runtimeWarnMinutes: null,
+      notes: null,
+      runtimeMinutes: null,
+    };
+  }
+
+  beforeEach(() => {
+    useEngraveRunStore.getState().reset();
+    useEngraveJobStore.getState().replace(defaultEngraveJob());
+    resetInventoryConditions();
+  });
+
+  afterEach(() => {
+    setEngraveRunClientLoader(null);
+    resetInventoryConditions();
+  });
+
+  it('hands the inventory’s summary table beside the cutter list', async () => {
+    setInventoryConditions(
+      [{ id: 'abc', quantity: 1, copies: [copy('abc-1', 'broken')] }],
+      (id) => `inv:${id}`,
+    );
+    let handed: EngraveShopOpts | undefined;
+    setEngraveRunClientLoader(async () => ({
+      // NOTHING stops the pipeline at `findings`, so the test needs no sim client; the shop options
+      // are already on the call by then.
+      engraveGenerate: async (_job, _tool, _catalogue, _calibration, _margins, shop) => {
+        handed = shop;
+        return NOTHING;
+      },
+      simOracle: async () => ({ ok: true, band: 0.016, levels: [], worst: { underCut: 0, overCut: 0 } }),
+    }));
+
+    await useEngraveRunStore.getState().generate();
+
+    // The table is the inventory's own — note and all — not a rebuild of it, and it travels with
+    // the same snapshot as `tools`. The worker can then skip this cutter by name.
+    expect(handed?.conditions?.get('inv:abc')).toEqual(conditionForKey('inv:abc'));
+    expect(handed?.conditions?.get('inv:abc')!.usable).toBe(0);
+    expect(handed?.tools).not.toBeNull();
   });
 });
 

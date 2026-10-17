@@ -8,8 +8,9 @@
  * program names its own.
  *
  * THE DEFAULT RULE, as filed on #432: **the largest flat end mill the catalogue recommends for the
- * job's material.** Largest is `cuttingDiameter`, ties broken on the registry key so the same shop
- * picks the same cutter twice.
+ * job's material**, skipping cutters with no usable copy. Largest is `cuttingDiameter`; an equal
+ * diameter goes to the better-kept condition, then the registry key, so the same shop picks the
+ * same cutter twice.
  *
  *   - FLAT. A facing pass is a flat bottom over a plane: `cuttingForTrace` refuses a thread mill, and
  *     a V-bit's cone or a ball nose's point leaves a corrugated surface by definition.
@@ -18,18 +19,24 @@
  *     metal line is never the default on a non-metal blank (`isMetalTool`, #405/#398). A catalogue
  *     that says nothing — none synced, or a cutter it cannot name — does not veto, exactly as it
  *     does not veto the engraving cutter's recommendation.
+ *   - A CUTTER WITH NO USABLE COPY IS NOT A CANDIDATE (#467, review R10): every copy marked broken
+ *     excludes it by name before the catalogue is asked. A WORN cutter stays eligible and can still
+ *     be the default — condition is a TIEBREAK, never a priority — so the largest diameter is asked
+ *     first and only an equal-diameter tie goes to the fresher bench (`conditionRank`, the order
+ *     `recommendTool` uses). A cutter whose condition nobody has set ranks as "not set", not worn.
  *   - NOTHING SURVIVES: the answer is a REFUSAL, not a fallback to the job's cutter. The caller then
  *     emits no facing program and says why; the engraving still generates.
  *
- * AN EXPLICIT PICK WINS, with one hard requirement: it has to be a flat end mill. A cutter the
- * catalogue does not recommend for the material still cuts when the operator names it — #455's "the
- * job names it by hand, so it still cuts" — because the name is the operator's assertion, not the
- * vendor's.
+ * AN EXPLICIT PICK WINS, with two hard requirements: it has to be a flat end mill, and it has to have
+ * a usable copy. A cutter the catalogue does not recommend for the material still cuts when the
+ * operator names it — #455's "the job names it by hand, so it still cuts" — because the name is the
+ * operator's assertion, not the vendor's. A cutter every copy of which is marked broken is a
+ * statement about the PHYSICAL bit, which no name can overrule (#415).
  *
- * PURE, and handed both lists: this runs in the sim worker, where the tool registry and the feed
- * catalogue are empty (#305/#324), so the caller sends `getTools()` and `feedCatalogueRows()`. The
- * condition table (#442) is NOT consulted — a cutter marked broken can still be the default here,
- * which is a gap this module's comment states rather than one it hides; #432's question carries it.
+ * PURE, and handed all three lists: this runs in the sim worker, where the tool registry, the feed
+ * catalogue and the condition table are empty (#305/#324/#442), so the caller sends `getTools()`,
+ * `feedCatalogueRows()` and `inventoryConditions()`. The condition table is handed in for exactly
+ * that reason, never read from `toolCondition`'s module state.
  */
 
 import {
@@ -41,7 +48,11 @@ import { isMetalMaterial, MATERIAL_LABELS } from '@/engine/cnc/materials';
 import { isMetalTool } from '@/engine/cnc/registerCutter';
 import { cuttingDiameter, cuttingForTrace } from '@/engine/cnc/tool';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
+import { conditionRank, type ConditionSummary } from '@/engine/cnc/toolCondition';
 import type { StockMaterial } from '@/types/engraveJob';
+
+/** The caller's condition snapshot by registry key, or null/absent when the bench is undescribed. */
+type ConditionTable = ReadonlyMap<string, ConditionSummary> | null | undefined;
 
 /** The cutter the facing program runs with, or the sentence saying why there is none. */
 export type FacingToolPick =
@@ -58,11 +69,26 @@ function diameterOf(entry: ToolLibraryEntry): number {
   return cuttingDiameter(entry.tool) ?? 0;
 }
 
-/** Largest first; the key breaks a tie so two equal cutters do not alternate run to run. */
-function byLargest(a: ToolLibraryEntry, b: ToolLibraryEntry): number {
+/**
+ * Whether the condition table says every copy of this cutter is broken. A cutter with no entry, or
+ * with an entry that still counts a usable copy, is eligible: "nothing known" is not "broken".
+ */
+function hasNoUsableCopy(entry: ToolLibraryEntry, conditions: ConditionTable): boolean {
+  return conditions?.get(entry.key)?.usable === 0;
+}
+
+/**
+ * Largest first. An EQUAL diameter goes to the better-kept cutter — condition is a tiebreak, never
+ * a priority (#467/#415) — and the key breaks what condition cannot, so two equal cutters do not
+ * alternate run to run.
+ */
+function byLargest(a: ToolLibraryEntry, b: ToolLibraryEntry, conditions: ConditionTable): number {
   const da = diameterOf(a);
   const db = diameterOf(b);
   if (da !== db) return db - da;
+  const ra = conditionRank(conditions?.get(a.key)?.best ?? null);
+  const rb = conditionRank(conditions?.get(b.key)?.best ?? null);
+  if (ra !== rb) return ra - rb;
   return a.key < b.key ? -1 : a.key > b.key ? 1 : 0;
 }
 
@@ -77,13 +103,15 @@ function notFlatReason(entry: ToolLibraryEntry): string {
  * The facing cutter for `material`, or the refusal sentence.
  *
  * `requestedKey` is the job's own `facing.toolKey` when it names one; `null`/absent asks for the
- * default rule. `tools` and `catalogue` are the caller's snapshots — see the module doc.
+ * default rule. `tools`, `catalogue` and `conditions` are the caller's snapshots — see the module
+ * doc. A missing `conditions` table means the bench is undescribed, so nothing is excluded as broken.
  */
 export function chooseFacingTool(
   tools: readonly ToolLibraryEntry[],
   catalogue: readonly FeedCatalogueRow[],
   material: StockMaterial,
   requestedKey: string | null = null,
+  conditions: ConditionTable = null,
 ): FacingToolPick {
   if (requestedKey !== null && requestedKey !== '') {
     const entry = tools.find((e) => e.key === requestedKey);
@@ -91,6 +119,12 @@ export function chooseFacingTool(
       return { entry: null, reason: `the job's facing tool "${requestedKey}" is not in the tool list` };
     }
     if (!isFlat(entry)) return { entry: null, reason: notFlatReason(entry) };
+    if (hasNoUsableCopy(entry, conditions)) {
+      return {
+        entry: null,
+        reason: `the job's facing tool "${entry.tool.name}" has no usable copy — every copy of it is marked broken`,
+      };
+    }
     return { entry, reason: null };
   }
 
@@ -113,7 +147,20 @@ export function chooseFacingTool(
     };
   }
 
-  const standing = onLine.map((entry) => ({
+  // #467/review R10 — skip broken cutters before the catalogue is asked, and say so if that is why
+  // nothing is left. A worn cutter stays here; only an equal-diameter tie prefers a fresher one.
+  const usable = onLine.filter((entry) => !hasNoUsableCopy(entry, conditions));
+  if (usable.length === 0) {
+    const names = onLine.map((entry) => `"${entry.tool.name}"`).join(', ');
+    return {
+      entry: null,
+      reason:
+        `every flat end mill in the tool list is marked broken (${names}) — a facing pass needs a ` +
+        `cutter with a usable copy`,
+    };
+  }
+
+  const standing = usable.map((entry) => ({
     entry,
     verdict: catalogueStandingFor(catalogueCoverageFor(catalogue, material, entry.tool), material, entry.tool.name),
   }));
@@ -133,5 +180,8 @@ export function chooseFacingTool(
     };
   }
 
-  return { entry: [...eligible].map((s) => s.entry).sort(byLargest)[0]!, reason: null };
+  return {
+    entry: [...eligible].map((s) => s.entry).sort((a, b) => byLargest(a, b, conditions))[0]!,
+    reason: null,
+  };
 }

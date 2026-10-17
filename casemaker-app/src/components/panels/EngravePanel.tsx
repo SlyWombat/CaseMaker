@@ -917,6 +917,36 @@ export function EngravePanel(): JSX.Element {
       : 'not checked yet'
   }`;
 
+  // #432 review R11 — a FACING job has a second program, and a withheld facing file must not be
+  // invisible: Save writes one file fewer than the sheet says, and the sheet's own sentence is the
+  // explanation. The row mirrors `facingSteps`' vocabulary ("the facing program was not produced"),
+  // and the cutter named is the one the file was cut with (`facingCam.toolName`), never the job's
+  // engraving tool. Facing off adds no row at all — nothing was asked for, so nothing is missing.
+  const facingJob = job.facing !== undefined && job.facing.enabled && job.facing.depth > 0;
+  const rowFacing: RowState = !facingJob
+    ? 'idle'
+    : run.generated === null
+      ? run.phase === 'generating'
+        ? 'pending'
+        : 'idle'
+      : run.generated.facingNc !== null
+        ? 'tick'
+        : 'cross';
+  const facingCam = run.generated?.facingCam ?? null;
+  const rowFacingText = `Facing — ${
+    run.generated === null
+      ? run.phase === 'generating'
+        ? 'working…'
+        : 'not generated yet'
+      : run.generated.facingNc === null
+        ? 'the facing program was not produced' +
+          (run.generated.facingError === null ? '' : `: ${run.generated.facingError}`) +
+          '. The engraving program can still be run, but the top will not be skimmed — clear the reason and generate again.'
+        : facingCam !== null
+          ? `${facingCam.toolName}, ⌀ ${facingCam.diameterMm} mm flat, ${facingCam.passes} × ${facingCam.stepDown} mm passes`
+          : `${run.generated.facingToolKey ?? 'its own cutter'}`
+  }`;
+
   async function generate(): Promise<void> {
     await run.generate();
   }
@@ -2245,6 +2275,9 @@ export function EngravePanel(): JSX.Element {
                   bench reading, not the estimate above.
                 </p>
               )}
+              {/* #432 review R11 — the facing program is its own file: name the cutter it runs, or
+                  the reason it was withheld. Absent when the job does not face. */}
+              {facingJob && <RunRow testid="engrave-run-facing" state={rowFacing} text={rowFacingText} />}
               <RunRow testid="engrave-run-verified" state={rowVerified} text={rowVerifiedText} />
               <RunRow testid="engrave-run-simulated" state={rowSimulated} text={rowSimulatedText} />
               {simCoverage.length > 0 && (
