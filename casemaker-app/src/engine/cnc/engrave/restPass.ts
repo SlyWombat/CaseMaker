@@ -84,7 +84,9 @@ function pct(v: number): string {
  */
 export function roughPick(reach: Reachability): RoughPick {
   const ranked: RoughCandidate[] = reach.cutters
-    .filter((c) => c.excluded === null && c.diameter > 0)
+    // #221 — a V-carve is offered by the model but has no flat-disc share; it is not a roughing
+    // candidate for a rest pair, and its own strategy is one program with one bit.
+    .filter((c) => c.excluded === null && !c.vCarve && c.diameter > 0)
     .map((c) => {
       const share = shareOf(reach, c.key);
       return { key: c.key, name: c.name, diameter: c.diameter, share, score: c.diameter * c.diameter * share };
@@ -157,12 +159,10 @@ export interface RestToolPick {
  * #486 — why `rest` cannot be the second cutter on this job, or null when it can.
  *
  * The rest pass is area-based: it asks what a narrower FLAT disc can open that the first program
- * left. A V-bit's cutting width grows with depth, so `recommendTool` excludes it from every job
- * holding a region item and `restToolPick` can never choose one; only `--rest <key>` can name it.
- * Left alone, that route measures "0 mm² of the 0 mm²" and reports "nothing to clean up", which
- * reads as a fact about the design rather than about the cutter. The maintainer's answer (#486,
- * 2026-10-17) is #221's V-carve, so the route says THIS sentence up front and generates the one
- * program it can honestly generate.
+ * left. A V-bit's cutting width grows with depth, so since #221 a V-bit on a region job IS the
+ * cutter (a V-carve) and never the second one; only `--rest <key>` can still name it, and that
+ * route says THIS sentence up front rather than measuring "0 mm² of the 0 mm²" and reporting
+ * "nothing to clean up". The maintainer's answer (#486, 2026-10-17) is #221's V-carve.
  *
  * A trace-only job has no regions and takes a V-bit as a normal trace tool, so it is not refused.
  */
@@ -183,6 +183,18 @@ export function vBitRestRefusal(job: EngraveJob, rest: Tool): string | null {
  * bench" and "the first cutter already reaches everything" are different answers for the operator.
  */
 export function restToolPick(reach: Reachability, roughKey: string): RestToolPick {
+  const base = reach.cutters.find((c) => c.key === roughKey);
+  // #221 — a V-carve is the WHOLE job: the cone pockets the design at the colour plane with one
+  // bit. There is no flat rest programme to add, so the row says that rather than measuring a
+  // second cutter against a job that does not have a second pass.
+  if (base?.vCarve === true) {
+    return {
+      cutter: null,
+      reason:
+        'the first cutter is a V-bit on a region job: the V-carve is the whole job at the colour ' +
+        'plane, so there is no flat rest pass to add',
+    };
+  }
   const cutter = finerThan(reach, roughKey);
   if (cutter !== null) {
     return {
@@ -193,8 +205,7 @@ export function restToolPick(reach: Reachability, roughKey: string): RestToolPic
         `${pct(shareOf(reach, cutter.key))} of the design's area)`,
     };
   }
-  const base = reach.cutters.find((c) => c.key === roughKey);
-  const measured = reach.cutters.filter((c) => c.excluded === null).length;
+  const measured = reach.cutters.filter((c) => c.excluded === null && !c.vCarve).length;
   return {
     cutter: null,
     reason:

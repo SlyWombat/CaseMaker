@@ -14,9 +14,9 @@ import {
   shareOf,
   untouchedBy,
   untouchedByAll,
-  V_BIT_REST_SENTENCE,
 } from '@/engine/cnc/engrave/reachability';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
+import { V_BIT_CARVE_SENTENCE } from '@/engine/cnc/engrave/recommendTool';
 import { flatEndMill, type Tool } from '@/engine/cnc/tool';
 import type { FeedCatalogueRow } from '@/engine/cnc/feeds';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
@@ -184,15 +184,19 @@ describe('reachabilityFor (#410)', () => {
     const reach = reachabilityFor(job, tools, [], measuring({ wide: { big: 0 } }));
     const rows = reachTable(reach);
     expect(rows.map((r) => r.key)).toEqual(['ball', 'wide']);
-    expect(rows[0]!.excluded).toBe('not a flat end mill (or a V-bit on a job with regions)');
+    expect(rows[0]!.excluded).toBe(
+      'not a flat end mill (or a V-bit whose tip and angle are not stated)',
+    );
     // Not measured means no per-item numbers at all — `null`, which is not the same as 0 %.
     expect(rows[0]!.shares).toEqual([null]);
     expect(rows[1]!.excluded).toBeNull();
     expect(rows[1]!.shares).toEqual([0]);
   });
 
-  it('answers a V-bit on a region job with the V-carve sentence, not the generic not-flat phrase (#486)', () => {
+  it('offers a V-bit on a region job as the V-carve, not as a rest cutter (#221)', () => {
     const job = jobWith('big');
+    // The V row is PLA's; the default job is softwood.
+    job.stock = { ...job.stock, material: 'pla' };
     const vbit = tool('vbit', 0.3, {
       name: '30° engraving bit',
       shape: 'engraving',
@@ -204,11 +208,19 @@ describe('reachabilityFor (#410)', () => {
     });
     const wide = tool('wide', 3.175, { shoulderLength: 12 });
     const reach = reachabilityFor(job, [vbit, wide], [], measuring({ wide: { big: 900 } }));
+    const cutter = reach.cutters.find((r) => r.key === 'vbit')!;
+    // The cone is OFFERED by the colour-plane model, but it is not measured as a flat disc: no
+    // rows, no share, and it cannot become the second cutter of a rest pair.
+    expect(cutter.excluded).toBeNull();
+    expect(cutter.vCarve).toBe(true);
+    expect(cutter.rows).toEqual([]);
+    expect(shareOf(reach, 'vbit')).toBe(0);
+    expect(finerThan(reach, 'wide')?.key).toBeUndefined();
     const cell = reachTable(reach).find((r) => r.key === 'vbit')!;
-    expect(cell.excluded).toBe(V_BIT_REST_SENTENCE);
-    expect(cell.excluded).toContain('a V-carve (#221)');
-    // A ball nose keeps the generic phrase: it is not a V-bit, and the #221 sentence would be a
-    // claim about an operation the operator did not ask for.
+    expect(cell.excluded).toBe(V_BIT_CARVE_SENTENCE);
+    expect(cell.shares).toEqual([]);
+    expect(cell.qualifies).toBe(true);
+    // A ball nose keeps the generic phrase: it is not a V-bit, and no V-carve is what it would be.
     expect(reachTable(reach).find((r) => r.key === 'wide')!.excluded).toBeNull();
   });
 

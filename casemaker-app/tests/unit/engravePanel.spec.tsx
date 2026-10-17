@@ -29,6 +29,12 @@ import { presetJawStrips } from '@/engine/cnc/sacrificial';
 import { runSheetFileName, runSheetFrameFileName } from '@/engine/cnc/engrave/runSheet';
 import { saveEngraveProgram } from '@/engine/exportTrigger';
 import { clearFeedCatalogue, setFeedCatalogue, type FeedCatalogueRow } from '@/engine/cnc/feeds';
+import { setInventoryEntries, resetRegistry } from '@/engine/cnc/toolRegistry';
+import { flatEndMill } from '@/engine/cnc/tool';
+import { vCone } from '@/engine/cnc/vProfile';
+import { vCarvePlane, vCarveStepover, vCarveStepoverClampNote } from '@/engine/cnc/vCarveGeometry';
+import { itemName, V_BIT_CARVE_SENTENCE, type ToolRecommendation } from '@/engine/cnc/engrave/recommendTool';
+import type { EngravePreview } from '@/workers/sim/engravePreview';
 import type { EngraveGenerated, EngraveProgram } from '@/workers/sim/engraveGenerate';
 
 // The save path is the thing under test (#207): mock it so a test can read the files the panel
@@ -2049,5 +2055,163 @@ describe('EngravePanel — the release step routing (#469)', () => {
     expect(blocked.textContent).toContain('faces the stock first');
     expect(screen.queryByTestId('engrave-release-upload')).toBeNull();
     expect(screen.queryByTestId('engrave-release-start')).toBeNull();
+  });
+});
+
+// #221 — a V-bit on a REGION job is the cutter, not an exclusion. The panel has to state the
+// strategy the engine models: the typed depth is the pocket floor, the design is correct at the
+// colour plane, and the pass pitch is the requested one beside the effective one. Every number
+// below is asserted against the engine's own answer, not a literal copied out of the render.
+describe('EngravePanel — the V-carve strategy (#221)', () => {
+  const V_TOOL = flatEndMill(0.3, {
+    name: '30° engraving bit',
+    typeText: 'Engraving',
+    shape: 'engraving',
+    tipDiameter: 0.3,
+    diameter: 3.175,
+    halfAngle: 15,
+    angle: 30,
+  });
+  const FILM = 1.2;
+
+  /** The panel's own rounding (`mm3`), so the assertion is about the number, not the spelling. */
+  const mm3 = (v: number): string => String(Math.round(v * 1000) / 1000);
+
+  /** Two fixed-id regions on a PLA blank (the V row exists only for PLA and PETG). */
+  function vJob() {
+    const job = defaultEngraveJob();
+    job.stock = { ...job.stock, material: 'pla' };
+    job.toolKey = 'inv:v30';
+    job.labels = [
+      { ...job.labels[0]!, id: 'title', text: 'TITLE', depth: 2.0 },
+      { ...job.labels[1]!, id: 'sub', text: 'SUB', depth: 0.5 },
+    ];
+    return job;
+  }
+
+  /** The preview the panel reads its film from; the rest of the preview is outside this spec. */
+  function previewWith(colourBoundaryDepth: number | null, recommendation: ToolRecommendation | null = null): EngravePreview {
+    return { colourBoundaryDepth, recommendation, findings: [] } as unknown as EngravePreview;
+  }
+
+  function show(job = vJob(), preview: EngravePreview | null = previewWith(FILM)): void {
+    setInventoryEntries([{ key: 'inv:v30', tool: V_TOOL, provenance: 'EngravePanel V-carve spec' }]);
+    act(() => {
+      useEngraveJobStore.setState({ job });
+    });
+    useEngravePreviewStore.setState({ preview, status: preview === null ? 'idle' : 'ready' });
+    render(<EngravePanel />);
+  }
+
+  // The describe-level hook runs BEFORE the file-level `cleanup()`, so the registry notification
+  // still reaches a mounted panel and has to be wrapped like any other state update.
+  afterEach(() => {
+    act(() => resetRegistry());
+  });
+
+  it('states the floor/colour-plane depth note and no longer calls the V-bit a stroke-width limit', () => {
+    show();
+    const note = screen.getByTestId('engrave-vcarve-depth-note').textContent ?? '';
+    expect(note).toContain('V-carve.');
+    expect(note).toContain('the pocket floor');
+    expect(note).toContain('colour plane');
+    expect(note).toContain(`${mm3(FILM)} mm below the top`);
+    expect(note).toContain('0.3 mm wide');
+    expect(note).toContain('15.0° from the axis');
+    // A V-bit has no flat stroke-width to state: the old hint is suppressed on a V-carve.
+    expect(screen.queryByTestId('engrave-thin-strokes')).toBeNull();
+  });
+
+  it('prints the plane geometry and the effective pitch beside the requested one, from the engine', () => {
+    show();
+    const cone = vCone(V_TOOL)!;
+    const title = vJob().labels[0]!;
+    const plane = vCarvePlane(cone, title.depth, FILM);
+    const stepover = vCarveStepover(plane.planeRadius, cone, 0.6);
+    // The default seed asks for 0.6 of the groove at the plane; for this cone that is wider than
+    // the tip radius, so the panel must show BOTH numbers and the clamp note.
+    expect(stepover.clamped).toBe(true);
+    expect(stepover.requested).toBeGreaterThan(stepover.effective);
+
+    const text = screen.getByTestId('engrave-vcarve-item-title').textContent ?? '';
+    expect(text).toContain(`${mm3(plane.grooveWidth)} mm groove at the plane`);
+    expect(text).toContain(`floor ${mm3(plane.floorInset)} mm narrower per side`);
+    expect(text).toContain(`top opening ${mm3(plane.surfaceOutset)} mm wider per side`);
+    expect(text).toContain(
+      `pass pitch ${mm3(stepover.effective)} mm beside the requested ${mm3(stepover.requested)} mm`,
+    );
+
+    // The warning is the FINDING's sentence, not a paraphrase: same engine function, same words.
+    expect(screen.getByTestId('engrave-vcarve-clamp-title').textContent).toBe(
+      vCarveStepoverClampNote(itemName(title), stepover, cone.tipRadius),
+    );
+  });
+
+  it('says the plane is the floor when the blank states no film', () => {
+    const job = vJob();
+    show(job, null); // no print on this blank, and no preview to resolve one from
+    expect(screen.getByTestId('engrave-vcarve-depth-note').textContent).toContain(
+      'this blank states no film, so the plane is the floor',
+    );
+    // With no film the plane IS the floor, so the note still carries per-item arithmetic.
+    expect(screen.getByTestId('engrave-vcarve-item-title')).toBeTruthy();
+  });
+
+  it('waits for the print to resolve rather than showing no-film arithmetic as a placeholder', () => {
+    const job = vJob();
+    job.stock = { ...job.stock, print: { split: 1.2, layerHeight: 0.2 } };
+    show(job, null); // the preview that resolves the film has not landed yet
+    expect(screen.getByTestId('engrave-vcarve-depth-note').textContent).toContain(
+      'resolving it from the print',
+    );
+    expect(screen.queryByTestId('engrave-vcarve-item-title')).toBeNull();
+    expect(screen.queryByTestId('engrave-vcarve-clamp-title')).toBeNull();
+  });
+
+  it('names a V-bit pick a V-bit, and gives its Why? row the V-carve sentence', () => {
+    const rec: ToolRecommendation = {
+      key: 'inv:v30',
+      compromise: false,
+      reason: `${V_BIT_CARVE_SENTENCE}.`,
+      conditionNote: null,
+      catalogueNote: null,
+      selectedNote: null,
+      candidates: [
+        {
+          key: 'inv:v30',
+          diameter: 0.3,
+          qualifies: true,
+          worst: null,
+          reachKnown: false,
+          reachOk: true,
+          condition: null,
+          vCarve: true,
+        },
+        {
+          key: 'flat-1.0',
+          diameter: 1.0,
+          qualifies: true,
+          worst: { labelId: 'title', ratio: 0.4, emptyChars: 0 },
+          reachKnown: true,
+          reachOk: true,
+          condition: null,
+        },
+      ],
+    };
+    show(vJob(), previewWith(FILM, rec));
+
+    expect(screen.getByTestId('engrave-tool-recommended-tag').textContent).toContain('recommended: 0.3 mm');
+    const box = screen.getByTestId('engrave-recommendation').textContent ?? '';
+    expect(box).toContain('Recommended: 0.3 mm V-bit');
+    expect(box).toContain(V_BIT_CARVE_SENTENCE);
+
+    // The disclosure names the cone as a V-bit and gives it the strategy sentence, while a flat
+    // candidate keeps the flat name and its own measured row.
+    const vRow = screen.getByTestId('engrave-candidate-inv:v30').textContent ?? '';
+    expect(vRow).toContain('0.3 mm V-bit');
+    expect(vRow).toContain(V_BIT_CARVE_SENTENCE);
+    const flatRow = screen.getByTestId('engrave-candidate-flat-1.0').textContent ?? '';
+    expect(flatRow).toContain('1.0 mm flat end');
+    expect(flatRow).toContain('40 % kept');
   });
 });

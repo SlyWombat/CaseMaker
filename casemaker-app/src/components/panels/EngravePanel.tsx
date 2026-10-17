@@ -38,7 +38,17 @@ import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import { cuttingDiameter } from '@/engine/cnc/tool';
 import { caseWordsForKey } from '@/engine/cnc/toolCondition';
 import { dedupeFindings, jobTool, validateJob, type JobFinding } from '@/engine/cnc/engrave/jobSetup';
-import { V_BIT_REST_SENTENCE } from '@/engine/cnc/engrave/reachability';
+import {
+  hasRegionItems,
+  itemName,
+  V_BIT_CARVE_SENTENCE,
+} from '@/engine/cnc/engrave/recommendTool';
+import { vCone } from '@/engine/cnc/vProfile';
+import {
+  vCarvePlane,
+  vCarveStepover,
+  vCarveStepoverClampNote,
+} from '@/engine/cnc/vCarveGeometry';
 import { validateVise } from '@/engine/cnc/fixture';
 import { keepOutLimitParts, keepOutMembrane, labelGlyphMeasure, labelJawReach, voidLimitForItem } from '@/engine/cnc/engrave/partPlan';
 import { ensureLabelFontsLoaded, ensureSeedFontsLoaded, labelFontsLoaded } from '@/engine/fonts/registry';
@@ -310,6 +320,11 @@ const STRIP_SIDES: readonly (keyof Sacrificial['sides'])[] = ['left', 'right', '
 /** 1 -> "1.0", 3.175 -> "3.175". The same formatting `recommendTool` uses in its reasons. */
 function fmtDiameter(d: number): string {
   return Number.isInteger(d) ? d.toFixed(1) : String(d);
+}
+
+/** A V-carve fact to the micron, as the sheet and the finding print it (`0.052`, `0.242`). */
+function mm3(v: number): string {
+  return String(Math.round(v * 1000) / 1000);
 }
 
 function toolOptionLabel(e: ToolLibraryEntry): string {
@@ -602,6 +617,28 @@ export function EngravePanel(): JSX.Element {
   // sentence without it — it never renders one.
   const feeds = tool ? feedsFor(feedCatalogueSnapshot(), job.stock.material, tool, jobMachine(job), job.cutOverride) : null;
   const params: CutParams | null = feeds && feeds.ok ? feeds.params : null;
+  // #221 — the V-carve strategy's facts, all READ from the engine: the cone from the cutter, the
+  // colour plane the preview resolved from the print (the same `colourBoundaryDepth` the sheet and
+  // the CAM use), and the pass spacing from `vCarveStepover` at the feeds row's own ratio. None of
+  // this is re-derived here; the panel only places the numbers the CAM already states.
+  const cone = tool ? vCone(tool) : null;
+  const hasRegions = hasRegionItems(job);
+  const vCarveJob = cone !== null && hasRegions;
+  // The preview may still be resolving. If the blank states a print and no preview has landed yet,
+  // the plane is UNKNOWN — showing the no-film arithmetic here would be a wrong number, not a
+  // placeholder.
+  const filmPending = job.stock.print !== undefined && preview === null;
+  const film = filmPending ? null : (preview?.colourBoundaryDepth ?? null);
+  const vCarveRatio =
+    cone !== null && cone.tipRadius > 0 && params !== null ? params.stepOver / (2 * cone.tipRadius) : null;
+  const vCarveItems = vCarveJob
+    ? [
+        ...job.labels.filter((i) => i.enabled),
+        ...job.shapes.filter((i) => i.enabled),
+        ...(job.combined ?? []).filter((i) => i.enabled),
+        ...(job.vectors ?? []).filter((i) => i.enabled),
+      ]
+    : [];
   // Only the clamps (#317): an `ok: false` result carries `-refused` diagnostics, which the refusal
   // box below already states, and a `catalogue-ignored` is not the machine's doing at all.
   const clamps = feeds?.ok ? feeds.diagnostics.filter((d) => CLAMP_CODES.has(d.code)) : [];
@@ -793,6 +830,13 @@ export function EngravePanel(): JSX.Element {
 
   const rec = preview?.recommendation ?? null;
   const recPick = rec?.key ? rec.candidates.find((c) => c.key === rec.key) ?? null : null;
+  // #221 — a V-bit pick is a V-carve, and the box says so rather than calling every recommendation
+  // a flat end. The shape comes from the cutter the key names, never from the candidate's diameter.
+  const recPickCone =
+    recPick === null ? null : (() => {
+        const entry = tools.find((e) => e.key === recPick.key);
+        return entry === undefined ? null : vCone(entry.tool);
+      })();
 
   // ---- the run (#206) ----------------------------------------------------------------------
 
@@ -2021,10 +2065,76 @@ export function EngravePanel(): JSX.Element {
         ))}
       </select>
       {job.sources?.tool && <SourceTag source={job.sources.tool} testid="engrave-tool-source" />}
-      {diameter !== null && (
+      {diameter !== null && !vCarveJob && (
         <p style={MUTED} data-testid="engrave-thin-strokes">
           Strokes thinner than {fmtDiameter(diameter)} mm cannot be cut — the cutter opens them away entirely.
         </p>
+      )}
+      {/* #221 — the V-carve strategy. On a region job the V-bit IS the cutter; the typed depth is
+          the FLOOR, and the design is correct at the colour plane. Every number below comes from
+          the engine (`vCarvePlane`, `vCarveStepover`, the preview's resolved film, the feeds row's
+          own step-over), so the panel cannot state a pitch the CAM does not run. */}
+      {vCarveJob && cone !== null && (
+        <div
+          data-testid="engrave-vcarve"
+          style={{ margin: '6px 0', border: '1px solid #3a4a5a', background: '#16202a', borderRadius: 4, padding: 6 }}
+        >
+          <p style={{ ...MUTED, color: '#c8d3de', margin: 0 }} data-testid="engrave-vcarve-depth-note">
+            <b>V-carve.</b> The depth you type is the pocket floor; the design is correct at the{' '}
+            <b>colour plane</b>
+            {filmPending
+              ? ' — resolving it from the print…'
+              : film !== null
+                ? `, ${mm3(film)} mm below the top, resolved from the print.`
+                : ' — this blank states no film, so the plane is the floor.'}{' '}
+            The tip is {fmtDiameter(cone.tipRadius * 2)} mm wide and its flank is{' '}
+            {fmtDiameter(cone.halfAngleDeg)}° from the axis.
+          </p>
+          {!filmPending &&
+            vCarveItems.map((item) => {
+              const plane = vCarvePlane(cone, item.depth, film);
+              const stepover =
+                vCarveRatio !== null && Number.isFinite(vCarveRatio) && vCarveRatio > 0 && vCarveRatio <= 1
+                  ? vCarveStepover(plane.planeRadius, cone, vCarveRatio)
+                  : null;
+              const name = itemName(item);
+              return (
+                <p
+                  key={item.id}
+                  style={MUTED}
+                  data-testid={`engrave-vcarve-item-${item.id}`}
+                >
+                  {name} at {mm3(item.depth)} mm: {mm3(plane.grooveWidth)} mm groove at the plane —
+                  floor {mm3(plane.floorInset)} mm narrower per side, top opening{' '}
+                  {mm3(plane.surfaceOutset)} mm wider per side;{' '}
+                  {stepover === null
+                    ? 'the pass pitch was not resolved for this job'
+                    : `pass pitch ${mm3(stepover.effective)} mm beside the requested ${mm3(stepover.requested)} mm`}
+                  {'.'}
+                </p>
+              );
+            })}
+          {!filmPending &&
+            vCarveItems.map((item) => {
+              const plane = vCarvePlane(cone, item.depth, film);
+              const stepover =
+                vCarveRatio !== null && Number.isFinite(vCarveRatio) && vCarveRatio > 0 && vCarveRatio <= 1
+                  ? vCarveStepover(plane.planeRadius, cone, vCarveRatio)
+                  : null;
+              // The finding's own sentence, not a paraphrase: this is a note about a correct cut,
+              // and the panel must not invent a second wording (or a second severity).
+              if (stepover === null || !stepover.clamped) return null;
+              return (
+                <p
+                  key={`clamp-${item.id}`}
+                  style={{ ...MUTED, color: '#e0c07a' }}
+                  data-testid={`engrave-vcarve-clamp-${item.id}`}
+                >
+                  {vCarveStepoverClampNote(itemName(item), stepover, cone.tipRadius)}
+                </p>
+              );
+            })}
+        </div>
       )}
       {rec && (
         <div
@@ -2034,7 +2144,11 @@ export function EngravePanel(): JSX.Element {
           <p style={{ ...MUTED, color: '#c8d3de', margin: 0 }}>
             {recPick ? (
               <>
-                <b>Recommended: {fmtDiameter(recPick.diameter)} mm flat end</b> — {rec.reason}{' '}
+                <b>
+                  Recommended: {fmtDiameter(recPick.diameter)} mm{' '}
+                  {recPickCone === null ? 'flat end' : 'V-bit'}
+                </b>{' '}
+                — {rec.reason}{' '}
                 <button
                   type="button"
                   data-testid="engrave-use-recommended"
@@ -2085,14 +2199,13 @@ export function EngravePanel(): JSX.Element {
             </summary>
             <div style={{ marginTop: 4 }}>
               {rec.candidates.map((c) => {
+                const candidateEntry = tools.find((e) => e.key === c.key);
+                const candidateCone = candidateEntry === undefined ? null : vCone(candidateEntry.tool);
                 const detail = c.excluded
                   ? c.excluded === 'not-flat'
-                    ? // #221/#486 — a V-bit is excluded from a design with regions because the
-                      // operation it would be is a V-carve, not because it cannot cut. The generic
-                      // phrase stays for a ball or bull nose, and for a V-bit that is not a cutter.
-                      c.vTrace
-                      ? V_BIT_REST_SENTENCE
-                      : 'not a flat end mill'
+                    ? // A ball or bull nose, or a V-bit whose file states no usable cone. Since
+                      // #221 a V-bit WITH a cone is offered as a V-carve, not excluded.
+                      'not a flat end mill'
                     : c.excluded === 'broken'
                       ? 'every copy is marked broken'
                       : c.excluded === 'no-catalogue-row'
@@ -2101,18 +2214,23 @@ export function EngravePanel(): JSX.Element {
                           // and it is the catalogue that named the materials it is listed for.
                           (c.catalogueNote ?? 'not listed by the catalogue for this material')
                         : 'no cutting parameters for this material'
-                  : c.worst
-                    ? `worst item "${itemDisplay(c.worst.labelId)}" · ${Math.round(c.worst.ratio * 100)} % kept${c.condition?.best === 'worn' ? ' · worn' : ''}`
-                    : c.condition?.best === 'worn'
-                      ? 'worn'
-                      : 'not measured';
+                  : c.vCarve
+                    ? // #221 — the strategy sentence: the design is the cone's width at the plane.
+                      V_BIT_CARVE_SENTENCE
+                    : c.worst
+                      ? `worst item "${itemDisplay(c.worst.labelId)}" · ${Math.round(c.worst.ratio * 100)} % kept${c.condition?.best === 'worn' ? ' · worn' : ''}`
+                      : c.condition?.best === 'worn'
+                        ? 'worn'
+                        : 'not measured';
                 return (
                   <div
                     key={c.key}
                     data-testid={`engrave-candidate-${c.key}`}
                     style={{ display: 'flex', justifyContent: 'space-between', gap: 8, fontSize: 11, lineHeight: 1.6 }}
                   >
-                    <span style={MUTED}>{fmtDiameter(c.diameter)} mm flat end</span>
+                    <span style={MUTED}>
+                      {fmtDiameter(c.diameter)} mm {candidateCone === null ? 'flat end' : 'V-bit'}
+                    </span>
                     <span style={{ color: c.qualifies ? '#9fd19b' : '#e0a19b' }}>{detail}</span>
                   </div>
                 );

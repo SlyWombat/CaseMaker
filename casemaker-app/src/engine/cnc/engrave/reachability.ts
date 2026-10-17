@@ -26,7 +26,14 @@ import type { ConditionSummary } from '@/engine/cnc/toolCondition';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import { LOST_DETAIL_RATIO_FALLBACK, type LabelEngravability } from '@/workers/sim/engraveGeometry';
 import type { EngraveJob } from '@/types/engraveJob';
-import { findItem, itemName, recommendTool, type ToolCandidate, type ToolRecommendation } from './recommendTool';
+import {
+  findItem,
+  itemName,
+  recommendTool,
+  V_BIT_CARVE_SENTENCE,
+  type ToolCandidate,
+  type ToolRecommendation,
+} from './recommendTool';
 
 /** One item, as every cutter sees it. */
 export interface ReachRow {
@@ -65,14 +72,20 @@ export interface CutterReach {
   shape: string | null;
   /**
    * True when the cutter is a cone the trace path takes (`isVTraceTool`) — a V-bit, not a ball
-   * nose. It is what lets a table row say why a V-bit was dropped in the #486 words ("a V-bit is
-   * not a rest cutter here"), instead of the generic `not-flat` phrase that has to cover both.
+   * nose. It is what lets a rest route state #486's sentence ("a V-bit is not a rest cutter here")
+   * rather than the generic `not-flat` phrase that has to cover both.
    */
   vTrace: boolean;
   /**
-   * Why this cutter was dropped WITHOUT being measured, if it was. A V-bit on a region job is
-   * reported here: the cone's width grows with depth, so it is refused by name rather than measured
-   * as if it were a flat of its tip diameter (#405).
+   * #221 — true when this cutter takes a REGION by the V-carve strategy: the floor is pocketed at
+   * the item's depth with the tip, and the design is correct at the colour plane. Such a cutter is
+   * not measured as a flat disc (`rows` is empty), so it has no share of the design and is never
+   * the second cutter of a rest pair.
+   */
+  vCarve: boolean;
+  /**
+   * Why this cutter was dropped WITHOUT being measured, if it was. A V-bit with no usable cone is
+   * refused here. A V-carve candidate is NOT excluded: it is offered by the model in `vCarve`.
    */
   excluded: ToolCandidate['excluded'] | null;
   /**
@@ -190,17 +203,22 @@ export function reachabilityFor(
       };
     });
     const ratios = cells.map((c) => c.ratio);
+    const vCarve = candidate.vCarve === true;
     return {
       key: candidate.key,
       name: entry?.tool.name ?? candidate.key,
       diameter: candidate.diameter,
       shape: entry?.tool.shape ?? null,
       vTrace: entry === undefined ? false : isVTraceTool(entry.tool),
+      // #221 — a V-carve has no flat-disc rows: the design is cut at the colour plane, not
+      // measured as a glyph opening. Its absence of rows is what keeps it out of the share math
+      // and out of `finerThan`'s rest pair, while still being OFFERED.
+      vCarve,
       excluded: candidate.excluded ?? null,
       excludedNote: candidate.excluded === 'no-catalogue-row' ? (candidate.catalogueNote ?? null) : null,
-      rows: cells,
-      bestRatio: ratios.length === 0 ? 0 : Math.max(...ratios),
-      worstRatio: ratios.length === 0 ? 0 : Math.min(...ratios),
+      rows: vCarve ? [] : cells,
+      bestRatio: vCarve || ratios.length === 0 ? 0 : Math.max(...ratios),
+      worstRatio: vCarve || ratios.length === 0 ? 0 : Math.min(...ratios),
       qualifies: candidate.qualifies,
     };
   });
@@ -213,11 +231,11 @@ export function reachabilityFor(
   // "MEASURED" is the load-bearing word, and `rows.length > 0` is NOT it: an EXCLUDED cutter still
   // gets a cell per item — zeroed, because nothing was measured against it — so a ball nose that
   // sorts first in the list would answer this with a total of 0 mm² and every cutter's share of the
-  // design would read 0 %. The first MEASURED cutter is the one whose cells carry the items' areas.
-  const totalArea = (cutters.find((c) => c.excluded === null && c.rows.length > 0)?.rows ?? []).reduce(
-    (sum, r) => sum + r.glyphArea,
-    0,
-  );
+  // design would read 0 %. A V-carve (#221) is offered without a flat measurement for the same
+  // reason: it must not be the cutter whose cells answer the items' area.
+  const totalArea = (
+    cutters.find((c) => c.excluded === null && !c.vCarve && c.rows.length > 0)?.rows ?? []
+  ).reduce((sum, r) => sum + r.glyphArea, 0);
   const totalShare = new Map<string, number>();
   for (const cutter of cutters) {
     const opened = cutter.rows.reduce((sum, r) => sum + r.openedArea, 0);
@@ -279,23 +297,20 @@ export interface ReachTableRow {
 }
 
 /**
- * #486 — the sentence a table cell (and the CLI's up-front note) uses for a V-bit named as a
+ * #486/#221 — the sentence a table cell (and the CLI's up-front note) uses for a V-bit named as a
  * SECOND cutter on a job whose items are regions. The rest pass is area-based: it asks what a
- * narrower flat disc can open that the first could not, and a cone's width is a function of depth,
- * so a V-bit was never measured as a rest cutter at all. The operation it would be is a V-carve.
+ * narrower flat disc can open that the first could not, and a cone's width is a function of depth.
+ * A V-bit is not that second programme — on a region job it IS the cutter, as a V-carve.
  */
-export const V_BIT_REST_SENTENCE = 'a V-bit is not a rest cutter here; the second program would be a V-carve (#221)';
+export const V_BIT_REST_SENTENCE =
+  'a V-bit is not a rest cutter here — on a region job it is the V-carve cutter itself, not a second program (#221)';
 
 /** Why a cutter was dropped before measuring, in one phrase, for a table cell. */
-function exclusionWords(
-  excluded: ToolCandidate['excluded'] | null,
-  note: string | null,
-  vTrace: boolean,
-): string | null {
+function exclusionWords(excluded: ToolCandidate['excluded'] | null, note: string | null): string | null {
   if (excluded === 'not-flat') {
-    // The `not-flat` class covers a ball nose, a bull nose and a V-bit. Only the V-bit on a region
-    // job has the #486 answer; the rest keep the generic phrase, which already names the case.
-    return vTrace ? V_BIT_REST_SENTENCE : 'not a flat end mill (or a V-bit on a job with regions)';
+    // Since #221 a V-bit with a usable cone is no longer excluded from a region job; the `not-flat`
+    // class that remains here is a ball or bull nose, or a V-bit whose cone the file does not state.
+    return 'not a flat end mill (or a V-bit whose tip and angle are not stated)';
   }
   if (excluded === 'no-feeds') return 'no cutting parameters for this material';
   if (excluded === 'broken') return 'every copy of it is marked broken';
@@ -315,7 +330,9 @@ export function reachTable(reach: Reachability): ReachTableRow[] {
     key: cutter.key,
     name: cutter.name,
     diameter: cutter.diameter,
-    excluded: exclusionWords(cutter.excluded, cutter.excludedNote, cutter.vTrace),
+    // #221 — a V-carve is offered, so it is not "excluded"; the cell says it was not measured as a
+    // flat disc, which is the same fact in the table's vocabulary.
+    excluded: cutter.vCarve ? V_BIT_CARVE_SENTENCE : exclusionWords(cutter.excluded, cutter.excludedNote),
     shares: cutter.excluded === null ? cutter.rows.map((r) => r.ratio) : cutter.rows.map(() => null),
     total: reach.totalShare.get(cutter.key) ?? 0,
     qualifies: cutter.qualifies,
@@ -336,7 +353,11 @@ export function finerThan(reach: Reachability, key: string): CutterReach | null 
   if (!base) return null;
   const baseShare = reach.totalShare.get(key) ?? 0;
   const better = reach.cutters.filter(
-    (c) => c.excluded === null && c.key !== key && (reach.totalShare.get(c.key) ?? 0) > baseShare + 1e-9,
+    (c) =>
+      c.excluded === null &&
+      !c.vCarve &&
+      c.key !== key &&
+      (reach.totalShare.get(c.key) ?? 0) > baseShare + 1e-9,
   );
   if (better.length === 0) return null;
   return better.reduce((a, b) => (b.diameter < a.diameter ? b : a));

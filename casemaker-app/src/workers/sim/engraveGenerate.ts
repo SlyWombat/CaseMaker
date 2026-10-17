@@ -50,7 +50,13 @@ import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import type { ConditionSummary } from '@/engine/cnc/toolCondition';
 import { type VCone } from '@/engine/cnc/vProfile';
 import { minimumXyStepMm } from '@/engine/cnc/machine';
-import { vCarveGrooveRefusal, vCarvePlane, vCarveStepover, type VCarvePlane } from '@/engine/cnc/vCarveGeometry';
+import {
+  vCarveGrooveRefusal,
+  vCarvePlane,
+  vCarveStepover,
+  vCarveStepoverClampNote,
+  type VCarvePlane,
+} from '@/engine/cnc/vCarveGeometry';
 import { isMetalTool } from '@/engine/cnc/registerCutter';
 import { MATERIAL_LABELS, isMetalMaterial } from '@/engine/cnc/materials';
 import { toPartPlan, labelProfile, jobDepthLimit, keepOutNameAt, type PartPlan } from '@/engine/cnc/engrave/partPlan';
@@ -546,11 +552,8 @@ function vCarveFindings(
             severity: 'warning',
             code: 'vcarve-stepover-clamped',
             labelId: item.id,
-            message:
-              `${item.name}: pitch ${mm(stepover.effective)} mm, clamped to the cutter's ` +
-              `${mm(cone.tipRadius)} mm tip radius from the requested ${mm(stepover.requested)} mm — ` +
-              `a wider pitch would leave a ridge of the top colour down strokes narrower than two ` +
-              `passes apart.`,
+            // One sentence, shared with the panel: the clamp note is the finding's own words.
+            message: vCarveStepoverClampNote(item.name, stepover, cone.tipRadius),
           });
         }
       }

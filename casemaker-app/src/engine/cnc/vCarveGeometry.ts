@@ -266,6 +266,23 @@ export function vCarvePassPitch(
 }
 
 /**
+ * The clamp in the words the `vcarve-stepover-clamped` finding uses. One function so the panel,
+ * the run sheet and the finding cannot paraphrase the same fact differently, and so the panel does
+ * not have to re-derive a sentence the CAM already states. `name` is the item's display name.
+ *
+ * Only meaningful when {@link VCarveStepover.clamped} is true; the caller decides whether to show
+ * it. No severity is implied here — the finding's severity is the caller's, and it is a NOTE.
+ */
+export function vCarveStepoverClampNote(name: string, stepover: VCarveStepover, tipRadius: number): string {
+  const mm = (v: number): string => String(Math.round(v * 1000) / 1000);
+  return (
+    `${name}: pitch ${mm(stepover.effective)} mm, clamped to the cutter's ${mm(tipRadius)} mm tip ` +
+    `radius from the requested ${mm(stepover.requested)} mm — a wider pitch would leave a ridge of ` +
+    'the top colour down strokes narrower than two passes apart.'
+  );
+}
+
+/**
  * Why a plane's groove is too narrow to machine, or null when it is fine (#221).
  *
  * The controller moves in whole X/Y steps, so a groove narrower than a few of them cannot be

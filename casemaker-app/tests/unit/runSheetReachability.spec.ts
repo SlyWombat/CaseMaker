@@ -161,7 +161,7 @@ describe('the run sheet’s reachability report (#410)', () => {
     expect(text).toContain('1 of your 3 cutters were not measured: not a flat end mill');
   });
 
-  it('answers a V-bit on a region job with the V-carve sentence, not the generic not-flat phrase (#486)', () => {
+  it('offers the V-carve as the cutter instead of printing a V-bit as an exclusion (#221)', () => {
     const vbit = tool('vbit', 0.3, {
       name: '30° engraving bit',
       shape: 'engraving',
@@ -171,14 +171,22 @@ describe('the run sheet’s reachability report (#410)', () => {
       halfAngle: 15,
       angle: 30,
     });
-    const reach = reachabilityFor(jobWith(), [...TOOLS, vbit], [], (key) =>
+    const job = jobWith();
+    job.stock.material = 'pla'; // the V row is PLA's
+    const reach = reachabilityFor(job, [...TOOLS, vbit], [], (key) =>
       ITEMS.map((i) => row(i.id, key === 'fine' ? { title: 900, sub: 80, lost: 0 }[i.id]! : 0)),
     );
+    // The V-carve is OFFERED and qualified; it is simply not a flat-disc measurement, so the table
+    // says that rather than "not a flat end mill".
+    const vRow = reach.cutters.find((c) => c.key === 'vbit')!;
+    expect(vRow.excluded).toBeNull();
+    expect(vRow.vCarve).toBe(true);
+    expect(vRow.qualifies).toBe(true);
     const text = textOf(section(sheetFor(reach), 'reach'));
-    expect(text).toContain('a V-bit is not a rest cutter here; the second program would be a V-carve (#221)');
-    // The ball nose keeps the generic phrase — the #221 sentence is about a V-bit, not every
+    expect(text).toContain('V-carve — the design is cut at the colour plane');
+    // The ball nose keeps the generic phrase — the V-carve sentence is about a V-bit, not every
     // cutter that is not flat.
-    expect(text).toContain('not a flat end mill (or a V-bit on a job with regions)');
+    expect(text).toContain('not a flat end mill (or a V-bit whose tip and angle are not stated)');
   });
 
   it('names the region NO cutter reaches, with its area, and that it is turned off', () => {

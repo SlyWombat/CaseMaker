@@ -97,6 +97,7 @@ function tableOf(rows: { key: string; diameter: number; share: number }[]): Reac
       diameter: r.diameter,
       shape: 'flat',
       vTrace: false,
+      vCarve: false,
       excluded: null,
       excludedNote: null,
       rows: [],
@@ -234,10 +235,10 @@ describe('vBitRestRefusal (#486)', () => {
       angle: 30,
     });
 
-  it('names the V-carve instead of measuring a V-bit as a rest cutter on a region job', () => {
+  it('names the V-carve as the job itself instead of measuring a V-bit as a rest cutter', () => {
     const job = jobWith('big');
     expect(vBitRestRefusal(job, vbit())).toBe(
-      'a V-bit is not a rest cutter here; the second program would be a V-carve (#221)',
+      'a V-bit is not a rest cutter here — on a region job it is the V-carve cutter itself, not a second program (#221)',
     );
     // The same cutter on a job with nothing left to rest-cut is not a refusal: a trace-only job
     // takes a V-bit as its ordinary cutter, and the route must not refuse it.
@@ -246,6 +247,30 @@ describe('vBitRestRefusal (#486)', () => {
 
   it('leaves a flat cutter alone, whatever the job holds', () => {
     expect(vBitRestRefusal(jobWith('big'), flatEndMill(0.6))).toBeNull();
+  });
+
+  it('adds no rest pass when the V-carve is the first cutter (#221)', () => {
+    const vbit: ToolLibraryEntry = {
+      key: 'inv:v30',
+      tool: flatEndMill(0.3, {
+        name: '30° engraving bit',
+        shape: 'engraving',
+        typeText: 'Engraving',
+        tipDiameter: 0.3,
+        diameter: 3.175,
+        halfAngle: 15,
+        angle: 30,
+        shoulderLength: 12,
+      }),
+      provenance: 'restPass test',
+    };
+    // Every flat loses the detail, so the V-carve is the recommendation.
+    const reach = reachabilityFor(jobWith('big'), [vbit, tool('flat', 1.0)], [], () => [row('big', 0)]);
+    expect(reach.recommendation.key).toBe('inv:v30');
+    const pick = restToolPick(reach, 'inv:v30');
+    expect(pick.cutter).toBeNull();
+    expect(pick.reason).toContain('the V-carve is the whole job at the colour plane');
+    expect(pick.reason).toContain('no flat rest pass to add');
   });
 });
 

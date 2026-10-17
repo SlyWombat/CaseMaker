@@ -5,11 +5,13 @@
  * losing detail.** A larger cutter is stiffer, clears faster and breaks less; the only reason
  * to go smaller is that the text needs it — which is exactly what #201 measures.
  *
- * TRACES WIDEN THE FIELD (#405). A job whose enabled items are all TRACES (a `line` or a
- * `stroke-label` — a line the cutter follows, `#219`) may also be cut by a V-bit, whose groove is a
- * function of depth and so is exactly a single-stroke line. A V-bit stays excluded the moment the
- * job holds a REGION item: opening a glyph needs one cutting width, and a cone's width grows with
- * depth, so the medial-axis V-carve that would lift that refusal stays in #221.
+ * TRACES AND REGIONS TAKE A V-BIT (#405, #221). A job whose enabled items are all TRACES (a `line`
+ * or a `stroke-label` — a line the cutter follows, `#219`) may be cut by a V-bit, whose groove is a
+ * function of depth and so is exactly a single-stroke line. Since #221 a region item may take one
+ * too: the V-carve pockets the design at the item's depth with the tip as the cutter, and the
+ * design is correct at the COLOUR PLANE (`tipRadius + (depth − film)·tanHalf`). The cone is not
+ * measured against a glyph as if it were a flat disc; it qualifies for the region by that model,
+ * and the panel states the plane, the floor inset and the effective pitch beside the requested one.
  *
  * This module is PURE: it is handed the per-candidate measurements (`measure`) and never
  * touches Manifold. That is what makes the rule testable without wasm, and it is why the type
@@ -101,13 +103,21 @@ export interface ToolCandidate {
    */
   catalogueNote?: string | null;
   /**
-   * True when this candidate is a V-bit excluded by `not-flat` BECAUSE the job holds a region item
-   * (#221/#486) — the one `not-flat` case with its own answer. A ball or bull nose keeps the
-   * generic phrase, and so does a V-bit that was excluded for not being a cutting tool at all.
-   * Optional for the same reason as `condition` and `catalogueNote`.
+   * True when this candidate is a V-bit on a job that holds a REGION item — a V-carve (#221).
+   * The cone is not measured against the glyphs as a flat disc: the design is correct at the
+   * colour plane, so the candidate qualifies by that model. Optional for the same reason as
+   * `condition` and `catalogueNote`.
    */
-  vTrace?: boolean;
+  vCarve?: boolean;
 }
+
+/**
+ * #221 — why a V-bit is the cutter on a region job, in the panel's "Why?" list and its
+ * recommendation sentence. One constant so the panel, the CLI and the run sheet cannot describe
+ * the strategy differently: the design is not the tip, it is the cone's width at the colour plane.
+ */
+export const V_BIT_CARVE_SENTENCE =
+  'V-carve — the design is cut at the colour plane, so the groove width there is the design';
 
 export interface ToolRecommendation {
   key: string | null;
@@ -182,6 +192,12 @@ function bySmallest(a: ToolCandidate, b: ToolCandidate): number {
 }
 
 function qualifyingReason(pick: ToolCandidate): string {
+  // #221 — a V-carve qualifies on its colour-plane model, not on a glyph-opening measurement.
+  if (pick.vCarve) {
+    return pick.reachKnown
+      ? `${V_BIT_CARVE_SENTENCE}.`
+      : `${V_BIT_CARVE_SENTENCE} (reach not recorded).`;
+  }
   // An unknown reach is not a refusal — the cutter is still recommended — but it is stated,
   // because a length nobody recorded cannot be checked against the holder gate.
   // "every item" (#214), not "every label": a job may contain only shapes.
@@ -243,6 +259,14 @@ export function itemName(item: EngraveAnyItem): string {
  * it when the signature gains a re-measure hook.
  */
 function compromiseReason(job: EngraveJob, pick: ToolCandidate): string {
+  // #221 — a V-carve has no glyph ratio to lose; it is closest only because its reach or its
+  // feeds kept it from qualifying outright, and the sentence has to say what it actually does.
+  if (pick.vCarve) {
+    return (
+      `No cutter you have keeps every item intact; the ${fmtDiameter(pick.diameter)} mm V-bit is ` +
+      'the closest, cutting the design at the colour plane.'
+    );
+  }
   const worst = pick.worst;
   if (!worst) {
     return `No cutter you have keeps every item intact; the smallest (${fmtDiameter(pick.diameter)} mm) is the closest.`;
@@ -282,7 +306,7 @@ function noCandidateReason(
   const base =
     catalogueNotes.length > 0
       ? 'No cutter in the list can be recommended for this material.'
-      : 'No cutter in the list is a flat end mill (or, for a trace-only job, a V-bit) with cutting parameters for this material.';
+      : 'No cutter in the list is a flat end mill — or, on a trace-only or region job, a V-bit — with cutting parameters for this material.';
   const broken =
     brokenCount === 0
       ? ''
@@ -331,6 +355,18 @@ function handPickedNote(
 }
 
 /**
+ * Does this job hold any enabled REGION item? Traces live in their own list (#219), so this is any
+ * enabled item in the four region lists — a label, a shape, a combined shape or an imported vector
+ * outline (#217). Exported for the panel's V-carve note: it and the recommendation must agree about
+ * whether the selected V-bit is cutting a region or tracing a line.
+ */
+export function hasRegionItems(job: EngraveJob): boolean {
+  return ([...job.labels, ...job.shapes, ...(job.combined ?? []), ...(job.vectors ?? [])] as EngraveAnyItem[]).some(
+    (item) => item.enabled,
+  );
+}
+
+/**
  * The rule. See the module doc for the premise; the acceptance tests are `recommendTool.spec.ts`.
  *
  * `measure(toolKey)` returns #201's `LabelEngravability[]` for that cutter, one row per enabled
@@ -372,13 +408,11 @@ export function recommendTool(
   const deepest = ([...job.labels, ...job.shapes, ...(job.combined ?? [])] as EngraveAnyItem[])
     .filter((item) => item.enabled)
     .reduce((max, item) => Math.max(max, item.depth), 0);
-  // #405 — a job whose enabled items are all TRACES (its region lists are empty) may take a V-bit;
-  // one that holds a region item may not (opening a glyph needs a single cutting width). Traces live
-  // in their own list (#219), so "has a region" is any enabled item in the four region lists — an
-  // imported vector outline (#217) included.
-  const hasRegions = ([...job.labels, ...job.shapes, ...(job.combined ?? []), ...(job.vectors ?? [])] as EngraveAnyItem[]).some(
-    (item) => item.enabled,
-  );
+  // #405/#221 — a job whose enabled items are all TRACES (its region lists are empty) may take a
+  // V-bit as a trace tool; one that holds a region item may take it as a V-CARVE. The list is
+  // shared with the panel (`hasRegionItems`) so the two cannot disagree about which strategy the
+  // job is in.
+  const hasRegions = hasRegionItems(job);
 
   const candidates: ToolCandidate[] = tools.map((entry) => {
     const tool = entry.tool;
@@ -392,11 +426,11 @@ export function recommendTool(
 
     const usable = cuttingForTrace(tool);
     if (!usable.ok) return { ...base, qualifies: false, excluded: 'not-flat' as const };
-    // A V-bit is a trace-only cutter: its width is a function of depth, so a region item (a glyph to
-    // open) cannot be cut by one and it is excluded by the same name a non-flat cutter always was.
-    if (usable.tool.shape === 'v' && hasRegions) {
-      return { ...base, qualifies: false, excluded: 'not-flat' as const, vTrace: true };
-    }
+    // #221 — a V-bit on a region job IS the cutter, not a `not-flat` exclusion. The V-carve
+    // pockets the floor at the item's depth with the tip, and the design is correct at the colour
+    // plane. It is not measured as a flat disc against the glyph, because a cone has no single
+    // width to measure against; the model itself is the qualification.
+    const vCarve = usable.tool.shape === 'v' && hasRegions;
     // #442 — a cutter the operator has marked broken, copy by copy, is out before its feeds are
     // looked at and before it is measured: whether the catalogue has a row for a bit is not a
     // question worth answering for a bit that is not in a condition to cut. Everything else — a
@@ -430,6 +464,20 @@ export function recommendTool(
         qualifies: false,
         excluded: 'no-feeds' as const,
         catalogueNote: catalogueStanding.note,
+      };
+    }
+
+    // #221 — the V-carve is qualified by its own model, not by a flat-disc measurement. Its
+    // `worst` stays null (there is no glyph-opening ratio to state for a cone), so the panel prints
+    // the V-carve sentence instead of "not measured". Reach still gates it: a cutter whose shoulder
+    // cannot clear the deepest cut is not a candidate, cone or not.
+    if (vCarve) {
+      return {
+        ...base,
+        qualifies: reachOk,
+        worst: null,
+        catalogueNote: catalogueStanding.note,
+        vCarve: true,
       };
     }
 

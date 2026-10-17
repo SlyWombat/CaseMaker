@@ -302,21 +302,37 @@ describe('recommendTool and V-bits (#405)', () => {
     };
   };
 
-  it('excludes a V-bit from a job that holds a region item, and never measures it', () => {
+  it('offers a V-bit on a region job as the V-carve cutter, without measuring it as a flat disc', () => {
     const job = jobWithLabel('l1', 'CASE', 1);
+    // The V row is PLA's; the default job is softwood, where a V-bit is honestly refused at feeds.
+    job.stock = { ...job.stock, material: 'pla' };
     const measure = vi.fn((_key: string) => [row('l1', 1)]);
     const rec = recommendTool(job, [vBit(), tool('flat', 1.0)], [], measure);
     // One candidate measured — the flat one. A cone is not measured against a glyph at all, because
-    // a cone has no single width for the glyph's opening to be measured against.
+    // a cone has no single width for the glyph's opening to be measured against; its qualification
+    // is the colour-plane model (#221).
     expect(measure).toHaveBeenCalledTimes(1);
     expect(measure).toHaveBeenCalledWith('flat');
-    expect(candidate(rec, 'inv:v30').excluded).toBe('not-flat');
-    // #221/#486 — this is the ONE `not-flat` case with its own answer, so the candidate says so:
-    // the panel prints "the second program would be a V-carve" rather than "not a flat end mill".
-    expect(candidate(rec, 'inv:v30').vTrace).toBe(true);
+    expect(candidate(rec, 'inv:v30').excluded).toBeUndefined();
+    expect(candidate(rec, 'inv:v30').vCarve).toBe(true);
+    expect(candidate(rec, 'inv:v30').qualifies).toBe(true);
+    // The flat keeps the pick while it qualifies: larger diameter, and a pocket is the simpler cut.
     expect(candidate(rec, 'flat').excluded).toBeUndefined();
-    expect(candidate(rec, 'flat').vTrace).toBeUndefined();
+    expect(candidate(rec, 'flat').vCarve).toBeUndefined();
     expect(rec.key).toBe('flat');
+  });
+
+  it('picks the V-carve when no flat keeps the detail', () => {
+    const job = jobWithLabel('l1', 'CASE', 1);
+    job.stock = { ...job.stock, material: 'pla' };
+    const rec = recommendTool(job, [vBit(), tool('flat', 1.0)], [], (_key) => [row('l1', 0.1)]);
+    expect(rec.key).toBe('inv:v30');
+    expect(rec.compromise).toBe(false);
+    // The reason is the strategy sentence, not "largest cutter that keeps every item intact": the
+    // V-carve is correct at the colour plane, and the panel prints the same constant.
+    expect(rec.reason).toBe(
+      'V-carve — the design is cut at the colour plane, so the groove width there is the design.',
+    );
   });
 
   it('does not mark a ball nose as the V-carve case', () => {
@@ -326,7 +342,7 @@ describe('recommendTool and V-bits (#405)', () => {
     const ball = tool('ball', 1.0, { shape: 'ball', typeText: 'Ball End' });
     const rec = recommendTool(job, [ball, tool('flat', 1.0)], [], vi.fn((_key: string) => [row('l1', 1)]));
     expect(candidate(rec, 'ball').excluded).toBe('not-flat');
-    expect(candidate(rec, 'ball').vTrace).toBeUndefined();
+    expect(candidate(rec, 'ball').vCarve).toBeUndefined();
   });
 
   it('qualifies a V-bit for a trace-only job and measures it', () => {
