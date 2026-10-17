@@ -1,5 +1,5 @@
 import { featureSim } from '@/platform/features';
-import { useEffect, useRef, useState, type CSSProperties, type JSX, type RefObject } from 'react';
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type JSX, type RefObject } from 'react';
 import { newItemDepthMm, useEngraveJobStore } from '@/store/engraveJobStore';
 import { useProjectStore } from '@/store/projectStore';
 import { useEngravePreviewStore } from '@/store/engravePreviewStore';
@@ -7,11 +7,17 @@ import { expandEngraveRow, useEngraveRowStore } from '@/store/engraveRowStore';
 import { useEngraveRunStore, requiredAckCodes, releaseBlocker, runErrorCodes, saveBlocker, uploadBlocker } from '@/store/engraveRunStore';
 import { useMachineStore } from '@/store/machineStore';
 import { useSimStore } from '@/store/simStore';
+import { useCncModeStore } from '@/store/cncModeStore';
+import { useEngravePackageStore } from '@/store/engravePackageStore';
+import { useStockStore } from '@/store/stockStore';
+import { preflightHub } from '@/engine/cnc/preflight';
+import type { PreflightCause } from '@/engine/cnc/preflight';
 import { runContextFor } from '@/store/machineRunStore';
 import { stepAtLine } from '@/engine/cnc/playbackClock';
 import { canDriveMachine } from '@/platform/capabilities';
 import { EngraveMachineUpload } from './EngraveMachineUpload';
 import { EngraveReleaseStep } from './EngraveReleaseStep';
+import { EngravePreflight } from './EngravePreflight';
 import { saveEngraveProgram } from '@/engine/exportTrigger';
 import { useSettingsStore } from '@/store/settingsStore';
 import {
@@ -793,6 +799,60 @@ export function EngravePanel(): JSX.Element {
   const simEnabled = featureSim;
   const running = run.phase === 'generating' || run.phase === 'simulating' || run.phase === 'checking';
 
+  // ---- #419 §3: the mode, and the cut gate --------------------------------------------------
+
+  // The mode is view state (store/cncModeStore.ts): the CNC surface is this right-rail panel, so
+  // the [Design][Cut] header lives at the top of it rather than in a new chrome bar. `jobId` keeps
+  // the mode with its document — opening another job starts at Design, because Cut is a statement
+  // about THIS job's package. Selecting the same job leaves the mode alone.
+  const mode = useCncModeStore((s) => s.mode);
+  const showMode = useCncModeStore((s) => s.show);
+  const syncJob = useCncModeStore((s) => s.syncJob);
+  useEffect(() => {
+    syncJob(job.id);
+  }, [job.id, syncJob]);
+
+  const calibration = useSettingsStore((s) => s.machineCalibration) ?? null;
+  const shelfItems = useStockStore((s) => s.items);
+  // Read through the store API, not localStorage directly: R8 moves the package into the job
+  // document with #425, and this line must not have to change with it.
+  const jobPackage = useEngravePackageStore((s) => s.packages.find((p) => p.jobId === job.id) ?? null);
+  // Only a stock entry actually taken off the shelf is handed to the stock owner. A piece typed in
+  // (or a file) that was later ALSO put on the shelf is still not this job's shelf pick.
+  const shelfEntryId = job.stockEntry?.kind === 'shelf' ? job.stockEntry.shelfId : null;
+  const shelfItem = shelfEntryId === null ? null : (shelfItems.find((item) => item.id === shelfEntryId) ?? null);
+
+  // PRESSING CUT IS WHAT ASKS THE GATE. The report is built only while Cut is up, so Design's
+  // render pays nothing for a verification pass it does not show; pressing the tab changes `mode`,
+  // which rebuilds this on the next render. Nothing is stored: every visit re-runs `collect()`,
+  // rather than replaying a verdict from an edit ago.
+  const preflight = useMemo(
+    () =>
+      mode === 'cut'
+        ? preflightHub({
+            job,
+            generated: run.generated,
+            staleSince: run.staleSince,
+            package: jobPackage,
+            calibration,
+            shelfItem,
+            // No honest reachability table is available synchronously in this slice — the preview
+            // holds a recommendation, not the measured table. Null leaves `recommendTool`'s verdict
+            // unstated rather than guessing it, so `no-cutter` stays unwired here.
+            reach: null,
+          })
+        : null,
+    [mode, job, run.generated, run.staleSince, jobPackage, calibration, shelfItem],
+  );
+
+  const backToDesign = (cause: PreflightCause | null): void => {
+    // §5.6's "Back to Design" lands on the row the owner named (through #411's expand seam), then
+    // leaves Cut. `hubTarget` is still the unresolved placeholder, so there is no scroll yet; a
+    // cause naming no item (a run-policy row, say) simply returns to the form.
+    if (cause?.labelId !== undefined) expandEngraveRow(cause.labelId);
+    showMode('design');
+  };
+
   // The run sheet is built on demand from the current job and the last generated result, and
   // shown as an overlay (#207). A stale result is not offered: the sheet would describe a job the
   // user has since changed.
@@ -1331,6 +1391,40 @@ export function EngravePanel(): JSX.Element {
       {/* Empty, unseen and ALWAYS here, so there is a live region to write a removal into (#411
           review). See `RemovalAnnouncement` for why the visible strip cannot be the live one. */}
       <RemovalAnnouncement />
+
+      {/* #419 §3 — the CNC mode switch. A header inside the panel, not a new chrome bar: the CNC
+          screen IS this right rail. Cut is never disabled: pressing it always re-asks the gate, so
+          a red job still reaches the page that says what is red. Design is today's stack below,
+          unchanged. */}
+      <div
+        data-testid="cnc-mode-switch"
+        role="group"
+        aria-label="CNC mode"
+        style={{ display: 'flex', gap: 4, marginBottom: 8 }}
+      >
+        <button
+          type="button"
+          data-testid="cnc-mode-design"
+          aria-pressed={mode === 'design'}
+          style={{ flex: 1, padding: 6 }}
+          onClick={() => showMode('design')}
+        >
+          Design
+        </button>
+        <button
+          type="button"
+          data-testid="cnc-mode-cut"
+          aria-pressed={mode === 'cut'}
+          title="Ask every preflight owner about this job and show what they say."
+          style={{ flex: 1, padding: 6 }}
+          onClick={() => showMode('cut')}
+        >
+          Cut
+        </button>
+      </div>
+
+      {mode === 'design' ? (
+        <>
 
       {/* The guided job setup (#254): a path INTO this panel. A new job can be set up from here
           without hunting through the fields below; skipping it leaves every field as it was. */}
@@ -2473,6 +2567,10 @@ export function EngravePanel(): JSX.Element {
         <p style={{ ...MUTED, opacity: 0.7 }} data-testid="engrave-preview-loading">
           Rebuilding the preview…
         </p>
+      )}
+        </>
+      ) : (
+        preflight !== null && <EngravePreflight report={preflight} onBackToDesign={backToDesign} />
       )}
     </div>
   );
