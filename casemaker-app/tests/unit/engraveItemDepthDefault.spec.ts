@@ -21,6 +21,7 @@ import {
 import { resetShopDefaultsStore, useShopDefaultsStore } from '@/store/shopDefaultsStore';
 import { KNOWN_DEFAULTS, ShopDefaultsSchema, readDefault } from '@/platform/defaultsClient';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
+import { BLANK_BAND_FILL_FALLBACK } from '@/engine/cnc/engrave/blankLabelSeed';
 import { useSettingsStore } from '@/store/settingsStore';
 import { useEngravePreviewStore } from '@/store/engravePreviewStore';
 
@@ -28,11 +29,11 @@ import { useEngravePreviewStore } from '@/store/engravePreviewStore';
  * A location that chose these numbers, parsed through the section's own schema. Takes the whole set
  * at once: the section is one map, so a second call would replace the first key rather than add to it.
  */
-function store(entries: Record<string, number>): void {
+function store(entries: Record<string, number>, unit = 'mm'): void {
   const section = Object.fromEntries(
     Object.entries(entries).map(([key, value]) => [
       key,
-      { value, source: 'chosen', setAt: '2026-10-16', unit: 'mm', note: null },
+      { value, source: 'chosen', setAt: '2026-10-16', unit, note: null },
     ]),
   );
   useShopDefaultsStore.setState({ status: 'present', defaults: ShopDefaultsSchema.parse(section) });
@@ -123,5 +124,59 @@ describe('a new item’s starting depth (#451)', () => {
       defaults: { [NEW_ITEM_DEPTH_KEY]: { value: 0, source: 'chosen', setAt: '2026-10-16', unit: 'mm', note: null } },
     });
     expect(newItemDepthMm()).toBe(0.5);
+  });
+});
+
+// #451 — the seeded line's SIZE is the shop's too. `blankLabelSeed` is pure and must stay so (it is
+// also called from the worker side of the app), so the two store routes that seed a blank read
+// `engrave.blankBandFill` and pass it in. This walks the real route rather than the module: if the
+// store forgot the hand-off, the default and the shop's own number would seed the same line.
+describe('the seeded line’s band fill (#451)', () => {
+  /** A bare blank of a footprint that is NOT the demo plank, so `takeBlankStock` re-lays the set. */
+  const BLANK = { enabled: true, width: 60, height: 40, thickness: 12, cornerRadius: 0 };
+
+  /** Take that blank as the job's stock and answer the size of the one line the route seeded. */
+  function seededSize(): number {
+    useEngraveJobStore.getState().takeBlankStock(BLANK);
+    const labels = useEngraveJobStore.getState().job.labels;
+    expect(labels).toHaveLength(1);
+    return labels[0]!.size;
+  }
+
+  /** Start the next case from the shipped demo job again (the route replaces its label set). */
+  function resetJob(): void {
+    act(() => {
+      useEngraveJobStore.setState({ job: defaultEngraveJob() });
+    });
+  }
+
+  it('takes the share the location holds, not the fallback', () => {
+    // No location: the labelled fallback, 0.7 of the band.
+    const fallback = seededSize();
+    expect(BLANK_BAND_FILL_FALLBACK).toBe(0.7);
+
+    // A shop that seeds a smaller line gets a smaller line: 0.5 of the same band cannot round up.
+    resetJob();
+    store({ 'engrave.blankBandFill': 0.5 }, 'x');
+    expect(seededSize()).toBeLessThan(fallback);
+
+    // …and a fuller band seeds a line no smaller — never the fallback by accident.
+    resetJob();
+    store({ 'engrave.blankBandFill': 0.9 }, 'x');
+    expect(seededSize()).toBeGreaterThanOrEqual(fallback);
+  });
+
+  it('falls back rather than seeding from a share the rule refuses', () => {
+    // A location holding a value outside `KNOWN_DEFAULTS`'s rule must not be what a line is sized
+    // from: zero of the band floors to no cap at all, so `blankLabelSeed` keeps its labelled number.
+    const fallback = seededSize();
+    resetJob();
+    useShopDefaultsStore.setState({
+      status: 'present',
+      defaults: {
+        'engrave.blankBandFill': { value: 0, source: 'chosen', setAt: '2026-10-17', unit: 'x', note: null },
+      },
+    });
+    expect(seededSize()).toBe(fallback);
   });
 });

@@ -103,8 +103,8 @@ describe('#363/#364 — the blank label seed', () => {
     // 1 … 12.55 and 25.55 … 37.1 — both exactly 11.55 tall, so the FRONT one wins the tie and the
     // line's centre is 6.775.
     expect(line.position.y).toBeCloseTo(6.775, 6);
-    // 0.7 × 11.55 = 8.085, floored to the 8 mm cap the issue's decision quotes — and it fits the
-    // 74.2 mm of usable width at that size, so nothing shrinks it.
+    // The DEFAULT band fill, 0.7 × 11.55 = 8.085, floors to the 8 mm cap the issue's decision
+    // quotes — and it fits the 74.2 mm of usable width at that size, so nothing shrinks it.
     expect(line.size).toBe(8);
     expect(line.rotation).toBe(0);
     expect(line.enabled).toBe(true);
@@ -221,6 +221,33 @@ describe('#363/#364 — the blank label seed', () => {
     expect(seed({ blank: { length: 2, width: 10, pocket: null }, edgeMargin: 0.5 })).toBeNull();
     // A whitespace placeholder is not a line.
     expect(seed({ text: '   ' })).toBeNull();
+  });
+});
+
+describe('#451 — the band fill is the shop default', () => {
+  it('uses the labelled fallback when the caller passes none', () => {
+    // The default badge's front band is 11.55 mm (see the first test above): 0.7 × 11.55 = 8.085,
+    // floored to the 8 mm cap the issue's decision quotes. The store hand-off below exercises this
+    // same path, so the no-service build is covered through the real caller as well.
+    expect(seed()!.size).toBe(8);
+  });
+
+  it('takes the fraction the caller passes', () => {
+    // 0.5 × 11.55 = 5.775, floored to 5 — and 'Name' fits the 74.2 mm of usable width at that size.
+    expect(seed({ bandFill: 0.5 })!.size).toBe(5);
+    // A full band is allowed: floor(1 × 11.55) = 11, and 'Name' bold's ink is 1.011 × 11 = 11.1 mm
+    // tall, inside the 11.55 mm band, and 3.536 × 11 = 38.9 mm wide, inside the usable width.
+    expect(seed({ bandFill: 1 })!.size).toBe(11);
+  });
+
+  it('falls back rather than seeding nothing when the fraction is out of range', () => {
+    // Zero or less would floor the starting cap below 1 mm and the search would never run; more
+    // than 1 is not "part of the band". The location's own rule refuses both, but a hand-built
+    // caller can pass them, so the labelled fallback stands — the same reading the sim's pitches
+    // take (#438/#451).
+    for (const bad of [0, -0.2, 1.01, Number.NaN, Number.POSITIVE_INFINITY]) {
+      expect(seed({ bandFill: bad })!.size).toBe(8);
+    }
   });
 });
 

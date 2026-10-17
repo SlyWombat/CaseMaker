@@ -23,7 +23,7 @@
 import type { FeedCatalogueRow } from '@/engine/cnc/feeds';
 import type { ConditionSummary } from '@/engine/cnc/toolCondition';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
-import { LOST_DETAIL_RATIO, type LabelEngravability } from '@/workers/sim/engraveGeometry';
+import { LOST_DETAIL_RATIO_FALLBACK, type LabelEngravability } from '@/workers/sim/engraveGeometry';
 import type { EngraveJob } from '@/types/engraveJob';
 import { findItem, itemName, recommendTool, type ToolCandidate, type ToolRecommendation } from './recommendTool';
 
@@ -82,7 +82,7 @@ export interface CutterReach {
   bestRatio: number;
   /** The smallest share of any single item, 0…1. 0 when it reaches nothing anywhere. */
   worstRatio: number;
-  /** True when every item survives at `LOST_DETAIL_RATIO` with no character lost — #201's bar. */
+  /** True when every item survives at `LOST_DETAIL_RATIO_FALLBACK` with no character lost — #201's bar. */
   qualifies: boolean;
 }
 
@@ -144,6 +144,7 @@ export function reachabilityFor(
   catalogue: readonly FeedCatalogueRow[],
   measure: (key: string) => LabelEngravability[],
   conditions?: ReadonlyMap<string, ConditionSummary> | null,
+  lostDetailWarnRatio: number | null = null,
 ): Reachability {
   const measured = new Map<string, LabelEngravability[]>();
   const recommendation = recommendTool(
@@ -156,6 +157,7 @@ export function reachabilityFor(
       return rows;
     },
     conditions,
+    lostDetailWarnRatio,
   );
 
   const items = enabledItems(job);
@@ -317,4 +319,4 @@ export function finerThan(reach: Reachability, key: string): CutterReach | null 
 }
 
 /** Re-exported so a report can say what "intact" meant without importing the geometry worker. */
-export { LOST_DETAIL_RATIO };
+export { LOST_DETAIL_RATIO_FALLBACK };

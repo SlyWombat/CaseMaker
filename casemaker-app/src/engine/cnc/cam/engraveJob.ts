@@ -244,6 +244,10 @@ function buildMoves(prepared: Prepared, params: CutParams): CamMove[] {
  *
  * `rapid` sits BEFORE `order` because a required parameter cannot follow a defaulted one — the
  * caller that passed `order` positionally gets a type error rather than a silent shift.
+ *
+ * `peckClearanceMm` is the shop's `drill.peckClearanceMm` (#451), read on the main thread and sent
+ * as a plain number; `null`/absent leaves `drillMoves`'s labelled fallback in charge. It is the only
+ * shop default this CAM core takes, because the drill path is the only part of it that reads one.
  */
 export function generateEngrave(
   tl: ManifoldToplevel,
@@ -252,6 +256,7 @@ export function generateEngrave(
   params: CutParams,
   rapid: RapidEstimate,
   order: 'nearest' = 'nearest',
+  peckClearanceMm: number | null = null,
 ): ToolpathIR {
   const radiusResult = cuttingRadiusForSweep(tool);
   if (!radiusResult.ok) throw new Error(`generateEngrave: ${radiusResult.reason}`);
@@ -270,7 +275,7 @@ export function generateEngrave(
         rings: [],
         passes: [],
         firstCut: holes[0] ?? [0, 0],
-        drillMoves: drillMoves(holes, label.depth, params.peck, params),
+        drillMoves: drillMoves(holes, label.depth, params.peck, params, peckClearanceMm),
       };
     }
     const rings = pocketLoops(label.polygons, toolRadius, params.stepOver, offset);

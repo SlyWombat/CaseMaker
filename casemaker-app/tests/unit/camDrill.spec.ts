@@ -19,7 +19,8 @@ import { feedsFor } from '@/engine/cnc/feeds';
 import { Z1 } from '@/engine/cnc/machine';
 import { flatEndMill } from '@/engine/cnc/tool';
 import { generateEngrave } from '@/engine/cnc/cam/engraveJob';
-import { orderHolesNearest, peckDepths } from '@/engine/cnc/cam/drill';
+import { orderHolesNearest, peckDepths, drillMoves, PECK_CLEARANCE_FALLBACK_MM } from '@/engine/cnc/cam/drill';
+import { HOP_Z, SAFE_Z } from '@/engine/cnc/cam/ir';
 import { parseEngraveJob } from '@/store/engraveJobSchema';
 import type { EngraveDrill, EngraveJob } from '@/types/engraveJob';
 import type { NodeMeshOutput } from '@/workers/geometry/meshOutput';
@@ -49,12 +50,12 @@ function singleHole(): EngraveJob {
 }
 
 /** The toolpath IR for a drill job, off the SAME regions the app would generate. */
-function drillIr(job: EngraveJob) {
+function drillIr(job: EngraveJob, peckClearanceMm: number | null = null) {
   const { regions, tool } = cutRegions(tl, job);
   if (tool === null) throw new Error(`${TOOL_KEY} is not in the tool library`);
   const feeds = feedsFor([], job.stock.material, tool, Z1, job.cutOverride);
   if (!feeds.ok) throw new Error(feeds.reason);
-  return generateEngrave(tl, regions, tool, feeds.params, Z1.rapidEstimate);
+  return generateEngrave(tl, regions, tool, feeds.params, Z1.rapidEstimate, 'nearest', peckClearanceMm);
 }
 
 /** Rebuild a solid from a meshed sweep result so its volume can be read. */
@@ -77,6 +78,38 @@ describe('drill CAM (#220)', () => {
       expect(m.x).toBe(50);
       expect(m.y).toBe(30);
     }
+  });
+
+  it('stops each re-entry rapid the shop clearance above the floor just cut (#451)', () => {
+    const params = { rpm: 12000, feed: 500, plungeFeed: 200, stepDown: 1, stepOver: 1, peck: 1, air: false };
+    // Per hole: down at the hop height, to the face, then after each of the first three pecks up to
+    // the hop height and back down to the floor just cut plus the clearance. The expected Z is built
+    // the way the code builds it ("floor + clearance"), so 1.2 mm is not compared against a rounded 0.2.
+    const rapids = (clearance: number | null) =>
+      drillMoves([[0, 0]], 4, 1, params, clearance)
+        .filter((m) => m.kind === 'rapid')
+        .map((m) => m.z);
+    const aboveFloor = [HOP_Z, 0, HOP_Z, -1 + 1.2, HOP_Z, -2 + 1.2, HOP_Z, -3 + 1.2, HOP_Z, SAFE_Z];
+    expect(rapids(1.2)).toEqual(aboveFloor);
+    // The region CAM hands the number to `drillMoves` — the hole path the app generates reads it,
+    // not only the function in isolation.
+    const op = drillIr(singleHole(), 1.2).operations[0]!;
+    expect(op.moves.filter((m) => m.kind === 'rapid').map((m) => m.z)).toEqual(aboveFloor);
+  });
+
+  it('falls back — labelled — when no usable clearance is handed in (#451)', () => {
+    const params = { rpm: 12000, feed: 500, plungeFeed: 200, stepDown: 1, stepOver: 1, peck: 1, air: false };
+    const rapids = (clearance: number | null | undefined) =>
+      drillMoves([[0, 0]], 4, 1, params, clearance)
+        .filter((m) => m.kind === 'rapid')
+        .map((m) => m.z);
+    const c = PECK_CLEARANCE_FALLBACK_MM;
+    const expected = [HOP_Z, 0, HOP_Z, -1 + c, HOP_Z, -2 + c, HOP_Z, -3 + c, HOP_Z, SAFE_Z];
+    expect(rapids(null)).toEqual(expected);
+    expect(rapids(undefined)).toEqual(expected);
+    expect(rapids(0)).toEqual(expected);
+    expect(rapids(Number.NaN)).toEqual(expected);
+    expect(rapids(-1)).toEqual(expected);
   });
 
   it('posts no canned cycle: no G81, G82 or G83 anywhere in the file', () => {

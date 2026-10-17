@@ -75,6 +75,22 @@ import type { OraclePredicted } from '@/engine/cnc/engrave/oracle';
 /** The stage that stopped the pipeline, or `done` when everything passed. */
 export type EngraveStage = 'findings' | 'feeds' | 'cam' | 'post' | 'verify' | 'done';
 
+/**
+ * The shop defaults the engrave pipeline reads but this realm cannot (#451): the location lives on
+ * the main thread, so the caller sends each chosen number as plain data. `null`/absent means the
+ * caller had no location — the receiving module then keeps its own LABELLED fallback, never an
+ * unlabelled literal.
+ *
+ * `lostDetailWarnRatio` is `engrave.lostDetailWarnRatio` (the share of an item's area a cutter must
+ * keep before `item-detail-lost` is raised). `peckClearanceMm` is `drill.peckClearanceMm` (how far
+ * above the floor just cut a peck's re-entry rapid stops). Both are read by `engraveRunStore` and
+ * `engravePreviewStore` — the preview needs only the ratio; the run needs both.
+ */
+export interface EngraveShopOpts {
+  lostDetailWarnRatio?: number | null;
+  peckClearanceMm?: number | null;
+}
+
 /** A stage refusal with its reason, so the panel can list it under the right row. */
 export interface EngraveFailure {
   stage: EngraveStage;
@@ -293,12 +309,16 @@ function drillPolygons(tl: ManifoldToplevel, holes: readonly [number, number][],
  * `toolForJob(job, tools)` from the list the preview was sent. One `Tool` object then feeds the
  * measurement, the findings, the CAM and the verifier, so the run can never disagree with itself
  * about which cutter it used.
+ *
+ * `shop` carries the caller's engrave shop defaults (#451); only the warn ratio is read here, since
+ * this stage measures and finds rather than emitting a peck path. See {@link EngraveShopOpts}.
  */
 export function engraveRegions(
   tl: ManifoldToplevel,
   job: EngraveJob,
   tool: Tool | null,
   margins: EngraveMargins = effectiveMargins(job, MARGIN_DEFAULTS),
+  shop: EngraveShopOpts = {},
 ): EngraveRegions {
   const plan = toPartPlan(job);
   const perChar = perCharFor(job);
@@ -312,7 +332,7 @@ export function engraveRegions(
   const traceRadius = tool === null ? null : (depth: number): number | null => traceRadiusAt(tool, depth);
 
   const measured = radius === null ? [] : measureLabels(tl, plan, radius, job.edgeMargin, perChar);
-  const engFindings = radius === null ? [] : engravabilityFindings(job, measured, ratioAtFor(tl, job, radius), tool);
+  const engFindings = radius === null ? [] : engravabilityFindings(job, measured, ratioAtFor(tl, job, radius), tool, shop.lostDetailWarnRatio ?? null);
 
   // #171/#345 — the cut regions a void check reads, built ONCE: the engrave openings plus the
   // swept traces (#270). A void-free job is the common case and pays for nothing here — sweeping
@@ -563,6 +583,12 @@ export function depthLimitReason(stack: StackDepthLimit, job: EngraveJob, x: Mm,
  * the frame file — the same object the caller loads the simulation with. Before this, the verifier
  * expanded `M6`, `G28` and the probe cycle against the vendor's anchors while the simulation expanded
  * them against the calibrated ones, so the gate and the sim judged two different machines for one .nc.
+ *
+ * `shop` is the engrave pipeline's shop defaults (#451), read by the caller for the same reason
+ * `margins` is: `engrave.lostDetailWarnRatio` decides which items the findings warn about, and
+ * `drill.peckClearanceMm` decides where each peck's re-entry rapid stops. Omitted, both modules keep
+ * their labelled fallbacks, so a test or a headless script with no location still cuts the same
+ * program the shipped default would.
  */
 export function engraveGenerate(
   tl: ManifoldToplevel,
@@ -571,13 +597,14 @@ export function engraveGenerate(
   catalogue: readonly FeedCatalogueRow[],
   calibration: MachineCalibration | null = null,
   margins: EngraveMargins = effectiveMargins(job, MARGIN_DEFAULTS),
+  shop: EngraveShopOpts = {},
 ): EngraveGenerated {
   // #347 — the JOB's machine, not the app's only one: the envelope, the spindle ceiling and the
   // frame below are read off the profile the document names. The POST is still `postZ1`'s dialect,
   // which is the only post this app has; a second mill is a second post, and this line is where a
   // job naming it would have to be refused until there is one.
   const mill = jobMachine(job, calibration);
-  const { plan, regions, predicted, findings } = engraveRegions(tl, job, tool, margins);
+  const { plan, regions, predicted, findings } = engraveRegions(tl, job, tool, margins, shop);
   const errors: EngraveFailure[] = [];
 
   const stop = (stage: EngraveStage, extra?: { feeds?: FeedsResult | null; message?: string }): EngraveGenerated => {
@@ -619,7 +646,7 @@ export function engraveGenerate(
     // tool, and `generateEngrave` refuses a V-bit by name (rightly: opening a region needs the
     // offset radius). The two CAMs return IRs describing the same machine state, so a job with no
     // regions simply IS the trace IR, and its `.nc` is unchanged.
-    const regionIr = regions.length === 0 ? null : generateEngrave(tl, regions, tool, feeds.params, mill.rapidEstimate);
+    const regionIr = regions.length === 0 ? null : generateEngrave(tl, regions, tool, feeds.params, mill.rapidEstimate, 'nearest', shop.peckClearanceMm ?? null);
     // #287 — single-line traces (#219) are their own CAM: the cutter's centre follows the path,
     // so there is no region to open, no offset and no pocketing. They are appended AFTER the
     // region operations, so a trace can shift no pocket's ordering, and a job with none joins an

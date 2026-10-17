@@ -45,9 +45,10 @@
  * 3.175 mm cutter at 0.1 walks some 5 000 measured steps on a ~100 000-cell grid — so it must never be
  * called on the UI thread. The cost grows with the pocket's area over the square of the engagement.
  *
- * THE NUMBERS ARE THE SHOP'S (`location.json` defaults): the engagement, step-down, helix fraction and
- * ramp angle are chosen; the feeds and the spindle speed are OUR placeholders, labelled unmeasured,
- * and no Makera vendor number is in the repo (#347).
+ * THE NUMBERS ARE THE SHOP'S (`location.json` defaults): the engagement, step-down, helix fraction,
+ * ramp angle, entry clearance and the planner's three refusal limits (grid size, residual share, neck
+ * area) are chosen; the feeds and the spindle speed are OUR placeholders, labelled unmeasured, and no
+ * Makera vendor number is in the repo (#347).
  */
 
 import { readDefault, type ShopDefaults } from '@/platform/defaultsClient';
@@ -67,6 +68,17 @@ export interface AdaptiveSettings {
   helixDiameterFraction: number;
   /** The helix's and the ramp's descent angle, degrees. */
   rampAngleDeg: number;
+  /**
+   * How far above the floor just cut a rapid down a cleared column stops, and the clearance an entry
+   * starts from, mm.
+   */
+  entryClearanceMm: number;
+  /** A grid larger than this many cells is refused rather than ground through. */
+  maxCells: number;
+  /** The left-over the plan tolerates as grid noise along the walls, as a share of the area to clear. */
+  residualShare: number;
+  /** Material in a neck narrower than the grid can see, mm², past which the plan is refused. */
+  neckAreaMm2: number;
   /** The clearing and linking feed, mm/min — a placeholder. */
   cutFeed: number;
   /** The helix, ramp and feed-down feed, mm/min — a placeholder. */
@@ -80,6 +92,10 @@ const KEYS: Record<keyof AdaptiveSettings, string> = {
   stepDownMm: 'adaptive.stepDownMm',
   helixDiameterFraction: 'adaptive.helixDiameterFraction',
   rampAngleDeg: 'adaptive.rampAngleDeg',
+  entryClearanceMm: 'adaptive.entryClearanceMm',
+  maxCells: 'adaptive.maxCells',
+  residualShare: 'adaptive.residualShare',
+  neckAreaMm2: 'adaptive.neckAreaMm2',
   cutFeed: 'adaptive.cutFeed',
   entryFeed: 'adaptive.entryFeed',
   spindleRpm: 'adaptive.spindleRpm',
@@ -103,7 +119,11 @@ export function adaptiveSettings(defaults: ShopDefaults | null): {
 /**
  * The planner's own constants. CHOSEN, and about the method rather than the cut, so they are not shop
  * defaults: the target and the ceiling as fractions of the cap (the gap is the measuring margin), the
- * fan of directions, and how far above the floor a rapid down a cleared column stops.
+ * fan of directions, and how far inside the exact wall test each clearing step stays.
+ *
+ * The constants that USED to live here and do not — the entry clearance above the floor, the grid's
+ * cell cap and the two residual limits — describe how the cut is planned and where it gives up, which
+ * is the shop's to choose, so they are `adaptive.*` defaults now (#451).
  */
 export const TARGET_OF_CAP = 0.7;
 export const ACCEPT_OF_CAP = 0.8;
@@ -113,15 +133,8 @@ const BISECTIONS = 7;
 const RING_POINTS = 24;
 /** A step ahead scoring under this (within ~15 % of the target, climb, a modest turn) ends the search. */
 const GOOD_ENOUGH = 0.25;
-export const ENTRY_CLEARANCE_MM = 0.5;
 /** How far inside the exact wall test every clearing step stays, mm: the written moves' rounding. */
 const WALL_MARGIN_MM = 0.001;
-/** A grid larger than this many cells is refused rather than ground through. */
-const MAX_CELLS = 12_000_000;
-/** The left-over the plan tolerates as grid noise along the walls, as a share of the area to clear. */
-const RESIDUAL_SHARE = 0.005;
-/** Material in a neck narrower than the grid can see, mm², past which the plan is refused. */
-const NECK_AREA_MM2 = 0.05;
 
 export interface AdaptiveInput {
   tool: Tool;
@@ -216,14 +229,18 @@ export function planAdaptive(input: AdaptiveInput): AdaptiveResult {
   const cap = s.engagementFraction * D;
   const target = TARGET_OF_CAP * cap;
   const accept = ACCEPT_OF_CAP * cap;
+  // The planner's MEASURING grid: a sixth of the engagement cap, or a twelfth of the radius, whichever
+  // is finer. It is the resolution at which the load is SENSED, not a cut the machine makes — the
+  // planner's own instrument, like DIRECTIONS above — so the divisor stays here rather than in the
+  // shop defaults; what the grid may COST is the shop's (`adaptive.maxCells` below) (#451).
   const h = Math.min(cap / 6, r / 12);
   const step = Math.max(2 * h, r / 5);
   const cells = (Math.ceil((geom.maxX - geom.minX) / h) + 2) * (Math.ceil((geom.maxY - geom.minY) / h) + 2);
-  if (cells > MAX_CELLS) {
+  if (cells > s.maxCells) {
     return {
       ok: false,
       code: 'adaptive-region-too-large',
-      reason: `the region needs a ${cells.toLocaleString('en')}-cell material grid at ${fmt(h)} mm (the cap is ${MAX_CELLS.toLocaleString('en')}): a lighter engagement on a pocket this size is more than phase 1 plans`,
+      reason: `the region needs a ${cells.toLocaleString('en')}-cell material grid at ${fmt(h)} mm (the cap is ${s.maxCells.toLocaleString('en')}): a lighter engagement on a pocket this size is more than phase 1 plans`,
     };
   }
   const grid = new MaterialGrid(geom, h);
@@ -250,7 +267,7 @@ export function planAdaptive(input: AdaptiveInput): AdaptiveResult {
   }
   grid.setTargets(distanceField(allowed, grid.nx, grid.ny, h), r);
   const targetArea = grid.totalTargets * h * h;
-  const neck = subGridNeck(grid, clearance, r);
+  const neck = subGridNeck(grid, clearance, r, s.neckAreaMm2);
   if (neck !== null) {
     return {
       ok: false,
@@ -420,7 +437,7 @@ export function planAdaptive(input: AdaptiveInput): AdaptiveResult {
     const comp = comps.find((c, idx) => !entered.has(idx) && c.cells.some((k) => dist[k]! <= r));
     if (comp === undefined) break;
     entered.add(comps.indexOf(comp));
-    const e = planEntry(geom, comp.best, comp.bestClearance, r, D, helixR, levelStep, tanA);
+    const e = planEntry(geom, comp.best, comp.bestClearance, r, D, helixR, levelStep, tanA, s.entryClearanceMm);
     if (!e.ok) return { ok: false, code: 'adaptive-no-entry', reason: e.reason };
     if (e.helixRefused !== undefined) findings.push({ code: 'adaptive-helix-refused', severity: 'info', message: e.helixRefused });
     entries.push(e.entry);
@@ -437,7 +454,7 @@ export function planAdaptive(input: AdaptiveInput): AdaptiveResult {
   }
 
   const residualArea = grid.remainingTargets * h * h;
-  if (residualArea > RESIDUAL_SHARE * targetArea) {
+  if (residualArea > s.residualShare * targetArea) {
     const where = residualCentroid(grid);
     return {
       ok: false,
@@ -492,7 +509,7 @@ export function planAdaptive(input: AdaptiveInput): AdaptiveResult {
  * corner leaves along its edge. Cutting there would be a full-width slot, so it is refused rather than
  * silently left standing.
  */
-function subGridNeck(grid: MaterialGrid, clearance: Float64Array, r: number): { area: number; at: P2 } | null {
+function subGridNeck(grid: MaterialGrid, clearance: Float64Array, r: number, neckAreaMm2: number): { area: number; at: P2 } | null {
   const h = grid.h;
   const loose = new Uint8Array(grid.material.length);
   for (let k = 0; k < loose.length; k++) if (grid.material[k] === 1 && clearance[k]! >= r - 0.75 * h) loose[k] = 1;
@@ -509,7 +526,7 @@ function subGridNeck(grid: MaterialGrid, clearance: Float64Array, r: number): { 
     n++;
   }
   const area = n * h * h;
-  return area > NECK_AREA_MM2 ? { area, at: [sx / n, sy / n] } : null;
+  return area > neckAreaMm2 ? { area, at: [sx / n, sy / n] } : null;
 }
 
 function stepLimit(maxSteps: number): AdaptiveResult {
@@ -527,6 +544,18 @@ function badSettings(s: AdaptiveSettings): string | null {
     return `a helix of ${s.helixDiameterFraction} × the diameter is outside 0.1 to 0.95 (above 1 it leaves a core standing in the middle)`;
   }
   if (!(s.rampAngleDeg > 0 && s.rampAngleDeg <= 30)) return `a ramp angle of ${s.rampAngleDeg}° is outside 0 to 30°`;
+  if (!(s.entryClearanceMm > 0 && s.entryClearanceMm <= 5)) {
+    return `an entry clearance of ${s.entryClearanceMm} mm is outside 0 to 5 mm`;
+  }
+  if (!(Number.isInteger(s.maxCells) && s.maxCells >= 1000 && s.maxCells <= 100_000_000)) {
+    return `a grid cap of ${s.maxCells} cells is not a whole number from 1 000 to 100 000 000`;
+  }
+  if (!(s.residualShare >= 0 && s.residualShare <= 0.5)) {
+    return `a residual share of ${s.residualShare} is outside 0 to 0.5 of the area to clear`;
+  }
+  if (!(s.neckAreaMm2 >= 0 && s.neckAreaMm2 <= 100)) {
+    return `a neck area of ${s.neckAreaMm2} mm² is outside 0 to 100 mm²`;
+  }
   if (!(s.cutFeed > 0 && s.entryFeed > 0 && s.spindleRpm > 0)) return 'a feed or the spindle speed is not positive';
   return null;
 }
@@ -683,6 +712,7 @@ function planEntry(
   helixR: number,
   levelStep: number,
   tanA: number,
+  entryClearanceMm: number,
 ): EntryResult {
   const bore = r + helixR;
   if (clear >= bore + WALL_MARGIN_MM) {
@@ -718,11 +748,11 @@ function planEntry(
     };
   }
   // The deepest descent a level's ramp makes: from the clearance above the level before, to this one.
-  const needed = (levelStep + ENTRY_CLEARANCE_MM) / tanA;
+  const needed = (levelStep + entryClearanceMm) / tanA;
   const len = Math.min(best.len, Math.max(D, needed));
   const a: [number, number] = [best.a[0], best.a[1]];
   const b: [number, number] = [best.a[0] + len * best.u[0], best.a[1] + len * best.u[1]];
-  const legs = Math.max(1, Math.ceil((levelStep + ENTRY_CLEARANCE_MM) / (len * tanA) - 1e-9));
+  const legs = Math.max(1, Math.ceil((levelStep + entryClearanceMm) / (len * tanA) - 1e-9));
   // The last descending leg ends at B when the leg count is odd, A when even; a flat pass back ends at the other.
   const end: P2 = legs % 2 === 1 ? a : b;
   return { ok: true, entry: { kind: 'ramp', a, b, legs }, end, heading: Math.atan2(end === a ? -best.u[1] : best.u[1], end === a ? -best.u[0] : best.u[0]), helixRefused };
@@ -760,7 +790,7 @@ function replay(ops: readonly Op2[], levels: readonly number[], s: AdaptiveSetti
     // already cut it rapids down the cleared column to the clearance above that floor — but never
     // above the face, since a feed that ends above Z0 is a cut in the air the post refuses.
     if (floor === 0) return;
-    const stop = Math.min(0, floor + ENTRY_CLEARANCE_MM);
+    const stop = Math.min(0, floor + s.entryClearanceMm);
     rapid(tx, ty, stop);
   };
   let top = 0;
@@ -771,7 +801,7 @@ function replay(ops: readonly Op2[], levels: readonly number[], s: AdaptiveSetti
         // From the top face on the first level; from the clearance above the floor just cut on every
         // level after — capped at the face, so a level shallower than the clearance never starts its
         // entry in the air (a feed ending above Z0 is refused by the post).
-        const start = Math.min(0, top + ENTRY_CLEARANCE_MM * (top === 0 ? 0 : 1));
+        const start = Math.min(0, top + s.entryClearanceMm * (top === 0 ? 0 : 1));
         if (e.kind === 'helix') {
           const [cx, cy] = e.centre;
           travelTo(cx + e.radius, cy, top);

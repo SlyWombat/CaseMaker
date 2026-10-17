@@ -10,6 +10,9 @@ import { tl } from './helpers/manifoldExec';
 import { engravability } from './helpers/engravePipeline';
 import { engravableProfile } from '@/engine/cnc/engrave/engravable';
 import {
+  engravabilityFindings,
+  lostDetailRatioFrom,
+  LOST_DETAIL_RATIO_FALLBACK,
   measureLabels,
   suggestCapHeight,
   type LabelEngravability,
@@ -167,6 +170,40 @@ describe('suggestCapHeight (#201 review)', () => {
     const job = jobWith('CASE', 4);
     const suggested = suggestCapHeight((size) => ratioAtFor(job, 3.175)('lbl-1', size), 4);
     expect(suggested).toBe(20);
+  });
+});
+
+describe('the lost-detail bar is the shop’s (#451)', () => {
+  /** One measured label keeping 92 % of its area — above the shipped 0.9 bar, below a 0.95 one. */
+  const measuredAt92: LabelEngravability[] = [
+    { labelId: 'lbl-1', glyphArea: 10, openedArea: 9.2, ratio: 0.92, emptyChars: [], outsideArea: 0, polygons: [] },
+  ];
+  const ratioAt = () => 0.5;
+  const detail = (job: EngraveJob, bar: number | null | undefined) =>
+    engravabilityFindings(job, measuredAt92, ratioAt, null, bar).find((x) => x.code === 'item-detail-lost');
+
+  it('raises item-detail-lost at a stricter bar and not at the shipped one', () => {
+    const job = jobWith('CASE', 4);
+    expect(detail(job, null)).toBeUndefined(); // 92 % ≥ 90 %: nothing lost
+    expect(detail(job, 0.9)).toBeUndefined();
+    expect(detail(job, 0.95)).toBeDefined(); // 92 % < 95 %
+    expect(detail(job, 1)).toBeDefined();
+  });
+
+  it('falls back — labelled — when the caller hands in no usable share', () => {
+    for (const bad of [null, undefined, 0, -1, Number.NaN]) {
+      expect(lostDetailRatioFrom(bad)).toBe(LOST_DETAIL_RATIO_FALLBACK);
+    }
+    const job = jobWith('CASE', 4);
+    for (const bad of [undefined, 0, -1, Number.NaN]) expect(detail(job, bad)).toBeUndefined();
+  });
+
+  it('suggestCapHeight reads the same bar', () => {
+    const at92 = () => 0.92;
+    expect(suggestCapHeight(at92, 4)).toBe(5); // 92 % reaches the shipped 90 %
+    expect(suggestCapHeight(at92, 4, 0.95)).toBeNull();
+    // An unusable bar is the labelled fallback, not a refusal of every size.
+    expect(suggestCapHeight(at92, 4, Number.NaN)).toBe(5);
   });
 });
 

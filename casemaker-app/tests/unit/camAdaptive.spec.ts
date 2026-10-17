@@ -245,14 +245,45 @@ function planFor(name: string, region: Polygons, settings: AdaptiveSettings = S)
 
 describe('#433 the settings are the location’s', () => {
   it('reads every adaptive.* key, seeded and labelled — the feeds as placeholders, none a vendor number', () => {
-    expect(S).toEqual({ engagementFraction: 0.1, stepDownMm: 1, helixDiameterFraction: 0.5, rampAngleDeg: 2, cutFeed: 600, entryFeed: 200, spindleRpm: 12000 });
+    expect(S).toEqual({
+      engagementFraction: 0.1,
+      stepDownMm: 1,
+      helixDiameterFraction: 0.5,
+      rampAngleDeg: 2,
+      entryClearanceMm: 0.5,
+      maxCells: 12_000_000,
+      residualShare: 0.005,
+      neckAreaMm2: 0.05,
+      cutFeed: 600,
+      entryFeed: 200,
+      spindleRpm: 12000,
+    });
     expect(Object.values(sources).every((v) => v === 'seeded')).toBe(true);
     for (const k of ['cutFeed', 'entryFeed', 'spindleRpm']) expect(DEFAULTS[`adaptive.${k}`]?.note).toContain('placeholder, not measured; not a vendor number');
-    for (const k of ['engagementFraction', 'stepDownMm', 'helixDiameterFraction', 'rampAngleDeg']) expect(DEFAULTS[`adaptive.${k}`]?.note).toContain('chosen, not measured');
+    for (const k of ['engagementFraction', 'stepDownMm', 'helixDiameterFraction', 'rampAngleDeg', 'entryClearanceMm', 'maxCells', 'residualShare', 'neckAreaMm2']) {
+      expect(DEFAULTS[`adaptive.${k}`]?.note).toContain('chosen, not measured');
+    }
     expect(S.cutFeed).toBeLessThanOrEqual(Z1.maxCutFeed);
     expect(S.spindleRpm).toBeLessThanOrEqual(Z1.maxRpm);
   });
 });
+
+// A 7 × 7 pocket with an 8 mm channel off its right side, a little wider than the cutter. (At
+// 0.2 mm wider the planner does clear it within the cap — the independent meter read 0.26 mm — by a
+// thousand short restarts across the 0.2 mm the centre can move; at 0.1 mm no step can. At 0.01 mm
+// no grid cell lands where the centre may stand at all, and the neck check is what refuses it.)
+const channel = (extra: number): Polygons => [
+  [
+    [0, 0],
+    [7, 0],
+    [7, 2],
+    [15, 2],
+    [15, 2 + D + extra],
+    [7, 2 + D + extra],
+    [7, 7],
+    [0, 7],
+  ],
+];
 
 describe.each(Object.entries(SHAPES))('#433 %s', (name, region) => {
   const allowedRef = offset(region, -R); // the centre's room, exactly: no slack, so a micron's overcut shows
@@ -380,23 +411,6 @@ describe('#433 entry: the helix refused, the ramp, and no entry at all', () => {
     expect(planAdaptive({ tool: MILL, region: [circle(10, 10, R - 0.1)], depth: 1, settings: S })).toMatchObject({ ok: false, code: 'adaptive-no-room' });
   });
 
-  // A 7 × 7 pocket with an 8 mm channel off its right side, a little wider than the cutter. (At
-  // 0.2 mm wider the planner does clear it within the cap — the independent meter read 0.26 mm — by a
-  // thousand short restarts across the 0.2 mm the centre can move; at 0.1 mm no step can. At 0.01 mm
-  // no grid cell lands where the centre may stand at all, and the neck check is what refuses it.)
-  const channel = (extra: number): Polygons => [
-    [
-      [0, 0],
-      [7, 0],
-      [7, 2],
-      [15, 2],
-      [15, 2 + D + extra],
-      [7, 2 + D + extra],
-      [7, 7],
-      [0, 7],
-    ],
-  ];
-
   it.each([0.1, 0.01])('a channel %s mm wider than the cutter cannot be cleared within the cap: refused, not slotted, not left', (extra) => {
     const r = planAdaptive({ tool: MILL, region: channel(extra), depth: 1, settings: S });
     expect(r).toMatchObject({ ok: false, code: 'adaptive-engagement-exceeded' });
@@ -410,6 +424,44 @@ describe('#433 refusals before any planning', () => {
     expect(planAdaptive({ tool: { ...MILL, cornerRadius: 0.5 }, region, depth: 1, settings: S })).toMatchObject({ ok: false, code: 'adaptive-not-flat' });
     expect(planAdaptive({ tool: MILL, region, depth: 0, settings: S })).toMatchObject({ ok: false, code: 'adaptive-bad-settings' });
     expect(planAdaptive({ tool: MILL, region, depth: 1, settings: { ...S, helixDiameterFraction: 1.2 } })).toMatchObject({ ok: false, code: 'adaptive-bad-settings' });
+    // #451 — the four new keys are held to the same bounds the location enforces on them.
+    for (const bad of [{ entryClearanceMm: 0 }, { maxCells: 500 }, { maxCells: 1.5 }, { residualShare: 0.6 }, { neckAreaMm2: -1 }]) {
+      expect(planAdaptive({ tool: MILL, region, depth: 1, settings: { ...S, ...bad } })).toMatchObject({ ok: false, code: 'adaptive-bad-settings' });
+    }
+  });
+});
+
+describe('#433 the refusal limits and entry clearance are the shop’s (#451)', () => {
+  it('refuses a grid larger than the shop cap, naming the cap it actually used', () => {
+    const r = planAdaptive({ tool: MILL, region: SHAPES.rectangle!, depth: 1, settings: { ...S, maxCells: 1000 } });
+    expect(r).toMatchObject({ ok: false, code: 'adaptive-region-too-large' });
+    if (r.ok) return;
+    expect(r.reason).toContain('the cap is 1,000');
+    // The message carries the configured number, not the shipped seed the code used to quote.
+    expect(r.reason).not.toContain('12,000,000');
+  });
+
+  it('the residual tolerance is the shop share of the area to clear', () => {
+    const base = planFor('circle', SHAPES.circle!);
+    // The default plan leaves grid noise along the curved wall; without any, this test would assert nothing.
+    expect(base.stats.residualArea).toBeGreaterThan(0);
+    const share = base.stats.residualArea / base.stats.targetArea;
+    const tight = planAdaptive({ tool: MILL, region: SHAPES.circle!, depth: DEPTH, settings: { ...S, residualShare: share * 0.5 } });
+    expect(tight).toMatchObject({ ok: false, code: 'adaptive-engagement-exceeded' });
+    if (!tight.ok) expect(tight.reason).toContain('cannot be cleared without passing');
+    // A share above what the plan leaves accepts it: the check reads the number, not a margin.
+    expect(planAdaptive({ tool: MILL, region: SHAPES.circle!, depth: DEPTH, settings: { ...S, residualShare: share * 1.1 } }).ok).toBe(true);
+  });
+
+  it('the neck area threshold is the shop’s', () => {
+    // The 0.01 mm channel has no cell where the centre may stand: the neck check is what refuses it.
+    const base = planAdaptive({ tool: MILL, region: channel(0.01), depth: 1, settings: S });
+    expect(base).toMatchObject({ ok: false });
+    if (!base.ok) expect(base.reason).toContain('lies in a part of the pocket within');
+    // A threshold above the neck's measured 20.8 mm² stands the check down: whatever refusal remains
+    // is a different one, so the number is read rather than the check being unavoidable.
+    const loose = planAdaptive({ tool: MILL, region: channel(0.01), depth: 1, settings: { ...S, neckAreaMm2: 50 } });
+    if (!loose.ok) expect(loose.reason).not.toContain('lies in a part of the pocket within');
   });
 });
 
@@ -452,5 +504,19 @@ describe('#433 posted and verified', () => {
     const report = verify(post(r.ir));
     expect(report.findings).toEqual([]);
     expect(report.stats.deepestZ).toBeCloseTo(-1, 3);
+  });
+
+  it('an entry starts the shop clearance above the floor just cut (#451)', () => {
+    const region = [rect(5, 5, 8, 6)];
+    const custom = adaptiveIR({ ...ctx, region, depth: 0.4, settings: { ...S, stepDownMm: 0.2, entryClearanceMm: 0.1 } });
+    if (!custom.ok) throw new Error(custom.reason);
+    expect(custom.plan.levels).toEqual([-0.2, -0.4]);
+    // The second level's entry travels down the cleared column to 0.1 mm above the −0.2 floor — a
+    // rapid at −0.1 that the shipped 0.5 mm clearance (capped at the face) never writes.
+    expect(custom.plan.moves.some((m) => m.kind === 'rapid' && m.z === -0.1)).toBe(true);
+    const shipped = adaptiveIR({ ...ctx, region, depth: 0.4, settings: { ...S, stepDownMm: 0.2 } });
+    if (!shipped.ok) throw new Error(shipped.reason);
+    expect(shipped.plan.moves.some((m) => m.kind === 'rapid' && m.z === -0.1)).toBe(false);
+    expect(verify(post(custom.ir)).findings).toEqual([]);
   });
 });

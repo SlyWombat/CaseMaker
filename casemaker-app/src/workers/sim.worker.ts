@@ -23,7 +23,7 @@ import type { NodeMeshOutput } from './geometry/meshOutput';
 import { createSimSession, type SimFrame, type SimLoadOpts, type SimLoadResult, type SimPath, type SimSession } from './sim/session';
 import type { ConditionSummary } from '@/engine/cnc/toolCondition';
 import { createEngravePreviewer, type EngravePreview, type EngravePreviewer } from './sim/engravePreview';
-import { engraveGenerate as runEngraveGenerate, type EngraveGenerated } from './sim/engraveGenerate';
+import { engraveGenerate as runEngraveGenerate, type EngraveGenerated, type EngraveShopOpts } from './sim/engraveGenerate';
 import type { OraclePredicted, OracleReport } from '@/engine/cnc/engrave/oracle';
 import { readDesign } from '@/engine/import/design3mf';
 import { parsePrusaThreeMf } from '@/engine/import/prusa3mf';
@@ -107,6 +107,9 @@ const api = {
    * cross by structured clone, like the `Tool` `simLoad` takes: the worker cannot see the app's
    * module state, so the list it measures and recommends from, the feed rows its recommendation
    * filters on, and the broken and worn copies it passes over, have to be sent to it.
+   *
+   * `shop` is the engrave shop defaults the caller read from the location (#451) — here only
+   * `engrave.lostDetailWarnRatio`, the bar the findings and the recommendation share.
    */
   async engravePreview(
     job: EngraveJob,
@@ -115,12 +118,13 @@ const api = {
     gen: number,
     margins: EngraveMargins,
     conditions: ReadonlyMap<string, ConditionSummary>,
+    shop?: EngraveShopOpts,
   ): Promise<EngravePreview | null> {
     // Issue #180 — the preview typesets labels through the synchronous `resolveFont`, and the
     // bundled faces are static assets now, so load the keys this job's enabled labels need
     // first. A shapes-only job (or one with every label disabled/empty) passes `[]`.
     await ensureFontsLoaded(fontKeysForLabels(job.labels, job.customFonts ?? []));
-    const p = (await getPreviewer()).engravePreview(job, tools, catalogue, gen, margins, conditions);
+    const p = (await getPreviewer()).engravePreview(job, tools, catalogue, gen, margins, conditions, shop);
     if (!p) return null;
     return Comlink.transfer(p, buffersOf([p.stock, ...p.floors.map((f) => f.mesh), ...p.fixture.map((f) => f.mesh), ...p.sacrificial.map((s) => s.mesh)]));
   },
@@ -137,6 +141,10 @@ const api = {
    * `catalogue` is Makera's feed rows, sent for the same reason and with more at stake (#324):
    * resolving feeds in here against the module state this realm owns would post the starting
    * table's numbers while the panel showed the catalogue's.
+   *
+   * `shop` carries the caller's engrave shop defaults (#451): `engrave.lostDetailWarnRatio` for the
+   * findings and `drill.peckClearanceMm` for the peck re-entry height. Omitted, the pipeline uses
+   * its labelled fallbacks, exactly as a headless run with no location does.
    */
   async engraveGenerate(
     job: EngraveJob,
@@ -144,9 +152,10 @@ const api = {
     catalogue: readonly FeedCatalogueRow[],
     calibration: MachineCalibration | null,
     margins: EngraveMargins,
+    shop?: EngraveShopOpts,
   ): Promise<EngraveGenerated> {
     await ensureFontsLoaded(fontKeysForLabels(job.labels, job.customFonts ?? []));
-    return runEngraveGenerate(await getToplevel(), job, tool, catalogue, calibration, margins);
+    return runEngraveGenerate(await getToplevel(), job, tool, catalogue, calibration, margins, shop);
   },
   /**
    * The volumetric oracle (#206 §3) against the program CURRENTLY loaded in the session. The

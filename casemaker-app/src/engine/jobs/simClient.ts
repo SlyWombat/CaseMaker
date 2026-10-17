@@ -15,6 +15,7 @@ import type { FeedCatalogueRow } from '@/engine/cnc/feeds';
 import type { ConditionSummary } from '@/engine/cnc/toolCondition';
 import type { EngraveJob, EngraveMargins } from '@/types/engraveJob';
 import type { SimWorkerApi, SimFrame, SimLoadResult, SimPath, EngravePreview, EngraveGenerated } from '@/workers/sim.worker';
+import type { EngraveShopOpts } from '@/workers/sim/engraveGenerate';
 import type { OraclePredicted, OracleReport } from '@/engine/cnc/engrave/oracle';
 import type { DesignJobPatch, DesignReadingDirection } from '@/engine/cnc/engrave/fromDesign';
 import { createFrameCoalescer } from './frameCoalescer';
@@ -204,6 +205,10 @@ export const simPath = (): Promise<SimPath> => getSimApi().simPath();
  * from — and the rows that recommendation filters on, the margins its void limits are drawn to, and
  * the broken and worn copies it passes over — are all sent with the job. Plain data, like the `Tool`
  * `simLoad` takes.
+ *
+ * `shop` is the engrave shop defaults (#451) — here `engrave.lostDetailWarnRatio`, read from the
+ * location on this side because the worker cannot see it. Omitted, the worker keeps its labelled
+ * fallback, so a caller with no location still previews the shipped default's way.
  */
 export const engravePreview = (
   job: EngraveJob,
@@ -212,8 +217,9 @@ export const engravePreview = (
   gen: number,
   margins: EngraveMargins,
   conditions: ReadonlyMap<string, ConditionSummary>,
+  shop?: EngraveShopOpts,
 ): Promise<EngravePreview | null> =>
-  getSimApi().engravePreview(job, tools, catalogue, gen, margins, conditions);
+  getSimApi().engravePreview(job, tools, catalogue, gen, margins, conditions, shop);
 
 /**
  * Generate → verify, headless, in the sim worker (#206). Returns the exact `.nc` text and the
@@ -233,6 +239,11 @@ export const engravePreview = (
  * it. It gates the program, so sending it is not optional: the fallback the worker would otherwise
  * use is the shipped default, and a run gated to a different margin than the sheet prints is
  * exactly the disagreement #345 exists to remove.
+ *
+ * `shop` is the engrave pipeline's shop defaults (#451), read on this side for the same reason as
+ * `margins`: `engrave.lostDetailWarnRatio` decides which items the findings warn about and
+ * `drill.peckClearanceMm` where each peck's re-entry rapid stops. Omitted, the worker keeps both
+ * labelled fallbacks — the program a headless run without a location would cut.
  */
 export const engraveGenerate = (
   job: EngraveJob,
@@ -240,8 +251,9 @@ export const engraveGenerate = (
   catalogue: readonly FeedCatalogueRow[],
   calibration: MachineCalibration | null,
   margins: EngraveMargins,
+  shop?: EngraveShopOpts,
 ): Promise<EngraveGenerated> =>
-  getSimApi().engraveGenerate(job, tool, catalogue, calibration, margins);
+  getSimApi().engraveGenerate(job, tool, catalogue, calibration, margins, shop);
 
 /**
  * The volumetric oracle (#206 §3) over the program CURRENTLY loaded in the worker's session.

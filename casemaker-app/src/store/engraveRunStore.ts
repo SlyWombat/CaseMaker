@@ -18,7 +18,7 @@ import { featureSim } from '@/platform/features';
 import { create } from 'zustand';
 import type { EngraveJob, EngraveMargins } from '@/types/engraveJob';
 import type { Tool } from '@/engine/cnc/tool';
-import type { EngraveGenerated } from '@/workers/sim/engraveGenerate';
+import type { EngraveGenerated, EngraveShopOpts } from '@/workers/sim/engraveGenerate';
 import type { OraclePredicted, OracleReport } from '@/engine/cnc/engrave/oracle';
 import type { SimDiagnostic } from '@/workers/sim/session';
 import type { SimStatus } from './simStore';
@@ -31,6 +31,7 @@ import { effectiveMargins } from '@/engine/cnc/engrave/depthBounds';
 import { useSettingsStore } from './settingsStore';
 import { useEngraveJobStore } from './engraveJobStore';
 import { useSimStore } from './simStore';
+import { shopDefault } from './shopDefaultsStore';
 import type { EngraveRunPhase } from './engraveRunGate';
 
 /**
@@ -60,6 +61,8 @@ export type EngraveRunClient = {
     catalogue: readonly FeedCatalogueRow[],
     calibration: MachineCalibration | null,
     margins: EngraveMargins,
+    /** The engrave pipeline's shop defaults (#451) — see `run` for why they are read here. */
+    shop?: EngraveShopOpts,
   ) => Promise<EngraveGenerated>;
   simOracle: (predicted: OraclePredicted[]) => Promise<OracleReport>;
 };
@@ -141,6 +144,16 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
     // a re-read after the await could straddle an edit and gate a different job than it reports.
     const margins = effectiveMargins(job, useSettingsStore.getState().margins);
 
+    // The engrave pipeline's shop defaults (#451), read ONCE here beside the margins and for the same
+    // reason: the worker cannot see the location, and these two numbers gate the program it posts —
+    // the warn ratio decides which items fail `item-detail-lost`, and the peck clearance decides the
+    // Z each drill's re-entry rapid stops at. Reading them before the await keeps the run's inputs
+    // one snapshot.
+    const shop: EngraveShopOpts = {
+      lostDetailWarnRatio: shopDefault('engrave.lostDetailWarnRatio').value,
+      peckClearanceMm: shopDefault('drill.peckClearanceMm').value,
+    };
+
     // The cutter, resolved ONCE on this side (#305): the sim worker cannot see the registry, so
     // it is sent the `Tool` — and the same object then loads the simulation below, so the gate
     // and the sweep cannot judge the job with two different cutters.
@@ -157,7 +170,7 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
     let generated: EngraveGenerated;
     try {
       client = await clientLoader();
-      generated = await client.engraveGenerate(job, tool, catalogue, calibration, margins);
+      generated = await client.engraveGenerate(job, tool, catalogue, calibration, margins, shop);
     } catch (e) {
       if (mine === seq) set({ phase: 'blocked', error: e instanceof Error ? e.message : String(e) });
       return;

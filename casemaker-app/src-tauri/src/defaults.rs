@@ -230,6 +230,13 @@ pub const UNMEASURED_SEEDS: &[(&str, f64, &str, &str)] = &[
     ("adaptive.cutFeed", 600.0, "mm/min", "placeholder, not measured; not a vendor number: the adaptive clearing feed until a measured row replaces it"),
     ("adaptive.entryFeed", 200.0, "mm/min", "placeholder, not measured; not a vendor number: the helix and ramp entry feed until a measured row replaces it"),
     ("adaptive.spindleRpm", 12000.0, "rpm", "placeholder, not measured; not a vendor number: the adaptive spindle speed until a measured row replaces it"),
+    // ── #451 adaptive settings (begin) — the entry clearance and the planner's three refusal limits:
+    // chosen, not measured, and `defaultsClient.ts` states the same bounds and fallbacks.
+    ("adaptive.entryClearanceMm", 0.5, "mm", "chosen, not measured: how far above the floor just cut a rapid down a cleared column stops, and the clearance every entry starts from"),
+    ("adaptive.maxCells", 12000000.0, "cells", "chosen, not measured: the largest material grid adaptive clearing will build; a pocket needing more cells at the planned engagement is refused rather than ground through"),
+    ("adaptive.residualShare", 0.005, "x", "chosen, not measured: the material adaptive clearing may leave as grid noise along the walls, as a share of the area to clear"),
+    ("adaptive.neckAreaMm2", 0.05, "mm²", "chosen, not measured: material in a neck narrower than the grid can see, above this area, refuses the plan rather than being left standing"),
+    // ── #451 adaptive settings (end)
     // ── #438 (begin) — the column engine's FLAT grid Y pitch: chosen, not measured.
     // ── #451 (begin) — the DXF arc chord error: chosen, not measured.
     ("import.dxfChordToleranceMm", 0.02, "mm", "chosen, not measured: the most a flattened DXF arc may stray from the true arc; smaller is more points"),
@@ -249,6 +256,13 @@ pub const UNMEASURED_SEEDS: &[(&str, f64, &str, &str)] = &[
     ("engrave.newItemDepthMm", 0.5, "mm", "chosen, not measured: the depth a new label, shape, combined shape, traced line or imported outline starts at, in the panel where the person then sets the depth that matters"),
     ("engrave.newDrillDepthMm", 1.0, "mm", "chosen, not measured: the depth a new hole starts at — deeper than an item's own starting depth because a hole that shallow shows nothing on the preview"),
     // ── #451 new-item starting depths (end)
+    // ── #451 engrave findings (begin) — the `item-detail-lost` bar: chosen, not measured.
+    ("engrave.lostDetailWarnRatio", 0.9, "x", "chosen, not measured: the share of an item's area a cutter must reach before the item is called detail-lost"),
+    // ── #451 engrave findings (end)
+    // ── #451 blank band fill (begin) — chosen, not measured, and `defaultsClient.ts` states the same
+    // bounds and fallback. It trades cap height against the clearance the dome and the print want.
+    ("engrave.blankBandFill", 0.7, "x", "chosen, not measured: how much of a free band the seeded line takes, as a share of it; more fill means a taller cap and less clearance"),
+    // ── #451 blank band fill (end)
     // ── #421 (begin) — the run plan's phase times that the app has not timed: chosen.
     ("plan.touchSeconds", 15.0, "s", "chosen, not measured as the app's runner would take it: 15 s a touch, from the 2026-10-15 console trace's edge scans, driven by a console script, not the app runner. 32 touch-to-touch intervals under 20 s (G38.2 Z-5, 16:35:59 to 16:50:34): median 13.3 s, mean 14.0 s, range 10.4 to 19.7 s; the round trips between touches are included"),
     ("plan.fitProbeSeconds", 45.0, "s", "chosen, not measured: fitting the wired probe by hand, from the plan of section 5.8; the first timed run replaces it"),
@@ -697,6 +711,18 @@ fn known_rule(key: &str, n: Option<f64>) -> Option<Result<(), String>> {
             "0.05 to 20 mm",
         )),
         // ── #451 new-item starting depths (end)
+        // ── #451 engrave findings (begin) — `defaultsClient.ts` states the same bounds. A share of
+        // the item's area, so it runs to 1 (the whole item kept): zero would call every cut lost.
+        "engrave.lostDetailWarnRatio" => Some(need(
+            n.is_some_and(|v| (0.1..=1.0).contains(&v)),
+            "0.1 to 1, the share of the item's area kept",
+        )),
+        // ── #451 blank band fill — a share of the band, so it runs to 1; above 0, or no line is seeded.
+        "engrave.blankBandFill" => Some(need(
+            n.is_some_and(|v| (0.05..=1.0).contains(&v)),
+            "0.05 to 1, the share of the free band the line takes",
+        )),
+        // ── #451 engrave findings (end)
         // ── #421 (begin) — the run plan's phase times (`defaultsClient.ts` states the same bounds).
         "plan.homeSeconds" | "plan.toolLengthSeconds" => Some(need(
             n.is_some_and(|v| (5.0..=300.0).contains(&v)),
@@ -763,6 +789,24 @@ fn known_rule(key: &str, n: Option<f64>) -> Option<Result<(), String>> {
             n.is_some_and(|v| (1000.0..=30000.0).contains(&v)),
             "1000 to 30000 rpm",
         )),
+        // ── #451 adaptive settings (begin) — `defaultsClient.ts` states the same bounds.
+        "adaptive.entryClearanceMm" => Some(need(
+            n.is_some_and(|v| (0.05..=5.0).contains(&v)),
+            "0.05 to 5 mm",
+        )),
+        "adaptive.maxCells" => Some(need(
+            n.is_some_and(|v| v.fract() == 0.0 && (1000.0..=100_000_000.0).contains(&v)),
+            "a whole number of cells, 1000 to 100000000",
+        )),
+        "adaptive.residualShare" => Some(need(
+            n.is_some_and(|v| (0.0..=0.5).contains(&v)),
+            "0 to 0.5 of the area to clear",
+        )),
+        "adaptive.neckAreaMm2" => Some(need(
+            n.is_some_and(|v| (0.0..=100.0).contains(&v)),
+            "0 to 100 mm²",
+        )),
+        // ── #451 adaptive settings (end)
         "tools.runtimeWarnMinutes" => Some(need(
             n.is_some_and(|v| v > 0.0 && v <= 100_000.0),
             "above 0, up to 100000 minutes",

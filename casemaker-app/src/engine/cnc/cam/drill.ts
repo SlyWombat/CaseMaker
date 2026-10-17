@@ -23,11 +23,20 @@ import { HOP_Z, SAFE_Z, type CamMove } from './ir';
 import type { CutParams } from '../feeds';
 
 /**
- * How far above the previous peck's floor the tool rapids back to before feeding the next peck,
- * mm. Named and PROVISIONAL: it must clear the chips packed at the bottom of the last peck
- * without re-cutting them, and it is measured on the first real peck cycle (#208/#209).
+ * The labelled fallback for `drill.peckClearanceMm`, mm (#451): how far above the previous peck's
+ * floor the tool rapids back to before feeding the next peck. Used only when the caller hands in
+ * no value — the shop's own number is read on the main thread, which is the realm that can see the
+ * location, and arrives here as a plain number. 0.5 is #220's PROVISIONAL value; the first real
+ * peck cycle measures it (#208/#209).
  */
-export const PECK_CLEARANCE = 0.5;
+export const PECK_CLEARANCE_FALLBACK_MM = 0.5;
+
+/** The caller's peck clearance when it is a usable length, else {@link PECK_CLEARANCE_FALLBACK_MM}. */
+export function peckClearanceFrom(peckClearanceMm: number | null | undefined): number {
+  return typeof peckClearanceMm === 'number' && Number.isFinite(peckClearanceMm) && peckClearanceMm > 0
+    ? peckClearanceMm
+    : PECK_CLEARANCE_FALLBACK_MM;
+}
 
 /**
  * The negative Z each peck bottoms out at, shallowest first, with the LAST exactly on `−depth`.
@@ -82,7 +91,8 @@ export function orderHolesNearest(
  * The moves for one drill item: every hole, in the order given (the caller orders them —
  * nearest-neighbour, #220 work item 4). Per hole: rapid to XY at `hopZ`, rapid straight down to
  * the stock top (a pure-Z rapid, in air), then one feed per peck. Between pecks the tool rapids
- * out to `hopZ` to clear chips and back down to `PECK_CLEARANCE` above the floor it just cut.
+ * out to `hopZ` to clear chips and back down to `peckClearanceMm` above the floor it just cut —
+ * the shop's `drill.peckClearanceMm`, or the labelled fallback when the caller passes none.
  * The hole ends with the tool back at `hopZ`; the item ends with a retract to `safeZ`.
  */
 export function drillMoves(
@@ -90,9 +100,11 @@ export function drillMoves(
   depth: number,
   peck: number,
   params: CutParams,
+  peckClearanceMm: number | null = null,
 ): CamMove[] {
   const moves: CamMove[] = [];
   const depths = peckDepths(depth, peck);
+  const clearance = peckClearanceFrom(peckClearanceMm);
   for (const [x, y] of holes) {
     moves.push({ kind: 'rapid', x, y, z: HOP_Z });
     // Down to the surface in air, then cut. A pure-Z rapid to the stock top is not an XY move
@@ -104,7 +116,7 @@ export function drillMoves(
       if (i < depths.length - 1) {
         // Clear the chips, then rapid back down the hole to just above the floor just cut.
         moves.push({ kind: 'rapid', x, y, z: HOP_Z });
-        moves.push({ kind: 'rapid', x, y, z: z + PECK_CLEARANCE });
+        moves.push({ kind: 'rapid', x, y, z: z + clearance });
       }
     }
     moves.push({ kind: 'rapid', x, y, z: HOP_Z });

@@ -191,6 +191,16 @@ export const KNOWN_DEFAULTS: Readonly<Record<string, KnownDefault>> = {
   'adaptive.stepDownMm': { label: 'adaptive step-down (chosen)', unit: 'mm', rule: z.number().min(0.05).max(10), fallback: 1 },
   'adaptive.helixDiameterFraction': { label: 'helix entry diameter, in cutter diameters (chosen)', unit: 'x', rule: z.number().min(0.1).max(0.95), fallback: 0.5 },
   'adaptive.rampAngleDeg': { label: 'helix and ramp entry angle (chosen)', unit: 'deg', rule: z.number().min(0.5).max(30), fallback: 2 },
+  // ── #451 adaptive settings (begin) — the entry clearance and the planner's three refusal limits.
+  // CHOSEN, not measured: `adaptive.ts` plans a pocket, and each of these is where it gives up rather
+  // than a number the machine reads. The clearance is the step ABOVE the floor just cut that a rapid
+  // down a cleared column stops at; the rest bound the grid it may build and the material it may leave.
+  // Fallbacks = adaptive.ts's shipped defaults.
+  'adaptive.entryClearanceMm': { label: 'adaptive entry clearance above the cut floor (chosen)', unit: 'mm', rule: z.number().min(0.05).max(5), fallback: 0.5 },
+  'adaptive.maxCells': { label: 'adaptive material grid cap (chosen)', unit: 'cells', rule: z.number().int().min(1000).max(100_000_000), fallback: 12_000_000 },
+  'adaptive.residualShare': { label: 'adaptive residual tolerance, as a share of the area to clear (chosen)', unit: 'x', rule: z.number().min(0).max(0.5), fallback: 0.005 },
+  'adaptive.neckAreaMm2': { label: 'adaptive sub-grid neck area (chosen)', unit: 'mm²', rule: z.number().min(0).max(100), fallback: 0.05 },
+  // ── #451 adaptive settings (end)
   'adaptive.cutFeed': { label: 'adaptive clearing feed (placeholder)', unit: 'mm/min', rule: z.number().min(5).max(1200), fallback: 600 },
   'adaptive.entryFeed': { label: 'adaptive entry feed (placeholder)', unit: 'mm/min', rule: z.number().min(5).max(1200), fallback: 200 },
   'adaptive.spindleRpm': { label: 'adaptive spindle speed (placeholder)', unit: 'rpm', rule: z.number().min(1000).max(30000), fallback: 12000 },
@@ -219,6 +229,19 @@ export const KNOWN_DEFAULTS: Readonly<Record<string, KnownDefault>> = {
   'engrave.newItemDepthMm': { label: 'depth a new item starts at (chosen)', unit: 'mm', rule: z.number().min(0.05).max(20), fallback: 0.5 },
   'engrave.newDrillDepthMm': { label: 'depth a new hole starts at (chosen)', unit: 'mm', rule: z.number().min(0.05).max(20), fallback: 1.0 },
   // ── #451 new-item starting depths (end)
+  // ── #451 engrave findings (begin) — the share of an item's area a cutter must reach before
+  // `item-detail-lost` is raised. CHOSEN, not measured: 0.9 is the point past which the surviving
+  // strokes stop reading as the character, and nobody has cut the matrix. Read by the engrave
+  // stores and sent to the sim worker as plain data (a worker cannot read the location). Fallback =
+  // `engraveGeometry.ts`'s LOST_DETAIL_RATIO_FALLBACK.
+  'engrave.lostDetailWarnRatio': { label: 'share of an item a cutter must keep before detail is lost (chosen)', unit: 'x', rule: z.number().min(0.1).max(1), fallback: 0.9 },
+  // ── #451 engrave findings (end)
+  // ── #451 blank band fill (begin) — how much of a free band the seeded line takes. CHOSEN, not
+  // measured: it trades cap height against the clearance the dome and the print want. Read by
+  // `engraveJobStore`'s two seed routes and passed in; Fallback = `blankLabelSeed.ts`'s
+  // BLANK_BAND_FILL_FALLBACK. Bounded above 0: zero would size the line to no band at all.
+  'engrave.blankBandFill': { label: 'blank band fill, as a share of the free band (chosen)', unit: 'x', rule: z.number().min(0.05).max(1), fallback: 0.7 },
+  // ── #451 blank band fill (end)
   // ── #421 (begin) — the run plan's phase times (§5.8). Two were TIMED in the 2026-10-15 console
   // trace and are seeded `measured` with a note (`defaults.rs`'s MEASURED_SEEDS): `$H` and `M491`. The
   // rest are chosen — the touch time too: its series came from a console script, not the app runner. Each fallback is its seed. The remount and re-registration

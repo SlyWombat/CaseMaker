@@ -59,7 +59,7 @@ import { cuttingDiameter, cuttingForTrace } from '@/engine/cnc/tool';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import { conditionRank, type ConditionSummary } from '@/engine/cnc/toolCondition';
 import type { EngraveAnyItem, EngraveJob } from '@/types/engraveJob';
-import { LOST_DETAIL_RATIO, type LabelEngravability } from '@/workers/sim/engraveGeometry';
+import { lostDetailRatioFrom, type LabelEngravability } from '@/workers/sim/engraveGeometry';
 
 /**
  * Why a tool was dropped before measuring (#211: flat-ends only, and only cutters that exist;
@@ -341,7 +341,13 @@ export function recommendTool(
   catalogue: readonly FeedCatalogueRow[],
   measure: (toolKey: string) => LabelEngravability[],
   conditions?: ReadonlyMap<string, ConditionSummary> | null,
+  lostDetailWarnRatio: number | null = null,
 ): ToolRecommendation {
+  // The bar a cutter has to clear is #201's own (engraveGeometry's `LOST_DETAIL_RATIO_FALLBACK`
+  // unless the caller sends the shop's `engrave.lostDetailWarnRatio`, #451). Passing it here rather
+  // than letting this module keep a second copy is what stops the recommendation and the findings
+  // from qualifying the same cutter at two different ratios.
+  const bar = lostDetailRatioFrom(lostDetailWarnRatio);
   // The deepest cut is over every enabled item — a shape or combined shape can be the deepest
   // thing in the job (#214/#215), and the reach test below must see it.
   const deepest = ([...job.labels, ...job.shapes, ...(job.combined ?? [])] as EngraveAnyItem[])
@@ -412,7 +418,7 @@ export function recommendTool(
     let worst: ToolCandidate['worst'] = null;
     let ratioOk = true;
     for (const row of rows) {
-      if (!(row.ratio >= LOST_DETAIL_RATIO) || row.emptyChars.length > 0) ratioOk = false;
+      if (!(row.ratio >= bar) || row.emptyChars.length > 0) ratioOk = false;
       const lost = row.emptyChars.length;
       if (
         worst === null ||

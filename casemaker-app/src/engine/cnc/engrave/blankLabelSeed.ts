@@ -74,14 +74,17 @@ export const BADGE_SEED_TEXT = 'Name';
 export const BLANK_SEED_TEXT = 'Text';
 
 /**
- * How much of the room a free band offers the seeded line takes, as a fraction.
+ * How much of the room a free band offers the seeded line takes, as a fraction — the LABELLED
+ * FALLBACK for the shop's `engrave.blankBandFill` (#451), and the same number it is seeded with.
  *
  * There is more to keep clear of than the pocket: the cutter's own clearance to the blank's edge
  * is `edgeMargin` (already taken off below), and a printed blank — a badge above all — is engraved
- * after printing, so the dome and the print's own overshoot want something too. 0.7 of an 11.55 mm
- * band is 8 mm of cap height with 1.8 mm either side of it — the number the issue's decision quotes.
+ * after printing, so the dome and the print's own overshoot want something too. This fallback,
+ * 0.7 of an 11.55 mm band, is 8 mm of cap height with 1.8 mm either side of it — the number the
+ * issue's decision quotes. A caller sends the shop's own number; this constant is what is left for
+ * the no-service build (the hosted web app), exactly as the sim's pitches and clearances do.
  */
-const BAND_FILL = 0.7;
+export const BLANK_BAND_FILL_FALLBACK = 0.7;
 
 /**
  * The floor the seeded label starts at, mm, before `redepthLabelsForBlank` replaces it — the same
@@ -119,6 +122,13 @@ export interface LabelSeedInputs {
   weight: TextWeight;
   /** The placeholder: `BADGE_SEED_TEXT` for a badge, `BLANK_SEED_TEXT` for a bare blank. */
   text?: string;
+  /**
+   * The shop's `engrave.blankBandFill` (#451): how much of a free band the line takes, as a
+   * fraction in (0, 1]. Read from the location by the caller, because this module is pure. Absent
+   * — or outside that range, which a hand-built caller may pass — `BLANK_BAND_FILL_FALLBACK`
+   * stands in.
+   */
+  bandFill?: number;
   measure?: InkMeasure;
 }
 
@@ -262,10 +272,11 @@ function freeBands(blank: SeedBlank, edgeMargin: Mm): { y0: Mm; y1: Mm }[] {
  *
  *   - **The band** — the free strip with the most ROOM, ties going to the front (nearest the
  *     operator, and the edge a line is read from). With no pocket the whole usable area is one band.
- *   - **The cap height** — `BAND_FILL` of the band, rounded DOWN to a whole millimetre, then
- *     measured down a millimetre at a time until the line's real ink box fits both the band's
- *     height and the blank's usable width. Whole millimetres and not a measured size: this is a
- *     starting point a person reads and edits, and `8` is a number someone can see is too big.
+ *   - **The cap height** — the shop's band fill (`engrave.blankBandFill`; fallback
+ *     `BLANK_BAND_FILL_FALLBACK`) of the band, rounded DOWN to a whole millimetre, then measured
+ *     down a millimetre at a time until the line's real ink box fits both the band's height and
+ *     the blank's usable width. Whole millimetres and not a measured size: this is a starting
+ *     point a person reads and edits, and `8` is a number someone can see is too big.
  *   - **The position** — centred in its band, and centred on the blank's X. `position` is the ink
  *     box's CENTRE, which is what `labelProfile` centres a label on too, so the clearance either
  *     side of the band is the same number.
@@ -294,7 +305,17 @@ export function blankLabelSeed(inputs: LabelSeedInputs): EngraveLabel | null {
   const bandHeight = room.y1 - room.y0;
   if (bandHeight <= 0) return null;
 
-  const start = Math.floor(BAND_FILL * bandHeight);
+  // The band fill is the shop's (#451): the caller reads `engrave.blankBandFill` from the location
+  // because this module is pure, and a no-service build falls back to the labelled constant. A
+  // fraction outside (0, 1] — which the location's own rule refuses, but a hand-built caller may
+  // pass — falls back rather than sizing a line to no band at all (0 would floor below 1 mm and
+  // seed nothing) or taking more than the band.
+  const askedFill = inputs.bandFill;
+  const bandFill =
+    typeof askedFill === 'number' && Number.isFinite(askedFill) && askedFill > 0 && askedFill <= 1
+      ? askedFill
+      : BLANK_BAND_FILL_FALLBACK;
+  const start = Math.floor(bandFill * bandHeight);
   for (let size = Math.min(start, Math.floor(usableWidth)); size >= 1; size--) {
     const ink = inkBoxOf(text, font, weight, size, inputs.measure);
     if (ink.width <= usableWidth && ink.height <= bandHeight) {

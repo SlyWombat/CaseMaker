@@ -40,10 +40,21 @@ import type {
 import { executeProfile, type ManifoldToplevel } from '@/workers/geometry/evaluateOp';
 
 /**
- * Ratio below which the opening has lost enough detail to warn. `0.9` is #171's starting
- * value; named here and cited rather than repeated as a bare literal (#201).
+ * The labelled fallback for `engrave.lostDetailWarnRatio`: the share of an item's area a cutter
+ * must keep before `item-detail-lost` is raised. `0.9` is #171's starting value; the shop's own
+ * number is read on the main thread (the worker cannot see the location) and arrives on the opts
+ * object. Named and cited rather than repeated as a bare literal (#201, #451).
  */
-export const LOST_DETAIL_RATIO = 0.9;
+export const LOST_DETAIL_RATIO_FALLBACK = 0.9;
+
+/** The caller's warn ratio when it is a usable share, else {@link LOST_DETAIL_RATIO_FALLBACK}. */
+export function lostDetailRatioFrom(lostDetailWarnRatio: number | null | undefined): number {
+  return typeof lostDetailWarnRatio === 'number' &&
+    Number.isFinite(lostDetailWarnRatio) &&
+    lostDetailWarnRatio > 0
+    ? lostDetailWarnRatio
+    : LOST_DETAIL_RATIO_FALLBACK;
+}
 
 /**
  * Areas below this are floating-point dust, not a real overhang. The stock outline and the
@@ -173,12 +184,15 @@ const SUGGEST_CAP_HEIGHT_STEPS = 8;
 /**
  * The smallest cap height to suggest for a label that has lost detail (#201 review).
  *
- * The area ratio is NOT linear in size — `size × LOST_DETAIL_RATIO / ratio` has no physical
- * basis (it suggested 93 mm for a 4 mm label at 3.9 % survival) — so the suggestion is
- * MEASURED rather than scaled: `measureAt` re-measures the label's opening ratio at a
- * candidate size, and the first size (rounded up to a whole millimetre) whose ratio reaches
- * `LOST_DETAIL_RATIO` is returned. `null` means no tried size gets there, so the cutter is
+ * The area ratio is NOT linear in size — scaling the cap height by the warning bar over the
+ * measured ratio has no physical basis (it suggested 93 mm for a 4 mm label at 3.9 % survival) — so
+ * the suggestion is MEASURED rather than scaled: `measureAt` re-measures the label's opening ratio
+ * at a candidate size, and the first size (rounded up to a whole millimetre) whose ratio reaches
+ * the warning bar is returned. `null` means no tried size gets there, so the cutter is
  * too large for the text.
+ *
+ * `lostDetailWarnRatio` is the shop's `engrave.lostDetailWarnRatio` (#451), read by the caller;
+ * `null`/absent (or an unusable value) leaves {@link LOST_DETAIL_RATIO_FALLBACK} in charge.
  *
  * Pure and injected, so it is tested without wasm; the caller supplies `measureAt` (the
  * worker re-measures that one label at the candidate size).
@@ -186,10 +200,12 @@ const SUGGEST_CAP_HEIGHT_STEPS = 8;
 export function suggestCapHeight(
   measureAt: (size: number) => number,
   current: number,
+  lostDetailWarnRatio: number | null = null,
 ): number | null {
+  const bar = lostDetailRatioFrom(lostDetailWarnRatio);
   for (let n = 1; n <= SUGGEST_CAP_HEIGHT_STEPS; n++) {
     const size = Math.ceil(current * SUGGEST_CAP_HEIGHT_GROWTH ** n);
-    if (measureAt(size) >= LOST_DETAIL_RATIO) return size;
+    if (measureAt(size) >= bar) return size;
   }
   return null;
 }
@@ -232,15 +248,22 @@ function cutterPhrase(tool: Tool | null): string {
  * no registry is visible. The caller resolves it on the main thread (`jobTool`) or from the list
  * it passed (`toolForJob`) and the same `Tool` object then feeds the measurement, the messages
  * and the CAM, so a finding can never name a cutter the sweep did not use.
+ *
+ * `lostDetailWarnRatio` is the shop's `engrave.lostDetailWarnRatio` (#451), read by the caller
+ * because this realm cannot see the location. `null`/absent — or a value that is not a positive
+ * finite number — leaves {@link LOST_DETAIL_RATIO_FALLBACK} in charge, the labelled no-service
+ * fallback.
  */
 export function engravabilityFindings(
   job: EngraveJob,
   m: LabelEngravability[],
   ratioAt: LabelRatioAt,
   tool: Tool | null,
+  lostDetailWarnRatio: number | null = null,
 ): JobFinding[] {
   const findings: JobFinding[] = [];
   const cutter = cutterPhrase(tool);
+  const bar = lostDetailRatioFrom(lostDetailWarnRatio);
 
   for (const row of m) {
     const src = findItem(job, row.labelId);
@@ -267,11 +290,11 @@ export function engravabilityFindings(
       });
     }
 
-    if (label && row.ratio > 0 && row.ratio < LOST_DETAIL_RATIO) {
+    if (label && row.ratio > 0 && row.ratio < bar) {
       const lostPct = (1 - row.ratio) * 100;
       // A measured suggestion, not a scaled one (#201 review): raise the cap height until
-      // the re-measured opening keeps 90 % of its area, or say the cutter is too large.
-      const suggested = suggestCapHeight((size) => ratioAt(row.labelId, size), label.size);
+      // the re-measured opening reaches the warning bar, or say the cutter is too large.
+      const suggested = suggestCapHeight((size) => ratioAt(row.labelId, size), label.size, bar);
       const hint =
         suggested === null
           ? 'this cutter is too large for this text — choose a smaller cutter'
@@ -282,7 +305,7 @@ export function engravabilityFindings(
         labelId: row.labelId,
         message: `Label "${label.text}" loses ${lostPct.toFixed(0)}% of its area to ${cutter}; ${hint}.`,
       });
-    } else if (shape && row.ratio > 0 && row.ratio < LOST_DETAIL_RATIO) {
+    } else if (shape && row.ratio > 0 && row.ratio < bar) {
       // No cap height to offer: say so plainly and point at the two real choices (#214).
       const lostPct = (1 - row.ratio) * 100;
       findings.push({

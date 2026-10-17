@@ -15,6 +15,7 @@ import { featureSim } from '@/platform/features';
 import { create } from 'zustand';
 import type { EngraveJob, EngraveMargins } from '@/types/engraveJob';
 import type { EngravePreview } from '@/workers/sim/engravePreview';
+import type { EngraveShopOpts } from '@/workers/sim/engraveGenerate';
 import { getTools } from '@/engine/cnc/toolRegistry';
 import { feedCatalogueRows } from '@/engine/cnc/feeds';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
@@ -23,6 +24,7 @@ import { inventoryConditions, type ConditionSummary } from '@/engine/cnc/toolCon
 import { effectiveMargins } from '@/engine/cnc/engrave/depthBounds';
 import { useEngraveJobStore } from './engraveJobStore';
 import { useSettingsStore } from './settingsStore';
+import { shopDefault } from './shopDefaultsStore';
 
 export type EngravePreviewStatus = 'idle' | 'loading' | 'ready' | 'error';
 
@@ -35,6 +37,8 @@ export type EngravePreviewClient = {
     margins: EngraveMargins,
     /** The inventory's condition summaries by registry key (#442) — see `run` for why it is read here. */
     conditions: ReadonlyMap<string, ConditionSummary>,
+    /** The engrave shop defaults (#451) — see `run` for why they are read here. */
+    shop?: EngraveShopOpts,
   ) => Promise<EngravePreview | null>;
 };
 
@@ -84,6 +88,8 @@ export const useEngravePreviewStore = create<EngravePreviewState>()((set) => {
       // The inventory's condition summaries go the same way as the registry snapshot (#442): the
       // worker has no copy of `toolCondition`'s map, so the recommendation that skips broken cutters
       // and notes a worn one would otherwise answer for a bench with no conditions set.
+      // The warn ratio is the shop's (#451), read here for the same reason: the worker cannot see the
+      // location, and the preview's findings must warn at the bar the run would raise.
       const preview = await client.engravePreview(
         job,
         getTools(),
@@ -91,6 +97,7 @@ export const useEngravePreviewStore = create<EngravePreviewState>()((set) => {
         mine,
         effectiveMargins(job, useSettingsStore.getState().margins),
         inventoryConditions(),
+        { lostDetailWarnRatio: shopDefault('engrave.lostDetailWarnRatio').value },
       );
       if (mine !== seq) return; // superseded by a newer request
       // `preview === null` means the worker saw a newer generation already; keep the last one.

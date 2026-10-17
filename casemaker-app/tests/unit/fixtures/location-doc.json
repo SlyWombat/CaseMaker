@@ -912,6 +912,34 @@
       "unit": "rpm",
       "note": "placeholder, not measured; not a vendor number: the adaptive spindle speed until a measured row replaces it"
     },
+    "adaptive.entryClearanceMm": {
+      "value": 0.5,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm",
+      "note": "chosen, not measured: how far above the floor just cut a rapid down a cleared column stops, and the clearance every entry starts from"
+    },
+    "adaptive.maxCells": {
+      "value": 12000000.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "cells",
+      "note": "chosen, not measured: the largest material grid adaptive clearing will build; a pocket needing more cells at the planned engagement is refused rather than ground through"
+    },
+    "adaptive.residualShare": {
+      "value": 0.005,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "x",
+      "note": "chosen, not measured: the material adaptive clearing may leave as grid noise along the walls, as a share of the area to clear"
+    },
+    "adaptive.neckAreaMm2": {
+      "value": 0.05,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm²",
+      "note": "chosen, not measured: material in a neck narrower than the grid can see, above this area, refuses the plan rather than being left standing"
+    },
     "engrave.newItemDepthMm": {
       "value": 0.5,
       "source": "seeded",
@@ -925,6 +953,20 @@
       "setAt": null,
       "unit": "mm",
       "note": "chosen, not measured: the depth a new hole starts at — deeper than an item's own starting depth because a hole that shallow shows nothing on the preview"
+    },
+    "engrave.lostDetailWarnRatio": {
+      "value": 0.9,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "x",
+      "note": "chosen, not measured: the share of an item's area a cutter must reach before the item is called detail-lost"
+    },
+    "engrave.blankBandFill": {
+      "value": 0.7,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "x",
+      "note": "chosen, not measured: how much of a free band the seeded line takes, as a share of it; more fill means a taller cap and less clearance"
     }
   }
 }

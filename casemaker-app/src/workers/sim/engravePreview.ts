@@ -50,7 +50,7 @@ import {
   type LabelRatioAt,
   type PerCharGlyph,
 } from './engraveGeometry';
-import { engraveRegions } from './engraveGenerate';
+import { engraveRegions, type EngraveShopOpts } from './engraveGenerate';
 
 type ManifoldInstance = InstanceType<ManifoldToplevel['Manifold']>;
 
@@ -174,6 +174,10 @@ export interface EngravePreviewer {
    * `conditions` is the inventory's condition summaries by registry key (#442), handed in for the
    * same reason a fourth time: `toolCondition`'s map lives on the main thread, so the recommendation
    * below would see a bench with no cutter marked worn or broken at all.
+   *
+   * `shop` is the engrave shop defaults this realm cannot read (#451) — here only
+   * `engrave.lostDetailWarnRatio`, which sets both the `item-detail-lost` bar the findings use and
+   * the `qualifies` bar the recommendation ranks against. See {@link EngraveShopOpts}.
    */
   engravePreview(
     job: EngraveJob,
@@ -182,6 +186,7 @@ export interface EngravePreviewer {
     gen: number,
     margins: EngraveMargins,
     conditions: ReadonlyMap<string, ConditionSummary>,
+    shop?: EngraveShopOpts,
   ): EngravePreview | null;
 }
 
@@ -232,6 +237,7 @@ function completeCompromiseReason(
   job: EngraveJob,
   rec: ToolRecommendation,
   tools: readonly ToolLibraryEntry[],
+  lostDetailWarnRatio: number | null = null,
 ): string {
   if (!rec.compromise || rec.key === null) return rec.reason;
   const pick = rec.candidates.find((c) => c.key === rec.key);
@@ -243,7 +249,7 @@ function completeCompromiseReason(
   const r = cuttingRadiusForSweep(entry.tool);
   if (!r.ok) return rec.reason;
   const ratioAt = ratioAtFor(tl, job, r.radius);
-  const suggested = suggestCapHeight((size) => ratioAt(worst.labelId, size), label.size);
+  const suggested = suggestCapHeight((size) => ratioAt(worst.labelId, size), label.size, lostDetailWarnRatio);
   const hint = suggested === null ? 'Choose a smaller cutter.' : `Try ${suggested} mm or more.`;
   return `${rec.reason} ${hint}`;
 }
@@ -258,6 +264,7 @@ export function createEngravePreviewer(tl: ManifoldToplevel): EngravePreviewer {
     gen: number,
     margins: EngraveMargins,
     conditions: ReadonlyMap<string, ConditionSummary>,
+    shop: EngraveShopOpts = {},
   ): EngravePreview | null => {
     if (gen < latestGen) return null;
     latestGen = gen;
@@ -272,7 +279,7 @@ export function createEngravePreviewer(tl: ManifoldToplevel): EngravePreviewer {
     // The job's own snapshot wins over its key's entry (design point 2, #305), resolved against
     // the list the main thread sent — the worker has no registry of its own to read.
     const tool = toolForJob(job, tools);
-    const { plan, measured, cuts, findings, colourBoundaryDepth } = engraveRegions(tl, job, tool, margins);
+    const { plan, measured, cuts, findings, colourBoundaryDepth } = engraveRegions(tl, job, tool, margins, shop);
 
     // A label whose findings include an error is left out of the cut — the stock is drawn
     // uncut there — but its row and findings are still reported (the issue's rule).
@@ -392,6 +399,9 @@ export function createEngravePreviewer(tl: ManifoldToplevel): EngravePreviewer {
       },
       // #442 — the bench's own condition summaries, sent with the job because this realm has none.
       conditions,
+      // #451 — the same warn ratio the findings above were built with, so the recommendation's
+      // "qualifies" bar and `item-detail-lost` cannot disagree about which cutters keep detail.
+      shop.lostDetailWarnRatio ?? null,
     );
 
     return {
@@ -405,7 +415,7 @@ export function createEngravePreviewer(tl: ManifoldToplevel): EngravePreviewer {
       colourBoundaryDepth,
       recommendation: {
         ...recommendation,
-        reason: completeCompromiseReason(tl, job, recommendation, tools),
+        reason: completeCompromiseReason(tl, job, recommendation, tools, shop.lostDetailWarnRatio ?? null),
       },
     };
   };

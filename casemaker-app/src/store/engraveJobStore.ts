@@ -1104,6 +1104,9 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
             pocket: pocket?.kind === 'rect' ? pocket : null,
           },
           edgeMargin: job.edgeMargin,
+          // The shop's band fill (#451): how much of the free band the line takes. This module
+          // reads the location; `blankLabelSeed` is pure and keeps only the labelled fallback.
+          bandFill: shopDefault('engrave.blankBandFill').value,
           font: face.font,
           weight: face.weight,
           measure: labelGlyphMeasure(job.customFonts ?? []),
@@ -1211,6 +1214,8 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
           // one band and the line is sized to the blank (`blankStockFor` carries dimensions only).
           blank: { length: job.stock.length, width: job.stock.width, pocket: null },
           edgeMargin: job.edgeMargin,
+          // The shop's band fill (#451), read here for the same reason as the badge route above.
+          bandFill: shopDefault('engrave.blankBandFill').value,
           font: face.font,
           weight: face.weight,
           text: BLANK_SEED_TEXT,
