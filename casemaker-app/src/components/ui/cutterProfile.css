@@ -1,0 +1,240 @@
+/*
+ * The cutter profile's stylesheet (#489).
+ *
+ * Tokens only: the app sets `color-scheme: dark` on `:root` and has no `data-theme` provider in
+ * this build, so this component does not invent a second theming path. If one arrives, it changes
+ * `--cm-color-*` and this file follows with no edit. The print variant never uses this file: the
+ * run sheet embeds `cutterProfileSvg`'s standalone monochrome string.
+ */
+
+.cutter-profile {
+  --cutter-ink: var(--cm-color-on-surface);
+  --cutter-muted: var(--cm-color-on-surface-muted);
+  --cutter-line: var(--cm-color-outline);
+  --cutter-warning: var(--cm-color-tertiary);
+  --cutter-accent: var(--cm-color-primary);
+  --cutter-background: var(--cm-color-surface-container-low, var(--cm-color-surface));
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  color: var(--cutter-ink);
+}
+
+.cutter-profile__svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  overflow: visible;
+  font-family: var(--cm-font-body);
+}
+
+.cutter-profile--full .cutter-profile__svg {
+  max-width: 420px;
+}
+
+.cutter-profile--thumb {
+  width: 96px;
+}
+
+.cutter-profile--thumb .cutter-profile__svg {
+  width: 96px;
+}
+
+.cutter-profile--print {
+  width: 100%;
+}
+
+/* The silhouette is a faint wash; the outline carries the information. */
+.cutter-profile__fill {
+  fill: var(--cutter-ink);
+  fill-opacity: 0.12;
+  stroke: none;
+}
+
+.cutter-profile__path {
+  fill: none;
+  stroke: var(--cutter-ink);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.cutter-profile__path--tip,
+.cutter-profile__path--flank,
+.cutter-profile__path--shank,
+.cutter-profile__path--neck {
+  stroke-width: 1.4;
+}
+
+.cutter-profile__path--break {
+  stroke-width: 1.1;
+}
+
+.cutter-profile__path--axis {
+  stroke: var(--cutter-muted);
+  stroke-width: 0.6;
+  opacity: 0.5;
+}
+
+.cutter-profile__path--detail {
+  stroke: var(--cutter-muted);
+  stroke-width: 0.7;
+  opacity: 0.85;
+}
+
+.cutter-profile__path--groove {
+  stroke: var(--cutter-muted);
+  stroke-width: 0.9;
+}
+
+.cutter-profile__path--dimension,
+.cutter-profile__path--leader,
+.cutter-profile__path--arc {
+  stroke: var(--cutter-muted);
+  stroke-width: 0.7;
+}
+
+.cutter-profile__path--extension {
+  stroke: var(--cutter-line);
+  stroke-width: 0.6;
+}
+
+.cutter-profile__path--arrow {
+  fill: var(--cutter-muted);
+  stroke: none;
+}
+
+.cutter-profile__path[data-dashed='true'] {
+  stroke-dasharray: 4 3;
+}
+
+/* Missing geometry is never a quieter solid line: it is dashed and in the warning colour. */
+.cutter-profile__path.is-missing {
+  stroke: var(--cutter-warning);
+}
+
+.cutter-profile__dimension {
+  cursor: pointer;
+  outline: none;
+}
+
+.cutter-profile__dimension:focus-visible .cutter-profile__dimension-text {
+  fill: var(--cutter-accent);
+}
+
+.cutter-profile__dimension-text {
+  fill: var(--cutter-muted);
+  font-family: var(--cm-font-body);
+  font-size: 9.5px;
+  font-weight: 500;
+  user-select: none;
+}
+
+.cutter-profile__dimension-text.is-missing {
+  fill: var(--cutter-warning);
+  font-weight: 700;
+}
+
+.cutter-profile__dimension-background {
+  fill: var(--cutter-background);
+}
+
+.cutter-profile__dimension.is-active .cutter-profile__path,
+.cutter-profile__path.is-active {
+  stroke: var(--cutter-accent);
+}
+
+.cutter-profile__dimension.is-active .cutter-profile__path--dimension,
+.cutter-profile__dimension.is-active .cutter-profile__path--extension,
+.cutter-profile__path.is-active {
+  stroke-width: 1.1;
+}
+
+.cutter-profile__dimension.is-active .cutter-profile__path--arrow {
+  fill: var(--cutter-accent);
+  stroke: none;
+}
+
+.cutter-profile__dimension.is-active .cutter-profile__dimension-text {
+  fill: var(--cutter-accent);
+}
+
+.cutter-profile__dimension.is-missing .cutter-profile__path.is-missing {
+  stroke: var(--cutter-warning);
+}
+
+.cutter-profile__groove-label {
+  fill: var(--cutter-muted);
+  font-family: var(--cm-font-body);
+  font-size: 9px;
+}
+
+.cutter-profile__mark {
+  fill: var(--cutter-muted);
+  font-family: var(--cm-font-body);
+  font-size: 9.5px;
+}
+
+.cutter-profile__mark.is-missing {
+  fill: var(--cutter-warning);
+  font-weight: 700;
+}
+
+.cutter-profile__scale-line {
+  fill: none;
+  stroke: var(--cutter-line);
+  stroke-width: 1;
+}
+
+.cutter-profile__scale-text,
+.cutter-profile__scale-note {
+  fill: var(--cutter-muted);
+  font-family: var(--cm-font-body);
+  font-size: 8.5px;
+}
+
+.cutter-profile__scale-note {
+  font-style: italic;
+}
+
+.cutter-profile__label-band {
+  fill: var(--cutter-ink);
+  stroke: var(--cutter-ink);
+  stroke-width: 0.4;
+}
+
+.cutter-profile.is-refused {
+  --cutter-ink: var(--cm-color-on-surface-muted);
+}
+
+.cutter-profile.is-refused .cutter-profile__fill {
+  fill-opacity: 0.06;
+}
+
+.cutter-profile__refusal {
+  margin: 0;
+  max-width: 42ch;
+  color: var(--cm-color-error);
+  font-family: var(--cm-font-mono);
+  font-size: var(--cm-text-mono-size);
+  line-height: 1.4;
+}
+
+.cutter-profile__condition {
+  margin: 0;
+  color: var(--cutter-warning);
+  font-family: var(--cm-font-mono);
+  font-size: var(--cm-text-mono-size);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .cutter-profile__path,
+  .cutter-profile__dimension-text,
+  .cutter-profile__dimension-background {
+    transition:
+      stroke 120ms ease,
+      stroke-width 120ms ease,
+      fill 120ms ease;
+  }
+}
