@@ -4,6 +4,7 @@
 // at module load, so the fake below is installed BEFORE the store is dynamically imported.
 
 import { describe, it, expect, vi } from 'vitest';
+import { setSeededIds } from '@/utils/id';
 
 // A minimal in-memory Storage, installed before any store import. The unit suite runs on
 // node, where localStorage does not exist and the store deliberately no-ops.
@@ -61,6 +62,46 @@ describe('EngraveJob schema (#200)', () => {
     expect(parsed.ok).toBe(true);
     if (!parsed.ok) return;
     expect(parsed.job).toEqual(job);
+  });
+
+  it('keeps a stated job id and mints one for a document written before the field (#419)', () => {
+    // The id is what a stock reservation and `RunContext.jobId` are keyed to, so it must survive a
+    // save and load. A document without one gains it on PARSE, with no `schemaVersion` bump — for
+    // v1 as well as v2, since the v1 schema predates the key entirely. Seeded ids are what make
+    // the minted value assertable rather than a fresh random string on every run.
+    const raw = JSON.parse(JSON.stringify(defaultEngraveJob())) as Record<string, unknown>;
+
+    setSeededIds(true);
+    try {
+      const kept = parseEngraveJob({ ...raw, id: 'job-stated' });
+      expect(kept.ok).toBe(true);
+      if (!kept.ok) return;
+      expect(kept.job.id).toBe('job-stated');
+
+      // A v2 document written before #419: the v2 field's `.default` mints one.
+      const v2 = { ...raw };
+      delete v2.id;
+      setSeededIds(true);
+      const minted = parseEngraveJob(v2);
+      expect(minted.ok).toBe(true);
+      if (!minted.ok) return;
+      expect(minted.job.schemaVersion).toBe(2);
+      expect(minted.job.id).toBe('job-s000001');
+
+      // A v1 document cannot reach that default (the v1 branch has no such key), so the transform
+      // mints it there. Both routes land on the same shape of id.
+      const v1 = { ...raw, schemaVersion: 1 } as Record<string, unknown>;
+      delete v1.sacrificial;
+      delete v1.breakthrough;
+      setSeededIds(true);
+      const old = parseEngraveJob(v1);
+      expect(old.ok).toBe(true);
+      if (!old.ok) return;
+      expect(old.job.schemaVersion).toBe(2);
+      expect(old.job.id).toBe('job-s000001');
+    } finally {
+      setSeededIds(false);
+    }
   });
 
   it('strips an unknown extra key rather than rejecting the job', () => {

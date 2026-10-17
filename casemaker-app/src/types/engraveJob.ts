@@ -643,6 +643,16 @@ export interface StockFlatness {
 
 export interface EngraveJob {
   schemaVersion: 2;
+  /**
+   * The job's own identity (#419): a stock reservation and `RunContext.jobId` are keyed to this,
+   * and a job is renamed freely, so neither `name` nor `machineId` can serve as the key.
+   *
+   * REQUIRED, not optional. A lazily-minted id lets two callers disagree about which id a job has,
+   * and the reservation would then be held against one of them. The schema is the one place that
+   * mints it: `engraveJobSchema`'s `.default(() => newId('job'))`, and the v1 transform below it,
+   * so a document written before this field existed gains an id on parse with no version bump.
+   */
+  id: string;
   name: string;
   /**
    * The MILL this job is written for (#347) — a `MACHINES` key, and `'Z1'` today, because that is

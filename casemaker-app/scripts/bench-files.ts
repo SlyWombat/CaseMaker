@@ -143,6 +143,9 @@ function ladderShape(row: 'A' | 'B', i: number): EngraveRectShape {
 function ladderJob(row: 'A' | 'B'): EngraveJob {
   return {
     schemaVersion: 2,
+    // #419's job identity. A REAL value, not `newId`: this script writes the job to disk, and
+    // re-running it must update the same document rather than mint a new identity each time.
+    id: `job-depth-ladder-${row.toLowerCase()}`,
     name: `165 depth ladder row ${row}`,
     // Both of these are required on `EngraveJob` and were missing from this literal: `tsx` strips
     // types, so nothing complained, but the committed `.job.json` was a document the app's own

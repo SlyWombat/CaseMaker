@@ -6,6 +6,7 @@ import { DEFAULT_BREAKTHROUGH, noneSacrificial } from '@/engine/cnc/sacrificial'
 import { DEFAULT_JAW_CLEARANCE_MM } from '@/engine/cnc/engrave/depthBounds';
 import { MAX_OUTLINE_CONTOURS, MAX_OUTLINE_POINTS } from '@/engine/import/outlineTypes';
 import type { EngraveJob } from '@/types/engraveJob';
+import { newId } from '@/utils/id';
 
 /**
  * The Zod mirror of `EngraveJob` (#200). A field on the TypeScript type with no entry here
@@ -539,6 +540,12 @@ const engraveJobV1Schema = z.object({
 /** Version 2 (#213): adds `sacrificial` and `breakthrough`. */
 const engraveJobV2Schema = engraveJobV1Schema.extend({
   schemaVersion: z.literal(2),
+  // #419's job identity. DEFAULTED, not optional: a stock reservation and `RunContext.jobId` are
+  // keyed to it, so every parsed job must carry one. A v2 document written before this field
+  // existed gains an id on parse with no `schemaVersion` bump — nothing about the document changes
+  // but this key. A v1 document is minted in the transform below, which is the only way it can get
+  // one: the v1 schema predates the field, so its branch never reaches this default.
+  id: z.string().min(1).default(() => newId('job')),
   sacrificial: sacrificialSchema,
   breakthrough: z.number().finite().nonnegative(),
   // #362's jaw clearance. DEFAULTED, unlike the optional keys below: the shipped value is the 1 mm
@@ -589,6 +596,9 @@ export const engraveJobSchema = z
       ? {
           ...job,
           schemaVersion: 2,
+          // …and its own id (#419): v1 predates the field, and the v2 default above is not reached
+          // by a document that parses against this branch, so it is minted here.
+          id: newId('job'),
           // An old job loads with no sacrificial material (#213): the default is none.
           sacrificial: noneSacrificial(),
           breakthrough: DEFAULT_BREAKTHROUGH,
