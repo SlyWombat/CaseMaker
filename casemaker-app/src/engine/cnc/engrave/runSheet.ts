@@ -1,6 +1,6 @@
 import type { RapidEstimate } from '@/engine/cnc/cam/ir';
 import { aabbOfProfile } from '@/engine/compiler/profile';
-import { jobTool, type JobFinding } from '@/engine/cnc/engrave/jobSetup';
+import { jobSetups, jobTool, type JobFinding } from '@/engine/cnc/engrave/jobSetup';
 import {
   idJawReach,
   keepOutLimit,
@@ -67,9 +67,9 @@ import type { Mm } from '@/types/units';
 
 /**
  * The operator run sheet (#207): a printable, job-specific checklist for the person standing at
- * the machine. V1 does not talk to the machine (`/Fabrication.md` §9.1) — the file is uploaded
- * through Makera Studio and the work origin is set by hand — so everything the file ASSUMES about
- * the physical setup has to reach the operator on paper.
+ * the machine. The program reaches the machine from the app's own upload panel (the desktop build)
+ * or through Makera Studio by hand, and the work origin is set by hand either way — so everything
+ * the file ASSUMES about the physical setup has to reach the operator on paper.
  *
  * This module is PURE DATA: `buildRunSheet` returns a plain `RunSheet` structure with no React,
  * no DOM and no wasm, so it is a function of the job plus what #206's `engraveGenerate` returned
@@ -83,10 +83,11 @@ import type { Mm } from '@/types/units';
  * machine does NOT know the cutter's length (`T1 M6` to the already-active tool does nothing —
  * `StartingTool`, `setup.ts`; the manual step is `M491`, `/Fabrication.md` §2).
  *
- * STEPS MARKED `unverified` ARE NOT CONFIRMED ON A REAL MACHINE. Three sections (mount the vise,
- * fit the cutter, set the origin) carry `unverified: '#208'`, and the view must render the tag —
- * an operator has to be able to tell a confirmed step from an assumed one (#207 "Do not hide the
- * ⚠ notes"). #208 removes the markers it confirms.
+ * STEPS MARKED `unverified` HAVE NOT BEEN RUN AT THE BENCH, and the view renders the tag — an
+ * operator has to be able to tell a confirmed step from an assumed one (#207 "Do not hide the
+ * ⚠ notes"). The mount, the cutter fit and the origin were walked at the machine on 2026-10-12,
+ * -15 and -16, so they carry no tag; what remains is the held stepped material scan and the rest
+ * pass's routine, and they point at the bench issue that will confirm them (#443).
  */
 
 // ---------------------------------------------------------------------------------------------
@@ -213,8 +214,9 @@ export interface RunSheetStep {
   /** Label of a blank the operator fills in. */
   record?: string;
   /**
-   * The issue that will confirm this step on the machine, e.g. `'#208'`. PRESENT means the step
-   * is an assumption, not a measured fact; the view must show the tag.
+   * The bench issue that will confirm this step on the machine, e.g. `'#443'`. PRESENT means the
+   * step has not been run at the bench, so it is an assumption rather than a walked routine; the
+   * view must show the tag.
    */
   unverified?: string;
   /** Render the step's text bold. The `vise-default` warning opens section 8 this way. */
@@ -1052,7 +1054,6 @@ function facingSteps(
 function registrationSteps(
   job: EngraveJob,
   onBoard: boolean,
-  unverified: string,
   tipDiameterMm?: Mm,
   /**
    * #432 review R1 — the job is skimmed before it is engraved, so the origin is probed with the
@@ -1075,7 +1076,6 @@ function registrationSteps(
           'probe by hand, or change the workholding — do not run this file until X0, Y0 and Z0 are ' +
           'known.',
         bold: true,
-        unverified,
       },
     ];
   }
@@ -1086,7 +1086,6 @@ function registrationSteps(
   for (const d of plan.datums) {
     steps.push({
       text: `The ${kindWord(job.workholding.kind)} already references ${axesWord(d.fixes)} to within ±${fmtNum(d.uncertainty)} mm, before any touch.`,
-      unverified,
     });
   }
   // One step per touch, in the plan's own order: rotation's pair first, then whatever the pair did
@@ -1095,7 +1094,6 @@ function registrationSteps(
     const words = describeTouch(t, length, width);
     steps.push({
       text: `Touch ${i + 1} of ${plan.touches.length}: ${words.edge}, ${words.where} — this gives ${readsWord(t)}.`,
-      unverified,
     });
   });
   steps.push({
@@ -1124,7 +1122,6 @@ function registrationSteps(
     record: facingRun
       ? 'surface Z (mm) and the probe’s PRB (mm)'
       : 'surface Z (mm) and the PRB of the tool that set Z0 (mm)',
-    unverified,
   });
   steps.push({
     text:
@@ -1145,12 +1142,11 @@ function registrationSteps(
       `app knowing. The only X/Y slack for that is this job's edge margin, ${fmtNum(job.edgeMargin)} mm, ` +
       'which is the gap the content keeps from a stock edge rather than a locating tolerance: a cut ' +
       'standing at that margin has used all of it.',
-    unverified,
   });
   // The planner's own caveats — the static-`.nc` rotation limitation, why Z is always probed, and
   // where a footprint could not be resolved. Verbatim but for the leading letter: the planner
   // writes notes as clauses, and the sheet prints sentences.
-  for (const note of plan.notes) steps.push({ text: sentence(note), unverified });
+  for (const note of plan.notes) steps.push({ text: sentence(note) });
   return steps;
 }
 
@@ -1729,7 +1725,7 @@ function restSwapSteps(facts: RestPassFacts): RunSheetStep[] {
         'reference, so the X and Y origin stays where it is.',
       code: '$H',
       record: `depth after ${rough.nc} (mm), per region above`,
-      unverified: '#410',
+      unverified: '#443',
     },
     {
       text:
@@ -1738,7 +1734,7 @@ function restSwapSteps(facts: RestPassFacts): RunSheetStep[] {
         'that reference reading was written down when the origin was set, so neither is re-taken here.',
       code: 'M491',
       record: 'the new cutter’s PRB (mm)',
-      unverified: '#410',
+      unverified: '#443',
     },
     {
       text:
@@ -1749,7 +1745,7 @@ function restSwapSteps(facts: RestPassFacts): RunSheetStep[] {
         'the first program’s own depth.',
       value: 'Z0 = surface + (cutter PRB − reference PRB)',
       record: 'Z0 for the second program (mm)',
-      unverified: '#410',
+      unverified: '#443',
     },
     // #437 item 8 — program 2 has its own dry run, and it belongs HERE rather than in the Dry run
     // section: its frame can only be run after the cutter change and the new Z0, and a step in §8
@@ -1763,7 +1759,7 @@ function restSwapSteps(facts: RestPassFacts): RunSheetStep[] {
             `never produced. Do not run ${rest.nc} — clear the errors, regenerate, and the frame ` +
             'comes back with the program.',
           bold: true,
-          unverified: '#410',
+          unverified: '#443',
         }
       : {
           text:
@@ -1771,7 +1767,7 @@ function restSwapSteps(facts: RestPassFacts): RunSheetStep[] {
             `${fmtNum(FRAME_Z)} mm above the work — no Z offset to set. If the trace is not where the ` +
             'rest should land, stop.',
           value: `${fmtNum(FRAME_Z)} mm above the work`,
-          unverified: '#410',
+          unverified: '#443',
         },
     {
       text:
@@ -1779,7 +1775,7 @@ function restSwapSteps(facts: RestPassFacts): RunSheetStep[] {
         'around the shapes the first program could not enter, and to spend most of its time in the air ' +
         'between them.',
       value: `about ${formatDuration(rest.seconds)}`,
-      unverified: '#410',
+      unverified: '#443',
     },
   ];
 }
@@ -1929,14 +1925,13 @@ export function buildRunSheet(
     });
   }
 
-  // ---- 2 · Mount the vise (⚠ #208) -----------------------------------------------------------
-  const UNVERIFIED = '#208';
+  // ---- 2 · Mount the vise ---------------------------------------------------------------------
+  // The bench issue any step that has NOT been walked at the machine names (see the module note):
+  // today that is the held stepped material scan and the rest pass's routine.
+  const BENCH_ISSUE = '#443';
   const mountSteps: RunSheetStep[] = [
-    {
-      text: 'Remove the MDF wasteboard. Seat the vise on its two locating pins; fasten with six M5×20 screws.',
-      unverified: UNVERIFIED,
-    },
-    { text: 'The fixed jaw is on the left.', unverified: UNVERIFIED },
+    { text: 'Remove the MDF wasteboard. Seat the vise on its two locating pins; fasten with six M5×20 screws.' },
+    { text: 'The fixed jaw is on the left.' },
   ];
 
   // ---- 3 · Load the blank --------------------------------------------------------------------
@@ -1946,6 +1941,21 @@ export function buildRunSheet(
   // as the face Z0 must not be probed on. Without one, the sheet says what it always said.
   const under = job.sacrificial.under;
   const onBoard = under !== null;
+  // #470 — which way round the blank goes is the FIRST setup's ORIENTATION (`setups/types.ts`: the
+  // stock face at each machine face), not a constant. A remounted stock sits with another stock
+  // face up, and the dimension between the jaws is then the other one; the identity every
+  // one-setup job carries gives exactly the sentence this step has always printed. A document that
+  // states an EMPTY `setups[]` has no first setup to read, so it falls back to the same identity
+  // rather than throwing — the same `?.[0] ??` idiom `jobTool` uses.
+  const orientation = jobSetups(job)[0]?.orientation ?? {
+    top: 'top',
+    bottom: 'bottom',
+    left: 'left',
+    right: 'right',
+    front: 'front',
+    back: 'back',
+  };
+  const betweenJaws = orientation.left === 'left' || orientation.left === 'right' ? 'length' : 'width';
   const loadSteps: RunSheetStep[] = [
     // #213 §6 — with sacrificial material the thing loaded is an assembly, and the order matters:
     // the part is fixed to the board/strips BEFORE it goes between the jaws, and the strips sit
@@ -1968,8 +1978,12 @@ export function buildRunSheet(
         };
       }),
     {
-      text: "The blank's length runs left–right between the jaws. The face to be engraved is up.",
-      value: `${fmtNum(length)} mm`,
+      text:
+        `The blank's ${betweenJaws} runs left–right between the jaws. ` +
+        (orientation.top === 'top'
+          ? 'The face to be engraved is up.'
+          : `The stock's ${orientation.top} face is up — that is the face to be engraved.`),
+      value: `${fmtNum(betweenJaws === 'length' ? length : width)} mm`,
     },
     {
       text:
@@ -1995,10 +2009,14 @@ export function buildRunSheet(
   const facingRun =
     job.facing !== undefined && job.facing.enabled && job.facing.depth > 0 && generated.facingNc !== null;
 
-  // ---- 4 · Fit the cutter and measure its length (⚠ #208) ------------------------------------
+  // ---- 4 · Fit the cutter and measure its length ---------------------------------------------
   // For a facing job this section runs AFTER the origin (see `facingRun` above) and fits the FACING
   // cutter, because that is the first cutter to touch the blank: the skim happens before anything
   // else, and its Z0 comes from the probe's surface reading, not from a second touch-off.
+  //
+  // `M491` is run from the app's own console or from Makera Studio (the harness `tools/z1/`
+  // drives the same command): naming only Studio said the app cannot do it, which stopped being
+  // true when the desktop build learned to talk to the machine.
   const cutterSteps: RunSheetStep[] = facingRun
     ? [
         {
@@ -2006,16 +2024,14 @@ export function buildRunSheet(
             'Home the machine, then fit the FACING cutter in place of the probe. Nothing moves but ' +
             'the Z reference, so the X and Y origin stays where the probing put it.',
           code: '$H',
-          unverified: UNVERIFIED,
         },
         {
           text:
-            'Fit the FACING cutter, not the engraving bit. Run tool-length calibration from Studio ' +
-            '(M491) and record this cutter’s PRB — a reading of THIS cutter alone, the second term ' +
-            'of the Z0 below.',
+            'Fit the FACING cutter, not the engraving bit. Run tool-length calibration from the ' +
+            'app’s console or Studio (M491) and record this cutter’s PRB — a reading of THIS cutter ' +
+            'alone, the second term of the Z0 below.',
           code: 'M491',
           record: 'the facing cutter’s PRB (mm)',
-          unverified: UNVERIFIED,
         },
         {
           text:
@@ -2025,34 +2041,30 @@ export function buildRunSheet(
             'cutter is fitted: that command zeroes the tool-length offset to the current tool (#387).',
           value: 'Z0 = surface + (facing PRB − probe PRB)',
           record: 'Z0 for the facing program (mm)',
-          unverified: UNVERIFIED,
         },
         {
           text:
             'Do not skip this because the program contains T1 M6. If the machine already believes ' +
             'tool 1 is fitted, that line does nothing.',
-          unverified: UNVERIFIED,
         },
       ]
     : [
         {
-          text: 'Fit the cutter with its collar. Run tool-length calibration from Studio (M491).',
+          text: 'Fit the cutter with its collar. Run tool-length calibration from the app’s console or Studio (M491).',
           // #410 review item 1 — the reading itself, on paper. Every Z in the program is this
           // cutter's, and a second cutter's Z0 is worked out from the difference between two of
           // these readings (the swap routine in the Cut section, and the origin step), so the number
           // has to be written down where it is taken.
           record: "the cutter's PRB (mm)",
-          unverified: UNVERIFIED,
         },
         {
           text:
             'Do not skip this because the program contains T1 M6. If the machine already believes tool 1 ' +
             'is fitted, that line does nothing.',
-          unverified: UNVERIFIED,
         },
       ];
 
-  // ---- 5 · Set the work origin (⚠ #208) ------------------------------------------------------
+  // ---- 5 · Set the work origin ---------------------------------------------------------------
   // #391 — where the origin IS, then how the operator checks it against the blank actually in the
   // jaws. One section, because they are one task: a corrected origin is corrected on the spot.
   //
@@ -2070,18 +2082,18 @@ export function buildRunSheet(
       ? [
           {
             text:
-              'Fit the wired probe, not a cutter. Run tool-length calibration from Studio (M491) and ' +
-              'record the PROBE’s PRB: this job is skimmed before it is engraved, so the probe sets ' +
-              'Z0 and its reading is the reference each cutter’s Z0 is worked out against — the ' +
-              'facing cutter’s below, and the engraving cutter’s after the re-touch.',
+              'Fit the wired probe, not a cutter. Run tool-length calibration from the app’s console ' +
+              'or Studio (M491) and record the PROBE’s PRB: this job is skimmed before it is ' +
+              'engraved, so the probe sets Z0 and its reading is the reference each cutter’s Z0 is ' +
+              'worked out against — the facing cutter’s below, and the engraving cutter’s after the ' +
+              're-touch.',
             code: 'M491',
             record: 'the probe’s PRB (mm)',
-            unverified: UNVERIFIED,
           },
         ]
       : []),
-    ...registrationSteps(job, onBoard, UNVERIFIED, options.scan?.tipDiameterMm, facingRun),
-    ...(options.materialScan === true ? materialPositionSteps(job, onBoard, UNVERIFIED, machine.toolChange.clearanceZ, options.scan) : []),
+    ...registrationSteps(job, onBoard, options.scan?.tipDiameterMm, facingRun),
+    ...(options.materialScan === true ? materialPositionSteps(job, onBoard, BENCH_ISSUE, machine.toolChange.clearanceZ, options.scan) : []),
   ];
 
   // ---- 6 · Dry run ---------------------------------------------------------------------------

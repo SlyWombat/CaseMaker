@@ -16,7 +16,7 @@
 
 import { useEffect, useRef, useState, type CSSProperties, type JSX } from 'react';
 import { attachConsole } from '@/platform/machineConsole';
-import { describeRun, runSettings } from '@/platform/machineRun';
+import { describeRun, programOwnsVacuum, runSettings } from '@/platform/machineRun';
 import { machineKey, useMachineRunStore } from '@/store/machineRunStore';
 import { runKey, useRunConfirmStore } from '@/store/runConfirmStore';
 import { useShopDefaultsStore } from '@/store/shopDefaultsStore';
@@ -81,6 +81,17 @@ export function EngraveMachineRun({ target, onProgramLine }: EngraveMachineRunPr
 
   const outcome = entry.outcome;
   const canRun = !running && (confirmed || atMachine);
+  // #470 (review R7) — the vacuum sentence says what THIS prepared file will do, not what the runner
+  // used to do for every file. An app upload owns the vacuum (#469), so the file's own words decide:
+  // one that carries `M331` switches it itself, and an `air: false` job carries no words at all and
+  // runs with the vacuum left off. "Vacuum on before it plays" described a run that does not happen
+  // in either case. Only an entry prepared some other way is bracketed by the runner.
+  const ownsVacuum = entry.context?.vacuumOwned === true || programOwnsVacuum(entry.context?.nc);
+  const vacuumLine = !ownsVacuum
+    ? 'Vacuum on before it plays, off after; the machine homes when it finishes.'
+    : programOwnsVacuum(entry.context?.nc)
+      ? 'The program switches the vacuum on and off itself; the machine homes when it finishes.'
+      : 'This program runs without the vacuum; the machine homes when it finishes.';
   return (
     <div data-testid="engrave-run" data-file={entry.filename}>
       {!confirmed && !running && (
@@ -106,7 +117,9 @@ export function EngraveMachineRun({ target, onProgramLine }: EngraveMachineRunPr
       >
         {running ? 'Running…' : `Run ${entry.filename}`}
       </button>
-      <p style={MUTED}>Vacuum on before it plays, off after; the machine homes when it finishes.</p>
+      <p style={MUTED} data-testid="engrave-run-vacuum">
+        {vacuumLine}
+      </p>
 
       {running && (
         <button

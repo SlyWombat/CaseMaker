@@ -138,11 +138,9 @@ exports[`runSheet (#207) > snapshots the whole RunSheet for a job with a depth b
       "steps": [
         {
           "text": "Remove the MDF wasteboard. Seat the vise on its two locating pins; fasten with six M5×20 screws.",
-          "unverified": "#208",
         },
         {
           "text": "The fixed jaw is on the left.",
-          "unverified": "#208",
         },
       ],
       "title": "2 · Mount the vise",
@@ -172,12 +170,10 @@ exports[`runSheet (#207) > snapshots the whole RunSheet for a job with a depth b
       "steps": [
         {
           "record": "the cutter's PRB (mm)",
-          "text": "Fit the cutter with its collar. Run tool-length calibration from Studio (M491).",
-          "unverified": "#208",
+          "text": "Fit the cutter with its collar. Run tool-length calibration from the app’s console or Studio (M491).",
         },
         {
           "text": "Do not skip this because the program contains T1 M6. If the machine already believes tool 1 is fitted, that line does nothing.",
-          "unverified": "#208",
         },
       ],
       "title": "4 · Fit the cutter and measure its length",
@@ -187,36 +183,28 @@ exports[`runSheet (#207) > snapshots the whole RunSheet for a job with a depth b
       "steps": [
         {
           "text": "The vise already references X and rotation to within ±0.05 mm, before any touch.",
-          "unverified": "#208",
         },
         {
           "text": "Touch 1 of 3: the front edge — the one nearest you, about 25 mm along it from the left end — this gives position and rotation.",
-          "unverified": "#208",
         },
         {
           "text": "Touch 2 of 3: the front edge — the one nearest you, about 75 mm along it from the left end — this gives rotation.",
-          "unverified": "#208",
         },
         {
           "text": "Touch 3 of 3: the right edge — the one against the moving jaw, at about its middle, 30 mm from the front end — this gives X.",
-          "unverified": "#208",
         },
         {
           "record": "surface Z (mm) and the PRB of the tool that set Z0 (mm)",
           "text": "Z0: the blank's top face — probe it, or touch off on it. Record the reading AND the tool that made it: on a job cut by two cutters the second program’s Z0 is worked out from this surface and the PRB of whichever tool took this touch, so both go on this one blank — the first cutter’s own PRB is a separate reading, taken where it is fitted.",
-          "unverified": "#208",
         },
         {
           "text": "X0 Y0 Z0 is the top-front-left corner of the blank. That leaves the work origin within ±0.02 mm in X and Y and ±0.02° in rotation. Move there and check by eye before going on. How well YOU set it is not modelled: the file places the blank at this corner and judges the jaws against it, so an origin that is out by a little — or a blank sitting differently from what was measured — shifts the whole job relative to both without the app knowing. The only X/Y slack for that is this job's edge margin, 1 mm, which is the gap the content keeps from a stock edge rather than a locating tolerance: a cut standing at that margin has used all of it.",
-          "unverified": "#208",
         },
         {
           "text": "Rotation is measured, and a static .nc cannot compensate it (Smoothieware has no variables, §7.3 / #187 item 1): apply it in Studio's dialogs, or re-post with the rotation baked into the geometry",
-          "unverified": "#208",
         },
         {
           "text": "Z is always probed on the engraved face (§7.2): no fixture can supply it",
-          "unverified": "#208",
         },
       ],
       "title": "5 · Set the work origin",
@@ -428,11 +416,9 @@ exports[`runSheet (#207) > snapshots the whole RunSheet for the default job 1`] 
       "steps": [
         {
           "text": "Remove the MDF wasteboard. Seat the vise on its two locating pins; fasten with six M5×20 screws.",
-          "unverified": "#208",
         },
         {
           "text": "The fixed jaw is on the left.",
-          "unverified": "#208",
         },
       ],
       "title": "2 · Mount the vise",
@@ -462,12 +448,10 @@ exports[`runSheet (#207) > snapshots the whole RunSheet for the default job 1`] 
       "steps": [
         {
           "record": "the cutter's PRB (mm)",
-          "text": "Fit the cutter with its collar. Run tool-length calibration from Studio (M491).",
-          "unverified": "#208",
+          "text": "Fit the cutter with its collar. Run tool-length calibration from the app’s console or Studio (M491).",
         },
         {
           "text": "Do not skip this because the program contains T1 M6. If the machine already believes tool 1 is fitted, that line does nothing.",
-          "unverified": "#208",
         },
       ],
       "title": "4 · Fit the cutter and measure its length",
@@ -477,36 +461,28 @@ exports[`runSheet (#207) > snapshots the whole RunSheet for the default job 1`] 
       "steps": [
         {
           "text": "The vise already references X and rotation to within ±0.05 mm, before any touch.",
-          "unverified": "#208",
         },
         {
           "text": "Touch 1 of 3: the front edge — the one nearest you, about 25 mm along it from the left end — this gives position and rotation.",
-          "unverified": "#208",
         },
         {
           "text": "Touch 2 of 3: the front edge — the one nearest you, about 75 mm along it from the left end — this gives rotation.",
-          "unverified": "#208",
         },
         {
           "text": "Touch 3 of 3: the right edge — the one against the moving jaw, at about its middle, 30 mm from the front end — this gives X.",
-          "unverified": "#208",
         },
         {
           "record": "surface Z (mm) and the PRB of the tool that set Z0 (mm)",
           "text": "Z0: the blank's top face — probe it, or touch off on it. Record the reading AND the tool that made it: on a job cut by two cutters the second program’s Z0 is worked out from this surface and the PRB of whichever tool took this touch, so both go on this one blank — the first cutter’s own PRB is a separate reading, taken where it is fitted.",
-          "unverified": "#208",
         },
         {
           "text": "X0 Y0 Z0 is the top-front-left corner of the blank. That leaves the work origin within ±0.02 mm in X and Y and ±0.02° in rotation. Move there and check by eye before going on. How well YOU set it is not modelled: the file places the blank at this corner and judges the jaws against it, so an origin that is out by a little — or a blank sitting differently from what was measured — shifts the whole job relative to both without the app knowing. The only X/Y slack for that is this job's edge margin, 1 mm, which is the gap the content keeps from a stock edge rather than a locating tolerance: a cut standing at that margin has used all of it.",
-          "unverified": "#208",
         },
         {
           "text": "Rotation is measured, and a static .nc cannot compensate it (Smoothieware has no variables, §7.3 / #187 item 1): apply it in Studio's dialogs, or re-post with the rotation baked into the geometry",
-          "unverified": "#208",
         },
         {
           "text": "Z is always probed on the engraved face (§7.2): no fixture can supply it",
-          "unverified": "#208",
         },
       ],
       "title": "5 · Set the work origin",

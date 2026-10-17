@@ -41,7 +41,7 @@ function tsFiles(dir: string): string[] {
 /**
  * Every code the tree can raise.
  *
- * The engine emits them four ways, and a complete scan needs all four:
+ * The engine emits them six ways, and a complete scan needs all six:
  *   - `code: 'kebab-case'` literals (`sweep.ts`, `engraveGeometry.ts`, `jobSetup.ts`, `fixture.ts`, `machine.ts`, `lexer.ts`);
  *   - `diag('severity', 'code', …)` calls, which in `interpreter.ts` frequently wrap
  *     onto several lines (hence `\s*` rather than spaces);
@@ -49,6 +49,11 @@ function tsFiles(dir: string): string[] {
  *   - `push('code', …)` calls in `verify.ts`, the verifier's own codes — every error the
  *     **Verified** row can report, `parse-error` and `runner-error` included. These wrap onto
  *     several lines too (the checker passes a `push` around), which the same `\s*` covers.
+ *   - `refuse('code', …)` in `workers/sim/session.ts`, which wraps its code onto the next line
+ *     when the message is long (`prior-removal-column`).
+ *   - a code CHOSEN by a ternary (`code: wordLike ? 'lowercase-word' : 'ignored-text'`,
+ *     `code: rotary ? 'rotary-stock' : 'flat-stock'`) — the literal pattern above cannot see
+ *     either arm, so both are read by the last two (#470).
  *
  * `custom` is Zod's own issue code (`toolLibrary.ts`), not a diagnostic a user sees.
  */
@@ -59,6 +64,10 @@ function sourceCodes(): string[] {
     /diag\(\s*'(?:error|warning|info)'\s*,\s*'([a-z0-9-]+)'/g,
     /warn\([^,()]+,\s*'([a-z0-9-]+)'/g,
     /push\(\s*'([a-z0-9-]+)'/g,
+    /refuse\(\s*'([a-z0-9-]+)'/g,
+    /refuse\(\s*\n\s*'([a-z0-9-]+)'/g,
+    /code:\s*[^,;\n]*?\?\s*'([a-z0-9-]+)'/g,
+    /code:\s*[^,;\n]*?\?\s*'[a-z0-9-]+'\s*:\s*'([a-z0-9-]+)'/g,
   ];
   for (const dir of [join(APP, 'src/engine/cnc'), join(APP, 'src/workers')]) {
     for (const file of tsFiles(dir)) {

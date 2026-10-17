@@ -7,16 +7,19 @@ badge is the first job. Chapter 5 says which parts of the engraving side are in 
 
 Two things to hold on to before you read on:
 
-- **Case Maker produces a file. It does not drive the machine.** There is no connection to
-  the Z1 here. You export a `.nc` file, upload it to the machine with **Makera Studio**, and
-  set the work origin there. Every chapter that could be read otherwise says so again.
+- **Case Maker writes the file, and the desktop build can hand it to the machine.** The
+  **desktop** app uploads the `.nc` to the Z1 over your network, plays it, stops it, and homes
+  after it — each of those a separate press of yours, with the machine named before anything is
+  written. The **web** build cannot reach a machine at all: it ends at the file, which you
+  upload with **Makera Studio**. The **work origin is set by hand** either way.
 - **Case Maker supports the Z1 only.** Carvera and Carvera Air are different machines; the
   app does not model them.
 - **On the public site the CNC side is a beta switch.** [electricrv.ca/casemaker](https://electricrv.ca/casemaker)
   hides the Engrave and Simulate sections, the cutting-job door, Manage and this guide
   unless the address carries `?BETA=yes`:
   `https://electricrv.ca/casemaker/?BETA=yes`. Dev builds and the desktop build have it on
-  without the switch. The switch does not let a browser reach a machine — nothing can.
+  without the switch. The switch does not let a browser reach a machine; only the desktop
+  build can.
 
 For the rest of the app — building cases around boards — see the
 [User Manual](https://github.com/SlyWombat/CaseMaker/blob/main/docs/user-manual.md). This
@@ -37,25 +40,30 @@ if a sentence says "will", it is not shipping yet. Everything is in millimetres.
 **What it is.** Case Maker can do two CNC things for a Makera Z1: **simulate** a G-code file
 you already have (so you can see what it cuts before risking a blank), and **write** an
 engraving program for a printed PLA blank — the two-colour badge — held in the vise. Both end
-at a `.nc` file on disk.
+at a `.nc` file on disk. The **desktop** build can also upload that file to the machine and
+play it from the Engrave panel (§5.9).
 
-**What it is not.** It is not machine control. It does not talk to the Z1. You take the
-`.nc` file to **Makera Studio**, upload it, set the work origin on the machine, and press
-go on the machine itself. Nothing is sent to the machine from Case Maker, ever.
+**What it is not.** It is not automatic machining. The desktop build sends the file and starts
+it **when you press the buttons**, and it can stop it and home it; it does not probe, set the
+work origin, or decide anything at the machine. The **web** build has no connection to the Z1
+at all — its upload control does not exist, rather than being drawn disabled — so there the
+file goes to **Makera Studio** by hand. In both builds you set the work origin on the machine.
 
 **What is deliberately not built** (from `/Fabrication.md` §9.1 — each is a decision, not an
 oversight):
 
-- Machine control over WiFi.
-- Automatic probing.
+- Automatic probing, and automatic origin-setting of any kind.
 - Autolevelling (`G32`) *in the file*. The printed blank is domed (about 0.33 mm across its
-  width), so the job runs `G32 R1` at the machine before cutting and `M370` after — a run-sheet
-  step (#176), in the firmware; the `.nc` the app writes is unchanged.
+  width), so the levelling pass runs at the machine's console before cutting and the state is
+  cleared after — never in the `.nc`, which the upload gate would refuse. Whether `G32` is
+  still needed on a face the app has skimmed is #176's bench question.
 - 3D surfacing.
-- V-carving.
+- V-carving regions. A V-bit cuts traces and stroke labels; it does not open a region (#221).
 - Laser work.
 - The 4th axis.
-- Multi-tool jobs.
+- Multi-tool jobs **in one program**. One setup is one tool and one `.nc` (#419); a job with
+  several setups is several programs, and the app's own upload refuses to send more than one
+  until the release step exists.
 
 > **⚠ Safety.** The simulation assumes a **rigid, ideal machine**: no deflection, no runout,
 > no Z-chain error, no chatter. It does not know about a clamp you added, a cutter you fitted
@@ -217,8 +225,9 @@ simulation works from an assumed one until you give it a better number.
 
 ## 4 · Simulate a G-code file — CNC-1
 
-> **Status: Partly available** — the Simulate panel (#196) works today; the viewport layers
-> (#197), playback (#198) and the end-to-end browser tests (#199) are planned.
+> **Status: Partly available** — the Simulate panel (#196), its viewport layers (#197), the
+> playback (#198) and the browser end-to-end tests (#199) all shipped. The screenshots below
+> are design mockups, and #281 refines the cycle estimate's rapid speed.
 
 You have a `.nc` file — from Makera Studio, from another CAM tool, or from Case Maker's own
 engraver once it lands — and you want to see what it does before it touches a blank.
@@ -338,19 +347,20 @@ answer *"will this come out clean"*.
 
 ## 5 · Engrave text into the blank — CNC-2
 
-> **Status: Partly available** — CNC-2's bench half is open: #208 (at the machine), #209 and #165 (measured feeds).
-> The **Engrave text** panel itself is in the app — steps 1–8 below (#200, #201, #202, #203,
-> #204, #205, #206, #207, all shipped, with #213, #244 and #271 beside them); steps 9 and 10
-> are the unconfirmed bench half. Each step is marked.
+> **Status: Partly available** — #208's day-1 runbook and #176's Z-chain measurement are open.
+> The **Engrave text** panel, the generate → verify → simulate → save gate, the run sheet,
+> facing and the desktop build's own upload and run are in the app today (#200–#207 with
+> #213, #244, #271, #423, #432 and #434 beside them).
 
 This is a walkthrough of the default job, start to finish: a printed two-colour PLA blank in
 the vise, with words engraved to different depths. Steps marked **in the app** describe the
-shipped screen; the two marked **bench** are written in the future tense on purpose, because
-nothing has confirmed them on a machine yet.
+shipped screen; the two marked **bench** are what has been walked at the machine, with the
+numbers still being written down.
 
-The **Engrave text** entry sits in the sidebar next to **Simulate .nc**, and — like every
-other part of this — **it ends at a `.nc` file you upload with Makera Studio.** Case Maker
-does not start the machine.
+The **Engrave text** entry sits in the sidebar next to **Simulate .nc**. It ends at a `.nc`
+file on disk — and, in the **desktop** build, at that same file on the machine's card, which
+the app can play for you (§9). The **web** build stops at the file; there you upload it with
+**Makera Studio**.
 
 **1. Describe the blank (#205, #271) — in the app.** Type the stock's length (X), width (Y)
 and thickness (Z), and pick a material. The job's material is **PLA**, the printed blank; the
@@ -423,6 +433,18 @@ into — never a slider: a slider cannot express 11.5 mm reliably, and on a two-
 choice is not continuous anyway (chapter 6). Labels at different depths are normal: the default
 job is three words at 2.0, 1.0 and 0.5 mm.
 
+**The item list holds more than labels (#219, #220, #411, #434).** Below the labels the panel
+lists **shapes**, **combined** shapes, single-line **traces**, **vectors**, **plunge drills**,
+**threads**, and the **keep-outs** that are voids rather than cuts. Every row is one line —
+show/hide and remove at the front, then the item's kind, its name and its depth — and expands
+to its editor; remove sits beside the show/hide box on every kind and never wraps away from
+the name. A ⚠ appears on a row that has a finding, and removing a row offers **Undo** beside
+the list.
+
+**A design can be imported as a job (#437).** In builds with the simulator, **Import a design
+(.3mf)…** reads a PrusaSlicer project: its blank, its magnet pocket and every volume it cuts
+become this job. The cutter, the vise and the margins are left as they are.
+
 ![The Engrave panel being edited](https://raw.githubusercontent.com/SlyWombat/CaseMaker/main/docs/assets/cnc/cnc-mockup-engrave-editing.png)
 
 *Design mockup — not the shipped screen.*
@@ -492,25 +514,45 @@ starting table instead, and `catalogue-ignored` names the row and the number it 
 panel keeps **"starting values — unmeasured"**. Step-over is always the app's own 45 %, never
 the catalogue's 63 % of the tip (#191). You can override each one.
 
-**6. Generate — the three checks (#206) — in the app.** Pressing **Generate** produces the
-toolpath and then runs three gates, each a row with a tick or a cross:
+**6. Generate — the four checks (#206, #353) — in the app.** Pressing **Generate** produces the
+toolpath and then runs four gates, each a row with a tick or a cross:
 
 - **Toolpath generated** — operations, move count and an estimated time.
 - **Verified** — the toolpath re-read and checked against the stock: it does not exit the
   stock, does not cut deeper than the floor allows, and stays clear of the fixture.
-- **Simulated** — the toolpath swept and compared against the predicted region.
+- **Simulated** — the toolpath swept and compared against the predicted region, with the
+  sweep's own coverage sentence under it saying what it did and did not check.
+- **Matches prediction** — the swept result compared with the region the geometry predicted,
+  with the worst under-cut and over-cut and the band they are judged in.
 
-**Nothing is written to disk until all three rows are ticks.** The **Save .nc…** button
+**Nothing is written to disk until all four rows are ticks.** The **Save .nc…** button
 stays disabled while any gate fails, with the reason beside it. This is the answer to *"why is
-Save disabled?"* in the troubleshooting table: one of the three checks has not passed, and
+Save disabled?"* in the troubleshooting table: one of the four checks has not passed, and
 the failing row says which.
 
-**Saving writes two files, not one** (#244, #273): the job itself, and `<job>-frame.nc` beside
-it — the same toolpath traced in the air, 20 mm up, with the height baked into the file. The
-run sheet's dry-run step sends you to that frame file by name, so the two always arrive
-together. Nothing is re-derived at save time: the frame is the one the verifier already passed.
+**Saving writes four files, not one** (#244, #273, #277, #432):
 
-![All three checks passed; Save and Run sheet are enabled](https://raw.githubusercontent.com/SlyWombat/CaseMaker/main/docs/assets/cnc/cnc-mockup-engrave-generated.png)
+- `<job>.nc` — the program.
+- `<job>-frame.nc` — the same toolpath traced in the air, 20 mm up, with the height baked
+  into the file. The run sheet's dry-run step sends you to it by name, so the two always
+  arrive together.
+- `<job>-face.nc` — the facing pass, when the job has one (below). It is its own program
+  with its own flat cutter, because a skim is a different tool and a different program.
+- `<job>-run.json` — the run record: the §9 rows as data, with the measured half blank for
+  you to fill in at the bench and open again later.
+
+Nothing is re-derived at save time: the frame is the one the verifier already passed, and the
+facing file is the one it checked.
+
+**Facing — skim the finish off before engraving (#432).** The **Finish** the blank states
+decides whether facing is offered and how deep it defaults: the panel fills in a depth with a
+sentence saying why, and you can type your own. A facing job is **two programs** — a facing
+pass with a flat cutter, then the engraving program from the faced top — each with its own
+tool-length calibration and its own Z0. The run sheet orders them probe → face → re-touch →
+engrave. The app's own upload refuses a job of more than one program until the release step
+exists, so on a facing job you save both files and play them in that order at the machine.
+
+![All four checks passed; Save and Run sheet are enabled](https://raw.githubusercontent.com/SlyWombat/CaseMaker/main/docs/assets/cnc/cnc-mockup-engrave-generated.png)
 
 *Design mockup — not the shipped screen.*
 
@@ -553,46 +595,62 @@ top face so the datum cannot be probed on the board by mistake.
 > **Placeholder — no capture yet.** The run sheet shipped with #207 but has not been
 > captured for this guide. A screenshot will go here.
 
-**9. At the machine — bench.**
+**9. At the machine — bench.** The mount, the cutter fit and the work origin have been walked
+at the machine (2026-10-12, -15 and -16); the numbers and photographs are still being written
+down.
 
-> **⚠ These steps have not yet been confirmed on a machine.**
+> **Placeholder — no capture yet.** #208 is the day-1 runbook that records the measurements
+> and takes the photographs.
 
-> **Placeholder — no capture yet.** #208 records the at-the-machine steps and #209 records
-> the feeds and finishes. Until they land the steps below are unverified, and this is where
-> their photographs will go.
+The order that has been run: home the machine (`$H`) before anything touches a cutter; fit the
+engraving cutter and run its **tool-length calibration** (`M491`) — from the app's own console
+in the desktop build, or from Makera Studio; fit the blank in the vise and confirm it stands
+proud of the jaws; set the work origin with the **wired probe** (chapter 2 — it touches PLA,
+and the Z touch on the top face is what sets the depth window). The run sheet prints the
+sequence for the job you generated, including which edge to touch first.
 
-The steps, in prose, will be: mount the correct cutter and probe its length; fit the blank in
-the vise and confirm it is proud of the jaws; set the work origin with the **wired probe**
-(chapter 2 — it touches PLA, and the single Z touch is what sets the depth window); run
-`G32 R1` over the engraved area, because the printed blank is domed, and `M370` when the job
-is done (#176); upload the `.nc` with Makera Studio; run the job with your hand on the stop.
-When #208 and #209 record the real screens and numbers, the assumed numbers here become
-measured ones.
+**The desktop build can take it from there.** **Upload to machine…** writes the file to the
+card after a confirmation naming the machine, its address, the file and its exact size; **Run**
+plays it, after one "I am at the machine" tick per program. **Stop** aborts, and the machine
+homes when it finishes on its own. The vacuum is **the program's own business**: the post
+writes `M331` before the first cut and `M332` after the last for the span the job declares, the
+run panel's sentence says which of those this file does, and a stop always sends `M332`.
+The app does not switch the machine on or off: the plug is a physical act.
+
+**The laser options.** Two settings, both off by default (decision Q21): **frame** traces the
+program's rectangle in the air so you can see where the job sits, and **point to origin** moves
+to X0 Y0 at the machine's clearance height. Neither cuts, and neither replaces a check by eye.
+
+If the face is domed, level it **at the console** — a `G32 R1` pass, or a facing skim from the
+app (step 6) — because the upload gate refuses a file carrying `G32`/`M370`. Run the job with
+your hand on the stop.
 
 **10. After the cut — bench.** Measure the actual depth of each floor and compare it with
-what you asked for. The difference is the Z-chain error the simulation cannot see (`/Fabrication.md`
-§7.6) — the sum of probe repeatability, `M491` tool-length repeatability and how the collet
-seats. Writing it down is how the assumed numbers become measured ones.
+what you asked for; the run record's blank lines are for exactly this. The difference is the
+Z-chain error the simulation cannot see (`/Fabrication.md` §7.6) — the sum of probe
+repeatability, `M491` tool-length repeatability and how the collet seats. Writing it down is
+how the assumed numbers become measured ones.
 
 ---
 
 ## 6 · Two-colour badges — CNC-3
 
-> **Status: Partly available** — CNC-3 (#165, #205). The badge blank is in the app: **Use
-> the badge blank** on the Engrave panel takes the stock and the magnet pocket from the
-> project's badge (#271). The surface/reveal depth choice (decision 20) is in the label rows
-> (#170) — on a blank that states how it was printed. Nothing writes that statement yet
-> (#166), and #165's measurement pass has not run.
+> **Status: Partly available** — CNC-3 (#166). The badge blank is in the app: **Use the badge
+> blank** on the Engrave panel takes the stock and the magnet pocket from the project's badge
+> (#271). The surface/reveal depth choice (decision 20) is in the label rows (#170) — on a
+> blank that states how it was printed. Since #368 the badge template and a badge made from
+> the app's own defaults both state a **provisional** print (0.2 mm layers); #166 is the
+> measurement that replaces the provisional numbers with readings of a real print.
 
 A **two-colour badge** is a blank printed in two colours stacked in Z — the lower colour
 underneath, the top colour above. Where the engraving cuts deeper than the boundary between
 them, the lower colour shows through. Shallow labels stay in the top colour; deep labels
 reveal the bottom one. That is the whole effect.
 
-**What must be measured before it can be built (#165).** The badge's blank is printed, so its
+**What must be measured before it can be trusted (#166).** The badge's blank is printed, so its
 thickness carries print error, and the height of the colour boundary is what a label's depth
 is measured against. Until that boundary is measured on a real print, no depth means
-anything. #165 is the measurement pass.
+anything: the app's numbers are the print spec's defaults, and they say so.
 
 **Why depth is two choices, not a slider (decision 20).** On a two-colour badge, a label's
 depth is not free: it either stays in the top colour (**"surface"**) or goes through to the
@@ -622,7 +680,7 @@ loaded), and says where the boundary sits.
 A badge says how it was printed through its **print** specification — layer height and first
 layer height — and since #368 the badge template and a badge created from the app's own defaults
 both state one (0.2 mm layers, marked **provisional**: the print spec's default, not a reading of
-your slicer, until #165's measurement lands). It is edited on the badge's **Part** panel, where the
+your slicer, until #166's measurement lands). It is edited on the badge's **Part** panel, where the
 layer height is the control that matters: the colour boundary lands on that grid, so moving it
 moves the split, every recommended depth, and every colour reading — and a depth measured at the
 bench was measured against the print it was cut on. The change reaches an existing job when you
@@ -662,7 +720,8 @@ material left over the pocket) when it does not.
 
 > **Status: Partly available** — the **Manage** screen (#311, tracking #212), the house service
 > behind it (#306, #308) and the three **Register** doors (#309) are in the app, so you can see and
-> register the cutters you own today. Nothing in CNC-4 (§7.1) has started.
+> register the cutters you own today. In CNC-4 (§7.1) the desktop bridge has shipped; the
+> camera and V-carving questions are what remain.
 
 **What this is, first.** Your cutters are not a property of the case you are building, and not a
 property of the Z1: they belong to the **house**. They outlive the machine they were bought for and
@@ -673,10 +732,10 @@ project open**.
 sidebar section: a sidebar section belongs to a project, and there is no project here. Opening it
 replaces the working area; closing it puts you back where you were.
 
-**The rail.** Two scopes today — **House → Tools** (the cutters) and **Machines** (the Z1's
-connection and profiles). **Materials** is drawn in the rail greyed and tagged *later*: the slot is
-shown so you can tell a reserved place from a broken one, but nothing is built behind it. The foot
-of the rail states the service in one line.
+**The rail.** Three scopes today — **House → Tools** (the cutters), **House → Materials** (the
+stock shelf: what material is on hand at this location, with its own feed rows, #413) and
+**Machines** (the Z1's connection and profiles). The foot of the rail states the service in
+one line.
 
 **House → Tools: the list.** Every cutter a job could name, **grouped by where it came from** —
 **Owned**, **Yours**, **Makera catalogue**, **Built-in** — so a shipped assumption is never sitting
@@ -752,26 +811,26 @@ the machine on is a physical act, not a setting.
 
 *Design mockup — not the shipped screen.*
 
-### 7.1 · Still later — CNC-4
+### 7.1 · The rest of CNC-4
 
-> **Status: Planned** — CNC-4 (#181, #185, #189). None of these is started.
+> **Status: Partly available** — the desktop bridge has shipped (#181); what remains is the
+> camera (#189).
 
-Three things are on the far side of this work, and none of them is in the app.
+**Sending the job to the machine (#181) — shipped.** The desktop build's bridge uploads the
+`.nc` to the Z1 over your network and plays it from the Engrave panel (§5.9): a confirmation
+naming the machine and the file before anything is written, a Stop while it runs, and a Home
+after a confirmed stop. It does not probe or set the work origin — those stay yours.
 
-**Sending the job to the machine (#181).** A bridge that uploads the `.nc` to the Z1 over
-WiFi and starts it, so you do not open Studio at all. This is the "one flag for the user"
-narrowing in `/Fabrication.md` §9.1: V1 stops at a verified file on purpose, because the
-bridge is the most environment-bound part of the whole job. Not started.
+**V-carving small text (#185, #221) — partly.** The V-groove reach test ran at the bench on
+2026-10-15. A V-bit cuts single-line traces and stroke labels today; opening a **region** with
+one is still refused by name (`region-v-carve-unavailable`, §8.1) until the V-carve work
+(#221).
 
-**Using the camera to find the part (#189).** The Z1 has an integrated camera. It cannot
+**Using the camera to find the part (#189) — open.** The Z1 has an integrated camera. It cannot
 measure Z, and Studio does not use it for origin-setting, so today it is a webcam you can
 watch. The plan is to calibrate it against the machine's own motions — the machine is a far
 better ruler than a printed sheet — and use it as a coarse datum so a probe starts from a
 confident position instead of a blind one. Not started.
-
-**V-carving small text (#185).** A V-bit couples depth to stroke width, so it can reach
-strokes a flat end mill cannot — but it needs a medial-axis engine, and it is V2 by decision
-(`/Fabrication.md` §7.4). Not started.
 
 ---
 
@@ -800,6 +859,8 @@ but something is assumed or unmeasured), or **info** (worth knowing).
 | `paren-comment-truncates` | error | Text **after** a `(` comment is discarded by the firmware, not run. | Move it out of the line. |
 | `unterminated-comment` | warning | A `(` comment has no closing `)`. | Close it. |
 | `ignored-line` | warning | A line starting with a character the firmware ignores. | Remove or fix it. |
+| `ignored-text` | warning | Text in a G-code command that is neither a word nor a comment — the firmware scans for an uppercase letter, finds no word, and drops it. A whole run of lowercase characters is reported once, not once per letter. | Remove it, or move it into a `(` comment. |
+| `lowercase-word` | error | A lowercase letter followed by a number looks like a word the author meant (`x5`). The firmware matches letters case-sensitively, so the word is silently dropped and the line runs without it. | Write the word in uppercase. |
 | `multiple-codes` | error | One command holds both a `G` and an `M` word. | Split them onto separate lines. |
 | `t-without-m6` | warning | A `T` word without `M6` on the same command does nothing. | Add `M6`, or remove it. |
 | `m6-without-t` | error | `M6` with no `T` word does nothing on this firmware. | Put the `T` in the same command. |
@@ -869,6 +930,7 @@ simulation does report about one is the sweep's own list, next:
 |---|---|---|---|
 | `stock-unsupported` | error | V1 sweeps a rectangular (prism) block only. | Use a rectangular blank. |
 | `stock-invalid` | error | Stock thickness is not positive. | Type a real thickness. |
+| `machine-unknown` | error | The simulation was asked for a machine id it has no profile for; the message lists the ids it knows. Nothing is swept, because a frame it cannot find is a frame it would have to guess. | Pick the machine in the Start wizard, or re-run the machine check. |
 | `prior-removal-invalid` | error | A rest pass was told what material a previous program left (#410), and that material is not a closed solid — so the sweep has no starting material to subtract from. | Simulate the first program and pass ITS result. |
 | `prior-removal-column` | error | A rest pass was asked for on a job the COLUMN engine sweeps — a rotary job, a V-bit (whose cutting width changes with depth), a drill or a thread mill (#382). Only the exact 2.5D sweep can start from the material a previous program left, so the pair is refused by name rather than swept from the blank (#410). | Measure the rest with a flat cutter, or cut the second program as a program of its own. |
 | `air-moves-unchecked` | warning | More air moves than the app checks; some were not verified. | Split a very long job. |
@@ -907,7 +969,6 @@ simulation does report about one is the sweep's own list, next:
 | `item-outside-stock` | error | An item hangs off the blank, or off the sacrificial material beside it (#213). Formerly `label-outside-stock`. | Move it back inside the edge margin, or declare a strip or board under the overhang. |
 | `item-over-void` | warning | An item cuts over a declared under-surface void (#231), whose membrane has nothing under it (#171). True at any depth — even a shallow cut there will chatter and finish rough. A single-line trace is warned about the same way (#270); a plunge drill is not, because a drill into a void is a breach `cut-too-deep` refuses, and a drilled hole has no pocketed floor to finish. | Move the cut clear of the void. A cut deep enough to break through is refused separately, as `cut-too-deep`. |
 | `item-depth-bound` | error | An item's floor lands on the wrong side of a plane it must stay clear of (#345). Raised for the colour split on a two-colour blank — a label's `depthIntent` chooses which SIDE of the split its floor belongs on, *surface* above it, *reveal* through it (#285) — and for a void's ceiling under the item's own footprint: the label cut over a magnet pocket is told where that ceiling is and how far above it the floor must stay (#345). Only a plane the job knows about can be broken, so a blank that states no split and a label that states no intent (or *custom*) are left alone. Where the split is known it is read off the printer's real layers, not the nominal design height, so changing the layer height moves it; a void's ceiling is read off the layer stack when the blank states its print and off the design's own membrane when it does not. `cut-too-deep` is the per-move backstop for both these planes — the cutter reaches a void's ceiling part-way through a move — and is the only check for an item that is not a label (a drawn shape, a traced path). An item past the stock's minimum floor is `depth-exceeds-stock`. Formerly `item-wrong-colour`. | Set the depth to the other side of the plane, or switch the label's intent. The message names the plane, where it is in mm, and which side the floor must be on. |
-| `trace-outside-stock` | error | A single-line trace runs off the blank (#219). | Move it back inside the stock. |
 
 **Checking the engraving job** (job):
 

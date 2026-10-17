@@ -231,7 +231,8 @@ export function EngraveMachineUpload({
           </p>
           <p style={MUTED}>
             This writes the file to the machine. It does not start the job — once it is on the card,
-            “Run it” starts it from here, or Makera Studio at the machine.
+            “Run it” below plays it from this app; Makera Studio at the machine can play the same
+            file instead.
           </p>
           <div style={{ display: 'flex', gap: 6 }}>
             <button

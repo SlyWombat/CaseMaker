@@ -2292,7 +2292,7 @@ export function EngravePanel(): JSX.Element {
               type="button"
               data-testid="engrave-save"
               disabled={saveBlockerText !== null}
-              title={saveBlockerText ?? 'Save the generated program for Makera Studio.'}
+              title={saveBlockerText ?? 'Save the generated program — to upload it from here, or to open in Makera Studio.'}
               style={{ width: '100%', padding: 7, marginTop: 6 }}
               onClick={() => void saveProgram()}
             >

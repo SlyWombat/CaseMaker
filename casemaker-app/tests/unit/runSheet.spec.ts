@@ -39,6 +39,7 @@ import { Z1 } from '@/engine/cnc';
 import { DEFAULT_VISE, validateVise } from '@/engine/cnc/fixture';
 import { presetJawStrips, presetPartOnBoard } from '@/engine/cnc/sacrificial';
 import type { EngraveJob } from '@/types/engraveJob';
+import type { Orientation } from '@/engine/cnc/setups/types';
 import { flatEndMill, type Tool } from '@/engine/cnc/tool';
 import type { ThreadPlanFacts, ThreadSettingsResult } from '@/engine/cnc/cam/threadMill';
 
@@ -185,20 +186,23 @@ describe('runSheet (#207)', () => {
     expect(measured.steps.some((s) => s.text.includes('measured once on the reference unit'))).toBe(false);
   });
 
-  it('flags every unverified step with an issue number, and the three assumed sections in full', () => {
-    const sheet = sheetFor(defaultEngraveJob());
-    let flagged = 0;
-    for (const s of sheet.sections) {
-      for (const step of s.steps) {
-        if (step.unverified !== undefined) {
-          expect(step.unverified).toMatch(/#\d+/);
-          flagged++;
-        }
-      }
-    }
-    expect(flagged).toBeGreaterThan(0);
-    for (const id of ['mount', 'cutter', 'origin']) {
-      for (const step of section(sheet, id).steps) expect(step.unverified).toBe('#208');
+  // #470 — the tag means "not walked at the bench". The mount, the cutter fit and the origin were
+  // walked at the machine on 2026-10-12, -15 and -16, so they carry no tag; what remains is the
+  // held material scan and the rest pass's routine, and both name the bench issue that will
+  // confirm them.
+  it('tags only what has not been walked at the bench, and names the bench issue', () => {
+    const tagged = (sheet: RunSheet) => sheet.sections.flatMap((s) => s.steps).filter((s) => s.unverified !== undefined);
+    // A default job carries no tag at all: the mount, the cutter and the origin are walked, and the
+    // material scan is held off.
+    expect(tagged(sheetFor(defaultEngraveJob()))).toEqual([]);
+    // The held material scan is where the tag lives, and it names the bench issue — in the origin
+    // section, beside the guidance it qualifies.
+    const sheet = sheetFor(defaultEngraveJob(), NO_SIM, NC, { materialScan: true });
+    const scan = tagged(sheet);
+    expect(scan.length).toBeGreaterThan(0);
+    for (const step of scan) expect(step.unverified).toBe('#443');
+    for (const id of ['mount', 'cutter']) {
+      for (const step of section(sheet, id).steps) expect(step.unverified).toBeUndefined();
     }
   });
 
@@ -794,6 +798,33 @@ describe('runSheet (#207)', () => {
       expect(load).toContain('Put the left strip between the fixed jaw and the part');
       expect(load).toContain('Put the right strip between the moving jaw and the part');
     });
+  });
+
+  // #470 — §3's load line is the FIRST setup's ORIENTATION, not a constant: a remounted stock sits
+  // with another stock face up, and a quarter turn puts the other dimension between the jaws.
+  it('reads the load line off the setup’s orientation', () => {
+    const base = defaultEngraveJob();
+    base.stock = { ...base.stock, length: 120, width: 80 };
+    const load = (orientation: Orientation) => {
+      const job: EngraveJob = {
+        ...base,
+        setups: [{ id: 'setup-1', orientation, mount: { kind: 'vise' }, itemIds: [], tools: [base.toolKey] }],
+      };
+      const steps = section(sheetFor(job), 'load').steps;
+      return steps.find((s) => s.text.includes('runs left–right'))!;
+    };
+    // The identity every one-setup job carries: the length between the jaws, top face up.
+    const identity = load({ top: 'top', bottom: 'bottom', left: 'left', right: 'right', front: 'front', back: 'back' });
+    expect(identity.text).toBe("The blank's length runs left–right between the jaws. The face to be engraved is up.");
+    expect(identity.value).toBe('120 mm');
+    // Tipped so the stock's FRONT face is up: the length is still the way round the jaws.
+    const tipped = load({ top: 'front', bottom: 'back', left: 'left', right: 'right', front: 'top', back: 'bottom' });
+    expect(tipped.text).toContain("The stock's front face is up — that is the face to be engraved.");
+    expect(tipped.value).toBe('120 mm');
+    // Quarter-turned: the WIDTH now runs between the jaws, and the width is the number printed.
+    const turned = load({ top: 'top', bottom: 'bottom', left: 'front', right: 'back', front: 'left', back: 'right' });
+    expect(turned.text).toContain("The blank's width runs left–right between the jaws.");
+    expect(turned.value).toBe('80 mm');
   });
 
   it('snapshots the whole RunSheet for the default job', () => {
