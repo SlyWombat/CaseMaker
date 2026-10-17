@@ -15,6 +15,11 @@
  * the untouched list draws the first few and says how many it is not drawing — but the moment there
  * is a search or a tier chip the cap is off, because then the list is an answer to a question and
  * hiding part of it would be hiding the thing that was asked for.
+ *
+ * THE FEEDS TABLE IS A PANE HERE (#450 slice 6). Feeds are per cutter and material, so the issue's
+ * placement decision puts their editor beside the cutter list rather than in a scope of its own. The
+ * `cutters` pane is the default and is unchanged; the `feeds` pane lists the location's rows and puts
+ * the selected row's form in the same right rail `ToolDetail` uses. `FeedsTable.tsx` owns both.
  */
 
 import { useMemo, useRef, useState, type ReactNode } from 'react';
@@ -35,12 +40,14 @@ import { cuttingDiameter } from '@/engine/cnc/tool';
 import type { InventoryItem } from '@/platform/houseClient';
 import { useToolRegistry } from '@/hooks/useToolRegistry';
 import { useHouseStore, useLastSync } from '@/store/houseStore';
+import { useFeedTableStore } from '@/store/feedTableStore';
 import { useManageModeStore, type TierFilter } from '@/store/manageModeStore';
 import { useToolRegistryStore } from '@/store/toolRegistryStore';
 import { DocsModal } from '@/components/docs/DocsModal';
 import { formatStamp, mm, NOT_APPLICABLE } from './display';
 import { cloneOf, useSelectedEntry } from './selection';
 import { ToolDetail } from './ToolDetail';
+import { FeedsPane, FeedEditor } from './FeedsTable';
 
 /** How many catalogue rows the untouched list draws before it says how many it is not drawing. */
 const CATALOGUE_PREVIEW = 8;
@@ -101,6 +108,15 @@ export function ToolsScope() {
   const selected = useSelectedEntry();
   const [docsOpen, setDocsOpen] = useState(false);
   const importInput = useRef<HTMLInputElement | null>(null);
+
+  // #450 slice 6: the feeds table is a PANE beside the cutter list, not a Manage scope of its own —
+  // the issue's placement decision is that feeds are per cutter, and the cutter's surface is where
+  // they are reached. `cutters` is the default, so every existing Tools behaviour is untouched.
+  const [pane, setPane] = useState<'cutters' | 'feeds'>('cutters');
+  /** The feed row open in the rail; `'new'` is the add form, null is no selection. */
+  const [feedOpen, setFeedOpen] = useState<string | null>(null);
+  const feedStatus = useFeedTableStore((s) => s.status);
+  const feedRows = useFeedTableStore((s) => s.rows);
 
   /** The possession behind each `inv:` row — a different document, keyed by the same id. */
   const itemsByKey = useMemo(() => {
@@ -214,6 +230,14 @@ export function ToolsScope() {
 
   const actionsDisabled = busy !== null;
 
+  // The row the rail is editing, and whether it vanished from under the form. The service can remove
+  // a row this window still has open (another window, an import); the rail then falls back to the
+  // empty prompt rather than holding a form for a row that is no longer in the table.
+  const selectedFeed =
+    feedOpen !== null && feedOpen !== 'new' ? (feedRows.find((r) => r.id === feedOpen) ?? null) : null;
+  const feedGone =
+    feedOpen !== null && feedOpen !== 'new' && feedStatus === 'present' && selectedFeed === null;
+
   return (
     <>
       <section className="mmain">
@@ -221,79 +245,119 @@ export function ToolsScope() {
           <div>
             <h3>Tools</h3>
             <p>
-              Every cutter a job can name, and where each definition came from. Makera’s rows are
-              read-only — clone one to rename it or to record what you measured. The built-ins are
-              always here, service or not.
+              {pane === 'cutters'
+                ? 'Every cutter a job can name, and where each definition came from. Makera’s rows are read-only — clone one to rename it or to record what you measured. The built-ins are always here, service or not.'
+                : 'The feeds table: how fast each material and cutter edge should cut. A row answers for one diameter band. Change a seeded row’s numbers and it becomes a chosen row, dated today.'}
             </p>
           </div>
           <div className="btn-row">
-            <button
-              type="button"
-              className="btn btn--primary"
-              data-testid="manage-register-open"
-              title="Register a physical cutter — scan its box, find it in the catalogue, or type it"
-              onClick={openRegister}
-            >
-              ＋ Register ▾
-            </button>
-            <button
-              type="button"
-              className="btn"
-              data-testid="manage-clone"
-              disabled={selected === null || actionsDisabled}
-              title={
-                selected === null
-                  ? 'Pick a row first'
-                  : 'Copy this definition into your own tier, to rename it or to record what you measured'
-              }
-              onClick={onClone}
-            >
-              Clone
-            </button>
-            <button
-              type="button"
-              className="btn"
-              data-testid="manage-sync"
-              disabled={actionsDisabled}
-              title="Re-read Makera Studio’s own library on this PC into the catalogue tier"
-              onClick={() => void syncCatalogue()}
-            >
-              {busy === 'sync' ? 'Syncing…' : 'Sync catalogue'}
-            </button>
-            <button
-              type="button"
-              className="btn"
-              data-testid="manage-export"
-              disabled={actionsDisabled}
-              title="Save the location — its machine, your definitions and the inventory — as one JSON file (location.json)"
-              onClick={() => void exportHouse()}
-            >
-              {busy === 'export' ? 'Saving…' : 'Export'}
-            </button>
-            <button
-              type="button"
-              className="btn"
-              data-testid="manage-import"
-              disabled={actionsDisabled}
-              title="Load a location.json over the service’s own — or an older house.json, which replaces only the definitions and the inventory"
-              onClick={() => importInput.current?.click()}
-            >
-              {busy === 'import' ? 'Loading…' : 'Import'}
-            </button>
-            <input
-              ref={importInput}
-              type="file"
-              accept=".json,application/json"
-              data-testid="manage-import-input"
-              style={{ display: 'none' }}
-              onChange={(e) => {
-                void onImportFile(e);
-              }}
-            />
+            {pane === 'cutters' ? (
+              <>
+                <button
+                  type="button"
+                  className="btn btn--primary"
+                  data-testid="manage-register-open"
+                  title="Register a physical cutter — scan its box, find it in the catalogue, or type it"
+                  onClick={openRegister}
+                >
+                  ＋ Register ▾
+                </button>
+                <button
+                  type="button"
+                  className="btn"
+                  data-testid="manage-clone"
+                  disabled={selected === null || actionsDisabled}
+                  title={
+                    selected === null
+                      ? 'Pick a row first'
+                      : 'Copy this definition into your own tier, to rename it or to record what you measured'
+                  }
+                  onClick={onClone}
+                >
+                  Clone
+                </button>
+                <button
+                  type="button"
+                  className="btn"
+                  data-testid="manage-sync"
+                  disabled={actionsDisabled}
+                  title="Re-read Makera Studio’s own library on this PC into the catalogue tier"
+                  onClick={() => void syncCatalogue()}
+                >
+                  {busy === 'sync' ? 'Syncing…' : 'Sync catalogue'}
+                </button>
+                <button
+                  type="button"
+                  className="btn"
+                  data-testid="manage-export"
+                  disabled={actionsDisabled}
+                  title="Save the location — its machine, your definitions and the inventory — as one JSON file (location.json)"
+                  onClick={() => void exportHouse()}
+                >
+                  {busy === 'export' ? 'Saving…' : 'Export'}
+                </button>
+                <button
+                  type="button"
+                  className="btn"
+                  data-testid="manage-import"
+                  disabled={actionsDisabled}
+                  title="Load a location.json over the service’s own — or an older house.json, which replaces only the definitions and the inventory"
+                  onClick={() => importInput.current?.click()}
+                >
+                  {busy === 'import' ? 'Loading…' : 'Import'}
+                </button>
+                <input
+                  ref={importInput}
+                  type="file"
+                  accept=".json,application/json"
+                  data-testid="manage-import-input"
+                  style={{ display: 'none' }}
+                  onChange={(e) => {
+                    void onImportFile(e);
+                  }}
+                />
+              </>
+            ) : (
+              <button
+                type="button"
+                className="btn btn--primary"
+                data-testid="manage-feed-add"
+                disabled={feedStatus !== 'present'}
+                title={
+                  feedStatus === 'present'
+                    ? 'Add a row to the location’s feeds table'
+                    : 'The feeds table is not readable yet'
+                }
+                onClick={() => setFeedOpen('new')}
+              >
+                ＋ Add a row
+              </button>
+            )}
           </div>
         </div>
 
-        {notice !== null && (
+        <div className="mfilter" data-testid="manage-tools-panes">
+          <button
+            type="button"
+            className={`chip${pane === 'cutters' ? ' chip--on' : ''}`}
+            data-testid="manage-tools-pane-cutters"
+            aria-pressed={pane === 'cutters'}
+            onClick={() => setPane('cutters')}
+          >
+            cutters
+          </button>
+          <button
+            type="button"
+            className={`chip${pane === 'feeds' ? ' chip--on' : ''}`}
+            data-testid="manage-tools-pane-feeds"
+            aria-pressed={pane === 'feeds'}
+            onClick={() => setPane('feeds')}
+          >
+            feeds
+          </button>
+        </div>
+
+        {pane === 'cutters' && notice !== null && (
           <div
             className={`mnotice mnotice--${notice.kind}`}
             data-testid="manage-notice"
@@ -314,7 +378,7 @@ export function ToolsScope() {
             Each note carries its weight (decision 1): a LOSS is drawn in the warning colour, an
             `info` plain. And they outlive a reload (decision 2): the service keeps the last report
             on `/health`, so a record read from there is drawn too, dated, before any sync here. */}
-        {lastSync !== null && lastSync.summary.notes.length > 0 && (
+        {pane === 'cutters' && lastSync !== null && lastSync.summary.notes.length > 0 && (
           <div
             className="mnotes"
             data-testid="manage-sync-notes"
@@ -336,6 +400,8 @@ export function ToolsScope() {
           </div>
         )}
 
+        {pane === 'cutters' && (
+        <>
         <div className="mfilter">
           <input
             className="fld fld--text"
@@ -409,9 +475,33 @@ export function ToolsScope() {
             </tbody>
           </table>
         </div>
+        </>
+        )}
+
+        {pane === 'feeds' && (
+          <FeedsPane openId={feedOpen === 'new' ? null : feedOpen} onOpen={setFeedOpen} />
+        )}
+
         {docsOpen && <DocsModal initialId="cnc-guide" onClose={() => setDocsOpen(false)} />}
       </section>
-      <ToolDetail />
+
+      {pane === 'cutters' ? (
+        <ToolDetail />
+      ) : feedStatus === 'present' && feedOpen !== null && !feedGone ? (
+        <FeedEditor
+          key={feedOpen}
+          item={selectedFeed}
+          onClose={() => setFeedOpen(null)}
+          onSaved={setFeedOpen}
+        />
+      ) : (
+        <aside className="context-panel" data-testid="manage-feed-detail-empty">
+          <div className="empty">
+            <h3>Feeds</h3>
+            <p>Pick a row to see and edit its numbers, or add one above.</p>
+          </div>
+        </aside>
+      )}
     </>
   );
 }

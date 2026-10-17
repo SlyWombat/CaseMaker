@@ -1,8 +1,8 @@
 /**
  * The feeds table as this window holds it (#450 slice 2), on the stock shelf's pattern (#413).
  *
- * READS AND WRITES, ONE STORE. The table is small and edited from one place — Manage › Tools, when
- * #450's editor lands — so one store holds the rows, the table's `ETag` and the notice of the last
+ * READS AND WRITES, ONE STORE. The table is small and edited from one place — Manage › Tools › Feeds
+ * (#450 slice 6) — so one store holds the rows, the table's `ETag` and the notice of the last
  * write. Every write re-reads, and a stale guard (#321) re-reads too, so the next attempt carries
  * the current `ETag`.
  *

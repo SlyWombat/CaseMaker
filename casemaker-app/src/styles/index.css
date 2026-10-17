@@ -2368,6 +2368,11 @@ button:disabled {
   outline: none;
   border-color: var(--m-rail-active-border);
 }
+/* A field the feeds editor's schema has named (Manage › Tools › Feeds, #450). */
+.manage .fld[data-status='error'] {
+  border-color: color-mix(in srgb, var(--cm-color-error) 55%, transparent);
+  background: color-mix(in srgb, var(--cm-color-error) 8%, var(--m-control-bg));
+}
 .manage .mono {
   font-family: var(--cm-font-mono);
   font-variant-numeric: tabular-nums;
@@ -2424,6 +2429,16 @@ button:disabled {
 .manage .tag--muted {
   color: var(--cm-color-on-surface-muted);
   border-color: var(--cm-color-outline-variant);
+}
+/* A feed row's source (#450): seeded is the app's own value, measured is the shop's own evidence. */
+.manage .tag[data-source='seeded'] {
+  color: var(--cm-color-on-surface-muted);
+  border-color: var(--cm-color-outline-variant);
+  border-style: dashed;
+}
+.manage .tag[data-source='measured'] {
+  color: var(--cm-color-primary);
+  border-color: color-mix(in srgb, var(--cm-color-primary) 45%, transparent);
 }
 .manage .badge {
   display: inline-block;
