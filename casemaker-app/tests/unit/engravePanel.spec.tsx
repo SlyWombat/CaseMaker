@@ -694,6 +694,70 @@ describe('EngravePanel — plunge drills (#260)', () => {
   });
 });
 
+// #445 phase B3: the thread row (B1) is reachable from the panel here. The row's own patch contract
+// is `engraveThreadRow.spec.tsx`'s; what these cases pin is the WIRING — the menu entry, the count,
+// the fold, the removal's undo — so "a person can add a thread" stops being an unverified claim.
+describe('EngravePanel — milled threads (#445 B3)', () => {
+  it('adds a Thread from the Add menu, open, at the shop’s starting depth', () => {
+    render(<EngravePanel />);
+    fireEvent.click(screen.getByTestId('engrave-add-thread'));
+
+    const job = useEngraveJobStore.getState().job;
+    expect(job.threads).toHaveLength(1);
+    expect(job.threads![0]!.kind).toBe('thread');
+    // The same "the row you just added is the open one" rule every other kind follows (#411).
+    expect(screen.getByTestId('engrave-thread-row-0')).toBeTruthy();
+    expect(screen.getByTestId('engrave-thread-depth-0')).toBeTruthy();
+    expect(screen.getByTestId('engrave-thread-size-0')).toBeTruthy();
+
+    // `engrave.newThreadDepthMm`'s labelled fallback with no shop service is 5 mm — a thread that
+    // starts as deep as a label would show a hole in the collapsed line, not a threaded length.
+    expect(job.threads![0]!.depth).toBe(5);
+    // It counts as an item, alongside the three default labels.
+    expect(screen.getByTestId('engrave-item-count').textContent).toBe('4');
+  });
+
+  it('writes the thread’s size and depth into the job', () => {
+    render(<EngravePanel />);
+    fireEvent.click(screen.getByTestId('engrave-add-thread'));
+
+    fireEvent.change(screen.getByTestId('engrave-thread-size-0'), { target: { value: 'M5' } });
+    fireEvent.change(screen.getByTestId('engrave-thread-depth-0'), { target: { value: '8' } });
+
+    const thread = useEngraveJobStore.getState().job.threads![0]!;
+    expect(thread.size).toBe('M5');
+    expect(thread.depth).toBe(8);
+    // The patch is a merge: the fields the person did not touch survive (`updateThread`).
+    expect(thread.position).toEqual({ x: useEngraveJobStore.getState().job.stock.length / 2, y: useEngraveJobStore.getState().job.stock.width / 2 });
+  });
+
+  it('removes a thread and offers its undo at the removal site', () => {
+    render(<EngravePanel />);
+    fireEvent.click(screen.getByTestId('engrave-add-thread'));
+    const id = useEngraveJobStore.getState().job.threads![0]!.id;
+
+    fireEvent.click(screen.getByTestId('engrave-thread-remove-0'));
+    expect(useEngraveJobStore.getState().job.threads).toEqual([]);
+    // The strip names the thing in the row's own words, like every other kind (#411).
+    expect(screen.getByTestId('engrave-undo-what').textContent).toBe('Thread removed.');
+
+    fireEvent.click(screen.getByTestId('engrave-undo'));
+    expect(useEngraveJobStore.getState().job.threads!.map((t) => t.id)).toEqual([id]);
+    expect(screen.queryByTestId('engrave-undo-strip')).toBeNull();
+  });
+
+  it('opens a thread row with the item list’s expand-all', () => {
+    render(<EngravePanel />);
+    fireEvent.click(screen.getByTestId('engrave-add-thread'));
+    fireEvent.click(screen.getByTestId('engrave-item-collapse-all'));
+    expect(screen.queryByTestId('engrave-thread-depth-0')).toBeNull();
+
+    // `itemRowIds` has to carry the thread's id, or "expand all" leaves this one row folded.
+    fireEvent.click(screen.getByTestId('engrave-item-expand-all'));
+    expect(screen.getByTestId('engrave-thread-depth-0')).toBeTruthy();
+  });
+});
+
 // #243 §14.2 A2: the Simulated row carries the same blind-spot sentence the Simulate panel
 // builds — imported from `simCoverage`, never written again, so the two cannot disagree.
 describe('EngravePanel — the Simulated row’s coverage sentence (#243)', () => {

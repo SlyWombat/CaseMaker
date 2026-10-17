@@ -27,7 +27,7 @@
 
 import { create } from 'zustand';
 import { attachConsole } from '@/platform/machineConsole';
-import { programHash, runProgram, type Progress, type RunOutcome, type RunSettings } from '@/platform/machineRun';
+import { programHash, programOwnsVacuum, runProgram, type Progress, type RunOutcome, type RunSettings } from '@/platform/machineRun';
 import { copyInMachine, offcutOffer, programCuts, runtimeOf, wearKey, weighRuntime, withRuntime } from '@/engine/cnc/runEnd';
 import type { StockItem } from '@/platform/stockClient';
 import type { InventoryItem } from '@/platform/houseClient';
@@ -67,6 +67,14 @@ export interface RunContext {
    * decides.
    */
   fibre?: FilamentFibre;
+  /**
+   * #419 Q-E — this file belongs to a job whose PROGRAMS own the vacuum span, so the runner must
+   * not bracket it. Set it for every file of such a job, the middle ones included: a middle file
+   * carries no `M331`/`M332` of its own (the first file turns the vacuum on, the last turns it
+   * off), so the text alone reads as "not owned" and the runner would switch the vacuum off at a
+   * bit change — the one thing the maintainer said not to do. Absent: the program text decides.
+   */
+  vacuumOwned?: boolean;
 }
 
 export interface RunEnd {
@@ -318,11 +326,16 @@ export const useMachineRunStore = create<MachineRunState>((set, get) => {
           const outcome = await runProgram(prepared.filename, {
             session,
             settings,
+            // #419 Q-E — a file that carries its own words owns the vacuum; a middle file of a
+            // multi-file job carries none, so its context says so explicitly. A run prepared
+            // without either (anything not uploaded through the job flow) keeps the fallback.
+            programOwnsVacuum: prepared.context?.vacuumOwned === true || programOwnsVacuum(prepared.context?.nc),
             stopRequested: () => f.stop,
             onEvent: (e) => {
               const entry = get().runs[machine];
               if (!entry) return;
               if (e.kind === 'poll') patch(machine, { progress: e.progress });
+              else if (e.kind === 'note') patch(machine, { lines: [...entry.lines, `(${e.text})`] });
               else if (e.kind === 'sent' && e.line !== '?') {
                 patch(machine, { lines: [...entry.lines, `> ${e.line}  ${e.reply.trim().split('\n')[0] ?? ''}`] });
               } else if (e.kind === 'missed') patch(machine, { lines: [...entry.lines, `(no status reply ${e.misses})`] });

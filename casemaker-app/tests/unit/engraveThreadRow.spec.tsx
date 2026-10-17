@@ -2,10 +2,10 @@
 // The milled-thread row (#445 phase B): the collapsed line's glyph and depth, and the editor that
 // states the thread — the ISO 261 size (pitch on screen), the assumed pilot, the axis, the depth.
 //
-// Rendered DIRECTLY, not through `EngravePanel`: phase B's panel wiring is #448-held, so no add
-// control reaches this row yet. That is deliberate — a spec that claimed "a person can add a
-// thread from the panel" would be false until the panel hunk lands. When it does, the reachability
-// claim belongs in `engravePanel.spec.tsx`.
+// Rendered DIRECTLY, not through `EngravePanel`: the row is a controlled component, and what is
+// worth pinning here is the patch each control sends. The reachability claim — a person CAN add a
+// thread from the panel — is `engravePanel.spec.tsx`'s (#445 B3), where the menu entry and the
+// list wiring live.
 //
 // The row is a controlled component: the parent owns the item and hands back the patched version.
 // So what is checkable here is the PATCH each control sends, which is the contract the panel's

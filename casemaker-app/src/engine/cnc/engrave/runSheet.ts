@@ -35,6 +35,10 @@ import {
   type ScanTouch,
 } from '@/engine/cnc/engrave/materialScan';
 import type { FeedsResult } from '@/engine/cnc/feeds';
+// #445 — `ThreadPlanFacts` exists for THIS reader: the half of the CAM's thread plan the sheet
+// prints, with `moves`/the IR/the simulator's spec left out (see the type's own comment).
+import type { ThreadPlanFacts, ThreadSettingsResult } from '@/engine/cnc/cam/threadMill';
+import { FASTENERS } from '@/engine/compiler/fasteners';
 import {
   finerThan,
   reachTable,
@@ -121,6 +125,20 @@ export interface RunSheetGenerated {
    * exists (#273) — the app only writes a frame it actually produced.
    */
   frameNc: string | null;
+  /**
+   * #445 — the thread plans this sheet prints, reduced to what it says and never carrying `moves`.
+   * Absent or null on a job with no thread; `EngraveGenerated` satisfies this as it stands.
+   *
+   * No `name`: the CAM's plan does not carry one, and the sheet zips it from `plan.threads` by
+   * index — the order the CAM built the plans in (one per enabled `plan.threads` entry).
+   */
+  threads?: readonly ThreadPlanFacts[] | null;
+  /**
+   * #445 — how the thread program's numbers were resolved: values, per-field sources and the
+   * catalogue's clamps. Null on a job that cuts no thread. The sheet prints the numbers the worker
+   * resolved, never a second resolution of its own.
+   */
+  threadMachining?: ThreadSettingsResult | null;
 }
 
 /**
@@ -1671,6 +1689,26 @@ export function buildRunSheet(
         'touch tip, so it triggers on PLA (measured 2026-10-08, 0.001 mm). The 3D Probe stays in reserve.',
     },
   ];
+  // #445 — a thread program cuts the thread only; the pilot is not in the file. The sheet says what
+  // has to exist before it runs: the ISO basic minor (D1 = D − 1.0825P, `FASTENERS`) and the depth,
+  // cleared by the shop's own `pilotTipClearanceMm`. The pilot DEPTH is not recomputed here —
+  // `threadMillIR` owns that arithmetic — so the step states the threaded length and the clearance,
+  // and an old generated object without `threadMachining` says the clearance was not recorded.
+  if (plan.threads.length > 0) {
+    const clearance = generated.threadMachining?.settings.pilotTipClearanceMm ?? null;
+    needSteps.push({
+      text:
+        'The pilot — this program cuts the thread only and never the pilot. Every hole below must ' +
+        'already be drilled, to the depth stated, before this file runs' +
+        (clearance === null
+          ? ' (the tip clearance was not recorded for this run).'
+          : `, and the drill must clear the tool tip by ${fmtNum(clearance)} mm.`),
+      value: plan.threads
+        .map((t) => `${t.name}: ⌀${fmtNum(FASTENERS[t.size].minor)} mm pilot, ${fmtNum(t.depth)} mm of thread`)
+        .join(' · '),
+      bold: true,
+    });
+  }
   const sac = sacrificialSummary(job);
   if (sac !== null) needSteps.push({ text: 'Sacrificial material:', value: sac });
   // #345 — the margin every bound in this job is drawn to, with its source and the arithmetic the
@@ -1820,7 +1858,48 @@ export function buildRunSheet(
 
   // ---- 7 · Cut -------------------------------------------------------------------------------
   const cutSteps: RunSheetStep[] = [];
-  if (params !== null) {
+  const threadMachining = generated.threadMachining ?? null;
+  const threadPlans = generated.threads ?? null;
+  if (plan.threads.length > 0) {
+    // #445 — a thread job's cut section is the worker's own resolved numbers, said once, then one
+    // line per thread and the check. `items` (`plan.engraves`) is empty on a thread job — threads
+    // are a sibling list — so the per-item loop below adds nothing here.
+    if (threadMachining !== null) {
+      const s = threadMachining.settings;
+      cutSteps.push({
+        text: `Spindle, helical feed and the entry. Vacuum ${(job.cutOverride?.air ?? true) ? 'on' : 'off'}.`,
+        value:
+          `${s.spindleRpm} RPM · ${fmtNum(s.feed)} mm/min helical feed · ${fmtNum(s.plungeFeed)} mm/min ` +
+          `down the pilot · ${threadPlans === null ? 'the radial pass count was not recorded' : `${threadPlans[0]?.passRadii.length ?? 0} radial pass(es) at ${fmtNum(s.radialStepoverMm)} mm inward`}`,
+      });
+      // The three placeholder keys say so in their own source sentence (`threadSettings`), so no
+      // second wording is invented here.
+      cutSteps.push({ text: `Where those numbers came from: ${threadMachining.sources.feed}.` });
+      // An ERROR cannot reach here (the worker stops first); a CLAMP did happen to a real row and
+      // the operator cut the clamped numbers, so the sheet repeats the machine's own sentence.
+      for (const d of threadMachining.diagnostics.filter((diag) => diag.severity === 'warning')) {
+        cutSteps.push({ text: d.message });
+      }
+    } else {
+      cutSteps.push({
+        text: 'The thread program’s parameters were not recorded for this run — use the numbers the job states.',
+      });
+    }
+    for (const [i, t] of plan.threads.entries()) {
+      // The plan and the CAM's plans are built from the same enabled list, in the same order, so a
+      // plan's facts are found by index. A missing fact says so rather than guessing a pass count.
+      const facts = threadPlans?.[i] ?? null;
+      cutSteps.push({
+        text:
+          `${t.name} — ⌀${fmtNum(FASTENERS[t.size].minor)} mm pilot` +
+          (facts === null
+            ? ', the pass count was not recorded'
+            : `, ${facts.passRadii.length} radial pass(es) landing the tooth on the ${t.size} major radius`),
+        value: `${fmtNum(t.depth)} mm of thread`,
+      });
+    }
+    cutSteps.push({ text: `Check the thread with a ${plan.threads[0]!.size} screw.` });
+  } else if (params !== null) {
     // #405 — A TRACE-ONLY JOB DOES NOT STEP OVER. A trace puts the cutter ON the line: there are
     // no contour-parallel loops, so nothing is ever stepped over, and the `stepOverFraction` a V
     // row has to carry for `CutParams`'s sake is inert (see the PLA V row in `feeds.ts`). Printing

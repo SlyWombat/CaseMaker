@@ -64,6 +64,7 @@ import { EngraveKeepOutRow } from './EngraveKeepOutRow';
 import { EngraveShapeRow } from './EngraveShapeRow';
 import { EngraveCombinedRow } from './EngraveCombinedRow';
 import { EngraveDrillRow } from './EngraveDrillRow';
+import { EngraveThreadRow } from './EngraveThreadRow';
 import { EngraveTraceRow } from './EngraveTraceRow';
 import { EngraveVectorRow } from './EngraveVectorRow';
 import { EngraveImportDialog } from './EngraveImportDialog';
@@ -246,6 +247,7 @@ function itemRowIds(job: EngraveJob): string[] {
     ...(job.combined ?? []).map((i) => i.id),
     ...(job.traces ?? []).map((i) => i.id),
     ...(job.drills ?? []).map((i) => i.id),
+    ...(job.threads ?? []).map((i) => i.id),
     ...(job.vectors ?? []).map((i) => i.id),
   ];
 }
@@ -472,6 +474,9 @@ export function EngravePanel(): JSX.Element {
   const addDrill = useEngraveJobStore((s) => s.addDrill);
   const updateDrill = useEngraveJobStore((s) => s.updateDrill);
   const removeDrill = useEngraveJobStore((s) => s.removeDrill);
+  const addThread = useEngraveJobStore((s) => s.addThread);
+  const updateThread = useEngraveJobStore((s) => s.updateThread);
+  const removeThread = useEngraveJobStore((s) => s.removeThread);
   const addKeepOut = useEngraveJobStore((s) => s.addKeepOut);
   const updateKeepOut = useEngraveJobStore((s) => s.updateKeepOut);
   const removeKeepOut = useEngraveJobStore((s) => s.removeKeepOut);
@@ -527,8 +532,9 @@ export function EngravePanel(): JSX.Element {
 
   // Findings: the worker's list (validateJob + validateVise + the geometry findings, deduped)
   // once it has one, otherwise the same two pure validators without the geometry half, merged the
-  // same way (#353) — so the list does not change under the user when the first preview lands, and
-  // the form is never blank.
+  // same way (#353) — so the form is never blank. Findings raised inside `engraveRegions` and
+  // nowhere else (`tool-metal-line`, #407; the engravability ones) appear when the preview lands;
+  // the fallback does not attempt them.
   const findings: JobFinding[] =
     preview?.findings ??
     dedupeFindings([...validateJob(job), ...validateVise(job.stock, job.workholding.vise, job.sacrificial)]);
@@ -1051,6 +1057,7 @@ export function EngravePanel(): JSX.Element {
   const combinedCount = job.combined?.length ?? 0;
   const traceCount = job.traces?.length ?? 0;
   const drillCount = job.drills?.length ?? 0;
+  const threadCount = job.threads?.length ?? 0;
   const vectorCount = job.vectors?.length ?? 0;
   const hasReferenceable = job.labels.length + job.shapes.length + combinedCount + vectorCount > 0;
 
@@ -1402,7 +1409,7 @@ export function EngravePanel(): JSX.Element {
       <h3 style={SUBHEAD}>
         Items{' '}
         <span style={{ ...TAG, marginLeft: 4 }} data-testid="engrave-item-count">
-          {job.labels.length + job.shapes.length + combinedCount + traceCount + drillCount + vectorCount}
+          {job.labels.length + job.shapes.length + combinedCount + traceCount + drillCount + threadCount + vectorCount}
         </span>
         <RowFolds testidPrefix="engrave-item" ids={itemRowIds(job)} firstButtonRef={itemsFoldRef} />
       </h3>
@@ -1464,6 +1471,17 @@ export function EngravePanel(): JSX.Element {
           findings={findingsFor(drill.id)}
           onChange={(patch) => updateDrill(drill.id, patch)}
           onRemove={() => removeDrill(drill.id)}
+        />
+      ))}
+      {(job.threads ?? []).map((thread, i) => (
+        <EngraveThreadRow
+          key={thread.id}
+          thread={thread}
+          index={i}
+          maxDepth={maxDepth}
+          findings={findingsFor(thread.id)}
+          onChange={(patch) => updateThread(thread.id, patch)}
+          onRemove={() => removeThread(thread.id)}
         />
       ))}
       {(job.vectors ?? []).map((shape, i) => (
@@ -1559,6 +1577,19 @@ export function EngravePanel(): JSX.Element {
               {k.label}
             </button>
           ))}
+        </div>
+        {/* #445 — a milled internal thread. Its pilot is NOT cut by this item: the row and the run
+            sheet say the hole has to exist first (D1), and the CAM orbits inside it. */}
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 4, alignItems: 'center' }}>
+          <span style={{ ...MUTED, margin: 0 }}>threads:</span>
+          <button
+            type="button"
+            data-testid="engrave-add-thread"
+            title="Add a milled internal thread — the pilot must already be drilled; the program cuts the thread only."
+            onClick={() => expandEngraveRow(addThread())}
+          >
+            Thread
+          </button>
         </div>
         {/* #217: import an SVG or DXF as a filled cut region. The file is parsed once; the
             contour list is what the job keeps. #252: trace a bitmap to the same kind of thing —

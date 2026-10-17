@@ -38,6 +38,8 @@ import { Z1 } from '@/engine/cnc';
 import { DEFAULT_VISE, validateVise } from '@/engine/cnc/fixture';
 import { presetJawStrips, presetPartOnBoard } from '@/engine/cnc/sacrificial';
 import type { EngraveJob } from '@/types/engraveJob';
+import { flatEndMill, type Tool } from '@/engine/cnc/tool';
+import type { ThreadPlanFacts, ThreadSettingsResult } from '@/engine/cnc/cam/threadMill';
 
 const NOW = new Date('2026-10-04T00:00:00Z');
 
@@ -988,5 +990,154 @@ describe('runSheet (#207)', () => {
       expect(validateJob(clear).map((f) => f.code)).not.toContain('stock-proud-too-small');
       expect(stepOf(clear).text).toContain('No cut on this job sweeps over a jaw');
     });
+  });
+});
+
+// #445 phase B — the run sheet's thread half. A thread program cuts the thread only, so the sheet
+// has two things the ordinary job has not: a PILOT the operator must have drilled already (§1), and
+// a cut section whose numbers come from the worker's `threadSettings`, never a second resolution.
+describe('runSheet — the thread program (#445 B2)', () => {
+  /** A 4 mm thread mill: inside M5's ⌀4.134 pilot and wide enough for its radial depth. */
+  const MILL: Tool = flatEndMill(4, {
+    name: '4 mm thread mill',
+    typeText: 'Thread Mill',
+    shape: 'thread',
+    tipDiameter: 4,
+    diameter: 4,
+    fluteLength: 20,
+  });
+
+  const threadJob = (): EngraveJob => ({
+    ...defaultEngraveJob(),
+    labels: [],
+    shapes: [],
+    threads: [
+      {
+        kind: 'thread',
+        id: 'thr-1',
+        position: { x: 50, y: 30 },
+        enabled: true,
+        size: 'M5',
+        standard: 'metric',
+        classFit: '6H',
+        depth: 5,
+        through: false,
+      },
+    ],
+    tool: MILL,
+  });
+
+  const SETTINGS = {
+    radialStepoverMm: 0.3,
+    entryRampMm: 0.2,
+    bottomClearancePitches: 1,
+    pilotTipClearanceMm: 1,
+    feed: 300,
+    plungeFeed: 100,
+    spindleRpm: 6000,
+    chordToleranceMm: 0.02,
+  };
+
+  const MACHINING: ThreadSettingsResult = {
+    settings: SETTINGS,
+    sources: {
+      radialStepoverMm: 'the shop default',
+      entryRampMm: 'the shop default',
+      bottomClearancePitches: 'the shop default',
+      pilotTipClearanceMm: 'the shop default',
+      feed: 'the catalogue row for this cutter and material',
+      plungeFeed: 'a labelled placeholder — no catalogue row states a plunge feed',
+      spindleRpm: 'the catalogue row for this cutter and material',
+      chordToleranceMm: 'the shop default',
+    },
+    diagnostics: [],
+  };
+
+  // The CAM's plan carries no name; the sheet zips it from `plan.threads`, so the name here is
+  // only for reading this fixture.
+  const FACTS: ThreadPlanFacts & { name: string } = {
+    name: 'Thread M5×0.8',
+    position: [50, 30],
+    size: 'M5',
+    major: 5,
+    pitch: 0.8,
+    minor: 4.134,
+    cuttingDiameter: 4,
+    threadDepth: 5,
+    tipDepth: 5.8,
+    runOut: 0.8,
+    passRadii: [0.2, 0.5],
+    chordsPerTurn: 24,
+  };
+
+  const threadSheet = (over: Partial<RunSheetGenerated> = {}): RunSheet => {
+    const job = threadJob();
+    return buildRunSheet(
+      job,
+      {
+        ...stubGenerated(job),
+        // A thread job's `feeds` is null: `feedsFor` refuses a thread mill, and the thread branch
+        // resolves `threadSettings` instead. `stubGenerated`'s own feeds call is already that refusal.
+        threads: [FACTS],
+        threadMachining: MACHINING,
+        ...over,
+      },
+      NO_SIM,
+      NOW,
+    );
+  };
+
+  const texts = (sheet: RunSheet, id: string) => section(sheet, id).steps.map((s) => `${s.text} ${s.value ?? ''}`);
+
+  it('§1 states the pilot, its ISO minor and the tip clearance the drill must leave', () => {
+    const need = texts(threadSheet(), 'need');
+    const pilot = need.find((t) => t.includes('never the pilot'));
+    expect(pilot, 'a pilot step').toBeTruthy();
+    expect(pilot).toContain('⌀4.134 mm pilot');
+    expect(pilot).toContain('5 mm of thread');
+    expect(pilot).toContain('clear the tool tip by 1 mm');
+  });
+
+  it('§1 tells an old generated object that the clearance was not recorded, rather than guessing one', () => {
+    const pilot = texts(threadSheet({ threadMachining: null }), 'need').find((t) => t.includes('never the pilot'));
+    expect(pilot).toContain('the tip clearance was not recorded');
+  });
+
+  it('a job with no thread has no pilot step — the sheet is unchanged for every other job', () => {
+    const job = defaultEngraveJob();
+    expect(texts(sheetFor(job), 'need').some((t) => t.includes('never the pilot'))).toBe(false);
+    // …and adding the new fields as nulls changes nothing about that sheet: nothing new is gated on
+    // `threads`, so the two builds are the same document.
+    const plain: RunSheetGenerated = { ...stubGenerated(job), threads: null, threadMachining: null };
+    expect(JSON.stringify(buildRunSheet(job, plain, NO_SIM, NOW))).toBe(JSON.stringify(sheetFor(job)));
+  });
+
+  it('§7 prints the worker’s own numbers, their source, one line per thread and the check', () => {
+    const cut = texts(threadSheet(), 'cut');
+    expect(cut.some((t) => t.includes('6000 RPM · 300 mm/min helical feed · 100 mm/min down the pilot'))).toBe(true);
+    expect(cut.some((t) => t.includes('2 radial pass(es) at 0.3 mm inward'))).toBe(true);
+    expect(cut.some((t) => t.includes('Where those numbers came from: the catalogue row'))).toBe(true);
+    expect(cut.some((t) => t.includes('⌀4.134 mm pilot') && t.includes('2 radial pass(es)'))).toBe(true);
+    expect(cut.some((t) => t.includes('5 mm of thread'))).toBe(true);
+    expect(cut.some((t) => t.includes('Check the thread with a M5 screw'))).toBe(true);
+    // The ordinary job's "nothing was resolved" line must NOT appear on a thread job.
+    expect(cut.some((t) => t.includes('Cutting parameters were not resolved'))).toBe(false);
+  });
+
+  it('§7 says so when an old generated object carries no resolved thread numbers', () => {
+    const cut = texts(threadSheet({ threadMachining: null, threads: null }), 'cut');
+    expect(cut.some((t) => t.includes('were not recorded for this run'))).toBe(true);
+    // The plan's own facts still print: the item and its threaded length never depend on the CAM.
+    expect(cut.some((t) => t.includes('⌀4.134 mm pilot') && t.includes('pass count was not recorded'))).toBe(true);
+    expect(cut.some((t) => t.includes('5 mm of thread'))).toBe(true);
+  });
+
+  it('§7 repeats a clamp the machine applied, in the machine’s own words', () => {
+    const clamped: ThreadSettingsResult = {
+      ...MACHINING,
+      diagnostics: [{ severity: 'warning', code: 'rpm-clamped', message: '6,000 RPM was clamped to 5,000 by the Z1.' }],
+    };
+    const cut = texts(threadSheet({ threadMachining: clamped }), 'cut');
+    expect(cut.some((t) => t.includes('clamped to 5,000 by the Z1'))).toBe(true);
   });
 });

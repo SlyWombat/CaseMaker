@@ -4,7 +4,7 @@
 import { describe, expect, it } from 'vitest';
 import { STATUS_POLL_TIMING, type ConsoleSendResult } from '@/platform/machineConsole';
 import { STOP_FALLBACK } from '@/platform/machineStop';
-import { describeRun, playLine, programHash, readProgress, runProgram, runSettings, RUN_POLL_FLOOR_MS } from '@/platform/machineRun';
+import { describeRun, playLine, programHash, programOwnsVacuum, readProgress, runProgram, runSettings, RUN_POLL_FLOOR_MS } from '@/platform/machineRun';
 import { readJobProgress } from '@/platform/desktop/protocol';
 
 const SETTINGS = { pollMs: 2000, noProgressMs: 30000, missLimit: 3 };
@@ -315,5 +315,66 @@ describe('#423 review — the fixes', () => {
     expect((await runProgram('job.nc', { ...deps(f), session: silent })).kind).toBe('refused');
     expect(programHash('G0 X1')).toBe(programHash('G0 X1'));
     expect(programHash('G0 X1')).not.toBe(programHash('G0 X2'));
+  });
+});
+
+// #419 Q-E — the vacuum belongs to the FILE once #419's post puts the words in it: the first file
+// turns it on, the last turns it off, and a multi-tool job keeps it running across the bit change
+// (the maintainer's 2026-10-16 bench note). The runner's own bracket stays as the fallback for a
+// file that carries no words — anything posted before #419, or uploaded from elsewhere.
+describe('#419 Q-E — the program owns the vacuum, or the runner brackets it', () => {
+  it('reads the words in the program text', () => {
+    expect(programOwnsVacuum('G21\nM331\nG0 X0\nM332\nM2\n')).toBe(true);
+    expect(programOwnsVacuum('G21\nM332\nM2\n')).toBe(true);
+    expect(programOwnsVacuum('M02\n')).toBe(false);
+    expect(programOwnsVacuum('; M331 in a comment only\nM02\n')).toBe(false); // never switch the vacuum on a comment
+    expect(programOwnsVacuum('  M332\n')).toBe(true);
+    expect(programOwnsVacuum(null)).toBe(false);
+    expect(programOwnsVacuum(undefined)).toBe(false);
+  });
+
+  it('a program that owns the words is not bracketed, and the run log says why', async () => {
+    const f = fake(['<Run|P:10,20,5>', '<Idle|P:9,100,4>']);
+    const notes: string[] = [];
+    const o = await runProgram('job.nc', {
+      ...deps(f),
+      programOwnsVacuum: true,
+      onEvent: (e) => e.kind === 'note' && notes.push(e.text),
+    });
+    expect(o.kind).toBe('finished');
+    if (o.kind !== 'finished') return;
+    expect(o.vacuumOwner).toBe('program');
+    expect(f.lines().filter((l) => l === 'M331' || l === 'M332')).toEqual([]);
+    // …but the file is still played and the machine is still homed.
+    expect(f.lines()).toContain('play /sd/gcodes/job.nc');
+    expect(f.lines().at(-1)).toBe('$H');
+    expect(notes).toHaveLength(1);
+    expect(notes[0]).toContain('switches the vacuum itself');
+    expect(describeRun(o)).toContain('The program switched the vacuum off itself');
+  });
+
+  it('a refused play leaves nothing to switch off either', async () => {
+    const f = fake([], { play: 'Error: file not found' });
+    const o = await runProgram('job.nc', { ...deps(f), programOwnsVacuum: true });
+    expect(o.kind).toBe('refused');
+    expect(f.lines().filter((l) => l === 'M331' || l === 'M332')).toEqual([]);
+  });
+
+  it('a program that never started switches nothing either way, and says so', async () => {
+    const f = fake(['<Idle|MPos:0,0,0>']);
+    const o = await runProgram('job.nc', { ...deps(f), programOwnsVacuum: true });
+    expect(o.kind).toBe('never-started');
+    expect(f.lines().filter((l) => l === 'M331' || l === 'M332')).toEqual([]);
+    expect(describeRun(o)).toContain('nothing was switched either way');
+  });
+
+  it('without the flag — any file that does not carry the words — the runner still brackets it', async () => {
+    const f = fake(['<Run|P:10,20,5>', '<Idle|P:9,100,4>']);
+    const o = await runProgram('job.nc', deps(f));
+    expect(o.kind).toBe('finished');
+    if (o.kind !== 'finished') return;
+    expect(o.vacuumOwner).toBe('runner');
+    expect(f.lines().slice(0, 3)).toEqual(['?', 'M331', 'play /sd/gcodes/job.nc']);
+    expect(f.lines().at(-2)).toBe('M332');
   });
 });
