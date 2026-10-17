@@ -26,7 +26,10 @@
 // code (`MACHINES.Z1`, `DEFAULT_VISE`) and a machine record names its profile by `profileId`; only
 // per-unit numbers — this machine's calibration, its saved vise and sacrificial setup — are stored.
 //
-// THE STOCK SHELF (#413) is `stock`, its entries' rules in `stock.rs`.
+// THE STOCK SHELF (#413) is `stock`, its entries' rules in `stock.rs`. THE FEEDS TABLE (#450) is
+// `feeds`, its rows' rules in `feeds.rs`; it starts EMPTY (seeding is a later slice of #450) and is
+// omitted from the document while empty, so a location written before the table existed — including
+// the shared fixture, which another workstream holds — round-trips byte for byte.
 //
 // A MACHINE'S POWER SWITCH (#416) AND WASTEBOARD (#417) are optional fields on its record, each
 // with its own endpoint (`power.rs`, `wasteboard.rs`).
@@ -35,6 +38,7 @@
 // machine record; no placeholder shapes are stubbed for it. A document that carries one of those keys before this
 // build knows it is refused by `deny_unknown_fields`, exactly as a misspelled key is (#339).
 
+use crate::feeds::{validate_table, FeedRow};
 use crate::house::{validate_tiers, HouseDoc, HouseError, InventoryItem, UserTool};
 use crate::stock::{validate_shelf, StockItem};
 use serde::{Deserialize, Serialize};
@@ -180,6 +184,12 @@ pub struct LocationDoc {
     /// The stock shelf (#413): the material on hand. Its own endpoint, `ETag` and guarded writes.
     #[serde(default)]
     pub stock: Vec<StockItem>,
+    /// The feeds table (#450): the cutting numbers for one (material, cutter edge, diameter band).
+    /// Its own endpoint, `ETag` and guarded writes. EMPTY in a fresh location — server seeding is a
+    /// later slice of #450 — and OMITTED while empty, so a document written before the table existed
+    /// (the shared `location-doc.json`, held by that slice) round-trips without gaining a key.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub feeds: Vec<FeedRow>,
     /// The shop's tunable defaults — thresholds, waits, chosen values — with provenance
     /// (`defaults.rs`). Open to new keys; its own endpoint, `ETag` and guarded writes.
     #[serde(default)]
@@ -225,6 +235,7 @@ impl LocationDoc {
             tools: Vec::new(),
             inventory: Vec::new(),
             stock: Vec::new(),
+            feeds: Vec::new(),
             defaults: crate::defaults::seeded(),
         }
     }
@@ -291,6 +302,7 @@ impl LocationDoc {
         }
         validate_tiers(&self.tools, &self.inventory)?;
         validate_shelf(&self.stock)?;
+        validate_table(&self.feeds)?;
         crate::defaults::validate_all(&self.defaults)
     }
 }
@@ -356,5 +368,44 @@ mod tests {
         v["machines"][0]["powerSwitch"] = serde_json::json!({ "provider": "ha" });
         let err = serde_json::from_value::<LocationDoc>(v).unwrap_err().to_string();
         assert!(err.contains("powerSwitch"), "{err}");
+    }
+
+    #[test]
+    fn a_fresh_location_has_no_feeds_and_says_nothing_about_them() {
+        // #450 slice 2. Seeding is OFF, and an EMPTY table is the same document as an absent one, so
+        // the held `location-doc.json` (which has no `feeds`) gains no key through a round trip.
+        // Writing the key only when it holds a row is what buys that.
+        let loc = LocationDoc::fresh();
+        assert!(loc.feeds.is_empty());
+        loc.validate().unwrap();
+        let v = serde_json::to_value(&loc).unwrap();
+        assert!(v.get("feeds").is_none(), "{v}");
+
+        let mut with_a_row = loc.clone();
+        with_a_row.feeds.push(crate::feeds::tests::a_row("feed-softwood-flat-0.8-1.6"));
+        with_a_row.validate().unwrap();
+        let v = serde_json::to_value(&with_a_row).unwrap();
+        assert_eq!(v["feeds"][0]["material"], serde_json::json!("softwood"));
+    }
+
+    #[test]
+    fn the_location_holds_the_feeds_table_to_its_whole_table_rule() {
+        // The one cross-row rule lives in `feeds.rs`; this proves the LOCATION calls it, so an import
+        // carrying a table the service would refuse cannot land.
+        let mut loc = LocationDoc::fresh();
+        loc.feeds.push(FeedRow {
+            min_diameter: 0.8,
+            max_diameter: 2.0,
+            ..crate::feeds::tests::a_row("feed-a")
+        });
+        loc.feeds.push(FeedRow {
+            min_diameter: 1.6,
+            max_diameter: 3.2,
+            ..crate::feeds::tests::a_row("feed-b")
+        });
+        assert!(matches!(loc.validate(), Err(HouseError::BadEntry(_))));
+
+        loc.feeds.pop();
+        loc.validate().unwrap();
     }
 }

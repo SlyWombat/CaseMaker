@@ -33,6 +33,7 @@
 // the app's own window: a 304 saves the body and nothing else is gained by `max-age` on a list the
 // user is editing.
 
+use crate::feeds::FeedRow;
 use crate::house::{HouseError, HouseStore, InventoryItem, ToolLibraryEntry};
 use crate::location::MachineRecord;
 use crate::stock::StockItem;
@@ -68,6 +69,10 @@ pub fn routes(store: Arc<HouseStore>) -> Router {
         // #413. The stock shelf: its own list, `ETag` and guarded writes, as the inventory has.
         .route("/api/v1/stock", get(list_stock).post(create_stock))
         .route("/api/v1/stock/*id", patch(update_stock).delete(delete_stock))
+        // #450 slice 2. The feeds table: its own list, `ETag` and guarded writes like the shelf.
+        // NOT `/api/v1/feeds` — that path is the Makera catalogue (see the route above).
+        .route("/api/v1/feed-table", get(list_feed_table).post(create_feed))
+        .route("/api/v1/feed-table/*id", patch(update_feed).delete(delete_feed))
         // #416. An optional power switch per machine: its config (guarded on the location), its token
         // (this computer only, into the secure store), and the switch itself.
         .route(
@@ -357,6 +362,58 @@ async fn delete_stock(
 ) -> Response<Body> {
     let guard = if_match(&headers);
     match store.delete_stock(&id, guard.as_deref()).await {
+        Ok(()) => empty(StatusCode::NO_CONTENT),
+        Err(e) => error_response(e),
+    }
+}
+
+/// The feeds table (#450). Same shape as the shelf: its own `ETag`, an unguarded create and
+/// guarded edits.
+async fn list_feed_table(State(store): State<Arc<HouseStore>>, headers: HeaderMap) -> Response<Body> {
+    match store.feed_table().await {
+        Ok((bytes, etag)) => json_with_etag(bytes, etag, &headers, StatusCode::OK),
+        Err(e) => error_response(e),
+    }
+}
+
+async fn create_feed(
+    State(store): State<Arc<HouseStore>>,
+    axum::Json(row): axum::Json<FeedRow>,
+) -> Response<Body> {
+    match store.create_feed(row).await {
+        Ok(()) => empty(StatusCode::CREATED),
+        Err(e) => error_response(e),
+    }
+}
+
+/// Replace a feed row. GUARDED on the table's `ETag`, like `update_stock`.
+async fn update_feed(
+    State(store): State<Arc<HouseStore>>,
+    Path(id): Path<String>,
+    headers: HeaderMap,
+    axum::Json(row): axum::Json<FeedRow>,
+) -> Response<Body> {
+    if row.id != id {
+        return error_response(HouseError::BadEntry(format!(
+            "the body's id {} does not match the URL's {id}",
+            row.id
+        )));
+    }
+    let guard = if_match(&headers);
+    match store.update_feed(row, guard.as_deref()).await {
+        Ok(()) => empty(StatusCode::OK),
+        Err(e) => error_response(e),
+    }
+}
+
+/// Remove a feed row. Guarded as `update_feed` is.
+async fn delete_feed(
+    State(store): State<Arc<HouseStore>>,
+    Path(id): Path<String>,
+    headers: HeaderMap,
+) -> Response<Body> {
+    let guard = if_match(&headers);
+    match store.delete_feed(&id, guard.as_deref()).await {
         Ok(()) => empty(StatusCode::NO_CONTENT),
         Err(e) => error_response(e),
     }
@@ -1230,6 +1287,69 @@ mod tests {
         let tag = etag_of(&app, "/api/v1/stock").await;
         let res = app.clone().oneshot(delete("/api/v1/stock/s-1", Some(&tag))).await.unwrap();
         assert_eq!(res.status(), StatusCode::NO_CONTENT);
+    }
+
+    #[tokio::test]
+    async fn the_feed_table_walks_its_lifecycle_over_http() {
+        // #450 slice 2. The same shape as the shelf, on its own path: `/feeds` is the catalogue.
+        let (_dir, app) = app_under_test();
+        let row = serde_json::to_value(crate::feeds::tests::a_row("feed-1")).unwrap();
+        let res = app.clone().oneshot(post_json("/api/v1/feed-table", &row)).await.unwrap();
+        assert_eq!(res.status(), StatusCode::CREATED);
+
+        // A row the table cannot use is a 400, in the service's own words.
+        let mut bad = row.clone();
+        bad["id"] = serde_json::json!("feed-bad");
+        bad["params"]["rpm"] = serde_json::json!(0);
+        let res = app.clone().oneshot(post_json("/api/v1/feed-table", &bad)).await.unwrap();
+        assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+        assert!(json_of(res).await["error"].as_str().unwrap().contains("rpm"));
+
+        // An overlap with the stored row is refused by the WHOLE-TABLE rule.
+        let mut overlap = row.clone();
+        overlap["id"] = serde_json::json!("feed-overlap");
+        overlap["minDiameter"] = serde_json::json!(1.0);
+        overlap["maxDiameter"] = serde_json::json!(3.2);
+        let res = app.clone().oneshot(post_json("/api/v1/feed-table", &overlap)).await.unwrap();
+        assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+        assert!(json_of(res).await["error"].as_str().unwrap().contains("overlap"));
+
+        // Guarded edit: no header 428, a stale one 412, the current one 200. The URL and body ids
+        // must agree.
+        let mut edited = row.clone();
+        edited["params"]["feed"] = serde_json::json!(600);
+        let res = app.clone().oneshot(patch_json("/api/v1/feed-table/feed-1", None, &edited)).await.unwrap();
+        assert_eq!(res.status(), StatusCode::PRECONDITION_REQUIRED);
+        let tag = etag_of(&app, "/api/v1/feed-table").await;
+        let res = app
+            .clone()
+            .oneshot(patch_json("/api/v1/feed-table/other", Some(&tag), &edited))
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::BAD_REQUEST, "the URL and the body disagree");
+        let res = app
+            .clone()
+            .oneshot(patch_json("/api/v1/feed-table/feed-1", Some("\"old\""), &edited))
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::PRECONDITION_FAILED);
+        let res = app
+            .clone()
+            .oneshot(patch_json("/api/v1/feed-table/feed-1", Some(&tag), &edited))
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        let listed = json_of(app.clone().oneshot(get("/api/v1/feed-table")).await.unwrap()).await;
+        assert_eq!(listed[0]["params"]["feed"], serde_json::json!(600.0));
+
+        // Delete is guarded too.
+        let res = app.clone().oneshot(delete("/api/v1/feed-table/feed-1", Some(&tag))).await.unwrap();
+        assert_eq!(res.status(), StatusCode::PRECONDITION_FAILED, "the validator moved");
+        let tag = etag_of(&app, "/api/v1/feed-table").await;
+        let res = app.clone().oneshot(delete("/api/v1/feed-table/feed-1", Some(&tag))).await.unwrap();
+        assert_eq!(res.status(), StatusCode::NO_CONTENT);
+        let listed = json_of(app.clone().oneshot(get("/api/v1/feed-table")).await.unwrap()).await;
+        assert_eq!(listed, serde_json::json!([]));
     }
 
     #[tokio::test]

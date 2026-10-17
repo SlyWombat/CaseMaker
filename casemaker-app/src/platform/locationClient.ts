@@ -33,6 +33,7 @@ import {
   type HouseWrite,
 } from './houseClient';
 import { StockShelfSchema } from './stockClient';
+import { FeedsTableSchema } from './feedClient';
 import { ShopDefaultsSchema } from './defaultsClient';
 import { PowerSwitchSchema } from './powerClient';
 import { WasteboardSchema } from '@/engine/cnc/wasteboard';
@@ -186,6 +187,11 @@ export const LocationDocSchema = z.object({
   inventory: InventorySchema.default([]),
   /** The stock shelf (#413), strict like the rest of an import. */
   stock: StockShelfSchema.default([]),
+  /**
+   * The feeds table (#450 slice 2), strict like the rest. Defaulted: a location exported before the
+   * table existed has no key, and an empty table is the absence of the key rather than a claim.
+   */
+  feeds: FeedsTableSchema.default([]),
   /** The shop's tunable defaults, with provenance (`defaultsClient.ts`). */
   defaults: ShopDefaultsSchema.default({}),
 });

@@ -89,6 +89,27 @@ describe('the location contract (#412)', () => {
     expect(parsed.data!.stock).toEqual([]);
   });
 
+  it('carries the feeds table (#450): absent reads empty, present is held to the whole-table rule', () => {
+    const { feeds: _f, ...older } = doc() as Doc & { feeds?: unknown };
+    const absent = LocationDocSchema.safeParse(older);
+    expect(absent.success, JSON.stringify(absent.error?.issues)).toBe(true);
+    expect(absent.data!.feeds).toEqual([]);
+
+    const good = (
+      JSON.parse(readFileSync(join(HERE, 'fixtures', 'feed-table.json'), 'utf8')) as { good: unknown[] }
+    ).good;
+    const present = LocationDocSchema.safeParse({ ...older, feeds: good });
+    expect(present.success, JSON.stringify(present.error?.issues)).toBe(true);
+    expect(present.data!.feeds).toHaveLength(10);
+
+    // The cross-row rule travels with the document through the same `superRefine`.
+    const overlap = [
+      good[0],
+      { ...(good[1] as Record<string, unknown>), id: 'feed-overlap', minDiameter: 1.0 },
+    ];
+    expect(LocationDocSchema.safeParse({ ...older, feeds: overlap }).success).toBe(false);
+  });
+
   it('leaves a house file, and anything else, to the service to judge', () => {
     expect(checkLocationImport('{"kind":"casemaker-house","schemaVersion":1}').kind).toBe('other');
     expect(checkLocationImport('not json').kind).toBe('other');

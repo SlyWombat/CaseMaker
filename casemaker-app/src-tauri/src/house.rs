@@ -72,6 +72,7 @@
 
 use crate::catalogue::{CatalogueDoc, SyncNote, SyncReport, SyncSummary, CATALOGUE_KIND};
 use crate::etag::etag_for;
+use crate::feeds::FeedRow;
 use crate::stock::StockItem;
 use crate::location::{
     LocationDoc, MachineRecord, LOCATION_FILE, LOCATION_KIND, LOCATION_SCHEMA_VERSION,
@@ -727,6 +728,14 @@ fn stock_bytes(inner: &Inner) -> Result<Vec<u8>, HouseError> {
     let mut items = inner.location.stock.clone();
     items.sort_by(|a, b| a.added_at.cmp(&b.added_at).then(a.id.cmp(&b.id)));
     json_bytes(&items)
+}
+
+/// The `/feed-table` body (#450): the rows in the order they are stored. NOT sorted, unlike the
+/// shelf: `entryFor` takes the FIRST matching row, and two rows are allowed to TOUCH at a shared
+/// diameter boundary precisely so the earlier one wins there; re-ordering here would change which
+/// row a cutter on that boundary takes.
+fn feed_table_bytes(inner: &Inner) -> Result<Vec<u8>, HouseError> {
+    json_bytes(&inner.location.feeds)
 }
 
 /// The `/defaults` body: the shop's defaults, keyed and sorted (a `BTreeMap`), so the bytes — and
@@ -1630,6 +1639,66 @@ impl HouseStore {
             )));
         }
         next.stock.retain(|s| s.id != id);
+        self.commit(&mut inner, next)
+    }
+
+    /// The feeds table, with its `ETag` (#450).
+    pub async fn feed_table(&self) -> Result<(Vec<u8>, String), HouseError> {
+        let inner = self.inner.read().await;
+        let bytes = feed_table_bytes(&inner)?;
+        let etag = etag_for(&bytes);
+        Ok((bytes, etag))
+    }
+
+    /// Add a row. Not guarded: a create is judged against its id, as `create_stock` is. The WHOLE
+    /// table is validated after the push, because an added row can overlap one already there — a
+    /// rule no single row can see (`feeds::validate_table`).
+    pub async fn create_feed(&self, row: FeedRow) -> Result<(), HouseError> {
+        row.validate()?;
+        let mut inner = self.inner.write().await;
+        Self::writable(&inner.location_problem)?;
+        if inner.location.feeds.iter().any(|f| f.id == row.id) {
+            return Err(HouseError::Conflict(format!(
+                "{} is already in the feeds table",
+                row.id
+            )));
+        }
+        let mut next = inner.location.clone();
+        next.feeds.push(row);
+        crate::feeds::validate_table(&next.feeds)?;
+        self.commit(&mut inner, next)
+    }
+
+    /// Replace a row — an edit, or a measurement landed on it. GUARDED on the table's `ETag`, with
+    /// the precondition first: a write based on an old table is a 412 whatever else is wrong with it.
+    pub async fn update_feed(&self, row: FeedRow, if_match: Option<&str>) -> Result<(), HouseError> {
+        let mut inner = self.inner.write().await;
+        Self::writable(&inner.location_problem)?;
+        check_precondition(&etag_for(&feed_table_bytes(&inner)?), if_match, "the feeds table")?;
+        row.validate()?;
+        let mut next = inner.location.clone();
+        let Some(existing) = next.feeds.iter_mut().find(|f| f.id == row.id) else {
+            return Err(HouseError::NotFound(format!(
+                "{} is not in the feeds table",
+                row.id
+            )));
+        };
+        *existing = row;
+        // An edit can move a row onto another's band just as a create can.
+        crate::feeds::validate_table(&next.feeds)?;
+        self.commit(&mut inner, next)
+    }
+
+    /// Remove a row. Guarded as `update_feed` is.
+    pub async fn delete_feed(&self, id: &str, if_match: Option<&str>) -> Result<(), HouseError> {
+        let mut inner = self.inner.write().await;
+        Self::writable(&inner.location_problem)?;
+        check_precondition(&etag_for(&feed_table_bytes(&inner)?), if_match, "the feeds table")?;
+        let mut next = inner.location.clone();
+        if !next.feeds.iter().any(|f| f.id == id) {
+            return Err(HouseError::NotFound(format!("{id} is not in the feeds table")));
+        }
+        next.feeds.retain(|f| f.id != id);
         self.commit(&mut inner, next)
     }
 
@@ -3334,6 +3403,27 @@ mod tests {
         let original: LocationDoc = serde_json::from_slice(&location_fixture()).unwrap();
         let back: LocationDoc = serde_json::from_slice(&exported).unwrap();
         assert_eq!(back, original, "export is the document that was imported");
+        // #450 slice 2. The fixture is held by another workstream and carries no `feeds`; an empty
+        // table writes no key, so importing and exporting it adds nothing at all. Raw-file equality
+        // is not the property to assert: the held file is hand-formatted and is not what serde
+        // writes (its `calibration` members are in a different order, among other things). The
+        // evidence is that the document TYPE adds nothing — the export is byte-for-byte the
+        // fixture's own parsed value re-serialised, and no `"feeds"` key appears in it. Struct
+        // equality alone would not catch an emitted `"feeds": []`.
+        let fixture = location_fixture();
+        assert!(
+            !String::from_utf8_lossy(&fixture).contains("\"feeds\""),
+            "the held fixture has no feeds section"
+        );
+        assert_eq!(
+            serde_json::to_vec_pretty(&original).unwrap(),
+            exported,
+            "an empty feeds table adds nothing to the exported document"
+        );
+        assert!(
+            !String::from_utf8_lossy(&exported).contains("\"feeds\""),
+            "an empty feeds table writes no key"
+        );
         // The machine's sections are kept verbatim — the client is their shape authority.
         assert_eq!(
             back.machines[0].fixtures.as_ref().unwrap()["vise"]["measuredAt"],
@@ -3525,6 +3615,88 @@ mod tests {
         assert_eq!(store.stock().await.unwrap().0, b"[]");
         let written = fs::read_to_string(dir.path().join(LOCATION_FILE)).unwrap();
         assert!(written.contains("\"stock\": []"), "{written}");
+    }
+
+    // — the feeds table (#450, slice 2) ------------------------------------------------------------
+
+    #[tokio::test]
+    async fn the_feeds_table_is_written_under_its_whole_table_rule() {
+        use crate::feeds::tests::a_row;
+        let (dir, store) = store();
+        let row = a_row("feed-softwood-flat-0.8-1.6");
+        store.create_feed(row.clone()).await.unwrap();
+        // One id, one row: a second create of the same id is a conflict, as on the shelf.
+        assert!(matches!(store.create_feed(row.clone()).await, Err(HouseError::Conflict(_))));
+
+        // A row that cannot stand on its own is a 400.
+        let mut bad = a_row("feed-bad");
+        bad.params.rpm = 0.0;
+        assert!(matches!(store.create_feed(bad).await, Err(HouseError::BadEntry(_))));
+
+        // TOUCHING at 1.6 is the table's shape, and the order it was added in is preserved.
+        let mut next_band = a_row("feed-softwood-flat-1.6-3.2");
+        next_band.min_diameter = 1.6;
+        next_band.max_diameter = 3.2;
+        store.create_feed(next_band).await.unwrap();
+        let (bytes, etag) = store.feed_table().await.unwrap();
+        let listed: Vec<FeedRow> = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(
+            listed.iter().map(|r| r.id.as_str()).collect::<Vec<_>>(),
+            ["feed-softwood-flat-0.8-1.6", "feed-softwood-flat-1.6-3.2"]
+        );
+
+        // An OVERLAP with a row already there is the table's rule, not any row's: 400.
+        let mut overlapping = a_row("feed-overlap");
+        overlapping.min_diameter = 1.0;
+        overlapping.max_diameter = 3.2;
+        let err = store.create_feed(overlapping.clone()).await.unwrap_err();
+        assert!(matches!(err, HouseError::BadEntry(_)), "{err:?}");
+        assert_eq!(store.feed_table().await.unwrap().0, bytes, "a refused add wrote nothing");
+
+        // Guarded: none, stale, current. An edit onto another row's band is refused whole.
+        let mut edited = row.clone();
+        edited.params.feed = 600.0;
+        assert!(matches!(
+            store.update_feed(edited.clone(), None).await,
+            Err(HouseError::PreconditionRequired(_))
+        ));
+        assert!(matches!(
+            store.update_feed(edited.clone(), Some("\"old\"")).await,
+            Err(HouseError::StalePrecondition(_))
+        ));
+        store.update_feed(edited.clone(), Some(&etag)).await.unwrap();
+
+        let (before, etag) = store.feed_table().await.unwrap();
+        let mut over = edited.clone();
+        over.max_diameter = 3.2;
+        assert!(matches!(
+            store.update_feed(over, Some(&etag)).await,
+            Err(HouseError::BadEntry(_))
+        ));
+        assert_eq!(store.feed_table().await.unwrap().0, before);
+
+        // A row that is not there is a 404; a delete needs the current guard.
+        let missing = a_row("feed-missing");
+        assert!(matches!(
+            store.update_feed(missing, Some(&etag)).await,
+            Err(HouseError::NotFound(_))
+        ));
+        assert!(matches!(
+            store.delete_feed("feed-softwood-flat-1.6-3.2", None).await,
+            Err(HouseError::PreconditionRequired(_))
+        ));
+        assert!(matches!(
+            store.delete_feed("feed-softwood-flat-1.6-3.2", Some("\"old\"")).await,
+            Err(HouseError::StalePrecondition(_))
+        ));
+        store.delete_feed("feed-softwood-flat-1.6-3.2", Some(&etag)).await.unwrap();
+        let (_, etag) = store.feed_table().await.unwrap();
+        store.delete_feed("feed-softwood-flat-0.8-1.6", Some(&etag)).await.unwrap();
+        assert_eq!(store.feed_table().await.unwrap().0, b"[]");
+
+        // An EMPTY table writes no key at all (the held fixture has none).
+        let written = fs::read_to_string(dir.path().join(LOCATION_FILE)).unwrap();
+        assert!(!written.contains("\"feeds\""), "{written}");
     }
 
     #[tokio::test]

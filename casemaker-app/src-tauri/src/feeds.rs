@@ -245,7 +245,7 @@ pub(crate) mod tests {
         }
     }
 
-    fn a_row(id: &str) -> FeedRow {
+    pub(crate) fn a_row(id: &str) -> FeedRow {
         FeedRow {
             id: id.to_string(),
             material: "softwood".into(),

@@ -22,6 +22,13 @@
 
 import { z } from 'zod';
 import { STOCK_MATERIALS } from '@/engine/cnc/materials';
+import {
+  houseRequest,
+  type HouseFailure,
+  type HouseReadFailure,
+  type HouseRequestOptions,
+  type HouseWrite,
+} from './houseClient';
 
 /** The cutter edge a row is for (#405). `null` — an absent field — means `flat`. */
 export const FEED_EDGES = ['flat', 'v'] as const;
@@ -145,4 +152,81 @@ export function feedProblem(row: unknown): string | null {
 export function feedTableProblem(table: unknown): string | null {
   const parsed = FeedsTableSchema.safeParse(table);
   return parsed.success ? null : firstIssue(parsed.error);
+}
+
+/**
+ * The service's `/feed-table` (#450 slice 2): the rows in the location's table, read ONE ROW AT A
+ * TIME like the shelf — a row this build cannot read (a newer `source`, a material word it does not
+ * know) is set aside with its reason and the rest still load. The whole-table rule cannot be checked
+ * row by row, but the service validates it on every write and `LocationDoc::validate` on load, so a
+ * table that violates it is a document the service refuses entire rather than one it serves here.
+ */
+export interface UnreadableFeed {
+  id: string | null;
+  reason: string;
+}
+
+export type FeedTableRead =
+  | { kind: 'ok'; etag: string | null; rows: FeedRow[]; unreadable: UnreadableFeed[] }
+  | HouseReadFailure;
+
+/** Read the feeds table. A 404 is a service from before #450: no table there. */
+export async function houseFeedTable(opts?: HouseRequestOptions): Promise<FeedTableRead> {
+  const res = await houseRequest('GET', '/feed-table', undefined, opts);
+  if (res.kind === 'refused') {
+    return res.status === 404 ? { kind: 'absent', reason: res.message } : { kind: 'error', detail: res.message };
+  }
+  if (res.kind !== 'ok') return res;
+  let json: unknown;
+  try {
+    json = JSON.parse(res.text);
+  } catch {
+    return { kind: 'error', detail: 'the feeds table is not readable JSON' };
+  }
+  if (!Array.isArray(json)) return { kind: 'error', detail: 'the feeds table is not a list' };
+  const rows: FeedRow[] = [];
+  const unreadable: UnreadableFeed[] = [];
+  for (const raw of json) {
+    const rawId = typeof raw === 'object' && raw !== null ? (raw as { id?: unknown }).id : undefined;
+    const parsed = FeedRowSchema.safeParse(raw);
+    if (parsed.success) rows.push(parsed.data);
+    else unreadable.push({ id: typeof rawId === 'string' ? rawId : null, reason: firstIssue(parsed.error) });
+  }
+  return { kind: 'ok', etag: res.etag ?? null, rows, unreadable };
+}
+
+/** Checked against the schema before it is sent, so a refusal names the field in this build's words. */
+function checked(row: FeedRow): HouseFailure | null {
+  const why = feedProblem(row);
+  return why === null ? null : { kind: 'refused', status: 400, message: why };
+}
+
+function okOnly(res: Awaited<ReturnType<typeof houseRequest>>): HouseWrite {
+  return res.kind === 'ok' ? { kind: 'ok' } : res;
+}
+
+/** Add a row. Not guarded: the id is judged instead (409 when it is taken). */
+export async function houseAddFeed(row: FeedRow, opts?: HouseRequestOptions): Promise<HouseWrite> {
+  return checked(row) ?? okOnly(await houseRequest('POST', '/feed-table', row, opts));
+}
+
+/** Replace a row. GUARDED (#321) on the table's `ETag`. */
+export async function houseReplaceFeed(
+  row: FeedRow,
+  ifMatch: string | null,
+  opts?: HouseRequestOptions,
+): Promise<HouseWrite> {
+  return (
+    checked(row) ??
+    okOnly(await houseRequest('PATCH', `/feed-table/${encodeURIComponent(row.id)}`, row, { ...opts, ifMatch }))
+  );
+}
+
+/** Remove a row. Guarded as a replace is. */
+export async function houseRemoveFeed(
+  id: string,
+  ifMatch: string | null,
+  opts?: HouseRequestOptions,
+): Promise<HouseWrite> {
+  return okOnly(await houseRequest('DELETE', `/feed-table/${encodeURIComponent(id)}`, undefined, { ...opts, ifMatch }));
 }
