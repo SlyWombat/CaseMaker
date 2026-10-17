@@ -375,7 +375,7 @@ describe('the thin fixture as a V-carve job (#221)', () => {
   // Slice D — the operator reads the pitch the CAM RUNS, with the requested number beside it, and
   // the sentence is a warning-worded note rather than a fault: the cut is correct either way.
   it('states the clamped pitch beside the requested one, per item', () => {
-    const g = generate(tl, fixtureJob());
+    const g = generate(tl, vCarveJob(design));
     expect(g.ok).toBe(true);
     const notes = g.findings.filter((f) => f.code === 'vcarve-stepover-clamped');
     expect(notes).toHaveLength(3);
@@ -388,7 +388,7 @@ describe('the thin fixture as a V-carve job (#221)', () => {
   });
 
   it('raises no note when the override asks for less than the tip radius', () => {
-    const job = fixtureJob();
+    const job = vCarveJob(design);
     const gentle = { ...job, cutOverride: { ...job.cutOverride, stepOver: 0.09 } };
     const g = generate(tl, gentle);
     expect(g.ok).toBe(true);
