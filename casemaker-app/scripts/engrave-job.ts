@@ -860,9 +860,32 @@ if (args.job) {
   // and the run sheet's reachability section is where the number is written down. This is the one
   // place the design route edits what the file said, and it says so.
   const unreachable = untouchedByAll(scanned);
+  // The reason has two different causes and must not confuse them. `untouchedByAll` counts only
+  // MEASURED cutters, and a cutter with no feeds row for this material is never measured — so when
+  // the cutter this run names has no numbers for the material (a V-bit on softwood, say), the drop
+  // is not "the strokes are finer than the smallest bit". The bit that would cut them simply has no
+  // feeds row here, and the sentence has to name that: it is the thing the operator can change.
+  const namedKey = args.tool ?? null;
+  const named = namedKey === null ? null : entryFor(namedKey);
+  const namedFeeds =
+    named === null ? null : feedsFor([], job.stock.material, named.tool, jobMachine(job), undefined);
   for (const { row, cutters } of unreachable) {
     const item = (job.vectors ?? []).find((v) => v.id === row.itemId);
     if (item) item.enabled = false;
+    if (
+      namedKey !== null &&
+      namedFeeds !== null &&
+      !namedFeeds.ok &&
+      namedFeeds.reason.startsWith('no cutting parameters')
+    ) {
+      console.log(
+        `  dropped    ${row.name} (${row.itemId}): the cutter this run names (${namedKey}) has no ` +
+          `feeds row for ${job.stock.material} — ${namedFeeds.reason} So none of the ${cutters} ` +
+          `cutters that do have parameters reaches any of its ${row.glyphArea.toFixed(2)} mm². It ` +
+          'stays in the job, turned off, and the run sheet carries the number.',
+      );
+      continue;
+    }
     console.log(
       `  dropped    ${row.name} (${row.itemId}): none of the ${cutters} measured cutters reaches any ` +
         `of its ${row.glyphArea.toFixed(2)} mm² — the strokes are finer than the smallest bit on the ` +
