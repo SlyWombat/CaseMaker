@@ -25,22 +25,15 @@
  * so in words ("reserved by the package of 14:02, now stale; the blank is still held").
  */
 
-import type { EngraveJob, JobSetup } from '@/types/engraveJob';
+import type { EngraveJob, FrozenPackage, FrozenProgram } from '@/types/engraveJob';
 import { jobSetups } from './jobSetup';
 import { programHash } from '@/engine/cnc/programHash';
 
-/** One frozen program: the text, its FNV key, and its frame file's text and key. */
-export interface FrozenProgram {
-  setupIndex: number;
-  setupId: string;
-  toolKey: string;
-  nc: string;
-  /** FNV of `nc` — exactly `EngraveProgram.programHash`. */
-  hash: string;
-  frameNc: string | null;
-  /** FNV of `frameNc`, or null with it. */
-  frameHash: string | null;
-}
+/**
+ * The document's own types (#425): the package block lives in `EngraveJob.package`, so the types
+ * are declared beside it and re-exported here, where every existing caller imports them.
+ */
+export type { FrozenPackage, FrozenProgram } from '@/types/engraveJob';
 
 /** What a freeze needs from a generated program — `EngraveProgram` satisfies it structurally. */
 export interface PackageProgramInput {
@@ -50,22 +43,6 @@ export interface PackageProgramInput {
   nc: string;
   frameNc: string | null;
   programHash: string;
-}
-
-export interface FrozenPackage {
-  /** The job whose programmes this freezes — a reservation is keyed to the same id. */
-  jobId: string;
-  /** ISO 8601, for the sentence the Cut screen shows ("the package of 14:02"). */
-  frozenAt: string;
-  /** FNV over the job's fingerprint and the programs' keys. Decision 3's package hash. */
-  hash: string;
-  /** FNV over the job's data at freeze time; `packageStaleness` compares against the job now. */
-  jobHash: string;
-  programs: FrozenProgram[];
-  /** The setups as frozen: the stored record, or the derived single setup. */
-  setups: JobSetup[];
-  /** The shelf entry this freeze reserved, or null when the job's stock is not on the shelf. */
-  stockEntryId: string | null;
 }
 
 /**
@@ -84,9 +61,34 @@ export function canonicalJson(value: unknown): string {
   return `{${entries.map(([k, v]) => `${JSON.stringify(k)}:${canonicalJson(v)}`).join(',')}}`;
 }
 
-/** FNV over the job's whole data — name, stock, items, setups, margins, cutter, facing. */
+/**
+ * The part of the document a program depends on (#425): everything except the package block,
+ * the run log, and the source files' embedded bytes.
+ *
+ * The exclusions are what make the block SAFE to store inside the job it describes. A naive
+ * fingerprint of the whole document would change the moment the package was written into it, so
+ * the freeze would stale itself; appending a run log would stale it again. The embedded bytes are
+ * derived provenance, not a program input — their `sha256` is kept, so a CHANGED source still
+ * moves the fingerprint while embedding the same file later does not.
+ */
+function fingerprintView(job: EngraveJob): unknown {
+  const view: Record<string, unknown> = { ...job };
+  delete view.package;
+  delete view.runLog;
+  const sourceFiles = view.sourceFiles;
+  if (Array.isArray(sourceFiles)) {
+    view.sourceFiles = sourceFiles.map((source: { embedded?: unknown } & Record<string, unknown>) => {
+      const withoutBytes: Record<string, unknown> = { ...source };
+      delete withoutBytes.embedded;
+      return withoutBytes;
+    });
+  }
+  return view;
+}
+
+/** FNV over the job's program-relevant data — name, stock, items, setups, margins, cutter, facing. */
 export function jobFingerprint(job: EngraveJob): string {
-  return programHash(canonicalJson(job));
+  return programHash(canonicalJson(fingerprintView(job)));
 }
 
 /** Why a freeze was refused, or the package it made. */

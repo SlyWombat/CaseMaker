@@ -251,9 +251,9 @@ describe('panel defaults and the new-job seam (#213)', () => {
   });
 });
 
-describe('EngraveJob schema migration (#213)', () => {  it('the default job is version 2 with no sacrificial material', () => {
+describe('EngraveJob schema migration (#213)', () => {  it('the default job is version 3 with no sacrificial material', () => {
     const job = defaultEngraveJob();
-    expect(job.schemaVersion).toBe(2);
+    expect(job.schemaVersion).toBe(3);
     expect(job.sacrificial).toEqual(noneSacrificial());
     expect(job.breakthrough).toBe(DEFAULT_BREAKTHROUGH);
   });
@@ -267,7 +267,7 @@ describe('EngraveJob schema migration (#213)', () => {  it('the default job is v
     expect(parsed.job).toEqual(job);
   });
 
-  it('loads a version-1 job as version 2 with no sacrificial material', () => {
+  it('loads a version-1 job as version 3 with no sacrificial material', () => {
     const v2 = defaultEngraveJob();
     const v1 = { ...v2, schemaVersion: 1 } as Record<string, unknown>;
     delete v1.sacrificial;
@@ -276,7 +276,7 @@ describe('EngraveJob schema migration (#213)', () => {  it('the default job is v
     const parsed = parseEngraveJob(v1);
     expect(parsed.ok).toBe(true);
     if (!parsed.ok) return;
-    expect(parsed.job.schemaVersion).toBe(2);
+    expect(parsed.job.schemaVersion).toBe(3);
     expect(parsed.job.sacrificial).toEqual(noneSacrificial());
     expect(parsed.job.breakthrough).toBe(DEFAULT_BREAKTHROUGH);
   });

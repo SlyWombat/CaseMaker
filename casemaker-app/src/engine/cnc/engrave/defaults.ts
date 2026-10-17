@@ -89,7 +89,7 @@ export function defaultEngraveJob(
   margins: MarginSettings = MARGIN_DEFAULTS,
 ): EngraveJob {
   return {
-    schemaVersion: 2,
+    schemaVersion: 3,
     // #419 — the job's own identity, minted here so a fresh job is a complete document rather than
     // one whose id appears only after a parse. Like the label ids below it, a copy gets its own id.
     id: newId('job'),

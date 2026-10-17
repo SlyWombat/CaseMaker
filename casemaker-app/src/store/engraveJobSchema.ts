@@ -674,6 +674,68 @@ const jobSetupSchema = z.object({
     .optional(),
 });
 
+/** A v3 source record (#425 §6): the file's bytes, or its name and SHA-256 when it is too large. */
+const jobSourceSchema = z
+  .object({
+    sha256: z.string().regex(/^[0-9a-f]{64}$/, 'a lowercase SHA-256 (64 hex characters)'),
+    kind: z.enum(['svg', 'dxf', 'image', '3mf', 'font']),
+    name: z.string().min(1),
+    embedded: z
+      .object({
+        encoding: z.literal('base64'),
+        data: z.string(),
+      })
+      .strict()
+      .nullable(),
+    size: z.number().int().nonnegative().nullable(),
+    path: z.string().nullable(),
+  })
+  .strict();
+
+/** One frozen program in the package block (#419 §4, #425). */
+const frozenProgramSchema = z
+  .object({
+    setupIndex: z.number().int().nonnegative(),
+    setupId: z.string().min(1),
+    toolKey: z.string().min(1),
+    nc: z.string(),
+    hash: z.string().min(1),
+    frameNc: z.string().nullable(),
+    frameHash: z.string().nullable(),
+  })
+  .strict();
+
+/**
+ * The package block Cut freezes (#419 §4, R8). Strict: the block is ours and a key this build does
+ * not name is not a field it can validate, so it is refused with its path rather than stripped.
+ * The integrity of the hashes is checked when a document is OPENED (`package.ts`), not here — a
+ * bad hash is a reason to refuse the package, never a reason a job file will not load.
+ */
+const frozenPackageSchema = z
+  .object({
+    jobId: z.string().min(1),
+    frozenAt: z.string().min(1),
+    hash: z.string().min(1),
+    jobHash: z.string().min(1),
+    programs: z.array(frozenProgramSchema).min(1),
+    setups: z.array(jobSetupSchema),
+    stockEntryId: z.string().nullable(),
+  })
+  .strict();
+
+/** One program's outcome in the document's run log (#425 §6). */
+const jobRunLogEntrySchema = z
+  .object({
+    programHash: z.string().min(1),
+    setupIndex: z.number().int().nonnegative(),
+    setupId: z.string().min(1),
+    toolKey: z.string().min(1),
+    at: z.string().min(1),
+    outcome: z.enum(['finished', 'stopped', 'failed']),
+    ncHash: z.string().optional(),
+  })
+  .strict();
+
 const jobSourcesSchema = z.object({
   stock: z
     .object({
@@ -810,30 +872,76 @@ const engraveJobV2Schema = engraveJobV1Schema.extend({
   setups: z.array(jobSetupSchema).optional(),
 });
 
+/**
+ * Version 3 (#425): the v2 document plus the three blocks Save/Open owns — the files it was made
+ * from, the package Cut froze, and what has been run. Nothing in v2 is renamed or retyped, so a
+ * v2 document is a v3 document with one literal changed and three keys absent; the byte-identical
+ * `.nc` rule follows from that and not from a migration that rewrites fields.
+ *
+ * The ROOT is passthrough: an unknown top-level key a same-version build wrote survives an
+ * open/save round trip, and is included in the package fingerprint (canonical JSON) so a package
+ * is never judged against a document that lost a field. The three owned blocks above are strict
+ * instead — an unknown key inside them is refused by path, never silently dropped.
+ *
+ * The embedded-file block is `sourceFiles`, NOT `sources`: `sources` has been the per-field
+ * provenance map since #246/#254 (`EngraveJobSources`), and every v2 key carries forward
+ * unchanged. Two different things both called "sources" in one document would invite exactly the
+ * wrong read.
+ */
+const engraveJobV3Schema = engraveJobV2Schema
+  .extend({
+    schemaVersion: z.literal(3),
+    sourceFiles: z.array(jobSourceSchema).optional(),
+    package: frozenPackageSchema.optional(),
+    runLog: z.array(jobRunLogEntrySchema).optional(),
+  })
+  .passthrough();
+
+/** The version this build writes. A higher literal is refused by name, never parsed. */
+export const CURRENT_JOB_SCHEMA_VERSION = 3;
+
+/** The sentence an Open surface shows for a document written by a newer build. */
+export function newerJobVersionMessage(version: number): string {
+  return `This job file was written by a newer version of Case Maker (schema version ${version}). Update the app to open it.`;
+}
+
+type ParsedJobVersion = z.output<
+  typeof engraveJobV1Schema | typeof engraveJobV2Schema | typeof engraveJobV3Schema
+>;
+
+/** The v1 and v2 transforms, applied to a document that already parsed against its own branch. */
+function migrateParsedJob(job: ParsedJobVersion): EngraveJob {
+  if (job.schemaVersion === 1) {
+    return {
+      ...job,
+      // The v1 transform's work is unchanged; the v3 stamp is the one addition (#425). A v1 job
+      // generates exactly the same program it did before the bump.
+      schemaVersion: 3,
+      // …and its own id (#419): v1 predates the field, and the v2 default above is not reached
+      // by a document that parses against this branch, so it is minted here.
+      id: newId('job'),
+      // An old job loads with no sacrificial material (#213): the default is none.
+      sacrificial: noneSacrificial(),
+      breakthrough: DEFAULT_BREAKTHROUGH,
+      // …and the jaw clearance that was the only number the check knew (#362): a v1 job is a
+      // v1 job, and 1.0 mm is what it was judged by.
+      jawClearance: DEFAULT_JAW_CLEARANCE_MM,
+      // …and no shapes (#214): every old label stays a label, so a version-1 job loads and
+      // cuts byte-identically.
+      shapes: [],
+      // …and no combined shapes (#215): the optional key is simply absent, so a v1 job
+      // round-trips byte-for-byte.
+    };
+  }
+  // v2 → v3 (#425): the literal and nothing else. `sources`/`package`/`runLog` stay ABSENT, not
+  // null and not empty, so a migrated document keeps the byte-for-byte rule every optional key
+  // follows. A v3 document passes through as parsed.
+  return job.schemaVersion === 2 ? { ...job, schemaVersion: 3 } : job;
+}
+
 export const engraveJobSchema = z
-  .union([engraveJobV1Schema, engraveJobV2Schema])
-  .transform((job): EngraveJob =>
-    job.schemaVersion === 1
-      ? {
-          ...job,
-          schemaVersion: 2,
-          // …and its own id (#419): v1 predates the field, and the v2 default above is not reached
-          // by a document that parses against this branch, so it is minted here.
-          id: newId('job'),
-          // An old job loads with no sacrificial material (#213): the default is none.
-          sacrificial: noneSacrificial(),
-          breakthrough: DEFAULT_BREAKTHROUGH,
-          // …and the jaw clearance that was the only number the check knew (#362): a v1 job is a
-          // v1 job, and 1.0 mm is what it was judged by.
-          jawClearance: DEFAULT_JAW_CLEARANCE_MM,
-          // …and no shapes (#214): every old label stays a label, so a version-1 job loads and
-          // cuts byte-identically.
-          shapes: [],
-          // …and no combined shapes (#215): the optional key is simply absent, so a v1 job
-          // round-trips byte-for-byte.
-        }
-      : job,
-  );
+  .union([engraveJobV1Schema, engraveJobV2Schema, engraveJobV3Schema])
+  .transform(migrateParsedJob);
 
 export type ParseEngraveJobResult =
   | { ok: true; job: EngraveJob }
@@ -854,12 +962,52 @@ function formatPath(path: readonly PropertyKey[]): string {
 
 /** Validate an unknown payload as an `EngraveJob`, collecting every issue as a readable line. */
 export function parseEngraveJob(json: unknown): ParseEngraveJobResult {
-  const result = engraveJobSchema.safeParse(json);
-  if (result.success) return { ok: true, job: result.data };
+  // A newer build's document is refused by NAME, before the union reduces it to "invalid literal".
+  // The Open surface shows `newerJobVersionMessage`; hydration parks the payload and keeps the
+  // sentence in the error list. Never parse a version this build does not know (#425).
+  const rawVersion =
+    json !== null && typeof json === 'object' && !Array.isArray(json)
+      ? (json as { schemaVersion?: unknown }).schemaVersion
+      : undefined;
+  if (
+    typeof rawVersion === 'number' &&
+    Number.isFinite(rawVersion) &&
+    rawVersion > CURRENT_JOB_SCHEMA_VERSION
+  ) {
+    return { ok: false, errors: [newerJobVersionMessage(rawVersion)] };
+  }
+  // Parse the branch the document's own literal selects, ONCE, and migrate it. A union is not used
+  // here for two reasons (#425): it reports every branch's failure as "<root>: Invalid input",
+  // which names nothing, and — before short-circuiting — it runs the earlier branches' defaults.
+  // A v3 document that reached the v3 branch after the v2 branch had already tried it would mint
+  // a seeded setup id twice. A document with no literal is read as the current version: that is
+  // what a hand-edited or half-written file is trying to be.
+  const branch =
+    rawVersion === 1 ? engraveJobV1Schema : rawVersion === 2 ? engraveJobV2Schema : engraveJobV3Schema;
+  const result = branch.safeParse(json);
+  if (result.success) return { ok: true, job: migrateParsedJob(result.data) };
   return {
     ok: false,
-    errors: result.error.issues.map((issue) => `${formatPath(issue.path)}: ${issue.message}`),
+    errors: result.error.issues.flatMap(formatIssue),
   };
+}
+
+/**
+ * One zod issue as the line a person reads. An `unrecognized_keys` issue on a strict object points
+ * at the OBJECT (`package`) and names the key only in its message; the key is the field that has
+ * to be fixed, so it is spliced into the path (`package.futureVerdict`).
+ */
+function formatIssue(issue: {
+  path: readonly PropertyKey[];
+  message: string;
+  code?: string;
+  keys?: readonly string[];
+}): string[] {
+  if (issue.code === 'unrecognized_keys' && issue.keys !== undefined) {
+    const base = formatPath(issue.path);
+    return issue.keys.map((key) => `${base === '<root>' ? key : `${base}.${key}`}: Unrecognized key`);
+  }
+  return [`${formatPath(issue.path)}: ${issue.message}`];
 }
 
 export { STOCK_LIMITS };

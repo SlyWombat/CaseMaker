@@ -143,7 +143,19 @@ export type KeepOutPatch = Partial<Omit<EngraveKeepOutRect, 'kind'>> &
   Partial<Omit<EngraveKeepOutSlot, 'kind'>> &
   Partial<Omit<EngraveKeepOutPolygon, 'kind'>>;
 
-export const ENGRAVE_JOB_KEY = 'casemaker.engraveJob.v1';
+/**
+ * The v3 document's autosave slot (#425). A v3 document is full of fields a v2 build does not
+ * know, and zod strips what it does not name — so the new build writes a NEW key rather than
+ * overwriting the one an older build reads. An older build therefore keeps its own v2 copy, and
+ * this build keeps its v3 one; neither can mistake the other's payload for its own.
+ */
+export const ENGRAVE_JOB_KEY = 'casemaker.engraveJob.v3';
+/**
+ * Where every v1/v2 build wrote the job. Read once on an upgrade — and only when the v3 key is
+ * empty — so the person's current job survives the version bump. Never written and never removed:
+ * it is the downgrade copy.
+ */
+export const ENGRAVE_JOB_LEGACY_KEY = 'casemaker.engraveJob.v1';
 /** Where a payload that failed validation is parked so it is not silently lost. */
 export const ENGRAVE_JOB_REJECTED_KEY = `${ENGRAVE_JOB_KEY}.rejected`;
 
@@ -174,8 +186,16 @@ function newDefaultJob(): EngraveJob {
 function loadJob(): EngraveJob {
   if (typeof localStorage === 'undefined') return newDefaultJob();
   let raw: string | null;
+  let legacy = false;
   try {
     raw = localStorage.getItem(ENGRAVE_JOB_KEY);
+    if (raw === null) {
+      // One-time upgrade read (#425): a v1 or v2 job lives under the old key. It is parsed through
+      // the same schema (migrating to v3) and then written to the v3 slot; the old payload is left
+      // where it is, so an older build can still open the job it wrote.
+      raw = localStorage.getItem(ENGRAVE_JOB_LEGACY_KEY);
+      legacy = raw !== null;
+    }
   } catch {
     return newDefaultJob();
   }
@@ -189,7 +209,10 @@ function loadJob(): EngraveJob {
   } catch {
     parsed = { ok: false, errors: ['stored payload is not valid JSON'] };
   }
-  if (parsed.ok) return parsed.job;
+  if (parsed.ok) {
+    if (legacy) persist(parsed.job);
+    return parsed.job;
+  }
 
   // Fall back to the default, but keep the bad payload under `.rejected` so a hand-edited
   // file or a newer-minor job is recoverable rather than gone.

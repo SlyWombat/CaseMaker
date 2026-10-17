@@ -189,7 +189,7 @@ describe('shape schema bounds (#214)', () => {
     const parsed = parseEngraveJob(v1);
     expect(parsed.ok).toBe(true);
     if (!parsed.ok) return;
-    expect(parsed.job.schemaVersion).toBe(2);
+    expect(parsed.job.schemaVersion).toBe(3);
     expect(parsed.job.labels).toEqual(v2.labels);
     expect(parsed.job.shapes).toEqual([]);
   });

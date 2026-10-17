@@ -642,7 +642,7 @@ describe('EngraveJob schema — #205’s cutOverride', () => {
     expect(result.job.cutOverride).toBeUndefined();
   });
 
-  it('stamps a version-1 job to v2 with no cut override (#213’s transform)', () => {
+  it('stamps a version-1 job to v3 with no cut override (#213’s transform, #425’s stamp)', () => {
     const v2 = defaultEngraveJob();
     const v1: Record<string, unknown> = { ...v2, schemaVersion: 1 };
     delete v1.sacrificial;
@@ -651,7 +651,7 @@ describe('EngraveJob schema — #205’s cutOverride', () => {
     const result = parseEngraveJob(JSON.parse(JSON.stringify(v1)) as unknown);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.job.schemaVersion).toBe(2);
+    expect(result.job.schemaVersion).toBe(3);
     expect(result.job.sacrificial.under).toBeNull();
     expect(result.job.breakthrough).toBeGreaterThan(0);
     // A field this version added loads as "no override", never as a partial v1-shaped object.

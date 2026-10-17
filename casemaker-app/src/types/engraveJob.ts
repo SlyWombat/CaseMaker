@@ -794,8 +794,90 @@ export interface JobSetup {
   remount?: JobSetupRemount;
 }
 
+/**
+ * One frozen program (#419 §4, #425): the text, its FNV key, and its frame file's text and key.
+ *
+ * This lived in `engine/cnc/engrave/package.ts` until v3 put the package block in the job
+ * document: `EngraveJob.package` is typed with it, and the document's own types must not import
+ * the engine that hashes it. `package.ts` re-exports both names, so every existing import site is
+ * unchanged.
+ */
+export interface FrozenProgram {
+  setupIndex: number;
+  setupId: string;
+  toolKey: string;
+  nc: string;
+  /** FNV of `nc` — exactly `EngraveProgram.programHash`. */
+  hash: string;
+  frameNc: string | null;
+  /** FNV of `frameNc`, or null with it. */
+  frameHash: string | null;
+}
+
+/**
+ * What Cut froze around a job (#419 §4, #425) — now a block in the document rather than a
+ * localStorage copy (R8). The hashes are FNV (decision 3); `jobHash` is the fingerprint the
+ * staleness comparison reads, and `hash` is the package's own key.
+ */
+export interface FrozenPackage {
+  /** The job whose programmes this freezes — a reservation is keyed to the same id. */
+  jobId: string;
+  /** ISO 8601, for the sentence the Cut screen shows ("the package of 14:02"). */
+  frozenAt: string;
+  /** FNV over the job's fingerprint and the programs' keys. Decision 3's package hash. */
+  hash: string;
+  /** FNV over the job's program-relevant data at freeze time; staleness compares against the job now. */
+  jobHash: string;
+  programs: FrozenProgram[];
+  /** The setups as frozen: the stored record, or the derived single setup. */
+  setups: JobSetup[];
+  /** The shelf entry this freeze reserved, or null when the job's stock is not on the shelf. */
+  stockEntryId: string | null;
+}
+
+/**
+ * One file the job was made from (#425 §6): content-addressed by the SHA-256 of its raw bytes.
+ *
+ * The derived geometry is what the job cuts (`vectors[].contours`, the label layout, the stock's
+ * print facts), so a reload renders and generates without the file. These bytes are provenance
+ * and the source a re-import can prove itself against — embedded when the file is at most 4 MiB,
+ * otherwise named with its hash so a missing or changed file can be refused precisely.
+ */
+export interface JobSource {
+  /** Lowercase SHA-256 of the raw bytes; the record's identity, so identical files dedupe. */
+  sha256: string;
+  kind: 'svg' | 'dxf' | 'image' | '3mf' | 'font';
+  /** The file's own name (a 3MF's Title for a design), for a person. */
+  name: string;
+  /** The raw bytes, base64, when embedded. `null` for a file over the 4 MiB cap. */
+  embedded: { encoding: 'base64'; data: string } | null;
+  /** The file's size in bytes, when it is known. */
+  size: number | null;
+  /** A path when one is known (CLI/desktop); null in the browser, which never exposes one. */
+  path: string | null;
+}
+
+/**
+ * One program's outcome on this job (#425 §6), the document's run log. Keyed by the program's
+ * FNV `programHash` — the package's key and the machine record's key — so a re-freeze can tell
+ * which entries still describe the programs it froze. A `stopped` or `failed` program is not
+ * done: only `finished` lets a reopen resume at the next setup.
+ */
+export interface JobRunLogEntry {
+  /** FNV of the program text — the package's key and the machine record's key. */
+  programHash: string;
+  setupIndex: number;
+  setupId: string;
+  toolKey: string;
+  /** ISO 8601, when the outcome was known. */
+  at: string;
+  outcome: 'finished' | 'stopped' | 'failed';
+  /** The run record's `ncHash` (SHA-256, first 8), when the record was written. */
+  ncHash?: string;
+}
+
 export interface EngraveJob {
-  schemaVersion: 2;
+  schemaVersion: 3;
   /**
    * The job's own identity (#419): a stock reservation and `RunContext.jobId` are keyed to this,
    * and a job is renamed freely, so neither `name` nor `machineId` can serve as the key.
@@ -1005,6 +1087,28 @@ export interface EngraveJob {
    * when the job enters it; until then the job only names it.
    */
   stockEntry?: JobStockEntry;
+  /**
+   * The files this job was made from (#425 §6). OPTIONAL, and absent on every v2 document and on
+   * a job built only from typed items — which is what the byte-for-byte rule for those documents
+   * requires. Records are content-addressed, so the same file named twice appears once.
+   *
+   * Named `sourceFiles`, not `sources`: `sources` has been the per-field PROVENANCE map since
+   * #246/#254 (`EngraveJobSources`), and every v2 key carries forward unchanged. Two different
+   * things both called "sources" in one document would invite exactly the wrong read.
+   */
+  sourceFiles?: JobSource[];
+  /**
+   * What Cut froze at approval (#419 §4, R8) — the package block that replaces
+   * `engravePackageStore`'s localStorage copy. ABSENT until the first freeze; Save never creates
+   * one (freezing is Cut's gate, D-17).
+   */
+  package?: FrozenPackage;
+  /**
+   * What has been run of this job so far (#425 §6), one entry per program outcome. ABSENT until
+   * the first end of run. It is the job's own progress; the machine's `finishedPrograms` list
+   * remains the machine's record of what finished on it, and the two are not duplicates.
+   */
+  runLog?: JobRunLogEntry[];
 }
 
 /** The forms a job's stock can take (#418): the rectangular ones. A rod, tube or disc is refused. */

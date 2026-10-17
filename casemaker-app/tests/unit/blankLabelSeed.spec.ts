@@ -54,7 +54,7 @@ const backing = new Map<string, string>();
   },
 } as Storage;
 
-const KEY = 'casemaker.engraveJob.v1';
+const KEY = 'casemaker.engraveJob.v3';
 
 async function freshStore() {
   vi.resetModules();

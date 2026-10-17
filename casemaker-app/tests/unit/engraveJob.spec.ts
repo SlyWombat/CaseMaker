@@ -38,7 +38,7 @@ import { validateVise } from '@/engine/cnc/fixture';
 import { defaultBadgeParams } from '@/types/badge';
 import { Z1 } from '@/engine/cnc/machine';
 
-const KEY = 'casemaker.engraveJob.v1';
+const KEY = 'casemaker.engraveJob.v3';
 
 async function freshStore() {
   vi.resetModules();
@@ -83,14 +83,15 @@ describe('EngraveJob schema (#200)', () => {
       if (!kept.ok) return;
       expect(kept.job.id).toBe('job-stated');
 
-      // A v2 document written before #419: the v2 field's `.default` mints one.
-      const v2 = { ...raw };
+      // A v2 document written before #419: the v2 field's `.default` mints one, and the migration
+      // stamps v3 without changing anything else (#425).
+      const v2: Record<string, unknown> = { ...raw, schemaVersion: 2 };
       delete v2.id;
       setSeededIds(true);
       const minted = parseEngraveJob(v2);
       expect(minted.ok).toBe(true);
       if (!minted.ok) return;
-      expect(minted.job.schemaVersion).toBe(2);
+      expect(minted.job.schemaVersion).toBe(3);
       expect(minted.job.id).toBe('job-s000001');
 
       // A v1 document cannot reach that default (the v1 branch has no such key), so the transform
@@ -102,19 +103,21 @@ describe('EngraveJob schema (#200)', () => {
       const old = parseEngraveJob(v1);
       expect(old.ok).toBe(true);
       if (!old.ok) return;
-      expect(old.job.schemaVersion).toBe(2);
+      expect(old.job.schemaVersion).toBe(3);
       expect(old.job.id).toBe('job-s000001');
     } finally {
       setSeededIds(false);
     }
   });
 
-  it('strips an unknown extra key rather than rejecting the job', () => {
+  it('preserves an unknown TOP-LEVEL key rather than rejecting the job (#425)', () => {
     const job = defaultEngraveJob();
     const parsed = parseEngraveJob({ ...job, bogus: 123 });
     expect(parsed.ok).toBe(true);
     if (!parsed.ok) return;
-    expect('bogus' in parsed.job).toBe(false);
+    // v3's root is passthrough: a key a same-version build wrote survives an open/save round trip.
+    // The keys INSIDE the owned blocks are strict instead (jobFile.spec.ts).
+    expect((parsed.job as unknown as Record<string, unknown>).bogus).toBe(123);
   });
 
   it('keeps the #345 flatness, its provenance and the job’s margins through a round trip', () => {
@@ -1116,7 +1119,7 @@ describe('JobSetup (#419 J2)', () => {
     const parsed = parseEngraveJob(v1);
     expect(parsed.ok).toBe(true);
     if (!parsed.ok) return;
-    expect(parsed.job.schemaVersion).toBe(2);
+    expect(parsed.job.schemaVersion).toBe(3);
     expect('setups' in parsed.job).toBe(false);
   });
 

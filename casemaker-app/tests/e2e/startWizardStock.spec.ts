@@ -64,7 +64,7 @@ test('new project → shelf stock → mount → empty design, the stock drawn', 
   await expect(page.getByTestId('engrave-stock-length')).toHaveValue('120');
   await expect(page.getByTestId('engrave-stock-width')).toHaveValue('60');
   await expect(page.getByTestId('engrave-stock-thickness')).toHaveValue('8');
-  const job = await page.evaluate(() => JSON.parse(localStorage.getItem('casemaker.engraveJob.v1') ?? 'null'));
+  const job = await page.evaluate(() => JSON.parse(localStorage.getItem('casemaker.engraveJob.v3') ?? 'null'));
   expect(job.labels).toEqual([]);
   expect(job.stockEntry).toMatchObject({ kind: 'shelf', shelfId: 'stock-long1' });
 
