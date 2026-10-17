@@ -257,6 +257,228 @@
       "addedAt": "2026-10-14T09:00:00.000Z"
     }
   ],
+  "feeds": [
+    {
+      "id": "feed-softwood-flat-0.8-1.6",
+      "material": "softwood",
+      "edge": null,
+      "minDiameter": 0.8,
+      "maxDiameter": 1.6,
+      "params": {
+        "rpm": 12000,
+        "feed": 500,
+        "plungeFeed": 200,
+        "stepDown": 0.5,
+        "stepOverFraction": 0.45,
+        "peckFraction": 1,
+        "air": true
+      },
+      "source": "seeded",
+      "setAt": null,
+      "note": null,
+      "provenance": "Starting value. rpm/feed/plunge are what Makera Studio emits for the Z1 (TopClamp.nc: S12000, F500, F200); step-down is a conservative guess for a 150 W spindle. Replace from #209."
+    },
+    {
+      "id": "feed-softwood-flat-1.6-3.2",
+      "material": "softwood",
+      "edge": null,
+      "minDiameter": 1.6,
+      "maxDiameter": 3.2,
+      "params": {
+        "rpm": 12000,
+        "feed": 500,
+        "plungeFeed": 200,
+        "stepDown": 1,
+        "stepOverFraction": 0.45,
+        "peckFraction": 1,
+        "air": true
+      },
+      "source": "seeded",
+      "setAt": null,
+      "note": null,
+      "provenance": "Starting value. rpm/feed/plunge are what Makera Studio emits for the Z1 (TopClamp.nc: S12000, F500, F200); step-down is a conservative guess for a 150 W spindle. Replace from #209."
+    },
+    {
+      "id": "feed-hardwood-flat-0.8-1.6",
+      "material": "hardwood",
+      "edge": null,
+      "minDiameter": 0.8,
+      "maxDiameter": 1.6,
+      "params": {
+        "rpm": 12000,
+        "feed": 400,
+        "plungeFeed": 150,
+        "stepDown": 0.3,
+        "stepOverFraction": 0.45,
+        "peckFraction": 1,
+        "air": true
+      },
+      "source": "seeded",
+      "setAt": null,
+      "note": null,
+      "provenance": "Starting value. rpm/feed/plunge are what Makera Studio emits for the Z1 (TopClamp.nc: S12000, F500, F200); step-down is a conservative guess for a 150 W spindle. Replace from #209."
+    },
+    {
+      "id": "feed-hardwood-flat-1.6-3.2",
+      "material": "hardwood",
+      "edge": null,
+      "minDiameter": 1.6,
+      "maxDiameter": 3.2,
+      "params": {
+        "rpm": 12000,
+        "feed": 400,
+        "plungeFeed": 150,
+        "stepDown": 0.6,
+        "stepOverFraction": 0.45,
+        "peckFraction": 1,
+        "air": true
+      },
+      "source": "seeded",
+      "setAt": null,
+      "note": null,
+      "provenance": "Starting value. rpm/feed/plunge are what Makera Studio emits for the Z1 (TopClamp.nc: S12000, F500, F200); step-down is a conservative guess for a 150 W spindle. Replace from #209."
+    },
+    {
+      "id": "feed-mdf-flat-0.8-1.6",
+      "material": "mdf",
+      "edge": null,
+      "minDiameter": 0.8,
+      "maxDiameter": 1.6,
+      "params": {
+        "rpm": 12000,
+        "feed": 500,
+        "plungeFeed": 200,
+        "stepDown": 0.5,
+        "stepOverFraction": 0.45,
+        "peckFraction": 1,
+        "air": true
+      },
+      "source": "seeded",
+      "setAt": null,
+      "note": null,
+      "provenance": "Starting value. rpm/feed/plunge are what Makera Studio emits for the Z1 (TopClamp.nc: S12000, F500, F200); step-down is a conservative guess for a 150 W spindle. Replace from #209."
+    },
+    {
+      "id": "feed-mdf-flat-1.6-3.2",
+      "material": "mdf",
+      "edge": null,
+      "minDiameter": 1.6,
+      "maxDiameter": 3.2,
+      "params": {
+        "rpm": 12000,
+        "feed": 500,
+        "plungeFeed": 200,
+        "stepDown": 1,
+        "stepOverFraction": 0.45,
+        "peckFraction": 1,
+        "air": true
+      },
+      "source": "seeded",
+      "setAt": null,
+      "note": null,
+      "provenance": "Starting value. rpm/feed/plunge are what Makera Studio emits for the Z1 (TopClamp.nc: S12000, F500, F200); step-down is a conservative guess for a 150 W spindle. Replace from #209."
+    },
+    {
+      "id": "feed-pla-flat-0.8-1.6",
+      "material": "pla",
+      "edge": null,
+      "minDiameter": 0.8,
+      "maxDiameter": 1.6,
+      "params": {
+        "rpm": 12000,
+        "feed": 500,
+        "plungeFeed": 200,
+        "stepDown": 0.3,
+        "stepOverFraction": 0.45,
+        "peckFraction": 1,
+        "air": true
+      },
+      "source": "seeded",
+      "setAt": null,
+      "note": null,
+      "provenance": "Starting value. rpm/feed/plunge are what Makera Studio emits for the Z1 (TopClamp.nc: S12000, F500, F200); step-down is a conservative guess for a 150 W spindle. Replace from #209."
+    },
+    {
+      "id": "feed-pla-flat-1.6-3.2",
+      "material": "pla",
+      "edge": null,
+      "minDiameter": 1.6,
+      "maxDiameter": 3.2,
+      "params": {
+        "rpm": 12000,
+        "feed": 500,
+        "plungeFeed": 200,
+        "stepDown": 0.5,
+        "stepOverFraction": 0.45,
+        "peckFraction": 1,
+        "air": true
+      },
+      "source": "seeded",
+      "setAt": null,
+      "note": null,
+      "provenance": "Starting value. rpm/feed/plunge are what Makera Studio emits for the Z1 (TopClamp.nc: S12000, F500, F200); step-down is a conservative guess for a 150 W spindle. Replace from #209."
+    },
+    {
+      "id": "feed-pla-flat-0.5-0.8",
+      "material": "pla",
+      "edge": null,
+      "minDiameter": 0.5,
+      "maxDiameter": 0.8,
+      "params": {
+        "rpm": 12000,
+        "feed": 500,
+        "plungeFeed": 200,
+        "stepDown": 0.2,
+        "stepOverFraction": 0.4,
+        "peckFraction": 1,
+        "air": true
+      },
+      "source": "seeded",
+      "setAt": null,
+      "note": "The FINEST flat row (#410), for the 0.6 mm corn cutter; appended so a 0.8 mm cutter still takes the 0.8-1.6 mm row.",
+      "provenance": "PLACEHOLDER, nothing measured: the 0.8-1.6 mm row's own starting values (S12000, F500, F200 — the Z1's emitted defaults) with the step-down and step-over cut back for a 0.6 mm cutter, which is the least stiff bit the bench owns. No vendor row for this diameter. #284 measures it."
+    },
+    {
+      "id": "feed-pla-v-0.3-0.5",
+      "material": "pla",
+      "edge": "v",
+      "minDiameter": 0.3,
+      "maxDiameter": 0.5,
+      "params": {
+        "rpm": 12000,
+        "feed": 500,
+        "plungeFeed": 200,
+        "stepDown": 1,
+        "stepOverFraction": 0.6,
+        "peckFraction": 1,
+        "air": true
+      },
+      "source": "seeded",
+      "setAt": null,
+      "note": null,
+      "provenance": "From the 2026-10-15 bench cut (#185, `docs/bench/185-v-groove.nc`): the hand file's own numbers — S12000, F500 along, F200 plunge, one pass to depth — cut a clean V groove in PLA (0.836 mm opening at 1.0 mm deep, the 30° × 0.3 mm bit). Starting values, not a coupon measurement: #284 is what measures this row."
+    },
+    {
+      "id": "feed-petg-v-0.3-0.5",
+      "material": "petg",
+      "edge": "v",
+      "minDiameter": 0.3,
+      "maxDiameter": 0.5,
+      "params": {
+        "rpm": 12000,
+        "feed": 500,
+        "plungeFeed": 200,
+        "stepDown": 1,
+        "stepOverFraction": 0.6,
+        "peckFraction": 1,
+        "air": true
+      },
+      "source": "seeded",
+      "setAt": null,
+      "note": null,
+      "provenance": "OBSERVED 2026-10-17, not measured: the 30° × 0.3 mm V-bit ran PETG at S12000, F500 along, F200 plunge for 856 s without melting. The numbers are the PLA V row's own starting values; no coupon measured PETG, and this row is a chosen placeholder for the two-colour blank. #284 is what settles it."
+    }
+  ],
   "defaults": {
     "power.onWaitSeconds": {
       "value": 180.0,

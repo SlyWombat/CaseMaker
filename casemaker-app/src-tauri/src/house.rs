@@ -1925,6 +1925,10 @@ impl HouseStore {
                 })?;
                 // A location exported before the shop defaults gets the seeds, as one read at load does.
                 crate::defaults::add_missing_seeds(&mut doc.defaults);
+                // The feeds table follows the same rule (#450 slice 5): a location exported before
+                // the table existed is imported with the eleven starting rows, not with a hole every
+                // job would fall back to the compiled literal through.
+                crate::feeds::add_missing_seeds(&mut doc.feeds);
                 doc.validate()?;
                 // An import is a WRITE: `seeded` is held to the write rule here too (#416/#417
                 // re-review) — the app's own starting value, exactly, or the entry is `chosen`.
@@ -3533,26 +3537,28 @@ mod tests {
         let original: LocationDoc = serde_json::from_slice(&location_fixture()).unwrap();
         let back: LocationDoc = serde_json::from_slice(&exported).unwrap();
         assert_eq!(back, original, "export is the document that was imported");
-        // #450 slice 2. The fixture is held by another workstream and carries no `feeds`; an empty
-        // table writes no key, so importing and exporting it adds nothing at all. Raw-file equality
-        // is not the property to assert: the held file is hand-formatted and is not what serde
-        // writes (its `calibration` members are in a different order, among other things). The
-        // evidence is that the document TYPE adds nothing — the export is byte-for-byte the
-        // fixture's own parsed value re-serialised, and no `"feeds"` key appears in it. Struct
-        // equality alone would not catch an emitted `"feeds": []`.
-        let fixture = location_fixture();
+        // #450 slice 5. The fixture carries the feeds table — the eleven starting rows, both V
+        // rows included — so the document BOTH sides read states where every number came from. Raw-file
+        // equality is not the property to assert: the fixture is hand-formatted and is not what
+        // serde writes (its `calibration` members are in a different order, among other things).
+        // The evidence is that the rows are the seeds and the export is byte-for-byte the
+        // fixture's own parsed value re-serialised, feeds included.
+        use crate::feeds::{FeedEdge, FeedSource};
+        assert_eq!(
+            back.feeds,
+            crate::feeds::seeded_rows(),
+            "the fixture carries every seeded row, not a subset"
+        );
+        assert_eq!(back.feeds.len(), 11);
+        assert!(back.feeds.iter().all(|r| r.source == FeedSource::Seeded));
         assert!(
-            !String::from_utf8_lossy(&fixture).contains("\"feeds\""),
-            "the held fixture has no feeds section"
+            back.feeds.iter().any(|r| r.edge == Some(FeedEdge::V)),
+            "the V row is a location row too"
         );
         assert_eq!(
             serde_json::to_vec_pretty(&original).unwrap(),
             exported,
-            "an empty feeds table adds nothing to the exported document"
-        );
-        assert!(
-            !String::from_utf8_lossy(&exported).contains("\"feeds\""),
-            "an empty feeds table writes no key"
+            "the exported document is the imported one, feeds included"
         );
         // The machine's sections are kept verbatim — the client is their shape authority.
         assert_eq!(
@@ -3567,6 +3573,20 @@ mod tests {
         assert_eq!(fresh.tools().await.unwrap().0, store.tools().await.unwrap().0);
         assert_eq!(fresh.inventory().await.unwrap().0, store.inventory().await.unwrap().0);
         assert_eq!(fresh.location().await.unwrap(), store.location().await.unwrap());
+    }
+
+    /// #450 slice 5: a location exported before the feeds table existed has no `feeds` key.
+    /// Importing it seeds the table, exactly as one read at load does, so the next export carries
+    /// the eleven starting rows rather than a hole every job would fall back to the compiled literal
+    /// through.
+    #[tokio::test]
+    async fn an_import_from_before_the_feeds_table_gets_the_seeded_rows() {
+        let (_dir, store) = store();
+        let mut doc: serde_json::Value = serde_json::from_slice(&location_fixture()).unwrap();
+        doc.as_object_mut().unwrap().remove("feeds");
+        store.import(&serde_json::to_vec(&doc).unwrap()).await.unwrap();
+        let back: LocationDoc = serde_json::from_slice(&store.export().await.unwrap()).unwrap();
+        assert_eq!(back.feeds, crate::feeds::seeded_rows());
     }
 
     #[tokio::test]

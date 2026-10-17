@@ -2,7 +2,7 @@
 // The feeds table's transport and store (#450 slice 2), on the stock shelf's model (#413): the rows
 // the service accepts through the client schema, and the store's unguarded create / guarded edits
 // against a fake service that moves its `ETag` on every write. The specimen is `feed-table.json` —
-// the same one `feeds.rs` reads — because the held `location-doc.json` has no `feeds` section yet.
+// the same one `feeds.rs` reads — so the store is tested against the shared rows, not a second copy.
 
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';

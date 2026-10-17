@@ -197,9 +197,10 @@ pub struct LocationDoc {
     #[serde(default)]
     pub stock: Vec<StockItem>,
     /// The feeds table (#450): the cutting numbers for one (material, cutter edge, diameter band).
-    /// Its own endpoint, `ETag` and guarded writes. A fresh location holds the eleven seeded rows; the
-    /// table is OMITTED while empty, so a document written before the table existed (the shared
-    /// `location-doc.json`, held by another slice) round-trips without gaining a key.
+    /// Its own endpoint, `ETag` and guarded writes. A fresh location holds the eleven seeded rows
+    /// and #450 slice 5 put them in the shared `location-doc.json` too; the table is OMITTED while
+    /// empty, so a location written before the table existed round-trips without gaining a key
+    /// until a read or an import seeds it.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub feeds: Vec<FeedRow>,
     /// The shop's tunable defaults — thresholds, waits, chosen values — with provenance
@@ -416,9 +417,9 @@ mod tests {
 
     #[test]
     fn an_empty_feeds_table_says_nothing_about_itself() {
-        // #450 slice 2/3. An EMPTY table is the same document as an absent one, so the held
-        // `location-doc.json` (which has no `feeds`) gains no key through a round trip. Writing the
-        // key only when it holds a row is what buys that; removing every row must also stay legal.
+        // #450 slice 2/3. An EMPTY table is the same document as an absent one, so a location that
+        // has no `feeds` gains no key through a round trip. Writing the key only when it holds a
+        // row is what buys that; removing every row must also stay legal.
         let mut loc = LocationDoc::fresh();
         loc.feeds.clear();
         loc.validate().unwrap();

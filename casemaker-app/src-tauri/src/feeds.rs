@@ -43,9 +43,15 @@ const MAX_SENTENCE: usize = 400;
 /// V rows are the one hand-written bench file's own numbers (the PETG one adds the observed two-colour
 /// blank run) — each row's `provenance` says which.
 ///
-/// ONE SPECIMEN, TWO SIDES. `tests/unit/fixtures/feed-table.json`'s `good` list is the same rows, and
-/// `the_seed_rows_are_the_shared_specimens_good_rows` holds this file to it, so a value edited on one
-/// side cannot silently drift from the other.
+/// ONE SPECIMEN, TWO READERS. `tests/unit/fixtures/feed-table.json`'s `good` list is the same rows,
+/// the shared `tests/unit/fixtures/location-doc.json` carries them in its `feeds` section (#450
+/// slice 5), and `the_shared_specimen_is_the_shape_the_client_parses` holds this file to the
+/// specimen, so a value edited on one side cannot silently drift from the other.
+///
+/// THE MATERIAL WORD IS THE CLIENT'S VOCABULARY. The V rows are `pla` and `petg` because that is
+/// what the stock materials name today; J19 moves the PLA row to `plastic`, and when it lands this
+/// file, the feed specimen and the location fixture each change one `material` line — together, in
+/// that order.
 const SEED_ROWS_JSON: &str = include_str!("feed-seeds.json");
 
 /// What a fresh location starts with — and what an EMPTY table is filled from on load.

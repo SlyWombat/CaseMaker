@@ -41,6 +41,11 @@ describe('the location contract (#412)', () => {
     expect(m.fixtures?.vise?.source).toBe('measured');
     expect(m.calibration?.machineId).toBe('Z1');
     expect(m.margins?.source).toBe('user');
+    // #450 slice 5: the fixture carries the feeds table the service seeds, every row labelled
+    // seeded and the V row among them — not a separate specimen that could drift.
+    expect(loc.feeds).toHaveLength(11);
+    expect(loc.feeds.every((row) => row.source === 'seeded')).toBe(true);
+    expect(loc.feeds.some((row) => row.edge === 'v')).toBe(true);
   });
 
   it('holds each machine section to the strict parser the "my machine" import uses', () => {
