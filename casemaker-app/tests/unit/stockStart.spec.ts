@@ -131,10 +131,24 @@ describe('a typed piece, and putting it on the shelf', () => {
 
 describe('the facing default comes from the finish (decision Q6)', () => {
   it('rough or unknown → on; finished or printed → off', () => {
-    expect(facingDefault('rough').on).toBe(true);
-    expect(facingDefault('unknown').on).toBe(true);
-    expect(facingDefault('finished').on).toBe(false);
-    expect(facingDefault('printed').on).toBe(false);
+    expect(facingDefault('rough', 'softwood').on).toBe(true);
+    expect(facingDefault('unknown', 'aluminium-6061').on).toBe(true);
+    expect(facingDefault('finished', 'hardwood').on).toBe(false);
+    expect(facingDefault('printed', 'softwood').on).toBe(false);
+  });
+
+  // #474 — the maintainer, 2026-10-17: a flat cutter smears a thermoplastic top, so facing is for
+  // wood and metal only. The material refuses it whatever the finish says.
+  it('never offers facing on printed plastic, whatever the finish', () => {
+    for (const material of ['pla', 'petg', 'pa-gf'] as const) {
+      for (const finish of ['rough', 'unknown', 'finished', 'printed'] as const) {
+        const def = facingDefault(finish, material);
+        expect(def.on).toBe(false);
+        expect(def.reason).toBe(
+          'facing is not offered on printed plastic: a flat cutter smears a thermoplastic top',
+        );
+      }
+    }
   });
 });
 
@@ -167,21 +181,29 @@ describe('the facing choice a new job starts with (#432 slice 4)', () => {
   });
 
   it('seeds on exactly for rough and unknown, and off for finished and printed', () => {
-    expect(facingSeed('rough')).toEqual({ enabled: true, depth: 0.5 });
-    expect(facingSeed('unknown')).toEqual({ enabled: true, depth: 0.2 });
-    expect(facingSeed('finished')).toEqual({ enabled: false, depth: 0.2 });
-    expect(facingSeed('printed')).toEqual({ enabled: false, depth: 0.2 });
+    expect(facingSeed('rough', 'softwood')).toEqual({ enabled: true, depth: 0.5 });
+    expect(facingSeed('unknown', 'hardwood')).toEqual({ enabled: true, depth: 0.2 });
+    expect(facingSeed('finished', 'mdf')).toEqual({ enabled: false, depth: 0.2 });
+    expect(facingSeed('printed', 'softwood')).toEqual({ enabled: false, depth: 0.2 });
     // No finish at all is the unknown default, not an invented one.
-    expect(facingSeed(null)).toEqual({ enabled: true, depth: 0.2 });
+    expect(facingSeed(null, 'softwood')).toEqual({ enabled: true, depth: 0.2 });
+  });
+
+  // #474 — a PETG job starts off with no depth to fill in: the material is the refusal, not the
+  // finish, so the rough/unknown seeds never apply.
+  it('seeds a printed plastic off with no depth, whatever the finish', () => {
+    expect(facingSeed('rough', 'petg')).toEqual({ enabled: false, depth: 0 });
+    expect(facingSeed('printed', 'petg')).toEqual({ enabled: false, depth: 0 });
+    expect(facingSeed(null, 'pa-gf')).toEqual({ enabled: false, depth: 0 });
   });
 
   it('fills the depth from the shop’s own figures, and falls back to the labelled seeds', () => {
-    expect(facingSeed('rough', { rough: 0.8 })).toEqual({ enabled: true, depth: 0.8 });
+    expect(facingSeed('rough', 'softwood', { rough: 0.8 })).toEqual({ enabled: true, depth: 0.8 });
     expect(facingShopFrom(null)).toEqual({ rough: 0.5, unknown: 0.2, margin: 0.1 });
   });
 
   it('seeds a job that still passes the schema — the key is optional, the seed is complete', () => {
-    const job = { ...defaultEngraveJob(), facing: facingSeed('rough') };
+    const job = { ...defaultEngraveJob(), facing: facingSeed('rough', 'softwood') };
     const parsed = parseEngraveJob(JSON.parse(JSON.stringify(job)));
     expect(parsed.ok).toBe(true);
     expect(parsed.ok && parsed.job.facing).toEqual({ enabled: true, depth: 0.5 });

@@ -1275,6 +1275,32 @@ describe('runSheet — the facing phase (#432 slice 3)', () => {
     expect(steps[0]!.value).toBe('facing off');
   });
 
+  // #474 — facing is for wood and metal only. A plastic job's sheet says that rather than quoting a
+  // finish default, and a job that still carries a pass is called out instead of walked through.
+  it('says facing is not offered on printed plastic', () => {
+    const base = facingJob({ enabled: false, depth: 0 });
+    const job = { ...base, stock: { ...base.stock, material: 'petg' as const } };
+    const steps = section(buildRunSheet(job, generatedWithFacing(job), NO_SIM, NOW), 'facing').steps;
+    expect(steps).toHaveLength(1);
+    expect(steps[0]!.text).toContain(
+      'facing is not offered on printed plastic: a flat cutter smears a thermoplastic top',
+    );
+    expect(steps[0]!.value).toBe('facing off');
+  });
+
+  it('calls out a plastic job that still carries a facing pass, without sending anyone through it', () => {
+    const base = facingJob({ enabled: true, depth: 0.5 });
+    const job = { ...base, stock: { ...base.stock, material: 'pla' as const } };
+    const sheet = buildRunSheet(job, generatedWithFacing(job, { facingNc: 'x', facingCam: CAM }), NO_SIM, NOW);
+    const steps = section(sheet, 'facing').steps;
+    expect(steps).toHaveLength(1);
+    expect(steps[0]!.text).toContain('still has a 0.5 mm facing pass');
+    expect(steps[0]!.text).toContain('facing is not offered on printed plastic');
+    expect(steps[0]!.text).toContain('Turn facing off in the Engrave panel');
+    expect(steps[0]!.value).toBe('facing on, not offered');
+    expect(steps[0]!.bold).toBe(true);
+  });
+
   it('treats a zero depth as not facing, the way the plan does', () => {
     const job = facingJob({ enabled: true, depth: 0 });
     const sheet = buildRunSheet(job, generatedWithFacing(job), NO_SIM, NOW);

@@ -230,6 +230,32 @@ describe('the material-first start (#418)', () => {
     expect(useEngraveJobStore.getState().job.stockEntry).toMatchObject({ kind: 'made', shelfId: saved.id, form: 'block' });
   });
 
+  // #474 — the maintainer, 2026-10-17: facing plastic will never work. A PETG blank seeds off with
+  // no depth even when it says it is rough, and the wizard says why rather than staying silent.
+  it('a printed plastic seeds facing off with no depth, whatever the finish (#474)', async () => {
+    fakeShelf(SHELF);
+    await toStockStep();
+    chooseMaterial('petg');
+    fireEvent.click(screen.getByTestId('start-wizard-stock-door-make'));
+    fireEvent.change(screen.getByTestId('start-wizard-make-length'), { target: { value: '60' } });
+    fireEvent.change(screen.getByTestId('start-wizard-make-width'), { target: { value: '40' } });
+    fireEvent.change(screen.getByTestId('start-wizard-make-thickness'), { target: { value: '3' } });
+    fireEvent.change(screen.getByTestId('start-wizard-stock-finish'), { target: { value: 'rough' } });
+
+    const line = screen.getByTestId('start-wizard-stock-facing');
+    expect(line.getAttribute('data-state')).toBe('off');
+    expect(line.textContent).toContain(
+      'facing is not offered on printed plastic: a flat cutter smears a thermoplastic top',
+    );
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('start-wizard-stock-next'));
+    });
+    await screen.findByTestId('engrave-setup-flow');
+    expect(useEngraveJobStore.getState().job.stock.material).toBe('petg');
+    expect(useEngraveJobStore.getState().job.facing).toEqual({ enabled: false, depth: 0 });
+  });
+
   it('round stock is not on offer to type; a disc on the shelf is refused by name', async () => {
     const disc = {
       ...(SHELF[0] as object),

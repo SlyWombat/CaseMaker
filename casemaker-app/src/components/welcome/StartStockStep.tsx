@@ -5,6 +5,7 @@ import { MATERIAL_LABELS, isPrintedBlankMaterial } from '@/engine/cnc/materials'
 import {
   JOB_STOCK_FORMS,
   facingDefault,
+  facingRefusal,
   facingSeed,
   facingShopFrom,
   formLabel,
@@ -190,9 +191,15 @@ export function StartStockStep({
   // #432 slice 4 — the same two readers the wizard seeds the job with, so the sentence here and the
   // choice written on the job can never disagree.
   const shopDefaults = useShopDefaultsStore((s) => s.defaults);
-  const facing = outcome.finish === null ? null : facingDefault(outcome.finish);
+  // #474 — a printed plastic is never faced, so the wizard says that and does not offer a depth,
+  // even on a piece whose finish nobody has stated: the material alone refuses it.
+  const facingRefused = facingRefusal(material) !== null;
+  const facing =
+    facingRefused || outcome.finish !== null
+      ? facingDefault(outcome.finish ?? 'unknown', material)
+      : null;
   const facingDepth =
-    outcome.finish === null ? null : facingSeed(outcome.finish, facingShopFrom(shopDefaults)).depth;
+    facing === null ? null : facingSeed(outcome.finish, material, facingShopFrom(shopDefaults)).depth;
 
   return (
     <div data-testid="start-wizard-step-stock" style={{ marginTop: 8 }}>
@@ -401,9 +408,11 @@ export function StartStockStep({
       {facing !== null && facingDepth !== null && (
         <p style={MUTED} data-testid="start-wizard-stock-facing" data-state={facing.on ? 'on' : 'off'}>
           Facing: {facing.on ? 'on' : 'off'} by default — {facing.reason}.{' '}
-          {facing.on
-            ? `The job starts with a ${mm(facingDepth)} mm skim; the Engrave panel shows that depth and can change it.`
-            : 'The job starts with that answer; the Engrave panel can face it instead.'}
+          {facingRefused
+            ? 'The job starts with that answer and the Engrave panel does not offer facing on this stock.'
+            : facing.on
+              ? `The job starts with a ${mm(facingDepth)} mm skim; the Engrave panel shows that depth and can change it.`
+              : 'The job starts with that answer; the Engrave panel can face it instead.'}
         </p>
       )}
     </div>

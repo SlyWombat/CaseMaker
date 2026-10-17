@@ -421,7 +421,11 @@ export function StartWizard(): JSX.Element {
       // rather than interpreted at Generate: a job with no key must keep planning exactly as it did
       // before #432, so "rough stock is faced by default" has to be written on the job when the job
       // is made. The panel's toggle then overrides it like any other answer.
-      const facing = facingSeed(entry.finish, facingShopFrom(useShopDefaultsStore.getState().defaults));
+      const facing = facingSeed(
+        entry.finish,
+        job.stock.material,
+        facingShopFrom(useShopDefaultsStore.getState().defaults),
+      );
       // The empty design: a stock pick brings no lines. (A design file brings its own items.)
       store.replace({
         ...job,

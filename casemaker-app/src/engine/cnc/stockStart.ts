@@ -26,7 +26,7 @@ import { readDefault, type ShopDefaults } from '@/platform/defaultsClient';
 import type { StockItem } from '@/platform/stockClient';
 import { isShippedDemoLabelSet } from './engrave/blankLabelSeed';
 import type { MillProfile } from './machine';
-import { isMetalMaterial, MATERIAL_LABELS } from './materials';
+import { isMetalMaterial, isPrintedBlankMaterial, MATERIAL_LABELS } from './materials';
 import type { EngraveFacing, EngraveJob, JobStockEntry, JobStockFinish, JobStockForm, StockMaterial } from '@/types/engraveJob';
 
 /** The rectangular forms a job's stock can take, in the order the wizard offers them. */
@@ -266,28 +266,50 @@ export function finishOf(job: Pick<EngraveJob, 'stockEntry' | 'stock'>): JobStoc
 }
 
 /**
+ * Why this material is never faced, or null (#474). The maintainer's rule of 2026-10-17: facing is
+ * for wood and metal only. A flat cutter pushed into a thermoplastic smears the top rather than
+ * cutting it, so no finish, no depth and no cutter choice makes a facing pass work on a printed
+ * blank — the material alone refuses it. Non-plastic materials (the woods, MDF, acrylic, the metals)
+ * are not refused here; for them the finish decides as it always has.
+ */
+export function facingRefusal(material: StockMaterial): string | null {
+  return isPrintedBlankMaterial(material)
+    ? 'facing is not offered on printed plastic: a flat cutter smears a thermoplastic top'
+    : null;
+}
+
+/**
  * The facing choice a NEW job is seeded with (#432 slice 4, decision Q6): whether to face, from the
- * finish's own default, and the depth the shop fills in ({@link facingDepthDefault}).
+ * material ({@link facingRefusal}) and the finish's own default, and the depth the shop fills in
+ * ({@link facingDepthDefault}).
  *
  * Seeded rather than interpreted at generate time: a job with no `facing` key must keep planning
  * exactly as it did before #432, so "rough stock is faced by default" has to be WRITTEN onto a job
  * when the job is made. An absent key means nobody has asked, and the panel offers the default with
  * its reason instead of acting on it.
+ *
+ * A printed plastic always seeds OFF with a zero depth (#474): the refusal is not a finish default
+ * that a finish could override, so there is no number to fill in either.
  */
 export function facingSeed(
   finish: JobStockFinish | null,
+  material: StockMaterial,
   shop?: Partial<FacingDepthShop>,
 ): Pick<EngraveFacing, 'enabled' | 'depth'> {
-  const def = facingDefault(finish ?? 'unknown');
+  if (facingRefusal(material) !== null) return { enabled: false, depth: 0 };
+  const def = facingDefault(finish ?? 'unknown', material);
   return { enabled: def.on, depth: facingDepthDefault(finish ?? 'unknown', { shop }).depthMm };
 }
 
 /**
- * Whether the job should face the stock first, from its finish (decision Q6): rough or unknown → on;
- * a finished sheet or a printed blank → off. Always overridable — this is the DEFAULT, and the reason
- * is part of the answer so the screen can say why.
+ * Whether the job should face the stock first, from its material and finish (decision Q6): a printed
+ * plastic is never faced (#474); otherwise rough or unknown → on, a finished sheet or a printed
+ * blank → off. Always overridable where it is offered — this is the DEFAULT, and the reason is part
+ * of the answer so the screen can say why.
  */
-export function facingDefault(finish: JobStockFinish): { on: boolean; reason: string } {
+export function facingDefault(finish: JobStockFinish, material: StockMaterial): { on: boolean; reason: string } {
+  const refused = facingRefusal(material);
+  if (refused !== null) return { on: false, reason: refused };
   switch (finish) {
     case 'rough':
       return { on: true, reason: 'rough stock is faced first, so the top is flat and Z0 is on a cut surface' };

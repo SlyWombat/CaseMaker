@@ -1773,6 +1773,44 @@ describe('EngravePanel (#432 slice 4) — the facing choice', () => {
     fireEvent.click(screen.getByTestId('engrave-facing-on'));
     expect(job().facing).toEqual({ enabled: true, depth: 0.2 });
   });
+
+  // #474 — the maintainer, 2026-10-17: facing plastic will never work. The material withholds the
+  // choice, so a rough PETG blank does not even get the "face it" button, and the sentence says why.
+  it('withholds facing on printed plastic, whatever the finish says', () => {
+    act(() => {
+      const base = defaultEngraveJob();
+      useEngraveJobStore.setState({
+        job: {
+          ...base,
+          stock: { ...base.stock, material: 'petg' },
+          stockEntry: { kind: 'made', shelfId: null, file: null, form: 'plate', finish: 'rough', conductive: false },
+        },
+      });
+    });
+    render(<EngravePanel />);
+    expect(screen.getByTestId('engrave-facing-why').textContent).toContain(
+      'facing is not offered on printed plastic: a flat cutter smears a thermoplastic top',
+    );
+    expect(screen.queryByTestId('engrave-facing-on')).toBeNull();
+    expect(screen.queryByTestId('engrave-facing-off')).toBeNull();
+    expect(screen.queryByTestId('engrave-facing-state')).toBeNull();
+    expect(screen.queryByTestId('engrave-facing-depth')).toBeNull();
+  });
+
+  it('only offers to turn facing off when a plastic job already carries it', () => {
+    act(() => {
+      const base = defaultEngraveJob();
+      useEngraveJobStore.setState({
+        job: { ...base, stock: { ...base.stock, material: 'petg' }, facing: { enabled: true, depth: 0.5 } },
+      });
+    });
+    render(<EngravePanel />);
+    expect(screen.queryByTestId('engrave-facing-on')).toBeNull();
+    expect(screen.getByTestId('engrave-facing-state').textContent).toBe('facing on');
+    expect(screen.queryByTestId('engrave-facing-depth')).toBeNull();
+    fireEvent.click(screen.getByTestId('engrave-facing-off'));
+    expect(job().facing).toEqual({ enabled: false, depth: 0.5 });
+  });
 });
 
 // #432 review R11 — a withheld facing file used to be invisible in the panel: Save wrote one file

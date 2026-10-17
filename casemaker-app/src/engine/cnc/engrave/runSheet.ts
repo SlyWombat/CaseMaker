@@ -55,7 +55,7 @@ import { MATERIAL_LABELS } from '@/engine/cnc/materials';
 import { VISE_BODY_DEPTH, viseEnvelope } from '@/engine/cnc/fixture';
 import { hasSacrificial, stripHeight, viseJawShift } from '@/engine/cnc/sacrificial';
 import { jobMachine } from '@/engine/cnc/calibration';
-import { facingDefault, finishOf } from '@/engine/cnc/stockStart';
+import { facingDefault, facingRefusal, finishOf } from '@/engine/cnc/stockStart';
 import type { FacingCamSummary } from '@/engine/cnc/cam/facing';
 import type { InkMeasure } from '@/engine/cnc/engrave/inkBox';
 import type { VerifyReport } from '@/engine/cnc/verify';
@@ -957,9 +957,25 @@ function facingSteps(
   // #432 slice 4 — the SAME reader the panel uses: a printed blank's implied finish counts, so a
   // job taken from a badge says "printed stock" here and not "finish is not recorded".
   const finish = finishOf(job);
-  const def = facingDefault(finish ?? 'unknown');
+  const def = facingDefault(finish ?? 'unknown', job.stock.material);
   const stockWords = finish === null ? 'stock whose finish is not recorded' : `${FINISH_WORDS[finish]} stock`;
   const steps: RunSheetStep[] = [];
+
+  // #474 — a printed plastic is never faced. A job that still carries a pass (written before the
+  // rule, or edited elsewhere) is called out rather than presented as a step to run.
+  const refusal = facingRefusal(job.stock.material);
+  if (refusal !== null) {
+    const on = facing.enabled && facing.depth > 0;
+    steps.push({
+      text: on
+        ? `This job still has a ${fmtNum(facing.depth)} mm facing pass, but ${refusal}. Turn facing ` +
+          'off in the Engrave panel and generate again before running it.'
+        : `No facing pass — ${refusal}.`,
+      bold: on,
+      value: on ? 'facing on, not offered' : 'facing off',
+    });
+    return steps;
+  }
 
   if (!facing.enabled || !(facing.depth > 0)) {
     steps.push({

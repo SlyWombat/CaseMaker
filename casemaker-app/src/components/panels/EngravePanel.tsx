@@ -56,9 +56,11 @@ import {
   FACING_DEPTH_MAX_MM,
   facingDefault,
   facingDepthDefault,
+  facingRefusal,
   facingShopFrom,
   finishOf,
 } from '@/engine/cnc/stockStart';
+import { MATERIAL_LABELS } from '@/engine/cnc/materials';
 import { useShopDefaultsStore } from '@/store/shopDefaultsStore';
 import { blankStockFor } from '@/engine/cnc/engrave/fromBlank';
 import { readDesignFile } from '@/engine/import/designImport';
@@ -628,7 +630,10 @@ export function EngravePanel(): JSX.Element {
   // the sentence under it come from the same `facingDepthDefault` call the wizard's seed makes.
   const shopDefaults = useShopDefaultsStore((s) => s.defaults);
   const finish = finishOf(job);
-  const facingDef = facingDefault(finish ?? 'unknown');
+  // #474 — printed plastic is never faced, so the material refuses it whatever the finish says; the
+  // panel withholds the choice rather than merely seeding it off.
+  const facingRefused = facingRefusal(job.stock.material) !== null;
+  const facingDef = facingDefault(finish ?? 'unknown', job.stock.material);
   const facing = job.facing ?? null;
   const facingOn = facing?.enabled ?? false;
   const facingDepthFill = facingDepthDefault(finish ?? 'unknown', { shop: facingShopFrom(shopDefaults) });
@@ -1474,41 +1479,54 @@ export function EngravePanel(): JSX.Element {
           operator can take with one press rather than a state they were put in silently. */}
       <h4 style={SUBSUB}>Facing</h4>
       <p style={MUTED} data-testid="engrave-facing-why">
-        {finish === null
-          ? 'The stock’s finish is not recorded, so the skim is the finish-unknown default'
-          : `The stock is ${FINISH_WORD[finish]}`}
-        {' — '}
-        {facingDef.reason}.
-        {facing === null
-          ? ' Nothing has been chosen, so the top is not skimmed.'
-          : facingOn && facing.depth === 0
-            ? ' Facing is on with a zero depth, so nothing is taken off.'
-            : ''}
+        {facingRefused ? (
+          <>
+            {MATERIAL_LABELS[job.stock.material]} — {facingDef.reason}.
+            {facingOn ? ' This job still turns facing on; turn it off before it is generated.' : ''}
+          </>
+        ) : (
+          <>
+            {finish === null
+              ? 'The stock’s finish is not recorded, so the skim is the finish-unknown default'
+              : `The stock is ${FINISH_WORD[finish]}`}
+            {' — '}
+            {facingDef.reason}.
+            {facing === null
+              ? ' Nothing has been chosen, so the top is not skimmed.'
+              : facingOn && facing.depth === 0
+                ? ' Facing is on with a zero depth, so nothing is taken off.'
+                : ''}
+          </>
+        )}
       </p>
-      <div role="group" aria-label="Facing" style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
-        <button
-          type="button"
-          data-testid="engrave-facing-on"
-          aria-pressed={facingOn}
-          title="Skim the whole top before engraving, then re-touch Z0 on the new surface."
-          onClick={() => chooseFacing(true)}
-        >
-          Face the top
-        </button>
-        <button
-          type="button"
-          data-testid="engrave-facing-off"
-          aria-pressed={!facingOn}
-          title="Engrave the top as it arrives."
-          onClick={() => chooseFacing(false)}
-        >
-          Leave it
-        </button>
-        <span style={TAG} data-testid="engrave-facing-state">
-          {facing === null ? 'not chosen' : facingOn ? 'facing on' : 'facing off'}
-        </span>
-      </div>
-      {facingOn && (
+      {(!facingRefused || facingOn) && (
+        <div role="group" aria-label="Facing" style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+          {!facingRefused && (
+            <button
+              type="button"
+              data-testid="engrave-facing-on"
+              aria-pressed={facingOn}
+              title="Skim the whole top before engraving, then re-touch Z0 on the new surface."
+              onClick={() => chooseFacing(true)}
+            >
+              Face the top
+            </button>
+          )}
+          <button
+            type="button"
+            data-testid="engrave-facing-off"
+            aria-pressed={!facingOn}
+            title="Engrave the top as it arrives."
+            onClick={() => chooseFacing(false)}
+          >
+            Leave it
+          </button>
+          <span style={TAG} data-testid="engrave-facing-state">
+            {facing === null ? 'not chosen' : facingOn ? 'facing on' : 'facing off'}
+          </span>
+        </div>
+      )}
+      {facingOn && !facingRefused && (
         <>
           <label style={FIELD_LABEL}>
             <span>depth</span>
