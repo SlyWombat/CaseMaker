@@ -21,7 +21,9 @@ import type {
   EngraveJob,
   EngraveKeepOut,
   EngraveTraceItem,
+  JobSetup,
 } from '@/types/engraveJob';
+import type { Orientation } from '@/engine/cnc/setups/types';
 
 /**
  * The two pure derivations that turn an `EngraveJob` into the emulator's inputs (#200).
@@ -246,6 +248,71 @@ export function workholdingFor(job: EngraveJob): Workholding {
     ],
     jawHeight: thickness - job.workholding.vise.stockProud,
   };
+}
+
+/**
+ * A top-up mount: each stock face sits at the machine face of the same name. `setups/types.ts`
+ * names this as the identity `Orientation`.
+ */
+const IDENTITY_ORIENTATION: Orientation = {
+  top: 'top',
+  bottom: 'bottom',
+  left: 'left',
+  right: 'right',
+  front: 'front',
+  back: 'back',
+};
+
+/**
+ * The id of the derived single setup. It is deliberately not minted: the implicit setup is not a
+ * stored record, so every caller and every call must get the same id. `implicit` cannot collide
+ * with a minted id, which is `setup-` plus ten generated characters (`newId('setup')`).
+ */
+const IMPLICIT_SETUP_ID = 'setup-implicit';
+
+/**
+ * The job's setups (#419 J2). A job that states `setups[]` returns them UNTOUCHED — the stored
+ * record is authoritative, and this is not a place to re-derive or normalise it.
+ *
+ * A job that does not (every document written before the field existed) gets the compatibility
+ * reading of the single setup it has always meant: the blank top-up in the vise, mounted as
+ * `workholding` says, cutting every ENABLED cutting item in document order with `job.toolKey`.
+ *
+ * "Cutting" is the operative word: `keepOuts` are voids and constraints, not work, so they are
+ * excluded; a `construction: true` item is reference-only and produces no cut of its own, so it is
+ * excluded too; a disabled item of any kind is excluded. The lists are walked in their document
+ * order — labels, shapes, combined, traces, vectors, drills — which is the order a single-setup
+ * job has always cut them in.
+ *
+ * This is a READING, not a second stored truth: the derived setup is built fresh on every call,
+ * has no registration (nothing was planned) and no remount (there is nowhere to come from).
+ */
+export function jobSetups(job: EngraveJob): JobSetup[] {
+  if (job.setups !== undefined) return job.setups;
+
+  const items: { id: string; enabled: boolean; construction?: boolean }[] = [
+    ...job.labels,
+    ...job.shapes,
+    ...(job.combined ?? []),
+    ...(job.traces ?? []),
+    ...(job.vectors ?? []),
+    ...(job.drills ?? []),
+  ];
+  const itemIds = items
+    .filter((item) => item.enabled && item.construction !== true)
+    .map((item) => item.id);
+
+  return [
+    {
+      id: IMPLICIT_SETUP_ID,
+      // A copy: the derived setup is built fresh on every call, so no caller can mutate the
+      // identity through one job and change the answer for the next.
+      orientation: { ...IDENTITY_ORIENTATION },
+      mount: { kind: job.workholding.kind },
+      itemIds,
+      tools: [job.toolKey],
+    },
+  ];
 }
 
 /**

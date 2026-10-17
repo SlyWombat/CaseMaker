@@ -5,6 +5,7 @@ import { ToolSchema } from '@/engine/cnc/toolLibrary';
 import { DEFAULT_BREAKTHROUGH, noneSacrificial } from '@/engine/cnc/sacrificial';
 import { DEFAULT_JAW_CLEARANCE_MM } from '@/engine/cnc/engrave/depthBounds';
 import { MAX_OUTLINE_CONTOURS, MAX_OUTLINE_POINTS } from '@/engine/import/outlineTypes';
+import { FACES, type Face } from '@/engine/cnc/setups/types';
 import type { EngraveJob } from '@/types/engraveJob';
 import { newId } from '@/utils/id';
 
@@ -467,6 +468,159 @@ const stockEntrySchema = z
   .refine((e) => e.kind !== 'shelf' || e.shelfId !== null, 'a shelf pick names its shelf entry')
   .refine((e) => e.kind !== 'file' || e.file !== null, 'stock read from a file names the file');
 
+/**
+ * The job's saved setups (#419 J2, §5.4). Every field of `JobSetup` in `types/engraveJob.ts` must
+ * be NAMED here: this object STRIPS what it does not name, so a field added to the interface alone
+ * silently disappears on load (the #219/#285 trap, three times over).
+ *
+ * `orientation` is derived from the setups engine's `FACES` rather than retyped, so a new face in
+ * the vocabulary cannot be stripped here. `registration.plan` mirrors `RegistrationPlan` field for
+ * field — the behavioural spec in `tests/unit/engraveJob.spec.ts` parses a REAL `planRegistration`
+ * answer through this schema, which is what catches the planner growing a field the mirror does not
+ * name. Its `settings` block is the same: #430's tunables are a shop default and move, so a plan
+ * re-planned later is not the plan that was approved.
+ */
+const mountSchema = z.enum(['vise', 'bracket', 'tape']);
+
+const faceSchema = z.enum(FACES);
+const orientationSchema = z.object(
+  Object.fromEntries(FACES.map((face) => [face, faceSchema])) as Record<Face, typeof faceSchema>,
+);
+
+const mountSpecSchema = z.object({
+  kind: mountSchema,
+  // Vise: the widest the jaws open, mm. Bracket/tape: a board under the stock.
+  viseOpeningMm: z.number().finite().positive().optional(),
+  board: z.boolean().optional(),
+});
+
+const edgeScanSchema = z.object({
+  edge: z.enum(['left', 'right', 'front', 'back']),
+  along: z.number().finite(),
+  expectedAt: z.number().finite(),
+  outward: z.union([z.literal(1), z.literal(-1)]),
+  start: z.number().finite(),
+  limit: z.number().finite(),
+  coarseStep: z.number().finite(),
+  fineStep: z.number().finite(),
+  label: z.string().optional(),
+});
+
+/** The stock as the job expected it, work XY — `ExpectedStock`. */
+const expectedStockSchema = z.object({
+  xMin: z.number().finite(),
+  yMin: z.number().finite(),
+  xMax: z.number().finite(),
+  yMax: z.number().finite(),
+  cornerRadius: z.number().finite().nonnegative(),
+});
+
+const bracketOriginSchema = z.object({
+  x: z.number().finite(),
+  y: z.number().finite(),
+  from: z.string(),
+  offsetMeasured: z.boolean(),
+});
+
+/** A clamp or the bracket's arm, as the operator must confirm it (#427). */
+const planObstacleSchema = z.object({
+  kind: z.enum(['clamp', 'bracket']),
+  label: z.string(),
+  min: z.tuple([z.number().finite(), z.number().finite()]),
+  max: z.tuple([z.number().finite(), z.number().finite()]),
+  topZ: z.number().finite(),
+});
+
+/** A reference cut in an earlier setup, read to find the stock again (#429). */
+const referenceEntrySchema = z.object({
+  itemId: z.string().min(1),
+  name: z.string(),
+  centre: positionSchema,
+  size: z.object({ x: z.number().finite(), y: z.number().finite() }),
+  xScans: z.array(z.number().int().nonnegative()),
+  yScans: z.array(z.number().int().nonnegative()),
+});
+
+/** The location's registration tunables (#430) as an approved plan froze them. */
+const registrationSettingsSchema = z.object({
+  capBelowSurfaceMm: z.number().finite(),
+  coarseStepMm: z.number().finite(),
+  fineStepMm: z.number().finite(),
+  parkAboveSurfaceMm: z.number().finite(),
+  scanInsideMm: z.number().finite(),
+  scanReachMm: z.number().finite(),
+  cornerClearanceMm: z.number().finite(),
+  surfaceBandMm: z.number().finite(),
+  tipRadiusMm: z.number().finite(),
+  tipRadiusUncertaintyMm: z.number().finite(),
+  tipDiameterMm: z.number().finite(),
+  edgeMarginMm: z.number().finite(),
+  surfaceSeekMm: z.number().finite(),
+  surfaceToleranceMm: z.number().finite(),
+  touchFeed: z.number().finite(),
+  surfaceFastFeed: z.number().finite(),
+  surfaceSlowFeed: z.number().finite(),
+  surfaceSlowSeekMm: z.number().finite(),
+  idlePollLimit: z.number().int(),
+  scanMissMarginMm: z.number().finite(),
+  readingResolutionMm: z.number().finite(),
+});
+
+const registrationPlanSchema = z.object({
+  mount: mountSchema,
+  stock: expectedStockSchema,
+  surfacePoint: positionSchema,
+  seek: z.object({
+    fromMachineZ: z.number().finite(),
+    travelMm: z.number().finite(),
+    band: z.object({ min: z.number().finite(), max: z.number().finite() }),
+  }),
+  scans: z.array(edgeScanSchema),
+  bracketOrigin: bracketOriginSchema.nullable(),
+  mountObstacles: z.array(planObstacleSchema),
+  settings: registrationSettingsSchema,
+  notes: z.array(z.string()),
+  references: z.array(referenceEntrySchema).optional(),
+  referenceRotation: z
+    .object({
+      between: z.tuple([z.string(), z.string()]),
+      separation: z.number().finite(),
+      resolutionMm: z.number().finite(),
+    })
+    .nullable()
+    .optional(),
+});
+
+const jobSetupRegistrationSchema = z.object({
+  method: mountSchema,
+  plan: registrationPlanSchema,
+  expected: z.string(),
+});
+
+/** `RemountStep.confirm`'s shape: a landmark question, its answers, and the right one's index. */
+const remountConfirmSchema = z.object({
+  question: z.string(),
+  options: z.array(z.string()),
+  correct: z.number().int().nonnegative(),
+});
+
+const jobSetupSchema = z.object({
+  // The schema mints a setup id exactly as it mints `EngraveJob.id`: a document written before the
+  // field existed (or a hand-built setup) gains one on parse rather than failing to load.
+  id: z.string().min(1).default(() => newId('setup')),
+  orientation: orientationSchema,
+  mount: mountSpecSchema,
+  itemIds: z.array(z.string().min(1)),
+  tools: z.array(z.string().min(1)),
+  registration: jobSetupRegistrationSchema.optional(),
+  remount: z
+    .object({
+      instruction: z.array(z.string()),
+      confirm: remountConfirmSchema.nullable(),
+    })
+    .optional(),
+});
+
 const jobSourcesSchema = z.object({
   stock: z
     .object({
@@ -587,6 +741,11 @@ const engraveJobV2Schema = engraveJobV1Schema.extend({
   // #418's material-first start: where the stock came from. OPTIONAL, not defaulted, for the same
   // byte-for-byte reason as `combined`/`traces`/`tool`.
   stockEntry: stockEntrySchema.optional(),
+  // #419 J2's setups. OPTIONAL and NOT defaulted: absent is today's single implicit top-up vise
+  // setup, and it must stay absent so every stored job round-trips byte-for-byte (the same rule as
+  // `combined`/`traces`/`vectors`/`keepOuts`/`drills`). Consumers read it through `jobSetups`, which
+  // supplies the implicit setup when the key is absent.
+  setups: z.array(jobSetupSchema).optional(),
 });
 
 export const engraveJobSchema = z

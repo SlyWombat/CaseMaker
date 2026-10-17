@@ -4,6 +4,9 @@
 // at module load, so the fake below is installed BEFORE the store is dynamically imported.
 
 import { describe, it, expect, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { setSeededIds } from '@/utils/id';
 
 // A minimal in-memory Storage, installed before any store import. The unit suite runs on
@@ -21,11 +24,13 @@ const backing = new Map<string, string>();
 } as Storage;
 
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
-import type { EngraveJob, EngraveLabel } from '@/types/engraveJob';
+import type { EngraveJob, EngraveLabel, JobSetup } from '@/types/engraveJob';
 import { parseEngraveJob } from '@/store/engraveJobSchema';
 import { labelProfile, toPartPlan } from '@/engine/cnc/engrave/partPlan';
-import { dedupeFindings, jobTool, toSetup, validateJob } from '@/engine/cnc/engrave/jobSetup';
+import { dedupeFindings, jobSetups, jobTool, toSetup, validateJob } from '@/engine/cnc/engrave/jobSetup';
 import { defaultSetupAnswers, stepFindings } from '@/engine/cnc/engrave/setupFlow';
+import { planRegistration, registrationSettings, type RegistrationPlan } from '@/engine/cnc/registration';
+import { ShopDefaultsSchema } from '@/platform/defaultsClient';
 import { aabbOfProfile } from '@/engine/compiler/profile';
 import { engravedFaceWorkZ, partToWork } from '@/engine/cnc/frames';
 import { badgeBlankFor } from '@/engine/cnc/engrave/fromBadge';
@@ -865,3 +870,241 @@ describe('engraveJobStore (#200)', () => {
     expect(t.kind === 'stroke-label' && t.font.length > 0).toBe(true);
   });
 });
+
+// #419 J2 — `setups[]` on the job document.
+//
+// The saved shape is §5.4's `{ orientation, mount, itemIds, tools, registration, remount }`: the
+// user's intent and the plan's provenance, never the planner's DERIVED `Setup` (rotation, stock
+// states with their removals, findings) — that is recomputed from the job and goes stale.
+describe('JobSetup (#419 J2)', () => {
+  // The registration planner's real fixture, copied from `registrationPlanner.spec.ts`: the shop's
+  // own defaults and the badge blank of Appendix C. A REAL `planRegistration` answer is the point
+  // — it pins the schema mirror behaviourally, so a field the planner grows later cannot be
+  // silently stripped on load (a hand-checked mirror is not evidence).
+  const HERE = dirname(fileURLToPath(import.meta.url));
+  const DOC = JSON.parse(readFileSync(join(HERE, 'fixtures', 'location-doc.json'), 'utf8')) as {
+    defaults: unknown;
+  };
+  const { settings: REG } = registrationSettings(ShopDefaultsSchema.parse(DOC.defaults));
+
+  const BLANK = { xMin: 0, yMin: 0, xMax: 38.1, yMax: 76.2, cornerRadius: 3 };
+
+  function realPlan(mount: 'vise' | 'bracket'): RegistrationPlan {
+    const result = planRegistration(
+      {
+        stock: BLANK,
+        mount,
+        expectedSurface: { machineZ: -56.172, from: 'the vise top and the blank’s proud height' },
+        seekFromMachineZ: -3,
+        fixtureBelowSurfaceMm: mount === 'vise' ? 0.72 : undefined,
+        bracketOrigin:
+          mount === 'bracket'
+            ? { x: -181.55, y: -184.8, from: 'anchor 1 + (0, 0)', offsetMeasured: true }
+            : undefined,
+        // A clamp on the back edge, clear of the surface point: the plan carries it, so the
+        // mirror's obstacle fields are exercised by the round trip too.
+        mountObstacles:
+          mount === 'bracket'
+            ? [{ kind: 'clamp' as const, label: 'the clamp on the back edge', min: [12, 68] as [number, number], max: [27, 98] as [number, number], topZ: 12 }]
+            : undefined,
+      },
+      REG,
+    );
+    if (!result.ok) throw new Error(result.reason);
+    return result.plan;
+  }
+
+  /** Two setups as a job saves them: a top-up vise pass, then a flip held in the bracket. */
+  function setupsFixture(): JobSetup[] {
+    return [
+      {
+        id: 'setup-top',
+        orientation: { top: 'top', bottom: 'bottom', left: 'left', right: 'right', front: 'front', back: 'back' },
+        mount: { kind: 'vise', viseOpeningMm: 120 },
+        itemIds: ['lbl-a', 'shp-a'],
+        tools: ['flat-1.0', 'cat:cone-30'],
+        registration: {
+          method: 'vise',
+          plan: realPlan('vise'),
+          expected: 'the fixed jaw holds X and rotation, the front scan finds Y, ±0.05 mm',
+        },
+      },
+      {
+        id: 'setup-flip',
+        orientation: { top: 'bottom', bottom: 'top', left: 'right', right: 'left', front: 'front', back: 'back' },
+        mount: { kind: 'bracket', board: true },
+        itemIds: ['shp-b'],
+        tools: ['flat-1.0'],
+        registration: {
+          method: 'bracket',
+          plan: realPlan('bracket'),
+          expected: 'XY from the bracket ±0.1, one Z touch, ≤ 0.15 mm step',
+        },
+        remount: {
+          instruction: [
+            'Loosen both clamps.',
+            'Turn it over SIDEWAYS: the left edge goes to the right.',
+            'Push the SAME corner into the bracket and refit the clamps on the uncut margin.',
+          ],
+          confirm: {
+            question: 'Which edge of the plate is against the bracket’s long arm now?',
+            options: ['the edge with the four holes nearest it', 'the plain edge'],
+            correct: 0,
+          },
+        },
+      },
+    ];
+  }
+
+  it('round-trips a job that carries setups, field for field', () => {
+    const job = defaultEngraveJob();
+    job.setups = setupsFixture();
+
+    const parsed = parseEngraveJob(JSON.parse(JSON.stringify(job)));
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.job.setups).toEqual(job.setups);
+    expect(parsed.job).toEqual(job);
+  });
+
+  it('pins the RegistrationPlan mirror against a REAL plan, reference fields included', () => {
+    const plan = realPlan('vise');
+    // #429's reference fields are OPTIONAL on the planner's answer; a plan that read an earlier
+    // feature must come back whole too, or the registration would lose what it measured.
+    const withReferences: RegistrationPlan = {
+      ...plan,
+      references: [
+        {
+          itemId: 'shp-a',
+          name: 'the four holes',
+          centre: { x: 19, y: 40 },
+          size: { x: 6, y: 6 },
+          xScans: [0, 1],
+          yScans: [2],
+        },
+      ],
+      referenceRotation: { between: ['shp-a', 'shp-b'], separation: 30, resolutionMm: 0.05 },
+    };
+    const [top] = setupsFixture();
+    const job = defaultEngraveJob();
+    job.setups = [{ ...top!, registration: { method: 'vise', plan: withReferences, expected: 'a feature cut in setup 1' } }];
+
+    const parsed = parseEngraveJob(JSON.parse(JSON.stringify(job)));
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    // `toEqual`, not a spot-check: this is what catches the planner adding a field the schema
+    // mirror does not name — Zod would strip it and the two objects would differ.
+    expect(parsed.job.setups![0]!.registration!.plan).toEqual(withReferences);
+  });
+
+  it('leaves setups ABSENT when the document has none — not [], not defaulted', () => {
+    const raw = JSON.parse(JSON.stringify(defaultEngraveJob())) as Record<string, unknown>;
+    expect('setups' in raw).toBe(false);
+
+    const parsed = parseEngraveJob(raw);
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect('setups' in parsed.job).toBe(false);
+    expect(parsed.job.setups).toBeUndefined();
+    expect(JSON.stringify(parsed.job)).not.toContain('"setups"');
+  });
+
+  it('a version-1 document parses and gains no setups key', () => {
+    const raw = JSON.parse(JSON.stringify(defaultEngraveJob())) as Record<string, unknown>;
+    const v1 = { ...raw, schemaVersion: 1 } as Record<string, unknown>;
+    delete v1.sacrificial;
+    delete v1.breakthrough;
+
+    const parsed = parseEngraveJob(v1);
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.job.schemaVersion).toBe(2);
+    expect('setups' in parsed.job).toBe(false);
+  });
+
+  it('mints a setup id on parse exactly as the job id is minted', () => {
+    const doc = JSON.parse(
+      JSON.stringify({ ...defaultEngraveJob(), setups: setupsFixture() }),
+    ) as { setups: { id?: string }[] };
+    delete doc.setups[0]!.id;
+
+    setSeededIds(true);
+    try {
+      const parsed = parseEngraveJob(doc);
+      expect(parsed.ok).toBe(true);
+      if (!parsed.ok) return;
+      // The job itself carries its id, so the setup's is the first id this parse mints.
+      expect(parsed.job.setups![0]!.id).toBe('setup-s000001');
+    } finally {
+      setSeededIds(false);
+    }
+  });
+
+  it('jobSetups returns stored setups untouched', () => {
+    const job = defaultEngraveJob();
+    job.setups = setupsFixture();
+    expect(jobSetups(job)).toBe(job.setups);
+  });
+
+  it('jobSetups reads a job without setups as ONE implicit top-up vise setup', () => {
+    const job = defaultEngraveJob();
+    const labelIds = job.labels.map((l) => l.id);
+    // A disabled line, a disabled shape and a construction item are not work; nor is a keep-out.
+    job.labels[1]!.enabled = false;
+    job.shapes = [
+      { id: 'shp-on', kind: 'rect', position: { x: 50, y: 30 }, rotation: 0, depth: 1, enabled: true, width: 10, height: 5, cornerRadius: 0 },
+      { id: 'shp-off', kind: 'rect', position: { x: 50, y: 30 }, rotation: 0, depth: 1, enabled: false, width: 10, height: 5, cornerRadius: 0 },
+      { id: 'shp-reference', kind: 'rect', position: { x: 50, y: 30 }, rotation: 0, depth: 1, enabled: true, construction: true, width: 10, height: 5, cornerRadius: 0 },
+    ];
+    job.combined = [
+      { id: 'cmb', kind: 'border', position: { x: 0, y: 0 }, rotation: 0, depth: 1, enabled: true, inset: 2, width: 1 },
+    ];
+    job.traces = [
+      { id: 'trc', kind: 'line', position: { x: 50, y: 30 }, rotation: 0, depth: 0.5, enabled: true, points: [[0, 0], [10, 0]], closed: false },
+    ];
+    job.vectors = [
+      {
+        id: 'vec',
+        kind: 'vector',
+        position: { x: 50, y: 30 },
+        rotation: 0,
+        depth: 1,
+        enabled: true,
+        sourceName: 'mark.svg',
+        contours: [[[0, 0], [1, 0], [1, 1]]],
+        fillRule: 'NonZero',
+        width: 1,
+        height: 1,
+      },
+    ];
+    job.drills = [
+      { id: 'drl', kind: 'drill', position: { x: 10, y: 10 }, rotation: 0, depth: 2, enabled: true, through: false },
+    ];
+    job.keepOuts = [
+      { id: 'ko', kind: 'rect', position: { x: 50, y: 30 }, rotation: 0, enabled: true, zCeiling: 2, width: 10, height: 5, cornerRadius: 0 },
+    ];
+
+    const [setup, ...rest] = jobSetups(job);
+    expect(rest).toEqual([]);
+    expect(setup!.id).toBe('setup-implicit');
+    // A top-up mount is the identity: every stock face is at the machine face of the same name.
+    expect(setup!.orientation).toEqual({
+      top: 'top',
+      bottom: 'bottom',
+      left: 'left',
+      right: 'right',
+      front: 'front',
+      back: 'back',
+    });
+    expect(setup!.mount).toEqual({ kind: 'vise' });
+    expect(setup!.tools).toEqual([job.toolKey]);
+    // Enabled cutting items, in document order across the six lists.
+    expect(setup!.itemIds).toEqual([labelIds[0]!, labelIds[2]!, 'shp-on', 'cmb', 'trc', 'vec', 'drl']);
+    expect(setup!.registration).toBeUndefined();
+    expect(setup!.remount).toBeUndefined();
+    expect(setup!.itemIds).not.toContain('shp-off');
+    expect(setup!.itemIds).not.toContain('shp-reference');
+    expect(setup!.itemIds).not.toContain('ko');
+  });
+});
+

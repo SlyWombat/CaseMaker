@@ -2,6 +2,8 @@ import type { Mm } from './units';
 import type { TextFont, TextWeight, CustomFont } from './textLabel';
 import type { CutParams } from '@/engine/cnc/feeds';
 import type { Tool } from '@/engine/cnc/tool';
+import type { Mount, MountSpec, Orientation, RemountStep } from '@/engine/cnc/setups/types';
+import type { RegistrationPlan } from '@/engine/cnc/registration/plan';
 
 /**
  * The CNC-2 job document (#200): a rectangular blank of wood held in the vise with text
@@ -641,6 +643,79 @@ export interface StockFlatness {
   source: 'badge' | 'user' | 'measured';
 }
 
+/**
+ * The registration half of a saved setup (#419 J2, §5.4; planned by #430).
+ *
+ * `plan` is the APPROVED choreography, frozen at the moment it was planned — a snapshot, not a
+ * re-derivation. `planRegistration` is pure and deterministic given the same stock, mount and
+ * settings, but a location's `registration.*` values are shop defaults that can move (#430), and
+ * a mount can be re-probed: re-planning later would silently replace the steps the operator
+ * approved with different ones. What a job stores is therefore what was approved.
+ */
+export interface JobSetupRegistration {
+  /** The method this registration uses: the mount it is performed on. */
+  method: Mount;
+  /** The approved plan, as it was planned. Never re-derived from the engine's current settings. */
+  plan: RegistrationPlan;
+  /** The accuracy it is expected to hold, in words — e.g. "XY from the bracket ±0.1, Z touch". */
+  expected: string;
+}
+
+/**
+ * The directed step that takes the stock from the previous setup into this one (#419 J2, §5.4).
+ *
+ * The REMOUNT PAGE is #428's; this is only the record that page will read. `confirm` reuses
+ * `RemountStep.confirm`'s shape — a landmark question the app can check, with the index of the
+ * right answer — because the direction and the question are the same idea whether the planner or
+ * the job holds them.
+ */
+export interface JobSetupRemount {
+  /** The operator's steps, in order, in landmark words ("the SAME corner still in the bracket"). */
+  instruction: string[];
+  /** The landmark question, or null where no earlier feature tells a mirrored mount apart. */
+  confirm: RemountStep['confirm'];
+}
+
+/**
+ * One SETUP as the job saves it (#419 J2, §5.4): one held position — a mount and an orientation,
+ * the items cut in it, the tools it uses, and what was approved for finding the stock again.
+ *
+ * DELIBERATELY NOT the setups engine's `Setup` (`engine/cnc/setups/types.ts`). That type is
+ * derived PLANNER GEOMETRY — a rotation matrix, the stock state entering and leaving with every
+ * `Removal[]`, findings, an index — all recomputed from the job and the planner, and all stale the
+ * moment a setting or an item moves. This record stores INTENT AND PROVENANCE only, which is
+ * exactly what §5.4's saved list names: `{ orientation, mount, itemIds, tools, registration,
+ * remount }`.
+ *
+ * It REUSES the engine's vocabulary rather than restating it (`Orientation`, `MountSpec`,
+ * `RegistrationPlan`, and `RemountStep.confirm`'s shape), so there is one meaning of a mount, of a
+ * face orientation and of a registration plan across the planner and the document.
+ */
+export interface JobSetup {
+  /**
+   * Stable within the job. Creation sites mint it with `newId('setup')`, like every other item id
+   * (`newEngraveLabelId`, `newEngraveShapeId`, …); the schema also mints a default the same way
+   * `EngraveJob.id` does, so a setup written without one gains it on parse rather than failing to
+   * load.
+   */
+  id: string;
+  /**
+   * Which STOCK face sits at each MACHINE face — `setups/types.ts`'s `Orientation`. A top-up mount
+   * is the identity record.
+   */
+  orientation: Orientation;
+  /** How the location holds the stock for this setup (vise, bracket, tape). */
+  mount: MountSpec;
+  /** The job item ids assigned to this setup, in the order they are cut. */
+  itemIds: string[];
+  /** The tool keys this setup uses, in use order — one program per key (#419 J3). */
+  tools: string[];
+  /** Present only once a registration has been planned and approved for this setup. */
+  registration?: JobSetupRegistration;
+  /** The directed step into this setup. Absent on the first setup, or where none is needed. */
+  remount?: JobSetupRemount;
+}
+
 export interface EngraveJob {
   schemaVersion: 2;
   /**
@@ -750,6 +825,23 @@ export interface EngraveJob {
    */
   tool?: Tool | null;
   workholding: { kind: 'vise'; vise: ViseParams };
+  /**
+   * The job's setups (#419 J2, §5.4): one per held position, in run order.
+   *
+   * OPTIONAL, and absent is meaningful: it is today's single implicit setup — the blank top-up in
+   * the vise, cut with `toolKey` and held as `workholding` says — so every document written before
+   * this field existed round-trips byte-for-byte and keeps exactly the behaviour it had.
+   * `jobSetups` (`engine/cnc/engrave/jobSetup.ts`) is the reader that derives that one setup; the
+   * implicit reading is a compatibility answer, not a second stored truth.
+   *
+   * WHEN PRESENT IT IS AUTHORITATIVE: `setups[]` says what is cut where, mounted how and with
+   * which tools, and `workholding`/`toolKey` then describe setup 0's mount and tool. Those two keys
+   * are deliberately NOT removed: every existing reader (the emulator, the run sheet, the feeds
+   * table) still asks them, and a single-setup job must give the same answer whichever reading a
+   * consumer takes. Consumers that understand setups read them; consumers written before this
+   * field read the old keys and describe setup 0.
+   */
+  setups?: JobSetup[];
   /** Material that must remain under the deepest cut, mm. */
   minFloor: Mm;
   /** No label may come closer than this to a stock edge, mm (measured from the cut edge). */
