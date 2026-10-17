@@ -30,7 +30,7 @@ import * as THREE from 'three';
 import { Html } from '@react-three/drei';
 import { useEngravePreviewStore } from '@/store/engravePreviewStore';
 import { useEngraveJobStore } from '@/store/engraveJobStore';
-import { useViewportStore } from '@/store/viewportStore';
+import { useViewportStore, isEngraveItemSelected } from '@/store/viewportStore';
 import type { NodeMeshOutput } from '@/workers/geometry/meshOutput';
 import type { ViseParams } from '@/types/engraveJob';
 import type { EngravePreviewLost, EngravePreviewOutline } from '@/workers/sim/engravePreview';
@@ -49,6 +49,13 @@ const STOCK_COLOR = '#c9a26b';
 const JAW_COLOR = '#4b5563';
 /** PROVISIONAL (#205): the axis marker's length as a fraction of the stock's smaller side. */
 const AXIS_FRACTION = 0.2;
+/**
+ * #441 — the glow a SELECTED floor takes. It is added to the depth colour rather than replacing
+ * it: the ramp (#170) is the floor's depth reading, and a selection that repainted the floor would
+ * make "selected" and "this deep" the same visual claim. Emissive is additive, so the ramp's
+ * colour still shows through while the selected item reads as lit.
+ */
+const SELECTED_FLOOR_GLOW = '#9adcff';
 
 /**
  * Where the vise numbers came from, in words (decision 28: a default is not a measurement). The
@@ -81,9 +88,14 @@ function useMeshGeometry(mesh: NodeMeshOutput | null): THREE.BufferGeometry | nu
  * #83 pickers do, so an orbit drag over the preview never selects. Floors that belong to traces,
  * drills, vectors and combined shapes resolve the same way: the preview emits one floor per cut,
  * and every cut carries its item's id.
+ *
+ * The selection is read from `viewportStore`, the same store the panel's name controls write, so
+ * the two directions cannot disagree; and because it is a store value rather than component state,
+ * a rebuilt preview (which replaces every floor mesh) redraws with the highlight still on.
  */
 function Floor({ mesh, color, labelId }: { mesh: NodeMeshOutput; color: string; labelId: string }) {
   const geom = useMeshGeometry(mesh);
+  const selected = useViewportStore((s) => isEngraveItemSelected(s.selection, labelId));
   if (!geom) return null;
   return (
     <mesh
@@ -97,7 +109,13 @@ function Floor({ mesh, color, labelId }: { mesh: NodeMeshOutput; color: string; 
         e.stopPropagation();
       }}
     >
-      <meshStandardMaterial color={color} metalness={0.05} roughness={0.7} />
+      <meshStandardMaterial
+        color={color}
+        emissive={selected ? SELECTED_FLOOR_GLOW : '#000000'}
+        emissiveIntensity={selected ? 0.6 : 0}
+        metalness={0.05}
+        roughness={0.7}
+      />
     </mesh>
   );
 }

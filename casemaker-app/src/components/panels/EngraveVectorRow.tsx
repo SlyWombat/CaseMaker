@@ -75,6 +75,7 @@ export function EngraveVectorRow({
     // a list of four imported files.
     <EngraveItemRow
       id={shape.id}
+      selectable
       prefix="engrave-vector"
       index={index}
       glyph="◫"

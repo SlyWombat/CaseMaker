@@ -822,6 +822,43 @@ body, html, #root {
 .engrave-item-row__expand:hover {
   color: #fff;
 }
+/* #441 — when the name is its own selection control, the chevron gives up the flexible width it
+   held while it shared a button with the name. */
+.engrave-item-row__expand--fold {
+  flex: 0 0 auto;
+}
+/* #441 — the row's name, selecting the item for the preview. It keeps the name's typography and
+   elision (the name span inside still gives up width); only the surrounding button is new, so the
+   line stays one line and the front cluster does not move. */
+.engrave-item-row__select {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  text-align: left;
+  background: none;
+  border: none;
+  padding: 2px 0;
+  color: #cbd5e1;
+  font-size: 12px;
+  cursor: pointer;
+}
+.engrave-item-row__select:hover {
+  color: #fff;
+}
+.engrave-item-row__select--selected {
+  color: #fff;
+}
+/* The selected item, wherever the selection came from: the same change a preview click makes. The
+   border is the row's own one, recoloured, so the line does not move. */
+.engrave-item-row--selected {
+  border-color: #4a9fd8;
+}
+.engrave-item-row__select--selected .engrave-item-row__name {
+  text-decoration: underline;
+  text-decoration-color: #6cb6ee;
+  text-underline-offset: 2px;
+}
 .engrave-item-row__caret,
 .engrave-item-row__glyph {
   flex: 0 0 auto;
@@ -890,6 +927,12 @@ body, html, #root {
     min-width: 24px;
     min-height: 24px;
     margin: -2px 0;
+  }
+  /* #441 — splitting the fold from the name must not shrink the fold below a fingertip. */
+  .engrave-item-row__expand--fold {
+    min-width: 24px;
+    min-height: 24px;
+    justify-content: center;
   }
 }
 /* #411 — the undo strip a removal leaves at its own site. It sits in the list's flow (it pushes

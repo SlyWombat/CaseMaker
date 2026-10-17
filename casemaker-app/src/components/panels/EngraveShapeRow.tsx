@@ -147,6 +147,7 @@ export function EngraveShapeRow({
     // kind's word when it has none) and the depth; the editor below opens on the chevron.
     <EngraveItemRow
       id={shape.id}
+      selectable
       prefix="engrave-shape"
       index={index}
       glyph={KIND_GLYPH[shape.kind]}

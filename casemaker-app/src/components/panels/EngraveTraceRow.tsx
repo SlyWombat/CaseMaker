@@ -130,6 +130,7 @@ export function EngraveTraceRow({
     // tooltip, so "Line" and "Single-line text" stay distinguishable while both read as one line.
     <EngraveItemRow
       id={trace.id}
+      selectable
       prefix="engrave-trace"
       index={index}
       glyph={trace.kind === 'line' ? '∿' : '𝑡'}

@@ -14,9 +14,11 @@ import { EngraveItemRow } from '@/components/panels/EngraveItemRow';
 import { intentWord, rowSummary } from '@/components/panels/engraveRowText';
 import type { JobFinding } from '@/engine/cnc/engrave/jobSetup';
 import { resetEngraveRows } from '@/store/engraveRowStore';
+import { useViewportStore } from '@/store/viewportStore';
 
 beforeEach(() => {
   resetEngraveRows();
+  useViewportStore.setState({ selection: null, activeSidebarSection: null });
 });
 
 afterEach(() => {
@@ -37,6 +39,8 @@ interface RowOptions {
   onToggleEnabled?: (enabled: boolean) => void;
   /** §5.3's intent word. Omitted by default, which is how most kinds call the shell. */
   intent?: string | null;
+  /** #441 — whether the row names an item the preview can show (the seven item kinds do). */
+  selectable?: boolean;
 }
 
 /** One row with an editor in it, so "the body is absent" is a claim about a body that exists when open. */
@@ -45,10 +49,12 @@ function row({
   onRemove = noop,
   onToggleEnabled = noop,
   intent,
+  selectable = false,
 }: RowOptions = {}): void {
   render(
     <EngraveItemRow
       id="item-1"
+      selectable={selectable}
       prefix="engrave-widget"
       index={0}
       glyph="▭"
@@ -189,5 +195,63 @@ describe('EngraveItemRow (#411)', () => {
     // The band #436 derives arrives as 0.49302855497458753; a line would be unreadable at that.
     expect(rowSummary(0.49302855497458753)).toBe('0.493 mm');
     expect(rowSummary(12.5, '°')).toBe('12.5 °');
+  });
+});
+
+/**
+ * #441 — the row → preview direction.
+ *
+ * The preview → row direction is `engravePick.spec.ts`: clicking a floor selects the item and
+ * opens its row. This half is the row's NAME writing the same selection, so the preview can light
+ * the item's floor. The row deliberately does NOT own any selection state of its own: it reads
+ * `viewportStore`, the same value the preview reads, which is what makes a rebuilt preview (which
+ * replaces every floor) redraw the highlight instead of losing it.
+ */
+describe('#441 — a row selects its item in the preview', () => {
+  it('selects the row’s own item when its name is pressed', () => {
+    useViewportStore.setState({ activeSidebarSection: 'cnc-engrave' });
+    row({ selectable: true });
+
+    fireEvent.click(screen.getByTestId('engrave-widget-select-0'));
+
+    expect(useViewportStore.getState().selection).toEqual({
+      kind: 'engrave-item',
+      itemId: 'item-1',
+    });
+    // Selecting is not folding: the row the person is reading stays as it was.
+    expect(screen.queryByTestId('engrave-widget-body-field')).toBeNull();
+    // …and it does not take the rail away from the panel whose row was pressed.
+    expect(useViewportStore.getState().activeSidebarSection).toBe('cnc-engrave');
+  });
+
+  it('shows the selection the preview made, without a second source of truth', () => {
+    // What `activateEngraveItem` writes when a floor is clicked.
+    useViewportStore.getState().setSelection({ kind: 'engrave-item', itemId: 'item-1' });
+    row({ selectable: true });
+
+    expect(screen.getByTestId('engrave-widget-select-0').getAttribute('aria-pressed')).toBe('true');
+    expect(screen.getByTestId('engrave-widget-row-0').className).toContain(
+      'engrave-item-row--selected',
+    );
+  });
+
+  it('moves the marking when another item is selected', () => {
+    useViewportStore.getState().setSelection({ kind: 'engrave-item', itemId: 'some-other-item' });
+    row({ selectable: true });
+
+    expect(screen.getByTestId('engrave-widget-select-0').getAttribute('aria-pressed')).toBe(
+      'false',
+    );
+    expect(screen.getByTestId('engrave-widget-row-0').className).not.toContain(
+      'engrave-item-row--selected',
+    );
+  });
+
+  it('does not offer selection from a row the preview cannot show', () => {
+    // The void rows reuse the shell but are not items: a void has an outline, not a floor.
+    row();
+    expect(screen.queryByTestId('engrave-widget-select-0')).toBeNull();
+    // The name is still inside the fold button, as before #441.
+    expect(screen.getByTestId('engrave-widget-expand-0').textContent).toContain('Face');
   });
 });

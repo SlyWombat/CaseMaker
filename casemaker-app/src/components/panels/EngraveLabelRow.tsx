@@ -169,6 +169,7 @@ export function EngraveLabelRow({
     // second line, away from the name it belongs to.
     <EngraveItemRow
       id={label.id}
+      selectable
       prefix="engrave-label"
       index={index}
       glyph="T"

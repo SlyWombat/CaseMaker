@@ -24,7 +24,7 @@
 
 import type { Object3D } from 'three';
 import { expandEngraveRow } from '@/store/engraveRowStore';
-import { useViewportStore } from '@/store/viewportStore';
+import { selectEngraveItem } from '@/store/viewportStore';
 
 /** The job item id a clicked preview object belongs to, or null when it is not tied to one. */
 export function engraveItemIdFromPick(object: Object3D | null | undefined): string | null {
@@ -48,7 +48,7 @@ export function engraveItemIdFromPick(object: Object3D | null | undefined): stri
 export function activateEngraveItem(object: Object3D | null | undefined): boolean {
   const itemId = engraveItemIdFromPick(object);
   if (itemId === null) return false;
-  useViewportStore.getState().setSelection({ kind: 'engrave-item', itemId });
+  selectEngraveItem(itemId);
   expandEngraveRow(itemId);
   return true;
 }

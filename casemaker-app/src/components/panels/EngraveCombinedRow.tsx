@@ -138,6 +138,7 @@ export function EngraveCombinedRow({
     // until someone names it, so an unnamed one reads "Cut-away" rather than blank.
     <EngraveItemRow
       id={shape.id}
+      selectable
       prefix="engrave-combined"
       index={index}
       glyph={KIND_GLYPH[shape.kind]}

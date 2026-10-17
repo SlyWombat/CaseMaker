@@ -12,7 +12,11 @@ import {
   activateEngraveItem,
   engraveItemIdFromPick,
 } from '@/components/viewport/engravePick';
-import { useViewportStore } from '@/store/viewportStore';
+import {
+  isEngraveItemSelected,
+  selectEngraveItem,
+  useViewportStore,
+} from '@/store/viewportStore';
 import { resetEngraveRows, useEngraveRowStore } from '@/store/engraveRowStore';
 
 /** A mesh-like object carrying one tag, as `Floor` renders it. */
@@ -106,5 +110,34 @@ describe('#441 — a click selects the item and opens its row', () => {
     useViewportStore.setState({ activeSidebarSection: 'cnc-engrave' });
     activateEngraveItem(tagged('label-1'));
     expect(useViewportStore.getState().activeSidebarSection).toBe('cnc-engrave');
+  });
+});
+
+/**
+ * #441 — the two sides write and read ONE selection.
+ *
+ * `selectEngraveItem` is what a row's name calls; `isEngraveItemSelected` is what a row and a
+ * preview floor both read. Testing them apart from React is what keeps the pair from growing a
+ * second notion of "selected" that a redraw of the preview would drop.
+ */
+describe('#441 — one selection shared by the row list and the preview', () => {
+  it('selects an item by id, as the row name does', () => {
+    selectEngraveItem('trace-9');
+    expect(useViewportStore.getState().selection).toEqual({
+      kind: 'engrave-item',
+      itemId: 'trace-9',
+    });
+  });
+
+  it('answers yes only for the selected item', () => {
+    selectEngraveItem('label-2');
+    const { selection } = useViewportStore.getState();
+    expect(isEngraveItemSelected(selection, 'label-2')).toBe(true);
+    expect(isEngraveItemSelected(selection, 'label-3')).toBe(false);
+  });
+
+  it('answers no for no selection or another kind of selection', () => {
+    expect(isEngraveItemSelected(null, 'label-2')).toBe(false);
+    expect(isEngraveItemSelected({ kind: 'host' }, 'label-2')).toBe(false);
   });
 });

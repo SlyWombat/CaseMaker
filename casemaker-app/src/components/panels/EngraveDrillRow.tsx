@@ -116,6 +116,7 @@ export function EngraveDrillRow({
     // / "Hole array" rather than as a blank field, exactly as the shape rows read their kind.
     <EngraveItemRow
       id={drill.id}
+      selectable
       prefix="engrave-drill"
       index={index}
       glyph="⌖"

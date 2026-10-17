@@ -86,6 +86,7 @@ export function EngraveThreadRow({
   return (
     <EngraveItemRow
       id={thread.id}
+      selectable
       prefix="engrave-thread"
       index={index}
       glyph="⌗"

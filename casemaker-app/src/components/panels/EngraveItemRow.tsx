@@ -1,6 +1,11 @@
 import type { JSX, ReactNode } from 'react';
 import type { JobFinding } from '@/engine/cnc/engrave/jobSetup';
 import { useEngraveRowStore } from '@/store/engraveRowStore';
+import {
+  isEngraveItemSelected,
+  selectEngraveItem,
+  useViewportStore,
+} from '@/store/viewportStore';
 
 /**
  * One line of the engrave panel's item list (#411), for every kind of item.
@@ -54,6 +59,16 @@ export interface EngraveItemRowProps {
   kindWord: string;
   /** What to draw where the mockup has "Face" / "Pocket A": the item's name, or the kind's word. */
   name: string;
+  /**
+   * Whether this row names an item the engrave PREVIEW can show (#441).
+   *
+   * The seven item kinds say yes; the void rows of §1b say no, because a declared void is a
+   * pocket the blank already has, not an item with a floor in the preview. When yes, the name is
+   * its own control — clicking it selects this item for the preview exactly as clicking the
+   * item's floor selects and opens its row — and the row carries the selected styling. When no,
+   * the name stays inside the fold button, as before.
+   */
+  selectable?: boolean;
   /** The one number on the right — the depth, or the void's ceiling. */
   summary: string;
   /**
@@ -109,6 +124,7 @@ export function EngraveItemRow({
   name,
   summary,
   intent = null,
+  selectable = false,
   enabled,
   enabledTitle,
   removeTitle,
@@ -120,14 +136,32 @@ export function EngraveItemRow({
 }: EngraveItemRowProps): JSX.Element {
   const open = useEngraveRowStore((s) => s.open.has(id));
   const toggle = useEngraveRowStore((s) => s.toggle);
+  // #441 — the row is selected when the preview's selection carries its id. The selection lives
+  // in `viewportStore` (not here) precisely so a redraw of the preview, which replaces every floor
+  // mesh, cannot lose it: nothing in the preview owns the selection, and the row reads the same
+  // value the floor's highlight does.
+  const selected = useViewportStore((s) => selectable && isEngraveItemSelected(s.selection, id));
   const n = index + 1;
   const what = whatOf(name, removeNoun, n);
   const errors = findings.filter((f) => f.severity === 'error');
   const warnings = findings.filter((f) => f.severity !== 'error');
 
+  const caret = (
+    <span className="engrave-item-row__caret" aria-hidden="true">
+      {open ? '▾' : '▸'}
+    </span>
+  );
+  const glyphSpan = (
+    <span className="engrave-item-row__glyph" aria-hidden="true" title={kindWord}>
+      {glyph}
+    </span>
+  );
+
   return (
     <div
-      className={`engrave-item-row${enabled ? '' : ' engrave-item-row--hidden'}`}
+      className={`engrave-item-row${enabled ? '' : ' engrave-item-row--hidden'}${
+        selected ? ' engrave-item-row--selected' : ''
+      }`}
       data-testid={`${prefix}-row-${index}`}
     >
       <div className="engrave-item-row__head">
@@ -150,23 +184,58 @@ export function EngraveItemRow({
             onChange={(e) => onToggleEnabled(e.target.checked)}
           />
         </label>
-        <button
-          type="button"
-          className="engrave-item-row__expand"
-          data-testid={`${prefix}-expand-${index}`}
-          aria-expanded={open}
-          aria-label={`${open ? 'Collapse' : 'Expand'} ${what}`}
-          title={open ? 'Collapse this item' : 'Show everything this item can be set to'}
-          onClick={() => toggle(id)}
-        >
-          <span className="engrave-item-row__caret" aria-hidden="true">
-            {open ? '▾' : '▸'}
-          </span>
-          <span className="engrave-item-row__glyph" aria-hidden="true" title={kindWord}>
-            {glyph}
-          </span>
-          <span className="engrave-item-row__name">{name}</span>
-        </button>
+        {selectable ? (
+          <>
+            {/* #441 — the chevron keeps the fold; the NAME is the selection control. They are two
+                controls rather than one because a click that opens an editor and a click that
+                says "this is the item I am looking at" are different intentions, and the
+                preview already draws the distinction: clicking a floor selects AND opens, while
+                the chevron only ever folds. */}
+            <button
+              type="button"
+              className="engrave-item-row__expand engrave-item-row__expand--fold"
+              data-testid={`${prefix}-expand-${index}`}
+              aria-expanded={open}
+              aria-label={`${open ? 'Collapse' : 'Expand'} ${what}`}
+              title={open ? 'Collapse this item' : 'Show everything this item can be set to'}
+              onClick={() => toggle(id)}
+            >
+              {caret}
+              {glyphSpan}
+            </button>
+            <button
+              type="button"
+              className={`engrave-item-row__select${
+                selected ? ' engrave-item-row__select--selected' : ''
+              }`}
+              data-testid={`${prefix}-select-${index}`}
+              aria-pressed={selected}
+              aria-label={`Select ${what} in the preview`}
+              title={
+                selected
+                  ? `${what} is selected in the preview`
+                  : `Select ${what} in the preview`
+              }
+              onClick={() => selectEngraveItem(id)}
+            >
+              <span className="engrave-item-row__name">{name}</span>
+            </button>
+          </>
+        ) : (
+          <button
+            type="button"
+            className="engrave-item-row__expand"
+            data-testid={`${prefix}-expand-${index}`}
+            aria-expanded={open}
+            aria-label={`${open ? 'Collapse' : 'Expand'} ${what}`}
+            title={open ? 'Collapse this item' : 'Show everything this item can be set to'}
+            onClick={() => toggle(id)}
+          >
+            {caret}
+            {glyphSpan}
+            <span className="engrave-item-row__name">{name}</span>
+          </button>
+        )}
         <span className="engrave-item-row__summary">{summary}</span>
         {/* §5.3 — the depth's intent word, drawn only by the kinds that state one. It is beside the
             number rather than in the tooltip because "surface" and "custom" are different claims

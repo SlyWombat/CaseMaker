@@ -247,3 +247,24 @@ export const useViewportStore = create<ViewportState>()((set, get) => ({
   },
   showAllParts: () => set({ hiddenParts: new Set<string>() }),
 }));
+
+/**
+ * #441 — select one engrave item, from EITHER side of the preview/list pair.
+ *
+ * The preview's floor meshes and the panel's name controls both write this one selection, so
+ * "which item is selected" cannot disagree between the two: there is no second, local notion of
+ * selectedness to keep in step. Apart from the store so the row shell does not have to write the
+ * kind literal itself, and so `activateEngraveItem` and the row use the same call.
+ */
+export function selectEngraveItem(itemId: string): void {
+  useViewportStore.getState().setSelection({ kind: 'engrave-item', itemId });
+}
+
+/**
+ * Whether the current selection is this item (#441). A pure predicate so a row can produce it
+ * from a selector and a preview floor can decide its highlight without either owning the shape
+ * of `ViewportSelection` or rebuilding a `{ kind, itemId }` object on every render.
+ */
+export function isEngraveItemSelected(selection: ViewportSelection, itemId: string): boolean {
+  return selection?.kind === 'engrave-item' && selection.itemId === itemId;
+}
