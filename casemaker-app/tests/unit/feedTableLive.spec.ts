@@ -70,7 +70,7 @@ beforeEach(() => setLocatedFeedTable(null));
 afterEach(() => setLocatedFeedTable(null));
 
 describe('the seeded table is the compiled table (#450 slice 3)', () => {
-  it('converts the service’s eleven rows into exactly UNMEASURED_FEEDS_TABLE, byte for byte', () => {
+  it('converts the service’s twelve rows into exactly UNMEASURED_FEEDS_TABLE, byte for byte', () => {
     const converted = entriesFromStoredRows(GOOD);
     expect(converted).toHaveLength(UNMEASURED_FEEDS_TABLE.length);
     // Key order matters for "byte for byte", so compare the serialized forms too: an extra `edge:

@@ -1926,7 +1926,7 @@ impl HouseStore {
                 // A location exported before the shop defaults gets the seeds, as one read at load does.
                 crate::defaults::add_missing_seeds(&mut doc.defaults);
                 // The feeds table follows the same rule (#450 slice 5): a location exported before
-                // the table existed is imported with the eleven starting rows, not with a hole every
+                // the table existed is imported with the twelve starting rows, not with a hole every
                 // job would fall back to the compiled literal through.
                 crate::feeds::add_missing_seeds(&mut doc.feeds);
                 doc.validate()?;
@@ -3537,7 +3537,7 @@ mod tests {
         let original: LocationDoc = serde_json::from_slice(&location_fixture()).unwrap();
         let back: LocationDoc = serde_json::from_slice(&exported).unwrap();
         assert_eq!(back, original, "export is the document that was imported");
-        // #450 slice 5. The fixture carries the feeds table — the eleven starting rows, both V
+        // #450 slice 5. The fixture carries the feeds table — the twelve starting rows, all three V
         // rows included — so the document BOTH sides read states where every number came from. Raw-file
         // equality is not the property to assert: the fixture is hand-formatted and is not what
         // serde writes (its `calibration` members are in a different order, among other things).
@@ -3549,7 +3549,7 @@ mod tests {
             crate::feeds::seeded_rows(),
             "the fixture carries every seeded row, not a subset"
         );
-        assert_eq!(back.feeds.len(), 11);
+        assert_eq!(back.feeds.len(), 12);
         assert!(back.feeds.iter().all(|r| r.source == FeedSource::Seeded));
         assert!(
             back.feeds.iter().any(|r| r.edge == Some(FeedEdge::V)),
@@ -3577,7 +3577,7 @@ mod tests {
 
     /// #450 slice 5: a location exported before the feeds table existed has no `feeds` key.
     /// Importing it seeds the table, exactly as one read at load does, so the next export carries
-    /// the eleven starting rows rather than a hole every job would fall back to the compiled literal
+    /// the twelve starting rows rather than a hole every job would fall back to the compiled literal
     /// through.
     #[tokio::test]
     async fn an_import_from_before_the_feeds_table_gets_the_seeded_rows() {
