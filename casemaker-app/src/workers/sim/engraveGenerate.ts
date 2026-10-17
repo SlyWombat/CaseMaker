@@ -1219,15 +1219,17 @@ export function engraveGenerate(
   margins: EngraveMargins = effectiveMargins(job, MARGIN_DEFAULTS),
   shop: EngraveShopOpts = {},
 ): EngraveGenerated {
-  // #473 — A PRINTED PLASTIC IS REFUSED OUTRIGHT, BEFORE ANY PROGRAM IS POSTED.
+  // #473 — A MATERIAL `facingRefusal` REFUSES IS REFUSED OUTRIGHT, BEFORE ANY PROGRAM IS POSTED.
   //
-  // #474 settled that facing is offered for wood and metal only: a flat cutter smears a
-  // thermoplastic top. The panel and the seed keep honest jobs honest, but a legacy or hand-edited
-  // document can still carry the pass. It must not reach the run order: the engraving program is
-  // posted in the document frame, whose Z0 is the FACED top, so a run whose skim will not happen
-  // would cut every depth from the wrong surface. The refusal names the material's rule and the way
-  // out, and it happens here — before the setups, the CAM and either program — rather than at the
-  // face file alone.
+  // #474 settled that facing is offered for wood and metal only: a flat cutter smears a plastic
+  // top. The panel and the seed keep honest jobs honest, but a legacy or hand-edited document can
+  // still carry the pass. It must not reach the run order: the engraving program is posted in the
+  // document frame, whose Z0 is the FACED top, so a run whose skim will not happen would cut every
+  // depth from the wrong surface. The refusal names the material's rule and the way out, and it
+  // happens here — before the setups, the CAM and either program — rather than at the face file
+  // alone. The predicate is `facingRefusal`'s, so every material it refuses — every non-wood,
+  // non-metal blank, including acrylic and the other plastics (#493) — reaches this finding with
+  // the material named.
   const facingWanted = job.facing !== undefined && job.facing.enabled && job.facing.depth > 0;
   const facingMaterialRefusal = facingWanted ? facingRefusal(job.stock.material) : null;
   if (facingMaterialRefusal !== null) {
@@ -1237,7 +1239,7 @@ export function engraveGenerate(
       findings: [
         {
           severity: 'error',
-          code: 'facing-printed-plastic',
+          code: 'facing-plastic',
           message: `${facingMaterialRefusal}. Turn facing off in the Engrave panel and generate again.`,
         },
       ],

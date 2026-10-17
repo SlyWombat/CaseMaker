@@ -555,8 +555,8 @@ facing file is the one it checked.
 **Facing — skim the finish off before engraving (#432, #474, #493).** Facing is offered on wood
 and metal only. On any plastic it is never offered, whatever finish the blank states — printed
 PLA or PETG, a purchased acrylic or ABS sheet, or a two-colour engraving laminate. The refusal
-names the material ("facing is not offered on Acrylic: a flat cutter smears a plastic top") and
-the way out: cut it as it is, or use wood or metal if the top must be skimmed. For wood and
+names the material: `facing is not offered on <material>: a flat cutter smears a plastic top`,
+and turning facing off in the Engrave panel is the way out. For wood and
 metal the **Finish** the blank states decides whether facing is offered and how deep it
 defaults: the panel fills in a depth with a sentence saying why, and you can type your own. A facing job is **two programs** — a facing
 pass with a flat cutter, then the engraving program from the faced top — each with its own
@@ -1022,7 +1022,7 @@ simulation does report about one is the sweep's own list, next:
 |---|---|---|---|
 | `depth-exceeds-stock` | error | An item cuts so deep the floor left under it is below the minimum. | Make it shallower or use thicker stock. |
 | `facing-too-deep` | error | The job asks to face its stock's top, and the depth asked is more than the blank has spare above the minimum floor — so the skim alone would break through. Facing also LOWERS every item's own limit, because the floor is measured from the faced surface: an item that just fitted the blank may be refused as `depth-exceeds-stock` once facing is on. | Ask for a lighter skim, or use thicker stock. |
-| `facing-printed-plastic` | error | The job asks for a facing pass on printed plastic. A flat cutter smears a thermoplastic top, so facing is not offered there at all (#474), and a job that still carries the choice is refused before any program is written: every later program is posted from the top a skim would leave, and there will be no such top. | Turn facing off in the Engrave panel and generate again. |
+| `facing-plastic` | error | The job asks for a facing pass on a material that cannot take one — every non-wood, non-metal material, i.e. any plastic (PLA, PETG, ABS, acrylic and the rest), not only a printed blank (#474). A flat cutter smears a plastic top instead of cutting it, so no finish, depth or cutter choice makes the pass work. The job is refused before any program is written: every later program is posted from the top a skim would leave, and there will be no such top. | Turn facing off in the Engrave panel and generate again. |
 | `no-items` | error | The job has no enabled label with text or shape. Formerly `no-labels`. | Add one. |
 | `setup-no-tool` | error | A saved setup names no cutter, so there is no program to write for it (#419). Every setup is one program, and a program is one tool. | Name a cutter on that setup. |
 | `setup-tools-unassigned` | error | A saved setup names more than one cutter, but nothing says which items each one cuts, so one program per cutter would cut every item of that setup twice (#419, waiting on #410's assignment). | Name one cutter per setup, or give the second cutter its own setup. |

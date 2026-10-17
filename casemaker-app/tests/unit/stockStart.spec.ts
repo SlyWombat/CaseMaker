@@ -23,8 +23,7 @@ import {
   jobItemCount,
   stockStillNamed,
 } from '@/engine/cnc/stockStart';
-import { meshAsStock, plain3mfProblem, readStockFile, sha256Hex } from '@/engine/import/meshStock';
-import { strToU8, zipSync } from 'fflate';
+import { meshAsStock, plain3mfProblem, readStockFile, sha256Hex } from '@/engine/import/meshStock';import { strToU8, zipSync } from 'fflate';
 import type { ParsedMesh } from '@/engine/import/stlParser';
 import { StockItemSchema, stockProblem, type StockItem } from '@/platform/stockClient';
 import { ShopDefaultsSchema } from '@/platform/defaultsClient';
@@ -142,10 +141,9 @@ describe('the facing default comes from the finish (decision Q6)', () => {
     expect(facingDefault('printed', 'softwood').on).toBe(false);
   });
 
-  /** The refusal's words for a material, which must name it and give the way out. */
+  /** The refusal's words for a material, which must name it and state the rule. */
   const refusalFor = (label: string): string =>
-    `facing is not offered on ${label}: a flat cutter smears a plastic top. ` +
-    'Cut the blank as it is, or use wood or metal if the top must be skimmed.';
+    `facing is not offered on ${label}: a flat cutter smears a plastic top`;
 
   // #474/#493 — the maintainer, 2026-10-17: a flat cutter smears a plastic top, so facing is for
   // wood and metal only. #493 widened the rule from the printed blanks to the CLASS: a purchased

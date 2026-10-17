@@ -269,19 +269,18 @@ export function finishOf(job: Pick<EngraveJob, 'stockEntry' | 'stock'>): JobStoc
  * Why this material is never faced, or null (#474, widened by #493). The maintainer's rule of
  * 2026-10-17: facing is for **wood and metal only**. A flat cutter pushed into a plastic smears the
  * top rather than cutting it, so no finish, no depth and no cutter choice makes a facing pass work
- * — the material alone refuses it, and the refusal names it and says the way out.
+ * — the material alone refuses it, and the sentence names the material rather than calling every
+ * one of them "printed plastic".
  *
- * #474 refused the printed blanks (the slicer's materials). #493 widened it to the CLASS: anything
- * that is neither wood (softwood, hardwood, MDF) nor metal is refused, which covers purchased
- * acrylic, ABS, PC, PP, TPU and the acrylic/ABS-based engraving laminates of #492 — a laminate does
- * not need a stock kind of its own to be caught, because its material is a plastic.
+ * #493 widened the predicate from the printed blanks to the CLASS: anything that is neither wood
+ * (softwood, hardwood, MDF) nor metal is refused, which covers purchased acrylic, ABS, PC, PP, TPU
+ * and the acrylic/ABS-based engraving laminates of #492 — a laminate does not need a stock kind of
+ * its own to be caught, because its material is a plastic.
  */
 export function facingRefusal(material: StockMaterial): string | null {
-  if (isWoodMaterial(material) || isMetalMaterial(material)) return null;
-  return (
-    `facing is not offered on ${MATERIAL_LABELS[material]}: a flat cutter smears a plastic top. ` +
-    'Cut the blank as it is, or use wood or metal if the top must be skimmed.'
-  );
+  return isWoodMaterial(material) || isMetalMaterial(material)
+    ? null
+    : `facing is not offered on ${MATERIAL_LABELS[material]}: a flat cutter smears a plastic top`;
 }
 
 /**
@@ -294,9 +293,9 @@ export function facingRefusal(material: StockMaterial): string | null {
  * when the job is made. An absent key means nobody has asked, and the panel offers the default with
  * its reason instead of acting on it.
  *
- * Any plastic always seeds OFF with a zero depth (#474, #493): the refusal is not a finish default
- * that a finish could override, so there is no number to fill in either. Wood and metal keep the
- * rough/unknown seeds.
+ * A material {@link facingRefusal} refuses always seeds OFF with a zero depth (#474, #493): the
+ * refusal is not a finish default that a finish could override, so there is no number to fill in
+ * either. Wood and metal keep the rough/unknown seeds.
  */
 export function facingSeed(
   finish: JobStockFinish | null,
