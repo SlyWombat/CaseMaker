@@ -22,6 +22,9 @@ import { flatEndMill, type Tool } from '@/engine/cnc/tool';
 import type { EngraveJob } from '@/types/engraveJob';
 import { generate, regions } from './helpers/engravePipeline';
 import { tl } from './helpers/manifoldExec';
+import { createSimSession } from '@/workers/sim/session';
+import { jobMachine } from '@/engine/cnc/calibration';
+import { jobTool, toSetup } from '@/engine/cnc/engrave/jobSetup';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const samples = join(here, '..', '..', '..', 'samples', 'badge-blank');
@@ -235,5 +238,50 @@ describe('the thin fixture as a V-carve job (#221)', () => {
     expect(g.nc).toContain('|angle=30|halfAngle=15');
     expect(g.nc).toContain(';@CM|TOOL|key=inv:kz-engrave-30-0-3');
     expect(g.cam!.operations).toBe(3);
+  });
+
+  // Slice B — the program slice A writes has to survive the two halves of the run that judge it:
+  // the column engine sweeps the cone at the program's constant Z, and the oracle compares the
+  // material left at the FLOOR with the geometry's floor polygons (the design inset by e·tan).
+  it('simulates on the column cone and the oracle accepts the floor', () => {
+    const job = fixtureJob();
+    const g = generate(tl, job);
+    expect(g.ok).toBe(true);
+    const tool = jobTool(job);
+    expect(tool).not.toBeNull();
+    if (g.nc === null || tool === null) throw new Error('the job should generate a program');
+
+    const setup = toSetup(job, jobMachine(job, null));
+    const session = createSimSession(tl);
+    try {
+      const load = session.load(g.nc, setup, tool, job.machineId);
+      expect(load.ok, load.ok ? '' : JSON.stringify(load.diagnostics)).toBe(true);
+      if (!load.ok) return;
+      // The cone is swept by the column engine (#405); the exact sweeper would have refused it.
+      expect(load.stats.engine).toBe('column');
+      expect(load.diagnostics.filter((d) => d.severity === 'error')).toEqual([]);
+      // The program is ONE bit at constant Z: the work origin is the stock's top face, so the
+      // deepest CUTTING move is the model's own D (0.394/0.399), and nothing goes below it.
+      const path = session.simPath();
+      let deepestCut = 0;
+      for (let i = 0; i < path.kind.length; i++) {
+        if (path.kind[i] === 1) deepestCut = Math.min(deepestCut, path.xyz[i * 3 + 2]!);
+      }
+      expect(deepestCut).toBeGreaterThan(-0.4);
+      expect(deepestCut).toBeLessThan(-0.39);
+
+      // The oracle compares the material at each FLOOR with the geometry's floor polygons — the
+      // design inset by e·tan — and must find the sweep reproduced them inside the derived band.
+      const oracle = session.oracle(g.predicted);
+      expect(oracle.ok, JSON.stringify({ worst: oracle.worst, levels: oracle.levels })).toBe(true);
+      // One level per distinct floor the plan states: the two text items at 0.394 and the logo
+      // at 0.399. The floor polygons are what `predicted` carries, so there is no mouth level.
+      const floors = oracle.levels.map((level) => level.z);
+      expect(floors.length).toBe(2);
+      expect(Math.min(...floors)).toBeCloseTo(-0.399, 3);
+      expect(Math.max(...floors)).toBeCloseTo(-0.394, 3);
+    } finally {
+      session.dispose();
+    }
   });
 });

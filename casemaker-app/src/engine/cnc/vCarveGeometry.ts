@@ -196,10 +196,44 @@ export function vCarvePlaneStepover(
   plane: VCarvePlane,
   ratio: number = DEFAULT_V_CARVE_STEPOVER_RATIO,
 ): number {
+  checkStepoverRatio(ratio);
+  return plane.grooveWidth * ratio;
+}
+
+function checkStepoverRatio(ratio: number): void {
   if (!Number.isFinite(ratio) || ratio <= 0 || ratio > 1) {
     throw new RangeError(`stepover ratio must be in (0, 1], got ${ratio}`);
   }
-  return plane.grooveWidth * ratio;
+}
+
+/**
+ * The pass spacing the FLOOR allows: the plane's step-over, clamped to the TIP RADIUS (#221).
+ *
+ * `vCarvePlaneStepover` is the engagement the feeds row asks for at the colour plane, but the
+ * floor at depth `D` is cleared by the TIP disc alone. Along a wall, two passes a pitch `p`
+ * apart leave the material between them (up to `p/2` from either centre) to whichever disc
+ * reaches furthest — the tip disc, whose reach is `tipRadius`, not the plane's `rPlane`. And a
+ * stroke's CENTRELINE is worse: the level sets `rPlane + k·pitch` stop existing where the stroke
+ * is narrower than `2·(rPlane + k·pitch)`, so the deepest point of the stroke can be up to a
+ * whole pitch from the last pass that exists. A pitch above `tipRadius` therefore leaves a ridge
+ * of the top colour across every stroke narrower than `2·(rPlane + pitch)` — material the floor
+ * prediction says was removed, which the oracle reads as an under-cut. So the flat rule #191
+ * applies to the tip unchanged; the tip WIDTH is only the limit between two passes that both
+ * exist, and the centreline is where it fails.
+ *
+ * This CLAMPS rather than refuses. A wider request only looks faster; a smaller pitch never
+ * leaves material behind, and the feeds validation already refuses an operator OVERRIDE past the
+ * tip width — a different question, about what was asked for rather than what the floor allows.
+ */
+export function vCarvePassPitch(
+  planeRadius: number,
+  cone: VCone,
+  ratio: number = DEFAULT_V_CARVE_STEPOVER_RATIO,
+): number {
+  positive('planeRadius', planeRadius);
+  positive('tipRadius', cone.tipRadius);
+  checkStepoverRatio(ratio);
+  return Math.min(2 * planeRadius * ratio, cone.tipRadius);
 }
 
 /**

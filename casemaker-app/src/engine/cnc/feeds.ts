@@ -1325,10 +1325,12 @@ export function feedsFor(
 
   // #191: contour-parallel loops further apart than the cutter can sweep leave an uncut spine.
   // Refuse, never clamp silently. A flat end mill's bound is its RADIUS (the #191 rule). A V-bit's
-  // floor is cut by its TIP DISC, so the floor-clearing pitch must never exceed one tip WIDTH —
-  // that is the hard bound here. The row's fraction is applied to the plane's groove width by the
-  // CAM (#221), and `generateEngrave` hands `pocketLoops` the same tip-width limit, so a plane
-  // wide enough to push the pitch past the tip is refused rather than cut with an uncut floor.
+  // number here is the row's seed at the TIP: the CAM scales it onto the colour plane's groove
+  // width and then clamps the resulting pitch to the TIP RADIUS (#221, `vCarvePassPitch`) — that,
+  // not the tip width, is what keeps the floor's stroke centrelines cut. The WIDTH remains the
+  // limit for an operator's request, because past it even two adjacent tip discs stop meeting;
+  // between the radius and the width the request is a legitimate plane engagement that the CAM's
+  // clamp slows down.
   const toolRadius = diameter / 2;
   const stepOverLimit = edge === 'v' ? diameter : toolRadius;
   if (params.stepOver > stepOverLimit) {

@@ -14,6 +14,7 @@ import {
   vCarveCap,
   vCarveGrooveRefusal,
   vCarveLevels,
+  vCarvePassPitch,
   vCarvePlane,
   vCarvePlaneStepover,
   vCarveRadialStep,
@@ -218,6 +219,35 @@ describe('vCarvePlaneStepover', () => {
     expect(() => vCarvePlaneStepover(plane, 0)).toThrow(/ratio/);
     expect(() => vCarvePlaneStepover(plane, 1.01)).toThrow(/ratio/);
     expect(() => vCarvePlaneStepover(plane, Number.NaN)).toThrow(/ratio/);
+  });
+});
+
+describe('vCarvePassPitch (#221 slice B)', () => {
+  const cone = bit30();
+
+  it('clamps the plane step-over to the tip radius, which is what clears the floor', () => {
+    // The thin blank asks for 0.242 mm at the plane (0.6 × 0.40396); the 0.15 mm tip disc clears
+    // the floor, so the CAM passes at 0.15. Measured on the fixture: a 0.242 pitch left 3.3 mm²
+    // of the floor uncut across the strokes' centrelines, and 0.15 left 3e-5 mm².
+    const thin = vCarvePlane(cone, 0.394, 0.2);
+    expect(vCarvePassPitch(thin.planeRadius, cone)).toBeCloseTo(0.15, 12);
+    // The badge asks for 0.236 and is clamped the same way.
+    const badge = vCarvePlane(cone, 0.985, 0.81);
+    expect(vCarvePassPitch(badge.planeRadius, cone)).toBeCloseTo(0.15, 12);
+    // With no film the plane is the floor and its width IS the tip width, so the row asks for
+    // 0.6 × 0.3 = 0.18 mm — still above the 0.15 radius, and clamped to it.
+    const noFilm = vCarvePlane(cone, 0.394, null);
+    expect(vCarvePlaneStepover(noFilm)).toBeCloseTo(0.18, 12);
+    expect(vCarvePassPitch(noFilm.planeRadius, cone)).toBeCloseTo(0.15, 12);
+    // A gentle ratio is honoured as asked, under the radius.
+    expect(vCarvePassPitch(noFilm.planeRadius, cone, 0.4)).toBeCloseTo(0.12, 12);
+  });
+
+  it('refuses bad arguments rather than inventing a pitch', () => {
+    expect(() => vCarvePassPitch(0, cone)).toThrow(/planeRadius/);
+    expect(() => vCarvePassPitch(0.2, { ...cone, tipRadius: 0 })).toThrow(/tipRadius/);
+    expect(() => vCarvePassPitch(0.2, cone, 0)).toThrow(/ratio/);
+    expect(() => vCarvePassPitch(0.2, cone, 1.2)).toThrow(/ratio/);
   });
 });
 

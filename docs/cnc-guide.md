@@ -119,8 +119,10 @@ With film `f`, depth `D` and half-angle `h`, the toolpath offsets the design by
 `tipRadius + (D − f)·tan(h)` at the plane, the floor is `(D − f)·tan(h)` narrower per side, and
 the opening at the top face is `f·tan(h)` wider per side. Single-colour stock has no film, so the
 plane IS the floor and the toolpath offset is the tip radius; a pointed bit then draws a line.
-The step-over is a fraction (0.6) of the groove's width AT THE PLANE, not of the tip. A flat end
-mill still pockets the glyph region, where depth is genuinely independent.
+The step-over is a fraction (0.6) of the groove's width AT THE PLANE, not of the tip; because the
+FLOOR is cleared by the tip disc alone, the CAM then clamps the pitch to the tip RADIUS — a wider
+pitch leaves a raised ridge of the top colour down every stroke narrower than two passes apart.
+A flat end mill still pockets the glyph region, where depth is genuinely independent.
 
 **The console.** Manage → Machines carries a one-line console, collapsed under the machine's card,
 in the desktop build only. Type a line, press Send, and the controller's answer appears beside it
