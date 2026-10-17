@@ -83,6 +83,14 @@ export function EngraveLabelRow({
   split = null,
 }: EngraveLabelRowProps): JSX.Element {
   const depthInvalid = label.depth > maxDepth;
+  // #440 — the recommendation CAN be the ceiling, but only where something under the label asks
+  // for more than the blank can carry — its own typed depth, or a colour split or void it reaches —
+  // and the ceiling is then the binding limit. The copy below has to say which of the two states it
+  // is in, or it falsifies itself exactly where the two numbers meet (the issue's own complaint
+  // about this paragraph). The sentence is about the blank's floor and not about the label's depth,
+  // because in the split/void state it is those that asked for more, not the typed number.
+  const recommendedAtCeiling =
+    recommended !== null && recommended !== undefined && Math.abs(recommended.depth - maxDepth) < 1e-9;
 
   /**
    * One state of the two-colour control. Pressing either writes the intent AND the depth it means
@@ -284,8 +292,10 @@ export function EngraveLabelRow({
       </div>
 
       <p style={{ ...MUTED, ...(depthInvalid ? { color: SEVERITY_COLOR.error } : null) }} data-testid={`engrave-label-maxdepth-${index}`}>
-        Max depth {maxDepth} mm here — the stock thickness less the minimum floor. That is the
-        ceiling this blank allows, not the depth the app recommends.
+        Max depth {maxDepth} mm here — the stock thickness less the minimum floor.{' '}
+        {recommendedAtCeiling
+          ? 'The recommendation stops here — a deeper cut would break the blank’s minimum floor.'
+          : 'That is the ceiling this blank allows, not the depth the app recommends.'}
       </p>
 
       {/* #362 — where the number came from (#345's rule). The recommendation is arithmetic on THIS

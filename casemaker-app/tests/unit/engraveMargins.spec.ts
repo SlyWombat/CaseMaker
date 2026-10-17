@@ -655,14 +655,17 @@ describe('the label depth a blank allows (#362)', () => {
     // the pocket's roof at y = 12.55. It reaches NO void, and since #369 it is clear of the JAWS too
     // — its MEASURED box is 28.2857 mm across a 76.2 mm blank (#394), so it comes 23.957 mm from
     // either jaw face, far past the 1 mm reach the jaws are judged by (`uncertainty + radius`, 0.5 mm
-    // of band and a 1 mm cutter, #391/#394). So the blank's
-    // underside is what answers, 2.81 mm, and the basis says the jaws set no limit rather than
-    // staying silent about them.
+    // of band and a 1 mm cutter, #391/#394). With no item limit binding, #440 makes the answer the
+    // label's OWN depth, not the blank's 2.81 mm ceiling: this fixture's label carries the demo
+    // 'CASE' line's 2 mm, and the ceiling merely bounds it. The basis says both, and the jaws set no
+    // limit rather than staying silent about them.
     const beside = label({ text: 'Name', size: 8, position: { x: 38.1, y: 6.775 } });
     expect(voidLimitForItem(job, beside, undefined, measure)).toBeNull();
     const besideRec = recommendLabelDepth(job, beside, inputsFor(job, beside))!;
-    expect(besideRec.depth).toBe(2.81);
-    expect(besideRec.basis[0]).toContain("the blank's 1 mm minimum floor allows 2.81 mm");
+    expect(besideRec.depth).toBe(2);
+    expect(besideRec.basis[0]).toBe(
+      "the blank's 1 mm minimum floor allows 2.81 mm, and the label's own 2 mm depth is within it",
+    );
     expect(besideRec.basis[1]).toContain('clear of both jaws by at least 23.957 mm; the jaws set no limit here');
 
     // A blank with nothing declared under it has no void floor to keep, and a void that does not cut
@@ -765,13 +768,52 @@ describe('the label depth a blank allows (#362)', () => {
     expect(recommendLabelDepth(tight, nearJaw(), inputsFor(tight, nearJaw()))).toBeNull();
   });
 
-  it('falls back to the blank’s own underside when nothing else limits it', () => {
-    // A 12 mm blank that must keep 10 mm: the underside binds at 2 mm, which the jaws' 4 − 1 = 3
-    // and the absent split do not.
+  it('bounds the label’s own depth by the blank’s underside — never answers with the ceiling (#440)', () => {
+    // A 12 mm blank that must keep 10 mm leaves a 2 mm ceiling. With no split, void or jaw binding,
+    // the answer is the depth the label ITSELF asks for; the underside only lowers it when that
+    // asks for more than the blank can keep under the floor. Before #440 the ceiling was the
+    // answer here, and `redepthLabelsForBlank` wrote it onto every unclaimed label.
     const job: EngraveJob = { ...defaultEngraveJob(), minFloor: 10, keepOuts: [] };
-    const rec = recommendLabelDepth(job, label(), inputsFor(job, label()))!;
-    expect(rec.depth).toBe(2);
-    expect(rec.basis[0]).toContain("the blank's 10 mm minimum floor allows 2 mm");
+    // The demo plank's jaws reach its lines (the 100 × 60 acceptance job is re-depthed to 3 / 3 / 3
+    // by that bound), so these cases state a line clear of them: this is about the underside being
+    // a cap, not about the jaw rule.
+    const clear = (line: EngraveLabel) =>
+      inputsFor(job, line, { jawReach: { jaw: 'fixed', gap: 20, reaches: false, overJaw: false } });
+
+    // The fixture's own 2 mm is within the ceiling, so it stands — not the 2 mm ceiling by
+    // coincidence, but because the label asked for it.
+    const within = recommendLabelDepth(job, label(), clear(label()))!;
+    expect(within.depth).toBe(2);
+    expect(within.basis[0]).toBe(
+      "the blank's 10 mm minimum floor allows 2 mm, and the label's own 2 mm depth is within it",
+    );
+
+    // A shallower design stands too, untouched: the blank does not talk a label into a deeper cut.
+    const shallow = label({ depth: 1.5 });
+    expect(recommendLabelDepth(job, shallow, clear(shallow))!.depth).toBe(1.5);
+
+    // Deeper than the ceiling: the ceiling BOUNDS the design rather than replacing it, and the
+    // clause says which is which.
+    const deep = label({ depth: 2.5 });
+    const capped = recommendLabelDepth(job, deep, clear(deep))!;
+    expect(capped.depth).toBe(2);
+    expect(capped.basis[0]).toBe(
+      "the blank's 10 mm minimum floor allows 2 mm, but the label's own 2.5 mm depth asks for more — " +
+        "the floor stops at the blank's limit",
+    );
+
+    // The issue's own example, inverted: a 60 mm blank with nothing else constraining it used to
+    // recommend 59 mm. It now recommends what the design asks for.
+    const thick: EngraveJob = {
+      ...defaultEngraveJob(),
+      stock: { ...defaultEngraveJob().stock, thickness: 60 },
+      keepOuts: [],
+    };
+    const face = label({ text: 'Face', depth: 0.5 });
+    const faceClear = inputsFor(thick, face, {
+      jawReach: { jaw: 'fixed', gap: 20, reaches: false, overJaw: false },
+    });
+    expect(recommendLabelDepth(thick, face, faceClear)!.depth).toBe(0.5);
   });
 
   it('revises its OWN past intent, and declines every other stated one (#362 review)', () => {
@@ -819,7 +861,10 @@ describe('the label depth a blank allows (#362)', () => {
     expect(clear.gap).toBeCloseTo(23.957, 3);
     expect(clear.reaches).toBe(false);
     const clearRec = recommendLabelDepth(job, centred, inputsFor(job, centred))!;
-    expect(clearRec.depth).toBe(2.81);
+    // #440 — the line's own depth (the demo 'CASE' 2 mm), not the blank's 2.81 mm ceiling. The
+    // ceiling is the upper bound the basis quotes, not the answer.
+    expect(clearRec.depth).toBe(2);
+    expect(clearRec.basis[0]).toContain("the label's own 2 mm depth is within it");
     // The jaws are still SAID, in the not-binding tail the panel row does not print: a clause that
     // named the floor and stayed silent about the jaws would read as if none had been considered.
     expect(clearRec.basis[1]).toBe('clear of both jaws by at least 23.957 mm; the jaws set no limit here');

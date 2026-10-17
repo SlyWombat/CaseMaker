@@ -393,11 +393,13 @@ describe('#363 — the store hand-off', () => {
     // asks about the voids the LINE reaches and finds none. Since #369 the JAWS are asked the same
     // way — by the line's own ink box — and this line is clear of them too: even at `inkBoxOf`'s
     // widest estimate it comes no nearer than 6.9 mm to a jaw face, past the 1 mm reach the jaws are
-    // judged by (`uncertainty + radius`, #391/#394). So the blank's underside answers: 3.81 − 1 = 2.81 mm. While every line
-    // was charged the blank-wide jaw floor it took 1.905 − 1 = 0.905 whether or not it went near a
-    // jaw; before #365 it was handed the pocket's 0.51 — half of what the blank allows, on a line the
-    // seed had deliberately placed clear of the pocket.
-    expect(line.depth).toBe(2.81);
+    // judged by (`uncertainty + radius`, #391/#394). So NOTHING limits it: the blank's underside
+    // (3.81 − 1 = 2.81 mm) is only a ceiling, and the recommendation is the depth the seed itself
+    // gave the line (#440 — it used to recommend that ceiling, and 59 mm on a 60 mm blank). While
+    // every line was charged the blank-wide jaw floor it took 1.905 − 1 = 0.905 whether or not it
+    // went near a jaw; before #365 it was handed the pocket's 0.51 — half of what the blank allows,
+    // on a line the seed had deliberately placed clear of the pocket.
+    expect(line.depth).toBe(0.5);
     // Both claims on the one line: `layout` says the ROUTE laid it out (which is what lets a later
     // take replace it), `depth` says the walk worked the number out (#363 review).
     expect(job.sources?.labels).toEqual({ [line.id]: { layout: 'computed', depth: 'computed' } });
@@ -637,8 +639,11 @@ describe('#364 — the bare-blank hand-off', () => {
     // Centred on the blank, in the whole face (a blank declares no pocket).
     expect(line.position.x).toBeCloseTo(30, 6);
     expect(line.position.y).toBeCloseTo(20, 6);
-    // The seed's placeholder is gone: `redepthLabelsForBlank` wrote the real number and stamped it.
-    expect(line.depth).not.toBe(0.5);
+    // Nothing binds this line on a 60 × 40 face — it is clear of the jaws and there is no void —
+    // so the walk agrees with the seed's own depth instead of raising it to the blank's ceiling
+    // (#440: that is what it used to write). The claim is still the walk's, which is what lets a
+    // later blank revise the number.
+    expect(line.depth).toBe(0.5);
     expect(job.sources?.labels).toEqual({ [line.id]: { layout: 'computed', depth: 'computed' } });
 
     // The bar #363 set, on the real pipeline: the job the wizard hands over generates clean.

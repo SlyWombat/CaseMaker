@@ -969,11 +969,12 @@ describe('EngravePanel — where a label’s depth came from (#362 review)', () 
   it('names the constraint under the depth it filled in, and calls the ceiling a ceiling', () => {
     takeBadgeBlank();
     // #365: the seeded 'Name' line sits BESIDE the pocket — that is the whole point of the band it
-    // is laid in — and since #369 it is clear of the JAWS too, so what answers it is the blank's own
-    // underside: 3.81 mm less the 1 mm floor. It carried the pocket's 0.51 mm before #365 made the
-    // void bound per-line, and the jaws' 0.905 mm before #369 made the jaw bound per-item — two
-    // floors neither the pocket nor the jaws could reach the line to impose. A second line, placed
-    // over the pocket, is what shows the void clause.
+    // is laid in — and since #369 it is clear of the JAWS too. It carried the pocket's 0.51 mm
+    // before #365 made the void bound per-line, and the jaws' 0.905 mm before #369 made the jaw
+    // bound per-item — two floors neither the pocket nor the jaws could reach the line to impose.
+    // #440: nor is the blank's underside an answer for it. Nothing limits this line, so the
+    // recommendation is the depth the line itself asks for (the seed's 0.5 mm), and the 2.81 mm
+    // ceiling only bounds it. A second line, placed over the pocket, is what shows the void clause.
     act(() => {
       useEngraveJobStore.getState().addLabel();
       const id = useEngraveJobStore.getState().job.labels[1]!.id;
@@ -986,8 +987,10 @@ describe('EngravePanel — where a label’s depth came from (#362 review)', () 
     expand('engrave-label', 1);
 
     const seeded = recommended(0)!;
-    expect(seeded).toContain('Recommended 2.81 mm');
-    expect(seeded).toContain("the blank's 1 mm minimum floor allows 2.81 mm");
+    expect(seeded).toContain('Recommended 0.5 mm');
+    expect(seeded).toContain(
+      "the blank's 1 mm minimum floor allows 2.81 mm, and the label's own 0.5 mm depth is within it",
+    );
     // The label is AT the recommendation, so nothing is added to reconcile: one number, no second.
     expect(seeded).not.toContain('This label is at');
 
@@ -1005,17 +1008,27 @@ describe('EngravePanel — where a label’s depth came from (#362 review)', () 
     expect(ceiling).toContain('ceiling this blank allows, not the depth the app recommends');
   });
 
-  it('keeps the sentence after the person types their own number, and reconciles the two', () => {
+  it('keeps the sentence after the person types a number the blank cannot carry, and reconciles the two', () => {
     takeBadgeBlank();
     render(<EngravePanel />);
     expand('engrave-label'); // #411
-    fireEvent.change(screen.getByTestId('engrave-label-depth-0'), { target: { value: '1.2' } });
+    // #440 — a typed depth is the label's own design, so on a blank that can carry it the
+    // recommendation is that same number and there is nothing to reconcile. This is the state where
+    // the ceiling DOES bind: 3.5 mm asks for more than the 3.81 mm badge keeps above its 1 mm floor.
+    fireEvent.change(screen.getByTestId('engrave-label-depth-0'), { target: { value: '3.5' } });
 
     const line = recommended(0)!;
     expect(line).toContain('Recommended 2.81 mm');
-    expect(line).toContain("the blank's 1 mm minimum floor allows 2.81 mm");
+    expect(line).toContain(
+      "the blank's 1 mm minimum floor allows 2.81 mm, but the label's own 3.5 mm depth asks for more — " +
+        "the floor stops at the blank's limit",
+    );
     // The advice is not withdrawn, and the row is honest that the field is no longer on it.
-    expect(line).toContain('This label is at 1.2 mm');
+    expect(line).toContain('This label is at 3.5 mm');
+    // The ceiling paragraph must not call the number it just recommended "not the recommendation".
+    expect(screen.getByTestId('engrave-label-maxdepth-0').textContent).toContain(
+      'The recommendation stops here — a deeper cut would break the blank’s minimum floor.',
+    );
   });
 
   it('offers no recommendation for a reference-only label, or one that states its own colour intent', () => {

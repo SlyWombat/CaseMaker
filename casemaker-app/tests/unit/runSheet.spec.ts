@@ -834,9 +834,9 @@ describe('runSheet (#207)', () => {
   // in the panel. A depth a person typed is theirs and gets no sentence.
   describe('where a label’s depth came from (#362 review)', () => {
     /**
-     * The default job with its first label's underside binding: a 12 mm blank that keeps 10 mm → a
-     * 2 mm floor. Built ONCE per call so the caller can address `labels[0].id` — the ids are minted
-     * per job, so a second `defaultEngraveJob()` would name a different label.
+     * The default job with its first label at the blank's own ceiling: a 12 mm blank that keeps
+     * 10 mm → a 2 mm limit (#440). Built ONCE per call so the caller can address `labels[0].id` —
+     * the ids are minted per job, so a second `defaultEngraveJob()` would name a different label.
      */
     function undersideJob(claim?: 'computed' | 'user'): EngraveJob {
       const base = { ...defaultEngraveJob(), minFloor: 10 };
@@ -870,12 +870,17 @@ describe('runSheet (#207)', () => {
       // re-depthing anything. The sheet says the app chose it and what the blank allows NOW, and
       // never quotes a clause for a number the arithmetic does not produce (which is the failure
       // #345 is about: provenance printed for a value it does not describe).
+      //
+      // #440 — the stale number is 3 mm, DEEPER than the 2 mm the blank keeps above its floor, so
+      // the recommendation (2 mm) still differs from it. A stale number BELOW the ceiling would now
+      // be a recommendation in its own right — the label's own depth — and the "recommended this for
+      // the blank it was taken on" sentence would rightly be withdrawn.
       const job = undersideJob('computed');
       const stale: EngraveJob = {
         ...job,
-        labels: job.labels.map((l) => ({ ...l, depth: 1.5 })),
+        labels: job.labels.map((l) => ({ ...l, depth: 3 })),
       };
-      const step = cutStep(stale, '1.5 mm deep');
+      const step = cutStep(stale, '3 mm deep');
       expect(step.text).toContain('the app recommended this depth for the blank it was taken on');
       expect(step.text).toContain("this blank's arithmetic allows 2 mm");
       expect(step.text).not.toContain('minimum floor allows 2 mm');

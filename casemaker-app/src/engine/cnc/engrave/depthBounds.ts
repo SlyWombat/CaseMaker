@@ -714,7 +714,13 @@ export interface LabelDepthInputs {
 
 /** What `recommendLabelDepth` worked out, and the arithmetic in words for the panel and the sheet. */
 export interface LabelDepthRecommendation {
-  /** The depth to cut at, mm — the shallowest any constraint under this item allows. */
+  /**
+   * The depth to cut at, mm.
+   *
+   * The item's own limiting plane when one binds (colour split, void, jaw); otherwise the depth
+   * the label itself asks for, lowered only if the blank's `thickness − minFloor` ceiling cannot
+   * carry it (#440). Never the blank's ceiling on its own.
+   */
   depth: Mm;
   /**
    * `'reveal'` when this recommendation places the floor PAST the blank's colour split, which is
@@ -739,17 +745,33 @@ export interface LabelDepthRecommendation {
  * label depth the 12 mm softwood job shipped with — so the wizard handed over a job its own findings
  * already complained about. The route that knows the blank now also says how deep it may be cut.
  *
- * The answer is the SHALLOWEST of four floors, each of which is a real plane or a real budget:
+ * There are two kinds of input, and #440 is about not confusing them:
  *
- *   1. the colour split, by ONE margin — `split + boundaryMargin`, which is the *below* bound
- *      `checkBounds` holds a `reveal` floor to;
- *   2. the void's ceiling, taken as the blank's own shallowest `keepOutLimit` (`inputs.voidLimit`);
- *   3. the blank's underside: `thickness − minFloor`;
- *   4. the jaws: `stockProud − max(job.jawClearance, boundaryMargin)` — the max is #345's rule that
- *      a per-job recommendation may be stricter than the setting, so a domed blank (whose boundary
- *      margin covers the dome) keeps more room over the jaws than the house number alone. Only
- *      where this item's own extent comes within the jaws' reach (`inputs.jawReach`, #369): a line
- *      with material between it and both jaw faces gets no jaw bound at all, and the basis says so.
+ *   - THE ITEM'S OWN LIMITS — the colour split it is for (1), the void under it (2) and the jaws
+ *     it reaches (4). Each is a fact about where this line sits and what it is meant to be, so
+ *     when one binds it is the answer:
+ *
+ *       1. the colour split, by ONE margin — `split + boundaryMargin`, which is the *below* bound
+ *          `checkBounds` holds a `reveal` floor to;
+ *       2. the void's ceiling, taken as the shallowest `keepOutLimit` THIS item reaches
+ *          (`inputs.voidLimit`);
+ *       4. the jaws: `stockProud − max(job.jawClearance, boundaryMargin)` — the max is #345's rule
+ *          that a per-job recommendation may be stricter than the setting, so a domed blank (whose
+ *          boundary margin covers the dome) keeps more room over the jaws than the house number
+ *          alone. Only where this item's own extent comes within the jaws' reach (`inputs.jawReach`,
+ *          #369): a line with material between it and both jaw faces gets no jaw bound at all, and
+ *          the basis says so.
+ *
+ *   - THE BLANK'S OWN CEILING — `thickness − minFloor`. It is a LIMIT on any depth, not an answer.
+ *     #440: treating it as the fourth candidate meant that when nothing else constrained a label
+ *     the recommendation returned the ceiling itself — `thickness − minFloor` — and
+ *     `redepthLabelsForBlank` wrote it onto every unclaimed label. On the 3.81 mm badge that is a
+ *     plausible 2.81 mm; on a 60 mm blank it was 59 mm and the recommendation was a cut through the
+ *     part. The ceiling now only CAPS the answer. When the item's own limits do not bind, the
+ *     answer is the depth the label itself asks for (`item.depth`) — the number the person typed,
+ *     or the seed's starting depth — and the ceiling lowers it only when that asks for more than the
+ *     blank can keep under the floor. A limit is the wrong shape for an answer, so it is no longer
+ *     one on its own.
  *
  * A blank that leaves no depth at all (`≤ 0` on a stock thinner than the clearance it must keep) is
  * NOT given a made-up 0.1 mm: this returns null, nothing is written, and the jaw check goes on
@@ -772,6 +794,9 @@ export function recommendLabelDepth(
   if (stated !== undefined && inputs.intent !== 'computed') return null;
 
   const margin = inputs.boundaryMargin;
+  // The ITEM'S OWN limits first. Each is about where this line sits and what it is meant to be,
+  // so a binding one is the answer. `candidates.length` afterwards says whether any of them
+  // exists at all — and that is what decides whether the blank's ceiling may answer (#440).
   const candidates: { depth: Mm; clause: string }[] = [];
 
   const split = splitDepthOf(job);
@@ -800,12 +825,6 @@ export function recommendLabelDepth(
     });
   }
 
-  const blank = shallower(job.stock.thickness - job.minFloor);
-  candidates.push({
-    depth: blank,
-    clause: `the blank's ${mm(job.minFloor)} mm minimum floor allows ${mm(blank)} mm`,
-  });
-
   const clearance = Math.max(job.jawClearance, margin);
   const { stockProud } = job.workholding.vise;
   // #369 — the jaw floor is a Z rule with an XY precondition, and the basis states which one held
@@ -825,6 +844,38 @@ export function recommendLabelDepth(
         `${mm(stockProud)} mm above the jaw tops and a floor has to stay ${mm(clearance)} mm clear ` +
         'of them',
     });
+  }
+
+  // The BLANK'S ceiling, `thickness − minFloor` (#440). It is a limit, so it may only CAP an
+  // answer — and it is only added to the field of candidates when there is something for it to
+  // cap. With no item limit at all, the answer is the label's own depth below, not this number.
+  const ceiling = shallower(job.stock.thickness - job.minFloor);
+  if (candidates.length > 0) {
+    candidates.push({
+      depth: ceiling,
+      clause: `the blank's ${mm(job.minFloor)} mm minimum floor allows ${mm(ceiling)} mm`,
+    });
+  }
+
+  // NO ITEM LIMIT BINDS: the answer is the depth the label itself asks for — the number the
+  // person typed, or the one the seed started it at — with the blank's ceiling as its upper
+  // bound. This is the #440 fix: returning the ceiling here made a 60 mm blank recommend 59 mm
+  // and, because `redepthLabelsForBlank` writes the answer, cut a label through the part.
+  if (candidates.length === 0) {
+    const design = 'depth' in item ? item.depth : undefined;
+    if (design === undefined || !(design > 0) || ceiling <= 0) return null;
+    const asked = roundDepth(design);
+    return {
+      depth: asked > ceiling + DEPTH_EPS ? ceiling : asked,
+      basis: [
+        asked > ceiling + DEPTH_EPS
+          ? `the blank's ${mm(job.minFloor)} mm minimum floor allows ${mm(ceiling)} mm, but the ` +
+            `label's own ${mm(asked)} mm depth asks for more — the floor stops at the blank's limit`
+          : `the blank's ${mm(job.minFloor)} mm minimum floor allows ${mm(ceiling)} mm, and the ` +
+            `label's own ${mm(asked)} mm depth is within it`,
+        `clear of both jaws by at least ${mm(gap)} mm; the jaws set no limit here`,
+      ],
+    };
   }
 
   const winner = candidates.reduce((a, b) => (b.depth < a.depth ? b : a));
