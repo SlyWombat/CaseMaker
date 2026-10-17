@@ -45,6 +45,11 @@ import type { FeedCatalogueRow } from '@/engine/cnc/feeds';
 import { executeProfile, type ManifoldToplevel } from '@/workers/geometry/evaluateOp';
 import { boxSolid, OVERSHOOT_MM } from '@/workers/geometry/sweep';
 import { meshOutputOf, type NodeMeshOutput } from '@/workers/geometry/meshOutput';
+import { probeResiduals, type ProbeResiduals } from '@/engine/cnc/probePlan';
+import {
+  registrationBandsFor,
+  type EngravePreviewRegistrationBand,
+} from './engraveRegistration';
 import {
   measureLabels,
   suggestCapHeight,
@@ -204,6 +209,12 @@ export interface EngravePreview {
   /** The declared under-surface voids (#271), enabled ones only; empty when the job has none. */
   voids: EngravePreviewVoid[];
   /**
+   * §5.4/§5.7 — the registration band: one translucent strip per edge or earlier-cut feature the
+   * first setup's approved registration references, or the datum edges a single setup's mount
+   * already holds. Empty when the mount holds no datum and nothing was planned.
+   */
+  registration: EngravePreviewRegistrationBand[];
+  /**
    * §5.7 — each region item's lost layer (design − as-cut), in item order. Empty when every design
    * is reached, when the job has no region items, or when no cutter opening was measured at all.
    */
@@ -248,6 +259,10 @@ export interface EngravePreviewer {
    * `shop` is the engrave shop defaults this realm cannot read (#451) — here only
    * `engrave.lostDetailWarnRatio`, which sets both the `item-detail-lost` bar the findings use and
    * the `qualifies` bar the recommendation ranks against. See {@link EngraveShopOpts}.
+   *
+   * `residuals` is the shop's five registration residuals (#451), handed in for the same reason:
+   * the registration band must draw the tolerance the location would use, and this realm can only
+   * read the labelled no-service fallbacks. Omitted, those fallbacks are what it draws.
    */
   engravePreview(
     job: EngraveJob,
@@ -257,6 +272,7 @@ export interface EngravePreviewer {
     margins: EngraveMargins,
     conditions: ReadonlyMap<string, ConditionSummary>,
     shop?: EngraveShopOpts,
+    residuals?: ProbeResiduals,
   ): EngravePreview | null;
 }
 
@@ -335,9 +351,14 @@ export function createEngravePreviewer(tl: ManifoldToplevel): EngravePreviewer {
     margins: EngraveMargins,
     conditions: ReadonlyMap<string, ConditionSummary>,
     shop: EngraveShopOpts = {},
+    residuals: ProbeResiduals = probeResiduals(),
   ): EngravePreview | null => {
     if (gen < latestGen) return null;
     latestGen = gen;
+
+    // §5.4 — the registration band is derived from the job's first setup and is independent of
+    // the geometry pass: plain rectangles, no Manifold, so it costs nothing beside the cuts.
+    const registration = registrationBandsFor(job, residuals);
 
     // #288 — the measurement, the findings and the cuts ALL come from `engraveRegions`, the same
     // call `engraveGenerate` makes, so the picture is drawn from the polygons the CAM is handed and
@@ -569,6 +590,7 @@ export function createEngravePreviewer(tl: ManifoldToplevel): EngravePreviewer {
       fixture,
       sacrificial,
       voids,
+      registration,
       lost,
       engravability: measured.map(({ polygons: _polygons, ...rest }) => rest),
       findings,

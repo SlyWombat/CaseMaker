@@ -23,6 +23,7 @@ import type { NodeMeshOutput } from './geometry/meshOutput';
 import { createSimSession, type SimFrame, type SimLoadOpts, type SimLoadResult, type SimPath, type SimSession } from './sim/session';
 import type { ConditionSummary } from '@/engine/cnc/toolCondition';
 import { createEngravePreviewer, type EngravePreview, type EngravePreviewer } from './sim/engravePreview';
+import type { ProbeResiduals } from '@/engine/cnc/probePlan';
 import { engraveGenerate as runEngraveGenerate, type EngraveGenerated, type EngraveShopOpts } from './sim/engraveGenerate';
 import type { OraclePredicted, OracleReport } from '@/engine/cnc/engrave/oracle';
 import { readDesign } from '@/engine/import/design3mf';
@@ -111,6 +112,10 @@ const api = {
    *
    * `shop` is the engrave shop defaults the caller read from the location (#451) — here only
    * `engrave.lostDetailWarnRatio`, the bar the findings and the recommendation share.
+   *
+   * `residuals` is the shop's five registration residuals (#451), read on the caller's side for
+   * the same reason: the worker cannot see the location, and the registration band must draw the
+   * tolerance the location would use rather than a compiled one.
    */
   async engravePreview(
     job: EngraveJob,
@@ -120,12 +125,13 @@ const api = {
     margins: EngraveMargins,
     conditions: ReadonlyMap<string, ConditionSummary>,
     shop?: EngraveShopOpts,
+    residuals?: ProbeResiduals,
   ): Promise<EngravePreview | null> {
     // Issue #180 — the preview typesets labels through the synchronous `resolveFont`, and the
     // bundled faces are static assets now, so load the keys this job's enabled labels need
     // first. A shapes-only job (or one with every label disabled/empty) passes `[]`.
     await ensureFontsLoaded(fontKeysForLabels(job.labels, job.customFonts ?? []));
-    const p = (await getPreviewer()).engravePreview(job, tools, catalogue, gen, margins, conditions, shop);
+    const p = (await getPreviewer()).engravePreview(job, tools, catalogue, gen, margins, conditions, shop, residuals);
     if (!p) return null;
     return Comlink.transfer(
       p,

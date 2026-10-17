@@ -21,6 +21,7 @@ import { feedCatalogueRows, resolvedFeedsTable } from '@/engine/cnc/feeds';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import type { FeedCatalogueRow } from '@/engine/cnc/feeds';
 import { inventoryConditions, type ConditionSummary } from '@/engine/cnc/toolCondition';
+import { probeResiduals, type ProbeResiduals } from '@/engine/cnc/probePlan';
 import { effectiveMargins } from '@/engine/cnc/engrave/depthBounds';
 import { useEngraveJobStore } from './engraveJobStore';
 import { useSettingsStore } from './settingsStore';
@@ -39,6 +40,8 @@ export type EngravePreviewClient = {
     conditions: ReadonlyMap<string, ConditionSummary>,
     /** The engrave shop defaults (#451) — see `run` for why they are read here. */
     shop?: EngraveShopOpts,
+    /** The registration residuals (#451) — see `run` for why they are read here. */
+    residuals?: ProbeResiduals,
   ) => Promise<EngravePreview | null>;
 };
 
@@ -114,6 +117,11 @@ export const useEngravePreviewStore = create<EngravePreviewState>()((set) => {
           // #450 slice 3 — the recommendation's feeds check must use the same table the run does.
           feeds: resolvedFeedsTable().table,
         },
+        // §5.4 — the registration band's five residuals, read HERE for the same reason as the
+        // margins: the worker cannot see the location, and the band must draw the tolerance the
+        // location would use. `probeResiduals` answers the labelled fallbacks when no location is
+        // readable, so a web build still draws a band and says where its number came from.
+        probeResiduals(),
       );
       if (mine !== seq) return; // superseded by a newer request
       // `preview === null` means the worker saw a newer generation already; keep the last one.

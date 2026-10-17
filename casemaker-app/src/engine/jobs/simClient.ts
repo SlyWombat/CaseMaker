@@ -20,6 +20,7 @@ import type { EngraveShopOpts } from '@/workers/sim/engraveGenerate';
 import type { OraclePredicted, OracleReport } from '@/engine/cnc/engrave/oracle';
 import type { DesignJobPatch, DesignReadingDirection } from '@/engine/cnc/engrave/fromDesign';
 import { liveShopDefaults, readDefault } from '@/platform/defaultsClient';
+import type { ProbeResiduals } from '@/engine/cnc/probePlan';
 import { createFrameCoalescer } from './frameCoalescer';
 
 let simWorker: Worker | null = null;
@@ -223,6 +224,10 @@ export const simPath = (): Promise<SimPath> => getSimApi().simPath();
  * `shop` is the engrave shop defaults (#451) — here `engrave.lostDetailWarnRatio`, read from the
  * location on this side because the worker cannot see it. Omitted, the worker keeps its labelled
  * fallback, so a caller with no location still previews the shipped default's way.
+ *
+ * `residuals` is the shop's five registration residuals (#451), read here for the same reason:
+ * the preview worker cannot see the location, and the registration band must draw the tolerance
+ * the location would use. Omitted, the worker draws its labelled fallbacks.
  */
 export const engravePreview = (
   job: EngraveJob,
@@ -232,8 +237,9 @@ export const engravePreview = (
   margins: EngraveMargins,
   conditions: ReadonlyMap<string, ConditionSummary>,
   shop?: EngraveShopOpts,
+  residuals?: ProbeResiduals,
 ): Promise<EngravePreview | null> =>
-  getSimApi().engravePreview(job, tools, catalogue, gen, margins, conditions, shop);
+  getSimApi().engravePreview(job, tools, catalogue, gen, margins, conditions, shop, residuals);
 
 /**
  * Generate → verify, headless, in the sim worker (#206). Returns the exact `.nc` text and the

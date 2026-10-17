@@ -39,6 +39,13 @@ export const VOID_COLOR = '#e0c07a';
 export const LOST_COLOR = '#f59e0b';
 
 /**
+ * §5.4 — the colour the REGISTRATION BAND is drawn in: the stock's location uncertainty, not a
+ * cut. A cool teal keeps it clear of the amber annotations (lost layer, void) and of the depth
+ * ramp's warm end, and it is not either of the two-colour stand-ins.
+ */
+export const REGISTRATION_COLOR = '#2dd4bf';
+
+/**
  * #170 — the two colours a floor is drawn in on a blank that states its colour split, when the
  * question is no longer "how deep" but "which colour".
  *

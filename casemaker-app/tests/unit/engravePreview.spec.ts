@@ -88,6 +88,13 @@ describe('engravePreview (#205)', () => {
     for (const jaw of p.fixture) expect(meshVolume(jaw.mesh)).toBeGreaterThan(0);
   });
 
+  it('carries the registration band for the mount’s datum edge (§5.4)', () => {
+    const p = buildPreview(defaultEngraveJob());
+    expect(p.registration).toHaveLength(1);
+    expect(p.registration[0]).toMatchObject({ edge: 'left', source: 'datum' });
+    expect(p.registration[0]!.uncertainty).toBeGreaterThan(0);
+  });
+
   it('leaves a label that is too deep out of the cut and reports it', () => {
     const job = defaultEngraveJob();
     job.labels = [{ ...job.labels[0]!, id: 'too-deep', text: 'DEEP', depth: 11.5 }];

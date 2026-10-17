@@ -34,8 +34,10 @@ import { useViewportStore } from '@/store/viewportStore';
 import type { NodeMeshOutput } from '@/workers/geometry/meshOutput';
 import type { ViseParams } from '@/types/engraveJob';
 import type { EngravePreviewLost } from '@/workers/sim/engravePreview';
+import type { EngravePreviewRegistrationBand } from '@/workers/sim/engraveRegistration';
+import { mm } from '@/engine/cnc/engrave/depthBounds';
 import { geometryFromMesh, SACRIFICIAL_COLOR, segmentGeometry } from './simGeometry';
-import { floorColor, LOST_COLOR, VOID_COLOR } from './engraveRamp';
+import { floorColor, LOST_COLOR, REGISTRATION_COLOR, VOID_COLOR } from './engraveRamp';
 import { hatchSegments } from './engraveHatch';
 import { clampLabelBox, projectToCanvas } from './projectedLabel';
 import { activateEngraveItem } from './engravePick';
@@ -398,6 +400,61 @@ function Lost({ item }: { item: EngravePreviewLost }) {
   );
 }
 
+/**
+ * How high above the top face the registration strip floats, mm. Above the lost layer's sliver
+ * and its hatch (0.02 and 0.03), so a band crossing a lost region is still read as the band.
+ */
+const REGISTRATION_LIFT_MM = 0.05;
+/** The strip's own thickness, mm — enough to draw, never enough to read as stock. */
+const REGISTRATION_THICKNESS_MM = 0.01;
+
+const REGISTRATION_LABEL = {
+  fontSize: 10,
+  color: REGISTRATION_COLOR,
+  background: 'rgba(20,25,30,0.7)',
+  borderRadius: 3,
+  padding: '1px 4px',
+  whiteSpace: 'nowrap',
+} as const;
+
+/**
+ * §5.4/§5.7 — one strip of the registration band: the stock may sit this far either side of the
+ * edge the setup was registered against. The worker hands over the strip's own rectangle, so this
+ * component only draws it: a stock edge's strip runs the full side, a reference feature's strip
+ * follows one of its walls, and only the first strip of a feature carries the label.
+ *
+ * It is an annotation, so it writes no depth (like the jaws and the lost layer, #162) and takes
+ * no pointer events.
+ */
+function RegistrationBand({ band }: { band: EngravePreviewRegistrationBand }) {
+  const [x0, y0] = band.min;
+  const [x1, y1] = band.max;
+  const width = x1 - x0;
+  const depth = y1 - y0;
+  if (!(width > 0 && depth > 0)) return null;
+  return (
+    <>
+      <mesh
+        position={[(x0 + x1) / 2, (y0 + y1) / 2, REGISTRATION_LIFT_MM]}
+        name={`engrave-registration-${band.id}`}
+        userData={{ engraveRegistration: band.id }}
+      >
+        <boxGeometry args={[width, depth, REGISTRATION_THICKNESS_MM]} />
+        <meshBasicMaterial color={REGISTRATION_COLOR} transparent opacity={0.22} depthWrite={false} />
+      </mesh>
+      {band.label !== null && band.labelAt !== null && (
+        <ProjectedLabel
+          position={[band.labelAt[0], band.labelAt[1], REGISTRATION_LIFT_MM]}
+          testId={`engrave-registration-label-${band.id}`}
+          style={REGISTRATION_LABEL}
+        >
+          registration: {band.label} ±{mm(band.uncertainty)} mm
+        </ProjectedLabel>
+      )}
+    </>
+  );
+}
+
 export function EngravePreview() {
   const preview = useEngravePreviewStore((s) => s.preview);
   // §5.7 — the design ↔ as-cut slider's position. `null` (the store's default and its state after
@@ -455,6 +512,12 @@ export function EngravePreview() {
 
       {preview.voids.map((v) => (
         <Void key={v.id} id={v.id} rings={v.rings} name={v.name} membrane={v.membrane} limit={v.limit} />
+      ))}
+
+      {/* §5.4 — where the stock may sit relative to what the setup was registered against. Drawn
+          at every slider position: it is a fact about the mount, not about how deep the cut is. */}
+      {preview.registration.map((band) => (
+        <RegistrationBand key={band.id} band={band} />
       ))}
 
       {preview.fixture.map((jaw) => (

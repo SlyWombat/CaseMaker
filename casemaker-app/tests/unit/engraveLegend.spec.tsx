@@ -61,6 +61,16 @@ describe('the engrave depth legend (#349)', () => {
     expect(box.style.pointerEvents).toBe('none');
   });
 
+  it('states the registration band’s widest tolerance with its own swatch (§5.4)', () => {
+    const p = previewFor();
+    useEngravePreviewStore.setState({ preview: p });
+    render(<EngraveLegend />);
+
+    const widest = Math.max(...p.registration.map((b) => b.uncertainty));
+    expect(p.registration.length).toBeGreaterThan(0);
+    expect(screen.getByTestId('engrave-legend-registration').textContent).toContain(`registration ±${widest} mm`);
+  });
+
   it('gives the sacrificial material and a declared void their own swatches', () => {
     const job: EngraveJob = {
       ...defaultEngraveJob(),

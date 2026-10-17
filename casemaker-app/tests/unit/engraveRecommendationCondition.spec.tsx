@@ -71,6 +71,7 @@ function previewWith(
     fixture: [],
     sacrificial: [],
     voids: [],
+    registration: [],
     lost: [],
     engravability: [],
     findings: [],

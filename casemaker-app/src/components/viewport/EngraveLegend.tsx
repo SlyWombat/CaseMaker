@@ -22,7 +22,7 @@ import { useEngravePreviewStore } from '@/store/engravePreviewStore';
 import { useEngraveJobStore } from '@/store/engraveJobStore';
 import { mm } from '@/engine/cnc/engrave/depthBounds';
 import { SACRIFICIAL_COLOR } from './simGeometry';
-import { depthColor, LOST_COLOR, splitColor, VOID_COLOR } from './engraveRamp';
+import { depthColor, LOST_COLOR, REGISTRATION_COLOR, splitColor, VOID_COLOR } from './engraveRamp';
 import { scrubStateAt, scrubWords } from './engraveScrub';
 
 /**
@@ -188,6 +188,21 @@ export function EngraveLegend(): JSX.Element | null {
         <div data-testid="engrave-legend-void" style={{ ...ROW, marginTop: 2 }}>
           <span style={{ ...SWATCH, border: `2px solid ${VOID_COLOR}` }} />
           void under the face
+        </div>
+      )}
+      {/* §5.4 — the registration band. The row gives the WIDEST tolerance drawn, so a setup whose
+          edges carry different residuals cannot read as one number; each edge's own value is on
+          its label in the scene. */}
+      {preview.registration.length > 0 && (
+        <div data-testid="engrave-legend-registration" style={{ ...ROW, marginTop: 2 }}>
+          <span
+            style={{
+              ...SWATCH,
+              background: `${REGISTRATION_COLOR}33`,
+              border: `2px solid ${REGISTRATION_COLOR}`,
+            }}
+          />
+          registration ±{mm(Math.max(...preview.registration.map((b) => b.uncertainty)))} mm
         </div>
       )}
     </div>
