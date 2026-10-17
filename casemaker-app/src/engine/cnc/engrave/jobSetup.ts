@@ -115,7 +115,12 @@ export type JobFindingCode =
   // against, so the check is one number against the stock's minimum floor — not a per-item one.
   // An item over-deep once the skim is counted is still `depth-exceeds-stock`, whose own check
   // measures from the faced surface.
-  | 'facing-too-deep';
+  | 'facing-too-deep'
+  // Programs (#419 J3). One program is one setup cut with ONE cutter; a setup that names none has
+  // nothing to post, and one that names several cannot say which items belong to which cutter
+  // (#410's assignment), so cutting it as one program per cutter would cut every item twice.
+  | 'setup-no-tool'
+  | 'setup-tools-unassigned';
 
 export interface JobFinding {
   severity: 'error' | 'warning';
@@ -782,7 +787,41 @@ export function validateJob(job: EngraveJob): JobFinding[] {
   if (tool) findings.push(...traceSelfOverlapFindings(job, (depth) => traceRadiusAt(tool, depth)));
 
   findings.push(...validateSacrificial(job));
+  findings.push(...setupProgramFindings(job));
 
+  return findings;
+}
+
+/**
+ * Every setup must be postable as exactly one program (#419 J3): a setup naming no cutter has
+ * nothing to post, and one naming several cannot say which items each cutter takes (#410's
+ * assignment), so one program per cutter would cut every item twice.
+ *
+ * Its own function because the GENERATOR needs it on the WHOLE job: `engraveRegions` validates the
+ * per-setup sub-job, which carries one `toolKey` by construction, so the multi-tool case can only be
+ * seen before the split. Exported so the run's own findings list says the same thing the panel's
+ * validation does.
+ */
+export function setupProgramFindings(job: EngraveJob): JobFinding[] {
+  const findings: JobFinding[] = [];
+  jobSetups(job).forEach((setup, i) => {
+    if (setup.tools.length === 0) {
+      findings.push({
+        severity: 'error',
+        code: 'setup-no-tool',
+        message: `Setup ${i + 1} names no cutter, so there is nothing to write a program for.`,
+      });
+    } else if (setup.tools.length > 1) {
+      findings.push({
+        severity: 'error',
+        code: 'setup-tools-unassigned',
+        message:
+          `Setup ${i + 1} names ${setup.tools.length} cutters (${setup.tools.join(', ')}), but which ` +
+          `items each one cuts is not modelled yet — one program per cutter would cut every item ` +
+          `twice. Name one cutter per setup, or give the second its own setup.`,
+      });
+    }
+  });
   return findings;
 }
 

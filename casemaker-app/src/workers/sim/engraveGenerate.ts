@@ -11,6 +11,10 @@
  *   verify   (#174)            → the text, re-parsed and checked against the depth limit
  *   frame    (#244)            → the same toolpath traced in the air, a second `.nc` file
  *
+ * Since #419 J3 the whole of that runs ONCE PER PROGRAM: a job with `setups[]` is one file per setup
+ * and cutter, and the result carries them as a list. One file has one tool, so the post's `M6`, the
+ * verifier's single-tool checks and the frame all keep their single-tool shape.
+ *
  * Each stage stops the pipeline on an error and reports which stage stopped it. What gets
  * verified is the TEXT, never the IR (`/Simulation.md` §1.2): `verifyProgram` parses the bytes
  * the machine would read, so a post-processor bug cannot hide behind a clean IR.
@@ -47,7 +51,9 @@ import { vCone } from '@/engine/cnc/vProfile';
 import { isMetalTool } from '@/engine/cnc/registerCutter';
 import { MATERIAL_LABELS, isMetalMaterial } from '@/engine/cnc/materials';
 import { toPartPlan, labelProfile, jobDepthLimit, keepOutNameAt, type PartPlan } from '@/engine/cnc/engrave/partPlan';
-import { dedupeFindings, toSetup, validateJob, type JobFinding } from '@/engine/cnc/engrave/jobSetup';
+import { dedupeFindings, jobSetups, setupProgramFindings, toSetup, validateJob, type JobFinding } from '@/engine/cnc/engrave/jobSetup';
+import { jobForSetup, setupPrograms, type JobProgramRef } from '@/engine/cnc/engrave/programs';
+import { programHash } from '@/engine/cnc/programHash';
 import { validateVise } from '@/engine/cnc/fixture';
 import { generateEngrave, type EngraveRegion } from '@/engine/cnc/cam/engraveJob';
 import { generateFacing } from '@/engine/cnc/cam/facing';
@@ -55,7 +61,7 @@ import { chooseFacingTool } from '@/engine/cnc/engrave/facingTool';
 import { generateTrace } from '@/engine/cnc/cam/trace';
 import type { Polygons } from '@/engine/cnc/cam/pocket';
 import { concatToolpathIR, estimateCycleSeconds, HOP_Z, type CamMove, type ToolpathIR } from '@/engine/cnc/cam/ir';
-import { postZ1, type PostContext } from '@/engine/cnc/post/z1';
+import { postZ1, type PostContext, type VacuumSpan } from '@/engine/cnc/post/z1';
 import { FRAME_Z } from '@/engine/cnc/engrave/runSheet';
 import type { Setup } from '@/engine/cnc/setup';
 import { verifyProgram, type DepthLimit, type VerifyReport } from '@/engine/cnc/verify';
@@ -131,6 +137,33 @@ export interface EngraveCamSummary {
   passes: number;
 }
 
+/**
+ * ONE program of the job (#419 J3): a single setup cut with a single cutter, posted, verified and
+ * keyed. The job's programs are a LIST because the run is a list — one file per tool, loaded and
+ * played in order, with the vacuum left on across the changes between them.
+ *
+ * `programHash` is FNV over `nc` (decision 3) — the same key the run confirmation and
+ * `finishedHashes` use, so a program that finished on this machine is recognised across reloads.
+ *
+ * Only a program that POSTED and PASSED THE VERIFIER appears here: a withheld file is not a program,
+ * and `EngraveGenerated.ok` is false whenever one is missing from the list it should have been in.
+ */
+export interface EngraveProgram {
+  /** 1-based, the operator's "Setup 2". */
+  setupIndex: number;
+  setupId: string;
+  /** The cutter this file runs — the setup's tool, and the header's `;@CM|TOOL|key=` line. */
+  toolKey: string;
+  nc: string;
+  verify: VerifyReport;
+  /** This program's own frame file (#244), checked by the same verifier; null when not produced. */
+  frameNc: string | null;
+  frameVerify: VerifyReport | null;
+  /** FNV-1a over `nc` — `programHash` in `engine/cnc/programHash.ts`. */
+  programHash: string;
+  cam: EngraveCamSummary | null;
+}
+
 export interface EngraveGenerated {
   /** False as soon as any stage reports an error. */
   ok: boolean;
@@ -197,6 +230,17 @@ export interface EngraveGenerated {
   facingToolKey: string | null;
   /** #432 — why the facing program is absent, or null. Never a stage refusal: the run is not stopped. */
   facingError: string | null;
+  /**
+   * #419 J3 — the job's programs, in cut order: one per setup, each with its own `.nc`, verifier
+   * report, frame file and FNV key. A single-setup job has exactly one, and the top-level `nc` /
+   * `verify` / `cam` fields above are that same program — the adapter the panels and the bench
+   * scripts read today.
+   *
+   * Empty when nothing was posted (a refusal before the CAM, or a withheld file). Callers that need
+   * the whole run — the package freeze, the run plan — must check `ok` first: a partial list is a
+   * diagnosis, not a runnable job.
+   */
+  programs: EngraveProgram[];
   /**
    * The regions the CAM cut and the oracle must match (#206 §3): each region item's opened
    * polygons, each drill's discs, and — since #287 — each single-line trace's swept region.
@@ -602,7 +646,11 @@ function frameProgram(
     tool: ir.tool,
     toolNumber: ir.toolNumber,
     spindleRpm: ir.spindleRpm,
-    air: ir.air,
+    // #419 Q-F — THE FRAME FILE CARRIES NO VACUUM WORDS. An air trace cuts nothing, so the vacuum
+    // buys it nothing, and a `M332` here would switch the mode OFF between two cutting programs
+    // (or an `M331` switch it on and leave the mode changed after an operator's own check). The
+    // span below is belt and braces: `air: false` alone would already suppress both words.
+    air: false,
     // The trace IS the safe height: the preamble retracts to FRAME_Z and every trace rapid is at
     // FRAME_Z, so there is no operator offset to set or clear. `hopZ` stays HOP_Z (the job's own
     // rapid floor): the post's fixed ending retracts to Z15 and homes, so the frame's verifier
@@ -620,7 +668,7 @@ function frameProgram(
       },
     ],
   };
-  const posted = postZ1(frameIr, ctx, machine);
+  const posted = postZ1(frameIr, ctx, machine, { vacuum: 'none' });
   if (!posted.ok) return { error: posted.errors.join('; ') };
   const verify = verifyProgram(posted.text, { setup, machine, tool, depthLimit: limit, minRapidZ: frameIr.hopZ });
   return { nc: posted.text, verify };
@@ -752,6 +800,12 @@ export function depthLimitReason(stack: StackDepthLimit, job: EngraveJob, x: Mm,
  * `drill.peckClearanceMm` decides where each peck's re-entry rapid stops. Omitted, both modules keep
  * their labelled fallbacks, so a test or a headless script with no location still cuts the same
  * program the shipped default would.
+ *
+ * IT RETURNS A LIST (#419 J3). `programs` is the job's files in cut order, one per setup, each
+ * posted, verified and FNV-keyed on its own; the older single-program fields (`nc`, `verify`,
+ * `frameNc`, `cam`) describe the FIRST program, which is the file the panels upload and simulate
+ * until #419 §3's multi-program upload lands. A job with no `setups[]` is exactly one program and
+ * takes the pre-#419 path unchanged, so its bytes do not move.
  */
 export function engraveGenerate(
   tl: ManifoldToplevel,
@@ -762,6 +816,134 @@ export function engraveGenerate(
   margins: EngraveMargins = effectiveMargins(job, MARGIN_DEFAULTS),
   shop: EngraveShopOpts = {},
 ): EngraveGenerated {
+  // #419 J3 — A JOB IS A LIST OF PROGRAMS.
+  //
+  // The job document says how many: one per setup (J2's `setups[]`), each cut with that setup's own
+  // cutter, each posted and verified on its own — because one FILE has one tool, and the run is the
+  // files played in order. `setupPrograms` is that reading; this function is the loop over it plus
+  // the adapter back to the single-program shape every existing caller reads.
+  //
+  // A LEGACY DOCUMENT (no `setups[]`) takes exactly today's path, unfiltered: one program, the whole
+  // job, `postZ1`'s default vacuum span. Deriving its single setup and re-filtering the lists would
+  // drop disabled and construction items from the CAM's input, which is a behaviour change this
+  // issue does not own.
+  if (job.setups === undefined) {
+    const one = generateOneProgram(tl, job, tool, catalogue, calibration, margins, shop, 'whole', true);
+    const ref: JobProgramRef = {
+      setupIndex: 1,
+      setupId: jobSetups(job)[0]!.id,
+      toolKey: job.toolKey,
+      itemIds: [],
+    };
+    return { ...one, programs: one.ok && one.nc !== null && one.verify !== null ? [programOf(one, ref)] : [] };
+  }
+
+  // A setup that cannot become exactly one program is refused BEFORE anything is cut: the panel's
+  // validation says the same sentence (#419 J3, `setupProgramFindings`).
+  const setupProblems = setupProgramFindings(job);
+  if (setupProblems.length > 0) {
+    return {
+      ok: false,
+      stage: 'findings',
+      findings: dedupeFindings([...setupProblems, ...validateJob(job)]),
+      feeds: null,
+      threads: null,
+      threadMachining: null,
+      cam: null,
+      nc: null,
+      verify: null,
+      frameNc: null,
+      frameVerify: null,
+      facingNc: null,
+      facingVerify: null,
+      facingToolKey: null,
+      facingError: null,
+      predicted: [],
+      programs: [],
+      errors: [],
+    };
+  }
+
+  const refs = setupPrograms(job);
+  const results = refs.map((ref, i) => {
+    // Decision 4 — the vacuum words are spread across the RUN: on in the first program, off in the
+    // last, neither in the ones between. One program is the whole run.
+    const span: VacuumSpan = refs.length === 1 ? 'whole' : i === 0 ? 'first' : i === refs.length - 1 ? 'last' : 'middle';
+    const subTool = toolForProgram(ref, job, tool, shop);
+    const sub = jobForSetup(job, ref, subTool);
+    return { ref, one: generateOneProgram(tl, sub, subTool, catalogue, calibration, margins, shop, span, i === 0) };
+  });
+
+  const first = results[0]!.one;
+  const stopped = results.find((r) => !r.one.ok);
+  return {
+    // The adapter: the top-level fields describe the FIRST program, which is the file the panels
+    // upload, simulate and save today. Multi-program upload is #419 §3's, not this slice's.
+    ...first,
+    ok: stopped === undefined,
+    stage: stopped?.one.stage ?? 'done',
+    findings: dedupeFindings(results.flatMap((r) => r.one.findings)),
+    errors: results.flatMap((r) => r.one.errors),
+    programs: results.flatMap((r) => (r.one.ok && r.one.nc !== null && r.one.verify !== null ? [programOf(r.one, r.ref)] : [])),
+  };
+}
+
+/** One program as the result's list entry, keyed by the FNV of its posted text (decision 3). */
+function programOf(one: Omit<EngraveGenerated, 'programs'>, ref: JobProgramRef): EngraveProgram {
+  const nc = one.nc!;
+  return {
+    setupIndex: ref.setupIndex,
+    setupId: ref.setupId,
+    toolKey: ref.toolKey,
+    nc,
+    verify: one.verify!,
+    frameNc: one.frameNc,
+    frameVerify: one.frameVerify,
+    programHash: programHash(nc),
+    cam: one.cam,
+  };
+}
+
+/**
+ * The cutter a program runs: the caller's resolved `Tool` when the program is the job's own cutter,
+ * otherwise the same key in the run's registry snapshot (`shop.tools`).
+ *
+ * The worker cannot see the tool registry (#305), which is why the job's cutter arrives as an
+ * argument at all. A setup naming a cutter that is in neither place returns null and the program
+ * stops at `feeds` with "the job has no usable cutter" — the same refusal a missing job cutter got.
+ */
+function toolForProgram(
+  ref: JobProgramRef,
+  job: EngraveJob,
+  tool: Tool | null,
+  shop: EngraveShopOpts,
+): Tool | null {
+  if (ref.toolKey === job.toolKey && tool !== null) return tool;
+  const entry = (shop.tools ?? []).find((e) => e.key === ref.toolKey);
+  return entry?.tool ?? (ref.toolKey === job.toolKey ? tool : null);
+}
+
+/**
+ * ONE program: the pipeline as it shipped, for one setup and one cutter. Returns everything the
+ * result carries EXCEPT `programs` — the list is assembled by the loop in `engraveGenerate`, which
+ * is the only place that knows how many programs the job has.
+ *
+ * `span` is this file's share of the run's vacuum words (decision 4) and `withFacing` says whether
+ * this program builds the job's facing file. The facing pass is a property of the BLANK, not of a
+ * setup, so exactly one program in a run produces it — the first, so the operator faces before any
+ * cut.
+ */
+function generateOneProgram(
+  tl: ManifoldToplevel,
+  job: EngraveJob,
+  tool: Tool | null,
+  catalogue: readonly FeedCatalogueRow[],
+  calibration: MachineCalibration | null,
+  margins: EngraveMargins,
+  shop: EngraveShopOpts,
+  span: VacuumSpan,
+  withFacing: boolean,
+): Omit<EngraveGenerated, 'programs'> {
   // #347 — the JOB's machine, not the app's only one: the envelope, the spindle ceiling and the
   // frame below are read off the profile the document names. The POST is still `postZ1`'s dialect,
   // which is the only post this app has; a second mill is a second post, and this line is where a
@@ -778,7 +960,7 @@ export function engraveGenerate(
       threads?: ThreadMillPlan[] | null;
       threadMachining?: ThreadSettingsResult | null;
     },
-  ): EngraveGenerated => {
+  ): Omit<EngraveGenerated, 'programs'> => {
     if (extra?.message !== undefined) errors.push({ stage, message: extra.message });
     return {
       ok: false,
@@ -931,7 +1113,7 @@ export function engraveGenerate(
   };
   let nc: string;
   try {
-    const posted = postZ1(ir, ctx, mill);
+    const posted = postZ1(ir, ctx, mill, { vacuum: span });
     if (!posted.ok) return stop('post', { feeds, message: posted.errors.join('; ') });
     nc = posted.text;
   } catch (e) {
@@ -963,7 +1145,7 @@ export function engraveGenerate(
     // the run still succeeds, because an operator who cannot face in this app can face in their own
     // program and still cut what this run produced.
     const facing =
-      facingDepth > 0
+      withFacing && facingDepth > 0
         ? facingProgram(job, facingDepth, ctx, mill, setup, limit, shop.tools ?? [], catalogue, shop.feeds ?? undefined)
         : { nc: null, verify: null, toolKey: null, error: null };
 

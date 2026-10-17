@@ -65,6 +65,31 @@ export interface PostContext {
 export type PostResult = { ok: true; text: string } | { ok: false; errors: string[] };
 
 /**
+ * Which of this FILE's two vacuum words it writes (#419 decision 4 / Q-E).
+ *
+ * A job cut as ONE program per tool leaves the vacuum ON across the bit change: the machine's mode
+ * is a state, not a per-file promise, and switching it off between two files would let the chips
+ * settle into the work while the operator changes the cutter. So the words are spread across the
+ * RUN rather than repeated in every file:
+ *
+ *  - `'whole'` — this is the only program: on at the preamble, off at the ending. TODAY'S FILE,
+ *    byte for byte, which is why it is the default.
+ *  - `'first'` — the run's first program: on, and no off.
+ *  - `'middle'` — neither word.
+ *  - `'last'`  — the run's last program: no on, and an off at the ending.
+ *  - `'none'`  — neither word, and `ir.air` is not consulted. The FRAME file uses this (Q-F): an
+ *    air trace cuts nothing, so it neither wants the vacuum nor may it leave the mode changed for
+ *    whatever the operator runs next.
+ */
+export type VacuumSpan = 'whole' | 'first' | 'middle' | 'last' | 'none';
+
+/** Post-level options that are about this file's PLACE in a run, not about the machine. */
+export interface PostOptions {
+  /** Defaults to `'whole'` — a standalone file, as every file this app wrote before #419 was. */
+  vacuum?: VacuumSpan;
+}
+
+/**
  * The CAM id the header claims. Whether the machine accepts a non-Studio id is #208 D1;
  * keeping it a single constant makes that answer a one-line change.
  */
@@ -94,8 +119,19 @@ function mkr(tag: string, ...fields: string[]): string {
  * the manual-change dialect only), or the IR is not the flat frame (#237: a rotary-frame IR,
  * or the `'rotary-axis'` datum, cannot be posted by the flat dialect).
  */
-export function postZ1(ir: ToolpathIR, ctx: PostContext, machine: MillProfile): PostResult {
+export function postZ1(
+  ir: ToolpathIR,
+  ctx: PostContext,
+  machine: MillProfile,
+  opts: PostOptions = {},
+): PostResult {
   const errors: string[] = [];
+
+  // #419 decision 4 — this file's share of the run's vacuum words, decided ONCE here so the
+  // preamble and the ending cannot disagree about which program they are in.
+  const span = opts.vacuum ?? 'whole';
+  const vacuumOn = ir.air && (span === 'whole' || span === 'first');
+  const vacuumOff = ir.air && (span === 'whole' || span === 'last');
 
   // An operation with no moves is SKIPPED, not refused: `generateEngrave` emits one for a
   // label whose region is empty, so operation numbers track label order (#173 comment).
@@ -281,8 +317,11 @@ export function postZ1(ir: ToolpathIR, ctx: PostContext, machine: MillProfile): 
       // which the bench drove from our console around both 2026-10-12 first-chips runs
       // (`docs/bench/traces/2026-10-12-cut-rowA.log`) and which the maintainer runs for every real
       // cut. The switches are off at power-up and a file cannot assume where the last job left
-      // them, so the program states this itself — which is why it belongs in the file.
-      if (ir.air) body.push('M331');
+      // them, so the program states this itself — which is why it belongs in the file. WHICH file
+      // says it is the run's first (#419 decision 4): `vacuumOn` is false in a middle or last
+      // program, because the mode is already on, and switching it off and back on across a bit
+      // change is exactly what that decision avoids.
+      if (vacuumOn) body.push('M331');
       // #384 — THE FILE LIFTS THE HEAD ITSELF, IN THE MACHINE FRAME. After a manual `M6` the
       // head's Z is wherever the last job left it, so an XY rapid at "whatever Z the head is
       // at" is the move that drives a tool through the work. `G53` is absolute in MACHINE
@@ -309,8 +348,9 @@ export function postZ1(ir: ToolpathIR, ctx: PostContext, machine: MillProfile): 
   // ---- Studio's own ending, verbatim.
   body.push(`G0 Z${axis(FINAL_RETRACT_Z)}`);
   // The other end of #283's `M331`: an explicit off. A mode left on would keep running after the
-  // job — the bench rule is vacuum on for the cut, off when it is finished.
-  if (ir.air) body.push('M332');
+  // job — the bench rule is vacuum on for the cut, off when it is finished. Only the RUN's last
+  // program writes it (#419 decision 4); a `'none'` frame file never does.
+  if (vacuumOff) body.push('M332');
   body.push('M05', 'G28', 'M02');
 
   return { ok: true, text: [...header, '', ...body].join('\n') + '\n' };

@@ -265,12 +265,12 @@ export function runSettings(defaults: ShopDefaults | null): RunSettings {
   };
 }
 
-/** A short, stable hash of a program's text (FNV-1a, 32-bit) — the run confirmation's key (#423, Q17). */
-export function programHash(nc: string): string {
-  let h = 0x811c9dc5;
-  for (let i = 0; i < nc.length; i++) {
-    h ^= nc.charCodeAt(i);
-    h = Math.imul(h, 0x01000193) >>> 0;
-  }
-  return h.toString(16).padStart(8, '0');
-}
+/**
+ * A short, stable hash of a program's text (FNV-1a, 32-bit) — the run confirmation's key (#423, Q17).
+ *
+ * The implementation moved to `engine/cnc/programHash.ts` (#419 J3: the generator keys its
+ * per-program list with the same function and must not import this module's console/Tauri seam).
+ * Re-exported HERE so every import site of the run's key keeps working, and so there is still one
+ * name for it on the platform side.
+ */
+export { programHash } from '@/engine/cnc/programHash';

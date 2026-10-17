@@ -22,6 +22,7 @@ import { jobTool, toSetup } from '@/engine/cnc/engrave/jobSetup';
 import { Z1 } from '@/engine/cnc/machine';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { CAM_ID, CAM_NAME } from '@/engine/cnc/post/z1';
+import { programHash } from '@/engine/cnc/programHash';
 import { version as APP_VERSION } from '../../package.json';
 import { presetPartOnBoard } from '@/engine/cnc/sacrificial';
 import { calibrationFromReplies } from '@/engine/cnc/calibration';
@@ -1443,5 +1444,137 @@ describe('facing the stock’s top (#432 slices 1–2)', () => {
     expect(g.ok).toBe(true);
     expect(g.facingNc, `${g.facingError} ${JSON.stringify(g.facingVerify?.findings.slice(0, 3))}`).not.toBeNull();
     expect(g.facingToolKey).toBe('user:facing-3.175');
+  });
+});
+
+// #419 J3 — A JOB IS A LIST OF PROGRAMS.
+//
+// One file per setup, each cut with that setup's own cutter, each posted and verified on its own.
+// The vacuum words are spread across the RUN (decision 4): `M331` in the first program only, `M332`
+// in the last only, so the mode stays on across the bit change; the frame file carries neither
+// (Q-F). A job with no `setups[]` is the same single program it always was, which is what the rest
+// of this file's cases (all legacy jobs) already proves by passing unchanged.
+describe('engraveGenerate — one program per setup (#419 J3)', () => {
+  const IDENTITY = {
+    top: 'top',
+    bottom: 'bottom',
+    left: 'left',
+    right: 'right',
+    front: 'front',
+    back: 'back',
+  } as const;
+  /** The second setup's cutter: same geometry as the job's, a DIFFERENT key, so routing is visible. */
+  const TOOL_B: ToolLibraryEntry = {
+    key: 'user:flat-1-b',
+    tool: flatEndMill(1.0, { name: '1 mm flat (setup B)' }),
+    provenance: 'test',
+  };
+  const setUp = (job: EngraveJob, groups: string[][], tools: string[]): EngraveJob => ({
+    ...job,
+    setups: groups.map((itemIds, i) => ({
+      id: `setup-${i + 1}`,
+      orientation: { ...IDENTITY },
+      mount: { kind: 'vise' },
+      itemIds,
+      tools: tools[i] === undefined ? [] : [tools[i]!],
+    })),
+  });
+  const vacuumWords = (nc: string): string[] => [...nc.matchAll(/\bM33[12]\b/g)].map((m) => m[0]);
+
+  it('posts one program per setup, with the vacuum spanning the run and not each file', () => {
+    const job = defaultEngraveJob();
+    const [a, b] = job.labels.map((l) => l.id);
+    const two = setUp(job, [[a!], [b!]], [job.toolKey, TOOL_B.key]);
+    const g = generate(tl, two, null, [], undefined, { tools: [TOOL_B, ...TOOL_LIBRARY] });
+    expect(g.ok, JSON.stringify({ errors: g.errors, findings: g.findings.filter((f) => f.severity === 'error').map((f) => f.code) })).toBe(true);
+    expect(g.programs).toHaveLength(2);
+
+    const [first, last] = g.programs;
+    expect(first!.setupIndex).toBe(1);
+    expect(first!.toolKey).toBe(job.toolKey);
+    expect(last!.setupIndex).toBe(2);
+    expect(last!.toolKey).toBe(TOOL_B.key);
+
+    // Decision 4: on in the first, off in the last, and each file has exactly one of the two.
+    expect(vacuumWords(first!.nc)).toEqual(['M331']);
+    expect(vacuumWords(last!.nc)).toEqual(['M332']);
+
+    // Q-F: an air trace cuts nothing and must not move the mode either way.
+    expect(vacuumWords(first!.frameNc!)).toEqual([]);
+    expect(vacuumWords(last!.frameNc!)).toEqual([]);
+
+    // The two are genuinely different programs, keyed by their own text.
+    expect(first!.nc).not.toBe(last!.nc);
+    expect(first!.programHash).not.toBe(last!.programHash);
+    expect(first!.programHash).toBe(programHash(first!.nc));
+
+    // A setup cuts its own items and nothing else: one operation each, not three.
+    expect(first!.cam!.operations).toBe(1);
+    expect(last!.cam!.operations).toBe(1);
+  });
+
+  it('keeps the single-program fields pointing at the first program', () => {
+    const job = defaultEngraveJob();
+    const [a, b] = job.labels.map((l) => l.id);
+    const g = generate(tl, setUp(job, [[a!], [b!]], [job.toolKey, TOOL_B.key]), null, [], undefined, {
+      tools: [TOOL_B, ...TOOL_LIBRARY],
+    });
+    expect(g.nc).toBe(g.programs[0]!.nc);
+    expect(g.verify).toBe(g.programs[0]!.verify);
+    expect(g.cam).toBe(g.programs[0]!.cam);
+  });
+
+  it('writes both vacuum words when the job is one program, whatever the setups say', () => {
+    const job = defaultEngraveJob();
+    const ids = job.labels.map((l) => l.id);
+    const g = generate(tl, setUp(job, [ids], [job.toolKey]));
+    expect(g.ok).toBe(true);
+    expect(g.programs).toHaveLength(1);
+    expect(vacuumWords(g.programs[0]!.nc)).toEqual(['M331', 'M332']);
+  });
+
+  it('cuts a middle program with neither vacuum word', () => {
+    const job = defaultEngraveJob();
+    const [a, b, c] = job.labels.map((l) => l.id);
+    const g = generate(tl, setUp(job, [[a!], [b!], [c!]], [job.toolKey, TOOL_B.key, job.toolKey]), null, [], undefined, {
+      tools: [TOOL_B, ...TOOL_LIBRARY],
+    });
+    expect(g.ok, JSON.stringify({ errors: g.errors, findings: g.findings.filter((f) => f.severity === 'error').map((f) => f.code) })).toBe(true);
+    expect(g.programs).toHaveLength(3);
+    expect(vacuumWords(g.programs[0]!.nc)).toEqual(['M331']);
+    expect(vacuumWords(g.programs[1]!.nc)).toEqual([]);
+    expect(vacuumWords(g.programs[2]!.nc)).toEqual(['M332']);
+  });
+
+  it('refuses a setup naming two cutters: one program per cutter would cut its items twice', () => {
+    const job = defaultEngraveJob();
+    const ids = job.labels.map((l) => l.id);
+    const two = { ...setUp(job, [ids], [job.toolKey]), setups: [{ ...setUp(job, [ids], [job.toolKey]).setups![0]!, tools: [job.toolKey, TOOL_B.key] }] };
+    const g = generate(tl, two, null, [], undefined, { tools: [TOOL_B, ...TOOL_LIBRARY] });
+    expect(g.ok).toBe(false);
+    expect(g.stage).toBe('findings');
+    expect(g.programs).toEqual([]);
+    expect(g.findings.filter((f) => f.code === 'setup-tools-unassigned' && f.severity === 'error')).toHaveLength(1);
+  });
+
+  it('refuses a setup naming no cutter', () => {
+    const job = defaultEngraveJob();
+    const ids = job.labels.map((l) => l.id);
+    const g = generate(tl, setUp(job, [ids], []), null, [], undefined, { tools: [TOOL_B] });
+    expect(g.ok).toBe(false);
+    expect(g.stage).toBe('findings');
+    expect(g.findings.some((f) => f.code === 'setup-no-tool')).toBe(true);
+  });
+
+  it('a legacy job is one program, and its frame file still carries no vacuum word', () => {
+    const g = generate(tl, defaultEngraveJob());
+    expect(g.ok).toBe(true);
+    expect(g.programs).toHaveLength(1);
+    expect(g.programs[0]!.nc).toBe(g.nc);
+    expect(g.programs[0]!.setupIndex).toBe(1);
+    // The file itself still turns the vacuum on and off — it is the whole run.
+    expect(vacuumWords(g.programs[0]!.nc)).toEqual(['M331', 'M332']);
+    // The frame file never did cut anything; since #419 Q-F it says nothing about the vacuum.
+    expect(vacuumWords(g.frameNc!)).toEqual([]);
   });
 });

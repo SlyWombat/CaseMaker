@@ -463,6 +463,24 @@ describe('EngravePanel — the run sheet mount (#207)', () => {
       facingToolKey: null,
       facingError: null,
       predicted: [],
+      // #419 J3 — the same program, as the run's list of one.
+      programs: [
+        {
+          setupIndex: 1,
+          setupId: 'setup-implicit',
+          toolKey: 'flat-1.0',
+          nc,
+          verify: {
+            ok: true,
+            findings: [],
+            stats: { lines: 2, cuttingMoves: 1, deepestZ: -2, bbox: { min: [0, 0, -2], max: [1, 1, 0] } },
+          },
+          frameNc: `${nc}\n;frame\n`,
+          frameVerify: null,
+          programHash: '00000000',
+          cam: { operations: 1, cuttingMoves: 10, estimatedSeconds: 5, passes: 2 },
+        },
+      ],
       errors: [],
     };
   }

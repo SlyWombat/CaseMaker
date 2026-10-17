@@ -41,6 +41,7 @@ const NOTHING: EngraveGenerated = {
   facingToolKey: null,
   facingError: null,
   predicted: [],
+  programs: [],
   errors: [],
 };
 
@@ -75,6 +76,7 @@ function clean(): EngraveGenerated {
     facingToolKey: null,
     facingError: null,
     predicted: [],
+    programs: [],
     errors: [],
   };
 }
