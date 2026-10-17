@@ -10,6 +10,7 @@ mod config;
 mod config_api;
 mod defaults;
 mod etag;
+mod feeds;
 mod guard;
 mod house;
 mod house_api;
