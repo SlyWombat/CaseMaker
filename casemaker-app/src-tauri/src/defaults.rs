@@ -133,6 +133,9 @@ pub const SEEDS: &[(&str, f64, &str)] = &[
     ("registration.cornerClearanceMm", 2.0, "mm"),
     ("registration.surfaceBandMm", 0.25, "mm"),
     ("registration.edgeMarginMm", 0.5, "mm"),
+    // #475 - the surface touches across the cut regions' extents: a centre plus both extents on each
+    // axis. CHOSEN, not measured; `defaultsClient.ts` states the same 5..=9 whole-number bound.
+    ("registration.surfaceTouchCount", 5.0, "touches"),
     ("registration.surfaceSeekMm", 60.0, "mm"),
     // How far the surface may sit from where the job expects it (stock thickness, the mount, G54 Z):
     // the surface touch only travels within this band, and refuses a reading outside it.
@@ -523,6 +526,10 @@ fn known_rule(key: &str, n: Option<f64>) -> Option<Result<(), String>> {
         "registration.scanReachMm" => Some(need(
             n.is_some_and(|v| (0.5..=50.0).contains(&v)),
             "0.5 to 50 mm",
+        )),
+        "registration.surfaceTouchCount" => Some(need(
+            n.is_some_and(|v| (5.0..=9.0).contains(&v) && v.fract() == 0.0),
+            "a whole number of touches, 5 to 9",
         )),
         "registration.cornerClearanceMm" => Some(need(
             n.is_some_and(|v| (0.0..=30.0).contains(&v)),

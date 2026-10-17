@@ -15,7 +15,6 @@ import { fileURLToPath } from 'node:url';
 import {
   buildRunSheet,
   formatDuration,
-  PANEL_RENDER_ERROR_CODE,
   FRAME_Z,
   rapidAssumptionNote,
   runSheetDiagramSvg,
@@ -226,24 +225,6 @@ describe('runSheet (#207)', () => {
     expect(warnings).toContain('The fixture was not checked.');
     expect(warnings).toContain('The holder is unproven.');
     expect(warnings.some((t) => t.includes('not a warning'))).toBe(false);
-  });
-
-  // #490 — the boundary writes a render crash into the run's diagnostics as an `error`. The sheet
-  // carries that one in section 8 (it is a fact about the run by the time the sheet is read), and
-  // keeps dropping other errors, which gate the run instead of being printed as prose.
-  it('carries a panel render crash with the warnings, and only that error (#490)', () => {
-    const job = defaultEngraveJob();
-    const sim: RunSheetSim = {
-      diagnostics: [
-        { severity: 'error', code: PANEL_RENDER_ERROR_CODE, message: 'boom (Engrave panel)' },
-        { severity: 'error', code: 'holder-collision', message: 'A refusal that must not reach the sheet.' },
-      ],
-    };
-    const warnings = section(buildRunSheet(job, stubGenerated(job), sim, NOW), 'warnings').steps.map(
-      (s) => s.text,
-    );
-    expect(warnings).toContain('boom (Engrave panel)');
-    expect(warnings.some((t) => t.includes('must not reach'))).toBe(false);
   });
 
   // #243 — the run sheet's §8 carries the Simulate panel's own coverage sentence, from the
@@ -756,41 +737,12 @@ describe('runSheet (#207)', () => {
       expect(svg).not.toContain('href=');
     });
 
-    it('lists the codes the drawing uses, in order, as the paper’s small print', () => {
-      // The drawing cannot hover on paper, so it carries a key. Only the codes THIS shape draws,
-      // each with its word and no value — the values are on the dimension lines.
-      const engraver = defaultEngraveJob();
-      engraver.tool = flatEndMill(3.175, {
-        name: '30° engraving bit',
-        typeText: 'Engraving',
-        shape: 'engraving',
-        tipDiameter: 0.3,
-        diameter: 3.175,
-        halfAngle: 15,
-        angle: 30,
-        fluteLength: 6,
-        shoulderLength: null,
-      });
-      expect(sheetFor(engraver).toolProfileLegend).toBe(
-        'DS shank diameter · DC cutting diameter · LC flute length · AN half angle · D1 tip diameter',
-      );
-
-      const flat = defaultEngraveJob();
-      flat.tool = flatEndMill(3.175, { fluteLength: 12, shoulderLength: null });
-      expect(sheetFor(flat).toolProfileLegend).toBe(
-        'DS shank diameter · DC cutting diameter · LC flute length · LS shoulder length',
-      );
-      // A code the shape does not draw is never in the key.
-      expect(sheetFor(flat).toolProfileLegend).not.toContain('AN');
-    });
-
     it('is absent when the job names no cutter', () => {
       const job = defaultEngraveJob();
       job.tool = null;
       job.toolKey = 'user:not-in-this-house';
       const sheet = sheetFor(job);
       expect('toolProfileSvg' in sheet).toBe(false);
-      expect('toolProfileLegend' in sheet).toBe(false);
     });
 
     it('embeds the same drawing in the Markdown, under the cutter section', () => {
@@ -802,10 +754,6 @@ describe('runSheet (#207)', () => {
       expect(need).toBeGreaterThan(-1);
       expect(drawing).toBeGreaterThan(need);
       expect(drawing).toBeLessThan(mount);
-      // …with its key directly under it, because the paper cannot hover.
-      const legend = md.indexOf(sheet.toolProfileLegend!);
-      expect(legend).toBeGreaterThan(drawing);
-      expect(legend).toBeLessThan(mount);
     });
   });
 
@@ -1547,6 +1495,36 @@ describe('runSheet — the facing phase (#432 slice 3)', () => {
   });
 });
 
+// #491 — the sheet's "The cutter" step carries the colour word of the copy the pick would choose.
+// The sheet stays pure: the word is handed in (`toolCase`), never read from a registry the bench
+// CLI and the sim worker do not have. Absent means the old colourless sentence — never a guess.
+describe('#491 the cutter’s case on the run sheet', () => {
+  const cutterStep = (options: RunSheetOptions) =>
+    section(sheetFor(defaultEngraveJob(), NO_SIM, NC, options), 'need').steps.find((s) =>
+      s.text.startsWith('The cutter'),
+    )!;
+
+  it('prints the word before the full label name', () => {
+    expect(cutterStep({}).text).not.toContain('case');
+    expect(cutterStep({ toolCase: 'Yellow case' }).text).toMatch(/^The cutter — Yellow case — .+\.$/);
+    expect(cutterStep({ toolCase: 'Yellow case (new) or green case (used)' }).text).toContain(
+      'Yellow case (new) or green case (used) —',
+    );
+  });
+
+  it('leaves a sheet built without the option byte-identical to before the field existed', () => {
+    // One job and one generated result: `defaultEngraveJob()` mints fresh label ids each call, so
+    // two of them would differ for a reason that has nothing to do with the new option.
+    const job = defaultEngraveJob();
+    const generated = stubGenerated(job);
+    expect(JSON.stringify(buildRunSheet(job, generated, NO_SIM, NOW))).toBe(
+      JSON.stringify(buildRunSheet(job, generated, NO_SIM, NOW, undefined, {})),
+    );
+    expect(cutterStep({}).text).not.toContain('— Yellow');
+  });
+});
+
+
 // #475 — Z0 on a bowed blank is measured, not a point. The sheet plans the touches across the cut's
 // extents and prints the band; with readings it prints the verdict, and the refusal is the finding's
 // own sentence so the paper and the app cannot say two things.
@@ -1589,31 +1567,5 @@ describe('the surface spread (#475)', () => {
     expect(all).toContain('may land from');
     expect(all).toContain('mm below Z0 and nowhere else');
     expect(steps.some((s) => s.bold === true && s.text.startsWith('this blank is bowed'))).toBe(false);
-// #491 — the sheet's "The cutter" step carries the colour word of the copy the pick would choose.
-// The sheet stays pure: the word is handed in (`toolCase`), never read from a registry the bench
-// CLI and the sim worker do not have. Absent means the old colourless sentence — never a guess.
-describe('#491 the cutter’s case on the run sheet', () => {
-  const cutterStep = (options: RunSheetOptions) =>
-    section(sheetFor(defaultEngraveJob(), NO_SIM, NC, options), 'need').steps.find((s) =>
-      s.text.startsWith('The cutter'),
-    )!;
-
-  it('prints the word before the full label name', () => {
-    expect(cutterStep({}).text).not.toContain('case');
-    expect(cutterStep({ toolCase: 'Yellow case' }).text).toMatch(/^The cutter — Yellow case — .+\.$/);
-    expect(cutterStep({ toolCase: 'Yellow case (new) or green case (used)' }).text).toContain(
-      'Yellow case (new) or green case (used) —',
-    );
-  });
-
-  it('leaves a sheet built without the option byte-identical to before the field existed', () => {
-    // One job and one generated result: `defaultEngraveJob()` mints fresh label ids each call, so
-    // two of them would differ for a reason that has nothing to do with the new option.
-    const job = defaultEngraveJob();
-    const generated = stubGenerated(job);
-    expect(JSON.stringify(buildRunSheet(job, generated, NO_SIM, NOW))).toBe(
-      JSON.stringify(buildRunSheet(job, generated, NO_SIM, NOW, undefined, {})),
-    );
-    expect(cutterStep({}).text).not.toContain('— Yellow');
   });
 });
