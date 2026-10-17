@@ -31,18 +31,24 @@ function jobForBadge(badge = defaultBadgeParams()): EngraveJob {
 describe('badgeBlankFor (#271)', () => {
   it('reads the blank out of the badge, in the job’s own stock shape', () => {
     const blank = badgeBlankFor(defaultBadgeParams());
-    // The badge's `width` is X and its `height` is Y — 3.0 in × 1.5 in, 0.15 in thick. What rides
-    // ALONG in the same object — the print and the dome (#285, #352, #368) — is those issues'
-    // business and is asserted in its own describe below, so here it is only that the dimensions are
-    // the badge's own, matched rather than deep-equalled so a fact added beside them cannot fail this.
+    // The badge is 3.0 in × 1.5 in (76.2 × 38.1), 0.15 in thick, and it goes on the bench TURNED
+    // a quarter turn (#383): its 38.1 mm side is across the jaws (X), so the stock's `length` is
+    // that side and its `width` the 76.2 mm one. What rides ALONG in the same object — the print
+    // and the dome (#285, #352, #368) — is those issues' business and is asserted in its own
+    // describe below, so here it is only that the dimensions are the badge's own, matched rather
+    // than deep-equalled so a fact added beside them cannot fail this.
     expect(blank.stock).toMatchObject({
-      length: 76.2,
-      width: 38.1,
+      length: 38.1,
+      width: 76.2,
       thickness: 3.81,
       material: 'pla',
       print: { split: 3, layerHeight: 0.2, firstLayerHeight: 0.2 },
     });
-    expect(blank.notes[0]).toContain('76.2 × 38.1 × 3.81');
+    // The note prints the stock in the job's own order, and says why it is the other way round
+    // from the badge's numbers — a sentence the person reading 38.1 × 76.2 is owed (#383).
+    expect(blank.notes[0]).toContain('38.1 × 76.2 × 3.81');
+    expect(blank.notes[0]).toContain('turned a quarter turn');
+    expect(blank.notes[0]).toContain('76.2 mm side now runs along Y');
   });
 
   it('stamps the magnet pocket with a ceiling in the blank’s own datum', () => {
@@ -51,10 +57,12 @@ describe('badgeBlankFor (#271)', () => {
     expect(pocket!.id).toBe(BADGE_POCKET_KEEP_OUT_ID);
     expect(pocket!.kind).toBe('rect');
     if (pocket!.kind !== 'rect') return;
-    expect(pocket!.width).toBe(45);
-    expect(pocket!.height).toBe(13);
+    // 45 × 13 in the badge's own frame, turned with the blank (#383): `pocket.length` runs along
+    // the badge's X, which on the stock is Y — so on the blank the rect is 13 across and 45 along.
+    expect(pocket!.width).toBe(13);
+    expect(pocket!.height).toBe(45);
     // Centred on the outline in the badge's frame -> the middle of the job's stock.
-    expect(pocket!.position).toEqual({ x: 38.1, y: 19.05 });
+    expect(pocket!.position).toEqual({ x: 19.05, y: 38.1 });
     // `pocket.depth` is measured from the BACK face; so is `zCeiling` — machined pocket-down
     // (/Fabrication.md §7.2), the back face IS the bottom face. Copied, not recomputed.
     expect(pocket!.zCeiling).toBe(2.3);
@@ -81,12 +89,12 @@ describe('badgeBlankFor (#271)', () => {
     // `max(boundaryMargin, minFloor)` = 1.0, not the shipped 0.2 (#345 decision A: with no layer
     // grid the structural floor is the only number with a basis).
     // 1.51 mm of membrane, less 1.0: 0.51 mm over the pocket…
-    expect(keepOutLimitAt(job, 38.1, 19.05)).toBeCloseTo(0.51, 6);
+    expect(keepOutLimitAt(job, 19.05, 38.1)).toBeCloseTo(0.51, 6);
     // …and nothing reserved out at the blank's corner, where the limit is the stock's own.
     expect(keepOutLimitAt(job, 5, 5)).toBeNull();
     expect(jobDepthLimit(job)(5, 5)).toBeCloseTo(3.81 - 1, 6);
     // The membrane is thin: a 1.5 mm cut on the badge's engraved face breaks through it.
-    expect(jobDepthLimit(job)(38.1, 19.05)).toBeLessThan(1.5);
+    expect(jobDepthLimit(job)(19.05, 38.1)).toBeLessThan(1.5);
   });
 
   it('survives the schema round-trip, at the same fixed id', () => {

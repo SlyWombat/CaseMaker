@@ -360,7 +360,8 @@ own badge, so nobody retypes 76.2 × 38.1 × 3.81 (chapter 6). Taking a blank al
 vise's **stock proud** with it when the vise is still the shipped default — half the blank, at
 most 4 mm (#344) — because a flat 4 mm stands taller than a 3.81 mm badge. A vise you saved or
 measured is never touched. X runs between the vise jaws; the fixed jaw is on the left. The
-stock's front-left corner is the work origin.
+stock's front-left corner is the work origin. A badge blank comes **turned a quarter turn**: its
+38.1 mm side runs across the jaws, its 76.2 mm side along them, so a name reads along Y (#383).
 
 A new blank also re-works the **lines** on it — where the job's set is still one the app laid out
 itself. Those three demo words were laid out for the 100 × 60 mm default plank, so on a badge they
@@ -603,7 +604,9 @@ number, and typing a depth is the override for anyone who wants one.
 of the Engrave panel's *Stock* section (chapter 5, step 1). It reads the project's badge —
 76.2 × 38.1 × 3.81 mm PLA by default — and sets the stock to that blank and declares its
 magnet pocket as a void the depth limit respects, then states back in a sentence what it set.
-Nothing else in the job changes.
+The blank is **turned to sit in the vise**: its 38.1 mm side across the jaws (X), its 76.2 mm
+side along them (Y), so the stock reads 38.1 × 76.2 and the name runs along Y (#383). Nothing
+else in the job changes.
 
 **The two-state depth choice (#170).** On a blank that says how it was printed, every label row
 carries **surface** and **reveal** beside its depth field. Each one writes the depth it means —

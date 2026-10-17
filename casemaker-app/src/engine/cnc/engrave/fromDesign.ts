@@ -206,10 +206,11 @@ function isBadgeBlank(design: Pick<DesignImport, 'stock'>): boolean {
  * The dome on the engraved face, or undefined (#345, #437).
  *
  * Only the badge blank gets a dome. For it `across` is computed from THIS job's spans rather than
- * copied from the badge route: the two blanks are the same part, but a design job's frame is turned,
- * so the 38.1 mm span — the one #345 measured the 0.33 mm across — is this job's `length`, where on
- * a badge job it is the `width` (`materialScan.ts` carries the same warning). Its source is
- * `badge`: this route COPIES the badge blank's own default, it did not measure anything here.
+ * copied from the badge route: the two routes turn the blank the same way since #383, but `across`
+ * names a span in the JOB's frame (`materialScan.ts` reads `'width'` as its X, and carries the
+ * warning), so the 38.1 mm span — the one #345 measured the 0.33 mm across — is this job's
+ * `length`. Its source is `badge`: this route COPIES the badge blank's own default, it did not
+ * measure anything here.
  *
  * For any other blank the dome is unknown, not a chosen default: a design file states no dome, and
  * stamping the badge's number onto an arbitrary plaque would put a figure nobody supplied into the

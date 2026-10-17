@@ -317,7 +317,10 @@ describe('the run sheet prints the margins (#345)', () => {
     const step = marginsStepOf(job)!;
     expect(step.value).toBe('0.2 mm boundary margin · the house default');
     expect(step.text).toContain('Recommended for this blank: 0.331 mm');
-    expect(step.text).toContain('domed 0.33 mm across its width');
+    // The dome is 0.33 mm across the badge's 38.1 mm side, which the blank's quarter turn (#383)
+    // makes the STOCK's length — the sentence names a span in the job's frame, as `flatness.across`
+    // does, so it reads "length" rather than the badge's own "width".
+    expect(step.text).toContain('domed 0.33 mm across its length');
   });
 
   it('leaves a job with no bound alone — the block would have nothing to say in it', () => {
@@ -485,11 +488,10 @@ describe('the label depth a blank allows (#362)', () => {
 
   /**
    * The demo 'CASE' line placed where the JAWS can reach it (#394). The line MEASURES 46.28 mm
-   * wide, so its own default (x = 50 on the 76.2 mm badge blank) comes 3.06 mm off the moving jaw
-   * face — past the 2.5 mm reach a default vise's 2 mm band plus the cutter's 0.5 mm radius opens,
-   * so it would be charged no jaw floor at all and the jaw's own tests would be testing nothing.
-   * At x = 24 its box comes 0.86 mm off the FIXED jaw face: the jaw floor is in play, and the other
-   * jaw is still 28.06 mm away, so which jaw answers is unambiguous.
+   * wide, and since the blank is TURNED for the vise (#383) the stock runs 38.1 mm in X, so the
+   * line's default x = 50 hangs off the moving end. At x = 24 its box comes 0.86 mm off the FIXED
+   * jaw face: the jaw floor is in play, and it overhangs the moving jaw outright, so the two gaps
+   * are 0.86 mm and 0 — the FIXED jaw is still the nearer, which is the one the clause names.
    */
   const nearJaw = (over: Partial<EngraveLabel> = {}): EngraveLabel =>
     label({ position: { x: 24, y: 43 }, ...over });
@@ -643,7 +645,7 @@ describe('the label depth a blank allows (#362)', () => {
     // else on the blank.
     const job = badgeJob();
     const measure = labelGlyphMeasure([]);
-    const over = label({ position: { x: 38.1, y: 19.05 } }); // the pocket's own centre
+    const over = label({ position: { x: 19.05, y: 38.1 } }); // the pocket's own centre
     const bound = voidLimitForItem(job, over, undefined, measure)!;
     expect(bound.name).toBe('Magnet pocket');
     expect(bound.limit).toBe(0.5100000000000002);
@@ -651,22 +653,23 @@ describe('the label depth a blank allows (#362)', () => {
     expect(rec.depth).toBe(0.51);
     expect(rec.basis[0]).toBe('"Magnet pocket" leaves 0.51 mm of material');
 
-    // The line the badge route seeds: 'Name' at 8 mm on (38.1, 6.775), whose ink box stops short of
-    // the pocket's roof at y = 12.55. It reaches NO void, and since #369 it is clear of the JAWS too
-    // — its MEASURED box is 28.2857 mm across a 76.2 mm blank (#394), so it comes 23.957 mm from
-    // either jaw face, far past the 1 mm reach the jaws are judged by (`uncertainty + radius`, 0.5 mm
-    // of band and a 1 mm cutter, #391/#394). With no item limit binding, #440 makes the answer the
-    // label's OWN depth, not the blank's 2.81 mm ceiling: this fixture's label carries the demo
-    // 'CASE' line's 2 mm, and the ceiling merely bounds it. The basis says both, and the jaws set no
-    // limit rather than staying silent about them.
-    const beside = label({ text: 'Name', size: 8, position: { x: 38.1, y: 6.775 } });
+    // The line the badge route seeds: 'Name' at 8 mm, turned with the blank so it reads along Y —
+    // (31.325, 38.1) at 90° (#383). Its ink box comes ~1.7 mm clear of the pocket's x band
+    // (12.55–25.55), so it reaches NO void, and since #369 it is clear of the JAWS too — the
+    // MEASURED box is 28.2857 mm long, so turned it stops ~2.7 mm short of the moving jaw face,
+    // past the 1 mm reach the jaws are judged by (`uncertainty + radius`, 0.5 mm of band and a 1 mm
+    // cutter, #391/#394). With no item limit binding, #440 makes the answer the label's OWN depth,
+    // not the blank's 2.81 mm ceiling: this fixture's label carries the demo 'CASE' line's 2 mm, and
+    // the ceiling merely bounds it. The basis says both, and the jaws set no limit rather than
+    // staying silent about them.
+    const beside = label({ text: 'Name', size: 8, position: { x: 31.325, y: 38.1 }, rotation: 90 });
     expect(voidLimitForItem(job, beside, undefined, measure)).toBeNull();
     const besideRec = recommendLabelDepth(job, beside, inputsFor(job, beside))!;
     expect(besideRec.depth).toBe(2);
     expect(besideRec.basis[0]).toBe(
       "the blank's 1 mm minimum floor allows 2.81 mm, and the label's own 2 mm depth is within it",
     );
-    expect(besideRec.basis[1]).toContain('clear of both jaws by at least 23.957 mm; the jaws set no limit here');
+    expect(besideRec.basis[1]).toContain('clear of both jaws by at least 2.729 mm; the jaws set no limit here');
 
     // A blank with nothing declared under it has no void floor to keep, and a void that does not cut
     // cannot bind anything either.
@@ -678,7 +681,7 @@ describe('the label depth a blank allows (#362)', () => {
 
   it('measures the line with the face where it can, and says so in the basis where it cannot (#365)', () => {
     const job = badgeJob();
-    const over = label({ position: { x: 38.1, y: 19.05 } });
+    const over = label({ position: { x: 19.05, y: 38.1 } });
     // No measure injected is the hand-off's own case: `inkBoxOf`'s documented upper-bound estimate,
     // and the answer carries that fact so the clause does not read as a measurement nobody made.
     // The estimate is the TIMID box, so a number worked out with it can only move deeper later.
@@ -701,22 +704,24 @@ describe('the label depth a blank allows (#362)', () => {
   it('reads every void kind in the void’s OWN frame, rotation included (#365 decision 1)', () => {
     const job = badgeJob();
     const measure = labelGlyphMeasure([]); // the app's own adapter, so the box is the real ink
-    // The seeded 'Name' line at 8 mm, centred on the pocket, widened into a box by that face.
-    const line = label({ text: 'Name', size: 8, position: { x: 38.1, y: 19.05 } });
+    // The seeded 'Name' line at 8 mm, centred on the pocket — the turned blank's centre (#383),
+    // widened into a box by that face.
+    const line = label({ text: 'Name', size: 8, position: { x: 19.05, y: 38.1 } });
     // Four voids, four kinds, each one reaching that line: a rect's face, a circle's disc, a slot
     // lying ACROSS the line (its rotated frame, not the blank's) and a ring whose bounding box the
     // line crosses.
     const reaching: EngraveKeepOut[] = [
-      { id: 'r', name: 'R', kind: 'rect', position: { x: 38.1, y: 19.05 }, rotation: 0, enabled: true, zCeiling: 2.3, width: 20, height: 6, cornerRadius: 0 },
-      { id: 'c', name: 'C', kind: 'circle', position: { x: 38.1, y: 19.05 }, rotation: 0, enabled: true, zCeiling: 2.3, diameter: 6 },
-      { id: 's', name: 'S', kind: 'slot', position: { x: 38.1, y: 19.05 }, rotation: 90, enabled: true, zCeiling: 2.3, length: 12, width: 4 },
-      { id: 'p', name: 'P', kind: 'polygon', position: { x: 38.1, y: 19.05 }, rotation: 30, enabled: true, zCeiling: 2.3, points: [[-6, -2], [6, -2], [6, 2], [-6, 2]] },
+      { id: 'r', name: 'R', kind: 'rect', position: { x: 19.05, y: 38.1 }, rotation: 0, enabled: true, zCeiling: 2.3, width: 20, height: 6, cornerRadius: 0 },
+      { id: 'c', name: 'C', kind: 'circle', position: { x: 19.05, y: 38.1 }, rotation: 0, enabled: true, zCeiling: 2.3, diameter: 6 },
+      { id: 's', name: 'S', kind: 'slot', position: { x: 19.05, y: 38.1 }, rotation: 90, enabled: true, zCeiling: 2.3, length: 12, width: 4 },
+      { id: 'p', name: 'P', kind: 'polygon', position: { x: 19.05, y: 38.1 }, rotation: 30, enabled: true, zCeiling: 2.3, points: [[-6, -2], [6, -2], [6, 2], [-6, 2]] },
     ];
     for (const ko of reaching) {
       expect(voidLimitForItem({ ...job, keepOuts: [ko] }, line, undefined, measure)?.name, ko.kind).toBe(ko.name);
     }
-    // The same four, moved clear of the line's box: none of them binds it. (Their CENTRES are still
-    // in the line's x range, so a check that reached for the wrong axis would fail here.)
+    // The same four, moved clear of the line's box: none of them binds it. (Their CENTRES stay in
+    // the line's x range — x = 10 against 4.91–33.19 — so a check that reached for the wrong axis
+    // would fail here.)
     for (const ko of reaching) {
       expect(
         voidLimitForItem({ ...job, keepOuts: [{ ...ko, position: { x: 10, y: 8 } }] }, line, undefined, measure),
@@ -724,10 +729,12 @@ describe('the label depth a blank allows (#362)', () => {
       ).toBeNull();
     }
 
-    // Rotation is the LINE's extent turning, read in the void's frame: this line clears the pocket's
-    // band (y 12.55–25.55) upright at (38.1, 30) — its ink half-height is 4.05 — and reaches it
-    // turned 90° about the same centre, where the half-WIDTH faces the pocket instead.
-    const upright = label({ text: 'Name', size: 8, position: { x: 38.1, y: 30 }, rotation: 0 });
+    // Rotation is the LINE's extent turning, read in the void's frame: the pocket is 13 mm across X
+    // and 45 mm along Y (a 12.55–25.55 x band, 15.6–60.6 in y). This line clears the pocket's y
+    // band upright at (19.05, 68) — its ink half-height is 4.05 — even though its 28.29 mm width
+    // spans the x band; turned 90° about the same centre the half-LENGTH faces the pocket in Y and
+    // reaches it.
+    const upright = label({ text: 'Name', size: 8, position: { x: 19.05, y: 68 }, rotation: 0 });
     expect(voidLimitForItem(job, upright, undefined, measure)).toBeNull();
     expect(voidLimitForItem(job, { ...upright, rotation: 90 }, undefined, measure)?.name).toBe('Magnet pocket');
   });
@@ -757,7 +764,7 @@ describe('the label depth a blank allows (#362)', () => {
     // Since #365 the void bound is the LINE's own, so this one is placed over the pocket for the
     // limit to be in play at all — the 'CASE' line itself sits at (50, 43), clear of it.
     const inputs = inputsFor(job, label(), {
-      voidLimit: voidLimitForItem(job, label({ position: { x: 38.1, y: 19.05 } })),
+      voidLimit: voidLimitForItem(job, label({ position: { x: 19.05, y: 38.1 } })),
     });
     expect(recommendLabelDepth(job, label({ depthIntent: 'surface' }), inputs)).toBeNull();
     expect(recommendLabelDepth(job, label({ depthIntent: 'custom' }), inputs)).toBeNull();
@@ -828,7 +835,7 @@ describe('the label depth a blank allows (#362)', () => {
     // Since #365 the void bound is the LINE's own, so this one is placed over the pocket for the
     // limit to be in play at all — the 'CASE' line itself sits at (50, 43), clear of it.
     const inputs = inputsFor(job, label(), {
-      voidLimit: voidLimitForItem(job, label({ position: { x: 38.1, y: 19.05 } })),
+      voidLimit: voidLimitForItem(job, label({ position: { x: 19.05, y: 38.1 } })),
     });
     const stated = label({ depthIntent: 'surface' });
     expect(recommendLabelDepth(job, stated, inputs)).toBeNull();
@@ -851,14 +858,15 @@ describe('the label depth a blank allows (#362)', () => {
   // #394), and a line clear of both jaws is bound by something else — or nothing.
   it('charges a jaw only to the lines it can reach, and names the jaw that binds (#369)', () => {
     const job = badgeJob({ keepOuts: [] });
-    // The blank's jaws face each other 76.2 mm apart in X and span the whole 38.1 mm of Y. A 'Name'
-    // line 8 mm tall MEASURES 28.2857 mm wide (#394), so centred on the blank it stops 23.957 mm
-    // short of either jaw face — past the 1.0 mm reach the shipped vise's own 0.5 mm uncertainty
-    // (calipered 2026-10-13/15, #208) plus the cutter's 0.5 mm radius opens up. Clear: no jaw bound.
-    const centred = label({ text: 'Name', size: 8, position: { x: 38.1, y: 6.775 } });
+    // The blank is TURNED for the vise (#383), so its jaws face each other 38.1 mm apart in X and
+    // span the whole 76.2 mm of Y. A 'Name' line 8 mm tall MEASURES 28.2857 mm wide (#394), so
+    // centred on the blank (x = 19.05) it stops 4.907 mm short of either jaw face — past the 1.0 mm
+    // reach the shipped vise's own 0.5 mm uncertainty (calipered 2026-10-13/15, #208) plus the
+    // cutter's 0.5 mm radius opens up. Clear: no jaw bound.
+    const centred = label({ text: 'Name', size: 8, position: { x: 19.05, y: 6.775 } });
     const clear = labelJawReach(job, centred);
     expect(clear.jaw).toBe('fixed');
-    expect(clear.gap).toBeCloseTo(23.957, 3);
+    expect(clear.gap).toBeCloseTo(4.907, 3);
     expect(clear.reaches).toBe(false);
     const clearRec = recommendLabelDepth(job, centred, inputsFor(job, centred))!;
     // #440 — the line's own depth (the demo 'CASE' 2 mm), not the blank's 2.81 mm ceiling. The
@@ -867,7 +875,7 @@ describe('the label depth a blank allows (#362)', () => {
     expect(clearRec.basis[0]).toContain("the label's own 2 mm depth is within it");
     // The jaws are still SAID, in the not-binding tail the panel row does not print: a clause that
     // named the floor and stayed silent about the jaws would read as if none had been considered.
-    expect(clearRec.basis[1]).toBe('clear of both jaws by at least 23.957 mm; the jaws set no limit here');
+    expect(clearRec.basis[1]).toBe('clear of both jaws by at least 4.907 mm; the jaws set no limit here');
 
     // …and the issue's own example, the same line 2 mm off the fixed jaw, is CLEAR now: the reach is
     // 0.5 + 0.5 = 1.0 mm, so 2 mm is twice it. Pinned because it moved with the caliper, not with
@@ -894,9 +902,10 @@ describe('the label depth a blank allows (#362)', () => {
 
     // A line wide enough to hang past BOTH jaw faces reaches both, and the tie goes to the fixed one
     // — the first the envelope declares — so the clause names one jaw rather than flickering between
-    // two. 'CASE' at 30 mm measures 99.171 mm, wider than the blank is long, and centred at x = 38.1
-    // it pokes out of each end; a line whose box overlaps a jaw is 0 mm from it, not a negative gap.
-    expect(labelJawReach(job, label({ size: 30, position: { x: 38.1, y: 43 } }))).toMatchObject({
+    // two. 'CASE' at 30 mm measures 99.171 mm, wider than the turned blank is long (38.1 mm in X),
+    // and centred at x = 19.05 it pokes out of each end; a line whose box overlaps a jaw is 0 mm
+    // from it, not a negative gap.
+    expect(labelJawReach(job, label({ size: 30, position: { x: 19.05, y: 43 } }))).toMatchObject({
       jaw: 'fixed',
       gap: 0,
       reaches: true,
@@ -904,15 +913,17 @@ describe('the label depth a blank allows (#362)', () => {
 
     // Rotation turns the line's extent about its centre, read in the jaws' own frame: a line 8 mm
     // tall and 28.2857 mm wide faces the fixed jaw with its 4.046 mm half-HEIGHT once turned 90°, so
-    // it comes further clear (34.054 mm) than upright, and the projection is what answers that.
-    const turned = label({ text: 'Name', size: 8, position: { x: 38.1, y: 6.775 }, rotation: 90 });
-    expect(labelJawReach(job, turned).gap).toBeCloseTo(34.054, 3);
+    // at x = 19.05 it comes 15.004 mm clear of either jaw — three times the 4.907 mm its 14.1429 mm
+    // half-WIDTH leaves upright — and the projection is what answers that.
+    const turned = label({ text: 'Name', size: 8, position: { x: 19.05, y: 6.775 }, rotation: 90 });
+    expect(labelJawReach(job, turned).gap).toBeCloseTo(15.004, 3);
   });
 
   it('hands the seeded badge line over clean through the real generate path (#369)', () => {
     // What `takeBadgeBlank` leaves behind for the badge the template makes (#363, #369): one 'Name'
-    // line, 8 mm tall, centred under the 76.2 mm blank 6.775 mm from the front edge, re-depth-ed by
-    // the walk to the blank's own 1.0 mm reveal (`engraveJob.spec.ts` pins the store's own answer).
+    // line, 8 mm tall, running along Y on the TURNED blank (#383) — (31.325, 38.1) at 90°, the
+    // badge's own 6.775 mm front-edge inset now measured from the moving jaw — re-depth-ed by the
+    // walk to the blank's own 1.0 mm reveal (`engraveJob.spec.ts` pins the store's own answer).
     // This runs that job through the real pipeline, which is where the operator would have met any
     // finding the hand-off left on it — and the walk's 1.0 mm is DEEPER than the 0.905 the jaws allow
     // a line beside them, so a blank-wide jaw check would refuse the job the wizard just built.
@@ -928,7 +939,8 @@ describe('the label depth a blank allows (#362)', () => {
           ...(base.labels[0] as EngraveLabel),
           text: 'Name',
           size: 8,
-          position: { x: blank.stock.length / 2, y: 6.775 },
+          position: { x: 31.325, y: 38.1 },
+          rotation: 90,
           depth: 1.0,
           depthIntent: 'reveal',
         },

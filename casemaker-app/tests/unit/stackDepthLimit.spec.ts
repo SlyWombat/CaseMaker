@@ -20,7 +20,8 @@ import { colourBoundaryFor, stackDepthLimit } from '@/workers/sim/stackDepthLimi
 import { depthLimitReason } from '@/workers/sim/engraveGenerate';
 import type { EngraveJob } from '@/types/engraveJob';
 
-/** The brand-default badge blank (76.2 × 38.1 × 3.81, a 45 × 13 × 2.3 pocket centred) as a job.
+/** The brand-default badge blank (turned for the vise since #383: 38.1 × 76.2 × 3.81, a 13 × 45 ×
+ *  2.3 pocket centred) as a job.
  *  `print=false` states NO print explicitly — the default badge now carries one (#368), and the
  *  gate's off side has to stay reachable. */
 function badgeJob(print: boolean): EngraveJob {
@@ -62,15 +63,16 @@ describe('stackDepthLimit (#285): what binds where', () => {
     expect(stack).not.toBeNull();
     expect(stack!.boundary).toBeCloseTo(0.8, 9);
     try {
-      // Over the pocket: the solid stops the cutter, so the reason is the void.
-      expect(stack!.reasonAt(38.1, 19.05)).toBe('void');
+      // Over the pocket — the middle of the turned blank (#383) — the solid stops the cutter, so
+      // the reason is the void.
+      expect(stack!.reasonAt(19.05, 38.1)).toBe('void');
       // Left of the pocket, on solid stock: the limit is the job's own floor and NOTHING in the
       // blank is in the way, so the reason is the stock.
       expect(stack!.reasonAt(10, 19.05)).toBe('stock');
       // The limit agrees with the reason: 1.4 mm of solid over the pocket (0.2 mm layers under the
       // 1.51 mm membrane) less the 0.2 mm boundary margin the ceiling's `above` bound carries
       // (#345), the full stock floor elsewhere.
-      expect(stack!.limit(38.1, 19.05)).toBeCloseTo(1.2, 6);
+      expect(stack!.limit(19.05, 38.1)).toBeCloseTo(1.2, 6);
       expect(stack!.limit(10, 19.05)).toBeCloseTo(job.stock.thickness - job.minFloor, 6);
     } finally {
       stack!.dispose();
@@ -86,7 +88,7 @@ describe('stackDepthLimit (#285): what binds where', () => {
     try {
       // #345: the bound the void's ceiling makes speaks of the PLANE, and `ceilingName` words it —
       // the same namer the per-item finding uses, so the two cannot describe one plane two ways.
-      expect(depthLimitReason(stack!, job, 38.1, 19.05)).toBe("— the magnet pocket's ceiling");
+      expect(depthLimitReason(stack!, job, 19.05, 38.1)).toBe("— the magnet pocket's ceiling");
       expect(depthLimitReason(stack!, job, 10, 19.05)).toBe('— the floor the job keeps under the stock');
     } finally {
       stack!.dispose();

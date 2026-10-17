@@ -708,8 +708,9 @@ export interface EngraveMargins {
  * #176's grid is what removes it — so the recommendation names it rather than assuming a flat
  * blank (`flatness unknown` is its own answer, never an invented 0).
  *
- * PROVISIONAL on the default badge: 0.33 mm across the width, measured on the printed blank for
- * #166 and awaiting the measured blank of #165.
+ * PROVISIONAL on the default badge: 0.33 mm across its 38.1 mm side — the stock's `length` since
+ * the blank is turned for the vise (#383) — measured on the printed blank for #166 and awaiting
+ * the measured blank of #165.
  */
 export interface StockFlatness {
   /** Centre-to-edge height difference on the engraved face, mm. */

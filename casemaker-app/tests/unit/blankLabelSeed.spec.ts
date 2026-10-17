@@ -91,26 +91,45 @@ function seed(over: Partial<LabelSeedInputs> = {}) {
 }
 
 describe('#363/#364 — the blank label seed', () => {
-  it('lays one name line on the default badge, centred, in the front band', () => {
+  it('lays one name line on the default badge blank, centred, in the front band', () => {
+    // `BLANK` is `badgeBlankFor`'s own output, so it is the TURNED frame (#383): 38.1 across (X),
+    // 76.2 along (Y). This case is the pure seed's default — text along X — on that blank.
     const line = seed();
     expect(line).not.toBeNull();
     if (!line) return;
     expect(line.text).toBe(BADGE_SEED_TEXT);
     // Centred on the blank's X…
-    expect(line.position.x).toBeCloseTo(38.1, 6);
+    expect(line.position.x).toBeCloseTo(19.05, 6);
     // …and in the band BELOW the pocket, ties going to the front (the operator's edge). The pocket
-    // is centred at 19.05 with a 13 mm height, so it spans 12.55 … 25.55 and the two free strips are
-    // 1 … 12.55 and 25.55 … 37.1 — both exactly 11.55 tall, so the FRONT one wins the tie and the
-    // line's centre is 6.775.
-    expect(line.position.y).toBeCloseTo(6.775, 6);
-    // The DEFAULT band fill, 0.7 × 11.55 = 8.085, floors to the 8 mm cap the issue's decision
-    // quotes — and it fits the 74.2 mm of usable width at that size, so nothing shrinks it.
-    expect(line.size).toBe(8);
+    // is centred at 38.1 with a 45 mm height, so it spans 15.6 … 60.6 and the two free strips are
+    // 1 … 15.6 and 60.6 … 75.2 — both exactly 14.6 tall, so the FRONT one wins the tie and the
+    // line's centre is 8.3.
+    expect(line.position.y).toBeCloseTo(8.3, 6);
+    // The DEFAULT band fill, 0.7 × 14.6 = 10.22, floors to 10 mm — and the line fits the 36.1 mm
+    // of usable width at that size, so nothing shrinks it.
+    expect(line.size).toBe(10);
     expect(line.rotation).toBe(0);
     expect(line.enabled).toBe(true);
     // The placeholder depth is the same floor `newLabel` writes; `redepthLabelsForBlank` owns the
     // real number (asserted on the store hand-off below).
     expect(line.depth).toBe(0.5);
+  });
+
+  it('reads the line along Y when the badge route asks for it (#383)', () => {
+    // The badge route's own call: the blank is on the bench turned, and a name reads along its long
+    // side. The seed lays the line out in the TEXT's frame — the badge's own 76.2 × 38.1, whose
+    // numbers the frame above used to be — and turns the answer back, so the line lands on the same
+    // physical ink box as before the turn, reading along Y.
+    const line = seed({ textAlong: 'y' });
+    expect(line).not.toBeNull();
+    if (!line) return;
+    expect(line.rotation).toBe(90);
+    // The text frame's (38.1, 6.775) — band centre 6.775, reading axis centred on 76.2 — mapped
+    // back: job_x = length − v, job_y = u.
+    expect(line.position.x).toBeCloseTo(38.1 - 6.775, 6);
+    expect(line.position.y).toBeCloseTo(38.1, 6);
+    // Same band, same cap height: only the direction and the turnaround changed.
+    expect(line.size).toBe(8);
   });
 
   it('mints a fresh id every time, so two seeds never collide', () => {
@@ -121,7 +140,9 @@ describe('#363/#364 — the blank label seed', () => {
   });
 
   it('takes the roomier band, and the front one only on a tie', () => {
-    // A pocket pushed to the front leaves a taller strip behind it.
+    // A pocket pushed to the front leaves a taller strip behind it. (Kept in the badge's own
+    // 76.2 × 38.1 frame: this case is about the band arithmetic, which also runs in the text frame
+    // the badge route uses — same numbers, same answer.)
     const line = seed({
       blank: {
         length: 76.2,
@@ -131,8 +152,9 @@ describe('#363/#364 — the blank label seed', () => {
     });
     // Bands are 1 … 5 (4 mm) and 11 … 37.1 (26.1 mm): the BACK one has the room.
     expect(line!.position.y).toBeCloseTo((11 + 37.1) / 2, 6);
-    // floor(0.7 × 26.1) = 18, and the line fits the 74.2 mm of usable width at that size, so the
-    // roomier band also gets the roomier line.
+    // floor(0.7 × 26.1) = 18, but the line has to fit the 74.2 mm of usable width too — 3.536 mm of
+    // ink per millimetre of cap puts 18 mm at 63.6 mm, which does fit. Sized to the room, not the
+    // width.
     expect(line!.size).toBe(18);
   });
 
@@ -226,18 +248,19 @@ describe('#363/#364 — the blank label seed', () => {
 
 describe('#451 — the band fill is the shop default', () => {
   it('uses the labelled fallback when the caller passes none', () => {
-    // The default badge's front band is 11.55 mm (see the first test above): 0.7 × 11.55 = 8.085,
-    // floored to the 8 mm cap the issue's decision quotes. The store hand-off below exercises this
-    // same path, so the no-service build is covered through the real caller as well.
-    expect(seed()!.size).toBe(8);
+    // The default badge's front band is 14.6 mm in the turned frame (see the first test above):
+    // 0.7 × 14.6 = 10.22, floored to the 10 mm cap the issue's decision quotes. The store hand-off
+    // below exercises this same path, so the no-service build is covered through the real caller
+    // as well.
+    expect(seed()!.size).toBe(10);
   });
 
   it('takes the fraction the caller passes', () => {
-    // 0.5 × 11.55 = 5.775, floored to 5 — and 'Name' fits the 74.2 mm of usable width at that size.
-    expect(seed({ bandFill: 0.5 })!.size).toBe(5);
-    // A full band is allowed: floor(1 × 11.55) = 11, and 'Name' bold's ink is 1.011 × 11 = 11.1 mm
-    // tall, inside the 11.55 mm band, and 3.536 × 11 = 38.9 mm wide, inside the usable width.
-    expect(seed({ bandFill: 1 })!.size).toBe(11);
+    // 0.5 × 14.6 = 7.3, floored to 7 — and 'Name' fits the 36.1 mm of usable width at that size.
+    expect(seed({ bandFill: 0.5 })!.size).toBe(7);
+    // A full band is allowed: floor(1 × 14.6) = 14, but 'Name' bold is 3.536 × 14 = 49.5 mm wide,
+    // past the 36.1 mm usable width, so the search walks down to 10 (35.4 mm wide, 10.1 mm tall).
+    expect(seed({ bandFill: 1 })!.size).toBe(10);
   });
 
   it('falls back rather than seeding nothing when the fraction is out of range', () => {
@@ -246,7 +269,7 @@ describe('#451 — the band fill is the shop default', () => {
     // caller can pass them, so the labelled fallback stands — the same reading the sim's pitches
     // take (#438/#451).
     for (const bad of [0, -0.2, 1.01, Number.NaN, Number.POSITIVE_INFINITY]) {
-      expect(seed({ bandFill: bad })!.size).toBe(8);
+      expect(seed({ bandFill: bad })!.size).toBe(10);
     }
   });
 });
@@ -387,12 +410,15 @@ describe('#363 — the store hand-off', () => {
     expect(job.labels).toHaveLength(1);
     const line = job.labels[0]!;
     expect(line.text).toBe('Name');
-    expect(line.position).toMatchObject({ x: 38.1 });
-    expect(line.position.y).toBeCloseTo(6.775, 6);
+    // #383 — the line reads along Y: the seed's text-frame answer is the badge's own (38.1, 6.775),
+    // turned back onto the stock as (length − 6.775, 38.1).
+    expect(line.position.x).toBeCloseTo(31.325, 6);
+    expect(line.position.y).toBeCloseTo(38.1, 6);
+    expect(line.rotation).toBe(90);
     // The seeded line sits in the free band BESIDE the magnet pocket, so since #365 the void bound
     // asks about the voids the LINE reaches and finds none. Since #369 the JAWS are asked the same
-    // way — by the line's own ink box — and this line is clear of them too: even at `inkBoxOf`'s
-    // widest estimate it comes no nearer than 6.9 mm to a jaw face, past the 1 mm reach the jaws are
+    // way — by the line's own ink box — and this line is clear of them too: turned, its box spans
+    // about 2.7 mm short of the moving jaw face at the measured size, past the reach the jaws are
     // judged by (`uncertainty + radius`, #391/#394). So NOTHING limits it: the blank's underside
     // (3.81 − 1 = 2.81 mm) is only a ceiling, and the recommendation is the depth the seed itself
     // gave the line (#440 — it used to recommend that ceiling, and 59 mm on a 60 mm blank). While
@@ -436,7 +462,7 @@ describe('#363 — the store hand-off', () => {
 
     s().takeBadgeBlank(badgeBlankFor(defaultBadgeParams()));
     const first = s().job.labels[0]!;
-    expect(first.position.x).toBeCloseTo(38.1, 6);
+    expect(first.position.x).toBeCloseTo(31.325, 6);
 
     // A larger badge. The line the first take seeded was laid out for the FIRST blank's size and
     // centre, and nobody has touched it since — so it is still a route's, and gets re-laid. Before
@@ -447,7 +473,11 @@ describe('#363 — the store hand-off', () => {
     expect(job.labels).toHaveLength(1);
     const second = job.labels[0]!;
     expect(second.id).not.toBe(first.id);
-    expect(second.position.x).toBeCloseTo(50, 6); // the new blank's own centre
+    // The 100 × 50 badge turns to a 50 × 100 stock; its pocket's bands are 1 … 18.5 and 31.5 … 49,
+    // so the front one wins the tie and the line reads along Y at x = 50 − 9.75 = 40.25.
+    expect(second.position.x).toBeCloseTo(40.25, 6);
+    expect(second.position.y).toBeCloseTo(50, 6);
+    expect(second.rotation).toBe(90);
     // The claims are the NEW line's alone: the dropped line's stamps went with it, not orphaned. The
     // second blank STATES a print (#368), so the walk's answer carries an intent alongside its depth
     // (`engraveJob.spec.ts` pins that number and its kind); the first badge in this file states none,
@@ -512,11 +542,12 @@ describe('#363 — the store hand-off', () => {
     expect(job.labels).toHaveLength(3);
     expect(job.labels.map((l) => l.text)).toEqual(['DAVE', 'MAKER', 'first chips']);
     // Nothing claimed a depth, so #362's walk still re-depths them for the new blank — the person
-    // moved the words, not the numbers. Since #365 that is a PER-LINE answer, and on this badge the
-    // three demo lines are three different constraints: 'DAVE' at (50, 43) sits clear of the magnet
-    // pocket (whose band is y 12.55–25.55) and takes the jaws' 0.905, while 'MAKER' at (50, 26) and
-    // 'first chips' at (50, 10) both reach the pocket's band and take its 0.51.
-    expect(job.labels.map((l) => l.depth)).toEqual([0.905, 0.51, 0.51]);
+    // moved the words, not the numbers. Since #365 that is a PER-LINE answer, and since the blank
+    // is TURNED (#383) this badge's magnet pocket lies along Y: it spans y 15.6–60.6, which all
+    // three demo lines (y 43, 26, 10 — with the estimate's 2.1 em box) reach, so all three take
+    // its 0.51. Before the turn the pocket lay across X, only the two middle lines reached it, and
+    // the first took the jaws' 0.905 instead.
+    expect(job.labels.map((l) => l.depth)).toEqual([0.51, 0.51, 0.51]);
   });
 
   it('re-depths the seeded lines onto the colour band when the badge states a print (#368)', async () => {

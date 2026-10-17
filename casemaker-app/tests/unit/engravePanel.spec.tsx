@@ -956,16 +956,18 @@ describe('EngravePanel — the badge blank (#271 route 1)', () => {
     const job = useEngraveJobStore.getState().job;
     // The blank AND the two facts that ride with it (#352, #368): the badge the template makes
     // states how it was printed, so the blank arrives with a layer grid and the dome a printed blank
-    // is assumed to carry. Both are the badge's own — this is the route that decides them.
+    // is assumed to carry. Both are the badge's own — this is the route that decides them. The
+    // blank is TURNED for the vise (#383): 38.1 mm across X, 76.2 mm along Y, and the dome is
+    // 0.33 mm across that 38.1 mm side, which is the stock's `length` in the job's own frame.
     expect(job.stock).toEqual({
-      length: 76.2,
-      width: 38.1,
+      length: 38.1,
+      width: 76.2,
       thickness: 3.81,
       material: 'pla',
       print: { split: 3, layerHeight: 0.2, firstLayerHeight: 0.2 },
-      flatness: { dome: 0.33, across: 'width', source: 'badge' },
+      flatness: { dome: 0.33, across: 'length', source: 'badge' },
     });
-    expect((screen.getByTestId('engrave-stock-length') as HTMLInputElement).value).toBe('76.2');
+    expect((screen.getByTestId('engrave-stock-length') as HTMLInputElement).value).toBe('38.1');
     // The numbers are the model's, not something someone typed here (decision 28's question).
     expect(screen.getByTestId('engrave-stock-length-source').dataset.source).toBe('computed');
 
@@ -980,7 +982,7 @@ describe('EngravePanel — the badge blank (#271 route 1)', () => {
     // The badge's own 1 mm minimum floor is NOT what stands in here — it does that only for a badge
     // that states no print (#345 decision A), and this one does state one.
     const limit = jobDepthLimit(job);
-    expect(limit(38.1, 19.05)).toBeCloseTo(1.2, 6);
+    expect(limit(19.05, 38.1)).toBeCloseTo(1.2, 6);
     expect(limit(5, 5)).toBeCloseTo(2.81, 6);
     expect(screen.getByTestId('engrave-badge-notes')).toBeTruthy();
   });
@@ -1016,7 +1018,7 @@ describe('EngravePanel — the badge blank (#271 route 1)', () => {
 
     // And the limit the row shows is the limit the verifier takes at that point, not a parallel one.
     const job = useEngraveJobStore.getState().job;
-    expect(jobDepthLimit(job)(38.1, 19.05)).toBeCloseTo(1.2, 6);
+    expect(jobDepthLimit(job)(19.05, 38.1)).toBeCloseTo(1.2, 6);
   });
 
   it('lands on the same void when it is pressed twice', async () => {
@@ -1076,7 +1078,14 @@ describe('EngravePanel — where a label’s depth came from (#362 review)', () 
     act(() => {
       useEngraveJobStore.getState().addLabel();
       const id = useEngraveJobStore.getState().job.labels[1]!.id;
-      useEngraveJobStore.getState().updateLabel(id, { position: { x: 38.1, y: 19.05 } });
+      // …and on the TURNED blank (#383) it has to be a line that fits: a new label's default
+      // 'New text' at 10 mm is ~70 mm wide across a 38.1 mm blank, so it overhangs both jaws and
+      // earns no recommendation at all (no floor stays 1 mm above the jaw tops). The seed's own
+      // face, 8 mm, is 28.3 mm wide and clears them by 4.9 mm; at y = 57 it sits inside the
+      // pocket's 15.6–60.6 band without overlapping the seeded line, which stops at y = 52.2.
+      useEngraveJobStore
+        .getState()
+        .updateLabel(id, { text: 'Name', size: 8, position: { x: 19.05, y: 57 } });
     });
     render(<EngravePanel />);
     // #411 — the recommendation is part of the row's editor, which is folded on a job that starts
@@ -1132,9 +1141,12 @@ describe('EngravePanel — where a label’s depth came from (#362 review)', () 
   it('offers no recommendation for a reference-only label, or one that states its own colour intent', () => {
     takeBadgeBlank();
     // #363 seeds ONE line on a badge, so add a second: this test needs a row that is NEITHER of the
-    // two refusals below, or "every row is null" would pass for the wrong reason.
+    // two refusals below, or "every row is null" would pass for the wrong reason. Small and clear
+    // of the pocket and of both jaw faces (#383's turned blank is only 38.1 mm across X), so the
+    // recommendation it should keep is a real one.
     act(() => {
-      useEngraveJobStore.getState().addLabel();
+      const id = useEngraveJobStore.getState().addLabel();
+      useEngraveJobStore.getState().updateLabel(id, { text: 'OK', size: 6, position: { x: 19.05, y: 8 } });
     });
     render(<EngravePanel />);
     // #411 — both rows open: row 0 is the one the two refusals are pressed on, row 1 the control.
@@ -1178,14 +1190,14 @@ describe('EngravePanel — where a label’s depth came from (#362 review)', () 
     });
     takeBadgeBlank({ ...PRINTED, splitHeight: 2.61 });
     // #365: this test is about the VOID binding, and the seeded line is laid BESIDE the pocket — move
-    // it over the pocket, where the ceiling is the floor that binds. Written straight into the job so
-    // the seed's own provenance stays what the last assertions read, which `updateLabel` would claim
-    // as the person's.
+    // it over the pocket (the turned blank's centre, #383), where the ceiling is the floor that
+    // binds. Written straight into the job so the seed's own provenance stays what the last
+    // assertions read, which `updateLabel` would claim as the person's.
     act(() => {
       const job = useEngraveJobStore.getState().job;
       const [first, ...rest] = job.labels;
       useEngraveJobStore.setState({
-        job: { ...job, labels: [{ ...first!, position: { x: 38.1, y: 19.05 } }, ...rest] },
+        job: { ...job, labels: [{ ...first!, position: { x: 19.05, y: 38.1 } }, ...rest] },
       });
       // The walk has to be re-run at the new position: `setState` writes a document, it does not
       // re-depth one, and the line has not been over the void since the blank was taken. It is the

@@ -688,7 +688,9 @@ describe('engravePreview — the colour boundary (#285, #345)', () => {
           font: base.labels[0]!.font,
           weight: 'bold',
           size: 6,
-          position: { x: 38.1, y: 19.05 },
+          // The magnet pocket's own centre on the TURNED blank (#383): the blank is 38.1 × 76.2,
+          // so the pocket is 13 mm across X and 45 mm along Y about (19.05, 38.1).
+          position: { x: 19.05, y: 38.1 },
           rotation: 0,
           depth,
           enabled: true,

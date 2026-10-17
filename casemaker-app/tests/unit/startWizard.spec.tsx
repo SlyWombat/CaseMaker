@@ -366,9 +366,11 @@ describe('#280 — step 2, what are you making', () => {
     await chooseJob('badge-blank');
     expect(screen.getByTestId('engrave-setup-flow')).toBeTruthy();
 
-    // The hand-off itself is the seed (#352): the badge's blank is the stock, no button pressed.
+    // The hand-off itself is the seed (#352): the badge's blank is the stock, no button pressed —
+    // and since #383 it is the blank TURNED a quarter turn, because that is how the vise holds it:
+    // the 38.1 mm span across the jaws (X), the 76.2 mm span along them (Y).
     const job = useEngraveJobStore.getState().job;
-    expect([job.stock.length, job.stock.width, job.stock.thickness]).toEqual([76.2, 38.1, 3.81]);
+    expect([job.stock.length, job.stock.width, job.stock.thickness]).toEqual([38.1, 76.2, 3.81]);
     // Seated on the jaws' 3.1 mm ledges: 3.81 − 3.1 (#208's calipers, #391 review item 1).
     expect(job.workholding.vise.stockProud).toBeCloseTo(0.71, 9);
     // …and the void the badge's model already has came with it (#271 route 1), so nothing floats.
@@ -412,7 +414,8 @@ describe('#280 — step 2, what are you making', () => {
     // and step 3.
     expect(await screen.findByTestId('engrave-setup-flow')).toBeTruthy();
     const job = useEngraveJobStore.getState().job;
-    expect(job.stock.length).toBeCloseTo(76.2, 6);
+    // …the turned blank (#383), so its 38.1 mm span is the stock's LENGTH.
+    expect(job.stock.length).toBeCloseTo(38.1, 6);
     expect(job.labels).toHaveLength(1);
     expect(job.labels[0]!.size).toBe(8); // measured, not the estimate's 5 (see the seed spec)
   });

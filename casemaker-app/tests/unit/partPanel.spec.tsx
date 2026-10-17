@@ -214,7 +214,8 @@ describe('PartPanel (#282) — the engrave job’s side of it', () => {
     useEngraveJobStore.setState({
       job: {
         ...job,
-        stock: { ...job.stock, length: 76.2, width: 38.1, thickness: 3.81 },
+        // The badge's blank TURNED (#383): 38.1 mm across the jaws, 76.2 mm along them.
+        stock: { ...job.stock, length: 38.1, width: 76.2, thickness: 3.81 },
         sources: { stock: { length: 'computed', width: 'computed', thickness: 'computed' } },
       },
     });
@@ -230,19 +231,21 @@ describe('PartPanel (#282) — the engrave job’s side of it', () => {
     useEngraveJobStore.setState({
       job: {
         ...job,
-        stock: { ...job.stock, length: 76.2, width: 38.1, thickness: 3.81 },
+        stock: { ...job.stock, length: 38.1, width: 76.2, thickness: 3.81 },
         sources: { stock: { length: 'computed', width: 'computed', thickness: 'computed' } },
         keepOuts: [
           {
             id: BADGE_POCKET_KEEP_OUT_ID,
             name: 'Magnet pocket',
             kind: 'rect',
-            position: { x: 38.1, y: 19.05 },
+            // On the turned blank (#383) the pocket is 13 mm across the jaws and 45 mm along them,
+            // so a shorter one is a badge edit the job has not caught up with.
+            position: { x: 19.05, y: 38.1 },
             rotation: 0,
             enabled: true,
             zCeiling: 2.3,
-            width: 30,
-            height: 13,
+            width: 13,
+            height: 30,
             cornerRadius: 0,
           },
         ],
@@ -250,8 +253,8 @@ describe('PartPanel (#282) — the engrave job’s side of it', () => {
     });
     render(<PartPanel />);
     const note = screen.getByTestId('part-job-note').textContent ?? '';
-    expect(note).toContain('30 × 13 mm pocket');
-    expect(note).toContain('45 × 13 mm');
+    expect(note).toContain('13 × 30 mm pocket');
+    expect(note).toContain('13 × 45 mm');
   });
 
   /** The job as “Use the badge blank” leaves it (#368): the blank's numbers, its print and its
@@ -265,8 +268,9 @@ describe('PartPanel (#282) — the engrave job’s side of it', () => {
         ...job,
         stock: {
           ...job.stock,
-          length: 76.2,
-          width: 38.1,
+          // The turned blank (#383), as `badgeBlankFor` emits it.
+          length: 38.1,
+          width: 76.2,
           thickness: 3.81,
           print: { split: 3, layerHeight: 0.2, firstLayerHeight: 0.2 },
         },
@@ -278,12 +282,13 @@ describe('PartPanel (#282) — the engrave job’s side of it', () => {
             id: BADGE_POCKET_KEEP_OUT_ID,
             name: 'Magnet pocket',
             kind: 'rect',
-            position: { x: 38.1, y: 19.05 },
+            // The quarter turn moves the pocket's extents (#383): 13 mm across the jaws, 45 mm along.
+            position: { x: 19.05, y: 38.1 },
             rotation: 0,
             enabled: true,
             zCeiling: 2.3,
-            width: 45,
-            height: 13,
+            width: 13,
+            height: 45,
             cornerRadius: 0,
           },
         ],

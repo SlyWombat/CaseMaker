@@ -604,11 +604,13 @@ function cornerBandMm(sinkMm: Mm, tipR: Mm): Mm {
  * near an end, and a plan that judged both by the middle's figure would swallow the first 0.28 mm
  * of a real change at the ends.
  *
- * THE SPANS ARE THE JOB'S, AND THE WORD `across` IS THE BADGE'S — THE OTHER WAY ROUND. `flatness`
- * travels with a badge, where `across: 'width'` means the BADGE's width, which `badgeBlankFor`
- * makes the job's `stock.length`: the X span the left and right edges bound. So `'width'` is the
- * job's X, `'length'` its Y, and the stated figure is applied to the span it names — with the
- * badge's measured figure for the span the job states nothing about.
+ * THE SPANS ARE THE JOB'S. `'width'` names the X span the left and right edges bound and
+ * `'length'` the Y span, and the stated figure is applied to the span its word names — with the
+ * badge's measured figure for the span the job states nothing about. Both routes that emit a
+ * `badge` flatness now name a span in the JOB's frame: `fromDesign` computes the word from the
+ * stock's own spans, and `badgeBlankFor` states `'length'` outright since #383, because the
+ * quarter turn that puts the badge on the bench puts #345's measured 38.1 mm side in X — the
+ * stock's length.
  */
 function domeDropMm(job: EngraveJob, x: Mm, y: Mm): Mm {
   const { length, width } = job.stock;

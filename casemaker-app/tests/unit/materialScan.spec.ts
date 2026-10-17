@@ -278,9 +278,10 @@ describe('planMaterialScan — the shipped default blank (#391)', () => {
     expect(p.resolutionMm).toBeCloseTo(planned(job).resolutionMm, 6);
   });
 
-  // The word `across` belongs to the BADGE the flatness came from, and the badge's axis is the other
-  // way round (`badgeBlankFor` sets `length: badge.width`): `'width'` is the job's X, `'length'` its
-  // Y. Getting it backwards would judge every edge against the wrong span's figure.
+  // The word `across` names a span in the JOB's frame, and the two are not interchangeable:
+  // `'width'` is the job's X, `'length'` its Y — the convention `badgeBlankFor` follows since #383
+  // (the turn puts the badge's measured 38.1 mm side in X, and it states `'length'` for it).
+  // Getting it backwards would judge every edge against the wrong span's figure.
   it('takes the stated dome across the span it names, in the JOB’s frame', () => {
     const job = defaultEngraveJob();
     const alongY = planned({

@@ -419,7 +419,9 @@ describe('a job that states its print limits on the printer’s layer grid (#285
           id: 'a',
           name: 'A',
           kind: 'rect',
-          position: { x: 38.1, y: 19.05 },
+          // #383 — the badge blank is turned: the pocket (and so this 10 × 10 patch) sits at the
+          // middle of the 38.1 × 76.2 stock.
+          position: { x: 19.05, y: 38.1 },
           rotation: 0,
           depth,
           enabled: true,
@@ -514,7 +516,15 @@ describe('the per-item void bound agrees with the region scan (#365)', () => {
       stock: blank.stock,
       keepOuts: [...(blank.pocket ? [blank.pocket] : []), ...extra],
       labels: [
-        { ...(base.labels[0] as EngraveLabel), id: 'name', text, size: 8, position: { x, y } },
+        // #383 — reading along Y, the way the badge route seeds a name on the turned blank.
+        {
+          ...(base.labels[0] as EngraveLabel),
+          id: 'name',
+          text,
+          size: 8,
+          position: { x, y },
+          rotation: 90,
+        },
       ],
       shapes: [],
     };
@@ -522,9 +532,10 @@ describe('the per-item void bound agrees with the region scan (#365)', () => {
   const margin = (job: EngraveJob) => defaultBoundaryMargin(job);
 
   it('names the same void, and the same number, where the line lies inside it', () => {
-    // The line is centred on the pocket (38.1, 19.05), so its whole measured ink is inside the
-    // 45 × 13 pocket: the Clipper2 scan sees a full overlap and the box test sees containment.
-    const job = badgeLine('Name', 38.1, 19.05);
+    // The line is centred on the pocket (19.05, 38.1) and reads along Y (#383), so its whole
+    // measured ink — 8 mm wide, 28 mm long, the way it sits on the turned blank — is inside the
+    // 13 × 45 pocket: the Clipper2 scan sees a full overlap and the box test sees containment.
+    const job = badgeLine('Name', 19.05, 38.1);
     const r = regions(tl, job);
     const scan = bindingVoidsByRegion(tl, job, r.plan, r.cuts, margin(job)).get('name')!;
     const bound = voidLimitForItem(job, job.labels[0]!, margin(job), labelGlyphMeasure([]))!;
@@ -538,20 +549,22 @@ describe('the per-item void bound agrees with the region scan (#365)', () => {
 
   it('never advises deeper than the scan where the line only PARTLY overlaps the void', () => {
     // The first test's line sits INSIDE the pocket: a containment. This one straddles its near edge
-    // (the roof at y = 12.55), so the two measurements are compared where the overlap is partial —
-    // the same question, and both have to answer it the same way.
+    // (the roof at y = 15.6 on the turned blank), so the two measurements are compared where the
+    // overlap is partial — the same question, and both have to answer it the same way.
     const pocket = badgeBlankFor(defaultBadgeParams()).pocket!;
     if (pocket.kind !== 'rect') throw new Error('the badge pocket is a rect');
     const roof = pocket.position.y - pocket.height / 2;
 
     // A second void with LESS material over it than the pocket, well clear of the text: the pocket
-    // leaves 1.51 mm and permits 0.51, this one leaves 1.21 mm and permits 0.21.
+    // leaves 1.51 mm and permits 0.51, this one leaves 1.21 mm and permits 0.21. It sits in the
+    // strip between the pocket's X edge and the jaw, where the MEASURED box (8 mm across on the
+    // turned blank) stops short of it but the estimated one — as wide as the blank — reaches.
     const shallower: EngraveKeepOut = {
       kind: 'rect', id: 'ko-bore', name: 'Test bore', enabled: true, rotation: 0,
-      position: { x: 63, y: 6 }, width: 6, height: 4, cornerRadius: 0, zCeiling: 2.6,
+      position: { x: 10, y: 40 }, width: 4, height: 4, cornerRadius: 0, zCeiling: 2.6,
     };
 
-    const job = badgeLine('Name', 38.1, roof + 2.5, [shallower]);
+    const job = badgeLine('Name', 19.05, roof + 2.5, [shallower]);
     const m = margin(job);
     const r = regions(tl, job);
     const scan = bindingVoidsByRegion(tl, job, r.plan, r.cuts, m).get('name')!;

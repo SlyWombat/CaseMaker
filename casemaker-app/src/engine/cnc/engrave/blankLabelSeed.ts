@@ -17,9 +17,9 @@
  *
  * The seeded line sits in the free band BESIDE the pocket, and since #365 the walk's void bound
  * knows it: `voidLimitForItem` asks about the voids the LINE's own ink box reaches, so the pocket
- * a line is clear of no longer sets its depth. Measured: the line at (38.1, 6.775) has no void
- * under it. Before #365 the bound was blank-wide (`shallowestVoidLimit`) and this line was advised
- * the pocket's 0.51 mm.
+ * a line is clear of no longer sets its depth. Measured: the line at (31.325, 38.1) — the badge
+ * route reads it along Y since #383 — has no void under it. Before #365 the bound was blank-wide
+ * (`shallowestVoidLimit`) and this line was advised the pocket's 0.51 mm.
  *
  * The JAW bound knows where the line is too, since #369: a line's own ink box decides whether the
  * jaws can reach it, and this one comes no nearer than 6.9 mm to a jaw face even at the estimate's
@@ -129,6 +129,15 @@ export interface LabelSeedInputs {
    * stands in.
    */
   bandFill?: number;
+  /**
+   * Which way the line reads on the BENCH: along X (the default) or along Y (#383). A badge blank
+   * taken by the badge route is clamped with its long side along Y, and a name reads along that
+   * long side — so that route asks for `'y'`. The layout below is unchanged either way: the blank
+   * (and its pocket) is transposed into the text's own frame, laid out there, and the answer
+   * turned back and given `rotation: 90`. A bare blank is the operator's own stock in the
+   * operator's own frame, so its route keeps the default.
+   */
+  textAlong?: 'x' | 'y';
   measure?: InkMeasure;
 }
 
@@ -266,6 +275,34 @@ function freeBands(blank: SeedBlank, edgeMargin: Mm): { y0: Mm; y1: Mm }[] {
 }
 
 /**
+ * The blank as a line reading along Y sees it (#383): the job's frame turned a quarter turn `ccw`,
+ * the same turn `fromDesign` makes — the text's +X is the job's +Y and its +Y the job's −X, so a
+ * job point (x, y) is the text point (y, length − x). The blank's spans swap, and the pocket comes
+ * with it: its extents swap and its centre moves the same way, because `freeBands` has to keep
+ * answering about the same hole.
+ *
+ * The pocket's `rotation` is carried unchanged. Every rect this seed is handed is axis-aligned
+ * (`badgeBlankFor` builds it at 0°, and `freeBands` only reads 0/180 as a band at all), and for an
+ * axis-aligned rect a swapped extent and a quarter turn are the same footprint.
+ */
+function inTextFrame(blank: SeedBlank): SeedBlank {
+  const { pocket } = blank;
+  return {
+    length: blank.width,
+    width: blank.length,
+    pocket:
+      pocket === null
+        ? null
+        : {
+            ...pocket,
+            position: { x: pocket.position.y, y: blank.length - pocket.position.x },
+            width: pocket.height,
+            height: pocket.width,
+          },
+  };
+}
+
+/**
  * The one label a blank route seeds, or null when this blank cannot hold one at all.
  *
  * The shape of the answer, and why each number is what it is:
@@ -277,9 +314,11 @@ function freeBands(blank: SeedBlank, edgeMargin: Mm): { y0: Mm; y1: Mm }[] {
  *     down a millimetre at a time until the line's real ink box fits both the band's height and
  *     the blank's usable width. Whole millimetres and not a measured size: this is a starting
  *     point a person reads and edits, and `8` is a number someone can see is too big.
- *   - **The position** — centred in its band, and centred on the blank's X. `position` is the ink
- *     box's CENTRE, which is what `labelProfile` centres a label on too, so the clearance either
- *     side of the band is the same number.
+ *   - **The position** — centred in its band, and centred along the line's own reading axis:
+ *     the blank's X by default, or its Y when `textAlong: 'y'` (#383), in which case the label is
+ *     also turned `rotation: 90` so the text reads that way. `position` is the ink box's CENTRE,
+ *     which is what `labelProfile` centres a label on too, so the clearance either side of the
+ *     band is the same number.
  *   - **The depth** — `STARTING_DEPTH`, and the caller's `redepthLabelsForBlank` walk replaces it
  *     before anything reads it, so one place owns the number and its provenance (#362).
  *
@@ -287,8 +326,13 @@ function freeBands(blank: SeedBlank, edgeMargin: Mm): { y0: Mm; y1: Mm }[] {
  * is seeded then; the person gets the demo labels' own findings, which is the honest report.
  */
 export function blankLabelSeed(inputs: LabelSeedInputs): EngraveLabel | null {
-  const { blank, edgeMargin, font, weight } = inputs;
+  const { edgeMargin, font, weight } = inputs;
   const text = inputs.text ?? BADGE_SEED_TEXT;
+  // #383 — the text's own frame. When the line reads along Y the blank (and its pocket) is
+  // transposed ONCE, here, and the answer turned back below, so every band, size and clearance
+  // between the two points is the same arithmetic as the default case.
+  const alongY = inputs.textAlong === 'y';
+  const blank = alongY ? inTextFrame(inputs.blank) : inputs.blank;
   const usableWidth = blank.length - 2 * edgeMargin;
   if (usableWidth <= 0 || text.trim().length === 0) return null;
 
@@ -319,14 +363,17 @@ export function blankLabelSeed(inputs: LabelSeedInputs): EngraveLabel | null {
   for (let size = Math.min(start, Math.floor(usableWidth)); size >= 1; size--) {
     const ink = inkBoxOf(text, font, weight, size, inputs.measure);
     if (ink.width <= usableWidth && ink.height <= bandHeight) {
+      const placed = { x: blank.length / 2, y: (room.y0 + room.y1) / 2 };
       return {
         id: newEngraveLabelId(),
         text,
         font,
         weight,
         size,
-        position: { x: blank.length / 2, y: (room.y0 + room.y1) / 2 },
-        rotation: 0,
+        // The text frame's point back in the job's: a point (u, v) there is the job's
+        // (length − v, u) — the same `ccw` turn `inTextFrame` made, undone.
+        position: alongY ? { x: inputs.blank.length - placed.y, y: placed.x } : placed,
+        rotation: alongY ? 90 : 0,
         depth: STARTING_DEPTH,
         enabled: true,
       };

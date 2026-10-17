@@ -1183,6 +1183,11 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
             pocket: pocket?.kind === 'rect' ? pocket : null,
           },
           edgeMargin: job.edgeMargin,
+          // #383 — the blank is on the bench with its long side along Y (the turn
+          // `badgeBlankFor` makes), and a name reads along a blank's long side, so the seed lays
+          // this line out along Y too. The bare-blank route keeps the default: that blank is the
+          // operator's own stock in the operator's own frame.
+          textAlong: 'y',
           // The shop's band fill (#451): how much of the free band the line takes. This module
           // reads the location; `blankLabelSeed` is pure and keeps only the labelled fallback.
           bandFill: shopDefault('engrave.blankBandFill').value,

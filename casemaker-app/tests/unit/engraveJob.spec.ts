@@ -559,11 +559,12 @@ describe('engraveJobStore (#200)', () => {
     });
 
     // The badge blank states no print, so there is no colour split for any intent to be about: the
-    // label re-depths to the jaws' 0.905 mm — the 'CASE' line sits at (50, 43), clear of the magnet
-    // pocket whose band is y 12.55–25.55 (#365) — and the `surface` claim goes with it. A stale
-    // `surface` here would be a claim about a blank this job has left.
+    // label re-depths to the magnet pocket's 0.51 mm — the 'CASE' line sits at (50, 43), and since
+    // the blank is TURNED (#383) the pocket's band is y 15.6–60.6, which the line's estimated box
+    // reaches (#365) — and the `surface` claim goes with it. A stale `surface` here would be a
+    // claim about a blank this job has left.
     s().takeBadgeBlank(badgeBlankFor(defaultBadgeParams({ print: undefined })));
-    expect(s().job.labels[0]!.depth).toBe(0.905);
+    expect(s().job.labels[0]!.depth).toBe(0.51);
     expect(s().job.labels[0]!.depthIntent).toBeUndefined();
     // The walk wrote the whole depth entry and carried the `layout` claim across it (#363 review), so
     // the person's own claim — and the line it protects — is still theirs afterwards.
