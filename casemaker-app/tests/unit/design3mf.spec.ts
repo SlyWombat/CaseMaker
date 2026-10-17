@@ -298,7 +298,20 @@ describe('the reader refuses what it cannot use (#410)', () => {
 
 describe('the blank’s material, read from the project (#456)', () => {
   it('reads the badge fixture as PETG, from the two blank extruders only', () => {
-    expect(readDesign(tl, fixtureFile()).filament).toEqual({
+    const file = fixtureFile();
+    // The project declares FIVE filaments, as the real `single.3mf` does: extruder 1 is
+    // PA11 Carbon Fiber, extruders 2 and 3 are PETG (the blank's two colours), 4 and 5 are PLA.
+    expect(file.settings.filament_type).toBe('PA;PETG;PETG;PLA;PLA');
+    expect(file.settings.filament_settings_id).toBe(
+      '"Prusament PA11 Carbon Fiber @XL";"Generic PETG @XL";"Generic PETG @XL";"Generic PLA @XLIS";"Generic PLA @XLIS"',
+    );
+    // The blank's volumes use extruders 2 and 3, so the reader takes only those two — the PA-CF
+    // and PLA profiles are other project filaments, not the blank's material.
+    expect(file.blankFilaments).toEqual([
+      { extruder: 2, type: 'PETG', settingsId: 'Generic PETG @XL' },
+      { extruder: 3, type: 'PETG', settingsId: 'Generic PETG @XL' },
+    ]);
+    expect(readDesign(tl, file).filament).toEqual({
       types: ['PETG'],
       settingsIds: ['Generic PETG @XL'],
       material: 'petg',
