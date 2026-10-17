@@ -13,6 +13,7 @@ import {
   programCuts,
   runtimeOf,
   separatedLeftover,
+  wearClassFor,
   wearKey,
   weighRuntime,
   withRuntime,
@@ -98,6 +99,24 @@ describe('#414 the program: where it cut, and for how long', () => {
     const gf = weighRuntime(reading, 'pa-gf', w);
     expect(gf.minutes).toBeCloseTo(reading.minutes * 5, 9);
     expect(gf.note).toContain('× 5 for pa-gf (abrasive, seeded — tools.wearWeight.abrasive)');
+  });
+
+  it('weights a filled base plastic by its fibre flag (#464)', () => {
+    // PET-CF is a `pet` blank — the app has no `pet-cf` material. The base alone is an ordinary
+    // plastic; the flag is the whole reason the minute is abrasive, whatever plastic carries it.
+    expect(wearClassFor('pet')).toBe('plastic');
+    expect(wearClassFor('pet', 'cf')).toBe('abrasive');
+    expect(wearClassFor('pc', 'cf')).toBe('abrasive');
+    expect(wearClassFor('petg', 'gf')).toBe('abrasive');
+    expect(wearKey('pet')).toBe('tools.wearWeight.plastic');
+    expect(wearKey('pet', 'cf')).toBe('tools.wearWeight.abrasive');
+    expect(wearKey('petg', 'gf')).toBe('tools.wearWeight.abrasive');
+
+    const reading = runtimeOf(programCuts(NC), 30)!;
+    const w = readDefault(DEFAULTS, 'tools.wearWeight.abrasive');
+    const cf = weighRuntime(reading, 'pet', w, 'cf');
+    expect(cf.minutes).toBeCloseTo(reading.minutes * 5, 9);
+    expect(cf.note).toContain('× 5 for pet (carbon fibre, abrasive, seeded — tools.wearWeight.abrasive)');
   });
 
   it('falls back to the run’s elapsed time, said so, when a cutting move has no feed', () => {
@@ -297,6 +316,14 @@ describe('#414 the run store: once per run, and only on a real finish', () => {
     expect(end.offcut?.state).toBe('asked');
     expect(end.offcut?.text).toContain('left over from the cut-out');
     expect(end.lines.join(' ')).toContain('× 3 for aluminium-6061');
+  });
+
+  it('the run context’s fibre flag makes a base plastic’s minute abrasive (#464)', async () => {
+    // The job's material is PET — a PETG-CF blank keeps its base — and the flag travels with it so
+    // the runtime is weighted 5×, not the plastic 1×.
+    const end = await endOfRun(TARGET, finished, { ...ctx, material: 'pet', fibre: 'cf' });
+    expect(calls).toContain(`runtime ${Math.round(cutMinutes * 5 * 1000) / 1000}`);
+    expect(end.lines.join(' ')).toContain('× 5 for pet (carbon fibre, abrasive, seeded — tools.wearWeight.abrasive)');
   });
 
   it('no stock entry: the shelf is left alone with a note; the runtime is still counted, unweighted', async () => {

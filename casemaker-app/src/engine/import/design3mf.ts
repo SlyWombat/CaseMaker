@@ -1,6 +1,6 @@
 import type { ManifoldToplevel } from '@/workers/geometry/evaluateOp';
 import type { Mm } from '@/types/units';
-import type { StockMaterial } from '@/types/engraveJob';
+import type { FilamentFibre, StockMaterial } from '@/types/engraveJob';
 import { finalizeOutline } from './outlineTypes';
 import { PrusaThreeMfError, type PrusaShapeVolume, type PrusaTextVolume, type PrusaThreeMf, type PrusaVolume } from './prusa3mf';
 
@@ -99,6 +99,13 @@ export interface DesignImport {
      * job's existing material is left alone rather than silently becoming PLA.
      */
     material: StockMaterial | null;
+    /**
+     * The fibre the blank's filament states, or null. A `PETG-CF` profile keeps `petg` as its
+     * material and carries `cf` here (#464): the base is what the feeds and the catalogue answer,
+     * and the flag is what makes the wear weighting abrasive. Null when no extruder names one or
+     * they disagree, and when `material` is null — a flag with no material has nothing to weigh.
+     */
+    fibre: FilamentFibre | null;
   } | null;
   /** Every volume that cuts the top face, in the file's own order. */
   regions: DesignRegion[];
@@ -310,9 +317,13 @@ function mmSetting(file: PrusaThreeMf, key: string): number | null {
  * `filament_type`'s value is the class, so this is keyed by the slicer's own words. FLEX and TPU
  * are two spellings of the same rubber, and NYLON is the common name for PA, so each pair maps to
  * ONE app material. The fibre-filled nylons are classes of their own because the wear weighting
- * treats them differently — they are abrasive (`runEnd.ts`'s `WEAR_CLASS`). A class this app does
- * not know (PVB, PEEK, an unmodelled PET-CF…) stays unmapped: a blank the app cannot name must
- * leave the job's material as it was rather than silently becoming PLA.
+ * treats them differently — they are abrasive (`runEnd.ts`'s `WEAR_CLASS`).
+ *
+ * The OTHER fibre composites (#464) map to their BASE plastic and carry the fibre beside it:
+ * `PETG-CF` is a `petg` blank plus `cf`, not a `petg-cf` material, and `runEnd.ts` reads the flag
+ * to weight it as abrasive. A class this app does not know — the engineering/odd `PEEK`, and the
+ * niche `PVB` — stays unmapped: a blank the app cannot name must leave the job's material as it
+ * was rather than silently becoming PLA.
  */
 const FILAMENT_TYPE_MATERIALS: Readonly<Record<string, StockMaterial>> = {
   PLA: 'pla',
@@ -325,6 +336,9 @@ const FILAMENT_TYPE_MATERIALS: Readonly<Record<string, StockMaterial>> = {
   NYLON: 'pa',
   'PA-CF': 'pa-cf',
   'PA-GF': 'pa-gf',
+  'PET-CF': 'pet',
+  'PETG-CF': 'petg',
+  'PC-CF': 'pc',
   PC: 'pc',
   PP: 'pp',
   FLEX: 'tpu',
@@ -341,37 +355,54 @@ function profileSays(profile: string, word: string): boolean {
 /** A profile's nylon base — PA, PA6, PA11, PA12, NYLON — which a composite name may spell out. */
 const NYLON_IN_PROFILE = /(^|[^A-Z0-9])(PA\d*|NYLON)([^A-Z0-9]|$)/;
 
+/** One filament's app material, with the fibre flag the class may also state (#464). */
+interface FilamentClass {
+  material: StockMaterial;
+  fibre: FilamentFibre | null;
+}
+
 /**
- * The fibre-filled nylons a profile name states in words rather than as a `PA-CF`/`PA-GF` class
- * word. The file's own example is `Prusament PA11 Carbon Fiber @XL` (#456): neither `PA-CF` nor
- * `PA` is a whole word there.
+ * The fibre words a profile name states. The file's own example is `Prusament PA11 Carbon Fiber
+ * @XL` (#456): neither `PA-CF` nor `PA` is a whole word there, so the fill is read on its own.
  */
-const FIBRE_IN_PROFILE: readonly { fibre: RegExp; material: StockMaterial }[] = [
-  { fibre: /(^|[^A-Z0-9])(CF|CARBON[ -]?FIB(?:ER|RE)?)([^A-Z0-9]|$)/, material: 'pa-cf' },
-  { fibre: /(^|[^A-Z0-9])(GF|GLASS[ -]?FIB(?:ER|RE)?)([^A-Z0-9]|$)/, material: 'pa-gf' },
+const FIBRE_IN_PROFILE: readonly { fibre: RegExp; kind: FilamentFibre }[] = [
+  { fibre: /(^|[^A-Z0-9])(CF|CARBON[ -]?FIB(?:ER|RE)?)([^A-Z0-9]|$)/, kind: 'cf' },
+  { fibre: /(^|[^A-Z0-9])(GF|GLASS[ -]?FIB(?:ER|RE)?)([^A-Z0-9]|$)/, kind: 'gf' },
 ];
+
+/** The fibre a FILAMENT CLASS word states (`PETG-CF`), or null. The class is one token, so no boundaries. */
+function fibreInClass(stated: string): FilamentFibre | null {
+  if (stated.endsWith('-CF')) return 'cf';
+  if (stated.endsWith('-GF')) return 'gf';
+  return null;
+}
 
 /**
  * The app material a PROFILE NAME states when `filament_type` is absent, or null.
  *
- * A fibre word is read first and only answers when the same profile is also nylon: a `PET-CF` or
- * bare `Carbon Fiber` profile is a composite this app has no class for, and it stays unknown
- * rather than becoming its unreinforced base. Otherwise the class words are matched as whole
- * words, with a nylon base such as `PA11` counting as PA.
+ * A fibre word is read first, and it needs a base in the same name to answer: a bare `Carbon
+ * Fiber` profile is still unknown. With one, the base plastic is the material and the fibre is the
+ * flag (#464) — except nylon, whose `pa-cf`/`pa-gf` classes already carry it. The class words are
+ * matched as whole words, with a nylon base such as `PA11` counting as PA. Composite class words
+ * are filtered out of the base match: `PA-CF` already contains the whole word `PA`, and counting
+ * both would look like two different materials.
  */
-function materialFromProfile(profile: string): StockMaterial | null {
+function materialFromProfile(profile: string): FilamentClass | null {
   if (profile === '') return null;
   const fibres = FIBRE_IN_PROFILE.filter((f) => f.fibre.test(profile));
-  if (fibres.length > 0) {
-    return fibres.length === 1 && NYLON_IN_PROFILE.test(profile) ? fibres[0]!.material : null;
-  }
+  if (fibres.length > 1) return null; // both fills named: no single flag
+  const fibre = fibres[0]?.kind ?? null;
   const found = new Set(
     Object.entries(FILAMENT_TYPE_MATERIALS)
-      .filter(([word]) => profileSays(profile, word))
+      .filter(([word]) => (fibre === null || !word.includes('-')) && profileSays(profile, word))
       .map(([, material]) => material),
   );
   if (NYLON_IN_PROFILE.test(profile)) found.add('pa');
-  return found.size === 1 ? [...found][0]! : null;
+  if (found.size !== 1) return null;
+  const material = [...found][0]!;
+  if (fibre === null) return { material, fibre: null };
+  if (material === 'pa') return { material: fibre === 'cf' ? 'pa-cf' : 'pa-gf', fibre };
+  return { material, fibre };
 }
 
 /**
@@ -384,9 +415,12 @@ function materialFromProfile(profile: string): StockMaterial | null {
  * blank's class concrete — matched on whole words, so `PETG` is found in a PETG profile but not
  * inside an unrelated word.
  */
-function materialForFilament(type: string | null, settingsId: string | null): StockMaterial | null {
+function materialForFilament(type: string | null, settingsId: string | null): FilamentClass | null {
   const stated = type?.trim().toUpperCase() ?? '';
-  if (stated !== '') return FILAMENT_TYPE_MATERIALS[stated] ?? null;
+  if (stated !== '') {
+    const material = FILAMENT_TYPE_MATERIALS[stated];
+    return material === undefined ? null : { material, fibre: fibreInClass(stated) };
+  }
   return materialFromProfile(settingsId?.toUpperCase() ?? '');
 }
 
@@ -396,27 +430,35 @@ function materialForFilament(type: string | null, settingsId: string | null): St
  * The entries are the BLANK's extruders only (`prusa3mf.ts` excludes `NegativeVolume` extruders),
  * so a modifier's plastic cannot answer for the blank. When those extruders disagree, or any of
  * them names a class this app cannot map, there is no single material to state and `material` is
- * null — the job keeps the material it had.
+ * null — the job keeps the material it had. The fibre flag follows the material: a blank whose
+ * extruders all state one fill keeps it, one filled colour among unfilled ones is enough to make
+ * the blank abrasive, and two different fills settle nothing.
  */
 function blankFilamentOf(file: PrusaThreeMf): DesignImport['filament'] {
   if (file.blankFilaments.length === 0) return null;
   const types: string[] = [];
   const settingsIds: string[] = [];
   const materials: StockMaterial[] = [];
+  const fibres: FilamentFibre[] = [];
   let resolved = true;
   for (const filament of file.blankFilaments) {
     if (filament.type !== null && !types.includes(filament.type)) types.push(filament.type);
     if (filament.settingsId !== null && !settingsIds.includes(filament.settingsId)) {
       settingsIds.push(filament.settingsId);
     }
-    const material = materialForFilament(filament.type, filament.settingsId);
-    if (material === null) resolved = false;
-    else if (!materials.includes(material)) materials.push(material);
+    const stated = materialForFilament(filament.type, filament.settingsId);
+    if (stated === null) resolved = false;
+    else {
+      if (!materials.includes(stated.material)) materials.push(stated.material);
+      if (stated.fibre !== null && !fibres.includes(stated.fibre)) fibres.push(stated.fibre);
+    }
   }
+  const material = resolved && materials.length === 1 ? materials[0]! : null;
   return {
     types,
     settingsIds,
-    material: resolved && materials.length === 1 ? materials[0]! : null,
+    material,
+    fibre: material !== null && fibres.length === 1 ? fibres[0]! : null,
   };
 }
 

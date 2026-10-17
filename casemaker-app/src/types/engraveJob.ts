@@ -46,6 +46,8 @@ import type { RegistrationPlan } from '@/engine/cnc/registration/plan';
  * them, so each is answered through `CATALOGUE_MATERIAL_ALIASES`'s nearest-plastic mapping (ABS or
  * acrylic), labelled everywhere as a mapping rather than a vendor claim. `pa-cf` and `pa-gf` are
  * separate from `pa` because fibre-filled nylon is abrasive and carries its own wear class.
+ * `PET-CF`, `PC-CF` and `PETG-CF` do NOT get classes of their own (#464): they are their base
+ * plastic here, and {@link FilamentFibre} carries the abrasive part.
  */
 export type StockMaterial =
   | 'softwood'
@@ -69,6 +71,18 @@ export type StockMaterial =
   | 'aluminium-7075'
   | 'brass'
   | 'copper';
+
+/**
+ * The fibre a printed blank's filament class states (#464): `cf` carbon, `gf` glass.
+ *
+ * Kept BESIDE the material rather than folded into it. A `PETG-CF` blank is PETG — that is what
+ * the feeds table and the catalogue mapping need to know — and the fibre is what the tool wear
+ * weighting needs to know. One flag over four base plastics is a smaller vocabulary than a
+ * material per pair, and it is the honest one: the app knows the base exactly and the fill by
+ * its class word. The fibre nylons keep their own materials (`pa-cf`, `pa-gf`) because those
+ * classes predate the flag; a caller may still pass their fibre, and it changes nothing.
+ */
+export type FilamentFibre = 'cf' | 'gf';
 
 /**
  * Where an asserted value came from (#246, and the same provenance rule as the vise and the

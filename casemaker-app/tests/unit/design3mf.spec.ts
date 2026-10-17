@@ -302,6 +302,7 @@ describe('the blank’s material, read from the project (#456)', () => {
       types: ['PETG'],
       settingsIds: ['Generic PETG @XL'],
       material: 'petg',
+      fibre: null,
     });
   });
 });
@@ -348,6 +349,9 @@ describe('the blank’s material maps the classes the app knows (#456)', () => {
     ['NYLON', 'pa'],
     ['PA-CF', 'pa-cf'],
     ['PA-GF', 'pa-gf'],
+    ['PET-CF', 'pet'],
+    ['PC-CF', 'pc'],
+    ['PETG-CF', 'petg'],
     ['PC', 'pc'],
     ['PP', 'pp'],
     ['FLEX', 'tpu'],
@@ -357,10 +361,33 @@ describe('the blank’s material maps the classes the app knows (#456)', () => {
     expect(designWith(`filament_type = ${type}`).filament?.material).toBe(material);
   });
 
+  it('keeps a CF composite as its base plastic, with the fibre beside it (#464)', () => {
+    // PET-CF is a PET blank that wears a cutter like a composite — not a `pet-cf` material. The
+    // base is what the feeds and the catalogue answer; the flag is what the wear weighting reads.
+    for (const [type, material] of [
+      ['PET-CF', 'pet'],
+      ['PC-CF', 'pc'],
+      ['PETG-CF', 'petg'],
+    ] as const) {
+      const filament = designWith(`filament_type = ${type}`).filament!;
+      expect(filament.material).toBe(material);
+      expect(filament.fibre).toBe('cf');
+    }
+    // An unfilled blank carries no flag.
+    expect(designWith('filament_type = PETG').filament?.fibre).toBeNull();
+    // The fibre nylons already ARE the composite class; their flag agrees and changes nothing.
+    expect(designWith('filament_type = PA-GF').filament?.fibre).toBe('gf');
+  });
+
   it('leaves a class this app cannot name unmapped — it never falls back to PLA', () => {
-    const filament = designWith('filament_type = PVB').filament!;
-    expect(filament.types).toEqual(['PVB']);
-    expect(filament.material).toBeNull();
+    // PEEK prints far hotter than this machine's owner is likely to blank, and PVB is a niche
+    // model-making filament; neither has a catalogue row, a wear class or a shelf place (#464).
+    for (const type of ['PVB', 'PEEK']) {
+      const filament = designWith(`filament_type = ${type}`).filament!;
+      expect(filament.types).toEqual([type]);
+      expect(filament.material).toBeNull();
+      expect(filament.fibre).toBeNull();
+    }
   });
 
   it('leaves an absent filament_type unmapped', () => {
@@ -382,14 +409,25 @@ describe('the blank’s material maps the classes the app knows (#456)', () => {
     expect(designWith('filament_settings_id = "a";"Generic PA6 Glass Fiber @XL"').filament?.material).toBe('pa-gf');
     // A nylon base the profile spells PA11 is still nylon.
     expect(designWith('filament_settings_id = "a";"Prusament PA11 @XL"').filament?.material).toBe('pa');
-    // A composite this app does not model is unknown, not its unreinforced base.
-    expect(designWith('filament_settings_id = "a";"Generic PET-CF @XL"').filament?.material).toBeNull();
+  });
+
+  it('reads a filled base plastic as that base plus the fibre flag (#464)', () => {
+    const petCf = designWith('filament_settings_id = "a";"Generic PET-CF @XL"').filament!;
+    expect(petCf).toMatchObject({ material: 'pet', fibre: 'cf' });
+    const pcCf = designWith('filament_settings_id = "a";"Prusament PC Blend Carbon Fiber @XL"').filament!;
+    expect(pcCf).toMatchObject({ material: 'pc', fibre: 'cf' });
+    const petgGf = designWith('filament_settings_id = "a";"Generic PETG Glass Fiber @XL"').filament!;
+    expect(petgGf).toMatchObject({ material: 'petg', fibre: 'gf' });
+    // A fill with no base in the name is not a material: the flag has nothing to sit beside.
+    expect(designWith('filament_settings_id = "a";"Carbon Fiber @XL"').filament?.material).toBeNull();
+    expect(designWith('filament_settings_id = "a";"Carbon Fiber @XL"').filament?.fibre).toBeNull();
   });
 
   it('states no single material when the blank’s extruders disagree', () => {
     const mixed = twoParts('PETG;PLA');
     expect(mixed.filament?.types).toEqual(['PETG', 'PLA']);
     expect(mixed.filament?.material).toBeNull();
+    expect(mixed.filament?.fibre).toBeNull();
   });
 });
 
@@ -408,6 +446,7 @@ describe.skipIf(!hasSample)('the maintainer’s own project, as an oracle', () =
       types: ['PETG'],
       settingsIds: ['Generic PETG @XL'],
       material: 'petg',
+      fibre: null,
     });
   });
 });

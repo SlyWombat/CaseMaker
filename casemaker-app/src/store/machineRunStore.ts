@@ -31,6 +31,7 @@ import { programHash, runProgram, type Progress, type RunOutcome, type RunSettin
 import { copyInMachine, offcutOffer, programCuts, runtimeOf, wearKey, weighRuntime, withRuntime } from '@/engine/cnc/runEnd';
 import type { StockItem } from '@/platform/stockClient';
 import type { InventoryItem } from '@/platform/houseClient';
+import type { FilamentFibre } from '@/types/engraveJob';
 import { readDefault, readFlag } from '@/platform/defaultsClient';
 import { newStockId, useStockStore } from './stockStore';
 import { useToolRegistryStore } from './toolRegistryStore';
@@ -59,6 +60,13 @@ export interface RunContext {
   partAt?: { x: number; y: number };
   /** The material cut, for the wear weight. Default: the reserved shelf entry's. */
   material?: StockItem['material'];
+  /**
+   * The blank's fibre flag (#464), when its filament class was a composite (`PETG-CF`). The
+   * material stays the base plastic — the feeds and catalogue answer that — and this is what makes
+   * the wear weighting abrasive. Absent for an unfilled blank, and then the material's own class
+   * decides.
+   */
+  fibre?: FilamentFibre;
 }
 
 export interface RunEnd {
@@ -191,7 +199,8 @@ export async function endOfRun(target: { host: string; port: number }, outcome: 
     else {
       const item = items.find((i) => i.id === who.itemId)!;
       const material = ctx?.material ?? parent?.material ?? null;
-      const weighed = weighRuntime(reading, material, material === null ? null : io.wearWeight(wearKey(material)));
+      const fibre = ctx?.fibre ?? null;
+      const weighed = weighRuntime(reading, material, material === null ? null : io.wearWeight(wearKey(material, fibre)), fibre);
       const w = await io.updateItem(withRuntime(item, who.copyId, weighed.minutes));
       lines.push(
         w.ok

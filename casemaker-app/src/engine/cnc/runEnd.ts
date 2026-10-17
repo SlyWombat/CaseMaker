@@ -30,6 +30,7 @@ import { parseGcode } from './gcode';
 import { StockItemSchema, formIsFlat, type StockForm, type StockItem } from '@/platform/stockClient';
 import type { ToolCopy } from './toolCondition';
 import type { STOCK_MATERIALS } from './materials';
+import type { FilamentFibre } from '@/types/engraveJob';
 
 /** A shelf material word (#413's vocabulary). */
 type StockMaterial = (typeof STOCK_MATERIALS)[number];
@@ -378,15 +379,18 @@ export function offcutOffer(input: {
 // ---------------------------------------------------------------------------------------------------
 // How much wear a minute of cutting is, by material.
 
+export type WearClass = 'plastic' | 'wood' | 'aluminium' | 'brass' | 'copper' | 'abrasive';
+
 /**
  * The wear classes the shop weights (`tools.wearWeight.<class>`), and which stock materials are
  * which. `abrasive` is the fibre-filled nylons' own class (#456): glass and carbon fibre wear a
  * cutting edge far faster than unfilled plastic, so they are weighted separately rather than
  * folded into `plastic`.
+ *
+ * This map is by MATERIAL, and a `PET-CF` blank's material is `pet` (#464) — so the flag is a
+ * second input, not a row here. {@link wearClassFor} is the reader that takes both.
  */
-export const WEAR_CLASS: Readonly<
-  Record<StockMaterial, 'plastic' | 'wood' | 'aluminium' | 'brass' | 'copper' | 'abrasive'>
-> = {
+export const WEAR_CLASS: Readonly<Record<StockMaterial, WearClass>> = {
   pla: 'plastic',
   petg: 'plastic',
   pet: 'plastic',
@@ -410,8 +414,23 @@ export const WEAR_CLASS: Readonly<
   copper: 'copper',
 };
 
-export function wearKey(material: StockMaterial): string {
-  return `tools.wearWeight.${WEAR_CLASS[material]}`;
+/** The shop's words for a fibre flag, for the runtime line. */
+const FIBRE_LABELS: Readonly<Record<FilamentFibre, string>> = { cf: 'carbon fibre', gf: 'glass fibre' };
+
+/**
+ * The wear class a material cuts at, with a composite's fibre flag (#464).
+ *
+ * A PET-CF blank is `pet` — this app has no class per base+fibre pair — so the base alone would
+ * weight it as an ordinary plastic. ANY fibre is abrasive whatever plastic carries it: that is the
+ * whole content of the flag, and it is why one `abrasive` class serves the nylons, the PETs, the
+ * polycarbonates and anything else a future class word fills.
+ */
+export function wearClassFor(material: StockMaterial, fibre: FilamentFibre | null = null): WearClass {
+  return fibre === null ? WEAR_CLASS[material] : 'abrasive';
+}
+
+export function wearKey(material: StockMaterial, fibre: FilamentFibre | null = null): string {
+  return `tools.wearWeight.${wearClassFor(material, fibre)}`;
 }
 
 export interface WeightedRuntime {
@@ -422,15 +441,26 @@ export interface WeightedRuntime {
   note: string;
 }
 
-/** The cutting minutes weighted by the material's wear weight, or unweighted (×1) when it is unknown. */
-export function weighRuntime(reading: RuntimeReading, material: StockMaterial | null, weight: { value: number; source: string } | null): WeightedRuntime {
+/**
+ * The cutting minutes weighted by the material's wear weight, or unweighted (×1) when it is
+ * unknown. `fibre` is the composite flag from the blank's filament class (#464): it selects the
+ * abrasive weight, and the note names the fill so the heavier number reads as the reason it does.
+ */
+export function weighRuntime(
+  reading: RuntimeReading,
+  material: StockMaterial | null,
+  weight: { value: number; source: string } | null,
+  fibre: FilamentFibre | null = null,
+): WeightedRuntime {
   if (material === null || weight === null) {
     return { minutes: reading.minutes, weight: 1, note: `${reading.note}; the material is not known, so it is counted unweighted (×1)` };
   }
+  const wearClass = wearClassFor(material, fibre);
+  const fill = fibre === null ? '' : `${FIBRE_LABELS[fibre]}, `;
   return {
     minutes: reading.minutes * weight.value,
     weight: weight.value,
-    note: `${reading.note}; × ${weight.value} for ${material} (${WEAR_CLASS[material]}, ${weight.source} — ${wearKey(material)}) = ${r2(reading.minutes * weight.value)} wear-minutes`,
+    note: `${reading.note}; × ${weight.value} for ${material} (${fill}${wearClass}, ${weight.source} — ${wearKey(material, fibre)}) = ${r2(reading.minutes * weight.value)} wear-minutes`,
   };
 }
 
