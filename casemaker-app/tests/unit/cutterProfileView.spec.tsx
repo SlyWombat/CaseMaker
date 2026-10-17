@@ -87,8 +87,36 @@ describe('CutterProfile (#489)', () => {
   it('makes a dimension keyboard-focusable, with an accessible name', () => {
     render(<CutterProfile tool={ENGRAVER} />);
     expect(dimension('D1').getAttribute('tabindex')).toBe('0');
-    expect(dimension('D1').getAttribute('aria-label')).toContain('flat tip Ø');
+    expect(dimension('D1').getAttribute('aria-label')).toContain('tip diameter');
     expect(dimension('D1').getAttribute('aria-label')).toContain('0.3');
+  });
+
+  it('gives every dimension line a hover title of code, word and value', () => {
+    // The maintainer's rule for this drawing: the code is all the picture has room to print, so
+    // the words live in the hover title — and there is no legend in the app taking up space.
+    render(<CutterProfile tool={ENGRAVER} />);
+    const title = (code: string) => dimension(code).querySelector('title')!.textContent;
+    expect(title('DS')).toBe('DS — shank diameter 3.175 mm');
+    expect(title('DC')).toBe('DC — cutting diameter 3.175 mm');
+    expect(title('LC')).toBe('LC — flute length 6.0 mm');
+    expect(title('AN')).toBe('AN — half angle 15°');
+    expect(title('D1')).toBe('D1 — tip diameter 0.3 mm');
+    // The accessible name says the same thing, so a screen reader hears one wording.
+    for (const code of ['DS', 'DC', 'LC', 'AN', 'D1']) {
+      expect(dimension(code).getAttribute('aria-label')).toBe(title(code));
+    }
+  });
+
+  it('says a missing field is not stated, in words, in its title', () => {
+    render(<CutterProfile tool={FLAT} />);
+    const ls = dimension('LS');
+    expect(ls.querySelector('title')!.textContent).toBe('LS — shoulder length, not stated');
+    // The flat's stated fields still read code, word and value.
+    expect(dimension('DC').querySelector('title')!.textContent).toBe('DC — cutting diameter 3.175 mm');
+    // The editor's field list uses the same sentence for its accessible name.
+    render(<CutterProfileFields tool={FLAT} />);
+    const row = document.querySelector('[data-testid="cutter-profile-fields"] [data-dimension="LS"]')!;
+    expect(row.getAttribute('aria-label')).toBe('LS — shoulder length, not stated');
   });
 
   it('highlights the edge that depends on a hovered missing field', () => {

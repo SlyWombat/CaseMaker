@@ -1,5 +1,5 @@
 import { type JSX } from 'react';
-import { cutterDimensionSpecs, type CutterField } from '@/engine/cnc/cutterProfile';
+import { cutterDimensionSpecs, dimensionTitle, type CutterField } from '@/engine/cnc/cutterProfile';
 import type { Tool } from '@/engine/cnc/tool';
 import { cutterFieldsLinked } from './cutterFieldLinks';
 import './cutterProfile.css';
@@ -51,7 +51,7 @@ export function CutterProfileFields({
             data-missing={spec.missing ? 'true' : undefined}
             role="listitem"
             tabIndex={0}
-            aria-label={`${spec.code} ${spec.label}: ${spec.missing ? 'not stated' : value}`}
+            aria-label={dimensionTitle(spec)}
             onMouseEnter={() => onFieldHover?.(spec.field)}
             onMouseLeave={() => onFieldHover?.(null)}
             onFocus={() => onFieldHover?.(spec.field)}

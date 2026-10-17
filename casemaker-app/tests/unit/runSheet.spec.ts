@@ -736,12 +736,41 @@ describe('runSheet (#207)', () => {
       expect(svg).not.toContain('href=');
     });
 
+    it('lists the codes the drawing uses, in order, as the paper’s small print', () => {
+      // The drawing cannot hover on paper, so it carries a key. Only the codes THIS shape draws,
+      // each with its word and no value — the values are on the dimension lines.
+      const engraver = defaultEngraveJob();
+      engraver.tool = flatEndMill(3.175, {
+        name: '30° engraving bit',
+        typeText: 'Engraving',
+        shape: 'engraving',
+        tipDiameter: 0.3,
+        diameter: 3.175,
+        halfAngle: 15,
+        angle: 30,
+        fluteLength: 6,
+        shoulderLength: null,
+      });
+      expect(sheetFor(engraver).toolProfileLegend).toBe(
+        'DS shank diameter · DC cutting diameter · LC flute length · AN half angle · D1 tip diameter',
+      );
+
+      const flat = defaultEngraveJob();
+      flat.tool = flatEndMill(3.175, { fluteLength: 12, shoulderLength: null });
+      expect(sheetFor(flat).toolProfileLegend).toBe(
+        'DS shank diameter · DC cutting diameter · LC flute length · LS shoulder length',
+      );
+      // A code the shape does not draw is never in the key.
+      expect(sheetFor(flat).toolProfileLegend).not.toContain('AN');
+    });
+
     it('is absent when the job names no cutter', () => {
       const job = defaultEngraveJob();
       job.tool = null;
       job.toolKey = 'user:not-in-this-house';
       const sheet = sheetFor(job);
       expect('toolProfileSvg' in sheet).toBe(false);
+      expect('toolProfileLegend' in sheet).toBe(false);
     });
 
     it('embeds the same drawing in the Markdown, under the cutter section', () => {
@@ -753,6 +782,10 @@ describe('runSheet (#207)', () => {
       expect(need).toBeGreaterThan(-1);
       expect(drawing).toBeGreaterThan(need);
       expect(drawing).toBeLessThan(mount);
+      // …with its key directly under it, because the paper cannot hover.
+      const legend = md.indexOf(sheet.toolProfileLegend!);
+      expect(legend).toBeGreaterThan(drawing);
+      expect(legend).toBeLessThan(mount);
     });
   });
 

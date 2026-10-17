@@ -113,6 +113,13 @@ export function RunSheetView({ sheet, onClose }: { sheet: RunSheet; onClose?: ()
                 dangerouslySetInnerHTML={{ __html: sheet.toolProfileSvg }}
               />
             )}
+            {/* The paper cannot hover, so the printed drawing carries its own key: the codes it
+                draws, in order. The values are on the dimension lines already. */}
+            {section.id === 'need' && sheet.toolProfileLegend !== undefined && (
+              <p className="run-sheet-tool-legend" data-testid="run-sheet-tool-legend">
+                {sheet.toolProfileLegend}
+              </p>
+            )}
             {section.id === 'origin' && (
               <div
                 className="run-sheet-diagram"

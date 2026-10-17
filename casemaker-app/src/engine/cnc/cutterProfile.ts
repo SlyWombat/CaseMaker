@@ -147,6 +147,7 @@ export interface CutterProfileDimension {
   field: CutterField;
   label: string;
   kind: CutterDimensionSpec['kind'];
+  unit: 'mm' | 'deg';
   value: number | null;
   text: string;
   missing: boolean;
@@ -202,14 +203,14 @@ interface DimensionInfo {
 }
 
 const DIMENSIONS: Record<CutterDimensionCode, DimensionInfo> = {
-  DS: { label: 'shank Ø', kind: 'diameter', unit: 'mm' },
-  DC: { label: 'cutting Ø', kind: 'diameter', unit: 'mm' },
+  DS: { label: 'shank diameter', kind: 'diameter', unit: 'mm' },
+  DC: { label: 'cutting diameter', kind: 'diameter', unit: 'mm' },
   LS: { label: 'shoulder length', kind: 'length', unit: 'mm' },
   LC: { label: 'flute length', kind: 'length', unit: 'mm' },
   CR: { label: 'corner radius', kind: 'radius', unit: 'mm' },
   TI: { label: 'included tip angle', kind: 'angle', unit: 'deg' },
   AN: { label: 'half angle', kind: 'angle', unit: 'deg' },
-  D1: { label: 'flat tip Ø', kind: 'diameter', unit: 'mm' },
+  D1: { label: 'tip diameter', kind: 'diameter', unit: 'mm' },
 };
 
 /**
@@ -326,6 +327,42 @@ export function cutterDimensionSpecs(tool: Tool): CutterDimensionSpec[] {
         : fmtMm(value);
     return { code, field, label: info.label, kind: info.kind, unit: info.unit, value, text, missing };
   });
+}
+
+/**
+ * The hover title for a dimension, in words: 'DC — cutting diameter 3.175 mm', 'AN — half angle
+ * 15°', and for a field the record does not state, 'LS — shoulder length, not stated'. The code
+ * alone is what the drawing has room to print; this is where the words live without taking any
+ * space on the picture.
+ */
+export function dimensionTitle(spec: {
+  code: CutterDimensionCode;
+  label: string;
+  unit: 'mm' | 'deg';
+  text: string;
+  missing: boolean;
+}): string {
+  if (spec.missing) return `${spec.code} — ${spec.label}, not stated`;
+  return `${spec.code} — ${spec.label} ${spec.unit === 'mm' ? `${spec.text} mm` : spec.text}`;
+}
+
+/**
+ * The order the codes are listed in when they are written out (the industry order the vocabulary
+ * came in). The drawing's own order is per shape and says what sits where on the picture; this is
+ * the order of a list of names.
+ */
+const LEGEND_ORDER: readonly CutterDimensionCode[] = ['DS', 'DC', 'LC', 'LS', 'CR', 'TI', 'AN', 'D1'];
+
+/**
+ * The one line of small print for the printed drawing: every code the shape draws, in the order
+ * above, each with its word and no value — the values are on the dimension lines. Null for a shape
+ * with no vocabulary, so a refusal drawing gets no legend rather than an empty one.
+ */
+export function cutterLegend(tool: Tool): string | null {
+  const drawn = new Set<CutterDimensionCode>(SHAPE_DIMENSION_CODES[tool.shape]);
+  const codes = LEGEND_ORDER.filter((code) => drawn.has(code));
+  if (codes.length === 0) return null;
+  return codes.map((code) => `${code} ${DIMENSIONS[code].label}`).join(' · ');
 }
 
 // ---------------------------------------------------------------------------------------------

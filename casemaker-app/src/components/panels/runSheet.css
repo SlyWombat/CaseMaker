@@ -145,6 +145,16 @@
   height: auto;
 }
 
+/* #489 review — the print drawing's key, small print under it. The app needs no legend: every
+   dimension line has its words in a hover title (see `CutterProfile.tsx`). */
+.run-sheet-tool-legend {
+  max-width: 300px;
+  margin: -4px 0 10px;
+  font-size: 11px;
+  line-height: 1.4;
+  color: #555;
+}
+
 /* SVG internals. The viewBox is in millimetres, so stroke widths and font sizes are in mm too. */
 .run-sheet-stock {
   fill: #fff;

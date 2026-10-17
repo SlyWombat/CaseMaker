@@ -46,6 +46,11 @@ export function renderRunSheetMarkdown(s: RunSheet, footerNote?: string): string
     if (section.id === 'need' && s.toolProfileSvg !== undefined) {
       out.push('');
       out.push(s.toolProfileSvg);
+      // The paper cannot hover: the drawing's key is printed under it.
+      if (s.toolProfileLegend !== undefined) {
+        out.push('');
+        out.push(`*${s.toolProfileLegend}*`);
+      }
     }
   }
   if (footerNote) {

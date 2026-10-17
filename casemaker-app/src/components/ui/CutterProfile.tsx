@@ -1,6 +1,7 @@
 import { useId, useMemo, useState, type JSX } from 'react';
 import {
   buildCutterProfile,
+  dimensionTitle,
   type CutterField,
   type CutterProfilePath,
   type CutterProfileSize,
@@ -168,7 +169,7 @@ export function CutterProfile({
 
         {model.dimensions.map((dimension) => {
           const isActive = cutterFieldsLinked(active, dimension.field);
-          const label = `${dimension.code} ${dimension.label}: ${dimension.missing ? 'not stated' : dimension.text}`;
+          const label = dimensionTitle(dimension);
           return (
             <g
               key={dimension.code}

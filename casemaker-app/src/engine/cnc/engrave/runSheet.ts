@@ -26,7 +26,7 @@ import {
   type MarginSettings,
 } from '@/engine/cnc/engrave/depthBounds';
 import { cuttingDiameter } from '@/engine/cnc/tool';
-import { cutterProfileSvg } from '@/engine/cnc/cutterProfile';
+import { cutterLegend, cutterProfileSvg } from '@/engine/cnc/cutterProfile';
 import { axesWord, describeTouch, kindWord, PROBE_SPEC, readsWord, registrationFor, sideWords } from '@/engine/cnc/engrave/registration';
 import {
   alongWord,
@@ -376,6 +376,12 @@ export interface RunSheet {
    * byte-identical to before this field existed.
    */
   toolProfileSvg?: string;
+  /**
+   * The small print under that drawing: every code it draws, in order, each with its word. The
+   * app needs no legend — every dimension line carries its words in a hover title — but paper
+   * cannot hover, and the values are already printed on the lines. ABSENT with the drawing.
+   */
+  toolProfileLegend?: string;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -2539,6 +2545,7 @@ export function buildRunSheet(
   );
   const toolProfileSvg =
     tool === null ? undefined : cutterProfileSvg(tool, { size: 'print', grooveDepth: deepestCut });
+  const toolProfileLegend = tool === null ? undefined : (cutterLegend(tool) ?? undefined);
 
   return {
     header,
@@ -2548,6 +2555,7 @@ export function buildRunSheet(
     // snapshot of it — is byte-identical to before this field existed.
     ...(stackUp ? { stackUp } : null),
     ...(toolProfileSvg === undefined ? null : { toolProfileSvg }),
+    ...(toolProfileLegend === undefined ? null : { toolProfileLegend }),
   };
 }
 
