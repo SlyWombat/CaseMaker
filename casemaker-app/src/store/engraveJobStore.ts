@@ -63,6 +63,7 @@ import type {
   EngraveTraceItem,
   EngraveVectorShape,
   FieldSource,
+  JobSetup,
   Sacrificial,
   ViseParams,
 } from '@/types/engraveJob';
@@ -697,6 +698,18 @@ export interface EngraveJobState {
    * which is the pre-#432 state — no facing section on the sheet and nothing faced.
    */
   setFacing: (facing: EngraveFacing | null) => void;
+  /**
+   * Replace the job's saved setups (#471). Once present the list is AUTHORITATIVE: the section
+   * writes it whole on every authoring action, and no item edit rewrites it behind the person's
+   * back — a removed item is surfaced as `setup-item-missing` and the person chooses. `null`
+   * deletes the field, returning the job to the implicit single setup (the pre-#419 reading); it
+   * does not store an empty list.
+   *
+   * Approvals (`registration`, `remount`) travel on the records the caller sends: the section
+   * uses `applySetupChange` to drop the ones an edit invalidates. This action deliberately does
+   * not prune or re-derive anything itself.
+   */
+  setSetups: (setups: JobSetup[] | null) => void;
   /**
    * Merge a hand edit into the feeds/speeds override (#205). A key set to `undefined` clears
    * just that field back to the computed value; `null` clears the whole override. The source
@@ -1456,6 +1469,17 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
           return rest;
         }
         return { ...job, facing };
+      }),
+
+    // #471 — the section's one write of the saved list. `null` is the absence the compatibility
+    // reading has always meant, so it deletes the key rather than storing `[]`.
+    setSetups: (setups) =>
+      apply((job) => {
+        if (setups === null) {
+          const { setups: _dropped, ...rest } = job;
+          return rest;
+        }
+        return { ...job, setups };
       }),
 
     // Any edit to the vise makes it a SAVED value, unless the patch states its own source

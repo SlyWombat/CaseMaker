@@ -702,6 +702,35 @@ describe('engraveJobStore (#200)', () => {
     expect('margins' in JSON.parse(localStorage.getItem(KEY)!)).toBe(false);
   });
 
+  // #471 — the Setups section's one write. Once present the list is authoritative; clearing it
+  // returns the job to the compatibility reading rather than storing an empty list.
+  it('setSetups writes the saved list whole, persists it, and null deletes the key', async () => {
+    backing.clear();
+    const { useEngraveJobStore } = await freshStore();
+    const job = useEngraveJobStore.getState().job;
+    const setups: JobSetup[] = [
+      {
+        id: 'setup-1',
+        orientation: { top: 'top', bottom: 'bottom', left: 'left', right: 'right', front: 'front', back: 'back' },
+        mount: { kind: 'vise' },
+        itemIds: [job.labels[0]!.id],
+        tools: [job.toolKey],
+      },
+    ];
+
+    useEngraveJobStore.getState().setSetups(setups);
+    expect(useEngraveJobStore.getState().job.setups).toEqual(setups);
+    expect(JSON.parse(localStorage.getItem(KEY)!).setups).toEqual(setups);
+
+    // A reload keeps them: the schema names every field of a setup.
+    const second = await freshStore();
+    expect(second.useEngraveJobStore.getState().job.setups).toEqual(setups);
+
+    second.useEngraveJobStore.getState().setSetups(null);
+    expect(second.useEngraveJobStore.getState().job.setups).toBeUndefined();
+    expect('setups' in JSON.parse(localStorage.getItem(KEY)!)).toBe(false);
+  });
+
   // #285 review — `print` is the one stock field a patch can CLEAR. An explicit `undefined` means
   // "this blank states no print", an OMITTED key means "this patch says nothing about it", and the
   // two must not be confused or a stale layer grid outlives the blank it described.
