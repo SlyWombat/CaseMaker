@@ -138,6 +138,23 @@ export interface EngravePreviewLost {
 }
 
 /**
+ * §5.7 — one step of the design ↔ as-cut slider: the stock after every cut at or SHALLOWER than
+ * this depth has been removed, cumulative.
+ *
+ * The steps are CUT DEPTHS, not animation frames. A cutter that plunges to 1.0 mm leaves exactly
+ * that floor in one move, so there is no stock state between 0.5 and 1.0 mm to show; a continuous
+ * scrub would be inventing depths the program never cuts. Stage 0 is always the uncut design (the
+ * faced blank) and the final state is the preview's own `stock` — this list stops short of it so
+ * the deepest body is not meshed (and transferred) twice.
+ */
+export interface EngravePreviewStage {
+  /** The deepest cut applied in this stage, mm below the face. 0 is the uncut design. */
+  depth: number;
+  /** The cumulative stock at this depth. Work frame. */
+  mesh: NodeMeshOutput;
+}
+
+/**
  * One declared under-surface void (#271): its footprint as plain rings, plus the two numbers the
  * panel and the viewport state about it.
  *
@@ -171,6 +188,13 @@ export interface EngravePreviewVoid {
 export interface EngravePreview {
   /** The stock with every enabled, error-free cut removed to its own depth (#288). Work frame. */
   stock: NodeMeshOutput;
+  /**
+   * §5.7 — the stock part-way through the program, one entry per distinct cut depth BELOW the
+   * deepest: `stages[0]` is the uncut design, and each later entry has cut one more depth. The
+   * finished state is `stock`. Empty when the job has no cut to scrub (the slider is then hidden,
+   * because every position would draw the same body).
+   */
+  stages: EngravePreviewStage[];
   /** One mesh per cut — label, shape, drill or trace: the bottom it leaves at its depth. */
   floors: EngravePreviewFloor[];
   /** The vise jaws (un-inflated), from `viseEnvelope`. */
@@ -349,7 +373,9 @@ export function createEngravePreviewer(tl: ManifoldToplevel): EngravePreviewer {
     const placedStock = stockBody.translate([0, 0, -facedThickness]);
     stockBody.delete();
 
-    const cutBodies: ManifoldInstance[] = [];
+    // Each body keeps its depth: the cumulative states below are built by subtracting one depth
+    // group at a time, so the slider can stop between cut depths without a second geometry pass.
+    const cutBodies: { body: ManifoldInstance; depth: number }[] = [];
     const floors: EngravePreviewFloor[] = [];
 
     // One pass over `cuts` — labels, shapes (#214), drills (#220) and traces (#219) alike. Each
@@ -368,7 +394,7 @@ export function createEngravePreviewer(tl: ManifoldToplevel): EngravePreviewer {
       // The cut: the opened region from −depth up PAST the top face (OVERSHOOT_MM, `sweep.ts`),
       // so the subtraction never has a coplanar face at Z = 0 to fight with.
       const cutBody = tl.Manifold.extrude(openedCS, cut.depth + OVERSHOOT_MM);
-      cutBodies.push(cutBody.translate([0, 0, -cut.depth]));
+      cutBodies.push({ body: cutBody.translate([0, 0, -cut.depth]), depth: cut.depth });
       cutBody.delete();
 
       // The floor: the same opened region as a sliver at the cut's bottom. A drill and a trace have
@@ -384,13 +410,40 @@ export function createEngravePreviewer(tl: ManifoldToplevel): EngravePreviewer {
       openedCS.delete();
     }
 
-    let stock: ManifoldInstance;
+    // §5.7 — the cumulative states the design ↔ as-cut slider steps through, built in the same
+    // pass as the finished stock. Subtracting one depth group at a time is exactly as correct as
+    // the one-shot difference (`(blank − A) − B = blank − (A ∪ B)`) and costs one difference per
+    // distinct depth, with each body deleted as soon as the group it belongs to is applied. The
+    // first stage is the uncut design; the finished state stays `stock`, so the deepest body is
+    // meshed and transferred once.
+    const stages: EngravePreviewStage[] = [];
+    // With no cuts the faced blank IS the final state; the slider then has nothing to scrub.
+    let stock: ManifoldInstance = placedStock;
     if (cutBodies.length > 0) {
-      stock = tl.Manifold.difference([placedStock, ...cutBodies]);
-      placedStock.delete();
-      for (const c of cutBodies) c.delete();
-    } else {
-      stock = placedStock;
+      stages.push({ depth: 0, mesh: meshOutputOf(placedStock) });
+      const byDepth = new Map<number, ManifoldInstance[]>();
+      for (const { body, depth } of cutBodies) {
+        const group = byDepth.get(depth);
+        if (group) group.push(body);
+        else byDepth.set(depth, [body]);
+      }
+      const depths = [...byDepth.keys()].sort((a, b) => a - b);
+      let running = placedStock;
+      for (let i = 0; i < depths.length; i++) {
+        const depth = depths[i]!;
+        const group = byDepth.get(depth)!;
+        const next = tl.Manifold.difference([running, ...group]);
+        // The state just consumed, and every body it applied, are no longer needed. `next` becomes
+        // the base for the following depth, and the last one becomes `stock`.
+        running.delete();
+        for (const body of group) body.delete();
+        if (i < depths.length - 1) {
+          stages.push({ depth, mesh: meshOutputOf(next) });
+          running = next;
+        } else {
+          stock = next;
+        }
+      }
     }
     const stockMesh = meshOutputOf(stock);
     stock.delete();
@@ -511,6 +564,7 @@ export function createEngravePreviewer(tl: ManifoldToplevel): EngravePreviewer {
 
     return {
       stock: stockMesh,
+      stages,
       floors,
       fixture,
       sacrificial,

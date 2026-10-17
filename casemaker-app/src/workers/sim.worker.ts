@@ -127,7 +127,22 @@ const api = {
     await ensureFontsLoaded(fontKeysForLabels(job.labels, job.customFonts ?? []));
     const p = (await getPreviewer()).engravePreview(job, tools, catalogue, gen, margins, conditions, shop);
     if (!p) return null;
-    return Comlink.transfer(p, buffersOf([p.stock, ...p.floors.map((f) => f.mesh), ...p.fixture.map((f) => f.mesh), ...p.sacrificial.map((s) => s.mesh)]));
+    return Comlink.transfer(
+      p,
+      buffersOf([
+        p.stock,
+        // §5.7 — the design ↔ as-cut slider's cumulative states. Their buffers travel with the
+        // preview exactly like the stock's: a stage held back would arrive as a detached or empty
+        // mesh once the worker's copy went away.
+        ...p.stages.map((s) => s.mesh),
+        ...p.floors.map((f) => f.mesh),
+        // §5.7 — the lost layer's slivers (slice 1) travel the same way; without the transfer they
+        // would be structured-cloned, leaving the worker holding a second copy of every buffer.
+        ...p.lost.map((l) => l.mesh),
+        ...p.fixture.map((f) => f.mesh),
+        ...p.sacrificial.map((s) => s.mesh),
+      ]),
+    );
   },
   /**
    * Generate → verify, headless (#206). Typesets labels through the synchronous `resolveFont`,

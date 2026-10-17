@@ -74,6 +74,7 @@ function previewWith(
     lost: [],
     engravability: [],
     findings: [],
+    stages: [],
     colourBoundaryDepth: null,
     recommendation: {
       key: PICK.key,

@@ -23,6 +23,7 @@ import { useEngraveJobStore } from '@/store/engraveJobStore';
 import { mm } from '@/engine/cnc/engrave/depthBounds';
 import { SACRIFICIAL_COLOR } from './simGeometry';
 import { depthColor, LOST_COLOR, splitColor, VOID_COLOR } from './engraveRamp';
+import { scrubStateAt, scrubWords } from './engraveScrub';
 
 /**
  * Top-right, below the top-left `ViewportToolbar` and above the bottom `SimTransport` (#198).
@@ -59,8 +60,20 @@ const SWATCH: CSSProperties = {
   boxSizing: 'border-box',
 };
 
+/**
+ * §5.7 — the design ↔ as-cut range. The BOX must stay `pointer-events: none` (#229: the legend may
+ * never swallow the toolbar's or the canvas's clicks), so the interactive row turns pointer events
+ * back on for itself — a descendant may opt in under a `none` ancestor.
+ */
+const SCRUB_ROW: CSSProperties = { ...ROW, marginTop: 2, pointerEvents: 'auto' };
+const SCRUBBER: CSSProperties = { width: 92, margin: 0, accentColor: '#4d8eff' };
+
 export function EngraveLegend(): JSX.Element | null {
   const preview = useEngravePreviewStore((s) => s.preview);
+  // §5.7 — the design ↔ as-cut slider. View state only: moving it writes this store and nothing
+  // else, so the job, its findings and the worker's next preview are untouched.
+  const scrubStage = useEngravePreviewStore((s) => s.scrubStage);
+  const setScrubStage = useEngravePreviewStore((s) => s.setScrubStage);
   const stock = useEngraveJobStore((s) => s.job.stock);
   const minFloor = useEngraveJobStore((s) => s.job.minFloor);
 
@@ -75,6 +88,7 @@ export function EngraveLegend(): JSX.Element | null {
   // Before the first preview lands there is nothing to say — and `EngravePreview` draws nothing
   // either, so an empty box would be the only thing on screen.
   if (!preview) return null;
+  const scrub = scrubStateAt(preview, scrubStage);
   const maxDepth = stock.thickness - minFloor;
   // #170 — on a blank that states its colour split the floors are NOT drawn on the depth ramp
   // (`floorColor`), so a ramp of depth swatches here would name colours the meshes are not in. The
@@ -90,6 +104,32 @@ export function EngraveLegend(): JSX.Element | null {
   return (
     <div data-testid="engrave-preview-legend" style={BOX}>
       <div style={{ fontWeight: 600, marginBottom: 2 }}>{split === null ? 'Depth' : 'Colour'}</div>
+      {/* §5.7 — design ↔ as cut. One step per cut depth (plus the uncut design), because the
+          program cuts those depths and no others; the readout says which state is on screen. The
+          control is absent when there is no cut at all: every position would draw the same blank. */}
+      {scrub.max > 0 && (
+        <>
+          <div data-testid="engrave-scrub-row" style={SCRUB_ROW}>
+            <span style={{ color: '#9aa4b0' }}>design</span>
+            <input
+              data-testid="engrave-scrub"
+              type="range"
+              min={0}
+              max={scrub.max}
+              step={1}
+              value={scrub.index}
+              aria-label="Design to as-cut depth"
+              aria-valuetext={scrubWords(scrub)}
+              onChange={(e) => setScrubStage(Number(e.currentTarget.value))}
+              style={SCRUBBER}
+            />
+            <span style={{ color: '#9aa4b0' }}>as cut</span>
+          </div>
+          <div data-testid="engrave-scrub-state" style={{ color: '#9aa4b0', marginBottom: 2 }}>
+            {scrubWords(scrub)}
+          </div>
+        </>
+      )}
       {split !== null ? (
         <>
           <div data-testid="engrave-legend-top" style={ROW}>
@@ -128,8 +168,9 @@ export function EngraveLegend(): JSX.Element | null {
           </div>
         ))
       )}
-      {/* §5.7 — the lost layer: an amber swatch and the area the cutter could not reach. */}
-      {preview.lost.length > 0 && (
+      {/* §5.7 — the lost layer: an amber swatch and the area the cutter could not reach. Only at
+          the as-cut end, matching the picture: part-way through, a not-yet-cut glyph is not lost. */}
+      {scrub.atCut && preview.lost.length > 0 && (
         <div data-testid="engrave-legend-lost" style={{ ...ROW, marginTop: 2 }}>
           <span style={{ ...SWATCH, background: LOST_COLOR }} />
           lost detail · {Number(lostArea.toFixed(2))} mm²

@@ -894,6 +894,51 @@ describe('engravePreview — the lost layer (§5.7)', () => {
     expect(p.lost.map((l) => l.labelId)).toEqual([job.labels[0]!.id, job.labels[2]!.id]);
   });
 
+  // §5.7 — the design ↔ as-cut slider. Each stage is a CLOSED-FORM material state: the blank less
+  // the opened area of every cut at or shallower than that stage's depth. A test that compared the
+  // stages to each other would pass even if all of them were the finished stock.
+  it('returns the cumulative stock at each cut depth, starting at the uncut design', () => {
+    const job = defaultEngraveJob();
+    const p = buildPreview(job);
+    const uncut = job.stock.length * job.stock.width * job.stock.thickness;
+
+    // The three labels cut at 2.0, 1.0 and 0.5 mm: the design, then a state after each of the two
+    // shallower depths. The deepest state is `stock`, never a duplicate stage.
+    expect(p.stages.map((s) => s.depth)).toEqual([0, 0.5, 1]);
+    expect(p.stages[0]!.mesh).not.toBe(p.stock);
+
+    const removedBy = (limit: number): number =>
+      p.engravability.reduce((sum, row) => {
+        const depth = job.labels.find((l) => l.id === row.labelId)?.depth ?? 0;
+        return depth > 0 && depth <= limit ? sum + row.openedArea * depth : sum;
+      }, 0);
+
+    // The design stage IS the blank.
+    expect(Math.abs(meshVolume(p.stages[0]!.mesh) - uncut)).toBeLessThan(uncut * 0.001);
+    for (const stage of p.stages) {
+      const removed = uncut - meshVolume(stage.mesh);
+      const expected = removedBy(stage.depth);
+      expect(Math.abs(removed - expected), `stage ${stage.depth} mm`).toBeLessThan(
+        Math.max(expected * 0.02, uncut * 0.0005),
+      );
+    }
+    // The finished stock removes every depth, and more than the last stage did.
+    const finalRemoved = uncut - meshVolume(p.stock);
+    expect(Math.abs(finalRemoved - removedBy(Infinity))).toBeLessThan(finalRemoved * 0.01);
+    expect(finalRemoved).toBeGreaterThan(uncut - meshVolume(p.stages[p.stages.length - 1]!.mesh));
+  });
+
+  it('has no stages when nothing is cut — the slider has no second state to show', () => {
+    const job = defaultEngraveJob();
+    job.labels.forEach((l) => {
+      l.enabled = false;
+    });
+    const p = buildPreview(job);
+
+    expect(p.floors).toHaveLength(0);
+    expect(p.stages).toEqual([]);
+  });
+
   it('has no lost layer for a drill or a trace — neither design is an area the cutter falls short of', () => {
     const job = defaultEngraveJob();
     job.labels = [{ ...job.labels[0]!, id: 'lbl', depth: 0.5 }];

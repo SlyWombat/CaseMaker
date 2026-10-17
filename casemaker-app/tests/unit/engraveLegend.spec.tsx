@@ -8,7 +8,7 @@
 // that is the point of the test: a legend that needs none cannot be misplaced by a camera.
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 
 import { EngraveLegend } from '@/components/viewport/EngraveLegend';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
@@ -31,7 +31,7 @@ function previewFor(job: EngraveJob = defaultEngraveJob()): NonNullable<ReturnTy
 }
 
 beforeEach(() => {
-  useEngravePreviewStore.setState({ preview: null });
+  useEngravePreviewStore.setState({ preview: null, scrubStage: null });
   // The sacrificial/void test leaves its own job in the store; reset it so these three do not
   // depend on running in this order (review of ebf38c5).
   useEngraveJobStore.setState({ job: defaultEngraveJob() });
@@ -162,6 +162,59 @@ describe('the engrave legend on a blank that states its split (#170)', () => {
     render(<EngraveLegend />);
 
     expect(screen.queryByTestId('engrave-legend-lost')).toBeNull();
+  });
+
+  // §5.7 — the slider is viewport chrome, and moving it is a VIEW act: it must not reach the job
+  // store, so the panel's document cannot become dirty and the worker is not asked to rebuild.
+  describe('the design ↔ as-cut slider (§5.7)', () => {
+    it('renders one step per cut depth, starting at as cut, and only the control takes pointers', () => {
+      const p = previewFor();
+      useEngravePreviewStore.setState({ preview: p });
+      render(<EngraveLegend />);
+
+      const slider = screen.getByTestId('engrave-scrub') as HTMLInputElement;
+      expect(slider.type).toBe('range');
+      expect(slider.min).toBe('0');
+      expect(slider.max).toBe(String(p.stages.length));
+      // The default preview is the finished one: no edit, no scrub, the picture the panel shipped.
+      expect(slider.value).toBe(String(p.stages.length));
+      expect(screen.getByTestId('engrave-scrub-state').textContent).toBe('as cut');
+      // #229 still holds for the legend box; only the control's own row opts back in.
+      expect((screen.getByTestId('engrave-preview-legend') as HTMLElement).style.pointerEvents).toBe('none');
+      expect((screen.getByTestId('engrave-scrub-row') as HTMLElement).style.pointerEvents).toBe('auto');
+    });
+
+    it('writes only the preview store — never the job — and withholds the lost layer mid-scrub', () => {
+      const p = previewFor();
+      useEngravePreviewStore.setState({ preview: p, scrubStage: null });
+      const jobBefore = useEngraveJobStore.getState().job;
+      render(<EngraveLegend />);
+      expect(screen.getByTestId('engrave-legend-lost')).not.toBeNull();
+
+      fireEvent.change(screen.getByTestId('engrave-scrub'), { target: { value: '0' } });
+
+      // Position 0 is the uncut design: no floor has been cut yet, so the lost layer is not a claim
+      // about anything on screen and its row is withheld with the amber mesh.
+      expect(useEngravePreviewStore.getState().scrubStage).toBe(0);
+      expect(screen.getByTestId('engrave-scrub-state').textContent).toBe('design (uncut)');
+      expect(screen.queryByTestId('engrave-legend-lost')).toBeNull();
+      // The one rule that matters for the control: no job write. Identity, not deep equality —
+      // any `set` on the document would replace the object and trigger a preview rebuild.
+      expect(useEngraveJobStore.getState().job).toBe(jobBefore);
+      expect(useEngravePreviewStore.getState().preview).toBe(p);
+    });
+
+    it('is absent when the job cuts nothing, because there is no second state to show', () => {
+      const job = defaultEngraveJob();
+      job.labels.forEach((l) => {
+        l.enabled = false;
+      });
+      useEngraveJobStore.setState({ job });
+      useEngravePreviewStore.setState({ preview: previewFor(job) });
+      render(<EngraveLegend />);
+
+      expect(screen.queryByTestId('engrave-scrub')).toBeNull();
+    });
   });
 
   it('still says nothing is cut when the blank has a split and no label is on (#170 review)', () => {

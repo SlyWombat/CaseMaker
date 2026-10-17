@@ -62,6 +62,18 @@ export interface EngravePreviewState {
   error: string | null;
   /** The generation of the newest request; a result from an older one is dropped. */
   gen: number;
+  /**
+   * §5.7 — where the viewport's design ↔ as-cut slider sits: 0 is the uncut design, `max` is the
+   * as-cut preview, `null` means as cut. This is VIEW state, not a job setting: it is read by the
+   * scene and the legend only, and setting it never writes `engraveJobStore`, so it cannot dirty
+   * the job or trigger a rebuild.
+   *
+   * It resets to `null` whenever a new preview lands. An edit is the user's newest statement about
+   * the job, so the picture it produces is shown finished rather than still scrubbed back to an
+   * earlier depth from before the edit.
+   */
+  scrubStage: number | null;
+  setScrubStage: (stage: number | null) => void;
   /** Debounced: rebuild the preview for `job` after the quiet window. */
   request: (job: EngraveJob) => void;
   /** Cancel any pending rebuild and forget the preview. */
@@ -105,7 +117,9 @@ export const useEngravePreviewStore = create<EngravePreviewState>()((set) => {
       );
       if (mine !== seq) return; // superseded by a newer request
       // `preview === null` means the worker saw a newer generation already; keep the last one.
-      if (preview) set({ preview, status: 'ready' });
+      // §5.7 — a new preview is shown at its as-cut end: the scrub was a view of the old result,
+      // and its depth may not even exist in the new one.
+      if (preview) set({ preview, status: 'ready', scrubStage: null });
       else set({ status: 'ready' });
     } catch (e) {
       if (mine === seq) set({ status: 'error', error: e instanceof Error ? e.message : String(e) });
@@ -117,6 +131,10 @@ export const useEngravePreviewStore = create<EngravePreviewState>()((set) => {
     status: 'idle',
     error: null,
     gen: 0,
+    scrubStage: null,
+    setScrubStage(stage) {
+      set({ scrubStage: stage });
+    },
     request(job) {
       const mine = ++seq;
       set({ gen: mine });
@@ -133,7 +151,7 @@ export const useEngravePreviewStore = create<EngravePreviewState>()((set) => {
         clearTimeout(timer);
         timer = null;
       }
-      set({ preview: null, status: 'idle', error: null, gen: seq });
+      set({ preview: null, status: 'idle', error: null, gen: seq, scrubStage: null });
     },
   };
 });

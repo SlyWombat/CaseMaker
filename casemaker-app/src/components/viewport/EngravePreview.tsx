@@ -17,6 +17,11 @@
  * the top face — the void itself is interior to solid material — and labelled with the deepest
  * cut it permits. §5.7's lost layer is the other amber overlay on that face: the design minus the
  * opening the cutter leaves, filled and hatched, one labelled area per item.
+ *
+ * The stock drawn here is whichever cumulative state the viewport's design ↔ as-cut slider selects
+ * (`engraveScrub.ts`): the finished preview at its right end — the default, and the only state
+ * before the slider existed — or an earlier cut depth on the way there. Floors follow the same
+ * position, and the lost layer appears only at as-cut because it is a claim about the final result.
  */
 
 import { useEffect, useMemo, useRef } from 'react';
@@ -34,6 +39,7 @@ import { floorColor, LOST_COLOR, VOID_COLOR } from './engraveRamp';
 import { hatchSegments } from './engraveHatch';
 import { clampLabelBox, projectToCanvas } from './projectedLabel';
 import { activateEngraveItem } from './engravePick';
+import { floorsForScrub, scrubStateAt } from './engraveScrub';
 
 /** The same neutral wood tone the simulation's stock uses (#197). */
 const STOCK_COLOR = '#c9a26b';
@@ -394,20 +400,29 @@ function Lost({ item }: { item: EngravePreviewLost }) {
 
 export function EngravePreview() {
   const preview = useEngravePreviewStore((s) => s.preview);
+  // §5.7 — the design ↔ as-cut slider's position. `null` (the store's default and its state after
+  // every rebuild) means the finished preview, which is what this component drew before the slider.
+  const scrubStage = useEngravePreviewStore((s) => s.scrubStage);
   const stock = useEngraveJobStore((s) => s.job.stock);
   const vise = useEngraveJobStore((s) => s.job.workholding.vise);
   const minFloor = useEngraveJobStore((s) => s.job.minFloor);
 
-  // Hooks run before the early return; the geometry is null until the first preview lands.
-  const stockGeom = useMeshGeometry(preview?.stock ?? null);
+  // Hooks run before the early return; the geometry is null until the first preview lands, and it
+  // is replaced (with its old geometry disposed) whenever the slider settles on another stage.
+  const scrub = preview ? scrubStateAt(preview, scrubStage) : null;
+  const stockGeom = useMeshGeometry(scrub?.mesh ?? null);
   // The ramp's upper bound: what this stock will allow at all (#205). The distinct-depth list the
   // legend used to build lives with the legend now (#349).
   const maxDepth = stock.thickness - minFloor;
 
-  if (!preview || !stockGeom) return null;
+  if (!preview || !scrub || !stockGeom) return null;
 
   const axisLen = Math.max(8, Math.min(Math.min(stock.length, stock.width) * AXIS_FRACTION, 25));
   const fixedJaw = preview.fixture[0];
+  // A floor belongs to a cut that has happened. Drawing a deep floor over a stock state that has
+  // not cut there yet would show a surface inside solid material; at the as-cut end this is every
+  // floor, exactly as before the slider.
+  const floors = floorsForScrub(preview.floors, scrub);
 
   return (
     <group>
@@ -419,7 +434,7 @@ export function EngravePreview() {
         <Sacrificial key={s.id} mesh={s.mesh} name={`engrave-${s.id}`} label={s.label} />
       ))}
 
-      {preview.floors.map((f) => (
+      {floors.map((f) => (
         <Floor
           key={f.labelId}
           mesh={f.mesh}
@@ -430,10 +445,13 @@ export function EngravePreview() {
 
       {/* §5.7 — the design the cut does not reach. Drawn after the floors so the amber is never
           hidden by a floor at the same XY; the lost region is on the top face, which is above
-          every floor anyway. */}
-      {preview.lost.map((l) => (
-        <Lost key={l.labelId} item={l} />
-      ))}
+          every floor anyway.
+
+          Only at the as-cut end: the lost layer is the FINAL difference between the design and what
+          the cutter leaves, and painting it over a part-way state would call every not-yet-cut
+          glyph "lost". Scrub back and the claim is withheld with the geometry. */}
+      {scrub.atCut &&
+        preview.lost.map((l) => <Lost key={l.labelId} item={l} />)}
 
       {preview.voids.map((v) => (
         <Void key={v.id} id={v.id} rings={v.rings} name={v.name} membrane={v.membrane} limit={v.limit} />
