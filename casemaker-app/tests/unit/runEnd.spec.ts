@@ -13,6 +13,7 @@ import {
   programCuts,
   runtimeOf,
   separatedLeftover,
+  wearKey,
   weighRuntime,
   withRuntime,
   type CutSegment,
@@ -81,6 +82,22 @@ describe('#414 the program: where it cut, and for how long', () => {
     expect(al.note).toContain('× 3 for aluminium-6061 (aluminium, seeded — tools.wearWeight.aluminium)');
     expect(readDefault(DEFAULTS, 'tools.wearWeight.plastic').value).toBe(1);
     expect(weighRuntime(reading, null, null)).toMatchObject({ weight: 1, note: expect.stringContaining('unweighted') });
+  });
+
+  it('gives the fibre-filled nylons their own abrasive weight (#456)', () => {
+    // PA-CF and PA-GF are the abrasive classes; unfilled PA is an ordinary plastic.
+    expect(wearKey('pa-cf')).toBe('tools.wearWeight.abrasive');
+    expect(wearKey('pa-gf')).toBe('tools.wearWeight.abrasive');
+    expect(wearKey('pa')).toBe('tools.wearWeight.plastic');
+
+    const w = readDefault(DEFAULTS, 'tools.wearWeight.abrasive');
+    expect(w).toEqual({ value: 5, source: 'seeded' });
+    expect(DEFAULTS['tools.wearWeight.abrasive']?.note).toContain('chosen, not measured');
+
+    const reading = runtimeOf(programCuts(NC), 30)!;
+    const gf = weighRuntime(reading, 'pa-gf', w);
+    expect(gf.minutes).toBeCloseTo(reading.minutes * 5, 9);
+    expect(gf.note).toContain('× 5 for pa-gf (abrasive, seeded — tools.wearWeight.abrasive)');
   });
 
   it('falls back to the run’s elapsed time, said so, when a cutting move has no feed', () => {

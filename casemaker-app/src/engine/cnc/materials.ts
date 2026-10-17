@@ -24,12 +24,18 @@
 import type { StockMaterial } from '@/types/engraveJob';
 
 /**
- * Every material this app can name, in the order the setup flow offers it.
+ * Every material this app can name, in the order the stock shelf offers it.
  *
  * The first four are the ones the starting table has rows for — a material this app can cut with
  * numbers of its own. The rest have no starting row at all: they are the materials a machine
  * profile declares, and only the user's own synced catalogue can answer them, which is exactly why
  * `feedsFor` refuses such a job until a row for (that cutter, that material) exists (#347, Route A).
+ *
+ * The PRINTED-BLANK classes (#456) are the exception in how they are answered. Their names are
+ * PrusaSlicer's own `filament_type` words, because the file that printed the blank is what states
+ * the material; the catalogue lists no row for any of them either, and `CATALOGUE_MATERIAL_ALIASES`
+ * in `feeds.ts` stands its nearest plastic rows in, labelled as a mapping. `pa-cf` and `pa-gf` are
+ * separate from `pa` because fibre-filled nylon is abrasive (`runEnd.ts`'s wear class).
  *
  * TWO LISTS ARE EDITED TOGETHER, and the compiler only enforces one of them: `MATERIAL_LABELS` below
  * is `Record<StockMaterial, string>`, so a new material in the TYPE is a compile error until it has
@@ -44,7 +50,17 @@ export const STOCK_MATERIALS = [
   'mdf',
   'pla',
   'petg',
+  'pet',
   'abs',
+  'asa',
+  'hips',
+  'pa',
+  'pa-cf',
+  'pa-gf',
+  'pc',
+  'pp',
+  'tpu',
+  'pva',
   'acrylic',
   'aluminium-6061',
   'aluminium-7075',
@@ -64,7 +80,17 @@ export const MATERIAL_LABELS: Readonly<Record<StockMaterial, string>> = {
   mdf: 'MDF',
   pla: 'PLA',
   petg: 'PETG',
+  pet: 'PET',
   abs: 'ABS',
+  asa: 'ASA',
+  hips: 'HIPS',
+  pa: 'PA (nylon)',
+  'pa-cf': 'PA-CF',
+  'pa-gf': 'PA-GF',
+  pc: 'PC',
+  pp: 'PP',
+  tpu: 'TPU',
+  pva: 'PVA',
   acrylic: 'Acrylic',
   'aluminium-6061': 'Aluminium 6061',
   'aluminium-7075': 'Aluminium 7075',

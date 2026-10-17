@@ -320,6 +320,10 @@ pub const UNMEASURED_SEEDS: &[(&str, f64, &str, &str)] = &[
     ("tools.wearWeight.aluminium", 3.0, "x", "chosen, not measured: a minute cutting 6061, 7075: three times the wear of plastic"),
     ("tools.wearWeight.brass", 2.0, "x", "chosen, not measured: a minute cutting brass: free-cutting, twice plastic"),
     ("tools.wearWeight.copper", 3.0, "x", "chosen, not measured: a minute cutting copper: gummy, as hard on a cutter as aluminium"),
+    // #456 — fibre-filled nylon (PA-CF, PA-GF) is abrasive, so it gets its own class rather than
+    // plastic's weight. Chosen, not measured: the maintainer asked for a heavier class; the number
+    // is ours until a bench comparison replaces it.
+    ("tools.wearWeight.abrasive", 5.0, "x", "chosen, not measured: a minute cutting PA-CF or PA-GF. Fibre-filled nylon is abrasive; five times plastic's wear is this app's choice (the maintainer asked for a heavier class in #456), not a bench measurement"),
     ("offcut.minSideMm", 20.0, "mm", "chosen, not measured: an offcut is offered back to the shelf only when both its sides are at least this (Q3: only leftover stock that has some size to it)"),
     // #436 — rest machining's two numbers, out of the code and into the document (the maintainer,
     // 2026-10-16: "That type of setting should be something we keep in our own database and not
@@ -694,7 +698,8 @@ fn known_rule(key: &str, n: Option<f64>) -> Option<Result<(), String>> {
         | "tools.wearWeight.wood"
         | "tools.wearWeight.aluminium"
         | "tools.wearWeight.brass"
-        | "tools.wearWeight.copper" => Some(need(
+        | "tools.wearWeight.copper"
+        | "tools.wearWeight.abrasive" => Some(need(
             n.is_some_and(|v| (0.1..=20.0).contains(&v)),
             "0.1 to 20",
         )),

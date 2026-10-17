@@ -378,11 +378,28 @@ export function offcutOffer(input: {
 // ---------------------------------------------------------------------------------------------------
 // How much wear a minute of cutting is, by material.
 
-/** The wear classes the shop weights (`tools.wearWeight.<class>`), and which stock materials are which. */
-export const WEAR_CLASS: Readonly<Record<StockMaterial, 'plastic' | 'wood' | 'aluminium' | 'brass' | 'copper'>> = {
+/**
+ * The wear classes the shop weights (`tools.wearWeight.<class>`), and which stock materials are
+ * which. `abrasive` is the fibre-filled nylons' own class (#456): glass and carbon fibre wear a
+ * cutting edge far faster than unfilled plastic, so they are weighted separately rather than
+ * folded into `plastic`.
+ */
+export const WEAR_CLASS: Readonly<
+  Record<StockMaterial, 'plastic' | 'wood' | 'aluminium' | 'brass' | 'copper' | 'abrasive'>
+> = {
   pla: 'plastic',
   petg: 'plastic',
+  pet: 'plastic',
   abs: 'plastic',
+  asa: 'plastic',
+  hips: 'plastic',
+  pa: 'plastic',
+  'pa-cf': 'abrasive',
+  'pa-gf': 'abrasive',
+  pc: 'plastic',
+  pp: 'plastic',
+  tpu: 'plastic',
+  pva: 'plastic',
   acrylic: 'plastic',
   softwood: 'wood',
   hardwood: 'wood',

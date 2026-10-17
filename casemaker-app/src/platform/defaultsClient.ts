@@ -193,6 +193,10 @@ export const KNOWN_DEFAULTS: Readonly<Record<string, KnownDefault>> = {
   'tools.wearWeight.aluminium': { label: 'wear weight, aluminium', unit: 'x', rule: z.number().min(0.1).max(20), fallback: 3 },
   'tools.wearWeight.brass': { label: 'wear weight, brass', unit: 'x', rule: z.number().min(0.1).max(20), fallback: 2 },
   'tools.wearWeight.copper': { label: 'wear weight, copper', unit: 'x', rule: z.number().min(0.1).max(20), fallback: 3 },
+  // #456 — fibre-filled nylon (PA-CF, PA-GF) is abrasive, so it gets its own class rather than
+  // plastic's weight. Chosen, not measured: the maintainer asked for a heavier class; the number
+  // is ours until a bench comparison replaces it.
+  'tools.wearWeight.abrasive': { label: 'wear weight, abrasive', unit: 'x', rule: z.number().min(0.1).max(20), fallback: 5 },
   // #434 — peck drilling with drill bits. The pecks are chosen; the feeds are our own placeholders.
   'drill.peckDiameters': { label: 'peck depth, in drill diameters (chosen)', unit: 'x', rule: z.number().min(0.1).max(10), fallback: 1 },
   'drill.peckClearanceMm': { label: 'peck re-entry clearance (chosen)', unit: 'mm', rule: z.number().min(0.05).max(5), fallback: 0.5 },

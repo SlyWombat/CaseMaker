@@ -500,24 +500,36 @@ export function catalogueMaterialFor(vendorName: string): StockMaterial | null {
  * The app materials whose catalogue rows stand in for one the catalogue has no row of its own
  * (#455): "map it to its nearest plastic rows (ABS or acrylic), and label that as a mapping".
  *
- * `t_MaterialList` lists no PLA, PETG or PA-GF — no printed-blank filament stock at all. Its only
- * plastics are ABS and acrylic, the two nearest neighbours of a printed blank among the materials
- * it does list. The map is APP material → app materials whose own vendor rows may answer it, in
- * preference order. ABS first is an app choice, not a vendor claim: neither vendor row ranks the
- * other, and fixing the order is what makes the same catalogue give the same answer twice.
+ * `t_MaterialList` lists no printed-blank filament stock at all — no PLA, PETG, PET, ASA, nylon
+ * (PA), the fibre-filled nylons, PC, PP, HIPS, TPU or PVA. Its only plastics are ABS and acrylic,
+ * the two nearest neighbours of a printed blank among the materials it does list, so every one of
+ * those classes maps to the same two rows. The map is APP material → app materials whose own vendor
+ * rows may answer it, in preference order. ABS first is an app choice, not a vendor claim: neither
+ * vendor row ranks the other, and fixing the order is what makes the same catalogue give the same
+ * answer twice.
  *
  * A mapping is NEVER a vendor statement about the job's material. Every caller that acts on one
  * labels it as a mapping — {@link catalogueStandingFor}'s note, {@link catalogueProvenance},
  * {@link catalogueOnlyRow} — so an ABS row can never read as Makera recommending a PLA cut.
  *
- * FOLLOW-UP (#456): PETG is a printed-blank plastic the catalogue also lists no row for, and maps
- * to these same two rows. PA-GF is deliberately NOT here yet: it is absent from `StockMaterial`
- * for now because it is abrasive and #415's wear weighting has to come with it; that class is
- * #456/#415's, not this map's.
+ * PA-CF and PA-GF map here on the same terms, NOT to Makera's `Carbon Fiber` row: that row is a
+ * sheet composite, and treating it as printed nylon would be a guess dressed as a vendor answer.
+ * Their abrasiveness is handled where it belongs, by their own `tools.wearWeight.abrasive` class
+ * (`runEnd.ts`'s `WEAR_CLASS`, #456).
  */
 export const CATALOGUE_MATERIAL_ALIASES: Readonly<Partial<Record<StockMaterial, readonly StockMaterial[]>>> = {
   pla: ['abs', 'acrylic'],
   petg: ['abs', 'acrylic'],
+  pet: ['abs', 'acrylic'],
+  asa: ['abs', 'acrylic'],
+  hips: ['abs', 'acrylic'],
+  pa: ['abs', 'acrylic'],
+  'pa-cf': ['abs', 'acrylic'],
+  'pa-gf': ['abs', 'acrylic'],
+  pc: ['abs', 'acrylic'],
+  pp: ['abs', 'acrylic'],
+  tpu: ['abs', 'acrylic'],
+  pva: ['abs', 'acrylic'],
 };
 
 /**

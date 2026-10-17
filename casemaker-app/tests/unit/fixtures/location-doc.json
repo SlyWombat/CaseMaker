@@ -730,6 +730,13 @@
       "unit": "x",
       "note": "chosen, not measured: a minute cutting copper: gummy, as hard on a cutter as aluminium"
     },
+    "tools.wearWeight.abrasive": {
+      "value": 5.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "x",
+      "note": "chosen, not measured: a minute cutting PA-CF or PA-GF. Fibre-filled nylon is abrasive; five times plastic's wear is this app's choice (the maintainer asked for a heavier class in #456), not a bench measurement"
+    },
     "offcut.offer": {
       "value": true,
       "source": "seeded",

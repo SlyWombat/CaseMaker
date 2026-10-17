@@ -52,11 +52,13 @@ export interface MaterialOption {
  *
  *   - A material the starting table covers (softwood, hardwood, MDF, PLA) is cut on this app's own
  *     numbers, whatever a profile says about it.
- *   - A material only a PROFILE names — the Z1's metals, ABS and Acrylic — is one the machine is
- *     set up for, and the only numbers for it are Makera's own, for that exact cutter and material
- *     (`feedsFor`, Route A). Offering it is not a promise: a job in one is REFUSED until the user's
- *     own synced catalogue carries such a row, and the refusal says which row is missing. The
- *     important half is that the metal can be ASKED for at all — before #347 the list offered four
+ *   - A material only a PROFILE names — the Z1's metals, ABS and Acrylic, and the printed-blank
+ *     classes (#456) — is one the machine is set up for, and the numbers for it are Makera's own,
+ *     for that exact cutter and material (`feedsFor`, Route A). The printed-blank classes have no
+ *     vendor row at all, so `CATALOGUE_MATERIAL_ALIASES` answers them from the nearest plastic rows
+ *     as a labelled mapping. Offering any of them is not a promise: a job in one is REFUSED until
+ *     a row (direct or mapped) exists, and the refusal says which row is missing. The important
+ *     half is that the material can be ASKED for at all — before #347 the list offered four
  *     materials and the machine's own table could not be answered from.
  *
  * It deliberately does NOT consult the catalogue, and that is a rule rather than a simplification:

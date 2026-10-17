@@ -305,16 +305,74 @@ function mmSetting(file: PrusaThreeMf, key: string): number | null {
 }
 
 /**
- * The app materials for the PrusaSlicer filament CLASSES this slice is certain of (#456). Only
- * these three names map: every other class the slicer can write (ASA, PC, PP, TPU/FLEX, PVA, the
- * PA family, and the fibre-filled variants) maps to nothing, because a blank the app cannot name
- * must leave the job's material as it was rather than silently becoming PLA.
+ * The app materials for the PrusaSlicer filament CLASSES a printed blank can carry (#456).
+ *
+ * `filament_type`'s value is the class, so this is keyed by the slicer's own words. FLEX and TPU
+ * are two spellings of the same rubber, and NYLON is the common name for PA, so each pair maps to
+ * ONE app material. The fibre-filled nylons are classes of their own because the wear weighting
+ * treats them differently — they are abrasive (`runEnd.ts`'s `WEAR_CLASS`). A class this app does
+ * not know (PVB, PEEK, an unmodelled PET-CF…) stays unmapped: a blank the app cannot name must
+ * leave the job's material as it was rather than silently becoming PLA.
  */
 const FILAMENT_TYPE_MATERIALS: Readonly<Record<string, StockMaterial>> = {
   PLA: 'pla',
   PETG: 'petg',
+  PET: 'pet',
   ABS: 'abs',
+  ASA: 'asa',
+  HIPS: 'hips',
+  PA: 'pa',
+  NYLON: 'pa',
+  'PA-CF': 'pa-cf',
+  'PA-GF': 'pa-gf',
+  PC: 'pc',
+  PP: 'pp',
+  FLEX: 'tpu',
+  TPU: 'tpu',
+  PVA: 'pva',
 };
+
+/** Does an upper-cased profile name contain `word` as a whole word? `PA-CF` counts as one word. */
+function profileSays(profile: string, word: string): boolean {
+  const escaped = word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`(^|[^A-Z0-9])${escaped}([^A-Z0-9]|$)`).test(profile);
+}
+
+/** A profile's nylon base — PA, PA6, PA11, PA12, NYLON — which a composite name may spell out. */
+const NYLON_IN_PROFILE = /(^|[^A-Z0-9])(PA\d*|NYLON)([^A-Z0-9]|$)/;
+
+/**
+ * The fibre-filled nylons a profile name states in words rather than as a `PA-CF`/`PA-GF` class
+ * word. The file's own example is `Prusament PA11 Carbon Fiber @XL` (#456): neither `PA-CF` nor
+ * `PA` is a whole word there.
+ */
+const FIBRE_IN_PROFILE: readonly { fibre: RegExp; material: StockMaterial }[] = [
+  { fibre: /(^|[^A-Z0-9])(CF|CARBON[ -]?FIB(?:ER|RE)?)([^A-Z0-9]|$)/, material: 'pa-cf' },
+  { fibre: /(^|[^A-Z0-9])(GF|GLASS[ -]?FIB(?:ER|RE)?)([^A-Z0-9]|$)/, material: 'pa-gf' },
+];
+
+/**
+ * The app material a PROFILE NAME states when `filament_type` is absent, or null.
+ *
+ * A fibre word is read first and only answers when the same profile is also nylon: a `PET-CF` or
+ * bare `Carbon Fiber` profile is a composite this app has no class for, and it stays unknown
+ * rather than becoming its unreinforced base. Otherwise the class words are matched as whole
+ * words, with a nylon base such as `PA11` counting as PA.
+ */
+function materialFromProfile(profile: string): StockMaterial | null {
+  if (profile === '') return null;
+  const fibres = FIBRE_IN_PROFILE.filter((f) => f.fibre.test(profile));
+  if (fibres.length > 0) {
+    return fibres.length === 1 && NYLON_IN_PROFILE.test(profile) ? fibres[0]!.material : null;
+  }
+  const found = new Set(
+    Object.entries(FILAMENT_TYPE_MATERIALS)
+      .filter(([word]) => profileSays(profile, word))
+      .map(([, material]) => material),
+  );
+  if (NYLON_IN_PROFILE.test(profile)) found.add('pa');
+  return found.size === 1 ? [...found][0]! : null;
+}
 
 /**
  * The app material for ONE extruder's filament statements, or null when this app cannot name it.
@@ -322,18 +380,14 @@ const FILAMENT_TYPE_MATERIALS: Readonly<Record<string, StockMaterial>> = {
  * PRECEDENCE: `filament_type` is the class and it WINS. When it states anything, that is the whole
  * answer — a known class maps and an unknown class stays unknown, even if `filament_settings_id`
  * happens to contain a word this map knows. `filament_settings_id` is consulted only when
- * `filament_type` is absent: a profile called "Prusament PETG @XL" then makes the blank's type
- * concrete, matched on a whole word so `PETG` is found there but not inside an unrelated word.
+ * `filament_type` is absent, so a profile called "Prusament PA11 Carbon Fiber @XL" makes the
+ * blank's class concrete — matched on whole words, so `PETG` is found in a PETG profile but not
+ * inside an unrelated word.
  */
 function materialForFilament(type: string | null, settingsId: string | null): StockMaterial | null {
   const stated = type?.trim().toUpperCase() ?? '';
   if (stated !== '') return FILAMENT_TYPE_MATERIALS[stated] ?? null;
-
-  const profile = settingsId?.toUpperCase() ?? '';
-  const found = Object.entries(FILAMENT_TYPE_MATERIALS)
-    .filter(([word]) => new RegExp(`(^|[^A-Z0-9])${word}([^A-Z0-9]|$)`).test(profile))
-    .map(([, material]) => material);
-  return found.length === 1 ? found[0]! : null;
+  return materialFromProfile(settingsId?.toUpperCase() ?? '');
 }
 
 /**

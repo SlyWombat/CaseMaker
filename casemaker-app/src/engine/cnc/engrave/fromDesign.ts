@@ -234,12 +234,17 @@ export function designJobFor(
   if (material !== null) {
     const fromSettings =
       filament!.settingsIds.length > 0
-        ? `, filament_settings_id ${filament!.settingsIds.map((id) => `"${id}"`).join(', ')}`
-        : '';
+        ? `filament_settings_id ${filament!.settingsIds.map((id) => `"${id}"`).join(', ')}`
+        : null;
+    // Name the statement that actually settled the class (#456): a project with no
+    // `filament_type` is answered by its profile name, and the note must not call that a type.
+    const stated =
+      filament!.types.length > 0
+        ? `filament_type (${filament!.types.join(', ')}${fromSettings === null ? '' : `, ${fromSettings}`})`
+        : (fromSettings ?? 'filament_type');
     notes.push(
-      `The blank's filament is ${MATERIAL_LABELS[material]}, read from the file's own filament_type ` +
-        `(${filament!.types.join(', ')}${fromSettings}). The job's stock material is the file's, ` +
-        'not an assumption.',
+      `The blank's filament is ${MATERIAL_LABELS[material]}, read from the file's own ${stated}. ` +
+        "The job's stock material is the file's, not an assumption.",
     );
   } else if (filament !== null) {
     const stated = filament.types.length > 0 ? filament.types.join(', ') : 'no filament_type';

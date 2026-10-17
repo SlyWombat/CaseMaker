@@ -27,7 +27,7 @@ import type { RegistrationPlan } from '@/engine/cnc/registration/plan';
  */
 
 /**
- * What the blank is made of (#200, widened by #347).
+ * What the blank is made of (#200, widened by #347 and #456).
  *
  * The first four are the materials this app's own STARTING TABLE has rows for — the ones it can
  * cut without anyone else's numbers. The rest are the materials a MACHINE PROFILE declares and
@@ -38,7 +38,14 @@ import type { RegistrationPlan } from '@/engine/cnc/registration/plan';
  * The two aluminium alloys are SEPARATE materials on purpose. `t_MaterialList` names `6061
  * Aluminum` and `7075 Aluminum` as distinct rows with distinct feeds, so folding them into one
  * `aluminium` would let whichever row the catalogue listed first answer for both — a wrong number
- * in metal, silently. Every name here maps to exactly one vendor row ({@link CATALOGUE_MATERIALS}).
+ * in metal, silently. Every metal and wood here maps to exactly one vendor row
+ * ({@link CATALOGUE_MATERIALS}).
+ *
+ * The printed-blank classes (#456) are PrusaSlicer's own `filament_type` words, because a printed
+ * blank's material is stated by the file that printed it. The catalogue lists NO row for any of
+ * them, so each is answered through `CATALOGUE_MATERIAL_ALIASES`'s nearest-plastic mapping (ABS or
+ * acrylic), labelled everywhere as a mapping rather than a vendor claim. `pa-cf` and `pa-gf` are
+ * separate from `pa` because fibre-filled nylon is abrasive and carries its own wear class.
  */
 export type StockMaterial =
   | 'softwood'
@@ -46,7 +53,17 @@ export type StockMaterial =
   | 'mdf'
   | 'pla'
   | 'petg'
+  | 'pet'
   | 'abs'
+  | 'asa'
+  | 'hips'
+  | 'pa'
+  | 'pa-cf'
+  | 'pa-gf'
+  | 'pc'
+  | 'pp'
+  | 'tpu'
+  | 'pva'
   | 'acrylic'
   | 'aluminium-6061'
   | 'aluminium-7075'

@@ -585,16 +585,37 @@ describe('the nearest-plastic mapping (#455)', () => {
     expect(CATALOGUE_MATERIAL_ALIASES.pla).toEqual(['abs', 'acrylic']);
   });
 
-  it('maps PETG to the same two rows (#456)', () => {
-    expect(CATALOGUE_MATERIAL_ALIASES.petg).toEqual(['abs', 'acrylic']);
-    // PA-GF is deliberately absent from this slice: its abrasive wear weighting is #415's.
-    expect((CATALOGUE_MATERIAL_ALIASES as Record<string, unknown>)['pa-gf']).toBeUndefined();
+  it('maps PETG and every other printed-blank class to the same two rows (#456)', () => {
+    for (const material of [
+      'pla',
+      'petg',
+      'pet',
+      'asa',
+      'hips',
+      'pa',
+      'pa-cf',
+      'pa-gf',
+      'pc',
+      'pp',
+      'tpu',
+      'pva',
+    ] as const) {
+      expect(CATALOGUE_MATERIAL_ALIASES[material], material).toEqual(['abs', 'acrylic']);
+    }
     const res = feedsFor([ABS_ROW], 'petg', makeraCutter(), Z1);
     if (!res.ok) throw new Error(res.reason);
     expect(res.params.rpm).toBe(11000);
     expect(res.catalogue).toEqual(ABS_ROW);
     expect(res.provenance).toContain('mapping this app makes');
     expect(res.provenance).toContain('not something Makera says about PETG');
+  });
+
+  it('answers an abrasive PA-GF job from the ABS row, never the carbon-fibre row (#456)', () => {
+    const res = feedsFor([ABS_ROW, CARBON_ROW], 'pa-gf', makeraCutter(), Z1);
+    if (!res.ok) throw new Error(res.reason);
+    expect(res.catalogue).toEqual(ABS_ROW);
+    expect(res.provenance).toContain('ABS row standing in');
+    expect(res.provenance).toContain('not something Makera says about PA-GF');
   });
 
   it('answers a PLA job from the ABS row, and stamps the provenance as a mapping', () => {
