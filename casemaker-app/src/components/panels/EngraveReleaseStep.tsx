@@ -220,7 +220,13 @@ export function EngraveReleaseStep({
   const uploadsReady = record.files.every((f) => f.done || f.upload === 'uploaded' || f.upload === 'present');
   const uploadFailed = record.files.some((f) => f.upload === 'failed');
   const atMachine = record.atMachine;
-  const mayStart = record.phase === 'ready' && atMachine && uploadsReady;
+  // The tick gates EVERY start, resume and try-again alike: an operator at the machine is what
+  // the confirmation means, and the run panel's own tick does not carry across to this step.
+  const mayStart =
+    (record.phase === 'ready' || record.phase === 'stopped' || record.phase === 'failed') &&
+    atMachine &&
+    uploadsReady &&
+    !record.spanClosing;
   const finished = record.files.filter((f) => f.done).length;
   const showUpload = (record.phase === 'idle' || record.phase === 'stopped' || record.phase === 'failed') && uploadsIncomplete;
 
@@ -319,7 +325,7 @@ export function EngraveReleaseStep({
 
       {record.phase !== 'idle' && record.phase !== 'uploading' && !uploadFailed && (
         <>
-          {(record.phase === 'ready' || record.phase === 'stopped' || record.phase === 'failed') &&
+          {(record.phase === 'ready' || record.phase === 'stopped' || record.phase === 'failed' || record.phase === 'closing') &&
             (uploadsReady ? (
               <>
                 <label style={MUTED}>
@@ -334,19 +340,21 @@ export function EngraveReleaseStep({
                 <button
                   type="button"
                   data-testid="engrave-release-start"
-                  disabled={!mayStart && record.phase === 'ready'}
+                  disabled={!mayStart}
                   style={{ width: '100%', padding: 7, marginTop: 6 }}
                   onClick={() => startRelease(target)}
                 >
-                  {record.phase === 'stopped'
-                    ? nextFile === null
-                      ? 'Nothing left to run'
-                      : `Resume — program ${nextFile.index} of ${record.files.length}`
-                    : record.phase === 'failed'
+                  {record.phase === 'closing'
+                    ? 'Stopping — switching the vacuum off before anything else can start…'
+                    : record.phase === 'stopped'
                       ? nextFile === null
                         ? 'Nothing left to run'
-                        : `Try again — program ${nextFile.index} of ${record.files.length}`
-                      : `Run the job — ${record.files.length} programs`}
+                        : `Resume — program ${nextFile.index} of ${record.files.length}`
+                      : record.phase === 'failed'
+                        ? nextFile === null
+                          ? 'Nothing left to run'
+                          : `Try again — program ${nextFile.index} of ${record.files.length}`
+                        : `Run the job — ${record.files.length} programs`}
                 </button>
               </>
             ) : (

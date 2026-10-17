@@ -4,7 +4,7 @@
 // machine already finished. The upload and the console are fake clients; nothing reaches a machine.
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { EngraveReleaseStep } from '@/components/panels/EngraveReleaseStep';
 import { setMachineConsoleLoader, type ConsoleSend, type MachineConsoleClient } from '@/platform/machineConsole';
 import { setMachineUploadLoader } from '@/platform/machineUpload';
@@ -24,7 +24,15 @@ import {
   releasePrograms,
   releasePending,
 } from '@/engine/cnc/engrave/release';
-import { endOfRun, resetMachineRunStore, setRunEndIO, type RunContext, type RunEndIO } from '@/store/machineRunStore';
+import {
+  endOfRun,
+  machineKey,
+  resetMachineRunStore,
+  setRunEndIO,
+  useMachineRunStore,
+  type RunContext,
+  type RunEndIO,
+} from '@/store/machineRunStore';
 import { resetRunConfirmStore } from '@/store/runConfirmStore';
 import { resetEngraveReleaseStore, useEngraveReleaseStore } from '@/store/engraveReleaseStore';
 import { clearStoredBaseline, resetLocationStore, useLocationStore } from '@/store/locationStore';
@@ -107,6 +115,27 @@ const sent: string[] = [];
 const uploaded: string[] = [];
 
 /**
+ * A gate for the span close, so a test can hold `M332`/`$H` in flight and try to start a program
+ * underneath them. Off by default: every other test's closes land at once.
+ */
+let closeGate: Promise<void> = Promise.resolve();
+let releaseClose: (() => void) | null = null;
+let holdClose = false;
+
+function holdSpanClose(): void {
+  closeGate = new Promise((resolve) => {
+    releaseClose = resolve;
+  });
+  holdClose = true;
+}
+
+function releaseSpanClose(): void {
+  holdClose = false;
+  releaseClose?.();
+  releaseClose = null;
+}
+
+/**
  * A controller that finishes each played program after `finishAfter` polls. `?` is Idle before a
  * play and after it finishes; an abort makes it Idle at once.
  */
@@ -118,6 +147,9 @@ function controller(finishAfter = 2): MachineConsoleClient {
       return {
         async send(line: string): Promise<ConsoleSend> {
           sent.push(line);
+          // The line is sent; the answer is what is held. That is the in-flight close the release
+          // step must not start underneath.
+          if (holdClose && (line === 'M332' || line === '$H')) await closeGate;
           let text = 'ok';
           if (line === '?') {
             if (playing === null || aborted) text = '<Idle|MPos:0,0,0>';
@@ -164,6 +196,9 @@ beforeEach(() => {
   sent.length = 0;
   uploaded.length = 0;
   consumed = [];
+  closeGate = Promise.resolve();
+  releaseClose = null;
+  holdClose = false;
   resetRunConfirmStore();
   resetMachineRunStore();
   resetEngraveReleaseStore();
@@ -186,6 +221,14 @@ afterEach(() => {
   setHouseClientLoader(null);
   setRunEndIO(null);
 });
+
+const record = () => useEngraveReleaseStore.getState().records[`${TARGET.host}:${TARGET.port}`];
+
+async function uploadOnly(): Promise<void> {
+  fireEvent.click(await screen.findByTestId('engrave-release-upload'));
+  fireEvent.click(screen.getByTestId('engrave-release-upload-confirm-send'));
+  await screen.findByTestId('engrave-release-start');
+}
 
 async function uploadAndStart(): Promise<void> {
   fireEvent.click(await screen.findByTestId('engrave-release-upload'));
@@ -340,6 +383,89 @@ describe('#469 the release step', () => {
     expect(sent.filter((l) => l.startsWith('play'))).toEqual(['play /sd/gcodes/Two-setup-job-p2.nc']);
     // Program 2 carries M332 only; the vacuum was off before the resume, so the step switches it on.
     expect(sent).toContain('M331');
+  }, 30000);
+
+  it('an unticked Resume is disabled and sends nothing', async () => {
+    render(<EngraveReleaseStep target={TARGET} job={twoSetupJob()} generated={generated()} blocker={null} />);
+    await uploadOnly();
+    // Stop at `ready`: the phase is `stopped`, the at-machine tick was never made.
+    await act(async () => {
+      useEngraveReleaseStore.getState().stop(TARGET);
+    });
+    await waitFor(() => expect(record()?.phase).toBe('stopped'), { timeout: 5000 });
+
+    const start = screen.getByTestId('engrave-release-start') as HTMLButtonElement;
+    expect(start.disabled).toBe(true);
+    fireEvent.click(start);
+    expect(sent.filter((l) => l.startsWith('play'))).toEqual([]);
+
+    // The tick is what enables Resume, not the phase alone.
+    fireEvent.click(screen.getByTestId('engrave-release-at-machine'));
+    expect((screen.getByTestId('engrave-release-start') as HTMLButtonElement).disabled).toBe(false);
+  }, 20000);
+
+  it('a Resume pressed while the span close is in flight does not start, and one after it resolves does', async () => {
+    render(<EngraveReleaseStep target={TARGET} job={twoSetupJob()} generated={generated()} blocker={null} />);
+    await uploadOnly();
+    fireEvent.click(screen.getByTestId('engrave-release-at-machine'));
+    holdSpanClose();
+    await act(async () => {
+      useEngraveReleaseStore.getState().stop(TARGET);
+    });
+    await waitFor(() => expect(record()?.phase).toBe('closing'), { timeout: 5000 });
+
+    // `M332`/`$H` are in flight. The button is disabled, and the store refuses a direct press too:
+    // starting now could put a program's own M331 underneath the late M332.
+    const start = screen.getByTestId('engrave-release-start') as HTMLButtonElement;
+    expect(start.disabled).toBe(true);
+    useEngraveReleaseStore.getState().startRelease(TARGET);
+    expect(record()?.phase).toBe('closing');
+    expect(sent.filter((l) => l.startsWith('play'))).toEqual([]);
+
+    releaseSpanClose();
+    await waitFor(() => expect(record()?.phase).toBe('stopped'), { timeout: 5000 });
+    expect((screen.getByTestId('engrave-release-start') as HTMLButtonElement).disabled).toBe(false);
+
+    fireEvent.click(screen.getByTestId('engrave-release-start'));
+    await waitFor(() => expect(sent.filter((l) => l.startsWith('play'))).toEqual(['play /sd/gcodes/Two-setup-job-p1.nc']), {
+      timeout: 5000,
+    });
+    // Let the program finish, so the test does not leave a run in flight at cleanup.
+    await screen.findByTestId('engrave-release-change', undefined, { timeout: 10000 });
+  }, 30000);
+
+  it('a start that fails after M331 says the vacuum is on and closes the span', async () => {
+    render(<EngraveReleaseStep target={TARGET} job={twoSetupJob()} generated={generated()} blocker={null} />);
+    await uploadAndStart();
+    await screen.findByTestId('engrave-release-change', undefined, { timeout: 10000 });
+
+    // Stop at the change, then resume at program 2: it carries only M332, so the release switches
+    // the vacuum on itself before starting.
+    await act(async () => {
+      useEngraveReleaseStore.getState().stop(TARGET);
+    });
+    await waitFor(() => expect(record()?.phase).toBe('stopped'), { timeout: 5000 });
+    fireEvent.click(screen.getByTestId('engrave-release-start'));
+    await screen.findByTestId('engrave-release-change', undefined, { timeout: 5000 });
+
+    // Make `prepare` refuse: another run is already going on this machine.
+    const key = machineKey(TARGET);
+    await act(async () => {
+      const entry = useMachineRunStore.getState().runs[key]!;
+      useMachineRunStore.setState({
+        runs: { ...useMachineRunStore.getState().runs, [key]: { ...entry, running: true } },
+      });
+    });
+    const before = sent.length;
+    fireEvent.click(screen.getByTestId('engrave-release-change-ok'));
+    fireEvent.click(screen.getByTestId('engrave-release-change-done'));
+
+    await waitFor(() => expect(record()?.phase).toBe('failed'), { timeout: 5000 });
+    const tail = sent.slice(before);
+    expect(tail).toContain('M331');
+    expect(tail).toContain('M332');
+    expect(tail).toContain('$H');
+    expect(record()?.notes.join('\n')).toContain('on with nothing cutting');
   }, 30000);
 
   it('consumes the job’s blank only when its LAST program finishes, not once per file', async () => {

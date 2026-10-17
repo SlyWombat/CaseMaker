@@ -75,6 +75,12 @@ export type ReleasePhase =
   | 'running'
   /** A program finished; the machine is homed and the vacuum stays on for the next cutter. */
   | 'bit-change'
+  /**
+   * The span is being closed (M332 + $H) and the run must not start until it has: a program
+   * started now could have its own M331 followed by the late M332, switching the vacuum off
+   * mid-cut.
+   */
+  | 'closing'
   | 'stopped'
   | 'done'
   | 'failed';
@@ -111,6 +117,12 @@ export interface ReleaseRecord {
    * state to claim either way, and the sentence says so.
    */
   vacuum: 'off' | 'on' | 'unknown';
+  /**
+   * A close (`M332` + `$H`) is in flight. The `closing` phase says this for a Stop; a failure that
+   * closes the span keeps its own phase (`failed`) and raises this flag instead, so a Try again
+   * cannot start a program underneath the same late `M332`.
+   */
+  spanClosing: boolean;
   stopAsked: boolean;
   /** The last Stop was pressed between programs, so the span is this store's to close. */
   stoppedBetween: boolean;
@@ -222,11 +234,19 @@ export const useEngraveReleaseStore = create<ReleaseState>((set, get) => {
     if (!runStore.prepare(rec.target, file.filename, file.hash, context)) {
       patch(machine, { phase: 'failed', vacuum });
       say(machine, `Program ${file.index} did not start: a run is already going on this machine.`);
+      // The switch-on has already gone out. Saying only "did not start" would leave the vacuum
+      // running with nothing cutting and no sentence about it; close the span (or report why not).
+      if (vacuum === 'on') {
+        await closeSpan(machine, 'The vacuum was switched on (M331) before this program and is on with nothing cutting.');
+      }
       return;
     }
     if (!runStore.start(rec.target, runSettings(useShopDefaultsStore.getState().defaults))) {
       patch(machine, { phase: 'failed', vacuum });
       say(machine, `Program ${file.index} did not start: the machine's run entry could not be started.`);
+      if (vacuum === 'on') {
+        await closeSpan(machine, 'The vacuum was switched on (M331) before this program and is on with nothing cutting.');
+      }
       return;
     }
     patch(machine, { phase: 'running', vacuum, settled: false, stopAsked: false });
@@ -241,13 +261,20 @@ export const useEngraveReleaseStore = create<ReleaseState>((set, get) => {
       say(machine, `${reason} The vacuum is already off.`);
       return;
     }
-    const r = await closeVacuumSpan(rec.target);
-    if (r.kind === 'done') {
-      patch(machine, { vacuum: 'off' });
-    } else {
-      patch(machine, { vacuum: 'unknown' });
+    // Every close is an in-flight state, whichever phase asked for it: `startRelease` and the
+    // panel's start button refuse while it is set, so no program begins under a late M332.
+    patch(machine, { spanClosing: true });
+    try {
+      const r = await closeVacuumSpan(rec.target);
+      if (r.kind === 'done') {
+        patch(machine, { vacuum: 'off' });
+      } else {
+        patch(machine, { vacuum: 'unknown' });
+      }
+      say(machine, `${reason} ${spanNote(r)}`);
+    } finally {
+      patch(machine, { spanClosing: false });
     }
-    say(machine, `${reason} ${spanNote(r)}`);
   };
 
   /** The machine's entry says a program ended. Work out the list's next move, exactly once. */
@@ -362,6 +389,7 @@ export const useEngraveReleaseStore = create<ReleaseState>((set, get) => {
             vacuum: 'unknown',
             stopAsked: false,
             stoppedBetween: false,
+            spanClosing: false,
             notes: [],
             settled: false,
           },
@@ -417,7 +445,16 @@ export const useEngraveReleaseStore = create<ReleaseState>((set, get) => {
     startRelease: (target) => {
       const machine = machineKey(target);
       const rec = get().records[machine];
-      if (rec === undefined || rec.phase === 'running' || rec.phase === 'starting' || rec.phase === 'uploading' || rec.phase === 'idle') return;
+      if (
+        rec === undefined ||
+        rec.spanClosing ||
+        rec.phase === 'running' ||
+        rec.phase === 'starting' ||
+        rec.phase === 'uploading' ||
+        rec.phase === 'closing' ||
+        rec.phase === 'idle'
+      )
+        return;
       const next = releaseNext(rec.files);
       if (next === null) {
         patch(machine, { phase: 'done', next: null });
@@ -458,8 +495,13 @@ export const useEngraveReleaseStore = create<ReleaseState>((set, get) => {
         return;
       }
       if (rec.phase === 'bit-change' || rec.phase === 'ready' || rec.phase === 'starting' || rec.phase === 'stopped') {
-        patch(machine, { phase: 'stopped', next: null, stopAsked: false, stoppedBetween: true });
-        void closeSpan(machine, 'Stopped between programs.');
+        // CLOSING IS A PHASE, not a fire-and-forget send: `M332`/`$H` are in flight, and a Resume
+        // pressed before they land could start a program whose own `M331` the late `M332` then
+        // undoes mid-cut. `startRelease` refuses `closing`, and the panel disables the button.
+        patch(machine, { phase: 'closing', next: null, stopAsked: false, stoppedBetween: true });
+        void closeSpan(machine, 'Stopped between programs.').finally(() => {
+          if (get().records[machine]?.phase === 'closing') patch(machine, { phase: 'stopped' });
+        });
       }
     },
 
