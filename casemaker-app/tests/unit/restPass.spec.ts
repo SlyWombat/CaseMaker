@@ -14,6 +14,7 @@ import {
   restToolPick,
   roughPick,
   unroughedItems,
+  vBitRestRefusal,
 } from '@/engine/cnc/engrave/restPass';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { flatEndMill, type Tool } from '@/engine/cnc/tool';
@@ -95,6 +96,7 @@ function tableOf(rows: { key: string; diameter: number; share: number }[]): Reac
       name: `${r.key} cutter`,
       diameter: r.diameter,
       shape: 'flat',
+      vTrace: false,
       excluded: null,
       excludedNote: null,
       rows: [],
@@ -216,6 +218,34 @@ describe('restToolPick (#410)', () => {
     const pick = restToolPick(all, 'mid');
     expect(pick.cutter).toBeNull();
     expect(pick.reason).toContain('one program is the whole job');
+  });
+});
+
+describe('vBitRestRefusal (#486)', () => {
+  /** The bench's 30° × 0.3 V-bit — the cutter this issue was opened on. */
+  const vbit = (): Tool =>
+    flatEndMill(0.3, {
+      name: 'Single Flute Engraving Bit — 30° × 0.3',
+      shape: 'engraving',
+      typeText: 'Engraving',
+      tipDiameter: 0.3,
+      diameter: 3.175,
+      halfAngle: 15,
+      angle: 30,
+    });
+
+  it('names the V-carve instead of measuring a V-bit as a rest cutter on a region job', () => {
+    const job = jobWith('big');
+    expect(vBitRestRefusal(job, vbit())).toBe(
+      'a V-bit is not a rest cutter here; the second program would be a V-carve (#221)',
+    );
+    // The same cutter on a job with nothing left to rest-cut is not a refusal: a trace-only job
+    // takes a V-bit as its ordinary cutter, and the route must not refuse it.
+    expect(vBitRestRefusal(jobWith(), vbit())).toBeNull();
+  });
+
+  it('leaves a flat cutter alone, whatever the job holds', () => {
+    expect(vBitRestRefusal(jobWith('big'), flatEndMill(0.6))).toBeNull();
   });
 });
 

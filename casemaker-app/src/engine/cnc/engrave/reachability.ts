@@ -21,6 +21,7 @@
  */
 
 import type { FeedCatalogueRow } from '@/engine/cnc/feeds';
+import { isVTraceTool } from '@/engine/cnc/tool';
 import type { ConditionSummary } from '@/engine/cnc/toolCondition';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import { LOST_DETAIL_RATIO_FALLBACK, type LabelEngravability } from '@/workers/sim/engraveGeometry';
@@ -62,6 +63,12 @@ export interface CutterReach {
   diameter: number;
   /** How the cutter is shaped — the reason a V-bit is excluded from a region job, not just `not-flat`. */
   shape: string | null;
+  /**
+   * True when the cutter is a cone the trace path takes (`isVTraceTool`) — a V-bit, not a ball
+   * nose. It is what lets a table row say why a V-bit was dropped in the #486 words ("a V-bit is
+   * not a rest cutter here"), instead of the generic `not-flat` phrase that has to cover both.
+   */
+  vTrace: boolean;
   /**
    * Why this cutter was dropped WITHOUT being measured, if it was. A V-bit on a region job is
    * reported here: the cone's width grows with depth, so it is refused by name rather than measured
@@ -188,6 +195,7 @@ export function reachabilityFor(
       name: entry?.tool.name ?? candidate.key,
       diameter: candidate.diameter,
       shape: entry?.tool.shape ?? null,
+      vTrace: entry === undefined ? false : isVTraceTool(entry.tool),
       excluded: candidate.excluded ?? null,
       excludedNote: candidate.excluded === 'no-catalogue-row' ? (candidate.catalogueNote ?? null) : null,
       rows: cells,
@@ -270,9 +278,25 @@ export interface ReachTableRow {
   qualifies: boolean;
 }
 
+/**
+ * #486 — the sentence a table cell (and the CLI's up-front note) uses for a V-bit named as a
+ * SECOND cutter on a job whose items are regions. The rest pass is area-based: it asks what a
+ * narrower flat disc can open that the first could not, and a cone's width is a function of depth,
+ * so a V-bit was never measured as a rest cutter at all. The operation it would be is a V-carve.
+ */
+export const V_BIT_REST_SENTENCE = 'a V-bit is not a rest cutter here; the second program would be a V-carve (#221)';
+
 /** Why a cutter was dropped before measuring, in one phrase, for a table cell. */
-function exclusionWords(excluded: ToolCandidate['excluded'] | null, note: string | null): string | null {
-  if (excluded === 'not-flat') return 'not a flat end mill (or a V-bit on a job with regions)';
+function exclusionWords(
+  excluded: ToolCandidate['excluded'] | null,
+  note: string | null,
+  vTrace: boolean,
+): string | null {
+  if (excluded === 'not-flat') {
+    // The `not-flat` class covers a ball nose, a bull nose and a V-bit. Only the V-bit on a region
+    // job has the #486 answer; the rest keep the generic phrase, which already names the case.
+    return vTrace ? V_BIT_REST_SENTENCE : 'not a flat end mill (or a V-bit on a job with regions)';
+  }
   if (excluded === 'no-feeds') return 'no cutting parameters for this material';
   if (excluded === 'broken') return 'every copy of it is marked broken';
   // #455 — the catalogue's own sentence has the vendor's material words in it, which is exactly
@@ -291,7 +315,7 @@ export function reachTable(reach: Reachability): ReachTableRow[] {
     key: cutter.key,
     name: cutter.name,
     diameter: cutter.diameter,
-    excluded: exclusionWords(cutter.excluded, cutter.excludedNote),
+    excluded: exclusionWords(cutter.excluded, cutter.excludedNote, cutter.vTrace),
     shares: cutter.excluded === null ? cutter.rows.map((r) => r.ratio) : cutter.rows.map(() => null),
     total: reach.totalShare.get(cutter.key) ?? 0,
     qualifies: cutter.qualifies,

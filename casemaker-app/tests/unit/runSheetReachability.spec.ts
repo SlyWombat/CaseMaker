@@ -161,6 +161,26 @@ describe('the run sheet’s reachability report (#410)', () => {
     expect(text).toContain('1 of your 3 cutters were not measured: not a flat end mill');
   });
 
+  it('answers a V-bit on a region job with the V-carve sentence, not the generic not-flat phrase (#486)', () => {
+    const vbit = tool('vbit', 0.3, {
+      name: '30° engraving bit',
+      shape: 'engraving',
+      typeText: 'Engraving',
+      tipDiameter: 0.3,
+      diameter: 3.175,
+      halfAngle: 15,
+      angle: 30,
+    });
+    const reach = reachabilityFor(jobWith(), [...TOOLS, vbit], [], (key) =>
+      ITEMS.map((i) => row(i.id, key === 'fine' ? { title: 900, sub: 80, lost: 0 }[i.id]! : 0)),
+    );
+    const text = textOf(section(sheetFor(reach), 'reach'));
+    expect(text).toContain('a V-bit is not a rest cutter here; the second program would be a V-carve (#221)');
+    // The ball nose keeps the generic phrase — the #221 sentence is about a V-bit, not every
+    // cutter that is not flat.
+    expect(text).toContain('not a flat end mill (or a V-bit on a job with regions)');
+  });
+
   it('names the region NO cutter reaches, with its area, and that it is turned off', () => {
     const text = textOf(section(sheetFor(reachFor()), 'reach'));
     expect(text).toContain('"LOST" is cut by none of the 2 cutters measured above');

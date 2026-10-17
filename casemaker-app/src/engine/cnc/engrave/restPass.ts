@@ -26,11 +26,13 @@ import {
   finerThan,
   shareOf,
   untouchedBy,
+  V_BIT_REST_SENTENCE,
   type CutterReach,
   type Reachability,
   type ReachRow,
 } from './reachability';
 import type { EngraveJob, EngraveVectorShape } from '@/types/engraveJob';
+import { isVTraceTool, type Tool } from '@/engine/cnc/tool';
 import type { CutParams } from '@/engine/cnc/feeds';
 import type { SeamFacts, ThirdToolAdvice } from './restSettings';
 
@@ -149,6 +151,27 @@ export function unroughedItems(reach: Reachability, roughKey: string): Unroughed
 export interface RestToolPick {
   cutter: CutterReach | null;
   reason: string;
+}
+
+/**
+ * #486 — why `rest` cannot be the second cutter on this job, or null when it can.
+ *
+ * The rest pass is area-based: it asks what a narrower FLAT disc can open that the first program
+ * left. A V-bit's cutting width grows with depth, so `recommendTool` excludes it from every job
+ * holding a region item and `restToolPick` can never choose one; only `--rest <key>` can name it.
+ * Left alone, that route measures "0 mm² of the 0 mm²" and reports "nothing to clean up", which
+ * reads as a fact about the design rather than about the cutter. The maintainer's answer (#486,
+ * 2026-10-17) is #221's V-carve, so the route says THIS sentence up front and generates the one
+ * program it can honestly generate.
+ *
+ * A trace-only job has no regions and takes a V-bit as a normal trace tool, so it is not refused.
+ */
+export function vBitRestRefusal(job: EngraveJob, rest: Tool): string | null {
+  if (!isVTraceTool(rest)) return null;
+  const hasRegions = [...job.labels, ...job.shapes, ...(job.combined ?? []), ...(job.vectors ?? [])].some(
+    (item) => item.enabled,
+  );
+  return hasRegions ? V_BIT_REST_SENTENCE : null;
 }
 
 /**

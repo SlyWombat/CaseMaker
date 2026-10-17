@@ -73,7 +73,7 @@ import ManifoldModule from 'manifold-3d';
 import { engraveGenerate, type EngraveGenerated } from '../src/workers/sim/engraveGenerate';
 import { createSimSession, type SimDiagnostic, type SimLoadOk, type SimSession } from '../src/workers/sim/session';
 import { unionRemoval, restMachining } from '../src/workers/sim/engraveRest';
-import { restJobFor, roughPick, restToolPick, unroughedItems, type RestPassFacts } from '../src/engine/cnc/engrave/restPass';
+import { restJobFor, roughPick, restToolPick, unroughedItems, vBitRestRefusal, type RestPassFacts } from '../src/engine/cnc/engrave/restPass';
 import {
   REST_OVERLAP_KEY,
   REST_THIRD_TOOL_KEY,
@@ -887,7 +887,7 @@ if (args.job) {
           : '');
   console.log(`  cutter 1   ${tool1Key} — ${roughReason}`);
 
-  const restChosen: Chosen | null = (() => {
+  const restPicked: Chosen | null = (() => {
     if (restOff) return null;
     if (args.rest !== undefined) return cutterNamed(args.rest, '--rest');
     const choice = restToolPick(cut, tool1Key);
@@ -895,8 +895,24 @@ if (args.job) {
       ? null
       : { key: choice.cutter.key, diameter: choice.cutter.diameter, reason: choice.reason };
   })();
-  if (restChosen !== null) console.log(`  cutter 2   ${restChosen.key} — ${restChosen.reason}`);
-  const restTool: Tool | null = restChosen === null ? null : toolFor(restChosen, '--rest');
+  const restPickedTool: Tool | null = restPicked === null ? null : toolFor(restPicked, '--rest');
+  // #486 — a V-bit named as the second cutter on a region job is not a rest cutter at all: the rest
+  // pass is area-based and the cone's width changes with depth. Say which operation it WOULD be
+  // (#221's V-carve) before anything is measured, and generate the one program that is honest,
+  // rather than the "0 mm² of the 0 mm² … nothing to clean up" receipt that hides the reason.
+  const restRefusal = restPickedTool === null ? null : vBitRestRefusal(job, restPickedTool);
+  if (restPicked !== null) {
+    console.log(
+      restRefusal !== null
+        ? `  cutter 2   ${restPicked.key} — ${restRefusal}`
+        : `  cutter 2   ${restPicked.key} — ${restPicked.reason}`,
+    );
+  }
+  if (restRefusal !== null) {
+    console.log('  note       no second program is generated: one program is the whole job (#221)');
+  }
+  const restChosen: Chosen | null = restRefusal === null ? restPicked : null;
+  const restTool: Tool | null = restRefusal === null ? restPickedTool : null;
 
   // WHAT THE SECOND BIT COULD OPEN, over the design as the FILE asked for it — measured BEFORE
   // program 1's items are turned off, because an item the first bit cannot enter at all is entirely

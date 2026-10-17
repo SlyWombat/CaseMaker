@@ -14,6 +14,7 @@ import {
   shareOf,
   untouchedBy,
   untouchedByAll,
+  V_BIT_REST_SENTENCE,
 } from '@/engine/cnc/engrave/reachability';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { flatEndMill, type Tool } from '@/engine/cnc/tool';
@@ -188,6 +189,27 @@ describe('reachabilityFor (#410)', () => {
     expect(rows[0]!.shares).toEqual([null]);
     expect(rows[1]!.excluded).toBeNull();
     expect(rows[1]!.shares).toEqual([0]);
+  });
+
+  it('answers a V-bit on a region job with the V-carve sentence, not the generic not-flat phrase (#486)', () => {
+    const job = jobWith('big');
+    const vbit = tool('vbit', 0.3, {
+      name: '30° engraving bit',
+      shape: 'engraving',
+      typeText: 'Engraving',
+      tipDiameter: 0.3,
+      diameter: 3.175,
+      halfAngle: 15,
+      angle: 30,
+    });
+    const wide = tool('wide', 3.175, { shoulderLength: 12 });
+    const reach = reachabilityFor(job, [vbit, wide], [], measuring({ wide: { big: 900 } }));
+    const cell = reachTable(reach).find((r) => r.key === 'vbit')!;
+    expect(cell.excluded).toBe(V_BIT_REST_SENTENCE);
+    expect(cell.excluded).toContain('a V-carve (#221)');
+    // A ball nose keeps the generic phrase: it is not a V-bit, and the #221 sentence would be a
+    // claim about an operation the operator did not ask for.
+    expect(reachTable(reach).find((r) => r.key === 'wide')!.excluded).toBeNull();
   });
 
   it('never offers a cutter the catalogue lists for other materials as a rest-pair second tool (#455)', () => {
