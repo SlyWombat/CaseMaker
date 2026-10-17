@@ -37,6 +37,7 @@ import {
 import { inventoryKey } from '@/engine/cnc/toolRegistry';
 import { TOOL_LIBRARY, type ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import { cuttingDiameter } from '@/engine/cnc/tool';
+import { CutterProfile } from '@/components/ui/CutterProfile';
 import type { InventoryItem } from '@/platform/houseClient';
 import { useToolRegistry } from '@/hooks/useToolRegistry';
 import { useHouseStore, useLastSync } from '@/store/houseStore';
@@ -436,6 +437,7 @@ export function ToolsScope() {
             <thead>
               <tr>
                 <th style={{ width: '34%' }}>Name</th>
+                <th className="thumb" aria-label="Profile" />
                 <th>Shape</th>
                 <th className="num">Tip ⌀</th>
                 <th className="num">Shank</th>
@@ -467,7 +469,7 @@ export function ToolsScope() {
               })}
               {groups.length === 0 && (
                 <tr className="more">
-                  <td colSpan={9} data-testid="manage-no-matches">
+                  <td colSpan={10} data-testid="manage-no-matches">
                     nothing matches “{query}”
                   </td>
                 </tr>
@@ -527,7 +529,7 @@ function Rows({
   return (
     <>
       <tr className="grp" data-testid={`manage-group-${tier}`}>
-        <td colSpan={9}>
+        <td colSpan={10}>
           {TIER_HEADING[tier]} <small>{tierNote(tier, count)}</small>
         </td>
       </tr>
@@ -559,6 +561,10 @@ function Rows({
                 <small>{provenanceLine(entry, possession)}</small>
               </button>
             </td>
+            {/* A silhouette, not the dimensioned drawing: 129 catalogue rows must stay scannable. */}
+            <td className="thumb">
+              <CutterProfile tool={t} size="thumb" testId={`manage-tools-profile-${entry.key}`} />
+            </td>
             <td>{t.shape}</td>
             <td className={dim(tip)}>{mm(tip)}</td>
             <td className={dim(t.handleDiameter)}>{mm(t.handleDiameter)}</td>
@@ -576,7 +582,7 @@ function Rows({
       })}
       {more > 0 && (
         <tr className="more">
-          <td colSpan={9} data-testid={`manage-more-${tier}`}>
+          <td colSpan={10} data-testid={`manage-more-${tier}`}>
             … {more} more catalogue {more === 1 ? 'row' : 'rows'} — search or scroll
           </td>
         </tr>

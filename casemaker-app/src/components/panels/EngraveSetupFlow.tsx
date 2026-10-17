@@ -21,6 +21,7 @@ import {
   type SetupStepId,
 } from '@/engine/cnc/engrave/setupFlow';
 import type { JobFinding } from '@/engine/cnc/engrave/jobSetup';
+import { CutterProfile } from '@/components/ui/CutterProfile';
 import type { StockMaterial } from '@/types/engraveJob';
 
 /**
@@ -92,6 +93,11 @@ export function EngraveSetupFlow({
   // "same as last job" is a no-op. They are a draft until Finish writes them.
   const [answers, setAnswers] = useState<SetupAnswers>(() => defaultSetupAnswers(job));
   const [index, setIndex] = useState(0);
+  // The silhouette for the answer as it is being edited, not the job's old cutter (#489).
+  const chosenTool = useMemo(
+    () => tools.find((e) => e.key === answers.toolKey) ?? null,
+    [tools, answers.toolKey],
+  );
 
   const shown = useMemo(
     () => (only === undefined ? SETUP_STEPS : SETUP_STEPS.filter((st) => only.includes(st.id))),
@@ -256,26 +262,33 @@ export function EngraveSetupFlow({
         );
       case 'cutter':
         return (
-          <label style={FIELD_LABEL}>
-            <span>Cutter</span>
-            <select
-              value={answers.toolKey}
-              data-testid="engrave-setup-tool"
-              aria-label="Tool"
-              title="The cutter this job is written for."
-              style={{ width: '100%' }}
-              onChange={(e) => setAnswers((a) => withToolAnswer(a, e.target.value))}
-            >
-              {tools.map((e) => {
-                const d = cuttingDiameter(e.tool);
-                return (
-                  <option key={e.key} value={e.key} title={e.provenance}>
-                    {d === null ? e.tool.name : `${e.tool.name} — Ø ${d} mm cutting`}
-                  </option>
-                );
-              })}
-            </select>
-          </label>
+          <>
+            <label style={FIELD_LABEL}>
+              <span>Cutter</span>
+              <select
+                value={answers.toolKey}
+                data-testid="engrave-setup-tool"
+                aria-label="Tool"
+                title="The cutter this job is written for."
+                style={{ width: '100%' }}
+                onChange={(e) => setAnswers((a) => withToolAnswer(a, e.target.value))}
+              >
+                {tools.map((e) => {
+                  const d = cuttingDiameter(e.tool);
+                  return (
+                    <option key={e.key} value={e.key} title={e.provenance}>
+                      {d === null ? e.tool.name : `${e.tool.name} — Ø ${d} mm cutting`}
+                    </option>
+                  );
+                })}
+              </select>
+            </label>
+            {chosenTool !== null && (
+              <div data-testid="engrave-setup-tool-thumb" style={{ marginTop: 6 }}>
+                <CutterProfile tool={chosenTool.tool} size="thumb" />
+              </div>
+            )}
+          </>
         );
     }
   }

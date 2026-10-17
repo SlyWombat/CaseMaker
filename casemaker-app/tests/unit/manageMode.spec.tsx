@@ -225,17 +225,33 @@ describe('#311 — the tool list, grouped by tier', () => {
     expect(counts).toContain(`${TOOL_LIBRARY.length} built-in`);
   });
 
+  it('draws a row silhouette and the full profile on a read-only row (#489)', () => {
+    render(<ManageMode />);
+    const thumb = screen.getByTestId(`manage-tools-profile-${USER.key}`);
+    expect(thumb.getAttribute('data-shape')).toBe('flat');
+    expect(thumb.querySelectorAll('[data-dimension]')).toHaveLength(0);
+
+    fireEvent.click(screen.getByTestId(`manage-tools-row-${CAT.key}`));
+    const profile = screen.getByTestId('manage-cutter-profile');
+    expect(profile.querySelectorAll('[data-dimension]')).toHaveLength(4);
+    expect(screen.getByTestId('manage-cutter-profile-fields').textContent).toContain('shoulder length');
+    // A read-only row has no editor; the profile is its full dimensioned view.
+    expect(q('manage-definition-editor')).toBeNull();
+  });
+
   it('a dimension no source stated is `—`, never 0', () => {
     render(<ManageMode />);
     const row = screen.getByTestId('manage-tools-row-user:1a2b3c4d5e');
     const cells = Array.from(row.querySelectorAll('td')).map((td) => td.textContent ?? '');
-    // tip ⌀ 2, shank 3.175, flute 12, shoulder unstated, stick-out unstated, qty not applicable.
-    expect(cells[2]).toBe('2.0');
-    expect(cells[3]).toBe('3.175');
-    expect(cells[4]).toBe('12.0');
-    expect(cells[5]).toBe('—');
+    // cell 1 is the profile silhouette (#489); then tip ⌀ 2, shank 3.175, flute 12, shoulder
+    // unstated, stick-out unstated, qty not applicable.
+    expect(cells[1]).toContain('Side profile');
+    expect(cells[3]).toBe('2.0');
+    expect(cells[4]).toBe('3.175');
+    expect(cells[5]).toBe('12.0');
     expect(cells[6]).toBe('—');
-    expect(cells[7]).toBe('·');
+    expect(cells[7]).toBe('—');
+    expect(cells[8]).toBe('·');
   });
 
   it('search narrows the list, and says so when nothing matches', () => {
@@ -360,6 +376,32 @@ describe('#335 — a Yours row is the one that can be changed', () => {
     expect((screen.getByTestId('manage-def-save') as HTMLButtonElement).disabled).toBe(true);
     // What the form has no box for is still drawn, read-only, as the unknown it is.
     expect(screen.getByTestId('manage-detail').textContent).toContain('unset; the machine probes the tip');
+  });
+
+  it('draws the profile from the live draft and links a box to its dimension (#489)', () => {
+    render(<ManageMode />);
+    fireEvent.click(screen.getByTestId(`manage-tools-row-${USER.key}`));
+
+    const profile = screen.getByTestId('manage-def-profile');
+    expect(profile.getAttribute('data-shape')).toBe('flat');
+    const dimension = (code: string) =>
+      profile.querySelector(`[data-dimension="${code}"]`) as SVGGElement;
+    // The row has an unstated shoulder, so LS is a dashed `?` on the drawing AND a `?` row.
+    expect(dimension('LS').textContent).toContain('LS ?');
+    expect(
+      screen.getByTestId('manage-def-profile-fields').querySelector('[data-field="shoulderLength"]')!.textContent,
+    ).toContain('? not stated');
+
+    // Hovering a box marks its dimension...
+    fireEvent.mouseEnter(screen.getByTestId('manage-def-flute').closest('label')!);
+    expect(dimension('LC').classList.contains('is-active')).toBe(true);
+    fireEvent.mouseLeave(screen.getByTestId('manage-def-flute').closest('label')!);
+    expect(dimension('LC').classList.contains('is-active')).toBe(false);
+
+    // ...and the drawing reads the DRAFT, not the saved row: a typed tip changes DC.
+    fireEvent.change(screen.getByTestId('manage-def-tip'), { target: { value: '3' } });
+    expect(dimension('DC').textContent).toContain('3.0');
+    expect(screen.getByTestId('manage-def-save').hasAttribute('disabled')).toBe(false);
   });
 
   it('Save PATCHes the key with the tool list’s validator and the edited fields, the rest untouched', async () => {

@@ -9,6 +9,7 @@ import {
 } from '@/engine/cnc/cutterProfile';
 import type { Tool } from '@/engine/cnc/tool';
 import type { Condition } from '@/engine/cnc/toolCondition';
+import { cutterFieldsLinked } from './cutterFieldLinks';
 import './cutterProfile.css';
 
 /**
@@ -131,7 +132,7 @@ export function CutterProfile({
         {model.paths.map((path, i) => (
           <path
             key={`p-${i}`}
-            className={`${roleClass(path)}${path.missingField !== undefined && path.missingField === active ? ' is-active' : ''}`}
+            className={`${roleClass(path)}${path.missingField !== undefined && cutterFieldsLinked(active, path.missingField) ? ' is-active' : ''}`}
             d={path.d}
             data-role={path.role}
             data-dashed={path.dashed ? 'true' : undefined}
@@ -151,7 +152,7 @@ export function CutterProfile({
         )}
 
         {model.dimensions.map((dimension) => {
-          const isActive = dimension.field === active;
+          const isActive = cutterFieldsLinked(active, dimension.field);
           const label = `${dimension.code} ${dimension.label}: ${dimension.missing ? 'not stated' : dimension.text}`;
           return (
             <g

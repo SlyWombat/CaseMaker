@@ -261,6 +261,25 @@ describe('guided job setup — the flow in the panel (#254)', () => {
     expect(useEngraveJobStore.getState().job.sources!.stock!.length).toBe('user');
   });
 
+  it('draws the silhouette of the cutter being chosen (#489)', () => {
+    render(<EngravePanel />);
+    fireEvent.click(screen.getByTestId('engrave-setup-open'));
+    fireEvent.click(screen.getByTestId('engrave-setup-next')); // material
+    fireEvent.click(screen.getByTestId('engrave-setup-next')); // blank
+    fireEvent.click(screen.getByTestId('engrave-setup-next')); // cutter
+
+    const thumb = screen.getByTestId('engrave-setup-tool-thumb');
+    expect(thumb.querySelector('svg')).not.toBeNull();
+    // The thumbnail is a silhouette: no dimension lines to read in a 96 px drawing.
+    expect(thumb.querySelectorAll('[data-dimension]')).toHaveLength(0);
+
+    const select = screen.getByTestId('engrave-setup-tool') as HTMLSelectElement;
+    const other = [...select.options].find((o) => o.value !== select.value && !o.disabled);
+    expect(other).toBeDefined();
+    fireEvent.change(select, { target: { value: other!.value } });
+    expect(thumb.querySelector('svg')).not.toBeNull();
+  });
+
   it('lets the sacrificial and material answers through to the job', () => {
     render(<EngravePanel />);
     fireEvent.click(screen.getByTestId('engrave-setup-open'));

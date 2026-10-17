@@ -39,7 +39,10 @@ import {
   type CutterSpec,
 } from '@/engine/cnc/registerCutter';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
-import { cuttingDiameter } from '@/engine/cnc/tool';
+import { cuttingDiameter, type Tool } from '@/engine/cnc/tool';
+import type { CutterField } from '@/engine/cnc/cutterProfile';
+import { CutterProfile } from '@/components/ui/CutterProfile';
+import { CutterProfileFields } from '@/components/ui/CutterProfileFields';
 import type { InventoryItem } from '@/platform/houseClient';
 import { useHouseStore } from '@/store/houseStore';
 import { useManageModeStore } from '@/store/manageModeStore';
@@ -225,6 +228,10 @@ function Detail({ entry, item }: { entry: ToolLibraryEntry; item: InventoryItem 
         </tbody>
       </table>
 
+      {/* The full dimensioned profile (#489) for every read-only row; a Yours row draws its DRAFT
+          inside the editor below, so the drawing and the boxes cannot disagree. */}
+      {tier !== 'yours' && <ReadOnlyCutterProfile tool={t} />}
+
       <div className="btn-row">
         <button
           type="button"
@@ -276,6 +283,57 @@ function Detail({ entry, item }: { entry: ToolLibraryEntry; item: InventoryItem 
 }
 
 /**
+ * The drawing and its dimension vocabulary (#489), side by side in the rail.
+ *
+ * The profile alone can say `?` for a field with no editor box (corner radius, the two angles) but
+ * a mouse has nothing to point at there. `CutterProfileFields` lists every code the shape uses with
+ * its value; both it and the drawing call the same `onFieldHover`, so a field and its dimension
+ * light each other whether the field has a box or only a row.
+ */
+function CutterProfilePanel({
+  tool,
+  highlightedField,
+  onFieldHover,
+  testId,
+}: {
+  tool: Tool;
+  highlightedField: CutterField | null;
+  onFieldHover: (field: CutterField | null) => void;
+  testId: string;
+}) {
+  return (
+    <div className="cutter-profile-panel" data-testid={`${testId}-panel`}>
+      <div className="panel-subhead">Profile</div>
+      <CutterProfile
+        tool={tool}
+        highlightedField={highlightedField}
+        onFieldHover={onFieldHover}
+        testId={testId}
+      />
+      <CutterProfileFields
+        tool={tool}
+        highlightedField={highlightedField}
+        onFieldHover={onFieldHover}
+        testId={`${testId}-fields`}
+      />
+    </div>
+  );
+}
+
+/** A read-only row's profile. It owns no draft, so its highlight can live here. */
+function ReadOnlyCutterProfile({ tool }: { tool: Tool }) {
+  const [highlighted, setHighlighted] = useState<CutterField | null>(null);
+  return (
+    <CutterProfilePanel
+      tool={tool}
+      highlightedField={highlighted}
+      onFieldHover={setHighlighted}
+      testId="manage-cutter-profile"
+    />
+  );
+}
+
+/**
  * The definition editor for a Yours row (#335): the Type door's six fields over the user's own
  * `Tool`, and a Save that replaces it in place.
  *
@@ -298,9 +356,14 @@ function DefinitionEditor({ entry }: { entry: ToolLibraryEntry }) {
   const updateTool = useHouseStore((s) => s.updateTool);
   const busy = useHouseStore((s) => s.busy);
   const [spec, setSpec] = useState<CutterSpec>(() => specOfTool(entry.tool));
+  // Which field the drawing says a change touches, shared by the boxes and the profile (#489).
+  const [highlighted, setHighlighted] = useState<CutterField | null>(null);
 
   const problem = specProblem(spec);
   const next = problem === null ? toolFromSpec(spec, entry.tool) : null;
+  // While a box holds a refusal there is no valid draft to draw; keep the last valid values on the
+  // page rather than making the profile vanish under the typo.
+  const drawn = next ?? entry.tool;
   // Dirty means the TOOL would change, read back through the same text the boxes show: `2.0`
   // typed over a stored 2 is not an edit.
   const dirty =
@@ -309,10 +372,28 @@ function DefinitionEditor({ entry }: { entry: ToolLibraryEntry }) {
 
   return (
     <div data-testid="manage-definition-editor">
-      <CutterFields prefix="manage-def" spec={spec} onChange={setSpec} disabled={disabled} />
+      <CutterProfilePanel
+        tool={drawn}
+        highlightedField={highlighted}
+        onFieldHover={setHighlighted}
+        testId="manage-def-profile"
+      />
+      <CutterFields
+        prefix="manage-def"
+        spec={spec}
+        onChange={setSpec}
+        disabled={disabled}
+        highlight={highlighted}
+        onHighlight={setHighlighted}
+      />
       <p className="hint">
         blank stays unknown — never 0. A blank shoulder is the depth it supports (#314).
       </p>
+      {problem !== null && (
+        <p className="hint" data-status="error" data-testid="manage-def-profile-stale">
+          The drawing keeps its last valid values while this box is refused: {problem}
+        </p>
+      )}
       <div className="btn-row">
         <button
           type="button"

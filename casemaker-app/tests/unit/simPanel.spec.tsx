@@ -183,6 +183,16 @@ describe('SimPanel', () => {
     expect((screen.getByTestId('sim-simulate') as HTMLButtonElement).disabled).toBe(false);
   });
 
+  it('draws the chosen cutter’s silhouette (#489)', () => {
+    openPlainFile();
+    act(() => useSimSetupStore.getState().setTool(CHOSEN_TOOL));
+    render(<SimPanel />);
+    const thumb = screen.getByTestId('sim-tool-profile');
+    expect(thumb.querySelector('svg')).not.toBeNull();
+    expect(thumb.querySelectorAll('[data-dimension]')).toHaveLength(0);
+    expect(thumb.querySelector('[data-shape]')).not.toBeNull();
+  });
+
   it('says a shape-only match is a suggestion, and an exact one is not (#316)', async () => {
     // The panel is the half of #316 the user reads. Makera sells six 3.175 mm flats that differ
     // only in length, so "matched from the file's TOOL record" over a 12 mm entry when the file

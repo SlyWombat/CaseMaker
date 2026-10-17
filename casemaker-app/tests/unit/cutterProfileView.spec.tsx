@@ -8,6 +8,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { CutterProfile } from '@/components/ui/CutterProfile';
+import { CutterProfileFields } from '@/components/ui/CutterProfileFields';
 import { flatEndMill, type Tool } from '@/engine/cnc/tool';
 
 afterEach(cleanup);
@@ -70,6 +71,17 @@ describe('CutterProfile (#489)', () => {
     rerender(<CutterProfile tool={ENGRAVER} highlightedField="tipDiameter" onFieldHover={onFieldHover} />);
     expect(dimension('D1').classList.contains('is-active')).toBe(true);
     expect(dimension('LC').classList.contains('is-active')).toBe(false);
+  });
+
+  it('links the shank box to the body diameter DC on a V-bit', () => {
+    // The editor has no `diameter` box: for an engraver the body IS the shank, and `toolFromSpec`
+    // writes `shank ⌀` into both fields. Highlighting either one must light both lines up.
+    const { rerender } = render(<CutterProfile tool={ENGRAVER} highlightedField="handleDiameter" />);
+    expect(dimension('DS').classList.contains('is-active')).toBe(true);
+    expect(dimension('DC').classList.contains('is-active')).toBe(true);
+    rerender(<CutterProfile tool={ENGRAVER} highlightedField="diameter" />);
+    expect(dimension('DS').classList.contains('is-active')).toBe(true);
+    expect(dimension('DC').classList.contains('is-active')).toBe(true);
   });
 
   it('makes a dimension keyboard-focusable, with an accessible name', () => {
@@ -146,6 +158,39 @@ describe('CutterProfile (#489)', () => {
     expect(band.getAttribute('style')).toMatch(/#e05a00|rgb\(224,\s*90,\s*0\)/);
     rerender(<CutterProfile tool={FLAT} />);
     expect(screen.queryByTestId('cutter-profile-label-band')).toBeNull();
+  });
+
+  it('lists every dimension code as a field, including the ones the form has no box for', () => {
+    const onFieldHover = vi.fn();
+    render(<CutterProfileFields tool={ENGRAVER} onFieldHover={onFieldHover} />);
+    const rows = [...document.querySelectorAll('[data-testid="cutter-profile-fields"] [role="listitem"]')];
+    expect(rows.map((row) => row.getAttribute('data-dimension'))).toEqual(['DS', 'DC', 'LC', 'AN', 'D1']);
+    const row = (code: string) => rows.find((r) => r.getAttribute('data-dimension') === code)!;
+    expect(row('DS').textContent).toContain('3.175 mm');
+    expect(row('AN').textContent).toContain('15°');
+    expect(row('LC').getAttribute('data-field')).toBe('fluteLength');
+
+    fireEvent.mouseEnter(row('LC'));
+    expect(onFieldHover).toHaveBeenCalledWith('fluteLength');
+    fireEvent.mouseLeave(row('LC'));
+    expect(onFieldHover).toHaveBeenLastCalledWith(null);
+
+    fireEvent.focus(row('D1'));
+    expect(onFieldHover).toHaveBeenLastCalledWith('tipDiameter');
+  });
+
+  it('marks a field row for an outside highlight, and says `? not stated` for a missing one', () => {
+    const { rerender } = render(<CutterProfileFields tool={FLAT} highlightedField="shoulderLength" />);
+    const row = (code: string) =>
+      document.querySelector(`[data-testid="cutter-profile-fields"] [data-dimension="${code}"]`) as HTMLElement;
+    expect(row('LS').classList.contains('is-active')).toBe(true);
+    expect(row('LS').classList.contains('is-missing')).toBe(true);
+    expect(row('LS').textContent).toContain('? not stated');
+    // A field outside this shape's vocabulary has no row to mark.
+    expect(document.querySelector('[data-testid="cutter-profile-fields"] [data-field="cornerRadius"]')).toBeNull();
+
+    rerender(<CutterProfileFields tool={ENGRAVER} highlightedField="handleDiameter" />);
+    expect(row('DC').classList.contains('is-active')).toBe(true);
   });
 
   it('names and describes the cutter in the SVG for assistive technology', () => {

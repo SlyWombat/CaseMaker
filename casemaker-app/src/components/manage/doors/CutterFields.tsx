@@ -9,7 +9,9 @@
  */
 
 import type { ChangeEvent } from 'react';
+import type { CutterField } from '@/engine/cnc/cutterProfile';
 import type { CutterSpec } from '@/engine/cnc/registerCutter';
+import { cutterFieldsLinked } from '@/components/ui/cutterFieldLinks';
 import { SHAPE_LABELS, TYPABLE_SHAPES } from './reading';
 
 export interface CutterFieldsProps {
@@ -18,14 +20,40 @@ export interface CutterFieldsProps {
   spec: CutterSpec;
   onChange: (next: CutterSpec) => void;
   disabled: boolean;
+  /** The dimension field the profile is pointing at; the matching box is marked. */
+  highlight?: CutterField | null;
+  /** Reports a box being hovered or focused, so the profile can mark its dimension. */
+  onHighlight?: (field: CutterField | null) => void;
 }
 
-export function CutterFields({ prefix, spec, onChange, disabled }: CutterFieldsProps) {
+export function CutterFields({
+  prefix,
+  spec,
+  onChange,
+  disabled,
+  highlight = null,
+  onHighlight,
+}: CutterFieldsProps) {
   const field = (key: keyof CutterSpec) => ({
     value: spec[key],
     disabled,
     onChange: (e: ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
       onChange({ ...spec, [key]: e.target.value }),
+  });
+
+  /**
+   * A box's link to the drawing (#489). The four lengths/diameters are the fields the Type door
+   * owns; corner radius, the two angles and the tip's D1 code have no box here, and carry their
+   * links in `CutterProfileFields` beside the drawing instead. Hover and focus both count, so the
+   * link is usable without a mouse.
+   */
+  const link = (fieldName: CutterField) => ({
+    className: `lf${cutterFieldsLinked(highlight, fieldName) ? ' is-active' : ''}`,
+    'data-field': fieldName,
+    onMouseEnter: () => onHighlight?.(fieldName),
+    onMouseLeave: () => onHighlight?.(null),
+    onFocus: () => onHighlight?.(fieldName),
+    onBlur: () => onHighlight?.(null),
   });
 
   return (
@@ -55,7 +83,7 @@ export function CutterFields({ prefix, spec, onChange, disabled }: CutterFieldsP
       {/* `tip ⌀` and `shank ⌀` are held together: this rail is narrow, and a break between a word
           and its symbol leaves a stray glyph alone on a line. */}
       <div className="grid2">
-        <label className="lf">
+        <label {...link('tipDiameter')}>
           <span>tip&nbsp;⌀ mm</span>
           <input
             className="fld fld--num"
@@ -67,7 +95,7 @@ export function CutterFields({ prefix, spec, onChange, disabled }: CutterFieldsP
             {...field('tipDiameter')}
           />
         </label>
-        <label className="lf">
+        <label {...link('handleDiameter')}>
           <span>shank&nbsp;⌀ mm</span>
           <input
             className="fld fld--num"
@@ -79,7 +107,7 @@ export function CutterFields({ prefix, spec, onChange, disabled }: CutterFieldsP
             {...field('handleDiameter')}
           />
         </label>
-        <label className="lf">
+        <label {...link('fluteLength')}>
           <span>flute mm</span>
           <input
             className="fld fld--num"
@@ -91,7 +119,7 @@ export function CutterFields({ prefix, spec, onChange, disabled }: CutterFieldsP
             {...field('fluteLength')}
           />
         </label>
-        <label className="lf">
+        <label {...link('shoulderLength')}>
           <span>shoulder mm</span>
           <input
             className="fld fld--num"

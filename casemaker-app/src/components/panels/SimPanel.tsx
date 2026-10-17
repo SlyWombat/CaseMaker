@@ -8,6 +8,7 @@ import type { StartingTool } from '@/engine/cnc';
 import type { DiagnosticSource, SimDiagnostic } from '@/workers/sim/session';
 import { MAX_TEXT_FILE_BYTES, openTextFile } from '@/utils/openTextFile';
 import { GcodePane } from '@/components/panels/GcodePane';
+import { CutterProfile } from '@/components/ui/CutterProfile';
 import { coverageDisclaimer, type SimRunOutcome } from '@/components/panels/simCoverage';
 import {
   ambiguousSentence,
@@ -374,6 +375,13 @@ export function SimPanel() {
           </option>
         ))}
       </select>
+      {/* The silhouette of the cutter the answers name (#489), so a picked row is recognisable
+          before the sweep runs. The dimensioned drawing belongs in House → Tools, not this panel. */}
+      {tool !== null && (
+        <div data-testid="sim-tool-profile" style={{ marginTop: 4 }}>
+          <CutterProfile tool={tool} size="thumb" />
+        </div>
+      )}
       {/* #316 — the file's TOOL record answers as well for rows in two tiers, so the form asks
           rather than choosing. There is NO preselected candidate: a seeded row would be a silent
           choice with an extra click, and the whole point is that neither row wins on its own. */}
