@@ -60,6 +60,7 @@ import { parseMarginsStrict, useSettingsStore, type FixturesSettings } from './s
 import { useMachineStore } from './machineStore';
 import { useToolRegistryStore } from './toolRegistryStore';
 import { useShopDefaultsStore } from './shopDefaultsStore';
+import { useFeedTableStore } from './feedTableStore';
 import {
   legacyMargins,
   marginWrites,
@@ -445,8 +446,14 @@ export async function pushMachine(now: () => string = () => new Date().toISOStri
  */
 export async function reconcileLocation(): Promise<void> {
   // The shop's defaults are read on the same connect: thresholds and waits come from the location —
-  // and, since #447, the depth margins, so the read is awaited before the margins are settled.
-  await Promise.all([useShopDefaultsStore.getState().refresh(), useLocationStore.getState().refresh()]);
+  // and, since #447, the depth margins, so the read is awaited before the margins are settled. The
+  // feeds table is read here too (#450 slice 3): `feedsFor` resolves against it, and a machine
+  // whose table arrived after startup must not keep cutting the compiled starting values.
+  await Promise.all([
+    useShopDefaultsStore.getState().refresh(),
+    useLocationStore.getState().refresh(),
+    useFeedTableStore.getState().refresh(),
+  ]);
   const { status, location } = useLocationStore.getState();
   if (status !== 'present' || location === null) return;
   const existing = location.machines[0];
@@ -645,7 +652,9 @@ function sameMargins(a: unknown, b: unknown): boolean {
  * a machine record that still carries margins — re-read the section, and move them in.
  */
 export async function settleMarginsAfterImport(): Promise<void> {
-  await useShopDefaultsStore.getState().refresh();
+  // The imported document brought its own feeds table too (#450 slice 3): re-read it, or the
+  // window keeps resolving against the pre-import rows.
+  await Promise.all([useShopDefaultsStore.getState().refresh(), useFeedTableStore.getState().refresh()]);
   const { status, location } = useLocationStore.getState();
   if (status !== 'present' || location === null) return;
   const record = location.machines[0] ?? null;

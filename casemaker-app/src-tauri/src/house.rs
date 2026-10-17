@@ -1024,8 +1024,12 @@ impl HouseStore {
             // duplicate key or a tool the client refuses.
             Ok(Some(mut doc)) => {
                 // A location from before the shop defaults (or before a seed this build adds) reads
-                // the seed values, in memory; the next write stores them (`defaults.rs`).
+                // the seed values, in memory; the next write stores them (`defaults.rs`). The feeds
+                // table follows the same rule (#450 slice 3): a location written before the table
+                // existed is served the ten starting rows — labelled `seeded`, unmeasured — rather
+                // than refusing every job until the user writes one.
                 crate::defaults::add_missing_seeds(&mut doc.defaults);
+                crate::feeds::add_missing_seeds(&mut doc.feeds);
                 return match doc.validate() {
                     Ok(()) => (doc, None),
                     Err(e) => {
@@ -3652,6 +3656,16 @@ mod tests {
     async fn the_feeds_table_is_written_under_its_whole_table_rule() {
         use crate::feeds::tests::a_row;
         let (dir, store) = store();
+        // #450 slice 3: a fresh location now holds the ten seeded rows, and this test is about the
+        // WRITE rule on a table it builds row by row. Delete the seeds through the guarded API, so
+        // the starting state is the empty table this test used to open with.
+        loop {
+            let (bytes, etag) = store.feed_table().await.unwrap();
+            let rows: Vec<FeedRow> = serde_json::from_slice(&bytes).unwrap();
+            let Some(first) = rows.first() else { break };
+            store.delete_feed(&first.id, Some(&etag)).await.unwrap();
+        }
+        assert_eq!(store.feed_table().await.unwrap().0, b"[]");
         let row = a_row("feed-softwood-flat-0.8-1.6");
         store.create_feed(row.clone()).await.unwrap();
         // One id, one row: a second create of the same id is a conflict, as on the shelf.
@@ -3726,6 +3740,26 @@ mod tests {
         // An EMPTY table writes no key at all (the held fixture has none).
         let written = fs::read_to_string(dir.path().join(LOCATION_FILE)).unwrap();
         assert!(!written.contains("\"feeds\""), "{written}");
+    }
+
+    #[tokio::test]
+    async fn an_older_location_with_no_feeds_table_is_served_the_seeds_at_load() {
+        // #450 slice 3. A document written before the table existed carries no `feeds`. It is
+        // served the ten starting rows — in memory, as an older one gets the defaults — so the
+        // panel has numbers from the first read; the user's file is not rewritten by opening it.
+        let older = TempDir::new().unwrap();
+        let mut doc: serde_json::Value = serde_json::from_slice(&location_fixture()).unwrap();
+        doc.as_object_mut().unwrap().remove("feeds");
+        fs::write(older.path().join(LOCATION_FILE), serde_json::to_vec(&doc).unwrap()).unwrap();
+
+        let store = HouseStore::open(older.path().to_path_buf());
+        let (bytes, _) = store.feed_table().await.unwrap();
+        let rows: Vec<FeedRow> = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(rows, crate::feeds::seeded_rows());
+        assert!(rows.iter().all(|r| r.source == crate::feeds::FeedSource::Seeded));
+
+        let on_disk = fs::read_to_string(older.path().join(LOCATION_FILE)).unwrap();
+        assert!(!on_disk.contains("\"feeds\""), "opening the location rewrote it: {on_disk}");
     }
 
     #[tokio::test]

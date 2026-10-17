@@ -106,7 +106,7 @@
       "source": "seeded",
       "setAt": null,
       "note": "The FINEST flat row (#410), for the 0.6 mm corn cutter; appended so a 0.8 mm cutter still takes the 0.8-1.6 mm row.",
-      "provenance": "PLACEHOLDER, nothing measured: the 0.8-1.6 mm row's own starting values (S12000, F500, F200) with the step-down and step-over cut back for a 0.6 mm cutter, which is the least stiff bit the bench owns. No vendor row for this diameter. #284 measures it."
+      "provenance": "PLACEHOLDER, nothing measured: the 0.8-1.6 mm row's own starting values (S12000, F500, F200 — the Z1's emitted defaults) with the step-down and step-over cut back for a 0.6 mm cutter, which is the least stiff bit the bench owns. No vendor row for this diameter. #284 measures it."
     },
     {
       "id": "feed-pla-v-0.3-0.5",
@@ -118,7 +118,7 @@
       "source": "seeded",
       "setAt": null,
       "note": null,
-      "provenance": "From the 2026-10-15 bench cut (#185, docs/bench/185-v-groove.nc): the hand file's own numbers, S12000, F500 along, F200 plunge, one pass to depth, cut a clean V groove in PLA (0.836 mm opening at 1.0 mm deep, the 30x0.3 mm bit). Starting values, not a coupon measurement: #284 is what measures this row."
+      "provenance": "From the 2026-10-15 bench cut (#185, `docs/bench/185-v-groove.nc`): the hand file's own numbers — S12000, F500 along, F200 plunge, one pass to depth — cut a clean V groove in PLA (0.836 mm opening at 1.0 mm deep, the 30° × 0.3 mm bit). Starting values, not a coupon measurement: #284 is what measures this row."
     }
   ],
   "refused": [

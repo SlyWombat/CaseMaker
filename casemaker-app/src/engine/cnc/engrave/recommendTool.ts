@@ -53,7 +53,13 @@
  * names the warning (`selectedNote`) rather than blocking the program.
  */
 
-import { catalogueCoverageFor, catalogueStandingFor, feedsFor, type FeedCatalogueRow } from '@/engine/cnc/feeds';
+import {
+  catalogueCoverageFor,
+  catalogueStandingFor,
+  feedsFor,
+  type FeedCatalogueRow,
+  type FeedsEntry,
+} from '@/engine/cnc/feeds';
 import { jobMachine } from '@/engine/cnc/calibration';
 import { cuttingDiameter, cuttingForTrace } from '@/engine/cnc/tool';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
@@ -342,6 +348,12 @@ export function recommendTool(
   measure: (toolKey: string) => LabelEngravability[],
   conditions?: ReadonlyMap<string, ConditionSummary> | null,
   lostDetailWarnRatio: number | null = null,
+  /**
+   * #450 slice 3 — the table the feeds check resolves against, when the caller has the location's
+   * (`resolvedFeedsTable().table`; a worker receives it as `EngraveShopOpts.feeds`). Absent: the
+   * compiled starting table, which is what a no-service build runs on.
+   */
+  table?: readonly FeedsEntry[],
 ): ToolRecommendation {
   // The bar a cutter has to clear is #201's own (engraveGeometry's `LOST_DETAIL_RATIO_FALLBACK`
   // unless the caller sends the shop's `engrave.lostDetailWarnRatio`, #451). Passing it here rather
@@ -405,7 +417,7 @@ export function recommendTool(
     }
     // #347 — the JOB's machine. The profile only supplies the clamp ceilings here, which no
     // calibration touches, so this needs no saved frame to be right.
-    if (!feedsFor(catalogue, job.stock.material, tool, jobMachine(job)).ok) {
+    if (!feedsFor(catalogue, job.stock.material, tool, jobMachine(job), undefined, table).ok) {
       return {
         ...base,
         qualifies: false,

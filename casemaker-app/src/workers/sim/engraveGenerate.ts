@@ -38,7 +38,7 @@ import { segmentsForRadius } from '@/engine/compiler/arcResolution';
 import { version as CAM_VERSION } from '../../../package.json';
 import type { MillProfile } from '@/engine/cnc/machine';
 import { jobMachine, type MachineCalibration } from '@/engine/cnc/calibration';
-import { feedsFor, type FeedsResult, type FeedCatalogueRow } from '@/engine/cnc/feeds';
+import { feedsFor, type FeedsEntry, type FeedsResult, type FeedCatalogueRow } from '@/engine/cnc/feeds';
 import { cuttingDiameter, cuttingForTrace, isVTraceTool, traceRadiusAt, type Tool } from '@/engine/cnc/tool';
 import { threadMillIR, threadSettings, type ThreadMillPlan } from '@/engine/cnc/cam/threadMill';
 import type { ShopDefaults } from '@/platform/defaultsClient';
@@ -91,6 +91,12 @@ export type EngraveStage = 'findings' | 'feeds' | 'cam' | 'post' | 'verify' | 'd
 export interface EngraveShopOpts {
   lostDetailWarnRatio?: number | null;
   peckClearanceMm?: number | null;
+  /**
+   * #450 slice 3 — the table `feedsFor` resolves against, resolved on the caller's side
+   * (`resolvedFeedsTable().table`) because the location lives on the main thread and a worker's own
+   * module state has no located table. Absent: the worker's compiled `FEEDS_TABLE` fallback.
+   */
+  feeds?: readonly FeedsEntry[] | null;
   /**
    * #445 — the whole shop-defaults map, because the thread settings carry a SOURCE per key and
    * `readDefault` resolves each one against the location. `engraveRunStore` passes the same map
@@ -699,7 +705,7 @@ export function engraveGenerate(
   } else {
     const usable = cuttingForTrace(tool);
     if (!usable.ok) return stop('feeds', { message: usable.reason });
-    const resolved = feedsFor(catalogue, job.stock.material, tool, mill, job.cutOverride);
+    const resolved = feedsFor(catalogue, job.stock.material, tool, mill, job.cutOverride, shop.feeds ?? undefined);
     if (!resolved.ok) return stop('feeds', { feeds: resolved, message: resolved.reason });
     feeds = resolved;
 

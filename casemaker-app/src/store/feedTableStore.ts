@@ -12,11 +12,14 @@
  * because `entryFor` takes the FIRST matching row.
  *
  * NO SERVICE, NO TABLE. The hosted web build has no house service; `status` stays `absent` there.
- * The compiled `UNMEASURED_FEEDS_TABLE` is the labelled fallback, and resolving one or the other is
- * #450 slice 3's job — this store does not quietly stand the literal in for the service.
+ * Every read installs what it found into `engine/cnc/feeds.ts` (`setLocatedFeedTable`), and an
+ * absent or failed read puts `null` back, so `feedsFor` resolves against the location on the main
+ * thread and the compiled `FEEDS_TABLE` (its unmeasured starting rows) — labelled as the fallback —
+ * otherwise. An empty served table takes the same path, because the document omits an empty table.
  */
 
 import { create } from 'zustand';
+import { setLocatedFeedTable } from '@/engine/cnc/feeds';
 import { newId } from '@/utils/id';
 import {
   houseAddFeed,
@@ -100,8 +103,13 @@ export const useFeedTableStore = create<FeedTableState>((set, get) => {
     refresh: async () => {
       const res = await houseFeedTable();
       if (res.kind === 'ok') {
+        // The location's rows are now what `feedsFor` resolves against (#450 slice 3). An empty
+        // table means the location stated none (the document omits one), so the install keeps the
+        // compiled fallback — `setLocatedFeedTable` owns that reading of empty.
+        setLocatedFeedTable(res.rows);
         set({ status: 'present', rows: res.rows, unreadable: res.unreadable, etag: res.etag, reason: null });
       } else {
+        setLocatedFeedTable(null);
         set({
           status: res.kind === 'absent' ? 'absent' : 'error',
           rows: [],
@@ -119,8 +127,9 @@ export const useFeedTableStore = create<FeedTableState>((set, get) => {
   };
 });
 
-/** Test seam. */
+/** Test seam. Also puts `feedsFor` back on the compiled fallback. */
 export function resetFeedTableStore(): void {
+  setLocatedFeedTable(null);
   useFeedTableStore.setState({
     status: 'unknown',
     rows: [],

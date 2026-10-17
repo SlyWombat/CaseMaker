@@ -17,7 +17,7 @@ import type { EngraveJob, EngraveMargins } from '@/types/engraveJob';
 import type { EngravePreview } from '@/workers/sim/engravePreview';
 import type { EngraveShopOpts } from '@/workers/sim/engraveGenerate';
 import { getTools } from '@/engine/cnc/toolRegistry';
-import { feedCatalogueRows } from '@/engine/cnc/feeds';
+import { feedCatalogueRows, resolvedFeedsTable } from '@/engine/cnc/feeds';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import type { FeedCatalogueRow } from '@/engine/cnc/feeds';
 import { inventoryConditions, type ConditionSummary } from '@/engine/cnc/toolCondition';
@@ -97,7 +97,11 @@ export const useEngravePreviewStore = create<EngravePreviewState>()((set) => {
         mine,
         effectiveMargins(job, useSettingsStore.getState().margins),
         inventoryConditions(),
-        { lostDetailWarnRatio: shopDefault('engrave.lostDetailWarnRatio').value },
+        {
+          lostDetailWarnRatio: shopDefault('engrave.lostDetailWarnRatio').value,
+          // #450 slice 3 — the recommendation's feeds check must use the same table the run does.
+          feeds: resolvedFeedsTable().table,
+        },
       );
       if (mine !== seq) return; // superseded by a newer request
       // `preview === null` means the worker saw a newer generation already; keep the last one.

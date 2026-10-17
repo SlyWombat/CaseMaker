@@ -402,6 +402,9 @@ export function createEngravePreviewer(tl: ManifoldToplevel): EngravePreviewer {
       // #451 — the same warn ratio the findings above were built with, so the recommendation's
       // "qualifies" bar and `item-detail-lost` cannot disagree about which cutters keep detail.
       shop.lostDetailWarnRatio ?? null,
+      // #450 slice 3 — the same feeds table the run's `feedsFor` resolves against, so a cutter the
+      // location's table covers is not excluded here for want of a compiled row (or the reverse).
+      shop.feeds ?? undefined,
     );
 
     return {

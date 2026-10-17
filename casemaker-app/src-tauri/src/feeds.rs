@@ -37,6 +37,31 @@ use std::collections::HashSet;
 /// The longest a `note` or a `provenance` may be, matching `defaults.rs`'s note rule.
 const MAX_SENTENCE: usize = 400;
 
+/// The ten starting rows (#450 slice 3): exactly the values the compiled `UNMEASURED_FEEDS_TABLE`
+/// held, every one `seeded` and labelled unmeasured. **No vendor numbers**: the three wood step-downs
+/// are conservative guesses for a 150 W spindle, the PLA rows are the bench's running values, and the
+/// V row is the one hand-written bench file's own numbers — each row's `provenance` says which.
+///
+/// ONE SPECIMEN, TWO SIDES. `tests/unit/fixtures/feed-table.json`'s `good` list is the same rows, and
+/// `the_seed_rows_are_the_shared_specimens_good_rows` holds this file to it, so a value edited on one
+/// side cannot silently drift from the other.
+const SEED_ROWS_JSON: &str = include_str!("feed-seeds.json");
+
+/// What a fresh location starts with — and what an EMPTY table is filled from on load.
+pub(crate) fn seeded_rows() -> Vec<FeedRow> {
+    serde_json::from_str(SEED_ROWS_JSON)
+        .expect("feed-seeds.json is the feeds table's own seed and must parse")
+}
+
+/// A location written before the table existed has an EMPTY table. Fill it with the seeds IN MEMORY,
+/// the way `defaults::add_missing_seeds` fills a missing scalar; the next write stores them. A
+/// NON-empty table is the shop's own and is never added to — taking a row out must stick.
+pub(crate) fn add_missing_seeds(rows: &mut Vec<FeedRow>) {
+    if rows.is_empty() {
+        *rows = seeded_rows();
+    }
+}
+
 /// The cutter EDGE a row is written for (#405). Absent means `flat`, every row before #405 and every
 /// coupon (which cuts with a flat end mill). It is part of SELECTION, not a comment: a V-bit engages a
 /// fraction of the material a same-diameter flat end mill does and wants different numbers.
@@ -370,11 +395,39 @@ pub(crate) mod tests {
         assert!(serde_json::from_value::<FeedRow>(v).is_err());
     }
 
+    /// The seeded table is a valid table: ten rows, all `seeded` (so no date), each labelled
+    /// unmeasured in its own provenance. This is the property a fresh location depends on.
+    #[test]
+    fn the_seed_rows_are_a_valid_unmeasured_table() {
+        let rows = seeded_rows();
+        validate_table(&rows).unwrap();
+        assert_eq!(rows.len(), 10);
+        assert!(rows.iter().all(|r| r.source == FeedSource::Seeded && r.set_at.is_none()));
+        assert!(rows.iter().all(|r| !r.provenance.trim().is_empty()));
+    }
+
+    /// An empty table is a location from before #450, and gets the seeds; a table with a row is the
+    /// shop's own and is left exactly as it is (removing a row must stick).
+    #[test]
+    fn an_empty_table_is_seeded_and_a_non_empty_one_is_not_added_to() {
+        let mut empty = Vec::new();
+        add_missing_seeds(&mut empty);
+        assert_eq!(empty, seeded_rows());
+
+        let mut one = vec![a_row("feed-mine")];
+        add_missing_seeds(&mut one);
+        assert_eq!(one, vec![a_row("feed-mine")]);
+    }
+
     /// `tests/unit/fixtures/feed-table.json`: the ONE specimen BOTH sides read — the good rows this
     /// service accepts and the tables it refuses. `feedTable.spec.ts` reads the same file through the
     /// Zod schema, so a key this side spells differently from the client fails one reader rather than
     /// passing both. A case marked `"zodOnly": true` is a rule only the client holds (the material
     /// vocabulary), as `stock-refusals.json` marks its own.
+    ///
+    /// #450 slice 3: the specimen's `good` list IS the seed — the rows a fresh location holds and the
+    /// compiled table's values — so this also holds the Rust seed to the client's fixture, row for row
+    /// and key for key.
     #[test]
     fn the_shared_specimen_is_the_shape_the_client_parses() {
         let path =
@@ -389,6 +442,11 @@ pub(crate) mod tests {
             assert_eq!(serde_json::to_value(row).unwrap(), *raw, "a row does not round-trip");
         }
         assert!(good.len() >= 10, "the specimen should carry the ten starting rows");
+        assert_eq!(
+            serde_json::to_value(seeded_rows()).unwrap(),
+            doc["good"],
+            "the seeded table is the shared specimen's good rows, byte for byte"
+        );
 
         // Every refused table is refused here: either the parse (a shape serde cannot hold) or the
         // rules. The `zodOnly` cases are the client's alone and are skipped.

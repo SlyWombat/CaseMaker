@@ -3,9 +3,11 @@
  *
  * THREE TIERS, LOWEST FIRST (#310):
  *
- *   1. {@link UNMEASURED_FEEDS_TABLE} — V1's short hardcoded table of conservative starting
- *      values. Nothing in it has been measured on this machine, and it says so: every row is
- *      `status: 'unmeasured'`.
+ *   1. The shop's feeds table — `location.json`'s `feeds` section since #450 slice 3, installed
+ *      here by `store/feedTableStore.ts` after a read. Its seeded rows are V1's short table of
+ *      conservative starting values, every one labelled `unmeasured`. With no location service
+ *      (the hosted web build) the compiled {@link UNMEASURED_FEEDS_TABLE} is the LABELLED
+ *      fallback; {@link resolvedFeedsTable} says which of the two answered.
  *   2. Makera's own catalogue ({@link setFeedCatalogue}), the vendor's numbers for the vendor's
  *      own cutters, imported from Studio's database by the house service (#308's reader, #310's
  *      table). It covers the cutters Makera sells and the materials Makera lists, and nothing
@@ -18,9 +20,9 @@
  *
  * `job.cutOverride` (#205/#246) is applied over whichever tier answered, and the machine's
  * ceilings are the last word on every value that leaves here (#184). The full precedence, highest
- * first, is measured → job.cutOverride → user_feed → catalogue_feed → UNMEASURED_FEEDS_TABLE; the
- * `user_feed` rung — a saved speed row keyed cutter × material — has no writer yet, and arrives
- * with the surface that writes it (#309/#311).
+ * first, is measured → job.cutOverride → user_feed → catalogue_feed → the shop feeds table (or its
+ * compiled fallback); the `user_feed` rung — a saved speed row keyed cutter × material — has no
+ * writer yet, and arrives with the surface that writes it (#309/#311).
  *
  * WHAT THE CATALOGUE TIER IS NOT. It is a STARTING point, never a measurement, so the panel names
  * it as one and `FieldSource` has a word of its own for it. Three things it does not decide:
@@ -30,8 +32,9 @@
  *     `112111313812`, 0.63 mm on the 1 mm flat, 3.78 mm on the 6 mm). Our contour-parallel sweep
  *     leaves an uncut spine above 50 % (#191), where the vendor's own pocketing operation does
  *     not, so their number describes their operation and not ours. Step-over therefore comes from
- *     our row — a conservative 45 % of the cutter — as do peck and air, which are this app's
- *     machining decisions rather than anything a vendor table states.
+ *     our row — a conservative fraction of the cutter, 45 % in the seeded rows and the shop's to
+ *     change (#450) — as do peck and air, which are this app's machining decisions rather than
+ *     anything a vendor table states.
  *   - **The PLA badge job.** No row in `t_MaterialList` is PLA, PETG, nylon or a generic plastic,
  *     so the tier cannot serve it DIRECTLY. Since #455 it serves it through the nearest plastic
  *     rows the catalogue does list — ABS and acrylic — and says so in every sentence that uses
@@ -92,7 +95,7 @@ import { cuttingForTrace, vendorId } from './tool';
 import type { Tool } from './tool';
 import { clampToMachine } from './machine';
 import type { ClampDiagnostic, MillProfile } from './machine';
-import { MATERIAL_LABELS } from './materials';
+import { MATERIAL_LABELS, STOCK_MATERIALS } from './materials';
 import type { FieldSource, StockMaterial } from '@/types/engraveJob';
 
 export interface CutParams {
@@ -403,6 +406,112 @@ function measuredProvenance(ms: FeedsMeasurement[]): string {
 /** The table every caller resolves against: a coupon's stack of values, then the rest. */
 export const FEEDS_TABLE: readonly FeedsEntry[] =
   applyMeasurements(UNMEASURED_FEEDS_TABLE, MEASURED_ROWS).table;
+
+// ---------------------------------------------------------------------------------------------
+// #450 slice 3 — the shop's table, from `location.json`
+// ---------------------------------------------------------------------------------------------
+//
+// `FEEDS_TABLE` above is the COMPILED starting table: one row per (material, edge, diameter band),
+// every row labelled `unmeasured`. Since #450 the shop's own copy lives in the location document
+// (`/api/v1/feed-table`, `platform/feedClient.ts`) and is what the app resolves against; the
+// compiled table is the LABELLED fallback for a build with no service (the hosted web build, or a
+// service from before the table) — never a second opinion beside a stored row.
+//
+// THE SAME REALM TRAP AS THE CATALOGUE (#324). A worker is a separate module realm, so a table
+// installed here does not reach it. `engraveRunStore` and `engravePreviewStore` therefore send the
+// resolved rows across as `EngraveShopOpts.feeds`, and the worker hands them to `feedsFor`. A
+// caller that sends nothing gets this module's {@link resolvedFeedsTable}: the location on the main
+// thread, the compiled fallback in a realm nobody installed one in.
+
+/**
+ * One row as the location's table stores it (`platform/feedClient.ts`'s `FeedRow`), structurally.
+ * Structural on purpose: that module's `houseClient` imports THIS file (`FeedCatalogueSchema`), so
+ * importing `FeedRow` here would close a module cycle around a schema initialised at load time.
+ */
+export interface StoredFeedRow {
+  material: string;
+  /** `flat` when absent. Only `v` is written through, so a flat row matches the compiled shape. */
+  edge?: 'flat' | 'v' | null;
+  minDiameter: number;
+  maxDiameter: number;
+  params: {
+    rpm: number;
+    feed: number;
+    plungeFeed: number;
+    stepDown: number;
+    stepOverFraction: number;
+    peckFraction: number;
+    air: boolean;
+  };
+  source: 'seeded' | 'chosen' | 'measured';
+  provenance: string;
+}
+
+/**
+ * The stored rows as the rows `feedsFor` resolves against. A material word this build does not know
+ * is skipped, not guessed at — `feedClient.ts` has already set such a row aside with its reason, so
+ * this is only the second guard for a caller that hand-assembles a table.
+ */
+export function entriesFromStoredRows(rows: readonly StoredFeedRow[]): FeedsEntry[] {
+  const known = STOCK_MATERIALS as readonly string[];
+  const out: FeedsEntry[] = [];
+  for (const row of rows) {
+    if (!known.includes(row.material)) continue;
+    out.push({
+      material: row.material as StockMaterial,
+      // Omitted when flat, exactly as the compiled table writes it (`edge` absent means flat), so a
+      // seeded location row converts to the very entry literal it replaced.
+      ...(row.edge === 'v' ? { edge: 'v' as const } : {}),
+      minDiameter: row.minDiameter,
+      maxDiameter: row.maxDiameter,
+      params: { ...row.params },
+      // `chosen` is a number a person set, not a measurement; only `measured` may claim the bench.
+      status: row.source === 'measured' ? 'measured' : 'unmeasured',
+      provenance: row.provenance,
+    });
+  }
+  return out;
+}
+
+/** The location's table, once its store has read one; `null` means no service answered. */
+let locatedFeedTable: readonly FeedsEntry[] | null = null;
+
+/**
+ * Install the table the service served (`store/feedTableStore.ts`, after every read). `null` is
+ * the no-service answer and puts the compiled fallback back — the same move `clearFeedCatalogue`
+ * makes when the service goes away.
+ *
+ * An EMPTY table is the no-service answer too. The document omits an empty table
+ * (`skip_serializing_if`), so a location that states no rows is a location that states no table;
+ * the alternative — an empty table refusing every job — would turn importing an older export into
+ * a shop with no cutting numbers at all. The service seeds a fresh location, so empty means "no
+ * table was stated", never "every row was removed".
+ */
+export function setLocatedFeedTable(rows: readonly StoredFeedRow[] | null): void {
+  locatedFeedTable = rows === null || rows.length === 0 ? null : entriesFromStoredRows(rows);
+}
+
+/** Which table `feedsFor` resolves against by default, and the word for where it came from. */
+export interface ResolvedFeedTable {
+  table: readonly FeedsEntry[];
+  from: 'location' | 'fallback';
+  /**
+   * A sentence fragment a surface can print: the location's table, or the compiled one named as
+   * the fallback it is. Never "the table" without saying which.
+   */
+  label: string;
+}
+
+export function resolvedFeedsTable(): ResolvedFeedTable {
+  if (locatedFeedTable !== null) {
+    return { table: locatedFeedTable, from: 'location', label: "the location's feeds table" };
+  }
+  return {
+    table: FEEDS_TABLE,
+    from: 'fallback',
+    label: 'the compiled starting table (this location states none), every row still labelled unmeasured',
+  };
+}
 
 // ---------------------------------------------------------------------------------------------
 // #310 — Makera's own catalogue, as a tier BELOW measurement
@@ -856,12 +965,28 @@ function catalogueProvenance(
 }
 
 /**
- * The step-over and peck a catalogue-only answer gets, as fractions of the cutter diameter
- * (#347). The SAME numbers the starting table's rows carry, and ours rather than the vendor's:
- * no feeds table states a step-over or a peck at all.
+ * The step-over and peck a catalogue-only answer gets, as fractions of the cutter diameter (#347).
+ * Ours rather than the vendor's: no feeds table states a step-over or a peck at all.
+ *
+ * Since #450 slice 3 they are read from the table ITSELF rather than compiled here — the flat row
+ * that would answer this diameter if the material were covered, and otherwise the widest flat band
+ * (a 6 mm catalogue-only cutter falls past every starting row). A shop that edits its step-over in
+ * one place therefore moves this path with it. `FEEDS_TABLE`'s first flat row is the fallback when
+ * a caller passes a table that has no flat row at all.
  */
-const CATALOGUE_ONLY_STEP_OVER_FRACTION = 0.45;
-const CATALOGUE_ONLY_PECK_FRACTION = 1.0;
+function catalogueFractions(
+  table: readonly FeedsEntry[],
+  diameter: number,
+): { stepOver: number; peck: number } {
+  const flat = table.filter((e) => (e.edge ?? 'flat') === 'flat');
+  const containing = flat.find((e) => diameter >= e.minDiameter && diameter <= e.maxDiameter);
+  const widest = flat.reduce<FeedsEntry | null>(
+    (best, e) => (best === null || e.maxDiameter > best.maxDiameter ? e : best),
+    null,
+  );
+  const source = containing ?? widest ?? FEEDS_TABLE.find((e) => (e.edge ?? 'flat') === 'flat')!;
+  return { stepOver: source.params.stepOverFraction, peck: source.params.peckFraction };
+}
 
 /** The four numbers a catalogue row states, as its own row, for the Route A answer below. */
 function catalogueOnlyRow(
@@ -871,6 +996,7 @@ function catalogueOnlyRow(
   tool: Tool,
   snapshot: FeedCatalogue,
   mappedFor: StockMaterial | null,
+  fractions: { stepOver: number; peck: number },
 ): FeedsEntry {
   const rowMaterial = MATERIAL_LABELS[catalogueMaterialFor(row.material) ?? material];
   const mapped =
@@ -888,8 +1014,8 @@ function catalogueOnlyRow(
       feed: row.feed,
       plungeFeed: row.plungeFeed,
       stepDown: row.stepDown,
-      stepOverFraction: CATALOGUE_ONLY_STEP_OVER_FRACTION,
-      peckFraction: CATALOGUE_ONLY_PECK_FRACTION,
+      stepOverFraction: fractions.stepOver,
+      peckFraction: fractions.peck,
       air: true,
     },
     // NOT `measured`: no coupon cut this. It is a vendor's starting point standing alone.
@@ -1011,7 +1137,7 @@ function entryFor(
   }
   return {
     ok: true,
-    entry: catalogueOnlyRow(material, diameter, row, tool, snapshot, mappedFor),
+    entry: catalogueOnlyRow(material, diameter, row, tool, snapshot, mappedFor, catalogueFractions(table, diameter)),
     catalogueOnly: true,
   };
 }
@@ -1021,10 +1147,13 @@ function entryFor(
  * the vendor's and which are the app's, because on a material the starting table does not cover
  * there is nothing else to say where the app's own values came from.
  */
-const CATALOGUE_ONLY_NOTE =
-  ` This material has no row in the starting table, so this row is the whole answer: its four ` +
-  `numbers as the vendor states them, with this app's ${CATALOGUE_ONLY_STEP_OVER_FRACTION} × cutter ` +
-  `step-over, one-diameter peck and air.`;
+function catalogueOnlyNote(entry: FeedsEntry): string {
+  return (
+    ` This material has no row in the starting table, so this row is the whole answer: its four ` +
+    `numbers as the vendor states them, with this app's ${entry.params.stepOverFraction} × cutter ` +
+    `step-over, a ${entry.params.peckFraction} × cutter-diameter peck and air.`
+  );
+}
 
 export type FeedsResult =
   | {
@@ -1082,10 +1211,11 @@ export type FeedsResult =
  * carried the starting table's. Making the argument required is what makes that mistake a compile
  * error instead of a silent one, the same shape `toolForIn` has for the same reason (#305).
  *
- * `table` is the table to resolve against, `FEEDS_TABLE` unless a caller has its own: a test
- * exercising the measured tier passes the output of {@link applyMeasurements}, which is the only
- * way a measured row can be put in front of this function without hand-editing a machine-written
- * region of this file.
+ * `table` is the table to resolve against: the location's feed table when one is installed
+ * ({@link setLocatedFeedTable}), and the compiled {@link FEEDS_TABLE} otherwise. A caller with its
+ * own passes it — a test exercising the measured tier passes the output of
+ * {@link applyMeasurements}, which is the only way a measured row can be put in front of this
+ * function without hand-editing a machine-written region of this file.
  */
 export function feedsFor(
   catalogue: readonly FeedCatalogueRow[] | FeedCatalogue,
@@ -1093,7 +1223,7 @@ export function feedsFor(
   tool: Tool,
   machine: MillProfile,
   override?: Partial<CutParams>,
-  table: readonly FeedsEntry[] = FEEDS_TABLE,
+  table: readonly FeedsEntry[] = resolvedFeedsTable().table,
 ): FeedsResult {
   const snapshot = catalogueOf(catalogue);
   // The cutter, in the table's terms: a flat end mill of some diameter, or a V-bit whose cutting
@@ -1245,7 +1375,7 @@ export function feedsFor(
   const answered = row !== null && used.size > 0;
   const provenance =
     (answered && row ? catalogueProvenance(row, tool, entry, ignored, snapshot, mappedFor) : entry.provenance) +
-    (catalogueOnly ? CATALOGUE_ONLY_NOTE : '');
+    (catalogueOnly ? catalogueOnlyNote(entry) : '');
 
   // The row DID answer (`answered`) rather than merely existing: a vendor row whose numbers were
   // all passed over supplied nothing, and the panel's "Makera's numbers" label would be false.

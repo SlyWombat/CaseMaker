@@ -23,7 +23,7 @@ import type { OraclePredicted, OracleReport } from '@/engine/cnc/engrave/oracle'
 import type { SimDiagnostic } from '@/workers/sim/session';
 import type { SimStatus } from './simStore';
 import { jobTool, toSetup } from '@/engine/cnc/engrave/jobSetup';
-import { feedCatalogueRows } from '@/engine/cnc/feeds';
+import { feedCatalogueRows, resolvedFeedsTable } from '@/engine/cnc/feeds';
 import type { FeedCatalogueRow } from '@/engine/cnc/feeds';
 import { jobMachine } from '@/engine/cnc/calibration';
 import type { MachineCalibration } from '@/engine/cnc';
@@ -154,6 +154,10 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
       lostDetailWarnRatio: shopDefault('engrave.lostDetailWarnRatio').value,
       peckClearanceMm: shopDefault('drill.peckClearanceMm').value,
       defaults: useShopDefaultsStore.getState().defaults,
+      // #450 slice 3 — the table the worker's `feedsFor` resolves against. Read from this realm,
+      // like the catalogue below and for the same reason: the worker cannot see the location, and
+      // a program built on the compiled rows would disagree with the panel's.
+      feeds: resolvedFeedsTable().table,
     };
 
     // The cutter, resolved ONCE on this side (#305): the sim worker cannot see the registry, so
@@ -167,6 +171,8 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
     // catalogue's S/F while the program carried the starting table's — the operator reading one set
     // of numbers and the machine running another.
     const catalogue = feedCatalogueRows();
+    // (`shop.feeds` was read above, in the same snapshot: the worker's `feedsFor` resolves against
+    // the shop's table, and the panel's main-thread `feedsFor` reads the same installed rows.)
 
     let client: EngraveRunClient;
     let generated: EngraveGenerated;
