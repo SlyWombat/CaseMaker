@@ -4,13 +4,14 @@ import { newItemDepthMm, useEngraveJobStore } from '@/store/engraveJobStore';
 import { useProjectStore } from '@/store/projectStore';
 import { useEngravePreviewStore } from '@/store/engravePreviewStore';
 import { expandEngraveRow, useEngraveRowStore } from '@/store/engraveRowStore';
-import { useEngraveRunStore, requiredAckCodes, runErrorCodes, saveBlocker, uploadBlocker } from '@/store/engraveRunStore';
+import { useEngraveRunStore, requiredAckCodes, releaseBlocker, runErrorCodes, saveBlocker, uploadBlocker } from '@/store/engraveRunStore';
 import { useMachineStore } from '@/store/machineStore';
 import { useSimStore } from '@/store/simStore';
 import { runContextFor } from '@/store/machineRunStore';
 import { stepAtLine } from '@/engine/cnc/playbackClock';
 import { canDriveMachine } from '@/platform/capabilities';
 import { EngraveMachineUpload } from './EngraveMachineUpload';
+import { EngraveReleaseStep } from './EngraveReleaseStep';
 import { saveEngraveProgram } from '@/engine/exportTrigger';
 import { useSettingsStore } from '@/store/settingsStore';
 import {
@@ -839,6 +840,12 @@ export function EngravePanel(): JSX.Element {
   // #255 — the machine upload. `uploadBlocker` is never weaker than `saveBlocker` (see its own
   // note), so Save and Upload state one rule between them rather than two that agree by luck.
   const uploadBlockerText = uploadBlocker(run);
+  // #469 / #419 §3 — a job that produced MORE THAN ONE program is played by the release step,
+  // which owns the whole list (upload all, play in order, pause for the bit change). The
+  // single-file upload below keeps its own refusal for such a job; the panel therefore renders
+  // one or the other, never both run panels.
+  const releaseGenerated = run.generated !== null && run.generated.programs.length > 1 ? run.generated : null;
+  const releaseBlockerText = releaseBlocker(run);
   const machine = useMachineStore((s) => s.machine);
   const noteLiveStatus = useMachineStore((s) => s.noteLiveStatus);
   // Both halves or neither: the gate is a statement about the report, so a `nc` without one is not
@@ -2358,8 +2365,19 @@ export function EngravePanel(): JSX.Element {
             {/* #255 — hand the verified program to the machine. Desktop build only: `canDriveMachine`
                 folds to false in the web build, so this block is dead code there and the bridge
                 never enters the web bundle. The filename is the one Save writes, so the file on the
-                machine's card and the one in the operator's run sheet are named the same thing. */}
-            {canDriveMachine && (
+                machine's card and the one in the operator's run sheet are named the same thing.
+                #469 — a job of more than one program is the release step's: it uploads every file
+                and plays them in cut order, so the single-file upload is not offered for it. */}
+            {canDriveMachine && releaseGenerated !== null && (
+              <EngraveReleaseStep
+                target={machine === null ? null : { host: machine.host, port: machine.port }}
+                job={job}
+                generated={releaseGenerated}
+                blocker={releaseBlockerText}
+                onProgramLine={followProgramLine}
+              />
+            )}
+            {canDriveMachine && releaseGenerated === null && (
               <EngraveMachineUpload
                 blocker={uploadBlockerText}
                 machine={machine}
