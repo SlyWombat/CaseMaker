@@ -19,6 +19,7 @@ import type { SimWorkerApi, SimFrame, SimLoadResult, SimPath, EngravePreview, En
 import type { EngraveShopOpts } from '@/workers/sim/engraveGenerate';
 import type { OraclePredicted, OracleReport } from '@/engine/cnc/engrave/oracle';
 import type { DesignJobPatch, DesignReadingDirection } from '@/engine/cnc/engrave/fromDesign';
+import { liveShopDefaults, readDefault } from '@/platform/defaultsClient';
 import { createFrameCoalescer } from './frameCoalescer';
 
 let simWorker: Worker | null = null;
@@ -57,6 +58,11 @@ export function setSimSinks(onFrame: ((k: number, frame: SimFrame) => void) | nu
 /**
  * Hard stop for one load, ms (#194). `sweepTimeline` is one synchronous call, so nothing can
  * interrupt it from the main thread: past this the only cancel is `terminateSim()`.
+ *
+ * #451: the value is the shop's `sim.budgetMs`, read when a load starts; this constant is its
+ * LABELLED no-service fallback and `simStore`'s `DEFAULT_SIM_BUDGET_MS` is the counterpart — keep
+ * the two equal. This module is main-thread side (it CREATES the worker), so it may read the live
+ * location through `defaultsClient`; the worker itself never does.
  */
 export const SIM_BUDGET_MS = 60_000;
 
@@ -70,7 +76,7 @@ const SIM_BUDGET_GRACE_MS = 5_000;
 
 /** What `loadSim` accepts on top of its arguments (#194). */
 export interface SimLoadOpts {
-  /** Wall-clock limit for this load, ms. Defaults to `SIM_BUDGET_MS`. */
+  /** Wall-clock limit for this load, ms. Defaults to the shop's `sim.budgetMs` (#451). */
   budgetMs?: number;
   /** Checkpoints swept so far. Called from the worker as the sweep advances. */
   onProgress?: (done: number, total: number) => void;
@@ -119,7 +125,8 @@ export type SimLoadPhase = 'sweep' | 'playback';
  */
 export async function loadSim(gcodeText: string, setup: Setup, tool: Tool, machineId: string | null, opts?: SimLoadOpts): Promise<SimLoadResult> {
   frames.reset();
-  const budgetMs = opts?.budgetMs ?? SIM_BUDGET_MS;
+  // #451 — the one seed, read at the load: the caller's explicit budget, else the shop's.
+  const budgetMs = opts?.budgetMs ?? readDefault(liveShopDefaults(), 'sim.budgetMs').value;
   const sweepBudget = Math.max(1, budgetMs - SIM_BUDGET_GRACE_MS);
   let timer: ReturnType<typeof setTimeout> | null = null;
   const expired = new Promise<SimLoadResult>((resolve) => {

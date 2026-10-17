@@ -45,6 +45,7 @@ import {
 import { toolFromMkrRecord } from '@/engine/cnc/tool';
 import { rectProfile } from '@/engine/compiler/profile';
 import { useSettingsStore } from './settingsStore';
+import { shopDefault } from './shopDefaultsStore';
 import type { Setup, StartingTool } from '@/engine/cnc';
 
 /**
@@ -122,8 +123,21 @@ export interface SimSetupState {
   reset(): void;
 }
 
-/** Default blank when the file states no stock (`/Simulation.md` §6): 100 x 100 x 10 mm. */
+/**
+ * Default blank when the file states no stock (`/Simulation.md` §6): 100 x 100 x 10 mm. This is the
+ * LABELLED no-service fallback for #451's three `sim.defaultStock*Mm` seeds; a session reads the
+ * shop's values when the form opens, so a location that changed them is what the form starts with.
+ */
 export const DEFAULT_STOCK: SimStock = { length: 100, width: 100, thickness: 10 };
+
+/** The blank a form starts with right now (#451): the shop's three seeds, or the fallbacks. */
+function defaultStock(): SimStock {
+  return {
+    length: shopDefault('sim.defaultStockLengthMm').value,
+    width: shopDefault('sim.defaultStockWidthMm').value,
+    thickness: shopDefault('sim.defaultStockThicknessMm').value,
+  };
+}
 
 const allDefault = (): SimSetupState['stockSource'] => ({ length: 'default', width: 'default', thickness: 'default' });
 
@@ -157,12 +171,17 @@ function nameRows(keys: readonly string[]): string {
 
 export const useSimSetupStore = create<SimSetupState>()((set, get) => ({
   ...EMPTY,
+  // #451 — the form's own starting blank, read when this store is created (the fallbacks when the
+  // location has not answered yet; a load after the answer reads them in `openFile`/`reset`).
+  stock: defaultStock(),
   openFile(name, text) {
     const parsed = parseGcode(text);
     const fromHeader = setupFromHeader(parsed.header);
 
-    // What THIS file says, before the user's own edits are laid over it.
-    const headerStock: SimStock = { ...DEFAULT_STOCK };
+    // What THIS file says, before the user's own edits are laid over it. With no header stock, the
+    // blank is the shop's (#451), read here so a location that answered since this store loaded
+    // still applies to the first file opened.
+    const headerStock: SimStock = defaultStock();
     const headerSource = allDefault();
     const part = fromHeader.patch.part;
     if (part && part.kind === 'prism' && part.outline.kind === 'p-rect') {
@@ -303,7 +322,7 @@ export const useSimSetupStore = create<SimSetupState>()((set, get) => ({
     set({ toolKey: key, toolSource: 'picked', toolCandidates: null });
   },
   reset() {
-    set({ ...EMPTY, stock: { ...DEFAULT_STOCK }, stockSource: allDefault() });
+    set({ ...EMPTY, stock: defaultStock(), stockSource: allDefault() });
   },
 }));
 

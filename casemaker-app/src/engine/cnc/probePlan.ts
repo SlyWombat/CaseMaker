@@ -32,11 +32,34 @@
  */
 
 import type { Profile } from '@/engine/compiler/profile';
+import { liveShopDefaults, readDefault, type ShopDefaults } from '@/platform/defaultsClient';
 import type { Mm, Vec2 } from '@/types/units';
 import type { Polygons } from './cam/pocket';
 import type { DatumSource, Workholding } from './setup';
 
 const EPS = 1e-9;
+
+/**
+ * The residuals the planner works with, each a shop default (#451): what a touch leaves, and what
+ * each fixture already holds. Passed in by the caller where it has the location; the defaults below
+ * are the LABELLED no-service fallbacks, and a worker realm (which cannot see the location) uses
+ * them — `defaultsClient`'s `readDefault` labels each value it answers.
+ *
+ * The plan stays pure given these five numbers: `planProbing` takes them as an argument, and
+ * {@link probeResiduals} is the one place that resolves them from the location where one is visible.
+ */
+export interface ProbeResiduals {
+  /** What one touch leaves on X, Y and rotation, mm — `registration.probeResidualMm`. */
+  probe: Mm;
+  /** The wired probe's repeatability in Z, mm — `registration.wiredProbeZResidualMm`. */
+  wiredProbeZ: Mm;
+  /** The chuck's runout where it locates the axis, mm — `registration.chuckAxisResidualMm`. */
+  chuckAxis: Mm;
+  /** How closely an anchor bracket repeats, mm — `bracket.repeatMm`. */
+  anchorBracket: Mm;
+  /** A vise's jaw squareness across the jaws, mm — `registration.viseJawResidualMm`. */
+  viseJaw: Mm;
+}
 
 /**
  * A touch's own repeatability: ball-contact scatter, mm. What is left after a touch.
@@ -45,6 +68,9 @@ const EPS = 1e-9;
  * only: five slow (F100) touches on the printed blank in the vise triggered within 0.001 mm of each
  * other, fast (F300) within 0.004 mm and 2–6 µm deep (`/Z1-Firmware-Dialect.md` §11.7, runbook C4).
  * 0.02 stays as the conservative value until the 3D Probe is measured the same way.
+ *
+ * #451: the value is the shop's `registration.probeResidualMm`; this constant is its labelled
+ * no-service fallback (`defaultsClient.ts` restates the same number).
  */
 export const PROBE_RESIDUAL_MM = 0.02;
 
@@ -54,12 +80,18 @@ export const PROBE_RESIDUAL_MM = 0.02;
  * separate constant from `PROBE_RESIDUAL_MM` because it is a different instrument's measured
  * number, and #345's Z budget is built on it rather than on the 3D probe's conservative assumption
  * (`/Z1-Firmware-Dialect.md` §11.7, runbook C4).
+ *
+ * #451: the value is the shop's `registration.wiredProbeZResidualMm`, seeded `measured` with that
+ * provenance; this constant is its labelled no-service fallback.
  */
 export const WIRED_PROBE_Z_RESIDUAL_MM = 0.001;
 
 /**
  * The chuck locates the axis. Its runout is the residual, mm. PROVISIONAL — an unverified
  * figure, the same standing as every stub until the bench measures it (#208).
+ *
+ * #451: the value is the shop's `registration.chuckAxisResidualMm`; this constant is its labelled
+ * no-service fallback.
  */
 export const CHUCK_AXIS_RESIDUAL_MM = 0.05;
 
@@ -67,11 +99,34 @@ export const CHUCK_AXIS_RESIDUAL_MM = 0.05;
  * A bracket seated on the anchor pins is repeatable to about this, mm. PROVISIONAL (#208 B1
  * owes the pin-to-face measurement); the datum exists because the geometry is, not because
  * the number is trustworthy.
+ *
+ * #451: the value is the shop's `bracket.repeatMm`; this constant is its labelled no-service
+ * fallback.
  */
 export const ANCHOR_BRACKET_RESIDUAL_MM = 0.05;
 
-/** A vise's jaw squareness: the residual across the jaws, mm. PROVISIONAL (see above). */
+/**
+ * A vise's jaw squareness: the residual across the jaws, mm. PROVISIONAL (see above).
+ *
+ * #451: the value is the shop's `registration.viseJawResidualMm`; this constant is its labelled
+ * no-service fallback.
+ */
 export const VISE_JAW_RESIDUAL_MM = 0.05;
+
+/**
+ * The five residuals from the shop's defaults (#451), or every labelled fallback when there is no
+ * location to read. A worker realm has no live defaults source, so it gets the fallbacks — the same
+ * numbers a fresh location is seeded with, and the reason no value is invented here.
+ */
+export function probeResiduals(defaults: ShopDefaults | null = liveShopDefaults()): ProbeResiduals {
+  return {
+    probe: readDefault(defaults, 'registration.probeResidualMm').value,
+    wiredProbeZ: readDefault(defaults, 'registration.wiredProbeZResidualMm').value,
+    chuckAxis: readDefault(defaults, 'registration.chuckAxisResidualMm').value,
+    anchorBracket: readDefault(defaults, 'bracket.repeatMm').value,
+    viseJaw: readDefault(defaults, 'registration.viseJawResidualMm').value,
+  };
+}
 
 /** Flatness tolerance that collapses a run of vertices into one straight edge, mm. */
 const DEFAULT_FLAT_TOL_MM = 0.02;
@@ -333,18 +388,18 @@ interface Obstruction {
 }
 
 /** What the fixture already establishes, before any touch (§7.3's "datum candidates"). */
-function datumOf(w: Workholding): DatumSource[] {
+function datumOf(w: Workholding, residuals: ProbeResiduals): DatumSource[] {
   switch (w.kind) {
     case 'anchor-bracket':
       // Seated against both faces of the L, so it fixes XY and squareness.
-      return [{ fixes: ['x', 'y', 'rotation'], uncertainty: ANCHOR_BRACKET_RESIDUAL_MM }];
+      return [{ fixes: ['x', 'y', 'rotation'], uncertainty: residuals.anchorBracket }];
     case 'vise':
       // The fixed jaw is the LEFT jaw (#191): the part is referenced in X and rotation, and is
       // free to slide along the jaw in Y. Across the jaws the residual is jaw squareness.
-      return [{ fixes: ['x', 'rotation'], uncertainty: VISE_JAW_RESIDUAL_MM }];
+      return [{ fixes: ['x', 'rotation'], uncertainty: residuals.viseJaw }];
     case 'rotary-chuck':
       // The chuck locates the axis; rotation about an axis is not a datum it can give.
-      return [{ fixes: ['x', 'y'], uncertainty: CHUCK_AXIS_RESIDUAL_MM }];
+      return [{ fixes: ['x', 'y'], uncertainty: residuals.chuckAxis }];
     case 'top-clamps':
       // Clamps push DOWN. They hold Z and give nothing in XY or rotation.
       return [];
@@ -481,7 +536,12 @@ function bboxDiagonal(polygons: Polygons): number {
  * refusal that names what is in the way. It never returns a touch point inside an obstruction
  * and never registers against something that is not a reference.
  */
-export function planProbing(part: ProbePart, workholding: Workholding, probe: ProbeSpec): ProbeResult {
+export function planProbing(
+  part: ProbePart,
+  workholding: Workholding,
+  probe: ProbeSpec,
+  residuals: ProbeResiduals = probeResiduals(),
+): ProbeResult {
   const notes: string[] = [];
   const tipR = Math.max(probe.tipDiameter, 0) / 2;
   const flatTol = probe.flatToleranceMm ?? DEFAULT_FLAT_TOL_MM;
@@ -499,7 +559,7 @@ export function planProbing(part: ProbePart, workholding: Workholding, probe: Pr
     };
   }
 
-  const datums = datumOf(workholding);
+  const datums = datumOf(workholding, residuals);
   const inherent = inherentResidual(workholding);
   const obstructions = obstructionsOf(workholding, notes);
 
@@ -573,11 +633,11 @@ export function planProbing(part: ProbePart, workholding: Workholding, probe: Pr
     };
   }
 
-  const afterTouch = (axis: ProbeAxis): Mm => (resolved.has(axis) ? PROBE_RESIDUAL_MM : residualOf(axis));
+  const afterTouch = (axis: ProbeAxis): Mm => (resolved.has(axis) ? residuals.probe : residualOf(axis));
   const residual = Math.max(afterTouch('x'), afterTouch('y'));
   const diagonal = bboxDiagonal(polygons);
   const rotationResidual = resolved.has('rotation')
-    ? (Math.atan2(PROBE_RESIDUAL_MM, diagonal / 2) * 180) / Math.PI
+    ? (Math.atan2(residuals.probe, diagonal / 2) * 180) / Math.PI
     : 0;
 
   if (!touches.length) {

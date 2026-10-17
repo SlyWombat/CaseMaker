@@ -164,6 +164,11 @@ const PROVISIONAL_DOME_MM: Mm = DEFAULT_BADGE_DOME_MM;
  * It is the measured badge blank's figure standing in for whatever blank is in the jaws, so the
  * plan names it as an assumption in its notes. A job that states its dome across the LONG span
  * gets its own figure there, and this one stands in across the short span instead.
+ *
+ * #451 keeps this compiled FOR NOW, for the reason `fromBadge.ts` states beside
+ * `DEFAULT_BADGE_DOME_MM`: no blank or stock record carries a dome WITH its direction, so the pair
+ * (0.33 across, 0.1 along) has nowhere to live yet. The record would need both spans and their
+ * provenance, not one `domeHeight` with no `across`.
  */
 const DOME_ALONG_LONG_MM: Mm = 0.1;
 

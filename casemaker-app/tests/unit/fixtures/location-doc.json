@@ -292,6 +292,27 @@
       "unit": "mm",
       "note": "chosen, not measured: the depth two touch readings are told apart by (the machine's dial, not the probe's spec)"
     },
+    "registration.probeResidualMm": {
+      "value": 0.02,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm",
+      "note": "assumed, not measured: the 3D probe's ball-contact scatter in X, Y and Z, and what is left after a touch. The wired probe measured 0.001 mm in Z (registration.wiredProbeZResidualMm); this stays the conservative figure until the 3D probe is measured the same way (2026-10-08, /Z1-Firmware-Dialect.md §11.7)"
+    },
+    "registration.chuckAxisResidualMm": {
+      "value": 0.05,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm",
+      "note": "provisional, not measured: the chuck's runout where it locates the axis; #208 owes the bench measurement"
+    },
+    "registration.viseJawResidualMm": {
+      "value": 0.05,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm",
+      "note": "provisional, not measured: the vise jaws' squareness across the jaws; #208 owes the bench measurement"
+    },
     "console.firstReplyMs": {
       "value": 60000.0,
       "source": "seeded",
@@ -653,6 +674,13 @@
       "unit": "mm",
       "note": "default, not measured: the top of the bracket (and its screw heads) above the surface the stock sits on"
     },
+    "bracket.repeatMm": {
+      "value": 0.05,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm",
+      "note": "provisional, not measured: how closely a bracket seated on the anchor pins repeats; #208 B1 owes the pin-to-face measurement"
+    },
     "clamps.topLengthMm": {
       "value": 30.0,
       "source": "seeded",
@@ -758,6 +786,13 @@
       "unit": "mm",
       "note": "the wired probe tip's outside diameter, as recorded with the 2026-10-15 bench scan: an opening must be wider than this to be entered at all"
     },
+    "registration.wiredProbeZResidualMm": {
+      "value": 0.001,
+      "source": "measured",
+      "setAt": "2026-10-08T00:00:00.000Z",
+      "unit": "mm",
+      "note": "the wired probe's repeatability in Z: five slow (F100) touches on the printed blank in the vise triggered within 0.001 mm of each other, fast (F300) within 0.004 mm and 2-6 um deep (/Z1-Firmware-Dialect.md §11.7, runbook C4, 2026-10-08)"
+    },
     "import.dxfChordToleranceMm": {
       "value": 0.02,
       "source": "seeded",
@@ -792,6 +827,41 @@
       "setAt": null,
       "unit": "deg",
       "note": "chosen, not measured: the rotary simulation grid's theta pitch; the sim's memory and time grow with 1/pitch"
+    },
+    "sim.playbackSpeed": {
+      "value": 20.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "x",
+      "note": "chosen, not measured: the playback multiplier a fresh simulation session starts at, as a multiple of wall-clock time; one of 1, 5, 20 or 100"
+    },
+    "sim.defaultStockLengthMm": {
+      "value": 100.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm",
+      "note": "chosen, not measured: the blank a simulation starts with when the file states no stock, along X; 100 x 100 x 10 is the documented default (/Simulation.md §6)"
+    },
+    "sim.defaultStockWidthMm": {
+      "value": 100.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm",
+      "note": "chosen, not measured: the blank a simulation starts with when the file states no stock, along Y; 100 x 100 x 10 is the documented default (/Simulation.md §6)"
+    },
+    "sim.defaultStockThicknessMm": {
+      "value": 10.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm",
+      "note": "chosen, not measured: the blank a simulation starts with when the file states no stock, in Z; 100 x 100 x 10 is the documented default (/Simulation.md §6)"
+    },
+    "sim.budgetMs": {
+      "value": 60000.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "ms",
+      "note": "chosen, not measured: the wall-clock limit one simulation load starts with. Past it the load is refused (or the worker killed), and Retry starts a load with twice this"
     },
     "plan.homeSeconds": {
       "value": 27.5,

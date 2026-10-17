@@ -128,6 +128,16 @@ export const KNOWN_DEFAULTS: Readonly<Record<string, KnownDefault>> = {
   // the depth two readings are told apart by. Its step, start gap and tip are the planner's own keys.
   'registration.scanMissMarginMm': { label: 'scan touch travel past the jaw tops (chosen)', unit: 'mm', rule: z.number().min(0.2).max(3), fallback: 1 },
   'registration.readingResolutionMm': { label: 'depth two touch readings are told apart by (chosen)', unit: 'mm', rule: z.number().min(0.005).max(0.5), fallback: 0.05 },
+  // ── #451 probe residuals (begin) — what a touch leaves and what each fixture already holds.
+  // The three PROVISIONAL figures are the stubs they replace (`probePlan.ts`); the 3D probe's 0.02
+  // stays an assumption, and only the wired probe's Z figure is measured. Fallbacks =
+  // `probePlan.ts`'s PROBE_RESIDUAL_MM / CHUCK_AXIS_RESIDUAL_MM / VISE_JAW_RESIDUAL_MM.
+  'registration.probeResidualMm': { label: 'probe residual after a touch, 3D probe (assumed)', unit: 'mm', rule: z.number().min(0).max(1), fallback: 0.02 },
+  // MEASURED 2026-10-08 — the wired probe's Z repeatability; the note in location.json says how.
+  'registration.wiredProbeZResidualMm': { label: 'wired probe residual in Z (measured)', unit: 'mm', rule: z.number().min(0).max(0.5), fallback: 0.001 },
+  'registration.chuckAxisResidualMm': { label: 'chuck axis residual (provisional)', unit: 'mm', rule: z.number().min(0).max(2), fallback: 0.05 },
+  'registration.viseJawResidualMm': { label: 'vise jaw residual (provisional)', unit: 'mm', rule: z.number().min(0).max(2), fallback: 0.05 },
+  // ── #451 probe residuals (end)
   // The typed console's reply window. The first-reply floor sits above the slowest line timed on the
   // bench (M491 ~32 s, $H ~31 s, 2026-10-15): a shorter window would call a moving machine timed out.
   'console.firstReplyMs': { label: 'console line, first reply wait (chosen)', unit: 'ms', rule: z.number().min(40_000).max(300_000), fallback: 60_000 },
@@ -182,6 +192,9 @@ export const KNOWN_DEFAULTS: Readonly<Record<string, KnownDefault>> = {
   'bracket.armLengthYMm': { label: 'bracket left arm length (not measured)', unit: 'mm', rule: z.number().min(5).max(300), fallback: 100 },
   'bracket.armWidthMm': { label: 'bracket arm thickness (not measured)', unit: 'mm', rule: z.number().min(1).max(50), fallback: 10 },
   'bracket.heightMm': { label: 'bracket height (not measured)', unit: 'mm', rule: z.number().min(1).max(80), fallback: 10 },
+  // #451 — how closely a bracket seated on the anchor pins repeats, mm. PROVISIONAL (#208 B1 owes
+  // the pin-to-face measurement). Fallback = `probePlan.ts`'s ANCHOR_BRACKET_RESIDUAL_MM.
+  'bracket.repeatMm': { label: 'anchor bracket repeatability (provisional)', unit: 'mm', rule: z.number().min(0).max(2), fallback: 0.05 },
   'clamps.topLengthMm': { label: 'top clamp length (not measured)', unit: 'mm', rule: z.number().min(5).max(150), fallback: 30 },
   'clamps.topWidthMm': { label: 'top clamp width (not measured)', unit: 'mm', rule: z.number().min(3).max(80), fallback: 15 },
   'clamps.topHeightMm': { label: 'top clamp height above the stock (not measured)', unit: 'mm', rule: z.number().min(1).max(80), fallback: 12 },
@@ -252,6 +265,19 @@ export const KNOWN_DEFAULTS: Readonly<Record<string, KnownDefault>> = {
   'sim.columnPitchXMm': { label: 'simulation grid X pitch (chosen)', unit: 'mm', rule: z.number().min(0.05).max(0.5), fallback: 0.1 },
   'sim.rotaryPitchDeg': { label: 'rotary simulation grid pitch (chosen)', unit: 'deg', rule: z.number().min(0.05).max(5), fallback: 0.25 },
   // ── #451 sim resolutions (end)
+  // ── #451 sim starting values (begin) — what a simulation SESSION begins with. CHOSEN, not
+  // measured: playback 20x is the approved mockup's (#195), the blank is the documented 100 x 100 x
+  // 10 (/Simulation.md §6) and the budget is where a load used to be stopped. `simStore` and
+  // `simSetupStore` read them when a session or a form opens; `simClient` (main-thread side) reads
+  // the budget at a load, and the worker is sent plain numbers, never this module. Fallbacks =
+  // `simStore.ts`'s DEFAULT_SPEED / DEFAULT_SIM_BUDGET_MS and `simSetupStore.ts`'s DEFAULT_STOCK.
+  // The speed is one of the transport's multipliers (SIM_SPEEDS), not any number in the range.
+  'sim.playbackSpeed': { label: 'playback speed a session starts at (chosen)', unit: 'x', rule: z.union([z.literal(1), z.literal(5), z.literal(20), z.literal(100)]), fallback: 20 },
+  'sim.defaultStockLengthMm': { label: 'simulation stock length when the file states none (chosen)', unit: 'mm', rule: z.number().min(1).max(1000), fallback: 100 },
+  'sim.defaultStockWidthMm': { label: 'simulation stock width when the file states none (chosen)', unit: 'mm', rule: z.number().min(1).max(1000), fallback: 100 },
+  'sim.defaultStockThicknessMm': { label: 'simulation stock thickness when the file states none (chosen)', unit: 'mm', rule: z.number().min(0.1).max(100), fallback: 10 },
+  'sim.budgetMs': { label: 'simulation load budget (chosen)', unit: 'ms', rule: z.number().min(5000).max(600000), fallback: 60_000 },
+  // ── #451 sim starting values (end)
   // ── #451 new-item starting depths (begin) — where an item the panel just added begins. CHOSEN,
   // not measured: nobody measured what depth a new item should start at, and the person who asked
   // for it is about to set the number that matters. Read by `engraveJobStore` (its `newItemDepthMm`

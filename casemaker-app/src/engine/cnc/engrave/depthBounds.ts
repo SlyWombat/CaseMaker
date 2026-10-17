@@ -40,7 +40,7 @@
 
 import { DEFAULT_BREAKTHROUGH } from '@/engine/cnc/sacrificial';
 import { colourBoundaryDepthFor } from '@/engine/cnc/layerStack';
-import { WIRED_PROBE_Z_RESIDUAL_MM } from '@/engine/cnc/probePlan';
+import { probeResiduals } from '@/engine/cnc/probePlan';
 import type { EngraveAnyItem, EngraveJob, EngraveLabel, EngraveMargins, FieldSource, MarginSource } from '@/types/engraveJob';
 import type { Mm } from '@/types/units';
 
@@ -560,7 +560,9 @@ export function recommendMargins(
   inputs: ZBudgetInputs = {},
 ): MarginRecommendation {
   const basis: string[] = [];
-  const probe = inputs.probeUncertainty ?? WIRED_PROBE_Z_RESIDUAL_MM;
+  // #451 — the wired probe's repeatability is the shop's `registration.wiredProbeZResidualMm`.
+  // A worker realm has no live defaults, so it gets `probePlan`'s labelled fallback (0.001).
+  const probe = inputs.probeUncertainty ?? probeResiduals().wiredProbeZ;
   let zTolerance = probe;
   basis.push(`the wired probe adds ${mm(probe)} mm`);
 

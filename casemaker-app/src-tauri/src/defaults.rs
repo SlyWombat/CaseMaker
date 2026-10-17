@@ -80,6 +80,18 @@ pub const MEASURED_SEEDS: &[(&str, f64, &str, &str, &str)] = &[
         "the wired probe tip's outside diameter, as recorded with the 2026-10-15 bench scan: an opening must \
          be wider than this to be entered at all",
     ),
+    // ── #451 (begin) — the wired probe's repeatability in Z, measured on the PRINTER'S blank in
+    // the vise: this is the figure #345's Z budget is built on.
+    (
+        "registration.wiredProbeZResidualMm",
+        0.001,
+        "mm",
+        "2026-10-08T00:00:00.000Z",
+        "the wired probe's repeatability in Z: five slow (F100) touches on the printed blank in the vise \
+         triggered within 0.001 mm of each other, fast (F300) within 0.004 mm and 2-6 um deep \
+         (/Z1-Firmware-Dialect.md §11.7, runbook C4, 2026-10-08)",
+    ),
+    // ── #451 (end)
     // ── #421 (begin) — the run plan's phase times, timed in docs/bench/traces/2026-10-15-console.log.
     (
         "plan.homeSeconds",
@@ -191,6 +203,14 @@ pub const UNMEASURED_SEEDS: &[(&str, f64, &str, &str)] = &[
         "mm",
         "default, not measured: the top of the bracket (and its screw heads) above the surface the stock sits on",
     ),
+    // ── #451 (begin) — how closely a bracket seated on the anchor pins repeats: provisional.
+    (
+        "bracket.repeatMm",
+        0.05,
+        "mm",
+        "provisional, not measured: how closely a bracket seated on the anchor pins repeats; #208 B1 owes the pin-to-face measurement",
+    ),
+    // ── #451 (end)
     (
         "clamps.topLengthMm",
         30.0,
@@ -260,6 +280,13 @@ pub const UNMEASURED_SEEDS: &[(&str, f64, &str, &str)] = &[
     ("sim.columnPitchXMm", 0.1, "mm", "chosen, not measured: the simulation grid's X pitch; the sim's memory and time grow with 1/pitch"),
     ("sim.rotaryPitchDeg", 0.25, "deg", "chosen, not measured: the rotary simulation grid's theta pitch; the sim's memory and time grow with 1/pitch"),
     // ── #451 sim resolutions (end)
+    // ── #451 sim starting values (begin) — what a session begins with: chosen, not measured.
+    ("sim.playbackSpeed", 20.0, "x", "chosen, not measured: the playback multiplier a fresh simulation session starts at, as a multiple of wall-clock time; one of 1, 5, 20 or 100"),
+    ("sim.defaultStockLengthMm", 100.0, "mm", "chosen, not measured: the blank a simulation starts with when the file states no stock, along X; 100 x 100 x 10 is the documented default (/Simulation.md §6)"),
+    ("sim.defaultStockWidthMm", 100.0, "mm", "chosen, not measured: the blank a simulation starts with when the file states no stock, along Y; 100 x 100 x 10 is the documented default (/Simulation.md §6)"),
+    ("sim.defaultStockThicknessMm", 10.0, "mm", "chosen, not measured: the blank a simulation starts with when the file states no stock, in Z; 100 x 100 x 10 is the documented default (/Simulation.md §6)"),
+    ("sim.budgetMs", 60000.0, "ms", "chosen, not measured: the wall-clock limit one simulation load starts with. Past it the load is refused (or the worker killed), and Retry starts a load with twice this"),
+    // ── #451 sim starting values (end)
     // ── #451 new-item starting depths (begin) — where an item the Engrave panel just added begins.
     // CHOSEN, not measured: nobody measured what depth a new item should start at, and the person who
     // asked for it is about to set the number that matters. A hole starts deeper than an item because
@@ -293,6 +320,13 @@ pub const UNMEASURED_SEEDS: &[(&str, f64, &str, &str)] = &[
     ("registration.idlePollLimit", 30.0, "polls", "chosen, not measured: how many status polls the registration waits for Idle before a touch, about a second each, before it stops"),
     ("registration.scanMissMarginMm", 1.0, "mm", "chosen, not measured: how far past the jaw tops a run-sheet scan touch may travel before it is called nothing; the cap that keeps a touch with nothing under it off the bed"),
     ("registration.readingResolutionMm", 0.05, "mm", "chosen, not measured: the depth two touch readings are told apart by (the machine's dial, not the probe's spec)"),
+    // ── #451 probe residuals (begin) — what a touch leaves and what each fixture already holds.
+    // The 3D probe's 0.02 is still an assumption; the chuck and jaw figures are provisional stubs
+    // (#208), and the wired probe's measured Z figure is in MEASURED_SEEDS.
+    ("registration.probeResidualMm", 0.02, "mm", "assumed, not measured: the 3D probe's ball-contact scatter in X, Y and Z, and what is left after a touch. The wired probe measured 0.001 mm in Z (registration.wiredProbeZResidualMm); this stays the conservative figure until the 3D probe is measured the same way (2026-10-08, /Z1-Firmware-Dialect.md §11.7)"),
+    ("registration.chuckAxisResidualMm", 0.05, "mm", "provisional, not measured: the chuck's runout where it locates the axis; #208 owes the bench measurement"),
+    ("registration.viseJawResidualMm", 0.05, "mm", "provisional, not measured: the vise jaws' squareness across the jaws; #208 owes the bench measurement"),
+    // ── #451 probe residuals (end)
     ("console.firstReplyMs", 60000.0, "ms", "chosen, not measured: how long a typed console line waits for its first reply. Above the slowest lines timed on the bench (M491 about 32 s, $H about 31 s, 2026-10-15)"),
     ("console.quietMs", 800.0, "ms", "chosen, not measured: the quiet gap that ends a console reply"),
     ("console.maxMs", 120000.0, "ms", "chosen, not measured: the longest a console reply may run; never shorter than the first-reply wait"),
@@ -645,6 +679,21 @@ fn known_rule(key: &str, n: Option<f64>) -> Option<Result<(), String>> {
             "250 to 30000 ms",
         )),
         // ── #449 (end)
+        // ── #451 probe residuals (begin) — `defaultsClient.ts` states the same bounds. Kept out of
+        // the #449 block: `benchDefaults.spec` pairs that block's arms with the #449 key list.
+        "registration.probeResidualMm" => Some(need(
+            n.is_some_and(|v| (0.0..=1.0).contains(&v)),
+            "0 to 1 mm",
+        )),
+        "registration.wiredProbeZResidualMm" => Some(need(
+            n.is_some_and(|v| (0.0..=0.5).contains(&v)),
+            "0 to 0.5 mm",
+        )),
+        "registration.chuckAxisResidualMm" | "registration.viseJawResidualMm" => Some(need(
+            n.is_some_and(|v| (0.0..=2.0).contains(&v)),
+            "0 to 2 mm",
+        )),
+        // ── #451 probe residuals (end)
         "registration.surfaceSlowFeed" => Some(need(
             n.is_some_and(|v| (5.0..=500.0).contains(&v)),
             "5 to 500 mm/min",
@@ -668,6 +717,11 @@ fn known_rule(key: &str, n: Option<f64>) -> Option<Result<(), String>> {
         "bracket.heightMm" => Some(need(
             n.is_some_and(|v| (1.0..=80.0).contains(&v)),
             "1 to 80 mm",
+        )),
+        // #451 — how closely the bracket repeats; `defaultsClient.ts` states the same bound.
+        "bracket.repeatMm" => Some(need(
+            n.is_some_and(|v| (0.0..=2.0).contains(&v)),
+            "0 to 2 mm",
         )),
         // Measured only — no seed: the machine Z of the surface the stock sits on beside the bracket.
         "bracket.seatMachineZ" => Some(need(
@@ -787,6 +841,25 @@ fn known_rule(key: &str, n: Option<f64>) -> Option<Result<(), String>> {
             "0.05 to 5 degrees",
         )),
         // ── #451 sim resolutions (end)
+        // ── #451 sim starting values (begin) — `defaultsClient.ts` states the same bounds. The
+        // playback speed is one of the transport's multipliers, not any number in a range.
+        "sim.playbackSpeed" => Some(need(
+            n.is_some_and(|v| [1.0, 5.0, 20.0, 100.0].contains(&v)),
+            "one of 1, 5, 20 or 100",
+        )),
+        "sim.defaultStockLengthMm" | "sim.defaultStockWidthMm" => Some(need(
+            n.is_some_and(|v| (1.0..=1000.0).contains(&v)),
+            "1 to 1000 mm",
+        )),
+        "sim.defaultStockThicknessMm" => Some(need(
+            n.is_some_and(|v| (0.1..=100.0).contains(&v)),
+            "0.1 to 100 mm",
+        )),
+        "sim.budgetMs" => Some(need(
+            n.is_some_and(|v| (5000.0..=600000.0).contains(&v)),
+            "5000 to 600000 ms",
+        )),
+        // ── #451 sim starting values (end)
         // ── #451 new-item starting depths (begin) — `defaultsClient.ts` states the same bounds. Not
         // 0: the job's schema refuses a depth of zero or less, so a starting depth under this would
         // be an item that cannot be added.
@@ -1053,11 +1126,13 @@ mod tests {
         validate_all(&s).unwrap();
         // Every chosen seed is `seeded`; the measured one says it was measured, when, and how.
         for (k, d) in &s {
-            if MEASURED_SEEDS.iter().any(|(m, ..)| m == k) {
+            if let Some((_, _, _, at, _)) = MEASURED_SEEDS.iter().find(|(m, ..)| m == k) {
                 assert_eq!(d.source, DefaultSource::Measured, "{k}");
+                // The note names the day the value was taken: one seed was measured on the 15th and
+                // the wired probe's Z figure on the 8th, so the day comes from the seed's own row.
+                let day = &at[..10];
                 assert!(
-                    d.set_at.is_some()
-                        && d.note.as_deref().is_some_and(|n| n.contains("2026-10-15")),
+                    d.set_at.is_some() && d.note.as_deref().is_some_and(|n| n.contains(day)),
                     "{k}"
                 );
             } else {

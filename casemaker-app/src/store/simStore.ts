@@ -38,8 +38,17 @@ export type SimSpeed = (typeof SIM_SPEEDS)[number];
 /**
  * The default speed. DECISION (#198 left it silent): 20×, matching the approved mockup (#195).
  * At the DISPLAY rapid rate a real job would otherwise take minutes before the first cut.
+ *
+ * #451: the value is the shop's `sim.playbackSpeed`, read when a session starts; this constant is
+ * its labelled no-service fallback (`defaultsClient.ts` restates the same number).
  */
 const DEFAULT_SPEED: SimSpeed = 20;
+
+/** The speed a session starts at (#451): the shop's, or the labelled fallback. */
+function startingSpeed(): SimSpeed {
+  const n = shopDefault('sim.playbackSpeed').value;
+  return (SIM_SPEEDS as readonly number[]).includes(n) ? (n as SimSpeed) : DEFAULT_SPEED;
+}
 
 /** Which viewport layers the simulation draws (#197). Stock and gouges are always drawn. */
 export interface SimLayers {
@@ -77,9 +86,18 @@ export interface SimProgress {
  * Wall-clock limit a load starts with, ms (#194). Written out rather than imported from
  * `simClient`: that module is reached only by dynamic import so the worker stays out of the
  * production graph, and importing a constant from it here would pull it in. `simClient`'s
- * `SIM_BUDGET_MS` is the counterpart — keep the two equal.
+ * `SIM_BUDGET_MS` is the counterpart — keep the two equal. Both are the LABELLED no-service
+ * fallback for the ONE seed `sim.budgetMs` (#451): each reads the location at use time.
  */
 export const DEFAULT_SIM_BUDGET_MS = 60_000;
+
+/**
+ * The budget a fresh session starts with (#451): the shop's `sim.budgetMs`, or the fallback.
+ * A retry doubles whatever the session is running on; a NEW session reads the seed again.
+ */
+function startingBudgetMs(): number {
+  return shopDefault('sim.budgetMs').value;
+}
 
 export interface SimState {
   status: SimStatus;
@@ -254,7 +272,8 @@ let lastLoad: LoadArgs | null = null;
 export const useSimStore = create<SimState>()((set, get) => {
   async function run(args: LoadArgs, budgetMs: number): Promise<void> {
     const mine = ++loadSeq;
-    set({ ...EMPTY, status: 'loading', budgetMs, phase: 'sweep' });
+    // A load starts the session's speed at the shop's seed, as it always reset to 20 before #451.
+    set({ ...EMPTY, speed: startingSpeed(), status: 'loading', budgetMs, phase: 'sweep' });
     try {
       const client = await clientLoader();
       client.setSimSinks(
@@ -325,7 +344,8 @@ export const useSimStore = create<SimState>()((set, get) => {
 
   return {
     ...EMPTY,
-    budgetMs: DEFAULT_SIM_BUDGET_MS,
+    speed: startingSpeed(),
+    budgetMs: startingBudgetMs(),
     async loadProgram(gcodeText, setup, tool, machineId, calibrationOverride, threads = []) {
       // The saved read of the machine's own frame, if the user has one (#279). Resolved HERE so
       // every load path — a panel, the engrave run, the QA harness — simulates the same machine,
@@ -339,6 +359,10 @@ export const useSimStore = create<SimState>()((set, get) => {
       const pitchX = shopDefault('sim.columnPitchXMm');
       const rotaryPitch = shopDefault('sim.rotaryPitchDeg');
       const proximity = shopDefault('sim.spindleOffProximityMm');
+      // #451 — a FRESH session takes the shop's `sim.budgetMs`; a later load keeps the session's
+      // budget, which a retry may have doubled. Reading the seed here (not at module import) means
+      // a location that answered after this module loaded still applies to the first load.
+      const fresh = lastLoad === null;
       lastLoad = {
         gcodeText,
         setup,
@@ -352,7 +376,7 @@ export const useSimStore = create<SimState>()((set, get) => {
         spindleOffProximityMm: proximity.value,
         threads,
       };
-      await run(lastLoad, get().budgetMs);
+      await run(lastLoad, fresh ? startingBudgetMs() : get().budgetMs);
     },
     async retryWithLongerBudget() {
       if (!lastLoad) return;
@@ -523,7 +547,7 @@ export const useSimStore = create<SimState>()((set, get) => {
     async dispose() {
       loadSeq++;
       lastLoad = null;
-      set({ ...EMPTY, budgetMs: DEFAULT_SIM_BUDGET_MS });
+      set({ ...EMPTY, speed: startingSpeed(), budgetMs: startingBudgetMs() });
       const c = await clientLoader().catch(() => null);
       await c?.disposeSim();
     },

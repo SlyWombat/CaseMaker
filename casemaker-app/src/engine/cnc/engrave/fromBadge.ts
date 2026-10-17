@@ -91,6 +91,13 @@ function stockPrintFor(badge: BadgeParams): EngraveJob['stock']['print'] {
  * §11.8, #293 Stage 2, 2026-10-08. It is stated as a flatness fact rather than folded into a margin
  * so the recommendation can say WHERE the number came from, and so a per-job probe (#176) can
  * replace it with the blank actually on the bench.
+ *
+ * #451 keeps this compiled FOR NOW: the audit asked for "a stock or blank record", but no record can
+ * carry the pair today. A shelf `StockItem` has `flatness`/`domeHeight` and no direction, and its
+ * `domeHeight` is one figure; a job's `stock.flatness` carries `{dome, across}` — one direction
+ * only — and `BadgeParams` (where this travels) has no dome field at all. Carrying the two measured
+ * figures per blank needs a record with BOTH spans and their provenance; until that exists,
+ * inventing a shape here would be one more number nobody supplied.
  */
 export const DEFAULT_BADGE_DOME_MM = 0.33;
 
