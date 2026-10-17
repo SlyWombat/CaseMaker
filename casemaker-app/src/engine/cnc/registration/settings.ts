@@ -39,6 +39,11 @@ export interface RegistrationSettings {
   surfaceSeekMm: number;
   /** How far the surface may sit from where the job expects it; the seek only travels this band. */
   surfaceToleranceMm: number;
+  /**
+   * #475 — how many surface touches the cut regions' extents get, beyond the registration-point
+   * touch. At least 5, so the centre and both extents on each axis are read; seeded 5.
+   */
+  surfaceTouchCount: number;
   touchFeed: number;
   surfaceFastFeed: number;
   surfaceSlowFeed: number;
@@ -74,6 +79,7 @@ const KEYS: Record<keyof RegistrationSettings, string> = {
   tipRadiusUncertaintyMm: 'registration.tipRadiusUncertaintyMm',
   tipDiameterMm: 'registration.tipDiameterMm',
   surfaceToleranceMm: 'registration.surfaceToleranceMm',
+  surfaceTouchCount: 'registration.surfaceTouchCount',
   edgeMarginMm: 'registration.edgeMarginMm',
   surfaceSeekMm: 'registration.surfaceSeekMm',
   touchFeed: 'registration.touchFeed',
@@ -120,5 +126,10 @@ export function settingsProblem(s: RegistrationSettings): string | null {
     return `the slow surface touch (${s.surfaceSlowSeekMm} mm) may go more than ${SLOW_SEEK_PAST_HIT_MAX_MM} mm past the fast touch's reading`;
   }
   if (!Number.isInteger(s.idlePollLimit) || s.idlePollLimit < 1) return 'the Idle poll limit must be a whole number of polls, at least 1';
+  // #475 — five is the floor, not a preference: a centre plus both extents on each axis is the
+  // smallest set that can see a bow in either direction.
+  if (!Number.isInteger(s.surfaceTouchCount) || s.surfaceTouchCount < 5) {
+    return 'the surface touch count must be a whole number, at least 5';
+  }
   return null;
 }

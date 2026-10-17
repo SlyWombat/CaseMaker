@@ -503,6 +503,13 @@
       "setAt": null,
       "unit": "mm"
     },
+    "registration.surfaceTouchCount": {
+      "value": 5,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "touches",
+      "note": "chosen, not measured: the surface touches across the cut regions' extents; five is a centre plus both extents on each axis (#475)"
+    },
     "registration.tipRadiusMm": {
       "value": 0.7,
       "source": "measured",

@@ -100,6 +100,9 @@ export const KNOWN_DEFAULTS: Readonly<Record<string, KnownDefault>> = {
   'registration.tipRadiusUncertaintyMm': { label: 'probe rim offset spread (measured)', unit: 'mm', rule: z.number().min(0).max(2), fallback: 0.25 },
   'registration.tipDiameterMm': { label: 'probe tip diameter (measured)', unit: 'mm', rule: z.number().min(0.2).max(10), fallback: 2.0 },
   'registration.surfaceToleranceMm': { label: 'surface tolerance', unit: 'mm', rule: z.number().min(0.05).max(10), fallback: 0.4 },
+  // #475 — the surface touches at the cut regions' extents. Five is the floor (a centre plus both
+  // extents on each axis); the seed is the issue's own 5. The labelled fallback IS the seed.
+  'registration.surfaceTouchCount': { label: 'surface touches across the cut', unit: 'touches', rule: z.number().int().min(5).max(9), fallback: 5 },
   'registration.edgeMarginMm': { label: 'registration margin', unit: 'mm', rule: z.number().min(0.01).max(20), fallback: 0.5 },
   'registration.surfaceSeekMm': { label: 'surface seek travel, at most', unit: 'mm', rule: z.number().min(1).max(100), fallback: 60.0 },
   'registration.touchFeed': { label: 'scan touch feed', unit: 'mm/min', rule: z.number().min(10).max(1000), fallback: 150.0 },

@@ -1362,16 +1362,33 @@ export function voidLimitForItem(
     label,
     measured ?? inkBoxOf(label.text, label.font, label.weight, label.size),
   );
+  const found = voidLimitForFootprint(job, box, margin);
+  return found === null ? null : { ...found, estimated: measured === null };
+}
+
+/**
+ * The shallowest limit among the voids an arbitrary FOOTPRINT reaches, and the void it belongs to —
+ * or null when the box reaches none (#475).
+ *
+ * `voidLimitForItem` is this function plus a label's ink box and the `estimated` flag. The split
+ * exists because #475's bowed-blank band is worked out per CUT REGION, and a region is not always a
+ * label: a shape's `aabbOfProfile` and a trace's path box are boxes too, and charging them the same
+ * conservative superset is what keeps a region from being told a pocket is clear when its own
+ * extent crosses one.
+ */
+export function voidLimitForFootprint(
+  job: EngraveJob,
+  box: ItemFootprint,
+  margin?: Mm,
+): { name: string; limit: Mm } | null {
   const m = margin ?? defaultBoundaryMargin(job);
-  let found: { name: string; limit: Mm; estimated: boolean } | null = null;
+  let found: { name: string; limit: Mm } | null = null;
   for (const ko of job.keepOuts ?? []) {
     if (!ko.enabled || !lineReachesKeepOut(box, ko)) continue;
     const limit = keepOutLimit(job, keepOutMembrane(job, ko.zCeiling), m);
     // `<` and not `<=`: at equal limits the first void keeps the answer, so the name a job shows is
     // the one its document declares first — stable, and never a silent re-pick.
-    if (found === null || limit < found.limit) {
-      found = { name: ko.name ?? '', limit, estimated: measured === null };
-    }
+    if (found === null || limit < found.limit) found = { name: ko.name ?? '', limit };
   }
   return found;
 }

@@ -607,6 +607,9 @@ const registrationSettingsSchema = z.object({
   edgeMarginMm: z.number().finite(),
   surfaceSeekMm: z.number().finite(),
   surfaceToleranceMm: z.number().finite(),
+  // #475 — absent in a plan frozen before this key existed; such a plan is still a valid record
+  // of the registration it was approved with, and the seed is the value every new plan carries.
+  surfaceTouchCount: z.number().int().min(5).max(9).default(5),
   touchFeed: z.number().finite(),
   surfaceFastFeed: z.number().finite(),
   surfaceSlowFeed: z.number().finite(),

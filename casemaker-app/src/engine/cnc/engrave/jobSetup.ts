@@ -92,6 +92,10 @@ export type JobFindingCode =
   // in `verify.ts`. The bounds a BLANK states (a void's ceiling, the stock's underside) keep the
   // owners named above: `cut-too-deep` and `depth-exceeds-stock`.
   | 'item-depth-bound'
+  // #475 — the blank's top is bowed more than the cut's depth band, so no Z0 can keep every floor
+  // past the colour line and clear of the pocket. Raised when the surface touches are measured, not
+  // by `validateJob`: the job document has no readings.
+  | 'blank-bowed'
   // Single-line traces (#219). `trace-self-overlap` is raised here; `trace-outside-stock` needs
   // the swept region intersected with the stock, which only the worker evaluates (#201). Both
   // are part of `TraceFindingCode` in `partPlan.ts`, where the geometry that detects them lives.
