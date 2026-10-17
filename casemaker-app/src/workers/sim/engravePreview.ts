@@ -400,7 +400,15 @@ export function createEngravePreviewer(tl: ManifoldToplevel): EngravePreviewer {
     // The job's own snapshot wins over its key's entry (design point 2, #305), resolved against
     // the list the main thread sent — the worker has no registry of its own to read.
     const tool = toolForJob(job, tools);
-    const { plan, measured, cuts, findings, colourBoundaryDepth } = engraveRegions(tl, job, tool, margins, shop);
+    const { plan, measured, cuts, findings, colourBoundaryDepth } = engraveRegions(
+      tl,
+      job,
+      tool,
+      margins,
+      shop,
+      null,
+      catalogue,
+    );
 
     // #420 slice 4 — a V-bit trace's cut is the cone dragged along its path, not its mouth
     // extruded straight down. The cone comes from the same `vCone` the oracle and the column

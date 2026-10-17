@@ -48,9 +48,9 @@ import { threadMillIR, threadSettings, type ThreadMillPlan, type ThreadSettingsR
 import type { ShopDefaults } from '@/platform/defaultsClient';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import type { ConditionSummary } from '@/engine/cnc/toolCondition';
-import { vCone } from '@/engine/cnc/vProfile';
+import { type VCone } from '@/engine/cnc/vProfile';
 import { minimumXyStepMm } from '@/engine/cnc/machine';
-import { vCarveGrooveRefusal, vCarvePlane, type VCarvePlane } from '@/engine/cnc/vCarveGeometry';
+import { vCarveGrooveRefusal, vCarvePlane, vCarveStepover, type VCarvePlane } from '@/engine/cnc/vCarveGeometry';
 import { isMetalTool } from '@/engine/cnc/registerCutter';
 import { MATERIAL_LABELS, isMetalMaterial } from '@/engine/cnc/materials';
 import { toPartPlan, labelProfile, jobDepthLimit, keepOutNameAt, type PartPlan } from '@/engine/cnc/engrave/partPlan';
@@ -477,6 +477,14 @@ function intersectionArea(tl: ManifoldToplevel, a: Polygons, b: Polygons): numbe
  *    step (read from `MillProfile.axisSteps`), so the controller cannot resolve its two walls.
  *    The refusal is by name and says the way out, "go deeper or widen the stroke".
  *
+ * THE STEP-OVER NOTE (#221 slice D) says which number set the pass pitch. The feeds row asks for
+ * a step-over at the colour plane; the floor allows at most the tip radius, so the CAM runs the
+ * smaller of the two ({@link vCarveStepover}). When the clamp wins, the operator is told both
+ * numbers and why — the cut is correct either way, so the finding is worded as a note, not a
+ * fault. `requestedStepOver` is the feeds resolver's own answer (`feedsFor(...).params.stepOver`),
+ * passed in by `engraveRegions`; when feeds refuse, the CAM will refuse at its own gate and no
+ * note is raised here.
+ *
  * THE MERGE CHECK is the design check from the brief. The surface opening of an item is its
  * colour-plane design offset outward by `surfaceOutset` per side. When two of those openings
  * overlap — two strokes of one item, or two items — the cavity merges at the top face and leaves a
@@ -491,14 +499,14 @@ function intersectionArea(tl: ManifoldToplevel, a: Polygons, b: Polygons): numbe
 function vCarveFindings(
   tl: ManifoldToplevel,
   plan: PartPlan,
-  tool: Tool | null,
+  cone: VCone,
   film: number | null,
   machine: MillProfile,
   planeById: ReadonlyMap<string, VCarvePlane>,
   designById: ReadonlyMap<string, Polygons>,
   surfaceById: ReadonlyMap<string, Polygons>,
+  requestedStepOver: number | null,
 ): JobFinding[] {
-  if (tool === null || vCone(tool) === null) return [];
   const offset = makeClipperOffset(tl);
   const findings: JobFinding[] = [];
   const mm = (v: number): string => String(Math.round(v * 1000) / 1000);
@@ -506,6 +514,28 @@ function vCarveFindings(
   for (const item of plan.engraves) {
     const plane = planeById.get(item.id);
     if (plane === undefined) continue;
+
+    if (requestedStepOver !== null) {
+      // The CAM's ratio is `params.stepOver / tipWidth` (#221); the same two numbers here, so the
+      // note and the program cannot name different pitches. A request outside (0, 1] cannot
+      // produce a note: the feeds gate refuses it before the CAM is reached.
+      const ratio = requestedStepOver / (2 * cone.tipRadius);
+      if (Number.isFinite(ratio) && ratio > 0 && ratio <= 1) {
+        const stepover = vCarveStepover(plane.planeRadius, cone, ratio);
+        if (stepover.clamped) {
+          findings.push({
+            severity: 'warning',
+            code: 'vcarve-stepover-clamped',
+            labelId: item.id,
+            message:
+              `${item.name}: pitch ${mm(stepover.effective)} mm, clamped to the cutter's ` +
+              `${mm(cone.tipRadius)} mm tip radius from the requested ${mm(stepover.requested)} mm — ` +
+              `a wider pitch would leave a ridge of the top colour down strokes narrower than two ` +
+              `passes apart.`,
+          });
+        }
+      }
+    }
 
     if (film !== null && item.depth < film - 1e-9) {
       findings.push({
@@ -614,6 +644,7 @@ export function engraveRegions(
   margins: EngraveMargins = effectiveMargins(job, MARGIN_DEFAULTS),
   shop: EngraveShopOpts = {},
   machine: MillProfile | null = null,
+  catalogue: readonly FeedCatalogueRow[] = [],
 ): EngraveRegions {
   const plan = toPartPlan(job);
   const mill = machine ?? jobMachine(job);
@@ -628,6 +659,17 @@ export function engraveRegions(
   const radius = usable !== null && usable.ok && usable.tool.shape === 'flat' ? usable.tool.radius : null;
   const cone = usable !== null && usable.ok && usable.tool.shape === 'v' ? usable.tool.cone : null;
   const traceRadius = tool === null ? null : (depth: number): number | null => traceRadiusAt(tool, depth);
+
+  // Slice D — the step-over the feeds row asks for, resolved by the same function the CAM path
+  // uses, with the same inputs (`job.cutOverride`, the shop's located table). The CAM resolves
+  // feeds again at its own gate; this call exists so the clamp NOTE can name the number that was
+  // actually asked for rather than a constant copied from the seed. A refusal here raises nothing:
+  // the feeds gate owns that sentence, and the note is skipped.
+  let requestedStepOver: number | null = null;
+  if (cone !== null && tool !== null) {
+    const requested = feedsFor(catalogue, job.stock.material, tool, mill, job.cutOverride, shop.feeds ?? undefined);
+    if (requested.ok) requestedStepOver = requested.params.stepOver;
+  }
 
   // #285 — the colour boundary, when the job states its print. PURE grid arithmetic (#285 review):
   // the boundary is a rule about the layer grid, not a measurement of the solid, so it is read
@@ -710,7 +752,20 @@ export function engraveRegions(
       surfaceById.set(engrave.id, surface);
     }
   }
-  const carveFindings = vCarveFindings(tl, plan, tool, colourBoundaryDepth, mill, planeById, designById, surfaceById);
+  const carveFindings =
+    cone === null
+      ? []
+      : vCarveFindings(
+          tl,
+          plan,
+          cone,
+          colourBoundaryDepth,
+          mill,
+          planeById,
+          designById,
+          surfaceById,
+          requestedStepOver,
+        );
 
   // `job.sacrificial` is threaded so the generate path's `vise-grip-shallow` judges what the
   // jaws actually grip (#213 §2), not the raw stock: the argument `validateVise` has accepted
@@ -1299,7 +1354,7 @@ function generateOneProgram(
   // which is the only post this app has; a second mill is a second post, and this line is where a
   // job naming it would have to be refused until there is one.
   const mill = jobMachine(job, calibration);
-  const { plan, regions, predicted, findings } = engraveRegions(tl, job, tool, margins, shop, mill);
+  const { plan, regions, predicted, findings } = engraveRegions(tl, job, tool, margins, shop, mill, catalogue);
   const errors: EngraveFailure[] = [];
 
   const stop = (

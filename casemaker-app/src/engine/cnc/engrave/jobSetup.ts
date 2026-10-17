@@ -76,6 +76,11 @@ export type JobFindingCode =
   // leave a ridge of the top colour below. A warning — the merged look is the operator's to
   // accept — raised with the geometry in hand (engraveGenerate's `vCarveFindings`).
   | 'vcarve-surface-merge'
+  // The step-over the feeds row asked for, cut down to the pitch the FLOOR allows (#221 slice D).
+  // A warning with note wording: nothing is wrong with the job, but the number the operator sees
+  // must be the one the CAM runs. The seed still states the request; this says when the tip
+  // radius, not the seed, set the pitch.
+  | 'vcarve-stepover-clamped'
   // A cutter Makera NAMES for metal, on a job cutting something that is not (#405). The line is a
   // property of the pair — the bit and the blank — so it cannot live on either side alone, and no
   // feed table can enforce it: a metal bit will happily cut PLA, badly, at numbers nobody measured.

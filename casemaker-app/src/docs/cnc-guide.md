@@ -855,9 +855,12 @@ after a confirmed stop. It does not probe or set the work origin — those stay 
 bench on 2026-10-15, and the colour-plane model followed on 2026-10-17. A V-bit still cuts
 single-line traces and stroke labels; it now also opens a **region**, pocketing the design at
 the colour plane, with the floor `e·tan(halfAngle)` narrower per side and the top-face opening
-`f·tan(halfAngle)` wider. The preview draws all three outlines, and the two named refusals and
-the merge warning are in §8.1 (`vcarve-above-colour-plane`, `vcarve-groove-too-narrow`,
-`vcarve-surface-merge`).
+`f·tan(halfAngle)` wider. The preview draws all three outlines, and the two named refusals, the
+merge warning and the step-over note are in §8.1 (`vcarve-above-colour-plane`,
+`vcarve-groove-too-narrow`, `vcarve-surface-merge`, `vcarve-stepover-clamped`). The feeds row
+asks for a step-over at the plane, but the floor is cleared by the tip disc alone, so the CAM
+clamps the pass pitch to the tip radius and `vcarve-stepover-clamped` states both numbers — the
+pitch it runs and the one that was asked for.
 
 **Using the camera to find the part (#189) — open.** The Z1 has an integrated camera. It cannot
 measure Z, and Studio does not use it for origin-setting, so today it is a webcam you can
@@ -1019,6 +1022,7 @@ simulation does report about one is the sweep's own list, next:
 | `vcarve-above-colour-plane` | error | An item's depth is shallower than the blank's film, so the floor would sit inside the coloured layer and the design would never reach the plane where it is correct. | Cut at least as deep as the film, or use single-colour stock. |
 | `vcarve-groove-too-narrow` | error | The groove the cone opens at the colour plane is narrower than the machine's minimum X/Y step (its steps-per-mm record), so the pocket cannot be positioned reliably. The message gives both widths in µm. | Cut deeper (a wider groove at the plane) or widen the stroke. |
 | `vcarve-surface-merge` | warning | Two strokes of one item, or two items, come closer than `2 × f·tan(halfAngle)` at the top face, so their surface openings merge even though their colour-plane designs do not. The colour line at the plane is still correct; the wall between them is not. | Space the strokes or items apart, or accept the merged wall. |
+| `vcarve-stepover-clamped` | warning | A note, not a fault: the feeds row's step-over asks for a pitch wider than the floor allows. The floor is cleared by the tip disc alone, so the CAM runs the smaller of the requested pitch and the tip radius; a wider pitch would leave a ridge of the top colour down every stroke narrower than two passes apart. The message states both numbers. | Nothing: the cut is correct. The request still governs a cutter whose tip radius is wider than it, or an override under the radius. |
 | ~~`region-v-carve-unavailable`~~ | — | Removed in #221; a V-bit now opens a region under the colour-plane model. | — |
 | `drill-outside-stock` | error | A plunge-drilled hole's rim reaches past the edge of the blank (#220). | Move the hole back inside the stock. |
 | `plunge-unproven` | warning/error | The job drills, but nothing recorded says the cutter is centre-cutting, so a straight plunge cannot be proven safe (#220). An error when the tool is recorded as NOT centre-cutting. | Use a centre-cutting end mill; #208 A1 records it for owned cutters. |

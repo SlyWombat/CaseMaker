@@ -367,6 +367,29 @@ describe('the thin fixture as a V-carve job (#221)', () => {
     expect(g.cam!.operations).toBe(3);
   });
 
+  // Slice D — the operator reads the pitch the CAM RUNS, with the requested number beside it, and
+  // the sentence is a warning-worded note rather than a fault: the cut is correct either way.
+  it('states the clamped pitch beside the requested one, per item', () => {
+    const g = generate(tl, fixtureJob());
+    expect(g.ok).toBe(true);
+    const notes = g.findings.filter((f) => f.code === 'vcarve-stepover-clamped');
+    expect(notes).toHaveLength(3);
+    for (const note of notes) expect(note.severity).toBe('warning');
+    // 0.6 × the 0.40396 mm groove at the plane = 0.242; the floor allows the 0.15 tip radius.
+    const title = notes.find((f) => /requested 0\.242 mm/.test(f.message));
+    expect(title).toBeDefined();
+    expect(title!.message).toMatch(/pitch 0\.15 mm/);
+    expect(title!.message).toMatch(/ridge of the top colour/);
+  });
+
+  it('raises no note when the override asks for less than the tip radius', () => {
+    const job = fixtureJob();
+    const gentle = { ...job, cutOverride: { ...job.cutOverride, stepOver: 0.09 } };
+    const g = generate(tl, gentle);
+    expect(g.ok).toBe(true);
+    expect(g.findings.filter((f) => f.code === 'vcarve-stepover-clamped')).toEqual([]);
+  });
+
   // Slice B — the program slice A writes has to survive the two halves of the run that judge it:
   // the column engine sweeps the cone at the program's constant Z, and the oracle compares the
   // material left at the FLOOR with the geometry's floor polygons (the design inset by e·tan).
