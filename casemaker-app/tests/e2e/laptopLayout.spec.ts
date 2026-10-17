@@ -12,23 +12,66 @@
 // Run (Windows, Vite started by hand per #226):
 //   npx playwright test tests/e2e/laptopLayout.spec.ts
 
+import type { Page } from '@playwright/test';
 import { test, expect } from './fixtures/caseMaker';
 
 /** Header height this layout must hold: `.app-shell`'s first grid row. */
 const HEADER_MAX_H = 48;
 /** A one-line toolbar button is 31–32 px; a wrapped one is 51+. */
 const ROW_MAX_H = 40;
+/** `ContextPanel`'s RAIL_MIN_W: at this width and up the panel is a grid column, below it a drawer. */
+const RAIL_MIN_W = 1024;
+
+/**
+ * #400 — wait for the panel's drawer/rail decision to reach its final state.
+ *
+ * `ContextPanel` keeps `isCompact` in React state, initialised from `window.innerWidth` and updated
+ * by a `resize` listener. The listener runs inside the resize event, but the state commit is
+ * scheduled as its own task, so a measurement taken straight after `setViewportSize` reads a value
+ * React may not have written yet — while the CSS media query that reshapes `.app-main` has already
+ * applied. The test must not depend on how long that gap is on a given machine. Poll the decision
+ * itself: the class and the handle must agree with the width the window reports right now. This
+ * waits for the condition, not for a number of milliseconds.
+ */
+async function waitForPanelMode(page: Page): Promise<void> {
+  await expect
+    .poll(
+      () =>
+        page.evaluate((railMinW: number) => {
+          const panel = document.querySelector('[data-testid="context-panel"]');
+          if (!panel) return false;
+          const drawer = window.innerWidth < railMinW;
+          const after = drawer ? 'context-panel--drawer' : 'context-panel--rail';
+          const hasHandle = document.querySelector('[data-testid="context-panel-handle"]') !== null;
+          return panel.classList.contains(after) && hasHandle === drawer;
+        }, RAIL_MIN_W),
+      { message: `context panel mode should match the window width`, timeout: 10_000 },
+    )
+    .toBe(true);
+}
 
 /** Load a board and open the engrave section. The section button TOGGLES, so the width sweep can
  *  call this repeatedly without closing what it just opened. */
-async function openEngrave(page: import('@playwright/test').Page): Promise<void> {
+async function openEngrave(page: Page): Promise<void> {
   await page.evaluate(async () => {
     await window.__caseMaker!.loadBuiltinBoard('rpi-4b');
   });
   const btn = page.getByTestId('sidebar-button-cnc-engrave');
   if ((await btn.getAttribute('aria-pressed')) !== 'true') await btn.click();
   await page.waitForSelector('[data-testid="engrave-preview-legend"]', { timeout: 60_000 });
-  await page.waitForTimeout(500);
+  // #400 — the 500 ms sleep that used to sit here was a bet on two things that had not settled.
+  // (a) The fonts are `font-display: swap` from `public/fonts/`, and the toolbar's row height and
+  // horizontal overflow are text measurements: a swap that lands after the first paint moves them
+  // (#355 asserts those numbers). `document.fonts.ready` is the signal, and Playwright's own
+  // screenshot step waits on the same set — under load it can still be pending when the assertions
+  // run.
+  await page.evaluate(async () => {
+    await document.fonts.ready;
+  });
+  // (b) The panel's own drawer/rail decision and its open state — both values React writes onto the
+  // element; wait for them to be there rather than for a timer.
+  await waitForPanelMode(page);
+  await expect(page.getByTestId('context-panel')).toHaveClass(/context-panel--open/, { timeout: 10_000 });
 }
 
 interface Layout {
@@ -128,6 +171,9 @@ test('the panel is a drawer only where the column would starve the canvas (#355)
   // Below it the overlay is back, and a drawer carries the handle tab that closes it.
   for (const width of [1023, 900, 768]) {
     await page.setViewportSize({ width, height: 800 });
+    // The 1024 -> 1023 step is the one that CHANGES modes; this is where a measurement taken a
+    // task too early used to read `--rail` and fail (#400).
+    await waitForPanelMode(page);
     const l = await readLayout(page);
     expect(l.panelClass, `panel at ${width}px`).toContain('context-panel--drawer');
     expect(l.handle, `handle at ${width}px`).toBe(true);
