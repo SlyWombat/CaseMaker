@@ -470,6 +470,18 @@ function receipt(generated: EngraveGenerated, loadDiags: SimDiagnostic[], load: 
     `  cam        ${generated.cam?.operations} ops, ${generated.cam?.cuttingMoves} cutting moves, ` +
       `${generated.cam?.passes} passes, ~${Math.round(generated.cam?.estimatedSeconds ?? 0)}s`,
   );
+  // #487 — the ordering's own receipt: what the file spends in the air, and what the pre-#487
+  // order would have spent on the same cut. The ratio is the figure the issue measured the
+  // problem by (1.82 : 1 in the rest pass), so the receipt reports it the same way.
+  const cam = generated.cam;
+  if (cam?.rapidMm !== undefined && cam.cutMm !== undefined && cam.baselineRapidMm !== undefined) {
+    const ratio = (rapid: number): string => (cam.cutMm! > 0 ? `${(rapid / cam.cutMm!).toFixed(2)} : 1` : '—');
+    console.log(
+      `  travel     ${cam.rapidMm.toFixed(1)} mm rapid / ${cam.cutMm.toFixed(1)} mm cut ` +
+        `(${ratio(cam.rapidMm)}); pre-#487 order ${cam.baselineRapidMm.toFixed(1)} mm ` +
+        `(${ratio(cam.baselineRapidMm)})`,
+    );
+  }
   const errs = generated.findings.filter((f) => f.severity === 'error');
   console.log(`  findings   ${errs.length} error, ${generated.findings.length - errs.length} warning`);
   for (const f of errs) console.log(`     ERROR ${f.code}: ${f.message}`);
@@ -1196,6 +1208,16 @@ if (args.job) {
       const cutParams = (g: EngraveGenerated): CutParams | null =>
         g.feeds && g.feeds.ok ? g.feeds.params : null;
       const passCount = (g: EngraveGenerated): number => g.cam?.passes ?? 1;
+      // #487 — the program's XY travel, present only when the CAM recorded it. An older stored
+      // result can arrive with a `cam` that predates the fields; the sheet then omits the step.
+      const travelOf = (
+        g: EngraveGenerated,
+      ): { travel?: { rapidMm: number; cutMm: number; baselineRapidMm: number } } => {
+        const cam = g.cam;
+        return cam?.rapidMm !== undefined && cam.cutMm !== undefined && cam.baselineRapidMm !== undefined
+          ? { travel: { rapidMm: cam.rapidMm, cutMm: cam.cutMm, baselineRapidMm: cam.baselineRapidMm } }
+          : {};
+      };
       // The trace-only rule is #405's, and the sheet applies it to program 1 from its own plan. It
       // is derived here for each program's OWN job rather than assumed from the kind of program a
       // rest pass writes today: a trace-bearing second program must not print a step-over.
@@ -1216,6 +1238,7 @@ if (args.job) {
           traceOnly: traceOnlyOf(job),
           moves: p1.generated.cam?.cuttingMoves ?? 0,
           seconds: seconds(p1.generated),
+          ...travelOf(p1.generated),
           removedVolume: p1.load.stats.removedVolume,
         },
         rest: {
@@ -1229,6 +1252,7 @@ if (args.job) {
           traceOnly: traceOnlyOf(restJob),
           moves: p2.generated.cam?.cuttingMoves ?? 0,
           seconds: seconds(p2.generated),
+          ...travelOf(p2.generated),
           removedVolume: p2.load.stats.removedVolume,
         },
         // The items program 1 leaves off AND program 2 really does cut — the other direction (left

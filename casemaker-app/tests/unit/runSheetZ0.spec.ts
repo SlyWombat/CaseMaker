@@ -377,3 +377,82 @@ describe('the run sheet states the rest pass’s settings and their provenance (
     expect(advice.value).toBe('10 % of the design — a third cutter is suggested');
   });
 });
+
+/**
+ * #487 — the ordering is on the paper, as two numbers the operator can check rather than the word
+ * "optimised". The Cut section states the program's own air-against-cut ratio and the ratio the
+ * pre-#487 order spent on the same cut; the swap routine states the pair's travel, because the
+ * second program's numbers exist nowhere else on the sheet.
+ */
+describe('the run sheet states the loop ordering (#487)', () => {
+  /** The generated half with the ordering report `summarize` always fills. */
+  function ordered(): RunSheetGenerated {
+    return {
+      ...generated(),
+      cam: {
+        operations: 2,
+        cuttingMoves: 40,
+        estimatedSeconds: 200,
+        passes: 1,
+        rapidMm: 417,
+        cutMm: 1820.1,
+        baselineRapidMm: 3293.8,
+        ordering: 'proximity',
+      },
+    };
+  }
+
+  it('prints the program’s rapid and cut travel, and what the old order spent', () => {
+    const cut = section(
+      'cut',
+      buildRunSheet(job(), ordered(), null, NOW, undefined, { restPass: facts() }),
+    );
+    const step = stepMatching(cut, /the toolpath is ordered by proximity/);
+    // A two-tool sheet says which program the numbers are about: the sheet is built for program 1.
+    expect(step.text).toMatch(/^Program 1, single-rough\.nc — /);
+    expect(step.text).toContain('The file spends 417 mm in the air against 1820.1 mm cutting');
+    expect(step.text).toContain('(0.229 : 1)');
+    expect(step.text).toContain('The pre-#487 order spent 3293.8 mm (1.81 : 1)');
+    expect(step.value).toBe('417 mm rapid · 1820.1 mm cut');
+  });
+
+  it('names no program when the sheet is the only one', () => {
+    const cut = section('cut', buildRunSheet(job(), ordered(), null, NOW, undefined, {}));
+    const step = stepMatching(cut, /the toolpath is ordered by proximity/);
+    expect(step.text).not.toMatch(/^Program \d/);
+  });
+
+  it('has no ordering step for a program the CAM ordered as before', () => {
+    // The stock `generated()` stub carries no report, which is what an un-ordered CAM summary looks
+    // like — and an older stored result passes the same way, because the fields are optional.
+    expect(section('cut').some((s) => /ordered by proximity/.test(s.text))).toBe(false);
+  });
+
+  it('states both programs’ travel in the swap routine, against what the old order spent', () => {
+    const travel = { rapidMm: 282.3, cutMm: 360.6, baselineRapidMm: 293.1 };
+    const restTravel = { rapidMm: 417, cutMm: 1820.1, baselineRapidMm: 3293.8 };
+    const s = sheet({
+      rough: { ...facts().rough, travel },
+      rest: { ...facts().rest, travel: restTravel },
+    });
+    const cut = section('cut', s);
+    const step = stepMatching(cut, /^Air travel, which is what the loop ordering/);
+    expect(step.text).toContain('single-rough.nc spends 282.3 mm in rapid against 360.6 mm cutting');
+    expect(step.text).toContain('(0.783 : 1)');
+    expect(step.text).toContain('single-rest.nc spends 417 mm in rapid against 1820.1 mm cutting');
+    expect(step.text).toContain('(0.229 : 1)');
+    expect(step.text).toContain('Before the ordering the same programs spent 293.1 mm and 3293.8 mm in rapid');
+    // Directly after the run-to-the-end step, where the operator changes the cutter and reads the
+    // second program's travel for the first time.
+    expect(cut.indexOf(step)).toBe(
+      cut.findIndex((x) => /^Run single-rough\.nc to the end/.test(x.text)) + 1,
+    );
+  });
+
+  it('says nothing about travel the programs did not report', () => {
+    // One program without a report is enough: a sentence naming only half the pair would read as
+    // the pair's.
+    const s = sheet({ rough: { ...facts().rough, travel: { rapidMm: 1, cutMm: 1, baselineRapidMm: 1 } } });
+    expect(section('cut', s).some((x) => /^Air travel, which is what the loop ordering/.test(x.text))).toBe(false);
+  });
+});

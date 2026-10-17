@@ -10,7 +10,7 @@ import {
   MILLING,
   type EngraveRegion,
 } from '@/engine/cnc/cam/engraveJob';
-import type { CamMove } from '@/engine/cnc/cam/ir';
+import { travelStats, type CamMove } from '@/engine/cnc/cam/ir';
 import type { Polygons } from '@/engine/cnc/cam/pocket';
 import { flatEndMill } from '@/engine/cnc/tool';
 import { Z1 } from '@/engine/cnc/machine';
@@ -366,5 +366,63 @@ describe('the tool number a job posts (#191 review)', () => {
     const third = generateEngrave(tl, [{ id: 'a', text: 'A', depth: 1, polygons: region }], { ...TOOL, number: 3 }, PARAMS, Z1.rapidEstimate);
     expect(third.toolNumber).toBe(3);
     expect(third.operations[0]?.name.startsWith('[T3]')).toBe(true);
+  });
+});
+
+// #487 — the ordering. The rules the issue states are checked here on a region the test owns; the
+// two real bench programs are the fixture spec's (`engraveOrdering.spec.ts`).
+describe('loop ordering (#487)', () => {
+  const region = rectRegion(10, 5);
+  const oneOp = (params: CutParams = PARAMS) =>
+    generateEngrave(tl, [{ id: 'a', text: 'A', depth: 1, polygons: region }], TOOL, params, Z1.rapidEstimate)
+      .operations[0]!.moves;
+
+  /** The loop's points as one string — two passes of one contour repeat it exactly. */
+  const loopKey = (pts: Pt[]): string => pts.map(([x, y]) => `${x.toFixed(6)},${y.toFixed(6)}`).join(' ');
+
+  it('takes each contour to its full depth before the next: a contour’s passes are consecutive', () => {
+    const loops = reconstructLoops(oneOp());
+    const seen = new Map<string, number[]>();
+    loops.forEach((pts, i) => {
+      const key = loopKey(pts);
+      seen.set(key, [...(seen.get(key) ?? []), i]);
+    });
+    // There is at least one contour cut more than once (the region needs several step-downs).
+    const repeated = [...seen.values()].filter((at) => at.length > 1);
+    expect(repeated.length).toBeGreaterThan(0);
+    for (const at of repeated) {
+      for (let k = 1; k < at.length; k++) expect(at[k]).toBe(at[k - 1]! + 1);
+    }
+  });
+
+  it('enters each loop at the vertex nearest the previous loop’s exit', () => {
+    const loops = reconstructLoops(oneOp());
+    expect(loops.length).toBeGreaterThan(1);
+    for (let i = 1; i < loops.length; i++) {
+      const [ex, ey] = loops[i - 1]![0]!;
+      const entry = loops[i]![0]!;
+      const entryDistance = Math.hypot(entry[0] - ex, entry[1] - ey);
+      const nearest = Math.min(...loops[i]!.map(([x, y]) => Math.hypot(x - ex, y - ey)));
+      expect(entryDistance).toBeCloseTo(nearest, 9);
+    }
+  });
+
+  it('reports the ordering and the program’s travel in the IR, agreeing with the moves', () => {
+    const ir = generateEngrave(tl, [{ id: 'a', text: 'A', depth: 1, polygons: region }], TOOL, PARAMS, Z1.rapidEstimate);
+    const ordering = ir.ordering;
+    expect(ordering).toBeDefined();
+    const stats = travelStats(ir.operations.flatMap((op) => op.moves));
+    expect(ordering!.order).toBe('proximity');
+    expect(ordering!.rapidMm).toBeCloseTo(stats.rapidMm, 6);
+    expect(ordering!.cutMm).toBeCloseTo(stats.cutMm, 6);
+    // The pre-#487 order is the same cut through the entries in document order, so its rapid is a
+    // real number, not a copy of the after figure.
+    expect(ordering!.baselineRapidMm).toBeGreaterThan(0);
+  });
+
+  it('places the same loops in the same order on every run (same input → same file)', () => {
+    const first = oneOp();
+    const second = oneOp();
+    expect(second).toEqual(first);
   });
 });

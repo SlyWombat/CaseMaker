@@ -349,6 +349,15 @@ export interface RestProgram {
   moves: number;
   seconds: number;
   /**
+   * #487 — the program's XY travel, and what the same cut would have spent before the loop
+   * ordering changed. Optional: a caller that predates the report still fills a `RestProgram`.
+   */
+  travel?: {
+    rapidMm: number;
+    cutMm: number;
+    baselineRapidMm: number;
+  };
+  /**
    * mm³ this program's own sweep removed. For the rest program that number is ON TOP of the first
    * one's — its sweep started from program 1's result (`SimLoadOpts.priorRemoval`) — so the two
    * together are what the pair takes out of the blank, and the second program's share of that is the

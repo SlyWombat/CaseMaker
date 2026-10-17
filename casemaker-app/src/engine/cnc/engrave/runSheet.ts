@@ -52,7 +52,7 @@ import {
   type ReachTableRow,
 } from '@/engine/cnc/engrave/reachability';
 import { fmtDiameter } from '@/engine/cnc/engrave/recommendTool';
-import type { RestPassFacts } from '@/engine/cnc/engrave/restPass';
+import type { RestPassFacts, RestProgram } from '@/engine/cnc/engrave/restPass';
 import { restSeamSentence } from '@/engine/cnc/engrave/restSettings';
 import { MATERIAL_LABELS } from '@/engine/cnc/materials';
 import { VISE_BODY_DEPTH, viseEnvelope } from '@/engine/cnc/fixture';
@@ -108,6 +108,15 @@ export interface RunSheetCamSummary {
   cuttingMoves: number;
   estimatedSeconds: number;
   passes: number;
+  /**
+   * #487 — XY rapid and cutting travel, mm, and the rapid travel the pre-#487 loop order would
+   * have spent on the same program. Optional so a caller that only has the old four numbers
+   * still builds a sheet; `EngraveGenerated.cam` always carries them.
+   */
+  rapidMm?: number;
+  cutMm?: number;
+  baselineRapidMm?: number;
+  ordering?: 'proximity' | null;
 }
 
 /**
@@ -1806,6 +1815,24 @@ function restPassSteps(facts: RestPassFacts): RunSheetStep[] {
 function restSwapSteps(facts: RestPassFacts): RunSheetStep[] {
   const { rough, rest } = facts;
   const dia = `⌀ ${fmtDiameter(rest.diameter)} mm`;
+  /** '1.82 : 1' — the ratio every travel sentence below states the same way. */
+  const ratio = (travel: { rapidMm: number; cutMm: number }): string =>
+    travel.cutMm > 0 ? `${fmtNum(travel.rapidMm / travel.cutMm)} : 1` : 'nothing cut';
+  const travelOf = (program: RestProgram, word: string): string | null =>
+    program.travel === undefined
+      ? null
+      : `${word} spends ${fmtNum(program.travel.rapidMm)} mm in rapid against ` +
+        `${fmtNum(program.travel.cutMm)} mm cutting (${ratio(program.travel)})`;
+  const travelSentence = ((): string | null => {
+    const a = travelOf(rough, rough.nc);
+    const b = travelOf(rest, rest.nc);
+    if (a === null || b === null) return null;
+    return (
+      `Air travel, which is what the loop ordering (#487) moves: ${a}; ${b}. ` +
+      `Before the ordering the same programs spent ${fmtNum(rough.travel!.baselineRapidMm)} mm and ` +
+      `${fmtNum(rest.travel!.baselineRapidMm)} mm in rapid.`
+    );
+  })();
   return [
     {
       text:
@@ -1816,6 +1843,7 @@ function restSwapSteps(facts: RestPassFacts): RunSheetStep[] {
       record: `depth after ${rough.nc} (mm), per region above`,
       unverified: '#443',
     },
+    ...(travelSentence === null ? [] : [{ text: travelSentence }]),
     {
       text:
         'Calibrate the new cutter’s length the same way as the first (M491) and record its PRB. This ' +
@@ -2315,6 +2343,31 @@ export function buildRunSheet(
     };
     cutSteps.push(step);
     programParams = step;
+    // #487 — what the ordering did, in the operator's terms: air travel against cutting travel,
+    // and the same program under the order this CAM used before it. "Optimised" that cannot be
+    // checked on paper is a feeling; the two numbers are the check. A job whose CAM carried no
+    // loops (a trace-only program) has nothing to report and gets no step.
+    const cam = generated.cam;
+    if (
+      cam?.ordering === 'proximity' &&
+      cam.rapidMm !== undefined &&
+      cam.cutMm !== undefined &&
+      cam.baselineRapidMm !== undefined &&
+      cam.cutMm > 0
+    ) {
+      const ratio = (rapid: number): string => `${fmtNum(rapid / cam.cutMm!)} : 1`;
+      const whose = options.restPass === undefined ? '' : `Program 1, ${options.restPass.rough.nc} — `;
+      cutSteps.push({
+        text:
+          `${whose}the toolpath is ordered by proximity: the cutter finishes each contour to its ` +
+          'depth before entering the next, takes each entry at the point nearest where it just ' +
+          'was, and cuts the pocket rings inside-out so the wall is the last thing it touches. ' +
+          `The file spends ${fmtNum(cam.rapidMm)} mm in the air against ${fmtNum(cam.cutMm)} mm ` +
+          `cutting (${ratio(cam.rapidMm)}). The pre-#487 order spent ` +
+          `${fmtNum(cam.baselineRapidMm)} mm (${ratio(cam.baselineRapidMm)}) on the same cut.`,
+        value: `${fmtNum(cam.rapidMm)} mm rapid · ${fmtNum(cam.cutMm)} mm cut`,
+      });
+    }
   } else {
     cutSteps.push({ text: 'Cutting parameters were not resolved for this job.' });
   }

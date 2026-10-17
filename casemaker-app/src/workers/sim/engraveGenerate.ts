@@ -62,7 +62,7 @@ import { chooseFacingTool } from '@/engine/cnc/engrave/facingTool';
 import { facingRefusal } from '@/engine/cnc/stockStart';
 import { generateTrace } from '@/engine/cnc/cam/trace';
 import type { Polygons } from '@/engine/cnc/cam/pocket';
-import { concatToolpathIR, estimateCycleSeconds, HOP_Z, type CamMove, type ToolpathIR } from '@/engine/cnc/cam/ir';
+import { concatToolpathIR, estimateCycleSeconds, HOP_Z, travelStats, type CamMove, type ToolpathIR } from '@/engine/cnc/cam/ir';
 import { postZ1, type PostContext, type VacuumSpan } from '@/engine/cnc/post/z1';
 import { FRAME_Z } from '@/engine/cnc/engrave/runSheet';
 import type { Setup } from '@/engine/cnc/setup';
@@ -157,6 +157,19 @@ export interface EngraveCamSummary {
   cuttingMoves: number;
   estimatedSeconds: number;
   passes: number;
+  /**
+   * #487 — XY travel of the whole program: the rapid (air) distance and the cutting distance,
+   * mm. The receipt and the run sheet print them against the pre-#487 order, so the gain is a
+   * number rather than a claim. OPTIONAL because a generated object stored by an older build
+   * still has a `cam` without them, and the sheet must then say nothing rather than invent a
+   * number; `summarize` always fills them.
+   */
+  rapidMm?: number;
+  cutMm?: number;
+  /** The same program under the pre-#487 loop order, mm. Equal to `rapidMm` when there was nothing to order. */
+  baselineRapidMm?: number;
+  /** `'proximity'` when the region CAM placed loops by #487; null when the program had no region loops. */
+  ordering?: 'proximity' | null;
 }
 
 /**
@@ -605,7 +618,25 @@ function summarize(ir: ReturnType<typeof generateEngrave>): EngraveCamSummary {
     }
     passes += zs.size;
   }
-  return { operations: ir.operations.length, cuttingMoves, estimatedSeconds, passes };
+  // #487 — the program's own travel, and the same program had its region loops been placed in
+  // document order. The report's two region numbers differ by exactly the ordering's doing, so
+  // swapping them in leaves every non-region move (a trace, a drill) where it was.
+  const travel = travelStats(ir.operations.flatMap((op) => op.moves));
+  const ordering = ir.ordering;
+  const baselineRapidMm =
+    ordering === undefined
+      ? travel.rapidMm
+      : travel.rapidMm - ordering.rapidMm + ordering.baselineRapidMm;
+  return {
+    operations: ir.operations.length,
+    cuttingMoves,
+    estimatedSeconds,
+    passes,
+    rapidMm: travel.rapidMm,
+    cutMm: travel.cutMm,
+    baselineRapidMm,
+    ordering: ordering === undefined || ordering.order !== 'proximity' ? null : 'proximity',
+  };
 }
 
 /**

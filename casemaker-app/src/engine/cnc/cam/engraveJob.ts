@@ -42,6 +42,7 @@ import {
   toolNumberFor,
 } from './ir';
 import { pocketLoops, type OffsetFn, type Polygons } from './pocket';
+import { tourNearest, twoOptOrder } from './tour';
 
 /**
  * A clockwise spindle, so conventional milling on the INSIDE of a pocket means travelling
@@ -122,7 +123,10 @@ export function zPasses(depth: number, stepDown: number): number[] {
 }
 
 /** Index of the vertex nearest `target`; ties go to the LOWEST index (deterministic start point). */
-function nearestVertexIndex(contour: readonly [number, number][], target: readonly [number, number]): number {
+function nearestVertexIndex(
+  contour: readonly (readonly [number, number])[],
+  target: readonly [number, number],
+): number {
   let best = 0;
   let bestDistance = Infinity;
   for (let i = 0; i < contour.length; i++) {
@@ -139,17 +143,50 @@ function nearestVertexIndex(contour: readonly [number, number][], target: readon
 }
 
 /**
- * The first point this label cuts: the start of the innermost ring's first contour, with the
- * contour reversed (milling direction) and rotated to begin nearest the origin — the same
- * rotation `buildMoves` applies with its initial previous position of (0, 0). Labels are
- * ordered by this point, so it must be a pure function of the label.
+ * A contour in emitted winding (reversed — see `MILLING`), rotated to begin at the vertex
+ * nearest `target`; ties to the lowest index. The first point is the loop's entry AND its exit:
+ * the loop closes back on it.
+ */
+function entryOn(
+  contour: readonly (readonly [number, number])[],
+  target: readonly [number, number],
+): [number, number][] {
+  const reversed = [...contour].reverse();
+  const start = nearestVertexIndex(reversed, target);
+  return [...reversed.slice(start), ...reversed.slice(0, start)] as [number, number][];
+}
+
+/** The mean of a contour's vertices — the point a tour compares loops by (#487). */
+function centroidOf(contour: readonly (readonly [number, number])[]): [number, number] {
+  let sx = 0;
+  let sy = 0;
+  for (const [x, y] of contour) {
+    sx += x;
+    sy += y;
+  }
+  return [sx / contour.length, sy / contour.length];
+}
+
+/**
+ * The first point this region cuts when it is the first one placed: the innermost ring's NEAREST
+ * contour to the origin, entered at its nearest vertex. Labels are ordered by this point, and the
+ * proximity order places the innermost ring first, so the two agree.
  */
 function firstCuttingPoint(rings: Polygons[]): [number, number] {
   if (rings.length === 0) return [0, 0];
   const inner = rings[rings.length - 1]!;
-  if (inner.length === 0) return [0, 0];
-  const reversed = [...inner[0]!].reverse();
-  return reversed[nearestVertexIndex(reversed, [0, 0])]!;
+  let best: [number, number] = [0, 0];
+  let bestDistance = Infinity;
+  for (const contour of inner) {
+    if (contour.length < 3) continue;
+    const [x, y] = entryOn(contour, [0, 0])[0]!;
+    const distance = x * x + y * y;
+    if (distance < bestDistance - 1e-9) {
+      bestDistance = distance;
+      best = [x, y];
+    }
+  }
+  return best;
 }
 
 interface Prepared {
@@ -161,7 +198,10 @@ interface Prepared {
   drillMoves?: CamMove[];
 }
 
-/** Greedy nearest-neighbour from (0, 0) on each label's first cutting point; ties by `labelId`. */
+/**
+ * Greedy nearest-neighbour from (0, 0) on each label's first cutting point, ties by `labelId`,
+ * then a 2-opt pass over that order (#487 item 1).
+ */
 function orderNearest(items: readonly Prepared[]): Prepared[] {
   const remaining = [...items];
   const ordered: Prepared[] = [];
@@ -185,51 +225,151 @@ function orderNearest(items: readonly Prepared[]): Prepared[] {
     position[0] = chosen.firstCut[0];
     position[1] = chosen.firstCut[1];
   }
-  return ordered;
+  const improved = twoOptOrder(
+    ordered.map((item) => item.firstCut),
+    ordered.map((_, i) => i),
+  );
+  return improved.map((i) => ordered[i]!);
+}
+
+/** How a region's loops are ordered (#487). `document` is the pre-#487 order, kept to price it. */
+export type LoopOrder = 'proximity' | 'document';
+
+/** One loop of one depth pass, already rotated to its entry vertex. */
+interface PlacedLoop {
+  /** Emitted winding, rotated so `points[0]` is the entry — and the exit, because the loop closes. */
+  points: [number, number][];
+  /** The entry vertex, repeated for readability at the emit site. */
+  entry: [number, number];
+  /** Work Z, negative. */
+  z: number;
 }
 
 /**
- * The moves for one operation: every pass, every ring innermost first (the wall is finished by
- * a light final cut), every contour. Between contours the tool hops to `hopZ`; the operation
- * ends with a retract to `safeZ` (the move before an operation's first rapid is therefore
- * always `safeZ`).
+ * Place one region's loops in cut order, without emitting moves.
  *
- * Direction: every contour is reversed (see `MILLING`). Start point: each contour is rotated to
- * begin at the vertex nearest the previous position, ties to the lowest index. The initial
- * previous position is (0, 0) — the same choice `firstCuttingPoint` makes, so the ordering and
- * the generated path agree.
+ * RINGS ARE INNERMOST FIRST IN BOTH ORDERS. That is #173's rule — the wall is finished by a
+ * light final cut — and it is a machining rule, not a convenience, so an optimisation does not
+ * get to reverse it.
+ *
+ * `'document'` is the pre-#487 order: a level at a time across the whole region, every ring,
+ * every contour in the order the offset emitted them. It is kept because the before/after the
+ * issue asks for has to be the REAL old order, not a re-derivation of it.
+ *
+ * `'proximity'` is #487's: within ONE ring the contours are visited in a nearest-neighbour tour
+ * with a 2-opt pass, and each contour is taken to its full depth before the next is entered —
+ * "each letter to full depth, then the next". The tool therefore crosses the design once per
+ * ring, not once per ring per pass, and enters every loop at the vertex nearest where it just
+ * was (item 3). Rings are compared by their centroid; the entry itself is the nearest VERTEX.
+ *
+ * `from` is where the tool already is — the previous operation's exit. The pre-#487 emitter used
+ * (0, 0) for every operation; the baseline here keeps that rule, which is one of the things the
+ * comparison measures.
  */
-function buildMoves(prepared: Prepared, params: CutParams): CamMove[] {
-  const moves: CamMove[] = [];
-  const previous: [number, number] = [0, 0];
-  for (const z of prepared.passes) {
-    for (let ri = prepared.rings.length - 1; ri >= 0; ri--) {
-      for (const contour of prepared.rings[ri]!) {
-        if (contour.length < 3) continue;
-        // Conventional milling: reverse the emitted winding relative to toPolygons().
-        const reversed = [...contour].reverse();
-        const start = nearestVertexIndex(reversed, previous);
-        const points = [...reversed.slice(start), ...reversed.slice(0, start)];
-        const [x0, y0] = points[0]!;
+function placeLoops(
+  prepared: Prepared,
+  order: LoopOrder,
+  from: readonly [number, number],
+): PlacedLoop[] {
+  const contours = prepared.rings
+    .map((ring) => ring.filter((contour) => contour.length >= 3))
+    .filter((ring) => ring.length > 0);
+  const loops: PlacedLoop[] = [];
+  const previous: [number, number] = [from[0], from[1]];
+  const place = (contour: readonly (readonly [number, number])[], z: number): void => {
+    const points = entryOn(contour, previous);
+    loops.push({ points, entry: points[0]!, z });
+    previous[0] = points[0]![0];
+    previous[1] = points[0]![1];
+  };
 
-        moves.push({ kind: 'rapid', x: x0, y: y0, z: HOP_Z });
-        moves.push({ kind: 'feed', x: x0, y: y0, z, f: params.plungeFeed });
-        for (let j = 1; j < points.length; j++) {
-          const [x, y] = points[j]!;
-          moves.push({ kind: 'feed', x, y, z, f: params.feed });
-        }
-        // Close the loop back on its start point.
-        moves.push({ kind: 'feed', x: x0, y: y0, z, f: params.feed });
-        moves.push({ kind: 'rapid', x: x0, y: y0, z: HOP_Z });
-        previous[0] = x0;
-        previous[1] = y0;
+  if (order === 'document') {
+    for (const z of prepared.passes) {
+      for (let ri = contours.length - 1; ri >= 0; ri--) {
+        for (const contour of contours[ri]!) place(contour, z);
       }
     }
+    return loops;
   }
-  if (moves.length > 0) {
-    moves.push({ kind: 'rapid', x: previous[0], y: previous[1], z: SAFE_Z });
+
+  for (let ri = contours.length - 1; ri >= 0; ri--) {
+    const ring = contours[ri]!;
+    const tour = tourNearest(ring.map(centroidOf), previous);
+    for (const k of tour) {
+      const contour = ring[k]!;
+      // Depth first: this contour is finished before the tool leaves it.
+      for (const z of prepared.passes) place(contour, z);
+    }
+  }
+  return loops;
+}
+
+/**
+ * The moves for one operation, from its placed loops. Between loops the tool hops to `hopZ`;
+ * the operation ends with a retract to `safeZ` (the move before an operation's first rapid is
+ * therefore always `safeZ`).
+ *
+ * Direction: every loop already carries the reversed winding (see `MILLING`) and its entry
+ * rotation. A retained Z-only rapid precedes every plunge, including the second and later passes
+ * of one contour, so the shape of the file is the same whichever order placed the loops.
+ */
+function buildMoves(loops: readonly PlacedLoop[], params: CutParams): CamMove[] {
+  const moves: CamMove[] = [];
+  for (const loop of loops) {
+    const [x0, y0] = loop.entry;
+    const { z } = loop;
+    moves.push({ kind: 'rapid', x: x0, y: y0, z: HOP_Z });
+    moves.push({ kind: 'feed', x: x0, y: y0, z, f: params.plungeFeed });
+    for (let j = 1; j < loop.points.length; j++) {
+      const [x, y] = loop.points[j]!;
+      moves.push({ kind: 'feed', x, y, z, f: params.feed });
+    }
+    // Close the loop back on its start point.
+    moves.push({ kind: 'feed', x: x0, y: y0, z, f: params.feed });
+    moves.push({ kind: 'rapid', x: x0, y: y0, z: HOP_Z });
+  }
+  const last = loops[loops.length - 1];
+  if (last) {
+    moves.push({ kind: 'rapid', x: last.entry[0], y: last.entry[1], z: SAFE_Z });
   }
   return moves;
+}
+
+/** The XY length of one placed loop: its feeds, closing move included. */
+function loopLength(loop: PlacedLoop): number {
+  let length = 0;
+  for (let i = 1; i < loop.points.length; i++) {
+    const [x1, y1] = loop.points[i - 1]!;
+    const [x2, y2] = loop.points[i]!;
+    length += Math.hypot(x2 - x1, y2 - y1);
+  }
+  const [x0, y0] = loop.entry;
+  const [xl, yl] = loop.points[loop.points.length - 1]!;
+  return length + Math.hypot(x0 - xl, y0 - yl);
+}
+
+/**
+ * XY rapid travel from `from` through each loop's entry, in order.
+ *
+ * `skipFirst` matches `travelStats`' rule: the IR does not carry where the program starts, so the
+ * very first move of a program is not charged. It is passed for the first operation only, so the
+ * report and the move walk count the same legs.
+ */
+function entryTravel(
+  from: readonly [number, number],
+  loops: readonly PlacedLoop[],
+  skipFirst = false,
+): number {
+  let total = 0;
+  let px = from[0];
+  let py = from[1];
+  for (let i = 0; i < loops.length; i++) {
+    const loop = loops[i]!;
+    if (!(skipFirst && i === 0)) total += Math.hypot(loop.entry[0] - px, loop.entry[1] - py);
+    px = loop.entry[0];
+    py = loop.entry[1];
+  }
+  return total;
 }
 
 /**
@@ -244,6 +384,11 @@ function buildMoves(prepared: Prepared, params: CutParams): CamMove[] {
  *
  * `rapid` sits BEFORE `order` because a required parameter cannot follow a defaulted one — the
  * caller that passed `order` positionally gets a type error rather than a silent shift.
+ *
+ * #487: the region order is nearest-neighbour refined by 2-opt, the contours within each ring are
+ * toured the same way and taken to full depth one at a time, and every entry is the vertex nearest
+ * the previous exit. `ToolpathIR.ordering` carries the rapid travel this cost and what the
+ * pre-#487 order would have cost on the same job, so the sheet can print the gain.
  *
  * `peckClearanceMm` is the shop's `drill.peckClearanceMm` (#451), read on the main thread and sent
  * as a plain number; `null`/absent leaves `drillMoves`'s labelled fallback in charge. It is the only
@@ -298,8 +443,35 @@ export function generateEngrave(
       ? strategies[order](prepared)
       : [...strategies[order](drilled), ...strategies[order](pocketed)];
 
+  // #487 — the tool's position carries from one operation to the next. Before this, every
+  // operation chose its entry as if the tool stood at the origin, so the first rapid of each
+  // region started from wherever the last one had finished rather than from the vertex nearest
+  // it. Drilled operations keep their own hole order and leave the tool at their last hole.
+  let cursor: [number, number] = [0, 0];
+  let regionRapidMm = 0;
+  let baselineRegionRapidMm = 0;
+  let regionCutMm = 0;
+
   const operations: CamOperation[] = ordered.map((item, index) => {
-    const moves = item.drillMoves ?? buildMoves(item, params);
+    let moves: CamMove[];
+    if (item.drillMoves !== undefined) {
+      moves = item.drillMoves;
+      const last = moves[moves.length - 1];
+      if (last) cursor = [last.x, last.y];
+    } else {
+      const loops = placeLoops(item, 'proximity', cursor);
+      moves = buildMoves(loops, params);
+      // Both orders are priced on the SAME legs: the first operation's opening leg is not
+      // charged (see `entryTravel`), which is the rule `travelStats` uses on the emitted moves.
+      const skipFirst = index === 0;
+      regionRapidMm += entryTravel(cursor, loops, skipFirst);
+      // The pre-#487 order chose every entry as if the tool stood at (0, 0); it is re-placed
+      // here so the before/after is the old order, not an approximation of it.
+      const baseline = placeLoops(item, 'document', [0, 0]);
+      baselineRegionRapidMm += entryTravel(cursor, baseline, skipFirst);
+      regionCutMm += loops.reduce((sum, loop) => sum + loopLength(loop), 0);
+      cursor = loops.length > 0 ? loops[loops.length - 1]!.entry : cursor;
+    }
     // A shape's ready-made descriptor when the caller supplied one (#214); otherwise the
     // label text, exactly as before, so a text-only caller's `.nc` is unchanged.
     const descriptor = item.label.name ?? `Engrave "${item.label.text}"`;
@@ -323,5 +495,17 @@ export function generateEngrave(
     safeZ: SAFE_Z,
     hopZ: HOP_Z,
     operations,
+    // A drill-only program has no loops to order, so it gets no report: its moves are the same
+    // in either order and there is no before/after to price.
+    ...(pocketed.length === 0
+      ? {}
+      : {
+          ordering: {
+            order: 'proximity' as const,
+            rapidMm: regionRapidMm,
+            baselineRapidMm: baselineRegionRapidMm,
+            cutMm: regionCutMm,
+          },
+        }),
   };
 }

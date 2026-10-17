@@ -76,6 +76,64 @@ export interface ToolpathIR {
   /** Z for hops between loops inside one operation, mm above the stock top. */
   hopZ: number;
   operations: CamOperation[];
+  /**
+   * #487 — how the region operations' loops were ordered, and what the ordering bought. Present
+   * only on an IR whose region CAM actually placed loops; absent on a trace- or drill-only IR
+   * (nothing to order) and on a rotary IR. `concatToolpathIR` keeps the FIRST IR's report, which
+   * is the region one — the traces appended after it are unchanged by the ordering.
+   */
+  ordering?: OrderingReport;
+}
+
+/**
+ * The CAM's own account of its loop ordering (#487).
+ *
+ * `rapidMm` and `baselineRapidMm` are the same program under the two orders, both measured as the
+ * XY distance the tool travels in rapid moves across the region operations — so the difference is
+ * the air the ordering saved, and the run sheet prints it rather than asking the operator to
+ * trust that "optimised" means faster.
+ */
+export interface OrderingReport {
+  /**
+   * `'proximity'`: rings innermost first, with the contours of each ring visited in a
+   * nearest-neighbour tour refined by 2-opt, and each contour taken to its full depth before the
+   * next is entered. `'document'`: a level at a time across the region, contours in the order the
+   * offset emitted them — the pre-#487 order, kept for the before/after number.
+   */
+  order: 'proximity' | 'document';
+  /** XY rapid travel of the REGION operations under this order, mm. */
+  rapidMm: number;
+  /** The same travel under the pre-#487 order, on the same job, mm. */
+  baselineRapidMm: number;
+  /** XY cutting travel of the region operations, mm — the same under either order. */
+  cutMm: number;
+}
+
+/** XY travel of a move list, split into rapid and cutting, mm (#487's own measure). */
+export interface TravelStats {
+  rapidMm: number;
+  cutMm: number;
+}
+
+/**
+ * The XY distance a move list spends in the air and in the cut, mm.
+ *
+ * Only XY is counted: a retract is the same height whichever loop follows it, so the figure the
+ * ordering can move is the horizontal one. The FIRST move is not charged — the IR does not carry
+ * the position the program starts from (the same reason `estimateCycleSeconds` skips it), and
+ * the ledger the issue prints was measured from the G-code the same way.
+ */
+export function travelStats(moves: readonly CamMove[]): TravelStats {
+  let rapidMm = 0;
+  let cutMm = 0;
+  for (let i = 1; i < moves.length; i++) {
+    const a = moves[i - 1]!;
+    const b = moves[i]!;
+    const distance = Math.hypot(b.x - a.x, b.y - a.y);
+    if (b.kind === 'rapid') rapidMm += distance;
+    else cutMm += distance;
+  }
+  return { rapidMm, cutMm };
 }
 
 /**
