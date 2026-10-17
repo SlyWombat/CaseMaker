@@ -224,6 +224,29 @@ export interface ThreadMillPlan {
 export type ThreadMillResult = { ok: true; plan: ThreadMillPlan } | { ok: false; reason: string };
 
 /**
+ * The half of `ThreadMillPlan` a READER needs (#445 phase B): what the thread is, how wide the
+ * passes are, and how far the tip runs — never `moves`, the IR, or the simulator's spec.
+ *
+ * It exists so the run sheet can print a thread without importing the CAM's plan type into a
+ * module whose job is prose. `ThreadMillPlan` is structurally assignable to it, so the worker's
+ * `threads` reaches the sheet unchanged.
+ */
+export type ThreadPlanFacts = Pick<
+  ThreadMillPlan,
+  | 'position'
+  | 'size'
+  | 'major'
+  | 'pitch'
+  | 'minor'
+  | 'cuttingDiameter'
+  | 'threadDepth'
+  | 'tipDepth'
+  | 'runOut'
+  | 'passRadii'
+  | 'chordsPerTurn'
+>;
+
+/**
  * Chords per revolution for an orbit of radius `r` at sagitta `tol`:
  * `ceil(π / acos(1 − min(tol, r/4) / r))`, floored at 12.
  *

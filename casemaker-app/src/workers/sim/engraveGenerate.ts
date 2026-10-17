@@ -40,7 +40,7 @@ import type { MillProfile } from '@/engine/cnc/machine';
 import { jobMachine, type MachineCalibration } from '@/engine/cnc/calibration';
 import { feedsFor, type FeedsEntry, type FeedsResult, type FeedCatalogueRow } from '@/engine/cnc/feeds';
 import { cuttingDiameter, cuttingForTrace, isVTraceTool, traceRadiusAt, type Tool } from '@/engine/cnc/tool';
-import { threadMillIR, threadSettings, type ThreadMillPlan } from '@/engine/cnc/cam/threadMill';
+import { threadMillIR, threadSettings, type ThreadMillPlan, type ThreadSettingsResult } from '@/engine/cnc/cam/threadMill';
 import type { ShopDefaults } from '@/platform/defaultsClient';
 import { vCone } from '@/engine/cnc/vProfile';
 import { isMetalTool } from '@/engine/cnc/registerCutter';
@@ -135,6 +135,18 @@ export interface EngraveGenerated {
    * #445 reads exactly as it did.
    */
   threads: ThreadMillPlan[] | null;
+  /**
+   * #445 phase B — the numbers the thread program was cut with, AND where each came from.
+   *
+   * `threads` states the geometry but not its provenance: the same 300 mm/min could be a catalogue
+   * row for this cutter or the shop's labelled placeholder. The run sheet has to say which, so the
+   * worker hands the resolved settings and their per-key sources across instead of letting the
+   * sheet re-resolve them — a second resolution could print numbers the file was not cut with.
+   * `null` for every job with no thread, and for a run that never resolved them. OPTIONAL because
+   * a generated object can arrive without it — one stored by an older build, or the bench script's
+   * — and the sheet must then say the source was not recorded rather than guess.
+   */
+  threadMachining?: ThreadSettingsResult | null;
   cam: EngraveCamSummary | null;
   /** The exact text to be saved. */
   nc: string | null;
@@ -632,7 +644,15 @@ export function engraveGenerate(
   const { plan, regions, predicted, findings } = engraveRegions(tl, job, tool, margins, shop);
   const errors: EngraveFailure[] = [];
 
-  const stop = (stage: EngraveStage, extra?: { feeds?: FeedsResult | null; message?: string; threads?: ThreadMillPlan[] | null }): EngraveGenerated => {
+  const stop = (
+    stage: EngraveStage,
+    extra?: {
+      feeds?: FeedsResult | null;
+      message?: string;
+      threads?: ThreadMillPlan[] | null;
+      threadMachining?: ThreadSettingsResult | null;
+    },
+  ): EngraveGenerated => {
     if (extra?.message !== undefined) errors.push({ stage, message: extra.message });
     return {
       ok: false,
@@ -640,6 +660,7 @@ export function engraveGenerate(
       findings,
       feeds: extra?.feeds ?? null,
       threads: extra?.threads ?? null,
+      threadMachining: extra?.threadMachining ?? null,
       cam: null,
       nc: null,
       verify: null,
@@ -668,11 +689,17 @@ export function engraveGenerate(
   if (tool === null) return stop('feeds', { message: 'the job has no usable cutter' });
   let feeds: FeedsResult | null = null;
   let threadPlans: ThreadMillPlan[] | null = null;
+  let threadMachining: ThreadSettingsResult | null = null;
   let ir: ToolpathIR;
   if (plan.threads.length > 0) {
     const resolved = threadSettings(shop.defaults ?? null, catalogue, job.stock.material, tool, mill);
+    // Carried from here on, refusals included: even a run that stops still knows which numbers it
+    // would have cut with and where they came from (#445 phase B's run sheet).
+    threadMachining = resolved;
     const refused = resolved.diagnostics.filter((d) => d.severity === 'error');
-    if (refused.length > 0) return stop('feeds', { message: refused.map((d) => d.message).join('; ') });
+    if (refused.length > 0) {
+      return stop('feeds', { message: refused.map((d) => d.message).join('; '), threadMachining });
+    }
     try {
       const plans: ThreadMillPlan[] = [];
       const irs: ToolpathIR[] = [];
@@ -692,7 +719,7 @@ export function engraveGenerate(
           air: job.cutOverride?.air ?? true,
           rapid: mill.rapidEstimate,
         });
-        if (!r.ok) return stop('cam', { message: r.reason });
+        if (!r.ok) return stop('cam', { message: r.reason, threadMachining });
         plans.push(r.plan);
         irs.push(r.ir);
       }
@@ -700,7 +727,7 @@ export function engraveGenerate(
       ir = irs.slice(1).reduce((a, b) => concatToolpathIR(a, b), irs[0]!);
       threadPlans = plans;
     } catch (e) {
-      return stop('cam', { message: e instanceof Error ? e.message : String(e) });
+      return stop('cam', { message: e instanceof Error ? e.message : String(e), threadMachining });
     }
   } else {
     const usable = cuttingForTrace(tool);
@@ -776,7 +803,7 @@ export function engraveGenerate(
     const verify = verifyProgram(nc, { setup, machine: mill, tool, depthLimit: limit, minRapidZ: ir.hopZ, ...(limitReasonAt ? { limitReasonAt } : {}) });
     if (verify.findings.some((f) => f.severity === 'error')) {
       errors.push({ stage: 'verify', message: `${verify.findings.filter((f) => f.severity === 'error').length} verifier error(s)` });
-      return { ok: false, stage: 'verify', findings, feeds, threads: threadPlans, cam, nc, verify, frameNc: null, frameVerify: null, predicted, errors };
+      return { ok: false, stage: 'verify', findings, feeds, threads: threadPlans, threadMachining, cam, nc, verify, frameNc: null, frameVerify: null, predicted, errors };
     }
 
     // 6. the frame file (#244): the job's XY extent traced in the air, beside the job. Produced by
@@ -785,12 +812,12 @@ export function engraveGenerate(
     const frame = frameProgram(ir, ctx, mill, setup, tool, limit);
     if ('error' in frame) {
       errors.push({ stage: 'verify', message: `the frame file could not be produced: ${frame.error}` });
-      return { ok: false, stage: 'verify', findings, feeds, threads: threadPlans, cam, nc, verify, frameNc: null, frameVerify: null, predicted, errors };
+      return { ok: false, stage: 'verify', findings, feeds, threads: threadPlans, threadMachining, cam, nc, verify, frameNc: null, frameVerify: null, predicted, errors };
     }
     const frameErrors = frame.verify.findings.filter((f) => f.severity === 'error');
     if (frameErrors.length > 0) {
       errors.push({ stage: 'verify', message: `the frame file has ${frameErrors.length} verifier error(s)` });
-      return { ok: false, stage: 'verify', findings, feeds, threads: threadPlans, cam, nc, verify, frameNc: frame.nc, frameVerify: frame.verify, predicted, errors };
+      return { ok: false, stage: 'verify', findings, feeds, threads: threadPlans, threadMachining, cam, nc, verify, frameNc: frame.nc, frameVerify: frame.verify, predicted, errors };
     }
 
     return {
@@ -799,6 +826,7 @@ export function engraveGenerate(
       findings,
       feeds,
       threads: threadPlans,
+      threadMachining,
       cam,
       nc,
       verify,

@@ -1147,6 +1147,11 @@ describe('engraveGenerate with a milled thread (#445)', () => {
     // The thread's plan is what the panel and the sim's load read — not a fabricated disc.
     expect(g.threads).toHaveLength(1);
     expect(g.threads![0]!.simThreads).toEqual([{ x: 50, y: 30, majorMm: 5, minorMm: 4.134, pitchMm: 0.8, threadDepthMm: 5, through: false }]);
+    // #445 phase B — the run sheet prints the numbers AND their provenance, so the worker carries
+    // the resolved settings across instead of letting the sheet resolve them a second time.
+    expect(g.threadMachining).not.toBeNull();
+    expect(g.threadMachining!.settings.feed).toBe(300);
+    expect(typeof g.threadMachining!.sources.feed).toBe('string');
     expect(g.cam!.operations).toBe(1);
     expect(g.nc).not.toBeNull();
     expect(g.verify!.findings.filter((f) => f.severity === 'error')).toEqual([]);
@@ -1169,6 +1174,8 @@ describe('engraveGenerate with a milled thread (#445)', () => {
     expect(out.ok).toBe(false);
     expect(out.stage).toBe('findings');
     expect(out.threads).toBeNull();
+    // Nothing was resolved, so nothing is claimed: the sheet says the source is not recorded.
+    expect(out.threadMachining).toBeNull();
     expect(g.ok).toBe(true); // the thread alone still passes — the refusal is the mixing
   });
 
