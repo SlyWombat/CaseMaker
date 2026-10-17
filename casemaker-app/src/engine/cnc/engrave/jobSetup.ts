@@ -359,15 +359,17 @@ export function jobSetups(job: EngraveJob): JobSetup[] {
 }
 
 /**
- * How the job holds the stock for its FIRST setup (#419 J2, #442's #427 item): the stored setup's
- * mount when the document states setups, and `workholding`'s — the vise — for the implicit one.
+ * How the job holds the stock for ONE setup (#419 J2, #442's #427 item; per-setup mounts, #471):
+ * the stored setup's mount when the document states that setup, and `workholding`'s — the vise —
+ * for the implicit one (or an index the document does not reach).
  *
- * This is the one reader a caller needs to decide whether the mount's obstacles apply at all: a
- * program on the bracket is checked against the bracket's arms and clamps; a program in the vise is
- * not (`bracketMount` answers `null`).
+ * The index is 0-based, like `job.setups` and unlike the operator's "Setup 1". This is the one
+ * reader a caller needs to decide whether the mount's obstacles apply at all: a program on the
+ * bracket is checked against the bracket's arms and clamps; a program in the vise is not
+ * (`bracketMount` answers `null`). A caller reading a program passes its `setupIndex - 1`.
  */
-export function jobMount(job: EngraveJob): Mount {
-  return job.setups?.[0]?.mount.kind ?? job.workholding.kind;
+export function jobMount(job: EngraveJob, setupIndex = 0): Mount {
+  return job.setups?.[setupIndex]?.mount.kind ?? job.workholding.kind;
 }
 
 /**

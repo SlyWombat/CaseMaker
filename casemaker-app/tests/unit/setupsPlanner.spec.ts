@@ -215,6 +215,67 @@ describe('#428 the mount steps', () => {
   });
 });
 
+describe('#471 per-setup mounts', () => {
+  const mixed = (): SetupsInput =>
+    input({
+      mount: { kind: 'vise', viseOpeningMm: 120 },
+      mounts: { bottom: { kind: 'bracket', board: true } },
+    });
+
+  it('setup 1 in the vise and setup 2 on the bracket, each checked against its own fixture', () => {
+    const plan = planSetups(mixed(), S);
+    expect(plan.setups.map((s) => [s.faceUp, s.mount.kind])).toEqual([
+      ['top', 'vise'],
+      ['bottom', 'bracket'],
+    ]);
+    // The stock is carried and the second setup's checks read the bracket, not the vise: no
+    // `cannot-seat`/`thin-grip` from a vise that is not holding it.
+    expect(plan.setups[1]!.findings.map((f) => f.code)).not.toContain('cannot-seat');
+  });
+
+  it('says the stock leaves one fixture for another, then turns it in the new one', () => {
+    const two = planSetups(mixed(), S).setups[1]!;
+    expect(two.remount!.turnWords[0]).toBe(
+      'Take the stock out of the vise and put it in the bracket with the face that was up still up and its front edge nearest you, its left edge against the bracket’s long arm.',
+    );
+    // The turn is from the UNTURNED placement in the new fixture: no "keep the edge on the fixed
+    // jaw", which is no longer holding anything.
+    expect(two.remount!.turnWords.slice(1)).toEqual([
+      'Keep the edge nearest you where it is.',
+      'Turn it so the edge now against the bracket’s long arm goes to the right.',
+      'Turn it so the face now up goes DOWN.',
+    ]);
+    expect(two.remount!.rotate).toEqual({ about: 'y', degrees: 180 });
+  });
+
+  it('a mount edit changes that setup only; the fixture-change words follow it', () => {
+    const inp = input({ mount: { kind: 'bracket', board: true } });
+    const plan = planSetups(inp, S);
+    const edited = editSetups(inp, plan, [{ kind: 'mount', face: 'bottom', mount: { kind: 'vise', viseOpeningMm: 120 } }], S);
+    if (!edited.ok) throw new Error(edited.reason);
+    expect(edited.plan.setups.map((s) => [s.faceUp, s.mount.kind])).toEqual([
+      ['top', 'bracket'],
+      ['bottom', 'vise'],
+    ]);
+    expect(edited.plan.setups[1]!.remount!.turnWords[0]).toContain('Take the stock out of the bracket and put it in the vise');
+  });
+
+  it('refuses a mount edit for a face that is not a setup, and reports a mount that cannot hold it', () => {
+    const inp = input({ mount: { kind: 'vise', viseOpeningMm: 120 }, removals: [pocket, sideSlot] });
+    const plan = planSetups(inp, S);
+    expect(editSetups(inp, plan, [{ kind: 'mount', face: 'back', mount: { kind: 'bracket' } }], S)).toMatchObject({
+      ok: false,
+      reason: expect.stringContaining('no back setup'),
+    });
+    // A side setup standing on an edge cannot be moved to the bracket: the direction becomes
+    // `unholdable` with the engine's reason, and the items are not silently dropped.
+    const moved = editSetups(inp, plan, [{ kind: 'mount', face: 'left', mount: { kind: 'bracket', board: true } }], S);
+    if (!moved.ok) throw new Error(moved.reason);
+    expect(moved.plan.setups.map((s) => s.faceUp)).toEqual(['top']);
+    expect(moved.plan.unholdable).toEqual([{ face: 'left', reason: expect.stringContaining('bracket cannot hold'), itemIds: ['slot'] }]);
+  });
+});
+
 describe('#428 the operator’s edits', () => {
   it('moves only to a face an item opens to; refuses merging a face into itself; merges, reorders, re-validates', () => {
     const inp = input();

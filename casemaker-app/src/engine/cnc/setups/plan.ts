@@ -18,7 +18,16 @@ import { checkSetup } from './checks';
 import { faceAxis, orient } from './orient';
 import { remountStep } from './remount';
 import type { SetupsSettings } from './settings';
-import type { Box, Face, Removal, Setup, SetupsInput, SetupsPlan, StockState } from './types';
+import type { Box, Face, MountSpec, Removal, Setup, SetupsInput, SetupsPlan, StockState } from './types';
+
+/**
+ * How the plan holds a setup whose up face is `face`: its own mount when `mounts` names one, else the
+ * input's default. Exported because the section renders a setup's mount from the same reading the
+ * planner used, and two answers to "which fixture is this?" would be one too many.
+ */
+export function mountFor(input: SetupsInput, face: Face): MountSpec {
+  return input.mounts?.[face] ?? input.mount;
+}
 
 /** The rotary's envelope, ⌀ × length, mm (`Rotary.md` — a product constant of the module). */
 const ROTARY = { diameter: 80, length: 150 };
@@ -76,7 +85,8 @@ export function buildSetups(
   let stock: StockState = { bounds: { min: [0, 0, 0], max: [input.stock.x, input.stock.y, input.stock.z] }, cuts: [] };
   for (const { face, items } of ordered) {
     const size = { x: stock.bounds.max[0] - stock.bounds.min[0], y: stock.bounds.max[1] - stock.bounds.min[1], z: stock.bounds.max[2] - stock.bounds.min[2] };
-    const o = orient(face, input.mount, size);
+    const mount = mountFor(input, face);
+    const o = orient(face, mount, size);
     if (!o.ok) {
       unholdable.push({ face, reason: o.reason, itemIds: items.map((i) => i.id) });
       continue;
@@ -86,13 +96,14 @@ export function buildSetups(
     setups.push({
       index: setups.length + 1,
       faceUp: face,
+      mount,
       rotation: o.matrix,
       orientation: o.orientation,
       itemIds: items.map((i) => i.id),
       stockBefore: stock,
       stockAfter: after,
-      remount: remountStep(setups.length + 1, prev ? prev.rotation : null, o.matrix, face, input.mount, stock),
-      findings: checkSetup(o.matrix, o.orientation, input.mount, stock, items, settings),
+      remount: remountStep(setups.length + 1, prev ? prev.rotation : null, o.matrix, face, mount, stock, prev ? prev.mount : null),
+      findings: checkSetup(o.matrix, o.orientation, mount, stock, items, settings),
     });
     stock = after;
   }
@@ -120,7 +131,13 @@ export type SetupEdit =
   | { kind: 'move'; itemId: string; toFace: Face }
   | { kind: 'add'; face: Face }
   | { kind: 'reorder'; faces: Face[] }
-  | { kind: 'merge'; from: Face; into: Face };
+  | { kind: 'merge'; from: Face; into: Face }
+  /**
+   * Change the fixture for one setup (maintainer decision, 2026-10-17). The face must already be a
+   * setup, because a mount belongs to a held position — adding the position and changing its mount
+   * are two statements, and the first one has to exist before the second means anything.
+   */
+  | { kind: 'mount'; face: Face; mount: MountSpec };
 
 export type EditResult = { ok: true; plan: SetupsPlan } | { ok: false; reason: string };
 
@@ -135,6 +152,9 @@ export function editSetups(input: SetupsInput, plan: SetupsPlan, edits: SetupEdi
     ...plan.unholdable.map((u) => ({ face: u.face, items: u.itemIds.map((id) => byId.get(id)!) })),
   ];
   const find = (f: Face) => order.find((g) => g.face === f);
+  // A mount edit changes the input the plan is rebuilt from, so later edits in the same call read
+  // the new fixture too instead of a stale one.
+  let mounts: Partial<Record<Face, MountSpec>> = { ...(input.mounts ?? {}) };
   for (const e of edits) {
     if (e.kind === 'add') {
       if (!find(e.face)) order.push({ face: e.face, items: [] });
@@ -158,13 +178,16 @@ export function editSetups(input: SetupsInput, plan: SetupsPlan, edits: SetupEdi
       const into = find(e.into) ?? (order.push({ face: e.into, items: [] }), find(e.into)!);
       into.items.push(...from.items);
       order = order.filter((g) => g !== from);
-    } else {
+    } else if (e.kind === 'reorder') {
       const known = new Set(order.map((g) => g.face));
       if (e.faces.length !== known.size || e.faces.some((f) => !known.has(f))) {
         return { ok: false, reason: 'a reorder must name every setup once' };
       }
       order = e.faces.map((f) => find(f)!);
+    } else {
+      if (!find(e.face)) return { ok: false, reason: `there is no ${e.face} setup whose mount to change` };
+      mounts = { ...mounts, [e.face]: e.mount };
     }
   }
-  return { ok: true, plan: buildSetups(input, order.filter((g) => g.items.length > 0), settings) };
+  return { ok: true, plan: buildSetups({ ...input, mounts }, order.filter((g) => g.items.length > 0), settings) };
 }

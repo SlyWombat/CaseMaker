@@ -21,6 +21,24 @@ import type { Face, MountSpec, RemountStep, Setup, StockState } from './types';
 /** How far off-centre a feature must sit, mm, for its side to tell a mount from its mirror image. */
 const LOPSIDED_MM = 1;
 
+/** The fixture as a noun, for the step that has to move the stock from one to another. */
+function holder(mount: MountSpec): string {
+  return mount.kind === 'vise' ? 'vise' : mount.kind === 'bracket' ? 'bracket' : 'tape';
+}
+
+/**
+ * Where the stock's left edge sits when it is put down unturned in the TARGET fixture. A fixture
+ * change is not a turn about a reference that is holding the stock: the old fixture has let go, so
+ * the words place the stock first and then turn it from there.
+ */
+function placedAgainst(mount: MountSpec): string {
+  return mount.kind === 'vise'
+    ? ', its left edge on the fixed jaw'
+    : mount.kind === 'bracket'
+      ? ', its left edge against the bracket’s long arm'
+      : '';
+}
+
 /** A MACHINE face, as the operator names it at the machine. */
 function where(f: Face, mount: MountSpec): string {
   switch (f) {
@@ -120,8 +138,23 @@ function landmark(
   };
 }
 
-/** The step that mounts the stock for a setup, turning it from `from` (null: as supplied, top up). */
-export function remountStep(setupIndex: number, from: Mat | null, to: Mat, faceUp: Face, mount: MountSpec, stock: StockState): RemountStep | null {
+/**
+ * The step that mounts the stock for a setup, turning it from `from` (null: as supplied, top up).
+ *
+ * `fromMount` is the fixture the stock is coming OUT of. When it differs from `mount`, the step has
+ * to say the stock leaves one fixture for another — "keep the edge on the fixed jaw" is a lie once
+ * the vise has let go. The words place it unturned in the new fixture and then turn it there, and
+ * the `rotate`/faces still come from the matrices, so a caller that ignores the words is unchanged.
+ */
+export function remountStep(
+  setupIndex: number,
+  from: Mat | null,
+  to: Mat,
+  faceUp: Face,
+  mount: MountSpec,
+  stock: StockState,
+  fromMount: MountSpec | null = null,
+): RemountStep | null {
   const I: Mat = [
     [1, 0, 0],
     [0, 1, 0],
@@ -132,8 +165,11 @@ export function remountStep(setupIndex: number, from: Mat | null, to: Mat, faceU
     const v = FACE_VEC[mf];
     return vecToFace([0, 1, 2].map((i) => to[0][i]! * v[0] + to[1][i]! * v[1] + to[2][i]! * v[2]) as [number, number, number]);
   };
+  const fixtureChange = from !== null && fromMount !== null && fromMount.kind !== mount.kind;
   // The FIRST mount has no "now" to turn from — the stock is in the operator's hands — so it is named
   // by the design's own faces, the one frame both the operator and the drawing share before any cut.
+  // A FIXTURE CHANGE moves the stock between holders: it is placed unturned in the new one, then
+  // turned from there, because the old fixture's references are no longer holding anything.
   const words =
     from === null
       ? faceUp === 'top'
@@ -141,7 +177,12 @@ export function remountStep(setupIndex: number, from: Mat | null, to: Mat, faceU
         : [
             `Mount it with the face the design calls ${faceUp} UP, its ${stockAtFirst('left')} ${where('left', mount)}, and its ${stockAtFirst('front')} ${where('front', mount)}.`,
           ]
-      : turnWords(start, to, mount);
+      : fixtureChange
+        ? [
+            `Take the stock out of the ${holder(fromMount)} and put it in the ${holder(mount)} with the face that was up still up and its front edge nearest you${placedAgainst(mount)}.`,
+            ...turnWords(I, to, mount),
+          ]
+        : turnWords(start, to, mount);
   if (from === null && words.length === 0) return null; // setup 1, top up: mounted as supplied
   const stockAt = (mf: Face): Face => {
     const v = FACE_VEC[mf];

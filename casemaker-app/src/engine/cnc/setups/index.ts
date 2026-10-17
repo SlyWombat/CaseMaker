@@ -6,3 +6,5 @@ export * from './plan';
 export * from './remount';
 export * from './registration';
 export * from './settings';
+/** #471 — the job document's cuts as the planner's removals. */
+export * from './fromJob';

@@ -54,7 +54,15 @@ export interface SetupsInput {
   /** The stock's size in its own frame, mm. */
   stock: { x: number; y: number; z: number };
   removals: Removal[];
+  /** The mount for every setup that does not name its own in `mounts`. */
   mount: MountSpec;
+  /**
+   * Per-setup mounts (maintainer decision, 2026-10-17): the key is the setup's UP FACE, and an entry
+   * here wins over `mount`. A job may hold its first setup in the vise and the next on the bracket —
+   * one fixture is in the machine at a time, so moving between them is part of the remount, and
+   * `remountStep` is told the previous mount to say that in words.
+   */
+  mounts?: Partial<Record<Face, MountSpec>>;
   /** The face the operator puts up first. Default `top`. */
   firstUp?: Face;
 }
@@ -106,6 +114,8 @@ export interface RemountStep {
 export interface Setup {
   index: number;
   faceUp: Face;
+  /** How THIS setup holds the stock: `SetupsInput.mounts[faceUp]` when stated, else the input's mount. */
+  mount: MountSpec;
   /** The rotation from the stock frame to the machine frame (det +1). */
   rotation: Mat;
   orientation: Orientation;

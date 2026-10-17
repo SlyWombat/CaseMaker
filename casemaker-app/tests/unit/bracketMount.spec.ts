@@ -281,12 +281,17 @@ describe('#442 the mount, assembled for a job', () => {
     expect(on.fixture.boxes[0]).toMatchObject({ min: [-10, -10, -7], max: [100, 0, 3] });
   });
 
-  it('jobMount reads the stored first setup, and a job with no setups is the vise', () => {
+  it('jobMount reads the stored setup at its index, and a job with no setups is the vise', () => {
     const job = defaultEngraveJob();
     expect(jobMount(job)).toBe('vise');
     const [implicit] = jobSetups(job);
-    const stored = { ...implicit!, id: 'setup-bracket', mount: { kind: 'bracket' as const, board: false } };
-    expect(jobMount({ ...job, setups: [stored] })).toBe('bracket');
+    const first = { ...implicit!, id: 'setup-bracket', mount: { kind: 'bracket' as const, board: false } };
+    const second = { ...implicit!, id: 'setup-tape', mount: { kind: 'tape' as const, board: true } };
+    // #471 — each setup's mount is its own: one fixture in the machine at a time.
+    expect(jobMount({ ...job, setups: [first, second] })).toBe('bracket');
+    expect(jobMount({ ...job, setups: [first, second] }, 1)).toBe('tape');
+    // An index the document does not reach is the job's own default, never an invented mount.
+    expect(jobMount({ ...job, setups: [first, second] }, 2)).toBe('vise');
   });
 
   it('toSetup carries the mount’s boxes as the fixture, and the vise’s envelope without one', () => {
