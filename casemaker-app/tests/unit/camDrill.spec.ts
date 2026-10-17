@@ -25,13 +25,27 @@ import { parseEngraveJob } from '@/store/engraveJobSchema';
 import type { EngraveDrill, EngraveJob } from '@/types/engraveJob';
 import type { NodeMeshOutput } from '@/workers/geometry/meshOutput';
 
-/** The tool the drill specs use: a 3.175 mm flat end mill, the shank every sample tool uses. */
+/**
+ * The tool the drill specs use: a 3.175 mm flat end mill, the shank every sample tool uses.
+ *
+ * The one built-in row is Makera's `(Metal)` cutter, and a softwood job carrying it is refused at
+ * findings (#407): the refusal is about the cutter/material PAIR, so a wood blank may not use a
+ * metal-line bit whatever its shape. This spec is about the peck's re-entry, not the cutter's
+ * provenance, so the job carries the SAME cutter — vendor id, flute and shoulder lengths — under a
+ * plain name, as `engraveShapes.spec` and `engraveGenerate.spec` do.
+ */
 const TOOL_KEY = 'flat-3.175x12-metal';
+const DRILL_TOOL = flatEndMill(3.175, {
+  id: '112111313812',
+  name: '3.175*12mm Flat End',
+  fluteLength: 12,
+  shoulderLength: 12,
+});
 
 /** A job whose only work is the given drills, on the default 100 × 60 × 12 softwood blank. */
 function drillJob(drills: EngraveDrill[], cutOverride?: EngraveJob['cutOverride']): EngraveJob {
   const base = defaultEngraveJob();
-  return { ...base, labels: [], shapes: [], toolKey: TOOL_KEY, drills, cutOverride };
+  return { ...base, labels: [], shapes: [], toolKey: TOOL_KEY, tool: DRILL_TOOL, drills, cutOverride };
 }
 
 /** One drill at (50, 30), depth 4, pecked 1 mm at a time. */

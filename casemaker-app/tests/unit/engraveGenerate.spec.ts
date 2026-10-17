@@ -113,7 +113,19 @@ describe('engraveGenerate (#206)', () => {
   });
 
   it('stops at findings when the cutter is too large for the text', () => {
-    const job: EngraveJob = { ...defaultEngraveJob(), toolKey: 'flat-3.175x12-metal' };
+    // The built-in row is Makera's `(Metal)` cutter, refused on a softwood blank (#407) — so the
+    // job carries the same cutter under a plain name, and this case is about the SIZE that fails
+    // the text rather than about a refusal it did not ask for.
+    const job: EngraveJob = {
+      ...defaultEngraveJob(),
+      toolKey: 'flat-3.175x12-metal',
+      tool: flatEndMill(3.175, {
+        id: '112111313812',
+        name: '3.175*12mm Flat End',
+        fluteLength: 12,
+        shoulderLength: 12,
+      }),
+    };
     const g = generate(tl, job);
     expect(g.ok).toBe(false);
     expect(g.stage).toBe('findings');
