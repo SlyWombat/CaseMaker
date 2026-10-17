@@ -95,6 +95,15 @@ function gridOf(
  * answers off `colourBoundaryDepthFor` without a Manifold toplevel. `engraveRegions` used to build
  * the whole stack just to read this one number and free it again, keeping the wasm live twice per
  * generate and once per preview keystroke for a value the grid already holds.
+ *
+ * THE SNAP IS CORRECT — DO NOT "FIX" IT BACK TO THE RAW SUBTRACTION (#221 slice C review). The
+ * boundary describes the PRINTED part, and a print is layer-quantised. The thick acceptance
+ * fixture's model is 3.81 mm with the colour change at 3.0 mm, whose raw difference is 0.81 mm;
+ * printed at 0.2 mm layers the part is 19 layers = 3.80 mm, with the colour change at layer 15,
+ * so the film physically is 0.80 mm below the top. The raw 0.81 is the model's arithmetic and
+ * never existed as material. Where the run sheet states the print facts it prints the resolved
+ * value with the raw beside it ("colour plane 0.80 mm below the top, from the file's 0.81 on
+ * 0.2 mm layers"); there is deliberately no finding for this.
  */
 export function colourBoundaryFor(plan: PartPlan, job: EngraveJob): Mm | null {
   const grid = gridOf(plan, job);
