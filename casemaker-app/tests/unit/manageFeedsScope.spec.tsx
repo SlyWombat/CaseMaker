@@ -198,6 +198,52 @@ describe('#450 Manage › Tools › Feeds', () => {
     });
   });
 
+  it('marks a row measured only by choosing it explicitly, and refuses until its provenance says who measured it', async () => {
+    const svc = fakeTable();
+    await openFeeds();
+
+    fireEvent.click(screen.getByTestId('manage-feeds-pick-feed-pla-flat-0.8-1.6'));
+    fireEvent.change(screen.getByTestId('manage-feed-param-rpm'), { target: { value: '9000' } });
+    // Moving the numbers promotes the row to CHOSEN and no further: a measured row is a claim a
+    // person makes, not a state the form falls into.
+    expect((screen.getByTestId('manage-feed-source') as HTMLSelectElement).value).toBe('chosen');
+    expect(screen.queryByTestId('manage-feed-measured')).toBeNull();
+
+    fireEvent.change(screen.getByTestId('manage-feed-source'), { target: { value: 'measured' } });
+    expect(screen.getByTestId('manage-feed-measured').textContent).toContain('says who measured it');
+    // The seeded sentence is still in the box, and a measured row cannot keep it: the save is
+    // refused on the field, with the reason, rather than writing a claim about Makera's numbers.
+    expect((screen.getByTestId('manage-feed-save') as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByTestId('manage-feed-problem').textContent).toContain(
+      'a row marked measured says who measured it',
+    );
+    expect(screen.getByTestId('manage-feed-problem').getAttribute('data-field')).toBe('provenance');
+
+    fireEvent.change(screen.getByTestId('manage-feed-provenance'), {
+      target: { value: 'measured the 0.8–1.6 mm PLA band on the bench coupon, Dave, 2026-10-17.' },
+    });
+    expect(screen.queryByTestId('manage-feed-problem')).toBeNull();
+    expect((screen.getByTestId('manage-feed-save') as HTMLButtonElement).disabled).toBe(false);
+
+    fireEvent.click(screen.getByTestId('manage-feed-save'));
+    await waitFor(() => expect(svc.sent.some((s) => s.method === 'PATCH')).toBe(true));
+    const patched = svc.sent.find((s) => s.method === 'PATCH')!.body as FeedRow;
+    expect(patched).toMatchObject({
+      id: 'feed-pla-flat-0.8-1.6',
+      source: 'measured',
+      params: { rpm: 9000 },
+      provenance: 'measured the 0.8–1.6 mm PLA band on the bench coupon, Dave, 2026-10-17.',
+    });
+    // The date is the save's, so the row states both halves of the claim: who in the sentence,
+    // when in `setAt`.
+    expect(typeof patched.setAt).toBe('string');
+    expect(patched.setAt).not.toBe('');
+    await waitFor(() =>
+      expect(screen.getByTestId('manage-feeds-source-feed-pla-flat-0.8-1.6').textContent).toBe('measured'),
+    );
+    expect(screen.getByTestId('manage-feeds-counts').textContent).toContain('1 measured');
+  });
+
   it('shows a backwards diameter on the field the schema names, and sends nothing', async () => {
     const svc = fakeTable();
     await openFeeds();

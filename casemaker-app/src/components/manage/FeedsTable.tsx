@@ -20,6 +20,13 @@
  * both require a date on anything that is not seeded, and this form supplies it rather than letting
  * a hand-typed row lie about where it came from.
  *
+ * MEASURED IS A CLAIM, NOT A STATE THE FORM FALLS INTO. Nothing here promotes a row: moving numbers
+ * makes a row `chosen`, never `measured`, and a new row starts `chosen`. A person marks a row
+ * measured by choosing it explicitly, and then the form insists the provenance sentence changes —
+ * it must say WHO measured these numbers, where the seeded sentence says where the app's starting
+ * values came from. The save stamps `setAt`, so the date is the "when" and the sentence is the
+ * "who".
+ *
  * TWO REFUSALS, BOTH SHOWN. The single-row schema (`FeedRowSchema`) and the cross-row rule
  * (`FeedsTableSchema` — two rows for one material and edge may touch but not overlap, because
  * `entryFor` takes the first match) are checked here before a write leaves the window, and the
@@ -447,9 +454,29 @@ export function FeedEditor({
     [draft, seed, mintedId, sessionAt],
   );
   const others = useMemo(() => rows.filter((r) => r.id !== seed?.id), [rows, seed?.id]);
-  const problem = stale
+  // The unmeasured → measured step is the PERSON's, never the form's: no number moving and no new
+  // row promotes itself. But a row that IS marked measured must say who measured it, and the
+  // seeded sentence ("Starting value. rpm/feed/plunge are what Makera Studio emits…") is a claim
+  // about the app, not about this shop. So the transition is refused until that sentence changes;
+  // `setAt`, which the save stamps, is the "when".
+  const measuredProvenanceStale =
+    seed !== null &&
+    seed.source !== 'measured' &&
+    candidate.source === 'measured' &&
+    draft.provenance.trim() === seed.provenance.trim();
+  const schemaProblem = stale
     ? { message: 'this row changed since you opened it — load the current one before saving', field: null }
     : problemOf(candidate, others);
+  const problem =
+    schemaProblem ??
+    (measuredProvenanceStale
+      ? {
+          message:
+            'a row marked measured says who measured it: update the provenance sentence, which ' +
+            'still describes where the starting numbers came from',
+          field: 'provenance',
+        }
+      : null);
   const numbersMoved = seed !== null && claimChanged(seed, candidate);
   // The honesty warning: a seeded row whose numbers moved is saved as chosen, and its old
   // provenance sentence was about the seeded numbers. Say so; the user can rewrite it here.
@@ -635,6 +662,13 @@ export function FeedEditor({
           ? 'No date: seeded means the app wrote these numbers; nobody measured them.'
           : `Set ${formatStamp(candidate.setAt) ?? 'just now'}. A number changed here re-dates the row.`}
       </p>
+      {candidate.source === 'measured' && (
+        <p className="hint" data-testid="manage-feed-measured">
+          <b>Measured</b> is this shop’s own claim: the save dates it, and the provenance sentence
+          says who measured it (a coupon on the bench, a dial test, the machine’s own report).
+          Nothing here promotes a row to measured — only choosing <b>measured</b> does.
+        </p>
+      )}
       <p className="hint" data-testid="manage-feed-provenance-rule">
         Change a number on a seeded row and it is saved as <b>chosen</b>, dated today — a hand-typed
         row never keeps a <b>seeded</b> claim.
