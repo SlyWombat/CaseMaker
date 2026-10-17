@@ -123,6 +123,12 @@ file cannot supply, and `Setup.wcs` is exactly the right place for it.
 Absolute work moves compute `target = param + wcs_offset − g92_offset + tool_offset`. The tool
 offset is applied in X, Y **and** Z.
 
+That formula holds with the offset the machine has **at that moment**, because writing the offset
+can reset it: `G10 L2 Pn` zeroes the tool-length offset to the current tool's own reading (observed
+2026-10-12, §11.12), and §11.2's `G10 L20 P0` zeroed it in the same sequence. The two write
+different numbers — `L20 P0` moves the **work zero**, `L2 P1` moves the **reference** — but both
+end with the offset at 0.
+
 ## 4. `G53` is not a simple modal
 
 `G53` makes the *next* motion use machine coordinates, and must be on the same line as it:
@@ -346,6 +352,13 @@ this controller — §11.10, #283.
   on after it, which says the toggles stayed put through the session's own traffic, not that a
   program boundary leaves them alone. §11.10 has the correction — each 2026-10-12 run carried its
   own `M331` … `M332` pair, so nothing isolates the boundary.
+- **Whether an X/Y-only `G10 L2` also resets the tool-length reference** is unchecked. It matters:
+  the laser point-to-origin path writes `G10 L2 P1 X Y` with no Z
+  (`casemaker-app/src/platform/machineLaser.ts:23`, `:285`), and its own comment says "Z0 is not
+  touched" — which may be true of G54 **Z** and not of the tool-length offset (§11.12). If an XY-only
+  write resets it, a laser XY set after a cutter's `M491` would invalidate that cutter's Z0. The
+  check is one `M499` pair either side of `G10 L2 P1 X Y` with a cutter fitted. On the bench
+  agenda (2026-10-17); kept here rather than filed, because the answer may be "no change".
 - **Nothing was captured off the wire.** A capture would make all of the above first-hand; the
   client's own log is what made any of it visible at all.
 
@@ -578,3 +591,33 @@ What this settles and what it does not:
 
 No `N` word appears in any corpus file or in anything our post writes, so nothing we generate was
 affected either way.
+
+### 11.12 Observed 2026-10-12 — `G10 L2` resets the tool-length reference (#387)
+
+Bench S3, setting the first chips origin (#165), with `M499` typed around the commands:
+
+| Moment | `M499` |
+|---|---|
+| after `M491` on the cutter | `tool:1 ref:-75.517 cur:-76.870 offset:-1.354` |
+| after `G10 L2 P1 X-180.5 Y-182.2 Z-55.191` | `tool:1 ref:-76.870 cur:-76.870 offset:0.000` |
+
+**`G10 L2` moves `ref` to the current tool's `cur`, zeroing the tool-length offset** — the same
+effect §11.2 saw from `G10 L20 P0`. The work position is `WPos = MPos − G54 − TLO`, checked against
+the status line several times that day. So a Z0 computed *with* the offset still in it comes out
+wrong by exactly that offset (1.354 mm here). The same reset is the explanation for an earlier,
+unexplained drop from `T:1,0.507` to `T:1,0.000`.
+
+**The order that works**, and the one any Z0 the app sets follows:
+
+1. the probe touches the surface in the collet;
+2. the cutter goes back in, and its `M491` runs;
+3. Z0 = probe touch + (cutter's sensor trigger − probe's sensor trigger), written with `G10 L2`
+   **while the cutter is fitted**.
+
+Row A: −56.107 + (−76.870 − −76.433) = **−56.544**. A camera check at Z +1 over the row's centre
+showed the tip clear of the blank.
+
+The app implements exactly this order (`casemaker-app/src/engine/cnc/registration/execute.ts`, home →
+cutter in → `M491` → `G10 L2`; `outcome.ts`'s `cutterZ0` does the subtraction), and
+`tests/unit/registrationPlanner.spec.ts` pins it. §3's absolute-move formula is the reason the
+order cannot be rearranged: the offset in force at the write is the one the write then loses.
