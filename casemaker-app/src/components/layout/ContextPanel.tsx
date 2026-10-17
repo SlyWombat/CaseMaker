@@ -14,6 +14,7 @@ import { HatsPanel } from '@/components/panels/HatsPanel';
 import { FeaturesPanel } from '@/components/panels/FeaturesPanel';
 import { SimPanel } from '@/components/panels/SimPanel';
 import { EngravePanel } from '@/components/panels/EngravePanel';
+import { PanelErrorBoundary } from '@/components/ui/PanelErrorBoundary';
 
 const SECTION_TITLES: Record<SidebarSectionId, string> = {
   board: 'Board',
@@ -45,7 +46,13 @@ function renderSection(id: SidebarSectionId): JSX.Element {
     case 'assets':   return <AssetsPanel />;
     case 'export':   return <ExportPanel />;
     case 'cnc-sim':  return <SimPanel />;
-    case 'cnc-engrave': return <EngravePanel />;
+    // #490 — a throw while rendering the panel is caught HERE, so the rail's header, the section
+    // list and the viewport survive it; the boundary says what threw and offers a reload.
+    case 'cnc-engrave': return (
+      <PanelErrorBoundary name="Engrave panel">
+        <EngravePanel />
+      </PanelErrorBoundary>
+    );
   }
 }
 

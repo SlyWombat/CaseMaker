@@ -15,6 +15,7 @@ import { fileURLToPath } from 'node:url';
 import {
   buildRunSheet,
   formatDuration,
+  PANEL_RENDER_ERROR_CODE,
   FRAME_Z,
   rapidAssumptionNote,
   runSheetDiagramSvg,
@@ -225,6 +226,24 @@ describe('runSheet (#207)', () => {
     expect(warnings).toContain('The fixture was not checked.');
     expect(warnings).toContain('The holder is unproven.');
     expect(warnings.some((t) => t.includes('not a warning'))).toBe(false);
+  });
+
+  // #490 — the boundary writes a render crash into the run's diagnostics as an `error`. The sheet
+  // carries that one in section 8 (it is a fact about the run by the time the sheet is read), and
+  // keeps dropping other errors, which gate the run instead of being printed as prose.
+  it('carries a panel render crash with the warnings, and only that error (#490)', () => {
+    const job = defaultEngraveJob();
+    const sim: RunSheetSim = {
+      diagnostics: [
+        { severity: 'error', code: PANEL_RENDER_ERROR_CODE, message: 'boom (Engrave panel)' },
+        { severity: 'error', code: 'holder-collision', message: 'A refusal that must not reach the sheet.' },
+      ],
+    };
+    const warnings = section(buildRunSheet(job, stubGenerated(job), sim, NOW), 'warnings').steps.map(
+      (s) => s.text,
+    );
+    expect(warnings).toContain('boom (Engrave panel)');
+    expect(warnings.some((t) => t.includes('must not reach'))).toBe(false);
   });
 
   // #243 — the run sheet's §8 carries the Simulate panel's own coverage sentence, from the

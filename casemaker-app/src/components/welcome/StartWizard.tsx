@@ -16,6 +16,7 @@ import { useMachineStore, type MachineCheckOutcome } from '@/store/machineStore'
 import { useStartWizardStore } from '@/store/startWizardStore';
 import { useViewportStore } from '@/store/viewportStore';
 import { EngraveSetupFlow } from '@/components/panels/EngraveSetupFlow';
+import { PanelErrorBoundary } from '@/components/ui/PanelErrorBoundary';
 import { readDesignFile } from '@/engine/import/designImport';
 import { useStockStore } from '@/store/stockStore';
 import type { Project } from '@/types/project';
@@ -451,7 +452,15 @@ export function StartWizard(): JSX.Element {
     }
   }
 
-  if (step === 'setup') return <EngraveSetupFlow onClose={closeWizard} steps={setupSteps} />;
+  // #490 — the same boundary as the panel's: a throw in the setup flow used to blank the hand-off
+  // (it is what #488's cold font cache did), leaving the wizard gone with nothing in its place.
+  if (step === 'setup') {
+    return (
+      <PanelErrorBoundary name="Engrave setup flow">
+        <EngraveSetupFlow onClose={closeWizard} steps={setupSteps} />
+      </PanelErrorBoundary>
+    );
+  }
 
   const jobTypes = JOB_TYPE_IDS.map((id) => findTemplateAcrossSources(id)).filter(
     (t): t is NonNullable<typeof t> => t !== undefined,

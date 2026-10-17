@@ -1134,6 +1134,15 @@ sentence rather than carrying a code of their own. **No screen consumes this yet
 | `no-cutter` | error | No cutter the library holds can cut this job at all — the recommendation's own refusal, in its words. A job that *names* a tool the library does not have is `tool-missing` instead, and one it can cut only by losing detail is the sweep's `item-detail-lost`. | Add a cutter that can cut it, or change the job. |
 | `stock-refusal` | error | The shelf entry the job asked to start from cannot start it: nothing left, all of it held for other jobs, or a form or size this machine cannot take. The message is the shelf's own. | Pick another blank, or free that one. |
 
+**The app's own screens** (render boundary — #490). Not a finding about the job: this is the app
+saying a screen failed to draw part of itself. The panel shows the sentence and a *Reload the
+panel* press; the run sheet carries the same sentence in §8, so a run handed to the bench says when
+one of the app's screens did not finish drawing.
+
+| Code | Severity | What it means in plain words | What to do |
+|---|---|---|---|
+| `panel-render-error` | error | The Engrave panel or its setup flow threw while drawing. The message is the throw's own message and the panel's name; in a dev build the console prints the component stack. The rest of the window keeps working. | Press **Reload the panel**. If it throws again, report it with the console's component stack. |
+
 ### 8.2 G-code the simulator understands
 
 > **Status: Available**.

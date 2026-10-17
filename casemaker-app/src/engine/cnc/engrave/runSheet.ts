@@ -179,8 +179,15 @@ export interface RunSheetGenerated {
 }
 
 /**
+ * #490 — the code the panel's error boundary writes when a render threw. The sheet carries it
+ * with the warnings even though its severity is `error`: by the time the sheet is read the crash
+ * is a fact about the run the operator needs, not one of the findings that gate it.
+ */
+export const PANEL_RENDER_ERROR_CODE = 'panel-render-error';
+
+/**
  * The simulation diagnostic the sheet carries, structurally a `SimDiagnostic`
- * (`src/workers/sim/session.ts`). Only warnings reach the sheet.
+ * (`src/workers/sim/session.ts`). Warnings reach the sheet, plus a panel crash (#490).
  */
 export interface RunSheetSimDiagnostic {
   severity: 'error' | 'warning' | 'info';
@@ -2596,7 +2603,9 @@ export function buildRunSheet(
   }
   if (sim) {
     for (const d of sim.diagnostics) {
-      if (d.severity === 'warning') pushWarning(d.code, d.message);
+      // #490 — a panel crash is an `error`, but section 8 is where the sheet says what the app
+      // could not do, so it is carried beside the warnings rather than dropped.
+      if (d.severity === 'warning' || d.code === PANEL_RENDER_ERROR_CODE) pushWarning(d.code, d.message);
     }
     // #243 — the coverage sentence, from the same builder the Simulate panel prints: which
     // geometry the sweep was given and which it never saw, and whether this run swept at all.

@@ -113,6 +113,12 @@ export interface EngraveRunState {
   /** Run the whole pipeline for the job as it is NOW. */
   generate: () => Promise<void>;
   setAcknowledged: (v: boolean) => void;
+  /**
+   * #490 — record a diagnostic that did not come from a sim stage: the panel's error boundary
+   * writes a render crash here, into the same list the run sheet reads, so a panel that threw
+   * still leaves a sentence the report can carry. Kept on the run, not on the job.
+   */
+  reportDiagnostic: (diagnostic: SimDiagnostic) => void;
   /** Forget the run (and the staleness). Does not touch the job. */
   reset: () => void;
 }
@@ -286,6 +292,8 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
     error: null,
     generate: run,
     setAcknowledged: (v) => set({ acknowledged: v }),
+    reportDiagnostic: (diagnostic) =>
+      set((state) => ({ simDiagnostics: [...state.simDiagnostics, diagnostic] })),
     reset: () => {
       seq += 1; // orphan any run in flight
       set({ generated: null, ...empty, phase: 'idle' });
