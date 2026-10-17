@@ -54,7 +54,7 @@ const MACHINE: MachineObservation = {
 };
 const VERIFY: VerifyReport = { ok: true, findings: [], stats: { lines: 1, cuttingMoves: 0, deepestZ: 0, bbox: { min: [0, 0, 0], max: [1, 1, 0] } } };
 const upload = (nc = 'M02\n') => (
-  <EngraveMachineUpload blocker={null} machine={MACHINE} program={{ nc, verify: VERIFY }} filename="job.nc" />
+  <EngraveMachineUpload blocker={null} machine={MACHINE} program={{ nc, verify: VERIFY }} filename="job.nc" lift={{ zMachine: -3, zFloorMachine: -102 }} />
 );
 
 beforeEach(() => {

@@ -61,6 +61,9 @@ function props(over: Partial<EngraveMachineUploadProps> = {}): EngraveMachineUpl
     machine: MACHINE,
     program: { nc: NC, verify: VERIFY },
     filename: 'Untitled-engrave-job.nc',
+    // The Z1's `toolChange.clearanceZ` and `softEndstop.zMin`, as the panel hands them in — required,
+    // never defaulted, and guarded at the point of use (#448).
+    lift: { zMachine: -3, zFloorMachine: -102 },
     ...over,
   };
 }

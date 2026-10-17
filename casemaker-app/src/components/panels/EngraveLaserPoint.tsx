@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type CSSProperties, type JSX } from 'react';
-import { LASER_JOG_STEPS, LaserPointSession, pointToOriginAllowed } from '@/platform/machineLaser';
+import { LASER_JOG_STEPS, LaserPointSession, pointToOriginAllowed, zText, type LaserLift } from '@/platform/machineLaser';
 import { laserHomeKey, useLaserHomeStore } from '@/store/laserHomeStore';
 
 /**
@@ -25,9 +25,15 @@ export interface EngraveLaserPointProps {
   margin: { mm: number; from: string };
   /** `laser.originUncertaintyMm`, with its source. */
   uncertainty: { mm: number; source: string };
+  /**
+   * The Z the head lifts to, with the bounds that make it safe — the resolved machine's
+   * `toolChange.clearanceZ` and `softEndstop.zMin`. REQUIRED, not defaulted: a missing one must be
+   * a typecheck error, never a silent −3 (#448).
+   */
+  lift: LaserLift;
 }
 
-export function EngraveLaserPoint({ host, port, margin, uncertainty }: EngraveLaserPointProps): JSX.Element {
+export function EngraveLaserPoint({ host, port, margin, uncertainty, lift }: EngraveLaserPointProps): JSX.Element {
   const [armed, setArmed] = useState(false);
   const [stage, setStage] = useState<'idle' | 'jogging' | 'confirm' | 'busy'>('idle');
   const [note, setNote] = useState<string | null>(null);
@@ -73,7 +79,7 @@ export function EngraveLaserPoint({ host, port, margin, uncertainty }: EngraveLa
 
   async function start(): Promise<void> {
     setStage('busy');
-    const s = new LaserPointSession({ host, port });
+    const s = new LaserPointSession({ host, port }, lift);
     session.current = s;
     const r = await s.begin();
     if (r.ok) {
@@ -155,7 +161,7 @@ export function EngraveLaserPoint({ host, port, margin, uncertainty }: EngraveLa
             data-testid="engrave-laser-point-start"
             disabled={!armed}
             style={{ width: '100%', padding: 7, marginTop: 4 }}
-            title="Lift to machine Z −3, then switch the probe laser on (M831)"
+            title={`Lift to machine Z ${zText(lift.zMachine)}, then switch the probe laser on (M831)`}
             onClick={() => void start()}
           >
             Point to origin with laser

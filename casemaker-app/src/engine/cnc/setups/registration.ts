@@ -4,6 +4,9 @@
  *
  * The EXPECTED SURFACE is the caller's to state (#430: never G54 Z): this takes the machine Z of what
  * the stock SITS on — the vise's ledge, the board's top — and adds the stock's height this way up.
+ * `seekFromMachineZ` is likewise the caller's: the resolved machine's `toolChange.clearanceZ`, the
+ * height the probe seeks from and the bound nothing may stand above (`plan.ts`). It is REQUIRED — a
+ * forgotten one would let a clamp reach the travel height unnoticed.
  */
 
 import { LEDGE_STEP } from '../fixture';
@@ -35,6 +38,8 @@ export function registrationFor(
   mount: MountSpec,
   input: {
     seatMachineZ: number;
+    /** The resolved machine's `toolChange.clearanceZ`: the seek height, and the bound nothing may exceed. */
+    seekFromMachineZ: number;
     cornerRadius: number;
     bracketOrigin?: BracketOrigin;
     /** Bracket (#427): the clamps and arms as placed, and whether to take the confirming touch. */
@@ -49,6 +54,7 @@ export function registrationFor(
       stock: { xMin: 0, yMin: 0, xMax: dims.x, yMax: dims.y, cornerRadius: input.cornerRadius },
       mount: mount.kind,
       expectedSurface: { machineZ: input.seatMachineZ + dims.z, from: `the seat at machine Z ${input.seatMachineZ} + the stock's ${dims.z} mm this way up (setup ${setup.index})` },
+      seekFromMachineZ: input.seekFromMachineZ,
       fixtureBelowSurfaceMm: mount.kind === 'vise' ? dims.z - LEDGE_STEP : undefined,
       bracketOrigin: input.bracketOrigin,
       mountObstacles: input.mountObstacles,
@@ -98,7 +104,7 @@ export function referenceOpenings(setup: Setup): { openings: ReferenceOpening[];
 export function referenceRegistrationFor(
   setup: Setup,
   mount: MountSpec,
-  input: { seatMachineZ: number; cornerRadius: number; cutCentre?: { x: number; y: number } },
+  input: { seatMachineZ: number; seekFromMachineZ: number; cornerRadius: number; cutCentre?: { x: number; y: number } },
   settings: RegistrationSettings,
 ): PlanResult {
   const dims = machineSize(setup.rotation, setup.stockBefore.bounds);
@@ -111,6 +117,7 @@ export function referenceRegistrationFor(
       stock: { xMin: 0, yMin: 0, xMax: dims.x, yMax: dims.y, cornerRadius: input.cornerRadius },
       mount: mount.kind,
       expectedSurface: { machineZ: input.seatMachineZ + dims.z, from: `the seat at machine Z ${input.seatMachineZ} + the stock's ${dims.z} mm this way up (setup ${setup.index})` },
+      seekFromMachineZ: input.seekFromMachineZ,
       fixtureBelowSurfaceMm: mount.kind === 'vise' ? dims.z - LEDGE_STEP : undefined,
       ...(input.cutCentre ? { cutCentre: input.cutCentre } : {}),
       openings,

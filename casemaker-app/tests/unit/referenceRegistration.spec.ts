@@ -36,6 +36,8 @@ const input = (over: Partial<ReferencePlanInput> = {}): ReferencePlanInput => ({
   stock: STOCK,
   mount: 'vise',
   expectedSurface: { machineZ: SURFACE, from: 'the vise ledge + 10 mm' },
+  // The Z1's own travel height (`MACHINES.Z1.toolChange.clearanceZ`) — required, never defaulted (#448).
+  seekFromMachineZ: -3,
   fixtureBelowSurfaceMm: 6.9,
   openings: [A, B],
   ...over,
@@ -280,14 +282,14 @@ describe('#429 from the setups engine', () => {
     expect(openings).toEqual([{ itemId: 'bore', name: 'the bore', min: [10, 30], max: [20, 40], depth: 10 }]);
     // The pocket was cut into the face now DOWN, and the chamfer is this setup's own: nothing blind on this face.
     expect(blind).toEqual([]);
-    const r = referenceRegistrationFor(two, { kind: 'vise' }, { seatMachineZ: -66, cornerRadius: 0 }, S);
+    const r = referenceRegistrationFor(two, { kind: 'vise' }, { seatMachineZ: -66, seekFromMachineZ: -3, cornerRadius: 0 }, S);
     if (!r.ok) throw new Error(r.reason);
     expect(r.plan.scans.every((sc) => sc.label?.includes('the bore'))).toBe(true);
   });
 
   it('a group of holes is not one opening: refused as a reference, by name', () => {
     const four: Removal = { id: 'h4', name: 'the four holes', volume: 200, box: { min: [10, 10, 0], max: [30, 50, 10] }, opensTo: ['top', 'bottom'] };
-    const r = referenceRegistrationFor(setup2(four), { kind: 'vise' }, { seatMachineZ: -66, cornerRadius: 0 }, S);
+    const r = referenceRegistrationFor(setup2(four), { kind: 'vise' }, { seatMachineZ: -66, seekFromMachineZ: -3, cornerRadius: 0 }, S);
     expect(r).toMatchObject({ ok: false, reason: expect.stringContaining('the four holes: not marked as one connected opening') });
   });
 });

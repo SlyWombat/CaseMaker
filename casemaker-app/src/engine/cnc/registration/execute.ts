@@ -8,7 +8,7 @@
  *      read one, so none is left to sit silently between the touches and the origin).
  *   3. The OPERATOR fits the wired probe (a callback — a person, not this code). `M491`: its last
  *      `[PRB:…]` is the probe's tool-length reading, the Z0 reference.
- *   4. The surface at the plan's clean point, from machine Z −3: a fast `G38.2` that travels only to the
+ *   4. The surface at the plan's clean point, from the plan's seek height (`seek.fromMachineZ`): a fast `G38.2` that travels only to the
  *      expected surface − tolerance, `G0 Z1`, a slow `G38.2`. BOTH readings must land inside the
  *      expected surface ± tolerance, or the run stops. The probe then PARKS at surface + park.
  *   5. Each edge scan, touch by touch, every XY move AT THE PARK HEIGHT: `G0 X Y`, `?` until Idle,
@@ -16,7 +16,8 @@
  *      miss, `G90`, the lift to park. Coarse, then fine; the scan stops at the first touch off the
  *      stock, then takes ONE touch midway back toward the stock to halve the last step (never further
  *      out than the miss).
- *   6. Lift (`G53 G0 Z-3`) and `$H`.
+ *   6. Lift to the plan's seek height (`G53 G0 Z` — the resolved machine's `toolChange.clearanceZ`) and
+ *      `$H`.
  *
  * `?` IS POLLED UNTIL IDLE BEFORE EVERY `G38.2`, as the bench did: a probe sent while a move is still
  * settling is not a probe of where the move was meant to end.
@@ -79,8 +80,13 @@ const f = (n: number) => (Math.round(n * 1000) / 1000).toFixed(3).replace(/\.?0+
 
 class Stop extends Error {}
 
-/** One machine conversation, stopping at the first answer it did not expect. */
-function session(deps: ExecDeps, idlePollLimit: number = MAX_IDLE_POLLS) {
+/**
+ * One machine conversation, stopping at the first answer it did not expect. `seekFromMachineZ` is
+ * REQUIRED: it is the height the recovery sentence tells the operator to lift to (the resolved
+ * machine's `toolChange.clearanceZ`), and a forgotten argument must be a typecheck error, never a
+ * silent −3 that could send the head somewhere the machine does not call clear.
+ */
+function session(deps: ExecDeps, seekFromMachineZ: number, idlePollLimit: number = MAX_IDLE_POLLS) {
   // A bounded wait whatever the location says: a whole number of polls, at least one (#449).
   const idlePolls = Number.isInteger(idlePollLimit) && idlePollLimit >= 1 ? idlePollLimit : MAX_IDLE_POLLS;
   const transcript: Transcript[] = [];
@@ -140,7 +146,7 @@ function session(deps: ExecDeps, idlePollLimit: number = MAX_IDLE_POLLS) {
     }
     return (
       `${reason}. Stopped — the probe may be ${depth}, and the machine may be in alarm. ` +
-      'To recover: $X, then G90, then lift with G53 G0 Z-3 before any XY move.'
+      `To recover: $X, then G90, then lift with G53 G0 Z${f(seekFromMachineZ)} before any XY move.`
     );
   }
 
@@ -161,9 +167,10 @@ function moveXY(plan: RegistrationPlan, x: number, y: number): string {
 
 /**
  * One scan touch at `at`: XY at the park height, Idle, probe down at most to the cap, clear a miss, lift.
- * `travelHigh` (#427): the move that STARTS a scan on the bracket goes at the seek height (machine Z −3)
- * and only then down to the park — the clamps and the bracket's arms stand above the stock, higher than
- * the park, and the move between two scan lines (or from the surface point) is not checked against them.
+ * `travelHigh` (#427): the move that STARTS a scan on the bracket goes at the seek height (the plan's
+ * `seek.fromMachineZ`) and only then down to the park — the clamps and the bracket's arms stand above the
+ * stock, higher than the park, and the move between two scan lines (or from the surface point) is not
+ * checked against them.
  * The touches ALONG a scan line stay at the park: the line itself is kept clear of the clamps.
  */
 async function touch(io: Session, plan: RegistrationPlan, scan: EdgeScan, at: number, parkZ: number, surfaceZ: number, travelHigh = false): Promise<ScanTouch> {
@@ -217,7 +224,7 @@ function inBand(prb: Prb | null, plan: RegistrationPlan, which: string): Prb {
 }
 
 export async function runRegistration(plan: RegistrationPlan, deps: ExecDeps): Promise<RunResult> {
-  const io = session(deps, plan.settings.idlePollLimit);
+  const io = session(deps, plan.seek.fromMachineZ, plan.settings.idlePollLimit);
   const s = plan.settings;
   // #449 — the settings are the location's; a set that cannot make a capped touch sends nothing at all.
   const bad = settingsProblem(s);
@@ -285,7 +292,7 @@ export async function applyCorrection(
   deps: ExecDeps,
   consent: { confirmed: boolean },
 ): Promise<ApplyResult> {
-  const io = session(deps);
+  const io = session(deps, outcome.seekFromMachineZ);
   if (!outcome.usable) {
     return { ok: false, reason: `no origin is written from this measurement: ${outcome.problems.join('; ')}`, transcript: [] };
   }

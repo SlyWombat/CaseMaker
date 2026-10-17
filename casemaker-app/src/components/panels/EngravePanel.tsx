@@ -2099,6 +2099,10 @@ export function EngravePanel(): JSX.Element {
                 machine={machine}
                 program={uploadable}
                 filename={runSheetFileName(job.name)}
+                lift={{
+                  zMachine: jobMachine(job).toolChange.clearanceZ,
+                  zFloorMachine: jobMachine(job).softEndstop.zMin,
+                }}
                 onLiveStatus={noteLiveStatus}
               />
             )}

@@ -43,6 +43,8 @@ function input(mount: 'vise' | 'tape' | 'bracket' = 'vise', over: Partial<PlanIn
     stock: BLANK,
     mount,
     expectedSurface: { machineZ: SURFACE, from: 'the vise top and the blank’s proud height' },
+    // The Z1's own travel height (`MACHINES.Z1.toolChange.clearanceZ`) — required, never defaulted (#448).
+    seekFromMachineZ: -3,
     fixtureBelowSurfaceMm: mount === 'vise' ? 0.72 : undefined,
     bracketOrigin: mount === 'bracket' ? { x: G54.x, y: G54.y, from: 'anchor1 + (0, 0)', offsetMeasured: true } : undefined,
     mountObstacles: mount === 'bracket' ? [] : undefined,
@@ -365,6 +367,17 @@ describe('#430 the executor, on a fake machine', () => {
     expect(z1.lines).toEqual(['?']);
   });
 
+  it('#448: the recovery sentence names the travel height it was given, not −3', async () => {
+    const silent = {
+      async send(line: string): Promise<ConsoleSendResult> {
+        return { kind: 'timeout', line, detail: 'no answer', text: '' };
+      },
+    };
+    const r = await runRegistration(plan('vise', { seekFromMachineZ: -10 }), { console: silent, operator: yes });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reason).toContain('lift with G53 G0 Z-10 before any XY move');
+  });
+
   it('stops at a failure at ANY step, sends nothing more but G90, and says the machine may be low or alarmed', async () => {
     const clean = fakeZ1({ actual: SHIFTED });
     const full = await runRegistration(plan('vise'), { console: clean.console, operator: yes });
@@ -575,6 +588,27 @@ describe('#427 the bracket: XY from the datum, an optional confirming touch', ()
     expect(planRegistration(input('bracket', { mountObstacles: [{ ...CLAMP, topZ: 53 }] }), S)).toMatchObject({ ok: false, reason: expect.stringContaining('travel height') });
     const over = { ...CLAMP, min: [15, 30] as [number, number], max: [25, 45] as [number, number] };
     expect(planRegistration(input('bracket', { mountObstacles: [over] }), S)).toMatchObject({ ok: false, reason: expect.stringContaining('surface touch point') });
+  });
+
+  it('#448: the seek and the obstacle bound are the travel height the caller gave, not −3', () => {
+    // The seek starts at the machine's travel height and the band is unchanged, so the travel follows it.
+    expect(plan('vise', { seekFromMachineZ: -10 }).seek).toEqual({
+      fromMachineZ: -10,
+      travelMm: 46.572,
+      band: { min: -56.572, max: -55.772 },
+    });
+    // A clamp standing to machine Z −8.17 clears −3, but from −10 the probe would be driven into it.
+    const clamp = { ...CLAMP, topZ: 48 };
+    expect(planRegistration(input('bracket', { mountObstacles: [clamp] }), S).ok).toBe(true);
+    expect(planRegistration(input('bracket', { seekFromMachineZ: -10, mountObstacles: [clamp] }), S)).toMatchObject({
+      ok: false,
+      reason: expect.stringContaining('machine Z -10'),
+    });
+    // A height that is not a number is refused before any of it.
+    expect(planRegistration(input('vise', { seekFromMachineZ: Number.NaN }), S)).toMatchObject({
+      ok: false,
+      reason: expect.stringContaining('travel height is not known'),
+    });
   });
 
   it('the confirm scans the RIGHT and BACK edges — the arms are on the left and front — clear of the clamps', () => {

@@ -327,6 +327,7 @@ export function referenceOutcome(plan: RegistrationPlan, data: RunData): Registr
     margin: s.edgeMarginMm,
     surfaceZ: data.surface.z,
     probeRefZ: data.probeRefZ,
+    seekFromMachineZ: plan.seek.fromMachineZ,
     currentG54,
     correctedG54: { x: r3(currentG54.x + offset.x), y: r3(currentG54.y + offset.y) },
     usable,

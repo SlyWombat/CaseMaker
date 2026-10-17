@@ -22,9 +22,12 @@
  *     clamps. They confirm the stock is pushed into the corner; they never move the origin. While the
  *     bracket's offset from the anchor is a default, not measured, the confirming touch is REQUIRED.
  *     The plan carries the mount's obstacles (`mountObstacles`: the clamps and the arms, as the job
- *     places them): a top that reaches the travel height (machine Z −3) is refused, the surface point
- *     must be clear of them, and the operator confirms the clamps are where the plan puts them before
- *     anything moves sideways (`execute.ts`).
+ *     places them): a top that reaches the travel height is refused, the surface point must be clear
+ *     of them, and the operator confirms the clamps are where the plan puts them before anything moves
+ *     sideways (`execute.ts`). The travel height is the resolved machine's `toolChange.clearanceZ`
+ *     (`machine.ts`), passed in as `seekFromMachineZ`; BOTH the seek's start AND this refusal bound
+ *     read that one value, so the invariant "nothing stands above the travel height" holds whatever
+ *     height a valid calibration supplies.
  *     Every XY move on the bracket is sent in MACHINE coordinates (`G53`), from the bracket's origin, so
  *     the touches land on the stock whatever G54 was left in force.
  *   - vise — the left edge (a confirm against the fixed jaw) and the front edge (Y — Appendix C). The
@@ -81,6 +84,14 @@ export interface PlanInput {
    * stock, and using it would offset the whole seek band by the difference between the two tools.
    */
   expectedSurface: { machineZ: number; from: string };
+  /**
+   * REQUIRED, and the CALLER's to supply: the machine's own travel height in MACHINE Z — the resolved
+   * machine's `toolChange.clearanceZ` (`machine.ts` → `resolveMachine`), the Z the controller lifts to
+   * before any clearance traverse. It is BOTH the height the seek starts from AND the bound the obstacle
+   * check is measured from (`planRegistration`), so the two can never drift: a clamp or the bracket's
+   * arm whose top reaches this height is refused, because the probe would be driven into it.
+   */
+  seekFromMachineZ: number;
   /** The centre of the cut area, work XY — the clean point the surface is touched at. Default: the stock's centre. */
   cutCentre?: { x: number; y: number };
   /** Vise: how far the jaw tops sit BELOW the stock's top (the stock's proud height), mm. */
@@ -121,7 +132,7 @@ export interface RegistrationPlan {
   mount: Mount;
   stock: ExpectedStock;
   surfacePoint: { x: number; y: number };
-  /** The surface touch: from machine Z −3, at most this far down; and the band a reading must land in. */
+  /** The surface touch: from the machine's travel height (`seekFromMachineZ`), at most this far down; and the band a reading must land in. */
   seek: { fromMachineZ: number; travelMm: number; band: { min: number; max: number } };
   scans: EdgeScan[];
   bracketOrigin: BracketOrigin | null;
@@ -151,9 +162,6 @@ export interface ReferenceEntry {
 }
 
 export type PlanResult = { ok: true; plan: RegistrationPlan } | { ok: false; reason: string };
-
-/** Where the probe starts the surface seek: high, at machine Z −3, as every bench run did. */
-export const SEEK_FROM_MACHINE_Z = -3;
 
 function scanFor(edge: Edge, along: number, stock: ExpectedStock, s: RegistrationSettings): EdgeScan {
   const outward: 1 | -1 = edge === 'right' || edge === 'back' ? 1 : -1;
@@ -185,18 +193,21 @@ export function planRegistration(input: PlanInput, s: RegistrationSettings): Pla
     return { ok: false, reason: `the stock is too small for a scan that starts ${s.scanInsideMm} mm inside its edges` };
   }
 
-  // The surface seek: bounded to the expected surface ± tolerance.
+  // The surface seek: bounded to the expected surface ± tolerance, and started from the machine's own
+  // travel height (`seekFromMachineZ`) — the SAME value the obstacle check below is measured from.
   const exp = input.expectedSurface.machineZ;
   if (!Number.isFinite(exp)) return { ok: false, reason: 'the job does not say where it expects the stock’s top' };
+  const seekFromMachineZ = input.seekFromMachineZ;
+  if (!Number.isFinite(seekFromMachineZ)) return { ok: false, reason: 'the machine’s travel height is not known' };
   const band = { min: r3(exp - s.surfaceToleranceMm), max: r3(exp + s.surfaceToleranceMm) };
-  if (band.max + s.parkAboveSurfaceMm > SEEK_FROM_MACHINE_Z) {
+  if (band.max + s.parkAboveSurfaceMm > seekFromMachineZ) {
     return { ok: false, reason: `the stock's top is expected at machine Z ${exp}: too high to park ${s.parkAboveSurfaceMm} mm above it` };
   }
-  const travel = r3(SEEK_FROM_MACHINE_Z - band.min);
+  const travel = r3(seekFromMachineZ - band.min);
   if (travel > s.surfaceSeekMm) {
     return {
       ok: false,
-      reason: `the stock's top is expected ${r3(SEEK_FROM_MACHINE_Z - exp)} mm below the start, more than the ${s.surfaceSeekMm} mm the surface touch may travel`,
+      reason: `the stock's top is expected ${r3(seekFromMachineZ - exp)} mm below the start, more than the ${s.surfaceSeekMm} mm the surface touch may travel`,
     };
   }
 
@@ -230,13 +241,14 @@ export function planRegistration(input: PlanInput, s: RegistrationSettings): Pla
     }
     bracketOrigin = input.bracketOrigin;
     mountObstacles = input.mountObstacles;
-    // Every top must sit below the travel height, with the surface's own tolerance to spare.
+    // Every top must sit below the travel height, with the surface's own tolerance to spare. The bound
+    // is the SAME `seekFromMachineZ` the seek starts from, so this refusal moves with the travel height.
     for (const o of mountObstacles) {
       const topMachine = r3(exp + o.topZ);
-      if (topMachine >= SEEK_FROM_MACHINE_Z - s.surfaceToleranceMm) {
+      if (topMachine >= seekFromMachineZ - s.surfaceToleranceMm) {
         return {
           ok: false,
-          reason: `${o.label} stands to machine Z ${topMachine}, up to the probe's travel height (machine Z ${SEEK_FROM_MACHINE_Z}): the probe would be driven into it — use lower clamps or thinner stock`,
+          reason: `${o.label} stands to machine Z ${topMachine}, up to the probe's travel height (machine Z ${seekFromMachineZ}): the probe would be driven into it — use lower clamps or thinner stock`,
         };
       }
     }
@@ -323,7 +335,7 @@ export function planRegistration(input: PlanInput, s: RegistrationSettings): Pla
       mount,
       stock,
       surfacePoint,
-      seek: { fromMachineZ: SEEK_FROM_MACHINE_Z, travelMm: travel, band },
+      seek: { fromMachineZ: seekFromMachineZ, travelMm: travel, band },
       scans,
       bracketOrigin,
       mountObstacles,

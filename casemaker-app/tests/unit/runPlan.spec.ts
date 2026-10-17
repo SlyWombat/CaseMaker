@@ -151,6 +151,7 @@ describe('#421 the phases', () => {
         stock: { xMin: 0, yMin: 0, xMax: 38.1, yMax: 76.2, cornerRadius: 3 },
         mount: 'vise',
         expectedSurface: { machineZ: -56.172, from: 'test' },
+        seekFromMachineZ: -3,
         fixtureBelowSurfaceMm: 0.72,
       },
       S,

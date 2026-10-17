@@ -26,7 +26,15 @@ function fake(fail?: string): string[] {
   }));
   return sent;
 }
-const props = (mm: number) => ({ host: '192.0.2.10', port: 2222, margin: { mm, from: "the job's edge margin" }, uncertainty: { mm: 1, source: 'seeded' } });
+// `lift` is the Z1's `toolChange.clearanceZ` and `softEndstop.zMin`: the hoist the panel sends before
+// the laser moves, with the floor the guard checks it against (#448).
+const props = (mm: number) => ({
+  host: '192.0.2.10',
+  port: 2222,
+  margin: { mm, from: "the job's edge margin" },
+  uncertainty: { mm: 1, source: 'seeded' },
+  lift: { zMachine: -3, zFloorMachine: -102 },
+});
 
 afterEach(() => {
   cleanup();

@@ -13,6 +13,11 @@
  * off and a home — the bench rule is to home when an activity is done. The laser is switched off in
  * a `finally` once `M831` has gone out, whatever happened in between.
  *
+ * THE LIFT IS GUARDED AT ITS POINT OF USE (#448). Both motions take a {@link LaserLift} — the height
+ * AND the bounds that make it safe — and both refuse, sending nothing at all, unless {@link liftProblem}
+ * passes: a calibration that read a positive value, a NaN, or something below the machine's soft
+ * endstop would otherwise drive the head up into its stops, down into the work, or nowhere legible.
+ *
  * POINT-TO-ORIGIN (#431 slice 2, {@link LaserPointSession}): lift, laser on, the operator jogs the dot
  * onto the stock's corner — X and Y only, one `G91 G0` line per step and straight back to `G90` — and
  * presses Set; after a confirmation the app writes `G10 L2 P1 X Y` from the machine position the
@@ -29,14 +34,51 @@ import { attachConsole, type MachineConsoleTarget } from './machineConsole';
 
 export const LASER_ON = 'M831';
 export const LASER_OFF = 'M832';
-/** The lift before any XY move: machine Z −3, the height the bench routine travels at. */
-export const LASER_SAFE_Z_MACHINE = -3;
 
 export interface XYBounds {
   minX: number;
   minY: number;
   maxX: number;
   maxY: number;
+}
+
+/**
+ * The Z both laser motions lift to, and the bounds that make it safe (#448).
+ *
+ * `zMachine` is the resolved machine's `toolChange.clearanceZ` (the same height `runRegistration`
+ * seeks from). `zFloorMachine` is the machine's own soft-endstop Z floor (`softEndstop.zMin`);
+ * `stockTopMachineZ` is the stock's top in machine Z when it is known — the engrave panel does not
+ * hold it, so it is usually absent. An object rather than a bare number because a guard needs the
+ * bounds, and a caller cannot pass one without the other.
+ */
+export interface LaserLift {
+  zMachine: number;
+  zFloorMachine: number;
+  stockTopMachineZ?: number;
+}
+
+/** A machine Z as the app writes it: three decimals at most, no trailing zeroes (−3, −2.5, −2.125). */
+export function zText(n: number): string {
+  return Number(n.toFixed(3)).toString();
+}
+
+/**
+ * Why a laser lift must not be attempted, or null. The lift must be a known number strictly between
+ * the machine's soft-endstop floor and machine Z0, and above the stock's top when that is known.
+ */
+export function liftProblem(lift: LaserLift): string | null {
+  const z = lift.zMachine;
+  if (!Number.isFinite(z)) return 'the machine’s travel height is not known';
+  if (!Number.isFinite(lift.zFloorMachine)) return 'the machine’s soft-endstop floor is not known';
+  if (z >= 0) return `the travel height (machine Z ${zText(z)}) is not below machine Z0 — the head would not lift`;
+  if (z <= lift.zFloorMachine) {
+    return `the travel height (machine Z ${zText(z)}) is at or below the machine’s soft endstop (machine Z ${zText(lift.zFloorMachine)})`;
+  }
+  const top = lift.stockTopMachineZ;
+  if (top !== undefined && Number.isFinite(top) && z <= top) {
+    return `the travel height (machine Z ${zText(z)}) is not above the stock’s top (machine Z ${zText(top)})`;
+  }
+  return null;
 }
 
 /** The program's XY extent, or null when the report holds no points. */
@@ -48,9 +90,12 @@ export function frameBounds(bbox: { min: readonly number[]; max: readonly number
   return { minX: minX as number, minY: minY as number, maxX: maxX as number, maxY: maxY as number };
 }
 
-/** The frame's motion lines, pure: lift, the four corners in the work offset, and back to the first. */
-export function laserFrameLines(b: XYBounds): string[] {
-  const f = (n: number) => Number(n.toFixed(3)).toString();
+/**
+ * The frame's motion lines, pure: lift, the four corners in the work offset, and back to the first.
+ * `zMachine` is a {@link LaserLift}'s height, already through {@link liftProblem} — `runLaserFrame`
+ * refuses before this builder is reached, so a bad height never becomes a line.
+ */
+export function laserFrameLines(b: XYBounds, zMachine: number): string[] {
   const corners: Array<[number, number]> = [
     [b.minX, b.minY],
     [b.maxX, b.minY],
@@ -59,9 +104,9 @@ export function laserFrameLines(b: XYBounds): string[] {
     [b.minX, b.minY],
   ];
   return [
-    `G53 G0 Z${LASER_SAFE_Z_MACHINE}`,
+    `G53 G0 Z${zText(zMachine)}`,
     'G90',
-    ...corners.map(([x, y]) => `G0 X${f(x)} Y${f(y)}`),
+    ...corners.map(([x, y]) => `G0 X${zText(x)} Y${zText(y)}`),
   ];
 }
 
@@ -71,8 +116,11 @@ export type LaserFrameOutcome =
   | { kind: 'failed'; detail: string; laserOff: boolean }
   | { kind: 'unavailable'; detail: string };
 
-/** Run the laser frame. Never throws. Refuses unless the machine is Idle with no program and no alarm. */
-export async function runLaserFrame(target: MachineConsoleTarget, bounds: XYBounds): Promise<LaserFrameOutcome> {
+/** Run the laser frame. Never throws. Refuses unless the machine is Idle with no program and no alarm,
+ *  and refuses a lift its bounds do not vouch for — BEFORE the console is even opened. */
+export async function runLaserFrame(target: MachineConsoleTarget, bounds: XYBounds, lift: LaserLift): Promise<LaserFrameOutcome> {
+  const bad = liftProblem(lift);
+  if (bad !== null) return { kind: 'failed', detail: `nothing was sent: ${bad}`, laserOff: true };
   const session = attachConsole(target);
   let laserMaybeOn = false;
   /** A failure after the laser may be on switches it off first, and says whether that was answered. */
@@ -95,9 +143,9 @@ export async function runLaserFrame(target: MachineConsoleTarget, bounds: XYBoun
         detail: `it reports ${state ?? 'no readable state'}${percent !== null ? ` at ${percent}%` : ''}, not an idle machine — nothing was sent`,
       };
     }
-    const [lift, ...moves] = laserFrameLines(bounds);
+    const [liftLine, ...moves] = laserFrameLines(bounds, lift.zMachine);
     // Lift before the laser goes on, so the dot is never shown while the head could still be low.
-    const up = await session.send(lift as string);
+    const up = await session.send(liftLine as string);
     if (up.kind !== 'sent') return fail(`lift: ${up.detail}`);
     laserMaybeOn = true;
     const on = await session.send(LASER_ON);
@@ -156,9 +204,12 @@ export class LaserPointSession {
   private ended = false;
 
   private readonly target: MachineConsoleTarget;
+  /** The guarded lift both the moved lines and the sentences use (#448). */
+  private readonly lift: LaserLift;
 
-  constructor(target: MachineConsoleTarget) {
+  constructor(target: MachineConsoleTarget, lift: LaserLift) {
     this.target = target;
+    this.lift = lift;
   }
 
   get active(): boolean {
@@ -179,6 +230,9 @@ export class LaserPointSession {
   begin(): Promise<PointStep> {
     return this.one(async () => {
       if (this.ended || this.session !== null) return { ok: false, detail: 'this session has already started' };
+      // #448 — a lift its bounds do not vouch for never opens the console, so nothing is sent at all.
+      const bad = liftProblem(this.lift);
+      if (bad !== null) return { ok: false, detail: `nothing was sent: ${bad}` };
       this.session = attachConsole(this.target);
       const ask = await this.session.send('?');
       if (ask.kind !== 'sent') return this.abort(ask.kind === 'unavailable' ? ask.detail : `status: ${ask.detail}`);
@@ -189,13 +243,13 @@ export class LaserPointSession {
       if (state?.toLowerCase() !== 'idle' || (percent !== null && percent < 100)) {
         return this.abort(`it reports ${state ?? 'no readable state'}${percent !== null ? ` at ${percent}%` : ''}, not an idle machine — nothing was sent`);
       }
-      const up = await this.session.send(`G53 G0 Z${LASER_SAFE_Z_MACHINE}`);
+      const up = await this.session.send(`G53 G0 Z${zText(this.lift.zMachine)}`);
       if (up.kind !== 'sent') return this.abort(`lift: ${up.detail}`);
       this.lifted = true;
       this.laserMaybeOn = true;
       const on = await this.session.send(LASER_ON);
       if (on.kind !== 'sent') return this.abort(`laser on: ${on.detail}`);
-      return { ok: true, detail: `Lifted to machine Z ${LASER_SAFE_Z_MACHINE}, laser on. Jog the dot onto the stock's corner.` };
+      return { ok: true, detail: `Lifted to machine Z ${zText(this.lift.zMachine)}, laser on. Jog the dot onto the stock's corner.` };
     }, { ok: false, detail: 'another command is still going' });
   }
 

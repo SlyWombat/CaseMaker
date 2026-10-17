@@ -3,13 +3,17 @@
 import { describe, it, expect, afterEach } from 'vitest';
 
 import { setMachineConsoleLoader, type ConsoleSend, type MachineConsoleSession } from '@/platform/machineConsole';
-import { laserFrameLines, runLaserFrame } from '@/platform/machineLaser';
+import { laserFrameLines, liftProblem, runLaserFrame, type LaserLift } from '@/platform/machineLaser';
+import { Z1 } from '@/engine/cnc/machine';
 
 afterEach(() => setMachineConsoleLoader(null));
 
 const TARGET = { host: '192.168.10.43', port: 2222 };
 const IDLE = '<Idle|MPos:-1.0000,-1.0000,-1.0000|Bf:14,128>';
 const B = { minX: 0, minY: 0, maxX: 36.5, maxY: 74.25 };
+/** The Z1's own travel height and soft-endstop floor, MACHINE Z: what the caller passes (#448). */
+const LIFT: LaserLift = { zMachine: Z1.toolChange.clearanceZ, zFloorMachine: Z1.softEndstop.zMin };
+const lifted = (zMachine: number, extra: Partial<LaserLift> = {}): LaserLift => ({ ...LIFT, zMachine, ...extra });
 
 function fake(answer: (line: string) => ConsoleSend) {
   const sent: string[] = [];
@@ -27,7 +31,9 @@ const ok = (line: string, text = 'ok'): ConsoleSend => ({ ok: true, line, text, 
 
 describe('#431 laserFrameLines', () => {
   it('lifts in machine coordinates, then visits the four corners and closes the loop', () => {
-    expect(laserFrameLines(B)).toEqual([
+    // The number is the Z1's own `toolChange.clearanceZ`, read on the machine (#208 B6) — passed in, not a constant.
+    expect(LIFT.zMachine).toBe(-3);
+    expect(laserFrameLines(B, LIFT.zMachine)).toEqual([
       'G53 G0 Z-3',
       'G90',
       'G0 X0 Y0',
@@ -37,12 +43,53 @@ describe('#431 laserFrameLines', () => {
       'G0 X0 Y0',
     ]);
   });
+
+  it('follows the lift it is given, not a constant (#448)', () => {
+    expect(laserFrameLines(B, -10)[0]).toBe('G53 G0 Z-10');
+    expect(laserFrameLines(B, -2.5)[0]).toBe('G53 G0 Z-2.5');
+  });
+});
+
+describe('#448 the lift guard', () => {
+  it('allows a height strictly between the soft-endstop floor and Z0, and above a known stock top', () => {
+    expect(liftProblem(LIFT)).toBeNull();
+    expect(liftProblem(lifted(-2.5))).toBeNull();
+    expect(liftProblem(lifted(-3, { stockTopMachineZ: -8 }))).toBeNull();
+    expect(liftProblem(lifted(Number.NaN))).toContain('travel height is not known');
+    expect(liftProblem(lifted(0))).toContain('not below machine Z0');
+    expect(liftProblem(lifted(5))).toContain('not below machine Z0');
+    expect(liftProblem(lifted(Z1.softEndstop.zMin))).toContain('soft endstop');
+    expect(liftProblem(lifted(-103))).toContain('soft endstop');
+    expect(liftProblem(lifted(-3, { stockTopMachineZ: -2 }))).toContain('not above the stock');
+    expect(liftProblem({ ...LIFT, zFloorMachine: Number.NaN })).toContain('soft-endstop floor is not known');
+  });
+
+  it('refuses the frame before the console is opened: nothing is sent', async () => {
+    for (const bad of [Number.NaN, 0, 5, Z1.softEndstop.zMin]) {
+      const sent = fake((l) => (l === '?' ? ok(l, IDLE) : ok(l)));
+      const r = await runLaserFrame(TARGET, B, lifted(bad));
+      expect(r).toMatchObject({ kind: 'failed', laserOff: true });
+      expect(sent).toEqual([]);
+    }
+    const stock = fake((l) => (l === '?' ? ok(l, IDLE) : ok(l)));
+    expect((await runLaserFrame(TARGET, B, lifted(-3, { stockTopMachineZ: -2 }))).kind).toBe('failed');
+    expect(stock).toEqual([]);
+  });
+
+  it('refuses point-to-origin before anything at all, and owes no home', async () => {
+    const { LaserPointSession } = await import('@/platform/machineLaser');
+    const sent = fake((l) => (l === '?' ? ok(l, IDLE) : ok(l)));
+    const s = new LaserPointSession(TARGET, lifted(Number.NaN));
+    expect(await s.begin()).toMatchObject({ ok: false, detail: expect.stringContaining('nothing was sent') });
+    expect(sent).toEqual([]);
+    expect(await s.end({ home: false })).toEqual({ laserOff: true, homed: false, lifted: false });
+  });
 });
 
 describe('#431 runLaserFrame', () => {
   it('runs lift, laser on, the corners, laser off, then homes', async () => {
     const sent = fake((l) => (l === '?' ? ok(l, IDLE) : ok(l)));
-    const r = await runLaserFrame(TARGET, B);
+    const r = await runLaserFrame(TARGET, B, LIFT);
     expect(r).toEqual({ kind: 'framed', homed: true });
     expect(sent[0]).toBe('?');
     expect(sent[1]).toBe('G53 G0 Z-3');
@@ -52,7 +99,7 @@ describe('#431 runLaserFrame', () => {
 
   it('refuses a running machine and sends nothing else', async () => {
     const sent = fake((l) => ok(l, '<Run|P:10,20,30>'));
-    expect((await runLaserFrame(TARGET, B)).kind).toBe('busy');
+    expect((await runLaserFrame(TARGET, B, LIFT)).kind).toBe('busy');
     expect(sent).toEqual(['?']);
   });
 
@@ -60,7 +107,7 @@ describe('#431 runLaserFrame', () => {
     const sent = fake((l) =>
       l === '?' ? ok(l, IDLE) : l === 'G0 X36.5 Y0' ? { ok: false, line: l, reason: 'timeout', detail: 'no reply', text: '' } : ok(l),
     );
-    const r = await runLaserFrame(TARGET, B);
+    const r = await runLaserFrame(TARGET, B, LIFT);
     expect(r).toMatchObject({ kind: 'failed', laserOff: true });
     expect(sent.at(-1)).toBe('M832');
     expect(sent).not.toContain('$H');
@@ -85,7 +132,7 @@ describe('#431 slice 2 — laser point-to-origin', () => {
   const sessionWith = async (answer: (l: string) => ConsoleSend = (l) => (l === '?' ? ok(l, AT) : ok(l))) => {
     const { LaserPointSession } = await import('@/platform/machineLaser');
     const sent = fake(answer);
-    return { s: new LaserPointSession(TARGET), sent };
+    return { s: new LaserPointSession(TARGET, LIFT), sent };
   };
 
   it('starts only on an idle machine: status, then the lift, then the laser', async () => {

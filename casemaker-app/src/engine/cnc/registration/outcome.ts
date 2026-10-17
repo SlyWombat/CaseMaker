@@ -61,6 +61,11 @@ export interface RegistrationOutcome {
   margin: number;
   surfaceZ: number;
   probeRefZ: number;
+  /**
+   * The plan's seek height, in MACHINE Z — the resolved machine's `toolChange.clearanceZ` it sought from
+   * (carried so the recovery sentence names the same height the plan lifted to, never a constant).
+   */
+  seekFromMachineZ: number;
   /** The G54 in force during the touches — null on the bracket, where every move was sent in machine XY. */
   currentG54: { x: number; y: number } | null;
   correctedG54: { x: number; y: number };
@@ -231,6 +236,7 @@ export function computeOutcome(plan: RegistrationPlan, data: RunData): Registrat
     margin: s.edgeMarginMm,
     surfaceZ: data.surface.z,
     probeRefZ: data.probeRefZ,
+    seekFromMachineZ: plan.seek.fromMachineZ,
     currentG54: onBracket ? null : g54InForce,
     correctedG54,
     usable,

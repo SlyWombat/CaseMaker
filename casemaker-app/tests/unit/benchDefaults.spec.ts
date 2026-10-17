@@ -25,7 +25,8 @@ import { materialScanSettingsFrom, SCAN_FALLBACK } from '@/engine/cnc/engrave/ma
 import { MAX_IDLE_POLLS } from '@/engine/cnc/registration/execute';
 import { registrationSettings, settingsProblem } from '@/engine/cnc/registration/settings';
 import { runRegistration } from '@/engine/cnc/registration/execute';
-import type { RegistrationPlan } from '@/engine/cnc/registration/plan';
+import { planRegistration } from '@/engine/cnc/registration/plan';
+import { Z1 } from '@/engine/cnc/machine';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const APP = join(HERE, '..', '..');
@@ -266,10 +267,23 @@ describe('#449 the values reach the code, and the floors still hold', () => {
     expect(KNOWN_DEFAULTS['registration.surfaceSlowSeekMm']!.rule.safeParse(2).success).toBe(true);
     expect(KNOWN_DEFAULTS['registration.surfaceSlowSeekMm']!.rule.safeParse(2.01).success).toBe(false);
     expect(settingsProblem({ ...s, idlePollLimit: 0 })).toContain('whole number');
-    // And the executor itself: nothing reaches the console. The refusal is decided before any other
-    // field of the plan is read, so a plan carrying only the settings is enough to prove it.
+    // And the executor itself: nothing reaches the console. The plan here is a REAL one — planned with
+    // the location's own settings, then handed the unusable set (#448 review: a cast that hides the
+    // plan's other fields would let production statement order be shaped by a test).
+    const good = planRegistration(
+      {
+        stock: { xMin: 0, yMin: 0, xMax: 38.1, yMax: 76.2, cornerRadius: 3 },
+        mount: 'vise',
+        expectedSurface: { machineZ: -56.172, from: 'the vise top and the blank’s proud height' },
+        // The Z1's own travel height — the same value the planner's own spec uses (#448).
+        seekFromMachineZ: Z1.toolChange.clearanceZ,
+        fixtureBelowSurfaceMm: 0.72,
+      },
+      s,
+    );
+    if (!good.ok) throw new Error(good.reason);
     const sent: string[] = [];
-    const r = await runRegistration({ settings: { ...s, surfaceSlowSeekMm: 1 } } as unknown as RegistrationPlan, {
+    const r = await runRegistration({ ...good.plan, settings: { ...s, surfaceSlowSeekMm: 1 } }, {
       console: { send: async (line: string) => (sent.push(line), { kind: 'sent' as const, line, text: 'ok', frames: 1, elapsedMs: 1 }) },
       operator: async () => true,
     });

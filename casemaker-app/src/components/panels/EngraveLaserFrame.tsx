@@ -1,5 +1,5 @@
 import { useState, type CSSProperties, type JSX } from 'react';
-import { runLaserFrame, type XYBounds } from '@/platform/machineLaser';
+import { runLaserFrame, type LaserLift, type XYBounds } from '@/platform/machineLaser';
 
 /**
  * #431 — "Frame with laser": trace the program's XY extent with the probe's laser before cutting.
@@ -15,10 +15,17 @@ export function EngraveLaserFrame({
   host,
   port,
   bounds,
+  lift,
 }: {
   host: string;
   port: number;
   bounds: XYBounds | null;
+  /**
+   * The Z the head lifts to, with the bounds that make it safe — the resolved machine's
+   * `toolChange.clearanceZ` and `softEndstop.zMin`. REQUIRED, not defaulted: a missing one must be
+   * a typecheck error, never a silent −3 (#448).
+   */
+  lift: LaserLift;
 }): JSX.Element {
   const [armed, setArmed] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -28,7 +35,7 @@ export function EngraveLaserFrame({
     if (bounds === null || busy) return;
     setBusy(true);
     setNote('Framing — the head lifts, the laser comes on and traces the job, then it homes…');
-    const r = await runLaserFrame({ host, port }, bounds);
+    const r = await runLaserFrame({ host, port }, bounds, lift);
     setNote(
       r.kind === 'framed'
         ? r.homed

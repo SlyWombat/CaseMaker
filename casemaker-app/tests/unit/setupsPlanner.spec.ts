@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { ShopDefaultsSchema } from '@/platform/defaultsClient';
 import { registrationSettings } from '@/engine/cnc/registration';
+import { Z1 } from '@/engine/cnc/machine';
 import {
   FACES,
   checkRemountAnswer,
@@ -25,6 +26,8 @@ import {
 const HERE = dirname(fileURLToPath(import.meta.url));
 const DEFAULTS = ShopDefaultsSchema.parse((JSON.parse(readFileSync(join(HERE, 'fixtures', 'location-doc.json'), 'utf8')) as { defaults: unknown }).defaults);
 const S = setupsSettings(DEFAULTS);
+/** The machine's own travel height, MACHINE Z — required on every registration input, never defaulted (#448). */
+const Z1_CLEARANCE_Z = Z1.toolChange.clearanceZ;
 
 /** A 100 × 60 × 10 plate (X × Y × Z). */
 const STOCK = { x: 100, y: 60, z: 10 };
@@ -114,7 +117,7 @@ describe('#428 the stock is carried, facing included', () => {
     expect(two!.stockBefore.bounds.max[2]).toBe(9); // a millimetre faced off the top
     expect(two!.stockBefore.cuts.map((c) => c.id)).toEqual(['face']);
     // The next registration expects the surface a millimetre lower: 9 mm tall now, not 10.
-    const reg = registrationFor(two!, { kind: 'vise' }, { seatMachineZ: -66, cornerRadius: 0 }, registrationSettings(DEFAULTS).settings);
+    const reg = registrationFor(two!, { kind: 'vise' }, { seatMachineZ: -66, seekFromMachineZ: Z1_CLEARANCE_Z, cornerRadius: 0 }, registrationSettings(DEFAULTS).settings);
     expect(reg.plan.ok && reg.plan.plan.seek.band).toEqual({ min: -57.4, max: -56.6 });
   });
 });
@@ -235,7 +238,7 @@ describe('#428 registration after a remount', () => {
   it('the flip: #430’s plan for the new up face, and the through holes as a reference at the mirrored Y', () => {
     const inp = input({ mount: { kind: 'vise', viseOpeningMm: 120 } });
     const two = planSetups(inp, S).setups[1]!;
-    const { plan, references } = registrationFor(two, inp.mount, { seatMachineZ: -66, cornerRadius: 0 }, registrationSettings(DEFAULTS).settings);
+    const { plan, references } = registrationFor(two, inp.mount, { seatMachineZ: -66, seekFromMachineZ: Z1_CLEARANCE_Z, cornerRadius: 0 }, registrationSettings(DEFAULTS).settings);
     if (!plan.ok) throw new Error(plan.reason);
     expect(plan.plan.seek.band).toEqual({ min: -56.4, max: -55.6 });
     expect(references).toEqual([{ itemId: 'holes', name: 'the four holes', at: { x: 15, y: 30 } }]);
@@ -247,7 +250,7 @@ describe('#428 registration after a remount', () => {
     const side = plan.setups.find((s) => s.faceUp === 'left')!;
     expect(side).toBeDefined();
     // Left up: machine X = the stock's height (the top on the moving jaw, X 10), Y = its depth, Z = its width.
-    const reg = registrationFor(side, { kind: 'vise' }, { seatMachineZ: -140, cornerRadius: 0 }, { ...registrationSettings(DEFAULTS).settings, scanInsideMm: 1 });
+    const reg = registrationFor(side, { kind: 'vise' }, { seatMachineZ: -140, seekFromMachineZ: Z1_CLEARANCE_Z, cornerRadius: 0 }, { ...registrationSettings(DEFAULTS).settings, scanInsideMm: 1 });
     if (!reg.plan.ok) throw new Error(reg.plan.reason);
     expect(reg.plan.plan.stock).toMatchObject({ xMax: 10, yMax: 60 });
     // The notch (stock Z 7–9, Y 40–50) sits near the moving jaw: machine X 8 of 10, Y 45.

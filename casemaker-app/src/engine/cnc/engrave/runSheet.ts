@@ -979,8 +979,9 @@ function registrationSteps(job: EngraveJob, onBoard: boolean, unverified: string
  * HELD, not printed (#391): `buildRunSheet` calls this only when `RunSheetOptions.materialScan` is
  * set, and nothing in the app sets it. The block was written, reviewed and held (review of 36f3837,
  * 2026-10-13); the review's seven items are now IN, one step each — the sendable `G38.2` line from a
- * stated start height with its travel cap and the miss's `$X`/lift, the tip stated as the figure
- * every other one derives from (an assumption when this was written; measured 2026-10-15, A8), the
+ * stated start height with its travel cap and the miss's `$X`/lift (`clearanceZ`: the resolved
+ * machine's `toolChange.clearanceZ`, the lift the sheet prints between touches), the tip stated as the
+ * figure every other one derives from (an assumption when this was written; measured 2026-10-15, A8), the
  * correction reading PAST the edge as the module always meant, the
  * dome as a shape judged edge by edge, bisection either way and a step for a pass that never
  * bracketed the edge, and per-jaw numbers inside §11.8's bounds carrying their own uncertainty —
@@ -990,6 +991,7 @@ function materialPositionSteps(
   job: EngraveJob,
   onBoard: boolean,
   unverified: string,
+  clearanceZ: number,
   scan: MaterialScanSettings = SCAN_FALLBACK,
 ): RunSheetStep[] {
   const part = onBoard ? 'part' : 'blank';
@@ -1078,7 +1080,7 @@ function materialPositionSteps(
       text:
         'Then lift the tip clear of the clamp. Do this after EVERY touch, hit or miss, before any X or ' +
         'Y move — after a miss the tip is at the cap with a jaw beside it:',
-      code: 'G53 G0 Z-3',
+      code: `G53 G0 Z${fmtNum(clearanceZ)}`,
       unverified,
     },
   ];
@@ -1778,7 +1780,7 @@ export function buildRunSheet(
   // `materialScan.ts` and its spec are untouched, so the block comes back the moment the fixes land.
   const originSteps: RunSheetStep[] = [
     ...registrationSteps(job, onBoard, UNVERIFIED, options.scan?.tipDiameterMm),
-    ...(options.materialScan === true ? materialPositionSteps(job, onBoard, UNVERIFIED, options.scan) : []),
+    ...(options.materialScan === true ? materialPositionSteps(job, onBoard, UNVERIFIED, machine.toolChange.clearanceZ, options.scan) : []),
   ];
 
   // ---- 6 · Dry run ---------------------------------------------------------------------------

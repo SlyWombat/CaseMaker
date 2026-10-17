@@ -9,7 +9,7 @@ import { useShopDefault } from '@/store/shopDefaultsStore';
 import { EngraveMachineRun } from './EngraveMachineRun';
 import { machineKey, useMachineRunStore, type RunContext } from '@/store/machineRunStore';
 import { programHash } from '@/platform/machineRun';
-import { frameBounds } from '@/platform/machineLaser';
+import { frameBounds, type LaserLift } from '@/platform/machineLaser';
 import { useSettingsStore } from '@/store/settingsStore';
 
 /**
@@ -62,6 +62,16 @@ export interface EngraveMachineUploadProps {
   /** The name the machine will receive — `runSheetFileName(job.name)`, so it matches the run sheet. */
   filename: string;
   /**
+   * The job's machine travel height with the bounds that make it safe, MACHINE Z — the resolved
+   * machine's `toolChange.clearanceZ` and `softEndstop.zMin` (`jobMachine(job)`), handed to the two
+   * laser motions (#431) — the frame's traverse and point-to-origin's lift — so their lift is the
+   * machine's own clearance, guarded against a bad calibration before anything is sent (#448).
+   *
+   * REQUIRED, not defaulted: this is a motion height on a safety-relevant path, and a forgotten one
+   * must be a typecheck error rather than a silent −3 the head is driven to.
+   */
+  lift: LaserLift;
+  /**
    * Told what the machine said when the upload asked it live and it was not idle (#296), so the
    * stored observation stops claiming otherwise. Optional: a test, or a host with no store, may omit it.
    */
@@ -95,6 +105,7 @@ export function EngraveMachineUpload({
   machine,
   program,
   filename,
+  lift,
   onLiveStatus,
   runContext,
   jobEdgeMarginMm,
@@ -251,11 +262,17 @@ export function EngraveMachineUpload({
               : { mm: houseEdgeMargin, from: 'the house edge margin (the job did not say its own)' }
           }
           uncertainty={{ mm: laserUncertainty.value, source: laserUncertainty.source }}
+          lift={lift}
         />
       )}
 
       {laserFrameOn && machine !== null && program !== null && (
-        <EngraveLaserFrame host={machine.host} port={machine.port} bounds={frameBounds(program.verify.stats.bbox)} />
+        <EngraveLaserFrame
+          host={machine.host}
+          port={machine.port}
+          bounds={frameBounds(program.verify.stats.bbox)}
+          lift={lift}
+        />
       )}
     </div>
   );
