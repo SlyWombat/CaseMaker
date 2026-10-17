@@ -803,10 +803,17 @@ if (args.job) {
   // soft jaws' ledges — instead of the flat working height. A new job in the panel goes through the
   // same function; this is not a special case for the 3MF route.
   const base = defaultEngraveJob(viseForNewJob(undefined, patch.stock));
+  // The patch states a material only when the file's own `filament_type` names one this app knows
+  // (#456); otherwise it omits the key, and the job keeps the material the default job gives — the
+  // same PLA this script built before, rather than an omission the schema would refuse.
+  const stock: EngraveJob['stock'] = {
+    ...patch.stock,
+    material: patch.stock.material ?? base.stock.material,
+  };
   const job: EngraveJob = {
     ...base,
     name: patch.name,
-    stock: patch.stock,
+    stock,
     // All three text items arrive as measured VECTOR items: the file carries the outlines, not the
     // strings, so nothing here is re-rendered from a font. Leaving the default job's demo labels in
     // would cut `CASE`/`MAKER` into the maintainer's badge.
