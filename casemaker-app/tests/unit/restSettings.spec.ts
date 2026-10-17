@@ -101,7 +101,7 @@ describe('the band is worked out per job, floored by the shop’s own number (#4
   });
 
   it('raises it for a pair whose residues need more than the shop ever stored', () => {
-    // ⌀3 mm at a 1.5 mm step-over leaves 0.201 mm slivers, and a ⌀1 mm rest cutter closes anything
+    // ⌀3 mm at a 1.5 mm step-over leaves 0.201 mm slivers, and a ⌀1 mm rest cutter opens away anything
     // under 1 mm, so this pair needs about 0.799 mm — wider than the 0.5 mm the shop holds.
     const choice = overlapForJob({
       stored: 0.5,
@@ -143,11 +143,11 @@ describe('the band is worked out per job, floored by the shop’s own number (#4
 });
 
 describe('what a job says about its own seam band (#436)', () => {
-  it('derives the residue sliver and the band the closing needs from the two cutters', () => {
+  it('derives the residue sliver and the band the opening needs from the two cutters', () => {
     const facts = restSeamFacts(badge(0.6));
     // r₁ − √(r₁² − s₁²/4) for ⌀2 mm at a 0.9 mm step-over: 0.10697 mm wide.
     expect(facts.sliver).toBeCloseTo(0.1069714, 6);
-    // The closing erases anything narrower than the second cutter, so sliver + overlap ≥ 0.6 mm.
+    // The opening erases anything narrower than the second cutter, so sliver + overlap ≥ 0.6 mm.
     expect(facts.needed).toBeCloseTo(0.4930286, 6);
     expect(facts.keepsSlivers).toBe(true);
     expect(facts.coversScallop).toBe(true);

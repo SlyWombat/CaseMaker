@@ -57,10 +57,31 @@ export type DesignReadingDirection = 'ccw' | 'cw';
  */
 export const DESIGN_POCKET_KEEP_OUT_ID = 'design-magnet-pocket';
 
+/**
+ * Which design FILE a contribution came from (#437): the project's own Title, and the SHA-256 of
+ * the bytes it was read from.
+ *
+ * The Title, not the picked filename: it is the identity the file itself carries, so a design
+ * renamed on disk is still the same design, and re-saving it is what changes the hash. A re-import
+ * of the same source REPLACES its previous items instead of adding a second set; an identical hash
+ * means the bytes did not change, so the import is a no-op rather than a duplication.
+ */
+export interface DesignSource {
+  /** The project's Title, as the 3MF metadata carries it — `DesignJobPatch.name`. */
+  name: string;
+  /** SHA-256 of the file's bytes, lowercase hex. */
+  sha256: string;
+}
+
 /** What a design contributes, as plain data for the store to write. */
 export interface DesignJobPatch {
   /** The project's name, as the 3MF's Title carries it. */
   name: string;
+  /**
+   * The file this patch was read from, when the caller read one (#437). Absent on patches built
+   * without a file — the CLI's fresh-job route and tests — and then the import can only add.
+   */
+  source?: DesignSource;
   /**
    * The blank, in `EngraveJob.stock`'s shape and the JOB's frame. `material` is present only when
    * the file's own `filament_type` names a class this app knows (#456); otherwise the key is
@@ -158,20 +179,51 @@ function mm(v: number): string {
   return `${Number(v.toFixed(3))}`;
 }
 
+/** The badge blank's nominal size, mm — the part #345 measured the dome on (3 × 1.5 × 0.15 in). */
+const BADGE_BLANK_MM = { lengthX: 76.2, widthY: 38.1, thickness: 3.81 } as const;
+
+/** How far a measured blank may sit from that nominal size and still be that part, mm. */
+const BADGE_BLANK_TOLERANCE_MM = 0.05;
+
 /**
- * The dome on the engraved face, or undefined when the file states no print (#345).
+ * Is this the printed badge blank whose dome #345 measured? (#437)
  *
- * `across` is computed from THIS job's spans rather than copied from the badge's: the two blanks
- * are the same part, but the job's frame is turned, so the 38.1 mm span — the one #345 measured the
- * 0.33 mm across — is this job's `length`, where on a badge job it is the `width`
- * (`materialScan.ts` carries the same warning). The dome itself is #345's bench measurement of this
- * blank's printed face, so its source is `measured`; nothing here measured it again.
+ * The 0.33 mm is a property of ONE printed part, not of every two-colour project: a 100 × 60 mm
+ * plaque printed in two colours is not that blank, and it has no measured dome at all. The check is
+ * the three dimensions — the file may lay the blank either way round — to a loose tolerance, because
+ * the measurement comes off a triangle soup and `um()` only rounds what is written, not what is read.
  */
-function stockFlatnessFor(stock: { length: Mm; width: Mm }): StockFlatness {
+function isBadgeBlank(design: Pick<DesignImport, 'stock'>): boolean {
+  const { lengthX, widthY, thickness } = design.stock;
+  const near = (a: number, b: number): boolean => Math.abs(a - b) <= BADGE_BLANK_TOLERANCE_MM;
+  const footprint =
+    (near(lengthX, BADGE_BLANK_MM.lengthX) && near(widthY, BADGE_BLANK_MM.widthY)) ||
+    (near(lengthX, BADGE_BLANK_MM.widthY) && near(widthY, BADGE_BLANK_MM.lengthX));
+  return footprint && near(thickness, BADGE_BLANK_MM.thickness);
+}
+
+/**
+ * The dome on the engraved face, or undefined (#345, #437).
+ *
+ * Only the badge blank gets a dome. For it `across` is computed from THIS job's spans rather than
+ * copied from the badge route: the two blanks are the same part, but a design job's frame is turned,
+ * so the 38.1 mm span — the one #345 measured the 0.33 mm across — is this job's `length`, where on
+ * a badge job it is the `width` (`materialScan.ts` carries the same warning). Its source is
+ * `badge`: this route COPIES the badge blank's own default, it did not measure anything here.
+ *
+ * For any other blank the dome is unknown, not a chosen default: a design file states no dome, and
+ * stamping the badge's number onto an arbitrary plaque would put a figure nobody supplied into the
+ * Z budget. `undefined` leaves the job with a flat assumption, which the notes say out loud.
+ */
+function stockFlatnessFor(
+  design: DesignImport,
+  stock: { length: Mm; width: Mm },
+): StockFlatness | undefined {
+  if (!isBadgeBlank(design)) return undefined;
   return {
     dome: DEFAULT_BADGE_DOME_MM,
     across: stock.length <= stock.width ? 'length' : 'width',
-    source: 'measured',
+    source: 'badge',
   };
 }
 
@@ -186,10 +238,11 @@ function stockFlatnessFor(stock: { length: Mm; width: Mm }): StockFlatness {
  */
 export function designJobFor(
   design: DesignImport,
-  opts: { direction?: DesignReadingDirection; id?: () => string } = {},
+  opts: { direction?: DesignReadingDirection; id?: () => string; source?: DesignSource } = {},
 ): DesignJobPatch {
   const direction = opts.direction ?? 'ccw';
   const id = opts.id ?? newEngraveShapeId;
+  const source = opts.source;
   const { length, width } = designStockSize(design);
   const rotation = designRotation(direction);
   // `undefined` on the synthetic patch shapes older callers build, and null when the file states
@@ -265,7 +318,7 @@ export function designJobFor(
         ? { firstLayerHeight: um(design.firstLayerHeight) }
         : {}),
     };
-    stock.flatness = stockFlatnessFor(stock);
+    stock.flatness = stockFlatnessFor(design, stock);
     notes.push(
       `The file states its print: ${mm(design.layerHeight)} mm layers` +
         (design.firstLayerHeight !== null ? ` (first layer ${mm(design.firstLayerHeight)} mm)` : '') +
@@ -273,11 +326,18 @@ export function designJobFor(
         `${mm(design.stock.thickness - design.colourSplit)} mm of the top extruder's material. ` +
         "The job's depth limit follows that boundary, not a nominal height.",
     );
-    notes.push(
-      `The engraved face also carries the printed blank's dome, about ${mm(stock.flatness.dome)} mm across ` +
-        `its ${stock.flatness.across} — #345's bench measurement of this blank, not a re-measurement here, ` +
-        "so the job's Z budget covers it and a per-job probe can replace it.",
-    );
+    if (stock.flatness !== undefined) {
+      notes.push(
+        `The engraved face also carries the printed blank's dome, about ${mm(stock.flatness.dome)} mm across ` +
+          `its ${stock.flatness.across} — the badge blank's own bench measurement (#345), copied with its ` +
+          "'badge' provenance; nothing here measured it again, and a per-job probe can replace it.",
+      );
+    } else {
+      notes.push(
+        'This blank is not the badge blank #345 measured, and the file states no dome of its own, so no ' +
+          'dome is claimed: the Z budget assumes a flat face until a per-job probe states one.',
+      );
+    }
   } else {
     notes.push(
       'The file states no print (no colour split, or no layer height), so the depth limit stays ' +
@@ -303,6 +363,9 @@ export function designJobFor(
       // The volume's OWN floor, measured from the top face — not a nominal depth (#410).
       depth: um(region.depth),
       enabled: true,
+      // Which file this item came from, when the caller read one (#437). A re-import replaces the
+      // previous items carrying the same source instead of adding a second set.
+      ...(source !== undefined ? { importedFrom: source } : {}),
     };
   });
 
@@ -352,6 +415,7 @@ export function designJobFor(
 
   return {
     name: design.name,
+    ...(source !== undefined ? { source } : {}),
     stock,
     vectors,
     keepOut,
@@ -364,9 +428,49 @@ export function designJobFor(
         width: 'computed',
         thickness: 'computed',
         ...(material !== null ? { material: 'computed' as const } : {}),
-        ...(stock.print ? { print: 'computed' as const, flatness: 'computed' as const } : {}),
+        ...(stock.print ? { print: 'computed' as const } : {}),
+        // Only when a dome was actually written (#437): a flatness the patch did not state must not
+        // claim provenance, or the job's merge would keep a stale stamp for a value it never got.
+        ...(stock.flatness ? { flatness: 'computed' as const } : {}),
       },
     },
     notes,
   };
+}
+
+/**
+ * Add a design patch's items to a job's list, replacing a previous import of the SAME file (#437).
+ *
+ * Importing an edited design a second time used to append its volumes to the first import's, so the
+ * job cut every item twice — once where the old file had it and once where the new one does. The
+ * identity is `patch.source` (the project's Title plus the bytes' SHA-256), stamped onto every item
+ * as `importedFrom`:
+ *
+ *   - a different source, or no source at all: append, exactly as before (`takeDesign` on a job a
+ *     person built keeps adding, like any other item route);
+ *   - the same source and the same hash: no-op. The bytes are identical, so this is the same import
+ *     and the job's existing items — possibly edited by hand since — are left alone;
+ *   - the same source, different bytes: the old import's items are REPLACED by the new patch's.
+ *
+ * Items from before this field existed carry no `importedFrom`; they are matched by the reader's
+ * `sourceName` prefix (`<Title> › <volume>`) so a job made by the previous release de-duplicates on
+ * its next import too. A replacement that removes an item someone has edited is the point: the item
+ * came from the file, and the file has changed.
+ */
+export function mergeDesignItems(
+  current: readonly EngraveVectorShape[],
+  patch: Pick<DesignJobPatch, 'name' | 'source' | 'vectors'>,
+): EngraveVectorShape[] {
+  const source = patch.source;
+  if (source === undefined) return [...current, ...patch.vectors];
+  const fromThisSource = (item: EngraveVectorShape): boolean =>
+    item.importedFrom !== undefined
+      ? item.importedFrom.name === source.name
+      : item.sourceName.startsWith(`${patch.name} › `);
+  const previous = current.filter(fromThisSource);
+  const unchanged =
+    previous.length > 0 &&
+    previous.every((item) => item.importedFrom?.sha256 === source.sha256);
+  if (unchanged) return [...current];
+  return [...current.filter((item) => !fromThisSource(item)), ...patch.vectors];
 }

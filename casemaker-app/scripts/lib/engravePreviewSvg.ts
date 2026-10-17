@@ -158,6 +158,36 @@ function pct(ratio: number | undefined): string {
   return ratio === undefined ? '—' : `${Math.round(ratio * 100)} %`;
 }
 
+/**
+ * An average advance width for the label font, in ems. The browser lays the text out; this is used
+ * ONLY to decide whether a centred label would run off the page, so an approximate figure is right
+ * for the job — a label moved a millimetre more than it had to be is still fully readable.
+ */
+const LABEL_ADVANCE_EM = 0.55;
+
+/**
+ * A centred label, kept inside the picture (#437).
+ *
+ * Labels are set at their item's box centre, and a rest program's items are small regions near the
+ * blank's edge carrying long names (`rest of (Like the Whiskey)`). Centred there, the text ran past
+ * the SVG viewport and the rasteriser CLIPPED it mid-word — the PNG then read as if the item's name
+ * simply stopped. The label is moved just far enough to fit, and shrunk when it could not fit at
+ * all; it is still centred in its item's box whenever the page has room for it.
+ */
+function fitLabel(
+  centreX: number,
+  text: string,
+  fontSize: number,
+  minX: number,
+  maxX: number,
+): { x: number; size: number } {
+  const usable = maxX - minX;
+  const needed = Math.max(text.length * LABEL_ADVANCE_EM * fontSize, 0);
+  const size = needed > usable ? (usable / Math.max(text.length * LABEL_ADVANCE_EM, 1)) : fontSize;
+  const half = (text.length * LABEL_ADVANCE_EM * size) / 2;
+  return { x: Math.min(Math.max(centreX, minX + half), maxX - half), size };
+}
+
 /** The whole picture, as one standalone SVG document. */
 export function engravePreviewSvg(input: EngravePreviewSvgInput): string {
   const { job, cuts, diameter, ratios } = input;
@@ -202,9 +232,11 @@ export function engravePreviewSvg(input: EngravePreviewSvgInput): string {
     // Well above the void's own centre line: a job's biggest item is usually centred over its
     // biggest void, so an item label and a void label land on the same point and print on top of
     // each other unless they are set deliberately apart.
+    const name = ko.name ?? ko.id;
+    const label = fitLabel(centre[0], name, 2.2, x0 + 1, x0 + vw - 1);
     parts.push(
-      `<text x="${mm(centre[0])}" y="${mm(-(centre[1] + 5))}" ` +
-        `fill="${INK_KEEP_OUT}" font-size="2.2" text-anchor="middle">${esc(ko.name ?? ko.id)}</text>`,
+      `<text x="${mm(label.x)}" y="${mm(-(centre[1] + 5))}" ` +
+        `fill="${INK_KEEP_OUT}" font-size="${mm(label.size)}" text-anchor="middle">${esc(name)}</text>`,
     );
   }
 
@@ -248,13 +280,14 @@ export function engravePreviewSvg(input: EngravePreviewSvgInput): string {
     const label = item.enabled
       ? `${item.name} · ${pct(ratios?.get(item.id))}`
       : `${item.name} — not cut`;
+    const fitted = fitLabel(cx, label, 2.2, x0 + 1, x0 + vw - 1);
     // A halo, because the text sits ON the artwork and has to survive over both inks.
     parts.push(
-      `<text x="${mm(cx)}" y="${mm(-cy)}" font-size="2.2" text-anchor="middle" fill="#fff" ` +
+      `<text x="${mm(fitted.x)}" y="${mm(-cy)}" font-size="${mm(fitted.size)}" text-anchor="middle" fill="#fff" ` +
         `stroke="#fff" stroke-width="0.6" paint-order="stroke">${esc(label)}</text>`,
     );
     parts.push(
-      `<text x="${mm(cx)}" y="${mm(-cy)}" font-size="2.2" text-anchor="middle" ` +
+      `<text x="${mm(fitted.x)}" y="${mm(-cy)}" font-size="${mm(fitted.size)}" text-anchor="middle" ` +
         `fill="${item.enabled ? '#111' : INK_KEEP_OUT}">${esc(label)}</text>`,
     );
   }

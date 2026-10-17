@@ -29,7 +29,7 @@ import {
   mayRelayoutLabels,
 } from '@/engine/cnc/engrave/blankLabelSeed';
 import { BADGE_POCKET_KEEP_OUT_ID, type BadgeBlank } from '@/engine/cnc/engrave/fromBadge';
-import { DESIGN_POCKET_KEEP_OUT_ID, designReplacesItems, type DesignJobPatch } from '@/engine/cnc/engrave/fromDesign';
+import { DESIGN_POCKET_KEEP_OUT_ID, designReplacesItems, mergeDesignItems, type DesignJobPatch } from '@/engine/cnc/engrave/fromDesign';
 import { blankStockFor } from '@/engine/cnc/engrave/fromBlank';
 import type { BlankParams } from '@/types/blank';
 import type { CutParams } from '@/engine/cnc/feeds';
@@ -628,7 +628,9 @@ export interface EngraveJobState {
    *   3. the ITEMS — see `designReplacesItems`: over a job that is still the app's own, the design's
    *      vectors REPLACE the demo words (they are laid out for a 100 × 60 mm plank and would be cut
    *      into the badge); over a job a person has worked on, they are ADDED and the job reports what
-   *      no longer fits.
+   *      no longer fits. An item whose `importedFrom` is the same design source is the exception to
+   *      both: re-importing that file REPLACES its own items rather than adding a second set (#437),
+   *      and an identical hash is a no-op — `mergeDesignItems` holds that rule.
    *
    * The cutter and the feeds are untouched: a design states no cutter, and which bit cuts it is the
    * reachability decision the panel makes with the numbers in front of it (#410's second half).
@@ -1231,8 +1233,10 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
       apply((current) => {
         if (!replaces) {
           // The person's job, with the design's items added. The blank has changed under their own
-          // items, and the findings say which of them no longer fit — reported, never moved.
-          return { ...current, vectors: [...(current.vectors ?? []), ...patch.vectors] };
+          // items, and the findings say which of them no longer fit — reported, never moved. A
+          // re-import of the same design file replaces its previous import instead of appending a
+          // second copy of every volume (#437); `mergeDesignItems` owns which items that means.
+          return { ...current, vectors: mergeDesignItems(current.vectors ?? [], patch) };
         }
         const sources: EngraveJobSources = { ...(current.sources ?? {}), ...patch.sources };
         // The claims on the lines this call just dropped are about lines that are gone. `takeBadgeBlank`

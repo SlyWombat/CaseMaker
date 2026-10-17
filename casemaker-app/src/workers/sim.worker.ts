@@ -27,6 +27,7 @@ import { engraveGenerate as runEngraveGenerate, type EngraveGenerated, type Engr
 import type { OraclePredicted, OracleReport } from '@/engine/cnc/engrave/oracle';
 import { readDesign } from '@/engine/import/design3mf';
 import { parsePrusaThreeMf } from '@/engine/import/prusa3mf';
+import { sha256Hex } from '@/engine/import/meshStock';
 import { designJobFor, type DesignJobPatch, type DesignReadingDirection } from '@/engine/cnc/engrave/fromDesign';
 
 let session: SimSession | null = null;
@@ -174,9 +175,15 @@ const api = {
    *
    * `bytes` is the whole file. The RESULT is plain data — no handle crosses, the same rule every
    * other method here follows — so the panel can hand it straight to the job store.
+   *
+   * The bytes are hashed here, once, and stamped on the patch as its `source` (#437): the Title
+   * names the design, the hash says whether a re-import is the same bytes or an edit. Hashing in
+   * the worker keeps the digest off the main thread and out of the panel's test seam.
    */
   async readDesign3mf(bytes: ArrayBuffer, direction: DesignReadingDirection): Promise<DesignJobPatch> {
-    return designJobFor(readDesign(await getToplevel(), parsePrusaThreeMf(bytes)), { direction });
+    const design = readDesign(await getToplevel(), parsePrusaThreeMf(bytes));
+    const source = { name: design.name, sha256: await sha256Hex(bytes) };
+    return designJobFor(design, { direction, source });
   },
 };
 

@@ -185,6 +185,11 @@ const vectorSchema = shapeBaseSchema
     fillRule: z.enum(['NonZero', 'EvenOdd']),
     width: z.number().finite().positive(),
     height: z.number().finite().positive(),
+    // Which design file the item came from (#437): the Title and the bytes' hash. Optional because
+    // SVG/DXF imports, hand-built items and older saved jobs carry none.
+    importedFrom: z
+      .object({ name: z.string().min(1), sha256: z.string().regex(/^[0-9a-f]{64}$/) })
+      .optional(),
   })
   .superRefine((v, ctx) => {
     let points = 0;

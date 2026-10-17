@@ -190,6 +190,49 @@ describe('the predicted-cut preview (#410)', () => {
     expect(svg({ job: named })).toContain('A &amp; B &lt;x&gt; · 100 %');
   });
 
+  it('keeps a rest item’s long label inside the picture instead of clipping it (#437)', () => {
+    // A rest program's items are small regions near the blank's edge carrying long names. Centred
+    // on such an item, the label ran past the SVG's viewport and the PNG cut the name off mid-word
+    // — the picture then read as if the item were called something shorter.
+    const base = job();
+    const restName = 'rest of (Like the Whiskey)';
+    const label = `${restName} · 100 %`;
+    const placed: EngraveJob = {
+      ...base,
+      stock: { ...base.stock, length: 20, width: 30, thickness: 3 },
+      vectors: [
+        {
+          ...base.vectors![0]!,
+          id: 'rest-1',
+          name: restName,
+          sourceName: restName,
+          contours: [square(4)],
+          position: { x: 18, y: 15 },
+        },
+      ],
+    };
+    const markup = svg({
+      job: placed,
+      cuts: [],
+      ratios: new Map([['rest-1', 1]]),
+      keepOuts: [],
+    });
+    const m = new RegExp(
+      `<text x="([^"]+)" y="[^"]+" font-size="([^"]+)" text-anchor="middle" fill="#111">${label.replace(/[()]/g, '\\$&')}</text>`,
+    ).exec(markup);
+    expect(m).not.toBeNull();
+    const x = Number(m![1]);
+    const size = Number(m![2]);
+    // The label still reads in full, and its estimated box is inside the page the PNG is cut from.
+    expect(markup).toContain(`>${label}</text>`);
+    expect(size).toBe(2.2);
+    // The page runs from −PAD_LEFT to length + PAD_RIGHT; 1 mm of inset is the module's own.
+    const half = (label.length * 0.55 * size) / 2;
+    expect(x).toBeLessThan(18);
+    expect(x - half).toBeGreaterThanOrEqual(-15);
+    expect(x + half).toBeLessThanOrEqual(35);
+  });
+
   it('states the blank, the viewing direction and the two inks', () => {
     const markup = svg();
     expect(markup).toContain('preview-test — the predicted cut at ⌀ 0.6 mm');

@@ -28,7 +28,7 @@
  * 0.9 mm step-over against a ⌀0.6 mm rest cutter:
  *
  *   - the seam band a residue sliver needs is `⌀₂ − sliver` = 0.493 mm, because the generator runs
- *     every item through a morphological closing that erases anything narrower than the cutter, and
+ *     every item through a morphological opening that erases anything narrower than the cutter, and
  *     a sliver is only about 0.107 mm wide to begin with;
  *   - the second cutter's own scallop is 0.24 mm, so a band narrower than that can leave a ridge.
  *
@@ -155,7 +155,7 @@ export function residueSliver(rough: SeamCutter): Mm {
 
 /**
  * The band that keeps those residues cuttable, mm — `diameter₂ − sliver`. The second cutter's own
- * closing erases anything narrower than its diameter, so a sliver survives to be cut only when the
+ * opening erases anything narrower than its diameter, so a sliver survives to be cut only when the
  * band makes it at least that wide.
  *
  * Null when the first cutter's step-over is unknown: the requirement is then not derived, rather
@@ -203,7 +203,7 @@ export interface BandInput {
   typed?: Mm | undefined;
   /** The cutter that cuts first — its scalloped boundary is what leaves the residue. */
   rough: SeamCutter;
-  /** The cutter that cleans up — its own width is what the closing erases. */
+  /** The cutter that cleans up — its own width is what the opening erases. */
   rest: SeamCutter;
 }
 
@@ -243,14 +243,14 @@ export interface SeamFacts {
   derivedFromCutters: boolean;
   /** True when an operator typed the band for this run, so nothing floored or raised it. */
   typed: boolean;
-  /** The second cutter's cutting diameter, mm — the width its own closing erases. */
+  /** The second cutter's cutting diameter, mm — the width its own opening erases. */
   restDiameter: Mm;
   /** The second cutter's step-over, mm, or null where the table has no row for it. */
   restStepOver: Mm | null;
   /** Residual sliver width the first cutter's scallop leaves, mm — `r₁ − √(r₁² − s₁²/4)`. */
   sliver: Mm;
   /**
-   * The band that keeps those slivers wide enough to survive the second cutter's closing, mm —
+   * The band that keeps those slivers wide enough to survive the second cutter's opening, mm —
    * `diameter₂ − sliver`. Null when the first cutter's step-over is unknown.
    */
   needed: Mm | null;
@@ -327,16 +327,16 @@ export function restSeamSentence(facts: SeamFacts): { text: string; value: strin
   } else if (facts.keepsSlivers) {
     parts.push(
       `The first cutter’s scalloped boundary leaves slivers about ${mm(facts.sliver)} wide, and this ` +
-        `generator closes anything narrower than the second cutter (${mm(facts.restDiameter)}), so a ` +
+        `generator’s opening erases anything narrower than the second cutter (${mm(facts.restDiameter)}), so a ` +
         `band of about ${mm(facts.needed)} is what keeps them cuttable. This band is at or past that: ` +
         'they are cut.',
     );
   } else {
     parts.push(
       `The first cutter’s scalloped boundary leaves slivers about ${mm(facts.sliver)} wide, and this ` +
-        `generator closes anything narrower than the second cutter (${mm(facts.restDiameter)}), so a ` +
+        `generator’s opening erases anything narrower than the second cutter (${mm(facts.restDiameter)}), so a ` +
         `band of about ${mm(facts.needed)} is what keeps them cuttable. THIS BAND IS BELOW THAT: the ` +
-        'slivers are closed rather than cut, and they are counted in the leftover number below ' +
+        'slivers are erased rather than cut, and they are counted in the leftover number below ' +
         'instead of being removed.',
     );
   }
@@ -371,8 +371,8 @@ export type SeamVerdict = Pick<SeamFacts, 'needed' | 'keepsSlivers'>;
  * on it would be a sentence about a measurement that does not exist.
  *
  * `seam` is what stops the advice pointing at the wrong remedy. A band narrower than the residues
- * need leaves the seam ITSELF standing — the second program's closing takes those slivers away
- * instead of cutting them — and a third cutter would face the same closing on the same slivers.
+ * need leaves the seam ITSELF standing — the second program's opening erases those slivers away
+ * instead of cutting them — and a third cutter would face the same opening on the same slivers.
  * When that is what the numbers show, the advice is to widen the band, and it says so.
  */
 export function thirdToolAdvice(
@@ -399,8 +399,8 @@ export function thirdToolAdvice(
     consequence =
       'That is over it, but another cutter is not what this remainder needs: the band the two ' +
       `programs run is narrower than the ${need} the first cutter’s residues need to survive the ` +
-      'second one’s closing, so what is standing is the SEAM, and a third cutter would be closed ' +
-      `away from it the same way. Widen the band to about ${need} and cut the pair again before ` +
+      'second one’s opening, so what is standing is the SEAM, and the third cutter’s opening would ' +
+      `erase it the same way. Widen the band to about ${need} and cut the pair again before ` +
       'reaching for one.';
   } else {
     consequence =

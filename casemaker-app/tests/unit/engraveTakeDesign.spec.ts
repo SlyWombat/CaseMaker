@@ -1,7 +1,8 @@
 // Taking a design file onto an OPEN job (#410 item 4 — the panel's import). Pure: the patch is
-// built by hand here (`fromDesign.spec.ts` covers reading the real file out of the maintainer's
-// project, and `designImport.spec.ts` the file-to-patch seam), so what is under test is what the
-// STORE does with a patch, and the gate that decides whether the job's own items survive it.
+// built by hand here (`fromDesign.spec.ts` covers building it from a project file, and
+// `designImport.spec.ts` the file-to-patch seam), so what is under test is what the STORE does with
+// a patch, the gate that decides whether the job's own items survive it, and the re-import rule
+// that replaces a design's own items instead of duplicating them (#437).
 //
 // The gate is the interesting half. `takeBadgeBlank` may replace a set of labels a route laid out;
 // this route brings ITEMS, so the question it has to answer is bigger — "is this job still the one
@@ -25,7 +26,10 @@ beforeEach(() => {
 });
 
 /** The design's own item: an 8 × 2 mm ring, on the file's blank, at the file's own depth. */
-function designVector(id = 'shp-1'): EngraveVectorShape {
+function designVector(
+  id = 'shp-1',
+  importedFrom?: { name: string; sha256: string },
+): EngraveVectorShape {
   return {
     kind: 'vector',
     id,
@@ -46,6 +50,7 @@ function designVector(id = 'shp-1'): EngraveVectorShape {
     rotation: 90,
     depth: 0.985,
     enabled: true,
+    ...(importedFrom === undefined ? {} : { importedFrom }),
   };
 }
 
@@ -82,7 +87,7 @@ function designPatch(over: Partial<DesignJobPatch> = {}): DesignJobPatch {
       thickness: 3.81,
       material: 'pla',
       print: { split: 2.3, layerHeight: 0.2 },
-      flatness: { dome: 0.33, across: 'length', source: 'measured' },
+      flatness: { dome: 0.33, across: 'length', source: 'badge' },
     },
     vectors: [designVector()],
     keepOut: designPocket(),
@@ -248,5 +253,59 @@ describe('takeDesign (#410)', () => {
     useEngraveJobStore.getState().takeDesign(designPatch());
     useEngraveJobStore.getState().takeDesign(designPatch());
     expect((job().keepOuts ?? []).filter((k) => k.id === DESIGN_POCKET_KEEP_OUT_ID)).toHaveLength(1);
+  });
+});
+
+describe('re-importing a design replaces its own items (#437)', () => {
+  const source = (sha: string) => ({ name: 'Single Barrel Badge', sha256: sha.repeat(64) });
+
+  /** A job a person has worked on, so `takeDesign` takes the ADD path rather than replacing. */
+  const personJob = (): void => {
+    useEngraveJobStore.setState({ job: { ...defaultEngraveJob(), labels: [] } });
+  };
+
+  /** One import of the design: the source stamped on the patch and on every item it brings. */
+  const imported = (sha: string, ids: string[]): DesignJobPatch => {
+    const s = source(sha);
+    return designPatch({
+      source: s,
+      vectors: ids.map((id) => designVector(id, s)),
+    });
+  };
+
+  it('does not append a second copy of every volume', () => {
+    personJob();
+    useEngraveJobStore.getState().takeDesign(imported('a', ['shp-1']));
+    expect(job().vectors!.map((v) => v.id)).toEqual(['shp-1']);
+
+    // The file was edited and re-imported: the first import's items go, the new file's arrive.
+    useEngraveJobStore.getState().takeDesign(imported('b', ['shp-2', 'shp-3']));
+    expect(job().vectors!.map((v) => v.id)).toEqual(['shp-2', 'shp-3']);
+  });
+
+  it('is a no-op when the bytes are identical, leaving a hand-edited import alone', () => {
+    personJob();
+    useEngraveJobStore.getState().takeDesign(imported('a', ['shp-1']));
+    // Deepen the imported item by hand, then import the very same file again.
+    useEngraveJobStore.setState({
+      job: {
+        ...job(),
+        vectors: job().vectors!.map((v) => ({ ...v, depth: 1.4 })),
+      },
+    });
+    useEngraveJobStore.getState().takeDesign(imported('a', ['shp-9']));
+    expect(job().vectors!.map((v) => v.id)).toEqual(['shp-1']);
+    expect(job().vectors![0]!.depth).toBe(1.4);
+  });
+
+  it('keeps another design’s items beside it — only the same source is replaced', () => {
+    personJob();
+    useEngraveJobStore.getState().takeDesign(imported('a', ['shp-1']));
+
+    const other = { name: 'Another Design', sha256: 'c'.repeat(64) };
+    useEngraveJobStore.getState().takeDesign(
+      designPatch({ name: 'Another Design', source: other, vectors: [designVector('shp-9', other)] }),
+    );
+    expect(job().vectors!.map((v) => v.id)).toEqual(['shp-1', 'shp-9']);
   });
 });

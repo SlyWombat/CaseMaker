@@ -4,35 +4,27 @@
 // the jaws, and getting from one to the other is a quarter rotation of the whole design. These
 // specs check the three things that can go wrong there — a mirrored design, an item that lands off
 // the blank, and an item whose stated `rotation` disagrees with where its own points ended up —
-// against the maintainer's own file, and they check them for BOTH directions.
+// against a synthetic badge project built by the fixture helper (#437), and they check them for BOTH
+// directions. The maintainer's untracked `samples/` file is no longer required to run any of this.
 
 import { describe, it, expect } from 'vitest';
-import { readFileSync, existsSync } from 'node:fs';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
 
 import { parsePrusaThreeMf } from '@/engine/import/prusa3mf';
 import { readDesign, type DesignImport } from '@/engine/import/design3mf';
 import {
   designJobFor,
   designPointToJob,
+  mergeDesignItems,
   DESIGN_POCKET_KEEP_OUT_ID,
   type DesignReadingDirection,
+  type DesignSource,
 } from '@/engine/cnc/engrave/fromDesign';
+import type { EngraveVectorShape } from '@/types/engraveJob';
 import { tl } from './helpers/manifoldExec';
-import { fixtureBlank, project } from './helpers/prusa3mfFixture';
-
-const here = dirname(fileURLToPath(import.meta.url));
-const samplePath = join(here, '..', '..', '..', 'samples', 'badge-blank', 'single.3mf');
-const hasSample = existsSync(samplePath);
-
-function sample(): ArrayBuffer {
-  const buf = readFileSync(samplePath);
-  return buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength) as ArrayBuffer;
-}
+import { badgeProject, fixtureBlank, project } from './helpers/prusa3mfFixture';
 
 function design(): DesignImport {
-  return readDesign(tl, parsePrusaThreeMf(sample()));
+  return readDesign(tl, parsePrusaThreeMf(badgeProject()));
 }
 
 /** Deterministic ids, so a patch can be compared as a whole. */
@@ -66,7 +58,7 @@ function placed(
   };
 }
 
-describe.skipIf(!hasSample)('the blank, as the job frame has it (#410)', () => {
+describe('the blank, as the job frame has it (#410)', () => {
   it('swaps the blank’s sides: 38.1 across the jaws, 76.2 along the feed', () => {
     const patch = designJobFor(design(), { id: ids() });
     expect(patch.name).toBe('single');
@@ -82,7 +74,8 @@ describe.skipIf(!hasSample)('the blank, as the job frame has it (#410)', () => {
     expect(stock.print).toEqual({ split: 3, layerHeight: 0.2 });
     // `across: 'length'` — NOT the badge route's `'width'`. The blanks are the same part but this
     // job's frame is turned, so the 38.1 mm span #345 measured the dome across is the LENGTH here.
-    expect(stock.flatness).toEqual({ dome: 0.33, across: 'length', source: 'measured' });
+    // `source: 'badge'` — this route copies the badge blank's default; it measured nothing here.
+    expect(stock.flatness).toEqual({ dome: 0.33, across: 'length', source: 'badge' });
   });
 
   it('stamps every field it writes as derived, never as a bench reading (#254)', () => {
@@ -98,7 +91,42 @@ describe.skipIf(!hasSample)('the blank, as the job frame has it (#410)', () => {
   });
 });
 
-describe.skipIf(!hasSample)('the turn (#410)', () => {
+describe('the dome is the badge blank’s, never an invented default (#437)', () => {
+  it('says the 0.33 mm is the badge blank’s own measurement, copied with its provenance', () => {
+    const notes = designJobFor(design()).notes.join('\n');
+    expect(notes).toContain("badge blank's own bench measurement (#345)");
+    expect(notes).toContain("'badge' provenance");
+    expect(notes).not.toContain('measured it again, so');
+  });
+
+  it('claims no dome on a two-colour blank that is not the badge blank', () => {
+    // A 100 × 60 mm plaque, printed in two colours: the file states its print but says nothing
+    // about a dome, and the badge blank's 0.33 mm is not this part's measurement.
+    const plaque = readDesign(
+      tl,
+      parsePrusaThreeMf(
+        project({
+          title: 'plaque',
+          volumes: [
+            { name: 'bottom', type: 'ModelPart', extruder: 2, box: [[0, 0, 0], [100, 60, 3]] },
+            { name: 'top', type: 'ModelPart', extruder: 3, box: [[0, 0, 3], [100, 60, 3.81]] },
+          ],
+          settings: 'filament_type = PLA;PETG;PETG\nlayer_height = 0.2\nfirst_layer_height = 0.2',
+        }),
+      ),
+    );
+    const patch = designJobFor(plaque);
+    expect(patch.stock.print).toEqual({ split: 3, layerHeight: 0.2 });
+    expect(patch.stock.flatness).toBeUndefined();
+    // No value, no provenance claim: a stale `flatness: 'computed'` would outlive the value.
+    expect('flatness' in (patch.sources.stock ?? {})).toBe(false);
+    const notes = patch.notes.join('\n');
+    expect(notes).toContain('not the badge blank #345 measured');
+    expect(notes).toContain('no dome is claimed');
+  });
+});
+
+describe('the turn (#410)', () => {
   it('says which way it turned the design, in words', () => {
     const ccw = designJobFor(design(), { direction: 'ccw' });
     expect(ccw.notes.join('\n')).toContain('COUNTER-CLOCKWISE');
@@ -185,24 +213,26 @@ describe.skipIf(!hasSample)('the turn (#410)', () => {
     d.regions.forEach((_region, i) => {
       const p = a.vectors[i]!.position;
       const q = b.vectors[i]!.position;
-      expect(q.x).toBeCloseTo(a.stock.length - p.x, 6);
-      expect(q.y).toBeCloseTo(a.stock.width - p.y, 6);
+      // Each position is rounded to the micron on its own, so the two directions can differ by a
+      // micron; the claim is the 180° relationship, not bit-identical arithmetic.
+      expect(q.x).toBeCloseTo(a.stock.length - p.x, 2);
+      expect(q.y).toBeCloseTo(a.stock.width - p.y, 2);
     });
     expect(a.vectors[0]!.rotation).toBe(90);
     expect(b.vectors[0]!.rotation).toBe(-90);
   });
 
   it('maps an item’s position to the measured spot on the blank', () => {
-    // The title's file-frame centre is (0.452, 8.2045) — measured in the design spec. ccw puts it
-    // at x = 19.05 − 8.2045 near the fixed jaw, y = 0.452 + 38.1 near the front edge.
+    // The title's cut is centred at (38.4575, 10.2655) in the fixture's file frame. ccw puts it at
+    // x = 38.1 − 10.2655 near the fixed jaw, y = 38.4575 along the feed.
     const patch = designJobFor(design(), { direction: 'ccw' });
     const title = patch.vectors.find((v) => v.name === 'Single Barrel')!;
-    expect(title.position.x).toBeCloseTo(10.845, 3);
-    expect(title.position.y).toBeCloseTo(38.552, 3);
+    expect(title.position.x).toBeCloseTo(27.8345, 3);
+    expect(title.position.y).toBeCloseTo(38.4575, 3);
   });
 });
 
-describe.skipIf(!hasSample)('the design’s items (#410)', () => {
+describe('the design’s items (#410)', () => {
   it('names every item after its volume, and gives it that volume’s own depth', () => {
     const patch = designJobFor(design());
     expect(patch.vectors.map((v) => v.name)).toEqual([
@@ -213,7 +243,7 @@ describe.skipIf(!hasSample)('the design’s items (#410)', () => {
     const [sub, title, logo] = patch.vectors;
     expect(sub!.depth).toBeCloseTo(0.985, 3);
     expect(title!.depth).toBeCloseTo(0.985, 3);
-    expect(logo!.depth).toBeCloseTo(0.998, 3);
+    expect(logo!.depth).toBeCloseTo(1.0, 3);
     for (const item of patch.vectors) {
       expect(item.kind).toBe('vector');
       expect(item.enabled).toBe(true);
@@ -275,7 +305,7 @@ describe.skipIf(!hasSample)('the design’s items (#410)', () => {
     }
     expect(maxX - minX).toBeCloseTo(13, 2);
     expect(maxY - minY).toBeCloseTo(45, 2);
-    // Centred on the blank, as the file's own origin is.
+    // Centred on the blank, as the file's own pocket is.
     expect(ko.position.x + (minX + maxX) / 2).toBeCloseTo(patch.stock.length / 2, 2);
     expect(ko.position.y + (minY + maxY) / 2).toBeCloseTo(patch.stock.width / 2, 2);
   });
@@ -325,6 +355,82 @@ describe('a direction is a parameter, not a constant (#410 / #383)', () => {
   });
 });
 
+describe('a re-import is told apart by the file it came from (#437)', () => {
+  const source = (sha: string): DesignSource => ({ name: 'single', sha256: sha.repeat(64) });
+
+  const item = (
+    id: string,
+    importedFrom?: DesignSource,
+    sourceName = 'single › volume',
+  ): EngraveVectorShape => ({
+    kind: 'vector',
+    id,
+    name: id,
+    sourceName,
+    contours: [[[0, 0], [1, 0], [0, 1]]],
+    fillRule: 'EvenOdd',
+    width: 1,
+    height: 1,
+    position: { x: 0, y: 0 },
+    rotation: 0,
+    depth: 1,
+    enabled: true,
+    ...(importedFrom === undefined ? {} : { importedFrom }),
+  });
+
+  it('stamps the source on the patch and on every item it brings', () => {
+    const s = source('a');
+    const patch = designJobFor(design(), { source: s });
+    expect(patch.source).toEqual(s);
+    for (const v of patch.vectors) expect(v.importedFrom).toEqual(s);
+  });
+
+  it('carries no source when the caller read no file — the CLI is unchanged', () => {
+    const patch = designJobFor(design());
+    expect(patch.source).toBeUndefined();
+    expect(patch.vectors[0]!.importedFrom).toBeUndefined();
+  });
+
+  it('appends when the patch names no source', () => {
+    const current = [item('keep')];
+    expect(mergeDesignItems(current, { name: 'single', vectors: [item('new')] }).map((v) => v.id)).toEqual([
+      'keep',
+      'new',
+    ]);
+  });
+
+  it('replaces the items of the same source when the bytes changed', () => {
+    const old = source('a');
+    const next = source('b');
+    const current = [item('old-1', old), item('old-2', old), item('someone-else', undefined, 'art › a')];
+    const merged = mergeDesignItems(current, {
+      name: 'single',
+      source: next,
+      vectors: [item('new', next)],
+    });
+    expect(merged.map((v) => v.id)).toEqual(['someone-else', 'new']);
+  });
+
+  it('is a no-op when the bytes are identical, leaving hand edits in place', () => {
+    const s = source('a');
+    const edited = { ...item('old', s), depth: 2 }; // the person deepened it after the import
+    expect(
+      mergeDesignItems([edited], { name: 'single', source: s, vectors: [item('new', s)] }),
+    ).toEqual([edited]);
+  });
+
+  it('recognises an item imported before the field existed by its source name', () => {
+    // Older jobs carry no `importedFrom`; the reader's `<Title> › <volume>` prefix is the identity.
+    const current = [item('legacy', undefined, 'single › Single Barrel'), item('other', undefined, 'art › a')];
+    const merged = mergeDesignItems(current, {
+      name: 'single',
+      source: source('b'),
+      vectors: [item('new', source('b'))],
+    });
+    expect(merged.map((v) => v.id)).toEqual(['other', 'new']);
+  });
+});
+
 describe('the job’s stock material comes from the file, or is left alone (#456)', () => {
   const designFor = (settings?: string) =>
     // The fixture blank prints with extruder 2, so a per-extruder list needs a first entry.
@@ -347,6 +453,23 @@ describe('the job’s stock material comes from the file, or is left alone (#456
     expect(notes).toContain("The job's stock material is the file's, not an assumption.");
   });
 
+  it('sets a fibre-filled nylon like any other known class', () => {
+    const patch = designJobFor(designFor('filament_type = PA-GF'));
+    expect(patch.stock.material).toBe('pa-gf');
+    expect(patch.sources.stock?.material).toBe('computed');
+    expect(patch.notes.join('\n')).toContain("read from the file's own filament_type (PA-GF)");
+  });
+
+  it('names the profile when filament_settings_id is what settled the class', () => {
+    const patch = designJobFor(
+      designFor('filament_settings_id = "a";"Prusament PA11 Carbon Fiber @XL"'),
+    );
+    expect(patch.stock.material).toBe('pa-cf');
+    const notes = patch.notes.join('\n');
+    expect(notes).toContain('read from the file\'s own filament_settings_id "Prusament PA11 Carbon Fiber @XL"');
+    expect(notes).not.toContain('filament_type (');
+  });
+
   it('leaves the material key absent when the file states no filament_type', () => {
     const patch = designJobFor(designFor());
     expect('material' in patch.stock).toBe(false);
@@ -355,10 +478,10 @@ describe('the job’s stock material comes from the file, or is left alone (#456
   });
 
   it('leaves the material key absent for an unknown type — never silently PLA', () => {
-    const patch = designJobFor(designFor('filament_type = ASA'));
+    const patch = designJobFor(designFor('filament_type = PVB'));
     expect('material' in patch.stock).toBe(false);
     expect('material' in (patch.sources.stock ?? {})).toBe(false);
-    expect(patch.notes.join('\n')).toContain('ASA');
+    expect(patch.notes.join('\n')).toContain('PVB');
     expect(patch.notes.join('\n')).toContain('does not map to a stock material');
   });
 });

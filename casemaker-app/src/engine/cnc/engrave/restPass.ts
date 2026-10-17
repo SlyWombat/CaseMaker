@@ -206,6 +206,28 @@ function size(polygons: readonly [number, number][][]): { width: number; height:
   return { width: maxX - minX, height: maxY - minY };
 }
 
+/** A measurement as the job writes every number: mm to the micron, like `fromDesign.ts`'s `um`. */
+function um(v: number): number {
+  return Number(v.toFixed(3));
+}
+
+/**
+ * An item name out of the region's operation descriptor (#437).
+ *
+ * `engraveRegions` names a region with `itemOperationName`: `Pocket outline "(Like the Whiskey)"
+ * (2 contours, 41.593…×5.171…mm)`. Carried verbatim into an item name, the rest program's own
+ * header re-quotes it — `rest of …` is written as `Pocket outline "rest of …"` — so the operator
+ * read nested quotes and the descriptor's unrounded sizes were repeated there too. The item's name
+ * is the quoted part when the descriptor carries one; otherwise its trailing parameter clause is
+ * dropped. Quotes are removed either way, because the header adds its own pair downstream.
+ */
+function restItemName(name: string | undefined, id: string): string {
+  if (name === undefined || name.trim() === '') return id;
+  const quoted = /"([^"]*)"/.exec(name)?.[1]?.trim();
+  if (quoted) return quoted;
+  return name.replace(/\s+\([^)]*\)\s*$/, '').trim() || id;
+}
+
 /**
  * The rest program's job document: the SAME blank, the same voids and the same material as the
  * design job, with the rest regions in place of every design item and the second cutter named.
@@ -232,7 +254,9 @@ export function restJobFor(
 ): EngraveJob {
   const vectors: EngraveVectorShape[] = regions.map((r, i) => {
     const { width, height } = size(r.polygons);
-    const name = r.name !== undefined && r.name !== '' ? r.name : r.id;
+    // The descriptor's own item name, not the operation sentence wrapped around it, and sizes at
+    // the micron so the header the panel reads back matches every other number in the job (#437).
+    const name = restItemName(r.name, r.id);
     return {
       kind: 'vector',
       id: `rest-${i + 1}`,
@@ -240,8 +264,8 @@ export function restJobFor(
       sourceName: `rest of ${name}`,
       contours: r.polygons,
       fillRule: 'EvenOdd',
-      width,
-      height,
+      width: um(width),
+      height: um(height),
       position: { x: 0, y: 0 },
       rotation: 0,
       depth: r.depth,

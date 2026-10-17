@@ -297,6 +297,42 @@ describe('restJobFor (#410)', () => {
     expect(v.height).toBeCloseTo(2, 10);
   });
 
+  it('takes the item name out of the operation descriptor, and writes its sizes at the micron', () => {
+    const job = fullJob();
+    const descriptor = 'Pocket outline "(Like the Whiskey)" (2 contours, 41.593054×5.171349mm)';
+    const rest = restJobFor(
+      job,
+      [
+        {
+          id: 'shp-1',
+          name: descriptor,
+          depth: 0.985,
+          polygons: [
+            [
+              [1, 1],
+              [9.1234567, 1],
+              [9.1234567, 3.7654321],
+              [1, 3.7654321],
+            ],
+          ],
+        },
+      ],
+      'fine',
+    );
+    const v = rest.vectors![0]!;
+    // The descriptor's quoted item name, not the descriptor itself: the header quotes the name
+    // again, so carrying the whole sentence made nested quotes (#437).
+    expect(v.name).toBe('rest of (Like the Whiskey)');
+    expect(v.sourceName).toBe('rest of (Like the Whiskey)');
+    // The ring is measured at float precision; the ITEM is written at the job's micron.
+    expect(v.width).toBe(8.123);
+    expect(v.height).toBe(2.765);
+
+    // An unnamed item has no quoted part; the descriptor's trailing size clause is dropped instead.
+    const unnamed = restJobFor(job, [{ id: 'shp-2', name: 'Pocket rect (1 contour, 8×2mm)', depth: 1, polygons: [ring] }], 'fine');
+    expect(unnamed.vectors![0]!.name).toBe('rest of Pocket rect');
+  });
+
   it('empties every design item list and keeps the BLANK’s own facts', () => {
     const job = fullJob();
     const rest = restJobFor(job, [{ id: 'shp-1', depth: 0.985, polygons: [ring] }], 'fine');

@@ -342,6 +342,13 @@ export interface EngraveVectorShape extends EngraveShapeBase {
   /** Bounding size in mm, for the panel. The contours are already in mm. */
   width: Mm;
   height: Mm;
+  /**
+   * The design FILE this item was imported from (#437), when it came from one: the project's
+   * Title and the bytes' SHA-256. A re-import of the same source replaces this item instead of
+   * adding a second copy, and an identical hash makes the import a no-op. Absent on items from
+   * SVG/DXF, hand-built items, and imports made before this field existed.
+   */
+  importedFrom?: { name: string; sha256: string };
 }
 
 /**

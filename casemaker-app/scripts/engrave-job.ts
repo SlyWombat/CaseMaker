@@ -1031,7 +1031,7 @@ if (args.job) {
     // WHAT A BAND HAS TO BEAT, measured on the badge blank (#410). The rest region is a RESIDUE: the
     // slivers tool 1's scalloped boundary left behind, plus every feature too narrow for it to
     // enter. A residue sliver is about `r1 − √(r1² − s1²/4)` wide — 0.107 mm for ⌀2 mm at a 0.9 mm
-    // step-over — and `engravableProfile` closes anything narrower than `2·r2`, the second cutter's
+    // step-over — and `engravableProfile` opens away anything narrower than `2·r2`, the second cutter's
     // own diameter. A sliver therefore survives to be cut only when `sliver + overlap ≥ diameter2`,
     // so the band THIS pair needs is about 0.493 mm: at a 0.1 mm band the badge left 12.24 mm²
     // (3.41 % of what it asks to remove) standing, and at 0.6 mm only 0.79 mm² (0.22 %) — so the
@@ -1111,7 +1111,7 @@ if (args.job) {
     if (seam.needed !== null && !seam.keepsSlivers) {
       console.log(
         `  seam       the first cutter leaves slivers about ${seam.sliver.toFixed(3)} mm wide and the ` +
-          `second cutter closes anything under ${seam.restDiameter.toFixed(3)} mm, so a band of about ` +
+          `second cutter’s opening erases anything under ${seam.restDiameter.toFixed(3)} mm, so a band of about ` +
           `${seam.needed.toFixed(3)} mm is what keeps them cuttable — this one is under it, and they ` +
           'are counted in the leftover instead of being cut',
       );
@@ -1120,7 +1120,7 @@ if (args.job) {
     for (const n of rest1.notes) console.log(`  rest       ${n}`);
 
     // WHICH REST REGIONS THE SECOND BIT CAN ACTUALLY OPEN. A rest region can be a sliver the first
-    // cutter could not quite reach, and `engravableProfile` closes a region narrower than the bit
+    // cutter could not quite reach, and `engravableProfile` opens away a region narrower than the bit
     // that is supposed to cut it (`offset(-r)` then `offset(+r)`) — down to nothing, which is
     // `item-empty`, a hard refusal that would stop the SECOND program over a region the design was
     // never going to give up anyway. So each region is measured with the same call the generator
