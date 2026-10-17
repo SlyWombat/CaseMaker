@@ -1121,12 +1121,12 @@ what a machine on a bench has been trammed to:
 | `plan-defaults-fallback` | info | No location was read, so some phase times are the app's built-in fallbacks rather than your shop's values. | Run the desktop app with its house service, so the plan reads your location's `plan.*` values. |
 | `plan-air-run-unhashed` | info | A program has no hash yet, so the plan treats it as one this machine has never run, and its air run defaults on (Q14). | Nothing: the air run is the safe default. Once the program is generated it has a hash. |
 
-**Opening the Cut hub** (preflight — #419). Before it shows a job, the hub will ask the things that already
+**Opening the Cut hub** (preflight — #419). Before it shows a job, the hub asks the things that already
 decide whether the job may be cut — the job checks, the item geometry the Generate measured, the fixture,
-the cutter reach, the verifier, the shelf entry the job starts from, and the run gate — and collect each
+the cutter reach, the verifier, the shelf entry the job starts from, and the run gate — and collects each
 owner's own verdict into rows. It checks nothing a second time, so a code here says which owner is speaking,
 and the message is that owner's own sentence. The rows below are the ones that state a verdict as a
-sentence rather than carrying a code of their own. **No screen consumes this yet:**
+sentence rather than carrying a code of their own. **The Cut screen is their first reader (#419):**
 
 | Code | Severity | What it means in plain words | What to do |
 |---|---|---|---|
@@ -1135,6 +1135,8 @@ sentence rather than carrying a code of their own. **No screen consumes this yet
 | `no-frame` | error | The program was generated, but the frame file beside it was not: the rectangle the job's extent is traced in, in the air, which is what shows the job sits square on the stock (#244). This is the Generate's own sentence for it. The program itself is fine, so it is not `no-generate`. | Fix what the sentence names, then Generate again. The frame is checked by the same verifier as the program. |
 | `no-cutter` | error | No cutter the library holds can cut this job at all — the recommendation's own refusal, in its words. A job that *names* a tool the library does not have is `tool-missing` instead, and one it can cut only by losing detail is the sweep's `item-detail-lost`. | Add a cutter that can cut it, or change the job. |
 | `stock-refusal` | error | The shelf entry the job asked to start from cannot start it: nothing left, all of it held for other jobs, or a form or size this machine cannot take. The message is the shelf's own. | Pick another blank, or free that one. |
+| `generated-stale` | error | The job or the machine frame changed after the last Generate, so the program the gate is reading no longer describes the job. This is the run store's own stale mark (`staleSince`), stated by the hub beside the collector's rows. | Generate again before cutting. The old result is not treated as current. |
+| `package-stale` | error | The frozen package the job is holding no longer matches the job: re-hashing by value found it changed since the freeze. The message names the package's time and `packageStaleness`'s own reason. The blank the package reserved stays held for this job (decision 2). | Re-freeze the package. A stale package is not started. |
 
 **The app's own screens** (render boundary — #490). Not a finding about the job: this is the app
 saying a screen failed to draw part of itself. The panel shows the sentence and a *Reload the

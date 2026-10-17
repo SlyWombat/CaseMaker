@@ -71,7 +71,18 @@ export type PreflightOwner =
   /** `saveBlocker` (`store/engraveRunGate.ts`) — why the run cannot proceed at all (no program yet). */
   | 'engraveRunGate'
   /** `stockFromShelf` (`engine/cnc/stockStart.ts`) — the shelf entry as this job's stock. */
-  | 'stockStart';
+  | 'stockStart'
+  /**
+   * THE HUB'S OWN POLICY ROWS — not an owner the collector calls.
+   *
+   * Two statements are about the RUN rather than about the job the collector is asked to judge:
+   * whether the generated result still describes this job (`staleSince`), and whether the frozen
+   * package still does (`packageStaleness`). The collector deliberately takes no run and no package
+   * (`collect.ts`'s `PreflightInput` says so), so the hub states these beside the collector's rows.
+   * They are policy, not a new check: both read an owner's existing verdict (the run store's stale
+   * mark, `package.ts`'s comparison) and both are emitted by `hub.ts`, never by `collect()`.
+   */
+  | 'run';
 
 /**
  * WHAT TO FIX, as far as the owner that raised the row already knows.

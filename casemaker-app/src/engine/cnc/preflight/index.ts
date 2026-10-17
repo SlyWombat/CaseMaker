@@ -10,4 +10,6 @@
 
 export { collect } from './collect';
 export type { PreflightInput } from './collect';
+export { preflightHub } from './hub';
+export type { PreflightHubInput, PreflightHubReport, PreflightScopeRows } from './hub';
 export type { PreflightCause, PreflightOwner, PreflightRow, PreflightScope, PreflightSeverity } from './types';
