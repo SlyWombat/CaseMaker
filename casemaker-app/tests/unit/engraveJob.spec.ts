@@ -350,6 +350,13 @@ describe('validateJob (#200)', () => {
     expect(validateJob(near).some((f) => f.code === 'vise-stock-not-proud')).toBe(false);
   });
 
+  // #488 review — the jaw check's first call is a PANEL RENDER, which can run before the text faces
+  // are parsed (#180), and the wizard's hand-off runs before anything has fetched one. The compile
+  // path must still throw on an unparsed face — a program is never cut from an estimate — but the
+  // collision check reads the documented upper-bound box instead, so the panel mounts and the
+  // check errs strict rather than silently skipping. Held in `partPlanUnparsedFace.spec.ts`, which
+  // stubs `resolveFont` to the cold-cache case: vitest here has every bundled face parsed.
+
   // #219: a trace is work too, so a job of traces alone is not "no items"; its own findings
   // (a stroke that merges under the cutter, a depth past the floor) are raised here.
   it('treats an enabled trace as work, so a trace-only job is not “no items” (#219)', () => {

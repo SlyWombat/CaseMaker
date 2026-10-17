@@ -1199,9 +1199,23 @@ export function labelFootprint(label: EngraveLabel, ink: InkBox): ItemFootprint 
   };
 }
 
+/**
+ * A line's stand-in profile while its face is not parsed: `inkBoxOf`'s documented upper-bound box,
+ * placed with `labelFootprint`'s own three moves — centred on `position`, turned by `rotation` — so
+ * it sits where `labelProfile` would put the real glyphs. Only `toPartPlan`'s `'estimate'` option
+ * builds one (#488 review); nothing that cuts a part ever sees it.
+ */
+function estimatedLabelProfile(label: EngraveLabel): Profile {
+  const ink = inkBoxOf(label.text, label.font, label.weight, label.size);
+  const box = labelFootprint(label, ink);
+  return pTranslate(
+    [box.x, box.y],
+    pRotate(box.rotation, rectProfile(box.halfWidth * 2, box.halfHeight * 2, true)),
+  );
+}
+
 /** The vector (x, y) turned by `deg` degrees, in `keepOutLocalPoint`'s handedness. */
-function rotateVec(x: number, y: number, deg: number): [number, number] {
-  const a = (deg * Math.PI) / 180;
+function rotateVec(x: number, y: number, deg: number): [number, number] {  const a = (deg * Math.PI) / 180;
   const c = Math.cos(a);
   const s = Math.sin(a);
   return [x * c - y * s, x * s + y * c];
@@ -1601,9 +1615,13 @@ function coverPoint(box: SweptBox | null, x: Mm, y: Mm): SweptBox {
  * can put material anywhere its item's box does not already cover.
  *
  * `plan` is accepted so a caller that already built one (the run sheet) reads the same profiles
- * without a second walk of the job.
+ * without a second walk of the job. When it is not given, the plan is built with
+ * `unparsedFace: 'estimate'` (#488 review): this function's callers are the jaw check and the run
+ * sheet's clearance sentence, and the jaw check's first call is a panel render, which can run
+ * before the text faces are parsed. The estimate is `inkBoxOf`'s upper bound, so it can only make
+ * the collision check stricter — never miss a cut.
  */
-export function sweptCuts(job: EngraveJob, plan: PartPlan = toPartPlan(job)): SweptCut[] {
+export function sweptCuts(job: EngraveJob, plan: PartPlan = toPartPlan(job, { unparsedFace: 'estimate' })): SweptCut[] {
   const cuts: SweptCut[] = [];
   const add = (id: string, name: string, depth: Mm, box: SweptBox, growBy: Mm) =>
     cuts.push({ id, name, depth, box: grownBox(box, growBy) });
@@ -1683,9 +1701,26 @@ export function jobDepthLimit(job: EngraveJob, margin?: Mm): DepthLimit {
  * Traces (#219) are a SEPARATE list: they take no part in `resolveItems` (nothing references one),
  * never reach `engraves`, and are appended in document order after the region items.
  */
-export function toPartPlan(job: EngraveJob): PartPlan {
+/**
+ * How `toPartPlan` treats a label whose face is not parsed yet (#180). The default lets
+ * `resolveFont` throw, which is the COMPILE path's promise: a program is never generated from an
+ * estimate of the text. `'estimate'` places the line as `inkBoxOf`'s documented upper-bound box
+ * instead, for the callers that only ask WHERE the cut is and run before the faces are up — the
+ * jaw check behind `validateJob` (#488 review), whose first call is a panel render and the
+ * wizard's hand-off, both of which can precede `ensureFontsLoaded`. An upper bound can only
+ * over-state the extent, which for a collision check is the safe direction.
+ */
+export interface PartPlanOptions {
+  unparsedFace?: 'throw' | 'estimate';
+}
+
+export function toPartPlan(job: EngraveJob, options: PartPlanOptions = {}): PartPlan {
   const stockOutline = rectProfile(job.stock.length, job.stock.width);
   const { order } = resolveItems(job);
+  // Read once: `labelGlyphMeasure` answers `null` for a face that is not parsed, which is the cue
+  // to fall back. It is only built when the caller asked for the fallback, so the compile path
+  // pays nothing for a question it must answer by throwing.
+  const measure = options.unparsedFace === 'estimate' ? labelGlyphMeasure(job.customFonts ?? []) : null;
 
   const profiles = new Map<string, Profile>();
   const engraves: PartPlan['engraves'] = [];
@@ -1701,7 +1736,10 @@ export function toPartPlan(job: EngraveJob): PartPlan {
     // user sees why it is missing rather than silently losing a cut.
     if (isShape(item) && item.kind === 'polygon' && polygonSelfIntersects(item.points)) continue;
 
-    const profile = itemProfile(item, job.customFonts, ctx);
+    const profile =
+      measure !== null && !isShape(item) && measure(item.text, item.font, item.weight, item.size) === null
+        ? estimatedLabelProfile(item)
+        : itemProfile(item, job.customFonts, ctx);
     profiles.set(item.id, profile);
     // A construction item is reference-only (#215): it resolves, but cuts nothing.
     if (item.construction) continue;
