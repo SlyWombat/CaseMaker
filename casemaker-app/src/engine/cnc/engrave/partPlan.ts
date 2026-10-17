@@ -645,6 +645,10 @@ export function tracePaths(
       return [rx + item.position.x, ry + item.position.y];
     }),
   );
+  // `closed` stays false for stroke labels even where the font drew a RING: the data already
+  // repeats the first point, so the CAM path is geometrically closed, and a true here would only
+  // add a zero-length closing feed (and change every stored job's motion lines). The bold passes
+  // join the seam themselves — `offsetPolyline` reads the repeated point (#409 low item).
   return { paths, closed: paths.map(() => false), groups };
 }
 

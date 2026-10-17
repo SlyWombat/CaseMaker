@@ -4,8 +4,11 @@ import { HERSHEY_SIMPLEX, type HersheyGlyph } from './hersheySimplex';
 
 /**
  * The bundled SINGLE-STROKE fonts (issue #219). Ordinary fonts are outlines: tracing them
- * engraves the OUTLINE of each letter, which is rarely wanted. A stroke font is a set of open
+ * engraves the OUTLINE of each letter, which is rarely wanted. A stroke font is a set of
  * polylines — the pen path — so tracing it engraves the letter itself, exactly one cutter wide.
+ * Most are open, but a closed loop (an 'O' bowl, a dot) is written the way the Hershey data
+ * writes one: its last point REPEATS its first. `offsetPolyline` reads that repeated point as a
+ * ring, so a bold pass joins its seam instead of leaving a notch there (#409).
  *
  * Only one face is bundled, the public-domain Hershey Roman Simplex. The registry is shaped like
  * `engine/fonts/registry.ts` (an id plus a label) so a second face is a one-line addition, and so
@@ -107,9 +110,10 @@ function glyphInkX(strokes: readonly (readonly [number, number][])[], gx: number
 }
 
 /**
- * Typeset `text` in a single-stroke font as open polylines, in millimetres, with the BASELINE on
+ * Typeset `text` in a single-stroke font as polylines, in millimetres, with the BASELINE on
  * y = 0 and y increasing up (the job frame's convention). `size` is the cap height in mm, the same
- * meaning as `EngraveLabel.size` and `TextLabel.size`.
+ * meaning as `EngraveLabel.size` and `TextLabel.size`. A closed loop keeps the font's repeated
+ * first point (see {@link isClosedRing}), so the ring survives the y-flip and the layout intact.
  *
  * The font data is y-DOWN (the Hershey convention, the 'H' spans y = -12..9); this flips it. Each
  * glyph is placed at the running pen X and advanced by its own `right - left` side bearings, so
@@ -160,12 +164,36 @@ export function strokeGlyphPaths(
 }
 
 /**
+ * Does `path` describe a RING — the Hershey data's way of writing a closed loop, as a path whose
+ * last point repeats its first? The repetition is bit-identical in the data (and stays so through
+ * `strokeGlyphPaths`, which applies the same pen x and scale to both), so an exact compare is the
+ * test; a 2-point path is degenerate rather than a ring.
+ */
+function isClosedRing(path: readonly [Mm, Mm][]): boolean {
+  if (path.length < 3) return false;
+  const a = path[0]!;
+  const b = path[path.length - 1]!;
+  return a[0] === b[0] && a[1] === b[1];
+}
+
+/**
  * Offset a polyline laterally by `distance`, mm — positive to the LEFT of travel, negative right
  * (#409). An interior vertex gets a MITER join up to `MITER_LIMIT`, and is CHAMFERED above it: the
  * two offset lines stop on their own segment's normal, so a sharp apex (the "A", "K", "W", "<")
- * cannot throw a spike past the width the spacing rule budgeted. The two ends move on their own
- * segment's normal (a flat cap), so the offset copy does not grow past the stroke's ends. A
- * zero-length segment is skipped and the neighbouring vertex absorbs it.
+ * cannot throw a spike past the width the spacing rule budgeted. The two ends of an OPEN path move
+ * on their own segment's normal (a flat cap), so the offset copy does not grow past the stroke's
+ * ends. A zero-length segment is skipped and the neighbouring vertex absorbs it.
+ *
+ * A CLOSED loop — the font's repeated-first-point convention, see {@link isClosedRing} — has no
+ * ends: its first and last vertices are the same point and get the same MITER/CHAMFER join an
+ * interior vertex gets, and the result closes back on that joined point. Treating it as an open
+ * path instead put two flat caps at the seam, leaving a small gap there that the pass's own
+ * groove did not reliably cover (#409 low item).
+ *
+ * An INWARD offset of a loop smaller than the offset (a Hershey dot) passes each miter through
+ * the loop's centre, so the copy reappears on the far side of it — still wound the same way, but
+ * no longer around the ink. That copy is deliberately kept: its groove is what cuts the loop's
+ * interior, and dropping it would leave that uncut.
  *
  * Pure, so the bold passes that use it are testable without a cutter or a job.
  */
@@ -198,32 +226,24 @@ export function offsetPolyline(path: readonly [Mm, Mm][], distance: number): [Mm
   // vertex against the ~0.75 mm the spacing rule budgeted. Above the limit the join is CHAMFERED —
   // both offset lines stop at `|distance|`, exactly the budget — instead of spiking.
   const MITER_LIMIT = 1.5;
-  const out: [Mm, Mm][] = [];
-  for (let i = 0; i < path.length; i++) {
-    const [x, y] = path[i]!;
-    if (i === 0 || i === path.length - 1) {
-      const nm = endNormal(i === 0);
-      out.push(nm ? [x + nm[0] * distance, y + nm[1] * distance] : [x, y]);
-      continue;
-    }
-    const n1 = normals[i - 1]!;
-    const n2 = normals[i]!;
-    if (!n1 && !n2) {
-      out.push([x, y]);
-      continue;
-    }
+  /** The offset point(s) at a vertex between an incoming and an outgoing segment normal. */
+  const join = (
+    x: number,
+    y: number,
+    n1: [number, number] | null,
+    n2: [number, number] | null,
+  ): [Mm, Mm][] => {
+    if (!n1 && !n2) return [[x, y]];
     if (!n1 || !n2) {
       const nm = (n1 ?? n2)!;
-      out.push([x + nm[0] * distance, y + nm[1] * distance]);
-      continue;
+      return [[x + nm[0] * distance, y + nm[1] * distance]];
     }
     let mx = n1[0] + n2[0];
     let my = n1[1] + n2[1];
     const ml = Math.hypot(mx, my);
     if (ml < 1e-9) {
       // A 180° reversal: the offset lines are parallel and never meet; use this segment's normal.
-      out.push([x + n1[0] * distance, y + n1[1] * distance]);
-      continue;
+      return [[x + n1[0] * distance, y + n1[1] * distance]];
     }
     mx /= ml;
     my /= ml;
@@ -232,11 +252,40 @@ export function offsetPolyline(path: readonly [Mm, Mm][], distance: number): [Mm
     const ratio = 1 / Math.max(cos, 1e-6);
     if (ratio > MITER_LIMIT) {
       // Chamfer: each offset line ends on its own segment's normal, `|distance|` from the vertex.
-      out.push([x + n1[0] * distance, y + n1[1] * distance]);
-      out.push([x + n2[0] * distance, y + n2[1] * distance]);
+      return [
+        [x + n1[0] * distance, y + n1[1] * distance],
+        [x + n2[0] * distance, y + n2[1] * distance],
+      ];
+    }
+    return [[x + mx * distance * ratio, y + my * distance * ratio]];
+  };
+
+  const out: [Mm, Mm][] = [];
+  if (isClosedRing(path)) {
+    const n = path.length;
+    // The seam is vertex 0 == vertex n−1: its incoming segment is the LAST normal and its outgoing
+    // segment the first, so it joins exactly as an interior vertex does. A chamfer returns two
+    // points — the arrival on the last segment, then the departure on the first — which are kept in
+    // that ring order.
+    const seam = join(path[0]![0], path[0]![1], normals[n - 2] ?? null, normals[0] ?? null);
+    out.push(...seam);
+    for (let i = 1; i <= n - 2; i++) {
+      const [x, y] = path[i]!;
+      out.push(...join(x, y, normals[i - 1]!, normals[i]!));
+    }
+    // Close the ring on the joined seam, keeping the first == last convention of the input.
+    out.push([seam[0]![0], seam[0]![1]]);
+    return out;
+  }
+
+  for (let i = 0; i < path.length; i++) {
+    const [x, y] = path[i]!;
+    if (i === 0 || i === path.length - 1) {
+      const nm = endNormal(i === 0);
+      out.push(nm ? [x + nm[0] * distance, y + nm[1] * distance] : [x, y]);
       continue;
     }
-    out.push([x + mx * distance * ratio, y + my * distance * ratio]);
+    out.push(...join(x, y, normals[i - 1]!, normals[i]!));
   }
   return out;
 }
