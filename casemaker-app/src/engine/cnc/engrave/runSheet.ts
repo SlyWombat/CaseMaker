@@ -992,9 +992,11 @@ function facingSteps(
 
   if (cam !== null) {
     steps.push({
+      // #432 review R1 — the facing cutter is already in: it was fitted (and its Z0 written) in the
+      // section above, so this step names the file and says WHICH cutter runs it, not "fit this".
       text:
-        `Fit the FACING cutter, not the engraving bit: ${cam.toolName}, ⌀ ` +
-        `${fmtNum(cam.diameterMm)} mm flat. Load ${faceFile} for this pass alone.`,
+        `The skim runs with the facing cutter fitted above — ${cam.toolName}, ⌀ ` +
+        `${fmtNum(cam.diameterMm)} mm flat — not the engraving bit. Load ${faceFile} for this pass alone.`,
       value: `⌀ ${fmtNum(cam.diameterMm)} mm`,
     });
     steps.push({
@@ -1009,21 +1011,57 @@ function facingSteps(
       `Run ${faceFile} after the dry run above, air or on the blank as this job was approved. It ` +
       'is a skim, so the first pass is the real cut — hold the stop ready and watch the first two lines.',
   });
+  // #432 review R1 — THE RE-TOUCH IS WITH THE PROBE, AND THE ENGRAVING CUTTER COMES BACK IN AFTER
+  // IT. That is the order `retouchSurface` then `applyCorrection` run in, and it is the only one
+  // that yields a Z0 for the engraving program at all: the G10 L2 that writes that Z0 zeroes the
+  // tool-length offset to the CURRENT tool (#387), so the engraving cutter has to be fitted and
+  // calibrated before the line is written. The old step stopped at the re-touch and never said so.
   steps.push({
     text:
-      `Re-touch Z0 on the faced surface before loading ${runSheetFileName(job.name)}. The skim took ` +
-      `${fmtNum(facing.depth)} mm off, and the engraving file is posted from the new top, so a Z0 ` +
-      'taken on the blank as it arrived now sits that far off. Fit the wired probe again and touch ' +
-      'the faced top at the registration point: the recorded value is where that touch MEASURES the ' +
-      `top to be, and ${fmtNum(facing.depth)} mm below the first reading is only what was expected. ` +
-      'Fit the cutter before the G10 L2 write: that command zeroes the tool-length offset to the ' +
-      'current tool (#387).',
+      'Then measure the top the skim left. Home the machine, select G54 and run G92.1, and fit the ' +
+      `wired probe again. Touch the faced top at the registration point: ${fmtNum(facing.depth)} mm ` +
+      'below your FIRST reading is what the skim should have taken, and that is only what was ' +
+      'EXPECTED — the number you write down is what the touch measures. If it sits far from that ' +
+      'expectation the skim did not run as planned: stop and check it, rather than accepting a ' +
+      'number the re-touch would refuse.',
+    code: '$H',
     record: 'faced surface Z (mm)',
+  });
+  steps.push({
+    text:
+      'Home the machine, then take the probe out and fit the engraving cutter — the one this job ' +
+      `was designed around, the cutter ${runSheetFileName(job.name)} was posted for. Run ` +
+      'tool-length calibration from Studio (M491) and record its PRB: a reading of THIS cutter ' +
+      'alone, not yet a Z.',
+    code: 'M491',
+    record: 'the engraving cutter’s PRB (mm)',
+  });
+  steps.push({
+    text:
+      'Set Z0 for the engraving program from the re-touch and those two readings, NOT by touching ' +
+      'the surface again: Z0 = the faced surface Z you just recorded + (the engraving cutter’s PRB ' +
+      '− the probe’s PRB recorded when you set the origin). With the engraving cutter fitted, write ' +
+      'it with G10 L2: that command zeroes the tool-length offset to the current tool (#387). Home ' +
+      `again once it is written, then load ${runSheetFileName(job.name)}.`,
+    value: 'Z0 = faced surface + (engraving PRB − probe PRB)',
+    record: 'Z0 for the engraving program (mm)',
   });
   return steps;
 }
 
-function registrationSteps(job: EngraveJob, onBoard: boolean, unverified: string, tipDiameterMm?: Mm): RunSheetStep[] {
+function registrationSteps(
+  job: EngraveJob,
+  onBoard: boolean,
+  unverified: string,
+  tipDiameterMm?: Mm,
+  /**
+   * #432 review R1 — the job is skimmed before it is engraved, so the origin is probed with the
+   * probe FITTED and the Z0 step records the probe's PRB rather than "the tool that made it": on
+   * this job there is only one candidate, and naming it is what lets the facing cutter's and the
+   * engraving cutter's Z0 be worked out from this one reading.
+   */
+  facingRun = false,
+): RunSheetStep[] {
   const { length, width } = job.stock;
   // #449 — the tip is the shop's measured `registration.tipDiameterMm` when the caller passed the scan
   // settings; `PROBE_SPEC` (the same 2.0 mm, its labelled fallback) otherwise.
@@ -1069,13 +1107,23 @@ function registrationSteps(job: EngraveJob, onBoard: boolean, unverified: string
     // step above, or the probe — and the formula's second term is whichever one it was.
     text:
       (onBoard
-        ? "Z0: the PART's top face — probe it, or touch off on it. NOT the board's top face."
-        : "Z0: the blank's top face — probe it, or touch off on it.") +
-      ' Record the reading AND the tool that made it: on a job cut by two cutters the second ' +
-      'program’s Z0 is worked out from this surface and the PRB of whichever tool took this ' +
-      'touch, so both go on this one blank — the first cutter’s own PRB is a separate reading, ' +
-      'taken where it is fitted.',
-    record: 'surface Z (mm) and the PRB of the tool that set Z0 (mm)',
+        ? facingRun
+          ? "Z0: the PART's top face — probe it with the probe you just fitted. NOT the board's top face."
+          : "Z0: the PART's top face — probe it, or touch off on it. NOT the board's top face."
+        : facingRun
+          ? "Z0: the blank's top face — probe it with the probe you just fitted."
+          : "Z0: the blank's top face — probe it, or touch off on it.") +
+      (facingRun
+        ? ' Record the reading AND the probe’s PRB: this job is skimmed before it is engraved, so ' +
+          'this surface and the probe’s reading are what the facing cutter’s Z0 is worked out from ' +
+          'and — after the re-touch on the faced top — the engraving cutter’s too.'
+        : ' Record the reading AND the tool that made it: on a job cut by two cutters the second ' +
+          'program’s Z0 is worked out from this surface and the PRB of whichever tool took this ' +
+          'touch, so both go on this one blank — the first cutter’s own PRB is a separate reading, ' +
+          'taken where it is fitted.'),
+    record: facingRun
+      ? 'surface Z (mm) and the probe’s PRB (mm)'
+      : 'surface Z (mm) and the PRB of the tool that set Z0 (mm)',
     unverified,
   });
   steps.push({
@@ -1935,24 +1983,74 @@ export function buildRunSheet(
     { text: 'Tighten. Check the blank does not rock.' },
   ];
 
+  // #432 review R1 — A FACING JOB'S ORDER IS PROBE → FACE → RE-TOUCH → ENGRAVE. The origin is
+  // probed before ANY cutter goes in, the first cutter fitted is the FACING one (its Z0 comes from
+  // the probe's reading), and the engraving cutter is fitted at the very end, after the re-touch on
+  // the faced top. So the two sections below SWAP for a facing job, and neither one's steps can be
+  // written without knowing which job it is — this flag is the one place that is decided.
+  //
+  // True only when the skim will actually run. A facing file the verifier withheld leaves the job
+  // as a plain one — the facing section below says so — and the sheet must not send the operator
+  // looking for a skim that does not exist.
+  const facingRun =
+    job.facing !== undefined && job.facing.enabled && job.facing.depth > 0 && generated.facingNc !== null;
+
   // ---- 4 · Fit the cutter and measure its length (⚠ #208) ------------------------------------
-  const cutterSteps: RunSheetStep[] = [
-    {
-      text: 'Fit the cutter with its collar. Run tool-length calibration from Studio (M491).',
-      // #410 review item 1 — the reading itself, on paper. Every Z in the program is this cutter's,
-      // and a second cutter's Z0 is worked out from the difference between two of these readings (the
-      // swap routine in the Cut section, and the origin step), so the number has to be written down
-      // where it is taken.
-      record: "the cutter's PRB (mm)",
-      unverified: UNVERIFIED,
-    },
-    {
-      text:
-        'Do not skip this because the program contains T1 M6. If the machine already believes tool 1 ' +
-        'is fitted, that line does nothing.',
-      unverified: UNVERIFIED,
-    },
-  ];
+  // For a facing job this section runs AFTER the origin (see `facingRun` above) and fits the FACING
+  // cutter, because that is the first cutter to touch the blank: the skim happens before anything
+  // else, and its Z0 comes from the probe's surface reading, not from a second touch-off.
+  const cutterSteps: RunSheetStep[] = facingRun
+    ? [
+        {
+          text:
+            'Home the machine, then fit the FACING cutter in place of the probe. Nothing moves but ' +
+            'the Z reference, so the X and Y origin stays where the probing put it.',
+          code: '$H',
+          unverified: UNVERIFIED,
+        },
+        {
+          text:
+            'Fit the FACING cutter, not the engraving bit. Run tool-length calibration from Studio ' +
+            '(M491) and record this cutter’s PRB — a reading of THIS cutter alone, the second term ' +
+            'of the Z0 below.',
+          code: 'M491',
+          record: 'the facing cutter’s PRB (mm)',
+          unverified: UNVERIFIED,
+        },
+        {
+          text:
+            'Set Z0 for the facing program from those two readings, NOT by touching the surface ' +
+            'again: Z0 = the surface Z you recorded when you probed the origin + (this cutter’s PRB ' +
+            '− the probe’s PRB, recorded there beside it). Write it with G10 L2 while the facing ' +
+            'cutter is fitted: that command zeroes the tool-length offset to the current tool (#387).',
+          value: 'Z0 = surface + (facing PRB − probe PRB)',
+          record: 'Z0 for the facing program (mm)',
+          unverified: UNVERIFIED,
+        },
+        {
+          text:
+            'Do not skip this because the program contains T1 M6. If the machine already believes ' +
+            'tool 1 is fitted, that line does nothing.',
+          unverified: UNVERIFIED,
+        },
+      ]
+    : [
+        {
+          text: 'Fit the cutter with its collar. Run tool-length calibration from Studio (M491).',
+          // #410 review item 1 — the reading itself, on paper. Every Z in the program is this
+          // cutter's, and a second cutter's Z0 is worked out from the difference between two of
+          // these readings (the swap routine in the Cut section, and the origin step), so the number
+          // has to be written down where it is taken.
+          record: "the cutter's PRB (mm)",
+          unverified: UNVERIFIED,
+        },
+        {
+          text:
+            'Do not skip this because the program contains T1 M6. If the machine already believes tool 1 ' +
+            'is fitted, that line does nothing.',
+          unverified: UNVERIFIED,
+        },
+      ];
 
   // ---- 5 · Set the work origin (⚠ #208) ------------------------------------------------------
   // #391 — where the origin IS, then how the operator checks it against the blank actually in the
@@ -1965,7 +2063,24 @@ export function buildRunSheet(
   // front, and bisection that covers one direction only. Holding one array entry is the whole change:
   // `materialScan.ts` and its spec are untouched, so the block comes back the moment the fixes land.
   const originSteps: RunSheetStep[] = [
-    ...registrationSteps(job, onBoard, UNVERIFIED, options.scan?.tipDiameterMm),
+    // #432 review R1 — a facing job probes the origin before any cutter is fitted, and the probe's
+    // own reading is what every cutter's Z0 below is worked out against. The step exists only for
+    // that job: a plain job may set Z0 with either the probe or the cutter (see the Z0 step).
+    ...(facingRun
+      ? [
+          {
+            text:
+              'Fit the wired probe, not a cutter. Run tool-length calibration from Studio (M491) and ' +
+              'record the PROBE’s PRB: this job is skimmed before it is engraved, so the probe sets ' +
+              'Z0 and its reading is the reference each cutter’s Z0 is worked out against — the ' +
+              'facing cutter’s below, and the engraving cutter’s after the re-touch.',
+            code: 'M491',
+            record: 'the probe’s PRB (mm)',
+            unverified: UNVERIFIED,
+          },
+        ]
+      : []),
+    ...registrationSteps(job, onBoard, UNVERIFIED, options.scan?.tipDiameterMm, facingRun),
     ...(options.materialScan === true ? materialPositionSteps(job, onBoard, UNVERIFIED, machine.toolChange.clearanceZ, options.scan) : []),
   ];
 
@@ -2217,8 +2332,18 @@ export function buildRunSheet(
       : []),
     { id: 'mount', title: 'Mount the vise', steps: mountSteps },
     { id: 'load', title: 'Load the blank', steps: loadSteps },
-    { id: 'cutter', title: 'Fit the cutter and measure its length', steps: cutterSteps },
-    { id: 'origin', title: 'Set the work origin', steps: originSteps },
+    // #432 review R1 — a facing job probes the origin FIRST, with the probe fitted, and only then
+    // puts the facing cutter in: the section order is the physical order, and the two sections are
+    // the run's first two acts at the machine either way.
+    ...(facingRun
+      ? [
+          { id: 'origin', title: 'Set the work origin with the probe', steps: originSteps },
+          { id: 'cutter', title: 'Fit the facing cutter and measure its length', steps: cutterSteps },
+        ]
+      : [
+          { id: 'cutter', title: 'Fit the cutter and measure its length', steps: cutterSteps },
+          { id: 'origin', title: 'Set the work origin', steps: originSteps },
+        ]),
     { id: 'dry-run', title: 'Dry run', steps: dryRunSteps },
     // #432 slice 3 — the skim sits between the air run and the cut: the trace is checked against
     // the origin on the blank as clamped, the skim removes the finish error, the re-touch that ends

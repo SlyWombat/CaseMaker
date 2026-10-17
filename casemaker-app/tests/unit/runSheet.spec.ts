@@ -1197,15 +1197,18 @@ describe('runSheet — the facing phase (#432 slice 3)', () => {
     // The depth the whole job is posted from, and the file the operator loads.
     expect(steps).toContain('0.5 mm off the whole top');
     expect(steps).toContain(runSheetFaceFileName(job.name));
-    // Its OWN cutter — never the engraving bit.
-    expect(steps).toContain('FACING cutter, not the engraving bit');
+    // Its OWN cutter — never the engraving bit. The cutter itself is FITTED in the section before
+    // this one (#432 review R1), so the step names which one the file runs rather than "fit it".
+    expect(steps).toContain('the facing cutter fitted above');
+    expect(steps).toContain('not the engraving bit');
     expect(steps).toContain('6 mm flat end mill');
     expect(steps).toContain('⌀ 6 mm');
     // The worker's numbers, verbatim.
     expect(steps).toContain('10000 RPM · 800 mm/min feed · 200 mm/min plunge · 3 × 0.2 mm passes · 3 mm step-over');
-    // And the re-touch that moves Z0 onto the faced surface.
-    expect(steps).toContain('Re-touch Z0 on the faced surface');
-    expect(steps).toContain('took 0.5 mm off');
+    // And the re-touch that MEASURES the faced top, with the probe — the number written down is
+    // the measurement, never the expectation.
+    expect(steps).toContain('measure the top the skim left');
+    expect(steps).toContain('0.5 mm below your FIRST reading');
     expect(section(sheet, 'facing').steps.some((s) => s.record === 'faced surface Z (mm)')).toBe(true);
   });
 
@@ -1227,7 +1230,8 @@ describe('runSheet — the facing phase (#432 slice 3)', () => {
     expect(failure?.text).toContain('top will not be skimmed');
     expect(failure?.bold).toBe(true);
     expect(steps.some((s) => s.text.includes(runSheetFaceFileName(job.name)))).toBe(false);
-    expect(steps.some((s) => s.text.includes('Re-touch Z0'))).toBe(false);
+    // Nothing to measure afterwards: the re-touch's blank is the one a skim would have left.
+    expect(steps.some((s) => s.record === 'faced surface Z (mm)')).toBe(false);
   });
 
   it('states that facing is off, quoting the finish default it overrode', () => {
@@ -1264,8 +1268,74 @@ describe('runSheet — the facing phase (#432 slice 3)', () => {
     );
     const steps = texts(sheet, 'facing').join(' | ');
     expect(steps).toContain(runSheetFaceFileName(job.name));
-    expect(steps).toContain('Re-touch Z0 on the faced surface');
+    expect(steps).toContain('measure the top the skim left');
     expect(steps).not.toContain('step-over');
+  });
+
+  // #432 review R1 — the sheet used to stop at the re-touch and never calibrate the engraving
+  // cutter, so an operator following it had no Z0 for the engraving program at all. The order is
+  // now the one `retouchSurface`/`applyCorrection` run in, and the one the bench used:
+  //   probe + Z0 → $H, facing cutter, M491, G10 L2 → face → re-touch with the probe →
+  //   $H, engraving cutter, M491, G10 L2 → engrave.
+  it('orders the run probe → face → re-touch → engrave, calibrating each cutter before its Z0 is written', () => {
+    const job = facingJob({ enabled: true, depth: 0.5 });
+    const sheet = buildRunSheet(
+      job,
+      generatedWithFacing(job, { facingNc: ';face\nG21\n', facingError: null, facingCam: CAM }),
+      NO_SIM,
+      NOW,
+    );
+
+    // The probe sets the origin BEFORE any cutter is fitted, so the two sections swap places — and
+    // the sheet says so in both titles, because "fit the cutter" is the one step that must not
+    // happen first on this job.
+    const ids = sheet.sections.map((s) => s.id);
+    expect(ids.indexOf('origin')).toBe(ids.indexOf('load') + 1);
+    expect(ids.indexOf('cutter')).toBe(ids.indexOf('origin') + 1);
+    expect(sheet.sections.find((s) => s.id === 'origin')!.title).toContain('with the probe');
+    expect(sheet.sections.find((s) => s.id === 'cutter')!.title).toBe('5 · Fit the facing cutter and measure its length');
+    // The engraving program is still the last thing run, after the section that re-zeros for it.
+    expect(ids.indexOf('facing')).toBe(ids.indexOf('dry-run') + 1);
+    expect(ids.indexOf('cut')).toBe(ids.indexOf('facing') + 1);
+
+    // 1 · the probe, then Z0 — and the Z0 records the PROBE's reading, not "the tool that made it".
+    const origin = section(sheet, 'origin').steps;
+    const probeFit = origin.findIndex((s) => s.code === 'M491');
+    const z0 = origin.findIndex((s) => s.text.startsWith('Z0:'));
+    expect(probeFit).toBeGreaterThanOrEqual(0);
+    expect(probeFit).toBeLessThan(z0);
+    expect(origin[probeFit]!.record).toBe('the probe’s PRB (mm)');
+    expect(origin[z0]!.record).toBe('surface Z (mm) and the probe’s PRB (mm)');
+    expect(origin[z0]!.text).toContain('probe it with the probe you just fitted');
+
+    // 2 · home, the FACING cutter, its M491, and its own G10 L2 — from the probe's reading.
+    const cutter = section(sheet, 'cutter').steps;
+    expect(cutter.slice(0, 3).map((s) => s.code ?? '')).toEqual(['$H', 'M491', '']);
+    expect(cutter[1]!.record).toBe('the facing cutter’s PRB (mm)');
+    expect(cutter[2]!.value).toBe('Z0 = surface + (facing PRB − probe PRB)');
+    expect(cutter[2]!.record).toBe('Z0 for the facing program (mm)');
+    expect(cutter[2]!.text).toContain('G10 L2');
+    // The engraving cutter is NOT fitted here: that is the fault this spec exists for.
+    expect(cutter.some((s) => (s.record ?? '').includes('engraving cutter'))).toBe(false);
+
+    // 3 · face, 4 · re-touch with the probe, 5 · the engraving cutter and its G10 L2.
+    const facing = section(sheet, 'facing').steps;
+    const faceAt = facing.findIndex((s) => s.text.includes(runSheetFaceFileName(job.name)));
+    const retouchAt = facing.findIndex((s) => s.record === 'faced surface Z (mm)');
+    const engraveFitAt = facing.findIndex((s) => s.record === 'the engraving cutter’s PRB (mm)');
+    const engraveZ0At = facing.findIndex((s) => s.record === 'Z0 for the engraving program (mm)');
+    expect(faceAt).toBeGreaterThanOrEqual(0);
+    expect(retouchAt).toBeGreaterThan(faceAt);
+    expect(engraveFitAt).toBeGreaterThan(retouchAt);
+    expect(engraveZ0At).toBeGreaterThan(engraveFitAt);
+    // The re-touch is made with the PROBE, not a cutter: it measures the faced top.
+    expect(facing[retouchAt]!.text).toContain('fit the wired probe again');
+    expect(facing[engraveFitAt]!.code).toBe('M491');
+    expect(facing[engraveZ0At]!.value).toBe('Z0 = faced surface + (engraving PRB − probe PRB)');
+    expect(facing[engraveZ0At]!.text).toContain('G10 L2');
+
+    // 6 · the cut assumes the Z0 the section above wrote, and refits nothing.
+    expect(section(sheet, 'cut').steps.some((s) => s.code === 'M491')).toBe(false);
   });
 
   it('sends the dry run on to the skim rather than straight to the cut, only on a facing job', () => {

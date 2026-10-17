@@ -730,6 +730,13 @@ function facingProgram(
   tools: readonly ToolLibraryEntry[],
   catalogue: readonly FeedCatalogueRow[],
   table: readonly FeedsEntry[] | undefined,
+  /**
+   * This file's share of the run's vacuum words (#419 decision 4). The facing file is the FIRST
+   * program of a run that has one — it runs before any cutter touches the part — so the caller
+   * passes `'first'`: the vacuum comes on here and stays on across the bit change, and the
+   * engraving program that follows is posted `'last'` to switch it off.
+   */
+  span: VacuumSpan,
 ): {
   nc: string | null;
   verify: VerifyReport | null;
@@ -780,7 +787,7 @@ function facingProgram(
       machine.rapidEstimate,
       depth,
     );
-    const posted = postZ1(ir, { ...ctx, toolKey }, machine);
+    const posted = postZ1(ir, { ...ctx, toolKey }, machine, { vacuum: span });
     if (!posted.ok) {
       return { nc: null, verify: null, toolKey, error: posted.errors.join('; '), cam: null };
     }
@@ -1000,6 +1007,25 @@ function toolForProgram(
 }
 
 /**
+ * The engraving program's share of the run's vacuum words when a FACING file was produced for it
+ * (#432 review R3).
+ *
+ * The vacuum words belong to the RUN (#419 decision 4), and the facing file is its first program:
+ * it is posted `'first'`, switching the vacuum on before the skim, and it stays on across the bit
+ * change to the engraving cutter. So the engraving program is no longer first — `'whole'` becomes
+ * `'last'` (it opens nothing and closes the run), and a multi-setup run's own first program becomes
+ * `'middle'`. The other two are unchanged: neither opens the run.
+ *
+ * Only applied when the facing file EXISTS. A facing file the verifier withheld leaves the
+ * engraving as the run's first program, and it carries both words itself.
+ */
+function spanAfterFacing(span: VacuumSpan): VacuumSpan {
+  if (span === 'whole') return 'last';
+  if (span === 'first') return 'middle';
+  return span;
+}
+
+/**
  * ONE program: the pipeline as it shipped, for one setup and one cutter. Returns everything the
  * result carries EXCEPT `programs` — the list is assembled by the loop in `engraveGenerate`, which
  * is the only place that knows how many programs the job has.
@@ -1007,7 +1033,8 @@ function toolForProgram(
  * `span` is this file's share of the run's vacuum words (decision 4) and `withFacing` says whether
  * this program builds the job's facing file. The facing pass is a property of the BLANK, not of a
  * setup, so exactly one program in a run produces it — the first, so the operator faces before any
- * cut.
+ * cut. That file is the run's FIRST program and takes the first word; this program's own span is
+ * then moved along by `spanAfterFacing`.
  */
 function generateOneProgram(
   tl: ManifoldToplevel,
@@ -1035,6 +1062,20 @@ function generateOneProgram(
       message?: string;
       threads?: ThreadMillPlan[] | null;
       threadMachining?: ThreadSettingsResult | null;
+      /**
+       * The facing file, when the stop happens AFTER it was built (#432 review R3 — the facing
+       * program is produced before the engraving is posted, so a post refusal can now come second).
+       * Omitted everywhere else: a run that stops before the artefact exists reports no facing
+       * file, no reason and no tool — `facingError` is "the program could not be produced", not
+       * "the run stopped first".
+       */
+      facing?: {
+        nc: string | null;
+        verify: VerifyReport | null;
+        toolKey: string | null;
+        error: string | null;
+        cam: FacingCamSummary | null;
+      };
     },
   ): Omit<EngraveGenerated, 'programs'> => {
     if (extra?.message !== undefined) errors.push({ stage, message: extra.message });
@@ -1050,14 +1091,11 @@ function generateOneProgram(
       verify: null,
       frameNc: null,
       frameVerify: null,
-      // Nothing about the facing pass is known yet: a run that stops before the artefact is built
-      // reports no facing file, no reason, and no tool — `facingError` is "the program could not be
-      // produced", not "the run stopped first".
-      facingNc: null,
-      facingVerify: null,
-      facingToolKey: null,
-      facingError: null,
-      facingCam: null,
+      facingNc: extra?.facing?.nc ?? null,
+      facingVerify: extra?.facing?.verify ?? null,
+      facingToolKey: extra?.facing?.toolKey ?? null,
+      facingError: extra?.facing?.error ?? null,
+      facingCam: extra?.facing?.cam ?? null,
       predicted,
       errors,
     };
@@ -1176,7 +1214,21 @@ function generateOneProgram(
   const minRapidZ = ir.hopZ;
   const cam = summarize(ir);
 
-  // 4. the post-processor (#173).
+  // 4. the depth limit and the setup. They are read by the facing file as well as by the verifier
+  // below, and the facing file has to be built BEFORE the engraving is posted — see step 6 — so
+  // both live up here. The depth limit is the one the JOB implies: the CNC-2 stock limit,
+  // tightened where an under-surface void leaves a thinner membrane (#231 item 3). On a job that
+  // states its print (#285) the whole limit comes from the layer stack instead, so the void
+  // membrane is layer-aligned and the verifier's number is the one the printer will honour.
+  const stack = stackDepthLimit(tl, plan, job, margins.boundaryMargin);
+  const limit: DepthLimit = stack?.limit ?? jobDepthLimit(job, margins.boundaryMargin);
+  const limitReasonAt = stack
+    ? (x: number, y: number): string => depthLimitReason(stack, job, x, y)
+    : undefined;
+  const setup = toSetup(job, mill, shop.mount?.fixture ?? undefined);
+
+  // 5. the post-processor (#173). Its `ctx` comes first because the facing file is posted from it
+  // too (step 6), and the two files share one job name, stock and frame.
   const ctx: PostContext = {
     jobName: job.name,
     stock: { length: job.stock.length, width: job.stock.width, thickness: job.stock.thickness },
@@ -1188,27 +1240,50 @@ function generateOneProgram(
     // no identity of its own, and this is the line that lets the file say which cutter it was for.
     toolKey: job.toolKey,
   };
+
+  // 6. the FACING file (#432 slice 2): the skim of the blank's top, as its own program, beside
+  // the job. It shares nothing with the engraving program — its own cutter, its own feeds, its own
+  // post and verify — and it can refind nothing either: a refusal is carried as `facingError` and
+  // the run still succeeds, because an operator who cannot face in this app can face in their own
+  // program and still cut what this run produced.
+  //
+  // BUILT BEFORE THE ENGRAVING IS POSTED (#432 review R3). The vacuum words belong to the RUN
+  // (#419 decision 4): the facing file is its first program and switches the vacuum on, and the
+  // engraving program that follows switches it off. So the engraving's own share depends on
+  // whether this file exists at all — a withheld facing file (refused by the verifier) leaves the
+  // engraving as the run's only program, and it has to carry BOTH words itself. The facing file's
+  // own span is `'first'` for the same reason.
+  const facing =
+    withFacing && facingDepth > 0
+      ? facingProgram(
+          job,
+          facingDepth,
+          ctx,
+          mill,
+          setup,
+          limit,
+          shop.mount,
+          shop.tools ?? [],
+          catalogue,
+          shop.feeds ?? undefined,
+          span === 'none' ? 'none' : 'first',
+        )
+      : { nc: null, verify: null, toolKey: null, error: null, cam: null };
+
+  // 7. the post-processor's text, with this file's share of the vacuum words: `span` when the
+  // engraving is the run's only program (or the facing file was withheld), `spanAfterFacing(span)`
+  // when the facing file has already taken the first word.
   let nc: string;
   try {
-    const posted = postZ1(ir, ctx, mill, { vacuum: span });
-    if (!posted.ok) return stop('post', { feeds, message: posted.errors.join('; ') });
+    const posted = postZ1(ir, ctx, mill, { vacuum: facing.nc !== null ? spanAfterFacing(span) : span });
+    if (!posted.ok) return stop('post', { feeds, message: posted.errors.join('; '), facing });
     nc = posted.text;
   } catch (e) {
-    return stop('post', { feeds, message: e instanceof Error ? e.message : String(e) });
+    return stop('post', { feeds, message: e instanceof Error ? e.message : String(e), facing });
   }
 
-  // 5. the verifier (#174) on the TEXT, with the depth limit the JOB implies: the CNC-2 stock
-  // limit, tightened where an under-surface void leaves a thinner membrane (#231 item 3). On a
-  // job that states its print (#285) the whole limit comes from the layer stack instead, so the
-  // void membrane is layer-aligned and the verifier's number is the one the printer will honour.
-  // The stack owns wasm cross-sections, so it lives no longer than the two verifier calls below.
-  const stack = stackDepthLimit(tl, plan, job, margins.boundaryMargin);
-  const limit: DepthLimit = stack?.limit ?? jobDepthLimit(job, margins.boundaryMargin);
-  const limitReasonAt = stack
-    ? (x: number, y: number): string => depthLimitReason(stack, job, x, y)
-    : undefined;
-  const setup = toSetup(job, mill, shop.mount?.fixture ?? undefined);
-
+  // 8. the verifier (#174) on the TEXT. The stack holds wasm cross-sections, so it is released
+  // when this function returns — it is read again by the verifier calls below and by the frame's.
   try {
     const verify = verifyProgram(nc, { setup, machine: mill, tool, depthLimit: limit, minRapidZ, ...(limitReasonAt ? { limitReasonAt } : {}), ...mountCtx(shop.mount) });
     if (verify.findings.some((f) => f.severity === 'error')) {
@@ -1216,17 +1291,7 @@ function generateOneProgram(
       return { ok: false, stage: 'verify', findings, feeds, threads: threadPlans, threadMachining, cam, nc, verify, frameNc: null, frameVerify: null, facingNc: null, facingVerify: null, facingToolKey: null, facingError: null, facingCam: null, predicted, errors };
     }
 
-    // 6. the FACING file (#432 slice 2): the skim of the blank's top, as its own program, beside
-    // the job. It shares nothing with the engraving program — its own cutter, its own feeds, its own
-    // post and verify — and it can refind nothing either: a refusal is carried as `facingError` and
-    // the run still succeeds, because an operator who cannot face in this app can face in their own
-    // program and still cut what this run produced.
-    const facing =
-      withFacing && facingDepth > 0
-        ? facingProgram(job, facingDepth, ctx, mill, setup, limit, shop.mount, shop.tools ?? [], catalogue, shop.feeds ?? undefined)
-        : { nc: null, verify: null, toolKey: null, error: null, cam: null };
-
-    // 7. the frame file (#244): the job's XY extent traced in the air, beside the job. Produced by
+    // 9. the frame file (#244): the job's XY extent traced in the air, beside the job. Produced by
     // THIS gated action from the same toolpath, and checked by the SAME verifier — a frame the
     // operator cannot run at the wrong Z, because the Z is in the file.
     const frame = frameProgram(ir, ctx, mill, setup, tool, limit, shop.mount);

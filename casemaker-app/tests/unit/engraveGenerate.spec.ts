@@ -1324,7 +1324,13 @@ describe('facing the stock’s top (#432 slices 1–2)', () => {
     // The engraving program is UNTOUCHED: no facing operation, no Z shift. The two files meet in
     // the machine because the re-touch re-zeros Z on the faced surface between them (#432 slice 4),
     // so lowering the cuts here would double-count the skim.
-    expect(g.nc).toBe(plain.nc);
+    //
+    // ONE thing does differ, and it is not a Z shift: the vacuum words belong to the RUN (#419
+    // decision 4), and the facing file is now its first program — it takes `M331` and the
+    // engraving program takes `M332` (#432 review R3). With both files' words stripped the
+    // engraving is byte-identical to the plain job's.
+    const stripVacuum = (nc: string) => nc.replace(/^[ \t]*M33[12][ \t]*\r?\n/gim, '');
+    expect(stripVacuum(g.nc!)).toBe(stripVacuum(plain.nc!));
     expect(g.cam).toEqual(plain.cam);
     expect(g.verify!.stats.deepestZ).toBe(plain.verify!.stats.deepestZ);
     expect(g.verify!.findings.filter((f) => f.severity === 'error')).toEqual([]);
@@ -1343,6 +1349,48 @@ describe('facing the stock’s top (#432 slices 1–2)', () => {
     expect(g.facingVerify!.findings.filter((f) => f.severity === 'error')).toEqual([]);
     // The skim really removes 0.5 mm, from the probed top down.
     expect(g.facingVerify!.stats.deepestZ).toBeCloseTo(-0.5, 6);
+  });
+
+  // #432 review R3 — the vacuum words belong to the RUN (#419 decision 4), and the facing file is
+  // its FIRST program: it switches the vacuum on before the skim, and the engraving program that
+  // follows switches it off. The mode therefore stays on across the bit change between them.
+  const vacuumWords = (nc: string): string[] => [...nc.matchAll(/\bM33[12]\b/g)].map((m) => m[0]);
+
+  it('gives the facing file the run’s first vacuum word and the engraving the last', () => {
+    const g = generate(tl, faced(), null, [], undefined, SHOP);
+    expect(g.ok, JSON.stringify({ errors: g.errors, facingError: g.facingError })).toBe(true);
+    expect(g.facingNc, g.facingError ?? '').not.toBeNull();
+    expect(vacuumWords(g.facingNc!)).toEqual(['M331']);
+    expect(vacuumWords(g.nc!)).toEqual(['M332']);
+  });
+
+  it('leaves the engraving as the run’s only program, carrying BOTH words, when the facing file is withheld', () => {
+    // The skim is refused by the verifier — it would run into the clamp — so no facing file exists.
+    // The engraving is then the whole run, and it must write both words itself: a share worked out
+    // for a file that was never produced would leave the vacuum on for ever.
+    const clamp: MountObstacle = {
+      id: 'clamp-test',
+      kind: 'clamp',
+      label: 'the clamp on the back edge',
+      fix: 'move it clear of the cut',
+      min: [0, 54],
+      max: [100, 60],
+      topZ: 0.5,
+    };
+    const mount: MountObstacles = {
+      obstacles: [clamp],
+      uncertainty: 0.1,
+      fixture: {
+        boxes: [{ id: clamp.id, label: clamp.label, min: [0, 54, -12], max: [100, 60, 0.5] }],
+        source: 'default',
+        uncertainty: 0.1,
+      },
+    };
+    const g = generate(tl, faced(), null, [], undefined, { ...SHOP, mount });
+    expect(g.ok).toBe(true);
+    expect(g.facingNc).toBeNull();
+    expect(g.facingError).toContain('could not be faced');
+    expect(vacuumWords(g.nc!)).toEqual(['M331', 'M332']);
   });
 
   // #432 review — `job.cutOverride` is the hand-entered S/F for the job's ENGRAVING cutter (#205).
