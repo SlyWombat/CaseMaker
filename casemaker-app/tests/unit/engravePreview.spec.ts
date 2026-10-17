@@ -10,7 +10,7 @@ import { describe, it, expect } from 'vitest';
 
 import { tl } from './helpers/manifoldExec';
 import { preview, regions } from './helpers/engravePipeline';
-import { createEngravePreviewer, FLOOR_THICKNESS_MM } from '@/workers/sim/engravePreview';
+import { createEngravePreviewer, FLOOR_THICKNESS_MM, LOST_THICKNESS_MM } from '@/workers/sim/engravePreview';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { effectiveMargins, MARGIN_DEFAULTS } from '@/engine/cnc/engrave/depthBounds';
 import { jobTool, type JobFinding } from '@/engine/cnc/engrave/jobSetup';
@@ -830,5 +830,101 @@ describe('engravePreview — the bench’s cutter conditions (#442)', () => {
     expect(own.condition).toEqual(summary);
     // …and the rule moves to the cutter it can still cut with: the other built-in.
     expect(p.recommendation.key).toBe('flat-3.175x12-metal');
+  });
+});
+
+// §5.7 — the lost layer. The controls are the measurements the preview ALREADY returns: a lost
+// area must be `glyphArea − openedArea` for the same item (the ratio the panel prints), and the
+// drawn sliver must be worth that area times its own thickness. That way the amber region cannot
+// drift from the row's "N % kept" while both still pass their own tests.
+describe('engravePreview — the lost layer (§5.7)', () => {
+  // Its own previewer: the tests above pin the shared one's latest generation.
+  const pv = createEngravePreviewer(tl);
+  let g = 0;
+  function buildPreview(job: EngraveJob) {
+    const p = preview(pv, job, ++g);
+    if (!p) throw new Error('the previewer refused a fresh generation');
+    return p;
+  }
+
+  it('counts design − as-cut per region item, matching the engravability row', () => {
+    const job = defaultEngraveJob();
+    const p = buildPreview(job);
+
+    // The shipped acceptance job's 8 mm label keeps 98.8 % (#209), so every label has some loss.
+    expect(p.lost.map((l) => l.labelId)).toEqual(job.labels.map((l) => l.id));
+
+    for (const lost of p.lost) {
+      const row = p.engravability.find((r) => r.labelId === lost.labelId)!;
+      const expected = row.glyphArea - row.openedArea;
+      expect(expected).toBeGreaterThan(0);
+      expect(Math.abs(lost.area - expected) / expected).toBeLessThan(0.02);
+      // The contours ARE the area the mesh was built from: a 20 µm sliver measures area × thickness.
+      expect(Math.abs(meshVolume(lost.mesh) / LOST_THICKNESS_MM - lost.area) / lost.area).toBeLessThan(0.02);
+      // It stands ON the top face, never in the cut.
+      expect(lost.mesh.bbox.min[2]).toBeCloseTo(0, 6);
+      expect(lost.mesh.bbox.max[2]).toBeCloseTo(LOST_THICKNESS_MM, 6);
+    }
+  });
+
+  it('does not paint a fully dropped glyph as lost: `item-empty` already refuses it by name', () => {
+    const job = defaultEngraveJob();
+    job.labels = [{ ...job.labels[0]!, id: 'tiny', text: 'I', size: 1.5, depth: 0.5 }];
+    const p = buildPreview(job);
+
+    const row = p.engravability.find((r) => r.labelId === 'tiny')!;
+    // The cutter is 1.0 mm across; a 1.5 mm bar is far thinner, so the opening is empty.
+    expect(row.openedArea).toBe(0);
+    expect(row.glyphArea).toBeGreaterThan(0);
+    // That is an ERROR (`item-empty`), and the picture leaves the item uncut. The lost layer is
+    // deliberately silent here: the finding already says the item is not cut, and amber over the
+    // whole glyph would read as a cutter limitation rather than the refusal it is.
+    expect(p.findings.some((f) => f.code === 'item-empty' && f.labelId === 'tiny' && f.severity === 'error')).toBe(true);
+    expect(p.lost).toHaveLength(0);
+  });
+
+  it('leaves an item with an ERROR finding out of the picture, and out of the lost layer too', () => {
+    const job = defaultEngraveJob();
+    job.labels = job.labels.map((l, i) => (i === 1 ? { ...l, depth: 11.5 } : l));
+    const p = buildPreview(job);
+
+    expect(p.findings.some((f) => f.code === 'depth-exceeds-stock' && f.labelId === job.labels[1]!.id)).toBe(true);
+    expect(p.lost.map((l) => l.labelId)).not.toContain(job.labels[1]!.id);
+    // The other two are still measured and still drawn.
+    expect(p.lost.map((l) => l.labelId)).toEqual([job.labels[0]!.id, job.labels[2]!.id]);
+  });
+
+  it('has no lost layer for a drill or a trace — neither design is an area the cutter falls short of', () => {
+    const job = defaultEngraveJob();
+    job.labels = [{ ...job.labels[0]!, id: 'lbl', depth: 0.5 }];
+    job.drills = [
+      {
+        kind: 'drill',
+        id: 'd1',
+        name: 'Magnet',
+        position: { x: 20, y: 20 },
+        rotation: 0,
+        depth: 3,
+        enabled: true,
+        through: false,
+      },
+    ];
+    job.traces = [
+      {
+        kind: 'line',
+        id: 'tr',
+        position: { x: 20, y: 40 },
+        rotation: 0,
+        points: [
+          [0, 0],
+          [30, 0],
+        ],
+        closed: false,
+        depth: 2,
+        enabled: true,
+      },
+    ];
+    const p = buildPreview(job);
+    expect(p.lost.map((l) => l.labelId)).toEqual(['lbl']);
   });
 });

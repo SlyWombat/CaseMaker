@@ -30,6 +30,15 @@ export const DEEP_COLOR = '#7a2e0e';
 export const VOID_COLOR = '#e0c07a';
 
 /**
+ * §5.7 — the amber the LOST LAYER is hatched in: detail the design asks for and the cutter's
+ * opening does not reach. Deliberately more saturated than {@link VOID_COLOR}: a void is a region
+ * the cut must respect and this is material the cut leaves behind by mistake, so the two amber
+ * annotations must not read as one. It also has to survive the depth ramp's warm end, which is why
+ * it is not a ramp colour.
+ */
+export const LOST_COLOR = '#f59e0b';
+
+/**
  * #170 — the two colours a floor is drawn in on a blank that states its colour split, when the
  * question is no longer "how deep" but "which colour".
  *

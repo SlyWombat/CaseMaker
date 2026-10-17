@@ -22,7 +22,7 @@ import { useEngravePreviewStore } from '@/store/engravePreviewStore';
 import { useEngraveJobStore } from '@/store/engraveJobStore';
 import { mm } from '@/engine/cnc/engrave/depthBounds';
 import { SACRIFICIAL_COLOR } from './simGeometry';
-import { depthColor, splitColor, VOID_COLOR } from './engraveRamp';
+import { depthColor, LOST_COLOR, splitColor, VOID_COLOR } from './engraveRamp';
 
 /**
  * Top-right, below the top-left `ViewportToolbar` and above the bottom `SimTransport` (#198).
@@ -82,6 +82,10 @@ export function EngraveLegend(): JSX.Element | null {
   // nothing in the app maps an extruder to a colour, so `SPLIT_TOP_COLOR` is not a claim about the
   // blank. Both come from the same module the meshes were coloured from, so they cannot drift.
   const split = preview.colourBoundaryDepth;
+  // §5.7 — the lost layer is a COUNT, not a colour key: the row states the area of the design the
+  // cutter does not reach, summed over the items the preview measured. It shows on either colour
+  // reading, because it answers a different question from both.
+  const lostArea = preview.lost.reduce((sum, l) => sum + l.area, 0);
 
   return (
     <div data-testid="engrave-preview-legend" style={BOX}>
@@ -123,6 +127,13 @@ export function EngraveLegend(): JSX.Element | null {
             {d.toFixed(1)} mm
           </div>
         ))
+      )}
+      {/* §5.7 — the lost layer: an amber swatch and the area the cutter could not reach. */}
+      {preview.lost.length > 0 && (
+        <div data-testid="engrave-legend-lost" style={{ ...ROW, marginTop: 2 }}>
+          <span style={{ ...SWATCH, background: LOST_COLOR }} />
+          lost detail · {Number(lostArea.toFixed(2))} mm²
+        </div>
       )}
       {/* #213 — the sacrificial material is not a depth; it gets its own swatch. */}
       {preview.sacrificial.length > 0 && (

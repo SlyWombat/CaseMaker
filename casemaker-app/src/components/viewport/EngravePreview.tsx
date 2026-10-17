@@ -15,7 +15,8 @@
  * origin with X and Y labelled — and every label projected from a world point is kept inside the
  * canvas whatever its anchor's projection does (#359, `projectedLabel.ts`). Each declared under-surface void (#271) is outlined in amber ON
  * the top face — the void itself is interior to solid material — and labelled with the deepest
- * cut it permits.
+ * cut it permits. §5.7's lost layer is the other amber overlay on that face: the design minus the
+ * opening the cutter leaves, filled and hatched, one labelled area per item.
  */
 
 import { useEffect, useMemo, useRef } from 'react';
@@ -27,8 +28,10 @@ import { useEngraveJobStore } from '@/store/engraveJobStore';
 import { useViewportStore } from '@/store/viewportStore';
 import type { NodeMeshOutput } from '@/workers/geometry/meshOutput';
 import type { ViseParams } from '@/types/engraveJob';
-import { geometryFromMesh, SACRIFICIAL_COLOR } from './simGeometry';
-import { floorColor, VOID_COLOR } from './engraveRamp';
+import type { EngravePreviewLost } from '@/workers/sim/engravePreview';
+import { geometryFromMesh, SACRIFICIAL_COLOR, segmentGeometry } from './simGeometry';
+import { floorColor, LOST_COLOR, VOID_COLOR } from './engraveRamp';
+import { hatchSegments } from './engraveHatch';
 import { clampLabelBox, projectToCanvas } from './projectedLabel';
 import { activateEngraveItem } from './engravePick';
 
@@ -301,6 +304,94 @@ function ProjectedLabel({
   );
 }
 
+/** The lost layer's hatch spacing and angle, mm and degrees — the drawing's own choice, not a job value. */
+const LOST_HATCH_PITCH_MM = 0.6;
+const LOST_HATCH_ANGLE_DEG = 45;
+/**
+ * The worker's lost sliver stands 20 µm on the face (`LOST_THICKNESS_MM` in `engravePreview.ts`,
+ * which cannot be imported here without pulling the worker's wasm graph into the app bundle). The
+ * hatch rides just above its top face so the lines are not z-fighting the fill they describe.
+ */
+const LOST_SLIVER_TOP_MM = 0.02;
+const LOST_HATCH_LIFT_MM = LOST_SLIVER_TOP_MM + 0.01;
+
+/** `4.2 mm²` — the same precision the run sheet prints an area at (`restSettings.mm2`). */
+function lostAreaWords(area: number): string {
+  return `${Number(area.toFixed(2))} mm²`;
+}
+
+const LOST_LABEL = {
+  fontSize: 10,
+  color: LOST_COLOR,
+  background: 'rgba(20,25,30,0.7)',
+  borderRadius: 3,
+  padding: '1px 4px',
+  whiteSpace: 'nowrap',
+} as const;
+
+/**
+ * §5.7 — one item's LOST LAYER: the design the cutter's opening does not reach, drawn ON the top
+ * face in amber. The fill says where the face is not cut; the hatch says it is an absence rather
+ * than another floor; the label gives the area the legend totals. Both the fill and the hatch come
+ * from the worker's `design − as-cut` contours — there is no second measurement here.
+ *
+ * Like a floor, the region is a PICK TARGET for its item (#441): clicking the loss opens the row
+ * of the item whose design it is.
+ */
+function Lost({ item }: { item: EngravePreviewLost }) {
+  const geom = useMeshGeometry(item.mesh);
+  const hatch = useMemo(() => {
+    const spans = hatchSegments(item.polygons, LOST_HATCH_PITCH_MM, LOST_HATCH_ANGLE_DEG);
+    if (spans.length === 0) return null;
+    const points = new Float32Array(spans.length * 6);
+    spans.forEach(([a, b], i) => {
+      const o = i * 6;
+      points[o] = a[0];
+      points[o + 1] = a[1];
+      points[o + 2] = LOST_HATCH_LIFT_MM;
+      points[o + 3] = b[0];
+      points[o + 4] = b[1];
+      points[o + 5] = LOST_HATCH_LIFT_MM;
+    });
+    return segmentGeometry(points, false);
+  }, [item.polygons]);
+  useEffect(() => () => hatch?.dispose(), [hatch]);
+
+  if (!geom) return null;
+  const centre = centreOf(item.mesh.bbox);
+  return (
+    <>
+      <mesh
+        geometry={geom}
+        name={`engrave-lost-${item.labelId}`}
+        userData={{ engraveLost: item.labelId }}
+        onClick={(e) => {
+          const { activeTool } = useViewportStore.getState();
+          if (activeTool !== 'select') return;
+          if (!activateEngraveItem(e.object)) return;
+          e.stopPropagation();
+        }}
+      >
+        {/* depthWrite:false, like the jaws and the removal body (#162): a transparent overlay that
+            wrote depth would hide the face it is annotating. */}
+        <meshStandardMaterial color={LOST_COLOR} transparent opacity={0.28} depthWrite={false} metalness={0.05} roughness={0.85} />
+      </mesh>
+      {hatch && (
+        <lineSegments geometry={hatch} name={`engrave-lost-hatch-${item.labelId}`}>
+          <lineBasicMaterial color={LOST_COLOR} />
+        </lineSegments>
+      )}
+      <ProjectedLabel
+        position={[centre[0], centre[1], LOST_HATCH_LIFT_MM]}
+        testId={`engrave-lost-label-${item.labelId}`}
+        style={LOST_LABEL}
+      >
+        lost: {lostAreaWords(item.area)}
+      </ProjectedLabel>
+    </>
+  );
+}
+
 export function EngravePreview() {
   const preview = useEngravePreviewStore((s) => s.preview);
   const stock = useEngraveJobStore((s) => s.job.stock);
@@ -335,6 +426,13 @@ export function EngravePreview() {
           labelId={f.labelId}
           color={floorColor(f.depth, maxDepth, preview.colourBoundaryDepth)}
         />
+      ))}
+
+      {/* §5.7 — the design the cut does not reach. Drawn after the floors so the amber is never
+          hidden by a floor at the same XY; the lost region is on the top face, which is above
+          every floor anyway. */}
+      {preview.lost.map((l) => (
+        <Lost key={l.labelId} item={l} />
       ))}
 
       {preview.voids.map((v) => (

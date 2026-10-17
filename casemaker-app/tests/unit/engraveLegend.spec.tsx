@@ -141,6 +141,29 @@ describe('the engrave legend on a blank that states its split (#170)', () => {
     expect(screen.getByTestId('engrave-legend-2').textContent).toContain('2.0 mm');
   });
 
+  it('states the lost layer’s area with its own swatch (§5.7)', () => {
+    const p = previewFor(defaultEngraveJob());
+    useEngravePreviewStore.setState({ preview: p });
+    render(<EngraveLegend />);
+
+    const total = p.lost.reduce((sum, l) => sum + l.area, 0);
+    expect(p.lost.length).toBeGreaterThan(0);
+    // The row totals the per-item areas the meshes were drawn from, at the sheet's precision.
+    expect(screen.getByTestId('engrave-legend-lost').textContent).toContain(`${Number(total.toFixed(2))} mm²`);
+  });
+
+  it('shows no lost row when nothing is lost', () => {
+    const job = defaultEngraveJob();
+    job.labels.forEach((l) => {
+      l.enabled = false;
+    });
+    useEngraveJobStore.setState({ job });
+    useEngravePreviewStore.setState({ preview: previewFor(job) });
+    render(<EngraveLegend />);
+
+    expect(screen.queryByTestId('engrave-legend-lost')).toBeNull();
+  });
+
   it('still says nothing is cut when the blank has a split and no label is on (#170 review)', () => {
     // The split branch is taken on the BLANK's own print, not on anything being cut — so it is
     // reached with nothing on the face at all, where the two colour rows describe a blank and could

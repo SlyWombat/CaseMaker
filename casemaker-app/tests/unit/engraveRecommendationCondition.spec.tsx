@@ -71,6 +71,7 @@ function previewWith(
     fixture: [],
     sacrificial: [],
     voids: [],
+    lost: [],
     engravability: [],
     findings: [],
     colourBoundaryDepth: null,

@@ -16,7 +16,9 @@
  * the cutter reaches `offset(offset(G, -r), +r)`, which rounds every inside corner and drops
  * any stroke thinner than 2r (#201, `/Fabrication.md` §7.5). `measureLabels` already computes
  * that region and its polygons; the preview reuses those polygons so the drawn cut and the
- * findings can never disagree about which cutter was measured.
+ * findings can never disagree about which cutter was measured. §5.7's LOST LAYER is the other
+ * side of the same subtraction: the ideal design minus that opening, per region item, delivered
+ * as contours and a thin sliver so the viewport can paint what the cutter could not reach.
  *
  * #288 — the cuts are not re-derived here at all: `engraveRegions` is called and the picture is
  * built from ITS `cuts`, the same list the oracle's prediction is a projection of. The preview used
@@ -61,6 +63,21 @@ type ManifoldInstance = InstanceType<ManifoldToplevel['Manifold']>;
  */
 export const FLOOR_THICKNESS_MM = 0.02;
 
+/**
+ * How thick the lost-layer sliver stands, mm (§5.7). It sits ON the top face rather than in the
+ * cut: a lost region is material the cutter did NOT remove, so a body at the face would z-fight the
+ * stock it annotates, and one below the face would read as a floor. The floor sliver's own 20 µm is
+ * thick enough to draw and thin enough never to read as stock — and it keeps the two meshes on one
+ * unit.
+ */
+export const LOST_THICKNESS_MM = FLOOR_THICKNESS_MM;
+
+/**
+ * Below this, a "lost" region is floating-point dust from the difference, not a detail the cutter
+ * missed, mm². The same 1e-6 the oracle's `MIN_AREA_MM2` uses to discard a thin ring.
+ */
+export const LOST_MIN_AREA_MM2 = 1e-6;
+
 /** Words for each sacrificial piece (#213), so the viewport can name what it draws. */
 const SACRIFICIAL_LABEL: Record<SacrificialBox['id'], string> = {
   under: 'Sacrificial board under the part',
@@ -93,6 +110,30 @@ export interface EngravePreviewFixture {
 export interface EngravePreviewSacrificial {
   id: string;
   label: string;
+  mesh: NodeMeshOutput;
+}
+
+/**
+ * One region item's LOST LAYER (§5.7): the ideal design the cutter's opening does not reach.
+ *
+ * The design is the item's own profile in the stock frame (the glyph or the shape the user placed);
+ * the as-cut region is the same opening `measureLabels` already measured and `cuts` already draws.
+ * Their difference is the detail the cutter cannot reach — thin strokes dropped whole, corners
+ * rounded away, a counter closed up — and it is a property of the geometry, not of a rendering:
+ * the viewport paints the contours it is handed and the legend adds the same areas.
+ *
+ * A DRILL has no lost layer (its design is the cutter's own disc, which is exactly what it cuts) and
+ * a TRACE has none either (the design is a centre line, not an area). Only `plan.engraves` carries
+ * a design area, so only those items appear here.
+ */
+export interface EngravePreviewLost {
+  /** The job item the design belongs to — the panel's row id. */
+  labelId: string;
+  /** Area of design − as-cut, mm². */
+  area: number;
+  /** Lost contours in the work frame, one ring per entry (a hole is its own ring). */
+  polygons: [number, number][][];
+  /** A thin sliver standing on the top face, z = 0 … +{@link LOST_THICKNESS_MM}, for the viewport. */
   mesh: NodeMeshOutput;
 }
 
@@ -138,6 +179,11 @@ export interface EngravePreview {
   sacrificial: EngravePreviewSacrificial[];
   /** The declared under-surface voids (#271), enabled ones only; empty when the job has none. */
   voids: EngravePreviewVoid[];
+  /**
+   * §5.7 — each region item's lost layer (design − as-cut), in item order. Empty when every design
+   * is reached, when the job has no region items, or when no cutter opening was measured at all.
+   */
+  lost: EngravePreviewLost[];
   /** Per-label measurements, without the (large) polygons: the findings carry the rest. */
   engravability: Omit<LabelEngravability, 'polygons'>[];
   /** `engraveRegions`' findings — `validateJob` + `validateVise` + engravability + the #171 void warning (#288). */
@@ -349,6 +395,53 @@ export function createEngravePreviewer(tl: ManifoldToplevel): EngravePreviewer {
     const stockMesh = meshOutputOf(stock);
     stock.delete();
 
+    // §5.7 — the LOST LAYER: for every region item, the ideal design MINUS the opening the cutter
+    // actually leaves. `measureLabels` has already evaluated that opening (and its area, which the
+    // panel's ratio is built on); this is the same subtraction materialised once for the picture, so
+    // the amber region and the row's "N % kept" can never describe different cutters.
+    //
+    // The design area exists only for `plan.engraves`: a drill's design is the cutter's own disc and
+    // a trace's is a centre line, so neither class loses anything here. An item with an ERROR
+    // finding is left uncut by the loop above and is deliberately NOT painted as lost too — the
+    // finding already says it is not cut, and a blanket of amber over the whole glyph would read as
+    // a cutter limitation rather than the refusal it is. An item with no measurement (the cutter
+    // cannot open a region at all) makes no lost claim either, the same "nothing measured, nothing
+    // claimed" rule `measureEngraving` follows.
+    const measuredById = new Map(measured.map((m) => [m.labelId, m] as const));
+    const lost: EngravePreviewLost[] = [];
+    for (const engrave of plan.engraves) {
+      if (errored.has(engrave.id)) continue;
+      const opening = measuredById.get(engrave.id);
+      if (!opening || opening.glyphArea <= 0) continue;
+
+      const designCS = executeProfile(tl, engrave.profile);
+      // An entirely-dropped glyph has an empty opening, and `ofPolygons([])` throws — so the whole
+      // design is the lost region in that case, without an empty as-cut side to subtract.
+      let lossCS: ReturnType<typeof executeProfile>;
+      if (opening.polygons.length === 0) {
+        lossCS = designCS;
+      } else {
+        const openedCS = executeProfile(tl, { kind: 'p-poly', contours: opening.polygons });
+        lossCS = tl.CrossSection.difference([designCS, openedCS]);
+        designCS.delete();
+        openedCS.delete();
+      }
+
+      const area = lossCS.area();
+      if (area <= LOST_MIN_AREA_MM2) {
+        lossCS.delete();
+        continue;
+      }
+      const polygons = lossCS.toPolygons() as [number, number][][];
+      // The sliver sits on the face (z = 0 … +thickness), not at the cut's floor: this is material
+      // the cut did not remove, so the face it annotates is the one it belongs against.
+      const sliver = tl.Manifold.extrude(lossCS, LOST_THICKNESS_MM);
+      const mesh = meshOutputOf(sliver);
+      sliver.delete();
+      lossCS.delete();
+      lost.push({ labelId: engrave.id, area, polygons, mesh });
+    }
+
     const fixture: EngravePreviewFixture[] = viseEnvelope(job.stock, job.workholding.vise, job.sacrificial).boxes.map(
       (box) => {
         const solid = boxSolid(tl, box);
@@ -422,6 +515,7 @@ export function createEngravePreviewer(tl: ManifoldToplevel): EngravePreviewer {
       fixture,
       sacrificial,
       voids,
+      lost,
       engravability: measured.map(({ polygons: _polygons, ...rest }) => rest),
       findings,
       colourBoundaryDepth,

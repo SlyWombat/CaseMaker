@@ -22,6 +22,13 @@ function tagged(tag: unknown): Object3D {
   return object;
 }
 
+/** A mesh-like object carrying the lost-layer tag, as `Lost` renders it (§5.7). */
+function taggedLost(tag: unknown): Object3D {
+  const object = new Object3D();
+  object.userData = { engraveLost: tag };
+  return object;
+}
+
 beforeEach(() => {
   useViewportStore.setState({ selection: null, activeSidebarSection: null });
   resetEngraveRows();
@@ -30,6 +37,12 @@ beforeEach(() => {
 describe('#441 — resolving a clicked preview object to its engrave item', () => {
   it('reads the item id off the clicked floor', () => {
     expect(engraveItemIdFromPick(tagged('label-7'))).toBe('label-7');
+  });
+
+  it('reads a lost-layer tag too — the loss belongs to the same item as the cut (§5.7)', () => {
+    expect(engraveItemIdFromPick(taggedLost('label-9'))).toBe('label-9');
+    expect(activateEngraveItem(taggedLost('label-9'))).toBe(true);
+    expect(useViewportStore.getState().selection).toEqual({ kind: 'engrave-item', itemId: 'label-9' });
   });
 
   it('walks up to the nearest tagged ancestor', () => {
