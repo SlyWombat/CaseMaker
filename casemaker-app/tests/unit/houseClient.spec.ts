@@ -70,6 +70,7 @@ const HEALTH = {
   schemaVersion: HOUSE_SCHEMA_VERSION,
   hasCatalogue: false,
   feedRows: 0,
+  materialSpecRows: 0,
   catalogueSyncedAt: null,
   lastSync: null,
   problems: [],
@@ -205,6 +206,7 @@ describe('probeHouse', () => {
       source: 'C:\\Makera\\makera_library.db',
       total: 129,
       feedRows: 0,
+      materialSpecRows: 0,
       notes: [
         { kind: 'loss', text: 'it holds no feed rows, and the catalogue already has 1328' },
         { kind: 'info', text: '2 cutters are in a category this build does not know' },
@@ -440,6 +442,7 @@ describe('houseSyncCatalogue (#328)', () => {
     changed: [],
     unchanged: 129,
     feedRows: 1328,
+    materialSpecRows: 189,
     notes: [{ kind: 'info', text: '40 feed rows name no cutter: they are not served' }],
   };
 

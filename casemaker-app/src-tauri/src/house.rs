@@ -566,6 +566,11 @@ pub struct Health {
     /// existed reports `has_catalogue: true` with `feedRows: 0`, which is exactly the state a re-sync
     /// fixes — so the two numbers answer different questions and a client shows both.
     pub feed_rows: usize,
+    /// How many vendor stock sizes the stored catalogue holds (#446). The same shape of answer as
+    /// `feed_rows`: a catalogue synced before the sizes were read reports 0 until a re-sync, and the
+    /// two counts answer different questions.
+    #[serde(default)]
+    pub material_spec_rows: usize,
     pub catalogue_synced_at: Option<String>,
     /// What the last sync came to (#328): its counts and its notes, kept in `catalogue.json` so the
     /// desktop and a LAN browser read the same answer after a restart. `None` until the first sync,
@@ -1098,6 +1103,7 @@ impl HouseStore {
             schema_version: HOUSE_SCHEMA_VERSION,
             has_catalogue: !inner.catalogue.tools.is_empty(),
             feed_rows: inner.catalogue.feeds.len(),
+            material_spec_rows: inner.catalogue.material_specs.len(),
             catalogue_synced_at: inner.catalogue.synced_at.clone(),
             last_sync: inner.catalogue.last_sync.clone(),
             problems: [&inner.location_problem, &inner.catalogue_problem]
@@ -1187,6 +1193,17 @@ impl HouseStore {
     pub async fn feeds(&self) -> Result<(Vec<u8>, String), HouseError> {
         let inner = self.inner.read().await;
         let bytes = json_bytes(&inner.catalogue.feeds)?;
+        let etag = etag_for(&bytes);
+        Ok((bytes, etag))
+    }
+
+    /// The vendor's purchasable stock sizes (#446), with its `ETag`. Its own document for the same
+    /// reason as the feeds: a client that only wants the sizes does not parse the feed matrix, and a
+    /// sync that changes one does not move the other's `ETag`. An empty array is a catalogue whose
+    /// library has no `t_MaterialSpecs` — a normal answer.
+    pub async fn material_specs(&self) -> Result<(Vec<u8>, String), HouseError> {
+        let inner = self.inner.read().await;
+        let bytes = json_bytes(&inner.catalogue.material_specs)?;
         let etag = etag_for(&bytes);
         Ok((bytes, etag))
     }
@@ -1827,6 +1844,16 @@ impl HouseStore {
                 inner.catalogue.feeds.len()
             )));
         }
+        // The same loss for the vendor's stock sizes (#446): a list that had rows and now has none
+        // is either a library that lost the table or one whose rows were all dropped. The shelf
+        // falls back to sizes the user types in, so the sync still lands — and the note says so.
+        if imported.material_specs.is_empty() && !inner.catalogue.material_specs.is_empty() {
+            notes.push(SyncNote::loss(format!(
+                "it holds no stock sizes, and the catalogue already has {} — this sync emptied the \
+                 vendor size list, so the shelf now offers only sizes the user entered",
+                inner.catalogue.material_specs.len()
+            )));
+        }
 
         let report = SyncReport {
             source: path.display().to_string(),
@@ -1837,12 +1864,14 @@ impl HouseStore {
             removed: change.removed,
             changed: change.changed,
             feed_rows: imported.feeds.len(),
+            material_spec_rows: imported.material_specs.len(),
             notes,
         };
         let doc = CatalogueDoc {
             synced_at: Some(synced_at),
             tools: imported.entries,
             feeds: imported.feeds,
+            material_specs: imported.material_specs,
             // The report's counts and notes outlive this response (#328): written beside the rows
             // so a restart, or a second client, still has what the sync said.
             last_sync: Some(SyncSummary::from(&report)),
@@ -2942,6 +2971,7 @@ mod tests {
             source: report.source.clone(),
             total: report.total,
             feed_rows: report.feed_rows,
+            material_spec_rows: report.material_spec_rows,
             notes: report.notes.clone(),
         };
         assert_eq!(store.health().await.last_sync, Some(expected.clone()));
@@ -3227,6 +3257,73 @@ mod tests {
         let first = store.sync_catalogue().await.unwrap();
         assert_eq!(first.feed_rows, 0);
         assert!(first.notes.is_empty(), "{:?}", first.notes);
+    }
+
+    #[tokio::test]
+    async fn vendor_stock_sizes_are_synced_served_and_their_loss_is_named() {
+        // #446, at the store's edge: the sizes travel from the vendor library into `catalogue.json`,
+        // out of their own endpoint with their own `ETag`, and a sync that empties the list is said
+        // out loud rather than passing as a clean report.
+        use crate::catalogue::fixture::{material, put_spec, Spec};
+
+        let dir = TempDir::new().unwrap();
+        let full = a_library(&dir);
+        let conn = rusqlite::Connection::open(&full).unwrap();
+        material(&conn, "mat-1", "Hardwood");
+        put_spec(
+            &conn,
+            &Spec {
+                id: "spec-1".to_string(),
+                material_id: "mat-1".to_string(),
+                name: "Hardwood / 100mm * 200mm * 5mm".to_string(),
+                shape: "R".to_string(),
+                length: Some(200.0),
+                width: Some(100.0),
+                height: Some(5.0),
+                diameter: None,
+                g_id: "9990000000000001".to_string(),
+            },
+        );
+        drop(conn);
+
+        let store = store_syncing(&dir, &full);
+        let report = store.sync_catalogue().await.unwrap();
+        assert_eq!(report.material_spec_rows, 1);
+        assert!(report.notes.is_empty(), "{:?}", report.notes);
+        assert_eq!(store.health().await.material_spec_rows, 1);
+
+        // Its own document, not a field on `/tools`: a client that wants the sizes does not parse
+        // 129 cutters, and the two `ETag`s move independently.
+        let (bytes, etag) = store.material_specs().await.unwrap();
+        let raw: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(raw[0]["material"], "Hardwood");
+        assert_eq!(raw[0]["shape"], "R");
+        assert_eq!(raw[0]["length"], serde_json::json!(200.0));
+        let (_, again) = store.material_specs().await.unwrap();
+        assert_eq!(etag, again);
+
+        // A library without the table empties the list. Unlike the cutters, that is not a refusal —
+        // the shelf falls back to sizes the user entered — but it IS a loss and is named as one.
+        let other = TempDir::new().unwrap();
+        let bare = a_library(&other);
+        rusqlite::Connection::open(&bare)
+            .unwrap()
+            .execute("DROP TABLE t_MaterialSpecs", [])
+            .unwrap();
+        let store = store_syncing(&dir, &bare);
+        let report = store.sync_catalogue().await.unwrap();
+        assert_eq!(report.material_spec_rows, 0);
+        let loss = report
+            .notes
+            .iter()
+            .find(|n| n.text.contains("emptied the vendor size list"))
+            .unwrap_or_else(|| panic!("{:?}", report.notes));
+        assert_eq!(loss.kind, crate::catalogue::SyncNoteKind::Loss);
+        assert_eq!(store.health().await.material_spec_rows, 0);
+        // Kept with the catalogue, so `/health` still says so after a restart.
+        let kept = store_syncing(&dir, &bare).health().await.last_sync.unwrap();
+        assert_eq!(kept.material_spec_rows, 0);
+        assert_eq!(kept.notes, report.notes);
     }
 
     // — the location (#412) -----------------------------------------------------------------------

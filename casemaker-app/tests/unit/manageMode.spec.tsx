@@ -58,6 +58,7 @@ const HEALTH: HouseHealth = {
   schemaVersion: HOUSE_SCHEMA_VERSION,
   hasCatalogue: true,
   feedRows: 0,
+  materialSpecRows: 0,
   catalogueSyncedAt: '2026-10-08T09:30:00.000Z',
   problems: [],
   warnings: [],
@@ -601,7 +602,15 @@ describe('#328 — a sync’s notes reach the screen', () => {
     const earlier = '2026-10-08T09:30:00.000Z';
     await goOnlineWithSync([], {
       ...HEALTH,
-      lastSync: { syncedAt: earlier, source: SOURCE, total: 129, feedRows: 0, notes: [NOTES[0]!] },
+      lastSync: {
+        syncedAt: earlier,
+        source: SOURCE,
+        total: 129,
+        feedRows: 0,
+        materialSpecRows: 0,
+        notes: [NOTES[0]!],
+      },
+
     });
     useManageModeStore.getState().openManage();
     render(<ManageMode />);

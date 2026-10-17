@@ -27,6 +27,7 @@ const HEALTH: HouseHealth = {
   schemaVersion: HOUSE_SCHEMA_VERSION,
   hasCatalogue: true,
   feedRows: 1328,
+  materialSpecRows: 189,
   catalogueSyncedAt: '2026-01-01T00:00:00.000Z',
   lastSync: null,
   problems: [],
@@ -76,6 +77,7 @@ const REPORT: SyncReport = {
   changed: ['cat:c'],
   unchanged: 126,
   feedRows: 1328,
+  materialSpecRows: 189,
   notes: [],
 };
 
@@ -415,7 +417,15 @@ describe('busy outlives the write, until the re-read lands (#336)', () => {
 // #328 decision 2 — the service keeps the last sync's report on `/health`, and the panel shows that
 // record until a sync is clicked here. Which one to show is one rule, pinned without two stores.
 describe('which last sync the panel talks about (#328)', () => {
-  const served = { syncedAt: '2026-01-02T00:00:00.000Z', source: 'db', total: 120, feedRows: 0, notes: [] };
+  const served = {
+    syncedAt: '2026-01-02T00:00:00.000Z',
+    source: 'db',
+    total: 120,
+    feedRows: 0,
+    materialSpecRows: 0,
+    notes: [],
+  };
+
 
   it('is the service’s record when nothing has been synced here, and says so', () => {
     expect(lastSyncView(null, null)).toBeNull();

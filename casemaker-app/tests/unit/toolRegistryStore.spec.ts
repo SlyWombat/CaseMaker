@@ -27,6 +27,7 @@ const HEALTH: HouseHealth = {
   schemaVersion: HOUSE_SCHEMA_VERSION,
   hasCatalogue: false,
   feedRows: 0,
+  materialSpecRows: 0,
   catalogueSyncedAt: null,
   lastSync: null,
   problems: [],

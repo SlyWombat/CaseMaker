@@ -95,6 +95,24 @@
 // a user how many arrived. A cutter is a definition with an identity; a feed row is a number whose
 // identity IS the (cutter, material) pair.
 //
+// AND THE VENDOR STOCK SIZES (#446). `t_MaterialSpecs` — 189 purchasable blanks, 137 rectangular and
+// 52 round in the real install — is read in the same pass and served as a THIRD document,
+// `GET /api/v1/material-specs`. This is what the stock shelf (#413) needs in order to offer Makera's
+// own sizes without a single row of them being committed (#347 Route A, `/Fabrication.md` §3): the
+// sync writes the user's own `catalogue.json`, and the web build has no service to ask. Each row is
+// named by the vendor (`materialName`) and joined to `t_MaterialList` for the material word the
+// client's own `catalogueMaterialFor` map recognises, exactly as a feed row is. The dims served are
+// the ones the row's shape uses and NO OTHERS: `R` is a rectangular blank (length × width × height)
+// and `C` a round bar (diameter × length). The unused columns are `''` in the database — the
+// empty-string trap above — and are served as null so a caller cannot read a round bar as having a
+// width.
+//
+// A SIZE ROW IS DROPPED, NOT SERVED SHORT, when it cannot be offered: no id, name or material, a
+// shape this build does not know (`R`/`C` are the only two in the real install), or a dim its shape
+// needs that is missing, zero, negative or non-finite. The client validates the document as one
+// array, so a single unusable row would cost every size; dropping it costs one row and is reported
+// in a note, as an unusable feed row is.
+//
 // WHAT IS DELIBERATELY NOT READ. `t_CustomCutterList`, `t_CutterInventoryList` and `t_SkuMapping`
 // are Studio's own — all empty or not ours. `Tool` is not widened by any of this (#212): what the CAM
 // view cannot carry lives in `CatalogueExtras`, beside the tool rather than inside it. The feed
@@ -248,6 +266,42 @@ pub struct FeedRow {
     pub step_down: f64,
 }
 
+/// One row of `t_MaterialSpecs` (#446): a stock size Makera sells, read at runtime for the shelf to
+/// offer (#413, #347 Route A). Served by `GET /api/v1/material-specs` and validated at the client by
+/// `MaterialSpecSchema`; nothing vendor-derived is committed.
+///
+/// THE ROW STATES TWO SHAPES, AND EACH USES ITS OWN DIMS. `R` is a rectangular blank —
+/// `length × width × height` — and `C` is a round bar, `diameter × length`. The columns the shape
+/// does not use are `''` in Studio's database (the empty-string trap) and are served `null`, so a
+/// caller can never read a round bar as having a width.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MaterialSpecRow {
+    /// `materialSpecsID`, the row's UUID primary key.
+    pub id: String,
+    /// `t_MaterialList.materialSubcategoryName`, VERBATIM — "6061 Aluminum", "PCB". The client's
+    /// map decides which of these this app can use, exactly as it does for a feed row.
+    pub material: String,
+    /// `materialName` — the vendor's product name, which is what a picker would show.
+    pub name: String,
+    /// `materialShape`: `"R"` rectangular, `"C"` round. A row with any other letter is dropped.
+    pub shape: String,
+    /// mm. Present on both shapes: a round bar has a length too.
+    pub length: f64,
+    /// mm; rectangular blanks only.
+    #[serde(default)]
+    pub width: Option<f64>,
+    /// mm; rectangular blanks only.
+    #[serde(default)]
+    pub height: Option<f64>,
+    /// mm; round bars only.
+    #[serde(default)]
+    pub diameter: Option<f64>,
+    /// `g_ID`, the vendor's 16-digit stock-size code. Provenance, not an identity — the row's
+    /// identity is `id` — and empty when the vendor did not state one.
+    pub stock_code: String,
+}
+
 /// `catalogue.json` — Makera's list as a sync imported it, local to this machine and never
 /// committed (`/Fabrication.md` §3, #186). Read by the house store, written only by a sync.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -266,6 +320,11 @@ pub struct CatalogueDoc {
     /// a re-sync fixes rather than an error (`GET /api/v1/health` reports it as `feedRows: 0`).
     #[serde(default)]
     pub feeds: Vec<FeedRow>,
+    /// The vendor's purchasable stock sizes (#446). Defaulted for the same reason `feeds` is: a
+    /// `catalogue.json` written before this tier existed parses as a catalogue with no sizes, which
+    /// a re-sync fixes rather than an error. No row of it is ever committed (#347 Route A).
+    #[serde(default)]
+    pub material_specs: Vec<MaterialSpecRow>,
     /// What the last sync came to (#328): the counts and the notes, so a restart — or a second
     /// client on the LAN — can still see what the sync said. Defaulted, like every field added after
     /// the first release: #320's strictness is about SHAPE, not absence, and a `catalogue.json`
@@ -282,6 +341,7 @@ impl Default for CatalogueDoc {
             synced_at: None,
             tools: Vec::new(),
             feeds: Vec::new(),
+            material_specs: Vec::new(),
             last_sync: None,
         }
     }
@@ -333,6 +393,10 @@ pub struct SyncSummary {
     pub total: usize,
     #[serde(default)]
     pub feed_rows: usize,
+    /// How many vendor stock sizes the catalogue holds (#446). A count for the same reason
+    /// `feed_rows` is one: a size row's identity is the vendor's row, not a diffable definition.
+    #[serde(default)]
+    pub material_spec_rows: usize,
     #[serde(default)]
     pub notes: Vec<SyncNote>,
 }
@@ -344,6 +408,7 @@ impl From<&SyncReport> for SyncSummary {
             source: r.source.clone(),
             total: r.total,
             feed_rows: r.feed_rows,
+            material_spec_rows: r.material_spec_rows,
             notes: r.notes.clone(),
         }
     }
@@ -372,6 +437,10 @@ pub struct SyncReport {
     /// question for it — the served `ETag` is what says the matrix moved.
     #[serde(default)]
     pub feed_rows: usize,
+    /// How many vendor stock sizes the catalogue now holds (#446). A COUNT for the same reason
+    /// `feed_rows` is one — see the equivalent field on `SyncSummary`.
+    #[serde(default)]
+    pub material_spec_rows: usize,
     /// Sentences about this sync that are not failures: a replaced unreadable file, a category
     /// this build does not know. Each carries its weight (#328).
     #[serde(default)]
@@ -418,6 +487,8 @@ pub struct Imported {
     pub entries: Vec<CatalogueEntry>,
     /// The feed matrix (#310), in catalogue order.
     pub feeds: Vec<FeedRow>,
+    /// The vendor's purchasable stock sizes (#446), in material-then-name order.
+    pub material_specs: Vec<MaterialSpecRow>,
     pub notes: Vec<SyncNote>,
 }
 
@@ -655,9 +726,16 @@ fn read_copy(copy: &Path, source: &Path) -> Result<Imported, String> {
         // was stored before.
         notes.push(SyncNote::info(note));
     }
+    let (material_specs, spec_note) = read_material_specs(&conn, source)?;
+    if let Some(note) = spec_note {
+        // The same convention as the feeds: the reader reports what it dropped, and the emptied-list
+        // loss is decided in `house.rs::sync_catalogue`.
+        notes.push(SyncNote::info(note));
+    }
     Ok(Imported {
         entries,
         feeds,
+        material_specs,
         notes,
     })
 }
@@ -740,6 +818,155 @@ fn read_feeds(conn: &rusqlite::Connection, source: &Path) -> Result<(Vec<FeedRow
     Ok((feeds, note))
 }
 
+/// The vendor's purchasable stock sizes (#446), in catalogue order.
+///
+/// Served only when a row is COMPLETE FOR ITS SHAPE, on the same reasoning as `read_feeds`: a single
+/// unusable row would cost the client the whole list when it parses the document as one array. A
+/// rectangular row (`R`) needs a positive, finite length, width and height; a round one (`C`) needs a
+/// positive, finite length and diameter. Studio stores the dims a shape does not use as the empty
+/// string, which `num()` already reads as `None` — so the check is simply "the fields this shape
+/// needs are numbers".
+///
+/// The shape is served as the vendor's own letter, not mapped to this app's vocabulary: the shelf's
+/// forms are its own thing (#413), and which catalogue shape a shelf form corresponds to is a
+/// question for whoever offers these sizes, not for the reader.
+///
+/// A row that does not join to `t_MaterialList` is invisible here (INNER JOIN), the same as a feed
+/// row that names no material. A row that DOES join and is then unusable is counted and noted.
+/// An unknown shape letter is counted in its own note, so "the vendor added a shape this build does
+/// not know" reads differently from "a row is missing a number".
+///
+/// A missing table is benign and silent — a library old enough not to have `t_MaterialSpecs` is
+/// still a library — and every other query error is refused. `absent_spec_table` says why the
+/// message, and not the error code, is the discriminator.
+fn read_material_specs(
+    conn: &rusqlite::Connection,
+    source: &Path,
+) -> Result<(Vec<MaterialSpecRow>, Option<String>), String> {
+    let mut stmt = match conn.prepare(SELECT_MATERIAL_SPECS) {
+        Ok(stmt) => stmt,
+        Err(e) if absent_spec_table(&e) => return Ok((Vec::new(), None)),
+        Err(e) => {
+            return Err(format!(
+                "{}: the vendor's stock sizes could not be read ({e})",
+                source.display()
+            ))
+        }
+    };
+    let rows = stmt
+        .query_map([], |r| {
+            Ok((
+                text(r.get_ref(0)?),
+                text(r.get_ref(1)?),
+                text(r.get_ref(2)?),
+                text(r.get_ref(3)?),
+                num(r.get_ref(4)?),
+                num(r.get_ref(5)?),
+                num(r.get_ref(6)?),
+                num(r.get_ref(7)?),
+                text(r.get_ref(8)?).unwrap_or_default(),
+            ))
+        })
+        .map_err(|e| format!("{}: {e}", source.display()))?;
+
+    let mut specs = Vec::new();
+    let mut incomplete: usize = 0;
+    let mut unknown_shape: usize = 0;
+    for row in rows {
+        let (id, material, name, shape, length, width, height, diameter, stock_code) =
+            row.map_err(|e| format!("{}: {e}", source.display()))?;
+        let (Some(id), Some(material), Some(name), Some(shape), Some(length)) =
+            (id, material, name, shape, length)
+        else {
+            incomplete += 1;
+            continue;
+        };
+        if id.trim().is_empty() || material.trim().is_empty() || name.trim().is_empty() {
+            incomplete += 1;
+            continue;
+        }
+        let positive = |n: Option<f64>| n.filter(|n| n.is_finite() && *n > 0.0);
+        let (length, width, height, diameter) =
+            (positive(Some(length)), positive(width), positive(height), positive(diameter));
+        let Some(length) = length else {
+            incomplete += 1;
+            continue;
+        };
+        let spec = match shape.as_str() {
+            "R" => match (width, height) {
+                (Some(width), Some(height)) => MaterialSpecRow {
+                    id,
+                    material,
+                    name,
+                    shape,
+                    length,
+                    width: Some(width),
+                    height: Some(height),
+                    diameter: None,
+                    stock_code,
+                },
+                _ => {
+                    incomplete += 1;
+                    continue;
+                }
+            },
+            "C" => match diameter {
+                Some(diameter) => MaterialSpecRow {
+                    id,
+                    material,
+                    name,
+                    shape,
+                    length,
+                    width: None,
+                    height: None,
+                    diameter: Some(diameter),
+                    stock_code,
+                },
+                None => {
+                    incomplete += 1;
+                    continue;
+                }
+            },
+            _ => {
+                unknown_shape += 1;
+                continue;
+            }
+        };
+        specs.push(spec);
+    }
+    let mut said: Vec<String> = Vec::new();
+    if incomplete > 0 {
+        said.push(format!(
+            "{incomplete} stock sizes are missing a number their shape needs, or name no material: \
+             they are not served"
+        ));
+    }
+    if unknown_shape > 0 {
+        said.push(format!(
+            "{unknown_shape} stock sizes are a shape this build does not know: they are not served"
+        ));
+    }
+    // The same one-note convention as the feeds: the reader says what it dropped, and whether the
+    // LIST emptied is decided one level up, where the previous document is visible.
+    let note = (!said.is_empty()).then(|| said.join("; "));
+    Ok((specs, note))
+}
+
+/// Is this prepare error the ONE benign case for the stock sizes: `t_MaterialSpecs` not being in the
+/// database (#446)?
+///
+/// The same measured fact as `absent_feed_table`: SQLite reports "no such table" and "no such
+/// column" with the same `SQLITE_ERROR` code, so the message is the discriminator. Only
+/// `t_MaterialSpecs` is matched: a `t_MaterialList` that has gone missing is a broken library, and
+/// `read_feeds` refuses it there — swallowing it here would turn one refusal into an empty list.
+fn absent_spec_table(e: &rusqlite::Error) -> bool {
+    matches!(
+        e,
+        rusqlite::Error::SqliteFailure(_, Some(m))
+            if m.contains("no such table") && m.contains("t_MaterialSpecs")
+    )
+}
+
 /// Is this prepare error the ONE benign case: `t_MakeraCutterProperties` simply not being in the
 /// database (#326)?
 ///
@@ -791,6 +1018,24 @@ const SELECT_FEEDS: &str = "
       JOIN t_MakeraCutterList l ON l.cutterId = p.cutterID
       JOIN t_MaterialList m ON m.materialID = p.materialId
      ORDER BY l.g_ID, m.materialSubcategoryName";
+
+/// The vendor's purchasable stock sizes (#446). The material is reached through the row's
+/// `materialID` and named by the vendor's own `materialSubcategoryName` — the same word the feed
+/// matrix uses for a material, so a shelf size and a feed row can be talked about together.
+///
+/// The read is ordered by that name, then the size's name, then its id: the id is the last tiebreak
+/// so a re-sync of an unchanged library produces the same document byte for byte (which is what the
+/// served `ETag` compares).
+///
+/// An INNER JOIN on purpose, like the feeds: a size with no material to name is a row about nothing.
+/// Studio stores the dimensions a shape does not use as the empty string; they come back as `None`
+/// through `num()` and are served as `null`.
+const SELECT_MATERIAL_SPECS: &str = "
+    SELECT s.materialSpecsID, m.materialSubcategoryName, s.materialName, s.materialShape,
+           s.length, s.width, s.height, s.diameter, s.g_ID
+      FROM t_MaterialSpecs s
+      JOIN t_MaterialList m ON m.materialID = s.materialID
+     ORDER BY m.materialSubcategoryName, s.materialName, s.materialSpecsID";
 
 /// One row of `t_MakeraCutterList`, as read. Kept as its own type so the hash and the mapping read
 /// the same values: `content_hash` must cover exactly what `to_entry` uses, and one struct is how
@@ -1049,6 +1294,12 @@ pub(crate) mod fixture {
         plungeFeedRate REAL, stepDown REAL, stepOver REAL, stepOverPercent REAL, coolant INTEGER)";
     const MATERIALS: &str = "CREATE TABLE t_MaterialList (materialID TEXT PRIMARY KEY NOT NULL, \
         materialCategoryID TEXT, materialSubcategoryName TEXT, lastUpdateDate TEXT)";
+    // #446's table, DDL verbatim from the real database. The dimensions a shape does not use are
+    // stored as `''` in REAL columns — the emptiness trap again — and `materialID` is the key into
+    // `t_MaterialList`, not a name.
+    const SPECS: &str = "CREATE TABLE t_MaterialSpecs (materialSpecsID TEXT PRIMARY KEY NOT NULL, \
+        materialID TEXT, materialName TEXT, materialShape TEXT, length REAL, width REAL, \
+        height REAL, diameter REAL, g_ID TEXT)";
 
     static SEQ: AtomicU64 = AtomicU64::new(0);
 
@@ -1104,6 +1355,7 @@ pub(crate) mod fixture {
         conn.execute(GROUPS, []).unwrap();
         conn.execute(PROPERTIES, []).unwrap();
         conn.execute(MATERIALS, []).unwrap();
+        conn.execute(SPECS, []).unwrap();
         conn
     }
 
@@ -1126,6 +1378,51 @@ pub(crate) mod fixture {
             "INSERT INTO t_MaterialList (materialID, materialCategoryID, materialSubcategoryName, \
              lastUpdateDate) VALUES (?1, ?2, ?3, ?4)",
             rusqlite::params![id, "mat-category-1", name, "2026-05-20 00:00:00"],
+        )
+        .unwrap();
+    }
+
+    /// One `t_MaterialSpecs` row (#446): a purchasable size of one material. A dimension left
+    /// `None` is written as `''`, which is how Studio writes one its shape does not use — and is
+    /// also how an incomplete row comes about.
+    #[derive(Default, Clone)]
+    pub(crate) struct Spec {
+        pub id: String,
+        pub material_id: String,
+        pub name: String,
+        /// `R`, `C`, or whatever else the vendor might add — `put_spec` does not check it.
+        pub shape: String,
+        pub length: Option<f64>,
+        pub width: Option<f64>,
+        pub height: Option<f64>,
+        pub diameter: Option<f64>,
+        pub g_id: String,
+    }
+
+    /// Insert a stock size. The empty-string-for-none behaviour is the fixture reproducing Studio,
+    /// not a convenience: `num()` reading `''` as `None` is the seam that matters here.
+    pub(crate) fn put_spec(conn: &Connection, s: &Spec) {
+        fn dim(v: Option<f64>) -> String {
+            match v {
+                Some(n) => n.to_string(),
+                None => String::new(),
+            }
+        }
+        conn.execute(
+            "INSERT INTO t_MaterialSpecs (materialSpecsID, materialID, materialName, \
+             materialShape, length, width, height, diameter, g_ID) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            rusqlite::params![
+                s.id,
+                s.material_id,
+                s.name,
+                s.shape,
+                dim(s.length),
+                dim(s.width),
+                dim(s.height),
+                dim(s.diameter),
+                s.g_id,
+            ],
         )
         .unwrap();
     }
@@ -1898,5 +2195,222 @@ mod tests {
         let imported = read_all(&path).unwrap();
         assert_eq!(imported.feeds.len(), 3, "the orphan is invisible, not served");
         assert!(imported.notes.is_empty(), "{:?}", imported.notes);
+    }
+
+    // — the vendor's stock sizes (#446) ------------------------------------------------------------
+
+    /// A library with two rectangular and one round purchasable size, in two materials — one of them
+    /// a vendor material this app has no feed row for, because a size and a cut are different
+    /// questions.
+    fn a_library_with_specs() -> (TempDir, PathBuf) {
+        let dir = TempDir::new().unwrap();
+        let path = temp_db(dir.path());
+        let conn = db(&path);
+        put(&conn, &Cutter::new("3.175*12mm Flat End(Metal)", 1));
+        material(&conn, "mat-1", "Hardwood");
+        material(&conn, "mat-2", "6061 Aluminum");
+        // Deliberately inserted out of order: the read orders by material, then size name, then id.
+        put_spec(
+            &conn,
+            &Spec {
+                id: "spec-hw-2".to_string(),
+                material_id: "mat-1".to_string(),
+                name: "Hardwood / 100mm * 200mm * 5mm".to_string(),
+                shape: "R".to_string(),
+                length: Some(200.0),
+                width: Some(100.0),
+                height: Some(5.0),
+                diameter: None,
+                g_id: "9990000000000001".to_string(),
+            },
+        );
+        put_spec(
+            &conn,
+            &Spec {
+                id: "spec-al-1".to_string(),
+                material_id: "mat-2".to_string(),
+                name: "6061 Aluminum / 150mm * 100mm * 3mm".to_string(),
+                shape: "R".to_string(),
+                length: Some(150.0),
+                width: Some(100.0),
+                height: Some(3.0),
+                diameter: None,
+                g_id: String::new(),
+            },
+        );
+        put_spec(
+            &conn,
+            &Spec {
+                id: "spec-hw-1".to_string(),
+                material_id: "mat-1".to_string(),
+                name: "Hardwood Dowel / 12mm * 300mm".to_string(),
+                shape: "C".to_string(),
+                length: Some(300.0),
+                width: None,
+                height: None,
+                diameter: Some(12.0),
+                g_id: "9990000000000002".to_string(),
+            },
+        );
+        drop(conn);
+        (dir, path)
+    }
+
+    #[test]
+    fn the_vendor_stock_sizes_import_complete_for_their_shape() {
+        let (_dir, path) = a_library_with_specs();
+        let imported = read_all(&path).unwrap();
+        assert!(imported.notes.is_empty(), "{:?}", imported.notes);
+        assert_eq!(imported.material_specs.len(), 3);
+
+        // The material's own WORD, the size's own NAME and id, and dims that depend on the shape.
+        // `6061 Aluminum` sorts before `Hardwood`, and within Hardwood the dowel before the sheet.
+        let rows: Vec<(&str, &str, &str, Option<f64>, Option<f64>, Option<f64>)> = imported
+            .material_specs
+            .iter()
+            .map(|s| {
+                (
+                    s.material.as_str(),
+                    s.name.as_str(),
+                    s.shape.as_str(),
+                    Some(s.length),
+                    s.width,
+                    s.diameter,
+                )
+            })
+            .collect();
+        assert_eq!(
+            rows,
+            vec![
+                ("6061 Aluminum", "6061 Aluminum / 150mm * 100mm * 3mm", "R", Some(150.0), Some(100.0), None),
+                ("Hardwood", "Hardwood / 100mm * 200mm * 5mm", "R", Some(200.0), Some(100.0), None),
+                ("Hardwood", "Hardwood Dowel / 12mm * 300mm", "C", Some(300.0), None, Some(12.0)),
+            ]
+        );
+        let dowel = &imported.material_specs[2];
+        assert_eq!(dowel.height, None, "a round size has no height");
+        assert_eq!(dowel.stock_code, "9990000000000002");
+
+        // The wire shape the client will parse: the vendor's `materialSpecsID`, its material and
+        // size names, the shape letter verbatim, the three dims (unused ones null), and `g_ID`.
+        let json = serde_json::to_value(&imported.material_specs[0]).unwrap();
+        let mut keys: Vec<&str> = json.as_object().unwrap().keys().map(|k| k.as_str()).collect();
+        keys.sort_unstable();
+        assert_eq!(
+            keys,
+            vec!["diameter", "height", "id", "length", "material", "name", "shape", "stockCode", "width"]
+        );
+        assert_eq!(json["shape"], "R");
+        assert!(json["diameter"].is_null(), "an unused dim is null, not a missing key");
+        assert_eq!(json["stockCode"], "", "a size with no g_ID says so with an empty string");
+    }
+
+    #[test]
+    fn a_stock_size_that_is_not_complete_for_its_shape_is_dropped_and_named() {
+        // The same empty-string trap as the feeds: Studio writes `''` for a dim a shape does not
+        // use, and a served `null` where the client's schema wants a number would cost the whole
+        // list. A zero or a negative is equally unusable.
+        let (_dir, path) = a_library_with_specs();
+        let conn = rusqlite::Connection::open(&path).unwrap();
+        conn.execute(
+            "UPDATE t_MaterialSpecs SET width = '' WHERE materialSpecsID = 'spec-al-1'",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "UPDATE t_MaterialSpecs SET diameter = 0 WHERE materialSpecsID = 'spec-hw-1'",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "UPDATE t_MaterialSpecs SET height = -5 WHERE materialSpecsID = 'spec-hw-2'",
+            [],
+        )
+        .unwrap();
+        drop(conn);
+
+        let imported = read_all(&path).unwrap();
+        assert!(imported.material_specs.is_empty(), "{:?}", imported.material_specs);
+        assert_eq!(imported.notes.len(), 1, "{:?}", imported.notes);
+        assert!(
+            imported.notes[0].text.contains("3 stock sizes"),
+            "{:?}",
+            imported.notes[0]
+        );
+        assert_eq!(imported.entries.len(), 1, "the tool tier is unaffected");
+    }
+
+    #[test]
+    fn a_stock_size_of_an_unknown_shape_is_dropped_in_its_own_note() {
+        // "The vendor added a shape this build does not know" is a different thing from "a row is
+        // missing a number", and the note says which — the same distinction the cutter categories
+        // make, for the same reason: one is a build that needs updating, the other a bad row.
+        let (_dir, path) = a_library_with_specs();
+        let conn = rusqlite::Connection::open(&path).unwrap();
+        conn.execute(
+            "UPDATE t_MaterialSpecs SET materialShape = 'S' WHERE materialSpecsID = 'spec-hw-1'",
+            [],
+        )
+        .unwrap();
+        drop(conn);
+
+        let imported = read_all(&path).unwrap();
+        assert_eq!(imported.material_specs.len(), 2, "the shapes this build knows are served");
+        assert_eq!(imported.notes.len(), 1, "{:?}", imported.notes);
+        assert!(
+            imported.notes[0].text.contains("1 stock sizes are a shape this build does not know"),
+            "{:?}",
+            imported.notes[0]
+        );
+    }
+
+    #[test]
+    fn a_database_without_the_stock_sizes_table_is_a_catalogue_without_them() {
+        // A library old enough not to have `t_MaterialSpecs` is still a library: an empty list and
+        // NO note, exactly like a library without the feeds table.
+        let dir = TempDir::new().unwrap();
+        let path = temp_db(dir.path());
+        let conn = db(&path);
+        put(&conn, &Cutter::new("3.175*12mm Flat End(Metal)", 1));
+        conn.execute("DROP TABLE t_MaterialSpecs", []).unwrap();
+        drop(conn);
+
+        let imported = read_all(&path).unwrap();
+        assert!(imported.material_specs.is_empty());
+        assert!(imported.notes.is_empty(), "{:?}", imported.notes);
+        assert_eq!(imported.entries.len(), 1, "the tool tier is unaffected");
+    }
+
+    #[test]
+    fn a_stock_sizes_query_that_fails_any_other_way_is_refused_rather_than_emptied() {
+        // The #326 lesson applied to the new table: a renamed column must not make the next sync
+        // succeed with an empty list and no note, wiping the sizes the user had.
+        let (_dir, path) = a_library_with_specs();
+        let conn = rusqlite::Connection::open(&path).unwrap();
+        conn.execute(
+            "ALTER TABLE t_MaterialSpecs RENAME COLUMN materialShape TO materialShape_new",
+            [],
+        )
+        .unwrap();
+        drop(conn);
+        let err = read_all(&path).unwrap_err();
+        assert!(err.contains("stock sizes"), "{err}");
+        assert!(err.contains("materialShape"), "the column must be named: {err}");
+
+        // And the join table going missing: the sizes exist and cannot be named. The feeds table is
+        // dropped too, so its own benign missing-table branch lets this reach the stock-sizes query
+        // instead of being refused there first.
+        let conn = rusqlite::Connection::open(&path).unwrap();
+        conn.execute(
+            "ALTER TABLE t_MaterialSpecs RENAME COLUMN materialShape_new TO materialShape",
+            [],
+        )
+        .unwrap();
+        conn.execute("DROP TABLE t_MakeraCutterProperties", []).unwrap();
+        conn.execute("DROP TABLE t_MaterialList", []).unwrap();
+        drop(conn);
+        let err = read_all(&path).unwrap_err();
+        assert!(err.contains("stock sizes"), "{err}");
+        assert!(err.contains("t_MaterialList"), "{err}");
     }
 }

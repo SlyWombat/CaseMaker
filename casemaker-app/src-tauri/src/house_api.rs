@@ -57,6 +57,10 @@ pub fn routes(store: Arc<HouseStore>) -> Router {
         // against the cutters' 129, and its own `ETag`, so a client that wants only the cutters does
         // not parse it and a re-sync that moves one number does not invalidate the list.
         .route("/api/v1/feeds", get(list_feeds))
+        // #446. The vendor's purchasable stock sizes, read from Studio's library at sync time. Its
+        // own document for the same reason as `/feeds`: a client that wants only the sizes does not
+        // parse 1 328 feed rows, and the two lists move independently.
+        .route("/api/v1/material-specs", get(list_material_specs))
         .route(
             "/api/v1/inventory/*id",
             patch(update_inventory).delete(delete_inventory),
@@ -215,6 +219,19 @@ async fn list_tools(State(store): State<Arc<HouseStore>>, headers: HeaderMap) ->
 /// before the tier existed.
 async fn list_feeds(State(store): State<Arc<HouseStore>>, headers: HeaderMap) -> Response<Body> {
     match store.feeds().await {
+        Ok((bytes, etag)) => json_with_etag(bytes, etag, &headers, StatusCode::OK),
+        Err(e) => error_response(e),
+    }
+}
+
+/// The vendor's purchasable stock sizes (#446). A plain array, like `/feeds`: the client's schema is
+/// the shape, and `[]` — a library with no `t_MaterialSpecs`, or a catalogue synced before the sizes
+/// were read — is a normal answer, not a 404.
+async fn list_material_specs(
+    State(store): State<Arc<HouseStore>>,
+    headers: HeaderMap,
+) -> Response<Body> {
+    match store.material_specs().await {
         Ok((bytes, etag)) => json_with_etag(bytes, etag, &headers, StatusCode::OK),
         Err(e) => error_response(e),
     }
@@ -889,11 +906,68 @@ mod tests {
 
         let body = json_of(app.clone().oneshot(get("/api/v1/health")).await.unwrap()).await;
         assert_eq!(body["feedRows"], serde_json::json!(0));
+        assert_eq!(body["materialSpecRows"], serde_json::json!(0));
         assert_eq!(body["problems"], serde_json::json!([]));
         assert_eq!(
             json_of(app.clone().oneshot(get("/api/v1/feeds")).await.unwrap()).await,
             serde_json::json!([])
         );
+    }
+
+    #[tokio::test]
+    async fn the_vendor_stock_sizes_are_served_as_their_own_list_with_a_validator() {
+        // #446. `[]` is a normal answer when the library has no sizes or the catalogue predates
+        // them, and the list revalidates like the others.
+        let (_dir, app) = app_under_test();
+        let res = app.clone().oneshot(get("/api/v1/material-specs")).await.unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        assert!(is_json(&res), "the SPA fallback must not answer for the API");
+        let etag = res
+            .headers()
+            .get(header::ETAG)
+            .expect("a list endpoint always carries a validator")
+            .to_str()
+            .unwrap()
+            .to_string();
+        assert_eq!(json_of(res).await, serde_json::json!([]));
+
+        let res = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/v1/material-specs")
+                    .header(header::IF_NONE_MATCH, etag)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::NOT_MODIFIED);
+
+        // A catalogue that holds sizes serves them as the plain array the client parses, and
+        // `/health` counts them.
+        use crate::house::CATALOGUE_FILE;
+        let dir = TempDir::new().unwrap();
+        std::fs::write(
+            dir.path().join(CATALOGUE_FILE),
+            br#"{"kind":"casemaker-catalogue","schemaVersion":1,
+                 "syncedAt":"2026-10-17T12:00:00.000Z","tools":[],
+                 "materialSpecs":[{"id":"spec-1","material":"Hardwood",
+                   "name":"Hardwood / 100mm * 200mm * 5mm","shape":"R",
+                   "length":200.0,"width":100.0,"height":5.0,"diameter":null,
+                   "stockCode":"9990000000000001"}]}"#,
+        )
+        .unwrap();
+        let store = Arc::new(HouseStore::open(dir.path().to_path_buf()));
+        let app = routes(store);
+        let body = json_of(app.clone().oneshot(get("/api/v1/health")).await.unwrap()).await;
+        assert_eq!(body["materialSpecRows"], serde_json::json!(1));
+        let rows =
+            json_of(app.clone().oneshot(get("/api/v1/material-specs")).await.unwrap()).await;
+        assert_eq!(rows.as_array().unwrap().len(), 1);
+        assert_eq!(rows[0]["material"], "Hardwood");
+        assert_eq!(rows[0]["shape"], "R");
+        assert!(rows[0]["diameter"].is_null());
     }
 
     #[tokio::test]

@@ -142,6 +142,8 @@ export const SyncSummarySchema = z.object({
   source: z.string(),
   total: z.number().int().nonnegative(),
   feedRows: z.number().int().nonnegative().default(0),
+  /** How many vendor stock sizes the catalogue holds (#446). The absence of the field IS the zero. */
+  materialSpecRows: z.number().int().nonnegative().default(0),
   notes: z.array(SyncNoteSchema).default([]),
 });
 
@@ -160,6 +162,12 @@ const HouseHealthSchema = z.object({
    * reports `hasCatalogue: true` with `feedRows: 0`, which is exactly the state a re-sync fixes.
    */
   feedRows: z.number().int().nonnegative().default(0),
+  /**
+   * How many vendor stock sizes the stored catalogue holds (#446). Defaulted for the same reason
+   * `feedRows` is: the absence of the field IS the zero, and a catalogue synced before the sizes
+   * were read reports 0 until a re-sync.
+   */
+  materialSpecRows: z.number().int().nonnegative().default(0),
   catalogueSyncedAt: z.string().nullable(),
   /**
    * What the last sync came to (#328). Defaulted for the same reason `feedRows` is: a service from
@@ -366,6 +374,8 @@ export const SyncReportSchema = z.object({
   changed: z.array(z.string()).default([]),
   unchanged: z.number().int().nonnegative(),
   feedRows: z.number().int().nonnegative().default(0),
+  /** How many vendor stock sizes the catalogue now holds (#446): a count, on the same reasoning. */
+  materialSpecRows: z.number().int().nonnegative().default(0),
   notes: z.array(SyncNoteSchema).default([]),
 });
 
