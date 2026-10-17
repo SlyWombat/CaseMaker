@@ -32,6 +32,7 @@ import {
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { buildCouponPrograms, type CouponSpec } from '@/engine/cnc/engrave/couponJob';
 import { labelJawReach } from '@/engine/cnc/engrave/partPlan';
+import { surfaceSpreadPlan, type SurfaceReading } from '@/engine/cnc/engrave/surfaceSpread';
 import { dedupeFindings, jobTool, validateJob } from '@/engine/cnc/engrave/jobSetup';
 import { parseEngraveJob } from '@/store/engraveJobSchema';
 import { feedsFor } from '@/engine/cnc/feeds';
@@ -1524,5 +1525,50 @@ describe('runSheet — the facing phase (#432 slice 3)', () => {
       'dry-run',
     ).join(' ');
     expect(facing).toContain('face the top and re-touch Z0 first');
+  });
+});
+
+// #475 — Z0 on a bowed blank is measured, not a point. The sheet plans the touches across the cut's
+// extents and prints the band; with readings it prints the verdict, and the refusal is the finding's
+// own sentence so the paper and the app cannot say two things.
+describe('the surface spread (#475)', () => {
+  it('plans the cut-extent touches and the Z0 rule on every sheet', () => {
+    const job = defaultEngraveJob();
+    const steps = section(sheetFor(job), 'origin').steps;
+    const all = steps.map((s) => s.text).join('\n');
+    expect(all).toContain("The blank's top is measured at 5 points across the cut");
+    expect(all).toContain("Surface touch 1 of 5: the cut area's centre");
+    expect(all).toContain('Surface touch 5 of 5: the cut area\'s back extent');
+    expect(all).toContain('Set Z0 from the LOWEST of these 5 readings');
+    expect(all).toContain('A surface spread wider than that band cannot keep every floor past the colour line');
+    // No readings: the stop rule quotes the refusal, and does not claim a verdict.
+    expect(all).toContain('If the lowest and highest readings differ by more than');
+    expect(all).toContain('this blank is bowed <spread> mm across the cut');
+    expect(all).not.toContain('Measured: lowest');
+  });
+
+  it('prints the measured refusal with the finding’s exact sentence', () => {
+    const job = defaultEngraveJob();
+    const plan = surfaceSpreadPlan(job)!;
+    const readings: SurfaceReading[] = plan.touches.map(() => ({ z: 0, source: 'probe' }));
+    readings[readings.length - 1] = { z: -(plan.band.width + 0.01), source: 'stated' };
+    const steps = section(sheetFor(job, NO_SIM, NC, { surfaceReadings: readings }), 'origin').steps;
+    const spread = Math.round((plan.band.width + 0.01) * 1000) / 1000;
+    const refusal = `this blank is bowed ${spread} mm across the cut; the floors cannot stay past the colour line and clear of the pocket`;
+    expect(steps.some((s) => s.bold === true && s.text === refusal)).toBe(true);
+    expect(steps.map((s) => s.text).join('\n')).toContain('(stated)');
+    expect(steps.map((s) => s.text).join('\n')).toContain('Do not run this file');
+  });
+
+  it('prints the landing range when the spread fits', () => {
+    const job = defaultEngraveJob();
+    const plan = surfaceSpreadPlan(job)!;
+    const readings: SurfaceReading[] = plan.touches.map(() => ({ z: 0, source: 'probe' }));
+    const steps = section(sheetFor(job, NO_SIM, NC, { surfaceReadings: readings }), 'origin').steps;
+    const all = steps.map((s) => s.text).join('\n');
+    expect(all).toContain('spread 0 mm against the');
+    expect(all).toContain('may land from');
+    expect(all).toContain('mm below Z0 and nowhere else');
+    expect(steps.some((s) => s.bold === true && s.text.startsWith('this blank is bowed'))).toBe(false);
   });
 });

@@ -36,6 +36,7 @@ import { validateVise } from '@/engine/cnc/fixture';
 import { keepOutLimitParts, keepOutMembrane, labelGlyphMeasure, labelJawReach, voidLimitForItem } from '@/engine/cnc/engrave/partPlan';
 import { ensureLabelFontsLoaded, ensureSeedFontsLoaded, labelFontsLoaded } from '@/engine/fonts/registry';
 import { buildRunSheet, runSheetFileName, type RunSheet } from '@/engine/cnc/engrave/runSheet';
+import { registrationSettings } from '@/engine/cnc/registration/settings';
 import { buildRunRecord, isMeasuredRun, serializeRunRecord } from '@/engine/cnc/engrave/runRecord';
 import { allRuns, lastTimedRun } from '@/engine/cnc/engrave/runHistory';
 import { useRunRecordStore } from '@/store/runRecordStore';
@@ -826,6 +827,9 @@ export function EngravePanel(): JSX.Element {
         { diagnostics: run.simDiagnostics, engine: run.simEngine ?? undefined, oracleBand: run.oracle?.band },
         new Date(),
         houseMargins,
+        // #475 — the surface touches are the shop's own `registration.surfaceTouchCount`, resolved
+        // by the same reader the registration planner uses; the labelled fallback is the seed (5).
+        { surfaceTouchCount: registrationSettings(shopDefaults).settings.surfaceTouchCount },
       ),
     );
   }

@@ -53,6 +53,13 @@ import {
 } from '@/engine/cnc/engrave/reachability';
 import { fmtDiameter } from '@/engine/cnc/engrave/recommendTool';
 import type { RestPassFacts, RestProgram } from '@/engine/cnc/engrave/restPass';
+import {
+  assessSurfaceSpread,
+  surfaceSpreadPlan,
+  Z0_REFERENCE,
+  type SurfaceReading,
+  type SurfaceReadingSource,
+} from '@/engine/cnc/engrave/surfaceSpread';
 import { restSeamSentence } from '@/engine/cnc/engrave/restSettings';
 import { MATERIAL_LABELS } from '@/engine/cnc/materials';
 import { VISE_BODY_DEPTH, viseEnvelope } from '@/engine/cnc/fixture';
@@ -1193,6 +1200,115 @@ function registrationSteps(
 }
 
 /**
+ * #475 — the surface SPREAD, as an operator reads it.
+ *
+ * The registration steps above set the origin and one Z0; on a printed blank that one touch is not
+ * enough, because the colour line is a plane and the dome is extra material on top of it (#475's
+ * observation of 2026-10-17). These steps plan the touches across the cut's extents, print the band
+ * the floors must land in, and — when the caller has readings — say whether this blank passes.
+ *
+ * The READINGS are optional because the app has no reading-input path yet: with none, the sheet
+ * prints the plan, the band, the Z0 rule and the stop rule, and an operator who takes the readings
+ * can apply them by hand. `surfaceSpread.spec.ts` and `runSheet.spec.ts` pass readings so the
+ * measured half cannot rot.
+ */
+function surfaceSpreadSteps(
+  job: EngraveJob,
+  margin: Mm,
+  touchCount?: number,
+  readings?: readonly SurfaceReading[],
+): RunSheetStep[] {
+  const plan = surfaceSpreadPlan(job, { touchCount, margin });
+  if (plan === null) return [];
+  const n = plan.touches.length;
+  const sourceWords = (s: SurfaceReadingSource): string =>
+    s === 'probe' ? 'probe' : s === 'touch-off' ? 'touched off' : 'stated';
+  const bandMm = fmtNum(plan.band.width);
+  const refWords =
+    Z0_REFERENCE === 'lowest' ? 'LOWEST' : Z0_REFERENCE === 'highest' ? 'HIGHEST' : 'MIDPOINT (the average)';
+
+  const steps: RunSheetStep[] = [
+    {
+      text:
+        `The blank's top is measured at ${n} points across the cut — its centre, then both extents on ` +
+        'each axis — because a printed blank’s colour line is a plane and its dome is extra material ' +
+        'above it: one touch at the centre cannot tell you the floor at the ends of a line. Take them ' +
+        'in the order below and write each reading down.',
+      record: 'surface Z at each point (mm), and how each was taken (probe / touch-off)',
+    },
+  ];
+  plan.touches.forEach((t, i) => {
+    steps.push({
+      text:
+        `Surface touch ${i + 1} of ${n}: ${t.at}, X ${fmtNum(t.x)} Y ${fmtNum(t.y)} — take the top there ` +
+        'and record the reading.',
+    });
+  });
+  steps.push({
+    text:
+      (plan.band.lower === null
+        ? 'This blank states no colour split, so only the ceiling limits the floors: they must stay at ' +
+          `most ${fmtNum(plan.band.upper.depth)} mm below the top (${plan.band.upper.name}, ` +
+          `including its ${fmtNum(plan.band.upper.margin)} mm margin).`
+        : `The floors must stay between ${fmtNum(plan.band.lower.depth)} mm below the top ` +
+          `(${plan.band.lower.name}, including its ${fmtNum(plan.band.lower.margin)} mm margin) and ` +
+          `${fmtNum(plan.band.upper.depth)} mm below it (${plan.band.upper.name}, including its ` +
+          `${fmtNum(plan.band.upper.margin)} mm margin) — a band ${bandMm} mm wide.`) +
+      ` A surface spread wider than that band cannot keep every floor past the colour line and clear ` +
+      'of the pocket at the same time.',
+    value: `band ${bandMm} mm`,
+  });
+  steps.push({
+    text:
+      `Set Z0 from the ${refWords} of these ${n} readings, not from the registration touch above and ` +
+      'not from the centre alone. Every programmed floor depth is measured from Z0, so at a higher ' +
+      'touch the local floor is deeper by exactly its height above Z0: with Z0 at the lowest reading, ' +
+      'the programmed depth is the SHALLOWEST floor and the programmed depth plus the spread is the ' +
+      'deepest.',
+    value: `Z0 = the ${refWords.toLowerCase()} surface touch`,
+    record: 'the touch Z0 was set from, and the readings it came from',
+  });
+
+  if (readings === undefined || readings.length !== n) {
+    steps.push({
+      text:
+        `If the lowest and highest readings differ by more than ${bandMm} mm, do not cut. The app ` +
+        'refuses that blank as: “this blank is bowed <spread> mm across the cut; the floors cannot ' +
+        'stay past the colour line and clear of the pocket”.',
+      bold: true,
+    });
+    return steps;
+  }
+
+  const a = assessSurfaceSpread(job, readings, { touchCount, margin });
+  const measured =
+    `Measured: lowest ${fmtNum(a.min.z)} at ${a.min.at} (${sourceWords(a.min.source)}), highest ` +
+    `${fmtNum(a.max.z)} at ${a.max.at} (${sourceWords(a.max.source)}); spread ${fmtNum(a.spread)} mm ` +
+    `against the ${bandMm} mm band.`;
+  if (a.ok && a.landing !== null) {
+    steps.push({
+      text:
+        `${measured} Z0 is the lowest reading, so the floors may land from ${fmtNum(a.landing.lower)} to ` +
+        `${fmtNum(a.landing.upper)} mm below Z0 and nowhere else: keep every programmed floor in that ` +
+        'range.',
+      record: 'floor depth (mm) against the landing range',
+    });
+  } else {
+    steps.push({ text: measured });
+    // The refusal's own sentence, exactly as the finding carries it (#475).
+    steps.push({ text: a.refusal!.message, bold: true });
+    steps.push({
+      text:
+        'Do not run this file: no floor depth can stay past the colour line and clear of the pocket ' +
+        'across this blank. Face or plane the top until the spread fits the band, or use a flatter ' +
+        'blank, then measure again.',
+      bold: true,
+    });
+  }
+  return steps;
+}
+
+/**
  * §5's second half — the material-position check (#391, decision 26).
  *
  * The steps above set the origin; these OFFER to check it against the blank that is actually in the
@@ -1502,6 +1618,21 @@ export interface RunSheetOptions {
    * here — this module is in the sim worker's import graph. Absent: `SCAN_FALLBACK`, the seeds.
    */
   scan?: MaterialScanSettings;
+  /**
+   * #475 — the shop's `registration.surfaceTouchCount`: how many surface touches the cut regions'
+   * extents get. Resolved by the caller from `registrationSettings(defaults).settings`, never read
+   * here (this module is in the sim worker's import graph). Absent: the labelled fallback (5).
+   */
+  surfaceTouchCount?: number;
+  /**
+   * #475 — the measured surface readings, in the plan's order (the order {@link surfaceSpreadSteps}
+   * prints). Absent: the sheet prints the touch plan, the band, the Z0 rule and the stop rule, but
+   * cannot say whether this blank passes — which is every sheet the app builds today, because the
+   * app has no reading-input path yet. That is a HOLD on the measured half, not on the plan: the
+   * touches and the refusal arithmetic are tested in `surfaceSpread.spec.ts`, and the run sheet's
+   * assertions pass readings explicitly.
+   */
+  surfaceReadings?: readonly SurfaceReading[];
   /**
    * The reachability table (#410), when the caller has measured one. **Absent for every job the app
    * and the bench script build** — nothing computes it on a hand-authored job, and no sheet that
@@ -2219,6 +2350,12 @@ export function buildRunSheet(
   // no field behind it, a tip diameter stated as fact, a correction direction that reads back to
   // front, and bisection that covers one direction only. Holding one array entry is the whole change:
   // `materialScan.ts` and its spec are untouched, so the block comes back the moment the fixes land.
+  // #475 — a registration the planner refuses is ONE refusal step, and a surface plan printed under
+  // it would be a sequence the sheet has just declined to stand behind. Same rule and same pure call
+  // as `materialPositionSteps` (which also asks `registrationFor` rather than receive the answer).
+  const registrationRefused =
+    'refuse' in
+    registrationFor(job, options.scan?.tipDiameterMm === undefined ? undefined : { ...PROBE_SPEC, tipDiameter: options.scan.tipDiameterMm });
   const originSteps: RunSheetStep[] = [
     // #432 review R1 — a facing job probes the origin before any cutter is fitted, and the probe's
     // own reading is what every cutter's Z0 below is worked out against. The step exists only for
@@ -2238,6 +2375,12 @@ export function buildRunSheet(
         ]
       : []),
     ...registrationSteps(job, onBoard, options.scan?.tipDiameterMm, facingRun),
+    // #475 — Z0 is a spread, not a point: print the surface touches across the cut's extents, the
+    // band they must land in, and (when the caller has readings) the measured verdict. Additive:
+    // a caller that passes no `surfaceTouchCount`/`surfaceReadings` gets the plan and stop rule.
+    ...(registrationRefused
+      ? []
+      : surfaceSpreadSteps(job, margins.boundaryMargin, options.surfaceTouchCount, options.surfaceReadings)),
     ...(options.materialScan === true ? materialPositionSteps(job, onBoard, BENCH_ISSUE, machine.toolChange.clearanceZ, options.scan) : []),
   ];
 

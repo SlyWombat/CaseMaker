@@ -206,6 +206,38 @@ exports[`runSheet (#207) > snapshots the whole RunSheet for a job with a depth b
         {
           "text": "Z is always probed on the engraved face (§7.2): no fixture can supply it",
         },
+        {
+          "record": "surface Z at each point (mm), and how each was taken (probe / touch-off)",
+          "text": "The blank's top is measured at 5 points across the cut — its centre, then both extents on each axis — because a printed blank’s colour line is a plane and its dome is extra material above it: one touch at the centre cannot tell you the floor at the ends of a line. Take them in the order below and write each reading down.",
+        },
+        {
+          "text": "Surface touch 1 of 5: the cut area's centre, X 50 Y 27.463 — take the top there and record the reading.",
+        },
+        {
+          "text": "Surface touch 2 of 5: the cut area's left extent, X 23.309 Y 27.463 — take the top there and record the reading.",
+        },
+        {
+          "text": "Surface touch 3 of 5: the cut area's right extent, X 76.691 Y 27.463 — take the top there and record the reading.",
+        },
+        {
+          "text": "Surface touch 4 of 5: the cut area's front extent, X 50 Y 4.766 — take the top there and record the reading.",
+        },
+        {
+          "text": "Surface touch 5 of 5: the cut area's back extent, X 50 Y 50.16 — take the top there and record the reading.",
+        },
+        {
+          "text": "This blank states no colour split, so only the ceiling limits the floors: they must stay at most 1 mm below the top (the magnet pocket's ceiling, including its 0.2 mm margin). A surface spread wider than that band cannot keep every floor past the colour line and clear of the pocket at the same time.",
+          "value": "band 1 mm",
+        },
+        {
+          "record": "the touch Z0 was set from, and the readings it came from",
+          "text": "Set Z0 from the LOWEST of these 5 readings, not from the registration touch above and not from the centre alone. Every programmed floor depth is measured from Z0, so at a higher touch the local floor is deeper by exactly its height above Z0: with Z0 at the lowest reading, the programmed depth is the SHALLOWEST floor and the programmed depth plus the spread is the deepest.",
+          "value": "Z0 = the lowest surface touch",
+        },
+        {
+          "bold": true,
+          "text": "If the lowest and highest readings differ by more than 1 mm, do not cut. The app refuses that blank as: “this blank is bowed <spread> mm across the cut; the floors cannot stay past the colour line and clear of the pocket”.",
+        },
       ],
       "title": "5 · Set the work origin",
     },
@@ -485,6 +517,38 @@ exports[`runSheet (#207) > snapshots the whole RunSheet for the default job 1`] 
         },
         {
           "text": "Z is always probed on the engraved face (§7.2): no fixture can supply it",
+        },
+        {
+          "record": "surface Z at each point (mm), and how each was taken (probe / touch-off)",
+          "text": "The blank's top is measured at 5 points across the cut — its centre, then both extents on each axis — because a printed blank’s colour line is a plane and its dome is extra material above it: one touch at the centre cannot tell you the floor at the ends of a line. Take them in the order below and write each reading down.",
+        },
+        {
+          "text": "Surface touch 1 of 5: the cut area's centre, X 50 Y 27.463 — take the top there and record the reading.",
+        },
+        {
+          "text": "Surface touch 2 of 5: the cut area's left extent, X 23.309 Y 27.463 — take the top there and record the reading.",
+        },
+        {
+          "text": "Surface touch 3 of 5: the cut area's right extent, X 76.691 Y 27.463 — take the top there and record the reading.",
+        },
+        {
+          "text": "Surface touch 4 of 5: the cut area's front extent, X 50 Y 4.766 — take the top there and record the reading.",
+        },
+        {
+          "text": "Surface touch 5 of 5: the cut area's back extent, X 50 Y 50.16 — take the top there and record the reading.",
+        },
+        {
+          "text": "This blank states no colour split, so only the ceiling limits the floors: they must stay at most 11 mm below the top (the blank's underside, including its 1 mm margin). A surface spread wider than that band cannot keep every floor past the colour line and clear of the pocket at the same time.",
+          "value": "band 11 mm",
+        },
+        {
+          "record": "the touch Z0 was set from, and the readings it came from",
+          "text": "Set Z0 from the LOWEST of these 5 readings, not from the registration touch above and not from the centre alone. Every programmed floor depth is measured from Z0, so at a higher touch the local floor is deeper by exactly its height above Z0: with Z0 at the lowest reading, the programmed depth is the SHALLOWEST floor and the programmed depth plus the spread is the deepest.",
+          "value": "Z0 = the lowest surface touch",
+        },
+        {
+          "bold": true,
+          "text": "If the lowest and highest readings differ by more than 11 mm, do not cut. The app refuses that blank as: “this blank is bowed <spread> mm across the cut; the floors cannot stay past the colour line and clear of the pocket”.",
         },
       ],
       "title": "5 · Set the work origin",
