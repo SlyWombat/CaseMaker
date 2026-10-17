@@ -48,6 +48,12 @@ import type { EngraveGenerated } from '@/workers/sim/engraveGenerate';
 import { uploadProgram, type MachineUploadResult } from '@/platform/machineUpload';
 import { describeRun, runSettings, type RunOutcome } from '@/platform/machineRun';
 import { closeVacuumSpan, switchVacuumOn } from '@/platform/machineSpan';
+import { attachConsole } from '@/platform/machineConsole';
+import {
+  retouchAndCorrectAfterFacing,
+  type AfterFacingResult,
+  type OperatorStep,
+} from '@/engine/cnc/registration/execute';
 import { getTools } from '@/engine/cnc/toolRegistry';
 import { jobTool } from '@/engine/cnc/engrave/jobSetup';
 import {
@@ -64,6 +70,8 @@ import {
 import { machineKey, runContextFor, useMachineRunStore, type RunContext } from './machineRunStore';
 import { finishedProgramsFor } from './locationStore';
 import { useShopDefaultsStore } from './shopDefaultsStore';
+import { firstRegistrationFor } from './engraveRegistrationStore';
+import { facingRegistrationBlocker } from './engraveRunGate';
 
 export type ReleasePhase =
   /** Planned, nothing sent: the upload button is the next press. */
@@ -73,6 +81,12 @@ export type ReleasePhase =
   /** A program is about to start (the span/pause is being settled). */
   | 'starting'
   | 'running'
+  /**
+   * #473/#494 — the face program finished and the operator confirmed the bit change: the faced top is
+   * being re-touched and Z0 is written for the engraving cutter. NO engraving program is running, and
+   * none starts until that succeeds (decision 4's probe → face → re-touch → engrave).
+   */
+  | 'retouch'
   /** A program finished; the machine is homed and the vacuum stays on for the next cutter. */
   | 'bit-change'
   /**
@@ -112,6 +126,19 @@ export interface ReleaseRecord {
    * needs a fresh tick from the operator standing there.
    */
   atMachine: boolean;
+  /**
+   * #494 — the executor's current request to the operator (fit the probe, fit the engraving cutter),
+   * while the post-facing re-touch/correction runs. Null at every other time. The panel answers through
+   * `answerOperator`; the promise the executor is awaiting is settled by that answer.
+   */
+  operatorStep: OperatorStep | null;
+  /**
+   * #494 — the program whose Z0 was written by the post-facing re-touch, so a RESUME of that same
+   * program does not probe the top a second time. The re-touch's surface point is inside the cut
+   * area: after the engraving program has cut there, a second touch would measure a floor, not the
+   * faced top. Only a fresh run (or a retry of a FAILED retouch, which never set this) re-touches.
+   */
+  retouchedFor: number | null;
   /** The file being written right now, 1-based. */
   uploading: number | null;
   /**
@@ -146,6 +173,11 @@ interface ReleaseState {
   startRelease: (target: { host: string; port: number }) => void;
   /** Resume after the bit-change pause, at the program the panel named. */
   confirmChange: (target: { host: string; port: number }) => void;
+  /**
+   * #494 — answer the post-facing executor's operator prompt. `true` continues, `false` stops it;
+   * either way the release waits for the executor's answer before the engraving program can start.
+   */
+  answerOperator: (target: { host: string; port: number }, ok: boolean) => void;
   /** Stop: a running program through the run store; a pause between programs by closing the span. */
   stop: (target: { host: string; port: number }) => void;
   setAtMachine: (target: { host: string; port: number }, at: boolean) => void;
@@ -278,8 +310,98 @@ export const useEngraveReleaseStore = create<ReleaseState>((set, get) => {
     }
   };
 
-  /** The machine's entry says a program ended. Work out the list's next move, exactly once. */
-  const settle = async (machine: string, index: number, outcome: RunOutcome): Promise<void> => {
+  /**
+   * #494 — the executor's operator prompts are PROMISES: it asks, a person answers, it continues.
+   * Each machine has at most one pending prompt; the resolver is kept here (not in the record, which
+   * React renders) and `answerOperator` settles it. A reset resolves it `false`, so an executor whose
+   * release was forgotten cannot sit waiting on a panel that is gone.
+   */
+  const operatorAnswers = new Map<string, (ok: boolean) => void>();
+  const askOperator = (machine: string, step: OperatorStep): Promise<boolean> => {
+    if (get().records[machine] === undefined) return Promise.resolve(false);
+    return new Promise((resolve) => {
+      operatorAnswers.set(machine, resolve);
+      patch(machine, { operatorStep: step });
+    });
+  };
+  const abandonOperator = (machine: string): void => {
+    const resolve = operatorAnswers.get(machine);
+    operatorAnswers.delete(machine);
+    resolve?.(false);
+  };
+
+  /** One sentence for a post-facing stop, whichever half refused: nothing engraves from it. */
+  const afterFacingNote = (r: Extract<AfterFacingResult, { ok: false }>): string => {
+    const what = r.step === 're-touch' ? 'The re-touch of the faced top refused' : 'Writing Z0 for the engraving cutter failed';
+    const sep = /[.!?]$/.test(r.reason) ? ' ' : '. ';
+    return `${what}: ${r.reason}${sep}No engraving program was played.`;
+  };
+
+  /**
+   * #494 — THE CONFIRMED BIT CHANGE AFTER A FACING pass, in decision 4's order: the faced top is
+   * RE-TOUCHED and Z0 is written for the ENGRAVING cutter before that cutter's program plays.
+   *
+   * The call is #473's executor, not a second copy of it: `retouchAndCorrectAfterFacing` owns the
+   * sequence, the band (`facing.retouchToleranceMm`) and the consent rule. This store supplies the
+   * run's context — the first registration measured before the face cut, the depth the face program
+   * removed, the location's defaults, the cutter named in the fit step — and BLOCKS the engraving
+   * program on any refusal: a band miss means the skim is not where it was posted to leave the top.
+   *
+   * The vacuum stays ON through the probe change (the face file switched it on; the engraving file
+   * switches it off). A refusal closes the span, because no further program will run.
+   */
+  const runAfterFacing = async (machine: string, index: number): Promise<void> => {
+    const rec = get().records[machine];
+    if (rec === undefined) return;
+    const file = findFile(rec, index);
+    if (file === null) return;
+    const first = firstRegistrationFor(rec.jobId, rec.target);
+    const blocked = facingRegistrationBlocker(rec.job, rec.files, first);
+    if (blocked !== null || first === null) {
+      patch(machine, { phase: 'failed', active: null, next: null, atMachine: false, operatorStep: null });
+      say(machine, `The engraving program did not start: ${blocked ?? 'the first registration is not in app state'}.`);
+      await closeSpan(machine, 'No program is running after the face program.');
+      return;
+    }
+    const removedMm = rec.job.facing?.enabled === true ? rec.job.facing.depth : Number.NaN;
+    patch(machine, { phase: 'retouch', active: null, next: null, operatorStep: null, atMachine: false, stopAsked: false });
+    say(
+      machine,
+      `Re-touching the faced top and writing Z0 for the engraving cutter (${file.toolKey}); no engraving program has started.`,
+    );
+    const handle = attachConsole(rec.target);
+    try {
+      const r = await retouchAndCorrectAfterFacing(
+        first.plan,
+        first.outcome,
+        { removedMm, defaults: useShopDefaultsStore.getState().defaults, engravingCutter: file.toolKey },
+        { console: { send: (line) => handle.send(line) }, operator: (step) => askOperator(machine, step) },
+        { confirmed: true },
+      );
+      if (get().records[machine] === undefined) return;
+      if (!r.ok) {
+        patch(machine, { phase: 'failed', active: null, next: null, atMachine: false, operatorStep: null });
+        say(machine, afterFacingNote(r));
+        await closeSpan(machine, 'The engraving program was not played, so the release step is closing the vacuum span.');
+        return;
+      }
+      patch(machine, { operatorStep: null, retouchedFor: index });
+      say(machine, `The faced top measured machine Z ${r.surface.z}; Z0 for ${file.toolKey} written (${r.correction}).`);
+      await runFile(machine, index);
+    } catch (e) {
+      if (get().records[machine] === undefined) return;
+      patch(machine, { phase: 'failed', active: null, next: null, atMachine: false, operatorStep: null });
+      say(
+        machine,
+        `The post-facing step could not run: ${e instanceof Error ? e.message : String(e)}. No engraving program was played.`,
+      );
+      await closeSpan(machine, 'The engraving program was not played, so the release step is closing the vacuum span.');
+    } finally {
+      await handle.close();
+    }
+  };
+
+  /** The machine's entry says a program ended. Work out the list's next move, exactly once. */  const settle = async (machine: string, index: number, outcome: RunOutcome): Promise<void> => {
     const rec = get().records[machine];
     if (rec === undefined || rec.settled) return;
     const file = findFile(rec, index);
@@ -387,6 +509,8 @@ export const useEngraveReleaseStore = create<ReleaseState>((set, get) => {
             active: null,
             next: null,
             atMachine: false,
+            operatorStep: null,
+            retouchedFor: null,
             uploading: null,
             vacuum: 'unknown',
             stopAsked: false,
@@ -403,7 +527,7 @@ export const useEngraveReleaseStore = create<ReleaseState>((set, get) => {
       const machine = machineKey(target);
       const rec = get().records[machine];
       if (rec === undefined) return;
-      if (rec.phase === 'uploading' || rec.phase === 'running' || rec.phase === 'starting') return;
+      if (rec.phase === 'uploading' || rec.phase === 'running' || rec.phase === 'starting' || rec.phase === 'retouch') return;
       const files = rec.files.map((f) => ({ ...f }));
       patch(machine, { phase: 'uploading', uploading: null, stopAsked: false });
       say(machine, `Uploading ${files.length} program${files.length === 1 ? '' : 's'} in cut order — nothing has run.`);
@@ -453,10 +577,19 @@ export const useEngraveReleaseStore = create<ReleaseState>((set, get) => {
         rec.phase === 'running' ||
         rec.phase === 'starting' ||
         rec.phase === 'uploading' ||
+        rec.phase === 'retouch' ||
         rec.phase === 'closing' ||
         rec.phase === 'idle'
       )
         return;
+      // #494 — a faced job cannot start its face file without the registration that the post-facing
+      // re-touch will need. Refuse before anything moves and name the missing step.
+      const first = firstRegistrationFor(rec.jobId, rec.target);
+      const blocked = facingRegistrationBlocker(rec.job, rec.files, first);
+      if (blocked !== null) {
+        say(machine, `The release did not start: ${blocked}.`);
+        return;
+      }
       const next = releaseNext(rec.files);
       if (next === null) {
         patch(machine, { phase: 'done', next: null });
@@ -478,7 +611,34 @@ export const useEngraveReleaseStore = create<ReleaseState>((set, get) => {
       const machine = machineKey(target);
       const rec = get().records[machine];
       if (rec === undefined || rec.phase !== 'bit-change' || rec.next === null) return;
+      const next = findFile(rec, rec.next);
+      const previous = next === null ? null : findFile(rec, next.index - 1);
+      // #494 — when the file that just finished is the FACING pass, the bit change is not the whole
+      // step: the faced top is re-touched and Z0 written for the engraving cutter first. The
+      // engraving file starts only if that succeeds (decision 4). A RESUME of an engraving program
+      // whose Z0 this step already wrote does not touch the top again: by then the program may have
+      // cut through the re-touch's own surface point.
+      if (
+        next !== null &&
+        previous?.kind === 'facing' &&
+        rec.job.facing?.enabled === true &&
+        rec.retouchedFor !== next.index
+      ) {
+        void runAfterFacing(machine, next.index);
+        return;
+      }
       void runFile(machine, rec.next);
+    },
+
+    answerOperator: (target, ok) => {
+      const machine = machineKey(target);
+      const rec = get().records[machine];
+      if (rec === undefined || rec.phase !== 'retouch' || rec.operatorStep === null) return;
+      const resolve = operatorAnswers.get(machine);
+      operatorAnswers.delete(machine);
+      patch(machine, { operatorStep: null });
+      resolve?.(ok);
+      say(machine, ok ? 'Operator continued the post-facing step.' : 'Operator stopped the post-facing step; it will not write the origin or start the engraving program.');
     },
 
     stop: (target) => {
@@ -494,6 +654,19 @@ export const useEngraveReleaseStore = create<ReleaseState>((set, get) => {
       if (rec.phase === 'uploading') {
         patch(machine, { stopAsked: true });
         say(machine, 'Stop pressed: the release step stops after the file being written now.');
+        return;
+      }
+      if (rec.phase === 'retouch') {
+        // The executor owns the conversation and cannot abort a line already on the wire. If it is
+        // waiting on a person, answer Stop; if the probe is moving, only the machine can stop it.
+        if (rec.operatorStep !== null) {
+          get().answerOperator(target, false);
+        } else {
+          say(
+            machine,
+            'Stop pressed while the post-facing probe or correction is moving. Nothing is sent from here mid-line: use the machine’s own stop, then Reset the release.',
+          );
+        }
         return;
       }
       if (rec.phase === 'bit-change' || rec.phase === 'ready' || rec.phase === 'starting' || rec.phase === 'stopped') {
@@ -512,6 +685,8 @@ export const useEngraveReleaseStore = create<ReleaseState>((set, get) => {
 
     reset: (target) => {
       const machine = machineKey(target);
+      // An executor waiting on an operator prompt must not wait forever for a panel that is gone.
+      abandonOperator(machine);
       set((s) => {
         const records = { ...s.records };
         delete records[machine];

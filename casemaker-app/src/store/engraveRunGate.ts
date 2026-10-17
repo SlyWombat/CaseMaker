@@ -18,8 +18,11 @@
  * the store — a script, a test, the QA harness — can build the end state of a run without a store.
  */
 
-import type { EngraveGenerated } from '@/workers/sim/engraveGenerate';
+import type { EngraveGenerated, EngraveProgram } from '@/workers/sim/engraveGenerate';
+import type { EngraveJob } from '@/types/engraveJob';
 import type { OracleReport } from '@/engine/cnc/engrave/oracle';
+import type { RegistrationOutcome } from '@/engine/cnc/registration/outcome';
+import type { RegistrationPlan } from '@/engine/cnc/registration/plan';
 import type { SimDiagnostic } from '@/workers/sim/session';
 import type { SimStatus } from './simStore';
 import { simErrors } from '@/engine/cnc/simGate';
@@ -169,6 +172,43 @@ export function releaseBlocker(v: EngraveRunView): string | null {
   }
   if (generated.facingNc != null && programs[0]?.kind !== 'facing') {
     return 'this job faces the stock first, but the face program is not in the run order — generate again';
+  }
+  return null;
+}
+
+/**
+ * Why a FACED job cannot start before its first registration is in app state (#494), or null.
+ *
+ * #473's release flow plays the face file first, then the operator changes to the engraving cutter.
+ * At that pause the faced top is re-touched and Z0 is written for the engraving cutter by
+ * `retouchAndCorrectAfterFacing`, which needs the job's FIRST registration: the measured top the
+ * facing pass was posted against. Losing that reading is not a recoverable mid-run condition — the
+ * correction would have no `surfaceZ` to measure the skim against — so the refusal is stated before
+ * the first file is played, with nothing cutting.
+ *
+ * This is a pure statement like the gates above: it takes the job, the run order and the stored
+ * registration, so the panel (which holds the job) and the store (which holds the run) ask the same
+ * question. The registration itself is another owner's UI; this is the seam that waits for it.
+ */
+export function facingRegistrationBlocker(
+  job: Pick<EngraveJob, 'facing'>,
+  programs: readonly Pick<EngraveProgram, 'kind'>[],
+  first: { plan: RegistrationPlan; outcome: RegistrationOutcome } | null,
+): string | null {
+  if (job.facing?.enabled !== true) return null;
+  // A job that faces plays the face file first (#473). A result from before that joined the list is
+  // already refused by `releaseBlocker`; this clause only says when a registration is needed at all.
+  if (programs[0]?.kind !== 'facing') return null;
+  const depth = job.facing.depth;
+  if (!Number.isFinite(depth) || depth <= 0) {
+    return 'the facing depth must be above 0 before Z0 can be set after the skim';
+  }
+  if (first === null) {
+    return 'this job faces the stock first, but its first registration is not in app state — run the registration step for this machine before the release';
+  }
+  if (!first.outcome.usable) {
+    const why = first.outcome.problems.length > 0 ? first.outcome.problems.join('; ') : 'no origin may be written from it';
+    return `the job's first registration is not usable — ${why}`;
   }
   return null;
 }

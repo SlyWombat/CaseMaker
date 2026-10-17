@@ -25,6 +25,8 @@ import { releaseNext, releasePending } from '@/engine/cnc/engrave/release';
 import { planRun } from '@/engine/cnc/plan/phases';
 import { finishedProgramsFor } from '@/store/locationStore';
 import { useEngraveReleaseStore, type ReleaseFile } from '@/store/engraveReleaseStore';
+import { useFirstRegistration } from '@/store/engraveRegistrationStore';
+import { facingRegistrationBlocker } from '@/store/engraveRunGate';
 import { useShopDefaultsStore } from '@/store/shopDefaultsStore';
 import { useToolRegistryStore } from '@/store/toolRegistryStore';
 import { cutterIdentity } from '@/engine/cnc/engrave/cutterCaseLine';
@@ -122,27 +124,35 @@ function ChangePanel({
       </p>
       <ol style={{ ...MUTED, paddingLeft: 18 }}>
         <li>
-          Fit the cutter and keep the X and Y origin where it is — <strong>the SAME corner</strong>, the same
-          edge. Nothing moves but the Z reference.
+          Fit <strong>{previous.kind === 'facing' ? 'the ENGRAVING cutter — not the facing cutter' : 'the cutter'}</strong>{' '}
+          and keep the X and Y origin where it is — <strong>the SAME corner</strong>, the same edge. Nothing moves
+          but the Z reference.
         </li>
-        <li>
-          Calibrate the new cutter’s length the same way as the first (<code>M491</code>) and record its PRB.
-          This is a reading of THIS cutter alone.
-        </li>
-        <li>
-          {previous.kind === 'facing' ? (
-            <>
-              Re-touch the FACED surface with the probe — a measured seek, never a fixed depth — and set Z0 from that
-              reading. The face file cut the top away, so Z0 measured before it no longer describes the stock.
-            </>
-          ) : (
-            <>
+        {previous.kind === 'facing' ? (
+          <>
+            <li>
+              The release step re-touches the FACED surface with the wired probe — a measured seek, never a fixed
+              depth — and writes Z0 for the engraving cutter from that reading. It will ask you to fit the probe,
+              then to fit the engraving cutter.
+            </li>
+            <li>
+              No engraving program starts if the re-touch lands outside the shop’s retouch tolerance, or if the
+              correction fails: the faced top is not where the skim was posted to leave it.
+            </li>
+          </>
+        ) : (
+          <>
+            <li>
+              Calibrate the new cutter’s length the same way as the first (<code>M491</code>) and record its PRB.
+              This is a reading of THIS cutter alone.
+            </li>
+            <li>
               Set Z0 for program {next.index} from those two readings, NOT by touching the surface again:{' '}
               <code>Z0 = surface + (cutter PRB − reference PRB)</code>. The surface has been cut since the origin
               was set, so re-touching it would sink this program’s floors by the last program’s depth.
-            </>
-          )}
-        </li>
+            </li>
+          </>
+        )}
       </ol>
       <label style={MUTED}>
         <input
@@ -152,7 +162,7 @@ function ChangePanel({
           onChange={(e) => setOk(e.target.checked)}
         />{' '}
         {previous.kind === 'facing'
-          ? 'The ENGRAVING cutter is fitted and calibrated (M491), the faced top is re-touched, and Z0 is set from that measurement.'
+          ? 'The ENGRAVING cutter is in hand and I am ready for the release step to re-touch the faced top and set Z0 before the engraving program starts.'
           : 'The cutter is changed, calibrated (M491), and Z0 is set from the two readings.'}
       </label>
       {/* D-17 — the at-machine tick is per PROGRAM: the bit-change pause cleared it, and program
@@ -173,7 +183,9 @@ function ChangePanel({
         style={{ width: '100%', padding: 7, marginTop: 6 }}
         onClick={onConfirm}
       >
-        Run program {next.index} of {next.total}
+        {previous.kind === 'facing'
+          ? `Re-touch and run program ${next.index} of ${next.total}`
+          : `Run program ${next.index} of ${next.total}`}
       </button>
     </div>
   );
@@ -194,6 +206,7 @@ export function EngraveReleaseStep({
   const uploadAll = useEngraveReleaseStore((s) => s.uploadAll);
   const startRelease = useEngraveReleaseStore((s) => s.startRelease);
   const confirmChange = useEngraveReleaseStore((s) => s.confirmChange);
+  const answerOperator = useEngraveReleaseStore((s) => s.answerOperator);
   const stop = useEngraveReleaseStore((s) => s.stop);
   const setAtMachine = useEngraveReleaseStore((s) => s.setAtMachine);
   const [stage, setStage] = useState<'idle' | 'confirm'>('idle');
@@ -204,6 +217,10 @@ export function EngraveReleaseStep({
   const [changeOkFor, setChangeOkFor] = useState<number | null>(null);
   const next = record?.next ?? null;
   const changeOk = changeOkFor !== null && changeOkFor === next;
+  // #494 — the job's first registration, and whether the release may start without one. The gate is
+  // the same function the store calls, so the button's disabled state and the start refusal agree.
+  const firstRegistration = useFirstRegistration(job.id, target);
+  const facingGate = facingRegistrationBlocker(job, generated.programs, firstRegistration);
 
   useEffect(() => {
     if (host !== undefined && port !== undefined && blocker === null) plan({ host, port }, job, generated);
@@ -265,7 +282,8 @@ export function EngraveReleaseStep({
     (record.phase === 'ready' || record.phase === 'stopped' || record.phase === 'failed') &&
     atMachine &&
     uploadsReady &&
-    !record.spanClosing;
+    !record.spanClosing &&
+    facingGate === null;
   const finished = record.files.filter((f) => f.done).length;
   const showUpload = (record.phase === 'idle' || record.phase === 'stopped' || record.phase === 'failed') && uploadsIncomplete;
 
@@ -285,6 +303,12 @@ export function EngraveReleaseStep({
           vacuum’s ON word. After it, change to the ENGRAVING cutter — not the facing cutter — and re-touch the faced
           surface with the probe: the engraving programs assume the surface the skim left, and are posted to it, not
           to the surface the face file found.
+        </p>
+      )}
+
+      {facingGate !== null && (
+        <p style={{ ...MUTED, color: '#f0b8a8' }} data-testid="engrave-release-registration-blocker">
+          The release is blocked — {facingGate}.
         </p>
       )}
 
@@ -437,6 +461,42 @@ export function EngraveReleaseStep({
                 Stop here — the vacuum goes off and the machine homes
               </button>
             </>
+          )}
+
+          {record.phase === 'retouch' && (
+            <div style={BOX} data-testid="engrave-release-retouch">
+              <p style={{ fontSize: 12, color: '#e6edf5', margin: '0 0 6px' }}>
+                The faced top is being re-touched and Z0 written for the engraving cutter. No engraving program
+                has started; it starts only after this succeeds.
+              </p>
+              {record.operatorStep !== null ? (
+                <>
+                  <p style={MUTED} data-testid="engrave-release-operator-text">
+                    {record.operatorStep.text}
+                  </p>
+                  <div style={{ display: 'flex', gap: 6 }}>
+                    <button
+                      type="button"
+                      data-testid="engrave-release-operator-continue"
+                      style={{ flex: 1, padding: 7 }}
+                      onClick={() => answerOperator(target, true)}
+                    >
+                      Continue
+                    </button>
+                    <button
+                      type="button"
+                      data-testid="engrave-release-operator-stop"
+                      style={{ flex: 1, padding: 7 }}
+                      onClick={() => answerOperator(target, false)}
+                    >
+                      Stop
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <p style={MUTED}>Waiting for the machine…</p>
+              )}
+            </div>
           )}
 
           {record.phase === 'done' && (

@@ -38,8 +38,15 @@ import {
 } from '@/store/machineRunStore';
 import { resetRunConfirmStore } from '@/store/runConfirmStore';
 import { resetEngraveReleaseStore, useEngraveReleaseStore } from '@/store/engraveReleaseStore';
+import {
+  resetEngraveRegistrationStore,
+  useEngraveRegistrationStore,
+} from '@/store/engraveRegistrationStore';
 import { clearStoredBaseline, resetLocationStore, useLocationStore } from '@/store/locationStore';
-import { releaseBlocker, uploadBlocker } from '@/store/engraveRunGate';
+import { facingRegistrationBlocker, releaseBlocker, uploadBlocker } from '@/store/engraveRunGate';
+import { planRegistration } from '@/engine/cnc/registration/plan';
+import { registrationSettings } from '@/engine/cnc/registration/settings';
+import type { RegistrationOutcome } from '@/engine/cnc/registration/outcome';
 import { describeUpload } from '@/components/panels/engraveUploadCopy';
 import type { EngraveGenerated, EngraveProgram } from '@/workers/sim/engraveGenerate';
 import type { VerifyReport } from '@/engine/cnc/verify';
@@ -127,6 +134,56 @@ function twoSetupJob(): EngraveJob {
   return job;
 }
 
+/** A job that faces the stock before it engraves (#473), with the depth the face program removes. */
+function facedJob(depth = 0.5): EngraveJob {
+  const job = defaultEngraveJob();
+  job.name = 'Faced job';
+  job.toolKey = 'flat-1.0';
+  job.facing = { enabled: true, depth };
+  return job;
+}
+
+/**
+ * #494 — the job's FIRST registration, as a registration step would leave it: a plan measured on this
+ * machine, with a usable outcome whose `surfaceZ` is the top the face program was posted against.
+ */
+const FIRST_OUTCOME: RegistrationOutcome = {
+  edges: [],
+  offset: { x: 0, y: 0 },
+  measured: { x: true, y: true },
+  centre: { x: 19.05, y: 38.1 },
+  rotationDeg: null,
+  rotationShiftMm: null,
+  withinMargin: true,
+  margin: 0.2,
+  surfaceZ: -56.172,
+  probeRefZ: -80,
+  seekFromMachineZ: -3,
+  currentG54: { x: -181.55, y: -184.8 },
+  correctedG54: { x: -181.55, y: -184.8 },
+  xyChecked: true,
+  usable: true,
+  problems: [],
+  notes: [],
+};
+
+function seedRegistration(job: EngraveJob, outcome: RegistrationOutcome = FIRST_OUTCOME): void {
+  const { settings } = registrationSettings(null);
+  const planned = planRegistration(
+    {
+      stock: { xMin: 0, yMin: 0, xMax: 38.1, yMax: 76.2, cornerRadius: 3 },
+      mount: 'vise',
+      expectedSurface: { machineZ: outcome.surfaceZ, from: 'the faced blank, as registered' },
+      seekFromMachineZ: outcome.seekFromMachineZ,
+      fixtureBelowSurfaceMm: 0.72,
+      cutCentre: { x: 24, y: 43 },
+    },
+    settings,
+  );
+  if (!planned.ok) throw new Error(planned.reason);
+  useEngraveRegistrationStore.getState().record(job.id, TARGET, planned.plan, outcome);
+}
+
 const sent: string[] = [];
 const uploaded: string[] = [];
 
@@ -153,9 +210,13 @@ function releaseSpanClose(): void {
 
 /**
  * A controller that finishes each played program after `finishAfter` polls. `?` is Idle before a
- * play and after it finishes; an abort makes it Idle at once.
+ * play and after it finishes; an abort makes it Idle at once. For #494's post-facing step,
+ * `retouchSurfaceZ` is the machine Z every probe touch reports and `m491` the tool-length reply.
  */
-function controller(finishAfter = 2): MachineConsoleClient {
+function controller(
+  finishAfter = 2,
+  opts: { retouchSurfaceZ?: number; m491?: string } = {},
+): MachineConsoleClient {
   let playing: { polls: number } | null = null;
   let aborted = false;
   return {
@@ -177,6 +238,11 @@ function controller(finishAfter = 2): MachineConsoleClient {
           } else if (line === 'abort') {
             aborted = true;
             text = 'ok\nAborted playing or paused file.';
+          } else if (line === 'M491') {
+            text = opts.m491 ?? 'ok\n[PRB:0,0,-80.000:1]';
+          } else if (opts.retouchSurfaceZ !== undefined && line.startsWith('G38.2')) {
+            // Both the fast and the slow touch of the re-touch seek read the same faced top.
+            text = `[PRB:-174.550,-175.800,${opts.retouchSurfaceZ.toFixed(3)}:1]\nok`;
           }
           return { ok: true, line, text, frames: 1, elapsedMs: 1 };
         },
@@ -218,6 +284,7 @@ beforeEach(() => {
   resetRunConfirmStore();
   resetMachineRunStore();
   resetEngraveReleaseStore();
+  resetEngraveRegistrationStore();
   resetLocationStore();
   clearStoredBaseline();
   setMachineConsoleLoader(async () => controller(2));
@@ -253,6 +320,22 @@ async function uploadAndStart(): Promise<void> {
   await screen.findByTestId('engrave-release-start');
   fireEvent.click(screen.getByTestId('engrave-release-at-machine'));
   fireEvent.click(screen.getByTestId('engrave-release-start'));
+}
+
+/** #494 — a faced run up to the confirmed bit change after the face program. */
+async function facedToChange(job: EngraveJob, engraving: EngraveProgram): Promise<void> {
+  render(<EngraveReleaseStep target={TARGET} job={job} generated={generated([FACE, engraving], NC_FACE)} blocker={null} />);
+  await uploadAndStart();
+  await screen.findByTestId('engrave-release-change', undefined, { timeout: 10000 });
+  fireEvent.click(screen.getByTestId('engrave-release-change-ok'));
+  fireEvent.click(screen.getByTestId('engrave-release-at-machine'));
+  fireEvent.click(screen.getByTestId('engrave-release-change-done'));
+}
+
+/** The engraving program after a face file: its own NC, the same setup and cutter. */
+function engravingProgram(): EngraveProgram {
+  const nc = 'G0 X1 Y1\nM332\nM02\n';
+  return { ...P1, nc, programHash: programHash(nc) };
 }
 
 describe('#469 the release step', () => {
@@ -308,6 +391,13 @@ describe('#469 the release step', () => {
     delete old.facingNc;
     delete old.facingError;
     expect(releaseBlocker({ ...view, generated: old as unknown as EngraveGenerated })).toBeNull();
+
+    // #494 — a faced run additionally needs its first registration before the release may start.
+    expect(facingRegistrationBlocker(facedJob(), [FACE, P1], null)).toContain(
+      'first registration is not in app state',
+    );
+    // A job that does not face needs none, even with a face file-shaped first program.
+    expect(facingRegistrationBlocker(defaultEngraveJob(), [FACE, P1], null)).toBeNull();
   });
 
   it('uploads every program, plays them in order, and sends no vacuum word between them', async () => {
@@ -346,8 +436,10 @@ describe('#469 the release step', () => {
     // the order becomes physical: the engraving cutter goes in, and the faced top is measured.
     const NC_EN = 'G0 X1 Y1\nM332\nM02\n';
     const EN: EngraveProgram = { ...P1, nc: NC_EN, programHash: programHash(NC_EN) };
-    const job = defaultEngraveJob();
-    job.name = 'Faced job';
+    const job = facedJob();
+    // #494 — a faced release needs the first registration in app state; the step that records it is
+    // still the registration UI's (#430), so the test seeds it as that step would.
+    seedRegistration(job);
     render(<EngraveReleaseStep target={TARGET} job={job} generated={generated([FACE, EN], NC_FACE)} blocker={null} />);
 
     expect((await screen.findByTestId('engrave-release-facing-note')).textContent).toContain('program 1 is the face file');
@@ -358,9 +450,178 @@ describe('#469 the release step', () => {
     expect(sent.filter((l) => l.startsWith('play'))).toEqual(['play /sd/gcodes/Faced-job-p1.nc']);
     const change = screen.getByTestId('engrave-release-change').textContent ?? '';
     expect(change).toContain('ENGRAVING cutter');
-    expect(change).toContain('Re-touch the FACED surface with the probe');
+    expect(change).toContain('re-touches the FACED surface with the wired probe');
     // The facing cutter was program 1's; the change names the engraving cutter for program 2.
     expect(change).toContain('flat-1.0');
+  }, 30000);
+
+  it('refuses a faced release with no first registration, then enables it when one is recorded (#494)', async () => {
+    const job = facedJob();
+    setMachineConsoleLoader(async () => controller(2, { retouchSurfaceZ: -56.666 }));
+    render(
+      <EngraveReleaseStep
+        target={TARGET}
+        job={job}
+        generated={generated([FACE, engravingProgram()], NC_FACE)}
+        blocker={null}
+      />,
+    );
+    await uploadOnly();
+    fireEvent.click(screen.getByTestId('engrave-release-at-machine'));
+
+    expect(screen.getByTestId('engrave-release-registration-blocker').textContent).toContain(
+      'first registration is not in app state',
+    );
+    const start = () => screen.getByTestId('engrave-release-start') as HTMLButtonElement;
+    expect(start().disabled).toBe(true);
+    // The store refuses too, not only the button: nothing is played without the reading.
+    await act(async () => {
+      useEngraveReleaseStore.getState().startRelease(TARGET);
+    });
+    expect(record()?.phase).toBe('ready');
+    expect(sent.filter((l) => l.startsWith('play'))).toEqual([]);
+
+    // The registration step records it; the panel subscribes, so Start unlocks without a remount.
+    await act(async () => {
+      seedRegistration(job);
+    });
+    await waitFor(() => expect(start().disabled).toBe(false), { timeout: 5000 });
+  }, 20000);
+
+  it('after the face file’s confirmed change, re-touches the faced top and writes Z0 before the engraving program (#494)', async () => {
+    const job = facedJob();
+    seedRegistration(job);
+    setMachineConsoleLoader(async () => controller(2, { retouchSurfaceZ: -56.666 }));
+    await facedToChange(job, engravingProgram());
+
+    // The executor asks for the wired probe, measures, then asks for the ENGRAVING cutter.
+    await waitFor(
+      () => expect(screen.getByTestId('engrave-release-operator-text').textContent).toContain('Fit the wired probe'),
+      { timeout: 10000 },
+    );
+    expect(record()?.phase).toBe('retouch');
+    fireEvent.click(screen.getByTestId('engrave-release-operator-continue'));
+    await waitFor(
+      () =>
+        expect(screen.getByTestId('engrave-release-operator-text').textContent).toContain('ENGRAVING cutter'),
+      { timeout: 10000 },
+    );
+    fireEvent.click(screen.getByTestId('engrave-release-operator-continue'));
+
+    await screen.findByTestId('engrave-release-done', undefined, { timeout: 15000 });
+    expect(sent.filter((l) => l.startsWith('play'))).toEqual([
+      'play /sd/gcodes/Faced-job-p1.nc',
+      'play /sd/gcodes/Faced-job-p2.nc',
+    ]);
+    // Z0 comes from the MEASURED faced top, and the write is ordered before the engraving program.
+    const g10 = sent.filter((l) => l.startsWith('G10 L2'));
+    expect(g10).toHaveLength(1);
+    expect(g10[0]).toContain('Z-56.666');
+    expect(sent.indexOf(g10[0]!)).toBeLessThan(sent.indexOf('play /sd/gcodes/Faced-job-p2.nc'));
+    const notes = record()?.notes.join('\n') ?? '';
+    expect(notes).toContain('faced top measured machine Z -56.666');
+    expect(notes).toContain('Z0 for flat-1.0 written');
+  }, 30000);
+
+  it('a re-touch outside the band BLOCKS the engraving program and closes the span (#494)', async () => {
+    const job = facedJob();
+    seedRegistration(job);
+    // The faced top should be at −56.672 ± the shop tolerance; this reading is 0.228 mm high.
+    setMachineConsoleLoader(async () => controller(2, { retouchSurfaceZ: -56.9 }));
+    await facedToChange(job, engravingProgram());
+
+    await waitFor(
+      () => expect(screen.getByTestId('engrave-release-operator-text').textContent).toContain('Fit the wired probe'),
+      { timeout: 10000 },
+    );
+    fireEvent.click(screen.getByTestId('engrave-release-operator-continue'));
+
+    await waitFor(() => expect(record()?.phase).toBe('failed'), { timeout: 15000 });
+    const notes = record()?.notes.join('\n') ?? '';
+    expect(notes).toContain('outside the expected');
+    expect(notes).toContain('No engraving program was played');
+    expect(sent.filter((l) => l.startsWith('play'))).toEqual(['play /sd/gcodes/Faced-job-p1.nc']);
+    expect(sent.filter((l) => l.startsWith('G10 L2'))).toHaveLength(0);
+    // The face file is the only program that ran; the vacuum was closed after the refusal.
+    expect(sent).toContain('M332');
+    expect(screen.queryByTestId('engrave-release-operator-text')).toBeNull();
+  }, 30000);
+
+  it('a failed cutter-length correction BLOCKS the engraving program and closes the span (#494)', async () => {
+    const job = facedJob();
+    seedRegistration(job);
+    // The re-touch is in band, but the cutter's M491 carries no PRB: Z0 cannot be written.
+    setMachineConsoleLoader(async () => controller(2, { retouchSurfaceZ: -56.666, m491: 'ok' }));
+    await facedToChange(job, engravingProgram());
+
+    await waitFor(
+      () => expect(screen.getByTestId('engrave-release-operator-text').textContent).toContain('Fit the wired probe'),
+      { timeout: 10000 },
+    );
+    fireEvent.click(screen.getByTestId('engrave-release-operator-continue'));
+    await waitFor(
+      () =>
+        expect(screen.getByTestId('engrave-release-operator-text').textContent).toContain('ENGRAVING cutter'),
+      { timeout: 10000 },
+    );
+    fireEvent.click(screen.getByTestId('engrave-release-operator-continue'));
+
+    await waitFor(() => expect(record()?.phase).toBe('failed'), { timeout: 15000 });
+    const notes = record()?.notes.join('\n') ?? '';
+    expect(notes).toContain('M491 answered no tool-length reading for the cutter');
+    expect(notes).toContain('No engraving program was played');
+    expect(sent.filter((l) => l.startsWith('play'))).toEqual(['play /sd/gcodes/Faced-job-p1.nc']);
+    expect(sent.filter((l) => l.startsWith('G10 L2'))).toHaveLength(0);
+    expect(sent).toContain('M332');
+  }, 30000);
+
+  it('a RESUME of the engraving program does not re-touch a top that program has already cut (#494)', async () => {
+    const job = facedJob();
+    seedRegistration(job);
+    setMachineConsoleLoader(async () => controller(2, { retouchSurfaceZ: -56.666 }));
+    render(
+      <EngraveReleaseStep
+        target={TARGET}
+        job={job}
+        generated={generated([FACE, engravingProgram()], NC_FACE)}
+        blocker={null}
+      />,
+    );
+    await screen.findByTestId('engrave-release-files');
+
+    // The state a resume after a failed program 2 leaves: the face file done, its bit change
+    // confirmed, and the re-touch's Z0 already written for program 2.
+    const machine = `${TARGET.host}:${TARGET.port}`;
+    const current = record()!;
+    await act(async () => {
+      useEngraveReleaseStore.setState({
+        records: {
+          ...useEngraveReleaseStore.getState().records,
+          [machine]: {
+            ...current,
+            phase: 'bit-change',
+            active: null,
+            next: 2,
+            atMachine: true,
+            retouchedFor: 2,
+            files: current.files.map((f) =>
+              f.index === 1 ? { ...f, done: true, upload: 'uploaded' as const } : { ...f, upload: 'uploaded' as const },
+            ),
+          },
+        },
+      });
+    });
+    await act(async () => {
+      useEngraveReleaseStore.getState().confirmChange(TARGET);
+    });
+
+    await waitFor(
+      () => expect(sent.filter((l) => l.startsWith('play'))).toEqual(['play /sd/gcodes/Faced-job-p2.nc']),
+      { timeout: 10000 },
+    );
+    // No probe seek and no second origin write: the top under the re-touch point is now a floor.
+    expect(sent.filter((l) => l.startsWith('G38.2'))).toEqual([]);
+    expect(sent.filter((l) => l.startsWith('G10 L2'))).toEqual([]);
   }, 30000);
 
   it('asks “I am at the machine” again for every program: the bit change clears the tick (D-17)', async () => {
