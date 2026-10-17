@@ -22,11 +22,12 @@
  * The facing default (decision Q6) is {@link facingDefault}; the facing operation itself is #432.
  */
 
+import { readDefault, type ShopDefaults } from '@/platform/defaultsClient';
 import type { StockItem } from '@/platform/stockClient';
 import { isShippedDemoLabelSet } from './engrave/blankLabelSeed';
 import type { MillProfile } from './machine';
 import { isMetalMaterial, MATERIAL_LABELS } from './materials';
-import type { EngraveJob, JobStockEntry, JobStockFinish, JobStockForm, StockMaterial } from '@/types/engraveJob';
+import type { EngraveFacing, EngraveJob, JobStockEntry, JobStockFinish, JobStockForm, StockMaterial } from '@/types/engraveJob';
 
 /** The rectangular forms a job's stock can take, in the order the wizard offers them. */
 export const JOB_STOCK_FORMS: readonly JobStockForm[] = ['plate', 'block', 'sheet', 'printed-blank'];
@@ -253,6 +254,35 @@ export function stockFromFile(file: FileStock, machine: MillProfile): StockChoic
 }
 
 /**
+ * The finish the job's stock states (#432 slice 4), or null when nothing says.
+ *
+ * The named entry is the first word; a job that carries a `print` was taken from a printed part —
+ * the badge's blank, a design file — and that IS its finish even when no entry was named (the
+ * panel's "Use the badge blank" writes no `stockEntry`). With neither, the finish is unknown, and
+ * the panel and the run sheet must say so rather than guess from the material.
+ */
+export function finishOf(job: Pick<EngraveJob, 'stockEntry' | 'stock'>): JobStockFinish | null {
+  return job.stockEntry?.finish ?? (job.stock.print !== undefined ? 'printed' : null);
+}
+
+/**
+ * The facing choice a NEW job is seeded with (#432 slice 4, decision Q6): whether to face, from the
+ * finish's own default, and the depth the shop fills in ({@link facingDepthDefault}).
+ *
+ * Seeded rather than interpreted at generate time: a job with no `facing` key must keep planning
+ * exactly as it did before #432, so "rough stock is faced by default" has to be WRITTEN onto a job
+ * when the job is made. An absent key means nobody has asked, and the panel offers the default with
+ * its reason instead of acting on it.
+ */
+export function facingSeed(
+  finish: JobStockFinish | null,
+  shop?: Partial<FacingDepthShop>,
+): Pick<EngraveFacing, 'enabled' | 'depth'> {
+  const def = facingDefault(finish ?? 'unknown');
+  return { enabled: def.on, depth: facingDepthDefault(finish ?? 'unknown', { shop }).depthMm };
+}
+
+/**
  * Whether the job should face the stock first, from its finish (decision Q6): rough or unknown → on;
  * a finished sheet or a printed blank → off. Always overridable — this is the DEFAULT, and the reason
  * is part of the answer so the screen can say why.
@@ -293,6 +323,19 @@ export interface FacingDepthShop {
   rough: number;
   unknown: number;
   margin: number;
+}
+
+/**
+ * The shop's facing figures from a defaults map — the three `facing.*` keys, each falling back to
+ * its labelled seed (`FACING_DEPTH_FALLBACK_MM`). One reader, so the panel's filled-in number and
+ * the reason under it can never come from two different sets of keys.
+ */
+export function facingShopFrom(defaults: ShopDefaults | null): FacingDepthShop {
+  return {
+    rough: readDefault(defaults, 'facing.roughMm').value,
+    unknown: readDefault(defaults, 'facing.unknownMm').value,
+    margin: readDefault(defaults, 'facing.marginMm').value,
+  };
 }
 
 /**

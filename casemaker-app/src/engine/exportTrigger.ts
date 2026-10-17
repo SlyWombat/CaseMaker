@@ -14,7 +14,7 @@ import type { FitVariant } from '@/types/snap';
 import { derivedKind } from '@/engine/compiler/archetype';
 import { isAlternativeNode, partForId } from '@/engine/exporters/parts';
 import { printNotesText } from '@/engine/exporters/printNotes';
-import { runSheetFileName, runSheetFrameFileName } from '@/engine/cnc/engrave/runSheet';
+import { runSheetFileName, runSheetFrameFileName, runSheetFaceFileName } from '@/engine/cnc/engrave/runSheet';
 import { runRecordFileName } from '@/engine/cnc/engrave/runRecord';
 
 export type { ExportFormat };
@@ -100,15 +100,23 @@ export async function saveText(text: string, filename: string, mime: string): Pr
  * belongs with the file that was cut and nowhere else; the operator fills it in at the bench and
  * `scripts/run-readback.ts` (or the panel's "Open run record…") brings it back. A null
  * `runRecord` writes the two programs and no record.
+ *
+ * #432 slice 3 — and a FOURTH: the facing file (`<job>-face.nc`), the skim the engraving is posted
+ * from. It is written only when the worker produced one; a null `facingNc` writes the rest and no
+ * face file, which is what a job that does not face — or one whose skim could not be built — gets.
+ * The run sheet names this file, so the two must be written in one breath or the sheet points at a
+ * file that is not there.
  */
 export async function saveEngraveProgram(
   nc: string,
   frameNc: string | null,
   jobName: string,
   runRecord: string | null = null,
+  facingNc: string | null = null,
 ): Promise<void> {
   await saveText(nc, runSheetFileName(jobName), 'text/plain');
   if (frameNc !== null) await saveText(frameNc, runSheetFrameFileName(jobName), 'text/plain');
+  if (facingNc !== null) await saveText(facingNc, runSheetFaceFileName(jobName), 'text/plain');
   if (runRecord !== null) await saveText(runRecord, runRecordFileName(jobName), 'application/json');
 }
 

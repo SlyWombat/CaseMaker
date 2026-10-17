@@ -8,7 +8,7 @@
 // The reader's own behaviour (the size guard, the direction, the parser's sentences) is that spec's
 // business, and the patch's effect on the job is `engraveTakeDesign.spec.ts`'s.
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 
 import { EngravePanel } from '@/components/panels/EngravePanel';
@@ -22,6 +22,19 @@ import {
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { setDesignImportClient } from '@/engine/import/designImport';
 import type { DesignJobPatch } from '@/engine/cnc/engrave/fromDesign';
+
+// #437 — the design door is a `featureSim` route like every other project-file reader; this spec
+// flips the switch to prove the panel does not offer it in a build without the simulator.
+const features = vi.hoisted(() => ({ sim: true }));
+vi.mock('@/platform/features', async (orig) => {
+  const real = await orig<typeof import('@/platform/features')>();
+  return {
+    ...real,
+    get featureSim() {
+      return features.sim;
+    },
+  };
+});
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -80,6 +93,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  features.sim = true;
   cleanup();
   useEngravePreviewStore.getState().dispose();
   setEngravePreviewClientLoader(null);
@@ -131,5 +145,14 @@ describe('EngravePanel — the design import entry (#410)', () => {
     const job = useEngraveJobStore.getState().job;
     expect(job.stock.length).toBe(100);
     expect(job.labels.length).toBe(3);
+  });
+
+  it('offers no design door in a build without the simulator (#437)', () => {
+    // The reader itself refuses there (`designImport`), so a button would only lead to that
+    // refusal — the same rule the sweep, Manage and the CNC guide follow.
+    features.sim = false;
+    render(<EngravePanel />);
+    expect(screen.queryByTestId('engrave-design-import')).toBeNull();
+    expect(screen.queryByTestId('engrave-design-input')).toBeNull();
   });
 });

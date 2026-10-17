@@ -21,7 +21,8 @@ import { useStockStore } from '@/store/stockStore';
 import type { Project } from '@/types/project';
 import type { JobStockEntry } from '@/types/engraveJob';
 import type { SetupStepId } from '@/engine/cnc/engrave/setupFlow';
-import { jobItemCount } from '@/engine/cnc/stockStart';
+import { facingSeed, facingShopFrom, jobItemCount } from '@/engine/cnc/stockStart';
+import { useShopDefaultsStore } from '@/store/shopDefaultsStore';
 import '@/store/stockEntryFollow';
 import { StartStockStep, type PendingStock } from './StartStockStep';
 
@@ -416,11 +417,17 @@ export function StartWizard(): JSX.Element {
         entry = p.choice.entry;
       }
       const job = useEngraveJobStore.getState().job;
+      // #432 slice 4 — the facing choice comes from the finish (decision Q6), and it is SEEDED here
+      // rather than interpreted at Generate: a job with no key must keep planning exactly as it did
+      // before #432, so "rough stock is faced by default" has to be written on the job when the job
+      // is made. The panel's toggle then overrides it like any other answer.
+      const facing = facingSeed(entry.finish, facingShopFrom(useShopDefaultsStore.getState().defaults));
       // The empty design: a stock pick brings no lines. (A design file brings its own items.)
       store.replace({
         ...job,
         ...(p.kind === 'design' ? {} : { labels: [], shapes: [] }),
         stockEntry: entry,
+        facing,
       });
 
       const stock = useEngraveJobStore.getState().job.stock;

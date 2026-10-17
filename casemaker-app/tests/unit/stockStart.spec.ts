@@ -7,6 +7,9 @@ import { Z1 } from '@/engine/cnc/machine';
 import {
   boxProblem,
   facingDefault,
+  facingSeed,
+  facingShopFrom,
+  finishOf,
   formProblem,
   shelfFor,
   shelfItemFromMade,
@@ -132,6 +135,56 @@ describe('the facing default comes from the finish (decision Q6)', () => {
     expect(facingDefault('unknown').on).toBe(true);
     expect(facingDefault('finished').on).toBe(false);
     expect(facingDefault('printed').on).toBe(false);
+  });
+});
+
+// #432 slice 4 — the finish the panel and the sheet read, and the choice a new job starts with.
+// Seeded rather than interpreted at Generate: a job with no `facing` key must plan as it did before
+// #432, so the default has to be WRITTEN when the job is made.
+describe('the facing choice a new job starts with (#432 slice 4)', () => {
+  const entry = (finish: JobStockEntry['finish']): JobStockEntry => ({
+    kind: 'made',
+    shelfId: null,
+    file: null,
+    form: 'plate',
+    finish,
+    conductive: false,
+  });
+
+  it('reads the named entry’s finish', () => {
+    expect(finishOf({ stockEntry: entry('rough'), stock: defaultEngraveJob().stock })).toBe('rough');
+    expect(finishOf({ stockEntry: entry('finished'), stock: defaultEngraveJob().stock })).toBe('finished');
+  });
+
+  it('reads a printed blank’s implied finish when no entry names one', () => {
+    const job = defaultEngraveJob();
+    const printed = { ...job, stock: { ...job.stock, print: { split: 3, layerHeight: 0.2, firstLayerHeight: 0.2 } } };
+    expect(finishOf(printed)).toBe('printed');
+  });
+
+  it('says nothing when neither the entry nor the print knows', () => {
+    expect(finishOf(defaultEngraveJob())).toBeNull();
+  });
+
+  it('seeds on exactly for rough and unknown, and off for finished and printed', () => {
+    expect(facingSeed('rough')).toEqual({ enabled: true, depth: 0.5 });
+    expect(facingSeed('unknown')).toEqual({ enabled: true, depth: 0.2 });
+    expect(facingSeed('finished')).toEqual({ enabled: false, depth: 0.2 });
+    expect(facingSeed('printed')).toEqual({ enabled: false, depth: 0.2 });
+    // No finish at all is the unknown default, not an invented one.
+    expect(facingSeed(null)).toEqual({ enabled: true, depth: 0.2 });
+  });
+
+  it('fills the depth from the shop’s own figures, and falls back to the labelled seeds', () => {
+    expect(facingSeed('rough', { rough: 0.8 })).toEqual({ enabled: true, depth: 0.8 });
+    expect(facingShopFrom(null)).toEqual({ rough: 0.5, unknown: 0.2, margin: 0.1 });
+  });
+
+  it('seeds a job that still passes the schema — the key is optional, the seed is complete', () => {
+    const job = { ...defaultEngraveJob(), facing: facingSeed('rough') };
+    const parsed = parseEngraveJob(JSON.parse(JSON.stringify(job)));
+    expect(parsed.ok).toBe(true);
+    expect(parsed.ok && parsed.job.facing).toEqual({ enabled: true, depth: 0.5 });
   });
 });
 

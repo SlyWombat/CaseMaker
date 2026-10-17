@@ -441,6 +441,63 @@ describe('#280 — step 2, what are you making', () => {
   });
 });
 
+// #432 slice 4 — the facing choice is SEEDED onto a job made from a piece of stock, not interpreted
+// at Generate: a job with no `facing` key must keep planning exactly as it did before #432.
+describe('#432 slice 4 — a new job starts with the finish’s facing choice', () => {
+  /** The stock step's "type a piece" door, with a 60 × 40 × 8 mm piece of the given finish. */
+  function typePiece(finish: 'rough' | 'finished' | 'printed' | 'unknown'): void {
+    fireEvent.click(screen.getByTestId('start-wizard-stock-door-make'));
+    fireEvent.change(screen.getByTestId('start-wizard-make-length'), { target: { value: '60' } });
+    fireEvent.change(screen.getByTestId('start-wizard-make-width'), { target: { value: '40' } });
+    fireEvent.change(screen.getByTestId('start-wizard-make-thickness'), { target: { value: '8' } });
+    fireEvent.change(screen.getByTestId('start-wizard-stock-finish'), { target: { value: finish } });
+  }
+
+  async function start(): Promise<void> {
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('start-wizard-stock-next'));
+    });
+    // A job with items on it asks before it is replaced.
+    const yes = screen.queryByTestId('start-wizard-replace-yes');
+    if (yes !== null) {
+      await act(async () => {
+        fireEvent.click(yes);
+      });
+    }
+  }
+
+  it('a rough piece is seeded facing on, with the shop’s rough skim', async () => {
+    render(<StartWizard />);
+    skipToJobStep();
+    typePiece('rough');
+    await start();
+
+    const job = useEngraveJobStore.getState().job;
+    expect(job.stockEntry?.finish).toBe('rough');
+    expect(job.facing).toEqual({ enabled: true, depth: 0.5 });
+  });
+
+  it('a finished piece is seeded facing off — the face is cut as it is', async () => {
+    render(<StartWizard />);
+    skipToJobStep();
+    typePiece('finished');
+    await start();
+
+    expect(useEngraveJobStore.getState().job.facing).toEqual({ enabled: false, depth: 0.2 });
+  });
+
+  it('the stock step says what the job will start with, depth and all', () => {
+    render(<StartWizard />);
+    skipToJobStep();
+    typePiece('rough');
+
+    const line = screen.getByTestId('start-wizard-stock-facing');
+    expect(line.getAttribute('data-state')).toBe('on');
+    expect(line.textContent).toContain('rough stock is faced first');
+    expect(line.textContent).toContain('0.5 mm skim');
+  });
+});
+
 describe('#280 — the machine record survives the wizard', () => {
   it('a found check is kept in the store, not in the component', () => {
     useClient(

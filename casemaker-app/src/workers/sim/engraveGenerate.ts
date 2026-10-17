@@ -55,8 +55,8 @@ import { dedupeFindings, jobSetups, setupProgramFindings, toSetup, validateJob, 
 import { jobForSetup, setupPrograms, type JobProgramRef } from '@/engine/cnc/engrave/programs';
 import { programHash } from '@/engine/cnc/programHash';
 import { validateVise } from '@/engine/cnc/fixture';
-import { generateEngrave, type EngraveRegion } from '@/engine/cnc/cam/engraveJob';
-import { generateFacing } from '@/engine/cnc/cam/facing';
+import { generateEngrave, zPasses, type EngraveRegion } from '@/engine/cnc/cam/engraveJob';
+import { generateFacing, type FacingCamSummary } from '@/engine/cnc/cam/facing';
 import { chooseFacingTool } from '@/engine/cnc/engrave/facingTool';
 import { generateTrace } from '@/engine/cnc/cam/trace';
 import type { Polygons } from '@/engine/cnc/cam/pocket';
@@ -230,6 +230,14 @@ export interface EngraveGenerated {
   facingToolKey: string | null;
   /** #432 — why the facing program is absent, or null. Never a stage refusal: the run is not stopped. */
   facingError: string | null;
+  /**
+   * #432 slice 3 — what the facing program was cut with: its OWN cutter, the pass count and the
+   * numbers from its feeds row. Null when no facing file was produced (see `facingError`), so the
+   * run sheet can state a face the file actually makes and say why when there is none. It is
+   * `FacingCamSummary`, not the sheet's own re-derivation: passes are `zPasses`' answer for this
+   * depth and this row, and a second computation could print a pass count the file does not make.
+   */
+  facingCam: FacingCamSummary | null;
   /**
    * #419 J3 — the job's programs, in cut order: one per setup, each with its own `.nc`, verifier
    * report, frame file and FNV key. A single-setup job has exactly one, and the top-level `nc` /
@@ -700,9 +708,15 @@ function facingProgram(
   tools: readonly ToolLibraryEntry[],
   catalogue: readonly FeedCatalogueRow[],
   table: readonly FeedsEntry[] | undefined,
-): { nc: string | null; verify: VerifyReport | null; toolKey: string | null; error: string | null } {
+): {
+  nc: string | null;
+  verify: VerifyReport | null;
+  toolKey: string | null;
+  error: string | null;
+  cam: FacingCamSummary | null;
+} {
   const pick = chooseFacingTool(tools, catalogue, job.stock.material, job.facing?.toolKey ?? null);
-  if (pick.entry === null) return { nc: null, verify: null, toolKey: null, error: pick.reason };
+  if (pick.entry === null) return { nc: null, verify: null, toolKey: null, error: pick.reason, cam: null };
   const tool = pick.entry.tool;
   const toolKey = pick.entry.key;
   // The facing pass resolves its OWN feeds: it is a different cutter in the same material, so the
@@ -715,8 +729,27 @@ function facingProgram(
   // at a small cutter's feed rate. The facing file's S/F are the row's own for the facing cutter.
   const feeds = feedsFor(catalogue, job.stock.material, tool, machine, undefined, table);
   if (!feeds.ok) {
-    return { nc: null, verify: null, toolKey, error: `the facing cutter "${tool.name}": ${feeds.reason}` };
+    return {
+      nc: null,
+      verify: null,
+      toolKey,
+      error: `the facing cutter "${tool.name}": ${feeds.reason}`,
+      cam: null,
+    };
   }
+  // What the file was cut with, for the sheet (#432 slice 3). `zPasses` is the SAME answer the IR
+  // uses for its Z levels, so the printed pass count cannot drift from the moves.
+  const cam: FacingCamSummary = {
+    toolName: tool.name,
+    diameterMm: cuttingDiameter(tool) ?? 0,
+    passes: zPasses(depth, feeds.params.stepDown).length,
+    stepDown: feeds.params.stepDown,
+    stepOver: feeds.params.stepOver,
+    rpm: feeds.params.rpm,
+    feed: feeds.params.feed,
+    plungeFeed: feeds.params.plungeFeed,
+    air: feeds.params.air,
+  };
   try {
     const ir = generateFacing(
       { length: job.stock.length, width: job.stock.width },
@@ -726,7 +759,9 @@ function facingProgram(
       depth,
     );
     const posted = postZ1(ir, { ...ctx, toolKey }, machine);
-    if (!posted.ok) return { nc: null, verify: null, toolKey, error: posted.errors.join('; ') };
+    if (!posted.ok) {
+      return { nc: null, verify: null, toolKey, error: posted.errors.join('; '), cam: null };
+    }
     const verify = verifyProgram(posted.text, {
       setup,
       machine,
@@ -741,11 +776,13 @@ function facingProgram(
         verify,
         toolKey,
         error: `the facing program has ${refused.length} verifier error(s)`,
+        // No file, so there is nothing whose numbers the sheet could print.
+        cam: null,
       };
     }
-    return { nc: posted.text, verify, toolKey, error: null };
+    return { nc: posted.text, verify, toolKey, error: null, cam };
   } catch (e) {
-    return { nc: null, verify: null, toolKey, error: e instanceof Error ? e.message : String(e) };
+    return { nc: null, verify: null, toolKey, error: e instanceof Error ? e.message : String(e), cam: null };
   }
 }
 
@@ -858,6 +895,7 @@ export function engraveGenerate(
       facingVerify: null,
       facingToolKey: null,
       facingError: null,
+      facingCam: null,
       predicted: [],
       programs: [],
       errors: [],
@@ -981,6 +1019,7 @@ function generateOneProgram(
       facingVerify: null,
       facingToolKey: null,
       facingError: null,
+      facingCam: null,
       predicted,
       errors,
     };
@@ -1136,7 +1175,7 @@ function generateOneProgram(
     const verify = verifyProgram(nc, { setup, machine: mill, tool, depthLimit: limit, minRapidZ, ...(limitReasonAt ? { limitReasonAt } : {}) });
     if (verify.findings.some((f) => f.severity === 'error')) {
       errors.push({ stage: 'verify', message: `${verify.findings.filter((f) => f.severity === 'error').length} verifier error(s)` });
-      return { ok: false, stage: 'verify', findings, feeds, threads: threadPlans, threadMachining, cam, nc, verify, frameNc: null, frameVerify: null, facingNc: null, facingVerify: null, facingToolKey: null, facingError: null, predicted, errors };
+      return { ok: false, stage: 'verify', findings, feeds, threads: threadPlans, threadMachining, cam, nc, verify, frameNc: null, frameVerify: null, facingNc: null, facingVerify: null, facingToolKey: null, facingError: null, facingCam: null, predicted, errors };
     }
 
     // 6. the FACING file (#432 slice 2): the skim of the blank's top, as its own program, beside
@@ -1147,7 +1186,7 @@ function generateOneProgram(
     const facing =
       withFacing && facingDepth > 0
         ? facingProgram(job, facingDepth, ctx, mill, setup, limit, shop.tools ?? [], catalogue, shop.feeds ?? undefined)
-        : { nc: null, verify: null, toolKey: null, error: null };
+        : { nc: null, verify: null, toolKey: null, error: null, cam: null };
 
     // 7. the frame file (#244): the job's XY extent traced in the air, beside the job. Produced by
     // THIS gated action from the same toolpath, and checked by the SAME verifier — a frame the
@@ -1155,12 +1194,12 @@ function generateOneProgram(
     const frame = frameProgram(ir, ctx, mill, setup, tool, limit);
     if ('error' in frame) {
       errors.push({ stage: 'verify', message: `the frame file could not be produced: ${frame.error}` });
-      return { ok: false, stage: 'verify', findings, feeds, threads: threadPlans, threadMachining, cam, nc, verify, frameNc: null, frameVerify: null, facingNc: facing.nc, facingVerify: facing.verify, facingToolKey: facing.toolKey, facingError: facing.error, predicted, errors };
+      return { ok: false, stage: 'verify', findings, feeds, threads: threadPlans, threadMachining, cam, nc, verify, frameNc: null, frameVerify: null, facingNc: facing.nc, facingVerify: facing.verify, facingToolKey: facing.toolKey, facingError: facing.error, facingCam: facing.cam, predicted, errors };
     }
     const frameErrors = frame.verify.findings.filter((f) => f.severity === 'error');
     if (frameErrors.length > 0) {
       errors.push({ stage: 'verify', message: `the frame file has ${frameErrors.length} verifier error(s)` });
-      return { ok: false, stage: 'verify', findings, feeds, threads: threadPlans, threadMachining, cam, nc, verify, frameNc: frame.nc, frameVerify: frame.verify, facingNc: facing.nc, facingVerify: facing.verify, facingToolKey: facing.toolKey, facingError: facing.error, predicted, errors };
+      return { ok: false, stage: 'verify', findings, feeds, threads: threadPlans, threadMachining, cam, nc, verify, frameNc: frame.nc, frameVerify: frame.verify, facingNc: facing.nc, facingVerify: facing.verify, facingToolKey: facing.toolKey, facingError: facing.error, facingCam: facing.cam, predicted, errors };
     }
 
     return {
@@ -1179,6 +1218,7 @@ function generateOneProgram(
       facingVerify: facing.verify,
       facingToolKey: facing.toolKey,
       facingError: facing.error,
+      facingCam: facing.cam,
       predicted,
       errors,
     };

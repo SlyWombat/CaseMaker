@@ -41,6 +41,7 @@ import type {
   EngraveDrill,
   EngraveDrillArrayItem,
   EngraveDrillItem,
+  EngraveFacing,
   EngraveFrameShape,
   EngraveJob,
   EngraveJobSources,
@@ -690,6 +691,12 @@ export interface EngraveJobState {
    * `'saved'` for an edit it made, a preset carries its own, `noneSacrificial()` clears it.
    */
   setSacrificial: (sacrificial: Sacrificial) => void;
+  /**
+   * The job's facing choice (#432 slice 4), replaced whole: the panel's toggle and depth field are
+   * the only writers, and each one sends the complete `{ enabled, depth }`. `null` deletes the key,
+   * which is the pre-#432 state — no facing section on the sheet and nothing faced.
+   */
+  setFacing: (facing: EngraveFacing | null) => void;
   /**
    * Merge a hand edit into the feeds/speeds override (#205). A key set to `undefined` clears
    * just that field back to the computed value; `null` clears the whole override. The source
@@ -1438,6 +1445,18 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
     },
 
     setSacrificial: (sacrificial) => apply((job) => ({ ...job, sacrificial })),
+
+    // #432 slice 4 — replaced whole, never merged: the panel sends both fields every time, and a
+    // field-by-field merge would let a stale `toolKey` (slice 2's own cutter) survive a toggle it
+    // has no business surviving. `null` puts the job back to the pre-#432 state exactly.
+    setFacing: (facing) =>
+      apply((job) => {
+        if (facing === null) {
+          const { facing: _dropped, ...rest } = job;
+          return rest;
+        }
+        return { ...job, facing };
+      }),
 
     // Any edit to the vise makes it a SAVED value, unless the patch states its own source
     // (e.g. a re-probe writing `measured`). A default is not a measurement (decision 28).

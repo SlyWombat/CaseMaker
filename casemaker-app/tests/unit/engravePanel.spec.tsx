@@ -462,6 +462,7 @@ describe('EngravePanel — the run sheet mount (#207)', () => {
       facingVerify: null,
       facingToolKey: null,
       facingError: null,
+      facingCam: null,
       predicted: [],
       // #419 J3 — the same program, as the run's list of one.
       programs: [
@@ -1680,5 +1681,96 @@ describe('EngravePanel item rows (#411)', () => {
     expect(screen.getByTestId('engrave-undo-announce').textContent).toContain('CASE');
     // The visible strip carries the words for the eye, not a second announcement for the ear.
     expect(screen.getByTestId('engrave-undo-strip').getAttribute('role')).toBeNull();
+  });
+});
+
+// #432 slice 4 — the facing choice is a TWO-STATE control whose default is the stock's finish.
+// Decision Q6 was "rough or unknown → on; finished sheet or printed blank → off; always
+// overridable", and the maintainer's depth decision was that the depth is asked every time facing
+// is on, arriving filled in. These cases pin the panel's half of that: what it shows before anyone
+// chooses, what a press writes, and that a typed number is left alone.
+describe('EngravePanel (#432 slice 4) — the facing choice', () => {
+  const job = () => useEngraveJobStore.getState().job;
+
+  /** A job whose stock names a finish — the one input the facing default reads (#413). */
+  const withFinish = (finish: 'rough' | 'finished' | 'printed' | 'unknown'): void => {
+    act(() => {
+      useEngraveJobStore.setState({
+        job: {
+          ...defaultEngraveJob(),
+          stockEntry: { kind: 'made', shelfId: null, file: null, form: 'plate', finish, conductive: false },
+        },
+      });
+    });
+  };
+
+  it('offers the finish’s default as advice and does not face a job nobody has chosen for', () => {
+    withFinish('rough');
+    render(<EngravePanel />);
+    // The default is ON for rough stock, and the panel says so — but the job itself carries no
+    // `facing` key, so nothing is faced until someone presses.
+    expect(screen.getByTestId('engrave-facing-why').textContent).toContain('rough stock is faced first');
+    expect(screen.getByTestId('engrave-facing-why').textContent).toContain('Nothing has been chosen');
+    expect(screen.getByTestId('engrave-facing-state').textContent).toBe('not chosen');
+    expect(screen.getByTestId('engrave-facing-on').getAttribute('aria-pressed')).toBe('false');
+    expect(screen.queryByTestId('engrave-facing-depth')).toBeNull();
+    expect(job().facing).toBeUndefined();
+  });
+
+  it('fills the depth in when facing is turned on, and says where the number came from', () => {
+    withFinish('rough');
+    render(<EngravePanel />);
+    fireEvent.click(screen.getByTestId('engrave-facing-on'));
+    expect(job().facing).toEqual({ enabled: true, depth: 0.5 });
+    expect((screen.getByTestId('engrave-facing-depth') as HTMLInputElement).value).toBe('0.5');
+    expect(screen.getByTestId('engrave-facing-depth-why').textContent).toContain(
+      "Rough stock, so the shop's 0.5 mm skim is filled in",
+    );
+  });
+
+  it('turns it off for a finished face and keeps the sentence that says why', () => {
+    withFinish('finished');
+    render(<EngravePanel />);
+    expect(screen.getByTestId('engrave-facing-why').textContent).toContain('a finished face is cut as it is');
+    fireEvent.click(screen.getByTestId('engrave-facing-off'));
+    expect(job().facing).toEqual({ enabled: false, depth: 0.2 });
+    expect(screen.getByTestId('engrave-facing-state').textContent).toBe('facing off');
+    expect(screen.queryByTestId('engrave-facing-depth')).toBeNull();
+  });
+
+  it('takes a typed depth as the operator’s own number and says it is not the filled-in one', () => {
+    withFinish('rough');
+    render(<EngravePanel />);
+    fireEvent.click(screen.getByTestId('engrave-facing-on'));
+    fireEvent.change(screen.getByTestId('engrave-facing-depth'), { target: { value: '0.35' } });
+    expect(job().facing?.depth).toBe(0.35);
+    expect(screen.getByTestId('engrave-facing-depth-why').textContent).toContain('Your number');
+    // Off and back on again keeps what was typed: the toggle is not the depth field's reset.
+    fireEvent.click(screen.getByTestId('engrave-facing-off'));
+    expect(job().facing).toEqual({ enabled: false, depth: 0.35 });
+    fireEvent.click(screen.getByTestId('engrave-facing-on'));
+    expect(job().facing).toEqual({ enabled: true, depth: 0.35 });
+  });
+
+  it('reads a badge blank as printed even when no shelf entry names a finish', () => {
+    act(() => {
+      const base = defaultEngraveJob();
+      useEngraveJobStore.setState({
+        job: {
+          ...base,
+          stock: { ...base.stock, print: { split: 3, layerHeight: 0.2, firstLayerHeight: 0.2 } },
+        },
+      });
+    });
+    render(<EngravePanel />);
+    expect(screen.getByTestId('engrave-facing-why').textContent).toContain('The stock is a printed blank');
+    expect(screen.getByTestId('engrave-facing-why').textContent).toContain('cut as printed');
+  });
+
+  it('says the finish is not recorded when nothing says it, and still offers the default', () => {
+    render(<EngravePanel />);
+    expect(screen.getByTestId('engrave-facing-why').textContent).toContain('finish is not recorded');
+    fireEvent.click(screen.getByTestId('engrave-facing-on'));
+    expect(job().facing).toEqual({ enabled: true, depth: 0.2 });
   });
 });

@@ -30,6 +30,12 @@
  * WRITING THE ORIGIN ({@link applyCorrection}) needs `confirmed: true` (Q12) AND a usable outcome — every
  * edge found, every axis measured, every touch where it was sent — and runs in #387's order: home,
  * the CUTTER in, its `M491`, `G10 L2 P1 X Y Z` with Z0 = surface + (cutter PRB − probe PRB), home.
+ *
+ * THE RE-TOUCH AFTER FACING (#432 slice 4, decision 4: probe → face → re-touch → engrave) is
+ * {@link retouchSurface}: the same surface seek, at the plan's own point, against the surface the
+ * skim was POSTED to leave. It returns an outcome whose `surfaceZ` is that MEASURED reading, and
+ * `applyCorrection` writes it — the depth is never subtracted from the first reading to stand in
+ * for a measurement, because a skim does not remove exactly its nominal depth.
  */
 
 import { controllerState } from '@/platform/machineUpload';
@@ -212,15 +218,48 @@ async function scanEdge(io: Session, plan: RegistrationPlan, scan: EdgeScan, par
   return { scan, touches };
 }
 
-/** A surface reading inside the plan's band, or a stop that says where it landed. */
-function inBand(prb: Prb | null, plan: RegistrationPlan, which: string): Prb {
+/** The machine-Z band a surface reading must land in, and the two sentences that explain it. */
+interface SurfaceBand {
+  min: number;
+  max: number;
+  /** How low the probe may be from here, in the stop message's terms. */
+  at: string;
+  /** What the reading should have been, for a seek that finds nothing. */
+  expect: string;
+}
+
+/** A surface reading inside the band, or a stop that says where it landed. */
+function inBand(prb: Prb | null, band: SurfaceBand, which: string): Prb {
   if (prb === null || !prb.touched) {
-    throw new Stop(`the ${which} surface touch found nothing down to machine Z ${plan.seek.band.min} — the stock is not where the job expects it`);
+    throw new Stop(`the ${which} surface touch found nothing down to machine Z ${band.min} — ${band.expect}`);
   }
-  if (prb.z < plan.seek.band.min || prb.z > plan.seek.band.max) {
-    throw new Stop(`the ${which} surface touch read machine Z ${prb.z}, outside the expected ${plan.seek.band.min} to ${plan.seek.band.max}`);
+  if (prb.z < band.min || prb.z > band.max) {
+    throw new Stop(`the ${which} surface touch read machine Z ${prb.z}, outside the expected ${band.min} to ${band.max}`);
   }
   return prb;
+}
+
+/**
+ * The surface seek: from the plan's travel height down to the band's floor and no further — a fast
+ * `G38.2`, `G0 Z1`, a slow `G38.2`, BOTH readings inside the band — then `G90` at the reading. The
+ * registration and the post-facing re-touch share it, so the two seeks cannot drift apart.
+ */
+async function seekSurface(io: Session, plan: RegistrationPlan, band: SurfaceBand): Promise<Prb> {
+  const s = plan.settings;
+  const travel = Math.round((plan.seek.fromMachineZ - band.min) * 1000) / 1000;
+  await io.send(`G53 G0 Z${f(plan.seek.fromMachineZ)}`);
+  await io.send('G90');
+  await io.send(moveXY(plan, plan.surfacePoint.x, plan.surfacePoint.y));
+  await io.idle();
+  io.at(band.at);
+  await io.send('G91');
+  inBand(lastPrb(await io.send(`G38.2 Z-${f(travel)} F${f(s.surfaceFastFeed)}`)), band, 'fast');
+  await io.send(`G0 Z${f(SURFACE_LIFT_MM)}`);
+  await io.idle();
+  io.at(`as low as ${f(s.surfaceSlowSeekMm - SURFACE_LIFT_MM)} mm below the fast touch's reading (the slow surface touch)`);
+  const slow = inBand(lastPrb(await io.send(`G38.2 Z-${f(s.surfaceSlowSeekMm)} F${f(s.surfaceSlowFeed)}`)), band, 'slow');
+  await io.send('G90');
+  return slow;
 }
 
 export async function runRegistration(plan: RegistrationPlan, deps: ExecDeps): Promise<RunResult> {
@@ -244,22 +283,13 @@ export async function runRegistration(plan: RegistrationPlan, deps: ExecDeps): P
       throw new Stop('stopped: the clamps were not confirmed where the plan puts them');
     }
 
-    await io.send(`G53 G0 Z${f(plan.seek.fromMachineZ)}`);
-    await io.send('G90');
-    await io.send(moveXY(plan, plan.surfacePoint.x, plan.surfacePoint.y));
-    await io.idle();
-    io.at(`as low as machine Z ${plan.seek.band.min}, ${s.surfaceToleranceMm} mm below the expected surface (the surface seek)`);
-    await io.send('G91');
-    inBand(lastPrb(await io.send(`G38.2 Z-${f(plan.seek.travelMm)} F${f(s.surfaceFastFeed)}`)), plan, 'fast');
-    await io.send(`G0 Z${f(SURFACE_LIFT_MM)}`);
-    await io.idle();
-    io.at(
-      `as low as ${f(s.surfaceSlowSeekMm - SURFACE_LIFT_MM)} mm below the fast touch's reading (the slow surface touch)`,
-    );
     // #449 — the slow travel is the shop's `registration.surfaceSlowSeekMm` (1.2 to 2 mm, more than the
     // lift); a plan whose settings break that never got this far (`settingsProblem`).
-    const slow = inBand(lastPrb(await io.send(`G38.2 Z-${f(s.surfaceSlowSeekMm)} F${f(s.surfaceSlowFeed)}`)), plan, 'slow');
-    await io.send('G90');
+    const slow = await seekSurface(io, plan, {
+      ...plan.seek.band,
+      at: `as low as machine Z ${plan.seek.band.min}, ${s.surfaceToleranceMm} mm below the expected surface (the surface seek)`,
+      expect: 'the stock is not where the job expects it',
+    });
     const parkZ = slow.z + s.parkAboveSurfaceMm;
     await io.send(`G53 G0 Z${f(parkZ)}`);
     io.at(`at the park height, ${s.parkAboveSurfaceMm} mm above the surface`);
@@ -278,6 +308,82 @@ export async function runRegistration(plan: RegistrationPlan, deps: ExecDeps): P
   }
 }
 
+export type RetouchResult =
+  | { ok: true; surface: Prb; outcome: RegistrationOutcome; transcript: Transcript[] }
+  | { ok: false; reason: string; transcript: Transcript[] };
+
+/**
+ * The re-touch after a facing pass (#432 slice 4, decision 4: probe → face → re-touch → engrave).
+ *
+ * The facing program is posted against the PROBED top and the engraving program against the top the
+ * skim leaves. That top is MEASURED, not computed: a skim never removes exactly its nominal depth
+ * (spindle growth, deflection, a blank clamped a little tilted), so the first reading minus
+ * `removedMm` is only the EXPECTATION the new touch is checked against — the band. The measured
+ * surface is what the origin is written from.
+ *
+ * Runs the same surface seek as the registration, at the plan's own point, with the wired probe;
+ * the XY origin is not re-derived (this measures Z alone; the first run's corrected XY is already in
+ * G54). The returned outcome is the first one with `surfaceZ` replaced, ready for
+ * {@link applyCorrection} with the cutter's own `M491`.
+ */
+export async function retouchSurface(
+  plan: RegistrationPlan,
+  outcome: RegistrationOutcome,
+  opts: { removedMm: number; toleranceMm: number },
+  deps: ExecDeps,
+): Promise<RetouchResult> {
+  const s = plan.settings;
+  const bad = settingsProblem(s);
+  if (bad !== null) return { ok: false, reason: `nothing was sent: ${bad}`, transcript: [] };
+  if (!Number.isFinite(opts.removedMm) || opts.removedMm <= 0) {
+    return { ok: false, reason: 'a re-touch needs the depth the facing pass removed, above 0', transcript: [] };
+  }
+  if (!Number.isFinite(opts.toleranceMm) || opts.toleranceMm <= 0) {
+    return { ok: false, reason: 'a re-touch needs a tolerance above 0', transcript: [] };
+  }
+  const r3 = (n: number) => Math.round(n * 1000) / 1000;
+  const expected = r3(outcome.surfaceZ - opts.removedMm);
+  const min = r3(expected - opts.toleranceMm);
+  const max = r3(expected + opts.toleranceMm);
+  if (!(min < plan.seek.fromMachineZ)) {
+    return {
+      ok: false,
+      reason:
+        `the re-touch has nowhere to travel: the faced top is expected at machine Z ${expected}, at or above the ` +
+        `travel height ${plan.seek.fromMachineZ}. Check the depth and that the facing pass ran`,
+      transcript: [],
+    };
+  }
+  const io = session(deps, plan.seek.fromMachineZ, plan.settings.idlePollLimit);
+  try {
+    const status = await io.send('?');
+    if (controllerState(status) !== 'Idle') throw new Stop(`the machine reads ${controllerState(status) ?? 'no state'}, not Idle`);
+    await io.send('$H');
+    await io.send('G54');
+    await io.send('G92.1');
+    if (
+      !(await deps.operator({
+        kind: 'fit-probe',
+        text: 'Fit the wired probe again: the faced top is measured before the engraving file is posted from it.',
+      }))
+    ) {
+      throw new Stop('stopped: the probe was not fitted');
+    }
+    const surface = await seekSurface(io, plan, {
+      min,
+      max,
+      at: `as low as machine Z ${min}, ${opts.toleranceMm} mm below the faced top expected at ${expected} (the re-touch)`,
+      expect: 'the faced top is not where the skim should have put it — check that the facing program ran before the re-touch',
+    });
+    await io.send(`G53 G0 Z${f(plan.seek.fromMachineZ)}`);
+    await io.send('$H');
+    return { ok: true, surface, outcome: { ...outcome, surfaceZ: surface.z }, transcript: io.transcript };
+  } catch (e) {
+    if (e instanceof Stop) return { ok: false, reason: await io.stopped(e.message), transcript: io.transcript };
+    throw e;
+  }
+}
+
 export type ApplyResult =
   | { ok: true; line: string; cutterRefZ: number; transcript: Transcript[] }
   | { ok: false; reason: string; transcript: Transcript[] };
@@ -286,6 +392,10 @@ export type ApplyResult =
  * Write the corrected origin — ONLY from a usable measurement, ONLY after the operator confirmed it
  * (Q12), and in #387's order: home before the bit change, the cutter in, its `M491`, `G10 L2` with Z0
  * recomputed for it, home.
+ *
+ * After a facing pass this is called with the RE-TOUCH's outcome ({@link retouchSurface}), whose
+ * `surfaceZ` is measured on the faced top. Nothing here subtracts a depth: Z0 is the surface the
+ * outcome carries, in the cutter's frame.
  */
 export async function applyCorrection(
   outcome: RegistrationOutcome,

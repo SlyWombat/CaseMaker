@@ -49,6 +49,14 @@ import {
 } from '@/engine/import/outlineImport';
 import { newEngraveShapeId } from '@/engine/cnc/engrave/defaults';
 import { badgeBlankFor } from '@/engine/cnc/engrave/fromBadge';
+import {
+  FACING_DEPTH_MAX_MM,
+  facingDefault,
+  facingDepthDefault,
+  facingShopFrom,
+  finishOf,
+} from '@/engine/cnc/stockStart';
+import { useShopDefaultsStore } from '@/store/shopDefaultsStore';
 import { blankStockFor } from '@/engine/cnc/engrave/fromBlank';
 import { readDesignFile } from '@/engine/import/designImport';
 import {
@@ -80,6 +88,7 @@ import type {
   EngraveLabel,
   EngraveShape,
   FieldSource,
+  JobStockFinish,
   Sacrificial,
   SacrificialSide,
   SacrificialUnder,
@@ -116,6 +125,19 @@ const TAG: CSSProperties = {
   fontWeight: 400,
 };
 const SEVERITY_COLOR: Record<JobFinding['severity'], string> = { error: '#f0b4ad', warning: '#e0c07a' };
+
+/** A leading letter, uppercased — the engine's reasons are clauses, the panel prints sentences. */
+function sentenceCase(text: string): string {
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
+/** A finish as the sentence “The stock is …” finishes (#413's four values). */
+const FINISH_WORD: Record<JobStockFinish, string> = {
+  rough: 'rough',
+  finished: 'finished',
+  printed: 'a printed blank',
+  unknown: 'of unknown finish',
+};
 
 /**
  * The feeds diagnostics that mean THE MACHINE MOVED A NUMBER (#317): the clamp half of
@@ -491,6 +513,7 @@ export function EngravePanel(): JSX.Element {
   const setSacrificial = useEngraveJobStore((s) => s.setSacrificial);
   const setCutOverride = useEngraveJobStore((s) => s.setCutOverride);
   const setCutOverrideSource = useEngraveJobStore((s) => s.setCutOverrideSource);
+  const setFacing = useEngraveJobStore((s) => s.setFacing);
 
   const preview = useEngravePreviewStore((s) => s.preview);
   const previewStatus = useEngravePreviewStore((s) => s.status);
@@ -587,6 +610,26 @@ export function EngravePanel(): JSX.Element {
   // `effectiveMargins` and `recommendMargins` use, so the title below and both of their numbers
   // agree.
   const houseBoundary = houseBoundaryMargin(job, houseMargins);
+
+  // #432 slice 4 — the facing choice. The finish is the ONE input (decision Q6): `finishOf` reads
+  // the named entry's answer, or a printed blank's implied one, and null means nothing says — the
+  // panel then prints that rather than guessing from the material. The depth's filled-in number and
+  // the sentence under it come from the same `facingDepthDefault` call the wizard's seed makes.
+  const shopDefaults = useShopDefaultsStore((s) => s.defaults);
+  const finish = finishOf(job);
+  const facingDef = facingDefault(finish ?? 'unknown');
+  const facing = job.facing ?? null;
+  const facingOn = facing?.enabled ?? false;
+  const facingDepthFill = facingDepthDefault(finish ?? 'unknown', { shop: facingShopFrom(shopDefaults) });
+  const facingDepthReason =
+    facing !== null && Math.abs(facing.depth - facingDepthFill.depthMm) < 1e-9
+      ? sentenceCase(facingDepthFill.reason) + '.'
+      : `Your number, not the ${mmText(facingDepthFill.depthMm)} filled in for this finish.`;
+  /** Turn facing on or off, FILLING IN the depth's default when the job had not chosen one. */
+  function chooseFacing(on: boolean): void {
+    const depth = facing?.depth ?? facingDepthFill.depthMm;
+    setFacing({ enabled: on, depth, ...(facing?.toolKey ? { toolKey: facing.toolKey } : {}) });
+  }
   // "Recommends more" is the only case worth a button: a recommendation that ties or loses to what
   // is already in force has nothing to offer, and two numbers that agree do not need a control.
   //
@@ -873,6 +916,9 @@ export function EngravePanel(): JSX.Element {
       generated.frameNc,
       job.name,
       serializeRunRecord(buildRunRecord(job, generated)),
+      // #432 slice 3 — the facing file goes with them when the worker produced one: the run sheet's
+      // facing section sends the operator to `<job>-face.nc`, so it has to be written here.
+      generated.facingNc,
     );
   }
 
@@ -1224,35 +1270,42 @@ export function EngravePanel(): JSX.Element {
       {/* #410 item 4 — the design file's way in, beside the guided setup because it is a whole-job
           entry and not a stock field: it brings the blank, the void AND the items. Its own button
           rather than a step of the wizard, because the file answers questions the wizard would
-          otherwise ask and then have to be corrected. */}
-      <button
-        type="button"
-        data-testid="engrave-design-import"
-        disabled={designReading}
-        title="Read a PrusaSlicer project (.3mf): its blank, its magnet pocket and every volume it cuts become this job. The cutter, the vise and the margins are left as they are."
-        style={{ width: '100%', padding: 6 }}
-        onClick={() => designInputRef.current?.click()}
-      >
-        {designReading ? 'Reading the design…' : 'Import a design (.3mf)…'}
-      </button>
-      {/* A plain file input, hidden, rather than the File System Access picker `openTextFile` uses:
-          the picker is Chrome-only, and this route needs the BYTES, not a decoded string. */}
-      <input
-        ref={designInputRef}
-        type="file"
-        accept=".3mf,model/3mf"
-        style={{ display: 'none' }}
-        data-testid="engrave-design-input"
-        onChange={(e) => {
-          const file = e.target.files?.[0];
-          e.target.value = '';
-          if (file) void readDesign(file);
-        }}
-      />
-      {designError && (
-        <p style={{ ...MUTED, color: SEVERITY_COLOR.error }} data-testid="engrave-design-error">
-          {designError}
-        </p>
+          otherwise ask and then have to be corrected.
+          #437 — behind `featureSim` like every other route that reads a project file: the reader
+          refuses in a build without the simulator (`designImport`), so the button would only take
+          the operator to that refusal. */}
+      {featureSim && (
+        <>
+          <button
+            type="button"
+            data-testid="engrave-design-import"
+            disabled={designReading}
+            title="Read a PrusaSlicer project (.3mf): its blank, its magnet pocket and every volume it cuts become this job. The cutter, the vise and the margins are left as they are."
+            style={{ width: '100%', padding: 6 }}
+            onClick={() => designInputRef.current?.click()}
+          >
+            {designReading ? 'Reading the design…' : 'Import a design (.3mf)…'}
+          </button>
+          {/* A plain file input, hidden, rather than the File System Access picker `openTextFile` uses:
+              the picker is Chrome-only, and this route needs the BYTES, not a decoded string. */}
+          <input
+            ref={designInputRef}
+            type="file"
+            accept=".3mf,model/3mf"
+            style={{ display: 'none' }}
+            data-testid="engrave-design-input"
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              e.target.value = '';
+              if (file) void readDesign(file);
+            }}
+          />
+          {designError && (
+            <p style={{ ...MUTED, color: SEVERITY_COLOR.error }} data-testid="engrave-design-error">
+              {designError}
+            </p>
+          )}
+        </>
       )}
       {designNotes && (
         // Closed by default, unlike the two blank routes' notes: this patch describes a whole
@@ -1353,6 +1406,84 @@ export function EngravePanel(): JSX.Element {
         </label>
       </div>
       <p style={MUTED}>X runs between the vise jaws. The fixed jaw is on the left.</p>
+
+      {/* 1a — the skim of the top (#432 slice 4, decision Q6). A two-state choice, not a slider:
+          the stock's finish carries the default and the sentence says what that default is, so the
+          honest number does the work and the control only reports it. The depth is ASKED once
+          facing is on, arriving filled in (`facingDepthDefault`) — the maintainer's decision was
+          that the skim is never taken without someone seeing how far.
+
+          An absent `facing` key is the pre-#432 job: nothing has chosen, and the job does not
+          face. The line under the toggle says what the finish says, so the default is advice the
+          operator can take with one press rather than a state they were put in silently. */}
+      <h4 style={SUBSUB}>Facing</h4>
+      <p style={MUTED} data-testid="engrave-facing-why">
+        {finish === null
+          ? 'The stock’s finish is not recorded, so the skim is the finish-unknown default'
+          : `The stock is ${FINISH_WORD[finish]}`}
+        {' — '}
+        {facingDef.reason}.
+        {facing === null
+          ? ' Nothing has been chosen, so the top is not skimmed.'
+          : facingOn && facing.depth === 0
+            ? ' Facing is on with a zero depth, so nothing is taken off.'
+            : ''}
+      </p>
+      <div role="group" aria-label="Facing" style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+        <button
+          type="button"
+          data-testid="engrave-facing-on"
+          aria-pressed={facingOn}
+          title="Skim the whole top before engraving, then re-touch Z0 on the new surface."
+          onClick={() => chooseFacing(true)}
+        >
+          Face the top
+        </button>
+        <button
+          type="button"
+          data-testid="engrave-facing-off"
+          aria-pressed={!facingOn}
+          title="Engrave the top as it arrives."
+          onClick={() => chooseFacing(false)}
+        >
+          Leave it
+        </button>
+        <span style={TAG} data-testid="engrave-facing-state">
+          {facing === null ? 'not chosen' : facingOn ? 'facing on' : 'facing off'}
+        </span>
+      </div>
+      {facingOn && (
+        <>
+          <label style={FIELD_LABEL}>
+            <span>depth</span>
+            <input
+              type="number"
+              data-testid="engrave-facing-depth"
+              aria-label="Facing depth, mm off the whole top"
+              title="The TOTAL material taken off the top face. The passes are the feeds row's step-down."
+              style={FIELD}
+              min={0}
+              max={FACING_DEPTH_MAX_MM}
+              step={0.05}
+              value={facing?.depth ?? 0}
+              onChange={(e) => {
+                const v = Number(e.target.value);
+                if (!Number.isFinite(v) || v < 0) return;
+                setFacing({
+                  enabled: true,
+                  depth: Math.min(v, FACING_DEPTH_MAX_MM),
+                  ...(facing?.toolKey ? { toolKey: facing.toolKey } : {}),
+                });
+              }}
+            />
+            <span style={{ ...MUTED, margin: 0 }}>mm off the whole top</span>
+          </label>
+          <p style={MUTED} data-testid="engrave-facing-depth-why">
+            {facingDepthReason} The skim is its own program (.nc) with its own flat cutter; the
+            engraving file is posted from the surface it leaves.
+          </p>
+        </>
+      )}
 
       {/* 1b — the voids the blank already has (#271). These are what `jobDepthLimit` reads, so
           the depth limit, the `item-over-void` warning and the run sheet's §1 list all speak of

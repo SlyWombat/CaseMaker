@@ -31,7 +31,7 @@ import {
 import { defaultInsert } from '@/engine/compiler/insert';
 import type { CaseParameters, Project, RackParams } from '@/types';
 import type { FitVariant } from '@/types/snap';
-import { runSheetFileName, runSheetFrameFileName } from '@/engine/cnc/engrave/runSheet';
+import { runSheetFaceFileName, runSheetFileName, runSheetFrameFileName } from '@/engine/cnc/engrave/runSheet';
 import { useJobStore } from '@/store/jobStore';
 import { useProjectStore, createDefaultProject } from '@/store/projectStore';
 import { useSettingsStore } from '@/store/settingsStore';
@@ -180,6 +180,35 @@ describe('engrave job + frame save (#244)', () => {
   it('writes the job alone when there is no frame (a run that never reached the post)', async () => {
     await saveEngraveProgram(';@MKR|BEGIN\nM02\n', null, 'Untitled engrave job');
     expect(downloads.map((d) => d.name)).toEqual([runSheetFileName('Untitled engrave job')]);
+  });
+
+  // #432 slice 3: the skim is its own program, so it is its own file — an operator loads the
+  // facing file on its own bit, re-touches Z0, and only then loads the engraving program.
+  it('writes the facing program as a third file, named beside the job (#432)', async () => {
+    await saveEngraveProgram(
+      ';@MKR|BEGIN\nM02\n',
+      ';@MKR|BEGIN\nG0 Z20\nM02\n',
+      'Untitled engrave job',
+      null,
+      ';@MKR|BEGIN\nG0 Z5\nM02\n',
+    );
+    expect(downloads.map((d) => d.name)).toEqual([
+      runSheetFileName('Untitled engrave job'),
+      runSheetFrameFileName('Untitled engrave job'),
+      runSheetFaceFileName('Untitled engrave job'),
+    ]);
+    // `-face` and not `-frame`: the two suffixes must not collide for two different programs.
+    expect(runSheetFaceFileName('Untitled engrave job')).not.toBe(
+      runSheetFrameFileName('Untitled engrave job'),
+    );
+  });
+
+  it('writes no facing file for a job that does not face — the saved file set is unchanged (#432)', async () => {
+    await saveEngraveProgram(';@MKR|BEGIN\nM02\n', ';@MKR|BEGIN\nG0 Z20\nM02\n', 'Untitled engrave job');
+    expect(downloads.map((d) => d.name)).toEqual([
+      runSheetFileName('Untitled engrave job'),
+      runSheetFrameFileName('Untitled engrave job'),
+    ]);
   });
 });
 

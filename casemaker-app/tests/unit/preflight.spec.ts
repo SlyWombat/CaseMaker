@@ -68,6 +68,7 @@ function generatedWith(over: Partial<EngraveGenerated>): EngraveGenerated {
     facingVerify: null,
     facingToolKey: null,
     facingError: null,
+    facingCam: null,
     predicted: [],
     programs: [],
     errors: [],

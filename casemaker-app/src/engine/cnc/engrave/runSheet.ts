@@ -55,12 +55,14 @@ import { MATERIAL_LABELS } from '@/engine/cnc/materials';
 import { VISE_BODY_DEPTH, viseEnvelope } from '@/engine/cnc/fixture';
 import { hasSacrificial, stripHeight, viseJawShift } from '@/engine/cnc/sacrificial';
 import { jobMachine } from '@/engine/cnc/calibration';
+import { facingDefault, finishOf } from '@/engine/cnc/stockStart';
+import type { FacingCamSummary } from '@/engine/cnc/cam/facing';
 import type { InkMeasure } from '@/engine/cnc/engrave/inkBox';
 import type { VerifyReport } from '@/engine/cnc/verify';
 // #243 — the blind-spot sentence is the Simulate panel's OWN builder, imported rather than
 // re-worded, so the sheet and the panel cannot disagree about what the sweep did not see.
 import { coverageDisclaimer, type SimCoverageInput, type SimRunOutcome } from '@/components/panels/simCoverage';
-import type { EngraveJob, EngraveMargins, ViseParams } from '@/types/engraveJob';
+import type { EngraveJob, EngraveMargins, JobStockFinish, ViseParams } from '@/types/engraveJob';
 import type { Mm } from '@/types/units';
 
 /**
@@ -139,6 +141,21 @@ export interface RunSheetGenerated {
    * resolved, never a second resolution of its own.
    */
   threadMachining?: ThreadSettingsResult | null;
+  /**
+   * #432 slice 3 — the FACING program: the skim of the blank's top, its own `.nc` beside the job
+   * (`runSheetFaceFileName`), or null when none was produced. Optional because a generated object
+   * stored by an older build has no such field, and a sheet for it must read exactly as it did
+   * before facing existed. `EngraveGenerated` satisfies this as it stands.
+   */
+  facingNc?: string | null;
+  /** #432 — why the facing file is absent, in the worker's own words; null with no reason. */
+  facingError?: string | null;
+  /**
+   * #432 — what the facing file was cut with: its OWN cutter, the pass count and the feeds row's
+   * numbers. Null when no file was produced. The sheet neither re-resolves nor re-counts: these are
+   * the numbers in the file.
+   */
+  facingCam?: FacingCamSummary | null;
 }
 
 /**
@@ -378,6 +395,15 @@ export const FRAME_Z: Mm = 20;
  */
 export function runSheetFrameFileName(jobName: string): string {
   return `${runSheetFileName(jobName).slice(0, -'.nc'.length)}-frame.nc`;
+}
+
+/**
+ * The facing file's name (#432 slice 3): `-face` before the extension, beside the job and its
+ * frame. One name, used by the save and by the sheet's own steps, so the operator cannot be sent
+ * to a file the save never wrote.
+ */
+export function runSheetFaceFileName(jobName: string): string {
+  return `${runSheetFileName(jobName).slice(0, -'.nc'.length)}-face.nc`;
 }
 
 /**
@@ -897,6 +923,106 @@ function sentence(text: string): string {
  * the part reaches a cut depth only if Z is probed on the wrong face, so the step says which face
  * it means whenever there is a board to confuse it with.
  */
+/** How a stock's finish is put on paper (#413's four values). */
+const FINISH_WORDS: Record<JobStockFinish, string> = {
+  rough: 'rough',
+  finished: 'finished',
+  printed: 'printed',
+  unknown: 'of unknown finish',
+};
+
+/**
+ * §7's facing phase (#432 slice 3): the skim of the blank's top, before anything is engraved.
+ *
+ * Present ONLY for a job that carries `facing` at all. A document written before #432 plans exactly
+ * as it did, so its sheet must not gain a section — not even one saying facing is off.
+ *
+ * The phase exists because the skim changes what every later step is measured from: the origin is
+ * set on the blank as clamped (the pre-facing top), the skim removes `facing.depth`, and the
+ * engraving file is posted from the surface that leaves. So the section closes with the re-touch,
+ * and the Cut section after it is the first to assume the new Z0.
+ *
+ * The numbers come from the WORKER (`facingCam`), never re-derived here — the pass count is
+ * `zPasses`' answer for the depth in the file. A null file is said plainly rather than left as a
+ * missing step: the engraving can still run, and the operator has to know the top was not skimmed.
+ */
+function facingSteps(
+  job: EngraveJob,
+  generated: RunSheetGenerated,
+  faceFile: string,
+): RunSheetStep[] {
+  const facing = job.facing!;
+  // #432 slice 4 — the SAME reader the panel uses: a printed blank's implied finish counts, so a
+  // job taken from a badge says "printed stock" here and not "finish is not recorded".
+  const finish = finishOf(job);
+  const def = facingDefault(finish ?? 'unknown');
+  const stockWords = finish === null ? 'stock whose finish is not recorded' : `${FINISH_WORDS[finish]} stock`;
+  const steps: RunSheetStep[] = [];
+
+  if (!facing.enabled || !(facing.depth > 0)) {
+    steps.push({
+      text:
+        `No facing pass — this job turns it off. By default the ${stockWords} is ` +
+        `${def.on ? 'faced first' : 'cut as it is'}: ${def.reason}.`,
+      value: 'facing off',
+    });
+    return steps;
+  }
+
+  steps.push({
+    text:
+      `Face the top first. The ${stockWords} means ${def.reason}. The skim removes ` +
+      `${fmtNum(facing.depth)} mm over the whole top, and every later program is posted from the ` +
+      'surface it leaves.',
+    value: `${fmtNum(facing.depth)} mm off the whole top`,
+  });
+
+  const cam = generated.facingCam ?? null;
+  if (generated.facingNc == null) {
+    steps.push({
+      text:
+        'The facing program was not produced' +
+        (generated.facingError == null ? '' : `: ${generated.facingError}`) +
+        '. The engraving program can still be run, but the top will not be skimmed — clear the ' +
+        'reason and generate again.',
+      bold: true,
+    });
+    return steps;
+  }
+
+  if (cam !== null) {
+    steps.push({
+      text:
+        `Fit the FACING cutter, not the engraving bit: ${cam.toolName}, ⌀ ` +
+        `${fmtNum(cam.diameterMm)} mm flat. Load ${faceFile} for this pass alone.`,
+      value: `⌀ ${fmtNum(cam.diameterMm)} mm`,
+    });
+    steps.push({
+      text: `Spindle, feed and step-over for the skim. Vacuum ${cam.air ? 'on' : 'off'}.`,
+      value:
+        `${cam.rpm} RPM · ${fmtNum(cam.feed)} mm/min feed · ${fmtNum(cam.plungeFeed)} mm/min plunge · ` +
+        `${cam.passes} × ${fmtNum(cam.stepDown)} mm passes · ${fmtNum(cam.stepOver)} mm step-over`,
+    });
+  }
+  steps.push({
+    text:
+      `Run ${faceFile} after the dry run above, air or on the blank as this job was approved. It ` +
+      'is a skim, so the first pass is the real cut — hold the stop ready and watch the first two lines.',
+  });
+  steps.push({
+    text:
+      `Re-touch Z0 on the faced surface before loading ${runSheetFileName(job.name)}. The skim took ` +
+      `${fmtNum(facing.depth)} mm off, and the engraving file is posted from the new top, so a Z0 ` +
+      'taken on the blank as it arrived now sits that far off. Fit the wired probe again and touch ' +
+      'the faced top at the registration point: the recorded value is where that touch MEASURES the ' +
+      `top to be, and ${fmtNum(facing.depth)} mm below the first reading is only what was expected. ` +
+      'Fit the cutter before the G10 L2 write: that command zeroes the tool-length offset to the ' +
+      'current tool (#387).',
+    record: 'faced surface Z (mm)',
+  });
+  return steps;
+}
+
 function registrationSteps(job: EngraveJob, onBoard: boolean, unverified: string, tipDiameterMm?: Mm): RunSheetStep[] {
   const { length, width } = job.stock;
   // #449 — the tip is the shop's measured `registration.tipDiameterMm` when the caller passed the scan
@@ -1874,7 +2000,11 @@ export function buildRunSheet(
             value: `${fmtNum(FRAME_Z)} mm above the work`,
           },
           {
-            text: `If the trace is not where the job should land, stop and change the job. Otherwise load ${header.fileName} and cut.`,
+            text:
+              `If the trace is not where the job should land, stop and change the job. ` +
+              (job.facing !== undefined
+                ? `Otherwise face the top and re-touch Z0 first (the next section), then load ${header.fileName} and cut.`
+                : `Otherwise load ${header.fileName} and cut.`),
           },
         ];
 
@@ -2068,6 +2198,17 @@ export function buildRunSheet(
           options.unreachable ?? untouchedByAll(options.reachability),
         );
 
+  const facingSection =
+    job.facing === undefined
+      ? []
+      : [
+          {
+            id: 'facing',
+            title: 'Face the stock top',
+            steps: facingSteps(job, generated, runSheetFaceFileName(job.name)),
+          },
+        ];
+
   const sections: { id: string; title: string; steps: RunSheetStep[] }[] = [
     { id: 'need', title: 'What you need', steps: needSteps },
     ...(reachSteps ? [{ id: 'reach', title: 'What each cutter reaches', steps: reachSteps }] : []),
@@ -2079,6 +2220,10 @@ export function buildRunSheet(
     { id: 'cutter', title: 'Fit the cutter and measure its length', steps: cutterSteps },
     { id: 'origin', title: 'Set the work origin', steps: originSteps },
     { id: 'dry-run', title: 'Dry run', steps: dryRunSteps },
+    // #432 slice 3 — the skim sits between the air run and the cut: the trace is checked against
+    // the origin on the blank as clamped, the skim removes the finish error, the re-touch that ends
+    // these steps moves Z0 onto the faced surface, and the Cut section is the first to assume it.
+    ...facingSection,
     { id: 'cut', title: 'Cut', steps: cutSteps },
     { id: 'warnings', title: 'Warnings carried from the app', steps: warnings },
     { id: 'record', title: 'Record afterwards', steps: recordSteps },

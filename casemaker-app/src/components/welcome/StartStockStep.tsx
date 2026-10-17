@@ -5,6 +5,8 @@ import { MATERIAL_LABELS, isPrintedBlankMaterial } from '@/engine/cnc/materials'
 import {
   JOB_STOCK_FORMS,
   facingDefault,
+  facingSeed,
+  facingShopFrom,
   formLabel,
   shelfFor,
   shelfItemFromMade,
@@ -18,6 +20,7 @@ import { readStockFile, type StockFileRead } from '@/engine/import/meshStock';
 import { featureSim } from '@/platform/features';
 import { SIZE_FIELDS, stockProblem, type StockItem } from '@/platform/stockClient';
 import { useEngraveJobStore } from '@/store/engraveJobStore';
+import { useShopDefaultsStore } from '@/store/shopDefaultsStore';
 import { newStockId, useStockStore } from '@/store/stockStore';
 import type { JobStockFinish, JobStockForm, StockMaterial } from '@/types/engraveJob';
 
@@ -184,7 +187,12 @@ export function StartStockStep({
     }
   }
 
+  // #432 slice 4 — the same two readers the wizard seeds the job with, so the sentence here and the
+  // choice written on the job can never disagree.
+  const shopDefaults = useShopDefaultsStore((s) => s.defaults);
   const facing = outcome.finish === null ? null : facingDefault(outcome.finish);
+  const facingDepth =
+    outcome.finish === null ? null : facingSeed(outcome.finish, facingShopFrom(shopDefaults)).depth;
 
   return (
     <div data-testid="start-wizard-step-stock" style={{ marginTop: 8 }}>
@@ -390,10 +398,12 @@ export function StartStockStep({
           ))}
         </div>
       )}
-      {facing !== null && (
+      {facing !== null && facingDepth !== null && (
         <p style={MUTED} data-testid="start-wizard-stock-facing" data-state={facing.on ? 'on' : 'off'}>
-          Facing: {facing.on ? 'on' : 'off'} by default — {facing.reason}. The facing pass itself is still to come
-          (#432).
+          Facing: {facing.on ? 'on' : 'off'} by default — {facing.reason}.{' '}
+          {facing.on
+            ? `The job starts with a ${mm(facingDepth)} mm skim; the Engrave panel shows that depth and can change it.`
+            : 'The job starts with that answer; the Engrave panel can face it instead.'}
         </p>
       )}
     </div>

@@ -20,6 +20,7 @@ import {
   runSheetDiagramSvg,
   runSheetFileName,
   runSheetFrameFileName,
+  runSheetFaceFileName,
   runSheetStackUpSvg,
   sha256Hex,
   type RunSheet,
@@ -1139,5 +1140,142 @@ describe('runSheet — the thread program (#445 B2)', () => {
     };
     const cut = texts(threadSheet({ threadMachining: clamped }), 'cut');
     expect(cut.some((t) => t.includes('clamped to 5,000 by the Z1'))).toBe(true);
+  });
+});
+
+describe('runSheet — the facing phase (#432 slice 3)', () => {
+  const CAM = {
+    toolName: '6 mm flat end mill',
+    diameterMm: 6,
+    passes: 3,
+    stepDown: 0.2,
+    stepOver: 3,
+    rpm: 10000,
+    feed: 800,
+    plungeFeed: 200,
+    air: true,
+  };
+
+  /** A job that carries a facing choice, and the finish that put it there. */
+  function facingJob(facing: EngraveJob['facing'], finish: 'rough' | 'finished' | 'printed' | 'unknown' = 'rough'): EngraveJob {
+    const job = defaultEngraveJob();
+    return {
+      ...job,
+      facing,
+      stockEntry: { kind: 'made', shelfId: null, file: null, form: 'plate', finish, conductive: false },
+    };
+  }
+
+  function generatedWithFacing(job: EngraveJob, over: Partial<RunSheetGenerated> = {}): RunSheetGenerated {
+    return { ...stubGenerated(job), ...over };
+  }
+
+  const texts = (sheet: RunSheet, id: string) =>
+    section(sheet, id).steps.map((s) => `${s.text} ${s.value ?? ''}`);
+
+  it('adds no facing section to a job written before #432 — the key absent means no change', () => {
+    const sheet = sheetFor(defaultEngraveJob());
+    expect(sheet.sections.some((s) => s.id === 'facing')).toBe(false);
+  });
+
+  it('puts the skim between the dry run and the cut, and names its own file, cutter and numbers', () => {
+    const job = facingJob({ enabled: true, depth: 0.5 });
+    const sheet = buildRunSheet(
+      job,
+      generatedWithFacing(job, { facingNc: ';face\nG21\n', facingError: null, facingCam: CAM }),
+      NO_SIM,
+      NOW,
+    );
+    const ids = sheet.sections.map((s) => s.id);
+    expect(ids.indexOf('facing')).toBe(ids.indexOf('dry-run') + 1);
+    expect(ids.indexOf('cut')).toBe(ids.indexOf('facing') + 1);
+
+    const steps = texts(sheet, 'facing').join(' | ');
+    // The finish and the default's own reason, not a second wording.
+    expect(steps).toContain('rough stock');
+    expect(steps).toContain('rough stock is faced first, so the top is flat and Z0 is on a cut surface');
+    // The depth the whole job is posted from, and the file the operator loads.
+    expect(steps).toContain('0.5 mm off the whole top');
+    expect(steps).toContain(runSheetFaceFileName(job.name));
+    // Its OWN cutter — never the engraving bit.
+    expect(steps).toContain('FACING cutter, not the engraving bit');
+    expect(steps).toContain('6 mm flat end mill');
+    expect(steps).toContain('⌀ 6 mm');
+    // The worker's numbers, verbatim.
+    expect(steps).toContain('10000 RPM · 800 mm/min feed · 200 mm/min plunge · 3 × 0.2 mm passes · 3 mm step-over');
+    // And the re-touch that moves Z0 onto the faced surface.
+    expect(steps).toContain('Re-touch Z0 on the faced surface');
+    expect(steps).toContain('took 0.5 mm off');
+    expect(section(sheet, 'facing').steps.some((s) => s.record === 'faced surface Z (mm)')).toBe(true);
+  });
+
+  it('says plainly when the facing file was not produced, and does not send anyone to it', () => {
+    const job = facingJob({ enabled: true, depth: 0.5 });
+    const sheet = buildRunSheet(
+      job,
+      generatedWithFacing(job, {
+        facingNc: null,
+        facingError: 'no flat end mill the catalogue recommends for PLA',
+        facingCam: null,
+      }),
+      NO_SIM,
+      NOW,
+    );
+    const steps = section(sheet, 'facing').steps;
+    const failure = steps.find((s) => s.text.includes('was not produced'));
+    expect(failure?.text).toContain('no flat end mill the catalogue recommends for PLA');
+    expect(failure?.text).toContain('top will not be skimmed');
+    expect(failure?.bold).toBe(true);
+    expect(steps.some((s) => s.text.includes(runSheetFaceFileName(job.name)))).toBe(false);
+    expect(steps.some((s) => s.text.includes('Re-touch Z0'))).toBe(false);
+  });
+
+  it('states that facing is off, quoting the finish default it overrode', () => {
+    const job = facingJob({ enabled: false, depth: 0.5 }, 'finished');
+    const sheet = buildRunSheet(job, generatedWithFacing(job), NO_SIM, NOW);
+    const steps = section(sheet, 'facing').steps;
+    expect(steps).toHaveLength(1);
+    expect(steps[0]!.text).toContain('turns it off');
+    expect(steps[0]!.text).toContain('a finished face is cut as it is');
+    expect(steps[0]!.value).toBe('facing off');
+  });
+
+  it('treats a zero depth as not facing, the way the plan does', () => {
+    const job = facingJob({ enabled: true, depth: 0 });
+    const sheet = buildRunSheet(job, generatedWithFacing(job), NO_SIM, NOW);
+    const steps = section(sheet, 'facing').steps;
+    expect(steps).toHaveLength(1);
+    expect(steps[0]!.value).toBe('facing off');
+  });
+
+  it('says the finish is not recorded when the job carries no stock entry', () => {
+    const job = { ...defaultEngraveJob(), facing: { enabled: true, depth: 0.5 } };
+    const sheet = buildRunSheet(job, generatedWithFacing(job, { facingNc: 'x', facingCam: CAM }), NO_SIM, NOW);
+    expect(texts(sheet, 'facing').join(' ')).toContain('finish is not recorded');
+  });
+
+  it('still names the file and the re-touch when an old run carries no facing numbers', () => {
+    const job = facingJob({ enabled: true, depth: 0.5 });
+    const sheet = buildRunSheet(
+      job,
+      generatedWithFacing(job, { facingNc: 'x', facingError: null, facingCam: null }),
+      NO_SIM,
+      NOW,
+    );
+    const steps = texts(sheet, 'facing').join(' | ');
+    expect(steps).toContain(runSheetFaceFileName(job.name));
+    expect(steps).toContain('Re-touch Z0 on the faced surface');
+    expect(steps).not.toContain('step-over');
+  });
+
+  it('sends the dry run on to the skim rather than straight to the cut, only on a facing job', () => {
+    const plain = texts(sheetFor(defaultEngraveJob()), 'dry-run').join(' ');
+    expect(plain).toContain('Otherwise load');
+    const job = facingJob({ enabled: true, depth: 0.5 });
+    const facing = texts(
+      buildRunSheet(job, generatedWithFacing(job, { facingNc: 'x', facingCam: CAM }), NO_SIM, NOW),
+      'dry-run',
+    ).join(' ');
+    expect(facing).toContain('face the top and re-touch Z0 first');
   });
 });

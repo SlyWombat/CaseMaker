@@ -245,7 +245,16 @@ export function computeOutcome(plan: RegistrationPlan, data: RunData): Registrat
   };
 }
 
-/** Z0 for the cutter: the surface + (cutter PRB − reference PRB) — #387. */
+/**
+ * Z0 for the cutter: the surface + (cutter PRB − reference PRB) — #387.
+ *
+ * `outcome.surfaceZ` is always a MEASURED surface. After a facing pass (#432 slice 4, decision 4:
+ * probe → face → re-touch → engrave) it is the re-touch's reading, not the first probe's: a skim
+ * never takes exactly its nominal depth (spindle growth, deflection, a tilted blank), so the datum
+ * is measured again on the faced top and fed back through `{...outcome, surfaceZ: measured}` rather
+ * than computed by subtracting the depth. The expected surface — the first reading minus the depth
+ * posted — is the re-touch's BAND, which is what `retouchSurface` checks the measurement against.
+ */
 export function cutterZ0(outcome: Pick<RegistrationOutcome, 'surfaceZ' | 'probeRefZ'>, cutterRefZ: number): number {
   return r3(outcome.surfaceZ + (cutterRefZ - outcome.probeRefZ));
 }

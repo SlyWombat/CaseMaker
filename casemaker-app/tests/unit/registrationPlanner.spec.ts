@@ -20,6 +20,7 @@ import {
   parsePrbs,
   planRegistration,
   registrationSettings,
+  retouchSurface,
   runRegistration,
   scanPositions,
   summarizeOutcome,
@@ -540,6 +541,75 @@ describe('#430 a Z-chain replay of the bench’s own answers (2026-10-15)', () =
     expect(applied.cutterRefZ).toBe(-79.158);
     expect(applied.line).toBe('G10 L2 P1 X-181.550 Y-184.800 Z-59.213');
     expect(applied.line).toBe(correctionLine(r.outcome, -79.158));
+  });
+
+  // #432 slice 4, decision 4: probe → face → re-touch → engrave. The re-touch is a MEASUREMENT of the
+  // faced top, so the written Z0 is the measured surface, never the first reading minus the depth.
+  /** A console that answers only a re-touch: idle, homes, and a surface reading at `surfaceZ`. */
+  function retouchZ1(surfaceZ: number) {
+    const lines: string[] = [];
+    const console = {
+      async send(line: string): Promise<ConsoleSendResult> {
+        lines.push(line);
+        let text = 'ok';
+        if (line === '?') text = '<Idle|MPos:-1.0000,-1.0000,-1.0000|WPos:179.5500,183.8000,55.0000>';
+        else if (line === 'M491') text = 'ok\nM497.3\nok\nG38.6 Z-108.000 F500.000\n[PRB:-9.890,-12.830,-79.158:1]\nok\nDone ATC';
+        else if (line.startsWith('G38.2 Z-2 ')) text = `[PRB:-174.550,-175.800,${surfaceZ.toFixed(3)}:1]\nok`;
+        else if (line.startsWith('G38.2')) text = `[PRB:-174.550,-175.800,${(surfaceZ + 0.001).toFixed(3)}:1]\nok`;
+        return { kind: 'sent', line, text, frames: 1, elapsedMs: 1 };
+      },
+    };
+    return { console, lines };
+  }
+  async function registered() {
+    const p = plan('bracket', {
+      cutCentre: { x: 7, y: 9 },
+      expectedSurface: { machineZ: -56.1, from: 'the bench' },
+      bracketOrigin: { x: -181.55, y: -184.8, from: 'the bench’s G54', offsetMeasured: true },
+    });
+    const r = await runRegistration(p, { console: replay().console, operator: yes });
+    if (!r.ok) throw new Error(r.reason);
+    return { p, outcome: r.outcome };
+  }
+
+  it('writes the MEASURED faced surface, 0.05 mm off the skim’s expectation', async () => {
+    const { p, outcome } = await registered();
+    // The first probe read −56.116; the skim was posted to take 0.5 mm, so the top is expected at
+    // −56.616. It measured −56.666 — 0.05 mm deeper than asked, which is the whole reason for a touch.
+    const z1 = retouchZ1(-56.666);
+    const rt = await retouchSurface(p, outcome, { removedMm: 0.5, toleranceMm: 0.25 }, { console: z1.console, operator: yes });
+    if (!rt.ok) throw new Error(rt.reason);
+    expect(rt.surface.z).toBe(-56.666);
+    // The seek's fast touch travels to the BAND's floor (expected − tolerance), not the first run's.
+    // From the travel height −3 down to the band's floor −56.866, not the first run's −56.422.
+    expect(z1.lines).toContain('G38.2 Z-53.866 F300');
+    expect(rt.outcome.surfaceZ).toBe(-56.666);
+    const applied = await applyCorrection(rt.outcome, { console: z1.console, operator: yes }, { confirmed: true });
+    if (!applied.ok) throw new Error(applied.reason);
+    // −56.666 + (−79.158 − −76.061) = −59.763: the measurement, not the nominal −56.616's −59.713.
+    expect(applied.line).toBe('G10 L2 P1 X-181.550 Y-184.800 Z-59.763');
+    expect(applied.line).toBe(correctionLine(rt.outcome, -79.158));
+    expect(z1.lines).toContain('G10 L2 P1 X-181.550 Y-184.800 Z-59.763');
+  });
+
+  it('refuses a re-touch that lands outside the band the skim set', async () => {
+    const { p, outcome } = await registered();
+    // Expected −56.616 ± 0.25; a reading of −57.2 means the top is not where this skim could have
+    // left it — the facing pass did not run, or did not remove what it was posted to.
+    const z1 = retouchZ1(-57.2);
+    const rt = await retouchSurface(p, outcome, { removedMm: 0.5, toleranceMm: 0.25 }, { console: z1.console, operator: yes });
+    expect(rt.ok).toBe(false);
+    if (rt.ok) return;
+    expect(rt.reason).toContain('outside the expected -56.866 to -56.366');
+    expect(z1.lines.some((l) => l.startsWith('G10 L2'))).toBe(false);
+  });
+
+  it('refuses a re-touch with no depth to expect, before it sends anything', async () => {
+    const { p, outcome } = await registered();
+    const z1 = retouchZ1(-56.666);
+    const rt = await retouchSurface(p, outcome, { removedMm: 0, toleranceMm: 0.25 }, { console: z1.console, operator: yes });
+    expect(rt.ok).toBe(false);
+    expect(z1.lines).toEqual([]);
   });
 });
 

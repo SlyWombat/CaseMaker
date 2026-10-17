@@ -56,6 +56,30 @@ export interface FacingStock {
   width: Mm;
 }
 
+/**
+ * What the facing program was cut with, for the run sheet (#432 slice 3).
+ *
+ * Carried out of the worker rather than re-derived beside the sheet: the sheet's rule is that the
+ * numbers it prints are the numbers in the file, and the passes are `zPasses`' answer for this
+ * depth and this feeds row — a second computation could print a pass count the file does not make.
+ * The cutter is named here because the facing file runs with its OWN bit, and a sheet that sent the
+ * operator to the engraving cutter would send them to the wrong station.
+ */
+export interface FacingCamSummary {
+  /** The cutter's display name, as the tool registry has it. */
+  toolName: string;
+  /** Its cutting diameter, mm. */
+  diameterMm: Mm;
+  /** How many Z passes the file makes. */
+  passes: number;
+  stepDown: Mm;
+  stepOver: Mm;
+  rpm: number;
+  feed: number;
+  plungeFeed: number;
+  air: boolean;
+}
+
 /** The offset of one raster line's start from the stock's front-left corner, and its direction. */
 interface RasterLine {
   start: [number, number];
