@@ -167,6 +167,7 @@ The command characters we use:
 | `0x3F` | `?` | Request machine status. The reply is a status frame (`0x81`). |
 
 Others in the published client (`!`, `~`, `0x18` e-stop) are **not** used by this bridge — see §8.
+The observed soft stop is the console word `abort` (§8, §9; `/Z1-Firmware-Dialect.md` §11.13).
 
 ### Legacy firmware
 
@@ -547,11 +548,11 @@ touching callers.
   does. A job that reports no `P` field for `--no-progress` ms (30 s by default) ends it non-zero,
   because a controller answering with no job in its status is not something this tool can watch.
   Ctrl-C there sends `abort` — the exact word Studio's own
-  grey Stop sends, recorded at the bench on 2026-10-12 (#303, which is where the wire record belongs
-  and is still open) — so a run is not left cutting unwatched: the **spindle stops at
-  once**, but the controller drains the queue it already had and only then answers `Aborted playing or
-  paused file` (**~18 s** in the 2026-10-12 observation), leaving the head where the queue ended, `Idle`
-  and no alarm. `run` waits 30 s for that reply — not the 3 s a console line gets — and takes it as the
+  grey Stop sends, recorded at the bench on 2026-10-12 and written up in
+  `/Z1-Firmware-Dialect.md` §11.13 (#303) — so a run is not left cutting unwatched: the **spindle
+  stops at once**, but the controller drains the queue it already had and only then answers `Aborted
+  playing or paused file` (**~18 s** in the 2026-10-12 observation), leaving the head where the queue
+  ended, `Idle` and no alarm. `run` waits 30 s for that reply — not the 3 s a console line gets — and takes it as the
   signal only when its text carries `Aborted playing`: the controller emits unsolicited lines mid-job
   too (a `?` reply in the 2026-10-12 log arrived with `G28 means goto clearance position on CARVERA`
   inside it), so any text at all is not the abort's answer. Once the queue is drained it sends
@@ -567,6 +568,15 @@ touching callers.
   physical stop is still the stop — this is a console word, not the e-stop byte, which stays unwired.
 - The single-byte e-stop byte is **not** wired: an e-stop that travels over the same socket the
   bridge is mid-transfer on is worse than useless. The physical stop is the stop.
+- **Studio's stop controls, recorded 2026-10-12 (#303).** Each was pressed on its own air run: the
+  grey **Stop** sends the console word `abort` (the soft stop — the spindle stops at once, the queued
+  motion drains for ~18 s, then `ok` + `Aborted playing or paused file.`, `Idle` with no alarm and no
+  homing); **Pause** sends `suspend` and **Resume** `resume` (both drain the queue first; the observed
+  resume homed instead of continuing the cut); the red **STOP** sends the realtime halt byte `↑` and
+  leaves `ALARM: Abort during cycle`, cleared with `$X`; **Reset** is greyed out during a run. The
+  row-per-control record and what it does not settle are in `/Z1-Firmware-Dialect.md` §11.13. The
+  console gate already allows `abort`; the app's own Stop button (#424) sends it with the honest
+  label, sends `M332` after a clean stop, and offers `$H` as its own press.
 - A machine refusal is surfaced as a refusal. The upload result has an explicit *refused* outcome
   and it is never retried automatically.
 
@@ -587,6 +597,7 @@ touching callers.
 | Why Studio's `download /sd/config.txt` works though the main board's `download` is a stub | **HALF-ANSWERED 2026-10-06.** The client side is no longer a mystery: `MakeraStudio.exe` is native Qt/C++, and its transfer code reads as a stop-and-wait block protocol inside the same `0x8668`/`0x55AA` envelope — messages `FILE_VIEW`/`FILE_DATA`/`FILE_MD5`/`FILE_END`/`RETRY`, receiver-driven by sequence number, `FILE_END` retried three times then abandoned, a 9 s send-side abort, and an MD5 pre-check that skips the transfer outright. The whole sequence is in §5. | **The machine's half is still inferred from the client's expectations, never observed**, so a receive path stays unwritten — which is now a choice rather than a gap: the config question this row was opened for was answered by `config-get sd <key>` (§5). Closes if a capture of a real download shows what the machine emits. |
 | Whether §5's raw upload matches what the machine wants for a `.nc` | **ANSWERED 2026-10-07 — raw is accepted, this direction needs no compression.** A plain, uncompressed `.nc` was transferred by §5's own sequence and acknowledged `ok`, and the file the card ended up holding hashes to the bytes that were sent. So the QuickLZ path Studio carries (`QuickLZCLI.exe`, `ftype == lz`, `the machine is decompress the nc file!`) is **not a precondition** for uploading: the receiver takes the file uncompressed, for at least this size and this path. What that leaves unmeasured is the shape of the compressed case — whether `ftype == lz` is Studio choosing to compress, or the machine demanding it above some size. | **closed for the upload question**, which is what it was opened for. Reopens only if a transfer is refused for size, and then with the refusal in hand rather than in anticipation of it. |
 | How the machine acknowledges a console command | **OBSERVED INDIRECTLY 2026-10-07.** Makera's own client renders every command it sends followed by a bare **`ok`**, and a completed multi-step macro as **`Done ATC`**; a probe trigger comes back as **`[PRB:x,y,z:1]`**. Read from the client's MDI log, **not from the wire** — the command half is certain (the client sent it), the reply half is one level removed. The dialect and the codes are in `/Z1-Firmware-Dialect.md` §11. | A wire capture. Not blocking: nothing in the bridge parses a reply it has not seen, and `?` status (§6) is the reply the bridge actually depends on. |
+| What Studio's stop controls send | **OBSERVED 2026-10-12 — one fresh air run per control (#303).** Red **STOP**: `↑` (realtime halt, likely Ctrl-X); spindle at once; `ALARM: Abort during cycle`, cleared by Unlock `$X`. **Pause**: `suspend`; queue drains first (~18 s). **Resume**: `resume`; the observed run homed (`G28 means goto clearance position on CARVERA`). Grey **Stop**: `abort`; spindle at once; `ok` + `Aborted playing or paused file.` ~18 s later; `Idle`, no alarm, no homing. **Reset**: greyed out during a run. Row-per-control record at `/Z1-Firmware-Dialect.md` §11.13. | **closed** — the vendor behaviour is recorded. Not settled: whether the cut would have resumed, the red STOP's exact byte. What our console does with it is #424 (Stop ships now) and #302. |
 | Whether the bridge must model the **accessory modes** at all | **OPEN 2026-10-07.** The machine carries a mode family — `M331`, `M331.1`, `M331.2`, `M331.4`, `M951` — controlling bed cleaning, blowing, static removal, an "extend out" mode and camera time-lapse (`/Z1-Firmware-Dialect.md` §11.3). `machine.ts` models the Z1's only accessory as **air (`M7`/`M9`)**, and **no `M7` or `M9` appeared in the traffic read.** | Deciding whether the bridge reproduces these modes or leaves them to the machine's own client. Note this is *not* on the first pass: `§8` keeps the bridge to "upload a verified `.nc` and report status". The row exists so the gap is written down rather than discovered later. |
 
 ## 10. The camera — its own server, not the command channel (OBSERVED 2026-10-08)

@@ -167,7 +167,11 @@ export async function runLaserFrame(target: MachineConsoleTarget, bounds: XYBoun
 // ---------------------------------------------------------------------------------------------------
 // Point-to-origin (#431 slice 2).
 
-/** The jog steps offered, mm. Nothing finer: the dot itself is only good to about a millimetre. */
+/**
+ * The jog steps offered, mm — a UI affordance, not a machine value: nothing safety-bearing depends
+ * on the particular set, because the jog guard accepts exactly the steps offered. Nothing finer: the
+ * dot itself is only good to about a millimetre. (#449: recorded as staying in the UI.)
+ */
 export const LASER_JOG_STEPS = [10, 1, 0.1] as const;
 export type JogStep = (typeof LASER_JOG_STEPS)[number];
 

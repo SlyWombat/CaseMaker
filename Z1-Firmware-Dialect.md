@@ -621,3 +621,23 @@ The app implements exactly this order (`casemaker-app/src/engine/cnc/registratio
 cutter in → `M491` → `G10 L2`; `outcome.ts`'s `cutterZ0` does the subtraction), and
 `tests/unit/registrationPlanner.spec.ts` pins it. §3's absolute-move formula is the reason the
 order cannot be rearranged: the offset in force at the write is the one the write then loses.
+
+### 11.13 Observed 2026-10-12 — Studio's stop controls (#303)
+
+Bench S2. Each control was tested on its own fresh air run of the raised three-stroke file, driven
+from Studio with our console disconnected. The lines are verbatim from Studio's MDI pane as the
+maintainer pasted them, in local time.
+
+| Control | What Studio sends | What the machine did |
+|---|---|---|
+| **Red STOP** | `↑` (the realtime halt byte, likely Ctrl-X) | Spindle stopped immediately. `ALARM: Abort during cycle` (16:01:57). "Aborted by halt" seen on screen. **Unlock** sends `$X`. |
+| **Pause** | `suspend` | The head stopped and the tool light blinked blue, but the queue drained first: "Suspended, resume to continue playing" arrived ~18 s after the press (16:16:07). Spindle at 0. Studio's progress bar kept moving meanwhile. |
+| **Resume** | `resume` | `Resuming playing...` / `Restoring saved XYZ positions and state...` / `Playing file resumed` (16:18:58). The maintainer saw it **home instead of resuming the cut**; the next logged line is `G28 means goto clearance position on CARVERA`. The pause had fallen late in the file, so whether the cut was already finished is not settled. |
+| **Grey Stop** | `abort` | Spindle stopped immediately. Then `ok` + `Aborted playing or paused file.` **18 s later** (press 16:21:44 → 16:22:02). Idle, **no alarm, no homing**. |
+| **Reset** | — | Greyed out during a run; it cannot be pressed. |
+
+**What this does not settle.** The red STOP's exact byte was not captured off the wire: the record
+is Studio's rendering of the realtime halt byte as `↑`, "likely Ctrl-X". And the paused run homed
+rather than resuming the cut, but the pause fell late in the file, so whether the cut would have
+resumed had it still been cutting is not settled. The observation does not record the tool, work
+offset or position after each press.
