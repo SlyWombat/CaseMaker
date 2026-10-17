@@ -57,8 +57,10 @@ pub enum Whereabouts {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ToolCopy {
     pub id: String,
-    /// The operator's condition. Optional since #491: a copy entered only to record its case
-    /// states no condition, and "new" is not a safe guess (#415).
+    /// The operator's condition. Optional since #491 because the case migration REQUIRES it: the
+    /// label corpus states which box each bit is in and nothing about wear, so the migration and
+    /// the label import create one copy per box with a case and no condition. The alternatives
+    /// were to drop the case or to claim "new" for a bit nobody examined — the guess #415 refused.
     #[serde(default)]
     pub condition: Option<Condition>,
     pub whereabouts: Whereabouts,

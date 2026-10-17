@@ -66,9 +66,14 @@ export const ToolCopySchema = z
   .object({
     id: z.string().refine((v) => v.trim().length > 0 && v === v.trim() && !CONTROL.test(v), 'is not a usable id'),
     /**
-     * The operator's condition, or null when nobody described this copy. Nullable since #491: a
-     * copy entered only to record its case ("the yellow one is the 2 mm flat") states a case and
-     * no condition, and guessing "new" for it would be exactly the guess #415 refused.
+     * The operator's condition, or null when nobody described this copy.
+     *
+     * NULLABLE BECAUSE #491'S MIGRATION REQUIRES IT, not by convenience. The label corpus says
+     * which case each physical bit is in and NOTHING about wear; the migration and the import must
+     * therefore create one copy per box that states a case and no condition. The old schema had no
+     * way to say "this copy exists, condition unknown": the only choices were to refuse the copy
+     * (losing the case) or to write "new", which is exactly the guess #415 refused. Null is that
+     * third state, and every consumer already ranked an undescribed copy as "condition unknown".
      */
     condition: z.enum(CONDITIONS).nullable().default(null),
     whereabouts: WhereaboutsSchema,
