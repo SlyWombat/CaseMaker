@@ -1031,7 +1031,7 @@ impl HouseStore {
                 // A location from before the shop defaults (or before a seed this build adds) reads
                 // the seed values, in memory; the next write stores them (`defaults.rs`). The feeds
                 // table follows the same rule (#450 slice 3): a location written before the table
-                // existed is served the ten starting rows — labelled `seeded`, unmeasured — rather
+                // existed is served the eleven starting rows — labelled `seeded`, unmeasured — rather
                 // than refusing every job until the user writes one.
                 crate::defaults::add_missing_seeds(&mut doc.defaults);
                 crate::feeds::add_missing_seeds(&mut doc.feeds);
@@ -3753,7 +3753,7 @@ mod tests {
     async fn the_feeds_table_is_written_under_its_whole_table_rule() {
         use crate::feeds::tests::a_row;
         let (dir, store) = store();
-        // #450 slice 3: a fresh location now holds the ten seeded rows, and this test is about the
+        // #450 slice 3: a fresh location now holds the eleven seeded rows, and this test is about the
         // WRITE rule on a table it builds row by row. Delete the seeds through the guarded API, so
         // the starting state is the empty table this test used to open with.
         loop {
@@ -3842,7 +3842,7 @@ mod tests {
     #[tokio::test]
     async fn an_older_location_with_no_feeds_table_is_served_the_seeds_at_load() {
         // #450 slice 3. A document written before the table existed carries no `feeds`. It is
-        // served the ten starting rows — in memory, as an older one gets the defaults — so the
+        // served the eleven starting rows — in memory, as an older one gets the defaults — so the
         // panel has numbers from the first read; the user's file is not rewritten by opening it.
         let older = TempDir::new().unwrap();
         let mut doc: serde_json::Value = serde_json::from_slice(&location_fixture()).unwrap();

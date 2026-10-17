@@ -1439,7 +1439,7 @@ mod tests {
     #[tokio::test]
     async fn the_feed_table_walks_its_lifecycle_over_http() {
         // #450 slice 2. The same shape as the shelf, on its own path: `/feeds` is the catalogue.
-        // #450 slice 3: a fresh location holds the ten seeded rows, so this row is made on a
+        // #450 slice 3: a fresh location holds the eleven seeded rows, so this row is made on a
         // material and band the seeds do not cover — the test is the lifecycle, not the seed.
         let (_dir, app) = app_under_test();
         let mut row = serde_json::to_value(crate::feeds::tests::a_row("feed-1")).unwrap();
@@ -1507,7 +1507,7 @@ mod tests {
         let listed = json_of(app.clone().oneshot(get("/api/v1/feed-table")).await.unwrap()).await;
         let left = listed.as_array().unwrap();
         assert!(!left.iter().any(|r| r["id"] == serde_json::json!("feed-1")), "{listed}");
-        assert_eq!(left.len(), 10, "the seeded rows are still there: {listed}");
+        assert_eq!(left.len(), 11, "the seeded rows are still there: {listed}");
     }
 
     #[tokio::test]
