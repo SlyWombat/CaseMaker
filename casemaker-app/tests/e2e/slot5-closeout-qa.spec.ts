@@ -111,18 +111,31 @@ test('visual QA: Engrave panel — stock, labels, tool recommendation and depth-
 
   // #211 acceptance 2: the user's own pick is kept when the recommendation changes.
   // `engrave-label-size-N` is the row's cap-height input (aria "cap"); shrinking it until
-  // the 3.175 cutter loses detail must move the recommendation TEXT, never the selection.
-  await page.getByTestId('engrave-tool').selectOption('flat-3.175x12-metal');
+  // the selected cutter loses detail must move the recommendation TEXT, never the selection.
+  //
+  // #407 — the other built-in cutter, `flat-3.175x12-metal` (Makera's `(Metal)` flat), is
+  // refused on this default softwood blank (`tool-metal-line`), so it can no longer stand in
+  // as the pair this step selects. The 1.0 mm flat is the pair the recommendation still names
+  // for this blank — the dev bench has no house catalogue, so these two are its only cutters,
+  // and the metal-line refusal does not touch the non-metal one.
+  await page.getByTestId('engrave-tool').selectOption('flat-1.0');
   const selBefore = await page.getByTestId('engrave-tool').inputValue();
+  // The recommendation is the qualifying pick before the edit…
+  await expect(page.getByTestId('engrave-recommendation')).toContainText('Largest cutter');
   const recBefore = await page.getByTestId('engrave-recommendation').innerText().catch(() => '(none)');
   // #411 — the cap-height field is in the row's body, which a job's rows arrive folded.
   await page.getByTestId('engrave-label-expand-0').click();
   await page.getByTestId('engrave-label-size-0').fill('4');
-  await page.waitForTimeout(4000);
+  // …and at a 4 mm cap height nothing qualifies, so the recommendation moves to the compromise
+  // sentence while the picker keeps the user's selection.
+  await expect(page.getByTestId('engrave-recommendation')).toContainText('No cutter you have can cut', { timeout: 30_000 });
   const selAfter = await page.getByTestId('engrave-tool').inputValue();
   const recAfter = await page.getByTestId('engrave-recommendation').innerText().catch(() => '(none)');
   console.log('DIAG #211 selBefore=%j selAfter=%j\n  recBefore=%j\n  recAfter=%j', selBefore, selAfter, recBefore, recAfter);
   expect(selAfter).toBe(selBefore);
+  expect(recAfter).not.toBe(recBefore);
+  // #407 — the pair is accepted by the refusal: no metal-line finding is raised for it.
+  await expect(page.locator('[data-testid$="-tool-metal-line"]')).toHaveCount(0);
 
   // #197 addition: Top frames the ENGRAVE preview's stock, not the case. force: the engrave
   // preview canvas sits over the toolbar and intercepts pointer events (see #197 comment).
