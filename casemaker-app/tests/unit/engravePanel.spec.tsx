@@ -104,6 +104,12 @@ describe('EngravePanel (#205)', () => {
   it('updates the “strokes thinner than” hint when the tool changes', () => {
     render(<EngravePanel />);
     expect(screen.getByTestId('engrave-thin-strokes').textContent).toContain('1.0 mm');
+    // #407 — this is the built-in `(Metal)` row, the only built-in at 3.175 mm: on the default
+    // softwood blank the worker's `engraveRegions` refuses the pair (`tool-metal-line`). The hint
+    // below is a fact about the selected cutter, computed beside that refusal; this jsdom harness
+    // has no worker, and the panel's fallback (`validateJob` + `validateVise`) does not carry the
+    // worker's finding, so the refusal itself is pinned in `engravePreview.spec.ts` and
+    // `engraveGenerate.spec.ts`, not here.
     fireEvent.change(screen.getByTestId('engrave-tool'), { target: { value: 'flat-3.175x12-metal' } });
     expect(screen.getByTestId('engrave-thin-strokes').textContent).toContain('3.175 mm');
   });
@@ -155,6 +161,11 @@ describe('EngravePanel — the clamp notice (#317)', () => {
   /** The default job, with the cutter whose id the rows above name. */
   const renderWithCatalogueCutter = (): void => {
     render(<EngravePanel />);
+    // #407 — the only built-in row carrying this vendor id is the `(Metal)` one, and on the
+    // default softwood blank the worker refuses the pair (`tool-metal-line`). The clamp notice is
+    // about the feed row, not the line; the panel's no-worker fallback does not run
+    // `engraveRegions`, so the refusal is not rendered here — it is pinned in
+    // `engravePreview.spec.ts` and `engraveGenerate.spec.ts`.
     fireEvent.change(screen.getByTestId('engrave-tool'), { target: { value: 'flat-3.175x12-metal' } });
   };
 
