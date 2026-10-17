@@ -93,6 +93,7 @@
 import { z } from 'zod';
 import { cuttingForTrace, vendorId } from './tool';
 import type { Tool } from './tool';
+import { DEFAULT_V_CARVE_STEPOVER_RATIO } from './vCarveGeometry';
 import { clampToMachine } from './machine';
 import type { ClampDiagnostic, MillProfile } from './machine';
 import { MATERIAL_LABELS, STOCK_MATERIALS } from './materials';
@@ -298,20 +299,44 @@ export const UNMEASURED_FEEDS_TABLE: readonly FeedsEntry[] = [
     // the job is refused for want of cutting parameters, which is the honest answer for a cutter
     // whose numbers nobody has.
     //
-    // `stepOverFraction` is carried because `CutParams` requires it, and it is INERT here: a trace
-    // puts the cutter on the line, so nothing is ever stepped over. `stepDown` is 1.0 — one pass to
-    // the colour-reveal depth the text job cuts at — and a deeper job simply takes a second pass.
+    // `stepOverFraction` is the V-carve seed (#221): the CAM applies it to the groove's width AT
+    // THE COLOUR PLANE (`2·rPlane`, `vCarvePlaneStepover`), not to the tip flat. `params.stepOver`
+    // below is still resolved against the cutting diameter, so the number the panel shows is the
+    // seed at the tip; `generateEngrave` scales it per item. A trace ignores both — the cutter is
+    // on the line — so trace jobs are unchanged. `stepDown` is 1.0: one pass to the reveal depth
+    // the text job cuts at, and a deeper job simply takes a second pass.
     material: 'pla',
     edge: 'v',
     minDiameter: 0.3,
     maxDiameter: 0.5,
-    params: { rpm: 12000, feed: 500, plungeFeed: 200, stepDown: 1.0, stepOverFraction: 0.45, peckFraction: 1.0, air: true },
+    params: { rpm: 12000, feed: 500, plungeFeed: 200, stepDown: 1.0, stepOverFraction: DEFAULT_V_CARVE_STEPOVER_RATIO, peckFraction: 1.0, air: true },
     status: 'unmeasured',
     provenance:
       'From the 2026-10-15 bench cut (#185, `docs/bench/185-v-groove.nc`): the hand file\'s own ' +
       'numbers — S12000, F500 along, F200 plunge, one pass to depth — cut a clean V groove in PLA ' +
       '(0.836 mm opening at 1.0 mm deep, the 30° × 0.3 mm bit). Starting values, not a coupon ' +
       'measurement: #284 is what measures this row.',
+  },
+  {
+    // The PETG V row (#221): the thin-film badge blank is PETG, and with only a PLA V row the
+    // floor-correct region job was refused at the feeds stage — the one material the acceptance
+    // fixture actually uses had no numbers at all.
+    //
+    // OBSERVED, on 2026-10-17, on the 30° × 0.3 mm bit: a PETG blank ran S12000 / F500 / F200 for
+    // 856 s without melting. That is a bench observation of one run, not a coupon measurement and
+    // not a catalogue row; the numbers are the PLA V row's own. REMOVABLE AS ONE ENTRY if the
+    // maintainer does not want an unmeasured PETG row to ship (#221's feeds decision).
+    material: 'petg',
+    edge: 'v',
+    minDiameter: 0.3,
+    maxDiameter: 0.5,
+    params: { rpm: 12000, feed: 500, plungeFeed: 200, stepDown: 1.0, stepOverFraction: DEFAULT_V_CARVE_STEPOVER_RATIO, peckFraction: 1.0, air: true },
+    status: 'unmeasured',
+    provenance:
+      'OBSERVED 2026-10-17, not measured: the 30° × 0.3 mm V-bit ran PETG at S12000, F500 along, ' +
+      'F200 plunge for 856 s without melting. The numbers are the PLA V row\'s own starting values; ' +
+      'no coupon measured PETG, and this row is a chosen placeholder for the two-colour blank. #284 ' +
+      'is what settles it.',
   },
 ];
 
@@ -1072,8 +1097,8 @@ function entryFor(
       ok: false,
       reason:
         `no cutting parameters for a ${diameter} mm V-bit in ${MATERIAL_LABELS[material]}: the starting ` +
-        `table has a V-bit row for PLA only, and ${CATALOGUE_LABEL} states a flat end mill's numbers, ` +
-        `never a cone's. Pick PLA, or a flat end mill for this material.`,
+        `table has a V-bit row for PLA and PETG only, and ${CATALOGUE_LABEL} states a flat end mill's ` +
+        `numbers, never a cone's. Pick PLA or PETG, or a flat end mill for this material.`,
     };
   }
 
@@ -1298,16 +1323,21 @@ export function feedsFor(
     if (override.air !== undefined) params.air = override.air;
   }
 
-  // #191: contour-parallel loops further apart than the radius leave an uncut spine. Refuse,
-  // never clamp silently. The radius here is the cutting radius at the blank's surface — for a V
-  // bit that is its tip (the width it opens grows with depth, but a step-over that leaves a spine
-  // is measured against the widest the loop's own pitch can reach, and it is the tip a `v` row's
-  // `stepOverFraction` is a fraction of).
+  // #191: contour-parallel loops further apart than the cutter can sweep leave an uncut spine.
+  // Refuse, never clamp silently. A flat end mill's bound is its RADIUS (the #191 rule). A V-bit's
+  // floor is cut by its TIP DISC, so the floor-clearing pitch must never exceed one tip WIDTH —
+  // that is the hard bound here. The row's fraction is applied to the plane's groove width by the
+  // CAM (#221), and `generateEngrave` hands `pocketLoops` the same tip-width limit, so a plane
+  // wide enough to push the pitch past the tip is refused rather than cut with an uncut floor.
   const toolRadius = diameter / 2;
-  if (params.stepOver > toolRadius) {
+  const stepOverLimit = edge === 'v' ? diameter : toolRadius;
+  if (params.stepOver > stepOverLimit) {
     return {
       ok: false,
-      reason: `step-over ${params.stepOver} mm exceeds the ${toolRadius} mm radius of the ${diameter} mm cutter: contour-parallel loops would leave an uncut spine (#191), and an override that leaves material is refused rather than clamped`,
+      reason:
+        edge === 'v'
+          ? `step-over ${params.stepOver} mm exceeds the ${diameter} mm tip width of the V-bit: contour-parallel tip passes would leave an uncut spine (#191), and an override that leaves material is refused rather than clamped`
+          : `step-over ${params.stepOver} mm exceeds the ${toolRadius} mm radius of the ${diameter} mm cutter: contour-parallel loops would leave an uncut spine (#191), and an override that leaves material is refused rather than clamped`,
     };
   }
 

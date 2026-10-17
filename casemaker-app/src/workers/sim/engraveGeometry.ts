@@ -102,6 +102,10 @@ export interface LabelEngravability {
  * caller with `labelProfile` on a single-character label at the same size — kerning does not
  * matter for an emptiness test. Whitespace characters are skipped.
  *
+ * `radiusFor` overrides `toolRadius` per item (#221): a V-carve's opening is measured at
+ * `rPlane = tipRadius + (depth − film)·tanHalf`, which differs from item to item on a design whose
+ * regions state different depths. Absent, every item uses `toolRadius`, exactly as before.
+ *
  * Every `CrossSection` created here (glyph, opening, stock inset, per-character opening) is
  * deleted exactly once.
  */
@@ -111,6 +115,7 @@ export function measureLabels(
   toolRadius: number,
   edgeMargin: number,
   perChar: (labelId: string) => PerCharGlyph[],
+  radiusFor?: (labelId: string) => number,
 ): LabelEngravability[] {
   const CS = tl.CrossSection;
   // The safe region: the SUPPORTED FOOTPRINT eroded by the edge margin (#213 §3). With no
@@ -122,10 +127,14 @@ export function measureLabels(
   const out: LabelEngravability[] = [];
   try {
     for (const engrave of plan.engraves) {
+      // The opening this item is measured at. A flat cutter has one radius for the job; a V's
+      // plane radius depends on the item's own depth (#221). A non-positive radius has no opening
+      // at all, so the item measures empty — the findings stage refuses it by name.
+      const itemRadius = radiusFor?.(engrave.id) ?? toolRadius;
       // A whitespace label is a `p-poly` with no contours, kept in the plan so it can be
       // reported (`labelProfile`). Manifold's `ofPolygons([])` throws, and every area is
       // zero anyway, so an empty profile short-circuits the whole evaluation.
-      const isEmpty = aabbOfProfile(engrave.profile) === null;
+      const isEmpty = aabbOfProfile(engrave.profile) === null || !(itemRadius > 0);
       let glyphArea = 0;
       let openedArea = 0;
       let outsideArea = 0;
@@ -136,7 +145,7 @@ export function measureLabels(
         glyphArea = glyphCS.area();
         glyphCS.delete();
 
-        const openedCS = executeProfile(tl, engravableProfile(engrave.profile, toolRadius));
+        const openedCS = executeProfile(tl, engravableProfile(engrave.profile, itemRadius));
         openedArea = openedCS.area();
         // toPolygons() returns each contour as [x, y][]; that is the work-frame shape #172 wants.
         polygons = openedCS.toPolygons() as [number, number][][];
@@ -154,7 +163,7 @@ export function measureLabels(
           emptyChars.push({ index, char: entry.char });
           return;
         }
-        const charCS = executeProfile(tl, engravableProfile(entry.profile, toolRadius));
+        const charCS = executeProfile(tl, engravableProfile(entry.profile, itemRadius));
         const charArea = charCS.area();
         charCS.delete();
         if (charArea === 0) emptyChars.push({ index, char: entry.char });
@@ -357,6 +366,22 @@ export interface CutRegion {
   /** Positive mm below the top face. */
   depth: number;
   polygons: [number, number][][];
+  /**
+   * A V-carve's three outlines (#221), present only on a region cut by a cone. `polygons` above is
+   * the colour-plane design; `floor` is the pocket bottom and `surface` the opening at the top
+   * face. Structural, so this module still does not import `cam/engraveJob`. The preview draws all
+   * three and cuts the stock with `surface`.
+   */
+  vCarve?: {
+    plane: [number, number][][];
+    floor: [number, number][][];
+    surface: [number, number][][];
+    /** Where the design outline sits: the film's depth, or the floor depth with no film. */
+    planeDepth: number;
+    planeRadius: number;
+    floorInset: number;
+    surfaceOutset: number;
+  };
 }
 
 /** A number for a finding sentence, rounded to the micron so a float artefact never prints. */

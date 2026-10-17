@@ -40,8 +40,16 @@ describe('the V1 feeds table', () => {
       // (`docs/bench/185-v-groove.nc`), not from Studio's own sample, so one provenance string for
       // the whole table is no longer the truth.
       if ((row.edge ?? 'flat') === 'v') {
-        expect(row.provenance).toContain('#185');
-        expect(row.provenance).toContain('185-v-groove.nc');
+        if (row.material === 'petg') {
+          // #221's two-colour blank: OBSERVED at the bench on 2026-10-17, with the PLA V row's
+          // own numbers — a labelled placeholder, never a measured row.
+          expect(row.provenance).toContain('OBSERVED 2026-10-17');
+          expect(row.provenance).toContain('not measured');
+          expect(row.provenance).toContain('#284');
+        } else {
+          expect(row.provenance).toContain('#185');
+          expect(row.provenance).toContain('185-v-groove.nc');
+        }
       } else if (row.provenance.startsWith('PLACEHOLDER')) {
         // #410 adds the third kind of source, and the weakest one: the finest flat row exists so
         // the 0.6 mm corn cutter the rest pass needs is not excluded as `no-feeds`, and there is no
@@ -183,7 +191,7 @@ describe('feedsFor and the V-bit row (#405)', () => {
     // table at all (#405), so the refusal names the missing row rather than a tier that would
     // never have answered.
     expect(res.reason).toContain('V-bit');
-    expect(res.reason).toContain('PLA only');
+    expect(res.reason).toContain('PLA and PETG only');
   });
 
   it('refuses the metal bit’s 0.1 mm tip: outside every V row, so no numbers, no job', () => {

@@ -1,28 +1,34 @@
 /**
- * The V-carve offset ladder, as pure geometry (#221).
+ * V-carve arithmetic, as pure geometry (#221).
  *
- * A V-carve is one region cut by a cone whose depth follows the region's width. The CAM does not
- * need a medial-axis skeleton to say that: it can walk a LADDER of inward offsets. At depth `d`
- * the cone's flat is `tipRadius + d·tanHalf` from the tip's centre line, so the tip may travel on
- * the region offset inward by exactly that radius without either flank leaving the region. Trace
- * that contour at `Z = -d`, for every depth up to the cap, and the union of the cones fills the
- * region. The identity used by the oracle is the same one:
+ * THE SHIPPED MODEL is a constant-depth pocket cut by the V-bit alone, with the DESIGN CORRECT AT
+ * THE COLOUR PLANE. With film thickness `f` (the blank's colour boundary, `colourBoundaryDepthFor`)
+ * and item depth `D` below the top face, the cutter tip goes to `D` and the colour plane sits
+ * `e = D − f` above it. The groove's half-width at that plane is
+ *
+ *     rPlane = tipRadius + e·tanHalf
+ *
+ * and the toolpath is the design offset INWARD by `rPlane`, cleared at depth `D`. The cone then
+ * gives the two other outlines for free: the FLOOR (depth `D`) is `e·tanHalf` narrower per side
+ * than the design, and the SURFACE opening is `f·tanHalf` wider per side. Floor to surface is the
+ * full `D·tanHalf`, which is the look the maintainer accepted.
+ *
+ * `D` is the item's stated depth, bounded by the blank's own floor (`thickness − minFloor`) by the
+ * depth checks every item already goes through. A blank with NO FILM has the plane at the floor
+ * (`f = 0`, `rPlane = tipRadius`): a pointed bit draws a line `2·D·tanHalf` wide at the surface and
+ * nothing at the bottom, which the run sheet says in words.
+ *
+ * THE STEPOVER is `ratio × 2·rPlane` — of the groove's width AT THE PLANE, never of the tip flat
+ * ({@link vCarvePlaneStepover}, seed {@link DEFAULT_V_CARVE_STEPOVER_RATIO}).
+ *
+ * THE OFFSET LADDER is a LATER OPTION, kept here as pure arithmetic and not built on by the CAM.
+ * It sits on the same cone identity used by the oracle:
  *
  *     a point at distance ρ from the boundary is cut to (ρ − tipRadius) / tanHalf,
  *     clamped at the cap.
  *
- * THE CAP is the item's stated depth, bounded by the blank's own floor (`thickness − minFloor`).
- * The cap is where the floor goes flat; depth-follows-width applies below it, never past it.
- *
- * THE CORE is what the deepest contour cannot reach. At the cap the tip's flat covers a band of
- * `tipRadius` inside the cap contour, so the untouched region is the inward offset by
- * `capWallRadius + tipRadius` (`coreOffsetRadius`). Program 1's 2 mm pass clears it where it
- * reaches; the V's own flat tip clears the rest at the cap, in parallel passes stepped by
- * `tipClearStepover`. This module owns the numbers; the Clipper offsets and the moves are the
- * CAM's (slice 2).
- *
- * NO FLAT: every function here takes a `VCone`. There is no flat-radius fallback, and the core
- * clearing uses the tool's real tip flat, not a cone treated as a flat end mill.
+ * NO FLAT: every function here takes a `VCone`. There is no flat-radius fallback, and the plane
+ * stepover uses the plane groove's real width, not a cone treated as a flat end mill.
  */
 
 import { flankHeightAboveTip, type VCone } from './vProfile';
@@ -36,11 +42,15 @@ export interface VCarveLevel {
 }
 
 /**
- * The shipped core-clearing stepover, as a FRACTION of the tip's flat diameter: 0.6 × 0.3 mm =
- * 0.18 mm on the 30° × 0.3 bit. It is a seed for the shop setting `vcarve.coreStepoverRatio`
- * (the setting itself is slice 2's), kept here so the CAM and its tests cannot disagree.
+ * The shipped V-carve stepover, as a FRACTION of the groove's width at the colour plane
+ * (`2·rPlane`): 0.6. On the thin blank that is 0.6 × 0.40396 = 0.242 mm; on the badge
+ * 0.6 × 0.39378 = 0.236 mm. It is the seed for the shop setting `vcarve.stepoverRatio` (the
+ * setting itself is a later slice), kept here so the feeds rows and the CAM cannot disagree.
  */
-export const DEFAULT_CORE_STEPOVER_RATIO = 0.6;
+export const DEFAULT_V_CARVE_STEPOVER_RATIO = 0.6;
+
+/** The machine's minimum X/Y step must be beaten by this many groove widths (#221). */
+export const V_CARVE_STEP_MARGIN = 2;
 
 function positive(name: string, value: number): void {
   if (!Number.isFinite(value) || value <= 0) {
@@ -82,9 +92,9 @@ export function vCarveLevels(cone: VCone, cap: number, pitch: number): VCarveLev
  * The cap for one item: its STATED depth, lowered only by the blank's hard floor. `null` when
  * either the item states no depth or the blank has no room left under `minFloor`.
  *
- * This is deliberately not a film-plus-margin calculation. The two-colour reveal is a consequence
- * of the item's depth, not a reason to choose a different one; `minFloor` is the job's own
- * material that must remain (1.0 mm by default, `depthBounds.ts`).
+ * This is the ladder's cap and is not the shipped model's depth: the shipped colour-plane model
+ * takes the item's depth `D` directly, and the every-item depth checks already hold it under
+ * `thickness − minFloor` (1.0 mm by default, `depthBounds.ts`).
  */
 export function vCarveCap(itemDepth: number, thickness: number, minFloor: number): number | null {
   const ceiling = thickness - minFloor;
@@ -123,14 +133,100 @@ export function cutDepthAtDistance(cone: VCone, rho: number, cap: number): numbe
 }
 
 /**
- * The parallel-pass stepover for clearing a cap core with the V's own flat tip, mm:
- * `tip flat diameter × ratio`. `null` for a sharp point, which has no flat to clear with — the
- * CAM must then leave the core to the first cutter or refuse.
+ * The three outlines one V-carve region has, and the numbers that place them (#221).
+ *
+ * All lengths are mm. `planeRadius` is the number the toolpath actually offsets the design by;
+ * the floor and the surface are consequences of the cone, not separate offsets the CAM applies.
  */
-export function tipClearStepover(cone: VCone, ratio: number = DEFAULT_CORE_STEPOVER_RATIO): number | null {
+export interface VCarvePlane {
+  /** The item's depth below the top face, mm. The tip plane. */
+  depth: number;
+  /** The colour boundary's depth below the top face, mm; 0 when the blank states no film. */
+  film: number;
+  /** `depth − film`, floored at 0: how far the floor is below the colour plane, mm. */
+  belowPlane: number;
+  /** Half-width of the groove AT THE COLOUR PLANE: `tipRadius + belowPlane·tanHalf`, mm. */
+  planeRadius: number;
+  /** Full groove width at the colour plane, `2·planeRadius`, mm. */
+  grooveWidth: number;
+  /** How much narrower the floor is than the design, per side, mm (`belowPlane·tanHalf`). */
+  floorInset: number;
+  /** How much wider the surface opening is than the design, per side, mm. */
+  surfaceOutset: number;
+  /** Floor-to-surface widening per side, mm — the whole cone's `depth·tanHalf` span. */
+  wallOffset: number;
+}
+
+/**
+ * The colour-plane geometry for one item. `film` is the colour boundary's depth below the top
+ * face (0/null for a blank with no print): the plane then IS the floor and `rPlane` is the tip
+ * radius, which is the "a pointed bit draws a line" case the run sheet describes.
+ *
+ * A cut SHALLOWER than the film has no colour plane at all; it is modelled with the plane at the
+ * floor (`belowPlane = 0`) so the arithmetic stays finite. The depth bounds that stop such a cut
+ * hiding the second colour belong to the item's own depth intent (`item-depth-bound`), not here.
+ */
+export function vCarvePlane(cone: VCone, depth: number, film: number | null): VCarvePlane {
+  positive('depth', depth);
+  const f = film === null || !Number.isFinite(film) || film <= 0 ? 0 : film;
+  // The plane is the colour boundary when the cut reaches it. With no film it is the floor; with a
+  // film the cut does not reach, there is no plane below the floor either, so the floor stands in.
+  const belowPlane = f > 0 ? Math.max(0, depth - f) : 0;
+  const planeRadius = cone.tipRadius + belowPlane * cone.tanHalf;
+  return {
+    depth,
+    film: f,
+    belowPlane,
+    planeRadius,
+    grooveWidth: planeRadius * 2,
+    floorInset: belowPlane * cone.tanHalf,
+    // From the plane to the top face. No film puts the plane at the floor, so the cone's whole
+    // depth widens the surface; a film wider than the cut stops at the cut's own depth.
+    surfaceOutset: (f > 0 ? Math.min(depth, f) : depth) * cone.tanHalf,
+    wallOffset: depth * cone.tanHalf,
+  };
+}
+
+/**
+ * The parallel-pass stepover for a V-carve at this plane, mm: `ratio × grooveWidth`. The groove
+ * width is measured AT THE COLOUR PLANE — not the tip flat — because that is the width whose
+ * adjacent passes must meet for the second colour's area to be the design.
+ */
+export function vCarvePlaneStepover(
+  plane: VCarvePlane,
+  ratio: number = DEFAULT_V_CARVE_STEPOVER_RATIO,
+): number {
   if (!Number.isFinite(ratio) || ratio <= 0 || ratio > 1) {
     throw new RangeError(`stepover ratio must be in (0, 1], got ${ratio}`);
   }
-  if (!(cone.tipRadius > 0)) return null;
-  return cone.tipRadius * 2 * ratio;
+  return plane.grooveWidth * ratio;
+}
+
+/**
+ * Why a plane's groove is too narrow to machine, or null when it is fine (#221).
+ *
+ * The controller moves in whole X/Y steps, so a groove narrower than a few of them cannot be
+ * resolved into the two walls the design asks for — the maintainer's "it has to be at least
+ * larger than the minimum x or y step". `machineStepMm` is that step, read from the MACHINE
+ * RECORD's steps-per-mm (`MillProfile.axisSteps`), never a shop tunable. The refusal is by name and
+ * says which way out: go deeper (widening the groove at the plane) or widen the stroke.
+ */
+export function vCarveGrooveRefusal(
+  plane: VCarvePlane,
+  machineStepMm: number,
+  margin: number = V_CARVE_STEP_MARGIN,
+): string | null {
+  if (!(machineStepMm > 0) || !Number.isFinite(machineStepMm)) {
+    throw new RangeError(`machineStepMm must be > 0 and finite, got ${machineStepMm}`);
+  }
+  const minimum = machineStepMm * margin;
+  if (plane.grooveWidth >= minimum) return null;
+  const microns = (v: number): string => {
+    const rounded = Math.round(v * 1e6) / 1e3;
+    return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(3).replace(/0+$/, '').replace(/\.$/, '');
+  };
+  return (
+    `the groove at the colour plane would be ${microns(plane.grooveWidth)} µm, under the ` +
+    `machine's ${microns(minimum)} µm step: go deeper or widen the stroke`
+  );
 }

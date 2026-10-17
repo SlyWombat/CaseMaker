@@ -150,6 +150,16 @@ export interface RotaryProfile {
   sources: Record<RotarySourcedField, string>;
 }
 
+/**
+ * One step of the controller's axes, as steps per millimetre (#221). Part of the MACHINE RECORD:
+ * a cutter's narrowest useful groove is judged against `1 / xyPerMm`, never against a setting.
+ */
+export interface AxisSteps {
+  xyPerMm: number;
+  zPerMm: number;
+  source: string;
+}
+
 export interface MillProfile extends MachineIdentity {
   /** A mill. The only process with a spindle and a tool change (#183: Z1-only). */
   process: 'mill';
@@ -192,6 +202,18 @@ export interface MillProfile extends MachineIdentity {
    * assume it goes, to print a number".
    */
   rapidEstimate: RapidEstimate;
+  /**
+   * The axes' step resolution, from the controller's own steps-per-mm (#221). This is the
+   * MACHINE's number, not a shop tunable: one X/Y microstep is `1 / xyPerMm` mm, and a V-carve
+   * whose colour-plane groove is narrower than a few of them cannot be resolved into the two
+   * walls the design asks for (`vCarveGrooveRefusal`).
+   *
+   * The Z1's 1600/3200 are the firmware's SHIPPED config (`configZ1.default`). They are not a
+   * reading of this machine: `alpha_steps_per_mm` and `beta_steps_per_mm` answer *not in config*
+   * on `/sd/config.txt`, and the compiled-in `firm` source is silent over the bridge (#208 B6/B7,
+   * `Z1-Bridge-Protocol.md`). The source string says exactly that, so a later read can replace it.
+   */
+  axisSteps: AxisSteps;
   maxRpm: number;
   /** `isATC=0`: a manual tool change, which is what makes `M490.1`/`M490.2` the tool-change path. */
   hasATC: false;
@@ -512,6 +534,14 @@ export const Z1: MillProfile = {
     accelMmPerS2: 150,
     source: 'config read 2026-10-07 + stopwatch 2026-10-08 (#281)',
   },
+  // The firmware's SHIPPED defaults (`configZ1.default`, /Makera-Parity.md §11.3), not a device
+  // read: both keys answer *not in config*, and the compiled-in `firm` source is silent over the
+  // bridge (#208 B7). One X/Y step is 1/1600 mm = 0.625 µm.
+  axisSteps: {
+    xyPerMm: 1600,
+    zPerMm: 3200,
+    source: 'configZ1.default, shipped firmware default — keys absent from /sd/config.txt and unreadable over the bridge (#208 B6/B7)',
+  },
   maxRpm: 13000,
   hasATC: false,
   toolSlots: 0,
@@ -580,6 +610,15 @@ export const Z1: MillProfile = {
 
 /** The only supported MILL machine. A second one is configuration here, not a refactor elsewhere. */
 export const MACHINES: Readonly<Record<string, MillProfile>> = { Z1 };
+
+/**
+ * The smallest X/Y move the controller can make, mm: one step of the axes (#221). Read from the
+ * MACHINE RECORD's `axisSteps`, so a second machine (or a real read of this one) changes the V
+ * groove bound by changing one field, and no shop setting can move it.
+ */
+export function minimumXyStepMm(machine: MillProfile): number {
+  return 1 / machine.axisSteps.xyPerMm;
+}
 
 /**
  * The nozzle width assumed when the printer is not named. Nearly every consumer FDM machine
@@ -750,6 +789,13 @@ export const millProfileSchema = z.object({
     xyMmPerMin: finite.positive(),
     zMmPerMin: finite.positive(),
     accelMmPerS2: finite.positive(),
+    source: z.string().min(1),
+  }),
+  // #221 — the axes' own step resolution. Positive like every other motion number; a zero would
+  // claim infinitely fine steps, which is a claim about hardware this field cannot make.
+  axisSteps: z.object({
+    xyPerMm: finite.positive(),
+    zPerMm: finite.positive(),
     source: z.string().min(1),
   }),
   maxRpm: finite.positive(),

@@ -84,6 +84,29 @@ describe('pocketLoops (#172)', () => {
     expect(() => pocketLoops(rect(10, 5), 0.5, 0.5, fakeRectOffset)).not.toThrow();
   });
 
+  it('lets a V-bit floor use its TIP WIDTH, and refuses one pitch past it (#221)', () => {
+    // The floor is cleared by the 0.15 mm tip disc, so a 0.24 mm pitch leaves no spine even though
+    // it is past the radius. The bound is the tip WIDTH, 0.3 mm; past it the disc passes separate.
+    const rings = pocketLoops(rect(10, 5), 0.15, 0.24, fakeRectOffset, 0.3);
+    expect(rings.length).toBeGreaterThan(0);
+    const refusal = (() => {
+      try {
+        pocketLoops(rect(10, 5), 0.15, 0.31, fakeRectOffset, 0.3);
+      } catch (error) {
+        return error;
+      }
+      return null;
+    })();
+    expect(refusal).toBeInstanceOf(StepOverTooLargeError);
+    expect((refusal as StepOverTooLargeError).limit).toBe(0.3);
+    expect((refusal as StepOverTooLargeError).message).toContain('0.3 mm cutter width');
+  });
+
+  it('refuses a non-positive maxStepOver rather than treating it as no limit', () => {
+    expect(() => pocketLoops(rect(10, 5), 0.5, 0.4, fakeRectOffset, 0)).toThrow(/maxStepOver/);
+    expect(() => pocketLoops(rect(10, 5), 0.5, 0.4, fakeRectOffset, -1)).toThrow(/maxStepOver/);
+  });
+
   it('a region of empty polygons produces no rings', () => {
     expect(pocketLoops([], 0.5, 0.4, fakeRectOffset)).toEqual([]);
   });

@@ -172,12 +172,12 @@ describe('the material list the job may be cut in (#347)', () => {
     const values = materialOptionsFor(Z1).map((o) => o.value);
     expect(values).toEqual([
       // What this app can cut with no help, in the table's own order…
-      'softwood', 'hardwood', 'mdf', 'pla',
+      'softwood', 'hardwood', 'mdf', 'pla', 'petg',
       // …then the Z1's own list, which the starting table has no row for: the vendor's
       // `t_MaterialList` in this app's words, metals included, plus the printed-blank classes
       // PrusaSlicer names (#456).
       'abs', 'acrylic',
-      'petg', 'pet', 'asa', 'hips', 'pa', 'pa-cf', 'pa-gf', 'pc', 'pp', 'tpu', 'pva',
+      'pet', 'asa', 'hips', 'pa', 'pa-cf', 'pa-gf', 'pc', 'pp', 'tpu', 'pva',
       'aluminium-6061', 'aluminium-7075', 'brass', 'copper',
     ]);
     // Every one of them has a word to show; offering a value the app cannot label would render a
@@ -188,7 +188,7 @@ describe('the material list the job may be cut in (#347)', () => {
   it('answers with the table’s materials when there is no machine to ask', () => {
     // The panel builds this list from `jobMachine(job)`, which always answers — but the no-argument
     // case must still be a usable list rather than an empty control.
-    expect(materialOptionsFor().map((o) => o.value)).toEqual(['softwood', 'hardwood', 'mdf', 'pla']);
+    expect(materialOptionsFor().map((o) => o.value)).toEqual(['softwood', 'hardwood', 'mdf', 'pla', 'petg']);
   });
 
   it('offers the metals on the one machine this app models, and only what it declares', () => {
@@ -201,7 +201,7 @@ describe('the material list the job may be cut in (#347)', () => {
     // A machine that declares nothing extra gets the table and nothing more — the profile is the
     // second half of the union, not a promise about every material the app knows.
     const bare = { ...Z1, materials: [] };
-    expect(materialOptionsFor(bare).map((o) => o.value)).toEqual(['softwood', 'hardwood', 'mdf', 'pla']);
+    expect(materialOptionsFor(bare).map((o) => o.value)).toEqual(['softwood', 'hardwood', 'mdf', 'pla', 'petg']);
   });
 });
 

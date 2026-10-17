@@ -100,7 +100,7 @@ describe('the location contract (#412)', () => {
     ).good;
     const present = LocationDocSchema.safeParse({ ...older, feeds: good });
     expect(present.success, JSON.stringify(present.error?.issues)).toBe(true);
-    expect(present.data!.feeds).toHaveLength(10);
+    expect(present.data!.feeds).toHaveLength(11);
 
     // The cross-row rule travels with the document through the same `superRefine`.
     const overlap = [

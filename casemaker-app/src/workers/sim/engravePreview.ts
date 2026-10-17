@@ -110,6 +110,21 @@ export interface EngravePreviewFloor {
   mesh: NodeMeshOutput;
 }
 
+/**
+ * One of a V-carve's three outlines (#221), in the work frame. The SURFACE is the opening at the
+ * top face (depth 0), the PLANE is the design at the colour plane (or the floor when the blank has
+ * no film), and the FLOOR is the pocket bottom at the item's depth. Drawn as lines only — the
+ * cutting solid is the surface opening, and the floor is already a mesh.
+ */
+export interface EngravePreviewOutline {
+  labelId: string;
+  level: 'surface' | 'plane' | 'floor';
+  /** Depth below the top face at which the outline is drawn, mm. Positive. */
+  depth: number;
+  /** Contours, outer CCW and holes CW, one entry per ring. */
+  rings: [number, number][][];
+}
+
 /** One vise jaw, drawn where the user SAID it is (un-inflated), from `viseEnvelope`. */
 export interface EngravePreviewFixture {
   id: string;
@@ -212,6 +227,11 @@ export interface EngravePreview {
   stages: EngravePreviewStage[];
   /** One mesh per cut — label, shape, drill or trace: the bottom it leaves at its depth. */
   floors: EngravePreviewFloor[];
+  /**
+   * The surface, colour-plane and floor outlines of every V-carve region (#221). Empty for a flat
+   * cutter, whose three outlines are one and the same polygon set and are already the cut body.
+   */
+  outlines: EngravePreviewOutline[];
   /** The vise jaws (un-inflated), from `viseEnvelope`. */
   fixture: EngravePreviewFixture[];
   /** The sacrificial material (#213), from `sacrificialBoxes`; empty when the job has none. */
@@ -415,6 +435,7 @@ export function createEngravePreviewer(tl: ManifoldToplevel): EngravePreviewer {
     // group at a time, so the slider can stop between cut depths without a second geometry pass.
     const cutBodies: { body: ManifoldInstance; depth: number }[] = [];
     const floors: EngravePreviewFloor[] = [];
+    const outlines: EngravePreviewOutline[] = [];
 
     // One pass over `cuts` — labels, shapes (#214), drills (#220) and traces (#219) alike. Each
     // carries its own polygons and its own depth already, so this loop is about Manifold, not about
@@ -454,25 +475,44 @@ export function createEngravePreviewer(tl: ManifoldToplevel): EngravePreviewer {
         continue;
       }
 
-      const openedCS = executeProfile(tl, { kind: 'p-poly', contours: cut.polygons });
+      // A V-carve's stock removal is its SURFACE opening at the top face, and its floor is the
+      // floor polygon set — narrower than the design by `e·tanHalf` per side (#221). A flat cut
+      // has one polygon set for all three, exactly as before.
+      const carve = cut.vCarve;
+      const bodyPolygons = carve?.surface ?? cut.polygons;
+      const floorPolygons = carve?.floor ?? cut.polygons;
 
-      // The cut: the opened region from −depth up PAST the top face (OVERSHOOT_MM, `sweep.ts`),
-      // so the subtraction never has a coplanar face at Z = 0 to fight with.
-      const cutBody = tl.Manifold.extrude(openedCS, cut.depth + OVERSHOOT_MM);
-      cutBodies.push({ body: cutBody.translate([0, 0, -cut.depth]), depth: cut.depth });
-      cutBody.delete();
+      if (bodyPolygons.length > 0) {
+        const openedCS = executeProfile(tl, { kind: 'p-poly', contours: bodyPolygons });
+        // The cut: the opening from −depth up PAST the top face (OVERSHOOT_MM, `sweep.ts`), so the
+        // subtraction never has a coplanar face at Z = 0 to fight with.
+        const cutBody = tl.Manifold.extrude(openedCS, cut.depth + OVERSHOOT_MM);
+        cutBodies.push({ body: cutBody.translate([0, 0, -cut.depth]), depth: cut.depth });
+        cutBody.delete();
+        openedCS.delete();
+      }
 
-      // The floor: the same opened region as a sliver at the cut's bottom. A drill and a trace have
-      // one too — a plunge and a swept flat end mill both leave a FLAT bottom at `depth`, which is
-      // exactly what a pocketed region leaves — so `floors` stays "the bottom of every cut" and the
-      // viewport's depth ramp gives a groove the same colour treatment a pocket gets.
-      const floorBody = tl.Manifold.extrude(openedCS, FLOOR_THICKNESS_MM);
-      const floorSolid = floorBody.translate([0, 0, -cut.depth]);
-      floorBody.delete();
-      floors.push({ labelId: cut.id, depth: cut.depth, mesh: meshOutputOf(floorSolid) });
-      floorSolid.delete();
+      // The floor: a sliver at the cut's bottom. A drill and a trace have one too — a plunge and a
+      // swept flat end mill both leave a FLAT bottom at `depth` — so `floors` stays "the bottom of
+      // every cut" and the viewport's depth ramp gives a groove the same treatment a pocket gets.
+      if (floorPolygons.length > 0) {
+        const floorCS = executeProfile(tl, { kind: 'p-poly', contours: floorPolygons });
+        const floorBody = tl.Manifold.extrude(floorCS, FLOOR_THICKNESS_MM);
+        const floorSolid = floorBody.translate([0, 0, -cut.depth]);
+        floorBody.delete();
+        floors.push({ labelId: cut.id, depth: cut.depth, mesh: meshOutputOf(floorSolid) });
+        floorSolid.delete();
+        floorCS.delete();
+      }
 
-      openedCS.delete();
+      if (carve !== undefined) {
+        const outline = (level: EngravePreviewOutline['level'], depth: number, rings: [number, number][][]) => {
+          if (rings.length > 0) outlines.push({ labelId: cut.id, level, depth, rings });
+        };
+        outline('surface', 0, carve.surface);
+        outline('plane', carve.planeDepth, carve.plane);
+        outline('floor', cut.depth, carve.floor);
+      }
     }
 
     // §5.7 — the cumulative states the design ↔ as-cut slider steps through, built in the same
@@ -631,6 +671,7 @@ export function createEngravePreviewer(tl: ManifoldToplevel): EngravePreviewer {
       stock: stockMesh,
       stages,
       floors,
+      outlines,
       fixture,
       sacrificial,
       voids,

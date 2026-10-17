@@ -33,7 +33,7 @@ import { useEngraveJobStore } from '@/store/engraveJobStore';
 import { useViewportStore } from '@/store/viewportStore';
 import type { NodeMeshOutput } from '@/workers/geometry/meshOutput';
 import type { ViseParams } from '@/types/engraveJob';
-import type { EngravePreviewLost } from '@/workers/sim/engravePreview';
+import type { EngravePreviewLost, EngravePreviewOutline } from '@/workers/sim/engravePreview';
 import type { EngravePreviewRegistrationBand } from '@/workers/sim/engraveRegistration';
 import { mm } from '@/engine/cnc/engrave/depthBounds';
 import { geometryFromMesh, SACRIFICIAL_COLOR, segmentGeometry } from './simGeometry';
@@ -217,6 +217,40 @@ function Void({
         </ProjectedLabel>
       )}
     </>
+  );
+}
+
+/**
+ * How far above its own level a V-carve outline floats, mm. The floor is a mesh whose top face
+ * sits exactly at `depth`; without the lift the outline would z-fight with it, and the surface
+ * outline with the stock's top face.
+ */
+const OUTLINE_LIFT = 0.02;
+
+/**
+ * The three V-carve levels (#221): the opening at the top face, the colour plane where the
+ * design is correct, and the floor the tip leaves. Distinct hues because the POINT of drawing
+ * them together is to see how far each one sits from the design.
+ */
+const OUTLINE_COLOR: Record<EngravePreviewOutline['level'], string> = {
+  surface: '#f5a524',
+  plane: '#4cc3ff',
+  floor: '#8bd450',
+};
+
+/** One V-carve outline: every ring drawn as line segments at its own depth. */
+function Outline({ labelId, level, depth, rings }: EngravePreviewOutline) {
+  const z = -depth + OUTLINE_LIFT;
+  const geom = useMemo(() => voidGeometry(rings, z), [rings, z]);
+  useEffect(() => () => geom.dispose(), [geom]);
+  return (
+    <lineSegments
+      geometry={geom}
+      name={`engrave-${level}-outline-${labelId}`}
+      userData={{ engraveOutline: level, labelId }}
+    >
+      <lineBasicMaterial color={OUTLINE_COLOR[level]} />
+    </lineSegments>
   );
 }
 
@@ -509,6 +543,10 @@ export function EngravePreview() {
           glyph "lost". Scrub back and the claim is withheld with the geometry. */}
       {scrub.atCut &&
         preview.lost.map((l) => <Lost key={l.labelId} item={l} />)}
+
+      {preview.outlines.map((o) => (
+        <Outline key={`${o.labelId}:${o.level}`} {...o} />
+      ))}
 
       {preview.voids.map((v) => (
         <Void key={v.id} id={v.id} rings={v.rings} name={v.name} membrane={v.membrane} limit={v.limit} />

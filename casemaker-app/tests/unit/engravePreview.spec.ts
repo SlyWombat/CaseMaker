@@ -15,7 +15,7 @@ import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { effectiveMargins, MARGIN_DEFAULTS } from '@/engine/cnc/engrave/depthBounds';
 import { jobTool, type JobFinding } from '@/engine/cnc/engrave/jobSetup';
 import { toPartPlan } from '@/engine/cnc/engrave/partPlan';
-import { cuttingRadiusForSweep, type Tool } from '@/engine/cnc/tool';
+import { cuttingRadiusForSweep, flatEndMill, type Tool } from '@/engine/cnc/tool';
 import { grooveRadiusAt, vCone } from '@/engine/cnc/vProfile';
 import { segmentsForRadius } from '@/engine/compiler/arcResolution';
 import { OVERSHOOT_MM } from '@/workers/geometry/sweep';
@@ -547,6 +547,83 @@ describe('engravePreview — drills and traces are in the picture (#288)', () =>
     const p = buildPreview(job);
     expect(p.floors.map((f) => f.labelId)).toEqual(cutIds);
     for (const floor of p.floors) expect(meshVolume(floor.mesh)).toBeGreaterThan(0);
+  });
+});
+
+describe('engravePreview — V-carve outlines (#221)', () => {
+  // Its own previewer: the "null for an older generation" test pins the shared one's latest
+  // generation to 1000, so a shared counter would make every `++gen` here stale.
+  const pv = createEngravePreviewer(tl);
+  let g = 0;
+  const build = (job: EngraveJob) => {
+    const p = preview(pv, job, ++g);
+    if (!p) throw new Error('the previewer refused a fresh generation');
+    return p;
+  };
+
+  /** The bench bit: 30° included, 15° from the axis, 0.3 mm tip, 3.175 mm shank. */
+  const bit30 = () =>
+    flatEndMill(0.3, {
+      name: 'Single Flute Engraving Bit 30 x 0.3',
+      typeText: 'Engraving',
+      shape: 'engraving',
+      handleDiameter: 3.175,
+      diameter: 3.175,
+      tipDiameter: 0.3,
+      angle: 30,
+      halfAngle: 15,
+    });
+
+  const vJob = (): EngraveJob => {
+    const base = defaultEngraveJob();
+    return {
+      ...base,
+      stock: {
+        length: 38.1,
+        width: 76.2,
+        thickness: 1.5,
+        material: 'petg',
+        print: { split: 1.3, layerHeight: 0.2 },
+      },
+      labels: [{ ...base.labels[0]!, position: { x: 19, y: 28 }, size: 8, depth: 0.394 }],
+      toolKey: 'inv:kz-engrave-30-0-3',
+      tool: bit30(),
+    };
+  };
+
+  /** Shoelace area of a polygon set, mm² (outer CCW minus holes CW). */
+  const ringsArea = (rings: [number, number][][]): number =>
+    rings.reduce((sum, ring) => {
+      let a = 0;
+      for (let i = 0; i < ring.length; i++) {
+        const [x0, y0] = ring[i]!;
+        const [x1, y1] = ring[(i + 1) % ring.length]!;
+        a += x0 * y1 - x1 * y0;
+      }
+      return sum + a / 2;
+    }, 0);
+
+  it('draws the surface opening, the colour plane and the floor for a V region', () => {
+    const job = vJob();
+    const p = build(job);
+    const id = job.labels[0]!.id;
+    const mine = p.outlines.filter((o) => o.labelId === id);
+    expect(mine.map((o) => o.level)).toEqual(['surface', 'plane', 'floor']);
+
+    const surface = mine.find((o) => o.level === 'surface')!;
+    const plane = mine.find((o) => o.level === 'plane')!;
+    const floor = mine.find((o) => o.level === 'floor')!;
+    expect(surface.depth).toBe(0);
+    expect(plane.depth).toBeCloseTo(0.2, 12); // the film
+    expect(floor.depth).toBeCloseTo(0.394, 12);
+
+    // The design is at the plane; the floor is e·tan narrower and the surface f·tan wider.
+    expect(ringsArea(floor.rings)).toBeLessThan(ringsArea(plane.rings));
+    expect(ringsArea(surface.rings)).toBeGreaterThan(ringsArea(plane.rings));
+  });
+
+  it('draws no outlines for a flat end mill: its three levels are one polygon set', () => {
+    expect(build(defaultEngraveJob()).outlines).toEqual([]);
   });
 });
 

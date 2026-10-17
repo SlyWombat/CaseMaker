@@ -39,7 +39,7 @@ import { viseForNewJob } from '@/engine/cnc/fixture';
 import { defaultBadgeParams } from '@/types/badge';
 import type { ToolpathIR } from '@/engine/cnc/cam/ir';
 import { cuttingForTrace, cuttingRadiusForSweep, flatEndMill, isVTraceTool, traceRadiusAt, type Tool } from '@/engine/cnc/tool';
-import type { EngraveDrill, EngraveJob, EngraveKeepOut, EngraveLabel, EngraveLineItem, EngraveStrokeLabelItem, EngraveThreadItem, EngraveTraceItem } from '@/types/engraveJob';
+import type { EngraveDrill, EngraveJob, EngraveKeepOut, EngraveLabel, EngraveLineItem, EngraveStrokeLabelItem, EngraveThreadItem, EngraveTraceItem, EngraveVectorShape } from '@/types/engraveJob';
 
 describe('engraveGenerate with a saved machine frame (#297)', () => {
   const read = calibrationFromReplies(new Map(Object.entries(Z1_FRAME_REPLIES)), {
@@ -916,6 +916,18 @@ describe('a V-bit trace job (#405)', () => {
     ...over,
   });
 
+  /**
+   * A filled-text REGION (not a trace) centred on the blank, small enough for the bench stock:
+   * the default job's `CASE` label, re-laid at 8 mm on a 38.1 × 76.2 mm blank.
+   */
+  const regionLabel = (over: Partial<EngraveLabel> = {}): EngraveLabel => ({
+    ...defaultEngraveJob().labels[0]!,
+    position: { x: 19, y: 28 },
+    size: 8,
+    depth: 1,
+    ...over,
+  });
+
   /** The COMMITTED bench job, straight off disk — the real document, not a re-typed copy. */
   const benchJob = (): EngraveJob => {
     const raw = readFileSync(new URL('../../../docs/bench/single-barrel.job.json', import.meta.url), 'utf8');
@@ -1009,20 +1021,97 @@ describe('a V-bit trace job (#405)', () => {
     expect(cuttingForTrace(flatEndMill(1.0))).toMatchObject({ ok: true, tool: { shape: 'flat', radius: 0.5 } });
   });
 
-  it('refuses a REGION cut with a V-bit by name, pointing at #221', () => {
-    const job = traceJob([title()], {
-      labels: defaultEngraveJob().labels.slice(0, 1),
+  it('accepts a REGION cut with a V-bit, and takes its offset from the colour plane (#221)', () => {
+    // The same job that was refused before #221, now with the colour-plane model: no film, so the
+    // plane IS the floor and the offset is the 0.15 mm tip radius.
+    const job = traceJob([], {
+      labels: [regionLabel()],
     });
     const g = generate(tl, job);
-    expect(g.ok).toBe(false);
-    expect(g.stage).toBe('findings');
-    expect(g.nc).toBeNull();
-    const refusal = g.findings.find((f) => f.code === 'region-v-carve-unavailable');
+    expect(g.findings.filter((f) => f.severity === 'error')).toEqual([]);
+    expect(g.ok).toBe(true);
+    expect(g.cam!.operations).toBe(1);
+    expect(g.nc).toMatch(/G1 Z-1\b/);
+
+    const r = regions(tl, job);
+    const cut = r.cuts.find((c) => c.id === job.labels[0]!.id)!;
+    expect(cut.vCarve).toBeDefined();
+    expect(cut.vCarve!.planeRadius).toBeCloseTo(0.15, 12);
+    expect(cut.vCarve!.planeDepth).toBeCloseTo(1, 12);
+    // No film: the plane is the floor, so the design IS the floor and the cone widens only upward.
+    expect(cut.vCarve!.floorInset).toBe(0);
+    expect(cut.vCarve!.surfaceOutset).toBeCloseTo(1 * Math.tan(Math.PI / 12), 12);
+  });
+
+  it('refuses a groove narrower than the machine step, by name, and says the way out (#221)', () => {
+    // A pointed bit with no film: the plane IS the floor and the tip has no width there, so the
+    // groove is 0 µm — under the Z1's 2 × 0.625 µm bar. `regions` stops before feeds, so the
+    // geometry refusal is what answers.
+    const pointed = bit30({ tipDiameter: 0, diameter: 3.175 });
+    const job = traceJob([], {
+      labels: [regionLabel({ depth: 0.002 })],
+      tool: pointed,
+    });
+    const r = regions(tl, job);
+    const refusal = r.findings.find((f) => f.code === 'vcarve-groove-too-narrow');
     expect(refusal).toBeDefined();
     expect(refusal!.severity).toBe('error');
-    expect(refusal!.message).toContain('#221');
-    // A refusal of the REGION, not of the cutter: the same tool cuts the same job's trace.
-    expect(g.nc).toBeNull();
+    expect(refusal!.message).toContain('0 µm');
+    expect(refusal!.message).toContain('1.25 µm');
+    expect(refusal!.message).toContain('go deeper or widen the stroke');
+  });
+
+  it('warns when two items’ surface openings merge, and NAMES the pair (#221)', () => {
+    // Two labels on the same spot: their colour-plane designs are separate items but their surface
+    // openings coincide, so the V leaves a ridge of top colour between walls that are one cavity.
+    const first = regionLabel({ id: 'pair-a' });
+    const second = regionLabel({ id: 'pair-b' });
+    const job = traceJob([], {
+      labels: [first, second],
+      stock: { length: 38.1, width: 76.2, thickness: 3.81, material: 'petg', print: { split: 3.61, layerHeight: 0.2 } },
+      minFloor: 1,
+    });
+    const r = regions(tl, job);
+    const merge = r.findings.find((f) => f.code === 'vcarve-surface-merge');
+    expect(merge).toBeDefined();
+    expect(merge!.severity).toBe('warning');
+    expect(merge!.labelId).toBe(first.id);
+    expect(merge!.message).toContain('CASE');
+    // A warning, not a refusal: the colour line at the plane is still correct.
+    expect(r.findings.filter((f) => f.severity === 'error' && f.code === 'vcarve-surface-merge')).toEqual([]);
+  });
+
+  it('warns when two strokes of ONE item merge, closing a gap narrower than the surface outset (#221)', () => {
+    // Two 1 × 1 lobes of ONE vector, 0.08 mm apart. The design keeps the gap at the colour plane
+    // (their plane openings are disjoint), but each wall's opening at the top face spreads
+    // 0.2·tan15 = 0.0536 mm per side, so 0.107 mm of total spread closes the 0.08 mm gap: the
+    // warning is about the item, not a pair.
+    const lobes: EngraveVectorShape = {
+      id: 'lobe-item',
+      kind: 'vector',
+      sourceName: 'spec',
+      contours: [
+        [[-1.04, -0.5], [-0.04, -0.5], [-0.04, 0.5], [-1.04, 0.5]],
+        [[0.04, -0.5], [1.04, -0.5], [1.04, 0.5], [0.04, 0.5]],
+      ],
+      fillRule: 'NonZero',
+      width: 2.08,
+      height: 1,
+      position: { x: 19, y: 28 },
+      rotation: 0,
+      depth: 0.394,
+      enabled: true,
+    };
+    const job = traceJob([], {
+      labels: [],
+      vectors: [lobes],
+      stock: { length: 38.1, width: 76.2, thickness: 1.5, material: 'petg', print: { split: 1.3, layerHeight: 0.2 } },
+    });
+    const r = regions(tl, job);
+    const merge = r.findings.find((f) => f.code === 'vcarve-surface-merge' && f.labelId === 'lobe-item');
+    expect(merge).toBeDefined();
+    expect(merge!.severity).toBe('warning');
+    expect(merge!.message).toContain('0.107');
   });
 
   it('REFUSES a METAL-line V-bit on a PLA job, by name', () => {

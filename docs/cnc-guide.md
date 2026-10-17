@@ -58,7 +58,8 @@ oversight):
   cleared after — never in the `.nc`, which the upload gate would refuse. Whether `G32` is
   still needed on a face the app has skimmed is #176's bench question.
 - 3D surfacing.
-- V-carving regions. A V-bit cuts traces and stroke labels; it does not open a region (#221).
+- V-carving a region whose groove at the colour plane is narrower than one machine step. The app
+  refuses it by name (`vcarve-groove-too-narrow`, §8.1); it does open regions otherwise (#221).
 - Laser work.
 - The 4th axis.
 - Multi-tool jobs **in one program**. One setup is one tool and one `.nc` (#419); a job with
@@ -110,11 +111,16 @@ rotation, and leaves it free to slide in Y. It mounts with the wasteboard remove
 dimensions are published nowhere, which is why the app ships defaults and asks you to
 measure your own (chapter 5).
 
-**Cutters: flat end mills only, for now.** A V-bit *couples depth to stroke width* — cut
-deeper and the groove grows wider — so a per-label depth control would stop meaning what the
-screen says (`/Fabrication.md` §7.4). A flat end mill pockets the glyph region, where depth
-is genuinely independent. That is the honest reason the app sweeps flat end mills only; it is
-not that a V-bit is worse at small text.
+**Cutters: a V-bit is correct at the colour plane.** A V-bit *couples depth to stroke width* —
+cut deeper and the groove grows wider — so the design can only be right at one depth. Since #221
+that depth is explicit: the **colour plane** sits at the blank's film thickness (the coloured
+layer of a two-colour blank), and the design is the groove there. The item's depth is the FLOOR.
+With film `f`, depth `D` and half-angle `h`, the toolpath offsets the design by
+`tipRadius + (D − f)·tan(h)` at the plane, the floor is `(D − f)·tan(h)` narrower per side, and
+the opening at the top face is `f·tan(h)` wider per side. Single-colour stock has no film, so the
+plane IS the floor and the toolpath offset is the tip radius; a pointed bit then draws a line.
+The step-over is a fraction (0.6) of the groove's width AT THE PLANE, not of the tip. A flat end
+mill still pockets the glyph region, where depth is genuinely independent.
 
 **The console.** Manage → Machines carries a one-line console, collapsed under the machine's card,
 in the desktop build only. Type a line, press Send, and the controller's answer appears beside it
@@ -843,10 +849,13 @@ the machine on is a physical act, not a setting.
 naming the machine and the file before anything is written, a Stop while it runs, and a Home
 after a confirmed stop. It does not probe or set the work origin — those stay yours.
 
-**V-carving small text (#185, #221) — partly.** The V-groove reach test ran at the bench on
-2026-10-15. A V-bit cuts single-line traces and stroke labels today; opening a **region** with
-one is still refused by name (`region-v-carve-unavailable`, §8.1) until the V-carve work
-(#221).
+**V-carving small text (#185, #221) — shipped for regions.** The V-groove reach test ran at the
+bench on 2026-10-15, and the colour-plane model followed on 2026-10-17. A V-bit still cuts
+single-line traces and stroke labels; it now also opens a **region**, pocketing the design at
+the colour plane, with the floor `e·tan(halfAngle)` narrower per side and the top-face opening
+`f·tan(halfAngle)` wider. The preview draws all three outlines, and the two named refusals and
+the merge warning are in §8.1 (`vcarve-above-colour-plane`, `vcarve-groove-too-narrow`,
+`vcarve-surface-merge`).
 
 **Using the camera to find the part (#189) — open.** The Z1 has an integrated camera. It cannot
 measure Z, and Studio does not use it for origin-setting, so today it is a webcam you can
@@ -1005,7 +1014,10 @@ simulation does report about one is the sweep's own list, next:
 | `polygon-self-intersecting` | error | A polygon shape crosses itself, so the outline is not a simple region. | Fix the points so the outline does not cross itself. |
 | `item-reference` | error | A frame or cut-away names an item that is missing, disabled, or part of a cycle, so the ring or pocket cannot be built. | Point it at a real, enabled item that does not depend on it. |
 | `trace-self-overlap` | warning | Two strokes of a single-line trace come closer than the cutter is wide, so the cut fills in (#219). For a V-bit the width is the groove the cone opens AT THAT TRACE'S DEPTH — `tip + 2·d·tan(halfAngle)` — not the tip (#405). | Space the lines apart, or use a smaller cutter. |
-| `region-v-carve-unavailable` | error | A label or a shape (a REGION) is cut with a V-bit. Opening a region means offsetting its outline by the cutter's width, and a cone has no single width — it widens as it deepens — so cutting a region with one is a V-carve, which this app does not do yet (#221). A V-bit still cuts single-line traces and stroke labels perfectly well. | Use a flat end mill for labels and shapes (keep the V-bit for stroke traces), or wait for the V-carve work (#221). |
+| `vcarve-above-colour-plane` | error | An item's depth is shallower than the blank's film, so the floor would sit inside the coloured layer and the design would never reach the plane where it is correct. | Cut at least as deep as the film, or use single-colour stock. |
+| `vcarve-groove-too-narrow` | error | The groove the cone opens at the colour plane is narrower than the machine's minimum X/Y step (its steps-per-mm record), so the pocket cannot be positioned reliably. The message gives both widths in µm. | Cut deeper (a wider groove at the plane) or widen the stroke. |
+| `vcarve-surface-merge` | warning | Two strokes of one item, or two items, come closer than `2 × f·tan(halfAngle)` at the top face, so their surface openings merge even though their colour-plane designs do not. The colour line at the plane is still correct; the wall between them is not. | Space the strokes or items apart, or accept the merged wall. |
+| ~~`region-v-carve-unavailable`~~ | — | Removed in #221; a V-bit now opens a region under the colour-plane model. | — |
 | `drill-outside-stock` | error | A plunge-drilled hole's rim reaches past the edge of the blank (#220). | Move the hole back inside the stock. |
 | `plunge-unproven` | warning/error | The job drills, but nothing recorded says the cutter is centre-cutting, so a straight plunge cannot be proven safe (#220). An error when the tool is recorded as NOT centre-cutting. | Use a centre-cutting end mill; #208 A1 records it for owned cutters. |
 | `drill-too-deep` | error | A hole is deeper than the cutter's flute, so chips cannot clear (#220). | Drill shallower, or use a cutter with a longer flute. |

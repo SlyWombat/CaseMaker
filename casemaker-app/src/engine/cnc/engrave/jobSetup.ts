@@ -66,13 +66,16 @@ export type JobFindingCode =
   | 'item-chars-lost'
   | 'item-detail-lost'
   | 'item-outside-stock'
-  // A V-BIT against a REGION item (#405). Opening a glyph or a shape means offsetting its outline
-  // by ONE cutting width, and a cone's width is a function of depth, so the toolpath that cuts a
-  // region with one is a medial-axis V-carve — the piece of #221 this change does not include. A
-  // trace (constant depth, the cutter on the line) is what a V-bit can do here, so the finding
-  // names the region item rather than refusing the cutter. Raised with the plan in hand, because
-  // "is this item a region?" is `toPartPlan`'s rule and must not be restated (engraveGenerate).
-  | 'region-v-carve-unavailable'
+  // V-CARVE region findings (#221). The design is correct at the COLOUR PLANE, so the two
+  // disqualifying facts are about that plane: a cut that stops above it never reaches the second
+  // colour, and a groove at it narrower than the machine's own X/Y step cannot be resolved into
+  // two walls. Both are errors and both name the way out.
+  | 'vcarve-above-colour-plane'
+  | 'vcarve-groove-too-narrow'
+  // The design check from the brief: two surface openings that overlap merge at the top face and
+  // leave a ridge of the top colour below. A warning — the merged look is the operator's to
+  // accept — raised with the geometry in hand (engraveGenerate's `vCarveFindings`).
+  | 'vcarve-surface-merge'
   // A cutter Makera NAMES for metal, on a job cutting something that is not (#405). The line is a
   // property of the pair — the bit and the blank — so it cannot live on either side alone, and no
   // feed table can enforce it: a metal bit will happily cut PLA, badly, at numbers nobody measured.

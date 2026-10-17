@@ -10,10 +10,12 @@ import {
   capWallRadius,
   coreOffsetRadius,
   cutDepthAtDistance,
-  DEFAULT_CORE_STEPOVER_RATIO,
-  tipClearStepover,
+  DEFAULT_V_CARVE_STEPOVER_RATIO,
   vCarveCap,
+  vCarveGrooveRefusal,
   vCarveLevels,
+  vCarvePlane,
+  vCarvePlaneStepover,
   vCarveRadialStep,
 } from '@/engine/cnc/vCarveGeometry';
 import { vCone, type VCone } from '@/engine/cnc/vProfile';
@@ -144,26 +146,120 @@ describe('cutDepthAtDistance', () => {
   });
 });
 
-describe('tipClearStepover', () => {
-  it('is 0.6 of the 0.3 mm tip flat by default — 0.18 mm', () => {
-    expect(DEFAULT_CORE_STEPOVER_RATIO).toBe(0.6);
-    expect(tipClearStepover(bit30())).toBeCloseTo(0.18, 12);
-    expect(tipClearStepover(bit30(), 0.5)).toBeCloseTo(0.15, 12);
-    expect(tipClearStepover(bit30(), 1)).toBeCloseTo(0.3, 12);
+describe('vCarvePlane', () => {
+  const cone = bit30();
+
+  it('places the thin blank’s plane: 0.194 mm below the film, 0.40396 mm of groove', () => {
+    const plane = vCarvePlane(cone, 0.394, 0.2);
+    expect(plane.film).toBe(0.2);
+    expect(plane.belowPlane).toBeCloseTo(0.194, 12);
+    expect(plane.planeRadius).toBeCloseTo(0.15 + 0.194 * TAN15, 12);
+    expect(plane.grooveWidth).toBeCloseTo(2 * (0.15 + 0.194 * TAN15), 12);
+    expect(plane.floorInset).toBeCloseTo(0.194 * TAN15, 12);
+    expect(plane.surfaceOutset).toBeCloseTo(0.2 * TAN15, 12);
+    expect(plane.wallOffset).toBeCloseTo(0.394 * TAN15, 12);
+    // The floor-to-surface span is exactly wallOffset per side.
+    expect(plane.surfaceOutset + plane.floorInset).toBeCloseTo(plane.wallOffset, 12);
   });
 
-  it('answers null for a sharp point: there is no flat to clear with', () => {
+  it('places the badge’s plane: 0.175 mm below the film, 0.39378 mm of groove', () => {
+    const plane = vCarvePlane(cone, 0.985, 0.81);
+    expect(plane.belowPlane).toBeCloseTo(0.175, 12);
+    expect(plane.grooveWidth).toBeCloseTo(2 * (0.15 + 0.175 * TAN15), 12);
+    expect(plane.surfaceOutset).toBeCloseTo(0.81 * TAN15, 12);
+  });
+
+  it('no film puts the plane AT the floor: the tip radius is the offset and the design is the floor', () => {
+    const plane = vCarvePlane(cone, 0.394, null);
+    expect(plane.film).toBe(0);
+    expect(plane.belowPlane).toBe(0);
+    expect(plane.planeRadius).toBeCloseTo(0.15, 12);
+    expect(plane.floorInset).toBe(0);
+    expect(plane.surfaceOutset).toBeCloseTo(0.394 * TAN15, 12);
+    expect(plane.surfaceOutset).toBeCloseTo(plane.wallOffset, 12);
+  });
+
+  it('a cut above the film has no plane below it, so the plane is the floor', () => {
+    const plane = vCarvePlane(cone, 0.1, 0.2);
+    expect(plane.belowPlane).toBe(0);
+    expect(plane.planeRadius).toBeCloseTo(0.15, 12);
+    expect(plane.surfaceOutset).toBeCloseTo(0.1 * TAN15, 12);
+  });
+
+  it('a true point tip works: the cone still widens the groove below the plane', () => {
     const sharp = vCone(
       flatEndMill(0, { shape: 'engraving', tipDiameter: 0, diameter: 3.175, halfAngle: 15 }),
     );
     if (sharp === null) throw new Error('a zero-tip bit is still a cone');
-    expect(sharp.tipRadius).toBe(0);
-    expect(tipClearStepover(sharp)).toBeNull();
+    const plane = vCarvePlane(sharp, 0.394, 0.2);
+    expect(plane.planeRadius).toBeCloseTo(0.194 * TAN15, 12);
+    expect(plane.floorInset).toBeCloseTo(0.194 * TAN15, 12);
+    // With no film the plane is the floor and a true point has no width there at all — the run
+    // sheet's "a point draws a line at the surface and nothing at the bottom".
+    expect(vCarvePlane(sharp, 0.1, null).planeRadius).toBe(0);
+  });
+});
+
+describe('vCarvePlaneStepover', () => {
+  const cone = bit30();
+
+  it('is 0.6 of the groove width at the plane — not of the tip flat', () => {
+    expect(DEFAULT_V_CARVE_STEPOVER_RATIO).toBe(0.6);
+    const thin = vCarvePlane(cone, 0.394, 0.2);
+    const badge = vCarvePlane(cone, 0.985, 0.81);
+    expect(vCarvePlaneStepover(thin)).toBeCloseTo(0.6 * 2 * (0.15 + 0.194 * TAN15), 12);
+    expect(vCarvePlaneStepover(thin)).toBeCloseTo(0.242, 3);
+    expect(vCarvePlaneStepover(badge)).toBeCloseTo(0.236, 3);
+    expect(vCarvePlaneStepover(thin, 0.5)).toBeCloseTo(thin.grooveWidth * 0.5, 12);
   });
 
   it('refuses a ratio outside (0, 1]', () => {
-    expect(() => tipClearStepover(bit30(), 0)).toThrow(/ratio/);
-    expect(() => tipClearStepover(bit30(), 1.01)).toThrow(/ratio/);
-    expect(() => tipClearStepover(bit30(), Number.NaN)).toThrow(/ratio/);
+    const plane = vCarvePlane(cone, 0.394, 0.2);
+    expect(() => vCarvePlaneStepover(plane, 0)).toThrow(/ratio/);
+    expect(() => vCarvePlaneStepover(plane, 1.01)).toThrow(/ratio/);
+    expect(() => vCarvePlaneStepover(plane, Number.NaN)).toThrow(/ratio/);
+  });
+});
+
+describe('vCarveGrooveRefusal', () => {
+  const cone = bit30();
+  /** The Z1's 1600 steps/mm on X and Y, mm per step. */
+  const STEP = 1 / 1600;
+
+  it('passes a normal blank: the plane groove is far wider than two steps', () => {
+    expect(vCarveGrooveRefusal(vCarvePlane(cone, 0.394, 0.2), STEP)).toBeNull();
+    expect(vCarveGrooveRefusal(vCarvePlane(cone, 0.985, 0.81), STEP)).toBeNull();
+  });
+
+  it('refuses a groove under the margin by name, with both widths and the way out', () => {
+    // A point tip on a 0.002 mm film, 0.003 mm deep: e = 0.001, so the groove is
+    // 2·0.001·tan15 = 0.000536 mm (0.536 µm), under 2 × 0.625 µm. The refusal is the maintainer's:
+    // go deeper or widen the stroke.
+    const sharp = vCone(
+      flatEndMill(0, { shape: 'engraving', tipDiameter: 0, diameter: 3.175, halfAngle: 15 }),
+    );
+    if (sharp === null) throw new Error('a zero-tip bit is still a cone');
+    const refusal = vCarveGrooveRefusal(vCarvePlane(sharp, 0.003, 0.002), STEP);
+    expect(refusal).not.toBeNull();
+    expect(refusal).toMatch(/0\.536 µm/);
+    expect(refusal).toMatch(/1\.25 µm/);
+    expect(refusal).toMatch(/go deeper or widen the stroke/);
+  });
+
+  it('uses the margin: a groove between one and two steps is still refused', () => {
+    const sharp = vCone(
+      flatEndMill(0, { shape: 'engraving', tipDiameter: 0, diameter: 3.175, halfAngle: 15 }),
+    );
+    if (sharp === null) throw new Error('a zero-tip bit is still a cone');
+    // e = 0.0019 -> 2·0.0019·tan15 = 1.018 µm: over one 0.625 µm step, under the shipped 1.25 bar.
+    const plane = vCarvePlane(sharp, 0.0039, 0.002);
+    expect(vCarveGrooveRefusal(plane, STEP, 1)).toBeNull();
+    expect(vCarveGrooveRefusal(plane, STEP)).not.toBeNull();
+  });
+
+  it('refuses a non-positive machine step rather than passing everything', () => {
+    const plane = vCarvePlane(cone, 0.394, 0.2);
+    expect(() => vCarveGrooveRefusal(plane, 0)).toThrow(/machineStepMm/);
+    expect(() => vCarveGrooveRefusal(plane, Number.NaN)).toThrow(/machineStepMm/);
   });
 });

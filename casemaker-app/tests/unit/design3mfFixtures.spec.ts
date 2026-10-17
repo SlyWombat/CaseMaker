@@ -17,6 +17,10 @@ import { fileURLToPath } from 'node:url';
 import { parsePrusaThreeMf } from '@/engine/import/prusa3mf';
 import { readDesign, type DesignImport } from '@/engine/import/design3mf';
 import { designJobFor } from '@/engine/cnc/engrave/fromDesign';
+import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
+import { flatEndMill, type Tool } from '@/engine/cnc/tool';
+import type { EngraveJob } from '@/types/engraveJob';
+import { generate, regions } from './helpers/engravePipeline';
 import { tl } from './helpers/manifoldExec';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -150,5 +154,86 @@ describe('the thin-film fixture (thin-film/single-thin.3mf)', () => {
     expect(patch.stock.material).toBe('petg');
     expect(patch.stock.print).toEqual({ split: 1.3, layerHeight: 0.2 });
     expect(patch.vectors).toHaveLength(3);
+  });
+});
+
+/**
+ * #221's first delivery target: the thin two-colour blank's WHOLE design, cut by ONE V-bit under
+ * the colour-plane model. The fixture states a 0.2 mm film and item depths of 0.394/0.399 mm, so
+ * the plane sits 0.194/0.199 mm above each floor and the tip radius grows by that much per side.
+ */
+describe('the thin fixture as a V-carve job (#221)', () => {
+  const design = read(join('thin-film', 'single-thin.3mf'));
+
+  /** The 30° engraving bit the bench ran: 0.3 mm tip, 3.175 mm shank, 15° half angle. */
+  const bit30 = (): Tool =>
+    flatEndMill(0.3, {
+      name: 'Single Flute Engraving Bit 30 x 0.3',
+      typeText: 'Engraving',
+      shape: 'engraving',
+      handleDiameter: 3.175,
+      diameter: 3.175,
+      tipDiameter: 0.3,
+      angle: 30,
+      halfAngle: 15,
+    });
+
+  const fixtureJob = (): EngraveJob => {
+    const patch = designJobFor(design);
+    const base = defaultEngraveJob();
+    return {
+      ...base,
+      name: patch.name,
+      stock: { ...base.stock, ...patch.stock },
+      labels: [],
+      shapes: [],
+      vectors: [...patch.vectors],
+      keepOuts: patch.keepOut ? [patch.keepOut] : [],
+      toolKey: 'inv:kz-engrave-30-0-3',
+      tool: bit30(),
+      // The 1.5 mm thin blank cannot stand the default 4 mm proud; the bench blank's 1.2 mm works.
+      workholding: {
+        ...base.workholding,
+        vise: { ...base.workholding.vise, stockProud: 1.2 },
+      },
+    };
+  };
+
+  const TAN15 = Math.tan(Math.PI / 12);
+
+  it('reads the 0.2 mm film as the colour plane', () => {
+    const r = regions(tl, fixtureJob());
+    expect(r.colourBoundaryDepth).toBeCloseTo(0.2, 12);
+  });
+
+  it('gives every item the plane radius the manager measured: tip + e·tan(half)', () => {
+    const r = regions(tl, fixtureJob());
+    expect(r.cuts).toHaveLength(3);
+    for (const cut of r.cuts) {
+      expect(cut.vCarve).toBeDefined();
+      const e = cut.depth - 0.2;
+      expect(cut.vCarve!.planeRadius).toBeCloseTo(0.15 + e * TAN15, 9);
+      expect(cut.vCarve!.floorInset).toBeCloseTo(e * TAN15, 9);
+      expect(cut.vCarve!.surfaceOutset).toBeCloseTo(0.2 * TAN15, 9);
+      expect(cut.vCarve!.planeDepth).toBeCloseTo(0.2, 12);
+    }
+    // The manager's worked numbers for the title/whiskey depths: 0.40396 mm of groove.
+    const groove = (0.15 + 0.194 * TAN15) * 2;
+    expect(groove).toBeCloseTo(0.40396, 5);
+  });
+
+  it('cuts the whole design with ONE V-bit and no error finding', () => {
+    const job = fixtureJob();
+    const g = generate(tl, job);
+    expect(g.findings.filter((f) => f.severity === 'error')).toEqual([]);
+    expect(g.ok).toBe(true);
+    expect(g.stage).toBe('done');
+    expect(g.nc).not.toBeNull();
+    // One tool, one program: the header states the cone, and the IR names one tool number.
+    expect(g.nc).toContain('type=Engraving');
+    expect(g.nc).toContain('tipdiameter=0.3');
+    expect(g.nc).toContain('|angle=30|halfAngle=15');
+    expect(g.nc).toContain(';@CM|TOOL|key=inv:kz-engrave-30-0-3');
+    expect(g.cam!.operations).toBe(3);
   });
 });

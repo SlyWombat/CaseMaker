@@ -43,12 +43,14 @@ import { version as CAM_VERSION } from '../../../package.json';
 import type { MillProfile } from '@/engine/cnc/machine';
 import { jobMachine, type MachineCalibration } from '@/engine/cnc/calibration';
 import { feedsFor, type FeedsEntry, type FeedsResult, type FeedCatalogueRow } from '@/engine/cnc/feeds';
-import { cuttingDiameter, cuttingForTrace, isVTraceTool, traceRadiusAt, type Tool } from '@/engine/cnc/tool';
+import { cuttingDiameter, cuttingForTrace, traceRadiusAt, type Tool } from '@/engine/cnc/tool';
 import { threadMillIR, threadSettings, type ThreadMillPlan, type ThreadSettingsResult } from '@/engine/cnc/cam/threadMill';
 import type { ShopDefaults } from '@/platform/defaultsClient';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import type { ConditionSummary } from '@/engine/cnc/toolCondition';
 import { vCone } from '@/engine/cnc/vProfile';
+import { minimumXyStepMm } from '@/engine/cnc/machine';
+import { vCarveGrooveRefusal, vCarvePlane, type VCarvePlane } from '@/engine/cnc/vCarveGeometry';
 import { isMetalTool } from '@/engine/cnc/registerCutter';
 import { MATERIAL_LABELS, isMetalMaterial } from '@/engine/cnc/materials';
 import { toPartPlan, labelProfile, jobDepthLimit, keepOutNameAt, type PartPlan } from '@/engine/cnc/engrave/partPlan';
@@ -56,7 +58,7 @@ import { dedupeFindings, jobSetups, setupProgramFindings, toSetup, validateJob, 
 import { jobForSetup, setupPrograms, type JobProgramRef } from '@/engine/cnc/engrave/programs';
 import { programHash } from '@/engine/cnc/programHash';
 import { validateVise } from '@/engine/cnc/fixture';
-import { generateEngrave, zPasses, type EngraveRegion } from '@/engine/cnc/cam/engraveJob';
+import { generateEngrave, makeClipperOffset, zPasses, type EngraveRegion, type VCarveRegion } from '@/engine/cnc/cam/engraveJob';
 import { generateFacing, type FacingCamSummary } from '@/engine/cnc/cam/facing';
 import { chooseFacingTool } from '@/engine/cnc/engrave/facingTool';
 import { facingRefusal } from '@/engine/cnc/stockStart';
@@ -328,12 +330,19 @@ function perCharFor(job: EngraveJob): (labelId: string) => PerCharGlyph[] {
  * and re-measure only that label (#201/#205). Copied from `engravePreview.ts` because that
  * helper is private to its module and this file must not edit it.
  */
-function ratioAtFor(tl: ManifoldToplevel, job: EngraveJob, radius: number): LabelRatioAt {
+function ratioAtFor(
+  tl: ManifoldToplevel,
+  job: EngraveJob,
+  radius: number,
+  radiusFor?: (labelId: string) => number,
+): LabelRatioAt {
   return (labelId, size) => {
     const label = job.labels.find((l) => l.id === labelId);
     if (!label) return 0;
     const probe: EngraveJob = { ...job, shapes: [], labels: [{ ...label, size }] };
-    return measureLabels(tl, toPartPlan(probe), radius, job.edgeMargin, perCharFor(probe))[0]?.ratio ?? 0;
+    const r = radiusFor?.(labelId) ?? radius;
+    if (!(r > 0)) return 0;
+    return measureLabels(tl, toPartPlan(probe), r, job.edgeMargin, perCharFor(probe))[0]?.ratio ?? 0;
   };
 }
 
@@ -423,37 +432,152 @@ function metalLineFindings(job: EngraveJob, tool: Tool | null): JobFinding[] {
 }
 
 /**
- * What a V-BIT in a job means (#405): the finding about the job rather than about the geometry,
- * which needs the PLAN, which is why it is raised here and not in `engravabilityFindings` (that
- * module is handed measurements, not items).
- *
- * `null` tool, or any cutter that is not a cone, answers nothing: every job before #405 had a flat
- * end mill and must produce exactly the findings it produced before. The metal-line refusal is not
- * here — it is a claim about the pair and so is judged for every cutter, in
- * {@link metalLineFindings} (#407).
+ * Surface area that means two V openings really merged, mm² (#221). The floor is far above
+ * Clipper2's ~1e-8 mm² noise and far below the sliver a 0.1 mm bridge across a 5 mm stroke leaves
+ * (~0.5 mm²), so `vcarve-surface-merge` is raised for a merge and not for an offset artefact.
  */
-function vCutterFindings(plan: PartPlan, tool: Tool | null): JobFinding[] {
-  if (tool === null || !isVTraceTool(tool)) return [];
+export const VCARVE_MERGE_AREA_MM2 = 0.001;
 
-  // A REGION needs ONE cutting width. Opening a glyph or a pocket means offsetting its outline
-  // by the cutter's radius (`generateEngrave`), and a cone has no single radius: its width at the
-  // depth the path is at is part of the answer. The toolpath that does cut a region with a V-bit is
-  // a medial-axis V-carve — #221's remaining piece — so this is a refusal by name, on the item that
-  // asked, rather than a refusal of the cutter (which traces perfectly well).
-  const region = plan.engraves[0];
-  if (region === undefined) return [];
-  const others = plan.engraves.length - 1;
-  return [
-    {
-      severity: 'error',
-      code: 'region-v-carve-unavailable',
-      labelId: region.id,
-      message:
-        `${region.name} is a REGION${others > 0 ? ` (and ${others} other item${others === 1 ? '' : 's'})` : ''}: opening it needs the cutter's ` +
-        `width, and a V-bit's width changes with the depth of the cut — cutting a region with one is a V-carve, ` +
-        `which this app does not do yet (#221). Use a flat end mill for regions, or make the artwork a stroke trace.`,
-    },
-  ];
+/** The area of a polygon set, mm². A tiny helper so the merge tests read as geometry. */
+function polygonsArea(tl: ManifoldToplevel, polygons: Polygons): number {
+  if (polygons.length === 0) return 0;
+  const cs = tl.CrossSection.ofPolygons(polygons);
+  try {
+    return cs.area();
+  } finally {
+    cs.delete();
+  }
+}
+
+/** The area two polygon sets share, mm². */
+function intersectionArea(tl: ManifoldToplevel, a: Polygons, b: Polygons): number {
+  if (a.length === 0 || b.length === 0) return 0;
+  const ca = tl.CrossSection.ofPolygons(a);
+  const cb = tl.CrossSection.ofPolygons(b);
+  try {
+    const shared = ca.intersect(cb);
+    try {
+      return shared.area();
+    } finally {
+      shared.delete();
+    }
+  } finally {
+    ca.delete();
+    cb.delete();
+  }
+}
+
+/**
+ * What a V-BIT in a job means, now that it cuts regions (#221): the two findings the colour-plane
+ * model needs, both about the geometry rather than about the cutter.
+ *
+ *  - `vcarve-above-colour-plane` — the item stops above the film, so the second colour is never
+ *    reached. The design was stated at that plane; a cut that cannot reach it cannot produce it.
+ *  - `vcarve-groove-too-narrow` — the groove at the plane is narrower than the machine's X/Y
+ *    step (read from `MillProfile.axisSteps`), so the controller cannot resolve its two walls.
+ *    The refusal is by name and says the way out, "go deeper or widen the stroke".
+ *
+ * THE MERGE CHECK is the design check from the brief. The surface opening of an item is its
+ * colour-plane design offset outward by `surfaceOutset` per side. When two of those openings
+ * overlap — two strokes of one item, or two items — the cavity merges at the top face and leaves a
+ * ridge of the top colour below, which is a different look from two separate grooves. We detect
+ * overlap directly (the closing of each surface opening, and the pairwise intersection between
+ * items), which is the fact itself, not a distance approximation. The warning names the item (or
+ * the pair) and the threshold that was crossed.
+ *
+ * `null` tool, or any cutter that is not a cone, answers nothing: a flat end mill's surface and
+ * floor are the design, and every finding before this one is unchanged.
+ */
+function vCarveFindings(
+  tl: ManifoldToplevel,
+  plan: PartPlan,
+  tool: Tool | null,
+  film: number | null,
+  machine: MillProfile,
+  planeById: ReadonlyMap<string, VCarvePlane>,
+  designById: ReadonlyMap<string, Polygons>,
+  surfaceById: ReadonlyMap<string, Polygons>,
+): JobFinding[] {
+  if (tool === null || vCone(tool) === null) return [];
+  const offset = makeClipperOffset(tl);
+  const findings: JobFinding[] = [];
+  const mm = (v: number): string => String(Math.round(v * 1000) / 1000);
+
+  for (const item of plan.engraves) {
+    const plane = planeById.get(item.id);
+    if (plane === undefined) continue;
+
+    if (film !== null && item.depth < film - 1e-9) {
+      findings.push({
+        severity: 'error',
+        code: 'vcarve-above-colour-plane',
+        labelId: item.id,
+        message:
+          `${item.name} is ${mm(item.depth)} mm deep, but this blank's colour plane is at ` +
+          `${mm(film)} mm: the cut never reaches the second colour, so the design cannot appear ` +
+          `there. Cut at least ${mm(film)} mm deep, or make the artwork a stroke trace.`,
+      });
+    }
+
+    const narrow = vCarveGrooveRefusal(plane, minimumXyStepMm(machine));
+    if (narrow !== null) {
+      findings.push({
+        severity: 'error',
+        code: 'vcarve-groove-too-narrow',
+        labelId: item.id,
+        message: `${item.name}: ${narrow}.`,
+      });
+    }
+  }
+
+  // Intra-item: closing the surface opening fills any gap narrower than twice its outset. What
+  // comes back wider than the colour-plane design is exactly those gaps turned solid at the top.
+  for (const item of plan.engraves) {
+    const plane = planeById.get(item.id);
+    const design = designById.get(item.id);
+    const surface = surfaceById.get(item.id);
+    if (plane === undefined || design === undefined || surface === undefined) continue;
+    if (plane.surfaceOutset <= 0 || surface.length === 0 || design.length === 0) continue;
+    const closed = offset(surface, -plane.surfaceOutset);
+    const gained = polygonsArea(tl, closed) - polygonsArea(tl, design);
+    if (gained > VCARVE_MERGE_AREA_MM2) {
+      findings.push({
+        severity: 'warning',
+        code: 'vcarve-surface-merge',
+        labelId: item.id,
+        message:
+          `two or more strokes of ${item.name} are closer than ${mm(plane.surfaceOutset * 2)} mm ` +
+          `(2 × the ${mm(plane.surfaceOutset)} mm surface wall offset): their V openings merge at ` +
+          `the top face and leave a ridge of the top colour below the colour plane.`,
+      });
+    }
+  }
+
+  // Cross-item: the openings themselves, each with its own outset, intersected.
+  for (let i = 0; i < plan.engraves.length; i++) {
+    for (let j = i + 1; j < plan.engraves.length; j++) {
+      const a = plan.engraves[i]!;
+      const b = plan.engraves[j]!;
+      const pa = planeById.get(a.id);
+      const pb = planeById.get(b.id);
+      const sa = surfaceById.get(a.id);
+      const sb = surfaceById.get(b.id);
+      if (pa === undefined || pb === undefined || sa === undefined || sb === undefined) continue;
+      if (intersectionArea(tl, sa, sb) > VCARVE_MERGE_AREA_MM2) {
+        findings.push({
+          severity: 'warning',
+          code: 'vcarve-surface-merge',
+          labelId: a.id,
+          message:
+            `${a.name} and ${b.name} are closer than ${mm(pa.surfaceOutset + pb.surfaceOutset)} mm ` +
+            `at the top face (their two surface wall offsets added): their V openings merge, ` +
+            `leaving a ridge of the top colour between them.`,
+        });
+      }
+    }
+  }
+
+  return findings;
 }
 
 /**
@@ -489,20 +613,53 @@ export function engraveRegions(
   tool: Tool | null,
   margins: EngraveMargins = effectiveMargins(job, MARGIN_DEFAULTS),
   shop: EngraveShopOpts = {},
+  machine: MillProfile | null = null,
 ): EngraveRegions {
   const plan = toPartPlan(job);
+  const mill = machine ?? jobMachine(job);
   const perChar = perCharFor(job);
-  // The cutter, split into the two things the pipeline needs from it (#405). `radius` is the FLAT
-  // radius the REGION stages take: measuring a glyph's opening, opening it with an offset, sweeping
-  // it into a drill disc. A V-bit has none — its width is a function of depth — so it answers null
-  // there and is refused a region by name below. A trace, by contrast, needs only the width at the
-  // trace's own depth, which `traceRadiusAt` gives for both shapes.
+  // The cutter, split into the things the pipeline needs from it (#405, #221). `radius` is the
+  // FLAT radius the region stages take: measuring a glyph's opening, opening it with an offset,
+  // sweeping it into a drill disc. A V-bit has no single radius — its width is a function of
+  // depth — so it answers null there, but since #221 it is no longer refused: the region stages
+  // take its per-item PLANE radius (`rPlane`), and the measurement, the CAM and the oracle all use
+  // that same number. A trace needs only the width at the trace's own depth (`traceRadiusAt`).
   const usable = tool === null ? null : cuttingForTrace(tool);
   const radius = usable !== null && usable.ok && usable.tool.shape === 'flat' ? usable.tool.radius : null;
+  const cone = usable !== null && usable.ok && usable.tool.shape === 'v' ? usable.tool.cone : null;
   const traceRadius = tool === null ? null : (depth: number): number | null => traceRadiusAt(tool, depth);
 
-  const measured = radius === null ? [] : measureLabels(tl, plan, radius, job.edgeMargin, perChar);
-  const engFindings = radius === null ? [] : engravabilityFindings(job, measured, ratioAtFor(tl, job, radius), tool, shop.lostDetailWarnRatio ?? null);
+  // #285 — the colour boundary, when the job states its print. PURE grid arithmetic (#285 review):
+  // the boundary is a rule about the layer grid, not a measurement of the solid, so it is read
+  // straight off `colourBoundaryFor` rather than by building the stack here and freeing it again.
+  // Since #221 it is also the V-carve's colour plane `f`.
+  const colourBoundaryDepth = colourBoundaryFor(plan, job);
+
+  // The colour-plane geometry of every region, computed once: the measurement, the CAM, the
+  // prediction, the preview and the merge warning all read these same numbers (#221).
+  const planeById = new Map<string, VCarvePlane>();
+  const engraveById = new Map(plan.engraves.map((e) => [e.id, e] as const));
+  const planeRadiusFor = (labelId: string): number => {
+    const engrave = engraveById.get(labelId);
+    if (engrave === undefined || cone === null) return 0;
+    const plane = vCarvePlane(cone, engrave.depth, colourBoundaryDepth);
+    planeById.set(labelId, plane);
+    return plane.planeRadius;
+  };
+  if (cone !== null) {
+    for (const engrave of plan.engraves) planeRadiusFor(engrave.id);
+  }
+
+  const measureRadius = radius ?? cone?.tipRadius ?? null;
+  const measured =
+    measureRadius === null
+      ? []
+      : measureLabels(tl, plan, measureRadius, job.edgeMargin, perChar, cone === null ? undefined : planeRadiusFor);
+  const ratioAt =
+    cone === null
+      ? ratioAtFor(tl, job, radius ?? 0)
+      : ratioAtFor(tl, job, cone.tipRadius, planeRadiusFor);
+  const engFindings = measured.length === 0 ? [] : engravabilityFindings(job, measured, ratioAt, tool, shop.lostDetailWarnRatio ?? null);
 
   // #171/#345 — the cut regions a void check reads, built ONCE: the engrave openings plus the
   // swept traces (#270). A void-free job is the common case and pays for nothing here — sweeping
@@ -518,11 +675,42 @@ export function engraveRegions(
   const bindingVoids = bindingVoidsByRegion(tl, job, plan, voidCuts, margins.boundaryMargin);
   const voidFindings = keepOutFindings(job, voidCuts, bindingVoids);
 
-  // #285 — the colour boundary, when the job states its print. PURE grid arithmetic (#285 review):
-  // the boundary is a rule about the layer grid, not a measurement of the solid, so it is read
-  // straight off `colourBoundaryFor` rather than by building the stack here and freeing it again.
-  // The verifier builds its own stack below; this used to be a second one, live on every keystroke.
-  const colourBoundaryDepth = colourBoundaryFor(plan, job);
+  const byId = new Map(measured.map((m) => [m.labelId, m] as const));
+  const itemById = new Map<string, EngraveItem>();
+  for (const l of job.labels) itemById.set(l.id, l);
+  for (const s of job.shapes) itemById.set(s.id, s);
+
+  // The three outlines of every V region (#221). `design` is the measured plane polygon set — the
+  // CAM's own input — so the offsets here cannot disagree with the toolpath. The floor and the
+  // surface are consequences of the cone; computing them once is what lets the prediction, the
+  // preview and the merge warning read the same geometry.
+  const vCarveById = new Map<string, VCarveRegion>();
+  const designById = new Map<string, Polygons>();
+  const surfaceById = new Map<string, Polygons>();
+  if (cone !== null) {
+    const offset = makeClipperOffset(tl);
+    for (const engrave of plan.engraves) {
+      const plane = planeById.get(engrave.id) ?? vCarvePlane(cone, engrave.depth, colourBoundaryDepth);
+      const design = byId.get(engrave.id)?.polygons ?? [];
+      if (design.length === 0) continue;
+      const floor = plane.floorInset > 0 ? offset(design, -plane.floorInset) : design;
+      const surface = plane.surfaceOutset > 0 ? offset(design, plane.surfaceOutset) : design;
+      vCarveById.set(engrave.id, {
+        plane: design,
+        floor,
+        surface,
+        // With no film (or a cut that never reaches it) the plane IS the floor, so the design
+        // outline is drawn at the cut depth; otherwise it sits at the colour boundary.
+        planeDepth: plane.film > 0 && engrave.depth >= plane.film ? plane.film : engrave.depth,
+        planeRadius: plane.planeRadius,
+        floorInset: plane.floorInset,
+        surfaceOutset: plane.surfaceOutset,
+      });
+      designById.set(engrave.id, design);
+      surfaceById.set(engrave.id, surface);
+    }
+  }
+  const carveFindings = vCarveFindings(tl, plan, tool, colourBoundaryDepth, mill, planeById, designById, surfaceById);
 
   // `job.sacrificial` is threaded so the generate path's `vise-grip-shallow` judges what the
   // jaws actually grip (#213 §2), not the raw stock: the argument `validateVise` has accepted
@@ -532,7 +720,7 @@ export function engraveRegions(
     ...validateVise(job.stock, job.workholding.vise, job.sacrificial),
     ...engFindings,
     ...metalLineFindings(job, tool),
-    ...vCutterFindings(plan, tool),
+    ...carveFindings,
     ...voidFindings,
     // #345 — every item judged against every bound under its footprint: the split on the side its
     // own `depthIntent` put it, and the ceiling of any void it sits over. A no-op for a job with
@@ -540,18 +728,17 @@ export function engraveRegions(
     ...itemDepthBoundFindings(job, colourBoundaryDepth, margins.boundaryMargin, bindingVoids),
   ]);
 
-  const byId = new Map(measured.map((m) => [m.labelId, m] as const));
-  const itemById = new Map<string, EngraveItem>();
-  for (const l of job.labels) itemById.set(l.id, l);
-  for (const s of job.shapes) itemById.set(s.id, s);
-
-  const regions: EngraveRegion[] = plan.engraves.map((e) => ({
-    id: e.id,
-    text: regionText(itemById.get(e.id)),
-    name: e.name,
-    depth: e.depth,
-    polygons: byId.get(e.id)?.polygons ?? [],
-  }));
+  const regions: EngraveRegion[] = plan.engraves.map((e) => {
+    const vCarve = vCarveById.get(e.id);
+    return {
+      id: e.id,
+      text: regionText(itemById.get(e.id)),
+      name: e.name,
+      depth: e.depth,
+      polygons: byId.get(e.id)?.polygons ?? [],
+      ...(vCarve === undefined ? {} : { vCarve }),
+    };
+  });
 
   // Plunge drills (#220): a region whose cut is the cutter's own disc per hole, so the preview
   // and the oracle see it exactly as the CAM will cut it. A `through` hole is refused by
@@ -592,9 +779,11 @@ export function engraveRegions(
   // So the two tool shapes produce the prediction DIFFERENTLY rather than one supplementing the
   // other: a flat cutter keeps `traceCutRegions`' region, and a cone replaces it. Adding the groove
   // beside the mouth would predict both at once and fail every V job on the overlap.
-  const cone = tool === null ? null : vCone(tool);
   const predicted: OraclePredicted[] = [
-    ...regions.map((c): OraclePredicted => ({ depth: c.depth, polygons: c.polygons })),
+    // A V region's prediction is its FLOOR at `depth` — the floor polygons the geometry built,
+    // not the plane design. The oracle simulates at the floor and would call the wider design an
+    // under-cut (#221). A flat region's floor IS its polygons.
+    ...regions.map((c): OraclePredicted => ({ depth: c.depth, polygons: c.vCarve?.floor ?? c.polygons })),
     ...(cone === null
       ? traceCuts.map((c): OraclePredicted => ({ depth: c.depth, polygons: c.polygons }))
       : plan.traces.map((t): OraclePredicted => ({ depth: t.depth, polygons: [], groove: { paths: t.paths, closed: t.closed, cone } }))),
@@ -1110,7 +1299,7 @@ function generateOneProgram(
   // which is the only post this app has; a second mill is a second post, and this line is where a
   // job naming it would have to be refused until there is one.
   const mill = jobMachine(job, calibration);
-  const { plan, regions, predicted, findings } = engraveRegions(tl, job, tool, margins, shop);
+  const { plan, regions, predicted, findings } = engraveRegions(tl, job, tool, margins, shop, mill);
   const errors: EngraveFailure[] = [];
 
   const stop = (

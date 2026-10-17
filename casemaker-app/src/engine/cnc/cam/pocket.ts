@@ -24,14 +24,20 @@ export type OffsetFn = (region: Polygons, delta: number) => Polygons;
 export class StepOverTooLargeError extends Error {
   readonly stepOver: number;
   readonly toolRadius: number;
-  constructor(stepOver: number, toolRadius: number) {
+  /** The largest pitch this cut allows: the tool radius, or a V-bit's tip width. */
+  readonly limit: number;
+  constructor(stepOver: number, toolRadius: number, limit: number = toolRadius) {
     super(
-      `step-over ${stepOver} mm exceeds the ${toolRadius} mm tool radius: contour-parallel ` +
-        `loops would leave an uncut spine (#191)`,
+      limit === toolRadius
+        ? `step-over ${stepOver} mm exceeds the ${toolRadius} mm tool radius: contour-parallel ` +
+            `loops would leave an uncut spine (#191)`
+        : `step-over ${stepOver} mm exceeds the ${limit} mm cutter width: contour-parallel ` +
+            `loops would leave an uncut spine (#191)`,
     );
     this.name = 'StepOverTooLargeError';
     this.stepOver = stepOver;
     this.toolRadius = toolRadius;
+    this.limit = limit;
   }
 }
 
@@ -67,6 +73,12 @@ function maxExtent(region: Polygons): number {
  * closed contours, because a shrinking region can split into several islands (and a ring
  * around a hole carries the hole contour too); every contour is kept.
  *
+ * `maxStepOver` is the pitch this CUT allows, and defaults to the tool radius — the #191 bound
+ * for a flat end mill's contour-parallel loops. A floor cut by a V-bit's flat tip is the same
+ * disc sweep with a smaller cutter, so its adjacent passes still meet while their pitch is up to
+ * the TIP WIDTH (`2 × toolRadius`); `generateEngrave` passes that width. Never raise it above
+ * twice the tool radius: beyond that the disc sweep leaves an uncut spine between passes.
+ *
  * The loop is guarded: at most `ceil(maxExtent / stepOver) + 4` rings are produced before
  * throwing. An offset that never empties is a bug, not a long job, and a pocket that runs
  * forever is worse than one that refuses.
@@ -76,6 +88,7 @@ export function pocketLoops(
   toolRadius: number,
   stepOver: number,
   offset: OffsetFn,
+  maxStepOver: number = toolRadius,
 ): Polygons[] {
   if (!(toolRadius > 0)) {
     throw new Error(`pocketLoops: toolRadius must be > 0, got ${toolRadius} mm`);
@@ -83,8 +96,11 @@ export function pocketLoops(
   if (!(stepOver > 0)) {
     throw new Error(`pocketLoops: stepOver must be > 0, got ${stepOver} mm`);
   }
-  if (stepOver > toolRadius) {
-    throw new StepOverTooLargeError(stepOver, toolRadius);
+  if (!(maxStepOver > 0)) {
+    throw new Error(`pocketLoops: maxStepOver must be > 0, got ${maxStepOver} mm`);
+  }
+  if (stepOver > maxStepOver) {
+    throw new StepOverTooLargeError(stepOver, toolRadius, maxStepOver);
   }
 
   const rings: Polygons[] = [];

@@ -68,6 +68,7 @@ function previewWith(
   return {
     stock: EMPTY_MESH,
     floors: [],
+    outlines: [],
     fixture: [],
     sacrificial: [],
     voids: [],

@@ -29,7 +29,7 @@
 import { segmentsForRadius } from '@/engine/compiler/arcResolution';
 import type { ManifoldToplevel } from '@/workers/geometry/evaluateOp';
 import type { CutParams } from '../feeds';
-import { cuttingRadiusForSweep, type Tool } from '../tool';
+import { cuttingForTrace, type Tool } from '../tool';
 import { drillMoves, orderHolesNearest } from './drill';
 import {
   estimateCycleSeconds,
@@ -54,6 +54,27 @@ import { tourNearest, twoOptOrder } from './tour';
  */
 export const MILLING = 'conventional' as const;
 
+/**
+ * The three outlines a V-carve region has (#221), and where the colour plane sits. The CAM uses
+ * `planeRadius` for its offset; the preview draws all three and the oracle predicts `floor`.
+ * `plane` is the same polygon set as the region's `polygons` — kept here so a consumer holding
+ * only the cut has the whole geometry without re-deriving it.
+ */
+export interface VCarveRegion {
+  /** The design at the colour plane — the polygons this region pockets. */
+  plane: Polygons;
+  /** The floor at `depth`, `floorInset` narrower per side. */
+  floor: Polygons;
+  /** The opening at the top face, `surfaceOutset` wider per side. */
+  surface: Polygons;
+  /** The colour plane's depth below the top face, mm — the cut's depth when there is no film. */
+  planeDepth: number;
+  /** `tipRadius + belowPlane·tanHalf`: the CAM's inward offset of the design, mm. */
+  planeRadius: number;
+  floorInset: number;
+  surfaceOutset: number;
+}
+
 /** One item's opened region (#201), ready to pocket. A text label or a shape pocket (#214). */
 export interface EngraveRegion {
   id: string;
@@ -71,6 +92,12 @@ export interface EngraveRegion {
   depth: number;
   /** #201's opened polygons — outer CCW, holes CW. NOT re-derived here. */
   polygons: Polygons;
+  /**
+   * A V-carve's plane/floor/surface geometry (#221), present only when this region is cut by a
+   * cone. The CAM takes its offset and stepover from here; absent on a V region means the caller
+   * has no film, so the plane is the floor and the tip radius is the offset.
+   */
+  vCarve?: VCarveRegion;
   /**
    * A PLUNGE DRILL (#220), present only on a drilled region. The hole CENTRES, in the stock
    * frame — one point for a `drill`, the whole lattice for a `drill-array`. Present => this
@@ -375,9 +402,19 @@ function entryTravel(
 /**
  * The toolpath IR for a set of opened label regions.
  *
- * `labels` are #201's opened regions in document order; `tool` must be a plain flat end mill
- * (`cuttingRadiusForSweep`), and `params` arrive from `feedsFor` (#202) — this module owns no
- * feeds, RPM or step values. `rapid` is the machine's rapid model, which the operation's
+ * `labels` are #201's opened regions in document order. `tool` is a flat end mill, or — since
+ * #221 — a V-bit. For a V-bit the DESIGN is correct at the COLOUR PLANE: the region is pocketed
+ * at `depth` with `rPlane = tipRadius + (depth − film)·tanHalf`, so the swept area at the plane
+ * equals the design, while the tip disc clears the floor (`rPlane − e·tanHalf` narrower per side)
+ * and the cone's flanks widen the opening above the plane (`film·tanHalf` wider per side at the
+ * top face). The colour-plane geometry and depths arrive per region in `vCarve`, computed once by
+ * the caller (`engraveRegions`); a V region without that block has no film, so the plane is the
+ * floor and the tip radius is the offset. `params` arrive from `feedsFor` (#202) — this module
+ * owns no feeds, RPM or step values. The V row's stepover fraction is applied to the groove's
+ * width AT THE PLANE (`2 × rPlane`), so the pitch is per region: `params.stepOver` was resolved
+ * against the tip diameter, and the fraction is `params.stepOver / tipWidth`. The floor is
+ * cleared by the tip disc, so the pitch may never exceed one tip width. `rapid` is the machine's
+ * rapid model, which the operation's
  * `estimatedSeconds` is timed with (#281); it is required, like every other number a caller
  * owns, so this module never invents a rate. `order` is the label ordering strategy; only
  * `'nearest'` exists in V1.
@@ -403,11 +440,43 @@ export function generateEngrave(
   order: 'nearest' = 'nearest',
   peckClearanceMm: number | null = null,
 ): ToolpathIR {
-  const radiusResult = cuttingRadiusForSweep(tool);
-  if (!radiusResult.ok) throw new Error(`generateEngrave: ${radiusResult.reason}`);
-  const toolRadius = radiusResult.radius;
+  const usable = cuttingForTrace(tool);
+  if (!usable.ok) throw new Error(`generateEngrave: ${usable.reason}`);
+  const cutTool = usable.tool;
+  const cone = cutTool.shape === 'v' ? cutTool.cone : null;
+  // A flat end mill's offset is its radius. A V-bit's offset is `rPlane`, the design's inward
+  // offset at the COLOUR PLANE (#221), which depends on the item's depth and the blank's film, so
+  // it is read per label from `vCarve`. A V region without that block has no film: the plane is
+  // the floor and the tip radius is the offset.
+  const flatRadius = cutTool.shape === 'v' ? 0 : cutTool.radius;
+  const tipWidth = cone === null ? 0 : cone.tipRadius * 2;
   const toolNumber = toolNumberFor(tool);
   const offset = makeClipperOffset(tl);
+
+  /**
+   * The rings for one region. A flat cutter uses its radius and the resolved step-over. A V uses
+   * the plane offset, and its stepover is the row's FRACTION applied to the groove's width at that
+   * plane (`vCarvePlaneStepover`): `params.stepOver` was resolved against the tip diameter, so the
+   * fraction is `params.stepOver / tipWidth` and the pitch grows with `planeRadius / tipRadius`.
+   * The floor is cleared by the tip disc, so the pitch may never exceed one tip WIDTH — the same
+   * hard bound `feedsFor` states, enforced here by `pocketLoops`.
+   */
+  const ringsFor = (label: EngraveRegion): Polygons[] => {
+    if (cone === null) return pocketLoops(label.polygons, flatRadius, params.stepOver, offset);
+    const planeRadius = label.vCarve?.planeRadius ?? cone.tipRadius;
+    if (!(planeRadius > 0) || !(tipWidth > 0)) {
+      throw new Error(
+        `generateEngrave: "${label.name ?? label.text}" has no groove at the colour plane (a point ` +
+          `tip with no depth below the film) — there is no region for a V-bit to pocket; use a ` +
+          `trace or cut deeper (#221)`,
+      );
+    }
+    const pitch = (params.stepOver / tipWidth) * planeRadius * 2;
+    if (!(pitch > 0)) {
+      throw new Error(`generateEngrave: the V-carve step-over resolved to ${pitch} mm; it must be > 0 (#221)`);
+    }
+    return pocketLoops(label.polygons, planeRadius, pitch, offset, tipWidth);
+  };
 
   const prepared: Prepared[] = labels.map((label) => {
     if (label.drill) {
@@ -423,7 +492,7 @@ export function generateEngrave(
         drillMoves: drillMoves(holes, label.depth, params.peck, params, peckClearanceMm),
       };
     }
-    const rings = pocketLoops(label.polygons, toolRadius, params.stepOver, offset);
+    const rings = ringsFor(label);
     return {
       label,
       rings,
