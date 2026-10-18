@@ -107,17 +107,32 @@ export interface StockDims {
   thickness: number;
 }
 
+/**
+ * The spatial through-cut mask (#218): at an XY that a through region or kerf removes, the
+ * deepest CUT the toolpath may reach there (positive mm below the top face); `null` everywhere
+ * else, meaning the ordinary `thickness − minFloor` rule stands.
+ *
+ * It is a function, not a job-wide boolean, because a job that cuts one part out still has
+ * pockets that must keep their floor. Tab spans return `thickness − tabs.height`: a tab is
+ * material the bottom of the blank keeps, so the deepest permitted cut over it is the tab's
+ * top. The mask is built from the geometry the CAM actually produced, so the toolpath and the
+ * check cannot disagree.
+ */
+export type ThroughMask = (x: number, y: number) => number | null;
+
 export interface SacrificialLimitOptions {
   /** CNC-2's floor over the part: the deepest cut there is `thickness − minFloor`. */
   minFloor: number;
   /** The job's `breakthrough`, mm: how far a cut may pass below the part's underside (#213/#218). */
   breakthrough: number;
   /**
-   * True where the item being checked cuts THROUGH the part (#218). The seam only: #218 passes
-   * it; nothing generates through-cuts yet, so the default is false. Over the part it turns the
-   * limit from `thickness − minFloor` into `thickness + breakthrough` when a board is present.
+   * The spatial through-cut mask (#218), or absent on a job with no through work. Over the part
+   * it raises the limit from `thickness − minFloor` to the mask's answer (capped at
+   * `thickness + breakthrough`) when a board is present; a tab span's answer is
+   * `thickness − tabs.height`, which is deliberately allowed to be LOWER than the ordinary
+   * floor, so the verifier refuses a path that cuts through a holding tab.
    */
-  through?: boolean;
+  through?: ThroughMask;
 }
 
 /** Is a work-frame XY inside an axis-aligned sacrificial box's XY footprint? Inclusive edges. */
@@ -148,17 +163,26 @@ function insideBox(b: SacrificialBox, x: number, y: number): boolean {
 export function sacrificialDepthLimit(stock: StockDims, s: Sacrificial, opts: SacrificialLimitOptions): DepthLimit {
   const { length: L, width: W, thickness: T } = stock;
   const { minFloor, breakthrough } = opts;
-  const through = opts.through ?? false;
-  const partLimit = through && s.under !== null ? T + breakthrough : T - minFloor;
+  const mask = opts.through ?? null;
+  const partLimit = T - minFloor;
 
   const boxes = sacrificialBoxes(stock, s);
   const under = boxes.find((b) => b.id === 'under') ?? null;
   const sides = boxes.filter((b) => b.id !== 'under');
 
   return (x, y) => {
-    if (x >= 0 && x <= L && y >= 0 && y <= W) return partLimit;
+    // The through mask is consulted FIRST: over the part it may raise the limit to the board, and
+    // over a tab span it deliberately lowers it to the tab's top. It never raises a limit past
+    // `T + breakthrough`, and it does nothing without a board — no board means no through cut.
+    const local = mask?.(x, y) ?? null;
+    const throughLimit =
+      local !== null && under !== null ? Math.min(T + breakthrough, local) : partLimit;
+    if (x >= 0 && x <= L && y >= 0 && y <= W) return throughLimit;
     for (const b of sides) {
-      if (insideBox(b, x, y)) return T + (under !== null && insideBox(under, x, y) ? breakthrough : 0);
+      if (insideBox(b, x, y)) {
+        const sideLimit = T + (under !== null && insideBox(under, x, y) ? breakthrough : 0);
+        return local !== null ? Math.min(sideLimit, local) : sideLimit;
+      }
     }
     if (under !== null && insideBox(under, x, y)) return T + breakthrough;
     return 0;

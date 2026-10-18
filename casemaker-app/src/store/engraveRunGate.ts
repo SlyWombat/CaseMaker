@@ -44,6 +44,9 @@ export const ACKNOWLEDGE_CODES: ReadonlySet<string> = new Set([
   'vise-default',
   'holder-vs-fixture-unproven',
   'holder-unproven',
+  // #218 — a cut-out with `tabs.count: 0` releases the part onto the board. The operator is
+  // acknowledging that it stays put only by the blank's own fixing.
+  'released-onto-board',
 ]);
 
 /** Where the run is, as the store spells it — declared here so the view below can name it once. */

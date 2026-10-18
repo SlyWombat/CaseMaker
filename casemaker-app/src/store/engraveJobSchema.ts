@@ -101,6 +101,9 @@ const shapeBaseSchema = z.object({
   enabled: z.boolean(),
   // Reference-only item (#215). Optional, so a pre-#215 job is unchanged.
   construction: z.boolean().optional(),
+  // Through pocket (#218), shapes only. Optional, so a pre-#218 document keeps no key and its
+  // `depth` keeps its ordinary meaning.
+  through: z.boolean().optional(),
 });
 
 const shapeKindsSchema = z.discriminatedUnion('kind', [
@@ -170,6 +173,28 @@ const combinedShapeSchema = z.discriminatedUnion('kind', [
     islands: z.array(z.string().min(1)),
   }),
 ]);
+
+/**
+ * A profile cut-out (#218). It is NOT a region and carries no `depth`: its floor is always the
+ * under-board's `thickness + breakthrough`. `of` names another item whose outline the path
+ * follows, or `'stock-inset'` for the blank's own edge. `inset` is the PATH's distance from that
+ * outline (the answered Q1 on #218), and the tab dimensions are the row's own — the shop's
+ * `tabs.*` seeds only supply a new row's starting values.
+ */
+const cutoutSchema = z.object({
+  kind: z.literal('cutout'),
+  id: z.string().min(1),
+  name: z.string().optional(),
+  enabled: z.boolean(),
+  of: z.union([z.literal('stock-inset'), z.string().min(1)]),
+  side: z.enum(['outside', 'inside']),
+  inset: z.number().finite().nonnegative(),
+  tabs: z.object({
+    count: z.number().int().nonnegative().max(64),
+    width: z.number().finite().positive(),
+    height: z.number().finite().positive(),
+  }),
+});
 
 /**
  * An imported vector outline (#217). It shares the shape base but is NOT a member of the
@@ -1045,6 +1070,9 @@ const engraveJobV2Schema = engraveJobV1Schema.extend({
   drills: z.array(drillSchema).optional(),
   // #445's milled threads. OPTIONAL for the same byte-for-byte reason as `combined`.
   threads: z.array(threadSchema).optional(),
+  // #218's profile cut-outs. OPTIONAL, not defaulted: a job with none keeps no key, so a
+  // pre-#218 document round-trips byte-for-byte (the same reason as `combined`).
+  cutouts: z.array(cutoutSchema).optional(),
   // #246/#254's per-field provenance. OPTIONAL, not defaulted: a job that has never had a
   // cutting override or a guided setup applied carries no key.
   sources: jobSourcesSchema.optional(),

@@ -91,6 +91,17 @@ import { generateFacing, type FacingCamSummary } from '@/engine/cnc/cam/facing';
 import { chooseFacingTool } from '@/engine/cnc/engrave/facingTool';
 import { facingRefusal } from '@/engine/cnc/stockStart';
 import { generateTrace } from '@/engine/cnc/cam/trace';
+import {
+  generateProfile,
+  kerfPolygons,
+  placeTabs,
+  profilePath,
+  tabRectangles,
+  type ProfileCut,
+  type ProfileSpan,
+  type ProfileTabReport,
+} from '@/engine/cnc/cam/profile';
+import { buildThroughMask, type MaskCutout } from '@/engine/cnc/engrave/throughMask';
 import type { Polygons } from '@/engine/cnc/cam/pocket';
 import { concatToolpathIR, estimateCycleSeconds, HOP_Z, travelStats, type CamMove, type ToolpathIR } from '@/engine/cnc/cam/ir';
 import { postZ1, type PostContext, type VacuumSpan } from '@/engine/cnc/post/z1';
@@ -98,8 +109,9 @@ import { FRAME_Z, runSheetFileName, runSheetFrameFileName } from '@/engine/cnc/e
 import type { Setup } from '@/engine/cnc/setup';
 import type { MountObstacles } from '@/engine/cnc/mounts/bracket';
 import { unfacedBands } from '@/engine/cnc/mounts/inPath';
-import { verifyProgram, type DepthLimit, type VerifyReport } from '@/engine/cnc/verify';
+import { verifyProgram, type DepthLimit, type ThroughMask, type VerifyReport } from '@/engine/cnc/verify';
 import type { ManifoldToplevel } from '@/workers/geometry/evaluateOp';
+import { executeProfile } from '@/workers/geometry/evaluateOp';
 import {
   bindingVoidsByRegion,
   itemDepthBoundFindings,
@@ -236,6 +248,12 @@ export interface EngraveCamSummary {
    */
   roughOperations?: number;
   finishOperations?: number;
+  /**
+   * #218 — how many operations in this program are full-depth `'through'` passes (a through
+   * shape/drill region or a cut-out profile). Optional so a stored object from an older build
+   * reads as "not recorded"; `summarize` always fills it.
+   */
+  throughOperations?: number;
 }
 
 /**
@@ -287,6 +305,12 @@ export interface EngraveProgram {
    * finish setting.
    */
   finish?: FinishPassFacts | null;
+  /**
+   * #218 — the cut-out/tab facts when THIS program cuts the profiles. Null on every other file:
+   * the run sheet's tab-removal step belongs to the program that leaves the tabs, not to the run
+   * as a whole (a job may cut its regions with one tool and its profiles with another).
+   */
+  through?: ThroughCutFacts | null;
 }
 
 /**
@@ -322,6 +346,28 @@ export interface DrillProgramFacts {
   sources: Record<keyof DrillSettings, string>;
   plans: (DrillBitPlan & { id: string; name: string })[];
   simDrillPoint: { deg: number; source: string };
+}
+
+/**
+ * #218 — what the CUT-OUT program cut, for the run sheet's tab-removal step. One entry per
+ * cut-out the program carries, with the tab spec the file was cut with and how many tabs were
+ * actually placed (a `tab-unplaceable` finding refuses the run, so a successful run has every
+ * requested tab, but the count is stated rather than inferred).
+ */
+export interface ThroughCutFacts {
+  /** The breakthrough the cut-out programs cut to, mm below the blank's bottom face. */
+  breakthroughMm: number;
+  /** The under-board's thickness, mm, or null when the job has none (refused before CAM). */
+  boardThicknessMm: number | null;
+  cutouts: {
+    id: string;
+    name: string;
+    tabs: { count: number; widthMm: number; heightMm: number };
+    /** Tab spans actually placed across every contour of the cut. */
+    spans: number;
+    /** Tabs asked for but not placed; 0 on a run that reached CAM. */
+    unplaceable: number;
+  }[];
 }
 
 export interface EngraveGenerated {
@@ -439,6 +485,13 @@ export interface EngraveGenerated {
    */
   drill?: DrillProgramFacts | null;
   /**
+   * #218 — what the CUT-OUTS in this program cut: the breakthrough, the board and each cut-out's
+   * tab spec. Present only on the program whose tool cuts the profiles (the cut-outs are a class
+   * of their own and always arrive on a flat end mill's setup); absent/null on every other file,
+   * so the run sheet's tab-removal step describes the file that actually leaves the tabs.
+   */
+  through?: ThroughCutFacts | null;
+  /**
    * The regions the CAM cut and the oracle must match (#206 §3): each region item's opened
    * polygons, each drill's discs, and — since #287 — each single-line trace's swept region.
    */
@@ -514,6 +567,20 @@ export interface EngraveRegions {
   measured: LabelEngravability[];
   /** What the REGION CAM is handed: labels, shapes and drills (#220). Traces are not here — see `cuts`. */
   regions: EngraveRegion[];
+  /**
+   * #218 — the CUT-OUTS' profile cuts, ready for `cam/profile.ts`: each one's offset centre path,
+   * through depth and tab spec. Empty when the job has none or the cutter is not a flat end mill
+   * (a cut-out needs one; the setup gate refuses the pairing). Kept here so the CAM, the oracle's
+   * prediction and the through mask all read the SAME path.
+   */
+  profiles: ProfileCut[];
+  /**
+   * #218 — the spatial through mask `jobDepthLimit` is composed with. Built from the geometry CAM
+   * actually cuts: opened through regions, through-drill discs, and each cut-out's kerf with its
+   * tab spans capped at `T − tabs.height`. Null when the job has no through work, which keeps the
+   * limit exactly as it was before.
+   */
+  throughMask: ThroughMask | null;
   /**
    * EVERY cut the program makes, in cutting order, one entry per item (#288): the region CAM's own
    * list above, then the single-line traces, which are CAM'd separately (`generateTrace`) and so are
@@ -952,6 +1019,75 @@ export function engraveRegions(
           requestedStepOver,
         );
 
+  // #218 — CUT-OUTS: each one's offset centre path, its tab spans, the kerf the oracle expects
+  // and the finding a tab that could not be placed raises. Built here, with the same injected
+  // offset the region CAM uses, so the path CAM cuts, the path the verifier's mask tests and the
+  // region the oracle expects are one geometry rather than three derivations.
+  const throughDepth = plan.stock.thickness + job.breakthrough;
+  const profiles: ProfileCut[] = [];
+  const cutoutMask: MaskCutout[] = [];
+  const cutoutCuts: CutRegion[] = [];
+  const cutoutPredicted: OraclePredicted[] = [];
+  const tabFindings: JobFinding[] = [];
+  if (radius !== null && plan.cutouts.length > 0) {
+    const offset = makeClipperOffset(tl);
+    for (const c of plan.cutouts) {
+      const outlineCS = executeProfile(tl, c.outline);
+      const outline = outlineCS.toPolygons() as Polygons;
+      outlineCS.delete();
+      if (outline.length === 0) continue;
+      const path = profilePath(outline, c.side, radius, c.inset, offset);
+      if (path.length === 0) continue;
+      const spans: ProfileSpan[][] = [];
+      let placed = 0;
+      let unplaceable = 0;
+      for (const contour of path) {
+        const placement = placeTabs(contour, c.tabs.count, c.tabs.width, radius);
+        spans.push(placement.spans);
+        placed += placement.spans.length;
+        unplaceable += placement.unplaceable;
+      }
+      profiles.push({
+        id: c.id,
+        name: c.name,
+        path,
+        depth: c.depth,
+        thickness: c.thickness,
+        tabs: { count: c.tabs.count, width: c.tabs.width, height: c.tabs.height },
+      });
+      cutoutMask.push({ path, spans, toolRadius: radius, tabHeight: c.tabs.height });
+      if (unplaceable > 0) {
+        tabFindings.push({
+          severity: 'error',
+          code: 'tab-unplaceable',
+          labelId: c.id,
+          message:
+            `Cut-out "${c.name}" asks for ${c.tabs.count} holding tabs ${c.tabs.width} mm wide, ` +
+            `but ${unplaceable} could not be placed on a straight edge long enough; the part ` +
+            'would be released where that tab was meant to hold it. Use a smaller tab width or count.',
+        });
+      }
+      const kerf = kerfPolygons(path, radius, offset);
+      const tabTop = c.thickness - c.tabs.height;
+      cutoutCuts.push({
+        id: c.id,
+        name: c.name,
+        depth: c.tabs.count > 0 ? tabTop : c.depth,
+        polygons: kerf,
+      });
+      // Two levels, as the oracle needs them: the whole kerf is cut down to the tab top, and the
+      // deep passes remove it everywhere except the tab rectangles. The rectangles lie wholly
+      // inside the kerf, so their even-odd subtraction is exact.
+      if (c.tabs.count > 0) {
+        cutoutPredicted.push({ depth: tabTop, polygons: kerf });
+        const kept = spans.flatMap((one) => tabRectangles(one, radius));
+        cutoutPredicted.push({ depth: c.depth, polygons: [...kerf, ...kept] });
+      } else {
+        cutoutPredicted.push({ depth: c.depth, polygons: kerf });
+      }
+    }
+  }
+
   // `job.sacrificial` is threaded so the generate path's `vise-grip-shallow` judges what the
   // jaws actually grip (#213 §2), not the raw stock: the argument `validateVise` has accepted
   // since `454110a` but this call never passed.
@@ -970,6 +1106,8 @@ export function engraveRegions(
     // own `depthIntent` put it, and the ceiling of any void it sits over. A no-op for a job with
     // neither.
     ...itemDepthBoundFindings(job, colourBoundaryDepth, margins.boundaryMargin, bindingVoids),
+    // #218 — a tab the CAM could not place on a straight edge.
+    ...tabFindings,
   ]);
 
   const regions: EngraveRegion[] = plan.engraves.map((e) => {
@@ -981,13 +1119,14 @@ export function engraveRegions(
       depth: e.depth,
       polygons: byId.get(e.id)?.polygons ?? [],
       ...(vCarve === undefined ? {} : { vCarve }),
+      ...(e.through === true ? { through: true as const } : {}),
     };
   });
 
   // Plunge drills (#220): a region whose cut is the cutter's own disc per hole, so the preview
-  // and the oracle see it exactly as the CAM will cut it. A `through` hole is refused by
-  // `drill-through-unavailable` before the pipeline reaches CAM, so it contributes no region —
-  // but a job that still carried one here would cut a floor, never break through.
+  // and the oracle see it exactly as the CAM will cut it. A `through` hole (#218) is no longer
+  // refused: its floor is the board, `thickness + breakthrough`, and its region carries the flag
+  // that makes the operation a `'through'` pass.
   //
   // #434 — a DRILL BIT is refused by `cuttingForTrace` (no flat radius), but its discs are the
   // FULL diameter below the point, so the region takes `cuttingDiameter / 2`: the preview and the
@@ -995,17 +1134,18 @@ export function engraveRegions(
   const drillToolRadius =
     tool !== null && tool.shape === 'drill' ? (cuttingDiameter(tool) ?? 0) / 2 || null : null;
   for (const d of plan.drills) {
-    if (d.through) continue;
     const drillRadius = radius ?? drillToolRadius;
+    const depth = d.through ? throughDepth : d.depth;
     regions.push({
       id: d.id,
       text: '',
       // The diameter is only known once the tool is resolved, so the region builder appends it —
       // the same division of labour `toPartPlan` documents (#220).
       name: drillRadius === null ? d.name : `${d.name} ⌀${drillRadius * 2}`,
-      depth: d.depth,
+      depth,
       polygons: drillRadius === null ? [] : drillPolygons(tl, d.holes, drillRadius),
       drill: { holes: d.holes.map(([x, y]) => [x, y] as [number, number]) },
+      ...(d.through ? { through: true as const } : {}),
     });
   }
 
@@ -1018,7 +1158,7 @@ export function engraveRegions(
   // enumerated (#288): the prediction below and `engravePreview`'s picture are both its projection,
   // so a fourth class (#218's cut-outs) lands in the program, the oracle and the preview together.
   const traceCuts: CutRegion[] = traceRadius === null ? [] : traceCutRegions(tl, plan, traceRadius);
-  const cuts: CutRegion[] = [...regions, ...traceCuts];
+  const cuts: CutRegion[] = [...regions, ...traceCuts, ...cutoutCuts];
 
   // #408 — a V TRACE's PREDICTION is a groove, not a region. What a cone removes at a level depends
   // on how far below its tip that level is, so a trace entry cannot be the mouth's polygon set the
@@ -1038,9 +1178,24 @@ export function engraveRegions(
     ...(cone === null
       ? traceCuts.map((c): OraclePredicted => ({ depth: c.depth, polygons: c.polygons }))
       : plan.traces.map((t): OraclePredicted => ({ depth: t.depth, polygons: [], groove: { paths: t.paths, closed: t.closed, cone } }))),
+    // #218 — a cut-out's kerf at the tab top, and the same kerf less its tab rectangles at the
+    // through depth. Every placed tab is subtracted; an unplaced one is not, and its material is
+    // correctly predicted as cut away.
+    ...cutoutPredicted,
   ];
 
-  return { plan, measured, regions, cuts, predicted, tool, radius, findings, colourBoundaryDepth, margins };
+  // #218 — the verifier's through mask, built from the SAME geometry: every through region's
+  // opened polygons (a through drill's discs are its region) and each cut-out's kerf with its
+  // tab spans capped at the tab top. Null when the job has no through work, so `jobDepthLimit`
+  // reads exactly as it did before this feature.
+  const throughMask = buildThroughMask({
+    thickness: plan.stock.thickness,
+    breakthrough: job.breakthrough,
+    regions: regions.filter((r) => r.through === true).map((r) => r.polygons),
+    cutouts: cutoutMask,
+  });
+
+  return { plan, measured, regions, profiles, throughMask, cuts, predicted, tool, radius, findings, colourBoundaryDepth, margins };
 }
 
 /** Count what the panel reports: operations, cutting moves, estimated seconds, depth passes. */
@@ -1050,9 +1205,11 @@ function summarize(ir: ReturnType<typeof generateEngrave>): EngraveCamSummary {
   let estimatedSeconds = 0;
   let roughOperations = 0;
   let finishOperations = 0;
+  let throughOperations = 0;
   for (const op of ir.operations) {
     if (op.passKind === 'rough') roughOperations++;
     else if (op.passKind === 'finish') finishOperations++;
+    else if (op.passKind === 'through') throughOperations++;
     estimatedSeconds += op.estimatedSeconds;
     const zs = new Set<number>();
     for (const m of op.moves) {
@@ -1082,6 +1239,7 @@ function summarize(ir: ReturnType<typeof generateEngrave>): EngraveCamSummary {
     ordering: ordering === undefined || ordering.order !== 'proximity' ? null : 'proximity',
     roughOperations,
     finishOperations,
+    throughOperations,
   };
 }
 
@@ -2104,6 +2262,7 @@ function programOf(one: Omit<EngraveGenerated, 'programs'>, ref: JobProgramRef):
     cam: one.cam,
     drill: one.drill ?? null,
     finish: one.finish ?? null,
+    through: one.through ?? null,
   };
 }
 
@@ -2204,7 +2363,7 @@ function generateOneProgram(
   // which is the only post this app has; a second mill is a second post, and this line is where a
   // job naming it would have to be refused until there is one.
   const mill = jobMachine(job, calibration);
-  const { plan, regions, predicted, findings } = engraveRegions(tl, job, tool, margins, shop, mill, catalogue);
+  const { plan, regions, profiles, throughMask, predicted, findings } = engraveRegions(tl, job, tool, margins, shop, mill, catalogue);
   const errors: EngraveFailure[] = [];
 
   const stop = (
@@ -2276,6 +2435,7 @@ function generateOneProgram(
   let threadPlans: ThreadMillPlan[] | null = null;
   let threadMachining: ThreadSettingsResult | null = null;
   let drillFacts: DrillProgramFacts | null = null;
+  let cutoutFacts: ThroughCutFacts | null = null;
   let ir: ToolpathIR;
   // #250 — the allowance crosses as a plain number+source; the mode is this program's half. No
   // shop finish block at all means no split, so a direct-engine caller and the golden `.nc` are
@@ -2299,7 +2459,7 @@ function generateOneProgram(
     // The program cuts drilled holes ONLY: one file has one tool, and an engraver's work cannot be
     // done by a bit's point. `validateJob`/`setupProgramFindings` refuse the pairing before this
     // point on a document they see whole; this check guards the sub-job the split actually hands in.
-    const otherWork = plan.engraves.length + plan.traces.length + plan.threads.length;
+    const otherWork = plan.engraves.length + plan.traces.length + plan.threads.length + plan.cutouts.length;
     if (otherWork > 0) {
       return stop('findings', {
         message:
@@ -2330,10 +2490,12 @@ function generateOneProgram(
         const r = drillBitIR({
           tool,
           holes: item.holes,
-          // A through hole never reaches CAM (`drill-through-unavailable`, #218), so every hole
-          // this program may cut is blind: its FULL DIAMETER goes to the item's depth and the
-          // point carries the tip deeper (`planDrillBit`).
-          depth: { kind: 'blind', fullDiameterDepth: item.depth },
+          // #218 — a through hole's full diameter clears the underside by the breakthrough. It is
+          // the same number the verifier's mask allows, so the hole the file drills and the hole
+          // the check expects cannot disagree.
+          depth: item.through
+            ? { kind: 'through', thickness: job.stock.thickness, breakthroughMm: job.breakthrough }
+            : { kind: 'blind', fullDiameterDepth: item.depth },
           settings: resolvedDrill.settings,
           pointAngleSource: resolvedDrill.sources.pointAngleDeg,
           stock: { length: job.stock.length, width: job.stock.width },
@@ -2418,15 +2580,43 @@ function generateOneProgram(
       // calls are inside this `try` so a trace CAM refusal reports the same `cam` stage a region
       // refusal does.
       //
-      // ORDERING, for whoever adds a class inside `generateEngrave` next (#218's cut-outs are the
-      // one already planned): the classes here end up drills → pockets → cut-outs → traces. Drills
-      // lead for the reason `generateEngrave` states (#220: a peck cycle leaves the blank
-      // unweakened). A trace wants to be cut BEFORE a cut-out releases the part, so #218 should
-      // place traces ahead of its cut-out class rather than leaving this append at the end — a
-      // released part can shift under the tape, which is exactly what the drills-first rule avoids.
+      // ORDERING: the classes end up drills → pockets → traces → CUT-OUTS. Drills lead for the
+      // reason `generateEngrave` states (#220: a peck cycle leaves the blank unweakened). Traces
+      // come BEFORE the cut-outs (#218): a cut-out releases the part, and an engraving made after
+      // that would be cut into a piece that can shift under the tape. The profile class is
+      // therefore last, and it is the only class that cuts into the board.
       const traceIr = generateTrace(plan.traces, tool, resolved.params, mill.rapidEstimate);
-      if (regionIr === null) ir = traceIr;
-      else ir = traceIr.operations.length > 0 ? concatToolpathIR(regionIr, traceIr) : regionIr;
+      const profileResult =
+        profiles.length === 0 ? null : generateProfile(profiles, tool, resolved.params, mill.rapidEstimate);
+      const beforeCutouts =
+        regionIr === null ? traceIr : traceIr.operations.length > 0 ? concatToolpathIR(regionIr, traceIr) : regionIr;
+      ir =
+        profileResult === null
+          ? beforeCutouts
+          : beforeCutouts.operations.length > 0
+            ? concatToolpathIR(beforeCutouts, profileResult.ir)
+            : profileResult.ir;
+      if (profileResult !== null) {
+        const byId = new Map(profiles.map((p) => [p.id, p] as const));
+        cutoutFacts = {
+          breakthroughMm: job.breakthrough,
+          boardThicknessMm: job.sacrificial.under?.thickness ?? null,
+          cutouts: profileResult.tabs.map((report) => {
+            const cut = byId.get(report.id);
+            return {
+              id: report.id,
+              name: report.name,
+              tabs: {
+                count: cut?.tabs.count ?? 0,
+                widthMm: cut?.tabs.width ?? 0,
+                heightMm: cut?.tabs.height ?? 0,
+              },
+              spans: report.spans,
+              unplaceable: report.unplaceable,
+            };
+          }),
+        };
+      }
     } catch (e) {
       return stop('cam', { feeds, message: e instanceof Error ? e.message : String(e) });
     }
@@ -2460,8 +2650,8 @@ function generateOneProgram(
   // tightened where an under-surface void leaves a thinner membrane (#231 item 3). On a job that
   // states its print (#285) the whole limit comes from the layer stack instead, so the void
   // membrane is layer-aligned and the verifier's number is the one the printer will honour.
-  const stack = stackDepthLimit(tl, plan, job, margins.boundaryMargin);
-  const limit: DepthLimit = stack?.limit ?? jobDepthLimit(job, margins.boundaryMargin);
+  const stack = stackDepthLimit(tl, plan, job, margins.boundaryMargin, throughMask ?? undefined);
+  const limit: DepthLimit = stack?.limit ?? jobDepthLimit(job, margins.boundaryMargin, throughMask ?? undefined);
   const limitReasonAt = stack
     ? (x: number, y: number): string => depthLimitReason(stack, job, x, y)
     : undefined;
@@ -2555,6 +2745,7 @@ function generateOneProgram(
       threadMachining,
       drill: drillFacts,
       finish: finishFacts,
+      through: cutoutFacts,
       cam,
       nc,
       verify,

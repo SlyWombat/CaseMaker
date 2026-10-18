@@ -214,6 +214,13 @@ export interface EngraveShapeBase {
    * `frame` or a `cutaway`. Its profile still resolves, so it can be a target or an island.
    */
   construction?: boolean;
+  /**
+   * Cut this pocket all the way through the blank into the under-board (#218). A through region
+   * has no typed depth: its floor is the setup's `thickness + breakthrough`, and `depth` is
+   * ignored by every consumer. Shapes only for the first pass (the answered question on #218):
+   * a label, vector or combined through region would need its own depth semantics.
+   */
+  through?: boolean;
 }
 
 /** A rectangle pocket. `cornerRadius` 0 = sharp — the cutter rounds it anyway. */
@@ -442,6 +449,56 @@ export interface EngraveTargetObject {
   /** False hides the reference object in the viewport; it is never cut either way. */
   enabled: boolean;
 }
+
+/**
+ * Holding tabs for a cut-out (#218): bridges of material left UNCUT across the kerf so the part
+ * cannot move before the operator frees it.
+ *
+ * `width` is the tab's width IN MATERIAL, mm. The CAM stops the cutter's centre one tool radius
+ * short on each side, so the span on the centre path is `width + 2 × toolRadius` — the off-by-one-
+ * diameter the tab test measures.
+ *
+ * `height` is measured UP from the bottom face, mm: the bottom `height` of the blank is never cut,
+ * so the tab's top is at `-(thickness - height)` in work Z.
+ */
+export interface CutoutTabs {
+  /** How many bridges. 0 cuts the part free. */
+  count: number;
+  width: Mm;
+  height: Mm;
+}
+
+/**
+ * A PROFILE CUT-OUT (#218): one closed path around (or inside) another item's outline, cut to
+ * the under-board and held by tabs. A cut-out is NOT a cleared region — it removes a kerf one
+ * cutter wide, so it has no `depth`, no profile to pocket and no entry in `PartPlan.engraves`.
+ * It is its own list, like traces/drills/keep-outs, and its own CAM class (`cam/profile.ts`).
+ *
+ * `of` names the item whose outline the path follows. `'stock-inset'` is the blank's own
+ * rectangle: the path is inset from the blank edge by `inset`, which is the PATH's distance from
+ * the edge, so the material left at the edge is `inset − toolRadius` (the answered Q1 on #218).
+ * For an item reference `inset` is likewise the PATH's distance from that outline.
+ *
+ * `side` says which side of the referenced outline the path lies on. The kerf is the cutter's
+ * width, centred on the path, so `outside` with `inset: 0` leaves the item's outline as the
+ * kerf's inner edge.
+ */
+export interface EngraveCutout {
+  kind: 'cutout';
+  id: string;
+  /** Optional human name, shown in operations and findings. */
+  name?: string;
+  enabled: boolean;
+  /** The item id whose outline the path follows, or `'stock-inset'` for the blank's own edge. */
+  of: string;
+  side: 'outside' | 'inside';
+  /** PATH distance from the referenced outline (or the blank edge), mm. Non-negative. */
+  inset: Mm;
+  tabs: CutoutTabs;
+}
+
+/** The one cut-out kind, named both ways the plan's prose uses: item and list entry. */
+export type EngraveCutoutItem = EngraveCutout;
 
 /** The winding a vector outline's contours are read with (#217) — Manifold's two fill rules. */
 export type VectorFillRule = 'NonZero' | 'EvenOdd';
@@ -1064,6 +1121,15 @@ export interface EngraveJob {
   labels: EngraveLabel[];
   /** Shape pockets (#214), each at its own depth. Empty for a text-only job. */
   shapes: EngraveShape[];
+  /**
+   * PROFILE CUT-OUTS (#218): paths that free a part from the blank, held by tabs. A separate
+   * list, like `traces`/`drills`/`keepOuts`, because a cut-out is not a cleared region and has
+   * no `depth`; they funnel into `PartPlan.cutouts` and CAM's `cam/profile.ts`.
+   *
+   * Optional, so a pre-#218 document round-trips byte-for-byte; the schema keeps it absent (not
+   * defaulted) for the same reason as `combined`, `traces` and `vectors`.
+   */
+  cutouts?: EngraveCutout[];
   /**
    * Combined shapes (#215): borders, frames and cut-aways built from other items or from the
    * stock. A separate list, like `labels` and `shapes`, so the panel's exhaustive `EngraveShape`

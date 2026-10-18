@@ -125,7 +125,16 @@ export type JobFindingCode =
   | 'drill-outside-stock'
   | 'plunge-unproven'
   | 'drill-too-deep'
-  | 'drill-through-unavailable'
+  // Through-cuts and cut-outs (#218). `through-needs-board`: no under-board, or one thinner than
+  // the breakthrough plus a millimetre. `through-tool-reach`: the cutter's flutes/shank do not
+  // cover `thickness + breakthrough`. `tab-unplaceable` and `loose-piece` are raised by the CAM
+  // checks that have the path geometry (`tab-unplaceable`) and the removal solid (`loose-piece`).
+  | 'through-needs-board'
+  | 'through-tool-reach'
+  | 'tab-unplaceable'
+  | 'cutout-needs-flat'
+  | 'loose-piece'
+  | 'released-onto-board'
   // #434 — a drill bit is the cutter of a DRILL-ONLY program. Hand-edited work that pairs one with
   // a region, trace or thread is refused by name: a drill cannot open a region, and one program has
   // one tool, so the other work has to move to a cutter that can make it.
@@ -183,7 +192,30 @@ export interface JobFinding {
   message: string;
 }
 
-/** A human name for an item, for finding messages: `Label "CASE"`, `Circle ⌀6`, `Border …`. */
+/**
+ * The one `through-needs-board` finding (#218). A through cut needs material under the blank to
+ * cut INTO: the under-board must be at least `breakthrough + 1` mm thick, so the breakthrough
+ * never reaches its far face.
+ */
+function throughBoardFinding(labelId: string, who: string, job: EngraveJob): JobFinding {
+  const need = job.breakthrough + 1;
+  const have = job.sacrificial.under?.thickness ?? 0;
+  return {
+    severity: 'error',
+    code: 'through-needs-board',
+    labelId,
+    message:
+      have > 0
+        ? `${who} cuts through the blank, but the under-board is ${fmt3(have)} mm; a through cut ` +
+          `needs at least ${fmt3(need)} mm (the ${fmt3(job.breakthrough)} mm breakthrough plus ` +
+          `1 mm) so it cannot reach the far face.`
+        : `${who} cuts through the blank, which needs a sacrificial under-board at least ` +
+          `${fmt3(need)} mm thick; add one under the part or this cut reaches the vise.`,
+  };
+}
+
+/**
+ * A human name for an item, for finding messages: `Label "CASE"`, `Circle ⌀6`, `Border …`. */
 export function itemLabel(item: EngraveAnyItem): string {
   if (!('kind' in item)) return `Label "${item.text}"`;
   const name = item.name ? ` "${item.name}"` : '';
@@ -471,6 +503,9 @@ export function validateJob(
   // forms are still enabled items, so they get their own findings below rather than vanishing.
   const enabledPrimitives: EngravePrimitive[] = (job.primitives ?? []).filter((p) => p.enabled);
   const cuttablePrimitives = enabledPrimitives.filter(primitiveReducesToRegion);
+  // PROFILE CUT-OUTS (#218) are a sixth list. A cut-out has no `construction`; a disabled one
+  // does nothing. Every enabled cut-out cuts through by definition.
+  const enabledCutouts = (job.cutouts ?? []).filter((c) => c.enabled);
   const { thickness } = job.stock;
 
   // #432 — the facing skim is material the items no longer have under them. Every item's depth is
@@ -491,6 +526,9 @@ export function validateJob(
   const floorAllowed = thickness - facingDepth - job.minFloor;
 
   for (const item of enabled) {
+    // A through region has no typed depth (#218): its floor is the board, and the through gate
+    // below judges it. `item.depth` on a through item is deliberately ignored.
+    if (item.through === true) continue;
     if (item.depth > floorAllowed) {
       const remaining = thickness - facingDepth - item.depth;
       findings.push({
@@ -611,6 +649,96 @@ export function validateJob(
     drillIsBit && drillAngle !== null && drillAngle.ok && drillDiameter !== null && drillDiameter > 0
       ? pointLength(drillDiameter, drillAngle.deg)
       : 0;
+  // #218 — one gate for every through cut. The board must exist AND leave a millimetre under the
+  // breakthrough; without it a through cut is a cut into the vise. `throughDepth` is the work
+  // depth a through cut reaches, the same number `toPartPlan` gives every through region and
+  // cut-out.
+  const throughDepth = thickness + job.breakthrough;
+  const throughReady =
+    job.sacrificial.under !== null && job.sacrificial.under.thickness >= job.breakthrough + 1;
+  // A profiler needs SHANK clearance, so its limit is `shoulderLength ?? fluteLength` — the same
+  // number the sweep's holder gate uses. A drill bit is judged in its own loop by flute length.
+  const profilerReach =
+    drillTool !== null && !drillIsBit ? (drillTool.shoulderLength ?? drillTool.fluteLength) : null;
+
+  // Through shape pockets (#218). Their depth is the board, so the ordinary floor check above
+  // skipped them; these are the two facts that can refuse one.
+  for (const item of enabled) {
+    if (item.through !== true) continue;
+    const who = itemLabel(item);
+    if (!throughReady) {
+      findings.push(throughBoardFinding(item.id, who, job));
+    } else if (profilerReach !== null && profilerReach > 0 && throughDepth > profilerReach) {
+      findings.push({
+        severity: 'error',
+        code: 'through-tool-reach',
+        labelId: item.id,
+        message:
+          `${who} cuts through to ${fmt3(throughDepth)} mm, past the ${fmt3(profilerReach)} mm of ` +
+          `"${drillTool!.name}" above its shank; the holder would rub the blank.`,
+      });
+    }
+  }
+
+  // Cut-outs (#218): every one cuts through, so the same board and reach gates apply, and its
+  // `of` reference must resolve. A cut-out is not part of `resolveItems` (it references an
+  // outline but produces none), so this is its own reference check.
+  const allById = new Map(all.map((item) => [item.id, item] as const));
+  for (const cutout of enabledCutouts) {
+    const who = cutout.name ? `Cut-out "${cutout.name}"` : 'The cut-out';
+    if (drillTool !== null && drillTool.shape !== 'flat') {
+      findings.push({
+        severity: 'error',
+        code: 'cutout-needs-flat',
+        labelId: cutout.id,
+        message:
+          `${who} follows its outline with the side of the cutter, so it needs a flat end mill; ` +
+          `"${drillTool.name}" is a ${drillTool.shape} cutter and cannot profile.`,
+      });
+    }
+    if (!throughReady) {
+      findings.push(throughBoardFinding(cutout.id, who, job));
+    } else if (profilerReach !== null && profilerReach > 0 && throughDepth > profilerReach) {
+      findings.push({
+        severity: 'error',
+        code: 'through-tool-reach',
+        labelId: cutout.id,
+        message:
+          `${who} cuts through to ${fmt3(throughDepth)} mm, past the ${fmt3(profilerReach)} mm of ` +
+          `"${drillTool!.name}" above its shank; the holder would rub the blank.`,
+      });
+    }
+    if (cutout.tabs.count === 0) {
+      findings.push({
+        severity: 'warning',
+        code: 'released-onto-board',
+        labelId: cutout.id,
+        message:
+          `${who} has no holding tabs, so it is freed onto the board at the end of the cut and is ` +
+          'held only by the tape, glue or screws that fixed the blank. A released part can move ' +
+          'under the cutter; add tabs if the part must stay put until the program ends.',
+      });
+    }
+    if (cutout.of !== 'stock-inset') {
+      const target = allById.get(cutout.of);
+      if (target === undefined) {
+        findings.push({
+          severity: 'error',
+          code: 'item-reference',
+          labelId: cutout.id,
+          message: `${who} follows "${cutout.of}", which is not in the job.`,
+        });
+      } else if (!target.enabled) {
+        findings.push({
+          severity: 'error',
+          code: 'item-reference',
+          labelId: cutout.id,
+          message: `${who} follows "${cutout.of}", which is disabled.`,
+        });
+      }
+    }
+  }
+
   const { length, width } = job.stock;
   for (const drill of enabledDrills) {
     const who = drillOperationName(drill);
@@ -618,15 +746,26 @@ export function validateJob(
     const tipDepth = drill.depth + drillPointLength;
     const depthAtFloor = drillIsBit ? tipDepth : drill.depth;
     if (drill.through) {
-      findings.push({
-        severity: 'error',
-        code: 'drill-through-unavailable',
-        labelId: drill.id,
-        message:
-          `${who} asks to cut through the blank, which needs a sacrificial board (#213) and the ` +
-          `through-cut depth rules (#218); neither is in yet, so the hole is refused rather than ` +
-          `cut into the vise.`,
-      });
+      // #218 — a through hole cuts to the board, not to `drill.depth`. The gate is the one every
+      // through cut shares: an under-board exists and is thick enough, and the cutter's flutes
+      // cover the breakthrough. A drill needs FLUTES to clear chips, so its limit is
+      // `fluteLength` (never `shoulderLength`, which is a profiler's shank-clearance number).
+      if (!throughReady) {
+        findings.push(throughBoardFinding(drill.id, who, job));
+      } else if (
+        drillTool.fluteLength !== null &&
+        drillTool.fluteLength > 0 &&
+        throughDepth > drillTool.fluteLength
+      ) {
+        findings.push({
+          severity: 'error',
+          code: 'through-tool-reach',
+          labelId: drill.id,
+          message:
+            `${who} cuts through to ${fmt3(throughDepth)} mm, past the ${drillTool.fluteLength} mm ` +
+            `flute of "${drillTool.name}"; the flutes would be buried and chips could not clear.`,
+        });
+      }
     } else if (depthAtFloor > floorAllowed) {
       const remaining = thickness - facingDepth - depthAtFloor;
       findings.push({
@@ -836,8 +975,11 @@ export function validateJob(
     // TIP is the deepest point, so the whole tip depth — hole plus point — has to fit.
     if (drillTool.fluteLength !== null && drillTool.fluteLength > 0) {
       for (const drill of enabledDrills) {
+        // A through drill's reach is judged by `through-tool-reach` against the board depth, not
+        // against `drill.depth` (which it does not use). One owner for the number.
+        if (drill.through) continue;
         const needed = drill.depth + drillPointLength;
-        if (!drill.through && needed > drillTool.fluteLength) {
+        if (needed > drillTool.fluteLength) {
           findings.push({
             severity: 'error',
             code: 'drill-too-deep',
@@ -927,13 +1069,14 @@ export function validateJob(
     // ANY enabled primitive counts as stated work: a refused cone/sphere already has its own
     // by-name error, so "nothing to do" would be a second, misleading complaint about the shape
     // the person drew.
-    enabledPrimitives.length === 0
+    enabledPrimitives.length === 0 &&
+    enabledCutouts.length === 0
   ) {
     findings.push({
       severity: 'error',
       code: 'no-items',
       message:
-        'The job has no enabled label with text, shape, trace, drilled hole, thread or cuttable 3D primitive.',
+        'The job has no enabled label with text, shape, trace, drilled hole, thread, cuttable 3D primitive or cut-out.',
     });
   }
 

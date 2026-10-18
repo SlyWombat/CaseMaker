@@ -17,8 +17,10 @@ import {
 import { resolveFont } from '@/engine/fonts/registry';
 import { strokeGlyphPaths, boldStrokePasses } from '@/engine/fonts/stroke/strokeFont';
 import type {
+  CutoutTabs,
   EngraveAnyItem,
   EngraveCombinedShape,
+  EngraveCutout,
   EngraveDrill,
   EngraveJob,
   EngraveKeepOut,
@@ -42,7 +44,7 @@ import { grooveWidthAt, vCone } from '@/engine/cnc/vProfile';
 import { defaultBoundaryMargin, voidFloor, voidMargin } from '@/engine/cnc/engrave/depthBounds';
 import { inkBoxOf, type InkBox, type InkMeasure } from '@/engine/cnc/engrave/inkBox';
 import { printedLayerGridOf, voidCeilingFor } from '@/engine/cnc/layerStack';
-import type { DepthLimit } from '@/engine/cnc/verify';
+import type { DepthLimit, ThroughMask } from '@/engine/cnc/verify';
 import { sacrificialDepthLimit } from '@/engine/cnc/verify';
 
 /**
@@ -94,7 +96,29 @@ export interface PartPlan {
     /** The first layer's own height, mm (#285); absent = the same as `layerHeight`. */
     firstLayerHeight?: Mm;
   };
-  engraves: { id: string; name: string; profile: Profile; depth: Mm }[];
+  engraves: { id: string; name: string; profile: Profile; depth: Mm; through?: boolean }[];
+  /**
+   * PROFILE CUT-OUTS (#218), a fifth sibling: the outline a `cam/profile.ts` path follows, plus
+   * its side, inset, tab spec and the depth it cuts to. The OUTLINE is the referenced item's
+   * profile in the stock frame, BEFORE the tool-radius offset — `cam/profile.ts` owns the
+   * injected offset, exactly as `pocketLoops` does. `depth` is `thickness + breakthrough`, the
+   * document's through depth, so the preview, the verifier and the CAM read one number.
+   *
+   * A cut-out whose `of` names an item that never resolved is absent here (the same rule as a
+   * region item with a broken reference): `validateJob` reports the reference, and no path is
+   * generated for it.
+   */
+  cutouts: {
+    id: string;
+    name: string;
+    outline: Profile;
+    side: 'outside' | 'inside';
+    inset: Mm;
+    depth: Mm;
+    /** The blank's thickness, mm — the tab top is `-(thickness - tabs.height)`. */
+    thickness: Mm;
+    tabs: CutoutTabs;
+  }[];
   /**
    * SINGLE-LINE traces (#219), a SIBLING of `engraves` rather than more entries in it. A trace
    * is not a region — the cutter's centre follows the path, so the cut is one cutter wide and
@@ -432,6 +456,21 @@ function primitiveProfile(primitive: EngravePrimitive): Profile {
     return circleProfile(radius, segmentsForRadius(radius));
   }
   return poly([]);
+}
+
+/**
+ * The operation name a profile cut-out reads (#218): `Cut out "badge" outside Pocket rect
+ * 30×20`, or for the blank's own edge `Cut out stock inset 3mm`. It parallels
+ * `itemOperationName`, but the referenced item's name is supplied by the caller because the
+ * cut-out itself holds only an id.
+ */
+export function cutoutOperationName(cutout: EngraveCutout, targetName: string | null): string {
+  const named = cutout.name ? ` "${cutout.name}"` : '';
+  const target =
+    cutout.of === 'stock-inset'
+      ? `stock inset ${cutout.inset}mm`
+      : (targetName ?? 'referenced item');
+  return `Cut out${named} ${cutout.side} ${target}`;
 }
 
 /**
@@ -1734,6 +1773,15 @@ export function sweptCuts(job: EngraveJob, plan: PartPlan = toPartPlan(job, { un
     const r = FASTENERS[thread.size].major / 2;
     add(thread.id, thread.name, thread.depth, { minX: x, maxX: x, minY: y, maxY: y }, r);
   }
+  // Cut-outs (#218) sweep the referenced outline plus the path offset (`inset`) and the cutter
+  // radius. The outline's bounding box covers every point of the offset path, so growing it by
+  // the offset is the safe superset the collision checks want.
+  for (const cutout of plan.cutouts) {
+    const aabb = aabbOfProfile(cutout.outline);
+    if (!aabb) continue;
+    const box = { minX: aabb.min[0], maxX: aabb.max[0], minY: aabb.min[1], maxY: aabb.max[1] };
+    add(cutout.id, cutout.name, cutout.depth, box, sweepRadiusForJob(job, 0) + cutout.inset);
+  }
   return cuts;
 }
 
@@ -1750,18 +1798,20 @@ export function sweptCuts(job: EngraveJob, plan: PartPlan = toPartPlan(job, { un
  * The two are independent: a void is a fact about the blank, the sacrificial material a fact
  * about the setup. Whichever is shallower at a point wins.
  *
- * A through-cut (#218) is not wired yet, so `through` is left false here; when #218 lands, the
- * flag comes from the job and this is the one place it is threaded from.
+ * A through-cut (#218) is threaded from HERE: `through` is the spatial mask the CAM built, and
+ * `sacrificialDepthLimit` consults it where a point is inside a through region or kerf. A job
+ * with no through work passes no mask and reads exactly as before.
  *
  * `margin` (#345) is the job's `boundaryMargin` as the caller resolved it, and only the void half
  * uses it: the job's own `minFloor`/`breakthrough` are the document's numbers and are not the
  * house's to override. It is passed in rather than looked up because this module must stay free of
  * the settings store — the panel and the worker each resolve it once and hand the same number here.
  */
-export function jobDepthLimit(job: EngraveJob, margin?: Mm): DepthLimit {
+export function jobDepthLimit(job: EngraveJob, margin?: Mm, through?: ThroughMask): DepthLimit {
   const sacrificial = sacrificialDepthLimit(job.stock, job.sacrificial, {
     minFloor: job.minFloor,
     breakthrough: job.breakthrough,
+    ...(through === undefined ? {} : { through }),
   });
   return (x, y) => {
     const base = sacrificial(x, y);
@@ -1809,6 +1859,8 @@ export function toPartPlan(job: EngraveJob, options: PartPlanOptions = {}): Part
   const measure = options.unparsedFace === 'estimate' ? labelGlyphMeasure(job.customFonts ?? []) : null;
 
   const profiles = new Map<string, Profile>();
+  /** The human name of each resolved item, for a cut-out's operation name (#218). */
+  const names = new Map<string, string>();
   const engraves: PartPlan['engraves'] = [];
   const ctx: ItemReferenceContext = {
     stockOutline,
@@ -1827,15 +1879,42 @@ export function toPartPlan(job: EngraveJob, options: PartPlanOptions = {}): Part
         ? estimatedLabelProfile(item)
         : itemProfile(item, job.customFonts, ctx);
     profiles.set(item.id, profile);
+    names.set(item.id, itemOperationName(item));
     // A construction item is reference-only (#215): it resolves, but cuts nothing.
     if (item.construction) continue;
+    // A through region (#218) has no typed depth: its floor is the setup's `thickness +
+    // breakthrough`, which is exactly what the region builder used to invent for itself. Carry
+    // the flag as well, so the verifier's mask and the preview can tell it from a blind pocket
+    // at the same depth.
+    const through = item.through === true;
     engraves.push({
       id: item.id,
       // The ready-made operation name (#214/#215), carried on the one funnel so the region
       // builder can hand it to `generateEngrave` without re-deriving the shape.
       name: itemOperationName(item),
       profile,
-      depth: item.depth,
+      depth: through ? job.stock.thickness + job.breakthrough : item.depth,
+      through,
+    });
+  }
+
+  // Profile cut-outs (#218), a fifth sibling. Their outline is resolved from the profiles map the
+  // walk above filled, so an item that did not resolve (broken reference, cycle, self-intersecting
+  // polygon) simply has no cut-out either. `'stock-inset'` follows the blank's own rectangle.
+  const cutouts: PartPlan['cutouts'] = [];
+  for (const cutout of job.cutouts ?? []) {
+    if (!cutout.enabled) continue;
+    const outline = cutout.of === 'stock-inset' ? stockOutline : profiles.get(cutout.of);
+    if (outline === undefined) continue;
+    cutouts.push({
+      id: cutout.id,
+      name: cutoutOperationName(cutout, cutout.of === 'stock-inset' ? null : (names.get(cutout.of) ?? null)),
+      outline,
+      side: cutout.side,
+      inset: cutout.inset,
+      depth: job.stock.thickness + job.breakthrough,
+      thickness: job.stock.thickness,
+      tabs: cutout.tabs,
     });
   }
 
@@ -1936,6 +2015,7 @@ export function toPartPlan(job: EngraveJob, options: PartPlanOptions = {}): Part
         : {}),
     },
     engraves,
+    cutouts,
     traces,
     drills,
     threads,

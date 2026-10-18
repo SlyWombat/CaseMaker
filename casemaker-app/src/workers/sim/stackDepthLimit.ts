@@ -51,7 +51,7 @@ import type { Mm } from '@/types/units';
 import { buildLayerStack, printedLayerGridOf } from '@/engine/cnc/layerStack';
 import { defaultBoundaryMargin, splitDepthOf, voidFloor } from '@/engine/cnc/engrave/depthBounds';
 import type { PartPlan } from '@/engine/cnc/engrave/partPlan';
-import { sacrificialDepthLimit, type DepthLimit } from '@/engine/cnc/verify';
+import { sacrificialDepthLimit, type DepthLimit, type ThroughMask } from '@/engine/cnc/verify';
 import type { ManifoldToplevel } from '@/workers/geometry/evaluateOp';
 
 /** Why the limit at a point is what it is, in the two states a value can be in. */
@@ -134,6 +134,7 @@ export function stackDepthLimit(
   plan: PartPlan,
   job: EngraveJob,
   margin: Mm = defaultBoundaryMargin(job),
+  through?: ThroughMask,
 ): StackDepthLimit | null {
   const grid = gridOf(plan, job);
   if (grid === null) return null;
@@ -155,12 +156,16 @@ export function stackDepthLimit(
   const sacrificial = sacrificialDepthLimit(job.stock, job.sacrificial, {
     minFloor: job.minFloor,
     breakthrough: job.breakthrough,
+    ...(through === undefined ? {} : { through }),
   });
 
   let disposed = false;
   return {
     limit(x, y) {
       const base = sacrificial(x, y);
+      // #218 — inside a through region or kerf the board is the floor, so the SOLID cannot bind:
+      // the layer stack models the blank's material and knows nothing about cutting past it.
+      if (through !== undefined && through(x, y) !== null) return base;
       const solid = stack.maxDepthAt(x, y);
       // Outside the PART the stack reports nothing — it models the blank's outline and the voids
       // in it, and has never been told about sacrificial material. `0` there means "no material",

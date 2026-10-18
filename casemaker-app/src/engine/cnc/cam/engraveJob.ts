@@ -128,6 +128,12 @@ export interface FinishPassSpec {
    * pocket loop. `depth` is the hole's flat floor.
    */
   drill?: { holes: [number, number][] };
+  /**
+   * This region cuts through the blank into the under-board (#218). `depth` already carries
+   * `thickness + breakthrough`; the flag is what marks the operation as a `'through'` pass and
+   * what the preview/verifier read as "the floor is the board, not the part".
+   */
+  through?: boolean;
 }
 
 /**
@@ -621,14 +627,17 @@ export function generateEngrave(
       regionCutMm += loops.reduce((sum, loop) => sum + loopLength(loop), 0);
       cursor = loops.length > 0 ? loops[loops.length - 1]!.entry : cursor;
       // An unsplit item keeps yesterday's name exactly; a split pass says which half it is, so a
-      // `.nc` opened in a sender names the two removals the sheet lists.
-      const suffix = pass.passKind === undefined ? '' : ` (${pass.passKind})`;
+      // `.nc` opened in a sender names the two removals the sheet lists. A through cut is its own
+      // kind (#218): it reaches the under-board, so it is never one half of a rough/finish pair
+      // and the sheet names it as the through pass.
+      const kind = item.label.through === true ? ('through' as const) : pass.passKind;
+      const suffix = kind === undefined ? '' : ` (${kind})`;
       operations.push({
         number: operations.length + 1,
         name: `[T${toolNumber}]${descriptor} ${item.label.depth.toFixed(1)}mm${suffix}`,
         labelId: item.label.id,
         depth: item.label.depth,
-        ...(pass.passKind === undefined ? {} : { passKind: pass.passKind }),
+        ...(kind === undefined ? {} : { passKind: kind }),
         moves,
         estimatedSeconds: estimateCycleSeconds(moves, rapid),
       });
