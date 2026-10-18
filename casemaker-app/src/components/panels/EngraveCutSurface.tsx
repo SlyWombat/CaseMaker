@@ -26,7 +26,7 @@
  * a second time.
  */
 
-import { useEffect, useMemo, useRef, useState, type CSSProperties, type JSX } from 'react';
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type JSX, type ReactNode } from 'react';
 import type { EngraveJob, FrozenPackage } from '@/types/engraveJob';
 import type { EngraveGenerated } from '@/workers/sim/engraveGenerate';
 import type { MachineObservation } from '@/platform/machineProbe';
@@ -54,6 +54,7 @@ import { EngraveMachineUpload } from './EngraveMachineUpload';
 import { EngraveReleaseStep } from './EngraveReleaseStep';
 import { MachineStrip } from './MachineStrip';
 import { RunPlanView } from './RunPlanView';
+import { EngraveRegistrationStep } from './EngraveRegistrationStep';
 
 const MUTED: CSSProperties = { fontSize: 11, color: '#9aa4b0', lineHeight: 1.5, margin: '4px 0' };
 const WARN: CSSProperties = { ...MUTED, color: '#f0b8a8' };
@@ -65,6 +66,46 @@ const BOX: CSSProperties = {
   borderRadius: 4,
   background: '#1b2027',
 };
+
+/** #524 — one numbered checklist step: a one-line summary that is always visible (with a ✓ when
+ *  done) and a body that opens when it is the step the operator is on. No new controls — the
+ *  browser's own `<details>` is the mechanism. */
+function Step({
+  number,
+  title,
+  done,
+  summary,
+  defaultOpen,
+  children,
+}: {
+  number: number;
+  title: string;
+  done: boolean;
+  summary: string;
+  defaultOpen?: boolean;
+  children: ReactNode;
+}) {
+  const [open, setOpen] = useState(defaultOpen ?? false);
+  return (
+    <details
+      data-testid={`engrave-cut-step-${number}`}
+      open={open}
+      onToggle={(e) => setOpen((e.currentTarget as HTMLDetailsElement).open)}
+      style={{ marginTop: 6, borderTop: '1px solid #2a2f36', paddingTop: 4 }}
+    >
+      <summary
+        data-testid={`engrave-cut-step-${number}-summary`}
+        style={{ cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 8 }}
+      >
+        <span style={{ fontSize: 12, fontWeight: 600, color: done ? OK : '#c8d3de' }}>
+          {done ? '✓' : '●'} {number} {title}
+        </span>
+        <span style={{ ...MUTED, margin: 0, textAlign: 'right' }}>{summary}</span>
+      </summary>
+      <div style={{ marginTop: 4 }}>{children}</div>
+    </details>
+  );
+}
 
 export interface EngraveCutSurfaceProps {
   /** The document as it is now — the gate was asked about this. */
@@ -260,6 +301,31 @@ export function EngraveCutSurface({
 
   return (
     <div data-testid="engrave-cut-surface">
+      {/* #524 — the Cut surface as a four-step checklist: Gate → Package → Register → Run. Each
+          step is one line when done and opens when it is the step the operator is on. */}
+      <Step
+        number={1}
+        title="Gate"
+        done={green}
+        summary={green ? 'clear' : `${report.errorCount} blocking finding${report.errorCount === 1 ? '' : 's'}`}
+        defaultOpen={!green}
+      >
+        <EngravePreflight report={report} onBackToDesign={onBackToDesign} />
+      </Step>
+
+      <Step
+        number={2}
+        title="Package"
+        done={packageCurrent}
+        summary={
+          pkg === null
+            ? 'not frozen yet'
+            : packageCurrent
+              ? `${pkg.programs.length} program${pkg.programs.length === 1 ? '' : 's'} · frozen ${clockOf(pkg.frozenAt)}`
+              : 'stale — freeze again'
+        }
+        defaultOpen={!packageCurrent}
+      >
       <section
         style={BOX}
         data-testid="engrave-package"
@@ -319,15 +385,21 @@ export function EngraveCutSurface({
           </p>
         )}
       </section>
+      </Step>
 
-      <EngravePreflight report={report} onBackToDesign={onBackToDesign} />
+      <Step number={3} title="Register the blank" done={false} summary="left edge, then the top face" defaultOpen={green && packageCurrent}>
+        <EngraveRegistrationStep job={job} target={target} />
+      </Step>
 
       {green && packageCurrent && plan !== null && (
-        <>
-          <section style={{ marginTop: 10 }} data-testid="engrave-cut-plan">
-            <RunPlanView plan={plan} />
-            <MachineStrip features={plan.features} onToggle={toggle} />
-          </section>
+        <Step number={4} title="Run" done={false} summary="the plan and the controls" defaultOpen>
+          <details style={{ marginTop: 4 }} data-testid="engrave-cut-plan">
+            <summary style={{ fontSize: 11, color: '#9aa4b0', cursor: 'pointer' }}>The plan</summary>
+            <div style={{ marginTop: 4 }}>
+              <RunPlanView plan={plan} />
+              <MachineStrip features={plan.features} onToggle={toggle} />
+            </div>
+          </details>
 
           {canDriveMachine && target !== null && (
             <section style={{ marginTop: 10 }} data-testid="engrave-cut-run">
@@ -364,7 +436,7 @@ export function EngraveCutSurface({
               )}
             </section>
           )}
-        </>
+        </Step>
       )}
     </div>
   );
