@@ -1,0 +1,119 @@
+{
+  "schemaVersion": 3,
+  "name": "450 laminate V feed F400 F400",
+  "machineId": "Z1",
+  "stock": {
+    "length": 25.35,
+    "width": 76,
+    "thickness": 1.5,
+    "material": "plastic"
+  },
+  "labels": [
+    {
+      "id": "450-lam-v-f400-lbl-0",
+      "text": "F400",
+      "font": "sans-default",
+      "weight": "bold",
+      "size": 6,
+      "position": {
+        "x": 12.7,
+        "y": 10
+      },
+      "rotation": 0,
+      "depth": 0.1,
+      "enabled": true
+    }
+  ],
+  "toolKey": "inv:kz-engrave-30-0-3",
+  "workholding": {
+    "kind": "vise",
+    "vise": {
+      "stockProud": -1.6,
+      "seat": "ledge",
+      "fixedJawThickness": 10,
+      "movingJawThickness": 10,
+      "jawLength": 100,
+      "jawStartY": -10,
+      "source": "default",
+      "uncertainty": 0.5
+    }
+  },
+  "minFloor": 1,
+  "edgeMargin": 1,
+  "customFonts": [],
+  "id": "job-ilby1wt0gg",
+  "sacrificial": {
+    "under": null,
+    "sides": {
+      "left": null,
+      "right": null,
+      "front": null,
+      "back": null
+    },
+    "source": "default"
+  },
+  "breakthrough": 0.3,
+  "jawClearance": 1,
+  "facing": {
+    "enabled": false,
+    "depth": 0
+  },
+  "shapes": [],
+  "sources": {
+    "stock": {
+      "length": "user",
+      "width": "user",
+      "thickness": "user",
+      "material": "user"
+    },
+    "tool": "user",
+    "labels": {
+      "lbl-jnzrz71t24": {
+        "layout": "user",
+        "depth": "user"
+      },
+      "lbl-18uiap5j6u": {
+        "layout": "user",
+        "depth": "user"
+      },
+      "lbl-pn3qtx06cz": {
+        "layout": "user",
+        "depth": "user"
+      },
+      "lbl-4f5oufezmd": {
+        "layout": "user",
+        "depth": "user"
+      }
+    }
+  },
+  "tool": {
+    "number": null,
+    "id": null,
+    "name": "Single Flute Engraving Bit - 1/8\" Shank 30° * 0.3mm",
+    "typeText": "Engraving",
+    "shape": "engraving",
+    "handleDiameter": 3.175,
+    "tipDiameter": 0.3,
+    "diameter": 3.175,
+    "cornerRadius": null,
+    "angle": null,
+    "halfAngle": 15,
+    "fluteLength": null,
+    "shoulderLength": null,
+    "stickout": null,
+    "centreCutting": null
+  },
+  "stockEntry": {
+    "kind": "made",
+    "shelfId": "stock-27tpsvq3oo",
+    "file": null,
+    "form": "sheet",
+    "finish": "finished",
+    "conductive": false
+  },
+  "combined": [],
+  "traces": [],
+  "cutOverride": {
+    "feed": 400
+  }
+}

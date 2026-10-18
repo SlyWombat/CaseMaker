@@ -1,0 +1,156 @@
+{
+ "schemaVersion": 3,
+ "id": "job-ilby1wt0gg",
+ "name": "Untitled engrave job",
+ "machineId": "Z1",
+ "stock": {
+  "length": 25.35,
+  "width": 76,
+  "thickness": 1.5,
+  "material": "plastic"
+ },
+ "labels": [
+  {
+   "id": "lbl-jnzrz71t24",
+   "text": "F400",
+   "font": "sans-default",
+   "weight": "bold",
+   "size": 6,
+   "position": {
+    "x": 12.7,
+    "y": 10
+   },
+   "rotation": 0,
+   "depth": 0.1,
+   "enabled": true
+  },
+  {
+   "id": "lbl-18uiap5j6u",
+   "text": "F600",
+   "font": "sans-default",
+   "weight": "bold",
+   "size": 6,
+   "position": {
+    "x": 12.7,
+    "y": 26
+   },
+   "rotation": 0,
+   "depth": 0.1,
+   "enabled": true
+  },
+  {
+   "id": "lbl-pn3qtx06cz",
+   "text": "F800",
+   "font": "sans-default",
+   "weight": "bold",
+   "size": 6,
+   "position": {
+    "x": 12.7,
+    "y": 42
+   },
+   "rotation": 0,
+   "depth": 0.1,
+   "enabled": true
+  },
+  {
+   "id": "lbl-4f5oufezmd",
+   "text": "F1000",
+   "font": "sans-default",
+   "weight": "bold",
+   "size": 6,
+   "position": {
+    "x": 12.7,
+    "y": 58
+   },
+   "rotation": 0,
+   "depth": 0.1,
+   "enabled": true
+  }
+ ],
+ "shapes": [],
+ "toolKey": "inv:kz-engrave-30-0-3",
+ "workholding": {
+  "kind": "vise",
+  "vise": {
+   "stockProud": -1.6,
+   "seat": "ledge",
+   "fixedJawThickness": 10,
+   "movingJawThickness": 10,
+   "jawLength": 100,
+   "jawStartY": -10,
+   "source": "default",
+   "uncertainty": 0.5
+  }
+ },
+ "minFloor": 1,
+ "edgeMargin": 1,
+ "sacrificial": {
+  "under": null,
+  "sides": {
+   "left": null,
+   "right": null,
+   "front": null,
+   "back": null
+  },
+  "source": "default"
+ },
+ "breakthrough": 0.3,
+ "jawClearance": 1,
+ "customFonts": [],
+ "sources": {
+  "stock": {
+   "length": "user",
+   "width": "user",
+   "thickness": "user",
+   "material": "user"
+  },
+  "tool": "user",
+  "labels": {
+   "lbl-jnzrz71t24": {
+    "layout": "user",
+    "depth": "user"
+   },
+   "lbl-18uiap5j6u": {
+    "layout": "user",
+    "depth": "user"
+   },
+   "lbl-pn3qtx06cz": {
+    "layout": "user",
+    "depth": "user"
+   },
+   "lbl-4f5oufezmd": {
+    "layout": "user",
+    "depth": "user"
+   }
+  }
+ },
+ "stockEntry": {
+  "kind": "made",
+  "shelfId": "stock-27tpsvq3oo",
+  "file": null,
+  "form": "sheet",
+  "finish": "finished",
+  "conductive": false
+ },
+ "facing": {
+  "enabled": false,
+  "depth": 0
+ },
+ "tool": {
+  "number": null,
+  "id": null,
+  "name": "Single Flute Engraving Bit - 1/8\" Shank 30\u00b0 * 0.3mm",
+  "typeText": "Engraving",
+  "shape": "engraving",
+  "handleDiameter": 3.175,
+  "tipDiameter": 0.3,
+  "diameter": 3.175,
+  "cornerRadius": null,
+  "angle": null,
+  "halfAngle": 15,
+  "fluteLength": null,
+  "shoulderLength": null,
+  "stickout": null,
+  "centreCutting": null
+ }
+}

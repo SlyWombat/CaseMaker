@@ -1,0 +1,21 @@
+{
+ "id": "450-lam-v-f600",
+ "title": "450 laminate V feed F600",
+ "parameter": "feed",
+ "values": [
+  600
+ ],
+ "basePath": "../450-laminate-base.job.json",
+ "text": {
+  "size": 6,
+  "pitch": 16
+ },
+ "origin": {
+  "x": 12.7,
+  "y": 26
+ },
+ "depth": 0.1,
+ "font": "sans-default",
+ "weight": "bold",
+ "note": "#450: the laminate's V feeds row. Yellow case 'Single Flute Engraving Bit - 1/8\" Shank 30\u00b0 * 0.3mm' (inv:kz-engrave-30-0-3) at 12 000 rpm, F600, 0.1 mm deep, one cell at work Y 26 on the 76 x 25.35 x 1.5 laminate as mounted 2026-10-17 (G54 -181.200/-184.125, Z0 -56.194)."
+}

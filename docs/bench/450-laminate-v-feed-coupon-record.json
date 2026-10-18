@@ -1,0 +1,62 @@
+{
+  "coupon": "450-laminate-v-feed",
+  "title": "450 laminate V feed coupon (F400/F600/F800/F1000)",
+  "parameter": "feed",
+  "material": "plastic",
+  "toolKey": "inv:kz-engrave-30-0-3",
+  "cuttingDiameter": 0.3,
+  "generatedOn": "2026-10-18",
+  "cutOn": "2026-10-18",
+  "baseOverride": {},
+  "note": "Four single-cell programs, one per feed, cut 2026-10-18 on the purchased two-colour laminate 76 x 25.35 x 1.5 (material \"plastic\") with the yellow \"Single Flute Engraving Bit - 1/8\\\" Shank 30\u00b0 * 0.3mm\" (inv:kz-engrave-30-0-3) at S12000, F200 plunge, 0.1 mm design depth (0.1-0.26 actual across the crowned sheet). Maintainer's verdict by eye and photo (docs/bench/img/2026-10-18-laminate-V-feed-coupon.jpg): all four clean, no melt, no strings, no visible difference; chose 1000.",
+  "programs": [
+    {
+      "program": "450-lam-v-f400-f400",
+      "values": [
+        400
+      ],
+      "ncFile": "450-laminate-V-feed-F400-F400.nc",
+      "sheetFile": "450-laminate-V-feed-F400-F400-run-sheet.md",
+      "hash": "e228caf8",
+      "verdict": "ok",
+      "chosen": false,
+      "note": "clean by eye; wall time 119 s"
+    },
+    {
+      "program": "450-lam-v-f600-f600",
+      "values": [
+        600
+      ],
+      "ncFile": "450-laminate-V-feed-F600-F600.nc",
+      "sheetFile": "450-laminate-V-feed-F600-F600-run-sheet.md",
+      "hash": "c2770c25",
+      "verdict": "ok",
+      "chosen": false,
+      "note": "clean by eye; wall time 111 s"
+    },
+    {
+      "program": "450-lam-v-f800-f800",
+      "values": [
+        800
+      ],
+      "ncFile": "450-laminate-V-feed-F800-F800.nc",
+      "sheetFile": "450-laminate-V-feed-F800-F800-run-sheet.md",
+      "hash": "1e3b5d63",
+      "verdict": "ok",
+      "chosen": false,
+      "note": "clean by eye; wall time 105 s"
+    },
+    {
+      "program": "450-lam-v-f1000-f1000",
+      "values": [
+        1000
+      ],
+      "ncFile": "450-laminate-V-feed-F1000-F1000.nc",
+      "sheetFile": "450-laminate-V-feed-F1000-F1000-run-sheet.md",
+      "hash": "caac7f08",
+      "verdict": "ok",
+      "chosen": true,
+      "note": "clean by eye; wall time 107 s"
+    }
+  ]
+}
