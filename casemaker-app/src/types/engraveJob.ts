@@ -334,6 +334,115 @@ export interface EngraveThreadItem {
 /** The one thread kind, named both ways the plan's prose uses: item and list entry. */
 export type EngraveThread = EngraveThreadItem;
 
+/**
+ * The axis a 3D primitive opens along (#435). `'z'` — the default when the field is absent —
+ * opens at the stock's TOP face and is the only axis the 2.5D region CAM can cut. `'x'` and `'y'`
+ * describe a side-opening undercut honestly, but are refused by name (`primitive-not-vertical`)
+ * rather than silently turned into a top pocket: a side opening needs the 3D engine (#222).
+ */
+export type EngravePrimitiveAxis = 'z' | 'x' | 'y';
+
+/**
+ * The fields every 3D primitive shares (#435). A primitive is a NEGATIVE VOLUME stated as a
+ * solid: `position` is its footprint centre in the stock frame, `rotation` turns it about Z,
+ * and `depth` says how far below the top face the volume reaches. Its geometry is a box, a
+ * cylinder, a cone or a sphere, chosen by `kind`.
+ *
+ * It lives in its OWN list (`EngraveJob.primitives`), like `drills` and `threads`, so every
+ * exhaustive switch over the existing item unions is untouched. The forms that reduce to a
+ * flat-floor region (a vertical box or cylinder) funnel through `toPartPlan`'s `engraves`;
+ * the rest are refused BY NAME by `validateJob` and never become a toolpath.
+ */
+export interface EngravePrimitiveBase {
+  id: string;
+  /** Optional human name, shown in operations and findings. */
+  name?: string;
+  position: { x: Mm; y: Mm };
+  rotation: number;
+  enabled: boolean;
+  /**
+   * The opening's axis. ABSENT means `'z'` — the top-face pocket every existing CAM understands.
+   * A non-Z axis is stored so a document can state the undercut it means, and refused by name
+   * until the 3D engine lands (#222).
+   */
+  axis?: EngravePrimitiveAxis;
+  /** How far below the top face the volume reaches, mm. Positive. */
+  depth: Mm;
+}
+
+/** A rectangular cut-away. `width` is X, `height` is Y, before `rotation`. */
+export interface EngraveBoxPrimitive extends EngravePrimitiveBase {
+  kind: 'box';
+  width: Mm;
+  height: Mm;
+}
+
+/** A round cut-away: one diameter, reaching straight down from the top face. */
+export interface EngraveCylinderPrimitive extends EngravePrimitiveBase {
+  kind: 'cylinder';
+  diameter: Mm;
+}
+
+/**
+ * A conical cut-away: the wide `diameter` at the top face, tapering to `tipDiameter` at
+ * `depth`. `tipDiameter` may be 0 (a sharp point). Refused by name (`primitive-cone-needs-cam`)
+ * because the region CAM only cuts walls parallel to the axis; it is never approximated as a
+ * cylinder.
+ */
+export interface EngraveConePrimitive extends EngravePrimitiveBase {
+  kind: 'cone';
+  diameter: Mm;
+  tipDiameter: Mm;
+}
+
+/**
+ * A spherical cut-away (a dimple). `diameter` is the ball's diameter and `depth` the cap's depth;
+ * `depth ≤ diameter` or the cap would be more than a hemisphere. Refused by name
+ * (`primitive-sphere-needs-3d`) because its floor is curved: a dexel job (#222), never a circle
+ * pocket.
+ */
+export interface EngraveSpherePrimitive extends EngravePrimitiveBase {
+  kind: 'sphere';
+  diameter: Mm;
+}
+
+export type EngravePrimitive =
+  | EngraveBoxPrimitive
+  | EngraveCylinderPrimitive
+  | EngraveConePrimitive
+  | EngraveSpherePrimitive;
+
+/**
+ * The part the cut-aways are positioned against (#435): an STL/3MF imported as a REFERENCE
+ * object, embedded in the document so a job renders without the external file.
+ *
+ * It is NOT cut. Cutting the stock around it (`stock − target`, with tabs) is the profile
+ * cut-out work tracked in #218; this field exists so the operator can see what the pockets are
+ * for, and `validateJob` says so once with the warning `target-object-not-cut`.
+ *
+ * `position` places the mesh's bbox centre in X/Y and its TOP at `position.z` in the work frame
+ * (z = 0 is the stock's top face), so leaving every field at 0 seats the object top-flush and
+ * centred on the stock. `rotation` turns it about Z through that centre. `size` is the parsed
+ * bbox, kept so the panel can name the object without decoding the file.
+ */
+export interface EngraveTargetObject {
+  id: string;
+  /** The imported file's name, shown in the row and on findings. */
+  name: string;
+  format: 'stl' | '3mf';
+  /** SHA-256 of the raw bytes, lowercase hex — the object's identity and the mesh cache key. */
+  sha256: string;
+  /** The raw file bytes, base64. Capped at 4 MiB on import (the #425 embedded-source rule). */
+  data: string;
+  /** Parsed bounding size in mm. */
+  size: { x: Mm; y: Mm; z: Mm };
+  position: { x: Mm; y: Mm; z: Mm };
+  /** Degrees counter-clockwise about Z, through the mesh's bbox centre. */
+  rotation: number;
+  /** False hides the reference object in the viewport; it is never cut either way. */
+  enabled: boolean;
+}
+
 /** The winding a vector outline's contours are read with (#217) — Manifold's two fill rules. */
 export type VectorFillRule = 'NonZero' | 'EvenOdd';
 
@@ -1012,6 +1121,24 @@ export interface EngraveJob {
    * defaulted) for the same reason as every list above it. Consumers read `job.threads ?? []`.
    */
   threads?: EngraveThread[];
+  /**
+   * 3D primitives (#435): box, cylinder, cone and sphere cut-aways. A separate list, like
+   * `drills` and `threads`, so every exhaustive item switch keeps compiling and old documents
+   * keep parsing; the forms that reduce to a flat-floor region join `PartPlan.engraves` in
+   * `toPartPlan`, and the rest are refused by name.
+   *
+   * Optional, so a pre-#435 document round-trips byte-for-byte; the schema keeps it absent (not
+   * defaulted) for the same reason as every list above it. Consumers read
+   * `job.primitives ?? []`.
+   */
+  primitives?: EngravePrimitive[];
+  /**
+   * The reference object the primitives are positioned against (#435). OPTIONAL and absent on
+   * every document that predates it. It is embedded rather than referenced by path, so the job
+   * stays self-contained (the #425 source-file rule), and it is never cut — `stock − target` is
+   * #218's cut-out work.
+   */
+  targetObject?: EngraveTargetObject;
   /**
    * The key of the cutter this job is written for — a builtin (`flat-1.0`), or a later registry
    * tier's key (`cat:`, `user:`, `inv:`). A PLAIN STRING, so no saved job has ever needed

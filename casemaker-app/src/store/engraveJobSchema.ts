@@ -321,6 +321,99 @@ const threadSchema = z.object({
   through: z.boolean(),
 });
 
+/**
+ * One 3D primitive (#435): a negative volume stated as a box, cylinder, cone or sphere. The
+ * shared fields are `position`/`rotation`/`depth`/`enabled` like every other item, plus an
+ * OPTIONAL `axis` that defaults (when absent) to `'z'` — the only axis the region CAM cuts.
+ *
+ * The two cross-field bounds are refused at the schema because they describe no solid at all:
+ * a cone's tip cannot be wider than its mouth, and a sphere's cap cannot be deeper than the ball's
+ * diameter. Whether a primitive's depth fits a particular blank is `validateJob`'s business
+ * (`depth-exceeds-stock`), not the schema's.
+ */
+const primitiveBaseSchema = z.object({
+  id: z.string().min(1),
+  name: z.string().optional(),
+  position: positionSchema,
+  rotation: z.number().finite(),
+  enabled: z.boolean(),
+  axis: z.enum(['z', 'x', 'y']).optional(),
+  depth: z.number().finite().positive(),
+});
+
+const primitiveSchema = z
+  .discriminatedUnion('kind', [
+    primitiveBaseSchema.extend({
+      kind: z.literal('box'),
+      width: z.number().finite().positive(),
+      height: z.number().finite().positive(),
+    }),
+    primitiveBaseSchema.extend({
+      kind: z.literal('cylinder'),
+      diameter: z.number().finite().positive(),
+    }),
+    primitiveBaseSchema.extend({
+      kind: z.literal('cone'),
+      diameter: z.number().finite().positive(),
+      tipDiameter: z.number().finite().nonnegative(),
+    }),
+    primitiveBaseSchema.extend({
+      kind: z.literal('sphere'),
+      diameter: z.number().finite().positive(),
+    }),
+  ])
+  .superRefine((primitive, ctx) => {
+    if (primitive.kind === 'cone' && primitive.tipDiameter > primitive.diameter) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'tipDiameter must be ≤ diameter',
+        path: ['tipDiameter'],
+      });
+    }
+    if (primitive.kind === 'sphere' && primitive.depth > primitive.diameter) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'a sphere cap depth must be ≤ its diameter',
+        path: ['depth'],
+      });
+    }
+  });
+
+/**
+ * The embedded reference object (#435), strict like the other owned v3 blocks: an unknown key is
+ * refused by path rather than silently dropped. `data` is base64 and capped at the same 4 MiB the
+ * import path enforces, so a hand-edited document cannot make the app decode an unbounded string.
+ * The hex pattern is the #425 `jobSourceSchema` rule — a lowercase SHA-256 is the object's identity.
+ */
+const MAX_TARGET_OBJECT_BASE64_CHARS = Math.ceil((4 * 1024 * 1024) / 3) * 4;
+
+const targetObjectSchema = z
+  .object({
+    id: z.string().min(1),
+    name: z.string().min(1),
+    format: z.enum(['stl', '3mf']),
+    sha256: z.string().regex(/^[0-9a-f]{64}$/, 'a lowercase SHA-256 (64 hex characters)'),
+    data: z.string().min(1).max(MAX_TARGET_OBJECT_BASE64_CHARS),
+    size: z
+      .object({
+        x: z.number().finite().positive(),
+        y: z.number().finite().positive(),
+        z: z.number().finite().positive(),
+      })
+      .strict(),
+    position: z
+      .object({
+        x: z.number().finite(),
+        y: z.number().finite(),
+        z: z.number().finite(),
+      })
+      .strict(),
+    rotation: z.number().finite(),
+    enabled: z.boolean(),
+  })
+  .strict();
+
+
 const keepOutSchema = z
   .discriminatedUnion('kind', [
     keepOutBaseSchema.extend({
@@ -993,6 +1086,11 @@ const engraveJobV3Schema = engraveJobV2Schema
     sourceFiles: z.array(jobSourceSchema).optional(),
     package: frozenPackageSchema.optional(),
     runLog: z.array(jobRunLogEntrySchema).optional(),
+    // #435 — 3D primitives and the reference object they are positioned against. BOTH OPTIONAL and
+    // not defaulted, so every document that predates them keeps its exact shape and parses
+    // unchanged; `schemaVersion` stays 3 because nothing existing is renamed or retyped.
+    primitives: z.array(primitiveSchema).optional(),
+    targetObject: targetObjectSchema.optional(),
   })
   .passthrough();
 

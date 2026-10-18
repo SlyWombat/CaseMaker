@@ -42,6 +42,16 @@ export function newEngraveThreadId(): string {
   return newId('thr');
 }
 
+/** Fresh 3D primitive id (#435). A primitive is its own kind of item, so it gets its own prefix. */
+export function newEngravePrimitiveId(): string {
+  return newId('prm');
+}
+
+/** Fresh target-object id (#435). There is at most one, but it is an addressable row. */
+export function newEngraveTargetObjectId(): string {
+  return newId('tgt');
+}
+
 /**
  * Fresh under-surface void id (#271). A void is NOT an item — it is a fact about the blank, so it
  * lives in its own list with its own prefix and never reaches the `engraves` pipeline.
