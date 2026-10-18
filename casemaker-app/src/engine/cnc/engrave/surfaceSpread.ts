@@ -153,6 +153,13 @@ export interface SurfaceSpreadAssessment {
   max: SurfaceExtremum;
   /** `max − min`, mm. */
   spread: Mm;
+  /**
+   * The axis the spread runs across (#475): the axis with the larger CENTRE-TO-EXTENT reading
+   * difference. `'length'` is X, `'width'` is Y — the stock's own words in `StockFlatness.across`.
+   * This is what the registration writes into the blank's flatness record, so it is computed from
+   * the readings rather than guessed from the stock's aspect.
+   */
+  across: 'width' | 'length';
   /** The Z0 the job is cut from, and the touch it came from (null for a midpoint). */
   z0: { z: Mm; touchId: string | null; rule: SurfaceReference };
   /**
@@ -359,6 +366,25 @@ function z0Of(touches: readonly SurfaceTouchReading[]): SurfaceSpreadAssessment[
 }
 
 /**
+ * The axis the spread runs across, in the stock's words: the axis with the larger centre-to-extent
+ * height difference. The first planned touch is the cut area's centre (the plan's own order), so
+ * the comparison is against it. A flat top ties at 0 and reads `'length'`; the direction is not
+ * consulted by the facing default, which must clear the high point whichever side it is on.
+ */
+function acrossOf(touches: readonly SurfaceTouchReading[]): 'width' | 'length' {
+  const centre = touches[0];
+  if (centre === undefined) return 'length';
+  let alongX = 0;
+  let alongY = 0;
+  for (const t of touches.slice(1)) {
+    const dz = Math.abs(t.z - centre.z);
+    if (Math.abs(t.x - centre.x) > 1e-9) alongX = Math.max(alongX, dz);
+    if (Math.abs(t.y - centre.y) > 1e-9) alongY = Math.max(alongY, dz);
+  }
+  return alongX >= alongY ? 'length' : 'width';
+}
+
+/**
  * Measure the blank from the planned touches.
  *
  * `readings` are in the plan's order (the sheet prints that order). Every reading carries its own
@@ -375,6 +401,19 @@ export function assessSurfaceSpread(
 ): SurfaceSpreadAssessment {
   const plan = surfaceSpreadPlan(job, options);
   if (plan === null) throw new Error('this job has no cut regions to measure the surface over');
+  return assessSurfaceReadings(plan, readings);
+}
+
+/**
+ * The same verdict from a plan that is already built — the executor's form (#475): it measured the
+ * plan's touches over the console and gets min/max/spread, Z0, the landing range and the refusal
+ * without needing the job again. `assessSurfaceSpread` is this plus the planning step, so the two
+ * cannot disagree about the arithmetic.
+ */
+export function assessSurfaceReadings(
+  plan: SurfaceSpreadPlan,
+  readings: readonly SurfaceReading[],
+): SurfaceSpreadAssessment {
   if (readings.length !== plan.touches.length) {
     throw new Error(
       `the surface spread needs ${plan.touches.length} readings, one per planned touch; got ${readings.length}`,
@@ -425,6 +464,7 @@ export function assessSurfaceSpread(
     min,
     max,
     spread,
+    across: acrossOf(touches),
     z0: z0Of(touches),
     landing,
     ok,

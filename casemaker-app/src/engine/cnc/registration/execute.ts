@@ -36,12 +36,25 @@
  * skim was POSTED to leave. It returns an outcome whose `surfaceZ` is that MEASURED reading, and
  * `applyCorrection` writes it — the depth is never subtracted from the first reading to stand in
  * for a measurement, because a skim does not remove exactly its nominal depth.
+ *
+ * THE CUT-EXTENT SPREAD (#475) is an optional half of {@link runRegistration}: after the
+ * registration point, the same `seekSurface` measures the plan's cut-extent touch points, the
+ * readings are assessed against the depth band (`assessSurfaceReadings`), Z0 becomes the LOWEST
+ * touch, and a spread wider than the band makes the outcome unusable with the `blank-bowed`
+ * refusal. The touches stay inside the registration's own validated seek band, so the #430 cap and
+ * tolerance hold unchanged.
  */
 
 import { controllerState } from '@/platform/machineUpload';
 import type { ConsoleSendResult } from '@/platform/machineConsole';
 import type { ShopDefaults } from '@/platform/defaultsClient';
 import { facingRetouchTolerance } from '@/engine/cnc/stockStart';
+import {
+  assessSurfaceReadings,
+  type SurfaceReading,
+  type SurfaceSpreadAssessment,
+  type SurfaceSpreadPlan,
+} from '@/engine/cnc/engrave/surfaceSpread';
 import { scanPositions, type EdgeScan, type RegistrationPlan } from './plan';
 import { classifyTouch, lastPrb, type Prb } from './readings';
 import { computeOutcome, correctionLine, type RegistrationOutcome, type RunData, type ScanRecord, type ScanTouch } from './outcome';
@@ -75,7 +88,18 @@ export interface Transcript {
 }
 
 export type RunResult =
-  | { ok: true; data: RunData; outcome: RegistrationOutcome; transcript: Transcript[] }
+  | {
+      ok: true;
+      data: RunData;
+      outcome: RegistrationOutcome;
+      /**
+       * #475 — the cut-extent measurement, when the caller asked for one. Its `z0` is the outcome's
+       * `surfaceZ` (the lowest touch) and its `refusal` is already in `outcome.problems`, so an
+       * origin cannot be written from a refused blank by accident.
+       */
+      spread?: SurfaceSpreadAssessment;
+      transcript: Transcript[];
+    }
   | { ok: false; reason: string; transcript: Transcript[] };
 
 /**
@@ -246,12 +270,17 @@ function inBand(prb: Prb | null, band: SurfaceBand, which: string): Prb {
  * `G38.2`, `G0 Z1`, a slow `G38.2`, BOTH readings inside the band — then `G90` at the reading. The
  * registration and the post-facing re-touch share it, so the two seeks cannot drift apart.
  */
-async function seekSurface(io: Session, plan: RegistrationPlan, band: SurfaceBand): Promise<Prb> {
+async function seekSurface(
+  io: Session,
+  plan: RegistrationPlan,
+  band: SurfaceBand,
+  point: { x: number; y: number } = plan.surfacePoint,
+): Promise<Prb> {
   const s = plan.settings;
   const travel = Math.round((plan.seek.fromMachineZ - band.min) * 1000) / 1000;
   await io.send(`G53 G0 Z${f(plan.seek.fromMachineZ)}`);
   await io.send('G90');
-  await io.send(moveXY(plan, plan.surfacePoint.x, plan.surfacePoint.y));
+  await io.send(moveXY(plan, point.x, point.y));
   await io.idle();
   io.at(band.at);
   await io.send('G91');
@@ -264,7 +293,16 @@ async function seekSurface(io: Session, plan: RegistrationPlan, band: SurfaceBan
   return slow;
 }
 
-export async function runRegistration(plan: RegistrationPlan, deps: ExecDeps): Promise<RunResult> {
+/**
+ * #475 — how many surface touches the run may take, and where. `surfaceSpreadPlan(job)` supplies
+ * the cut area's centre and extents and the depth band those regions leave; the executor measures
+ * the points and assesses the readings. The caller passes it only when it wants a spread verdict.
+ */
+export async function runRegistration(
+  plan: RegistrationPlan,
+  deps: ExecDeps,
+  spreadPlan?: SurfaceSpreadPlan,
+): Promise<RunResult> {
   const io = session(deps, plan.seek.fromMachineZ, plan.settings.idlePollLimit);
   const s = plan.settings;
   // #449 — the settings are the location's; a set that cannot make a capped touch sends nothing at all.
@@ -292,6 +330,33 @@ export async function runRegistration(plan: RegistrationPlan, deps: ExecDeps): P
       at: `as low as machine Z ${plan.seek.band.min}, ${s.surfaceToleranceMm} mm below the expected surface (the surface seek)`,
       expect: 'the stock is not where the job expects it',
     });
+
+    // #475 — the cut extents. Each planned touch is a full, bounded surface seek at its own XY,
+    // inside the SAME band the registration point was checked against (#430's cap and tolerance):
+    // a reading outside it stops the run rather than quietly widening the measurement. The plan's
+    // first point is the cut area's centre, which is normally the registration point itself — that
+    // reading is reused, so the blank is not touched twice in the same spot.
+    const spreadReadings: SurfaceReading[] = [];
+    if (spreadPlan !== undefined) {
+      for (const touch of spreadPlan.touches) {
+        const samePoint =
+          Math.abs(touch.x - plan.surfacePoint.x) < 1e-6 && Math.abs(touch.y - plan.surfacePoint.y) < 1e-6;
+        const prb = samePoint
+          ? slow
+          : await seekSurface(
+              io,
+              plan,
+              {
+                ...plan.seek.band,
+                at: `as low as machine Z ${plan.seek.band.min}, ${s.surfaceToleranceMm} mm below the expected surface (the surface touch at ${touch.at})`,
+                expect: 'the stock is not where the job expects it',
+              },
+              { x: touch.x, y: touch.y },
+            );
+        spreadReadings.push({ z: prb.z, source: 'probe' });
+      }
+    }
+
     const parkZ = slow.z + s.parkAboveSurfaceMm;
     await io.send(`G53 G0 Z${f(parkZ)}`);
     io.at(`at the park height, ${s.parkAboveSurfaceMm} mm above the surface`);
@@ -303,7 +368,27 @@ export async function runRegistration(plan: RegistrationPlan, deps: ExecDeps): P
     await io.send('$H');
     const data: RunData = { probeRefZ: ref.z, surface: slow, scans };
     // A plan that registers on earlier-setup features has its own outcome (#429); #430's is unchanged.
-    return { ok: true, data, outcome: plan.references ? referenceOutcome(plan, data) : computeOutcome(plan, data), transcript: io.transcript };
+    const outcome = plan.references ? referenceOutcome(plan, data) : computeOutcome(plan, data);
+
+    // #475 — the spread verdict. Z0 is the LOWEST touch (the colour line is a plane and the dome is
+    // extra top material), so the outcome carries it even when the blank is refused; a refusal also
+    // makes the measurement unusable, which stops `applyCorrection` writing an origin from it.
+    let spread: SurfaceSpreadAssessment | undefined;
+    if (spreadPlan !== undefined) {
+      spread = assessSurfaceReadings(spreadPlan, spreadReadings);
+      outcome.surfaceZ = spread.z0.z;
+      if (!spread.ok && spread.refusal !== null) {
+        outcome.usable = false;
+        outcome.problems.push(spread.refusal.message);
+      }
+    }
+    return {
+      ok: true,
+      data,
+      outcome,
+      ...(spread === undefined ? {} : { spread }),
+      transcript: io.transcript,
+    };
   } catch (e) {
     if (e instanceof Stop) return { ok: false, reason: await io.stopped(e.message), transcript: io.transcript };
     throw e;

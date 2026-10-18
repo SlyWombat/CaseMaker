@@ -1743,11 +1743,12 @@ export interface RunSheetOptions {
   surfaceTouchCount?: number;
   /**
    * #475 — the measured surface readings, in the plan's order (the order {@link surfaceSpreadSteps}
-   * prints). Absent: the sheet prints the touch plan, the band, the Z0 rule and the stop rule, but
-   * cannot say whether this blank passes — which is every sheet the app builds today, because the
-   * app has no reading-input path yet. That is a HOLD on the measured half, not on the plan: the
-   * touches and the refusal arithmetic are tested in `surfaceSpread.spec.ts`, and the run sheet's
-   * assertions pass readings explicitly.
+   * prints). The registration step supplies them from the run it measured
+   * (`engraveRegistrationStore`'s `surfaceSpreadFor`), so a sheet for an already-registered job
+   * prints the measured spread and the landing range, or the `blank-bowed` refusal. Absent: the
+   * sheet prints the touch plan, the band, the Z0 rule and the stop rule, but cannot say whether
+   * this blank passes — which is every sheet opened before the job has been registered on this
+   * machine.
    */
   surfaceReadings?: readonly SurfaceReading[];
   /**

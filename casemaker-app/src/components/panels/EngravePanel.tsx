@@ -58,6 +58,7 @@ import { registrationSettings } from '@/engine/cnc/registration/settings';
 import { buildRunRecord, isMeasuredRun, serializeRunRecord } from '@/engine/cnc/engrave/runRecord';
 import { allRuns, lastTimedRun } from '@/engine/cnc/engrave/runHistory';
 import { useRunRecordStore } from '@/store/runRecordStore';
+import { surfaceSpreadFor } from '@/store/engraveRegistrationStore';
 import { openTextFile } from '@/utils/openTextFile';
 import { feedCatalogueSnapshot, feedsFor, type CutParams } from '@/engine/cnc/feeds';
 import { materialOptionsFor } from '@/engine/cnc/engrave/setupFlow';
@@ -974,6 +975,15 @@ export function EngravePanel(): JSX.Element {
     // that cache is per-realm — the main thread must load the job's faces itself first, exactly
     // as `JobScheduler` does before its compile.
     await ensureLabelFontsLoaded(job.labels, job.customFonts ?? []);
+    // #475 — the cut-extent measurement from THIS job's registration on THIS machine, if one has
+    // run. Handing the readings in makes the origin section print the measured spread and the
+    // landing range (or the refusal) instead of only the plan; no measurement means the sheet keeps
+    // its plan-and-stop-rule wording.
+    const measuredMachine = useMachineStore.getState().machine;
+    const measuredSpread =
+      measuredMachine === null
+        ? null
+        : surfaceSpreadFor(job.id, { host: measuredMachine.host, port: measuredMachine.port });
     // #345 — the house setting the run was gated to, handed over rather than a pre-resolved margin:
     // the sheet resolves it the same way `engraveRunStore` did at Generate, so its depth notes are
     // the numbers the verifier enforced and its recommendation is made from the SETTING.
@@ -987,13 +997,19 @@ export function EngravePanel(): JSX.Element {
         { diagnostics: run.simDiagnostics, engine: run.simEngine ?? undefined, oracleBand: run.oracle?.band },
         new Date(),
         houseMargins,
-        // #475 — the surface touches are the shop's own `registration.surfaceTouchCount`, resolved
-        // by the same reader the registration planner uses; the labelled fallback is the seed (5).
+        // #475 — a measured run hands its own touch count and readings in; with none, the sheet
+        // plans the touches from the shop's `registration.surfaceTouchCount`, resolved by the same
+        // reader the registration planner uses (the labelled fallback is the seed, 5).
         // #491 — the chosen copy's case, or both when the pick is indifferent; null leaves the
         // colourless sentence. Read here from the registry's copy pool (this thread), never in the
         // pure sheet module.
         {
-          surfaceTouchCount: registrationSettings(shopDefaults).settings.surfaceTouchCount,
+          // A measurement was taken with the APPROVED plan's count; taking the shop's current
+          // number here could build a different plan and silently drop the readings.
+          surfaceTouchCount:
+            measuredSpread?.assessment.plan.touches.length ??
+            registrationSettings(shopDefaults).settings.surfaceTouchCount,
+          surfaceReadings: measuredSpread?.assessment.touches,
           toolCase: caseWordsForKey(job.toolKey) ?? undefined,
           // #472 — the two-tool facts the generator measured, so the sheet's second-program section
           // prints the files and numbers this run actually produced rather than re-deriving them.

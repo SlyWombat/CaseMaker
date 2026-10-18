@@ -11,16 +11,23 @@ import {
   type MachineConsoleClient,
 } from '@/platform/machineConsole';
 import { EngraveRegistrationStep } from '@/components/panels/EngraveRegistrationStep';
+import { badgeBlankFor } from '@/engine/cnc/engrave/fromBadge';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
+import { effectiveMargins } from '@/engine/cnc/engrave/depthBounds';
 import { jobSetups } from '@/engine/cnc/engrave/jobSetup';
+import { surfaceSpreadPlan } from '@/engine/cnc/engrave/surfaceSpread';
 import { planRegistration, type RegistrationPlan } from '@/engine/cnc/registration/plan';
 import { registrationSettings } from '@/engine/cnc/registration/settings';
 import { parseEngraveJob } from '@/store/engraveJobSchema';
+import { useEngraveJobStore } from '@/store/engraveJobStore';
 import {
   firstRegistrationFor,
   resetEngraveRegistrationStore,
+  surfaceSpreadFor,
 } from '@/store/engraveRegistrationStore';
-import type { EngraveJob } from '@/types/engraveJob';
+import { useSettingsStore } from '@/store/settingsStore';
+import { defaultBadgeParams } from '@/types/badge';
+import type { EngraveJob, EngraveLabel } from '@/types/engraveJob';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -46,23 +53,57 @@ function makePlan(surfaceZ: number): RegistrationPlan {
 }
 
 /** A job whose FIRST setup carries an approved registration, the shape #471 writes. */
+function attachPlan(job: EngraveJob, plan: RegistrationPlan): EngraveJob {
+  const setup = jobSetups(job)[0]!;
+  return {
+    ...job,
+    setups: [
+      {
+        ...setup,
+        mount: { kind: 'vise' },
+        registration: {
+          method: 'vise',
+          plan,
+          expected: 'XY from the fixed jaw ±0.1 mm, Z from the surface touch',
+        },
+      },
+    ],
+  };
+}
+
 function jobWithPlan(plan: RegistrationPlan): EngraveJob {
   const job = defaultEngraveJob();
   job.name = 'Registration step fixture';
   job.stock = { ...job.stock, length: 38.1, width: 76.2, thickness: 3, material: 'petg' };
-  const setup = jobSetups(job)[0]!;
-  job.setups = [
-    {
-      ...setup,
-      mount: { kind: 'vise' },
-      registration: {
-        method: 'vise',
-        plan,
-        expected: 'XY from the fixed jaw ±0.1 mm, Z from the surface touch',
-      },
-    },
-  ];
-  return job;
+  return attachPlan(job, plan);
+}
+
+const COLOUR_0_2 = { kind: 'printed' as const, capMm: 0.81, layerHeight: 0.2, firstLayerHeight: 0.2 };
+
+/** #475 — the badge blank of Appendix C: a 0.2 mm depth band, and the issue's own readings. */
+function badgeJobWithPlan(plan: RegistrationPlan): EngraveJob {
+  const blank = badgeBlankFor(defaultBadgeParams({ print: undefined }));
+  const base = defaultEngraveJob();
+  const line = base.labels[0] as EngraveLabel;
+  const job: EngraveJob = {
+    ...base,
+    name: 'Bowed badge fixture',
+    stock: { ...blank.stock, colour: COLOUR_0_2 },
+    workholding: { kind: 'vise', vise: { ...base.workholding.vise, stockProud: 1.905 } },
+    keepOuts: blank.pocket ? [blank.pocket] : [],
+    labels: [{ ...line, position: { x: 24, y: 43 }, depth: 1.1 }],
+  };
+  return attachPlan(job, plan);
+}
+
+/** The spread plan the step builds: the approved plan's count and the sheet's own margin. */
+function spreadPlanFor(job: EngraveJob) {
+  const plan = surfaceSpreadPlan(job, {
+    touchCount: registrationSettings(null).settings.surfaceTouchCount,
+    margin: effectiveMargins(job, useSettingsStore.getState().margins).boundaryMargin,
+  });
+  if (plan === null) throw new Error('the fixture job has no cut regions');
+  return plan;
 }
 
 interface FakeOptions {
@@ -74,6 +115,8 @@ interface FakeOptions {
   alarmAtM491?: boolean;
   /** Answer the apply step's M491 with no PRB. */
   noCutterReading?: boolean;
+  /** #475 — the surface the fake answers at each cut-extent touch, keyed by the sent XY. */
+  spreadReadings?: readonly { x: number; y: number; z: number }[];
 }
 
 /**
@@ -86,6 +129,7 @@ function controller(plan: RegistrationPlan, sent: string[], opts: FakeOptions = 
   let m491 = 0;
   let lastX = 0;
   let lastY = 0;
+  let missedScan = false;
   const stockZ = plan.seek.band.max - (plan.seek.band.max - plan.seek.band.min) / 2;
 
   const reply = (text: string): ConsoleSend => ({ ok: true, line: '', text, frames: 1, elapsedMs: 1 });
@@ -118,8 +162,16 @@ function controller(plan: RegistrationPlan, sent: string[], opts: FakeOptions = 
                 ? Math.abs(lastY - s.along) < 1e-6
                 : Math.abs(lastX - s.along) < 1e-6,
             );
-            if (scan === undefined) return reply(`[PRB:${lastX},${lastY},${stockZ}:1]\nok`);
-            if (opts.missFirstScanTouch === true && g38 === 3) {
+            if (scan === undefined) {
+              // #475 — the cut extents. They send XY rounded to 0.001 mm, so the planned point is
+              // matched at the precision it was actually commanded.
+              const reading = opts.spreadReadings?.find(
+                (r) => Math.abs(r.x - lastX) < 1e-3 && Math.abs(r.y - lastY) < 1e-3,
+              );
+              return reply(`[PRB:${lastX},${lastY},${reading?.z ?? stockZ}:1]\nok`);
+            }
+            if (opts.missFirstScanTouch === true && !missedScan) {
+              missedScan = true;
               return reply(`[PRB:${lastX},${lastY},${stockZ - plan.settings.capBelowSurfaceMm}:0]\nok`);
             }
             const at = scan.edge === 'left' || scan.edge === 'right' ? lastX : lastY;
@@ -138,15 +190,18 @@ function controller(plan: RegistrationPlan, sent: string[], opts: FakeOptions = 
 }
 
 const sent: string[] = [];
+let savedJob: EngraveJob;
 
 beforeEach(() => {
   sent.length = 0;
+  savedJob = useEngraveJobStore.getState().job;
   resetEngraveRegistrationStore();
 });
 
 afterEach(() => {
   cleanup();
   setMachineConsoleLoader(null);
+  useEngraveJobStore.setState({ job: savedJob });
 });
 
 function install(plan: RegistrationPlan, opts: FakeOptions = {}): void {
@@ -179,6 +234,8 @@ describe('#495 — the registration step', () => {
     const plan = makePlan(surfaceZ);
     const job = jobWithPlan(plan);
     install(plan);
+    // The step records the blank's measured flatness on the job the sheet reads (#475).
+    useEngraveJobStore.setState({ job });
     render(<EngraveRegistrationStep job={job} target={TARGET} />);
 
     // The plan is the approved one, in the Setups section's words.
@@ -211,6 +268,15 @@ describe('#495 — the registration step', () => {
     expect(recorded!.plan).toEqual(plan);
     expect(recorded!.outcome.surfaceZ).toBe(surfaceZ);
     expect(recorded!.outcome.usable).toBe(true);
+
+    // #475 — the measured spread is on the job for #432 R9's facing default. This fake answers
+    // every extent at the same height, so the measured spread is 0 and its provenance is measured.
+    expect(useEngraveJobStore.getState().job.stock.flatness).toEqual({
+      dome: 0,
+      across: 'length',
+      source: 'measured',
+    });
+    expect(surfaceSpreadFor(job.id, TARGET)?.assessment.spread).toBe(0);
   });
 
   it('refuses the origin when the measured edges are outside the margin, and records nothing', async () => {
@@ -227,6 +293,46 @@ describe('#495 — the registration step', () => {
     expect(screen.queryByTestId('engrave-registration-write')).toBeNull();
     expect(sent.some((line) => line.startsWith('G10 L2'))).toBe(false);
     expect(firstRegistrationFor(job.id, TARGET)).toBeNull();
+  });
+
+  it('refuses a blank bowed wider than the cut’s band, writes no origin, and records the measured flatness (#475)', async () => {
+    const plan = makePlan(-55.131);
+    const job = badgeJobWithPlan(plan);
+    const spread = spreadPlanFor(job);
+    // The issue's five readings, in the plan's order: centre, left, right, front, back. The first
+    // is the registration touch itself, so the executor reuses that reading.
+    const zs = [-55.131, -55.269, -55.232, -55.315, -55.341];
+    install(plan, {
+      spreadReadings: spread.touches.map((t, i) => ({ x: t.x, y: t.y, z: zs[i]! })),
+    });
+    useEngraveJobStore.setState({ job });
+    render(<EngraveRegistrationStep job={job} target={TARGET} />);
+
+    await runStep();
+
+    expect(screen.getByTestId('engrave-registration-spread').getAttribute('data-ok')).toBe('false');
+    expect(screen.getByTestId('engrave-registration-spread').textContent).toContain('spread 0.21 mm against the 0.2 mm band');
+    expect(screen.getByTestId('engrave-registration-spread-refusal').textContent).toBe(
+      'this blank is bowed 0.21 mm across the cut; the floors cannot stay past the colour line and clear of the pocket',
+    );
+    expect(screen.queryByTestId('engrave-registration-landing')).toBeNull();
+    expect(screen.getByTestId('engrave-registration-refusal').textContent).toContain(
+      'No origin is written: this blank is bowed 0.21 mm',
+    );
+    expect(screen.getByTestId('engrave-registration-verdict').getAttribute('data-usable')).toBe('false');
+
+    // A refusal writes nothing and records no origin, but the MEASUREMENT is still kept: the run
+    // sheet prints the refusal, and #432 R9 reads the blank's measured flatness.
+    expect(screen.queryByTestId('engrave-registration-write')).toBeNull();
+    expect(sent.some((line) => line.startsWith('G10 L2'))).toBe(false);
+    expect(firstRegistrationFor(job.id, TARGET)).toBeNull();
+    expect(surfaceSpreadFor(job.id, TARGET)?.assessment.spread).toBe(0.21);
+    expect(surfaceSpreadFor(job.id, TARGET)?.assessment.ok).toBe(false);
+    expect(useEngraveJobStore.getState().job.stock.flatness).toEqual({
+      dome: 0.21,
+      across: 'width',
+      source: 'measured',
+    });
   });
 
   it('refuses a scan that is already off the stock, writes nothing, and records nothing', async () => {

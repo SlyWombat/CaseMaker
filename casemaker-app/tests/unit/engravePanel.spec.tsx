@@ -14,6 +14,10 @@ import { resetEngraveReleaseStore } from '@/store/engraveReleaseStore';
 import { resetEngravePackageStore } from '@/store/engravePackageStore';
 import { resetCncMode } from '@/store/cncModeStore';
 import { resetEngraveRows } from '@/store/engraveRowStore';
+import {
+  resetEngraveRegistrationStore,
+  useEngraveRegistrationStore,
+} from '@/store/engraveRegistrationStore';
 import { useSettingsStore } from '@/store/settingsStore';
 import {
   setEngravePreviewClientLoader,
@@ -22,6 +26,7 @@ import {
 } from '@/store/engravePreviewStore';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { MARGIN_DEFAULTS, checkBounds, splitBound } from '@/engine/cnc/engrave/depthBounds';
+import { assessSurfaceSpread } from '@/engine/cnc/engrave/surfaceSpread';
 import { jobDepthLimit } from '@/engine/cnc/engrave/partPlan';
 import { BADGE_POCKET_KEEP_OUT_ID, badgeBlankFor } from '@/engine/cnc/engrave/fromBadge';
 import { defaultBadgeParams, type BadgeParams } from '@/types/badge';
@@ -508,6 +513,7 @@ describe('EngravePanel — the run sheet mount (#207)', () => {
 
   beforeEach(() => {
     useEngraveRunStore.getState().reset();
+    resetEngraveRegistrationStore();
     vi.mocked(saveEngraveProgram).mockClear();
   });
 
@@ -563,8 +569,58 @@ describe('EngravePanel — the run sheet mount (#207)', () => {
     expect(sheet.textContent).toContain(runSheetFrameFileName(savedName));
   });
 
-  it('refuses the sheet once the job is stale', () => {
+  it('prints the measured landing range from this job’s registration (#475)', async () => {
+    const target = { host: '192.0.2.10', port: 2222 };
+    const job = useEngraveJobStore.getState().job;
+    // The registration measured five touches; the sheet must print THESE numbers, not the plan.
+    const assessment = assessSurfaceSpread(job, [
+      { z: -56.1, source: 'probe' },
+      { z: -56.05, source: 'probe' },
+      { z: -56.02, source: 'probe' },
+      { z: -56.08, source: 'probe' },
+      { z: -56.04, source: 'probe' },
+    ]);
+    expect(assessment.ok).toBe(true);
+    useEngraveRegistrationStore.getState().measureSurface(job.id, target, assessment);
+    act(() => {
+      useMachineStore.setState({
+        machine: {
+          name: 'Z1',
+          host: target.host,
+          port: target.port,
+          busy: false,
+          ip: null,
+          mac: null,
+          status: '<Idle|MPos:0,0,0>',
+          profileId: 'Z1',
+          observedAt: '2026-10-17T00:00:00.000Z',
+          notes: [],
+        },
+      });
+    });
+
     render(<EngravePanel />);
+    act(() => {
+      useEngraveRunStore.setState({
+        generated: readyGenerated(';@MKR|BEGIN\nG21 G90\nM02'),
+        simStatus: 'ready',
+        simDiagnostics: [],
+        phase: 'ready',
+        acknowledged: true,
+      });
+    });
+    fireEvent.click(screen.getByTestId('engrave-run-sheet'));
+    const sheet = await screen.findByTestId('run-sheet');
+
+    // The executor's readings, in the plan's order, with their provenance and the landing range.
+    expect(sheet.textContent).toContain("Measured: lowest -56.1 at the cut area's centre (probe)");
+    expect(sheet.textContent).toContain('spread 0.08 mm against the 11 mm band');
+    expect(sheet.textContent).toContain('the floors may land from 0 to 10.92 mm below Z0');
+    // The plan-only stop rule is replaced, not duplicated: the sheet knows what this blank measured.
+    expect(sheet.textContent).not.toContain('If the lowest and highest readings differ by more than');
+  });
+
+  it('refuses the sheet once the job is stale', () => {    render(<EngravePanel />);
     act(() => {
       useEngraveRunStore.setState({
         generated: readyGenerated(';@MKR|BEGIN\nM02'),

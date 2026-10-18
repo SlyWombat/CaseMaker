@@ -24,6 +24,7 @@
  */
 
 import { create } from 'zustand';
+import type { SurfaceSpreadAssessment } from '@/engine/cnc/engrave/surfaceSpread';
 import type { RegistrationOutcome } from '@/engine/cnc/registration/outcome';
 import type { RegistrationPlan } from '@/engine/cnc/registration/plan';
 
@@ -37,19 +38,38 @@ export interface FirstRegistration {
   outcome: RegistrationOutcome;
 }
 
+/**
+ * #475 — the cut-extent surface measurement from the registration run, kept even when no origin was
+ * written (a refused blank still has a measured spread, and the run sheet prints that refusal).
+ * Session state for the same reason the outcome is: it describes one blank on one machine.
+ */
+export interface SurfaceSpreadMeasurement {
+  jobId: string;
+  target: { host: string; port: number };
+  assessment: SurfaceSpreadAssessment;
+}
+
 interface EngraveRegistrationState {
   records: Record<string, FirstRegistration>;
+  surfaces: Record<string, SurfaceSpreadMeasurement>;
   record: (
     jobId: string,
     target: { host: string; port: number },
     plan: RegistrationPlan,
     outcome: RegistrationOutcome,
   ) => void;
+  /** #475 — remember what the cut-extent touches measured, independent of whether an origin was written. */
+  measureSurface: (
+    jobId: string,
+    target: { host: string; port: number },
+    assessment: SurfaceSpreadAssessment,
+  ) => void;
   clear: (jobId: string) => void;
 }
 
 export const useEngraveRegistrationStore = create<EngraveRegistrationState>((set) => ({
   records: {},
+  surfaces: {},
 
   record: (jobId, target, plan, outcome) =>
     set((s) => ({
@@ -59,11 +79,21 @@ export const useEngraveRegistrationStore = create<EngraveRegistrationState>((set
       },
     })),
 
+  measureSurface: (jobId, target, assessment) =>
+    set((s) => ({
+      surfaces: {
+        ...s.surfaces,
+        [jobId]: { jobId, target: { host: target.host, port: target.port }, assessment },
+      },
+    })),
+
   clear: (jobId) =>
     set((s) => {
       const records = { ...s.records };
       delete records[jobId];
-      return { records };
+      const surfaces = { ...s.surfaces };
+      delete surfaces[jobId];
+      return { records, surfaces };
     }),
 }));
 
@@ -94,7 +124,35 @@ function matching(
   return rec.target.host === target.host && rec.target.port === target.port ? rec : null;
 }
 
-/** Test seam: forget every registration. */
+/**
+ * #475 — the cut-extent measurement for THIS job on THIS machine, or null. The run sheet reads it
+ * to print the measured spread and the landing range; a measurement from another machine's frame
+ * is not this blank's.
+ */
+export function surfaceSpreadFor(
+  jobId: string,
+  target: { host: string; port: number },
+): SurfaceSpreadMeasurement | null {
+  return matchingSurface(useEngraveRegistrationStore.getState().surfaces[jobId], target);
+}
+
+/** The same question as a render subscription, so a later registration updates the sheet. */
+export function useSurfaceSpread(
+  jobId: string,
+  target: { host: string; port: number } | null,
+): SurfaceSpreadMeasurement | null {
+  return useEngraveRegistrationStore((s) => (target === null ? null : matchingSurface(s.surfaces[jobId], target)));
+}
+
+function matchingSurface(
+  rec: SurfaceSpreadMeasurement | undefined,
+  target: { host: string; port: number },
+): SurfaceSpreadMeasurement | null {
+  if (rec === undefined) return null;
+  return rec.target.host === target.host && rec.target.port === target.port ? rec : null;
+}
+
+/** Test seam: forget every registration and every cut-extent measurement. */
 export function resetEngraveRegistrationStore(): void {
-  useEngraveRegistrationStore.setState({ records: {} });
+  useEngraveRegistrationStore.setState({ records: {}, surfaces: {} });
 }

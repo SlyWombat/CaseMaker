@@ -23,9 +23,14 @@
  * `RegistrationOutcome` is SESSION state (#495 decision): the document holds the approved plan, not
  * the last measurement.
  *
- * #475's extents touches are not shown as measured here: `runRegistration` probes the registration
- * point and the edges, while #475's surface-spread plan is printed by the run sheet and has no
- * console executor in this base. The step does not invent readings for it.
+ * #475 — THE CUT-EXTENT SPREAD. The same run also measures the surface at the cut regions' extents
+ * (`surfaceSpreadPlan(job)` at the approved plan's touch count and the house boundary margin the
+ * sheet uses), reusing the executor's
+ * `seekSurface` and its #430 bounds. The step shows the min/max/spread and the band; Z0 in the
+ * recorded outcome is the LOWEST touch. A spread wider than the band is the `blank-bowed` refusal:
+ * the outcome is unusable, so no origin is written and the write button is withheld. The measured
+ * spread is written to `stock.flatness` (`source: 'measured'`) and kept in the store for the run
+ * sheet, which prints the measured landing range.
  */
 
 import { useEffect, useRef, useState, type CSSProperties, type JSX } from 'react';
@@ -42,7 +47,11 @@ import {
   type Transcript,
 } from '@/engine/cnc/registration/execute';
 import { attachConsole, type ConsoleHandle } from '@/platform/machineConsole';
+import { effectiveMargins } from '@/engine/cnc/engrave/depthBounds';
+import { surfaceSpreadPlan, type SurfaceSpreadAssessment } from '@/engine/cnc/engrave/surfaceSpread';
+import { useEngraveJobStore } from '@/store/engraveJobStore';
 import { useEngraveRegistrationStore } from '@/store/engraveRegistrationStore';
+import { useSettingsStore } from '@/store/settingsStore';
 
 const MUTED: CSSProperties = { fontSize: 11, color: '#9aa4b0', lineHeight: 1.5, margin: '4px 0' };
 const MONO: CSSProperties = {
@@ -108,7 +117,15 @@ function approvedPlan(job: EngraveJob): { plan: RegistrationPlan | null; why: st
  * #495 §4 names, so it gets no origin. The one exception is the bracket's X/Y taken on trust: there
  * is no measured deviation to be outside a margin when the confirming touch was not taken.
  */
-function writerRefusal(outcome: RegistrationOutcome): string | null {
+function writerRefusal(
+  outcome: RegistrationOutcome,
+  spread: SurfaceSpreadAssessment | null = null,
+): string | null {
+  // #475 — the blank is bowed more than the cut's depth band: no Z0 can keep every floor past the
+  // colour line and clear of the pocket, so this is a refusal before it is an unusable edge scan.
+  if (spread !== null && !spread.ok && spread.refusal !== null) {
+    return `No origin is written: ${spread.refusal.message}.`;
+  }
   if (!outcome.usable) {
     return `No origin is written from this measurement: ${outcome.problems.join('; ')}.`;
   }
@@ -158,6 +175,8 @@ function TranscriptBlock({ transcript }: { transcript: Transcript[] }): JSX.Elem
 export function EngraveRegistrationStep({ job, target }: EngraveRegistrationStepProps): JSX.Element {
   const { plan, why } = approvedPlan(job);
   const record = useEngraveRegistrationStore((s) => s.record);
+  const measureSurface = useEngraveRegistrationStore((s) => s.measureSurface);
+  const houseMargins = useSettingsStore((s) => s.margins);
   const [phase, setPhase] = useState<Phase>('idle');
   const [atMachine, setAtMachine] = useState(false);
   const [prompt, setPrompt] = useState<OperatorStep | null>(null);
@@ -222,14 +241,44 @@ export function EngraveRegistrationStep({ job, target }: EngraveRegistrationStep
     setError(null);
     const handle = attachConsole(target);
     handleRef.current = handle;
+    // #475 — the cut regions' extents, at the touch count the APPROVED plan carries (a shop default
+    // that may have moved since is not allowed to change what the operator approved). The margin is
+    // resolved exactly as the run sheet resolves it, so the band the assessment refuses on and the
+    // band the sheet prints for the same readings cannot be two different numbers.
+    const spreadPlan = surfaceSpreadPlan(job, {
+      touchCount: plan.settings.surfaceTouchCount,
+      margin: effectiveMargins(job, houseMargins).boundaryMargin,
+    });
     try {
-      const r = await runRegistration(plan, {
-        console: { send: (line) => handle.send(line) },
-        // The at-machine tick already names the wired probe, so the executor's first prompt is
-        // answered by it; every other step (the bracket's clamps, the cutter) is a fresh press.
-        operator: (step) => (step.kind === 'fit-probe' ? Promise.resolve(true) : askOperator(step)),
-      });
+      const r = await runRegistration(
+        plan,
+        {
+          console: { send: (line) => handle.send(line) },
+          // The at-machine tick already names the wired probe, so the executor's first prompt is
+          // answered by it; every other step (the bracket's clamps, the cutter) is a fresh press.
+          operator: (step) => (step.kind === 'fit-probe' ? Promise.resolve(true) : askOperator(step)),
+        },
+        spreadPlan ?? undefined,
+      );
       if (!aliveRef.current) return;
+      if (r.ok && r.spread !== undefined) {
+        // The measurement is session data for the sheet even when the blank is refused; the job's
+        // flatness record is the measured high-to-low spread, which is what #432 R9 reads.
+        measureSurface(job.id, target, r.spread);
+        const store = useEngraveJobStore.getState();
+        if (store.job.id === job.id) {
+          store.setStock(
+            {
+              flatness: {
+                dome: r.spread.spread,
+                across: r.spread.across,
+                source: 'measured',
+              },
+            },
+            'measured',
+          );
+        }
+      }
       if (!r.ok) {
         const note = await homeAfterStop(handle, r.reason);
         if (!aliveRef.current) return;
@@ -242,7 +291,7 @@ export function EngraveRegistrationStep({ job, target }: EngraveRegistrationStep
       }
       setResult(r);
       setPhase('measured');
-      if (writerRefusal(r.outcome) !== null) {
+      if (writerRefusal(r.outcome, r.spread ?? null) !== null) {
         handleRef.current = null;
         await handle.close();
       }
@@ -257,7 +306,7 @@ export function EngraveRegistrationStep({ job, target }: EngraveRegistrationStep
 
   async function writeOrigin(): Promise<void> {
     if (target === null || plan === null || result?.ok !== true || busy) return;
-    if (writerRefusal(result.outcome) !== null) return;
+    if (writerRefusal(result.outcome, result.spread ?? null) !== null) return;
     setPhase('writing');
     setError(null);
     const handle = handleRef.current ?? attachConsole(target);
@@ -303,7 +352,8 @@ export function EngraveRegistrationStep({ job, target }: EngraveRegistrationStep
   }
 
   const outcome = result?.ok === true ? result.outcome : null;
-  const refusal = outcome === null ? null : writerRefusal(outcome);
+  const spread = result?.ok === true ? (result.spread ?? null) : null;
+  const refusal = outcome === null ? null : writerRefusal(outcome, spread);
   const data = result?.ok === true ? result.data : null;
 
   return (
@@ -433,6 +483,32 @@ export function EngraveRegistrationStep({ job, target }: EngraveRegistrationStep
                     <li key={i}>{problem}</li>
                   ))}
                 </ul>
+              )}
+
+              {spread !== null && (
+                <div
+                  data-testid="engrave-registration-spread"
+                  data-ok={spread.ok ? 'true' : 'false'}
+                  style={{ marginTop: 6 }}
+                >
+                  <div style={{ fontSize: 11, color: spread.ok ? OK : BAD }}>
+                    <strong>Surface spread</strong> — lowest {n(spread.min.z)} at {spread.min.at} (
+                    {spread.min.source}), highest {n(spread.max.z)} at {spread.max.at} (
+                    {spread.max.source}); spread {n(spread.spread)} mm against the{' '}
+                    {n(spread.plan.band.width)} mm band.
+                  </div>
+                  {spread.ok && spread.landing !== null ? (
+                    <div data-testid="engrave-registration-landing" style={{ ...MUTED, color: OK }}>
+                      Z0 is the lowest reading ({n(spread.z0.z)}), so the floors may land from{' '}
+                      {n(spread.landing.lower)} to {n(spread.landing.upper)} mm below Z0 and nowhere
+                      else.
+                    </div>
+                  ) : (
+                    <div data-testid="engrave-registration-spread-refusal" style={{ ...MUTED, color: BAD }}>
+                      {spread.refusal?.message}
+                    </div>
+                  )}
+                </div>
               )}
 
               {phase === 'measured' && refusal === null && (
