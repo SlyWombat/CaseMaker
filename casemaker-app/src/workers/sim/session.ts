@@ -597,7 +597,7 @@ export function createSimSession(tl: ManifoldToplevel, hooks?: SimSessionHooks):
           'oracle: this is a ROTARY column sweep, whose grid runs over (X, θ): a 2D region in the work frame cannot be read off it, so the CAM\'s predicted regions cannot be compared with the material it left',
         );
       }
-      return computeOracle(tl, gridSliceAt(tl, grid), predicted, columnOracleBand(worstContours(l.timeline), grid));
+      return computeOracle(tl, gridSliceAt(tl, grid), predicted, columnOracleBand(worstContours(l.timeline), grid), grid);
     }
     if (!l || l.kind !== 'swept') throw new Error('oracle: no swept program is loaded');
     const removal = l.sweep.removal;

@@ -115,7 +115,7 @@ import {
 } from './engraveGeometry';
 import { colourBoundaryFor, stackDepthLimit, type StackDepthLimit } from './stackDepthLimit';
 import { ceilingName, effectiveMargins, MARGIN_DEFAULTS } from '@/engine/cnc/engrave/depthBounds';
-import type { OraclePredicted } from '@/engine/cnc/engrave/oracle';
+import type { OraclePredicted, OracleThreadMove } from '@/engine/cnc/engrave/oracle';
 
 /** The stage that stopped the pipeline, or `done` when everything passed. */
 export type EngraveStage = 'findings' | 'feeds' | 'cam' | 'post' | 'verify' | 'done';
@@ -774,6 +774,42 @@ function drillPolygons(tl: ManifoldToplevel, holes: readonly [number, number][],
   const polygons = union.toPolygons() as Polygons;
   union.delete();
   return polygons;
+}
+
+/**
+ * A milled thread's oracle prediction (#445): the item's dimensions, the tool's cutting diameter,
+ * and the plan's own FEED moves as segments. The oracle sweeps the same column/cone profile the
+ * simulator does over these, on the grid the run was swept with, so there is no second model of the
+ * thread and no annulus guessed against an envelope.
+ *
+ * Every move's start is the preceding move's endpoint; the first feed therefore needs no start of
+ * its own because the plan always opens with a rapid. Only feeds cut — a rapid stays at HOP_Z/above
+ * the top face and lowers no column.
+ */
+function threadPrediction(plan: ThreadMillPlan): OraclePredicted {
+  const moves: OracleThreadMove[] = [];
+  let prev: { x: number; y: number; z: number } | null = null;
+  for (const m of plan.moves) {
+    if (m.kind === 'feed' && prev !== null) {
+      moves.push({ x0: prev.x, y0: prev.y, x1: m.x, y1: m.y, z: Math.min(prev.z, m.z) });
+    }
+    prev = { x: m.x, y: m.y, z: m.z };
+  }
+  return {
+    depth: plan.tipDepth,
+    polygons: [],
+    thread: {
+      x: plan.position[0],
+      y: plan.position[1],
+      majorMm: plan.major,
+      minorMm: plan.minor,
+      pitchMm: plan.pitch,
+      threadDepthMm: plan.threadDepth,
+      tipDepthMm: plan.tipDepth,
+      cuttingDiameterMm: plan.cuttingDiameter,
+      moves,
+    },
+  };
 }
 
 /**
@@ -2353,6 +2389,10 @@ function generateOneProgram(
       // `concatToolpathIR` renumbers the operations from 1, which is its contract (#287).
       ir = irs.slice(1).reduce((a, b) => concatToolpathIR(a, b), irs[0]!);
       threadPlans = plans;
+      // #445 — each thread is an ORACLE item now: the prediction is the plan's own feed geometry
+      // against the item's dimensions, so `computeOracle` can judge the thread the program cuts
+      // rather than skipping it (D7's no-prediction was a consequence of the old envelope model).
+      for (const p of plans) predicted.push(threadPrediction(p));
     } catch (e) {
       return stop('cam', { message: e instanceof Error ? e.message : String(e), threadMachining });
     }

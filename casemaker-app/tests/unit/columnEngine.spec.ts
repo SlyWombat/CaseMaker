@@ -7,7 +7,7 @@
  * removes the annulus `[z, R]` wherever the tool reaches, i.e. `π (R² − z²) · 2 r_t`.
  */
 import { describe, expect, it } from 'vitest';
-import { ROTARY, FLAT, columnSweep, closestAngularOffset, cutterReach, meshRotary, meshFlat, type ColumnCutter, type CutMove } from '@/workers/geometry/columnEngine';
+import { ROTARY, FLAT, columnSweep, closestAngularOffset, cutterReach, meshRotary, meshFlat, surfaceAboveTip, threadCutter, type ColumnCutter, type ColumnGrid, type CutMove } from '@/workers/geometry/columnEngine';
 import { stubSetup, type Setup } from '@/engine/cnc/setup';
 import { flatEndMill, type Tool } from '@/engine/cnc/tool';
 import { rectProfile } from '@/engine/compiler/profile';
@@ -443,10 +443,11 @@ describe('a V-bit cone on the flat engine (#405)', () => {
 });
 
 /**
- * Thread milling on the flat engine (#445 §4). The removal model does NOT change — the cutting
- * diameter is swept as a cylinder, as #382 left it — but when the load brings the thread's own
- * dimensions the generic envelope warning is replaced by one line per thread, and the cutter is
- * checked against each thread it claims to cut.
+ * Thread milling on the flat engine (#445). When the load brings the thread's own dimensions the
+ * cutting-diameter cylinder is replaced by the NECK + 60° TOOTH profile (`threadCutter`), swept
+ * along the program's helix; the generic envelope warning is replaced by one line per thread, and
+ * the cutter is checked against each thread it claims to cut. Without dimensions the old cylinder
+ * and its warning are unchanged.
  */
 describe('a milled thread on the flat engine (#445)', () => {
   /** A 4 mm thread mill: fits M5's ⌀4.134 pilot and spans its radial depth. */
@@ -455,6 +456,81 @@ describe('a milled thread on the flat engine (#445)', () => {
   const M5 = { x: 20, y: 15, majorMm: 5, minorMm: 4.134, pitchMm: 0.8, threadDepthMm: 5, through: false };
   const flat = (z = -5.8) => fakeTimeline([move({ u0: 20, u1: 20, v0: 15, v1: 15, z })], false, 15);
   const tiny = { dx: 0.2, dThetaDeg: 0.2 };
+
+  it('models the cutter as a neck plus a 60° tooth that rises INWARD', () => {
+    // M5 over a 4 mm cutter: tip r = 2, radial depth = 0.433, root r = 1.567.
+    const cutter = threadCutter(4, 5, 4.134);
+    const root = cutter.toothRootRadius!;
+    expect(cutter.radius).toBeCloseTo(2, 9);
+    expect(root).toBeCloseTo(2 - (5 - 4.134) / 2, 9);
+    expect(cutter.tanHalf).toBeCloseTo(Math.tan(Math.PI / 6), 9);
+    // The whole user-facing reach is the tooth tip, not a cone that grows with depth.
+    expect(cutterReach(cutter, 0)).toBeCloseTo(2, 9);
+    expect(cutterReach(cutter, 20)).toBeCloseTo(2, 9);
+    // At the tip the floor is the move's Z; halfway to the root it is higher by the flank rise; at
+    // the root/neck it is the tip plane again (the neck's own bottom).
+    expect(surfaceAboveTip(cutter, 2)).toBe(0);
+    const mid = (2 + root) / 2;
+    expect(surfaceAboveTip(cutter, mid)).toBeCloseTo((2 - mid) / Math.tan(Math.PI / 6), 6);
+    expect(surfaceAboveTip(cutter, root)).toBe(0);
+    expect(surfaceAboveTip(cutter, 2.0001)).toBe(Infinity); // no pad: the tooth ends at its tip
+    expect(surfaceAboveTip(cutter, 3)).toBe(Infinity);
+    // Half a cell of padding only widens the footprint, never raises the flank.
+    expect(threadCutter(4, 5, 4.134, 0.1).outerRadius).toBeCloseTo(2.1, 9);
+    expect(surfaceAboveTip(threadCutter(4, 5, 4.134, 0.1), 2.05)).toBe(0);
+  });
+
+  it('sweeps the tooth along the helix: the floor carries the pitch and the flank', () => {
+    // One revolution of an M5 helix at the final radial pass: the tool axis orbits at
+    // (D − d)/2 = 0.5 mm, climbing one pitch (0.8) per turn from the tip depth.
+    const N = 360;
+    const zTip = -5.8;
+    const cx = 20;
+    const cy = 15;
+    const moves: CutMove[] = [];
+    for (let i = 0; i < N; i++) {
+      const a0 = (2 * Math.PI * i) / N;
+      const a1 = (2 * Math.PI * (i + 1)) / N;
+      moves.push(move({
+        u0: cx + 0.5 * Math.cos(a0), v0: cy + 0.5 * Math.sin(a0),
+        u1: cx + 0.5 * Math.cos(a1), v1: cy + 0.5 * Math.sin(a1),
+        z: zTip + (M5.pitchMm * i) / N,
+      }));
+    }
+    const setup = prism(40, 30, 8);
+    const res = { dx: 0.1, dThetaDeg: 0.1 };
+    const thread = threadCutter(4, M5.majorMm, M5.minorMm);
+    /** A one-cell grid centred exactly where the assertion wants to read the floor. */
+    const cell = (x: number, y: number): ColumnGrid => ({
+      kind: 'flat', nu: 1, nv: 1, u0: x, du: 1, v0: y, dv: 1, initial: 0, base: -8, h: new Float32Array([0]),
+    });
+    // One chord only, so the reading is the flank's own shape: a column 1.75 mm from the tool
+    // axis is on the 60° tooth, 0.433 mm above the tip plane. The cylinder model of #382 left it
+    // at the tip depth.
+    const flank = cell(cx + 2.25, cy);
+    FLAT.applyMove(flank, moves[0]!, thread);
+    expect(flank.h[0]).toBeCloseTo(zTip + 0.433, 2);
+    // The whole revolution at the tooth's tip radius: only the one chord that passes over each
+    // cell reaches it, so the floor IS the move's Z — and half a turn later that Z is half a
+    // pitch higher. The floor is a helix, not a level.
+    const nearTip = cell(cx + 2.5, cy);
+    const farTip = cell(cx - 2.5, cy);
+    for (const m of moves) {
+      FLAT.applyMove(nearTip, m, thread);
+      FLAT.applyMove(farTip, m, thread);
+    }
+    expect(nearTip.h[0]).toBeCloseTo(zTip, 2);
+    expect(farTip.h[0]).toBeCloseTo(zTip + M5.pitchMm / 2, 2);
+    expect(farTip.h[0]! - nearTip.h[0]!).toBeCloseTo(0.4, 2);
+    // The old cylinder, swept over the same path, is level at the tip depth everywhere inside
+    // ⌀d — so the profile leaves material the envelope used to claim removed.
+    const grid = FLAT.buildGrid(setup, thread, moves, res);
+    for (const m of moves) FLAT.applyMove(grid, m, thread);
+    const cylinder: ColumnCutter = { radius: 2, tanHalf: null };
+    const flatGrid = FLAT.buildGrid(setup, cylinder, moves, res);
+    for (const m of moves) FLAT.applyMove(flatGrid, m, cylinder);
+    expect(FLAT.volume(grid).removed).toBeLessThan(FLAT.volume(flatGrid).removed);
+  });
 
   it('replaces the generic envelope warning with one line per thread, and states the band', () => {
     const out = columnSweep(flat(), MILL(), prism(40, 30, 8), { resolution: tiny, threads: [M5] });
@@ -467,8 +543,12 @@ describe('a milled thread on the flat engine (#445)', () => {
     const band = (Math.PI / 4) * (M5.majorMm ** 2 - M5.minorMm ** 2) * M5.threadDepthMm;
     expect(band).toBeCloseTo(31.0627, 3);
     expect(envelope[0]!.message).toContain('31.06 mm³');
-    expect(envelope[0]!.message).toMatch(/the pilot is assumed and is not simulated/);
-    expect(envelope[0]!.message).toMatch(/helical form is not drawn/);
+    // The new model is said in the message: a neck + 60° tooth swept along the helix, with the
+    // crests still absent and the pilot traced in the blank.
+    expect(envelope[0]!.message).toMatch(/neck plus a tooth on the item's 60° form/);
+    expect(envelope[0]!.message).toMatch(/floor follows the thread's pitch and flank/);
+    expect(envelope[0]!.message).toMatch(/crests between the grooves are not left/);
+    expect(envelope[0]!.message).toMatch(/neck traces the ⌀4\.134 pilot/);
   });
 
   it('keeps the old envelope warning when no thread dimensions are passed', () => {

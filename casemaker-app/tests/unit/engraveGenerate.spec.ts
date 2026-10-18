@@ -1351,6 +1351,22 @@ describe('engraveGenerate with a milled thread (#445)', () => {
     expect(g.verify!.findings.filter((f) => f.severity === 'error')).toEqual([]);
     // The helical cutting moves are on the wire; the tip runs a pitch of run-out past the thread.
     expect(g.verify!.stats.deepestZ).toBeCloseTo(-5.8, 3);
+    // #445 — the oracle's prediction for a thread is the same profile swept along the program's
+    // own helix: the item's dimensions, the cutter's diameter, and the feed segments the sim will
+    // compare its slice against. The depth is the TIP depth, not the thread's nominal depth.
+    const predicted = g.predicted.find((p) => p.thread !== undefined);
+    expect(predicted, 'one thread prediction').toBeTruthy();
+    expect(predicted!.depth).toBeCloseTo(5.8, 6);
+    expect(predicted!.thread).toMatchObject({
+      x: 50, y: 30, majorMm: 5, minorMm: 4.134, pitchMm: 0.8,
+      threadDepthMm: 5, tipDepthMm: 5.8, cuttingDiameterMm: 4,
+    });
+    // The first revolution of each radial pass: the helix chords climb exactly one pitch.
+    const firstTurn = predicted!.thread!.moves.filter(
+      (m) => Math.hypot(m.x1 - m.x0, m.y1 - m.y0) > 1e-9 && m.z <= -5.8 + 0.8 + 1e-6,
+    );
+    expect(firstTurn.length).toBeGreaterThan(0);
+    expect(Math.max(...firstTurn.map((m) => m.z)) - Math.min(...firstTurn.map((m) => m.z))).toBeCloseTo(0.8, 2);
   });
 
   it('two threads are ONE program, one tool, and operations renumbered', () => {

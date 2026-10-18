@@ -66,13 +66,58 @@ export interface ColumnCutter {
    * with no stated end (a V-bit, #405, whose flank is taken to run to the top face). A DRILL has one
    * (#382): its point is a cone from a sharp tip out to the drill's radius, and past that radius the
    * drill is a wall, so nothing beyond it is cut however deep the tip goes. Ignored for a flat end,
-   * whose `radius` already is its outer edge.
+   * whose `radius` already is its outer edge. For a THREAD MILL (#445) it is the padded footprint
+   * bound: the tooth's tip radius plus the engine's half-cell widening.
    */
   outerRadius?: number;
+  /**
+   * A THREAD MILL's tooth root radius, mm (#445): the radius where the 60° tooth meets the reduced
+   * neck. At or inside it the cutter is its neck — a level floor at the tip plane; between it and
+   * `radius` the tooth's flank rises INWARD, away from the wall, which is the opposite slope to a
+   * V-bit. Absent for every other cutter.
+   */
+  toothRootRadius?: number;
+}
+
+/**
+ * A metric ISO thread's flank: 60° included, so each flank makes 30° with the axis' normal. In
+ * `ColumnCutter` terms the tooth's axial rise per mm of inward radial travel is `1/tanHalf`, the
+ * same reading a 60° V-bit uses.
+ */
+export const THREAD_FLANK_TAN = Math.tan(Math.PI / 6);
+
+/**
+ * The cutter a THREAD MILL presents in a column model (#445): a NECK column of `rRoot` plus a 60°
+ * tooth cone from the tip radius `rTip` inward to the root. Swept along the program's helix it
+ * leaves the thread's pitch and flank in the floor: the tooth's outer edge traces the major
+ * diameter, the root traces the basic minor (the pilot), and the flank rises back from the wall
+ * as a column moves inward.
+ *
+ * `cuttingDiameter` is the tool's `d`; `major`/`minor` are the item's ISO basic sizes. `pad` is the
+ * engine's half-cell widening, applied only to the FOOTPRINT bound (`outerRadius`), never to the
+ * flank's own geometry: widening the flank would raise the floor, which is the under-removal
+ * direction.
+ *
+ * A cutter so small that `rTip − (D − D1)/2` is not positive has no neck left in the model; the
+ * tooth then runs to the axis at `rRoot = 0` and the profile stays finite.
+ */
+export function threadCutter(cuttingDiameter: number, major: number, minor: number, pad = 0): ColumnCutter {
+  const rTip = cuttingDiameter / 2;
+  const radialDepth = (major - minor) / 2;
+  const rRoot = Math.max(0, rTip - radialDepth);
+  return { radius: rTip, tanHalf: THREAD_FLANK_TAN, outerRadius: rTip + pad, toothRootRadius: rRoot };
 }
 
 /** The surface a column at radial distance `rho` from the tool axis is left at: tip Z + this. */
 export function surfaceAboveTip(cutter: ColumnCutter, rho: number): number {
+  if (cutter.toothRootRadius !== undefined) {
+    // #445 — a thread mill's tooth: the neck is the tip plane, the flank rises INWARD from the
+    // tooth tip, and past the (padded) footprint nothing is cut.
+    if (rho > (cutter.outerRadius ?? cutter.radius)) return Infinity;
+    if (rho <= cutter.toothRootRadius) return 0;
+    const h = (cutter.radius - rho) / (cutter.tanHalf as number);
+    return h > 0 ? h : 0;
+  }
   if (cutter.tanHalf === null) return rho <= cutter.radius ? 0 : Infinity;
   if (cutter.outerRadius !== undefined && rho > cutter.outerRadius) return Infinity;
   const h = (rho - cutter.radius) / cutter.tanHalf;
@@ -94,6 +139,9 @@ export function surfaceAboveTip(cutter: ColumnCutter, rho: number): number {
  * Below 45° it over-scans by `1/tanHalf²` and only wastes time.
  */
 export function cutterReach(cutter: ColumnCutter, aboveTip: number): number {
+  // #445 — a thread tooth's flank rises INWARD, so its furthest reach is the tooth tip (plus the
+  // engine's padding) at every depth; unlike a V-bit it does not widen as the tip goes down.
+  if (cutter.toothRootRadius !== undefined) return cutter.outerRadius ?? cutter.radius;
   if (cutter.tanHalf === null) return cutter.radius;
   const cone = cutter.radius + aboveTip * cutter.tanHalf;
   // A bounded cone (a drill, #382) reaches no further than its body, however deep the tip is.
@@ -127,10 +175,12 @@ export type ColumnCutterResult =
  *   - DRILL: a sharp cone of the drill's point angle — `drillPointAngle`, the same rule the #434 CAM
  *     plans the hole by — bounded at the drill's radius by its body. An `info` names the angle and
  *     whether the drill stated it or the shop default supplied it;
- *   - THREAD MILL: its cutting diameter as a flat cylinder at the tip — an ENVELOPE, conservative
- *     over-removal, and a `warning` says so: the teeth on a helix are not a solid of revolution, and
- *     the thread form is not modelled. Never sized from the thread spec (an M5 mill does not cut a
- *     5 mm hole: it orbits). A thread mill that states no cutting diameter is refused by name.
+ *   - THREAD MILL: its cutting diameter as a flat cylinder at the tip, which is the FALLBACK for a
+ *     file with no thread dimensions. It is a conservative over-removal and a `warning` says so.
+ *     When the load brings the thread's own dimensions (#445), `columnSweep` replaces this cylinder
+ *     with the real column/cone profile — a reduced neck plus the item's 60° tooth — so the helix
+ *     the program emits is left in the floor. Never sized from the thread spec (an M5 mill does not
+ *     cut a 5 mm hole: it orbits). A thread mill that states no cutting diameter is refused by name.
  *
  * A ball, a bull nose, an unknown shape: refused, as before (#222).
  */
@@ -335,10 +385,12 @@ export interface ColumnSweepOpts {
   rotaryPitchDeg?: number | null;
   /**
    * The threads the program mills (#445 §4), as the CAM planned them: plain numbers, type-only so
-   * this worker does not import the CAM module. With these present the generic envelope warning is
-   * replaced by one line per thread, and each thread is checked against the cutting diameter. A
-   * ROTARY job with them is refused by name (`thread-flat-only`): a thread is cut on a flat face,
-   * and a single-valued radius column has no form for it.
+   * this worker does not import the CAM module. With these present the thread mill is swept as its
+   * NECK plus the item's 60° TOOTH (a column/cone profile, `threadCutter`) instead of the fallback
+   * cylinder, the generic envelope warning is replaced by one line per thread, and each thread is
+   * checked against the cutting diameter. A ROTARY job with them is refused by name
+   * (`thread-flat-only`): a thread is cut on a flat face, and a single-valued radius column has no
+   * form for it.
    */
   threads?: readonly SimThreadSpec[] | null;
 }
@@ -519,7 +571,7 @@ export const ROTARY: ColumnParameterisation = {
 };
 
 /** Euclidean distance from (px, py) to the segment (ax, ay)–(bx, by). */
-function distToSegment(px: number, py: number, ax: number, ay: number, bx: number, by: number): number {
+export function distToSegment(px: number, py: number, ax: number, ay: number, bx: number, by: number): number {
   const dx = bx - ax;
   const dy = by - ay;
   const len2 = dx * dx + dy * dy;
@@ -542,10 +594,11 @@ function distToSegment(px: number, py: number, ax: number, ay: number, bx: numbe
  * (#405, the hook #221 reserved here): a V-bit's floor at a column is `tipZ + (ρ − r_t)/tan`, ρ
  * being the column's distance from the move's segment, so the groove it leaves is a V and not a
  * slot of the tip's width. A DRILL is the same cone with a sharp tip, BOUNDED at the drill's radius
- * (`ColumnCutter.outerRadius`, #382), and a THREAD MILL is swept as its cutting-diameter cylinder, an
- * envelope (`columnCutterFor`). A BALL or a BULL nose is still refused before the sweep reaches this
- * parameterisation: their constant-Z footprint is a profile too, but it is #222's, and a wrong
- * profile is worse than a refusal.
+ * (`ColumnCutter.outerRadius`, #382), and a THREAD MILL is its neck plus the item's 60° tooth, swept
+ * as an inverted cone with a level neck (`ColumnCutter.toothRootRadius`, #445; the fallback for a
+ * file with no thread dimensions is its cutting-diameter cylinder — `columnCutterFor`). A BALL or a
+ * BULL nose is still refused before the sweep reaches this parameterisation: their constant-Z
+ * footprint is a profile too, but it is #222's, and a wrong profile is worse than a refusal.
  */
 export const FLAT: ColumnParameterisation = {
   kind: 'flat',
@@ -986,14 +1039,32 @@ export function columnSweep(timeline: Timeline, tool: Tool, setup: Setup, opts?:
   const flatPitch = positive(opts?.flatPitchYMm, COLUMN_FLAT_PITCH_Y_FALLBACK_MM);
   const res: ColumnResolution =
     opts?.resolution ?? (rotary ? { dx: pitchX, dThetaDeg: rotaryPitch } : { dx: pitchX, dThetaDeg: flatPitch });
-  // A thread mill's ENVELOPE is widened by half a cell diagonal (#382 review): a column is cut when
-  // its CENTRE is within the radius, so at the 0.1 mm default a small radius can lose up to half a
-  // cell around its edge. Widened, every column whose cell the true cylinder touches is cut — the
+  // A thread mill's cutter (#445): when the load brings the thread's own dimensions, the tool is
+  // modelled as its NECK plus a 60° TOOTH — a column/cone profile — so the helix the program
+  // already emits leaves the thread's pitch and flank in the floor. Without dimensions (a foreign
+  // file, the QA harness) the old cutting-diameter cylinder stays, and so does its warning.
+  //
+  // The footprint is widened by half a cell diagonal either way (#382 review): a column is cut when
+  // its CENTRE is within the shape, so at the 0.1 mm default a small tooth can lose up to half a
+  // cell around its edge. Widened, every column whose cell the true cutter touches is cut — the
   // over-removal side, which is the side an envelope promises.
   let cutter = resolved.cutter;
   if (resolved.kind === 'thread-envelope') {
     const pad = Math.hypot(res.dx, res.dThetaDeg) / 2;
-    cutter = { ...cutter, radius: cutter.radius + pad };
+    const specs = opts?.threads ?? [];
+    if (specs.length > 0) {
+      // The ITEM states the thread and the TOOL supplies its cutting diameter (#445 D2). More than
+      // one thread size can share this program's one tool; the WIDEST radial depth gives the
+      // smallest neck and the widest tooth — the conservative side. The oracle checks each thread
+      // against its own size, so a mismatched pairing is still caught there.
+      let widest = specs[0]!;
+      for (const s of specs) {
+        if (s.majorMm - s.minorMm > widest.majorMm - widest.minorMm) widest = s;
+      }
+      cutter = threadCutter(cutter.radius * 2, widest.majorMm, widest.minorMm, pad);
+    } else {
+      cutter = { ...cutter, radius: cutter.radius + pad };
+    }
   }
 
   // Resolve every checkpoint's moves once. `stateAt` is snapshotted (O(512)), not recomputed.
@@ -1037,15 +1108,16 @@ export function columnSweep(timeline: Timeline, tool: Tool, setup: Setup, opts?:
           message: `thread at (${s.x}, ${s.y}): the ${d} mm cutting diameter spans only ${d.toFixed(3)} mm, less than the ${radialDepth.toFixed(3)} mm radial depth of the ⌀${s.majorMm} over ⌀${s.minorMm} thread, so the cutter cannot reach the major diameter`,
         });
       }
-      // The envelope's over-removal as an UPPER bound: the annular band between the basic minor and
-      // the major, `π/4 (D² − D1²) L`. It needs no thread-profile coefficient, so it cannot be
-      // optimistic. The pilot is not an initial condition — the sweep starts from the solid blank,
-      // and pre-lowering the pilot would count a cut this program did not make.
+      // The profile still cannot leave the crests, so the over-removal remains an UPPER bound: the
+      // annular band between the basic minor and the major, `π/4 (D² − D1²) L`. It needs no
+      // thread-profile coefficient, so it cannot be optimistic. The pilot is not an initial
+      // condition — the sweep starts from the solid blank — but the modelled neck now traces a
+      // ⌀D1 bore, where the shop drills the pilot before this file runs.
       const band = (Math.PI / 4) * (s.majorMm ** 2 - s.minorMm ** 2) * s.threadDepthMm;
       diagnostics.push({
         severity: 'warning',
         code: 'thread-envelope',
-        message: `thread at (${s.x}, ${s.y}): ⌀${s.majorMm} × ${s.pitchMm}, ⌀${s.minorMm} pilot, ${s.threadDepthMm} mm; the envelope removes the whole ⌀${s.majorMm} bore (the annular band from ⌀${s.minorMm} to ⌀${s.majorMm} is ${band.toFixed(2)} mm³); the true thread leaves its ridges, so the picture over-removes by less than that; the helical form is not drawn; the pilot is assumed and is not simulated`,
+        message: `thread at (${s.x}, ${s.y}): ⌀${s.majorMm} × ${s.pitchMm}, ⌀${s.minorMm} pilot, ${s.threadDepthMm} mm; the cutter is simulated as its neck plus a tooth on the item's 60° form, swept along the helix, so the floor follows the thread's pitch and flank; a column holds one height, so the crests between the grooves are not left — the picture over-removes by at most the annular band from ⌀${s.minorMm} to ⌀${s.majorMm} (${band.toFixed(2)} mm³). The neck traces the ⌀${s.minorMm} pilot in the solid blank; the shop drills it first`,
       });
     }
   }

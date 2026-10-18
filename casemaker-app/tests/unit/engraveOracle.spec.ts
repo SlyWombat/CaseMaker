@@ -9,7 +9,7 @@ import { describe, it, expect } from 'vitest';
 
 import { tl } from './helpers/manifoldExec';
 import { generate } from './helpers/engravePipeline';
-import { createSimSession, type SimSession } from '@/workers/sim/session';
+import { createSimSession, type SimLoadOpts, type SimSession } from '@/workers/sim/session';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import {
   ORACLE_AREA_FLOOR,
@@ -21,7 +21,8 @@ import { ARC_CHORD_TOLERANCE_MM, SWEEP_SIMPLIFY_EPS_MM } from '@/engine/compiler
 import { SWEEP_TOLERANCES } from '@/workers/geometry/sweep';
 import type { CamMove, ToolpathIR } from '@/engine/cnc/cam/ir';
 import { postZ1, type PostContext } from '@/engine/cnc/post/z1';
-import type { Tool } from '@/engine/cnc/tool';
+import { flatEndMill, type Tool } from '@/engine/cnc/tool';
+import type { ShopDefaults } from '@/platform/defaultsClient';
 import { jobTool, toSetup } from '@/engine/cnc/engrave/jobSetup';
 import { Z1 } from '@/engine/cnc/machine';
 import type { EngraveJob } from '@/types/engraveJob';
@@ -40,9 +41,9 @@ function postCtx(job: EngraveJob): PostContext {
   };
 }
 
-function load(job: EngraveJob, nc: string, tool: Tool): SimSession {
+function load(job: EngraveJob, nc: string, tool: Tool, opts?: SimLoadOpts): SimSession {
   const session = createSimSession(tl);
-  const r = session.load(nc, toSetup(job, Z1), tool, Z1.id);
+  const r = session.load(nc, toSetup(job, Z1), tool, Z1.id, opts);
   if (!r.ok) throw new Error(`load refused: ${JSON.stringify(r.diagnostics)}`);
   return session;
 }
@@ -201,6 +202,87 @@ describe('engraveOracle (#206 §3)', () => {
       const blind = session.oracle(g.predicted.filter((p) => Math.abs(p.depth - 1.5) > 1e-9));
       expect(blind.ok).toBe(false);
       expect(over(blind)).toBeGreaterThan(30);
+    } finally {
+      session.dispose();
+    }
+  });
+
+  // #445 — a thread is judged on the SAME column/cone profile the simulator swept, not against an
+  // annulus guessed at. The prediction is the CAM plan's own feed segments swept with
+  // `threadCutter`/`surfaceAboveTip` on this run's grid, so the two sides are two readings of one
+  // model; the levels include the threaded depth and a shallow flank level, where a cylinder (or a
+  // wrong pitch) would disagree across the annulus.
+  it('passes a milled thread on the profile the simulator swept (#445)', () => {
+    const MILL: Tool = flatEndMill(4, {
+      name: '4 mm thread mill',
+      typeText: 'Thread Mill',
+      shape: 'thread',
+      tipDiameter: 4,
+      diameter: 4,
+      fluteLength: 20,
+    });
+    const defaults = {
+      'thread.radialStepoverMm': { value: 0.2, source: 'seeded' },
+      'thread.entryRampMm': { value: 0.5, source: 'seeded' },
+      'thread.bottomClearancePitches': { value: 1, source: 'seeded' },
+      'thread.pilotTipClearanceMm': { value: 0.5, source: 'seeded' },
+      'thread.feed': { value: 300, source: 'seeded' },
+      'thread.plungeFeed': { value: 100, source: 'seeded' },
+      'thread.spindleRpm': { value: 10000, source: 'seeded' },
+      'thread.chordToleranceMm': { value: 0.01, source: 'seeded' },
+    } as unknown as ShopDefaults;
+    const base = defaultEngraveJob();
+    const job: EngraveJob = {
+      ...base,
+      labels: [],
+      shapes: [],
+      traces: [],
+      drills: [],
+      tool: MILL,
+      threads: [
+        {
+          kind: 'thread',
+          id: 'thr-a',
+          position: { x: 50, y: 30 },
+          enabled: true,
+          size: 'M5',
+          standard: 'metric',
+          classFit: '6H',
+          depth: 5,
+          through: false,
+        },
+      ],
+    };
+    const g = generate(tl, job, null, [], undefined, { defaults });
+    expect(g.ok).toBe(true);
+    expect(g.nc).not.toBeNull();
+    expect(g.threads).toHaveLength(1);
+    // The simulator needs the thread's dimensions; a foreign file may not have them, but this
+    // program does, and the run's own store passes exactly this list to `load`.
+    const session = load(job, g.nc!, MILL, { threads: g.threads!.flatMap((t) => t.simThreads) });
+    try {
+      const report = session.oracle(g.predicted);
+      // The tip depth (thread depth + run-out), the threaded depth and the shallow flank level.
+      expect(report.levels.map((l) => l.z)).toEqual([-0.5, -5, -5.8]);
+      for (const level of report.levels) {
+        expect(level.predictedArea).toBeGreaterThan(0);
+        expect(level.simulatedArea).toBeGreaterThan(0);
+      }
+      expect(report.ok).toBe(true);
+      expect(under(report)).toBeLessThanOrEqual(ORACLE_AREA_FLOOR);
+      expect(over(report)).toBeLessThanOrEqual(ORACLE_AREA_FLOOR);
+
+      // The control: loaded WITHOUT the thread's dimensions the simulator falls back to the old
+      // cutting-diameter cylinder, which cuts deeper across the annulus than the profile predicts.
+      // The oracle must see that difference rather than sharing the fallback's mistake.
+      const cylindrical = load(job, g.nc!, MILL);
+      try {
+        const blind = cylindrical.oracle(g.predicted);
+        expect(blind.ok).toBe(false);
+        expect(over(blind)).toBeGreaterThan(ORACLE_AREA_FLOOR);
+      } finally {
+        cylindrical.dispose();
+      }
     } finally {
       session.dispose();
     }

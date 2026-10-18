@@ -41,7 +41,13 @@ import { grooveRadiusAt, type VCone } from '@/engine/cnc/vProfile';
 import { traceSweptProfile } from '@/engine/cnc/engrave/partPlan';
 import { executeProfile, type ManifoldToplevel } from '@/workers/geometry/evaluateOp';
 import { CHUNK as SWEEP_CHUNK, FANOUT as SWEEP_FANOUT, SWEEP_TOLERANCES } from '@/workers/geometry/sweep';
-import type { ColumnGrid } from '@/workers/geometry/columnEngine';
+import {
+  cutterReach,
+  distToSegment,
+  surfaceAboveTip,
+  threadCutter,
+  type ColumnGrid,
+} from '@/workers/geometry/columnEngine';
 
 type ManifoldInstance = InstanceType<ManifoldToplevel['Manifold']>;
 type CrossSectionInstance = InstanceType<ManifoldToplevel['CrossSection']>;
@@ -83,12 +89,52 @@ export interface OracleGroove {
   cone: VCone;
 }
 
-/** One item's predicted region at one depth (the opened region of a glyph, a shape, or a groove). */
+/** One FEED segment of a thread program, reduced from the CAM plan's own moves. */
+export interface OracleThreadMove {
+  x0: number;
+  y0: number;
+  x1: number;
+  y1: number;
+  /** The move's LOWEST tip Z in the work frame, the same reduction `flatMovesOf` makes. */
+  z: number;
+}
+
+/**
+ * A MILLED THREAD's cut, as the shape it is (#445): the item's ISO geometry, the tool's cutting
+ * diameter, and the program's own feed segments. The oracle sweeps the SAME column/cone profile
+ * the simulator sweeps (`threadCutter`/`surfaceAboveTip`) over these segments on the column grid,
+ * so the prediction and the simulation are two readings of one model rather than an annulus
+ * guessed against an envelope.
+ *
+ * The segments are the CAM's FEED moves only. A rapid is at `HOP_Z`/above the top face and lowers
+ * no column; the entry ramp and the plunge are feeds and are included.
+ *
+ * Data only — this crosses a `postMessage` boundary to the sim worker, so a plan's `CamMove`s are
+ * reduced here to the five numbers the prediction needs, never the IR.
+ */
+export interface OracleThread {
+  /** The hole's axis, work XY. */
+  x: number;
+  y: number;
+  majorMm: number;
+  minorMm: number;
+  pitchMm: number;
+  /** The threaded length below the top face. */
+  threadDepthMm: number;
+  /** `threadDepth + run-out`: how far below the top the tooth tip goes. */
+  tipDepthMm: number;
+  /** The cutter's cutting diameter. */
+  cuttingDiameterMm: number;
+  /** The CAM's feed moves, as segments, in program order. */
+  moves: readonly OracleThreadMove[];
+}
+
+/** One item's predicted region at one depth (the opened region of a glyph, a shape, a groove or a thread). */
 export interface OraclePredicted {
   /**
    * Floor of this item's cut, depth below the stock top face, mm (positive). For a groove this is
    * the TRACE'S TIP depth: the level its own floor is at, and the one its region has shrunk to the
-   * tip radius by.
+   * tip radius by. For a thread it is the TIP depth: the deepest level the tooth reaches.
    */
   depth: number;
   /** Outer contours CCW and holes CW, as `measureLabels` / `toPartPlan` produce them. */
@@ -99,6 +145,12 @@ export interface OraclePredicted {
    * region — the mouth at every level — is the standing "do not" of #221.
    */
   groove?: OracleGroove;
+  /**
+   * Set instead of `polygons` when the item is a MILLED THREAD (#445). Its region is the column
+   * grid swept with the same neck-plus-tooth profile the simulator uses, evaluated at the grid's
+   * own cell centres; it is derived per level from the moves and the tip depth above.
+   */
+  thread?: OracleThread;
 }
 
 /** The comparison at one distinct floor Z. */
@@ -297,6 +349,101 @@ function shallowGrooveLevel(predicted: readonly OraclePredicted[]): number[] {
 }
 
 /**
+ * The predicted HEIGHT FIELD a milled thread leaves, sampled at the column grid's own cell centres
+ * and returned as a level slicer (#445).
+ *
+ * The simulator and this prediction must answer with the same model: the profile is `threadCutter`/
+ * `surfaceAboveTip` (including the engine's half-cell pad) and the moves are the CAM plan's own
+ * feed segments. Only the FIRST REVOLUTION of each pass can lower a column: the helix is periodic
+ * in angle and strictly increasing in Z, so a later turn at the same angle sits above the first
+ * one and its footprint at every level is a subset of the first turn's. The entry ramp and the
+ * plunge sit at or below that top and are kept.
+ *
+ * The window is the move extent grown by the cutter's reach. Cells outside the cut keep the top
+ * face, so a level slices them as untouched, exactly as the simulated grid does.
+ */
+function threadPredictedSlice(tl: ManifoldToplevel, grid: ColumnGrid, thread: OracleThread): OracleSliceAt | null {
+  const pad = columnBandTerm(grid);
+  const cutter = threadCutter(thread.cuttingDiameterMm, thread.majorMm, thread.minorMm, pad);
+  const reach = cutterReach(cutter, 0);
+  // One pitch up from the tip: the top of the first revolution. Later turns are dominated.
+  const firstTurnTop = -thread.tipDepthMm + thread.pitchMm + 1e-6;
+  const moves = thread.moves.filter((m) => m.z < grid.initial - 1e-9 && m.z <= firstTurnTop);
+  if (moves.length === 0) return null;
+
+  let xMin = Infinity;
+  let xMax = -Infinity;
+  let yMin = Infinity;
+  let yMax = -Infinity;
+  for (const m of moves) {
+    if (m.x0 < xMin) xMin = m.x0;
+    if (m.x1 < xMin) xMin = m.x1;
+    if (m.x0 > xMax) xMax = m.x0;
+    if (m.x1 > xMax) xMax = m.x1;
+    if (m.y0 < yMin) yMin = m.y0;
+    if (m.y1 < yMin) yMin = m.y1;
+    if (m.y0 > yMax) yMax = m.y0;
+    if (m.y1 > yMax) yMax = m.y1;
+  }
+  const i0 = Math.max(0, Math.ceil((xMin - reach - grid.u0) / grid.du));
+  const i1 = Math.min(grid.nu - 1, Math.floor((xMax + reach - grid.u0) / grid.du));
+  const j0 = Math.max(0, Math.ceil((yMin - reach - grid.v0) / grid.dv));
+  const j1 = Math.min(grid.nv - 1, Math.floor((yMax + reach - grid.v0) / grid.dv));
+  if (i1 < i0 || j1 < j0) return null;
+
+  const nu = i1 - i0 + 1;
+  const nv = j1 - j0 + 1;
+  const h = new Float32Array(nu * nv);
+  h.fill(grid.initial);
+  for (let j = 0; j < nv; j++) {
+    const y = grid.v0 + (j0 + j) * grid.dv;
+    for (let i = 0; i < nu; i++) {
+      const x = grid.u0 + (i0 + i) * grid.du;
+      let floorHere = grid.initial;
+      for (const m of moves) {
+        const rho = distToSegment(x, y, m.x0, m.y0, m.x1, m.y1);
+        if (rho > reach) continue;
+        const f = m.z + surfaceAboveTip(cutter, rho);
+        const floor = f < grid.base ? grid.base : f;
+        if (floor < floorHere) floorHere = floor;
+      }
+      h[j * nu + i] = floorHere;
+    }
+  }
+  const window: ColumnGrid = {
+    kind: 'flat',
+    nu,
+    nv,
+    u0: grid.u0 + i0 * grid.du,
+    du: grid.du,
+    v0: grid.v0 + j0 * grid.dv,
+    dv: grid.dv,
+    initial: grid.initial,
+    base: grid.base,
+    h,
+  };
+  return gridSliceAt(tl, window);
+}
+
+/**
+ * The levels a THREAD prediction is judged at, beside its own tip depth (#445).
+ *
+ * The tip depth is where the tooth's first move sits, and at that level the predicted region has
+ * shrunk to a sliver at the helix's start — the narrowest question the item can be asked. The
+ * threaded depth is the bottom of the functional thread, and the shallow level (the groove rule,
+ * `ORACLE_SHALLOW_DEPTH_FRACTION`) checks the flank and pitch across the annulus rather than only
+ * the floor. Deduplicated by `computeOracle`'s Set.
+ */
+function threadLevels(predicted: readonly OraclePredicted[]): number[] {
+  const out: number[] = [];
+  for (const p of predicted) {
+    if (p.thread === undefined || !(p.thread.threadDepthMm > 0)) continue;
+    out.push(p.thread.threadDepthMm, p.thread.threadDepthMm * ORACLE_SHALLOW_DEPTH_FRACTION);
+  }
+  return out;
+}
+
+/**
  * Compare the simulated side against `predicted`, level by level. Every CrossSection is deleted
  * exactly once, on both the success and the throw path.
  */
@@ -305,22 +452,38 @@ export function computeOracle(
   sliceAt: OracleSliceAt,
   predicted: readonly OraclePredicted[],
   band: number,
+  threadGrid?: ColumnGrid | null,
 ): OracleReport {
   const CS = tl.CrossSection;
   // The offsets are by `band` itself, so the arc being flattened has radius ≈ band.
   const roundSegments = segmentsForRadius(band);
 
-  // One level per distinct depth that actually carries geometry — a polygon set, or a groove,
-  // whose vertices are worked out below. Ascending so the report reads shallow-first.
+  // #445 — a THREAD prediction is a grid-shaped height field, and the only grid it can be compared
+  // on is the column grid the run was swept with. It is built once per thread, outside the level
+  // loop; each level asks it only for the cells at or below that level. A caller with a thread
+  // entry and no grid would be comparing against nothing, which is a bug rather than a verdict.
+  const threadSlices: (OracleSliceAt | null)[] = predicted.map((p) => {
+    if (p.thread === undefined) return null;
+    if (threadGrid === undefined || threadGrid === null || threadGrid.kind !== 'flat') {
+      throw new Error('oracle: a thread prediction needs the FLAT column grid it will be compared on');
+    }
+    return threadPredictedSlice(tl, threadGrid, p.thread);
+  });
+
+  // One level per distinct depth that actually carries geometry — a polygon set, a groove, or a
+  // thread, whose vertices are worked out below. Ascending so the report reads shallow-first.
   const depths = [
     ...new Set([
       ...predicted
-        .filter((p) => p.depth > 0 && (p.polygons.length > 0 || p.groove !== undefined))
+        .filter((p) => p.depth > 0 && (p.polygons.length > 0 || p.groove !== undefined || p.thread !== undefined))
         .map((p) => p.depth),
       // #408 — a groove is judged at its MOUTH as well as at its floor, and only a groove needs it:
       // a flat cutter's region is the same set at every level above its floor, so an extra level
       // there would re-ask the same question (and it is not a level the plan cuts to).
       ...shallowGrooveLevel(predicted),
+      // #445 — a thread's annulus changes at every level (the flank and the run-out), so its
+      // threaded depth and a shallow slice are asked too.
+      ...threadLevels(predicted),
     ]),
   ].sort((a, b) => a - b);
 
@@ -336,13 +499,16 @@ export function computeOracle(
     // (not one `ofPolygons` of concatenated contours) so a hole inside one item is preserved when
     // another item overlaps it.
     const parts: CrossSectionInstance[] = [];
-    for (const p of predicted) {
+    for (let pi = 0; pi < predicted.length; pi++) {
+      const p = predicted[pi] as OraclePredicted;
       if (!(p.depth + 1e-9 >= depth)) continue;
       const cs = p.groove
         ? grooveRegionAt(tl, p.groove, p.depth, depth)
-        : p.polygons.length > 0
-          ? CS.ofPolygons(p.polygons)
-          : null;
+        : p.thread !== undefined
+          ? (threadSlices[pi]?.(z + ORACLE_SLICE_LIFT_MM) ?? null)
+          : p.polygons.length > 0
+            ? CS.ofPolygons(p.polygons)
+            : null;
       if (cs) parts.push(cs);
     }
     if (parts.length === 0) continue;
