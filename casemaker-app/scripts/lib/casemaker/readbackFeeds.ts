@@ -57,12 +57,12 @@ function parseArgs(argv: string[]): Args {
 }
 
 function fail(message: string): never {
-  console.error(`feeds-readback: ${message}`);
+  console.error(`casemaker readback feeds: ${message}`);
   throw new CliExit(1);
 }
 
 const USAGE =
-  'usage: scripts/feeds-readback.ts <record.json> [--feeds <feeds.ts>] [--dry-run]';
+  'usage: casemaker readback feeds <record.json> [--feeds <feeds.ts>] [--dry-run]';
 
 // ---------------------------------------------------------------------------------------------
 // The marked region in feeds.ts

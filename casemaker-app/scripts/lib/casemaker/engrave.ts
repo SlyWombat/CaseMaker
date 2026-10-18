@@ -207,14 +207,14 @@ function parseArgs(argv: string[]): Args {
 }
 
 function fail(message: string): never {
-  console.error(`engrave-job: ${message}`);
+  console.error(`casemaker engrave: ${message}`);
   throw new CliExit(1);
 }
 
 const USAGE =
-  'usage: scripts/engrave-job.ts <job.json> [--out <dir>]\n' +
-  '       scripts/engrave-job.ts --coupon <coupon-spec.json> [--out <dir>]\n' +
-  '       scripts/engrave-job.ts --from-3mf <design.3mf> [--turn ccw|cw] [--tool <key>]\n' +
+  'usage: casemaker engrave <job.json> [--out <dir>]\n' +
+  '       casemaker engrave --coupon <coupon-spec.json> [--out <dir>]\n' +
+  '       casemaker engrave --from-3mf <design.3mf> [--turn ccw|cw] [--tool <key>]\n' +
   '              [--rest <key|none>] [--overlap <mm>] [--third-tool <pct>] [--out <dir>]\n' +
   '       [--location <location.json|house.json>]  (any input; default: the app’s own location)';
 
@@ -870,7 +870,7 @@ async function engraveJobBody(argv: string[], options: CommandOptions): Promise<
     mkdirSync(outDir, { recursive: true });
     const result = runJob(parsed.job, outDir, {
       writeJobDocument: false,
-      note: `*Generated from \`${basename(path)}\` by \`scripts/engrave-job.ts\`; the app’s \`RunSheetView\` renders the same \`buildRunSheet\` structure. No result is recorded here.*`,
+      note: `*Generated from \`${basename(path)}\` by \`casemaker engrave\`; the app’s \`RunSheetView\` renders the same \`buildRunSheet\` structure. No result is recorded here.*`,
     });
     if (result.ok) {
       programs.push(result.program);

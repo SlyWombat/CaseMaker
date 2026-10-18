@@ -54,11 +54,11 @@ function parseArgs(argv: string[]): Args {
 }
 
 function fail(message: string): never {
-  console.error(`run-readback: ${message}`);
+  console.error(`casemaker readback run: ${message}`);
   throw new CliExit(1);
 }
 
-const USAGE = 'usage: scripts/run-readback.ts <record.json> [--history <runHistory.ts>] [--dry-run]';
+const USAGE = 'usage: casemaker readback run <record.json> [--history <runHistory.ts>] [--dry-run]';
 
 /**
  * Apply a filled run record to the machine-written region of `runHistory.ts` (#277).

@@ -36,22 +36,24 @@ function run(script: string, args: string[] = []): Run {
 }
 
 describe('#477 the old script paths remain entry points', () => {
-  it('scripts/engrave-job.ts still prints its own usage and exits 1', () => {
+  // The legacy paths share the body's `fail()` and USAGE, so since #484 they report the command
+  // they now route to — the spec still proves the old path runs.
+  it('scripts/engrave-job.ts still runs and prints the command usage, exiting 1', () => {
     const r = run('scripts/engrave-job.ts');
     expect(r.status).toBe(1);
-    expect(r.stderr).toContain('engrave-job: usage: scripts/engrave-job.ts');
+    expect(r.stderr).toContain('casemaker engrave: usage: casemaker engrave');
   }, 120_000);
 
-  it('scripts/feeds-readback.ts still prints its own usage and exits 1', () => {
+  it('scripts/feeds-readback.ts still runs and prints the command usage, exiting 1', () => {
     const r = run('scripts/feeds-readback.ts');
     expect(r.status).toBe(1);
-    expect(r.stderr).toContain('feeds-readback: usage: scripts/feeds-readback.ts');
+    expect(r.stderr).toContain('casemaker readback feeds: usage: casemaker readback feeds');
   }, 120_000);
 
-  it('scripts/run-readback.ts still prints its own usage and exits 1', () => {
+  it('scripts/run-readback.ts still runs and prints the command usage, exiting 1', () => {
     const r = run('scripts/run-readback.ts');
     expect(r.status).toBe(1);
-    expect(r.stderr).toContain('run-readback: usage: scripts/run-readback.ts');
+    expect(r.stderr).toContain('casemaker readback run: usage: casemaker readback run');
   }, 120_000);
 });
 
