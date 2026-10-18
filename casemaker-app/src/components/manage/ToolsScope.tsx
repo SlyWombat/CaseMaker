@@ -64,24 +64,43 @@ const CHIPS: Array<{ id: TierFilter; label: string }> = [
   { id: 'builtin', label: 'built-in' },
 ];
 
-/** A definition's own sentence about where it came from — what the row's second line shows. */
-function provenanceLine(entry: ToolLibraryEntry, item: InventoryItem | null): ReactNode {
-  if (item === null) return entry.provenance;
-  const codes = item.codes.map((c) => (
-    <span className="code" key={`${c.symbology}:${c.value}`}>
-      <i>{c.symbology.toUpperCase()}</i>
-      {c.value}
-    </span>
-  ));
-  const notes = item.notes ?? null;
-  if (notes === null && codes.length === 0) return 'registered here — no notes and no code';
-  return (
-    <>
-      {notes}
-      {notes !== null && codes.length > 0 ? ' · ' : null}
-      {codes}
-    </>
-  );
+/**
+ * The one structured fact an owned row shows under its name: the code(s) on the box (#500).
+ *
+ * THE ROW IS THE OPERATOR'S, NOT THE IMPORT'S. It used to print `InventoryItem.notes` wholesale:
+ * `Case: yellow. Makera C1-BIT-… Label CN: … Metal line (-M-). Two physical variants (#381) …
+ * Back in its box (swapped out of the spindle 2026-10-12)`. That sentence is `build-house.ts`'s
+ * bookkeeping plus the operator's own aside; an issue number and a raw import line are not row
+ * text, and the whereabouts sentence is the possession's detail, which the rail already shows and
+ * edits (`ToolDetail`'s inventory editor). The row keeps what the operator reads across the
+ * columns — name, case colour (the Case column), code, shape, tip, shank — and the code is the only
+ * one of those that has no column of its own.
+ *
+ * A non-owned row has no second line: `entry.provenance` is where the definition came from, not a
+ * field of the cutter, and the group heading plus the rail already say it. The From column's tier
+ * tag still answers "whose row is this" at a glance.
+ *
+ * The cell ellipsizes a long line (#500); {@link RowDetail.title} carries the whole sentence to the
+ * hover, the same way #489's drawing keeps its full dimension words in the title rather than
+ * squeezing them into the row.
+ */
+interface RowDetail {
+  content: ReactNode;
+  /** The full line, verbatim, for the hover title when the cell has to ellipsize it. */
+  title: string;
+}
+
+function codeLine(item: InventoryItem): RowDetail | null {
+  if (item.codes.length === 0) return null;
+  return {
+    content: item.codes.map((c) => (
+      <span className="code" key={`${c.symbology}:${c.value}`}>
+        <i>{c.symbology.toUpperCase()}</i>
+        {c.value}
+      </span>
+    )),
+    title: item.codes.map((c) => `${c.symbology.toUpperCase()} ${c.value}`).join(' · '),
+  };
 }
 
 export function ToolsScope() {
@@ -581,6 +600,7 @@ function Rows({
       </tr>
       {entries.map((entry) => {
         const possession = item.get(entry.key) ?? null;
+        const detail = possession === null ? null : codeLine(possession);
         const t = entry.tool;
         const tip = cuttingDiameter(t);
         const dim = (v: number | null) => (v === null ? 'num dim' : 'num');
@@ -603,8 +623,10 @@ function Rows({
                 aria-current={selectedKey === entry.key ? 'true' : undefined}
                 onClick={() => onSelect(entry.key)}
               >
-                {t.name}
-                <small>{provenanceLine(entry, possession)}</small>
+                <span className="tbl__name" title={t.name}>
+                  {t.name}
+                </span>
+                {detail !== null && <small title={detail.title}>{detail.content}</small>}
               </button>
             </td>
             {/* A silhouette, not the dimensioned drawing: 129 catalogue rows must stay scannable. */}
