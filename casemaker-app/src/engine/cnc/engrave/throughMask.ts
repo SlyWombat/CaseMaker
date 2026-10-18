@@ -5,7 +5,8 @@
  * it from the paths and regions generation produced — not from the document, so the check and
  * the toolpath cannot drift apart:
  *
- *   - inside a THROUGH REGION's opened polygons → `thickness + breakthrough`;
+ *   - inside a THROUGH REGION's opened polygons → `thickness + breakthrough` (plus the region's
+ *     `extraDepth`, which a drill's point needs below the full diameter);
  *   - inside a THROUGH DRILL's cutter disc       → `thickness + breakthrough`;
  *   - inside a cut-out KERF (within the cutter radius of the centre path):
  *       across a TAB SPAN                        → `thickness − tabs.height` (the tab's top);
@@ -30,12 +31,22 @@ export interface MaskCutout {
   tabHeight: number;
 }
 
+/**
+ * One through region's opened polygons. `extraDepth` is how much deeper than the board allowance
+ * the cut legitimately reaches: a through DRILL's point adds its own length below the full
+ * diameter, and the file's deepest move is the tip. Absent (0) for every other through region.
+ */
+export interface MaskRegion {
+  polygons: Polygons;
+  extraDepth?: number;
+}
+
 export interface MaskGeometry {
   /** The part's thickness, mm — the tab top is measured down from this. */
   thickness: number;
   breakthrough: number;
-  /** Opened polygons of every through REGION (shape pocket). */
-  regions?: Polygons[];
+  /** Opened polygons of every through REGION (shape pocket, drill disc). */
+  regions?: MaskRegion[];
   /** Every through DRILL: hole centres and the cutter radius. */
   drills?: { holes: readonly [number, number][]; radius: number }[];
   cutouts?: MaskCutout[];
@@ -68,10 +79,22 @@ function closestOnSegment(
   return { distance: Math.hypot(x - (a[0] + t * dx), y - (a[1] + t * dy)), t };
 }
 
-/** Is arc `s` strictly inside one of the (non-wrapping) span intervals? */
+/**
+ * The post writes coordinates to 0.001 mm (`post/z1.ts` rounds each axis). A tab span's end is
+ * where the cutter plunges back to the through depth, and that same point in the IR can round to
+ * a thousandth on either side of the interval. Comparing the arc with this resolution keeps the
+ * file's own rounded plunge from being refused as a cut through the tab: a point within one post
+ * step of a span's end is treated as the through side. That is at most 0.001 mm of extra material
+ * at the tab's root — far below the machine's own positioning.
+ */
+const SPAN_END_TOLERANCE_MM = 0.001;
+
+/** Is arc `s` inside one of the (non-wrapping) span intervals, clear of both ends? */
 function inTabSpan(spans: readonly ProfileSpan[], s: number): boolean {
   for (const span of spans) {
-    if (s > span.startArc + 1e-9 && s < span.endArc - 1e-9) return true;
+    if (s > span.startArc + SPAN_END_TOLERANCE_MM && s < span.endArc - SPAN_END_TOLERANCE_MM) {
+      return true;
+    }
   }
   return false;
 }
@@ -108,8 +131,10 @@ export function buildThroughMask(geometry: MaskGeometry): ThroughMask | null {
         }
       }
     }
-    for (const polygons of regions) {
-      if (pointInPolygons(polygons, x, y)) return throughLimit;
+    for (const region of regions) {
+      if (pointInPolygons(region.polygons, x, y)) {
+        return throughLimit + (region.extraDepth ?? 0);
+      }
     }
     for (const drill of drills) {
       for (const [hx, hy] of drill.holes) {

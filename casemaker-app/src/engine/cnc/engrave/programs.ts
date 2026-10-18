@@ -86,6 +86,9 @@ export function jobForSetup(job: EngraveJob, ref: JobProgramRef, tool?: Tool | n
     ...(job.threads !== undefined ? { threads: keep(job.threads) } : {}),
     // #435 — a primitive is cut only by the setup that owns it, like every other item.
     ...(job.primitives !== undefined ? { primitives: keep(job.primitives) } : {}),
+    // #218 — the cut-out list is cutting work too: a program that does not own the item must not
+    // cut its outline, and the program that owns it must.
+    ...(job.cutouts !== undefined ? { cutouts: keep(job.cutouts) } : {}),
   } as EngraveJob;
 }
 

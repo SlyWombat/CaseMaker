@@ -14,6 +14,7 @@ import { viseEnvelope } from '@/engine/cnc/fixture';
 import { validateSacrificial, viseJawShift } from '@/engine/cnc/sacrificial';
 import { stubSetup, type FixtureEnvelope, type Setup, type Workholding } from '@/engine/cnc/setup';
 import {
+  cutoutOperationName,
   drillHoles,
   drillOperationName,
   jawGapFor,
@@ -415,6 +416,9 @@ export function jobSetups(job: EngraveJob): JobSetup[] {
     // or sphere is still the document's, and `validateJob` names it, but it is not work any cutter
     // owns.
     ...(job.primitives ?? []).filter(primitiveReducesToRegion),
+    // #218 — a cut-out is cutting work like any other item: it belongs to the setup (and so to a
+    // cutter's program) or a job with only cut-outs has no program assigned to it at all.
+    ...(job.cutouts ?? []),
   ];
   const itemIds = items
     .filter((item) => item.enabled && item.construction !== true)
@@ -1254,6 +1258,9 @@ export function setupProgramFindings(job: EngraveJob): JobFinding[] {
     if (primitive.enabled && primitiveReducesToRegion(primitive)) {
       workById.set(primitive.id, primitiveOperationName(primitive));
     }
+  }
+  for (const cutout of job.cutouts ?? []) {
+    if (cutout.enabled) workById.set(cutout.id, cutoutOperationName(cutout, null));
   }
   jobSetups(job).forEach((setup, i) => {
     const tools = setupTools(setup, job);

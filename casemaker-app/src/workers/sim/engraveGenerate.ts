@@ -43,7 +43,14 @@ import { version as CAM_VERSION } from '../../../package.json';
 import type { MillProfile } from '@/engine/cnc/machine';
 import { jobMachine, type MachineCalibration } from '@/engine/cnc/calibration';
 import { feedsFor, type FeedsEntry, type FeedsResult, type FeedCatalogueRow } from '@/engine/cnc/feeds';
-import { cuttingDiameter, cuttingForTrace, traceRadiusAt, type Tool } from '@/engine/cnc/tool';
+import {
+  cuttingDiameter,
+  cuttingForTrace,
+  drillPointAngle,
+  pointLength,
+  traceRadiusAt,
+  type Tool,
+} from '@/engine/cnc/tool';
 import { threadMillIR, threadSettings, type ThreadMillPlan, type ThreadSettingsResult } from '@/engine/cnc/cam/threadMill';
 import { drillBitIR, drillSettings, type DrillBitPlan, type DrillSettings } from '@/engine/cnc/cam/drillBit';
 import type { ShopDefaults } from '@/platform/defaultsClient';
@@ -92,6 +99,7 @@ import { chooseFacingTool } from '@/engine/cnc/engrave/facingTool';
 import { facingRefusal } from '@/engine/cnc/stockStart';
 import { generateTrace } from '@/engine/cnc/cam/trace';
 import {
+  enclosedPath,
   generateProfile,
   kerfPolygons,
   placeTabs,
@@ -1077,7 +1085,10 @@ export function engraveRegions(
       const tabTop = c.thickness - c.tabs.height;
       const kept = spans.flatMap((one) => tabRectangles(one, radius));
       cutoutKerfs.push([...kerf, ...kept]);
-      if (placed === 0) cutoutReleased.push(path);
+      // The part a released cut-out frees is the area ENCLOSED by its centre path. `path` is CW
+      // for an inside profile, so it is put back to a fillable winding first: a CW outer reads as
+      // empty in the loose-piece cross-section and the part would be counted as the loose piece.
+      if (placed === 0) cutoutReleased.push(enclosedPath(path));
       cutoutCuts.push({
         id: c.id,
         name: c.name,
@@ -1196,10 +1207,36 @@ export function engraveRegions(
   // opened polygons (a through drill's discs are its region) and each cut-out's kerf with its
   // tab spans capped at the tab top. Null when the job has no through work, so `jobDepthLimit`
   // reads exactly as it did before this feature.
+  // A through DRILL's point reaches below its full diameter, and the file's deepest move is the
+  // tip: the mask allows exactly the tip depth `planDrillBit` computes (the same post-rounded
+  // value), or a drill program would be refused by its own verifier. A flat end mill's through
+  // hole has no point, so it adds nothing.
+  const drillFallback = shop.drill ?? drillSettings(shop.defaults ?? null);
+  const drillPoint =
+    tool !== null && tool.shape === 'drill'
+      ? drillPointAngle(tool, {
+          deg: drillFallback.settings.pointAngleDeg,
+          source: drillFallback.sources.pointAngleDeg,
+        })
+      : null;
+  const drillDiameter = tool === null ? null : tool.tipDiameter ?? tool.diameter;
+  const drillExtraDepth =
+    drillPoint !== null && drillPoint.ok && drillDiameter !== null
+      ? Math.max(
+          0,
+          Math.round((throughDepth + pointLength(drillDiameter, drillPoint.deg)) * 1000) / 1000 -
+            throughDepth,
+        )
+      : 0;
   const throughMask = buildThroughMask({
     thickness: plan.stock.thickness,
     breakthrough: job.breakthrough,
-    regions: regions.filter((r) => r.through === true).map((r) => r.polygons),
+    regions: regions
+      .filter((r) => r.through === true)
+      .map((r) => ({
+        polygons: r.polygons,
+        ...(r.drill === undefined ? {} : { extraDepth: drillExtraDepth }),
+      })),
     cutouts: cutoutMask,
   });
 
@@ -1273,26 +1310,32 @@ function loosePieceFindings(
     const areas = parts.map((part) => part.area());
     if (areas.filter((area) => area > 1e-6).length <= 1) return [];
 
-    // The largest part is the blank's remaining body; the cut-outs are small by comparison and a
-    // severed chunk is what this check is looking for. (If a cut leaves two similar halves, one
-    // of them is reported — the operator needs to know either way.)
-    let main = 0;
-    for (let i = 1; i < parts.length; i++) {
-      if (areas[i]! > areas[main]!) main = i;
-    }
+    // The deliberately released parts are classified OUT first. A component that IS one of those
+    // parts leaves (almost) nothing once they are subtracted; a millimetre-scale tolerance absorbs
+    // the kerf's float arithmetic. Doing this before choosing the main part matters: the piece the
+    // operator asked to cut out can be LARGER than the frame left around it, and the frame is the
+    // material the mount holds however small it is. The largest of what remains is that body.
     const freeCS =
       releasedParts.length === 0 ? null : own(CS.ofPolygons(releasedParts.flat()));
-    let pieces = 0;
-    let areaMm2 = 0;
+    const countable: number[] = [];
     for (let i = 0; i < parts.length; i++) {
-      if (i === main || areas[i]! <= 1e-6) continue;
+      if (areas[i]! <= 1e-6) continue;
       if (freeCS !== null) {
-        // What is left of this component once the deliberately released parts are taken out. A
-        // component that IS one of those parts leaves (almost) nothing; a millimetre-scale
-        // tolerance absorbs the kerf's float arithmetic.
         const rest = own(parts[i]!.subtract(freeCS));
         if (rest.area() <= Math.max(1e-3, areas[i]! * 1e-3)) continue;
       }
+      countable.push(i);
+    }
+    if (countable.length <= 1) return [];
+    // The largest remaining part is the blank's body; a severed chunk is what this check is
+    // looking for. (If a cut leaves two similar halves, one of them is reported — the operator
+    // needs to know either way.)
+    let main = countable[0]!;
+    for (const i of countable) if (areas[i]! > areas[main]!) main = i;
+    let pieces = 0;
+    let areaMm2 = 0;
+    for (const i of countable) {
+      if (i === main) continue;
       pieces++;
       areaMm2 += areas[i]!;
     }

@@ -19,6 +19,7 @@ import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { flatEndMill, pointLength } from '@/engine/cnc/tool';
 import { jobTool, setupProgramFindings, validateJob } from '@/engine/cnc/engrave/jobSetup';
 import { setupPrograms } from '@/engine/cnc/engrave/programs';
+import { presetPartOnBoard } from '@/engine/cnc/sacrificial';
 import { setInventoryEntries, resetRegistry } from '@/engine/cnc/toolRegistry';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import type { EngraveDrill, EngraveJob } from '@/types/engraveJob';
@@ -164,10 +165,47 @@ describe('the drill geometry in validateJob (#434)', () => {
     expect(validateJob(drillJob([hole(2)]), point).map((f) => f.code)).not.toContain('plunge-unproven');
   });
 
-  it('keeps drill-through-unavailable until #218', () => {
+  it('gates a through hole on the under-board and the flute (#218)', () => {
     const through = { ...(hole(2) as Extract<EngraveDrill, { kind: 'drill' }>), through: true };
-    const codes = validateJob(drillJob([through]), point).map((f) => f.code);
-    expect(codes).toContain('drill-through-unavailable');
+
+    // The shipped job has no under-board, so the cut would reach the vise.
+    const bare = validateJob(drillJob([through]), point).map((f) => f.code);
+    expect(bare).toContain('through-needs-board');
+
+    // A board satisfies the board gate; the through depth is 12.3 mm, so 10 mm of flute is short.
+    const short = { ...DRILL, fluteLength: 10 };
+    const reach = validateJob(
+      drillJob([through], { sacrificial: presetPartOnBoard(), tool: short }),
+      point,
+    ).map((f) => f.code);
+    expect(reach).not.toContain('through-needs-board');
+    expect(reach).toContain('through-tool-reach');
+  });
+
+  it('drills a through hole into the board and verifies clean (#218)', () => {
+    const long = flatEndMill(3, {
+      name: '3 mm drill',
+      typeText: 'Drill',
+      shape: 'drill',
+      tipDiameter: 3,
+      diameter: 3,
+      cornerRadius: null,
+      angle: null,
+      centreCutting: null,
+      fluteLength: 20,
+      shoulderLength: 20,
+    });
+    const through = { ...(hole(2) as Extract<EngraveDrill, { kind: 'drill' }>), through: true };
+    const job = drillJob([through], { sacrificial: presetPartOnBoard(), tool: long });
+
+    const g = generate(tl, job, null, [], undefined, SHOP);
+    expect(g.errors).toEqual([]);
+    expect(g.ok).toBe(true);
+    expect(g.stage).toBe('done');
+    expect(g.verify!.findings.filter((f) => f.severity === 'error')).toEqual([]);
+    // The FULL DIAMETER clears the underside by the breakthrough; the point goes deeper still.
+    const plan = g.drill!.plans[0]!;
+    expect(plan.tipDepth).toBeCloseTo(12 + 0.3 + plan.pointLength, 3);
   });
 
   it('refuses a legacy job that pairs the drill with engraving work', () => {

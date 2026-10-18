@@ -40,7 +40,7 @@ import { viseForNewJob } from '@/engine/cnc/fixture';
 import { defaultBadgeParams } from '@/types/badge';
 import type { ToolpathIR } from '@/engine/cnc/cam/ir';
 import { cuttingForTrace, cuttingRadiusForSweep, flatEndMill, isVTraceTool, traceRadiusAt, type Tool } from '@/engine/cnc/tool';
-import type { EngraveDrill, EngraveJob, EngraveKeepOut, EngraveLabel, EngraveLineItem, EngraveStrokeLabelItem, EngraveThreadItem, EngraveTraceItem, EngraveVectorShape } from '@/types/engraveJob';
+import type { EngraveCutout, EngraveDrill, EngraveJob, EngraveKeepOut, EngraveLabel, EngraveLineItem, EngraveStrokeLabelItem, EngraveThreadItem, EngraveTraceItem, EngraveVectorShape } from '@/types/engraveJob';
 
 describe('engraveGenerate with a saved machine frame (#297)', () => {
   const read = calibrationFromReplies(new Map(Object.entries(Z1_FRAME_REPLIES)), {
@@ -2164,5 +2164,159 @@ describe('the per-cutter assignment (#472)', () => {
       setupWith(job, [job.toolKey, TOOL_B.key], { [job.toolKey]: [], [TOOL_B.key]: ids }),
     );
     expect(findings.some((f) => f.code === 'setup-tool-no-items' && f.severity === 'error')).toBe(true);
+  });
+});
+
+/**
+ * Through-cuts and cut-outs (#218): a tabbed cut-out all the way to a verified program, the tab
+ * that cannot be placed, the cutter that cannot reach the board, and the through cut that leaves
+ * a piece of the blank loose. Real Manifold, real verifier.
+ */
+describe('through-cuts and cut-outs (#218)', () => {
+  /** A 3.175 mm flat with real reach: 20 mm of flute and shoulder clears a 12.3 mm through cut. */
+  const PROFILER = flatEndMill(3.175, {
+    name: '3.175 mm flat end',
+    fluteLength: 20,
+    shoulderLength: 20,
+  });
+
+  /** The default 100 × 60 × 12 blank with ONE cut-out and a 12 mm board under it. */
+  function cutoutJob(
+    cutoutOver: Partial<EngraveCutout> = {},
+    jobOver: Partial<EngraveJob> = {},
+  ): EngraveJob {
+    const base = defaultEngraveJob();
+    return {
+      ...base,
+      labels: [],
+      shapes: [],
+      toolKey: 'inv:flat-3.175x20',
+      tool: PROFILER,
+      sacrificial: presetPartOnBoard(),
+      breakthrough: 0.3,
+      cutouts: [
+        {
+          kind: 'cutout',
+          id: 'cut-1',
+          name: 'Badge',
+          enabled: true,
+          of: 'stock-inset',
+          side: 'inside',
+          inset: 5,
+          tabs: { count: 4, width: 4, height: 1 },
+          ...cutoutOver,
+        },
+      ],
+      ...jobOver,
+    };
+  }
+
+  /** A small rect pocket, for a cut-out to follow. */
+  const RECT = { kind: 'rect' as const, id: 'rect-1', enabled: true, position: { x: 50, y: 30 }, rotation: 0, cornerRadius: 0, depth: 1 };
+
+  it('cuts a tabbed cut-out through the blank and reports its facts on the program and the sheet', () => {
+    const job = cutoutJob();
+    const g = generate(tl, job);
+    expect(g.ok).toBe(true);
+    expect(g.stage).toBe('done');
+    expect(g.findings.filter((f) => f.severity === 'error')).toEqual([]);
+    expect(g.verify!.findings.filter((f) => f.severity === 'error')).toEqual([]);
+
+    // One operation, and it is the full-depth pass the shared IR vocabulary calls 'through'.
+    expect(g.cam!.operations).toBe(1);
+    expect(g.cam!.throughOperations).toBe(1);
+
+    // The facts the run sheet reads: the breakthrough, the board it lands in, and the tab spec
+    // the file was cut with (all four requested tabs placed).
+    expect(g.through).toEqual({
+      breakthroughMm: 0.3,
+      boardThicknessMm: 12,
+      cutouts: [
+        {
+          id: 'cut-1',
+          name: 'Cut out "Badge" inside stock inset 5mm',
+          tabs: { count: 4, widthMm: 4, heightMm: 1 },
+          spans: 4,
+          unplaceable: 0,
+        },
+      ],
+    });
+    // The same facts travel on the program entry — the sheet's per-program section reads them.
+    expect(g.programs).toHaveLength(1);
+    expect(g.programs[0]!.through).toEqual(g.through);
+
+    const sheet = buildRunSheet(job, g, null);
+    const cut = sheet.sections.find((s) => s.id === 'cut')!;
+    const text = cut.steps.map((s) => `${s.text} ${s.value ?? ''}`).join('\n');
+    expect(text).toContain('through into the board, 0.3 mm past the blank');
+    expect(text).toContain('the board is 12 mm thick');
+    // The tab removal is its OWN step and names the count and dimensions.
+    expect(text).toContain('Only after the program ends');
+    expect(text).toContain('4 tabs to cut by hand');
+    expect(text).toContain('Cut out "Badge" inside stock inset 5mm: 4 tabs, 4 mm wide and 1 mm high');
+  });
+
+  it('frees a tabless cut-out onto the board without calling the released part loose', () => {
+    const job = cutoutJob({ tabs: { count: 0, width: 4, height: 1 } });
+    const g = generate(tl, job);
+    expect(g.ok).toBe(true); // `released-onto-board` is a warning, not a refusal.
+    expect(g.findings.some((f) => f.code === 'released-onto-board' && f.severity === 'warning')).toBe(true);
+    // The operator ASKED for the part to be freed, so the loose-piece check excludes it.
+    expect(g.findings.some((f) => f.code === 'loose-piece')).toBe(false);
+    expect(g.through!.cutouts[0]!.spans).toBe(0);
+    // And the sheet has no tab-removal step to give.
+    const sheet = buildRunSheet(job, g, null);
+    const text = sheet.sections
+      .find((s) => s.id === 'cut')!
+      .steps.map((s) => `${s.text} ${s.value ?? ''}`)
+      .join('\n');
+    expect(text).toContain('through into the board');
+    expect(text).not.toContain('Only after the program ends');
+  });
+
+  it('refuses a tab with no straight edge long enough to hold it, before any program is posted', () => {
+    // A 3 × 3 rect's outside path has 6.175 mm edges; a 4 mm tab needs 7.175 mm of centre path.
+    const job = cutoutJob(
+      { of: 'rect-1', side: 'outside', inset: 0, tabs: { count: 4, width: 4, height: 1 } },
+      { shapes: [{ ...RECT, width: 3, height: 3 }] },
+    );
+    const g = generate(tl, job);
+    expect(g.ok).toBe(false);
+    expect(g.stage).toBe('findings');
+    expect(g.nc).toBeNull();
+    const f = g.findings.find((x) => x.code === 'tab-unplaceable');
+    expect(f).toBeDefined();
+    expect(f!.severity).toBe('error');
+    expect(f!.labelId).toBe('cut-1');
+    expect(f!.message).toContain('4 holding tabs');
+  });
+
+  it('refuses a through cut the cutter cannot reach above its shank', () => {
+    // 12 mm of blank plus the 0.3 mm breakthrough is 12.3 mm; this cutter states 5 mm of shoulder.
+    const short = flatEndMill(3.175, { name: 'short flat end', fluteLength: 20, shoulderLength: 5 });
+    const g = generate(tl, cutoutJob({}, { tool: short, toolKey: 'inv:short' }));
+    expect(g.ok).toBe(false);
+    expect(g.stage).toBe('findings');
+    const f = g.findings.find((x) => x.code === 'through-tool-reach');
+    expect(f).toBeDefined();
+    expect(f!.severity).toBe('error');
+    expect(f!.labelId).toBe('cut-1');
+    expect(f!.message).toContain('12.3');
+  });
+
+  it('refuses a through cut that leaves a piece of the blank disconnected', () => {
+    // A 100 × 4 through slot spanning the blank edge to edge severs the front strip.
+    const job = cutoutJob(
+      {},
+      { cutouts: [], shapes: [{ ...RECT, width: 100, height: 4, id: 'slit', through: true }] },
+    );
+    const g = generate(tl, job);
+    expect(g.ok).toBe(false);
+    expect(g.stage).toBe('findings');
+    expect(g.nc).toBeNull();
+    const f = g.findings.find((x) => x.code === 'loose-piece');
+    expect(f).toBeDefined();
+    expect(f!.severity).toBe('error');
+    expect(f!.message).toMatch(/disconnected from the material the mount holds/);
   });
 });

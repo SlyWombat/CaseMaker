@@ -1596,6 +1596,83 @@ describe('the surface spread (#475)', () => {
 // point and its provenance, the peck, the re-entry clearance, the feed and spindle (placeholders),
 // and each hole's full-diameter depth against its tip depth. The facts come from the generated
 // program, never a second resolution of the shop's defaults.
+describe('runSheet — the through cut and its tabs (#218)', () => {
+  const ENGR = 'inv:engraver-0.2';
+  const program = (nc: string, frameNc: string | null, toolKey: string, extra: object = {}) => ({
+    setupIndex: 1,
+    toolKey,
+    nc,
+    frameNc,
+    cam: { operations: 2, cuttingMoves: 40, estimatedSeconds: 30, passes: 1 },
+    ...extra,
+  });
+  const sectionText = (sheet: RunSheet, id: string): string =>
+    section(sheet, id).steps.map((step) => `${step.text} ${step.value ?? ''}`).join('\n');
+
+  const throughFacts = (): NonNullable<RunSheetGenerated['through']> => ({
+    breakthroughMm: 0.3,
+    boardThicknessMm: 12,
+    cutouts: [
+      { id: 'cut-1', name: 'Badge', tabs: { count: 4, widthMm: 4, heightMm: 1 }, spans: 4, unplaceable: 0 },
+      { id: 'cut-2', name: 'Insert', tabs: { count: 0, widthMm: 4, heightMm: 1 }, spans: 0, unplaceable: 0 },
+    ],
+  });
+
+  it('states the breakthrough and the board left under it, and gives tab removal its own step', () => {
+    const job = defaultEngraveJob();
+    const sheet = buildRunSheet(job, { ...stubGenerated(job), through: throughFacts() }, NO_SIM, NOW);
+    const cut = sectionText(sheet, 'cut');
+    expect(cut).toContain('cuts 2 pieces out of the blank and through into the board');
+    expect(cut).toContain('0.3 mm past the blank\'s underside');
+    expect(cut).toContain('the board is 12 mm thick');
+    expect(cut).toContain('kerf stops 11.7 mm short of its underside');
+    // The tab step is a step of its own, not a sentence inside the breakthrough one.
+    expect(cut).toContain('remove the cut-out parts');
+    expect(cut).toContain('Badge: 4 tabs, 4 mm wide and 1 mm high');
+    expect(cut).toContain('Only after the program ends');
+    expect(cut).toContain('4 tabs to cut by hand');
+    // The zero-tab cut-out contributes no tab detail.
+    expect(cut).not.toContain('Insert:');
+  });
+
+  it('omits the tab step when no cut-out has tabs, and says nothing without through facts', () => {
+    const job = defaultEngraveJob();
+    const noTabs: RunSheetGenerated['through'] = {
+      breakthroughMm: 0.3,
+      boardThicknessMm: null,
+      cutouts: [{ id: 'c', name: 'Part', tabs: { count: 0, widthMm: 4, heightMm: 1 }, spans: 0, unplaceable: 0 }],
+    };
+    const withNone = sectionText(buildRunSheet(job, { ...stubGenerated(job), through: noTabs }, NO_SIM, NOW), 'cut');
+    expect(withNone).toContain('cuts one piece out of the blank');
+    expect(withNone).not.toContain('cut the holding tab');
+    expect(withNone).not.toContain('board is');
+
+    const plain = sectionText(buildRunSheet(job, stubGenerated(job), NO_SIM, NOW), 'cut');
+    expect(plain).not.toContain('through into the board');
+  });
+
+  it('prints the facts in a later program’s own section too', () => {
+    const job = defaultEngraveJob();
+    const sheet = buildRunSheet(
+      job,
+      {
+        ...stubGenerated(job),
+        through: null,
+        programs: [
+          program(NC, `${NC}\n;frame\n`, ENGR),
+          program(`${NC}\n;2\n`, `${NC}\n;2\n;frame\n`, ENGR, { through: throughFacts() }),
+        ],
+      },
+      NO_SIM,
+      NOW,
+    );
+    const cut2 = sectionText(sheet, 'cut-2');
+    expect(cut2).toContain('through into the board');
+    expect(cut2).toContain('4 tabs to cut by hand');
+    expect(sectionText(sheet, 'cut')).not.toContain('through into the board');
+  });
+});
+
 describe('runSheet — the drill program (#434)', () => {
   const DRILL = flatEndMill(3, {
     name: '3 mm drill',

@@ -277,6 +277,28 @@ describe('flat parameterisation (#222)', () => {
     expect(grid.h[j * grid.nu + i]).toBe(-5); // base, not −99
   });
 
+  it('a grid floor lets a through cut reach the breakthrough into the board', () => {
+    const built = FLAT.buildGrid(prism(40, 40, 5), CUT, [move({ z: -99 })], { dx: 0.1, dThetaDeg: 0.1 });
+    // `columnSweep` sets this from `breakthroughMm`; here it is set directly.
+    const grid = { ...built, floor: built.base - 0.3 };
+    FLAT.applyMove(grid, move({ u0: 20, u1: 20, v0: 20, v1: 20, z: -99 }), CUT);
+    const i = Math.round((20 - grid.u0) / grid.du);
+    const j = Math.round((20 - grid.v0) / grid.dv);
+    expect(grid.h[j * grid.nu + i]).toBeCloseTo(-5.3, 6); // base − breakthrough, not −99
+  });
+
+  it('splits volume at the blank bottom: part loss and sacrificial loss', () => {
+    const built = FLAT.buildGrid(prism(40, 40, 5), CUT, [move({ z: -99 })], { dx: 0.05, dThetaDeg: 0.05 });
+    const grid = { ...built, floor: built.base - 0.3 };
+    FLAT.applyMove(grid, move({ u0: 20, u1: 20, v0: 20, v1: 20, z: -99 }), CUT);
+    const vol = FLAT.volume(grid);
+    const disc = Math.PI * RT * RT;
+    expect(vol.removed).toBeGreaterThan(disc * 5 * 0.95);
+    expect(vol.removed).toBeLessThan(disc * 5 * 1.05);
+    expect(vol.sacrificialRemoved ?? 0).toBeGreaterThan(disc * 0.3 * 0.9);
+    expect(vol.sacrificialRemoved ?? 0).toBeLessThan(disc * 0.3 * 1.1);
+  });
+
   it('meshes the uncut blank as a closed box spanning the stock extent', () => {
     const grid = FLAT.buildGrid(prism(40, 40, 5), CUT, [], { dx: 0.1, dThetaDeg: 0.1 });
     const m = meshFlat(grid, { dx: 1, dThetaDeg: 1 });
@@ -304,6 +326,29 @@ describe('flat parameterisation (#222)', () => {
     expect(out.count).toBe(1);
     expect(out.meshAt(-1).triangleCount).toBeGreaterThan(0);
     expect(out.meshAt(0).triangleCount).toBeGreaterThan(0);
+  });
+
+  it('takes breakthroughMm and reports the below-blank removal separately (#218)', () => {
+    // The program cuts 0.3 mm past the 5 mm blank's underside.
+    const tl = fakeTimeline([move({ u0: 20, u1: 20, v0: 20, v1: 20, z: -5.3 })], false, 20);
+    const through = columnSweep(tl, flatEndMill(3.175), prism(40, 40, 5), {
+      resolution: { dx: 0.2, dThetaDeg: 0.2 },
+      breakthroughMm: 0.3,
+    });
+    expect(through.ok).toBe(true);
+    if (!through.ok) return;
+    expect(through.stats.removedFromSacrificial).toBeGreaterThan(0);
+    // The display mesh follows the kerf through the underside instead of stopping at base.
+    expect(through.meshAt(0).bbox.min[2]).toBeLessThan(-5);
+
+    // The same program without the option is clamped at the base and removes nothing from a board.
+    const clamped = columnSweep(tl, flatEndMill(3.175), prism(40, 40, 5), {
+      resolution: { dx: 0.2, dThetaDeg: 0.2 },
+    });
+    expect(clamped.ok).toBe(true);
+    if (!clamped.ok) return;
+    expect(clamped.stats.removedFromSacrificial).toBe(0);
+    expect(clamped.meshAt(0).bbox.min[2]).toBeCloseTo(-5, 6);
   });
 });
 

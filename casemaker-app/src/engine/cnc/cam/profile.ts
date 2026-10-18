@@ -114,6 +114,16 @@ export function profilePath(
 }
 
 /**
+ * The REGION enclosed by a profile centre path, wound the way a polygon SET is read for filling:
+ * outer contours CCW. `profilePath` reverses an INSIDE path to CW (the milling convention above),
+ * so the raw path cannot be handed to `CrossSection.ofPolygons` as a solid — a CW outer reads as
+ * nothing there. The loose-piece analysis (#218) asks exactly this question of a released part.
+ */
+export function enclosedPath(path: Polygons): Polygons {
+  return path.map((contour) => (signedArea(contour) >= 0 ? contour : reverseWinding(contour)));
+}
+
+/**
  * The KERF a profile cut removes: everything within `toolRadius` of the centre path. That is the
  * path offset OUT by the radius minus the path offset IN by it, as one even-odd polygon set
  * (outers CCW, the inner contours reversed). The oracle needs it at a cut-out's tab-keeper depth
@@ -125,7 +135,7 @@ export function profilePath(
  * is the filled outer contour — the tool does remove the whole disc.
  */
 export function kerfPolygons(path: Polygons, toolRadius: number, offset: OffsetFn): Polygons {
-  const ccw = path.map((contour) => (signedArea(contour) >= 0 ? contour : reverseWinding(contour)));
+  const ccw = enclosedPath(path);
   const outer = offset(ccw, toolRadius).filter((contour) => contour.length >= 3);
   const inner = offset(ccw, -toolRadius).filter((contour) => contour.length >= 3);
   return [...outer, ...inner.map(reverseWinding)];
@@ -277,11 +287,16 @@ export function placeTabs(
   };
 }
 
-/** Do two circular arc ranges overlap (edges exclusive)? */
+/**
+ * Do two circular arc ranges overlap? The ranges are CLOSED: two spans that touch, or that lie
+ * exactly on top of one another, are one tab's worth of material, not two, so both count as an
+ * overlap (the caller reports the second as unplaceable). The old exclusive test let an
+ * identical placement through, cutting the same tab twice and reporting two tabs.
+ */
 function rangesOverlap(a0: number, a1: number, b0: number, b1: number): boolean {
   const inside = (s: number, lo: number, hi: number): boolean => {
     if (hi < lo) return s >= lo || s <= hi;
-    return s > lo && s < hi;
+    return s >= lo && s <= hi;
   };
   return inside(a0, b0, b1) || inside(a1, b0, b1) || inside(b0, a0, a1) || inside(b1, a0, a1);
 }
@@ -366,7 +381,13 @@ function contourMoves(
     // module header for why a ramp is not permitted. A span is placed on ONE straight edge, so
     // there is no intermediate vertex to visit.
     const span = interval.after;
-    moves.push({ kind: 'rapid', x: span.start[0], y: span.start[1], z: tabTopZ });
+    // The retract is VERTICAL: reuse the last cut point's own XY rather than recomputing the
+    // span's start. The two are the same point geometrically, but their floats need not be the
+    // same bits — and the post rounds each coordinate to 0.001 mm, so two readings of one point
+    // can post as X26.412 and X26.413. That half-thousandth became a diagonal rapid at depth,
+    // which the verifier rightly refuses (`rapid-too-low`).
+    const at = moves[moves.length - 1]!;
+    moves.push({ kind: 'rapid', x: at.x, y: at.y, z: tabTopZ });
     moves.push({ kind: 'feed', x: span.end[0], y: span.end[1], z: tabTopZ, f: params.feed });
     moves.push({ kind: 'feed', x: span.end[0], y: span.end[1], z, f: params.plungeFeed });
   }

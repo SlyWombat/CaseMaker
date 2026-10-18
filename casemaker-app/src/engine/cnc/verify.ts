@@ -127,8 +127,9 @@ export interface SacrificialLimitOptions {
   breakthrough: number;
   /**
    * The spatial through-cut mask (#218), or absent on a job with no through work. Over the part
-   * it raises the limit from `thickness − minFloor` to the mask's answer (capped at
-   * `thickness + breakthrough`) when a board is present; a tab span's answer is
+   * it raises the limit from `thickness − minFloor` to the mask's answer when a board is present
+   * (the mask is built from the CAM and keeps itself to `thickness + breakthrough`, plus a drill
+   * point where one is cut); a tab span's answer is
    * `thickness − tabs.height`, which is deliberately allowed to be LOWER than the ordinary
    * floor, so the verifier refuses a path that cuts through a holding tab.
    */
@@ -148,7 +149,8 @@ function insideBox(b: SacrificialBox, x: number, y: number): boolean {
  *
  * The table (#213 §3), all work-frame mm below the part's top face (Z = 0), `T` = part thickness:
  *
- *   over the part         `T − minFloor`, or `T + breakthrough` for a through-cut with a board;
+ *   over the part         `T − minFloor`, or `T + breakthrough` for a through-cut with a board
+ *                         (a through drill's point a point length below that, #218);
  *   over a side strip     `T` — the strip's full height down to the part's underside, so cutting
  *                         the strip away is allowed — plus `breakthrough` where a board lies under
  *                         the point;
@@ -172,11 +174,12 @@ export function sacrificialDepthLimit(stock: StockDims, s: Sacrificial, opts: Sa
 
   return (x, y) => {
     // The through mask is consulted FIRST: over the part it may raise the limit to the board, and
-    // over a tab span it deliberately lowers it to the tab's top. It never raises a limit past
-    // `T + breakthrough`, and it does nothing without a board — no board means no through cut.
+    // over a tab span it deliberately lowers it to the tab's top. Its answer is the CAM's own
+    // number, already bounded by `T + breakthrough` — except for a through DRILL, whose point
+    // legitimately reaches a point length below the board allowance (#218). It does nothing
+    // without a board; no board means no through cut.
     const local = mask?.(x, y) ?? null;
-    const throughLimit =
-      local !== null && under !== null ? Math.min(T + breakthrough, local) : partLimit;
+    const throughLimit = local !== null && under !== null ? local : partLimit;
     if (x >= 0 && x <= L && y >= 0 && y <= W) return throughLimit;
     for (const b of sides) {
       if (insideBox(b, x, y)) {

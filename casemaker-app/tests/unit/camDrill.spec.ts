@@ -260,9 +260,10 @@ describe('drill findings (#220)', () => {
   /** The codes `validateJob` raises for a drill job. */
   const codes = (job: EngraveJob) => validateJob(job).map((f) => f.code);
 
-  it('refuses a through hole until #213 and #218 land', () => {
+  it('refuses a through hole that has no under-board to break into (#218)', () => {
     const job = drillJob([{ ...(singleHole().drills![0]!), through: true }]);
-    expect(codes(job)).toContain('drill-through-unavailable');
+    expect(codes(job)).toContain('through-needs-board');
+    expect(codes(job)).not.toContain('drill-through-unavailable');
   });
 
   it('flags a hole whose rim runs off the blank', () => {
