@@ -262,8 +262,9 @@ describe('engraveOracle (#206 §3)', () => {
     const session = load(job, g.nc!, MILL, { threads: g.threads!.flatMap((t) => t.simThreads) });
     try {
       const report = session.oracle(g.predicted);
-      // The tip depth (thread depth + run-out), the threaded depth and the shallow flank level.
-      expect(report.levels.map((l) => l.z)).toEqual([-0.5, -5, -5.8]);
+      // The tip depth (thread depth + run-out), the threaded depth, the shallow flank level and
+      // half a pitch above the tip — the level a wrong pitch moves first.
+      expect(report.levels.map((l) => Number(l.z.toFixed(6)))).toEqual([-0.5, -5, -5.4, -5.8]);
       for (const level of report.levels) {
         expect(level.predictedArea).toBeGreaterThan(0);
         expect(level.simulatedArea).toBeGreaterThan(0);
@@ -283,6 +284,25 @@ describe('engraveOracle (#206 §3)', () => {
       } finally {
         cylindrical.dispose();
       }
+      // And a wrong PITCH is caught: bend the predicted helix by 20% of its climb and the
+      // simulated floor (the program's own pitch) is no longer the floor the prediction says.
+      const wrongPitch = g.predicted.map((p) =>
+        p.thread === undefined
+          ? p
+          : {
+              ...p,
+              thread: {
+                ...p.thread,
+                moves: p.thread.moves.map((m) => ({
+                  ...m,
+                  z: m.z - (m.z + p.thread!.tipDepthMm) * 0.2,
+                })),
+              },
+            },
+      );
+      const bent = session.oracle(wrongPitch);
+      expect(bent.ok).toBe(false);
+      expect(under(bent) + over(bent)).toBeGreaterThan(ORACLE_AREA_FLOOR);
     } finally {
       session.dispose();
     }

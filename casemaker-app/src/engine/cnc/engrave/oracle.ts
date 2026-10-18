@@ -430,15 +430,18 @@ function threadPredictedSlice(tl: ManifoldToplevel, grid: ColumnGrid, thread: Or
  *
  * The tip depth is where the tooth's first move sits, and at that level the predicted region has
  * shrunk to a sliver at the helix's start — the narrowest question the item can be asked. The
- * threaded depth is the bottom of the functional thread, and the shallow level (the groove rule,
- * `ORACLE_SHALLOW_DEPTH_FRACTION`) checks the flank and pitch across the annulus rather than only
- * the floor. Deduplicated by `computeOracle`'s Set.
+ * threaded depth is the bottom of the functional thread; the shallow level (the groove rule,
+ * `ORACLE_SHALLOW_DEPTH_FRACTION`) checks the flank and pitch across the annulus; and HALF A PITCH
+ * ABOVE THE TIP cuts the first revolution in half, which is the level a wrong pitch changes first.
+ * Deduplicated by `computeOracle`'s Set.
  */
 function threadLevels(predicted: readonly OraclePredicted[]): number[] {
   const out: number[] = [];
   for (const p of predicted) {
     if (p.thread === undefined || !(p.thread.threadDepthMm > 0)) continue;
     out.push(p.thread.threadDepthMm, p.thread.threadDepthMm * ORACLE_SHALLOW_DEPTH_FRACTION);
+    const halfPitchUp = p.thread.tipDepthMm - p.thread.pitchMm / 2;
+    if (halfPitchUp > 0) out.push(halfPitchUp);
   }
   return out;
 }
