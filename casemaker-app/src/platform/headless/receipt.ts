@@ -400,8 +400,15 @@ function formatMinutes(minutes: number): string {
   return `${sec} s`;
 }
 
+/**
+ * The byte count of an output the details name by file — matched on either separator, because the
+ * receipt records the path the PLATFORM wrote (`C:\…\badge.nc` on the Windows build) while the
+ * details keep the bare file name the program was given.
+ */
 function bytesOf(receipt: Receipt, name: string): number | null {
-  const exact = receipt.outputs.find((o) => o.path === name || o.path.endsWith(`/${name}`));
+  const exact = receipt.outputs.find(
+    (o) => o.path === name || o.path.endsWith(`/${name}`) || o.path.endsWith(`\\${name}`),
+  );
   return exact === undefined ? null : exact.bytes;
 }
 

@@ -216,7 +216,12 @@ describe('#478 a committed bench job’s receipt', () => {
       expect(CHAPTER_8, `chapter 8 has no row for ${d.code}`).toContain('`' + d.code + '`');
     }
     // The human form is rendered FROM this document, so the fixture also pins what an operator saw.
-    expect(renderReceipt(receipt).join('\n')).toContain('  stage      done, ok=true');
+    const rendered = renderReceipt(receipt).join('\n');
+    expect(rendered).toContain('  stage      done, ok=true');
+    // The bytes come from `outputs`, whose paths carry this machine's separator — the fixture is
+    // generated on Windows, so it is the case that a `/`-only match would report `? bytes`.
+    expect(rendered).toContain('  file       176-g32-stroke.nc  (1171 bytes, 41 lines)');
+    expect(rendered).toContain('  frame      176-g32-stroke-frame.nc  (1072 bytes)');
   });
 });
 
