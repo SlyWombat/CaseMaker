@@ -285,7 +285,11 @@ describe('#311 — the detail rail', () => {
     const rail = screen.getByTestId('manage-detail');
     expect(rail.textContent).toContain('2 mm flat end');
     // A null shoulder is not a missing row: it is the depth the cutter cannot be proven to support.
-    expect(rail.textContent).toContain('the depth it supports (#314)');
+    // The panel states that fact; the issue that will measure it stays out of the operator's copy.
+    expect(rail.textContent).toContain('the depth it supports is not recorded');
+    expect(rail.textContent).toContain('unknown');
+    expect(rail.textContent).not.toContain('#314');
+    expect(rail.textContent).not.toContain('#220');
     expect(rail.textContent).toContain('unset; the machine probes the tip');
     // The only write a catalogue row offers is a clone.
     expect(q('manage-clone-here')).not.toBeNull();

@@ -188,7 +188,7 @@ function Detail({ entry, item }: { entry: ToolLibraryEntry; item: InventoryItem 
                 <th>shoulder length</th>
                 <td>
                   {mm(t.shoulderLength)} mm{' '}
-                  {t.shoulderLength === null && <span className="dim">— the depth it supports (#314)</span>}
+                  {t.shoulderLength === null && <span className="dim">— the depth it supports is not recorded</span>}
                 </td>
               </tr>
             </>
@@ -204,7 +204,7 @@ function Detail({ entry, item }: { entry: ToolLibraryEntry; item: InventoryItem 
             <th>centre-cutting</th>
             <td>
               {t.centreCutting === null ? '—' : t.centreCutting ? 'yes' : 'no'}{' '}
-              {t.centreCutting === null && <span className="dim">unknown (#220)</span>}
+              {t.centreCutting === null && <span className="dim">unknown</span>}
             </td>
           </tr>
           {t.number !== null && (
@@ -387,7 +387,7 @@ function DefinitionEditor({ entry }: { entry: ToolLibraryEntry }) {
         onHighlight={setHighlighted}
       />
       <p className="hint">
-        blank stays unknown — never 0. A blank shoulder is the depth it supports (#314).
+        blank stays unknown — never 0. A blank shoulder means the depth it supports is not recorded.
       </p>
       {problem !== null && (
         <p className="hint" data-status="error" data-testid="manage-def-profile-stale">
