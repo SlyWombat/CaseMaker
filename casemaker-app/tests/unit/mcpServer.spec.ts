@@ -111,7 +111,9 @@ describe('#481 the library tools', () => {
     const result = await callTool('list_boards', {});
     const receipt = receiptOf(result);
     const details = mcpDetails(receipt);
-    expect(receipt.version).toBe(2);
+    // A literal pin, not `RECEIPT_VERSION`: a bump is a wire change and must be deliberate. 3 added
+    // the `machine` variant (#477).
+    expect(receipt.version).toBe(3);
     expect(receipt.ok).toBe(true);
     expect(details.tool).toBe('list_boards');
 

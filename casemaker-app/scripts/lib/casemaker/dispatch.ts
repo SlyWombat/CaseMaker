@@ -7,7 +7,7 @@
  *
  * `--json` is parsed HERE, once (#478): the flag is stripped from wherever it appears and handed to
  * every handler through {@link CommandOptions}, so stdout carries the receipt document and nothing
- * else. `machine` is refused here as well, until #479 decides it. Neither is stubbed.
+ * else.
  */
 import { HUMAN, type CommandOptions } from './output';
 
@@ -23,7 +23,7 @@ export interface CasemakerHandlers {
   location: CommandHandler;
   /** `readback feeds|run`; receives the section as its first argument. */
   readback: CommandHandler;
-  /** `machine`; a refusal for now. */
+  /** `machine`; the read subcommands (#477). */
   machine: CommandHandler;
 }
 
@@ -44,19 +44,17 @@ export const USAGE = [
   '  casemaker location tools|stock|machines [--location <location.json|house.json>]',
   '  casemaker readback feeds <record.json> [--feeds <feeds.ts>] [--dry-run]',
   '  casemaker readback run <record.json> [--history <runHistory.ts>] [--dry-run]',
+  '  casemaker machine status|version|finished [--host <ip>] [--location <file>]',
+  '  casemaker machine hashes <card-path> [<card-path> ...] [--host <ip>]',
   '',
   'Human output is the default and is rendered from the run’s receipt. With `--json`, stdout is',
-  'exactly that receipt document and progress goes to stderr. Machine/hardware commands await',
-  '#479 and are not in this build.',
+  'exactly that receipt document and progress goes to stderr. The machine commands read only;',
+  'nothing here switches power (#479: the plug is outside Case Maker).',
 ].join('\n');
 
 /** `--json` takes no value: the receipt has one shape, so there is no format to negotiate. */
 export const JSON_VALUE_REFUSED =
   '--json takes no value — it selects the receipt document, and there is only one shape; nothing was run.';
-
-/** The refusal every machine/hardware command gets until #479 is decided. */
-export const MACHINE_DEFERRED =
-  'machine commands are not available in this build — they await the #479 decision; nothing was sent to the machine or the network.';
 
 /**
  * Route one command line. Returns the exit code; never calls `process.exit`, so the bin owns that.

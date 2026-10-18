@@ -1,5 +1,6 @@
-// #477 — the old script paths still work, and the new command owns its two flags: `--json` the
-// receipt switch (#478), `machine` the remaining refusal (#479).
+// #477 — the old script paths still work, and the new command owns its flags: `--json` the
+// receipt switch (#478), and the machine subcommands, which refuse an unknown target without a
+// socket (their own spec drives the transport).
 //
 // These are process-level smoke tests: each old entry point or `casemaker` invocation must reach
 // its own usage/refusal and exit with the documented code. They are spawn-based because that is the
@@ -80,10 +81,9 @@ describe('#477 the casemaker entry point', () => {
     expect(r.stderr).toContain('nothing was run');
   }, 120_000);
 
-  it('refuses machine commands with #479 named and touches nothing', () => {
-    const r = run('scripts/casemaker.ts', ['machine', 'status']);
+  it('refuses a machine command with no address before opening a socket', () => {
+    const r = run('scripts/casemaker.ts', ['machine', 'status', '--location', 'tests/unit/fixtures/no-such-location.json']);
     expect(r.status).toBe(2);
-    expect(r.stderr).toContain('#479');
-    expect(r.stderr).toContain('nothing was sent to the machine or the network');
+    expect(r.stderr).toContain('no machine address — pass --host');
   }, 120_000);
 });

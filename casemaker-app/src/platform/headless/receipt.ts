@@ -25,8 +25,12 @@ import { z } from 'zod';
  * 2 (#481) — the receipt gained a `mcp` command variant, the one pure tools (list/describe/
  * new/patch/compile) return: they run no CLI command whose receipt could be borrowed, and every
  * MCP tool must return a receipt. The four command variants are unchanged.
+ *
+ * 3 (#477) — the receipt gained a `machine` command variant, for the commands that speak to the
+ * controller on the LAN. Same reason as `mcp`: `casemaker machine status` runs no other command
+ * whose receipt could be borrowed, and every command emits one.
  */
-export const RECEIPT_VERSION = 2;
+export const RECEIPT_VERSION = 3;
 
 /**
  * #206's four gates, in the order the panel asks them. `gate` names the one that stopped a run;
@@ -325,6 +329,68 @@ export const mcpDetailsSchema = z
   })
   .describe('An MCP tool’s own details.');
 
+/**
+ * The `machine` subcommands (#477). The reads — `status`, `version`, `hashes`, `finished` — are
+ * unattended; the two physical actions (`upload`, `play`) are only ever reachable behind
+ * `--confirm <program hash>` (#479's confirmed line). Power is not here at all: the plug is this
+ * bench's fixture, not a product assumption.
+ */
+export const RECEIPT_MACHINE_SECTIONS = ['status', 'version', 'hashes', 'finished', 'upload', 'play'] as const;
+export type ReceiptMachineSection = (typeof RECEIPT_MACHINE_SECTIONS)[number];
+
+/** What a `?` status line says, in the protocol's own terms (`readJobProgress`, `alarmLine`). */
+export const machineStatusSchema = z
+  .object({
+    line: z.string().nullable().describe('The `?` status line, verbatim, or null when none came back.'),
+    state: z.string().nullable().describe('The state word at the front of the line (`Idle`, `Run`, `Alarm`, …).'),
+    progressLine: z.number().int().nonnegative().nullable().describe('`P:`’s first field — the line being run.'),
+    percent: z.number().nullable().describe('`P:`’s second field — percent complete, 100 at the end.'),
+    elapsedS: z.number().nullable().describe('`P:`’s third field — seconds elapsed in the job.'),
+    alarm: z.string().nullable().describe('The controller’s own alarm line, verbatim, or null.'),
+    finished: z
+      .boolean()
+      .describe('Whether the job has ended: percent 100 AND `Idle` — `Idle` alone appears mid-job.'),
+  })
+  .describe('A status read, as the controller answered it.');
+
+/** One card file’s digest, as the controller itself reports it. */
+export const machineHashSchema = z
+  .object({
+    path: z.string().min(1).describe('The absolute path on the controller’s card.'),
+    md5: z.string().nullable().describe('The controller’s MD5, 32 lowercase hex, or null when it had no digest.'),
+    detail: z.string().nullable().describe('Why no digest came back, or null on success.'),
+  })
+  .describe('A file on the card, hashed by the controller.');
+
+/** Everything `casemaker machine` reports beyond the receipt envelope. */
+export const machineDetailsSchema = z
+  .object({
+    section: z.enum(RECEIPT_MACHINE_SECTIONS).describe('Which machine command ran.'),
+    host: z.string().nullable().describe('The machine reached, or null when nothing was sent.'),
+    port: z.number().int().nonnegative().describe('The command port used (2222 on a Z1).'),
+    status: machineStatusSchema.nullable().describe('The status read, or null for another section.'),
+    version: z.string().nullable().describe('The firmware version the controller reports, or null.'),
+    hashes: z.array(machineHashSchema).describe('The card files hashed, in the order asked about.'),
+    finished: z
+      .object({
+        machine: z.string().min(1).describe('The machine record whose finished list was read.'),
+        hashes: z.array(z.string()).describe('Every FNV program hash the record says finished cleanly.'),
+      })
+      .nullable()
+      .describe('The machine record’s finished-program list, or null for another section.'),
+    action: z
+      .object({
+        confirm: z.string().min(1).describe('The `--confirm` token the caller gave.'),
+        programHash: z.string().nullable().describe('The program’s FNV hash, or null before one was computed.'),
+        path: z.string().nullable().describe('The card path the action named, or null.'),
+        sent: z.string().nullable().describe('The line sent to the controller, or null when nothing was sent.'),
+        dryRun: z.boolean().describe('Whether the action stopped before opening a socket.'),
+      })
+      .nullable()
+      .describe('The guarded action (upload/play), or null for a read.'),
+  })
+  .describe('The machine command’s own details.');
+
 // ---------------------------------------------------------------------------------------------
 // The receipt
 // ---------------------------------------------------------------------------------------------
@@ -361,6 +427,9 @@ export const receiptSchema = z.discriminatedUnion('command', [
   z
     .object({ ...envelope, command: z.literal('mcp').describe('The command that produced this receipt.'), details: mcpDetailsSchema })
     .describe('The receipt of an MCP tool that runs no command of its own.'),
+  z
+    .object({ ...envelope, command: z.literal('machine').describe('The command that produced this receipt.'), details: machineDetailsSchema })
+    .describe('The receipt of a machine command.'),
 ]);
 
 export type Receipt = z.infer<typeof receiptSchema>;
@@ -374,6 +443,8 @@ export type ExportDetails = z.infer<typeof exportDetailsSchema>;
 export type LocationDetails = z.infer<typeof locationDetailsSchema>;
 export type ReadbackDetails = z.infer<typeof readbackDetailsSchema>;
 export type McpDetails = z.infer<typeof mcpDetailsSchema>;
+export type MachineDetails = z.infer<typeof machineDetailsSchema>;
+export type MachineStatusRead = z.infer<typeof machineStatusSchema>;
 
 /**
  * A diagnostic. The guide row is the code itself — `cnc-guide.md` §8.1's table is keyed by code —
@@ -691,7 +762,69 @@ export function renderReceipt(receipt: Receipt): string[] {
       return readbackLines(receipt);
     case 'mcp':
       return mcpLines(receipt);
+    case 'machine':
+      return machineLines(receipt);
   }
+}
+
+/**
+ * A machine command's own result (#477): the address it spoke to, then the section's facts. Every
+ * line is built from the receipt, so `--json` and the terminal carry the same values.
+ */
+function machineLines(receipt: Extract<Receipt, { command: 'machine' }>): string[] {
+  const { details } = receipt;
+  const lines = [`machine ${details.section}  ok=${receipt.ok}`];
+  if (details.host === null) lines.push(`  host       (nothing was sent)`);
+  else lines.push(`  host       ${details.host}:${details.port}`);
+
+  if (details.status !== null) {
+    const status = details.status;
+    lines.push(`  status     ${status.line ?? '(no reply)'}`);
+    lines.push(`  state      ${status.state ?? '(none)'}`);
+    if (status.percent === null && status.progressLine === null) lines.push('  progress   no P: field');
+    else {
+      lines.push(
+        `  progress   line ${status.progressLine ?? '?'}, ${status.percent ?? '?'} %, ` +
+          `${status.elapsedS ?? '?'} s`,
+      );
+    }
+    lines.push(`  alarm      ${status.alarm ?? '(none)'}`);
+    lines.push(
+      status.finished
+        ? '  job        finished — percent 100 and Idle'
+        : status.percent === null
+          ? '  job        no progress reported'
+          : '  job        not finished yet',
+    );
+  }
+
+  if (details.section === 'version') lines.push(`  version    ${details.version ?? '(no reply)'}`);
+
+  for (const hash of details.hashes) {
+    lines.push(
+      hash.md5 === null
+        ? `  file       ${hash.path}  (no digest — ${hash.detail ?? 'no reason given'})`
+        : `  file       ${hash.path}  md5=${hash.md5}`,
+    );
+  }
+
+  if (details.finished !== null) {
+    lines.push(`  machine    ${details.finished.machine}`);
+    if (details.finished.hashes.length === 0) lines.push('  finished   (no program has finished cleanly yet)');
+    for (const hash of details.finished.hashes) lines.push(`  finished   ${hash}`);
+  }
+
+  if (details.action !== null) {
+    const action = details.action;
+    lines.push(`  confirm    ${action.confirm}`);
+    if (action.programHash !== null) lines.push(`  program    ${action.programHash}`);
+    if (action.path !== null) lines.push(`  path       ${action.path}`);
+    if (action.dryRun) lines.push('  sent       (dry run — nothing was sent)');
+    else if (action.sent !== null) lines.push(`  sent       ${action.sent}`);
+  }
+
+  for (const refusal of receipt.refusals) lines.push(`  !! ${refusal.reason}`);
+  return lines;
 }
 
 /**

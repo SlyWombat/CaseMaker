@@ -326,6 +326,73 @@ describe('#478 the human output is rendered from the receipt', () => {
     expect(refused).toContain('  !! invalid case patch: wallThickness: too small');
   });
 
+  it('renders a machine read from the receipt, and the guarded action’s confirmation (#477)', () => {
+    const text = renderReceipt({
+      version: RECEIPT_VERSION,
+      command: 'machine',
+      ok: true,
+      stage: 'status',
+      gate: null,
+      inputs: [],
+      outputs: [],
+      diagnostics: [],
+      provenance: [],
+      refusals: [],
+      details: {
+        section: 'status',
+        host: '192.0.2.10',
+        port: 2222,
+        status: {
+          line: '<Idle|MPos:0,0,0|P:4,100,120>',
+          state: 'Idle',
+          progressLine: 4,
+          percent: 100,
+          elapsedS: 120,
+          alarm: null,
+          finished: true,
+        },
+        version: null,
+        hashes: [],
+        finished: null,
+        action: null,
+      },
+    }).join('\n');
+    expect(text).toContain('machine status  ok=true');
+    expect(text).toContain('  host       192.0.2.10:2222');
+    expect(text).toContain('  job        finished — percent 100 and Idle');
+
+    const action = renderReceipt({
+      version: RECEIPT_VERSION,
+      command: 'machine',
+      ok: true,
+      stage: 'play',
+      gate: null,
+      inputs: [],
+      outputs: [],
+      diagnostics: [],
+      provenance: [],
+      refusals: [],
+      details: {
+        section: 'play',
+        host: '192.0.2.10',
+        port: 2222,
+        status: null,
+        version: null,
+        hashes: [],
+        finished: null,
+        action: {
+          confirm: '3fa2b1c9',
+          programHash: '3fa2b1c9',
+          path: '/sd/gcodes/badge.nc',
+          sent: 'play /sd/gcodes/badge.nc',
+          dryRun: false,
+        },
+      },
+    }).join('\n');
+    expect(action).toContain('  confirm    3fa2b1c9');
+    expect(action).toContain('  sent       play /sd/gcodes/badge.nc');
+  });
+
   it('renders a location section from its records, and the no-document case', () => {
     const text = renderReceipt({
       version: RECEIPT_VERSION,

@@ -1,6 +1,6 @@
 // #477 — the `casemaker` dispatch layer. Handlers are fakes here on purpose: the routing and the
-// two flags the dispatcher owns (`--json` → the receipt switch, `machine` → #479) are what this
-// spec holds, and neither needs the wasm-bearing engrave pipeline or a spawned process.
+// two flags the dispatcher owns (`--json` → the receipt switch, and the command words) are what
+// this spec holds, and neither needs the wasm-bearing engrave pipeline or a spawned process.
 
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -11,7 +11,6 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   dispatch,
   JSON_VALUE_REFUSED,
-  MACHINE_DEFERRED,
   USAGE,
   type CasemakerHandlers,
 } from '../../scripts/lib/casemaker/dispatch';
@@ -127,16 +126,28 @@ describe('#477 casemaker dispatch', () => {
     expect(Object.values(calls).flat()).toEqual([]);
   });
 
-  it('keeps the machine command as an explicit #479 refusal in the shipped handlers', async () => {
+  it('routes the shipped machine handler into the machine command module', async () => {
     // Imported lazily so the routing cases above stay free of the command modules.
     const { defaultHandlers } = await import('../../scripts/lib/casemaker/handlers');
+    const { machineMain } = await import('../../scripts/lib/casemaker/machineCommand');
     const errors: string[] = [];
     vi.spyOn(console, 'error').mockImplementation((...args: unknown[]) => {
       errors.push(args.map(String).join(' '));
     });
-    expect(await defaultHandlers.machine(['status'], HUMAN)).toBe(2);
-    expect(errors.join('\n')).toContain(MACHINE_DEFERRED);
-    expect(MACHINE_DEFERRED).toContain('#479');
+    // A transport that fails the test if anything reaches it: an unknown subcommand is refused
+    // before a socket is opened.
+    const transport = {
+      udpListen: async () => [],
+      tcpConnect: async () => {
+        throw new Error('no socket may be opened for a usage error');
+      },
+      tcpWrite: async () => undefined,
+      tcpRead: async () => new Uint8Array(),
+      tcpClose: async () => undefined,
+    };
+    expect(await defaultHandlers.machine).toBe(machineMain);
+    expect(await machineMain(['frobnicate'], HUMAN, { transport, locate: () => null })).toBe(2);
+    expect(errors.join('\n')).toContain('is not a machine command');
   });
 
   it('publishes the bin and the npm aliases without dropping any existing script', () => {
