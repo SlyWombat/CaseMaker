@@ -42,7 +42,7 @@ import {
   traceSweptProfile,
 } from '@/engine/cnc/engrave/partPlan';
 import type { JobFinding } from '@/engine/cnc/engrave/jobSetup';
-import { viseEnvelope } from '@/engine/cnc/fixture';
+import { viseBody } from '@/engine/cnc/fixture';
 import { sacrificialBoxes, type SacrificialBox } from '@/engine/cnc/sacrificial';
 import { cuttingRadiusForSweep } from '@/engine/cnc/tool';
 import { toolForJob } from '@/engine/cnc/toolRegistry';
@@ -125,7 +125,11 @@ export interface EngravePreviewOutline {
   rings: [number, number][][];
 }
 
-/** One vise jaw, drawn where the user SAID it is (un-inflated), from `viseEnvelope`. */
+/**
+ * One drawn vise piece — a jaw or the body — from `viseBody` (#508). It sits where the user SAID
+ * it is (un-inflated) and does NOT grow with the stock: the collision model is `viseEnvelope`,
+ * which is a different thing.
+ */
 export interface EngravePreviewFixture {
   id: string;
   label: string;
@@ -232,7 +236,7 @@ export interface EngravePreview {
    * cutter, whose three outlines are one and the same polygon set and are already the cut body.
    */
   outlines: EngravePreviewOutline[];
-  /** The vise jaws (un-inflated), from `viseEnvelope`. */
+  /** The drawn vise — two jaw bars and the body — from `viseBody` (#508). */
   fixture: EngravePreviewFixture[];
   /** The sacrificial material (#213), from `sacrificialBoxes`; empty when the job has none. */
   sacrificial: EngravePreviewSacrificial[];
@@ -608,7 +612,7 @@ export function createEngravePreviewer(tl: ManifoldToplevel): EngravePreviewer {
       lost.push({ labelId: engrave.id, area, polygons, mesh });
     }
 
-    const fixture: EngravePreviewFixture[] = viseEnvelope(job.stock, job.workholding.vise, job.sacrificial).boxes.map(
+    const fixture: EngravePreviewFixture[] = viseBody(job.stock, job.workholding.vise, job.sacrificial).boxes.map(
       (box) => {
         const solid = boxSolid(tl, box);
         const mesh = meshOutputOf(solid);

@@ -745,6 +745,17 @@ export type EngraveKeepOut =
 export interface ViseParams {
   /** How far the stock's top face stands above the jaw tops, mm. */
   stockProud: Mm;
+  /**
+   * What the blank's underside rests on (#508). `ledge` is the soft jaws' shelf, `LEDGE_STEP`
+   * below the jaw tops — the shipped default; `floor` is the body's own top for taller parts
+   * ("clamp directly against the bottom of the jaws"), `VISE_FLOOR_DEPTH` below the jaw tops.
+   *
+   * The seat is a MECHANISM, not a measurement: it says where the stock's underside is, and for a
+   * shipped-default vise it is what `stockProud` is derived from (`defaultStockProud`). A saved
+   * or measured vise keeps its own `stockProud`; the seat then only names where the app believes
+   * the stock rests.
+   */
+  seat: 'ledge' | 'floor';
   /** Thickness of each jaw in X, mm. */
   fixedJawThickness: Mm;
   movingJawThickness: Mm;

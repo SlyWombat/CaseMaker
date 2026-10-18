@@ -4997,6 +4997,15 @@
               "description": "Moving jaw thickness in millimetres.",
               "type": "number"
             },
+            "seat": {
+              "default": "ledge",
+              "description": "What the blank's underside rests on: the soft jaws' ledge or the body floor.",
+              "enum": [
+                "ledge",
+                "floor"
+              ],
+              "type": "string"
+            },
             "source": {
               "description": "Where these jaw numbers came from: a default, a saved setup, or a measurement.",
               "enum": [

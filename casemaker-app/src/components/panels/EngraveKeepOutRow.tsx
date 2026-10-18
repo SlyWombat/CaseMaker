@@ -55,7 +55,7 @@ const POINTS: CSSProperties = {
   boxSizing: 'border-box',
 };
 
-const SEVERITY_COLOR: Record<JobFinding['severity'], string> = { error: '#f0b4ad', warning: '#e0c07a' };
+const SEVERITY_COLOR: Record<JobFinding['severity'], string> = { error: '#f0b4ad', warning: '#e0c07a', info: '#7fa6c9' };
 
 const KIND_LABEL: Record<EngraveKeepOut['kind'], string> = {
   rect: 'Rectangle',

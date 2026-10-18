@@ -16,8 +16,12 @@
  * comparison. `severity` is copied from the owner wherever the owner states one.
  */
 
-/** The two levels every owner already speaks (#419 §2.2). */
-export type PreflightSeverity = 'error' | 'warning';
+/**
+ * The levels the owners speak (#419 §2.2); `info` was added with #508's `vise-seat`, which states
+ * a fact about the setup rather than a fault in it. Only `error` blocks and only `error`/`warning`
+ * are counted, so an info row informs the operator without becoming a gate.
+ */
+export type PreflightSeverity = 'error' | 'warning' | 'info';
 
 /**
  * WHICH OWNER produced a row, named by the module the collector called.

@@ -34,7 +34,7 @@ const POINTS: CSSProperties = {
   boxSizing: 'border-box',
 };
 
-const SEVERITY_COLOR: Record<JobFinding['severity'], string> = { error: '#f0b4ad', warning: '#e0c07a' };
+const SEVERITY_COLOR: Record<JobFinding['severity'], string> = { error: '#f0b4ad', warning: '#e0c07a', info: '#7fa6c9' };
 
 /** The schema's caps, mirrored here so the editor commits only a loadable path (#219). */
 const MAX_POINTS = 5000;

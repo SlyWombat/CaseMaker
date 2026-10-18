@@ -140,6 +140,9 @@ function parseVise(raw: unknown): ViseParams | undefined {
   }
   const measuredAt = o.measuredAt;
   if (measuredAt !== undefined && typeof measuredAt !== 'string') return undefined;
+  // #508 — a vise saved before the seat existed holds no `seat`. The seat is a setup choice rather
+  // than a fact about the hardware, so an old record reads as the default instead of being refused.
+  const seat: ViseParams['seat'] = o.seat === 'floor' ? 'floor' : 'ledge';
   return {
     stockProud: o.stockProud as number,
     fixedJawThickness: o.fixedJawThickness as number,
@@ -148,6 +151,7 @@ function parseVise(raw: unknown): ViseParams | undefined {
     jawStartY: o.jawStartY as number,
     source: source as ViseParams['source'],
     uncertainty: o.uncertainty as number,
+    seat,
     ...(measuredAt !== undefined ? { measuredAt } : {}),
   };
 }

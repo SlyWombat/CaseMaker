@@ -647,9 +647,12 @@ describe('#364 — the bare-blank hand-off', () => {
     const job = s().job;
     // The demo plank is the one blank those three words were written for, so they stay — by text,
     // position and id — and only their DEPTHS move (2 / 1 / 0.5 were never a recommendation).
+    // #508 shifted the number: the blank now rests on the jaws' ledge, so it stands 8.9 mm proud on
+    // a 12 mm plank, and the recommendation is the jaw floor `stockProud − jawClearance` — 7.9 mm
+    // here, where the old working height of 4 mm made it 3 mm.
     expect(job.labels.map((l) => l.text)).toEqual(['CASE', 'MAKER', 'first chips']);
     expect(job.labels.map((l) => l.position.x)).toEqual([50, 50, 50]);
-    expect(job.labels.map((l) => l.depth)).toEqual([3, 3, 3]);
+    expect(job.labels.map((l) => l.depth)).toEqual([7.9, 7.9, 7.9]);
     // No seed ran, so nothing carries a route's `layout` stamp — only the walk's `computed` depths.
     expect(Object.values(job.sources?.labels ?? {}).every((c) => c.layout === undefined)).toBe(true);
     expect(Object.values(job.sources?.labels ?? {}).every((c) => c.depth === 'computed')).toBe(true);

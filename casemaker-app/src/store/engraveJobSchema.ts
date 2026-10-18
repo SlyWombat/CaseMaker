@@ -717,6 +717,13 @@ const viseSchema = z.object({
     .number()
     .finite()
     .describe('How far the stock stands proud of the jaws, in millimetres.'),
+  // #508 — what the blank's underside rests on. DEFAULTED rather than optional: a document written
+  // before the seat existed was a ledge job by definition (the shipped model only had the ledge),
+  // so it parses into the same shape without a schemaVersion bump.
+  seat: z
+    .enum(['ledge', 'floor'])
+    .default('ledge')
+    .describe("What the blank's underside rests on: the soft jaws' ledge or the body floor."),
   fixedJawThickness: z
     .number()
     .finite()

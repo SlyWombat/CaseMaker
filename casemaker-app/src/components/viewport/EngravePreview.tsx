@@ -36,6 +36,7 @@ import type { ViseParams } from '@/types/engraveJob';
 import type { EngravePreviewLost, EngravePreviewOutline } from '@/workers/sim/engravePreview';
 import type { EngravePreviewRegistrationBand } from '@/workers/sim/engraveRegistration';
 import { mm } from '@/engine/cnc/engrave/depthBounds';
+import { VISE_BAR_HEIGHT } from '@/engine/cnc/fixture';
 import { geometryFromMesh, SACRIFICIAL_COLOR, segmentGeometry } from './simGeometry';
 import { floorColor, LOST_COLOR, REGISTRATION_COLOR, VOID_COLOR } from './engraveRamp';
 import { hatchSegments } from './engraveHatch';
@@ -617,7 +618,7 @@ export function EngravePreview() {
             whiteSpace: 'nowrap',
           }}
         >
-          vise: {sourceWords(vise.source)}
+          vise: {sourceWords(vise.source)} · bar height {VISE_BAR_HEIGHT} mm PROVISIONAL
         </ProjectedLabel>
       )}
 

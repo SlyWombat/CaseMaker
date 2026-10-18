@@ -416,7 +416,9 @@ describe('preflight: the shape of the gate (not a rule, just its contract)', () 
       expect(row.owner).toBeTruthy();
       expect(row.code).toBeTruthy();
       expect(row.message.length).toBeGreaterThan(0);
-      expect(['error', 'warning']).toContain(row.severity);
+      // #508 added `info` to the vocabulary (`vise-seat` states the setup, it does not fault it);
+      // only `error` blocks.
+      expect(['error', 'warning', 'info']).toContain(row.severity);
       // §2.2/§7: the hub`s scroll target is deliberately unresolved, so it is always null here.
       expect(row.cause.hubTarget).toBeNull();
       // The scope the call was made for, copied onto every row — this call asked about setup 0 and

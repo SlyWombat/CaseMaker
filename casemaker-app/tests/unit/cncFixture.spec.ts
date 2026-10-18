@@ -24,13 +24,18 @@ const backing = new Map<string, string>();
 import {
   DEFAULT_VISE,
   GRIP_MIN,
+  LEDGE_STEP,
+  VISE_BAR_HEIGHT,
   VISE_BODY_DEPTH,
+  VISE_FLOOR_DEPTH,
   boxesOverlap,
   defaultStockProud,
   inflate,
+  seatDepth,
   todayISODate,
   uncertaintyFor,
   validateVise,
+  viseBody,
   viseEnvelope,
   viseForNewJob,
 } from '@/engine/cnc/fixture';
@@ -87,6 +92,97 @@ describe('viseEnvelope (#203)', () => {
     expect(env.uncertainty).toBe(0.5);
     // The box min Z is thickness + body depth below the top — the raw, un-inflated value.
     expect(env.boxes[0]!.min[2]).toBe(-(STOCK.thickness + VISE_BODY_DEPTH));
+  });
+});
+
+// #508 — the DRAWN vise, which is a different thing from the obstacle envelope. The preview used
+// to draw the envelope's boxes, so a thick blank made the jaws grow with it; these tests pin the
+// split: drawn geometry depends on the jaw layout and the PROVISIONAL bar height, never on the
+// stock's thickness, while the envelope keeps its collision behaviour untouched.
+describe('viseBody — the drawn vise (#508)', () => {
+  it('draws two jaw bars and the body, sized from the fixture constants', () => {
+    const body = viseBody(STOCK, DEFAULT_VISE);
+    expect(body.boxes.map((b) => b.id)).toEqual(['vise-fixed-jaw', 'vise-moving-jaw', 'vise-body']);
+
+    const [fixed, moving, under] = body.boxes as [ObstacleBox, ObstacleBox, ObstacleBox];
+    expect(fixed.max[0]).toBe(0);
+    expect(moving.min[0]).toBe(STOCK.length);
+    // Jaw tops on the seat the job states, bars of the PROVISIONAL height below them.
+    expect(fixed.max[2]).toBe(-DEFAULT_VISE.stockProud);
+    expect(moving.max[2]).toBe(-DEFAULT_VISE.stockProud);
+    expect(fixed.max[2] - fixed.min[2]).toBe(VISE_BAR_HEIGHT);
+    expect(moving.max[2] - moving.min[2]).toBe(VISE_BAR_HEIGHT);
+    // The body hangs directly beneath the bars and spans the opening between the jaw faces.
+    expect(under.max[2]).toBe(fixed.min[2]);
+    expect(under.min[2]).toBe(fixed.min[2] - VISE_BODY_DEPTH);
+    expect(under.min[0]).toBe(0);
+    expect(under.max[0]).toBe(STOCK.length);
+    // In Y all three span the measured jaw run.
+    for (const b of body.boxes) {
+      expect(b.min[1]).toBe(DEFAULT_VISE.jawStartY);
+      expect(b.max[1]).toBe(DEFAULT_VISE.jawStartY + DEFAULT_VISE.jawLength);
+    }
+  });
+
+  it('draws the same jaw height for a 3.8 mm blank, a 12 mm blank and a 50 mm cube', () => {
+    const blanks = [
+      { length: 100, width: 60, thickness: 3.8 },
+      { length: 100, width: 60, thickness: 12 },
+      { length: 50, width: 50, thickness: 50 }, // the cube
+    ];
+    for (const blank of blanks) {
+      const vise = viseForNewJob(undefined, blank);
+      const [fixed, moving] = viseBody(blank, vise).boxes as [ObstacleBox, ObstacleBox];
+      // Both bars are the same height to within arithmetic dust: `stockProud` can be a long decimal
+      // (46.9 on the cube), and subtracting it from the fixed bar top leaves a 1e-15 residue.
+      expect(fixed.max[2] - fixed.min[2], `${blank.thickness} mm fixed bar`).toBeCloseTo(VISE_BAR_HEIGHT, 9);
+      expect(moving.max[2] - moving.min[2], `${blank.thickness} mm moving bar`).toBeCloseTo(VISE_BAR_HEIGHT, 9);
+    }
+  });
+
+  it('ignores thickness entirely: changing it alone changes nothing drawn', () => {
+    // The signature takes `{ length }`, so thickness cannot reach the drawing; this pins that the
+    // promise holds even when a caller passes the job's whole stock object.
+    const thin = { length: 100, width: 60, thickness: 3.8 };
+    const cube = { length: 100, width: 60, thickness: 50 };
+    expect(viseBody(thin, DEFAULT_VISE)).toEqual(viseBody(cube, DEFAULT_VISE));
+  });
+
+  it('leaves the collision envelope growing with thickness, as it always has', () => {
+    // The two models coexist deliberately: the drawn jaw is fixed, the obstacle box is not.
+    const thin = viseEnvelope({ ...STOCK, thickness: 3.8 }, DEFAULT_VISE).boxes[0]!;
+    const thick = viseEnvelope({ ...STOCK, thickness: 50 }, DEFAULT_VISE).boxes[0]!;
+    expect(thin.min[2]).toBe(-(3.8 + VISE_BODY_DEPTH));
+    expect(thick.min[2]).toBe(-(50 + VISE_BODY_DEPTH));
+    // What the preview draws no longer follows that growth.
+    expect(viseBody(STOCK, DEFAULT_VISE).boxes[0]!.min[2]).toBe(-DEFAULT_VISE.stockProud - VISE_BAR_HEIGHT);
+  });
+});
+
+describe('vise-seat — the seat the blank rests on (#508)', () => {
+  const seatFinding = (vise: ViseParams, thickness = STOCK.thickness) =>
+    validateVise({ ...STOCK, thickness }, vise).find((f) => f.code === 'vise-seat');
+
+  it('states the ledge seat, its depth and the proud it leaves — as information, not a fault', () => {
+    const f = seatFinding(viseForNewJob(undefined, STOCK));
+    expect(f).toBeDefined();
+    expect(f!.severity).toBe('info');
+    expect(f!.message).toContain('ledge');
+    expect(f!.message).toContain('3.1 mm');
+    expect(f!.message).toContain('8.9 mm proud');
+  });
+
+  it('names the floor as PROVISIONAL and says when the blank sits below the jaw tops', () => {
+    // A 12 mm blank on the 20 mm floor: its top is 8 mm BELOW the jaw tops, and that is the truth.
+    const f = seatFinding({ ...DEFAULT_VISE, seat: 'floor', stockProud: -8 });
+    expect(f!.message).toContain('floor');
+    expect(f!.message).toContain('PROVISIONAL');
+    expect(f!.message).toContain('sits 8 mm below them');
+  });
+
+  it('is emitted for every source, even a measured vise — it describes the setup, not trust', () => {
+    const measured: ViseParams = { ...DEFAULT_VISE, source: 'measured', stockProud: 8.9, measuredAt: '2026-10-18' };
+    expect(seatFinding(measured)?.severity).toBe('info');
   });
 });
 
@@ -371,22 +467,37 @@ describe('stockProud: a job input with an honest default (#231 item 2)', () => {
   // The 3.81 mm badge blank #165 cuts: a flat 4 mm lies above the whole blank.
   const BADGE = { length: 76.2, width: 38.1, thickness: 3.81 };
 
-  it('derives the default proud from the stock: the seated value, else half the thickness capped at 4 mm', () => {
-    expect(defaultStockProud(12)).toBe(4); // the default blank: unchanged, the shipped 4 mm
-    expect(defaultStockProud(8)).toBe(4);
-    // 6 mm is past the seated rule (6 − 3.1 = 2.9) and under the 7.1 mm where the 4 mm cap starts to
-    // decide, so the ledge is what the default takes.
+  it('derives the default proud from the seat: the ledge puts the blank’s underside on the ledge (#508)', () => {
+    // #508 changed this rule. The blank rests ON something, so its proud is what is left of its
+    // thickness above that seat — `t − 3.1` on the ledge — not the old flat working height. On the
+    // 12 mm default blank that moves 4 → 8.9, and on an 8 mm blank 4 → 4.9.
+    expect(defaultStockProud(12)).toBeCloseTo(8.9, 9);
+    expect(defaultStockProud(8)).toBeCloseTo(4.9, 9);
+    // The pre-#508 `min(4, t/2, t − 3.1)` survives ONLY as the ledge's lower bound, which it never
+    // binds: `t − 3.1` is always one of that minimum's terms.
     expect(defaultStockProud(6)).toBeCloseTo(2.9, 9);
-    // The badge blank: seated on the 3.1 mm ledges it stands 0.71 mm proud (#208), which is BELOW
-    // half the blank and so is the number the default carries (#391 review item 1).
+    // The badge blank: seated on the 3.1 mm ledges it stands 0.71 mm proud (#208).
     expect(defaultStockProud(3.81)).toBeCloseTo(0.71, 9);
-    // A blank no taller than the ledge step gets the seated value too (#406): on the ledges its top
-    // is at or below the jaw tops, so the proud is ≤ 0. It used to fall back to t/2 (1.5 on a 3 mm
-    // blank), which put the modelled jaw top BELOW the real one. Since #488 the ≤ 0 value is not a
-    // refusal: the job's cuts decide, and a cut that keeps the jaw clearance gets a note instead.
+    // A blank no taller than the ledge step sits with its top at or below the jaw tops (#406). Since
+    // #488 that ≤ 0 value is not a refusal: the job's cuts decide, and a cut that keeps the jaw
+    // clearance gets a note instead.
     expect(defaultStockProud(3.1)).toBe(0);
     expect(defaultStockProud(3)).toBeCloseTo(-0.1, 9);
     expect(defaultStockProud(2)).toBeCloseTo(-1.1, 9);
+  });
+
+  it('derives a floor seat strictly: t − floorDepth, negative allowed (#508)', () => {
+    // The floor is not clamped. On a blank thinner than the body's depth the jaw tops are above the
+    // blank's top face, and the negative proud is the truthful answer.
+    expect(seatDepth('ledge')).toBe(LEDGE_STEP);
+    expect(seatDepth('floor')).toBe(VISE_FLOOR_DEPTH);
+    expect(defaultStockProud(12, 'floor')).toBeCloseTo(12 - VISE_FLOOR_DEPTH, 9);
+    expect(defaultStockProud(12, 'floor')).toBeCloseTo(-8, 9);
+    expect(defaultStockProud(50, 'floor')).toBeCloseTo(30, 9);
+    expect(defaultStockProud(3.81, 'floor')).toBeCloseTo(3.81 - VISE_FLOOR_DEPTH, 9);
+    // The ledge is still the default seat (#508), and naming it changes nothing.
+    expect(DEFAULT_VISE.seat).toBe('ledge');
+    expect(defaultStockProud(12)).toBe(defaultStockProud(12, DEFAULT_VISE.seat));
   });
 
   it('the shipped DEFAULT_VISE still refuses the badge blank — the gap this closes', () => {

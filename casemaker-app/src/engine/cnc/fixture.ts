@@ -44,13 +44,49 @@ import { hasSacrificial, noneSacrificial, stripHeight, viseJawShift } from './sa
  */
 
 /**
- * How far the box extends below the stock's underside, mm. It only has to be "far enough that
- * nothing can pass under it" (/Simulation.md §1.1: the holder-into-part check), so this is a
+ * How far the ENVELOPE box extends below the stock's underside, mm. It only has to be "far enough
+ * that nothing can pass under it" (/Simulation.md §1.1: the holder-into-part check), so this is a
  * generous depth, not a measured body height.
+ *
+ * It also sizes the drawn body below the jaw bars (`viseBody`, #508), where it is a fixed height
+ * rather than a distance from the stock. Both uses are the same unmeasured quantity — how tall the
+ * body is — so they share the one PROVISIONAL figure rather than inventing a second.
  *
  * PROVISIONAL (#208): the real vise body is unmeasured.
  */
 export const VISE_BODY_DEPTH = 20;
+
+/**
+ * The drawn soft-jaw bar's height, mm — PROVISIONAL, and it exists for the picture only (#508).
+ *
+ * The bar is calipered 10 mm ACROSS (#208, 2026-10-13); its height has never been measured. The
+ * drawing needs one that does not change with the stock, and the envelope's `VISE_BODY_DEPTH` is
+ * not it: that figure is a "nothing passes under it" distance below the stock, which is exactly
+ * what made a thick blank look like it grew the jaws. So the drawn bar takes a fixed height,
+ * chosen level with the body below it, and the jaw's source label says PROVISIONAL until the
+ * bench calipers it — the same pending list as the body's height and footprint, the maximum
+ * opening and the moving jaw's travel (#208/#444). Nothing checks the opening against a stock
+ * yet: the number that would let it do so is on that list.
+ */
+export const VISE_BAR_HEIGHT: Mm = 20;
+
+/**
+ * How far the body's floor — the surface a tall part is clamped directly against, "against the
+ * bottom of the jaws" on the Makera vise page — sits below the jaw tops, mm (#508). It is the
+ * seat under the `floor` seat, where a blank's underside rests on the body rather than on the
+ * ledges.
+ *
+ * PROVISIONAL (#508): the body's height has never been calipered. It is seeded level with the
+ * drawn bar's bottom (the body's top), so a floor-seated blank rests exactly on the body with no
+ * gap and no overlap, and it joins `VISE_BAR_HEIGHT` on #444's calipers list. A reading that
+ * separates them moves this constant alone; nothing derives from the pair's equality.
+ */
+export const VISE_FLOOR_DEPTH: Mm = 20;
+
+/** How far the blank's underside sits below the jaw tops for a seat, mm (#508). */
+export function seatDepth(seat: ViseParams['seat']): Mm {
+  return seat === 'floor' ? VISE_FLOOR_DEPTH : LEDGE_STEP;
+}
 
 /**
  * The minimum stock gripped below the jaw tops, mm, below which the part can lift — the LABELLED
@@ -123,42 +159,45 @@ export const LEDGE_WIDTH: Mm = 1.9;
 
 /**
  * How far a stock of `thickness` stands proud of the jaw tops by default, mm — the HONEST
- * default (#231 item 2).
+ * default (#231 item 2, corrected by #508).
  *
  * `stockProud` is a job input (`ViseParams.stockProud`) and stays one; this is the value the
  * SHIPPED default vise carries — what a new job starts from, and what `viseAfterStockEdit`
  * re-derives whenever an edit restates the blank's thickness (#344), so a job saved while the two
- * disagreed does not stay stuck. It used to be a bare 4 mm, which is not a truth: on a stock at or
- * under 4 mm thick — the 3.81 mm badge blank #165 cuts — a flat 4 mm is taller than the whole blank
- * and `validateVise` refuses it outright (`vise-stock-proud-exceeds-thickness`), so the job had to
- * override the vise by hand.
+ * disagreed does not stay stuck.
  *
- * So the default tracks the stock, and takes the LOWEST of the rules that can apply,
- * `min(4, t/2, t − LEDGE_STEP)`, for every blank:
+ * #508 — THE SEAT DECIDES. The blank rests on something, and that fixes where its top is: its
+ * underside is `seatDepth(seat)` below the jaw tops, so a `thickness`-thick blank stands
+ * `thickness − seatDepth` proud. Until #508 the default was `min(4, t/2, t − LEDGE_STEP)`, which
+ * treated 4 mm as a working height and capped the proud value there; that picture was wrong for a
+ * blank thicker than 7.1 mm — the stock's underside cannot float between the jaws. The old rule is
+ * kept below as the LOWER bound (it already contains `t − LEDGE_STEP`, so on the ledge the seated
+ * value always wins):
  *
- *   - **the ledge** (#208 review, 2026-10-15) — the soft jaws' ledges are a hard stop, so a blank
- *     can stand no LESS than `thickness − LEDGE_STEP` proud: 0.72 mm on the 3.82 mm badge blank.
- *     That is the safe end, because the modelled jaw top is `−stockProud`. Taking the least proud
- *     the blank can have puts the modelled plane at the HIGHEST the real jaw top can be. The
- *     2026-10-15 bench read 0.82–0.90 mm on that blank, above the seated 0.72 and never below it,
- *     and the jaw box, grown by `uncertainty`, covers the real jaw. The half-thickness rule put the
- *     modelled top 0.4–0.7 mm BELOW the real one on this blank, which is clearance the tool does
- *     not really have;
- *   - **half the thickness**, capped at the 4 mm working height — the cap decides on a blank taller
- *     than 7.1 mm, where the seated value is the larger. On the 12 mm default blank this is the
- *     shipped 4 mm, so nothing that used the default changes.
+ *   - **`ledge`** (the shipped default) — the soft jaws' ledges are a hard stop, so the blank's
+ *     underside IS the ledge plane, `LEDGE_STEP` below the jaw tops: proud = `t − 3.1`. On the
+ *     default 12 mm blank that is 8.9 mm, where the old cap said 4; the 3.82 mm badge blank still
+ *     gets 0.72 mm, the number the 2026-10-15 bench read 0.82–0.90 above. Taking the seated value
+ *     puts the modelled jaw top at the HIGHEST the real one can be — the safe end, since the jaw
+ *     box is grown by `uncertainty` from there;
+ *   - **`floor`** — a taller part clamped directly against the bottom of the jaws rests on the
+ *     body, `VISE_FLOOR_DEPTH` below the jaw tops: proud = `t − floorDepth`, and NEGATIVE is
+ *     allowed (a 12 mm blank on the floor sits 8.8 mm below the jaw tops). That is the #488 case:
+ *     the app states the plane the blank really sits on, and whether the job is cuttable is decided
+ *     by where its cuts are (`vise-jaw-collision`), not by a proud value invented to keep it
+ *     positive.
  *
- * A blank NO TALLER than the step (#406) gets the seated value too, which is `≤ 0`. That is the
+ * A blank NO TALLER than the seat depth (#406) gets a value `≤ 0` on the ledge too. That is the
  * truth about it: seated on the ledges, its top is at or below the jaw tops. Since #488 that is a
- * NOTE rather than a refusal: the app does not know how the blank is raised (a packer, a shim, a
- * different hold), so it states no jaw plane it cannot justify, and whether the job is cuttable is
- * decided by where its cuts are — `validateJob` measures every cut's swept extent against the jaw
- * faces and refuses (`vise-jaw-collision`) only when one comes too near. Until #406 this branch
- * returned `t/2` instead, which modelled the jaw tops up to 1.5 mm BELOW the real ones on a 3 mm
- * blank. Returning `0` would still be `3.1 − t` too low.
+ * NOTE rather than a refusal, for the same reason as the floor case.
  */
-export function defaultStockProud(thickness: Mm): Mm {
-  return Math.min(DEFAULT_STOCK_PROUD, thickness / 2, thickness - LEDGE_STEP);
+export function defaultStockProud(thickness: Mm, seat: ViseParams['seat'] = 'ledge'): Mm {
+  if (seat === 'floor') return thickness - VISE_FLOOR_DEPTH;
+  // The ledge seat, with the pre-#508 rule stated as its lower bound. `Math.min` contains
+  // `thickness - LEDGE_STEP`, so the max can only ever return the seated value; the bound is kept
+  // because it is the model's own statement of "never less proud than this", not because it can win.
+  const lowerBound = Math.min(DEFAULT_STOCK_PROUD, thickness / 2, thickness - LEDGE_STEP);
+  return Math.max(lowerBound, thickness - LEDGE_STEP);
 }
 
 /**
@@ -181,16 +220,18 @@ export function defaultStockProud(thickness: Mm): Mm {
  * vise body stands and how much grip a part needs before it can lift are both unmeasured, and no
  * test cut has been run under the probe.
  *
- * `stockProud` here is the shipped working height, correct for the 12 mm default blank. A job on
- * a DIFFERENT stock must resolve its default through `viseForNewJob` (below), never from this
- * constant: `DEFAULT_VISE` knows no stock, so its 4 mm would refuse a thin blank.
+ * `stockProud` here is a PLACEHOLDER, not a height: `DEFAULT_VISE` knows no stock, so the proud
+ * value is derived per job from the seat (`defaultStockProud`, #508) — 8.9 mm on the 12 mm default
+ * blank, 0.72 on the badge blank, 46.9 on a 50 mm cube seated on the ledge. Every creation path
+ * derives it; the constant's own 4 mm is what a caller that cannot say the stock gets.
  *
  * NOTE (#203): this is the ONE place the shipped numbers live. `engrave/defaults.ts` imports
  * `DEFAULT_VISE` for a new job's vise, and `engraveJobStore` passes a saved `ViseParams` back in
  * through `defaultEngraveJob(vise)` when settings holds one.
  */
 export const DEFAULT_VISE: ViseParams = {
-  stockProud: DEFAULT_STOCK_PROUD, // Per-job, not a vise constant — `defaultStockProud` derives it from the stock.
+  stockProud: DEFAULT_STOCK_PROUD, // Per-job, not a vise constant — `defaultStockProud` derives it from the stock and seat.
+  seat: 'ledge', // #508: the blank sits on the soft jaws' ledges unless the operator says otherwise.
   fixedJawThickness: 10, // Calipered 2026-10-13: the soft-jaw top is 10 mm across (#208).
   movingJawThickness: 10, // Calipered 2026-10-13: 10 on this jaw too — 9 was §11.8's band (#208).
   jawLength: 100, // Calipered 2026-10-15: the tall bar's length in Y (#208).
@@ -218,7 +259,23 @@ export function viseForNewJob(
 ): ViseParams {
   if (saved) return { ...saved };
   if (!stock) return { ...DEFAULT_VISE };
-  return { ...DEFAULT_VISE, stockProud: defaultStockProud(stock.thickness) };
+  return {
+    ...DEFAULT_VISE,
+    stockProud: defaultStockProud(stock.thickness, DEFAULT_VISE.seat),
+  };
+}
+
+/**
+ * A vise as SEATED on a stock, mm (#508): a shipped-default vise's `stockProud` is re-derived
+ * from the seat (`defaultStockProud`), and a SAVED or MEASURED vise keeps the number its owner
+ * recorded, exactly — even when the seat geometry disagrees, so the panel can still show why.
+ *
+ * This is the one rule every creation path applies (`newDefaultJob`, `viseAfterStockEdit`, the
+ * setup flow's blank fix), so a default job can never carry the placeholder in `DEFAULT_VISE`.
+ */
+export function seatedVise(vise: ViseParams, thickness: Mm): ViseParams {
+  if (vise.source !== 'default') return { ...vise };
+  return { ...vise, stockProud: defaultStockProud(thickness, vise.seat) };
 }
 
 /**
@@ -266,6 +323,59 @@ export function viseEnvelope(
   ];
   // `measuredAt` is copied through with the provenance: the envelope must be able to say WHEN it
   // was measured, not only that it was (#203).
+  return { boxes, source: vise.source, uncertainty: vise.uncertainty, measuredAt: vise.measuredAt };
+}
+
+/**
+ * The vise as the preview DRAWS it (#508): two jaw bars and the body beneath them, sized from the
+ * constants the bench has calipered and from nothing else.
+ *
+ * This is deliberately not `viseEnvelope`. The envelope is a conservative obstacle model — its
+ * boxes run `VISE_BODY_DEPTH` below the stock's underside and its totals grow with stock
+ * thickness — which is right for collision checks and wrong for a picture: drawn from the
+ * envelope, a thicker blank made the jaws appear to grow with it.
+ *
+ * So the drawn geometry reads no stock thickness at all: `stock` is `{ length }`, and that is a
+ * type-level promise, not a convention. What it does read is the measured jaw layout — widths,
+ * `jawStartY`/`jawLength`, the `stockProud` seat, the sacrificial shift — plus the PROVISIONAL
+ * bar height. The bars sit below the jaw tops (`-stockProud`) and the body hangs beneath them,
+ * spanning the opening. The envelope is unchanged and stays the thing the checks use.
+ */
+export function viseBody(
+  stock: { length: Mm },
+  vise: ViseParams,
+  sacrificial: Sacrificial = noneSacrificial(),
+): FixtureEnvelope {
+  const jawMinY = vise.jawStartY;
+  const jawMaxY = vise.jawStartY + vise.jawLength;
+  const shift = viseJawShift(sacrificial);
+  const jawTopZ = -vise.stockProud;
+  const jawBottomZ = jawTopZ - VISE_BAR_HEIGHT;
+  const bodyBottomZ = jawBottomZ - VISE_BODY_DEPTH;
+  // The inner faces: the fixed jaw ends at the stock's left edge, the moving jaw starts at its
+  // right edge, and the sacrificial shift moves each face by the strip/under-board it bears on.
+  const fixedInnerX = 0 - shift.left;
+  const movingInnerX = stock.length + shift.right;
+  const boxes: ObstacleBox[] = [
+    {
+      id: 'vise-fixed-jaw',
+      label: 'Vise fixed jaw (left)',
+      min: [fixedInnerX - vise.fixedJawThickness, jawMinY, jawBottomZ],
+      max: [fixedInnerX, jawMaxY, jawTopZ],
+    },
+    {
+      id: 'vise-moving-jaw',
+      label: 'Vise moving jaw (right)',
+      min: [movingInnerX, jawMinY, jawBottomZ],
+      max: [movingInnerX + vise.movingJawThickness, jawMaxY, jawTopZ],
+    },
+    {
+      id: 'vise-body',
+      label: 'Vise body',
+      min: [fixedInnerX, jawMinY, bodyBottomZ],
+      max: [movingInnerX, jawMaxY, jawBottomZ],
+    },
+  ];
   return { boxes, source: vise.source, uncertainty: vise.uncertainty, measuredAt: vise.measuredAt };
 }
 
@@ -403,6 +513,23 @@ export function validateVise(
         `${covered} mm of the stock's ${width} mm width — less than half.`,
     });
   }
+
+  // #508 — the seat is where the blank's underside really is. It is a FACT about the setup, not a
+  // fault in it, so it is `info`: the picture is only readable if the app says what it drew.
+  const depth = seatDepth(vise.seat);
+  const seatWords =
+    vise.seat === 'floor'
+      ? `the body floor, ${fmtMm(depth)} mm below the jaw tops (PROVISIONAL depth, #508)`
+      : `the soft jaws' ledge, ${fmtMm(depth)} mm below the jaw tops`;
+  findings.push({
+    severity: 'info',
+    code: 'vise-seat',
+    message:
+      `The blank rests on ${seatWords}. Its ${fmtMm(thickness)} mm thickness ` +
+      (vise.stockProud >= 0
+        ? `stands ${fmtMm(vise.stockProud)} mm proud of them.`
+        : `sits ${fmtMm(-vise.stockProud)} mm below them.`),
+  });
 
   if (vise.source === 'default') {
     findings.push({

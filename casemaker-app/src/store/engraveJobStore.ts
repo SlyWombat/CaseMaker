@@ -15,7 +15,7 @@ import {
   newEngraveThreadId,
   newEngraveTraceId,
 } from '@/engine/cnc/engrave/defaults';
-import { defaultStockProud, todayISODate, viseForNewJob } from '@/engine/cnc/fixture';
+import { defaultStockProud, seatedVise, todayISODate, viseForNewJob } from '@/engine/cnc/fixture';
 import { sacrificialForNewJob } from '@/engine/cnc/sacrificial';
 import { resolveTool } from '@/engine/cnc/toolRegistry';
 import { applyAnswers, type SetupAnswers } from '@/engine/cnc/engrave/setupFlow';
@@ -226,7 +226,10 @@ function persist(job: EngraveJob): void {
 function newDefaultJob(): EngraveJob {
   const { fixtures, margins } = useSettingsStore.getState();
   const job = defaultEngraveJob(viseForNewJob(fixtures.vise), margins);
-  return { ...job, sacrificial: sacrificialForNewJob(fixtures.sacrificial) };
+  // #508 — a fresh job's default vise is seated on the stock it is about to cut: `viseForNewJob`
+  // knows no stock, so without this the job would carry `DEFAULT_VISE`'s placeholder proud.
+  const vise = seatedVise(job.workholding.vise, job.stock.thickness);
+  return { ...job, workholding: { ...job.workholding, vise }, sacrificial: sacrificialForNewJob(fixtures.sacrificial) };
 }
 
 function loadJob(): EngraveJob {
@@ -406,7 +409,8 @@ function viseAfterStockEdit(job: EngraveJob, patch: Partial<EngraveJob['stock']>
   const { vise } = job.workholding;
   if (thickness === undefined) return vise;
   if (vise.source !== 'default') return vise;
-  const stockProud = defaultStockProud(thickness);
+  // #508 — the seat, not just the thickness: a floor-seated blank sits `VISE_FLOOR_DEPTH` down.
+  const stockProud = defaultStockProud(thickness, vise.seat);
   return stockProud === vise.stockProud ? vise : { ...vise, stockProud };
 }
 
@@ -1824,13 +1828,22 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
     // unless the patch already carries a date.
     setVise: (patch) =>
       apply((job) => {
-        const source = patch.source ?? 'saved';
+        // #508 — the SEAT is a mechanism, not a measurement: choosing it on a shipped-default vise
+        // re-derives `stockProud` from the seat and leaves the source alone. A patch that states a
+        // jaw number, or nothing at all (the panel's "save as my vise"), is the user's own exactly
+        // as before and is stamped 'saved'.
+        const keys = Object.keys(patch).filter((k) => patch[k as keyof ViseParams] !== undefined);
+        const seatOnly = keys.length > 0 && keys.every((k) => k === 'seat');
+        const source = patch.source ?? (seatOnly ? job.workholding.vise.source : 'saved');
         const vise: ViseParams = {
           ...job.workholding.vise,
           ...patch,
           source,
           ...(source !== 'default' && !patch.measuredAt ? { measuredAt: todayISODate() } : {}),
         };
+        if (patch.seat !== undefined && source === 'default') {
+          vise.stockProud = defaultStockProud(job.stock.thickness, vise.seat);
+        }
         return { ...job, workholding: { ...job.workholding, vise } };
       }),
 

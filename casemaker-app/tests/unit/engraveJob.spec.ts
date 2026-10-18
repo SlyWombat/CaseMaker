@@ -894,6 +894,32 @@ describe('engraveJobStore (#200)', () => {
     expect(useEngraveJobStore.getState().job.workholding.vise.source).toBe('measured');
   });
 
+  // #508 — the seat is a SETUP choice, not a vise edit. On a default vise, changing it re-derives
+  // the seated proud and the vise stays `default`, because the numbers are still the product's.
+  it('a seat change re-seats a default vise', async () => {
+    backing.clear();
+    const { useEngraveJobStore } = await freshStore();
+    const s = () => useEngraveJobStore.getState();
+
+    expect(s().job.workholding.vise).toMatchObject({ source: 'default', seat: 'ledge', stockProud: 8.9 });
+    s().setVise({ seat: 'floor' });
+    // The default 12 mm blank on the 20 mm floor: 8 mm below the jaw tops, and negative is the truth.
+    expect(s().job.workholding.vise).toMatchObject({ source: 'default', seat: 'floor', stockProud: -8 });
+    // A later thickness change follows the new seat.
+    s().setStock({ thickness: 30 }, 'user');
+    expect(s().job.workholding.vise).toMatchObject({ seat: 'floor', stockProud: 10 });
+  });
+
+  it('a seat change never re-derives a saved or measured vise’s numbers', async () => {
+    backing.clear();
+    const { useEngraveJobStore } = await freshStore();
+    const s = () => useEngraveJobStore.getState();
+
+    s().setVise({ stockProud: 6 });
+    s().setVise({ seat: 'floor' });
+    expect(s().job.workholding.vise).toMatchObject({ source: 'saved', seat: 'floor', stockProud: 6 });
+  });
+
   // #345 — the job's own depth margins, and the two states the panel's row moves between.
   it('setJobMargins writes the job’s own margins, and null puts it back on the house setting', async () => {
     backing.clear();
@@ -1027,7 +1053,9 @@ describe('engraveJobStore (#200)', () => {
     const { setStock } = useEngraveJobStore.getState();
     expect(useEngraveJobStore.getState().job.workholding.vise).toMatchObject({
       source: 'default',
-      stockProud: 4,
+      // #508 — the fresh job is SEATED: the default 12 mm plank rests on the ledge, so its proud is
+      // 12 − 3.1 = 8.9 rather than the shipped placeholder 4.
+      stockProud: 8.9,
     });
 
     // "Use the badge blank": the same patch the panel's button sends.

@@ -44,6 +44,7 @@ const VISE = {
   jawLength: 100,
   jawStartY: -10,
   source: 'measured' as const,
+  seat: 'ledge' as const,
   uncertainty: 0.1,
   measuredAt: '2026-10-13T12:00:00.000Z',
 };

@@ -23,7 +23,7 @@ import { presetJawStrips, presetPartOnBoard } from '@/engine/cnc/sacrificial';
 import { itemConditionSummary, type ConditionSummary } from '@/engine/cnc/toolCondition';
 import { parseEngraveJob } from '@/store/engraveJobSchema';
 import { badgeBlankFor } from '@/engine/cnc/engrave/fromBadge';
-import { viseForNewJob } from '@/engine/cnc/fixture';
+import { VISE_BAR_HEIGHT, viseForNewJob } from '@/engine/cnc/fixture';
 import { defaultBadgeParams } from '@/types/badge';
 import type { NodeMeshOutput } from '@/workers/geometry/meshOutput';
 import type { EngraveJob, EngraveLabel, EngraveShape } from '@/types/engraveJob';
@@ -84,10 +84,38 @@ describe('engravePreview (#205)', () => {
     for (const floor of p.floors) expect(meshVolume(floor.mesh)).toBeGreaterThan(0);
   });
 
-  it('draws the two vise jaws', () => {
+  it('draws the two vise jaws and the body (#508)', () => {
     const p = buildPreview(defaultEngraveJob());
-    expect(p.fixture.map((f) => f.id)).toEqual(['vise-fixed-jaw', 'vise-moving-jaw']);
-    for (const jaw of p.fixture) expect(meshVolume(jaw.mesh)).toBeGreaterThan(0);
+    expect(p.fixture.map((f) => f.id)).toEqual(['vise-fixed-jaw', 'vise-moving-jaw', 'vise-body']);
+    for (const piece of p.fixture) expect(meshVolume(piece.mesh)).toBeGreaterThan(0);
+  });
+
+  it('draws the same vise height for a 3.8 mm blank, a 12 mm blank and a 50 mm cube (#508)', () => {
+    // The picture used to be the collision envelope, whose boxes run deeper as the stock thickens;
+    // drawn from it, a thicker blank appeared to grow the jaws. The cube is the loud case.
+    const jobs = [
+      { thickness: 3.8, length: 100, width: 60 },
+      { thickness: 12, length: 100, width: 60 },
+      { thickness: 50, length: 50, width: 50 },
+    ].map(({ thickness, length, width }) => {
+      const job = defaultEngraveJob();
+      job.stock.thickness = thickness;
+      job.stock.length = length;
+      job.stock.width = width;
+      job.workholding.vise = viseForNewJob(undefined, job.stock);
+      return job;
+    });
+
+    const heights = jobs.map((job) => {
+      const p = buildPreview(job);
+      return p.fixture.slice(0, 2).map((piece) => piece.mesh.bbox.max[2] - piece.mesh.bbox.min[2]);
+    });
+    // The bar height is the same at every thickness — fixed, not derived from the stock.
+    // Mesh coordinates are float32, so the bbox carries ~1e-6 mm of rounding.
+    for (const pair of heights) {
+      for (const height of pair) expect(height).toBeCloseTo(VISE_BAR_HEIGHT, 4);
+    }
+    expect(heights[1]).toEqual(heights[2]); // same seat, so identical, not merely close
   });
 
   it('carries the registration band for the mount’s datum edge (§5.4)', () => {

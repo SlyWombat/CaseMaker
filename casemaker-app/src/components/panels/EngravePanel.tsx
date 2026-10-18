@@ -175,7 +175,7 @@ const TAG: CSSProperties = {
   whiteSpace: 'nowrap',
   fontWeight: 400,
 };
-const SEVERITY_COLOR: Record<JobFinding['severity'], string> = { error: '#f0b4ad', warning: '#e0c07a' };
+const SEVERITY_COLOR: Record<JobFinding['severity'], string> = { error: '#f0b4ad', warning: '#e0c07a', info: '#7fa6c9' };
 
 /** A leading letter, uppercased — the engine's reasons are clauses, the panel prints sentences. */
 function sentenceCase(text: string): string {
@@ -2565,7 +2565,24 @@ export function EngravePanel(): JSX.Element {
         </span>
       </h3>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
-        {viseNum('stockProud', 'stock proud', 'How far the stock’s top face stands above the jaw tops, mm.')}
+        {/* #508 — the seat is the operator's answer, not a measurement: it is WHAT the blank's
+            underside rests on, and it is what sets how high the blank sits. The body floor's depth
+            is PROVISIONAL until the bench calipers it. */}
+        <label style={FIELD_LABEL}>
+          <span>blank rests on</span>
+          <select
+            value={job.workholding.vise.seat}
+            data-testid="engrave-vise-seat"
+            aria-label="Vise blank seat"
+            title="What the blank’s underside rests on: the soft jaws’ ledge, or the vise body’s floor."
+            style={FIELD}
+            onChange={(e) => setVise({ seat: e.target.value as ViseParams['seat'] })}
+          >
+            <option value="ledge">jaw ledge</option>
+            <option value="floor">body floor (PROVISIONAL)</option>
+          </select>
+        </label>
+        {viseNum('stockProud', 'stock proud', 'How far the stock’s top face stands above the jaw tops, mm. A default vise derives it from the seat and the thickness.')}
         {viseNum('fixedJawThickness', 'fixed jaw', 'Fixed jaw (left) thickness in X, mm.')}
         {viseNum('movingJawThickness', 'moving jaw', 'Moving jaw thickness in X, mm.')}
         {viseNum('jawLength', 'jaw length', 'Jaw length in Y, mm.')}

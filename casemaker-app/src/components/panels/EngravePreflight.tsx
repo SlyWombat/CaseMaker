@@ -31,7 +31,7 @@ const TAG: CSSProperties = {
   color: '#9aa4b0',
   verticalAlign: 'middle',
 };
-const SEVERITY_COLOR: Record<PreflightRow['severity'], string> = { error: '#f0b4ad', warning: '#e0c07a' };
+const SEVERITY_COLOR: Record<PreflightRow['severity'], string> = { error: '#f0b4ad', warning: '#e0c07a', info: '#7fa6c9' };
 
 export interface EngravePreflightProps {
   /** The hub's aggregate — one `collect()` per scope, plus the two run-policy rows. */

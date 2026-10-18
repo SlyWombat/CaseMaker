@@ -266,9 +266,8 @@ export function blankViseFindings(a: SetupAnswers): JobFinding[] {
 
 /**
  * The #231 fix: when the vise's `stockProud` is at or past the blank's thickness, the value that
- * resolves it is the stock-derived default (`defaultStockProud`: the seated value, capped by half
- * the blank and the shipped 4 mm), applied as the user's asserted setup (`source: 'saved'`).
- * Returns null when nothing needs fixing.
+ * resolves it is the seated default (`defaultStockProud`: the blank's underside on its seat, #508),
+ * applied as the user's asserted setup (`source: 'saved'`). Returns null when nothing needs fixing.
  *
  * On a blank no taller than the ledge step the derived value is `≤ 0` — the blank's top at or below
  * the jaw tops. Since #488 that is no longer a refusal, so the fix is offered there too: the job is
@@ -278,7 +277,11 @@ export function blankViseFindings(a: SetupAnswers): JobFinding[] {
  */
 export function stockProudFix(a: SetupAnswers): ViseParams | null {
   if (a.vise.stockProud < a.stock.thickness) return null;
-  return { ...a.vise, stockProud: defaultStockProud(a.stock.thickness), source: 'saved' };
+  return {
+    ...a.vise,
+    stockProud: defaultStockProud(a.stock.thickness, a.vise.seat),
+    source: 'saved',
+  };
 }
 
 // ---- answer updaters ---------------------------------------------------------------------------

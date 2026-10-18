@@ -62,6 +62,8 @@ export type JobFindingCode =
   | 'vise-stock-proud-exceeds-thickness'
   | 'vise-grip-shallow'
   | 'vise-jaw-short'
+  // Which seat the blank rests on and the proud it gives (#508) — information, never a fault.
+  | 'vise-seat'
   // Sacrificial material (#213): validated by `validateSacrificial`, raised through `validateJob`.
   | 'side-strip-unsupported'
   | 'strip-taller-than-part'
@@ -189,7 +191,11 @@ export type JobFindingCode =
   | 'setup-rest-nothing';
 
 export interface JobFinding {
-  severity: 'error' | 'warning';
+  /**
+   * `info` states a fact the panel should show but that blocks nothing — the seat a blank rests
+   * on is one (#508): it is a mechanism, not a fault in the job.
+   */
+  severity: 'error' | 'warning' | 'info';
   code: JobFindingCode;
   /** The item (label or shape) a finding points at, when it is about one item. */
   labelId?: string;
