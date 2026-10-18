@@ -90,6 +90,116 @@
           }
         ]
       },
+      "bedFixtures": [
+        {
+          "id": "fx-vise-1",
+          "kind": "vise",
+          "product": "makera-z1-low-profile-vise",
+          "variant": null,
+          "constants": {
+            "jawBarWidth": 10.0,
+            "jawLength": 100.0,
+            "ledgeStep": 3.1,
+            "ledgeWidth": 1.9
+          },
+          "unit": {
+            "stockProud": 1.5,
+            "fixedJawThickness": 10.0,
+            "movingJawThickness": 10.0,
+            "jawLength": 100.0,
+            "jawStartY": -10.0,
+            "uncertainty": 0.1,
+            "jawBarHeight": null,
+            "bodyHeight": null,
+            "maxOpening": null
+          },
+          "provenance": {
+            "jawBarWidth": "measured:2026-10-13T12:00:00.000Z",
+            "jawLength": "measured:2026-10-13T12:00:00.000Z",
+            "ledgeStep": "measured:2026-10-15T09:00:00.000Z",
+            "ledgeWidth": "measured:2026-10-15T09:00:00.000Z",
+            "stockProud": "measured:2026-10-13T12:00:00.000Z",
+            "fixedJawThickness": "measured:2026-10-13T12:00:00.000Z",
+            "movingJawThickness": "measured:2026-10-13T12:00:00.000Z",
+            "jawLength": "measured:2026-10-13T12:00:00.000Z",
+            "jawStartY": "measured:2026-10-13T12:00:00.000Z",
+            "uncertainty": "measured:2026-10-13T12:00:00.000Z",
+            "jawBarHeight": "unmeasured",
+            "bodyHeight": "unmeasured",
+            "maxOpening": "unmeasured"
+          }
+        }
+      ],
+      "bedProfiles": [
+        {
+          "id": "bp-migrated-2026-10-15",
+          "name": "Current bed (migrated 2026-10-15)",
+          "createdAt": "2026-10-15T09:00:00.000Z",
+          "basedOn": null,
+          "surface": {
+            "kind": "wasteboard",
+            "material": null,
+            "length": null,
+            "width": null,
+            "thickness": 10.0,
+            "position": null,
+            "provenance": {
+              "thickness": "measured:2026-10-15T07:00:00.000Z"
+            },
+            "scars": [
+              {
+                "x": -150.0,
+                "y": -150.0,
+                "width": 40.0,
+                "height": 20.0,
+                "at": "2026-10-15T08:00:00.000Z",
+                "jobId": "job-1"
+              }
+            ],
+            "lastResurfacedAt": null
+          },
+          "datums": {
+            "surfaceTopZ": null,
+            "viseJawTopZ": null,
+            "bracketSeatZ": {
+              "value": -70.2,
+              "measuredAt": "2026-10-16T10:00:00.000Z",
+              "by": "wired-probe",
+              "at": null
+            },
+            "rotaryAxis": null
+          },
+          "placements": [
+            {
+              "id": "pl-vise",
+              "fixture": "fx-vise-1",
+              "where": {
+                "kind": "pins",
+                "pins": "vise",
+                "anchor": null
+              },
+              "count": null,
+              "frame": {
+                "fixedJawFaceX": -0.1,
+                "jawStartY": -10.0
+              },
+              "provenance": {
+                "fixedJawFaceX": "measured:2026-10-16T09:00:00.000Z",
+                "jawStartY": "typed"
+              }
+            }
+          ],
+          "preferredMounting": [],
+          "consumables": null,
+          "history": [
+            {
+              "at": "2026-10-15T09:00:00.000Z",
+              "what": "created by migrating the wasteboard, the vise settings and the bracket seat"
+            }
+          ]
+        }
+      ],
+      "activeBedProfileId": "bp-migrated-2026-10-15",
       "updatedAt": "2026-10-15T09:00:00.000Z"
     }
   ],

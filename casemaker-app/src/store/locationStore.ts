@@ -56,11 +56,13 @@ import {
   type MachineRecord,
 } from '@/platform/locationClient';
 import { houseAddFinishedProgram } from '@/platform/finishedProgramsClient';
+import { bedFromLegacy, bedMigrationDue, newestViseRegistration } from '@/platform/bedProfiles';
 import { parseMarginsStrict, useSettingsStore, type FixturesSettings } from './settingsStore';
 import { useMachineStore } from './machineStore';
 import { useToolRegistryStore } from './toolRegistryStore';
 import { useShopDefaultsStore } from './shopDefaultsStore';
 import { useFeedTableStore } from './feedTableStore';
+import { useEngraveRegistrationStore } from './engraveRegistrationStore';
 import {
   legacyMargins,
   marginWrites,
@@ -291,6 +293,12 @@ export function mergeMachine(
       power: server?.power ?? null,
       wasteboard: server?.wasteboard ?? null,
       finishedPrograms: server?.finishedPrograms ?? [],
+      // The bed (#510) is written by the one-time migration and, later, by the profile UI. Until
+      // then this write-through carries the served keys unchanged — `undefined` when the machine
+      // has never been migrated, so a settings save does not add empty keys or reset the marker.
+      bedFixtures: server?.bedFixtures,
+      bedProfiles: server?.bedProfiles,
+      activeBedProfileId: server?.activeBedProfileId,
       updatedAt: now,
     },
     fromLocation,
@@ -441,6 +449,49 @@ export async function pushMachine(now: () => string = () => new Date().toISOStri
 }
 
 /**
+ * #510 — run the bed migration ONCE per machine, in place. The pure mapping is
+ * `platform/bedProfiles.ts`; this is the wiring that supplies its two client-only inputs (the
+ * parsed legacy `fixtures` section and this window's registration outcomes) and writes the result
+ * through the normal guarded machine PUT.
+ *
+ * `bedProfiles === undefined` is the marker. A machine whose description was deliberately emptied
+ * (`[]`) is left alone, so a second connect — or a second window — changes nothing. A refused or
+ * stale write is retried once against a fresh read; a failed one waits for the next connect rather
+ * than looping on the card.
+ */
+async function migrateBedOnce(now: () => string = () => new Date().toISOString()): Promise<void> {
+  const first = useLocationStore.getState().location?.machines[0];
+  if (first === undefined || !bedMigrationDue(first)) return;
+  // A successful machine PUT clears `writeNote` (the card's message). The margins move that ran
+  // just before this may have left a refusal note that is still true; the bed migration must not
+  // erase it, so the note from before the migration is carried across a successful write.
+  const carriedNote = useLocationStore.getState().writeNote;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const state = useLocationStore.getState();
+    const machine = state.location?.machines.find((m) => m.id === first.id);
+    if (machine === undefined || !bedMigrationDue(machine)) return;
+    const registration = newestViseRegistration(
+      Object.values(useEngraveRegistrationStore.getState().records),
+      machine.address,
+    );
+    // One timestamp for the profile's birth and the record's `updatedAt`, so a migration that
+    // straddles midnight cannot date its profile a day before the write that carried it.
+    const at = now();
+    const migrated = bedFromLegacy(
+      machine,
+      useShopDefaultsStore.getState().defaults,
+      registration,
+      at,
+    );
+    if (migrated === null) return;
+    const outcome = await state.saveMachine({ ...machine, ...migrated, updatedAt: at });
+    if (outcome === 'ok' && carriedNote !== null) useLocationStore.setState({ writeNote: carriedNote });
+    if (outcome !== 'stale') return;
+    // `saveMachine` re-read the location on a stale guard: try once against what was served.
+  }
+}
+
+/**
  * Connect: read the location, then reconcile (see the module doc) — the location's record wins
  * where it has one, and this window seeds it where it does not.
  */
@@ -459,12 +510,17 @@ export async function reconcileLocation(): Promise<void> {
   const existing = location.machines[0];
   const stored = storedBaseline();
   await settleMargins(existing ?? null, stored);
-  if (existing !== undefined) {
+  // #510: the bed is migrated BEFORE the record is applied or written through, so this window's
+  // base and the next write-through already carry it. It needs the defaults read above and the
+  // session's registration outcomes; both are client-only, which is why the service cannot do it.
+  await migrateBedOnce();
+  const machine = useLocationStore.getState().location?.machines[0] ?? existing;
+  if (machine !== undefined) {
     // #439: a base this window stored for the SAME machine is merged against — so an edit whose write
     // failed before the restart is written, and a section only the location changed is still taken in.
     // Without one, the location's record wins.
-    if (stored !== null && stored.id === existing.id) baseline = stored;
-    else applyMachineToSettings(existing);
+    if (stored !== null && stored.id === machine.id) baseline = stored;
+    else applyMachineToSettings(machine);
   }
   await pushMachine();
   confirmMarginsMoved();

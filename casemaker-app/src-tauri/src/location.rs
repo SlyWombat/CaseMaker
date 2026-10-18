@@ -67,10 +67,578 @@ pub struct MachineAddress {
     pub port: u16,
 }
 
+// ── #510: the bed — fixtures, profiles and the active one ──────────────────────────────────────
+//
+// THE BED IS PART OF THE MACHINE, NOT OF A JOB. `docs/design/bed-profiles.md` §2: what surface the
+// stock stands on, which accessories are on it and where, the datums measured on it, and the
+// mountings the shop prefers on it. A machine keeps many named profiles and exactly one ACTIVE
+// profile; a job binds to that id rather than to a copy of the numbers (#509; the job side is a
+// later slice). The migration below is the first-run shape: an existing machine's `wasteboard` and
+// vise become one profile named "Current bed (migrated <date>)", made active.
+//
+// WHY THE FIXTURE RECORDS ARE `bedFixtures` AND NOT §2's `fixtures`. `machines[].fixtures` has held
+// the client's `FixturesSettings` record (`{vise?, sacrificial?}`) since #412, and that record is
+// the SOURCE of the vise migration. Replacing it would delete the data being migrated and break
+// every reader of the settings section, so the new list lives beside it and `fixtures` is left
+// untouched — "nothing is deleted", the migration rule in the design. The key is the one place this
+// build differs from §2's literal spelling.
+//
+// A DATUM IS NEVER TYPED. The design's rule is enforced here and in the client: a datum carries the
+// value, when it was measured, and by what; `by: "typed"` is refused, as is a datum with no date.
+// A profile may be saved with every datum `null`, and each consumer refuses by name until it is
+// measured (as `bracket.seatMachineZ` does today).
+//
+// OPEN QUESTION A, DECIDED. The vise and the 4th-axis module share the locating pins, so one
+// profile may not place both: validation refuses a profile that has a `vise` and a `rotary-module`
+// placement (or both pin kinds), with a plain sentence rather than a silent overwrite.
+
+/// One accessory the shop owns, as the design's *fixture record* (§1): the product's constants,
+/// THIS unit's measurements, and where every number came from.
+///
+/// `kind` is an open string (`vise`, `bracket`, `top-clamp`, `side-clamp`, `rotary-module`,
+/// `vacuum-bed`, `probe`, …): another accessory is additive and must not need a schema version.
+/// `constants` and `unit` are open maps because the accessory families carry different dimensions;
+/// `provenance` maps each key (`"*"` for "all of them") to a location provenance word, optionally
+/// with its date or instrument (`measured:2026-10-15`, `vendor:config.anchor_length`, `default`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct FixtureRecord {
+    pub id: String,
+    pub kind: String,
+    /// `makera-z1-low-profile-vise`, `makera-z1-bracket`, … — null when nobody named it.
+    pub product: Option<String>,
+    /// `thin` / `thick` for the bracket, null elsewhere.
+    pub variant: Option<String>,
+    #[serde(default)]
+    pub constants: serde_json::Map<String, serde_json::Value>,
+    #[serde(default)]
+    pub unit: serde_json::Map<String, serde_json::Value>,
+    #[serde(default)]
+    pub provenance: std::collections::BTreeMap<String, String>,
+}
+
+/// A datum measured ON this bed (§1). There is no "typed" constructor: `validate` refuses
+/// `by: "typed"` in any case, and all four fields are required so an unmeasured datum is `null`
+/// rather than a shape with a value and no provenance.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct MeasuredDatum {
+    pub value: f64,
+    pub measured_at: String,
+    /// The instrument: `wired-probe`, `calipers`, … — never `typed`.
+    pub by: String,
+    /// Where on the bed, in machine XY, when the measurement named a point.
+    pub at: Option<[f64; 2]>,
+}
+
+/// The four datums a profile describes; each is `null` until measured (open question E's bare bed
+/// carries only `surfaceTopZ` when someone measures it).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct BedDatums {
+    pub surface_top_z: Option<MeasuredDatum>,
+    pub vise_jaw_top_z: Option<MeasuredDatum>,
+    pub bracket_seat_z: Option<MeasuredDatum>,
+    pub rotary_axis: Option<MeasuredDatum>,
+}
+
+/// What the stock or the fixtures stand on (§1, open question E).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum SurfaceKind {
+    BareBed,
+    Wasteboard,
+    FixturePlate,
+    VacuumBed,
+}
+
+/// The wasteboard's front-left corner in machine XY, with its frame stated so it cannot be read as
+/// work coordinates (the work origin moves with every job).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct BedPosition {
+    pub front_left: [f64; 2],
+    /// Only `machine` today; stated rather than implied, because a work-frame position would move
+    /// with G54 and describe a different place tomorrow.
+    pub frame: String,
+}
+
+/// The surface record of one profile. The #417 wasteboard's thickness, scars and dates move here
+/// whole; the dimensions and position are the design's additions and are absent until known.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct BedSurface {
+    pub kind: SurfaceKind,
+    pub material: Option<String>,
+    pub length: Option<f64>,
+    pub width: Option<f64>,
+    pub thickness: Option<f64>,
+    pub position: Option<BedPosition>,
+    #[serde(default)]
+    pub provenance: std::collections::BTreeMap<String, String>,
+    /// Through-cut rectangles the board carries, machine XY — the same `Scar` #417 defines, so a
+    /// migrated board's scars keep one shape.
+    #[serde(default)]
+    pub scars: Vec<crate::wasteboard::Scar>,
+    pub last_resurfaced_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum PlacementKind {
+    Pins,
+    Anchor,
+    Free,
+}
+
+/// The shared locating pins: the vise and the 4th-axis module are mutually exclusive (open
+/// question A, decided 2026-10-18).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum LocatingPins {
+    Vise,
+    Rotary,
+}
+
+/// How a placement holds its fixture: on the pins, at one of the bracket's two anchors, or merely
+/// standing on the bed (the clamps).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PlacementWhere {
+    pub kind: PlacementKind,
+    pub pins: Option<LocatingPins>,
+    /// 1 or 2 — the bracket's two anchors. Null for the other kinds.
+    pub anchor: Option<u8>,
+}
+
+/// Machine XY of a placement's locating feature: the fixed jaw face and where the bar starts.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PlacementFrame {
+    pub fixed_jaw_face_x: Option<f64>,
+    pub jaw_start_y: Option<f64>,
+}
+
+/// One fixture PUT ON the bed (§1). It adds position and orientation only; the drawn shape is the
+/// fixture record's.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct BedPlacement {
+    pub id: String,
+    /// A `FixtureRecord.id` on the same machine.
+    pub fixture: String,
+    #[serde(rename = "where")]
+    pub place: PlacementWhere,
+    /// Two top clamps are one placement with `count: 2`.
+    pub count: Option<u32>,
+    pub frame: Option<PlacementFrame>,
+    #[serde(default)]
+    pub provenance: std::collections::BTreeMap<String, String>,
+}
+
+/// How a stock class is held (§1): a placement, or none when the manner needs no fixture (tape on
+/// the surface).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct MountingChoice {
+    pub placement: Option<String>,
+    pub manner: MountingManner,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum MountingManner {
+    Jaws,
+    /// The design's spelling is `corner+clamps`; the plus is part of the word.
+    #[serde(rename = "corner+clamps")]
+    CornerClamps,
+    Tape,
+    Vacuum,
+    Chuck,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PreferredMounting {
+    /// The design's stock-class expression (`sheet<=3mm`, `plate|block`, …), kept as the shop
+    /// wrote it.
+    pub stock: String,
+    pub mount: MountingChoice,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ConsumableTape {
+    pub width_mm: f64,
+    pub thickness_mm: f64,
+    pub provenance: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ConsumableBoard {
+    pub material: String,
+    /// `[length, width, thickness]`, mm.
+    pub size: [f64; 3],
+    pub count: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct Consumables {
+    pub tape: Option<ConsumableTape>,
+    #[serde(default)]
+    pub boards: Vec<ConsumableBoard>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ProfileHistoryEntry {
+    pub at: String,
+    pub what: String,
+}
+
+/// One named description of the machine's bed (§2).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct BedProfile {
+    pub id: String,
+    pub name: String,
+    pub created_at: String,
+    /// The shipped profile it started from (`default:z1-vise`), or null.
+    pub based_on: Option<String>,
+    pub surface: BedSurface,
+    pub datums: BedDatums,
+    #[serde(default)]
+    pub placements: Vec<BedPlacement>,
+    #[serde(default)]
+    pub preferred_mounting: Vec<PreferredMounting>,
+    pub consumables: Option<Consumables>,
+    #[serde(default)]
+    pub history: Vec<ProfileHistoryEntry>,
+}
+
+fn finite_positive(v: f64) -> bool {
+    v.is_finite() && v > 0.0
+}
+
+impl FixtureRecord {
+    fn validate(&self, machine: &str) -> Result<(), HouseError> {
+        validate_id(&self.id, "fixture")?;
+        if self.kind.trim().is_empty() {
+            return Err(HouseError::BadEntry(format!(
+                "machine {machine}'s fixture {} does not say what kind it is",
+                self.id
+            )));
+        }
+        if let Some(product) = &self.product {
+            if product.trim().is_empty() {
+                return Err(HouseError::BadEntry(format!(
+                    "machine {machine}'s fixture {} names an empty product",
+                    self.id
+                )));
+            }
+        }
+        if let Some(variant) = &self.variant {
+            if variant.trim().is_empty() {
+                return Err(HouseError::BadEntry(format!(
+                    "machine {machine}'s fixture {} names an empty variant",
+                    self.id
+                )));
+            }
+        }
+        // Numbers in the open maps are dimensions or counts: refuse a non-finite one so a bad
+        // record cannot reach a consumer as NaN. `serde_json` cannot hold NaN, but a future writer
+        // could hand us a float that overflowed; the check is cheap and states the rule.
+        for (what, map) in [("constants", &self.constants), ("unit", &self.unit)] {
+            for (key, value) in map {
+                if key.trim().is_empty() {
+                    return Err(HouseError::BadEntry(format!(
+                        "machine {machine}'s fixture {} has a {what} key with no name",
+                        self.id
+                    )));
+                }
+                if let Some(n) = value.as_f64() {
+                    if !n.is_finite() {
+                        return Err(HouseError::BadEntry(format!(
+                            "machine {machine}'s fixture {} has a non-finite {what}.{key}",
+                            self.id
+                        )));
+                    }
+                }
+            }
+        }
+        validate_provenance(machine, "fixture", &self.id, &self.provenance)
+    }
+}
+
+impl MeasuredDatum {
+    fn validate(&self, machine: &str, profile: &str, what: &str) -> Result<(), HouseError> {
+        if !self.value.is_finite() {
+            return Err(HouseError::BadEntry(format!(
+                "machine {machine}'s bed profile {profile}: {what} is not a number"
+            )));
+        }
+        if self.measured_at.trim().is_empty() {
+            return Err(HouseError::BadEntry(format!(
+                "machine {machine}'s bed profile {profile}: {what} does not say when it was measured"
+            )));
+        }
+        let by = self.by.trim();
+        if by.is_empty() || by.eq_ignore_ascii_case("typed") {
+            return Err(HouseError::BadEntry(format!(
+                "machine {machine}'s bed profile {profile}: {what} must be measured, never typed"
+            )));
+        }
+        if let Some(at) = self.at {
+            if !at.iter().all(|v| v.is_finite()) {
+                return Err(HouseError::BadEntry(format!(
+                    "machine {machine}'s bed profile {profile}: {what} names a point that is not a number"
+                )));
+            }
+        }
+        Ok(())
+    }
+}
+
+impl BedDatums {
+    fn validate(&self, machine: &str, profile: &str) -> Result<(), HouseError> {
+        for (what, datum) in [
+            ("surfaceTopZ", &self.surface_top_z),
+            ("viseJawTopZ", &self.vise_jaw_top_z),
+            ("bracketSeatZ", &self.bracket_seat_z),
+            ("rotaryAxis", &self.rotary_axis),
+        ] {
+            if let Some(d) = datum {
+                d.validate(machine, profile, what)?;
+            }
+        }
+        Ok(())
+    }
+}
+
+impl BedSurface {
+    fn validate(&self, machine: &str, profile: &str) -> Result<(), HouseError> {
+        let bad = |why: &str| {
+            Err(HouseError::BadEntry(format!(
+                "machine {machine}'s bed profile {profile}: the surface {why}"
+            )))
+        };
+        for (what, v) in [("length", self.length), ("width", self.width), ("thickness", self.thickness)] {
+            if v.is_some_and(|n| !finite_positive(n)) {
+                return bad(&format!("has a {what} that is not a positive number of mm"));
+            }
+        }
+        if self.material.as_ref().is_some_and(|m| m.trim().is_empty()) {
+            return bad("names an empty material");
+        }
+        if self
+            .last_resurfaced_at
+            .as_ref()
+            .is_some_and(|d| d.trim().is_empty())
+        {
+            return bad("has an empty resurfacing date");
+        }
+        if let Some(pos) = &self.position {
+            if pos.frame != "machine" {
+                return bad(&format!("is positioned in {:?}, not machine XY", pos.frame));
+            }
+            if !pos.front_left.iter().all(|v| v.is_finite()) {
+                return bad("has a front-left corner that is not a number");
+            }
+        }
+        crate::wasteboard::validate_scars(&self.scars, "the bed surface")?;
+        match self.kind {
+            SurfaceKind::BareBed => {
+                if self.material.is_some()
+                    || self.length.is_some()
+                    || self.width.is_some()
+                    || self.thickness.is_some()
+                    || self.position.is_some()
+                    || self.last_resurfaced_at.is_some()
+                    || !self.scars.is_empty()
+                {
+                    return bad("is the bare bed: it has no size, position, scars or resurfacing (open question E)");
+                }
+            }
+            SurfaceKind::Wasteboard => {
+                if self.thickness.is_none() {
+                    return bad("is a wasteboard but does not say how thick it is");
+                }
+            }
+            SurfaceKind::FixturePlate | SurfaceKind::VacuumBed => {}
+        }
+        validate_provenance(machine, "bed profile", profile, &self.provenance)
+    }
+}
+
+impl PlacementWhere {
+    fn validate(&self, machine: &str, profile: &str, placement: &str) -> Result<(), HouseError> {
+        let bad = |why: String| {
+            Err(HouseError::BadEntry(format!(
+                "machine {machine}'s bed profile {profile}, placement {placement}: {why}"
+            )))
+        };
+        match self.kind {
+            PlacementKind::Pins => {
+                if self.pins.is_none() {
+                    return bad("is on the pins but does not say which fixture's pins".into());
+                }
+                if self.anchor.is_some() {
+                    return bad("is on the pins and also names an anchor".into());
+                }
+            }
+            PlacementKind::Anchor => {
+                if self.pins.is_some() {
+                    return bad("is at an anchor and also names the pins".into());
+                }
+                if !matches!(self.anchor, Some(1 | 2)) {
+                    return bad("is at an anchor that is not 1 or 2".into());
+                }
+            }
+            PlacementKind::Free => {
+                if self.pins.is_some() || self.anchor.is_some() {
+                    return bad("stands free but names pins or an anchor".into());
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+impl BedProfile {
+    fn validate(
+        &self,
+        machine: &str,
+        fixtures: Option<&[FixtureRecord]>,
+    ) -> Result<(), HouseError> {
+        validate_id(&self.id, "bed profile")?;
+        let bad = |why: String| {
+            Err(HouseError::BadEntry(format!(
+                "machine {machine}'s bed profile {}: {why}",
+                self.id
+            )))
+        };
+        if self.name.trim().is_empty() {
+            return bad("has no name".into());
+        }
+        if self.created_at.trim().is_empty() {
+            return bad("does not say when it was created".into());
+        }
+        self.surface.validate(machine, &self.id)?;
+        self.datums.validate(machine, &self.id)?;
+
+        let mut placement_ids = HashSet::new();
+        let mut placed_kinds: Vec<&str> = Vec::new();
+        let mut pin_kinds = HashSet::new();
+        for p in &self.placements {
+            validate_id(&p.id, "placement")?;
+            if !placement_ids.insert(p.id.as_str()) {
+                return bad(format!("has two placements called {}", p.id));
+            }
+            p.place.validate(machine, &self.id, &p.id)?;
+            let Some(fixture) = fixtures.and_then(|list| list.iter().find(|f| f.id == p.fixture))
+            else {
+                return bad(format!(
+                    "places fixture {} which this machine does not own",
+                    p.fixture
+                ));
+            };
+            placed_kinds.push(fixture.kind.as_str());
+            if let Some(pins) = p.place.pins {
+                pin_kinds.insert(pins);
+            }
+            if p.count == Some(0) {
+                return bad(format!("places {} zero times", p.fixture));
+            }
+            if let Some(frame) = &p.frame {
+                for (what, v) in [
+                    ("fixedJawFaceX", frame.fixed_jaw_face_x),
+                    ("jawStartY", frame.jaw_start_y),
+                ] {
+                    if v.is_some_and(|n| !n.is_finite()) {
+                        return bad(format!("has a frame {what} that is not a number"));
+                    }
+                }
+            }
+        }
+        // Open question A, decided 2026-10-18: the vise and the 4th-axis module share the pins and
+        // one of them is on the bed at a time. Refuse both, whether the conflict is in the fixture
+        // kinds or directly in the pin labels.
+        if placed_kinds.contains(&"vise") && placed_kinds.contains(&"rotary-module") {
+            return bad("places the vise and the 4th-axis module: they share the pins, so one at a time".into());
+        }
+        if pin_kinds.contains(&LocatingPins::Vise) && pin_kinds.contains(&LocatingPins::Rotary) {
+            return bad("places the vise and the 4th-axis module on the pins: they are mutually exclusive".into());
+        }
+
+        let mut stocks = HashSet::new();
+        for m in &self.preferred_mounting {
+            if m.stock.trim().is_empty() {
+                return bad("has a preferred mounting with no stock class".into());
+            }
+            if !stocks.insert(m.stock.as_str()) {
+                return bad(format!("prefers two mountings for {}", m.stock));
+            }
+            if let Some(placement) = &m.mount.placement {
+                if !placement_ids.contains(placement.as_str()) {
+                    return bad(format!(
+                        "prefers placement {placement}, which this profile does not have"
+                    ));
+                }
+            }
+        }
+
+        if let Some(c) = &self.consumables {
+            if let Some(tape) = &c.tape {
+                if !finite_positive(tape.width_mm) || !finite_positive(tape.thickness_mm) {
+                    return bad("records tape with a width or thickness that is not a positive number".into());
+                }
+                if tape.provenance.trim().is_empty() {
+                    return bad("records tape with no provenance".into());
+                }
+            }
+            for b in &c.boards {
+                if b.material.trim().is_empty() {
+                    return bad("records a board with no material".into());
+                }
+                if !b.size.iter().all(|v| finite_positive(*v)) {
+                    return bad("records a board whose size is not three positive numbers".into());
+                }
+            }
+        }
+
+        for h in &self.history {
+            if h.at.trim().is_empty() || h.what.trim().is_empty() {
+                return bad("has a history entry with no date or no description".into());
+            }
+        }
+        Ok(())
+    }
+}
+
+fn validate_provenance(
+    machine: &str,
+    what: &str,
+    id: &str,
+    map: &std::collections::BTreeMap<String, String>,
+) -> Result<(), HouseError> {
+    for (key, value) in map {
+        if key.trim().is_empty() || value.trim().is_empty() {
+            return Err(HouseError::BadEntry(format!(
+                "machine {machine}'s {what} {id} has a provenance entry with no key or no source"
+            )));
+        }
+    }
+    Ok(())
+}
+
 /// One physical machine at the location (§3.1).
 ///
 /// Every optional field is serialized as `null` rather than omitted, the same rule `Tool` follows:
-/// the client's schema reads `null` as "not stated", and an absent key is not the same claim.
+/// the client's schema reads `null` as "not stated", and an absent key is not the same claim. The
+/// EXCEPTIONS are the additive sections that must not appear on an older document — the finished
+/// programs (#419) and the bed (#510) — which are omitted while absent.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct MachineRecord {
@@ -96,6 +664,21 @@ pub struct MachineRecord {
     /// `FixturesSettings` (#203, #213) — the saved vise and sacrificial setup — as the client sent it.
     #[serde(default)]
     pub fixtures: Option<serde_json::Value>,
+    /// The accessories this machine owns (#510): product constants, this unit's measurements and
+    /// provenance. The design's literal key is `fixtures`, which #412 already gave to the settings
+    /// record above; the list lives beside it so the migrated data is not deleted (module comment).
+    /// ABSENT, not `null`, until there is one, so a location written before the bed existed
+    /// round-trips without gaining a key.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bed_fixtures: Option<Vec<FixtureRecord>>,
+    /// The machine's bed profiles (#510), named and dated. `None` is "the bed has not been
+    /// described yet" — what the first migration and the wizard (#512) act on; `Some(vec![])` is a
+    /// description that was deliberately emptied, so the migration does not run again.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bed_profiles: Option<Vec<BedProfile>>,
+    /// The one active profile. Present exactly when `bed_profiles` has at least one entry.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub active_bed_profile_id: Option<String>,
     /// `MarginSettings` (#345), as the client sent it.
     #[serde(default)]
     pub margins: Option<serde_json::Value>,
@@ -141,6 +724,53 @@ impl MachineRecord {
             w.validate()?;
         }
         crate::finished_programs::validate_list(&self.id, &self.finished_programs)?;
+        if let Some(fixtures) = &self.bed_fixtures {
+            let mut ids = HashSet::new();
+            for f in fixtures {
+                f.validate(&self.id)?;
+                if !ids.insert(f.id.as_str()) {
+                    return Err(HouseError::BadEntry(format!(
+                        "machine {} has two fixtures called {}",
+                        self.id, f.id
+                    )));
+                }
+            }
+        }
+        if let Some(profiles) = &self.bed_profiles {
+            let mut ids = HashSet::new();
+            for p in profiles {
+                p.validate(&self.id, self.bed_fixtures.as_deref())?;
+                if !ids.insert(p.id.as_str()) {
+                    return Err(HouseError::BadEntry(format!(
+                        "machine {} has two bed profiles called {}",
+                        self.id, p.id
+                    )));
+                }
+            }
+        }
+        match (&self.bed_profiles, &self.active_bed_profile_id) {
+            (None, Some(id)) => {
+                return Err(HouseError::BadEntry(format!(
+                    "machine {} names {id} as its active bed profile but has no profiles",
+                    self.id
+                )));
+            }
+            (Some(profiles), Some(id)) => {
+                if !profiles.iter().any(|p| &p.id == id) {
+                    return Err(HouseError::BadEntry(format!(
+                        "machine {} names {id} as its active bed profile, which it does not have",
+                        self.id
+                    )));
+                }
+            }
+            (Some(profiles), None) if !profiles.is_empty() => {
+                return Err(HouseError::BadEntry(format!(
+                    "machine {} has bed profiles but names no active one",
+                    self.id
+                )));
+            }
+            _ => {}
+        }
         for (what, section) in [
             ("calibration", &self.calibration),
             ("fixtures", &self.fixtures),
@@ -334,12 +964,115 @@ mod tests {
             address: Some(MachineAddress { host: "192.168.10.43".into(), port: 2222 }),
             calibration: None,
             fixtures: Some(serde_json::json!({})),
+            bed_fixtures: None,
+            bed_profiles: None,
+            active_bed_profile_id: None,
             margins: None,
             power: None,
             wasteboard: None,
             finished_programs: Vec::new(),
             updated_at: "2026-10-15T00:00:00.000Z".into(),
         }
+    }
+
+    fn a_datum(value: f64) -> MeasuredDatum {
+        MeasuredDatum {
+            value,
+            measured_at: "2026-10-15T09:00:00.000Z".into(),
+            by: "wired-probe".into(),
+            at: Some([-150.0, -150.0]),
+        }
+    }
+
+    fn a_bed_fixture() -> FixtureRecord {
+        FixtureRecord {
+            id: "fx-vise-1".into(),
+            kind: "vise".into(),
+            product: Some("makera-z1-low-profile-vise".into()),
+            variant: None,
+            constants: serde_json::json!({
+                "jawBarWidth": 10.0, "jawLength": 100.0, "ledgeStep": 3.1, "ledgeWidth": 1.9
+            })
+            .as_object()
+            .unwrap()
+            .clone(),
+            unit: serde_json::json!({
+                "jawBarHeight": null, "bodyHeight": null, "maxOpening": null
+            })
+            .as_object()
+            .unwrap()
+            .clone(),
+            provenance: [("jawBarWidth".to_string(), "measured:2026-10-13".to_string())].into(),
+        }
+    }
+
+    fn a_bed_profile() -> BedProfile {
+        BedProfile {
+            id: "bp-1".into(),
+            name: "Test bed".into(),
+            created_at: "2026-10-15T09:00:00.000Z".into(),
+            based_on: Some("default:z1-vise".into()),
+            surface: BedSurface {
+                kind: SurfaceKind::Wasteboard,
+                material: Some("MDF".into()),
+                length: Some(200.0),
+                width: Some(200.0),
+                thickness: Some(10.0),
+                position: Some(BedPosition { front_left: [-150.0, -150.0], frame: "machine".into() }),
+                provenance: [("thickness".to_string(), "measured:2026-10-15".to_string())].into(),
+                scars: Vec::new(),
+                last_resurfaced_at: None,
+            },
+            datums: BedDatums {
+                surface_top_z: Some(a_datum(-112.345)),
+                vise_jaw_top_z: None,
+                bracket_seat_z: None,
+                rotary_axis: None,
+            },
+            placements: vec![BedPlacement {
+                id: "pl-vise".into(),
+                fixture: "fx-vise-1".into(),
+                place: PlacementWhere {
+                    kind: PlacementKind::Pins,
+                    pins: Some(LocatingPins::Vise),
+                    anchor: None,
+                },
+                count: None,
+                frame: Some(PlacementFrame {
+                    fixed_jaw_face_x: Some(-0.1),
+                    jaw_start_y: Some(-10.0),
+                }),
+                provenance: [("fixedJawFaceX".to_string(), "measured:2026-10-17".to_string())].into(),
+            }],
+            preferred_mounting: vec![PreferredMounting {
+                stock: "plate|block".into(),
+                mount: MountingChoice { placement: Some("pl-vise".into()), manner: MountingManner::Jaws },
+            }],
+            consumables: Some(Consumables {
+                tape: Some(ConsumableTape {
+                    width_mm: 20.0,
+                    thickness_mm: 0.1,
+                    provenance: "typed".into(),
+                }),
+                boards: vec![ConsumableBoard {
+                    material: "MDF".into(),
+                    size: [100.0, 100.0, 2.0],
+                    count: 4,
+                }],
+            }),
+            history: vec![ProfileHistoryEntry {
+                at: "2026-10-15T09:00:00.000Z".into(),
+                what: "created from default:z1-vise".into(),
+            }],
+        }
+    }
+
+    fn a_machine_with_a_bed() -> MachineRecord {
+        let mut m = a_machine("m-1");
+        m.bed_fixtures = Some(vec![a_bed_fixture()]);
+        m.bed_profiles = Some(vec![a_bed_profile()]);
+        m.active_bed_profile_id = Some("bp-1".into());
+        m
     }
 
     #[test]
@@ -391,6 +1124,144 @@ mod tests {
         with_hashes.validate().unwrap();
         let v = serde_json::to_value(&with_hashes).unwrap();
         assert_eq!(v["finishedPrograms"], serde_json::json!(["a1b2c3d4"]));
+    }
+
+    #[test]
+    fn a_machine_with_a_bed_round_trips_with_its_fixtures_and_profile() {
+        // #510: the model is stored, so a machine carrying it must come back exactly — the fixture
+        // records, the profile with its surface/datums/placements, and the active id.
+        let machine = a_machine_with_a_bed();
+        machine.validate().unwrap();
+        let v = serde_json::to_value(&machine).unwrap();
+        assert_eq!(v["bedFixtures"][0]["id"], serde_json::json!("fx-vise-1"));
+        assert_eq!(v["bedFixtures"][0]["constants"]["ledgeStep"], serde_json::json!(3.1));
+        assert_eq!(v["bedProfiles"][0]["surface"]["kind"], serde_json::json!("wasteboard"));
+        assert_eq!(v["bedProfiles"][0]["datums"]["surfaceTopZ"]["by"], serde_json::json!("wired-probe"));
+        assert_eq!(v["activeBedProfileId"], serde_json::json!("bp-1"));
+        let back: MachineRecord = serde_json::from_value(v).unwrap();
+        assert_eq!(back, machine);
+    }
+
+    #[test]
+    fn a_machine_without_a_bed_says_nothing_about_one() {
+        // #510's round-trip rule: a document written before the bed existed must not GAIN the keys.
+        // `fixtures` (the #412 settings record) is untouched and still serialized as before.
+        let machine = a_machine("m-1");
+        machine.validate().unwrap();
+        let v = serde_json::to_value(&machine).unwrap();
+        for key in ["bedFixtures", "bedProfiles", "activeBedProfileId"] {
+            assert!(v.get(key).is_none(), "{key} was written: {v}");
+        }
+        assert!(v.get("fixtures").is_some(), "the legacy fixtures section is still there");
+    }
+
+    #[test]
+    fn a_datum_typed_by_hand_is_refused_and_an_undated_one_does_not_parse() {
+        let mut machine = a_machine_with_a_bed();
+        machine.bed_profiles.as_mut().unwrap()[0]
+            .datums
+            .surface_top_z
+            .as_mut()
+            .unwrap()
+            .by = "Typed".into();
+        assert!(matches!(machine.validate(), Err(HouseError::BadEntry(_))));
+
+        // The schema itself holds a datum to all four fields: value, date and instrument are not
+        // optional, so an unmeasured datum cannot be written as a bare value.
+        assert!(serde_json::from_value::<MeasuredDatum>(serde_json::json!({
+            "value": -112.3, "by": "wired-probe"
+        }))
+        .is_err());
+        assert!(serde_json::from_value::<MeasuredDatum>(serde_json::json!({
+            "value": -112.3, "measuredAt": "2026-10-15T09:00:00.000Z"
+        }))
+        .is_err());
+    }
+
+    #[test]
+    fn the_active_bed_profile_must_be_one_the_machine_has() {
+        let mut missing = a_machine_with_a_bed();
+        missing.active_bed_profile_id = Some("bp-other".into());
+        assert!(missing.validate().is_err());
+
+        let mut none_named = a_machine_with_a_bed();
+        none_named.active_bed_profile_id = None;
+        assert!(none_named.validate().is_err());
+
+        let mut active_without_profiles = a_machine("m-1");
+        active_without_profiles.active_bed_profile_id = Some("bp-1".into());
+        assert!(active_without_profiles.validate().is_err());
+
+        // An EMPTY list with no active id is a legal, deliberately emptied description — and the
+        // marker that the first migration has already run.
+        let mut emptied = a_machine("m-1");
+        emptied.bed_fixtures = Some(Vec::new());
+        emptied.bed_profiles = Some(Vec::new());
+        emptied.validate().unwrap();
+    }
+
+    #[test]
+    fn the_vise_and_the_rotary_module_may_not_share_the_pins() {
+        let mut rotary_fixture = a_bed_fixture();
+        rotary_fixture.id = "fx-rotary".into();
+        rotary_fixture.kind = "rotary-module".into();
+        let mut machine = a_machine_with_a_bed();
+        machine.bed_fixtures.as_mut().unwrap().push(rotary_fixture);
+        machine.bed_profiles.as_mut().unwrap()[0].placements.push(BedPlacement {
+            id: "pl-rotary".into(),
+            fixture: "fx-rotary".into(),
+            place: PlacementWhere {
+                kind: PlacementKind::Pins,
+                pins: Some(LocatingPins::Rotary),
+                anchor: None,
+            },
+            count: None,
+            frame: None,
+            provenance: Default::default(),
+        });
+        let err = machine.validate().unwrap_err().to_string();
+        assert!(err.contains("mutually exclusive") || err.contains("one at a time"), "{err}");
+
+        // A placement naming a fixture the machine does not own is refused too, so a profile cannot
+        // point at another machine's accessory.
+        let mut stranger = a_machine_with_a_bed();
+        stranger.bed_profiles.as_mut().unwrap()[0].placements[0].fixture = "fx-elsewhere".into();
+        assert!(stranger.validate().is_err());
+    }
+
+    #[test]
+    fn a_bare_bed_has_no_size_scars_or_resurfacing() {
+        let mut machine = a_machine_with_a_bed();
+        {
+            let surface = &mut machine.bed_profiles.as_mut().unwrap()[0].surface;
+            surface.kind = SurfaceKind::BareBed;
+        }
+        // It still carries the wasteboard's size and material, which open question E forbids.
+        assert!(machine.validate().is_err());
+
+        let surface = &mut machine.bed_profiles.as_mut().unwrap()[0].surface;
+        surface.material = None;
+        surface.length = None;
+        surface.width = None;
+        surface.thickness = None;
+        surface.position = None;
+        surface.provenance.clear();
+        machine.validate().unwrap();
+    }
+
+    #[test]
+    fn a_wasteboard_says_how_thick_it_is() {
+        let mut machine = a_machine_with_a_bed();
+        machine.bed_profiles.as_mut().unwrap()[0].surface.thickness = None;
+        assert!(machine.validate().is_err());
+    }
+
+    #[test]
+    fn a_key_in_a_profile_this_build_does_not_know_is_refused() {
+        let mut v = serde_json::to_value(a_machine_with_a_bed()).unwrap();
+        v["bedProfiles"][0]["datums"]["surfaceTopZ"]["typedBy"] = serde_json::json!("hand");
+        let err = serde_json::from_value::<MachineRecord>(v).unwrap_err().to_string();
+        assert!(err.contains("typedBy"), "{err}");
     }
 
     #[test]

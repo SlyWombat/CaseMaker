@@ -1406,12 +1406,29 @@ impl HouseStore {
                 record.power = existing.power.clone();
                 record.wasteboard = existing.wasteboard.clone();
                 record.finished_programs = existing.finished_programs.clone();
+                // The bed (#510) is written by the client's one-time migration and, later, by the
+                // profile UI. An OLDER client sends no bed keys at all, and must not wipe them —
+                // but the migration itself arrives as a key-bearing PUT, so the rule is "absent
+                // keeps what is stored" rather than "always keep", as power and the wasteboard do:
+                // those have their own endpoints, the bed does not yet.
+                if record.bed_fixtures.is_none() {
+                    record.bed_fixtures = existing.bed_fixtures.clone();
+                }
+                if record.bed_profiles.is_none() {
+                    record.bed_profiles = existing.bed_profiles.clone();
+                }
+                if record.active_bed_profile_id.is_none() {
+                    record.active_bed_profile_id = existing.active_bed_profile_id.clone();
+                }
                 *existing = record;
             }
             None => {
                 record.power = None;
                 record.wasteboard = None;
                 record.finished_programs = Vec::new();
+                record.bed_fixtures = None;
+                record.bed_profiles = None;
+                record.active_bed_profile_id = None;
                 next.machines.push(record);
             }
         }
@@ -3350,6 +3367,9 @@ mod tests {
             address: Some(crate::location::MachineAddress { host: "192.0.2.10".into(), port: 2222 }),
             calibration: None,
             fixtures: Some(serde_json::json!({ "vise": { "source": "measured" } })),
+            bed_fixtures: None,
+            bed_profiles: None,
+            active_bed_profile_id: None,
             margins: None,
             power: None,
             wasteboard: None,
@@ -4046,6 +4066,73 @@ mod tests {
         assert_eq!(m["margins"]["source"], serde_json::json!("user"));
         assert_eq!(m["power"]["entityId"], serde_json::json!("switch.makera_cnc"));
         assert_eq!(m["wasteboard"]["thickness"], serde_json::json!(10.0));
+    }
+
+    #[tokio::test]
+    async fn a_machine_put_keeps_bed_keys_an_older_client_omits_and_accepts_the_migration() {
+        // #510: the client's one-time migration is a key-bearing machine PUT, and the settings
+        // write-through of an OLDER client carries no bed keys at all. The first must write, the
+        // second must not wipe — the reason `put_machine` has the `is_none` rule.
+        use crate::location::{
+            BedDatums, BedProfile, BedSurface, FixtureRecord, SurfaceKind,
+        };
+
+        let (_dir, store) = store_with_machine().await;
+        let (_, etag) = store.location().await.unwrap();
+        let mut migrated = a_machine("m-1");
+        migrated.bed_fixtures = Some(vec![FixtureRecord {
+            id: "fx-vise-1".into(),
+            kind: "vise".into(),
+            product: Some("makera-z1-low-profile-vise".into()),
+            variant: None,
+            constants: Default::default(),
+            unit: Default::default(),
+            provenance: Default::default(),
+        }]);
+        migrated.bed_profiles = Some(vec![BedProfile {
+            id: "bp-1".into(),
+            name: "Current bed (migrated 2026-10-18)".into(),
+            created_at: "2026-10-18T00:00:00.000Z".into(),
+            based_on: None,
+            surface: BedSurface {
+                kind: SurfaceKind::BareBed,
+                material: None,
+                length: None,
+                width: None,
+                thickness: None,
+                position: None,
+                provenance: Default::default(),
+                scars: Vec::new(),
+                last_resurfaced_at: None,
+            },
+            datums: BedDatums {
+                surface_top_z: None,
+                vise_jaw_top_z: None,
+                bracket_seat_z: None,
+                rotary_axis: None,
+            },
+            placements: Vec::new(),
+            preferred_mounting: Vec::new(),
+            consumables: None,
+            history: Vec::new(),
+        }]);
+        migrated.active_bed_profile_id = Some("bp-1".into());
+        store.put_machine(migrated, Some(&etag)).await.unwrap();
+
+        let view: serde_json::Value = serde_json::from_slice(&store.location().await.unwrap().0).unwrap();
+        assert_eq!(view["machines"][0]["bedFixtures"][0]["id"], serde_json::json!("fx-vise-1"));
+        assert_eq!(view["machines"][0]["activeBedProfileId"], serde_json::json!("bp-1"));
+
+        // An older client's settings write: no bed keys on the wire, so the stored bed survives.
+        let (_, etag) = store.location().await.unwrap();
+        let mut older = a_machine("m-1");
+        older.margins = Some(serde_json::json!({ "source": "user" }));
+        store.put_machine(older, Some(&etag)).await.unwrap();
+        let view: serde_json::Value = serde_json::from_slice(&store.location().await.unwrap().0).unwrap();
+        assert_eq!(view["machines"][0]["margins"]["source"], serde_json::json!("user"));
+        assert_eq!(view["machines"][0]["bedFixtures"][0]["id"], serde_json::json!("fx-vise-1"));
+        assert_eq!(view["machines"][0]["bedProfiles"][0]["id"], serde_json::json!("bp-1"));
+        assert_eq!(view["machines"][0]["activeBedProfileId"], serde_json::json!("bp-1"));
     }
 
     #[tokio::test]

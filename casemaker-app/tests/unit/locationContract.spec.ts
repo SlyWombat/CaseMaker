@@ -61,6 +61,46 @@ describe('the location contract (#412)', () => {
     expect(parsed.success, JSON.stringify(parsed.error?.issues)).toBe(true);
   });
 
+  it('carries the bed model (#510): fixture records, the migrated profile and its active id', () => {
+    const parsed = LocationDocSchema.safeParse(doc());
+    expect(parsed.success, JSON.stringify(parsed.error?.issues)).toBe(true);
+    const m = parsed.data!.machines[0]!;
+    expect(m.bedFixtures?.[0]).toMatchObject({
+      id: 'fx-vise-1',
+      kind: 'vise',
+      product: 'makera-z1-low-profile-vise',
+    });
+    expect(m.bedFixtures?.[0]?.constants).toMatchObject({ jawBarWidth: 10, ledgeStep: 3.1 });
+    expect(m.bedProfiles?.[0]).toMatchObject({
+      id: 'bp-migrated-2026-10-15',
+      name: 'Current bed (migrated 2026-10-15)',
+      surface: { kind: 'wasteboard', thickness: 10 },
+    });
+    expect(m.bedProfiles?.[0]?.datums.bracketSeatZ).toMatchObject({
+      value: -70.2,
+      by: 'wired-probe',
+    });
+    expect(m.activeBedProfileId).toBe(m.bedProfiles?.[0]?.id);
+  });
+
+  it('round-trips a machine from before the bed without gaining its keys (#510)', () => {
+    const d = doc();
+    const m = d.machines[0]!;
+    delete m.bedFixtures;
+    delete m.bedProfiles;
+    delete m.activeBedProfileId;
+    const parsed = LocationDocSchema.safeParse(d);
+    expect(parsed.success, JSON.stringify(parsed.error?.issues)).toBe(true);
+    const text = JSON.stringify(parsed.data);
+    // The keys are `.optional()`, not defaulted: an old document must not gain them on the way
+    // through this build (the issue's byte-for-byte rule).
+    expect(text).not.toContain('bedFixtures');
+    expect(text).not.toContain('bedProfiles');
+    expect(text).not.toContain('activeBedProfileId');
+    // The legacy section that shares the design's word "fixtures" is still there.
+    expect(parsed.data!.machines[0]!.fixtures?.vise?.source).toBe('measured');
+  });
+
   it.each<[string, (d: Doc) => void]>([
     ['a margins section with no source', (d) => delete (d.machines[0]!.margins as Record<string, unknown>).source],
     ['a vise missing a jaw', (d) => delete ((d.machines[0]!.fixtures as { vise: Record<string, unknown> }).vise.jawLength)],
@@ -68,6 +108,60 @@ describe('the location contract (#412)', () => {
     ['one machine twice', (d) => d.machines.push({ ...d.machines[0]! })],
     ['a future version', (d) => (d.schemaVersion = 2)],
     ['a duplicate tool key', (d) => ((d.tools[1] as { key: string }).key = (d.tools[0] as { key: string }).key)],
+    [
+      'a datum typed by hand',
+      (d) => {
+        const profile = (d.machines[0]!.bedProfiles as Array<Record<string, unknown>>)[0]!;
+        const datums = profile.datums as { bracketSeatZ: { by: string } };
+        datums.bracketSeatZ.by = 'typed';
+      },
+    ],
+    ['an active bed profile the machine does not have', (d) => (d.machines[0]!.activeBedProfileId = 'bp-elsewhere')],
+    [
+      'a placement of a fixture the machine does not own',
+      (d) => {
+        const profile = (d.machines[0]!.bedProfiles as Array<{ placements: Array<Record<string, unknown>> }>)[0]!;
+        profile.placements[0]!.fixture = 'fx-elsewhere';
+      },
+    ],
+    [
+      'the vise and the rotary module on the shared pins',
+      (d) => {
+        const m = d.machines[0]!;
+        const fixtures = m.bedFixtures as Array<Record<string, unknown>>;
+        fixtures.push({ ...fixtures[0]!, id: 'fx-rotary', kind: 'rotary-module' });
+        const profile = (m.bedProfiles as Array<{ placements: Array<Record<string, unknown>> }>)[0]!;
+        profile.placements.push({
+          id: 'pl-rotary',
+          fixture: 'fx-rotary',
+          where: { kind: 'pins', pins: 'rotary', anchor: null },
+          count: null,
+          frame: null,
+          provenance: {},
+        });
+      },
+    ],
+    [
+      'an unknown key in a bed profile',
+      (d) => {
+        const profile = (d.machines[0]!.bedProfiles as Array<Record<string, unknown>>)[0]!;
+        profile.surprise = true;
+      },
+    ],
+    [
+      'a bare bed that still carries a thickness',
+      (d) => {
+        const profile = (d.machines[0]!.bedProfiles as Array<{ surface: Record<string, unknown> }>)[0]!;
+        profile.surface.kind = 'bare-bed';
+      },
+    ],
+    [
+      'a wasteboard with no thickness',
+      (d) => {
+        const profile = (d.machines[0]!.bedProfiles as Array<{ surface: Record<string, unknown> }>)[0]!;
+        profile.surface.thickness = null;
+      },
+    ],
   ])('refuses %s, and an import of it is refused before it is sent', (_why, breakIt) => {
     const d = doc();
     breakIt(d);

@@ -240,6 +240,9 @@ describe('the "my machine" migration into the location (#412)', () => {
       null,
       '2026-10-15T09:00:00.000Z',
     );
+    // #510: `[]` is the "already described" marker, so this connect does not also run the one-time
+    // bed migration — the subject here stays #412's settings merge and its no-echo write.
+    theirs.bedProfiles = [];
     const service = fakeService([theirs]);
     setLocal({}); // this window's storage holds nothing
 
@@ -456,6 +459,40 @@ describe('importing a location file (#412)', () => {
   });
 });
 
+describe('#510 the bed migration on connect', () => {
+  const legacy = () =>
+    mergeMachine(
+      {
+        fixtures: { vise: { ...VISE } },
+        margins: { ...MARGIN_DEFAULTS, source: 'user' },
+        calibration: undefined,
+        observation: null,
+      },
+      null,
+      null,
+      '2026-10-15T09:00:00.000Z',
+    ).record;
+
+  it('migrates a machine from before the bed once; a second connect writes nothing', async () => {
+    const service = fakeService([legacy()]);
+    setLocal({});
+    await reconcileLocation();
+
+    expect(service.puts).toHaveLength(1);
+    const migrated = service.machines()[0]!;
+    expect(migrated.bedFixtures?.[0]).toMatchObject({ id: 'fx-vise-1', kind: 'vise' });
+    expect(migrated.bedProfiles?.[0]?.id).toMatch(/^bp-migrated-\d{4}-\d{2}-\d{2}$/);
+    expect(migrated.bedProfiles?.[0]?.name).toMatch(/^Current bed \(migrated \d{4}-\d{2}-\d{2}\)$/);
+    expect(migrated.activeBedProfileId).toBe(migrated.bedProfiles?.[0]?.id);
+    // The legacy sections are the migration's SOURCE, not something it removes.
+    expect(migrated.fixtures?.vise).toMatchObject({ stockProud: 1.5 });
+
+    // `bedProfiles` now exists (the marker): another connect must not migrate or write again.
+    await reconcileLocation();
+    expect(service.puts).toHaveLength(1);
+  });
+});
+
 /** Poll a condition across microtasks — the write-through is fire-and-forget by design. */
 async function vi_waitFor(cond: () => boolean, tries = 50): Promise<void> {
   for (let i = 0; i < tries; i++) {
@@ -466,13 +503,17 @@ async function vi_waitFor(cond: () => boolean, tries = 50): Promise<void> {
 }
 
 describe('#439 an edit whose write failed survives a restart', () => {
-  const theirs = () =>
-    mergeMachine(
+  const theirs = () => {
+    const record = mergeMachine(
       { fixtures: { vise: { ...VISE } }, margins: { ...MARGIN_DEFAULTS, source: 'user' }, calibration: CALIBRATION, observation: OBSERVATION },
       null,
       null,
       '2026-10-15T09:00:00.000Z',
     ).record;
+    // #510: described already (deliberately empty), so these restart scenarios see no one-time bed
+    // migration write in `puts` — their subject is the failed-edit merge.
+    return { ...record, bedProfiles: [] };
+  };
 
   /** Connect, edit the margins while every write fails, then "restart": the window's memory is gone. */
   async function failedEditThenRestart(service: ReturnType<typeof fakeService>, failing: { on: boolean }) {

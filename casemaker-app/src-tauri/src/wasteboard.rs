@@ -54,6 +54,29 @@ pub struct Wasteboard {
 /// The most scars a board records (#417 review cap). A board this scarred wants resurfacing.
 pub const MAX_SCARS: usize = 500;
 
+/// The scar rules, shared by the #417 board and #510's bed surface (a migrated board is the same
+/// board): at most [`MAX_SCARS`], each with a finite position, a positive size and a time.
+pub(crate) fn validate_scars(scars: &[Scar], what: &str) -> Result<(), HouseError> {
+    if scars.len() > MAX_SCARS {
+        return Err(HouseError::BadEntry(format!(
+            "{what}: {} scars recorded; {MAX_SCARS} is the most — resurface the board, which clears them",
+            scars.len()
+        )));
+    }
+    for s in scars {
+        if ![s.x, s.y].iter().all(|v| v.is_finite())
+            || !finite_positive(s.width)
+            || !finite_positive(s.height)
+            || s.at.trim().is_empty()
+        {
+            return Err(HouseError::BadEntry(format!(
+                "{what}: a scar needs a position, a positive size and a time"
+            )));
+        }
+    }
+    Ok(())
+}
+
 fn finite_positive(v: f64) -> bool {
     v.is_finite() && v > 0.0
 }
@@ -69,21 +92,7 @@ impl Wasteboard {
         {
             return bad("a measured thickness says when it was measured".into());
         }
-        if self.scars.len() > MAX_SCARS {
-            return bad(format!(
-                "{} scars recorded; {MAX_SCARS} is the most — resurface the board, which clears them",
-                self.scars.len()
-            ));
-        }
-        for s in &self.scars {
-            if ![s.x, s.y].iter().all(|v| v.is_finite())
-                || !finite_positive(s.width)
-                || !finite_positive(s.height)
-                || s.at.trim().is_empty()
-            {
-                return bad("a scar needs a position, a positive size and a time".into());
-            }
-        }
+        validate_scars(&self.scars, "the wasteboard")?;
         Ok(())
     }
 }

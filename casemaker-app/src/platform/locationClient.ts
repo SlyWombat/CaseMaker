@@ -36,7 +36,7 @@ import { StockShelfSchema } from './stockClient';
 import { FeedsTableSchema } from './feedClient';
 import { ShopDefaultsSchema } from './defaultsClient';
 import { PowerSwitchSchema } from './powerClient';
-import { WasteboardSchema } from '@/engine/cnc/wasteboard';
+import { WasteboardSchema, ScarSchema } from '@/engine/cnc/wasteboard';
 
 /** Magic string that says "this is a Case Maker location file". Equal to `location.rs`'s. */
 export const LOCATION_KIND = 'casemaker-location';
@@ -69,6 +69,277 @@ export const MachineAddressSchema = z.object({
   host: z.string().min(1),
   port: z.number().int().min(1).max(65535),
 });
+
+// ── #510: the bed — fixture records, profiles and the active one ──────────────────────────────
+//
+// The design is `docs/design/bed-profiles.md` §2. The model lives on the machine because the bed is
+// a property of the physical unit, not of a job; many named profiles, exactly one active. The
+// service's typed half is `location.rs`, and the shared specimen is `tests/unit/fixtures/location-doc.json`.
+//
+// WHY THE FIXTURE RECORDS ARE `bedFixtures`, NOT §2's `fixtures`: `machines[].fixtures` has held the
+// `FixturesSettings` record (`{vise?, sacrificial?}`) since #412, and that record is the SOURCE of
+// the vise migration. Replacing it would delete the data being migrated, so the new list lives
+// beside it and `fixtures` is untouched (see `platform/bedProfiles.ts` and the completion note on
+// #510). It is the one place this build differs from the design's literal key.
+//
+// A DATUM IS NEVER TYPED. `by: "typed"` is refused here as well as in Rust, and every datum field
+// is required — an unmeasured datum is `null`, never a value with no provenance.
+//
+// OPEN QUESTION A, DECIDED: the vise and the 4th-axis module share the pins and are mutually
+// exclusive. A profile that places both is refused at the machine level, where the fixture kinds
+// are known.
+
+const bedId = z
+  .string()
+  .min(1)
+  .refine(
+    // eslint-disable-next-line no-control-regex -- control characters are exactly what is refused
+    (v) => v === v.trim() && !v.includes('/') && !/[\u0000-\u001f\u007f-\u009f]/.test(v),
+    'cannot be an id: no slash, no control character, no space at either end',
+  );
+const bedText = z.string().refine((v) => v.trim().length > 0, 'is empty');
+const bedNumber = z.number().finite();
+const bedPositive = bedNumber.positive();
+const bedProvenance = z.record(z.string(), bedText).superRefine((map, ctx) => {
+  for (const key of Object.keys(map)) {
+    if (key.trim().length === 0) {
+      ctx.addIssue({ code: 'custom', path: [key], message: 'a provenance entry has no key' });
+    }
+  }
+});
+
+/** One accessory the shop owns: product constants, this unit's measurements, and provenance. */
+export const FixtureRecordSchema = z
+  .object({
+    id: bedId,
+    /** Open on purpose (`vise`, `bracket`, `top-clamp`, `rotary-module`, …): another accessory is additive. */
+    kind: bedText,
+    product: bedText.nullable().default(null),
+    variant: bedText.nullable().default(null),
+    constants: z.record(z.string(), z.unknown()).default({}),
+    unit: z.record(z.string(), z.unknown()).default({}),
+    provenance: bedProvenance.default({}),
+  })
+  .strict()
+  .superRefine((f, ctx) => {
+    // The open maps carry dimensions and counts; the service refuses nameless keys and non-finite
+    // numbers, and the client must not be the more permissive side of the same contract.
+    for (const [what, map] of [['constants', f.constants], ['unit', f.unit]] as const) {
+      for (const [key, value] of Object.entries(map)) {
+        if (key.trim().length === 0) {
+          ctx.addIssue({ code: 'custom', path: [what, key], message: `a ${what} key has no name` });
+        }
+        if (typeof value === 'number' && !Number.isFinite(value)) {
+          ctx.addIssue({ code: 'custom', path: [what, key], message: `${what}.${key} is not a finite number` });
+        }
+      }
+    }
+  });
+
+/** A datum measured ON this bed: value, date and instrument, never a typed number. */
+export const MeasuredDatumSchema = z
+  .object({
+    value: bedNumber,
+    measuredAt: bedText,
+    by: bedText.refine((v) => v.trim().toLowerCase() !== 'typed', 'a datum is measured, never typed'),
+    at: z.tuple([bedNumber, bedNumber]).nullable().default(null),
+  })
+  .strict();
+
+/** The four datums a profile describes; each `null` until measured. */
+export const BedDatumsSchema = z
+  .object({
+    surfaceTopZ: MeasuredDatumSchema.nullable().default(null),
+    viseJawTopZ: MeasuredDatumSchema.nullable().default(null),
+    bracketSeatZ: MeasuredDatumSchema.nullable().default(null),
+    rotaryAxis: MeasuredDatumSchema.nullable().default(null),
+  })
+  .strict();
+
+const BedPositionSchema = z
+  .object({
+    frontLeft: z.tuple([bedNumber, bedNumber]),
+    frame: z.literal('machine'),
+  })
+  .strict();
+
+/** What the stock or the fixtures stand on (open question E: the bare bed has no size or scars). */
+export const BedSurfaceSchema = z
+  .object({
+    kind: z.enum(['bare-bed', 'wasteboard', 'fixture-plate', 'vacuum-bed']),
+    material: bedText.nullable().default(null),
+    length: bedPositive.nullable().default(null),
+    width: bedPositive.nullable().default(null),
+    thickness: bedPositive.nullable().default(null),
+    position: BedPositionSchema.nullable().default(null),
+    provenance: bedProvenance.default({}),
+    scars: z.array(ScarSchema).max(500).default([]),
+    lastResurfacedAt: bedText.nullable().default(null),
+  })
+  .strict()
+  .superRefine((s, ctx) => {
+    if (s.kind === 'bare-bed') {
+      if (
+        s.material !== null ||
+        s.length !== null ||
+        s.width !== null ||
+        s.thickness !== null ||
+        s.position !== null ||
+        s.lastResurfacedAt !== null ||
+        s.scars.length > 0
+      ) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['kind'],
+          message: 'the bare bed has no size, position, scars or resurfacing (open question E)',
+        });
+      }
+    }
+    if (s.kind === 'wasteboard' && s.thickness === null) {
+      ctx.addIssue({ code: 'custom', path: ['thickness'], message: 'a wasteboard says how thick it is' });
+    }
+  });
+
+const PlacementWhereSchema = z
+  .object({
+    kind: z.enum(['pins', 'anchor', 'free']),
+    /** Open question A: the two pin users are `vise` and `rotary`. */
+    pins: z.enum(['vise', 'rotary']).nullable().default(null),
+    anchor: z.number().int().min(1).max(2).nullable().default(null),
+  })
+  .strict()
+  .superRefine((w, ctx) => {
+    if (w.kind === 'pins' && w.pins === null) {
+      ctx.addIssue({ code: 'custom', path: ['pins'], message: "a pins placement says whose pins" });
+    }
+    if (w.kind !== 'pins' && w.pins !== null) {
+      ctx.addIssue({ code: 'custom', path: ['pins'], message: 'only a pins placement names the pins' });
+    }
+    if (w.kind === 'anchor' && w.anchor === null) {
+      ctx.addIssue({ code: 'custom', path: ['anchor'], message: 'an anchor placement says which anchor (1 or 2)' });
+    }
+    if (w.kind !== 'anchor' && w.anchor !== null) {
+      ctx.addIssue({ code: 'custom', path: ['anchor'], message: 'only an anchor placement names an anchor' });
+    }
+  });
+
+const PlacementFrameSchema = z
+  .object({
+    fixedJawFaceX: bedNumber.nullable().default(null),
+    jawStartY: bedNumber.nullable().default(null),
+  })
+  .strict();
+
+/** One fixture put on the bed: position and orientation only; the shape is the fixture's. */
+export const BedPlacementSchema = z
+  .object({
+    id: bedId,
+    fixture: bedId,
+    where: PlacementWhereSchema,
+    count: z.number().int().positive().nullable().default(null),
+    frame: PlacementFrameSchema.nullable().default(null),
+    provenance: bedProvenance.default({}),
+  })
+  .strict();
+
+const MountingChoiceSchema = z
+  .object({
+    placement: bedId.nullable().default(null),
+    manner: z.enum(['jaws', 'corner+clamps', 'tape', 'vacuum', 'chuck']),
+  })
+  .strict();
+
+const PreferredMountingSchema = z
+  .object({
+    stock: bedText,
+    mount: MountingChoiceSchema,
+  })
+  .strict();
+
+const ConsumableTapeSchema = z
+  .object({
+    widthMm: bedPositive,
+    thicknessMm: bedPositive,
+    provenance: bedText,
+  })
+  .strict();
+
+const ConsumableBoardSchema = z
+  .object({
+    material: bedText,
+    /** `[length, width, thickness]`, mm. */
+    size: z.tuple([bedPositive, bedPositive, bedPositive]),
+    count: z.number().int().min(0),
+  })
+  .strict();
+
+const ConsumablesSchema = z
+  .object({
+    tape: ConsumableTapeSchema.nullable().default(null),
+    boards: z.array(ConsumableBoardSchema).default([]),
+  })
+  .strict();
+
+const ProfileHistoryEntrySchema = z
+  .object({
+    at: bedText,
+    what: bedText,
+  })
+  .strict();
+
+/** One named description of the machine's bed. */
+export const BedProfileSchema = z
+  .object({
+    id: bedId,
+    name: bedText,
+    createdAt: bedText,
+    /** The shipped profile it started from, or null. */
+    basedOn: bedText.nullable().default(null),
+    surface: BedSurfaceSchema,
+    datums: BedDatumsSchema,
+    placements: z.array(BedPlacementSchema).default([]),
+    preferredMounting: z.array(PreferredMountingSchema).default([]),
+    consumables: ConsumablesSchema.nullable().default(null),
+    history: z.array(ProfileHistoryEntrySchema).default([]),
+  })
+  .strict()
+  .superRefine((p, ctx) => {
+    const placementIds = new Set<string>();
+    p.placements.forEach((pl, i) => {
+      if (placementIds.has(pl.id)) {
+        ctx.addIssue({ code: 'custom', path: ['placements', i, 'id'], message: `two placements called "${pl.id}"` });
+      }
+      placementIds.add(pl.id);
+    });
+    // Open question A, decided: the pin labels alone may not name both accessories, even where a
+    // fixture's `kind` does not (the service refuses the same conflict).
+    const pinKinds = new Set(p.placements.flatMap((pl) => (pl.where.pins === null ? [] : [pl.where.pins])));
+    if (pinKinds.has('vise') && pinKinds.has('rotary')) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['placements'],
+        message: 'places the vise and the 4th-axis module on the pins: they are mutually exclusive',
+      });
+    }
+    const stocks = new Set<string>();
+    p.preferredMounting.forEach((m, i) => {
+      if (stocks.has(m.stock)) {
+        ctx.addIssue({ code: 'custom', path: ['preferredMounting', i, 'stock'], message: `two mountings for "${m.stock}"` });
+      }
+      stocks.add(m.stock);
+      if (m.mount.placement !== null && !placementIds.has(m.mount.placement)) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['preferredMounting', i, 'mount', 'placement'],
+          message: `prefers placement "${m.mount.placement}", which this profile does not have`,
+        });
+      }
+    });
+  });
+
+export type FixtureRecord = z.infer<typeof FixtureRecordSchema>;
+export type BedProfile = z.infer<typeof BedProfileSchema>;
+
 
 /**
  * One machine at the location (§3.1). `serial` and `firmware` are null until something READS them
@@ -105,7 +376,90 @@ export const MachineRecordSchema = z.object({
   finishedPrograms: z
     .array(z.string().min(1).refine((h) => h === h.trim(), 'a hash has no space at either end'))
     .default([]),
+  /**
+   * The accessories this machine owns (#510). `.optional()`, NOT `.default([])`: a machine from
+   * before the bed existed has no key, and parsing it must not gain one — the round-trip rule the
+   * issue pins. `undefined` is also the migration's "not described yet" marker.
+   */
+  bedFixtures: z.array(FixtureRecordSchema).optional(),
+  /** The machine's bed profiles, same presence rule; `[]` is a deliberately emptied description. */
+  bedProfiles: z.array(BedProfileSchema).optional(),
+  /** The one active profile; present exactly when `bedProfiles` holds at least one. */
+  activeBedProfileId: bedId.optional(),
   updatedAt: z.string().min(1),
+}).superRefine((m, ctx) => {
+  if (m.bedFixtures !== undefined) {
+    const ids = new Set<string>();
+    m.bedFixtures.forEach((f, i) => {
+      if (ids.has(f.id)) {
+        ctx.addIssue({ code: 'custom', path: ['bedFixtures', i, 'id'], message: `machine has two fixtures called "${f.id}"` });
+      }
+      ids.add(f.id);
+    });
+  }
+
+  const profiles = m.bedProfiles;
+  if (profiles !== undefined) {
+    const ids = new Set<string>();
+    profiles.forEach((p, i) => {
+      if (ids.has(p.id)) {
+        ctx.addIssue({ code: 'custom', path: ['bedProfiles', i, 'id'], message: `machine has two bed profiles called "${p.id}"` });
+      }
+      ids.add(p.id);
+
+      // Placements name a fixture this machine owns, and the vise and the 4th-axis module may not
+      // both be on the bed (open question A, decided exclusive).
+      const placedKinds = new Set<string>();
+      p.placements.forEach((pl, j) => {
+        const fixture = m.bedFixtures?.find((f) => f.id === pl.fixture);
+        if (fixture === undefined) {
+          ctx.addIssue({
+            code: 'custom',
+            path: ['bedProfiles', i, 'placements', j, 'fixture'],
+            message: `places fixture "${pl.fixture}", which this machine does not own`,
+          });
+        } else {
+          placedKinds.add(fixture.kind);
+        }
+      });
+      if (placedKinds.has('vise') && placedKinds.has('rotary-module')) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['bedProfiles', i, 'placements'],
+          message: 'places the vise and the 4th-axis module: they share the pins, so one at a time',
+        });
+      }
+    });
+  }
+
+  // Exactly one active profile once there is a profile; no active id without one.
+  if (profiles === undefined) {
+    if (m.activeBedProfileId !== undefined) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['activeBedProfileId'],
+        message: 'names an active bed profile but the machine has no profiles',
+      });
+    }
+  } else if (profiles.length === 0) {
+    if (m.activeBedProfileId !== undefined) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['activeBedProfileId'],
+        message: 'names an active bed profile but the machine has no profiles',
+      });
+    }
+  } else {
+    if (m.activeBedProfileId === undefined) {
+      ctx.addIssue({ code: 'custom', path: ['activeBedProfileId'], message: 'the machine has bed profiles but names no active one' });
+    } else if (!profiles.some((p) => p.id === m.activeBedProfileId)) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['activeBedProfileId'],
+        message: `names "${m.activeBedProfileId}", which is not one of this machine's profiles`,
+      });
+    }
+  }
 });
 
 export type MachineAddress = z.infer<typeof MachineAddressSchema>;
