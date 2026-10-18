@@ -25,13 +25,13 @@ const RAIL_MIN_W = 1024;
 /**
  * #400 — wait for the panel's drawer/rail decision to reach its final state.
  *
- * `ContextPanel` keeps `isCompact` in React state, initialised from `window.innerWidth` and updated
- * by a `resize` listener. The listener runs inside the resize event, but the state commit is
- * scheduled as its own task, so a measurement taken straight after `setViewportSize` reads a value
- * React may not have written yet — while the CSS media query that reshapes `.app-main` has already
- * applied. The test must not depend on how long that gap is on a given machine. Poll the decision
- * itself: the class and the handle must agree with the width the window reports right now. This
- * waits for the condition, not for a number of milliseconds.
+ * `ContextPanel` asks `matchMedia('(max-width: 1023px)')` through `useSyncExternalStore` (#462),
+ * so the class now comes from the same query CSS applies rather than from a `resize` listener and
+ * a later state commit. What remains asynchronous is the delivery of the media query's `change`
+ * event after `setViewportSize` — and React's render of it — so a measurement taken straight away
+ * can still precede the new class. The test must not depend on how long that takes on a given
+ * machine. Poll the decision itself: the class and the handle must agree with the width the window
+ * reports right now. This waits for the condition, not for a number of milliseconds.
  */
 async function waitForPanelMode(page: Page): Promise<void> {
   await expect

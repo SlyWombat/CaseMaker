@@ -1,4 +1,4 @@
-import { useEffect, useState, type JSX } from 'react';
+import { useSyncExternalStore, useState, type JSX } from 'react';
 import { useViewportStore, type SidebarSectionId } from '@/store/viewportStore';
 import { SelectionPanel } from '@/components/viewport/SelectionPanel';
 import { CasePanel } from '@/components/panels/CasePanel';
@@ -78,32 +78,51 @@ function renderSection(id: SidebarSectionId): JSX.Element {
  */
 const RAIL_MIN_W = 1024;
 
+/**
+ * Issue #462 — the SAME boundary the stylesheet's `.app-main` query uses, asked as a question.
+ *
+ * The mode used to be React state fed by a `resize` listener, and that listener ran inside the
+ * resize event while its `setState` committed in a later task. CSS applies the media query
+ * synchronously, so for one task/frame after crossing 1024 the panel's mode class could disagree
+ * with the grid: a `--rail` column inside a collapsed drawer layout, or the reverse. A capture
+ * taken in that frame recorded the wrong state (#355's assertions are exactly such a
+ * measurement).
+ *
+ * `useSyncExternalStore` removes the gap: React reads `matches` from the media query — the same
+ * value CSS applies — during render, and subscribes to the query's own `change` event. The query
+ * string is derived from `RAIL_MIN_W` so the two sides cannot drift apart.
+ */
+const COMPACT_QUERY = `(max-width: ${RAIL_MIN_W - 1}px)`;
+
+function compactQuery(): MediaQueryList | null {
+  if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return null;
+  return window.matchMedia(COMPACT_QUERY);
+}
+
+function subscribeCompact(onStoreChange: () => void): () => void {
+  const query = compactQuery();
+  if (query === null) return () => {};
+  query.addEventListener('change', onStoreChange);
+  return () => query.removeEventListener('change', onStoreChange);
+}
+
+function isCompactViewport(): boolean {
+  return compactQuery()?.matches ?? false;
+}
+
 export function ContextPanel() {
   const selection = useViewportStore((s) => s.selection);
   const activeSection = useViewportStore((s) => s.activeSidebarSection);
   const setSection = useViewportStore((s) => s.setActiveSidebarSection);
-  const [isCompact, setIsCompact] = useState(() =>
-    typeof window !== 'undefined' ? window.innerWidth < RAIL_MIN_W : false,
-  );
+  const isCompact = useSyncExternalStore(subscribeCompact, isCompactViewport, () => false);
   // Issue #280 — the auto-open rule below fires on a *change* of input, so a panel that MOUNTS
   // with a section already active (the startup wizard sets the section and then the shell swaps
   // this panel in) would leave the drawer shut on a compact viewport: a highlighted rail button
   // with nothing beside it, which is the #274 "no way in" complaint one step later. Start open in
   // that case, by the same condition.
   const [drawerOpen, setDrawerOpen] = useState(
-    () =>
-      typeof window !== 'undefined' &&
-      window.innerWidth < RAIL_MIN_W &&
-      (selection !== null || activeSection !== null),
+    () => isCompactViewport() && (selection !== null || activeSection !== null),
   );
-
-  useEffect(() => {
-    function onResize() {
-      setIsCompact(window.innerWidth < RAIL_MIN_W);
-    }
-    window.addEventListener('resize', onResize);
-    return () => window.removeEventListener('resize', onResize);
-  }, []);
 
   // Auto-open the drawer when EITHER a geometry selection OR a sidebar
   // section becomes active (compact viewports only).

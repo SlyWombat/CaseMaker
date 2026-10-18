@@ -12,7 +12,7 @@
 // one-close rule that came with it.
 
 import { describe, it, expect, beforeEach } from 'vitest';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 
 import { ContextPanel } from '@/components/layout/ContextPanel';
 import { useViewportStore } from '@/store/viewportStore';
@@ -23,12 +23,54 @@ function setWidth(w: number): void {
   Object.defineProperty(window, 'innerWidth', { configurable: true, writable: true, value: w });
 }
 
+// Issue #462 — jsdom has no `matchMedia`. This answers whatever `max-width` query the panel
+// asks, from `innerWidth`, and records the `change` listeners so a test can fire them WITHOUT a
+// `resize` event. That last part is the regression: the old implementation listened only to
+// `resize`, so a mode that follows the media query — the one CSS applies — was untestable.
+type MediaListener = () => void;
+let mediaListeners: MediaListener[] = [];
+
+function installMatchMedia(): void {
+  mediaListeners = [];
+  Object.defineProperty(window, 'matchMedia', {
+    configurable: true,
+    writable: true,
+    value: (query: string): MediaQueryList =>
+      ({
+        get matches() {
+          const limit = /max-width:\s*(\d+)px/.exec(query);
+          return limit === null ? false : window.innerWidth <= Number(limit[1]);
+        },
+        media: query,
+        onchange: null,
+        addEventListener(type: string, listener: MediaListener) {
+          if (type === 'change') mediaListeners.push(listener);
+        },
+        removeEventListener(type: string, listener: MediaListener) {
+          if (type === 'change') mediaListeners = mediaListeners.filter((l) => l !== listener);
+        },
+        addListener(listener: MediaListener) {
+          mediaListeners.push(listener);
+        },
+        removeListener(listener: MediaListener) {
+          mediaListeners = mediaListeners.filter((l) => l !== listener);
+        },
+        dispatchEvent: () => false,
+      }) as unknown as MediaQueryList,
+  });
+}
+
+function fireMediaChange(): void {
+  for (const listener of [...mediaListeners]) listener();
+}
+
 function panelClass(): string {
   return screen.getByTestId('context-panel').className;
 }
 
 beforeEach(() => {
   cleanup();
+  installMatchMedia();
   useViewportStore.setState({ activeSidebarSection: null, selection: null });
 });
 
@@ -75,6 +117,27 @@ describe('#355 — the rail shares the viewport from 1024 up', () => {
     render(<ContextPanel />);
     expect(panelClass()).toContain('context-panel--drawer');
     expect(screen.getByTestId('context-panel-handle')).toBeTruthy();
+  });
+
+  it('takes a new mode from the media query itself, with no resize event (#462)', () => {
+    setWidth(1440);
+    useViewportStore.setState({ activeSidebarSection: 'cnc-engrave' });
+    render(<ContextPanel />);
+    expect(panelClass()).toContain('context-panel--rail');
+
+    // The one event the CSS side acts on; the old `resize` listener would not hear it and the
+    // panel would stay a rail inside a drawer layout.
+    act(() => {
+      setWidth(1023);
+      fireMediaChange();
+    });
+    expect(panelClass()).toContain('context-panel--drawer');
+
+    act(() => {
+      setWidth(1440);
+      fireMediaChange();
+    });
+    expect(panelClass()).toContain('context-panel--rail');
   });
 
   it('carries ONE way to close a section — the content’s own × — in either mode', () => {
