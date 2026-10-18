@@ -1969,6 +1969,43 @@ body, html, #root {
   color: #67c0ff;
 }
 
+/* Phones (#507) — the dialog kept its `200px 1fr` body at every width. At 390px the dialog is
+   95vw (~370px), so after the nav the article had ~114px: "User Manual" stacked one word per line
+   and every paragraph ran one or two words deep. Below the app's phone breakpoint (640px, #134)
+   the nav becomes a horizontal strip ABOVE the article and the article gets the dialog's width.
+
+   The strip wraps into rows instead of scrolling sideways: six titles fit in two rows at phone
+   width, and a nav whose last items are hidden behind a swipe is a nav a user can miss. */
+@media (max-width: 640px) {
+  .docs-modal-body {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+  .docs-modal-nav {
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 4px;
+    padding: 8px;
+    border-right: 0;
+    border-bottom: 1px solid #2a2f36;
+    overflow: visible;
+  }
+  .docs-modal-nav button {
+    flex: none;
+    white-space: nowrap;
+    font-size: 12px;
+    padding: 5px 8px;
+  }
+  .docs-modal-content {
+    /* The article is a grid item now; without this its min-content width (a long code token, a
+       docs table) can still force the dialog wider than the screen. Long blocks scroll inside the
+       article instead. */
+    min-width: 0;
+    padding: 16px;
+    overflow-x: auto;
+  }
+}
+
 .port-delta-readout {
   background: rgba(20, 24, 28, 0.92);
   border: 1px solid #ffd267;
@@ -3165,6 +3202,111 @@ button:disabled {
   font-size: 12px;
   line-height: 1.5;
   color: var(--cm-color-on-surface-muted);
+}
+
+/* --- narrow widths: phone and tablet (#507) ------------------------------- */
+/* The surface is `220px 1fr 360px`. Those two rails are 580px before the centre gets anything: at
+   the 768px tablet width the centre had 188px, and at 390px the rails did not even fit. Below the
+   laptop boundary (1023px — the same width where `.app-main` itself stops sharing three columns,
+   #93/#355) the surface stacks instead:
+
+     - the scopes rail becomes ONE horizontal tab row across the top;
+     - the main pane is the full screen width and keeps its own internal scroll;
+     - the detail rail sits BELOW the list, full width, rather than beside it. On a narrow screen
+       there is no second column for it, and squeezing the list to keep one is exactly the bug.
+
+   The "House"/"Machines" dividers and the service foot are desktop chrome: the three buttons say
+   what the dividers said, and the status bar already carries `manage · house: present/absent`
+   plus the definition count. Hiding them is what lets the tab row fit three targets.
+
+   `grid-template-rows` is `auto minmax(70vh, 1fr) auto`, not three `auto` rows: the detail panel
+   can be longer than the screen (the machine rail is), and with a plain `1fr` it would take the
+   main pane's height and collapse the list to a sliver. The 70vh floor keeps the list usable and
+   lets the surface scroll down to the detail. */
+@media (max-width: 1023px) {
+  .manage {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(70vh, 1fr) auto;
+    overflow-x: hidden;
+    overflow-y: auto;
+  }
+  .manage .mrail {
+    /* Sticky, because the tab row is the only scope switcher: scrolling down to the detail must
+       not take it away. */
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    flex-direction: row;
+    align-items: stretch;
+    gap: 4px;
+    padding: 6px;
+    background: var(--cm-color-surface-container-low);
+    border-right: 0;
+    border-bottom: var(--cm-border-1);
+  }
+  .manage .mrail .nav {
+    /* Grow from the CONTENT width rather than from an equal `0` basis: "No machine yet" and a
+       profile · host label need more room than "Tools", and with equal thirds the machine tab
+       ellipsised to "No ma…" on a 390px screen while the other two had space to spare. Long
+       machine labels still shrink (the `min-width: 0` below), just not before it is necessary. */
+    flex: 1 1 auto;
+    gap: 6px;
+    padding: 8px 6px;
+    width: auto;
+    min-width: 0;
+    margin-bottom: 0;
+    justify-content: center;
+  }
+  /* One line per tab, ellipsised: the machine label carries a profile AND a host, and letting it
+     wrap would make the tab row taller than the content it introduces. */
+  .manage .mrail .nav > span {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .manage .mrail .nav__icon {
+    flex: none;
+  }
+  .manage .mrail .nav__divider,
+  .manage .mrail .mrail__foot {
+    display: none;
+  }
+  .manage .mmain {
+    grid-column: 1;
+  }
+  /* A top hairline separates the detail from the list now; the left one belonged to the column it
+     no longer occupies. */
+  .manage .context-panel {
+    grid-column: 1;
+    border-left: 0;
+    border-top: var(--cm-border-1);
+    /* The detail row must keep its content height. As a scroll container it contributes a zero
+       automatic minimum, and in this fixed-height grid the leftover 125px went to the auto row
+       and the panel scrolled INSIDE itself — a letterbox at the foot of the list. `max-content`
+       makes the surface the scroller instead, which is what "the detail rail below the list"
+       means. */
+    min-height: max-content;
+  }
+}
+
+@media (max-width: 640px) {
+  /* The machine card's two read-out columns stay side by side in the full-width pane, which gives
+     each `kv` a 130px label and ~35px for its value — the same one-character-per-line failure one
+     level in. On a phone they stack. */
+  .manage .two {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  /* The header's action buttons were a `flex: none` block pinned to the right of a wide row; at
+     phone width the row is wider than the screen. They wrap under the title instead of clipping. */
+  .manage .mhead {
+    flex-wrap: wrap;
+  }
+  .manage .mhead .btn-row {
+    margin-left: 0;
+    flex-wrap: wrap;
+    max-width: 100%;
+  }
 }
 
 /* The toolbar's Manage toggle, lit while the mode is up. The app's toolbar buttons carry no class
