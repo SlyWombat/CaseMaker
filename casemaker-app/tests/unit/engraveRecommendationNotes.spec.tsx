@@ -1,11 +1,17 @@
 // @vitest-environment jsdom
-// #442 — the panel prints the pick's condition note on its own line.
+// The panel's sentences BESIDE and INSIDE the cutter recommendation:
+//   #442 — the pick's condition note on its own line;
+//   #455/#458 — the catalogue note, the hand-pick warning, and a `no-catalogue-row` candidate's
+//     own reason;
+//   #454/#458 — the `Why?` row's `· worn` / broken suffix naming the shop's copies when the summary
+//     was adopted from them.
 //
-// The note is a DIFFERENT claim from the reason beside it — "why this cutter" versus "check this one
-// before you cut" — so it must not be folded into the reason's sentence. This drives the real panel
-// with a seeded preview and asserts the line is there when the recommendation carries a note and gone
-// when it does not. The note's own words are `toolCondition`'s and the pick's rule is
-// `recommendTool.spec.ts`; what this pins is the rendering half of the wiring.
+// Each note is a DIFFERENT claim from the reason beside it — "why this cutter", "what the catalogue
+// lists it for", "check this one before you cut" — so none may be folded into the reason's
+// sentence. This drives the real panel with a seeded preview and asserts each line is there when
+// the recommendation carries it and gone when it does not. The notes' own words are
+// `toolCondition`'s and the pick's rules are `recommendTool.spec.ts`; what this pins is the
+// rendering half of the wiring.
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { act, cleanup, render, screen } from '@testing-library/react';
@@ -215,5 +221,89 @@ describe('the panel’s catalogue and hand-pick notes (#458)', () => {
     expect(screen.getByTestId('engrave-candidate-corn-1.0').textContent).toContain(
       'no cutting parameters for this material',
     );
+  });
+});
+
+// #454/#458 — a built-in or `cat:` key pools the shop's copies that correspond to it, so a
+// condition summarised on it is about THOSE copies. Without the parenthetical the `Why?` row reads
+// exactly like a condition the operator set on the shipped definition.
+describe('the panel attributes an adopted condition (#454/#458)', () => {
+  const shopCopies = { adopted: true };
+
+  it('says whose copies a worn built-in is, in the worst-item row', () => {
+    const adopted: ToolCandidate = {
+      key: 'flat-3.175x12-metal',
+      diameter: 3.175,
+      qualifies: true,
+      worst: { labelId: 'missing-item', ratio: 0.87, emptyChars: 0 },
+      reachKnown: false,
+      reachOk: true,
+      condition: { best: 'worn', usable: 1, note: '…', ...shopCopies },
+    };
+    useEngravePreviewStore.setState({ preview: previewWith({}, [PICK, adopted]), status: 'ready' });
+    render(<EngravePanel />);
+
+    expect(screen.getByTestId('engrave-candidate-flat-3.175x12-metal').textContent).toContain(
+      '· worn (the shop’s copies)',
+    );
+  });
+
+  it('says whose copies a worn built-in is, in the plain worn row', () => {
+    const adopted: ToolCandidate = {
+      key: 'cat:worn-only',
+      diameter: 1,
+      qualifies: true,
+      worst: null,
+      reachKnown: false,
+      reachOk: true,
+      condition: { best: 'worn', usable: 1, note: '…', ...shopCopies },
+    };
+    useEngravePreviewStore.setState({ preview: previewWith({}, [PICK, adopted]), status: 'ready' });
+    render(<EngravePanel />);
+
+    expect(screen.getByTestId('engrave-candidate-cat:worn-only').textContent).toContain(
+      'worn (the shop’s copies)',
+    );
+  });
+
+  it('says whose copies decided a broken built-in is out', () => {
+    const adopted: ToolCandidate = {
+      key: 'flat-1.0',
+      diameter: 1,
+      qualifies: false,
+      worst: null,
+      reachKnown: false,
+      reachOk: true,
+      excluded: 'broken',
+      condition: { best: 'broken', usable: 0, note: '…', ...shopCopies },
+    };
+    // `PICK` shares this key, so it is the only candidate: two rows with one test id would make
+    // the query ambiguous rather than test anything.
+    useEngravePreviewStore.setState({ preview: previewWith({}, [adopted]), status: 'ready' });
+    render(<EngravePanel />);
+
+    expect(screen.getByTestId('engrave-candidate-flat-1.0').textContent).toContain(
+      'every copy is marked broken (the shop’s copies)',
+    );
+  });
+
+  it('adds no attribution to an owned key, whose summary is its own copies', () => {
+    // The contrast that keeps the three cases above from passing on decoration: an `inv:` key's
+    // worn summary is the operator's own statement and must read exactly as before.
+    const owned: ToolCandidate = {
+      key: 'inv:my-1mm',
+      diameter: 1,
+      qualifies: true,
+      worst: { labelId: 'missing-item', ratio: 0.87, emptyChars: 0 },
+      reachKnown: false,
+      reachOk: true,
+      condition: { best: 'worn', usable: 1, note: '…' },
+    };
+    useEngravePreviewStore.setState({ preview: previewWith({}, [PICK, owned]), status: 'ready' });
+    render(<EngravePanel />);
+
+    const text = screen.getByTestId('engrave-candidate-inv:my-1mm').textContent ?? '';
+    expect(text).toContain('· worn');
+    expect(text).not.toContain('shop’s copies');
   });
 });

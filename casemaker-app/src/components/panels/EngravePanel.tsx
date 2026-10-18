@@ -43,6 +43,7 @@ import {
   hasRegionItems,
   itemName,
   V_BIT_CARVE_SENTENCE,
+  type ToolCandidate,
 } from '@/engine/cnc/engrave/recommendTool';
 import { vCone } from '@/engine/cnc/vProfile';
 import {
@@ -325,6 +326,16 @@ const STRIP_SIDES: readonly (keyof Sacrificial['sides'])[] = ['left', 'right', '
 /** 1 -> "1.0", 3.175 -> "3.175". The same formatting `recommendTool` uses in its reasons. */
 function fmtDiameter(d: number): string {
   return Number.isInteger(d) ? d.toFixed(1) : String(d);
+}
+
+/**
+ * #454/#458 — a built-in or catalogue key borrows the condition of the shop's copies that
+ * correspond to it, so a summarised condition on it is a statement about THOSE copies, not about
+ * the shipped definition. The `Why?` row's short suffix has to say so, or it reads exactly like a
+ * condition the operator set. An owned key's summary IS its own copies and carries no attribution.
+ */
+function conditionSourceWord(c: ToolCandidate): string {
+  return c.condition?.adopted ? ' (the shop’s copies)' : '';
 }
 
 /** A V-carve fact to the micron, as the sheet and the finding print it (`0.052`, `0.242`). */
@@ -2219,7 +2230,10 @@ export function EngravePanel(): JSX.Element {
                       // #221 a V-bit WITH a cone is offered as a V-carve, not excluded.
                       'not a flat end mill'
                     : c.excluded === 'broken'
-                      ? 'every copy is marked broken'
+                      ? // #454/#458 — whose copies said so. Without the attribution a built-in
+                        // reading "every copy is marked broken" sounds like the operator's own
+                        // verdict on the shipped definition.
+                        'every copy is marked broken' + conditionSourceWord(c)
                       : c.excluded === 'no-catalogue-row'
                         ? // #455/#458 — the catalogue's own words. "No cutting parameters" is
                           // the opposite of true here: the starting table answers these cutters
@@ -2230,9 +2244,9 @@ export function EngravePanel(): JSX.Element {
                     ? // #221 — the strategy sentence: the design is the cone's width at the plane.
                       V_BIT_CARVE_SENTENCE
                     : c.worst
-                      ? `worst item "${itemDisplay(c.worst.labelId)}" · ${Math.round(c.worst.ratio * 100)} % kept${c.condition?.best === 'worn' ? ' · worn' : ''}`
+                      ? `worst item "${itemDisplay(c.worst.labelId)}" · ${Math.round(c.worst.ratio * 100)} % kept${c.condition?.best === 'worn' ? ` · worn${conditionSourceWord(c)}` : ''}`
                       : c.condition?.best === 'worn'
-                        ? 'worn'
+                        ? 'worn' + conditionSourceWord(c)
                         : 'not measured';
                 return (
                   <div

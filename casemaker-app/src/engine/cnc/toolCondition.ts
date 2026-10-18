@@ -161,6 +161,14 @@ export interface ConditionSummary {
    * note names them, so an adopted condition never reads as one the operator set on the definition.
    */
   note: string | null;
+  /**
+   * True when this summary is POOLED from the owned copies that correspond to a built-in or `cat:`
+   * key (#454), not from an item's own copies. The note already says so in words; the flag is what
+   * lets the panel attribute the `Why?` row's `· worn` / `broken` the same way (#458), without
+   * re-deriving adoption from a key's tier. Optional, like `ToolCandidate.catalogueNote`: a
+   * hand-built summary in a test stays a summary.
+   */
+  adopted?: boolean;
 }
 
 /** Every copy's condition: the described ones, then `null` for each undescribed one. */
@@ -290,7 +298,10 @@ export function setInventoryConditions(
     summaries.set(entry.key, {
       ...summary,
       // The attribution is the point (#454): the operator set no condition on a shipped assumption
-      // or a vendor row, so the caution must say whose copies it is about.
+      // or a vendor row, so the caution must say whose copies it is about. The flag carries the
+      // same fact where the panel prints only the row's short suffix (#458), so a `· worn` on a
+      // built-in can name the shop's copies without matching on the note's wording.
+      adopted: true,
       note:
         summary.note === null
           ? null

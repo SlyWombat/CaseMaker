@@ -179,10 +179,12 @@ describe('#454 a definition adopts the condition of the copies that are the same
     expect(conditionForKey('inv:only')).toMatchObject({ best: 'broken', usable: 0 });
     // … and the built-in that would otherwise have looked fresh is out for the same reason.
     const adopted = conditionForKey('flat-1.0')!;
-    expect(adopted).toMatchObject({ best: 'broken', usable: 0 });
+    expect(adopted).toMatchObject({ best: 'broken', usable: 0, adopted: true });
     expect(adopted.note).toContain('every copy of this cutter is marked broken');
     // The attribution: no operator described the shipped assumption.
     expect(adopted.note).toContain('shop’s own copies');
+    // The same fact as a flag, for the panel's short `Why?` row (#458).
+    expect(conditionForKey('inv:only')!.adopted).toBeUndefined();
     // The worker reads this same table, not a second copy of the rule (#442).
     expect(inventoryConditions().get('flat-1.0')).toEqual(adopted);
   });
@@ -190,7 +192,7 @@ describe('#454 a definition adopts the condition of the copies that are the same
   it('carries a worn owned 3.175 mm cutter to the built-in on the same line', () => {
     setInventoryConditions([owned('worn', WIDE_METAL, [copy('worn-1', 'worn')])], (id) => `inv:${id}`, TOOL_LIBRARY);
     const adopted = conditionForKey(BUILTIN_31.key)!;
-    expect(adopted).toMatchObject({ best: 'worn', usable: 1 });
+    expect(adopted).toMatchObject({ best: 'worn', usable: 1, adopted: true });
     expect(adopted.note).toContain('marked worn');
     expect(adopted.note).toContain('check it before the cut');
     expect(adopted.note).toContain('shop’s own copies');
