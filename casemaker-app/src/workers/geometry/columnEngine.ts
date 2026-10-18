@@ -77,6 +77,16 @@ export interface ColumnCutter {
    * V-bit. Absent for every other cutter.
    */
   toothRootRadius?: number;
+  /**
+   * A ROUNDED tip's corner-arc radius, mm (#532): a BALL nose or a BULL nose. Inside `radius` the
+   * floor is flat at the tip plane; from `radius` out to `radius + cornerRadius` (= `outerRadius`)
+   * it follows a quarter-round of this radius — the torus/sphere surface — and past `outerRadius`
+   * the cutter is its cylindrical body, so nothing beyond is cut. A BALL is the special case
+   * `radius = 0`, `cornerRadius = outerRadius = R` (a hemisphere of the tool radius); a BULL has
+   * `radius = R − cornerRadius`. Absent for every other cutter, and never set together with
+   * `toothRootRadius` or a non-null `tanHalf`.
+   */
+  cornerRadius?: number;
 }
 
 /**
@@ -118,6 +128,19 @@ export function surfaceAboveTip(cutter: ColumnCutter, rho: number): number {
     const h = (cutter.radius - rho) / (cutter.tanHalf as number);
     return h > 0 ? h : 0;
   }
+  if (cutter.cornerRadius !== undefined) {
+    // #532 — a ball (radius 0) or a bull nose: flat out to `radius`, then a quarter-round of
+    // `cornerRadius` whose arc centre is at (radius, cornerRadius) in the (ρ, z) plane. The floor
+    // at radial distance ρ is `rc − sqrt(rc² − (ρ − radius)²)`: 0 at ρ = radius (meets the flat),
+    // rc at ρ = radius + cornerRadius (meets the cylindrical body). Past the body nothing is cut.
+    const outer = cutter.outerRadius ?? cutter.radius + cutter.cornerRadius;
+    if (rho > outer) return Infinity;
+    if (rho <= cutter.radius) return 0;
+    const dr = rho - cutter.radius;
+    const rc = cutter.cornerRadius;
+    const under = rc * rc - dr * dr;
+    return under > 0 ? rc - Math.sqrt(under) : rc;
+  }
   if (cutter.tanHalf === null) return rho <= cutter.radius ? 0 : Infinity;
   if (cutter.outerRadius !== undefined && rho > cutter.outerRadius) return Infinity;
   const h = (rho - cutter.radius) / cutter.tanHalf;
@@ -142,6 +165,9 @@ export function cutterReach(cutter: ColumnCutter, aboveTip: number): number {
   // #445 — a thread tooth's flank rises INWARD, so its furthest reach is the tooth tip (plus the
   // engine's padding) at every depth; unlike a V-bit it does not widen as the tip goes down.
   if (cutter.toothRootRadius !== undefined) return cutter.outerRadius ?? cutter.radius;
+  // #532 — a ball/bull is a cylindrical body of `outerRadius` above the rounded corner, so its XY
+  // reach is that body radius at every depth (never more), exactly like a thread tooth's.
+  if (cutter.cornerRadius !== undefined) return cutter.outerRadius ?? cutter.radius + cutter.cornerRadius;
   if (cutter.tanHalf === null) return cutter.radius;
   const cone = cutter.radius + aboveTip * cutter.tanHalf;
   // A bounded cone (a drill, #382) reaches no further than its body, however deep the tip is.
@@ -163,7 +189,7 @@ export interface DrillPointDefault {
 }
 
 export type ColumnCutterResult =
-  | { ok: true; cutter: ColumnCutter; kind: 'flat' | 'v' | 'drill' | 'thread-envelope'; diagnostics: SweepDiagnostic[] }
+  | { ok: true; cutter: ColumnCutter; kind: 'flat' | 'v' | 'drill' | 'thread-envelope' | 'ball' | 'bull'; diagnostics: SweepDiagnostic[] }
   | { ok: false; reason: string };
 
 /**
@@ -182,7 +208,12 @@ export type ColumnCutterResult =
  *     the program emits is left in the floor. Never sized from the thread spec (an M5 mill does not
  *     cut a 5 mm hole: it orbits). A thread mill that states no cutting diameter is refused by name.
  *
- * A ball, a bull nose, an unknown shape: refused, as before (#222).
+ *   - BALL nose (#532): a hemisphere of the tool radius — `radius 0`, `cornerRadius = R`. At radial
+ *     distance ρ its floor rises `R − sqrt(R² − ρ²)`, so a move leaves a round-bottomed groove.
+ *   - BULL nose (#532): a flat floor out to `R − cornerRadius`, then a quarter-round of the stated
+ *     corner radius up to `R`, so a move leaves a filleted corner. Refused if it states no corner.
+ *
+ * A tapered ball, an unknown shape: refused, as before (#222).
  */
 export function columnCutterFor(tool: Tool, drillDefault?: DrillPointDefault | null): ColumnCutterResult {
   if (tool.shape === 'drill') {
@@ -233,6 +264,33 @@ export function columnCutterFor(tool: Tool, drillDefault?: DrillPointDefault | n
         },
       ],
     };
+  }
+  if (tool.shape === 'ball') {
+    // A ball nose (#532): the hemisphere's radius is the cutting radius — a 1 mm ball's
+    // `cuttingDiameter` is 1, so R = 0.5 — flat part zero, the whole tip a quarter-round of R.
+    const d = cuttingDiameter(tool);
+    if (d === null || !(d > 0)) {
+      return { ok: false, reason: `ball nose "${tool.name}" states no cutting diameter (tipdiameter=${tool.tipDiameter}, diameter=${tool.diameter})` };
+    }
+    const r = d / 2;
+    return { ok: true, kind: 'ball', cutter: { radius: 0, tanHalf: null, cornerRadius: r, outerRadius: r }, diagnostics: [] };
+  }
+  if (tool.shape === 'bull') {
+    // A bull nose (#532): a flat floor of `R − cornerRadius`, the corner a quarter-round of the
+    // stated corner radius out to `R`. A bull that states no corner is a flat end's refusal, not a
+    // silent flat sweep — the rounded corner is the whole point of the shape.
+    const d = cuttingDiameter(tool);
+    if (d === null || !(d > 0)) {
+      return { ok: false, reason: `bull nose "${tool.name}" states no cutting diameter (tipdiameter=${tool.tipDiameter}, diameter=${tool.diameter})` };
+    }
+    const rc = tool.cornerRadius;
+    if (rc === null || !(rc > 0)) {
+      return { ok: false, reason: `bull nose "${tool.name}" states no corner radius (cornerradius=${tool.cornerRadius}); without it the rounded corner that distinguishes a bull nose cannot be modelled` };
+    }
+    const r = d / 2;
+    // A corner wider than the tool radius is a ball; clamp so the flat part cannot go negative.
+    const corner = Math.min(rc, r);
+    return { ok: true, kind: 'bull', cutter: { radius: r - corner, tanHalf: null, cornerRadius: corner, outerRadius: r }, diagnostics: [] };
   }
   const trace = cuttingForTrace(tool);
   if (!trace.ok) return trace;
@@ -612,9 +670,10 @@ export function distToSegment(px: number, py: number, ax: number, ay: number, bx
  * slot of the tip's width. A DRILL is the same cone with a sharp tip, BOUNDED at the drill's radius
  * (`ColumnCutter.outerRadius`, #382), and a THREAD MILL is its neck plus the item's 60° tooth, swept
  * as an inverted cone with a level neck (`ColumnCutter.toothRootRadius`, #445; the fallback for a
- * file with no thread dimensions is its cutting-diameter cylinder — `columnCutterFor`). A BALL or a
- * BULL nose is still refused before the sweep reaches this parameterisation: their constant-Z
- * footprint is a profile too, but it is #222's, and a wrong profile is worse than a refusal.
+ * file with no thread dimensions is its cutting-diameter cylinder — `columnCutterFor`). A BALL is a
+ * hemisphere of the tool radius and a BULL nose a flat floor with a quarter-round corner (#532,
+ * `ColumnCutter.cornerRadius`): both are a height profile over the disc, so `applyMove` leaves a
+ * round-bottomed groove and a filleted corner respectively.
  */
 export const FLAT: ColumnParameterisation = {
   kind: 'flat',
@@ -1022,10 +1081,10 @@ function zeroStats(): SweepStats {
 /**
  * Sweep a timeline with the column engine. A ROTARY job (A moves) uses the rotary
  * parameterisation and refuses (`rotary-stock`) a non-cylinder stock; a non-rotary job uses the
- * FLAT parameterisation and refuses (`flat-stock`) a non-prism stock. Both refuse (`tool-refused`)
- * a tool neither parameterisation can hold: a ball or bull nose, or — since #405 — a V-bit, and
- * since #382 a drill or a thread mill, on a ROTARY job, which has no form in a single-valued radius
- * column. The rotary engine refuses
+ * FLAT parameterisation and refuses (`flat-stock`) a non-prism stock. The ROTARY engine refuses
+ * (`tool-refused`) every tool but a flat end mill — a V-bit (#405), a drill or a thread mill
+ * (#382), and a ball or bull nose (#532) — because a single-valued radius column holds none of
+ * their profiles about a turntable axis; the FLAT engine admits them all. The rotary engine refuses
  * (`axis-crossing`) a genuine crossing and warns (`axis-clamped`) about shallow dips it clamped.
  * Diagnostic `code`s match the exact sweeper's vocabulary so the UI does not learn a second set.
  */
@@ -1059,7 +1118,9 @@ export function columnSweep(timeline: Timeline, tool: Tool, setup: Setup, opts?:
         ? 'a V-bit, whose cone about a turntable axis is a different body'
         : resolved.kind === 'drill'
           ? 'a drill, whose cone point about a turntable axis is not modelled'
-          : 'a thread mill, whose envelope about a turntable axis is not modelled';
+          : resolved.kind === 'ball' || resolved.kind === 'bull'
+            ? `a ${resolved.kind} nose, whose rounded tip about a turntable axis is not modelled`
+            : 'a thread mill, whose envelope about a turntable axis is not modelled';
     return {
       ok: false,
       diagnostics: [{ severity: 'error', code: 'tool-refused', message: `the rotary column engine sweeps a flat end mill only; tool "${tool.name}" is ${what}` }],

@@ -281,13 +281,15 @@ export interface SimLoadOpts {
 
 /**
  * Does this tool's job go to the COLUMN engine on a prism? A V-bit or chamfer (#405), a drill and a
- * thread mill (#382): the exact sweeper's contract is one flat cutting radius, and none of these has
- * one it can honestly use. One that states too little to sweep (a box-code chamfer with no tip, a
- * thread mill with no cutting diameter) still routes here, so the column engine's refusal — which
- * names what is missing — is the one the user reads.
+ * thread mill (#382), a ball or a bull nose (#532): the exact sweeper's contract is one flat cutting
+ * radius, and none of these has one it can honestly use — a ball/bull is a height profile over its
+ * radius, which the FLAT dexel holds (`columnCutterFor`, `ColumnCutter.cornerRadius`). One that
+ * states too little to sweep (a box-code chamfer with no tip, a thread mill with no cutting diameter,
+ * a bull nose with no corner radius) still routes here, so the column engine's refusal — which names
+ * what is missing — is the one the user reads.
  */
 export function sweepsOnColumn(tool: Tool): boolean {
-  return isVShape(tool) || tool.shape === 'drill' || tool.shape === 'thread';
+  return isVShape(tool) || tool.shape === 'drill' || tool.shape === 'thread' || tool.shape === 'ball' || tool.shape === 'bull';
 }
 
 /**
@@ -297,8 +299,9 @@ export function sweepsOnColumn(tool: Tool): boolean {
  * path-only (#194) — but the FLAT dexel can draw exactly that, and already runs today for
  * V/drill/thread. So a job that (a) is denser than the exact sweep takes on
  * (`isDenseForExactSweep`) and (b) uses a genuine flat end mill — `cuttingRadiusForSweep(tool).ok`,
- * which is false for a ball or a bull nose, those being #532's to admit, so they keep their
- * existing `tool-refused` — is sent to the dexel rather than refused.
+ * which is false for a ball or a bull nose — is sent to the dexel rather than refused. A ball/bull
+ * does not need this gate: it already routes to the dexel through `sweepsOnColumn` (#532), dense or
+ * not, so keeping it out here leaves B's dense-flat routing flat-only, as #531 relies on.
  *
  * A REST PASS is NOT re-routed: the column engine cannot start from a previous program's material
  * (it would answer `prior-removal-column`), so a dense flat rest pass keeps its existing exact-sweep
