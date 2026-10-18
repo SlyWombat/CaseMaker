@@ -211,6 +211,12 @@ export interface RunSheetProgram {
    * The per-program section reads it from here, never from the top-level facts.
    */
   finish?: RunSheetFinishFacts | null;
+  /**
+   * #218 — the cut-outs THIS program cuts through, when it has any. Structurally the worker's
+   * `ThroughCutFacts`, so the generated object is assignable unchanged; absent on every program
+   * that cuts no cut-out and on a result stored by an older build.
+   */
+  through?: RunSheetThroughFacts | null;
 }
 
 /**
@@ -222,6 +228,27 @@ export interface RunSheetFinishFacts {
   stockToLeaveMm: { value: number; source: FinishSettingSource };
   mode: 'rough-and-finish' | 'rough-only' | 'finish-only';
   itemIds: readonly string[];
+}
+
+/**
+ * #218 — what a program's cut-outs cut: the breakthrough, the board it lands in, and one entry
+ * per cut-out with the holding tabs the file was made with. The run sheet prints these numbers;
+ * it never re-plans a tab.
+ */
+export interface RunSheetThroughFacts {
+  /** How far below the blank's bottom face the kerf reaches, mm. */
+  breakthroughMm: number;
+  /** The board's thickness, or null when the job states none. */
+  boardThicknessMm: number | null;
+  cutouts: readonly {
+    id: string;
+    name: string;
+    tabs: { count: number; widthMm: number; heightMm: number };
+    /** Tab spans the CAM actually placed (one per contour). */
+    spans: number;
+    /** Spans it could not place; a non-zero count is a finding, never a silent omission. */
+    unplaceable: number;
+  }[];
 }
 
 /** #434 — the drill program's settings, their per-key sources, and one plan per drilled item. */
@@ -289,6 +316,13 @@ export interface RunSheetGenerated {
    * when it cut in one pass; a later program carries its own facts on `programs[n].finish`.
    */
   finish?: RunSheetFinishFacts | null;
+  /**
+   * #218 — the cut-outs the FIRST program cuts through, when it cuts any (the top-level result
+   * describes program 1, exactly as `drill` does). A later program's facts travel on
+   * `programs[n].through` and are printed in that program's own section (#419). Absent or null on
+   * a job with no cut-out, and on a result stored by an older build.
+   */
+  through?: RunSheetThroughFacts | null;
   /**
    * #432 slice 3 — the FACING program: the skim of the blank's top, its own `.nc` beside the job
    * (`runSheetFaceFileName`), or null when none was produced. Optional because a generated object
@@ -2394,6 +2428,51 @@ function programRunSteps(program: RunSheetProgram, number: number): RunSheetStep
   return steps;
 }
 
+/**
+ * #218 — the through-cut and tab-removal steps for one program. Two separate steps on purpose:
+ * the first says what the file does below the blank, the second is a physical action taken after
+ * the program ends and is never buried inside another sentence. Empty for a program with no
+ * cut-outs, so every pre-#218 sheet is unchanged.
+ */
+function throughCutSteps(facts: RunSheetThroughFacts | null | undefined): RunSheetStep[] {
+  if (facts === null || facts === undefined || facts.cutouts.length === 0) return [];
+  const count = facts.cutouts.length;
+  const board = facts.boardThicknessMm;
+  const steps: RunSheetStep[] = [
+    {
+      text:
+        `This program cuts ${count === 1 ? 'one piece' : `${count} pieces`} out of the blank and through ` +
+        `into the board, ${fmtNum(facts.breakthroughMm)} mm past the blank's underside` +
+        (board === null
+          ? '.'
+          : ` — the board is ${fmtNum(board)} mm thick, so the kerf stops ` +
+            `${fmtNum(Math.max(0, board - facts.breakthroughMm))} mm short of its underside.`),
+      value: `${fmtNum(facts.breakthroughMm)} mm breakthrough`,
+    },
+  ];
+  const tabbed = facts.cutouts.filter((c) => c.tabs.count > 0);
+  if (tabbed.length > 0) {
+    const total = tabbed.reduce((sum, c) => sum + c.tabs.count, 0);
+    const detail = tabbed
+      .map(
+        (c) =>
+          `${c.name}: ${c.tabs.count} tab${c.tabs.count === 1 ? '' : 's'}, ` +
+          `${fmtNum(c.tabs.widthMm)} mm wide and ${fmtNum(c.tabs.heightMm)} mm high`,
+      )
+      .join('; ');
+    steps.push({
+      // A DISTINCT step, not a sentence inside another: the program holds the part by these tabs,
+      // and the operator must not free it before the file ends.
+      text:
+        `Only after the program ends, remove the cut-out ${count === 1 ? 'part' : 'parts'} and cut ` +
+        `the ${total === 1 ? 'holding tab' : 'holding tabs'} by hand — ${detail}. Cut each tab flush ` +
+        'with the part and the blank; do not lever a part out by its tabs.',
+      value: `${total} tab${total === 1 ? '' : 's'} to cut by hand`,
+    });
+  }
+  return steps;
+}
+
 /** A drill program's own section — point, `drill.*` numbers and provenance, holes, then the file. */
 function drillProgramSectionSteps(
   program: RunSheetProgram,
@@ -2412,6 +2491,7 @@ function drillProgramSectionSteps(
     ...(point === null ? [] : [point]),
     ...drillCutSteps(facts, vacuumOn).steps,
     ...programRunSteps(program, number),
+    ...throughCutSteps(program.through),
   ];
 }
 
@@ -2430,6 +2510,7 @@ function engraveProgramSectionSteps(program: RunSheetProgram, number: number): R
     },
     ...(program.finish == null ? [] : [finishAllowanceStep(program.finish)]),
     ...programRunSteps(program, number),
+    ...throughCutSteps(program.through),
   ];
 }
 
@@ -2449,6 +2530,7 @@ function restRoughProgramSection(program: RunSheetProgram, facts: RestPassFacts,
     restProgramParamsStep(facts.rough, number),
     ...(program.finish == null ? [] : [finishAllowanceStep(program.finish)]),
     ...programRunSteps(program, number),
+    ...throughCutSteps(program.through),
   ];
 }
 
@@ -2463,6 +2545,7 @@ function restProgramSection(program: RunSheetProgram, facts: RestPassFacts, labe
     },
     ...(program.finish == null ? [] : [finishAllowanceStep(program.finish)]),
     ...restProgramSectionSteps(facts, labels),
+    ...throughCutSteps(program.through),
   ];
 }
 
@@ -3210,6 +3293,9 @@ export function buildRunSheet(
   cutSteps.push({
     text: 'Stay at the machine. Stop it if the sound changes, the blank moves, or the cutter loads up.',
   });
+  // #218 — program 1's through cut-outs and their holding tabs. Two distinct steps from the
+  // helper: what the file does below the blank, then the tab removal done after it ends.
+  cutSteps.push(...throughCutSteps(generated.through));
   // #410 — the second program's routine joins THIS section, not the narrative one: it is a sequence
   // of things done at the machine, in order, after the first file has run to its end.
   if (options.restPass !== undefined && !restInOwnSection) {
