@@ -16,7 +16,7 @@
 import { readFileSync } from 'node:fs';
 
 import { bootstrap } from '../../../src/platform/headless/bootstrap';
-import { engraveGenerate } from '../../../src/workers/sim/engraveGenerate';
+import { engraveGenerate, type EngraveFailure, type EngraveStage } from '../../../src/workers/sim/engraveGenerate';
 import { createSimSession, type SimDiagnostic } from '../../../src/workers/sim/session';
 import { simErrors } from '../../../src/engine/cnc/simGate';
 import { runSheetFileName } from '../../../src/engine/cnc/engrave/runSheet';
@@ -52,6 +52,12 @@ export interface PreparedProgram {
   filename: string;
   nc: string;
   verify: VerifyReport;
+  /** The generate stage that produced it (`done`), for the receipt. */
+  stage: EngraveStage;
+  /** The generator's own `ok` flag. */
+  ok: boolean;
+  /** The generator's stage-failure messages, for the receipt. */
+  errors: EngraveFailure[];
   /** `programHash(nc)` — the FNV key `--confirm` names and `finishedPrograms` records. */
   hash: string;
   findings: JobFinding[];
@@ -80,7 +86,24 @@ export interface PreparedProgram {
 
 export type PrepareResult =
   | { ok: true; program: PreparedProgram }
-  | { ok: false; stage: string; reason: string };
+  | {
+      ok: false;
+      stage: string;
+      reason: string;
+      /**
+       * What `engraveGenerate` produced, when the run reached it. The bench script prints its
+       * `stage`/`verify` report before it says "no usable cutter" or "no program", so a refusal that
+       * happened AFTER generation must carry the report along for it to print. Absent for a
+       * pre-generate failure (an unparseable job, an unreadable record).
+       */
+      generated?: {
+        stage: EngraveStage;
+        ok: boolean;
+        verify: VerifyReport | null;
+        errors: EngraveFailure[];
+        findings: JobFinding[];
+      };
+    };
 
 export interface PrepareOptions {
   /** The app's exported "my machine" record (#247) — its depth margins are the house's (#345). */
@@ -138,12 +161,25 @@ export async function prepareVerifiedProgram(
 
   // `jobTool` reads the registry, so it must come after the bootstrap.
   const tool = jobTool(job);
-  if (tool === null) {
-    return { ok: false, stage: 'findings', reason: 'the job has no usable cutter — nothing is swept or prepared' };
-  }
   const mill = jobMachine(job, calibration);
   const catalogue: never[] = [];
+  // Generate even with no cutter: the bench script prints the `stage`/`verify` report before it
+  // says "no usable cutter", so the refusal below must carry what `engraveGenerate` produced.
   const generated = engraveGenerate(tl, job, tool, catalogue, calibration, margins);
+  if (tool === null) {
+    return {
+      ok: false,
+      stage: 'findings',
+      reason: 'the job has no usable cutter — nothing is swept or prepared',
+      generated: {
+        stage: generated.stage,
+        ok: generated.ok,
+        verify: generated.verify,
+        errors: generated.errors,
+        findings: generated.findings,
+      },
+    };
+  }
 
   const run: { simStatus: SimStatus; simDiagnostics: SimDiagnostic[]; oracle: OracleReport | null } = {
     simStatus: 'idle',
@@ -193,6 +229,13 @@ export async function prepareVerifiedProgram(
       ok: false,
       stage: generated.stage,
       reason: `no program, or no verifier report — the run stopped at ${generated.stage}`,
+      generated: {
+        stage: generated.stage,
+        ok: generated.ok,
+        verify: generated.verify,
+        errors: generated.errors,
+        findings: generated.findings,
+      },
     };
   }
 
@@ -202,6 +245,9 @@ export async function prepareVerifiedProgram(
     filename: runSheetFileName(job.name),
     nc: generated.nc,
     verify: generated.verify,
+    stage: generated.stage,
+    ok: generated.ok,
+    errors: generated.errors,
     hash: programHash(generated.nc),
     findings: generated.findings,
     sim: { status: run.simStatus, diagnostics: run.simDiagnostics, oracle: run.oracle },
