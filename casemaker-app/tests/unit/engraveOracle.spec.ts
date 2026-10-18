@@ -307,4 +307,70 @@ describe('engraveOracle (#206 §3)', () => {
       session.dispose();
     }
   });
+
+  // #445 review — the entry ramp may be LONGER than the pitch (the 0.5 mm seed against M2's
+  // 0.4 mm). Its upper segments then sit above the first revolution's top, and the simulator sweeps
+  // them; a prediction that kept only the first revolution would leave those columns untouched and
+  // report an over-cut on a correct program. This is the permanent regression for that filter.
+  it('passes an M2 thread whose entry ramp is longer than its pitch (#445)', () => {
+    const MILL: Tool = flatEndMill(1.2, {
+      name: '1.2 mm thread mill',
+      typeText: 'Thread Mill',
+      shape: 'thread',
+      tipDiameter: 1.2,
+      diameter: 1.2,
+      fluteLength: 20,
+    });
+    const defaults = {
+      'thread.radialStepoverMm': { value: 0.2, source: 'seeded' },
+      'thread.entryRampMm': { value: 0.5, source: 'seeded' },
+      'thread.bottomClearancePitches': { value: 1, source: 'seeded' },
+      'thread.pilotTipClearanceMm': { value: 0.5, source: 'seeded' },
+      'thread.feed': { value: 300, source: 'seeded' },
+      'thread.plungeFeed': { value: 100, source: 'seeded' },
+      'thread.spindleRpm': { value: 10000, source: 'seeded' },
+      'thread.chordToleranceMm': { value: 0.01, source: 'seeded' },
+    } as unknown as ShopDefaults;
+    const base = defaultEngraveJob();
+    const job: EngraveJob = {
+      ...base,
+      labels: [],
+      shapes: [],
+      traces: [],
+      drills: [],
+      tool: MILL,
+      threads: [
+        {
+          kind: 'thread',
+          id: 'thr-m2',
+          position: { x: 50, y: 30 },
+          enabled: true,
+          size: 'M2',
+          standard: 'metric',
+          classFit: '6H',
+          depth: 3,
+          through: false,
+        },
+      ],
+    };
+    const g = generate(tl, job, null, [], undefined, { defaults });
+    expect(g.ok).toBe(true);
+    expect(g.threads).toHaveLength(1);
+    const plan = g.threads![0]!;
+    // The premise: M2's pitch is 0.4 and the ramp 0.5, so the ramp really does climb above the
+    // top of the first revolution (one pitch up from the tip). Without the premise the test would
+    // not exercise the regression.
+    expect(plan.pitch).toBeCloseTo(0.4, 9);
+    const firstTurnTop = -plan.tipDepth + plan.pitch;
+    expect(plan.moves.some((m) => m.z > firstTurnTop + 1e-9 && m.z < -1e-9)).toBe(true);
+    const session = load(job, g.nc!, MILL, { threads: g.threads!.flatMap((t) => t.simThreads) });
+    try {
+      const report = session.oracle(g.predicted);
+      expect(report.ok).toBe(true);
+      expect(under(report)).toBeLessThanOrEqual(ORACLE_AREA_FLOOR);
+      expect(over(report)).toBeLessThanOrEqual(ORACLE_AREA_FLOOR);
+    } finally {
+      session.dispose();
+    }
+  });
 });

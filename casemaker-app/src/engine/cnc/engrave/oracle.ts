@@ -354,10 +354,12 @@ function shallowGrooveLevel(predicted: readonly OraclePredicted[]): number[] {
  *
  * The simulator and this prediction must answer with the same model: the profile is `threadCutter`/
  * `surfaceAboveTip` (including the engine's half-cell pad) and the moves are the CAM plan's own
- * feed segments. Only the FIRST REVOLUTION of each pass can lower a column: the helix is periodic
- * in angle and strictly increasing in Z, so a later turn at the same angle sits above the first
- * one and its footprint at every level is a subset of the first turn's. The entry ramp and the
- * plunge sit at or below that top and are kept.
+ * feed segments — ALL of them. A later turn of the helix is dominated by the first one at the same
+ * angle, so filtering to the first revolution is tempting, but it is only sound while the entry
+ * ramp is no longer than one pitch: a 0.5 mm ramp over M2's 0.4 mm pitch climbs above the first
+ * turn's top, the simulator still sweeps those upper ramp segments, and a prediction that dropped
+ * them would report an over-cut on a correct program (#445 review). Every move is swept here
+ * instead; the extra work is one pass over the plan's own segments.
  *
  * The window is the move extent grown by the cutter's reach. Cells outside the cut keep the top
  * face, so a level slices them as untouched, exactly as the simulated grid does.
@@ -366,9 +368,10 @@ function threadPredictedSlice(tl: ManifoldToplevel, grid: ColumnGrid, thread: Or
   const pad = columnBandTerm(grid);
   const cutter = threadCutter(thread.cuttingDiameterMm, thread.majorMm, thread.minorMm, pad);
   const reach = cutterReach(cutter, 0);
-  // One pitch up from the tip: the top of the first revolution. Later turns are dominated.
-  const firstTurnTop = -thread.tipDepthMm + thread.pitchMm + 1e-6;
-  const moves = thread.moves.filter((m) => m.z < grid.initial - 1e-9 && m.z <= firstTurnTop);
+  // Every move the simulator sweeps, not just the first revolution: the ramp can rise above the
+  // first turn's top when it is longer than the pitch (#445 review), and later turns are dominated
+  // but harmless to sweep.
+  const moves = thread.moves.filter((m) => m.z < grid.initial - 1e-9);
   if (moves.length === 0) return null;
 
   let xMin = Infinity;
