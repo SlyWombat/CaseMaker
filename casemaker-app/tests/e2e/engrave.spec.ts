@@ -138,7 +138,9 @@ test('a hole added in the panel is cut as its own operation', async ({ cm, page 
   expect(state.ok).toBe(true);
   expect(state.stage).toBe('done');
   expect(state.verifyErrors).toBe(0);
-  expect(state.operations).toBe(4); // three labels + the one hole
+  // #250 — the shop's seeded finish allowance splits every flat label into a roughing and a
+  // finishing pass, so the three labels count six; the drill is unchanged and is the seventh.
+  expect(state.operations).toBe(7);
 });
 
 // #288 — the previewed blank drew only the REGION items, so a drilled hole was cut by the program
