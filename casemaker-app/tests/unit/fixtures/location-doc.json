@@ -533,6 +533,13 @@
       "setAt": null,
       "unit": "s"
     },
+    "finish.stockToLeaveMm": {
+      "value": 0.2,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm",
+      "note": "chosen, not measured: how much stock the roughing pass leaves on the walls and the floor for the finishing pass. 0.2 mm is about one printed layer at the common layer height. The first bench cut that inspects a finished floor replaces this"
+    },
     "registration.surfaceSlowSeekMm": {
       "value": 2.0,
       "source": "seeded",

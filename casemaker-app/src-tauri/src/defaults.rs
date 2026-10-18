@@ -376,6 +376,10 @@ pub const UNMEASURED_SEEDS: &[(&str, f64, &str, &str)] = &[
     // compiled in"). Both chosen, not measured (Q19); the first two-tool cut replaces them.
     ("rest.overlapMm", 0.5, "mm", "chosen, not measured: the LEAST the band both programs cut at the seam may be. The band itself is worked out per job from that job's own two cutters, and this is the floor under it — a 2 mm cutter at a 0.9 mm step-over leaves slivers 0.107 mm wide and a 0.6 mm rest cutter closes anything narrower, so the badge's pair needs about 0.493 mm. The first two-tool cut replaces this"),
     ("rest.thirdToolPct", 2.0, "%", "chosen, not measured: the share of a job's own removal area that may still be standing after both programs have run before a third cutter is suggested"),
+    // #250 — the finish pass's stock-to-leave. Chosen, not measured: about one printed layer at the
+    // common layer height, and small enough that a 1 mm flat still has a roughing cut. The first
+    // bench cut that inspects a finished floor replaces it.
+    ("finish.stockToLeaveMm", 0.2, "mm", "chosen, not measured: how much stock the roughing pass leaves on the walls and the floor for the finishing pass. 0.2 mm is about one printed layer at the common layer height. The first bench cut that inspects a finished floor replaces this"),
     // ── #447 (begin) — the house depth margins (#345), out of browser storage. Chosen, not measured:
     // the numbers `depthBounds.ts`'s MARGIN_DEFAULTS shipped with, which a job copies or seeds from.
     ("margins.boundaryMarginMm", 0.2, "mm", "chosen, not measured: how far every floor stays clear of a plane it must not cross; 0.2 is one printed layer at the common layer height. While it is the seed, a blank that states its print uses its own layer height instead"),
@@ -553,6 +557,12 @@ fn known_rule(key: &str, n: Option<f64>) -> Option<Result<(), String>> {
         "rest.thirdToolPct" => Some(need(
             n.is_some_and(|v| (0.1..=50.0).contains(&v)),
             "0.1 to 50 percent",
+        )),
+        // #250 — an allowance wider than a millimetre is a second roughing cut, not a finish
+        // allowance; zero is allowed and turns the split off.
+        "finish.stockToLeaveMm" => Some(need(
+            n.is_some_and(|v| (0.0..=1.0).contains(&v)),
+            "0 to 1 mm",
         )),
         "registration.tipDiameterMm" => Some(need(
             n.is_some_and(|v| (0.2..=10.0).contains(&v)),

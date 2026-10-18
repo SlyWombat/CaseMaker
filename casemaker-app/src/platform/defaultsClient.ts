@@ -19,6 +19,7 @@ import { z } from 'zod';
 import { GRIP_MIN } from '@/engine/cnc/fixture';
 import { DRILL_POINT_FALLBACK_DEG } from '@/engine/cnc/tool';
 import { REST_MACHINING_FALLBACK } from '@/engine/cnc/engrave/restSettings';
+import { FINISH_STOCK_TO_LEAVE_FALLBACK } from '@/engine/cnc/engrave/finishPass';
 import {
   houseRequest,
   setHouseRequestTimeoutMs,
@@ -354,6 +355,16 @@ export const KNOWN_DEFAULTS: Readonly<Record<string, KnownDefault>> = {
     unit: '%',
     rule: z.number().min(0.1).max(50),
     fallback: REST_MACHINING_FALLBACK.thirdToolFraction * 100,
+  },
+  // #250 — the finish pass's stock-to-leave. The maintainer's rule (2026-10-15) is the one the rest
+  // pair follows: a tunable value lives in the location document. CHOSEN, not measured: about one
+  // printed layer; the first bench cut that inspects a finished floor replaces it. 0 turns the
+  // rough/finish split off.
+  'finish.stockToLeaveMm': {
+    label: 'finish pass stock to leave on walls and floor (chosen)',
+    unit: 'mm',
+    rule: z.number().min(0).max(1),
+    fallback: FINISH_STOCK_TO_LEAVE_FALLBACK,
   },
   // #417 — how deep a cut may go into the wasteboard before it is warned about.
   'wasteboard.depthLimitMm': {

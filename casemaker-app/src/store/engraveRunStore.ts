@@ -200,6 +200,14 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
         overlap: shopDefault('rest.overlapMm'),
         thirdToolPct: shopDefault('rest.thirdToolPct'),
       },
+      // #250 — the finish pass's allowance, from the SAME snapshot and for the same worker-realm
+      // reason. The worker splits each flat region into a roughing pass that leaves this much on the
+      // walls and floor and a finishing pass at full depth; the source travels so the run sheet can
+      // say where the number came from. This line is what makes the shipped app use the finish pass;
+      // a caller that omits it (a preview, a direct-engine test) cuts in one pass as before.
+      finish: {
+        stockToLeaveMm: shopDefault('finish.stockToLeaveMm'),
+      },
       // #434 — the drill numbers (`drill.peckDiameters`, `drill.peckClearanceMm`,
       // `drill.pointAngleDeg`, `drill.plungeFeed`, `drill.spindleRpm`) from the SAME snapshot,
       // with each one's source. A drill program's plan and its depth findings read this reading
