@@ -338,8 +338,9 @@ instead of guessing:
   sweep that would produce it was refused. A **Try again with a longer limit** button may
   appear.
 - **A tool shape it has no model for**: the simulator sweeps a flat end mill, a V-bit or chamfer,
-  a drill (its point cone on its cylinder) and a thread mill (as its cutting-diameter cylinder,
-  labelled `thread-envelope`, with its neck checked). A ball or bull nose, or a cutter whose record lacks the tip, angle or
+  a drill (its point cone on its cylinder) and a thread mill (as its neck and a 60° tooth, swept
+  along the program's helix, labelled `thread-envelope`, with its neck checked). A ball or bull
+  nose, or a cutter whose record lacks the tip, angle or
   diameter its model needs, is refused with `tool-refused`, and the message names what is missing.
 
 Every refusal and warning has a short code. Chapter 8 lists all of them.
@@ -638,8 +639,9 @@ the stock, the feeds and the steps to follow at the machine, derived from how th
   **effective pass pitch beside the requested one** (#221). A pitch the CAM had to clamp prints
   in the same warning words as the app's note, so paper and program cannot disagree.
 - A **thread** job states the pilot's ISO minor diameter, the threaded length and the shop's
-  pilot-tip clearance (#445). A **laminate** sheet quotes the cap its plane came from, and
-  whether that cap is assumed or measured (#492).
+  pilot-tip clearance (#445). The thread line also names the cutter beside the thread — its name
+  and cutting diameter — so a wrong pairing is caught by eye (#460, option (a)). A **laminate**
+  sheet quotes the cap its plane came from, and whether that cap is assumed or measured (#492).
 
 **Saving writes four files, not one** (#244, #273, #277, #432): `<job>.nc` (the program),
 `<job>-frame.nc` (the same toolpath 20 mm up, with the height baked in), `<job>-face.nc` (the
@@ -1029,7 +1031,7 @@ simulation does report about one is the sweep's own list, next:
 | `axis-clamped` | warning | A rotary cut dipped just past the axis (within one tool radius) and was clamped to it; the far-side hollow is not modelled, and the cut did not come out the depth the program asked for. | Keep the cutter off the axis, or accept the clamped picture. |
 | `tool-refused` | error | The simulator has no model for this cutter, or the cutter's record does not state what its model needs. The exact sweep takes a flat end mill. The column engine also takes a V-bit or chamfer with a stated tip and angle, a drill with a stated diameter, and a thread mill with a stated cutting diameter (#405, #382). A ball or bull nose is refused, and so is anything on a rotary job except a flat end mill. The message names what is missing, for example a chamfer box code that states no tip, or a thread mill whose only size is its thread. | Type the missing number on the cutter, or pick a cutter the simulator models. |
 | `drill-point-angle` | info | A drill is simulated as a cone point on a cylinder. The message names the included point angle used and where it came from: the drill's own record, or the shop default `drill.pointAngleDeg`, which is *chosen*, not measured. The #434 drilling CAM plans the hole's tip depth from the same rule and hands the simulation the angle it planned with (#382). A drill with no angle of its own is refused (`tool-refused`) when no default reaches the simulation. | If the drill's point is not the default, type its angle on the cutter. |
-| `thread-envelope` | warning | A thread mill is simulated as a plain cylinder of its cutting diameter all the way up, an **envelope**, widened by half a grid cell so no column the cutter touches is missed. Around the teeth and the neck that over-removes. The wider shank above the neck is **not** modelled, so a cut deeper than the neck would show less than the shank takes. The neck check says whether it is: `holder-collision` past a stated flute or shoulder length, `holder-unproven` when the cutter states neither. The thread form is not modelled (#382). | Read the drawn hole as the mill's reach, not as the thread. Type the mill's flute length so the neck can be checked. |
+| `thread-envelope` | warning | A thread mill's removal is an **envelope**. When the sim is given the thread's own dimensions (a job's thread item, #445), the cutter is modelled as its neck plus a 60° tooth on the item's basic form and swept along the program's helix, so the floor carries the thread's pitch and flank. A column holds one height, so the crests between the grooves are not left: the picture over-removes by at most the annular band π/4 (D² − D1²) L, and the message states that volume. The neck traces the ⌀D1 pilot in the solid blank, where the shop drills it first. A program loaded without the dimensions (a foreign file, the QA harness) falls back to a plain cylinder of the cutting diameter, widened by half a grid cell. Either way the wider shank above the neck is **not** modelled: `holder-collision` past a stated flute or shoulder length, `holder-unproven` when the cutter states neither. | Read the drawn hole as the mill's reach, not as the finished thread: crests are absent and the pilot is assumed drilled. Type the mill's flute length so the neck can be checked. |
 | `probe-fitted-cut` | error | A cutting move was made with `T0` active — `T0` is the **probe**, and a probe is contact, not removal. No cutter is modelled for it, and nothing is drawn as removed. The post never writes a probe cut, so the file is foreign or broken. | Check the tool numbers; re-post the job. |
 | `dense-3d-refused` | error | Too many separate cut runs at one (segment, Z): a 3D or dense job the 2.5D sweep will not take on. | — |
 | `sweep-budget-exceeded` | error | The sweep would take longer than the allowed budget, so it was stopped. | Retry with a longer limit, or simplify the job. |

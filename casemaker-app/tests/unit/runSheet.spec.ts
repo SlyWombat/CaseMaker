@@ -1239,8 +1239,27 @@ describe('runSheet — the thread program (#445 B2)', () => {
     expect(cut.some((t) => t.includes('⌀4.134 mm pilot') && t.includes('2 radial pass(es)'))).toBe(true);
     expect(cut.some((t) => t.includes('5 mm of thread'))).toBe(true);
     expect(cut.some((t) => t.includes('Check the thread with a M5 screw'))).toBe(true);
+    // R18 / #460 option (a): the thread and the cutter are on ONE line, so a wrong pairing is
+    // caught by eye. The item is still the authority for the pitch; this is the person's guard.
+    const threadLine = cut.find((t) => t.includes('Thread M5×0.8'))!;
+    expect(threadLine).toContain('4 mm thread mill');
+    expect(threadLine).toContain('⌀4 mm cutting');
+    expect(threadLine).toContain('M5×0.8 — 4 mm thread mill');
     // The ordinary job's "nothing was resolved" line must NOT appear on a thread job.
     expect(cut.some((t) => t.includes('Cutting parameters were not resolved'))).toBe(false);
+  });
+
+  it('§7 says a missing cutting diameter in the same thread line rather than omitting the cutter', () => {
+    const job = { ...threadJob(), tool: { ...MILL, tipDiameter: null, diameter: null } };
+    const sheet = buildRunSheet(
+      job,
+      { ...stubGenerated(job), threads: [FACTS], threadMachining: MACHINING },
+      NO_SIM,
+      NOW,
+    );
+    const threadLine = texts(sheet, 'cut').find((t) => t.includes('Thread M5×0.8'))!;
+    expect(threadLine).toContain('4 mm thread mill (cutting diameter not recorded)');
+    expect(threadLine).toContain('⌀4.134 mm pilot');
   });
 
   it('§7 says so when an old generated object carries no resolved thread numbers', () => {

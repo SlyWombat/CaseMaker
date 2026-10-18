@@ -3028,13 +3028,22 @@ export function buildRunSheet(
         text: 'The thread program’s parameters were not recorded for this run — use the numbers the job states.',
       });
     }
+    // R18 / #460 option (a) — the thread and the cutter are printed on ONE line so a wrong pairing
+    // is caught by eye. The cutter's own pitch is not on the wire in phase 2 (the item is the
+    // authority, D2), so this pairing is the guard a person has. Revisit as option (b) — a served
+    // `pitch` field plus a `thread-wrong-pitch` refusal — when a third thread mill arrives or the
+    // first wrong pairing is seen; #460 is closed on that trigger.
+    const cutterText =
+      tool === null
+        ? 'the job’s cutter'
+        : `${tool.name}${diameter === null ? ' (cutting diameter not recorded)' : ` (⌀${fmtNum(diameter)} mm cutting)`}`;
     for (const [i, t] of plan.threads.entries()) {
       // The plan and the CAM's plans are built from the same enabled list, in the same order, so a
       // plan's facts are found by index. A missing fact says so rather than guessing a pass count.
       const facts = threadPlans?.[i] ?? null;
       cutSteps.push({
         text:
-          `${t.name} — ⌀${fmtNum(FASTENERS[t.size].minor)} mm pilot` +
+          `${t.name} — ${cutterText}, ⌀${fmtNum(FASTENERS[t.size].minor)} mm pilot` +
           (facts === null
             ? ', the pass count was not recorded'
             : `, ${facts.passRadii.length} radial pass(es) landing the tooth on the ${t.size} major radius`),

@@ -161,6 +161,13 @@ export interface ThreadGeometry {
  *
  * Only the table's metric coarse sizes exist here; UNC/UNF and a 6G allowance are refused by
  * their absence (D5), not approximated. `FastenerSize` is what makes the table total.
+ *
+ * #460 option (a), maintainer 2026-10-17: the CUTTER's pitch is still not on the wire, so a
+ * cutter/thread pitch mismatch cannot be refused here. The run sheet prints the thread and the
+ * cutter on one line so a person can catch a wrong pairing, and the load's `thread-cutter-fit`
+ * checks the diameters. Revisit as option (b) — a served `pitch` field plus a
+ * `thread-wrong-pitch` refusal — when a third thread mill arrives or the first wrong pairing is
+ * seen. #460 is closed on that trigger, not on a silent assumption that it never happens.
  */
 export function threadGeometry(size: FastenerSize): ThreadGeometry {
   const f = FASTENERS[size];
