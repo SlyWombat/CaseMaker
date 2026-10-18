@@ -2312,6 +2312,35 @@ describe('through-cuts and cut-outs (#218)', () => {
     expect(text).toContain('Cut out "Badge" inside stock inset 5mm: 4 tabs, 4 mm wide and 1 mm high');
   });
 
+  it('the oracle predicts the material an interrupted pass LEAVES, not a square tab (#218)', () => {
+    // The sweep stops with the cutter's CENTRE at the span ends, so at a deep pass the standing
+    // tab is the span band less the two round end discs. Predicting the plain `tabRectangles`
+    // (which is what the void scan and the run sheet describe) leaves the disc-overhang as an
+    // under-cut and refuses the save with "the simulation does not match the prediction".
+    const job = cutoutJob();
+    const g = generate(tl, job);
+    expect(g.ok).toBe(true);
+    const session = createSimSession(tl);
+    try {
+      const load = session.load(g.nc as string, toSetup(job, Z1), jobTool(job)!, Z1.id);
+      expect(load.ok).toBe(true);
+      if (!load.ok) throw new Error(JSON.stringify(load.diagnostics));
+      const report = session.oracle(g.predicted);
+      expect(report.ok).toBe(true);
+
+      // The pin: the deepest level must REMOVE LESS than the level at the tab top, because that
+      // is where the tabs stand. With the square-rectangle prediction both areas were equal.
+      const deepest = report.levels.reduce((a, b) => (a.z < b.z ? a : b));
+      const tabTop = report.levels.find((l) => l.z === -(job.stock.thickness - 1))!;
+      expect(tabTop).toBeDefined();
+      expect(deepest.z).toBeCloseTo(-(job.stock.thickness + job.breakthrough), 6);
+      expect(deepest.predictedArea).toBeLessThan(tabTop.predictedArea);
+      expect(deepest.underCut).toBeLessThan(0.001);
+    } finally {
+      session.dispose();
+    }
+  });
+
   it('frees a tabless cut-out onto the board without calling the released part loose', () => {
     const job = cutoutJob({ tabs: { count: 0, width: 4, height: 1 } });
     const g = generate(tl, job);

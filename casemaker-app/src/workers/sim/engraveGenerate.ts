@@ -119,6 +119,7 @@ import { unfacedBands } from '@/engine/cnc/mounts/inPath';
 import { verifyProgram, type DepthLimit, type ThroughMask, type VerifyReport } from '@/engine/cnc/verify';
 import type { ManifoldToplevel } from '@/workers/geometry/evaluateOp';
 import { executeProfile } from '@/workers/geometry/evaluateOp';
+import { circlePolygon } from '@/workers/geometry/sweep';
 import {
   bindingVoidsByRegion,
   itemDepthBoundFindings,
@@ -664,6 +665,62 @@ function metalLineFindings(job: EngraveJob, tool: Tool | null): JobFinding[] {
  */
 export const VCARVE_MERGE_AREA_MM2 = 0.001;
 
+/**
+ * The material a tab ACTUALLY leaves at a deep pass, as polygons (#218).
+ *
+ * `tabRectangles` states the intent — `width` of material across the kerf — but the cutter
+ * cannot start and stop at a square end. The deep passes stop with the cutter's CENTRE at the
+ * span start and resume at the span end, so each end is an n-gon disc of radius r, the same
+ * `circlePolygon` the sweep uses (`segmentsForRadius(r)`). What is left standing is the band
+ * across the span LESS those two discs, which is the rectangle plus a shallow circular segment
+ * at each end (area `r² (2 − π/2)` each). Predicting the plain rectangle left that material as
+ * an under-cut in the oracle, which is exactly the check catching its own geometric idealisation
+ * rather than a CAM mistake. The tab is still the bridge the operator asked for; this is its
+ * shape where the cutter meets it.
+ */
+function tabKeptRegions(tl: ManifoldToplevel, spans: readonly ProfileSpan[], radius: number): Polygons {
+  if (spans.length === 0 || !(radius > 0)) return [];
+  const CS = tl.CrossSection;
+  const n = segmentsForRadius(radius);
+  const out: Polygons = [];
+  for (const span of spans) {
+    const [x0, y0] = span.start;
+    const [x1, y1] = span.end;
+    const length = Math.hypot(x1 - x0, y1 - y0);
+    if (!(length > 0)) continue;
+    const nx = (-(y1 - y0) / length) * radius;
+    const ny = ((x1 - x0) / length) * radius;
+    // CCW like `circlePolygon`: CrossSection reads a clockwise contour as a hole, and a band
+    // wound that way would difference to nothing.
+    const band = CS.ofPolygons([
+      [
+        [x0 - nx, y0 - ny],
+        [x1 - nx, y1 - ny],
+        [x1 + nx, y1 + ny],
+        [x0 + nx, y0 + ny],
+      ],
+    ]);
+    const startDisc = CS.ofPolygons([circlePolygon(x0, y0, radius, n)]);
+    const endDisc = CS.ofPolygons([circlePolygon(x1, y1, radius, n)]);
+    try {
+      const kept = CS.difference([band, startDisc, endDisc]);
+      try {
+        // Reversed to a NEGATIVE winding: the prediction appends these to the kerf, and a filled
+        // (positive) contour inside the kerf would be swallowed by the union instead of carving
+        // the standing material out of it — the same convention `tabRectangles` uses.
+        out.push(...(kept.toPolygons() as Polygons).map((contour) => [...contour].reverse()));
+      } finally {
+        kept.delete();
+      }
+    } finally {
+      band.delete();
+      startDisc.delete();
+      endDisc.delete();
+    }
+  }
+  return out;
+}
+
 /** The area of a polygon set, mm². A tiny helper so the merge tests read as geometry. */
 function polygonsArea(tl: ManifoldToplevel, polygons: Polygons): number {
   if (polygons.length === 0) return 0;
@@ -1115,11 +1172,14 @@ export function engraveRegions(
         cutout: true,
       });
       // Two levels, as the oracle needs them: the whole kerf is cut down to the tab top, and the
-      // deep passes remove it everywhere except the tab rectangles. The rectangles lie wholly
-      // inside the kerf, so their even-odd subtraction is exact.
+      // deep passes remove it everywhere except what the interrupted pass leaves standing. That
+      // kept region is the rectangle plus the two disc-lens corners (`tabKeptRegions`), not the
+      // plain rectangle: the sweep stops with a round cutter, and the oracle compares against the
+      // removal the file really makes.
       if (c.tabs.count > 0) {
+        const keptPredicted = spans.flatMap((one) => tabKeptRegions(tl, one, radius));
         cutoutPredicted.push({ depth: tabTop, polygons: kerf });
-        cutoutPredicted.push({ depth: c.depth, polygons: [...kerf, ...kept] });
+        cutoutPredicted.push({ depth: c.depth, polygons: [...kerf, ...keptPredicted] });
       } else {
         cutoutPredicted.push({ depth: c.depth, polygons: kerf });
       }
