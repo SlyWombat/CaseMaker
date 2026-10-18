@@ -86,6 +86,7 @@ describe('a drill bit is its own program (#434)', () => {
     // The facts the run sheet and the simulation read travel with the generated program.
     const facts = g.drill;
     expect(facts).not.toBeNull();
+    expect(facts!.toolName).toBe('3 mm drill');
     expect(facts!.settings).toEqual(SETTINGS);
     expect(facts!.sources).toEqual(SOURCES);
     expect(facts!.simDrillPoint).toEqual({ deg: 118, source: SOURCES.pointAngleDeg });

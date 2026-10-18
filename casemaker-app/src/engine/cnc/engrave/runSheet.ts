@@ -170,6 +170,8 @@ export interface RunSheetDrillPlan {
 
 /** #434 — the drill program's settings, their per-key sources, and one plan per drilled item. */
 export interface RunSheetDrillFacts {
+  /** The bit's own name. Optional so a generated object from before it was carried still sheets. */
+  toolName?: string;
   settings: {
     peckDiameters: number;
     peckClearanceMm: number;
@@ -2669,7 +2671,7 @@ export function buildRunSheet(
     const s = drillFacts.settings;
     const d0 = drillFacts.plans[0]!;
     const step: RunSheetStep = {
-      text: `Drill spindle, plunge feed and peck. Vacuum ${(job.cutOverride?.air ?? true) ? 'on' : 'off'}.`,
+      text: `Drill with ${drillFacts.toolName ?? 'the drill bit'} — spindle, plunge feed and peck. Vacuum ${(job.cutOverride?.air ?? true) ? 'on' : 'off'}.`,
       value:
         `${s.spindleRpm} RPM · ${fmtNum(s.plungeFeed)} mm/min plunge · pecks of ` +
         `${fmtNum(s.peckDiameters)} × ⌀${fmtNum(d0.diameter)} = ${fmtNum(d0.peck)} mm · ` +

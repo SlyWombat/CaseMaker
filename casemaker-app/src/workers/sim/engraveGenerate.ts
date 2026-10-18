@@ -276,6 +276,8 @@ export interface EngraveProgram {
  * the column engine sweeps the point the CAM planned instead of re-reading the setting.
  */
 export interface DrillProgramFacts {
+  /** The bit's own name, so the run sheet names the cutter rather than "the drill". */
+  toolName: string;
   settings: DrillSettings;
   sources: Record<keyof DrillSettings, string>;
   plans: (DrillBitPlan & { id: string; name: string })[];
@@ -2209,6 +2211,7 @@ function generateOneProgram(
     }
     const resolvedDrill = shop.drill ?? drillSettings(shop.defaults ?? null);
     const facts: DrillProgramFacts = {
+      toolName: tool.name,
       settings: resolvedDrill.settings,
       sources: resolvedDrill.sources,
       plans: [],

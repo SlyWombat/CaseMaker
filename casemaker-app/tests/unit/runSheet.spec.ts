@@ -1614,6 +1614,7 @@ describe('runSheet — the drill program (#434)', () => {
   const withDrill = (job: EngraveJob): RunSheetGenerated => ({
     ...stubGenerated(job),
     drill: {
+      toolName: '3 mm drill',
       settings: { peckDiameters: 1, peckClearanceMm: 0.5, pointAngleDeg: 118, plungeFeed: 120, spindleRpm: 9000 },
       sources: {
         peckDiameters: 'chosen for this bench',
@@ -1650,6 +1651,7 @@ describe('runSheet — the drill program (#434)', () => {
 
     const cut = section(sheet, 'cut').steps;
     const cutText = cut.map((s) => `${s.text} ${s.value ?? ''}`).join('\n');
+    expect(cutText).toContain('Drill with 3 mm drill');
     expect(cutText).toContain('9000 RPM');
     expect(cutText).toContain('120 mm/min plunge');
     expect(cutText).toContain('pecks of 1 × ⌀3 = 3 mm');
