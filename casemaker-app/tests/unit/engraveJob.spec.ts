@@ -153,13 +153,21 @@ describe('EngraveJob schema (#200)', () => {
     // The old record was `{ dome, across }`, and the direction word was read in opposite senses by
     // different modules. A job carrying it loads as "not yet measured": one span cannot state the
     // pair, and the next extents-touch run writes the real one (#496).
-    const parsed = parseEngraveJob({
-      ...defaultEngraveJob(),
-      stock: { ...defaultEngraveJob().stock, flatness: { dome: 0.33, across: 'length', source: 'badge' } },
-    });
+    const before = defaultEngraveJob();
+    const raw = {
+      ...before,
+      stock: { ...before.stock, flatness: { dome: 0.33, across: 'length' as const, source: 'badge' as const } },
+    };
+    const parsed = parseEngraveJob(raw);
     expect(parsed.ok).toBe(true);
     if (!parsed.ok) return;
     expect(parsed.job.stock.flatness).toBeUndefined();
+    // Everything ELSE survives untouched: the dropped record is the only change a pre-#496 saved
+    // job takes, so opening and saving one loses no other fact about the blank or the job.
+    const { flatness: _dropped, ...stockWithoutFlatness } = raw.stock;
+    expect(parsed.job.stock).toEqual(stockWithoutFlatness);
+    expect(parsed.job).toEqual({ ...raw, stock: stockWithoutFlatness });
+    void _dropped;
   });
 
   // #464 — the fibre flag sits beside the material, so the schema has to name BOTH or a round trip
