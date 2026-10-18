@@ -84,15 +84,33 @@ import type { Mm } from '@/types/units';
 
 /**
  * The operator run sheet (#207): a printable, job-specific checklist for the person standing at
- * the machine. The program reaches the machine from the app's own upload panel (the desktop build)
- * or through Makera Studio by hand, and the work origin is set by hand either way — so everything
- * the file ASSUMES about the physical setup has to reach the operator on paper.
+ * the machine, and the paper half of the workflow the app now runs.
+ *
+ * THE WORKFLOW IT BELONGS TO. A job is designed in the panel's **Design** mode: stock, mount,
+ * the cuts, the setups and the cutters. Pressing **Cut** asks every preflight owner about the job
+ * (#419); a green page freezes the cut package — the programs, their frame files, the plan and
+ * the hashes — and any Design edit marks it stale. The Cut page also carries the **registration
+ * step** (#495), which runs the setup's approved plan and writes the origin from a measurement
+ * only after the operator presses the button. A finished multi-program job is played by the
+ * **release step** (#469): it uploads every frozen program, plays them in cut order, keeps the
+ * vacuum on across the bit change and stops for each cutter's calibration. A one-program job
+ * keeps the single-file upload. The web build stops at the files and hands them to Makera Studio.
+ * Everything the file ASSUMES about the physical setup still has to reach the operator on paper —
+ * that is this module's job.
  *
  * This module is PURE DATA: `buildRunSheet` returns a plain `RunSheet` structure with no React,
  * no DOM and no wasm, so it is a function of the job plus what #206's `engraveGenerate` returned
  * plus the simulation's diagnostics. `RunSheetView.tsx` renders it; the SVG for the origin
  * diagram is generated here too (`runSheetDiagramSvg`) so the whole sheet is buildable and
  * testable without a browser.
+ *
+ * The sheet follows the job it describes: the four saved files (#244, #432), the facing order
+ * probe → face → re-touch → engrave (with the re-touch a measurement, not a fixed depth), the
+ * setups and their remount/registration approvals (#471, #495), the surface touches and depth
+ * band (#475), a V-carve's cone and colour plane with the effective pitch beside the requested
+ * one (#221), a thread's pilot and clearance (#445), and a purchased laminate's stated colour
+ * cap (#492). A step that exists only on one kind of job is gated on that job, so an older job's
+ * sheet reads exactly as it did before the step existed.
  *
  * Three assumptions can ruin the part or the cutter if they are wrong, so the sheet states each
  * one plainly: where X0 Y0 Z0 is (the stock's top-front-left corner, Z0 on the top face), which
@@ -102,9 +120,10 @@ import type { Mm } from '@/types/units';
  *
  * STEPS MARKED `unverified` HAVE NOT BEEN RUN AT THE BENCH, and the view renders the tag — an
  * operator has to be able to tell a confirmed step from an assumed one (#207 "Do not hide the
- * ⚠ notes"). The mount, the cutter fit and the origin were walked at the machine on 2026-10-12,
- * -15 and -16, so they carry no tag; what remains is the held stepped material scan and the rest
- * pass's routine, and they point at the bench issue that will confirm them (#443).
+ * ⚠ notes"). The mount, the cutter fit, the origin and the app's own run were walked at the
+ * machine on 2026-10-12, -15, -16 and -17, so they carry no tag; what remains is the held stepped
+ * material scan and the rest pass's routine, and they point at the bench issue that will confirm
+ * them (#443).
  */
 
 // ---------------------------------------------------------------------------------------------
