@@ -15,7 +15,7 @@ import { describe, it, expect } from 'vitest';
 import { tl } from './helpers/manifoldExec';
 import { generate } from './helpers/engravePipeline';
 import { createSimSession, type SimLoadOk, type SimSession } from '@/workers/sim/session';
-import { type EngraveGenerated } from '@/workers/sim/engraveGenerate';
+import { type EngraveGenerated, type EngraveShopOpts } from '@/workers/sim/engraveGenerate';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { DEFAULT_FONT_ID } from '@/engine/fonts/registry';
 import { jobTool, toSetup } from '@/engine/cnc/engrave/jobSetup';
@@ -141,9 +141,26 @@ function overlapJob(): EngraveJob {
   return { ...base, labels: [], shapes: [a, b] };
 }
 
+/** A plain 10 × 6 pocket 1 mm deep — the simplest shape for the finish pass's two removals. */
+function rectJob(): EngraveJob {
+  const base = defaultEngraveJob();
+  const rect: EngraveRectShape = {
+    id: 'r',
+    kind: 'rect',
+    position: { x: 50, y: 30 },
+    rotation: 0,
+    depth: 1,
+    enabled: true,
+    width: 10,
+    height: 6,
+    cornerRadius: 0,
+  };
+  return { ...base, labels: [], shapes: [rect] };
+}
+
 /** Generate, verify and load a job through the real session; every error gate must be clean. */
-function run(job: EngraveJob): { g: EngraveGenerated; session: SimSession; load: SimLoadOk } {
-  const g = generate(tl, job);
+function run(job: EngraveJob, shop: EngraveShopOpts = {}): { g: EngraveGenerated; session: SimSession; load: SimLoadOk } {
+  const g = generate(tl, job, null, [], undefined, shop);
   expect(g.errors).toEqual([]);
   expect(g.ok).toBe(true);
   expect(g.nc).not.toBeNull();
@@ -281,4 +298,50 @@ describe('combined shapes, simulated (#215)', () => {
       session.dispose();
     }
   });
+
+  // #250 — the sweep is the proof the finish is a REAL second removal, not a relabelled path. At
+  // the roughing program's deepest checkpoint the floor stands 0.2 mm high and the walls stand
+  // 0.2 mm inside the design; at the finishing checkpoint the removal reaches full depth.
+  it(
+    'shows the roughing removal, then the finishing removal at full depth (#250)',
+    () => {
+      const { g, session, load } = run(rectJob(), {
+        finish: { stockToLeaveMm: { value: 0.2, source: 'chosen' } },
+      });
+      try {
+        expect(g.finish?.mode).toBe('rough-and-finish');
+        expect(g.cam!.roughOperations).toBe(1);
+        expect(g.cam!.finishOperations).toBe(1);
+
+        const zs = load.checkpoints.map((cp) => cp.z);
+        // The roughing pass's last depth is 1 − 0.2; the finishing pass is one full-depth pass.
+        expect(zs).toContain(-0.8);
+        expect(zs.at(-1)).toBe(-1);
+        const roughK = load.checkpoints.map((cp, i) => (cp.z === -0.8 ? i : -1)).filter((i) => i >= 0).at(-1)!;
+        const finishK = load.checkpoints.length - 1;
+        expect(roughK).toBeLessThan(finishK);
+
+        const rough = session.frameAt(roughK, 1)!.removalSoFar as NodeMeshOutput;
+        const finish = session.frameAt(finishK, 2)!.removalSoFar as NodeMeshOutput;
+        // Above the rough floor: the roughing sweep is smaller than the design by the allowance
+        // band on every wall (with the cutter's own corner radius at the four corners).
+        const roughArea = sliceArea(rough, -0.7);
+        const finishArea = sliceArea(finish, -0.7);
+        expect(roughArea).toBeGreaterThan(50);
+        expect(roughArea).toBeLessThan(56);
+        expect(finishArea).toBeGreaterThan(roughArea + 5);
+        // Below the rough floor (−0.8) the roughing pass removed nothing, and the finishing pass
+        // removed the design all the way to the item's full depth.
+        expect(sliceArea(rough, -0.9)).toBe(0);
+        const planned = tl.CrossSection.ofPolygons(g.predicted[0]!.polygons).area();
+        const fullDepth = sliceArea(finish, -0.95);
+        expect(fullDepth).toBeGreaterThan(planned * 0.99);
+
+        expect(session.oracle(g.predicted).ok).toBe(true);
+      } finally {
+        session.dispose();
+      }
+    },
+    30_000,
+  );
 });

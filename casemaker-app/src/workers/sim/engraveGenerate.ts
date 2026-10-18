@@ -85,7 +85,8 @@ import { simErrors, simulationProblem } from '@/engine/cnc/simGate';
 import type { NodeMeshOutput } from '../geometry/meshOutput';
 import { programHash } from '@/engine/cnc/programHash';
 import { validateVise } from '@/engine/cnc/fixture';
-import { generateEngrave, makeClipperOffset, zPasses, type EngraveRegion, type VCarveRegion } from '@/engine/cnc/cam/engraveJob';
+import { generateEngrave, makeClipperOffset, zPasses, type EngraveRegion, type FinishPassSpec, type VCarveRegion } from '@/engine/cnc/cam/engraveJob';
+import type { FinishStockToLeave } from '@/engine/cnc/engrave/finishPass';
 import { generateFacing, type FacingCamSummary } from '@/engine/cnc/cam/facing';
 import { chooseFacingTool } from '@/engine/cnc/engrave/facingTool';
 import { facingRefusal } from '@/engine/cnc/stockStart';
@@ -184,6 +185,14 @@ export interface EngraveShopOpts {
     thirdToolPct: { value: number; source: RestSettingSource };
   } | null;
   /**
+   * #250 — `finish.stockToLeaveMm`, resolved on the CALLER's side like `rest`: the location lives on
+   * the main thread and the worker must not pull the defaults client in. The source travels with the
+   * number so the run sheet prints where the allowance came from. Absent/null means the build has no
+   * finish setting: every program cuts in one pass, exactly as before #250, which is what the golden
+   * `.nc` and every direct-engine caller rely on. `engraveRunStore` always supplies it.
+   */
+  finish?: { stockToLeaveMm: FinishStockToLeave } | null;
+  /**
    * #434 — the drill-bit numbers (`drill.peckDiameters`, `drill.peckClearanceMm`,
    * `drill.pointAngleDeg`, `drill.plungeFeed`, `drill.spindleRpm`) with each one's source,
    * resolved on the CALLER's side by `drillSettings(shopDefaults)` exactly as `rest` is. The
@@ -219,6 +228,14 @@ export interface EngraveCamSummary {
   baselineRapidMm?: number;
   /** `'proximity'` when the region CAM placed loops by #487; null when the program had no region loops. */
   ordering?: 'proximity' | null;
+  /**
+   * #250 — operations that cut with a roughing allowance, and operations that finished at full
+   * depth. OPTIONAL: a stored generated object from before #250 has neither, and the sheet then
+   * narrates the program as one pass. `summarize` always fills them (0 when the program was not
+   * split).
+   */
+  roughOperations?: number;
+  finishOperations?: number;
 }
 
 /**
@@ -264,7 +281,30 @@ export interface EngraveProgram {
    * (the run plan, a per-program sheet) can name its `drill.*` numbers. Null on every other file.
    */
   drill?: DrillProgramFacts | null;
+  /**
+   * #250 — the allowance this program split against, when it wrote rough and/or finishing passes.
+   * Null/absent on a program that cut in one pass: a drill's file, a V region, or a build with no
+   * finish setting.
+   */
+  finish?: FinishPassFacts | null;
 }
+
+/**
+ * #250 — what a program's rough/finish split was, for the run sheet's two steps. The sheet already
+ * has the job's items; `itemIds` says which of them this program actually split, because a drill or
+ * a V region is never split even when the program's `mode` asks for both passes.
+ */
+export interface FinishPassFacts {
+  /** The allowance the roughing pass left on walls and floor, and where the number came from. */
+  stockToLeaveMm: FinishStockToLeave;
+  /** Which half (or both) this program wrote. */
+  mode: FinishPassSpec['mode'];
+  /** Label ids this program split, in the order their operations were emitted. */
+  itemIds: string[];
+}
+
+/** #250 — the pass split one program writes. The job's program count is #472's, not this. */
+export type FinishPassMode = FinishPassSpec['mode'];
 
 /**
  * #434 — what the DRILL PROGRAM cut, and with which numbers. One entry per drill item the
@@ -312,6 +352,12 @@ export interface EngraveGenerated {
    */
   threadMachining?: ThreadSettingsResult | null;
   cam: EngraveCamSummary | null;
+  /**
+   * #250 — the rough/finish split of the program this object describes (the FIRST program for the
+   * legacy single-file adapter). Null/absent when the program was not split; `programs` carries each
+   * program's own facts.
+   */
+  finish?: FinishPassFacts | null;
   /** The exact text to be saved. */
   nc: string | null;
   /** #174. */
@@ -966,7 +1012,11 @@ function summarize(ir: ReturnType<typeof generateEngrave>): EngraveCamSummary {
   let cuttingMoves = 0;
   let passes = 0;
   let estimatedSeconds = 0;
+  let roughOperations = 0;
+  let finishOperations = 0;
   for (const op of ir.operations) {
+    if (op.passKind === 'rough') roughOperations++;
+    else if (op.passKind === 'finish') finishOperations++;
     estimatedSeconds += op.estimatedSeconds;
     const zs = new Set<number>();
     for (const m of op.moves) {
@@ -994,6 +1044,8 @@ function summarize(ir: ReturnType<typeof generateEngrave>): EngraveCamSummary {
     cutMm: travel.cutMm,
     baselineRapidMm,
     ordering: ordering === undefined || ordering.order !== 'proximity' ? null : 'proximity',
+    roughOperations,
+    finishOperations,
   };
 }
 
@@ -1485,7 +1537,7 @@ function generateRestPair(
   if (roughTool === null || group.length < 2) {
     const roughJob = jobForSetup(job, roughRef, roughTool);
     const makeRough = (span: VacuumSpan): OneProgram =>
-      generateOneProgram(tl, roughJob, roughTool, catalogue, calibration, margins, shop, span, withFacing);
+      generateOneProgram(tl, roughJob, roughTool, catalogue, calibration, margins, shop, span, withFacing, 'rough-and-finish');
     const roughOne = makeRough(roughSpan);
     attempts.push(roughOne);
     if (roughOne.ok && roughOne.nc !== null && roughOne.verify !== null) {
@@ -1522,7 +1574,7 @@ function generateRestPair(
   const roughRefKept: JobProgramRef = { ...roughRef, itemIds: roughRef.itemIds.filter((id) => !unroughedIds.has(id)) };
   const roughJobKept = jobForSetup(job, roughRefKept, roughTool);
   const makeRoughKept = (span: VacuumSpan): OneProgram =>
-    generateOneProgram(tl, roughJobKept, roughTool, catalogue, calibration, margins, shop, span, withFacing);
+    generateOneProgram(tl, roughJobKept, roughTool, catalogue, calibration, margins, shop, span, withFacing, 'rough-only');
   const keptOne = makeRoughKept(roughSpan);
   attempts.push(keptOne);
   if (!keptOne.ok || keptOne.nc === null || keptOne.verify === null) {
@@ -1653,7 +1705,7 @@ function generateRestPair(
     // the route resolved on this realm's side, so it is materialised exactly as `jobForSetup` does.
     const restJob: EngraveJob = { ...restJobBase, tool: restTool };
     const makeRest = (span: VacuumSpan): OneProgram =>
-      generateOneProgram(tl, restJob, restTool, catalogue, calibration, margins, shop, span, false);
+      generateOneProgram(tl, restJob, restTool, catalogue, calibration, margins, shop, span, false, 'finish-only');
     const restOne = makeRest(restSpan);
     nextCursor += 1;
     attempts.push(restOne);
@@ -1825,7 +1877,7 @@ export function engraveGenerate(
   // drop disabled and construction items from the CAM's input, which is a behaviour change this
   // issue does not own.
   if (job.setups === undefined) {
-    const one = generateOneProgram(tl, job, tool, catalogue, calibration, margins, shop, 'whole', true);
+    const one = generateOneProgram(tl, job, tool, catalogue, calibration, margins, shop, 'whole', true, 'rough-and-finish');
     const ref: JobProgramRef = {
       setupIndex: 1,
       setupId: jobSetups(job)[0]!.id,
@@ -1918,6 +1970,7 @@ export function engraveGenerate(
             shop,
             nextSpan,
             cursor === 0,
+            'rough-and-finish',
           );
         const one = make(span);
         attempts.push(one);
@@ -2014,6 +2067,7 @@ function programOf(one: Omit<EngraveGenerated, 'programs'>, ref: JobProgramRef):
     programHash: programHash(nc),
     cam: one.cam,
     drill: one.drill ?? null,
+    finish: one.finish ?? null,
   };
 }
 
@@ -2102,6 +2156,12 @@ function generateOneProgram(
   shop: EngraveShopOpts,
   span: VacuumSpan,
   withFacing: boolean,
+  /**
+   * #250 — which half of the rough/finish split this program writes. The caller knows it because it
+   * knows the (setup, tool) list: a single program writes both, the first of a rest pair roughs, and
+   * every later rest program finishes.
+   */
+  finishMode: FinishPassMode = 'rough-and-finish',
 ): Omit<EngraveGenerated, 'programs'> {
   // #347 — the JOB's machine, not the app's only one: the envelope, the spindle ceiling and the
   // frame below are read off the profile the document names. The POST is still `postZ1`'s dialect,
@@ -2181,6 +2241,14 @@ function generateOneProgram(
   let threadMachining: ThreadSettingsResult | null = null;
   let drillFacts: DrillProgramFacts | null = null;
   let ir: ToolpathIR;
+  // #250 — the allowance crosses as a plain number+source; the mode is this program's half. No
+  // shop finish block at all means no split, so a direct-engine caller and the golden `.nc` are
+  // byte-identical to before.
+  const finishSpec: FinishPassSpec | null =
+    shop.finish == null
+      ? null
+      : { stockToLeaveMm: shop.finish.stockToLeaveMm.value, mode: finishMode };
+  let finishFacts: FinishPassFacts | null = null;
   // #432 — the facing depth the plan carries, or 0 when the job does not face. It decides whether
   // the facing artefact is built at all; it never touches the ENGRAVING program, which stays in the
   // document's frame (Z0 = the faced surface) because the re-touch re-zeros Z there between the two
@@ -2302,7 +2370,7 @@ function generateOneProgram(
       // tool, and `generateEngrave` refuses a V-bit by name (rightly: opening a region needs the
       // offset radius). The two CAMs return IRs describing the same machine state, so a job with no
       // regions simply IS the trace IR, and its `.nc` is unchanged.
-      const regionIr = regions.length === 0 ? null : generateEngrave(tl, regions, tool, resolved.params, mill.rapidEstimate, 'nearest', shop.peckClearanceMm ?? null);
+      const regionIr = regions.length === 0 ? null : generateEngrave(tl, regions, tool, resolved.params, mill.rapidEstimate, 'nearest', shop.peckClearanceMm ?? null, finishSpec);
       // #287 — single-line traces (#219) are their own CAM: the cutter's centre follows the path,
       // so there is no region to open, no offset and no pocketing. They are appended AFTER the
       // region operations, so a trace can shift no pocket's ordering, and a job with none joins an
@@ -2337,6 +2405,14 @@ function generateOneProgram(
   // cut by the full facing depth once that re-touch lands.
   const minRapidZ = ir.hopZ;
   const cam = summarize(ir);
+  if (shop.finish != null && (cam.roughOperations ?? 0) + (cam.finishOperations ?? 0) > 0) {
+    // V regions and drills emit no `passKind`, so the ids are exactly the items this program split.
+    finishFacts = {
+      stockToLeaveMm: shop.finish.stockToLeaveMm,
+      mode: finishMode,
+      itemIds: [...new Set(ir.operations.filter((op) => op.passKind !== undefined).map((op) => op.labelId))],
+    };
+  }
 
   // 4. the depth limit and the setup. They are read by the facing file as well as by the verifier
   // below, and the facing file has to be built BEFORE the engraving is posted — see step 6 — so
@@ -2438,6 +2514,7 @@ function generateOneProgram(
       threads: threadPlans,
       threadMachining,
       drill: drillFacts,
+      finish: finishFacts,
       cam,
       nc,
       verify,

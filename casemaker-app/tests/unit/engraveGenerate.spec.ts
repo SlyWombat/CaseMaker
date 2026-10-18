@@ -1923,6 +1923,64 @@ describe('engraveGenerate — one program per setup (#419 J3)', () => {
     expect(g.restPass!.rest.nc).toMatch(/\.nc$/);
   });
 
+  it('splits a single-cutter setup into rough and finish operations in one program (#250)', () => {
+    const job = defaultEngraveJob();
+    const ids = job.labels.map((l) => l.id);
+    const one = setUp(job, [ids], [job.toolKey]);
+    const g = generate(tl, one, null, [], undefined, {
+      finish: { stockToLeaveMm: { value: 0.2, source: 'chosen' } },
+    });
+    expect(g.ok, JSON.stringify({ stage: g.stage, errors: g.errors })).toBe(true);
+    expect(g.programs).toHaveLength(1);
+    const program = g.programs[0]!;
+    expect(program.finish).not.toBeNull();
+    expect(program.finish!.mode).toBe('rough-and-finish');
+    expect(program.finish!.stockToLeaveMm).toEqual({ value: 0.2, source: 'chosen' });
+    expect([...program.finish!.itemIds].sort()).toEqual([...ids].sort());
+    expect(program.cam!.roughOperations).toBe(ids.length);
+    expect(program.cam!.finishOperations).toBe(ids.length);
+    expect(program.cam!.operations).toBe(ids.length * 2);
+    expect(program.nc).toContain('(rough)');
+    expect(program.nc).toContain('(finish)');
+    // The single-program adapter describes the same first file.
+    expect(g.finish).toEqual(program.finish);
+    expect(g.cam!.operations).toBe(program.cam!.operations);
+  });
+
+  it('roughs with the first cutter and finishes with the rest cutter (#250)', () => {
+    const job: EngraveJob = {
+      ...defaultEngraveJob(),
+      stock: { ...defaultEngraveJob().stock, material: 'pla' },
+    };
+    const ids = job.labels.map((l) => l.id);
+    const base = setUp(job, [ids], [job.toolKey]);
+    const two: EngraveJob = {
+      ...base,
+      setups: [{ ...base.setups![0]!, tools: [job.toolKey, TOOL_REST.key] }],
+    };
+    const g = generate(tl, two, null, [], undefined, {
+      tools: [TOOL_REST, ...TOOL_LIBRARY],
+      finish: { stockToLeaveMm: { value: 0.2, source: 'chosen' } },
+    });
+    expect(
+      g.ok,
+      JSON.stringify({ stage: g.stage, errors: g.errors, findings: g.findings.filter((f) => f.severity === 'error') }),
+    ).toBe(true);
+    expect(g.programs).toHaveLength(2);
+    const [rough, rest] = g.programs;
+    expect(rough!.finish!.mode).toBe('rough-only');
+    expect(rest!.finish!.mode).toBe('finish-only');
+    expect(rough!.cam!.roughOperations).toBeGreaterThan(0);
+    expect(rough!.cam!.finishOperations).toBe(0);
+    expect(rest!.cam!.roughOperations).toBe(0);
+    expect(rest!.cam!.finishOperations).toBeGreaterThan(0);
+    // Each file names the half it cuts, so the two removals are legible in the sender.
+    expect(rough!.nc).toContain('(rough)');
+    expect(rough!.nc).not.toContain('(finish)');
+    expect(rest!.nc).toContain('(finish)');
+    expect(rest!.nc).not.toContain('(rough)');
+  });
+
   it('leaves items assigned to a later cutter out of the clearing program', () => {
     const job: EngraveJob = {
       ...defaultEngraveJob(),
