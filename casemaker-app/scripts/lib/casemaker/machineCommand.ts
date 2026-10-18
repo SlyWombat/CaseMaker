@@ -101,6 +101,8 @@ const USAGE =
   'card returns; home sends `$H`, and probe sends `M491` (the tool-length probe — fit the wired\n' +
   'probe first; it does NOT home, run `machine home` for that). Those two have no program to hash,\n' +
   'so their token is the literal word: `--confirm home` and `--confirm probe`, and nothing else.\n' +
+  'The bench rule is `$H` before every bit change, so the operator\'s order is home → fit the\n' +
+  'probe → probe, each as its own command.\n' +
   'Nothing here switches power (#479: the plug is outside Case Maker), and nothing generates and\n' +
   'plays in one step.';
 
@@ -964,7 +966,8 @@ const PHYSICAL_LINES = { home: '$H', probe: 'M491' } as const;
  * Their token is the literal word, and nothing else. `home` sends `$H`; `probe` sends `M491`, the
  * firmware's tool-length probe (the wired probe must be fitted first — `runRegistration`'s own
  * operator step), and does NOT home first: a caller who wants both runs both commands, in that
- * order. Neither line is built from an argument, so there is no path or text to guard.
+ * order. The bench rule is `$H` before every bit change, so the operator's order is home → fit the
+ * probe → probe. Neither line is built from an argument, so there is no path or text to guard.
  *
  * Both require the same pre-flight `play` does — an alarm, a non-Idle state or a `P:` below 100
  * refuses before anything is sent — and both follow the line with `?` at `--poll` until the machine
