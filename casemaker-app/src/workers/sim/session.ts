@@ -268,6 +268,15 @@ export interface SimLoadOpts {
    * band instead of the generic envelope warning. A rotary job is refused by name.
    */
   threads?: readonly SimThreadSpec[] | null;
+  /**
+   * How far below the blank a job's through cuts reach, mm (#218) — the job's breakthrough, read
+   * by the caller because the session holds no job. The EXACT sweeper needs nothing: the G-code
+   * already cuts into the board and `setup.sacrificial` is the second body it removes from. The
+   * COLUMN engine clamps every floor to the blank's bottom, so without this a through drill or a
+   * V-bit through pocket would stop at the bottom face; with it, the flat grid reaches
+   * `base − breakthroughMm` and reports the board removal as `removedFromSacrificial`. Absent: 0.
+   */
+  breakthroughMm?: number | null;
 }
 
 /**

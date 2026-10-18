@@ -1028,6 +1028,13 @@ export function engraveRegions(
   const cutoutCuts: CutRegion[] = [];
   const cutoutPredicted: OraclePredicted[] = [];
   const tabFindings: JobFinding[] = [];
+  // #218 — the bottom face's removal for the loose-piece analysis: each kerf less the material
+  // its placed tabs keep (the rectangles are wound opposite the kerf, so the positive fill rule
+  // subtracts them), and each cut-out that cut itself free. A cut-out with every requested tab
+  // unplaceable is free too, even though `released-onto-board` is not raised for it — the error
+  // is `tab-unplaceable`; either way the part's disconnection is expected, not a second finding.
+  const cutoutKerfs: Polygons[] = [];
+  const cutoutReleased: Polygons[] = [];
   if (radius !== null && plan.cutouts.length > 0) {
     const offset = makeClipperOffset(tl);
     for (const c of plan.cutouts) {
@@ -1068,6 +1075,9 @@ export function engraveRegions(
       }
       const kerf = kerfPolygons(path, radius, offset);
       const tabTop = c.thickness - c.tabs.height;
+      const kept = spans.flatMap((one) => tabRectangles(one, radius));
+      cutoutKerfs.push([...kerf, ...kept]);
+      if (placed === 0) cutoutReleased.push(path);
       cutoutCuts.push({
         id: c.id,
         name: c.name,
@@ -1079,7 +1089,6 @@ export function engraveRegions(
       // inside the kerf, so their even-odd subtraction is exact.
       if (c.tabs.count > 0) {
         cutoutPredicted.push({ depth: tabTop, polygons: kerf });
-        const kept = spans.flatMap((one) => tabRectangles(one, radius));
         cutoutPredicted.push({ depth: c.depth, polygons: [...kerf, ...kept] });
       } else {
         cutoutPredicted.push({ depth: c.depth, polygons: kerf });
@@ -1194,7 +1203,119 @@ export function engraveRegions(
     cutouts: cutoutMask,
   });
 
-  return { plan, measured, regions, profiles, throughMask, cuts, predicted, tool, radius, findings, colourBoundaryDepth, margins };
+  // #218 — what the through cuts disconnect: the check runs here, where Manifold is loaded, and
+  // reads the SAME polygons the cut classes above were built from. A job with no through work is
+  // a no-op (no removal polygons).
+  const looseFindings = loosePieceFindings(
+    tl,
+    job.stock,
+    regions.filter((r) => r.through === true).map((r) => r.polygons),
+    cutoutKerfs,
+    cutoutReleased,
+  );
+
+  return {
+    plan,
+    measured,
+    regions,
+    profiles,
+    throughMask,
+    cuts,
+    predicted,
+    tool,
+    radius,
+    findings: [...findings, ...looseFindings],
+    colourBoundaryDepth,
+    margins,
+  };
+}
+
+/**
+ * #218 — the LOOSE-PIECE check, done where the wasm lives.
+ *
+ * A through cut removes material from the bottom face: a through pocket or drill leaves a hole,
+ * and a cut-out leaves its kerf less the rectangles its placed tabs keep. The blank is what is
+ * left of the stock after those removals; `decompose()` splits it into its topologically
+ * disconnected parts. One part is the blank its tape/glue holds. Any OTHER part with positive
+ * area moves when the cutter touches it.
+ *
+ * A cut-out the job deliberately released (no tabs placed) is expected to be one of those parts:
+ * it is the piece the operator asked to cut out, and `released-onto-board` (or the error
+ * `tab-unplaceable`) already says so. Its region is the area enclosed by the centre path, so a
+ * component that lies wholly inside one of those regions is that part, not a second finding.
+ * Everything else is reported, once, as `loose-piece`.
+ *
+ * The 2D bottom face is the right test: every cut here passes through the full thickness, and a
+ * tab is material at the bottom, so connectivity at the bottom is connectivity of the solid.
+ * A declared void leaves the material at the bottom in place and therefore never appears.
+ */
+function loosePieceFindings(
+  tl: ManifoldToplevel,
+  stock: { length: number; width: number },
+  throughPolygons: readonly Polygons[],
+  cutoutKerfs: readonly Polygons[],
+  releasedParts: readonly Polygons[],
+): JobFinding[] {
+  const removalPolygons = [...throughPolygons, ...cutoutKerfs].flat();
+  if (removalPolygons.length === 0) return [];
+  const CS = tl.CrossSection;
+  // Every wasm handle made here is deleted in the `finally`, decompose()'s children included.
+  const owned: { delete(): void }[] = [];
+  const own = <T extends { delete(): void }>(value: T): T => {
+    owned.push(value);
+    return value;
+  };
+  try {
+    const stockCS = own(CS.square([stock.length, stock.width]));
+    const removalCS = own(CS.ofPolygons(removalPolygons));
+    const remaining = own(stockCS.subtract(removalCS));
+    const parts = remaining.decompose().map(own);
+    const areas = parts.map((part) => part.area());
+    if (areas.filter((area) => area > 1e-6).length <= 1) return [];
+
+    // The largest part is the blank's remaining body; the cut-outs are small by comparison and a
+    // severed chunk is what this check is looking for. (If a cut leaves two similar halves, one
+    // of them is reported — the operator needs to know either way.)
+    let main = 0;
+    for (let i = 1; i < parts.length; i++) {
+      if (areas[i]! > areas[main]!) main = i;
+    }
+    const freeCS =
+      releasedParts.length === 0 ? null : own(CS.ofPolygons(releasedParts.flat()));
+    let pieces = 0;
+    let areaMm2 = 0;
+    for (let i = 0; i < parts.length; i++) {
+      if (i === main || areas[i]! <= 1e-6) continue;
+      if (freeCS !== null) {
+        // What is left of this component once the deliberately released parts are taken out. A
+        // component that IS one of those parts leaves (almost) nothing; a millimetre-scale
+        // tolerance absorbs the kerf's float arithmetic.
+        const rest = own(parts[i]!.subtract(freeCS));
+        if (rest.area() <= Math.max(1e-3, areas[i]! * 1e-3)) continue;
+      }
+      pieces++;
+      areaMm2 += areas[i]!;
+    }
+    if (pieces === 0) return [];
+    return [
+      {
+        severity: 'error',
+        code: 'loose-piece',
+        message:
+          `The through cuts leave ${pieces === 1 ? 'a piece' : `${pieces} pieces`} of the blank ` +
+          `(${fmtArea(areaMm2)}) disconnected from the material the mount holds. ` +
+          `${pieces === 1 ? 'It' : 'They'} can move under the cutter after being freed; leave a ` +
+          'connecting bridge of material, move the cut away from the blank’s edges, or add holding tabs.',
+      },
+    ];
+  } finally {
+    for (const handle of owned) handle.delete();
+  }
+}
+
+/** A printed area for a finding, in mm²: one decimal below 10, whole numbers above. */
+function fmtArea(mm2: number): string {
+  return `${mm2 < 10 ? mm2.toFixed(1) : Math.round(mm2)} mm²`;
 }
 
 /** Count what the panel reports: operations, cutting moves, estimated seconds, depth passes. */
@@ -1586,6 +1707,9 @@ function simulateProgram(
   try {
     return session.load(nc, setup, tool, job.machineId, {
       calibration,
+      // #218: a through cut's kerf reaches this far below the blank. The exact sweeper cuts the
+      // board from the G-code alone; the column engine needs the number because it clamps floors.
+      breakthroughMm: job.breakthrough,
       ...(priorRemoval === undefined ? {} : { priorRemoval }),
     });
   } finally {

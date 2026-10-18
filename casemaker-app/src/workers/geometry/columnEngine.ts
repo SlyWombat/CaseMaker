@@ -260,10 +260,16 @@ export interface ColumnGrid {
   readonly initial: number;
   /**
    * The untouched LOWER bound (rotary: 0, the axis; flat: the stock's bottom-face work Z). Only
-   * the flat parameterisation cuts towards it, and a cut is clamped to it — nothing can be
-   * removed below the blank.
+   * the flat parameterisation cuts towards it; a cut is clamped to {@link floor}.
    */
   readonly base: number;
+  /**
+   * The lowest value a column may take (#218). Absent, it is `base` and nothing can be removed
+   * below the blank — every caller before a through-cut. A FLAT job that cuts through passes
+   * `base − breakthrough`, the board's depth below the blank, so the kerf reaches through the
+   * bottom face. Rotary never sets it: a radius column cannot go below the axis either way.
+   */
+  readonly floor?: number;
   /** Remaining value: `h[j*nu + i]`. Rotary: remaining radius from the axis. Flat: remaining top Z. */
   readonly h: Float32Array;
 }
@@ -352,7 +358,7 @@ export interface ColumnParameterisation {
   /** The grid's surface at display resolution. */
   mesh(grid: ColumnGrid, res: ColumnResolution): NodeMeshOutput;
   /** Removed and (uncut) stock volume, mm³, from the grid. */
-  volume(grid: ColumnGrid): { removed: number; stock: number };
+  volume(grid: ColumnGrid): { removed: number; stock: number; sacrificialRemoved?: number };
 }
 
 export interface ColumnSweepOpts {
@@ -377,6 +383,15 @@ export interface ColumnSweepOpts {
    * overrides the whole grid.
    */
   columnPitchXMm?: number | null;
+  /**
+   * How far below the blank's bottom face the program may cut, mm (#218) — the job's breakthrough,
+   * read by the caller because the worker holds no job. Absent or zero: the flat grid's floor is
+   * the blank's bottom, exactly as before. Present: the floor is `base − breakthroughMm`, so a
+   * through cut's kerf is swept through the bottom face and its removal below the blank is
+   * reported as `removedFromSacrificial`. The verifier's depth limit is the authority on how deep
+   * a cut may go; this only lets the sweep draw the cut the program actually makes.
+   */
+  breakthroughMm?: number | null;
   /**
    * The ROTARY grid's θ pitch, degrees: the shop's `sim.rotaryPitchDeg`, read by the caller (#451).
    * Absent: {@link COLUMN_ROTARY_PITCH_FALLBACK_DEG}. Ignored by a flat job (its second axis is
@@ -588,7 +603,8 @@ export function distToSegment(px: number, py: number, ax: number, ay: number, bx
  * engine #222 asks for: the cost is the columns a move touches, not the number of Z levels.
  *
  * Work frame: the ordinary 3-axis frame. The stock's top face is `initial`, its bottom `base`; a
- * cut is clamped to `base` because nothing can be removed below the blank.
+ * cut is clamped to the grid's `floor` — `base`, or `base − breakthrough` for a job that cuts
+ * through into the board (#218), so nothing can be removed deeper than the blank allows.
  *
  * A NON-FLAT footprint is a height profile over that disc, and this is where it is modelled
  * (#405, the hook #221 reserved here): a V-bit's floor at a column is `tipZ + (ρ − r_t)/tan`, ρ
@@ -668,6 +684,9 @@ export const FLAT: ColumnParameterisation = {
 
   applyMove(grid, m, cutter) {
     const { nu, nv, u0, du, v0, dv, h, initial, base } = grid;
+    // The lowest floor a cut may leave (#218): the blank's bottom, or — when the caller passed a
+    // breakthrough — that far into the board, which is where a through cut's kerf shows.
+    const bottom = grid.floor ?? base;
     if (m.z >= initial) return { written: 0, crossed: null, clamped: null }; // wholly above the blank
     const xLo = Math.min(m.u0, m.u1);
     const xHi = Math.max(m.u0, m.u1);
@@ -693,9 +712,10 @@ export const FLAT: ColumnParameterisation = {
         const rho = distToSegment(x, y, m.u0, m.v0, m.u1, m.v1);
         if (rho > reach) continue;
         // The floor this column is left at: the tip plane for a flat end, and the cone's flank
-        // height above it for a V-bit (#405). Clamped to the blank's bottom.
+        // height above it for a V-bit (#405). Clamped to `bottom` — the blank's bottom, or the
+        // board's breakthrough floor when the job cuts through (#218).
         const f = m.z + surfaceAboveTip(cutter, rho);
-        const floor = f < base ? base : f;
+        const floor = f < bottom ? bottom : f;
         const idx = j * nu + i;
         if (floor < (h[idx] as number)) {
           h[idx] = floor;
@@ -714,12 +734,21 @@ export const FLAT: ColumnParameterisation = {
     const { initial, base, du, dv } = grid;
     const cellArea = du * dv;
     let removed = 0;
+    let sacrificialRemoved = 0;
     for (let k = 0; k < grid.h.length; k++) {
-      const top = Math.max(base, Math.min(initial, grid.h[k] as number));
-      removed += (initial - top) * cellArea;
+      const top = Math.min(initial, grid.h[k] as number);
+      if (top < base) {
+        // Through the blank's bottom (#218): the part's own volume is gone to `base`, and the
+        // rest is board material the breakthrough took. The exact sweeper splits these the same
+        // way (`removedFromPart` / `removedFromSacrificial`).
+        removed += (initial - base) * cellArea;
+        sacrificialRemoved += (base - top) * cellArea;
+      } else {
+        removed += (initial - top) * cellArea;
+      }
     }
     const stock = (initial - base) * du * grid.nu * dv * grid.nv;
-    return { removed, stock };
+    return { removed, stock, sacrificialRemoved };
   },
 };
 
@@ -820,6 +849,12 @@ export function meshRotary(grid: ColumnGrid, res: ColumnResolution): NodeMeshOut
  * extent: a vertex at every (x, y) node of the DISPLAY grid (each nearest-sampled from the sim
  * grid), with a bottom face at `base` and four side skirts closing it. A rectangular blank is not
  * star-shaped like the rotary stock, so the closure is a box, not a triangle fan.
+ *
+ * A THROUGH cut (#218) makes a column's top sit BELOW `base`, and the mesh must not pretend the
+ * bottom face is intact there: the bottom vertex for such a column is degenerate with the top
+ * and every bottom quad touching it is omitted, so the kerf is open through the underside. The
+ * top heightfield is drawn at the real floor (`base − breakthrough`), which is the hole the
+ * viewport shows; the blank's bottom face is kept everywhere the material remains.
  */
 export function meshFlat(grid: ColumnGrid, res: ColumnResolution): NodeMeshOutput {
   const xMin = grid.u0 - grid.du / 2;
@@ -835,6 +870,8 @@ export function meshFlat(grid: ColumnGrid, res: ColumnResolution): NodeMeshOutpu
   const topCount = nx * ny;
   const vertexCount = topCount * 2; // a top grid and a bottom grid
   const positions = new Float32Array(vertexCount * 3);
+  /** Each display column's top Z; below `base` is a through column (#218). */
+  const tops = new Float32Array(topCount);
   const put = (v: number, x: number, y: number, z: number): void => {
     positions[v * 3] = x;
     positions[v * 3 + 1] = y;
@@ -850,19 +887,28 @@ export function meshFlat(grid: ColumnGrid, res: ColumnResolution): NodeMeshOutpu
     const x = xMin + (I / nuD) * L;
     for (let J = 0; J <= nvD; J++) {
       const y = yMin + (J / nvD) * W;
-      const top = Math.max(grid.base, Math.min(grid.initial, sample(x, y)));
+      // The real floor, not a clamp to the blank's bottom: a through cut's top is below `base`
+      // and the kerf is exactly that hole (#218).
+      const top = Math.min(grid.initial, sample(x, y));
+      tops[idxOf(I, J)] = top;
       put(idxOf(I, J), x, y, top);
-      put(topCount + idxOf(I, J), x, y, grid.base);
+      // Where material remains the bottom is the blank's bottom; where it is through there is no
+      // material, so the bottom vertex falls on the top and the quads around it are omitted below.
+      put(topCount + idxOf(I, J), x, y, top < grid.base ? top : grid.base);
     }
   }
   const idx: number[] = [];
   const quad = (a: number, b: number, c: number, d: number): void => {
     idx.push(a, b, c, a, c, d);
   };
+  const through = (I: number, J: number): boolean => (tops[idxOf(I, J)] as number) < grid.base;
   for (let I = 0; I < nuD; I++) {
     for (let J = 0; J < nvD; J++) {
       quad(idxOf(I, J), idxOf(I + 1, J), idxOf(I + 1, J + 1), idxOf(I, J + 1)); // top, +Z
-      quad(topCount + idxOf(I, J), topCount + idxOf(I, J + 1), topCount + idxOf(I + 1, J + 1), topCount + idxOf(I + 1, J)); // bottom, −Z
+      // The underside of the blank, except where the cut is through: there the kerf is open.
+      if (!through(I, J) && !through(I + 1, J) && !through(I + 1, J + 1) && !through(I, J + 1)) {
+        quad(topCount + idxOf(I, J), topCount + idxOf(I, J + 1), topCount + idxOf(I + 1, J + 1), topCount + idxOf(I + 1, J)); // bottom, −Z
+      }
     }
   }
   const side = (t0: number, t1: number, b0: number, b1: number): void => {
@@ -1077,6 +1123,11 @@ export function columnSweep(timeline: Timeline, tool: Tool, setup: Setup, opts?:
   } catch (e) {
     return { ok: false, diagnostics: [{ severity: 'error', code: rotary ? 'rotary-stock' : 'flat-stock', message: e instanceof Error ? e.message : String(e) }] };
   }
+  // A through job lets the flat grid's columns reach the breakthrough into the board (#218). The
+  // breakthrough is the caller's reading of the job; absent or zero keeps the floor at the blank's
+  // bottom, which is every job that does not cut through and every pre-#218 caller.
+  const breakthrough = typeof opts?.breakthroughMm === 'number' && Number.isFinite(opts.breakthroughMm) && opts.breakthroughMm > 0 ? opts.breakthroughMm : 0;
+  if (!rotary && breakthrough > 0) grid = { ...grid, floor: grid.base - breakthrough };
   const stats = zeroStats();
   stats.resolution = { dx: grid.du, dThetaDeg: grid.dv };
   // The cutter's own notes first: the drill's point and where its angle came from, the thread mill's
@@ -1224,6 +1275,9 @@ export function columnSweep(timeline: Timeline, tool: Tool, setup: Setup, opts?:
   stats.stockVolume = vol.stock;
   stats.removedVolume = vol.removed;
   stats.removedFromPart = vol.removed;
+  // Material the breakthrough took out of the board UNDER the blank (#218); 0 for every job that
+  // does not cut through. The exact sweeper's own split, so a reader sees one pair of numbers.
+  stats.removedFromSacrificial = vol.sacrificialRemoved ?? 0;
   stats.resultVolume = vol.stock - vol.removed;
   stats.checkpointsSwept = count;
   stats.columnOps = ops;
