@@ -525,9 +525,9 @@ export function validateVise(
     severity: 'info',
     code: 'vise-seat',
     message:
-      `The blank rests on ${seatWords}. Its ${fmtMm(thickness)} mm thickness ` +
+      `The job seats the blank on ${seatWords}. It states the ${fmtMm(thickness)} mm blank ` +
       (vise.stockProud >= 0
-        ? `stands ${fmtMm(vise.stockProud)} mm proud of them.`
+        ? `stands ${fmtMm(vise.stockProud)} mm proud of the jaw tops.`
         : `sits ${fmtMm(-vise.stockProud)} mm below them.`),
   });
 

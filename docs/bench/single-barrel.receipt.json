@@ -58,6 +58,14 @@
       "program": "single barrel"
     },
     {
+      "code": "vise-seat",
+      "guideRow": "vise-seat",
+      "severity": "info",
+      "message": "The job seats the blank on the soft jaws' ledge, 3.1 mm below the jaw tops. It states the 3.81 mm blank stands 1.2 mm proud of the jaw tops.",
+      "source": "findings",
+      "program": "single barrel"
+    },
+    {
       "code": "vise-default",
       "guideRow": "vise-default",
       "severity": "warning",
