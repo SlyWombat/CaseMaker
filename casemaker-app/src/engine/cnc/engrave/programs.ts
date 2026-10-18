@@ -84,6 +84,8 @@ export function jobForSetup(job: EngraveJob, ref: JobProgramRef, tool?: Tool | n
     ...(job.vectors !== undefined ? { vectors: keep(job.vectors) } : {}),
     ...(job.drills !== undefined ? { drills: keep(job.drills) } : {}),
     ...(job.threads !== undefined ? { threads: keep(job.threads) } : {}),
+    // #435 — a primitive is cut only by the setup that owns it, like every other item.
+    ...(job.primitives !== undefined ? { primitives: keep(job.primitives) } : {}),
   } as EngraveJob;
 }
 

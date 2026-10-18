@@ -66,7 +66,8 @@ import { jobMachine } from '@/engine/cnc/calibration';
 import { cuttingDiameter, cuttingForTrace } from '@/engine/cnc/tool';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import { conditionRank, type ConditionSummary } from '@/engine/cnc/toolCondition';
-import type { EngraveAnyItem, EngraveJob } from '@/types/engraveJob';
+import type { EngraveAnyItem, EngraveJob, EngravePrimitive } from '@/types/engraveJob';
+import { primitiveLabel, primitiveReducesToRegion } from './partPlan';
 import { lostDetailRatioFrom, type LabelEngravability } from '@/workers/sim/engraveGeometry';
 
 /**
@@ -220,6 +221,15 @@ export function findItem(job: EngraveJob, id: string): EngraveAnyItem | undefine
   );
 }
 
+/**
+ * The enabled primitives that become a region (`toPartPlan`'s rule, #435): a vertical box or
+ * cylinder. Cone and sphere are refused by name and an X/Y primitive is not a pocket, so neither
+ * may influence the cutter choice or the V-carve strategy.
+ */
+function cuttablePrimitives(job: EngraveJob): EngravePrimitive[] {
+  return (job.primitives ?? []).filter((p) => p.enabled && primitiveReducesToRegion(p));
+}
+
 /** A short human name for the worst item, without assuming it is a label (#214/#215). Exported with {@link findItem}. */
 export function itemName(item: EngraveAnyItem): string {
   if (!('kind' in item)) return `"${item.text}"`;
@@ -272,7 +282,8 @@ function compromiseReason(job: EngraveJob, pick: ToolCandidate): string {
     return `No cutter you have keeps every item intact; the smallest (${fmtDiameter(pick.diameter)} mm) is the closest.`;
   }
   const item = findItem(job, worst.labelId);
-  const name = item ? itemName(item) : `item ${worst.labelId}`;
+  const primitive = item === undefined ? (job.primitives ?? []).find((p) => p.id === worst.labelId) : undefined;
+  const name = item ? itemName(item) : primitive ? primitiveLabel(primitive) : `item ${worst.labelId}`;
   // A cap height only exists for a label (#214).
   const at = item && !('kind' in item) ? ` at ${item.size} mm` : '';
   const lost = Math.round((1 - worst.ratio) * 100);
@@ -361,8 +372,10 @@ function handPickedNote(
  * whether the selected V-bit is cutting a region or tracing a line.
  */
 export function hasRegionItems(job: EngraveJob): boolean {
-  return ([...job.labels, ...job.shapes, ...(job.combined ?? []), ...(job.vectors ?? [])] as EngraveAnyItem[]).some(
-    (item) => item.enabled,
+  return (
+    ([...job.labels, ...job.shapes, ...(job.combined ?? []), ...(job.vectors ?? [])] as EngraveAnyItem[]).some(
+      (item) => item.enabled,
+    ) || cuttablePrimitives(job).length > 0
   );
 }
 
@@ -405,9 +418,12 @@ export function recommendTool(
   const bar = lostDetailRatioFrom(lostDetailWarnRatio);
   // The deepest cut is over every enabled item — a shape or combined shape can be the deepest
   // thing in the job (#214/#215), and the reach test below must see it.
-  const deepest = ([...job.labels, ...job.shapes, ...(job.combined ?? [])] as EngraveAnyItem[])
-    .filter((item) => item.enabled)
-    .reduce((max, item) => Math.max(max, item.depth), 0);
+  const deepest = cuttablePrimitives(job).reduce(
+    (max, primitive) => Math.max(max, primitive.depth),
+    ([...job.labels, ...job.shapes, ...(job.combined ?? [])] as EngraveAnyItem[])
+      .filter((item) => item.enabled)
+      .reduce((max, item) => Math.max(max, item.depth), 0),
+  );
   // #405/#221 — a job whose enabled items are all TRACES (its region lists are empty) may take a
   // V-bit as a trace tool; one that holds a region item may take it as a V-CARVE. The list is
   // shared with the panel (`hasRegionItems`) so the two cannot disagree about which strategy the

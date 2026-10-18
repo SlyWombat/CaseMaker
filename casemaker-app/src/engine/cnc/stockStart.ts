@@ -510,6 +510,8 @@ export function jobItemCount(job: EngraveJob): number {
     (job.traces?.length ?? 0) +
     (job.vectors?.length ?? 0) +
     (job.drills?.length ?? 0) +
+    // #435 — a primitive is an item even when its form is refused by name; validation says so.
+    (job.primitives?.length ?? 0) +
     (job.keepOuts?.length ?? 0)
   );
 }

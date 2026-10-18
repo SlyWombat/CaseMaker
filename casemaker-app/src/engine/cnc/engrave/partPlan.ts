@@ -23,6 +23,7 @@ import type {
   EngraveJob,
   EngraveKeepOut,
   EngraveLabel,
+  EngravePrimitive,
   EngraveShape,
   EngraveStrokeLabelItem,
   EngraveThread,
@@ -371,6 +372,66 @@ export function itemOperationName(item: EngraveAnyItem): string {
       return `Pocket outline${named} (${n} contour${n === 1 ? '' : 's'}, ${item.width}×${item.height}mm)`;
     }
   }
+}
+
+/**
+ * Which 3D primitives (#435) reduce to a flat-floor REGION the existing CAM can cut: a box or a
+ * cylinder opening straight down from the top face. Every other form — a cone's sloped wall, a
+ * sphere's curved floor, any side-opening axis — is refused by name in `validateJob` and never
+ * reaches `engraves`. The predicate lives HERE, beside the reduction it guards, so the plan and
+ * the findings cannot disagree about what is cuttable.
+ */
+export function primitiveReducesToRegion(primitive: EngravePrimitive): boolean {
+  if ((primitive.axis ?? 'z') !== 'z') return false;
+  return primitive.kind === 'box' || primitive.kind === 'cylinder';
+}
+
+/**
+ * The operation's display name for a primitive (#435) — the descriptor only, like
+ * `itemOperationName`; the CAM appends the depth and the tool prefix.
+ */
+export function primitiveOperationName(primitive: EngravePrimitive): string {
+  const named = primitive.name ? ` "${primitive.name}"` : '';
+  switch (primitive.kind) {
+    case 'box':
+      return `Pocket box${named} ${primitive.width}×${primitive.height}`;
+    case 'cylinder':
+      return `Pocket cylinder${named} ⌀${primitive.diameter}`;
+    case 'cone':
+      return `Cone${named} ⌀${primitive.diameter}→⌀${primitive.tipDiameter}`;
+    case 'sphere':
+      return `Sphere${named} ⌀${primitive.diameter}`;
+  }
+}
+
+/** A primitive in a finding's sentence: `Box "lid" 20×10`, `Sphere ⌀8`. */
+export function primitiveLabel(primitive: EngravePrimitive): string {
+  const named = primitive.name ? ` "${primitive.name}"` : '';
+  switch (primitive.kind) {
+    case 'box':
+      return `Box${named} ${primitive.width}×${primitive.height}`;
+    case 'cylinder':
+      return `Cylinder${named} ⌀${primitive.diameter}`;
+    case 'cone':
+      return `Cone${named} ⌀${primitive.diameter}→⌀${primitive.tipDiameter}`;
+    case 'sphere':
+      return `Sphere${named} ⌀${primitive.diameter}`;
+  }
+}
+
+/**
+ * A cuttable primitive as a `Profile` centred on the ORIGIN and unrotated, exactly like
+ * `shapeProfile`: a rectangle for a box, a circle for a cylinder, with the same explicit segment
+ * count a round shape gets (#190). Only vertical box/cylinder forms reach here; a refused kind
+ * yields the empty region rather than an invented one.
+ */
+function primitiveProfile(primitive: EngravePrimitive): Profile {
+  if (primitive.kind === 'box') return rectProfile(primitive.width, primitive.height, true);
+  if (primitive.kind === 'cylinder') {
+    const radius = primitive.diameter / 2;
+    return circleProfile(radius, segmentsForRadius(radius));
+  }
+  return poly([]);
 }
 
 /**
@@ -1716,7 +1777,8 @@ export function jobDepthLimit(job: EngraveJob, margin?: Mm): DepthLimit {
  *
  * Labels, shapes and combined shapes funnel through `itemProfile` into the ONE `engraves` list
  * (#214/#215): the document keeps three fields so old jobs and the label pipeline are untouched,
- * but nothing downstream can tell one from another except by its id.
+ * but nothing downstream can tell one from another except by its id. Cuttable 3D primitives
+ * (#435) join that same list; refused ones never do.
  *
  * Items are walked in `resolveItems`' dependency order, so a `frame`/`cutaway` always finds the
  * profile of what it references. An item with a broken reference never appears in that order.
@@ -1774,6 +1836,22 @@ export function toPartPlan(job: EngraveJob, options: PartPlanOptions = {}): Part
       name: itemOperationName(item),
       profile,
       depth: item.depth,
+    });
+  }
+
+  // 3D primitives (#435) join the SAME region funnel only where they reduce to a flat-floor
+  // region: a box or cylinder opening out of the top face. Nothing references a primitive, so
+  // there is no dependency ordering to respect and no entry in `profiles`. The refused forms are
+  // deliberately absent here — `validateJob` names them and stops generation, so no toolpath can
+  // be written from an approximation.
+  for (const primitive of job.primitives ?? []) {
+    if (!primitive.enabled || !primitiveReducesToRegion(primitive)) continue;
+    const placed = pRotate(primitive.rotation, primitiveProfile(primitive));
+    engraves.push({
+      id: primitive.id,
+      name: primitiveOperationName(primitive),
+      profile: pTranslate([primitive.position.x, primitive.position.y], placed),
+      depth: primitive.depth,
     });
   }
 

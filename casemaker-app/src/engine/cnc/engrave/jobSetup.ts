@@ -18,6 +18,9 @@ import {
   drillOperationName,
   jawGapFor,
   polygonSelfIntersects,
+  primitiveLabel,
+  primitiveOperationName,
+  primitiveReducesToRegion,
   resolveItems,
   sweptCuts,
   threadOperationName,
@@ -31,6 +34,7 @@ import type {
   EngraveDrill,
   EngraveJob,
   EngraveKeepOut,
+  EngravePrimitive,
   EngraveThread,
   EngraveTraceItem,
   JobSetup,
@@ -136,6 +140,15 @@ export type JobFindingCode =
   | 'thread-through-unavailable'
   | 'thread-pilot-unproven'
   | 'thread-flute-unproven'
+  // 3D primitives (#435). A primitive is cut only where it reduces to a flat-floor region; the
+  // other forms are refused BY NAME rather than approximated. Each sentence names the engine or
+  // issue that can cut the shape, so the refusal is an instruction, not a dead end.
+  | 'primitive-not-vertical'
+  | 'primitive-cone-needs-cam'
+  | 'primitive-sphere-needs-3d'
+  // The reference object is never cut (#435): it is what the pockets are FOR. `stock − target` is
+  // the profile cut-out work tracked in #218, so this is a warning, not an error.
+  | 'target-object-not-cut'
   // Facing (#432). The job's facing depth is taken off the same blank every item is measured
   // against, so the check is one number against the stock's minimum floor — not a per-item one.
   // An item over-deep once the skim is counted is still `depth-exceeds-stock`, whose own check
@@ -363,6 +376,10 @@ export function jobSetups(job: EngraveJob): JobSetup[] {
     ...(job.vectors ?? []),
     ...(job.drills ?? []),
     ...(job.threads ?? []),
+    // #435 — only the primitives that actually cut belong in a setup's item list. A refused cone
+    // or sphere is still the document's, and `validateJob` names it, but it is not work any cutter
+    // owns.
+    ...(job.primitives ?? []).filter(primitiveReducesToRegion),
   ];
   const itemIds = items
     .filter((item) => item.enabled && item.construction !== true)
@@ -450,6 +467,10 @@ export function validateJob(
   // Milled threads (#445) are a fourth list. A thread has no `construction`; a disabled one does
   // nothing.
   const enabledThreads: EngraveThread[] = (job.threads ?? []).filter((t) => t.enabled);
+  // 3D primitives (#435) are a fifth list. Only the cuttable forms count as WORK; the refused
+  // forms are still enabled items, so they get their own findings below rather than vanishing.
+  const enabledPrimitives: EngravePrimitive[] = (job.primitives ?? []).filter((p) => p.enabled);
+  const cuttablePrimitives = enabledPrimitives.filter(primitiveReducesToRegion);
   const { thickness } = job.stock;
 
   // #432 — the facing skim is material the items no longer have under them. Every item's depth is
@@ -495,6 +516,73 @@ export function validateJob(
           `would remain on a ${thickness} mm stock, below the ${job.minFloor} mm minimum.`,
       });
     }
+  }
+
+  // 3D primitives (#435), in two parts: the depth every enabled primitive must respect, and the
+  // by-name refusals for the forms the region CAM cannot cut. A refused primitive is an ERROR even
+  // when it is the job's only work: silently dropping it would let Generate report "nothing to do"
+  // about a shape the person drew. An axis other than Z is tested first — it makes even a box an
+  // undercut — and each message names the way the shape CAN be cut.
+  for (const primitive of enabledPrimitives) {
+    if (primitive.depth > floorAllowed) {
+      const remaining = thickness - facingDepth - primitive.depth;
+      findings.push({
+        severity: 'error',
+        code: 'depth-exceeds-stock',
+        labelId: primitive.id,
+        message:
+          `${primitiveLabel(primitive)} cuts ${primitive.depth} mm deep; only ${remaining} mm of ` +
+          `floor would remain on a ${thickness} mm stock, below the ${job.minFloor} mm minimum.`,
+      });
+    }
+    const axis = primitive.axis ?? 'z';
+    if (axis !== 'z') {
+      findings.push({
+        severity: 'error',
+        code: 'primitive-not-vertical',
+        labelId: primitive.id,
+        message:
+          `${primitiveLabel(primitive)} opens along ${axis.toUpperCase()}, which is a side-opening ` +
+          `undercut — not a top-face region the region CAM can cut. Set its axis to Z, or cut it ` +
+          `with the 3D engine (#222); it is refused rather than approximated.`,
+      });
+      continue;
+    }
+    if (primitive.kind === 'cone') {
+      findings.push({
+        severity: 'error',
+        code: 'primitive-cone-needs-cam',
+        labelId: primitive.id,
+        message:
+          `${primitiveLabel(primitive)} has a sloped wall. The region CAM only cuts walls parallel ` +
+          `to the cutter axis, so a cone would be approximated as a cylinder and is refused. The ` +
+          `V-carve/chamfer work (#221) and the 3D engine (#222) are the ways to cut it.`,
+      });
+      continue;
+    }
+    if (primitive.kind === 'sphere') {
+      findings.push({
+        severity: 'error',
+        code: 'primitive-sphere-needs-3d',
+        labelId: primitive.id,
+        message:
+          `${primitiveLabel(primitive)} has a curved floor. A sphere is a dexel job (#222), not a ` +
+          `flat-floor region; it is refused rather than approximated as a circle pocket.`,
+      });
+    }
+  }
+
+  // The target object (#435) is a REFERENCE. Saying so once, as a warning, keeps "why is my
+  // imported part not being cut?" from being answered by silence; it never blocks the other work.
+  if (job.targetObject?.enabled === true) {
+    findings.push({
+      severity: 'warning',
+      code: 'target-object-not-cut',
+      message:
+        `The target object "${job.targetObject.name}" is a reference: it is shown in the viewport ` +
+        `but not cut. Cutting the stock around it is the profile cut-out work tracked in #218; ` +
+        `this job's other items are unaffected.`,
+    });
   }
 
   // Plunge drills (#220): depth, reach, stock containment, a centre-cutting tool and the
@@ -602,6 +690,7 @@ export function validateJob(
       ...enabled.filter(itemHasWork).map(itemLabel),
       ...enabledTraces.filter(traceHasWork).map(traceOperationName),
       ...enabledDrills.map(drillOperationName),
+      ...cuttablePrimitives.map(primitiveOperationName),
     ];
     if (otherWork.length > 0) {
       findings.push({
@@ -773,12 +862,18 @@ export function validateJob(
         ...enabled.map(itemLabel),
         ...enabledTraces.map(traceOperationName),
         ...enabledThreads.map(threadOperationName),
+        ...cuttablePrimitives.map(primitiveOperationName),
       ];
       if (otherWork.length > 0 && !findings.some((f) => f.code === 'drill-mixed-tools')) {
         findings.push({
           severity: 'error',
           code: 'drill-mixed-tools',
-          labelId: enabledDrills[0]?.id ?? enabled[0]?.id ?? enabledTraces[0]?.id ?? enabledThreads[0]?.id,
+          labelId:
+            enabledDrills[0]?.id ??
+            enabled[0]?.id ??
+            enabledTraces[0]?.id ??
+            enabledThreads[0]?.id ??
+            enabledPrimitives[0]?.id,
           message:
             `"${drillTool.name}" is a drill bit, but this job also cuts ${otherWork[0]}` +
             `${otherWork.length > 1 ? ` and ${otherWork.length - 1} other item(s)` : ''}. A drill ` +
@@ -824,11 +919,21 @@ export function validateJob(
     }
   }
 
-  if (!enabled.some(itemHasWork) && !enabledTraces.some(traceHasWork) && enabledDrills.length === 0 && enabledThreads.length === 0) {
+  if (
+    !enabled.some(itemHasWork) &&
+    !enabledTraces.some(traceHasWork) &&
+    enabledDrills.length === 0 &&
+    enabledThreads.length === 0 &&
+    // ANY enabled primitive counts as stated work: a refused cone/sphere already has its own
+    // by-name error, so "nothing to do" would be a second, misleading complaint about the shape
+    // the person drew.
+    enabledPrimitives.length === 0
+  ) {
     findings.push({
       severity: 'error',
       code: 'no-items',
-      message: 'The job has no enabled label with text, shape, trace, drilled hole or thread.',
+      message:
+        'The job has no enabled label with text, shape, trace, drilled hole, thread or cuttable 3D primitive.',
     });
   }
 
@@ -994,6 +1099,13 @@ export function setupProgramFindings(job: EngraveJob): JobFinding[] {
   }
   for (const thread of job.threads ?? []) {
     if (thread.enabled) workById.set(thread.id, threadOperationName(thread));
+  }
+  // #435 — a cuttable primitive is region work, so a setup may assign it and the drill-tool check
+  // has to see it as work the bit cannot do.
+  for (const primitive of job.primitives ?? []) {
+    if (primitive.enabled && primitiveReducesToRegion(primitive)) {
+      workById.set(primitive.id, primitiveOperationName(primitive));
+    }
   }
   jobSetups(job).forEach((setup, i) => {
     const tools = setupTools(setup, job);

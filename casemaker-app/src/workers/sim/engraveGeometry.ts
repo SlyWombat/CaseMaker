@@ -13,7 +13,7 @@
  */
 
 import type { PartPlan } from '@/engine/cnc/engrave/partPlan';
-import { keepOutMembrane, traceSweptProfile } from '@/engine/cnc/engrave/partPlan';
+import { keepOutMembrane, primitiveLabel, traceSweptProfile } from '@/engine/cnc/engrave/partPlan';
 import { engravableProfile } from '@/engine/cnc/engrave/engravable';
 import {
   boundsFor,
@@ -34,6 +34,7 @@ import type {
   EngraveCombinedShape,
   EngraveJob,
   EngraveLabel,
+  EngravePrimitive,
   EngraveShape,
   EngraveVectorShape,
 } from '@/types/engraveJob';
@@ -276,15 +277,24 @@ export function engravabilityFindings(
 
   for (const row of m) {
     const src = findItem(job, row.labelId);
+    const primitive = src === undefined ? findPrimitive(job, row.labelId) : undefined;
     const label = src && !isShapeItem(src) ? src : null;
     const shape = src && isShapeItem(src) ? src : null;
 
-    if (src && hasContent(src) && row.openedArea === 0) {
+    const empty =
+      (src !== undefined && hasContent(src) && row.openedArea === 0) ||
+      (primitive !== undefined && row.glyphArea > 0 && row.openedArea === 0);
+    if (empty) {
       findings.push({
         severity: 'error',
         code: 'item-empty',
         labelId: row.labelId,
-        message: emptyMessage(src, cutter),
+        message:
+          primitive !== undefined
+            ? `${primitiveLabel(primitive)} has nothing this cutter can reach: it is smaller than ${cutter}.`
+            : src !== undefined
+              ? emptyMessage(src, cutter)
+              : '',
       });
     }
 
@@ -568,7 +578,8 @@ export function keepOutFindings(
     if (region.depth > worst.limit + DEPTH_EPS_MM) continue;
 
     const src = findItem(job, region.id);
-    const who = src ? itemLabel(src) : region.name || `Item ${region.id}`;
+    const primitive = src === undefined ? findPrimitive(job, region.id) : undefined;
+    const who = src ? itemLabel(src) : primitive ? primitiveLabel(primitive) : region.name || `Item ${region.id}`;
     findings.push({
       severity: 'warning',
       code: 'item-over-void',
@@ -580,6 +591,14 @@ export function keepOutFindings(
     });
   }
   return findings;
+}
+
+/**
+ * The 3D primitive a measurement row names (#435). Cuttable primitives join `plan.engraves`, so a
+ * row can name one; they are not `EngraveAnyItem`s, which is why this is a second lookup.
+ */
+function findPrimitive(job: EngraveJob, id: string): EngravePrimitive | undefined {
+  return (job.primitives ?? []).find((p) => p.id === id);
 }
 
 /** The item — label, shape, combined shape or imported vector — a measurement row names (#214/#215/#217). */

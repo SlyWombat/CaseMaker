@@ -98,6 +98,9 @@ function itemIdsIn(job: EngraveJob): Set<string> {
     ...(job.vectors ?? []),
     ...(job.drills ?? []),
     ...(job.threads ?? []),
+    // #435 — a primitive is addressable by a setup whether or not it cuts; a disabled or refused
+    // form is `notCut`, not `missing`.
+    ...(job.primitives ?? []),
     ...(job.keepOuts ?? []),
   ];
   for (const item of lists) ids.add(item.id);

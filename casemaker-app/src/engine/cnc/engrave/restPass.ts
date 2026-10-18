@@ -32,6 +32,7 @@ import {
   type ReachRow,
 } from './reachability';
 import type { EngraveJob, EngraveVectorShape } from '@/types/engraveJob';
+import { hasRegionItems } from './recommendTool';
 import { isVTraceTool, type Tool } from '@/engine/cnc/tool';
 import type { CutParams } from '@/engine/cnc/feeds';
 import type { SeamFacts, ThirdToolAdvice } from './restSettings';
@@ -168,10 +169,8 @@ export interface RestToolPick {
  */
 export function vBitRestRefusal(job: EngraveJob, rest: Tool): string | null {
   if (!isVTraceTool(rest)) return null;
-  const hasRegions = [...job.labels, ...job.shapes, ...(job.combined ?? []), ...(job.vectors ?? [])].some(
-    (item) => item.enabled,
-  );
-  return hasRegions ? V_BIT_REST_SENTENCE : null;
+  // The same question `recommendTool` asks, so a primitive pocket counts as a region here too.
+  return hasRegionItems(job) ? V_BIT_REST_SENTENCE : null;
 }
 
 /**
