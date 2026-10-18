@@ -651,7 +651,7 @@
           "description": "The stage the command reached, or null when it stopped before one."
         },
         "version": {
-          "const": 1,
+          "const": 2,
           "description": "The receipt document’s shape version.",
           "type": "number"
         }
@@ -920,7 +920,7 @@
           "description": "The stage the command reached, or null when it stopped before one."
         },
         "version": {
-          "const": 1,
+          "const": 2,
           "description": "The receipt document’s shape version.",
           "type": "number"
         }
@@ -1268,7 +1268,7 @@
           "description": "The stage the command reached, or null when it stopped before one."
         },
         "version": {
-          "const": 1,
+          "const": 2,
           "description": "The receipt document’s shape version.",
           "type": "number"
         }
@@ -1830,7 +1830,302 @@
           "description": "The stage the command reached, or null when it stopped before one."
         },
         "version": {
-          "const": 1,
+          "const": 2,
+          "description": "The receipt document’s shape version.",
+          "type": "number"
+        }
+      },
+      "required": [
+        "version",
+        "ok",
+        "stage",
+        "gate",
+        "inputs",
+        "outputs",
+        "diagnostics",
+        "provenance",
+        "refusals",
+        "command",
+        "details"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "The receipt of an MCP tool that runs no command of its own.",
+      "properties": {
+        "command": {
+          "const": "mcp",
+          "description": "The command that produced this receipt.",
+          "type": "string"
+        },
+        "details": {
+          "description": "An MCP tool’s own details.",
+          "properties": {
+            "document": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The project document the tool wrote, or null when it wrote none."
+            },
+            "items": {
+              "description": "The ids the tool listed, built or compiled, in the order the tool returns them.",
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "tool": {
+              "description": "The MCP tool that produced this receipt.",
+              "enum": [
+                "list_boards",
+                "list_templates",
+                "describe_board",
+                "new_project",
+                "patch_case",
+                "compile_project"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "tool",
+            "document",
+            "items"
+          ],
+          "type": "object"
+        },
+        "diagnostics": {
+          "description": "Every code the run raised.",
+          "items": {
+            "description": "One code the run raised, with the guide row an operator reads next.",
+            "properties": {
+              "code": {
+                "description": "The diagnostic code, e.g. `item-empty`; every engine code is also a cnc-guide row.",
+                "minLength": 1,
+                "type": "string"
+              },
+              "guideRow": {
+                "description": "The cnc-guide chapter 8 row key for this code — the code itself for every engine diagnostic.",
+                "minLength": 1,
+                "type": "string"
+              },
+              "message": {
+                "description": "The finding, in the words the engine or verifier raised it in.",
+                "type": "string"
+              },
+              "program": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "The program whose pipeline raised it, or null for a run-level diagnostic."
+              },
+              "severity": {
+                "description": "How the finding is treated by the gates.",
+                "enum": [
+                  "error",
+                  "warning",
+                  "info"
+                ],
+                "type": "string"
+              },
+              "source": {
+                "description": "Which list raised it.",
+                "enum": [
+                  "findings",
+                  "verify",
+                  "simulation"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "guideRow",
+              "severity",
+              "message",
+              "source",
+              "program"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "gate": {
+          "anyOf": [
+            {
+              "enum": [
+                "generated",
+                "verified",
+                "simulated",
+                "prediction"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The #206 gate that stopped the run, or null when none did."
+        },
+        "inputs": {
+          "description": "The files the command read, with their hashes.",
+          "items": {
+            "description": "A file the command read (an input) or wrote (an output).",
+            "properties": {
+              "bytes": {
+                "description": "Size of the file, in bytes.",
+                "maximum": 9007199254740991,
+                "minimum": 0,
+                "type": "integer"
+              },
+              "path": {
+                "description": "The file, as the command names it — relative paths stay relative.",
+                "minLength": 1,
+                "type": "string"
+              },
+              "sha256": {
+                "description": "SHA-256 of the file bytes, 64 lowercase hex characters.",
+                "pattern": "^[0-9a-f]{64}$",
+                "type": "string"
+              }
+            },
+            "required": [
+              "path",
+              "sha256",
+              "bytes"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "ok": {
+          "description": "Whether the command completed its gates.",
+          "type": "boolean"
+        },
+        "outputs": {
+          "description": "The files the command wrote, with their hashes.",
+          "items": {
+            "description": "A file the command read (an input) or wrote (an output).",
+            "properties": {
+              "bytes": {
+                "description": "Size of the file, in bytes.",
+                "maximum": 9007199254740991,
+                "minimum": 0,
+                "type": "integer"
+              },
+              "path": {
+                "description": "The file, as the command names it — relative paths stay relative.",
+                "minLength": 1,
+                "type": "string"
+              },
+              "sha256": {
+                "description": "SHA-256 of the file bytes, 64 lowercase hex characters.",
+                "pattern": "^[0-9a-f]{64}$",
+                "type": "string"
+              }
+            },
+            "required": [
+              "path",
+              "sha256",
+              "bytes"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "provenance": {
+          "description": "Every number an operator acts on, with where it came from.",
+          "items": {
+            "description": "A number the run used, with its provenance.",
+            "properties": {
+              "name": {
+                "description": "The setting, as the job or the sheet spells it, e.g. `rest.overlapMm`.",
+                "minLength": 1,
+                "type": "string"
+              },
+              "source": {
+                "description": "Where the number came from.",
+                "enum": [
+                  "seeded",
+                  "located",
+                  "typed",
+                  "measured"
+                ],
+                "type": "string"
+              },
+              "unit": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "Its unit (`mm`, `%`, …), or null when it has none."
+              },
+              "value": {
+                "description": "The number this run used.",
+                "type": "number"
+              }
+            },
+            "required": [
+              "name",
+              "value",
+              "unit",
+              "source"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "refusals": {
+          "description": "Every refusal the run reported, as data.",
+          "items": {
+            "description": "A refusal the run reported, as data.",
+            "properties": {
+              "code": {
+                "description": "A stable refusal code, e.g. `simulation-refused`.",
+                "minLength": 1,
+                "type": "string"
+              },
+              "reason": {
+                "description": "The reason, as an operator reads it.",
+                "minLength": 1,
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "reason"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "stage": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The stage the command reached, or null when it stopped before one."
+        },
+        "version": {
+          "const": 2,
           "description": "The receipt document’s shape version.",
           "type": "number"
         }

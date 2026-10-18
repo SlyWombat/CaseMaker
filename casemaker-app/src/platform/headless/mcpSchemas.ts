@@ -44,11 +44,20 @@ export const MCP_SCHEMA_NAMES = Object.keys(mcpSchemaDocuments) as McpSchemaName
  * object for a `z.preprocess` is its inner object shape (Zod 4), which is what we want.
  */
 export function generateMcpSchema(name: McpSchemaName): string {
-  const json = z.toJSONSchema(mcpSchemaDocuments[name], {
+  return `${JSON.stringify(jsonSchemaOf(mcpSchemaDocuments[name]), null, 2)}\n`;
+}
+
+/**
+ * The JSON Schema for ANY Zod document, with the same representation and key order the committed
+ * schemas use. #481 advertises its tool arguments with this, so a tool's `inputSchema` and the
+ * documents under `schemas/` are produced by one function rather than two opinions.
+ */
+export function jsonSchemaOf(schema: z.ZodType): Record<string, unknown> {
+  const json = z.toJSONSchema(schema, {
     io: 'input',
     unrepresentable: 'any',
   });
-  return `${JSON.stringify(sortKeys(json), null, 2)}\n`;
+  return sortKeys(json) as Record<string, unknown>;
 }
 
 /**

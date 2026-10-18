@@ -14,6 +14,7 @@
     "location": "npm run casemaker -- location",
     "readback:feeds": "npm run casemaker -- readback feeds",
     "readback:run": "npm run casemaker -- readback run",
+    "mcp:server": "tsx --tsconfig tsconfig.scripts.json scripts/mcp-server.ts",
     "dev": "vite",
     "build": "tsc -b && vite build",
     "dev:desktop": "vite --mode desktop",
@@ -65,6 +66,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
+    "@modelcontextprotocol/sdk": "^1.32.1",
     "@playwright/test": "1.61.0",
     "@tauri-apps/cli": "^2.12.2",
     "@testing-library/jest-dom": "^6.9.1",

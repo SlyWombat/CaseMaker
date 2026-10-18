@@ -151,6 +151,21 @@ describe('#478 the receipt schema', () => {  it('accepts a receipt each command 
           run: null,
         },
       },
+      {
+        // #481 — the variant the pure MCP tools return: no command ran, so there is no
+        // command-specific details block, only the tool, the document and the items it read.
+        version: RECEIPT_VERSION,
+        command: 'mcp',
+        ok: true,
+        stage: 'read',
+        gate: null,
+        inputs: [],
+        outputs: [],
+        diagnostics: [],
+        provenance: [],
+        refusals: [],
+        details: { tool: 'list_boards', document: null, items: ['rpi-4b', 'esp32-devkit'] },
+      },
     ];
     for (const receipt of receipts) {
       const parsed = parseReceipt(JSON.parse(receiptJson(receipt)));
@@ -273,6 +288,42 @@ describe('#478 the human output is rendered from the receipt', () => {
     expect(text).toContain('p.stl  1200 triangles  2.0 KB');
     expect(text).toContain('  notes      p-PRINT-NOTES.txt');
     expect(text).toContain('Wrote /out/p.stl');
+  });
+
+  it('renders a pure MCP tool from its tool, document, items and refusal (#481)', () => {
+    const text = renderReceipt({
+      version: RECEIPT_VERSION,
+      command: 'mcp',
+      ok: true,
+      stage: 'written',
+      gate: null,
+      inputs: [],
+      outputs: [{ path: '/out/p.caseproj.json', sha256: 'b'.repeat(64), bytes: 900 }],
+      diagnostics: [],
+      provenance: [],
+      refusals: [],
+      details: { tool: 'new_project', document: '/out/p.caseproj.json', items: ['prj-1'] },
+    }).join('\n');
+    expect(text).toContain('mcp new_project  ok=true');
+    expect(text).toContain('  document   /out/p.caseproj.json');
+    expect(text).toContain('  item       prj-1');
+
+    const refused = renderReceipt({
+      version: RECEIPT_VERSION,
+      command: 'mcp',
+      ok: false,
+      stage: 'validated',
+      gate: null,
+      inputs: [],
+      outputs: [],
+      diagnostics: [],
+      provenance: [],
+      refusals: [{ code: 'patch-refused', reason: 'invalid case patch: wallThickness: too small' }],
+      details: { tool: 'patch_case', document: null, items: ['wallThickness: too small'] },
+    }).join('\n');
+    expect(refused).toContain('mcp patch_case  ok=false');
+    expect(refused).not.toContain('document   ');
+    expect(refused).toContain('  !! invalid case patch: wallThickness: too small');
   });
 
   it('renders a location section from its records, and the no-document case', () => {

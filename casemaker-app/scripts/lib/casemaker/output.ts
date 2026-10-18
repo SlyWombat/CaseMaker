@@ -16,10 +16,25 @@ import {
   type Receipt,
 } from '../../../src/platform/headless/receipt';
 
+/**
+ * Where a command's two channels go when it is NOT printing (#481). The MCP server runs the same
+ * command functions inside a long-lived process whose stdout carries JSON-RPC, so it captures the
+ * receipt instead of formatting it. A sink replaces BOTH channels: a command with a sink never
+ * writes a progress line or a rendered result to stdout.
+ */
+export interface CommandSink {
+  /** Progress and advisories; omitted lines are discarded rather than printed. */
+  progress?(line: string): void;
+  /** The run's receipt, already validated. Called exactly once per run. */
+  receipt?(receipt: Receipt): void;
+}
+
 /** What the dispatcher learned from the command line, handed to every handler. */
 export interface CommandOptions {
   /** `--json` was passed: emit the receipt document instead of human lines. */
   json: boolean;
+  /** Capture the two channels instead of printing them (the MCP server, #481). */
+  sink?: CommandSink;
 }
 
 /** The default a direct script wrapper (`scripts/engrave-job.ts`) runs with. */
@@ -33,13 +48,22 @@ export interface CommandOutput {
 }
 
 export function commandOutput(options: CommandOptions): CommandOutput {
+  const sink = options.sink;
   return {
     progress(line: string): void {
+      if (sink !== undefined) {
+        sink.progress?.(line);
+        return;
+      }
       if (options.json) console.error(line);
       else console.log(line);
     },
     emitReceipt(receipt: Receipt): void {
       const parsed = parseReceipt(receipt);
+      if (sink !== undefined) {
+        sink.receipt?.(parsed);
+        return;
+      }
       if (options.json) {
         process.stdout.write(receiptJson(parsed));
         return;

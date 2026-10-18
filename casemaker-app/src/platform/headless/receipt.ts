@@ -19,8 +19,14 @@
 
 import { z } from 'zod';
 
-/** The receipt document's own version. A changed SHAPE bumps it; a new optional field does not. */
-export const RECEIPT_VERSION = 1;
+/**
+ * The receipt document's own version. A changed SHAPE bumps it; a new optional field does not.
+ *
+ * 2 (#481) — the receipt gained a `mcp` command variant, the one pure tools (list/describe/
+ * new/patch/compile) return: they run no CLI command whose receipt could be borrowed, and every
+ * MCP tool must return a receipt. The four command variants are unchanged.
+ */
+export const RECEIPT_VERSION = 2;
 
 /**
  * #206's four gates, in the order the panel asks them. `gate` names the one that stopped a run;
@@ -289,6 +295,36 @@ export const readbackDetailsSchema = z
   })
   .describe('The readback command’s own details.');
 
+/**
+ * The MCP tools that run NO command of their own (#481): lookups over the library and the project
+ * document tools. Each returns this variant; every other tool returns the receipt of the command
+ * it ran (`export_parts` → `export`, `generate_program`/`run_sheet` → `engrave`, `read_location`
+ * → `location`).
+ */
+export const RECEIPT_MCP_TOOLS = [
+  'list_boards',
+  'list_templates',
+  'describe_board',
+  'new_project',
+  'patch_case',
+  'compile_project',
+] as const;
+export type ReceiptMcpTool = (typeof RECEIPT_MCP_TOOLS)[number];
+
+/** Everything an MCP tool reports beyond the receipt envelope. */
+export const mcpDetailsSchema = z
+  .object({
+    tool: z.enum(RECEIPT_MCP_TOOLS).describe('The MCP tool that produced this receipt.'),
+    document: z
+      .string()
+      .nullable()
+      .describe('The project document the tool wrote, or null when it wrote none.'),
+    items: z
+      .array(z.string())
+      .describe('The ids the tool listed, built or compiled, in the order the tool returns them.'),
+  })
+  .describe('An MCP tool’s own details.');
+
 // ---------------------------------------------------------------------------------------------
 // The receipt
 // ---------------------------------------------------------------------------------------------
@@ -322,6 +358,9 @@ export const receiptSchema = z.discriminatedUnion('command', [
   z
     .object({ ...envelope, command: z.literal('readback').describe('The command that produced this receipt.'), details: readbackDetailsSchema })
     .describe('The receipt of a readback.'),
+  z
+    .object({ ...envelope, command: z.literal('mcp').describe('The command that produced this receipt.'), details: mcpDetailsSchema })
+    .describe('The receipt of an MCP tool that runs no command of its own.'),
 ]);
 
 export type Receipt = z.infer<typeof receiptSchema>;
@@ -334,6 +373,7 @@ export type EngraveProgram = z.infer<typeof engraveProgramSchema>;
 export type ExportDetails = z.infer<typeof exportDetailsSchema>;
 export type LocationDetails = z.infer<typeof locationDetailsSchema>;
 export type ReadbackDetails = z.infer<typeof readbackDetailsSchema>;
+export type McpDetails = z.infer<typeof mcpDetailsSchema>;
 
 /**
  * A diagnostic. The guide row is the code itself — `cnc-guide.md` §8.1's table is keyed by code —
@@ -649,7 +689,23 @@ export function renderReceipt(receipt: Receipt): string[] {
       return locationLines(receipt);
     case 'readback':
       return readbackLines(receipt);
+    case 'mcp':
+      return mcpLines(receipt);
   }
+}
+
+/**
+ * An MCP tool's own result: the tool, its document if it wrote one, and the ids it produced. The
+ * client normally reads `structuredContent`; these lines exist so a receipt is never a shape the
+ * one renderer cannot state.
+ */
+function mcpLines(receipt: Extract<Receipt, { command: 'mcp' }>): string[] {
+  const { details } = receipt;
+  const lines = [`mcp ${details.tool}  ok=${receipt.ok}`];
+  if (details.document !== null) lines.push(`  document   ${details.document}`);
+  for (const item of details.items) lines.push(`  item       ${item}`);
+  for (const refusal of receipt.refusals) lines.push(`  !! ${refusal.reason}`);
+  return lines;
 }
 
 /** The provenance of a shop default, mapped to the receipt's four sources (#478). */
