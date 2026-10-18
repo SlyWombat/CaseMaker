@@ -94,6 +94,7 @@ import {
   presetJawStrips,
   presetPartOnBoard,
 } from '@/engine/cnc/sacrificial';
+import { EngraveJobFileBar } from './EngraveJobFileBar';
 import { EngraveLabelRow } from './EngraveLabelRow';
 import { EngraveKeepOutRow } from './EngraveKeepOutRow';
 import { EngraveShapeRow } from './EngraveShapeRow';
@@ -1493,6 +1494,10 @@ export function EngravePanel(): JSX.Element {
 
       {mode === 'design' ? (
         <>
+
+      {/* #425 §6 — the document's Save/Open surface. Design only: the file owns the job, and the
+          Cut branch is #419's. */}
+      <EngraveJobFileBar />
 
       {/* The guided job setup (#254): a path INTO this panel. A new job can be set up from here
           without hunting through the fields below; skipping it leaves every field as it was. */}
