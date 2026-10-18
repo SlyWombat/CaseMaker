@@ -1,13 +1,10 @@
-// #508 — the preview draws the VISE, not the collision envelope.
-//
-// The envelope's boxes run `VISE_BODY_DEPTH` below the stock's underside and grow with the stock,
-// which is right for the sweep and wrong for a picture: drawn from them, a thick blank made the
-// jaws appear to grow with it. `viseBody` draws fixed-height bars instead, and its source label
-// says the bar height is PROVISIONAL until the bench calipers it.
+// #520 — the preview draws the Makera Low-Profile Vise as it actually is, not the collision
+// envelope. Two stepped soft jaws (a 10 mm land and a 1.9 mm ledge set 3.1 mm below the top), two
+// rails, the screws and a provisional bed, all from `viseBody`.
 //
 // This spec is the eyeball half. It captures the shipped 12 mm blank and then a 50 mm cube — the
-// case where the old picture differed most — and asserts the label carries the PROVISIONAL note.
-// The heights themselves are pinned in `tests/unit/cncFixture.spec.ts` and
+// case where the old picture differed most — and checks the seat still moves the blank. The
+// numbers themselves are pinned in `tests/unit/cncFixture.spec.ts` and
 // `tests/unit/engravePreview.spec.ts`; a screenshot is a claim someone has to LOOK at, so the
 // captures land in Playwright's gitignored output dir (`test-results/`).
 //
@@ -38,7 +35,7 @@ async function setStock(page: Page, key: 'length' | 'width' | 'thickness', value
   await expect(page.getByTestId(`engrave-stock-${key}`)).toHaveValue(String(value));
 }
 
-test('the drawn vise does not grow with the stock — looked at on a 50 mm cube (#508)', async ({
+test('the drawn vise is the real one, and the seat still moves the blank (#520)', async ({
   cm,
   page,
 }, testInfo) => {
@@ -52,13 +49,10 @@ test('the drawn vise does not grow with the stock — looked at on a 50 mm cube 
   await cm.ready();
   await openEngrave(page);
 
-  // The source label says where the numbers came from AND that the drawn bar height is not one of
-  // the measured numbers yet.
-  const source = page.getByTestId('engrave-jaw-source');
-  await expect(source).toContainText('bar height 20 mm PROVISIONAL');
-
-  // #508 — the seat is an operator's choice on the vise row, and a default vise re-seats when it
+  // The seat is an operator's choice on the vise row, and a default vise re-seats when it
   // changes: 12 − 3.1 on the ledge, 12 − 20 on the floor (negative is the truthful answer).
+  // #523 — the vise row lives in the Hold group, closed by default.
+  await page.getByTestId('engrave-group-hold-summary').click();
   const seat = page.getByTestId('engrave-vise-seat');
   const proud = page.getByTestId('engrave-vise-stockProud');
   await expect(seat).toHaveValue('ledge');
@@ -70,7 +64,7 @@ test('the drawn vise does not grow with the stock — looked at on a 50 mm cube 
 
   await page.getByTestId('viewport-fit').click();
   await page.waitForTimeout(700);
-  await page.screenshot({ path: shot(testInfo, '508-vise-12mm.png') });
+  await page.screenshot({ path: shot(testInfo, '520-vise-12mm.png') });
 
   // A 50 mm cube. The design is moved and shrunk to fit it, so the picture is about the vise and
   // not about a refused layout.
@@ -87,11 +81,10 @@ test('the drawn vise does not grow with the stock — looked at on a 50 mm cube 
 
   await expect(page.getByTestId('engrave-preview-legend')).toBeVisible({ timeout: 60_000 });
   await expect(page.getByTestId('engrave-preview-error')).toHaveCount(0);
-  await expect(source).toContainText('bar height 20 mm PROVISIONAL');
 
   await page.getByTestId('viewport-fit').click();
   await page.waitForTimeout(700);
-  await page.screenshot({ path: shot(testInfo, '508-vise-cube.png') });
+  await page.screenshot({ path: shot(testInfo, '520-vise-cube.png') });
 
   expect(errors).toEqual([]);
 });

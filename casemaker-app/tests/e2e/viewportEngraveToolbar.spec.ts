@@ -358,6 +358,8 @@ test('#361 — the sacrificial swatch clears the toolbar at both widths', async 
   // The swatch reads the SIM store, so a sim scene has to be up for it to render at all — and the
   // only route in the app that puts a sacrificial body into that store is the engrave job's own:
   // the strips, then Generate, which loads the program it generated into `simStore`.
+  // #523 — the sacrificial presets live in the Hold group, closed by default.
+  await page.getByTestId('engrave-group-hold-summary').click();
   await page.getByTestId('engrave-sac-preset-strips').click();
   await page.getByTestId('engrave-generate').click();
   await expect(page.getByTestId('sim-legend-sacrificial')).toBeVisible({ timeout: 180_000 });

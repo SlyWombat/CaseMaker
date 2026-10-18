@@ -19,6 +19,8 @@ async function openEngravePanel(page: Page): Promise<void> {
   });
   await page.getByTestId('sidebar-button-cnc-engrave').click();
   await expect(page.getByTestId('engrave-panel')).toBeVisible();
+  // #523 — the Setups section lives in the Hold group, closed by default: open it first.
+  await page.getByTestId('engrave-group-hold-summary').click();
 }
 
 test('Setups: implicit draft, stale list, disabled Add, and the remount refusal', async ({ cm, page }) => {
