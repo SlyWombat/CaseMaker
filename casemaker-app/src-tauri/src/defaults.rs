@@ -380,6 +380,12 @@ pub const UNMEASURED_SEEDS: &[(&str, f64, &str, &str)] = &[
     // common layer height, and small enough that a 1 mm flat still has a roughing cut. The first
     // bench cut that inspects a finished floor replaces it.
     ("finish.stockToLeaveMm", 0.2, "mm", "chosen, not measured: how much stock the roughing pass leaves on the walls and the floor for the finishing pass. 0.2 mm is about one printed layer at the common layer height. The first bench cut that inspects a finished floor replaces this"),
+    // #218 — holding tabs. Three PROVISIONAL numbers (4 tabs, 4 mm wide, 1 mm of kept material);
+    // the first tabbed cut replaces all three. A job stores its own spec, so these seed a NEW
+    // cut-out rather than overriding an existing one.
+    ("tabs.count", 4.0, "tabs", "chosen, not measured: holding tabs per cut-out. Four is provisional — the first part cut with tabs replaces it"),
+    ("tabs.widthMm", 4.0, "mm", "chosen, not measured: holding-tab width in material. The cutter's centre path stops two tool radii further apart. Provisional until the first tabbed cut"),
+    ("tabs.heightMm", 1.0, "mm", "chosen, not measured: material a holding tab leaves below the tab top. Provisional; on a 3.81 mm badge blank it leaves 1 mm under a 2.81 mm cut"),
     // ── #447 (begin) — the house depth margins (#345), out of browser storage. Chosen, not measured:
     // the numbers `depthBounds.ts`'s MARGIN_DEFAULTS shipped with, which a job copies or seeds from.
     ("margins.boundaryMarginMm", 0.2, "mm", "chosen, not measured: how far every floor stays clear of a plane it must not cross; 0.2 is one printed layer at the common layer height. While it is the seed, a blank that states its print uses its own layer height instead"),
@@ -563,6 +569,19 @@ fn known_rule(key: &str, n: Option<f64>) -> Option<Result<(), String>> {
         "finish.stockToLeaveMm" => Some(need(
             n.is_some_and(|v| (0.0..=1.0).contains(&v)),
             "0 to 1 mm",
+        )),
+        // #218 — the same rules `defaultsClient.ts` restates for the three tab numbers.
+        "tabs.count" => Some(need(
+            n.is_some_and(|v| (0.0..=64.0).contains(&v) && v.fract() == 0.0),
+            "a whole number of tabs from 0 to 64",
+        )),
+        "tabs.widthMm" => Some(need(
+            n.is_some_and(|v| (0.1..=50.0).contains(&v)),
+            "0.1 to 50 mm",
+        )),
+        "tabs.heightMm" => Some(need(
+            n.is_some_and(|v| (0.1..=20.0).contains(&v)),
+            "0.1 to 20 mm",
         )),
         "registration.tipDiameterMm" => Some(need(
             n.is_some_and(|v| (0.2..=10.0).contains(&v)),

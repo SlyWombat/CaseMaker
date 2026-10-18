@@ -1886,7 +1886,7 @@ export function toPartPlan(job: EngraveJob, options: PartPlanOptions = {}): Part
     // breakthrough`, which is exactly what the region builder used to invent for itself. Carry
     // the flag as well, so the verifier's mask and the preview can tell it from a blind pocket
     // at the same depth.
-    const through = item.through === true;
+    const through = 'through' in item && item.through === true;
     engraves.push({
       id: item.id,
       // The ready-made operation name (#214/#215), carried on the one funnel so the region

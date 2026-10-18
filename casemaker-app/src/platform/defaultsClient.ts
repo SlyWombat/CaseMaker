@@ -20,6 +20,7 @@ import { GRIP_MIN } from '@/engine/cnc/fixture';
 import { DRILL_POINT_FALLBACK_DEG } from '@/engine/cnc/tool';
 import { REST_MACHINING_FALLBACK } from '@/engine/cnc/engrave/restSettings';
 import { FINISH_STOCK_TO_LEAVE_FALLBACK } from '@/engine/cnc/engrave/finishPass';
+import { TAB_SETTINGS_FALLBACK } from '@/engine/cnc/cam/tabSettings';
 import {
   houseRequest,
   setHouseRequestTimeoutMs,
@@ -365,6 +366,27 @@ export const KNOWN_DEFAULTS: Readonly<Record<string, KnownDefault>> = {
     unit: 'mm',
     rule: z.number().min(0).max(1),
     fallback: FINISH_STOCK_TO_LEAVE_FALLBACK,
+  },
+  // #218 — holding tabs. Three numbers, all PROVISIONAL and chosen: how many tabs hold a cut-out,
+  // how wide the kept material is, and how much material the tab leaves. The job stores its own
+  // spec, so these are what a NEW cut-out is created with (`tabSettings.ts`).
+  'tabs.count': {
+    label: 'holding tabs per cut-out (chosen)',
+    unit: 'tabs',
+    rule: z.number().int().min(0).max(64),
+    fallback: TAB_SETTINGS_FALLBACK.count,
+  },
+  'tabs.widthMm': {
+    label: 'holding tab width (chosen)',
+    unit: 'mm',
+    rule: z.number().min(0.1).max(50),
+    fallback: TAB_SETTINGS_FALLBACK.widthMm,
+  },
+  'tabs.heightMm': {
+    label: 'holding tab height left below the tab top (chosen)',
+    unit: 'mm',
+    rule: z.number().min(0.1).max(20),
+    fallback: TAB_SETTINGS_FALLBACK.heightMm,
   },
   // #417 — how deep a cut may go into the wasteboard before it is warned about.
   'wasteboard.depthLimitMm': {

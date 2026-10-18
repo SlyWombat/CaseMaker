@@ -538,9 +538,10 @@ describe('sacrificialDepthLimit (#213 §3): the depth table', () => {
   });
 
   it('a through-cut makes the part limit thickness + breakthrough, but only with a board', () => {
-    const withBoard = sacrificialDepthLimit(STOCK, presetPartOnBoard(), { ...OPTS, through: true });
+    const through = (): number => STOCK.thickness + OPTS.breakthrough;
+    const withBoard = sacrificialDepthLimit(STOCK, presetPartOnBoard(), { ...OPTS, through });
     expect(withBoard(10, 5)).toBe(5.3);
-    const noBoard = sacrificialDepthLimit(STOCK, noneSacrificial(), { ...OPTS, through: true });
+    const noBoard = sacrificialDepthLimit(STOCK, noneSacrificial(), { ...OPTS, through });
     expect(noBoard(10, 5)).toBe(4);
   });
 

@@ -18,8 +18,8 @@
  */
 
 import type { ThroughMask } from '../verify';
-import type { Polygons } from './pocket';
-import type { ProfileSpan } from './profile';
+import type { Polygons } from '../cam/pocket';
+import type { ProfileSpan } from '../cam/profile';
 
 /** A cut-out's kerf, as the CAM laid it: the centre path, its tab spans and the cutter radius. */
 export interface MaskCutout {

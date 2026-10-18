@@ -99,7 +99,6 @@ import {
   tabRectangles,
   type ProfileCut,
   type ProfileSpan,
-  type ProfileTabReport,
 } from '@/engine/cnc/cam/profile';
 import { buildThroughMask, type MaskCutout } from '@/engine/cnc/engrave/throughMask';
 import type { Polygons } from '@/engine/cnc/cam/pocket';

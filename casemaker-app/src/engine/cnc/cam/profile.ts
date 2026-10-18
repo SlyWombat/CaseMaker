@@ -259,7 +259,7 @@ export function placeTabs(
     // Centre the span on the edge, so neither end can land on a corner.
     const start = best.start + (best.length - spanLength) / 2;
     const end = start + spanLength;
-    if (chosen.some((s) => rangesOverlap(start, end, s.start, s.end, perimeter))) {
+    if (chosen.some((s) => rangesOverlap(start, end, s.start, s.end))) {
       unplaceable++;
       continue;
     }
@@ -278,7 +278,7 @@ export function placeTabs(
 }
 
 /** Do two circular arc ranges overlap (edges exclusive)? */
-function rangesOverlap(a0: number, a1: number, b0: number, b1: number, perimeter: number): boolean {
+function rangesOverlap(a0: number, a1: number, b0: number, b1: number): boolean {
   const inside = (s: number, lo: number, hi: number): boolean => {
     if (hi < lo) return s >= lo || s <= hi;
     return s > lo && s < hi;

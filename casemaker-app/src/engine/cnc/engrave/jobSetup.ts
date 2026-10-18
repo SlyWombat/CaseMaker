@@ -527,8 +527,9 @@ export function validateJob(
 
   for (const item of enabled) {
     // A through region has no typed depth (#218): its floor is the board, and the through gate
-    // below judges it. `item.depth` on a through item is deliberately ignored.
-    if (item.through === true) continue;
+    // below judges it. `item.depth` on a through item is deliberately ignored. Only a shape can
+    // carry `through`; a label has no such field.
+    if ('through' in item && item.through === true) continue;
     if (item.depth > floorAllowed) {
       const remaining = thickness - facingDepth - item.depth;
       findings.push({
@@ -664,7 +665,7 @@ export function validateJob(
   // Through shape pockets (#218). Their depth is the board, so the ordinary floor check above
   // skipped them; these are the two facts that can refuse one.
   for (const item of enabled) {
-    if (item.through !== true) continue;
+    if (!('through' in item) || item.through !== true) continue;
     const who = itemLabel(item);
     if (!throughReady) {
       findings.push(throughBoardFinding(item.id, who, job));
@@ -753,6 +754,7 @@ export function validateJob(
       if (!throughReady) {
         findings.push(throughBoardFinding(drill.id, who, job));
       } else if (
+        drillTool !== null &&
         drillTool.fluteLength !== null &&
         drillTool.fluteLength > 0 &&
         throughDepth > drillTool.fluteLength
