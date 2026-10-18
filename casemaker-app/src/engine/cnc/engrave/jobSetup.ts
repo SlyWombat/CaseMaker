@@ -164,6 +164,14 @@ export type JobFindingCode =
   // The reference object is never cut (#435): it is what the pockets are FOR. `stock − target` is
   // the profile cut-out work tracked in #218, so this is a warning, not an error.
   | 'target-object-not-cut'
+  // A GOAL object (#533): the embedded mesh IS the shape to make, so it is not warned as uncut.
+  // `goal-object-oversize` is the sane-size check — the goal's footprint or depth exceeds the
+  // blank it would be carved from, so no toolpath could reproduce it from this stock (an error).
+  // `goal-object-no-toolpath` is an INFO note that the goal is a recognised input but 3D toolpath
+  // generation (slice D, #534) is not built yet, so this job posts no cut for it — the goal's
+  // counterpart to the reference's `target-object-not-cut`, answering "why is my goal not cut?".
+  | 'goal-object-oversize'
+  | 'goal-object-no-toolpath'
   // Facing (#432). The job's facing depth is taken off the same blank every item is measured
   // against, so the check is one number against the stock's minimum floor — not a per-item one.
   // An item over-deep once the skim is counted is still `depth-exceeds-stock`, whose own check
@@ -626,17 +634,59 @@ export function validateJob(
     }
   }
 
-  // The target object (#435) is a REFERENCE. Saying so once, as a warning, keeps "why is my
-  // imported part not being cut?" from being answered by silence; it never blocks the other work.
+  // The embedded mesh (#435, #533) is judged by its ROLE. Absent means 'reference', so a document
+  // written before #533 keeps today's behaviour exactly.
   if (job.targetObject?.enabled === true) {
-    findings.push({
-      severity: 'warning',
-      code: 'target-object-not-cut',
-      message:
-        `The target object "${job.targetObject.name}" is a reference: it is shown in the viewport ` +
-        `but not cut. Cutting the stock around it is the profile cut-out work; ` +
-        `this job's other items are unaffected.`,
-    });
+    const target = job.targetObject;
+    if ((target.role ?? 'reference') === 'goal') {
+      // A GOAL (#533) IS the work, so it is never warned as uncut. It is validated instead: it must
+      // have volume, and it must fit the blank it would be carved from — a goal taller than the
+      // stock, or wider than its footprint, cannot be reproduced from this stock.
+      const { length, width } = job.stock;
+      const hasVolume = target.size.x > 0 && target.size.y > 0 && target.size.z > 0;
+      const fitsFootprint = target.size.x <= length && target.size.y <= width;
+      const fitsDepth = target.size.z <= thickness;
+      if (!hasVolume) {
+        findings.push({
+          severity: 'error',
+          code: 'goal-object-oversize',
+          message:
+            `The goal object "${target.name}" is flat in at least one direction ` +
+            `(${fmt3(target.size.x)}×${fmt3(target.size.y)}×${fmt3(target.size.z)} mm); a goal needs ` +
+            `volume to drive a 3D cut toward.`,
+        });
+      } else if (!fitsFootprint || !fitsDepth) {
+        findings.push({
+          severity: 'error',
+          code: 'goal-object-oversize',
+          message:
+            `The goal object "${target.name}" is ` +
+            `${fmt3(target.size.x)}×${fmt3(target.size.y)}×${fmt3(target.size.z)} mm, larger than the ` +
+            `${fmt3(length)}×${fmt3(width)}×${fmt3(thickness)} mm blank it would be carved from; ` +
+            `it cannot be reproduced from this stock. Use a larger blank or scale the goal.`,
+        });
+      } else {
+        // A sane goal, recognised but not yet machinable: 3D toolpath generation is slice D (#534).
+        findings.push({
+          severity: 'info',
+          code: 'goal-object-no-toolpath',
+          message:
+            `The goal object "${target.name}" is the shape to make. It fits the blank, but 3D ` +
+            `toolpath generation is not built yet, so this job posts no cut for it.`,
+        });
+      }
+    } else {
+      // A REFERENCE (#435). Saying so once, as a warning, keeps "why is my imported part not being
+      // cut?" from being answered by silence; it never blocks the other work.
+      findings.push({
+        severity: 'warning',
+        code: 'target-object-not-cut',
+        message:
+          `The target object "${target.name}" is a reference: it is shown in the viewport ` +
+          `but not cut. Cutting the stock around it is the profile cut-out work; ` +
+          `this job's other items are unaffected.`,
+      });
+    }
   }
 
   // Plunge drills (#220): depth, reach, stock containment, a centre-cutting tool and the

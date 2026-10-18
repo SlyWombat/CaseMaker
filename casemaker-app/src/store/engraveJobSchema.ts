@@ -656,9 +656,18 @@ const targetObjectSchema = z
       .finite()
       .describe('Rotation in degrees counter-clockwise about Z through the mesh centre.'),
     enabled: z.boolean().describe('False keeps the object in the document but out of the program.'),
+    // #533 — the role decides whether the mesh is positioned against (reference) or made (goal).
+    // Left OPTIONAL rather than defaulted: an absent key stays absent, so a document written before
+    // this slice round-trips byte-for-byte and the read site (`target.role ?? 'reference'`) treats
+    // absent as 'reference'. The key MUST live here as well as in `types/engraveJob.ts`, or the
+    // strict schema strips it.
+    role: z
+      .enum(['reference', 'goal'])
+      .optional()
+      .describe("What the mesh is to the job: 'reference' (positioned against, not cut; the default when absent) or 'goal' (the shape to make)."),
   })
   .strict()
-  .describe('A reference mesh (STL/3MF) that the cutting volumes are positioned against.');
+  .describe('An embedded mesh (STL/3MF): a reference the cutting volumes are positioned against, or a goal shape to make.');
 
 
 const keepOutSchema = z

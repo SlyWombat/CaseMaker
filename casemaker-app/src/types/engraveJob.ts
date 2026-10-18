@@ -420,12 +420,19 @@ export type EngravePrimitive =
   | EngraveSpherePrimitive;
 
 /**
- * The part the cut-aways are positioned against (#435): an STL/3MF imported as a REFERENCE
- * object, embedded in the document so a job renders without the external file.
+ * An STL/3MF embedded in the document (#435, #533) so a job renders without the external file.
  *
- * It is NOT cut. Cutting the stock around it (`stock − target`, with tabs) is the profile
- * cut-out work tracked in #218; this field exists so the operator can see what the pockets are
- * for, and `validateJob` says so once with the warning `target-object-not-cut`.
+ * Its `role` decides what it IS to the job:
+ *
+ * - `'reference'` (the default, and today's only behaviour): the part the cut-aways are
+ *   positioned against. It is NOT cut. Cutting the stock around it (`stock − target`, with tabs)
+ *   is the profile cut-out work tracked in #218; a reference exists so the operator can see what
+ *   the pockets are for, and `validateJob` says so once with the warning `target-object-not-cut`.
+ * - `'goal'` (#533, slice C): the mesh is the shape to MAKE — the target surface the roughing and
+ *   finishing passes drive toward (a heightfield over the stock top). A goal IS the work, so it is
+ *   NOT warned about as uncut; `validateJob` validates it as a goal instead. Generating the 3D
+ *   toolpath for a goal is slice D (#534) and is not done here, so a goal gets an info finding
+ *   until that lands.
  *
  * `position` places the mesh's bbox centre in X/Y and its TOP at `position.z` in the work frame
  * (z = 0 is the stock's top face), so leaving every field at 0 seats the object top-flush and
@@ -446,9 +453,17 @@ export interface EngraveTargetObject {
   position: { x: Mm; y: Mm; z: Mm };
   /** Degrees counter-clockwise about Z, through the mesh's bbox centre. */
   rotation: number;
-  /** False hides the reference object in the viewport; it is never cut either way. */
+  /** False hides the object in the viewport; a reference is never cut either way. */
   enabled: boolean;
+  /**
+   * What the mesh IS to the job (#533). Absent means `'reference'` — the only role before this
+   * slice — so old documents keep today's behaviour. `'goal'` marks the mesh as the shape to make.
+   */
+  role?: EngraveTargetRole;
 }
+
+/** The role an embedded mesh plays (#533): a part to position against, or a shape to make. */
+export type EngraveTargetRole = 'reference' | 'goal';
 
 /**
  * Holding tabs for a cut-out (#218): bridges of material left UNCUT across the kerf so the part
