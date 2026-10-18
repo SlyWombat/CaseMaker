@@ -1567,11 +1567,22 @@ body, html, #root {
 }
 .wb-grid--templates { grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); }
 .wb-card--tpl { min-height: 116px; }
+/* #504 — descriptions are deliberately cut at four lines so template cards
+   keep a consistent height. The wrapper carries `flex: 1` (it pushes the
+   print line to the bottom); the clamped element must NOT itself be the
+   stretched flex item: given free space, flex-grow makes a line-clamped box
+   taller than four lines and a fifth line leaks out. As an ordinary block
+   child inside the wrapper it stays exactly four lines, and Chromium draws
+   the native ellipsis. The full text stays in the DOM and is exposed by the
+   card's title + aria-describedby. */
+.wb-card__desc-wrap {
+  flex: 1;
+  min-width: 0;
+}
 .wb-card__desc {
   font-size: var(--cm-text-mono-size);
   color: var(--cm-color-on-surface-variant);
   line-height: 1.4;
-  flex: 1;
   display: -webkit-box;
   -webkit-line-clamp: 4;
   -webkit-box-orient: vertical;

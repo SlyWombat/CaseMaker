@@ -8,6 +8,7 @@ import {
   listTemplates,
   findTemplateAcrossSources,
   findTemplateByBoardAcrossSources,
+  type RegisteredTemplate,
 } from '@/library/templateRegistry';
 import { scheduleImmediate } from '@/engine/jobs/JobScheduler';
 import { BoardPreviewSvg } from './BoardPreviewSvg';
@@ -65,6 +66,57 @@ function connectorInventory(board: BoardProfile): Array<{ label: string; count: 
   return Array.from(counts.entries())
     .sort((a, b) => b[1] - a[1])
     .map(([kind, count]) => ({ label: KIND_LABELS[kind] ?? kind, count }));
+}
+
+/**
+ * One welcome-screen template card (#504). Both strips — board-less project
+ * types and the board-bound Quick Start list — show the same card, so the
+ * four-line description cut and its disclosure path live here once.
+ *
+ * The description is wrapped because the card is a flex column with a
+ * min-height: if the clamped description is itself the flex item it also
+ * carries `flex: 1`, flex-grow stretches it past four lines, and a fifth line
+ * leaks out (which is exactly what the desktop cards did before #504). The
+ * wrapper takes the growth; the inner element is an ordinary block child that
+ * stays exactly four lines tall, which is what `-webkit-line-clamp` needs to
+ * draw its native ellipsis.
+ *
+ * Clamping is deliberate (consistent card heights), so the full text must
+ * still be reachable: `title` gives pointer users a hover tooltip and
+ * `aria-describedby` hands the full, unclipped description to assistive tech
+ * — the visual ellipsis is the cue that there is more, not the only copy.
+ */
+function TemplateCard({
+  t,
+  onApply,
+}: {
+  t: RegisteredTemplate;
+  onApply: (id: string) => void;
+}) {
+  const descId = `welcome-template-desc-${t.id}`;
+  return (
+    <li>
+      <button
+        className="wb-card wb-card--tpl"
+        onClick={() => onApply(t.id)}
+        data-testid={`welcome-template-${t.id}`}
+        aria-label={`Load ${t.name} template`}
+        aria-describedby={descId}
+        title={t.description}
+      >
+        <div className="wb-card__name">{t.name}</div>
+        <div className="wb-card__desc-wrap">
+          <div className="wb-card__desc" id={descId}>
+            {t.description}
+          </div>
+        </div>
+        <div className="wb-card__print">
+          ~{t.estPrintMinutes} min print
+          {t.sourceLabel ? ` · ⛁ ${t.sourceLabel}` : ''}
+        </div>
+      </button>
+    </li>
+  );
 }
 
 export function WelcomeOverlay() {
@@ -355,23 +407,13 @@ export function WelcomeOverlay() {
                 <h2>No board? Start from a project type</h2>
                 <ul className="wb-grid wb-grid--templates">
                   {projectTypeTemplates.map((t) => (
-                    <li key={t.id}>
-                      <button
-                        className="wb-card wb-card--tpl"
-                        onClick={() => {
-                          void applyTemplate(t.id);
-                        }}
-                        data-testid={`welcome-template-${t.id}`}
-                        aria-label={`Load ${t.name} template`}
-                      >
-                        <div className="wb-card__name">{t.name}</div>
-                        <div className="wb-card__desc">{t.description}</div>
-                        <div className="wb-card__print">
-                          ~{t.estPrintMinutes} min print
-                          {t.sourceLabel ? ` · ⛁ ${t.sourceLabel}` : ''}
-                        </div>
-                      </button>
-                    </li>
+                    <TemplateCard
+                      key={t.id}
+                      t={t}
+                      onApply={(id) => {
+                        void applyTemplate(id);
+                      }}
+                    />
                   ))}
                 </ul>
               </section>
@@ -459,23 +501,13 @@ export function WelcomeOverlay() {
               <h2>Quick Start Templates</h2>
               <ul className="wb-grid wb-grid--templates">
                 {boardTemplates.map((t) => (
-                  <li key={t.id}>
-                    <button
-                      className="wb-card wb-card--tpl"
-                      onClick={() => {
-                        void applyTemplate(t.id);
-                      }}
-                      data-testid={`welcome-template-${t.id}`}
-                      aria-label={`Load ${t.name} template`}
-                    >
-                      <div className="wb-card__name">{t.name}</div>
-                      <div className="wb-card__desc">{t.description}</div>
-                      <div className="wb-card__print">
-                        ~{t.estPrintMinutes} min print
-                        {t.sourceLabel ? ` · ⛁ ${t.sourceLabel}` : ''}
-                      </div>
-                    </button>
-                  </li>
+                  <TemplateCard
+                    key={t.id}
+                    t={t}
+                    onApply={(id) => {
+                      void applyTemplate(id);
+                    }}
+                  />
                 ))}
               </ul>
             </section>
