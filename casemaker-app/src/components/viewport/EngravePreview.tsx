@@ -32,11 +32,9 @@ import { useEngravePreviewStore } from '@/store/engravePreviewStore';
 import { useEngraveJobStore } from '@/store/engraveJobStore';
 import { useViewportStore, isEngraveItemSelected } from '@/store/viewportStore';
 import type { NodeMeshOutput } from '@/workers/geometry/meshOutput';
-import type { ViseParams } from '@/types/engraveJob';
 import type { EngravePreviewLost, EngravePreviewOutline } from '@/workers/sim/engravePreview';
 import type { EngravePreviewRegistrationBand } from '@/workers/sim/engraveRegistration';
 import { mm } from '@/engine/cnc/engrave/depthBounds';
-import { VISE_BAR_HEIGHT } from '@/engine/cnc/fixture';
 import { geometryFromMesh, SACRIFICIAL_COLOR, segmentGeometry } from './simGeometry';
 import { floorColor, LOST_COLOR, REGISTRATION_COLOR, VOID_COLOR } from './engraveRamp';
 import { hatchSegments } from './engraveHatch';
@@ -58,17 +56,6 @@ const AXIS_FRACTION = 0.2;
  * colour still shows through while the selected item reads as lit.
  */
 const SELECTED_FLOOR_GLOW = '#9adcff';
-
-/**
- * Where the vise numbers came from, in words (decision 28: a default is not a measurement). The
- * shipped jaws are calipered (#208, 2026-10-15), so 'default' means "shipped, measured on the
- * reference unit" — not the unmeasured defaults these words used to name.
- */
-function sourceWords(source: ViseParams['source']): string {
-  if (source === 'default') return 'shipped defaults (reference unit)';
-  if (source === 'saved') return 'saved vise';
-  return 'measured for this setup';
-}
 
 /**
  * A geometry built from a worker mesh, disposed when the mesh is replaced or on unmount. A
@@ -515,7 +502,6 @@ export function EngravePreview() {
   // every rebuild) means the finished preview, which is what this component drew before the slider.
   const scrubStage = useEngravePreviewStore((s) => s.scrubStage);
   const stock = useEngraveJobStore((s) => s.job.stock);
-  const vise = useEngraveJobStore((s) => s.job.workholding.vise);
   const minFloor = useEngraveJobStore((s) => s.job.minFloor);
 
   // Hooks run before the early return; the geometry is null until the first preview lands, and it
@@ -529,7 +515,6 @@ export function EngravePreview() {
   if (!preview || !scrub || !stockGeom) return null;
 
   const axisLen = Math.max(8, Math.min(Math.min(stock.length, stock.width) * AXIS_FRACTION, 25));
-  const fixedJaw = preview.fixture[0];
   // A floor belongs to a cut that has happened. Drawing a deep floor over a stock state that has
   // not cut there yet would show a surface inside solid material; at the as-cut end this is every
   // floor, exactly as before the slider.
@@ -604,28 +589,6 @@ export function EngravePreview() {
           Y
         </ProjectedLabel>
       </group>
-
-      {fixedJaw && (
-        <ProjectedLabel
-          position={centreOf(fixedJaw.mesh.bbox)}
-          testId="engrave-jaw-source"
-          style={{
-            fontSize: 10,
-            color: '#c8d3de',
-            background: 'rgba(20,25,30,0.7)',
-            borderRadius: 3,
-            padding: '1px 4px',
-            whiteSpace: 'nowrap',
-          }}
-        >
-          {/* Two lines on purpose (#508/#359): one line carrying both facts is 349 px wide and the
-              laptop canvas is 344, so `clampLabelBox`'s too-wide case would centre it and clip both
-              edges. The source and the PROVISIONAL note each fit the narrow canvas alone. */}
-          vise: {sourceWords(vise.source)}
-          <br />
-          bar height {VISE_BAR_HEIGHT} mm PROVISIONAL
-        </ProjectedLabel>
-      )}
 
     </group>
   );

@@ -25,6 +25,7 @@ import {
   DEFAULT_VISE,
   GRIP_MIN,
   LEDGE_STEP,
+  LEDGE_WIDTH,
   VISE_BAR_HEIGHT,
   VISE_BODY_DEPTH,
   VISE_FLOOR_DEPTH,
@@ -99,29 +100,53 @@ describe('viseEnvelope (#203)', () => {
 // to draw the envelope's boxes, so a thick blank made the jaws grow with it; these tests pin the
 // split: drawn geometry depends on the jaw layout and the PROVISIONAL bar height, never on the
 // stock's thickness, while the envelope keeps its collision behaviour untouched.
-describe('viseBody — the drawn vise (#508)', () => {
-  it('draws two jaw bars and the body, sized from the fixture constants', () => {
-    const body = viseBody(STOCK, DEFAULT_VISE);
-    expect(body.boxes.map((b) => b.id)).toEqual(['vise-fixed-jaw', 'vise-moving-jaw', 'vise-body']);
+describe('viseBody — the drawn vise (#508, #520)', () => {
+  const find = (boxes: ObstacleBox[], id: string): ObstacleBox => boxes.find((b) => b.id === id)!;
 
-    const [fixed, moving, under] = body.boxes as [ObstacleBox, ObstacleBox, ObstacleBox];
+  it('draws the stepped jaws, the rails, the screws and a provisional bed', () => {
+    const body = viseBody(STOCK, DEFAULT_VISE);
+    const ids = body.boxes.map((b) => b.id);
+    // The two jaw bars stay first, so the preview's fixture[0]/fixture[1] contract holds.
+    expect(ids[0]).toBe('vise-fixed-jaw');
+    expect(ids[1]).toBe('vise-moving-jaw');
+    expect(ids).toContain('vise-fixed-ledge');
+    expect(ids).toContain('vise-moving-ledge');
+    expect(ids).toContain('vise-fixed-rail');
+    expect(ids).toContain('vise-moving-rail');
+    // "screw 2" — the numbered clamp station the operator counts on the moving rail.
+    expect(ids).toContain('vise-moving-clamp-2');
+    expect(ids).toContain('vise-bed');
+    expect(ids).toContain('vise-bed-rail-left');
+    expect(ids).toContain('vise-bed-rail-right');
+    // The solid body that used to fill the slot is gone: below the ledges the opening is OPEN, so
+    // a probe that lands on a miss reads air, not the vise.
+    expect(ids).not.toContain('vise-body');
+  });
+
+  it('sizes the jaw land and the ledge from the calipered constants (#208)', () => {
+    const body = viseBody(STOCK, DEFAULT_VISE);
+    const fixed = find(body.boxes, 'vise-fixed-jaw');
+    const ledge = find(body.boxes, 'vise-fixed-ledge');
+
+    // The 10 mm land sits at the fixed jaw, its face on x = 0, its top on the seat, the
+    // PROVISIONAL bar height below it.
     expect(fixed.max[0]).toBe(0);
-    expect(moving.min[0]).toBe(STOCK.length);
-    // Jaw tops on the seat the job states, bars of the PROVISIONAL height below them.
+    expect(fixed.max[0] - fixed.min[0]).toBe(DEFAULT_VISE.fixedJawThickness);
     expect(fixed.max[2]).toBe(-DEFAULT_VISE.stockProud);
-    expect(moving.max[2]).toBe(-DEFAULT_VISE.stockProud);
     expect(fixed.max[2] - fixed.min[2]).toBe(VISE_BAR_HEIGHT);
-    expect(moving.max[2] - moving.min[2]).toBe(VISE_BAR_HEIGHT);
-    // The body hangs directly beneath the bars and spans the opening between the jaw faces.
-    expect(under.max[2]).toBe(fixed.min[2]);
-    expect(under.min[2]).toBe(fixed.min[2] - VISE_BODY_DEPTH);
-    expect(under.min[0]).toBe(0);
-    expect(under.max[0]).toBe(STOCK.length);
-    // In Y all three span the measured jaw run.
-    for (const b of body.boxes) {
-      expect(b.min[1]).toBe(DEFAULT_VISE.jawStartY);
-      expect(b.max[1]).toBe(DEFAULT_VISE.jawStartY + DEFAULT_VISE.jawLength);
-    }
+
+    // The ledge is 1.9 mm deep, facing inward from the jaw face, its top 3.1 mm below the jaw top.
+    expect(ledge.min[0]).toBe(0);
+    expect(ledge.max[0] - ledge.min[0]).toBe(LEDGE_WIDTH);
+    expect(ledge.max[2]).toBe(fixed.max[2] - LEDGE_STEP);
+  });
+
+  it('keeps the slot between the jaws open at the rail depth', () => {
+    const body = viseBody(STOCK, DEFAULT_VISE);
+    // The fixed rail ends at the fixed jaw's face, the moving rail starts at the moving jaw's —
+    // nothing spans the opening where the blank sits and the probe lands.
+    expect(find(body.boxes, 'vise-fixed-rail').max[0]).toBe(0);
+    expect(find(body.boxes, 'vise-moving-rail').min[0]).toBe(STOCK.length);
   });
 
   it('draws the same jaw height for a 3.8 mm blank, a 12 mm blank and a 50 mm cube', () => {
@@ -132,7 +157,9 @@ describe('viseBody — the drawn vise (#508)', () => {
     ];
     for (const blank of blanks) {
       const vise = viseForNewJob(undefined, blank);
-      const [fixed, moving] = viseBody(blank, vise).boxes as [ObstacleBox, ObstacleBox];
+      const boxes = viseBody(blank, vise).boxes;
+      const fixed = find(boxes, 'vise-fixed-jaw');
+      const moving = find(boxes, 'vise-moving-jaw');
       // Both bars are the same height to within arithmetic dust: `stockProud` can be a long decimal
       // (46.9 on the cube), and subtracting it from the fixed bar top leaves a 1e-15 residue.
       expect(fixed.max[2] - fixed.min[2], `${blank.thickness} mm fixed bar`).toBeCloseTo(VISE_BAR_HEIGHT, 9);
@@ -155,7 +182,7 @@ describe('viseBody — the drawn vise (#508)', () => {
     expect(thin.min[2]).toBe(-(3.8 + VISE_BODY_DEPTH));
     expect(thick.min[2]).toBe(-(50 + VISE_BODY_DEPTH));
     // What the preview draws no longer follows that growth.
-    expect(viseBody(STOCK, DEFAULT_VISE).boxes[0]!.min[2]).toBe(-DEFAULT_VISE.stockProud - VISE_BAR_HEIGHT);
+    expect(find(viseBody(STOCK, DEFAULT_VISE).boxes, 'vise-fixed-jaw').min[2]).toBe(-DEFAULT_VISE.stockProud - VISE_BAR_HEIGHT);
   });
 });
 

@@ -327,8 +327,38 @@ export function viseEnvelope(
 }
 
 /**
- * The vise as the preview DRAWS it (#508): two jaw bars and the body beneath them, sized from the
- * constants the bench has calipered and from nothing else.
+ * PROVISIONAL (#520): the vise rail's width across X, mm — how wide each base plate runs under its
+ * jaw. The jaw sits at the rail's INNER edge and the row of screws runs along the exposed outer
+ * half. Unmeasured; it joins #444's calipers list. Read from the 2026-10-18 photos.
+ */
+export const VISE_RAIL_WIDTH: Mm = 25;
+
+/** PROVISIONAL (#520): the clamp screws on the moving rail — numbered 1..n in the photos. */
+export const VISE_CLAMP_SCREWS = 3;
+
+/** PROVISIONAL (#520): the mounting screws along the fixed rail. */
+export const VISE_MOUNT_SCREWS = 4;
+
+/**
+ * PROVISIONAL (#520): a screw head's drawn size, mm — a small square stand-in for the socket
+ * heads in the photos. Unmeasured.
+ */
+export const VISE_SCREW_SIZE: Mm = 4;
+
+/** PROVISIONAL (#520): how far the bed plate runs past the rails, mm. No bed model yet (#509/#510). */
+export const VISE_BED_MARGIN: Mm = 25;
+
+/** PROVISIONAL (#520): the bed plate's thickness, mm, and the coarse hole-grid pitch, mm. */
+export const VISE_BED_THICKNESS: Mm = 10;
+export const VISE_BED_HOLE_PITCH: Mm = 20;
+
+/**
+ * The vise as the preview DRAWS it, as it actually looks (#520): two stepped soft jaws — a 10 mm
+ * land and a 1.9 mm ledge set 3.1 mm below the top (the #208 calipers) — two rails beneath them
+ * (the PROVISIONAL 20 mm rail height), the screws the operator counts ("screw 2" is the moving
+ * rail's second clamp), and a provisional bed plate with two rails and a coarse hole grid. The
+ * slot between the jaws stays OPEN below the ledges, so a probe that lands on a miss reads as
+ * landing in air, not on the vise.
  *
  * This is deliberately not `viseEnvelope`. The envelope is a conservative obstacle model — its
  * boxes run `VISE_BODY_DEPTH` below the stock's underside and its totals grow with stock
@@ -338,8 +368,9 @@ export function viseEnvelope(
  * So the drawn geometry reads no stock thickness at all: `stock` is `{ length }`, and that is a
  * type-level promise, not a convention. What it does read is the measured jaw layout — widths,
  * `jawStartY`/`jawLength`, the `stockProud` seat, the sacrificial shift — plus the PROVISIONAL
- * bar height. The bars sit below the jaw tops (`-stockProud`) and the body hangs beneath them,
- * spanning the opening. The envelope is unchanged and stays the thing the checks use.
+ * rail and bed figures. The bars sit below the jaw tops (`-stockProud`), the ledges below them,
+ * the rails beneath the bars, and the bed beneath the rails. The envelope is unchanged and stays
+ * the thing the checks use.
  */
 export function viseBody(
   stock: { length: Mm },
@@ -351,12 +382,18 @@ export function viseBody(
   const shift = viseJawShift(sacrificial);
   const jawTopZ = -vise.stockProud;
   const jawBottomZ = jawTopZ - VISE_BAR_HEIGHT;
-  const bodyBottomZ = jawBottomZ - VISE_BODY_DEPTH;
+  const railBottomZ = jawBottomZ - VISE_BODY_DEPTH;
   // The inner faces: the fixed jaw ends at the stock's left edge, the moving jaw starts at its
   // right edge, and the sacrificial shift moves each face by the strip/under-board it bears on.
   const fixedInnerX = 0 - shift.left;
   const movingInnerX = stock.length + shift.right;
-  const boxes: ObstacleBox[] = [
+
+  const boxes: ObstacleBox[] = [];
+
+  // The two stepped soft jaws. Each is a 10 mm land bar plus a 1.9 mm ledge facing inward, its
+  // top 3.1 mm below the jaw top. The ledge's top plane IS the blank's underside on the `ledge`
+  // seat (`defaultStockProud` puts `-stockProud - LEDGE_STEP` at `-thickness`).
+  boxes.push(
     {
       id: 'vise-fixed-jaw',
       label: 'Vise fixed jaw (left)',
@@ -370,12 +407,99 @@ export function viseBody(
       max: [movingInnerX + vise.movingJawThickness, jawMaxY, jawTopZ],
     },
     {
-      id: 'vise-body',
-      label: 'Vise body',
-      min: [fixedInnerX, jawMinY, bodyBottomZ],
-      max: [movingInnerX, jawMaxY, jawBottomZ],
+      id: 'vise-fixed-ledge',
+      label: 'Vise fixed-jaw ledge',
+      min: [fixedInnerX, jawMinY, jawTopZ - LEDGE_STEP - LEDGE_STEP],
+      max: [fixedInnerX + LEDGE_WIDTH, jawMaxY, jawTopZ - LEDGE_STEP],
     },
-  ];
+    {
+      id: 'vise-moving-ledge',
+      label: 'Vise moving-jaw ledge',
+      min: [movingInnerX - LEDGE_WIDTH, jawMinY, jawTopZ - LEDGE_STEP - LEDGE_STEP],
+      max: [movingInnerX, jawMaxY, jawTopZ - LEDGE_STEP],
+    },
+  );
+
+  // The two rails under the jaws, the PROVISIONAL 20 mm rail height, the full vise length. The
+  // slot between them — under the blank, between the jaw faces — stays OPEN.
+  boxes.push(
+    {
+      id: 'vise-fixed-rail',
+      label: 'Vise fixed rail',
+      min: [fixedInnerX - VISE_RAIL_WIDTH, jawMinY, railBottomZ],
+      max: [fixedInnerX, jawMaxY, jawBottomZ],
+    },
+    {
+      id: 'vise-moving-rail',
+      label: 'Vise moving rail',
+      min: [movingInnerX, jawMinY, railBottomZ],
+      max: [movingInnerX + VISE_RAIL_WIDTH, jawMaxY, jawBottomZ],
+    },
+  );
+
+  // The screws. Each is a small head sitting proud of its rail's top, on the exposed outer half
+  // (the jaw covers the inner half). The moving rail's clamps are the numbered stations.
+  const fixedScrewX = fixedInnerX - VISE_RAIL_WIDTH / 2;
+  const movingScrewX = movingInnerX + VISE_RAIL_WIDTH / 2;
+  const screwTop = jawBottomZ + VISE_SCREW_SIZE;
+  for (let i = 0; i < VISE_MOUNT_SCREWS; i++) {
+    const y = jawMinY + (vise.jawLength * (i + 1)) / (VISE_MOUNT_SCREWS + 1);
+    boxes.push({
+      id: `vise-fixed-screw-${i + 1}`,
+      label: `Vise fixed-rail screw ${i + 1}`,
+      min: [fixedScrewX - VISE_SCREW_SIZE / 2, y - VISE_SCREW_SIZE / 2, jawBottomZ],
+      max: [fixedScrewX + VISE_SCREW_SIZE / 2, y + VISE_SCREW_SIZE / 2, screwTop],
+    });
+  }
+  for (let i = 0; i < VISE_CLAMP_SCREWS; i++) {
+    const y = jawMinY + (vise.jawLength * (i + 1)) / (VISE_CLAMP_SCREWS + 1);
+    boxes.push({
+      id: `vise-moving-clamp-${i + 1}`,
+      label: `Vise clamp screw ${i + 1}`,
+      min: [movingScrewX - VISE_SCREW_SIZE / 2, y - VISE_SCREW_SIZE / 2, jawBottomZ],
+      max: [movingScrewX + VISE_SCREW_SIZE / 2, y + VISE_SCREW_SIZE / 2, screwTop],
+    });
+  }
+
+  // A provisional bed: a plate under the vise, two rails running its length, and a coarse hole
+  // grid, so a tall part and the head's chuck have something to judge clearance against. There is
+  // no bed model yet (#509/#510) — these figures are context, not a machine reading.
+  const bedMinX = fixedInnerX - VISE_RAIL_WIDTH - VISE_BED_MARGIN;
+  const bedMaxX = movingInnerX + VISE_RAIL_WIDTH + VISE_BED_MARGIN;
+  const bedMinY = jawMinY - VISE_BED_MARGIN;
+  const bedMaxY = jawMaxY + VISE_BED_MARGIN;
+  const bedRailBottom = railBottomZ - VISE_BED_THICKNESS - VISE_BED_THICKNESS;
+  boxes.push(
+    {
+      id: 'vise-bed',
+      label: 'Vise bed',
+      min: [bedMinX, bedMinY, railBottomZ - VISE_BED_THICKNESS],
+      max: [bedMaxX, bedMaxY, railBottomZ],
+    },
+    {
+      id: 'vise-bed-rail-left',
+      label: 'Bed rail (left)',
+      min: [bedMinX, bedMinY, bedRailBottom],
+      max: [bedMinX + VISE_BED_THICKNESS, bedMaxY, railBottomZ - VISE_BED_THICKNESS],
+    },
+    {
+      id: 'vise-bed-rail-right',
+      label: 'Bed rail (right)',
+      min: [bedMaxX - VISE_BED_THICKNESS, bedMinY, bedRailBottom],
+      max: [bedMaxX, bedMaxY, railBottomZ - VISE_BED_THICKNESS],
+    },
+  );
+  for (let y = bedMinY + VISE_BED_HOLE_PITCH / 2; y < bedMaxY; y += VISE_BED_HOLE_PITCH) {
+    for (let x = bedMinX + VISE_BED_HOLE_PITCH / 2; x < bedMaxX; x += VISE_BED_HOLE_PITCH) {
+      boxes.push({
+        id: `vise-bed-hole-${Math.round(x)}-${Math.round(y)}`,
+        label: 'Bed hole',
+        min: [x - 1.5, y - 1.5, railBottomZ],
+        max: [x + 1.5, y + 1.5, railBottomZ + 0.5],
+      });
+    }
+  }
+
   return { boxes, source: vise.source, uncertainty: vise.uncertainty, measuredAt: vise.measuredAt };
 }
 
