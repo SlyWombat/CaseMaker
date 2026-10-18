@@ -309,12 +309,20 @@ test('#368 — a badge that states its print reaches Engrave with a live colour 
   await page.getByTestId('engrave-stock-from-badge').click();
 
   // The legend turns from a plain depth key into the two colours plus the plane they part at.
+  //
+  // #497 — this is the preview-dependent step: `takeBadgeBlank` writes the stock, and the preview
+  // store rebuilds on a debounce; the legend is not rendered at all until that rebuild lands. Under
+  // full-suite load it can exceed Playwright's 5 s default (reproduced: the locator was still absent
+  // at 5 s), so wait for the actual post-preview state — the split row — with the 60 s budget this
+  // file gives its other worker-backed steps. The assertions below are unchanged.
   const legend = page.getByTestId('engrave-preview-legend');
+  // 3.0 mm of split under 0.2 mm layers: the boundary lands on the 0.8 mm line.
+  await expect(page.getByTestId('engrave-legend-split')).toHaveText('split 0.8 mm down', {
+    timeout: 60_000,
+  });
   await expect(legend).toContainText('Colour');
   await expect(page.getByTestId('engrave-legend-top')).toContainText('top colour');
   await expect(page.getByTestId('engrave-legend-bottom')).toContainText('bottom colour');
-  // 3.0 mm of split under 0.2 mm layers: the boundary lands on the 0.8 mm line.
-  await expect(page.getByTestId('engrave-legend-split')).toHaveText('split 0.8 mm down');
 
   // The seeded line is clear of both jaws (#369), so the blank's own colour split is what binds it
   // and the walk writes the reveal itself: 0.8 + 0.2 = 1.0, one printed layer PAST the boundary — so

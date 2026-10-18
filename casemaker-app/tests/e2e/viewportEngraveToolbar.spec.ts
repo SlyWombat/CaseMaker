@@ -23,6 +23,13 @@ import { test, expect } from './fixtures/caseMaker';
 
 test.use({ viewport: { width: 1440, height: 900 } });
 
+// #497 — the sacrificial route generates a real program in the worker. Under concurrent unit-test
+// load this test measured 29.7 s against Playwright's 30 s default, so the 180 s expectation inside
+// it could never actually be honoured. Give the file the same worker-backed budget `engrave.spec.ts`
+// uses.
+// This is a budget, not a wait: every assertion still has to reach its state.
+test.setTimeout(240_000);
+
 interface Rect {
   x: number;
   y: number;
@@ -257,12 +264,56 @@ const WIDTHS: { width: number; height: number }[] = [
   { width: 1024, height: 700 },
 ];
 
+/**
+ * #497 — wait for the toolbar edge the legends are anchored to, rather than for a number of
+ * milliseconds.
+ *
+ * `Viewport` publishes the toolbar's bottom edge into `--cm-viewport-toolbar-bottom` from a
+ * `ResizeObserver`, asynchronously after the width change that makes the toolbar re-wrap. A font
+ * swap moves the text metrics the same way. The old `waitForTimeout(600)` was a bet that both had
+ * finished; under full-suite load that bet loses, and the rect read describes the previous width's
+ * anchor. Poll the state instead: fonts settled, the published variable equal (within the whole-px
+ * rounding `Viewport` writes) to the toolbar's bottom edge inside the wrapper, and the legend
+ * already positioned by exactly that value plus its 8 px gutter. When this resolves, a synchronous
+ * rect read describes the layout the app has published.
+ */
+async function waitForToolbarMeasurement(page: Page, legendTestId: string): Promise<void> {
+  await page.evaluate(async () => {
+    await document.fonts.ready;
+  });
+  await expect
+    .poll(
+      () =>
+        page.evaluate((id: string) => {
+          const wrapper = document.querySelector('.viewport-wrapper') as HTMLElement | null;
+          const toolbar = document.querySelector('[data-testid="viewport-toolbar"]') as HTMLElement | null;
+          const legend = document.querySelector(`[data-testid="${id}"]`) as HTMLElement | null;
+          if (!wrapper || !toolbar || !legend) return false;
+          const wrapperTop = wrapper.getBoundingClientRect().top;
+          const toolbarBottom = toolbar.getBoundingClientRect().bottom - wrapperTop;
+          const legendTop = legend.getBoundingClientRect().top - wrapperTop;
+          const published = Number.parseFloat(
+            wrapper.style.getPropertyValue('--cm-viewport-toolbar-bottom'),
+          );
+          if (!Number.isFinite(published)) return false;
+          return (
+            Math.abs(published - toolbarBottom) <= 1 &&
+            Math.abs(legendTop - (published + 8)) <= 1
+          );
+        }, legendTestId),
+      {
+        message: `${legendTestId} should be positioned by the toolbar edge the app measured`,
+        timeout: 30_000,
+      },
+    )
+    .toBe(true);
+}
+
 /** Clear of the toolbar AND still inside the pane — the fix must not push the legend off an edge. */
 async function expectCleared(page: Page, legendTestId: string, label: string): Promise<void> {
   for (const size of WIDTHS) {
     await page.setViewportSize(size);
-    // The toolbar re-wraps and the observer publishes the new edge; give the layout one frame.
-    await page.waitForTimeout(600);
+    await waitForToolbarMeasurement(page, legendTestId);
     const m = await toolbarHits(page, legendTestId);
     console.log(
       '#361 %s %dx%d legend=%j toolbar=%j --cm-viewport-toolbar-bottom=%s hits=%j',
@@ -287,7 +338,7 @@ test('#361 — the depth legend clears the toolbar at both widths', async ({ cm,
   // The control: at the wrapped width, the PRE-#361 layout really does overlap what the assertion
   // above just proved clear. Without this, the check would pass on a toolbar that never wraps.
   await page.setViewportSize({ width: 1024, height: 700 });
-  await page.waitForTimeout(600);
+  await waitForToolbarMeasurement(page, 'engrave-preview-legend');
   const before = await toolbarHits(page, 'engrave-preview-legend', true);
   console.log('#361 engrave 1024x700 WITHOUT the measured variable: hits=%j', before.hits);
   expect(
