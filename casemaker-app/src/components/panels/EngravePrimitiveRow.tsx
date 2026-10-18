@@ -222,7 +222,10 @@ export function EngravePrimitiveRow({
               style={NUM}
               onChange={(e) => {
                 const v = Number(e.target.value);
-                if (!Number.isFinite(v) || v < 0 || v > primitive.diameter) return;
+                // Only the round forms have a base diameter to bound the tip against; the box
+                // never renders this input, so the `in` check narrows instead of assuming.
+                if (!Number.isFinite(v) || v < 0) return;
+                if ('diameter' in primitive && v > primitive.diameter) return;
                 onChange({ tipDiameter: v });
               }}
             />

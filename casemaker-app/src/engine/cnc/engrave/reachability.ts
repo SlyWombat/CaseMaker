@@ -111,8 +111,11 @@ export interface CutterReach {
 export interface Reachability {
   /** Every cutter the picker would offer, in the order it was handed over. */
   cutters: CutterReach[];
-  /** The item ids and names, in the job's own order — the table's columns. */
-  items: { id: string; name: string }[];
+  /**
+   * The item ids, names and depths, in the job's own order — the table's columns. `depth` is what
+   * a report reads to name the item a cutter could not enter (#435, rest machining's sentence).
+   */
+  items: { id: string; name: string; depth: number }[];
   /**
    * #211's answer, computed from the SAME rows. `key: null` when no cutter is eligible at all.
    * `compromise: true` means none keeps every item intact and the smallest was picked instead.
