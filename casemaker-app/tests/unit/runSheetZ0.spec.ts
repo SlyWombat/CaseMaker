@@ -29,6 +29,7 @@ import type { RestPassFacts } from '@/engine/cnc/engrave/restPass';
 import type { CutParams, FeedsResult } from '@/engine/cnc/feeds';
 import { REST_MACHINING_FALLBACK, restSeamFacts, thirdToolAdvice } from '@/engine/cnc/engrave/restSettings';
 import type { EngraveJob } from '@/types/engraveJob';
+import { renderRunSheetMarkdown } from '../../scripts/runSheetMarkdown';
 
 const NOW = new Date('2026-10-15T00:00:00Z');
 
@@ -510,6 +511,10 @@ describe('per-program Cut sections for the rest pair (#419)', () => {
     const all = text(s.sections.flatMap((x) => x.steps));
     expect(all.split('Set Z0 for the second program').length - 1).toBe(1);
     expect(all.split('Program 2, single-rest.nc').length - 1).toBe(1);
+    // The printed sheet carries the section, under its own heading.
+    const md = renderRunSheetMarkdown(s);
+    expect(md).toContain(`## ${s.sections.find((x) => x.id === 'cut-2')!.title}`);
+    expect(md).toContain('Program 2 is single-rest.nc');
     // The rest pair happens after program 1, before the warnings.
     const ids = s.sections.map((x) => x.id);
     expect(ids.indexOf('cut')).toBeLessThan(ids.indexOf('cut-2'));

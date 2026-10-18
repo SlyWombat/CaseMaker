@@ -1807,6 +1807,11 @@ describe('runSheet — every program gets its own Cut section (#419)', () => {
     expect(all.split('drill.peckDiameters').length - 1).toBe(1);
     // And §1 does not claim a drill point for a run that engraves first.
     expect(sectionText(sheet, 'need')).not.toContain('The drill’s point');
+
+    // The printed sheet carries the section too, under its own heading.
+    const md = renderRunSheetMarkdown(sheet);
+    expect(md).toContain(`## ${section(sheet, 'cut-2').title}`);
+    expect(md).toContain('Drill with 3 mm drill');
   });
 
   it('gives any later engraving program its own file, frame and CAM estimate', () => {
