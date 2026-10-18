@@ -29,7 +29,6 @@ import {
   presetPartOnBoard,
 } from '@/engine/cnc/sacrificial';
 import { dedupeFindings, validateJob, type JobFinding } from '@/engine/cnc/engrave/jobSetup';
-import { resolveTool } from '@/engine/cnc/toolRegistry';
 import type {
   EngraveJob,
   FieldSource,
@@ -94,14 +93,14 @@ export type WorkholdingChoice = 'vise' | 'rotary';
 /** The three sacrificial answers people actually build — plus "keep a custom setup". */
 export type SacrificialChoice = 'none' | 'board' | 'strips' | 'custom';
 
-/** The steps, in the order they are asked. */
-export type SetupStepId = 'holding' | 'material' | 'blank' | 'cutter';
+/** The steps, in the order they are asked. #516: the cutter is not one — the tool is the software's
+ *  recommendation once the work exists, not a question to ask before any of it is defined. */
+export type SetupStepId = 'holding' | 'material' | 'blank';
 
 export const SETUP_STEPS: readonly { id: SetupStepId; title: string }[] = [
   { id: 'holding', title: 'What is holding the part?' },
   { id: 'material', title: 'What is it made of?' },
   { id: 'blank', title: 'How big is the blank?' },
-  { id: 'cutter', title: 'Which cutter is fitted?' },
 ];
 
 /**
@@ -113,14 +112,12 @@ export interface SetupAnswers {
   sacrificial: Sacrificial;
   stock: { length: number; width: number; thickness: number; material: StockMaterial };
   vise: ViseParams;
-  toolKey: string;
   /**
    * The provenance of each answer. The vise's own `source` and the sacrificial's own `source`
-   * travel inside those objects; stock and the cutter have no other home, so they live here.
+   * travel inside those objects; stock has no other home, so it lives here.
    */
   sources: {
     stock: Record<'length' | 'width' | 'thickness' | 'material', FieldSource>;
-    tool: FieldSource;
   };
 }
 
@@ -140,7 +137,6 @@ export function defaultSetupAnswers(job: EngraveJob): SetupAnswers {
     sacrificial: job.sacrificial,
     stock: { ...job.stock },
     vise: { ...job.workholding.vise },
-    toolKey: job.toolKey,
     sources: {
       stock: {
         length: carried(job.sources?.stock?.length),
@@ -148,7 +144,6 @@ export function defaultSetupAnswers(job: EngraveJob): SetupAnswers {
         thickness: carried(job.sources?.stock?.thickness),
         material: carried(job.sources?.stock?.material),
       },
-      tool: carried(job.sources?.tool),
     },
   };
 }
@@ -180,34 +175,21 @@ export function sacrificialForChoice(choice: SacrificialChoice, current: Sacrifi
 }
 
 /**
- * The one write path (#254). Applies every answer to the job and stamps the stock and cutter
- * provenance. The vise and sacrificial carry their own `source`, so nothing this function writes
- * is untagged — the acceptance the guided setup promises.
- *
- * **The snapshot moves WITH the key (#318).** A job names its cutter twice — `toolKey` and the
- * materialised `tool` — and `toolForJob` prefers the snapshot, so this function writing `toolKey`
- * alone left the job cutting with the OLD cutter while the panel showed the new one: picking
- * `flat-1.0`, then answering the flow's cutter question with `flat-3.175x12-metal`, kept the 1 mm
- * flat under every consumer (preview, feeds, CAM, post, verifier, and `stepFindings`). Re-resolved
- * here rather than only in the store, because `stepFindings` builds its probe through this same
- * function and has to judge the cutter the flow is about to write.
- *
- * Re-pinned **only when the key changes**: an unchanged key keeps the job's own snapshot, so
- * opening this flow and finishing without touching the cutter cannot silently re-prove the job at
- * a cutter that has since been re-collared or re-measured (`toolRegistry`'s design point 1).
+ * The one write path (#254). Applies every answer to the job and stamps the stock provenance. The
+ * vise and sacrificial carry their own `source`, so nothing this function writes is untagged — the
+ * acceptance the guided setup promises. #516: the cutter is NOT an answer — the flow collects the
+ * work, and the tool is the software's recommendation once the work is defined, not a question asked
+ * before any of it exists.
  */
 export function applyAnswers(job: EngraveJob, a: SetupAnswers): EngraveJob {
   return {
     ...job,
     stock: { ...a.stock },
-    toolKey: a.toolKey,
-    tool: a.toolKey === job.toolKey ? job.tool : resolveTool(a.toolKey),
     workholding: { kind: 'vise', vise: { ...a.vise } },
     sacrificial: a.sacrificial,
     sources: {
       ...(job.sources ?? {}),
       stock: { ...a.sources.stock },
-      tool: a.sources.tool,
     },
   };
 }
@@ -231,7 +213,6 @@ const STEP_CODES: Record<SetupStepId, ReadonlySet<JobFinding['code']>> = {
     'vise-default',
     'depth-exceeds-stock',
   ]),
-  cutter: new Set(['tool-missing']),
 };
 
 /**
@@ -300,11 +281,6 @@ export function withStockAnswer(
     stock: { ...a.stock, [key]: value },
     sources: { ...a.sources, stock: { ...a.sources.stock, [key]: carried(a.sources.stock[key]) } },
   };
-}
-
-/** Set the cutter, tagging it (unless it was measured). */
-export function withToolAnswer(a: SetupAnswers, key: string): SetupAnswers {
-  return { ...a, toolKey: key, sources: { ...a.sources, tool: carried(a.sources.tool) } };
 }
 
 /** Set the workholding answer. Only `'vise'` is selectable today (rotary is CNC-5). */

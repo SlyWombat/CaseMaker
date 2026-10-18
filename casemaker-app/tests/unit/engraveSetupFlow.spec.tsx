@@ -27,9 +27,8 @@ import { Z1 } from '@/engine/cnc/machine';
 import { MATERIAL_LABELS } from '@/engine/cnc/materials';
 import { parseEngraveJob } from '@/store/engraveJobSchema';
 import { presetJawStrips } from '@/engine/cnc/sacrificial';
-import { jobTool, validateJob } from '@/engine/cnc/engrave/jobSetup';
+import { validateJob } from '@/engine/cnc/engrave/jobSetup';
 import { validateVise } from '@/engine/cnc/fixture';
-import { resolveTool } from '@/engine/cnc/toolRegistry';
 
 vi.mock('@/engine/exportTrigger', () => ({ saveText: vi.fn() }));
 
@@ -63,23 +62,21 @@ function toBlankStep(): void {
 describe('guided job setup — the pure answers (#254)', () => {
   it('every value applyAnswers writes carries a source, and measured is never demoted', () => {
     const job = defaultEngraveJob();
-    // Pretend thickness was a caliper reading and the cutter was typed.
-    job.sources = { stock: { thickness: 'measured' }, tool: 'user' };
+    // Pretend thickness was a caliper reading.
+    job.sources = { stock: { thickness: 'measured' } };
 
     const answers = defaultSetupAnswers(job);
     expect(answers.sources.stock.thickness).toBe('measured'); // carried, not demoted
     expect(answers.sources.stock.length).toBe('user'); // a shipped default, asserted now
-    expect(answers.sources.tool).toBe('user');
 
     const applied = applyAnswers(job, answers);
-    // No value the flow wrote is untagged: all four stock fields and the cutter have a source.
+    // No value the flow wrote is untagged: all four stock fields have a source.
     expect(applied.sources!.stock).toEqual({
       length: 'user',
       width: 'user',
       thickness: 'measured',
       material: 'user',
     });
-    expect(applied.sources!.tool).toBe('user');
     // The vise and sacrificial carry their own `source`, so they are tagged too.
     expect(applied.workholding.vise.source).toBeTruthy();
     expect(applied.sacrificial.source).toBeTruthy();
@@ -143,28 +140,6 @@ describe('guided job setup — the pure answers (#254)', () => {
     answers.sacrificial = presetJawStrips();
     expect(applyAnswers(job, answers).sacrificial).toEqual(presetJawStrips());
   });
-
-  it('moves the cutter SNAPSHOT with the key, so the job cuts with the cutter the panel shows (#318)', () => {
-    const start = defaultEngraveJob(); // names flat-1.0
-    const from = resolveTool(start.toolKey);
-    const to = resolveTool('flat-3.175x12-metal');
-    expect(from?.name, 'flat-1.0 should resolve').toBeTruthy();
-    expect(to?.name, 'flat-3.175x12-metal should resolve').toBeTruthy();
-    expect(to!.name).not.toBe(from!.name);
-
-    const job = { ...start, tool: from };
-    // The flow's cutter question answered with a different key than the job's snapshot.
-    const applied = applyAnswers(job, { ...defaultSetupAnswers(job), toolKey: 'flat-3.175x12-metal' });
-
-    expect(applied.toolKey).toBe('flat-3.175x12-metal');
-    // `toolForJob` prefers the snapshot, so a stale one is the cutter every consumer would cut
-    // with — preview, feeds, CAM, post, verifier, and the flow's own `stepFindings`.
-    expect(jobTool(applied)!.name).toBe(to!.name);
-
-    // An UNCHANGED key keeps the job's own snapshot: re-entering the flow and finishing without
-    // touching the cutter must not silently re-pin it (`toolRegistry`'s design point 1).
-    expect(applyAnswers(job, defaultSetupAnswers(job)).tool).toBe(from);
-  });
 });
 
 describe('the material list the job may be cut in (#347)', () => {
@@ -226,8 +201,7 @@ describe('guided job setup — the flow in the panel (#254)', () => {
     );
 
     // Finish: the job now carries the blank and the corrected vise, every value tagged.
-    fireEvent.click(screen.getByTestId('engrave-setup-next')); // cutter
-    fireEvent.click(screen.getByTestId('engrave-setup-next')); // finish
+    fireEvent.click(screen.getByTestId('engrave-setup-next')); // finish (blank is the last step)
     expect(screen.queryByTestId('engrave-setup-flow')).toBeNull();
 
     const job = useEngraveJobStore.getState().job;
@@ -236,7 +210,6 @@ describe('guided job setup — the flow in the panel (#254)', () => {
     expect(job.workholding.vise.source).toBe('saved');
     // Every value the flow wrote is tagged, and shows on the panel.
     expect(screen.getByTestId('engrave-stock-thickness-source').getAttribute('data-source')).toBe('user');
-    expect(screen.getByTestId('engrave-tool-source').getAttribute('data-source')).toBe('user');
     expect(screen.getByTestId('engrave-vise-badge').textContent).toMatch(/^saved/);
   });
 
@@ -261,25 +234,6 @@ describe('guided job setup — the flow in the panel (#254)', () => {
     expect(useEngraveJobStore.getState().job.sources!.stock!.length).toBe('user');
   });
 
-  it('draws the silhouette of the cutter being chosen (#489)', () => {
-    render(<EngravePanel />);
-    fireEvent.click(screen.getByTestId('engrave-setup-open'));
-    fireEvent.click(screen.getByTestId('engrave-setup-next')); // material
-    fireEvent.click(screen.getByTestId('engrave-setup-next')); // blank
-    fireEvent.click(screen.getByTestId('engrave-setup-next')); // cutter
-
-    const thumb = screen.getByTestId('engrave-setup-tool-thumb');
-    expect(thumb.querySelector('svg')).not.toBeNull();
-    // The thumbnail is a silhouette: no dimension lines to read in a 96 px drawing.
-    expect(thumb.querySelectorAll('[data-dimension]')).toHaveLength(0);
-
-    const select = screen.getByTestId('engrave-setup-tool') as HTMLSelectElement;
-    const other = [...select.options].find((o) => o.value !== select.value && !o.disabled);
-    expect(other).toBeDefined();
-    fireEvent.change(select, { target: { value: other!.value } });
-    expect(thumb.querySelector('svg')).not.toBeNull();
-  });
-
   it('lets the sacrificial and material answers through to the job', () => {
     render(<EngravePanel />);
     fireEvent.click(screen.getByTestId('engrave-setup-open'));
@@ -287,8 +241,7 @@ describe('guided job setup — the flow in the panel (#254)', () => {
     fireEvent.click(screen.getByTestId('engrave-setup-next')); // material
     fireEvent.change(screen.getByTestId('engrave-setup-material'), { target: { value: 'hardwood' } });
     fireEvent.click(screen.getByTestId('engrave-setup-next')); // blank
-    fireEvent.click(screen.getByTestId('engrave-setup-next')); // cutter
-    fireEvent.click(screen.getByTestId('engrave-setup-next')); // finish
+    fireEvent.click(screen.getByTestId('engrave-setup-next')); // finish (blank is the last step)
 
     const job = useEngraveJobStore.getState().job;
     expect(job.stock.material).toBe('hardwood');
