@@ -1240,15 +1240,45 @@ one of the app's screens did not finish drawing.
 |---|---|---|---|
 | `panel-render-error` | error | The Engrave panel or its setup flow threw while drawing. The message is the throw's own message and the panel's name; in a dev build the console prints the component stack. The rest of the window keeps working. | Press **Reload the panel**. If it throws again, report it with the console's component stack. |
 
-**Running a job without the app** (headless scripts — #483). The engine's command-line entry
-points (`scripts/engrave-job.ts` and the coupon/build scripts) run in Node. One capability needs
-the app's browser environment and is refused by name rather than throwing `document is not
-defined`. The browser-only export trigger is not a headless capability: the scripts write files
-directly, so it is excluded from the headless compile rather than stubbed.
+**Running a job without the app** (headless — #483). The command-line surface is `casemaker`
+(§8.6): `engrave`, `export`, `location`, `readback` and the `machine` subcommands all run in Node.
+One capability needs the app's browser environment and is refused by name rather than throwing
+`document is not defined`. The browser-only export trigger is not a headless capability: the
+commands write files directly, so it is excluded from the headless compile rather than stubbed.
 
 | Code | Severity | What it means in plain words | What to do |
 |---|---|---|---|
 | `headless-unsupported` | error | A headless run asked for `raster-import`: tracing a PNG, JPEG, WebP, GIF or BMP into a vector outline, which needs the browser's bitmap decoder and a canvas. The refusal names the route that asked, for example `headless-unsupported: raster-import (route: decodeImageFile)`. A `--from-3mf` design is **not** refused — the 3MF reader takes geometry only, never a texture. | Trace the image in the desktop app and import the resulting outline, or use an SVG/DXF outline or a `--from-3mf` design. |
+
+**Driving the machine from the command line** (machine commands — #477). These are the codes in a
+`machine` receipt's `refusals` list, not engine diagnostics: each names why the command stopped,
+and the terminal renders it as `  !! <reason>`. An `upload` receipt also carries the job's own
+findings, sweep and verifier diagnostics under their usual codes — the rows above already cover
+those. The commands and their confirmations are in §8.6.
+
+| Code | What it means in plain words | What to do |
+|---|---|---|
+| `machine-unreachable` | The command could not open the controller's command port (2222). Nothing was sent. | Check the machine is on and on the network, and that `--host` (or the location document's address) is right. |
+| `status-no-reply` | The controller answered nothing to a `?` poll. | Retry; if it stays silent, check the machine's network and its own screen. |
+| `version-unread` | `version` could not be read from `/sd/config.txt`. | Read it with `casemaker machine version` again, or check the card. |
+| `hash-unread` | The controller returned no digest for one or more card files. | Check the path names a file the card holds; retry. |
+| `machine-busy` | The machine is not Idle, or reports Idle while its `P:` field says a program is only partly through. Nothing was sent. | Wait for the job to end (percent 100 **and** Idle), then run again. |
+| `machine-alarm` | The controller is in an alarm (during the pre-flight check, or while a program ran). Nothing was sent in the first case. | Clear the alarm at the machine; a running program needs a person there. |
+| `machine-unreadable` | The status line came back but could not be read as one. Nothing was sent. | Check the reply with the console; retry when it reads as a status line. |
+| `upload-refused` | The controller declined the transfer. | Read its detail; a refused file is not retried automatically. |
+| `upload-timeout` | The transfer did not finish inside the upload's own window. | Check the machine and the network, then run again. |
+| `upload-error` | The transfer threw. | Read the message; nothing is claimed about what the card now holds. |
+| `machine-unavailable` | This build has no socket layer to reach the machine with. | Use the desktop build or a Node checkout; the web build cannot reach a machine. |
+| `upload-blocked` | The app's own Upload gate refuses this program. The reason is its sentence, and any clearance codes a person must tick are named. | Fix what the sentence names; for a clearance check, make it at the machine and pass `--acknowledge=<codes>`. |
+| `program-refused` | No program exists to upload: the job did not generate, verify, or simulate. | Fix the job; the reason names the stage that stopped it. |
+| `confirm-mismatch` | `--confirm` did not name what this run would send or play. The message prints both hashes. Nothing was sent. | Re-run `--dry` (upload) and copy the hash it prints. |
+| `card-unreadable` | `play` could not read the named file from the card, so it cannot hash what it would run. | Check the path on the card (`casemaker machine hashes <path>`). |
+| `play-refused` | The controller refused the `play` line. | Read its detail; a refused line is not retried automatically. |
+| `play-timeout` | `--timeout` passed before the program reported finished. The program may still be running. | Look at the machine; poll `casemaker machine status` before sending anything else. |
+| `home-timeout` / `probe-timeout` | `--timeout` passed before the machine reported Idle after `$H` / `M491`. | Look at the machine; a `$H` or probe that did not finish is not a completed one. |
+| `probe-no-reading` | `M491` answered without a `[PRB:…]` reading. | The probe may not have run; check the wired probe and retry at the machine. |
+| `probe-missed` | The probe travelled its whole distance and touched nothing (`:0`), at the X/Y/Z printed. | Check the probe and the surface before trusting any Z0 from it. |
+| `aborted` | Ctrl-C during `machine play`: `abort` was sent and the controller is draining its queue. The vacuum is whatever the program left it in. | Wait for Idle, then home before the next job. |
 
 ### 8.2 G-code the simulator understands
 
@@ -1365,3 +1395,158 @@ not have* — instead of passing the closest match off as the answer.
   `item-over-void` is raised as an ERROR instead (#218). An unmeasured void is not reserved at
   all — a job that declares none cuts as it always did.
 - **TLO** — tool length offset: the measured length of the fitted cutter, reset by `M491`.
+
+### 8.6 · Running the CNC side without the app
+
+> **Status: Available**.
+
+The desktop window is not the only way to use the CNC side. The `casemaker` command runs the
+same engines — the job checks, the verifier, the sweep, the post — in Node, and the
+**desktop build's machine link** as well: it can upload a program, play it, home and probe, each
+behind its own confirmation. It is what a bench laptop, a script or an agent uses.
+
+Run it from the `casemaker-app` directory:
+
+```text
+cd casemaker-app
+npm run casemaker -- --help
+npm run casemaker -- engrave ../docs/bench/single-barrel.job.json --out /tmp/run
+```
+
+`npm run casemaker -- <command>` is the everyday form, and the named aliases `npm run engrave`,
+`export:project`, `location`, `readback:feeds` and `readback:run` call the same command. The
+package's `bin` is `scripts/casemaker.mjs`, so a global install or `npx casemaker` reaches it too.
+
+**`--json` goes anywhere on the line.** Without it, a command prints a human result. With it,
+stdout carries exactly the run's receipt document and progress moves to stderr, so `| jq` sees
+nothing else. It takes no value: `--json=true` is refused before anything runs.
+
+#### The commands
+
+| Command | What it does |
+|---|---|
+| `engrave <job.json> [--out <dir>]` | Generates, verifies, simulates and writes one job: the `.nc`, its frame and its run sheet. `--out` defaults to the job's own directory. |
+| `engrave --coupon <spec.json> [--out <dir>]` | Sweeps a coupon spec into one program per value, with its preview and its fill-in record. |
+| `engrave --from-3mf <design.3mf>` | Cuts a 3MF design instead of a job. `--turn ccw\|cw`, `--tool <key>`, `--rest <key\|none>`, `--overlap <mm>`, `--third-tool <pct>`, `--location <file>` adjust it. The 3MF reader takes geometry only — a texture is not an outline. |
+| `export <project.json> [--out <dir>]` | Compiles a project and writes one print-ready binary STL, with its `-PRINT-NOTES.txt` sidecar. |
+| `location tools\|stock\|machines` | Reads the machine's own document — the app's `location.json`, or a `house.json` — and prints one section. `--location <file>` names the document. |
+| `readback feeds <record.json>` | Takes a filled coupon record and writes its measurements into the `feeds.ts` region. `--dry-run` prints and writes nothing. |
+| `readback run <record.json>` | Files a completed run in the `runHistory.ts` region. `--dry-run` prints and writes nothing. |
+| `machine status\|version\|hashes\|finished` | Reads the machine (§8.6, *The machine*). These four never move it. |
+| `machine upload\|play\|home\|probe` | Moves the machine, each only behind an explicit confirmation. |
+
+#### The receipt
+
+Every run ends with one receipt — the same shape whichever command produced it, and the only
+source of the human lines you see (`renderReceipt` is the one formatter). The document carries:
+
+- `ok`, `stage` and `gate` — whether the run passed, how far it got, and which of the four gates
+  (`generated`, `verified`, `simulated`, `prediction`) stopped it, or `null` when none did;
+- `inputs` and `outputs` — every file read and written, with its **sha256** and its size in bytes.
+  A path is recorded as the command named it, so a relative path stays relative;
+- `diagnostics` — every code the run raised, its severity, the engine's own sentence, which list
+  raised it (`findings`, `verify` or `simulation`), and the program it belongs to. Every code is
+  a row in §8.1 — that table, not the source list, is where you read what it means;
+- `provenance` — every number you act on, with where it came from: **seeded** (this build ships
+  it), **located** (read from the machine's own document), **typed** (given on the command line)
+  or **measured** (recorded at the bench);
+- `refusals` — every reason the run stopped, as a code and a sentence. The terminal shows each as
+  `  !! <reason>`;
+- `details` — what only that command can say: the files a program wrote, the programs a coupon
+  sweep produced, a location's tiers, or a machine command's answer.
+
+The schema is versioned in the document itself (`version`), and the build's own copy is
+`src/platform/headless/schemas/receipt.json`. A consumer that depends on the shape should check
+the version rather than assume it.
+
+**Exit codes.** `0` — success, or `--help`/`help`. `1` — the command ran and stopped: a job that
+did not pass its gates, or a machine command that refused; the receipt is still printed, and its
+`refusals` say why. `2` — a usage error: an unknown command, a bad flag, a word where a number
+belongs. Nothing ran, and nothing was written or sent. `130` — you pressed Ctrl-C during
+`machine play`; `abort` was sent and the receipt says so.
+
+#### The machine
+
+Four commands read the machine and can be run unattended:
+
+| Command | What it reads |
+|---|---|
+| `machine status [--host <ip>] [--port <n>]` | One `?` poll: the state word, the `P:<line>,<percent>,<seconds>` field, any alarm, and whether the job has finished (percent 100 **and** Idle). |
+| `machine version` | The `version` key of the controller's `/sd/config.txt`. |
+| `machine hashes <card-path> [...]` | The controller's own MD5 for files on its card, for example `/sd/gcodes/badge.nc`. |
+| `machine finished [--machine <id>]` | The finished-program list in your machine record: every FNV program hash it says finished cleanly. This one reads the document, not the network. |
+
+The read-only commands take their address from `--host <ip>`; without one they use the single
+addressed machine in the location document, and refuse if it names none or more than one.
+`finished` reads the machine record instead, so it takes `--location` and `--machine <id>`.
+
+**The physical commands, and their tokens.** A command that moves the machine names what will
+move before it does it:
+
+- `machine upload <job.json> --dry | --confirm <program hash>` generates the job exactly as the
+  app does — the job checks, the verifier, the sweep and the prediction, then the app's own
+  Upload gate — and prints the program's **FNV hash** (eight lowercase hex digits). `--dry` stops
+  there and sends nothing. `--confirm` must name that hash, or the command refuses with both
+  hashes printed. `--my-machine <file>` supplies the house depth margins; without it the run uses
+  the shipped defaults and the receipt says so. `--calibration <file>` supplies the saved machine
+  calibration; without it the shipped machine profile is used and noted. `--acknowledge=<codes>`
+  names clearance checks a person has made at the machine — the codes must be exactly the ones
+  the run asks for, never a blanket tick. `--dir <card dir>` defaults to `/sd/gcodes`.
+- `machine play <card-path> --confirm <program hash>` plays a file the **card already holds**.
+  The hash is computed from the bytes the controller returns to `cat`, so `--confirm` names what
+  will run, not what you believe was uploaded. It refuses unless the machine is Idle with no
+  alarm and its `P:` field is at 100. `--timeout <seconds>` bounds the wait; Ctrl-C sends
+  `abort`, exactly as the app's Stop does.
+- `machine home --confirm home` sends `$H`. Nothing else is accepted as the token: there is no
+  program to hash.
+- `machine probe --confirm probe` sends `M491`, the firmware's tool-length probe. It does **not**
+  home first. The bench rule is `$H` before every bit change, so the order is **home → fit the
+  wired probe → probe**, each as its own command. The receipt carries the last `[PRB:…]` the
+  controller answered, and refuses when the probe touched nothing.
+
+`--poll <ms>` is never faster than 2000 ms, whatever it is given. `home` and `probe` wait for the
+machine to report Idle after the line, because both macros run for tens of seconds at the bench.
+
+**What no command does.** Nothing here chains a generate into a play: `upload` writes to the card
+and stops, and `play` names a card path. Nothing switches power — the bench's smart plug is
+equipment outside Case Maker, driven by `tools/z1/power.sh`, and no CLI or MCP tool reads or
+switches it.
+
+#### The MCP server
+
+`scripts/mcp-server.ts` serves the same functions to an MCP client over stdio. It is read-only
+towards the machine on purpose: it offers no upload, play, probe or power tool at all. Its ten
+tools are:
+
+| Tool | What it does |
+|---|---|
+| `list_boards` | Every board profile this build can resolve, with its size and provenance. |
+| `list_templates` | Every project template, with the board it is the curated recipe for. |
+| `describe_board` | One board profile in full: size, mounting holes and components. |
+| `new_project` | Builds a project from a board or a template and writes the project document. A template's own board wins over `boardId`. |
+| `patch_case` | Changes case parameters through the app's own patch path, so dependent fields follow; a rejected patch changes nothing. |
+| `compile_project` | Compiles a project to its build plan: node ids and the placement report. |
+| `export_parts` | Lays the compiled parts out print-ready and writes one binary STL with its `-PRINT-NOTES.txt` sidecar. |
+| `generate_program` | Generates, verifies and simulates a job or a 3MF design and writes the `.nc`, frame and run sheet. Returns the engrave receipt. |
+| `run_sheet` | Builds a job like `generate_program` and returns its run sheet as Markdown, beside the receipt. |
+| `read_location` | Reads the machine's own document: its tools, stock shelf or machines. |
+
+Every tool returns the human rendering as its text content and `{ receipt, data }` as structured
+content; a refusal sets the error flag and its receipt says why.
+
+To give a Claude Code session the tools, register the server with an **absolute** script path and
+the scripts' TypeScript config. The server imports `@/…` modules, and `tsconfig.json` has no
+`paths` — only `tsconfig.scripts.json` does — so the environment variable is not optional:
+
+```text
+cd casemaker-app
+claude mcp add casemaker \
+  --env TSX_TSCONFIG_PATH=<abs>/casemaker-app/tsconfig.scripts.json \
+  -- node <abs>/casemaker-app/node_modules/tsx/dist/cli.mjs <abs>/casemaker-app/scripts/mcp-server.ts
+```
+
+`npm run mcp:server` starts the same server from the `casemaker-app` directory for a manual
+check. stdout is the JSON-RPC protocol, so the server writes nothing else there; a command's
+progress is returned inside its tool result, not printed.
+
+To take the server away again: `claude mcp remove casemaker`.
