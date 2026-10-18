@@ -49,6 +49,18 @@ describe('#441 — resolving a clicked preview object to its engrave item', () =
     expect(useViewportStore.getState().selection).toEqual({ kind: 'engrave-item', itemId: 'label-9' });
   });
 
+  it('reads a 3D primitive and the target object by their own tags (#435)', () => {
+    const primitive = new Object3D();
+    primitive.userData = { engravePrimitive: 'prm-4' };
+    expect(engraveItemIdFromPick(primitive)).toBe('prm-4');
+
+    const target = new Object3D();
+    target.userData = { engraveTarget: 'tgt-1' };
+    expect(engraveItemIdFromPick(target)).toBe('tgt-1');
+    expect(activateEngraveItem(target)).toBe(true);
+    expect(useViewportStore.getState().selection).toEqual({ kind: 'engrave-item', itemId: 'tgt-1' });
+  });
+
   it('walks up to the nearest tagged ancestor', () => {
     const floor = tagged('trace-2');
     const wrapper = new Object3D();

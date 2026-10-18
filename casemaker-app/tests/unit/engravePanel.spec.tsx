@@ -41,7 +41,7 @@ import { flatEndMill } from '@/engine/cnc/tool';
 import { vCone } from '@/engine/cnc/vProfile';
 import { vCarvePlane, vCarveStepover, vCarveStepoverClampNote } from '@/engine/cnc/vCarveGeometry';
 import { itemName, V_BIT_CARVE_SENTENCE, type ToolRecommendation } from '@/engine/cnc/engrave/recommendTool';
-import type { EngraveTraceItem } from '@/types/engraveJob';
+import type { EngraveJob, EngraveTargetObject, EngraveTraceItem } from '@/types/engraveJob';
 import type { EngravePreview } from '@/workers/sim/engravePreview';
 import type { EngraveGenerated, EngraveProgram } from '@/workers/sim/engraveGenerate';
 
@@ -2412,5 +2412,116 @@ describe('EngravePanel — the V-carve strategy (#221)', () => {
     const flatRow = screen.getByTestId('engrave-candidate-flat-1.0').textContent ?? '';
     expect(flatRow).toContain('1.0 mm flat end');
     expect(flatRow).toContain('40 % kept');
+  });
+});
+
+// #435 — the primitive rows, the Add menu entries and the optional target object.
+describe('EngravePanel — 3D primitives and the target object (#435)', () => {
+  function setJob(mutate: (job: EngraveJob) => EngraveJob): void {
+    act(() => {
+      useEngraveJobStore.setState({ job: mutate(defaultEngraveJob()) });
+    });
+  }
+
+  it('adds each primitive kind from the menu and counts it as an item', () => {
+    render(<EngravePanel />);
+    const before = Number(screen.getByTestId('engrave-item-count').textContent);
+    fireEvent.click(screen.getByTestId('engrave-add-primitive-box'));
+    fireEvent.click(screen.getByTestId('engrave-add-primitive-cylinder'));
+    fireEvent.click(screen.getByTestId('engrave-add-primitive-cone'));
+    fireEvent.click(screen.getByTestId('engrave-add-primitive-sphere'));
+
+    expect(screen.getByTestId('engrave-primitive-row-0')).toBeTruthy();
+    expect(screen.getByTestId('engrave-primitive-row-3')).toBeTruthy();
+    expect(Number(screen.getByTestId('engrave-item-count').textContent)).toBe(before + 4);
+    expect(useEngraveJobStore.getState().job.primitives?.map((p) => p.kind)).toEqual([
+      'box',
+      'cylinder',
+      'cone',
+      'sphere',
+    ]);
+  });
+
+  it('edits a box through its row and puts it in the plan as a region', () => {
+    render(<EngravePanel />);
+    fireEvent.click(screen.getByTestId('engrave-add-primitive-box'));
+    // The add opens the row (#411), so its editor is already showing.
+    fireEvent.change(screen.getByTestId('engrave-primitive-width-0'), { target: { value: '30' } });
+    fireEvent.change(screen.getByTestId('engrave-primitive-depth-0'), { target: { value: '1.5' } });
+
+    const primitive = useEngraveJobStore.getState().job.primitives?.[0];
+    expect(primitive?.kind).toBe('box');
+    if (primitive?.kind !== 'box') return;
+    expect(primitive.width).toBe(30);
+    expect(primitive.depth).toBe(1.5);
+    expect(screen.getByTestId('engrave-primitive-row-0').textContent).toContain('1.5 mm');
+  });
+
+  it('shows the by-name refusal on a cone row instead of approximating it', () => {
+    render(<EngravePanel />);
+    fireEvent.click(screen.getByTestId('engrave-add-primitive-cone'));
+    expect(screen.getByTestId('engrave-primitive-finding-0-primitive-cone-needs-cam')).toBeTruthy();
+    expect(screen.getByTestId('engrave-primitive-warn-0')).toBeTruthy();
+    expect(screen.getByTestId('engrave-primitive-cut-0').textContent).toContain('refuses it by name');
+  });
+
+  it('will not commit a sphere cap deeper than its diameter', () => {
+    render(<EngravePanel />);
+    fireEvent.click(screen.getByTestId('engrave-add-primitive-sphere'));
+    const before = useEngraveJobStore.getState().job.primitives?.[0]?.depth;
+    fireEvent.change(screen.getByTestId('engrave-primitive-depth-0'), { target: { value: '50' } });
+    expect(useEngraveJobStore.getState().job.primitives?.[0]?.depth).toBe(before);
+  });
+
+  it('shows the target object section, places the object and removes it with undo', () => {
+    const targetObject: EngraveTargetObject = {
+      id: 'tgt-1',
+      name: 'bracket.stl',
+      format: 'stl',
+      sha256: 'a'.repeat(64),
+      data: 'AAAA',
+      size: { x: 10, y: 8, z: 4 },
+      position: { x: 50, y: 30, z: 0 },
+      rotation: 0,
+      enabled: true,
+    };
+    setJob((job) => ({ ...job, targetObject }));
+    render(<EngravePanel />);
+
+    expect(screen.getByTestId('engrave-target-count').textContent).toBe('1');
+    expect(screen.getByTestId('engrave-target-row-0').textContent).toContain('bracket.stl');
+    expect(screen.getByTestId('engrave-target-row-0').textContent).toContain('10×8×4 mm');
+
+    expand('engrave-target');
+    fireEvent.change(screen.getByTestId('engrave-target-x-0'), { target: { value: '12' } });
+    expect(useEngraveJobStore.getState().job.targetObject?.position.x).toBe(12);
+
+    fireEvent.click(screen.getByTestId('engrave-target-remove-0'));
+    expect(useEngraveJobStore.getState().job.targetObject).toBeUndefined();
+    expect(screen.getByTestId('engrave-undo-strip')).toBeTruthy();
+    fireEvent.click(screen.getByTestId('engrave-undo'));
+    expect(useEngraveJobStore.getState().job.targetObject?.id).toBe('tgt-1');
+  });
+
+  it('offers the hidden file input for a target object, and explains the no-cut warning', () => {
+    const targetObject: EngraveTargetObject = {
+      id: 'tgt-1',
+      name: 'bracket.stl',
+      format: 'stl',
+      sha256: 'a'.repeat(64),
+      data: 'AAAA',
+      size: { x: 10, y: 8, z: 4 },
+      position: { x: 50, y: 30, z: 0 },
+      rotation: 0,
+      enabled: true,
+    };
+    setJob((job) => ({ ...job, targetObject }));
+    render(<EngravePanel />);
+
+    const input = screen.getByTestId('engrave-target-input') as HTMLInputElement;
+    expect(input.accept).toContain('.stl');
+    expect(input.accept).toContain('.3mf');
+    expand('engrave-target');
+    expect(screen.getByTestId('engrave-target-finding-0-target-object-not-cut')).toBeTruthy();
   });
 });

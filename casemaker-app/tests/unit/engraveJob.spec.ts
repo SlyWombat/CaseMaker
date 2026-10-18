@@ -271,6 +271,101 @@ describe('EngraveJob schema (#200)', () => {
   });
 });
 
+describe('3D primitives and the target object (#435)', () => {
+  const base = {
+    id: 'prm-1',
+    position: { x: 50, y: 30 },
+    rotation: 0,
+    depth: 2,
+    enabled: true,
+  };
+
+  it('are OPTIONAL additions to v3: a document without them parses with the version unchanged', () => {
+    const job = defaultEngraveJob();
+    expect(job.schemaVersion).toBe(3);
+    expect(job.primitives).toBeUndefined();
+    expect(job.targetObject).toBeUndefined();
+
+    const parsed = parseEngraveJob(JSON.parse(JSON.stringify(job)));
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.job.schemaVersion).toBe(3);
+    expect(parsed.job.primitives).toBeUndefined();
+    expect(parsed.job.targetObject).toBeUndefined();
+  });
+
+  it('round-trips all four primitive kinds without a version bump', () => {
+    const job = defaultEngraveJob();
+    const jobWith = {
+      ...job,
+      primitives: [
+        { ...base, kind: 'box', width: 20, height: 10 },
+        { ...base, id: 'prm-2', kind: 'cylinder', diameter: 6 },
+        { ...base, id: 'prm-3', kind: 'cone', diameter: 8, tipDiameter: 1 },
+        { ...base, id: 'prm-4', kind: 'sphere', diameter: 8, depth: 4 },
+      ],
+    } as EngraveJob;
+
+    const parsed = parseEngraveJob(JSON.parse(JSON.stringify(jobWith)));
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.job.schemaVersion).toBe(3);
+    expect(parsed.job.primitives).toEqual(jobWith.primitives);
+  });
+
+  it('refuses a cone whose tip is wider than its base, naming the field', () => {
+    const job = defaultEngraveJob();
+    const parsed = parseEngraveJob({
+      ...job,
+      primitives: [{ ...base, kind: 'cone', diameter: 4, tipDiameter: 6 }],
+    });
+    expect(parsed.ok).toBe(false);
+    if (parsed.ok) return;
+    expect(parsed.errors.some((e) => e.includes('primitives[0].tipDiameter'))).toBe(true);
+  });
+
+  it('refuses a sphere cap deeper than its diameter', () => {
+    const job = defaultEngraveJob();
+    const parsed = parseEngraveJob({
+      ...job,
+      primitives: [{ ...base, kind: 'sphere', diameter: 6, depth: 7 }],
+    });
+    expect(parsed.ok).toBe(false);
+    if (parsed.ok) return;
+    expect(parsed.errors.some((e) => e.includes('primitives[0].depth'))).toBe(true);
+  });
+
+  it('accepts a fully stated target object and refuses a malformed one', () => {
+    const job = defaultEngraveJob();
+    const targetObject = {
+      id: 'tgt-1',
+      name: 'bracket.stl',
+      format: 'stl' as const,
+      sha256: 'a'.repeat(64),
+      data: 'AAAA',
+      size: { x: 10, y: 8, z: 4 },
+      position: { x: 5, y: 5, z: 0 },
+      rotation: 30,
+      enabled: true,
+    };
+
+    const ok = parseEngraveJob({ ...job, targetObject });
+    expect(ok.ok).toBe(true);
+    if (!ok.ok) return;
+    expect(ok.job.schemaVersion).toBe(3);
+    expect(ok.job.targetObject).toEqual(targetObject);
+
+    for (const broken of [
+      { ...targetObject, sha256: 'not-a-hash' },
+      { ...targetObject, data: '' },
+      { ...targetObject, format: 'obj' },
+      { ...targetObject, size: { x: 0, y: 8, z: 4 } },
+    ]) {
+      expect(parseEngraveJob({ ...job, targetObject: broken }).ok).toBe(false);
+    }
+  });
+});
+
 describe('labelProfile (#200)', () => {
   it('centres "H" on its position and keeps cap height at size', () => {
     const box = aabbOfProfile(labelProfile(makeLabel(), []))!;
