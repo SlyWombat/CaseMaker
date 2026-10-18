@@ -126,8 +126,10 @@ describe('#382 columnCutterFor — the simulator\'s resolver, not the CAM\'s', (
     expect(columnCutterFor({ ...CHAMFER, tipDiameter: null }).ok).toBe(false);
     expect(columnCutterFor({ ...DRILL, tipDiameter: null, diameter: null }).ok).toBe(false);
     expect(columnCutterFor({ ...DRILL, angle: 200 }, SHOP).ok).toBe(false);
-    // Ball and bull are still #222's.
-    expect(columnCutterFor({ ...flatEndMill(2), shape: 'ball', typeText: 'Ball' }).ok).toBe(false);
+    // A ball nose now simulates on the dexel (#532, #222 slice A) — its admission is covered in
+    // simBallBullDexel.spec. A flat end mill that merely carries a corner radius is NOT a declared
+    // bull nose (shape 'bull'), so it stays refused by cuttingForTrace's capsule rule.
+    expect(columnCutterFor({ ...flatEndMill(2), shape: 'ball', typeText: 'Ball' }).ok).toBe(true);
     expect(columnCutterFor(flatEndMill(2, { cornerRadius: 0.2 })).ok).toBe(false);
   });
 

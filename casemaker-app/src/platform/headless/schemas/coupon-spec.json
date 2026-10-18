@@ -4307,6 +4307,14 @@
               ],
               "type": "object"
             },
+            "role": {
+              "description": "What the mesh is to the job: 'reference' (positioned against, not cut; the default when absent) or 'goal' (the shape to make).",
+              "enum": [
+                "reference",
+                "goal"
+              ],
+              "type": "string"
+            },
             "rotation": {
               "description": "Rotation in degrees counter-clockwise about Z through the mesh centre.",
               "type": "number"
