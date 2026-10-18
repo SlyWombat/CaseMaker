@@ -377,6 +377,17 @@ export interface CutRegion {
   depth: number;
   polygons: [number, number][][];
   /**
+   * #218 — this cut reaches THROUGH the blank into the under-board. A void under it is not a
+   * finish problem: the cut would break into the cavity and the membrane is all that holds the
+   * freed piece, so `keepOutFindings` raises an error rather than a warning.
+   */
+  through?: boolean;
+  /**
+   * #218 — this region is a cut-out's KERF rather than a pocket. Only the sentence differs: it
+   * has no document item, so the finding names it as `Cut-out "…"` instead of looking it up.
+   */
+  cutout?: boolean;
+  /**
    * A V-carve's three outlines (#221), present only on a region cut by a cone. `polygons` above is
    * the colour-plane design; `floor` is the pocket bottom and `surface` the opening at the top
    * face. Structural, so this module still does not import `cam/engraveJob`. The preview draws all
@@ -418,6 +429,7 @@ export function engraveCutRegions(plan: PartPlan, measured: readonly LabelEngrav
     name: e.name,
     depth: e.depth,
     polygons: byId.get(e.id)?.polygons ?? [],
+    ...(e.through === true ? { through: true as const } : {}),
   }));
 }
 
@@ -551,6 +563,10 @@ export function bindingVoidsByRegion(
 /**
  * Warn about every cut that sits over an under-surface void (#171).
  *
+ * #218 — a THROUGH cut (a region flagged `through`, or a cut-out's kerf) raised over a void is an
+ * ERROR instead: the cut leaves the blank and breaks into the cavity, and the membrane over it is
+ * the only material holding the freed piece. The warning's depth suppression does not apply to it.
+ *
  * One finding, not two: a cut deep enough to breach the membrane is refused as `cut-too-deep` by
  * the VERIFIER, against the LAYER-ALIGNED limit #178's stack supplies, and that refusal's own
  * advice is to move the cut clear. Computing a second breach test here would mean a second owner
@@ -575,19 +591,34 @@ export function keepOutFindings(
   for (const region of regions) {
     const worst = bound.get(region.id);
     if (worst === undefined) continue;
-    if (region.depth > worst.limit + DEPTH_EPS_MM) continue;
+    // A THROUGH cut over a void is a refusal, not a finish warning (#218): the cut leaves the
+    // blank and breaks into the cavity, whose membrane is the only material holding the piece
+    // that would be freed. The ordinary suppression below exists to hand a BREACH to the
+    // verifier; a through cut over a void is refused here, before a program is posted.
+    const through = region.through === true;
+    if (!through && region.depth > worst.limit + DEPTH_EPS_MM) continue;
 
     const src = findItem(job, region.id);
-    const primitive = src === undefined ? findPrimitive(job, region.id) : undefined;
-    const who = src ? itemLabel(src) : primitive ? primitiveLabel(primitive) : region.name || `Item ${region.id}`;
+    const cutout = region.cutout === true;
+    const primitive = cutout || src !== undefined ? undefined : findPrimitive(job, region.id);
+    const who = cutout
+      ? `Cut-out "${region.name || region.id}"`
+      : src
+        ? itemLabel(src)
+        : primitive
+          ? primitiveLabel(primitive)
+          : region.name || `Item ${region.id}`;
     findings.push({
-      severity: 'warning',
+      severity: through ? 'error' : 'warning',
       code: 'item-over-void',
       labelId: region.id,
-      message:
-        `${who} cuts ${fmtMm(region.depth)} mm deep over "${worst.name}" — a ` +
-        `${fmtMm(worst.membrane)} mm membrane with nothing under it — so expect chatter and a ` +
-        `rough finish there. Moving the cut clear of the void will finish better.`,
+      message: through
+        ? `${who} cuts through the blank over "${worst.name}" — the ${fmtMm(worst.membrane)} mm ` +
+          'membrane over the void is the only thing holding the piece, so the cut would break ' +
+          'into the cavity and free it. Move the cut clear of the void, or do not cut it through.'
+        : `${who} cuts ${fmtMm(region.depth)} mm deep over "${worst.name}" — a ` +
+          `${fmtMm(worst.membrane)} mm membrane with nothing under it — so expect chatter and a ` +
+          `rough finish there. Moving the cut clear of the void will finish better.`,
     });
   }
   return findings;

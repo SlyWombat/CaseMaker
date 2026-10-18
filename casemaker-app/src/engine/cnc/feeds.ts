@@ -1274,6 +1274,12 @@ export function feedsFor(
   machine: MillProfile,
   override?: Partial<CutParams>,
   table: readonly FeedsEntry[] = resolvedFeedsTable().table,
+  /**
+   * #218 — the cut's ENGAGEMENT, where it differs from the row's pocketing assumption. A profile
+   * cut follows the outside of the part with the cutter buried to its full width on one side, so
+   * it asks more of the edge than the contour-parallel pocket the table's row describes.
+   */
+  context?: { slotting?: boolean },
 ): FeedsResult {
   const snapshot = catalogueOf(catalogue);
   // The cutter, in the table's terms: a flat end mill of some diameter, or a V-bit whose cutting
@@ -1347,6 +1353,10 @@ export function feedsFor(
     if (override.peck !== undefined) params.peck = override.peck;
     if (override.air !== undefined) params.air = override.air;
   }
+
+  // PROVISIONAL (#218): a profile cut is a full-width SLOT, both sides of the cutter engaged, so
+  // half the row's pocketing step-down holds until the slotting coupon measures it (#248's path).
+  if (context?.slotting === true) params.stepDown /= 2;
 
   // #191: contour-parallel loops further apart than the cutter can sweep leave an uncut spine.
   // Refuse, never clamp silently. A flat end mill's bound is its RADIUS (the #191 rule). A V-bit's

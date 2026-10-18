@@ -129,11 +129,13 @@ export type JobFindingCode =
   | 'drill-too-deep'
   // Through-cuts and cut-outs (#218). `through-needs-board`: no under-board, or one thinner than
   // the breakthrough plus a millimetre. `through-tool-reach`: the cutter's flutes/shank do not
-  // cover `thickness + breakthrough`. `tab-unplaceable` and `loose-piece` are raised by the CAM
-  // checks that have the path geometry (`tab-unplaceable`) and the removal solid (`loose-piece`).
+  // cover `thickness + breakthrough`. `tab-unplaceable`, `cutout-empty` and `loose-piece` are
+  // raised by the CAM checks that have the path geometry (`tab-unplaceable`, `cutout-empty`) and
+  // the removal solid (`loose-piece`).
   | 'through-needs-board'
   | 'through-tool-reach'
   | 'tab-unplaceable'
+  | 'cutout-empty'
   | 'cutout-needs-flat'
   | 'loose-piece'
   | 'released-onto-board'

@@ -5,7 +5,8 @@
 import { describe, expect, it } from 'vitest';
 import { tl } from './helpers/manifoldExec';
 import { makeClipperOffset } from '@/engine/cnc/cam/engraveJob';
-import type { CutParams } from '@/engine/cnc/feeds';
+import { zPasses } from '@/engine/cnc/cam/engraveJob';
+import { feedsFor, type CutParams } from '@/engine/cnc/feeds';
 import {
   generateProfile,
   kerfPolygons,
@@ -188,5 +189,48 @@ describe('generateProfile (#218)', () => {
     // A pass lands exactly at the tab top (z = -5); with no tabs there is no RETRACT to that Z,
     // so no rapid at it. (The feed pass at -5 is the ordinary cut.)
     expect(ir.operations[0]!.moves.some((m) => m.kind === 'rapid' && m.z === tabTopZ)).toBe(false);
+  });
+});
+
+describe('slotting feeds for a profile cut (#218)', () => {
+  const cut = (tabs: { count: number; width: number; height: number }): ProfileCut => ({
+    id: 'cut-1',
+    name: 'Cut-out',
+    path: profilePath(rect(40, 20), 'outside', R, 0, offset),
+    depth: 6.3,
+    thickness: 6,
+    tabs,
+  });
+
+  it('halves the step-down, so the profile takes twice the pocket passes', () => {
+    // The SAME row answers both: pocketing is what the feeds row describes, and a profile cut
+    // is a full-width slot. `slotting` is the one difference.
+    const pocket = feedsFor([], 'softwood', MILL, Z1);
+    const slot = feedsFor([], 'softwood', MILL, Z1, undefined, undefined, { slotting: true });
+    expect(pocket.ok).toBe(true);
+    expect(slot.ok).toBe(true);
+    if (!pocket.ok || !slot.ok) return;
+
+    expect(slot.params.stepDown).toBeCloseTo(pocket.params.stepDown / 2, 9);
+
+    // A depth that is a whole number of pocket passes: 6 passes become 12.
+    const depth = pocket.params.stepDown * 6;
+    expect(zPasses(depth, pocket.params.stepDown).length).toBe(6);
+    expect(zPasses(depth, slot.params.stepDown).length).toBe(12);
+
+    // And the CAM really uses the handed-down number: the same cut at the slotting step-down
+    // reaches twice as many distinct Z levels.
+    const cutDepth = {
+      ...cut({ count: 0, width: 4, height: 1 }),
+      depth,
+      thickness: depth,
+    };
+    const levels = (params: CutParams): number =>
+      new Set(
+        generateProfile([cutDepth], MILL, params, Z1.rapidEstimate).ir.operations[0]!.moves
+          .filter((m) => m.kind === 'feed')
+          .map((m) => m.z),
+      ).size;
+    expect(levels(slot.params)).toBe(2 * levels(pocket.params));
   });
 });

@@ -962,19 +962,10 @@ export function engraveRegions(
       : ratioAtFor(tl, job, cone.tipRadius, planeRadiusFor);
   const engFindings = measured.length === 0 ? [] : engravabilityFindings(job, measured, ratioAt, tool, shop.lostDetailWarnRatio ?? null);
 
-  // #171/#345 — the cut regions a void check reads, built ONCE: the engrave openings plus the
-  // swept traces (#270). A void-free job is the common case and pays for nothing here — sweeping
-  // the traces means wasm, and #205 calls this on a debounce.
-  const voidCuts: CutRegion[] =
-    plan.stock.keepOuts.length === 0
-      ? []
-      : [...engraveCutRegions(plan, measured), ...(traceRadius === null ? [] : traceCutRegions(tl, plan, traceRadius))];
-
-  // #345 decision B — ONE scan decides which void binds each region, and BOTH stages read it: the
-  // per-move warning (#171) and the per-item bound, so the banner and the item cannot name
-  // different voids for the same overlap.
-  const bindingVoids = bindingVoidsByRegion(tl, job, plan, voidCuts, margins.boundaryMargin);
-  const voidFindings = keepOutFindings(job, voidCuts, bindingVoids);
+  // #171/#345 — the cut regions a void check reads are built ONCE, below: the engrave openings,
+  // the swept traces (#270) and — since #218 — each cut-out's kerf. A void-free job is the common
+  // case and pays for nothing here — sweeping the traces means wasm, and #205 calls this on a
+  // debounce.
 
   const byId = new Map(measured.map((m) => [m.labelId, m] as const));
   const itemById = new Map<string, EngraveItem>();
@@ -1049,9 +1040,34 @@ export function engraveRegions(
       const outlineCS = executeProfile(tl, c.outline);
       const outline = outlineCS.toPolygons() as Polygons;
       outlineCS.delete();
-      if (outline.length === 0) continue;
+      if (outline.length === 0) {
+        // #218 — a referenced outline that resolves to nothing has no path to cut. Without this
+        // finding the cut-out would vanish from the program with no sentence saying why.
+        tabFindings.push({
+          severity: 'error',
+          code: 'cutout-empty',
+          labelId: c.id,
+          message:
+            `${c.name} cannot follow its outline: the item it references resolves to an empty ` +
+            'region, so there is no part to cut out.',
+        });
+        continue;
+      }
       const path = profilePath(outline, c.side, radius, c.inset, offset);
-      if (path.length === 0) continue;
+      if (path.length === 0) {
+        // #218 — the offset consumed the outline: `profilePath` returns [] and the cut-out would
+        // silently disappear. The common case is a `stock-inset` larger than half the blank.
+        tabFindings.push({
+          severity: 'error',
+          code: 'cutout-empty',
+          labelId: c.id,
+          message:
+            `${c.name} cannot be cut: its ${c.inset} mm inset on the ${c.side} of the outline, ` +
+            'together with the cutter radius, leaves no path to follow. Reduce the inset or ' +
+            'choose a larger outline.',
+        });
+        continue;
+      }
       const spans: ProfileSpan[][] = [];
       let placed = 0;
       let unplaceable = 0;
@@ -1094,6 +1110,9 @@ export function engraveRegions(
         name: c.name,
         depth: c.tabs.count > 0 ? tabTop : c.depth,
         polygons: kerf,
+        // #218 — the kerf leaves the blank, so a void under it is an ERROR in the void check.
+        through: true,
+        cutout: true,
       });
       // Two levels, as the oracle needs them: the whole kerf is cut down to the tab top, and the
       // deep passes remove it everywhere except the tab rectangles. The rectangles lie wholly
@@ -1106,6 +1125,24 @@ export function engraveRegions(
       }
     }
   }
+
+  // #171/#345 — the cut regions a void check reads, built ONCE: the engrave openings, the swept
+  // traces (#270) and each cut-out's KERF (#218). The cut-outs join only now, when their geometry
+  // exists, so a declared void under a kerf is seen by the same scan as one under a pocket.
+  const voidCuts: CutRegion[] =
+    plan.stock.keepOuts.length === 0
+      ? []
+      : [
+          ...engraveCutRegions(plan, measured),
+          ...(traceRadius === null ? [] : traceCutRegions(tl, plan, traceRadius)),
+          ...cutoutCuts,
+        ];
+
+  // #345 decision B — ONE scan decides which void binds each region, and BOTH stages read it: the
+  // per-move warning (#171) and the per-item bound, so the banner and the item cannot name
+  // different voids for the same overlap.
+  const bindingVoids = bindingVoidsByRegion(tl, job, plan, voidCuts, margins.boundaryMargin);
+  const voidFindings = keepOutFindings(job, voidCuts, bindingVoids);
 
   // `job.sacrificial` is threaded so the generate path's `vise-grip-shallow` judges what the
   // jaws actually grip (#213 §2), not the raw stock: the argument `validateVise` has accepted
@@ -2730,6 +2767,24 @@ function generateOneProgram(
     const resolved = feedsFor(catalogue, job.stock.material, tool, mill, job.cutOverride, shop.feeds ?? undefined);
     if (!resolved.ok) return stop('feeds', { feeds: resolved, message: resolved.reason });
     feeds = resolved;
+    // #218 — a cut-out follows its outline with both sides of the cutter engaged: a full-width
+    // SLOT. Resolve the same row again with `slotting`, and use THAT answer for the profile CAM
+    // only, so the pocket, trace and rest passes keep the row's pocketing numbers.
+    const profileFeeds =
+      profiles.length === 0
+        ? null
+        : feedsFor(
+            catalogue,
+            job.stock.material,
+            tool,
+            mill,
+            job.cutOverride,
+            shop.feeds ?? undefined,
+            { slotting: true },
+          );
+    if (profileFeeds !== null && !profileFeeds.ok) {
+      return stop('feeds', { feeds: profileFeeds, message: profileFeeds.reason });
+    }
 
     // 3. the CAM core (#172), on the SAME opened polygons stage 1 measured.
     try {
@@ -2753,7 +2808,9 @@ function generateOneProgram(
       // therefore last, and it is the only class that cuts into the board.
       const traceIr = generateTrace(plan.traces, tool, resolved.params, mill.rapidEstimate);
       const profileResult =
-        profiles.length === 0 ? null : generateProfile(profiles, tool, resolved.params, mill.rapidEstimate);
+        profiles.length === 0
+          ? null
+          : generateProfile(profiles, tool, profileFeeds!.params, mill.rapidEstimate);
       const beforeCutouts =
         regionIr === null ? traceIr : traceIr.operations.length > 0 ? concatToolpathIR(regionIr, traceIr) : regionIr;
       ir =

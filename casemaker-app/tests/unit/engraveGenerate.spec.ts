@@ -392,6 +392,62 @@ describe('an under-surface void limits the cut (#231 item 3)', () => {
     });
     expect(g.findings.some((f) => f.code === 'item-over-void')).toBe(false);
   });
+
+  // #218 — a THROUGH cut over a void is not a finish warning. It leaves the blank and breaks into
+  // the cavity, and the membrane over the void is the only material holding the freed piece.
+  const REACH = flatEndMill(3.175, {
+    name: '3.175 mm flat end',
+    fluteLength: 20,
+    shoulderLength: 20,
+  });
+
+  it('refuses a through REGION over the void, naming the membrane (#218)', () => {
+    const throughA = { ...shapeA(1.0), through: true };
+    const g = generate(tl, {
+      ...job(1.0, [pocket]),
+      toolKey: 'inv:reach',
+      tool: REACH,
+      sacrificial: presetPartOnBoard(),
+      shapes: [throughA, shapeB(2.0)],
+    });
+    expect(g.ok).toBe(false);
+    expect(g.stage).toBe('findings');
+    const over = g.findings.find((f) => f.code === 'item-over-void');
+    expect(over?.severity).toBe('error');
+    expect(over?.labelId).toBe('a');
+    expect(over?.message).toContain('Magnet pocket');
+    expect(over?.message).toContain('only thing holding the piece');
+  });
+
+  it('refuses a cut-out whose KERF crosses the void, naming the membrane (#218)', () => {
+    // Shape A (10 × 10 at 50, 30) is wholly over the pocket, and its outside kerf is wider still:
+    // every point of the profile leaves the blank inside the cavity.
+    const g = generate(tl, {
+      ...job(1.0, [pocket]),
+      toolKey: 'inv:reach',
+      tool: REACH,
+      sacrificial: presetPartOnBoard(),
+      cutouts: [
+        {
+          kind: 'cutout',
+          id: 'cut-1',
+          name: 'Badge',
+          enabled: true,
+          of: 'a',
+          side: 'outside',
+          inset: 0,
+          tabs: { count: 4, width: 4, height: 1 },
+        },
+      ],
+    });
+    expect(g.ok).toBe(false);
+    expect(g.stage).toBe('findings');
+    const over = g.findings.find((f) => f.code === 'item-over-void' && f.labelId === 'cut-1');
+    expect(over?.severity).toBe('error');
+    expect(over?.message).toContain('Cut-out');
+    expect(over?.message).toContain('Magnet pocket');
+    expect(over?.message).toContain('only thing holding the piece');
+  });
 });
 
 // #285 — a job that states its print takes its DEPTH LIMIT from the blank sliced on the printer's
@@ -2318,5 +2374,19 @@ describe('through-cuts and cut-outs (#218)', () => {
     expect(f).toBeDefined();
     expect(f!.severity).toBe('error');
     expect(f!.message).toMatch(/disconnected from the material the mount holds/);
+  });
+
+  it('refuses a cut-out whose inset leaves no path, instead of silently dropping it (#218)', () => {
+    // A 100 mm inset on the 100 × 60 blank shrinks the profile past the cutter radius: the old
+    // behaviour was `profilePath` returning [] and the cut-out simply vanishing from the program.
+    const g = generate(tl, cutoutJob({ inset: 100 }));
+    expect(g.ok).toBe(false);
+    expect(g.stage).toBe('findings');
+    expect(g.nc).toBeNull();
+    const f = g.findings.find((x) => x.code === 'cutout-empty' && x.labelId === 'cut-1');
+    expect(f).toBeDefined();
+    expect(f!.severity).toBe('error');
+    expect(f!.message).toContain('100 mm inset');
+    expect(f!.message).toContain('no path');
   });
 });
