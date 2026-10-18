@@ -1,6 +1,6 @@
 import { featureSim } from '@/platform/features';
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type JSX, type RefObject } from 'react';
-import { newItemDepthFor, useEngraveJobStore } from '@/store/engraveJobStore';
+import { newItemDepthFor, newTargetObjectId, useEngraveJobStore } from '@/store/engraveJobStore';
 import { useProjectStore } from '@/store/projectStore';
 import { useEngravePreviewStore } from '@/store/engravePreviewStore';
 import { expandEngraveRow, useEngraveRowStore } from '@/store/engraveRowStore';
@@ -51,7 +51,14 @@ import {
   vCarveStepoverClampNote,
 } from '@/engine/cnc/vCarveGeometry';
 import { validateVise } from '@/engine/cnc/fixture';
-import { keepOutLimitParts, keepOutMembrane, labelGlyphMeasure, labelJawReach, voidLimitForItem } from '@/engine/cnc/engrave/partPlan';
+import {
+  keepOutLimitParts,
+  keepOutMembrane,
+  labelGlyphMeasure,
+  labelJawReach,
+  primitiveLabel,
+  voidLimitForItem,
+} from '@/engine/cnc/engrave/partPlan';
 import { ensureLabelFontsLoaded, ensureSeedFontsLoaded, labelFontsLoaded } from '@/engine/fonts/registry';
 import { buildRunSheet, type RunSheet } from '@/engine/cnc/engrave/runSheet';
 import { registrationSettings } from '@/engine/cnc/registration/settings';
@@ -87,6 +94,7 @@ import { MATERIAL_LABELS } from '@/engine/cnc/materials';
 import { useShopDefaultsStore } from '@/store/shopDefaultsStore';
 import { blankStockFor } from '@/engine/cnc/engrave/fromBlank';
 import { readDesignFile } from '@/engine/import/designImport';
+import { readTargetObjectFile } from '@/engine/import/targetObject';
 import {
   defaultSacrificialSide,
   defaultSacrificialUnder,
@@ -102,6 +110,8 @@ import { EngraveShapeRow } from './EngraveShapeRow';
 import { EngraveCombinedRow } from './EngraveCombinedRow';
 import { EngraveDrillRow } from './EngraveDrillRow';
 import { EngraveThreadRow } from './EngraveThreadRow';
+import { EngravePrimitiveRow } from './EngravePrimitiveRow';
+import { EngraveTargetObjectRow } from './EngraveTargetObjectRow';
 import { EngraveTraceRow } from './EngraveTraceRow';
 import { EngraveVectorRow } from './EngraveVectorRow';
 import { EngraveImportDialog } from './EngraveImportDialog';
@@ -116,6 +126,7 @@ import type {
   EngraveJob,
   EngraveKeepOut,
   EngraveLabel,
+  EngravePrimitive,
   EngraveShape,
   FieldSource,
   JobStockFinish,
@@ -280,6 +291,19 @@ const ADD_DRILL_KINDS: readonly { value: 'drill' | 'drill-array'; label: string 
 ];
 
 /**
+ * The four 3D PRIMITIVE kinds (#435), added to `job.primitives` from the Items menu. Only the
+ * vertical box and cylinder reduce to a region; the menu still offers all four, because refusing
+ * a shape BY NAME (cone needs #221/#222, sphere is a dexel job for #222) is the design, and a
+ * person drawing a target object may need to state the shape before a cutter exists for it.
+ */
+const ADD_PRIMITIVE_KINDS: readonly { value: EngravePrimitive['kind']; label: string }[] = [
+  { value: 'box', label: 'Box' },
+  { value: 'cylinder', label: 'Cylinder' },
+  { value: 'cone', label: 'Cone' },
+  { value: 'sphere', label: 'Sphere' },
+];
+
+/**
  * The four VOID kinds (#271), added to `job.keepOuts` from the Stock section — NOT from the
  * Items "+ Add…" menu. A void is a fact about the blank, not something the cutter makes: the
  * menu's other entries all become cut operations, and putting a void among them would invite
@@ -312,6 +336,7 @@ function itemRowIds(job: EngraveJob): string[] {
     ...(job.traces ?? []).map((i) => i.id),
     ...(job.drills ?? []).map((i) => i.id),
     ...(job.threads ?? []).map((i) => i.id),
+    ...(job.primitives ?? []).map((i) => i.id),
     ...(job.vectors ?? []).map((i) => i.id),
   ];
 }
@@ -471,7 +496,7 @@ function UndoRemoval({
   section,
   fallbackRef,
 }: {
-  section: 'items' | 'voids';
+  section: 'items' | 'voids' | 'target';
   /** The list's header control, to hand focus to when this strip goes (see the effect below). */
   fallbackRef?: RefObject<HTMLButtonElement | null>;
 }): JSX.Element | null {
@@ -556,6 +581,12 @@ export function EngravePanel(): JSX.Element {
   const addThread = useEngraveJobStore((s) => s.addThread);
   const updateThread = useEngraveJobStore((s) => s.updateThread);
   const removeThread = useEngraveJobStore((s) => s.removeThread);
+  const addPrimitive = useEngraveJobStore((s) => s.addPrimitive);
+  const updatePrimitive = useEngraveJobStore((s) => s.updatePrimitive);
+  const removePrimitive = useEngraveJobStore((s) => s.removePrimitive);
+  const setTargetObject = useEngraveJobStore((s) => s.setTargetObject);
+  const updateTargetObject = useEngraveJobStore((s) => s.updateTargetObject);
+  const removeTargetObject = useEngraveJobStore((s) => s.removeTargetObject);
   const addKeepOut = useEngraveJobStore((s) => s.addKeepOut);
   const updateKeepOut = useEngraveJobStore((s) => s.updateKeepOut);
   const removeKeepOut = useEngraveJobStore((s) => s.removeKeepOut);
@@ -855,6 +886,11 @@ export function EngravePanel(): JSX.Element {
   const [designNotes, setDesignNotes] = useState<string[] | null>(null);
   const [designError, setDesignError] = useState<string | null>(null);
   const [designReading, setDesignReading] = useState(false);
+  // #435 — the reference object's import. Like the design file, this needs the BYTES (the mesh is
+  // parsed once and embedded), so it is a plain hidden input rather than the text-file picker.
+  const targetInputRef = useRef<HTMLInputElement>(null);
+  const [targetImporting, setTargetImporting] = useState(false);
+  const [targetError, setTargetError] = useState<string | null>(null);
 
   async function readDesign(file: File): Promise<void> {
     setDesignError(null);
@@ -877,6 +913,42 @@ export function EngravePanel(): JSX.Element {
       setDesignReading(false);
     }
   }
+  /**
+   * #435 — read a picked STL/3MF as the target object. The parser, the size guard, the hash and
+   * the base64 embedding are all `readTargetObjectFile`'s; this only places the result: centred in
+   * X/Y with its TOP on the stock's top face (Z0), which is where a reference part sits when it is
+   * being used to lay out pockets.
+   */
+  async function readTarget(file: File): Promise<void> {
+    setTargetError(null);
+    setTargetImporting(true);
+    try {
+      const result = await readTargetObjectFile(file, newTargetObjectId());
+      if (!result.ok) {
+        setTargetError(result.error);
+        return;
+      }
+      setTargetObject({
+        id: result.id,
+        name: result.name,
+        format: result.format,
+        sha256: result.sha256,
+        data: result.data,
+        size: result.size,
+        position: { x: job.stock.length / 2, y: job.stock.width / 2, z: 0 },
+        rotation: 0,
+        enabled: true,
+      });
+      // A new object arrives open, like every other add: its placement is the field the import
+      // could not settle.
+      expandEngraveRow(result.id);
+    } catch (e) {
+      setTargetError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setTargetImporting(false);
+    }
+  }
+
   const errors = findings.filter((f) => f.severity === 'error');
   const blockedByFeeds = feeds !== null && !feeds.ok;
   const blocked = errors.length > 0 || blockedByFeeds;
@@ -1338,6 +1410,8 @@ export function EngravePanel(): JSX.Element {
     if (item) return 'kind' in item ? item.name ?? item.kind : item.text;
     const trace = (job.traces ?? []).find((t) => t.id === id);
     if (trace) return trace.name ?? (trace.kind === 'line' ? 'Line' : `Text "${trace.text}"`);
+    const primitive = (job.primitives ?? []).find((p) => p.id === id);
+    if (primitive) return primitive.name ?? primitiveLabel(primitive);
     return id;
   }
 
@@ -1357,6 +1431,8 @@ export function EngravePanel(): JSX.Element {
   const drillCount = job.drills?.length ?? 0;
   const threadCount = job.threads?.length ?? 0;
   const vectorCount = job.vectors?.length ?? 0;
+  const primitiveCount = job.primitives?.length ?? 0;
+  const target = job.targetObject ?? null;
   const hasReferenceable = job.labels.length + job.shapes.length + combinedCount + vectorCount > 0;
 
   const stockNum = (key: 'length' | 'width' | 'thickness', label: string, title: string): JSX.Element => {
@@ -1843,7 +1919,7 @@ export function EngravePanel(): JSX.Element {
       <h3 style={SUBHEAD}>
         Items{' '}
         <span style={{ ...TAG, marginLeft: 4 }} data-testid="engrave-item-count">
-          {job.labels.length + job.shapes.length + combinedCount + traceCount + drillCount + threadCount + vectorCount}
+          {job.labels.length + job.shapes.length + combinedCount + traceCount + drillCount + threadCount + primitiveCount + vectorCount}
         </span>
         <RowFolds testidPrefix="engrave-item" ids={itemRowIds(job)} firstButtonRef={itemsFoldRef} />
       </h3>
@@ -1916,6 +1992,17 @@ export function EngravePanel(): JSX.Element {
           findings={findingsFor(thread.id)}
           onChange={(patch) => updateThread(thread.id, patch)}
           onRemove={() => removeThread(thread.id)}
+        />
+      ))}
+      {(job.primitives ?? []).map((primitive, i) => (
+        <EngravePrimitiveRow
+          key={primitive.id}
+          primitive={primitive}
+          index={i}
+          maxDepth={maxDepth}
+          findings={findingsFor(primitive.id)}
+          onChange={(patch) => updatePrimitive(primitive.id, patch)}
+          onRemove={() => removePrimitive(primitive.id)}
         />
       ))}
       {(job.vectors ?? []).map((shape, i) => (
@@ -2025,6 +2112,29 @@ export function EngravePanel(): JSX.Element {
             Thread
           </button>
         </div>
+        {/* #435 — 3D cut-away primitives against the target object. A vertical box/cylinder is
+            pocketed by the region CAM; cone and sphere are refused BY NAME rather than
+            approximated (sphere is a dexel job, #222). */}
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 4, alignItems: 'center' }}>
+          <span style={{ ...MUTED, margin: 0 }}>3D:</span>
+          {ADD_PRIMITIVE_KINDS.map((k) => (
+            <button
+              key={k.value}
+              type="button"
+              data-testid={`engrave-add-primitive-${k.value}`}
+              title={
+                k.value === 'box' || k.value === 'cylinder'
+                  ? `Add a vertical ${k.label.toLowerCase()} pocketed by the region CAM.`
+                  : k.value === 'cone'
+                    ? 'Add a cone. Its sloped wall needs the V-carve/chamfer work (#221) or the 3D engine (#222), so it is refused by name rather than approximated.'
+                    : 'Add a sphere. It is a dexel job (#222), so it is refused by name rather than approximated as a circle pocket.'
+              }
+              onClick={() => expandEngraveRow(addPrimitive(k.value))}
+            >
+              {k.label}
+            </button>
+          ))}
+        </div>
         {/* #217: import an SVG or DXF as a filled cut region. The file is parsed once; the
             contour list is what the job keeps. #252: trace a bitmap to the same kind of thing —
             the picture is thresholded and its boundaries become the contours. */}
@@ -2056,6 +2166,58 @@ export function EngravePanel(): JSX.Element {
         )}
       </details>
       <p style={MUTED}>Depth keeps the {job.minFloor} mm minimum floor — at most {maxDepth} mm on this stock.</p>
+
+      {/* 2b — the target object (#435): the reference part the 3D primitives are positioned
+          against. It is deliberately NOT in the item list or the item count: it is never cut, and
+          `validateJob` says so once as a warning. `stock − target` is the profile cut-out work
+          tracked in #218. */}
+      <h3 style={SUBHEAD}>
+        Target object{' '}
+        <span style={{ ...TAG, marginLeft: 4 }} data-testid="engrave-target-count">
+          {target === null ? 0 : 1}
+        </span>
+      </h3>
+      <p style={MUTED}>
+        A reference model the 3D primitives are placed against. It is embedded in the job and drawn
+        in the viewport, but it is not cut — the stock around it is the profile cut-out work (#218).
+      </p>
+      <UndoRemoval section="target" />
+      {target !== null && (
+        <EngraveTargetObjectRow
+          target={target}
+          index={0}
+          findings={findings.filter((f) => f.code === 'target-object-not-cut')}
+          onChange={(patch) => updateTargetObject(patch)}
+          onRemove={() => removeTargetObject()}
+        />
+      )}
+      <button
+        type="button"
+        data-testid="engrave-target-import"
+        disabled={targetImporting}
+        style={{ marginTop: 4 }}
+        title="Read an STL or 3MF part as a reference object. The file is parsed once, embedded in the job and shown in the viewport; it is never cut."
+        onClick={() => targetInputRef.current?.click()}
+      >
+        {targetImporting ? 'Reading the object…' : target === null ? 'Import a target object…' : 'Replace the target object…'}
+      </button>
+      <input
+        ref={targetInputRef}
+        type="file"
+        accept=".stl,.3mf,model/stl,model/3mf"
+        style={{ display: 'none' }}
+        data-testid="engrave-target-input"
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          e.target.value = '';
+          if (file) void readTarget(file);
+        }}
+      />
+      {targetError && (
+        <p style={{ ...MUTED, color: SEVERITY_COLOR.error }} data-testid="engrave-target-error">
+          {targetError}
+        </p>
+      )}
 
       {/* #345 — what every floor keeps clear of, and where that number came from. The tag names the
           source ("the house default", "this job's recommendation", "set for this job"); when the

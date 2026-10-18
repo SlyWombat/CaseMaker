@@ -22,6 +22,7 @@ import { newId } from '@/utils/id';
 import { bracketSettings, anchorFrom, bracketDatum, bracketExpectedSurface, clampObstacles, bracketObstacles, defaultClampPlacements } from '@/engine/cnc/mounts/bracket';
 import { jobMachine } from '@/engine/cnc/calibration';
 import { registrationSettings } from '@/engine/cnc/registration/settings';
+import { primitiveLabel } from '@/engine/cnc/engrave/partPlan';
 import { summarizePlan } from '@/engine/cnc/registration/summary';
 import type { PlanObstacle, RegistrationPlan } from '@/engine/cnc/registration/plan';
 import {
@@ -217,6 +218,10 @@ export function EngraveSetupsSection(): JSX.Element {
     ];
     for (const list of lists) {
       for (const item of list) map.set(item.id, item.name ?? item.text ?? item.id);
+    }
+    // #435 — a primitive has no text; its label is its name, else its shape and size.
+    for (const primitive of job.primitives ?? []) {
+      map.set(primitive.id, primitive.name ?? primitiveLabel(primitive));
     }
     return map;
   }, [job]);

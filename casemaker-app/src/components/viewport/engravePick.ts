@@ -10,9 +10,10 @@
  * the mesh already hands us the mesh itself, but a wrapper group around it (or a future compound
  * pickable) would still resolve to the item it belongs to rather than silently missing.
  *
- * Two tags are read: `engraveFloor` (the cut's bottom, #441) and `engraveLost` (§5.7's lost layer).
- * Both name a job item, and clicking either should open that item's row — the loss is a property of
- * the same item as the cut beside it.
+ * Four tags are read: `engraveFloor` (the cut's bottom, #441), `engraveLost` (§5.7's lost layer),
+ * `engravePrimitive` (a 3D cut-away primitive, #435) and `engraveTarget` (the reference object,
+ * #435). Each names a row in the panel, and clicking it should open that row — the loss is a
+ * property of the same item as the cut beside it, and a primitive's ghost is the item itself.
  *
  * It lives here, apart from the component, so a node test can call it with a plain `Object3D`:
  * no canvas, no renderer, no WebGL. Only `userData` and `parent` are read.
@@ -29,7 +30,12 @@ import { selectEngraveItem } from '@/store/viewportStore';
 /** The job item id a clicked preview object belongs to, or null when it is not tied to one. */
 export function engraveItemIdFromPick(object: Object3D | null | undefined): string | null {
   for (let node = object ?? null; node; node = node.parent) {
-    for (const tag of [node.userData?.engraveFloor, node.userData?.engraveLost]) {
+    for (const tag of [
+      node.userData?.engraveFloor,
+      node.userData?.engraveLost,
+      node.userData?.engravePrimitive,
+      node.userData?.engraveTarget,
+    ]) {
       if (typeof tag === 'string' && tag !== '') return tag;
     }
   }

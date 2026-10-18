@@ -42,6 +42,7 @@ import { hatchSegments } from './engraveHatch';
 import { clampLabelBox, projectToCanvas } from './projectedLabel';
 import { activateEngraveItem } from './engravePick';
 import { floorsForScrub, scrubStateAt } from './engraveScrub';
+import { EngravePrimitives } from './EngravePrimitives';
 
 /** The same neutral wood tone the simulation's stock uses (#197). */
 const STOCK_COLOR = '#c9a26b';
@@ -551,6 +552,11 @@ export function EngravePreview() {
           color={floorColor(f.depth, maxDepth, preview.colourBoundaryDepth)}
         />
       ))}
+
+      {/* #435 — the 3D primitives and the reference object. They are drawn from the JOB, not from
+          the worker's preview: a refused shape (a sphere, a side-opening primitive) has no floor,
+          and drawing it anyway is how its row and its by-name refusal remain visible together. */}
+      <EngravePrimitives />
 
       {/* §5.7 — the design the cut does not reach. Drawn after the floors so the amber is never
           hidden by a floor at the same XY; the lost region is on the top face, which is above

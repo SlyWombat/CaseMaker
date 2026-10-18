@@ -7,7 +7,9 @@ import {
   newEngraveDrillId,
   newEngraveKeepOutId,
   newEngraveLabelId,
+  newEngravePrimitiveId,
   newEngraveShapeId,
+  newEngraveTargetObjectId,
   newEngraveThreadId,
   newEngraveTraceId,
 } from '@/engine/cnc/engrave/defaults';
@@ -21,7 +23,7 @@ import {
   type EngraveNamedItem,
 } from '@/engine/cnc/engrave/jobSetup';
 import { effectiveMargins, recommendLabelDepth, recommendedEngraveDepth } from '@/engine/cnc/engrave/depthBounds';
-import { labelGlyphMeasure, labelJawReach, voidLimitForItem } from '@/engine/cnc/engrave/partPlan';
+import { labelGlyphMeasure, labelJawReach, primitiveLabel, voidLimitForItem } from '@/engine/cnc/engrave/partPlan';
 import {
   BLANK_SEED_TEXT,
   blankLabelSeed,
@@ -35,9 +37,12 @@ import type { BlankParams } from '@/types/blank';
 import type { CutParams } from '@/engine/cnc/feeds';
 import type {
   EngraveBorderShape,
+  EngraveBoxPrimitive,
   EngraveCircleShape,
   EngraveCombinedShape,
+  EngraveConePrimitive,
   EngraveCutawayShape,
+  EngraveCylinderPrimitive,
   EngraveDrill,
   EngraveDrillArrayItem,
   EngraveDrillItem,
@@ -54,11 +59,14 @@ import type {
   EngraveLineItem,
   EngraveMargins,
   EngravePolygonShape,
+  EngravePrimitive,
   EngraveRectShape,
   EngraveShape,
   EngraveShapeBase,
   EngraveSlotShape,
+  EngraveSpherePrimitive,
   EngraveStrokeLabelItem,
+  EngraveTargetObject,
   EngraveThread,
   EngraveTraceItem,
   EngraveVectorShape,
@@ -137,6 +145,28 @@ export type DrillPatch = Partial<Omit<EngraveDrillItem, 'kind'>> &
  * because phase 2 has exactly one thread kind.
  */
 export type ThreadPatch = Partial<Omit<EngraveThread, 'kind'>>;
+
+/**
+ * A hand edit to one 3D primitive (#435). Every optional field of all four kinds is present, so a
+ * row patches just what it changed without naming the discriminant — the same shape as
+ * `DrillPatch`. `kind` is never patched (remove and re-add instead).
+ */
+export type PrimitivePatch = Partial<Omit<EngraveBoxPrimitive, 'kind' | 'position'>> &
+  Partial<Omit<EngraveCylinderPrimitive, 'kind' | 'position'>> &
+  Partial<Omit<EngraveConePrimitive, 'kind' | 'position'>> &
+  Partial<Omit<EngraveSpherePrimitive, 'kind' | 'position'>> & {
+    /** A partial placement: the store merges it into the primitive's own X/Y. */
+    position?: Partial<EngravePrimitive['position']>;
+  };
+
+/**
+ * A hand edit to the reference object (#435). Its bytes, hash and parsed size are the import's
+ * facts and cannot be patched — placement, rotation, name and visibility are the row's fields.
+ */
+export type TargetObjectPatch = Partial<Pick<EngraveTargetObject, 'name' | 'rotation' | 'enabled'>> & {
+  /** A partial placement: the store merges it into the object's own X/Y/Z. */
+  position?: Partial<EngraveTargetObject['position']>;
+};
 
 /**
  * A hand edit to one under-surface void (#271). The same shape as `ShapePatch` — every optional
@@ -505,6 +535,42 @@ function newThread(job: EngraveJob, depth: number): EngraveThread {
 }
 
 /**
+ * A brand-new 3D primitive (#435), centred on the stock and starting at the same depth a new
+ * region item does. Every number is valid against the schema: a box 20 × 10, a ⌀6 cylinder, a
+ * cone ⌀8 → ⌀1, a ⌀8 sphere. The cone and sphere arrive with concrete dimensions because their
+ * rows replace numbers rather than inventing a shape; the refusal findings explain that neither
+ * is cut yet, so nothing is silently approximated.
+ */
+function newPrimitive(kind: EngravePrimitive['kind'], job: EngraveJob, depth: number): EngravePrimitive {
+  const base = {
+    id: newEngravePrimitiveId(),
+    position: { x: job.stock.length / 2, y: job.stock.width / 2 },
+    rotation: 0,
+    depth,
+    enabled: true,
+  };
+  switch (kind) {
+    case 'box':
+      return { ...base, kind: 'box', width: 20, height: 10 };
+    case 'cylinder':
+      return { ...base, kind: 'cylinder', diameter: 6 };
+    case 'cone':
+      return { ...base, kind: 'cone', diameter: 8, tipDiameter: 1 };
+    case 'sphere':
+      return { ...base, kind: 'sphere', diameter: 8 };
+  }
+}
+
+/**
+ * A default target-object id (#435). The object itself is built by the import, which already
+ * holds the bytes, hash and parsed size; this helper exists so the id convention lives with every
+ * other item id.
+ */
+export function newTargetObjectId(): string {
+  return newEngraveTargetObjectId();
+}
+
+/**
  * A default under-surface void of the given kind (#271), centred on the stock like a new shape.
  *
  * `zCeiling` is HALF the blank's thickness, rounded to 0.1 mm: a neutral place to start that
@@ -549,7 +615,7 @@ export interface PendingRemoval {
    * Which list it came out of — the panel draws the strip at the removal site, and a void removed
    * from "Voids under the face" must not have its undo offered under the item list below it.
    */
-  section: 'items' | 'voids';
+  section: 'items' | 'voids' | 'target';
   /** Puts it back, through `apply` like every other write. */
   restore: () => void;
 }
@@ -641,6 +707,20 @@ export interface EngraveJobState {
   /** Merge a hand edit into one thread (#445). A partial `position` is merged, not replaced. */
   updateThread: (id: string, patch: ThreadPatch) => void;
   removeThread: (id: string) => void;
+  /** Add a default 3D primitive of `kind` (#435) and return its id. */
+  addPrimitive: (kind: EngravePrimitive['kind']) => string;
+  /** Merge a hand edit into one primitive (#435). A partial `position` is merged, not replaced. */
+  updatePrimitive: (id: string, patch: PrimitivePatch) => void;
+  removePrimitive: (id: string) => void;
+  /**
+   * Set the reference object the primitives are positioned against (#435), replacing any existing
+   * one. The caller has already read, hashed and embedded the file (`targetObject.ts`); this is
+   * only the document write.
+   */
+  setTargetObject: (target: EngraveTargetObject) => void;
+  /** Merge a placement/visibility edit into the target object (#435). No-op when there is none. */
+  updateTargetObject: (patch: TargetObjectPatch) => void;
+  removeTargetObject: () => void;
   /**
    * Declare an under-surface void of `kind` (#271) and return its id. A void is a fact about the
    * blank, not an item: it is never cut, and it is what `jobDepthLimit` reads to refuse a cut
@@ -1183,6 +1263,73 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
         (job) => ({ ...job, threads: (job.threads ?? []).filter((t) => t.id !== id) }),
         removalWhat(thread),
         (job) => ({ ...job, threads: insertAt(job.threads ?? [], at, thread) }),
+      );
+    },
+
+    addPrimitive: (kind) => {
+      const primitive = newPrimitive(kind, get().job, newItemDepthFor(get().job));
+      apply((job) => ({ ...job, primitives: [...(job.primitives ?? []), primitive] }));
+      return primitive.id;
+    },
+
+    updatePrimitive: (id, patch) =>
+      apply((job) => ({
+        ...job,
+        primitives: (job.primitives ?? []).map((primitive) =>
+          primitive.id === id
+            ? ({
+                ...primitive,
+                ...patch,
+                // Merge a partial position rather than replacing the whole object.
+                position: patch.position ? { ...primitive.position, ...patch.position } : primitive.position,
+              } as EngravePrimitive)
+            : primitive,
+        ),
+      })),
+
+    removePrimitive: (id) => {
+      const list = get().job.primitives ?? [];
+      const at = list.findIndex((p) => p.id === id);
+      const primitive = list[at];
+      if (!primitive) return;
+      removeWithUndo(
+        (job) => ({ ...job, primitives: (job.primitives ?? []).filter((p) => p.id !== id) }),
+        // A primitive has `kind`/`name` but is not an `EngraveAnyItem`; `primitiveLabel` is its own
+        // namer, so a box still reads as a box rather than a generic "item".
+        primitiveLabel(primitive),
+        (job) => ({ ...job, primitives: insertAt(job.primitives ?? [], at, primitive) }),
+      );
+    },
+
+    setTargetObject: (target) => apply((job) => ({ ...job, targetObject: target })),
+
+    updateTargetObject: (patch) =>
+      apply((job) => {
+        const target = job.targetObject;
+        if (!target) return job;
+        return {
+          ...job,
+          targetObject: {
+            ...target,
+            ...patch,
+            // Merge a partial position rather than replacing the whole object.
+            position: patch.position ? { ...target.position, ...patch.position } : target.position,
+          },
+        };
+      }),
+
+    removeTargetObject: () => {
+      const target = get().job.targetObject;
+      if (!target) return;
+      removeWithUndo(
+        (job) => {
+          const next = { ...job };
+          delete next.targetObject;
+          return next;
+        },
+        `Target object “${target.name}”`,
+        (job) => ({ ...job, targetObject: target }),
+        'target',
       );
     },
 
