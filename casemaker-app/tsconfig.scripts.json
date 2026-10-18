@@ -14,5 +14,15 @@
     "skipLibCheck": true,
     "paths": { "@/*": ["./src/*"] }
   },
-  "include": ["scripts/**/*", "src/**/*"]
+  // The headless compile starts from the scripts (the Node entry points) and follows their
+  // imports; it does not make every `src/**` file a root. That is what keeps the browser-only
+  // files (JSX components, and `engine/exportTrigger.ts`) out of the no-DOM check.
+  //
+  // The two ambient declaration files are included explicitly: they are reached through the
+  // scripts' import graph but are not imported by it, so without them `import.meta.glob`,
+  // `import.meta.env`, `?url` imports, `__FEATURE_SIM__` and `opentype.js` lose their types.
+  "include": ["scripts/**/*", "src/vite-env.d.ts", "src/types/opentype-js.d.ts"],
+  // A browser download path has no headless caller: this is excluded rather than stubbed.
+  // `tests/unit/headlessImport.spec.ts` walks this config's program to prove nothing pulls it in.
+  "exclude": ["src/engine/exportTrigger.ts"]
 }

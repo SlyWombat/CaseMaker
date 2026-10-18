@@ -1240,6 +1240,16 @@ one of the app's screens did not finish drawing.
 |---|---|---|---|
 | `panel-render-error` | error | The Engrave panel or its setup flow threw while drawing. The message is the throw's own message and the panel's name; in a dev build the console prints the component stack. The rest of the window keeps working. | Press **Reload the panel**. If it throws again, report it with the console's component stack. |
 
+**Running a job without the app** (headless scripts — #483). The engine's command-line entry
+points (`scripts/engrave-job.ts` and the coupon/build scripts) run in Node. One capability needs
+the app's browser environment and is refused by name rather than throwing `document is not
+defined`. The browser-only export trigger is not a headless capability: the scripts write files
+directly, so it is excluded from the headless compile rather than stubbed.
+
+| Code | Severity | What it means in plain words | What to do |
+|---|---|---|---|
+| `headless-unsupported` | error | A headless run asked for `raster-import`: tracing a PNG, JPEG, WebP, GIF or BMP into a vector outline, which needs the browser's bitmap decoder and a canvas. The refusal names the route that asked, for example `headless-unsupported: raster-import (route: decodeImageFile)`. A `--from-3mf` design is **not** refused — the 3MF reader takes geometry only, never a texture. | Trace the image in the desktop app and import the resulting outline, or use an SVG/DXF outline or a `--from-3mf` design. |
+
 ### 8.2 G-code the simulator understands
 
 > **Status: Available**.
