@@ -24,7 +24,10 @@
  * fed straight into `engraveGenerate` by `scripts/engrave-job.ts`.
  */
 
+import { z } from 'zod';
+
 import type { CutParams, FeedsMeasurement } from '@/engine/cnc/feeds';
+import { engraveJobDocumentSchema } from '@/store/engraveJobSchema';
 import type { EngraveJob, EngraveLabel, StockMaterial } from '@/types/engraveJob';
 import type { TextFont, TextWeight } from '@/types/textLabel';
 import type { Mm } from '@/types/units';
@@ -32,30 +35,126 @@ import type { Mm } from '@/types/units';
 /** The parameter a coupon sweeps. `depth` is per item; the rest are per program. */
 export type CouponParam = 'depth' | 'feed' | 'rpm' | 'stepDown' | 'stepOver';
 
-export interface CouponSpec {
-  /** File-stem id for the programs this spec produces, e.g. `feed-sweep`. */
-  id: string;
-  /** Human title, used in each program's job name. */
-  title: string;
-  parameter: CouponParam;
-  /** The values to sweep, in coupon order (left to right). */
-  values: number[];
-  /**
-   * The job the coupon is carved from: supplies the stock, cutter, workholding, vise,
-   * sacrificial material, `minFloor` and `edgeMargin`. Its own items are DISCARDED — a coupon
-   * contains only its cells.
-   */
-  base: EngraveJob;
-  /** Cell text: cap height and centre-to-centre pitch along +X, mm. */
-  text: { size: Mm; pitch: Mm };
-  /** Centre of the FIRST cell, mm from the stock's front-left corner. Cells run in +X. */
-  origin: { x: Mm; y: Mm };
-  /** Pocket depth for a non-`depth` sweep, mm. Ignored when `parameter === 'depth'`. */
-  depth: Mm;
-  /** Cap-height font and weight for the cell text. Defaults to the base job's first label. */
-  font?: TextFont;
-  weight?: TextWeight;
-}
+// The coupon spec also has a runtime schema (#480): it is one of the documents the headless MCP
+// tools accept, and its JSON Schema is generated from here rather than hand-written. The
+// interface below is derived from it so the type and the emitted schema cannot drift.
+
+const couponTextSchema = z
+  .object({
+    size: z
+      .number()
+      .positive()
+      .describe('Cap height of the cell text in millimetres.'),
+    pitch: z
+      .number()
+      .positive()
+      .describe('Centre-to-centre spacing between cells along X, in millimetres.'),
+  })
+  .describe('Cell text metrics: cap height and centre-to-centre pitch along X, in millimetres.');
+
+const couponOriginSchema = z
+  .object({
+    x: z.number().describe('X of the first cell centre, millimetres from the stock front-left corner.'),
+    y: z.number().describe('Y of the first cell centre, millimetres from the stock front-left corner.'),
+  })
+  .describe('Centre of the first cell in millimetres from the stock front-left corner; cells run in +X.');
+
+/** The fields the in-memory spec and the file form share, described once. */
+const couponSharedFields = {
+  parameter: z
+    .enum(['depth', 'feed', 'rpm', 'stepDown', 'stepOver'])
+    .describe(
+      'The parameter to sweep. A depth sweep is ONE program with a labelled cell per value; ' +
+        'every other parameter is one program per value, because the CAM carries one feed, ' +
+        'spindle speed and step-over per program.',
+    ),
+  values: z
+    .array(z.number())
+    .min(1)
+    .describe('The values to test, in coupon order (left to right).'),
+  text: couponTextSchema,
+  origin: couponOriginSchema,
+  depth: z
+    .number()
+    .describe(
+      'Pocket depth for a non-depth sweep, in millimetres; ignored when parameter is "depth".',
+    ),
+  font: z
+    .string()
+    .min(1)
+    .optional()
+    .describe("Cap-height font id for the cell text; omit to reuse the base job's first label font."),
+  weight: z
+    .enum(['regular', 'bold'])
+    .optional()
+    .describe('Weight of the cell text; omit to reuse the base job\'s first label weight.'),
+} as const;
+
+/**
+ * The in-memory coupon spec the builder takes. `CouponSpec` is derived from this, so a field
+ * added to the type appears in the generated MCP schema in the same edit.
+ */
+export const couponSpecSchema = z
+  .object({
+    id: z.string().min(1).describe('File-stem id for the programs this spec produces, e.g. "feed-sweep".'),
+    title: z.string().min(1).describe("Human title, used in each program's job name."),
+    ...couponSharedFields,
+    base: engraveJobDocumentSchema.describe(
+      'The job the coupon is carved from: supplies the stock, cutter, workholding, vise, ' +
+        'sacrificial material, minFloor and edgeMargin. Its own items are DISCARDED; a coupon ' +
+        'contains only its cells.',
+    ),
+  })
+  .describe('A coupon: a parameter sweep engraved as a labelled grid of cells.');
+
+/**
+ * Derived from the schema, except `base`: the job document's root is `.passthrough()`, so its
+ * inferred type carries an index signature that `EngraveJob` does not. The builder takes the
+ * engine's own type — this is the same document, said without the passthrough.
+ */
+export type CouponSpec = Omit<z.infer<typeof couponSpecSchema>, 'base'> & { base: EngraveJob };
+
+/**
+ * The coupon spec as a FILE (or an MCP tool argument): `id` and `title` may be omitted and
+ * defaulted, and the base job may be named by `basePath` instead of inlined.
+ */
+export const couponSpecFileSchema = z
+  .object({
+    id: z
+      .string()
+      .min(1)
+      .optional()
+      .describe('File-stem id for the programs; omit to use the spec file name.'),
+    title: z
+      .string()
+      .min(1)
+      .optional()
+      .describe("Human title for the programs; omit to use the id, or 'coupon' if there is no id."),
+    ...couponSharedFields,
+    base: engraveJobDocumentSchema
+      .optional()
+      .describe('The base job inline. Give exactly one of "base" or "basePath".'),
+    basePath: z
+      .string()
+      .min(1)
+      .optional()
+      .describe(
+        'Path to a job document used as the base, relative to the spec file; ' +
+          'give exactly one of "base" or "basePath".',
+      ),
+  })
+  .superRefine((spec, ctx) => {
+    const hasBase = spec.base !== undefined;
+    const hasPath = spec.basePath !== undefined;
+    if (hasBase === hasPath) {
+      ctx.addIssue({
+        code: 'custom',
+        path: hasBase ? ['basePath'] : ['base'],
+        message: 'give exactly one of "base" (inline job document) or "basePath" (path to one)',
+      });
+    }
+  })
+  .describe('A coupon spec document: a parameter sweep engraved as a labelled grid of cells.');
 
 /** One program a coupon produces: a normal `EngraveJob` plus how to name and read it. */
 export interface CouponProgram {

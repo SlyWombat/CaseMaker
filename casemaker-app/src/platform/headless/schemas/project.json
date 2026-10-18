@@ -1,0 +1,3713 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "A Case Maker project: the board, the case parameters and every feature of the case's design.",
+  "properties": {
+    "antennas": {
+      "description": "Antennas placed in the design.",
+      "items": {
+        "properties": {
+          "enabled": {
+            "description": "False keeps the antenna in the document but models none.",
+            "type": "boolean"
+          },
+          "facing": {
+            "description": "Direction the antenna exits the case; omit for internal arrangements.",
+            "enum": [
+              "+x",
+              "-x",
+              "+y",
+              "-y"
+            ],
+            "type": "string"
+          },
+          "id": {
+            "description": "Unique antenna id.",
+            "type": "string"
+          },
+          "type": {
+            "description": "Antenna arrangement: internal, an external Raspberry Pi antenna, or an external mount.",
+            "enum": [
+              "internal",
+              "rpi-external",
+              "external-mount"
+            ],
+            "type": "string"
+          },
+          "uOffset": {
+            "description": "Offset along the chosen face, in millimetres.",
+            "type": "number"
+          }
+        },
+        "required": [
+          "id",
+          "type",
+          "enabled"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "board": {
+      "description": "The board the case is built around.",
+      "properties": {
+        "builtin": {
+          "description": "True for a profile bundled with the app; imported profiles are coerced to false.",
+          "type": "boolean"
+        },
+        "clonedFrom": {
+          "description": "Id of the board this profile was cloned from.",
+          "minLength": 1,
+          "type": "string"
+        },
+        "components": {
+          "description": "Components on the board that need a cutout, opening or label.",
+          "items": {
+            "properties": {
+              "cutoutMargin": {
+                "description": "Extra clearance around the cutout in millimetres; omit for none.",
+                "minimum": 0,
+                "type": "number"
+              },
+              "cutoutShape": {
+                "description": "Cutout outline: a rounded rectangle or a circle; omit for the kind default.",
+                "enum": [
+                  "rect",
+                  "round"
+                ],
+                "type": "string"
+              },
+              "facing": {
+                "description": "Face the component sits on; omit for a top-side component.",
+                "enum": [
+                  "+x",
+                  "-x",
+                  "+y",
+                  "-y",
+                  "+z",
+                  "-z"
+                ],
+                "type": "string"
+              },
+              "fixtureId": {
+                "description": "Id of a bench fixture that documents how this component is held while probing.",
+                "minLength": 1,
+                "type": "string"
+              },
+              "id": {
+                "description": "Unique id for this component within the board.",
+                "minLength": 1,
+                "type": "string"
+              },
+              "kind": {
+                "description": "What the component is; this chooses the cutout profile and how the picker draws it.",
+                "enum": [
+                  "usb-c",
+                  "usb-a",
+                  "usb-b",
+                  "micro-usb",
+                  "hdmi",
+                  "micro-hdmi",
+                  "barrel-jack",
+                  "ethernet-rj45",
+                  "gpio-header",
+                  "sd-card",
+                  "flat-cable",
+                  "fan-mount",
+                  "text-label",
+                  "antenna-connector",
+                  "custom"
+                ],
+                "type": "string"
+              },
+              "position": {
+                "description": "Component origin on the board, in millimetres: X/Y from the PCB corner, Z above the board top.",
+                "properties": {
+                  "x": {
+                    "description": "X in millimetres.",
+                    "type": "number"
+                  },
+                  "y": {
+                    "description": "Y in millimetres.",
+                    "type": "number"
+                  },
+                  "z": {
+                    "description": "Z in millimetres; Z is up, with the board top at Z 0.",
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "x",
+                  "y",
+                  "z"
+                ],
+                "type": "object"
+              },
+              "size": {
+                "description": "Component extents in millimetres, before any cutout margin is added.",
+                "properties": {
+                  "x": {
+                    "description": "X in millimetres.",
+                    "type": "number"
+                  },
+                  "y": {
+                    "description": "Y in millimetres.",
+                    "type": "number"
+                  },
+                  "z": {
+                    "description": "Z in millimetres; Z is up, with the board top at Z 0.",
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "x",
+                  "y",
+                  "z"
+                ],
+                "type": "object"
+              },
+              "text": {
+                "description": "Silkscreen legend drawn on the board, for components of kind \"text-label\".",
+                "minLength": 1,
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "kind",
+              "position",
+              "size"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "crossReference": {
+          "description": "URL of an alternate source that corroborates the dimensions.",
+          "format": "uri",
+          "type": "string"
+        },
+        "datasheetRevision": {
+          "description": "Revision of the datasheet the dimensions were read from.",
+          "type": "string"
+        },
+        "defaultStandoffHeight": {
+          "description": "Gap in millimetres between the cavity floor and the underside of the PCB.",
+          "minimum": 0,
+          "type": "number"
+        },
+        "enclosure": {
+          "description": "A finished device in a vendor shell, for the stand archetype; omit for a bare PCB.",
+          "properties": {
+            "body": {
+              "description": "The vendor shell body in plan view and depth, in millimetres.",
+              "properties": {
+                "depth": {
+                  "description": "Body depth in millimetres.",
+                  "exclusiveMinimum": 0,
+                  "type": "number"
+                },
+                "height": {
+                  "description": "Body height in millimetres.",
+                  "exclusiveMinimum": 0,
+                  "type": "number"
+                },
+                "width": {
+                  "description": "Body width in millimetres.",
+                  "exclusiveMinimum": 0,
+                  "type": "number"
+                },
+                "x": {
+                  "description": "Body origin X in millimetres.",
+                  "type": "number"
+                },
+                "y": {
+                  "description": "Body origin Y in millimetres.",
+                  "type": "number"
+                }
+              },
+              "required": [
+                "x",
+                "y",
+                "width",
+                "height",
+                "depth"
+              ],
+              "type": "object"
+            },
+            "bossDiameter": {
+              "description": "Diameter in millimetres of the shell mounting bosses.",
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            "bossHeight": {
+              "description": "Height in millimetres of the shell mounting bosses.",
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            "edgeProtrusions": {
+              "description": "Bumps on the shell face that a mount must channel around; omit for none.",
+              "items": {
+                "properties": {
+                  "depth": {
+                    "description": "How far the protrusion stands out in millimetres.",
+                    "exclusiveMinimum": 0,
+                    "type": "number"
+                  },
+                  "edge": {
+                    "description": "Body face the protrusion is on.",
+                    "enum": [
+                      "+x",
+                      "-x",
+                      "+y",
+                      "-y"
+                    ],
+                    "type": "string"
+                  },
+                  "from": {
+                    "description": "Start of the protrusion along that edge, in millimetres.",
+                    "type": "number"
+                  },
+                  "id": {
+                    "description": "Unique id for this protrusion.",
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "to": {
+                    "description": "End of the protrusion along that edge, in millimetres.",
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "id",
+                  "edge",
+                  "from",
+                  "to",
+                  "depth"
+                ],
+                "type": "object"
+              },
+              "type": "array"
+            },
+            "flangeThickness": {
+              "description": "Thickness of the device shell wall in millimetres.",
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            "sliderChannel": {
+              "description": "Rear T-slot channel a slide-on bracket locks into; omit for none.",
+              "properties": {
+                "cavityWidth": {
+                  "description": "Width in millimetres of the wide part of the T-slot.",
+                  "exclusiveMinimum": 0,
+                  "type": "number"
+                },
+                "length": {
+                  "description": "Length in millimetres of the channel along the body.",
+                  "exclusiveMinimum": 0,
+                  "type": "number"
+                },
+                "lipDepth": {
+                  "description": "Depth in millimetres of the retaining lip; must be less than totalDepth.",
+                  "exclusiveMinimum": 0,
+                  "type": "number"
+                },
+                "throatWidth": {
+                  "description": "Width in millimetres of the narrow slot opening; must be less than cavityWidth.",
+                  "exclusiveMinimum": 0,
+                  "type": "number"
+                },
+                "topFromDeviceBottom": {
+                  "description": "Channel top position in millimetres above the bottom of the device.",
+                  "exclusiveMinimum": 0,
+                  "type": "number"
+                },
+                "totalDepth": {
+                  "description": "Total depth in millimetres of the channel.",
+                  "exclusiveMinimum": 0,
+                  "type": "number"
+                }
+              },
+              "required": [
+                "cavityWidth",
+                "throatWidth",
+                "lipDepth",
+                "totalDepth",
+                "length",
+                "topFromDeviceBottom"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "flangeThickness",
+            "body",
+            "bossDiameter",
+            "bossHeight"
+          ],
+          "type": "object"
+        },
+        "id": {
+          "description": "Stable id for the board, e.g. \"esp32-devkit-v1\"; the library keys off this.",
+          "minLength": 1,
+          "type": "string"
+        },
+        "manufacturer": {
+          "description": "Board maker, e.g. \"Espressif\".",
+          "minLength": 1,
+          "type": "string"
+        },
+        "measurementMethod": {
+          "description": "How the dimensions were obtained: datasheet, open-source CAD, or a physical measurement.",
+          "enum": [
+            "datasheet",
+            "open-source-cad",
+            "physical-measurement"
+          ],
+          "type": "string"
+        },
+        "mountingHoles": {
+          "description": "Mounting holes that should receive standoff bosses; may be empty.",
+          "items": {
+            "properties": {
+              "diameter": {
+                "description": "Hole diameter in millimetres; the standoff boss and screw pass through this.",
+                "exclusiveMinimum": 0,
+                "type": "number"
+              },
+              "id": {
+                "description": "Unique id for this hole within the board.",
+                "minLength": 1,
+                "type": "string"
+              },
+              "x": {
+                "description": "Hole centre X, millimetres from the board origin at the PCB corner.",
+                "type": "number"
+              },
+              "y": {
+                "description": "Hole centre Y, millimetres from the board origin at the PCB corner.",
+                "type": "number"
+              }
+            },
+            "required": [
+              "id",
+              "x",
+              "y",
+              "diameter"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "name": {
+          "description": "Human-readable board name shown in the picker.",
+          "minLength": 1,
+          "type": "string"
+        },
+        "pcb": {
+          "description": "The bare PCB: its size determines the case cavity footprint.",
+          "properties": {
+            "size": {
+              "description": "PCB extents in millimetres; Z is the board thickness.",
+              "properties": {
+                "x": {
+                  "description": "X in millimetres.",
+                  "type": "number"
+                },
+                "y": {
+                  "description": "Y in millimetres.",
+                  "type": "number"
+                },
+                "z": {
+                  "description": "Z in millimetres; Z is up, with the board top at Z 0.",
+                  "type": "number"
+                }
+              },
+              "required": [
+                "x",
+                "y",
+                "z"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "size"
+          ],
+          "type": "object"
+        },
+        "recommendedZClearance": {
+          "description": "Clearance in millimetres to leave above the tallest component.",
+          "minimum": 0,
+          "type": "number"
+        },
+        "retentionClips": {
+          "description": "Explicit board-retention clips; omit to let the builder choose placements.",
+          "items": {
+            "properties": {
+              "edge": {
+                "description": "PCB edge the clip is placed on.",
+                "enum": [
+                  "+x",
+                  "-x",
+                  "+y",
+                  "-y"
+                ],
+                "type": "string"
+              },
+              "offset": {
+                "description": "Distance in millimetres from the start of that edge.",
+                "minimum": 0,
+                "type": "number"
+              },
+              "reach": {
+                "description": "How far in millimetres the clip reaches over the board; omit for the default.",
+                "exclusiveMinimum": 0,
+                "type": "number"
+              },
+              "style": {
+                "description": "A two-jaw clip or a shelf-only support tab; omit for \"clip\".",
+                "enum": [
+                  "clip",
+                  "shelf"
+                ],
+                "type": "string"
+              },
+              "width": {
+                "description": "Clip width along the edge in millimetres; omit for the builder default.",
+                "exclusiveMinimum": 0,
+                "type": "number"
+              }
+            },
+            "required": [
+              "edge",
+              "offset"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "retentionFootprint": {
+          "description": "Restrict board retention to this rectangle of the PCB; omit for the whole board.",
+          "properties": {
+            "height": {
+              "description": "Footprint height in millimetres.",
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            "width": {
+              "description": "Footprint width in millimetres.",
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            "x": {
+              "description": "Footprint origin X in millimetres from the PCB corner.",
+              "type": "number"
+            },
+            "y": {
+              "description": "Footprint origin Y in millimetres from the PCB corner.",
+              "type": "number"
+            }
+          },
+          "required": [
+            "x",
+            "y",
+            "width",
+            "height"
+          ],
+          "type": "object"
+        },
+        "retentionShoulder": {
+          "description": "Raise a perimeter seat rim so a face-down board sits snug; omit for off.",
+          "type": "boolean"
+        },
+        "schemaVersion": {
+          "description": "Board-profile format version; omit for version 1.",
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991,
+          "type": "integer"
+        },
+        "secondaryBoardMounts": {
+          "description": "Boards held above the floor on snap clips; omit for none.",
+          "items": {
+            "properties": {
+              "clips": {
+                "description": "Snap clips that hold the secondary board.",
+                "items": {
+                  "properties": {
+                    "edge": {
+                      "description": "Board edge the snap clip is placed on.",
+                      "enum": [
+                        "+x",
+                        "-x",
+                        "+y",
+                        "-y"
+                      ],
+                      "type": "string"
+                    },
+                    "offset": {
+                      "description": "Distance in millimetres from the start of that edge.",
+                      "minimum": 0,
+                      "type": "number"
+                    },
+                    "width": {
+                      "description": "Clip width along the edge in millimetres.",
+                      "exclusiveMinimum": 0,
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "edge",
+                    "offset"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "id": {
+                "description": "Unique id for this secondary mount.",
+                "minLength": 1,
+                "type": "string"
+              },
+              "overhang": {
+                "description": "How far in millimetres the board may overhang its supports.",
+                "exclusiveMinimum": 0,
+                "type": "number"
+              },
+              "position": {
+                "description": "Where the secondary board sits in plan view, in millimetres.",
+                "properties": {
+                  "x": {
+                    "description": "Mount origin X in millimetres.",
+                    "type": "number"
+                  },
+                  "y": {
+                    "description": "Mount origin Y in millimetres.",
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "x",
+                  "y"
+                ],
+                "type": "object"
+              },
+              "size": {
+                "description": "Secondary board extents in millimetres.",
+                "properties": {
+                  "x": {
+                    "description": "X in millimetres.",
+                    "type": "number"
+                  },
+                  "y": {
+                    "description": "Y in millimetres.",
+                    "type": "number"
+                  },
+                  "z": {
+                    "description": "Z in millimetres; Z is up, with the board top at Z 0.",
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "x",
+                  "y",
+                  "z"
+                ],
+                "type": "object"
+              },
+              "standoffHeight": {
+                "description": "Height in millimetres above the cavity floor.",
+                "minimum": 0,
+                "type": "number"
+              }
+            },
+            "required": [
+              "id",
+              "position",
+              "size",
+              "standoffHeight",
+              "clips"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "source": {
+          "description": "URL the board dimensions were taken from; required for built-in profiles.",
+          "format": "uri",
+          "type": "string"
+        },
+        "version": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "number"
+            }
+          ],
+          "description": "Publisher version of this profile (\"1.2.0\" or a counter); bump when the data changes."
+        },
+        "visualAssets": {
+          "description": "Optional model and photo assets, with the licence and source they were taken from.",
+          "properties": {
+            "glb": {
+              "description": "Path or URL of a glTF binary (GLB) model.",
+              "minLength": 1,
+              "type": "string"
+            },
+            "license": {
+              "description": "Licence that permits redistributing the assets; required with any asset.",
+              "minLength": 1,
+              "type": "string"
+            },
+            "sideImage": {
+              "description": "Path or URL of a side-on board photo.",
+              "minLength": 1,
+              "type": "string"
+            },
+            "sourceUrl": {
+              "description": "Where the assets came from; required with any asset.",
+              "format": "uri",
+              "type": "string"
+            },
+            "topImage": {
+              "description": "Path or URL of a top-down board photo.",
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          "type": "object"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "manufacturer",
+        "pcb",
+        "mountingHoles",
+        "components",
+        "defaultStandoffHeight",
+        "recommendedZClearance",
+        "builtin"
+      ],
+      "type": "object"
+    },
+    "case": {
+      "description": "The case parameters and archetypes.",
+      "properties": {
+        "badge": {
+          "description": "Badge archetype settings; omit or disable for a normal shell and lid.",
+          "properties": {
+            "bottomExtruder": {
+              "description": "Extruder index for the bottom colour.",
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991,
+              "type": "integer"
+            },
+            "cornerRadius": {
+              "description": "Badge corner radius, in millimetres.",
+              "minimum": 0,
+              "type": "number"
+            },
+            "enabled": {
+              "description": "True builds a badge blank instead of a box.",
+              "type": "boolean"
+            },
+            "height": {
+              "description": "Badge height, in millimetres.",
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            "magnetPocket": {
+              "anyOf": [
+                {
+                  "properties": {
+                    "depth": {
+                      "description": "Magnet pocket depth, in millimetres.",
+                      "exclusiveMinimum": 0,
+                      "type": "number"
+                    },
+                    "length": {
+                      "description": "Magnet pocket length, in millimetres.",
+                      "exclusiveMinimum": 0,
+                      "type": "number"
+                    },
+                    "width": {
+                      "description": "Magnet pocket width, in millimetres.",
+                      "exclusiveMinimum": 0,
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "length",
+                    "width",
+                    "depth"
+                  ],
+                  "type": "object"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Magnet pocket dimensions, or null for no pocket."
+            },
+            "print": {
+              "description": "Slicing facts the blank was printed with; omit when unknown.",
+              "properties": {
+                "firstLayerHeight": {
+                  "description": "First-layer height, in millimetres.",
+                  "exclusiveMinimum": 0,
+                  "type": "number"
+                },
+                "layerHeight": {
+                  "description": "Print layer height, in millimetres.",
+                  "exclusiveMinimum": 0,
+                  "type": "number"
+                }
+              },
+              "required": [
+                "layerHeight",
+                "firstLayerHeight"
+              ],
+              "type": "object"
+            },
+            "splitHeight": {
+              "description": "Height of the bottom colour layer, in millimetres.",
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            "thickness": {
+              "description": "Badge thickness, in millimetres.",
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            "topExtruder": {
+              "description": "Extruder index for the top colour.",
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991,
+              "type": "integer"
+            },
+            "width": {
+              "description": "Badge width, in millimetres.",
+              "exclusiveMinimum": 0,
+              "type": "number"
+            }
+          },
+          "required": [
+            "enabled",
+            "width",
+            "height",
+            "thickness",
+            "cornerRadius",
+            "splitHeight",
+            "magnetPocket",
+            "bottomExtruder",
+            "topExtruder"
+          ],
+          "type": "object"
+        },
+        "blank": {
+          "description": "Bare-blank archetype settings; omit or disable for a normal shell and lid.",
+          "properties": {
+            "cornerRadius": {
+              "description": "Plate corner radius, in millimetres.",
+              "minimum": 0,
+              "type": "number"
+            },
+            "enabled": {
+              "description": "True builds a bare plate instead of a box.",
+              "type": "boolean"
+            },
+            "height": {
+              "description": "Plate height, in millimetres.",
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            "thickness": {
+              "description": "Plate thickness, in millimetres.",
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            "width": {
+              "description": "Plate width, in millimetres.",
+              "exclusiveMinimum": 0,
+              "type": "number"
+            }
+          },
+          "required": [
+            "enabled",
+            "width",
+            "height",
+            "thickness",
+            "cornerRadius"
+          ],
+          "type": "object"
+        },
+        "boardRetention": {
+          "description": "How the board is held in the case; omit for the archetype default.",
+          "enum": [
+            "screws",
+            "snap",
+            "press-fit",
+            "none"
+          ],
+          "type": "string"
+        },
+        "bosses": {
+          "description": "Standoff bosses for the board mounting holes.",
+          "properties": {
+            "enabled": {
+              "description": "True adds mounting bosses under the board holes.",
+              "type": "boolean"
+            },
+            "holeDiameter": {
+              "description": "Boss hole diameter, in millimetres.",
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            "insertType": {
+              "description": "Screw interface the bosses provide.",
+              "enum": [
+                "self-tap",
+                "heat-set-m2.5",
+                "heat-set-m3",
+                "pass-through",
+                "none"
+              ],
+              "type": "string"
+            },
+            "outerDiameter": {
+              "description": "Boss outer diameter, in millimetres.",
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            "position": {
+              "description": "Whether bosses grow from the floor ('bottom') or hang from the lid ('top'); omit for bottom.",
+              "enum": [
+                "bottom",
+                "top"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "enabled",
+            "insertType",
+            "outerDiameter",
+            "holeDiameter"
+          ],
+          "type": "object"
+        },
+        "clearanceTweaks": {
+          "description": "Per-side overrides of internalClearance, in millimetres; omit to use it on every side.",
+          "properties": {
+            "xMax": {
+              "description": "Clearance on the +X side, in millimetres.",
+              "minimum": 0,
+              "type": "number"
+            },
+            "xMin": {
+              "description": "Clearance on the −X side, in millimetres.",
+              "minimum": 0,
+              "type": "number"
+            },
+            "yMax": {
+              "description": "Clearance on the +Y side, in millimetres.",
+              "minimum": 0,
+              "type": "number"
+            },
+            "yMin": {
+              "description": "Clearance on the −Y side, in millimetres.",
+              "minimum": 0,
+              "type": "number"
+            }
+          },
+          "required": [
+            "xMin",
+            "xMax",
+            "yMin",
+            "yMax"
+          ],
+          "type": "object"
+        },
+        "cornerRadius": {
+          "description": "Outer vertical corner radius, in millimetres.",
+          "minimum": 0,
+          "type": "number"
+        },
+        "customCutouts": {
+          "description": "Freeform user-placed cutouts; omit for none.",
+          "items": {
+            "properties": {
+              "enabled": {
+                "description": "False keeps the cutout in the document but cuts nothing.",
+                "type": "boolean"
+              },
+              "face": {
+                "description": "Case face the cutout is on.",
+                "enum": [
+                  "top",
+                  "bottom",
+                  "front",
+                  "back",
+                  "left",
+                  "right"
+                ],
+                "type": "string"
+              },
+              "height": {
+                "description": "Cutout height, in millimetres.",
+                "exclusiveMinimum": 0,
+                "type": "number"
+              },
+              "id": {
+                "description": "Unique cutout id.",
+                "type": "string"
+              },
+              "label": {
+                "description": "Optional label shown with the cutout.",
+                "type": "string"
+              },
+              "rotationDeg": {
+                "description": "Rotation on the face, in degrees; omit for 0.",
+                "type": "number"
+              },
+              "shape": {
+                "description": "Cutout outline.",
+                "enum": [
+                  "rect",
+                  "round",
+                  "slot"
+                ],
+                "type": "string"
+              },
+              "u": {
+                "description": "Position along the face, in millimetres.",
+                "type": "number"
+              },
+              "v": {
+                "description": "Position across the face, in millimetres.",
+                "type": "number"
+              },
+              "width": {
+                "description": "Cutout width, in millimetres.",
+                "exclusiveMinimum": 0,
+                "type": "number"
+              }
+            },
+            "required": [
+              "id",
+              "face",
+              "shape",
+              "u",
+              "v",
+              "width",
+              "height",
+              "enabled"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "extraCavityZ": {
+          "description": "Extra cavity depth above the board, in millimetres.",
+          "minimum": 0,
+          "type": "number"
+        },
+        "fit": {
+          "description": "Project print-fit variant; omit for 'tight'.",
+          "enum": [
+            "tight",
+            "standard",
+            "loose"
+          ],
+          "type": "string"
+        },
+        "floorThickness": {
+          "description": "Case floor thickness, in millimetres.",
+          "exclusiveMinimum": 0,
+          "type": "number"
+        },
+        "hinge": {
+          "description": "Barrel hinge settings; omit for no hinge.",
+          "properties": {
+            "enabled": {
+              "description": "False keeps the hinge in the document but builds none.",
+              "type": "boolean"
+            },
+            "face": {
+              "description": "Case side face the hinge is on.",
+              "enum": [
+                "+x",
+                "-x",
+                "+y",
+                "-y"
+              ],
+              "type": "string"
+            },
+            "hingeLength": {
+              "description": "Hinge length along the face, in millimetres.",
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            "id": {
+              "description": "Unique hinge id.",
+              "type": "string"
+            },
+            "knuckleClearance": {
+              "description": "Clearance between knuckles, in millimetres.",
+              "minimum": 0,
+              "type": "number"
+            },
+            "knuckleOuterDiameter": {
+              "description": "Knuckle outer diameter, in millimetres.",
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            "numKnuckles": {
+              "description": "Number of knuckles (at least 3).",
+              "maximum": 9007199254740991,
+              "minimum": 3,
+              "type": "integer"
+            },
+            "pinDiameter": {
+              "description": "Hinge pin diameter, in millimetres.",
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            "pinMode": {
+              "description": "Whether the pin prints separately or as part of the hinge.",
+              "enum": [
+                "separate",
+                "print-in-place"
+              ],
+              "type": "string"
+            },
+            "positioning": {
+              "description": "How knuckles are distributed along the face.",
+              "enum": [
+                "continuous",
+                "pair-at-ends",
+                "centered"
+              ],
+              "type": "string"
+            },
+            "stopAngle": {
+              "description": "Opening stop angle in degrees; omit for no stop.",
+              "type": "number"
+            },
+            "style": {
+              "description": "Hinge style.",
+              "enum": [
+                "external-pin",
+                "print-in-place",
+                "piano-continuous",
+                "piano-segmented",
+                "pip-pivot",
+                "hardware-screw"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "id",
+            "style",
+            "face",
+            "numKnuckles",
+            "knuckleOuterDiameter",
+            "pinDiameter",
+            "knuckleClearance",
+            "positioning",
+            "hingeLength",
+            "pinMode",
+            "enabled"
+          ],
+          "type": "object"
+        },
+        "insert": {
+          "description": "Tool-insert holder archetype settings; omit or disable for a normal shell and lid.",
+          "properties": {
+            "chamfer": {
+              "description": "Chamfer on the pocket mouths, in millimetres.",
+              "minimum": 0,
+              "type": "number"
+            },
+            "clearance": {
+              "description": "Clearance around each tool pocket, in millimetres.",
+              "minimum": 0,
+              "type": "number"
+            },
+            "cornerRadius": {
+              "description": "Plate corner radius, in millimetres.",
+              "minimum": 0,
+              "type": "number"
+            },
+            "depth": {
+              "description": "Plate depth, in millimetres.",
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            "enabled": {
+              "description": "True builds a tool-insert holder instead of a box.",
+              "type": "boolean"
+            },
+            "floor": {
+              "description": "Material left under each pocket, in millimetres.",
+              "minimum": 0,
+              "type": "number"
+            },
+            "items": {
+              "description": "Tool pockets cut into the plate.",
+              "items": {
+                "properties": {
+                  "depth": {
+                    "description": "Pocket depth, in millimetres.",
+                    "exclusiveMinimum": 0,
+                    "type": "number"
+                  },
+                  "id": {
+                    "description": "Unique tool-pocket id.",
+                    "type": "string"
+                  },
+                  "shape": {
+                    "description": "Pocket cross-section.",
+                    "enum": [
+                      "round",
+                      "hex"
+                    ],
+                    "type": "string"
+                  },
+                  "size": {
+                    "description": "Pocket across-flats or diameter, in millimetres.",
+                    "exclusiveMinimum": 0,
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "id",
+                  "shape",
+                  "size",
+                  "depth"
+                ],
+                "type": "object"
+              },
+              "type": "array"
+            },
+            "magnetSize": {
+              "description": "Magnet size as diameter×thickness, in millimetres; used with magnetic retention.",
+              "enum": [
+                "6x2",
+                "8x3",
+                "10x2"
+              ],
+              "type": "string"
+            },
+            "pitchGap": {
+              "description": "Gap between adjacent pockets, in millimetres.",
+              "minimum": 0,
+              "type": "number"
+            },
+            "retention": {
+              "description": "How tools are held: friction or magnets; omit for 'friction'.",
+              "enum": [
+                "friction",
+                "magnet"
+              ],
+              "type": "string"
+            },
+            "thickness": {
+              "description": "Plate thickness, in millimetres.",
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            "width": {
+              "description": "Plate width, in millimetres.",
+              "exclusiveMinimum": 0,
+              "type": "number"
+            }
+          },
+          "required": [
+            "enabled",
+            "width",
+            "depth",
+            "thickness",
+            "cornerRadius",
+            "clearance",
+            "chamfer",
+            "floor",
+            "pitchGap",
+            "items"
+          ],
+          "type": "object"
+        },
+        "internalClearance": {
+          "description": "Gap between the board and the cavity walls, in millimetres.",
+          "minimum": 0,
+          "type": "number"
+        },
+        "joint": {
+          "description": "How the lid joins the case: snap-fit, screw-down, or flat-lid (the legacy value \"sliding\" is read as flat-lid).",
+          "enum": [
+            "snap-fit",
+            "screw-down",
+            "flat-lid"
+          ],
+          "type": "string"
+        },
+        "latches": {
+          "description": "Spring-cam locking latches; omit for none.",
+          "items": {
+            "properties": {
+              "enabled": {
+                "description": "False keeps the latch in the document but builds none.",
+                "type": "boolean"
+              },
+              "height": {
+                "description": "Latch height, in millimetres.",
+                "exclusiveMinimum": 0,
+                "type": "number"
+              },
+              "id": {
+                "description": "Unique latch id.",
+                "type": "string"
+              },
+              "throw": {
+                "description": "Cam throw, in millimetres.",
+                "exclusiveMinimum": 0,
+                "type": "number"
+              },
+              "tolerance": {
+                "description": "Cam/striker engagement tolerance, in millimetres (at most 1).",
+                "maximum": 1,
+                "minimum": 0,
+                "type": "number"
+              },
+              "uPosition": {
+                "description": "Position along that wall, in millimetres.",
+                "type": "number"
+              },
+              "wall": {
+                "description": "Case wall the latch is on.",
+                "enum": [
+                  "+x",
+                  "-x",
+                  "+y",
+                  "-y"
+                ],
+                "type": "string"
+              },
+              "width": {
+                "description": "Latch width, in millimetres.",
+                "exclusiveMinimum": 0,
+                "type": "number"
+              }
+            },
+            "required": [
+              "id",
+              "wall",
+              "uPosition",
+              "enabled",
+              "throw",
+              "width",
+              "height"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "lidCavityHeight": {
+          "description": "Height of a shell lid cavity, in millimetres; 0 or omitted means a flat plate lid.",
+          "minimum": 0,
+          "type": "number"
+        },
+        "lidRecess": {
+          "description": "True cuts a recess so the lid seats into the case; omit for a flush lid.",
+          "type": "boolean"
+        },
+        "lidThickness": {
+          "description": "Lid thickness, in millimetres.",
+          "exclusiveMinimum": 0,
+          "type": "number"
+        },
+        "magnetPockets": {
+          "description": "Magnet pockets for magnetic retention; omit for none.",
+          "items": {
+            "properties": {
+              "enabled": {
+                "description": "False keeps the pocket in the document but cuts nothing.",
+                "type": "boolean"
+              },
+              "face": {
+                "description": "Case face the pocket is cut into.",
+                "enum": [
+                  "+x",
+                  "-x",
+                  "+y",
+                  "-y",
+                  "+z",
+                  "-z"
+                ],
+                "type": "string"
+              },
+              "id": {
+                "description": "Unique magnet-pocket id.",
+                "type": "string"
+              },
+              "label": {
+                "description": "Optional label shown with the pocket.",
+                "type": "string"
+              },
+              "retention": {
+                "description": "How the magnet is retained; omit for the builder default.",
+                "enum": [
+                  "glue",
+                  "press",
+                  "captured"
+                ],
+                "type": "string"
+              },
+              "size": {
+                "description": "Magnet size as diameter×thickness, in millimetres.",
+                "enum": [
+                  "6x2",
+                  "8x3",
+                  "10x2"
+                ],
+                "type": "string"
+              },
+              "u": {
+                "description": "Position along the face, in millimetres.",
+                "type": "number"
+              },
+              "v": {
+                "description": "Position across the face, in millimetres.",
+                "type": "number"
+              }
+            },
+            "required": [
+              "id",
+              "face",
+              "u",
+              "v",
+              "size",
+              "enabled"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "rack": {
+          "description": "Mini-rack archetype settings; omit or disable for a normal shell and lid.",
+          "properties": {
+            "accessories": {
+              "description": "Accessories fitted into the rack; omit for none.",
+              "items": {
+                "properties": {
+                  "frontPlate": {
+                    "description": "True adds a front plate.",
+                    "type": "boolean"
+                  },
+                  "id": {
+                    "description": "Unique accessory id.",
+                    "type": "string"
+                  },
+                  "shelfDepth": {
+                    "anyOf": [
+                      {
+                        "exclusiveMinimum": 0,
+                        "type": "number"
+                      },
+                      {
+                        "const": "full",
+                        "type": "string"
+                      }
+                    ],
+                    "description": "Shelf depth in millimetres, or \"full\" for the whole rack depth."
+                  },
+                  "slots": {
+                    "description": "Rack units the accessory spans (1–12).",
+                    "maximum": 12,
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "type": {
+                    "description": "Accessory kind.",
+                    "enum": [
+                      "blank",
+                      "shelf",
+                      "keystone",
+                      "cable-tray"
+                    ],
+                    "type": "string"
+                  },
+                  "vented": {
+                    "description": "True cuts vents in the accessory.",
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "id",
+                  "type"
+                ],
+                "type": "object"
+              },
+              "type": "array"
+            },
+            "assembledExport": {
+              "description": "True exports the rack assembled rather than as separate parts.",
+              "type": "boolean"
+            },
+            "cableNotches": {
+              "description": "Cable pass-through notches; omit for none.",
+              "properties": {
+                "count": {
+                  "description": "Number of notches (1–12).",
+                  "maximum": 12,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                "depth": {
+                  "description": "Notch depth, in millimetres.",
+                  "exclusiveMinimum": 0,
+                  "type": "number"
+                },
+                "plate": {
+                  "description": "Which plate carries the notches.",
+                  "enum": [
+                    "top",
+                    "bottom",
+                    "both"
+                  ],
+                  "type": "string"
+                },
+                "width": {
+                  "description": "Notch width, in millimetres.",
+                  "exclusiveMinimum": 0,
+                  "type": "number"
+                }
+              },
+              "required": [
+                "plate",
+                "count",
+                "width",
+                "depth"
+              ],
+              "type": "object"
+            },
+            "depth": {
+              "description": "Rack depth, in millimetres.",
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            "enabled": {
+              "description": "True builds the rack assembly instead of a box.",
+              "type": "boolean"
+            },
+            "fans": {
+              "description": "Fans mounted in the rack sides; omit for none.",
+              "items": {
+                "properties": {
+                  "id": {
+                    "description": "Unique fan id.",
+                    "type": "string"
+                  },
+                  "side": {
+                    "description": "Rack side the fan is on.",
+                    "enum": [
+                      "left",
+                      "right"
+                    ],
+                    "type": "string"
+                  },
+                  "size": {
+                    "anyOf": [
+                      {
+                        "const": 40,
+                        "type": "number"
+                      },
+                      {
+                        "const": 60,
+                        "type": "number"
+                      },
+                      {
+                        "const": 80,
+                        "type": "number"
+                      },
+                      {
+                        "const": 92,
+                        "type": "number"
+                      },
+                      {
+                        "const": 120,
+                        "type": "number"
+                      }
+                    ],
+                    "description": "Fan size in millimetres (40, 60, 80, 92 or 120)."
+                  },
+                  "y": {
+                    "description": "Fan centre along the rack depth, in millimetres.",
+                    "exclusiveMinimum": 0,
+                    "type": "number"
+                  },
+                  "z": {
+                    "description": "Fan centre above the rack bottom, in millimetres.",
+                    "exclusiveMinimum": 0,
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "id",
+                  "side",
+                  "size",
+                  "y",
+                  "z"
+                ],
+                "type": "object"
+              },
+              "type": "array"
+            },
+            "fit": {
+              "description": "Rack plate-tab fit; omit for 'tight'.",
+              "enum": [
+                "tight",
+                "standard",
+                "loose"
+              ],
+              "type": "string"
+            },
+            "floorRibs": {
+              "description": "True adds ribs to the rack floor.",
+              "type": "boolean"
+            },
+            "printer": {
+              "description": "Deprecated home of the printer bed; the project-level printer takes precedence.",
+              "properties": {
+                "preset": {
+                  "description": "Name of the printer preset these bounds came from.",
+                  "type": "string"
+                },
+                "x": {
+                  "description": "Build volume along X, in millimetres.",
+                  "exclusiveMinimum": 0,
+                  "type": "number"
+                },
+                "y": {
+                  "description": "Build volume along Y, in millimetres.",
+                  "exclusiveMinimum": 0,
+                  "type": "number"
+                },
+                "z": {
+                  "description": "Build volume along Z, in millimetres.",
+                  "exclusiveMinimum": 0,
+                  "type": "number"
+                }
+              },
+              "required": [
+                "x",
+                "y",
+                "z"
+              ],
+              "type": "object"
+            },
+            "slots": {
+              "description": "Number of rack units (2–40).",
+              "maximum": 40,
+              "minimum": 2,
+              "type": "integer"
+            },
+            "wallMount": {
+              "description": "How the rack mounts to a wall; omit for no wall mount.",
+              "enum": [
+                "none",
+                "ears",
+                "cleat",
+                "keyhole"
+              ],
+              "type": "string"
+            },
+            "width": {
+              "description": "Rack width (front-to-back panel span), in millimetres.",
+              "exclusiveMinimum": 0,
+              "type": "number"
+            }
+          },
+          "required": [
+            "enabled",
+            "width",
+            "depth",
+            "slots"
+          ],
+          "type": "object"
+        },
+        "rugged": {
+          "description": "Rugged exterior settings; omit or disable for a plain shell.",
+          "properties": {
+            "corners": {
+              "description": "Protective corner caps.",
+              "properties": {
+                "capHeight": {
+                  "description": "Corner cap height, in millimetres; omit for 12 mm.",
+                  "exclusiveMinimum": 0,
+                  "type": "number"
+                },
+                "enabled": {
+                  "description": "True adds protective corner caps.",
+                  "type": "boolean"
+                },
+                "flexBumper": {
+                  "description": "True cuts a flexible bumper profile into the caps.",
+                  "type": "boolean"
+                },
+                "radius": {
+                  "description": "Corner cap radius, in millimetres.",
+                  "exclusiveMinimum": 0,
+                  "type": "number"
+                }
+              },
+              "required": [
+                "enabled",
+                "radius",
+                "flexBumper"
+              ],
+              "type": "object"
+            },
+            "enabled": {
+              "description": "True builds the rugged exterior features.",
+              "type": "boolean"
+            },
+            "feet": {
+              "description": "Feet or pads on the case bottom.",
+              "properties": {
+                "enabled": {
+                  "description": "True adds feet.",
+                  "type": "boolean"
+                },
+                "padDiameter": {
+                  "description": "Foot diameter, in millimetres.",
+                  "exclusiveMinimum": 0,
+                  "type": "number"
+                },
+                "padHeight": {
+                  "description": "Foot height, in millimetres.",
+                  "exclusiveMinimum": 0,
+                  "type": "number"
+                },
+                "pads": {
+                  "anyOf": [
+                    {
+                      "const": 4,
+                      "type": "number"
+                    },
+                    {
+                      "const": 6,
+                      "type": "number"
+                    }
+                  ],
+                  "description": "Number of feet: 4 or 6."
+                }
+              },
+              "required": [
+                "enabled",
+                "pads",
+                "padDiameter",
+                "padHeight"
+              ],
+              "type": "object"
+            },
+            "ribbing": {
+              "description": "Exterior ribbing.",
+              "properties": {
+                "clearBand": {
+                  "description": "Band kept clear of ribs around the rim, in millimetres.",
+                  "minimum": 0,
+                  "type": "number"
+                },
+                "direction": {
+                  "description": "Rib direction.",
+                  "enum": [
+                    "vertical",
+                    "horizontal"
+                  ],
+                  "type": "string"
+                },
+                "enabled": {
+                  "description": "True adds exterior ribs.",
+                  "type": "boolean"
+                },
+                "ribCount": {
+                  "description": "Number of ribs.",
+                  "maximum": 9007199254740991,
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "ribDepth": {
+                  "description": "Rib depth, in millimetres.",
+                  "exclusiveMinimum": 0,
+                  "type": "number"
+                }
+              },
+              "required": [
+                "enabled",
+                "direction",
+                "ribCount",
+                "ribDepth",
+                "clearBand"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "enabled",
+            "corners",
+            "ribbing",
+            "feet"
+          ],
+          "type": "object"
+        },
+        "seal": {
+          "description": "Waterproof gasket settings; omit or disable for no seal geometry.",
+          "properties": {
+            "compressionFactor": {
+              "description": "Fraction the gasket is compressed when closed (0.1–0.4).",
+              "maximum": 0.4,
+              "minimum": 0.1,
+              "type": "number"
+            },
+            "depth": {
+              "description": "Gasket channel depth, in millimetres.",
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            "enabled": {
+              "description": "True cuts a gasket channel and tongue.",
+              "type": "boolean"
+            },
+            "gasketClearance": {
+              "description": "Extra gasket clearance, in millimetres (at most 1); omit for the printer default.",
+              "maximum": 1,
+              "minimum": 0,
+              "type": "number"
+            },
+            "gasketMaterial": {
+              "description": "Gasket material.",
+              "enum": [
+                "tpu",
+                "eva",
+                "epdm"
+              ],
+              "type": "string"
+            },
+            "mode": {
+              "description": "Closure style: a recessed lid or a clamshell; omit for 'recess'.",
+              "enum": [
+                "recess",
+                "clamshell"
+              ],
+              "type": "string"
+            },
+            "profile": {
+              "description": "Gasket cross-section: flat or O-ring.",
+              "enum": [
+                "flat",
+                "o-ring"
+              ],
+              "type": "string"
+            },
+            "width": {
+              "description": "Gasket channel width, in millimetres.",
+              "exclusiveMinimum": 0,
+              "type": "number"
+            }
+          },
+          "required": [
+            "enabled",
+            "profile",
+            "width",
+            "depth",
+            "compressionFactor",
+            "gasketMaterial"
+          ],
+          "type": "object"
+        },
+        "snapCatches": {
+          "description": "Snap catches that hold the lid on; omit for none.",
+          "items": {
+            "properties": {
+              "barbType": {
+                "default": "hook",
+                "description": "Barb cross-section; omitted values load as \"hook\".",
+                "enum": [
+                  "hook",
+                  "asymmetric-ramp",
+                  "symmetric-ramp",
+                  "half-round",
+                  "ball-socket"
+                ],
+                "type": "string"
+              },
+              "cantileverOn": {
+                "default": "lid",
+                "description": "Which part carries the flexing cantilever; omitted values load as \"lid\".",
+                "enum": [
+                  "lid",
+                  "case"
+                ],
+                "type": "string"
+              },
+              "enabled": {
+                "description": "False keeps the catch in the document but builds none.",
+                "type": "boolean"
+              },
+              "fit": {
+                "description": "Per-catch fit override; omit to inherit case.fit.",
+                "enum": [
+                  "tight",
+                  "standard",
+                  "loose"
+                ],
+                "type": "string"
+              },
+              "id": {
+                "description": "Unique snap-catch id.",
+                "type": "string"
+              },
+              "insertionRampDeg": {
+                "description": "Insertion ramp angle in degrees; omit for the barb default.",
+                "type": "number"
+              },
+              "retentionRampDeg": {
+                "description": "Retention ramp angle in degrees; omit for the barb default.",
+                "type": "number"
+              },
+              "uPosition": {
+                "description": "Position along that wall, in millimetres.",
+                "type": "number"
+              },
+              "wall": {
+                "description": "Case wall the catch is on.",
+                "enum": [
+                  "+x",
+                  "-x",
+                  "+y",
+                  "-y"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "wall",
+              "uPosition",
+              "enabled"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "snapType": {
+          "description": "Snap style: small barbs or a full-length lid snap.",
+          "enum": [
+            "barb",
+            "full-lid"
+          ],
+          "type": "string"
+        },
+        "splitForPrint": {
+          "description": "Split the shell into bed-sized pieces; omit for no split.",
+          "type": "boolean"
+        },
+        "stand": {
+          "description": "Desk-stand archetype settings; omit or disable for a normal shell and lid.",
+          "properties": {
+            "baseDepth": {
+              "description": "Foot depth, in millimetres.",
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            "baseThickness": {
+              "description": "Foot thickness, in millimetres.",
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            "bezelMargin": {
+              "description": "Margin between the device and the bezel, in millimetres.",
+              "minimum": 0,
+              "type": "number"
+            },
+            "drywallHeadDiameter": {
+              "description": "Drywall screw head diameter, in millimetres.",
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            "drywallScrewDiameter": {
+              "description": "Drywall screw shank diameter, in millimetres.",
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            "enabled": {
+              "description": "True builds a desk/wall stand instead of a case.",
+              "type": "boolean"
+            },
+            "frameThickness": {
+              "description": "Frame thickness, in millimetres.",
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            "gussetHeightFraction": {
+              "description": "Gusset height as a fraction of the frame height (0.1–1).",
+              "maximum": 1,
+              "minimum": 0.1,
+              "type": "number"
+            },
+            "gussetThickness": {
+              "description": "Gusset thickness, in millimetres.",
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            "mount": {
+              "description": "How the stand is mounted.",
+              "enum": [
+                "desk",
+                "wall",
+                "slider",
+                "pocket"
+              ],
+              "type": "string"
+            },
+            "openingClearance": {
+              "description": "Clearance in the device opening, in millimetres.",
+              "minimum": 0,
+              "type": "number"
+            },
+            "plateBorder": {
+              "description": "Border around the mounting plate, in millimetres.",
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            "plateThickness": {
+              "description": "Mounting plate thickness, in millimetres.",
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            "screwHoleDiameter": {
+              "description": "Screw hole diameter, in millimetres.",
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            "shroudDepth": {
+              "description": "Shroud depth, in millimetres.",
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            "shroudWall": {
+              "description": "Shroud wall thickness, in millimetres.",
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            "tiltAngleDeg": {
+              "description": "Tilt of the device from vertical, in degrees (0–60).",
+              "maximum": 60,
+              "minimum": 0,
+              "type": "number"
+            }
+          },
+          "required": [
+            "enabled",
+            "tiltAngleDeg",
+            "frameThickness",
+            "bezelMargin",
+            "openingClearance",
+            "screwHoleDiameter",
+            "baseDepth",
+            "baseThickness",
+            "gussetThickness",
+            "gussetHeightFraction"
+          ],
+          "type": "object"
+        },
+        "toolbox": {
+          "description": "Stacking-toolbox archetype settings; omit or disable for a normal shell and lid.",
+          "properties": {
+            "depth": {
+              "description": "Bin depth, in millimetres.",
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            "enabled": {
+              "description": "True builds the stacking toolbox instead of a box.",
+              "type": "boolean"
+            },
+            "grid": {
+              "description": "True adds the divider lattice to the bin floor.",
+              "type": "boolean"
+            },
+            "height": {
+              "description": "Bin height, in millimetres.",
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            "pegs": {
+              "description": "Drop-in dividers standing in the bin; omit for none.",
+              "items": {
+                "properties": {
+                  "axis": {
+                    "description": "Axis the divider runs along.",
+                    "enum": [
+                      "x",
+                      "y"
+                    ],
+                    "type": "string"
+                  },
+                  "enabled": {
+                    "description": "False keeps the divider in the document but builds none.",
+                    "type": "boolean"
+                  },
+                  "height": {
+                    "description": "Divider height, in millimetres.",
+                    "exclusiveMinimum": 0,
+                    "type": "number"
+                  },
+                  "id": {
+                    "description": "Unique divider id.",
+                    "type": "string"
+                  },
+                  "spans": {
+                    "description": "Divider span across the bin, in lattice units.",
+                    "exclusiveMinimum": 0,
+                    "type": "number"
+                  },
+                  "thickness": {
+                    "description": "Divider thickness, in millimetres.",
+                    "exclusiveMinimum": 0,
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "id",
+                  "spans",
+                  "height",
+                  "thickness",
+                  "axis",
+                  "enabled"
+                ],
+                "type": "object"
+              },
+              "type": "array"
+            },
+            "width": {
+              "description": "Bin width, in millimetres.",
+              "exclusiveMinimum": 0,
+              "type": "number"
+            }
+          },
+          "required": [
+            "enabled",
+            "width",
+            "depth",
+            "height",
+            "grid"
+          ],
+          "type": "object"
+        },
+        "ventilation": {
+          "description": "Ventilation openings cut into the case.",
+          "properties": {
+            "coverage": {
+              "description": "Fraction of the surface the vents cover, from 0 to 1.",
+              "maximum": 1,
+              "minimum": 0,
+              "type": "number"
+            },
+            "enabled": {
+              "description": "True cuts ventilation openings.",
+              "type": "boolean"
+            },
+            "pattern": {
+              "description": "Vent opening pattern.",
+              "enum": [
+                "none",
+                "slots",
+                "hex",
+                "chevron"
+              ],
+              "type": "string"
+            },
+            "surfaces": {
+              "description": "Surfaces the vent pattern is cut into; omit for ['back'].",
+              "items": {
+                "enum": [
+                  "top",
+                  "bottom",
+                  "front",
+                  "back",
+                  "left",
+                  "right"
+                ],
+                "type": "string"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "enabled",
+            "pattern",
+            "coverage"
+          ],
+          "type": "object"
+        },
+        "wallThickness": {
+          "description": "Case wall thickness, in millimetres.",
+          "exclusiveMinimum": 0,
+          "type": "number"
+        },
+        "zClearance": {
+          "description": "Gap above the board, in millimetres.",
+          "minimum": 0,
+          "type": "number"
+        }
+      },
+      "required": [
+        "wallThickness",
+        "floorThickness",
+        "lidThickness",
+        "cornerRadius",
+        "internalClearance",
+        "zClearance",
+        "joint",
+        "ventilation",
+        "bosses"
+      ],
+      "type": "object"
+    },
+    "createdAt": {
+      "description": "When the project was created.",
+      "type": "string"
+    },
+    "customDisplays": {
+      "description": "Display profiles embedded in the project.",
+      "items": {
+        "properties": {
+          "activeArea": {
+            "description": "The lit area of the display, in millimetres.",
+            "properties": {
+              "offsetX": {
+                "description": "Active area X offset from the PCB centre, in millimetres.",
+                "type": "number"
+              },
+              "offsetY": {
+                "description": "Active area Y offset from the PCB centre, in millimetres.",
+                "type": "number"
+              },
+              "x": {
+                "description": "Active area width, in millimetres.",
+                "exclusiveMinimum": 0,
+                "type": "number"
+              },
+              "y": {
+                "description": "Active area height, in millimetres.",
+                "exclusiveMinimum": 0,
+                "type": "number"
+              }
+            },
+            "required": [
+              "x",
+              "y",
+              "offsetX",
+              "offsetY"
+            ],
+            "type": "object"
+          },
+          "bezel": {
+            "description": "Bezel widths around the active area, in millimetres.",
+            "properties": {
+              "bottom": {
+                "description": "Bezel width at the bottom, in millimetres.",
+                "minimum": 0,
+                "type": "number"
+              },
+              "left": {
+                "description": "Bezel width on the left, in millimetres.",
+                "minimum": 0,
+                "type": "number"
+              },
+              "right": {
+                "description": "Bezel width on the right, in millimetres.",
+                "minimum": 0,
+                "type": "number"
+              },
+              "top": {
+                "description": "Bezel width at the top, in millimetres.",
+                "minimum": 0,
+                "type": "number"
+              }
+            },
+            "required": [
+              "top",
+              "right",
+              "bottom",
+              "left"
+            ],
+            "type": "object"
+          },
+          "builtin": {
+            "description": "True for a profile bundled with the app.",
+            "type": "boolean"
+          },
+          "compatibleBoards": {
+            "description": "Ids of the main boards this display can be paired with.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "components": {
+            "description": "Components on the display board that need a cutout or opening.",
+            "items": {
+              "properties": {
+                "cutoutMargin": {
+                  "description": "Extra clearance around the cutout in millimetres; omit for none.",
+                  "minimum": 0,
+                  "type": "number"
+                },
+                "cutoutShape": {
+                  "description": "Cutout outline: a rounded rectangle or a circle; omit for the kind default.",
+                  "enum": [
+                    "rect",
+                    "round"
+                  ],
+                  "type": "string"
+                },
+                "facing": {
+                  "description": "Face the component sits on; omit for a top-side component.",
+                  "enum": [
+                    "+x",
+                    "-x",
+                    "+y",
+                    "-y",
+                    "+z"
+                  ],
+                  "type": "string"
+                },
+                "id": {
+                  "description": "Unique id for this component within the display.",
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "kind": {
+                  "description": "What the component is; this chooses the cutout profile and how the picker draws it.",
+                  "enum": [
+                    "usb-c",
+                    "usb-a",
+                    "usb-b",
+                    "micro-usb",
+                    "hdmi",
+                    "micro-hdmi",
+                    "barrel-jack",
+                    "ethernet-rj45",
+                    "gpio-header",
+                    "sd-card",
+                    "flat-cable",
+                    "fan-mount",
+                    "text-label",
+                    "antenna-connector",
+                    "custom"
+                  ],
+                  "type": "string"
+                },
+                "position": {
+                  "description": "Component origin on the display board, in millimetres.",
+                  "properties": {
+                    "x": {
+                      "description": "X in millimetres.",
+                      "type": "number"
+                    },
+                    "y": {
+                      "description": "Y in millimetres.",
+                      "type": "number"
+                    },
+                    "z": {
+                      "description": "Z in millimetres.",
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "x",
+                    "y",
+                    "z"
+                  ],
+                  "type": "object"
+                },
+                "size": {
+                  "description": "Component extents in millimetres.",
+                  "properties": {
+                    "x": {
+                      "description": "X in millimetres.",
+                      "type": "number"
+                    },
+                    "y": {
+                      "description": "Y in millimetres.",
+                      "type": "number"
+                    },
+                    "z": {
+                      "description": "Z in millimetres.",
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "x",
+                    "y",
+                    "z"
+                  ],
+                  "type": "object"
+                }
+              },
+              "required": [
+                "id",
+                "kind",
+                "position",
+                "size"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "id": {
+            "description": "Stable id for the display profile.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "interface": {
+            "description": "Electrical interface the display uses.",
+            "enum": [
+              "dsi",
+              "hdmi",
+              "spi",
+              "i2c",
+              "parallel-rgb"
+            ],
+            "type": "string"
+          },
+          "manufacturer": {
+            "description": "Display maker.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "mounting": {
+            "description": "How the display is mounted.",
+            "enum": [
+              "gpio-mate",
+              "shield",
+              "standalone",
+              "corner-screws"
+            ],
+            "type": "string"
+          },
+          "mountingHoles": {
+            "description": "Mounting holes on the display; may be empty.",
+            "items": {
+              "properties": {
+                "diameter": {
+                  "description": "Hole diameter in millimetres.",
+                  "exclusiveMinimum": 0,
+                  "type": "number"
+                },
+                "id": {
+                  "description": "Unique id for this hole within the display.",
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "x": {
+                  "description": "Hole centre X, millimetres from the board origin.",
+                  "type": "number"
+                },
+                "y": {
+                  "description": "Hole centre Y, millimetres from the board origin.",
+                  "type": "number"
+                }
+              },
+              "required": [
+                "id",
+                "x",
+                "y",
+                "diameter"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "name": {
+            "description": "Human-readable display name.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "overallHeight": {
+            "description": "Total height of the display assembly, in millimetres.",
+            "exclusiveMinimum": 0,
+            "type": "number"
+          },
+          "pcb": {
+            "description": "The bare display PCB.",
+            "properties": {
+              "size": {
+                "description": "PCB extents in millimetres; Z is the board thickness.",
+                "properties": {
+                  "x": {
+                    "description": "X in millimetres.",
+                    "type": "number"
+                  },
+                  "y": {
+                    "description": "Y in millimetres.",
+                    "type": "number"
+                  },
+                  "z": {
+                    "description": "Z in millimetres.",
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "x",
+                  "y",
+                  "z"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "size"
+            ],
+            "type": "object"
+          },
+          "source": {
+            "description": "URL the display dimensions were taken from.",
+            "format": "uri",
+            "type": "string"
+          },
+          "touch": {
+            "description": "Touch technology, or none.",
+            "enum": [
+              "none",
+              "resistive",
+              "capacitive-fts",
+              "capacitive-ipt"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "manufacturer",
+          "pcb",
+          "activeArea",
+          "bezel",
+          "overallHeight",
+          "mounting",
+          "mountingHoles",
+          "interface",
+          "touch",
+          "components",
+          "compatibleBoards",
+          "builtin"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "customFonts": {
+      "default": [],
+      "description": "Fonts embedded in the project; omitted values load as an empty list.",
+      "items": {
+        "properties": {
+          "data": {
+            "description": "Base64 of the TTF/OTF file.",
+            "type": "string"
+          },
+          "id": {
+            "description": "Id labels use to name this font.",
+            "type": "string"
+          },
+          "name": {
+            "description": "Human-readable font name.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "data"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "customHats": {
+      "description": "HAT profiles embedded in the project.",
+      "items": {
+        "properties": {
+          "builtin": {
+            "description": "True for a profile bundled with the app.",
+            "type": "boolean"
+          },
+          "compatibleBoards": {
+            "description": "Ids of the main boards this HAT's mounting positions are defined against.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "components": {
+            "description": "Components on the HAT that need a cutout, opening or label.",
+            "items": {
+              "properties": {
+                "cutoutMargin": {
+                  "description": "Extra clearance around the cutout in millimetres; omit for none.",
+                  "minimum": 0,
+                  "type": "number"
+                },
+                "cutoutShape": {
+                  "description": "Cutout outline: a rounded rectangle or a circle; omit for the kind default.",
+                  "enum": [
+                    "rect",
+                    "round"
+                  ],
+                  "type": "string"
+                },
+                "facing": {
+                  "description": "Face the component sits on; omit for a top-side component.",
+                  "enum": [
+                    "+x",
+                    "-x",
+                    "+y",
+                    "-y",
+                    "+z"
+                  ],
+                  "type": "string"
+                },
+                "fixtureId": {
+                  "description": "Id of a bench fixture that documents how this component is held while probing.",
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "id": {
+                  "description": "Unique id for this component within the HAT.",
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "kind": {
+                  "description": "What the component is; this chooses the cutout profile and how the picker draws it.",
+                  "enum": [
+                    "usb-c",
+                    "usb-a",
+                    "usb-b",
+                    "micro-usb",
+                    "hdmi",
+                    "micro-hdmi",
+                    "barrel-jack",
+                    "ethernet-rj45",
+                    "gpio-header",
+                    "sd-card",
+                    "flat-cable",
+                    "fan-mount",
+                    "text-label",
+                    "antenna-connector",
+                    "custom"
+                  ],
+                  "type": "string"
+                },
+                "position": {
+                  "description": "Component origin on the HAT, in millimetres.",
+                  "properties": {
+                    "x": {
+                      "description": "X in millimetres.",
+                      "type": "number"
+                    },
+                    "y": {
+                      "description": "Y in millimetres.",
+                      "type": "number"
+                    },
+                    "z": {
+                      "description": "Z in millimetres.",
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "x",
+                    "y",
+                    "z"
+                  ],
+                  "type": "object"
+                },
+                "size": {
+                  "description": "Component extents in millimetres, before any cutout margin is added.",
+                  "properties": {
+                    "x": {
+                      "description": "X in millimetres.",
+                      "type": "number"
+                    },
+                    "y": {
+                      "description": "Y in millimetres.",
+                      "type": "number"
+                    },
+                    "z": {
+                      "description": "Z in millimetres.",
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "x",
+                    "y",
+                    "z"
+                  ],
+                  "type": "object"
+                }
+              },
+              "required": [
+                "id",
+                "kind",
+                "position",
+                "size"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "headerHeight": {
+            "description": "Height of the stacking header between boards, in millimetres.",
+            "exclusiveMinimum": 0,
+            "type": "number"
+          },
+          "id": {
+            "description": "Stable id for the HAT profile.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "manufacturer": {
+            "description": "HAT maker.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "mountingHoles": {
+            "description": "Mounting holes on the HAT; may be empty.",
+            "items": {
+              "properties": {
+                "diameter": {
+                  "description": "Hole diameter in millimetres.",
+                  "exclusiveMinimum": 0,
+                  "type": "number"
+                },
+                "id": {
+                  "description": "Unique id for this hole within the HAT.",
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "x": {
+                  "description": "Hole centre X, millimetres from the board origin.",
+                  "type": "number"
+                },
+                "y": {
+                  "description": "Hole centre Y, millimetres from the board origin.",
+                  "type": "number"
+                }
+              },
+              "required": [
+                "id",
+                "x",
+                "y",
+                "diameter"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "mountingPositions": {
+            "description": "Named placements on a compatible board; omit when the HAT has none.",
+            "items": {
+              "properties": {
+                "id": {
+                  "description": "Unique id for this mounting position.",
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "label": {
+                  "description": "Label shown in the placement picker.",
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "offset": {
+                  "description": "Where the HAT sits relative to the main board, in millimetres.",
+                  "properties": {
+                    "x": {
+                      "description": "X offset from the board centre, in millimetres.",
+                      "type": "number"
+                    },
+                    "y": {
+                      "description": "Y offset from the board centre, in millimetres.",
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "x",
+                    "y"
+                  ],
+                  "type": "object"
+                },
+                "rotation": {
+                  "anyOf": [
+                    {
+                      "const": 0,
+                      "type": "number"
+                    },
+                    {
+                      "const": 90,
+                      "type": "number"
+                    },
+                    {
+                      "const": 180,
+                      "type": "number"
+                    },
+                    {
+                      "const": 270,
+                      "type": "number"
+                    }
+                  ],
+                  "description": "Rotation of the HAT on the board, in degrees."
+                }
+              },
+              "required": [
+                "id",
+                "label",
+                "offset",
+                "rotation"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "name": {
+            "description": "Human-readable HAT name.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "pcb": {
+            "description": "The bare HAT PCB.",
+            "properties": {
+              "size": {
+                "description": "PCB extents in millimetres; Z is the board thickness.",
+                "properties": {
+                  "x": {
+                    "description": "X in millimetres.",
+                    "type": "number"
+                  },
+                  "y": {
+                    "description": "Y in millimetres.",
+                    "type": "number"
+                  },
+                  "z": {
+                    "description": "Z in millimetres.",
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "x",
+                  "y",
+                  "z"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "size"
+            ],
+            "type": "object"
+          },
+          "source": {
+            "description": "URL the HAT dimensions were taken from.",
+            "format": "uri",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "manufacturer",
+          "pcb",
+          "mountingHoles",
+          "headerHeight",
+          "components",
+          "compatibleBoards",
+          "builtin"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "display": {
+      "anyOf": [
+        {
+          "properties": {
+            "bezelInset": {
+              "description": "Bezel inset in millimetres; for a recessed bezel.",
+              "type": "number"
+            },
+            "displayId": {
+              "description": "Id of the display profile being placed.",
+              "type": "string"
+            },
+            "enabled": {
+              "description": "False keeps the placement in the document but models none.",
+              "type": "boolean"
+            },
+            "framing": {
+              "description": "How the display is framed in the case.",
+              "enum": [
+                "top-window",
+                "recessed-bezel",
+                "flush-glass",
+                "hood-shade",
+                "tilted",
+                "removable-cap",
+                "bracket-only"
+              ],
+              "type": "string"
+            },
+            "hoodHeight": {
+              "description": "Hood height in millimetres; for a hood shade.",
+              "type": "number"
+            },
+            "hostSupport": {
+              "description": "How the display host board is supported.",
+              "enum": [
+                "gpio-only",
+                "case-rim-bracket",
+                "under-board-posts",
+                "full-cradle"
+              ],
+              "type": "string"
+            },
+            "id": {
+              "description": "Unique display placement id.",
+              "type": "string"
+            },
+            "offset": {
+              "description": "Offset of the display from its default position, in millimetres.",
+              "properties": {
+                "x": {
+                  "description": "X offset in millimetres.",
+                  "type": "number"
+                },
+                "y": {
+                  "description": "Y offset in millimetres.",
+                  "type": "number"
+                }
+              },
+              "required": [
+                "x",
+                "y"
+              ],
+              "type": "object"
+            },
+            "tiltAngle": {
+              "description": "Display tilt in degrees; omit for none.",
+              "type": "number"
+            }
+          },
+          "required": [
+            "id",
+            "displayId",
+            "framing",
+            "offset",
+            "hostSupport",
+            "enabled"
+          ],
+          "type": "object"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The display mounted in the case, or null for none."
+    },
+    "externalAssets": {
+      "description": "Imported meshes placed in the model.",
+      "items": {
+        "properties": {
+          "data": {
+            "description": "Base64 of the mesh file.",
+            "type": "string"
+          },
+          "format": {
+            "description": "Mesh file format.",
+            "enum": [
+              "stl",
+              "3mf"
+            ],
+            "type": "string"
+          },
+          "id": {
+            "description": "Unique asset id.",
+            "type": "string"
+          },
+          "name": {
+            "description": "Display name of the asset.",
+            "type": "string"
+          },
+          "transform": {
+            "description": "Placement of the asset in the model.",
+            "properties": {
+              "position": {
+                "description": "[x, y, z] placement of the mesh, in millimetres.",
+                "prefixItems": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "number"
+                  }
+                ],
+                "type": "array"
+              },
+              "rotation": {
+                "description": "[x, y, z] rotation of the mesh, in degrees.",
+                "prefixItems": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "number"
+                  }
+                ],
+                "type": "array"
+              },
+              "scale": {
+                "description": "Uniform scale applied to the mesh.",
+                "type": "number"
+              }
+            },
+            "required": [
+              "position",
+              "rotation",
+              "scale"
+            ],
+            "type": "object"
+          },
+          "visibility": {
+            "description": "How the asset participates: a reference display, a subtraction, or a union.",
+            "enum": [
+              "reference",
+              "subtract",
+              "union"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "format",
+          "data",
+          "transform",
+          "visibility"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "fanMounts": {
+      "description": "Fans mounted on the case.",
+      "items": {
+        "properties": {
+          "bladeStandoff": {
+            "description": "Clearance between the fan blades and the case, in millimetres.",
+            "minimum": 0,
+            "type": "number"
+          },
+          "bossesEnabled": {
+            "description": "True adds screw bosses for the fan.",
+            "type": "boolean"
+          },
+          "enabled": {
+            "description": "False keeps the mount in the document but builds none.",
+            "type": "boolean"
+          },
+          "face": {
+            "description": "Case face the fan is mounted on.",
+            "enum": [
+              "+x",
+              "-x",
+              "+y",
+              "-y",
+              "+z",
+              "-z"
+            ],
+            "type": "string"
+          },
+          "grille": {
+            "description": "Grille pattern cut over the fan.",
+            "enum": [
+              "cross",
+              "spiral",
+              "honeycomb",
+              "concentric",
+              "open"
+            ],
+            "type": "string"
+          },
+          "id": {
+            "description": "Unique fan-mount id.",
+            "type": "string"
+          },
+          "position": {
+            "description": "Fan centre on the face, in millimetres.",
+            "properties": {
+              "u": {
+                "description": "Position along the face, in millimetres.",
+                "type": "number"
+              },
+              "v": {
+                "description": "Position across the face, in millimetres.",
+                "type": "number"
+              }
+            },
+            "required": [
+              "u",
+              "v"
+            ],
+            "type": "object"
+          },
+          "size": {
+            "description": "Fan size as width×height×thickness, in millimetres.",
+            "enum": [
+              "30x30x10",
+              "40x40x10",
+              "40x40x20",
+              "50x50x10",
+              "60x60x15"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "size",
+          "face",
+          "position",
+          "grille",
+          "bladeStandoff",
+          "bossesEnabled",
+          "enabled"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "hats": {
+      "description": "HAT boards stacked on the main board.",
+      "items": {
+        "properties": {
+          "enabled": {
+            "description": "False keeps the placement in the document but models none.",
+            "type": "boolean"
+          },
+          "hatId": {
+            "description": "Id of the HAT profile being placed.",
+            "type": "string"
+          },
+          "id": {
+            "description": "Unique placement id.",
+            "type": "string"
+          },
+          "liftOverride": {
+            "description": "Override of the HAT lift above the board, in millimetres.",
+            "type": "number"
+          },
+          "mountingPositionId": {
+            "description": "Id of the HAT mounting position this placement uses.",
+            "type": "string"
+          },
+          "offsetOverride": {
+            "description": "Override of the HAT offset from the board centre, in millimetres.",
+            "properties": {
+              "x": {
+                "description": "X offset in millimetres.",
+                "type": "number"
+              },
+              "y": {
+                "description": "Y offset in millimetres.",
+                "type": "number"
+              }
+            },
+            "required": [
+              "x",
+              "y"
+            ],
+            "type": "object"
+          },
+          "ports": {
+            "description": "Ports opened for this HAT.",
+            "items": {
+              "properties": {
+                "cutoutMargin": {
+                  "description": "Extra clearance around the opening, in millimetres.",
+                  "minimum": 0,
+                  "type": "number"
+                },
+                "cutoutShape": {
+                  "description": "Opening outline; omit for the kind default.",
+                  "enum": [
+                    "rect",
+                    "round"
+                  ],
+                  "type": "string"
+                },
+                "enabled": {
+                  "description": "False keeps the port in the document but cuts no opening.",
+                  "type": "boolean"
+                },
+                "facing": {
+                  "description": "Direction the port faces.",
+                  "enum": [
+                    "+x",
+                    "-x",
+                    "+y",
+                    "-y",
+                    "+z",
+                    "-z"
+                  ],
+                  "type": "string"
+                },
+                "id": {
+                  "description": "Unique port id.",
+                  "type": "string"
+                },
+                "kind": {
+                  "description": "Connector kind; chooses the cutout profile.",
+                  "enum": [
+                    "usb-c",
+                    "usb-a",
+                    "usb-b",
+                    "micro-usb",
+                    "hdmi",
+                    "micro-hdmi",
+                    "barrel-jack",
+                    "ethernet-rj45",
+                    "gpio-header",
+                    "sd-card",
+                    "flat-cable",
+                    "fan-mount",
+                    "text-label",
+                    "antenna-connector",
+                    "custom"
+                  ],
+                  "type": "string"
+                },
+                "locked": {
+                  "description": "True pins the port to its source component position.",
+                  "type": "boolean"
+                },
+                "position": {
+                  "description": "Port position on the board, in millimetres.",
+                  "properties": {
+                    "x": {
+                      "description": "X in millimetres.",
+                      "type": "number"
+                    },
+                    "y": {
+                      "description": "Y in millimetres.",
+                      "type": "number"
+                    },
+                    "z": {
+                      "description": "Z in millimetres.",
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "x",
+                    "y",
+                    "z"
+                  ],
+                  "type": "object"
+                },
+                "size": {
+                  "description": "Port opening extents, in millimetres.",
+                  "properties": {
+                    "x": {
+                      "description": "X in millimetres.",
+                      "type": "number"
+                    },
+                    "y": {
+                      "description": "Y in millimetres.",
+                      "type": "number"
+                    },
+                    "z": {
+                      "description": "Z in millimetres.",
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "x",
+                    "y",
+                    "z"
+                  ],
+                  "type": "object"
+                },
+                "sourceComponentId": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "Id of the board component this port opens for, or null for a hand-placed port."
+                }
+              },
+              "required": [
+                "id",
+                "sourceComponentId",
+                "kind",
+                "position",
+                "size",
+                "facing",
+                "cutoutMargin",
+                "locked",
+                "enabled"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "stackIndex": {
+            "description": "Position in the stacking order, 0 nearest the board.",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "hatId",
+          "stackIndex",
+          "ports",
+          "enabled"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "id": {
+      "description": "Stable project id.",
+      "type": "string"
+    },
+    "modifiedAt": {
+      "description": "When the project was last saved.",
+      "type": "string"
+    },
+    "mountingFeatures": {
+      "description": "Mounting features attached to the case.",
+      "items": {
+        "properties": {
+          "enabled": {
+            "description": "False keeps the feature in the document but builds none.",
+            "type": "boolean"
+          },
+          "face": {
+            "description": "Case face the feature is attached to.",
+            "enum": [
+              "+x",
+              "-x",
+              "+y",
+              "-y",
+              "+z",
+              "-z"
+            ],
+            "type": "string"
+          },
+          "id": {
+            "description": "Unique mounting-feature id.",
+            "type": "string"
+          },
+          "mountClass": {
+            "default": "external",
+            "description": "Whether the feature lives inside the cavity or extrudes outside; omitted values load as \"external\".",
+            "enum": [
+              "external",
+              "internal"
+            ],
+            "type": "string"
+          },
+          "params": {
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "string"
+                }
+              ]
+            },
+            "description": "Feature-specific parameters, keyed by name.",
+            "propertyNames": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "position": {
+            "description": "Placement on the face, in millimetres.",
+            "properties": {
+              "u": {
+                "description": "Position along the face, in millimetres.",
+                "type": "number"
+              },
+              "v": {
+                "description": "Position across the face, in millimetres.",
+                "type": "number"
+              }
+            },
+            "required": [
+              "u",
+              "v"
+            ],
+            "type": "object"
+          },
+          "presetId": {
+            "description": "Id of the preset the feature was created from.",
+            "type": "string"
+          },
+          "rotation": {
+            "description": "Rotation on the face, in degrees.",
+            "type": "number"
+          },
+          "type": {
+            "description": "What kind of mounting feature this is.",
+            "enum": [
+              "screw-tab",
+              "end-flange",
+              "zip-tie-slot",
+              "vesa-mount",
+              "extrusion-mount",
+              "aligned-standoff",
+              "saddle"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "type",
+          "face",
+          "position",
+          "rotation",
+          "params",
+          "enabled"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "name": {
+      "description": "Human-readable project name.",
+      "type": "string"
+    },
+    "ports": {
+      "description": "Openings cut for the board ports.",
+      "items": {
+        "properties": {
+          "cutoutMargin": {
+            "description": "Extra clearance around the opening, in millimetres.",
+            "minimum": 0,
+            "type": "number"
+          },
+          "cutoutShape": {
+            "description": "Opening outline; omit for the kind default.",
+            "enum": [
+              "rect",
+              "round"
+            ],
+            "type": "string"
+          },
+          "enabled": {
+            "description": "False keeps the port in the document but cuts no opening.",
+            "type": "boolean"
+          },
+          "facing": {
+            "description": "Direction the port faces.",
+            "enum": [
+              "+x",
+              "-x",
+              "+y",
+              "-y",
+              "+z",
+              "-z"
+            ],
+            "type": "string"
+          },
+          "id": {
+            "description": "Unique port id.",
+            "type": "string"
+          },
+          "kind": {
+            "description": "Connector kind; chooses the cutout profile.",
+            "enum": [
+              "usb-c",
+              "usb-a",
+              "usb-b",
+              "micro-usb",
+              "hdmi",
+              "micro-hdmi",
+              "barrel-jack",
+              "ethernet-rj45",
+              "gpio-header",
+              "sd-card",
+              "flat-cable",
+              "fan-mount",
+              "text-label",
+              "antenna-connector",
+              "custom"
+            ],
+            "type": "string"
+          },
+          "locked": {
+            "description": "True pins the port to its source component position.",
+            "type": "boolean"
+          },
+          "position": {
+            "description": "Port position on the board, in millimetres.",
+            "properties": {
+              "x": {
+                "description": "X in millimetres.",
+                "type": "number"
+              },
+              "y": {
+                "description": "Y in millimetres.",
+                "type": "number"
+              },
+              "z": {
+                "description": "Z in millimetres.",
+                "type": "number"
+              }
+            },
+            "required": [
+              "x",
+              "y",
+              "z"
+            ],
+            "type": "object"
+          },
+          "size": {
+            "description": "Port opening extents, in millimetres.",
+            "properties": {
+              "x": {
+                "description": "X in millimetres.",
+                "type": "number"
+              },
+              "y": {
+                "description": "Y in millimetres.",
+                "type": "number"
+              },
+              "z": {
+                "description": "Z in millimetres.",
+                "type": "number"
+              }
+            },
+            "required": [
+              "x",
+              "y",
+              "z"
+            ],
+            "type": "object"
+          },
+          "sourceComponentId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Id of the board component this port opens for, or null for a hand-placed port."
+          }
+        },
+        "required": [
+          "id",
+          "sourceComponentId",
+          "kind",
+          "position",
+          "size",
+          "facing",
+          "cutoutMargin",
+          "locked",
+          "enabled"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "printer": {
+      "description": "The printer's build volume, used for fit checks; omit when unknown.",
+      "properties": {
+        "preset": {
+          "description": "Name of the printer preset these bounds came from.",
+          "type": "string"
+        },
+        "x": {
+          "description": "Build volume along X, in millimetres.",
+          "exclusiveMinimum": 0,
+          "type": "number"
+        },
+        "y": {
+          "description": "Build volume along Y, in millimetres.",
+          "exclusiveMinimum": 0,
+          "type": "number"
+        },
+        "z": {
+          "description": "Build volume along Z, in millimetres.",
+          "exclusiveMinimum": 0,
+          "type": "number"
+        }
+      },
+      "required": [
+        "x",
+        "y",
+        "z"
+      ],
+      "type": "object"
+    },
+    "schemaVersion": {
+      "const": 16,
+      "description": "Project document schema version.",
+      "type": "number"
+    },
+    "textLabels": {
+      "description": "Text labels on the case.",
+      "items": {
+        "properties": {
+          "attachedToPortId": {
+            "description": "Id of the port the label is attached to; omit for a free-placed label.",
+            "type": "string"
+          },
+          "depth": {
+            "description": "Engraving depth or emboss height, in millimetres.",
+            "exclusiveMinimum": 0,
+            "type": "number"
+          },
+          "enabled": {
+            "description": "False keeps the label in the document but cuts nothing.",
+            "type": "boolean"
+          },
+          "face": {
+            "description": "Case face the label is on.",
+            "enum": [
+              "+x",
+              "-x",
+              "+y",
+              "-y",
+              "+z",
+              "-z"
+            ],
+            "type": "string"
+          },
+          "font": {
+            "description": "Font registry id: a bundled face or a project custom font id.",
+            "type": "string"
+          },
+          "id": {
+            "description": "Unique label id.",
+            "type": "string"
+          },
+          "mode": {
+            "description": "Cut the label in or raise it.",
+            "enum": [
+              "engrave",
+              "emboss"
+            ],
+            "type": "string"
+          },
+          "position": {
+            "description": "Label centre on the face, in millimetres.",
+            "properties": {
+              "u": {
+                "description": "Position along the face, in millimetres.",
+                "type": "number"
+              },
+              "v": {
+                "description": "Position across the face, in millimetres.",
+                "type": "number"
+              }
+            },
+            "required": [
+              "u",
+              "v"
+            ],
+            "type": "object"
+          },
+          "rotation": {
+            "description": "Rotation on the face, in degrees.",
+            "type": "number"
+          },
+          "size": {
+            "description": "Cap height in millimetres.",
+            "exclusiveMinimum": 0,
+            "type": "number"
+          },
+          "text": {
+            "description": "The text to place.",
+            "type": "string"
+          },
+          "weight": {
+            "description": "Stroke weight.",
+            "enum": [
+              "regular",
+              "bold"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "text",
+          "font",
+          "weight",
+          "size",
+          "face",
+          "position",
+          "rotation",
+          "depth",
+          "mode",
+          "enabled"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "id",
+    "name",
+    "createdAt",
+    "modifiedAt",
+    "board",
+    "case",
+    "ports",
+    "externalAssets",
+    "hats",
+    "customHats",
+    "mountingFeatures",
+    "display",
+    "customDisplays",
+    "fanMounts",
+    "textLabels",
+    "antennas"
+  ],
+  "type": "object"
+}

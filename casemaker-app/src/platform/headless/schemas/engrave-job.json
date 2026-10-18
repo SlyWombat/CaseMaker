@@ -1,0 +1,5053 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": {},
+  "description": "A Case Maker engrave job: the stock, the cutter, the workholding and every feature to cut.",
+  "properties": {
+    "breakthrough": {
+      "description": "How far a through cut goes past the blank's bottom face, in millimetres.",
+      "minimum": 0,
+      "type": "number"
+    },
+    "combined": {
+      "description": "Shapes derived from other items (border, frame, cutaway); omit for none.",
+      "items": {
+        "oneOf": [
+          {
+            "properties": {
+              "construction": {
+                "description": "Reference-only: cut nothing, but other items may refer to this shape.",
+                "type": "boolean"
+              },
+              "depth": {
+                "description": "Pocket depth below the stock's top face, in millimetres.",
+                "exclusiveMinimum": 0,
+                "type": "number"
+              },
+              "enabled": {
+                "description": "False keeps the item in the document but out of the program.",
+                "type": "boolean"
+              },
+              "id": {
+                "description": "Unique id for this item within the job.",
+                "minLength": 1,
+                "type": "string"
+              },
+              "inset": {
+                "description": "Distance of the ring from the referenced item's outline, in millimetres.",
+                "minimum": 0,
+                "type": "number"
+              },
+              "kind": {
+                "const": "border",
+                "description": "A ring pocket derived from an existing item's outline.",
+                "type": "string"
+              },
+              "name": {
+                "description": "Optional human-readable name for the item list.",
+                "type": "string"
+              },
+              "position": {
+                "description": "Centre of the shape in work coordinates (a polygon's points are relative to it).",
+                "properties": {
+                  "x": {
+                    "description": "X in millimetres from the stock's front-left corner.",
+                    "type": "number"
+                  },
+                  "y": {
+                    "description": "Y in millimetres from the stock's front-left corner.",
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "x",
+                  "y"
+                ],
+                "type": "object"
+              },
+              "rotation": {
+                "description": "Rotation in degrees counter-clockwise about position.",
+                "type": "number"
+              },
+              "through": {
+                "description": "Cut through the blank to the sacrificial board; the floor is the breakthrough rule and depth is then only the checked pocket depth.",
+                "type": "boolean"
+              },
+              "width": {
+                "description": "Ring width in millimetres.",
+                "exclusiveMinimum": 0,
+                "type": "number"
+              }
+            },
+            "required": [
+              "id",
+              "position",
+              "rotation",
+              "depth",
+              "enabled",
+              "kind",
+              "inset",
+              "width"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "around": {
+                "description": "Id of the item whose outline the frame follows.",
+                "minLength": 1,
+                "type": "string"
+              },
+              "construction": {
+                "description": "Reference-only: cut nothing, but other items may refer to this shape.",
+                "type": "boolean"
+              },
+              "depth": {
+                "description": "Pocket depth below the stock's top face, in millimetres.",
+                "exclusiveMinimum": 0,
+                "type": "number"
+              },
+              "enabled": {
+                "description": "False keeps the item in the document but out of the program.",
+                "type": "boolean"
+              },
+              "gap": {
+                "description": "Clearance between the referenced outline and the frame, in millimetres.",
+                "minimum": 0,
+                "type": "number"
+              },
+              "id": {
+                "description": "Unique id for this item within the job.",
+                "minLength": 1,
+                "type": "string"
+              },
+              "kind": {
+                "const": "frame",
+                "description": "A frame around an existing item, with a gap.",
+                "type": "string"
+              },
+              "name": {
+                "description": "Optional human-readable name for the item list.",
+                "type": "string"
+              },
+              "position": {
+                "description": "Centre of the shape in work coordinates (a polygon's points are relative to it).",
+                "properties": {
+                  "x": {
+                    "description": "X in millimetres from the stock's front-left corner.",
+                    "type": "number"
+                  },
+                  "y": {
+                    "description": "Y in millimetres from the stock's front-left corner.",
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "x",
+                  "y"
+                ],
+                "type": "object"
+              },
+              "rotation": {
+                "description": "Rotation in degrees counter-clockwise about position.",
+                "type": "number"
+              },
+              "through": {
+                "description": "Cut through the blank to the sacrificial board; the floor is the breakthrough rule and depth is then only the checked pocket depth.",
+                "type": "boolean"
+              },
+              "width": {
+                "description": "Frame width in millimetres.",
+                "exclusiveMinimum": 0,
+                "type": "number"
+              }
+            },
+            "required": [
+              "id",
+              "position",
+              "rotation",
+              "depth",
+              "enabled",
+              "kind",
+              "around",
+              "gap",
+              "width"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "construction": {
+                "description": "Reference-only: cut nothing, but other items may refer to this shape.",
+                "type": "boolean"
+              },
+              "depth": {
+                "description": "Pocket depth below the stock's top face, in millimetres.",
+                "exclusiveMinimum": 0,
+                "type": "number"
+              },
+              "enabled": {
+                "description": "False keeps the item in the document but out of the program.",
+                "type": "boolean"
+              },
+              "id": {
+                "description": "Unique id for this item within the job.",
+                "minLength": 1,
+                "type": "string"
+              },
+              "islands": {
+                "description": "Ids of items kept standing inside the cleared area.",
+                "items": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "kind": {
+                "const": "cutaway",
+                "description": "Remove the area inside an outer item while leaving listed islands standing.",
+                "type": "string"
+              },
+              "name": {
+                "description": "Optional human-readable name for the item list.",
+                "type": "string"
+              },
+              "outer": {
+                "description": "Id of the item whose interior is cleared.",
+                "minLength": 1,
+                "type": "string"
+              },
+              "position": {
+                "description": "Centre of the shape in work coordinates (a polygon's points are relative to it).",
+                "properties": {
+                  "x": {
+                    "description": "X in millimetres from the stock's front-left corner.",
+                    "type": "number"
+                  },
+                  "y": {
+                    "description": "Y in millimetres from the stock's front-left corner.",
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "x",
+                  "y"
+                ],
+                "type": "object"
+              },
+              "rotation": {
+                "description": "Rotation in degrees counter-clockwise about position.",
+                "type": "number"
+              },
+              "through": {
+                "description": "Cut through the blank to the sacrificial board; the floor is the breakthrough rule and depth is then only the checked pocket depth.",
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "id",
+              "position",
+              "rotation",
+              "depth",
+              "enabled",
+              "kind",
+              "outer",
+              "islands"
+            ],
+            "type": "object"
+          }
+        ]
+      },
+      "type": "array"
+    },
+    "customFonts": {
+      "description": "Fonts embedded in the document, usable by id from labels.",
+      "items": {
+        "properties": {
+          "data": {
+            "description": "Base64 of the TTF/OTF file.",
+            "type": "string"
+          },
+          "id": {
+            "description": "Id the job's labels use to name this font.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "name": {
+            "description": "Human-readable font name.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "data"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "cutOverride": {
+      "description": "The user's hand edits to feeds and speeds; omit to use the computed values.",
+      "properties": {
+        "air": {
+          "description": "True cuts this job in air (no material); omit for a real cut.",
+          "type": "boolean"
+        },
+        "feed": {
+          "description": "Cutting feed override, mm/min; omit to use the computed value.",
+          "type": "number"
+        },
+        "peck": {
+          "description": "Peck depth for plunge drilling, millimetres; omit for no pecking.",
+          "type": "number"
+        },
+        "plungeFeed": {
+          "description": "Plunge feed override, mm/min; omit to use the computed value.",
+          "type": "number"
+        },
+        "rpm": {
+          "description": "Spindle speed override, rpm; omit to use the computed value.",
+          "type": "number"
+        },
+        "stepDown": {
+          "description": "Depth per pass override, millimetres; omit to use the computed value.",
+          "type": "number"
+        },
+        "stepOver": {
+          "description": "Step-over override, millimetres; omit to use the computed value.",
+          "type": "number"
+        }
+      },
+      "type": "object"
+    },
+    "cutouts": {
+      "description": "Profile cut-outs that free the part from the stock; omit for none.",
+      "items": {
+        "properties": {
+          "enabled": {
+            "description": "False keeps the cut-out in the document but out of the program.",
+            "type": "boolean"
+          },
+          "id": {
+            "description": "Unique id for this cut-out within the job.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "inset": {
+            "description": "Distance of the cutting path from the named outline, in millimetres.",
+            "minimum": 0,
+            "type": "number"
+          },
+          "kind": {
+            "const": "cutout",
+            "description": "A profile cut-out; its floor is the under-board's thickness plus breakthrough.",
+            "type": "string"
+          },
+          "name": {
+            "description": "Optional human-readable name for the item list.",
+            "type": "string"
+          },
+          "of": {
+            "anyOf": [
+              {
+                "const": "stock-inset",
+                "type": "string"
+              },
+              {
+                "minLength": 1,
+                "type": "string"
+              }
+            ],
+            "description": "Outline to follow: \"stock-inset\" for the blank's own edge, or the id of another item."
+          },
+          "side": {
+            "description": "Cut outside the named outline or inside it.",
+            "enum": [
+              "outside",
+              "inside"
+            ],
+            "type": "string"
+          },
+          "tabs": {
+            "description": "Holding tabs that keep the part attached until the final pass.",
+            "properties": {
+              "count": {
+                "description": "Number of holding tabs around the path (0–64).",
+                "maximum": 64,
+                "minimum": 0,
+                "type": "integer"
+              },
+              "height": {
+                "description": "Tab height up from the cut's floor, in millimetres.",
+                "exclusiveMinimum": 0,
+                "type": "number"
+              },
+              "width": {
+                "description": "Tab width along the path, in millimetres.",
+                "exclusiveMinimum": 0,
+                "type": "number"
+              }
+            },
+            "required": [
+              "count",
+              "width",
+              "height"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "kind",
+          "id",
+          "enabled",
+          "of",
+          "side",
+          "inset",
+          "tabs"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "drills": {
+      "description": "Plunge-drilled holes and hole arrays; omit for none.",
+      "items": {
+        "oneOf": [
+          {
+            "properties": {
+              "depth": {
+                "description": "Hole floor below the stock's top face, in millimetres.",
+                "exclusiveMinimum": 0,
+                "type": "number"
+              },
+              "enabled": {
+                "description": "False keeps the drill in the document but out of the program.",
+                "type": "boolean"
+              },
+              "id": {
+                "description": "Unique id for this drill within the job.",
+                "minLength": 1,
+                "type": "string"
+              },
+              "kind": {
+                "const": "drill",
+                "description": "One hole, as wide as the job's cutter.",
+                "type": "string"
+              },
+              "name": {
+                "description": "Optional human-readable name for the item list.",
+                "type": "string"
+              },
+              "position": {
+                "description": "The first hole centre, in work coordinates.",
+                "properties": {
+                  "x": {
+                    "description": "X in millimetres from the stock's front-left corner.",
+                    "type": "number"
+                  },
+                  "y": {
+                    "description": "Y in millimetres from the stock's front-left corner.",
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "x",
+                  "y"
+                ],
+                "type": "object"
+              },
+              "rotation": {
+                "description": "Degrees counter-clockwise about position; ignored by a plain drill, rotates an array's lattice.",
+                "type": "number"
+              },
+              "through": {
+                "description": "Drill through the blank into the sacrificial board, following the breakthrough rule.",
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "id",
+              "position",
+              "rotation",
+              "depth",
+              "enabled",
+              "through",
+              "kind"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "count": {
+                "description": "Array size in holes along each axis.",
+                "properties": {
+                  "x": {
+                    "description": "Number of holes along X.",
+                    "maximum": 9007199254740991,
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "y": {
+                    "description": "Number of holes along Y.",
+                    "maximum": 9007199254740991,
+                    "minimum": 1,
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "x",
+                  "y"
+                ],
+                "type": "object"
+              },
+              "depth": {
+                "description": "Hole floor below the stock's top face, in millimetres.",
+                "exclusiveMinimum": 0,
+                "type": "number"
+              },
+              "enabled": {
+                "description": "False keeps the drill in the document but out of the program.",
+                "type": "boolean"
+              },
+              "id": {
+                "description": "Unique id for this drill within the job.",
+                "minLength": 1,
+                "type": "string"
+              },
+              "kind": {
+                "const": "drill-array",
+                "description": "A rectangular array of identical holes.",
+                "type": "string"
+              },
+              "name": {
+                "description": "Optional human-readable name for the item list.",
+                "type": "string"
+              },
+              "pitch": {
+                "description": "Hole spacing in millimetres along X and Y.",
+                "properties": {
+                  "x": {
+                    "description": "Centre-to-centre spacing along X, in millimetres.",
+                    "exclusiveMinimum": 0,
+                    "type": "number"
+                  },
+                  "y": {
+                    "description": "Centre-to-centre spacing along Y, in millimetres.",
+                    "exclusiveMinimum": 0,
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "x",
+                  "y"
+                ],
+                "type": "object"
+              },
+              "position": {
+                "description": "The first hole centre, in work coordinates.",
+                "properties": {
+                  "x": {
+                    "description": "X in millimetres from the stock's front-left corner.",
+                    "type": "number"
+                  },
+                  "y": {
+                    "description": "Y in millimetres from the stock's front-left corner.",
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "x",
+                  "y"
+                ],
+                "type": "object"
+              },
+              "rotation": {
+                "description": "Degrees counter-clockwise about position; ignored by a plain drill, rotates an array's lattice.",
+                "type": "number"
+              },
+              "through": {
+                "description": "Drill through the blank into the sacrificial board, following the breakthrough rule.",
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "id",
+              "position",
+              "rotation",
+              "depth",
+              "enabled",
+              "through",
+              "kind",
+              "count",
+              "pitch"
+            ],
+            "type": "object"
+          }
+        ]
+      },
+      "type": "array"
+    },
+    "edgeMargin": {
+      "description": "Margin kept from the stock's edge, in millimetres.",
+      "minimum": 0,
+      "type": "number"
+    },
+    "facing": {
+      "description": "The facing pass to run first; omit to skip facing.",
+      "properties": {
+        "depth": {
+          "description": "Total depth taken off the top face, in millimetres; 0 means nothing is removed.",
+          "maximum": 10,
+          "minimum": 0,
+          "type": "number"
+        },
+        "enabled": {
+          "description": "True runs a facing pass before the job.",
+          "type": "boolean"
+        },
+        "toolKey": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Registry key of the facing cutter; null or omitted asks the default rule."
+        }
+      },
+      "required": [
+        "enabled",
+        "depth"
+      ],
+      "type": "object"
+    },
+    "id": {
+      "description": "Stable job id; generated when a document does not state one.",
+      "minLength": 1,
+      "type": "string"
+    },
+    "jawClearance": {
+      "default": 1,
+      "description": "Clearance kept from the vise jaws, in millimetres.",
+      "minimum": 0,
+      "type": "number"
+    },
+    "keepOuts": {
+      "description": "Voids inside the blank that no cut may enter; omit for none.",
+      "items": {
+        "oneOf": [
+          {
+            "properties": {
+              "cornerRadius": {
+                "description": "Corner radius in millimetres; at most half the smaller side.",
+                "minimum": 0,
+                "type": "number"
+              },
+              "enabled": {
+                "description": "False keeps the void in the document but out of the program.",
+                "type": "boolean"
+              },
+              "height": {
+                "description": "Height along Y before rotation, in millimetres.",
+                "exclusiveMinimum": 0,
+                "type": "number"
+              },
+              "id": {
+                "description": "Unique id for this keep-out within the job.",
+                "minLength": 1,
+                "type": "string"
+              },
+              "kind": {
+                "const": "rect",
+                "description": "A rectangular void.",
+                "type": "string"
+              },
+              "name": {
+                "description": "Optional human-readable name for the item list.",
+                "type": "string"
+              },
+              "position": {
+                "description": "Centre of the void in work coordinates.",
+                "properties": {
+                  "x": {
+                    "description": "X in millimetres from the stock's front-left corner.",
+                    "type": "number"
+                  },
+                  "y": {
+                    "description": "Y in millimetres from the stock's front-left corner.",
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "x",
+                  "y"
+                ],
+                "type": "object"
+              },
+              "rotation": {
+                "description": "Rotation in degrees counter-clockwise about position.",
+                "type": "number"
+              },
+              "width": {
+                "description": "Width along X before rotation, in millimetres.",
+                "exclusiveMinimum": 0,
+                "type": "number"
+              },
+              "zCeiling": {
+                "description": "Ceiling of the void in part-frame Z from the blank's bottom face, in millimetres.",
+                "exclusiveMinimum": 0,
+                "type": "number"
+              }
+            },
+            "required": [
+              "id",
+              "position",
+              "rotation",
+              "enabled",
+              "zCeiling",
+              "kind",
+              "width",
+              "height",
+              "cornerRadius"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "diameter": {
+                "description": "Void diameter in millimetres.",
+                "exclusiveMinimum": 0,
+                "type": "number"
+              },
+              "enabled": {
+                "description": "False keeps the void in the document but out of the program.",
+                "type": "boolean"
+              },
+              "id": {
+                "description": "Unique id for this keep-out within the job.",
+                "minLength": 1,
+                "type": "string"
+              },
+              "kind": {
+                "const": "circle",
+                "description": "A round void.",
+                "type": "string"
+              },
+              "name": {
+                "description": "Optional human-readable name for the item list.",
+                "type": "string"
+              },
+              "position": {
+                "description": "Centre of the void in work coordinates.",
+                "properties": {
+                  "x": {
+                    "description": "X in millimetres from the stock's front-left corner.",
+                    "type": "number"
+                  },
+                  "y": {
+                    "description": "Y in millimetres from the stock's front-left corner.",
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "x",
+                  "y"
+                ],
+                "type": "object"
+              },
+              "rotation": {
+                "description": "Rotation in degrees counter-clockwise about position.",
+                "type": "number"
+              },
+              "zCeiling": {
+                "description": "Ceiling of the void in part-frame Z from the blank's bottom face, in millimetres.",
+                "exclusiveMinimum": 0,
+                "type": "number"
+              }
+            },
+            "required": [
+              "id",
+              "position",
+              "rotation",
+              "enabled",
+              "zCeiling",
+              "kind",
+              "diameter"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "enabled": {
+                "description": "False keeps the void in the document but out of the program.",
+                "type": "boolean"
+              },
+              "id": {
+                "description": "Unique id for this keep-out within the job.",
+                "minLength": 1,
+                "type": "string"
+              },
+              "kind": {
+                "const": "slot",
+                "description": "A stadium-shaped (rounded-ended) void.",
+                "type": "string"
+              },
+              "length": {
+                "description": "Overall length along X in millimetres; at least the width.",
+                "exclusiveMinimum": 0,
+                "type": "number"
+              },
+              "name": {
+                "description": "Optional human-readable name for the item list.",
+                "type": "string"
+              },
+              "position": {
+                "description": "Centre of the void in work coordinates.",
+                "properties": {
+                  "x": {
+                    "description": "X in millimetres from the stock's front-left corner.",
+                    "type": "number"
+                  },
+                  "y": {
+                    "description": "Y in millimetres from the stock's front-left corner.",
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "x",
+                  "y"
+                ],
+                "type": "object"
+              },
+              "rotation": {
+                "description": "Rotation in degrees counter-clockwise about position.",
+                "type": "number"
+              },
+              "width": {
+                "description": "Void width in millimetres.",
+                "exclusiveMinimum": 0,
+                "type": "number"
+              },
+              "zCeiling": {
+                "description": "Ceiling of the void in part-frame Z from the blank's bottom face, in millimetres.",
+                "exclusiveMinimum": 0,
+                "type": "number"
+              }
+            },
+            "required": [
+              "id",
+              "position",
+              "rotation",
+              "enabled",
+              "zCeiling",
+              "kind",
+              "length",
+              "width"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "enabled": {
+                "description": "False keeps the void in the document but out of the program.",
+                "type": "boolean"
+              },
+              "id": {
+                "description": "Unique id for this keep-out within the job.",
+                "minLength": 1,
+                "type": "string"
+              },
+              "kind": {
+                "const": "polygon",
+                "description": "A closed polygonal void.",
+                "type": "string"
+              },
+              "name": {
+                "description": "Optional human-readable name for the item list.",
+                "type": "string"
+              },
+              "points": {
+                "description": "Closed polygon vertices relative to position; 3–500 points.",
+                "items": {
+                  "description": "An [x, y] point in millimetres, relative to the item position.",
+                  "prefixItems": [
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "number"
+                    }
+                  ],
+                  "type": "array"
+                },
+                "maxItems": 500,
+                "minItems": 3,
+                "type": "array"
+              },
+              "position": {
+                "description": "Centre of the void in work coordinates.",
+                "properties": {
+                  "x": {
+                    "description": "X in millimetres from the stock's front-left corner.",
+                    "type": "number"
+                  },
+                  "y": {
+                    "description": "Y in millimetres from the stock's front-left corner.",
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "x",
+                  "y"
+                ],
+                "type": "object"
+              },
+              "rotation": {
+                "description": "Rotation in degrees counter-clockwise about position.",
+                "type": "number"
+              },
+              "zCeiling": {
+                "description": "Ceiling of the void in part-frame Z from the blank's bottom face, in millimetres.",
+                "exclusiveMinimum": 0,
+                "type": "number"
+              }
+            },
+            "required": [
+              "id",
+              "position",
+              "rotation",
+              "enabled",
+              "zCeiling",
+              "kind",
+              "points"
+            ],
+            "type": "object"
+          }
+        ]
+      },
+      "type": "array"
+    },
+    "labels": {
+      "description": "Text labels engraved into the stock.",
+      "items": {
+        "properties": {
+          "construction": {
+            "description": "Reference-only: cut nothing, but validators may use its geometry; omit for a real label.",
+            "type": "boolean"
+          },
+          "depth": {
+            "description": "Engraving depth below the stock's top face, in millimetres.",
+            "exclusiveMinimum": 0,
+            "type": "number"
+          },
+          "depthIntent": {
+            "description": "Which colour the floor is meant to land in on a two-colour blank: reveal the lower colour, sit at the surface, or a custom depth; omit when no intent is stated.",
+            "enum": [
+              "reveal",
+              "surface",
+              "custom"
+            ],
+            "type": "string"
+          },
+          "enabled": {
+            "description": "False keeps the label in the document but out of the program.",
+            "type": "boolean"
+          },
+          "font": {
+            "description": "Font registry id: a bundled face (\"sans-default\", \"mono-default\", \"serif-default\") or a custom font id.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "id": {
+            "description": "Unique id for this label within the job.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "position": {
+            "description": "Centre of the text's bounding box in work coordinates.",
+            "properties": {
+              "x": {
+                "description": "X in millimetres from the stock's front-left corner.",
+                "type": "number"
+              },
+              "y": {
+                "description": "Y in millimetres from the stock's front-left corner.",
+                "type": "number"
+              }
+            },
+            "required": [
+              "x",
+              "y"
+            ],
+            "type": "object"
+          },
+          "rotation": {
+            "description": "Rotation in degrees counter-clockwise about position.",
+            "type": "number"
+          },
+          "size": {
+            "description": "Cap height in millimetres.",
+            "maximum": 100,
+            "minimum": 1,
+            "type": "number"
+          },
+          "text": {
+            "description": "The text to engrave.",
+            "maxLength": 200,
+            "type": "string"
+          },
+          "weight": {
+            "description": "Stroke weight: regular or bold.",
+            "enum": [
+              "regular",
+              "bold"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "text",
+          "font",
+          "weight",
+          "size",
+          "position",
+          "rotation",
+          "depth",
+          "enabled"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "machineId": {
+      "default": "Z1",
+      "description": "The mill the job is cut on; the build keeps the one machine it models.",
+      "enum": [
+        "Z1"
+      ],
+      "type": "string"
+    },
+    "margins": {
+      "description": "The job's own Z-error margins; omit to run on the house setting.",
+      "properties": {
+        "boundaryMargin": {
+          "description": "Extra clearance kept from the stock's boundary, in millimetres.",
+          "maximum": 100,
+          "minimum": 0,
+          "type": "number"
+        },
+        "source": {
+          "description": "Where these margins came from: a default, a recommendation, or the user.",
+          "enum": [
+            "default",
+            "recommended",
+            "user"
+          ],
+          "type": "string"
+        },
+        "zTolerance": {
+          "description": "Tolerance on the Z floor, in millimetres.",
+          "maximum": 100,
+          "minimum": 0,
+          "type": "number"
+        }
+      },
+      "required": [
+        "boundaryMargin",
+        "zTolerance",
+        "source"
+      ],
+      "type": "object"
+    },
+    "minFloor": {
+      "description": "Minimum allowed distance from the blank's bottom face to a floor, in millimetres.",
+      "minimum": 0,
+      "type": "number"
+    },
+    "name": {
+      "description": "Human-readable job name.",
+      "type": "string"
+    },
+    "package": {
+      "additionalProperties": false,
+      "description": "The programs and setups frozen by Cut; omit before a cut is frozen.",
+      "properties": {
+        "frozenAt": {
+          "description": "When the package was frozen.",
+          "minLength": 1,
+          "type": "string"
+        },
+        "hash": {
+          "description": "Package fingerprint over the frozen content.",
+          "minLength": 1,
+          "type": "string"
+        },
+        "jobHash": {
+          "description": "Hash of the job document the package froze.",
+          "minLength": 1,
+          "type": "string"
+        },
+        "jobId": {
+          "description": "Id of the job the package froze.",
+          "minLength": 1,
+          "type": "string"
+        },
+        "programs": {
+          "description": "The frozen programs, at least one.",
+          "items": {
+            "additionalProperties": false,
+            "description": "One program frozen when Cut was pressed.",
+            "properties": {
+              "frameHash": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "Hash of the frame program, or null."
+              },
+              "frameNc": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "The frozen frame program, or null when none was posted."
+              },
+              "hash": {
+                "description": "Hash of the frozen program text.",
+                "minLength": 1,
+                "type": "string"
+              },
+              "nc": {
+                "description": "The frozen G-code program.",
+                "type": "string"
+              },
+              "setupId": {
+                "description": "Id of the setup that runs this program.",
+                "minLength": 1,
+                "type": "string"
+              },
+              "setupIndex": {
+                "description": "Index of the setup that runs this program.",
+                "maximum": 9007199254740991,
+                "minimum": 0,
+                "type": "integer"
+              },
+              "toolKey": {
+                "description": "Registry key of the cutter this program uses.",
+                "minLength": 1,
+                "type": "string"
+              }
+            },
+            "required": [
+              "setupIndex",
+              "setupId",
+              "toolKey",
+              "nc",
+              "hash",
+              "frameNc",
+              "frameHash"
+            ],
+            "type": "object"
+          },
+          "minItems": 1,
+          "type": "array"
+        },
+        "setups": {
+          "description": "The setups the frozen programs run in.",
+          "items": {
+            "properties": {
+              "id": {
+                "description": "Unique setup id; generated when a document does not state one.",
+                "minLength": 1,
+                "type": "string"
+              },
+              "itemIds": {
+                "description": "Ids of the items cut in this setup.",
+                "items": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "mount": {
+                "description": "How the stock is held for this setup.",
+                "properties": {
+                  "board": {
+                    "description": "True when a board sits under the stock; for bracket and tape setups.",
+                    "type": "boolean"
+                  },
+                  "kind": {
+                    "description": "How the stock is held: in the vise, on the bracket, or with tape.",
+                    "enum": [
+                      "vise",
+                      "bracket",
+                      "tape"
+                    ],
+                    "type": "string"
+                  },
+                  "viseOpeningMm": {
+                    "description": "Widest jaw opening in millimetres; for a vise setup.",
+                    "exclusiveMinimum": 0,
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "kind"
+                ],
+                "type": "object"
+              },
+              "orientation": {
+                "description": "Which stock face the setup works on, per face name.",
+                "properties": {
+                  "back": {
+                    "description": "A stock face name; this setup slot states which face it refers to.",
+                    "enum": [
+                      "top",
+                      "bottom",
+                      "left",
+                      "right",
+                      "front",
+                      "back"
+                    ],
+                    "type": "string"
+                  },
+                  "bottom": {
+                    "description": "A stock face name; this setup slot states which face it refers to.",
+                    "enum": [
+                      "top",
+                      "bottom",
+                      "left",
+                      "right",
+                      "front",
+                      "back"
+                    ],
+                    "type": "string"
+                  },
+                  "front": {
+                    "description": "A stock face name; this setup slot states which face it refers to.",
+                    "enum": [
+                      "top",
+                      "bottom",
+                      "left",
+                      "right",
+                      "front",
+                      "back"
+                    ],
+                    "type": "string"
+                  },
+                  "left": {
+                    "description": "A stock face name; this setup slot states which face it refers to.",
+                    "enum": [
+                      "top",
+                      "bottom",
+                      "left",
+                      "right",
+                      "front",
+                      "back"
+                    ],
+                    "type": "string"
+                  },
+                  "right": {
+                    "description": "A stock face name; this setup slot states which face it refers to.",
+                    "enum": [
+                      "top",
+                      "bottom",
+                      "left",
+                      "right",
+                      "front",
+                      "back"
+                    ],
+                    "type": "string"
+                  },
+                  "top": {
+                    "description": "A stock face name; this setup slot states which face it refers to.",
+                    "enum": [
+                      "top",
+                      "bottom",
+                      "left",
+                      "right",
+                      "front",
+                      "back"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "top",
+                  "bottom",
+                  "left",
+                  "right",
+                  "front",
+                  "back"
+                ],
+                "type": "object"
+              },
+              "registration": {
+                "description": "The approved registration for this setup; omit for none.",
+                "properties": {
+                  "expected": {
+                    "description": "One-line description of what the plan expects to find.",
+                    "type": "string"
+                  },
+                  "method": {
+                    "description": "How the stock is held: in the vise, on the bracket, or with tape.",
+                    "enum": [
+                      "vise",
+                      "bracket",
+                      "tape"
+                    ],
+                    "type": "string"
+                  },
+                  "plan": {
+                    "description": "The approved registration plan for this setup.",
+                    "properties": {
+                      "bracketOrigin": {
+                        "anyOf": [
+                          {
+                            "properties": {
+                              "from": {
+                                "description": "What the origin was derived from.",
+                                "type": "string"
+                              },
+                              "offsetMeasured": {
+                                "description": "True when the offset was measured rather than assumed.",
+                                "type": "boolean"
+                              },
+                              "x": {
+                                "description": "Bracket origin X, in millimetres.",
+                                "type": "number"
+                              },
+                              "y": {
+                                "description": "Bracket origin Y, in millimetres.",
+                                "type": "number"
+                              }
+                            },
+                            "required": [
+                              "x",
+                              "y",
+                              "from",
+                              "offsetMeasured"
+                            ],
+                            "type": "object"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ],
+                        "description": "Bracket origin when the plan found one, or null."
+                      },
+                      "mount": {
+                        "description": "How the stock is held: in the vise, on the bracket, or with tape.",
+                        "enum": [
+                          "vise",
+                          "bracket",
+                          "tape"
+                        ],
+                        "type": "string"
+                      },
+                      "mountObstacles": {
+                        "description": "Clamps and bracket arms the operator must confirm are clear.",
+                        "items": {
+                          "properties": {
+                            "kind": {
+                              "description": "The kind of obstacle: a clamp or the bracket arm.",
+                              "enum": [
+                                "clamp",
+                                "bracket"
+                              ],
+                              "type": "string"
+                            },
+                            "label": {
+                              "description": "Label shown to the operator.",
+                              "type": "string"
+                            },
+                            "max": {
+                              "description": "[x, y] maximum corner of the obstacle, in millimetres.",
+                              "prefixItems": [
+                                {
+                                  "type": "number"
+                                },
+                                {
+                                  "type": "number"
+                                }
+                              ],
+                              "type": "array"
+                            },
+                            "min": {
+                              "description": "[x, y] minimum corner of the obstacle, in millimetres.",
+                              "prefixItems": [
+                                {
+                                  "type": "number"
+                                },
+                                {
+                                  "type": "number"
+                                }
+                              ],
+                              "type": "array"
+                            },
+                            "topZ": {
+                              "description": "Top of the obstacle in part-frame Z, in millimetres.",
+                              "type": "number"
+                            }
+                          },
+                          "required": [
+                            "kind",
+                            "label",
+                            "min",
+                            "max",
+                            "topZ"
+                          ],
+                          "type": "object"
+                        },
+                        "type": "array"
+                      },
+                      "notes": {
+                        "description": "Human-readable notes shown with the plan.",
+                        "items": {
+                          "type": "string"
+                        },
+                        "type": "array"
+                      },
+                      "referenceRotation": {
+                        "anyOf": [
+                          {
+                            "properties": {
+                              "between": {
+                                "description": "The two reference ids whose separation fixes the rotation.",
+                                "prefixItems": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "string"
+                                  }
+                                ],
+                                "type": "array"
+                              },
+                              "resolutionMm": {
+                                "description": "Resolution of the rotation estimate, in millimetres.",
+                                "type": "number"
+                              },
+                              "separation": {
+                                "description": "Centre-to-centre separation of the two references, in millimetres.",
+                                "type": "number"
+                              }
+                            },
+                            "required": [
+                              "between",
+                              "separation",
+                              "resolutionMm"
+                            ],
+                            "type": "object"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ],
+                        "description": "Rotation derived from two reference cuts, or null/omitted."
+                      },
+                      "references": {
+                        "description": "Reference cuts used to relocate the stock in a later setup; omit if none.",
+                        "items": {
+                          "properties": {
+                            "centre": {
+                              "description": "Reference centre in work coordinates.",
+                              "properties": {
+                                "x": {
+                                  "description": "X in millimetres from the stock's front-left corner.",
+                                  "type": "number"
+                                },
+                                "y": {
+                                  "description": "Y in millimetres from the stock's front-left corner.",
+                                  "type": "number"
+                                }
+                              },
+                              "required": [
+                                "x",
+                                "y"
+                              ],
+                              "type": "object"
+                            },
+                            "itemId": {
+                              "description": "Id of the item whose cut is used as a reference.",
+                              "minLength": 1,
+                              "type": "string"
+                            },
+                            "name": {
+                              "description": "Item name, for the run sheet.",
+                              "type": "string"
+                            },
+                            "size": {
+                              "description": "Reference extent in millimetres.",
+                              "properties": {
+                                "x": {
+                                  "description": "Reference size along X, in millimetres.",
+                                  "type": "number"
+                                },
+                                "y": {
+                                  "description": "Reference size along Y, in millimetres.",
+                                  "type": "number"
+                                }
+                              },
+                              "required": [
+                                "x",
+                                "y"
+                              ],
+                              "type": "object"
+                            },
+                            "xScans": {
+                              "description": "Scan indices along X that touch this reference.",
+                              "items": {
+                                "maximum": 9007199254740991,
+                                "minimum": 0,
+                                "type": "integer"
+                              },
+                              "type": "array"
+                            },
+                            "yScans": {
+                              "description": "Scan indices along Y that touch this reference.",
+                              "items": {
+                                "maximum": 9007199254740991,
+                                "minimum": 0,
+                                "type": "integer"
+                              },
+                              "type": "array"
+                            }
+                          },
+                          "required": [
+                            "itemId",
+                            "name",
+                            "centre",
+                            "size",
+                            "xScans",
+                            "yScans"
+                          ],
+                          "type": "object"
+                        },
+                        "type": "array"
+                      },
+                      "scans": {
+                        "description": "Edge scans the plan runs.",
+                        "items": {
+                          "properties": {
+                            "along": {
+                              "description": "Position along the edge where the scan runs, in millimetres.",
+                              "type": "number"
+                            },
+                            "coarseStep": {
+                              "description": "Coarse search step, in millimetres.",
+                              "type": "number"
+                            },
+                            "edge": {
+                              "description": "Stock edge this scan measures.",
+                              "enum": [
+                                "left",
+                                "right",
+                                "front",
+                                "back"
+                              ],
+                              "type": "string"
+                            },
+                            "expectedAt": {
+                              "description": "Expected edge position, in millimetres.",
+                              "type": "number"
+                            },
+                            "fineStep": {
+                              "description": "Fine search step, in millimetres.",
+                              "type": "number"
+                            },
+                            "label": {
+                              "description": "Optional label shown next to the scan in the run sheet.",
+                              "type": "string"
+                            },
+                            "limit": {
+                              "description": "Scan travel limit, in millimetres.",
+                              "type": "number"
+                            },
+                            "outward": {
+                              "anyOf": [
+                                {
+                                  "const": 1,
+                                  "type": "number"
+                                },
+                                {
+                                  "const": -1,
+                                  "type": "number"
+                                }
+                              ],
+                              "description": "Scan direction: +1 or −1 along the axis."
+                            },
+                            "start": {
+                              "description": "Scan start position, in millimetres.",
+                              "type": "number"
+                            }
+                          },
+                          "required": [
+                            "edge",
+                            "along",
+                            "expectedAt",
+                            "outward",
+                            "start",
+                            "limit",
+                            "coarseStep",
+                            "fineStep"
+                          ],
+                          "type": "object"
+                        },
+                        "type": "array"
+                      },
+                      "seek": {
+                        "description": "The surface seek this plan runs.",
+                        "properties": {
+                          "band": {
+                            "description": "Height band accepted as the surface, in millimetres.",
+                            "properties": {
+                              "max": {
+                                "description": "Top of the accepted surface band, in millimetres.",
+                                "type": "number"
+                              },
+                              "min": {
+                                "description": "Bottom of the accepted surface band, in millimetres.",
+                                "type": "number"
+                              }
+                            },
+                            "required": [
+                              "min",
+                              "max"
+                            ],
+                            "type": "object"
+                          },
+                          "fromMachineZ": {
+                            "description": "Machine Z the seek starts from, in millimetres.",
+                            "type": "number"
+                          },
+                          "travelMm": {
+                            "description": "How far the seek may travel down, in millimetres.",
+                            "type": "number"
+                          }
+                        },
+                        "required": [
+                          "fromMachineZ",
+                          "travelMm",
+                          "band"
+                        ],
+                        "type": "object"
+                      },
+                      "settings": {
+                        "description": "The registration tunables the plan was computed with.",
+                        "properties": {
+                          "capBelowSurfaceMm": {
+                            "description": "Probe cap height below the nominal surface, in millimetres.",
+                            "type": "number"
+                          },
+                          "coarseStepMm": {
+                            "description": "Coarse search step, in millimetres.",
+                            "type": "number"
+                          },
+                          "cornerClearanceMm": {
+                            "description": "Clearance kept from corners, in millimetres.",
+                            "type": "number"
+                          },
+                          "edgeMarginMm": {
+                            "description": "Margin kept from the stock edge, in millimetres.",
+                            "type": "number"
+                          },
+                          "fineStepMm": {
+                            "description": "Fine search step, in millimetres.",
+                            "type": "number"
+                          },
+                          "idlePollLimit": {
+                            "description": "How many status polls may show the machine idle before a touch gives up.",
+                            "maximum": 9007199254740991,
+                            "minimum": -9007199254740991,
+                            "type": "integer"
+                          },
+                          "parkAboveSurfaceMm": {
+                            "description": "Parking height above the surface, in millimetres.",
+                            "type": "number"
+                          },
+                          "readingResolutionMm": {
+                            "description": "Resolution of a probe position reading, in millimetres.",
+                            "type": "number"
+                          },
+                          "scanInsideMm": {
+                            "description": "How far inside the expected edge a scan starts, in millimetres.",
+                            "type": "number"
+                          },
+                          "scanMissMarginMm": {
+                            "description": "Extra travel past the expected edge before a scan counts as missed, in millimetres.",
+                            "type": "number"
+                          },
+                          "scanReachMm": {
+                            "description": "How far a scan may travel, in millimetres.",
+                            "type": "number"
+                          },
+                          "surfaceBandMm": {
+                            "description": "Height band treated as the surface, in millimetres.",
+                            "type": "number"
+                          },
+                          "surfaceFastFeed": {
+                            "description": "Fast probe feed during the surface seek, mm/min.",
+                            "type": "number"
+                          },
+                          "surfaceSeekMm": {
+                            "description": "Distance to seek down to find the surface, in millimetres.",
+                            "type": "number"
+                          },
+                          "surfaceSlowFeed": {
+                            "description": "Slow probe feed during the final surface approach, mm/min.",
+                            "type": "number"
+                          },
+                          "surfaceSlowSeekMm": {
+                            "description": "Distance over which the slow approach runs, in millimetres.",
+                            "type": "number"
+                          },
+                          "surfaceToleranceMm": {
+                            "description": "Tolerance for a surface touch, in millimetres.",
+                            "type": "number"
+                          },
+                          "surfaceTouchCount": {
+                            "default": 5,
+                            "description": "Number of surface touches (5–9) the approved plan used.",
+                            "maximum": 9,
+                            "minimum": 5,
+                            "type": "integer"
+                          },
+                          "tipDiameterMm": {
+                            "description": "Probe tip diameter, in millimetres.",
+                            "type": "number"
+                          },
+                          "tipRadiusMm": {
+                            "description": "Effective probe tip radius, in millimetres.",
+                            "type": "number"
+                          },
+                          "tipRadiusUncertaintyMm": {
+                            "description": "Uncertainty on the probe tip radius, in millimetres.",
+                            "type": "number"
+                          },
+                          "touchFeed": {
+                            "description": "Probe feed while touching, mm/min.",
+                            "type": "number"
+                          }
+                        },
+                        "required": [
+                          "capBelowSurfaceMm",
+                          "coarseStepMm",
+                          "fineStepMm",
+                          "parkAboveSurfaceMm",
+                          "scanInsideMm",
+                          "scanReachMm",
+                          "cornerClearanceMm",
+                          "surfaceBandMm",
+                          "tipRadiusMm",
+                          "tipRadiusUncertaintyMm",
+                          "tipDiameterMm",
+                          "edgeMarginMm",
+                          "surfaceSeekMm",
+                          "surfaceToleranceMm",
+                          "touchFeed",
+                          "surfaceFastFeed",
+                          "surfaceSlowFeed",
+                          "surfaceSlowSeekMm",
+                          "idlePollLimit",
+                          "scanMissMarginMm",
+                          "readingResolutionMm"
+                        ],
+                        "type": "object"
+                      },
+                      "stock": {
+                        "description": "The stock as this plan expects to find it.",
+                        "properties": {
+                          "cornerRadius": {
+                            "description": "Expected corner radius in millimetres; 0 for square corners.",
+                            "minimum": 0,
+                            "type": "number"
+                          },
+                          "xMax": {
+                            "description": "Expected stock maximum X, in the work frame.",
+                            "type": "number"
+                          },
+                          "xMin": {
+                            "description": "Expected stock minimum X, in the work frame.",
+                            "type": "number"
+                          },
+                          "yMax": {
+                            "description": "Expected stock maximum Y, in the work frame.",
+                            "type": "number"
+                          },
+                          "yMin": {
+                            "description": "Expected stock minimum Y, in the work frame.",
+                            "type": "number"
+                          }
+                        },
+                        "required": [
+                          "xMin",
+                          "yMin",
+                          "xMax",
+                          "yMax",
+                          "cornerRadius"
+                        ],
+                        "type": "object"
+                      },
+                      "surfacePoint": {
+                        "description": "Work-coordinate point where the surface is probed.",
+                        "properties": {
+                          "x": {
+                            "description": "X in millimetres from the stock's front-left corner.",
+                            "type": "number"
+                          },
+                          "y": {
+                            "description": "Y in millimetres from the stock's front-left corner.",
+                            "type": "number"
+                          }
+                        },
+                        "required": [
+                          "x",
+                          "y"
+                        ],
+                        "type": "object"
+                      }
+                    },
+                    "required": [
+                      "mount",
+                      "stock",
+                      "surfacePoint",
+                      "seek",
+                      "scans",
+                      "bracketOrigin",
+                      "mountObstacles",
+                      "settings",
+                      "notes"
+                    ],
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "method",
+                  "plan",
+                  "expected"
+                ],
+                "type": "object"
+              },
+              "remount": {
+                "description": "Instructions for remounting the stock; omit when the setup is never remounted.",
+                "properties": {
+                  "confirm": {
+                    "anyOf": [
+                      {
+                        "properties": {
+                          "correct": {
+                            "description": "Index of the correct answer in options.",
+                            "maximum": 9007199254740991,
+                            "minimum": 0,
+                            "type": "integer"
+                          },
+                          "options": {
+                            "description": "Answer options.",
+                            "items": {
+                              "type": "string"
+                            },
+                            "type": "array"
+                          },
+                          "question": {
+                            "description": "The question put to the operator after remounting.",
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "question",
+                          "options",
+                          "correct"
+                        ],
+                        "type": "object"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "description": "The landmark question that confirms the remount, or null."
+                  },
+                  "instruction": {
+                    "description": "Steps shown when the stock is remounted.",
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  }
+                },
+                "required": [
+                  "instruction",
+                  "confirm"
+                ],
+                "type": "object"
+              },
+              "toolItems": {
+                "additionalProperties": {
+                  "items": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                "description": "Item ids cut by each cutter, keyed by registry key; omit when not assigned per cutter.",
+                "propertyNames": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              "tools": {
+                "description": "Registry keys of the cutters this setup uses.",
+                "items": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            },
+            "required": [
+              "orientation",
+              "mount",
+              "itemIds",
+              "tools"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "stockEntryId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Shelf entry id of the stock, or null when not a shelf entry."
+        }
+      },
+      "required": [
+        "jobId",
+        "frozenAt",
+        "hash",
+        "jobHash",
+        "programs",
+        "setups",
+        "stockEntryId"
+      ],
+      "type": "object"
+    },
+    "primitives": {
+      "description": "3D negative volumes (box, cylinder, cone, sphere); omit for none.",
+      "items": {
+        "oneOf": [
+          {
+            "properties": {
+              "axis": {
+                "description": "Axis the volume is cut along; omit for Z, the only axis the region CAM cuts.",
+                "enum": [
+                  "z",
+                  "x",
+                  "y"
+                ],
+                "type": "string"
+              },
+              "depth": {
+                "description": "How far below the stock's top face the volume reaches, in millimetres.",
+                "exclusiveMinimum": 0,
+                "type": "number"
+              },
+              "enabled": {
+                "description": "False keeps the primitive in the document but out of the program.",
+                "type": "boolean"
+              },
+              "height": {
+                "description": "Height along Y before rotation, in millimetres.",
+                "exclusiveMinimum": 0,
+                "type": "number"
+              },
+              "id": {
+                "description": "Unique id for this primitive within the job.",
+                "minLength": 1,
+                "type": "string"
+              },
+              "kind": {
+                "const": "box",
+                "description": "A rectangular cut-away volume.",
+                "type": "string"
+              },
+              "name": {
+                "description": "Optional human-readable name for the item list.",
+                "type": "string"
+              },
+              "position": {
+                "description": "Footprint centre of the volume in the stock frame.",
+                "properties": {
+                  "x": {
+                    "description": "X in millimetres from the stock's front-left corner.",
+                    "type": "number"
+                  },
+                  "y": {
+                    "description": "Y in millimetres from the stock's front-left corner.",
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "x",
+                  "y"
+                ],
+                "type": "object"
+              },
+              "rotation": {
+                "description": "Rotation in degrees counter-clockwise about Z through position.",
+                "type": "number"
+              },
+              "width": {
+                "description": "Width along X before rotation, in millimetres.",
+                "exclusiveMinimum": 0,
+                "type": "number"
+              }
+            },
+            "required": [
+              "id",
+              "position",
+              "rotation",
+              "enabled",
+              "depth",
+              "kind",
+              "width",
+              "height"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "axis": {
+                "description": "Axis the volume is cut along; omit for Z, the only axis the region CAM cuts.",
+                "enum": [
+                  "z",
+                  "x",
+                  "y"
+                ],
+                "type": "string"
+              },
+              "depth": {
+                "description": "How far below the stock's top face the volume reaches, in millimetres.",
+                "exclusiveMinimum": 0,
+                "type": "number"
+              },
+              "diameter": {
+                "description": "Cylinder diameter in millimetres.",
+                "exclusiveMinimum": 0,
+                "type": "number"
+              },
+              "enabled": {
+                "description": "False keeps the primitive in the document but out of the program.",
+                "type": "boolean"
+              },
+              "id": {
+                "description": "Unique id for this primitive within the job.",
+                "minLength": 1,
+                "type": "string"
+              },
+              "kind": {
+                "const": "cylinder",
+                "description": "A cylindrical cut-away volume.",
+                "type": "string"
+              },
+              "name": {
+                "description": "Optional human-readable name for the item list.",
+                "type": "string"
+              },
+              "position": {
+                "description": "Footprint centre of the volume in the stock frame.",
+                "properties": {
+                  "x": {
+                    "description": "X in millimetres from the stock's front-left corner.",
+                    "type": "number"
+                  },
+                  "y": {
+                    "description": "Y in millimetres from the stock's front-left corner.",
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "x",
+                  "y"
+                ],
+                "type": "object"
+              },
+              "rotation": {
+                "description": "Rotation in degrees counter-clockwise about Z through position.",
+                "type": "number"
+              }
+            },
+            "required": [
+              "id",
+              "position",
+              "rotation",
+              "enabled",
+              "depth",
+              "kind",
+              "diameter"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "axis": {
+                "description": "Axis the volume is cut along; omit for Z, the only axis the region CAM cuts.",
+                "enum": [
+                  "z",
+                  "x",
+                  "y"
+                ],
+                "type": "string"
+              },
+              "depth": {
+                "description": "How far below the stock's top face the volume reaches, in millimetres.",
+                "exclusiveMinimum": 0,
+                "type": "number"
+              },
+              "diameter": {
+                "description": "Cone diameter at its mouth, in millimetres.",
+                "exclusiveMinimum": 0,
+                "type": "number"
+              },
+              "enabled": {
+                "description": "False keeps the primitive in the document but out of the program.",
+                "type": "boolean"
+              },
+              "id": {
+                "description": "Unique id for this primitive within the job.",
+                "minLength": 1,
+                "type": "string"
+              },
+              "kind": {
+                "const": "cone",
+                "description": "A conical cut-away, e.g. a countersink.",
+                "type": "string"
+              },
+              "name": {
+                "description": "Optional human-readable name for the item list.",
+                "type": "string"
+              },
+              "position": {
+                "description": "Footprint centre of the volume in the stock frame.",
+                "properties": {
+                  "x": {
+                    "description": "X in millimetres from the stock's front-left corner.",
+                    "type": "number"
+                  },
+                  "y": {
+                    "description": "Y in millimetres from the stock's front-left corner.",
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "x",
+                  "y"
+                ],
+                "type": "object"
+              },
+              "rotation": {
+                "description": "Rotation in degrees counter-clockwise about Z through position.",
+                "type": "number"
+              },
+              "tipDiameter": {
+                "description": "Cone diameter at its tip, in millimetres; 0 is a sharp point and it may not exceed diameter.",
+                "minimum": 0,
+                "type": "number"
+              }
+            },
+            "required": [
+              "id",
+              "position",
+              "rotation",
+              "enabled",
+              "depth",
+              "kind",
+              "diameter",
+              "tipDiameter"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "axis": {
+                "description": "Axis the volume is cut along; omit for Z, the only axis the region CAM cuts.",
+                "enum": [
+                  "z",
+                  "x",
+                  "y"
+                ],
+                "type": "string"
+              },
+              "depth": {
+                "description": "How far below the stock's top face the volume reaches, in millimetres.",
+                "exclusiveMinimum": 0,
+                "type": "number"
+              },
+              "diameter": {
+                "description": "Ball diameter in millimetres; the cap depth may not exceed it.",
+                "exclusiveMinimum": 0,
+                "type": "number"
+              },
+              "enabled": {
+                "description": "False keeps the primitive in the document but out of the program.",
+                "type": "boolean"
+              },
+              "id": {
+                "description": "Unique id for this primitive within the job.",
+                "minLength": 1,
+                "type": "string"
+              },
+              "kind": {
+                "const": "sphere",
+                "description": "A spherical cut-away (a dimple).",
+                "type": "string"
+              },
+              "name": {
+                "description": "Optional human-readable name for the item list.",
+                "type": "string"
+              },
+              "position": {
+                "description": "Footprint centre of the volume in the stock frame.",
+                "properties": {
+                  "x": {
+                    "description": "X in millimetres from the stock's front-left corner.",
+                    "type": "number"
+                  },
+                  "y": {
+                    "description": "Y in millimetres from the stock's front-left corner.",
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "x",
+                  "y"
+                ],
+                "type": "object"
+              },
+              "rotation": {
+                "description": "Rotation in degrees counter-clockwise about Z through position.",
+                "type": "number"
+              }
+            },
+            "required": [
+              "id",
+              "position",
+              "rotation",
+              "enabled",
+              "depth",
+              "kind",
+              "diameter"
+            ],
+            "type": "object"
+          }
+        ]
+      },
+      "type": "array"
+    },
+    "runLog": {
+      "description": "Programs already run from this document; omit for none.",
+      "items": {
+        "additionalProperties": false,
+        "description": "One program run recorded in the job document.",
+        "properties": {
+          "at": {
+            "description": "When the run was recorded.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "ncHash": {
+            "description": "Hash of the program text actually run; omit when not recorded.",
+            "type": "string"
+          },
+          "outcome": {
+            "description": "How the run ended: finished, stopped by the operator, or failed.",
+            "enum": [
+              "finished",
+              "stopped",
+              "failed"
+            ],
+            "type": "string"
+          },
+          "programHash": {
+            "description": "Hash of the program that ran.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "setupId": {
+            "description": "Id of the setup the program ran in.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "setupIndex": {
+            "description": "Index of the setup the program ran in.",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "toolKey": {
+            "description": "Registry key of the cutter used.",
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "programHash",
+          "setupIndex",
+          "setupId",
+          "toolKey",
+          "at",
+          "outcome"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "sacrificial": {
+      "description": "The sacrificial material under and around the stock.",
+      "properties": {
+        "sides": {
+          "description": "Side strips around the stock, per side.",
+          "properties": {
+            "back": {
+              "anyOf": [
+                {
+                  "properties": {
+                    "height": {
+                      "anyOf": [
+                        {
+                          "const": "flush",
+                          "type": "string"
+                        },
+                        {
+                          "exclusiveMinimum": 0,
+                          "type": "number"
+                        }
+                      ],
+                      "description": "\"flush\" for level with the part top, or a positive height from the part bottom in millimetres."
+                    },
+                    "thickness": {
+                      "description": "Strip thickness in millimetres.",
+                      "exclusiveMinimum": 0,
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "thickness",
+                    "height"
+                  ],
+                  "type": "object"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Strip at the back, or null."
+            },
+            "front": {
+              "anyOf": [
+                {
+                  "properties": {
+                    "height": {
+                      "anyOf": [
+                        {
+                          "const": "flush",
+                          "type": "string"
+                        },
+                        {
+                          "exclusiveMinimum": 0,
+                          "type": "number"
+                        }
+                      ],
+                      "description": "\"flush\" for level with the part top, or a positive height from the part bottom in millimetres."
+                    },
+                    "thickness": {
+                      "description": "Strip thickness in millimetres.",
+                      "exclusiveMinimum": 0,
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "thickness",
+                    "height"
+                  ],
+                  "type": "object"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Strip at the front, or null."
+            },
+            "left": {
+              "anyOf": [
+                {
+                  "properties": {
+                    "height": {
+                      "anyOf": [
+                        {
+                          "const": "flush",
+                          "type": "string"
+                        },
+                        {
+                          "exclusiveMinimum": 0,
+                          "type": "number"
+                        }
+                      ],
+                      "description": "\"flush\" for level with the part top, or a positive height from the part bottom in millimetres."
+                    },
+                    "thickness": {
+                      "description": "Strip thickness in millimetres.",
+                      "exclusiveMinimum": 0,
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "thickness",
+                    "height"
+                  ],
+                  "type": "object"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Strip on the left side, or null."
+            },
+            "right": {
+              "anyOf": [
+                {
+                  "properties": {
+                    "height": {
+                      "anyOf": [
+                        {
+                          "const": "flush",
+                          "type": "string"
+                        },
+                        {
+                          "exclusiveMinimum": 0,
+                          "type": "number"
+                        }
+                      ],
+                      "description": "\"flush\" for level with the part top, or a positive height from the part bottom in millimetres."
+                    },
+                    "thickness": {
+                      "description": "Strip thickness in millimetres.",
+                      "exclusiveMinimum": 0,
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "thickness",
+                    "height"
+                  ],
+                  "type": "object"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Strip on the right side, or null."
+            }
+          },
+          "required": [
+            "left",
+            "right",
+            "front",
+            "back"
+          ],
+          "type": "object"
+        },
+        "source": {
+          "description": "Where these sacrificial numbers came from: a default, a saved set, or a measurement.",
+          "enum": [
+            "default",
+            "saved",
+            "measured"
+          ],
+          "type": "string"
+        },
+        "under": {
+          "anyOf": [
+            {
+              "properties": {
+                "attach": {
+                  "description": "How the under-board is held to the stock.",
+                  "enum": [
+                    "tape",
+                    "glue",
+                    "screws",
+                    "loose"
+                  ],
+                  "type": "string"
+                },
+                "overhang": {
+                  "description": "How far the board extends beyond the stock on each side, in millimetres.",
+                  "properties": {
+                    "back": {
+                      "description": "Overhang at the back, in millimetres; 0 is flush.",
+                      "minimum": 0,
+                      "type": "number"
+                    },
+                    "front": {
+                      "description": "Overhang at the front, in millimetres; 0 is flush.",
+                      "minimum": 0,
+                      "type": "number"
+                    },
+                    "left": {
+                      "description": "Overhang on the left side, in millimetres; 0 is flush.",
+                      "minimum": 0,
+                      "type": "number"
+                    },
+                    "right": {
+                      "description": "Overhang on the right side, in millimetres; 0 is flush.",
+                      "minimum": 0,
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "left",
+                    "right",
+                    "front",
+                    "back"
+                  ],
+                  "type": "object"
+                },
+                "thickness": {
+                  "description": "Under-board thickness in millimetres.",
+                  "exclusiveMinimum": 0,
+                  "type": "number"
+                }
+              },
+              "required": [
+                "thickness",
+                "overhang",
+                "attach"
+              ],
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The board under the stock, or null when there is none."
+        }
+      },
+      "required": [
+        "under",
+        "sides",
+        "source"
+      ],
+      "type": "object"
+    },
+    "schemaVersion": {
+      "const": 3,
+      "description": "Document schema version.",
+      "type": "number"
+    },
+    "setups": {
+      "description": "Saved setups; omit for the implicit single top-up vise setup.",
+      "items": {
+        "properties": {
+          "id": {
+            "description": "Unique setup id; generated when a document does not state one.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "itemIds": {
+            "description": "Ids of the items cut in this setup.",
+            "items": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "mount": {
+            "description": "How the stock is held for this setup.",
+            "properties": {
+              "board": {
+                "description": "True when a board sits under the stock; for bracket and tape setups.",
+                "type": "boolean"
+              },
+              "kind": {
+                "description": "How the stock is held: in the vise, on the bracket, or with tape.",
+                "enum": [
+                  "vise",
+                  "bracket",
+                  "tape"
+                ],
+                "type": "string"
+              },
+              "viseOpeningMm": {
+                "description": "Widest jaw opening in millimetres; for a vise setup.",
+                "exclusiveMinimum": 0,
+                "type": "number"
+              }
+            },
+            "required": [
+              "kind"
+            ],
+            "type": "object"
+          },
+          "orientation": {
+            "description": "Which stock face the setup works on, per face name.",
+            "properties": {
+              "back": {
+                "description": "A stock face name; this setup slot states which face it refers to.",
+                "enum": [
+                  "top",
+                  "bottom",
+                  "left",
+                  "right",
+                  "front",
+                  "back"
+                ],
+                "type": "string"
+              },
+              "bottom": {
+                "description": "A stock face name; this setup slot states which face it refers to.",
+                "enum": [
+                  "top",
+                  "bottom",
+                  "left",
+                  "right",
+                  "front",
+                  "back"
+                ],
+                "type": "string"
+              },
+              "front": {
+                "description": "A stock face name; this setup slot states which face it refers to.",
+                "enum": [
+                  "top",
+                  "bottom",
+                  "left",
+                  "right",
+                  "front",
+                  "back"
+                ],
+                "type": "string"
+              },
+              "left": {
+                "description": "A stock face name; this setup slot states which face it refers to.",
+                "enum": [
+                  "top",
+                  "bottom",
+                  "left",
+                  "right",
+                  "front",
+                  "back"
+                ],
+                "type": "string"
+              },
+              "right": {
+                "description": "A stock face name; this setup slot states which face it refers to.",
+                "enum": [
+                  "top",
+                  "bottom",
+                  "left",
+                  "right",
+                  "front",
+                  "back"
+                ],
+                "type": "string"
+              },
+              "top": {
+                "description": "A stock face name; this setup slot states which face it refers to.",
+                "enum": [
+                  "top",
+                  "bottom",
+                  "left",
+                  "right",
+                  "front",
+                  "back"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "top",
+              "bottom",
+              "left",
+              "right",
+              "front",
+              "back"
+            ],
+            "type": "object"
+          },
+          "registration": {
+            "description": "The approved registration for this setup; omit for none.",
+            "properties": {
+              "expected": {
+                "description": "One-line description of what the plan expects to find.",
+                "type": "string"
+              },
+              "method": {
+                "description": "How the stock is held: in the vise, on the bracket, or with tape.",
+                "enum": [
+                  "vise",
+                  "bracket",
+                  "tape"
+                ],
+                "type": "string"
+              },
+              "plan": {
+                "description": "The approved registration plan for this setup.",
+                "properties": {
+                  "bracketOrigin": {
+                    "anyOf": [
+                      {
+                        "properties": {
+                          "from": {
+                            "description": "What the origin was derived from.",
+                            "type": "string"
+                          },
+                          "offsetMeasured": {
+                            "description": "True when the offset was measured rather than assumed.",
+                            "type": "boolean"
+                          },
+                          "x": {
+                            "description": "Bracket origin X, in millimetres.",
+                            "type": "number"
+                          },
+                          "y": {
+                            "description": "Bracket origin Y, in millimetres.",
+                            "type": "number"
+                          }
+                        },
+                        "required": [
+                          "x",
+                          "y",
+                          "from",
+                          "offsetMeasured"
+                        ],
+                        "type": "object"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "description": "Bracket origin when the plan found one, or null."
+                  },
+                  "mount": {
+                    "description": "How the stock is held: in the vise, on the bracket, or with tape.",
+                    "enum": [
+                      "vise",
+                      "bracket",
+                      "tape"
+                    ],
+                    "type": "string"
+                  },
+                  "mountObstacles": {
+                    "description": "Clamps and bracket arms the operator must confirm are clear.",
+                    "items": {
+                      "properties": {
+                        "kind": {
+                          "description": "The kind of obstacle: a clamp or the bracket arm.",
+                          "enum": [
+                            "clamp",
+                            "bracket"
+                          ],
+                          "type": "string"
+                        },
+                        "label": {
+                          "description": "Label shown to the operator.",
+                          "type": "string"
+                        },
+                        "max": {
+                          "description": "[x, y] maximum corner of the obstacle, in millimetres.",
+                          "prefixItems": [
+                            {
+                              "type": "number"
+                            },
+                            {
+                              "type": "number"
+                            }
+                          ],
+                          "type": "array"
+                        },
+                        "min": {
+                          "description": "[x, y] minimum corner of the obstacle, in millimetres.",
+                          "prefixItems": [
+                            {
+                              "type": "number"
+                            },
+                            {
+                              "type": "number"
+                            }
+                          ],
+                          "type": "array"
+                        },
+                        "topZ": {
+                          "description": "Top of the obstacle in part-frame Z, in millimetres.",
+                          "type": "number"
+                        }
+                      },
+                      "required": [
+                        "kind",
+                        "label",
+                        "min",
+                        "max",
+                        "topZ"
+                      ],
+                      "type": "object"
+                    },
+                    "type": "array"
+                  },
+                  "notes": {
+                    "description": "Human-readable notes shown with the plan.",
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "referenceRotation": {
+                    "anyOf": [
+                      {
+                        "properties": {
+                          "between": {
+                            "description": "The two reference ids whose separation fixes the rotation.",
+                            "prefixItems": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "string"
+                              }
+                            ],
+                            "type": "array"
+                          },
+                          "resolutionMm": {
+                            "description": "Resolution of the rotation estimate, in millimetres.",
+                            "type": "number"
+                          },
+                          "separation": {
+                            "description": "Centre-to-centre separation of the two references, in millimetres.",
+                            "type": "number"
+                          }
+                        },
+                        "required": [
+                          "between",
+                          "separation",
+                          "resolutionMm"
+                        ],
+                        "type": "object"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "description": "Rotation derived from two reference cuts, or null/omitted."
+                  },
+                  "references": {
+                    "description": "Reference cuts used to relocate the stock in a later setup; omit if none.",
+                    "items": {
+                      "properties": {
+                        "centre": {
+                          "description": "Reference centre in work coordinates.",
+                          "properties": {
+                            "x": {
+                              "description": "X in millimetres from the stock's front-left corner.",
+                              "type": "number"
+                            },
+                            "y": {
+                              "description": "Y in millimetres from the stock's front-left corner.",
+                              "type": "number"
+                            }
+                          },
+                          "required": [
+                            "x",
+                            "y"
+                          ],
+                          "type": "object"
+                        },
+                        "itemId": {
+                          "description": "Id of the item whose cut is used as a reference.",
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "name": {
+                          "description": "Item name, for the run sheet.",
+                          "type": "string"
+                        },
+                        "size": {
+                          "description": "Reference extent in millimetres.",
+                          "properties": {
+                            "x": {
+                              "description": "Reference size along X, in millimetres.",
+                              "type": "number"
+                            },
+                            "y": {
+                              "description": "Reference size along Y, in millimetres.",
+                              "type": "number"
+                            }
+                          },
+                          "required": [
+                            "x",
+                            "y"
+                          ],
+                          "type": "object"
+                        },
+                        "xScans": {
+                          "description": "Scan indices along X that touch this reference.",
+                          "items": {
+                            "maximum": 9007199254740991,
+                            "minimum": 0,
+                            "type": "integer"
+                          },
+                          "type": "array"
+                        },
+                        "yScans": {
+                          "description": "Scan indices along Y that touch this reference.",
+                          "items": {
+                            "maximum": 9007199254740991,
+                            "minimum": 0,
+                            "type": "integer"
+                          },
+                          "type": "array"
+                        }
+                      },
+                      "required": [
+                        "itemId",
+                        "name",
+                        "centre",
+                        "size",
+                        "xScans",
+                        "yScans"
+                      ],
+                      "type": "object"
+                    },
+                    "type": "array"
+                  },
+                  "scans": {
+                    "description": "Edge scans the plan runs.",
+                    "items": {
+                      "properties": {
+                        "along": {
+                          "description": "Position along the edge where the scan runs, in millimetres.",
+                          "type": "number"
+                        },
+                        "coarseStep": {
+                          "description": "Coarse search step, in millimetres.",
+                          "type": "number"
+                        },
+                        "edge": {
+                          "description": "Stock edge this scan measures.",
+                          "enum": [
+                            "left",
+                            "right",
+                            "front",
+                            "back"
+                          ],
+                          "type": "string"
+                        },
+                        "expectedAt": {
+                          "description": "Expected edge position, in millimetres.",
+                          "type": "number"
+                        },
+                        "fineStep": {
+                          "description": "Fine search step, in millimetres.",
+                          "type": "number"
+                        },
+                        "label": {
+                          "description": "Optional label shown next to the scan in the run sheet.",
+                          "type": "string"
+                        },
+                        "limit": {
+                          "description": "Scan travel limit, in millimetres.",
+                          "type": "number"
+                        },
+                        "outward": {
+                          "anyOf": [
+                            {
+                              "const": 1,
+                              "type": "number"
+                            },
+                            {
+                              "const": -1,
+                              "type": "number"
+                            }
+                          ],
+                          "description": "Scan direction: +1 or −1 along the axis."
+                        },
+                        "start": {
+                          "description": "Scan start position, in millimetres.",
+                          "type": "number"
+                        }
+                      },
+                      "required": [
+                        "edge",
+                        "along",
+                        "expectedAt",
+                        "outward",
+                        "start",
+                        "limit",
+                        "coarseStep",
+                        "fineStep"
+                      ],
+                      "type": "object"
+                    },
+                    "type": "array"
+                  },
+                  "seek": {
+                    "description": "The surface seek this plan runs.",
+                    "properties": {
+                      "band": {
+                        "description": "Height band accepted as the surface, in millimetres.",
+                        "properties": {
+                          "max": {
+                            "description": "Top of the accepted surface band, in millimetres.",
+                            "type": "number"
+                          },
+                          "min": {
+                            "description": "Bottom of the accepted surface band, in millimetres.",
+                            "type": "number"
+                          }
+                        },
+                        "required": [
+                          "min",
+                          "max"
+                        ],
+                        "type": "object"
+                      },
+                      "fromMachineZ": {
+                        "description": "Machine Z the seek starts from, in millimetres.",
+                        "type": "number"
+                      },
+                      "travelMm": {
+                        "description": "How far the seek may travel down, in millimetres.",
+                        "type": "number"
+                      }
+                    },
+                    "required": [
+                      "fromMachineZ",
+                      "travelMm",
+                      "band"
+                    ],
+                    "type": "object"
+                  },
+                  "settings": {
+                    "description": "The registration tunables the plan was computed with.",
+                    "properties": {
+                      "capBelowSurfaceMm": {
+                        "description": "Probe cap height below the nominal surface, in millimetres.",
+                        "type": "number"
+                      },
+                      "coarseStepMm": {
+                        "description": "Coarse search step, in millimetres.",
+                        "type": "number"
+                      },
+                      "cornerClearanceMm": {
+                        "description": "Clearance kept from corners, in millimetres.",
+                        "type": "number"
+                      },
+                      "edgeMarginMm": {
+                        "description": "Margin kept from the stock edge, in millimetres.",
+                        "type": "number"
+                      },
+                      "fineStepMm": {
+                        "description": "Fine search step, in millimetres.",
+                        "type": "number"
+                      },
+                      "idlePollLimit": {
+                        "description": "How many status polls may show the machine idle before a touch gives up.",
+                        "maximum": 9007199254740991,
+                        "minimum": -9007199254740991,
+                        "type": "integer"
+                      },
+                      "parkAboveSurfaceMm": {
+                        "description": "Parking height above the surface, in millimetres.",
+                        "type": "number"
+                      },
+                      "readingResolutionMm": {
+                        "description": "Resolution of a probe position reading, in millimetres.",
+                        "type": "number"
+                      },
+                      "scanInsideMm": {
+                        "description": "How far inside the expected edge a scan starts, in millimetres.",
+                        "type": "number"
+                      },
+                      "scanMissMarginMm": {
+                        "description": "Extra travel past the expected edge before a scan counts as missed, in millimetres.",
+                        "type": "number"
+                      },
+                      "scanReachMm": {
+                        "description": "How far a scan may travel, in millimetres.",
+                        "type": "number"
+                      },
+                      "surfaceBandMm": {
+                        "description": "Height band treated as the surface, in millimetres.",
+                        "type": "number"
+                      },
+                      "surfaceFastFeed": {
+                        "description": "Fast probe feed during the surface seek, mm/min.",
+                        "type": "number"
+                      },
+                      "surfaceSeekMm": {
+                        "description": "Distance to seek down to find the surface, in millimetres.",
+                        "type": "number"
+                      },
+                      "surfaceSlowFeed": {
+                        "description": "Slow probe feed during the final surface approach, mm/min.",
+                        "type": "number"
+                      },
+                      "surfaceSlowSeekMm": {
+                        "description": "Distance over which the slow approach runs, in millimetres.",
+                        "type": "number"
+                      },
+                      "surfaceToleranceMm": {
+                        "description": "Tolerance for a surface touch, in millimetres.",
+                        "type": "number"
+                      },
+                      "surfaceTouchCount": {
+                        "default": 5,
+                        "description": "Number of surface touches (5–9) the approved plan used.",
+                        "maximum": 9,
+                        "minimum": 5,
+                        "type": "integer"
+                      },
+                      "tipDiameterMm": {
+                        "description": "Probe tip diameter, in millimetres.",
+                        "type": "number"
+                      },
+                      "tipRadiusMm": {
+                        "description": "Effective probe tip radius, in millimetres.",
+                        "type": "number"
+                      },
+                      "tipRadiusUncertaintyMm": {
+                        "description": "Uncertainty on the probe tip radius, in millimetres.",
+                        "type": "number"
+                      },
+                      "touchFeed": {
+                        "description": "Probe feed while touching, mm/min.",
+                        "type": "number"
+                      }
+                    },
+                    "required": [
+                      "capBelowSurfaceMm",
+                      "coarseStepMm",
+                      "fineStepMm",
+                      "parkAboveSurfaceMm",
+                      "scanInsideMm",
+                      "scanReachMm",
+                      "cornerClearanceMm",
+                      "surfaceBandMm",
+                      "tipRadiusMm",
+                      "tipRadiusUncertaintyMm",
+                      "tipDiameterMm",
+                      "edgeMarginMm",
+                      "surfaceSeekMm",
+                      "surfaceToleranceMm",
+                      "touchFeed",
+                      "surfaceFastFeed",
+                      "surfaceSlowFeed",
+                      "surfaceSlowSeekMm",
+                      "idlePollLimit",
+                      "scanMissMarginMm",
+                      "readingResolutionMm"
+                    ],
+                    "type": "object"
+                  },
+                  "stock": {
+                    "description": "The stock as this plan expects to find it.",
+                    "properties": {
+                      "cornerRadius": {
+                        "description": "Expected corner radius in millimetres; 0 for square corners.",
+                        "minimum": 0,
+                        "type": "number"
+                      },
+                      "xMax": {
+                        "description": "Expected stock maximum X, in the work frame.",
+                        "type": "number"
+                      },
+                      "xMin": {
+                        "description": "Expected stock minimum X, in the work frame.",
+                        "type": "number"
+                      },
+                      "yMax": {
+                        "description": "Expected stock maximum Y, in the work frame.",
+                        "type": "number"
+                      },
+                      "yMin": {
+                        "description": "Expected stock minimum Y, in the work frame.",
+                        "type": "number"
+                      }
+                    },
+                    "required": [
+                      "xMin",
+                      "yMin",
+                      "xMax",
+                      "yMax",
+                      "cornerRadius"
+                    ],
+                    "type": "object"
+                  },
+                  "surfacePoint": {
+                    "description": "Work-coordinate point where the surface is probed.",
+                    "properties": {
+                      "x": {
+                        "description": "X in millimetres from the stock's front-left corner.",
+                        "type": "number"
+                      },
+                      "y": {
+                        "description": "Y in millimetres from the stock's front-left corner.",
+                        "type": "number"
+                      }
+                    },
+                    "required": [
+                      "x",
+                      "y"
+                    ],
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "mount",
+                  "stock",
+                  "surfacePoint",
+                  "seek",
+                  "scans",
+                  "bracketOrigin",
+                  "mountObstacles",
+                  "settings",
+                  "notes"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "method",
+              "plan",
+              "expected"
+            ],
+            "type": "object"
+          },
+          "remount": {
+            "description": "Instructions for remounting the stock; omit when the setup is never remounted.",
+            "properties": {
+              "confirm": {
+                "anyOf": [
+                  {
+                    "properties": {
+                      "correct": {
+                        "description": "Index of the correct answer in options.",
+                        "maximum": 9007199254740991,
+                        "minimum": 0,
+                        "type": "integer"
+                      },
+                      "options": {
+                        "description": "Answer options.",
+                        "items": {
+                          "type": "string"
+                        },
+                        "type": "array"
+                      },
+                      "question": {
+                        "description": "The question put to the operator after remounting.",
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "question",
+                      "options",
+                      "correct"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "The landmark question that confirms the remount, or null."
+              },
+              "instruction": {
+                "description": "Steps shown when the stock is remounted.",
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            },
+            "required": [
+              "instruction",
+              "confirm"
+            ],
+            "type": "object"
+          },
+          "toolItems": {
+            "additionalProperties": {
+              "items": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "description": "Item ids cut by each cutter, keyed by registry key; omit when not assigned per cutter.",
+            "propertyNames": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "tools": {
+            "description": "Registry keys of the cutters this setup uses.",
+            "items": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "orientation",
+          "mount",
+          "itemIds",
+          "tools"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "shapes": {
+      "default": [],
+      "description": "Rectangular, round, slot and polygon pockets.",
+      "items": {
+        "oneOf": [
+          {
+            "properties": {
+              "construction": {
+                "description": "Reference-only: cut nothing, but other items may refer to this shape.",
+                "type": "boolean"
+              },
+              "cornerRadius": {
+                "description": "Corner radius in millimetres; at most half the smaller side.",
+                "minimum": 0,
+                "type": "number"
+              },
+              "depth": {
+                "description": "Pocket depth below the stock's top face, in millimetres.",
+                "exclusiveMinimum": 0,
+                "type": "number"
+              },
+              "enabled": {
+                "description": "False keeps the item in the document but out of the program.",
+                "type": "boolean"
+              },
+              "height": {
+                "description": "Height along Y before rotation, in millimetres.",
+                "exclusiveMinimum": 0,
+                "type": "number"
+              },
+              "id": {
+                "description": "Unique id for this item within the job.",
+                "minLength": 1,
+                "type": "string"
+              },
+              "kind": {
+                "const": "rect",
+                "description": "A rectangular pocket with rounded corners.",
+                "type": "string"
+              },
+              "name": {
+                "description": "Optional human-readable name for the item list.",
+                "type": "string"
+              },
+              "position": {
+                "description": "Centre of the shape in work coordinates (a polygon's points are relative to it).",
+                "properties": {
+                  "x": {
+                    "description": "X in millimetres from the stock's front-left corner.",
+                    "type": "number"
+                  },
+                  "y": {
+                    "description": "Y in millimetres from the stock's front-left corner.",
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "x",
+                  "y"
+                ],
+                "type": "object"
+              },
+              "rotation": {
+                "description": "Rotation in degrees counter-clockwise about position.",
+                "type": "number"
+              },
+              "through": {
+                "description": "Cut through the blank to the sacrificial board; the floor is the breakthrough rule and depth is then only the checked pocket depth.",
+                "type": "boolean"
+              },
+              "width": {
+                "description": "Width along X before rotation, in millimetres.",
+                "exclusiveMinimum": 0,
+                "type": "number"
+              }
+            },
+            "required": [
+              "id",
+              "position",
+              "rotation",
+              "depth",
+              "enabled",
+              "kind",
+              "width",
+              "height",
+              "cornerRadius"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "construction": {
+                "description": "Reference-only: cut nothing, but other items may refer to this shape.",
+                "type": "boolean"
+              },
+              "depth": {
+                "description": "Pocket depth below the stock's top face, in millimetres.",
+                "exclusiveMinimum": 0,
+                "type": "number"
+              },
+              "diameter": {
+                "description": "Pocket diameter in millimetres.",
+                "exclusiveMinimum": 0,
+                "type": "number"
+              },
+              "enabled": {
+                "description": "False keeps the item in the document but out of the program.",
+                "type": "boolean"
+              },
+              "id": {
+                "description": "Unique id for this item within the job.",
+                "minLength": 1,
+                "type": "string"
+              },
+              "kind": {
+                "const": "circle",
+                "description": "A round pocket.",
+                "type": "string"
+              },
+              "name": {
+                "description": "Optional human-readable name for the item list.",
+                "type": "string"
+              },
+              "position": {
+                "description": "Centre of the shape in work coordinates (a polygon's points are relative to it).",
+                "properties": {
+                  "x": {
+                    "description": "X in millimetres from the stock's front-left corner.",
+                    "type": "number"
+                  },
+                  "y": {
+                    "description": "Y in millimetres from the stock's front-left corner.",
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "x",
+                  "y"
+                ],
+                "type": "object"
+              },
+              "rotation": {
+                "description": "Rotation in degrees counter-clockwise about position.",
+                "type": "number"
+              },
+              "through": {
+                "description": "Cut through the blank to the sacrificial board; the floor is the breakthrough rule and depth is then only the checked pocket depth.",
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "id",
+              "position",
+              "rotation",
+              "depth",
+              "enabled",
+              "kind",
+              "diameter"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "construction": {
+                "description": "Reference-only: cut nothing, but other items may refer to this shape.",
+                "type": "boolean"
+              },
+              "depth": {
+                "description": "Pocket depth below the stock's top face, in millimetres.",
+                "exclusiveMinimum": 0,
+                "type": "number"
+              },
+              "enabled": {
+                "description": "False keeps the item in the document but out of the program.",
+                "type": "boolean"
+              },
+              "id": {
+                "description": "Unique id for this item within the job.",
+                "minLength": 1,
+                "type": "string"
+              },
+              "kind": {
+                "const": "slot",
+                "description": "A stadium-shaped (rounded-ended) slot pocket.",
+                "type": "string"
+              },
+              "length": {
+                "description": "Overall length along X in millimetres; at least the width.",
+                "exclusiveMinimum": 0,
+                "type": "number"
+              },
+              "name": {
+                "description": "Optional human-readable name for the item list.",
+                "type": "string"
+              },
+              "position": {
+                "description": "Centre of the shape in work coordinates (a polygon's points are relative to it).",
+                "properties": {
+                  "x": {
+                    "description": "X in millimetres from the stock's front-left corner.",
+                    "type": "number"
+                  },
+                  "y": {
+                    "description": "Y in millimetres from the stock's front-left corner.",
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "x",
+                  "y"
+                ],
+                "type": "object"
+              },
+              "rotation": {
+                "description": "Rotation in degrees counter-clockwise about position.",
+                "type": "number"
+              },
+              "through": {
+                "description": "Cut through the blank to the sacrificial board; the floor is the breakthrough rule and depth is then only the checked pocket depth.",
+                "type": "boolean"
+              },
+              "width": {
+                "description": "Slot width in millimetres.",
+                "exclusiveMinimum": 0,
+                "type": "number"
+              }
+            },
+            "required": [
+              "id",
+              "position",
+              "rotation",
+              "depth",
+              "enabled",
+              "kind",
+              "length",
+              "width"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "construction": {
+                "description": "Reference-only: cut nothing, but other items may refer to this shape.",
+                "type": "boolean"
+              },
+              "depth": {
+                "description": "Pocket depth below the stock's top face, in millimetres.",
+                "exclusiveMinimum": 0,
+                "type": "number"
+              },
+              "enabled": {
+                "description": "False keeps the item in the document but out of the program.",
+                "type": "boolean"
+              },
+              "id": {
+                "description": "Unique id for this item within the job.",
+                "minLength": 1,
+                "type": "string"
+              },
+              "kind": {
+                "const": "polygon",
+                "description": "A closed polygonal pocket.",
+                "type": "string"
+              },
+              "name": {
+                "description": "Optional human-readable name for the item list.",
+                "type": "string"
+              },
+              "points": {
+                "description": "Closed polygon vertices relative to position; 3–500 points.",
+                "items": {
+                  "description": "An [x, y] point in millimetres, relative to the item position.",
+                  "prefixItems": [
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "number"
+                    }
+                  ],
+                  "type": "array"
+                },
+                "maxItems": 500,
+                "minItems": 3,
+                "type": "array"
+              },
+              "position": {
+                "description": "Centre of the shape in work coordinates (a polygon's points are relative to it).",
+                "properties": {
+                  "x": {
+                    "description": "X in millimetres from the stock's front-left corner.",
+                    "type": "number"
+                  },
+                  "y": {
+                    "description": "Y in millimetres from the stock's front-left corner.",
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "x",
+                  "y"
+                ],
+                "type": "object"
+              },
+              "rotation": {
+                "description": "Rotation in degrees counter-clockwise about position.",
+                "type": "number"
+              },
+              "through": {
+                "description": "Cut through the blank to the sacrificial board; the floor is the breakthrough rule and depth is then only the checked pocket depth.",
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "id",
+              "position",
+              "rotation",
+              "depth",
+              "enabled",
+              "kind",
+              "points"
+            ],
+            "type": "object"
+          }
+        ]
+      },
+      "type": "array"
+    },
+    "sourceFiles": {
+      "description": "Files the job was made from, with their identity; omit for none.",
+      "items": {
+        "additionalProperties": false,
+        "description": "A file the job was made from, with its identity and optionally its bytes.",
+        "properties": {
+          "embedded": {
+            "anyOf": [
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "data": {
+                    "description": "Base64 of the source file.",
+                    "type": "string"
+                  },
+                  "encoding": {
+                    "const": "base64",
+                    "description": "Always base64.",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "encoding",
+                  "data"
+                ],
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The embedded bytes, or null when the file was too large to embed."
+          },
+          "kind": {
+            "description": "What kind of file the source is.",
+            "enum": [
+              "svg",
+              "dxf",
+              "image",
+              "3mf",
+              "font"
+            ],
+            "type": "string"
+          },
+          "name": {
+            "description": "File name the source was imported from.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Path the source was read from, or null when not recorded."
+          },
+          "sha256": {
+            "description": "Lowercase SHA-256 of the source file's bytes (64 hex characters).",
+            "pattern": "^[0-9a-f]{64}$",
+            "type": "string"
+          },
+          "size": {
+            "anyOf": [
+              {
+                "maximum": 9007199254740991,
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Source size in bytes, or null when unknown."
+          }
+        },
+        "required": [
+          "sha256",
+          "kind",
+          "name",
+          "embedded",
+          "size",
+          "path"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "sources": {
+      "description": "Where asserted feeds, stock and label values came from; omit when nothing was stamped.",
+      "properties": {
+        "cut": {
+          "description": "Per-field provenance for the cutting parameters; omit when nothing was stamped.",
+          "properties": {
+            "air": {
+              "description": "Where this value came from: computed, a cutter catalogue, the user, a measurement, or an assumption.",
+              "enum": [
+                "computed",
+                "catalogue",
+                "user",
+                "measured",
+                "assumed"
+              ],
+              "type": "string"
+            },
+            "feed": {
+              "description": "Where this value came from: computed, a cutter catalogue, the user, a measurement, or an assumption.",
+              "enum": [
+                "computed",
+                "catalogue",
+                "user",
+                "measured",
+                "assumed"
+              ],
+              "type": "string"
+            },
+            "peck": {
+              "description": "Where this value came from: computed, a cutter catalogue, the user, a measurement, or an assumption.",
+              "enum": [
+                "computed",
+                "catalogue",
+                "user",
+                "measured",
+                "assumed"
+              ],
+              "type": "string"
+            },
+            "plungeFeed": {
+              "description": "Where this value came from: computed, a cutter catalogue, the user, a measurement, or an assumption.",
+              "enum": [
+                "computed",
+                "catalogue",
+                "user",
+                "measured",
+                "assumed"
+              ],
+              "type": "string"
+            },
+            "rpm": {
+              "description": "Where this value came from: computed, a cutter catalogue, the user, a measurement, or an assumption.",
+              "enum": [
+                "computed",
+                "catalogue",
+                "user",
+                "measured",
+                "assumed"
+              ],
+              "type": "string"
+            },
+            "stepDown": {
+              "description": "Where this value came from: computed, a cutter catalogue, the user, a measurement, or an assumption.",
+              "enum": [
+                "computed",
+                "catalogue",
+                "user",
+                "measured",
+                "assumed"
+              ],
+              "type": "string"
+            },
+            "stepOver": {
+              "description": "Where this value came from: computed, a cutter catalogue, the user, a measurement, or an assumption.",
+              "enum": [
+                "computed",
+                "catalogue",
+                "user",
+                "measured",
+                "assumed"
+              ],
+              "type": "string"
+            }
+          },
+          "type": "object"
+        },
+        "labels": {
+          "additionalProperties": {
+            "properties": {
+              "depth": {
+                "description": "Where this value came from: computed, a cutter catalogue, the user, a measurement, or an assumption.",
+                "enum": [
+                  "computed",
+                  "catalogue",
+                  "user",
+                  "measured",
+                  "assumed"
+                ],
+                "type": "string"
+              },
+              "depthIntent": {
+                "description": "Where this value came from: computed, a cutter catalogue, the user, a measurement, or an assumption.",
+                "enum": [
+                  "computed",
+                  "catalogue",
+                  "user",
+                  "measured",
+                  "assumed"
+                ],
+                "type": "string"
+              },
+              "layout": {
+                "description": "Where this value came from: computed, a cutter catalogue, the user, a measurement, or an assumption.",
+                "enum": [
+                  "computed",
+                  "catalogue",
+                  "user",
+                  "measured",
+                  "assumed"
+                ],
+                "type": "string"
+              }
+            },
+            "type": "object"
+          },
+          "description": "Per-label provenance, keyed by label id; omit when no label was stamped.",
+          "propertyNames": {
+            "type": "string"
+          },
+          "type": "object"
+        },
+        "stock": {
+          "description": "Per-field provenance for the stock; omit when nothing was stamped.",
+          "properties": {
+            "colour": {
+              "description": "Where this value came from: computed, a cutter catalogue, the user, a measurement, or an assumption.",
+              "enum": [
+                "computed",
+                "catalogue",
+                "user",
+                "measured",
+                "assumed"
+              ],
+              "type": "string"
+            },
+            "fibre": {
+              "description": "Where this value came from: computed, a cutter catalogue, the user, a measurement, or an assumption.",
+              "enum": [
+                "computed",
+                "catalogue",
+                "user",
+                "measured",
+                "assumed"
+              ],
+              "type": "string"
+            },
+            "flatness": {
+              "description": "Where this value came from: computed, a cutter catalogue, the user, a measurement, or an assumption.",
+              "enum": [
+                "computed",
+                "catalogue",
+                "user",
+                "measured",
+                "assumed"
+              ],
+              "type": "string"
+            },
+            "length": {
+              "description": "Where this value came from: computed, a cutter catalogue, the user, a measurement, or an assumption.",
+              "enum": [
+                "computed",
+                "catalogue",
+                "user",
+                "measured",
+                "assumed"
+              ],
+              "type": "string"
+            },
+            "material": {
+              "description": "Where this value came from: computed, a cutter catalogue, the user, a measurement, or an assumption.",
+              "enum": [
+                "computed",
+                "catalogue",
+                "user",
+                "measured",
+                "assumed"
+              ],
+              "type": "string"
+            },
+            "print": {
+              "description": "Where this value came from: computed, a cutter catalogue, the user, a measurement, or an assumption.",
+              "enum": [
+                "computed",
+                "catalogue",
+                "user",
+                "measured",
+                "assumed"
+              ],
+              "type": "string"
+            },
+            "thickness": {
+              "description": "Where this value came from: computed, a cutter catalogue, the user, a measurement, or an assumption.",
+              "enum": [
+                "computed",
+                "catalogue",
+                "user",
+                "measured",
+                "assumed"
+              ],
+              "type": "string"
+            },
+            "width": {
+              "description": "Where this value came from: computed, a cutter catalogue, the user, a measurement, or an assumption.",
+              "enum": [
+                "computed",
+                "catalogue",
+                "user",
+                "measured",
+                "assumed"
+              ],
+              "type": "string"
+            }
+          },
+          "type": "object"
+        },
+        "tool": {
+          "description": "Where this value came from: computed, a cutter catalogue, the user, a measurement, or an assumption.",
+          "enum": [
+            "computed",
+            "catalogue",
+            "user",
+            "measured",
+            "assumed"
+          ],
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "stock": {
+      "description": "The blank being cut.",
+      "properties": {
+        "colour": {
+          "description": "Two-colour blank facts; omit for a single-colour blank.",
+          "properties": {
+            "capMm": {
+              "description": "Thickness of the top colour layer, measured from the engraved face, in millimetres.",
+              "maximum": 100,
+              "minimum": 0,
+              "type": "number"
+            },
+            "firstLayerHeight": {
+              "description": "First-layer height in millimetres; printed blanks only, and needs layerHeight.",
+              "exclusiveMinimum": 0,
+              "maximum": 100,
+              "type": "number"
+            },
+            "kind": {
+              "description": "A printed two-colour blank, or a laminate with the colour plane already in it.",
+              "enum": [
+                "printed",
+                "laminate"
+              ],
+              "type": "string"
+            },
+            "layerHeight": {
+              "description": "Print layer height in millimetres; printed blanks only, omit when unknown.",
+              "exclusiveMinimum": 0,
+              "maximum": 100,
+              "type": "number"
+            }
+          },
+          "required": [
+            "kind",
+            "capMm"
+          ],
+          "type": "object"
+        },
+        "fibre": {
+          "description": "Fibre in a printed blank: carbon fibre (\"cf\") or glass fibre (\"gf\"); omit for none.",
+          "enum": [
+            "cf",
+            "gf"
+          ],
+          "type": "string"
+        },
+        "flatness": {
+          "anyOf": [
+            {
+              "properties": {
+                "measuredAt": {
+                  "description": "When the measurement was taken.",
+                  "maxLength": 64,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "source": {
+                  "const": "measured",
+                  "description": "Always \"measured\": these numbers came from the probe.",
+                  "type": "string"
+                },
+                "touchCount": {
+                  "description": "How many probe touches produced the measurement.",
+                  "exclusiveMinimum": 0,
+                  "maximum": 1000,
+                  "type": "integer"
+                },
+                "xMm": {
+                  "description": "Measured bow along X, in millimetres, over the clamped piece.",
+                  "maximum": 100,
+                  "minimum": 0,
+                  "type": "number"
+                },
+                "yMm": {
+                  "description": "Measured bow along Y, in millimetres, over the clamped piece.",
+                  "maximum": 100,
+                  "minimum": 0,
+                  "type": "number"
+                }
+              },
+              "required": [
+                "xMm",
+                "yMm",
+                "source",
+                "touchCount",
+                "measuredAt"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "across": {
+                  "description": "Legacy direction word; dropped on load with the figure.",
+                  "enum": [
+                    "width",
+                    "length"
+                  ],
+                  "type": "string"
+                },
+                "dome": {
+                  "description": "Legacy single bow figure in millimetres; dropped on load.",
+                  "minimum": 0,
+                  "type": "number"
+                },
+                "source": {
+                  "description": "Where the legacy figure came from; dropped on load.",
+                  "enum": [
+                    "badge",
+                    "user",
+                    "measured"
+                  ],
+                  "type": "string"
+                }
+              },
+              "required": [
+                "dome",
+                "across",
+                "source"
+              ],
+              "type": "object"
+            }
+          ],
+          "description": "Bow measured on the clamped piece; omit when the surface has not been measured."
+        },
+        "length": {
+          "description": "Stock length along X, in millimetres (the machine limit is 200).",
+          "exclusiveMinimum": 0,
+          "maximum": 200,
+          "type": "number"
+        },
+        "material": {
+          "description": "Stock material; selects the feeds/speeds table the job starts from.",
+          "enum": [
+            "softwood",
+            "hardwood",
+            "mdf",
+            "pla",
+            "petg",
+            "pet",
+            "abs",
+            "asa",
+            "hips",
+            "pa",
+            "pa-cf",
+            "pa-gf",
+            "pc",
+            "pp",
+            "tpu",
+            "pva",
+            "acrylic",
+            "plastic",
+            "aluminium-6061",
+            "aluminium-7075",
+            "brass",
+            "copper"
+          ],
+          "type": "string"
+        },
+        "thickness": {
+          "description": "Stock thickness along Z, in millimetres (the machine limit is 100).",
+          "exclusiveMinimum": 0,
+          "maximum": 100,
+          "type": "number"
+        },
+        "width": {
+          "description": "Stock width along Y, in millimetres (the machine limit is 200).",
+          "exclusiveMinimum": 0,
+          "maximum": 200,
+          "type": "number"
+        }
+      },
+      "required": [
+        "length",
+        "width",
+        "thickness",
+        "material"
+      ],
+      "type": "object"
+    },
+    "stockEntry": {
+      "description": "Where the stock came from: a shelf entry, a file, or made in place.",
+      "properties": {
+        "conductive": {
+          "description": "True when the stock conducts (a safety-relevant fact).",
+          "type": "boolean"
+        },
+        "file": {
+          "anyOf": [
+            {
+              "properties": {
+                "name": {
+                  "description": "File name the stock was read from.",
+                  "type": "string"
+                },
+                "sha256": {
+                  "description": "Lowercase SHA-256 of the file's bytes (64 hex characters).",
+                  "pattern": "^[0-9a-f]{64}$",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "name",
+                "sha256"
+              ],
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Name and hash of the stock file; null unless kind is \"file\"."
+        },
+        "finish": {
+          "description": "Surface the stock arrived with.",
+          "enum": [
+            "rough",
+            "finished",
+            "printed",
+            "unknown"
+          ],
+          "type": "string"
+        },
+        "form": {
+          "description": "Stock form: sheet, plate, block, or a printed blank.",
+          "enum": [
+            "sheet",
+            "plate",
+            "block",
+            "printed-blank"
+          ],
+          "type": "string"
+        },
+        "kind": {
+          "description": "A shelf entry, an imported file, or stock made in place.",
+          "enum": [
+            "shelf",
+            "file",
+            "made"
+          ],
+          "type": "string"
+        },
+        "shelfId": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Shelf entry id; null unless kind is \"shelf\"."
+        }
+      },
+      "required": [
+        "kind",
+        "shelfId",
+        "file",
+        "form",
+        "finish",
+        "conductive"
+      ],
+      "type": "object"
+    },
+    "targetObject": {
+      "additionalProperties": false,
+      "description": "Reference mesh the primitives are positioned against; omit for none.",
+      "properties": {
+        "data": {
+          "description": "Base64 of the mesh file, at most 4 MiB decoded.",
+          "maxLength": 5592408,
+          "minLength": 1,
+          "type": "string"
+        },
+        "enabled": {
+          "description": "False keeps the object in the document but out of the program.",
+          "type": "boolean"
+        },
+        "format": {
+          "description": "File format of the reference mesh.",
+          "enum": [
+            "stl",
+            "3mf"
+          ],
+          "type": "string"
+        },
+        "id": {
+          "description": "Unique id for the reference object.",
+          "minLength": 1,
+          "type": "string"
+        },
+        "name": {
+          "description": "File name the reference object was imported from.",
+          "minLength": 1,
+          "type": "string"
+        },
+        "position": {
+          "additionalProperties": false,
+          "description": "Where the reference mesh is placed: X/Y centre and TOP height in the work frame.",
+          "properties": {
+            "x": {
+              "description": "X of the mesh bounding-box centre, in the work frame.",
+              "type": "number"
+            },
+            "y": {
+              "description": "Y of the mesh bounding-box centre, in the work frame.",
+              "type": "number"
+            },
+            "z": {
+              "description": "Z of the mesh's TOP in the work frame.",
+              "type": "number"
+            }
+          },
+          "required": [
+            "x",
+            "y",
+            "z"
+          ],
+          "type": "object"
+        },
+        "rotation": {
+          "description": "Rotation in degrees counter-clockwise about Z through the mesh centre.",
+          "type": "number"
+        },
+        "sha256": {
+          "description": "Lowercase SHA-256 of the mesh file's bytes (64 hex characters).",
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        },
+        "size": {
+          "additionalProperties": false,
+          "description": "Parsed mesh bounding-box size in millimetres.",
+          "properties": {
+            "x": {
+              "description": "Mesh bounding-box size along X, in millimetres.",
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            "y": {
+              "description": "Mesh bounding-box size along Y, in millimetres.",
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            "z": {
+              "description": "Mesh bounding-box size along Z, in millimetres.",
+              "exclusiveMinimum": 0,
+              "type": "number"
+            }
+          },
+          "required": [
+            "x",
+            "y",
+            "z"
+          ],
+          "type": "object"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "format",
+        "sha256",
+        "data",
+        "size",
+        "position",
+        "rotation",
+        "enabled"
+      ],
+      "type": "object"
+    },
+    "threads": {
+      "description": "Milled metric threads; omit for none.",
+      "items": {
+        "properties": {
+          "classFit": {
+            "const": "6H",
+            "description": "Tolerance class: 6H (the only one this build cuts).",
+            "type": "string"
+          },
+          "depth": {
+            "description": "Threaded depth below the stock's top face, in millimetres.",
+            "exclusiveMinimum": 0,
+            "type": "number"
+          },
+          "enabled": {
+            "description": "False keeps the thread in the document but out of the program.",
+            "type": "boolean"
+          },
+          "id": {
+            "description": "Unique id for this thread within the job.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "kind": {
+            "const": "thread",
+            "description": "A milled thread (a threaded hole).",
+            "type": "string"
+          },
+          "name": {
+            "description": "Optional human-readable name for the item list.",
+            "type": "string"
+          },
+          "position": {
+            "description": "Thread axis in work coordinates.",
+            "properties": {
+              "x": {
+                "description": "X in millimetres from the stock's front-left corner.",
+                "type": "number"
+              },
+              "y": {
+                "description": "Y in millimetres from the stock's front-left corner.",
+                "type": "number"
+              }
+            },
+            "required": [
+              "x",
+              "y"
+            ],
+            "type": "object"
+          },
+          "size": {
+            "description": "ISO metric thread size.",
+            "enum": [
+              "M2",
+              "M2.5",
+              "M3",
+              "M4",
+              "M5",
+              "M6"
+            ],
+            "type": "string"
+          },
+          "standard": {
+            "const": "metric",
+            "description": "Thread standard: metric (the only one this build cuts).",
+            "type": "string"
+          },
+          "through": {
+            "description": "Mill the thread through the blank to the sacrificial board.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "kind",
+          "id",
+          "position",
+          "enabled",
+          "size",
+          "standard",
+          "classFit",
+          "depth",
+          "through"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "tool": {
+      "anyOf": [
+        {
+          "properties": {
+            "angle": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Included point angle in degrees, or null when unstated."
+            },
+            "centreCutting": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "True when the cutter can plunge cut at its centre; null when unknown."
+            },
+            "cornerRadius": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Corner radius in millimetres, or null when unstated."
+            },
+            "diameter": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Cutting diameter in millimetres, or null when unstated."
+            },
+            "fluteLength": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Flute length in millimetres, or null when unstated."
+            },
+            "halfAngle": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Half the included point angle in degrees, or null when unstated."
+            },
+            "handleDiameter": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Shank/handle diameter in millimetres, or null when unstated."
+            },
+            "id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Catalogue id of the cutter, or null when unknown."
+            },
+            "name": {
+              "description": "Human-readable cutter name.",
+              "minLength": 1,
+              "type": "string"
+            },
+            "number": {
+              "anyOf": [
+                {
+                  "maximum": 9007199254740991,
+                  "minimum": -9007199254740991,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Tool number in the program header, or null when unset."
+            },
+            "shape": {
+              "description": "Cutter shape.",
+              "enum": [
+                "flat",
+                "ball",
+                "tapered-ball",
+                "engraving",
+                "chamfer",
+                "drill",
+                "thread",
+                "bull",
+                "unknown"
+              ],
+              "type": "string"
+            },
+            "shoulderLength": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Shoulder length in millimetres, or null when unstated."
+            },
+            "stickout": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Amount the cutter stands out of the collet, in millimetres, or null when unstated."
+            },
+            "tipDiameter": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Diameter at the very tip in millimetres, or null when unstated."
+            },
+            "typeText": {
+              "description": "Cutter type as the source states it, e.g. \"Flat End\".",
+              "type": "string"
+            }
+          },
+          "required": [
+            "number",
+            "id",
+            "name",
+            "typeText",
+            "shape",
+            "handleDiameter",
+            "tipDiameter",
+            "diameter",
+            "cornerRadius",
+            "angle",
+            "halfAngle",
+            "fluteLength",
+            "shoulderLength",
+            "stickout"
+          ],
+          "type": "object"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Snapshot of the cutter the job was written with, or null."
+    },
+    "toolKey": {
+      "description": "Registry key of the cutter the job starts with.",
+      "minLength": 1,
+      "type": "string"
+    },
+    "traces": {
+      "description": "Single-line polylines and stroke text; omit for none.",
+      "items": {
+        "oneOf": [
+          {
+            "properties": {
+              "closed": {
+                "description": "True closes the polyline back to its first point (needs at least three points).",
+                "type": "boolean"
+              },
+              "construction": {
+                "description": "Reference-only: cut nothing, but other items may refer to this trace.",
+                "type": "boolean"
+              },
+              "depth": {
+                "description": "Cut depth of the single-line stroke below the stock's top face, in millimetres.",
+                "exclusiveMinimum": 0,
+                "type": "number"
+              },
+              "enabled": {
+                "description": "False keeps the trace in the document but out of the program.",
+                "type": "boolean"
+              },
+              "id": {
+                "description": "Unique id for this trace within the job.",
+                "minLength": 1,
+                "type": "string"
+              },
+              "kind": {
+                "const": "line",
+                "description": "A free polyline cut as a single pass.",
+                "type": "string"
+              },
+              "name": {
+                "description": "Optional human-readable name for the item list.",
+                "type": "string"
+              },
+              "points": {
+                "description": "Polyline vertices relative to position, in millimetres; 2–5000 points.",
+                "items": {
+                  "description": "An [x, y] point in millimetres, relative to the item position.",
+                  "prefixItems": [
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "number"
+                    }
+                  ],
+                  "type": "array"
+                },
+                "maxItems": 5000,
+                "minItems": 2,
+                "type": "array"
+              },
+              "position": {
+                "description": "Origin the points (or the text's bounding box) are relative to.",
+                "properties": {
+                  "x": {
+                    "description": "X in millimetres from the stock's front-left corner.",
+                    "type": "number"
+                  },
+                  "y": {
+                    "description": "Y in millimetres from the stock's front-left corner.",
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "x",
+                  "y"
+                ],
+                "type": "object"
+              },
+              "rotation": {
+                "description": "Rotation in degrees counter-clockwise about position.",
+                "type": "number"
+              }
+            },
+            "required": [
+              "id",
+              "position",
+              "rotation",
+              "depth",
+              "enabled",
+              "kind",
+              "points",
+              "closed"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "construction": {
+                "description": "Reference-only: cut nothing, but other items may refer to this trace.",
+                "type": "boolean"
+              },
+              "depth": {
+                "description": "Cut depth of the single-line stroke below the stock's top face, in millimetres.",
+                "exclusiveMinimum": 0,
+                "type": "number"
+              },
+              "enabled": {
+                "description": "False keeps the trace in the document but out of the program.",
+                "type": "boolean"
+              },
+              "font": {
+                "description": "Font registry id: a bundled face or a custom font id.",
+                "minLength": 1,
+                "type": "string"
+              },
+              "id": {
+                "description": "Unique id for this trace within the job.",
+                "minLength": 1,
+                "type": "string"
+              },
+              "kind": {
+                "const": "stroke-label",
+                "description": "Single-stroke (engraving-style) text.",
+                "type": "string"
+              },
+              "name": {
+                "description": "Optional human-readable name for the item list.",
+                "type": "string"
+              },
+              "position": {
+                "description": "Origin the points (or the text's bounding box) are relative to.",
+                "properties": {
+                  "x": {
+                    "description": "X in millimetres from the stock's front-left corner.",
+                    "type": "number"
+                  },
+                  "y": {
+                    "description": "Y in millimetres from the stock's front-left corner.",
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "x",
+                  "y"
+                ],
+                "type": "object"
+              },
+              "rotation": {
+                "description": "Rotation in degrees counter-clockwise about position.",
+                "type": "number"
+              },
+              "size": {
+                "description": "Cap height in millimetres.",
+                "maximum": 100,
+                "minimum": 1,
+                "type": "number"
+              },
+              "spacing": {
+                "const": "cut-width",
+                "description": "Set to \"cut-width\" to open glyph gaps to a groove width; omit to keep normal spacing.",
+                "type": "string"
+              },
+              "text": {
+                "description": "The text to cut.",
+                "maxLength": 200,
+                "type": "string"
+              },
+              "weight": {
+                "description": "Target cut width of a bold stroke, in millimetres; omit for the font default.",
+                "exclusiveMinimum": 0,
+                "maximum": 20,
+                "type": "number"
+              },
+              "widthScale": {
+                "description": "Horizontal condensation of the glyphs (0.5–2); omit for 1.",
+                "maximum": 2,
+                "minimum": 0.5,
+                "type": "number"
+              }
+            },
+            "required": [
+              "id",
+              "position",
+              "rotation",
+              "depth",
+              "enabled",
+              "kind",
+              "text",
+              "font",
+              "size"
+            ],
+            "type": "object"
+          }
+        ]
+      },
+      "type": "array"
+    },
+    "vectors": {
+      "description": "Outlines imported from SVG/DXF files; omit for none.",
+      "items": {
+        "properties": {
+          "construction": {
+            "description": "Reference-only: cut nothing, but other items may refer to this shape.",
+            "type": "boolean"
+          },
+          "contours": {
+            "description": "Closed rings of [x, y] points in millimetres; at least one ring, each with at least three points.",
+            "items": {
+              "items": {
+                "description": "An [x, y] point in millimetres, relative to the item position.",
+                "prefixItems": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "number"
+                  }
+                ],
+                "type": "array"
+              },
+              "minItems": 3,
+              "type": "array"
+            },
+            "maxItems": 2000,
+            "minItems": 1,
+            "type": "array"
+          },
+          "depth": {
+            "description": "Pocket depth below the stock's top face, in millimetres.",
+            "exclusiveMinimum": 0,
+            "type": "number"
+          },
+          "enabled": {
+            "description": "False keeps the item in the document but out of the program.",
+            "type": "boolean"
+          },
+          "fillRule": {
+            "description": "How self-intersections are filled: NonZero or EvenOdd.",
+            "enum": [
+              "NonZero",
+              "EvenOdd"
+            ],
+            "type": "string"
+          },
+          "height": {
+            "description": "Bounding-box height of the outline in millimetres.",
+            "exclusiveMinimum": 0,
+            "type": "number"
+          },
+          "id": {
+            "description": "Unique id for this item within the job.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "importedFrom": {
+            "description": "The design file this vector came from; omitted when unknown.",
+            "properties": {
+              "name": {
+                "description": "Title of the imported design file.",
+                "minLength": 1,
+                "type": "string"
+              },
+              "sha256": {
+                "description": "Lowercase SHA-256 of the imported file (64 hex characters).",
+                "pattern": "^[0-9a-f]{64}$",
+                "type": "string"
+              }
+            },
+            "required": [
+              "name",
+              "sha256"
+            ],
+            "type": "object"
+          },
+          "kind": {
+            "const": "vector",
+            "description": "An outline imported from an SVG or DXF file.",
+            "type": "string"
+          },
+          "name": {
+            "description": "Optional human-readable name for the item list.",
+            "type": "string"
+          },
+          "position": {
+            "description": "Centre of the shape in work coordinates (a polygon's points are relative to it).",
+            "properties": {
+              "x": {
+                "description": "X in millimetres from the stock's front-left corner.",
+                "type": "number"
+              },
+              "y": {
+                "description": "Y in millimetres from the stock's front-left corner.",
+                "type": "number"
+              }
+            },
+            "required": [
+              "x",
+              "y"
+            ],
+            "type": "object"
+          },
+          "rotation": {
+            "description": "Rotation in degrees counter-clockwise about position.",
+            "type": "number"
+          },
+          "sourceName": {
+            "description": "Name of the design file the outline came from.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "through": {
+            "description": "Cut through the blank to the sacrificial board; the floor is the breakthrough rule and depth is then only the checked pocket depth.",
+            "type": "boolean"
+          },
+          "width": {
+            "description": "Bounding-box width of the outline in millimetres.",
+            "exclusiveMinimum": 0,
+            "type": "number"
+          }
+        },
+        "required": [
+          "id",
+          "position",
+          "rotation",
+          "depth",
+          "enabled",
+          "kind",
+          "sourceName",
+          "contours",
+          "fillRule",
+          "width",
+          "height"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "workholding": {
+      "description": "How the stock is held.",
+      "properties": {
+        "kind": {
+          "const": "vise",
+          "description": "Always vise in version 1.",
+          "type": "string"
+        },
+        "vise": {
+          "description": "The vise jaw measurements the job was set up with.",
+          "properties": {
+            "fixedJawThickness": {
+              "description": "Fixed jaw thickness in millimetres.",
+              "type": "number"
+            },
+            "jawLength": {
+              "description": "Jaw length in millimetres.",
+              "type": "number"
+            },
+            "jawStartY": {
+              "description": "Work-coordinate Y where the jaws begin, in millimetres.",
+              "type": "number"
+            },
+            "measuredAt": {
+              "description": "When the jaws were measured; omitted for a default or saved set.",
+              "type": "string"
+            },
+            "movingJawThickness": {
+              "description": "Moving jaw thickness in millimetres.",
+              "type": "number"
+            },
+            "source": {
+              "description": "Where these jaw numbers came from: a default, a saved setup, or a measurement.",
+              "enum": [
+                "default",
+                "saved",
+                "measured"
+              ],
+              "type": "string"
+            },
+            "stockProud": {
+              "description": "How far the stock stands proud of the jaws, in millimetres.",
+              "type": "number"
+            },
+            "uncertainty": {
+              "description": "Measurement uncertainty in millimetres; 0 for values taken as exact.",
+              "minimum": 0,
+              "type": "number"
+            }
+          },
+          "required": [
+            "stockProud",
+            "fixedJawThickness",
+            "movingJawThickness",
+            "jawLength",
+            "jawStartY",
+            "source",
+            "uncertainty"
+          ],
+          "type": "object"
+        }
+      },
+      "required": [
+        "kind",
+        "vise"
+      ],
+      "type": "object"
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "name",
+    "machineId",
+    "stock",
+    "labels",
+    "toolKey",
+    "workholding",
+    "minFloor",
+    "edgeMargin",
+    "customFonts",
+    "sacrificial",
+    "breakthrough"
+  ],
+  "type": "object"
+}

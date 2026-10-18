@@ -23,26 +23,34 @@ import { flatEndMill } from './tool';
 
 const finiteOrNull = z.number().finite().nullable();
 
+// #480 — every field carries `.describe()`: a job's embedded cutter snapshot is emitted as JSON
+// Schema for the headless MCP tools.
 export const ToolSchema = z.object({
-  number: z.number().int().nullable(),
-  id: z.string().nullable(),
-  name: z.string().min(1),
-  typeText: z.string(),
-  shape: z.enum(['flat', 'ball', 'tapered-ball', 'engraving', 'chamfer', 'drill', 'thread', 'bull', 'unknown']),
-  handleDiameter: finiteOrNull,
-  tipDiameter: finiteOrNull,
-  diameter: finiteOrNull,
-  cornerRadius: finiteOrNull,
-  angle: finiteOrNull,
-  halfAngle: finiteOrNull,
-  fluteLength: finiteOrNull,
-  shoulderLength: finiteOrNull,
-  stickout: finiteOrNull,
+  number: z.number().int().nullable().describe('Tool number in the program header, or null when unset.'),
+  id: z.string().nullable().describe('Catalogue id of the cutter, or null when unknown.'),
+  name: z.string().min(1).describe('Human-readable cutter name.'),
+  typeText: z.string().describe('Cutter type as the source states it, e.g. "Flat End".'),
+  shape: z
+    .enum(['flat', 'ball', 'tapered-ball', 'engraving', 'chamfer', 'drill', 'thread', 'bull', 'unknown'])
+    .describe('Cutter shape.'),
+  handleDiameter: finiteOrNull.describe('Shank/handle diameter in millimetres, or null when unstated.'),
+  tipDiameter: finiteOrNull.describe('Diameter at the very tip in millimetres, or null when unstated.'),
+  diameter: finiteOrNull.describe('Cutting diameter in millimetres, or null when unstated.'),
+  cornerRadius: finiteOrNull.describe('Corner radius in millimetres, or null when unstated.'),
+  angle: finiteOrNull.describe('Included point angle in degrees, or null when unstated.'),
+  halfAngle: finiteOrNull.describe('Half the included point angle in degrees, or null when unstated.'),
+  fluteLength: finiteOrNull.describe('Flute length in millimetres, or null when unstated.'),
+  shoulderLength: finiteOrNull.describe('Shoulder length in millimetres, or null when unstated.'),
+  stickout: finiteOrNull.describe('Amount the cutter stands out of the collet, in millimetres, or null when unstated.'),
   /**
    * Not a `;@MKR|TOOL` field (#220): a list saved before it existed parses with `null` —
    * UNKNOWN, the same as an absent header field, never `false`.
    */
-  centreCutting: z.boolean().nullable().default(null),
+  centreCutting: z
+    .boolean()
+    .nullable()
+    .default(null)
+    .describe('True when the cutter can plunge cut at its centre; null when unknown.'),
 });
 
 /**
