@@ -25,6 +25,7 @@ import type { EngraveGenerated, EngraveProgram } from '@/workers/sim/engraveGene
 import { resetMachineRunStore } from '@/store/machineRunStore';
 import { resetEngraveReleaseStore, useEngraveReleaseStore } from '@/store/engraveReleaseStore';
 import { resetEngravePackageStore, useEngravePackageStore } from '@/store/engravePackageStore';
+import { useEngraveJobStore } from '@/store/engraveJobStore';
 import { resetRunConfirmStore } from '@/store/runConfirmStore';
 import { clearStoredBaseline, resetLocationStore } from '@/store/locationStore';
 import { resetStockStore, useStockStore } from '@/store/stockStore';
@@ -90,7 +91,7 @@ function generated(programs: EngraveProgram[]): EngraveGenerated {
 }
 
 function row(
-  severity: 'error' | 'warning' | 'info',
+  severity: 'error' | 'warning',
   code: string,
   message: string,
 ): PreflightRow {
@@ -185,19 +186,19 @@ interface Props {
 }
 
 /**
- * The panel's own wiring, minus the editor: `EngravePanel` reads the frozen package from the store
- * and hands it down, so a freeze is visible without remounting. Reproducing that one line here is
- * what lets the surface's freeze-on-green show in the same visit, as it does in the app.
+ * The panel's own wiring, minus the editor: `EngravePanel` reads the job (and its package block)
+ * from the document store and hands them down, so a freeze is visible without remounting.
+ * Reproducing that one line here is what lets the surface's freeze-on-green show in the same
+ * visit, as it does in the app.
  */
 function Harness(props: Props) {
-  const stored = useEngravePackageStore(
-    (state) => state.packages.find((p) => p.jobId === props.job.id) ?? null,
-  );
+  const open = useEngraveJobStore((state) => state.job);
+  const job = open.id === props.job.id ? open : props.job;
   return (
     <EngraveCutSurface
-      job={props.job}
+      job={job}
       report={props.report}
-      package={stored ?? props.pkg}
+      package={job.package ?? props.pkg}
       generated={props.generated}
       staleSince={props.staleSince ?? null}
       machine={props.canDrive === false ? null : machineObservation()}
@@ -211,6 +212,8 @@ function Harness(props: Props) {
 }
 
 function draw(props: Props) {
+  // #425 — the document owns the package. Seed the open job so a freeze has somewhere to land.
+  useEngraveJobStore.setState({ job: props.pkg === null ? props.job : { ...props.job, package: props.pkg } });
   const rendered = render(<Harness {...props} />);
   return { ...rendered, show: (p: Props) => rendered.rerender(<Harness {...p} />) };
 }
@@ -224,6 +227,7 @@ beforeEach(() => {
   resetRunConfirmStore();
   resetMachineRunStore();
   resetEngraveReleaseStore();
+  useEngraveJobStore.getState().reset();
   resetEngravePackageStore();
   resetLocationStore();
   clearStoredBaseline();
@@ -311,7 +315,6 @@ describe('#419 §3 the Cut surface', () => {
   it('keeps a stale package and its blank, and re-freezes only on an explicit press', async () => {
     const job = shelfJob();
     const pkg = frozen(job, [P1]);
-    useEngravePackageStore.setState({ packages: [pkg] });
     useStockStore.setState({
       items: [{ ...shelfItem(), reservations: [{ jobId: job.id, quantity: 1, at: AT }] }],
     });
@@ -352,7 +355,6 @@ describe('#419 §3 the Cut surface', () => {
   it('plays the frozen texts even when the live Generate holds different text', async () => {
     const job = twoSetupJob();
     const pkg = frozen(job, [P1, P2]);
-    useEngravePackageStore.setState({ packages: [pkg] });
     // The live result carries the SAME verifier keys but different text: the reports are matched by
     // hash, while the file that is sent must be the package's.
     const live = generated([
@@ -376,7 +378,6 @@ describe('#419 §3 the Cut surface', () => {
   it('refuses a frozen text with no verifier report, in the surface and in the store', async () => {
     const job = twoSetupJob();
     const pkg = frozen(job, [P1, P2]);
-    useEngravePackageStore.setState({ packages: [pkg] });
     // A fresh session with no Generate: no report matches the frozen texts.
     draw({ job, report: reportOf(), pkg, generated: null });
 
@@ -406,7 +407,6 @@ describe('#419 §3 the Cut surface', () => {
   it('shows ONE plan under Cut, and run controls only when this build may drive a machine', async () => {
     const job = twoSetupJob();
     const pkg = frozen(job, [P1, P2]);
-    useEngravePackageStore.setState({ packages: [pkg] });
     const props = { job, report: reportOf(), pkg, generated: generated([P1, P2]) };
     const view = draw({ ...props, canDrive: true });
 

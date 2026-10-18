@@ -150,9 +150,13 @@ export function EngraveCutSurface({
   const missingReport = sources.find((source) => source.verify === null) ?? null;
 
   // A NEW PACKAGE IS A NEW RUN: the operator's strip switches are about this package's plan.
-  useEffect(() => {
+  // Adjusted during render (guarded, so it settles in one extra pass) rather than in an effect,
+  // which would paint the previous package's switches for a frame first.
+  const [overridesFor, setOverridesFor] = useState<string | null>(pkg?.hash ?? null);
+  if ((pkg?.hash ?? null) !== overridesFor) {
+    setOverridesFor(pkg?.hash ?? null);
     setOverrides({});
-  }, [pkg?.hash]);
+  }
 
   // FREEZE ON GREEN, once. No package + a clear gate + a verifiable Generate is approval.
   useEffect(() => {
@@ -169,10 +173,15 @@ export function EngraveCutSurface({
     });
   }, [green, pkg, generatedReady, generated, job, freeze]);
 
-  const finishedHashes = useMemo(
-    () => (target === null ? [] : finishedProgramsFor(target)),
-    [target],
-  );
+  const finishedHashes = useMemo(() => {
+    // #425 §6 — the machine's finished list and the DOCUMENT's run log both answer "not new". The
+    // document's answer travels with a saved job; the machine's survives a forgotten release.
+    const logged = (job.runLog ?? [])
+      .filter((entry) => entry.outcome === 'finished')
+      .map((entry) => entry.programHash);
+    const machineFinished = target === null ? [] : finishedProgramsFor(target);
+    return [...new Set([...machineFinished, ...logged])];
+  }, [target, job.runLog]);
   const plan = useMemo(
     () =>
       pkg === null
@@ -320,6 +329,11 @@ export function EngraveCutSurface({
                   }}
                   onLiveStatus={onLiveStatus}
                   runContext={runContext}
+                  setup={
+                    sources[0] === undefined
+                      ? undefined
+                      : { setupIndex: sources[0].setupIndex, setupId: sources[0].setupId }
+                  }
                   jobEdgeMarginMm={job.edgeMargin}
                   onProgramLine={onProgramLine}
                 />

@@ -193,6 +193,15 @@ interface ReleaseState {
 const sameHashes = (a: readonly ReleaseFile[], b: readonly ReleaseProgram[]): boolean =>
   a.length === b.length && a.every((f, i) => f.hash === b[i]?.hash && f.filename === b[i]?.filename);
 
+/**
+ * #425 §6 — the programs the DOCUMENT says finished. The machine's own list
+ * (`finishedProgramsFor`) is the bench's answer; the document's run log travels with a saved job,
+ * so a reopened package resumes where the last session left it. Both are finished-only: a
+ * `stopped` or `failed` program is played again.
+ */
+const finishedLogged = (job: Pick<EngraveJob, 'runLog'>): string[] =>
+  (job.runLog ?? []).filter((entry) => entry.outcome === 'finished').map((entry) => entry.programHash);
+
 const findFile = (rec: ReleaseRecord, index: number | null): ReleaseFile | null =>
   index === null ? null : (rec.files.find((f) => f.index === index) ?? null);
 
@@ -267,6 +276,10 @@ export const useEngraveReleaseStore = create<ReleaseState>((set, get) => {
       programHash: file.hash,
       programIndex: file.index,
       programTotal: file.total,
+      // #425 §6 — the document's own name for the setup this file cuts, so the run end can record
+      // the outcome against the frozen program rather than against its position in today's list.
+      setupIndex: file.setupIndex,
+      setupId: file.setupId,
     };
     const runStore = useMachineRunStore.getState();
     if (!runStore.prepare(rec.target, file.filename, file.hash, context)) {
@@ -479,7 +492,7 @@ export const useEngraveReleaseStore = create<ReleaseState>((set, get) => {
     plan: (target, job, programs) => {
       const machine = machineKey(target);
       const current = get().records[machine];
-      const done = finishedProgramsFor(target);
+      const done = [...finishedProgramsFor(target), ...finishedLogged(job)];
       const planned = releasePrograms(job.name, programs, done);
       if (current !== undefined && current.jobId === job.id && sameHashes(current.files, planned)) {
         // A remount, or a refresh after a run finished elsewhere: keep the upload results and the

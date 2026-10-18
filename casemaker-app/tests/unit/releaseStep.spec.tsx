@@ -43,6 +43,7 @@ import {
 } from '@/store/machineRunStore';
 import { resetRunConfirmStore } from '@/store/runConfirmStore';
 import { resetEngraveReleaseStore, useEngraveReleaseStore } from '@/store/engraveReleaseStore';
+import { useEngraveJobStore } from '@/store/engraveJobStore';
 import {
   resetEngraveRegistrationStore,
   useEngraveRegistrationStore,
@@ -348,6 +349,7 @@ function engravingProgram(): EngraveProgram {
 function sourcesOf(programs: EngraveProgram[]): ReleaseSource[] {
   return programs.map((p) => ({
     setupIndex: p.setupIndex,
+    setupId: p.setupId,
     toolKey: p.toolKey,
     ...(p.kind === undefined ? {} : { kind: p.kind }),
     nc: p.nc,
@@ -364,6 +366,8 @@ function sourcesOf(programs: EngraveProgram[]): ReleaseSource[] {
 function renderStep(job: EngraveJob, programs: EngraveProgram[] = [P1, P2]): RunPlan {
   const made = freezePackage(job, programs, '2026-10-17T14:02:00.000Z');
   if (!made.ok) throw new Error(made.reason);
+  // #425 §6 — the release is the OPEN document's run, so its outcome has a document to land in.
+  useEngraveJobStore.setState({ job: { ...job, package: made.package } });
   const reports = new Map(programs.map((p) => [p.programHash, p.verify] as const));
   const runPlan = cutPlan({ job, pkg: made.package, finishedHashes: [], defaults: null });
   render(
@@ -486,6 +490,12 @@ describe('#469 the release step', () => {
     ]);
     // M332 was in program 2's own text, not sent by the release step between files.
     expect(sent.filter((l) => l === 'M332')).toHaveLength(0);
+    // #425 §6 — the DOCUMENT holds the resume fact for both played programs, with their setups.
+    const log = useEngraveJobStore.getState().job.runLog ?? [];
+    expect(log.map((entry) => [entry.programHash, entry.setupId, entry.outcome])).toEqual([
+      [P1.programHash, 'setup-1', 'finished'],
+      [P2.programHash, 'setup-2', 'finished'],
+    ]);
   }, 30000);
 
   it('plays a faced run as face file then engraving, and asks for the engraving cutter and a measured re-touch', async () => {

@@ -85,6 +85,12 @@ export interface EngraveMachineUploadProps {
    */
   runContext?: Omit<RunContext, 'nc'>;
   /**
+   * #425 §6 — the setup the one frozen program cuts, named as the document names it. The run end
+   * records the outcome against it so a reopened job resumes here. Optional: an upload outside the
+   * frozen flow has no document fact to add.
+   */
+  setup?: { setupIndex: number; setupId: string };
+  /**
    * The job's own edge margin, mm (#431: laser point-to-origin is refused when it is tighter than the
    * dot). Optional: without it the house's margin setting is used, and the panel says so.
    */
@@ -115,6 +121,7 @@ export function EngraveMachineUpload({
   lift,
   onLiveStatus,
   runContext,
+  setup,
   jobEdgeMarginMm,
   onProgramLine,
 }: EngraveMachineUploadProps): JSX.Element {
@@ -189,6 +196,7 @@ export function EngraveMachineUpload({
       // so the runner does not have to infer the job from one file of it.
       prepareRun({ host: machine.host, port: machine.port }, outcome.filename, programHash(program.nc), {
         ...runContext,
+        ...(setup ?? {}),
         nc: program.nc,
         vacuumOwned: true,
         // #469 — one file is the whole job here, so its span is `whole` when it carries the words

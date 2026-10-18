@@ -31,6 +31,7 @@ import { getTools } from '@/engine/cnc/toolRegistry';
 import { inventoryConditions } from '@/engine/cnc/toolCondition';
 import type { MachineCalibration } from '@/engine/cnc';
 import { effectiveMargins } from '@/engine/cnc/engrave/depthBounds';
+import { jobFingerprint } from '@/engine/cnc/engrave/package';
 import { useSettingsStore } from './settingsStore';
 import { useEngraveJobStore } from './engraveJobStore';
 import { useSimStore } from './simStore';
@@ -312,8 +313,15 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
 // Any edit to the job after a Generate makes the result stale (#206). This is the whole
 // "subscribe to engraveJobStore" requirement; nothing else may clear `staleSince` but a
 // fresh Generate.
+//
+// #425 — NOT every document write is an edit. Freezing a package (`setPackage`) and recording a
+// run outcome (`appendRunLog`) replace the job object but change neither its fingerprint nor a
+// single program: the package's own staleness check excludes both blocks for the same reason. A
+// naive reference check here would mark the Generate stale the instant Cut froze its own package,
+// so the run would refuse itself before the first upload. Compare fingerprints instead.
 useEngraveJobStore.subscribe((state, prev) => {
   if (state.job === prev.job) return;
+  if (jobFingerprint(state.job) === jobFingerprint(prev.job)) return;
   markStale();
 });
 

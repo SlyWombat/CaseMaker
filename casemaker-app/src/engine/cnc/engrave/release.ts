@@ -35,6 +35,8 @@ import { runSheetFileName } from './runSheet';
 export interface ReleaseSource {
   /** 1-based, the operator's "Setup 2". The facing program shares the first setup's index. */
   setupIndex: number;
+  /** The setup's document id — what the run log records so a resume can name it (#425 §6). */
+  setupId: string;
   toolKey: string;
   /** #473 — `'facing'` for the run's first file when the job faces; absent reads as `'engrave'`. */
   kind?: EngraveProgramKind;
@@ -69,6 +71,7 @@ export interface ReleaseProgram {
   index: number;
   total: number;
   setupIndex: number;
+  setupId: string;
   toolKey: string;
   /** #473 — `'facing'` for the run's first (blank-skim) file; absent reads as `'engrave'`. */
   kind?: EngraveProgramKind;
@@ -100,6 +103,7 @@ export function releasePrograms(
     index: i + 1,
     total,
     setupIndex: p.setupIndex,
+    setupId: p.setupId,
     toolKey: p.toolKey,
     kind: p.kind,
     filename: releaseFileName(jobName, i + 1, total),
@@ -130,6 +134,7 @@ export function frozenReleaseSources(
 ): ReleaseSource[] {
   return pkg.programs.map((program, i) => ({
     setupIndex: program.setupIndex,
+    setupId: program.setupId,
     toolKey: program.toolKey,
     ...(i === 0 && job.facing?.enabled === true ? { kind: 'facing' as const } : {}),
     nc: program.nc,

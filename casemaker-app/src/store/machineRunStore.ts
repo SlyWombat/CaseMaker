@@ -39,6 +39,7 @@ import { useToolRegistryStore } from './toolRegistryStore';
 import { useHouseStore } from './houseStore';
 import { machineAt, useLocationStore } from './locationStore';
 import { useShopDefaultsStore } from './shopDefaultsStore';
+import { useEngraveJobStore } from './engraveJobStore';
 
 /**
  * What a run knows about its job, for its end (#414). Everything but the program is OPTIONAL: the job
@@ -97,6 +98,13 @@ export interface RunContext {
    */
   programIndex?: number;
   programTotal?: number;
+  /**
+   * #425 §6 — the setup this file cuts, as the package names it. The run end writes the program's
+   * outcome into the open document's run log against this id, so a reopened job resumes at the
+   * first program the document has no `finished` entry for.
+   */
+  setupIndex?: number;
+  setupId?: string;
 }
 
 /**
@@ -310,6 +318,49 @@ export async function endOfRun(target: { host: string; port: number }, outcome: 
   return { kind: 'finished', lines, offcut, stockQuestion: null };
 }
 
+/**
+ * #425 §6 — the ONE write a run end makes to the document's run log.
+ *
+ * The machine entry records what the controller did; the document records what happened to the
+ * program it froze, so Save/Open carries the resume point. It is written only when all three hold:
+ *
+ *  - the run's context names its job, program and setup (a run prepared outside the job flow does
+ *    not — there is no document fact to invent);
+ *  - that job is the OPEN document (an outcome for another job id is not this document's);
+ *  - the document's frozen package still carries this exact program hash. A re-freeze prunes the
+ *    old programs, and an outcome for a program that no longer exists is not a resume fact.
+ *
+ * `finished` is the only outcome that means done; `stopped` and `failed` both resume by playing
+ * the program again from its beginning (#425 §6).
+ */
+function recordProgramOutcome(context: RunContext | null, outcome: RunOutcome): void {
+  if (
+    context?.jobId === undefined ||
+    context.programHash === undefined ||
+    context.setupIndex === undefined ||
+    context.setupId === undefined
+  ) {
+    return;
+  }
+  const document = useEngraveJobStore.getState();
+  if (document.job.id !== context.jobId) return;
+  const frozen = document.job.package?.programs.some((program) => program.hash === context.programHash) === true;
+  if (!frozen) return;
+  document.appendRunLog({
+    programHash: context.programHash,
+    setupIndex: context.setupIndex,
+    setupId: context.setupId,
+    toolKey: context.toolKey ?? document.job.toolKey,
+    at: new Date().toISOString(),
+    outcome:
+      outcome.kind === 'finished'
+        ? 'finished'
+        : outcome.kind === 'aborted' || outcome.kind === 'stopped-unconfirmed'
+          ? 'stopped'
+          : 'failed',
+  });
+}
+
 export interface RunEntry {
   running: boolean;
   filename: string;
@@ -433,6 +484,8 @@ export const useMachineRunStore = create<MachineRunState>((set, get) => {
         // Once per run: this runs once per `start`, and `end` is cleared only by the next one.
         const outcome = get().runs[machine]?.outcome ?? null;
         if (outcome === null) return;
+        // #425 §6 — the document's resume fact, written once per run end, before the shelf writes.
+        recordProgramOutcome(prepared.context ?? null, outcome);
         let end: RunEnd;
         try {
           end = await endOfRun(target, outcome, prepared.context ?? null);
