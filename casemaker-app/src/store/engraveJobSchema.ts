@@ -580,16 +580,36 @@ function migrateStockPrint(raw: unknown): unknown {
 }
 
 /**
- * The printed face's dome (#345). OPTIONAL, not defaulted, for the same byte-for-byte reason as
- * `print`: a blank nobody has stated a flatness for keeps no key, and the recommendation then says
- * "flatness unknown" rather than carrying an invented 0. Bounded by the stock's own thickness — a
- * dome taller than the blank is not a flatness.
+ * The bow MEASURED on the clamped piece (#496): a drop per stock axis, with how and when it was
+ * read. OPTIONAL, not defaulted, for the same byte-for-byte reason as `print`: a job whose surface
+ * has not been measured keeps no key, and the recommendation then says "not yet measured" rather
+ * than carrying an invented 0. Bounded by the stock's own thickness — a bow taller than the blank
+ * is not a flatness.
  */
-const stockFlatnessSchema = z.object({
-  dome: z.number().finite().nonnegative().max(STOCK_LIMITS.thickness),
+const measuredFlatnessSchema = z.object({
+  xMm: z.number().finite().nonnegative().max(STOCK_LIMITS.thickness),
+  yMm: z.number().finite().nonnegative().max(STOCK_LIMITS.thickness),
+  source: z.literal('measured'),
+  touchCount: z.number().int().positive().max(1000),
+  measuredAt: z.string().min(1).max(64),
+});
+
+/**
+ * A pre-#496 flatness: one figure and a direction word. It is DROPPED on load rather than migrated
+ * — one span cannot state a two-span measurement, and the direction word was read in opposite
+ * senses by different modules, so carrying its number onto an axis would invent the other half.
+ * The job loads as "not yet measured", which is what it is until the extents touches run again.
+ */
+const legacyFlatnessSchema = z.object({
+  dome: z.number().finite().nonnegative(),
   across: z.enum(['width', 'length']),
   source: z.enum(['badge', 'user', 'measured']),
 });
+
+const stockFlatnessSchema = z.union([
+  measuredFlatnessSchema,
+  legacyFlatnessSchema.transform(() => undefined),
+]);
 
 const stockObjectSchema = z
   .object({

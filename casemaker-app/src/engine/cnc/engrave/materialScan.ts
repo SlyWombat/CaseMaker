@@ -58,7 +58,6 @@
  */
 
 import { inflate, viseEnvelope } from '@/engine/cnc/fixture';
-import { DEFAULT_BADGE_DOME_MM } from './fromBadge';
 import type { ObstacleBox } from '@/engine/cnc/setup';
 import { PROBE_SPEC, SIDE_WORDS, type JobSide } from './registration';
 // TYPE ONLY: this module is in the sim worker's import graph (via `runSheet.ts`), and a worker never
@@ -150,27 +149,17 @@ export const SCAN_START_GAP_MM: Mm = SCAN_FALLBACK.startGapMm;
 export const DEPTH_TOLERANCE_MM: Mm = SCAN_FALLBACK.readingResolutionMm;
 
 /**
- * What to plan with when the job states no dome. NOT zero: an unstated dome is unknown, and 0 mm
- * would tell the plan the blank is flat (#345's own rule, and the badge figure is the measured
- * one the job would have carried). The plan says which figure it used.
- */
-const PROVISIONAL_DOME_MM: Mm = DEFAULT_BADGE_DOME_MM;
-
-/**
- * The blank's dome ALONG its longer span, mm — the second figure §11.8 measured (0.33 mm across
- * the badge's 38 mm span, ~0.1 mm along its 76 mm one), and the one the job has no field for: a
- * job states `flatness.dome` for ONE direction, and the model needs both.
+ * The bow MEASURED on this job's piece, on the stock's own axes — or null when the surface has not
+ * been measured (#496). `xMm` runs along the stock's `length` (X), `yMm` across its `width` (Y).
  *
- * It is the measured badge blank's figure standing in for whatever blank is in the jaws, so the
- * plan names it as an assumption in its notes. A job that states its dome across the LONG span
- * gets its own figure there, and this one stands in across the short span instead.
- *
- * #451 keeps this compiled FOR NOW, for the reason `fromBadge.ts` states beside
- * `DEFAULT_BADGE_DOME_MM`: no blank or stock record carries a dome WITH its direction, so the pair
- * (0.33 across, 0.1 along) has nowhere to live yet. The record would need both spans and their
- * provenance, not one `domeHeight` with no `across`.
+ * There is deliberately NO fallback figure: a bow is a property of the piece as clamped, not of the
+ * part it was printed as, and the badge blank's bench numbers were deleted with #496 rather than
+ * standing in for whatever blank is in the jaws. A job with no record plans with the dial alone and
+ * says "not yet measured".
  */
-const DOME_ALONG_LONG_MM: Mm = 0.1;
+function measuredDrops(job: EngraveJob): StockFlatness | null {
+  return job.stock.flatness ?? null;
+}
 
 /** A side of the blank. The same four `registration.ts` names, and the same words for them. */
 export type ScanEdge = JobSide;
@@ -388,20 +377,24 @@ export function planMaterialScan(job: EngraveJob, scan: MaterialScanSettings = S
     };
   }
 
-  const dome = job.stock.flatness?.dome ?? PROVISIONAL_DOME_MM;
+  // The clearance the face is allowed to fall away by: the larger measured drop, or nothing at all
+  // when the surface has not been measured (#496). The dial still separates two readings.
+  const drops = measuredDrops(job);
+  const dome = drops === null ? 0 : Math.max(drops.xMm, drops.yMm);
   const blankMm = dome + dial;
   const belowMm = proud - dial;
   // Only a blank ABOVE the jaw tops can have its edge hidden by its own dome: the refusal asks
   // whether the jaw is still below the blank's top somewhere in its band. Below the jaw tops the
-  // jaw is the reference instead, so the question does not arise (#430).
-  if (!belowJawTops && belowMm <= blankMm) {
+  // jaw is the reference instead, so the question does not arise (#430) — and without a measured
+  // bow there is no dome to reason about, so the refusal waits for the measurement (#496).
+  if (drops !== null && !belowJawTops && belowMm <= blankMm) {
     return {
       refuse: true,
       code: 'dome-covers-the-jaw',
       message:
-        `the blank’s ${fmtNum(dome)} mm dome is as deep as the ${fmtNum(proud)} mm it stands proud ` +
-        'of the jaw tops, so a reading at its edge cannot be told from one on the jaw. Flatten the ' +
-        'blank, or raise it in the jaws, before checking its position this way',
+        `the blank’s ${fmtNum(dome)} mm measured bow is as deep as the ${fmtNum(proud)} mm it ` +
+        'stands proud of the jaw tops, so a reading at its edge cannot be told from one on the ' +
+        'jaw. Flatten the blank, or raise it in the jaws, before checking its position this way',
     };
   }
 
@@ -516,8 +509,7 @@ export function planMaterialScan(job: EngraveJob, scan: MaterialScanSettings = S
   const missTravelMm = belowJawTops ? scan.missMarginMm : proud + scan.missMarginMm;
   /** The outward touch's offset past the nominal edge, mm — the last of `offsets`. */
   const outwardMm = tipR + step;
-  const flatness: StockFlatness | undefined = job.stock.flatness;
-  const acrossX = flatness === undefined || flatness.across === 'width';
+  const flatness = measuredDrops(job);
   const jawReferenced = edges.filter((e) => e.reference === 'jaw');
   const free = edges.filter((e) => e.reference === 'scanned' && e.jawUnder === 'off');
   const unsure = edges.filter((e) => e.reference === 'scanned' && e.jawUnder === 'maybe');
@@ -541,9 +533,9 @@ export function planMaterialScan(job: EngraveJob, scan: MaterialScanSettings = S
   const highSignature = belowJawTops || (proud > 0 && proud < tipR + scan.missMarginMm);
   /** The blank's own height below the reference at one edge's touch line, mm. */
   const dropAt = (edge: ScanEdge): Mm => edges.find((e) => e.edge === edge)!.dropMm;
-  /** The two figures the shape is built from: the span the job's own dome names, and the other. */
-  const acrossDrop = acrossX ? dropAt('left') : dropAt('front');
-  const otherDrop = acrossX ? dropAt('front') : dropAt('left');
+  /** The measured drop on the stock's X (left/right edges) and Y (front/back edges) spans. */
+  const dropX = flatness?.xMm ?? 0;
+  const dropY = flatness?.yMm ?? 0;
 
   return {
     tipRadiusMm: tipR,
@@ -564,16 +556,19 @@ export function planMaterialScan(job: EngraveJob, scan: MaterialScanSettings = S
         `from this one figure — the ${fmtNum(resolutionMm)} mm the reading stands past the edge is ` +
         'its radius and the dial, and a smaller tip is a sharper scan.',
       flatness
-        ? `The ${fmtNum(dome)} mm the reads are allowed to vary by is the dome the job states ` +
-          `(${flatness.source}, across its ${flatness.across}).`
-        : `The job states no dome, so the reads are allowed the ${fmtNum(dome)} mm the badge blank ` +
-          'measured — a domed blank is the case that matters, and this is the figure to correct.',
+        ? `The ${fmtNum(dome)} mm the reads are allowed to vary by is the bow the job MEASURED ` +
+          `(${flatness.source}: ${fmtNum(flatness.xMm)} mm along X, ${fmtNum(flatness.yMm)} mm ` +
+          `along Y, from touches taken on this piece).`
+        : `The job has not measured its surface, so no bow is claimed: the reads are allowed the ` +
+          `${fmtNum(dial)} mm dial alone, and a domed blank may read deeper at an edge than here. ` +
+          'Measure the surface before judging the edges against this plan.',
       `The face is a SHAPE and not one number, so the blank’s own top sits at a different depth at ` +
         `each edge: about ${fmtNum(dropAt('left'))} mm below the reference at the left and right ` +
-        `edges, ${fmtNum(dropAt('front'))} mm at the front and back. The ${fmtNum(acrossDrop)} mm the ` +
-        `job states is taken across the span it names; the other span carries the ` +
-        `${fmtNum(otherDrop)} mm §11.8 measured on the badge blank. Each edge’s step prints the ` +
-        'height it is judged against.',
+        `edges, ${fmtNum(dropAt('front'))} mm at the front and back.` +
+        (flatness
+          ? ` The job measured ${fmtNum(dropX)} mm along X and ${fmtNum(dropY)} mm along Y; each ` +
+            'edge’s step prints the height it is judged against.'
+          : ' No measurement has been taken, so those depths come from the plan, not from this blank.'),
       ...(jawReferenced.length > 0
         ? [
             `The blank sits ${fmtNum(-proud)} mm BELOW the jaw tops, so ${names(jawReferenced.map((e) => e.edge))} ` +
@@ -715,27 +710,23 @@ function cornerBandMm(sinkMm: Mm, tipR: Mm): Mm {
  * The blank's own face as a SHAPE, mm below its highest point, at a point on the blank — the model
  * that replaced the dome-as-a-tolerance the review of 36f3837 called out (#391 item 4).
  *
- * Two parabolas, one per span, which is the shape §11.8 measured: the badge blank's face is convex,
- * highest near the middle, and **0.33 mm lower at its left and right edges** than at the middle,
- * **0.1 mm lower at its front and back**. Those are not the same number and they are not a
- * tolerance around the middle's: a touch near a side meets a face 0.33 mm further down than a touch
- * near an end, and a plan that judged both by the middle's figure would swallow the first 0.28 mm
- * of a real change at the ends.
+ * Two parabolas, one per stock axis, from the pair this job measured (#496): a convex face is
+ * highest near the middle and falls by `xMm` at the left and right edges and by `yMm` at the front
+ * and back. Those are not the same number and they are not a tolerance around the middle's: a plan
+ * that judged both by one figure would swallow a real change on the other axis.
  *
- * THE SPANS ARE THE JOB'S. `'width'` names the X span the left and right edges bound and
- * `'length'` the Y span, and the stated figure is applied to the span its word names — with the
- * badge's measured figure for the span the job states nothing about. Both routes that emit a
- * `badge` flatness now name a span in the JOB's frame: `fromDesign` computes the word from the
- * stock's own spans, and `badgeBlankFor` states `'length'` outright since #383, because the
- * quarter turn that puts the badge on the bench puts #345's measured 38.1 mm side in X — the
- * stock's length.
+ * The axes are the STOCK's, not a direction word's — `xMm` runs along `length` and `yMm` across
+ * `width`, which is exactly what the extents touches measure. The direction-word convention this
+ * module used to read was the opposite of `surfaceSpread`'s (#496), which is why the record carries
+ * axes now.
  */
 function domeDropMm(job: EngraveJob, x: Mm, y: Mm): Mm {
   const { length, width } = job.stock;
-  const acrossX = job.stock.flatness === undefined || job.stock.flatness.across === 'width';
-  const stated = job.stock.flatness?.dome ?? PROVISIONAL_DOME_MM;
-  const dropX = acrossX ? stated : DEFAULT_BADGE_DOME_MM;
-  const dropY = acrossX ? DOME_ALONG_LONG_MM : stated;
+  // #496 — the two drops are the job's own measurement, one per stock axis. With no measurement
+  // the model is flat: the plan already says no bow is claimed.
+  const measured = measuredDrops(job);
+  const dropX = measured?.xMm ?? 0;
+  const dropY = measured?.yMm ?? 0;
   // Normalised so ±1 is the blank's own edge on that axis and 0 is its middle, where the reference
   // touch is: the model's zero and the scan's zero are the same point by construction.
   const u = length > 0 ? (2 * x) / length - 1 : 0;

@@ -120,21 +120,46 @@ describe('EngraveJob schema (#200)', () => {
     expect((parsed.job as unknown as Record<string, unknown>).bogus).toBe(123);
   });
 
-  it('keeps the #345 flatness, its provenance and the job’s margins through a round trip', () => {
+  it('keeps the measured flatness pair, its provenance and the job’s margins through a round trip', () => {
     const job = defaultEngraveJob();
-    job.stock.flatness = { dome: 0.33, across: 'width', source: 'badge' };
-    job.sources = { stock: { flatness: 'computed' } };
+    job.stock.flatness = {
+      xMm: 0.33,
+      yMm: 0.1,
+      source: 'measured',
+      touchCount: 5,
+      measuredAt: '2026-10-18T10:00:00.000Z',
+    };
+    job.sources = { stock: { flatness: 'measured' } };
     job.margins = { boundaryMargin: 0.331, zTolerance: 0.331, source: 'recommended' };
 
     const parsed = parseEngraveJob(JSON.parse(JSON.stringify(job)));
     expect(parsed.ok).toBe(true);
     if (!parsed.ok) return;
     // The VALUE is not enough on its own: every enumerated key zod does not name is stripped, and
-    // a blank that kept its dome while losing where the number came from would read as measured.
-    expect(parsed.job.stock.flatness).toEqual({ dome: 0.33, across: 'width', source: 'badge' });
-    expect(parsed.job.sources?.stock?.flatness).toBe('computed');
+    // a blank that kept its bow while losing where the number came from would read as measured.
+    expect(parsed.job.stock.flatness).toEqual({
+      xMm: 0.33,
+      yMm: 0.1,
+      source: 'measured',
+      touchCount: 5,
+      measuredAt: '2026-10-18T10:00:00.000Z',
+    });
+    expect(parsed.job.sources?.stock?.flatness).toBe('measured');
     expect(parsed.job.margins).toEqual({ boundaryMargin: 0.331, zTolerance: 0.331, source: 'recommended' });
     expect(parsed.job).toEqual(job);
+  });
+
+  it('drops a pre-#496 one-span flatness on load rather than inventing the other span', () => {
+    // The old record was `{ dome, across }`, and the direction word was read in opposite senses by
+    // different modules. A job carrying it loads as "not yet measured": one span cannot state the
+    // pair, and the next extents-touch run writes the real one (#496).
+    const parsed = parseEngraveJob({
+      ...defaultEngraveJob(),
+      stock: { ...defaultEngraveJob().stock, flatness: { dome: 0.33, across: 'length', source: 'badge' } },
+    });
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.job.stock.flatness).toBeUndefined();
   });
 
   // #464 — the fibre flag sits beside the material, so the schema has to name BOTH or a round trip

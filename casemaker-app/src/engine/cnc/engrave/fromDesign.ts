@@ -1,6 +1,5 @@
 import { newEngraveShapeId } from '@/engine/cnc/engrave/defaults';
 import { isShippedDemoLabelSet } from '@/engine/cnc/engrave/blankLabelSeed';
-import { DEFAULT_BADGE_DOME_MM } from '@/engine/cnc/engrave/fromBadge';
 import { MATERIAL_LABELS } from '@/engine/cnc/materials';
 import type { DesignImport } from '@/engine/import/design3mf';
 import type { Mm } from '@/types/units';
@@ -9,7 +8,6 @@ import type {
   EngraveJobSources,
   EngraveKeepOut,
   EngraveVectorShape,
-  StockFlatness,
 } from '@/types/engraveJob';
 
 /**
@@ -179,55 +177,6 @@ function mm(v: number): string {
   return `${Number(v.toFixed(3))}`;
 }
 
-/** The badge blank's nominal size, mm — the part #345 measured the dome on (3 × 1.5 × 0.15 in). */
-const BADGE_BLANK_MM = { lengthX: 76.2, widthY: 38.1, thickness: 3.81 } as const;
-
-/** How far a measured blank may sit from that nominal size and still be that part, mm. */
-const BADGE_BLANK_TOLERANCE_MM = 0.05;
-
-/**
- * Is this the printed badge blank whose dome #345 measured? (#437)
- *
- * The 0.33 mm is a property of ONE printed part, not of every two-colour project: a 100 × 60 mm
- * plaque printed in two colours is not that blank, and it has no measured dome at all. The check is
- * the three dimensions — the file may lay the blank either way round — to a loose tolerance, because
- * the measurement comes off a triangle soup and `um()` only rounds what is written, not what is read.
- */
-function isBadgeBlank(design: Pick<DesignImport, 'stock'>): boolean {
-  const { lengthX, widthY, thickness } = design.stock;
-  const near = (a: number, b: number): boolean => Math.abs(a - b) <= BADGE_BLANK_TOLERANCE_MM;
-  const footprint =
-    (near(lengthX, BADGE_BLANK_MM.lengthX) && near(widthY, BADGE_BLANK_MM.widthY)) ||
-    (near(lengthX, BADGE_BLANK_MM.widthY) && near(widthY, BADGE_BLANK_MM.lengthX));
-  return footprint && near(thickness, BADGE_BLANK_MM.thickness);
-}
-
-/**
- * The dome on the engraved face, or undefined (#345, #437).
- *
- * Only the badge blank gets a dome. For it `across` is computed from THIS job's spans rather than
- * copied from the badge route: the two routes turn the blank the same way since #383, but `across`
- * names a span in the JOB's frame (`materialScan.ts` reads `'width'` as its X, and carries the
- * warning), so the 38.1 mm span — the one #345 measured the 0.33 mm across — is this job's
- * `length`. Its source is `badge`: this route COPIES the badge blank's own default, it did not
- * measure anything here.
- *
- * For any other blank the dome is unknown, not a chosen default: a design file states no dome, and
- * stamping the badge's number onto an arbitrary plaque would put a figure nobody supplied into the
- * Z budget. `undefined` leaves the job with a flat assumption, which the notes say out loud.
- */
-function stockFlatnessFor(
-  design: DesignImport,
-  stock: { length: Mm; width: Mm },
-): StockFlatness | undefined {
-  if (!isBadgeBlank(design)) return undefined;
-  return {
-    dome: DEFAULT_BADGE_DOME_MM,
-    across: stock.length <= stock.width ? 'length' : 'width',
-    source: 'badge',
-  };
-}
-
 /**
  * Read `design` as this job's blank and its items, in the job's frame.
  *
@@ -333,7 +282,6 @@ export function designJobFor(
         ? { firstLayerHeight: um(design.firstLayerHeight) }
         : {}),
     };
-    stock.flatness = stockFlatnessFor(design, stock);
     notes.push(
       `The file states its print: ${mm(design.layerHeight)} mm layers` +
         (design.firstLayerHeight !== null ? ` (first layer ${mm(design.firstLayerHeight)} mm)` : '') +
@@ -341,18 +289,10 @@ export function designJobFor(
         `${mm(design.stock.thickness - design.colourSplit)} mm of the top extruder's material. ` +
         "The job's depth limit follows that boundary, not a nominal height.",
     );
-    if (stock.flatness !== undefined) {
-      notes.push(
-        `The engraved face also carries the printed blank's dome, about ${mm(stock.flatness.dome)} mm across ` +
-          `its ${stock.flatness.across} — the badge blank's own bench measurement (#345), copied with its ` +
-          "'badge' provenance; nothing here measured it again, and a per-job probe can replace it.",
-      );
-    } else {
-      notes.push(
-        'This blank is not the badge blank #345 measured, and the file states no dome of its own, so no ' +
-          'dome is claimed: the Z budget assumes a flat face until a per-job probe states one.',
-      );
-    }
+    notes.push(
+      'No bow is claimed from the file: a bow belongs to the piece as clamped, so the job states one ' +
+        'only after its own surface has been measured (#496).',
+    );
   } else {
     notes.push(
       'The file states no print facts (no colour split, or no layer height), so this import claims ' +
@@ -448,9 +388,6 @@ export function designJobFor(
         // same stamp — and only when a flag was actually written, like every other key here.
         ...(stock.fibre !== undefined ? { fibre: 'computed' as const } : {}),
         ...(stock.colour ? { colour: 'computed' as const } : {}),
-        // Only when a dome was actually written (#437): a flatness the patch did not state must not
-        // claim provenance, or the job's merge would keep a stale stamp for a value it never got.
-        ...(stock.flatness ? { flatness: 'computed' as const } : {}),
       },
     },
     notes,

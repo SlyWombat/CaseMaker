@@ -270,11 +270,14 @@ describe('#495 — the registration step', () => {
     expect(recorded!.outcome.usable).toBe(true);
 
     // #475 — the measured spread is on the job for #432 R9's facing default. This fake answers
-    // every extent at the same height, so the measured spread is 0 and its provenance is measured.
-    expect(useEngraveJobStore.getState().job.stock.flatness).toEqual({
-      dome: 0,
-      across: 'length',
+    // every extent at the same height, so the measured drops are 0 and their provenance is measured.
+    // #496 — both spans, with the touch count and the date the surface was measured.
+    expect(useEngraveJobStore.getState().job.stock.flatness).toMatchObject({
+      xMm: 0,
+      yMm: 0,
       source: 'measured',
+      touchCount: 5,
+      measuredAt: expect.any(String),
     });
     expect(surfaceSpreadFor(job.id, TARGET)?.assessment.spread).toBe(0);
   });
@@ -328,10 +331,13 @@ describe('#495 — the registration step', () => {
     expect(firstRegistrationFor(job.id, TARGET)).toBeNull();
     expect(surfaceSpreadFor(job.id, TARGET)?.assessment.spread).toBe(0.21);
     expect(surfaceSpreadFor(job.id, TARGET)?.assessment.ok).toBe(false);
-    expect(useEngraveJobStore.getState().job.stock.flatness).toEqual({
-      dome: 0.21,
-      across: 'width',
+    // #496 — the job records the pair, each span on its own stock axis, not one ambiguous "across".
+    expect(useEngraveJobStore.getState().job.stock.flatness).toMatchObject({
+      xMm: 0.138,
+      yMm: 0.21,
       source: 'measured',
+      touchCount: 5,
+      measuredAt: expect.any(String),
     });
   });
 

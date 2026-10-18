@@ -16,8 +16,9 @@
  * shelf already refuses one (`SPHERE_REFUSAL`).
  *
  * WHAT IS NOT CARRIED. A shelf entry's `layers` carry a name and a thickness but no layer height, and
- * its `domeHeight` has no direction; the job's `colour` (printed layers) and `flatness` need both.
- * Neither is invented: they stay absent and the notes say so. A laminate's `capMm` IS carried
+ * its `domeHeight` has no axes. Neither is invented: `colour` stays absent and the notes say so;
+ * `flatness` is not the shelf's at all — a bow belongs to the piece as clamped, so the job states
+ * one only from its own measurement (#496). A laminate's `capMm` IS carried
  * (#492) — it is a stated fact about the sheet, and its provenance travels with it as `assumed` or
  * `measured`. (The two-colour badge is ~1 % of jobs, §8.)
  *
@@ -166,7 +167,7 @@ export function stockFromShelf(item: StockItem, machine: MillProfile): StockChoi
   }
   if (item.flatness === 'domed') {
     notes.push(
-      `It is recorded as domed ${item.domeHeight ?? '?'} mm; the job does not carry the dome yet (the shelf does not say across which side).`,
+      `It is recorded as domed ${item.domeHeight ?? '?'} mm; the job's bow is not copied from the shelf — it states one only after measuring its own clamped surface (#496).`,
     );
   }
   return {
@@ -418,31 +419,30 @@ export function facingShopFrom(defaults: ShopDefaults | null): FacingDepthShop {
  * The measured high-to-low spread of the job's blank top, mm — or null when nobody measured it
  * (#432 review R9).
  *
- * The facing depth's probed branch ({@link facingDepthDefault}) needs a measurement, and the one
- * number the job carries for it is `stock.flatness.dome`; its `source` says whether that is a
- * measurement (`'measured'`) or a stated default (`'badge'` from a printed blank, `'user'` typed
- * in). Only `'measured'` fills a depth in — a default dressed up as a probe would read as a
- * measurement nobody took.
+ * The facing depth's probed branch ({@link facingDepthDefault}) needs a measurement, and the job
+ * carries one only as `stock.flatness`, which since #496 is written by the extents touches alone
+ * and is a drop per stock axis. The larger of the two is the high-to-low a skim has to clear.
  *
  * Only a material facing is offered on can answer (#474/#493): on any plastic this returns null
  * even if a measured flatness is recorded, so the wood/metal-only rule is enforced here as well
  * as at the toggle.
  *
- * Direction is irrelevant to a skim: it has to clear the high point whichever side of the blank
- * it is across, so `flatness.across` is not consulted.
+ * Direction is irrelevant to a skim beyond taking the larger drop: it has to clear the high point
+ * whichever side of the blank it is across.
  */
 export function measuredTopSpreadMm(job: Pick<EngraveJob, 'stock'>): number | null {
   if (facingRefusal(job.stock.material) !== null) return null;
   const flatness = job.stock.flatness;
-  if (flatness === undefined || flatness.source !== 'measured') return null;
-  return Number.isFinite(flatness.dome) && flatness.dome >= 0 ? flatness.dome : null;
+  if (flatness === undefined) return null;
+  const spread = Math.max(flatness.xMm, flatness.yMm);
+  return Number.isFinite(spread) && spread >= 0 ? spread : null;
 }
 
 /**
  * The depth filled into a facing job's depth field (#432): the answer to "how far", not the choice
  * of whether to face — that is `facingDefault`'s, from the finish.
  *
- * When the blank's top has been MEASURED — a measured `stock.flatness.dome` handed in through
+ * When the blank's top has been MEASURED — a measured `stock.flatness` handed in through
  * {@link measuredTopSpreadMm}, or a probe's own spread — that high-to-low figure is the measured
  * out-of-flat, and the shop's margin is added so the skim clears the highest point rather than
  * grazing it. Without a measurement the finish decides: rough stock takes the rough figure,

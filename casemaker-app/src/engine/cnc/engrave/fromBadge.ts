@@ -95,44 +95,6 @@ function stockColourFor(badge: BadgeParams): EngraveJob['stock']['colour'] {
 }
 
 /**
- * The dome a printed badge blank carries, mm (#345) — MEASURED, not assumed. The printed
- * two-colour blank, seated on the vise's jaw shelf, is convex ~0.33 mm centre-to-edge across its
- * 38 mm width and ~0.1 mm along its 76 mm length (the face printed against the bed, now up),
- * measured with the wired probe and referenced to the fixed jaw's top — `/Z1-Firmware-Dialect.md`
- * §11.8, #293 Stage 2, 2026-10-08. It is stated as a flatness fact rather than folded into a margin
- * so the recommendation can say WHERE the number came from, and so a per-job probe (#176) can
- * replace it with the blank actually on the bench.
- *
- * #451 keeps this compiled FOR NOW: the audit asked for "a stock or blank record", but no record can
- * carry the pair today. A shelf `StockItem` has `flatness`/`domeHeight` and no direction, and its
- * `domeHeight` is one figure; a job's `stock.flatness` carries `{dome, across}` — one direction
- * only — and `BadgeParams` (where this travels) has no dome field at all. Carrying the two measured
- * figures per blank needs a record with BOTH spans and their provenance; until that exists,
- * inventing a shape here would be one more number nobody supplied.
- */
-export const DEFAULT_BADGE_DOME_MM = 0.33;
-
-/**
- * The blank's flatness, in `EngraveJob.stock`'s shape, or `undefined` when the badge states nothing
- * about how it was printed (#345).
- *
- * The dome is a consequence of PRINTING, so it travels with the print for the same reason the split
- * does: a badge that states no print has told us nothing about how flat it is, and inventing a dome
- * for it would put a number nobody supplied into `recommendMargins`' budget. The 0.33 mm figure is
- * the one measured across the blank's 38.1 mm side — 0.1 mm is what it does along the 76.2 mm one —
- * and since the quarter turn (#383) that side is the stock's LENGTH, in X.
- *
- * `across` names the span in the JOB's frame, not the badge's: it is the same 38.1 mm side either
- * way, and `materialScan` reads `'width'` as the job's X (see its own note at the plan), so this
- * must follow the stock's own field. Getting the word wrong silently judges every edge against the
- * other span's dome — the badge case in `materialScan.spec` is the guard.
- */
-function stockFlatnessFor(badge: BadgeParams): EngraveJob['stock']['flatness'] {
-  if (!badge.print) return undefined;
-  return { dome: DEFAULT_BADGE_DOME_MM, across: 'length', source: 'badge' };
-}
-
-/**
  * Read `badge` as the job's blank: its stock, and the void its model already has.
  *
  * Deliberately narrow — it does not touch labels, tool, vise, feeds or `minFloor`. The badge
@@ -149,7 +111,6 @@ function stockFlatnessFor(badge: BadgeParams): EngraveJob['stock']['flatness'] {
 export function badgeBlankFor(badge: BadgeParams): BadgeBlank {
   const pocket = badge.magnetPocket;
   const colour = stockColourFor(badge);
-  const flatness = stockFlatnessFor(badge);
   const notes = [
     `The badge's blank, ${mm(badge.height)} × ${mm(badge.width)} × ${mm(badge.thickness)} mm PLA, ` +
       `is now the stock (its bounding rectangle — the corner radii are not modelled here), turned ` +
@@ -166,12 +127,8 @@ export function badgeBlankFor(badge: BadgeParams): BadgeBlank {
     );
   }
 
-  if (flatness) {
-    notes.push(
-      `Its dome came with it too: a printed blank is out of flat by about ${mm(flatness.dome)} mm ` +
-        `across its ${flatness.across}, which the job's Z budget has to cover.`,
-    );
-  }
+  // #496 — no dome comes with the badge. A bow belongs to the piece as clamped, not to the part
+  // number it was printed as, so the job states one only after its own surface has been measured.
 
   if (!pocket) {
     notes.push('This badge has no magnet pocket, so no void was declared.');
@@ -182,7 +139,6 @@ export function badgeBlankFor(badge: BadgeParams): BadgeBlank {
         thickness: badge.thickness,
         material: 'pla',
         colour,
-        flatness,
       },
       pocket: null,
       notes,
@@ -202,7 +158,6 @@ export function badgeBlankFor(badge: BadgeParams): BadgeBlank {
       thickness: badge.thickness,
       material: 'pla',
       colour,
-      flatness,
     },
     pocket: {
       id: BADGE_POCKET_KEEP_OUT_ID,

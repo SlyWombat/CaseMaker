@@ -258,7 +258,9 @@ describe('#475 the executor measures the cut extents', () => {
     expect(r.spread!.spread).toBe(0.21);
     expect(r.spread!.ok).toBe(false);
     expect(r.spread!.landing).toBeNull();
-    expect(r.spread!.across).toBe('width');
+    // #496 — both centre-to-edge drops, on the stock's axes: 0.138 mm to the X extents (left is
+    // the reading that sets it), 0.21 mm to the Y extents. The pair is what the job records.
+    expect(r.spread!.drops).toEqual({ xMm: 0.138, yMm: 0.21 });
     expect(r.spread!.z0).toEqual({ z: -55.341, touchId: 'surface-5', rule: 'lowest' });
     expect(r.spread!.refusal).toMatchObject({ severity: 'error', code: 'blank-bowed' });
     expect(r.spread!.refusal?.message).toBe(

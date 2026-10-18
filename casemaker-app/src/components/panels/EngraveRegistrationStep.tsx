@@ -263,16 +263,21 @@ export function EngraveRegistrationStep({ job, target }: EngraveRegistrationStep
       if (!aliveRef.current) return;
       if (r.ok && r.spread !== undefined) {
         // The measurement is session data for the sheet even when the blank is refused; the job's
-        // flatness record is the measured high-to-low spread, which is what #432 R9 reads.
+        // flatness record is the measured pair, which is what #432 R9 reads and what the depth
+        // recommendation and the material scan plan from (#496). Both spans travel with the count
+        // of touches that produced them and the date they were taken: a figure with no provenance
+        // is the assumed dome #496 removed.
         measureSurface(job.id, target, r.spread);
         const store = useEngraveJobStore.getState();
         if (store.job.id === job.id) {
           store.setStock(
             {
               flatness: {
-                dome: r.spread.spread,
-                across: r.spread.across,
+                xMm: r.spread.drops.xMm,
+                yMm: r.spread.drops.yMm,
                 source: 'measured',
+                touchCount: r.spread.touches.length,
+                measuredAt: new Date().toISOString(),
               },
             },
             'measured',

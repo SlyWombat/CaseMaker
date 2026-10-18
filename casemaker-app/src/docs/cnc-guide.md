@@ -59,10 +59,10 @@ oversight):
 - Automatic probing or origin-setting that you have not approved. The Cut page's registration
   step runs the setup's approved plan and asks before it writes the origin (#495); nothing
   probes, homes or writes on its own.
-- Autolevelling (`G32`) *in the file*. The printed blank is domed (about 0.33 mm across its
-  width), so the levelling pass runs at the machine's console before cutting and the state is
-  cleared after — never in the `.nc`, which the upload gate would refuse. Whether `G32` is
-  still needed on a face the app has skimmed is #176's bench question.
+- Autolevelling (`G32`) *in the file*. A printed blank can be domed (the badge in hand, about
+  0.33 mm across its width), so the levelling pass runs at the machine's console before cutting and
+  the state is cleared after — never in the `.nc`, which the upload gate would refuse. Whether
+  `G32` is still needed on a face the app has skimmed is #176's bench question.
 - 3D surfacing.
 - V-carving a region whose groove at the colour plane is narrower than one machine step. The app
   refuses it by name (`vcarve-groove-too-narrow`, §8.1); it does open regions otherwise (#221).
@@ -507,9 +507,11 @@ PLA or PETG, a purchased acrylic or ABS sheet, or a two-colour engraving laminat
 names the material: `facing is not offered on <material>: a flat cutter smears a plastic top`,
 and turning facing off in the panel is the way out. For wood and metal the **Finish** the blank
 states decides whether facing is offered and how deep it defaults: the panel fills in a depth
-with a sentence saying why, and you can type your own. The default is the job's measured top
-spread plus the shop's margin when the blank carries a measurement (`stock.flatness` with source
-`measured`), else the shop's rough or unknown figure — and a stated dome is not a measurement.
+with a sentence saying why, and you can type your own. The default is the larger of the job's two
+measured drops plus the shop's margin when the job has measured its surface (`stock.flatness`, one
+drop per stock axis, written only by a measurement — #496), else the shop's rough or unknown
+figure. A bow is a property of the piece as clamped, so it is never assumed from the blank alone:
+until this job's own surface has been touched, no bow is claimed.
 A facing job is **two programs** — a facing pass with its own flat cutter,
 then the engraving program from the faced top — each with its own tool-length calibration and
 its own Z0. The run sheet orders them probe → face → re-touch → engrave.
@@ -1155,7 +1157,7 @@ optional, so a refusal would cost the operator the sentence and nothing else.
 | Code | Severity | What it means in plain words | What to do |
 |---|---|---|---|
 | `not-proud-enough` | error | The blank stands so little proud of the jaw tops that the probe cannot tell the blank's own top from the jaw's — every reading would sit within the dial's own tolerance of both. | Seat the blank higher, or set the origin as usual and check the blank against it with a rule. |
-| `dome-covers-the-jaw` | error | The blank's stated dome is as deep as the height it stands proud, so the top of the dome and the level of the jaw tops read the same. | Say what the dome really is, seat the blank higher, or check with a rule instead. |
+| `dome-covers-the-jaw` | error | The bow the job MEASURED is as deep as the height the blank stands proud, so the top of the bow and the level of the jaw tops read the same. Raised only after the surface has been measured; a job with no measurement has no bow claim to check. | Face or plane the top, seat the blank higher, or check with a rule instead. |
 
 **Reading the file header** (form prefill only; these never change the sweep):
 

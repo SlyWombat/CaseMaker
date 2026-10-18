@@ -123,7 +123,7 @@ exports[`runSheet (#207) > snapshots the whole RunSheet for a job with a depth b
           "text": "The Z1 low-profile vise, and the wired probe that ships with the machine — a mechanical touch tip, so it triggers on PLA (measured 2026-10-08, 0.001 mm). The 3D Probe stays in reserve.",
         },
         {
-          "text": "Depth margins — how far every floor stays clear of a plane: a void’s ceiling, the colour split. Recommended for this blank: 0.2 mm — the wired probe adds 0.001 mm; flatness unknown: no number for the dome.",
+          "text": "Depth margins — how far every floor stays clear of a plane: a void’s ceiling, the colour split. Recommended for this blank: 0.2 mm — the wired probe adds 0.001 mm; flatness not yet measured: no bow claim.",
           "value": "0.2 mm boundary margin · the house default · no print grid stated: a void’s ceiling keeps the job’s minimum floor, 1 mm",
         },
         {

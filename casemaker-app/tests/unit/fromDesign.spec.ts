@@ -69,13 +69,12 @@ describe('the blank, as the job frame has it (#410)', () => {
     expect(patch.stock.material).toBe('petg');
   });
 
-  it('carries the file’s own print facts, and the dome across the axis that is 38.1', () => {
+  it('carries the file’s own print facts, and no bow — a bow is the job’s own measurement', () => {
     const stock = designJobFor(design()).stock;
     expect(stock.colour).toEqual({ kind: 'printed', capMm: 0.81, layerHeight: 0.2 });
-    // `across: 'length'` — NOT the badge route's `'width'`. The blanks are the same part but this
-    // job's frame is turned, so the 38.1 mm span #345 measured the dome across is the LENGTH here.
-    // `source: 'badge'` — this route copies the badge blank's default; it measured nothing here.
-    expect(stock.flatness).toEqual({ dome: 0.33, across: 'length', source: 'badge' });
+    // #496 — the file states how the part was printed, not how THIS piece sits in the jaws. A bow
+    // belongs to the clamped piece, so an import claims none and the registration step writes it.
+    expect(stock.flatness).toBeUndefined();
   });
 
   it('stamps every field it writes as derived, never as a bench reading (#254)', () => {
@@ -86,22 +85,22 @@ describe('the blank, as the job frame has it (#410)', () => {
       thickness: 'computed',
       material: 'computed',
       colour: 'computed',
-      flatness: 'computed',
     });
   });
 });
 
-describe('the dome is the badge blank’s, never an invented default (#437)', () => {
-  it('says the 0.33 mm is the badge blank’s own measurement, copied with its provenance', () => {
-    const notes = designJobFor(design()).notes.join('\n');
-    expect(notes).toContain("badge blank's own bench measurement (#345)");
-    expect(notes).toContain("'badge' provenance");
-    expect(notes).not.toContain('measured it again, so');
+describe('no bow is claimed from the file, badge blank or not (#496)', () => {
+  it('says the bow is the job’s own measurement, not the badge blank’s', () => {
+    const patch = designJobFor(design());
+    expect(patch.stock.flatness).toBeUndefined();
+    const notes = patch.notes.join('\n');
+    expect(notes).toContain('No bow is claimed from the file');
+    expect(notes).not.toContain('badge blank’s own bench measurement');
   });
 
-  it('claims no dome on a two-colour blank that is not the badge blank', () => {
+  it('claims no bow on any other two-colour blank either', () => {
     // A 100 × 60 mm plaque, printed in two colours: the file states its print but says nothing
-    // about a dome, and the badge blank's 0.33 mm is not this part's measurement.
+    // about a bow, and the badge blank's bench figure was deleted rather than standing in (#496).
     const plaque = readDesign(
       tl,
       parsePrusaThreeMf(
@@ -121,8 +120,7 @@ describe('the dome is the badge blank’s, never an invented default (#437)', ()
     // No value, no provenance claim: a stale `flatness: 'computed'` would outlive the value.
     expect('flatness' in (patch.sources.stock ?? {})).toBe(false);
     const notes = patch.notes.join('\n');
-    expect(notes).toContain('not the badge blank #345 measured');
-    expect(notes).toContain('no dome is claimed');
+    expect(notes).toContain('No bow is claimed from the file');
   });
 });
 

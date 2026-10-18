@@ -58,7 +58,11 @@ function toolName(toolKey: string): string {
 export function cutPlan(input: CutPlanInput): RunPlan {
   const { job, pkg } = input;
   const flatness: StockFlatness =
-    job.stock.flatness === undefined ? 'unknown' : job.stock.flatness.dome > 0 ? 'domed' : 'flat';
+    job.stock.flatness === undefined
+      ? 'unknown'
+      : Math.max(job.stock.flatness.xMm, job.stock.flatness.yMm) > 0
+        ? 'domed'
+        : 'flat';
   return planRun({
     setups: pkg.setups.map((setup, i) => ({
       index: i + 1,

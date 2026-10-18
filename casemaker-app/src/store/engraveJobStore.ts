@@ -1006,8 +1006,8 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
         // `colour`, `flatness` and `fibre` are the stock fields a patch can CLEAR (#285 review,
         // #345, #464, #492). "Use the badge blank" on a badge that has lost its print must take the
         // colour facts away with it, or the stack limit goes on applying to a blank whose print is
-        // no longer known — and the stated dome (`flatness`) is a fact about the SAME printed
-        // blank, so it goes with it too. The fibre flag goes for the same reason a design import
+        // no longer known — and the measured bow (`flatness`, #496) was taken on the SAME clamped
+        // piece, so it goes with it too. The fibre flag goes for the same reason a design import
         // states it beside the material: re-importing a plain PETG file over a `PETG-CF` one must
         // stop the runs being weighed as abrasive. An explicit `undefined` says that; an OMITTED
         // key still means "leave it alone", which is what every other caller relies on — a laminate

@@ -309,39 +309,49 @@ describe('the facing choice a new job starts with (#432 slice 4)', () => {
 });
 
 // #432 review R9 — the probed branch of the depth default had no caller, so the "spread plus the
-// shop margin" answer could never occur. The job's measured top is `stock.flatness` with
-// `source: 'measured'`; a stated dome is not a measurement, and a plastic never reaches it.
+// shop margin" answer could never occur. The job's measured top is `stock.flatness`, which since
+// #496 only a measurement writes; a plastic never reaches it.
 describe('the facing depth default from a measured top (#432 R9)', () => {
-  const jobWith = (material: 'softwood' | 'brass' | 'petg', flatness?: { dome: number; source: 'measured' | 'badge' | 'user' }) => {
+  const jobWith = (
+    material: 'softwood' | 'brass' | 'petg',
+    pair?: { xMm: number; yMm: number },
+  ) => {
     const job = defaultEngraveJob();
     return {
       ...job,
       stock: {
         ...job.stock,
         material,
-        ...(flatness === undefined
+        ...(pair === undefined
           ? {}
-          : { flatness: { dome: flatness.dome, across: 'width' as const, source: flatness.source } }),
+          : {
+              flatness: {
+                ...pair,
+                source: 'measured' as const,
+                touchCount: 5,
+                measuredAt: '2026-10-18T10:00:00.000Z',
+              },
+            }),
       },
     };
   };
 
-  it('takes a MEASURED flatness as the spread, on wood and metal', () => {
-    expect(measuredTopSpreadMm(jobWith('softwood', { dome: 0.24, source: 'measured' }))).toBe(0.24);
-    expect(measuredTopSpreadMm(jobWith('brass', { dome: 0.08, source: 'measured' }))).toBe(0.08);
+  it('takes the larger measured drop as the spread, on wood and metal', () => {
+    expect(measuredTopSpreadMm(jobWith('softwood', { xMm: 0.24, yMm: 0.1 }))).toBe(0.24);
+    expect(measuredTopSpreadMm(jobWith('brass', { xMm: 0.08, yMm: 0.03 }))).toBe(0.08);
+    // The larger of the two is the high-to-low a skim has to clear (#496).
+    expect(measuredTopSpreadMm(jobWith('softwood', { xMm: 0.1, yMm: 0.18 }))).toBe(0.18);
     // A measured FLAT top is 0, not "no measurement": the margin is still filled in.
-    expect(measuredTopSpreadMm(jobWith('softwood', { dome: 0, source: 'measured' }))).toBe(0);
+    expect(measuredTopSpreadMm(jobWith('softwood', { xMm: 0, yMm: 0 }))).toBe(0);
   });
 
-  it('refuses a stated dome, and refuses any reading on a plastic', () => {
-    expect(measuredTopSpreadMm(jobWith('softwood', { dome: 0.33, source: 'badge' }))).toBeNull();
-    expect(measuredTopSpreadMm(jobWith('softwood', { dome: 0.33, source: 'user' }))).toBeNull();
-    expect(measuredTopSpreadMm(jobWith('petg', { dome: 0.24, source: 'measured' }))).toBeNull();
+  it('refuses an unmeasured top, and refuses any reading on a plastic', () => {
+    expect(measuredTopSpreadMm(jobWith('petg', { xMm: 0.24, yMm: 0.1 }))).toBeNull();
     expect(measuredTopSpreadMm(defaultEngraveJob())).toBeNull();
   });
 
   it('fills the depth with spread + the shop margin and says where it came from', () => {
-    const spread = measuredTopSpreadMm(jobWith('softwood', { dome: 0.24, source: 'measured' }));
+    const spread = measuredTopSpreadMm(jobWith('softwood', { xMm: 0.24, yMm: 0.1 }));
     expect(facingDepthDefault('rough', { probedSpreadMm: spread })).toEqual({
       depthMm: 0.34,
       reason: "the blank's measured top varies by 0.24 mm, plus the shop's 0.1 mm margin",

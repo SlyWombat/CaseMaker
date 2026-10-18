@@ -781,9 +781,8 @@ export function EngravePanel(): JSX.Element {
   const facing = job.facing ?? null;
   const facingOn = facing?.enabled ?? false;
   // #432 review R9 — the aimed-for default is the MEASURED top's high-to-low spread plus the
-  // shop's margin. The job carries a measured top only as `stock.flatness` with
-  // `source: 'measured'`; a badge's stated dome is not a measurement, and `measuredTopSpreadMm`
-  // returns null on any plastic, so the wood/metal-only rule holds here too.
+  // shop's margin. Since #496 `stock.flatness` IS the measurement (nothing else writes it), and
+  // `measuredTopSpreadMm` returns null on any plastic, so the wood/metal-only rule holds here too.
   const facingDepthFill = facingDepthDefault(finish ?? 'unknown', {
     probedSpreadMm: measuredTopSpreadMm(job),
     shop: facingShopFrom(shopDefaults),

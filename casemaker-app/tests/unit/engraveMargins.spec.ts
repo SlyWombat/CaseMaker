@@ -53,6 +53,11 @@ function printedJob(colour: EngraveJob['stock']['colour'], flatness?: EngraveJob
 
 const PRINT_0_2 = { kind: 'printed', capMm: 9.0, layerHeight: 0.2, firstLayerHeight: 0.2 } as const;
 
+/** A measured surface record, the only thing #496 lets write `stock.flatness`. */
+function measured(xMm: number, yMm: number): EngraveJob['stock']['flatness'] {
+  return { xMm, yMm, source: 'measured', touchCount: 5, measuredAt: '2026-10-18T10:00:00.000Z' };
+}
+
 describe('the depth-bound model (#345)', () => {
   it('refuses a floor ON the plane from either side, and passes one margin clear', () => {
     const above = voidBound('Magnet pocket', 2.0);
@@ -209,30 +214,31 @@ describe('the house margins and the job’s own (#345)', () => {
 });
 
 describe('the recommendation (#345)', () => {
-  it('adds the blank’s dome when the job runs no autolevel grid', () => {
-    const job = printedJob(PRINT_0_2, { dome: 0.33, across: 'width', source: 'badge' });
+  it('adds the larger measured drop when the job runs no autolevel grid', () => {
+    const job = printedJob(PRINT_0_2, measured(0.33, 0.1));
     const rec = recommendMargins(job, MARGIN_DEFAULTS);
-    // The wired probe's measured repeatability plus the dome — the two things that move Z.
+    // The wired probe's measured repeatability plus the blank's bow — the two things that move Z.
     expect(rec.zTolerance).toBeCloseTo(WIRED_PROBE_Z_RESIDUAL_MM + 0.33, 9);
     expect(rec.boundaryMargin).toBeCloseTo(0.331, 9);
-    expect(rec.basis.join(' ')).toContain('domed 0.33 mm across its width');
+    expect(rec.basis.join(' ')).toContain('falls 0.33 mm along X and 0.1 mm along Y');
+    expect(rec.basis.join(' ')).toContain('5 touches');
     expect(rec.basis.join(' ')).toContain('runs no autolevel grid');
   });
 
-  it('says "flatness unknown" rather than inventing a dome for a blank that states none', () => {
+  it('says "flatness not yet measured" rather than inventing a bow for a blank nobody measured', () => {
     const rec = recommendMargins(printedJob(PRINT_0_2), MARGIN_DEFAULTS);
     expect(rec.zTolerance).toBeCloseTo(WIRED_PROBE_Z_RESIDUAL_MM, 9);
-    expect(rec.basis.join(' ')).toContain('flatness unknown');
+    expect(rec.basis.join(' ')).toContain('flatness not yet measured');
     // The house setting is a floor under the advice: a job with nothing special about it is not
     // talked into a tighter margin than the house runs.
     expect(rec.boundaryMargin).toBe(DEFAULT_BOUNDARY_MARGIN_MM);
   });
 
-  it('takes the grid’s residual INSTEAD of the dome — a grid is what measures the dome away', () => {
-    const job = printedJob(PRINT_0_2, { dome: 0.33, across: 'width', source: 'badge' });
+  it('takes the grid’s residual INSTEAD of the bow — a grid is what measures the bow away', () => {
+    const job = printedJob(PRINT_0_2, measured(0.33, 0.1));
     const rec = recommendMargins(job, MARGIN_DEFAULTS, { gridResidual: 0.05 });
     expect(rec.zTolerance).toBeCloseTo(WIRED_PROBE_Z_RESIDUAL_MM + 0.05, 9);
-    expect(rec.basis.join(' ')).not.toContain('domed');
+    expect(rec.basis.join(' ')).not.toContain('falls');
     expect(rec.basis.join(' ')).toContain("autolevel grid's residual");
   });
 
@@ -301,26 +307,17 @@ describe('the run sheet prints the margins (#345)', () => {
         'job’s minimum floor, 1 mm',
     );
     expect(step.text).toContain('Recommended for this blank: 0.2 mm');
-    expect(step.text).toContain('flatness unknown');
+    expect(step.text).toContain('flatness not yet measured');
   });
 
-  it('recommends more than the house default for a blank that says it is domed', () => {
-    // The badge is the case the block exists for: the shipped 0.2 mm is smaller than the 0.33 mm
-    // the blank is domed by, and the operator reading the printout has no panel to check it against.
-    const badge = badgeBlankFor(defaultBadgeParams({ print: { layerHeight: 0.2, firstLayerHeight: 0.2 } }));
-    const job: EngraveJob = {
-      ...defaultEngraveJob(viseForNewJob(undefined, badge.stock)),
-      stock: badge.stock,
-      keepOuts: badge.pocket ? [badge.pocket] : [],
-      labels: [],
-    };
+  it('recommends more than the house default for a blank whose surface was measured bowed', () => {
+    // The shipped 0.2 mm is smaller than the 0.33 mm this blank measured, and the operator reading
+    // the printout has no panel to check it against. The pair is the job's own measurement (#496).
+    const base = voidJob();
+    const job: EngraveJob = { ...base, stock: { ...base.stock, flatness: measured(0.33, 0.1) } };
     const step = marginsStepOf(job)!;
-    expect(step.value).toBe('0.2 mm boundary margin · the house default');
     expect(step.text).toContain('Recommended for this blank: 0.331 mm');
-    // The dome is 0.33 mm across the badge's 38.1 mm side, which the blank's quarter turn (#383)
-    // makes the STOCK's length — the sentence names a span in the job's frame, as `flatness.across`
-    // does, so it reads "length" rather than the badge's own "width".
-    expect(step.text).toContain('domed 0.33 mm across its length');
+    expect(step.text).toContain('falls 0.33 mm along X and 0.1 mm along Y');
   });
 
   it('leaves a job with no bound alone — the block would have nothing to say in it', () => {

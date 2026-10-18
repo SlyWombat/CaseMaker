@@ -537,13 +537,14 @@ export interface MarginRecommendation {
  *   - the probe's own repeatability (`inputs.probeUncertainty`, the wired probe's measured 0.001 by
  *     default — the model's other probe figure, `PROBE_RESIDUAL_MM`, is the 3D probe's assumed one);
  *   - PLUS either the autolevel grid's residual (`inputs.gridResidual`, #176) when the job runs a
- *     grid, or the blank's stated dome (`stock.flatness`, #345) when it does not. A grid is what
- *     measures the dome away, so carrying both would double-count the same error;
+ *     grid, or the blank's measured bow (`stock.flatness`, #496) when it does not. A grid is what
+ *     measures the bow away, so carrying both would double-count the same error;
  *   - PLUS the thickness' own ± when the blank was measured rather than modelled.
  *
- * A blank that states no flatness and runs no grid gets NO dome term and says so ("flatness
- * unknown") rather than inventing 0 — the honest answer is a budget that may be too small, and the
- * basis is what tells the user to check.
+ * A blank whose surface has not been measured (`stock.flatness` is only ever written by the extents
+ * touches, #496) and that runs no grid gets NO bow term and says so ("not yet measured") rather
+ * than inventing 0 — the honest answer is a budget that may be too small, and the basis is what
+ * tells the user to check.
  *
  * The margin is then `max(setting, zTolerance)`: the house setting is a floor under the advice, so
  * a job with nothing special about it is not talked into a tighter margin than the house runs.
@@ -577,12 +578,17 @@ export function recommendMargins(
   } else {
     const flatness = job.stock.flatness;
     if (flatness) {
-      zTolerance += flatness.dome;
+      // #496 — the bow is the job's own measurement, one drop per stock axis. The budget carries
+      // the larger, because it has to cover the high point whichever axis the bow runs along.
+      const bow = Math.max(flatness.xMm, flatness.yMm);
+      zTolerance += bow;
       basis.push(
-        `the blank is domed ${mm(flatness.dome)} mm across its ${flatness.across} and this job runs no autolevel grid`,
+        `the blank's measured top falls ${mm(flatness.xMm)} mm along X and ${mm(flatness.yMm)} mm ` +
+          `along Y (${flatness.touchCount} touches, ${flatness.measuredAt.slice(0, 10)}), so the ` +
+          'larger is carried; this job runs no autolevel grid',
       );
     } else {
-      basis.push('flatness unknown: no number for the dome');
+      basis.push('flatness not yet measured: no bow claim');
     }
   }
 

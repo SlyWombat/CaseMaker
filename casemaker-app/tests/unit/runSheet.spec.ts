@@ -506,7 +506,17 @@ describe('runSheet (#207)', () => {
     // sheet saying them in words a person at the machine can act on (and about it not saying them
     // when they would not be true).
     it('offers the material-position scan, in physical landmarks and the plan’s own numbers', () => {
-      const steps = section(sheetFor(defaultEngraveJob(), NO_SIM, NC, SCAN), 'origin').steps;
+      // #496 — the job carries a MEASURED bow, one drop per stock axis; the plan's bands are those
+      // drops plus the dial, which is what makes the sides and the ends different figures.
+      const job = defaultEngraveJob();
+      job.stock.flatness = {
+        xMm: 0.33,
+        yMm: 0.1,
+        source: 'measured',
+        touchCount: 5,
+        measuredAt: '2026-10-18T10:00:00.000Z',
+      };
+      const steps = section(sheetFor(job, NO_SIM, NC, SCAN), 'origin').steps;
       const texts = steps.map((s) => s.text);
 
       // It is an OFFER, and it says why it costs something: a tool change.
@@ -544,8 +554,9 @@ describe('runSheet (#207)', () => {
       for (const id of checks) expect(id).toMatch(/at the middle of the blank’s (width|length)/);
 
       // The bands are the JOB's figures (#345/#362), not constants in the sheet — and they are PER
-      // EDGE, because the dome is a shape (#391 item 4): the sides are judged against 0.38 mm and
-      // the ends against 0.15, where the old block quoted one figure for all four.
+      // EDGE, because each measured drop is on its own stock axis (#496): the sides are judged
+      // against 0.33 + 0.05 and the ends against 0.1 + 0.05, where the old block quoted one figure
+      // for all four.
       const reading = texts.find((t) => t.startsWith('Reading the depths.'))!;
       expect(reading).toContain('within 0.38 mm of the reference is the blank at the left and right edges');
       expect(reading).toContain('0.15 mm at the front and back');

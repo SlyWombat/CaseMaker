@@ -1164,18 +1164,16 @@ describe('EngravePanel — the badge blank (#271 route 1)', () => {
     await press(screen.getByTestId('engrave-stock-from-badge'));
 
     const job = useEngraveJobStore.getState().job;
-    // The blank AND the two facts that ride with it (#352, #368): the badge the template makes
-    // states how it was printed, so the blank arrives with a layer grid and the dome a printed blank
-    // is assumed to carry. Both are the badge's own — this is the route that decides them. The
-    // blank is TURNED for the vise (#383): 38.1 mm across X, 76.2 mm along Y, and the dome is
-    // 0.33 mm across that 38.1 mm side, which is the stock's `length` in the job's own frame.
+    // The blank AND the print facts that ride with it (#352, #368): the badge the template makes
+    // states how it was printed, so the blank arrives with a layer grid. No bow comes with it —
+    // since #496 a bow belongs to the piece as clamped and is only written by a measurement. The
+    // blank is TURNED for the vise (#383): 38.1 mm across X, 76.2 mm along Y.
     expect(job.stock).toEqual({
       length: 38.1,
       width: 76.2,
       thickness: 3.81,
       material: 'pla',
       colour: { kind: 'printed', capMm: 0.81, layerHeight: 0.2, firstLayerHeight: 0.2 },
-      flatness: { dome: 0.33, across: 'length', source: 'badge' },
     });
     expect((screen.getByTestId('engrave-stock-length') as HTMLInputElement).value).toBe('38.1');
     // The numbers are the model's, not something someone typed here (decision 28's question).
@@ -1450,10 +1448,16 @@ describe('EngravePanel — where a label’s depth came from (#362 review)', () 
 // (whose own spec covers `setJobMargins`): what the row SHOWS is as much of the feature as the
 // number it writes.
 describe('EngravePanel margins row (#345)', () => {
-  /** A blank that states the dome a printed badge carries — what lifts the recommendation. */
+  /** A blank whose surface was measured bowed — what lifts the recommendation since #496. */
   const domed = (): void => {
     const job = defaultEngraveJob();
-    job.stock.flatness = { dome: 0.33, across: 'width', source: 'badge' };
+    job.stock.flatness = {
+      xMm: 0.33,
+      yMm: 0.1,
+      source: 'measured',
+      touchCount: 5,
+      measuredAt: '2026-10-18T10:00:00.000Z',
+    };
     act(() => useEngraveJobStore.setState({ job }));
   };
 
@@ -1471,11 +1475,11 @@ describe('EngravePanel margins row (#345)', () => {
     domed();
     render(<EngravePanel />);
 
-    // 0.001 mm of probe plus the stated 0.33 mm dome — above the 0.2 mm house layer, so there is
+    // 0.001 mm of probe plus the measured 0.33 mm drop — above the 0.2 mm house layer, so there is
     // something to take, and the basis says which term moved it.
     const recommended = screen.getByTestId('engrave-margins-recommended').textContent!;
     expect(recommended).toContain('0.331');
-    expect(recommended).toContain('domed 0.33');
+    expect(recommended).toContain('falls 0.33 mm along X');
 
     fireEvent.click(screen.getByTestId('engrave-margins-use'));
 

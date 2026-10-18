@@ -117,8 +117,8 @@ export type FieldSource = 'computed' | 'catalogue' | 'user' | 'measured' | 'assu
 export interface EngraveJobSources {
   /**
    * Which stock fields were asserted, and how (#254). Absent = the shipped default blank. `colour`
-   * and `flatness` are stamped by whoever copies a badge's print facts in (#285, #345), the same
-   * way `material` is stamped when a badge becomes the blank.
+   * is stamped by whoever copies a badge's print facts in (#285); `flatness` is stamped `measured`
+   * by the registration step that measured the clamped piece (#475, #496), never by an import.
    *
    * `print` was this key's name before #492; a document that still carries it is migrated on load
    * to `colour` (see `engraveJobSchema.ts`), so nothing in this build reads the old key.
@@ -880,25 +880,30 @@ export interface EngraveMargins {
 }
 
 /**
- * How flat the blank's printed face is (#345), stated by whoever knows it: a badge's print spec
- * states the dome, a bare blank states none.
+ * How flat the blank's top is, as MEASURED on the piece in the jaws (#496, #475).
  *
- * `dome` is the height difference between the blank's centre and its edges on the face to be
- * engraved. It is the term a job running with NO autolevel grid must carry in its Z budget —
- * #176's grid is what removes it — so the recommendation names it rather than assuming a flat
- * blank (`flatness unknown` is its own answer, never an invented 0).
+ * A bow belongs to the job, not to a shelf record or to the badge it was printed as: the same
+ * nominal blank clamps differently every time, so the only honest figure is the one the extents
+ * touches took on this piece. The pair is per stock AXIS — `xMm` is the centre-to-edge drop along
+ * the stock's `length` (X), `yMm` across its `width` (Y) — because that is what the touches
+ * measure, and the direction words (`'width'`/`'length'`) were read in opposite senses by different
+ * modules (#496; the 2026-10-17 bench note corrects a direction claim for exactly this reason).
  *
- * PROVISIONAL on the default badge: 0.33 mm across its 38.1 mm side — the stock's `length` since
- * the blank is turned for the vise (#383) — measured on the printed blank for #166 and awaiting
- * the measured blank of #165.
+ * It is the term a job running with NO autolevel grid carries in its Z budget — #176's grid is what
+ * removes it. A job that has not measured its surface has NO flatness record: "not yet measured" is
+ * its own answer, never an invented 0 and never a figure copied from a badge (#496 decision).
  */
 export interface StockFlatness {
-  /** Centre-to-edge height difference on the engraved face, mm. */
-  dome: Mm;
-  /** The direction `dome` was measured across. */
-  across: 'width' | 'length';
-  /** Where the number came from — a default is not a measurement (decision 28). */
-  source: 'badge' | 'user' | 'measured';
+  /** Centre-to-edge drop along the stock's `length` (X), mm. */
+  xMm: Mm;
+  /** Centre-to-edge drop across the stock's `width` (Y), mm. */
+  yMm: Mm;
+  /** Only a measurement writes this record (#496). */
+  source: 'measured';
+  /** How many surface touches produced the pair. */
+  touchCount: number;
+  /** When the surface was measured, ISO 8601. */
+  measuredAt: string;
 }
 
 /**
@@ -1096,8 +1101,8 @@ export interface EngraveJob {
   machineId: string;
   /**
    * length = X, width = Y, thickness = Z. `colour` is the colour-plane input (#492, from #285);
-   * absent for every job that is not a two-colour blank or a laminate. `flatness` is the dome the
-   * printed face carries (#345), where anyone has stated one.
+   * absent for every job that is not a two-colour blank or a laminate. `flatness` is the bow
+   * MEASURED on this piece in the jaws (#496), absent until the surface has been measured.
    */
   stock: {
     length: Mm;

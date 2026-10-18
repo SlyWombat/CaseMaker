@@ -40,6 +40,23 @@ function benchJob(): EngraveJob {
   return parsed.job;
 }
 
+/**
+ * The measured pair a job carries after its extents touches (#496). Both spans, per stock axis:
+ * 0.33 mm along the 38.1 mm span (X in the badge's turned frame), 0.1 mm along the 76.2 mm one.
+ */
+const MEASURED = {
+  xMm: 0.33,
+  yMm: 0.1,
+  source: 'measured',
+  touchCount: 5,
+  measuredAt: '2026-10-18T10:00:00.000Z',
+} as const;
+
+/** The job with its surface measured: what the shape model is planned from (#496). */
+function withMeasured(job: EngraveJob, pair: { xMm: number; yMm: number } = MEASURED): EngraveJob {
+  return { ...job, stock: { ...job.stock, flatness: { ...pair, source: 'measured', touchCount: 5, measuredAt: MEASURED.measuredAt } } };
+}
+
 /** A plan, insisting it is not a refusal — the tests below are all about what it plans. */
 function planned(job: EngraveJob): MaterialScanPlan {
   const plan = planMaterialScan(job);
@@ -75,12 +92,12 @@ describe('planMaterialScan — the shipped default blank (#391)', () => {
   // (#208, 2026-10-15: a plain cylinder 2.0 mm across, no ball): the coarse step is 2 mm, so the
   // four touches sit 3.0 / 1.0 inside and 0.7 / 3.0 outside, and the corner sample is the middle of
   // the 0.312 mm band rather than the 0.9 a 3 mm tip's band put it at.
-  const plan = () => planned(defaultEngraveJob());
+  const plan = () => planned(withMeasured(defaultEngraveJob()));
 
-  it('reads its bands from the job: the blank’s dome, and the height it stands proud', () => {
+  it('reads its bands from the job: the measured bow, and the height it stands proud', () => {
     const p = plan();
-    // The job's own figure for the span it names — 0.33 mm of dome (the badge figure, used because
-    // the job states none) plus the dial's 0.05 — and the height it stands proud, less the dial.
+    // The job's own measured figure — 0.33 mm on the X span plus the dial's 0.05 (the larger of
+    // the two drops is the outer bound) — and the height it stands proud, less the dial.
     expect(p.bands.blankMm).toBeCloseTo(0.38, 6);
     expect(p.bands.belowMm).toBeCloseTo(3.95, 6);
     // The reference is the blank's top face, at the middle: the touch everything is read against.
@@ -93,9 +110,9 @@ describe('planMaterialScan — the shipped default blank (#391)', () => {
   // and a plan that judged all four by it would swallow most of a real change at the ends.
   it('judges each edge against the top where THAT edge is, not one figure for the blank', () => {
     const p = plan();
-    // The stated dome is taken across the span it names (the job's X, where the left and right edges
-    // are); the other span carries the badge's measured 0.1 mm. Each edge's band is its own top plus
-    // the same dial, so the SIDES are allowed 0.38 mm and the ENDS 0.15 mm — not 0.38 everywhere.
+    // The measured pair is taken per axis (0.33 mm on X, where the left and right edges are; 0.1 mm
+    // on Y). Each edge's band is its own top plus the same dial, so the SIDES are allowed 0.38 mm
+    // and the ENDS 0.15 mm — not 0.38 everywhere.
     expect(p.edges.map((e) => e.edge)).toEqual(['left', 'right', 'front', 'back']);
     for (const side of ['left', 'right'] as const) {
       expect(edgeOf(p, side).dropMm).toBeCloseTo(0.33, 6);
@@ -258,47 +275,51 @@ describe('planMaterialScan — the shipped default blank (#391)', () => {
     expect(p.notes[0]).toContain('#208 A8');
     expect(p.notes[0]).toContain('0.312 mm the reading stands past the edge');
     expect(p.notes[0]).toContain('a smaller tip is a sharper scan');
-    // The dome's provenance is the second thing it says, because it is the second input.
-    expect(p.notes[1]).toContain('The job states no dome');
+    // The measurement's provenance is the second thing it says, because it is the second input.
+    expect(p.notes[1]).toContain('is the bow the job MEASURED');
+    expect(p.notes[1]).toContain('0.33 mm along X');
   });
 
-  it('judges the reads against the dome the job states, when it states one', () => {
+  it('plans with the dial alone and says "not yet measured" when no surface was measured', () => {
+    // #496 — no badge stand-in, no invented 0: the plan claims no bow at all.
+    const p = planned(defaultEngraveJob());
+    expect(p.bands.blankMm).toBeCloseTo(0.05, 6);
+    expect(edgeOf(p, 'left').dropMm).toBe(0);
+    expect(edgeOf(p, 'front').dropMm).toBe(0);
+    expect(p.notes.join(' ')).toContain('has not measured its surface');
+  });
+
+  it('judges the reads against the pair the job measured, when it has one', () => {
     const job = defaultEngraveJob();
-    const p = planned({
-      ...job,
-      stock: { ...job.stock, flatness: { dome: 0.05, across: 'width', source: 'measured' } },
-    });
-    expect(p.bands.blankMm).toBeCloseTo(0.1, 6);
-    expect(p.notes.join(' ')).toContain('is the dome the job states (measured, across its width)');
+    const p = planned(withMeasured(job, { xMm: 0.05, yMm: 0.1 }));
+    // The plan's own allowed span is the larger measured drop plus the dial: 0.1 (Y) + 0.05.
+    expect(p.bands.blankMm).toBeCloseTo(0.15, 6);
+    expect(p.notes.join(' ')).toContain('is the bow the job MEASURED');
     // A flatter blank moves what each edge is judged against — the left and right edges carry the
-    // stated 0.05, the front and back the badge's 0.1 — and NOT the scan's bias, which is the tip
-    // and the dial alone. The old plan's 0.998 → 0.539 was the dome-as-a-tolerance bug: a dome that
-    // is a shape cannot also be the resolution.
+    // measured 0.05 on X, the front and back the 0.1 on Y — and NOT the scan's bias, which is the
+    // tip and the dial alone. The old plan's 0.998 → 0.539 was the dome-as-a-tolerance bug: a bow
+    // that is a shape cannot also be the resolution.
     expect(edgeOf(p, 'left').bands.blankMm).toBeCloseTo(0.1, 6);
     expect(edgeOf(p, 'front').bands.blankMm).toBeCloseTo(0.15, 6);
     expect(p.resolutionMm).toBeCloseTo(planned(job).resolutionMm, 6);
   });
 
-  // The word `across` names a span in the JOB's frame, and the two are not interchangeable:
-  // `'width'` is the job's X, `'length'` its Y — the convention `badgeBlankFor` follows since #383
-  // (the turn puts the badge's measured 38.1 mm side in X, and it states `'length'` for it).
-  // Getting it backwards would judge every edge against the wrong span's figure.
-  it('takes the stated dome across the span it names, in the JOB’s frame', () => {
-    const job = defaultEngraveJob();
-    const alongY = planned({
-      ...job,
-      stock: { ...job.stock, flatness: { dome: 0.2, across: 'length', source: 'measured' } },
-    });
-    expect(edgeOf(alongY, 'front').bands.blankMm).toBeCloseTo(0.25, 6);
-    expect(edgeOf(alongY, 'back').bands.blankMm).toBeCloseTo(0.25, 6);
-    // The X span now carries the badge's measured across-the-width figure instead.
-    expect(edgeOf(alongY, 'left').bands.blankMm).toBeCloseTo(0.38, 6);
-    expect(edgeOf(alongY, 'right').bands.blankMm).toBeCloseTo(0.38, 6);
+  // The pair is per STOCK AXIS (#496): xMm is the drop along `length` (left/right edges), yMm the
+  // drop across `width` (front/back). The direction words this module used to read were the
+  // opposite of `surfaceSpread`'s, which is why the record carries axes now.
+  it('takes each measured drop on its own axis, not one figure for both', () => {
+    const p = planned(withMeasured(defaultEngraveJob(), { xMm: 0.2, yMm: 0.3 }));
+    expect(edgeOf(p, 'left').bands.blankMm).toBeCloseTo(0.25, 6);
+    expect(edgeOf(p, 'right').bands.blankMm).toBeCloseTo(0.25, 6);
+    expect(edgeOf(p, 'front').bands.blankMm).toBeCloseTo(0.35, 6);
+    expect(edgeOf(p, 'back').bands.blankMm).toBeCloseTo(0.35, 6);
   });
 });
 
 describe('planMaterialScan — the bench’s badge blank (#391)', () => {
-  const plan = () => planned(benchJob());
+  // The committed bench job predates #496 and carries no flatness; the shape tests below plan the
+  // pair the registration step measured on that piece.
+  const plan = () => planned(withMeasured(benchJob()));
 
   it('reads the blank’s own height as the jaw depth, not the default’s 4 mm', () => {
     const p = plan();
@@ -343,7 +364,7 @@ describe('planMaterialScan — the bench’s badge blank (#391)', () => {
     expect(p.notes.join(' ')).toContain('keeps them off the bed');
   });
 
-  it('refuses when the job states no dome and the blank is thin', () => {
+  it('refuses a thin blank, and one whose measured bow is as deep as its proud height', () => {
     const job = benchJob();
     // 0.15 mm proud is inside the dial's own tolerance: nothing tells the blank from the jaw.
     const plan = planMaterialScan({
@@ -351,12 +372,12 @@ describe('planMaterialScan — the bench’s badge blank (#391)', () => {
       workholding: { kind: 'vise', vise: { ...job.workholding.vise, stockProud: 0.05 } },
     });
     expect(plan).toMatchObject({ refuse: true, code: 'not-proud-enough' });
-    // And a dome as deep as the height it stands leaves the same nothing.
-    const domed = planMaterialScan({
-      ...job,
-      stock: { ...job.stock, flatness: { dome: 1.2, across: 'width', source: 'badge' } },
-    });
-    expect(domed).toMatchObject({ refuse: true, code: 'dome-covers-the-jaw' });
+    // And a measured bow as deep as the height it stands leaves the same nothing.
+    const bowed = planMaterialScan(withMeasured(job, { xMm: 1.2, yMm: 1.2 }));
+    expect(bowed).toMatchObject({ refuse: true, code: 'dome-covers-the-jaw' });
+    // Without a measurement there is no bow to reason about, so that refusal waits for one: the
+    // same blank plans with the dial alone (#496).
+    expect('refuse' in planMaterialScan(job)).toBe(false);
   });
 });
 

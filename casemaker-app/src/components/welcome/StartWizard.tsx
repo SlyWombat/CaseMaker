@@ -424,8 +424,8 @@ export function StartWizard(): JSX.Element {
         // A size read off a file is the app's reading of it; a shelf entry or a typed piece is the
         // user's statement. The colour facts are NOT cleared here any more (#492): a shelf
         // laminate's cap is a fact of the chosen piece, and a design file states no print facts at
-        // all rather than erasing the entry's. `flatness` is still cleared — no choice here carries
-        // a direction for its dome.
+        // all rather than erasing the entry's. `flatness` is still cleared — it is the bow measured
+        // on the PREVIOUS piece as clamped and says nothing about this one (#496).
         const colourSource = p.choice.colourSource;
         store.setStock(
           { ...p.choice.stock, flatness: undefined },

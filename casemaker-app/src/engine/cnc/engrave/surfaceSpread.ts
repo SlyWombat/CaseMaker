@@ -154,12 +154,13 @@ export interface SurfaceSpreadAssessment {
   /** `max − min`, mm. */
   spread: Mm;
   /**
-   * The axis the spread runs across (#475): the axis with the larger CENTRE-TO-EXTENT reading
-   * difference. `'length'` is X, `'width'` is Y — the stock's own words in `StockFlatness.across`.
-   * This is what the registration writes into the blank's flatness record, so it is computed from
-   * the readings rather than guessed from the stock's aspect.
+   * The centre-to-edge drop on each stock axis (#496): `xMm` along the stock's `length` (X),
+   * `yMm` across its `width` (Y). These are the pair the registration writes into the job's
+   * `stock.flatness` — computed from the readings rather than guessed from the stock's aspect, and
+   * per axis because the direction words this module used to expose were read in opposite senses
+   * by different consumers (#496).
    */
-  across: 'width' | 'length';
+  drops: { xMm: Mm; yMm: Mm };
   /** The Z0 the job is cut from, and the touch it came from (null for a midpoint). */
   z0: { z: Mm; touchId: string | null; rule: SurfaceReference };
   /**
@@ -366,22 +367,25 @@ function z0Of(touches: readonly SurfaceTouchReading[]): SurfaceSpreadAssessment[
 }
 
 /**
- * The axis the spread runs across, in the stock's words: the axis with the larger centre-to-extent
- * height difference. The first planned touch is the cut area's centre (the plan's own order), so
- * the comparison is against it. A flat top ties at 0 and reads `'length'`; the direction is not
- * consulted by the facing default, which must clear the high point whichever side it is on.
+ * The centre-to-edge drop on each stock axis, mm. The first planned touch is the cut area's centre
+ * (the plan's own order), so the comparison is against it. A flat top ties at 0 on both axes.
+ *
+ * Both figures are kept (#496): the badge blank's measured bow is not symmetric (0.33 mm along one
+ * span, 0.1 mm along the other), and the material scan's face model needs the pair. The executor
+ * writes the pair into `stock.flatness`; the facing default takes the larger of the two, because a
+ * skim must clear the high point whichever side of the blank it is on.
  */
-function acrossOf(touches: readonly SurfaceTouchReading[]): 'width' | 'length' {
+function dropsOf(touches: readonly SurfaceTouchReading[]): { xMm: Mm; yMm: Mm } {
   const centre = touches[0];
-  if (centre === undefined) return 'length';
-  let alongX = 0;
-  let alongY = 0;
+  if (centre === undefined) return { xMm: 0, yMm: 0 };
+  let xMm = 0;
+  let yMm = 0;
   for (const t of touches.slice(1)) {
     const dz = Math.abs(t.z - centre.z);
-    if (Math.abs(t.x - centre.x) > 1e-9) alongX = Math.max(alongX, dz);
-    if (Math.abs(t.y - centre.y) > 1e-9) alongY = Math.max(alongY, dz);
+    if (Math.abs(t.x - centre.x) > 1e-9) xMm = Math.max(xMm, dz);
+    if (Math.abs(t.y - centre.y) > 1e-9) yMm = Math.max(yMm, dz);
   }
-  return alongX >= alongY ? 'length' : 'width';
+  return { xMm: r3(xMm), yMm: r3(yMm) };
 }
 
 /**
@@ -464,7 +468,7 @@ export function assessSurfaceReadings(
     min,
     max,
     spread,
-    across: acrossOf(touches),
+    drops: dropsOf(touches),
     z0: z0Of(touches),
     landing,
     ok,
