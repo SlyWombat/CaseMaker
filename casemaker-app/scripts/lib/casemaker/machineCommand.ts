@@ -7,6 +7,7 @@
  *
  *   Read, unattended:      status · version · hashes · finished
  *   Physical, confirmed:   upload · play            (behind `--confirm <program hash>`)
+ *                          home · probe            (behind the literal word: `--confirm home|probe`)
  *   Never here:            a generate chained into a play; any MCP tool (#481's server has none)
  *
  * The two reads that touch the LAN are the same protocol calls the app's bridge uses — `runStatus`,
@@ -48,6 +49,8 @@ import {
   type MachineUploadResult,
 } from '../../../src/platform/machineUpload';
 import { programHash } from '../../../src/engine/cnc/programHash';
+import { lastPrb } from '../../../src/engine/cnc/registration/readings';
+import { CONSOLE_TIMING } from '../../../src/platform/machineConsole';
 import type { VerifyReport } from '../../../src/engine/cnc/verify';
 import { createNodeTransport } from '../../../tools/z1/transport.node.mjs';
 import { loadLocation, LocationDocumentError, type LoadedLocation } from '../../../src/platform/headless/bootstrap';
@@ -72,7 +75,7 @@ import {
   type PrepareResult,
 } from './verifiedProgram';
 
-const SECTIONS = ['status', 'version', 'hashes', 'finished', 'upload', 'play'] as const;
+const SECTIONS = ['status', 'version', 'hashes', 'finished', 'upload', 'play', 'home', 'probe'] as const;
 type Section = (typeof SECTIONS)[number];
 
 const USAGE =
@@ -85,6 +88,8 @@ const USAGE =
   '              [--dir <card dir>] [--host <ip>] [--port <n>]\n' +
   '       casemaker machine play    <card-path> --confirm <program hash> [--timeout <seconds>]\n' +
   '              [--poll <ms, >= 2000>] [--host <ip>] [--port <n>]\n' +
+  '       casemaker machine home    --confirm home [--timeout <seconds>] [--poll <ms, >= 2000>]\n' +
+  '       casemaker machine probe   --confirm probe [--timeout <seconds>] [--poll <ms, >= 2000>]\n' +
   '\n' +
   'Reads, unattended: status polls `?`, version reads the `version` key from /sd/config.txt,\n' +
   'hashes asks the controller for its own MD5 of files it holds, and finished reads the machine\n' +
@@ -93,8 +98,11 @@ const USAGE =
   'PHYSICAL, and only with the token that names what will move: upload sends the program a job\n' +
   'generates, but only when --confirm names its FNV hash (--dry prints the hash and sends nothing);\n' +
   'play runs a file the CARD ALREADY HOLDS, but only when --confirm names the hash of the bytes the\n' +
-  'card returns. Nothing here switches power (#479: the plug is outside Case Maker), and nothing\n' +
-  'generates and plays in one step.';
+  'card returns; home sends `$H`, and probe sends `M491` (the tool-length probe — fit the wired\n' +
+  'probe first; it does NOT home, run `machine home` for that). Those two have no program to hash,\n' +
+  'so their token is the literal word: `--confirm home` and `--confirm probe`, and nothing else.\n' +
+  'Nothing here switches power (#479: the plug is outside Case Maker), and nothing generates and\n' +
+  'plays in one step.';
 
 /** The connect window: the app's own 3 s connect timeout. */
 const CONNECT_TIMEOUT_MS = 3000;
@@ -226,6 +234,22 @@ function validateArgs(args: Args): void {
     if (args.myMachine !== undefined || args.calibration !== undefined || args.acknowledge !== null) {
       fail('play takes no --my-machine, --calibration or --acknowledge — nothing is generated');
     }
+    return;
+  }
+  if (section === 'home' || section === 'probe') {
+    if (args.paths.length > 0) fail(`${section} takes no arguments, not "${args.paths[0]}"`);
+    // No program is generated, so there is no hash to name. The token is the word itself (#479's
+    // amendment): it says which physical act the caller means, and it cannot be obtained by accident.
+    if (args.confirm !== section) {
+      fail(`${section} has no program to hash — its confirmation token is the literal word: --confirm ${section}`);
+    }
+    if (args.dry) fail(`${section} takes no --dry — the word IS the confirmation; without it nothing is sent`);
+    const refused: string[] = [];
+    if (args.dir !== undefined) refused.push('--dir');
+    if (args.myMachine !== undefined) refused.push('--my-machine');
+    if (args.calibration !== undefined) refused.push('--calibration');
+    if (args.acknowledge !== null) refused.push('--acknowledge');
+    if (refused.length > 0) fail(`${section} takes none of ${refused.join(', ')} — nothing is generated or cleared here`);
     return;
   }
   const used = hasFlags();
@@ -370,7 +394,17 @@ function statusRead(text: string | null, diagnostics: string[] = []): MachineSta
 }
 
 function emptyDetails(section: Section, host: string | null, port: number): MachineDetails {
-  return { section, host, port, status: null, version: null, hashes: [], finished: null, action: null };
+  return {
+    section,
+    host,
+    port,
+    status: null,
+    version: null,
+    hashes: [],
+    finished: null,
+    action: null,
+    probe: null,
+  };
 }
 
 /** What the dependency seam is: the socket layer, and the document reader a spec replaces. */
@@ -472,6 +506,7 @@ async function machineBody(argv: string[], options: CommandOptions, deps: Machin
 
   if (section === 'upload') return uploadBody(args, options, deps, locate);
   if (section === 'play') return playBody(args, options, deps, locate);
+  if (section === 'home' || section === 'probe') return physicalBody(args, options, deps, locate);
 
   if (section === 'finished') {
     const record = recordOf(args, locate);
@@ -916,6 +951,140 @@ async function playBody(
     }
   } finally {
     process.off('SIGINT', onSignal);
+    await deps.transport.tcpClose(conn);
+  }
+}
+
+/** The line each no-program action sends. The section itself is the token (#479's amendment). */
+const PHYSICAL_LINES = { home: '$H', probe: 'M491' } as const;
+
+/**
+ * `machine home` and `machine probe` — the two physical acts with no program to hash.
+ *
+ * Their token is the literal word, and nothing else. `home` sends `$H`; `probe` sends `M491`, the
+ * firmware's tool-length probe (the wired probe must be fitted first — `runRegistration`'s own
+ * operator step), and does NOT home first: a caller who wants both runs both commands, in that
+ * order. Neither line is built from an argument, so there is no path or text to guard.
+ *
+ * Both require the same pre-flight `play` does — an alarm, a non-Idle state or a `P:` below 100
+ * refuses before anything is sent — and both follow the line with `?` at `--poll` until the machine
+ * reports Idle. `$H` and `M491` are macros measured in tens of seconds at the bench (27.5 s and
+ * 31.4 s, 2026-10-15), which is why the send uses the app's typed-line window rather than the
+ * status poll's.
+ */
+async function physicalBody(
+  args: Args,
+  options: CommandOptions,
+  deps: MachineDeps,
+  locate: (path?: string) => LoadedLocation | null,
+): Promise<number> {
+  const out = commandOutput(options);
+  const section = args.section as 'home' | 'probe';
+  const line = PHYSICAL_LINES[section];
+
+  const target = targetOf(args, locate);
+  const details = emptyDetails(section, target.host, target.port);
+  const refusals: ReceiptRefusal[] = [];
+
+  let conn: number;
+  try {
+    conn = await deps.transport.tcpConnect(target.host, target.port, CONNECT_TIMEOUT_MS);
+  } catch (e) {
+    refusals.push({
+      code: 'machine-unreachable',
+      reason: `could not connect to ${target.host}:${target.port}: ${e instanceof Error ? e.message : String(e)}`,
+    });
+    out.emitReceipt(machineReceipt(details, false, refusals));
+    return 1;
+  }
+
+  try {
+    const before = await runStatus(deps.transport, conn);
+    details.status = statusRead(before.text, before.diagnostics);
+    const problem = playProblem(details.status);
+    if (problem !== null) {
+      refusals.push(problem);
+      out.emitReceipt(machineReceipt(details, false, refusals));
+      return 1;
+    }
+
+    const session = openConsole(deps.transport, conn);
+    const sent = await session.send(line, CONSOLE_TIMING);
+    if (!sent.ok) {
+      refusals.push({
+        code: `${section}-refused`,
+        reason:
+          `the controller did not answer \`${line}\` within its window` +
+          (sent.detail === '' ? '' : `: ${sent.detail}`),
+      });
+      out.emitReceipt(machineReceipt(details, false, refusals));
+      return 1;
+    }
+    details.action = {
+      confirm: section,
+      programHash: null,
+      path: null,
+      sent: line,
+      dryRun: false,
+      ackCodes: [],
+      alreadyPresent: false,
+    };
+    if (section === 'probe') details.probe = { line, prb: lastPrb(sent.text), text: sent.text };
+
+    out.progress(`${line} sent — polling \`?\` every ${args.pollMs} ms until the machine is Idle`);
+
+    const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+    const deadline = args.timeoutS === undefined ? null : Date.now() + args.timeoutS * 1000;
+    for (;;) {
+      const readStatus = await runStatus(deps.transport, conn);
+      details.status = statusRead(readStatus.text, readStatus.diagnostics);
+      if (details.status.alarm !== null) {
+        refusals.push({
+          code: 'machine-alarm',
+          reason: `the controller raised \`${details.status.alarm}\` — check the machine`,
+        });
+        out.emitReceipt(machineReceipt(details, false, refusals));
+        return 1;
+      }
+      if (details.status.state !== null && details.status.state.toLowerCase() === 'idle') break;
+      if (deadline !== null && Date.now() > deadline) {
+        refusals.push({
+          code: `${section}-timeout`,
+          reason: `--timeout ${args.timeoutS} s passed before the machine reported Idle`,
+        });
+        out.emitReceipt(machineReceipt(details, false, refusals));
+        return 1;
+      }
+      await sleep(args.pollMs);
+    }
+
+    // The reading is judged only once the machine has settled: a miss usually raises the alarm the
+    // status read above reports first, and this branch catches the case where it did not.
+    if (section === 'probe' && details.probe !== null) {
+      const prb = details.probe.prb;
+      if (prb === null) {
+        refusals.push({
+          code: 'probe-no-reading',
+          reason: `${line} answered no [PRB:…] reading: ${details.probe.text.trim() || '(the reply was empty)'}`,
+        });
+        out.emitReceipt(machineReceipt(details, false, refusals));
+        return 1;
+      }
+      if (!prb.touched) {
+        refusals.push({
+          code: 'probe-missed',
+          reason:
+            `the probe travelled its whole distance and touched nothing (it stopped at x ${prb.x}, y ${prb.y}, z ${prb.z})` +
+            ' — check the probe and the surface before trusting any Z0 from it',
+        });
+        out.emitReceipt(machineReceipt(details, false, refusals));
+        return 1;
+      }
+    }
+
+    out.emitReceipt(machineReceipt(details, true, refusals));
+    return 0;
+  } finally {
     await deps.transport.tcpClose(conn);
   }
 }

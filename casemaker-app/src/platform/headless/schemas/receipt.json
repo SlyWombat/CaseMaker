@@ -2235,7 +2235,7 @@
                   "type": "null"
                 }
               ],
-              "description": "The guarded action (upload/play), or null for a read."
+              "description": "The guarded action (upload/play/home/probe), or null for a read."
             },
             "finished": {
               "anyOf": [
@@ -2325,6 +2325,68 @@
               "minimum": 0,
               "type": "integer"
             },
+            "probe": {
+              "anyOf": [
+                {
+                  "properties": {
+                    "line": {
+                      "description": "The line sent to run the tool-length probe (`M491` on a Z1).",
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "prb": {
+                      "anyOf": [
+                        {
+                          "properties": {
+                            "touched": {
+                              "description": "Whether the probe touched (`:1`) or travelled its whole distance and hit nothing (`:0`).",
+                              "type": "boolean"
+                            },
+                            "x": {
+                              "description": "The trigger’s machine X, mm.",
+                              "type": "number"
+                            },
+                            "y": {
+                              "description": "The trigger’s machine Y, mm.",
+                              "type": "number"
+                            },
+                            "z": {
+                              "description": "The trigger’s machine Z, mm.",
+                              "type": "number"
+                            }
+                          },
+                          "required": [
+                            "x",
+                            "y",
+                            "z",
+                            "touched"
+                          ],
+                          "type": "object"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The last `[PRB:…]` the controller answered, or null when the reply carried none."
+                    },
+                    "text": {
+                      "description": "The controller’s reply to the probe line, verbatim.",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "line",
+                    "prb",
+                    "text"
+                  ],
+                  "type": "object"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The tool-length probe’s reading, or null for another section."
+            },
             "section": {
               "description": "Which machine command ran.",
               "enum": [
@@ -2333,7 +2395,9 @@
                 "hashes",
                 "finished",
                 "upload",
-                "play"
+                "play",
+                "home",
+                "probe"
               ],
               "type": "string"
             },
@@ -2452,7 +2516,8 @@
             "version",
             "hashes",
             "finished",
-            "action"
+            "action",
+            "probe"
           ],
           "type": "object"
         },

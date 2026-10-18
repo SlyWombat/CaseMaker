@@ -355,6 +355,7 @@ describe('#478 the human output is rendered from the receipt', () => {
         hashes: [],
         finished: null,
         action: null,
+        probe: null,
       },
     }).join('\n');
     expect(text).toContain('machine status  ok=true');
@@ -389,6 +390,7 @@ describe('#478 the human output is rendered from the receipt', () => {
           ackCodes: ['vise-default'],
           alreadyPresent: false,
         },
+        probe: null,
       },
     }).join('\n');
     expect(action).toContain('  confirm    3fa2b1c9');
@@ -423,10 +425,50 @@ describe('#478 the human output is rendered from the receipt', () => {
           ackCodes: [],
           alreadyPresent: false,
         },
+        probe: null,
       },
     }).join('\n');
     expect(dry).toContain('  confirm    (none — --dry)');
     expect(dry).toContain('  next       re-run with --confirm 3fa2b1c9 to send it');
+
+    const probe = renderReceipt({
+      version: RECEIPT_VERSION,
+      command: 'machine',
+      ok: true,
+      stage: 'probe',
+      gate: null,
+      inputs: [],
+      outputs: [],
+      diagnostics: [],
+      provenance: [],
+      refusals: [],
+      details: {
+        section: 'probe',
+        host: '192.0.2.10',
+        port: 2222,
+        status: null,
+        version: null,
+        hashes: [],
+        finished: null,
+        action: {
+          confirm: 'probe',
+          programHash: null,
+          path: null,
+          sent: 'M491',
+          dryRun: false,
+          ackCodes: [],
+          alreadyPresent: false,
+        },
+        probe: {
+          line: 'M491',
+          prb: { x: -11.6, y: -14.6, z: -118.4, touched: true },
+          text: '[PRB:-11.600,-14.600,-118.400:1]\nok',
+        },
+      },
+    }).join('\n');
+    expect(probe).toContain('  confirm    probe');
+    expect(probe).toContain('  sent       M491');
+    expect(probe).toContain('  probe      x -11.6, y -14.6, z -118.4 — touched');
   });
 
   it('renders a location section from its records, and the no-document case', () => {

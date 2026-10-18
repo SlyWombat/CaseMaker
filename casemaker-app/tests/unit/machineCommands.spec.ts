@@ -767,3 +767,140 @@ describe('#477 machine — flags belong to the command that reads them', () => {
     expect(neither.stderr.join('\n')).toContain('upload needs exactly one of --confirm <program hash> or --dry');
   });
 });
+
+// ---------------------------------------------------------------------------------------------
+// home and probe — the physical acts with no program to hash (#479's amendment)
+// ---------------------------------------------------------------------------------------------
+
+const IDLE_ZERO = '<Idle|MPos:0,0,0|P:0,0,0>';
+
+function homeTransport(): FakeTransport {
+  const transport = new FakeTransport();
+  transport.on('?', encodeFrame(0x81, utf8(OK_STATUS))); // pre-flight: Idle, not alarmed
+  transport.on('$H', encodeFrame(0x81, utf8('ok')));
+  transport.on('?', encodeFrame(0x81, utf8(IDLE_ZERO))); // served: Idle again
+  return transport;
+}
+
+describe('#477 machine home — `$H`, behind the literal word', () => {
+  it('homes the machine and reports the line it sent, polling until Idle', async () => {
+    const transport = homeTransport();
+    const { code, stdout } = await run(['home', '--confirm', 'home'], transport, location(), HUMAN, {
+      sleep: async () => undefined,
+    });
+
+    expect(code).toBe(0);
+    expect(transport.lines()).toEqual(['?', '$H', '?']);
+    const text = stdout.join('\n');
+    expect(text).toContain('machine home  ok=true');
+    expect(text).toContain('  confirm    home');
+    expect(text).toContain('  sent       $H');
+    expect(text).toContain('  state      Idle');
+  });
+
+  it('refuses any token other than the literal word, before any socket', async () => {
+    const transport = new FakeTransport();
+    const { code, stderr } = await run(['home', '--confirm', 'abc'], transport, location());
+    expect(code).toBe(2);
+    expect(stderr.join('\n')).toContain('its confirmation token is the literal word: --confirm home');
+    expect(transport.connects).toBe(0);
+
+    const missing = await run(['home'], new FakeTransport(), location());
+    expect(missing.code).toBe(2);
+    expect(missing.stderr.join('\n')).toContain('--confirm home');
+  });
+
+  it('refuses --dry: the word is the confirmation', async () => {
+    const { code, stderr } = await run(['home', '--confirm', 'home', '--dry'], new FakeTransport(), location());
+    expect(code).toBe(2);
+    expect(stderr.join('\n')).toContain('home takes no --dry');
+  });
+
+  it('will not home a machine that is not Idle, and sends nothing', async () => {
+    const transport = new FakeTransport();
+    transport.on('?', encodeFrame(0x81, utf8('<Run|MPos:1,2,3|P:5,10,4>')));
+    const { code, stdout } = await run(['home', '--confirm', 'home'], transport, location());
+    expect(code).toBe(1);
+    expect(transport.lines()).toEqual(['?']);
+    expect(stdout.join('\n')).toContain('  !! it reports Run rather than Idle — nothing was sent');
+  });
+
+  it('will not home a machine in an alarm', async () => {
+    const transport = new FakeTransport();
+    transport.on('?', encodeFrame(0x81, utf8('<Alarm|MPos:0,0,0>')));
+    const { code, stdout } = await run(['home', '--confirm', 'home'], transport, location());
+    expect(code).toBe(1);
+    expect(transport.lines()).toEqual(['?']);
+    expect(stdout.join('\n')).toContain('the controller is in an alarm');
+  });
+});
+
+describe('#477 machine probe — `M491`, behind the literal word', () => {
+  function probeTransport(reply: string, after = IDLE_ZERO): FakeTransport {
+    const transport = new FakeTransport();
+    transport.on('?', encodeFrame(0x81, utf8(OK_STATUS)));
+    transport.on('M491', encodeFrame(0x81, utf8(reply)));
+    transport.on('?', encodeFrame(0x81, utf8(after)));
+    return transport;
+  }
+
+  it('runs the tool-length probe and carries the slow PRB reading in the receipt', async () => {
+    const transport = probeTransport(
+      '[PRB:-11.600,-14.600,-118.400:1]\n[PRB:-11.600,-14.600,-118.350:1]\nok',
+    );
+    const receipt = await receiptOf(['probe', '--confirm', 'probe'], transport, location(), {
+      sleep: async () => undefined,
+    });
+
+    if (receipt.command !== 'machine') throw new Error('expected a machine receipt');
+    expect(receipt.ok).toBe(true);
+    expect(receipt.stage).toBe('probe');
+    expect(receipt.details.action).toEqual({
+      confirm: 'probe',
+      programHash: null,
+      path: null,
+      sent: 'M491',
+      dryRun: false,
+      ackCodes: [],
+      alreadyPresent: false,
+    });
+    // The SECOND [PRB:…] is the slow re-probe — the reading, per readings.ts.
+    expect(receipt.details.probe?.prb).toEqual({ x: -11.6, y: -14.6, z: -118.35, touched: true });
+    expect(transport.lines()).toEqual(['?', 'M491', '?']);
+  });
+
+  it('renders the reading for an operator', async () => {
+    const transport = probeTransport('[PRB:-11.600,-14.600,-118.350:1]\nok');
+    const { code, stdout } = await run(['probe', '--confirm', 'probe'], transport, location(), HUMAN, {
+      sleep: async () => undefined,
+    });
+    expect(code).toBe(0);
+    expect(stdout.join('\n')).toContain('  probe      x -11.6, y -14.6, z -118.35 — touched');
+  });
+
+  it('reports a miss as a refusal, after the machine settles into its alarm', async () => {
+    const transport = probeTransport(
+      '[PRB:-193.400,-140.000,-63.000:0]\nALARM: Probe fail\nok',
+      '<Alarm|MPos:0,0,0>',
+    );
+    const { code, stdout } = await run(['probe', '--confirm', 'probe'], transport, location());
+    expect(code).toBe(1);
+    expect(transport.lines()).toEqual(['?', 'M491', '?']);
+    expect(stdout.join('\n')).toContain('the controller raised');
+  });
+
+  it('refuses a reply that carried no [PRB:…] reading', async () => {
+    const transport = probeTransport('ok');
+    const { code, stdout } = await run(['probe', '--confirm', 'probe'], transport, location());
+    expect(code).toBe(1);
+    expect(stdout.join('\n')).toContain('M491 answered no [PRB:…] reading');
+  });
+
+  it('needs the literal word, not a program hash', async () => {
+    const transport = new FakeTransport();
+    const { code, stderr } = await run(['probe', '--confirm', '3fa2b1c9'], transport, location());
+    expect(code).toBe(2);
+    expect(stderr.join('\n')).toContain('probe has no program to hash — its confirmation token is the literal word: --confirm probe');
+    expect(transport.connects).toBe(0);
+  });
+});

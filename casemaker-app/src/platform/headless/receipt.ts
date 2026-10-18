@@ -335,7 +335,16 @@ export const mcpDetailsSchema = z
  * `--confirm <program hash>` (#479's confirmed line). Power is not here at all: the plug is this
  * bench's fixture, not a product assumption.
  */
-export const RECEIPT_MACHINE_SECTIONS = ['status', 'version', 'hashes', 'finished', 'upload', 'play'] as const;
+export const RECEIPT_MACHINE_SECTIONS = [
+  'status',
+  'version',
+  'hashes',
+  'finished',
+  'upload',
+  'play',
+  'home',
+  'probe',
+] as const;
 export type ReceiptMachineSection = (typeof RECEIPT_MACHINE_SECTIONS)[number];
 
 /** What a `?` status line says, in the protocol's own terms (`readJobProgress`, `alarmLine`). */
@@ -396,7 +405,25 @@ export const machineDetailsSchema = z
           .describe('Whether the machine declined the transfer because it already held identical bytes.'),
       })
       .nullable()
-      .describe('The guarded action (upload/play), or null for a read.'),
+      .describe('The guarded action (upload/play/home/probe), or null for a read.'),
+    probe: z
+      .object({
+        line: z.string().min(1).describe('The line sent to run the tool-length probe (`M491` on a Z1).'),
+        prb: z
+          .object({
+            x: z.number().describe('The trigger’s machine X, mm.'),
+            y: z.number().describe('The trigger’s machine Y, mm.'),
+            z: z.number().describe('The trigger’s machine Z, mm.'),
+            touched: z
+              .boolean()
+              .describe('Whether the probe touched (`:1`) or travelled its whole distance and hit nothing (`:0`).'),
+          })
+          .nullable()
+          .describe('The last `[PRB:…]` the controller answered, or null when the reply carried none.'),
+        text: z.string().describe('The controller’s reply to the probe line, verbatim.'),
+      })
+      .nullable()
+      .describe('The tool-length probe’s reading, or null for another section.'),
   })
   .describe('The machine command’s own details.');
 
@@ -836,6 +863,18 @@ function machineLines(receipt: Extract<Receipt, { command: 'machine' }>): string
       }
     } else if (action.sent !== null) lines.push(`  sent       ${action.sent}`);
     if (action.alreadyPresent) lines.push('  note       the card already held identical bytes — nothing was rewritten');
+  }
+
+  if (details.probe !== null) {
+    const probe = details.probe;
+    lines.push(
+      `  probe      ${
+        probe.prb === null
+          ? 'the reply carried no [PRB:…] reading'
+          : `x ${probe.prb.x}, y ${probe.prb.y}, z ${probe.prb.z} — ` +
+            (probe.prb.touched ? 'touched' : 'NO touch (it travelled its whole distance)')
+      }`,
+    );
   }
 
   for (const refusal of receipt.refusals) lines.push(`  !! ${refusal.reason}`);
