@@ -35,9 +35,6 @@
 import { writeFileSync, mkdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createRequire } from 'node:module';
-
-import ManifoldModule from 'manifold-3d';
 
 import { engraveGenerate } from '@/workers/sim/engraveGenerate';
 import { createSimSession } from '@/workers/sim/session';
@@ -61,6 +58,7 @@ import { stockDepthLimit, verifyProgram } from '@/engine/cnc/verify';
 import { simErrors, simulationProblem } from '@/engine/cnc/simGate';
 import type { CouponSpec } from '@/engine/cnc/engrave/couponJob';
 import type { EngraveJob, EngraveRectShape } from '@/types/engraveJob';
+import { bootstrap } from '@/platform/headless/bootstrap';
 import { version as CAM_VERSION } from '../package.json';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -69,10 +67,7 @@ const appRoot = join(here, '..');
 const outDir = join(repoRoot, 'docs', 'bench');
 mkdirSync(outDir, { recursive: true });
 
-const require = createRequire(import.meta.url);
-const wasmPath = require.resolve('manifold-3d/manifold.wasm');
-const tl = await ManifoldModule({ locateFile: () => wasmPath });
-tl.setup();
+const { manifold: tl } = await bootstrap();
 
 const fmt = (n: number): string => String(Number(n.toFixed(3)));
 

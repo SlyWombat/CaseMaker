@@ -3,9 +3,8 @@
 import { writeFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createRequire } from 'node:module';
-import ManifoldModule from 'manifold-3d';
 import { compileProject } from '../src/engine/compiler/ProjectCompiler';
+import { bootstrap } from '../src/platform/headless/bootstrap';
 import { executeOpSync } from '../src/workers/geometry/evaluateOp';
 import { buildAsciiStl } from '../src/workers/export/stlAscii';
 import { findTemplate } from '../src/library/templates';
@@ -13,9 +12,7 @@ import type { Project } from '../src/types';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const samples = join(here, '..', '..', 'samples');
-const require = createRequire(import.meta.url);
-const tl = await ManifoldModule({ locateFile: () => require.resolve('manifold-3d/manifold.wasm') });
-tl.setup();
+const { manifold: tl } = await bootstrap();
 
 const tpl = findTemplate('mini-rack-10in')!;
 const proj = tpl.build() as Project;

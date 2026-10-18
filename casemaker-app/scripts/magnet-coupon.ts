@@ -26,9 +26,8 @@
 import { writeFileSync, mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createRequire } from 'node:module';
-import ManifoldModule from 'manifold-3d';
 
+import { bootstrap } from '../src/platform/headless/bootstrap';
 import { MAGNETS, type MagnetSize } from '../src/engine/compiler/fasteners';
 import {
   buildMagnetCoupon,
@@ -47,9 +46,7 @@ const outDir = process.env.COUPON_OUT
   ? join(process.env.COUPON_OUT)
   : join(here, '..', '..', 'samples');
 mkdirSync(outDir, { recursive: true });
-const require = createRequire(import.meta.url);
-const tl = await ManifoldModule({ locateFile: () => require.resolve('manifold-3d/manifold.wasm') });
-tl.setup();
+const { manifold: tl } = await bootstrap();
 
 const ALL: MagnetSize[] = ['6x2', '8x3', '10x2'];
 const arg = process.argv[2];

@@ -48,7 +48,8 @@
 // that has never been opened by a #412 build is exactly what it always was. Absent files are not an
 // error — the built-in tier is what a headless run falls back to, the way the app itself does with
 // no house service. `--location <file>` names one instead; the document's own `kind` says which of
-// the two it is.
+// the two it is. The reading — with the wasm module and the bundled fonts — is the shared headless
+// bootstrap (#476), so the CLI and the MCP server start the same way this script does.
 //
 // For each program it writes, into `--out` (default: the document's own directory, or the working
 // directory for `--from-3mf`, which has no document to sit beside):
@@ -64,11 +65,8 @@
 // NOTHING here measures anything. It emits INPUTS and the machine's receipt; the operator records
 // the verdicts in the coupon record, and the readback applies them to the table.
 
-import { writeFileSync, mkdirSync, readFileSync, existsSync } from 'node:fs';
+import { writeFileSync, mkdirSync, readFileSync } from 'node:fs';
 import { dirname, join, basename, isAbsolute } from 'node:path';
-import { createRequire } from 'node:module';
-
-import ManifoldModule from 'manifold-3d';
 
 import { engraveGenerate, type EngraveGenerated } from '../src/workers/sim/engraveGenerate';
 import { createSimSession, type SimDiagnostic, type SimLoadOk, type SimSession } from '../src/workers/sim/session';
@@ -96,9 +94,7 @@ import {
 import { parseEngraveJob } from '../src/store/engraveJobSchema';
 import { simErrors, simulationProblem } from '../src/engine/cnc/simGate';
 import { buildCouponPrograms, type CouponRecord, type CouponRecordRow, type CouponSpec } from '../src/engine/cnc/engrave/couponJob';
-import { BUNDLED_FONT_KEYS, registerBundledFontBytes } from '../src/engine/fonts/registry';
-import { ToolLibrarySchema, type ToolLibraryEntry } from '../src/engine/cnc/toolLibrary';
-import { entryFor, getTools, setInventoryEntries, setRegistry } from '../src/engine/cnc/toolRegistry';
+import { entryFor, getTools } from '../src/engine/cnc/toolRegistry';
 import {
   finerThan,
   reachabilityFor,
@@ -117,10 +113,8 @@ import { jobMachine } from '../src/engine/cnc/calibration';
 import { executeProfile } from '../src/workers/geometry/evaluateOp';
 import { engravePreviewSvg } from './lib/engravePreviewSvg';
 import { svgToPng } from './lib/svgToPng';
-import { InventorySchema, type InventoryItem } from '../src/platform/houseClient';
-import { checkLocationImport } from '../src/platform/locationClient';
-import { KNOWN_DEFAULTS, readDefault, type ShopDefaults } from '../src/platform/defaultsClient';
-import { inventoryEntryFor } from '../src/store/toolRegistryStore';
+import { KNOWN_DEFAULTS, readDefault } from '../src/platform/defaultsClient';
+import { bootstrap } from '../src/platform/headless/bootstrap';
 import { defaultEngraveJob } from '../src/engine/cnc/engrave/defaults';
 import { viseForNewJob } from '../src/engine/cnc/fixture';
 import { designJobFor, type DesignReadingDirection } from '../src/engine/cnc/engrave/fromDesign';
@@ -130,120 +124,9 @@ import type { EngraveJob } from '../src/types/engraveJob';
 import { toPartPlan } from '../src/engine/cnc/engrave/partPlan';
 import { renderRunSheetMarkdown } from './runSheetMarkdown';
 
-const require = createRequire(import.meta.url);
-const tl = await ManifoldModule({ locateFile: () => require.resolve('manifold-3d/manifold.wasm') });
-tl.setup();
-
-// Text labels need parsed fonts, and the app loads them by `fetch`ing a static asset — which
-// node's fetch cannot do for a `file:` URL. Seed the registry straight off disk, exactly the way
-// the vitest setup file (`tests/setup/fonts.ts`) does, so a job with text labels engraves here too.
-for (const key of BUNDLED_FONT_KEYS) {
-  const bytes = readFileSync(new URL(`../src/engine/fonts/files/${key}.ttf`, import.meta.url));
-  registerBundledFontBytes(key, bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength));
-}
-
-// ---------------------------------------------------------------------------------------------
-// The house: the machine's own cutters, read off disk
-// ---------------------------------------------------------------------------------------------
-
-/**
- * The shop's tunable defaults, as the document holds them (#416/#417), or null when this run has no
- * document to read them from — a house file from before the section existed, or no file at all. Null
- * is not "no values": it is what {@link readDefault} answers a labelled `fallback` for, which is the
- * same thing the app itself does with no house service. Set by {@link loadDocs}; read below.
- */
-let shopDefaults: ShopDefaults | null = null;
-
-/**
- * Where the desktop app keeps the machine's own documents — `dirs::data_dir()/casemaker/` on the
- * Rust side, spelled here for the same two platforms: `%APPDATA%` on Windows, `$XDG_DATA_HOME` (or
- * `~/.local/share`) elsewhere. Deliberately the SAME path, so a headless run and the app see one
- * set of cutters; there is no second copy to drift.
- *
- * Two names, tried in order, because #412 moved the user's document from the second to the first
- * (`location.rs`): on a machine the location migration has run on, both files are on disk and only
- * `location.json` is still being edited, so reading the older one would resolve the job against a
- * frozen copy of the cutter list. On a machine it has not run on, `location.json` does not exist and
- * `house.json` is still the truth.
- */
-function defaultDocPaths(): string[] {
-  const base =
-    process.platform === 'win32'
-      ? process.env.APPDATA
-      : (process.env.XDG_DATA_HOME ?? (process.env.HOME ? join(process.env.HOME, '.local', 'share') : undefined));
-  if (!base) return [];
-  const dir = join(base, 'casemaker');
-  return [join(dir, 'location.json'), join(dir, 'house.json')];
-}
-
-/**
- * Load the machine's own documents into the tool registry, so `inv:…` keys resolve. The first path
- * that exists wins; nothing existing is not an error (see below).
- *
- * An absent or unreadable file is NOT a failure: a headless run with no document is exactly the app
- * with no house service, and the built-in tier is what both fall back to (#305). A file that is
- * present but does not match the schema IS a failure — reading half of it would put a cutter in the
- * registry that the app itself would refuse, which is worse than having none.
- *
- * A LOCATION is checked by `checkLocationImport`, the very function the panel holds an imported file
- * to (#412): one rule for the document, so a `location.json` this script reads is one the app would
- * have accepted — machine records included, which is the point of checking the whole document rather
- * than the two tiers this run actually wants. Anything of another kind is read as the house, with
- * the same two zod schemas `houseClient` uses on the HTTP path.
- */
-function loadDocs(paths: readonly string[]): void {
-  const path = paths.find((p) => existsSync(p));
-  if (path === undefined) return; // no documents on this machine — the built-ins carry the run
-  let raw: string;
-  try {
-    raw = readFileSync(path, 'utf8');
-  } catch {
-    return;
-  }
-
-  let tools: ToolLibraryEntry[];
-  let inventory: InventoryItem[];
-  let what: string;
-  const location = checkLocationImport(raw);
-  if (location.kind === 'refused') return fail(`${path}: ${location.reason}`);
-  if (location.kind === 'location') {
-    tools = location.doc.tools;
-    inventory = location.doc.inventory;
-    // #436 — the shop's own rest-machining numbers live here, not in the source. A document that
-    // predates the section reads as `{}`, which `readDefault` answers with the labelled fallback.
-    shopDefaults = location.doc.defaults;
-    what = `location "${location.doc.name}"`;
-  } else {
-    let json: unknown;
-    try {
-      json = JSON.parse(raw);
-    } catch (e) {
-      return fail(`${path} is not JSON: ${(e as Error).message}`);
-    }
-    const doc = json as { tools?: unknown; inventory?: unknown };
-    const parsedTools = ToolLibrarySchema.safeParse(doc.tools ?? []);
-    if (!parsedTools.success) return fail(`${path}: "tools" is not a tool list:\n  ${parsedTools.error.message}`);
-    const parsedInventory = InventorySchema.safeParse(doc.inventory ?? []);
-    if (!parsedInventory.success) return fail(`${path}: "inventory" is not an inventory:\n  ${parsedInventory.error.message}`);
-    tools = parsedTools.data;
-    inventory = parsedInventory.data;
-    what = 'house';
-  }
-  setRegistry(tools);
-  setInventoryEntries(inventory.map(inventoryEntryFor));
-  console.log(
-    `${what}: ${path} — ${tools.length} tool${tools.length === 1 ? '' : 's'} from the user's own ` +
-      `list, ${inventory.length} owned cutter${inventory.length === 1 ? '' : 's'}`,
-  );
-  // #436 — say which rest-machining numbers this run is about to use, and where each came from, so a
-  // sheet that reads oddly can be traced back to the document (or to the absence of one) before the
-  // program is run. Silent about a key the document simply has not set: `readDefault` falls back and
-  // the seam sentence says so where it matters.
-  for (const key of [REST_OVERLAP_KEY, REST_THIRD_TOOL_KEY]) {
-    const d = shopDefaults?.[key];
-    if (d !== undefined) console.log(`  default ${key} = ${String(d.value)}${d.unit ?? ''} (${d.source})`);
-  }
-}
+// The wasm module, the bundled fonts and the machine's own document are the shared headless
+// bootstrap (#476). It runs once the arguments are parsed, below — before ANY job resolves a
+// cutter, since `jobTool` reads the registry.
 
 // ---------------------------------------------------------------------------------------------
 // Args
@@ -332,8 +215,33 @@ if (!args.from3mf && (args.turn || args.tool || args.rest || args.overlap !== un
 }
 
 // Before ANY job resolves a cutter: `jobTool` reads the registry, so the machine's own documents
-// have to be in it first.
-loadDocs(args.location === undefined ? defaultDocPaths() : [args.location]);
+// have to be in it first. The bootstrap reads the document the args named (`--location`) or the
+// machine's own, and validates it exactly as the app's import panel does (#412).
+const boot = await bootstrap({ location: args.location }).catch((e: Error) => fail(e.message));
+const tl = boot.manifold;
+/**
+ * The shop's tunable defaults, as the document holds them (#416/#417), or null when this run has no
+ * document to read them from — a house file from before the section existed, or no file at all. Null
+ * is not "no values": it is what {@link readDefault} answers a labelled `fallback` for, which is the
+ * same thing the app itself does with no house service.
+ */
+const shopDefaults = boot.location?.defaults ?? null;
+if (boot.location !== null) {
+  const where = boot.location;
+  const what = where.kind === 'location' ? `location "${where.name}"` : 'house';
+  console.log(
+    `${what}: ${where.path} — ${where.tools.length} tool${where.tools.length === 1 ? '' : 's'} ` +
+      `from the user's own list, ${where.inventory.length} owned cutter${where.inventory.length === 1 ? '' : 's'}`,
+  );
+  // #436 — say which rest-machining numbers this run is about to use, and where each came from, so a
+  // sheet that reads oddly can be traced back to the document (or to the absence of one) before the
+  // program is run. Silent about a key the document simply has not set: `readDefault` falls back and
+  // the seam sentence says so where it matters.
+  for (const key of [REST_OVERLAP_KEY, REST_THIRD_TOOL_KEY]) {
+    const d = shopDefaults?.[key];
+    if (d !== undefined) console.log(`  default ${key} = ${String(d.value)}${d.unit ?? ''} (${d.source})`);
+  }
+}
 
 const readJson = (path: string): unknown => {
   try {

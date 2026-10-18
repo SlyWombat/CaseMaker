@@ -27,9 +27,8 @@
 import { writeFileSync, mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createRequire } from 'node:module';
-import ManifoldModule from 'manifold-3d';
 
+import { bootstrap } from '../src/platform/headless/bootstrap';
 import { cube, difference, union, type BuildOp } from '../src/engine/compiler/buildPlan';
 import {
   FASTENERS,
@@ -45,9 +44,7 @@ import { engrave } from './coupon-glyphs';
 const here = dirname(fileURLToPath(import.meta.url));
 const samplesDir = join(here, '..', '..', 'samples');
 mkdirSync(samplesDir, { recursive: true });
-const require = createRequire(import.meta.url);
-const tl = await ManifoldModule({ locateFile: () => require.resolve('manifold-3d/manifold.wasm') });
-tl.setup();
+const { manifold: tl } = await bootstrap();
 
 const arg = (process.argv[2] ?? 'M5').toUpperCase();
 const SIZE = (Object.keys(FASTENERS) as FastenerSize[]).find((s) => s.toUpperCase() === arg);

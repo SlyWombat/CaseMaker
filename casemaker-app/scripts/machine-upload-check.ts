@@ -42,11 +42,9 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createRequire } from 'node:module';
-
-import ManifoldModule from 'manifold-3d';
 
 import { asVerifiedProgram, uploadVerifiedProgram } from '../src/platform/desktop/machineBridge.ts';
+import { bootstrap } from '../src/platform/headless/bootstrap';
 import { GCODE_DIR, md5Hex } from '../src/platform/desktop/protocol.ts';
 import { createNodeTransport } from '../tools/z1/transport.node.mjs';
 import { engraveGenerate } from '../src/workers/sim/engraveGenerate';
@@ -62,7 +60,6 @@ import { parseEngraveJob } from '../src/store/engraveJobSchema';
 import { parseMyMachineFile } from '../src/store/myMachineFile';
 import { requiredAckCodes, uploadBlocker, type EngraveRunView } from '../src/store/engraveRunGate';
 import type { SimStatus } from '../src/store/simStore';
-import { BUNDLED_FONT_KEYS, registerBundledFontBytes } from '../src/engine/fonts/registry';
 
 const [jobPath, host] = process.argv.slice(2);
 if (!jobPath || !host) {
@@ -70,17 +67,9 @@ if (!jobPath || !host) {
   process.exit(2);
 }
 
-const require = createRequire(import.meta.url);
-const tl = await ManifoldModule({ locateFile: () => require.resolve('manifold-3d/manifold.wasm') });
-tl.setup();
-
-// Text labels need parsed fonts, and the app loads them by `fetch`ing a static asset, which node's
-// fetch cannot do for a `file:` URL. Same seeding `scripts/engrave-job.ts` and `tests/setup/fonts.ts`
-// use, so a job with text engraves here too.
-for (const key of BUNDLED_FONT_KEYS) {
-  const bytes = readFileSync(new URL(`../src/engine/fonts/files/${key}.ttf`, import.meta.url));
-  registerBundledFontBytes(key, bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength));
-}
+// The wasm module, the bundled fonts (a job with text engraves here too) and the machine's own
+// document come from the shared headless bootstrap (#476).
+const { manifold: tl } = await bootstrap();
 
 const parsed = parseEngraveJob(JSON.parse(readFileSync(jobPath, 'utf8')));
 if (!parsed.ok) {

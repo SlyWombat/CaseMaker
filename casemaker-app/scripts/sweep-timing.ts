@@ -153,12 +153,10 @@ async function runChild(args: Args): Promise<void> {
   const t0 = performance.now();
   const path = resolveCorpusPath(args.file);
 
-  // Loaded lazily so the parent (which never loads wasm) also imports this file cheaply.
-  const ManifoldModule = (await import('manifold-3d')).default;
-  const require = createRequire(import.meta.url);
-  const wasmPath = require.resolve('manifold-3d/manifold.wasm');
-  const tl = await ManifoldModule({ locateFile: () => wasmPath });
-  tl.setup();
+  // Loaded lazily so the parent (which never loads wasm) also imports this file cheaply: the
+  // bootstrap module itself is pulled in here, not at the top (#476).
+  const { bootstrap } = await import('../src/platform/headless/bootstrap');
+  const { manifold: tl } = await bootstrap();
 
   const { parseGcode, buildTimeline, stubSetup, MACHINES } = await import('@/engine/cnc');
   const machine = args.machine === 'none' ? undefined : MACHINES[args.machine];

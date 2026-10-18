@@ -31,11 +31,9 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createRequire } from 'node:module';
 
-import ManifoldModule from 'manifold-3d';
-
-import { BUNDLED_FONTS, registerBundledFontBytes } from '@/engine/fonts/registry';
+import { BUNDLED_FONTS } from '@/engine/fonts/registry';
+import { bootstrap } from '@/platform/headless/bootstrap';
 import { BUNDLED_FONT_URLS } from '@/engine/fonts/fontAssets';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { labelProfile, toPartPlan } from '@/engine/cnc/engrave/partPlan';
@@ -54,26 +52,23 @@ const repoRoot = join(here, '..', '..');
 const outDir = join(repoRoot, 'docs', 'bench');
 mkdirSync(outDir, { recursive: true });
 
-const require = createRequire(import.meta.url);
-const wasmPath = require.resolve('manifold-3d/manifold.wasm');
-const tl = await ManifoldModule({ locateFile: () => wasmPath });
-tl.setup();
+// The wasm module and the parsed-font cache come from the shared headless bootstrap (#476): the
+// registry loads the six bundled TTFs with `fetch(url)`, which Node refuses for a `file:` URL, so
+// the bootstrap reads the same bytes through `registerBundledFontBytes` — the seam
+// `tests/setup/fonts.ts` uses. (This report reads no location of its own; the bootstrap's reading
+// of the machine's document changes nothing it measures.)
+const { manifold: tl } = await bootstrap();
 
 // ---------------------------------------------------------------------------------------------
-// Fonts, without the browser's fetch
+// Font hashes, for the report's pin
 // ---------------------------------------------------------------------------------------------
-// The registry loads the six bundled TTFs with `fetch(url)` against `new URL('./files/…',
-// import.meta.url)`. Under tsx those hrefs are `file:` URLs, and Node 24's fetch refuses them
-// ("not implemented… yet…"), so use the module's own Node seam instead —
-// `registerBundledFontBytes`, the one `tests/setup/fonts.ts` uses. Same bytes, same parse.
 
 const fontHashes = new Map<string, string>();
-for (const [key, url] of Object.entries(BUNDLED_FONT_URLS)) {
+for (const url of Object.values(BUNDLED_FONT_URLS)) {
   const bytes = readFileSync(fileURLToPath(url));
   // The numbers below are these exact bytes (#185 review: "pin the font files' hashes"), so a
   // font update that moves an outline shows up as a hash change next to a changed table.
   fontHashes.set(basename(fileURLToPath(url)), createHash('sha256').update(bytes).digest('hex').slice(0, 12));
-  registerBundledFontBytes(key, bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer);
 }
 
 // ---------------------------------------------------------------------------------------------
