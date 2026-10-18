@@ -35,6 +35,14 @@ export interface CommandOptions {
   json: boolean;
   /** Capture the two channels instead of printing them (the MCP server, #481). */
   sink?: CommandSink;
+  /**
+   * The clock a run stamps into the files it writes (#484), or absent to read the wall clock.
+   *
+   * It exists for ONE caller: a spec that compares a committed fixture with a fresh run. The run
+   * sheet carries its generation date, and the receipt carries the sheet's sha256, so without a
+   * pinned clock the fixture would change at midnight. Nothing on the command line sets it.
+   */
+  now?: Date;
 }
 
 /** The default a direct script wrapper (`scripts/engrave-job.ts`) runs with. */

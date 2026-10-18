@@ -679,7 +679,9 @@ async function engraveJobBody(argv: string[], options: CommandOptions): Promise<
       job,
       generated,
       { diagnostics: load.diagnostics, outcome: 'swept', engine: load.stats.engine },
-      new Date(),
+      // The run's one clock (#484): a caller may pin it so a committed fixture stays byte-stable;
+      // absent, this is the wall clock the command has always used.
+      options.now ?? new Date(),
       MARGIN_DEFAULTS,
       opts.sheetOptions ?? {},
     );
