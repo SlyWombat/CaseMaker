@@ -5,22 +5,17 @@
 // the snap-fit calibration cube tracked by issue #2 and a representative
 // ESP32 DevKit V1 case with snap-fit lid.
 
-import { writeFileSync, mkdirSync } from 'node:fs';
+import { mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { compileProject } from '../src/engine/compiler/ProjectCompiler';
 import { bootstrap } from '../src/platform/headless/bootstrap';
-import { executeOp } from '../src/workers/geometry/evaluateOp';
 import { createDefaultProject } from '../src/store/projectStore';
-import { buildBinaryStl } from '../src/workers/export/stlBinary';
 import { autoPortsForBoard } from '../src/engine/compiler/portFactory';
-import { applyLayoutToMeshes, PRINT_FLIP_NODE_IDS } from '../src/engine/exportLayout';
-import { partForId } from '../src/engine/exporters/parts';
-import { printNotesText } from '../src/engine/exporters/printNotes';
 import { defaultSnapCatchesForCase } from '../src/engine/compiler/snapCatches';
 import { findTemplate } from '../src/library/templates';
-import type { Project, BoardProfile, MeshNode } from '../src/types';
+import type { Project, BoardProfile } from '../src/types';
+import { writeProjectStl } from './lib/casemaker/projectExport';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(here, '..', '..');
@@ -31,43 +26,6 @@ mkdirSync(samplesDir, { recursive: true });
 // typesets labels synchronously) come from the shared headless bootstrap (#476). No shipped sample
 // carries labels today, but seeding keeps a label-bearing sample compiling.
 const { manifold: tl } = await bootstrap();
-
-interface NodeOutput {
-  id: string;
-  positions: Float32Array;
-  indices: Uint32Array;
-  triCount: number;
-}
-
-async function buildNodeMeshes(project: Project): Promise<NodeOutput[]> {
-  const plan = compileProject(project);
-  const out: NodeOutput[] = [];
-  for (const node of plan.nodes) {
-    const m = await executeOp(tl, node.op);
-    try {
-      const mesh = m.getMesh();
-      const numProp = mesh.numProp;
-      const verts = mesh.vertProperties;
-      const indices = new Uint32Array(mesh.triVerts);
-      let positions: Float32Array;
-      if (numProp === 3) {
-        positions = new Float32Array(verts);
-      } else {
-        const numVert = verts.length / numProp;
-        positions = new Float32Array(numVert * 3);
-        for (let i = 0; i < numVert; i++) {
-          positions[i * 3] = verts[i * numProp]!;
-          positions[i * 3 + 1] = verts[i * numProp + 1]!;
-          positions[i * 3 + 2] = verts[i * numProp + 2]!;
-        }
-      }
-      out.push({ id: node.id, positions, indices, triCount: indices.length / 3 });
-    } finally {
-      m.delete();
-    }
-  }
-  return out;
-}
 
 function buildCalibrationProject(): Project {
   // 30 × 30 × 1.6 mm "PCB" with no components and no holes — produces a tiny
@@ -206,32 +164,11 @@ const SAMPLES: SampleSpec[] = [
 let totalTris = 0;
 for (const sample of SAMPLES) {
   const project = sample.build();
-  const rawMeshes = await buildNodeMeshes(project);
-  // Apply the print-ready layout (issue #10): flip the lid 180° on X, drop
-  // every part to Z=0, pack side-by-side along +X with a 5 mm gap.
-  const meshNodes: MeshNode[] = rawMeshes.map((m) => ({
-    id: m.id,
-    buffer: { positions: m.positions, indices: m.indices },
-    stats: {
-      vertexCount: m.positions.length / 3,
-      triangleCount: m.triCount,
-      bbox: { min: [0, 0, 0], max: [0, 0, 0] },
-    },
-  }));
-  const laid = applyLayoutToMeshes(meshNodes, { gap: 5, bedWidth: 220, flipNodeIds: PRINT_FLIP_NODE_IDS });
-  const buf = buildBinaryStl(laid.map((m) => ({ positions: m.positions, indices: m.indices })));
-  const path = join(samplesDir, sample.filename);
-  writeFileSync(path, Buffer.from(buf));
-  // Issue #154 — the print guidance reaches the file the user actually gets.
-  // The sample is laid out print-ready (above), so the sidecar says the parts
-  // are already turned over.
-  const notesPath = join(samplesDir, sample.filename.replace(/\.stl$/i, '') + '-PRINT-NOTES.txt');
-  writeFileSync(
-    notesPath,
-    printNotesText(laid.map((m) => partForId(m.id)), 'print-ready'),
+  // The compile → lay-out → STL → PRINT-NOTES path is shared with `casemaker export` (#477).
+  const written = await writeProjectStl(tl, project, samplesDir, sample.filename);
+  totalTris += written.triangles;
+  console.log(
+    `${sample.filename}  ${written.triangles} triangles  ${(written.bytes / 1024).toFixed(1)} KB`,
   );
-  const tris = rawMeshes.reduce((s, m) => s + m.triCount, 0);
-  totalTris += tris;
-  console.log(`${sample.filename}  ${tris} triangles  ${(buf.byteLength / 1024).toFixed(1)} KB`);
 }
 console.log(`\nWrote ${SAMPLES.length} samples (${totalTris} total triangles) to ${samplesDir}`);

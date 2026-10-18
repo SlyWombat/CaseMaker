@@ -4,7 +4,16 @@
   "version": "1.0.0",
   "license": "Apache-2.0",
   "type": "module",
+  "bin": {
+    "casemaker": "scripts/casemaker.mjs"
+  },
   "scripts": {
+    "casemaker": "tsx --tsconfig tsconfig.scripts.json scripts/casemaker.ts",
+    "engrave": "npm run casemaker -- engrave",
+    "export:project": "npm run casemaker -- export",
+    "location": "npm run casemaker -- location",
+    "readback:feeds": "npm run casemaker -- readback feeds",
+    "readback:run": "npm run casemaker -- readback run",
     "dev": "vite",
     "build": "tsc -b && vite build",
     "dev:desktop": "vite --mode desktop",

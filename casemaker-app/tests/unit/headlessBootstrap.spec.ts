@@ -20,6 +20,8 @@ const LOCATION = JSON.parse(readFileSync(FIXTURE, 'utf8')) as {
   name: string;
   tools: unknown[];
   inventory: unknown[];
+  machines: unknown[];
+  stock: unknown[];
   defaults: Record<string, unknown>;
 };
 
@@ -62,6 +64,10 @@ describe('#476 the headless bootstrap', () => {
     expect(first.location!.path).toBe(FIXTURE);
     expect(first.location!.tools).toHaveLength(LOCATION.tools.length);
     expect(first.location!.inventory).toHaveLength(LOCATION.inventory.length);
+    // #477 — the document's other two sections are resolved here too, so `casemaker location`
+    // does not parse the file a second time.
+    expect(first.location!.machines).toHaveLength(LOCATION.machines.length);
+    expect(first.location!.stock).toHaveLength(LOCATION.stock.length);
     expect(first.location!.defaults).not.toBeNull();
     const keys = getTools().map((t) => t.key);
     expect(keys).toEqual(expect.arrayContaining((first.location!.tools as { key: string }[]).map((t) => t.key)));
@@ -75,6 +81,9 @@ describe('#476 the headless bootstrap', () => {
     expect(loaded!.kind).toBe('house');
     expect(loaded!.name).toBeNull();
     expect(loaded!.defaults).toBeNull();
+    // A house file has no machine or stock sections: empty, not the location's value.
+    expect(loaded!.machines).toEqual([]);
+    expect(loaded!.stock).toEqual([]);
     expect(loaded!.path).toBe(path);
     expect(getTools().some((t) => t.key === (LOCATION.tools[0] as { key: string }).key)).toBe(true);
   });

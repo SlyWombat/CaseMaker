@@ -29,7 +29,8 @@ import { setInventoryEntries, setRegistry } from '@/engine/cnc/toolRegistry';
 import { BUNDLED_FONT_KEYS, registerBundledFontBytes } from '@/engine/fonts/registry';
 import type { ShopDefaults } from '@/platform/defaultsClient';
 import { InventorySchema, type InventoryItem } from '@/platform/houseClient';
-import { checkLocationImport } from '@/platform/locationClient';
+import { checkLocationImport, type MachineRecord } from '@/platform/locationClient';
+import type { StockItem } from '@/platform/stockClient';
 import { inventoryEntryFor } from '@/store/toolRegistryStore';
 
 // Shadow the global so this file typechecks with AND without @types/node (see nodeGlobJson.ts).
@@ -162,6 +163,13 @@ export interface LoadedLocation {
   tools: ToolLibraryEntry[];
   /** The cutters the user physically owns, now in the registry as `inv:` entries. */
   inventory: InventoryItem[];
+  /**
+   * The location's machine records, in the order the document holds them (#477). Empty for a house
+   * file, which has no such section — not "no machines", but "this document does not say".
+   */
+  machines: MachineRecord[];
+  /** The location's stock shelf (#413); empty for a house file, for the same reason. */
+  stock: StockItem[];
   /** The shop's tunable defaults (#416/#417); null for a house file or a document without them. */
   defaults: ShopDefaults | null;
 }
@@ -194,6 +202,8 @@ export function loadLocation(path?: string | readonly string[]): LoadedLocation 
 
   let tools: ToolLibraryEntry[];
   let inventory: InventoryItem[];
+  let machines: MachineRecord[];
+  let stock: StockItem[];
   let name: string | null;
   let kind: LoadedLocation['kind'];
   let defaults: ShopDefaults | null;
@@ -202,6 +212,10 @@ export function loadLocation(path?: string | readonly string[]): LoadedLocation 
   if (location.kind === 'location') {
     tools = location.doc.tools;
     inventory = location.doc.inventory;
+    // #477 — the CLI's `location stock|machines` reads the same resolved document rather than
+    // parsing the file a second time.
+    machines = location.doc.machines;
+    stock = location.doc.stock;
     // #436 — the shop's own rest-machining numbers live here, not in the source. A document that
     // predates the section reads as `{}`, which `readDefault` answers with the labelled fallback.
     defaults = location.doc.defaults;
@@ -225,13 +239,15 @@ export function loadLocation(path?: string | readonly string[]): LoadedLocation 
     }
     tools = parsedTools.data;
     inventory = parsedInventory.data;
+    machines = [];
+    stock = [];
     name = null;
     kind = 'house';
     defaults = null;
   }
   setRegistry(tools);
   setInventoryEntries(inventory.map(inventoryEntryFor));
-  return { path: found, kind, name, tools, inventory, defaults };
+  return { path: found, kind, name, tools, inventory, machines, stock, defaults };
 }
 
 // ---------------------------------------------------------------------------------------------
