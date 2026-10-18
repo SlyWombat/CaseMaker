@@ -120,8 +120,11 @@ test("the saved .nc, reloaded as a stranger's file, removes the same volume", as
   await page.screenshot({ path: testInfo.outputPath('simulate-after-engrave.png') });
 
   await page.evaluate((text) => window.__caseMaker!.simOpenText('stranger.nc', text), nc);
-  // Still no Result before this panel runs it, even though the bytes are identical: the engrave
-  // run's session belongs to the engrave run, not to the file row that just took its name.
+  // Wait for the row to take the file name, so the "no Result" assertion below describes the same
+  // committed render. Still no Result before this panel runs it, even though the bytes are
+  // identical: the engrave run's session belongs to the engrave run, not to the file row that just
+  // took its name.
+  await expect(page.getByTestId('sim-file-name')).toHaveText('stranger.nc');
   await expect(page.getByTestId('sim-result')).toHaveCount(0);
   await page.evaluate(() => window.__caseMaker!.simRun());
   await expect(page.getByTestId('sim-result')).toBeVisible({ timeout: 60_000 });
