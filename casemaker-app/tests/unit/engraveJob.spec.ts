@@ -168,6 +168,15 @@ describe('EngraveJob schema (#200)', () => {
     expect(parsed.job.stock).toEqual(stockWithoutFlatness);
     expect(parsed.job).toEqual({ ...raw, stock: stockWithoutFlatness });
     void _dropped;
+    // BYTE-FOR-BYTE: the store saves `JSON.stringify(job)` after the same parse that loaded it, so
+    // saving a job that was just opened must write the identical bytes again — nothing rewritten,
+    // no field reordered or defaulted on the way past (the one-span record is the only loss, and
+    // the deep equality above is what says so).
+    const saved = JSON.stringify(parsed.job);
+    const reloaded = parseEngraveJob(JSON.parse(saved));
+    expect(reloaded.ok).toBe(true);
+    if (!reloaded.ok) return;
+    expect(JSON.stringify(reloaded.job)).toBe(saved);
   });
 
   // #464 — the fibre flag sits beside the material, so the schema has to name BOTH or a round trip
