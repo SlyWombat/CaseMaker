@@ -386,11 +386,47 @@ describe('#478 the human output is rendered from the receipt', () => {
           path: '/sd/gcodes/badge.nc',
           sent: 'play /sd/gcodes/badge.nc',
           dryRun: false,
+          ackCodes: ['vise-default'],
+          alreadyPresent: false,
         },
       },
     }).join('\n');
     expect(action).toContain('  confirm    3fa2b1c9');
+    expect(action).toContain('  cleared    vise-default');
     expect(action).toContain('  sent       play /sd/gcodes/badge.nc');
+
+    const dry = renderReceipt({
+      version: RECEIPT_VERSION,
+      command: 'machine',
+      ok: true,
+      stage: 'upload',
+      gate: null,
+      inputs: [],
+      outputs: [],
+      diagnostics: [],
+      provenance: [],
+      refusals: [],
+      details: {
+        section: 'upload',
+        host: null,
+        port: 2222,
+        status: null,
+        version: null,
+        hashes: [],
+        finished: null,
+        action: {
+          confirm: null,
+          programHash: '3fa2b1c9',
+          path: '/sd/gcodes/badge.nc',
+          sent: null,
+          dryRun: true,
+          ackCodes: [],
+          alreadyPresent: false,
+        },
+      },
+    }).join('\n');
+    expect(dry).toContain('  confirm    (none — --dry)');
+    expect(dry).toContain('  next       re-run with --confirm 3fa2b1c9 to send it');
   });
 
   it('renders a location section from its records, and the no-document case', () => {

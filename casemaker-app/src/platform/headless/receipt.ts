@@ -380,11 +380,20 @@ export const machineDetailsSchema = z
       .describe('The machine record’s finished-program list, or null for another section.'),
     action: z
       .object({
-        confirm: z.string().min(1).describe('The `--confirm` token the caller gave.'),
+        confirm: z
+          .string()
+          .nullable()
+          .describe('The `--confirm` token the caller gave, or null for a `--dry` run.'),
         programHash: z.string().nullable().describe('The program’s FNV hash, or null before one was computed.'),
         path: z.string().nullable().describe('The card path the action named, or null.'),
         sent: z.string().nullable().describe('The line sent to the controller, or null when nothing was sent.'),
         dryRun: z.boolean().describe('Whether the action stopped before opening a socket.'),
+        ackCodes: z
+          .array(z.string())
+          .describe('The clearance codes the caller acknowledged with `--acknowledge`, or [] for none.'),
+        alreadyPresent: z
+          .boolean()
+          .describe('Whether the machine declined the transfer because it already held identical bytes.'),
       })
       .nullable()
       .describe('The guarded action (upload/play), or null for a read.'),
@@ -816,11 +825,17 @@ function machineLines(receipt: Extract<Receipt, { command: 'machine' }>): string
 
   if (details.action !== null) {
     const action = details.action;
-    lines.push(`  confirm    ${action.confirm}`);
+    lines.push(`  confirm    ${action.confirm ?? '(none — --dry)'}`);
     if (action.programHash !== null) lines.push(`  program    ${action.programHash}`);
+    if (action.ackCodes.length > 0) lines.push(`  cleared    ${action.ackCodes.join(', ')}`);
     if (action.path !== null) lines.push(`  path       ${action.path}`);
-    if (action.dryRun) lines.push('  sent       (dry run — nothing was sent)');
-    else if (action.sent !== null) lines.push(`  sent       ${action.sent}`);
+    if (action.dryRun) {
+      lines.push('  sent       (dry run — nothing was sent)');
+      if (action.programHash !== null) {
+        lines.push(`  next       re-run with --confirm ${action.programHash} to send it`);
+      }
+    } else if (action.sent !== null) lines.push(`  sent       ${action.sent}`);
+    if (action.alreadyPresent) lines.push('  note       the card already held identical bytes — nothing was rewritten');
   }
 
   for (const refusal of receipt.refusals) lines.push(`  !! ${refusal.reason}`);

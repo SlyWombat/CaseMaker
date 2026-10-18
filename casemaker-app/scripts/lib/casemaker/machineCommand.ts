@@ -27,27 +27,52 @@
  */
 import {
   COMMAND_TCP_PORT,
+  GCODE_DIR,
+  MIN_STATUS_POLL_MS,
   alarmLine,
+  openConsole,
+  playProgramLine,
   readConfigKey,
   readJobProgress,
   runMd5Sum,
+  runReadFile,
   runStatus,
+  uploadPath,
   type MachineTransport,
 } from '../../../src/platform/desktop/protocol.ts';
+import { asVerifiedProgram, uploadVerifiedProgram } from '../../../src/platform/desktop/machineBridge';
+import {
+  setMachineUploadLoader,
+  uploadProgram,
+  type MachineUploadClient,
+  type MachineUploadResult,
+} from '../../../src/platform/machineUpload';
+import { programHash } from '../../../src/engine/cnc/programHash';
+import type { VerifyReport } from '../../../src/engine/cnc/verify';
 import { createNodeTransport } from '../../../tools/z1/transport.node.mjs';
 import { loadLocation, LocationDocumentError, type LoadedLocation } from '../../../src/platform/headless/bootstrap';
 import {
+  diagnostic,
   RECEIPT_VERSION,
   type MachineDetails,
   type MachineStatusRead,
   type Receipt,
+  type ReceiptDiagnostic,
+  type ReceiptFile,
   type ReceiptRefusal,
 } from '../../../src/platform/headless/receipt';
 import type { MachineRecord } from '../../../src/platform/locationClient';
 import { CliExit, isCliExit } from './exit';
 import { commandOutput, HUMAN, type CommandOptions } from './output';
+import { fileReceipt } from './receiptFiles';
+import {
+  prepareVerifiedProgram,
+  type PreparedProgram,
+  type PrepareOptions,
+  type PrepareResult,
+} from './verifiedProgram';
 
-const SECTIONS = ['status', 'version', 'hashes', 'finished'] as const;
+const SECTIONS = ['status', 'version', 'hashes', 'finished', 'upload', 'play'] as const;
 type Section = (typeof SECTIONS)[number];
 
 const USAGE =
@@ -55,10 +80,21 @@ const USAGE =
   '       casemaker machine version [--host <ip>] [--port <n>] [--location <file>]\n' +
   '       casemaker machine hashes  <card-path> [<card-path> ...] [--host <ip>] [--port <n>]\n' +
   '       casemaker machine finished [--machine <id>] [--location <file>]\n' +
+  '       casemaker machine upload  <job.json> --dry | --confirm <program hash>\n' +
+  '              [--my-machine <file>] [--calibration <file>] [--acknowledge=<codes>]\n' +
+  '              [--dir <card dir>] [--host <ip>] [--port <n>]\n' +
+  '       casemaker machine play    <card-path> --confirm <program hash> [--timeout <seconds>]\n' +
+  '              [--poll <ms, >= 2000>] [--host <ip>] [--port <n>]\n' +
   '\n' +
-  'Reads only: status polls `?`, version reads the `version` key from /sd/config.txt, hashes asks\n' +
-  'the controller for its own MD5 of files it holds, and finished reads the machine record’s\n' +
-  'finished-program list. Nothing here uploads, plays, homes or switches power.';
+  'Reads, unattended: status polls `?`, version reads the `version` key from /sd/config.txt,\n' +
+  'hashes asks the controller for its own MD5 of files it holds, and finished reads the machine\n' +
+  'record’s finished-program list.\n' +
+  '\n' +
+  'PHYSICAL, and only with the token that names what will move: upload sends the program a job\n' +
+  'generates, but only when --confirm names its FNV hash (--dry prints the hash and sends nothing);\n' +
+  'play runs a file the CARD ALREADY HOLDS, but only when --confirm names the hash of the bytes the\n' +
+  'card returns. Nothing here switches power (#479: the plug is outside Case Maker), and nothing\n' +
+  'generates and plays in one step.';
 
 /** The connect window: the app's own 3 s connect timeout. */
 const CONNECT_TIMEOUT_MS = 3000;
@@ -70,10 +106,27 @@ interface Args {
   location?: string;
   machine?: string;
   paths: string[];
+  confirm?: string;
+  dry: boolean;
+  dir?: string;
+  myMachine?: string;
+  calibration?: string;
+  acknowledge: string[] | null;
+  timeoutS?: number;
+  pollMs: number;
+}
+
+/** `--acknowledge=a,b` and a bare `--acknowledge` (an empty list) both parse, as the bench does. */
+function acknowledgeValue(arg: string): string[] {
+  const raw = arg.slice('--acknowledge'.length).replace(/^=/, '');
+  return raw
+    .split(',')
+    .map((c) => c.trim())
+    .filter((c) => c.length > 0);
 }
 
 function parseArgs(argv: string[]): Args {
-  const args: Args = { port: COMMAND_TCP_PORT, paths: [] };
+  const args: Args = { port: COMMAND_TCP_PORT, paths: [], dry: false, acknowledge: null, pollMs: MIN_STATUS_POLL_MS };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--host') {
@@ -92,6 +145,36 @@ function parseArgs(argv: string[]): Args {
       const v = argv[++i];
       if (v === undefined) throw new Error('--machine needs a machine record id');
       args.machine = v;
+    } else if (a === '--confirm') {
+      const v = argv[++i];
+      if (v === undefined) throw new Error('--confirm needs the program hash (or the word "probe"/"home")');
+      args.confirm = v;
+    } else if (a === '--dry') {
+      args.dry = true;
+    } else if (a === '--dir') {
+      const v = argv[++i];
+      if (v === undefined) throw new Error('--dir needs the card directory the program lands in');
+      args.dir = v;
+    } else if (a === '--my-machine') {
+      const v = argv[++i];
+      if (v === undefined) throw new Error('--my-machine needs the app’s exported machine record');
+      args.myMachine = v;
+    } else if (a === '--calibration') {
+      const v = argv[++i];
+      if (v === undefined) throw new Error('--calibration needs a saved calibration record');
+      args.calibration = v;
+    } else if (a !== undefined && (a === '--acknowledge' || a.startsWith('--acknowledge='))) {
+      args.acknowledge = acknowledgeValue(a);
+    } else if (a === '--timeout') {
+      const v = Number(argv[++i]);
+      if (!Number.isInteger(v) || v <= 0) throw new Error('--timeout must be a whole number of seconds');
+      args.timeoutS = v;
+    } else if (a === '--poll') {
+      const v = Number(argv[++i]);
+      if (!Number.isInteger(v) || v < MIN_STATUS_POLL_MS) {
+        throw new Error(`--poll must be at least ${MIN_STATUS_POLL_MS} ms — a faster poll faulted the controller on 2026-10-12`);
+      }
+      args.pollMs = v;
     } else if (a !== undefined && a.startsWith('--')) throw new Error(`unknown flag "${a}"`);
     else if (args.section === undefined) {
       if (!(SECTIONS as readonly string[]).includes(a ?? '')) {
@@ -102,6 +185,51 @@ function parseArgs(argv: string[]): Args {
   }
   if (args.section === undefined) throw new Error(`no machine command given\n\n${USAGE}`);
   return args;
+}
+
+/**
+ * Flags each command accepts, refused by name rather than ignored. A `--confirm` on `status` is a
+ * caller who thinks they are running something else; a silent no-op would let that stand.
+ */
+function validateArgs(args: Args): void {
+  const section = args.section as Section;
+  const hasFlags = (): string[] => {
+    const used: string[] = [];
+    if (args.confirm !== undefined) used.push('--confirm');
+    if (args.dry) used.push('--dry');
+    if (args.dir !== undefined) used.push('--dir');
+    if (args.myMachine !== undefined) used.push('--my-machine');
+    if (args.calibration !== undefined) used.push('--calibration');
+    if (args.acknowledge !== null) used.push('--acknowledge');
+    if (args.timeoutS !== undefined) used.push('--timeout');
+    if (args.pollMs !== MIN_STATUS_POLL_MS) used.push('--poll');
+    return used;
+  };
+
+  if (section === 'upload') {
+    if (args.paths.length !== 1) fail('upload needs exactly one job document');
+    if (args.dry === (args.confirm !== undefined)) {
+      fail('upload needs exactly one of --confirm <program hash> or --dry');
+    }
+    if (args.timeoutS !== undefined || args.pollMs !== MIN_STATUS_POLL_MS) {
+      fail('upload takes no --timeout or --poll — it does not follow a job');
+    }
+    return;
+  }
+  if (section === 'play') {
+    if (args.paths.length !== 1) fail('play needs exactly one card path (e.g. /sd/gcodes/badge.nc)');
+    if (args.confirm === undefined) {
+      fail('play needs --confirm <program hash> — the hash of the bytes the CARD holds (see `machine hashes`)');
+    }
+    if (args.dry) fail('play takes no --dry — the card read and its hash are what --confirm is checked against');
+    if (args.dir !== undefined) fail('play takes no --dir: the path you named is the file it runs');
+    if (args.myMachine !== undefined || args.calibration !== undefined || args.acknowledge !== null) {
+      fail('play takes no --my-machine, --calibration or --acknowledge — nothing is generated');
+    }
+    return;
+  }
+  const used = hasFlags();
+  if (used.length > 0) fail(`${section} is a read and takes none of ${used.join(', ')}`);
 }
 
 function fail(message: string, code = 2): never {
@@ -195,6 +323,7 @@ function machineReceipt(
   details: MachineDetails,
   ok: boolean,
   refusals: ReceiptRefusal[],
+  extra: { inputs?: ReceiptFile[]; diagnostics?: ReceiptDiagnostic[] } = {},
 ): Extract<Receipt, { command: 'machine' }> {
   return {
     version: RECEIPT_VERSION,
@@ -202,12 +331,41 @@ function machineReceipt(
     ok,
     stage: details.section,
     gate: null,
-    inputs: [],
+    inputs: extra.inputs ?? [],
     outputs: [],
-    diagnostics: [],
+    diagnostics: extra.diagnostics ?? [],
     provenance: [],
     refusals,
     details,
+  };
+}
+
+/** Every code the preparer's run raised, in the receipt's own vocabulary. */
+function prepareDiagnostics(program: PreparedProgram): ReceiptDiagnostic[] {
+  const out: ReceiptDiagnostic[] = [];
+  for (const f of program.findings) {
+    out.push(diagnostic(f.code, f.severity, f.message, 'findings', program.jobName));
+  }
+  for (const f of program.verify.findings) {
+    out.push(diagnostic(f.code, f.severity, f.message, 'verify', program.jobName));
+  }
+  for (const d of program.sim.diagnostics) {
+    out.push(diagnostic(d.code, d.severity, d.message, 'simulation', program.jobName));
+  }
+  return out;
+}
+
+/** A status line read the way `machine status` reads one. */
+function statusRead(text: string | null, diagnostics: string[] = []): MachineStatusRead {
+  const progress = text === null ? null : readJobProgress(text);
+  return {
+    line: text,
+    state: progress?.state ?? null,
+    progressLine: progress?.line ?? null,
+    percent: progress?.percent ?? null,
+    elapsedS: progress?.elapsedS ?? null,
+    alarm: alarmOf(text, diagnostics),
+    finished: progress?.state === 'Idle' && progress?.percent === 100,
   };
 }
 
@@ -221,6 +379,56 @@ export interface MachineDeps {
   transport: MachineTransport;
   /** The document reader. Production: `loadLocation`; specs pass a fixture without touching disk. */
   locate?: (path?: string) => LoadedLocation | null;
+  /**
+   * `upload`'s job → verified-program pipeline. Production: `prepareVerifiedProgram`; a spec
+   * replaces it so the upload paths are driven without running the wasm generator.
+   */
+  prepare?: (jobPath: string, opts: PrepareOptions) => Promise<PrepareResult>;
+  /** `upload`'s gate and transfer. Production: the app's `uploadProgram`; a spec fakes it. */
+  upload?: (
+    target: { host: string; port: number },
+    program: { filename: string; nc: string; verify: VerifyReport },
+    transport: MachineTransport,
+  ) => Promise<MachineUploadResult>;
+  /** `play`'s wait between polls, so a spec never sleeps for a real interval. */
+  sleep?: (ms: number) => Promise<void>;
+}
+
+/**
+ * The app's own upload path, reached through its test seam. `machineUpload.ts` loads the Tauri
+ * bridge by default; under Node there is no such bridge, so the loader is pointed at the same
+ * functions over the injected transport — the identical gate and idle check, with only the socket
+ * underneath switched, exactly as `scripts/machine-upload-check.ts` does.
+ */
+async function uploadThroughApp(
+  target: { host: string; port: number },
+  program: { filename: string; nc: string; verify: VerifyReport },
+  transport: MachineTransport,
+): Promise<MachineUploadResult> {
+  const client: MachineUploadClient = {
+    status: async (t) => {
+      const conn = await transport.tcpConnect(t.host, t.port, CONNECT_TIMEOUT_MS);
+      try {
+        const read = await runStatus(transport, conn);
+        return { ok: read.ok, text: read.text };
+      } finally {
+        await transport.tcpClose(conn);
+      }
+    },
+    upload: async (t, p) => {
+      const verified = asVerifiedProgram(p.filename, p.content, p.report);
+      if (verified === null) {
+        return { ok: false, reason: 'error', detail: 'the program has not passed the verifier' };
+      }
+      return uploadVerifiedProgram(t, verified, { transport, connectTimeoutMs: CONNECT_TIMEOUT_MS });
+    },
+  };
+  setMachineUploadLoader(async () => client);
+  try {
+    return await uploadProgram(target, program);
+  } finally {
+    setMachineUploadLoader(null);
+  }
 }
 
 /**
@@ -228,7 +436,13 @@ export interface MachineDeps {
  * transport) never opens the Node socket layer.
  */
 function defaultDeps(): MachineDeps {
-  return { transport: createNodeTransport(), locate: (path) => loadLocation(path) };
+  return {
+    transport: createNodeTransport(),
+    locate: (path) => loadLocation(path),
+    prepare: prepareVerifiedProgram,
+    upload: uploadThroughApp,
+    sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+  };
 }
 
 /** The handler `handlers.ts` binds; `machineMain` is the dispatcher-facing wrapper. */
@@ -251,9 +465,13 @@ export async function machineMain(
 
 async function machineBody(argv: string[], options: CommandOptions, deps: MachineDeps): Promise<number> {
   const args = parseArgs(argv);
+  validateArgs(args);
   const section = args.section as Section;
   const locate = deps.locate ?? ((path?: string) => loadLocation(path));
   const out = commandOutput(options);
+
+  if (section === 'upload') return uploadBody(args, options, deps, locate);
+  if (section === 'play') return playBody(args, options, deps, locate);
 
   if (section === 'finished') {
     const record = recordOf(args, locate);
@@ -350,6 +568,356 @@ async function machineBody(argv: string[], options: CommandOptions, deps: Machin
 
   out.emitReceipt(machineReceipt(details, ok, refusals));
   return ok ? 0 : 1;
+}
+
+/** A failed upload's own receipt refusal — the app's six outcomes, each named for what happened. */
+function uploadRefusal(outcome: Exclude<MachineUploadResult, { kind: 'uploaded' }>): ReceiptRefusal {
+  switch (outcome.kind) {
+    case 'busy':
+      return { code: 'machine-busy', reason: outcome.detail };
+    case 'refused':
+      return { code: 'upload-refused', reason: `the machine declined the transfer: ${outcome.detail}` };
+    case 'timeout':
+      return { code: 'upload-timeout', reason: outcome.detail };
+    case 'error':
+      return { code: 'upload-error', reason: outcome.detail };
+    case 'unavailable':
+      return { code: 'machine-unavailable', reason: outcome.reason };
+  }
+}
+
+/**
+ * Why the machine may not be started now, or null. The app's own rule (`machineUpload.ts`): an
+ * alarm outranks the state word, only `Idle` passes, and `Idle` with a `P:` below 100 is still a
+ * running program (#390's spin-down window).
+ */
+function playProblem(status: MachineStatusRead): ReceiptRefusal | null {
+  if (status.alarm !== null) {
+    return {
+      code: 'machine-alarm',
+      reason: `the controller is in an alarm (\`${status.alarm}\`) — clear it at the machine first; nothing was sent`,
+    };
+  }
+  if (status.state === null) {
+    return {
+      code: 'machine-unreadable',
+      reason: `the status line was not readable (${status.line ?? 'no reply'}) — nothing was sent`,
+    };
+  }
+  if (status.state.toLowerCase() !== 'idle') {
+    return { code: 'machine-busy', reason: `it reports ${status.state} rather than Idle — nothing was sent` };
+  }
+  if (status.percent !== null && status.percent < 100) {
+    return {
+      code: 'machine-busy',
+      reason: `it reports Idle, but its status line says a program is ${status.percent}% through — nothing was sent`,
+    };
+  }
+  return null;
+}
+
+/**
+ * `machine upload` — a job document through the app's own generate → verify → upload gate, and to
+ * the card only when `--confirm` names the program's hash.
+ *
+ * The order is the point. `--dry` stops after generation and prints the hash, so the token comes
+ * from the command that consumes it. A token that does not match is refused with both hashes and
+ * no connection. The send itself is `machineUpload.uploadProgram`: the app's verified-only gate,
+ * its idle check, and its transfer — not a second implementation.
+ */
+async function uploadBody(
+  args: Args,
+  options: CommandOptions,
+  deps: MachineDeps,
+  locate: (path?: string) => LoadedLocation | null,
+): Promise<number> {
+  const out = commandOutput(options);
+  const jobPath = args.paths[0] as string;
+
+  let input: ReceiptFile;
+  try {
+    input = fileReceipt(jobPath);
+  } catch (e) {
+    fail(`cannot read ${jobPath}: ${e instanceof Error ? e.message : String(e)}`);
+  }
+
+  const prepare = deps.prepare ?? prepareVerifiedProgram;
+  let result: PrepareResult;
+  try {
+    result = await prepare(jobPath, {
+      myMachine: args.myMachine,
+      calibration: args.calibration,
+      acknowledged: args.acknowledge,
+    });
+  } catch (e) {
+    // An unreadable --my-machine or --calibration record is a usage error, not a refusal.
+    if (e instanceof Error) fail(e.message);
+    throw e;
+  }
+
+  const details = emptyDetails('upload', null, args.port);
+  if (!result.ok) {
+    const receipt = machineReceipt(
+      details,
+      false,
+      [{ code: 'program-refused', reason: result.reason }],
+      { inputs: [input] },
+    );
+    out.emitReceipt(receipt);
+    return 1;
+  }
+
+  const program = result.program;
+  const diagnostics = prepareDiagnostics(program);
+  details.action = {
+    confirm: args.confirm ?? null,
+    programHash: program.hash,
+    path: null,
+    sent: null,
+    dryRun: args.dry,
+    ackCodes: args.acknowledge ?? [],
+    alreadyPresent: false,
+  };
+
+  // A --acknowledge list that is not exactly what this run asks for is a usage error, and the
+  // bench script's rule: the tick is per-program, so a blanket one waves through what it was not
+  // meant to.
+  if (program.ackError !== null) fail(program.ackError);
+
+  if (program.blocker !== null) {
+    const hint =
+      program.requiredAcks.length > 0
+        ? ` Once they are made at the machine, pass --acknowledge=${program.requiredAcks.join(',')}.`
+        : '';
+    const receipt = machineReceipt(
+      details,
+      false,
+      [{ code: 'upload-blocked', reason: `${program.blocker}.${hint}` }],
+      { inputs: [input], diagnostics },
+    );
+    out.emitReceipt(receipt);
+    return 1;
+  }
+
+  const destination = uploadPath(args.dir ?? GCODE_DIR, program.filename);
+  details.action.path = destination;
+
+  if (args.dry) {
+    out.emitReceipt(machineReceipt(details, true, [], { inputs: [input], diagnostics }));
+    return 0;
+  }
+
+  if (args.confirm !== program.hash) {
+    const receipt = machineReceipt(
+      details,
+      false,
+      [
+        {
+          code: 'confirm-mismatch',
+          reason:
+            `--confirm ${args.confirm ?? '(none)'} does not name this job's program: ` +
+            `${jobPath} generates ${program.hash}. Nothing was sent.`,
+        },
+      ],
+      { inputs: [input], diagnostics },
+    );
+    out.emitReceipt(receipt);
+    return 1;
+  }
+
+  const target = targetOf(args, locate);
+  details.host = target.host;
+  details.port = target.port;
+
+  const upload = deps.upload ?? uploadThroughApp;
+  const canWriteNote =
+    `${program.filename} (${program.nc.length} bytes) — ${program.machineId}, ` +
+    `margins ${program.margins.boundaryMargin} mm / ±${program.margins.zTolerance} (${program.marginsFrom})` +
+    (program.calibrationNote === null ? ', shipped profile' : `, ${program.calibrationNote}`);
+  out.progress(`uploading ${canWriteNote}`);
+
+  let outcome: MachineUploadResult;
+  try {
+    outcome = await upload(
+      target,
+      { filename: program.filename, nc: program.nc, verify: program.verify },
+      deps.transport,
+    );
+  } catch (e) {
+    const receipt = machineReceipt(
+      details,
+      false,
+      [{ code: 'upload-error', reason: `the upload failed: ${e instanceof Error ? e.message : String(e)}` }],
+      { inputs: [input], diagnostics },
+    );
+    out.emitReceipt(receipt);
+    return 1;
+  }
+
+  if (outcome.kind === 'uploaded') {
+    details.action.sent = `upload ${destination}`;
+    details.action.alreadyPresent = outcome.alreadyPresent;
+    details.status = statusRead(outcome.status);
+    out.emitReceipt(machineReceipt(details, true, [], { inputs: [input], diagnostics }));
+    return 0;
+  }
+
+  if (outcome.kind === 'busy') details.status = statusRead(outcome.status);
+  const receipt = machineReceipt(details, false, [uploadRefusal(outcome)], {
+    inputs: [input],
+    diagnostics,
+  });
+  out.emitReceipt(receipt);
+  return 1;
+}
+
+/**
+ * `machine play` — run a file the card ALREADY HOLDS, only when `--confirm` names the hash of the
+ * bytes the card returns.
+ *
+ * The hash is computed from `runReadFile`'s text, not from a local file, so the token names what
+ * the machine will actually run. The pre-play read is the app's own idle rule; the follow-up is
+ * `?` at `--poll` (never under 2000 ms, the interval whose faster cousin faulted the controller on
+ * 2026-10-12). Ctrl-C sends `abort` at the next poll boundary and says so; this command sends no
+ * `M331`/`M332`, no `$H`, and never uploads.
+ */
+async function playBody(
+  args: Args,
+  options: CommandOptions,
+  deps: MachineDeps,
+  locate: (path?: string) => LoadedLocation | null,
+): Promise<number> {
+  const out = commandOutput(options);
+  const path = args.paths[0] as string;
+  const line = playProgramLine(path);
+  if (line === null) {
+    fail(`"${path}" is not a playable card path — absolute, and only A-Z a-z 0-9 . _ - /`);
+  }
+  const confirm = args.confirm as string;
+
+  const target = targetOf(args, locate);
+  const details = emptyDetails('play', target.host, target.port);
+  const refusals: ReceiptRefusal[] = [];
+
+  let conn: number;
+  try {
+    conn = await deps.transport.tcpConnect(target.host, target.port, CONNECT_TIMEOUT_MS);
+  } catch (e) {
+    refusals.push({
+      code: 'machine-unreachable',
+      reason: `could not connect to ${target.host}:${target.port}: ${e instanceof Error ? e.message : String(e)}`,
+    });
+    out.emitReceipt(machineReceipt(details, false, refusals));
+    return 1;
+  }
+
+  let aborted = false;
+  const onSignal = (): void => {
+    aborted = true;
+  };
+  process.on('SIGINT', onSignal);
+
+  try {
+    // The token names the CARD's bytes, so the card is asked first. A local hash would name what
+    // this run believes is there, which is the assumption --confirm exists to remove.
+    const read = await runReadFile(deps.transport, conn, path);
+    if (!read.ok) {
+      refusals.push({
+        code: 'card-unreadable',
+        reason: `the card did not return ${path}: ${read.detail}`,
+      });
+      out.emitReceipt(machineReceipt(details, false, refusals));
+      return 1;
+    }
+    const hash = programHash(read.text);
+    details.action = {
+      confirm,
+      programHash: hash,
+      path,
+      sent: null,
+      dryRun: false,
+      ackCodes: [],
+      alreadyPresent: false,
+    };
+    if (hash !== confirm) {
+      refusals.push({
+        code: 'confirm-mismatch',
+        reason:
+          `--confirm ${confirm} does not name the bytes the card holds: ${path} hashes ${hash}. ` +
+          `Nothing was sent.`,
+      });
+      out.emitReceipt(machineReceipt(details, false, refusals));
+      return 1;
+    }
+
+    const before = await runStatus(deps.transport, conn);
+    details.status = statusRead(before.text, before.diagnostics);
+    const problem = playProblem(details.status);
+    if (problem !== null) {
+      refusals.push(problem);
+      out.emitReceipt(machineReceipt(details, false, refusals));
+      return 1;
+    }
+
+    const session = openConsole(deps.transport, conn);
+    const played = await session.send(line);
+    if (!played.ok) {
+      refusals.push({
+        code: 'play-refused',
+        reason: `the controller refused \`${line}\`: ${played.detail}`,
+      });
+      out.emitReceipt(machineReceipt(details, false, refusals));
+      return 1;
+    }
+    details.action.sent = line;
+
+    const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+    const deadline = args.timeoutS === undefined ? null : Date.now() + args.timeoutS * 1000;
+    out.progress(`playing ${path} — polling \`?\` every ${args.pollMs} ms (Ctrl-C aborts)`);
+
+    for (;;) {
+      if (aborted) {
+        // The bench's stop: `abort` stops the spindle at once; the controller then drains the moves
+        // it had already buffered. 60 s is the seeded `stop.abortReplyMs` (`z1.mjs run`).
+        const stopped = await session.send('abort', { firstReplyMs: 60_000, maxMs: 60_000 });
+        refusals.push({
+          code: 'aborted',
+          reason: stopped.ok
+            ? 'Ctrl-C — `abort` was sent; the controller is draining its queue. The vacuum state is whatever the program left it in.'
+            : `Ctrl-C — \`abort\` was NOT answered (${stopped.detail}). Check the machine.`,
+        });
+        out.emitReceipt(machineReceipt(details, false, refusals));
+        return 130;
+      }
+
+      const readStatus = await runStatus(deps.transport, conn);
+      details.status = statusRead(readStatus.text, readStatus.diagnostics);
+      if (details.status.finished) {
+        out.emitReceipt(machineReceipt(details, true, refusals));
+        return 0;
+      }
+      if (details.status.alarm !== null) {
+        refusals.push({
+          code: 'machine-alarm',
+          reason: `the controller raised \`${details.status.alarm}\` while the program ran — check the machine`,
+        });
+        out.emitReceipt(machineReceipt(details, false, refusals));
+        return 1;
+      }
+      if (deadline !== null && Date.now() > deadline) {
+        refusals.push({
+          code: 'play-timeout',
+          reason: `--timeout ${args.timeoutS} s passed before the program reported finished`,
+        });
+        out.emitReceipt(machineReceipt(details, false, refusals));
+        return 1;
+      }
+      await sleep(args.pollMs);
+    }
+  } finally {
+    process.off('SIGINT', onSignal);
+    await deps.transport.tcpClose(conn);
+  }
 }
 
 export { USAGE as MACHINE_USAGE };

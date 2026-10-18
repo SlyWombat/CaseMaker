@@ -2160,10 +2160,27 @@
               "anyOf": [
                 {
                   "properties": {
+                    "ackCodes": {
+                      "description": "The clearance codes the caller acknowledged with `--acknowledge`, or [] for none.",
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": "array"
+                    },
+                    "alreadyPresent": {
+                      "description": "Whether the machine declined the transfer because it already held identical bytes.",
+                      "type": "boolean"
+                    },
                     "confirm": {
-                      "description": "The `--confirm` token the caller gave.",
-                      "minLength": 1,
-                      "type": "string"
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The `--confirm` token the caller gave, or null for a `--dry` run."
                     },
                     "dryRun": {
                       "description": "Whether the action stopped before opening a socket.",
@@ -2208,7 +2225,9 @@
                     "programHash",
                     "path",
                     "sent",
-                    "dryRun"
+                    "dryRun",
+                    "ackCodes",
+                    "alreadyPresent"
                   ],
                   "type": "object"
                 },

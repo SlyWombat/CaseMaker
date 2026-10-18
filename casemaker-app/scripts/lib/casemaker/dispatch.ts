@@ -46,10 +46,13 @@ export const USAGE = [
   '  casemaker readback run <record.json> [--history <runHistory.ts>] [--dry-run]',
   '  casemaker machine status|version|finished [--host <ip>] [--location <file>]',
   '  casemaker machine hashes <card-path> [<card-path> ...] [--host <ip>]',
+  '  casemaker machine upload <job.json> --confirm <program hash> | --dry',
+  '  casemaker machine play <card-path> --confirm <program hash> [--timeout <seconds>]',
   '',
   'Human output is the default and is rendered from the run’s receipt. With `--json`, stdout is',
-  'exactly that receipt document and progress goes to stderr. The machine commands read only;',
-  'nothing here switches power (#479: the plug is outside Case Maker).',
+  'exactly that receipt document and progress goes to stderr. status, version, hashes and finished',
+  'only read; upload and play move the machine and require --confirm, the token that names what',
+  'will move. Nothing here switches power (#479: the plug is outside Case Maker).',
 ].join('\n');
 
 /** `--json` takes no value: the receipt has one shape, so there is no format to negotiate. */
