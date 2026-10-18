@@ -415,20 +415,46 @@ export function facingShopFrom(defaults: ShopDefaults | null): FacingDepthShop {
 }
 
 /**
+ * The measured high-to-low spread of the job's blank top, mm — or null when nobody measured it
+ * (#432 review R9).
+ *
+ * The facing depth's probed branch ({@link facingDepthDefault}) needs a measurement, and the one
+ * number the job carries for it is `stock.flatness.dome`; its `source` says whether that is a
+ * measurement (`'measured'`) or a stated default (`'badge'` from a printed blank, `'user'` typed
+ * in). Only `'measured'` fills a depth in — a default dressed up as a probe would read as a
+ * measurement nobody took.
+ *
+ * Only a material facing is offered on can answer (#474/#493): on any plastic this returns null
+ * even if a measured flatness is recorded, so the wood/metal-only rule is enforced here as well
+ * as at the toggle.
+ *
+ * Direction is irrelevant to a skim: it has to clear the high point whichever side of the blank
+ * it is across, so `flatness.across` is not consulted.
+ */
+export function measuredTopSpreadMm(job: Pick<EngraveJob, 'stock'>): number | null {
+  if (facingRefusal(job.stock.material) !== null) return null;
+  const flatness = job.stock.flatness;
+  if (flatness === undefined || flatness.source !== 'measured') return null;
+  return Number.isFinite(flatness.dome) && flatness.dome >= 0 ? flatness.dome : null;
+}
+
+/**
  * The depth filled into a facing job's depth field (#432): the answer to "how far", not the choice
  * of whether to face — that is `facingDefault`'s, from the finish.
  *
- * When the blank has been PROBED, the probed top's high-to-low spread is the measured out-of-flat,
- * and the shop's margin is added so the skim clears the highest point rather than grazing it.
- * Without a probe the finish decides: rough stock takes the rough figure, unknown stock the light
- * one. A finished or printed blank is not faced by default, so nobody has said what its skim should
- * be — a person who switches facing on for one gets the light figure and a sentence saying it was
- * the fallback, rather than a number invented for a finish that implies no skim at all.
+ * When the blank's top has been MEASURED — a measured `stock.flatness.dome` handed in through
+ * {@link measuredTopSpreadMm}, or a probe's own spread — that high-to-low figure is the measured
+ * out-of-flat, and the shop's margin is added so the skim clears the highest point rather than
+ * grazing it. Without a measurement the finish decides: rough stock takes the rough figure,
+ * unknown stock the light one. A finished or printed blank is not faced by default, so nobody has
+ * said what its skim should be — a person who switches facing on for one gets the light figure
+ * and a sentence saying it was the fallback, rather than a number invented for a finish that
+ * implies no skim at all.
  */
 export function facingDepthDefault(
   finish: JobStockFinish,
   opts: {
-    /** High-to-low spread the probe found on the top, mm; null/absent = not probed. */
+    /** High-to-low spread a measurement found on the top, mm; null/absent = not measured. */
     probedSpreadMm?: number | null;
     /** The shop's figures; absent keys fall back to {@link FACING_DEPTH_FALLBACK_MM}. */
     shop?: Partial<FacingDepthShop>;
@@ -440,7 +466,7 @@ export function facingDepthDefault(
   if (typeof spread === 'number' && Number.isFinite(spread) && spread >= 0) {
     return {
       depthMm: round2(spread + shop.margin),
-      reason: `the probe found the top varies by ${round2(spread)} mm, plus the shop's ${shop.margin} mm margin`,
+      reason: `the blank's measured top varies by ${round2(spread)} mm, plus the shop's ${shop.margin} mm margin`,
     };
   }
   switch (finish) {

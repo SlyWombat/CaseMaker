@@ -81,6 +81,7 @@ import {
   facingRefusal,
   facingShopFrom,
   finishOf,
+  measuredTopSpreadMm,
 } from '@/engine/cnc/stockStart';
 import { MATERIAL_LABELS } from '@/engine/cnc/materials';
 import { useShopDefaultsStore } from '@/store/shopDefaultsStore';
@@ -698,7 +699,8 @@ export function EngravePanel(): JSX.Element {
   // #432 slice 4 — the facing choice. The finish is the ONE input (decision Q6): `finishOf` reads
   // the named entry's answer, or a printed blank's implied one, and null means nothing says — the
   // panel then prints that rather than guessing from the material. The depth's filled-in number and
-  // the sentence under it come from the same `facingDepthDefault` call the wizard's seed makes.
+  // the sentence under it come from the same `facingDepthDefault` call the wizard's seed makes; the
+  // panel adds the one input the wizard cannot have at stock-choice time — a measured top (R9).
   const shopDefaults = useShopDefaultsStore((s) => s.defaults);
   const finish = finishOf(job);
   // #474/#493 — no plastic is faced (wood and metal only), so the material refuses it whatever the
@@ -707,7 +709,14 @@ export function EngravePanel(): JSX.Element {
   const facingDef = facingDefault(finish ?? 'unknown', job.stock.material);
   const facing = job.facing ?? null;
   const facingOn = facing?.enabled ?? false;
-  const facingDepthFill = facingDepthDefault(finish ?? 'unknown', { shop: facingShopFrom(shopDefaults) });
+  // #432 review R9 — the aimed-for default is the MEASURED top's high-to-low spread plus the
+  // shop's margin. The job carries a measured top only as `stock.flatness` with
+  // `source: 'measured'`; a badge's stated dome is not a measurement, and `measuredTopSpreadMm`
+  // returns null on any plastic, so the wood/metal-only rule holds here too.
+  const facingDepthFill = facingDepthDefault(finish ?? 'unknown', {
+    probedSpreadMm: measuredTopSpreadMm(job),
+    shop: facingShopFrom(shopDefaults),
+  });
   const facingDepthReason =
     facing !== null && Math.abs(facing.depth - facingDepthFill.depthMm) < 1e-9
       ? sentenceCase(facingDepthFill.reason) + '.'

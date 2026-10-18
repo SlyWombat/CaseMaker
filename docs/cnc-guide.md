@@ -506,9 +506,10 @@ PLA or PETG, a purchased acrylic or ABS sheet, or a two-colour engraving laminat
 names the material: `facing is not offered on <material>: a flat cutter smears a plastic top`,
 and turning facing off in the panel is the way out. For wood and metal the **Finish** the blank
 states decides whether facing is offered and how deep it defaults: the panel fills in a depth
-with a sentence saying why, and you can type your own. The default is the probed top's
-high-to-low spread plus the shop's margin when the blank has been probed, else the shop's rough
-or unknown figure. A facing job is **two programs** — a facing pass with its own flat cutter,
+with a sentence saying why, and you can type your own. The default is the job's measured top
+spread plus the shop's margin when the blank carries a measurement (`stock.flatness` with source
+`measured`), else the shop's rough or unknown figure — and a stated dome is not a measurement.
+A facing job is **two programs** — a facing pass with its own flat cutter,
 then the engraving program from the faced top — each with its own tool-length calibration and
 its own Z0. The run sheet orders them probe → face → re-touch → engrave.
 
