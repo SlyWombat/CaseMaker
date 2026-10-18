@@ -15,9 +15,7 @@ import type { PreflightCause } from '@/engine/cnc/preflight';
 import { runContextFor } from '@/store/machineRunStore';
 import { stepAtLine } from '@/engine/cnc/playbackClock';
 import { canDriveMachine } from '@/platform/capabilities';
-import { EngraveMachineUpload } from './EngraveMachineUpload';
-import { EngraveReleaseStep } from './EngraveReleaseStep';
-import { EngravePreflight } from './EngravePreflight';
+import { EngraveCutSurface } from './EngraveCutSurface';
 import { EngraveRegistrationStep } from './EngraveRegistrationStep';
 import { saveEngraveProgram } from '@/engine/exportTrigger';
 import { useSettingsStore } from '@/store/settingsStore';
@@ -54,7 +52,7 @@ import {
 import { validateVise } from '@/engine/cnc/fixture';
 import { keepOutLimitParts, keepOutMembrane, labelGlyphMeasure, labelJawReach, voidLimitForItem } from '@/engine/cnc/engrave/partPlan';
 import { ensureLabelFontsLoaded, ensureSeedFontsLoaded, labelFontsLoaded } from '@/engine/fonts/registry';
-import { buildRunSheet, runSheetFileName, type RunSheet } from '@/engine/cnc/engrave/runSheet';
+import { buildRunSheet, type RunSheet } from '@/engine/cnc/engrave/runSheet';
 import { registrationSettings } from '@/engine/cnc/registration/settings';
 import { buildRunRecord, isMeasuredRun, serializeRunRecord } from '@/engine/cnc/engrave/runRecord';
 import { allRuns, lastTimedRun } from '@/engine/cnc/engrave/runHistory';
@@ -891,9 +889,11 @@ export function EngravePanel(): JSX.Element {
 
   const calibration = useSettingsStore((s) => s.machineCalibration) ?? null;
   const shelfItems = useStockStore((s) => s.items);
-  // Read through the store API, not localStorage directly: R8 moves the package into the job
-  // document with #425, and this line must not have to change with it.
-  const jobPackage = useEngravePackageStore((s) => s.packages.find((p) => p.jobId === job.id) ?? null);
+  // #425 — the document owns the package block. Prefer what the store hands back (on #425's branch
+  // that reads the open document, and a fresh freeze lands there first), and fall back to a block a
+  // loaded v3 document already carries. Both are the same `FrozenPackage` shape.
+  const storedPackage = useEngravePackageStore((s) => s.packages.find((p) => p.jobId === job.id) ?? null);
+  const jobPackage = storedPackage ?? job.package ?? null;
   // Only a stock entry actually taken off the shelf is handed to the stock owner. A piece typed in
   // (or a file) that was later ALSO put on the shelf is still not this job's shelf pick.
   const shelfEntryId = job.stockEntry?.kind === 'shelf' ? job.stockEntry.shelfId : null;
@@ -992,20 +992,13 @@ export function EngravePanel(): JSX.Element {
   // #255 — the machine upload. `uploadBlocker` is never weaker than `saveBlocker` (see its own
   // note), so Save and Upload state one rule between them rather than two that agree by luck.
   const uploadBlockerText = uploadBlocker(run);
-  // #469 / #419 §3 — a job that produced MORE THAN ONE program is played by the release step,
-  // which owns the whole list (upload all, play in order, pause for the bit change). The
-  // single-file upload below keeps its own refusal for such a job; the panel therefore renders
-  // one or the other, never both run panels.
-  const releaseGenerated = run.generated !== null && run.generated.programs.length > 1 ? run.generated : null;
+  // #469 / #419 §3 — the Cut surface owns the run controls. It plays the FROZEN list: more than
+  // one program goes through the release step, one program through the single-file upload. Both
+  // gates are computed here, against the live run view, and handed down so the panel and the
+  // surface cannot state two different rules.
   const releaseBlockerText = releaseBlocker(run);
   const machine = useMachineStore((s) => s.machine);
   const noteLiveStatus = useMachineStore((s) => s.noteLiveStatus);
-  // Both halves or neither: the gate is a statement about the report, so a `nc` without one is not
-  // a program this panel may offer to send.
-  const uploadable =
-    run.generated !== null && run.generated.nc !== null && run.generated.verify !== null
-      ? { nc: run.generated.nc, verify: run.generated.verify }
-      : null;
   const cam = run.generated?.cam ?? null;
 
   // #442 (#414) — what the run's end is told about the job, built in ONE place
@@ -2637,37 +2630,8 @@ export function EngravePanel(): JSX.Element {
               </p>
             )}
 
-            {/* #255 — hand the verified program to the machine. Desktop build only: `canDriveMachine`
-                folds to false in the web build, so this block is dead code there and the bridge
-                never enters the web bundle. The filename is the one Save writes, so the file on the
-                machine's card and the one in the operator's run sheet are named the same thing.
-                #469 — a job of more than one program is the release step's: it uploads every file
-                and plays them in cut order, so the single-file upload is not offered for it. */}
-            {canDriveMachine && releaseGenerated !== null && (
-              <EngraveReleaseStep
-                target={machine === null ? null : { host: machine.host, port: machine.port }}
-                job={job}
-                generated={releaseGenerated}
-                blocker={releaseBlockerText}
-                onProgramLine={followProgramLine}
-              />
-            )}
-            {canDriveMachine && releaseGenerated === null && (
-              <EngraveMachineUpload
-                blocker={uploadBlockerText}
-                machine={machine}
-                program={uploadable}
-                filename={runSheetFileName(job.name)}
-                lift={{
-                  zMachine: jobMachine(job).toolChange.clearanceZ,
-                  zFloorMachine: jobMachine(job).softEndstop.zMin,
-                }}
-                onLiveStatus={noteLiveStatus}
-                runContext={runContext}
-                jobEdgeMarginMm={job.edgeMargin}
-                onProgramLine={followProgramLine}
-              />
-            )}
+            {/* #419 §3 — the run controls live under CUT now, over the frozen package. Design
+                stops at a verified, saved program; Cut is the approval and the run. */}
 
             {/* The operator run sheet (#207): printable, built from this job and the verified
                 result. Offered once a job has generated AND verified; a stale result is refused,
@@ -2740,12 +2704,27 @@ export function EngravePanel(): JSX.Element {
         preflight !== null && (
           <>
             {/* #495 — the registration step runs the setup's approved plan, then the gate's
-                findings read below it. The release step (slice 3) mounts on this same page. */}
+                findings read below it. The Cut surface (slice 2) shows the package, the one plan
+                and — when the gate is green and the package current — the run controls. */}
             <EngraveRegistrationStep
               job={job}
               target={machine === null ? null : { host: machine.host, port: machine.port }}
             />
-            <EngravePreflight report={preflight} onBackToDesign={backToDesign} />
+            <EngraveCutSurface
+              job={job}
+              report={preflight}
+              package={jobPackage}
+              generated={run.generated}
+              staleSince={run.staleSince}
+              machine={machine}
+              canDriveMachine={canDriveMachine}
+              runContext={runContext}
+              uploadBlocker={uploadBlockerText}
+              releaseBlocker={releaseBlockerText}
+              onProgramLine={followProgramLine}
+              onLiveStatus={noteLiveStatus}
+              onBackToDesign={backToDesign}
+            />
           </>
         )
       )}

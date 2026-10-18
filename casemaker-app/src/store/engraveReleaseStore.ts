@@ -44,7 +44,6 @@
 
 import { create } from 'zustand';
 import type { EngraveJob } from '@/types/engraveJob';
-import type { EngraveGenerated } from '@/workers/sim/engraveGenerate';
 import { uploadProgram, type MachineUploadResult } from '@/platform/machineUpload';
 import { describeRun, runSettings, type RunOutcome } from '@/platform/machineRun';
 import { closeVacuumSpan, switchVacuumOn } from '@/platform/machineSpan';
@@ -66,6 +65,7 @@ import {
   releasePrograms,
   releaseFileName,
   type ReleaseProgram,
+  type ReleaseSource,
 } from '@/engine/cnc/engrave/release';
 import { machineKey, runContextFor, useMachineRunStore, type RunContext } from './machineRunStore';
 import { finishedProgramsFor } from './locationStore';
@@ -166,7 +166,12 @@ interface ReleaseState {
    * (Re)plan the release for a job: name the files, read the finished hashes, and keep the upload
    * results already made for unchanged programs. Safe to call on every render.
    */
-  plan: (target: { host: string; port: number }, job: EngraveJob, generated: EngraveGenerated) => void;
+  /**
+   * Plan (or re-plan) this machine's release from the job's APPROVED programs (#419 §3, #425).
+   * `programs` is the frozen package's list, never the live Generate: the texts the machine plays
+   * are the texts that were approved.
+   */
+  plan: (target: { host: string; port: number }, job: EngraveJob, programs: readonly ReleaseSource[]) => void;
   /** Upload every program in cut order. Never throws; a failure is a phase and a sentence. */
   uploadAll: (target: { host: string; port: number }) => Promise<void>;
   /** Begin (or resume) the run at the first unfinished program. */
@@ -471,15 +476,15 @@ export const useEngraveReleaseStore = create<ReleaseState>((set, get) => {
   return {
     records: {},
 
-    plan: (target, job, generated) => {
+    plan: (target, job, programs) => {
       const machine = machineKey(target);
       const current = get().records[machine];
       const done = finishedProgramsFor(target);
-      const planned = releasePrograms(job.name, generated.programs, done);
+      const planned = releasePrograms(job.name, programs, done);
       if (current !== undefined && current.jobId === job.id && sameHashes(current.files, planned)) {
         // A remount, or a refresh after a run finished elsewhere: keep the upload results and the
         // at-machine confirmation, and read the finished list again.
-        const merged = releasePrograms(job.name, generated.programs, done).map((f, i) => ({
+        const merged = releasePrograms(job.name, programs, done).map((f, i) => ({
           ...f,
           upload: current.files[i]!.upload,
           uploadNote: current.files[i]!.uploadNote,
@@ -488,8 +493,9 @@ export const useEngraveReleaseStore = create<ReleaseState>((set, get) => {
         return;
       }
       // A DIFFERENT PROGRAM LIST is a different run: do not carry upload states or a phase across.
-      const feeds = generated.feeds;
-      const airOn = feeds !== null && feeds.ok === true ? feeds.params.air : (job.cutOverride?.air ?? true);
+      // #419 decision 4 — the vacuum span is the frozen post's own words, so it is read from the
+      // text that will be played, not from the Generate that happened to produce it.
+      const airOn = jobCarriesVacuumWords(programs);
       set((s) => ({
         records: {
           ...s.records,
@@ -538,6 +544,20 @@ export const useEngraveReleaseStore = create<ReleaseState>((set, get) => {
         if (get().records[machine]?.stopAsked === true) {
           patch(machine, { phase: 'stopped', uploading: null, atMachine: false });
           say(machine, 'Uploading stopped. The files already written stay on the card.');
+          return;
+        }
+        // #419 §3 — VERIFIED ONLY. The package carries texts, not verifier reports; the Cut surface
+        // matched this session's reports by hash. A frozen program with no match is refused here,
+        // with the file's own number, rather than being sent on the strength of a report about some
+        // other text. There is no "send anyway" path.
+        if (f.verify === null) {
+          files[i] = { ...f, upload: 'failed', uploadNote: 'no verifier report for this frozen text in this session' };
+          patch(machine, { files: files.map((x) => ({ ...x })), uploading: null, phase: 'failed' });
+          say(
+            machine,
+            `Program ${f.index} was NOT uploaded: this session holds no verifier report for its frozen text. Generate the job again before running it.`,
+          );
+          say(machine, 'No program was played.');
           return;
         }
         files[i] = { ...f, upload: 'sending', uploadNote: null };

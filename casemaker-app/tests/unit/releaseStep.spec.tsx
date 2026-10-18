@@ -22,11 +22,16 @@ import { resetInventoryConditions, setInventoryConditions, type ToolCopy } from 
 import { flatEndMill } from '@/engine/cnc/tool';
 import { TOOL_LIBRARY } from '@/engine/cnc/toolLibrary';
 import {
+  frozenReleaseSources,
   programVacuumSpan,
   releaseFileName,
   releasePrograms,
   releasePending,
+  type ReleaseSource,
 } from '@/engine/cnc/engrave/release';
+import { freezePackage } from '@/engine/cnc/engrave/package';
+import { cutPlan } from '@/engine/cnc/engrave/cutPlan';
+import type { RunPlan } from '@/engine/cnc/plan';
 import {
   endOfRun,
   machineKey,
@@ -325,7 +330,7 @@ async function uploadAndStart(): Promise<void> {
 
 /** #494 — a faced run up to the confirmed bit change after the face program. */
 async function facedToChange(job: EngraveJob, engraving: EngraveProgram): Promise<void> {
-  render(<EngraveReleaseStep target={TARGET} job={job} generated={generated([FACE, engraving], NC_FACE)} blocker={null} />);
+  renderStep(job, [FACE, engraving]);
   await uploadAndStart();
   await screen.findByTestId('engrave-release-change', undefined, { timeout: 10000 });
   fireEvent.click(screen.getByTestId('engrave-release-change-ok'));
@@ -339,6 +344,40 @@ function engravingProgram(): EngraveProgram {
   return { ...P1, nc, programHash: programHash(nc) };
 }
 
+/** A generated program as a release source: the shape the pure list reader takes. */
+function sourcesOf(programs: EngraveProgram[]): ReleaseSource[] {
+  return programs.map((p) => ({
+    setupIndex: p.setupIndex,
+    toolKey: p.toolKey,
+    ...(p.kind === undefined ? {} : { kind: p.kind }),
+    nc: p.nc,
+    hash: p.programHash,
+    verify: p.verify,
+  }));
+}
+
+/**
+ * #419 §3 / #425 — the step is fed the FROZEN package's sources and the one Cut plan, exactly as
+ * `EngraveCutSurface` feeds it. Building them here through the production helpers keeps the spec
+ * from testing a second, looser contract.
+ */
+function renderStep(job: EngraveJob, programs: EngraveProgram[] = [P1, P2]): RunPlan {
+  const made = freezePackage(job, programs, '2026-10-17T14:02:00.000Z');
+  if (!made.ok) throw new Error(made.reason);
+  const reports = new Map(programs.map((p) => [p.programHash, p.verify] as const));
+  const runPlan = cutPlan({ job, pkg: made.package, finishedHashes: [], defaults: null });
+  render(
+    <EngraveReleaseStep
+      target={TARGET}
+      job={job}
+      programs={frozenReleaseSources(job, made.package, reports)}
+      runPlan={runPlan}
+      blocker={null}
+    />,
+  );
+  return runPlan;
+}
+
 describe('#469 the release step', () => {
   it('names a one-program job as the run sheet does and a list by cut-order position', () => {
     expect(releaseFileName('My job', 1, 1)).toBe('My-job.nc');
@@ -347,7 +386,7 @@ describe('#469 the release step', () => {
   });
 
   it('keeps a finished program in the list, marks it done, and leaves it out of what is left to play', () => {
-    const files = releasePrograms('Job', [P1, P2], [P1.programHash]);
+    const files = releasePrograms('Job', sourcesOf([P1, P2]), [P1.programHash]);
     expect(files).toHaveLength(2);
     expect(files[0]!.done).toBe(true);
     expect(files[1]!.done).toBe(false);
@@ -402,8 +441,18 @@ describe('#469 the release step', () => {
   });
 
   it('uploads every program, plays them in order, and sends no vacuum word between them', async () => {
-    render(<EngraveReleaseStep target={TARGET} job={twoSetupJob()} generated={generated()} blocker={null} />);
+    renderStep(twoSetupJob());
     await uploadAndStart();
+
+    // #419 decision 4 — every file the release plays owns the vacuum span, including the middle
+    // ones: `vacuumOwned` is what stops the runner from bracketing a file it does not own.
+    expect(useMachineRunStore.getState().runs[`${TARGET.host}:${TARGET.port}`]?.context).toMatchObject({
+      vacuumOwned: true,
+      vacuumSpan: 'first',
+      nc: NC1,
+      programIndex: 1,
+      programTotal: 2,
+    });
 
     // Program 1 runs to its end; the release pauses at the bit change with the machine homed.
     await screen.findByTestId('engrave-release-change', undefined, { timeout: 10000 });
@@ -422,6 +471,13 @@ describe('#469 the release step', () => {
     expect((screen.getByTestId('engrave-release-change-done') as HTMLButtonElement).disabled).toBe(true);
     fireEvent.click(screen.getByTestId('engrave-release-at-machine'));
     fireEvent.click(screen.getByTestId('engrave-release-change-done'));
+    expect(useMachineRunStore.getState().runs[`${TARGET.host}:${TARGET.port}`]?.context).toMatchObject({
+      vacuumOwned: true,
+      vacuumSpan: 'last',
+      nc: NC2,
+      programIndex: 2,
+      programTotal: 2,
+    });
     await screen.findByTestId('engrave-release-done', undefined, { timeout: 10000 });
 
     expect(sent.filter((l) => l.startsWith('play'))).toEqual([
@@ -441,7 +497,7 @@ describe('#469 the release step', () => {
     // #494 — a faced release needs the first registration in app state; the step that records it is
     // still the registration UI's (#430), so the test seeds it as that step would.
     seedRegistration(job);
-    render(<EngraveReleaseStep target={TARGET} job={job} generated={generated([FACE, EN], NC_FACE)} blocker={null} />);
+    renderStep(job, [FACE, EN]);
 
     expect((await screen.findByTestId('engrave-release-facing-note')).textContent).toContain('program 1 is the face file');
     await uploadAndStart();
@@ -459,14 +515,7 @@ describe('#469 the release step', () => {
   it('refuses a faced release with no first registration, then enables it when one is recorded (#494)', async () => {
     const job = facedJob();
     setMachineConsoleLoader(async () => controller(2, { retouchSurfaceZ: -56.666 }));
-    render(
-      <EngraveReleaseStep
-        target={TARGET}
-        job={job}
-        generated={generated([FACE, engravingProgram()], NC_FACE)}
-        blocker={null}
-      />,
-    );
+    renderStep(job, [FACE, engravingProgram()]);
     await uploadOnly();
     fireEvent.click(screen.getByTestId('engrave-release-at-machine'));
 
@@ -580,14 +629,7 @@ describe('#469 the release step', () => {
     const job = facedJob();
     seedRegistration(job);
     setMachineConsoleLoader(async () => controller(2, { retouchSurfaceZ: -56.666 }));
-    render(
-      <EngraveReleaseStep
-        target={TARGET}
-        job={job}
-        generated={generated([FACE, engravingProgram()], NC_FACE)}
-        blocker={null}
-      />,
-    );
+    renderStep(job, [FACE, engravingProgram()]);
     await screen.findByTestId('engrave-release-files');
 
     // The state a resume after a failed program 2 leaves: the face file done, its bit change
@@ -626,7 +668,7 @@ describe('#469 the release step', () => {
   }, 30000);
 
   it('asks “I am at the machine” again for every program: the bit change clears the tick (D-17)', async () => {
-    render(<EngraveReleaseStep target={TARGET} job={twoSetupJob()} generated={generated()} blocker={null} />);
+    renderStep(twoSetupJob());
     await uploadAndStart();
     await screen.findByTestId('engrave-release-change', undefined, { timeout: 10000 });
 
@@ -643,7 +685,7 @@ describe('#469 the release step', () => {
   }, 30000);
 
   it('a Stop between programs closes the span: M332 then $H, on an Idle machine', async () => {
-    render(<EngraveReleaseStep target={TARGET} job={twoSetupJob()} generated={generated()} blocker={null} />);
+    renderStep(twoSetupJob());
     await uploadAndStart();
     await screen.findByTestId('engrave-release-change', undefined, { timeout: 10000 });
 
@@ -704,7 +746,7 @@ describe('#469 the release step', () => {
     setHouseClientLoader(async () => client);
     await useLocationStore.getState().refresh();
 
-    render(<EngraveReleaseStep target={TARGET} job={twoSetupJob()} generated={generated()} blocker={null} />);
+    renderStep(twoSetupJob());
     fireEvent.click(await screen.findByTestId('engrave-release-upload'));
     fireEvent.click(screen.getByTestId('engrave-release-upload-confirm-send'));
     await screen.findByTestId('engrave-release-start');
@@ -725,7 +767,7 @@ describe('#469 the release step', () => {
   }, 30000);
 
   it('an unticked Resume is disabled and sends nothing', async () => {
-    render(<EngraveReleaseStep target={TARGET} job={twoSetupJob()} generated={generated()} blocker={null} />);
+    renderStep(twoSetupJob());
     await uploadOnly();
     // Stop at `ready`: the phase is `stopped`, the at-machine tick was never made.
     await act(async () => {
@@ -744,7 +786,7 @@ describe('#469 the release step', () => {
   }, 20000);
 
   it('a Resume pressed while the span close is in flight does not start, and one after it resolves does', async () => {
-    render(<EngraveReleaseStep target={TARGET} job={twoSetupJob()} generated={generated()} blocker={null} />);
+    renderStep(twoSetupJob());
     await uploadOnly();
     fireEvent.click(screen.getByTestId('engrave-release-at-machine'));
     holdSpanClose();
@@ -777,7 +819,7 @@ describe('#469 the release step', () => {
   }, 30000);
 
   it('a start that fails after M331 says the vacuum is on and closes the span', async () => {
-    render(<EngraveReleaseStep target={TARGET} job={twoSetupJob()} generated={generated()} blocker={null} />);
+    renderStep(twoSetupJob());
     await uploadAndStart();
     await screen.findByTestId('engrave-release-change', undefined, { timeout: 10000 });
 
@@ -917,7 +959,7 @@ describe('#491 the release step names the cutter’s case', () => {
       (id) => `inv:${id}`,
       TOOL_LIBRARY,
     );
-    render(<EngraveReleaseStep target={TARGET} job={twoSetupJob()} generated={generated()} blocker={null} />);
+    renderStep(twoSetupJob());
     await uploadAndStart();
     const sentence = await screen.findByTestId('engrave-release-change-sentence', undefined, { timeout: 10000 });
     expect(sentence.textContent).toContain(

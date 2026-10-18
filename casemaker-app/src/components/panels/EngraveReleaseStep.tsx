@@ -15,19 +15,16 @@
 
 import { useEffect, useState, type CSSProperties, type JSX } from 'react';
 import type { EngraveJob } from '@/types/engraveJob';
-import type { EngraveGenerated } from '@/workers/sim/engraveGenerate';
-import type { StockFlatness } from '@/platform/stockClient';
 import { programBytes } from '@/platform/machineUpload';
-import { getTools } from '@/engine/cnc/toolRegistry';
-import { jobMachine } from '@/engine/cnc/calibration';
-import { jobSetups } from '@/engine/cnc/engrave/jobSetup';
-import { releaseNext, releasePending } from '@/engine/cnc/engrave/release';
-import { planRun } from '@/engine/cnc/plan/phases';
-import { finishedProgramsFor } from '@/store/locationStore';
+import {
+  releaseNext,
+  releasePending,
+  type ReleaseSource,
+} from '@/engine/cnc/engrave/release';
+import type { RunPlan } from '@/engine/cnc/plan';
 import { useEngraveReleaseStore, type ReleaseFile } from '@/store/engraveReleaseStore';
 import { useFirstRegistration } from '@/store/engraveRegistrationStore';
 import { facingRegistrationBlocker } from '@/store/engraveRunGate';
-import { useShopDefaultsStore } from '@/store/shopDefaultsStore';
 import { useToolRegistryStore } from '@/store/toolRegistryStore';
 import { cutterIdentity } from '@/engine/cnc/engrave/cutterCaseLine';
 import { EngraveMachineRun } from './EngraveMachineRun';
@@ -41,24 +38,18 @@ export interface EngraveReleaseStepProps {
   /** Where the machine was last reached, or null. The step cannot do anything without one. */
   target: { host: string; port: number } | null;
   job: EngraveJob;
-  generated: EngraveGenerated;
+  /**
+   * The FROZEN programs, in cut order — the only texts the step uploads and plays (#419 §3). The
+   * Cut surface builds them with `frozenReleaseSources`; this component never re-reads the
+   * document for a program.
+   */
+  programs: readonly ReleaseSource[];
+  /** The one plan the Cut surface shows (`cutPlan`) — not a second derivation made here. */
+  runPlan: RunPlan;
   /** `releaseBlocker(run)` — required, so the panel's gate and this component cannot disagree. */
   blocker: string | null;
   /** Told the source line the machine reports while a program runs (`EngraveMachineRun`). */
   onProgramLine?: (line: number | null) => void;
-}
-
-function labelOf(toolKey: string): { name: string; note: string } {
-  const entry = getTools().find((e) => e.key === toolKey);
-  if (entry === undefined) {
-    return { name: toolKey, note: 'the registry has no row for this key — fit the cutter the program was posted for' };
-  }
-  const t = entry.tool;
-  const dia = t.tipDiameter ?? t.diameter;
-  return {
-    name: t.name,
-    note: `${toolKey}${dia === null ? '' : `, ⌀ ${Math.round(dia * 1000) / 1000} mm`} — ${entry.provenance}`,
-  };
 }
 
 function FileRow({ file }: { file: ReleaseFile }): JSX.Element {
@@ -194,7 +185,8 @@ function ChangePanel({
 export function EngraveReleaseStep({
   target,
   job,
-  generated,
+  programs,
+  runPlan,
   blocker,
   onProgramLine,
 }: EngraveReleaseStepProps): JSX.Element {
@@ -220,32 +212,11 @@ export function EngraveReleaseStep({
   // #494 — the job's first registration, and whether the release may start without one. The gate is
   // the same function the store calls, so the button's disabled state and the start refusal agree.
   const firstRegistration = useFirstRegistration(job.id, target);
-  const facingGate = facingRegistrationBlocker(job, generated.programs, firstRegistration);
+  const facingGate = facingRegistrationBlocker(job, programs, firstRegistration);
 
   useEffect(() => {
-    if (host !== undefined && port !== undefined && blocker === null) plan({ host, port }, job, generated);
-  }, [host, port, job, generated, blocker, plan]);
-
-  const planView = (() => {
-    if (host === undefined || port === undefined) return null;
-    const flatness: StockFlatness =
-      job.stock.flatness === undefined ? 'unknown' : job.stock.flatness.dome > 0 ? 'domed' : 'flat';
-    return planRun({
-      setups: jobSetups(job).map((_, i) => ({ index: i + 1, mountStep: i > 0, faced: false, registration: null })),
-      programs: generated.programs.map((p, i) => ({
-        id: `p${i + 1}`,
-        setupIndex: p.setupIndex,
-        label: labelOf(p.toolKey).name,
-        hash: p.programHash,
-      })),
-      machine: jobMachine(job),
-      mount: job.workholding.kind,
-      stock: { flatness },
-      shallowestCutMm: null,
-      finishedHashes: finishedProgramsFor({ host, port }),
-      defaults: useShopDefaultsStore.getState().defaults,
-    });
-  })();
+    if (host !== undefined && port !== undefined && blocker === null) plan({ host, port }, job, programs);
+  }, [host, port, job, programs, blocker, plan]);
 
   if (target === null) {
     return (
@@ -297,7 +268,7 @@ export function EngraveReleaseStep({
         The vacuum goes on with the job’s first program and stays on across every bit change; only the job’s last
         program turns it off. A Stop between programs sends M332 and homes.
       </p>
-      {generated.facingNc != null && (
+      {job.facing?.enabled === true && (
         <p style={{ ...MUTED, color: '#f0d79b' }} data-testid="engrave-release-facing-note">
           This job faces the stock first: program 1 is the face file, posted to the probed top and carrying the
           vacuum’s ON word. After it, change to the ENGRAVING cutter — not the facing cutter — and re-touch the faced
@@ -312,19 +283,17 @@ export function EngraveReleaseStep({
         </p>
       )}
 
-      {planView !== null && (
-        <details data-testid="engrave-release-plan">
-          <summary style={MUTED}>The plan ({Math.round(planView.totalSeconds / 60)} min, lower bound where unstated)</summary>
-          <ol style={{ ...MUTED, paddingLeft: 18 }}>
-            {planView.phases.map((p) => (
-              <li key={p.id}>
-                {p.title} — {p.who === 'machine' ? 'machine' : 'you'}
-                {p.seconds === null ? '' : `, ${Math.round(p.seconds)} s`}
-              </li>
-            ))}
-          </ol>
-        </details>
-      )}
+      <details data-testid="engrave-release-plan">
+        <summary style={MUTED}>The plan ({Math.round(runPlan.totalSeconds / 60)} min, lower bound where unstated)</summary>
+        <ol style={{ ...MUTED, paddingLeft: 18 }}>
+          {runPlan.phases.map((p) => (
+            <li key={p.id}>
+              {p.title} — {p.who === 'machine' ? 'machine' : 'you'}
+              {p.seconds === null ? '' : `, ${Math.round(p.seconds)} s`}
+            </li>
+          ))}
+        </ol>
+      </details>
 
       <ul style={{ ...MUTED, paddingLeft: 18 }} data-testid="engrave-release-files">
         {record.files.map((f) => (

@@ -1,0 +1,424 @@
+// @vitest-environment jsdom
+// #419 §3, slice 2 — the CUT SURFACE: freeze on green, the package line, the one shared plan, and
+// run controls fed by the FROZEN texts rather than by the live Generate.
+//
+// The gate and the machine are inputs here: this spec is about what the surface does once the hub
+// says "green" and what it refuses to do when it does not. The stock shelf is the same guarded fake
+// the package store's own spec uses; nothing reaches a machine.
+
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { EngraveCutSurface } from '@/components/panels/EngraveCutSurface';
+import type { MachineObservation } from '@/platform/machineProbe';
+import type { PreflightHubReport } from '@/engine/cnc/preflight/hub';
+import type { PreflightRow } from '@/engine/cnc/preflight/types';
+import { setHouseClientLoader, type HouseCall, type HouseClient } from '@/platform/houseClient';
+import { setMachineUploadLoader } from '@/platform/machineUpload';
+import { programHash } from '@/platform/machineRun';
+import { StockItemSchema, type StockItem } from '@/platform/stockClient';
+import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
+import { jobSetups } from '@/engine/cnc/engrave/jobSetup';
+import { freezePackage, type FrozenPackage } from '@/engine/cnc/engrave/package';
+import { frozenReleaseSources } from '@/engine/cnc/engrave/release';
+import type { VerifyReport } from '@/engine/cnc/verify';
+import type { EngraveGenerated, EngraveProgram } from '@/workers/sim/engraveGenerate';
+import { resetMachineRunStore } from '@/store/machineRunStore';
+import { resetEngraveReleaseStore, useEngraveReleaseStore } from '@/store/engraveReleaseStore';
+import { resetEngravePackageStore, useEngravePackageStore } from '@/store/engravePackageStore';
+import { resetRunConfirmStore } from '@/store/runConfirmStore';
+import { clearStoredBaseline, resetLocationStore } from '@/store/locationStore';
+import { resetStockStore, useStockStore } from '@/store/stockStore';
+import type { EngraveJob } from '@/types/engraveJob';
+
+(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+
+const TARGET = { host: '192.0.2.10', port: 2222 };
+const AT = '2026-10-17T14:02:00.000Z';
+const VERIFY: VerifyReport = {
+  ok: true,
+  findings: [],
+  stats: { lines: 1, cuttingMoves: 0, deepestZ: 0, bbox: { min: [0, 0, 0], max: [1, 1, 0] } },
+};
+
+const NC1 = 'M331\nG0 X0 Y0\nM02\n';
+const NC2 = 'G0 X1 Y1\nM332\nM02\n';
+const P1: EngraveProgram = {
+  setupIndex: 1,
+  setupId: 'setup-1',
+  toolKey: 'flat-1.0',
+  nc: NC1,
+  verify: VERIFY,
+  frameNc: null,
+  frameVerify: null,
+  programHash: programHash(NC1),
+  cam: null,
+};
+const P2: EngraveProgram = {
+  setupIndex: 2,
+  setupId: 'setup-2',
+  toolKey: 'flat-3.175x12-metal',
+  nc: NC2,
+  verify: VERIFY,
+  frameNc: null,
+  frameVerify: null,
+  programHash: programHash(NC2),
+  cam: null,
+};
+
+function generated(programs: EngraveProgram[]): EngraveGenerated {
+  return {
+    ok: true,
+    stage: 'done',
+    findings: [],
+    feeds: null,
+    threads: null,
+    threadMachining: null,
+    cam: null,
+    nc: programs[0]?.nc ?? null,
+    verify: programs[0]?.verify ?? null,
+    frameNc: null,
+    frameVerify: null,
+    facingNc: null,
+    facingVerify: null,
+    facingToolKey: null,
+    facingError: null,
+    facingCam: null,
+    predicted: [],
+    programs,
+    errors: [],
+  } as unknown as EngraveGenerated;
+}
+
+function row(
+  severity: 'error' | 'warning' | 'info',
+  code: string,
+  message: string,
+): PreflightRow {
+  return {
+    severity,
+    code,
+    message,
+    owner: 'run',
+    cause: { setupIndex: 0, toolKey: 'flat-1.0', hubTarget: null },
+  };
+}
+
+function reportOf(rows: PreflightRow[] = []): PreflightHubReport {
+  const errors = rows.filter((r) => r.severity === 'error');
+  return {
+    policyRows: rows,
+    scopes: [],
+    rows,
+    firstBlocking: errors[0] ?? null,
+    errorCount: errors.length,
+    warningCount: rows.filter((r) => r.severity === 'warning').length,
+  };
+}
+
+/** A job with two stored setups, so the plan has a setup for each program. */
+function twoSetupJob(): EngraveJob {
+  const job = defaultEngraveJob();
+  job.name = 'Two setup job';
+  job.toolKey = 'flat-1.0';
+  const first = jobSetups(job)[0]!;
+  job.setups = [first, { ...first, id: 'setup-2', tools: ['flat-3.175x12-metal'] }];
+  return job;
+}
+
+/** A job with a shelf blank, so freezing takes a hold this spec can watch. */
+function shelfJob(): EngraveJob {
+  const job = defaultEngraveJob();
+  job.stockEntry = { kind: 'shelf', shelfId: 'stock-plate1', file: null, form: 'plate', finish: 'finished', conductive: false };
+  return job;
+}
+
+function shelfItem(): StockItem {
+  return StockItemSchema.parse({
+    id: 'stock-plate1',
+    material: 'aluminium-6061',
+    form: 'plate',
+    size: { length: 100, width: 100, thickness: 5 },
+    layers: [],
+    capMm: null,
+    capSource: null,
+    finish: 'rough',
+    flatness: 'flat',
+    domeHeight: null,
+    conductive: true,
+    quantity: 1,
+    reservations: [],
+    consumed: [],
+    source: 'purchased',
+    notes: null,
+    addedAt: '2026-10-15T09:00:00.000Z',
+  });
+}
+
+function frozen(job: EngraveJob, programs: EngraveProgram[]): FrozenPackage {
+  const made = freezePackage(job, programs, AT);
+  if (!made.ok) throw new Error(made.reason);
+  return made.package;
+}
+
+function machineObservation(): MachineObservation {
+  return {
+    name: 'Z1',
+    host: TARGET.host,
+    port: TARGET.port,
+    busy: false,
+    ip: TARGET.host,
+    mac: null,
+    status: '<Idle|MPos:0,0,0>',
+    profileId: 'z1',
+    observedAt: AT,
+    notes: [],
+  };
+}
+
+interface Props {
+  job: EngraveJob;
+  report: PreflightHubReport;
+  pkg: FrozenPackage | null;
+  generated: EngraveGenerated | null;
+  canDrive?: boolean;
+  staleSince?: number | null;
+}
+
+/**
+ * The panel's own wiring, minus the editor: `EngravePanel` reads the frozen package from the store
+ * and hands it down, so a freeze is visible without remounting. Reproducing that one line here is
+ * what lets the surface's freeze-on-green show in the same visit, as it does in the app.
+ */
+function Harness(props: Props) {
+  const stored = useEngravePackageStore(
+    (state) => state.packages.find((p) => p.jobId === props.job.id) ?? null,
+  );
+  return (
+    <EngraveCutSurface
+      job={props.job}
+      report={props.report}
+      package={stored ?? props.pkg}
+      generated={props.generated}
+      staleSince={props.staleSince ?? null}
+      machine={props.canDrive === false ? null : machineObservation()}
+      canDriveMachine={props.canDrive !== false}
+      runContext={{}}
+      uploadBlocker={null}
+      releaseBlocker={null}
+      onBackToDesign={() => {}}
+    />
+  );
+}
+
+function draw(props: Props) {
+  const rendered = render(<Harness {...props} />);
+  return { ...rendered, show: (p: Props) => rendered.rerender(<Harness {...p} />) };
+}
+
+let shelfItems: StockItem[];
+let uploads: { filename: string; content: string }[];
+
+beforeEach(() => {
+  uploads = [];
+  shelfItems = [shelfItem()];
+  resetRunConfirmStore();
+  resetMachineRunStore();
+  resetEngraveReleaseStore();
+  resetEngravePackageStore();
+  resetLocationStore();
+  clearStoredBaseline();
+  resetStockStore();
+  useStockStore.setState({ status: 'present', items: shelfItems, etag: '"s-1"' });
+
+  let version = 1;
+  const client = {
+    call: async (method: string, path: string, body?: unknown): Promise<HouseCall> => {
+      if (method === 'GET' && path === '/stock') {
+        return { kind: 'ok', text: JSON.stringify(shelfItems), etag: `"s-${version}"` };
+      }
+      if (method === 'PATCH') {
+        const id = decodeURIComponent(path.replace('/stock/', ''));
+        shelfItems = shelfItems.map((item) => (item.id === id ? (body as StockItem) : item));
+        useStockStore.setState({ items: shelfItems, etag: `"s-${version + 1}"` });
+        version += 1;
+        return { kind: 'ok', text: '' };
+      }
+      return { kind: 'ok', text: '' };
+    },
+  } as unknown as HouseClient;
+  setHouseClientLoader(async () => client);
+  setMachineUploadLoader(async () => ({
+    status: async () => ({ ok: true, text: '<Idle|MPos:0,0,0>' }),
+    upload: async (_target, program) => {
+      uploads.push({ filename: program.filename, content: new TextDecoder().decode(program.content) });
+      return { ok: true, bytes: program.content.length, packets: 1, alreadyPresent: false };
+    },
+  }));
+});
+
+afterEach(() => {
+  cleanup();
+  setHouseClientLoader(null);
+  setMachineUploadLoader(null);
+});
+
+function storedPackage(job: EngraveJob): FrozenPackage {
+  const pkg = useEngravePackageStore.getState().packageFor(job.id);
+  if (pkg === null) throw new Error('no package was frozen');
+  return pkg;
+}
+
+describe('#419 §3 the Cut surface', () => {
+  it('freezes on green, once, and says what the package holds and what the shelf did', async () => {
+    const job = defaultEngraveJob();
+    const made = generated([P1]);
+    draw({ job, report: reportOf(), pkg: null, generated: made });
+
+    await waitFor(() => expect(screen.getByTestId('engrave-package').dataset.state).toBe('current'));
+    const pkg = storedPackage(job);
+    expect(pkg.programs).toHaveLength(1);
+    expect(useEngravePackageStore.getState().packages).toHaveLength(1);
+
+    const line = screen.getByTestId('engrave-package').textContent ?? '';
+    expect(line).toContain('1 program · 1 setup');
+    expect(line).toMatch(/frozen \d{2}:\d{2}/);
+    expect(line).toContain(`key ${pkg.hash.slice(0, 8)}`);
+    expect(screen.getByTestId('engrave-package-state').textContent).toContain(
+      'The frozen programs still describe this job.',
+    );
+    // The job's stock is not a shelf entry: nothing was taken, and the line says so.
+    expect(screen.getByTestId('engrave-package-reservation').textContent).toContain('not a shelf entry');
+  });
+
+  it('does not freeze while the gate is red', async () => {
+    const job = defaultEngraveJob();
+    draw({
+      job,
+      report: reportOf([row('error', 'tool-too-big', 'the cutter cannot reach the label')]),
+      pkg: null,
+      generated: generated([P1]),
+    });
+
+    // Give the freeze effect every chance to run before saying it did not.
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    });
+    expect(useEngravePackageStore.getState().packages).toEqual([]);
+    expect(screen.getByTestId('engrave-package').dataset.state).toBe('none');
+    expect(screen.queryByTestId('engrave-cut-plan')).toBeNull();
+  });
+
+  it('keeps a stale package and its blank, and re-freezes only on an explicit press', async () => {
+    const job = shelfJob();
+    const pkg = frozen(job, [P1]);
+    useEngravePackageStore.setState({ packages: [pkg] });
+    useStockStore.setState({
+      items: [{ ...shelfItem(), reservations: [{ jobId: job.id, quantity: 1, at: AT }] }],
+    });
+    shelfItems = useStockStore.getState().items;
+
+    const edited: EngraveJob = {
+      ...job,
+      labels: job.labels.map((label, i) => (i === 0 ? { ...label, depth: label.depth + 0.1 } : label)),
+    };
+    const staleRow = row('error', 'package-stale', 'the job changed since it was frozen: label depth changed');
+    draw({ job: edited, report: reportOf([staleRow]), pkg, generated: generated([P1]) });
+
+    await waitFor(() => expect(screen.getByTestId('engrave-package').dataset.state).toBe('stale'));
+    expect(screen.getByTestId('engrave-package-state').textContent).toContain('Its blank stays held for this job.');
+    expect(screen.getByTestId('engrave-package-reservation').textContent).toContain(`Held for ${job.id}`);
+
+    const refreeze = screen.getByTestId('engrave-package-refreeze') as HTMLButtonElement;
+    expect(refreeze.disabled).toBe(false);
+    // Nothing moved on staleness alone.
+    expect(storedPackage(job).hash).toBe(pkg.hash);
+    expect(
+      useStockStore.getState().items[0]!.reservations.filter((r) => r.jobId === job.id),
+    ).toHaveLength(1);
+
+    fireEvent.click(refreeze);
+    await waitFor(() => expect(screen.getByTestId('engrave-package').dataset.state).toBe('current'));
+
+    const after = storedPackage(job);
+    expect(after.hash).not.toBe(pkg.hash);
+    expect(useEngravePackageStore.getState().packages).toHaveLength(1);
+    // A re-freeze MOVES the hold: one reservation for this job, not two.
+    const holds = useStockStore.getState().items[0]!.reservations.filter((r) => r.jobId === job.id);
+    expect(holds).toHaveLength(1);
+    expect(holds[0]!.quantity).toBe(1);
+    expect(screen.getByTestId('engrave-package-reservation-note').textContent).toContain('blank held for this job');
+  });
+
+  it('plays the frozen texts even when the live Generate holds different text', async () => {
+    const job = twoSetupJob();
+    const pkg = frozen(job, [P1, P2]);
+    useEngravePackageStore.setState({ packages: [pkg] });
+    // The live result carries the SAME verifier keys but different text: the reports are matched by
+    // hash, while the file that is sent must be the package's.
+    const live = generated([
+      { ...P1, nc: 'LIVE P1\n', programHash: P1.programHash },
+      { ...P2, nc: 'LIVE P2\n', programHash: P2.programHash },
+    ]);
+    draw({ job, report: reportOf(), pkg, generated: live });
+
+    fireEvent.click(await screen.findByTestId('engrave-release-upload'));
+    fireEvent.click(screen.getByTestId('engrave-release-upload-confirm-send'));
+    await screen.findByTestId('engrave-release-start');
+
+    const files = useEngraveReleaseStore.getState().records[`${TARGET.host}:${TARGET.port}`]?.files ?? [];
+    expect(files.map((f) => f.nc)).toEqual([NC1, NC2]);
+    expect(uploads).toHaveLength(2);
+    expect(uploads[0]!.content).toContain('M331');
+    expect(uploads[1]!.content).toContain('M332');
+    expect(uploads.some((u) => u.content.includes('LIVE'))).toBe(false);
+  });
+
+  it('refuses a frozen text with no verifier report, in the surface and in the store', async () => {
+    const job = twoSetupJob();
+    const pkg = frozen(job, [P1, P2]);
+    useEngravePackageStore.setState({ packages: [pkg] });
+    // A fresh session with no Generate: no report matches the frozen texts.
+    draw({ job, report: reportOf(), pkg, generated: null });
+
+    await waitFor(() =>
+      expect(screen.getByTestId('engrave-release-blocked').textContent).toContain(
+        'program 1 has no verifier report in this session',
+      ),
+    );
+    expect(screen.queryByTestId('engrave-release-upload')).toBeNull();
+
+    // The store refuses too: verified-only is not a disabled button.
+    const sources = frozenReleaseSources(
+      job,
+      pkg,
+      new Map([[P1.programHash, VERIFY]]), // program 2's frozen text has no report
+    );
+    await act(async () => {
+      useEngraveReleaseStore.getState().plan(TARGET, job, sources);
+      await useEngraveReleaseStore.getState().uploadAll(TARGET);
+    });
+    expect(uploads).toHaveLength(1);
+    const rec = useEngraveReleaseStore.getState().records[`${TARGET.host}:${TARGET.port}`];
+    expect(rec?.phase).toBe('failed');
+    expect(rec?.notes.join('\n')).toContain('no verifier report for its frozen text');
+  });
+
+  it('shows ONE plan under Cut, and run controls only when this build may drive a machine', async () => {
+    const job = twoSetupJob();
+    const pkg = frozen(job, [P1, P2]);
+    useEngravePackageStore.setState({ packages: [pkg] });
+    const props = { job, report: reportOf(), pkg, generated: generated([P1, P2]) };
+    const view = draw({ ...props, canDrive: true });
+
+    expect(screen.getAllByTestId('run-plan')).toHaveLength(1);
+    expect(screen.getByTestId('machine-strip')).toBeTruthy();
+    expect(screen.getByTestId('engrave-cut-plan')).toBeTruthy();
+    expect(screen.getByTestId('engrave-cut-run')).toBeTruthy();
+
+    // Same plan, no controls: the web build shows what the run would be but sends nothing.
+    view.show({ ...props, canDrive: false });
+    expect(screen.getAllByTestId('run-plan')).toHaveLength(1);
+    expect(screen.getByTestId('machine-strip')).toBeTruthy();
+    expect(screen.queryByTestId('engrave-cut-run')).toBeNull();
+  });
+});

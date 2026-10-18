@@ -15,8 +15,35 @@
  * single-file job uploads under the name every existing surface already prints.
  */
 
-import type { EngraveProgram, EngraveProgramKind } from '@/workers/sim/engraveGenerate';
+import type { EngraveProgramKind } from '@/workers/sim/engraveGenerate';
+import type { EngraveJob, FrozenPackage } from '@/types/engraveJob';
+import type { VerifyReport } from '@/engine/cnc/verify';
 import { runSheetFileName } from './runSheet';
+
+/**
+ * One approved program as the release step reads it.
+ *
+ * #419 §3 / #425 — THE TEXT IS THE FROZEN PACKAGE'S. After approval the package is the only copy of
+ * what the machine will play: a live `EngraveGenerated` is a statement about the document as it is
+ * NOW, and the document may have changed since. `frozenReleaseSources` turns a package into this
+ * shape once; nothing downstream re-reads the job for a program.
+ *
+ * `verify` is nullable because the package does not carry verifier reports. The Cut surface matches
+ * the current session's reports to the frozen texts by FNV hash; a frozen program with no match is
+ * refused at the upload, never sent unverified.
+ */
+export interface ReleaseSource {
+  /** 1-based, the operator's "Setup 2". The facing program shares the first setup's index. */
+  setupIndex: number;
+  toolKey: string;
+  /** #473 — `'facing'` for the run's first file when the job faces; absent reads as `'engrave'`. */
+  kind?: EngraveProgramKind;
+  nc: string;
+  /** FNV of `nc` — the package's key and the machine record's key (decision 3). */
+  hash: string;
+  /** The verifier report for this exact text, or null when this session holds none. */
+  verify: VerifyReport | null;
+}
 
 /** The stem of a job's file names — `runSheetFileName` without its `.nc`. */
 export function releaseStem(jobName: string): string {
@@ -48,7 +75,8 @@ export interface ReleaseProgram {
   filename: string;
   hash: string;
   nc: string;
-  verify: EngraveProgram['verify'];
+  /** The report that gated this text; null when this session holds none (the upload refuses). */
+  verify: VerifyReport | null;
   /** This machine has already finished this program cleanly (#419 §4.5). */
   done: boolean;
 }
@@ -63,7 +91,7 @@ export interface ReleaseProgram {
  */
 export function releasePrograms(
   jobName: string,
-  programs: readonly EngraveProgram[],
+  programs: readonly ReleaseSource[],
   finishedHashes: readonly string[],
 ): ReleaseProgram[] {
   const total = programs.length;
@@ -75,10 +103,38 @@ export function releasePrograms(
     toolKey: p.toolKey,
     kind: p.kind,
     filename: releaseFileName(jobName, i + 1, total),
-    hash: p.programHash,
+    hash: p.hash,
     nc: p.nc,
     verify: p.verify,
-    done: done.has(p.programHash),
+    done: done.has(p.hash),
+  }));
+}
+
+/**
+ * The frozen package as the release step's sources, in cut order.
+ *
+ * The texts, order and keys come from the package only. Two things the package deliberately does
+ * NOT store are supplied here:
+ *
+ *  - `kind`: #473's generator posts a faced job's face file FIRST, so position plus the job's own
+ *    facing flag is the reading. A faced package cannot freeze without the face program (the gate
+ *    refuses the run otherwise), and a non-faced package never has one.
+ *  - `verify`: the package holds no verifier reports. `reportsByHash` is this session's Generate,
+ *    matched by the frozen program's own FNV key. A missing entry stays null and the upload refuses
+ *    it — fabricating a report would break the verified-only rule.
+ */
+export function frozenReleaseSources(
+  job: Pick<EngraveJob, 'facing'>,
+  pkg: Pick<FrozenPackage, 'programs'>,
+  reportsByHash: ReadonlyMap<string, VerifyReport>,
+): ReleaseSource[] {
+  return pkg.programs.map((program, i) => ({
+    setupIndex: program.setupIndex,
+    toolKey: program.toolKey,
+    ...(i === 0 && job.facing?.enabled === true ? { kind: 'facing' as const } : {}),
+    nc: program.nc,
+    hash: program.hash,
+    verify: reportsByHash.get(program.hash) ?? null,
   }));
 }
 

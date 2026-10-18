@@ -11,6 +11,8 @@ import { useEngraveJobStore, undoEngraveRemoval, resetEngraveRemovalUndo, REMOVA
 import { useEngraveRunStore } from '@/store/engraveRunStore';
 import { useMachineStore } from '@/store/machineStore';
 import { resetEngraveReleaseStore } from '@/store/engraveReleaseStore';
+import { resetEngravePackageStore } from '@/store/engravePackageStore';
+import { resetCncMode } from '@/store/cncModeStore';
 import { resetEngraveRows } from '@/store/engraveRowStore';
 import { useSettingsStore } from '@/store/settingsStore';
 import {
@@ -2060,10 +2062,14 @@ describe('EngravePanel — the release step routing (#469)', () => {
       });
     });
     render(<EngravePanel />);
+    // #419 §3 — the run controls live under Cut, over the package the green gate freezes.
+    fireEvent.click(screen.getByTestId('cnc-mode-cut'));
   }
 
   beforeEach(() => {
     caps.canDriveMachine = true;
+    resetCncMode();
+    resetEngravePackageStore();
   });
 
   afterEach(() => {
@@ -2071,6 +2077,8 @@ describe('EngravePanel — the release step routing (#469)', () => {
     useEngraveRunStore.getState().reset();
     useMachineStore.setState({ machine: null });
     resetEngraveReleaseStore();
+    resetEngravePackageStore();
+    resetCncMode();
   });
 
   it('routes a multi-program job to the release step, not the single-file upload', async () => {
