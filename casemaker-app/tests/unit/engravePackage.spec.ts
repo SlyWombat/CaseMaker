@@ -23,6 +23,8 @@ import {
   type PackageProgramInput,
 } from '@/engine/cnc/engrave/package';
 import { resetEngravePackageStore, useEngravePackageStore } from '@/store/engravePackageStore';
+import { useEngraveJobStore } from '@/store/engraveJobStore';
+import { parseEngraveJob } from '@/store/engraveJobSchema';
 import type { EngraveJob } from '@/types/engraveJob';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -140,10 +142,17 @@ describe('the package store (#419 §4): freeze takes the blank, and keeps it whi
   const entry = (id: string) =>
     (useStockStore.getState().items.find((i) => i.id === id) ?? null)!;
 
-  const shelfJob = () => ({ ...defaultEngraveJob(), stockEntry: shelfStock('stock-plate1') });
+  const shelfJob = () => {
+    // The document is the owner (#425), so a freeze writes into the OPEN job. Build the shelf job
+    // from the store's own document and put it back, so the ids agree.
+    const job: EngraveJob = { ...useEngraveJobStore.getState().job, stockEntry: shelfStock('stock-plate1') };
+    useEngraveJobStore.getState().replace(job);
+    return job;
+  };
 
   beforeEach(() => {
     localStorage.clear();
+    useEngraveJobStore.getState().reset();
     resetEngravePackageStore();
     resetStockStore();
   });
@@ -152,7 +161,7 @@ describe('the package store (#419 §4): freeze takes the blank, and keeps it whi
     vi.resetModules();
   });
 
-  it('freezes, persists to this browser, and holds the job’s blank', async () => {
+  it('freezes into the JOB DOCUMENT, holds the blank, and writes no browser package cache', async () => {
     fakeShelf(SHELF.map((s) => StockItemSchema.parse(s)));
     const job = shelfJob();
     const res = await useEngravePackageStore.getState().freeze(job, [program('G21\nM331\nM332\nM2\n')]);
@@ -160,8 +169,10 @@ describe('the package store (#419 §4): freeze takes the blank, and keeps it whi
     if (!res.ok) return;
     expect(res.reservation.kind).toBe('held');
 
+    // The document owns it (#425 R8): the block is in the open job, and the old cache key is gone.
+    expect(useEngraveJobStore.getState().job.package).toEqual(res.package);
     expect(useEngravePackageStore.getState().packageFor(job.id)?.hash).toBe(res.package.hash);
-    expect(JSON.parse(localStorage.getItem('casemaker.packages.v1') ?? '[]')).toHaveLength(1);
+    expect(localStorage.getItem('casemaker.packages.v1')).toBeNull();
 
     const plate = entry('stock-plate1');
     expect(plate.reservations.map((r) => r.jobId).sort()).toEqual(['job-1', job.id].sort());
@@ -224,7 +235,8 @@ describe('the package store (#419 §4): freeze takes the blank, and keeps it whi
   it('a refused shelf does not refuse the freeze — the package exists, the reservation says why', async () => {
     // stock-blank1 is at zero (consumed by job-12): reserve refuses with the consuming job named.
     fakeShelf(SHELF.map((s) => StockItemSchema.parse(s)));
-    const job = { ...defaultEngraveJob(), stockEntry: shelfStock('stock-blank1') };
+    const job: EngraveJob = { ...useEngraveJobStore.getState().job, stockEntry: shelfStock('stock-blank1') };
+    useEngraveJobStore.getState().replace(job);
     const res = await useEngravePackageStore.getState().freeze(job, [program('G21\nM2\n')]);
     expect(res.ok).toBe(true);
     if (!res.ok) return;
@@ -241,12 +253,21 @@ describe('the package store (#419 §4): freeze takes the blank, and keeps it whi
     expect(entry('stock-plate1').reservations.map((r) => r.jobId)).not.toContain(job.id);
   });
 
-  it('survives a reload: the package and its key are read back from this browser', async () => {
-    const job = defaultEngraveJob();
+  it('survives a reload through the document’s own autosave, not a package cache', async () => {
+    const job = shelfJob();
     const nc = 'G21\nM331\nG0 X1\nM332\nM2\n';
     const res = await useEngravePackageStore.getState().freeze(job, [program(nc)]);
     if (!res.ok) throw new Error(res.reason);
 
+    // What Save/Open reads: the serialized v3 document, parsed back through the real schema.
+    const text = JSON.stringify(useEngraveJobStore.getState().job);
+    const parsed = parseEngraveJob(JSON.parse(text));
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.job.package?.hash).toBe(res.package.hash);
+    expect(parsed.job.package?.programs[0]?.nc).toBe(nc);
+
+    // …and a fresh store module hydrates that same document from the v3 autosave slot.
     vi.resetModules();
     const fresh = await import('@/store/engravePackageStore');
     const back = fresh.useEngravePackageStore.getState().packageFor(job.id);
