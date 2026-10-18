@@ -1,4 +1,5 @@
 import type { Project } from '@/types';
+import { openTextFile } from '@/utils/openTextFile';
 import { projectSchema } from './projectSchema';
 
 export function serializeProject(project: Project): string {
@@ -133,4 +134,102 @@ export function downloadProjectJson(project: Project): void {
 export async function readProjectFromFile(file: File): Promise<Project> {
   const text = await file.text();
   return parseProject(text);
+}
+
+// ---------------------------------------------------------------------------------------------
+// Generic text-file pickers (#425). The project's functions above predate the job document; a job
+// file needs the same File System Access path but a different type and no project schema. Keeping
+// the binding (#144) and the E2E fallback in one place is the point — a second copy is how the
+// "Illegal invocation" bug comes back.
+
+export interface TextFileType {
+  description: string;
+  accept: Record<string, string[]>;
+}
+
+export type SaveTextOutcome =
+  /** Written through a handle that can be reused for the next in-place Save. */
+  | { kind: 'saved'; handle: ProjectFileHandle }
+  /** No picker (or E2E, where the native dialog cannot complete): the file landed in Downloads. */
+  | { kind: 'downloaded' }
+  | { kind: 'cancelled' };
+
+/** True where a native dialog cannot be completed: headless E2E and vitest. */
+export function nativeDialogUnavailable(): boolean {
+  return import.meta.env.VITE_E2E === '1' || import.meta.env.MODE === 'test';
+}
+
+/** Write text through a bound handle. */
+export async function writeTextToHandle(handle: ProjectFileHandle, text: string): Promise<void> {
+  const h = handle as FileSystemFileHandle;
+  const writable = await h.createWritable();
+  await writable.write(text);
+  await writable.close();
+}
+
+/** Save text in place (a handle) or through the picker/download fallback. */
+export async function saveTextFile(
+  text: string,
+  suggestedName: string,
+  type: TextFileType,
+  existingHandle?: ProjectFileHandle | null,
+): Promise<SaveTextOutcome> {
+  if (existingHandle !== undefined && existingHandle !== null) {
+    await writeTextToHandle(existingHandle, text);
+    return { kind: 'saved', handle: existingHandle };
+  }
+  const api = fsAccess();
+  if (api !== null && !nativeDialogUnavailable()) {
+    try {
+      const handle = await api.save({ suggestedName, types: [type] });
+      await writeTextToHandle(handle, text);
+      return { kind: 'saved', handle };
+    } catch (error) {
+      // User cancelled the dialog: not a failure and not a write.
+      if (error instanceof DOMException && error.name === 'AbortError') return { kind: 'cancelled' };
+      throw error;
+    }
+  }
+  downloadText(text, suggestedName);
+  return { kind: 'downloaded' };
+}
+
+/**
+ * Open one text file: the native picker where it can complete, the `<input type="file">` fallback
+ * in E2E/vitest (where a picker exists but never resolves). `null` on cancel.
+ */
+export async function openTextFileViaPicker(
+  type: TextFileType,
+): Promise<{ text: string; name: string; handle: ProjectFileHandle | null } | null> {
+  const api = fsAccess();
+  if (api !== null && !nativeDialogUnavailable()) {
+    try {
+      const [handle] = await api.open({ multiple: false, types: [type] });
+      if (!handle) return null;
+      const file = await handle.getFile();
+      return { text: await file.text(), name: handle.name, handle };
+    } catch (error) {
+      if (error instanceof DOMException && error.name === 'AbortError') return null;
+      throw error;
+    }
+  }
+  // The `<input>` fallback wants one MIME/extensions pair; every type here has exactly one.
+  const entry = Object.entries(type.accept)[0];
+  const mime = entry?.[0] ?? 'application/json';
+  const extensions = entry?.[1] ?? ['.json'];
+  const picked = await openTextFile({ description: type.description, extensions, mime });
+  return picked === null ? null : { ...picked, handle: null };
+}
+
+/** The anchor-download fallback, named once. */
+export function downloadText(text: string, filename: string, mime = 'application/json'): void {
+  const blob = new Blob([text], { type: mime });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }

@@ -78,7 +78,7 @@ export interface EngravePackageState {
   release: (jobId: string) => Promise<boolean>;
 }
 
-export const useEngravePackageStore = create<EngravePackageState>()((set, get) => ({
+export const useEngravePackageStore = create<EngravePackageState>()((_set, get) => ({
   packages: documentPackages(),
 
   packageFor: (jobId) => documentPackage(jobId),

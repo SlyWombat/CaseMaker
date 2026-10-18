@@ -13,6 +13,13 @@ import {
   packageStaleness,
   type FrozenProgram,
 } from '@/engine/cnc/engrave/package';
+import { embedSource } from '@/engine/cnc/engrave/jobSources';
+import {
+  JOB_FILE_EXTENSION,
+  jobFileName,
+  parseJobFile,
+  serializeJobFile,
+} from '@/engine/cnc/engrave/jobFile';
 import {
   CURRENT_JOB_SCHEMA_VERSION,
   newerJobVersionMessage,
@@ -222,6 +229,72 @@ describe('the v3 document envelope (#425)', () => {
     if (parsed.ok) return;
     expect(parsed.errors.join(' ')).not.toContain('newer version');
     expect(parsed.errors.join(' ')).toContain('schemaVersion');
+  });
+});
+
+describe('the job file (#425 §6)', () => {
+  it('names the file from the job, with the one extension every job uses', () => {
+    expect(JOB_FILE_EXTENSION).toBe('.cutjob.json');
+    expect(jobFileName('Badge blank')).toBe('Badge_blank.cutjob.json');
+    expect(jobFileName('***')).toBe('job.cutjob.json');
+  });
+
+  it('serializes the document itself, and a round trip keeps package, run log and sources', async () => {
+    const { doc } = withPackage(defaultEngraveJob());
+    const raw = new TextEncoder().encode('<svg xmlns="http://www.w3.org/2000/svg"/>');
+    const bytes = raw.buffer.slice(raw.byteOffset, raw.byteOffset + raw.byteLength) as ArrayBuffer;
+    const { source: embedded } = await embedSource({ kind: 'svg', name: 'logo.svg', bytes });
+    const full: EngraveJob = {
+      ...doc,
+      sourceFiles: [embedded],
+      runLog: [runEntry()],
+    };
+
+    const parsed = await parseJobFile(serializeJobFile(full));
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.job).toEqual(full);
+    expect(parsed.package).toEqual({ ok: true, reason: null });
+    expect(parsed.sources.map((check) => [check.source.name, check.status])).toEqual([['logo.svg', 'ok']]);
+    expect(parsed.sourceError).toBeNull();
+  });
+
+  it('refuses malformed JSON and a schema-invalid field with the named error', async () => {
+    const malformed = await parseJobFile('{ not json');
+    expect(malformed.ok).toBe(false);
+    if (malformed.ok) return;
+    expect(malformed.errors[0]).toContain('the file is not valid JSON');
+
+    const bad = JSON.parse(JSON.stringify(defaultEngraveJob())) as {
+      labels: Record<string, unknown>[];
+    };
+    delete bad.labels[0]!.text;
+    const refused = await parseJobFile(JSON.stringify(bad));
+    expect(refused.ok).toBe(false);
+    if (refused.ok) return;
+    expect(refused.errors[0]).toMatch(/^labels\[0\]\.text: /);
+  });
+
+  it('opens a tampered package and a missing unrequired source, reporting both', async () => {
+    const { doc } = withPackage(defaultEngraveJob());
+    const pkg = doc.package!;
+    const tampered: EngraveJob = {
+      ...doc,
+      package: { ...pkg, programs: pkg.programs.map((p) => ({ ...p, nc: `${p.nc}G0 X0\n` })) },
+      sourceFiles: [source({ embedded: null })],
+    };
+
+    const parsed = await parseJobFile(serializeJobFile(tampered));
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    // The document is the owner: a bad package is a state the run gate refuses, not a lost job.
+    expect(parsed.job.package?.programs[0]!.nc).toBe(`${NC}G0 X0\n`);
+    expect(parsed.package).toEqual({
+      ok: false,
+      reason: 'the saved program text does not match its hash; the package will not be offered for a run',
+    });
+    expect(parsed.sources.map((check) => check.status)).toEqual(['missing']);
+    expect(parsed.sourceError).toBeNull();
   });
 });
 
