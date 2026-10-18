@@ -26,6 +26,7 @@ import type { ConditionSummary } from '@/engine/cnc/toolCondition';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import { LOST_DETAIL_RATIO_FALLBACK, type LabelEngravability } from '@/workers/sim/engraveGeometry';
 import type { EngraveJob } from '@/types/engraveJob';
+import { primitiveLabel, primitiveReducesToRegion } from './partPlan';
 import {
   findItem,
   itemName,
@@ -142,6 +143,13 @@ function enabledItems(job: EngraveJob): { id: string; name: string; depth: numbe
       const found = findItem(job, item.id);
       out.push({ id: item.id, name: found ? itemName(found) : item.id, depth: item.depth });
     }
+  }
+  // #435 — a cuttable primitive is a region in `toPartPlan` exactly like these four, so it takes
+  // the same place in the reach table. Leaving it out would make the table's share math miss its
+  // area and, worse, hide a primitive the rough cutter cannot enter from the two-tool split.
+  for (const primitive of job.primitives ?? []) {
+    if (!primitive.enabled || !primitiveReducesToRegion(primitive)) continue;
+    out.push({ id: primitive.id, name: primitiveLabel(primitive), depth: primitive.depth });
   }
   return out;
 }

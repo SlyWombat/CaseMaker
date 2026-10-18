@@ -57,6 +57,7 @@ import {
   labelGlyphMeasure,
   labelJawReach,
   primitiveLabel,
+  primitiveReducesToRegion,
   voidLimitForItem,
 } from '@/engine/cnc/engrave/partPlan';
 import { ensureLabelFontsLoaded, ensureSeedFontsLoaded, labelFontsLoaded } from '@/engine/fonts/registry';
@@ -696,12 +697,18 @@ export function EngravePanel(): JSX.Element {
         : (preview?.colourBoundaryDepth ?? null);
   const vCarveRatio =
     cone !== null && cone.tipRadius > 0 && params !== null ? params.stepOver / (2 * cone.tipRadius) : null;
-  const vCarveItems = vCarveJob
+  // #435 — a cuttable primitive is a region the V-carve pockets too, so its colour-plane numbers
+  // belong here beside the labels and shapes. The list is normalised to id/name/depth because a
+  // primitive is not an `EngraveAnyItem` (it has no text and no `itemName` wording).
+  const vCarveItems: { id: string; name: string; depth: number }[] = vCarveJob
     ? [
-        ...job.labels.filter((i) => i.enabled),
-        ...job.shapes.filter((i) => i.enabled),
-        ...(job.combined ?? []).filter((i) => i.enabled),
-        ...(job.vectors ?? []).filter((i) => i.enabled),
+        ...job.labels.filter((i) => i.enabled).map((i) => ({ id: i.id, name: itemName(i), depth: i.depth })),
+        ...job.shapes.filter((i) => i.enabled).map((i) => ({ id: i.id, name: itemName(i), depth: i.depth })),
+        ...(job.combined ?? []).filter((i) => i.enabled).map((i) => ({ id: i.id, name: itemName(i), depth: i.depth })),
+        ...(job.vectors ?? []).filter((i) => i.enabled).map((i) => ({ id: i.id, name: itemName(i), depth: i.depth })),
+        ...(job.primitives ?? [])
+          .filter((p) => p.enabled && primitiveReducesToRegion(p))
+          .map((p) => ({ id: p.id, name: primitiveLabel(p), depth: p.depth })),
       ]
     : [];
   // Only the clamps (#317): an `ok: false` result carries `-refused` diagnostics, which the refusal
@@ -2354,7 +2361,7 @@ export function EngravePanel(): JSX.Element {
                 vCarveRatio !== null && Number.isFinite(vCarveRatio) && vCarveRatio > 0 && vCarveRatio <= 1
                   ? vCarveStepover(plane.planeRadius, cone, vCarveRatio)
                   : null;
-              const name = itemName(item);
+              const name = item.name;
               return (
                 <p
                   key={item.id}
@@ -2387,7 +2394,7 @@ export function EngravePanel(): JSX.Element {
                   style={{ ...MUTED, color: '#e0c07a' }}
                   data-testid={`engrave-vcarve-clamp-${item.id}`}
                 >
-                  {vCarveStepoverClampNote(itemName(item), stepover, cone.tipRadius)}
+                  {vCarveStepoverClampNote(item.name, stepover, cone.tipRadius)}
                 </p>
               );
             })}

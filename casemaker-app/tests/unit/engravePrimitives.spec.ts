@@ -14,7 +14,10 @@ import {
 } from '@/engine/cnc/engrave/partPlan';
 import { jobSetups, validateJob } from '@/engine/cnc/engrave/jobSetup';
 import { jobForSetup } from '@/engine/cnc/engrave/programs';
+import { reachabilityFor } from '@/engine/cnc/engrave/reachability';
+import { flatEndMill } from '@/engine/cnc/tool';
 import { aabbOfProfile } from '@/engine/compiler/profile';
+import type { LabelEngravability } from '@/workers/sim/engraveGeometry';
 import type { EngraveJob, EngravePrimitive, EngraveTargetObject } from '@/types/engraveJob';
 
 const BASE = {
@@ -174,6 +177,28 @@ describe('#435 — setups see the primitives that actually cut', () => {
     ]);
     const [setup] = jobSetups(job);
     expect(setup?.itemIds).toEqual(['box']);
+  });
+
+  it('puts a cuttable primitive in the reach table, so the two-tool split sees its area', () => {
+    const tool = { key: 'flat', tool: flatEndMill(2), provenance: 'engravePrimitives test' };
+    const box = primitive({ id: 'box', kind: 'box', width: 20, height: 10 });
+    const cyl = primitive({ id: 'cyl', kind: 'cylinder', diameter: 6 });
+    const sphere = primitive({ id: 'sphere', kind: 'sphere', diameter: 8 });
+    const measure = (): LabelEngravability[] => [
+      { labelId: 'box', glyphArea: 200, openedArea: 50, ratio: 0.25, emptyChars: [], outsideArea: 0, polygons: [] },
+    ];
+    const reach = reachabilityFor(jobWith([box, cyl, sphere]), [tool], [], measure);
+    // The refused sphere is not a region; the two cuttable forms are, with the names the findings
+    // use, so the run sheet's "cannot enter" sentence can name them rather than print an id.
+    expect(reach.items.map((i) => [i.id, i.name, i.depth])).toEqual([
+      ['box', 'Box 20×10', 2],
+      ['cyl', 'Cylinder ⌀6', 2],
+    ]);
+    const flat = reach.cutters.find((c) => c.key === 'flat');
+    expect(flat?.rows.map((r) => [r.itemId, r.ratio])).toEqual([
+      ['box', 0.25],
+      ['cyl', 1],
+    ]);
   });
 
   it('filters primitives by the setup that owns them', () => {
