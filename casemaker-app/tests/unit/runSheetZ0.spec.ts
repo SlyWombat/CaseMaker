@@ -456,3 +456,115 @@ describe('the run sheet states the loop ordering (#487)', () => {
     expect(section('cut', s).some((x) => /^Air travel, which is what the loop ordering/.test(x.text))).toBe(false);
   });
 });
+
+/**
+ * #419 — the run is the FILES, not one result. When the generated half carries the program list,
+ * each later program gets its own Cut section fed from its own facts. The rest pair is the case the
+ * sheet already knew how to word ("Program 1/Program 2"): those words must follow the pair to its
+ * real position in the run, and must not be printed twice.
+ */
+describe('per-program Cut sections for the rest pair (#419)', () => {
+  const program = (nc: string, frameNc: string | null, toolKey: string) => ({
+    setupIndex: 1,
+    toolKey,
+    nc,
+    frameNc,
+    cam: { operations: 2, cuttingMoves: 40, estimatedSeconds: 200, passes: 1 },
+  });
+
+  const text = (steps: RunSheetStep[]): string =>
+    steps.map((s) => `${s.text} ${s.value ?? ''} ${s.record ?? ''}`).join('\n');
+
+  const withRun = (nc: string, programs: ReturnType<typeof program>[]): RunSheetGenerated => ({
+    ...generated(),
+    nc,
+    programs,
+  });
+
+  it('moves the second program’s feeds and swap routine into cut-2, out of program 1', () => {
+    const programs = [
+      program('single-rough.nc', 'single-rough.frame.nc', 'o-flute-2'),
+      program('single-rest.nc', null, 'o-flute-0.6'),
+    ];
+    const s = buildRunSheet(job(), withRun('single-rough.nc', programs), null, NOW, undefined, { restPass: facts() });
+    const cut = text(section('cut', s));
+    const cut2 = text(section('cut-2', s));
+
+    // Nothing about the second program stays under program 1.
+    expect(cut).not.toContain('Set Z0 for the second program');
+    expect(cut).not.toContain('single-rest.nc');
+    expect(cut).not.toContain('o-flute-0.6');
+
+    // The section says who it is, then the pair's own recorded routine and feeds.
+    expect(cut2).toContain('Program 2 is single-rest.nc, the rest cut for setup 1');
+    expect(cut2).toContain('cut with o-flute-0.6 (⌀ 0.6 mm)');
+    expect(cut2).toContain('Program 2, single-rest.nc (o-flute-0.6, ⌀ 0.6 mm) —');
+    expect(cut2).toContain('Set Z0 for the second program');
+    expect(cut2).toContain('Z0 = surface + (cutter PRB − reference PRB)');
+    expect(cut2).toContain('the first program’s own depth');
+    expect(cut2).toContain('18000 RPM');
+
+    // The narrative still describes the pair once, and the pair's facts are not duplicated.
+    const rest = text(section('rest', s));
+    expect(rest).toContain('TWO programs');
+    const all = text(s.sections.flatMap((x) => x.steps));
+    expect(all.split('Set Z0 for the second program').length - 1).toBe(1);
+    expect(all.split('Program 2, single-rest.nc').length - 1).toBe(1);
+    // The rest pair happens after program 1, before the warnings.
+    const ids = s.sections.map((x) => x.id);
+    expect(ids.indexOf('cut')).toBeLessThan(ids.indexOf('cut-2'));
+    expect(ids.indexOf('cut-2')).toBeLessThan(ids.indexOf('warnings'));
+  });
+
+  it('numbers a rest pair that follows another program: rough 2, rest 3, with the real words', () => {
+    const programs = [
+      program('setup-engrave.nc', 'setup-engrave.frame.nc', 'engraver-0.2'),
+      program('single-rough.nc', 'single-rough.frame.nc', 'o-flute-2'),
+      program('single-rest.nc', null, 'o-flute-0.6'),
+    ];
+    const s = buildRunSheet(job(), withRun('setup-engrave.nc', programs), null, NOW, undefined, { restPass: facts() });
+    const cut = text(section('cut', s));
+    const cut2 = text(section('cut-2', s));
+    const cut3 = text(section('cut-3', s));
+
+    // Program 1 is the engraver; the pair's files are programs 2 and 3.
+    expect(cut).not.toContain('Set Z0');
+    expect(cut).not.toContain('single-rough.nc');
+    expect(cut).not.toContain('Program 2');
+
+    expect(cut2).toContain('Program 2 is single-rough.nc, the first cut of the rest pair');
+    expect(cut2).toContain('Program 2, single-rough.nc (o-flute-2, ⌀ 2 mm) —');
+    expect(cut2).toContain('single-rough.frame.nc');
+
+    expect(cut3).toContain('Program 3 is single-rest.nc, the rest cut');
+    expect(cut3).toContain('Program 3, single-rest.nc (o-flute-0.6, ⌀ 0.6 mm) —');
+    // The routine names the REAL positions, not "the second program" and "the first program".
+    expect(cut3).toContain('Set Z0 for program 3');
+    expect(cut3).toContain('program 3’s floors');
+    expect(cut3).toContain('program 2’s own depth');
+    expect(cut3).not.toContain('the second program');
+    expect(cut3).not.toContain('the first program’s');
+
+    const all = text(s.sections.flatMap((x) => x.steps));
+    expect(all.split('Set Z0 for program 3').length - 1).toBe(1);
+    // The rough program's feeds are stated once, in its own section.
+    expect(all.split('Program 2, single-rough.nc').length - 1).toBe(1);
+  });
+
+  it('keeps the old single-document placement when the run list does not place the pair', () => {
+    // A caller may hold rest facts from a generation whose program list it does not pass (the CLI
+    // before this field, an older stored result). Nothing moves: the old words stay in `cut`.
+    const s = buildRunSheet(
+      job(),
+      withRun('setup-engrave.nc', [program('setup-engrave.nc', 'setup-engrave.frame.nc', 'engraver-0.2')]),
+      null,
+      NOW,
+      undefined,
+      { restPass: facts() },
+    );
+    const cut = text(section('cut', s));
+    expect(s.sections.some((x) => x.id === 'cut-2')).toBe(false);
+    expect(cut).toContain('Set Z0 for the second program');
+    expect(cut).toContain('Program 2, single-rest.nc (o-flute-0.6, ⌀ 0.6 mm) —');
+  });
+});

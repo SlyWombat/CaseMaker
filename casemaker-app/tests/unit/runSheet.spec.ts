@@ -1672,3 +1672,204 @@ describe('runSheet — the drill program (#434)', () => {
     expect(all).not.toContain('The drill’s point');
   });
 });
+
+describe('runSheet — every program gets its own Cut section (#419)', () => {
+  const ENGR = 'inv:engraver-0.2';
+  const DRILL_NC = 'G21 G90\nT2 M6\nS9000\nG1 Z-4.901 F120\nM2';
+  const DRILL_FRAME = 'G21 G90\nT2 M6\nG1 Z1.000\nM2';
+  const OTHER_NC = 'G21 G90\nT1 M6\nS18000\nG1 Z-0.300 F420\nM2';
+  const OTHER_FRAME = 'G21 G90\nT1 M6\nG1 Z1.000\nM2';
+
+  /** A run program as the generated result carries it: its own file, frame and CAM summary. */
+  const program = (nc: string, frameNc: string | null, toolKey: string, extra: object = {}) => ({
+    setupIndex: 1,
+    toolKey,
+    nc,
+    frameNc,
+    cam: { operations: 2, cuttingMoves: 40, estimatedSeconds: 30, passes: 1 },
+    ...extra,
+  });
+
+  const allText = (sheet: RunSheet): string =>
+    sheet.sections.flatMap((s) => s.steps.map((step) => `${step.text} ${step.value ?? ''}`)).join('\n');
+  const sectionText = (sheet: RunSheet, id: string): string =>
+    section(sheet, id).steps.map((step) => `${step.text} ${step.value ?? ''}`).join('\n');
+
+  // Reuse the drill fixture from #434's block: the same bit, the same numbers, as program 2.
+  const drillJob2 = (): EngraveJob => {
+    const base = defaultEngraveJob();
+    return {
+      ...base,
+      labels: [],
+      shapes: [],
+      drills: [
+        {
+          id: 'port',
+          kind: 'drill',
+          name: 'port',
+          position: { x: 50, y: 30 },
+          rotation: 0,
+          depth: 4,
+          enabled: true,
+          through: false,
+        },
+      ],
+      toolKey: 'inv:drill-3',
+      tool: flatEndMill(3, {
+        name: '3 mm drill',
+        typeText: 'Drill',
+        shape: 'drill',
+        tipDiameter: 3,
+        diameter: 3,
+        angle: null,
+        centreCutting: null,
+      }),
+    };
+  };
+
+  const drillFacts = (): RunSheetGenerated['drill'] => ({
+    toolName: '3 mm drill',
+    settings: { peckDiameters: 1, peckClearanceMm: 0.5, pointAngleDeg: 118, plungeFeed: 120, spindleRpm: 9000 },
+    sources: {
+      peckDiameters: 'chosen for this bench',
+      peckClearanceMm: 'chosen for this bench',
+      pointAngleDeg: 'chosen for this bench',
+      plungeFeed: 'placeholder, not measured',
+      spindleRpm: 'placeholder, not measured',
+    },
+    plans: [
+      {
+        id: 'port',
+        name: 'Drill "port"',
+        diameter: 3,
+        angle: { deg: 118, from: 'the shop default drill.pointAngleDeg (chosen for this bench)' },
+        pointLength: 0.901,
+        tipDepth: 4.901,
+        peck: 3,
+        holes: [[50, 30]],
+      },
+    ],
+    simDrillPoint: { deg: 118, source: 'chosen for this bench' },
+  });
+
+  it('describes a drill program 2 in its own section and leaves program 1 free of drill facts', () => {
+    const job = drillJob2();
+    const generated: RunSheetGenerated = {
+      ...stubGenerated(job),
+      programs: [
+        program(NC, `${NC}\n;frame\n`, ENGR),
+        program(DRILL_NC, DRILL_FRAME, 'inv:drill-3', { drill: drillFacts() }),
+      ],
+    };
+    const sheet = buildRunSheet(job, generated, NO_SIM, NOW);
+    expect(section(sheet, 'cut')).toBeTruthy();
+    expect(section(sheet, 'cut-2')).toBeTruthy();
+
+    // The plan's order is the physical order: after program 1, before the warnings.
+    const ids = sheet.sections.map((s) => s.id);
+    expect(ids.indexOf('cut')).toBeLessThan(ids.indexOf('cut-2'));
+    expect(ids.indexOf('cut-2')).toBeLessThan(ids.indexOf('warnings'));
+    expect(section(sheet, 'cut-2').title).toContain('program 2');
+    expect(section(sheet, 'cut-2').title).toContain('3 mm drill');
+
+    const cut = sectionText(sheet, 'cut');
+    expect(cut).not.toContain('Drill with');
+    expect(cut).not.toContain('drill.peckDiameters');
+    expect(cut).not.toContain(DRILL_NC);
+
+    const cut2 = sectionText(sheet, 'cut-2');
+    // Who it is and what it cuts.
+    expect(cut2).toContain(`Program 2 is ${DRILL_NC}, the drill program`);
+    expect(cut2).toContain('cut with 3 mm drill');
+    // The point step, stated once for this program.
+    expect(cut2).toContain('The drill’s point');
+    expect(cut2).toContain('118° included');
+    expect(cut2).toContain('0.901 mm below the full ⌀3 mm');
+    // The drill.* numbers and their provenance.
+    expect(cut2).toContain('Drill with 3 mm drill');
+    expect(cut2).toContain('9000 RPM');
+    expect(cut2).toContain('120 mm/min plunge');
+    expect(cut2).toContain('pecks of 1 × ⌀3 = 3 mm');
+    expect(cut2).toContain('re-entry 0.5 mm');
+    expect(cut2).toContain('drill.peckDiameters');
+    expect(cut2).toContain('placeholder, not measured');
+    // Full-diameter depth against the tip.
+    expect(cut2).toContain('The full ⌀3 mm reaches 4 mm');
+    expect(cut2).toContain('tip carries 0.901 mm lower, to 4.901 mm');
+    // Its own frame and file, never program 1's.
+    expect(cut2).toContain(DRILL_FRAME);
+    expect(cut2).toContain(DRILL_NC);
+    expect(cut2).not.toContain(NC);
+
+    // One copy, in one section: the drill is not also printed under program 1.
+    const all = allText(sheet);
+    expect(all.split('Drill with 3 mm drill').length - 1).toBe(1);
+    expect(all.split('drill.peckDiameters').length - 1).toBe(1);
+    // And §1 does not claim a drill point for a run that engraves first.
+    expect(sectionText(sheet, 'need')).not.toContain('The drill’s point');
+  });
+
+  it('gives any later engraving program its own file, frame and CAM estimate', () => {
+    const job = defaultEngraveJob();
+    const generated: RunSheetGenerated = {
+      ...stubGenerated(job),
+      programs: [
+        program(NC, `${NC}\n;frame\n`, ENGR),
+        program(OTHER_NC, OTHER_FRAME, 'inv:o-flute-0.6'),
+      ],
+    };
+    const sheet = buildRunSheet(job, generated, NO_SIM, NOW);
+    const cut2 = sectionText(sheet, 'cut-2');
+    expect(cut2).toContain(`Program 2 is ${OTHER_NC}`);
+    expect(cut2).toContain('cut with inv:o-flute-0.6');
+    expect(cut2).toContain(OTHER_FRAME);
+    expect(cut2).toContain(OTHER_NC);
+    expect(cut2).toContain('2 operations');
+    expect(sectionText(sheet, 'cut')).not.toContain(OTHER_NC);
+  });
+
+  it('warns, bold, when a later program has no frame file', () => {
+    const job = defaultEngraveJob();
+    const generated: RunSheetGenerated = {
+      ...stubGenerated(job),
+      programs: [program(NC, `${NC}\n;frame\n`, ENGR), program(OTHER_NC, null, ENGR)],
+    };
+    const steps = section(buildRunSheet(job, generated, NO_SIM, NOW), 'cut-2').steps;
+    const noFrame = steps.find((s) => s.text.includes('There is no frame file for program 2'));
+    expect(noFrame).toBeTruthy();
+    expect(noFrame!.bold).toBe(true);
+    expect(noFrame!.text).toContain('Do not run');
+  });
+
+  it('keeps a list with only program 1 — or no list at all — byte-identical', () => {
+    const job = defaultEngraveJob();
+    const without = buildRunSheet(job, stubGenerated(job), NO_SIM, NOW);
+    const withOne: RunSheetGenerated = {
+      ...stubGenerated(job),
+      programs: [program(NC, `${NC}\n;frame\n`, ENGR)],
+    };
+    const one = buildRunSheet(job, withOne, NO_SIM, NOW);
+    // No cut-2 (and no other per-program section) when only the first program exists.
+    expect(one.sections.map((s) => s.id)).toEqual(without.sections.map((s) => s.id));
+    expect(one.sections.map((s) => s.steps)).toEqual(without.sections.map((s) => s.steps));
+    expect(one.sections.map((s) => s.title)).toEqual(without.sections.map((s) => s.title));
+  });
+
+  it('skips a facing entry when it numbers the engraving programs', () => {
+    const job = defaultEngraveJob();
+    const generated: RunSheetGenerated = {
+      ...stubGenerated(job),
+      programs: [
+        program('face.nc', 'face.frame.nc', 'inv:face', { kind: 'facing' }),
+        program(NC, `${NC}\n;frame\n`, ENGR),
+        program(OTHER_NC, OTHER_FRAME, ENGR),
+      ],
+    };
+    const sheet = buildRunSheet(job, generated, NO_SIM, NOW);
+    // The face has its own section; the first ENGRAVING file is program 1, so the second is
+    // program 2 — not 3.
+    expect(section(sheet, 'cut-2')).toBeTruthy();
+    expect(sectionText(sheet, 'cut-2')).toContain('Program 2 is');
+    expect(sheet.sections.some((s) => s.id === 'cut-3')).toBe(false);
+  });
+});

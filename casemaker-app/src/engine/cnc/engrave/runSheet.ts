@@ -112,6 +112,11 @@ import type { Mm } from '@/types/units';
  * cap (#492). A step that exists only on one kind of job is gated on that job, so an older job's
  * sheet reads exactly as it did before the step existed.
  *
+ * A MULTI-PROGRAM RUN is described in cut order (#419): program 1 in the `cut` section, then one
+ * section per later engraving program, each fed from that program's own facts — a drill's point
+ * and `drill.*` provenance, the rest pass's measured pair, or a later setup's file and frame. The
+ * per-job preamble (mount, load, origin, dry run) stays before them, because it happens once.
+ *
  * Three assumptions can ruin the part or the cutter if they are wrong, so the sheet states each
  * one plainly: where X0 Y0 Z0 is (the stock's top-front-left corner, Z0 on the top face), which
  * way round the blank goes (length in X between the jaws, fixed jaw on the left), and that the
@@ -168,6 +173,37 @@ export interface RunSheetDrillPlan {
   holes: readonly (readonly [number, number])[];
 }
 
+/**
+ * ONE program of the run, as the sheet needs to describe it (#419 J3, #434, #472). A STRUCTURAL
+ * SUBSET of `EngraveProgram` (`workers/sim/engraveGenerate.ts`), so the generated object is
+ * assignable unchanged and a result stored by an older build — with no `programs` list at all —
+ * still builds exactly the sheet it built before.
+ *
+ * The list is the run ORDER. A `facing` entry is the blank's skim, which the sheet already
+ * describes in "Face the stock top"; the sections below number the ENGRAVING programs 1..n, so the
+ * operator's "program 1" is the first file after the face, as the rest pass has always said.
+ */
+export interface RunSheetProgram {
+  /** `'facing'` for the blank's skim; absent or `'engrave'` for a setup's program. */
+  kind?: 'facing' | 'engrave';
+  /** 1-based setup the program cuts. */
+  setupIndex: number;
+  /** The cutter this file runs. */
+  toolKey: string;
+  /** The file to load. */
+  nc: string;
+  /** This program's own frame file, or null when none was produced. */
+  frameNc: string | null;
+  /** What the CAM did, for the run step's estimate. */
+  cam: RunSheetCamSummary | null;
+  /**
+   * #434 — the drill facts when THIS program is the drill bit's. Null on every other file. The
+   * per-program section reads them from here, never from the top-level `drill` (which describes
+   * program 1 only).
+   */
+  drill?: RunSheetDrillFacts | null;
+}
+
 /** #434 — the drill program's settings, their per-key sources, and one plan per drilled item. */
 export interface RunSheetDrillFacts {
   /** The bit's own name. Optional so a generated object from before it was carried still sheets. */
@@ -221,9 +257,11 @@ export interface RunSheetGenerated {
   threadMachining?: ThreadSettingsResult | null;
   /**
    * #434 — what the DRILL program cut, structurally a `DrillProgramFacts` from
-   * `engraveGenerate`. Present only on the drill bit's own program; absent/null everywhere else,
-   * so a sheet for an engraving program says nothing about a drill. The sheet prints these
-   * numbers rather than re-planning the holes: they are the numbers in the file.
+   * `engraveGenerate`. Present only when the TOP-LEVEL result is the drill bit's own program
+   * (program 1); absent/null everywhere else, so a sheet whose first program engraves says
+   * nothing about a drill here. A LATER drill program carries its own facts on `programs[n].drill`
+   * and gets its own Cut section (#419). The sheet prints these numbers rather than re-planning
+   * the holes: they are the numbers in the file.
    */
   drill?: RunSheetDrillFacts | null;
   /**
@@ -241,6 +279,18 @@ export interface RunSheetGenerated {
    * the numbers in the file.
    */
   facingCam?: FacingCamSummary | null;
+  /**
+   * #419 J3 — the run's programs in cut order (`EngraveGenerated.programs`). Present on every
+   * generated result this build produces; OPTIONAL because a result stored by an older build (or a
+   * caller that only has the single-program shape) has no list, and its sheet must read exactly as
+   * it did before.
+   *
+   * When present, the sheet describes program 1 in the existing `cut` section and gives every
+   * later ENGRAVING program its own section, in this order, fed from that program's own facts.
+   * A `facing` entry is skipped: its section is "Face the stock top", which is already placed
+   * before the cut.
+   */
+  programs?: readonly RunSheetProgram[];
 }
 
 /**
@@ -1784,9 +1834,13 @@ export interface RunSheetOptions {
    * program has nothing to say about a second one, and every sheet that exists today gains no line.
    *
    * It carries the facts rather than the two jobs: what each program is, what tool 1 could not reach,
-   * what tool 2 measured as its rest, and what the chained simulation says is left. This sheet IS
-   * program 1's sheet — the header names its file and its hash — so the second program is described
-   * as a step of it and not given a sheet of its own, which would be two documents for one setup.
+   * what tool 2 measured as its rest, and what the chained simulation says is left.
+   *
+   * When the caller ALSO supplies the run's program list (`RunSheetGenerated.programs`), the pair's
+   * swap/Z0 routine and the second program's own feeds move into that program's Cut section
+   * (`cut-2`, `cut-3`, …), labelled with its real position in the run. Without a list — an older
+   * stored result, the CLI before this field, a spec that stubs the generated half — they stay in
+   * program 1's Cut section with the old "Program 1/Program 2" words, byte-for-byte.
    */
   restPass?: RestPassFacts;
 }
@@ -1928,7 +1982,7 @@ function restPassSteps(facts: RestPassFacts): RunSheetStep[] {
 
   steps.push({
     text:
-      `This design is cut in TWO programs, one per cutter. ${rough.nc} clears every region ${dia(
+      `This design is cut in TWO programs for these two cutters. ${rough.nc} clears every region ${dia(
         rough.diameter,
       )} can enter; ${rest.nc} then cuts only what the first program LEFT — the inside corners, the ` +
       'counters, the thin strokes and the tips a wider bit cannot reach. Nothing is cut twice except ' +
@@ -2067,9 +2121,17 @@ function restPassSteps(facts: RestPassFacts): RunSheetStep[] {
  * sections (the rest section, the reachability table), so a number written into this text is a stale
  * claim the first time one is added.
  */
-function restSwapSteps(facts: RestPassFacts): RunSheetStep[] {
+function restSwapSteps(facts: RestPassFacts, labels?: RestProgramLabels): RunSheetStep[] {
   const { rough, rest } = facts;
   const dia = `⌀ ${fmtDiameter(rest.diameter)} mm`;
+  // #419 — the pair is not always the run's first two files. When the caller supplies the run's
+  // program list, the section says the REAL positions; without one the old words are kept
+  // byte-for-byte ("the second program", "program 2's outline", ...).
+  const restWord = labels === undefined || labels.rest === 2 ? 'the second program' : `program ${labels.rest}`;
+  const restPoss = labels === undefined || labels.rest === 2 ? 'the second program’s' : `program ${labels.rest}’s`;
+  const restPossAscii = labels === undefined || labels.rest === 2 ? "program 2's" : `program ${labels.rest}'s`;
+  const roughWord = labels === undefined || labels.rough === 1 ? 'the first program' : `program ${labels.rough}`;
+  const roughPoss = labels === undefined || labels.rough === 1 ? 'the first program’s' : `program ${labels.rough}’s`;
   /** '1.82 : 1' — the ratio every travel sentence below states the same way. */
   const ratio = (travel: { rapidMm: number; cutMm: number }): string =>
     travel.cutMm > 0 ? `${fmtNum(travel.rapidMm / travel.cutMm)} : 1` : 'nothing cut';
@@ -2110,13 +2172,13 @@ function restSwapSteps(facts: RestPassFacts): RunSheetStep[] {
     },
     {
       text:
-        'Set Z0 for the second program from those two readings, NOT by touching the surface again: ' +
+        `Set Z0 for ${restWord} from those two readings, NOT by touching the surface again: ` +
         'Z0 = the surface Z you recorded when you set the origin + (this cutter’s PRB − the PRB of ' +
         'the tool that set Z0, recorded there beside it). The surface has been cut since that ' +
-        'reading, so touching it off again would sink every one of the second program’s floors by ' +
-        'the first program’s own depth.',
+        `reading, so touching it off again would sink every one of the ${restPoss} floors by ` +
+        `${roughPoss} own depth.`,
       value: 'Z0 = surface + (cutter PRB − reference PRB)',
-      record: 'Z0 for the second program (mm)',
+      record: `Z0 for ${restWord} (mm)`,
       unverified: '#443',
     },
     // #437 item 8 — program 2 has its own dry run, and it belongs HERE rather than in the Dry run
@@ -2135,7 +2197,7 @@ function restSwapSteps(facts: RestPassFacts): RunSheetStep[] {
         }
       : {
           text:
-            `Load ${rest.frame} and run it. It traces program 2's outline in the air, the same ` +
+            `Load ${rest.frame} and run it. It traces ${restPossAscii} outline in the air, the same ` +
             `${fmtNum(FRAME_Z)} mm above the work — no Z offset to set. If the trace is not where the ` +
             'rest should land, stop.',
           value: `${fmtNum(FRAME_Z)} mm above the work`,
@@ -2144,12 +2206,221 @@ function restSwapSteps(facts: RestPassFacts): RunSheetStep[] {
     {
       text:
         `Load ${rest.nc} and run it. The cutter traces only the rest: expect it to cut in short passes ` +
-        'around the shapes the first program could not enter, and to spend most of its time in the air ' +
+        `around the shapes ${roughWord} could not enter, and to spend most of its time in the air ` +
         'between them.',
       value: `about ${formatDuration(rest.seconds)}`,
       unverified: '#443',
     },
   ];
+}
+
+/** #419 — a rest pair's positions in the run, 1-based among the ENGRAVING programs. */
+interface RestProgramLabels {
+  rough: number;
+  rest: number;
+}
+
+/**
+ * #434 — §1's drill-point statement, as a step. Shared by the one-program drill sheet and a drill
+ * program's own section, so the two cannot word the point differently.
+ */
+function drillPointStep(facts: RunSheetDrillFacts): RunSheetStep | null {
+  const first = facts.plans[0] ?? null;
+  if (first === null) return null;
+  return {
+    text:
+      `The drill’s point — ${first.angle.from}. A drill is the full ⌀ only a point length ` +
+      'above its tip, so this program states each hole’s full-diameter depth and its tip depth.',
+    value:
+      `${fmtNum(first.angle.deg)}° included · tip ${fmtNum(first.pointLength)} mm below ` +
+      `the full ⌀${fmtNum(first.diameter)} mm`,
+  };
+}
+
+/**
+ * #434 — the drill program's Cut steps: its parameters, their provenance, and one line per drilled
+ * item with the full-diameter depth against the tip. The facts handed in are the program's OWN
+ * (`programs[n].drill` or the top-level result when it is program 1), never a re-resolution.
+ */
+function drillCutSteps(
+  facts: RunSheetDrillFacts,
+  vacuumOn: boolean,
+): { params: RunSheetStep; steps: RunSheetStep[] } {
+  const s = facts.settings;
+  const d0 = facts.plans[0]!;
+  const params: RunSheetStep = {
+    text: `Drill with ${facts.toolName ?? 'the drill bit'} — spindle, plunge feed and peck. Vacuum ${vacuumOn ? 'on' : 'off'}.`,
+    value:
+      `${s.spindleRpm} RPM · ${fmtNum(s.plungeFeed)} mm/min plunge · pecks of ` +
+      `${fmtNum(s.peckDiameters)} × ⌀${fmtNum(d0.diameter)} = ${fmtNum(d0.peck)} mm · ` +
+      `re-entry ${fmtNum(s.peckClearanceMm)} mm above the floor just cut`,
+  };
+  const steps: RunSheetStep[] = [
+    params,
+    {
+      text:
+        `Where those numbers came from: drill.peckDiameters (${facts.sources.peckDiameters}); ` +
+        `drill.peckClearanceMm (${facts.sources.peckClearanceMm}); ` +
+        `drill.plungeFeed (${facts.sources.plungeFeed}); ` +
+        `drill.spindleRpm (${facts.sources.spindleRpm}). The plunge feed and spindle speed are ` +
+        'placeholders, not measured.',
+    },
+  ];
+  for (const d of facts.plans) {
+    // The plan rounds its tip and point to the post's precision; the full-diameter depth is the
+    // difference, rounded the same way so it prints as the item stated it.
+    const full = Math.round((d.tipDepth - d.pointLength) * 1000) / 1000;
+    steps.push({
+      text:
+        `${d.name} — ${d.holes.length} hole(s) on the ${fmtNum(d.angle.deg)}° point ` +
+        `(${d.angle.from}). The full ⌀${fmtNum(d.diameter)} mm reaches ${fmtNum(full)} mm; the ` +
+        `tip carries ${fmtNum(d.pointLength)} mm lower, to ${fmtNum(d.tipDepth)} mm.`,
+      value: `⌀${fmtNum(d.diameter)} mm · tip ${fmtNum(d.tipDepth)} mm`,
+    });
+  }
+  return { params, steps };
+}
+
+/** #472 — the rest program's own feeds line, labelled with its real position in the run. */
+function restProgramParamsStep(rest: RestProgram, number: number): RunSheetStep {
+  const label = `Program ${number}, ${rest.nc} (${rest.key}, ⌀ ${fmtNum(rest.diameter)} mm) — `;
+  const p = rest.params;
+  if (p === null) {
+    return { text: `${label}cutting parameters were not resolved for this program.` };
+  }
+  // The trace-only rule is the rest program's own fact (`RestProgram.traceOnly`), not an assumption
+  // about what a rest pass writes today (#405).
+  return {
+    text: rest.traceOnly
+      ? `${label}spindle, feed and plunge. Vacuum ${p.air ? 'on' : 'off'}.`
+      : `${label}spindle, feed, plunge, passes and step-down. Vacuum ${p.air ? 'on' : 'off'}.`,
+    value: rest.traceOnly
+      ? `${p.rpm} RPM · ${fmtNum(p.feed)} mm/min feed · ${fmtNum(p.plungeFeed)} mm/min plunge · ` +
+        'a single stroke on every line, cut straight to depth — no step-over'
+      : `${p.rpm} RPM · ${fmtNum(p.feed)} mm/min feed · ${fmtNum(p.plungeFeed)} mm/min plunge · ` +
+        `${rest.passes} × ${fmtNum(p.stepDown)} mm passes · ${fmtNum(p.stepOver)} mm step-over`,
+  };
+}
+
+/**
+ * #419 — a rest program's own Cut section: the measured pair's swap/Z0 routine and the second
+ * cutter's feeds, in the order they happen. The narrative (what each cutter is FOR, what it left,
+ * the chained simulation) is the earlier "Two tools, one blank" section and is not repeated here.
+ */
+function restProgramSectionSteps(facts: RestPassFacts, labels: RestProgramLabels): RunSheetStep[] {
+  const steps = restSwapSteps(facts, labels);
+  // `restSwapSteps` always ends [frame step, load step]; the program's own numbers belong before
+  // the dry run that first loads one of its files.
+  steps.splice(steps.length - 2, 0, restProgramParamsStep(facts.rest, labels.rest));
+  return steps;
+}
+
+/** The frame/load pair for a later program: its own dry run, then the file. */
+function programRunSteps(program: RunSheetProgram, number: number): RunSheetStep[] {
+  const steps: RunSheetStep[] = [];
+  if (program.frameNc === null) {
+    steps.push({
+      text:
+        `There is no frame file for program ${number}: it did not pass verification, so the trace ` +
+        `was never produced. Do not run ${program.nc} — clear the errors, regenerate, and the frame ` +
+        'comes back with the program.',
+      bold: true,
+    });
+  } else {
+    steps.push({
+      text:
+        `Load ${program.frameNc} and run it. It traces program ${number}'s outline in the air, the ` +
+        `same ${fmtNum(FRAME_Z)} mm above the work — no Z offset to set. If the trace is not where ` +
+        'the program should land, stop.',
+      value: `${fmtNum(FRAME_Z)} mm above the work`,
+    });
+  }
+  const cam = program.cam;
+  steps.push({
+    text:
+      `Load ${program.nc} and run it` +
+      (cam === null
+        ? '. Its CAM summary was not recorded for this run.'
+        : ` — ${cam.operations} operation${cam.operations === 1 ? '' : 's'}, ` +
+          `${cam.cuttingMoves} cutting move${cam.cuttingMoves === 1 ? '' : 's'}.`),
+    ...(cam === null ? {} : { value: `about ${formatDuration(cam.estimatedSeconds)}` }),
+  });
+  return steps;
+}
+
+/** A drill program's own section — point, `drill.*` numbers and provenance, holes, then the file. */
+function drillProgramSectionSteps(
+  program: RunSheetProgram,
+  facts: RunSheetDrillFacts,
+  number: number,
+  vacuumOn: boolean,
+): RunSheetStep[] {
+  const point = drillPointStep(facts);
+  return [
+    {
+      text:
+        `Program ${number} is ${program.nc}, the drill program for setup ${program.setupIndex} — ` +
+        `cut with ${facts.toolName ?? 'the drill bit'}.`,
+      value: `program ${number}`,
+    },
+    ...(point === null ? [] : [point]),
+    ...drillCutSteps(facts, vacuumOn).steps,
+    ...programRunSteps(program, number),
+  ];
+}
+
+/** A later engraving program that carries no drill or rest facts of its own. */
+function engraveProgramSectionSteps(program: RunSheetProgram, number: number): RunSheetStep[] {
+  const cam = program.cam;
+  return [
+    {
+      text:
+        `Program ${number} is ${program.nc}, the cut for setup ${program.setupIndex} — ` +
+        `cut with ${program.toolKey}.`,
+      value:
+        cam === null
+          ? 'no CAM summary was recorded'
+          : `${cam.operations} operation${cam.operations === 1 ? '' : 's'} · about ${formatDuration(cam.estimatedSeconds)}`,
+    },
+    ...programRunSteps(program, number),
+  ];
+}
+
+/**
+ * The FIRST cut of a rest pair that is not program 1: its own section, with its own feeds and file.
+ * The pair's swap routine belongs to the second program's section, which starts by finishing this
+ * one; nothing here repeats the measured rest facts.
+ */
+function restRoughProgramSection(program: RunSheetProgram, facts: RestPassFacts, number: number): RunSheetStep[] {
+  return [
+    {
+      text:
+        `Program ${number} is ${program.nc}, the first cut of the rest pair for setup ` +
+        `${program.setupIndex} — cut with ${facts.rough.key} (⌀ ${fmtNum(facts.rough.diameter)} mm).`,
+      value: `program ${number}`,
+    },
+    restProgramParamsStep(facts.rough, number),
+    ...programRunSteps(program, number),
+  ];
+}
+
+/** A rest program's own section: who it is, then the measured pair's swap and its own numbers. */
+function restProgramSection(program: RunSheetProgram, facts: RestPassFacts, labels: RestProgramLabels): RunSheetStep[] {
+  return [
+    {
+      text:
+        `Program ${labels.rest} is ${program.nc}, the rest cut for setup ${program.setupIndex} — ` +
+        `cut with ${facts.rest.key} (⌀ ${fmtNum(facts.rest.diameter)} mm).`,
+      value: `program ${labels.rest}`,
+    },
+    ...restProgramSectionSteps(facts, labels),
+  ];
+}
+
+/** Where `nc` sits in the run, 1-based among the engraving programs; null when it is not there. */
+function programNumberIn(run: readonly RunSheetProgram[], nc: string): number | null {
+  const index = run.findIndex((program) => program.nc === nc);
+  return index < 0 ? null : index + 1;
 }
 
 /**
@@ -2313,6 +2584,25 @@ export function buildRunSheet(
   const film = colourPlaneFor(job, plan);
   const vCarveJob = cone !== null && items.length > 0;
   const nc = generated.nc;
+  // #419 — THE RUN, not only program 1. `generated.programs` is the frozen/approved list in cut
+  // order; the facing entry has its own section ("Face the stock top"), so the numbering below is
+  // among the ENGRAVING programs and matches the rest pass's long-standing "Program 1/2" words.
+  // A caller without the list (an older stored result, the CLI before this field, every spec that
+  // stubs the generated half) keeps the single-program sheet byte-for-byte.
+  const hasProgramList = generated.programs !== undefined;
+  const runPrograms = (generated.programs ?? []).filter((program) => (program.kind ?? 'engrave') !== 'facing');
+  const roughNumber =
+    options.restPass === undefined ? null : programNumberIn(runPrograms, options.restPass.rough.nc);
+  const restNumber =
+    options.restPass === undefined ? null : programNumberIn(runPrograms, options.restPass.rest.nc);
+  // The rest steps move into their program's own section only when the program list places them.
+  // Without that placement the old sheet is kept exactly, including its "Program 1"/"Program 2"
+  // labels, so a stored result or the CLI cannot change under this feature.
+  const restInOwnSection = hasProgramList && restNumber !== null && roughNumber !== null;
+  const restLabels: RestProgramLabels | undefined =
+    options.restPass !== undefined && roughNumber !== null && restNumber !== null
+      ? { rough: roughNumber, rest: restNumber }
+      : undefined;
   // #347 — the JOB's machine. Read once, here, rather than handed in: the name is the profile's and
   // no saved calibration touches it, so the sheet and the panel cannot disagree about which machine
   // this is even when the panel is showing a calibrated frame. Its rapid model is read from the same
@@ -2355,17 +2645,8 @@ export function buildRunSheet(
   // #434 — a drill's cutting end is a POINT, so the hole is its full diameter only a point length
   // above the tip. State the point and its provenance before the bit is loaded: §7's depths are
   // stated twice (full diameter and tip) and the operator has to know why.
-  const drillFirst = generated.drill?.plans[0] ?? null;
-  if (drillFirst !== null) {
-    needSteps.splice(2, 0, {
-      text:
-        `The drill’s point — ${drillFirst.angle.from}. A drill is the full ⌀ only a point length ` +
-        'above its tip, so §7 states each hole’s full-diameter depth and its tip depth.',
-      value:
-        `${fmtNum(drillFirst.angle.deg)}° included · tip ${fmtNum(drillFirst.pointLength)} mm below ` +
-        `the full ⌀${fmtNum(drillFirst.diameter)} mm`,
-    });
-  }
+  const drillPoint = generated.drill === undefined || generated.drill === null ? null : drillPointStep(generated.drill);
+  if (drillPoint !== null) needSteps.splice(2, 0, drillPoint);
   // #221 — a V-carve job's design is not the tip: it is the cone's width at the colour plane. State
   // the cone and the plane before the cutter is loaded, so the operator can check the bit and the
   // blank's printed film against the numbers §7 uses.
@@ -2668,38 +2949,11 @@ export function buildRunSheet(
     // #434 — a DRILL program's Cut section. Its numbers are the drill's own (the settings the
     // planner was handed), not `feedsFor`'s: the bit is not a milling cutter and never resolved a
     // feeds row. `programParams` points at the parameters step so a rest-pass label can still
-    // prefix it as it does for the other branches.
-    const s = drillFacts.settings;
-    const d0 = drillFacts.plans[0]!;
-    const step: RunSheetStep = {
-      text: `Drill with ${drillFacts.toolName ?? 'the drill bit'} — spindle, plunge feed and peck. Vacuum ${(job.cutOverride?.air ?? true) ? 'on' : 'off'}.`,
-      value:
-        `${s.spindleRpm} RPM · ${fmtNum(s.plungeFeed)} mm/min plunge · pecks of ` +
-        `${fmtNum(s.peckDiameters)} × ⌀${fmtNum(d0.diameter)} = ${fmtNum(d0.peck)} mm · ` +
-        `re-entry ${fmtNum(s.peckClearanceMm)} mm above the floor just cut`,
-    };
-    cutSteps.push(step);
-    programParams = step;
-    cutSteps.push({
-      text:
-        `Where those numbers came from: drill.peckDiameters (${drillFacts.sources.peckDiameters}); ` +
-        `drill.peckClearanceMm (${drillFacts.sources.peckClearanceMm}); ` +
-        `drill.plungeFeed (${drillFacts.sources.plungeFeed}); ` +
-        `drill.spindleRpm (${drillFacts.sources.spindleRpm}). The plunge feed and spindle speed are ` +
-        'placeholders, not measured.',
-    });
-    for (const d of drillFacts.plans) {
-      // The plan rounds its tip and point to the post's precision; the full-diameter depth is the
-      // difference, rounded the same way so it prints as the item stated it.
-      const full = Math.round((d.tipDepth - d.pointLength) * 1000) / 1000;
-      cutSteps.push({
-        text:
-          `${d.name} — ${d.holes.length} hole(s) on the ${fmtNum(d.angle.deg)}° point ` +
-          `(${d.angle.from}). The full ⌀${fmtNum(d.diameter)} mm reaches ${fmtNum(full)} mm; the ` +
-          `tip carries ${fmtNum(d.pointLength)} mm lower, to ${fmtNum(d.tipDepth)} mm.`,
-        value: `⌀${fmtNum(d.diameter)} mm · tip ${fmtNum(d.tipDepth)} mm`,
-      });
-    }
+    // prefix it as it does for the other branches. The step builders are shared with a LATER
+    // drill program's own section (#419), so the two cannot word the numbers differently.
+    const drill = drillCutSteps(drillFacts, job.cutOverride?.air ?? true);
+    cutSteps.push(...drill.steps);
+    programParams = drill.params;
   } else if (plan.threads.length > 0) {
     // #445 — a thread job's cut section is the worker's own resolved numbers, said once, then one
     // line per thread and the check. `items` (`plan.engraves`) is empty on a thread job — threads
@@ -2774,7 +3028,12 @@ export function buildRunSheet(
       cam.cutMm > 0
     ) {
       const ratio = (rapid: number): string => `${fmtNum(rapid / cam.cutMm!)} : 1`;
-      const whose = options.restPass === undefined ? '' : `Program 1, ${options.restPass.rough.nc} — `;
+      // Only the rough program IS program 1; a rest pair in a later setup does not rename this
+      // section's program.
+      const whose =
+        options.restPass === undefined || (roughNumber !== null && roughNumber !== 1)
+          ? ''
+          : `Program ${roughNumber ?? 1}, ${options.restPass.rough.nc} — `;
       cutSteps.push({
         text:
           `${whose}the toolpath is ordered by proximity: the cutter finishes each contour to its ` +
@@ -2795,26 +3054,15 @@ export function buildRunSheet(
   // here is gated on `restPass`, so a one-program sheet is byte-identical to the sheet before it.
   if (options.restPass !== undefined) {
     const { rough, rest } = options.restPass;
-    if (programParams !== null) programParams.text = `Program 1, ${rough.nc} — ${programParams.text}`;
-    const label = `Program 2, ${rest.nc} (${rest.key}, ⌀ ${fmtNum(rest.diameter)} mm) — `;
-    const p = rest.params;
-    if (p === null) {
-      cutSteps.push({ text: `${label}cutting parameters were not resolved for this program.` });
-    } else {
-      // The trace-only rule is the rest program's own fact (`RestProgram.traceOnly`), not an
-      // assumption about what a rest pass writes today: a trace puts the cutter on the line, so a
-      // step-over printed beside it would be a number for a cut the program never makes (#405).
-      cutSteps.push({
-        text: rest.traceOnly
-          ? `${label}spindle, feed and plunge. Vacuum ${p.air ? 'on' : 'off'}.`
-          : `${label}spindle, feed, plunge, passes and step-down. Vacuum ${p.air ? 'on' : 'off'}.`,
-        value: rest.traceOnly
-          ? `${p.rpm} RPM · ${fmtNum(p.feed)} mm/min feed · ${fmtNum(p.plungeFeed)} mm/min plunge · ` +
-            'a single stroke on every line, cut straight to depth — no step-over'
-          : `${p.rpm} RPM · ${fmtNum(p.feed)} mm/min feed · ${fmtNum(p.plungeFeed)} mm/min plunge · ` +
-            `${rest.passes} × ${fmtNum(p.stepDown)} mm passes · ${fmtNum(p.stepOver)} mm step-over`,
-      });
+    // #419 — program 1's parameters are labelled with its REAL position in the run. Only the rough
+    // program IS program 1; when the rest pair belongs to a later setup, the top-level parameters
+    // here are still the first program's, so they keep the unlabelled/Program 1 words. The pair's
+    // second program gets its own section below when the program list places it; without a list the
+    // old single-document placement (its feeds line here) is kept byte-for-byte.
+    if (programParams !== null && (roughNumber === null || roughNumber === 1)) {
+      programParams.text = `Program ${roughNumber ?? 1}, ${rough.nc} — ${programParams.text}`;
     }
+    if (!restInOwnSection) cutSteps.push(restProgramParamsStep(rest, restNumber ?? 2));
   }
   for (const item of items) {
     // #231 item 3 — say which cut sits over a void, and the depth the material there allows,
@@ -2876,7 +3124,56 @@ export function buildRunSheet(
   });
   // #410 — the second program's routine joins THIS section, not the narrative one: it is a sequence
   // of things done at the machine, in order, after the first file has run to its end.
-  if (options.restPass !== undefined) cutSteps.push(...restSwapSteps(options.restPass));
+  if (options.restPass !== undefined && !restInOwnSection) {
+    cutSteps.push(...restSwapSteps(options.restPass));
+  }
+
+  // ---- per-program Cut sections (#419) ------------------------------------------------------
+  // Program 1 is the `cut` section above, fed from the top-level result. Every later ENGRAVING
+  // program gets its own section here, in cut order, fed from its own facts: a drill program's
+  // `drill` block, a rest program's measured pair, or — for any other program — its file, CAM
+  // summary and frame. The run is the files played in order, so the sections are the physical
+  // order too: after program 1 finishes, the operator meets program 2's swap (or bit) here.
+  const programSections: { id: string; title: string; steps: RunSheetStep[] }[] = [];
+  if (hasProgramList) {
+    for (let i = 1; i < runPrograms.length; i++) {
+      const program = runPrograms[i]!;
+      const number = i + 1;
+      const rest =
+        options.restPass !== undefined && restInOwnSection && program.nc === options.restPass.rest.nc
+          ? options.restPass
+          : null;
+      const restRough =
+        options.restPass !== undefined && restInOwnSection && program.nc === options.restPass.rough.nc
+          ? options.restPass
+          : null;
+      if (rest !== null && restLabels !== undefined) {
+        programSections.push({
+          id: `cut-${number}`,
+          title: `Cut, program ${number} — ${rest.rest.key} (rest)`,
+          steps: restProgramSection(program, rest, restLabels),
+        });
+      } else if (restRough !== null) {
+        programSections.push({
+          id: `cut-${number}`,
+          title: `Cut, program ${number} — ${restRough.rough.key} (first cut)`,
+          steps: restRoughProgramSection(program, restRough, number),
+        });
+      } else if (program.drill !== undefined && program.drill !== null && program.drill.plans.length > 0) {
+        programSections.push({
+          id: `cut-${number}`,
+          title: `Cut, program ${number} — ${program.drill.toolName ?? 'the drill bit'}`,
+          steps: drillProgramSectionSteps(program, program.drill, number, job.cutOverride?.air ?? true),
+        });
+      } else {
+        programSections.push({
+          id: `cut-${number}`,
+          title: `Cut, program ${number} — ${program.toolKey}`,
+          steps: engraveProgramSectionSteps(program, number),
+        });
+      }
+    }
+  }
 
   // ---- 8 · Warnings carried from the app -----------------------------------------------------
   const warnings: RunSheetStep[] = [];
@@ -2986,6 +3283,8 @@ export function buildRunSheet(
     // these steps moves Z0 onto the faced surface, and the Cut section is the first to assume it.
     ...facingSection,
     { id: 'cut', title: 'Cut', steps: cutSteps },
+    // #419 — each later program's own Cut section, in run order. Program 1 is `cut` above.
+    ...programSections,
     { id: 'warnings', title: 'Warnings carried from the app', steps: warnings },
     { id: 'record', title: 'Record afterwards', steps: recordSteps },
   ].map((section, i) => ({ ...section, title: `${i + 1} · ${section.title}` }));
