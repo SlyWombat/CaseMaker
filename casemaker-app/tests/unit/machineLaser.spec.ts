@@ -3,7 +3,7 @@
 import { describe, it, expect, afterEach } from 'vitest';
 
 import { setMachineConsoleLoader, type ConsoleSend, type MachineConsoleSession } from '@/platform/machineConsole';
-import { laserFrameLines, liftProblem, runLaserFrame, type LaserLift } from '@/platform/machineLaser';
+import { laserFrameLines, liftProblem, runLaserFrame, stockTopSentence, type LaserLift } from '@/platform/machineLaser';
 import { Z1 } from '@/engine/cnc/machine';
 
 afterEach(() => setMachineConsoleLoader(null));
@@ -64,6 +64,20 @@ describe('#448 the lift guard', () => {
     expect(liftProblem({ ...LIFT, zFloorMachine: Number.NaN })).toContain('soft-endstop floor is not known');
   });
 
+  it('names the obstacle above the registered surface when that is what the lift hits (#457)', () => {
+    const lift = lifted(-3, {
+      stockTopMachineZ: -2,
+      stockTop: {
+        surfaceMachineZ: -12,
+        measuredAt: '2026-10-18T02:14:00.000Z',
+        obstacle: { label: 'the clamp on the back edge, 15 mm in from the right-hand corner', machineZ: -2 },
+      },
+    });
+    expect(liftProblem(lift)).toBe(
+      'the travel height (machine Z -3) is not above the clamp on the back edge, 15 mm in from the right-hand corner (machine Z -2)',
+    );
+  });
+
   it('refuses the frame before the console is opened: nothing is sent', async () => {
     for (const bad of [Number.NaN, 0, 5, Z1.softEndstop.zMin]) {
       const sent = fake((l) => (l === '?' ? ok(l, IDLE) : ok(l)));
@@ -83,6 +97,32 @@ describe('#448 the lift guard', () => {
     expect(await s.begin()).toMatchObject({ ok: false, detail: expect.stringContaining('nothing was sent') });
     expect(sent).toEqual([]);
     expect(await s.end({ home: false })).toEqual({ laserOff: true, homed: false, lifted: false });
+  });
+});
+
+describe('#457 what the panels say the lift was checked against', () => {
+  it('names the registered surface and when it was measured, and the obstacle above it', () => {
+    const lift: LaserLift = {
+      ...LIFT,
+      stockTopMachineZ: -56.6,
+      stockTop: {
+        surfaceMachineZ: -57.6,
+        measuredAt: '2026-10-18T02:14:00.000Z',
+        obstacle: { label: 'the vise jaws', machineZ: -56.6 },
+      },
+    };
+    expect(stockTopSentence(lift)).toBe(
+      'The lift must clear the surface this job registered on this machine (machine Z -57.6, measured 2026-10-18 02:14) and the vise jaws, whose top stands above it at machine Z -56.6.',
+    );
+    expect(stockTopSentence({ ...lift, stockTop: { ...lift.stockTop!, obstacle: null }, stockTopMachineZ: -57.6 })).toBe(
+      'The lift must clear the surface this job registered on this machine (machine Z -57.6, measured 2026-10-18 02:14); nothing on the mount stands above it.',
+    );
+  });
+
+  it('says plainly that no registration was recorded, rather than implying the top was checked', () => {
+    expect(stockTopSentence(LIFT)).toBe(
+      'No registration recorded for this job on this machine: the lift is the machine’s fixed travel height (machine Z -3) and the stock’s top is not checked.',
+    );
   });
 });
 

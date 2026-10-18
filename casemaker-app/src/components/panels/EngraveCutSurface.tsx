@@ -34,8 +34,8 @@ import type { VerifyReport } from '@/engine/cnc/verify';
 import type { FeatureKind, FeatureOverrides } from '@/engine/cnc/plan';
 import type { PreflightCause } from '@/engine/cnc/preflight';
 import type { PreflightHubReport } from '@/engine/cnc/preflight/hub';
-import { jobMachine } from '@/engine/cnc/calibration';
 import { cutPlan } from '@/engine/cnc/engrave/cutPlan';
+import { laserLiftFor } from '@/engine/cnc/engrave/laserSurface';
 import { packageStaleness } from '@/engine/cnc/engrave/package';
 import {
   frozenReleaseSources,
@@ -45,8 +45,10 @@ import {
 import { finishedProgramsFor } from '@/store/locationStore';
 import type { RunContext } from '@/store/machineRunStore';
 import { useEngravePackageStore } from '@/store/engravePackageStore';
+import { useFirstRegistration } from '@/store/engraveRegistrationStore';
 import { useShopDefaultsStore } from '@/store/shopDefaultsStore';
 import { useStockStore } from '@/store/stockStore';
+import type { LaserLift } from '@/platform/machineLaser';
 import { EngravePreflight } from './EngravePreflight';
 import { EngraveMachineUpload } from './EngraveMachineUpload';
 import { EngraveReleaseStep } from './EngraveReleaseStep';
@@ -134,6 +136,12 @@ export function EngraveCutSurface({
     () => (machine === null ? null : { host: machine.host, port: machine.port }),
     [machine],
   );
+  /**
+   * #457 — the surface this job's registration measured on THIS machine, and what stands above it.
+   * Session state (#494): a reload forgets it, and the lasers then say "no registration recorded"
+   * rather than pretend a fixed clearance checked a top nobody measured.
+   */
+  const firstRegistration = useFirstRegistration(job.id, target);
   const green = report.firstBlocking === null;
   const staleness = pkg === null ? null : packageStaleness(pkg, job);
   const packageCurrent = pkg !== null && staleness?.stale === false;
@@ -141,6 +149,25 @@ export function EngraveCutSurface({
   const sources: ReleaseSource[] = useMemo(
     () => (pkg === null ? [] : frozenReleaseSources(job, pkg, reports)),
     [job, pkg, reports],
+  );
+  /**
+   * #457 — the surface this job's registration measured on THIS machine, and what stands above it.
+   * Session state (#494): a reload forgets it, and the lasers then say "no registration recorded"
+   * rather than pretend a fixed clearance checked a top nobody measured. The setup is the one the
+   * single-program upload is about, so its mount (vise, bracket, tape) is the one the laser flies in.
+   */
+  const setupIndex = sources[0]?.setupIndex ?? 0;
+  const lift = useMemo<LaserLift>(
+    () =>
+      laserLiftFor(
+        job,
+        firstRegistration === null
+          ? null
+          : { surfaceMachineZ: firstRegistration.outcome.surfaceZ, measuredAt: firstRegistration.measuredAt },
+        defaults,
+        setupIndex,
+      ),
+    [job, defaults, firstRegistration, setupIndex],
   );
   const generatedReady =
     generated !== null &&
@@ -323,10 +350,7 @@ export function EngraveCutSurface({
                       : { nc: sources[0].nc, verify: sources[0].verify }
                   }
                   filename={releaseFileName(job.name, 1, 1)}
-                  lift={{
-                    zMachine: jobMachine(job).toolChange.clearanceZ,
-                    zFloorMachine: jobMachine(job).softEndstop.zMin,
-                  }}
+                  lift={lift}
                   onLiveStatus={onLiveStatus}
                   runContext={runContext}
                   setup={

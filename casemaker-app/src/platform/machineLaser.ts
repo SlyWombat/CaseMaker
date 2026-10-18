@@ -47,14 +47,29 @@ export interface XYBounds {
  *
  * `zMachine` is the resolved machine's `toolChange.clearanceZ` (the same height `runRegistration`
  * seeks from). `zFloorMachine` is the machine's own soft-endstop Z floor (`softEndstop.zMin`);
- * `stockTopMachineZ` is the stock's top in machine Z when it is known — the engrave panel does not
- * hold it, so it is usually absent. An object rather than a bare number because a guard needs the
- * bounds, and a caller cannot pass one without the other.
+ * `stockTopMachineZ` is the highest thing the lift must clear in machine Z, when the job's surface
+ * has been registered on this machine (#457) — the registered top itself, or a mount obstacle
+ * standing above it (`engine/cnc/engrave/laserSurface.ts`). An object rather than a bare number
+ * because a guard needs the bounds, and a caller cannot pass one without the other.
  */
 export interface LaserLift {
   zMachine: number;
   zFloorMachine: number;
   stockTopMachineZ?: number;
+  /**
+   * Where the stock-top bound came from (#457): the surface the registration measured, when it was
+   * recorded, and the mount's obstacle it is up against (or null). Present exactly when
+   * `stockTopMachineZ` is; the panels print it so the operator reads WHICH surface the lift was
+   * checked against — and that a job with no registration has no such check.
+   */
+  stockTop?: {
+    /** The registered top, machine Z — work Z0 of the surface the touches measured. */
+    surfaceMachineZ: number;
+    /** ISO time the registration was recorded. */
+    measuredAt: string;
+    /** The highest mount obstacle standing above that top, or null when none does. */
+    obstacle: { label: string; machineZ: number } | null;
+  };
 }
 
 /** A machine Z as the app writes it: three decimals at most, no trailing zeroes (−3, −2.5, −2.125). */
@@ -63,8 +78,27 @@ export function zText(n: number): string {
 }
 
 /**
+ * What the lift's stock-top check rests on, in the panel's words (#457). A lifted head is only as
+ * safe as the top it was checked against, so the panel says which surface that was and when it was
+ * measured — or that there was no registration, in which case the lift is the machine's fixed
+ * clearance and the stock's top is NOT checked, rather than silently implying that it was.
+ */
+export function stockTopSentence(lift: LaserLift): string {
+  const top = lift.stockTop;
+  if (top === undefined || lift.stockTopMachineZ === undefined) {
+    return `No registration recorded for this job on this machine: the lift is the machine’s fixed travel height (machine Z ${zText(lift.zMachine)}) and the stock’s top is not checked.`;
+  }
+  const when = top.measuredAt.length >= 16 ? `${top.measuredAt.slice(0, 10)} ${top.measuredAt.slice(11, 16)}` : top.measuredAt;
+  const surface = `the surface this job registered on this machine (machine Z ${zText(top.surfaceMachineZ)}, measured ${when})`;
+  return top.obstacle === null
+    ? `The lift must clear ${surface}; nothing on the mount stands above it.`
+    : `The lift must clear ${surface} and ${top.obstacle.label}, whose top stands above it at machine Z ${zText(top.obstacle.machineZ)}.`;
+}
+
+/**
  * Why a laser lift must not be attempted, or null. The lift must be a known number strictly between
- * the machine's soft-endstop floor and machine Z0, and above the stock's top when that is known.
+ * the machine's soft-endstop floor and machine Z0, and above the highest thing on the job's surface
+ * when its registration is known — the registered top or an obstacle above it (#457).
  */
 export function liftProblem(lift: LaserLift): string | null {
   const z = lift.zMachine;
@@ -76,7 +110,8 @@ export function liftProblem(lift: LaserLift): string | null {
   }
   const top = lift.stockTopMachineZ;
   if (top !== undefined && Number.isFinite(top) && z <= top) {
-    return `the travel height (machine Z ${zText(z)}) is not above the stock’s top (machine Z ${zText(top)})`;
+    const what = lift.stockTop?.obstacle?.label ?? 'the stock’s top';
+    return `the travel height (machine Z ${zText(z)}) is not above ${what} (machine Z ${zText(top)})`;
   }
   return null;
 }

@@ -1,5 +1,5 @@
 import { useState, type CSSProperties, type JSX } from 'react';
-import { runLaserFrame, type LaserLift, type XYBounds } from '@/platform/machineLaser';
+import { runLaserFrame, stockTopSentence, type LaserLift, type XYBounds } from '@/platform/machineLaser';
 
 /**
  * #431 — "Frame with laser": trace the program's XY extent with the probe's laser before cutting.
@@ -76,6 +76,11 @@ export function EngraveLaserFrame({
           The program has no moves to frame.
         </p>
       )}
+      {/* #457 — which top the lift was checked against, and when it was measured (or that none
+          was): a frame flown at a fixed height must not imply the stock's top was vouched for. */}
+      <p style={MUTED} data-testid="engrave-laser-frame-surface">
+        {stockTopSentence(lift)}
+      </p>
       {note !== null && (
         <p style={MUTED} data-testid="engrave-laser-frame-note">
           {note}

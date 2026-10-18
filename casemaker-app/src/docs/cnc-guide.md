@@ -674,6 +674,14 @@ The **web** build cannot reach a machine at all. It ends at the file, which you 
 program's rectangle in the air so you can see where the job sits, and **point to origin** moves
 to X0 Y0 at the machine's clearance height. Neither cuts, and neither replaces a check by eye.
 
+Both motions lift the head to the machine's own travel height, and the lift is **checked against
+the surface your registration measured** on this machine, plus anything standing above it on the
+mount: the vise's jaws around a blank seated below their tops, a bracket's arm, a clamp. The panel
+names the surface, when it was measured and what the height has to clear; if the fixed height
+cannot clear it, the laser is refused and nothing is sent. A job with **no registration on this
+machine** says so instead — the lift is the fixed height and the top of the stock is not checked,
+so register first if the blank is thin or the mount crowded.
+
 **The vacuum is the program's own business.** The post writes `M331` before the first cut and
 `M332` after the last for the span the job declares; the run panel's sentence says which of
 those this file does, and a stop always sends `M332`. If the face is domed, level it **at the

@@ -102,3 +102,59 @@ describe('#431 EngraveLaserPoint', () => {
     await waitFor(() => expect(sent.at(-1)).toBe('$H'));
   });
 });
+
+describe('#457 the point-to-origin lift says what it was checked against', () => {
+  const REGISTERED = {
+    zMachine: -3,
+    zFloorMachine: -102,
+    stockTopMachineZ: -56.6,
+    stockTop: {
+      surfaceMachineZ: -57.6,
+      measuredAt: '2026-10-18T02:14:00.000Z',
+      obstacle: { label: 'the vise jaws', machineZ: -56.6 },
+    },
+  };
+
+  it('names the registered surface, when it was measured, and the obstacle above it', () => {
+    fake();
+    render(<EngraveLaserPoint {...props(2)} lift={REGISTERED} />);
+    const text = screen.getByTestId('engrave-laser-point-surface').textContent ?? '';
+    expect(text).toContain('machine Z -57.6');
+    expect(text).toContain('measured 2026-10-18 02:14');
+    expect(text).toContain('the vise jaws');
+  });
+
+  it('says no registration was recorded for a job without one', () => {
+    fake();
+    render(<EngraveLaserPoint {...props(2)} />);
+    expect(screen.getByTestId('engrave-laser-point-surface').textContent).toContain('No registration recorded');
+  });
+
+  it('refuses before anything is sent when the lift is not above the clamped blank', async () => {
+    const sent = fake();
+    render(
+      <EngraveLaserPoint
+        {...props(2)}
+        lift={{
+          zMachine: -3,
+          zFloorMachine: -102,
+          stockTopMachineZ: -2,
+          stockTop: {
+            surfaceMachineZ: -16,
+            measuredAt: '2026-10-18T02:14:00.000Z',
+            obstacle: { label: 'the clamp on the back edge', machineZ: -2 },
+          },
+        }}
+      />,
+    );
+    fireEvent.click(screen.getByTestId('engrave-laser-point-arm'));
+    fireEvent.click(screen.getByTestId('engrave-laser-point-start'));
+    await waitFor(() =>
+      expect(screen.getByTestId('engrave-laser-point-note').textContent).toContain(
+        'nothing was sent: the travel height (machine Z -3) is not above the clamp on the back edge (machine Z -2)',
+      ),
+    );
+    expect(sent).toEqual([]);
+    expect(screen.queryByTestId('engrave-laser-point-jog')).toBeNull();
+  });
+});

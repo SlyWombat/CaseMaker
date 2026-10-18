@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type CSSProperties, type JSX } from 'react';
-import { LASER_JOG_STEPS, LaserPointSession, pointToOriginAllowed, zText, type LaserLift } from '@/platform/machineLaser';
+import { LASER_JOG_STEPS, LaserPointSession, pointToOriginAllowed, stockTopSentence, zText, type LaserLift } from '@/platform/machineLaser';
 import { laserHomeKey, useLaserHomeStore } from '@/store/laserHomeStore';
 
 /**
@@ -148,6 +148,10 @@ export function EngraveLaserPoint({ host, port, margin, uncertainty, lift }: Eng
       <p style={MUTED}>
         Laser point-to-origin — good to ±{uncertainty.mm} mm ({uncertainty.source}, laser.originUncertaintyMm); sets X and Y only, Z0 is
         unchanged.
+      </p>
+      {/* #457 — the lift's own bound, in the same words the frame uses. */}
+      <p style={MUTED} data-testid="engrave-laser-point-surface">
+        {stockTopSentence(lift)}
       </p>
       {homeOwed}
       {stage === 'idle' && (

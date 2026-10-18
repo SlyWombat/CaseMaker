@@ -36,6 +36,12 @@ export interface FirstRegistration {
   plan: RegistrationPlan;
   /** What the touches measured. */
   outcome: RegistrationOutcome;
+  /**
+   * When the record was made, ISO 8601 (#457). The measured surface also lives in machine Z on
+   * `outcome.surfaceZ`, but a machine coordinate with no date cannot say whether it still describes
+   * the blank on the table; the laser's panel prints this so the operator sees how old the reading is.
+   */
+  measuredAt: string;
 }
 
 /**
@@ -75,7 +81,13 @@ export const useEngraveRegistrationStore = create<EngraveRegistrationState>((set
     set((s) => ({
       records: {
         ...s.records,
-        [jobId]: { jobId, target: { host: target.host, port: target.port }, plan, outcome },
+        [jobId]: {
+          jobId,
+          target: { host: target.host, port: target.port },
+          plan,
+          outcome,
+          measuredAt: new Date().toISOString(),
+        },
       },
     })),
 
