@@ -19,8 +19,9 @@
 import { test, expect } from './fixtures/caseMaker';
 import { LABEL_PAD } from '../../src/components/viewport/projectedLabel';
 
-/** The three the issue measured; the void labels share the same mechanism but need a job with one. */
-const LABELS = ['engrave-axis-x', 'engrave-axis-y', 'engrave-jaw-source'];
+/** The two axis labels the issue measured; the jaw-source floating label was removed in #520, and
+ *  the void labels share the same mechanism but need a job with one. */
+const LABELS = ['engrave-axis-x', 'engrave-axis-y'];
 
 /** Load a board and open the engrave section (the section button TOGGLES). */
 async function openEngrave(page: import('@playwright/test').Page): Promise<void> {
@@ -69,13 +70,11 @@ test('at laptop width every projected label is inside the canvas, clamped to the
     expect(box!.bottom, `${id} bottom edge`).toBeLessThanOrEqual(canvas.bottom);
   }
 
-  // And "inside" is not luck: the jaw's anchor projects ~11 px from the left edge, so a box merely
-  // sitting somewhere inside would not be pinned to the pad. ±1 px is the rounding the measured
-  // box carries (offsetWidth is whole pixels; the rect is not).
-  const jaw = labels.find((l) => l.id === 'engrave-jaw-source')!.box!;
-  const dx = jaw.left - canvas.left;
-  expect(dx, 'the jaw label is clamped to the pad').toBeGreaterThanOrEqual(LABEL_PAD - 1);
-  expect(dx, 'the jaw label is clamped to the pad').toBeLessThanOrEqual(LABEL_PAD + 1);
+  // That the clamp PINS a label whose anchor projects outside the canvas to LABEL_PAD (rather than
+  // clipping it) is checked directly on the arithmetic in tests/unit/projectedLabel.spec.ts. The
+  // jaw-source label this e2e used to pin-check was the one whose anchor fell near the edge at this
+  // width; #520 removed it, and the remaining axis labels project inside the narrow canvas — so the
+  // end-to-end assertion kept here is the one in the loop above: every projected label lands inside.
 
   await page.screenshot({ path: 'test-results/359-labels-1024x700.png' });
 });

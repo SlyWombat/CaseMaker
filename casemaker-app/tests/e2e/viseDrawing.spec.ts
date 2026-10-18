@@ -51,9 +51,12 @@ test('the drawn vise is the real one, and the seat still moves the blank (#520)'
 
   // The seat is an operator's choice on the vise row, and a default vise re-seats when it
   // changes: 12 − 3.1 on the ledge, 12 − 20 on the floor (negative is the truthful answer).
-  // #523 — the vise row lives in the Hold group, closed by default.
+  // #523 — the vise row lives in the Hold group (closed by default), and the fields themselves
+  // live behind the vise card's "Edit" (also closed). Open both before touching the seat.
   await page.getByTestId('engrave-group-hold-summary').click();
+  await page.getByTestId('engrave-vise-card').locator('summary').click();
   const seat = page.getByTestId('engrave-vise-seat');
+  await expect(seat).toBeVisible();
   const proud = page.getByTestId('engrave-vise-stockProud');
   await expect(seat).toHaveValue('ledge');
   await expect(proud).toHaveValue('8.9');
