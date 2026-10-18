@@ -20,10 +20,9 @@ import { newId } from '@/utils/id';
 import { autoPortsForBoard } from '@/engine/compiler/portFactory';
 import { autoPortsForHat } from '@/engine/compiler/hats';
 import { defaultAntennasForBoard } from '@/engine/compiler/antennas';
-import { applyCasePatch } from '@/engine/compiler/applyCasePatch';
 import { fourCornerScrewTabs, endFlangesPreset, extrusionMountPreset } from '@/engine/compiler/mountingFeatures';
 import { computeShellDims } from '@/engine/compiler/caseShell';
-import { caseParamsSchema } from '@/store/projectSchema';
+import { patchProject } from '@/platform/headless/patch';
 
 const DEFAULT_BOARD_ID = 'rpi-4b';
 
@@ -224,9 +223,9 @@ export const useProjectStore = create<ProjectState>()(
         setProject: (p) => set({ project: p, welcomeMode: false }),
         patchCase: (patch) =>
           set((s) => {
-            // Issue #56 — validate the patch against the case schema before
-            // committing. Rejects invalid writes (wrong type, removed enum
-            // values, out-of-range numbers) with a console error and a no-op.
+            // Issue #56 — validate before committing, and reject invalid writes
+            // (wrong type, removed enum values, out-of-range numbers) with a
+            // console error and a no-op.
             //
             // Note: .partial() only loosens TOP-LEVEL fields. Nested objects
             // like `ventilation` and `bosses` must still be passed as a
@@ -235,28 +234,22 @@ export const useProjectStore = create<ProjectState>()(
             // `patch({ ventilation: { coverage: 0.5 } })` would silently fail
             // validation here — surface it via the console error in that
             // case so the no-op is at least visible.
-            const parsed = caseParamsSchema.partial().safeParse(patch);
-            if (!parsed.success) {
+            //
+            // #482 — the validation, auto-population (snap-catch seeding
+            // #29/#46, ventilation defaults #33) and pinned modifiedAt are
+            // patchProject's, shared with the headless CLI/MCP path. One
+            // implementation, so a headless patch cannot skip the seeding.
+            const result = patchProject(s.project, patch);
+            if (!result.ok) {
               console.error(
                 '[patchCase] rejected invalid patch:',
-                parsed.error.issues,
+                result.issues,
                 'patch:',
                 patch,
               );
               return s;
             }
-            const validPatch = parsed.data;
-            return {
-            project: produce(s.project, (draft) => {
-              // Auto-population rules (snap-catch seeding #29/#46, ventilation
-              // defaults #33) live in applyCasePatch — shared with the
-              // template interpreter so templates can't bypass them.
-              const hatResolver = (id: string) =>
-                (draft.customHats ?? []).find((h) => h.id === id) ?? getBuiltinHat(id);
-              applyCasePatch(draft, validPatch as Partial<CaseParameters>, hatResolver);
-              draft.modifiedAt = new Date(0).toISOString();
-            }),
-          };
+            return { project: result.project };
           }),
         setPrinter: (printer) =>
           set((s) => ({
