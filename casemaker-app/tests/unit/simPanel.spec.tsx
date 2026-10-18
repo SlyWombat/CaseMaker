@@ -376,6 +376,47 @@ describe('SimPanel', () => {
     expect(screen.queryByTestId('sim-result')).toBeNull();
   });
 
+  // #506 — the engrave run's verify stage loads its generated program into this same `simStore`
+  // (`engraveRunStore`) without opening a file in `simSetupStore`. Opening Simulate .nc afterwards
+  // used to show the panel's empty file row directly above that finished Result/Diagnostics.
+  it('does not present a session the panel did not start (#506)', async () => {
+    setSimClientLoader(async () => fakeClient(READY));
+    await act(async () => {
+      await useSimStore
+        .getState()
+        .loadProgram('G0 X1 Y1\n', buildSimSetup(DEFAULT_STOCK, 'unknown'), flatEndMill(3.175), Z1.id, undefined, [], null, 'engrave');
+    });
+    render(<SimPanel />);
+
+    // The empty state, and nothing from the engrave run underneath it.
+    expect(screen.getByTestId('sim-file-name').textContent).toBe('No file open');
+    expect(screen.getByTestId('sim-drop-hint')).toBeTruthy();
+    expect(screen.queryByTestId('sim-result')).toBeNull();
+    expect(screen.queryByTestId('sim-diagnostics')).toBeNull();
+    expect(screen.queryByTestId('sim-close')).toBeNull();
+    // The load itself succeeded: this is about whose run the panel may present, not the sweep.
+    expect(useSimStore.getState().status).toBe('ready');
+  });
+
+  // #506 — a Result belongs to the program it swept. Opening another `.nc` after a run must not
+  // leave the old numbers under the new file's row (the issue's "current file or a previous file").
+  it('drops a previous file’s result when another file is opened (#506)', async () => {
+    setSimClientLoader(async () => fakeClient(READY));
+    openPlainFile();
+    act(() => useSimSetupStore.getState().setTool(CHOSEN_TOOL));
+    render(<SimPanel />);
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('sim-simulate'));
+    });
+    await screen.findByTestId('sim-result');
+
+    act(() => useSimSetupStore.getState().openFile('other.nc', 'G0 X2 Y2\n'));
+    expect(screen.getByTestId('sim-file-name').textContent).toBe('other.nc');
+    expect(screen.queryByTestId('sim-result')).toBeNull();
+    expect(screen.queryByTestId('sim-diagnostics')).toBeNull();
+  });
+
   it('shows the disclaimer after a successful load', async () => {
     setSimClientLoader(async () => fakeClient(READY));
     openPlainFile();

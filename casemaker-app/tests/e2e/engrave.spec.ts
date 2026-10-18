@@ -88,7 +88,7 @@ test('editing the job after Generate makes the result stale and blocks Save', as
   await expect(page.getByTestId('engrave-save-blocked')).toContainText('the job or the machine frame changed since it was generated');
 });
 
-test("the saved .nc, reloaded as a stranger's file, removes the same volume", async ({ cm, page }) => {
+test("the saved .nc, reloaded as a stranger's file, removes the same volume", async ({ cm, page }, testInfo) => {
   await cm.ready();
   await openEngravePanel(page);
 
@@ -109,8 +109,22 @@ test("the saved .nc, reloaded as a stranger's file, removes the same volume", as
   expect(path).not.toBeNull();
   const nc = readFileSync(path!, 'utf8');
 
+  // #506 — Generate just loaded that program into the shared `simStore`. Simulate .nc reads its file
+  // row from `simSetupStore`, where nothing was opened, so it must show its empty state — not the
+  // engrave run's finished Result and Diagnostics underneath "No file open".
+  await page.getByTestId('sidebar-button-cnc-sim').click();
+  await expect(page.getByTestId('sim-panel')).toBeVisible();
+  await expect(page.getByTestId('sim-file-name')).toHaveText('No file open');
+  await expect(page.getByTestId('sim-result')).toHaveCount(0);
+  await expect(page.getByTestId('sim-diagnostics')).toHaveCount(0);
+  await page.screenshot({ path: testInfo.outputPath('simulate-after-engrave.png') });
+
   await page.evaluate((text) => window.__caseMaker!.simOpenText('stranger.nc', text), nc);
+  // Still no Result before this panel runs it, even though the bytes are identical: the engrave
+  // run's session belongs to the engrave run, not to the file row that just took its name.
+  await expect(page.getByTestId('sim-result')).toHaveCount(0);
   await page.evaluate(() => window.__caseMaker!.simRun());
+  await expect(page.getByTestId('sim-result')).toBeVisible({ timeout: 60_000 });
 
   const reloaded = await page.evaluate(() => window.__caseMaker!.getSimState());
   expect(reloaded.status).toBe('ready');

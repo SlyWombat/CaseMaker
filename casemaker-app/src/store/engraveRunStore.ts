@@ -282,6 +282,10 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
           // #434 — the point angle the drill PLAN used, when this program is a drill bit's: the
           // column engine sweeps the point the CAM planned instead of re-reading the setting.
           generated.drill?.simDrillPoint ?? null,
+          // #506 — this load belongs to the engrave run, not the Simulate panel. Both share
+          // `simStore` (so the viewport shows the sweep); the origin is what stops the panel
+          // presenting this finished Result under its own empty file row.
+          'engrave',
         );
     } catch (e) {
       if (mine === seq) set({ phase: 'blocked', error: e instanceof Error ? e.message : String(e) });

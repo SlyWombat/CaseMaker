@@ -147,6 +147,8 @@ export function SimPanel() {
   const resetSetup = useSimSetupStore((s) => s.reset);
 
   const status = useSimStore((s) => s.status);
+  const origin = useSimStore((s) => s.origin);
+  const loadedProgram = useSimStore((s) => s.loadedProgram);
   const error = useSimStore((s) => s.error);
   const diagnostics = useSimStore((s) => s.diagnostics);
   const info = useSimStore((s) => s.info);
@@ -168,6 +170,17 @@ export function SimPanel() {
   const tool = toolKey ? resolveTool(toolKey) : null;
   const loading = status === 'loading';
   const canSimulate = gcodeText !== null && tool !== null && !loading;
+
+  /**
+   * #506 — this panel presents only a session it started, for the program in its own form. The
+   * engrave run drives the same `simStore` (so the viewport can show its sweep), and a previous
+   * Simulate run stays in the store after another file is opened. Without this check, a finished
+   * Result/Diagnostics block would sit directly under a file row reading "No file open", and an
+   * operator could not tell whether it described the current file, a previous one, or the engrave
+   * verification. The session is the panel's when `origin` says so AND the text it loaded is the
+   * text of the file on screen — the two halves cover the two ways to be stale.
+   */
+  const ownsSession = origin === 'panel' && gcodeText !== null && loadedProgram === gcodeText;
 
   // #316 — how a row is named in the question and in the answer: the entry's own name, and the tier
   // word every other screen gives it. A key the registry no longer holds falls back to the key
@@ -297,7 +310,7 @@ export function SimPanel() {
     );
   };
 
-  const grouped = status === 'ready' ? groupDiagnostics(diagnostics, info?.summary.diagnosticCounts ?? {}) : null;
+  const grouped = ownsSession && status === 'ready' ? groupDiagnostics(diagnostics, info?.summary.diagnosticCounts ?? {}) : null;
 
   return (
     <div
@@ -479,7 +492,7 @@ export function SimPanel() {
         Simulate
       </button>
 
-      {loading && (
+      {ownsSession && loading && (
         <div data-testid="sim-running" style={{ marginTop: 10 }}>
           <div style={{ height: 6, background: '#1a1f25', borderRadius: 3, overflow: 'hidden' }}>
             <div
@@ -509,7 +522,7 @@ export function SimPanel() {
       )}
 
       {/* 5 — result */}
-      {status === 'ready' && info && (
+      {ownsSession && status === 'ready' && info && (
         <div data-testid="sim-result">
           <h3 style={SUBHEAD}>
             Result{' '}
@@ -575,7 +588,7 @@ export function SimPanel() {
       )}
 
       {/* refusal / error — in place of the result */}
-      {status === 'refused' && (
+      {ownsSession && status === 'refused' && (
         <div
           data-testid="sim-refusal"
           style={{ marginTop: 10, border: '1px solid #7a2828', background: '#2a1416', borderRadius: 4, padding: 8 }}
@@ -614,7 +627,7 @@ export function SimPanel() {
       )}
 
       {/* 6b — restart from a step (#249): a generated, verified `.nc`, not a controller command. */}
-      {isSimSceneActive({ status, pathOnly }) && gcodeText !== null && (
+      {ownsSession && isSimSceneActive({ status, pathOnly }) && (
         <div data-testid="sim-restart" style={{ marginTop: 12 }}>
           <h3 style={SUBHEAD}>Restart from a step</h3>
           <p style={MUTED}>
@@ -685,7 +698,7 @@ export function SimPanel() {
         </div>
       )}
 
-      {status === 'error' && (
+      {ownsSession && status === 'error' && (
         <div data-testid="sim-error" style={{ marginTop: 10, border: '1px solid #7a2828', background: '#2a1416', borderRadius: 4, padding: 8, color: '#f0b4ad', fontSize: 12 }}>
           {error ?? 'the simulation failed'}
         </div>
@@ -702,7 +715,7 @@ export function SimPanel() {
       )}
 
       {/* 8 — close */}
-      {status !== 'idle' && status !== 'loading' && (
+      {ownsSession && status !== 'idle' && status !== 'loading' && (
         <button type="button" data-testid="sim-close" onClick={() => void close()} style={{ width: '100%', marginTop: 8, padding: 7 }}>
           Close simulation
         </button>

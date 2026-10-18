@@ -32,6 +32,15 @@ import type { SimThreadSpec } from '@/engine/cnc/cam/threadMill';
 
 export type SimStatus = 'idle' | 'loading' | 'ready' | 'refused' | 'error';
 
+/**
+ * Who started the current session (#506). The Simulate panel and the engrave run's verify stage
+ * share this one store — the engrave run legitimately drives it so the viewport shows its sweep —
+ * so a session has to remember whose it is. Only the panel presents a session as the result of the
+ * file in its own form; a `'engrave'` load is shown in the viewport and reported through
+ * `engraveRunStore`, never as this panel's Result.
+ */
+export type SimSessionOrigin = 'panel' | 'engrave';
+
 /** The playback speed multipliers the transport offers (#198): a wall-clock multiplier. */
 export const SIM_SPEEDS = [1, 5, 20, 100] as const;
 export type SimSpeed = (typeof SIM_SPEEDS)[number];
@@ -101,6 +110,17 @@ function startingBudgetMs(): number {
 
 export interface SimState {
   status: SimStatus;
+  /**
+   * Who started this session (#506): the Simulate panel or the engrave run. The two share this
+   * store, so this is what stops one's finished run being presented as the other's.
+   */
+  origin: SimSessionOrigin | null;
+  /**
+   * The program text this session was loaded with (#506), null while idle. The Simulate panel
+   * compares it with the file open in its form: a Result belongs to the program it swept, not to
+   * whichever `.nc` happens to be in the form afterwards.
+   */
+  loadedProgram: string | null;
   error: string | null;
   diagnostics: SimDiagnostic[];
   info: SimLoadInfo | null;
@@ -165,6 +185,12 @@ export interface SimState {
      * (`drill.pointAngleDeg`), which is what every non-drill program does.
      */
     drillPointDefault?: { deg: number; source: string } | null,
+    /**
+     * #506 — who started this session. The engrave run passes `'engrave'`; the panel (and the QA
+     * harness that drives the panel's path) takes the default. The panel only presents a session
+     * it started, so a shared store cannot show the engrave verification as the panel's Result.
+     */
+    origin?: SimSessionOrigin,
   ): Promise<void>;
   /** Run the last load again with twice the time limit (#194). No-op when nothing has been loaded. */
   retryWithLongerBudget(): Promise<void>;
@@ -223,6 +249,8 @@ export function setSimClientLoader(fn: (() => Promise<SimClient>) | null): void 
 
 const EMPTY = {
   status: 'idle' as SimStatus,
+  origin: null as SimSessionOrigin | null,
+  loadedProgram: null as string | null,
   error: null,
   diagnostics: [] as SimDiagnostic[],
   info: null,
@@ -258,6 +286,8 @@ interface LoadArgs {
   tool: Tool;
   machineId: string | null;
   calibration: MachineCalibration | null;
+  /** #506 — whose session this is, kept so a retry cannot change the presentation owner. */
+  origin: SimSessionOrigin;
   /** The shop's `drill.pointAngleDeg`, read once at the load like `calibration` (#382). */
   drillPointDefault: { deg: number; source: string };
   /** The shop's `sim.columnFlatPitchYMm`, read once at the load for the same reason (#438). */
@@ -279,7 +309,7 @@ export const useSimStore = create<SimState>()((set, get) => {
   async function run(args: LoadArgs, budgetMs: number): Promise<void> {
     const mine = ++loadSeq;
     // A load starts the session's speed at the shop's seed, as it always reset to 20 before #451.
-    set({ ...EMPTY, speed: startingSpeed(), status: 'loading', budgetMs, phase: 'sweep' });
+    set({ ...EMPTY, speed: startingSpeed(), status: 'loading', budgetMs, phase: 'sweep', origin: args.origin, loadedProgram: args.gcodeText });
     try {
       const client = await clientLoader();
       client.setSimSinks(
@@ -352,7 +382,7 @@ export const useSimStore = create<SimState>()((set, get) => {
     ...EMPTY,
     speed: startingSpeed(),
     budgetMs: startingBudgetMs(),
-    async loadProgram(gcodeText, setup, tool, machineId, calibrationOverride, threads = [], drillPointDefault = null) {
+    async loadProgram(gcodeText, setup, tool, machineId, calibrationOverride, threads = [], drillPointDefault = null, origin = 'panel') {
       // The saved read of the machine's own frame, if the user has one (#279). Resolved HERE so
       // every load path — a panel, the engrave run, the QA harness — simulates the same machine,
       // and so a retry or a restart cannot drift onto a different frame than the job was loaded on.
@@ -377,6 +407,7 @@ export const useSimStore = create<SimState>()((set, get) => {
         tool,
         machineId,
         calibration,
+        origin,
         drillPointDefault: { deg: point.deg, source: point.source },
         flatPitchYMm: flatPitch.value,
         columnPitchXMm: pitchX.value,
