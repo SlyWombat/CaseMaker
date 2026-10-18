@@ -794,13 +794,16 @@ describe('EngravePanel — plunge drills (#260)', () => {
     expect(done.kind === 'drill-array' && done.count.x).toBe(3);
   });
 
-  it('refuses a through hole and disables Generate, naming #218', () => {
+  it('refuses a through hole with no board under it, and disables Generate (#218)', () => {
     render(<EngravePanel />);
     fireEvent.click(screen.getByTestId('engrave-add-drill'));
     fireEvent.click(screen.getByTestId('engrave-drill-through-0'));
     expect(useEngraveJobStore.getState().job.drills![0]!.through).toBe(true);
-    const finding = screen.getByTestId('engrave-drill-finding-0-drill-through-unavailable');
-    expect(finding.textContent).toContain('#218');
+    // The shipped job has no sacrificial material, so the cut would reach the vise. The gate is
+    // the board's, no longer #218's absence.
+    const finding = screen.getByTestId('engrave-drill-finding-0-through-needs-board');
+    expect(finding.textContent).toContain('under-board');
+    expect(finding.textContent).toContain('1.3');
     expect((screen.getByTestId('engrave-generate') as HTMLButtonElement).disabled).toBe(true);
   });
 
