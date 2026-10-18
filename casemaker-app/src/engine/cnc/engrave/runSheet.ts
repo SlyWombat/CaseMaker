@@ -68,6 +68,7 @@ import {
   type SurfaceReadingSource,
 } from '@/engine/cnc/engrave/surfaceSpread';
 import { restSeamSentence } from '@/engine/cnc/engrave/restSettings';
+import { finishSourceWords, type FinishSettingSource } from '@/engine/cnc/engrave/finishPass';
 import { MATERIAL_LABELS } from '@/engine/cnc/materials';
 import { VISE_BODY_DEPTH, viseEnvelope } from '@/engine/cnc/fixture';
 import { hasSacrificial, stripHeight, viseJawShift } from '@/engine/cnc/sacrificial';
@@ -155,6 +156,9 @@ export interface RunSheetCamSummary {
   cutMm?: number;
   baselineRapidMm?: number;
   ordering?: 'proximity' | null;
+  /** #250 — how many of this program's operations rough and finish. Optional like the travel numbers. */
+  roughOperations?: number;
+  finishOperations?: number;
 }
 
 /**
@@ -202,6 +206,22 @@ export interface RunSheetProgram {
    * program 1 only).
    */
   drill?: RunSheetDrillFacts | null;
+  /**
+   * #250 — the rough/finish split when THIS program wrote one. Null/absent on a one-pass program.
+   * The per-program section reads it from here, never from the top-level facts.
+   */
+  finish?: RunSheetFinishFacts | null;
+}
+
+/**
+ * #250 — what a program's rough/finish split was, structurally `FinishPassFacts` from
+ * `engraveGenerate`. `itemIds` is the split items in operation order; a drill or a V region is
+ * never in it. The allowance carries its source so the sheet prints provenance, not a bare number.
+ */
+export interface RunSheetFinishFacts {
+  stockToLeaveMm: { value: number; source: FinishSettingSource };
+  mode: 'rough-and-finish' | 'rough-only' | 'finish-only';
+  itemIds: readonly string[];
 }
 
 /** #434 — the drill program's settings, their per-key sources, and one plan per drilled item. */
@@ -264,6 +284,11 @@ export interface RunSheetGenerated {
    * the holes: they are the numbers in the file.
    */
   drill?: RunSheetDrillFacts | null;
+  /**
+   * #250 — the rough/finish split of the program this object describes (program 1). Null/absent
+   * when it cut in one pass; a later program carries its own facts on `programs[n].finish`.
+   */
+  finish?: RunSheetFinishFacts | null;
   /**
    * #432 slice 3 — the FACING program: the skim of the blank's top, its own `.nc` beside the job
    * (`runSheetFaceFileName`), or null when none was produced. Optional because a generated object
@@ -2315,6 +2340,27 @@ function restProgramSectionSteps(facts: RestPassFacts, labels: RestProgramLabels
   return steps;
 }
 
+/**
+ * #250 — the allowance line before the split item rows: the number, its provenance, and which file
+ * finishes the cut. Stated even for a good number, for the same reason `restSourceWords` states
+ * every rest source.
+ */
+function finishAllowanceStep(facts: RunSheetFinishFacts): RunSheetStep {
+  const leave = fmtNum(facts.stockToLeaveMm.value);
+  const where =
+    facts.mode === 'rough-and-finish'
+      ? 'This file follows it with the finishing pass, at full depth.'
+      : facts.mode === 'rough-only'
+        ? 'A later program in this run is the finishing pass, at full depth.'
+        : 'This program is the finishing pass; the roughing cut ran in the previous program.';
+  return {
+    text:
+      `Finish allowance: the roughing pass leaves ${leave} mm of stock on the walls and the floor ` +
+      `(${finishSourceWords(facts.stockToLeaveMm.source)}). ${where}`,
+    value: `${leave} mm stock to leave`,
+  };
+}
+
 /** The frame/load pair for a later program: its own dry run, then the file. */
 function programRunSteps(program: RunSheetProgram, number: number): RunSheetStep[] {
   const steps: RunSheetStep[] = [];
@@ -2382,6 +2428,7 @@ function engraveProgramSectionSteps(program: RunSheetProgram, number: number): R
           ? 'no CAM summary was recorded'
           : `${cam.operations} operation${cam.operations === 1 ? '' : 's'} · about ${formatDuration(cam.estimatedSeconds)}`,
     },
+    ...(program.finish == null ? [] : [finishAllowanceStep(program.finish)]),
     ...programRunSteps(program, number),
   ];
 }
@@ -2400,6 +2447,7 @@ function restRoughProgramSection(program: RunSheetProgram, facts: RestPassFacts,
       value: `program ${number}`,
     },
     restProgramParamsStep(facts.rough, number),
+    ...(program.finish == null ? [] : [finishAllowanceStep(program.finish)]),
     ...programRunSteps(program, number),
   ];
 }
@@ -2413,6 +2461,7 @@ function restProgramSection(program: RunSheetProgram, facts: RestPassFacts, labe
         `cut with ${facts.rest.key} (⌀ ${fmtNum(facts.rest.diameter)} mm).`,
       value: `program ${labels.rest}`,
     },
+    ...(program.finish == null ? [] : [finishAllowanceStep(program.finish)]),
     ...restProgramSectionSteps(facts, labels),
   ];
 }
@@ -3064,6 +3113,11 @@ export function buildRunSheet(
     }
     if (!restInOwnSection) cutSteps.push(restProgramParamsStep(rest, restNumber ?? 2));
   }
+  // #250 — the allowance is a shop number with a source, and it decides what the operator should
+  // see after the roughing cut: stock standing on every wall and on the floor. The mode says whose
+  // file finishes it, because a rest pair puts the two halves in two programs (#472).
+  const finishFacts = generated.finish ?? null;
+  if (finishFacts !== null) cutSteps.push(finishAllowanceStep(finishFacts));
   for (const item of items) {
     // #231 item 3 — say which cut sits over a void, and the depth the material there allows,
     // so the item name no longer has to smuggle the distinction onto the sheet.
@@ -3074,6 +3128,31 @@ export function buildRunSheet(
           ? ` (DEEPER than the ${fmtNum(keepOutLimit(job, over.solidThickness, margins.boundaryMargin))} mm the void allows)`
           : ` (deepest cut there ${fmtNum(keepOutLimit(job, over.solidThickness, margins.boundaryMargin))} mm)`)
       : '';
+    if (finishFacts !== null && finishFacts.itemIds.includes(item.id)) {
+      // #250 — this item is cut in two removals. The roughing row says what stands after it (the
+      // allowance on walls and floor); the finishing row says the full depth. A rest pair's first
+      // program writes only the first row and its second program only the second, so the operator
+      // reads the same two removals across the two files.
+      const leave = finishFacts.stockToLeaveMm.value;
+      if (finishFacts.mode !== 'finish-only') {
+        cutSteps.push({
+          text:
+            `${item.name}${note}${depthSourceWords(job, item, margins.boundaryMargin, measure)} — ` +
+            `roughing pass: leaves ${fmtNum(leave)} mm of stock on the walls and the floor.`,
+          value: `rough to ${fmtNum(item.depth - leave)} mm deep · ${fmtNum(leave)} mm stock left`,
+        });
+      }
+      if (finishFacts.mode !== 'rough-only') {
+        cutSteps.push({
+          text:
+            `${item.name}${note}${depthSourceWords(job, item, margins.boundaryMargin, measure)} — ` +
+            `finishing pass: full depth along the walls and the floor, ${fmtNum(leave)} mm below the ` +
+            'roughing cut.',
+          value: `${fmtNum(item.depth)} mm deep · full depth`,
+        });
+      }
+      continue;
+    }
     if (vCarveJob && cone !== null) {
       // #221 — the per-item V facts are the CAM's own numbers: the plane from `vCarvePlane`, the
       // pitch from `vCarveStepover` at the ratio the feeds row's step-over states (the same ratio

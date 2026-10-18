@@ -1878,3 +1878,46 @@ describe('runSheet — every program gets its own Cut section (#419)', () => {
     expect(sheet.sections.some((s) => s.id === 'cut-3')).toBe(false);
   });
 });
+
+// #250 — the roughing and finishing removals are two steps, and the allowance says where its number
+// came from. The sheet prints the worker's facts; it never re-resolves the shop default.
+describe('runSheet — the finish pass (#250)', () => {
+  const finishFacts = (mode: 'rough-and-finish' | 'rough-only' | 'finish-only', ids: readonly string[]) => ({
+    stockToLeaveMm: { value: 0.2, source: 'chosen' as const },
+    mode,
+    itemIds: ids,
+  });
+
+  it('prints a roughing and a finishing row for every split item, with the allowance provenance', () => {
+    const job = defaultEngraveJob();
+    const ids = job.labels.map((l) => l.id);
+    const stub = stubGenerated(job);
+    const generated: RunSheetGenerated = {
+      ...stub,
+      finish: finishFacts('rough-and-finish', ids),
+      cam: { ...stub.cam!, roughOperations: ids.length, finishOperations: ids.length },
+    };
+    const cut = section(buildRunSheet(job, generated, NO_SIM, NOW), 'cut').steps.map((s) => s.text);
+    expect(cut.filter((t) => t.includes('roughing pass:')).length).toBe(ids.length);
+    expect(cut.filter((t) => t.includes('finishing pass:')).length).toBe(ids.length);
+    expect(cut.some((t) => t.includes('Finish allowance: the roughing pass leaves 0.2 mm'))).toBe(true);
+    expect(cut.some((t) => t.includes('a value chosen for this shop'))).toBe(true);
+    expect(cut.some((t) => t.includes('This file follows it with the finishing pass'))).toBe(true);
+  });
+
+  it('a rest pair’s first program states only the roughing removal and points at the later file', () => {
+    const job = defaultEngraveJob();
+    const ids = job.labels.map((l) => l.id);
+    const stub = stubGenerated(job);
+    const sheet = buildRunSheet(
+      job,
+      { ...stub, finish: finishFacts('rough-only', ids), cam: { ...stub.cam!, roughOperations: ids.length } },
+      NO_SIM,
+      NOW,
+    );
+    const cut = section(sheet, 'cut').steps.map((s) => s.text);
+    expect(cut.filter((t) => t.includes('roughing pass:')).length).toBe(ids.length);
+    expect(cut.some((t) => t.includes('finishing pass:'))).toBe(false);
+    expect(cut.some((t) => t.includes('A later program in this run is the finishing pass'))).toBe(true);
+  });
+});
