@@ -99,7 +99,7 @@ function fakeZ1(opts: { holes?: ReferenceOpening[]; shift?: { x: number; y: numb
       }
       m = /^G0 Z(-?[\d.]+)$/.exec(line);
       if (m) return (pos.z += Number(m[1])), reply('ok');
-      m = /^G38\.2 Z-([\d.]+) F[\d.]+$/.exec(line);
+      m = /^G38\.3 Z-([\d.]+) F[\d.]+$/.exec(line);
       if (m) {
         if (mode !== 'G91') throw new Error('probed in absolute mode');
         const target = pos.z - Number(m[1]);
@@ -111,8 +111,8 @@ function fakeZ1(opts: { holes?: ReferenceOpening[]; shift?: { x: number; y: numb
         }
         pos.z = target;
         lowestTouch = Math.min(lowestTouch, target);
-        alarmed = true;
-        return reply(`[PRB:${pos.x.toFixed(3)},${pos.y.toFixed(3)},${target.toFixed(3)}:0]\nALARM: Probe fail`);
+        // #518 — a G38.3 miss is a reading and `ok`, never an alarm.
+        return reply(`[PRB:${pos.x.toFixed(3)},${pos.y.toFixed(3)},${target.toFixed(3)}:0]\nok`);
       }
       return reply(`error:unexpected line ${line}`);
     },
@@ -258,7 +258,7 @@ describe('#429 the run', () => {
     const r = await runRegistration(p, { console: fake.console, operator: yes });
     // The bounded seek finds nothing down to the band, and the run stops there, saying how low the probe may be.
     expect(r).toMatchObject({ ok: false, reason: expect.stringContaining('the surface seek') });
-    expect(fake.lines.filter((l) => l.startsWith('G38.2'))).toHaveLength(1);
+    expect(fake.lines.filter((l) => l.startsWith('G38.3'))).toHaveLength(1);
   });
 
   it('a hole that is not there makes the result unusable, by its label', async () => {

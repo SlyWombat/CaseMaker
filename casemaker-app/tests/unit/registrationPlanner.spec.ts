@@ -94,14 +94,30 @@ describe('#430 the plan', () => {
     expect(planRegistration(input('vise', { expectedSurface: { machineZ: -99, from: 'x' } }), S)).toMatchObject({ ok: false });
   });
 
-  it('refuses a vise whose jaws sit within the surface band of the stock, or a mount with no origin', () => {
+  it('refuses a vise whose jaws sit within the surface band of the stock — either way — or a mount with no origin', () => {
     expect(planRegistration(input('vise', { fixtureBelowSurfaceMm: 0.1 }), S)).toMatchObject({ ok: false });
-    expect(planRegistration(input('vise', { fixtureBelowSurfaceMm: -1 }), S)).toMatchObject({ ok: false });
+    const within = planRegistration(input('vise', { fixtureBelowSurfaceMm: -0.2 }), S);
+    expect(within.ok).toBe(false);
+    if (!within.ok) expect(within.reason).toContain('0.2 mm above');
     // The tolerance must not reach the jaw tops: a seek onto a jaw would read as the surface.
     const reach = planRegistration(input('vise', { fixtureBelowSurfaceMm: 0.3 }), S);
     expect(reach.ok).toBe(false);
     if (!reach.ok) expect(reach.reason).toContain('reaches the jaw tops');
     expect(planRegistration(input('bracket', { bracketOrigin: undefined }), S)).toMatchObject({ ok: false });
+  });
+
+  it('#517 a stock BELOW the jaw tops is planned: the jaw reads high past the gripped edge, and that reading is the edge', () => {
+    // The 2026-10-18 laminate: 1.5 mm on the 3.1 mm ledges, 1.6 mm below the jaw tops, band 0.25.
+    const r = planRegistration(input('vise', { fixtureBelowSurfaceMm: -1.6 }), S);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.plan.scans[0]).toMatchObject({ edge: 'left', aboveIsEdge: true });
+    expect(r.plan.scans[1]!.aboveIsEdge).toBeUndefined();
+    expect(r.plan.notes.join(' ')).toContain('1.6 mm below the jaw tops');
+    // The jaws must stay under the park height: every sideways move is made there.
+    const tall = planRegistration(input('vise', { fixtureBelowSurfaceMm: -(S.parkAboveSurfaceMm - 0.5) }), S);
+    expect(tall.ok).toBe(false);
+    if (!tall.ok) expect(tall.reason).toContain('park height');
   });
 
   it('tape: two left points kept clear of the rounded corners', () => {
@@ -153,6 +169,8 @@ function fakeZ1(opts: {
   actual: ExpectedStock;
   surface?: number;
   jaw?: boolean;
+  /** #517 — a jaw top this far ABOVE the surface for 10 mm left of the stock (a recessed sheet). */
+  jawAbove?: number;
   clamp?: { xMin: number; xMax: number };
   idle?: boolean;
   polls?: number;
@@ -177,6 +195,7 @@ function fakeZ1(opts: {
     if (opts.clamp && wx >= opts.clamp.xMin && wx <= opts.clamp.xMax) return surface + 2;
     if (wx >= a.xMin - RIM && wx <= a.xMax + RIM && wy >= a.yMin - RIM && wy <= a.yMax + RIM) return surface;
     if (opts.jaw && wx < a.xMin && wx > a.xMin - 10) return surface - 0.47;
+    if (opts.jawAbove !== undefined && wx < a.xMin && wx > a.xMin - 10) return surface + opts.jawAbove;
     return null;
   };
   const console = {
@@ -226,7 +245,11 @@ function fakeZ1(opts: {
         if (mode !== 'G91') throw new Error('a Z move in absolute work coordinates');
         return (pos.z += Number(m[1])), reply('ok');
       }
+      // #518 — the executor probes with G38.3: a miss is `[PRB:…:0]` and `ok`, never an alarm. A G38.2
+      // from the executor is a regression and is answered as the controller would: an alarm.
       m = /^G38\.2 Z-([\d.]+) F[\d.]+$/.exec(line);
+      if (m) return (alarmed = true), reply('ALARM: Probe fail');
+      m = /^G38\.3 Z-([\d.]+) F[\d.]+$/.exec(line);
       if (m) {
         if (mode !== 'G91') throw new Error('the executor probed in absolute mode');
         const target = pos.z - Number(m[1]);
@@ -238,8 +261,7 @@ function fakeZ1(opts: {
         }
         pos.z = target;
         lowest = Math.min(lowest, pos.z);
-        alarmed = true;
-        return reply(`[PRB:${pos.x.toFixed(3)},${pos.y.toFixed(3)},${target.toFixed(3)}:0]\nALARM: Probe fail`);
+        return reply(`[PRB:${pos.x.toFixed(3)},${pos.y.toFixed(3)},${target.toFixed(3)}:0]\nok`);
       }
       if (/^G10 L2 P1 /.test(line)) return reply('ok');
       return reply(`error:unexpected line ${line}`);
@@ -268,9 +290,9 @@ describe('#430 the executor, on a fake machine', () => {
     expect(z1.lines.slice(0, 5)).toEqual(['?', '$H', 'G54', 'G92.1', 'M491']);
     expect(z1.lines.slice(-2)).toEqual(['G53 G0 Z-3', '$H']);
     for (const line of z1.lines) expect(consoleProblem(line), line).toBeNull();
-    // `?` reads Idle right before every G38.2.
+    // `?` reads Idle right before every G38.3.
     z1.lines.forEach((l, i) => {
-      if (l.startsWith('G38.2')) expect(z1.lines.slice(0, i).filter((x) => x !== 'G91').at(-1)).toBe('?');
+      if (l.startsWith('G38.3')) expect(z1.lines.slice(0, i).filter((x) => x !== 'G91').at(-1)).toBe('?');
     });
     // Every XY move after the surface happens at the park height (surface + 3), the first at Z −3.
     const park = SURFACE + S.parkAboveSurfaceMm;
@@ -286,7 +308,10 @@ describe('#430 the executor, on a fake machine', () => {
       expect(sc.scan.outward * (mid.at - sc.touches[firstOff]!.at)).toBeLessThan(0);
     }
     expect(r.data.scans[0]!.touches.some((t) => t.kind === 'below')).toBe(true); // the jaw top
-    expect(z1.lines).toContain('$X');
+    // #518 — a miss is a reading: nothing is cleared, and the machine was never in alarm.
+    expect(z1.lines).not.toContain('$X');
+    expect(z1.lines.some((l) => l.startsWith('G38.2'))).toBe(false);
+    expect(z1.alarmed()).toBe(false);
 
     expect(r.outcome.usable).toBe(true);
     expect(Math.abs(r.outcome.offset.x - 1.2)).toBeLessThanOrEqual(S.fineStepMm / 2);
@@ -333,6 +358,23 @@ describe('#430 the executor, on a fake machine', () => {
     const n = z1.lines.length;
     expect((await applyCorrection(r.outcome, { console: z1.console, operator: yes }, { confirmed: true })).ok).toBe(false);
     expect(z1.lines.length).toBe(n);
+  });
+
+  it('#517 a stock below the jaw tops: the jaw reads high, the edge is found there, nothing alarms', async () => {
+    const z1 = fakeZ1({ actual: SHIFTED, jawAbove: 1.6 });
+    const r = await runRegistration(plan('vise', { fixtureBelowSurfaceMm: -1.6 }), { console: z1.console, operator: yes });
+    if (!r.ok) throw new Error(r.reason);
+    const left = r.data.scans[0]!;
+    expect(left.scan.aboveIsEdge).toBe(true);
+    expect(left.touches.some((t) => t.kind === 'above')).toBe(true);
+    // One pass out to the first high reading, then ONE midpoint touch back toward the stock, like a miss.
+    const firstOff = left.touches.findIndex((t) => t.kind !== 'stock');
+    expect(firstOff).toBe(left.touches.length - 2);
+    expect(r.outcome.usable).toBe(true);
+    expect(r.outcome.problems).toEqual([]);
+    expect(Math.abs(r.outcome.offset.x - 1.2)).toBeLessThanOrEqual(S.fineStepMm / 2);
+    expect(z1.lines).not.toContain('$X');
+    expect(z1.alarmed()).toBe(false);
   });
 
   it('a clamp above the surface stops its scan and is named', async () => {
@@ -405,12 +447,35 @@ describe('#430 the executor, on a fake machine', () => {
     }
   });
 
-  it('a stop right after a miss unlocks BEFORE G90 — the Z1 refuses G90 in alarm', async () => {
+  it('a stop on a real alarm during a scan touch unlocks BEFORE G90 — the Z1 refuses G90 in alarm', async () => {
+    const z1 = fakeZ1({ actual: SHIFTED });
+    let probes = 0;
+    const faulty = {
+      async send(line: string): Promise<ConsoleSendResult> {
+        // The first scan touch — the third probe, after the fast and slow surface seeks — answers a
+        // hard-limit alarm, not a miss (#518: a miss is a reading under G38.3 and never alarms); the
+        // machine is then alarmed and relative.
+        if (line.startsWith('G38.3') && ++probes === 3) {
+          z1.lines.push(line);
+          return { kind: 'sent', line, text: 'ALARM: Hard limit [Z]\nok', frames: 1, elapsedMs: 1 };
+        }
+        return z1.console.send(line);
+      },
+    };
+    const r = await runRegistration(plan('vise'), { console: faulty, operator: yes });
+    expect(r.ok).toBe(false);
+    expect(z1.lines.slice(-2)).toEqual(['$X', 'G90']);
+    expect(z1.mode()).toBe('G90');
+    expect(z1.alarmed()).toBe(false);
+    if (!r.ok) expect(r.reason).toContain(`${S.capBelowSurfaceMm} mm below the surface (a scan touch)`);
+  });
+
+  it('#518 a scan miss is a reading: no $X follows it; only a stop after a TIMEOUT (an unknown state) unlocks on suspicion', async () => {
     const z1 = fakeZ1({ actual: SHIFTED });
     const flaky = {
       async send(line: string): Promise<ConsoleSendResult> {
-        // The executor's own `$X` after the first scan miss times out: the machine is alarmed and relative.
-        if (line === '$X' && z1.alarmed() && !z1.lines.includes('STOPPED')) {
+        // The `G90` right after the first scan touch times out: the machine is NOT alarmed, only relative.
+        if (line === 'G90' && z1.lines.filter((l) => l.startsWith('G38.3')).length >= 3 && !z1.lines.includes('STOPPED')) {
           z1.lines.push('STOPPED');
           return { kind: 'timeout', line, detail: 'no answer', text: '' };
         }
@@ -419,10 +484,12 @@ describe('#430 the executor, on a fake machine', () => {
     };
     const r = await runRegistration(plan('vise'), { console: flaky, operator: yes });
     expect(r.ok).toBe(false);
-    expect(z1.lines.slice(-2)).toEqual(['$X', 'G90']);
+    // Three probes and their misses went by with no `$X`; the only `$X` is the stop's own, after the timeout.
+    const stoppedAt = z1.lines.indexOf('STOPPED');
+    expect(z1.lines.slice(0, stoppedAt)).not.toContain('$X');
+    expect(z1.lines.slice(stoppedAt + 1)).toEqual(['$X', 'G90']);
     expect(z1.mode()).toBe('G90');
     expect(z1.alarmed()).toBe(false);
-    if (!r.ok) expect(r.reason).toContain(`${S.capBelowSurfaceMm} mm below the surface (a scan touch)`);
   });
 
   it('a surface seek that finds nothing says how low the probe may be: the bottom of the band', async () => {
@@ -430,7 +497,9 @@ describe('#430 the executor, on a fake machine', () => {
     const r = await runRegistration(plan('vise'), { console: z1.console, operator: yes });
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.reason).toContain('as low as machine Z -56.572, 0.4 mm below the expected surface');
-    expect(z1.lines.slice(-2)).toEqual(['$X', 'G90']);
+    // #518 — the seek's miss did not alarm the machine, so the stop sends G90 alone.
+    expect(z1.lines.slice(-1)).toEqual(['G90']);
+    expect(z1.lines).not.toContain('$X');
     expect(z1.mode()).toBe('G90');
   });
 
@@ -455,7 +524,7 @@ describe('#430 the executor, on a fake machine', () => {
     const z1 = fakeZ1({ actual: SHIFTED });
     const cut = {
       async send(line: string): Promise<ConsoleSendResult> {
-        if (line.startsWith(`G38.2 Z-${S.surfaceSlowSeekMm} `)) {
+        if (line.startsWith(`G38.3 Z-${S.surfaceSlowSeekMm} `)) {
           z1.lines.push(line);
           return { kind: 'timeout', line, detail: 'no reply', text: '' };
         }
@@ -506,7 +575,7 @@ describe('#430 a Z-chain replay of the bench’s own answers (2026-10-15)', () =
     const console = {
       async send(line: string): Promise<ConsoleSendResult> {
         lines.push(line);
-        const key = line.startsWith('G38.2 Z-2 ') ? 'SLOW' : line.startsWith('G38.2') ? 'FAST' : line in REPLY ? line : null;
+        const key = line.startsWith('G38.3 Z-2 ') ? 'SLOW' : line.startsWith('G38.3') ? 'FAST' : line in REPLY ? line : null;
         const list = key ? REPLY[key]! : ['ok'];
         const i = counters[key ?? line] ?? 0;
         counters[key ?? line] = i + 1;
@@ -555,8 +624,8 @@ describe('#430 a Z-chain replay of the bench’s own answers (2026-10-15)', () =
         let text = 'ok';
         if (line === '?') text = '<Idle|MPos:-1.0000,-1.0000,-1.0000|WPos:179.5500,183.8000,55.0000>';
         else if (line === 'M491') text = 'ok\nM497.3\nok\nG38.6 Z-108.000 F500.000\n[PRB:-9.890,-12.830,-79.158:1]\nok\nDone ATC';
-        else if (line.startsWith('G38.2 Z-2 ')) text = `[PRB:-174.550,-175.800,${surfaceZ.toFixed(3)}:1]\nok`;
-        else if (line.startsWith('G38.2')) text = `[PRB:-174.550,-175.800,${(surfaceZ + 0.001).toFixed(3)}:1]\nok`;
+        else if (line.startsWith('G38.3 Z-2 ')) text = `[PRB:-174.550,-175.800,${surfaceZ.toFixed(3)}:1]\nok`;
+        else if (line.startsWith('G38.3')) text = `[PRB:-174.550,-175.800,${(surfaceZ + 0.001).toFixed(3)}:1]\nok`;
         return { kind: 'sent', line, text, frames: 1, elapsedMs: 1 };
       },
     };
@@ -583,7 +652,7 @@ describe('#430 a Z-chain replay of the bench’s own answers (2026-10-15)', () =
     expect(rt.surface.z).toBe(-56.666);
     // The seek's fast touch travels to the BAND's floor (expected − tolerance), not the first run's.
     // From the travel height −3 down to the band's floor −56.866, not the first run's −56.422.
-    expect(z1.lines).toContain('G38.2 Z-53.866 F300');
+    expect(z1.lines).toContain('G38.3 Z-53.866 F300');
     expect(rt.outcome.surfaceZ).toBe(-56.666);
     const applied = await applyCorrection(rt.outcome, { console: z1.console, operator: yes }, { confirmed: true });
     if (!applied.ok) throw new Error(applied.reason);
@@ -645,7 +714,7 @@ describe('#430 a Z-chain replay of the bench’s own answers (2026-10-15)', () =
 
     // The measurement happens before anything writes an origin, and the G10 write is last.
     const g10 = z1.lines.findIndex((l) => l.startsWith('G10 L2'));
-    const touch = z1.lines.findIndex((l) => l.startsWith('G38.2 Z-2 '));
+    const touch = z1.lines.findIndex((l) => l.startsWith('G38.3 Z-2 '));
     expect(touch).toBeGreaterThan(-1);
     expect(g10).toBeGreaterThan(touch);
     expect(z1.lines.filter((l) => l.startsWith('G10 L2'))).toHaveLength(1);
@@ -702,7 +771,7 @@ describe('#430 a Z-chain replay of the bench’s own answers (2026-10-15)', () =
     if (r.ok) return;
     expect(r.step).toBe('correction');
     // The re-touch ran and measured; the origin was not written.
-    expect(r.transcript.some((t) => t.line.startsWith('G38.2 Z-2 '))).toBe(true);
+    expect(r.transcript.some((t) => t.line.startsWith('G38.3 Z-2 '))).toBe(true);
     expect(z1.lines.some((l) => l.startsWith('G10 L2'))).toBe(false);
   });
 });

@@ -41,6 +41,7 @@
  * Pure: work coordinates in, a plan out. No machine, no store.
  */
 
+import { PARK_CLEARANCE_MM } from '@/platform/defaultsClient';
 import { settingsProblem, type RegistrationSettings } from './settings';
 
 export type Mount = 'vise' | 'bracket' | 'tape';
@@ -66,6 +67,13 @@ export interface EdgeScan {
   limit: number;
   coarseStep: number;
   fineStep: number;
+  /**
+   * #517 — a reading ABOVE the surface band on this scan is the mount's own top standing over a recessed
+   * stock (the vise jaw when the stock sits below the jaw tops): it is where the stock ENDS, not an
+   * obstacle in the way. The executor halves back from it like a miss and the outcome takes it as the
+   * first touch off. Absent (the proud case, the bracket, tape): a high reading is a clamp, and stops.
+   */
+  aboveIsEdge?: boolean;
   /**
    * What the scan finds, in words, when it is not one of the stock's own edges — "the left wall of the
    * four holes" (#429). The finding's sentences use it; the stock's edge name otherwise.
@@ -94,7 +102,11 @@ export interface PlanInput {
   seekFromMachineZ: number;
   /** The centre of the cut area, work XY — the clean point the surface is touched at. Default: the stock's centre. */
   cutCentre?: { x: number; y: number };
-  /** Vise: how far the jaw tops sit BELOW the stock's top (the stock's proud height), mm. */
+  /**
+   * Vise: how far the jaw tops sit BELOW the stock's top (the stock's proud height), mm. NEGATIVE when
+   * the stock sits below the jaw tops (a thin sheet on the ledges, #488/#517): the jaws then stand above
+   * it by that much, and a touch past the gripped edge lands on a jaw and reads high.
+   */
   fixtureBelowSurfaceMm?: number;
   /** Bracket: the work origin in MACHINE XY, from anchor1 and the stock's offset in the bracket. */
   bracketOrigin?: BracketOrigin;
@@ -300,27 +312,48 @@ export function planRegistration(input: PlanInput, s: RegistrationSettings): Pla
       );
     }
   } else {
+    /** Vise, #517: the stock sits below the jaw tops, so a jaw reads HIGH past the gripped edge — and that is the edge. */
+    let jawAboveStock = false;
     if (mount === 'vise') {
       const proud = input.fixtureBelowSurfaceMm;
       if (proud === undefined || !Number.isFinite(proud)) {
         return { ok: false, reason: 'the vise mount needs how far the jaw tops sit below the stock’s top' };
       }
-      // A jaw within the surface band reads as the stock: the scan could not see the edge.
-      if (proud <= s.surfaceBandMm) {
-        return { ok: false, reason: `the jaw tops sit only ${proud} mm below the stock — within the ${s.surfaceBandMm} mm surface band, so a jaw touch would read as the stock` };
+      // A jaw within the surface band of the stock's top — either way — reads as the stock: the scan could
+      // not see the edge. The test is on the DISTANCE (#517): a jaw 1.6 mm ABOVE a 1.5 mm sheet is as
+      // distinguishable as one 1.6 mm below it, and the sign only says which way the reading goes.
+      if (Math.abs(proud) <= s.surfaceBandMm) {
+        const where = proud < 0 ? `${r3(-proud)} mm above` : `${r3(proud)} mm below`;
+        return { ok: false, reason: `the jaw tops sit ${where} the stock’s top — within the ${s.surfaceBandMm} mm surface band, so a jaw touch would read as the stock` };
       }
-      // A surface seek that misses the stock must not land on a jaw and call it the stock.
-      if (s.surfaceToleranceMm >= proud) {
-        return { ok: false, reason: `the surface tolerance (${s.surfaceToleranceMm} mm) reaches the jaw tops ${proud} mm below the stock — a seek onto a jaw would read as the surface` };
+      if (proud > 0) {
+        // A surface seek that misses the stock must not land on a jaw and call it the stock.
+        if (s.surfaceToleranceMm >= proud) {
+          return { ok: false, reason: `the surface tolerance (${s.surfaceToleranceMm} mm) reaches the jaw tops ${proud} mm below the stock — a seek onto a jaw would read as the surface` };
+        }
+        notes.push('the fixed jaw fixes X and rotation: the left-edge scan confirms it, the front-edge scan finds Y');
+      } else {
+        // The jaws stand above the stock: every sideways move is made at the park height, which must clear
+        // them — the seek band lies below the jaw tops, so a seek cannot mistake a jaw for the surface.
+        const above = -proud;
+        if (above >= s.parkAboveSurfaceMm - PARK_CLEARANCE_MM) {
+          return {
+            ok: false,
+            reason: `the jaw tops stand ${r3(above)} mm above the stock, which the ${s.parkAboveSurfaceMm} mm park height does not clear by ${PARK_CLEARANCE_MM} mm — the probe would be driven into a jaw between touches`,
+          };
+        }
+        jawAboveStock = true;
+        notes.push(
+          `the stock sits ${r3(above)} mm below the jaw tops: a left-edge touch past the stock lands on the fixed jaw and reads ABOVE the surface band — that reading is the jaw, so the edge is where the readings go high; the fixed jaw fixes X and rotation, the front-edge scan finds Y`,
+        );
       }
-      notes.push('the fixed jaw fixes X and rotation: the left-edge scan confirms it, the front-edge scan finds Y');
     }
     const ys = span(stock.yMin, stock.yMax, 'left');
     if (typeof ys === 'string') return { ok: false, reason: ys };
     const xs = span(stock.xMin, stock.xMax, 'front');
     if (typeof xs === 'string') return { ok: false, reason: xs };
     if (mount === 'tape') scans.push(scanFor('left', ys.lo, stock, s), scanFor('left', ys.hi, stock, s));
-    else scans.push(scanFor('left', midY, stock, s));
+    else scans.push({ ...scanFor('left', midY, stock, s), ...(jawAboveStock ? { aboveIsEdge: true } : {}) });
     scans.push(scanFor('front', midX, stock, s));
   }
 

@@ -187,7 +187,7 @@ function fakeZ1(opts: {
         if (mode !== 'G91') throw new Error('a Z move in absolute work coordinates');
         return (pos.z += Number(m[1])), reply('ok');
       }
-      m = /^G38\.2 Z-([\d.]+) F[\d.]+$/.exec(line);
+      m = /^G38\.3 Z-([\d.]+) F[\d.]+$/.exec(line);
       if (m) {
         if (mode !== 'G91') throw new Error('the executor probed in absolute mode');
         const target = pos.z - Number(m[1]);
@@ -199,8 +199,8 @@ function fakeZ1(opts: {
         }
         pos.z = target;
         lowest = Math.min(lowest, pos.z);
-        alarmed = true;
-        return reply(`[PRB:${pos.x.toFixed(3)},${pos.y.toFixed(3)},${target.toFixed(3)}:0]\nALARM: Probe fail`);
+        // #518 — a G38.3 miss is a reading and `ok`, never an alarm.
+        return reply(`[PRB:${pos.x.toFixed(3)},${pos.y.toFixed(3)},${target.toFixed(3)}:0]\nok`);
       }
       if (/^G10 L2 P1 /.test(line)) return reply('ok');
       return reply(`error:unexpected line ${line}`);
@@ -224,7 +224,7 @@ const yes = async () => true;
 
 /** How many probe seeks the run makes: the registration's two, plus two per touch not reused. */
 function probeSeeks(lines: readonly string[]): number {
-  return lines.filter((l) => l.startsWith('G38.2')).length;
+  return lines.filter((l) => l.startsWith('G38.3')).length;
 }
 
 describe('#475 the executor measures the cut extents', () => {

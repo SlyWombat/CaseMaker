@@ -94,8 +94,10 @@ export function edgeFrom(record: ScanRecord, tipRadius: number): EdgeFinding {
   // The name a sentence uses: a feature's wall by its label (#429), else the stock's edge.
   const what = scan.label ?? `the ${scan.edge} edge`;
   if (touches.length === 0) return { ...base, foundAt: null, problem: `the scan of ${what} made no touch` };
+  // A high reading is an obstacle — unless the plan says this scan's high reading is the mount's own top
+  // past a recessed stock (#517: the vise jaw above a thin sheet), in which case it is the first touch off.
   const above = touches.find((t) => t.kind === 'above');
-  if (above) {
+  if (above && scan.aboveIsEdge !== true) {
     return {
       ...base,
       foundAt: null,

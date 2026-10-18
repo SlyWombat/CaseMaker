@@ -153,7 +153,7 @@ function controller(plan: RegistrationPlan, sent: string[], opts: FakeOptions = 
             if (y !== null) lastY = Number(y[1]);
             return reply('ok');
           }
-          if (line.startsWith('G38.2')) {
+          if (line.startsWith('G38.3')) {
             g38 += 1;
             // The first two are the surface seek's fast and slow touch, at the registration point.
             if (g38 <= 2) return reply(`[PRB:${lastX},${lastY},${stockZ}:1]\nok`);

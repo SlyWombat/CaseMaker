@@ -8,18 +8,24 @@
  *      read one, so none is left to sit silently between the touches and the origin).
  *   3. The OPERATOR fits the wired probe (a callback — a person, not this code). `M491`: its last
  *      `[PRB:…]` is the probe's tool-length reading, the Z0 reference.
- *   4. The surface at the plan's clean point, from the plan's seek height (`seek.fromMachineZ`): a fast `G38.2` that travels only to the
- *      expected surface − tolerance, `G0 Z1`, a slow `G38.2`. BOTH readings must land inside the
+ *   4. The surface at the plan's clean point, from the plan's seek height (`seek.fromMachineZ`): a fast `G38.3` that travels only to the
+ *      expected surface − tolerance, `G0 Z1`, a slow `G38.3`. BOTH readings must land inside the
  *      expected surface ± tolerance, or the run stops. The probe then PARKS at surface + park.
  *   5. Each edge scan, touch by touch, every XY move AT THE PARK HEIGHT: `G0 X Y`, `?` until Idle,
- *      `G91`, `G38.2 Z-(park + cap)` — so a touch can never go below the surface − cap — `$X` after a
- *      miss, `G90`, the lift to park. Coarse, then fine; the scan stops at the first touch off the
- *      stock, then takes ONE touch midway back toward the stock to halve the last step (never further
- *      out than the miss).
+ *      `G91`, `G38.3 Z-(park + cap)` — so a touch can never go below the surface − cap — `G90`, the
+ *      lift to park. Coarse, then fine; the scan stops at the first touch off the stock, then takes
+ *      ONE touch midway back toward the stock to halve the last step (never further out than the miss).
+ *
+ * EVERY PROBE IS `G38.3`, NEVER `G38.2` (#518, maintainer 2026-10-18: "why do we need to error, it causes
+ * user panic that something bad happened"). A scan touch past the edge is the EXPECTED answer of a scan,
+ * and `G38.2` turns it into `ALARM: Probe fail` with the machine locked until `$X` — observed on the
+ * bench, every miss an alarm. `G38.3` reports the same miss as `[PRB:…:0]` and leaves the machine Idle
+ * (2026-10-18, the laminate scans), so no `$X` is sent and the transcript shows each miss as a reading.
+ * A surface seek that finds nothing is still a stop — this code's own, with the machine not in alarm.
  *   6. Lift to the plan's seek height (`G53 G0 Z` — the resolved machine's `toolChange.clearanceZ`) and
  *      `$H`.
  *
- * `?` IS POLLED UNTIL IDLE BEFORE EVERY `G38.2`, as the bench did: a probe sent while a move is still
+ * `?` IS POLLED UNTIL IDLE BEFORE EVERY `G38.3`, as the bench did: a probe sent while a move is still
  * settling is not a probe of where the move was meant to end.
  *
  * IT STOPS AT THE FIRST UNEXPECTED ANSWER — a refusal, a timeout, an error, any alarm that is not a
@@ -214,10 +220,10 @@ async function touch(io: Session, plan: RegistrationPlan, scan: EdgeScan, at: nu
   await io.idle();
   io.at(`as low as ${s.capBelowSurfaceMm} mm below the surface (a scan touch)`);
   await io.send('G91');
-  const reply = await io.send(`G38.2 Z-${f(s.parkAboveSurfaceMm + s.capBelowSurfaceMm)} F${f(s.touchFeed)}`, { missOk: true });
+  const reply = await io.send(`G38.3 Z-${f(s.parkAboveSurfaceMm + s.capBelowSurfaceMm)} F${f(s.touchFeed)}`, { missOk: true });
   const prb = lastPrb(reply);
   if (prb === null) throw new Stop(`the touch at ${f(x)}, ${f(y)} answered no probe reading`);
-  if (!prb.touched) await io.send('$X');
+  // A miss under G38.3 is a reading, not an alarm (#518): nothing to clear.
   await io.send('G90');
   await io.send(`G53 G0 Z${f(parkZ)}`);
   io.at(`at the park height, ${s.parkAboveSurfaceMm} mm above the surface`);
@@ -232,8 +238,9 @@ async function scanEdge(io: Session, plan: RegistrationPlan, scan: EdgeScan, par
     const t = await touch(io, plan, scan, p, parkZ, surfaceZ, plan.mount === 'bracket' && touches.length === 0);
     touches.push(t);
     if (t.kind !== 'stock') {
-      // Something above the surface (a clamp): stop the scan here and say so (outcome.ts).
-      if (t.kind !== 'above' && lastOn !== null) {
+      // Something above the surface (a clamp): stop the scan here and say so (outcome.ts) — unless the
+      // plan says a high reading on this scan is the jaw past a recessed stock (#517), the edge itself.
+      if ((t.kind !== 'above' || scan.aboveIsEdge === true) && lastOn !== null) {
         const mid = Math.round(((lastOn + p) / 2) * 1000) / 1000;
         touches.push(await touch(io, plan, scan, mid, parkZ, surfaceZ));
       }
@@ -267,7 +274,7 @@ function inBand(prb: Prb | null, band: SurfaceBand, which: string): Prb {
 
 /**
  * The surface seek: from the plan's travel height down to the band's floor and no further — a fast
- * `G38.2`, `G0 Z1`, a slow `G38.2`, BOTH readings inside the band — then `G90` at the reading. The
+ * `G38.3`, `G0 Z1`, a slow `G38.3`, BOTH readings inside the band — then `G90` at the reading. The
  * registration and the post-facing re-touch share it, so the two seeks cannot drift apart.
  */
 async function seekSurface(
@@ -284,11 +291,11 @@ async function seekSurface(
   await io.idle();
   io.at(band.at);
   await io.send('G91');
-  inBand(lastPrb(await io.send(`G38.2 Z-${f(travel)} F${f(s.surfaceFastFeed)}`)), band, 'fast');
+  inBand(lastPrb(await io.send(`G38.3 Z-${f(travel)} F${f(s.surfaceFastFeed)}`)), band, 'fast');
   await io.send(`G0 Z${f(SURFACE_LIFT_MM)}`);
   await io.idle();
   io.at(`as low as ${f(s.surfaceSlowSeekMm - SURFACE_LIFT_MM)} mm below the fast touch's reading (the slow surface touch)`);
-  const slow = inBand(lastPrb(await io.send(`G38.2 Z-${f(s.surfaceSlowSeekMm)} F${f(s.surfaceSlowFeed)}`)), band, 'slow');
+  const slow = inBand(lastPrb(await io.send(`G38.3 Z-${f(s.surfaceSlowSeekMm)} F${f(s.surfaceSlowFeed)}`)), band, 'slow');
   await io.send('G90');
   return slow;
 }
