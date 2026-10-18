@@ -1,6 +1,6 @@
 // #477 — the `casemaker` dispatch layer. Handlers are fakes here on purpose: the routing and the
-// two deferred answers (`--json` → #478, `machine` → #479) are what this spec holds, and neither
-// needs the wasm-bearing engrave pipeline or a spawned process.
+// two flags the dispatcher owns (`--json` → the receipt switch, `machine` → #479) are what this
+// spec holds, and neither needs the wasm-bearing engrave pipeline or a spawned process.
 
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -10,11 +10,12 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
   dispatch,
-  JSON_DEFERRED,
+  JSON_VALUE_REFUSED,
   MACHINE_DEFERRED,
   USAGE,
   type CasemakerHandlers,
 } from '../../scripts/lib/casemaker/dispatch';
+import { HUMAN, type CommandOptions } from '../../scripts/lib/casemaker/output';
 import { readbackMain, type ReadbackHandlers } from '../../scripts/lib/casemaker/readbackCommand';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -29,14 +30,17 @@ interface Calls {
   machine: string[][];
 }
 
-function fakes(code = 0): { handlers: CasemakerHandlers; calls: Calls } {
+function fakes(code = 0): { handlers: CasemakerHandlers; calls: Calls; options: CommandOptions[] } {
   const calls: Calls = { engrave: [], exportProject: [], location: [], readback: [], machine: [] };
-  const record = (name: keyof Calls) => async (argv: string[]) => {
+  const options: CommandOptions[] = [];
+  const record = (name: keyof Calls) => async (argv: string[], opts: CommandOptions) => {
     calls[name].push(argv);
+    options.push(opts);
     return code;
   };
   return {
     calls,
+    options,
     handlers: {
       engrave: record('engrave'),
       exportProject: record('exportProject'),
@@ -95,20 +99,32 @@ describe('#477 casemaker dispatch', () => {
     expect(Object.values(calls).flat()).toEqual([]);
   });
 
-  it('refuses --json everywhere with #478 named, before any handler runs', async () => {
+  it('strips --json wherever it appears and tells every handler about it', async () => {
     for (const argv of [
       ['engrave', 'job.json', '--json'],
       ['--json', 'export', 'p.json'],
-      ['location', 'tools', '--json=true'],
       ['readback', 'run', 'r.json', '--json'],
     ]) {
-      const { handlers, calls } = fakes();
+      const { handlers, calls, options } = fakes();
       const out = io();
-      expect(await dispatch(argv, handlers, out.io)).toBe(2);
-      expect(out.errors).toEqual([`casemaker: ${JSON_DEFERRED}`]);
-      expect(JSON_DEFERRED).toContain('#478');
-      expect(Object.values(calls).flat()).toEqual([]);
+      expect(await dispatch(argv, handlers, out.io)).toBe(0);
+      expect(options).toEqual([{ json: true }]);
+      // The flag never reaches a handler as an argument — the handler reads `options.json`.
+      expect(Object.values(calls).flat().every((a) => !a.includes('--json'))).toBe(true);
+      expect(out.errors).toEqual([]);
     }
+
+    const human = fakes();
+    expect(await dispatch(['engrave', 'job.json'], human.handlers, io().io)).toBe(0);
+    expect(human.options).toEqual([{ json: false }]);
+  });
+
+  it('refuses a value on --json, before any handler runs', async () => {
+    const { handlers, calls } = fakes();
+    const out = io();
+    expect(await dispatch(['location', 'tools', '--json=true'], handlers, out.io)).toBe(2);
+    expect(out.errors).toEqual([`casemaker: ${JSON_VALUE_REFUSED}`]);
+    expect(Object.values(calls).flat()).toEqual([]);
   });
 
   it('keeps the machine command as an explicit #479 refusal in the shipped handlers', async () => {
@@ -118,7 +134,7 @@ describe('#477 casemaker dispatch', () => {
     vi.spyOn(console, 'error').mockImplementation((...args: unknown[]) => {
       errors.push(args.map(String).join(' '));
     });
-    expect(await defaultHandlers.machine(['status'])).toBe(2);
+    expect(await defaultHandlers.machine(['status'], HUMAN)).toBe(2);
     expect(errors.join('\n')).toContain(MACHINE_DEFERRED);
     expect(MACHINE_DEFERRED).toContain('#479');
   });
@@ -151,22 +167,26 @@ describe('#477 casemaker dispatch', () => {
 });
 
 describe('#477 casemaker readback routing', () => {
-  it('routes feeds and run with the record script’s own arguments', async () => {
+  it('routes feeds and run with the record script’s own arguments and the receipt switch', async () => {
     const seen: Record<string, string[][]> = { feeds: [], run: [] };
+    const options: CommandOptions[] = [];
     const handlers: ReadbackHandlers = {
-      feeds: async (argv) => {
+      feeds: async (argv, opts) => {
         seen.feeds!.push(argv);
+        options.push(opts);
         return 3;
       },
-      run: async (argv) => {
+      run: async (argv, opts) => {
         seen.run!.push(argv);
+        options.push(opts);
         return 4;
       },
     };
-    expect(await readbackMain(['feeds', 'record.json', '--dry-run'], handlers)).toBe(3);
-    expect(await readbackMain(['run', 'record.json', '--history', 'h.ts'], handlers)).toBe(4);
+    expect(await readbackMain(['feeds', 'record.json', '--dry-run'], { json: true }, handlers)).toBe(3);
+    expect(await readbackMain(['run', 'record.json', '--history', 'h.ts'], HUMAN, handlers)).toBe(4);
     expect(seen.feeds).toEqual([['record.json', '--dry-run']]);
     expect(seen.run).toEqual([['record.json', '--history', 'h.ts']]);
+    expect(options).toEqual([{ json: true }, { json: false }]);
   });
 
   it('refuses a missing or unknown section without calling either readback', async () => {
@@ -185,8 +205,8 @@ describe('#477 casemaker readback routing', () => {
     vi.spyOn(console, 'error').mockImplementation((...args: unknown[]) => {
       errors.push(args.map(String).join(' '));
     });
-    expect(await readbackMain([], handlers)).toBe(2);
-    expect(await readbackMain(['nope'], handlers)).toBe(2);
+    expect(await readbackMain([], HUMAN, handlers)).toBe(2);
+    expect(await readbackMain(['nope'], HUMAN, handlers)).toBe(2);
     expect(errors.join('\n')).toContain('one of feeds, run');
     expect(called).toBe(0);
   });

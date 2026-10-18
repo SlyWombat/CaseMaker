@@ -1,0 +1,110 @@
+{
+  "version": 1,
+  "ok": true,
+  "stage": "done",
+  "gate": null,
+  "inputs": [
+    {
+      "path": "docs/bench/176-g32-stroke.job.json",
+      "sha256": "fd676b0eb62c43313f322019a99a52c5e2212f5cd9b77e0f21884822ba86edc0",
+      "bytes": 1563
+    },
+    {
+      "path": "casemaker-app/tests/unit/fixtures/location-doc.json",
+      "sha256": "caff785ef88f039e2ce8404859e2c9aad274d05473c4160b1c6b5cc15252aaed",
+      "bytes": 50106
+    }
+  ],
+  "outputs": [
+    {
+      "path": ".scratch\\receipt-fixture\\176-g32-stroke.nc",
+      "sha256": "0f53250c9a0e8d7f4330cb4251abaebffecc73a45fb34f75c203799ba1e75313",
+      "bytes": 1171
+    },
+    {
+      "path": ".scratch\\receipt-fixture\\176-g32-stroke-frame.nc",
+      "sha256": "6bb15935996be52d501439c5cffdc79209eaf4f6b1e62af703ef3208dbbdf0e2",
+      "bytes": 1072
+    },
+    {
+      "path": ".scratch\\receipt-fixture\\176-g32-stroke-run-sheet.md",
+      "sha256": "8ad197f5defe9bd717d508dce249f7f53268fe8b48675ecd7cc19220b47b8006",
+      "bytes": 15934
+    }
+  ],
+  "diagnostics": [
+    {
+      "code": "vise-grip-shallow",
+      "guideRow": "vise-grip-shallow",
+      "severity": "warning",
+      "message": "Only 2.61 mm of the stock is gripped below the jaw tops; under 3 mm the part can lift (PROVISIONAL threshold, #208).",
+      "source": "findings",
+      "program": "176 g32 stroke"
+    },
+    {
+      "code": "vise-default",
+      "guideRow": "vise-default",
+      "severity": "warning",
+      "message": "Vise dimensions are the shipped defaults, measured once on the reference unit (#208); they are not a measurement of this machine's own vise.",
+      "source": "findings",
+      "program": "176 g32 stroke"
+    },
+    {
+      "code": "tool-change-noop",
+      "guideRow": "tool-change-noop",
+      "severity": "info",
+      "message": "M6 to T1, which is already active: the firmware does nothing (no change, no length calibration)",
+      "source": "simulation",
+      "program": "176 g32 stroke"
+    }
+  ],
+  "provenance": [
+    {
+      "name": "tool.inv:kz-o-flute-2-12.diameter",
+      "value": 2,
+      "unit": "mm",
+      "source": "seeded"
+    }
+  ],
+  "refusals": [],
+  "command": "engrave",
+  "details": {
+    "kind": "job",
+    "outDir": ".scratch/receipt-fixture",
+    "programs": [
+      {
+        "name": "176 g32 stroke",
+        "stage": "done",
+        "ok": true,
+        "ncFile": "176-g32-stroke.nc",
+        "ncLines": 41,
+        "frameFile": "176-g32-stroke-frame.nc",
+        "cam": {
+          "operations": 1,
+          "cuttingMoves": 4,
+          "passes": 2,
+          "estimatedSeconds": 19.608888888888885,
+          "rapidMm": 59.99999999999999,
+          "cutMm": 119.99999999999999,
+          "baselineRapidMm": 59.99999999999999
+        },
+        "sim": {
+          "ok": true,
+          "engine": "exact",
+          "count": 2,
+          "removedVolumeMm3": 98.49715612059299,
+          "errorCount": 0
+        },
+        "sheet": {
+          "file": "176-g32-stroke-run-sheet.md",
+          "ncHash": "0f53250c",
+          "estimatedTime": "20 s"
+        },
+        "previews": [],
+        "images": []
+      }
+    ],
+    "coupon": null,
+    "pair": null
+  }
+}

@@ -24,7 +24,10 @@ import {
   UNMEASURED_FEEDS_TABLE,
   type FeedsMeasurement,
 } from '../../../src/engine/cnc/feeds';
+import { RECEIPT_VERSION } from '../../../src/platform/headless/receipt';
 import { CliExit, isCliExit } from './exit';
+import { commandOutput, HUMAN, type CommandOptions } from './output';
+import { fileReceipt } from './receiptFiles';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_FEEDS = join(here, '..', '..', '..', 'src', 'engine', 'cnc', 'feeds.ts');
@@ -112,16 +115,20 @@ function mergeMeasurement(existing: FeedsMeasurement[], add: FeedsMeasurement): 
  * documented script path run the identical code. `fail()` throws {@link CliExit}; the returned
  * number is the process exit code.
  */
-export async function readbackFeedsMain(argv: string[]): Promise<number> {
+export async function readbackFeedsMain(
+  argv: string[],
+  options: CommandOptions = HUMAN,
+): Promise<number> {
   try {
-    return await readbackFeedsBody(argv);
+    return await readbackFeedsBody(argv, options);
   } catch (e) {
     if (isCliExit(e)) return e.code;
     throw e;
   }
 }
 
-async function readbackFeedsBody(argv: string[]): Promise<number> {
+async function readbackFeedsBody(argv: string[], options: CommandOptions): Promise<number> {
+  const out = commandOutput(options);
   let args: Args;
   try {
     args = parseArgs(argv);
@@ -168,21 +175,51 @@ async function readbackFeedsBody(argv: string[]): Promise<number> {
     measurement.diameter <= e.maxDiameter,
   );
 
-  console.log(`${recordPath}  ->  ${args.feeds}${args.dryRun ? '  (dry run)' : ''}`);
-  console.log(
-    `  measurement  ${measurement.material} Ø${measurement.diameter} ${measurement.parameter} = ` +
-      `${measurement.value}  (coupon "${measurement.coupon}", cut ${measurement.on})`,
-  );
-  if (row) {
-    console.log(`  row          ${row.material} ${row.minDiameter}-${row.maxDiameter} mm -> ${row.status}`);
-    console.log(`  provenance   ${row.provenance}`);
-  }
-
   if (args.dryRun) {
-    console.log('\n(dry run — feeds.ts not written)');
+    // Nothing is written; the receipt says so with `written: null` and the renderer prints the
+    // dry-run line from `dryRun` (#478).
   } else {
     writeFileSync(args.feeds, next);
-    console.log(`\nwrote ${merged.length} measurement(s) into the feeds.ts region`);
   }
+  out.emitReceipt({
+    version: RECEIPT_VERSION,
+    command: 'readback',
+    ok: true,
+    stage: 'applied',
+    gate: null,
+    inputs: [fileReceipt(recordPath)],
+    outputs: args.dryRun ? [] : [fileReceipt(args.feeds)],
+    diagnostics: [],
+    provenance: [],
+    refusals: [],
+    details: {
+      section: 'feeds',
+      record: recordPath,
+      target: args.feeds,
+      dryRun: args.dryRun,
+      feeds: {
+        measurement: {
+          material: measurement.material,
+          diameter: measurement.diameter,
+          parameter: measurement.parameter,
+          value: measurement.value,
+          coupon: measurement.coupon,
+          on: measurement.on,
+        },
+        row:
+          row === undefined
+            ? null
+            : {
+                material: row.material,
+                minDiameter: row.minDiameter,
+                maxDiameter: row.maxDiameter,
+                status: row.status,
+                provenance: row.provenance,
+              },
+        written: args.dryRun ? null : merged.length,
+      },
+      run: null,
+    },
+  });
   return 0;
 }

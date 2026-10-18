@@ -8,12 +8,13 @@ import { engraveJobMain } from './engrave';
 import { exportMain } from './exportCommand';
 import { locationMain } from './locationCommand';
 import { readbackMain } from './readbackCommand';
+import type { CommandOptions } from './output';
 
 /**
  * Machine/hardware commands are refused explicitly rather than omitted silently: the user types
  * `casemaker machine status` and is told why nothing ran and where the decision lives (#479).
  */
-async function machineMain(_argv: string[]): Promise<number> {
+async function machineMain(_argv: string[], _options: CommandOptions): Promise<number> {
   console.error(`casemaker machine: ${MACHINE_DEFERRED}`);
   return 2;
 }

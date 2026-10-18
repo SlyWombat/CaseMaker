@@ -5,12 +5,14 @@
  * importing the wasm-bearing engrave pipeline. `handlers.ts` supplies the real ones; the bin is the
  * only place the two meet.
  *
- * `--json` and `machine` are refused HERE, once, rather than each command inventing an answer:
- * #478 owns the receipt schema and #479 owns the machine command. Neither is stubbed.
+ * `--json` is parsed HERE, once (#478): the flag is stripped from wherever it appears and handed to
+ * every handler through {@link CommandOptions}, so stdout carries the receipt document and nothing
+ * else. `machine` is refused here as well, until #479 decides it. Neither is stubbed.
  */
+import { HUMAN, type CommandOptions } from './output';
 
 /** One command implementation: its own arguments (the subcommand already removed), exit code back. */
-export type CommandHandler = (argv: string[]) => Promise<number>;
+export type CommandHandler = (argv: string[], options: CommandOptions) => Promise<number>;
 
 export interface CasemakerHandlers {
   /** `engrave`, including `--coupon` and `--from-3mf`. */
@@ -43,13 +45,14 @@ export const USAGE = [
   '  casemaker readback feeds <record.json> [--feeds <feeds.ts>] [--dry-run]',
   '  casemaker readback run <record.json> [--history <runHistory.ts>] [--dry-run]',
   '',
-  'Human output is the default. `--json` is reserved for the receipt (#478) and is not',
-  'available yet. Machine/hardware commands await #479 and are not in this build.',
+  'Human output is the default and is rendered from the run’s receipt. With `--json`, stdout is',
+  'exactly that receipt document and progress goes to stderr. Machine/hardware commands await',
+  '#479 and are not in this build.',
 ].join('\n');
 
-/** The refusal `--json` gets until #478 writes the schema. Deliberately one sentence, no schema. */
-export const JSON_DEFERRED =
-  '--json is not available yet — the receipt schema belongs to #478 and is not written; nothing was run.';
+/** `--json` takes no value: the receipt has one shape, so there is no format to negotiate. */
+export const JSON_VALUE_REFUSED =
+  '--json takes no value — it selects the receipt document, and there is only one shape; nothing was run.';
 
 /** The refusal every machine/hardware command gets until #479 is decided. */
 export const MACHINE_DEFERRED =
@@ -65,14 +68,14 @@ export async function dispatch(
   handlers: CasemakerHandlers,
   io: CliIo = console,
 ): Promise<number> {
-  // The deferred flag is refused wherever it appears, before any handler can start work — a
-  // receipt-shaped flag that silently ran the command would be worse than no flag at all.
-  if (argv.includes('--json') || argv.some((a) => a.startsWith('--json='))) {
-    io.error(`casemaker: ${JSON_DEFERRED}`);
+  // A value on the receipt switch is refused before any handler can start work: `--json=true`
+  // means the caller expected a choice the receipt does not offer.
+  if (argv.some((a) => a.startsWith('--json='))) {
+    io.error(`casemaker: ${JSON_VALUE_REFUSED}`);
     return 2;
   }
-
-  const [command, ...rest] = argv;
+  const options: CommandOptions = { ...HUMAN, json: argv.includes('--json') };
+  const [command, ...rest] = argv.filter((a) => a !== '--json');
   if (command === undefined || command === 'help' || command === '--help' || command === '-h') {
     io.log(USAGE);
     return command === undefined ? 2 : 0;
@@ -80,15 +83,15 @@ export async function dispatch(
 
   switch (command) {
     case 'engrave':
-      return handlers.engrave(rest);
+      return handlers.engrave(rest, options);
     case 'export':
-      return handlers.exportProject(rest);
+      return handlers.exportProject(rest, options);
     case 'location':
-      return handlers.location(rest);
+      return handlers.location(rest, options);
     case 'readback':
-      return handlers.readback(rest);
+      return handlers.readback(rest, options);
     case 'machine':
-      return handlers.machine(rest);
+      return handlers.machine(rest, options);
     default:
       io.error(`casemaker: unknown command "${command}"\n\n${USAGE}`);
       return 2;

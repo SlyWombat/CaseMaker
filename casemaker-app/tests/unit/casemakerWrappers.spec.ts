@@ -1,4 +1,5 @@
-// #477 — the old script paths still work, and the new command refuses the deferred flags.
+// #477 — the old script paths still work, and the new command owns its two flags: `--json` the
+// receipt switch (#478), `machine` the remaining refusal (#479).
 //
 // These are process-level smoke tests: each old entry point or `casemaker` invocation must reach
 // its own usage/refusal and exit with the documented code. They are spawn-based because that is the
@@ -63,11 +64,20 @@ describe('#477 the casemaker entry point', () => {
     expect(r.stdout).toContain('casemaker readback');
   }, 120_000);
 
-  it('refuses --json with #478 named, before a command can run', () => {
-    const r = run('scripts/casemaker.ts', ['engrave', 'docs/bench/single-barrel.job.json', '--json']);
+  it('accepts --json anywhere on the line as the receipt switch (#478)', () => {
+    // `--help` short-circuits before a handler, so this proves the strip without starting the
+    // wasm-bearing pipeline; the receipt itself is covered by the unit specs.
+    const r = run('scripts/casemaker.ts', ['--json', '--help']);
+    expect(r.status).toBe(0);
+    expect(r.stdout).toContain('usage: casemaker <command>');
+    expect(r.stdout).toContain('With `--json`, stdout is');
+  }, 120_000);
+
+  it('refuses a value on --json before a command can run', () => {
+    const r = run('scripts/casemaker.ts', ['engrave', 'docs/bench/single-barrel.job.json', '--json=true']);
     expect(r.status).toBe(2);
-    expect(r.stderr).toContain('#478');
-    expect(r.stderr).toContain('not available yet');
+    expect(r.stderr).toContain('--json takes no value');
+    expect(r.stderr).toContain('nothing was run');
   }, 120_000);
 
   it('refuses machine commands with #479 named and touches nothing', () => {

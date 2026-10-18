@@ -1,0 +1,1854 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "oneOf": [
+    {
+      "description": "The receipt of an engrave run.",
+      "properties": {
+        "command": {
+          "const": "engrave",
+          "description": "The command that produced this receipt.",
+          "type": "string"
+        },
+        "details": {
+          "description": "The engrave command’s own details.",
+          "properties": {
+            "coupon": {
+              "anyOf": [
+                {
+                  "description": "The coupon sweep summary, when the run was a coupon.",
+                  "properties": {
+                    "allOk": {
+                      "description": "Whether every program generated.",
+                      "type": "boolean"
+                    },
+                    "parameter": {
+                      "description": "The case parameter the sweep varies.",
+                      "enum": [
+                        "depth",
+                        "feed",
+                        "rpm",
+                        "stepDown",
+                        "stepOver"
+                      ],
+                      "type": "string"
+                    },
+                    "recordFile": {
+                      "description": "The coupon record file name the run wrote.",
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "rowCount": {
+                      "description": "Program rows the record carries to fill in.",
+                      "maximum": 9007199254740991,
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "title": {
+                      "description": "The coupon spec’s title.",
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "values": {
+                      "description": "The values swept, in the spec’s order.",
+                      "items": {
+                        "type": "number"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "required": [
+                    "title",
+                    "parameter",
+                    "values",
+                    "recordFile",
+                    "rowCount",
+                    "allOk"
+                  ],
+                  "type": "object"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The coupon summary, or null for a job or design run."
+            },
+            "kind": {
+              "description": "Which input built the run: a job, a 3MF design, or a coupon spec.",
+              "enum": [
+                "job",
+                "design",
+                "coupon"
+              ],
+              "type": "string"
+            },
+            "outDir": {
+              "description": "The directory the files were written into.",
+              "type": "string"
+            },
+            "pair": {
+              "anyOf": [
+                {
+                  "description": "The two-program summary, when a rest pass ran.",
+                  "properties": {
+                    "leftoverAreaMm2": {
+                      "description": "Design area still standing between the two programs, mm².",
+                      "minimum": 0,
+                      "type": "number"
+                    },
+                    "restDiameterMm": {
+                      "description": "The second cutter’s cutting diameter, mm.",
+                      "exclusiveMinimum": 0,
+                      "type": "number"
+                    },
+                    "restFile": {
+                      "description": "The second program’s `.nc` file name.",
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "restRemovedVolumeMm3": {
+                      "description": "Material the second program removed on its own, mm³.",
+                      "minimum": 0,
+                      "type": "number"
+                    },
+                    "roughDiameterMm": {
+                      "description": "The first cutter’s cutting diameter, mm.",
+                      "exclusiveMinimum": 0,
+                      "type": "number"
+                    },
+                    "roughFile": {
+                      "description": "The first program’s `.nc` file name.",
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "thirdToolShare": {
+                      "anyOf": [
+                        {
+                          "minimum": 0,
+                          "type": "number"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The leftover as a share of what the design asks for, or null."
+                    },
+                    "thirdToolSuggested": {
+                      "anyOf": [
+                        {
+                          "type": "boolean"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "Whether a third cutter is suggested, or null when not judged."
+                    },
+                    "thirdToolThreshold": {
+                      "anyOf": [
+                        {
+                          "minimum": 0,
+                          "type": "number"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The shop’s third-cutter threshold, as a fraction, or null."
+                    }
+                  },
+                  "required": [
+                    "roughFile",
+                    "roughDiameterMm",
+                    "restFile",
+                    "restDiameterMm",
+                    "restRemovedVolumeMm3",
+                    "leftoverAreaMm2",
+                    "thirdToolShare",
+                    "thirdToolThreshold",
+                    "thirdToolSuggested"
+                  ],
+                  "type": "object"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The two-program summary, or null when only one program ran."
+            },
+            "programs": {
+              "description": "Every program the run wrote, in the order written.",
+              "items": {
+                "description": "One program a run wrote.",
+                "properties": {
+                  "cam": {
+                    "anyOf": [
+                      {
+                        "description": "The CAM summary for one program.",
+                        "properties": {
+                          "baselineRapidMm": {
+                            "anyOf": [
+                              {
+                                "minimum": 0,
+                                "type": "number"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ],
+                            "description": "Rapid travel the pre-#487 ordering would have spent, mm, or null."
+                          },
+                          "cutMm": {
+                            "anyOf": [
+                              {
+                                "minimum": 0,
+                                "type": "number"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ],
+                            "description": "Cutting travel, mm, or null when not recorded."
+                          },
+                          "cuttingMoves": {
+                            "description": "Cutting moves in the program.",
+                            "maximum": 9007199254740991,
+                            "minimum": 0,
+                            "type": "integer"
+                          },
+                          "estimatedSeconds": {
+                            "description": "Estimated cutting time, in seconds.",
+                            "minimum": 0,
+                            "type": "number"
+                          },
+                          "operations": {
+                            "description": "Toolpath operations the CAM emitted.",
+                            "maximum": 9007199254740991,
+                            "minimum": 0,
+                            "type": "integer"
+                          },
+                          "passes": {
+                            "description": "Depth passes the program makes.",
+                            "maximum": 9007199254740991,
+                            "minimum": 0,
+                            "type": "integer"
+                          },
+                          "rapidMm": {
+                            "anyOf": [
+                              {
+                                "minimum": 0,
+                                "type": "number"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ],
+                            "description": "Rapid (air) travel, mm, or null when not recorded."
+                          }
+                        },
+                        "required": [
+                          "operations",
+                          "cuttingMoves",
+                          "passes",
+                          "estimatedSeconds",
+                          "rapidMm",
+                          "cutMm",
+                          "baselineRapidMm"
+                        ],
+                        "type": "object"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "description": "The CAM summary, or null when the CAM produced none."
+                  },
+                  "frameFile": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "description": "The frame `.nc` file name, or null when none was written."
+                  },
+                  "images": {
+                    "description": "Preview PNG file names rendered for this program.",
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "name": {
+                    "description": "The job name the program was written under.",
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "ncFile": {
+                    "description": "The `.nc` file name, without its directory.",
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "ncLines": {
+                    "description": "Line count of the `.nc` text.",
+                    "maximum": 9007199254740991,
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "ok": {
+                    "description": "Whether the generator itself reported success.",
+                    "type": "boolean"
+                  },
+                  "previews": {
+                    "description": "Preview SVG file names written for this program.",
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "sheet": {
+                    "anyOf": [
+                      {
+                        "properties": {
+                          "estimatedTime": {
+                            "description": "The estimated time the sheet prints.",
+                            "minLength": 1,
+                            "type": "string"
+                          },
+                          "file": {
+                            "description": "The run sheet file name, without its directory.",
+                            "minLength": 1,
+                            "type": "string"
+                          },
+                          "ncHash": {
+                            "description": "The hash of the `.nc` the sheet describes.",
+                            "minLength": 1,
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "file",
+                          "ncHash",
+                          "estimatedTime"
+                        ],
+                        "type": "object"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "description": "The run sheet written for this program, or null when none was."
+                  },
+                  "sim": {
+                    "anyOf": [
+                      {
+                        "description": "The simulation summary for one program.",
+                        "properties": {
+                          "count": {
+                            "description": "Checkpoints the sweep recorded.",
+                            "maximum": 9007199254740991,
+                            "minimum": 0,
+                            "type": "integer"
+                          },
+                          "engine": {
+                            "description": "The sweep engine that ran, e.g. `exact` or `raster`.",
+                            "type": "string"
+                          },
+                          "errorCount": {
+                            "description": "Simulation diagnostics of severity `error`.",
+                            "maximum": 9007199254740991,
+                            "minimum": 0,
+                            "type": "integer"
+                          },
+                          "ok": {
+                            "description": "Whether the sweep produced material.",
+                            "type": "boolean"
+                          },
+                          "removedVolumeMm3": {
+                            "anyOf": [
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ],
+                            "description": "Material the sweep removed, mm³, when the mesh is present."
+                          }
+                        },
+                        "required": [
+                          "ok",
+                          "engine",
+                          "count",
+                          "removedVolumeMm3",
+                          "errorCount"
+                        ],
+                        "type": "object"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "description": "The simulation summary, or null when no sweep ran."
+                  },
+                  "stage": {
+                    "description": "The pipeline stage the program reached, e.g. `done`.",
+                    "minLength": 1,
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "name",
+                  "stage",
+                  "ok",
+                  "ncFile",
+                  "ncLines",
+                  "frameFile",
+                  "cam",
+                  "sim",
+                  "sheet",
+                  "previews",
+                  "images"
+                ],
+                "type": "object"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "kind",
+            "outDir",
+            "programs",
+            "coupon",
+            "pair"
+          ],
+          "type": "object"
+        },
+        "diagnostics": {
+          "description": "Every code the run raised.",
+          "items": {
+            "description": "One code the run raised, with the guide row an operator reads next.",
+            "properties": {
+              "code": {
+                "description": "The diagnostic code, e.g. `item-empty`; every engine code is also a cnc-guide row.",
+                "minLength": 1,
+                "type": "string"
+              },
+              "guideRow": {
+                "description": "The cnc-guide chapter 8 row key for this code — the code itself for every engine diagnostic.",
+                "minLength": 1,
+                "type": "string"
+              },
+              "message": {
+                "description": "The finding, in the words the engine or verifier raised it in.",
+                "type": "string"
+              },
+              "program": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "The program whose pipeline raised it, or null for a run-level diagnostic."
+              },
+              "severity": {
+                "description": "How the finding is treated by the gates.",
+                "enum": [
+                  "error",
+                  "warning",
+                  "info"
+                ],
+                "type": "string"
+              },
+              "source": {
+                "description": "Which list raised it.",
+                "enum": [
+                  "findings",
+                  "verify",
+                  "simulation"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "guideRow",
+              "severity",
+              "message",
+              "source",
+              "program"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "gate": {
+          "anyOf": [
+            {
+              "enum": [
+                "generated",
+                "verified",
+                "simulated",
+                "prediction"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The #206 gate that stopped the run, or null when none did."
+        },
+        "inputs": {
+          "description": "The files the command read, with their hashes.",
+          "items": {
+            "description": "A file the command read (an input) or wrote (an output).",
+            "properties": {
+              "bytes": {
+                "description": "Size of the file, in bytes.",
+                "maximum": 9007199254740991,
+                "minimum": 0,
+                "type": "integer"
+              },
+              "path": {
+                "description": "The file, as the command names it — relative paths stay relative.",
+                "minLength": 1,
+                "type": "string"
+              },
+              "sha256": {
+                "description": "SHA-256 of the file bytes, 64 lowercase hex characters.",
+                "pattern": "^[0-9a-f]{64}$",
+                "type": "string"
+              }
+            },
+            "required": [
+              "path",
+              "sha256",
+              "bytes"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "ok": {
+          "description": "Whether the command completed its gates.",
+          "type": "boolean"
+        },
+        "outputs": {
+          "description": "The files the command wrote, with their hashes.",
+          "items": {
+            "description": "A file the command read (an input) or wrote (an output).",
+            "properties": {
+              "bytes": {
+                "description": "Size of the file, in bytes.",
+                "maximum": 9007199254740991,
+                "minimum": 0,
+                "type": "integer"
+              },
+              "path": {
+                "description": "The file, as the command names it — relative paths stay relative.",
+                "minLength": 1,
+                "type": "string"
+              },
+              "sha256": {
+                "description": "SHA-256 of the file bytes, 64 lowercase hex characters.",
+                "pattern": "^[0-9a-f]{64}$",
+                "type": "string"
+              }
+            },
+            "required": [
+              "path",
+              "sha256",
+              "bytes"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "provenance": {
+          "description": "Every number an operator acts on, with where it came from.",
+          "items": {
+            "description": "A number the run used, with its provenance.",
+            "properties": {
+              "name": {
+                "description": "The setting, as the job or the sheet spells it, e.g. `rest.overlapMm`.",
+                "minLength": 1,
+                "type": "string"
+              },
+              "source": {
+                "description": "Where the number came from.",
+                "enum": [
+                  "seeded",
+                  "located",
+                  "typed",
+                  "measured"
+                ],
+                "type": "string"
+              },
+              "unit": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "Its unit (`mm`, `%`, …), or null when it has none."
+              },
+              "value": {
+                "description": "The number this run used.",
+                "type": "number"
+              }
+            },
+            "required": [
+              "name",
+              "value",
+              "unit",
+              "source"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "refusals": {
+          "description": "Every refusal the run reported, as data.",
+          "items": {
+            "description": "A refusal the run reported, as data.",
+            "properties": {
+              "code": {
+                "description": "A stable refusal code, e.g. `simulation-refused`.",
+                "minLength": 1,
+                "type": "string"
+              },
+              "reason": {
+                "description": "The reason, as an operator reads it.",
+                "minLength": 1,
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "reason"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "stage": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The stage the command reached, or null when it stopped before one."
+        },
+        "version": {
+          "const": 1,
+          "description": "The receipt document’s shape version.",
+          "type": "number"
+        }
+      },
+      "required": [
+        "version",
+        "ok",
+        "stage",
+        "gate",
+        "inputs",
+        "outputs",
+        "diagnostics",
+        "provenance",
+        "refusals",
+        "command",
+        "details"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "The receipt of a project export.",
+      "properties": {
+        "command": {
+          "const": "export",
+          "description": "The command that produced this receipt.",
+          "type": "string"
+        },
+        "details": {
+          "description": "The export command’s own details.",
+          "properties": {
+            "triangles": {
+              "description": "Triangles across the compiled parts, before layout.",
+              "maximum": 9007199254740991,
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "triangles"
+          ],
+          "type": "object"
+        },
+        "diagnostics": {
+          "description": "Every code the run raised.",
+          "items": {
+            "description": "One code the run raised, with the guide row an operator reads next.",
+            "properties": {
+              "code": {
+                "description": "The diagnostic code, e.g. `item-empty`; every engine code is also a cnc-guide row.",
+                "minLength": 1,
+                "type": "string"
+              },
+              "guideRow": {
+                "description": "The cnc-guide chapter 8 row key for this code — the code itself for every engine diagnostic.",
+                "minLength": 1,
+                "type": "string"
+              },
+              "message": {
+                "description": "The finding, in the words the engine or verifier raised it in.",
+                "type": "string"
+              },
+              "program": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "The program whose pipeline raised it, or null for a run-level diagnostic."
+              },
+              "severity": {
+                "description": "How the finding is treated by the gates.",
+                "enum": [
+                  "error",
+                  "warning",
+                  "info"
+                ],
+                "type": "string"
+              },
+              "source": {
+                "description": "Which list raised it.",
+                "enum": [
+                  "findings",
+                  "verify",
+                  "simulation"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "guideRow",
+              "severity",
+              "message",
+              "source",
+              "program"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "gate": {
+          "anyOf": [
+            {
+              "enum": [
+                "generated",
+                "verified",
+                "simulated",
+                "prediction"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The #206 gate that stopped the run, or null when none did."
+        },
+        "inputs": {
+          "description": "The files the command read, with their hashes.",
+          "items": {
+            "description": "A file the command read (an input) or wrote (an output).",
+            "properties": {
+              "bytes": {
+                "description": "Size of the file, in bytes.",
+                "maximum": 9007199254740991,
+                "minimum": 0,
+                "type": "integer"
+              },
+              "path": {
+                "description": "The file, as the command names it — relative paths stay relative.",
+                "minLength": 1,
+                "type": "string"
+              },
+              "sha256": {
+                "description": "SHA-256 of the file bytes, 64 lowercase hex characters.",
+                "pattern": "^[0-9a-f]{64}$",
+                "type": "string"
+              }
+            },
+            "required": [
+              "path",
+              "sha256",
+              "bytes"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "ok": {
+          "description": "Whether the command completed its gates.",
+          "type": "boolean"
+        },
+        "outputs": {
+          "description": "The files the command wrote, with their hashes.",
+          "items": {
+            "description": "A file the command read (an input) or wrote (an output).",
+            "properties": {
+              "bytes": {
+                "description": "Size of the file, in bytes.",
+                "maximum": 9007199254740991,
+                "minimum": 0,
+                "type": "integer"
+              },
+              "path": {
+                "description": "The file, as the command names it — relative paths stay relative.",
+                "minLength": 1,
+                "type": "string"
+              },
+              "sha256": {
+                "description": "SHA-256 of the file bytes, 64 lowercase hex characters.",
+                "pattern": "^[0-9a-f]{64}$",
+                "type": "string"
+              }
+            },
+            "required": [
+              "path",
+              "sha256",
+              "bytes"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "provenance": {
+          "description": "Every number an operator acts on, with where it came from.",
+          "items": {
+            "description": "A number the run used, with its provenance.",
+            "properties": {
+              "name": {
+                "description": "The setting, as the job or the sheet spells it, e.g. `rest.overlapMm`.",
+                "minLength": 1,
+                "type": "string"
+              },
+              "source": {
+                "description": "Where the number came from.",
+                "enum": [
+                  "seeded",
+                  "located",
+                  "typed",
+                  "measured"
+                ],
+                "type": "string"
+              },
+              "unit": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "Its unit (`mm`, `%`, …), or null when it has none."
+              },
+              "value": {
+                "description": "The number this run used.",
+                "type": "number"
+              }
+            },
+            "required": [
+              "name",
+              "value",
+              "unit",
+              "source"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "refusals": {
+          "description": "Every refusal the run reported, as data.",
+          "items": {
+            "description": "A refusal the run reported, as data.",
+            "properties": {
+              "code": {
+                "description": "A stable refusal code, e.g. `simulation-refused`.",
+                "minLength": 1,
+                "type": "string"
+              },
+              "reason": {
+                "description": "The reason, as an operator reads it.",
+                "minLength": 1,
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "reason"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "stage": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The stage the command reached, or null when it stopped before one."
+        },
+        "version": {
+          "const": 1,
+          "description": "The receipt document’s shape version.",
+          "type": "number"
+        }
+      },
+      "required": [
+        "version",
+        "ok",
+        "stage",
+        "gate",
+        "inputs",
+        "outputs",
+        "diagnostics",
+        "provenance",
+        "refusals",
+        "command",
+        "details"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "The receipt of a location read.",
+      "properties": {
+        "command": {
+          "const": "location",
+          "description": "The command that produced this receipt.",
+          "type": "string"
+        },
+        "details": {
+          "description": "The location command’s own details.",
+          "properties": {
+            "document": {
+              "anyOf": [
+                {
+                  "properties": {
+                    "inventory": {
+                      "description": "Owned cutters the document states.",
+                      "maximum": 9007199254740991,
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "kind": {
+                      "description": "Which document kind was read.",
+                      "enum": [
+                        "location",
+                        "house"
+                      ],
+                      "type": "string"
+                    },
+                    "name": {
+                      "description": "The location’s name, or `house` for a house document.",
+                      "type": "string"
+                    },
+                    "path": {
+                      "description": "The file the document was read from.",
+                      "type": "string"
+                    },
+                    "tools": {
+                      "description": "Tools on the document’s own list.",
+                      "maximum": 9007199254740991,
+                      "minimum": 0,
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "name",
+                    "path",
+                    "tools",
+                    "inventory"
+                  ],
+                  "type": "object"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The document that was resolved, or null when neither location.json nor house.json was found."
+            },
+            "records": {
+              "description": "The section’s records, in the order it prints them.",
+              "items": {
+                "description": "One record a location section prints.",
+                "properties": {
+                  "fields": {
+                    "description": "The ordered values the operator reads on the line.",
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "label": {
+                    "description": "The line’s leading label, e.g. `tool`, `owned`, `stock`.",
+                    "minLength": 1,
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "label",
+                  "fields"
+                ],
+                "type": "object"
+              },
+              "type": "array"
+            },
+            "section": {
+              "description": "Which section was asked for.",
+              "enum": [
+                "tools",
+                "stock",
+                "machines"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "section",
+            "document",
+            "records"
+          ],
+          "type": "object"
+        },
+        "diagnostics": {
+          "description": "Every code the run raised.",
+          "items": {
+            "description": "One code the run raised, with the guide row an operator reads next.",
+            "properties": {
+              "code": {
+                "description": "The diagnostic code, e.g. `item-empty`; every engine code is also a cnc-guide row.",
+                "minLength": 1,
+                "type": "string"
+              },
+              "guideRow": {
+                "description": "The cnc-guide chapter 8 row key for this code — the code itself for every engine diagnostic.",
+                "minLength": 1,
+                "type": "string"
+              },
+              "message": {
+                "description": "The finding, in the words the engine or verifier raised it in.",
+                "type": "string"
+              },
+              "program": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "The program whose pipeline raised it, or null for a run-level diagnostic."
+              },
+              "severity": {
+                "description": "How the finding is treated by the gates.",
+                "enum": [
+                  "error",
+                  "warning",
+                  "info"
+                ],
+                "type": "string"
+              },
+              "source": {
+                "description": "Which list raised it.",
+                "enum": [
+                  "findings",
+                  "verify",
+                  "simulation"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "guideRow",
+              "severity",
+              "message",
+              "source",
+              "program"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "gate": {
+          "anyOf": [
+            {
+              "enum": [
+                "generated",
+                "verified",
+                "simulated",
+                "prediction"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The #206 gate that stopped the run, or null when none did."
+        },
+        "inputs": {
+          "description": "The files the command read, with their hashes.",
+          "items": {
+            "description": "A file the command read (an input) or wrote (an output).",
+            "properties": {
+              "bytes": {
+                "description": "Size of the file, in bytes.",
+                "maximum": 9007199254740991,
+                "minimum": 0,
+                "type": "integer"
+              },
+              "path": {
+                "description": "The file, as the command names it — relative paths stay relative.",
+                "minLength": 1,
+                "type": "string"
+              },
+              "sha256": {
+                "description": "SHA-256 of the file bytes, 64 lowercase hex characters.",
+                "pattern": "^[0-9a-f]{64}$",
+                "type": "string"
+              }
+            },
+            "required": [
+              "path",
+              "sha256",
+              "bytes"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "ok": {
+          "description": "Whether the command completed its gates.",
+          "type": "boolean"
+        },
+        "outputs": {
+          "description": "The files the command wrote, with their hashes.",
+          "items": {
+            "description": "A file the command read (an input) or wrote (an output).",
+            "properties": {
+              "bytes": {
+                "description": "Size of the file, in bytes.",
+                "maximum": 9007199254740991,
+                "minimum": 0,
+                "type": "integer"
+              },
+              "path": {
+                "description": "The file, as the command names it — relative paths stay relative.",
+                "minLength": 1,
+                "type": "string"
+              },
+              "sha256": {
+                "description": "SHA-256 of the file bytes, 64 lowercase hex characters.",
+                "pattern": "^[0-9a-f]{64}$",
+                "type": "string"
+              }
+            },
+            "required": [
+              "path",
+              "sha256",
+              "bytes"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "provenance": {
+          "description": "Every number an operator acts on, with where it came from.",
+          "items": {
+            "description": "A number the run used, with its provenance.",
+            "properties": {
+              "name": {
+                "description": "The setting, as the job or the sheet spells it, e.g. `rest.overlapMm`.",
+                "minLength": 1,
+                "type": "string"
+              },
+              "source": {
+                "description": "Where the number came from.",
+                "enum": [
+                  "seeded",
+                  "located",
+                  "typed",
+                  "measured"
+                ],
+                "type": "string"
+              },
+              "unit": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "Its unit (`mm`, `%`, …), or null when it has none."
+              },
+              "value": {
+                "description": "The number this run used.",
+                "type": "number"
+              }
+            },
+            "required": [
+              "name",
+              "value",
+              "unit",
+              "source"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "refusals": {
+          "description": "Every refusal the run reported, as data.",
+          "items": {
+            "description": "A refusal the run reported, as data.",
+            "properties": {
+              "code": {
+                "description": "A stable refusal code, e.g. `simulation-refused`.",
+                "minLength": 1,
+                "type": "string"
+              },
+              "reason": {
+                "description": "The reason, as an operator reads it.",
+                "minLength": 1,
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "reason"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "stage": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The stage the command reached, or null when it stopped before one."
+        },
+        "version": {
+          "const": 1,
+          "description": "The receipt document’s shape version.",
+          "type": "number"
+        }
+      },
+      "required": [
+        "version",
+        "ok",
+        "stage",
+        "gate",
+        "inputs",
+        "outputs",
+        "diagnostics",
+        "provenance",
+        "refusals",
+        "command",
+        "details"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "The receipt of a readback.",
+      "properties": {
+        "command": {
+          "const": "readback",
+          "description": "The command that produced this receipt.",
+          "type": "string"
+        },
+        "details": {
+          "description": "The readback command’s own details.",
+          "properties": {
+            "dryRun": {
+              "description": "Whether the write was rehearsed and skipped.",
+              "type": "boolean"
+            },
+            "feeds": {
+              "anyOf": [
+                {
+                  "description": "The feeds readback’s own details.",
+                  "properties": {
+                    "measurement": {
+                      "anyOf": [
+                        {
+                          "properties": {
+                            "coupon": {
+                              "description": "The coupon the measurement came from.",
+                              "type": "string"
+                            },
+                            "diameter": {
+                              "description": "The coupon’s cutter diameter, mm.",
+                              "exclusiveMinimum": 0,
+                              "type": "number"
+                            },
+                            "material": {
+                              "description": "The material the coupon measured.",
+                              "type": "string"
+                            },
+                            "on": {
+                              "description": "The date the coupon was cut (YYYY-MM-DD).",
+                              "type": "string"
+                            },
+                            "parameter": {
+                              "description": "The feeds parameter measured (`feed`, `rpm`, …).",
+                              "type": "string"
+                            },
+                            "value": {
+                              "description": "The measured value, in the parameter’s own unit.",
+                              "type": "number"
+                            }
+                          },
+                          "required": [
+                            "material",
+                            "diameter",
+                            "parameter",
+                            "value",
+                            "coupon",
+                            "on"
+                          ],
+                          "type": "object"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The measurement applied, or null when the record was refused before one was read."
+                    },
+                    "row": {
+                      "anyOf": [
+                        {
+                          "properties": {
+                            "material": {
+                              "description": "The feeds row’s material.",
+                              "type": "string"
+                            },
+                            "maxDiameter": {
+                              "description": "The row’s inclusive maximum diameter, mm.",
+                              "type": "number"
+                            },
+                            "minDiameter": {
+                              "description": "The row’s inclusive minimum diameter, mm.",
+                              "type": "number"
+                            },
+                            "provenance": {
+                              "description": "The row’s provenance, as the table states it.",
+                              "type": "string"
+                            },
+                            "status": {
+                              "description": "The row’s resulting status.",
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "material",
+                            "minDiameter",
+                            "maxDiameter",
+                            "status",
+                            "provenance"
+                          ],
+                          "type": "object"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The feeds row the measurement resolves to, or null when none matched."
+                    },
+                    "written": {
+                      "anyOf": [
+                        {
+                          "maximum": 9007199254740991,
+                          "minimum": 0,
+                          "type": "integer"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "Measurements in the region after the write, or null for a dry run."
+                    }
+                  },
+                  "required": [
+                    "measurement",
+                    "row",
+                    "written"
+                  ],
+                  "type": "object"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The feeds readback’s details, or null for `run`."
+            },
+            "record": {
+              "description": "The record file that was read.",
+              "type": "string"
+            },
+            "run": {
+              "anyOf": [
+                {
+                  "description": "The run readback’s own details.",
+                  "properties": {
+                    "cutOn": {
+                      "description": "The date the run was cut (YYYY-MM-DD).",
+                      "type": "string"
+                    },
+                    "depths": {
+                      "description": "Per-feature posted and measured depths.",
+                      "items": {
+                        "properties": {
+                          "measured": {
+                            "anyOf": [
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ],
+                            "description": "The measured depth, mm, or null when unmeasured."
+                          },
+                          "name": {
+                            "description": "The depth feature’s name.",
+                            "type": "string"
+                          },
+                          "planned": {
+                            "description": "The posted depth, mm.",
+                            "type": "number"
+                          }
+                        },
+                        "required": [
+                          "name",
+                          "planned",
+                          "measured"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "estimatedSeconds": {
+                      "anyOf": [
+                        {
+                          "minimum": 0,
+                          "type": "number"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The estimate the record carries, seconds, or null."
+                    },
+                    "finish": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The finish recorded, or null."
+                    },
+                    "job": {
+                      "description": "The job the run record names.",
+                      "type": "string"
+                    },
+                    "legible": {
+                      "anyOf": [
+                        {
+                          "type": "boolean"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "Whether the result was legible, or null when unrecorded."
+                    },
+                    "measuredRuns": {
+                      "anyOf": [
+                        {
+                          "maximum": 9007199254740991,
+                          "minimum": 0,
+                          "type": "integer"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "Measured runs in the region after the write, or null for a dry run."
+                    },
+                    "minutes": {
+                      "anyOf": [
+                        {
+                          "minimum": 0,
+                          "type": "number"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "Measured wall-clock time, minutes, or null."
+                    },
+                    "ncFile": {
+                      "description": "The program file the run cut.",
+                      "type": "string"
+                    },
+                    "ncHash": {
+                      "description": "The program hash the record states, or an empty string.",
+                      "type": "string"
+                    },
+                    "notes": {
+                      "description": "The operator’s note, empty when none.",
+                      "type": "string"
+                    },
+                    "replaced": {
+                      "description": "Whether the write replaced an existing record rather than adding one.",
+                      "type": "boolean"
+                    },
+                    "tool": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The cutter the record names, or null."
+                    }
+                  },
+                  "required": [
+                    "job",
+                    "ncFile",
+                    "ncHash",
+                    "minutes",
+                    "cutOn",
+                    "tool",
+                    "estimatedSeconds",
+                    "depths",
+                    "legible",
+                    "finish",
+                    "notes",
+                    "replaced",
+                    "measuredRuns"
+                  ],
+                  "type": "object"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The run readback’s details, or null for `feeds`."
+            },
+            "section": {
+              "description": "Which readback ran.",
+              "enum": [
+                "feeds",
+                "run"
+              ],
+              "type": "string"
+            },
+            "target": {
+              "description": "The source file the record is applied to.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "section",
+            "record",
+            "target",
+            "dryRun",
+            "feeds",
+            "run"
+          ],
+          "type": "object"
+        },
+        "diagnostics": {
+          "description": "Every code the run raised.",
+          "items": {
+            "description": "One code the run raised, with the guide row an operator reads next.",
+            "properties": {
+              "code": {
+                "description": "The diagnostic code, e.g. `item-empty`; every engine code is also a cnc-guide row.",
+                "minLength": 1,
+                "type": "string"
+              },
+              "guideRow": {
+                "description": "The cnc-guide chapter 8 row key for this code — the code itself for every engine diagnostic.",
+                "minLength": 1,
+                "type": "string"
+              },
+              "message": {
+                "description": "The finding, in the words the engine or verifier raised it in.",
+                "type": "string"
+              },
+              "program": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "The program whose pipeline raised it, or null for a run-level diagnostic."
+              },
+              "severity": {
+                "description": "How the finding is treated by the gates.",
+                "enum": [
+                  "error",
+                  "warning",
+                  "info"
+                ],
+                "type": "string"
+              },
+              "source": {
+                "description": "Which list raised it.",
+                "enum": [
+                  "findings",
+                  "verify",
+                  "simulation"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "guideRow",
+              "severity",
+              "message",
+              "source",
+              "program"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "gate": {
+          "anyOf": [
+            {
+              "enum": [
+                "generated",
+                "verified",
+                "simulated",
+                "prediction"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The #206 gate that stopped the run, or null when none did."
+        },
+        "inputs": {
+          "description": "The files the command read, with their hashes.",
+          "items": {
+            "description": "A file the command read (an input) or wrote (an output).",
+            "properties": {
+              "bytes": {
+                "description": "Size of the file, in bytes.",
+                "maximum": 9007199254740991,
+                "minimum": 0,
+                "type": "integer"
+              },
+              "path": {
+                "description": "The file, as the command names it — relative paths stay relative.",
+                "minLength": 1,
+                "type": "string"
+              },
+              "sha256": {
+                "description": "SHA-256 of the file bytes, 64 lowercase hex characters.",
+                "pattern": "^[0-9a-f]{64}$",
+                "type": "string"
+              }
+            },
+            "required": [
+              "path",
+              "sha256",
+              "bytes"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "ok": {
+          "description": "Whether the command completed its gates.",
+          "type": "boolean"
+        },
+        "outputs": {
+          "description": "The files the command wrote, with their hashes.",
+          "items": {
+            "description": "A file the command read (an input) or wrote (an output).",
+            "properties": {
+              "bytes": {
+                "description": "Size of the file, in bytes.",
+                "maximum": 9007199254740991,
+                "minimum": 0,
+                "type": "integer"
+              },
+              "path": {
+                "description": "The file, as the command names it — relative paths stay relative.",
+                "minLength": 1,
+                "type": "string"
+              },
+              "sha256": {
+                "description": "SHA-256 of the file bytes, 64 lowercase hex characters.",
+                "pattern": "^[0-9a-f]{64}$",
+                "type": "string"
+              }
+            },
+            "required": [
+              "path",
+              "sha256",
+              "bytes"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "provenance": {
+          "description": "Every number an operator acts on, with where it came from.",
+          "items": {
+            "description": "A number the run used, with its provenance.",
+            "properties": {
+              "name": {
+                "description": "The setting, as the job or the sheet spells it, e.g. `rest.overlapMm`.",
+                "minLength": 1,
+                "type": "string"
+              },
+              "source": {
+                "description": "Where the number came from.",
+                "enum": [
+                  "seeded",
+                  "located",
+                  "typed",
+                  "measured"
+                ],
+                "type": "string"
+              },
+              "unit": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "Its unit (`mm`, `%`, …), or null when it has none."
+              },
+              "value": {
+                "description": "The number this run used.",
+                "type": "number"
+              }
+            },
+            "required": [
+              "name",
+              "value",
+              "unit",
+              "source"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "refusals": {
+          "description": "Every refusal the run reported, as data.",
+          "items": {
+            "description": "A refusal the run reported, as data.",
+            "properties": {
+              "code": {
+                "description": "A stable refusal code, e.g. `simulation-refused`.",
+                "minLength": 1,
+                "type": "string"
+              },
+              "reason": {
+                "description": "The reason, as an operator reads it.",
+                "minLength": 1,
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "reason"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "stage": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The stage the command reached, or null when it stopped before one."
+        },
+        "version": {
+          "const": 1,
+          "description": "The receipt document’s shape version.",
+          "type": "number"
+        }
+      },
+      "required": [
+        "version",
+        "ok",
+        "stage",
+        "gate",
+        "inputs",
+        "outputs",
+        "diagnostics",
+        "provenance",
+        "refusals",
+        "command",
+        "details"
+      ],
+      "type": "object"
+    }
+  ]
+}

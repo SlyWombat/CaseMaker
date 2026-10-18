@@ -24,7 +24,10 @@ import { fileURLToPath } from 'node:url';
 import { parseRunRecord, isMeasuredRun, type RunRecord } from '../../../src/engine/cnc/engrave/runRecord';
 import { mergeMeasuredRuns } from '../../../src/engine/cnc/engrave/runHistory';
 import { extractMeasuredRuns, spliceMeasuredRuns } from '../../../src/engine/cnc/engrave/runHistoryRegion';
+import { RECEIPT_VERSION } from '../../../src/platform/headless/receipt';
 import { CliExit, isCliExit } from './exit';
+import { commandOutput, HUMAN, type CommandOptions } from './output';
+import { fileReceipt } from './receiptFiles';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_HISTORY = join(here, '..', '..', '..', 'src', 'engine', 'cnc', 'engrave', 'runHistory.ts');
@@ -64,16 +67,20 @@ const USAGE = 'usage: scripts/run-readback.ts <record.json> [--history <runHisto
  * documented script path run the identical code. `fail()` throws {@link CliExit}; the returned
  * number is the process exit code.
  */
-export async function readbackRunMain(argv: string[]): Promise<number> {
+export async function readbackRunMain(
+  argv: string[],
+  options: CommandOptions = HUMAN,
+): Promise<number> {
   try {
-    return await readbackRunBody(argv);
+    return await readbackRunBody(argv, options);
   } catch (e) {
     if (isCliExit(e)) return e.code;
     throw e;
   }
 }
 
-async function readbackRunBody(argv: string[]): Promise<number> {
+async function readbackRunBody(argv: string[], options: CommandOptions): Promise<number> {
+  const out = commandOutput(options);
   let args: Args;
   try {
     args = parseArgs(argv);
@@ -82,21 +89,6 @@ async function readbackRunBody(argv: string[]): Promise<number> {
     throw e; // unreachable; `fail` exits
   }
   if (!args.record) fail(USAGE);
-
-  // ---------------------------------------------------------------------------------------------
-  // Reporting
-  // ---------------------------------------------------------------------------------------------
-
-  /** `14 min 20 s` — the same shape the run sheet formats a duration in. */
-  function formatMinutes(minutes: number): string {
-    const s = Math.round(minutes * 60);
-    const h = Math.floor(s / 3600);
-    const m = Math.floor((s % 3600) / 60);
-    const sec = s % 60;
-    if (h > 0) return `${h} h ${m} min`;
-    if (m > 0) return `${m} min ${sec} s`;
-    return `${sec} s`;
-  }
 
   // ---------------------------------------------------------------------------------------------
   // Read, apply, write
@@ -116,8 +108,9 @@ async function readbackRunBody(argv: string[]): Promise<number> {
 
   // The one thing this script adds to `parseRunRecord`: a file that is still blank is not an error in
   // the app (the panel shows nothing and says nothing), but reading it back would write a non-run
-  // into the history, so it is refused here with what to do about it.
-  if (!isMeasuredRun(run)) {
+  // into the history, so it is refused here with what to do about it. The null check repeats the
+  // guard's own condition so the type narrows for the receipt below.
+  if (!isMeasuredRun(run) || run.cutOn === null) {
     fail(
       `${recordPath} has no cutOn date — this record is still blank. Fill the measured half in at the ` +
         'bench and date the cut before reading it back.',
@@ -138,39 +131,47 @@ async function readbackRunBody(argv: string[]): Promise<number> {
     throw e; // unreachable; `fail` exits
   }
 
-  console.log(`${recordPath}  ->  ${args.history}${args.dryRun ? '  (dry run)' : ''}`);
-  console.log(`  run          ${run.job}  (${run.ncFile}, hash ${run.ncHash || 'unknown'})`);
-  console.log(
-    `  measured     ${run.minutes === null ? 'no wall-clock time recorded' : formatMinutes(run.minutes)} ` +
-      `on ${run.cutOn}${run.tool === null ? '' : `  ·  ${run.tool}`}`,
-  );
-  if (run.estimatedSeconds !== null) {
-    const est = Math.round(run.estimatedSeconds);
-    console.log(
-      `  estimate     ${formatMinutes(est / 60)} (${est} s) — the measured figure shows BESIDE it, never instead of it`,
-    );
-  }
-  for (const d of run.depths) {
-    console.log(
-      `  depth        ${d.name}: posted ${d.planned} mm` +
-        (d.measured === null ? ', not measured' : `, measured ${d.measured} mm`),
-    );
-  }
-  console.log(
-    `  outcome      ${run.legible === null ? 'legibility not recorded' : run.legible ? 'legible' : 'NOT legible'}` +
-      ` · ${run.finish ?? 'finish not recorded'}` +
-      (run.notes === '' ? '' : ` · “${run.notes}”`),
-  );
-
+  // The write happens before the receipt describes it, so `replaced` and the region's count are
+  // facts about what is on disk rather than a prediction of it (#478).
+  const replaced = existing.some((r) => r.ncFile === run.ncFile);
   if (args.dryRun) {
-    console.log('\n(dry run — runHistory.ts not written)');
+    // Nothing is written; `measuredRuns: null` and `dryRun` are what the renderer reports.
   } else {
     writeFileSync(args.history, next);
-    const replaced = existing.some((r) => r.ncFile === run.ncFile);
-    console.log(
-      `\n${replaced ? 'replaced' : 'added'} the record for ${run.ncFile}; ` +
-        `${merged.length} measured run(s) in the region`,
-    );
   }
+  out.emitReceipt({
+    version: RECEIPT_VERSION,
+    command: 'readback',
+    ok: true,
+    stage: 'applied',
+    gate: null,
+    inputs: [fileReceipt(recordPath)],
+    outputs: args.dryRun ? [] : [fileReceipt(args.history)],
+    diagnostics: [],
+    provenance: [],
+    refusals: [],
+    details: {
+      section: 'run',
+      record: recordPath,
+      target: args.history,
+      dryRun: args.dryRun,
+      feeds: null,
+      run: {
+        job: run.job,
+        ncFile: run.ncFile,
+        ncHash: run.ncHash,
+        minutes: run.minutes,
+        cutOn: run.cutOn,
+        tool: run.tool,
+        estimatedSeconds: run.estimatedSeconds,
+        depths: run.depths.map((d) => ({ name: d.name, planned: d.planned, measured: d.measured })),
+        legible: run.legible,
+        finish: run.finish,
+        notes: run.notes,
+        replaced,
+        measuredRuns: args.dryRun ? null : merged.length,
+      },
+    },
+  });
   return 0;
 }

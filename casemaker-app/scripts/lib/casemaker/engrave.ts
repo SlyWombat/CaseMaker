@@ -69,7 +69,7 @@ import { writeFileSync, mkdirSync, readFileSync } from 'node:fs';
 import { dirname, join, basename, isAbsolute } from 'node:path';
 
 import { engraveGenerate, type EngraveGenerated } from '../../../src/workers/sim/engraveGenerate';
-import { createSimSession, type SimDiagnostic, type SimLoadOk, type SimSession } from '../../../src/workers/sim/session';
+import { createSimSession, type SimLoadOk, type SimSession } from '../../../src/workers/sim/session';
 import { unionRemoval, restMachining } from '../../../src/workers/sim/engraveRest';
 import { restJobFor, roughPick, restToolPick, unroughedItems, vBitRestRefusal, type RestPassFacts } from '../../../src/engine/cnc/engrave/restPass';
 import {
@@ -124,6 +124,22 @@ import type { EngraveJob } from '../../../src/types/engraveJob';
 import { toPartPlan } from '../../../src/engine/cnc/engrave/partPlan';
 import { renderRunSheetMarkdown } from '../../runSheetMarkdown';
 import { CliExit, isCliExit } from './exit';
+import { commandOutput, HUMAN, type CommandOptions } from './output';
+import { fileReceipt } from './receiptFiles';
+import {
+  diagnostic,
+  gateForStage,
+  provenance,
+  provenanceForDefault,
+  RECEIPT_VERSION,
+  type EngraveDetails,
+  type EngraveProgram,
+  type Receipt,
+  type ReceiptDiagnostic,
+  type ReceiptFile,
+  type ReceiptProvenance,
+  type ReceiptRefusal,
+} from '../../../src/platform/headless/receipt';
 
 // The wasm module, the bundled fonts and the machine's own document are the shared headless
 // bootstrap (#476). It runs once the arguments are parsed, below — before ANY job resolves a
@@ -202,6 +218,14 @@ const USAGE =
   '              [--rest <key|none>] [--overlap <mm>] [--third-tool <pct>] [--out <dir>]\n' +
   '       [--location <location.json|house.json>]  (any input; default: the app’s own location)';
 
+/** A pipeline that stopped, as the receipt needs it (#478). */
+interface EngraveFailure {
+  stage: string;
+  gate: Receipt['gate'];
+  diagnostics: ReceiptDiagnostic[];
+  refusals: ReceiptRefusal[];
+}
+
 /**
  * The engrave command as a callable function (#477): one job document, coupon spec or 3MF design
  * into the files the bench needs. The body below is the former `scripts/engrave-job.ts`, moved
@@ -211,16 +235,95 @@ const USAGE =
  * dispatcher can run the command without losing the process. The script wrapper turns the returned
  * code into `process.exitCode`.
  */
-export async function engraveJobMain(argv: string[]): Promise<number> {
+export async function engraveJobMain(argv: string[], options: CommandOptions = HUMAN): Promise<number> {
   try {
-    return await engraveJobBody(argv);
+    return await engraveJobBody(argv, options);
   } catch (e) {
     if (isCliExit(e)) return e.code;
     throw e;
   }
 }
 
-async function engraveJobBody(argv: string[]): Promise<number> {
+async function engraveJobBody(argv: string[], options: CommandOptions): Promise<number> {
+  const out = commandOutput(options);
+  // The run's receipt accumulates as the command works; NOTHING here prints a result line —
+  // `out.emitReceipt` renders the whole block from this object at the end (#478).
+  const runInputs: ReceiptFile[] = [];
+  const runOutputs: ReceiptFile[] = [];
+  const runDiagnostics: ReceiptDiagnostic[] = [];
+  const runProvenance: ReceiptProvenance[] = [];
+  const runRefusals: ReceiptRefusal[] = [];
+  const programs: EngraveProgram[] = [];
+  /** Where each preview PNG belongs on the receipt: the program that drew it (#478). */
+  const imageTargets: { svgFile: string; pngFile: string; program: EngraveProgram }[] = [];
+  const provenanceNames = new Set<string>();
+  let kind: EngraveDetails['kind'] = 'job';
+  let outDir = '';
+  let coupon: EngraveDetails['coupon'] = null;
+  let pair: EngraveDetails['pair'] = null;
+  let runOk = true;
+  let runStage: string | null = null;
+  let runGate: Receipt['gate'] = null;
+
+  /** Add a number's provenance once, whatever route reached it. */
+  function noteProvenance(entry: ReceiptProvenance): void {
+    if (provenanceNames.has(entry.name)) return;
+    provenanceNames.add(entry.name);
+    runProvenance.push(entry);
+  }
+
+  /** Record a file the run read. A missing input is the same refusal it always was, not a crash. */
+  function recordInput(path: string): void {
+    try {
+      runInputs.push(fileReceipt(path));
+    } catch (e) {
+      fail(`cannot read ${path}: ${(e as Error).message}`);
+    }
+  }
+
+  /** Record a stopped pipeline. The receipt is the report; the caller returns exit code 1. */
+  function recordFailure(failure: EngraveFailure): void {
+    // The FIRST stop is the one the receipt names: a coupon sweep that stops three programs is
+    // still reported at the stage the first one reached.
+    if (runOk) {
+      runStage = failure.stage;
+      runGate = failure.gate;
+    }
+    runOk = false;
+    runDiagnostics.push(...failure.diagnostics);
+    runRefusals.push(...failure.refusals);
+  }
+
+  /** Emit the run's one receipt. `ok` is the run's, not a program's. */
+  function emit(): void {
+    out.emitReceipt({
+      version: RECEIPT_VERSION,
+      command: 'engrave',
+      ok: runOk,
+      // A completed run reached the generator's terminal stage; a stopped one names where it
+      // stopped (`recordFailure`).
+      stage: runOk ? (runStage ?? 'done') : runStage,
+      gate: runGate,
+      inputs: runInputs,
+      outputs: runOutputs,
+      diagnostics: runDiagnostics,
+      provenance: runProvenance,
+      refusals: runRefusals,
+      details: { kind, outDir, programs, coupon, pair },
+    });
+  }
+
+  /**
+   * Record a stopped pipeline, emit the receipt and hand back the failure exit code (#478). The
+   * caller writes `return stop(...)`, so the stopped run still reports its stage, gate and reason
+   * instead of printing nothing and exiting 1.
+   */
+  function stop(failure: EngraveFailure): number {
+    recordFailure(failure);
+    emit();
+    return 1;
+  }
+
   let args: Args;
   try {
     args = parseArgs(argv);
@@ -234,7 +337,8 @@ async function engraveJobBody(argv: string[]): Promise<number> {
   if (!args.from3mf && (args.turn || args.tool || args.rest || args.overlap !== undefined || args.thirdTool !== undefined)) {
     fail('--turn, --tool, --rest, --overlap and --third-tool only apply to --from-3mf');
   }
-
+  kind = args.coupon ? 'coupon' : args.from3mf ? 'design' : 'job';
+  recordInput(inputs[0]!);
   // Before ANY job resolves a cutter: `jobTool` reads the registry, so the machine's own documents
   // have to be in it first. The bootstrap reads the document the args named (`--location`) or the
   // machine's own, and validates it exactly as the app's import panel does (#412).
@@ -249,18 +353,19 @@ async function engraveJobBody(argv: string[]): Promise<number> {
   const shopDefaults = boot.location?.defaults ?? null;
   if (boot.location !== null) {
     const where = boot.location;
+    recordInput(where.path);
     const what = where.kind === 'location' ? `location "${where.name}"` : 'house';
-    console.log(
+    out.progress(
       `${what}: ${where.path} — ${where.tools.length} tool${where.tools.length === 1 ? '' : 's'} ` +
         `from the user's own list, ${where.inventory.length} owned cutter${where.inventory.length === 1 ? '' : 's'}`,
     );
     // #436 — say which rest-machining numbers this run is about to use, and where each came from, so a
     // sheet that reads oddly can be traced back to the document (or to the absence of one) before the
     // program is run. Silent about a key the document simply has not set: `readDefault` falls back and
-    // the seam sentence says so where it matters.
+    // the seam sentence says so where it matters. The receipt carries the same numbers as provenance.
     for (const key of [REST_OVERLAP_KEY, REST_THIRD_TOOL_KEY]) {
       const d = shopDefaults?.[key];
-      if (d !== undefined) console.log(`  default ${key} = ${String(d.value)}${d.unit ?? ''} (${d.source})`);
+      if (d !== undefined) out.progress(`  default ${key} = ${String(d.value)}${d.unit ?? ''} (${d.source})`);
     }
   }
 
@@ -302,13 +407,13 @@ async function engraveJobBody(argv: string[]): Promise<number> {
     const rows = reachTable(reach);
     if (rows.length === 0) return;
     const pct = (v: number | null): string => (v === null ? '—' : `${Math.round(v * 100)}%`);
-    console.log('\nwhat each cutter reaches, item by item, and over the design as a whole:');
-    console.log(`  ${'cutter'.padEnd(24)} ${'   ⌀'.padEnd(10)} ${reach.items.map((i) => i.name).join(' | ')}`);
+    out.progress('\nwhat each cutter reaches, item by item, and over the design as a whole:');
+    out.progress(`  ${'cutter'.padEnd(24)} ${'   ⌀'.padEnd(10)} ${reach.items.map((i) => i.name).join(' | ')}`);
     for (const row of rows) {
       const cells = row.shares.map(pct).map((s) => s.padStart(6)).join('  ');
       const verdict =
         row.excluded !== null ? row.excluded : row.qualifies ? 'keeps every item intact' : 'loses detail';
-      console.log(
+      out.progress(
         `  ${row.key.padEnd(24)} ${`${row.diameter} mm`.padStart(9)}  ${cells}   ` +
           `${pct(row.total).padStart(5)} total   ${verdict}`,
       );
@@ -316,17 +421,17 @@ async function engraveJobBody(argv: string[]): Promise<number> {
     const pick = reach.recommendation.key;
     const finer = pick === null ? null : finerThan(reach, pick);
     if (pick !== null && finer !== null) {
-      console.log(
+      out.progress(
         `  → #211 picks ${pick} (${pct(reach.totalShare.get(pick) ?? 0)} of the design); ${finer.key} reaches ` +
           `${pct(reach.totalShare.get(finer.key) ?? 0)}, so what is left is worth a second program (#410).`,
       );
     } else if (pick !== null) {
-      console.log(`  → #211 picks ${pick}, and no smaller cutter reaches more: one program is enough.`);
+      out.progress(`  → #211 picks ${pick}, and no smaller cutter reaches more: one program is enough.`);
     }
     // #455 — a caution about the cutter the job NAMES, when it is not one the catalogue recommends.
     // Always null on this path (no catalogue is loaded; see `scanReach`), but printed here rather
     // than in each caller so a run that does have rows cannot silently drop it.
-    if (reach.recommendation.selectedNote !== null) console.log(`  ! ${reach.recommendation.selectedNote}`);
+    if (reach.recommendation.selectedNote !== null) out.progress(`  ! ${reach.recommendation.selectedNote}`);
   }
 
   /**
@@ -381,46 +486,24 @@ async function engraveJobBody(argv: string[]): Promise<number> {
   }
 
   /**
-   * The receipt for a job that got through. The count is kept beside each list for the run's summary
-   * line, but every error is NAMED (#393): a bare count tells the operator that something is wrong
-   * and not what, so a program whose cutter reached the jaw reads exactly like one that grazed the
-   * stock top. The warnings are the run sheet's business and are carried there.
-   *
-   * No simulation error reaches here: `runJob` names them and stops before this prints. The count
-   * stays on the line anyway (through the same `simErrors` the refusal uses), so the line reads the
-   * same whether it is a receipt or a post-mortem.
+   * The diagnostics a written program's own lists raise (#478). Every error is emitted as data with
+   * its code — the run sheet carries the same findings — and the receipt's renderer decides which
+   * block each appears under, so a count is never the only trace of a defect (#393).
    */
-  function receipt(generated: EngraveGenerated, loadDiags: SimDiagnostic[], load: SimLoadOk): void {
-    const warn = (findings: { severity: string; code: string; message: string }[]) => {
-      for (const f of findings.filter((x) => x.severity === 'warning')) console.log(`     warn  ${f.code}: ${f.message}`);
-    };
-    console.log(`  stage      ${generated.stage}, ok=${generated.ok}`);
-    console.log(
-      `  cam        ${generated.cam?.operations} ops, ${generated.cam?.cuttingMoves} cutting moves, ` +
-        `${generated.cam?.passes} passes, ~${Math.round(generated.cam?.estimatedSeconds ?? 0)}s`,
-    );
-    // #487 — the ordering's own receipt: what the file spends in the air, and what the pre-#487
-    // order would have spent on the same cut. The ratio is the figure the issue measured the
-    // problem by (1.82 : 1 in the rest pass), so the receipt reports it the same way.
-    const cam = generated.cam;
-    if (cam?.rapidMm !== undefined && cam.cutMm !== undefined && cam.baselineRapidMm !== undefined) {
-      const ratio = (rapid: number): string => (cam.cutMm! > 0 ? `${(rapid / cam.cutMm!).toFixed(2)} : 1` : '—');
-      console.log(
-        `  travel     ${cam.rapidMm.toFixed(1)} mm rapid / ${cam.cutMm.toFixed(1)} mm cut ` +
-          `(${ratio(cam.rapidMm)}); pre-#487 order ${cam.baselineRapidMm.toFixed(1)} mm ` +
-          `(${ratio(cam.baselineRapidMm)})`,
-      );
-    }
-    const errs = generated.findings.filter((f) => f.severity === 'error');
-    console.log(`  findings   ${errs.length} error, ${generated.findings.length - errs.length} warning`);
-    for (const f of errs) console.log(`     ERROR ${f.code}: ${f.message}`);
-    warn(generated.findings);
-    warn(generated.verify?.findings ?? []);
-    console.log(
-      `  sim        ok=${load.ok}, engine=${load.stats.engine}, count=${load.count}, ` +
-        `removed=${load.stats.removedVolume.toFixed(2)} mm³, ${simErrors(loadDiags).length} errors`,
-    );
-    warn(loadDiags);
+  function generatedDiagnostics(
+    job: EngraveJob,
+    generated: EngraveGenerated,
+    load: SimLoadOk | null,
+  ): ReceiptDiagnostic[] {
+    return [
+      ...generated.findings.map((f) => diagnostic(f.code, f.severity, f.message, 'findings', job.name)),
+      ...(generated.verify?.findings ?? []).map((f) =>
+        diagnostic(f.code, f.severity, f.message, 'verify', job.name),
+      ),
+      ...(load?.diagnostics ?? []).map((d) =>
+        diagnostic(d.code, d.severity, d.message, 'simulation', job.name),
+      ),
+    ];
   }
 
   /** What a successful `runJob` wrote, for the coupon record. */
@@ -439,7 +522,9 @@ async function engraveJobBody(argv: string[]): Promise<number> {
      */
     previews: { svg: string; svgFile: string; pngFile: string }[];
   }
-  type JobResult = JobFiles | { ok: false };
+  type JobResult =
+    | { ok: true; files: JobFiles; program: EngraveProgram; diagnostics: ReceiptDiagnostic[] }
+    | { ok: false; failure: EngraveFailure };
 
   /** A program that has been generated, verified and simulated — and not yet written anywhere. */
   interface Prepared {
@@ -465,7 +550,7 @@ async function engraveJobBody(argv: string[]): Promise<number> {
      */
     session: SimSession;
   }
-  type PrepareResult = Prepared | { ok: false };
+  type PrepareResult = Prepared | { ok: false; failure: EngraveFailure };
 
   /** How a program is written, once it is known to be good. */
   interface WriteOpts {
@@ -496,12 +581,18 @@ async function engraveJobBody(argv: string[]): Promise<number> {
     // No Makera feed rows in a headless run (#324): the catalogue tier needs a house service.
     const generated = engraveGenerate(tl, job, jobTool(job), []);
     if (!generated.ok || generated.nc === null) {
-      console.error(`\n${job.name}`);
-      console.error(
-        JSON.stringify({ stage: generated.stage, errors: generated.errors, findings: generated.findings }, null, 2),
-      );
-      console.error(`  !! stopped at ${generated.stage}`);
-      return { ok: false };
+      return {
+        ok: false,
+        failure: {
+          stage: generated.stage,
+          gate: gateForStage(generated.stage),
+          diagnostics: generatedDiagnostics(job, generated, null),
+          refusals: [
+            { code: 'stopped', reason: `stopped at ${generated.stage}` },
+            ...generated.errors.map((e) => ({ code: 'stage-error', reason: e.message })),
+          ],
+        },
+      };
     }
 
     // The generator's own "verified" gate: run the saved text through the session and refuse on an
@@ -522,11 +613,18 @@ async function engraveJobBody(argv: string[]): Promise<number> {
       opts.priorRemoval === undefined ? {} : { priorRemoval: opts.priorRemoval },
     );
     if (!load.ok) {
-      console.error(`\n${job.name}`);
-      console.error(JSON.stringify(load.diagnostics, null, 2));
-      console.error('  !! simulation refused the file');
       session.dispose();
-      return { ok: false };
+      return {
+        ok: false,
+        failure: {
+          stage: 'simulated',
+          gate: 'simulated',
+          diagnostics: load.diagnostics.map((d) =>
+            diagnostic(d.code, d.severity, d.message, 'simulation', job.name),
+          ),
+          refusals: [{ code: 'simulation-refused', reason: 'simulation refused the file' }],
+        },
+      };
     }
 
     // #393 — THE OTHER HALF OF THE GATE, and the one that was missing. `load.ok` means the sweep
@@ -536,12 +634,24 @@ async function engraveJobBody(argv: string[]): Promise<number> {
     // coupons whose own simulation said they hit the jaw, and receipted them "all generated".
     const simProblem = simulationProblem(load.diagnostics);
     if (simProblem !== null) {
-      console.error(`\n${job.name}`);
-      for (const d of simErrors(load.diagnostics)) console.error(`  ERROR ${d.code}: ${d.message}`);
-      console.error(`  !! ${simProblem}`);
-      console.error(`  !! nothing written: a job the simulation refuses is a document to fix, not a file`);
       session.dispose();
-      return { ok: false };
+      return {
+        ok: false,
+        failure: {
+          stage: 'simulated',
+          gate: 'simulated',
+          diagnostics: load.diagnostics.map((d) =>
+            diagnostic(d.code, d.severity, d.message, 'simulation', job.name),
+          ),
+          refusals: [
+            { code: 'simulation-refused', reason: simProblem },
+            {
+              code: 'nothing-written',
+              reason: 'nothing written: a job the simulation refuses is a document to fix, not a file',
+            },
+          ],
+        },
+      };
     }
 
     return { ok: true, job, tool, nc, diameter, generated, load, session };
@@ -552,7 +662,11 @@ async function engraveJobBody(argv: string[]): Promise<number> {
    * a document rather than read one — the job JSON. Disposes the session on the way out, so a
    * prepared program cannot outlive its sweep by accident.
    */
-  function writeProgram(prepared: Prepared, outDir: string, opts: WriteOpts): JobFiles {
+  function writeProgram(
+    prepared: Prepared,
+    outDir: string,
+    opts: WriteOpts,
+  ): { files: JobFiles; program: EngraveProgram; diagnostics: ReceiptDiagnostic[] } {
     const { job, tool, nc, diameter, generated, load } = prepared;
     const writeSheet = opts.sheet !== false;
     // The stem is claimed through `stemFor`, which refuses a name already used this run: the rest
@@ -576,9 +690,21 @@ async function engraveJobBody(argv: string[]): Promise<number> {
     const ncFile = sheet.header.fileName;
     const frameFile = runSheetFrameFileName(job.name);
     writeFileSync(join(outDir, ncFile), nc);
-    if (generated.frameNc !== null) writeFileSync(join(outDir, frameFile), generated.frameNc);
-    if (writeSheet) writeFileSync(join(outDir, `${stem}-run-sheet.md`), renderRunSheetMarkdown(sheet, opts.note));
-    if (opts.writeJobDocument) writeFileSync(join(outDir, `${stem}.job.json`), JSON.stringify(job, null, 2) + '\n');
+    runOutputs.push(fileReceipt(join(outDir, ncFile)));
+    if (generated.frameNc !== null) {
+      writeFileSync(join(outDir, frameFile), generated.frameNc);
+      runOutputs.push(fileReceipt(join(outDir, frameFile)));
+    }
+    if (writeSheet) {
+      writeFileSync(join(outDir, `${stem}-run-sheet.md`), renderRunSheetMarkdown(sheet, opts.note));
+      runOutputs.push(fileReceipt(join(outDir, `${stem}-run-sheet.md`)));
+    }
+    if (opts.writeJobDocument) {
+      writeFileSync(join(outDir, `${stem}.job.json`), JSON.stringify(job, null, 2) + '\n');
+      runOutputs.push(fileReceipt(join(outDir, `${stem}.job.json`)));
+    }
+    // The cutter's own number, so the receipt says where the program's width came from.
+    noteProvenance(provenance(`tool.${job.toolKey}.diameter`, diameter, 'mm', 'seeded'));
 
     // #410 — THE PREDICTED CUT, DRAWN AT THE CUTTER'S REAL WIDTH. The table says a percentage; a
     // percentage does not show WHICH strokes survive, and that is the thing that decides whether the
@@ -606,25 +732,56 @@ async function engraveJobBody(argv: string[]): Promise<number> {
         keepOuts: head,
       });
       writeFileSync(join(outDir, svgFile), svg);
+      runOutputs.push(fileReceipt(join(outDir, svgFile)));
       previews.push({ svg, svgFile, pngFile: `${stem}-preview.png` });
     }
 
-    console.log(`\n${job.name}`);
-    console.log(`  file       ${ncFile}  (${nc.length} bytes, ${nc.split('\n').length} lines)`);
-    if (generated.frameNc !== null) console.log(`  frame      ${frameFile}  (${generated.frameNc.length} bytes)`);
-    receipt(generated, load.diagnostics, load);
-    if (writeSheet) {
-      console.log(`  sheet      ${stem}-run-sheet.md  hash=${sheet.header.fileHash}  time=${sheet.header.estimatedTime}`);
-    }
-    for (const p of previews) console.log(`  preview    ${p.svgFile}  (the caller renders the PNG)`);
+    const cam = generated.cam;
+    const program: EngraveProgram = {
+      name: job.name,
+      stage: generated.stage,
+      ok: generated.ok,
+      ncFile,
+      ncLines: nc.split('\n').length,
+      frameFile: generated.frameNc !== null ? frameFile : null,
+      cam:
+        cam === null
+          ? null
+          : {
+              operations: cam.operations,
+              cuttingMoves: cam.cuttingMoves,
+              passes: cam.passes,
+              estimatedSeconds: cam.estimatedSeconds,
+              rapidMm: cam.rapidMm ?? null,
+              cutMm: cam.cutMm ?? null,
+              baselineRapidMm: cam.baselineRapidMm ?? null,
+            },
+      sim: {
+        ok: load.ok,
+        engine: load.stats.engine,
+        count: load.count,
+        removedVolumeMm3: load.stats.removedVolume,
+        errorCount: simErrors(load.diagnostics).length,
+      },
+      sheet: writeSheet
+        ? { file: `${stem}-run-sheet.md`, ncHash: sheet.header.fileHash, estimatedTime: sheet.header.estimatedTime }
+        : null,
+      previews: previews.map((p) => p.svgFile),
+      images: [],
+    };
+    for (const p of previews) imageTargets.push({ svgFile: p.svgFile, pngFile: p.pngFile, program });
     prepared.session.dispose();
     return {
-      ok: true,
-      ncFile,
-      frameFile: generated.frameNc !== null ? frameFile : null,
-      sheetFile: writeSheet ? `${stem}-run-sheet.md` : null,
-      hash: sheet.header.fileHash,
-      previews,
+      files: {
+        ok: true,
+        ncFile,
+        frameFile: generated.frameNc !== null ? frameFile : null,
+        sheetFile: writeSheet ? `${stem}-run-sheet.md` : null,
+        hash: sheet.header.fileHash,
+        previews,
+      },
+      program,
+      diagnostics: generatedDiagnostics(job, generated, load),
     };
   }
 
@@ -641,15 +798,18 @@ async function engraveJobBody(argv: string[]): Promise<number> {
     },
   ): JobResult {
     const prepared = prepare(job);
-    if (!prepared.ok) return { ok: false };
-    return writeProgram(prepared, outDir, {
-      writeJobDocument: opts.writeJobDocument,
-      note: opts.note,
-      ...(opts.reachability === undefined
-        ? {}
-        : { sheetOptions: { reachability: opts.reachability, ...(opts.unreachable ? { unreachable: opts.unreachable } : null) } }),
-      ...(opts.preview === true ? { preview: true } : null),
-    });
+    if (!prepared.ok) return prepared;
+    return {
+      ok: true,
+      ...writeProgram(prepared, outDir, {
+        writeJobDocument: opts.writeJobDocument,
+        note: opts.note,
+        ...(opts.reachability === undefined
+          ? {}
+          : { sheetOptions: { reachability: opts.reachability, ...(opts.unreachable ? { unreachable: opts.unreachable } : null) } }),
+        ...(opts.preview === true ? { preview: true } : null),
+      }),
+    };
   }
 
 
@@ -706,13 +866,16 @@ async function engraveJobBody(argv: string[]): Promise<number> {
     const path = args.job;
     const parsed = parseEngraveJob(readJson(path));
     if (!parsed.ok) fail(`${path} is not a valid engrave job:\n  ${parsed.errors.join('\n  ')}`);
-    const outDir = args.out ?? dirname(path);
+    outDir = args.out ?? dirname(path);
     mkdirSync(outDir, { recursive: true });
-    const ok = runJob(parsed.job, outDir, {
+    const result = runJob(parsed.job, outDir, {
       writeJobDocument: false,
       note: `*Generated from \`${basename(path)}\` by \`scripts/engrave-job.ts\`; the app’s \`RunSheetView\` renders the same \`buildRunSheet\` structure. No result is recorded here.*`,
     });
-    if (!ok.ok) throw new CliExit(1);
+    if (result.ok) {
+      programs.push(result.program);
+      runDiagnostics.push(...result.diagnostics);
+    } else return stop(result.failure);
   } else if (args.from3mf) {
     const path = args.from3mf;
     const direction = args.turn ?? 'ccw';
@@ -807,7 +970,7 @@ async function engraveJobBody(argv: string[]): Promise<number> {
         !namedFeeds.ok &&
         namedFeeds.reason.startsWith('no cutting parameters')
       ) {
-        console.log(
+        out.progress(
           `  dropped    ${row.name} (${row.itemId}): the cutter this run names (${namedKey}) has no ` +
             `feeds row for ${job.stock.material} — ${namedFeeds.reason} So none of the ${cutters} ` +
             `cutters that do have parameters reaches any of its ${row.glyphArea.toFixed(2)} mm². It ` +
@@ -815,7 +978,7 @@ async function engraveJobBody(argv: string[]): Promise<number> {
         );
         continue;
       }
-      console.log(
+      out.progress(
         `  dropped    ${row.name} (${row.itemId}): none of the ${cutters} measured cutters reaches any ` +
           `of its ${row.glyphArea.toFixed(2)} mm² — the strokes are finer than the smallest bit on the ` +
           'bench. It stays in the job, turned off, and the run sheet carries the number.',
@@ -849,7 +1012,7 @@ async function engraveJobBody(argv: string[]): Promise<number> {
           (pick.chosen !== null && !restOff && pick.chosen.key !== tool1Key
             ? `; the clearance rule would have taken ${pick.chosen.key} (⌀² × share = ${pick.chosen.score.toFixed(2)})`
             : '');
-    console.log(`  cutter 1   ${tool1Key} — ${roughReason}`);
+    out.progress(`  cutter 1   ${tool1Key} — ${roughReason}`);
 
     const restPicked: Chosen | null = (() => {
       if (restOff) return null;
@@ -866,14 +1029,14 @@ async function engraveJobBody(argv: string[]): Promise<number> {
     // rather than the "0 mm² of the 0 mm² … nothing to clean up" receipt that hides the reason.
     const restRefusal = restPickedTool === null ? null : vBitRestRefusal(job, restPickedTool);
     if (restPicked !== null) {
-      console.log(
+      out.progress(
         restRefusal !== null
           ? `  cutter 2   ${restPicked.key} — ${restRefusal}`
           : `  cutter 2   ${restPicked.key} — ${restPicked.reason}`,
       );
     }
     if (restRefusal !== null) {
-      console.log('  note       no second program is generated: one program is the whole job (#221)');
+      out.progress('  note       no second program is generated: one program is the whole job (#221)');
     }
     const restChosen: Chosen | null = restRefusal === null ? restPicked : null;
     const restTool: Tool | null = restRefusal === null ? restPickedTool : null;
@@ -894,7 +1057,7 @@ async function engraveJobBody(argv: string[]): Promise<number> {
     for (const item of unroughed) {
       const v = (job.vectors ?? []).find((x) => x.id === item.id);
       if (v) v.enabled = false;
-      console.log(
+      out.progress(
         `  left to 2  ${item.name} (${item.id}): ${tool1Key} cannot enter any of its ` +
           `${item.area.toFixed(2)} mm², so the first program leaves it off and ${restChosen?.key} cuts it ` +
           `at ${item.depth.toFixed(2)} mm.`,
@@ -911,7 +1074,7 @@ async function engraveJobBody(argv: string[]): Promise<number> {
           .filter((c) => c.excluded === null)
           .map((c) => ({ key: c.key, row: c.rows.find((r) => r.itemId === row.itemId) }))
           .find((c) => c.row !== undefined && c.row.ratio > 0);
-        console.log(
+        out.progress(
           `  note       ${job.toolKey} reaches none of ${row.name}` +
             (finer ? `; ${finer.key} reaches ${Math.round((finer.row?.ratio ?? 0) * 100)} % of it` : '') +
             ' — the generator will refuse this job until it is cut with a finer bit or turned off.',
@@ -949,15 +1112,15 @@ async function engraveJobBody(argv: string[]): Promise<number> {
     };
     roundTrips(job, 'job');
 
-    const outDir = args.out ?? process.cwd();
+    outDir = args.out ?? process.cwd();
     mkdirSync(outDir, { recursive: true });
     for (const item of patch.vectors) if (item.name !== undefined) names.add(item.name);
-    console.log(
+    out.progress(
       `${basename(path)} — ${design.regions.length} item${design.regions.length === 1 ? '' : 's'} ` +
         `(${[...names].join(', ')}), turned ${direction}, ${patch.stock.length} × ${patch.stock.width} × ` +
         `${patch.stock.thickness} mm ${patch.stock.material}`,
     );
-    for (const note of patch.notes) console.log(`  ${note}`);
+    for (const note of patch.notes) out.progress(`  ${note}`);
 
     const note =
       `*Built from \`${basename(path)}\` by \`scripts/engrave-job.ts --from-3mf\` (#410): the blank, the ` +
@@ -972,7 +1135,7 @@ async function engraveJobBody(argv: string[]): Promise<number> {
     // asked for the single-program answer — which is byte-for-byte what this route wrote before the
     // scope note, so the earlier acceptance still holds over the same input.
     if (restChosen === null) {
-      const ok = runJob(job, outDir, {
+      const result = runJob(job, outDir, {
         writeJobDocument: true,
         // #410 — the measurements this route already made ARE the run sheet's reachability section, and
         // they are handed over rather than re-measured: the sheet must print the numbers that chose the
@@ -985,15 +1148,18 @@ async function engraveJobBody(argv: string[]): Promise<number> {
         preview: true,
         note,
       });
-      if (!ok.ok) throw new CliExit(1);
-      previews.push(...ok.previews);
+      if (result.ok) {
+        programs.push(result.program);
+        runDiagnostics.push(...result.diagnostics);
+        previews.push(...result.files.previews);
+      } else return stop(result.failure);
     } else {
       // ---- PROGRAM 1: the clearing pass ----------------------------------------------------------
       // Nothing is written yet. The rest region cannot be computed until this program has been swept,
       // because it is measured against the material the sweep says was removed — so the pipeline runs
       // twice and only then does anything reach the disk.
       const p1 = prepare(job);
-      if (!p1.ok) throw new CliExit(1);
+      if (!p1.ok) return stop(p1.failure);
 
       // ---- WHAT PROGRAM 1 LEFT ---------------------------------------------------------------
       // Against its own SIMULATED REMOVAL, not against its offsets (#410's scope note: "computed from
@@ -1066,12 +1232,17 @@ async function engraveJobBody(argv: string[]): Promise<number> {
       } satisfies SeamFactsInput);
       // The band the programs are actually handed — not the stored number, which is only its floor.
       const overlap = seam.overlap;
-      console.log(`  overlap    ${overlap.toFixed(3)} mm — ${seam.note}`);
+      // #478's provenance, exactly where the number is chosen: the band the programs run with, and
+      // the threshold the third-tool advice is measured against — each with the source `#436` already
+      // tracks (typed when the flag was passed, otherwise the shop default's own).
+      noteProvenance(provenanceForDefault(REST_OVERLAP_KEY, overlap, 'mm', overlapSource));
+      noteProvenance(provenanceForDefault(REST_THIRD_TOOL_KEY, thirdToolPct, '%', thirdToolSource));
+      out.progress(`  overlap    ${overlap.toFixed(3)} mm — ${seam.note}`);
       // "the floor it started from", not "the location's value": the floor is the fallback too on a
       // build with no location to read, and a sentence naming the wrong one is the defect this route
       // exists to avoid.
       if (seam.derivedFromCutters && seam.needed !== null) {
-        console.log(
+        out.progress(
           `  overlap    raised off the ${overlapRead.value.toFixed(3)} mm floor this run started from: ` +
             `the band this job’s own two cutters need is ${seam.needed.toFixed(3)} mm`,
         );
@@ -1079,18 +1250,18 @@ async function engraveJobBody(argv: string[]): Promise<number> {
       // An unknown step-over is a MISSING number, and it is reported as one: "narrower than unknown mm"
       // claimed a comparison that was never made (#436 review).
       if (seam.restStepOver === null) {
-        console.log(
+        out.progress(
           '  seam       this material states no step-over for the second cutter, so whether the band ' +
             'reaches past its own scallop is not judged here',
         );
       } else if (!seam.coversScallop) {
-        console.log(
+        out.progress(
           '  seam       a ridge can survive where the two programs meet: the band is narrower than ' +
             `the second cutter’s own scallop (${seam.restStepOver.toFixed(3)} mm)`,
         );
       }
       if (seam.needed !== null && !seam.keepsSlivers) {
-        console.log(
+        out.progress(
           `  seam       the first cutter leaves slivers about ${seam.sliver.toFixed(3)} mm wide and the ` +
             `second cutter’s opening erases anything under ${seam.restDiameter.toFixed(3)} mm, so a band of about ` +
             `${seam.needed.toFixed(3)} mm is what keeps them cuttable — this one is under it, and they ` +
@@ -1098,7 +1269,7 @@ async function engraveJobBody(argv: string[]): Promise<number> {
         );
       }
       const rest1 = restMachining(tl, { removal: p1.load.meshes.removal, cuts: designCuts, overlap });
-      for (const n of rest1.notes) console.log(`  rest       ${n}`);
+      for (const n of rest1.notes) out.progress(`  rest       ${n}`);
 
       // WHICH REST REGIONS THE SECOND BIT CAN ACTUALLY OPEN. A rest region can be a sliver the first
       // cutter could not quite reach, and `engravableProfile` opens away a region narrower than the bit
@@ -1118,7 +1289,7 @@ async function engraveJobBody(argv: string[]): Promise<number> {
         const dropped = kept.filter((_, i) => !open.has(`rest-${i + 1}`));
         kept = kept.filter((_, i) => open.has(`rest-${i + 1}`));
         for (const r of dropped) {
-          console.log(
+          out.progress(
             `  too fine   ${r.name ?? r.id}: the rest of it is ${r.area.toFixed(3)} mm² of corner, and ` +
               `${restChosen.key} closes it to nothing — the second program would refuse the whole job ` +
               'over it, so it is left standing and counted.',
@@ -1138,7 +1309,7 @@ async function engraveJobBody(argv: string[]): Promise<number> {
         // simulated together: tool 2's sweep runs on tool 1's result").
         const removal1 = p1.load.meshes.removal;
         const prepared = prepare(restJob, removal1 === null ? {} : { priorRemoval: removal1 });
-        if (!prepared.ok) throw new CliExit(1);
+        if (!prepared.ok) return stop(prepared.failure);
         p2 = prepared;
 
         // ---- WHAT NEITHER PROGRAM TOUCHES ------------------------------------------------------
@@ -1263,33 +1434,33 @@ async function engraveJobBody(argv: string[]): Promise<number> {
         },
         preview: true,
       });
-      previews.push(...w1.previews);
+      previews.push(...w1.files.previews);
+      programs.push(w1.program);
+      runDiagnostics.push(...w1.diagnostics);
 
       if (p2 === null || facts === null) {
-        console.log(
+        out.progress(
           `  rest       nothing to clean up: ${tool1Key} removed every square millimetre ${restChosen.key} ` +
             `could have opened, so ${restChosen.key} would cut air. One program is the whole job.`,
         );
       } else {
         const w2 = writeProgram(p2, outDir, { writeJobDocument: true, note, sheet: false, preview: true });
-        previews.push(...w2.previews);
-        console.log(
-          `\n  pair       ${facts.rough.nc} (⌀${facts.rough.diameter} mm) then ${facts.rest.nc} ` +
-            `(⌀${facts.rest.diameter} mm) — the second program removed ` +
-            `${facts.restRemovedVolume.toFixed(2)} mm³ on top of the first, and ` +
-            `${facts.leftover.area.toFixed(2)} mm² of the design is left standing between them.`,
-        );
-        // #436 — the threshold's answer, at the terminal as well as on the sheet: the operator
-        // choosing a third cutter is standing at the machine, not reading the sheet.
-        if (facts.thirdTool !== null) {
-          console.log(
-            `  leftover   ${(facts.thirdTool.share * 100).toFixed(2)} % of what the design asks for ` +
-              `(threshold ${(facts.thirdTool.fraction * 100).toFixed(2)} %): ` +
-              (facts.thirdTool.suggested
-                ? 'a third cutter is suggested for it'
-                : 'too small to act on — no third cutter suggested'),
-          );
-        }
+        previews.push(...w2.files.previews);
+        programs.push(w2.program);
+        runDiagnostics.push(...w2.diagnostics);
+        // #478 — the pair is result data. `renderReceipt` prints it, third-tool answer included, from
+        // `details.pair`; the numbers here are the ones the sheet's two-tool section was given.
+        pair = {
+          roughFile: facts.rough.nc,
+          roughDiameterMm: facts.rough.diameter,
+          restFile: facts.rest.nc,
+          restDiameterMm: facts.rest.diameter,
+          restRemovedVolumeMm3: facts.restRemovedVolume,
+          leftoverAreaMm2: facts.leftover.area,
+          thirdToolShare: facts.thirdTool === null ? null : facts.thirdTool.share,
+          thirdToolThreshold: facts.thirdTool === null ? null : facts.thirdTool.fraction,
+          thirdToolSuggested: facts.thirdTool === null ? null : facts.thirdTool.suggested,
+        };
       }
     }
 
@@ -1300,9 +1471,13 @@ async function engraveJobBody(argv: string[]): Promise<number> {
       try {
         const png = await svgToPng(p.svg);
         writeFileSync(join(outDir, p.pngFile), png);
-        console.log(`  image      ${p.pngFile}  (${png.length} bytes — the predicted cut at the real cutter width)`);
+        runOutputs.push(fileReceipt(join(outDir, p.pngFile)));
+        // The picture is result data: it is listed on the program that drew it, and the renderer
+        // prints it with its byte count from the receipt's own outputs (#478).
+        const target = imageTargets.find((t) => t.svgFile === p.svgFile);
+        if (target !== undefined) target.program.images.push(p.pngFile);
       } catch (e) {
-        console.log(
+        out.progress(
           `  note       ${p.pngFile} was not rendered (${(e as Error).message}) — the SVG beside ` +
             'it is complete and opens in any browser. Playwright needs a browser: `npx playwright install`.',
         );
@@ -1311,20 +1486,17 @@ async function engraveJobBody(argv: string[]): Promise<number> {
   } else {
     const path = args.coupon as string;
     const spec = parseCouponSpec(readJson(path), path);
-    const outDir = args.out ?? dirname(path);
+    outDir = args.out ?? dirname(path);
     mkdirSync(outDir, { recursive: true });
 
-    let programs;
+    let couponPrograms;
     try {
-      programs = buildCouponPrograms(spec);
+      couponPrograms = buildCouponPrograms(spec);
     } catch (e) {
       fail((e as Error).message);
     }
 
-    console.log(`${spec.title} — ${spec.parameter} sweep over ${spec.values.join(', ')}`);
-    console.log(`${programs.length} program${programs.length === 1 ? '' : 's'} into ${outDir}`);
-
-    // The record needs the cutter's cutting diameter to select a feeds row on readback, so read it
+    // The cutter's cutting diameter to select a feeds row on readback, so read it
     // from the same tool library `jobTool` the job was built with.
     const couponTool = jobTool(spec.base);
     if (couponTool === null) fail(`tool "${spec.base.toolKey}" is not in the tool library`);
@@ -1335,7 +1507,7 @@ async function engraveJobBody(argv: string[]): Promise<number> {
 
     const rows: CouponRecordRow[] = [];
     let allOk = true;
-    for (const program of programs) {
+    for (const program of couponPrograms) {
       const result = runJob(program.job, outDir, {
         writeJobDocument: true,
         note:
@@ -1344,21 +1516,26 @@ async function engraveJobBody(argv: string[]): Promise<number> {
           `then \`scripts/feeds-readback.ts\` flips the matching \`feeds.ts\` row to measured from it.*`,
       });
       if (result.ok) {
+        programs.push(result.program);
+        runDiagnostics.push(...result.diagnostics);
         // `sheetFile` is nullable since #410 — a two-tool job writes one sheet, for program 1 — but a
         // coupon always asks for its own, and a record row pointing at a sheet that was never written
         // is a field the readback would follow into nothing.
-        if (result.sheetFile === null) fail(`coupon program "${program.id}" was written without a run sheet`);
+        if (result.files.sheetFile === null) fail(`coupon program "${program.id}" was written without a run sheet`);
         rows.push({
           program: program.id,
           values: program.values,
-          ncFile: result.ncFile,
-          sheetFile: result.sheetFile,
-          hash: result.hash,
+          ncFile: result.files.ncFile,
+          sheetFile: result.files.sheetFile,
+          hash: result.files.hash,
           verdict: null,
           chosen: false,
           note: '',
         });
       } else {
+        // Every program is attempted: a sweep with one stopped value still reports the rest, and
+        // the receipt carries every failure it raised (#478).
+        recordFailure(result.failure);
         allOk = false;
       }
     }
@@ -1383,11 +1560,18 @@ async function engraveJobBody(argv: string[]): Promise<number> {
       programs: rows,
     };
     const recordStem = spec.id.replace(/[^A-Za-z0-9._-]+/g, '-');
-    writeFileSync(join(outDir, `${recordStem}-coupon-record.json`), JSON.stringify(record, null, 2) + '\n');
-    console.log(`  record     ${recordStem}-coupon-record.json  (${rows.length} row(s) to complete)`);
-
-    console.log(`\nreceipt: ${programs.length} program(s), ${allOk ? 'all generated' : 'SOME STOPPED — see above'}`);
-    if (!allOk) throw new CliExit(1);
+    const recordFile = `${recordStem}-coupon-record.json`;
+    writeFileSync(join(outDir, recordFile), JSON.stringify(record, null, 2) + '\n');
+    runOutputs.push(fileReceipt(join(outDir, recordFile)));
+    coupon = {
+      title: spec.title,
+      parameter: spec.parameter,
+      values: spec.values,
+      recordFile,
+      rowCount: rows.length,
+      allOk,
+    };
   }
-  return 0;
+  emit();
+  return runOk ? 0 : 1;
 }

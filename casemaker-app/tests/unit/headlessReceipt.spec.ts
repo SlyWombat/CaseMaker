@@ -25,6 +25,12 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const APP = join(HERE, '..', '..');
 const GUIDE = readFileSync(join(APP, 'src/docs/cnc-guide.md'), 'utf8');
 const CHAPTER_8 = GUIDE.slice(GUIDE.indexOf('\n## 8 · '));
+/**
+ * A real run's receipt, from the committed bench document beside it. It is generated on Windows,
+ * so its output paths carry backslashes; that is a property of the machine it ran on, not of the
+ * document, and the tier-3 round-trip test normalises paths before comparing a fresh run.
+ */
+const FIXTURE = join(APP, '..', 'docs', 'bench', '176-g32-stroke.receipt.json');
 
 function engraveReceipt(over: Partial<Extract<Receipt, { command: 'engrave' }>> = {}): Receipt {
   return {
@@ -76,8 +82,7 @@ function engraveReceipt(over: Partial<Extract<Receipt, { command: 'engrave' }>> 
   } as Receipt;
 }
 
-describe('#478 the receipt schema', () => {
-  it('accepts a receipt each command can build, and round-trips through JSON', () => {
+describe('#478 the receipt schema', () => {  it('accepts a receipt each command can build, and round-trips through JSON', () => {
     const receipts: Receipt[] = [
       engraveReceipt(),
       {
@@ -194,6 +199,24 @@ describe('#478 the receipt schema', () => {
     expect(provenanceForDefault('k', 1, 'mm', 'seeded').source).toBe('located');
     expect(provenanceForDefault('k', 1, 'mm', 'chosen').source).toBe('located');
     expect(provenanceForDefault('k', 1, 'mm', 'fallback').source).toBe('seeded');
+  });
+});
+
+describe('#478 a committed bench job’s receipt', () => {
+  it('parses, round-trips byte for byte, and names a chapter 8 row for every diagnostic', () => {
+    const text = readFileSync(FIXTURE, 'utf8');
+    const receipt = parseReceipt(JSON.parse(text));
+    expect(receipt.command).toBe('engrave');
+    expect(receipt.ok).toBe(true);
+    // The JSON a command writes is exactly this document: the fixture is the round trip's reference
+    // (tier 3 step 9), so a serialiser change that reorders or reformats is a test failure here.
+    expect(receiptJson(receipt)).toBe(text);
+    for (const d of receipt.diagnostics) {
+      expect(d.guideRow, `the fixture's code ${d.code} must be its own guide row`).toBe(d.code);
+      expect(CHAPTER_8, `chapter 8 has no row for ${d.code}`).toContain('`' + d.code + '`');
+    }
+    // The human form is rendered FROM this document, so the fixture also pins what an operator saw.
+    expect(renderReceipt(receipt).join('\n')).toContain('  stage      done, ok=true');
   });
 });
 

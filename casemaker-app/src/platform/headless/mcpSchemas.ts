@@ -11,7 +11,8 @@
  * historical version and migrate them, and emitting one of those would produce sixteen (or three)
  * migrated copies of the same document rather than one shape an author can write.
  *
- * The receipt schema is NOT here: it waits for #478 (#480's plan comment says so explicitly).
+ * The receipt (#478) is here as of its own landing: it is the document every command returns, and
+ * the MCP tools of #481 hand the same object back, so its schema belongs beside the inputs.
  */
 
 import { z } from 'zod';
@@ -20,6 +21,7 @@ import { couponSpecFileSchema } from '@/engine/cnc/engrave/couponJob';
 import { boardProfileSchema } from '@/library/schema';
 import { engraveJobDocumentSchema } from '@/store/engraveJobSchema';
 import { projectDocumentSchema } from '@/store/projectSchema';
+import { receiptSchema } from '@/platform/headless/receipt';
 
 /** One document per MCP input/result shape, in the order the generator writes them. */
 export const mcpSchemaDocuments = {
@@ -29,6 +31,7 @@ export const mcpSchemaDocuments = {
     .array(boardProfileSchema)
     .describe('The board library: an array of board profiles bundled with or imported into the app.'),
   'coupon-spec': couponSpecFileSchema,
+  receipt: receiptSchema,
 } as const;
 
 export type McpSchemaName = keyof typeof mcpSchemaDocuments;
@@ -73,7 +76,7 @@ function sortKeys(value: unknown): unknown {
   return sorted;
 }
 
-/** All four documents, keyed by their file stem. */
+/** All five documents, keyed by their file stem. */
 export function generateMcpSchemas(): Record<McpSchemaName, string> {
   const out = {} as Record<McpSchemaName, string>;
   for (const name of MCP_SCHEMA_NAMES) out[name] = generateMcpSchema(name);

@@ -7,13 +7,14 @@
  */
 import { readbackFeedsMain } from './readbackFeeds';
 import { readbackRunMain } from './readbackRun';
+import { HUMAN, type CommandOptions } from './output';
 
 export const READBACK_SECTIONS = ['feeds', 'run'] as const;
 export type ReadbackSection = (typeof READBACK_SECTIONS)[number];
 
 export interface ReadbackHandlers {
-  feeds: (argv: string[]) => Promise<number>;
-  run: (argv: string[]) => Promise<number>;
+  feeds: (argv: string[], options: CommandOptions) => Promise<number>;
+  run: (argv: string[], options: CommandOptions) => Promise<number>;
 }
 
 export const defaultReadbackHandlers: ReadbackHandlers = {
@@ -24,11 +25,12 @@ export const defaultReadbackHandlers: ReadbackHandlers = {
 /** Route `feeds`/`run`. Unknown sections are a usage error; the record's argv is untouched. */
 export async function readbackMain(
   argv: string[],
+  options: CommandOptions = HUMAN,
   handlers: ReadbackHandlers = defaultReadbackHandlers,
 ): Promise<number> {
   const [section, ...rest] = argv;
-  if (section === 'feeds') return handlers.feeds(rest);
-  if (section === 'run') return handlers.run(rest);
+  if (section === 'feeds') return handlers.feeds(rest, options);
+  if (section === 'run') return handlers.run(rest, options);
   console.error(
     `casemaker readback: ${section === undefined ? 'a section is required' : `unknown section "${section}"`} — ` +
       `one of ${READBACK_SECTIONS.join(', ')}\n` +

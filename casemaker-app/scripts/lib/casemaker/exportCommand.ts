@@ -10,9 +10,12 @@ import { readFileSync, mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
 import { bootstrap } from '../../../src/platform/headless/bootstrap';
+import { RECEIPT_VERSION } from '../../../src/platform/headless/receipt';
 import { parseProject } from '../../../src/store/persistence';
 import { CliExit, isCliExit } from './exit';
+import { commandOutput, HUMAN, type CommandOptions } from './output';
 import { writeProjectStl } from './projectExport';
+import { fileReceipt } from './receiptFiles';
 
 interface Args {
   project?: string;
@@ -53,16 +56,17 @@ function stemFor(name: string): string {
 }
 
 /** Run the export. Returns the process exit code; a refusal has already been printed. */
-export async function exportMain(argv: string[]): Promise<number> {
+export async function exportMain(argv: string[], options: CommandOptions = HUMAN): Promise<number> {
   try {
-    return await exportBody(argv);
+    return await exportBody(argv, options);
   } catch (e) {
     if (isCliExit(e)) return e.code;
     throw e;
   }
 }
 
-async function exportBody(argv: string[]): Promise<number> {
+async function exportBody(argv: string[], options: CommandOptions): Promise<number> {
+  const out = commandOutput(options);
   let args: Args;
   try {
     args = parseArgs(argv);
@@ -96,8 +100,20 @@ async function exportBody(argv: string[]): Promise<number> {
   const filename = `${stemFor(project.name)}.stl`;
   const written = await writeProjectStl(tl, project, outDir, filename);
 
-  console.log(`${written.fileName}  ${written.triangles} triangles  ${(written.bytes / 1024).toFixed(1)} KB`);
-  console.log(`  notes      ${written.notesFileName}`);
-  console.log(`\nWrote ${join(outDir, written.fileName)}`);
+  // One receipt for the run (#478): the project it read, both files it wrote with their hashes, and
+  // the triangle count — `renderReceipt` is what turns these into the three lines an operator sees.
+  out.emitReceipt({
+    version: RECEIPT_VERSION,
+    command: 'export',
+    ok: true,
+    stage: 'written',
+    gate: null,
+    inputs: [fileReceipt(path)],
+    outputs: [fileReceipt(join(outDir, written.fileName)), fileReceipt(join(outDir, written.notesFileName))],
+    diagnostics: [],
+    provenance: [],
+    refusals: [],
+    details: { triangles: written.triangles },
+  });
   return 0;
 }
