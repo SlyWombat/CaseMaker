@@ -9,6 +9,7 @@ import {
   makeClipperOffset,
   MILLING,
   type EngraveRegion,
+  type FinishPassSpec,
 } from '@/engine/cnc/cam/engraveJob';
 import { travelStats, type CamMove } from '@/engine/cnc/cam/ir';
 import type { Polygons } from '@/engine/cnc/cam/pocket';
@@ -424,5 +425,70 @@ describe('loop ordering (#487)', () => {
     const first = oneOp();
     const second = oneOp();
     expect(second).toEqual(first);
+  });
+});
+
+// #250 — one region, two removals. The roughing pass is the ideal region eroded by the cutter
+// radius PLUS the allowance and stops the same allowance above the floor; the finishing pass is
+// the ideal region at the cutter's own radius, cut in one full-depth pass.
+describe('finish pass (#250)', () => {
+  const leaves = (mode: FinishPassSpec['mode'], stockToLeaveMm = 0.2): FinishPassSpec => ({
+    stockToLeaveMm,
+    mode,
+  });
+  const maxX = (loops: readonly (readonly Pt[])[]): number =>
+    Math.max(...loops.flatMap((loop) => loop.map(([x]) => x)));
+
+  it('roughs with the allowance and finishes the ideal region at full depth', () => {
+    const ir = generateEngrave(
+      tl,
+      [{ id: 'a', text: 'A', depth: 1, polygons: rectRegion(10, 5) }],
+      TOOL,
+      PARAMS,
+      Z1.rapidEstimate,
+      'nearest',
+      null,
+      leaves('rough-and-finish'),
+    );
+    expect(ir.operations.map((op) => op.passKind)).toEqual(['rough', 'finish']);
+    expect(ir.operations.map((op) => op.name)).toEqual([
+      '[T1]Engrave "A" 1.0mm (rough)',
+      '[T1]Engrave "A" 1.0mm (finish)',
+    ]);
+
+    // The floor allowance: step-down 0.4 to 0.8 mm, not 1.0; the finishing pass reaches full depth.
+    expect(distinctFeedZs(ir.operations[0]!.moves)).toEqual([-0.4, -0.8]);
+    expect(distinctFeedZs(ir.operations[1]!.moves)).toEqual([-1]);
+
+    // The wall allowance: the roughing walls stand leave mm inside the finishing walls.
+    const roughMaxX = maxX(reconstructLoops(ir.operations[0]!.moves));
+    const finishMaxX = maxX(reconstructLoops(ir.operations[1]!.moves));
+    expect(roughMaxX).toBeCloseTo(10 - R - 0.2, 6);
+    expect(finishMaxX).toBeCloseTo(10 - R, 6);
+    expect(roughMaxX).toBeLessThan(finishMaxX);
+  });
+
+  it('writes only the half its mode names, for a named finishing cutter', () => {
+    const region = rectRegion(10, 5);
+    const labels = [{ id: 'a', text: 'A', depth: 1, polygons: region }];
+    const rough = generateEngrave(tl, labels, TOOL, PARAMS, Z1.rapidEstimate, 'nearest', null, leaves('rough-only'));
+    expect(rough.operations).toHaveLength(1);
+    expect(rough.operations[0]!.passKind).toBe('rough');
+    expect(distinctFeedZs(rough.operations[0]!.moves)).toEqual([-0.4, -0.8]);
+
+    const finish = generateEngrave(tl, labels, TOOL, PARAMS, Z1.rapidEstimate, 'nearest', null, leaves('finish-only'));
+    expect(finish.operations).toHaveLength(1);
+    expect(finish.operations[0]!.passKind).toBe('finish');
+    expect(distinctFeedZs(finish.operations[0]!.moves)).toEqual([-1]);
+  });
+
+  it('cuts one unsplit operation when no finish spec is given or the allowance is zero', () => {
+    const labels = [{ id: 'a', text: 'A', depth: 1, polygons: rectRegion(10, 5) }];
+    for (const finish of [null, leaves('rough-and-finish', 0)]) {
+      const ir = generateEngrave(tl, labels, TOOL, PARAMS, Z1.rapidEstimate, 'nearest', null, finish);
+      expect(ir.operations).toHaveLength(1);
+      expect(ir.operations[0]!.passKind).toBeUndefined();
+      expect(ir.operations[0]!.name).toBe('[T1]Engrave "A" 1.0mm');
+    }
   });
 });

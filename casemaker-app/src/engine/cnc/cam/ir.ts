@@ -29,6 +29,18 @@ export type CamMove =
   | { kind: 'rapid'; x: number; y: number; z: number }
   | { kind: 'feed'; x: number; y: number; z: number; f: number };
 
+/**
+ * #250 — which pass of an item's cut this operation is. `rough` leaves the finish allowance
+ * behind; `finish` cuts the ideal region at full depth. `through` is #218's full-depth profile /
+ * cut-out pass (J31's semantics, kept in the shared union so both issues land on one definition);
+ * it is not emitted by the pocket/engrave CAM and is not a pass of a rough/finish pair.
+ *
+ * OPTIONAL on the operation, because every pre-#250 operation — a drill, a trace, a thread, a
+ * one-pass pocket — is neither: absence means "the document did not split this cut into passes",
+ * and the post, the sheet and the sweep keep their old reading.
+ */
+export type CamPassKind = 'rough' | 'finish' | 'through';
+
 export interface CamOperation {
   /** 1-based, in cutting order. Becomes the `;@MKR|TOOLPATH|number=` line. */
   number: number;
@@ -38,6 +50,11 @@ export interface CamOperation {
   labelId: string;
   /** Positive mm. */
   depth: number;
+  /**
+   * #250 — `rough` or `finish` when the item was split into a roughing and a finishing pass;
+   * absent on every operation that is not part of such a pair (see {@link CamPassKind}).
+   */
+  passKind?: CamPassKind;
   moves: CamMove[];
   /**
    * The operation's CYCLE estimate in seconds — cutting PLUS rapids, every move through the

@@ -38,6 +38,7 @@ import {
   SAFE_Z,
   type CamMove,
   type CamOperation,
+  type CamPassKind,
   type RapidEstimate,
   type ToolpathIR,
   toolNumberFor,
@@ -76,8 +77,28 @@ export interface VCarveRegion {
   surfaceOutset: number;
 }
 
-/** One item's opened region (#201), ready to pocket. A text label or a shape pocket (#214). */
-export interface EngraveRegion {
+/**
+ * #250 — the finish pass as the CAM receives it.
+ *
+ * `mode` says which half of the pair THIS program cuts, because one program is one tool and the
+ * split that decides how many programs a job has is #472's (setup, tool) split, not a second one
+ * here:
+ *   - `rough-and-finish`: the same cutter cuts both passes, in this file;
+ *   - `rough-only`: the first cutter of a multi-tool setup leaves the allowance for a named later
+ *     cutter, whose measured-rest program is `finish-only`;
+ *   - `finish-only`: the later cutter's program, cutting its rest geometry at full depth.
+ *
+ * Only a FLAT cutter is split. A V-carve region is cut by the cone's whole geometry and a drill,
+ * trace or thread is not a pocket, so those keep their one-pass output even when the job names an
+ * allowance. `stockToLeaveMm <= 0` disables the split entirely (the pre-#250 output).
+ */
+export interface FinishPassSpec {
+  /** Material left on the walls and floor by the roughing pass, mm. */
+  stockToLeaveMm: number;
+  mode: 'rough-and-finish' | 'rough-only' | 'finish-only';
+}
+
+/** One item's opened region (#201), ready to pocket. A text label or a shape pocket (#214). */export interface EngraveRegion {
   id: string;
   /** The label's text (empty for a shape). The FALLBACK operation name. */
   text: string;
@@ -217,10 +238,19 @@ function firstCuttingPoint(rings: Polygons[]): [number, number] {
   return best;
 }
 
+/** One pass of one item: its rings and the Z levels it cuts them at (#250). */
+interface PreparedPass {
+  rings: Polygons[];
+  /** Negative work Z, shallowest first. */
+  passes: number[];
+  /** `rough`/`finish` when the item was split; absent on a one-pass cut. */
+  passKind?: Extract<CamPassKind, 'rough' | 'finish'>;
+}
+
 interface Prepared {
   label: EngraveRegion;
-  rings: Polygons[];
-  passes: number[];
+  /** One entry for a one-pass cut; two (rough then finish) when #250 split the item. */
+  passList: PreparedPass[];
   firstCut: [number, number];
   /** A drilled region's moves, computed at prepare time (#220). Present => `buildMoves` is not used. */
   drillMoves?: CamMove[];
@@ -295,11 +325,11 @@ interface PlacedLoop {
  * comparison measures.
  */
 function placeLoops(
-  prepared: Prepared,
+  pass: PreparedPass,
   order: LoopOrder,
   from: readonly [number, number],
 ): PlacedLoop[] {
-  const contours = prepared.rings
+  const contours = pass.rings
     .map((ring) => ring.filter((contour) => contour.length >= 3))
     .filter((ring) => ring.length > 0);
   const loops: PlacedLoop[] = [];
@@ -312,7 +342,7 @@ function placeLoops(
   };
 
   if (order === 'document') {
-    for (const z of prepared.passes) {
+    for (const z of pass.passes) {
       for (let ri = contours.length - 1; ri >= 0; ri--) {
         for (const contour of contours[ri]!) place(contour, z);
       }
@@ -326,7 +356,7 @@ function placeLoops(
     for (const k of tour) {
       const contour = ring[k]!;
       // Depth first: this contour is finished before the tool leaves it.
-      for (const z of prepared.passes) place(contour, z);
+      for (const z of pass.passes) place(contour, z);
     }
   }
   return loops;
@@ -433,6 +463,12 @@ function entryTravel(
  * `peckClearanceMm` is the shop's `drill.peckClearanceMm` (#451), read on the main thread and sent
  * as a plain number; `null`/absent leaves `drillMoves`'s labelled fallback in charge. It is the only
  * shop default this CAM core takes, because the drill path is the only part of it that reads one.
+ *
+ * `finish` is #250's per-program pass mode. `null`/absent cuts every region in one pass, byte for
+ * byte as before (the golden `.nc` depends on it). With an allowance, a flat region is cut as a
+ * roughing pass that leaves `stockToLeaveMm` on walls and floor, then a finishing pass at full depth
+ * on the ideal outline; `mode` selects which of the two THIS program writes, because the tool split
+ * that decides the programs is #472's. A V region, and a program with no allowance, is untouched.
  */
 export function generateEngrave(
   tl: ManifoldToplevel,
@@ -442,6 +478,7 @@ export function generateEngrave(
   rapid: RapidEstimate,
   order: 'nearest' = 'nearest',
   peckClearanceMm: number | null = null,
+  finish: FinishPassSpec | null = null,
 ): ToolpathIR {
   const usable = cuttingForTrace(tool);
   if (!usable.ok) throw new Error(`generateEngrave: ${usable.reason}`);
@@ -465,8 +502,8 @@ export function generateEngrave(
    * (#191's flat rule, which a stroke's centreline makes stricter than the tip width) and the same
    * radius is `pocketLoops`' bound.
    */
-  const ringsFor = (label: EngraveRegion): Polygons[] => {
-    if (cone === null) return pocketLoops(label.polygons, flatRadius, params.stepOver, offset);
+  const ringsFor = (label: EngraveRegion, extraRadius = 0): Polygons[] => {
+    if (cone === null) return pocketLoops(label.polygons, flatRadius + extraRadius, params.stepOver, offset);
     const planeRadius = label.vCarve?.planeRadius ?? cone.tipRadius;
     if (!(planeRadius > 0) || !(tipWidth > 0)) {
       throw new Error(
@@ -484,6 +521,11 @@ export function generateEngrave(
     return pocketLoops(label.polygons, planeRadius, pitch, offset, cone.tipRadius);
   };
 
+  // #250 — a flat cutter whose program asks for an allowance is cut in two passes. A V region is
+  // the cone's whole geometry and is not split; the mode says which half this PROGRAM cuts, because
+  // the (setup, tool) split that decides how many programs a job has is #472's.
+  const finishOn = finish !== null && finish.stockToLeaveMm > 0 && cone === null;
+
   const prepared: Prepared[] = labels.map((label) => {
     if (label.drill) {
       // Drilled region (#220): no rings to pocket. The holes are visited nearest-neighbour and
@@ -492,19 +534,38 @@ export function generateEngrave(
       const holes = orderHolesNearest(label.drill.holes);
       return {
         label,
-        rings: [],
-        passes: [],
+        passList: [],
         firstCut: holes[0] ?? [0, 0],
         drillMoves: drillMoves(holes, label.depth, params.peck, params, peckClearanceMm),
       };
     }
-    const rings = ringsFor(label);
-    return {
-      label,
-      rings,
+    const onePass: PreparedPass = {
+      rings: ringsFor(label),
       passes: zPasses(label.depth, params.stepDown),
-      firstCut: firstCuttingPoint(rings),
     };
+    if (!finishOn || finish === null) {
+      return { label, passList: [onePass], firstCut: firstCuttingPoint(onePass.rings) };
+    }
+    const leave = finish.stockToLeaveMm;
+    const passList: PreparedPass[] = [];
+    const roughDepth = label.depth - leave;
+    if (finish.mode !== 'finish-only' && roughDepth > 0) {
+      // The roughing region is eroded by the tool radius PLUS the wall allowance; its deepest pass
+      // stops the same distance above the floor.
+      passList.push({
+        rings: ringsFor(label, leave),
+        passes: zPasses(roughDepth, params.stepDown),
+        passKind: 'rough',
+      });
+    }
+    if (finish.mode !== 'rough-only') {
+      // The finishing pass is the ideal region at the cutter's own radius, one full-depth pass.
+      passList.push({ rings: ringsFor(label), passes: [-label.depth], passKind: 'finish' });
+    }
+    // A cut shallower than the allowance has no roughing pass to make; keeping the one-pass cut is
+    // better than writing an item with no operation at all (#250 review).
+    if (passList.length === 0) passList.push(onePass);
+    return { label, passList, firstCut: firstCuttingPoint(passList[0]!.rings) };
   });
 
   const strategies: Record<'nearest', (items: readonly Prepared[]) => Prepared[]> = { nearest: orderNearest };
@@ -527,38 +588,52 @@ export function generateEngrave(
   let baselineRegionRapidMm = 0;
   let regionCutMm = 0;
 
-  const operations: CamOperation[] = ordered.map((item, index) => {
-    let moves: CamMove[];
-    if (item.drillMoves !== undefined) {
-      moves = item.drillMoves;
-      const last = moves[moves.length - 1];
-      if (last) cursor = [last.x, last.y];
-    } else {
-      const loops = placeLoops(item, 'proximity', cursor);
-      moves = buildMoves(loops, params);
-      // Both orders are priced on the SAME legs: the first operation's opening leg is not
-      // charged (see `entryTravel`), which is the rule `travelStats` uses on the emitted moves.
-      const skipFirst = index === 0;
-      regionRapidMm += entryTravel(cursor, loops, skipFirst);
-      // The pre-#487 order chose every entry as if the tool stood at (0, 0); it is re-placed
-      // here so the before/after is the old order, not an approximation of it.
-      const baseline = placeLoops(item, 'document', [0, 0]);
-      baselineRegionRapidMm += entryTravel(cursor, baseline, skipFirst);
-      regionCutMm += loops.reduce((sum, loop) => sum + loopLength(loop), 0);
-      cursor = loops.length > 0 ? loops[loops.length - 1]!.entry : cursor;
-    }
+  const operations: CamOperation[] = [];
+  for (const item of ordered) {
     // A shape's ready-made descriptor when the caller supplied one (#214); otherwise the
     // label text, exactly as before, so a text-only caller's `.nc` is unchanged.
     const descriptor = item.label.name ?? `Engrave "${item.label.text}"`;
-    return {
-      number: index + 1,
-      name: `[T${toolNumber}]${descriptor} ${item.label.depth.toFixed(1)}mm`,
-      labelId: item.label.id,
-      depth: item.label.depth,
-      moves,
-      estimatedSeconds: estimateCycleSeconds(moves, rapid),
-    };
-  });
+    if (item.drillMoves !== undefined) {
+      const moves = item.drillMoves;
+      const last = moves[moves.length - 1];
+      if (last) cursor = [last.x, last.y];
+      operations.push({
+        number: operations.length + 1,
+        name: `[T${toolNumber}]${descriptor} ${item.label.depth.toFixed(1)}mm`,
+        labelId: item.label.id,
+        depth: item.label.depth,
+        moves,
+        estimatedSeconds: estimateCycleSeconds(moves, rapid),
+      });
+      continue;
+    }
+    for (const pass of item.passList) {
+      const loops = placeLoops(pass, 'proximity', cursor);
+      const moves = buildMoves(loops, params);
+      // Both orders are priced on the SAME legs: the first operation's opening leg is not
+      // charged (see `entryTravel`), which is the rule `travelStats` uses on the emitted moves.
+      const skipFirst = operations.length === 0;
+      regionRapidMm += entryTravel(cursor, loops, skipFirst);
+      // The pre-#487 order chose every entry as if the tool stood at (0, 0); it is re-placed
+      // here so the before/after is the old order, not an approximation of it.
+      const baseline = placeLoops(pass, 'document', [0, 0]);
+      baselineRegionRapidMm += entryTravel(cursor, baseline, skipFirst);
+      regionCutMm += loops.reduce((sum, loop) => sum + loopLength(loop), 0);
+      cursor = loops.length > 0 ? loops[loops.length - 1]!.entry : cursor;
+      // An unsplit item keeps yesterday's name exactly; a split pass says which half it is, so a
+      // `.nc` opened in a sender names the two removals the sheet lists.
+      const suffix = pass.passKind === undefined ? '' : ` (${pass.passKind})`;
+      operations.push({
+        number: operations.length + 1,
+        name: `[T${toolNumber}]${descriptor} ${item.label.depth.toFixed(1)}mm${suffix}`,
+        labelId: item.label.id,
+        depth: item.label.depth,
+        ...(pass.passKind === undefined ? {} : { passKind: pass.passKind }),
+        moves,
+        estimatedSeconds: estimateCycleSeconds(moves, rapid),
+      });
+    }
+  }
 
   return {
     // The 3-axis work frame. A rotary IR has its own frame (#237); nothing emits one yet.
