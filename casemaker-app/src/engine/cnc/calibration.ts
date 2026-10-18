@@ -390,6 +390,6 @@ export function machineCalibrationNotice(
     message:
       `Machine positions are the vendor's shipped defaults — this machine's own configuration has ` +
       `not been read, and on a calibrated machine the anchors and the tool-length sensor sit ` +
-      `elsewhere (#279, #208 B6/B7).`,
+      `elsewhere.`,
   };
 }

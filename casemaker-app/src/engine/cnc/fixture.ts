@@ -495,7 +495,7 @@ export function validateVise(
       // blank, in the run sheet's own warnings section.
       message:
         `Only ${fmtMm(grip)} mm of ${what} is gripped below the jaw tops; under ${minGripMm} mm ` +
-        `the part can lift (PROVISIONAL threshold, #208).`,
+        `the part can lift (a provisional threshold).`,
     });
   }
 
@@ -519,7 +519,7 @@ export function validateVise(
   const depth = seatDepth(vise.seat);
   const seatWords =
     vise.seat === 'floor'
-      ? `the body floor, ${fmtMm(depth)} mm below the jaw tops (PROVISIONAL depth, #508)`
+      ? `the body floor, ${fmtMm(depth)} mm below the jaw tops (a provisional depth)`
       : `the soft jaws' ledge, ${fmtMm(depth)} mm below the jaw tops`;
   findings.push({
     severity: 'info',
@@ -539,7 +539,7 @@ export function validateVise(
       // once on the reference unit, and this job's vise has not been measured ITSELF. The sentence
       // says which of the two it is, because "unmeasured defaults" stopped being true on 2026-10-15.
       message:
-        'Vise dimensions are the shipped defaults, measured once on the reference unit (#208); ' +
+        'Vise dimensions are the shipped defaults, measured once on the reference unit; ' +
         'they are not a measurement of this machine\'s own vise.',
     });
   }

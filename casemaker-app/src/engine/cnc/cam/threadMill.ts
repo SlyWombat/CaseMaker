@@ -281,7 +281,7 @@ export function planThreadMill(input: ThreadMillInput): ThreadMillResult {
   const d = cuttingDiameter(tool);
   if (d === null || !(d > 0)) return { ok: false, reason: `${tool.name} states no cutting diameter` };
   if (input.through) {
-    return { ok: false, reason: 'a through thread is unavailable until the through-cut gate (#213/#218) lands' };
+    return { ok: false, reason: 'a through thread is unavailable until the through-cut gate lands' };
   }
   if (!(input.depth > 0)) return { ok: false, reason: 'the thread has no depth' };
 

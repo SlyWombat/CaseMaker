@@ -520,7 +520,7 @@ export function EngraveRegistrationStep({ job, target }: EngraveRegistrationStep
                 <>
                   <p style={MUTED}>
                     Writing the origin also asks you to take the probe out and fit the cutter; its{' '}
-                    <code>M491</code> sets Z0 in #387's order.
+                    <code>M491</code> sets Z0 in this order.
                   </p>
                   <button
                     type="button"

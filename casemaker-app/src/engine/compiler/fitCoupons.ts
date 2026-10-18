@@ -472,11 +472,11 @@ export function buildBoardSnapClipCoupon(
     bodies: FIT_VARIANTS.length + 1,
     settles:
       `the two-jaw board clip (boardSnap.ts CLIP_FIT = ${CLIP_FIT} mm between ` +
-      'spine face and PCB edge) + fitRelief(#153): which grade — a 0.15 / 0.25 / ' +
+      'spine face and PCB edge) + fit relief: which grade — a 0.15 / 0.25 / ' +
       '0.40 mm gap — lets a 1.6 mm board edge cam the jaw aside, snap in and ' +
       'still be held?',
     provenance:
-      'PROVISIONAL — the ladder is #153’s and no board has been clipped into a ' +
+      'PROVISIONAL — the ladder is a chosen starting set and no board has been clipped into a ' +
       'loosened jaw to prove it. The clips are the compiler’s own geometry, slabbed ' +
       'down to the -y wall; the plinths and the gauge are coupon scaffolding. The ' +
       'gauge is cut to the board’s stated thickness, so a pass is also a check that ' +
@@ -606,7 +606,7 @@ function hookCutBounds(
   if (!cut) {
     throw new Error(
       'snapCatchCouponPlan: this catch has no wall socket to ladder — only the ' +
-        "default 'hook' design is relieved by #153 (see the coupon's provenance)",
+        "default 'hook' design carries the fit relief (see the coupon's provenance)",
     );
   }
   const bb = aabbOfOp(cut);
@@ -772,11 +772,11 @@ export function buildSnapCatchCoupon(
     columns,
     bodies: 2,
     settles:
-      'snapCatches.ts buildHookTabWallSubtract relief (#153): which grade — ' +
+      'snapCatches.ts buildHookTabWallSubtract relief: which grade — ' +
       '0 / 0.10 / 0.25 mm — lets the hook tab click into its socket and still ' +
       'hold the lid down',
     provenance:
-      'PROVISIONAL — the ladder is #153’s, and NO fit grade has been printed ' +
+      'PROVISIONAL — the ladder is a chosen starting set, and NO fit grade has been printed ' +
       'against a real catch. The socket and the tab are both the compiler’s own ' +
       'geometry; the plate stub on the tab and the backing behind the wall are ' +
       'coupon scaffolding, not mating surfaces. Only the default hook design is ' +
@@ -985,16 +985,16 @@ export function buildRackTabCoupon(
     columns,
     bodies: FIT_VARIANTS.length + 1,
     settles:
-      'rack.ts TAB_SLACK + fitRelief(rack.fit) (#153) across the slot, and ' +
-      'TAB_Z_SLACK + fitRelief(rack.fit) (#356) up its opening: which grade — ' +
+      'rack.ts TAB_SLACK + fitRelief(rack.fit) across the slot, and ' +
+      'TAB_Z_SLACK + fitRelief(rack.fit) up its opening: which grade — ' +
       '0 / 0.10 / 0.25 mm — lets the plate tab slide into its bottom ledge, ' +
       'clear the ceiling, and still stop the deck shifting',
     provenance:
-      'PROVISIONAL — the ladder is #153’s, and no rack has been assembled with a ' +
+      'PROVISIONAL — the ladder is a chosen starting set, and no rack has been assembled with a ' +
       'loosened ledge to prove it. Both halves are the compiler’s own parts cut ' +
       'with a slab, so the coupon cannot certify a slot the panel does not have; ' +
       'the slice windows are coupon scaffolding, not mating surfaces. The one tab ' +
-      'carries only the fixed #356 shave, so its thickness is a datum the rungs ' +
+      'carries only the fixed tab-ceiling shave, so its thickness is a datum the rungs ' +
       'are measured against, never a rung itself. Its z grade is COARSE: the ' +
       'ledge slice prints rack-z as PRINT-z, where the real panel lies flat so ' +
       'its ledges are cut in-plane, and a 0.2 mm layer therefore quantises the ' +
@@ -1002,7 +1002,7 @@ export function buildRackTabCoupon(
       'one face. Read the slot WIDTH (in-plane, full resolution) as this ' +
       'coupon’s answer, then, and the z difference as an indication of what a ' +
       'rung opens rather than a measurement of it. What it does ' +
-      'NOT cover: the same ledge is cut at the rack TOP, where #356 opens the ' +
+      'NOT cover: the same ledge is cut at the rack TOP, where the top ledge opens the ' +
       'FLOOR down instead of the ceiling up (the coupon slices the bottom one), ' +
       'the plate is also carried by a ' +
       'mid tab on racks deeper than MID_BAR_MIN_DEPTH, and nothing here tests the ' +

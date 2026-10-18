@@ -413,7 +413,7 @@ describe('the run sheet states the loop ordering (#487)', () => {
     expect(step.text).toMatch(/^Program 1, single-rough\.nc — /);
     expect(step.text).toContain('The file spends 417 mm in the air against 1820.1 mm cutting');
     expect(step.text).toContain('(0.229 : 1)');
-    expect(step.text).toContain('The pre-#487 order spent 3293.8 mm (1.81 : 1)');
+    expect(step.text).toContain('The previous ordering spent 3293.8 mm (1.81 : 1)');
     expect(step.value).toBe('417 mm rapid · 1820.1 mm cut');
   });
 

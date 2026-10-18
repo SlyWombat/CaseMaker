@@ -258,7 +258,7 @@ export async function endOfRun(target: { host: string; port: number }, outcome: 
 
   // The stock.
   if (!hasStock || !ctx) {
-    lines.push('No shelf entry is recorded for this job, so the shelf is unchanged (the job flow, #419, will say which stock it reserved).');
+    lines.push('No shelf entry is recorded for this job, so the shelf is unchanged (the job flow will say which stock it reserved).');
   } else if (!lastProgram) {
     lines.push(
       `${programWord} finished cleanly: the stock stays reserved until the job's last program finishes.`,
@@ -271,7 +271,7 @@ export async function endOfRun(target: { host: string; port: number }, outcome: 
   // The runtime — written once, never retried.
   const reading = cuts ? runtimeOf(cuts, outcome.last.elapsedS) : null;
   if (reading === null) lines.push('No runtime was counted: neither the program nor the run says how long it cut.');
-  else if (cuts && cuts.tools.length > 1) lines.push('No runtime was counted: the program changes between tools, and one program per tool is the rule (Q15).');
+  else if (cuts && cuts.tools.length > 1) lines.push('No runtime was counted: the program changes between tools, and one program per tool is the rule.');
   else if (machineId === null) lines.push('No runtime was counted: this machine is not one of the location’s.');
   else {
     const items = io.inventory();

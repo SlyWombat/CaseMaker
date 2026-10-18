@@ -860,7 +860,7 @@ function MountingFeatureDetail({
 
       {(feature.type === 'aligned-standoff' || feature.type === 'saddle') && (
         <p className="selection-panel__hint">
-          Internal-mount geometry is a follow-up (#80 slice 4 deferred). The
+          Internal-mount geometry is a follow-up. The
           schema records this feature type but no geometry is emitted yet.
         </p>
       )}

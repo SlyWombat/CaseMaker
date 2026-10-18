@@ -180,7 +180,7 @@ export interface FeedsEntry {
 }
 
 const PROVENANCE =
-  'Starting value. rpm/feed/plunge are what Makera Studio emits for the Z1 (TopClamp.nc: S12000, F500, F200); step-down is a conservative guess for a 150 W spindle. Replace from #209.';
+  'Starting value. rpm/feed/plunge are what Makera Studio emits for the Z1 (TopClamp.nc: S12000, F500, F200); step-down is a conservative guess for a 150 W spindle. Replace it with a measured coupon.';
 
 /**
  * The V1 table's STARTING VALUES. Every row `unmeasured`. The two PLA rows are placed for #284's
@@ -283,8 +283,8 @@ export const UNMEASURED_FEEDS_TABLE: readonly FeedsEntry[] = [
     provenance:
       'PLACEHOLDER, nothing measured: the 0.8-1.6 mm row\'s own starting values (S12000, F500, ' +
       'F200 — the Z1\'s emitted defaults) with the step-down and step-over cut back for a 0.6 mm ' +
-      'cutter, which is the least stiff bit the bench owns. No vendor row for this diameter. #284 ' +
-      'measures it.',
+      'cutter, which is the least stiff bit the bench owns. No vendor row for this diameter. A ' +
+      'coupon is what measures it.',
   },
   {
     // The V-BIT row (#405), for the single-stroke text job. Its numbers are the hand-written bench
@@ -312,10 +312,10 @@ export const UNMEASURED_FEEDS_TABLE: readonly FeedsEntry[] = [
     params: { rpm: 12000, feed: 500, plungeFeed: 200, stepDown: 1.0, stepOverFraction: DEFAULT_V_CARVE_STEPOVER_RATIO, peckFraction: 1.0, air: true },
     status: 'unmeasured',
     provenance:
-      'From the 2026-10-15 bench cut (#185, `docs/bench/185-v-groove.nc`): the hand file\'s own ' +
+      'From the 2026-10-15 bench cut (`docs/bench/185-v-groove.nc`): the hand file\'s own ' +
       'numbers — S12000, F500 along, F200 plunge, one pass to depth — cut a clean V groove in PLA ' +
       '(0.836 mm opening at 1.0 mm deep, the 30° × 0.3 mm bit). Starting values, not a coupon ' +
-      'measurement: #284 is what measures this row.',
+      'measurement: a coupon is what measures this row.',
   },
   {
     // The PETG V row (#221): the thin-film badge blank is PETG, and with only a PLA V row the
@@ -335,8 +335,8 @@ export const UNMEASURED_FEEDS_TABLE: readonly FeedsEntry[] = [
     provenance:
       'OBSERVED 2026-10-17, not measured: the 30° × 0.3 mm V-bit ran PETG at S12000, F500 along, ' +
       'F200 plunge for 856 s without melting. The numbers are the PLA V row\'s own starting values; ' +
-      'no coupon measured PETG, and this row is a chosen placeholder for the two-colour blank. #284 ' +
-      'is what settles it.',
+      'no coupon measured PETG, and this row is a chosen placeholder for the two-colour blank. A ' +
+      'coupon is what settles it.',
   },
   {
     // The PLASTIC V row (#492): the purchased two-colour laminate's material is the generic
@@ -356,8 +356,8 @@ export const UNMEASURED_FEEDS_TABLE: readonly FeedsEntry[] = [
       'OBSERVED 2026-10-17, not measured: chosen from the PETG observation of 2026-10-17, ' +
       'unmeasured on laminate — the 30° × 0.3 mm V-bit ran S12000, F500 along, F200 plunge for ' +
       '856 s without melting. The numbers are the PLA V row\'s own starting values; no coupon ' +
-      'measured plastic, and this row is a chosen placeholder for the two-colour laminate. #284 ' +
-      'is what settles it.',
+      'measured plastic, and this row is a chosen placeholder for the two-colour laminate. A ' +
+      'coupon is what settles it.',
   },
 ];
 
@@ -1373,8 +1373,8 @@ export function feedsFor(
       ok: false,
       reason:
         edge === 'v'
-          ? `step-over ${params.stepOver} mm exceeds the ${diameter} mm tip width of the V-bit: contour-parallel tip passes would leave an uncut spine (#191), and an override that leaves material is refused rather than clamped`
-          : `step-over ${params.stepOver} mm exceeds the ${toolRadius} mm radius of the ${diameter} mm cutter: contour-parallel loops would leave an uncut spine (#191), and an override that leaves material is refused rather than clamped`,
+          ? `step-over ${params.stepOver} mm exceeds the ${diameter} mm tip width of the V-bit: contour-parallel tip passes would leave an uncut spine, and an override that leaves material is refused rather than clamped`
+          : `step-over ${params.stepOver} mm exceeds the ${toolRadius} mm radius of the ${diameter} mm cutter: contour-parallel loops would leave an uncut spine, and an override that leaves material is refused rather than clamped`,
     };
   }
 

@@ -596,7 +596,7 @@ export function planProbing(
       resolved.add('rotation');
       notes.push(
         'rotation is measured, and a static .nc cannot compensate it (Smoothieware has no ' +
-          'variables, §7.3 / #187 item 1): apply it in Studio\'s dialogs, or re-post with the ' +
+          'variables): apply it in Studio\'s dialogs, or re-post with the ' +
           'rotation baked into the geometry',
       );
     }
@@ -647,9 +647,9 @@ export function planProbing(
     );
   } else if (!needs('rotation')) {
     // The mechanical fix is the real de-risking of §7.3: it is what lets a static .nc work.
-    notes.push('rotation is fixed mechanically by the fixture, so no compensation is needed (§7.3)');
+    notes.push('rotation is fixed mechanically by the fixture, so no compensation is needed');
   }
-  notes.push('Z is always probed on the engraved face (§7.2): no fixture can supply it');
+  notes.push('Z is always probed on the engraved face: no fixture can supply it');
 
   return {
     touches,

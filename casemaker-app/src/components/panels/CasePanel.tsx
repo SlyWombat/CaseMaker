@@ -668,22 +668,22 @@ const HINGE_STYLE_OPTIONS: { value: HingeStyle; label: string; hint: string }[] 
   {
     value: 'piano-continuous',
     label: 'Piano (continuous)',
-    hint: 'Many tightly-spaced knuckles giving a visually-continuous hinge bar. Strongest action — best for protective cases. (#110)',
+    hint: 'Many tightly-spaced knuckles giving a visually-continuous hinge bar. Strongest action — best for protective cases.',
   },
   {
     value: 'piano-segmented',
     label: 'Piano (segmented)',
-    hint: '5–7 knuckle clusters with gaps. Easier to print than continuous; visually similar. (#110)',
+    hint: '5–7 knuckle clusters with gaps. Easier to print than continuous; visually similar.',
   },
   {
     value: 'pip-pivot',
     label: 'Pip pivot',
-    hint: 'Two short pivot bosses near the ends, no centerline pin. Lid clips on. Suitable only for shallow cases (< 80 mm). (#110)',
+    hint: 'Two short pivot bosses near the ends, no centerline pin. Lid clips on. Suitable only for shallow cases (< 80 mm).',
   },
   {
     value: 'hardware-screw',
     label: 'Two screws',
-    hint: 'Two M3×8 screws, one at each end of the hinge edge — no printed pin. Robust for big or heavy lids that are opened often. The bosses sit at the ends of the face and are sized for the screw, so the hinge length above does not apply. (#114)',
+    hint: 'Two M3×8 screws, one at each end of the hinge edge — no printed pin. Robust for big or heavy lids that are opened often. The bosses sit at the ends of the face and are sized for the screw, so the hinge length above does not apply.',
   },
 ];
 
@@ -782,7 +782,7 @@ function HingeSection({ params, patch }: HingeSectionProps) {
             label="Knuckle count"
             unit="count"
             hint={screwHinge
-              ? 'Fixed at 4 for the two-screw style: one case + one lid knuckle at each end of the face. (#114)'
+              ? 'Fixed at 4 for the two-screw style: one case + one lid knuckle at each end of the face.'
               : 'Total knuckle slots. Odd, ≥3. Even indices are case-attached; odd indices are lid-attached.'}
           >
             <input
@@ -869,7 +869,7 @@ function HingeSection({ params, patch }: HingeSectionProps) {
             label="Hinge length"
             unit="mm"
             hint={screwHinge
-              ? 'Not used by the two-screw style — the bosses sit at the ends of the face. (#114)'
+              ? 'Not used by the two-screw style — the bosses sit at the ends of the face.'
               : 'Total length of the knuckle run, including clearances.'}
           >
             <input
@@ -990,7 +990,7 @@ function SealSection({ params, patch }: SealSectionProps) {
           data-testid="seal-enabled"
           aria-label="Waterproof seal enabled"
         />
-        <span>Waterproof gasket (TPU ring) — #107/#108</span>
+        <span>Waterproof gasket (TPU ring)</span>
       </label>
       {enabled && seal && (
         <>
@@ -1078,7 +1078,7 @@ function SealSection({ params, patch }: SealSectionProps) {
           <LabelledField
             label="Gasket clearance"
             unit="mm"
-            hint="Issue #113 — per-printer tolerance applied to the lid tongue inset and channel slop. Default 0.2 mm matches pre-#113 behavior. Bump if your printer over-extrudes; reduce for tighter sealing on a well-tuned printer."
+            hint="Per-printer tolerance applied to the lid tongue inset and channel slop. Default 0.2 mm. Bump if your printer over-extrudes; reduce for tighter sealing on a well-tuned printer."
           >
             <input
               type="number"
@@ -1155,7 +1155,7 @@ function LatchesSection({ params, patch }: LatchesSectionProps) {
   return (
     <div className="latches-section">
       <div className="vent-row" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <span>Latches ({latches.length}) — #109</span>
+        <span>Latches ({latches.length})</span>
         <button type="button" onClick={addLatch} data-testid="add-latch" title="Add a Pelican-style spring-cam latch on a side wall">
           + Add latch
         </button>
@@ -1267,7 +1267,7 @@ function RuggedSection({ params, patch }: RuggedSectionProps) {
           onChange={(e) => onToggle(e.target.checked)}
           data-testid="rugged-enabled"
         />
-        <span>Rugged exterior (corners, ribs, feet) — #111</span>
+        <span>Rugged exterior (corners, ribs, feet)</span>
       </label>
       {enabled && rugged && (
         <>

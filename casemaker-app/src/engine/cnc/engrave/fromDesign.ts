@@ -221,7 +221,7 @@ export function designJobFor(
 
   const notes: string[] = [
     `The blank is ${mm(length)} × ${mm(width)} × ${mm(design.stock.thickness)} mm: the file's ` +
-      `${mm(design.stock.lengthX)} × ${mm(design.stock.widthY)} laid across the jaws (#383), so its ` +
+      `${mm(design.stock.lengthX)} × ${mm(design.stock.widthY)} laid across the jaws, so its ` +
       `${mm(design.stock.widthY)} mm side now runs in Y along the feed and its ${mm(design.stock.lengthX)} mm ` +
       'side across them in X.',
     `The design was turned 90° ${direction === 'ccw' ? 'COUNTER-CLOCKWISE' : 'CLOCKWISE'} as seen from ` +
@@ -291,7 +291,7 @@ export function designJobFor(
     );
     notes.push(
       'No bow is claimed from the file: a bow belongs to the piece as clamped, so the job states one ' +
-        'only after its own surface has been measured (#496).',
+        'only after its own surface has been measured.',
     );
   } else {
     notes.push(
@@ -366,7 +366,7 @@ export function designJobFor(
   );
   notes.push(
     'No cutter was chosen: `designJobFor` settles the blank and the items only. Which bit cuts them, and ' +
-      'whether one bit or two, is decided with the reachability numbers in hand (#410).',
+      'whether one bit or two, is decided with the reachability numbers in hand.',
   );
 
   return {

@@ -314,7 +314,7 @@ export interface ReachTableRow {
  * A V-bit is not that second programme — on a region job it IS the cutter, as a V-carve.
  */
 export const V_BIT_REST_SENTENCE =
-  'a V-bit is not a rest cutter here — on a region job it is the V-carve cutter itself, not a second program (#221)';
+  'a V-bit is not a rest cutter here — on a region job it is the V-carve cutter itself, not a second program';
 
 /** Why a cutter was dropped before measuring, in one phrase, for a table cell. */
 function exclusionWords(excluded: ToolCandidate['excluded'] | null, note: string | null): string | null {

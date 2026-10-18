@@ -373,7 +373,7 @@ export function planMaterialScan(job: EngraveJob, scan: MaterialScanSettings = S
       message:
         `the blank stands ${fmtNum(proud)} mm proud of the jaw tops, so a touch just outside its ` +
         'edge reads the blank’s own height and there is nothing to tell the blank from the jaw. ' +
-        'The height the blank stands proud (#208 A5) is what makes this scan work',
+        'The height the blank stands proud is what makes this scan work',
     };
   }
 
@@ -551,7 +551,7 @@ export function planMaterialScan(job: EngraveJob, scan: MaterialScanSettings = S
       // It used to say AS ASSUMED — no tip had been measured. A8 calipered it on 2026-10-15, so the
       // sentence now names the reading instead (and still names WHICH probe it is, because the
       // machine ships three and only the wired one is the touch-off tip).
-      `The tip is ${fmtNum(scan.tipDiameterMm)} mm across, measured (#208 A8, 2026-10-15: the wired ` +
+      `The tip is ${fmtNum(scan.tipDiameterMm)} mm across, measured on 2026-10-15 (the wired ` +
         `probe's shaft — a hollow cylinder, no ball): every position and depth below is derived ` +
         `from this one figure — the ${fmtNum(resolutionMm)} mm the reading stands past the edge is ` +
         'its radius and the dial, and a smaller tip is a sharper scan.',

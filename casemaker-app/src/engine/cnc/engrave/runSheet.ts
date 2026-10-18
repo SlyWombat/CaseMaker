@@ -1265,7 +1265,7 @@ function facingSteps(
       text:
         `The skim runs with the facing cutter fitted above — ${cam.toolName}, ⌀ ` +
         `${fmtNum(cam.diameterMm)} mm flat — not the engraving bit. The release step uploads ` +
-        `${faceFile} with the run and plays it FIRST, before the engraving program (#473).`,
+        `${faceFile} with the run and plays it FIRST, before the engraving program.`,
       value: `⌀ ${fmtNum(cam.diameterMm)} mm`,
     });
     steps.push({
@@ -1310,7 +1310,7 @@ function facingSteps(
       'Set Z0 for the engraving program from the re-touch and those two readings, NOT by touching ' +
       'the surface again: Z0 = the faced surface Z you just recorded + (the engraving cutter’s PRB ' +
       '− the probe’s PRB recorded when you set the origin). With the engraving cutter fitted, write ' +
-      'it with G10 L2: that command zeroes the tool-length offset to the current tool (#387). Home ' +
+      'it with G10 L2: that command zeroes the tool-length offset to the current tool. Home ' +
       `again once it is written, then load ${runSheetFileName(job.name)}.`,
     value: 'Z0 = faced surface + (engraving PRB − probe PRB)',
     record: 'Z0 for the engraving program (mm)',
@@ -1649,7 +1649,7 @@ function materialPositionSteps(
       text:
         `Every touch below is ONE line, sent with the tip held ${gapMm} mm above the top of the blank — ` +
         'lift to that height and jog X and Y THERE, never sideways at depth. The Z word is the distance ' +
-        `the tip may TRAVEL, not a place to go (§11.6): from the ${gapMm} mm gap it descends onto the ` +
+        `the tip may TRAVEL, not a place to go: from the ${gapMm} mm gap it descends onto the ` +
         `blank and stops there, or runs the ${gapMm} mm plus the ${capMm} mm cap if there is nothing ` +
         'under it — as far as it may ever go, which is what keeps a touch that finds nothing off the bed:',
       code: `G38.2 Z-${travelMm} F${feed}`,
@@ -2204,7 +2204,7 @@ function restSwapSteps(facts: RestPassFacts, labels?: RestProgramLabels): RunShe
     const b = travelOf(rest, rest.nc);
     if (a === null || b === null) return null;
     return (
-      `Air travel, which is what the loop ordering (#487) moves: ${a}; ${b}. ` +
+      `Air travel, which is what the loop ordering moves: ${a}; ${b}. ` +
       `Before the ordering the same programs spent ${fmtNum(rough.travel!.baselineRapidMm)} mm and ` +
       `${fmtNum(rest.travel!.baselineRapidMm)} mm in rapid.`
     );
@@ -2959,7 +2959,7 @@ export function buildRunSheet(
             'Set Z0 for the facing program from those two readings, NOT by touching the surface ' +
             'again: Z0 = the surface Z you recorded when you probed the origin + (this cutter’s PRB ' +
             '− the probe’s PRB, recorded there beside it). Write it with G10 L2 while the facing ' +
-            'cutter is fitted: that command zeroes the tool-length offset to the current tool (#387).',
+            'cutter is fitted: that command zeroes the tool-length offset to the current tool.',
           value: 'Z0 = surface + (facing PRB − probe PRB)',
           record: 'Z0 for the facing program (mm)',
         },
@@ -3181,7 +3181,7 @@ export function buildRunSheet(
           'depth before entering the next, takes each entry at the point nearest where it just ' +
           'was, and cuts the pocket rings inside-out so the wall is the last thing it touches. ' +
           `The file spends ${fmtNum(cam.rapidMm)} mm in the air against ${fmtNum(cam.cutMm)} mm ` +
-          `cutting (${ratio(cam.rapidMm)}). The pre-#487 order spent ` +
+          `cutting (${ratio(cam.rapidMm)}). The previous ordering spent ` +
           `${fmtNum(cam.baselineRapidMm)} mm (${ratio(cam.baselineRapidMm)}) on the same cut.`,
         value: `${fmtNum(cam.rapidMm)} mm rapid · ${fmtNum(cam.cutMm)} mm cut`,
       });

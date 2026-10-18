@@ -18,18 +18,18 @@
   "outputs": [
     {
       "path": "<out>/single-barrel.nc",
-      "sha256": "2be0c0b9670247d5aa82dc140ceaa51501535bf8c220406a534d26c2cbf58560",
-      "bytes": 7470
+      "sha256": "7fca679ab83a97846b1783d9f3ed5a0617ac0fe25f71ab7affca5bbd19ef3839",
+      "bytes": 7456
     },
     {
       "path": "<out>/single-barrel-frame.nc",
-      "sha256": "3366dbaa49725842d7f774b31aa8332f8eb80b972df91723a40a92ecbb19187a",
-      "bytes": 1246
+      "sha256": "2d83e326261b1a9c351cd059ce4c373f821d26b2085eab5663ca732c405e9f7b",
+      "bytes": 1232
     },
     {
       "path": "<out>/single-barrel-run-sheet.md",
-      "sha256": "19c77214e8b39000f3c7f30349b964511d3fc3527c18a1b1d3caca9f7a8af4fa",
-      "bytes": 17959
+      "sha256": "b301e6829c10508eb14f952c0e881163f3ff5c41b57685b04b20db332b99f221",
+      "bytes": 17912
     }
   ],
   "diagnostics": [
@@ -53,7 +53,7 @@
       "code": "vise-grip-shallow",
       "guideRow": "vise-grip-shallow",
       "severity": "warning",
-      "message": "Only 2.61 mm of the stock is gripped below the jaw tops; under 3 mm the part can lift (PROVISIONAL threshold, #208).",
+      "message": "Only 2.61 mm of the stock is gripped below the jaw tops; under 3 mm the part can lift (a provisional threshold).",
       "source": "findings",
       "program": "single barrel"
     },
@@ -69,7 +69,7 @@
       "code": "vise-default",
       "guideRow": "vise-default",
       "severity": "warning",
-      "message": "Vise dimensions are the shipped defaults, measured once on the reference unit (#208); they are not a measurement of this machine's own vise.",
+      "message": "Vise dimensions are the shipped defaults, measured once on the reference unit; they are not a measurement of this machine's own vise.",
       "source": "findings",
       "program": "single barrel"
     },
@@ -121,7 +121,7 @@
         },
         "sheet": {
           "file": "single-barrel-run-sheet.md",
-          "ncHash": "2be0c0b9",
+          "ncHash": "7fca679a",
           "estimatedTime": "1 min 49 s"
         },
         "previews": [],

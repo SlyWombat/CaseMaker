@@ -237,7 +237,7 @@ export function measurementFromRecord(record: CouponRecord, recordPath?: string)
   if (!MEASURABLE.includes(record.parameter as FeedsMeasurement['parameter'])) {
     const reason =
       record.parameter === 'depth'
-        ? 'a depth coupon measures the job’s achievable depth, not a feeds-table field (#165 records that in /Fabrication.md §7.2); there is nothing to write into feeds.ts'
+        ? 'a depth coupon measures the job’s achievable depth, not a feeds-table field; there is nothing to write into feeds.ts'
         : `coupon parameter "${String(record.parameter)}" is not a feeds-table field`;
     return { ok: false, reason };
   }
@@ -293,7 +293,7 @@ export function measurementFromRecord(record: CouponRecord, recordPath?: string)
   if (parameter === 'stepOver' && value > record.cuttingDiameter / 2 + 1e-9) {
     return {
       ok: false,
-      reason: `step-over ${value} mm exceeds the ${record.cuttingDiameter / 2} mm radius of the ${record.cuttingDiameter} mm cutter (#191)`,
+      reason: `step-over ${value} mm exceeds the ${record.cuttingDiameter / 2} mm radius of the ${record.cuttingDiameter} mm cutter`,
     };
   }
 

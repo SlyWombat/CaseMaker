@@ -30,9 +30,9 @@ export class StepOverTooLargeError extends Error {
     super(
       limit === toolRadius
         ? `step-over ${stepOver} mm exceeds the ${toolRadius} mm tool radius: contour-parallel ` +
-            `loops would leave an uncut spine (#191)`
+            `loops would leave an uncut spine`
         : `step-over ${stepOver} mm exceeds the ${limit} mm cutter width: contour-parallel ` +
-            `loops would leave an uncut spine (#191)`,
+            `loops would leave an uncut spine`,
     );
     this.name = 'StepOverTooLargeError';
     this.stepOver = stepOver;

@@ -771,7 +771,7 @@ export function holderGate(tool: Tool, deepestCutDepth: number | null): SweepDia
 export function sweepTimeline(tl: ManifoldToplevel, timeline: Timeline, tool: Tool, setup: Setup, opts?: SweepOpts): SweepOutcome {
   const diagnostics: SweepDiagnostic[] = [];
   if (timeline.summary.laser) return { ok: false, diagnostics: [{ severity: 'error', code: 'laser-job', message: 'this is a laser job (M321): a mill simulation refuses it rather than drawing a cut' }] };
-  if (timeline.summary.rotary) return { ok: false, diagnostics: [{ severity: 'error', code: 'rotary-job', message: 'this job moves the A axis: the EXACT 2.5D sweep does not take rotary work — a rotary job is swept by the column engine instead (/Rotary.md §4.1, §4.7)' }] };
+  if (timeline.summary.rotary) return { ok: false, diagnostics: [{ severity: 'error', code: 'rotary-job', message: 'this job moves the A axis: the EXACT 2.5D sweep does not take rotary work — a rotary job is swept by the column engine instead' }] };
   const rr = cuttingRadiusForSweep(tool);
   if (!rr.ok) return { ok: false, diagnostics: [{ severity: 'error', code: 'tool-refused', message: rr.reason }] };
   const radius = rr.radius;
@@ -779,7 +779,7 @@ export function sweepTimeline(tl: ManifoldToplevel, timeline: Timeline, tool: To
   if (timeline.checkpoints.length > MAX_CHECKPOINTS) {
     return {
       ok: false,
-      diagnostics: [{ severity: 'error', code: 'dense-3d-refused', message: `this program cuts in ${timeline.checkpoints.length} separate runs of cuts at one (segment, Z), more than the ${MAX_CHECKPOINTS} the 2.5D sweep takes on: a 3D or dense job V1 does not simulate (/Simulation.md §4.4, §9)` }],
+      diagnostics: [{ severity: 'error', code: 'dense-3d-refused', message: `this program cuts in ${timeline.checkpoints.length} separate runs of cuts at one (segment, Z), more than the ${MAX_CHECKPOINTS} the 2.5D sweep takes on: a 3D or dense job V1 does not simulate` }],
     };
   }
   const st = stockFromSetup(tl, setup);
@@ -948,7 +948,7 @@ export function sweepTimeline(tl: ManifoldToplevel, timeline: Timeline, tool: To
         {
           severity: 'error',
           code: 'sweep-budget-exceeded',
-          message: `the sweep stopped after ${elapsed} ms, at checkpoint ${done} of ${total}: this program is too slow to simulate at this size (/Simulation.md §4.4). Raise the time limit and try again`,
+          message: `the sweep stopped after ${elapsed} ms, at checkpoint ${done} of ${total}: this program is too slow to simulate at this size. Raise the time limit and try again`,
         },
       ],
     };
@@ -1059,7 +1059,7 @@ export function sweepTimeline(tl: ManifoldToplevel, timeline: Timeline, tool: To
           }
         }
         if (cp.nonConstantZ) {
-          diagnostics.push({ severity: 'info', code: 'ramp-over-removed', checkpoint: idx, message: `checkpoint ${idx} has moves that change Z; swept at its lowest Z, which removes more than the machine would (/Simulation.md §3.2)` });
+          diagnostics.push({ severity: 'info', code: 'ramp-over-removed', checkpoint: idx, message: `checkpoint ${idx} has moves that change Z; swept at its lowest Z, which removes more than the machine would` });
         }
       }
     }
@@ -1129,7 +1129,7 @@ export function sweepTimeline(tl: ManifoldToplevel, timeline: Timeline, tool: To
       diagnostics.push({
         severity: 'info',
         code: 'fixture-unchecked',
-        message: `the ${setup.workholding.kind} is not modelled as an obstacle yet (#204): the cutter's proximity to ${labels.join(', ')} is NOT checked`,
+        message: `the ${setup.workholding.kind} is not modelled as an obstacle yet: the cutter's proximity to ${labels.join(', ')} is NOT checked`,
       });
     }
   }

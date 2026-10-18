@@ -532,7 +532,7 @@ export const Z1: MillProfile = {
     xyMmPerMin: 1200,
     zMmPerMin: 600,
     accelMmPerS2: 150,
-    source: 'config read 2026-10-07 + stopwatch 2026-10-08 (#281)',
+    source: 'config read 2026-10-07 + stopwatch 2026-10-08',
   },
   // The firmware's SHIPPED defaults (`configZ1.default`, /Makera-Parity.md §11.3), not a device
   // read: both keys answer *not in config*, and the compiled-in `firm` source is silent over the
@@ -540,7 +540,7 @@ export const Z1: MillProfile = {
   axisSteps: {
     xyPerMm: 1600,
     zPerMm: 3200,
-    source: 'configZ1.default, shipped firmware default — keys absent from /sd/config.txt and unreadable over the bridge (#208 B6/B7)',
+    source: 'configZ1.default, shipped firmware default — keys absent from /sd/config.txt and unreadable over the bridge',
   },
   maxRpm: 13000,
   hasATC: false,
@@ -552,7 +552,7 @@ export const Z1: MillProfile = {
     xMin: -207.0,
     yMin: -206.0,
     zMin: -102.0,
-    source: 'config-get sd, read on the machine (#208 B2, 2026-10-06)',
+    source: 'config-get sd, read on the machine, 2026-10-06',
   },
   // `air: false` — `M7`/`M9` are answered `ok` and blow nothing on this machine; `vacuum: true` —
   // the post writes bare `M331`/`M332` and the machine obeys them (#283, bench 2026-10-12).
@@ -600,8 +600,8 @@ export const Z1: MillProfile = {
     sources: {
       envelope: 't_MachineType, Makera library database (the Z1 row) — a vendor figure, not measured',
       stepsPerDegree: 'configZ1.default, shipped default (key absent from /sd/config.txt) — unverified',
-      maxRate: 'config-get sd on the machine (#208 B9, 2026-10-07) — a config read, not a measurement',
-      acceleration: 'config-get sd on the machine (#208 B9, 2026-10-07) — a config read, not a measurement',
+      maxRate: 'config-get sd on the machine, 2026-10-07 — a config read, not a measurement',
+      acceleration: 'config-get sd on the machine, 2026-10-07 — a config read, not a measurement',
       homing: 'configZ1.default, shipped default (key absent from /sd/config.txt) — unverified',
       unwind: 'configZ1.default / Robot.cpp, corroborated by the vendor rotary files (they end on G92.4A0S0) — unverified on the device',
     },

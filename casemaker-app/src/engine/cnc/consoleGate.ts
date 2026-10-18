@@ -141,7 +141,7 @@ const CONSOLE_DENY: ReadonlyArray<{ pattern: RegExp; why: string }> = [
   { pattern: /^\s*(reset|dfu|flash|upgrade|reboot|restart)\b/i, why: 'it resets or reflashes the controller' },
   { pattern: /^\s*(upload|download)\b/i, why: 'transfers go through the verified-program upload, not the console' },
   // The realtime bytes travel on their own and are deliberately unwired (§8): the physical stop is the stop.
-  { pattern: /^\s*[!~]\s*$/, why: 'realtime hold/resume bytes are not wired (Z1-Bridge-Protocol.md §8)' },
+  { pattern: /^\s*[!~]\s*$/, why: 'realtime hold/resume bytes are not wired' },
 ];
 
 /** Why a line may not be sent, or null when it may. Pure, so a UI can ask before it connects. */
@@ -188,7 +188,7 @@ export function consolePipedProblem(line: string): string | null {
   return (
     `refusing ${JSON.stringify(line)}: a piped console sends the status poll (?) and nothing else — a line ` +
     'from a script has nobody at the machine to watch it, and streaming a program through the console is what ' +
-    'faulted the controller on 2026-10-12 (#386). Type this line at the keyboard, send it with `send … ' +
+    'faulted the controller on 2026-10-12. Type this line at the keyboard, send it with `send … ' +
     '--i-am-at-the-machine`, or upload the program and start it with `play`.'
   );
 }

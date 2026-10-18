@@ -1042,7 +1042,7 @@ export function columnSweep(timeline: Timeline, tool: Tool, setup: Setup, opts?:
         {
           severity: 'error',
           code: 'thread-flat-only',
-          message: `this program cuts ${opts?.threads?.length} milled thread(s), and a thread is simulated on a flat face only: the rotary column grid is a single-valued radius per (θ, X) column, which has no form for a thread, so nothing is claimed about this job (/Rotary.md, #445 §4)`,
+          message: `this program cuts ${opts?.threads?.length} milled thread(s), and a thread is simulated on a flat face only: the rotary column grid is a single-valued radius per (θ, X) column, which has no form for a thread, so nothing is claimed about this job`,
         },
       ],
     };
@@ -1056,7 +1056,7 @@ export function columnSweep(timeline: Timeline, tool: Tool, setup: Setup, opts?:
   if (rotary && resolved.kind !== 'flat') {
     const what =
       resolved.kind === 'v'
-        ? "a V-bit, whose cone about a turntable axis is a different body (#221's chamfer profiles)"
+        ? 'a V-bit, whose cone about a turntable axis is a different body'
         : resolved.kind === 'drill'
           ? 'a drill, whose cone point about a turntable axis is not modelled'
           : 'a thread mill, whose envelope about a turntable axis is not modelled';
@@ -1209,7 +1209,7 @@ export function columnSweep(timeline: Timeline, tool: Tool, setup: Setup, opts?:
             {
               severity: 'error',
               code: 'axis-crossing',
-              message: `line ${m.line}: the cutter tip reaches radius Z ${r.crossed.z.toFixed(3)}, deeper than the tool radius ${cutter.radius.toFixed(4)} mm below the rotary axis, at step ${m.step}: a single-valued radius column cannot represent a cut that crosses the axis (/Rotary.md §4.3, decision R8)`,
+              message: `line ${m.line}: the cutter tip reaches radius Z ${r.crossed.z.toFixed(3)}, deeper than the tool radius ${cutter.radius.toFixed(4)} mm below the rotary axis, at step ${m.step}: a single-valued radius column cannot represent a cut that crosses the axis`,
             },
           ],
         };
@@ -1224,11 +1224,11 @@ export function columnSweep(timeline: Timeline, tool: Tool, setup: Setup, opts?:
     if (deadline !== null && performance.now() > deadline) {
       stats.ms.total = performance.now() - t0;
       stats.checkpointsSwept = k + 1;
-      return { ok: false, diagnostics: [{ severity: 'error', code: 'sweep-budget-exceeded', message: `the column sweep passed its ${Math.round((opts?.budgetMs ?? 0) / 1000)} s budget after ${k + 1} of ${count} checkpoints; raise the limit or coarsen the grid (/Rotary.md §4.4)` }] };
+      return { ok: false, diagnostics: [{ severity: 'error', code: 'sweep-budget-exceeded', message: `the column sweep passed its ${Math.round((opts?.budgetMs ?? 0) / 1000)} s budget after ${k + 1} of ${count} checkpoints; raise the limit or coarsen the grid` }] };
     }
   }
   const tSweep = performance.now();
-  if (clampedMoves > 0) diagnostics.push({ severity: 'warning', code: 'axis-clamped', message: `${clampedMoves} cutting move(s) took the cutter tip past the rotary axis by less than the tool radius ${cutter.radius.toFixed(4)} mm and were clamped to Z 0 (deepest Z ${clampedWorst.toFixed(3)}): the cut did not come out as deep as the program asked and its far-side hollow is not modelled (/Rotary.md §4.3, decision R8)` });
+  if (clampedMoves > 0) diagnostics.push({ severity: 'warning', code: 'axis-clamped', message: `${clampedMoves} cutting move(s) took the cutter tip past the rotary axis by less than the tool radius ${cutter.radius.toFixed(4)} mm and were clamped to Z 0 (deepest Z ${clampedWorst.toFixed(3)}): the cut did not come out as deep as the program asked and its far-side hollow is not modelled` });
 
   // Gouges: a rapid whose cutter would cut material (§4.4). Detected, not subtracted; reported
   // with the count and the first step. Solids are a follow-up (see the file note). The check is

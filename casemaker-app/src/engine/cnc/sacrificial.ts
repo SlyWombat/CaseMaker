@@ -267,7 +267,7 @@ export function validateSacrificial(job: EngraveJob): JobFinding[] {
       severity: 'warning',
       code: 'sacrificial-default',
       message:
-        'Sacrificial dimensions are unmeasured defaults (#213); cut depths onto them cannot be trusted yet.',
+        'Sacrificial dimensions are unmeasured defaults; cut depths onto them cannot be trusted yet.',
     });
   }
 

@@ -54,7 +54,7 @@ describe('the Z1 profile', () => {
       accelMmPerS2: 150,
       // The decided sentence (#281, review of 62fa025): both halves of the evidence, and neither of
       // them claiming to be a measurement of the machine.
-      source: 'config read 2026-10-07 + stopwatch 2026-10-08 (#281)',
+      source: 'config read 2026-10-07 + stopwatch 2026-10-08',
     });
     // Z alone is slower than X/Y: the config's `gamma_max_rate` is half `alpha_max_rate`.
     expect(Z1.rapidEstimate.zMmPerMin).toBeLessThan(Z1.rapidEstimate.xyMmPerMin);
@@ -122,7 +122,7 @@ describe('the Z1 profile', () => {
       xMin: -207.0,
       yMin: -206.0,
       zMin: -102.0,
-      source: expect.stringContaining('#208 B2'),
+      source: expect.stringContaining('2026-10-06'),
     });
     expect(Z1.softEndstop.xMin).toBeLessThan(Z1.envelope.x.min);
     expect(Z1.softEndstop.zMin).toBeLessThan(Z1.envelope.z.min);
@@ -159,8 +159,8 @@ describe('the Z1 profile', () => {
     ]);
     // The rates are a config READ off the machine (B9), which is still not a measurement.
     expect(Z1.rotary?.sources.maxRate).toMatch(/config-get|config read/);
-    expect(Z1.rotary?.sources.maxRate).toContain('B9');
-    expect(Z1.rotary?.sources.acceleration).toContain('B9');
+    expect(Z1.rotary?.sources.maxRate).toContain('config read');
+    expect(Z1.rotary?.sources.acceleration).toContain('config read');
     // Steps and homing are still the shipped default, and must SAY so until R-1 measures them.
     expect(Z1.rotary?.sources.stepsPerDegree).toContain('configZ1.default');
     expect(Z1.rotary?.sources.stepsPerDegree).toMatch(/unverified/i);

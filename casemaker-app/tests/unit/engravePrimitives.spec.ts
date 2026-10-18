@@ -104,7 +104,7 @@ describe('#435 — refusals are by name, never an approximation', () => {
     expect(found?.severity).toBe('error');
     expect(found?.labelId).toBe('prm-1');
     expect(found?.message).toContain('side-opening');
-    expect(found?.message).toContain('#222');
+    expect(found?.message).toContain('3D engine');
   });
 
   it('refuses a cone and names the sloped wall and the two routes to cut it', () => {
@@ -113,8 +113,8 @@ describe('#435 — refusals are by name, never an approximation', () => {
     expect(found).toBeDefined();
     expect(found?.severity).toBe('error');
     expect(found?.message).toContain('sloped wall');
-    expect(found?.message).toContain('#221');
-    expect(found?.message).toContain('#222');
+    expect(found?.message).toContain('V-carve/chamfer');
+    expect(found?.message).toContain('3D engine');
     expect(codes(job)).not.toContain('primitive-sphere-needs-3d');
   });
 
@@ -123,7 +123,7 @@ describe('#435 — refusals are by name, never an approximation', () => {
     const found = validateJob(job).find((f) => f.code === 'primitive-sphere-needs-3d');
     expect(found).toBeDefined();
     expect(found?.severity).toBe('error');
-    expect(found?.message).toContain('dexel job (#222)');
+    expect(found?.message).toContain('a dexel job');
     expect(found?.message).toContain('refused rather than approximated');
   });
 
@@ -157,7 +157,7 @@ describe('#435 — refusals are by name, never an approximation', () => {
     expect(found).toBeDefined();
     expect(found?.severity).toBe('warning');
     expect(found?.message).toContain('bracket.stl');
-    expect(found?.message).toContain('#218');
+    expect(found?.message).toContain('profile cut-out work');
   });
 
   it('labels each shape in words for the findings to use', () => {

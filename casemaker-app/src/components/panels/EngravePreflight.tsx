@@ -16,7 +16,7 @@
  */
 
 import type { CSSProperties, JSX } from 'react';
-import type { PreflightCause, PreflightRow } from '@/engine/cnc/preflight';
+import type { PreflightCause, PreflightOwner, PreflightRow } from '@/engine/cnc/preflight';
 import type { PreflightHubReport } from '@/engine/cnc/preflight/hub';
 
 const MUTED: CSSProperties = { fontSize: 11, color: '#9aa4b0', lineHeight: 1.5, margin: '4px 0' };
@@ -32,6 +32,24 @@ const TAG: CSSProperties = {
   verticalAlign: 'middle',
 };
 const SEVERITY_COLOR: Record<PreflightRow['severity'], string> = { error: '#f0b4ad', warning: '#e0c07a', info: '#7fa6c9' };
+
+/**
+ * #505 — the owner tag is operator copy, not a symbol table. The collector's owner is an internal
+ * tag (`engraveRunGate`, `fixture`, ...); the page still names WHO answered, in words, while the
+ * row's `data-owner` keeps the machine value for tests and diagnostics. The mapping is exhaustive
+ * (a `Record<PreflightOwner, ...>`) so a new owner cannot silently fall through to a raw token.
+ */
+const OWNER_LABEL: Record<PreflightOwner, string> = {
+  jobSetup: 'job',
+  generate: 'generate',
+  fixture: 'vise',
+  sacrificial: 'sacrificial board',
+  reach: 'cutter reach',
+  verify: 'verification',
+  engraveRunGate: 'run gate',
+  stockStart: 'stock',
+  run: 'run state',
+};
 
 export interface EngravePreflightProps {
   /** The hub's aggregate — one `collect()` per scope, plus the two run-policy rows. */
@@ -58,7 +76,7 @@ function Row({ row, index, expanded }: { row: PreflightRow; index: number; expan
       <span>
         <code style={{ color }}>{row.code}</code> {row.message}{' '}
         <span style={TAG} data-testid={`engrave-preflight-owner-${index}`}>
-          {row.owner}
+          {OWNER_LABEL[row.owner]}
         </span>
         {expanded && (
           <span style={{ ...MUTED, display: 'block' }} data-testid={`engrave-preflight-cause-${index}`}>

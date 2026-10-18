@@ -65,7 +65,7 @@ export function PrinterField({ testIdPrefix, hint }: PrinterFieldProps): ReactEl
         label="Printer"
         hint={
           hint ??
-          'The project’s bed (#148) — saved with the project, so every archetype checks its parts against the same volume. Parts are checked flat AND diagonally.'
+          'The project’s bed — saved with the project, so every archetype checks its parts against the same volume. Parts are checked flat AND diagonally.'
         }
       >
         <select

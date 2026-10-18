@@ -598,7 +598,7 @@ export function validateJob(
         message:
           `${primitiveLabel(primitive)} opens along ${axis.toUpperCase()}, which is a side-opening ` +
           `undercut — not a top-face region the region CAM can cut. Set its axis to Z, or cut it ` +
-          `with the 3D engine (#222); it is refused rather than approximated.`,
+          `with the 3D engine; it is refused rather than approximated.`,
       });
       continue;
     }
@@ -610,7 +610,7 @@ export function validateJob(
         message:
           `${primitiveLabel(primitive)} has a sloped wall. The region CAM only cuts walls parallel ` +
           `to the cutter axis, so a cone would be approximated as a cylinder and is refused. The ` +
-          `V-carve/chamfer work (#221) and the 3D engine (#222) are the ways to cut it.`,
+          `V-carve/chamfer work and the 3D engine are the ways to cut it.`,
       });
       continue;
     }
@@ -620,7 +620,7 @@ export function validateJob(
         code: 'primitive-sphere-needs-3d',
         labelId: primitive.id,
         message:
-          `${primitiveLabel(primitive)} has a curved floor. A sphere is a dexel job (#222), not a ` +
+          `${primitiveLabel(primitive)} has a curved floor. A sphere is a dexel job, not a ` +
           `flat-floor region; it is refused rather than approximated as a circle pocket.`,
       });
     }
@@ -634,7 +634,7 @@ export function validateJob(
       code: 'target-object-not-cut',
       message:
         `The target object "${job.targetObject.name}" is a reference: it is shown in the viewport ` +
-        `but not cut. Cutting the stock around it is the profile cut-out work tracked in #218; ` +
+        `but not cut. Cutting the stock around it is the profile cut-out work; ` +
         `this job's other items are unaffected.`,
     });
   }
@@ -871,8 +871,8 @@ export function validateJob(
           code: 'thread-through-unavailable',
           labelId: thread.id,
           message:
-            `${who} asks to thread through the blank, which needs a sacrificial board (#213) and ` +
-            `the through-cut depth rules (#218); neither is in yet, so the thread is refused rather ` +
+            `${who} asks to thread through the blank, which needs a sacrificial board and ` +
+            `the through-cut depth rules; neither is in yet, so the thread is refused rather ` +
             `than cut into the vise.`,
         });
       } else {
@@ -956,7 +956,7 @@ export function validateJob(
           labelId: thread.id,
           message:
             `Nothing recorded for "${threadTool.name}" states its flute length, so the run-out has ` +
-            `not been shown to clear the flutes (#208 records the owned cutters' lengths).`,
+            `not been shown to clear the flutes; the owned cutters' recorded lengths would settle it.`,
         });
       }
     }
@@ -985,7 +985,7 @@ export function validateJob(
         labelId: enabledDrills[0]!.id,
         message:
           `The job drills, but nothing recorded for "${drillTool.name}" says it is centre-cutting ` +
-          `(the .nc header has no such field, #220); #208 A1 settles it for cutters that are owned.`,
+          `(the .nc header has no such field); an owned cutter's own record settles it.`,
       });
     }
     // A peck must fit inside the flute: beyond it the chips have nowhere to go. A drill bit's

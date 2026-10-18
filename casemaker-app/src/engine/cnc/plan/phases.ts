@@ -255,7 +255,7 @@ export function planRun(input: RunPlanInput): RunPlan {
       findings.push({
         code: 'plan-registration-unplanned',
         severity: 'info',
-        text: `Setup ${setup.index}: ${reg && !reg.ok ? `the registration planner refused (${reg.reason})` : 'no registration plan was made'}, so its time is the shop's re-registration estimate (${s.reregisterSeconds.key}).`,
+        text: `Setup ${setup.index}: ${reg && !reg.ok ? `the registration planner refused (${reg.reason})` : 'no registration plan was made'}, so its time is the shop's re-registration estimate.`,
       });
     }
     if (autoLevelOn) {
@@ -291,7 +291,7 @@ export function planRun(input: RunPlanInput): RunPlan {
         findings.push({ code: 'plan-cut-unestimated', severity: 'warning', text: `${p.label}: ${cut.from}, so the plan's total leaves it out.` });
       }
       if (p.hash === null) {
-        findings.push({ code: 'plan-air-run-unhashed', severity: 'info', text: `${p.label} has no program hash yet, so it counts as a program this machine has not run (Q14).` });
+        findings.push({ code: 'plan-air-run-unhashed', severity: 'info', text: `${p.label} has no program hash yet, so it counts as a program this machine has not run.` });
       }
       if (airRunFor[i]) {
         add({
@@ -333,7 +333,12 @@ export function planRun(input: RunPlanInput): RunPlan {
     findings.push({
       code: 'plan-defaults-fallback',
       severity: 'info',
-      text: `No location was read, so ${fallbacks.length === 1 ? 'one phase time is' : `${fallbacks.length} phase times are`} the build's fallbacks (${fallbacks.join(', ')}).`,
+      // #505 — the keys (`plan.homeSeconds`, `setups.remountMinutes`, ...) are how the defaults
+      // client addresses them, not words an operator should meet in a finding. The count is what
+      // the sentence needs; the key list stays available on `PlanSettings` for code.
+      text: `No location was read, so ${
+        fallbacks.length === 1 ? 'one phase time uses' : `${fallbacks.length} phase times use`
+      } the app's built-in defaults rather than this shop's settings.`,
     });
   }
   return {

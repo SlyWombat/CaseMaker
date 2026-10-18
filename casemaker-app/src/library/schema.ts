@@ -118,7 +118,7 @@ const visualAssetsSchema = z
         code: 'custom',
         path: ['license'],
         message:
-          'visualAssets.license is required when glb/topImage/sideImage is present — record the redistribution licence (see src/docs/board-assets.md)',
+          'visualAssets.license is required when glb/topImage/sideImage is present — record the redistribution licence (see the board-assets documentation)',
       });
     }
     if (!assets.sourceUrl) {

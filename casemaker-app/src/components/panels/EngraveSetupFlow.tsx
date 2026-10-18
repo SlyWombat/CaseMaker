@@ -189,7 +189,7 @@ export function EngraveSetupFlow({
             <label style={{ ...FIELD_LABEL, opacity: 0.5 }}>
               <input type="radio" disabled data-testid="engrave-setup-holding-rotary" /> Rotary chuck
             </label>
-            <p style={MUTED}>A rotary chuck is CNC-5 (#237); it is asked here but not yet offered.</p>
+            <p style={MUTED}>A rotary chuck is asked about here but not yet offered.</p>
             <label style={FIELD_LABEL}>
               <span>Sacrificial material</span>
               <select

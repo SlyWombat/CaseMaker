@@ -117,7 +117,7 @@ function drillDiameter(tool: Tool): number | null {
 export function planDrillBit(input: DrillBitInput): DrillBitResult {
   const { tool, settings: s } = input;
   if (tool.shape !== 'drill') {
-    return { ok: false, reason: `${tool.name} is a ${tool.shape} cutter, not a drill — a flat end mill plunges holes through #220's path` };
+    return { ok: false, reason: `${tool.name} is a ${tool.shape} cutter, not a drill — a flat end mill is not the cutter for a drilled hole` };
   }
   const d = drillDiameter(tool);
   if (d === null) return { ok: false, reason: `${tool.name} states no diameter` };

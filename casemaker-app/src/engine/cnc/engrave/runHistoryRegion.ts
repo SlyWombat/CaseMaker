@@ -50,7 +50,7 @@ export function extractMeasuredRuns(source: string, path?: string): RunRecord[] 
 export function renderMeasuredRuns(runs: readonly RunRecord[]): string {
   return [
     RUNS_BEGIN,
-    '// Machine-written by `scripts/run-readback.ts` (#277) from a filled run record. Do not hand-edit.',
+    '// Machine-written by `scripts/run-readback.ts` from a filled run record. Do not hand-edit.',
     `export const MEASURED_RUNS: readonly RunRecord[] = ${JSON.stringify(runs, null, 2)};`,
     RUNS_END,
   ].join('\n');

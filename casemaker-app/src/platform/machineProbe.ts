@@ -417,7 +417,7 @@ async function readFrame(
   } catch (e) {
     notes.push(
       `The machine's own coordinate frame could not be read (${reasonOf(e)}). Positions stay the ` +
-        `vendor's defaults (#279).`,
+        `vendor's defaults.`,
     );
     return null;
   }
@@ -430,7 +430,7 @@ async function readFrame(
     notes.push(
       `The machine's coordinate frame was not read completely — ${parts.join('; ')}. Nothing was ` +
         `applied: a half-read frame would be a machine of its own, so positions stay the vendor's ` +
-        `defaults (#279).`,
+        `defaults.`,
     );
     return null;
   }

@@ -252,7 +252,7 @@ describe('saying which frame is in force', () => {
     const notice = machineCalibrationNotice(Z1);
     expect(notice.code).toBe('machine-vendor-frame');
     expect(notice.severity).toBe('warning');
-    expect(notice.message).toMatch(/#279/);
+    expect(notice.message).toContain("vendor's shipped defaults");
   });
 
   it('says when the numbers came from this machine, and when', () => {

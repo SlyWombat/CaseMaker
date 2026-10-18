@@ -87,7 +87,7 @@ export function centreResolution(s: RegistrationSettings): number {
  */
 export function planReferences(input: ReferencePlanInput, s: RegistrationSettings): PlanResult {
   if (input.mount === 'bracket') {
-    return { ok: false, reason: 'on the bracket X and Y come from its datum (#427): reference features are for the vise and tape' };
+    return { ok: false, reason: 'on the bracket X and Y come from its datum: reference features are for the vise and tape' };
   }
   const keep = s.tipRadiusMm + s.cornerClearanceMm;
   const stockRect: Rect = { min: [input.stock.xMin, input.stock.yMin], max: [input.stock.xMax, input.stock.yMax] };

@@ -268,7 +268,7 @@ export function RackPanel() {
 
       <LabelledField
         label="Snap fit"
-        hint="Issue #153 — how much print relief the plate-tab ledges get. Tight is the as-designed number; go looser if the top/bottom plates were too tight to seat. Only ever loosens — the tab position does not move."
+        hint="How much print relief the plate-tab ledges get. Tight is the as-designed number; go looser if the top/bottom plates were too tight to seat. Only ever loosens — the tab position does not move."
       >
         <select
           value={rack.fit ?? 'tight'}
@@ -287,7 +287,7 @@ export function RackPanel() {
       <h3 className="panel-subhead">Printer</h3>
       <PrinterField
         testIdPrefix="rack-printer"
-        hint="The project's bed (#148) — saved with the project, so every archetype checks its parts against the same volume. Every rack part is checked against it (flat or diagonal placement); blockers appear in the banner with achievable sizes."
+        hint="The project's bed — saved with the project, so every archetype checks its parts against the same volume. Every rack part is checked against it (flat or diagonal placement); blockers appear in the banner with achievable sizes."
       />
 
       {rackFitsWhole(rack, printer) && (

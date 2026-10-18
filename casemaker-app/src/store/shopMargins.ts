@@ -191,8 +191,8 @@ export function legacyMargins(input: {
 /** The note a migrated value carries, so the section says where it came from. */
 export function migrationNote(from: LegacyMargins['from']): string {
   return from === 'record'
-    ? "moved from the machine record's depth margins (#447)"
-    : "moved from this browser's saved depth margins (#447)";
+    ? "moved from the machine record's depth margins"
+    : "moved from this browser's saved depth margins";
 }
 
 /** Per browser: this browser's margins have been moved into this location (the value is its id). */

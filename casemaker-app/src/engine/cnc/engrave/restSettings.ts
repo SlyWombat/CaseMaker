@@ -92,12 +92,12 @@ export function restSourceWords(source: RestSettingSource, flag: string): string
     case 'user':
       return `typed for this run on the command line (${flag})`;
     case 'measured':
-      return 'measured on this bench (#436)';
+      return 'measured on this bench';
     case 'chosen':
-      return 'chosen rather than measured, and stored in this location’s own defaults (#436)';
+      return 'chosen rather than measured, and stored in this location’s own defaults';
     case 'seeded':
       return (
-        'the value this location was seeded with, chosen rather than measured (#436) — the first ' +
+        'the value this location was seeded with, chosen rather than measured — the first ' +
         'two-tool cut replaces it'
       );
     case 'fallback':
@@ -107,7 +107,7 @@ export function restSourceWords(source: RestSettingSource, flag: string): string
       // happened.
       return (
         'the fallback this build carries for it, used because this location holds no value it ' +
-        'could read (#436), chosen rather than measured'
+        'could read, chosen rather than measured'
       );
   }
 }

@@ -1023,7 +1023,7 @@ describe('#204: the fixture is an obstacle the sweep refuses to cut into', () =>
     if (!viseOut.ok) throw new Error('refused');
     const reported = viseOut.value.diagnostics.find((d) => d.code === 'fixture-unchecked');
     expect(reported?.message).toContain('vise jaw 1, vise jaw 2');
-    expect(reported?.message).toContain('(#204)');
+    expect(reported?.message).toContain('NOT checked');
 
     for (const hold of [
       { kind: 'printed-nest', nest: 'badge-blank', seatClearance: 0.15 },

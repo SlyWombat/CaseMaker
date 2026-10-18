@@ -166,7 +166,7 @@ export function meshAsStock(mesh: ParsedMesh, tol: number = WELD_TOLERANCE_MM): 
       ok: false,
       reason:
         `this is 3D stock — ${shaped} face${shaped === 1 ? ' is' : 's are'} neither flat on the top or bottom nor vertical, ` +
-        'and cutting from a shaped (non-prismatic) blank is not supported yet (#222)',
+        'and cutting from a shaped (non-prismatic) blank is not supported yet',
     };
   }
 

@@ -526,14 +526,18 @@ export function SimPanel() {
         <div data-testid="sim-result">
           <h3 style={SUBHEAD}>
             Result{' '}
+            {/* #505 — the badges say what was done, not the enum behind it. "stub"/"exact"/
+                "backend" are implementation words; "bed position assumed" and "exact sweep" are
+                the same facts in operator language. The identifying test id and the explanatory
+                title are unchanged. */}
             <span data-testid="sim-placement-badge" title={STUB_TITLE} style={TAG}>
-              placement: stub
+              bed position assumed
             </span>
             {/* Which backend swept this job (#222): the exact 2.5D sweeper or the column engine.
                 `stats.engine` is REQUIRED (#405), so no fallback: the two could disagree, and a
                 V-bit trace — swept by the column engine's cone profile — must never read "exact". */}
             <span data-testid="sim-backend" title={BACKEND_TITLE} style={TAG}>
-              backend: {info.stats.engine}
+              {info.stats.engine === 'exact' ? 'exact sweep' : 'column sweep'}
             </span>
           </h3>
           <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>

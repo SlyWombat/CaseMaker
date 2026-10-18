@@ -176,7 +176,7 @@ describe('vise-seat — the seat the blank rests on (#508)', () => {
     // A 12 mm blank on the 20 mm floor: its top is 8 mm BELOW the jaw tops, and that is the truth.
     const f = seatFinding({ ...DEFAULT_VISE, seat: 'floor', stockProud: -8 });
     expect(f!.message).toContain('floor');
-    expect(f!.message).toContain('PROVISIONAL');
+    expect(f!.message).toContain('provisional');
     expect(f!.message).toContain('sits 8 mm below them');
   });
 

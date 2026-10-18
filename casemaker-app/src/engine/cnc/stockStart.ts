@@ -74,7 +74,7 @@ export function formProblem(form: string): string | null {
   if (form === 'rod' || form === 'tube' || form === 'disc') {
     return (
       `a ${form} is round stock — a job here cuts a rectangular block held in the vise, and round ` +
-      'stock needs the rotary (not characterised yet, #238), so it is not offered'
+      'stock needs the rotary (not characterised yet), so it is not offered'
     );
   }
   if (form === 'sphere') return 'sphere stock is not offered — nothing at the location holds one and nothing here cuts one';
@@ -167,7 +167,7 @@ export function stockFromShelf(item: StockItem, machine: MillProfile): StockChoi
   }
   if (item.flatness === 'domed') {
     notes.push(
-      `It is recorded as domed ${item.domeHeight ?? '?'} mm; the job's bow is not copied from the shelf — it states one only after measuring its own clamped surface (#496).`,
+      `It is recorded as domed ${item.domeHeight ?? '?'} mm; the job's bow is not copied from the shelf — it states one only after measuring its own clamped surface.`,
     );
   }
   return {

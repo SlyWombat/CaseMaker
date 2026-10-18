@@ -32,7 +32,7 @@ describe('#421 the plan view', () => {
     expect(screen.getByTestId('run-plan-phase-s1.p1.cut-last').textContent).toContain('2 min 20 s');
     expect(screen.getByTestId('run-plan-phase-home').textContent).toContain('fallback');
     expect(screen.getByTestId('run-plan-total').textContent).toContain('Total');
-    expect(screen.getByTestId('run-plan-findings').textContent).toContain('fallback');
+    expect(screen.getByTestId('run-plan-findings').textContent).toContain('built-in defaults');
     const table = screen.getByRole('table');
     expect(table.querySelector('caption')?.textContent).toContain('phase by phase');
     expect([...table.querySelectorAll('th')].every((th) => th.getAttribute('scope') === 'col')).toBe(true);

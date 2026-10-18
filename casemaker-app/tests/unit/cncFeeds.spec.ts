@@ -45,7 +45,7 @@ describe('the V1 feeds table', () => {
           // own numbers — a labelled placeholder, never a measured row.
           expect(row.provenance).toContain('OBSERVED 2026-10-17');
           expect(row.provenance).toContain('not measured');
-          expect(row.provenance).toContain('#284');
+          expect(row.provenance).toContain('coupon is what');
         } else if (row.material === 'plastic') {
           // #492's two-colour laminate: the PETG observation (#221) carried over to the generic
           // plastic material, with the PLA V row's own numbers — a labelled placeholder, never a
@@ -53,9 +53,9 @@ describe('the V1 feeds table', () => {
           expect(row.provenance).toContain('OBSERVED 2026-10-17');
           expect(row.provenance).toContain('not measured');
           expect(row.provenance).toContain('PETG observation');
-          expect(row.provenance).toContain('#284');
+          expect(row.provenance).toContain('coupon is what');
         } else {
-          expect(row.provenance).toContain('#185');
+          expect(row.provenance).toContain('bench cut');
           expect(row.provenance).toContain('185-v-groove.nc');
         }
       } else if (row.provenance.startsWith('PLACEHOLDER')) {
@@ -65,11 +65,11 @@ describe('the V1 feeds table', () => {
         // 0.8-1.6 mm row's own, with the engagement cut back, and it SAYS so. A placeholder passes
         // only by naming the issue that will measure it; without that the branch above would be a
         // way for any row to dodge the rule.
-        expect(row.provenance).toContain('#284');
+        expect(row.provenance).toContain('coupon is what');
         expect(row.provenance).toContain('nothing measured');
       } else {
         expect(row.provenance).toContain('Starting value');
-        expect(row.provenance).toContain('#209');
+        expect(row.provenance).toContain('measured coupon');
         expect(row.provenance).toContain('TopClamp.nc');
       }
     }
@@ -177,7 +177,7 @@ describe('feedsFor and the V-bit row (#405)', () => {
     expect(res.params.stepDown).toBe(1.0);
     // The provenance is the bench cut, and it says it is a STARTING value, not a coupon result.
     expect(res.entry.provenance).toContain('185-v-groove.nc');
-    expect(res.entry.provenance).toContain('#284');
+    expect(res.entry.provenance).toContain('coupon is what');
   });
 
   it('selects on the EDGE: a 0.4 mm flat end mill takes the V row for nothing', () => {
@@ -228,7 +228,7 @@ describe('feedsFor enforces step-over <= radius (#191)', () => {
     expect(tooWide.ok).toBe(false);
     if (tooWide.ok) throw new Error('expected a refusal');
     expect(tooWide.reason).toContain('0.5 mm radius');
-    expect(tooWide.reason).toContain('#191');
+    expect(tooWide.reason).toContain('refused rather than clamped');
 
     const atRadius = feedsFor([], 'softwood', flatEndMill(1.0), Z1, { stepOver: 0.5 });
     expect(atRadius.ok).toBe(true);

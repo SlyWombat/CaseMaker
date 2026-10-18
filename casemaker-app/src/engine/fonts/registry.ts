@@ -235,7 +235,7 @@ export function resolveFont(
   if (!parsed) {
     throw new Error(
       `bundled font "${key}" is not loaded — call ensureFontsLoaded() with the project's font ` +
-        `keys before resolving it (issue #180)`,
+        `keys before resolving it`,
     );
   }
   return parsed;

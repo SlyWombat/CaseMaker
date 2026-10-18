@@ -308,7 +308,7 @@ export function verifyProgram(text: string, ctx: VerifyContext): VerifyReport {
       push(
         'numbered-line',
         w.line,
-        `the word '${shown}' numbers this line, and the firmware executes NOTHING on a numbered line: it strips the number but keeps testing 'N', which matches none of its branches, and answers 'ok - ignore: [M5]' (bench 2026-10-12, #385). A numbered program runs as a stream of silently skipped lines`,
+        `the word '${shown}' numbers this line, and the firmware executes NOTHING on a numbered line: it strips the number but keeps testing 'N', which matches none of its branches, and answers 'ok - ignore: [M5]' (bench 2026-10-12). A numbered program runs as a stream of silently skipped lines`,
       );
     } else if (!PARAM_LETTERS.has(w.letter)) {
       push('not-our-dialect', w.line, `the word '${shown}' is not in the post's dialect (only G, M, T, S, F, X, Y, Z words)`);

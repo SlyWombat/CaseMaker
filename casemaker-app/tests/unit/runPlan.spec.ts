@@ -256,7 +256,7 @@ describe('#421 the machine strip', () => {
     const v = get({}, 'vacuum');
     expect(v).toMatchObject({ shown: true, available: false, defaultOn: true, on: true, overridden: false });
     expect(v.reason).toContain('every cut');
-    expect(v.note).toContain('#419');
+    expect(v.note).toContain('job flow');
     // An override cannot turn it off: the runner sends M331 regardless, so the plan must not claim otherwise.
     expect(get({ overrides: { vacuum: false } }, 'vacuum')).toMatchObject({ on: true, overridden: false });
     const plan = planRun(input({ overrides: { vacuum: false } }));
@@ -267,7 +267,7 @@ describe('#421 the machine strip', () => {
     expect(get({}, 'air-run')).toMatchObject({ defaultOn: true, on: true });
     const repeat = get({ finishedHashes: ['aaaa1111'] }, 'air-run');
     expect(repeat).toMatchObject({ defaultOn: false, on: false });
-    expect(repeat.reason).toContain('same hash');
+    expect(repeat.reason).toContain('unchanged');
     expect(get({ finishedHashes: ['aaaa1111'], overrides: { airRun: true } }, 'air-run')).toMatchObject({ on: true, overridden: true });
     // Per program in the plan: only the new one gets an air run, unless switched for the whole job.
     const two: RunPlanInput['programs'] = [
@@ -287,7 +287,7 @@ describe('#421 the machine strip', () => {
     expect(Z1_CAPABILITIES.autoLevel.proven).toBe(false);
     const a = get({ overrides: { autoLevel: true } }, 'auto-level');
     expect(a).toMatchObject({ shown: true, available: false, on: false, overridden: false });
-    expect(a.reason).toContain('#176');
+    expect(a.reason).toContain('Off until auto-level is proven');
     expect(a.reason).toContain('would have it on');
     expect(planRun(input({ overrides: { autoLevel: true } })).phases.find((p) => p.kind === 'registration')!.parts).toHaveLength(1);
   });
@@ -311,7 +311,7 @@ describe('#421 the machine strip', () => {
   it('light (Q18): an unproven capability is modelled but not shown; proven, it is on during a run', () => {
     const l = get({ overrides: { light: true } }, 'light');
     expect(l).toMatchObject({ shown: false, available: false, on: false });
-    expect(l.reason).toContain('#422');
+    expect(l.reason).toContain('bench check');
     const proven = { ...Z1_CAPABILITIES, light: { ...Z1_CAPABILITIES.light, proven: true } };
     expect(get({ capabilities: proven }, 'light')).toMatchObject({ shown: true, available: true, defaultOn: true });
   });

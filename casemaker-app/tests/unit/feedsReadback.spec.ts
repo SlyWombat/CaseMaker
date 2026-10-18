@@ -96,7 +96,7 @@ describe('measurementFromRecord (#248 item 3)', () => {
     const res = measurementFromRecord(record({ parameter: 'depth', programs: [program({ values: [0.6, 0.8] })] }));
     expect(res.ok).toBe(false);
     if (res.ok) throw new Error('expected a refusal');
-    expect(res.reason).toContain('§7.2');
+    expect(res.reason).toContain('not a feeds-table field');
   });
 
   it('requires a cut date — a measured row must carry its date', () => {
@@ -137,7 +137,7 @@ describe('measurementFromRecord (#248 item 3)', () => {
     const past = measurementFromRecord(record({ parameter: 'stepOver', programs: [program({ values: [0.7] })] }));
     expect(past.ok).toBe(false);
     if (past.ok) throw new Error('expected a refusal');
-    expect(past.reason).toContain('#191');
+    expect(past.reason).toContain('0.5 mm radius');
   });
 
   it('refuses a multi-value program — a feeds row takes one value', () => {

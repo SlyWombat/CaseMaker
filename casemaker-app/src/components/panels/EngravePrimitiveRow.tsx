@@ -275,7 +275,7 @@ export function EngravePrimitiveRow({
           : primitive.kind === 'cone'
             ? 'A cone has a sloped wall; the region CAM cannot cut it and Generate refuses it by name.'
             : primitive.kind === 'sphere'
-              ? 'A sphere is a dexel job (#222); the region CAM cannot cut it and Generate refuses it by name.'
+              ? 'A sphere is a dexel job; the region CAM cannot cut it and Generate refuses it by name.'
               : 'A side-opening primitive is an undercut; the region CAM cannot cut it and Generate refuses it by name.'}
       </p>
 

@@ -435,7 +435,7 @@ describe('an STL/3MF used as the stock (#418, §5.1 Load)', () => {
     ];
     const r = meshAsStock(meshOf(tet));
     expect(r.ok).toBe(false);
-    if (!r.ok) expect(r.reason).toMatch(/3D stock .*\(#222\)/);
+    if (!r.ok) expect(r.reason).toMatch(/3D stock .*not supported yet/);
   });
 
   it('a prism whose outline is not a rectangle is refused with how much of its box it covers', () => {

@@ -337,7 +337,7 @@ export function StartStockStep({
           </div>
           <p style={MUTED}>
             Rod, tube and disc are not offered: a job here cuts a rectangular block held in the vise, and round stock
-            needs the rotary (#238). Sphere stock is not offered at all.
+            needs the rotary. Sphere stock is not offered at all.
           </p>
           <label style={{ ...MUTED, display: 'flex', gap: 4, alignItems: 'center' }}>
             <input
@@ -366,7 +366,7 @@ export function StartStockStep({
           />
           <p style={MUTED}>
             A closed, prismatic, rectangular mesh is cut as a block of its size. A PrusaSlicer project with negative
-            volumes is offered as the stock and the design in one step. A shaped (3D) blank is refused until #222.
+            volumes is offered as the stock and the design in one step. A shaped (3D) blank is refused until the 3D engine lands.
           </p>
           {reading && (
             <p style={MUTED} data-testid="start-wizard-load-reading">

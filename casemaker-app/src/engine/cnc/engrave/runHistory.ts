@@ -17,7 +17,7 @@ import { runSheetFileName } from '@/engine/cnc/engrave/runSheet';
 import { isTimedRun, type RunRecord } from '@/engine/cnc/engrave/runRecord';
 
 // <runs-measured>
-// Machine-written by `scripts/run-readback.ts` (#277) from a filled run record. Do not hand-edit.
+// Machine-written by `scripts/run-readback.ts` from a filled run record. Do not hand-edit.
 export const MEASURED_RUNS: readonly RunRecord[] = [];
 // </runs-measured>
 

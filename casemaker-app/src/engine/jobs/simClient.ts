@@ -141,7 +141,7 @@ export async function loadSim(gcodeText: string, setup: Setup, tool: Tool, machi
             source: 'sweep',
             severity: 'error',
             code: 'sweep-budget-exceeded',
-            message: `the simulation was stopped after ${Math.round(budgetMs / 1000)} s: this program is too slow to simulate at this size (/Simulation.md §4.4). Try again with a longer limit`,
+            message: `the simulation was stopped after ${Math.round(budgetMs / 1000)} s: this program is too slow to simulate at this size. Try again with a longer limit`,
           },
         ],
       });

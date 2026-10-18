@@ -238,7 +238,7 @@ describe('vBitRestRefusal (#486)', () => {
   it('names the V-carve as the job itself instead of measuring a V-bit as a rest cutter', () => {
     const job = jobWith('big');
     expect(vBitRestRefusal(job, vbit())).toBe(
-      'a V-bit is not a rest cutter here — on a region job it is the V-carve cutter itself, not a second program (#221)',
+      'a V-bit is not a rest cutter here — on a region job it is the V-carve cutter itself, not a second program',
     );
     // The same cutter on a job with nothing left to rest-cut is not a refusal: a trace-only job
     // takes a V-bit as its ordinary cutter, and the route must not refuse it.

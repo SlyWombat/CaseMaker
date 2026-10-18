@@ -403,7 +403,7 @@ function BadgeEditor({ badge }: { badge: BadgeParams }) {
             </span>
           </LabelledField>
           <p style={HINT} data-testid="badge-print-source">
-            Provisional — the print spec’s stated default (#166), not a reading of your slicer.
+            Provisional — the print spec’s stated default, not a reading of your slicer.
           </p>
         </>
       ) : (

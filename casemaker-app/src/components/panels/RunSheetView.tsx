@@ -24,9 +24,13 @@ import './runSheet.css';
  * assumption, so the marker is rendered from the data, never left to prose.
  */
 
-/** The visible note for a step whose issue will confirm it on a real machine. */
-function unverifiedNote(issue: string): string {
-  return `Not yet confirmed on the machine (${issue}).`;
+/**
+ * #505 — the visible note says the operator's fact. The tracker reference that will confirm the
+ * step on a real machine stays in the data and on the tag's `title`, not in the sentence: a
+ * printed sheet is read at the bench, where an issue number is bookkeeping for someone else.
+ */
+function unverifiedNote(): string {
+  return 'Not yet confirmed on the machine.';
 }
 
 function StepBody({ step }: { step: RunSheetStep }): JSX.Element {
@@ -42,7 +46,9 @@ function StepBody({ step }: { step: RunSheetStep }): JSX.Element {
         </span>
       )}
       {step.unverified !== undefined && (
-        <em className="run-sheet-unverified">{unverifiedNote(step.unverified)}</em>
+        <em className="run-sheet-unverified" title={`Bench issue ${step.unverified}`}>
+          {unverifiedNote()}
+        </em>
       )}
     </>
   );

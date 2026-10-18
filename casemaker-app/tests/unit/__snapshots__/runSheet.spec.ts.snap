@@ -96,7 +96,7 @@ exports[`runSheet (#207) > snapshots the whole RunSheet for a job with a depth b
   },
   "header": {
     "estimatedTime": "1 min 35 s",
-    "estimatedTimeNote": "cutting + rapids through the trapezoid, timed on a rapid model of 1200 mm/min XY / 600 mm/min Z at 150 mm/s² (config read 2026-10-07 + stopwatch 2026-10-08 (#281)) — a planning estimate, not a measured cycle time.",
+    "estimatedTimeNote": "cutting + rapids through the trapezoid, timed on a rapid model of 1200 mm/min XY / 600 mm/min Z at 150 mm/s² (config read 2026-10-07 + stopwatch 2026-10-08) — a planning estimate, not a measured cycle time.",
     "fileHash": "a377421c",
     "fileName": "Untitled-engrave-job.nc",
     "generatedOn": "2026-10-04",
@@ -201,10 +201,10 @@ exports[`runSheet (#207) > snapshots the whole RunSheet for a job with a depth b
           "text": "X0 Y0 Z0 is the top-front-left corner of the blank. That leaves the work origin within ±0.02 mm in X and Y and ±0.02° in rotation. Move there and check by eye before going on. How well YOU set it is not modelled: the file places the blank at this corner and judges the jaws against it, so an origin that is out by a little — or a blank sitting differently from what was measured — shifts the whole job relative to both without the app knowing. The only X/Y slack for that is this job's edge margin, 1 mm, which is the gap the content keeps from a stock edge rather than a locating tolerance: a cut standing at that margin has used all of it.",
         },
         {
-          "text": "Rotation is measured, and a static .nc cannot compensate it (Smoothieware has no variables, §7.3 / #187 item 1): apply it in Studio's dialogs, or re-post with the rotation baked into the geometry",
+          "text": "Rotation is measured, and a static .nc cannot compensate it (Smoothieware has no variables): apply it in Studio's dialogs, or re-post with the rotation baked into the geometry",
         },
         {
-          "text": "Z is always probed on the engraved face (§7.2): no fixture can supply it",
+          "text": "Z is always probed on the engraved face: no fixture can supply it",
         },
         {
           "record": "surface Z at each point (mm), and how each was taken (probe / touch-off)",
@@ -284,7 +284,7 @@ exports[`runSheet (#207) > snapshots the whole RunSheet for a job with a depth b
       "steps": [
         {
           "bold": true,
-          "text": "Vise dimensions are the shipped defaults, measured once on the reference unit (#208); they are not a measurement of this machine's own vise.",
+          "text": "Vise dimensions are the shipped defaults, measured once on the reference unit; they are not a measurement of this machine's own vise.",
         },
         {
           "text": "Checked: the tool against the stock and the modelled fixture (Vise fixed jaw (left), Vise moving jaw (right)).",
@@ -416,7 +416,7 @@ exports[`runSheet (#207) > snapshots the whole RunSheet for the default job 1`] 
   },
   "header": {
     "estimatedTime": "1 min 35 s",
-    "estimatedTimeNote": "cutting + rapids through the trapezoid, timed on a rapid model of 1200 mm/min XY / 600 mm/min Z at 150 mm/s² (config read 2026-10-07 + stopwatch 2026-10-08 (#281)) — a planning estimate, not a measured cycle time.",
+    "estimatedTimeNote": "cutting + rapids through the trapezoid, timed on a rapid model of 1200 mm/min XY / 600 mm/min Z at 150 mm/s² (config read 2026-10-07 + stopwatch 2026-10-08) — a planning estimate, not a measured cycle time.",
     "fileHash": "a377421c",
     "fileName": "Untitled-engrave-job.nc",
     "generatedOn": "2026-10-04",
@@ -513,10 +513,10 @@ exports[`runSheet (#207) > snapshots the whole RunSheet for the default job 1`] 
           "text": "X0 Y0 Z0 is the top-front-left corner of the blank. That leaves the work origin within ±0.02 mm in X and Y and ±0.02° in rotation. Move there and check by eye before going on. How well YOU set it is not modelled: the file places the blank at this corner and judges the jaws against it, so an origin that is out by a little — or a blank sitting differently from what was measured — shifts the whole job relative to both without the app knowing. The only X/Y slack for that is this job's edge margin, 1 mm, which is the gap the content keeps from a stock edge rather than a locating tolerance: a cut standing at that margin has used all of it.",
         },
         {
-          "text": "Rotation is measured, and a static .nc cannot compensate it (Smoothieware has no variables, §7.3 / #187 item 1): apply it in Studio's dialogs, or re-post with the rotation baked into the geometry",
+          "text": "Rotation is measured, and a static .nc cannot compensate it (Smoothieware has no variables): apply it in Studio's dialogs, or re-post with the rotation baked into the geometry",
         },
         {
-          "text": "Z is always probed on the engraved face (§7.2): no fixture can supply it",
+          "text": "Z is always probed on the engraved face: no fixture can supply it",
         },
         {
           "record": "surface Z at each point (mm), and how each was taken (probe / touch-off)",
@@ -596,7 +596,7 @@ exports[`runSheet (#207) > snapshots the whole RunSheet for the default job 1`] 
       "steps": [
         {
           "bold": true,
-          "text": "Vise dimensions are the shipped defaults, measured once on the reference unit (#208); they are not a measurement of this machine's own vise.",
+          "text": "Vise dimensions are the shipped defaults, measured once on the reference unit; they are not a measurement of this machine's own vise.",
         },
         {
           "text": "Checked: the tool against the stock and the modelled fixture (Vise fixed jaw (left), Vise moving jaw (right)).",

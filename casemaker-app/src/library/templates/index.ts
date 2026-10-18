@@ -152,7 +152,7 @@ const codeTemplates: OrderedTemplate[] = [
     id: 'protective-case',
     name: 'Protective case (waterproof, hinged, latched)',
     description:
-      'Pelican-style protective enclosure with TPU gasket, piano-segmented hinge, two spring-cam latches, rugged corners, vertical ribs, and feet. Replace the empty interior with your host PCB after creating the project. (#106)',
+      'Pelican-style protective enclosure with TPU gasket, piano-segmented hinge, two spring-cam latches, rugged corners, vertical ribs, and feet. Replace the empty interior with your host PCB after creating the project.',
     estPrintMinutes: 480,
     order: 150,
     build: protectiveCase,

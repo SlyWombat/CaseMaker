@@ -17,7 +17,7 @@
     "source": "seeded",
     "setAt": null,
     "note": null,
-    "provenance": "Starting value. rpm/feed/plunge are what Makera Studio emits for the Z1 (TopClamp.nc: S12000, F500, F200); step-down is a conservative guess for a 150 W spindle. Replace from #209."
+    "provenance": "Starting value. rpm/feed/plunge are what Makera Studio emits for the Z1 (TopClamp.nc: S12000, F500, F200); step-down is a conservative guess for a 150 W spindle. Replace it with a measured coupon."
   },
   {
     "id": "feed-softwood-flat-1.6-3.2",
@@ -37,7 +37,7 @@
     "source": "seeded",
     "setAt": null,
     "note": null,
-    "provenance": "Starting value. rpm/feed/plunge are what Makera Studio emits for the Z1 (TopClamp.nc: S12000, F500, F200); step-down is a conservative guess for a 150 W spindle. Replace from #209."
+    "provenance": "Starting value. rpm/feed/plunge are what Makera Studio emits for the Z1 (TopClamp.nc: S12000, F500, F200); step-down is a conservative guess for a 150 W spindle. Replace it with a measured coupon."
   },
   {
     "id": "feed-hardwood-flat-0.8-1.6",
@@ -57,7 +57,7 @@
     "source": "seeded",
     "setAt": null,
     "note": null,
-    "provenance": "Starting value. rpm/feed/plunge are what Makera Studio emits for the Z1 (TopClamp.nc: S12000, F500, F200); step-down is a conservative guess for a 150 W spindle. Replace from #209."
+    "provenance": "Starting value. rpm/feed/plunge are what Makera Studio emits for the Z1 (TopClamp.nc: S12000, F500, F200); step-down is a conservative guess for a 150 W spindle. Replace it with a measured coupon."
   },
   {
     "id": "feed-hardwood-flat-1.6-3.2",
@@ -77,7 +77,7 @@
     "source": "seeded",
     "setAt": null,
     "note": null,
-    "provenance": "Starting value. rpm/feed/plunge are what Makera Studio emits for the Z1 (TopClamp.nc: S12000, F500, F200); step-down is a conservative guess for a 150 W spindle. Replace from #209."
+    "provenance": "Starting value. rpm/feed/plunge are what Makera Studio emits for the Z1 (TopClamp.nc: S12000, F500, F200); step-down is a conservative guess for a 150 W spindle. Replace it with a measured coupon."
   },
   {
     "id": "feed-mdf-flat-0.8-1.6",
@@ -97,7 +97,7 @@
     "source": "seeded",
     "setAt": null,
     "note": null,
-    "provenance": "Starting value. rpm/feed/plunge are what Makera Studio emits for the Z1 (TopClamp.nc: S12000, F500, F200); step-down is a conservative guess for a 150 W spindle. Replace from #209."
+    "provenance": "Starting value. rpm/feed/plunge are what Makera Studio emits for the Z1 (TopClamp.nc: S12000, F500, F200); step-down is a conservative guess for a 150 W spindle. Replace it with a measured coupon."
   },
   {
     "id": "feed-mdf-flat-1.6-3.2",
@@ -117,7 +117,7 @@
     "source": "seeded",
     "setAt": null,
     "note": null,
-    "provenance": "Starting value. rpm/feed/plunge are what Makera Studio emits for the Z1 (TopClamp.nc: S12000, F500, F200); step-down is a conservative guess for a 150 W spindle. Replace from #209."
+    "provenance": "Starting value. rpm/feed/plunge are what Makera Studio emits for the Z1 (TopClamp.nc: S12000, F500, F200); step-down is a conservative guess for a 150 W spindle. Replace it with a measured coupon."
   },
   {
     "id": "feed-pla-flat-0.8-1.6",
@@ -137,7 +137,7 @@
     "source": "seeded",
     "setAt": null,
     "note": null,
-    "provenance": "Starting value. rpm/feed/plunge are what Makera Studio emits for the Z1 (TopClamp.nc: S12000, F500, F200); step-down is a conservative guess for a 150 W spindle. Replace from #209."
+    "provenance": "Starting value. rpm/feed/plunge are what Makera Studio emits for the Z1 (TopClamp.nc: S12000, F500, F200); step-down is a conservative guess for a 150 W spindle. Replace it with a measured coupon."
   },
   {
     "id": "feed-pla-flat-1.6-3.2",
@@ -157,7 +157,7 @@
     "source": "seeded",
     "setAt": null,
     "note": null,
-    "provenance": "Starting value. rpm/feed/plunge are what Makera Studio emits for the Z1 (TopClamp.nc: S12000, F500, F200); step-down is a conservative guess for a 150 W spindle. Replace from #209."
+    "provenance": "Starting value. rpm/feed/plunge are what Makera Studio emits for the Z1 (TopClamp.nc: S12000, F500, F200); step-down is a conservative guess for a 150 W spindle. Replace it with a measured coupon."
   },
   {
     "id": "feed-pla-flat-0.5-0.8",
@@ -176,8 +176,8 @@
     },
     "source": "seeded",
     "setAt": null,
-    "note": "The FINEST flat row (#410), for the 0.6 mm corn cutter; appended so a 0.8 mm cutter still takes the 0.8-1.6 mm row.",
-    "provenance": "PLACEHOLDER, nothing measured: the 0.8-1.6 mm row's own starting values (S12000, F500, F200 — the Z1's emitted defaults) with the step-down and step-over cut back for a 0.6 mm cutter, which is the least stiff bit the bench owns. No vendor row for this diameter. #284 measures it."
+    "note": "The FINEST flat row, for the 0.6 mm corn cutter; appended so a 0.8 mm cutter still takes the 0.8-1.6 mm row.",
+    "provenance": "PLACEHOLDER, nothing measured: the 0.8-1.6 mm row's own starting values (S12000, F500, F200 — the Z1's emitted defaults) with the step-down and step-over cut back for a 0.6 mm cutter, which is the least stiff bit the bench owns. No vendor row for this diameter. A coupon is what measures it."
   },
   {
     "id": "feed-pla-v-0.3-0.5",
@@ -197,7 +197,7 @@
     "source": "seeded",
     "setAt": null,
     "note": null,
-    "provenance": "From the 2026-10-15 bench cut (#185, `docs/bench/185-v-groove.nc`): the hand file's own numbers — S12000, F500 along, F200 plunge, one pass to depth — cut a clean V groove in PLA (0.836 mm opening at 1.0 mm deep, the 30° × 0.3 mm bit). Starting values, not a coupon measurement: #284 is what measures this row."
+    "provenance": "From the 2026-10-15 bench cut (`docs/bench/185-v-groove.nc`): the hand file's own numbers — S12000, F500 along, F200 plunge, one pass to depth — cut a clean V groove in PLA (0.836 mm opening at 1.0 mm deep, the 30° × 0.3 mm bit). Starting values, not a coupon measurement: a coupon is what measures this row."
   },
   {
     "id": "feed-petg-v-0.3-0.5",
@@ -217,7 +217,7 @@
     "source": "seeded",
     "setAt": null,
     "note": null,
-    "provenance": "OBSERVED 2026-10-17, not measured: the 30° × 0.3 mm V-bit ran PETG at S12000, F500 along, F200 plunge for 856 s without melting. The numbers are the PLA V row's own starting values; no coupon measured PETG, and this row is a chosen placeholder for the two-colour blank. #284 is what settles it."
+    "provenance": "OBSERVED 2026-10-17, not measured: the 30° × 0.3 mm V-bit ran PETG at S12000, F500 along, F200 plunge for 856 s without melting. The numbers are the PLA V row's own starting values; no coupon measured PETG, and this row is a chosen placeholder for the two-colour blank. A coupon is what settles it."
   },
   {
     "id": "feed-plastic-v-0.3-0.5",
@@ -236,7 +236,7 @@
     },
     "source": "seeded",
     "setAt": null,
-    "note": "The purchased two-colour laminate's V row (#492), chosen from the PETG observation of 2026-10-17 and unmeasured on laminate; the PLA V row stays for PLA.",
-    "provenance": "OBSERVED 2026-10-17, not measured: chosen from the PETG observation of 2026-10-17, unmeasured on laminate — the 30° × 0.3 mm V-bit ran S12000, F500 along, F200 plunge for 856 s without melting. The numbers are the PLA V row's own starting values; no coupon measured plastic, and this row is a chosen placeholder for the two-colour laminate. #284 is what settles it."
+    "note": "The purchased two-colour laminate's V row, chosen from the PETG observation of 2026-10-17 and unmeasured on laminate; the PLA V row stays for PLA.",
+    "provenance": "OBSERVED 2026-10-17, not measured: chosen from the PETG observation of 2026-10-17, unmeasured on laminate — the 30° × 0.3 mm V-bit ran S12000, F500 along, F200 plunge for 856 s without melting. The numbers are the PLA V row's own starting values; no coupon measured plastic, and this row is a chosen placeholder for the two-colour laminate. A coupon is what settles it."
   }
 ]

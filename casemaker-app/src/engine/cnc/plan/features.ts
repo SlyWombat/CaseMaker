@@ -134,7 +134,7 @@ export function machineFeatures(input: FeatureInput): FeatureSwitch[] {
       available: false,
       defaultOn: true,
       reason: 'On for every cut — the maintainer’s default: M331 before play, M332 after.',
-      note: 'Locked on: the run switches the vacuum on before every program today, and this switch takes effect only once the job flow (#419) passes it to the run.',
+      note: 'Locked on: the run switches the vacuum on before every program today, and this switch takes effect only once the job flow passes it to the run.',
       commands: 'M331 / M332',
     },
     o.vacuum,
@@ -147,10 +147,10 @@ export function machineFeatures(input: FeatureInput): FeatureSwitch[] {
     input.programs.length === 0
       ? 'No program to air-run.'
       : !anyNew
-        ? 'Off: this machine has already run every program in this job, unchanged (Q14 — same hash).'
+        ? 'Off: this machine has already run every program in this job, unchanged.'
         : freshLabels.length === input.programs.length
-          ? `On: this machine has not run ${input.programs.length === 1 ? 'this program' : 'these programs'} before (Q14 — no finished run with ${input.programs.length === 1 ? 'its hash' : 'their hashes'}).`
-          : `On for the programs this machine has not run before (${freshLabels.join(', ')}); off for the repeats (Q14 — by hash).`;
+          ? `On: this machine has not run ${input.programs.length === 1 ? 'this program' : 'these programs'} before — no finished run matches ${input.programs.length === 1 ? 'its hash' : 'their hashes'}.`
+          : `On for the programs this machine has not run before (${freshLabels.join(', ')}); off for the repeats, matched by hash.`;
   const airRun = sw(
     {
       feature: 'air-run',
@@ -190,7 +190,7 @@ export function machineFeatures(input: FeatureInput): FeatureSwitch[] {
           shown: true,
           available: false,
           defaultOn: false,
-          reason: `Off until ${caps.autoLevel.gate} proves G32 R1 / M370 on this machine (Q13). Once it does, this job would have it ${rule.on ? 'on' : 'off'}: ${rule.why}.`,
+          reason: `Off until auto-level is proven on this machine with G32 R1 / M370. Once it is, this job would have it ${rule.on ? 'on' : 'off'}: ${rule.why}.`,
           note: null,
           commands: caps.autoLevel.commands,
         },
@@ -205,7 +205,7 @@ export function machineFeatures(input: FeatureInput): FeatureSwitch[] {
           shown: true,
           available: true,
           defaultOn: true,
-          reason: 'On while the job runs, so the camera and the operator can see (Q18).',
+          reason: 'On while the job runs, so the camera and the operator can see.',
           note: null,
           commands: caps.light.commands,
         }
@@ -215,7 +215,7 @@ export function machineFeatures(input: FeatureInput): FeatureSwitch[] {
           shown: false,
           available: false,
           defaultOn: false,
-          reason: `Not offered until the ${caps.light.gate} bench check sees M821 / M822 work from our console (Q18); then it is on while a job runs.`,
+          reason: `Not offered until a bench check sees M821 / M822 work from our console; then it is on while a job runs.`,
           note: null,
           commands: caps.light.commands,
         },

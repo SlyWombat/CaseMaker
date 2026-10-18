@@ -146,12 +146,12 @@ export function postZ1(
   // axis, so the two Zs are different quantities. There is no rotary posting until R-3.
   if (ir.frame === 'rotary') {
     errors.push(
-      'the toolpath IR is a ROTARY-frame IR (work Z = radius from the axis); this post writes the flat 3-axis dialect only (#237 R-0; R-3 adds rotary posting)',
+      'the toolpath IR is a ROTARY-frame IR (work Z = radius from the axis); this post writes the flat 3-axis dialect only, and rotary posting is not implemented yet',
     );
   }
   if (ctx.zDatum === 'rotary-axis') {
     errors.push(
-      "zDatum 'rotary-axis' is not postable: this post measures every Z from the probed top face (#237 R-0; R-3 adds rotary posting)",
+      "zDatum 'rotary-axis' is not postable: this post measures every Z from the probed top face, and rotary posting is not implemented yet",
     );
   }
 
@@ -240,7 +240,7 @@ export function postZ1(
     ...(ir.tool.shape === 'flat'
       ? []
       : [
-          `; type=${sanitizeMkrValue(ir.tool.typeText)} is UNVERIFIED against Makera Studio (#268):` +
+          `; type=${sanitizeMkrValue(ir.tool.typeText)} is UNVERIFIED against Makera Studio:` +
             ` a non-flat cutter's own word for this field, not one read out of a Studio sample`,
         ]),
     // #332: our own record, right after the one it qualifies, naming the cutter by OUR key — the

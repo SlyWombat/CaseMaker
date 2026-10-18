@@ -272,7 +272,7 @@ describe('planMaterialScan — the shipped default blank (#391)', () => {
     const p = plan();
     expect(p.notes[0]).toContain('The tip is 2 mm across, measured');
     expect(p.notes[0]).toContain('hollow cylinder, no ball');
-    expect(p.notes[0]).toContain('#208 A8');
+    expect(p.notes[0]).toContain('measured on 2026-10-15');
     expect(p.notes[0]).toContain('0.312 mm the reading stands past the edge');
     expect(p.notes[0]).toContain('a smaller tip is a sharper scan');
     // The measurement's provenance is the second thing it says, because it is the second input.

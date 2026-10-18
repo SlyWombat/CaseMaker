@@ -355,7 +355,7 @@ describe('the machine still has the last word', () => {
     const res = feedsFor(feedCatalogueRows(), 'hardwood', makeraCutter(), Z1, { stepOver: 2.0 });
     expect(res.ok).toBe(false);
     if (res.ok) throw new Error('expected a refusal');
-    expect(res.reason).toContain('#191');
+    expect(res.reason).toContain('refused rather than clamped');
   });
 });
 

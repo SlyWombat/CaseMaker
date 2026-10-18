@@ -459,7 +459,7 @@ export function MachinesScope() {
         <div className="panel-subhead">What a job gets from this</div>
         <p className="hint">
           The envelope gate, the tool-change positions and the probe feeds in every <code>.nc</code>{' '}
-          this app writes for it — the numbers the file is verified against (#184, #208).
+          this app writes for it — the numbers the file is verified against.
         </p>
 
         {/* #416 — no "Bench power" paragraph for everyone: a machine with no switch shows nothing

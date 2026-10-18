@@ -89,7 +89,7 @@ describe('#434 the pecks', () => {
 
 describe('#434 refusals', () => {
   it('a flat end mill, no diameter, a strange point angle, no holes, a hole off the stock', () => {
-    expect(planDrillBit(input({ tool: flatEndMill(2) }))).toMatchObject({ ok: false, reason: expect.stringContaining('#220') });
+    expect(planDrillBit(input({ tool: flatEndMill(2) }))).toMatchObject({ ok: false, reason: expect.stringContaining('flat end mill is not the cutter for a drilled hole') });
     expect(planDrillBit(input({ tool: { ...DRILL, tipDiameter: null, diameter: null } }))).toMatchObject({ ok: false, reason: expect.stringContaining('no diameter') });
     expect(planDrillBit(input({ tool: { ...DRILL, angle: 30 } }))).toMatchObject({ ok: false, reason: expect.stringContaining('not a drill') });
     expect(planDrillBit(input({ holes: [] }))).toMatchObject({ ok: false });

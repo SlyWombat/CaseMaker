@@ -515,12 +515,12 @@ export function generateEngrave(
       throw new Error(
         `generateEngrave: "${label.name ?? label.text}" has no groove at the colour plane (a point ` +
           `tip with no depth below the film) — there is no region for a V-bit to pocket; use a ` +
-          `trace or cut deeper (#221)`,
+          `trace or cut deeper`,
       );
     }
     const pitch = vCarvePassPitch(planeRadius, cone, params.stepOver / tipWidth);
     if (!(pitch > 0)) {
-      throw new Error(`generateEngrave: the V-carve step-over resolved to ${pitch} mm; it must be > 0 (#221)`);
+      throw new Error(`generateEngrave: the V-carve step-over resolved to ${pitch} mm; it must be > 0`);
     }
     // The tip radius is also the bound `pocketLoops` is given: nothing wider may be asked of a
     // cut whose floor only the tip disc reaches.
