@@ -618,7 +618,12 @@ export function EngravePreview() {
             whiteSpace: 'nowrap',
           }}
         >
-          vise: {sourceWords(vise.source)} · bar height {VISE_BAR_HEIGHT} mm PROVISIONAL
+          {/* Two lines on purpose (#508/#359): one line carrying both facts is 349 px wide and the
+              laptop canvas is 344, so `clampLabelBox`'s too-wide case would centre it and clip both
+              edges. The source and the PROVISIONAL note each fit the narrow canvas alone. */}
+          vise: {sourceWords(vise.source)}
+          <br />
+          bar height {VISE_BAR_HEIGHT} mm PROVISIONAL
         </ProjectedLabel>
       )}
 

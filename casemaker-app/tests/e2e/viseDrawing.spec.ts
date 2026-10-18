@@ -57,6 +57,17 @@ test('the drawn vise does not grow with the stock — looked at on a 50 mm cube 
   const source = page.getByTestId('engrave-jaw-source');
   await expect(source).toContainText('bar height 20 mm PROVISIONAL');
 
+  // #508 — the seat is an operator's choice on the vise row, and a default vise re-seats when it
+  // changes: 12 − 3.1 on the ledge, 12 − 20 on the floor (negative is the truthful answer).
+  const seat = page.getByTestId('engrave-vise-seat');
+  const proud = page.getByTestId('engrave-vise-stockProud');
+  await expect(seat).toHaveValue('ledge');
+  await expect(proud).toHaveValue('8.9');
+  await seat.selectOption('floor');
+  await expect(proud).toHaveValue('-8');
+  await seat.selectOption('ledge');
+  await expect(proud).toHaveValue('8.9');
+
   await page.getByTestId('viewport-fit').click();
   await page.waitForTimeout(700);
   await page.screenshot({ path: shot(testInfo, '508-vise-12mm.png') });
