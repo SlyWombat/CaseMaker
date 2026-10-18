@@ -1,0 +1,126 @@
+{
+  "version": 3,
+  "ok": true,
+  "stage": "done",
+  "gate": null,
+  "inputs": [
+    {
+      "path": "<job>",
+      "sha256": "ba950049001b2592a63a90b7924ed41d7ae1b8c74367516a3444c72a4717f2c2",
+      "bytes": 1791
+    },
+    {
+      "path": "<location>",
+      "sha256": "caff785ef88f039e2ce8404859e2c9aad274d05473c4160b1c6b5cc15252aaed",
+      "bytes": 50106
+    }
+  ],
+  "outputs": [
+    {
+      "path": "<out>/single-barrel.nc",
+      "sha256": "2be0c0b9670247d5aa82dc140ceaa51501535bf8c220406a534d26c2cbf58560",
+      "bytes": 7470
+    },
+    {
+      "path": "<out>/single-barrel-frame.nc",
+      "sha256": "3366dbaa49725842d7f774b31aa8332f8eb80b972df91723a40a92ecbb19187a",
+      "bytes": 1246
+    },
+    {
+      "path": "<out>/single-barrel-run-sheet.md",
+      "sha256": "19c77214e8b39000f3c7f30349b964511d3fc3527c18a1b1d3caca9f7a8af4fa",
+      "bytes": 17959
+    }
+  ],
+  "diagnostics": [
+    {
+      "code": "trace-self-overlap",
+      "guideRow": "trace-self-overlap",
+      "severity": "warning",
+      "message": "Strokes merge: 82 pairs of this trace's lines come closer than the cutter width (up to 0.84 mm overlap). The cut will fill in — space the lines apart, or use a smaller cutter.",
+      "source": "findings",
+      "program": "single barrel"
+    },
+    {
+      "code": "trace-self-overlap",
+      "guideRow": "trace-self-overlap",
+      "severity": "warning",
+      "message": "Strokes merge: 113 pairs of this trace's lines come closer than the cutter width (up to 0.84 mm overlap). The cut will fill in — space the lines apart, or use a smaller cutter.",
+      "source": "findings",
+      "program": "single barrel"
+    },
+    {
+      "code": "vise-grip-shallow",
+      "guideRow": "vise-grip-shallow",
+      "severity": "warning",
+      "message": "Only 2.61 mm of the stock is gripped below the jaw tops; under 3 mm the part can lift (PROVISIONAL threshold, #208).",
+      "source": "findings",
+      "program": "single barrel"
+    },
+    {
+      "code": "vise-default",
+      "guideRow": "vise-default",
+      "severity": "warning",
+      "message": "Vise dimensions are the shipped defaults, measured once on the reference unit (#208); they are not a measurement of this machine's own vise.",
+      "source": "findings",
+      "program": "single barrel"
+    },
+    {
+      "code": "tool-change-noop",
+      "guideRow": "tool-change-noop",
+      "severity": "info",
+      "message": "M6 to T1, which is already active: the firmware does nothing (no change, no length calibration)",
+      "source": "simulation",
+      "program": "single barrel"
+    }
+  ],
+  "provenance": [
+    {
+      "name": "tool.inv:kz-engrave-30-0-3.diameter",
+      "value": 0.3,
+      "unit": "mm",
+      "source": "seeded"
+    }
+  ],
+  "refusals": [],
+  "command": "engrave",
+  "details": {
+    "kind": "job",
+    "outDir": "<out>",
+    "programs": [
+      {
+        "name": "single barrel",
+        "stage": "done",
+        "ok": true,
+        "ncFile": "single-barrel.nc",
+        "ncLines": 441,
+        "frameFile": "single-barrel-frame.nc",
+        "cam": {
+          "operations": 2,
+          "cuttingMoves": 305,
+          "passes": 2,
+          "estimatedSeconds": 109.12068711510106,
+          "rapidMm": 308.72731156457826,
+          "cutMm": 357.07405121549573,
+          "baselineRapidMm": 308.72731156457826
+        },
+        "sim": {
+          "ok": true,
+          "engine": "column",
+          "count": 2,
+          "removedVolumeMm3": 204.35425009064036,
+          "errorCount": 0
+        },
+        "sheet": {
+          "file": "single-barrel-run-sheet.md",
+          "ncHash": "2be0c0b9",
+          "estimatedTime": "1 min 49 s"
+        },
+        "previews": [],
+        "images": []
+      }
+    ],
+    "coupon": null,
+    "pair": null
+  }
+}

@@ -1,0 +1,32 @@
+{
+  "version": 3,
+  "ok": true,
+  "stage": "written",
+  "gate": null,
+  "inputs": [
+    {
+      "path": "<project>",
+      "sha256": "8009d137f03d7cc4df577592b7e56236093199167eb8ff8fc62470c0cb82e59b",
+      "bytes": 3553
+    }
+  ],
+  "outputs": [
+    {
+      "path": "<out>/ESP32_DevKit_V1_CLI_sample.stl",
+      "sha256": "26b6f2011027292d4003652c3b99e4928171a32a6871bac4b1162e7eb3a6effc",
+      "bytes": 124284
+    },
+    {
+      "path": "<out>/ESP32_DevKit_V1_CLI_sample-PRINT-NOTES.txt",
+      "sha256": "8a53d07ba13ab3f50daf35ba7936ce1ce40355e9804bc52da1ab5cd2c56d7288",
+      "bytes": 648
+    }
+  ],
+  "diagnostics": [],
+  "provenance": [],
+  "refusals": [],
+  "command": "export",
+  "details": {
+    "triangles": 2484
+  }
+}

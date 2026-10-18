@@ -1,0 +1,178 @@
+{
+  "schemaVersion": 16,
+  "id": "proj-docs-sample",
+  "name": "ESP32 DevKit V1 — CLI sample",
+  "createdAt": "1970-01-01T00:00:00.000Z",
+  "modifiedAt": "1970-01-01T00:00:00.000Z",
+  "board": {
+    "id": "custom-esp32-devkit-v1-docs-sample",
+    "name": "ESP32 DevKit V1 (30-pin)",
+    "manufacturer": "DOIT",
+    "pcb": {
+      "size": {
+        "x": 51.5,
+        "y": 28.3,
+        "z": 1.6
+      }
+    },
+    "mountingHoles": [
+      {
+        "id": "h1",
+        "x": 2.96,
+        "y": 2.54,
+        "diameter": 3
+      },
+      {
+        "id": "h2",
+        "x": 48.96,
+        "y": 2.54,
+        "diameter": 3
+      },
+      {
+        "id": "h3",
+        "x": 2.96,
+        "y": 25.54,
+        "diameter": 3
+      },
+      {
+        "id": "h4",
+        "x": 48.96,
+        "y": 25.54,
+        "diameter": 3
+      }
+    ],
+    "components": [
+      {
+        "id": "usb-micro",
+        "kind": "micro-usb",
+        "position": {
+          "x": -1,
+          "y": 10.16,
+          "z": 1.6
+        },
+        "size": {
+          "x": 5.5,
+          "y": 7.62,
+          "z": 2.6
+        },
+        "facing": "-x",
+        "cutoutMargin": 0.5
+      },
+      {
+        "id": "header-left",
+        "kind": "gpio-header",
+        "position": {
+          "x": 6.81,
+          "y": 25.63,
+          "z": -8.5
+        },
+        "size": {
+          "x": 38.1,
+          "y": 2.54,
+          "z": 8.5
+        }
+      },
+      {
+        "id": "header-right",
+        "kind": "gpio-header",
+        "position": {
+          "x": 6.81,
+          "y": 0.23,
+          "z": -8.5
+        },
+        "size": {
+          "x": 38.1,
+          "y": 2.54,
+          "z": 8.5
+        }
+      },
+      {
+        "id": "wroom-module",
+        "kind": "antenna-connector",
+        "position": {
+          "x": 26,
+          "y": 5.15,
+          "z": 1.6
+        },
+        "size": {
+          "x": 25.5,
+          "y": 18,
+          "z": 3.1
+        },
+        "facing": "+z",
+        "cutoutMargin": 0
+      }
+    ],
+    "defaultStandoffHeight": 10,
+    "recommendedZClearance": 12,
+    "crossReference": "https://github.com/SlyWombat/case-maker/tree/main/samples/cad-references/boards/esp32-devkit-v1",
+    "measurementMethod": "open-source-cad",
+    "builtin": false,
+    "clonedFrom": "esp32-devkit-v1"
+  },
+  "case": {
+    "wallThickness": 2,
+    "floorThickness": 2,
+    "lidThickness": 2,
+    "cornerRadius": 2,
+    "internalClearance": 2,
+    "clearanceTweaks": {
+      "xMin": 0,
+      "xMax": 0,
+      "yMin": 0,
+      "yMax": 0
+    },
+    "zClearance": 12,
+    "joint": "flat-lid",
+    "ventilation": {
+      "enabled": false,
+      "pattern": "none",
+      "coverage": 0
+    },
+    "bosses": {
+      "enabled": true,
+      "insertType": "self-tap",
+      "outerDiameter": 5,
+      "holeDiameter": 2.5
+    }
+  },
+  "ports": [
+    {
+      "id": "port-docs-sample-0-usb-micro",
+      "sourceComponentId": "usb-micro",
+      "kind": "micro-usb",
+      "position": {
+        "x": -1,
+        "y": 10.16,
+        "z": 1.6
+      },
+      "size": {
+        "x": 5.5,
+        "y": 7.62,
+        "z": 2.6
+      },
+      "facing": "-x",
+      "cutoutMargin": 0.5,
+      "locked": false,
+      "enabled": true
+    }
+  ],
+  "externalAssets": [],
+  "hats": [],
+  "customHats": [],
+  "mountingFeatures": [],
+  "display": null,
+  "customDisplays": [],
+  "fanMounts": [],
+  "textLabels": [],
+  "antennas": [
+    {
+      "id": "ant-esp32-devkit-v1",
+      "type": "internal",
+      "enabled": true,
+      "facing": "-y",
+      "uOffset": 26
+    }
+  ],
+  "customFonts": []
+}
