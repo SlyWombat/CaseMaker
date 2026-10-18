@@ -42,9 +42,12 @@ export async function openManage(page: Page): Promise<void> {
   if ((await direct.count()) === 0) {
     await page.getByTestId('toolbar-overflow-toggle').click();
     await page.getByTestId('manage-open').click();
-    // The ⋯ panel belongs to the toolbar and stays open when Manage is chosen. Close it so the
-    // measurements and captures are the surface, not the menu over it.
-    await page.getByTestId('toolbar-overflow-toggle').click();
+    // #503 — choosing a command now dismisses the ⋯ panel. Before that fix the panel stayed open
+    // over the surface and had to be toggled shut here; toggling unconditionally would now REOPEN
+    // it, and its New button would intercept the scope click below. Close it only if it is still
+    // there, so the measurement sees the surface either way.
+    const panel = page.getByTestId('toolbar-overflow-panel');
+    if ((await panel.count()) > 0) await page.getByTestId('toolbar-overflow-toggle').click();
   } else {
     await direct.click();
   }

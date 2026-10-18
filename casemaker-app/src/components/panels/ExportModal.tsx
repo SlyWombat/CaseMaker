@@ -142,7 +142,12 @@ export function ExportModal({ onClose }: ExportModalProps) {
           border: '1px solid #2a2f36',
           borderRadius: 6,
           padding: 16,
-          minWidth: 480,
+          // #503 — the dialog used to demand `minWidth: 480`, so on a 390 px phone it was centred
+          // with both sides off-screen: the title, every row and the × were clipped, and Escape was
+          // the only way out. Its width is now the viewport's, capped at the old comfortable 640,
+          // and `border-box` keeps the 16 px padding inside that number rather than adding to it.
+          width: 'min(640px, calc(100vw - 32px))',
+          boxSizing: 'border-box',
           maxWidth: 640,
           maxHeight: '85vh',
           overflowY: 'auto',

@@ -8,6 +8,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { Toolbar } from '@/components/layout/Toolbar';
 import { useProjectStore } from '@/store/projectStore';
+import { useManageModeStore } from '@/store/manageModeStore';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -19,6 +20,7 @@ beforeEach(() => {
   cleanup();
   setWidth(1280);
   useProjectStore.setState({ welcomeMode: false });
+  useManageModeStore.getState().closeManage();
 });
 
 const q = (id: string) => screen.queryByTestId(id);
@@ -75,6 +77,20 @@ describe('the header toolbar at phone width (#134)', () => {
     expect(q('toolbar-overflow-panel')).not.toBeNull();
     fireEvent.mouseDown(document.body);
     expect(q('toolbar-overflow-panel')).toBeNull();
+  });
+
+  it('choosing a command dismisses the menu (#503)', () => {
+    setWidth(390);
+    render(<Toolbar />);
+    fireEvent.click(screen.getByTestId('toolbar-overflow-toggle'));
+    expect(q('toolbar-overflow-panel')).not.toBeNull();
+
+    // Manage used to leave the menu open over the rail it opened (#503). The outside-tap handler
+    // cannot see this click: the button is INSIDE the ref it tests, so the panel has to close on
+    // the command itself.
+    fireEvent.click(screen.getByTestId('manage-open'));
+    expect(q('toolbar-overflow-panel')).toBeNull();
+    expect(useManageModeStore.getState().open).toBe(true);
   });
 
   it('opening settings from the menu closes the menu and shows the dialog', () => {

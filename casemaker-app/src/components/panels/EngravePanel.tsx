@@ -157,7 +157,19 @@ const SUBHEAD: CSSProperties = { margin: '12px 0 4px', fontSize: 12, fontWeight:
 /** A heading under one of the numbered sections — the voids live under Stock (#271). */
 const SUBSUB: CSSProperties = { margin: '10px 0 2px', fontSize: 11, fontWeight: 600, color: '#9aa4b0' };
 const FIELD: CSSProperties = { width: 74 };
-const FIELD_LABEL: CSSProperties = { display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, color: '#9aa4b0' };
+// #503 — the label may WRAP, not just shrink. A stock field carries a `computed` source tag after
+// its input; at the panel's ~300 px content width that tag did not fit beside the label and input,
+// and because it could not wrap it was the thing cut off (the tag read "compu" at the right edge).
+// Wrapping puts the tag on its own line, where it stays readable.
+const FIELD_LABEL: CSSProperties = { display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, color: '#9aa4b0', flexWrap: 'wrap' };
+/**
+ * #503 — a two-column field grid whose columns may shrink below their content's min-content width.
+ * `1fr` is `minmax(auto, 1fr)`, so the widest unbreakable thing in a cell (here the source tag) set
+ * the column's minimum and the second column hung past the panel's right edge at phone and tablet
+ * widths. A zero minimum keeps both columns inside the panel; the label's own `flexWrap` handles
+ * the overflow within a cell.
+ */
+const FIELD_GRID: CSSProperties = { display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 6 };
 
 /**
  * A value as a field should PRINT it (#406). Binary float noise a person should never read —
@@ -1771,7 +1783,7 @@ export function EngravePanel(): JSX.Element {
           ))}
         </div>
       )}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
+      <div style={FIELD_GRID}>
         {stockNum('length', 'length X', 'Stock X — it runs between the vise jaws.')}
         {stockNum('width', 'width Y', 'Stock Y — away from the operator.')}
         {stockNum('thickness', 'thickness', 'Stock Z — the blank’s thickness. Max depth per label is this less the minimum floor.')}
@@ -2564,7 +2576,7 @@ export function EngravePanel(): JSX.Element {
           {viseBadge(job.workholding.vise)}
         </span>
       </h3>
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
+      <div style={FIELD_GRID}>
         {/* #508 — the seat is the operator's answer, not a measurement: it is WHAT the blank's
             underside rests on, and it is what sets how high the blank sits. The body floor's depth
             is PROVISIONAL until the bench calipers it. */}
@@ -2640,7 +2652,7 @@ export function EngravePanel(): JSX.Element {
         <span>Board under the part</span>
       </label>
       {under && (
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
+        <div style={FIELD_GRID}>
           {sacNum('engrave-sac-under-thickness', 'thickness', under.thickness, 'Board thickness, mm. A breakthrough may not exceed this less 1 mm.', (v) => patchUnder({ thickness: v }))}
           {sacNum('engrave-sac-under-overhang-left', 'overhang left', under.overhang.left, 'How far the board extends past the part on the fixed-jaw side, mm. 0 = flush.', (v) => patchUnder({ overhang: { ...under.overhang, left: v } }))}
           {sacNum('engrave-sac-under-overhang-right', 'overhang right', under.overhang.right, 'How far the board extends past the part on the moving-jaw side, mm.', (v) => patchUnder({ overhang: { ...under.overhang, right: v } }))}
@@ -2783,7 +2795,7 @@ export function EngravePanel(): JSX.Element {
       {tool && (
         <details style={{ marginTop: 6 }}>
           <summary style={{ fontSize: 11, color: '#9aa4b0', cursor: 'pointer' }}>Override</summary>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, marginTop: 6 }}>
+          <div style={{ ...FIELD_GRID, marginTop: 6 }}>
             {OVERRIDE_FIELDS.map((f) => overrideNum(f.key, f.label, f.unit))}
           </div>
           <p style={MUTED}>

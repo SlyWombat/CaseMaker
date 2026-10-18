@@ -161,6 +161,13 @@ body, html, #root {
   transform: translateX(100%);
   transition: transform 180ms ease;
   box-shadow: -4px 0 14px rgba(0, 0, 0, 0.4);
+  /* #503 — the handle below is fixed to the window's right edge and paints OVER the open drawer
+     (#355). Its ~30 px tab sat on the last few pixels of the content column, so whatever happened to
+     be at mid-height was covered: the margin chip's source tag, the end of a stock paragraph, a
+     card border. The drawer reserves the tab's width on its right; rail mode draws no handle and
+     keeps the plain 16 px padding. The tab measures 30 px, so 16 (the normal padding) + 16 = 32 px
+     leaves it 2 px of clearance. */
+  padding-right: calc(var(--cm-space-4) + var(--cm-space-4));
 }
 .context-panel--drawer.context-panel--open {
   transform: translateX(0);

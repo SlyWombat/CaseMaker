@@ -335,7 +335,19 @@ export function Toolbar() {
               ⋯
             </button>
             {overflowOpen && (
-              <div className="toolbar-overflow__panel" role="menu" data-testid="toolbar-overflow-panel">
+              <div
+                className="toolbar-overflow__panel"
+                role="menu"
+                data-testid="toolbar-overflow-panel"
+                // #503 — choosing a command must put the menu away. The outside-tap handler below
+                // cannot do it: a click ON a command is inside `overflowRef`, so the menu stayed up
+                // over whatever the command opened — the Manage rail, the Export dialog's backdrop,
+                // the Docs reader. Any click on one of the panel's buttons is a choice; close on the
+                // way out. (Settings keeps its own handler and is unaffected.)
+                onClick={(e) => {
+                  if ((e.target as HTMLElement).closest('button') !== null) setOverflowOpen(false);
+                }}
+              >
                 {newBtn}
                 {manageBtn}
                 {saveAsBtn}
