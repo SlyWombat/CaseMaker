@@ -1851,6 +1851,12 @@ export interface RunSheetOptions {
    */
   surfaceTouchCount?: number;
   /**
+   * #451 — the shop's `runSheet.blankToleranceMm`: how far a measured blank may differ from the
+   * job's stated size before the sheet tells the operator to change the job and regenerate. Resolved
+   * by the caller from the shop defaults, never read here. Absent: the labelled fallback (0.5 mm).
+   */
+  blankToleranceMm?: number;
+  /**
    * #475 — the measured surface readings, in the plan's order (the order {@link surfaceSpreadSteps}
    * prints). The registration step supplies them from the run it measured
    * (`engraveRegistrationStore`'s `surfaceSpreadFor`), so a sheet for an already-registered job
@@ -2754,7 +2760,7 @@ export function buildRunSheet(
   const needSteps: RunSheetStep[] = [
     {
       text:
-        'The blank. Measure it. If it differs by more than 0.5 mm in any dimension, change the job ' +
+        `The blank. Measure it. If it differs by more than ${fmtNum(options.blankToleranceMm ?? 0.5)} mm in any dimension, change the job ` +
         'and regenerate — do not run this file.',
       value: `${fmtNum(length)} × ${fmtNum(width)} × ${fmtNum(thickness)} mm ${MATERIAL_LABELS[material]}`,
     },

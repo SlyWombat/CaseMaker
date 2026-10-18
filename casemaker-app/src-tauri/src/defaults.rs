@@ -283,6 +283,9 @@ pub const UNMEASURED_SEEDS: &[(&str, f64, &str, &str)] = &[
     ("sim.columnPitchXMm", 0.1, "mm", "chosen, not measured: the simulation grid's X pitch; the sim's memory and time grow with 1/pitch"),
     ("sim.rotaryPitchDeg", 0.25, "deg", "chosen, not measured: the rotary simulation grid's theta pitch; the sim's memory and time grow with 1/pitch"),
     // ── #451 sim resolutions (end)
+    // ── #451 runSheet (begin) — the blank-size tolerance the sheet prints in its first instruction.
+    ("runSheet.blankToleranceMm", 0.5, "mm", "chosen, not measured: how far a measured blank may differ from the job's stated size before the sheet tells the operator to change the job and regenerate"),
+    // ── #451 runSheet (end)
     // ── #451 sim starting values (begin) — what a session begins with: chosen, not measured.
     ("sim.playbackSpeed", 20.0, "x", "chosen, not measured: the playback multiplier a fresh simulation session starts at, as a multiple of wall-clock time; one of 1, 5, 20 or 100"),
     ("sim.defaultStockLengthMm", 100.0, "mm", "chosen, not measured: the blank a simulation starts with when the file states no stock, along X; 100 x 100 x 10 is the documented default (/Simulation.md §6)"),

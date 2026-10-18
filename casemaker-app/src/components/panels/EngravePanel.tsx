@@ -91,7 +91,7 @@ import {
   measuredTopSpreadMm,
 } from '@/engine/cnc/stockStart';
 import { MATERIAL_LABELS } from '@/engine/cnc/materials';
-import { useShopDefaultsStore } from '@/store/shopDefaultsStore';
+import { useShopDefaultsStore, shopDefault } from '@/store/shopDefaultsStore';
 import { blankStockFor } from '@/engine/cnc/engrave/fromBlank';
 import { readDesignFile } from '@/engine/import/designImport';
 import { readTargetObjectFile } from '@/engine/import/targetObject';
@@ -1160,6 +1160,9 @@ export function EngravePanel(): JSX.Element {
           // #472 — the two-tool facts the generator measured, so the sheet's second-program section
           // prints the files and numbers this run actually produced rather than re-deriving them.
           restPass: generated.restPass ?? undefined,
+          // #451 — the shop's `runSheet.blankToleranceMm`: how far a measured blank may differ
+          // before the sheet says "change the job and regenerate".
+          blankToleranceMm: shopDefault('runSheet.blankToleranceMm').value,
         },
       ),
     );

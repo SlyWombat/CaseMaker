@@ -942,6 +942,13 @@
       "setAt": "2026-10-15T08:00:00.000Z",
       "unit": "%"
     },
+    "runSheet.blankToleranceMm": {
+      "value": 0.5,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm",
+      "note": "chosen, not measured: how far a measured blank may differ from the job's stated size before the sheet says change the job and regenerate"
+    },
     "run.missLimit": {
       "value": 3.0,
       "source": "seeded",

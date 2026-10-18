@@ -271,6 +271,9 @@ export const KNOWN_DEFAULTS: Readonly<Record<string, KnownDefault>> = {
   'sim.columnPitchXMm': { label: 'simulation grid X pitch (chosen)', unit: 'mm', rule: z.number().min(0.05).max(0.5), fallback: 0.1 },
   'sim.rotaryPitchDeg': { label: 'rotary simulation grid pitch (chosen)', unit: 'deg', rule: z.number().min(0.05).max(5), fallback: 0.25 },
   // ── #451 sim resolutions (end)
+  // ── #451 runSheet (begin) — the blank-size tolerance the sheet prints in its first instruction.
+  'runSheet.blankToleranceMm': { label: 'blank-size tolerance the sheet prints (chosen)', unit: 'mm', rule: z.number().min(0.05).max(5), fallback: 0.5 },
+  // ── #451 runSheet (end)
   // ── #451 sim starting values (begin) — what a simulation SESSION begins with. CHOSEN, not
   // measured: playback 20x is the approved mockup's (#195), the blank is the documented 100 x 100 x
   // 10 (/Simulation.md §6) and the budget is where a load used to be stopped. `simStore` and
