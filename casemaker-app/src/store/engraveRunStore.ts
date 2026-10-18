@@ -190,6 +190,14 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
       // not only by the one the panel shows.
       conditions: inventoryConditions(),
       mount,
+      // #472 — the rest pass's two numbers, read from the location in the SAME snapshot as the
+      // others. The worker cannot import the defaults client (`houseClient` drags the transport
+      // into that realm), so the resolved values and their sources cross as plain data; absent,
+      // the generator uses its labelled fallback pair.
+      rest: {
+        overlap: shopDefault('rest.overlapMm'),
+        thirdToolPct: shopDefault('rest.thirdToolPct'),
+      },
     };
 
     // The cutter, resolved ONCE on this side (#305): the sim worker cannot see the registry, so

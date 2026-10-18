@@ -970,7 +970,13 @@ export function EngravePanel(): JSX.Element {
         // #491 — the chosen copy's case, or both when the pick is indifferent; null leaves the
         // colourless sentence. Read here from the registry's copy pool (this thread), never in the
         // pure sheet module.
-        { surfaceTouchCount: registrationSettings(shopDefaults).settings.surfaceTouchCount, toolCase: caseWordsForKey(job.toolKey) ?? undefined },
+        {
+          surfaceTouchCount: registrationSettings(shopDefaults).settings.surfaceTouchCount,
+          toolCase: caseWordsForKey(job.toolKey) ?? undefined,
+          // #472 — the two-tool facts the generator measured, so the sheet's second-program section
+          // prints the files and numbers this run actually produced rather than re-deriving them.
+          restPass: generated.restPass ?? undefined,
+        },
       ),
     );
   }
