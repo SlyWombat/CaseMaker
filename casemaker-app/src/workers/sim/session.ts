@@ -32,7 +32,7 @@ import { applyEvent, buildTimeline, parseGcode, resolveMachine, MACHINES, type F
 import { moveSeconds, rapidRate, type RapidEstimate } from '@/engine/cnc/cam/ir';
 
 import type { Mm } from '@/types/units';
-import { type Tool } from '@/engine/cnc/tool';
+import { cuttingRadiusForSweep, type Tool } from '@/engine/cnc/tool';
 import { isVShape } from '@/engine/cnc/vProfile';
 import {
   columnOracleBand,
@@ -46,7 +46,7 @@ import {
 import type { ManifoldToplevel } from '../geometry/evaluateOp';
 import { meshOutputOf, type NodeMeshOutput } from '../geometry/meshOutput';
 import { createPlayback, type Playback } from '../geometry/playback';
-import { boxSolid, sweepTimeline, type SweepDiagnostic, type SweepResult, type SweepStats } from '../geometry/sweep';
+import { boxSolid, isDenseForExactSweep, sweepTimeline, type SweepDiagnostic, type SweepResult, type SweepStats } from '../geometry/sweep';
 import { columnSweep, type ColumnSweepOk, type DrillPointDefault } from '../geometry/columnEngine';
 import type { SimThreadSpec } from '@/engine/cnc/cam/threadMill';
 
@@ -290,6 +290,25 @@ export function sweepsOnColumn(tool: Tool): boolean {
   return isVShape(tool) || tool.shape === 'drill' || tool.shape === 'thread';
 }
 
+/**
+ * Does a DENSE flat-end-mill job route to the COLUMN (dexel) engine instead of being refused
+ * `dense-3d-refused` by the exact sweep (#531, slice B)? The exact 2.5D sweeper caps itself at
+ * `MAX_CHECKPOINTS` causal runs and refuses anything denser by name, leaving a 3D/relief file
+ * path-only (#194) — but the FLAT dexel can draw exactly that, and already runs today for
+ * V/drill/thread. So a job that (a) is denser than the exact sweep takes on
+ * (`isDenseForExactSweep`) and (b) uses a genuine flat end mill — `cuttingRadiusForSweep(tool).ok`,
+ * which is false for a ball or a bull nose, those being #532's to admit, so they keep their
+ * existing `tool-refused` — is sent to the dexel rather than refused.
+ *
+ * A REST PASS is NOT re-routed: the column engine cannot start from a previous program's material
+ * (it would answer `prior-removal-column`), so a dense flat rest pass keeps its existing exact-sweep
+ * `dense-3d-refused` refusal rather than trading it for a different one. This is routing only: the
+ * dexel engine and its geometry are untouched.
+ */
+export function denseFlatRoutesToColumn(timeline: Timeline, tool: Tool, opts?: SimLoadOpts): boolean {
+  return isDenseForExactSweep(timeline) && !opts?.priorRemoval && cuttingRadiusForSweep(tool).ok;
+}
+
 export interface SimSession {
   load(gcodeText: string, setup: Setup, tool: Tool, machineId: string | null, opts?: SimLoadOpts): SimLoadResult;
   /**
@@ -406,7 +425,12 @@ export function createSimSession(tl: ManifoldToplevel, hooks?: SimSessionHooks):
     // ONE place the decision is made: a job whose tool is a cone never reaches `sweepTimeline`.
     // A DRILL (its point is a cone) and a THREAD MILL (swept as its envelope) route the same way
     // (#382) — `sweepsOnColumn`.
-    if (timeline.summary.rotary || sweepsOnColumn(tool)) {
+    //
+    // A DENSE FLAT job routes here too (#531, slice B): the exact sweeper would refuse it
+    // `dense-3d-refused` for crossing `MAX_CHECKPOINTS`, leaving a 3D/relief file path-only, but
+    // the FLAT dexel draws it — `denseFlatRoutesToColumn` gates this on a genuine flat end mill and
+    // on its not being a rest pass, so a ball/bull (#532) and a rest pass keep their old refusals.
+    if (timeline.summary.rotary || sweepsOnColumn(tool) || denseFlatRoutesToColumn(timeline, tool, opts)) {
       // A rest pass is measured against the material a previous program left, and only the exact
       // sweeper can start from it. Silently sweeping the blank instead would draw a cut nobody is
       // going to make, so the pair is refused by name (#410).

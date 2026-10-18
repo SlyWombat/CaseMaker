@@ -427,13 +427,22 @@ describe('refusals: a refused SWEEP leaves a path-only session, even over a good
   // stock, not the job. The cylinder/axis-crossing paths live in simSessionRotary.spec.ts.
   it('a rotary job', () => expect(sweepCodes(refusal('S1000 M3\nG0 X20 Y30 Z0\nG1 X40 A90 F100\n', setup()))).toEqual(['rotary-stock']));
 
-  it(`more than ${MAX_CHECKPOINTS} checkpoints`, () => {
+  // #531 slice B: a dense FLAT job is no longer refused `dense-3d-refused` here — it routes to the
+  // FLAT dexel (column engine) and is DRAWN, so it leaves a full (not path-only) session. The exact
+  // 2.5D sweep still refuses the same timeline by name when it is the engine asked to run it
+  // (cncSweep.spec.ts); the routing and the carve-outs (non-dense flat, ball/bull) live in
+  // simSessionDenseFlat.spec.ts.
+  it(`more than ${MAX_CHECKPOINTS} checkpoints on a flat tool now routes to the column engine`, () => {
     const lines = ['S1000 M3'];
     for (let i = 0; i < MAX_CHECKPOINTS + 1; i++) {
       lines.push(`G0 X${10 + (i % 50)} Y${10 + (i % 7)} Z1`, `G1 Z${i % 2 ? -0.5 : -1} F100`, `G1 X${12 + (i % 50)}`, 'G0 Z1');
     }
-    const d = refusal(lines.join('\n'), setup());
-    expect(d.find((x) => x.code === 'dense-3d-refused')?.source).toBe('sweep');
+    const session = createSimSession(tl);
+    const r = session.load(lines.join('\n'), setup(), tool, null);
+    expect(r.ok).toBe(true);
+    expect(r.diagnostics.some((x) => x.code === 'dense-3d-refused')).toBe(false);
+    expect(meshVolume(frame(session, 0).stock)).toBeGreaterThan(0); // drawn on the dexel
+    session.dispose();
   });
 
   it('an unknown tool shape, named', () => {

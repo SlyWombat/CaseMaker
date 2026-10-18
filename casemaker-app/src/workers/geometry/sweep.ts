@@ -86,6 +86,15 @@ export const MAX_GOUGES = 200;
  */
 export const MAX_CHECKPOINTS = 1000;
 /**
+ * Is this timeline denser than the EXACT 2.5D sweep takes on — i.e. would `sweepTimeline` refuse it
+ * `dense-3d-refused`? The one definition of the `MAX_CHECKPOINTS` classifier, exposed so the session
+ * can route a dense FLAT job to the column (dexel) engine instead of leaving it path-only (#531),
+ * while `sweepTimeline` below still refuses the same job by name when it IS the one asked to run it.
+ */
+export function isDenseForExactSweep(timeline: Timeline): boolean {
+  return timeline.checkpoints.length > MAX_CHECKPOINTS;
+}
+/**
  * Below this an intersection with the UNCUT blank is floating-point dust, not material: the
  * blank and the air solid are both exact polygons, so a real overlap is far larger.
  */
@@ -776,7 +785,7 @@ export function sweepTimeline(tl: ManifoldToplevel, timeline: Timeline, tool: To
   if (!rr.ok) return { ok: false, diagnostics: [{ severity: 'error', code: 'tool-refused', message: rr.reason }] };
   const radius = rr.radius;
 
-  if (timeline.checkpoints.length > MAX_CHECKPOINTS) {
+  if (isDenseForExactSweep(timeline)) {
     return {
       ok: false,
       diagnostics: [{ severity: 'error', code: 'dense-3d-refused', message: `this program cuts in ${timeline.checkpoints.length} separate runs of cuts at one (segment, Z), more than the ${MAX_CHECKPOINTS} the 2.5D sweep takes on: a 3D or dense job V1 does not simulate` }],
