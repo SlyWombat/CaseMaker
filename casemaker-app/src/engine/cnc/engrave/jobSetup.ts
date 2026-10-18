@@ -31,6 +31,7 @@ import {
 import { FASTENERS } from '@/engine/compiler/fasteners';
 import type {
   EngraveAnyItem,
+  EngraveCutout,
   EngraveDrill,
   EngraveJob,
   EngraveKeepOut,
@@ -245,7 +246,7 @@ export function itemLabel(item: EngraveAnyItem): string {
  * traces, the drills and the under-surface voids each have a line of their own there even though a
  * combined shape cannot reference one.
  */
-export type EngraveNamedItem = EngraveAnyItem | EngraveTraceItem | EngraveDrill | EngraveThread | EngraveKeepOut;
+export type EngraveNamedItem = EngraveAnyItem | EngraveTraceItem | EngraveDrill | EngraveThread | EngraveKeepOut | EngraveCutout;
 
 /**
  * The KIND in a word — "Rectangle", "Cut-away", "Single-line text", "Hole array" (#411).
@@ -287,6 +288,8 @@ export function itemKindWord(item: EngraveNamedItem): string {
       return 'Hole array';
     case 'thread':
       return 'Thread';
+    case 'cutout':
+      return 'Cut-out';
   }
 }
 

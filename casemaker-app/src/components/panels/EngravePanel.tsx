@@ -37,7 +37,7 @@ import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import { cuttingDiameter, drillPointAngle, pointLength } from '@/engine/cnc/tool';
 import { drillSettings } from '@/engine/cnc/cam/drillBit';
 import { caseWordsForKey } from '@/engine/cnc/toolCondition';
-import { dedupeFindings, jobTool, validateJob, type JobFinding } from '@/engine/cnc/engrave/jobSetup';
+import { dedupeFindings, itemKindWord, itemRowName, jobTool, validateJob, type JobFinding } from '@/engine/cnc/engrave/jobSetup';
 import {
   hasRegionItems,
   itemName,
@@ -110,6 +110,7 @@ import { EngraveKeepOutRow } from './EngraveKeepOutRow';
 import { EngraveShapeRow } from './EngraveShapeRow';
 import { EngraveCombinedRow } from './EngraveCombinedRow';
 import { EngraveDrillRow } from './EngraveDrillRow';
+import { EngraveCutoutRow, type CutoutTarget } from './EngraveCutoutRow';
 import { EngraveThreadRow } from './EngraveThreadRow';
 import { EngravePrimitiveRow } from './EngravePrimitiveRow';
 import { EngraveTargetObjectRow } from './EngraveTargetObjectRow';
@@ -305,6 +306,13 @@ const ADD_PRIMITIVE_KINDS: readonly { value: EngravePrimitive['kind']; label: st
 ];
 
 /**
+ * The one CUT-OUT kind (#218), added from the same menu but to `job.cutouts`. It is not a cleared
+ * region: the cutter follows a closed path and removes a kerf through the blank, held by tabs.
+ * The new row starts around the blank's own edge, the one outline every job has.
+ */
+const ADD_CUTOUT_KINDS: readonly { value: 'cutout'; label: string }[] = [{ value: 'cutout', label: 'Cut out' }];
+
+/**
  * The four VOID kinds (#271), added to `job.keepOuts` from the Stock section — NOT from the
  * Items "+ Add…" menu. A void is a fact about the blank, not something the cutter makes: the
  * menu's other entries all become cut operations, and putting a void among them would invite
@@ -338,6 +346,7 @@ function itemRowIds(job: EngraveJob): string[] {
     ...(job.drills ?? []).map((i) => i.id),
     ...(job.threads ?? []).map((i) => i.id),
     ...(job.primitives ?? []).map((i) => i.id),
+    ...(job.cutouts ?? []).map((i) => i.id),
     ...(job.vectors ?? []).map((i) => i.id),
   ];
 }
@@ -588,6 +597,9 @@ export function EngravePanel(): JSX.Element {
   const setTargetObject = useEngraveJobStore((s) => s.setTargetObject);
   const updateTargetObject = useEngraveJobStore((s) => s.updateTargetObject);
   const removeTargetObject = useEngraveJobStore((s) => s.removeTargetObject);
+  const addCutout = useEngraveJobStore((s) => s.addCutout);
+  const updateCutout = useEngraveJobStore((s) => s.updateCutout);
+  const removeCutout = useEngraveJobStore((s) => s.removeCutout);
   const addKeepOut = useEngraveJobStore((s) => s.addKeepOut);
   const updateKeepOut = useEngraveJobStore((s) => s.updateKeepOut);
   const removeKeepOut = useEngraveJobStore((s) => s.removeKeepOut);
@@ -1437,10 +1449,17 @@ export function EngravePanel(): JSX.Element {
   const traceCount = job.traces?.length ?? 0;
   const drillCount = job.drills?.length ?? 0;
   const threadCount = job.threads?.length ?? 0;
+  const cutoutCount = job.cutouts?.length ?? 0;
   const vectorCount = job.vectors?.length ?? 0;
   const primitiveCount = job.primitives?.length ?? 0;
   const target = job.targetObject ?? null;
   const hasReferenceable = job.labels.length + job.shapes.length + combinedCount + vectorCount > 0;
+  // #218 — the `of` picker's choices. The words are the item list's own (`itemRowName` /
+  // `itemKindWord`), so the row and the list cannot name the same item differently.
+  const cutoutTargets: CutoutTarget[] = allItems(job).map((it) => {
+    const name = itemRowName(it);
+    return { id: it.id, label: name === '' ? itemKindWord(it) : `${itemKindWord(it)} “${name}”` };
+  });
 
   const stockNum = (key: 'length' | 'width' | 'thickness', label: string, title: string): JSX.Element => {
     const src = job.sources?.stock?.[key];
@@ -1926,7 +1945,7 @@ export function EngravePanel(): JSX.Element {
       <h3 style={SUBHEAD}>
         Items{' '}
         <span style={{ ...TAG, marginLeft: 4 }} data-testid="engrave-item-count">
-          {job.labels.length + job.shapes.length + combinedCount + traceCount + drillCount + threadCount + primitiveCount + vectorCount}
+          {job.labels.length + job.shapes.length + combinedCount + traceCount + drillCount + threadCount + primitiveCount + cutoutCount + vectorCount}
         </span>
         <RowFolds testidPrefix="engrave-item" ids={itemRowIds(job)} firstButtonRef={itemsFoldRef} />
       </h3>
@@ -2010,6 +2029,17 @@ export function EngravePanel(): JSX.Element {
           findings={findingsFor(primitive.id)}
           onChange={(patch) => updatePrimitive(primitive.id, patch)}
           onRemove={() => removePrimitive(primitive.id)}
+        />
+      ))}
+      {(job.cutouts ?? []).map((cutout, i) => (
+        <EngraveCutoutRow
+          key={cutout.id}
+          cutout={cutout}
+          index={i}
+          targets={cutoutTargets}
+          findings={findingsFor(cutout.id)}
+          onChange={(patch) => updateCutout(cutout.id, patch)}
+          onRemove={() => removeCutout(cutout.id)}
         />
       ))}
       {(job.vectors ?? []).map((shape, i) => (
@@ -2137,6 +2167,22 @@ export function EngravePanel(): JSX.Element {
                     : 'Add a sphere. It is a dexel job (#222), so it is refused by name rather than approximated as a circle pocket.'
               }
               onClick={() => expandEngraveRow(addPrimitive(k.value))}
+            >
+              {k.label}
+            </button>
+          ))}
+        </div>
+        {/* #218 — a profile cut-out that frees a part from the blank, held by tabs until it is
+            removed. Its path is the referenced outline (or the blank edge) plus the inset. */}
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 4, alignItems: 'center' }}>
+          <span style={{ ...MUTED, margin: 0 }}>cut-outs:</span>
+          {ADD_CUTOUT_KINDS.map((k) => (
+            <button
+              key={k.value}
+              type="button"
+              data-testid={`engrave-add-${k.value}`}
+              title="Cut a part out of the blank along a closed path, through into the board, and hold it with tabs you remove by hand."
+              onClick={() => expandEngraveRow(addCutout())}
             >
               {k.label}
             </button>

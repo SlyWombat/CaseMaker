@@ -153,7 +153,7 @@ export function EngraveShapeRow({
       glyph={KIND_GLYPH[shape.kind]}
       kindWord={KIND_LABEL[shape.kind]}
       name={shape.name?.trim() ? shape.name : KIND_LABEL[shape.kind]}
-      summary={rowSummary(shape.depth)}
+      summary={shape.through === true ? 'through' : rowSummary(shape.depth)}
       enabled={shape.enabled}
       enabledTitle="A disabled shape is kept in the job but not cut."
       removeTitle="Remove this shape."
@@ -245,39 +245,60 @@ export function EngraveShapeRow({
         {positionNum('x')}
         {positionNum('y')}
         {numField('rotation', 'rot', 'Degrees counter-clockwise about the shape centre.')}
+        {/* #218 — a through region has no typed depth: its floor is the breakthrough rule. The
+            toggle replaces the depth controls rather than sitting beside a dead input. */}
         <label style={FIELD_LABEL}>
-          <span>depth</span>
           <input
-            type="range"
-            min={0}
-            max={maxDepth}
-            step="0.1"
-            value={Math.min(shape.depth, maxDepth)}
-            aria-label={`Shape ${index + 1} depth slider`}
-            title={`Depth below the top face, mm. At most ${maxDepth} mm on this stock: the thickness less the minimum floor.`}
-            onChange={(e) => onChange({ depth: Number(e.target.value) })}
+            type="checkbox"
+            checked={shape.through === true}
+            data-testid={`engrave-shape-through-${index}`}
+            aria-label={`Shape ${index + 1} through`}
+            title="Cut this pocket through the blank into the under-board. Needs a sacrificial board; the depth comes from the breakthrough rule, so no depth is typed."
+            onChange={(e) => onChange({ through: e.target.checked ? true : undefined })}
           />
-          <input
-            type="number"
-            min={0}
-            step="0.1"
-            value={shape.depth}
-            data-testid={`engrave-shape-depth-${index}`}
-            aria-label={`Shape ${index + 1} depth`}
-            title="Depth of this pocket's floor below the top face, mm."
-            style={{ ...NUM, ...(depthInvalid ? INVALID : null) }}
-            onChange={(e) => {
-              const v = Number(e.target.value);
-              if (Number.isFinite(v)) onChange({ depth: v });
-            }}
-          />
-          <span>mm</span>
+          <span>through</span>
         </label>
+        {shape.through !== true && (
+          <label style={FIELD_LABEL}>
+            <span>depth</span>
+            <input
+              type="range"
+              min={0}
+              max={maxDepth}
+              step="0.1"
+              value={Math.min(shape.depth, maxDepth)}
+              aria-label={`Shape ${index + 1} depth slider`}
+              title={`Depth below the top face, mm. At most ${maxDepth} mm on this stock: the thickness less the minimum floor.`}
+              onChange={(e) => onChange({ depth: Number(e.target.value) })}
+            />
+            <input
+              type="number"
+              min={0}
+              step="0.1"
+              value={shape.depth}
+              data-testid={`engrave-shape-depth-${index}`}
+              aria-label={`Shape ${index + 1} depth`}
+              title="Depth of this pocket's floor below the top face, mm."
+              style={{ ...NUM, ...(depthInvalid ? INVALID : null) }}
+              onChange={(e) => {
+                const v = Number(e.target.value);
+                if (Number.isFinite(v)) onChange({ depth: v });
+              }}
+            />
+            <span>mm</span>
+          </label>
+        )}
       </div>
 
-      <p style={{ ...MUTED, ...(depthInvalid ? { color: SEVERITY_COLOR.error } : null) }} data-testid={`engrave-shape-maxdepth-${index}`}>
-        Max depth {maxDepth} mm here — the stock thickness less the minimum floor.
-      </p>
+      {shape.through === true ? (
+        <p style={MUTED} data-testid={`engrave-shape-maxdepth-${index}`}>
+          Cuts through the blank into the board — the depth is the breakthrough rule, not a typed number.
+        </p>
+      ) : (
+        <p style={{ ...MUTED, ...(depthInvalid ? { color: SEVERITY_COLOR.error } : null) }} data-testid={`engrave-shape-maxdepth-${index}`}>
+          Max depth {maxDepth} mm here — the stock thickness less the minimum floor.
+        </p>
+      )}
     </EngraveItemRow>
   );
 }

@@ -52,6 +52,11 @@ export function newEngraveTargetObjectId(): string {
   return newId('tgt');
 }
 
+/** Fresh profile cut-out id (#218). A cut-out removes a kerf, not a region, and is its own list. */
+export function newEngraveCutoutId(): string {
+  return newId('cut');
+}
+
 /**
  * Fresh under-surface void id (#271). A void is NOT an item — it is a fact about the blank, so it
  * lives in its own list with its own prefix and never reaches the `engraves` pipeline.

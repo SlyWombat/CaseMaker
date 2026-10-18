@@ -11,8 +11,10 @@ import type { EngraveDrill } from '@/types/engraveJob';
  *
  * There is deliberately NO diameter field — the hole IS the cutter's (a bigger hole is a circle
  * pocket, #214) — so the row edits placement, depth, the through flag and, for an array, the
- * lattice. The `through` toggle is present but its finding (`drill-through-unavailable`) refuses
- * it until #218 rules land, so the row does not hide a field the model carries.
+ * lattice. The `through` toggle cuts to the sacrificial board instead of to a typed depth; the
+ * job's findings refuse it when no board is fitted (`through-needs-board`) or the bit's flutes do
+ * not reach the breakthrough (`through-tool-reach`), so the row does not hide a field the model
+ * carries (#218).
  *
  * `count` fields commit only whole numbers ≥ 1, because the schema refuses a fractional count
  * outright (a silently floored lattice is not what the user typed) and a bad value would make the

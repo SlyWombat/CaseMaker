@@ -1,10 +1,12 @@
 import { create } from 'zustand';
-import { shopDefault } from '@/store/shopDefaultsStore';
+import { shopDefault, useShopDefaultsStore } from '@/store/shopDefaultsStore';
+import { tabSettings, type TabSettings } from '@/engine/cnc/cam/tabSettings';
 import { DEFAULT_FONT_ID } from '@/engine/fonts/registry';
 import { DEFAULT_STROKE_FONT_ID } from '@/engine/fonts/stroke/strokeFont';
 import {
   defaultEngraveJob,
   newEngraveDrillId,
+  newEngraveCutoutId,
   newEngraveKeepOutId,
   newEngraveLabelId,
   newEngravePrimitiveId,
@@ -42,6 +44,7 @@ import type {
   EngraveCombinedShape,
   EngraveConePrimitive,
   EngraveCutawayShape,
+  EngraveCutout,
   EngraveCylinderPrimitive,
   EngraveDrill,
   EngraveDrillArrayItem,
@@ -166,6 +169,14 @@ export type PrimitivePatch = Partial<Omit<EngraveBoxPrimitive, 'kind' | 'positio
 export type TargetObjectPatch = Partial<Pick<EngraveTargetObject, 'name' | 'rotation' | 'enabled'>> & {
   /** A partial placement: the store merges it into the object's own X/Y/Z. */
   position?: Partial<EngraveTargetObject['position']>;
+};
+
+/**
+ * A hand edit to one profile cut-out (#218). `tabs` is a partial of its own object and is MERGED,
+ * like a position, so a row can change the count without restating width and height.
+ */
+export type CutoutPatch = Partial<Omit<EngraveCutout, 'kind' | 'tabs'>> & {
+  tabs?: Partial<EngraveCutout['tabs']>;
 };
 
 /**
@@ -571,6 +582,24 @@ export function newTargetObjectId(): string {
 }
 
 /**
+ * A brand-new profile cut-out (#218), around the blank's own edge (`stock-inset`) — the shape a
+ * "cut a part out of the blank" action starts from, and the only reference every job can supply.
+ * The tab numbers are the shop's own (#218 three-edit rule) at the moment the row is created;
+ * the job then keeps them even if the shop's change.
+ */
+function newCutout(tabs: TabSettings): EngraveCutout {
+  return {
+    kind: 'cutout',
+    id: newEngraveCutoutId(),
+    enabled: true,
+    of: 'stock-inset',
+    side: 'outside',
+    inset: 0,
+    tabs: { count: tabs.count, width: tabs.widthMm, height: tabs.heightMm },
+  };
+}
+
+/**
  * A default under-surface void of the given kind (#271), centred on the stock like a new shape.
  *
  * `zCeiling` is HALF the blank's thickness, rounded to 0.1 mm: a neutral place to start that
@@ -721,6 +750,11 @@ export interface EngraveJobState {
   /** Merge a placement/visibility edit into the target object (#435). No-op when there is none. */
   updateTargetObject: (patch: TargetObjectPatch) => void;
   removeTargetObject: () => void;
+  /** Add a profile cut-out (#218) with the shop's tab numbers and return its id. */
+  addCutout: () => string;
+  /** Merge a hand edit into one cut-out (#218). A partial `tabs` is merged, not replaced. */
+  updateCutout: (id: string, patch: CutoutPatch) => void;
+  removeCutout: (id: string) => void;
   /**
    * Declare an under-surface void of `kind` (#271) and return its id. A void is a fact about the
    * blank, not an item: it is never cut, and it is what `jobDepthLimit` reads to refuse a cut
@@ -1333,6 +1367,43 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
       );
     },
 
+    addCutout: () => {
+      // The tab numbers are the SHOP's at the moment the row is created (#218); after this the
+      // job keeps them, so reopening a document never silently re-specs a cut already made.
+      const tabs = tabSettings(useShopDefaultsStore.getState().defaults).settings;
+      const cutout = newCutout(tabs);
+      apply((job) => ({ ...job, cutouts: [...(job.cutouts ?? []), cutout] }));
+      return cutout.id;
+    },
+
+    updateCutout: (id, patch) =>
+      apply((job) => ({
+        ...job,
+        cutouts: (job.cutouts ?? []).map((cutout) =>
+          cutout.id === id
+            ? ({
+                ...cutout,
+                ...patch,
+                // Merge a partial tab spec rather than replacing it: a row that changes the count
+                // must not blank the width and height.
+                tabs: patch.tabs ? { ...cutout.tabs, ...patch.tabs } : cutout.tabs,
+              } as EngraveCutout)
+            : cutout,
+        ),
+      })),
+
+    removeCutout: (id) => {
+      const list = get().job.cutouts ?? [];
+      const at = list.findIndex((c) => c.id === id);
+      const cutout = list[at];
+      if (!cutout) return;
+      removeWithUndo(
+        (job) => ({ ...job, cutouts: (job.cutouts ?? []).filter((c) => c.id !== id) }),
+        removalWhat(cutout),
+        (job) => ({ ...job, cutouts: insertAt(job.cutouts ?? [], at, cutout) }),
+      );
+    },
+
     addKeepOut: (kind) => {
       const keepOut = newKeepOut(kind, get().job);
       apply((job) => ({ ...job, keepOuts: [...(job.keepOuts ?? []), keepOut] }));
@@ -1509,6 +1580,9 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
           combined: [],
           traces: [],
           drills: [],
+          // A cut-out names an item (`of`); the items it could name were just dropped, so its
+          // reference would dangle (#218). The design's own items replace the job.
+          cutouts: [],
           vectors: patch.vectors,
           sources,
         };

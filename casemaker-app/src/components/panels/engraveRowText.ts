@@ -36,8 +36,8 @@ export function rowSummary(value: number, unit = 'mm'): string {
  *   - `custom` is the person's own number with no rule behind it, so a word on it would claim a
  *     provenance it does not have;
  *   - an unstated intent is the same case by another route;
- *   - and no other kind of item states an intent at all (a drill's `through` is refused before it
- *     can be a fact about the job, `drill-through-unavailable`).
+ *   - and no other kind of item states an intent at all (a drill's `through` is a cut property,
+ *     not a depth intent).
  *
  * So this returns the word for the one kind that has one, and the row draws the span only when it
  * gets something — which is also why the prop is `string | null` rather than an enum.

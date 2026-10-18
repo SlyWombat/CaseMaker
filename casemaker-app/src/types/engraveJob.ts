@@ -280,10 +280,10 @@ export interface EngraveDrillBase {
   depth: Mm;
   enabled: boolean;
   /**
-   * Cut all the way through the blank. NOT AVAILABLE YET: a through hole is only permitted
-   * where a sacrificial board exists (#213) and its depth is a rule of the through-cut work
-   * (#218), so a job that asks for one is REFUSED with `drill-through-unavailable` rather than
-   * cutting into the vise.
+   * Cut all the way through the blank into the sacrificial board (#218). Its depth is the job's
+   * breakthrough rule, not `depth`; the job's findings refuse it without a board
+   * (`through-needs-board`) or when the bit's flutes do not reach the breakthrough
+   * (`through-tool-reach`).
    */
   through: boolean;
 }
