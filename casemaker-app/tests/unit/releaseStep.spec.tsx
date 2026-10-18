@@ -247,9 +247,14 @@ function controller(
             text = 'ok\nAborted playing or paused file.';
           } else if (line === 'M491') {
             text = opts.m491 ?? 'ok\n[PRB:0,0,-80.000:1]';
-          } else if (opts.retouchSurfaceZ !== undefined && line.startsWith('G38.2')) {
-            // Both the fast and the slow touch of the re-touch seek read the same faced top.
+          } else if (opts.retouchSurfaceZ !== undefined && line.startsWith('G38.3')) {
+            // Both the fast and the slow touch of the re-touch seek read the same faced top. Every
+            // probe is G38.3 since #518; the post-facing re-touch shares seekSurface with registration.
             text = `[PRB:-174.550,-175.800,${opts.retouchSurfaceZ.toFixed(3)}:1]\nok`;
+          } else if (line.startsWith('G38.2')) {
+            // #518 — the executor must never send G38.2 (the bench alarmed on every miss). Answer an
+            // alarm so a regression back to G38.2 fails loudly, as the registration-spec fakes do.
+            text = 'ALARM: Probe fail';
           }
           return { ok: true, line, text, frames: 1, elapsedMs: 1 };
         },
