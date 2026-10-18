@@ -1572,3 +1572,101 @@ describe('the surface spread (#475)', () => {
     expect(steps.some((s) => s.bold === true && s.text.startsWith('this blank is bowed'))).toBe(false);
   });
 });
+
+// #434 — a drill bit's program is its own file, and the sheet states the drill's numbers: the
+// point and its provenance, the peck, the re-entry clearance, the feed and spindle (placeholders),
+// and each hole's full-diameter depth against its tip depth. The facts come from the generated
+// program, never a second resolution of the shop's defaults.
+describe('runSheet — the drill program (#434)', () => {
+  const DRILL = flatEndMill(3, {
+    name: '3 mm drill',
+    typeText: 'Drill',
+    shape: 'drill',
+    tipDiameter: 3,
+    diameter: 3,
+    angle: null,
+    centreCutting: null,
+  });
+
+  const drillJob = (): EngraveJob => {
+    const base = defaultEngraveJob();
+    return {
+      ...base,
+      labels: [],
+      shapes: [],
+      drills: [
+        {
+          id: 'port',
+          kind: 'drill',
+          name: 'port',
+          position: { x: 50, y: 30 },
+          rotation: 0,
+          depth: 4,
+          enabled: true,
+          through: false,
+        },
+      ],
+      toolKey: 'inv:drill-3',
+      tool: DRILL,
+    };
+  };
+
+  const withDrill = (job: EngraveJob): RunSheetGenerated => ({
+    ...stubGenerated(job),
+    drill: {
+      settings: { peckDiameters: 1, peckClearanceMm: 0.5, pointAngleDeg: 118, plungeFeed: 120, spindleRpm: 9000 },
+      sources: {
+        peckDiameters: 'chosen for this bench',
+        peckClearanceMm: 'chosen for this bench',
+        pointAngleDeg: 'chosen for this bench',
+        plungeFeed: 'placeholder, not measured',
+        spindleRpm: 'placeholder, not measured',
+      },
+      plans: [
+        {
+          id: 'port',
+          name: 'Drill "port"',
+          diameter: 3,
+          angle: { deg: 118, from: 'the shop default drill.pointAngleDeg (chosen for this bench)' },
+          pointLength: 0.901,
+          tipDepth: 4.901,
+          peck: 3,
+          holes: [[50, 30]],
+        },
+      ],
+      simDrillPoint: { deg: 118, source: 'chosen for this bench' },
+    },
+  });
+
+  it('§1 states the point and where its angle came from, and §7 prints the drill.* numbers', () => {
+    const job = drillJob();
+    const sheet = buildRunSheet(job, withDrill(job), NO_SIM, NOW);
+    const need = section(sheet, 'need').steps;
+    const needText = need.map((s) => `${s.text} ${s.value ?? ''}`).join('\n');
+    expect(needText).toContain('The drill’s point');
+    expect(needText).toContain('118° included');
+    expect(needText).toContain('0.901 mm below the full ⌀3 mm');
+    expect(needText).toContain('chosen for this bench');
+
+    const cut = section(sheet, 'cut').steps;
+    const cutText = cut.map((s) => `${s.text} ${s.value ?? ''}`).join('\n');
+    expect(cutText).toContain('9000 RPM');
+    expect(cutText).toContain('120 mm/min plunge');
+    expect(cutText).toContain('pecks of 1 × ⌀3 = 3 mm');
+    expect(cutText).toContain('re-entry 0.5 mm');
+    expect(cutText).toContain('drill.peckDiameters');
+    expect(cutText).toContain('placeholder, not measured');
+    // The hole's full-diameter depth and the tip, side by side.
+    expect(cutText).toContain('The full ⌀3 mm reaches 4 mm');
+    expect(cutText).toContain('tip carries 0.901 mm lower, to 4.901 mm');
+    expect(cutText).not.toContain('Cutting parameters were not resolved');
+  });
+
+  it('says nothing about a drill on a program that carries no drill facts', () => {
+    const job = drillJob();
+    const sheet = buildRunSheet(job, stubGenerated(job), NO_SIM, NOW);
+    const all = sheet.sections.flatMap((s) => s.steps.map((step) => `${step.text} ${step.value ?? ''}`)).join('\n');
+    expect(all).not.toContain('drill.peckDiameters');
+    expect(all).not.toContain('The drill’s point');
+  });
+});

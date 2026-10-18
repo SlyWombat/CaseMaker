@@ -756,6 +756,95 @@ describe('EngravePanel — plunge drills (#260)', () => {
   });
 });
 
+// #434 — a drill bit is a DRILL-ONLY cutter: one program has one tool, and the bit cannot open a
+// region. The panel offers the registry's drill only when the job's cutting work is all holes, and
+// states the point angle (and where it came from) for the drill it has selected.
+describe('EngravePanel — the drill bit as a drill-only cutter (#434)', () => {
+  const DRILL_KEY = 'inv:drill-3';
+  const DRILL = flatEndMill(3, {
+    name: '3 mm drill',
+    typeText: 'Drill',
+    shape: 'drill',
+    tipDiameter: 3,
+    diameter: 3,
+    cornerRadius: null,
+    angle: null,
+    centreCutting: null,
+  });
+  const HOLE = {
+    id: 'port',
+    kind: 'drill' as const,
+    name: 'port',
+    position: { x: 50, y: 30 },
+    rotation: 0,
+    depth: 2,
+    enabled: true,
+    through: false,
+  };
+
+  /** The same drill, selected, with no regions/traces/threads: the drill-only shape. */
+  function drillOnlyJob(): ReturnType<typeof defaultEngraveJob> {
+    const job = defaultEngraveJob();
+    job.labels = [];
+    job.shapes = [];
+    job.traces = [];
+    job.threads = [];
+    job.drills = [HOLE];
+    job.toolKey = DRILL_KEY;
+    return job;
+  }
+
+  function show(job: ReturnType<typeof defaultEngraveJob>): void {
+    setInventoryEntries([{ key: DRILL_KEY, tool: DRILL, provenance: 'EngravePanel drill spec' }]);
+    act(() => {
+      useEngraveJobStore.setState({ job });
+    });
+    useEngravePreviewStore.setState({ preview: null, status: 'idle' });
+    render(<EngravePanel />);
+  }
+
+  const optionValues = (): string[] =>
+    Array.from((screen.getByTestId('engrave-tool') as HTMLSelectElement).options).map((o) => o.value);
+
+  afterEach(() => {
+    act(() => resetRegistry());
+  });
+
+  it('offers an owned drill bit for a job that cuts only holes, and states its point', () => {
+    show(drillOnlyJob());
+    expect(optionValues()).toContain(DRILL_KEY);
+    expect((screen.getByTestId('engrave-tool') as HTMLSelectElement).value).toBe(DRILL_KEY);
+
+    // The angle is the shop's `drill.pointAngleDeg` (the drill states none), labelled as such, and
+    // the tip's point length is stated with it.
+    const point = screen.getByTestId('engrave-drill-point').textContent ?? '';
+    expect(point).toContain('Drill point.');
+    expect(point).toContain('118.0°');
+    expect(point).toContain('drill.pointAngleDeg');
+    expect(point).toContain('fallback');
+    expect(point).toContain('0.901 mm above the tip');
+  });
+
+  it('does not offer a drill to a job that engraves regions', () => {
+    show(defaultEngraveJob());
+    expect(optionValues()).not.toContain(DRILL_KEY);
+    // No drill is selected, so there is no point note to state.
+    expect(screen.queryByTestId('engrave-drill-point')).toBeNull();
+  });
+
+  it('keeps a selected drill listed in a mixed job and says why that pairing is refused', () => {
+    const job = defaultEngraveJob();
+    job.drills = [HOLE];
+    job.toolKey = DRILL_KEY;
+    show(job);
+    // The select must always have its own value among its options.
+    expect(optionValues()).toContain(DRILL_KEY);
+    expand('engrave-drill');
+    const finding = screen.getByTestId('engrave-drill-finding-0-drill-mixed-tools');
+    expect(finding.textContent).toContain('drilled holes only');
+  });
+});
+
 // #445 phase B3: the thread row (B1) is reachable from the panel here. The row's own patch contract
 // is `engraveThreadRow.spec.tsx`'s; what these cases pin is the WIRING — the menu entry, the count,
 // the fold, the removal's undo — so "a person can add a thread" stops being an unverified claim.

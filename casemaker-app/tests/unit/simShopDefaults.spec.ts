@@ -132,6 +132,25 @@ describe('the sim’s shop defaults (#451)', () => {
       rotaryPitchDeg: COLUMN_ROTARY_PITCH_FALLBACK_DEG,
     });
   });
+
+  // #434 — a drill program hands over the point angle its PLAN used, so the sweep states the same
+  // point the CAM planned rather than re-reading a setting that may have changed since.
+  it('a caller’s drill point override reaches the worker and beats the shop’s own reading', async () => {
+    chosen({ 'drill.pointAngleDeg': 135 });
+    const { client, seen } = captureClient();
+    setSimClientLoader(async () => client);
+    const override = { deg: 118, source: 'the drill program’s plan' };
+    await useSimStore.getState().loadProgram('G0 X0 Y0 Z1\n', setup(), flatEndMill(1), null, null, [], override);
+    expect(seen[0]).toMatchObject({ drillPointDefault: override });
+  });
+
+  it('without an override the drill point is the location’s reading (#434)', async () => {
+    chosen({ 'drill.pointAngleDeg': 135 });
+    const { client, seen } = captureClient();
+    setSimClientLoader(async () => client);
+    await load();
+    expect(seen[0]).toMatchObject({ drillPointDefault: { deg: 135, source: 'chosen' } });
+  });
 });
 
 /** A minimal Timeline good enough for `columnSweep` (it reads checkpoints, events, stateAt, airMoves). */
