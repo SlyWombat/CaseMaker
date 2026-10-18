@@ -24,7 +24,12 @@
 import { readDefault, type ShopDefaults } from '@/platform/defaultsClient';
 import { HOP_Z, SAFE_Z, estimateCycleSeconds, toolNumberFor, type CamMove, type CamOperation, type RapidEstimate, type ToolpathIR } from './ir';
 import { orderHolesNearest, peckDepths } from './drill';
-import { drillPointAngle, type Tool } from '../tool';
+import { drillPointAngle, pointLength, type Tool } from '../tool';
+
+// The point's geometry is `tool.ts`': `jobSetup`'s depth checks need it too, and must not import
+// this module (whose `drillSettings` pulls the defaults client into the worker's realm). Re-exported
+// here so every existing `from '@/engine/cnc/cam/drillBit'` import keeps working.
+export { pointLength };
 
 const r3 = (n: number) => Math.round(n * 1000) / 1000;
 
@@ -101,11 +106,6 @@ export interface DrillBitPlan {
 }
 
 export type DrillBitResult = { ok: true; plan: DrillBitPlan } | { ok: false; reason: string };
-
-/** The tip's depth below a full-diameter point: `(d / 2) / tan(angle / 2)`. */
-export function pointLength(diameter: number, includedAngleDeg: number): number {
-  return diameter / 2 / Math.tan(((includedAngleDeg / 2) * Math.PI) / 180);
-}
 
 /** The drill's cutting diameter: the record's tip diameter, else its diameter. */
 function drillDiameter(tool: Tool): number | null {

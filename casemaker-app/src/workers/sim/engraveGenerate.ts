@@ -45,6 +45,7 @@ import { jobMachine, type MachineCalibration } from '@/engine/cnc/calibration';
 import { feedsFor, type FeedsEntry, type FeedsResult, type FeedCatalogueRow } from '@/engine/cnc/feeds';
 import { cuttingDiameter, cuttingForTrace, traceRadiusAt, type Tool } from '@/engine/cnc/tool';
 import { threadMillIR, threadSettings, type ThreadMillPlan, type ThreadSettingsResult } from '@/engine/cnc/cam/threadMill';
+import { drillBitIR, drillSettings, type DrillBitPlan, type DrillSettings } from '@/engine/cnc/cam/drillBit';
 import type { ShopDefaults } from '@/platform/defaultsClient';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import type { ConditionSummary } from '@/engine/cnc/toolCondition';
@@ -182,6 +183,15 @@ export interface EngraveShopOpts {
     overlap: { value: number; source: RestSettingSource };
     thirdToolPct: { value: number; source: RestSettingSource };
   } | null;
+  /**
+   * #434 — the drill-bit numbers (`drill.peckDiameters`, `drill.peckClearanceMm`,
+   * `drill.pointAngleDeg`, `drill.plungeFeed`, `drill.spindleRpm`) with each one's source,
+   * resolved on the CALLER's side by `drillSettings(shopDefaults)` exactly as `rest` is. The
+   * worker plans a drill program and states the point angle its findings used from this reading;
+   * absent/null falls back to `drillSettings(shop.defaults)` and then to the labelled fallbacks,
+   * so an old caller states `fallback` rather than inventing a number.
+   */
+  drill?: { settings: DrillSettings; sources: Record<keyof DrillSettings, string> } | null;
 }
 
 /** A stage refusal with its reason, so the panel can list it under the right row. */
@@ -249,6 +259,27 @@ export interface EngraveProgram {
   /** FNV-1a over `nc` — `programHash` in `engine/cnc/programHash.ts`. */
   programHash: string;
   cam: EngraveCamSummary | null;
+  /**
+   * #434 — the drill facts when THIS program is the drill bit's, so a caller describing program N
+   * (the run plan, a per-program sheet) can name its `drill.*` numbers. Null on every other file.
+   */
+  drill?: DrillProgramFacts | null;
+}
+
+/**
+ * #434 — what the DRILL PROGRAM cut, and with which numbers. One entry per drill item the
+ * program carries (a drill program's items are its drills), in document order, plus the settings
+ * the planner read and each one's source, so the run sheet prints provenance rather than
+ * re-resolving the shop's defaults.
+ *
+ * `simDrillPoint` is the point default `planDrillBit` used (`SimLoadOpts.drillPointDefault`), so
+ * the column engine sweeps the point the CAM planned instead of re-reading the setting.
+ */
+export interface DrillProgramFacts {
+  settings: DrillSettings;
+  sources: Record<keyof DrillSettings, string>;
+  plans: (DrillBitPlan & { id: string; name: string })[];
+  simDrillPoint: { deg: number; source: string };
 }
 
 export interface EngraveGenerated {
@@ -352,6 +383,13 @@ export interface EngraveGenerated {
    * cut — the sheet then has no second program to describe.
    */
   restPass?: RestPassFacts | null;
+  /**
+   * #434 — what the DRILL program cut: one plan per drill item, the settings and their sources,
+   * and the point default the plan used. Present only when this result is the drill bit's own
+   * program (a `(setup, drill)` entry); absent/null on every other program, so the run sheet's
+   * drill section describes the file that actually holds the holes.
+   */
+  drill?: DrillProgramFacts | null;
   /**
    * The regions the CAM cut and the oracle must match (#206 §3): each region item's opened
    * polygons, each drill's discs, and — since #287 — each single-line trace's swept region.
@@ -833,8 +871,12 @@ export function engraveRegions(
   // `job.sacrificial` is threaded so the generate path's `vise-grip-shallow` judges what the
   // jaws actually grip (#213 §2), not the raw stock: the argument `validateVise` has accepted
   // since `454110a` but this call never passed.
+  // #434 — the point angle the DRILL findings are judged with: the caller's resolved settings,
+  // else the labelled fallback (never a silent literal). It is the same reading `planDrillBit`
+  // takes, so the depth a finding accepts and the depth a program cuts cannot disagree.
+  const drillResolved = shop.drill ?? drillSettings(shop.defaults ?? null);
   const findings = dedupeFindings([
-    ...validateJob(job),
+    ...validateJob(job, { deg: drillResolved.settings.pointAngleDeg, source: drillResolved.sources.pointAngleDeg }),
     ...validateVise(job.stock, job.workholding.vise, job.sacrificial),
     ...engFindings,
     ...metalLineFindings(job, tool),
@@ -862,16 +904,23 @@ export function engraveRegions(
   // and the oracle see it exactly as the CAM will cut it. A `through` hole is refused by
   // `drill-through-unavailable` before the pipeline reaches CAM, so it contributes no region —
   // but a job that still carried one here would cut a floor, never break through.
+  //
+  // #434 — a DRILL BIT is refused by `cuttingForTrace` (no flat radius), but its discs are the
+  // FULL diameter below the point, so the region takes `cuttingDiameter / 2`: the preview and the
+  // oracle then see the hole the bit cuts, not an empty entry.
+  const drillToolRadius =
+    tool !== null && tool.shape === 'drill' ? (cuttingDiameter(tool) ?? 0) / 2 || null : null;
   for (const d of plan.drills) {
     if (d.through) continue;
+    const drillRadius = radius ?? drillToolRadius;
     regions.push({
       id: d.id,
       text: '',
       // The diameter is only known once the tool is resolved, so the region builder appends it —
       // the same division of labour `toPartPlan` documents (#220).
-      name: radius === null ? d.name : `${d.name} ⌀${radius * 2}`,
+      name: drillRadius === null ? d.name : `${d.name} ⌀${drillRadius * 2}`,
       depth: d.depth,
-      polygons: radius === null ? [] : drillPolygons(tl, d.holes, radius),
+      polygons: drillRadius === null ? [] : drillPolygons(tl, d.holes, drillRadius),
       drill: { holes: d.holes.map(([x, y]) => [x, y] as [number, number]) },
     });
   }
@@ -1833,62 +1882,78 @@ export function engraveGenerate(
   for (let s = 0; s < setups.length; s++) {
     const setup = setups[s]!;
     const group = refs.filter((ref) => ref.setupIndex === s + 1);
-    if (group.length <= 1) {
-      const ref = group[0];
-      if (ref === undefined) continue;
-      // Decision 4 — the vacuum words are spread across the RUN: on in the first program, off in
-      // the last, neither in the ones between. One program is the whole run. These are provisional
-      // while the rest pass decides how many files the run really has; `posted` settles them below.
-      const span = spanAt(cursor);
-      const subTool = toolForProgram(ref, job, tool, shop);
-      const make = (nextSpan: VacuumSpan): OneProgram =>
-        generateOneProgram(
-          tl,
-          jobForSetup(job, ref, subTool),
-          subTool,
-          catalogue,
-          calibration,
-          margins,
-          shop,
-          nextSpan,
-          cursor === 0,
-        );
-      const one = make(span);
-      attempts.push(one);
-      if (one.ok && one.nc !== null && one.verify !== null) posted.push({ ref, one, make, span });
-      cursor += 1;
-      continue;
+    // #434 — A DRILL BIT IS NEVER A REST CUTTER. The setup's refs are partitioned into maximal
+    // runs that keep their order: a drill ref is ONE program in place, and a run of end-mill refs
+    // takes #472's model exactly as before (one program, or rough + measured rest). Partitioning
+    // rather than special-casing the whole group keeps the (setup, tool) list the one split — the
+    // drill is just another program in it — and leaves the rest-pass geometry untouched.
+    const segments: { drill: boolean; refs: JobProgramRef[] }[] = [];
+    for (const ref of group) {
+      const drill = toolForProgram(ref, job, tool, shop)?.shape === 'drill';
+      const last = segments.at(-1);
+      if (last !== undefined && last.drill === drill) last.refs.push(ref);
+      else segments.push({ drill, refs: [ref] });
     }
 
-    const roughTool = toolForProgram(group[0]!, job, tool, shop);
-    const restTools = group.slice(1).map((ref) => toolForProgram(ref, job, tool, shop));
-    const base = posted.length;
-    const pair = generateRestPair(
-      tl,
-      job,
-      setup,
-      group,
-      roughTool,
-      restTools,
-      catalogue,
-      calibration,
-      margins,
-      shop,
-      cursor === 0,
-      cursor,
-      refs.length,
-      restFindings,
-    );
-    attempts.push(...pair.attempts);
-    posted.push(...pair.posted);
-    if (pair.link !== null) {
-      restLink = {
-        ...pair.link,
-        roughIndex: base,
-        restIndex: base + pair.posted.indexOf(pair.link.rest),
-      };
+    for (const segment of segments) {
+      const segmentRefs = segment.refs;
+      if (segment.drill || segmentRefs.length <= 1) {
+        const ref = segmentRefs[0];
+        if (ref === undefined) continue;
+        // Decision 4 — the vacuum words are spread across the RUN: on in the first program, off in
+        // the last, neither in the ones between. One program is the whole run. These are provisional
+        // while the rest pass decides how many files the run really has; `posted` settles them below.
+        const span = spanAt(cursor);
+        const subTool = toolForProgram(ref, job, tool, shop);
+        const make = (nextSpan: VacuumSpan): OneProgram =>
+          generateOneProgram(
+            tl,
+            jobForSetup(job, ref, subTool),
+            subTool,
+            catalogue,
+            calibration,
+            margins,
+            shop,
+            nextSpan,
+            cursor === 0,
+          );
+        const one = make(span);
+        attempts.push(one);
+        if (one.ok && one.nc !== null && one.verify !== null) posted.push({ ref, one, make, span });
+        cursor += 1;
+        continue;
+      }
+
+      const roughTool = toolForProgram(segmentRefs[0]!, job, tool, shop);
+      const restTools = segmentRefs.slice(1).map((ref) => toolForProgram(ref, job, tool, shop));
+      const base = posted.length;
+      const pair = generateRestPair(
+        tl,
+        job,
+        setup,
+        segmentRefs,
+        roughTool,
+        restTools,
+        catalogue,
+        calibration,
+        margins,
+        shop,
+        cursor === 0,
+        cursor,
+        refs.length,
+        restFindings,
+      );
+      attempts.push(...pair.attempts);
+      posted.push(...pair.posted);
+      if (pair.link !== null) {
+        restLink = {
+          ...pair.link,
+          roughIndex: base,
+          restIndex: base + pair.posted.indexOf(pair.link.rest),
+        };
+      }
+      cursor = pair.cursor;
     }
-    cursor = pair.cursor;
   }
 
   // Settle the run's vacuum words against the programs that really posted. A rest pass that had
@@ -1946,6 +2011,7 @@ function programOf(one: Omit<EngraveGenerated, 'programs'>, ref: JobProgramRef):
     frameVerify: one.frameVerify,
     programHash: programHash(nc),
     cam: one.cam,
+    drill: one.drill ?? null,
   };
 }
 
@@ -2050,6 +2116,8 @@ function generateOneProgram(
       message?: string;
       threads?: ThreadMillPlan[] | null;
       threadMachining?: ThreadSettingsResult | null;
+      /** #434 — the drill program's facts, when this program is the drill bit's. */
+      drill?: DrillProgramFacts | null;
       /**
        * The facing file, when the stop happens AFTER it was built (#432 review R3 — the facing
        * program is produced before the engraving is posted, so a post refusal can now come second).
@@ -2074,6 +2142,7 @@ function generateOneProgram(
       feeds: extra?.feeds ?? null,
       threads: extra?.threads ?? null,
       threadMachining: extra?.threadMachining ?? null,
+      drill: extra?.drill ?? null,
       cam: null,
       nc: null,
       verify: null,
@@ -2108,13 +2177,77 @@ function generateOneProgram(
   let feeds: FeedsResult | null = null;
   let threadPlans: ThreadMillPlan[] | null = null;
   let threadMachining: ThreadSettingsResult | null = null;
+  let drillFacts: DrillProgramFacts | null = null;
   let ir: ToolpathIR;
   // #432 — the facing depth the plan carries, or 0 when the job does not face. It decides whether
   // the facing artefact is built at all; it never touches the ENGRAVING program, which stays in the
   // document's frame (Z0 = the faced surface) because the re-touch re-zeros Z there between the two
   // programs. Slice 3 orders the two; slice 4 is the re-touch itself.
   const facingDepth = plan.facing?.depth ?? 0;
-  if (plan.threads.length > 0) {
+  if (tool.shape === 'drill') {
+    // #434 — A DRILL BIT'S OWN PROGRAM. `cuttingForTrace` and `feedsFor` both refuse a drill (it is
+    // not a milling cutter), so this branch is taken BEFORE either. One operation per drill item,
+    // `planDrillBit` → `drillBitIR`, joined by `concatToolpathIR` — one tool, so one file — then
+    // posted, verified and framed exactly as any other program.
+    //
+    // The program cuts drilled holes ONLY: one file has one tool, and an engraver's work cannot be
+    // done by a bit's point. `validateJob`/`setupProgramFindings` refuse the pairing before this
+    // point on a document they see whole; this check guards the sub-job the split actually hands in.
+    const otherWork = plan.engraves.length + plan.traces.length + plan.threads.length;
+    if (otherWork > 0) {
+      return stop('findings', {
+        message:
+          `"${tool.name}" is a drill bit, so this program cuts drilled holes only; it also has ` +
+          `${otherWork} region, trace or thread item(s) to cut. Give that work to an end mill, in ` +
+          'its own setup.',
+      });
+    }
+    if (plan.drills.length === 0) {
+      return stop('findings', {
+        message: `"${tool.name}" is a drill bit, but this setup assigns it no holes to drill.`,
+      });
+    }
+    const resolvedDrill = shop.drill ?? drillSettings(shop.defaults ?? null);
+    const facts: DrillProgramFacts = {
+      settings: resolvedDrill.settings,
+      sources: resolvedDrill.sources,
+      plans: [],
+      simDrillPoint: {
+        deg: resolvedDrill.settings.pointAngleDeg,
+        source: resolvedDrill.sources.pointAngleDeg,
+      },
+    };
+    try {
+      const irs: ToolpathIR[] = [];
+      for (const item of plan.drills) {
+        const r = drillBitIR({
+          tool,
+          holes: item.holes,
+          // A through hole never reaches CAM (`drill-through-unavailable`, #218), so every hole
+          // this program may cut is blind: its FULL DIAMETER goes to the item's depth and the
+          // point carries the tip deeper (`planDrillBit`).
+          depth: { kind: 'blind', fullDiameterDepth: item.depth },
+          settings: resolvedDrill.settings,
+          pointAngleSource: resolvedDrill.sources.pointAngleDeg,
+          stock: { length: job.stock.length, width: job.stock.width },
+          name: item.name,
+          labelId: item.id,
+          // Every cut in this app runs with the vacuum on (#283); `cutOverride.air` is the job's
+          // own say, and the feeds table never states anything else.
+          air: job.cutOverride?.air ?? true,
+          rapid: mill.rapidEstimate,
+        });
+        if (!r.ok) return stop('cam', { message: r.reason, drill: facts });
+        facts.plans.push({ ...r.plan, id: item.id, name: item.name });
+        irs.push(r.ir);
+      }
+      // `concatToolpathIR` renumbers the operations from 1, which is its contract (#287).
+      ir = irs.slice(1).reduce((a, b) => concatToolpathIR(a, b), irs[0]!);
+      drillFacts = facts;
+    } catch (e) {
+      return stop('cam', { message: e instanceof Error ? e.message : String(e), drill: facts });
+    }
+  } else if (plan.threads.length > 0) {
     const resolved = threadSettings(shop.defaults ?? null, catalogue, job.stock.material, tool, mill);
     // Carried from here on, refusals included: even a run that stops still knows which numbers it
     // would have cut with and where they came from (#445 phase B's run sheet).
@@ -2277,7 +2410,7 @@ function generateOneProgram(
     const verify = verifyProgram(nc, { setup, machine: mill, tool, depthLimit: limit, minRapidZ, ...(limitReasonAt ? { limitReasonAt } : {}), ...mountCtx(shop.mount) });
     if (verify.findings.some((f) => f.severity === 'error')) {
       errors.push({ stage: 'verify', message: `${verify.findings.filter((f) => f.severity === 'error').length} verifier error(s)` });
-      return { ok: false, stage: 'verify', findings, feeds, threads: threadPlans, threadMachining, cam, nc, verify, frameNc: null, frameVerify: null, facingNc: null, facingVerify: null, facingToolKey: null, facingError: null, facingCam: null, predicted, errors };
+      return { ok: false, stage: 'verify', findings, feeds, threads: threadPlans, threadMachining, drill: drillFacts, cam, nc, verify, frameNc: null, frameVerify: null, facingNc: null, facingVerify: null, facingToolKey: null, facingError: null, facingCam: null, predicted, errors };
     }
 
     // 9. the frame file (#244): the job's XY extent traced in the air, beside the job. Produced by
@@ -2286,12 +2419,12 @@ function generateOneProgram(
     const frame = frameProgram(ir, ctx, mill, setup, tool, limit, shop.mount);
     if ('error' in frame) {
       errors.push({ stage: 'verify', message: `the frame file could not be produced: ${frame.error}` });
-      return { ok: false, stage: 'verify', findings, feeds, threads: threadPlans, threadMachining, cam, nc, verify, frameNc: null, frameVerify: null, facingNc: facing.nc, facingVerify: facing.verify, facingToolKey: facing.toolKey, facingError: facing.error, facingCam: facing.cam, predicted, errors };
+      return { ok: false, stage: 'verify', findings, feeds, threads: threadPlans, threadMachining, drill: drillFacts, cam, nc, verify, frameNc: null, frameVerify: null, facingNc: facing.nc, facingVerify: facing.verify, facingToolKey: facing.toolKey, facingError: facing.error, facingCam: facing.cam, predicted, errors };
     }
     const frameErrors = frame.verify.findings.filter((f) => f.severity === 'error');
     if (frameErrors.length > 0) {
       errors.push({ stage: 'verify', message: `the frame file has ${frameErrors.length} verifier error(s)` });
-      return { ok: false, stage: 'verify', findings, feeds, threads: threadPlans, threadMachining, cam, nc, verify, frameNc: frame.nc, frameVerify: frame.verify, facingNc: facing.nc, facingVerify: facing.verify, facingToolKey: facing.toolKey, facingError: facing.error, facingCam: facing.cam, predicted, errors };
+      return { ok: false, stage: 'verify', findings, feeds, threads: threadPlans, threadMachining, drill: drillFacts, cam, nc, verify, frameNc: frame.nc, frameVerify: frame.verify, facingNc: facing.nc, facingVerify: facing.verify, facingToolKey: facing.toolKey, facingError: facing.error, facingCam: facing.cam, predicted, errors };
     }
 
     return {
@@ -2301,6 +2434,7 @@ function generateOneProgram(
       feeds,
       threads: threadPlans,
       threadMachining,
+      drill: drillFacts,
       cam,
       nc,
       verify,

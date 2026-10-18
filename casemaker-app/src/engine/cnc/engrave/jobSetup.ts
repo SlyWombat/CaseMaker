@@ -1,7 +1,15 @@
 import { rectProfile } from '@/engine/compiler/profile';
 import type { MillProfile } from '@/engine/cnc/machine';
 import { getTools, toolForJob } from '@/engine/cnc/toolRegistry';
-import { cuttingDiameter, cuttingRadiusForSweep, traceRadiusAt, type Tool } from '@/engine/cnc/tool';
+import {
+  cuttingDiameter,
+  cuttingRadiusForSweep,
+  drillPointAngle,
+  pointLength,
+  traceRadiusAt,
+  DRILL_POINT_FALLBACK_DEG,
+  type Tool,
+} from '@/engine/cnc/tool';
 import { viseEnvelope } from '@/engine/cnc/fixture';
 import { validateSacrificial, viseJawShift } from '@/engine/cnc/sacrificial';
 import { stubSetup, type FixtureEnvelope, type Setup, type Workholding } from '@/engine/cnc/setup';
@@ -114,6 +122,10 @@ export type JobFindingCode =
   | 'plunge-unproven'
   | 'drill-too-deep'
   | 'drill-through-unavailable'
+  // #434 — a drill bit is the cutter of a DRILL-ONLY program. Hand-edited work that pairs one with
+  // a region, trace or thread is refused by name: a drill cannot open a region, and one program has
+  // one tool, so the other work has to move to a cutter that can make it.
+  | 'drill-mixed-tools'
   // Milled threads (#445, #434 phase 2). The same shape of data-plus-tool checks as the drills,
   // with the tool's own fit against the ISO thread added.
   | 'thread-wrong-tool'
@@ -410,8 +422,16 @@ export function toSetup(job: EngraveJob, machine: MillProfile, fixture?: Fixture
 /**
  * Pure checks on the job as data. Geometry-dependent findings — an item hanging off the
  * stock, strokes too thin for the cutter — need the worker and are #201.
+ *
+ * `drillPoint` is the shop's `drill.pointAngleDeg` reading, when the caller has one (#434). A drill
+ * bit's tip is a POINT LENGTH below its full diameter, so the depth and flute checks need the
+ * included angle. The worker passes the located reading (`shop.drill` / `shop.defaults`); a caller
+ * with no location gets the same labelled fallback the CAM uses, never an unlabelled literal.
  */
-export function validateJob(job: EngraveJob): JobFinding[] {
+export function validateJob(
+  job: EngraveJob,
+  drillPoint: { deg: number; source: string } | null = null,
+): JobFinding[] {
   const findings: JobFinding[] = [];
   const all: EngraveAnyItem[] = [
     ...job.labels,
@@ -478,15 +498,37 @@ export function validateJob(job: EngraveJob): JobFinding[] {
   }
 
   // Plunge drills (#220): depth, reach, stock containment, a centre-cutting tool and the
-  // through-cut gate. The tool is resolved once here; `drill-outside-stock` and the
-  // centre-cutting check need its radius, and skip cleanly when the job names no flat cutter
-  // (the `tool-missing`/feeds stage reports that instead).
+  // through-cut gate. The tool is resolved once here. A DRILL BIT (#434) is judged by its own
+  // geometry: its full diameter is `cuttingDiameter` (the tip diameter when its record states one),
+  // and its tip is a POINT LENGTH below that full diameter — so reach uses the diameter and depth
+  // uses the point angle, not the flat cutter's radius. `cuttingRadiusForSweep` refuses a drill, so
+  // the two shapes take separate answers here while the checks themselves stay one block.
   const drillTool = jobTool(job);
-  const drillRadiusResult = drillTool ? cuttingRadiusForSweep(drillTool) : null;
-  const drillRadius = drillRadiusResult && drillRadiusResult.ok ? drillRadiusResult.radius : null;
+  const drillIsBit = drillTool !== null && drillTool.shape === 'drill';
+  const drillDiameter = drillIsBit ? cuttingDiameter(drillTool) : null;
+  const drillRadiusResult = drillTool && !drillIsBit ? cuttingRadiusForSweep(drillTool) : null;
+  const drillRadius = drillIsBit
+    ? drillDiameter !== null && drillDiameter > 0
+      ? drillDiameter / 2
+      : null
+    : drillRadiusResult && drillRadiusResult.ok
+      ? drillRadiusResult.radius
+      : null;
+  // The angle's fallback is the shop's reading when the caller had one; otherwise the same chosen
+  // 118° the CAM uses, labelled as a fallback so a message never presents it as measured.
+  const drillAngle = drillIsBit
+    ? drillPointAngle(drillTool, drillPoint ?? { deg: DRILL_POINT_FALLBACK_DEG, source: 'fallback' })
+    : null;
+  const drillPointLength =
+    drillIsBit && drillAngle !== null && drillAngle.ok && drillDiameter !== null && drillDiameter > 0
+      ? pointLength(drillDiameter, drillAngle.deg)
+      : 0;
   const { length, width } = job.stock;
   for (const drill of enabledDrills) {
     const who = drillOperationName(drill);
+    // A drill bit's tip is the deepest point of the hole; a flat end mill's floor is its depth.
+    const tipDepth = drill.depth + drillPointLength;
+    const depthAtFloor = drillIsBit ? tipDepth : drill.depth;
     if (drill.through) {
       findings.push({
         severity: 'error',
@@ -497,15 +539,18 @@ export function validateJob(job: EngraveJob): JobFinding[] {
           `through-cut depth rules (#218); neither is in yet, so the hole is refused rather than ` +
           `cut into the vise.`,
       });
-    } else if (drill.depth > floorAllowed) {
-      const remaining = thickness - facingDepth - drill.depth;
+    } else if (depthAtFloor > floorAllowed) {
+      const remaining = thickness - facingDepth - depthAtFloor;
       findings.push({
         severity: 'error',
         code: 'depth-exceeds-stock',
         labelId: drill.id,
-        message:
-          `${who} drills ${drill.depth} mm deep; only ${remaining} mm of floor would remain on a ` +
-          `${thickness} mm stock, below the ${job.minFloor} mm minimum.`,
+        message: drillIsBit
+          ? `${who}'s tip reaches ${fmt3(tipDepth)} mm (${fmt3(drill.depth)} mm of full diameter ` +
+            `plus the ${fmt3(drillPointLength)} mm point); only ${fmt3(remaining)} mm of floor would ` +
+            `remain on a ${thickness} mm stock, below the ${job.minFloor} mm minimum.`
+          : `${who} drills ${drill.depth} mm deep; only ${remaining} mm of floor would remain on a ` +
+            `${thickness} mm stock, below the ${job.minFloor} mm minimum.`,
       });
     }
     // A hole is a disc of the cutter's radius, so it is off the stock when its RIM crosses an
@@ -685,7 +730,10 @@ export function validateJob(job: EngraveJob): JobFinding[] {
           `The job drills, but "${drillTool.name}" is recorded as NOT centre-cutting: it cannot ` +
           `plunge straight down without a pilot hole.`,
       });
-    } else if (drillTool.centreCutting === null) {
+    } else if (drillTool.centreCutting === null && !drillIsBit) {
+      // A DRILL BIT is centre-cutting by construction (#434): its point is the cutting end, so
+      // the flat cutter's unproven-plunge warning would be a false doubt. The explicit `false`
+      // above still fires: a record that says so is a contradiction worth showing.
       findings.push({
         severity: 'warning',
         code: 'plunge-unproven',
@@ -695,19 +743,48 @@ export function validateJob(job: EngraveJob): JobFinding[] {
           `(the .nc header has no such field, #220); #208 A1 settles it for cutters that are owned.`,
       });
     }
-    // A peck must fit inside the flute: beyond it the chips have nowhere to go.
+    // A peck must fit inside the flute: beyond it the chips have nowhere to go. A drill bit's
+    // TIP is the deepest point, so the whole tip depth — hole plus point — has to fit.
     if (drillTool.fluteLength !== null && drillTool.fluteLength > 0) {
       for (const drill of enabledDrills) {
-        if (!drill.through && drill.depth > drillTool.fluteLength) {
+        const needed = drill.depth + drillPointLength;
+        if (!drill.through && needed > drillTool.fluteLength) {
           findings.push({
             severity: 'error',
             code: 'drill-too-deep',
             labelId: drill.id,
-            message:
-              `${drillOperationName(drill)} drills ${drill.depth} mm, past the ${drillTool.fluteLength} mm ` +
-              `flute of "${drillTool.name}": once the flutes are buried, chips cannot clear.`,
+            message: drillIsBit
+              ? `${drillOperationName(drill)} needs ${fmt3(needed)} mm of flute (the ${fmt3(drill.depth)} mm ` +
+                `hole plus its ${fmt3(drillPointLength)} mm point), past the ${drillTool.fluteLength} mm ` +
+                `flute of "${drillTool.name}": once the flutes are buried, chips cannot clear.`
+              : `${drillOperationName(drill)} drills ${drill.depth} mm, past the ${drillTool.fluteLength} mm ` +
+                `flute of "${drillTool.name}": once the flutes are buried, chips cannot clear.`,
           });
         }
+      }
+    }
+    // #434 — a drill bit is the cutter of a DRILL-ONLY program. This is checked here, on the job's
+    // own document, only when there is no `setups[]`: a setup job's cutters are per setup and the
+    // generator judges each setup's sub-job (which carries one materialised cutter) with this same
+    // function. A legacy document pairing the drill with a region, trace or thread would otherwise
+    // reach the drill branch with work the bit cannot do.
+    if (drillIsBit && job.setups === undefined) {
+      const otherWork: string[] = [
+        ...enabled.map(itemLabel),
+        ...enabledTraces.map(traceOperationName),
+        ...enabledThreads.map(threadOperationName),
+      ];
+      if (otherWork.length > 0 && !findings.some((f) => f.code === 'drill-mixed-tools')) {
+        findings.push({
+          severity: 'error',
+          code: 'drill-mixed-tools',
+          labelId: enabledDrills[0]?.id ?? enabled[0]?.id ?? enabledTraces[0]?.id ?? enabledThreads[0]?.id,
+          message:
+            `"${drillTool.name}" is a drill bit, but this job also cuts ${otherWork[0]}` +
+            `${otherWork.length > 1 ? ` and ${otherWork.length - 1} other item(s)` : ''}. A drill ` +
+            `program cuts drilled holes only; give the other work to an end mill in another setup ` +
+            `or cutter.`,
+        });
       }
     }
   }
@@ -906,6 +983,18 @@ function words(ids: readonly string[]): string {
  */
 export function setupProgramFindings(job: EngraveJob): JobFinding[] {
   const findings: JobFinding[] = [];
+  // Every enabled cutting item by id, for the drill-tool check below (#434): a drill bit owns
+  // drills, never a region/trace/thread. Disabled and construction items are not work.
+  const workById = new Map<string, string>();
+  for (const item of [...job.labels, ...job.shapes, ...(job.combined ?? []), ...(job.vectors ?? [])]) {
+    if (item.enabled && !item.construction) workById.set(item.id, itemLabel(item));
+  }
+  for (const trace of job.traces ?? []) {
+    if (trace.enabled && !trace.construction) workById.set(trace.id, traceOperationName(trace));
+  }
+  for (const thread of job.threads ?? []) {
+    if (thread.enabled) workById.set(thread.id, threadOperationName(thread));
+  }
   jobSetups(job).forEach((setup, i) => {
     const tools = setupTools(setup, job);
     if (setup.tools.length === 0) {
@@ -980,6 +1069,30 @@ export function setupProgramFindings(job: EngraveJob): JobFinding[] {
           'program to measure the rest from. Assign it at least one item, or remove it.',
       });
     }
+
+    // #434 — a DRILL BIT cuts that setup's drilled holes only. Its program is the drill's own
+    // (#434), not a clearing/rest pass: a region, trace or thread assigned to it is work the bit
+    // cannot do, and one program has one tool. The generator's sub-job check sees the same fact
+    // with the cutter materialised; this one lets the panel say it before Generate.
+    tools.forEach((toolKey, toolIndex) => {
+      const entryTool = toolForJob(
+        { toolKey, ...(toolKey === job.toolKey && job.tool !== undefined && job.tool !== null ? { tool: job.tool } : {}) },
+        getTools(),
+      );
+      if (entryTool?.shape !== 'drill') return;
+      const other = toolItemsFor(setup, toolKey, toolIndex).filter((id) => itemSet.has(id) && workById.has(id));
+      if (other.length === 0) return;
+      findings.push({
+        severity: 'error',
+        code: 'drill-mixed-tools',
+        labelId: other[0],
+        message:
+          `Setup ${i + 1} assigns ${workById.get(other[0]!)}` +
+          `${other.length > 1 ? ` and ${other.length - 1} other item(s)` : ''} to the drill ` +
+          `"${entryTool.name}". A drill program cuts drilled holes only; assign the other work to ` +
+          `an end mill, or put it in its own setup.`,
+      });
+    });
   });
   return findings;
 }

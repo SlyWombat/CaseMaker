@@ -36,6 +36,7 @@ import { useSettingsStore } from './settingsStore';
 import { useEngraveJobStore } from './engraveJobStore';
 import { useSimStore } from './simStore';
 import { shopDefault, useShopDefaultsStore } from './shopDefaultsStore';
+import { drillSettings } from '@/engine/cnc/cam/drillBit';
 import type { EngraveRunPhase } from './engraveRunGate';
 
 /**
@@ -199,6 +200,11 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
         overlap: shopDefault('rest.overlapMm'),
         thirdToolPct: shopDefault('rest.thirdToolPct'),
       },
+      // #434 — the drill numbers (`drill.peckDiameters`, `drill.peckClearanceMm`,
+      // `drill.pointAngleDeg`, `drill.plungeFeed`, `drill.spindleRpm`) from the SAME snapshot,
+      // with each one's source. A drill program's plan and its depth findings read this reading
+      // rather than re-resolving the location in the worker.
+      drill: drillSettings(shopDefaults),
     };
 
     // The cutter, resolved ONCE on this side (#305): the sim worker cannot see the registry, so
@@ -265,6 +271,9 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
           // The threads this program mills (#445 §4): plain dimensions the column engine can state
           // the annular band from. Empty for every non-thread job, leaving today's behaviour.
           generated.threads?.flatMap((t) => t.simThreads) ?? [],
+          // #434 — the point angle the drill PLAN used, when this program is a drill bit's: the
+          // column engine sweeps the point the CAM planned instead of re-reading the setting.
+          generated.drill?.simDrillPoint ?? null,
         );
     } catch (e) {
       if (mine === seq) set({ phase: 'blocked', error: e instanceof Error ? e.message : String(e) });

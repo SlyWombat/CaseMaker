@@ -297,7 +297,28 @@ export function traceRadiusAt(tool: Tool, depth: number): number | null {
 /** The drill-point angles a drill can have, degrees included — the one range the CAM and the sim check. */
 export const DRILL_POINT_RANGE_DEG = { min: 60, max: 150 } as const;
 
+/**
+ * The included point angle a drill is assumed to have when neither its own record nor the shop's
+ * `drill.pointAngleDeg` states one (chosen, not measured — #434 phase 1). It lives here, beside the
+ * range and the resolver, rather than in `cam/drillBit.ts`, because `engrave/jobSetup.ts` needs the
+ * same number for its depth checks and must not import the defaults client (the worker runs it).
+ * `KNOWN_DEFAULTS`' fallback is this same value; the two are pinned equal in `camDrillBit.spec.ts`.
+ */
+export const DRILL_POINT_FALLBACK_DEG = 118;
+
 export type DrillPointResult = { ok: true; deg: number; from: string; stated: boolean } | { ok: false; reason: string };
+
+/**
+ * The tip's depth below the full-diameter point: `(d / 2) / tan(angle / 2)`.
+ *
+ * The geometry is the drill's, not the CAM's: the planner states a blind hole's tip depth with it,
+ * the simulator sweeps the point with it, and `validateJob` holds the tip to the blank's floor with
+ * it. It is here for the same reason {@link DRILL_POINT_FALLBACK_DEG} is: `jobSetup` needs it and
+ * importing `cam/drillBit` there would drag `defaultsClient` into the worker's realm.
+ */
+export function pointLength(diameter: number, includedAngleDeg: number): number {
+  return diameter / 2 / Math.tan(((includedAngleDeg / 2) * Math.PI) / 180);
+}
 
 /**
  * A drill's INCLUDED point angle, and where it came from (#382, #434) — or why there is none.

@@ -159,6 +159,12 @@ export interface SimState {
     calibration?: MachineCalibration | null,
     /** The threads the program mills (#445 §4), as the CAM planned them; plain data, consumed by the sweep. */
     threads?: readonly SimThreadSpec[],
+    /**
+     * #434 — the drill point default the PROGRAM was planned with, so the column engine sweeps the
+     * point the CAM used instead of re-reading the setting. Omitted/null keeps the shop read
+     * (`drill.pointAngleDeg`), which is what every non-drill program does.
+     */
+    drillPointDefault?: { deg: number; source: string } | null,
   ): Promise<void>;
   /** Run the last load again with twice the time limit (#194). No-op when nothing has been loaded. */
   retryWithLongerBudget(): Promise<void>;
@@ -346,13 +352,15 @@ export const useSimStore = create<SimState>()((set, get) => {
     ...EMPTY,
     speed: startingSpeed(),
     budgetMs: startingBudgetMs(),
-    async loadProgram(gcodeText, setup, tool, machineId, calibrationOverride, threads = []) {
+    async loadProgram(gcodeText, setup, tool, machineId, calibrationOverride, threads = [], drillPointDefault = null) {
       // The saved read of the machine's own frame, if the user has one (#279). Resolved HERE so
       // every load path — a panel, the engrave run, the QA harness — simulates the same machine,
       // and so a retry or a restart cannot drift onto a different frame than the job was loaded on.
       const calibration =
         calibrationOverride !== undefined ? calibrationOverride : (useSettingsStore.getState().machineCalibration ?? null);
-      const point = shopDefault('drill.pointAngleDeg');
+      // #434 — a drill program hands the point its PLAN used; any other load reads the shop's.
+      const shopPoint = shopDefault('drill.pointAngleDeg');
+      const point = drillPointDefault ?? { deg: shopPoint.value, source: shopPoint.source };
       const flatPitch = shopDefault('sim.columnFlatPitchYMm');
       // The rest of the sim's chosen numbers (#451), read at the same moment as the flat pitch:
       // the worker cannot read the location, so these are the caller's to send.
@@ -369,7 +377,7 @@ export const useSimStore = create<SimState>()((set, get) => {
         tool,
         machineId,
         calibration,
-        drillPointDefault: { deg: point.value, source: point.source },
+        drillPointDefault: { deg: point.deg, source: point.source },
         flatPitchYMm: flatPitch.value,
         columnPitchXMm: pitchX.value,
         rotaryPitchDeg: rotaryPitch.value,

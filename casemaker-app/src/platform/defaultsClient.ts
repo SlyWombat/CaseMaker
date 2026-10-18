@@ -17,6 +17,7 @@
 
 import { z } from 'zod';
 import { GRIP_MIN } from '@/engine/cnc/fixture';
+import { DRILL_POINT_FALLBACK_DEG } from '@/engine/cnc/tool';
 import { REST_MACHINING_FALLBACK } from '@/engine/cnc/engrave/restSettings';
 import {
   houseRequest,
@@ -216,7 +217,7 @@ export const KNOWN_DEFAULTS: Readonly<Record<string, KnownDefault>> = {
   // #434 — peck drilling with drill bits. The pecks are chosen; the feeds are our own placeholders.
   'drill.peckDiameters': { label: 'peck depth, in drill diameters (chosen)', unit: 'x', rule: z.number().min(0.1).max(10), fallback: 1 },
   'drill.peckClearanceMm': { label: 'peck re-entry clearance (chosen)', unit: 'mm', rule: z.number().min(0.05).max(5), fallback: 0.5 },
-  'drill.pointAngleDeg': { label: 'drill point angle when unstated (chosen)', unit: 'deg', rule: z.number().min(60).max(150), fallback: 118 },
+  'drill.pointAngleDeg': { label: 'drill point angle when unstated (chosen)', unit: 'deg', rule: z.number().min(60).max(150), fallback: DRILL_POINT_FALLBACK_DEG },
   'drill.plungeFeed': { label: 'drilling feed (placeholder)', unit: 'mm/min', rule: z.number().min(5).max(2000), fallback: 100 },
   'drill.spindleRpm': { label: 'drilling spindle speed (placeholder)', unit: 'rpm', rule: z.number().min(1000).max(30000), fallback: 10000 },
   // #445 — thread milling. The pass, the ramp, the run-out and the chord are chosen; the feeds and

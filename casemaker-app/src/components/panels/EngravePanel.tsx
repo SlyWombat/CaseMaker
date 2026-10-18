@@ -34,7 +34,8 @@ import { jobSplit } from '@/engine/cnc/engrave/depthIntent';
 import { jobMachine } from '@/engine/cnc/calibration';
 import { useToolRegistry } from '@/hooks/useToolRegistry';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
-import { cuttingDiameter } from '@/engine/cnc/tool';
+import { cuttingDiameter, drillPointAngle, pointLength } from '@/engine/cnc/tool';
+import { drillSettings } from '@/engine/cnc/cam/drillBit';
 import { caseWordsForKey } from '@/engine/cnc/toolCondition';
 import { dedupeFindings, jobTool, validateJob, type JobFinding } from '@/engine/cnc/engrave/jobSetup';
 import {
@@ -639,6 +640,16 @@ export function EngravePanel(): JSX.Element {
   // this is re-derived here; the panel only places the numbers the CAM already states.
   const cone = tool ? vCone(tool) : null;
   const hasRegions = hasRegionItems(job);
+  // #434 — A DRILL BIT IS A DRILL-ONLY CUTTER. One program has one tool, so the select offers the
+  // registry's drills only when the job's cutting work is all drilled holes; the cutter already
+  // selected stays listed so the select's value is always one of its options. A hand-edited job
+  // that pairs a drill with other work is refused by `drill-mixed-tools`, not silently offered.
+  const drillOnly =
+    (job.drills ?? []).some((d) => d.enabled) &&
+    !hasRegions &&
+    !(job.traces ?? []).some((t) => t.enabled) &&
+    !(job.threads ?? []).some((t) => t.enabled);
+  const toolOptions = tools.filter((e) => e.tool.shape !== 'drill' || e.key === job.toolKey || drillOnly);
   const vCarveJob = cone !== null && hasRegions;
   // The preview may still be resolving. If the blank is a PRINT and no preview has landed yet, the
   // plane is UNKNOWN — showing the no-film arithmetic here would be a wrong number, not a
@@ -700,6 +711,17 @@ export function EngravePanel(): JSX.Element {
   // the sentence under it come from the same `facingDepthDefault` call the wizard's seed makes; the
   // panel adds the one input the wizard cannot have at stock-choice time — a measured top (R9).
   const shopDefaults = useShopDefaultsStore((s) => s.defaults);
+  // #434 — the point this drill is planned with, and where its angle came from: the same reading
+  // the CAM (`planDrillBit`) and the simulation take — the drill's own record, else the shop's
+  // `drill.pointAngleDeg`, with that reading's source.
+  const drillShop = drillSettings(shopDefaults ?? null);
+  const drillPoint =
+    tool !== null && tool.shape === 'drill'
+      ? drillPointAngle(tool, { deg: drillShop.settings.pointAngleDeg, source: drillShop.sources.pointAngleDeg })
+      : null;
+  const drillDiameter = tool !== null && tool.shape === 'drill' ? cuttingDiameter(tool) : null;
+  const drillTipLength =
+    drillPoint?.ok === true && drillDiameter !== null ? pointLength(drillDiameter, drillPoint.deg) : null;
   const finish = finishOf(job);
   // #474/#493 — no plastic is faced (wood and metal only), so the material refuses it whatever the
   // finish says; the panel withholds the choice rather than merely seeding it off.
@@ -2094,13 +2116,34 @@ export function EngravePanel(): JSX.Element {
         <option value="" disabled>
           Choose a cutter…
         </option>
-        {tools.map((e) => (
+        {toolOptions.map((e) => (
           <option key={e.key} value={e.key} title={e.provenance}>
             {toolOptionLabel(e)}
           </option>
         ))}
       </select>
       {job.sources?.tool && <SourceTag source={job.sources.tool} testid="engrave-tool-source" />}
+      {/* #434 — a drill's cutting end is a point, and the hole is its full diameter only a point
+          length above the tip. The panel states the angle and where it came from, the same reading
+          the worker plans and the simulation sweeps. */}
+      {tool?.shape === 'drill' && (
+        <p style={MUTED} data-testid="engrave-drill-point">
+          {drillPoint?.ok === true ? (
+            <>
+              <b>Drill point.</b> {fmtDiameter(drillPoint.deg)}° included — {drillPoint.from}.
+              {drillTipLength !== null && (
+                <>
+                  {' '}
+                  The hole is its full ⌀{fmtDiameter(drillDiameter ?? 0)} mm only{' '}
+                  {mm3(drillTipLength)} mm above the tip.
+                </>
+              )}
+            </>
+          ) : (
+            <>The drill’s point: {drillPoint?.reason ?? 'the point angle could not be read'}.</>
+          )}
+        </p>
+      )}
       {diameter !== null && !vCarveJob && (
         <p style={MUTED} data-testid="engrave-thin-strokes">
           Strokes thinner than {fmtDiameter(diameter)} mm cannot be cut — the cutter opens them away entirely.

@@ -16,6 +16,7 @@ import { create } from 'zustand';
 import type { EngraveJob, EngraveMargins } from '@/types/engraveJob';
 import type { EngravePreview } from '@/workers/sim/engravePreview';
 import type { EngraveShopOpts } from '@/workers/sim/engraveGenerate';
+import { drillSettings } from '@/engine/cnc/cam/drillBit';
 import { getTools } from '@/engine/cnc/toolRegistry';
 import { feedCatalogueRows, resolvedFeedsTable } from '@/engine/cnc/feeds';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
@@ -25,7 +26,7 @@ import { probeResiduals, type ProbeResiduals } from '@/engine/cnc/probePlan';
 import { effectiveMargins } from '@/engine/cnc/engrave/depthBounds';
 import { useEngraveJobStore } from './engraveJobStore';
 import { useSettingsStore } from './settingsStore';
-import { shopDefault } from './shopDefaultsStore';
+import { shopDefault, useShopDefaultsStore } from './shopDefaultsStore';
 
 export type EngravePreviewStatus = 'idle' | 'loading' | 'ready' | 'error';
 
@@ -114,6 +115,9 @@ export const useEngravePreviewStore = create<EngravePreviewState>()((set) => {
         inventoryConditions(),
         {
           lostDetailWarnRatio: shopDefault('engrave.lostDetailWarnRatio').value,
+          // #434 — the drill point angle (and the other `drill.*` numbers) with their sources, so
+          // the preview's depth findings are judged with the point the run would plan.
+          drill: drillSettings(useShopDefaultsStore.getState().defaults),
           // #450 slice 3 — the recommendation's feeds check must use the same table the run does.
           feeds: resolvedFeedsTable().table,
         },

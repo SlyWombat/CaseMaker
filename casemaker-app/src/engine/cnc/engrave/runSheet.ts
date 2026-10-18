@@ -153,6 +153,36 @@ export interface RunSheetCamSummary {
 }
 
 /**
+ * #434 — one drill operation's facts, structurally a `DrillBitPlan` (the fields this sheet reads).
+ * `id`/`name` identify the item the holes belong to; `angle.from` is the CAM's own provenance
+ * sentence for the point, so the sheet never re-resolves the shop's `drill.pointAngleDeg`.
+ */
+export interface RunSheetDrillPlan {
+  id: string;
+  name: string;
+  diameter: number;
+  angle: { deg: number; from: string };
+  pointLength: number;
+  tipDepth: number;
+  peck: number;
+  holes: readonly (readonly [number, number])[];
+}
+
+/** #434 — the drill program's settings, their per-key sources, and one plan per drilled item. */
+export interface RunSheetDrillFacts {
+  settings: {
+    peckDiameters: number;
+    peckClearanceMm: number;
+    pointAngleDeg: number;
+    plungeFeed: number;
+    spindleRpm: number;
+  };
+  sources: Record<'peckDiameters' | 'peckClearanceMm' | 'pointAngleDeg' | 'plungeFeed' | 'spindleRpm', string>;
+  plans: readonly RunSheetDrillPlan[];
+  simDrillPoint: { deg: number; source: string };
+}
+
+/**
  * The half of #206's `EngraveGenerated` this sheet reads. It is deliberately a STRUCTURAL SUBSET:
  * the real `EngraveGenerated` also carries `ok` and `stage`, which the sheet does not need, and
  * an `EngraveGenerated` is assignable to this interface unchanged. Everything the sheet reports
@@ -187,6 +217,13 @@ export interface RunSheetGenerated {
    * resolved, never a second resolution of its own.
    */
   threadMachining?: ThreadSettingsResult | null;
+  /**
+   * #434 — what the DRILL program cut, structurally a `DrillProgramFacts` from
+   * `engraveGenerate`. Present only on the drill bit's own program; absent/null everywhere else,
+   * so a sheet for an engraving program says nothing about a drill. The sheet prints these
+   * numbers rather than re-planning the holes: they are the numbers in the file.
+   */
+  drill?: RunSheetDrillFacts | null;
   /**
    * #432 slice 3 — the FACING program: the skim of the blank's top, its own `.nc` beside the job
    * (`runSheetFaceFileName`), or null when none was produced. Optional because a generated object
@@ -2312,6 +2349,20 @@ export function buildRunSheet(
         'touch tip, so it triggers on PLA (measured 2026-10-08, 0.001 mm). The 3D Probe stays in reserve.',
     },
   ];
+  // #434 — a drill's cutting end is a POINT, so the hole is its full diameter only a point length
+  // above the tip. State the point and its provenance before the bit is loaded: §7's depths are
+  // stated twice (full diameter and tip) and the operator has to know why.
+  const drillFirst = generated.drill?.plans[0] ?? null;
+  if (drillFirst !== null) {
+    needSteps.splice(2, 0, {
+      text:
+        `The drill’s point — ${drillFirst.angle.from}. A drill is the full ⌀ only a point length ` +
+        'above its tip, so §7 states each hole’s full-diameter depth and its tip depth.',
+      value:
+        `${fmtNum(drillFirst.angle.deg)}° included · tip ${fmtNum(drillFirst.pointLength)} mm below ` +
+        `the full ⌀${fmtNum(drillFirst.diameter)} mm`,
+    });
+  }
   // #221 — a V-carve job's design is not the tip: it is the cone's width at the colour plane. State
   // the cone and the plane before the cutter is loaded, so the operator can check the bit and the
   // blank's printed film against the numbers §7 uses.
@@ -2609,7 +2660,44 @@ export function buildRunSheet(
   let programParams: RunSheetStep | null = null;
   const threadMachining = generated.threadMachining ?? null;
   const threadPlans = generated.threads ?? null;
-  if (plan.threads.length > 0) {
+  const drillFacts = generated.drill ?? null;
+  if (drillFacts !== null && drillFacts.plans.length > 0) {
+    // #434 — a DRILL program's Cut section. Its numbers are the drill's own (the settings the
+    // planner was handed), not `feedsFor`'s: the bit is not a milling cutter and never resolved a
+    // feeds row. `programParams` points at the parameters step so a rest-pass label can still
+    // prefix it as it does for the other branches.
+    const s = drillFacts.settings;
+    const d0 = drillFacts.plans[0]!;
+    const step: RunSheetStep = {
+      text: `Drill spindle, plunge feed and peck. Vacuum ${(job.cutOverride?.air ?? true) ? 'on' : 'off'}.`,
+      value:
+        `${s.spindleRpm} RPM · ${fmtNum(s.plungeFeed)} mm/min plunge · pecks of ` +
+        `${fmtNum(s.peckDiameters)} × ⌀${fmtNum(d0.diameter)} = ${fmtNum(d0.peck)} mm · ` +
+        `re-entry ${fmtNum(s.peckClearanceMm)} mm above the floor just cut`,
+    };
+    cutSteps.push(step);
+    programParams = step;
+    cutSteps.push({
+      text:
+        `Where those numbers came from: drill.peckDiameters (${drillFacts.sources.peckDiameters}); ` +
+        `drill.peckClearanceMm (${drillFacts.sources.peckClearanceMm}); ` +
+        `drill.plungeFeed (${drillFacts.sources.plungeFeed}); ` +
+        `drill.spindleRpm (${drillFacts.sources.spindleRpm}). The plunge feed and spindle speed are ` +
+        'placeholders, not measured.',
+    });
+    for (const d of drillFacts.plans) {
+      // The plan rounds its tip and point to the post's precision; the full-diameter depth is the
+      // difference, rounded the same way so it prints as the item stated it.
+      const full = Math.round((d.tipDepth - d.pointLength) * 1000) / 1000;
+      cutSteps.push({
+        text:
+          `${d.name} — ${d.holes.length} hole(s) on the ${fmtNum(d.angle.deg)}° point ` +
+          `(${d.angle.from}). The full ⌀${fmtNum(d.diameter)} mm reaches ${fmtNum(full)} mm; the ` +
+          `tip carries ${fmtNum(d.pointLength)} mm lower, to ${fmtNum(d.tipDepth)} mm.`,
+        value: `⌀${fmtNum(d.diameter)} mm · tip ${fmtNum(d.tipDepth)} mm`,
+      });
+    }
+  } else if (plan.threads.length > 0) {
     // #445 — a thread job's cut section is the worker's own resolved numbers, said once, then one
     // line per thread and the check. `items` (`plan.engraves`) is empty on a thread job — threads
     // are a sibling list — so the per-item loop below adds nothing here.
