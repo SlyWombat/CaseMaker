@@ -750,6 +750,9 @@ const jobSetupSchema = z.object({
   mount: mountSpecSchema,
   itemIds: z.array(z.string().min(1)),
   tools: z.array(z.string().min(1)),
+  // #472 — per-cutter item assignment. Named here because the schema strips an unknown field on
+  // load, and a saved assignment silently lost is a setup that cuts the wrong items.
+  toolItems: z.record(z.string().min(1), z.array(z.string().min(1))).optional(),
   registration: jobSetupRegistrationSchema.optional(),
   remount: z
     .object({

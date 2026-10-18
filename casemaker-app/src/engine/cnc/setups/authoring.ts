@@ -363,8 +363,31 @@ export function applySetupChange(setups: readonly JobSetup[], index: number, cha
       let next: JobSetup = { ...setup };
       if (change.mount !== undefined) next.mount = change.mount;
       if (change.orientation !== undefined) next.orientation = change.orientation;
-      if (change.itemIds !== undefined) next.itemIds = [...change.itemIds];
-      if (change.tools !== undefined) next.tools = [...change.tools];
+      if (change.itemIds !== undefined) {
+        next.itemIds = [...change.itemIds];
+        // #472 — an assignment is about the setup's items; one that left the setup cannot stay.
+        if (next.toolItems !== undefined) {
+          const kept = new Set(next.itemIds);
+          next.toolItems = Object.fromEntries(
+            Object.entries(next.toolItems)
+              .map(([key, ids]) => [key, ids.filter((id) => kept.has(id))] as const)
+              .filter(([, ids]) => ids.length > 0),
+          );
+        }
+      }
+      if (change.tools !== undefined) {
+        next.tools = [...change.tools];
+        // A cutter that left the setup takes its assignment with it; a one-cutter setup needs no
+        // map at all (every item is that cutter's), and an empty map would read as "assigned
+        // nothing" rather than "no assignment".
+        if (next.tools.length <= 1) delete next.toolItems;
+        else if (next.toolItems !== undefined) {
+          const kept = new Set(next.tools);
+          next.toolItems = Object.fromEntries(
+            Object.entries(next.toolItems).filter(([key]) => kept.has(key)),
+          );
+        }
+      }
       if (approvals) next = withoutRemount(withoutRegistration(next));
       return next;
     }

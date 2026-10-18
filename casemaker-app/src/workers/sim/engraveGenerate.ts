@@ -31,7 +31,7 @@
  *     but not for a CAM or POST refusal, and a refusal with no reason is useless in the panel.
  */
 
-import type { EngraveItem, EngraveJob, EngraveMargins } from '@/types/engraveJob';
+import type { EngraveItem, EngraveJob, EngraveMargins, JobSetup } from '@/types/engraveJob';
 import type { Mm } from '@/types/units';
 import { segmentsForRadius } from '@/engine/compiler/arcResolution';
 // package.json version for the post's `;@MKR|CAM|v=` header. Read from package.json directly
@@ -62,6 +62,26 @@ import { MATERIAL_LABELS, isMetalMaterial } from '@/engine/cnc/materials';
 import { toPartPlan, labelProfile, jobDepthLimit, keepOutNameAt, type PartPlan } from '@/engine/cnc/engrave/partPlan';
 import { dedupeFindings, jobSetups, setupProgramFindings, toSetup, validateJob, type JobFinding } from '@/engine/cnc/engrave/jobSetup';
 import { jobForSetup, setupPrograms, type JobProgramRef } from '@/engine/cnc/engrave/programs';
+import {
+  restJobFor,
+  vBitRestRefusal,
+  type RestPassFacts,
+  type RestProgram,
+  type UnroughedItem,
+} from '@/engine/cnc/engrave/restPass';
+import {
+  restSeamFacts,
+  thirdToolAdvice,
+  REST_MACHINING_FALLBACK,
+  type RestSettingSource,
+  type SeamCutter,
+  type SeamFacts,
+} from '@/engine/cnc/engrave/restSettings';
+import { findItem, itemName } from '@/engine/cnc/engrave/recommendTool';
+import { unionRemoval, restMachining, type RestRegion, type RestResult } from './engraveRest';
+import { createSimSession, type SimLoadOk, type SimLoadResult } from './session';
+import { simErrors, simulationProblem } from '@/engine/cnc/simGate';
+import type { NodeMeshOutput } from '../geometry/meshOutput';
 import { programHash } from '@/engine/cnc/programHash';
 import { validateVise } from '@/engine/cnc/fixture';
 import { generateEngrave, makeClipperOffset, zPasses, type EngraveRegion, type VCarveRegion } from '@/engine/cnc/cam/engraveJob';
@@ -72,7 +92,7 @@ import { generateTrace } from '@/engine/cnc/cam/trace';
 import type { Polygons } from '@/engine/cnc/cam/pocket';
 import { concatToolpathIR, estimateCycleSeconds, HOP_Z, travelStats, type CamMove, type ToolpathIR } from '@/engine/cnc/cam/ir';
 import { postZ1, type PostContext, type VacuumSpan } from '@/engine/cnc/post/z1';
-import { FRAME_Z } from '@/engine/cnc/engrave/runSheet';
+import { FRAME_Z, runSheetFileName, runSheetFrameFileName } from '@/engine/cnc/engrave/runSheet';
 import type { Setup } from '@/engine/cnc/setup';
 import type { MountObstacles } from '@/engine/cnc/mounts/bracket';
 import { unfacedBands } from '@/engine/cnc/mounts/inPath';
@@ -151,6 +171,17 @@ export interface EngraveShopOpts {
    * the vise's own envelope, exactly as every pre-#427 run did.
    */
   mount?: MountObstacles | null;
+  /**
+   * #472 — the location's two rest-machining numbers, resolved on the CALLER's side for the same
+   * reason `defaults` is: the worker must not pull the defaults client (and its house transport)
+   * into this realm. `engraveRunStore` reads them from `rest.overlapMm` and `rest.thirdToolPct`
+   * through `readDefault`, so the source travels with the number exactly as it does on the CLI route.
+   * Absent/null is no location: the labelled `REST_MACHINING_FALLBACK` pair is used.
+   */
+  rest?: {
+    overlap: { value: number; source: RestSettingSource };
+    thirdToolPct: { value: number; source: RestSettingSource };
+  } | null;
 }
 
 /** A stage refusal with its reason, so the panel can list it under the right row. */
@@ -311,6 +342,16 @@ export interface EngraveGenerated {
    * diagnosis, not a runnable job.
    */
   programs: EngraveProgram[];
+  /**
+   * #472 — the two-tool story, when a setup names more than one cutter and the rest pass actually
+   * produced a second program. Every number comes from the measurements made HERE (the first
+   * program's simulated removal, the rest regions it left, and the second program's chained sweep),
+   * so the run sheet prints the numbers the files were cut with rather than re-deriving them.
+   *
+   * Absent/null on every one-cutter job, and on a multi-cutter setup whose rest pass had nothing to
+   * cut — the sheet then has no second program to describe.
+   */
+  restPass?: RestPassFacts | null;
   /**
    * The regions the CAM cut and the oracle must match (#206 §3): each region item's opened
    * polygons, each drill's discs, and — since #287 — each single-line trace's swept region.
@@ -1175,6 +1216,462 @@ export function depthLimitReason(stack: StackDepthLimit, job: EngraveJob, x: Mm,
 }
 
 /**
+ * One program's result, before the list is assembled. `generateOneProgram`'s return shape.
+ */
+type OneProgram = Omit<EngraveGenerated, 'programs'>;
+
+/**
+ * A program the run will really play: it posted and the verifier passed. `make` builds it again
+ * with a different share of the run's vacuum words, which is how the first and last programs are
+ * settled once the rest pass has decided how many files the run actually has (#472).
+ */
+interface PostedProgram {
+  ref: JobProgramRef;
+  one: OneProgram;
+  make: (span: VacuumSpan) => OneProgram;
+  span: VacuumSpan;
+}
+
+/**
+ * The measurements a rest pair produced, held until the program list is final so the facts read
+ * the files the run will actually play (the vacuum words are settled after this point).
+ */
+interface RestLink {
+  roughIndex: number;
+  restIndex: number;
+  roughJob: EngraveJob;
+  restJob: EngraveJob;
+  roughKey: string;
+  restKey: string;
+  roughDiameter: number;
+  restDiameter: number;
+  roughShare: number;
+  roughReason: string;
+  restReason: string;
+  unroughed: UnroughedItem[];
+  regions: RestRegion[];
+  rest1: RestResult;
+  left: RestResult;
+  p1: SimLoadOk;
+  p2: SimLoadOk;
+  seam: SeamFacts;
+  thirdToolPct: number;
+  thirdToolSource: RestSettingSource;
+}
+
+/**
+ * A pair as one setup's generator hands it back: the measurements and the two programs, BEFORE
+ * their places in the run are known (the main loop adds `roughIndex`/`restIndex` when it appends
+ * the pair to the run's program list).
+ */
+type RestPairLink = Omit<RestLink, 'roughIndex' | 'restIndex'> & {
+  rough: PostedProgram;
+  rest: PostedProgram;
+};
+
+/**
+ * Run one posted program through the same simulation the run will use, with the same setup the
+ * generator built. The worker's own session is fresh each time; the meshes it returns are plain
+ * data, so it is disposed on the way out — except that the caller keeps the removal mesh it needs,
+ * which is a structured-clone-safe copy.
+ */
+function simulateProgram(
+  tl: ManifoldToplevel,
+  job: EngraveJob,
+  nc: string,
+  tool: Tool,
+  calibration: MachineCalibration | null,
+  shop: EngraveShopOpts,
+  priorRemoval?: NodeMeshOutput,
+): SimLoadResult {
+  const mill = jobMachine(job, calibration);
+  const setup = toSetup(job, mill, shop.mount?.fixture ?? undefined);
+  const session = createSimSession(tl);
+  try {
+    return session.load(nc, setup, tool, job.machineId, {
+      calibration,
+      ...(priorRemoval === undefined ? {} : { priorRemoval }),
+    });
+  } finally {
+    session.dispose();
+  }
+}
+
+/** Why a simulated program is not safe to measure against, or null when it is. */
+function simRefusal(load: SimLoadResult): string | null {
+  if (!load.ok) {
+    const errors = simErrors(load.diagnostics).map((d) => d.message);
+    return errors.length > 0 ? errors.join('; ') : 'the simulation refused the program';
+  }
+  return simulationProblem(load.diagnostics);
+}
+
+/** One program as the sheet's rest section prints it. */
+function restProgramFact(
+  one: OneProgram,
+  job: EngraveJob,
+  key: string,
+  diameter: number,
+  reason: string,
+  removedVolume: number,
+): RestProgram & { reason: string } {
+  const cam = one.cam;
+  return {
+    key,
+    diameter,
+    reason,
+    nc: runSheetFileName(job.name),
+    frame: one.frameNc === null ? null : runSheetFrameFileName(job.name),
+    params: one.feeds !== null && one.feeds.ok ? one.feeds.params : null,
+    passes: cam?.passes ?? 1,
+    traceOnly:
+      toPartPlan(job).engraves.length === 0 &&
+      (job.traces?.some((t) => t.enabled && !t.construction) ?? false),
+    moves: cam?.cuttingMoves ?? 0,
+    seconds: Math.round(cam?.estimatedSeconds ?? 0),
+    ...(cam?.rapidMm !== undefined && cam.cutMm !== undefined && cam.baselineRapidMm !== undefined
+      ? { travel: { rapidMm: cam.rapidMm, cutMm: cam.cutMm, baselineRapidMm: cam.baselineRapidMm } }
+      : {}),
+    removedVolume,
+  };
+}
+
+/** The rest pair's story, assembled from the final posted programs and the measurements behind them. */
+function assembleRestFacts(link: RestLink, posted: readonly PostedProgram[]): RestPassFacts {
+  const roughOne = posted[link.roughIndex]!.one;
+  const restOne = posted[link.restIndex]!.one;
+  return {
+    rough: {
+      ...restProgramFact(
+        roughOne,
+        link.roughJob,
+        link.roughKey,
+        link.roughDiameter,
+        link.roughReason,
+        link.p1.stats.removedVolume,
+      ),
+      share: link.roughShare,
+      score: link.roughDiameter * link.roughDiameter * link.roughShare,
+    },
+    rest: restProgramFact(
+      restOne,
+      link.restJob,
+      link.restKey,
+      link.restDiameter,
+      link.restReason,
+      link.p2.stats.removedVolume,
+    ),
+    unroughed: link.unroughed,
+    regions: link.regions.map((r) => ({
+      name: r.name ?? r.id,
+      depth: r.depth,
+      area: r.area,
+      cutArea: r.cutArea,
+      clearedArea: r.clearedArea,
+    })),
+    cutArea: link.rest1.cutArea,
+    clearedArea: link.rest1.clearedArea,
+    restArea: link.regions.reduce((sum, r) => sum + r.area, 0),
+    overlap: link.seam.overlap,
+    seam: link.seam,
+    thirdTool: thirdToolAdvice(
+      link.left.restArea,
+      link.rest1.cutArea,
+      { thirdToolFraction: link.thirdToolPct / 100, source: link.thirdToolSource },
+      link.seam,
+    ),
+    restRemovedVolume: link.p2.stats.removedVolume,
+    leftover: {
+      area: link.left.restArea,
+      byItem: link.left.regions
+        .map((r) => ({ name: r.name ?? r.id, depth: r.depth, area: r.area }))
+        .sort((a, b) => b.area - a.area),
+    },
+  };
+}
+
+/**
+ * One setup's rest pair, measured and generated (#472). `null` when the rough program did not
+ * post; the finding for why the rest could not be measured is pushed into `findings`.
+ *
+ * The order is the CLI route's (scripts/engrave-job.ts), and for its reasons: the first program is
+ * generated, then SIMULATED, then the rest is measured against that sweep's own removal, then the
+ * second program is generated and swept from the first one's result. Nothing here trusts an offset
+ * standing in for a cut.
+ */
+function generateRestPair(
+  tl: ManifoldToplevel,
+  job: EngraveJob,
+  setup: JobSetup,
+  group: readonly JobProgramRef[],
+  roughTool: Tool | null,
+  restTools: readonly (Tool | null)[],
+  catalogue: readonly FeedCatalogueRow[],
+  calibration: MachineCalibration | null,
+  margins: EngraveMargins,
+  shop: EngraveShopOpts,
+  withFacing: boolean,
+  cursor: number,
+  refCount: number,
+  findings: JobFinding[],
+): {
+  attempts: OneProgram[];
+  posted: PostedProgram[];
+  link: RestPairLink | null;
+  cursor: number;
+} {
+  const roughRef = group[0]!;
+  const attempts: OneProgram[] = [];
+  const posted: PostedProgram[] = [];
+  let nextCursor = cursor;
+  const spanAt = (index: number): VacuumSpan =>
+    refCount === 1 ? 'whole' : index === 0 ? 'first' : index === refCount - 1 ? 'last' : 'middle';
+  const roughSpan = spanAt(nextCursor);
+  nextCursor += 1;
+
+  const mill = jobMachine(job, calibration);
+
+  if (roughTool === null || group.length < 2) {
+    const roughJob = jobForSetup(job, roughRef, roughTool);
+    const makeRough = (span: VacuumSpan): OneProgram =>
+      generateOneProgram(tl, roughJob, roughTool, catalogue, calibration, margins, shop, span, withFacing);
+    const roughOne = makeRough(roughSpan);
+    attempts.push(roughOne);
+    if (roughOne.ok && roughOne.nc !== null && roughOne.verify !== null) {
+      posted.push({ ref: roughRef, one: roughOne, make: makeRough, span: roughSpan });
+    }
+    return { attempts, posted, link: null, cursor: nextCursor };
+  }
+
+  // The design as the SETUP asks for it, measured by the first cutter BEFORE any program is
+  // generated. It is measured over every setup item — including the ones assigned to a later cutter
+  // — because a share is a fraction of the design and an item the first cutter cannot enter at all
+  // is still part of it.
+  const setupRef: JobProgramRef = { ...roughRef, itemIds: setup.itemIds };
+  const measureJob = jobForSetup(job, setupRef, roughTool);
+  const measured = measureEngraving(tl, measureJob, roughTool);
+  const glyphArea = measured.reduce((sum, m) => sum + m.glyphArea, 0);
+  const openedArea = measured.reduce((sum, m) => sum + m.openedArea, 0);
+  const roughShare = glyphArea > 0 ? openedArea / glyphArea : 0;
+  const unroughed: UnroughedItem[] = measured
+    .filter((m) => m.glyphArea > 0 && m.openedArea === 0)
+    .map((m) => {
+      const item = findItem(measureJob, m.labelId);
+      return {
+        id: m.labelId,
+        name: item === undefined ? m.labelId : itemName(item),
+        area: m.glyphArea,
+        depth: item?.depth ?? 0,
+      };
+    });
+  const unroughedIds = new Set(unroughed.map((u) => u.id));
+  // The first program leaves an item it cannot enter out entirely: with the item enabled,
+  // `engraveRegions` raises `item-empty` and stops the whole program. Everything else assigned to
+  // this cutter stays.
+  const roughRefKept: JobProgramRef = { ...roughRef, itemIds: roughRef.itemIds.filter((id) => !unroughedIds.has(id)) };
+  const roughJobKept = jobForSetup(job, roughRefKept, roughTool);
+  const makeRoughKept = (span: VacuumSpan): OneProgram =>
+    generateOneProgram(tl, roughJobKept, roughTool, catalogue, calibration, margins, shop, span, withFacing);
+  const keptOne = makeRoughKept(roughSpan);
+  attempts.push(keptOne);
+  if (!keptOne.ok || keptOne.nc === null || keptOne.verify === null) {
+    return { attempts, posted, link: null, cursor: nextCursor };
+  }
+  const roughRecord: PostedProgram = { ref: roughRefKept, one: keptOne, make: makeRoughKept, span: roughSpan };
+  posted.push(roughRecord);
+
+  const p1 = simulateProgram(tl, roughJobKept, keptOne.nc, roughTool, calibration, shop);
+  const p1Problem = simRefusal(p1);
+  if (!p1.ok || p1Problem !== null) {
+    findings.push({
+      severity: 'error',
+      code: 'setup-rest-unavailable',
+      message:
+        `Setup ${roughRef.setupIndex}'s first program could not be measured for the rest pass: ` +
+        `${p1Problem ?? 'the simulation refused it'}. The job cannot plan its second cutter safely.`,
+    });
+    return { attempts, posted, link: null, cursor: nextCursor };
+  }
+
+  if (vBitRestRefusal(measureJob, roughTool) !== null) {
+    findings.push({
+      severity: 'error',
+      code: 'setup-rest-unavailable',
+      message:
+        `Setup ${roughRef.setupIndex} names ${roughRef.toolKey} first and then another cutter, but ` +
+        `${vBitRestRefusal(measureJob, roughTool)}. The V-carve is the whole region job; remove the ` +
+        'later cutter from the setup, or name a flat cutter first.',
+    });
+    return { attempts, posted, link: null, cursor: nextCursor };
+  }
+
+  const roughFeeds = feedsFor(catalogue, job.stock.material, roughTool, mill, job.cutOverride, shop.feeds ?? undefined);
+  const roughDiameter = cuttingDiameter(roughTool) ?? 0;
+  const overlapRead = shop.rest?.overlap ?? {
+    value: REST_MACHINING_FALLBACK.overlap,
+    source: REST_MACHINING_FALLBACK.source,
+  };
+  const thirdRead = shop.rest?.thirdToolPct ?? {
+    value: REST_MACHINING_FALLBACK.thirdToolFraction * 100,
+    source: REST_MACHINING_FALLBACK.source,
+  };
+  const roughCutter: SeamCutter = {
+    key: roughRef.toolKey,
+    diameter: roughDiameter,
+    stepOver: roughFeeds.ok ? roughFeeds.params.stepOver : null,
+  };
+
+  let removal: NodeMeshOutput | null = p1.meshes.removal;
+  let removalMeshes: NodeMeshOutput[] = removal === null ? [] : [removal];
+  let link: RestPairLink | null = null;
+
+  for (let r = 0; r < restTools.length; r++) {
+    const restTool = restTools[r]!;
+    const restRef = group[r + 1]!;
+    const restSpan = spanAt(nextCursor);
+    if (restTool === null) {
+      findings.push({
+        severity: 'error',
+        code: 'setup-rest-unavailable',
+        message:
+          `Setup ${restRef.setupIndex} names ${restRef.toolKey} as a later cutter, but that cutter ` +
+          'is not on this bench. Add it to the tool library, or remove it from the setup.',
+      });
+      break;
+    }
+    const refusal = vBitRestRefusal(measureJob, restTool);
+    if (refusal !== null) {
+      findings.push({
+        severity: 'error',
+        code: 'setup-rest-unavailable',
+        message: `Setup ${restRef.setupIndex}'s ${restRef.toolKey} cannot take the rest pass: ${refusal}.`,
+      });
+      break;
+    }
+    // What this cutter would cut over the WHOLE setup, measured before the first program's items
+    // were trimmed — an item the first cutter cannot enter is entirely this one's job.
+    const design = engraveRegions(tl, measureJob, restTool, margins, shop, mill, catalogue);
+    const restFeeds = feedsFor(
+      catalogue,
+      job.stock.material,
+      restTool,
+      mill,
+      undefined,
+      shop.feeds ?? undefined,
+    );
+    const restDiameter = cuttingDiameter(restTool) ?? 0;
+    const restCutterRef: SeamCutter = {
+      key: restRef.toolKey,
+      diameter: restDiameter,
+      stepOver: restFeeds.ok ? restFeeds.params.stepOver : null,
+    };
+    const seam = restSeamFacts({
+      stored: overlapRead.value,
+      source: overlapRead.source,
+      rough: roughCutter,
+      rest: restCutterRef,
+    });
+    const rest1 = restMachining(tl, { removal, cuts: design.cuts, overlap: seam.overlap });
+    // A region the second cutter's own opening erases is dropped rather than generated: left in,
+    // it is an `item-empty` refusal that would stop the whole second program over a corner the
+    // design never gave up. The CLI route drops the same regions for the same reason.
+    let kept = rest1.regions;
+    if (kept.length > 0) {
+      const probe = { ...restJobFor(job, kept, restRef.toolKey), tool: restTool };
+      const open = new Set(
+        engraveRegions(tl, probe, restTool, margins, shop, mill, catalogue)
+          .measured.filter((m) => m.openedArea > 0)
+          .map((m) => m.labelId),
+      );
+      kept = kept.filter((_, i) => open.has(`rest-${i + 1}`));
+    }
+    if (kept.length === 0) {
+      findings.push({
+        severity: 'warning',
+        code: 'setup-rest-nothing',
+        message:
+          `Setup ${restRef.setupIndex}'s ${restRef.toolKey} has nothing left to clean up: the first ` +
+          'program already removed everything this cutter can open, so no second program is written ' +
+          'for it.',
+      });
+      break;
+    }
+    const restJobBase = restJobFor(job, kept, restRef.toolKey);
+    // The generator's readers (`validateJob` inside `engraveRegions`, the verifier) resolve the
+    // cutter through `job.tool` or the WORKER's registry, which is empty. The rest job names a key
+    // the route resolved on this realm's side, so it is materialised exactly as `jobForSetup` does.
+    const restJob: EngraveJob = { ...restJobBase, tool: restTool };
+    const makeRest = (span: VacuumSpan): OneProgram =>
+      generateOneProgram(tl, restJob, restTool, catalogue, calibration, margins, shop, span, false);
+    const restOne = makeRest(restSpan);
+    nextCursor += 1;
+    attempts.push(restOne);
+    if (!restOne.ok || restOne.nc === null || restOne.verify === null) break;
+    const restRecord: PostedProgram = { ref: restRef, one: restOne, make: makeRest, span: restSpan };
+    posted.push(restRecord);
+    const p2 = simulateProgram(tl, restJob, restOne.nc, restTool, calibration, shop, removal ?? undefined);
+    const p2Problem = simRefusal(p2);
+    if (!p2.ok || p2Problem !== null) {
+      findings.push({
+        severity: 'error',
+        code: 'setup-rest-unavailable',
+        message:
+          `Setup ${restRef.setupIndex}'s rest program (${restRef.toolKey}) could not be measured: ` +
+          `${p2Problem ?? 'the simulation refused it'}.`,
+      });
+      break;
+    }
+    // What neither program touches: the same measurement on the union of both removals, at zero
+    // overlap, so `restArea` is design material left standing and not the seam band.
+    removalMeshes = [...removalMeshes, ...(p2.meshes.removal === null ? [] : [p2.meshes.removal])];
+    const both = unionRemoval(tl, removalMeshes);
+    const left = restMachining(tl, { removal: both, cuts: design.cuts, overlap: 0 });
+    if (link === null) {
+      const reached = new Set(kept.map((k) => k.id));
+      link = {
+        rough: roughRecord,
+        rest: restRecord,
+        roughJob: roughJobKept,
+        restJob,
+        roughKey: roughRef.toolKey,
+        restKey: restRef.toolKey,
+        roughDiameter,
+        restDiameter,
+        roughShare,
+        roughReason:
+          `${roughRef.toolKey} cuts first: the setup names it as the first cutter` +
+          (unroughed.length > 0 ? `, and it cannot enter ${unroughed.length === 1 ? 'one item' : `${unroughed.length} items`} at all` : '') +
+          (glyphArea > 0 ? `, reaching ${Math.round(roughShare * 100)} % of the design's area` : '') +
+          '.',
+        restReason:
+          `${restRef.toolKey} cleans up: the setup names it after ${roughRef.toolKey}, and its ` +
+          `regions are measured against what the first program's own sweep left.`,
+        unroughed: unroughed.filter((u) => reached.has(u.id)),
+        regions: kept,
+        rest1,
+        left,
+        p1,
+        p2,
+        seam,
+        thirdToolPct: thirdRead.value,
+        thirdToolSource: thirdRead.source,
+      };
+    }
+    // p2's own removal already contains p1's: it was swept with `priorRemoval`, so it is the
+    // cumulative part for any third cutter rather than another layer to add.
+    removal = p2.meshes.removal;
+  }
+
+  return {
+    attempts,
+    posted,
+    link,
+    cursor: nextCursor,
+  };
+}
+
+
+/**
  * Generate, post and verify one engrave job.
  *
  * `tool` is the resolved cutter, HANDED IN (#305): this runs in the sim worker, where neither the
@@ -1316,35 +1813,122 @@ export function engraveGenerate(
     };
   }
 
+  // #472 — ONE PROGRAM PER (SETUP, TOOL), and a later cutter is a REST PASS.
+  //
+  // A one-cutter setup is generated exactly as it was. A setup naming two or more cutters runs its
+  // first program, SWEEPS it, measures the rest against that sweep, and generates the second file
+  // from the measured regions — the CLI route's order (#410), now inside the app's own generator so
+  // the panel, the run plan and the sheet all see the same two files. The measured facts are carried
+  // on `restPass` for the sheet; nothing about program 1's geometry depends on them.
   const refs = setupPrograms(job);
-  const results = refs.map((ref, i) => {
-    // Decision 4 — the vacuum words are spread across the RUN: on in the first program, off in the
-    // last, neither in the ones between. One program is the whole run.
-    const span: VacuumSpan = refs.length === 1 ? 'whole' : i === 0 ? 'first' : i === refs.length - 1 ? 'last' : 'middle';
-    const subTool = toolForProgram(ref, job, tool, shop);
-    const sub = jobForSetup(job, ref, subTool);
-    return { ref, one: generateOneProgram(tl, sub, subTool, catalogue, calibration, margins, shop, span, i === 0) };
+  const setups = jobSetups(job);
+  const attempts: OneProgram[] = [];
+  const posted: PostedProgram[] = [];
+  const restFindings: JobFinding[] = [];
+  let restLink: RestLink | null = null;
+  let cursor = 0;
+  const spanAt = (index: number): VacuumSpan =>
+    refs.length === 1 ? 'whole' : index === 0 ? 'first' : index === refs.length - 1 ? 'last' : 'middle';
+
+  for (let s = 0; s < setups.length; s++) {
+    const setup = setups[s]!;
+    const group = refs.filter((ref) => ref.setupIndex === s + 1);
+    if (group.length <= 1) {
+      const ref = group[0];
+      if (ref === undefined) continue;
+      // Decision 4 — the vacuum words are spread across the RUN: on in the first program, off in
+      // the last, neither in the ones between. One program is the whole run. These are provisional
+      // while the rest pass decides how many files the run really has; `posted` settles them below.
+      const span = spanAt(cursor);
+      const subTool = toolForProgram(ref, job, tool, shop);
+      const make = (nextSpan: VacuumSpan): OneProgram =>
+        generateOneProgram(
+          tl,
+          jobForSetup(job, ref, subTool),
+          subTool,
+          catalogue,
+          calibration,
+          margins,
+          shop,
+          nextSpan,
+          cursor === 0,
+        );
+      const one = make(span);
+      attempts.push(one);
+      if (one.ok && one.nc !== null && one.verify !== null) posted.push({ ref, one, make, span });
+      cursor += 1;
+      continue;
+    }
+
+    const roughTool = toolForProgram(group[0]!, job, tool, shop);
+    const restTools = group.slice(1).map((ref) => toolForProgram(ref, job, tool, shop));
+    const base = posted.length;
+    const pair = generateRestPair(
+      tl,
+      job,
+      setup,
+      group,
+      roughTool,
+      restTools,
+      catalogue,
+      calibration,
+      margins,
+      shop,
+      cursor === 0,
+      cursor,
+      refs.length,
+      restFindings,
+    );
+    attempts.push(...pair.attempts);
+    posted.push(...pair.posted);
+    if (pair.link !== null) {
+      restLink = {
+        ...pair.link,
+        roughIndex: base,
+        restIndex: base + pair.posted.indexOf(pair.link.rest),
+      };
+    }
+    cursor = pair.cursor;
+  }
+
+  // Settle the run's vacuum words against the programs that really posted. A rest pass that had
+  // nothing to cut leaves fewer files than `refs` predicted, so the last actual program has to
+  // become the run's last word; regenerating only the boundary files keeps every other byte where
+  // it was.
+  const total = posted.length;
+  posted.forEach((program, i) => {
+    const want: VacuumSpan = total === 1 ? 'whole' : i === 0 ? 'first' : i === total - 1 ? 'last' : 'middle';
+    if (want === program.span) return;
+    const next = program.make(want);
+    if (next.ok && next.nc !== null && next.verify !== null) {
+      program.one = next;
+      program.span = want;
+    }
   });
 
-  const first = results[0]!.one;
-  const stopped = results.find((r) => !r.one.ok);
+  const restPass = restLink === null ? null : assembleRestFacts(restLink, posted);
+  const restErrors = restFindings.filter((f) => f.severity === 'error');
+  const first = attempts[0]!;
+  const stopped = attempts.find((one) => !one.ok);
   return {
     // The adapter: the top-level fields describe the FIRST program, which is the file the panels
     // upload, simulate and save today. Multi-program upload is #419 §3's, not this slice's.
     ...first,
-    ok: stopped === undefined,
-    stage: stopped?.one.stage ?? 'done',
-    findings: dedupeFindings(results.flatMap((r) => r.one.findings)),
-    errors: results.flatMap((r) => r.one.errors),
-    programs: results.flatMap((r) => {
+    ok: stopped === undefined && restErrors.length === 0,
+    stage: stopped?.stage ?? (restErrors.length > 0 ? 'findings' : 'done'),
+    findings: dedupeFindings([...attempts.flatMap((one) => one.findings), ...restFindings]),
+    errors: attempts.flatMap((one) => one.errors),
+    programs: posted.flatMap((program) => {
       // #473 — the face file is the run's first program, then the setup's own. Only the first
-      // program builds it (`generateOneProgram`'s `withFacing`), so only `results[0]` can add one.
-      const face = facingProgramOf(r.one, r.ref);
+      // program builds it (`generateOneProgram`'s `withFacing`), so only the first posted one can
+      // add it.
+      const face = facingProgramOf(program.one, program.ref);
       return [
         ...(face === null ? [] : [face]),
-        ...(r.one.ok && r.one.nc !== null && r.one.verify !== null ? [programOf(r.one, r.ref)] : []),
+        programOf(program.one, program.ref),
       ];
     }),
+    restPass,
   };
 }
 

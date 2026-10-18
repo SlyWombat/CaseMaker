@@ -339,3 +339,42 @@ describe('#471 applySetupChange — only the approvals the edit invalidates', ()
     expect(next).not.toBe(before);
   });
 });
+
+// #472 — the assignment is a statement about the setup's items and cutters. An edit that removes
+// either must not leave a stale claim behind: an item that left the setup cannot stay assigned, and
+// a cutter that left cannot keep its list.
+describe('#472 applySetupChange — the per-cutter assignment follows the edit', () => {
+  const withAssignments = (): { setups: JobSetup[]; a: string; b: string } => {
+    const job = defaultEngraveJob();
+    const [a, b] = cutItemIds(job) as [string, string];
+    const setups: JobSetup[] = [
+      {
+        id: 'setup-1',
+        orientation: { ...IDENTITY },
+        mount: { kind: 'vise' },
+        itemIds: [a, b],
+        tools: ['flat-rough', 'flat-rest'],
+        toolItems: { 'flat-rough': [a], 'flat-rest': [b] },
+      },
+    ];
+    return { setups, a, b };
+  };
+
+  it('drops an item that left the setup, and a list left empty', () => {
+    const { setups, a } = withAssignments();
+    const next = applySetupChange(setups, 0, { itemIds: [a] });
+    expect(next[0]!.toolItems).toEqual({ 'flat-rough': [a] });
+  });
+
+  it('deletes the map when the setup is cut by one cutter again', () => {
+    // One cutter owns every item; an empty or partial map would read as "assigned nothing".
+    const next = applySetupChange(withAssignments().setups, 0, { tools: ['flat-rough'] });
+    expect(next[0]!.toolItems).toBeUndefined();
+  });
+
+  it('keeps only the assignments of cutters that are still named', () => {
+    const { setups, a } = withAssignments();
+    const next = applySetupChange(setups, 0, { tools: ['flat-rough', 'flat-other'] });
+    expect(next[0]!.toolItems).toEqual({ 'flat-rough': [a] });
+  });
+});

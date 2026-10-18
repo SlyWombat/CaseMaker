@@ -802,6 +802,17 @@ export interface JobSetup {
   itemIds: string[];
   /** The tool keys this setup uses, in use order — one program per key (#419 J3). */
   tools: string[];
+  /**
+   * Which of the setup's items each cutter owns (#472). The key is a tool key from {@link tools};
+   * the value is the ids from {@link itemIds} that cutter takes. Absent on a one-tool setup (every
+   * item is that cutter's). A multi-tool setup may omit it, which is the same reading: the first
+   * cutter owns every item, and the later cutters are rest passes measured from the first one.
+   *
+   * A later cutter's whole items are left out of program 1 and cut in the rest program, so the
+   * saved map says who is RESPONSIBLE for an item, not that each cutter gets a plain slice of the
+   * design.
+   */
+  toolItems?: Record<string, string[]>;
   /** Present only once a registration has been planned and approved for this setup. */
   registration?: JobSetupRegistration;
   /** The directed step into this setup. Absent on the first setup, or where none is needed. */

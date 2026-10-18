@@ -133,11 +133,22 @@ export type JobFindingCode =
   // that still carries the pass before any program is posted, because the engraving file's Z0 is
   // the faced top. `facing-plastic` is the class: every non-wood, non-metal material.
   | 'facing-plastic'
-  // Programs (#419 J3). One program is one setup cut with ONE cutter; a setup that names none has
-  // nothing to post, and one that names several cannot say which items belong to which cutter
-  // (#410's assignment), so cutting it as one program per cutter would cut every item twice.
+  // Programs (#419 J3, #472). One program is one setup cut with ONE cutter; a setup that names
+  // none has nothing to post. A setup naming several states its per-cutter item assignment in
+  // `toolItems`; without one, the first cutter owns every item and the later cutters are rest
+  // passes. These four codes are the assignment's own checks — a missing item, one claimed twice,
+  // a cutter (or item) the setup does not name, and a first cutter with nothing to clear.
   | 'setup-no-tool'
-  | 'setup-tools-unassigned';
+  | 'setup-items-unassigned'
+  | 'setup-items-duplicated'
+  | 'setup-tool-unknown'
+  | 'setup-tool-no-items'
+  // #472 — the rest pass itself. `unavailable` is an error: the first programme could not be
+  // simulated, the named cutter is not on the bench, or a V-bit was named as a flat rest cutter, so
+  // no honest second file can be written. `nothing` is a warning: the finer cutter is real and
+  // measured, but the first programme already removed everything it can open.
+  | 'setup-rest-unavailable'
+  | 'setup-rest-nothing';
 
 export interface JobFinding {
   severity: 'error' | 'warning';
@@ -851,32 +862,122 @@ function fmt3(n: number): number {
 }
 
 /**
- * Every setup must be postable as exactly one program (#419 J3): a setup naming no cutter has
- * nothing to post, and one naming several cannot say which items each cutter takes (#410's
- * assignment), so one program per cutter would cut every item twice.
+ * The cutters a setup runs, in order. A setup naming none falls back to the job's cutter so the
+ * reading is total; {@link setupProgramFindings} reports the empty case so the fallback is never
+ * silent.
+ */
+export function setupTools(setup: JobSetup, job: EngraveJob): string[] {
+  return setup.tools.length > 0 ? [...setup.tools] : [job.toolKey];
+}
+
+/**
+ * The items a cutter owns, in setup order — the one reading of `toolItems` used by both the
+ * program split and its validation (#472).
  *
- * Its own function because the GENERATOR needs it on the WHOLE job: `engraveRegions` validates the
- * per-setup sub-job, which carries one `toolKey` by construction, so the multi-tool case can only be
- * seen before the split. Exported so the run's own findings list says the same thing the panel's
- * validation does.
+ * With no map, the first cutter owns every item and the rest own none (their work is measured).
+ * With a map, the list is filtered through `itemIds`, so a stale assignment cannot resurrect an
+ * item that left the setup, and the setup's order is what the program cuts.
+ */
+export function toolItemsFor(setup: JobSetup, toolKey: string, toolIndex = 0): string[] {
+  const stored = setup.toolItems?.[toolKey];
+  if (stored !== undefined) {
+    const wanted = new Set(stored);
+    return setup.itemIds.filter((id) => wanted.has(id));
+  }
+  if (setup.toolItems !== undefined) return [];
+  return toolIndex === 0 ? [...setup.itemIds] : [];
+}
+
+/** `a`, `a and b`, `a, b and c` — a list in a finding's sentence. */
+function words(ids: readonly string[]): string {
+  if (ids.length <= 1) return ids.join('');
+  return `${ids.slice(0, -1).join(', ')} and ${ids.at(-1)}`;
+}
+
+/**
+ * Every setup must be postable as exactly one program per cutter (#419 J3, #472): a setup naming
+ * no cutter has nothing to post; one naming several states which items each cutter owns, or leaves
+ * the first cutter owning all of them and the later ones as rest passes.
+ *
+ * The assignment is checked here rather than in `programs.ts` because the GENERATOR needs it on the
+ * WHOLE job: `engraveRegions` validates the per-setup sub-job, which carries one `toolKey` by
+ * construction, so the multi-tool case can only be seen before the split. Exported so the run's own
+ * findings list says the same thing the panel's validation does.
  */
 export function setupProgramFindings(job: EngraveJob): JobFinding[] {
   const findings: JobFinding[] = [];
   jobSetups(job).forEach((setup, i) => {
+    const tools = setupTools(setup, job);
     if (setup.tools.length === 0) {
       findings.push({
         severity: 'error',
         code: 'setup-no-tool',
         message: `Setup ${i + 1} names no cutter, so there is nothing to write a program for.`,
       });
-    } else if (setup.tools.length > 1) {
+      return;
+    }
+
+    const known = new Set(setup.tools);
+    const itemSet = new Set(setup.itemIds);
+    if (setup.toolItems !== undefined) {
+      const claimed = new Map<string, string[]>();
+      for (const [toolKey, ids] of Object.entries(setup.toolItems)) {
+        if (!known.has(toolKey)) {
+          findings.push({
+            severity: 'error',
+            code: 'setup-tool-unknown',
+            message:
+              `Setup ${i + 1} assigns items to "${toolKey}", which is not one of its cutters ` +
+              `(${setup.tools.join(', ')}).`,
+          });
+        }
+        const unknown = ids.filter((id) => !itemSet.has(id));
+        if (unknown.length > 0) {
+          findings.push({
+            severity: 'error',
+            code: 'setup-tool-unknown',
+            message:
+              `Setup ${i + 1} assigns ${unknown.length === 1 ? 'an item' : `${unknown.length} items`} ` +
+              `that ${unknown.length === 1 ? 'is' : 'are'} not in it: ${words(unknown)}.`,
+          });
+        }
+        for (const id of ids) {
+          if (!itemSet.has(id)) continue;
+          claimed.set(id, [...(claimed.get(id) ?? []), toolKey]);
+        }
+      }
+
+      const duplicated = [...claimed.entries()].filter(([, keys]) => keys.length > 1);
+      for (const [id, keys] of duplicated) {
+        findings.push({
+          severity: 'error',
+          code: 'setup-items-duplicated',
+          message:
+            `Setup ${i + 1} assigns item "${id}" to more than one cutter (${keys.join(', ')}). ` +
+            'An item is cut once: give it to one cutter.',
+        });
+      }
+
+      const unassigned = setup.itemIds.filter((id) => !claimed.has(id));
+      if (unassigned.length > 0) {
+        findings.push({
+          severity: 'error',
+          code: 'setup-items-unassigned',
+          message:
+            `Setup ${i + 1} names no cutter for ${unassigned.length === 1 ? 'an item' : `${unassigned.length} items`} ` +
+            `(${words(unassigned)}), so ${unassigned.length === 1 ? 'it' : 'they'} would not be cut.`,
+        });
+      }
+    }
+
+    const firstItems = toolItemsFor(setup, tools[0]!, 0).filter((id) => itemSet.has(id));
+    if (firstItems.length === 0) {
       findings.push({
         severity: 'error',
-        code: 'setup-tools-unassigned',
+        code: 'setup-tool-no-items',
         message:
-          `Setup ${i + 1} names ${setup.tools.length} cutters (${setup.tools.join(', ')}), but which ` +
-          `items each one cuts is not modelled yet — one program per cutter would cut every item ` +
-          `twice. Name one cutter per setup, or give the second its own setup.`,
+          `Setup ${i + 1}'s first cutter (${tools[0]}) has no items, so there is no clearing ` +
+          'program to measure the rest from. Assign it at least one item, or remove it.',
       });
     }
   });

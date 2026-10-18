@@ -19,7 +19,8 @@ import { defaultBoundaryMargin } from '@/engine/cnc/engrave/depthBounds';
 import { labelGlyphMeasure, traceSelfOverlaps, voidLimitForItem } from '@/engine/cnc/engrave/partPlan';
 import { bindingVoidsByRegion } from '@/workers/sim/engraveGeometry';
 import { createSimSession } from '@/workers/sim/session';
-import { jobTool, toSetup } from '@/engine/cnc/engrave/jobSetup';
+import { jobTool, setupProgramFindings, toSetup } from '@/engine/cnc/engrave/jobSetup';
+import { setupPrograms } from '@/engine/cnc/engrave/programs';
 import { Z1 } from '@/engine/cnc/machine';
 import {
   itemConditionSummary,
@@ -1795,6 +1796,12 @@ describe('engraveGenerate — one program per setup (#419 J3)', () => {
     tool: flatEndMill(1.0, { name: '1 mm flat (setup B)' }),
     provenance: 'test',
   };
+  /** #472 — the finer cutter a two-tool setup's rest pass runs with. */
+  const TOOL_REST: ToolLibraryEntry = {
+    key: 'user:flat-0.6-rest',
+    tool: flatEndMill(0.6, { name: '0.6 mm flat (rest)' }),
+    provenance: 'test',
+  };
   const setUp = (job: EngraveJob, groups: string[][], tools: string[]): EngraveJob => ({
     ...job,
     setups: groups.map((itemIds, i) => ({
@@ -1872,15 +1879,116 @@ describe('engraveGenerate — one program per setup (#419 J3)', () => {
     expect(vacuumWords(g.programs[2]!.nc)).toEqual(['M332']);
   });
 
-  it('refuses a setup naming two cutters: one program per cutter would cut its items twice', () => {
-    const job = defaultEngraveJob();
+  it('cuts a setup naming two cutters as a clearing program and a measured rest program', () => {
+    // PLA: the 0.6 mm cutter's feeds row (#410) is plastic, and this case is about the rest pass,
+    // not about a material's feed table.
+    const job: EngraveJob = {
+      ...defaultEngraveJob(),
+      stock: { ...defaultEngraveJob().stock, material: 'pla' },
+    };
     const ids = job.labels.map((l) => l.id);
-    const two = { ...setUp(job, [ids], [job.toolKey]), setups: [{ ...setUp(job, [ids], [job.toolKey]).setups![0]!, tools: [job.toolKey, TOOL_B.key] }] };
-    const g = generate(tl, two, null, [], undefined, { tools: [TOOL_B, ...TOOL_LIBRARY] });
+    const base = setUp(job, [ids], [job.toolKey]);
+    const two: EngraveJob = {
+      ...base,
+      setups: [{ ...base.setups![0]!, tools: [job.toolKey, TOOL_REST.key] }],
+    };
+    const g = generate(tl, two, null, [], undefined, { tools: [TOOL_REST, ...TOOL_LIBRARY] });
+    expect(
+      g.ok,
+      JSON.stringify({
+        stage: g.stage,
+        errors: g.errors,
+        findings: g.findings.filter((f) => f.severity === 'error'),
+      }),
+    ).toBe(true);
+    expect(g.programs).toHaveLength(2);
+
+    const [rough, rest] = g.programs;
+    expect(rough!.setupIndex).toBe(1);
+    expect(rest!.setupIndex).toBe(1);
+    expect(rough!.toolKey).toBe(job.toolKey);
+    expect(rest!.toolKey).toBe(TOOL_REST.key);
+    // Decision 4: the run opens with the clearing program and closes with the rest program.
+    expect(vacuumWords(rough!.nc)).toEqual(['M331']);
+    expect(vacuumWords(rest!.nc)).toEqual(['M332']);
+
+    // The sheet's program-2 facts are the measurements this run made, not a re-derivation.
+    expect(g.restPass).not.toBeNull();
+    expect(g.restPass!.rough.key).toBe(job.toolKey);
+    expect(g.restPass!.rest.key).toBe(TOOL_REST.key);
+    expect(g.restPass!.regions.length).toBeGreaterThan(0);
+    expect(g.restPass!.restArea).toBeGreaterThan(0);
+    expect(g.restPass!.overlap).toBeGreaterThan(0);
+    expect(g.restPass!.restRemovedVolume).toBeGreaterThan(0);
+    expect(g.restPass!.rest.nc).toMatch(/\.nc$/);
+  });
+
+  it('leaves items assigned to a later cutter out of the clearing program', () => {
+    const job: EngraveJob = {
+      ...defaultEngraveJob(),
+      stock: { ...defaultEngraveJob().stock, material: 'pla' },
+    };
+    const [a, b] = job.labels.map((l) => l.id);
+    const base = setUp(job, [[a!, b!]], [job.toolKey]);
+    const two: EngraveJob = {
+      ...base,
+      setups: [
+        {
+          ...base.setups![0]!,
+          tools: [job.toolKey, TOOL_REST.key],
+          toolItems: { [job.toolKey]: [a!], [TOOL_REST.key]: [b!] },
+        },
+      ],
+    };
+    const g = generate(tl, two, null, [], undefined, { tools: [TOOL_REST, ...TOOL_LIBRARY] });
+    expect(
+      g.ok,
+      JSON.stringify({
+        stage: g.stage,
+        errors: g.errors,
+        findings: g.findings.filter((f) => f.severity === 'error'),
+      }),
+    ).toBe(true);
+    expect(g.programs).toHaveLength(2);
+    // The first program cuts only the item assigned to it; the second is measured over the whole
+    // setup, so the item the first never touched is entirely its work.
+    expect(g.programs[0]!.cam!.operations).toBe(1);
+    expect(g.restPass!.rest.nc).toMatch(/\.nc$/);
+  });
+
+  it('refuses an assignment that names an item twice, or leaves one unassigned', () => {
+    const job = defaultEngraveJob();
+    const [a, b] = job.labels.map((l) => l.id);
+    const base = setUp(job, [[a!, b!]], [job.toolKey]);
+    const duplicated: EngraveJob = {
+      ...base,
+      setups: [
+        {
+          ...base.setups![0]!,
+          tools: [job.toolKey, TOOL_B.key],
+          toolItems: { [job.toolKey]: [a!], [TOOL_B.key]: [a!, b!] },
+        },
+      ],
+    };
+    const g = generate(tl, duplicated, null, [], undefined, { tools: [TOOL_B, ...TOOL_LIBRARY] });
     expect(g.ok).toBe(false);
     expect(g.stage).toBe('findings');
     expect(g.programs).toEqual([]);
-    expect(g.findings.filter((f) => f.code === 'setup-tools-unassigned' && f.severity === 'error')).toHaveLength(1);
+    expect(g.findings.some((f) => f.code === 'setup-items-duplicated' && f.severity === 'error')).toBe(true);
+
+    const unassigned: EngraveJob = {
+      ...base,
+      setups: [
+        {
+          ...base.setups![0]!,
+          tools: [job.toolKey, TOOL_B.key],
+          toolItems: { [job.toolKey]: [a!] },
+        },
+      ],
+    };
+    const u = generate(tl, unassigned, null, [], undefined, { tools: [TOOL_B, ...TOOL_LIBRARY] });
+    expect(u.ok).toBe(false);
+    expect(u.findings.some((f) => f.code === 'setup-items-unassigned' && f.severity === 'error')).toBe(true);
   });
 
   it('refuses a setup naming no cutter', () => {
@@ -1902,5 +2010,85 @@ describe('engraveGenerate — one program per setup (#419 J3)', () => {
     expect(vacuumWords(g.programs[0]!.nc)).toEqual(['M331', 'M332']);
     // The frame file never did cut anything; since #419 Q-F it says nothing about the vacuum.
     expect(vacuumWords(g.frameNc!)).toEqual([]);
+  });
+});
+
+// #472 — the assignment itself: `setupPrograms` is the one split, and `setupProgramFindings` is
+// the one reading of the map. Tested directly, without a wasm run, because these are the rules
+// every later program (and the sheet) is derived from.
+describe('the per-cutter assignment (#472)', () => {
+  const ORIENTATION = {
+    top: 'top',
+    bottom: 'bottom',
+    left: 'left',
+    right: 'right',
+    front: 'front',
+    back: 'back',
+  } as const;
+  const TOOL_B: ToolLibraryEntry = {
+    key: 'user:flat-1-b',
+    tool: flatEndMill(1.0, { name: '1 mm flat (setup B)' }),
+    provenance: 'test',
+  };
+  const setupWith = (
+    job: EngraveJob,
+    tools: string[],
+    toolItems?: Record<string, string[]>,
+  ): EngraveJob => ({
+    ...job,
+    setups: [
+      {
+        id: 'setup-1',
+        orientation: { ...ORIENTATION },
+        mount: { kind: 'vise' },
+        itemIds: job.labels.map((l) => l.id),
+        tools,
+        ...(toolItems === undefined ? {} : { toolItems }),
+      },
+    ],
+  });
+
+  it('makes one ref per (setup, tool), each with the items that cutter owns', () => {
+    const job = defaultEngraveJob();
+    const [a, b] = job.labels.map((l) => l.id);
+    const refs = setupPrograms(
+      setupWith(job, [job.toolKey, TOOL_B.key], { [job.toolKey]: [a!], [TOOL_B.key]: [b!] }),
+    );
+    expect(refs.map((r) => [r.setupIndex, r.toolKey, r.itemIds])).toEqual([
+      [1, job.toolKey, [a]],
+      [1, TOOL_B.key, [b]],
+    ]);
+  });
+
+  it('gives the first cutter every item when a multi-tool setup states no map', () => {
+    const job = defaultEngraveJob();
+    const ids = job.labels.map((l) => l.id);
+    const refs = setupPrograms(setupWith(job, [job.toolKey, TOOL_B.key]));
+    expect(refs.map((r) => r.itemIds)).toEqual([ids, []]);
+  });
+
+  it('drops an assignment that names a cutter or item the setup no longer holds', () => {
+    const job = defaultEngraveJob();
+    const [a, b] = job.labels.map((l) => l.id);
+    const findings = setupProgramFindings(
+      setupWith(job, [job.toolKey], {
+        [job.toolKey]: [a!],
+        'user:ghost': [b!],
+        removed: [a!],
+      }),
+    );
+    // A single-cutter setup's map is stale by definition: the tool key no longer listed is
+    // `setup-tool-unknown`, and the setup's own item b is then unassigned.
+    expect(findings.some((f) => f.code === 'setup-tool-unknown' && f.severity === 'error')).toBe(true);
+    expect(findings.some((f) => f.code === 'setup-items-unassigned' && f.severity === 'error')).toBe(true);
+  });
+
+  it('refuses a first cutter with nothing assigned', () => {
+    const job = defaultEngraveJob();
+    const ids = job.labels.map((l) => l.id);
+    const findings = setupProgramFindings(
+      setupWith(job, [job.toolKey, TOOL_B.key], { [job.toolKey]: [], [TOOL_B.key]: ids }),
+    );
+    expect(findings.some((f) => f.code === 'setup-tool-no-items' && f.severity === 'error')).toBe(true);
   });
 });

@@ -11,17 +11,21 @@
  * meant — `jobSetups` derives it, so the legacy path and the stored path meet here rather than in
  * the generator's control flow.
  *
- * ONE TOOL PER SETUP, FOR NOW. `JobSetup.tools` is a list because the model allows a setup to use
- * more than one cutter, but WHICH ITEMS each cutter takes is #410's assignment and does not exist
- * yet: a setup naming a second tool would cut every one of its items twice, once per tool. So the
- * derivation refuses that shape rather than guessing (see `setupToolProblems`) — the program list
- * is one per (setup, tool) exactly while each setup names one tool, which is the whole of J3 that
- * can be honest today.
+ * ONE PROGRAM PER (SETUP, TOOL). `JobSetup.tools` is the ordered cut chain, and #472's
+ * `toolItems` says which of the setup's items each cutter owns. A setup that names no map gets the
+ * reading every pre-#472 document already had: the first cutter owns every item, and a later
+ * cutter is a REST pass — the generator measures what the previous program left instead of walking
+ * the item list again (the CLI route's behaviour, #410).
+ *
+ * A later ref's `itemIds` are the items the operator assigned to that cutter. They are not the
+ * program's cut geometry — a rest program's geometry is the measured rest regions, built by the
+ * generator — but they are the assignment the setup saved, and the items that must not be cut by
+ * the earlier cutter.
  */
 
 import type { EngraveJob } from '@/types/engraveJob';
 import type { Tool } from '@/engine/cnc/tool';
-import { jobSetups } from './jobSetup';
+import { jobSetups, setupTools, toolItemsFor } from './jobSetup';
 
 /** One program, before it is cut: a setup, the items it cuts, and the cutter. */
 export interface JobProgramRef {
@@ -29,22 +33,22 @@ export interface JobProgramRef {
   setupIndex: number;
   setupId: string;
   toolKey: string;
-  /** The setup's items, in document order, as it listed them. */
+  /** The setup items assigned to this cutter, in the setup's own document order. */
   itemIds: readonly string[];
 }
 
 /**
- * Every setup's programs, in cut order. A setup with no tool named falls back to `job.toolKey`
- * (the legacy reading: the document's cutter is the one every cut uses) — `setupToolProblems`
- * reports the empty case so the fallback is never silent.
+ * Every setup's programs, in cut order: one per tool, each carrying the items that tool owns.
  */
 export function setupPrograms(job: EngraveJob): JobProgramRef[] {
-  return jobSetups(job).map((setup, i) => ({
-    setupIndex: i + 1,
-    setupId: setup.id,
-    toolKey: setup.tools[0] ?? job.toolKey,
-    itemIds: setup.itemIds,
-  }));
+  return jobSetups(job).flatMap((setup, i) =>
+    setupTools(setup, job).map((toolKey, toolIndex) => ({
+      setupIndex: i + 1,
+      setupId: setup.id,
+      toolKey,
+      itemIds: toolItemsFor(setup, toolKey, toolIndex),
+    })),
+  );
 }
 
 /**

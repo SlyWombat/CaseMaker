@@ -317,6 +317,10 @@ export function restJobFor(
     vectors,
     drills: [],
     toolKey,
+    // #472 — the rest job is ONE program for ONE cutter. A saved `setups[]` would make anything
+    // that re-read the document inside the generator walk the whole job again from one of its own
+    // programs, so it is removed exactly as `jobForSetup` removes it.
+    setups: undefined,
     // The materialised cutter belonged to the FIRST program. Left in place it would be read back
     // ahead of `toolKey` (`jobTool`) and the rest program would be generated, verified and simulated
     // for the wrong bit — so it is cleared, and the route materialises the second cutter's.
