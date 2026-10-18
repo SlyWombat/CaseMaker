@@ -760,7 +760,7 @@ const jobSetupSchema = z.object({
 });
 
 /** A v3 source record (#425 §6): the file's bytes, or its name and SHA-256 when it is too large. */
-const jobSourceSchema = z
+export const jobSourceSchema = z
   .object({
     sha256: z.string().regex(/^[0-9a-f]{64}$/, 'a lowercase SHA-256 (64 hex characters)'),
     kind: z.enum(['svg', 'dxf', 'image', '3mf', 'font']),
@@ -778,7 +778,7 @@ const jobSourceSchema = z
   .strict();
 
 /** One frozen program in the package block (#419 §4, #425). */
-const frozenProgramSchema = z
+export const frozenProgramSchema = z
   .object({
     setupIndex: z.number().int().nonnegative(),
     setupId: z.string().min(1),
@@ -796,7 +796,7 @@ const frozenProgramSchema = z
  * The integrity of the hashes is checked when a document is OPENED (`package.ts`), not here — a
  * bad hash is a reason to refuse the package, never a reason a job file will not load.
  */
-const frozenPackageSchema = z
+export const frozenPackageSchema = z
   .object({
     jobId: z.string().min(1),
     frozenAt: z.string().min(1),
@@ -809,7 +809,7 @@ const frozenPackageSchema = z
   .strict();
 
 /** One program's outcome in the document's run log (#425 §6). */
-const jobRunLogEntrySchema = z
+export const jobRunLogEntrySchema = z
   .object({
     programHash: z.string().min(1),
     setupIndex: z.number().int().nonnegative(),

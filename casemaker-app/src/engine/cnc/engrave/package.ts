@@ -25,7 +25,7 @@
  * so in words ("reserved by the package of 14:02, now stale; the blank is still held").
  */
 
-import type { EngraveJob, FrozenPackage, FrozenProgram } from '@/types/engraveJob';
+import type { EngraveJob, FrozenPackage, FrozenProgram, JobRunLogEntry } from '@/types/engraveJob';
 import { jobSetups } from './jobSetup';
 import { programHash } from '@/engine/cnc/programHash';
 
@@ -155,4 +155,100 @@ export function packageStaleness(pkg: FrozenPackage, job: EngraveJob): PackageSt
     return { stale: true, reason: 'the job changed since the package was frozen' };
   }
   return { stale: false, reason: null };
+}
+
+/** Why a stored package cannot be trusted, or null when every saved text is the approved one. */
+export interface PackageIntegrity {
+  ok: boolean;
+  /** The sentence the Cut surface shows; null when `ok`. */
+  reason: string | null;
+}
+
+/**
+ * The sentence a package's saved texts get when they are not the ones that were approved. It is
+ * deliberately different from staleness: a stale package is a job that changed, while an unusable
+ * one is a file whose bytes were edited after the freeze (or a package whose own record is
+ * inconsistent). Neither ever causes the text to be dropped or the job to fail to open.
+ */
+const PACKAGE_TAMPERED_SENTENCE =
+  'the saved program text does not match its hash; the package will not be offered for a run';
+
+/**
+ * Is this package INTERNALLY the one it says it is? Recompute every text's FNV key, the frame keys,
+ * and the package's own key, and check that each program still names a setup the package carries.
+ *
+ * This is NOT staleness (`packageStaleness`): a package can be perfectly intact and stale, or
+ * current and tampered with. Save/Open runs this on load, because the document is the only copy of
+ * the approved texts now; a mismatch keeps the job and the block, but marks the package unusable so
+ * Cut refuses until a re-freeze. Program texts are the one thing a package cannot re-derive from
+ * the job (that needs the worker), so the hashes are the whole guarantee.
+ */
+export function validatePackage(pkg: FrozenPackage): PackageIntegrity {
+  if (pkg.programs.length === 0) {
+    return { ok: false, reason: 'the package holds no program' };
+  }
+  const setups = new Set(pkg.setups.map((setup) => setup.id));
+  for (const program of pkg.programs) {
+    if (programHash(program.nc) !== program.hash) {
+      return { ok: false, reason: PACKAGE_TAMPERED_SENTENCE };
+    }
+    if (program.frameNc !== null && programHash(program.frameNc) !== program.frameHash) {
+      return { ok: false, reason: PACKAGE_TAMPERED_SENTENCE };
+    }
+    if (program.frameNc === null && program.frameHash !== null) {
+      return { ok: false, reason: PACKAGE_TAMPERED_SENTENCE };
+    }
+    if (!setups.has(program.setupId)) {
+      return {
+        ok: false,
+        reason: `the package names setup ${program.setupId}, which it does not carry`,
+      };
+    }
+  }
+  if (packageHash(pkg.jobHash, pkg.programs) !== pkg.hash) {
+    return { ok: false, reason: 'the package does not match its own hash' };
+  }
+  return { ok: true, reason: null };
+}
+
+/**
+ * Keep only the run-log entries that still describe a program the package carries.
+ *
+ * A re-freeze can add, remove or re-post a program. An outcome whose `programHash` is no longer in
+ * the new package is history of a program this job no longer has — keeping it would let
+ * `resumeAtSetup` think a setup is done when its current program has never run. Matching entries
+ * survive, so a re-freeze does not throw away progress on the programs that did not change.
+ */
+export function pruneRunLog(
+  runLog: readonly JobRunLogEntry[] | undefined,
+  programs: readonly FrozenProgram[],
+): JobRunLogEntry[] | undefined {
+  if (runLog === undefined) return undefined;
+  const hashes = new Set(programs.map((program) => program.hash));
+  return runLog.filter((entry) => hashes.has(entry.programHash));
+}
+
+/** Where a reloaded job picks up: the first frozen program that has not finished. */
+export interface ResumePoint {
+  setupIndex: number;
+  setupId: string;
+  programHash: string;
+}
+
+/**
+ * The program a reopened job resumes at — the first in the frozen package with no `finished` entry
+ * in the run log. A `stopped` or `failed` program is NOT done (the same rule
+ * `finishedProgramsFor` follows): a partially cut file has no honest continuation, so it is played
+ * again from its beginning. Null when every program finished or the job has no package.
+ */
+export function resumeAtSetup(job: EngraveJob): ResumePoint | null {
+  const programs = job.package?.programs;
+  if (programs === undefined || programs.length === 0) return null;
+  const finished = new Set(
+    (job.runLog ?? []).filter((entry) => entry.outcome === 'finished').map((entry) => entry.programHash),
+  );
+  const next = programs.find((program) => !finished.has(program.hash));
+  return next === undefined
+    ? null
+    : { setupIndex: next.setupIndex, setupId: next.setupId, programHash: next.hash };
 }

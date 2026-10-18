@@ -63,11 +63,14 @@ import type {
   EngraveTraceItem,
   EngraveVectorShape,
   FieldSource,
+  FrozenPackage,
+  JobRunLogEntry,
   JobSetup,
   JobSource,
   Sacrificial,
   ViseParams,
 } from '@/types/engraveJob';
+import { pruneRunLog } from '@/engine/cnc/engrave/package';
 import { withSource } from '@/engine/cnc/engrave/jobSources';
 import { parseEngraveJob, type ParseEngraveJobResult } from './engraveJobSchema';
 import { useSettingsStore } from './settingsStore';
@@ -697,6 +700,25 @@ export interface EngraveJobState {
    * write's to hide.
    */
   addSourceFile: (source: JobSource) => void;
+  /**
+   * Write (or clear) the package block the document owns (#425, R8).
+   *
+   * The document is the one authority: a freeze, a Save and an Open all agree because they read
+   * `job.package`, not a browser cache. A package frozen for a DIFFERENT job id is ignored — the
+   * document cannot describe someone else's run — and writing one PRUNES the run log to the
+   * programs the new package carries (`pruneRunLog`), so an outcome for a program that no longer
+   * exists cannot answer the resume question.
+   *
+   * `null` removes the key. Save never creates a package; only Cut's freeze does.
+   */
+  setPackage: (pkg: FrozenPackage | null) => void;
+  /**
+   * Append one program outcome to the document's run log (#425 §6). The one write a run end makes:
+   * `finished` means done, `stopped`/`failed` means the program is played again. Appending does not
+   * touch the package or its fingerprint (`jobFingerprint` excludes `runLog`), so it can never
+   * stale a package it did not change.
+   */
+  appendRunLog: (entry: JobRunLogEntry) => void;
   /**
    * Give every label a depth THIS blank allows, and say who decided (#362) — the arithmetic is
    * `recommendLabelDepth`, this is only the walk over the labels and the provenance.
@@ -1356,6 +1378,32 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
       apply((current) => ({
         ...current,
         sourceFiles: withSource(current.sourceFiles, source),
+      }));
+    },
+
+    setPackage: (pkg) => {
+      apply((current) => {
+        if (pkg === null) {
+          const { package: _removed, ...rest } = current;
+          return rest;
+        }
+        // A package for another job is not this document's: writing it would make `job.package`
+        // disagree with `job.id`, and the staleness check would then refuse it forever.
+        if (pkg.jobId !== current.id) return current;
+        return {
+          ...current,
+          package: pkg,
+          ...(current.runLog === undefined
+            ? {}
+            : { runLog: pruneRunLog(current.runLog, pkg.programs) }),
+        };
+      });
+    },
+
+    appendRunLog: (entry) => {
+      apply((current) => ({
+        ...current,
+        runLog: [...(current.runLog ?? []), entry],
       }));
     },
 
