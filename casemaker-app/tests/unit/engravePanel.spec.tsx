@@ -34,6 +34,7 @@ import { flatEndMill } from '@/engine/cnc/tool';
 import { vCone } from '@/engine/cnc/vProfile';
 import { vCarvePlane, vCarveStepover, vCarveStepoverClampNote } from '@/engine/cnc/vCarveGeometry';
 import { itemName, V_BIT_CARVE_SENTENCE, type ToolRecommendation } from '@/engine/cnc/engrave/recommendTool';
+import type { EngraveTraceItem } from '@/types/engraveJob';
 import type { EngravePreview } from '@/workers/sim/engravePreview';
 import type { EngraveGenerated, EngraveProgram } from '@/workers/sim/engraveGenerate';
 
@@ -624,6 +625,47 @@ describe('EngravePanel — single-line traces (#219)', () => {
     expect(screen.getByTestId('engrave-trace-font-1')).toBeTruthy();
     // Traces count as items (#219), alongside the three default labels.
     expect(screen.getByTestId('engrave-item-count').textContent).toBe('5');
+  });
+
+  // #409 — the three stroke-model fields are OPT-IN and the editor is the only place a LABEL item
+  // can turn them on. They stay absent by default, so a stored job that states none of them lays
+  // out exactly as before; clearing a field returns it to absent.
+  it('edits a single-line label’s bold width, condense and gap, and clears them again', () => {
+    render(<EngravePanel />);
+    fireEvent.click(screen.getByTestId('engrave-add-line'));
+    fireEvent.click(screen.getByTestId('engrave-add-stroke-label'));
+
+    // A `line` has no stroke model — these are the LABEL item's fields.
+    expect(screen.queryByTestId('engrave-trace-weight-0')).toBeNull();
+    expect(screen.queryByTestId('engrave-trace-widthscale-1')).toBeTruthy();
+    expect(screen.queryByTestId('engrave-trace-spacing-1')).toBeTruthy();
+
+    const stroke = (): Extract<EngraveTraceItem, { kind: 'stroke-label' }> => {
+      const t = useEngraveJobStore.getState().job.traces![1]!;
+      if (t.kind !== 'stroke-label') throw new Error('expected the added stroke label');
+      return t;
+    };
+
+    fireEvent.change(screen.getByTestId('engrave-trace-weight-1'), { target: { value: '1.5' } });
+    expect(stroke().weight).toBe(1.5);
+    // Out of the schema's bounds is not committed: the job must stay loadable.
+    fireEvent.change(screen.getByTestId('engrave-trace-weight-1'), { target: { value: '50' } });
+    expect(stroke().weight).toBe(1.5);
+    fireEvent.change(screen.getByTestId('engrave-trace-weight-1'), { target: { value: '' } });
+    expect(stroke().weight).toBeUndefined();
+
+    fireEvent.change(screen.getByTestId('engrave-trace-widthscale-1'), { target: { value: '0.8' } });
+    expect(stroke().widthScale).toBe(0.8);
+    fireEvent.change(screen.getByTestId('engrave-trace-widthscale-1'), { target: { value: '0.3' } });
+    expect(stroke().widthScale).toBe(0.8);
+    fireEvent.change(screen.getByTestId('engrave-trace-widthscale-1'), { target: { value: '' } });
+    expect(stroke().widthScale).toBeUndefined();
+
+    const gap = screen.getByTestId('engrave-trace-spacing-1') as HTMLInputElement;
+    fireEvent.click(gap);
+    expect(stroke().spacing).toBe('cut-width');
+    fireEvent.click(gap);
+    expect(stroke().spacing).toBeUndefined();
   });
 
   it('commits points only when the path is a valid polyline', () => {

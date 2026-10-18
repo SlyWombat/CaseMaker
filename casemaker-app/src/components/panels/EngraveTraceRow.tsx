@@ -39,6 +39,14 @@ const SEVERITY_COLOR: Record<JobFinding['severity'], string> = { error: '#f0b4ad
 /** The schema's caps, mirrored here so the editor commits only a loadable path (#219). */
 const MAX_POINTS = 5000;
 
+/**
+ * The schema's #409 bounds, mirrored for the same reason: the editor commits only a stroke label
+ * the job document will load again. `weight` is a positive cut width; `widthScale` condenses x.
+ */
+const MIN_WIDTH_SCALE = 0.5;
+const MAX_WIDTH_SCALE = 2;
+const MAX_STROKE_WEIGHT = 20;
+
 function pointsToText(points: readonly [Mm, Mm][]): string {
   return points.map(([x, y]) => `${x}, ${y}`).join('\n');
 }
@@ -224,6 +232,74 @@ export function EngraveTraceRow({
             </select>
           </label>
           {numField('size', 'cap', 'Cap height, mm — the height of a capital letter, as for an outline label.')}
+        </div>
+      )}
+
+      {/* #409 — the stroke model, for a LABEL item. All three are OPT-IN and absent by default,
+          so a stored job that states none of them lays out exactly as before. The first two need
+          a V-bit: bold offsets a cone's depth-dependent groove, and the gap rule measures "a
+          groove's width"; a flat end mill's cut is its diameter at every depth, and the engine
+          ignores both fields rather than inventing a width. */}
+      {trace.kind === 'stroke-label' && (
+        <div style={ROW_INLINE}>
+          <label style={FIELD_LABEL}>
+            <span>bold</span>
+            <input
+              type="number"
+              min={0}
+              step="any"
+              value={trace.weight ?? ''}
+              placeholder="off"
+              data-testid={`engrave-trace-weight-${index}`}
+              aria-label={`${kindLabel} ${index + 1} bold target cut width`}
+              title="Bold: the cut width this stroke's parallel passes must reach, mm. Needs a V-bit — a flat end mill's cut is its diameter. Blank is one cutter width."
+              style={NUM}
+              onChange={(e) => {
+                const raw = e.target.value;
+                if (raw === '') return onChange({ weight: undefined });
+                const v = Number(raw);
+                // Commit only a loadable number; a half-typed or out-of-bound value keeps the
+                // stored one, exactly as the points editor refuses an invalid path.
+                if (Number.isFinite(v) && v > 0 && v <= MAX_STROKE_WEIGHT) onChange({ weight: v });
+              }}
+            />
+            <span>mm</span>
+          </label>
+          <label style={FIELD_LABEL}>
+            <span>condense</span>
+            <input
+              type="number"
+              min={MIN_WIDTH_SCALE}
+              max={MAX_WIDTH_SCALE}
+              step="any"
+              value={trace.widthScale ?? ''}
+              placeholder="1"
+              data-testid={`engrave-trace-widthscale-${index}`}
+              aria-label={`${kindLabel} ${index + 1} horizontal condense`}
+              title="Condense: multiply x only, 0.5–2, so the line gets shorter without losing cap height. Blank is the font's own widths."
+              style={NUM}
+              onChange={(e) => {
+                const raw = e.target.value;
+                if (raw === '') return onChange({ widthScale: undefined });
+                const v = Number(raw);
+                if (Number.isFinite(v) && v >= MIN_WIDTH_SCALE && v <= MAX_WIDTH_SCALE) {
+                  onChange({ widthScale: v });
+                }
+              }}
+            />
+            <span>×</span>
+          </label>
+          <label style={FIELD_LABEL}>
+            <input
+              type="checkbox"
+              checked={trace.spacing === 'cut-width'}
+              data-testid={`engrave-trace-spacing-${index}`}
+              aria-label={`${kindLabel} ${index + 1} keep a groove between letters`}
+              title="Keep at least one groove's width of clear, uncut surface between neighbouring letters. Needs a V-bit, because it measures the groove the cone opens at this depth. Off by default."
+              onChange={(e) => onChange({ spacing: e.target.checked ? 'cut-width' : undefined })}
+            />
+            <span>keep a groove between letters</span>
+          </label>
         </div>
       )}
 
