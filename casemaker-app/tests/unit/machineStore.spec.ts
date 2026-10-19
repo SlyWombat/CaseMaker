@@ -23,7 +23,13 @@ function observation(over: Partial<MachineObservation> = {}): MachineObservation
 }
 
 beforeEach(() => {
-  useMachineStore.setState({ machine: null, outcome: null, reason: null, checkedAt: null });
+  useMachineStore.setState({
+    machine: null,
+    outcome: null,
+    reason: null,
+    checkedAt: null,
+    heartbeat: { reachable: null, lastSeenAt: null },
+  });
   localStorage.removeItem(MACHINE_STORAGE_KEY);
 });
 
@@ -87,6 +93,36 @@ describe('#280 — machineStore', () => {
     useMachineStore.getState().forget();
     useMachineStore.getState().noteLiveStatus({ busy: true, status: '<Run>' });
     expect(useMachineStore.getState().machine).toBeNull();
+  });
+
+  it('noteHeartbeat records reachable and the last-seen moment, leaving the machine record alone (#555)', () => {
+    useMachineStore.getState().setProbeResult({ kind: 'found', observation: observation(), calibration: null });
+    const before = useMachineStore.getState().machine!;
+    useMachineStore.getState().noteHeartbeat(true);
+    const after = useMachineStore.getState().machine!;
+    expect(useMachineStore.getState().heartbeat.reachable).toBe(true);
+    expect(useMachineStore.getState().heartbeat.lastSeenAt).not.toBeNull();
+    // The machine's identity and record are the CHECK's, not the heartbeat's — nothing there moves.
+    expect(after.host).toBe(before.host);
+    expect(after.observedAt).toBe(before.observedAt);
+    expect(after.status).toBe(before.status);
+    // And the heartbeat is a live claim, never written to storage.
+    expect(JSON.parse(localStorage.getItem(MACHINE_STORAGE_KEY)!).heartbeat).toBeUndefined();
+  });
+
+  it('noteHeartbeat unreachable keeps the last-seen moment (#555)', () => {
+    useMachineStore.getState().setProbeResult({ kind: 'found', observation: observation(), calibration: null });
+    useMachineStore.getState().noteHeartbeat(true);
+    const seen = useMachineStore.getState().heartbeat.lastSeenAt;
+    useMachineStore.getState().noteHeartbeat(false);
+    expect(useMachineStore.getState().heartbeat.reachable).toBe(false);
+    expect(useMachineStore.getState().heartbeat.lastSeenAt).toBe(seen);
+  });
+
+  it('noteHeartbeat with no remembered machine does nothing', () => {
+    useMachineStore.getState().forget();
+    useMachineStore.getState().noteHeartbeat(true);
+    expect(useMachineStore.getState().heartbeat.reachable).toBeNull();
   });
 
   it('reloads the machine from storage', async () => {

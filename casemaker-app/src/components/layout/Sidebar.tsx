@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { useProjectStore } from '@/store/projectStore';
 import { useViewportStore, type SidebarSectionId } from '@/store/viewportStore';
 import { derivedKind, type Archetype } from '@/engine/compiler/archetype';
+import { MachinePin } from './MachinePin';
 
 /** Phone breakpoint, matching the welcome screen's ≤640px block. Below it the
  *  left rail is an off-canvas drawer instead of a fixed 320px column, which
@@ -180,6 +181,10 @@ export function Sidebar() {
         </button>
       )}
       <aside className={className} data-testid="sidebar" aria-label="Sections" style={{ padding: 8 }}>
+        {/* #556 / #555 — the machine, pinned above the section index so it stays in the frame while
+            designing, simulating and cutting, not only on the Manage screen. Gated on the CNC UI
+            (`featureSim`) with the rest of the machine surface; the pin renders its own states. */}
+        {featureSim && <MachinePin />}
         {sections.map((s) => {
           const isActive = activeSection === s.id;
           return (

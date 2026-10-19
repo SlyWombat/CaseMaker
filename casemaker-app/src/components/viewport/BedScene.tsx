@@ -132,11 +132,13 @@ function datumLabelPosition(d: BedSceneDatum): [number, number, number] {
 export function BedScene({ machine }: { machine: MachineRecord }) {
   const mill = resolvedMachineById(machine.profileId ?? 'Z1', machine.calibration);
   const profile = machine.bedProfiles?.find((p) => p.id === machine.activeBedProfileId) ?? null;
-  const fixtures = machine.bedFixtures ?? [];
 
   const scene = useMemo(
-    () => (mill !== undefined && profile !== null ? bedScene({ mill, fixtures, profile }) : null),
-    [mill, fixtures, profile],
+    () =>
+      mill !== undefined && profile !== null
+        ? bedScene({ mill, fixtures: machine.bedFixtures ?? [], profile })
+        : null,
+    [mill, machine.bedFixtures, profile],
   );
 
   const hasWebgl = useMemo(() => webglAvailable(), []);

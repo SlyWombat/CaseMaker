@@ -29,6 +29,21 @@ const MACHINE_KEY = 'casemaker.machine.v1';
 /** What the last check concluded. `found` is the only one that leaves a machine behind. */
 export type MachineCheckOutcome = MachineProbeResult['kind'];
 
+/**
+ * What the live heartbeat (#555) last concluded about the remembered machine.
+ *
+ * Reachability is a live claim, never a record: it is re-established by the heartbeat on every
+ * open, and `null` until the first heartbeat answers. `lastSeenAt` is the heartbeat's own moment,
+ * kept apart from the check's `observedAt` so a 2 s poll never moves the record the Manage card
+ * keys its vacuum switch on.
+ */
+export interface MachineHeartbeat {
+  /** Whether the last heartbeat reached the machine, or null before the first one has answered. */
+  reachable: boolean | null;
+  /** ISO timestamp of the last successful heartbeat, or null when none has answered. */
+  lastSeenAt: string | null;
+}
+
 export interface MachineState {
   /** The machine we last reached, or null when the last check did not find one. */
   machine: MachineObservation | null;
@@ -41,6 +56,8 @@ export interface MachineState {
   reason: string | null;
   /** When the check ran. Null means no check has run in this profile. */
   checkedAt: string | null;
+  /** The live heartbeat's conclusion (#555) — reachable / unreachable / last-seen. */
+  heartbeat: MachineHeartbeat;
   /** Record one probe result. The single write path: the probe produces, the store keeps. */
   setProbeResult: (result: MachineProbeResult) => void;
   /**
@@ -51,6 +68,13 @@ export interface MachineState {
   noteLiveStatus: (live: { busy: boolean; status: string }) => void;
   /** Forget the machine entirely — a new check, or the user saying "not this one". */
   forget: () => void;
+  /**
+   * Record one heartbeat result (#555): whether the machine answered, and when it was last seen.
+   * Only the heartbeat fields move — the machine's identity, status and `observedAt` are the
+   * check's record, not the heartbeat's, so a 2 s poll never rewrites the record the Manage card
+   * keys its vacuum switch on.
+   */
+  noteHeartbeat: (reachable: boolean) => void;
 }
 
 interface MachineSlice {
@@ -58,9 +82,16 @@ interface MachineSlice {
   outcome: MachineCheckOutcome | null;
   reason: string | null;
   checkedAt: string | null;
+  heartbeat: MachineHeartbeat;
 }
 
-const EMPTY: MachineSlice = { machine: null, outcome: null, reason: null, checkedAt: null };
+const EMPTY: MachineSlice = {
+  machine: null,
+  outcome: null,
+  reason: null,
+  checkedAt: null,
+  heartbeat: { reachable: null, lastSeenAt: null },
+};
 
 /** The four outcomes, stated once so a corrupted or older payload cannot invent a fifth. */
 const OUTCOMES: ReadonlySet<MachineCheckOutcome> = new Set(['found', 'not-found', 'unavailable', 'error']);
@@ -113,6 +144,8 @@ function loadMachine(): MachineSlice {
       outcome,
       reason: typeof parsed.reason === 'string' ? parsed.reason : null,
       checkedAt: typeof parsed.checkedAt === 'string' ? parsed.checkedAt : null,
+      // Reachability is a live claim, never a record: the heartbeat re-establishes it on open.
+      heartbeat: { reachable: null, lastSeenAt: null },
     };
   } catch {
     return { ...EMPTY };
@@ -122,7 +155,12 @@ function loadMachine(): MachineSlice {
 function persist(s: MachineSlice): void {
   if (typeof localStorage === 'undefined') return;
   try {
-    localStorage.setItem(MACHINE_KEY, JSON.stringify(s));
+    // The heartbeat is deliberately NOT written: reachability and last-seen are re-established by
+    // the heartbeat on every open, and storing a 2 s poll would churn the record for nothing.
+    localStorage.setItem(
+      MACHINE_KEY,
+      JSON.stringify({ machine: s.machine, outcome: s.outcome, reason: s.reason, checkedAt: s.checkedAt }),
+    );
   } catch {
     // ignore quota errors
   }
@@ -137,6 +175,8 @@ export const useMachineStore = create<MachineState>()((set, get) => ({
       outcome: result.kind,
       reason: result.kind === 'unavailable' ? result.reason : result.kind === 'error' ? result.detail : null,
       checkedAt: new Date().toISOString(),
+      // A fresh check is a fresh record: reachability is re-established by the heartbeat, not kept.
+      heartbeat: { reachable: null, lastSeenAt: null },
     };
     set(slice);
     persist(slice);
@@ -150,6 +190,7 @@ export const useMachineStore = create<MachineState>()((set, get) => ({
       outcome: get().outcome,
       reason: get().reason,
       checkedAt: get().checkedAt,
+      heartbeat: get().heartbeat,
     };
     set(slice);
     persist(slice);
@@ -159,6 +200,15 @@ export const useMachineStore = create<MachineState>()((set, get) => ({
     const slice: MachineSlice = { ...EMPTY, checkedAt: get().checkedAt };
     set(slice);
     persist(slice);
+  },
+
+  noteHeartbeat: (reachable) => {
+    const current = get().machine;
+    if (current === null) return;
+    const now = new Date().toISOString();
+    set({
+      heartbeat: { reachable, lastSeenAt: reachable ? now : get().heartbeat.lastSeenAt },
+    });
   },
 }));
 
