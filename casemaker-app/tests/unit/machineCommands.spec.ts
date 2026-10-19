@@ -836,6 +836,27 @@ describe('#477 machine home — `$H`, behind the literal word', () => {
     expect(transport.lines()).toEqual(['?']);
     expect(stdout.join('\n')).toContain('the controller is in an alarm');
   });
+
+  it('Ctrl-C sends abort and exits 130 while the poll waits for Idle', async () => {
+    const transport = new FakeTransport();
+    transport.on('?', encodeFrame(0x81, utf8(OK_STATUS))); // pre-flight: Idle, not alarmed
+    transport.on('$H', encodeFrame(0x81, utf8('ok')));
+    transport.on('?', encodeFrame(0x81, utf8('<Run|MPos:1,2,3|P:5,10,4>'))); // still busy: the poll keeps going
+    transport.on('abort', encodeFrame(0x81, utf8('ok')));
+    let fired = false;
+    const { code, stdout } = await run(['home', '--confirm', 'home'], transport, location(), HUMAN, {
+      sleep: async () => {
+        if (!fired) {
+          fired = true;
+          process.emit('SIGINT');
+        }
+      },
+    });
+
+    expect(code).toBe(130);
+    expect(transport.lines()).toEqual(['?', '$H', '?', 'abort']);
+    expect(stdout.join('\n')).toContain('Ctrl-C — `abort` was sent');
+  });
 });
 
 describe('#477 machine probe — `M491`, behind the literal word', () => {

@@ -1001,6 +1001,12 @@ async function physicalBody(
     return 1;
   }
 
+  let aborted = false;
+  const onSignal = (): void => {
+    aborted = true;
+  };
+  process.on('SIGINT', onSignal);
+
   try {
     const before = await runStatus(deps.transport, conn);
     details.status = statusRead(before.text, before.diagnostics);
@@ -1034,11 +1040,25 @@ async function physicalBody(
     };
     if (section === 'probe') details.probe = { line, prb: lastPrb(sent.text), text: sent.text };
 
-    out.progress(`${line} sent — polling \`?\` every ${args.pollMs} ms until the machine is Idle`);
+    out.progress(`${line} sent — polling \`?\` every ${args.pollMs} ms until the machine is Idle (Ctrl-C aborts)`);
 
     const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
     const deadline = args.timeoutS === undefined ? null : Date.now() + args.timeoutS * 1000;
     for (;;) {
+      if (aborted) {
+        // The bench's stop: `abort` stops the machine at once. 60 s is the seeded `stop.abortReplyMs`
+        // (`z1.mjs run`).
+        const stopped = await session.send('abort', { firstReplyMs: 60_000, maxMs: 60_000 });
+        refusals.push({
+          code: 'aborted',
+          reason: stopped.ok
+            ? 'Ctrl-C — `abort` was sent; the controller is stopping.'
+            : `Ctrl-C — \`abort\` was NOT answered (${stopped.detail}). Check the machine.`,
+        });
+        out.emitReceipt(machineReceipt(details, false, refusals));
+        return 130;
+      }
+
       const readStatus = await runStatus(deps.transport, conn);
       details.status = statusRead(readStatus.text, readStatus.diagnostics);
       if (details.status.alarm !== null) {
@@ -1088,6 +1108,7 @@ async function physicalBody(
     out.emitReceipt(machineReceipt(details, true, refusals));
     return 0;
   } finally {
+    process.off('SIGINT', onSignal);
     await deps.transport.tcpClose(conn);
   }
 }
