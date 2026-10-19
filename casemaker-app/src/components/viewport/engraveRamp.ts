@@ -46,6 +46,15 @@ export const LOST_COLOR = '#f59e0b';
 export const REGISTRATION_COLOR = '#2dd4bf';
 
 /**
+ * #549 — the warning treatment for an engrave item that clips to empty (out of the stock, inside
+ * the jaw-clearance margin, or refused): a dashed outline of the item's DESIGN at its real
+ * position, so the operator can see where it actually sits. A saturated red, distinct from the
+ * X-axis marker's `#e5484d` and from every floor/annotation colour, so a dashed red ring can never
+ * be read as a cut or as any of the amber/teal annotations.
+ */
+export const WARNING_COLOR = '#ff5a4d';
+
+/**
  * #170 — the two colours a floor is drawn in on a blank that states its colour split, when the
  * question is no longer "how deep" but "which colour".
  *

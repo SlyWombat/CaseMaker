@@ -35,12 +35,16 @@ import type { NodeMeshOutput } from '@/workers/geometry/meshOutput';
 import type { EngravePreviewLost, EngravePreviewOutline } from '@/workers/sim/engravePreview';
 import type { EngravePreviewRegistrationBand } from '@/workers/sim/engraveRegistration';
 import { mm } from '@/engine/cnc/engrave/depthBounds';
+import { jobMachine } from '@/engine/cnc/calibration';
+import { machineBedPlate } from '@/engine/cnc/bedPlate';
+import { BED_COLOR } from '@/engine/cnc/bedScene';
 import { geometryFromMesh, SACRIFICIAL_COLOR, segmentGeometry } from './simGeometry';
-import { floorColor, LOST_COLOR, REGISTRATION_COLOR, VOID_COLOR } from './engraveRamp';
+import { floorColor, LOST_COLOR, REGISTRATION_COLOR, VOID_COLOR, WARNING_COLOR } from './engraveRamp';
 import { hatchSegments } from './engraveHatch';
 import { clampLabelBox, projectToCanvas } from './projectedLabel';
 import { activateEngraveItem } from './engravePick';
 import { floorsForScrub, scrubStateAt } from './engraveScrub';
+import { warningOutlinesFor, type WarningRing } from './engraveWarning';
 import { EngravePrimitives } from './EngravePrimitives';
 
 /** The same neutral wood tone the simulation's stock uses (#197). */
@@ -496,6 +500,98 @@ function RegistrationBand({ band }: { band: EngravePreviewRegistrationBand }) {
   );
 }
 
+/**
+ * #549 — how far above the top face a blocked item's warning outline floats, mm. The same lift the
+ * void outline uses: clear of the face's own geometry and of the lost layer's sliver (0 … 0.02), so
+ * a dashed ring that overlaps the stock is still read as sitting ON the face, not inside it.
+ */
+const WARNING_LIFT = 0.05;
+
+/**
+ * Line segments for every ring of one blocked item's design, floating just above the stock's top
+ * face, dashed. The dashed material needs `computeLineDistances` on the geometry, done here exactly
+ * as `segmentGeometry(…, dashed)` does.
+ */
+function warningGeometry(rings: readonly WarningRing[], z: number): THREE.BufferGeometry {
+  const pts: number[] = [];
+  for (const ring of rings) {
+    for (let i = 0; i < ring.length; i++) {
+      const a = ring[i]!;
+      const b = ring[(i + 1) % ring.length]!;
+      pts.push(a[0], a[1], z, b[0], b[1], z);
+    }
+  }
+  const geom = new THREE.BufferGeometry();
+  geom.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
+  new THREE.LineSegments(geom).computeLineDistances();
+  return geom;
+}
+
+/** One blocked item's design outline, drawn dashed in the warning colour at its real position. */
+function WarningOutlineLines({ labelId, rings }: { labelId: string; rings: readonly WarningRing[] }) {
+  const geom = useMemo(() => warningGeometry(rings, WARNING_LIFT), [rings]);
+  useEffect(() => () => geom.dispose(), [geom]);
+  return (
+    <lineSegments
+      geometry={geom}
+      name={`engrave-warning-${labelId}`}
+      userData={{ engraveWarning: labelId }}
+    >
+      <lineDashedMaterial color={WARNING_COLOR} dashSize={1.5} gapSize={1} />
+    </lineSegments>
+  );
+}
+
+/**
+ * #549 — the "here is where you put it" overlay: for every enabled, non-construction label, simple
+ * shape or vector that the preview cut NOTHING of (out of the stock, inside the jaw-clearance
+ * margin, or refused with an error finding), draw its DESIGN outline at its real position in the
+ * warning colour. The clipped "what will actually cut" floors stay as they are; this is additive.
+ */
+function WarningOutlines() {
+  const job = useEngraveJobStore((s) => s.job);
+  const preview = useEngravePreviewStore((s) => s.preview);
+  const floorIds = useMemo(
+    () => new Set((preview?.floors ?? []).map((f) => f.labelId)),
+    [preview],
+  );
+  const outlines = useMemo(() => warningOutlinesFor(job, floorIds), [job, floorIds]);
+  if (outlines.length === 0) return null;
+  return (
+    <group name="engrave-warnings">
+      {outlines.map((o) => (
+        <WarningOutlineLines key={o.labelId} labelId={o.labelId} rings={o.rings} />
+      ))}
+    </group>
+  );
+}
+
+/**
+ * #557 — the machine's usable work area: the 200 × 200 bed plate the vise mounts on, drawn UNDER
+ * the drawn vise at the vise's real machine position (the locating pins, `bedPlate.ts`), so the
+ * stock and the vise read as sitting in the real machine envelope instead of floating. It is the
+ * machine's own envelope from `jobMachine`, placed in the WORK frame by `machineBedPlate`.
+ */
+function MachineBed() {
+  const job = useEngraveJobStore((s) => s.job);
+  // Memoised on the job: the box changes only when the job does, so a scrub or a camera move
+  // rebuilds nothing (`renderer.info.memory.geometries` must stay bounded — #197).
+  const { centre, size } = useMemo(() => {
+    const box = machineBedPlate(job.workholding.vise, job.sacrificial, jobMachine(job, null));
+    return {
+      centre: [(box.min[0] + box.max[0]) / 2, (box.min[1] + box.max[1]) / 2, (box.min[2] + box.max[2]) / 2] as [number, number, number],
+      size: [box.max[0] - box.min[0], box.max[1] - box.min[1], box.max[2] - box.min[2]] as [number, number, number],
+    };
+  }, [job]);
+  if (!(size[0] > 0 && size[1] > 0 && size[2] > 0)) return null;
+  return (
+    <mesh position={centre} name="engrave-bed-plate">
+      <boxGeometry args={size} />
+      <meshStandardMaterial color={BED_COLOR} metalness={0.15} roughness={0.7} />
+    </mesh>
+  );
+}
+
 export function EngravePreview() {
   const preview = useEngravePreviewStore((s) => s.preview);
   // §5.7 — the design ↔ as-cut slider's position. `null` (the store's default and its state after
@@ -568,9 +664,17 @@ export function EngravePreview() {
         <RegistrationBand key={band.id} band={band} />
       ))}
 
+      {/* #557 — the machine's bed plate, drawn under the vise so the setup reads as seated in the
+          real machine envelope rather than floating. */}
+      <MachineBed />
+
       {preview.fixture.map((jaw) => (
         <Jaw key={jaw.id} mesh={jaw.mesh} name={`engrave-${jaw.id}`} />
       ))}
+
+      {/* #549 — blocked items' design outlines, drawn after the floors and fixture so they read
+          over the clipped preview as the "here is where you put it" overlay. */}
+      <WarningOutlines />
 
       {/* The work origin: the stock's top-front-left corner, with X and Y labelled. */}
       <group name="engrave-axes">

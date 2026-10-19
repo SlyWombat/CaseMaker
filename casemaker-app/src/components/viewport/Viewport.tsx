@@ -22,6 +22,9 @@ import { useViewportStore, type ViewportCameraMode } from '@/store/viewportStore
 import { useJobStore } from '@/store/jobStore';
 import { isSimSceneActive, useSimStore, type SimState } from '@/store/simStore';
 import { useEngravePreviewStore } from '@/store/engravePreviewStore';
+import { useEngraveJobStore } from '@/store/engraveJobStore';
+import { jobMachine } from '@/engine/cnc/calibration';
+import { machineBedPlate } from '@/engine/cnc/bedPlate';
 import type { EngravePreview } from '@/workers/sim/engravePreview';
 import { pathBounds } from './simGeometry';
 
@@ -87,13 +90,17 @@ function simBoxesOf(s: SimState): SceneBox[] {
 }
 
 /**
- * The boxes the engrave preview draws (#205): its stock, plus one per vise jaw. An EMPTY list
- * while the preview is still building — so `activeSceneBounds` frames nothing rather than the
- * case, which the engrave branch of `SceneMeshes` is not drawing.
+ * The boxes the engrave preview draws (#205): its stock, plus one per vise jaw, plus — #557 — the
+ * machine's bed plate, so the camera frames the real machine envelope and the stock reads as
+ * sitting WITHIN it rather than floating. An EMPTY list while the preview is still building — so
+ * `activeSceneBounds` frames nothing rather than the case, which the engrave branch of
+ * `SceneMeshes` is not drawing.
  */
-function engraveBoxesOf(preview: EngravePreview | null): SceneBox[] {
+function engraveBoxesOf(preview: EngravePreview | null, bed: SceneBox | null): SceneBox[] {
   if (!preview) return [];
-  return [preview.stock.bbox, ...preview.fixture.map((f) => f.mesh.bbox)];
+  const boxes: SceneBox[] = [preview.stock.bbox, ...preview.fixture.map((f) => f.mesh.bbox)];
+  if (bed) boxes.push(bed);
+  return boxes;
 }
 
 /** `activeSceneBounds` over the live stores — for the controllers, which read non-reactively. */
@@ -103,10 +110,18 @@ function activeSceneBoundsFromStores(): { center: THREE.Vector3; diag: number } 
   // The engrave section owns the viewport exactly when no simulation does (#205); a simulation
   // that is still up keeps the camera, so the two branches can never both be fenced.
   const engraveActive = !simActive && useViewportStore.getState().activeSidebarSection === 'cnc-engrave';
+  // #557 — the machine bed plate in the WORK frame, so the camera frames the real envelope. Only
+  // computed while the engrave section owns the viewport (the case view frames its own nodes).
+  const bedBox: SceneBox | null = engraveActive
+    ? (() => {
+        const job = useEngraveJobStore.getState().job;
+        return machineBedPlate(job.workholding.vise, job.sacrificial, jobMachine(job, null));
+      })()
+    : null;
   return activeSceneBounds({
     nodes: useJobStore.getState().nodes,
     simBoxes: simActive ? simBoxesOf(sim) : null,
-    engraveBoxes: engraveActive ? engraveBoxesOf(useEngravePreviewStore.getState().preview) : null,
+    engraveBoxes: engraveActive ? engraveBoxesOf(useEngravePreviewStore.getState().preview, bedBox) : null,
   });
 }
 
