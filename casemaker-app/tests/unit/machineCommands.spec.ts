@@ -857,6 +857,30 @@ describe('#477 machine home — `$H`, behind the literal word', () => {
     expect(transport.lines()).toEqual(['?', '$H', '?', 'abort']);
     expect(stdout.join('\n')).toContain('Ctrl-C — `abort` was sent');
   });
+
+  it('--timeout sends abort and exits non-zero when the machine never settles', async () => {
+    const transport = new FakeTransport();
+    transport.on('?', encodeFrame(0x81, utf8(OK_STATUS))); // pre-flight: Idle, not alarmed
+    transport.on('$H', encodeFrame(0x81, utf8('ok')));
+    // The poll keeps answering "busy", so the loop spins until the --timeout deadline.
+    transport.on('?', encodeFrame(0x81, utf8('<Run|MPos:1,2,3|P:5,10,4>')));
+    transport.on('?', encodeFrame(0x81, utf8('<Run|MPos:1,2,3|P:5,10,4>')));
+    transport.on('abort', encodeFrame(0x81, utf8('ok')));
+
+    const now = vi.spyOn(Date, 'now').mockReturnValue(0);
+    let advanced = false;
+    const { code, stdout } = await run(
+      ['home', '--confirm', 'home', '--timeout', '1'],
+      transport,
+      location(),
+      HUMAN,
+      { sleep: async () => { if (!advanced) { advanced = true; now.mockReturnValue(2_000); } } },
+    );
+
+    expect(code).toBe(1);
+    expect(transport.lines()).toEqual(['?', '$H', '?', '?', 'abort']);
+    expect(stdout.join('\n')).toContain('`abort` was sent');
+  });
 });
 
 describe('#477 machine probe — `M491`, behind the literal word', () => {

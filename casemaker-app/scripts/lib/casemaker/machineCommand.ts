@@ -1071,9 +1071,14 @@ async function physicalBody(
       }
       if (details.status.state !== null && details.status.state.toLowerCase() === 'idle') break;
       if (deadline !== null && Date.now() > deadline) {
+        // #543 — the --timeout deadline aborts like Ctrl-C, not just an exit: a stalled `$H`/`M491`
+        // must not be left mid-move. Same reply window as the SIGINT path above.
+        const stopped = await session.send('abort', { firstReplyMs: 60_000, maxMs: 60_000 });
         refusals.push({
           code: `${section}-timeout`,
-          reason: `--timeout ${args.timeoutS} s passed before the machine reported Idle`,
+          reason: stopped.ok
+            ? `--timeout ${args.timeoutS} s passed — \`abort\` was sent; the controller is stopping.`
+            : `--timeout ${args.timeoutS} s passed, and \`abort\` was NOT answered (${stopped.detail}). Check the machine.`,
         });
         out.emitReceipt(machineReceipt(details, false, refusals));
         return 1;
