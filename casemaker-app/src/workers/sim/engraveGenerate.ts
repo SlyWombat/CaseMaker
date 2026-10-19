@@ -31,7 +31,7 @@
  *     but not for a CAM or POST refusal, and a refusal with no reason is useless in the panel.
  */
 
-import type { EngraveItem, EngraveJob, EngraveMargins, JobSetup } from '@/types/engraveJob';
+import type { EngraveItem, EngraveJob, EngraveMargins, EngraveTargetObject, JobSetup } from '@/types/engraveJob';
 import type { Mm } from '@/types/units';
 import { segmentsForRadius } from '@/engine/compiler/arcResolution';
 // package.json version for the post's `;@MKR|CAM|v=` header. Read from package.json directly
@@ -47,6 +47,7 @@ import {
   cuttingDiameter,
   cuttingForTrace,
   drillPointAngle,
+  flatEndMill,
   pointLength,
   traceRadiusAt,
   type Tool,
@@ -110,7 +111,8 @@ import {
 } from '@/engine/cnc/cam/profile';
 import { buildThroughMask, type MaskCutout } from '@/engine/cnc/engrave/throughMask';
 import type { Polygons } from '@/engine/cnc/cam/pocket';
-import { concatToolpathIR, estimateCycleSeconds, HOP_Z, travelStats, type CamMove, type ToolpathIR } from '@/engine/cnc/cam/ir';
+import { concatToolpathIR, estimateCycleSeconds, HOP_Z, toolNumberFor, travelStats, type CamMove, type ToolpathIR } from '@/engine/cnc/cam/ir';
+import { generateSurface3dForGoal, type SurfaceFeeds } from '@/engine/cnc/cam/surface3d';
 import { postZ1, type PostContext, type VacuumSpan } from '@/engine/cnc/post/z1';
 import { FRAME_Z, runSheetFileName, runSheetFrameFileName } from '@/engine/cnc/engrave/runSheet';
 import type { Setup } from '@/engine/cnc/setup';
@@ -2230,6 +2232,156 @@ function generateRestPair(
   };
 }
 
+/**
+ * The goal object a PURE 3D-surfacing job is (#534, slice D), or `null`.
+ *
+ * A pure goal job carries an enabled `role: 'goal'` mesh and NO authoring items — no labels,
+ * shapes, traces, drills, threads, cut-outs, primitives, vectors, combined shapes or keep-outs.
+ * Mixing a goal with ordinary item work is slice E's to resolve (the item program still cuts; the
+ * goal keeps its `goal-object-no-toolpath` info from `validateJob`), so the dispatch below takes
+ * ONLY the pure case and leaves every mixed job on exactly today's path.
+ */
+function pureGoalObject(job: EngraveJob): EngraveTargetObject | null {
+  const t = job.targetObject;
+  if (t === undefined || t.role !== 'goal' || !t.enabled) return null;
+  const hasItems =
+    job.labels.length > 0 ||
+    job.shapes.length > 0 ||
+    (job.cutouts?.length ?? 0) > 0 ||
+    (job.combined?.length ?? 0) > 0 ||
+    (job.traces?.length ?? 0) > 0 ||
+    (job.vectors?.length ?? 0) > 0 ||
+    (job.keepOuts?.length ?? 0) > 0 ||
+    (job.drills?.length ?? 0) > 0 ||
+    (job.threads?.length ?? 0) > 0 ||
+    (job.primitives?.length ?? 0) > 0;
+  return hasItems ? null : t;
+}
+
+/**
+ * The empty program-fields shell a goal result fills, so its return matches `EngraveGenerated`.
+ */
+function emptyGoalResult(): Omit<EngraveGenerated, 'ok' | 'stage' | 'findings' | 'feeds' | 'cam' | 'nc' | 'verify'> {
+  return {
+    threads: null,
+    threadMachining: null,
+    frameNc: null,
+    frameVerify: null,
+    facingNc: null,
+    facingVerify: null,
+    facingToolKey: null,
+    facingError: null,
+    facingCam: null,
+    predicted: [],
+    programs: [],
+    errors: [],
+  };
+}
+
+/**
+ * 3D SURFACING FROM A GOAL MESH (#534, slice D) — the generate worker's dispatch to `cam/surface3d`.
+ *
+ * It samples the goal to a top-Z heightfield and emits a raster-roughing + ball-finishing toolpath
+ * to the IR, then posts it. Feeds are the job's ordinary 2.5D feeds (a ball resolves them through a
+ * flat proxy of its cutting diameter — a LABELLED placeholder, never a measured 3D feed: that is
+ * the bench slice F, #536).
+ *
+ * `verify` is deliberately `null`: the exact 2.5D sweep (`verifyProgram`) cannot judge a 3D ball
+ * program — a ball "can neither sweep nor trace" there — so the honest check is the FLAT dexel
+ * (slice A), which the UI wires in slice E (#535). Until then the program is generated and posted
+ * but is NOT promoted into `programs`, exactly as the single-file adapter already leaves an
+ * unverified program out. The dry proof that the toolpath reproduces the goal is the unit spec.
+ */
+export function generateGoalProgram(
+  job: EngraveJob,
+  goal: EngraveTargetObject,
+  tool: Tool | null,
+  catalogue: readonly FeedCatalogueRow[],
+  calibration: MachineCalibration | null,
+  shop: EngraveShopOpts,
+): EngraveGenerated {
+  const base = emptyGoalResult();
+  const fail = (stage: EngraveStage, message: string, feeds: FeedsResult | null = null): EngraveGenerated => ({
+    ...base,
+    ok: false,
+    stage,
+    findings: [],
+    feeds,
+    cam: null,
+    nc: null,
+    verify: null,
+    errors: [{ stage, message }],
+  });
+
+  if (tool === null) return fail('feeds', 'the job has no usable cutter');
+  const mill = jobMachine(job, calibration);
+
+  // Feeds — the job's 2.5D feeds, reused unchanged (slice F tunes 3D engagement, #536). A ball/bull
+  // is refused by `feedsFor` (it cannot trace), so its feeds come through a FLAT proxy of its
+  // cutting diameter; a flat cutter resolves directly.
+  const isRound = tool.shape === 'ball' || tool.shape === 'bull';
+  const feedTool = isRound ? flatEndMill(cuttingDiameter(tool) ?? 0, { name: `${tool.name} (feeds via flat proxy)` }) : tool;
+  const resolved = feedsFor(catalogue, job.stock.material, feedTool, mill, job.cutOverride, shop.feeds ?? undefined);
+  if (!resolved.ok) return fail('feeds', resolved.reason, resolved);
+
+  const feeds: SurfaceFeeds = {
+    feed: resolved.params.feed,
+    plungeFeed: resolved.params.plungeFeed,
+    stepDown: resolved.params.stepDown,
+    roughStepOver: resolved.params.stepOver,
+    // A ball finish wants a finer step-over than a flat pocket's; no measured 3D number exists yet
+    // (slice F), so the pocketing step-over stands as the labelled placeholder.
+    finishStepOver: resolved.params.stepOver,
+  };
+
+  let surfaced: ReturnType<typeof generateSurface3dForGoal>;
+  try {
+    surfaced = generateSurface3dForGoal({
+      target: goal,
+      tool,
+      toolNumber: toolNumberFor(tool),
+      spindleRpm: resolved.params.rpm,
+      air: job.cutOverride?.air ?? true,
+      feeds,
+      rapid: mill.rapidEstimate,
+      opts: { stockToLeaveMm: shop.finish?.stockToLeaveMm.value },
+    });
+  } catch (e) {
+    return fail('cam', e instanceof Error ? e.message : String(e), resolved);
+  }
+  if (surfaced === null) {
+    return fail('cam', `the goal "${goal.name}" lies at or above the stock top, so there is no surface to cut`, resolved);
+  }
+
+  const ctx: PostContext = {
+    jobName: job.name,
+    stock: { length: job.stock.length, width: job.stock.width, thickness: job.stock.thickness },
+    materialName: job.stock.material,
+    zDatum: 'probed-top-face',
+    origin: 'topFrontLeft',
+    camVersion: CAM_VERSION,
+    toolKey: job.toolKey,
+  };
+  let nc: string | null = null;
+  try {
+    const posted = postZ1(surfaced.ir, ctx, mill, { vacuum: 'whole' });
+    if (posted.ok) nc = posted.text;
+    else return fail('post', posted.errors.join('; '), resolved);
+  } catch (e) {
+    return fail('post', e instanceof Error ? e.message : String(e), resolved);
+  }
+
+  return {
+    ...base,
+    ok: true,
+    stage: 'done',
+    findings: [],
+    feeds: resolved,
+    cam: summarize(surfaced.ir),
+    nc,
+    verify: null,
+  };
+}
 
 /**
  * Generate, post and verify one engrave job.
@@ -2320,6 +2472,15 @@ export function engraveGenerate(
       programs: [],
       errors: [],
     };
+  }
+
+  // #534 slice D — A PURE 3D-SURFACING JOB. A job whose only work is a `role: 'goal'` mesh is
+  // surfaced by `cam/surface3d` (raster roughing + ball finishing over the goal's heightfield),
+  // dispatched here BEFORE the item pipeline, which has nothing to cut. A goal mixed with item work
+  // stays on the path below (the items cut; the goal keeps its `goal-object-no-toolpath` info).
+  const goal = job.setups === undefined ? pureGoalObject(job) : null;
+  if (goal !== null) {
+    return generateGoalProgram(job, goal, tool, catalogue, calibration, shop);
   }
 
   // #419 J3 — A JOB IS A LIST OF PROGRAMS.
