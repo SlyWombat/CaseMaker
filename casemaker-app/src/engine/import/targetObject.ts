@@ -12,7 +12,6 @@
 
 import type { EngraveTargetObject } from '@/types/engraveJob';
 import { arrayBufferToBase64 } from './base64';
-import { sha256Hex } from './meshStock';
 import { parseStl, type ParsedMesh } from './stlParser';
 import { parse3MF } from './threeMfParser';
 
@@ -88,6 +87,10 @@ export async function readTargetObjectFile(file: File, id: string): Promise<Targ
 
   let sha256: string;
   try {
+    // Lazy import so the headless graph (surface3d → targetObjectMesh, #534) never STATICALLY pulls
+    // in meshStock → designImport → platform/features, which is browser-only (__FEATURE_SIM__,
+    // window). This reader runs only in the browser file picker, where that chain is fine.
+    const { sha256Hex } = await import('./meshStock');
     sha256 = await sha256Hex(bytes);
   } catch {
     return { ok: false, error: `${file.name} could not be hashed.` };

@@ -2362,11 +2362,11 @@ export function generateGoalProgram(
     camVersion: CAM_VERSION,
     toolKey: job.toolKey,
   };
-  let nc: string | null = null;
+  let nc: string;
   try {
     const posted = postZ1(surfaced.ir, ctx, mill, { vacuum: 'whole' });
-    if (posted.ok) nc = posted.text;
-    else return fail('post', posted.errors.join('; '), resolved);
+    if (!posted.ok) return fail('post', posted.errors.join('; '), resolved);
+    nc = posted.text;
   } catch (e) {
     return fail('post', e instanceof Error ? e.message : String(e), resolved);
   }

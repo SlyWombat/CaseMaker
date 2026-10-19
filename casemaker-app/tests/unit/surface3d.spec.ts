@@ -25,7 +25,6 @@ import {
   DEFAULT_GRID_PITCH_MM,
   generateSurface3dIR,
   sampleGoalHeightfield,
-  type GoalHeightfield,
   type SurfaceFeeds,
   type SurfaceTool,
 } from '@/engine/cnc/cam/surface3d';
