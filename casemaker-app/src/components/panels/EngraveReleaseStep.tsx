@@ -25,12 +25,12 @@ import type { RunPlan } from '@/engine/cnc/plan';
 import { useEngraveReleaseStore, type ReleaseFile } from '@/store/engraveReleaseStore';
 import { useFirstRegistration } from '@/store/engraveRegistrationStore';
 import { facingRegistrationBlocker } from '@/store/engraveRunGate';
+import { useMachineTranscriptStore } from '@/store/machineTranscriptStore';
 import { useToolRegistryStore } from '@/store/toolRegistryStore';
 import { cutterIdentity } from '@/engine/cnc/engrave/cutterCaseLine';
 import { EngraveMachineRun } from './EngraveMachineRun';
 
 const MUTED: CSSProperties = { fontSize: 11, color: '#9aa4b0', lineHeight: 1.5, margin: '4px 0' };
-const MONO: CSSProperties = { fontSize: 10, fontFamily: 'monospace', maxHeight: 160, overflow: 'auto', margin: '4px 0', color: '#c8d3de' };
 const BOX: CSSProperties = { marginTop: 6, padding: 8, border: '1px solid #3a4552', borderRadius: 4, background: '#1b2027' };
 const OK = '#9fd19b';
 
@@ -217,6 +217,14 @@ export function EngraveReleaseStep({
   useEffect(() => {
     if (host !== undefined && port !== undefined && blocker === null) plan({ host, port }, job, programs);
   }, [host, port, job, programs, blocker, plan]);
+
+  // #528 — the release notes no longer render in the rail; the dock's Transcript tab reads the
+  // store. The text is the same join the old rail `<pre>` rendered, so the content is unchanged.
+  const setReleaseTranscript = useMachineTranscriptStore((s) => s.setReleaseNotes);
+  useEffect(() => {
+    const notes = record?.notes ?? [];
+    setReleaseTranscript(notes.length > 0 ? notes.join('\n') : null);
+  }, [record?.notes, setReleaseTranscript]);
 
   if (target === null) {
     return (
@@ -474,12 +482,6 @@ export function EngraveReleaseStep({
             </p>
           )}
         </>
-      )}
-
-      {record.notes.length > 0 && (
-        <pre style={MONO} data-testid="engrave-release-notes">
-          {record.notes.join('\n')}
-        </pre>
       )}
 
       <EngraveMachineRun target={target} controlled onProgramLine={onProgramLine} />

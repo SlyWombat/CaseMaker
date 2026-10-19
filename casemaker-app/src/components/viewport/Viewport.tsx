@@ -8,6 +8,7 @@ import { EngraveLegend } from './EngraveLegend';
 import { MachineStatusStrip } from './MachineStatusStrip';
 import { SimLegend } from './SimLegend';
 import { SimTransport } from './SimTransport';
+import { MachineDock } from './MachineDock';
 import { ViewportToolbar } from './ViewportToolbar';
 import {
   activeSceneBounds,
@@ -363,54 +364,66 @@ export function Viewport() {
   const toolbarRef = useRef<HTMLDivElement>(null);
   useToolbarBottom(wrapperRef, toolbarRef);
   return (
-    <div ref={wrapperRef} className="viewport-wrapper" onPointerDown={onPointerDown}>
+    <div
+      ref={wrapperRef}
+      className="viewport-wrapper"
+      onPointerDown={onPointerDown}
+      style={{ display: 'flex', flexDirection: 'column' }}
+    >
       <ViewportToolbar ref={toolbarRef} />
-      <Canvas
-        gl={{ antialias: !isE2E, preserveDrawingBuffer: true }}
-        dpr={isE2E ? 1 : window.devicePixelRatio}
-        flat={isE2E}
-        onCreated={({ scene }) => {
-          scene.up = new THREE.Vector3(0, 0, 1);
-        }}
-        // Issue #83 — clicking empty canvas (no scene object hit) clears
-        // any active selection. Only fires while the Select tool is on so
-        // we don't fight Orbit/Pan tool drag-clicks.
-        onPointerMissed={() => {
-          const { activeTool, setSelection } = useViewportStore.getState();
-          if (activeTool === 'select') setSelection(null);
-        }}
-        data-testid="viewport-canvas"
-      >
-        <PerspectiveCamera makeDefault position={[120, -160, 90]} fov={45} up={[0, 0, 1]} />
-        <ambientLight intensity={0.6} />
-        <directionalLight position={[100, -100, 200]} intensity={0.8} />
-        <directionalLight position={[-100, 100, 100]} intensity={0.3} />
-        <OrbitControls
-          target={DEFAULT_TARGET}
-          enableDamping={!isE2E}
-          makeDefault
-        />
-        <CameraModeController />
-        <AutoFrame />
-        <ViewportCameraController />
-        {!simActive && !engraveActive && <GridFloor />}
-        <SceneMeshes />
-      </Canvas>
-      {/* #349 — the engrave depth legend rides over the canvas as DOM, like the transport, rather
-          than being projected from the scene origin. It renders itself null with no preview.
-          Gated on the SCENE, not just the section: opening the Engrave section does not take the
-          viewport from a loaded simulation (`SceneMeshes`, and `activeSceneBounds` above), so the
-          depth legend must not paint over a scene it does not describe — as DOM it did not follow
-          the scene the way it did while it lived inside `EngravePreview` (review of ebf38c5). */}
-      {engraveActive && !simActive && <EngraveLegend />}
-      {/* #349 — the simulation's sacrificial swatch, the same move. */}
-      {simActive && <SimLegend />}
-      {/* #198 — the transport rides over the bottom of the canvas while a simulation owns the
-          scene. It renders itself null otherwise, so no guard is needed here. */}
-      <SimTransport />
+      {/* The canvas and its overlays flex to fill the space above the status strip and the dock,
+          so those two bands stack at the bottom instead of overlapping the canvas (#528). */}
+      <div style={{ position: 'relative', flex: '1 1 0', minHeight: 0 }}>
+        <Canvas
+          gl={{ antialias: !isE2E, preserveDrawingBuffer: true }}
+          dpr={isE2E ? 1 : window.devicePixelRatio}
+          flat={isE2E}
+          onCreated={({ scene }) => {
+            scene.up = new THREE.Vector3(0, 0, 1);
+          }}
+          // Issue #83 — clicking empty canvas (no scene object hit) clears
+          // any active selection. Only fires while the Select tool is on so
+          // we don't fight Orbit/Pan tool drag-clicks.
+          onPointerMissed={() => {
+            const { activeTool, setSelection } = useViewportStore.getState();
+            if (activeTool === 'select') setSelection(null);
+          }}
+          data-testid="viewport-canvas"
+        >
+          <PerspectiveCamera makeDefault position={[120, -160, 90]} fov={45} up={[0, 0, 1]} />
+          <ambientLight intensity={0.6} />
+          <directionalLight position={[100, -100, 200]} intensity={0.8} />
+          <directionalLight position={[-100, 100, 100]} intensity={0.3} />
+          <OrbitControls
+            target={DEFAULT_TARGET}
+            enableDamping={!isE2E}
+            makeDefault
+          />
+          <CameraModeController />
+          <AutoFrame />
+          <ViewportCameraController />
+          {!simActive && !engraveActive && <GridFloor />}
+          <SceneMeshes />
+        </Canvas>
+        {/* #349 — the engrave depth legend rides over the canvas as DOM, like the transport, rather
+            than being projected from the scene origin. It renders itself null with no preview.
+            Gated on the SCENE, not just the section: opening the Engrave section does not take the
+            viewport from a loaded simulation (`SceneMeshes`, and `activeSceneBounds` above), so the
+            depth legend must not paint over a scene it does not describe — as DOM it did not follow
+            the scene the way it did while it lived inside `EngravePreview` (review of ebf38c5). */}
+        {engraveActive && !simActive && <EngraveLegend />}
+        {/* #349 — the simulation's sacrificial swatch, the same move. */}
+        {simActive && <SimLegend />}
+        {/* #198 — the transport rides over the bottom of the canvas while a simulation owns the
+            scene. It renders itself null otherwise, so no guard is needed here. */}
+        <SimTransport />
+      </div>
       {/* #526 — the live machine in one line under the viewport whenever a machine is remembered.
           It renders itself null until machineStore carries a machine, so no guard is needed here. */}
       <MachineStatusStrip />
+      {/* #528 — the dock band under the viewport for what the machine said. Renders itself null
+          until there is transcript content. */}
+      <MachineDock />
     </div>
   );
 }

@@ -20,9 +20,9 @@ import { describeRun, programOwnsVacuum, runSettings } from '@/platform/machineR
 import { machineKey, useMachineRunStore } from '@/store/machineRunStore';
 import { runKey, useRunConfirmStore } from '@/store/runConfirmStore';
 import { useShopDefaultsStore } from '@/store/shopDefaultsStore';
+import { useMachineTranscriptStore } from '@/store/machineTranscriptStore';
 
 const MUTED: CSSProperties = { fontSize: 11, color: '#9aa4b0', lineHeight: 1.5, margin: '4px 0' };
-const LOG: CSSProperties = { fontSize: 10, fontFamily: 'monospace', maxHeight: 120, overflow: 'auto', margin: '4px 0', color: '#c8d3de' };
 
 export interface EngraveMachineRunProps {
   target: { host: string; port: number };
@@ -68,6 +68,13 @@ export function EngraveMachineRun({ target, onProgramLine, controlled = false }:
   useEffect(() => {
     lineCallback.current?.(line);
   }, [line]);
+  // #528 — the run log no longer renders in the rail; the dock's Transcript tab reads the store.
+  // The text is the same join the old rail `<pre>` rendered, so the content is unchanged.
+  const setRunTranscript = useMachineTranscriptStore((s) => s.setRunLines);
+  useEffect(() => {
+    const lines = entry?.lines ?? [];
+    setRunTranscript(lines.length > 0 ? lines.join('\n') : null);
+  }, [entry?.lines, setRunTranscript]);
   if (!entry) return null;
   const running = entry.running;
 
@@ -162,11 +169,6 @@ export function EngraveMachineRun({ target, onProgramLine, controlled = false }:
           {entry.progress.state ?? '—'} · {entry.progress.percent === null ? '—' : `${entry.progress.percent} %`} · line{' '}
           {entry.progress.line ?? '—'} · {entry.progress.elapsedS === null ? '—' : `${entry.progress.elapsedS} s`}
         </p>
-      )}
-      {entry.lines.length > 0 && (
-        <pre style={LOG} data-testid="engrave-run-lines">
-          {entry.lines.join('\n')}
-        </pre>
       )}
       {outcome !== null && !running && (
         <p style={MUTED} data-testid="engrave-run-outcome" data-state={outcome.kind}>

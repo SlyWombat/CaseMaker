@@ -44,24 +44,16 @@ import {
   type ApplyResult,
   type OperatorStep,
   type RunResult,
-  type Transcript,
 } from '@/engine/cnc/registration/execute';
 import { attachConsole, type ConsoleHandle } from '@/platform/machineConsole';
 import { effectiveMargins } from '@/engine/cnc/engrave/depthBounds';
 import { surfaceSpreadPlan, type SurfaceSpreadAssessment } from '@/engine/cnc/engrave/surfaceSpread';
 import { useEngraveJobStore } from '@/store/engraveJobStore';
 import { useEngraveRegistrationStore } from '@/store/engraveRegistrationStore';
+import { useMachineTranscriptStore } from '@/store/machineTranscriptStore';
 import { useSettingsStore } from '@/store/settingsStore';
 
 const MUTED: CSSProperties = { fontSize: 11, color: '#9aa4b0', lineHeight: 1.5, margin: '4px 0' };
-const MONO: CSSProperties = {
-  fontSize: 10,
-  fontFamily: 'monospace',
-  maxHeight: 150,
-  overflow: 'auto',
-  margin: '4px 0',
-  color: '#c8d3de',
-};
 const BOX: CSSProperties = {
   marginTop: 6,
   padding: 8,
@@ -160,18 +152,6 @@ function ScanBlock({ record, index }: { record: ScanRecord; index: number }): JS
   );
 }
 
-function TranscriptBlock({ transcript }: { transcript: Transcript[] }): JSX.Element {
-  if (transcript.length === 0) return <></>;
-  return (
-    <details style={{ marginTop: 4 }}>
-      <summary style={MUTED}>Machine transcript ({transcript.length} lines)</summary>
-      <pre style={MONO} data-testid="engrave-registration-transcript">
-        {transcript.map((t) => `> ${t.line}\n${t.reply}`).join('\n')}
-      </pre>
-    </details>
-  );
-}
-
 export function EngraveRegistrationStep({ job, target }: EngraveRegistrationStepProps): JSX.Element {
   const { plan, why } = approvedPlan(job);
   const record = useEngraveRegistrationStore((s) => s.record);
@@ -202,6 +182,22 @@ export function EngraveRegistrationStep({ job, target }: EngraveRegistrationStep
   }, []);
 
   const busy = phase === 'running' || phase === 'writing';
+
+  // #528 — the transcript no longer renders in the rail; the dock's Transcript tab reads the store.
+  // Write the SAME text the old rail `<pre>`s rendered (`> line\nreply` per entry) so nothing changes
+  // but the home of the element. The old render could show the registration run's transcript AND the
+  // origin write's transcript at once (the touches block kept rendering after `written` landed), so
+  // the dock's one section is the two conversations in the order the rail printed them.
+  const setRegistrationTranscript = useMachineTranscriptStore((s) => s.setRegistration);
+  useEffect(() => {
+    const transcript = [
+      ...(result !== null ? result.transcript : []),
+      ...(written !== null ? written.transcript : []),
+    ];
+    setRegistrationTranscript(
+      transcript.length > 0 ? transcript.map((t) => `> ${t.line}\n${t.reply}`).join('\n') : null,
+    );
+  }, [written, result, setRegistrationTranscript]);
 
   function askOperator(step: OperatorStep): Promise<boolean> {
     if (!aliveRef.current) return Promise.resolve(false);
@@ -451,7 +447,6 @@ export function EngraveRegistrationStep({ job, target }: EngraveRegistrationStep
             <div data-testid="engrave-registration-failed" style={{ marginTop: 6 }}>
               <p style={{ fontSize: 12, color: BAD, margin: '0 0 4px' }}>{result.reason}</p>
               {homeNote !== null && <p style={MUTED}>{homeNote}</p>}
-              <TranscriptBlock transcript={result.transcript} />
             </div>
           )}
 
@@ -537,7 +532,6 @@ export function EngraveRegistrationStep({ job, target }: EngraveRegistrationStep
                   {refusal}
                 </p>
               )}
-              <TranscriptBlock transcript={result !== null && result.ok ? result.transcript : []} />
             </div>
           )}
 
@@ -549,13 +543,11 @@ export function EngraveRegistrationStep({ job, target }: EngraveRegistrationStep
               <p style={MUTED} data-testid="engrave-registration-recorded">
                 Registration recorded for the release step, with the plan that was approved.
               </p>
-              <TranscriptBlock transcript={written.transcript} />
             </div>
           )}
           {written !== null && !written.ok && (
             <div data-testid="engrave-registration-write-failed" style={{ marginTop: 6 }}>
               <p style={{ fontSize: 12, color: BAD, margin: '0 0 4px' }}>{written.reason}</p>
-              <TranscriptBlock transcript={written.transcript} />
             </div>
           )}
 
