@@ -12,6 +12,7 @@ import { programHash, programOwnsVacuum } from '@/platform/machineRun';
 import { frameBounds, type LaserLift } from '@/platform/machineLaser';
 import { useSettingsStore } from '@/store/settingsStore';
 import { useToolRegistryStore } from '@/store/toolRegistryStore';
+import { useToolRegistry } from '@/hooks/useToolRegistry';
 import { cutterIdentity } from '@/engine/cnc/engrave/cutterCaseLine';
 
 /**
@@ -147,14 +148,33 @@ export function EngraveMachineUpload({
   const items = useToolRegistryStore((s) => s.items);
   const cutter =
     runContext?.toolKey === undefined ? null : cutterIdentity(runContext.toolKey, items);
+  // #537 — the cutter-mismatch SELECTOR. It asks which CUTTER is fitted, in the tool library's
+  // `key` space (the same space `job.toolKey` holds), defaulting to the program's recommendation.
+  // A different key than `runContext.toolKey` is a mismatch: refused with the #516 item 3 finding,
+  // and Send stays disabled. The inventory's codes/case colours still feed the label through
+  // `cutterIdentity` above; this value space is the library, not the inventory's `id` space.
+  const tools = useToolRegistry();
+  const recommendedToolKey = runContext?.toolKey ?? null;
+  const [selectedToolKey, setSelectedToolKey] = useState<string | null>(null);
+  // The recommended cutter is normally a library entry; a job written for a key whose registry row
+  // is absent (not loaded yet) still gets an option so the select always names the default.
+  const hasRecommended = recommendedToolKey !== null && tools.some((e) => e.key === recommendedToolKey);
+  const mismatch = cutter !== null && selectedToolKey !== null && selectedToolKey !== recommendedToolKey;
+  // #516 item 3's fix, for the RECOMMENDED cutter: `fit <colour> — <label>`.
+  const mismatchSentence =
+    cutter === null
+      ? null
+      : `fit ${cutter.casePhrase === null ? '' : `${cutter.casePhrase} — `}${cutter.name}`;
   // #538 — `fitted` confirms a SPECIFIC cutter. If the file is (re)posted for a different cutter
-  // while the confirmation is open, a checkbox ticked for the previous one must not carry over.
-  // Adjusted during render (guarded, so it settles in one extra pass), like the blocked-guard below.
+  // while the confirmation is open, a checkbox ticked for the previous one must not carry over —
+  // and neither must a picked selector answer. Adjusted during render (guarded, so it settles in
+  // one extra pass), like the blocked-guard below.
   const fittedCutterKey = runContext?.toolKey ?? null;
   const fittedCutterKeyRef = useRef<string | null>(null);
   if (fittedCutterKeyRef.current !== fittedCutterKey) {
     fittedCutterKeyRef.current = fittedCutterKey;
     if (fitted) setFitted(false);
+    if (selectedToolKey !== null) setSelectedToolKey(null);
   }
 
   // Order matters, and matches `uploadBlocker`'s own reasoning: the run's trust first, then whether
@@ -185,6 +205,7 @@ export function EngraveMachineUpload({
     // one that remembers an older answer.
     if (blocked !== null || machine === null || program === null) {
       setFitted(false);
+      setSelectedToolKey(null);
       setStage('idle');
       return;
     }
@@ -220,6 +241,7 @@ export function EngraveMachineUpload({
       });
     }
     setFitted(false);
+    setSelectedToolKey(null);
     setStage('idle');
   }
 
@@ -246,6 +268,7 @@ export function EngraveMachineUpload({
         onClick={() => {
           setResult(null);
           setFitted(false);
+          setSelectedToolKey(null);
           setStage('confirm');
         }}
       >
@@ -282,27 +305,44 @@ export function EngraveMachineUpload({
             file instead.
           </p>
           {cutter !== null && (
-            <label style={MUTED} data-testid="engrave-upload-fitted">
-              <input
-                type="checkbox"
-                checked={fitted}
-                onChange={(e) => setFitted(e.target.checked)}
-              />{' '}
-              I have fitted this cutter:{' '}
-              {cutter.casePhrase !== null && (
-                <>
-                  <strong>{cutter.casePhrase}</strong> —{' '}
-                </>
+            <>
+              <p style={MUTED}>Which cutter is fitted?</p>
+              <select
+                data-testid="engrave-upload-cutter-select"
+                aria-label="Which cutter is fitted?"
+                title="The cutter the operator actually fitted, against the program's recommended one."
+                value={selectedToolKey ?? recommendedToolKey ?? ''}
+                onChange={(e) => setSelectedToolKey(e.target.value)}
+                style={{ width: '100%', margin: '0 0 6px' }}
+              >
+                {!hasRecommended && <option value={cutter.toolKey}>{cutter.name}</option>}
+                {tools.map((e) => (
+                  <option key={e.key} value={e.key} title={e.provenance}>
+                    {e.tool.name}
+                  </option>
+                ))}
+              </select>
+              {mismatch && mismatchSentence !== null && (
+                <p style={{ ...MUTED, color: BAD_COLOR }} data-testid="engrave-upload-cutter-mismatch">
+                  {mismatchSentence}
+                </p>
               )}
-              <strong>{cutter.name}</strong> ({cutter.code})
-            </label>
+              <label style={MUTED} data-testid="engrave-upload-fitted">
+                <input
+                  type="checkbox"
+                  checked={fitted}
+                  onChange={(e) => setFitted(e.target.checked)}
+                />{' '}
+                I have fitted this cutter.
+              </label>
+            </>
           )}
           <div style={{ display: 'flex', gap: 6 }}>
             <button
               type="button"
               data-testid="engrave-upload-confirm-send"
               style={{ flex: 1, padding: 7 }}
-              disabled={cutter !== null && !fitted}
+              disabled={cutter !== null && (!fitted || mismatch)}
               onClick={() => void send()}
             >
               Send it
@@ -313,6 +353,7 @@ export function EngraveMachineUpload({
               style={{ flex: 1, padding: 7 }}
               onClick={() => {
                 setFitted(false);
+                setSelectedToolKey(null);
                 setStage('idle');
               }}
             >

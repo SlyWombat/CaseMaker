@@ -385,3 +385,99 @@ describe('#538 EngraveMachineUpload — the fitted checkbox resets', () => {
     expect(sendDisabled()).toBe(true);
   });
 });
+
+describe('#537 EngraveMachineUpload — the cutter-mismatch selector', () => {
+  const openConfirm = (): void => {
+    fireEvent.click(screen.getByTestId('engrave-upload'));
+  };
+  const cutterSelect = (): HTMLSelectElement =>
+    screen.getByTestId('engrave-upload-cutter-select') as HTMLSelectElement;
+  const fittedBox = (): HTMLInputElement =>
+    screen.getByTestId('engrave-upload-fitted').querySelector('input') as HTMLInputElement;
+  const tickFitted = (): void => {
+    act(() => {
+      fittedBox().click();
+    });
+  };
+  const sendDisabled = (): boolean =>
+    (screen.getByTestId('engrave-upload-confirm-send') as HTMLButtonElement).disabled;
+
+  it('defaults to the program cutter and allows Send once fitted is ticked', () => {
+    render(<EngraveMachineUpload {...props({ runContext: { toolKey: 'flat-1.0' } })} />);
+    openConfirm();
+
+    expect(cutterSelect().value).toBe('flat-1.0');
+    expect(screen.queryByTestId('engrave-upload-cutter-mismatch')).toBeNull();
+    // The fitted tick is still required before anything is written.
+    expect(sendDisabled()).toBe(true);
+    tickFitted();
+    expect(sendDisabled()).toBe(false);
+  });
+
+  it('refuses a different cutter with the mismatch finding, even when fitted is ticked', () => {
+    render(<EngraveMachineUpload {...props({ runContext: { toolKey: 'flat-1.0' } })} />);
+    openConfirm();
+
+    fireEvent.change(cutterSelect(), { target: { value: 'flat-3.175x12-metal' } });
+    // #516 item 3's fix names the RECOMMENDED cutter — colour first when one is known, then label.
+    expect(screen.getByTestId('engrave-upload-cutter-mismatch').textContent).toBe(
+      'fit 1 mm flat end (assumed)',
+    );
+    // The mismatch is a refusal: the fitted tick cannot override it.
+    tickFitted();
+    expect(sendDisabled()).toBe(true);
+  });
+
+  it('names the recommended cutter’s case colour and label in the mismatch fix', () => {
+    const TOOL = flatEndMill(0.5, { name: '0.5*2mm Engraving(Metal)' });
+    const ITEM: InventoryItem = {
+      id: 'engraver',
+      tool: TOOL,
+      origin: null,
+      quantity: 1,
+      codes: [{ symbology: 'qr', value: 'C1-BIT-ENGRAVE' }],
+      addedAt: '2026-10-17T00:00:00.000Z',
+      notes: null,
+      copies: [],
+      colletFits: null,
+    };
+    const yellowCopy = (): ToolCopy => ({
+      id: 'c-1',
+      condition: 'new',
+      whereabouts: { kind: 'box', case: { colour: 'yellow', label: 'yellow base, clear tube' } },
+      runtimeWarnMinutes: null,
+      notes: null,
+      runtimeMinutes: null,
+    });
+    setInventoryEntries([{ key: 'inv:engraver', tool: TOOL, provenance: 'registered here' }]);
+    useToolRegistryStore.setState({ items: [ITEM] });
+    setInventoryConditions(
+      [{ id: 'engraver', quantity: 1, copies: [yellowCopy()] }],
+      (id) => `inv:${id}`,
+    );
+
+    render(<EngraveMachineUpload {...props({ runContext: { toolKey: 'inv:engraver' } })} />);
+    openConfirm();
+    fireEvent.change(cutterSelect(), { target: { value: 'flat-1.0' } });
+
+    expect(screen.getByTestId('engrave-upload-cutter-mismatch').textContent).toBe(
+      'fit Yellow case — 0.5*2mm Engraving(Metal)',
+    );
+  });
+
+  it('returns to the recommended cutter — no mismatch — when the box is reopened', () => {
+    render(<EngraveMachineUpload {...props({ runContext: { toolKey: 'flat-1.0' } })} />);
+    openConfirm();
+    fireEvent.change(cutterSelect(), { target: { value: 'flat-3.175x12-metal' } });
+    expect(screen.getByTestId('engrave-upload-cutter-mismatch')).toBeTruthy();
+
+    fireEvent.click(screen.getByTestId('engrave-upload-confirm-cancel'));
+    openConfirm();
+
+    expect(cutterSelect().value).toBe('flat-1.0');
+    expect(screen.queryByTestId('engrave-upload-cutter-mismatch')).toBeNull();
+    tickFitted();
+    expect(sendDisabled()).toBe(false);
+  });
+});
+
