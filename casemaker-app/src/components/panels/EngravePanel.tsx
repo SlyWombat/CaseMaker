@@ -1037,6 +1037,18 @@ export function EngravePanel(): JSX.Element {
         return entry === undefined ? null : vCone(entry.tool);
       })();
 
+  // #516 — the tool is the software's recommendation once the work is defined. When the preview
+  // has a pick and the operator has not chosen a cutter, the job follows it (source 'computed');
+  // a user-chosen or measured tool is left alone, so the recommender cannot silently replace a
+  // decision the operator made.
+  useEffect(() => {
+    const key = rec?.key ?? null;
+    if (key === null) return;
+    const source = job.sources?.tool;
+    if (source === 'user' || source === 'measured') return;
+    if (job.toolKey !== key) setTool(key, 'computed');
+  }, [rec?.key, job.sources?.tool, job.toolKey, setTool]);
+
   // ---- the run (#206) ----------------------------------------------------------------------
 
   const run = useEngraveRunStore();
@@ -2473,7 +2485,7 @@ export function EngravePanel(): JSX.Element {
                 <button
                   type="button"
                   data-testid="engrave-use-recommended"
-                  onClick={() => rec.key && setTool(rec.key)}
+                  onClick={() => rec.key && setTool(rec.key, 'computed')}
                 >
                   Use it
                 </button>

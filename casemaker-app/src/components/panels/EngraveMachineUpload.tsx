@@ -127,6 +127,10 @@ export function EngraveMachineUpload({
 }: EngraveMachineUploadProps): JSX.Element {
   const [stage, setStage] = useState<'idle' | 'confirm' | 'sending'>('idle');
   const [result, setResult] = useState<MachineUploadResult | null>(null);
+  // #516 — "which cutter is fitted?" is a run-time confirmation, not a setup question: the upload
+  // names the cutter this file was posted for, and the operator confirms that cutter is the one in
+  // the spindle before the file is sent.
+  const [fitted, setFitted] = useState(false);
   // #423 review: while a program runs on this machine, nothing is uploaded to it — and the run panel
   // under this one (which holds Stop) cannot be swapped out from under the operator.
   const runningHere = useMachineRunStore((s) => (machine === null ? false : s.runs[machineKey(machine)]?.running === true));
@@ -265,11 +269,28 @@ export function EngraveMachineUpload({
             “Run it” below plays it from this app; Makera Studio at the machine can play the same
             file instead.
           </p>
+          {cutter !== null && (
+            <label style={MUTED} data-testid="engrave-upload-fitted">
+              <input
+                type="checkbox"
+                checked={fitted}
+                onChange={(e) => setFitted(e.target.checked)}
+              />{' '}
+              I have fitted this cutter:{' '}
+              {cutter.casePhrase !== null && (
+                <>
+                  <strong>{cutter.casePhrase}</strong> —{' '}
+                </>
+              )}
+              <strong>{cutter.name}</strong> ({cutter.code})
+            </label>
+          )}
           <div style={{ display: 'flex', gap: 6 }}>
             <button
               type="button"
               data-testid="engrave-upload-confirm-send"
               style={{ flex: 1, padding: 7 }}
+              disabled={cutter !== null && !fitted}
               onClick={() => void send()}
             >
               Send it
