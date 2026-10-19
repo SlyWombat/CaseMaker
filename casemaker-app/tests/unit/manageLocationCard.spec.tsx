@@ -133,11 +133,10 @@ describe('#412 the location card', () => {
     expect(screen.getByTestId('manage-machine-detail').textContent).not.toContain('power.sh');
   });
 
-  it('shows the wasteboard from the location, with the shop default’s limit', () => {
+  it('shows the bed block (the wasteboard migrated into the active profile) with the calipers link', () => {
     useLocationStore.setState({ status: 'present', location: VIEW });
     render(<MachinesScope />);
-    expect(screen.getByTestId('manage-wasteboard-summary').textContent).toContain('10.0 mm (measured');
-    expect(screen.getByTestId('manage-wasteboard-summary').textContent).toContain('1 scar');
-    expect(screen.getByTestId('manage-wasteboard-limit').textContent).toContain('fallback');
+    expect(screen.getByTestId('manage-bed-summary').textContent).toContain('wasteboard');
+    expect(screen.getByTestId('manage-bed-unmeasured').textContent).toContain('calipers list');
   });
 });

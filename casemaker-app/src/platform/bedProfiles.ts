@@ -288,3 +288,68 @@ function dayOf(now: string): string {
 function round3(n: number): number {
   return Math.round(n * 1000) / 1000;
 }
+
+// ── #511: the Bed block's actions ───────────────────────────────────────────────────────────────
+//
+// "I changed the bed" and "Measure…" both save a NEW dated profile and never move the machine; the
+// pure shapes live here (beside the migration) so the Bed block and, later, the wizard (S3) share
+// them, and so they can be pinned without a store.
+
+/** The datums a profile describes, by their `BedProfile['datums']` key. */
+export const BED_DATUM_KEYS = ['surfaceTopZ', 'viseJawTopZ', 'bracketSeatZ', 'rotaryAxis'] as const;
+export type BedDatumKey = (typeof BED_DATUM_KEYS)[number];
+
+/** A human sentence for each datum, for the "to measure" list. */
+export const BED_DATUM_WORDS: Record<BedDatumKey, string> = {
+  surfaceTopZ: 'surface top',
+  viseJawTopZ: 'jaw top',
+  bracketSeatZ: 'bracket seat',
+  rotaryAxis: 'rotary axis',
+};
+
+/**
+ * "I changed the bed" (#511, `bed-profiles.md` §5): the ACTIVE profile copied into a NEW dated
+ * profile, every datum cleared (whatever changed, nothing measured on the old bed still describes
+ * the new one) and the surface's scars dropped with the surface's datum. The old profile stays in
+ * `bedProfiles` untouched, with its scars and datums.
+ *
+ * Returns the new profile and the list of what was cleared, so the card can say "to measure" by
+ * name. `nextId` is the caller's new profile id (a fresh `newId('bp')`).
+ */
+export function changedBedProfile(
+  active: BedProfile,
+  nextId: string,
+  now: string,
+): { profile: BedProfile; cleared: string[] } {
+  const cleared: string[] = [];
+  for (const key of BED_DATUM_KEYS) {
+    if (active.datums[key] !== null) cleared.push(BED_DATUM_WORDS[key]);
+  }
+  if (active.surface.scars.length > 0) cleared.push('surface scars');
+
+  const day = dayOf(now);
+  const profile: BedProfile = {
+    ...active,
+    id: nextId,
+    name: `Bed changed ${day}`,
+    createdAt: now,
+    basedOn: active.id,
+    datums: { surfaceTopZ: null, viseJawTopZ: null, bracketSeatZ: null, rotaryAxis: null },
+    // Scars belong to the surface instance; a changed bed's surface is a new instance.
+    surface: { ...active.surface, scars: [] },
+    // Placements stay (the fixtures are still on the bed), their frames re-measured in the wizard.
+    placements: active.placements.map((p) => ({ ...p })),
+    preferredMounting: active.preferredMounting.map((m) => ({ ...m })),
+    history: [...active.history, { at: now, what: `created from "${active.name}" after the bed changed` }],
+  };
+  return { profile, cleared };
+}
+
+/** "Switch" (#511): never moves the machine — it only re-names which saved profile is active. */
+export function switchActiveProfile(
+  machine: MachineRecord,
+  activeBedProfileId: string,
+  now: string,
+): MachineRecord {
+  return { ...machine, activeBedProfileId, updatedAt: now };
+}

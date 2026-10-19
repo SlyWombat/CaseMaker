@@ -12,7 +12,7 @@ import type { ReactNode } from 'react';
 import type { LocationView, MachineRecord } from '@/platform/locationClient';
 import { formatStamp } from './display';
 import { MachinePower } from './MachinePower';
-import { MachineWasteboard } from './MachineWasteboard';
+import { MachineBed } from './MachineBed';
 import { houseDismissHouseWarning } from '@/platform/locationClient';
 import { useToolRegistryStore } from '@/store/toolRegistryStore';
 import { useLocationStore } from '@/store/locationStore';
@@ -70,9 +70,10 @@ function MachineKv({ machine }: { machine: MachineRecord }) {
             : '— not in the location'}
       </Kv>
       <Kv label="recorded">{formatStamp(machine.updatedAt) ?? machine.updatedAt}</Kv>
-      {/* #417 — the wasteboard, and #416 — the optional power switch (which draws nothing when the
-          machine has none, beyond a collapsed set-up on the desktop build). */}
-      <MachineWasteboard machine={machine} />
+      {/* #511 — the bed profile (the wasteboard's home since #510), and #416 — the optional power
+          switch (which draws nothing when the machine has none, beyond a collapsed set-up on the
+          desktop build). */}
+      <MachineBed machine={machine} />
       <MachinePower machine={machine} />
     </div>
   );

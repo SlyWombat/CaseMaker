@@ -15,7 +15,9 @@ import { fileURLToPath } from 'node:url';
 import {
   bedFromLegacy,
   bedMigrationDue,
+  changedBedProfile,
   newestViseRegistration,
+  switchActiveProfile,
   type RegistrationSource,
 } from '@/platform/bedProfiles';
 import type { ShopDefaults } from '@/platform/defaultsClient';
@@ -200,6 +202,36 @@ describe('the bed migrations (#510)', () => {
     )!;
     const parsed = MachineRecordSchema.safeParse({ ...machine, ...migrated });
     expect(parsed.success, JSON.stringify(parsed.error?.issues)).toBe(true);
+  });
+});
+
+describe('#511 the Bed block\'s pure actions', () => {
+  it('I changed the bed copies the active profile into a new dated one, clearing and listing the datums', () => {
+    const migrated = bedFromLegacy(legacyMachine(), MEASURED_SEAT, null, NOW)!;
+    const active = migrated.bedProfiles[0]!;
+    const { profile, cleared } = changedBedProfile(active, 'bp-new', '2026-10-19T10:00:00.000Z');
+
+    expect(profile.id).toBe('bp-new');
+    expect(profile.name).toBe('Bed changed 2026-10-19');
+    expect(profile.basedOn).toBe(active.id);
+    // Every datum cleared — whatever changed, nothing measured on the old bed still holds.
+    expect(profile.datums).toEqual({ surfaceTopZ: null, viseJawTopZ: null, bracketSeatZ: null, rotaryAxis: null });
+    // The cleared datums are listed by name, and the surface's scars go with the surface datum.
+    expect(cleared).toEqual(['bracket seat', 'surface scars']);
+    expect(profile.surface.scars).toEqual([]);
+    expect(profile.history.at(-1)!.what).toContain('after the bed changed');
+    // The old profile is untouched.
+    expect(active.datums.bracketSeatZ).not.toBeNull();
+    expect(active.surface.scars.length).toBeGreaterThan(0);
+  });
+
+  it('Switch re-names which profile is active, never editing the list', () => {
+    const machine = legacyMachine();
+    const migrated = bedFromLegacy(machine, MEASURED_SEAT, null, NOW)!;
+    const withBed = { ...machine, ...migrated };
+    const switched = switchActiveProfile(withBed, 'bp-other', '2026-10-19T10:00:00.000Z');
+    expect(switched.activeBedProfileId).toBe('bp-other');
+    expect(switched.bedProfiles).toEqual(withBed.bedProfiles);
   });
 });
 
