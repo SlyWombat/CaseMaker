@@ -128,6 +128,8 @@ export interface SimState {
   diagnostics: SimDiagnostic[];
   info: SimLoadInfo | null;
   meshes: SimLoadOk['meshes'] | null;
+  /** The cutter this session was loaded with (#554), for the sim's tool-head layer. */
+  tool: Tool | null;
   /** The frame on screen, and the checkpoint it is for. */
   frame: SimFrame | null;
   k: number;
@@ -258,6 +260,7 @@ const EMPTY = {
   diagnostics: [] as SimDiagnostic[],
   info: null,
   meshes: null,
+  tool: null as Tool | null,
   frame: null,
   k: -1,
   path: null,
@@ -312,7 +315,7 @@ export const useSimStore = create<SimState>()((set, get) => {
   async function run(args: LoadArgs, budgetMs: number): Promise<void> {
     const mine = ++loadSeq;
     // A load starts the session's speed at the shop's seed, as it always reset to 20 before #451.
-    set({ ...EMPTY, speed: startingSpeed(), status: 'loading', budgetMs, phase: 'sweep', origin: args.origin, loadedProgram: args.gcodeText });
+    set({ ...EMPTY, speed: startingSpeed(), status: 'loading', budgetMs, phase: 'sweep', origin: args.origin, loadedProgram: args.gcodeText, tool: args.tool });
     try {
       const client = await clientLoader();
       client.setSimSinks(

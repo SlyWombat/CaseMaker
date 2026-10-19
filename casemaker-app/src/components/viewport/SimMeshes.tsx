@@ -15,33 +15,36 @@ import * as THREE from 'three';
 import { useSimStore } from '@/store/simStore';
 import type { NodeMeshOutput } from '@/workers/geometry/meshOutput';
 import {
+  cleanStockGeometry,
+  disposeToolHeadGroup,
   drawsSacrificial,
+  FIXTURE_COLOR,
   geometryFromMesh,
+  PATH_COLOR,
+  RAPID_COLOR,
+  REMOVED_COLOR,
   SACRIFICIAL_COLOR,
   sacrificialMesh,
   segmentGeometry,
   splitPath,
+  toolHeadGroup,
   toolPositionAt,
   vertexIndexAtStep,
 } from './simGeometry';
 
 const STOCK_COLOR = '#c9a26b'; // a neutral wood tone
-const REMOVED_COLOR = '#ff5a36';
 const GOUGE_COLOR = '#ff0033';
-const CUT_COLOR = '#00e0ff';
-const RAPID_COLOR = '#ffd400';
-const TOOL_COLOR = '#d0d4dc';
-/** PROVISIONAL (#197): the drawn flute length; use the tool's stated flute length when there is one. */
-const TOOL_HEIGHT_MM = 12;
-const FIXTURE_COLOR = '#4b5563';
 
 /**
  * A geometry built from a `NodeMeshOutput`, disposed when its mesh is replaced or on unmount. A
  * scrub replaces the stock mesh many times, so without this the geometries would accumulate
  * (`renderer.info.memory.geometries` must stay bounded — #197).
  */
-function useMeshGeometry(mesh: NodeMeshOutput | null): THREE.BufferGeometry | null {
-  const geom = useMemo(() => (mesh ? geometryFromMesh(mesh) : null), [mesh]);
+function useMeshGeometry(
+  mesh: NodeMeshOutput | null,
+  build: (m: NodeMeshOutput) => THREE.BufferGeometry = geometryFromMesh,
+): THREE.BufferGeometry | null {
+  const geom = useMemo(() => (mesh ? build(mesh) : null), [mesh, build]);
   useEffect(() => () => geom?.dispose(), [geom]);
   return geom;
 }
@@ -114,6 +117,7 @@ export function SimMeshes() {
   const path = useSimStore((s) => s.path);
   const layers = useSimStore((s) => s.layers);
   const info = useSimStore((s) => s.info);
+  const tool = useSimStore((s) => s.tool);
 
   const lastStep = info ? info.summary.steps - 1 : -1;
   // Issue #197: on a fresh load the step is already the last one but no frame has been delivered
@@ -123,7 +127,12 @@ export function SimMeshes() {
   const stockMesh = meshes ? (finished ? meshes.result : frame?.stock ?? meshes.stock) : null;
   const removalMesh = finished ? meshes?.removal ?? null : frame?.removalSoFar ?? null;
 
-  const stockGeom = useMeshGeometry(stockMesh);
+  // #552 — the COLUMN (dexel) stock carries the per-column side skirts that read as a comb; the
+  // exact sweeper's Manifold stock is already clean and its vertical faces (pocket walls) must be
+  // kept. The column engine is the one that never emits a removal ghost, so that is the honest
+  // discriminator between the two stock shapes.
+  const cleanStock = meshes?.removal === null;
+  const stockGeom = useMeshGeometry(stockMesh, cleanStock ? cleanStockGeometry : geometryFromMesh);
   const removalGeom = useMeshGeometry(removalMesh);
   // #213 §4 — the sacrificial material as cut so far, on its OWN layer (`layers.sacrificial`).
   // Null when the job has none, so nothing is drawn; before the first frame lands the load's uncut
@@ -135,16 +144,13 @@ export function SimMeshes() {
   const split = useMemo(() => (path ? splitPath(path) : null), [path]);
   const cutSegments = split ? vertexIndexAtStep(split.cutStep, step) : 0;
   const rapidSegments = split ? vertexIndexAtStep(split.rapidStep, step) : 0;
-  const cutTotal = split ? split.cutStep.length : 0;
-  const rapidTotal = split ? split.rapidStep.length : 0;
 
-  const tool = path ? toolPositionAt(path, step) : null;
-  const radius = info?.radius ?? 0;
-  const toolGeom = useMemo(
-    () => (radius > 0 ? new THREE.CylinderGeometry(radius, radius, TOOL_HEIGHT_MM, 24) : null),
-    [radius],
-  );
-  useEffect(() => () => toolGeom?.dispose(), [toolGeom]);
+  const toolTip = path ? toolPositionAt(path, step) : null;
+  // #554 — the tool head is built from the tool's own profile, not `info.radius` (a V-bit's radius
+  // is a ~0.1 mm needle). The group's tip sits at the origin and rises along +Z, so the whole
+  // assembly is just positioned at the tip.
+  const toolHead = useMemo(() => toolHeadGroup(tool), [tool]);
+  useEffect(() => () => disposeToolHeadGroup(toolHead), [toolHead]);
 
   const visibleGouges = meshes ? meshes.gouges.filter((g) => step >= g.step) : [];
 
@@ -177,24 +183,14 @@ export function SimMeshes() {
       ))}
 
       {layers.path && split && (
-        <>
-          <LineLayer data={split.cuts} start={0} count={2 * cutSegments} color={CUT_COLOR} />
-          <LineLayer data={split.cuts} start={2 * cutSegments} count={2 * (cutTotal - cutSegments)} color={CUT_COLOR} opacity={0.25} />
-        </>
+        <LineLayer data={split.cuts} start={0} count={2 * cutSegments} color={PATH_COLOR} />
       )}
       {layers.rapids && split && (
-        <>
-          <LineLayer data={split.rapids} start={0} count={2 * rapidSegments} color={RAPID_COLOR} dashed />
-          <LineLayer data={split.rapids} start={2 * rapidSegments} count={2 * (rapidTotal - rapidSegments)} color={RAPID_COLOR} opacity={0.25} dashed />
-        </>
+        <LineLayer data={split.rapids} start={0} count={2 * rapidSegments} color={RAPID_COLOR} dashed />
       )}
 
-      {layers.tool && tool && toolGeom && (
-        // CylinderGeometry's axis is +Y; rotate about X so it points up the world's +Z, and lift
-        // its centre by half the height so its BASE sits on the tool tip.
-        <mesh geometry={toolGeom} position={[tool[0], tool[1], tool[2] + TOOL_HEIGHT_MM / 2]} rotation={[Math.PI / 2, 0, 0]} name="sim-tool">
-          <meshStandardMaterial color={TOOL_COLOR} transparent opacity={0.9} metalness={0.3} roughness={0.4} />
-        </mesh>
+      {layers.tool && toolTip && toolHead && (
+        <primitive object={toolHead} position={[toolTip[0], toolTip[1], toolTip[2]]} name="sim-tool" />
       )}
 
       {layers.fixture &&

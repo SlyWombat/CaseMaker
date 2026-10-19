@@ -5,6 +5,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   checkpointAtStep,
+  cleanStockGeometry,
   geometryFromMesh,
   pathBounds,
   segmentGeometry,
@@ -14,6 +15,7 @@ import {
 } from '@/components/viewport/simGeometry';
 import type { CheckpointInfo, SimPath } from '@/workers/sim/session';
 import type { NodeMeshOutput } from '@/workers/geometry/meshOutput';
+import { meshFlat, type ColumnGrid } from '@/workers/geometry/columnEngine';
 
 /**
  * A five-vertex path: a rapid into the first known position (drawn as nothing — it has no
@@ -171,5 +173,66 @@ describe('segmentGeometry', () => {
     const g = segmentGeometry(SEGMENTS, false);
     expect(g.getAttribute('lineDistance')).toBeUndefined();
     g.dispose();
+  });
+});
+
+// #552 — the uncut stock's per-column side skirts read as a comb; the cleaned geometry replaces
+// them with one flat wall per side while keeping the heightfield top and the underside intact.
+describe('cleanStockGeometry', () => {
+  /** Triangles whose face normal is horizontal (|nz| ≈ 0): the vertical skirts/walls. */
+  const verticalTriangles = (positions: ArrayLike<number>, indices: ArrayLike<number>): number => {
+    let n = 0;
+    for (let i = 0; i < indices.length; i += 3) {
+      const ia = indices[i]! * 3;
+      const ib = indices[i + 1]! * 3;
+      const ic = indices[i + 2]! * 3;
+      const ax = positions[ia]!, ay = positions[ia + 1]!;
+      const bx = positions[ib]!, by = positions[ib + 1]!;
+      const cx = positions[ic]!, cy = positions[ic + 1]!;
+      const nz = (bx - ax) * (cy - ay) - (by - ay) * (cx - ax);
+      if (Math.abs(nz) < 1e-9) n += 1;
+    }
+    return n;
+  };
+
+  it('replaces the per-column skirts with four flat walls, keeping the top and underside', () => {
+    const grid: ColumnGrid = {
+      kind: 'flat',
+      nu: 4,
+      nv: 4,
+      u0: 0,
+      du: 1,
+      v0: 0,
+      dv: 1,
+      initial: 0,
+      base: -10,
+      h: new Float32Array(16).fill(0),
+    };
+    const mesh = meshFlat(grid, { dx: 0.5, dThetaDeg: 0.5 });
+    const skirts = verticalTriangles(mesh.positions, mesh.indices);
+    expect(skirts).toBeGreaterThan(8); // the per-column comb this removes
+
+    const cleaned = cleanStockGeometry(mesh);
+    const positions = cleaned.getAttribute('position').array as Float32Array;
+    const indices = cleaned.getIndex()!.array as Uint32Array;
+    expect(verticalTriangles(positions, indices)).toBe(8); // exactly the four walls
+    // The top heightfield and the underside are carried over untouched: only the skirts (dropped)
+    // and the four new walls (8 triangles) differ.
+    expect(indices.length / 3).toBe(mesh.indices.length / 3 - skirts + 8);
+    // The clean block keeps the same extent.
+    const pos = cleaned.getAttribute('position');
+    let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
+    for (let i = 0; i < pos.count; i++) {
+      const x = pos.getX(i), z = pos.getZ(i);
+      if (x < minX) minX = x;
+      if (x > maxX) maxX = x;
+      if (z < minZ) minZ = z;
+      if (z > maxZ) maxZ = z;
+    }
+    expect(minX).toBeCloseTo(mesh.bbox.min[0]!, 6);
+    expect(maxX).toBeCloseTo(mesh.bbox.max[0]!, 6);
+    expect(minZ).toBeCloseTo(mesh.bbox.min[2]!, 6);
+    expect(maxZ).toBeCloseTo(mesh.bbox.max[2]!, 6);
+    cleaned.dispose();
   });
 });

@@ -9,6 +9,9 @@ import {
 } from '@/store/viewportStore';
 import { isSimSceneActive, useSimStore, type SimLayers } from '@/store/simStore';
 import { dispatchViewportCamera } from './viewportCamera';
+// #553 — the layer colours are the ONE source shared with `SimMeshes`, so the toggle swatch and
+// the drawn line can never drift apart (the toggles ARE the legend).
+import { FIXTURE_COLOR, PATH_COLOR, RAPID_COLOR, REMOVED_COLOR, SACRIFICIAL_COLOR, TOOL_COLOR } from './simGeometry';
 
 /**
  * Issue #197 §8 — a CNC section is one whose id starts `cnc-` (`cnc-sim` today, the engrave
@@ -17,15 +20,17 @@ import { dispatchViewportCamera } from './viewportCamera';
  */
 const isCncSection = (id: SidebarSectionId | null): boolean => id !== null && id.startsWith('cnc-');
 
-/** The layer toggles, in the mockup's order (#195), with the `simStore.layers` key each drives. */
-const LAYERS: { key: keyof SimLayers; label: string }[] = [
-  { key: 'removed', label: 'Removed' },
-  { key: 'path', label: 'Path' },
-  { key: 'rapids', label: 'Rapids' },
-  { key: 'tool', label: 'Tool' },
-  { key: 'fixture', label: 'Fixture' },
+/** The layer toggles, in the mockup's order (#195), with the `simStore.layers` key each drives and
+ *  the colour each drawn layer uses (#553): the chip's swatch is the legend, so it must be the
+ *  exact hex the mesh/line is drawn in. */
+const LAYERS: { key: keyof SimLayers; label: string; color: string; dashed?: boolean }[] = [
+  { key: 'removed', label: 'Removed', color: REMOVED_COLOR },
+  { key: 'path', label: 'Path', color: PATH_COLOR },
+  { key: 'rapids', label: 'Rapids', color: RAPID_COLOR, dashed: true },
+  { key: 'tool', label: 'Tool', color: TOOL_COLOR },
+  { key: 'fixture', label: 'Fixture', color: FIXTURE_COLOR },
   // #213 §4 — the sacrificial material, its own layer (independent of the workholding one).
-  { key: 'sacrificial', label: 'Sacrificial' },
+  { key: 'sacrificial', label: 'Sacrificial', color: SACRIFICIAL_COLOR },
 ];
 
 /**
@@ -298,6 +303,19 @@ export function ViewportToolbar({ ref }: ViewportToolbarProps) {
                 onChange={() => toggleLayer(l.key)}
                 style={{ width: 11, height: 11, margin: 0, accentColor: 'var(--cm-color-primary)' }}
                 data-testid={`viewport-layer-${l.key}`}
+              />
+              {/* #553 — the colour swatch that makes the toggle the legend. */}
+              <span
+                aria-hidden="true"
+                style={{
+                  width: 9,
+                  height: 9,
+                  borderRadius: 2,
+                  flex: 'none',
+                  ...(l.dashed
+                    ? { border: `1px dashed ${l.color}`, background: 'transparent' }
+                    : { background: l.color }),
+                }}
               />
               {l.label}
             </label>

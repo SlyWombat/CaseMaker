@@ -306,7 +306,7 @@ function TransportBar() {
           {path && path.rapidsTimed === false ? ' (feeds only)' : ''}
         </span>
         <span data-testid="sim-step" style={READOUT_MUTED}>
-          step {Math.max(0, step) + 1} / {stepCount}
+          step {Math.max(0, step)} / {lastStep}
         </span>
         <span data-testid="sim-line" style={READOUT_MUTED}>
           line {line ?? '—'}

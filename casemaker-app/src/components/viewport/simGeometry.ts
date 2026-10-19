@@ -6,6 +6,8 @@
 import * as THREE from 'three';
 import type { NodeMeshOutput } from '@/workers/geometry/meshOutput';
 import type { CheckpointInfo, SimPath } from '@/workers/sim/session';
+import type { Tool } from '@/engine/cnc/tool';
+import { isVShape, vCone } from '@/engine/cnc/vProfile';
 
 /**
  * The sacrificial material's colour (#213 §4) — the board under the part and the strips beside it.
@@ -16,6 +18,20 @@ import type { CheckpointInfo, SimPath } from '@/workers/sim/session';
  * PROVISIONAL (#213): still the first place it is named; fold into a shared palette when one exists.
  */
 export const SACRIFICIAL_COLOR = '#9ca3af';
+
+/**
+ * The simulation layer colours (#197), the ONE source for both the viewport meshes (`SimMeshes`)
+ * and the layer-toggle swatches (#553): the toggles ARE the legend, so the swatch and the drawn
+ * line must be the same hex, and a single constant is what stops them drifting apart.
+ */
+export const PATH_COLOR = '#00e0ff'; // cuts (kind 1/2), the blue path
+export const RAPID_COLOR = '#ffd400'; // rapids (kind 0), drawn dashed
+export const REMOVED_COLOR = '#ff5a36'; // the removed volume ghost
+export const TOOL_COLOR = '#d0d4dc'; // the cutting head / tool body
+export const FIXTURE_COLOR = '#4b5563'; // the vise jaws
+
+/** The flute length the tool head falls back to when the tool states none (#197). */
+export const TOOL_FLUTE_LENGTH_MM = 12;
 
 /**
  * A mesh as the worker returns it → a three `BufferGeometry`, the same way `bufferToGeometry`
@@ -173,4 +189,136 @@ export function checkpointAtStep(checkpoints: CheckpointInfo[], step: number): n
     else hi = mid;
   }
   return lo - 1;
+}
+
+/**
+ * The stock dexel/heightfield mesh with its per-column SIDE SKIRTS rebuilt as one flat wall per
+ * side (#552). The engine meshes the four outer skirts column-by-column (a quad between every two
+ * display columns), so even an uncut blank's walls read as dense vertical seams. The top heightfield
+ * (where the pocket is) and the underside (whose kerfs stay open on a through cut) are kept exactly
+ * as the engine made them; only the skirts are replaced, so the untouched perimeter is a clean flat
+ * face while the cut detail stays. The caller owns the returned geometry and must `dispose()` it.
+ */
+export function cleanStockGeometry(mesh: NodeMeshOutput): THREE.BufferGeometry {
+  const positions = mesh.positions;
+  const src = mesh.indices;
+  const kept: number[] = [];
+  for (let i = 0; i < src.length; i += 3) {
+    const ia = src[i]! * 3;
+    const ib = src[i + 1]! * 3;
+    const ic = src[i + 2]! * 3;
+    const ax = positions[ia]!, ay = positions[ia + 1]!;
+    const bx = positions[ib]!, by = positions[ib + 1]!;
+    const cx = positions[ic]!, cy = positions[ic + 1]!;
+    // The z of (b−a)×(c−a): positive for the top heightfield, negative for the underside, and
+    // exactly 0 for the vertical skirts — which is what this drops.
+    const nz = (bx - ax) * (cy - ay) - (by - ay) * (cx - ax);
+    if (Math.abs(nz) > 1e-9) kept.push(src[i]!, src[i + 1]!, src[i + 2]!);
+  }
+  // Rebuild the four skirts as one quad each, reusing `meshFlat`'s own vertex order so the walls
+  // keep the engine's outward winding.
+  const { min, max } = mesh.bbox;
+  const zT = max[2]!;
+  const zB = min[2]!;
+  const x0 = min[0]!, x1 = max[0]!, y0 = min[1]!, y1 = max[1]!;
+  const wallVerts: number[] = [];
+  const wallIdx: number[] = [];
+  const side = (t0: [number, number, number], t1: [number, number, number], b0: [number, number, number], b1: [number, number, number]): void => {
+    const n = positions.length / 3 + wallVerts.length / 3;
+    wallVerts.push(t0[0], t0[1], t0[2], t1[0], t1[1], t1[2], b0[0], b0[1], b0[2], b1[0], b1[1], b1[2]);
+    wallIdx.push(n, n + 1, n + 2, n, n + 2, n + 3);
+  };
+  side([x0, y0, zT], [x0, y1, zT], [x0, y0, zB], [x0, y1, zB]); // −X
+  side([x1, y1, zT], [x1, y0, zT], [x1, y1, zB], [x1, y0, zB]); // +X
+  side([x1, y0, zT], [x0, y0, zT], [x1, y0, zB], [x0, y0, zB]); // −Y
+  side([x0, y1, zT], [x1, y1, zT], [x0, y1, zB], [x1, y1, zB]); // +Y
+
+  const positionsOut = new Float32Array(positions.length + wallVerts.length);
+  positionsOut.set(positions, 0);
+  positionsOut.set(wallVerts, positions.length);
+  const indicesOut = new Uint32Array(kept.length + wallIdx.length);
+  indicesOut.set(kept, 0);
+  indicesOut.set(wallIdx, kept.length);
+  const geom = new THREE.BufferGeometry();
+  geom.setAttribute('position', new THREE.BufferAttribute(positionsOut, 3));
+  geom.setIndex(new THREE.BufferAttribute(indicesOut, 1));
+  geom.computeVertexNormals();
+  return geom;
+}
+
+/**
+ * The cutting-head assembly for the sim's tool layer (#554): the true bit profile (cone for a
+ * V/engraving/chamfer bit, a flat body, a hemispherical end for a ball), the shank above the
+ * flutes, and a collet/holder stub — instead of `info.radius`, which is a lossy stand-in. Built in
+ * the tool's own frame: the TIP sits at the origin and the head rises along +Z, so the caller just
+ * positions the group at the tip. The caller owns the group and must dispose every mesh it holds.
+ */
+export function toolHeadGroup(tool: Tool | null): THREE.Group | null {
+  if (!tool) return null;
+  const tipR = Math.max(0.05, (tool.tipDiameter ?? tool.diameter ?? 1) / 2);
+  const cutR = Math.max(tipR, (tool.diameter ?? tool.handleDiameter ?? tipR * 2) / 2);
+  // The 1/8" shank is the catalogue default, so a missing handle reads as the common case.
+  const shankR = Math.max(cutR, (tool.handleDiameter ?? 3.175) / 2);
+  const fluteLen = tool.fluteLength ?? TOOL_FLUTE_LENGTH_MM;
+  const stickout = tool.stickout ?? Math.max(fluteLen + 6, 20);
+  const holderR = Math.max(shankR + 0.75, 4);
+  const holderLen = 6;
+
+  const material = new THREE.MeshStandardMaterial({ color: TOOL_COLOR, transparent: true, opacity: 0.9, metalness: 0.3, roughness: 0.4 });
+  const group = new THREE.Group();
+  // A body of revolution: a cylinder/cone of `height` spanning z ∈ [z, z+height], `rTop` at the
+  // top end and `rBottom` at the tip end (CylinderGeometry's axis is +Y; rotate it up to +Z).
+  const addBody = (rTop: number, rBottom: number, height: number, z: number): void => {
+    if (height <= 0) return;
+    const g = new THREE.CylinderGeometry(rTop, rBottom, height, 20);
+    g.rotateX(Math.PI / 2);
+    g.translate(0, 0, z + height / 2);
+    group.add(new THREE.Mesh(g, material));
+  };
+
+  // Where the cutting head ends — the shank and collet sit above it.
+  let headTop = fluteLen;
+
+  if (tool.shape === 'ball') {
+    // A ball nose: a hemisphere whose dome is the tip (below the origin), then the body cylinder.
+    const cap = new THREE.SphereGeometry(cutR, 20, 12, 0, Math.PI * 2, Math.PI / 2, Math.PI / 2);
+    cap.rotateX(Math.PI / 2); // lower hemisphere's dome -> −Z
+    cap.translate(0, 0, cutR); // dome (the tip) at z=0, equator at z=cutR
+    group.add(new THREE.Mesh(cap, material));
+    addBody(cutR, cutR, fluteLen, cutR);
+    headTop = cutR + fluteLen;
+  } else if (tool.shape === 'drill') {
+    // A drill: a conical point at the tip, then the body cylinder above it.
+    const pointH = Math.min(fluteLen, tipR * 3);
+    const point = new THREE.ConeGeometry(tipR, pointH, 20);
+    point.rotateX(-Math.PI / 2); // apex -> −Z (the tip)
+    point.translate(0, 0, pointH / 2); // apex at z=0
+    group.add(new THREE.Mesh(point, material));
+    addBody(tipR, tipR, fluteLen, pointH);
+    headTop = pointH + fluteLen;
+  } else {
+    // A V/engraving/chamfer cone widens from the tip to the shank over the flute; everything else
+    // (flat, bull, thread, tapered-ball, unknown) is a plain cutting body.
+    const cone = vCone(tool);
+    const topR = cone ? Math.min(shankR, cone.tipRadius + fluteLen * cone.tanHalf) : cutR;
+    addBody(topR, isVShape(tool) ? cone?.tipRadius ?? tipR : cutR, fluteLen, 0);
+  }
+
+  const shankLen = Math.max(0, stickout - headTop);
+  addBody(shankR, shankR, shankLen, headTop);
+  addBody(holderR, holderR, holderLen, headTop + shankLen);
+  return group;
+}
+
+/** Dispose every geometry and material a `toolHeadGroup` built (#554). */
+export function disposeToolHeadGroup(group: THREE.Group | null): void {
+  if (!group) return;
+  group.traverse((obj) => {
+    if (obj instanceof THREE.Mesh) {
+      obj.geometry.dispose();
+      const m = obj.material;
+      if (Array.isArray(m)) m.forEach((x) => x.dispose());
+      else m.dispose();
+    }
+  });
 }
