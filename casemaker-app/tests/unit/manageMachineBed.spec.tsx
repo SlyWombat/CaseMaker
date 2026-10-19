@@ -70,7 +70,7 @@ describe('#511 the Bed block', () => {
       open: async () => ({
         send: async (line: string) => {
           consoleSends.push(line);
-          return { kind: 'sent', line, text: '', frames: 0, elapsedMs: 0 } as const;
+          return { ok: true, line, text: '', frames: 0, elapsedMs: 0 };
         },
         close: async () => {},
       }),
