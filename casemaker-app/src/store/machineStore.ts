@@ -22,6 +22,7 @@
 
 import { create } from 'zustand';
 import type { MachineObservation, MachineProbeResult } from '@/platform/machineProbe';
+import { readStatusLine } from '@/platform/desktop/protocol';
 
 const MACHINE_KEY = 'casemaker.machine.v1';
 
@@ -89,6 +90,8 @@ function parseMachine(raw: unknown): MachineObservation | null {
     ip: str(o.ip),
     mac: str(o.mac),
     status: str(o.status),
+    // #526 — the parsed status line is derived, never persisted: re-derived from the raw line on load.
+    statusLine: str(o.status) === null ? null : readStatusLine(str(o.status)!),
     profileId: str(o.profileId),
     observedAt,
     notes: Array.isArray(o.notes) ? o.notes.filter((n): n is string => typeof n === 'string') : [],
@@ -143,7 +146,7 @@ export const useMachineStore = create<MachineState>()((set, get) => ({
     const current = get().machine;
     if (current === null) return;
     const slice: MachineSlice = {
-      machine: { ...current, busy, status, observedAt: new Date().toISOString() },
+      machine: { ...current, busy, status, statusLine: readStatusLine(status), observedAt: new Date().toISOString() },
       outcome: get().outcome,
       reason: get().reason,
       checkedAt: get().checkedAt,

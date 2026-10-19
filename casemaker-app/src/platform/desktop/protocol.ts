@@ -483,6 +483,91 @@ export function readJobProgress(text: string): JobProgress {
   return { state: state === null ? null : state[1]!, line: num(0), percent: num(1), elapsedS: num(2) };
 }
 
+/** One axis triplet off the status line — X Y Z, plus A/B when the rotary is fitted (#526). */
+export interface StatusPosition {
+  x: number | null;
+  y: number | null;
+  z: number | null;
+  a: number | null;
+  b: number | null;
+}
+
+/** A `F:`/`S:` field — actual, set, and the override percent (#526). */
+export interface StatusRate {
+  actual: number | null;
+  set: number | null;
+  override: number | null;
+}
+
+/**
+ * What a `?` status line says, whole (#526): the state word and the job's progress (reusing
+ * `readJobProgress`), plus the work and machine positions, the feed and spindle rates, and the
+ * tool number. Every field is null when the line does not carry it — an idle machine has no `P:`
+ * and a probe-only poll has no `T:`.
+ */
+export interface MachineStatusLine {
+  state: string | null;
+  /** The work position (`WPos:`), the frame the job is written in. */
+  wpos: StatusPosition;
+  /** The machine position (`MPos:`), what the axis encoders report. */
+  mpos: StatusPosition;
+  /** The feed rate (`F:`): actual mm/min, the set figure, and the override percent. */
+  feed: StatusRate;
+  /** The spindle (`S:`): actual rpm, the set figure, and the override percent. */
+  spindle: StatusRate;
+  /** The tool number (`T:`), or null when no tool is fitted. */
+  tool: number | null;
+  progress: JobProgress;
+}
+
+/** The `KEY:value` field of a status line, or null — fields are `|`-separated (#526). */
+function statusField(text: string, key: string): string | null {
+  const m = new RegExp(`(?:^|\\|)${key}:([^|>]*)`).exec(text);
+  return m === null ? null : m[1]!;
+}
+
+/** `X,Y,Z` (and `A,B` when fitted) into a `StatusPosition`. */
+function readPosition(field: string | null): StatusPosition {
+  const parts = field === null ? [] : field.split(',');
+  const at = (i: number): number | null => {
+    const raw = parts[i]?.trim();
+    if (raw === undefined || raw === '') return null;
+    const v = Number(raw);
+    return Number.isFinite(v) ? v : null;
+  };
+  return { x: at(0), y: at(1), z: at(2), a: at(3), b: at(4) };
+}
+
+/** `actual,set,override%` into a `StatusRate`. */
+function readRate(field: string | null): StatusRate {
+  const parts = field === null ? [] : field.split(',');
+  const at = (i: number): number | null => {
+    const raw = parts[i]?.trim();
+    if (raw === undefined || raw === '') return null;
+    const v = Number(raw);
+    return Number.isFinite(v) ? v : null;
+  };
+  return { actual: at(0), set: at(1), override: at(2) };
+}
+
+/**
+ * Parse one status line into its facts (#526). Pure text; the strip, the viewport and the
+ * registration runner all read the same line through this, so they cannot disagree about what the
+ * machine said. `state` and the `P:` progress come from `readJobProgress` — the one reader that
+ * already knows the state word and the job's line/percent/elapsed.
+ */
+export function readStatusLine(text: string): MachineStatusLine {
+  return {
+    state: readJobProgress(text).state,
+    wpos: readPosition(statusField(text, 'WPos')),
+    mpos: readPosition(statusField(text, 'MPos')),
+    feed: readRate(statusField(text, 'F')),
+    spindle: readRate(statusField(text, 'S')),
+    tool: readRate(statusField(text, 'T')).actual,
+    progress: readJobProgress(text),
+  };
+}
+
 /**
  * The words the controller uses when it has stopped for its own reasons — a bare line, not a state
  * word: `ALARM: Probe fail` after a `G38.2` finds nothing (`Z1-Firmware-Dialect.md` §11.2), the

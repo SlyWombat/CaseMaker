@@ -5,6 +5,7 @@ import * as THREE from 'three';
 import { GridFloor } from './GridFloor';
 import { SceneMeshes } from './SceneMeshes';
 import { EngraveLegend } from './EngraveLegend';
+import { MachineStatusStrip } from './MachineStatusStrip';
 import { SimLegend } from './SimLegend';
 import { SimTransport } from './SimTransport';
 import { ViewportToolbar } from './ViewportToolbar';
@@ -407,6 +408,9 @@ export function Viewport() {
       {/* #198 — the transport rides over the bottom of the canvas while a simulation owns the
           scene. It renders itself null otherwise, so no guard is needed here. */}
       <SimTransport />
+      {/* #526 — the live machine in one line under the viewport whenever a machine is remembered.
+          It renders itself null until machineStore carries a machine, so no guard is needed here. */}
+      <MachineStatusStrip />
     </div>
   );
 }

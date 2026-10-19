@@ -41,6 +41,7 @@
 import { CALIBRATION_KEY_LIST, calibrationFromReplies, type MachineCalibration } from '@/engine/cnc/calibration';
 import { loadMachineBridge } from './capabilities';
 import { liveShopDefaults, machineTiming } from './defaultsClient';
+import { readStatusLine, type MachineStatusLine } from './desktop/protocol';
 
 /**
  * The command port a typed address connects to when none is given: `COMMAND_TCP_PORT`
@@ -133,6 +134,11 @@ export interface MachineObservation {
   mac: string | null;
   /** The controller's status line, verbatim, or null when it did not answer. */
   status: string | null;
+  /**
+   * The parsed status line (#526), derived from `status`. Optional so a test fixture can hand a
+   * raw `status` alone; a consumer falls back to `readStatusLine(machine.status)`.
+   */
+  statusLine?: MachineStatusLine | null;
   /**
    * The `MACHINES` id this identity resolves to, or `null` for a machine we do not know. `null` is
    * a RESULT, not a failure: it says every machine-dependent number for this job is unknown.
@@ -374,6 +380,7 @@ async function observe(client: MachineProbeClient, reached: Reached): Promise<Ob
       ip,
       mac,
       status,
+      statusLine: status === null ? null : readStatusLine(status),
       profileId,
       observedAt,
       notes,
