@@ -296,6 +296,28 @@ describe('#419 §3 the Cut surface', () => {
     expect(screen.getByTestId('engrave-package-reservation').textContent).toContain('no blank needs to be held');
   });
 
+  it('#547 — the dry-run selector surfaces, and a full dry run sends the lifted text under a -dry name', async () => {
+    const job = defaultEngraveJob();
+    job.name = 'Dry job';
+    const pkg = frozen(job, [P1]);
+    draw({ job, report: reportOf(), pkg, generated: generated([P1]) });
+
+    await waitFor(() => expect(screen.getByTestId('engrave-package').dataset.state).toBe('current'));
+
+    const select = screen.getByTestId('engrave-dry-run-level') as HTMLSelectElement;
+    expect(select.value).toBe('off');
+    expect(screen.queryByTestId('engrave-dry-run-note')).toBeNull();
+
+    fireEvent.change(select, { target: { value: 'full' } });
+    expect(screen.getByTestId('engrave-dry-run-note').textContent).toContain('spindle stays off');
+
+    // The single-file upload path is fed the lifted program under its own -dry file name.
+    fireEvent.click(screen.getByTestId('engrave-upload'));
+    await waitFor(() => {
+      expect(screen.getByTestId('engrave-upload-confirm').textContent).toContain('-dry.nc');
+    });
+  });
+
   it('does not freeze while the gate is red', async () => {
     const job = defaultEngraveJob();
     draw({

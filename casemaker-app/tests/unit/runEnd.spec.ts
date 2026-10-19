@@ -318,6 +318,19 @@ describe('#414 the run store: once per run, and only on a real finish', () => {
     expect(end.lines.join(' ')).toContain('× 3 for aluminium-6061');
   });
 
+  it('#547 — a finished dry run records nothing: no finished hash, no stock, no runtime, no offcut', async () => {
+    const end = await endOfRun(TARGET, finished, { ...ctx, dryRun: true });
+    expect(calls).toEqual([]);
+    expect(end).toMatchObject({ kind: 'finished', offcut: null, stockQuestion: null });
+    expect(end.lines.join(' ')).toContain('nothing was recorded');
+  });
+
+  it('#547 — a stopped dry run records nothing either', async () => {
+    const stopped = await endOfRun(TARGET, { kind: 'aborted', stop: { kind: 'stopped' } as never, last }, { ...ctx, dryRun: true });
+    expect(calls).toEqual([]);
+    expect(stopped).toMatchObject({ kind: 'stopped', offcut: null, stockQuestion: null });
+  });
+
   it('the run context’s fibre flag makes a base plastic’s minute abrasive (#464)', async () => {
     // The job's material is PET — a PETG-CF blank keeps its base — and the flag travels with it so
     // the runtime is weighted 5×, not the plastic 1×.

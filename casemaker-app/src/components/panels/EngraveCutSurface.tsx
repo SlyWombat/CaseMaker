@@ -42,6 +42,11 @@ import {
   releaseFileName,
   type ReleaseSource,
 } from '@/engine/cnc/engrave/release';
+import { DRY_RUN_SAFE_Z, dryRunProgramFor, type DryRunLevel } from '@/engine/cnc/engrave/dryRun';
+import { jobMachine } from '@/engine/cnc/calibration';
+import { jobTool, toSetup } from '@/engine/cnc/engrave/jobSetup';
+import { flatEndMill } from '@/engine/cnc/tool';
+import { useSettingsStore } from '@/store/settingsStore';
 import { finishedProgramsFor } from '@/store/locationStore';
 import type { RunContext } from '@/store/machineRunStore';
 import { useEngravePackageStore } from '@/store/engravePackageStore';
@@ -191,6 +196,34 @@ export function EngraveCutSurface({
     () => (pkg === null ? [] : frozenReleaseSources(job, pkg, reports)),
     [job, pkg, reports],
   );
+
+  // #547 — the dry-run selector: `off` (cut for real), `traverse` (one lifted air pass) or `full`
+  // (the whole lifted list through the ordinary release flow). Default `off` — the maintainer left
+  // the default TBD, and a rehearsal must be chosen on purpose, never by accident.
+  const [dryRunLevel, setDryRunLevel] = useState<DryRunLevel | 'off'>('off');
+  // The verifier context for the LIFTED text. The tool never affects a dry-run check (no spindle,
+  // no cuts), so the job's cutter — or a minimal flat mill when none resolves — is an honest stand-in.
+  const calibration = useSettingsStore((s) => s.machineCalibration) ?? null;
+  const dryRunDeps = useMemo(() => {
+    const mill = jobMachine(job, calibration);
+    return { setup: toSetup(job, mill), machine: mill, tool: jobTool(job) ?? flatEndMill(1) };
+  }, [job, calibration]);
+  /** The program list the run controls play: the frozen texts, or their lifted dry-run variants. */
+  const runSources: ReleaseSource[] = useMemo(() => {
+    if (dryRunLevel === 'off') return sources;
+    return sources.map((s) => {
+      if (s.verify === null) return s; // the missing-report blocker already refuses; keep it visible
+      const dry = dryRunProgramFor(s.nc, dryRunDeps);
+      return { ...s, nc: dry.nc, verify: dry.verify, hash: dry.hash, dryRun: true };
+    });
+  }, [sources, dryRunLevel, dryRunDeps]);
+  // A traverse plays ONE lifted program (a fast head/progress rehearsal); a full dry run plays all.
+  const traverseOnly = dryRunLevel === 'traverse';
+  const releaseSources = traverseOnly ? runSources.slice(0, 1) : runSources;
+  const singleSource = releaseSources[0];
+  // #547 — a dry run must never consume the blank: the single-file run context says so, and the
+  // release path sets the same flag per file from `ReleaseProgram.dryRun`.
+  const runContextWithDry = dryRunLevel === 'off' ? runContext : { ...runContext, dryRun: true as const };
   /**
    * #457 — the surface this job's registration measured on THIS machine, and what stands above it.
    * Session state (#494): a reload forgets it, and the lasers then say "no registration recorded"
@@ -424,11 +457,39 @@ export function EngraveCutSurface({
 
           {canDriveMachine && target !== null && (
             <section style={{ marginTop: 10 }} data-testid="engrave-cut-run">
-              {sources.length > 1 ? (
+              {/* #547 — the dry-run selector. Both levels fly the real XY path at a safe Z with the
+                  spindle off; `traverse` plays one program, `full` the whole list. */}
+              <div style={BOX} data-testid="engrave-dry-run">
+                <label style={{ fontSize: 12, color: '#e6edf5' }}>
+                  <strong>Dry run</strong>{' '}
+                  <select
+                    value={dryRunLevel}
+                    data-testid="engrave-dry-run-level"
+                    aria-label="Dry-run level"
+                    style={{ marginLeft: 6 }}
+                    onChange={(e) => setDryRunLevel(e.target.value as DryRunLevel | 'off')}
+                  >
+                    <option value="off">Off — cut for real</option>
+                    <option value="traverse">Traverse only — one air pass, no stock</option>
+                    <option value="full">Full dry run — whole flow, spindle off, in the air</option>
+                  </select>
+                </label>
+                {dryRunLevel !== 'off' && (
+                  <p style={MUTED} data-testid="engrave-dry-run-note">
+                    The spindle stays off and every move flies at Z {DRY_RUN_SAFE_Z} above the top face —
+                    nothing is clamped, nothing is cut, and no stock, runtime or finished program is
+                    recorded. {traverseOnly
+                      ? 'A single traverse of the first program — the fastest way to light up the progress bar and head view.'
+                      : 'The whole program list plays through the release flow, bit-change prompts included.'}
+                  </p>
+                )}
+              </div>
+
+              {releaseSources.length > 1 ? (
                 <EngraveReleaseStep
                   target={target}
                   job={job}
-                  programs={sources}
+                  programs={releaseSources}
                   runPlan={plan}
                   blocker={releaseBlocker ?? missingReportBlocker}
                   onProgramLine={onProgramLine}
@@ -438,18 +499,18 @@ export function EngraveCutSurface({
                   blocker={uploadBlocker ?? missingReportBlocker}
                   machine={machine}
                   program={
-                    sources[0]?.verify === null || sources[0] === undefined
+                    singleSource?.verify === null || singleSource === undefined
                       ? null
-                      : { nc: sources[0].nc, verify: sources[0].verify }
+                      : { nc: singleSource.nc, verify: singleSource.verify }
                   }
-                  filename={releaseFileName(job.name, 1, 1)}
+                  filename={releaseFileName(job.name, 1, 1, singleSource?.dryRun === true)}
                   lift={lift}
                   onLiveStatus={onLiveStatus}
-                  runContext={runContext}
+                  runContext={runContextWithDry}
                   setup={
-                    sources[0] === undefined
+                    singleSource === undefined
                       ? undefined
-                      : { setupIndex: sources[0].setupIndex, setupId: sources[0].setupId }
+                      : { setupIndex: singleSource.setupIndex, setupId: singleSource.setupId }
                   }
                   jobEdgeMarginMm={job.edgeMargin}
                   onProgramLine={onProgramLine}

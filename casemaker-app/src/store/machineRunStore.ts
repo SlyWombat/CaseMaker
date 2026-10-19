@@ -105,6 +105,12 @@ export interface RunContext {
    */
   setupIndex?: number;
   setupId?: string;
+  /**
+   * #547 — the program played was a LIFTED dry-run variant. A finished dry run must not record the
+   * program as finished, consume the stock, count cutter runtime or offer an offcut: it rehearsed
+   * the path with the spindle off, in the air, and nothing was cut.
+   */
+  dryRun?: boolean;
 }
 
 /**
@@ -210,6 +216,22 @@ export async function endOfRun(target: { host: string; port: number }, outcome: 
     ctx?.programIndex !== undefined && ctx?.programTotal !== undefined
       ? `program ${ctx.programIndex} of ${ctx.programTotal}`
       : 'the program';
+  // #547 — a dry run rehearses the path with the spindle off and nothing clamped. Its end must not
+  // touch the finished-program record, the shelf, the cutter runtime or the offcut: nothing was cut.
+  if (ctx?.dryRun === true) {
+    if (outcome.kind === 'finished') {
+      return {
+        kind: 'finished',
+        lines: ['The dry run finished: nothing was recorded — no program marked finished, no stock consumed, no cutter runtime counted.'],
+        offcut: null,
+        stockQuestion: null,
+      };
+    }
+    if (outcome.kind === 'aborted' || outcome.kind === 'stopped-unconfirmed') {
+      return { kind: 'stopped', lines: ['The dry run was stopped: nothing was recorded.'], offcut: null, stockQuestion: null };
+    }
+    return { kind: 'nothing', lines: ['The dry run did not finish: nothing was recorded.'], offcut: null, stockQuestion: null };
+  }
   if (outcome.kind === 'aborted' || outcome.kind === 'stopped-unconfirmed') {
     return {
       kind: 'stopped',

@@ -45,6 +45,12 @@ export interface ReleaseSource {
   hash: string;
   /** The verifier report for this exact text, or null when this session holds none. */
   verify: VerifyReport | null;
+  /**
+   * #547 — the text is a LIFTED dry-run variant, not the frozen cutting program. It gets its own
+   * `-dry` file name (so it never overwrites the real program on the card) and its own run end
+   * (nothing is recorded, no stock is consumed).
+   */
+  dryRun?: boolean;
 }
 
 /** The stem of a job's file names — `runSheetFileName` without its `.nc`. */
@@ -59,10 +65,15 @@ export function releaseStem(jobName: string): string {
  * the single-file upload all print, and a one-program job must not gain a suffix for no reason.
  * MORE THAN ONE gets `<job>-p<n>.nc`: the face/frame files already take `<job>-face.nc` and
  * `<job>-frame.nc`, so a program's own suffix cannot collide with either.
+ *
+ * `dryRun` (#547) inserts `-dry` before the suffix (or the extension): a dry-run variant is a
+ * DIFFERENT file, and it must not overwrite the real program it was lifted from on the card.
  */
-export function releaseFileName(jobName: string, index: number, total: number): string {
-  if (total <= 1) return runSheetFileName(jobName);
-  return `${releaseStem(jobName)}-p${index}.nc`;
+export function releaseFileName(jobName: string, index: number, total: number, dryRun = false): string {
+  const stem = releaseStem(jobName);
+  const dry = dryRun ? '-dry' : '';
+  if (total <= 1) return `${stem}${dry}.nc`;
+  return `${stem}${dry}-p${index}.nc`;
 }
 
 /** One program as the release step lists, names and plays it. */
@@ -82,6 +93,8 @@ export interface ReleaseProgram {
   verify: VerifyReport | null;
   /** This machine has already finished this program cleanly (#419 §4.5). */
   done: boolean;
+  /** #547 — a lifted dry-run variant: `-dry` file name, and the run end records nothing. */
+  dryRun: boolean;
 }
 
 /**
@@ -106,11 +119,12 @@ export function releasePrograms(
     setupId: p.setupId,
     toolKey: p.toolKey,
     kind: p.kind,
-    filename: releaseFileName(jobName, i + 1, total),
+    filename: releaseFileName(jobName, i + 1, total, p.dryRun),
     hash: p.hash,
     nc: p.nc,
     verify: p.verify,
     done: done.has(p.hash),
+    dryRun: p.dryRun === true,
   }));
 }
 

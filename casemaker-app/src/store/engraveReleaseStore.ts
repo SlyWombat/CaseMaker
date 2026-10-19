@@ -280,6 +280,8 @@ export const useEngraveReleaseStore = create<ReleaseState>((set, get) => {
       // the outcome against the frozen program rather than against its position in today's list.
       setupIndex: file.setupIndex,
       setupId: file.setupId,
+      // #547 — a lifted dry-run file records nothing at its end (no stock, no runtime, no finished hash).
+      ...(file.dryRun ? { dryRun: true } : {}),
     };
     const runStore = useMachineRunStore.getState();
     if (!runStore.prepare(rec.target, file.filename, file.hash, context)) {
