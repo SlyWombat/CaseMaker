@@ -9,6 +9,14 @@ import { describe, it, expect } from 'vitest';
 
 import { preflightHub, type PreflightHubInput } from '@/engine/cnc/preflight';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
+
+// #516 item 5 — the default job no longer seeds a cutter; the recommendation names `flat-1.0`.
+// These engine tests need the job to name its cutter, so `dj()` applies that recommendation.
+function dj(...args: Parameters<typeof defaultEngraveJob>): ReturnType<typeof defaultEngraveJob> {
+  const job = defaultEngraveJob(...args);
+  job.toolKey = 'flat-1.0';
+  return job;
+}
 import { freezePackage } from '@/engine/cnc/engrave/package';
 import type { VerifyReport } from '@/engine/cnc/verify';
 import type { EngraveGenerated, EngraveProgram } from '@/workers/sim/engraveGenerate';
@@ -100,7 +108,7 @@ function hubFor(job: EngraveJob, over: Partial<PreflightHubInput> = {}) {
 
 describe('preflightHub: the (setup, tool) loop', () => {
   it('asks once per scope, in the job`s setup and tool order, and stamps every row with its scope', () => {
-    const job = twoSetups(defaultEngraveJob(), ['user:flat-1-a', TOOL_B]);
+    const job = twoSetups(dj(), ['user:flat-1-a', TOOL_B]);
     const report = hubFor(job);
 
     expect(report.scopes.map((g) => g.scope)).toEqual([
@@ -120,14 +128,28 @@ describe('preflightHub: the (setup, tool) loop', () => {
   });
 
   it('gives a job with no stored setups the single scope that job has', () => {
-    const job = defaultEngraveJob();
+    const job = dj();
     const report = hubFor(job);
     expect(report.scopes).toHaveLength(1);
     expect(report.scopes[0]!.scope).toEqual({ setupIndex: 0, toolKey: job.toolKey });
   });
 
+  it('gives a tool-less default job the single scope, so the gate is not green for want of a cutter (#516 item 5)', () => {
+    const job = defaultEngraveJob(); // no cutter named yet
+    const report = hubFor(job);
+
+    expect(report.scopes).toHaveLength(1);
+    expect(report.scopes[0]!.scope).toEqual({ setupIndex: 0, toolKey: '' });
+    // The gate was genuinely asked: the missing program is the run gate's own sentence, and the
+    // tool-less state itself is not reported as a finding (`setup-no-tool` is for SAVED setups).
+    expect(report.scopes[0]!.rows.some((r) => r.code === 'no-generate')).toBe(true);
+    expect(report.scopes[0]!.rows.some((r) => r.code === 'setup-no-tool')).toBe(false);
+    expect(report.firstBlocking?.code).toBe('no-generate');
+    expect(report.firstBlocking?.message).toBe('Generate first.');
+  });
+
   it('judges each scope against ITS program, not against the top-level adapter', () => {
-    const job = twoSetups(defaultEngraveJob(), ['user:flat-1-a', TOOL_B]);
+    const job = twoSetups(dj(), ['user:flat-1-a', TOOL_B]);
     const a = program(1, 'user:flat-1-a', 'A\n', reportWith([
       { severity: 'error', code: 'bad-ending', line: null, message: 'program A is the one at fault' },
     ]));
@@ -142,7 +164,7 @@ describe('preflightHub: the (setup, tool) loop', () => {
   });
 
   it('asks a scope with no program with no file, so a stopped Generate cannot read clean', () => {
-    const job = twoSetups(defaultEngraveJob(), ['user:flat-1-a', TOOL_B]);
+    const job = twoSetups(dj(), ['user:flat-1-a', TOOL_B]);
     const a = program(1, 'user:flat-1-a', 'A\n');
     const generated = generatedWith({
       ok: false,
@@ -166,7 +188,7 @@ describe('preflightHub: the (setup, tool) loop', () => {
 
 describe('preflightHub: the run-policy rows', () => {
   it('states a stale Generate first, before any scope row', () => {
-    const job = defaultEngraveJob();
+    const job = dj();
     const report = hubFor(job, { generated: generatedWith({}), staleSince: Date.parse('2026-10-17T14:02:00Z') });
     expect(report.policyRows.map((r) => r.code)).toEqual(['generated-stale']);
     expect(report.rows[0]!.code).toBe('generated-stale');
@@ -175,7 +197,7 @@ describe('preflightHub: the run-policy rows', () => {
   });
 
   it('states a stale package with the freeze time and the package owner`s reason, holding the blank', () => {
-    const job = defaultEngraveJob();
+    const job = dj();
     const frozen = freezePackage(
       job,
       [{ setupIndex: 1, setupId: 'setup-1', toolKey: job.toolKey, nc: 'G90\n', programHash: 'h', frameNc: null }],
@@ -195,14 +217,14 @@ describe('preflightHub: the run-policy rows', () => {
   });
 
   it('does not call a run stale when no Generate has produced anything', () => {
-    const report = hubFor(defaultEngraveJob(), { staleSince: Date.now() });
+    const report = hubFor(dj(), { staleSince: Date.now() });
     expect(report.policyRows).toEqual([]);
   });
 });
 
 describe('preflightHub: the page order and the first block', () => {
   it('keeps the hub`s order: policy rows, then every scope`s rows, never re-sorted', () => {
-    const job = twoSetups(defaultEngraveJob(), ['user:flat-1-a', TOOL_B]);
+    const job = twoSetups(dj(), ['user:flat-1-a', TOOL_B]);
     const report = hubFor(job);
     expect(report.rows).toEqual([
       ...report.policyRows,
@@ -212,7 +234,7 @@ describe('preflightHub: the page order and the first block', () => {
   });
 
   it('counts a warning without treating it as blocking', () => {
-    const job = defaultEngraveJob();
+    const job = dj();
     const nc = 'G90 G21\n';
     const generated = generatedWith({
       nc,

@@ -12,6 +12,14 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 
 import { EngraveLegend } from '@/components/viewport/EngraveLegend';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
+
+// #516 item 5 — the default job no longer seeds a cutter; the recommendation names `flat-1.0`.
+// These engine tests need the job to name its cutter, so `dj()` applies that recommendation.
+function dj(...args: Parameters<typeof defaultEngraveJob>): ReturnType<typeof defaultEngraveJob> {
+  const job = defaultEngraveJob(...args);
+  job.toolKey = 'flat-1.0';
+  return job;
+}
 import { presetPartOnBoard } from '@/engine/cnc/sacrificial';
 import type { EngraveJob } from '@/types/engraveJob';
 import { useEngraveJobStore } from '@/store/engraveJobStore';
@@ -24,7 +32,7 @@ const previewer = createEngravePreviewer(tl);
 let gen = 0;
 
 /** `job`'s own preview, on a fresh generation so nothing is ever stale (#205). */
-function previewFor(job: EngraveJob = defaultEngraveJob()): NonNullable<ReturnType<typeof previewOf>> {
+function previewFor(job: EngraveJob = dj()): NonNullable<ReturnType<typeof previewOf>> {
   const p = previewOf(previewer, job, ++gen);
   if (p === null) throw new Error('a fresh generation must produce a preview');
   return p;
@@ -34,7 +42,7 @@ beforeEach(() => {
   useEngravePreviewStore.setState({ preview: null, scrubStage: null });
   // The sacrificial/void test leaves its own job in the store; reset it so these three do not
   // depend on running in this order (review of ebf38c5).
-  useEngraveJobStore.setState({ job: defaultEngraveJob() });
+  useEngraveJobStore.setState({ job: dj() });
 });
 
 afterEach(cleanup);
@@ -73,7 +81,7 @@ describe('the engrave depth legend (#349)', () => {
 
   it('gives the sacrificial material and a declared void their own swatches', () => {
     const job: EngraveJob = {
-      ...defaultEngraveJob(),
+      ...dj(),
       sacrificial: presetPartOnBoard(),
       keepOuts: [
         {
@@ -106,7 +114,7 @@ describe('the engrave depth legend (#349)', () => {
 describe('the engrave legend on a blank that states its split (#170)', () => {
   /** The shipped job, printed: a 1 mm top colour on a 12 mm blank puts the boundary 1 mm down. */
   function printed(capMm = 1): EngraveJob {
-    const job = defaultEngraveJob();
+    const job = dj();
     job.stock.colour = { kind: 'printed', capMm, layerHeight: 0.2, firstLayerHeight: 0.2 };
     useEngraveJobStore.setState({ job });
     return job;
@@ -143,7 +151,7 @@ describe('the engrave legend on a blank that states its split (#170)', () => {
   });
 
   it('keeps the ramp for a blank that states none — the two readings do not leak into each other', () => {
-    useEngravePreviewStore.setState({ preview: previewFor(defaultEngraveJob()) });
+    useEngravePreviewStore.setState({ preview: previewFor(dj()) });
     render(<EngraveLegend />);
 
     expect(screen.queryByTestId('engrave-legend-top')).toBeNull();
@@ -152,7 +160,7 @@ describe('the engrave legend on a blank that states its split (#170)', () => {
   });
 
   it('states the lost layer’s area with its own swatch (§5.7)', () => {
-    const p = previewFor(defaultEngraveJob());
+    const p = previewFor(dj());
     useEngravePreviewStore.setState({ preview: p });
     render(<EngraveLegend />);
 
@@ -163,7 +171,7 @@ describe('the engrave legend on a blank that states its split (#170)', () => {
   });
 
   it('shows no lost row when nothing is lost', () => {
-    const job = defaultEngraveJob();
+    const job = dj();
     job.labels.forEach((l) => {
       l.enabled = false;
     });
@@ -215,7 +223,7 @@ describe('the engrave legend on a blank that states its split (#170)', () => {
     });
 
     it('is absent when the job cuts nothing, because there is no second state to show', () => {
-      const job = defaultEngraveJob();
+      const job = dj();
       job.labels.forEach((l) => {
         l.enabled = false;
       });

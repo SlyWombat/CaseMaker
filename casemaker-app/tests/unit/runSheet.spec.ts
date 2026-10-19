@@ -30,6 +30,14 @@ import {
   type RunSheetStackUp,
 } from '@/engine/cnc/engrave/runSheet';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
+
+// #516 item 5 — the default job no longer seeds a cutter; the recommendation names `flat-1.0`.
+// These engine tests need the job to name its cutter, so `dj()` applies that recommendation.
+function dj(...args: Parameters<typeof defaultEngraveJob>): ReturnType<typeof defaultEngraveJob> {
+  const job = defaultEngraveJob(...args);
+  job.toolKey = 'flat-1.0';
+  return job;
+}
 import { buildCouponPrograms, type CouponSpec } from '@/engine/cnc/engrave/couponJob';
 import { labelJawReach } from '@/engine/cnc/engrave/partPlan';
 import { surfaceSpreadPlan, type SurfaceReading } from '@/engine/cnc/engrave/surfaceSpread';
@@ -112,7 +120,7 @@ describe('runSheet (#207)', () => {
   });
 
   it('builds the header from the job and the generated file', () => {
-    const job = defaultEngraveJob();
+    const job = dj();
     const sheet = sheetFor(job);
     expect(sheet.header.jobName).toBe(job.name);
     expect(sheet.header.generatedOn).toBe('2026-10-04');
@@ -133,7 +141,7 @@ describe('runSheet (#207)', () => {
   });
 
   it('carries the stock, the three depths, stockProud, the feeds and the hash', () => {
-    const job = defaultEngraveJob();
+    const job = dj();
     const sheet = sheetFor(job);
     const all = JSON.stringify(sheet);
     expect(all).toContain('100 × 60 × 12 mm softwood');
@@ -156,7 +164,7 @@ describe('runSheet (#207)', () => {
   });
 
   it('changes the file hash when the .nc changes by one character', () => {
-    const job = defaultEngraveJob();
+    const job = dj();
     const a = sheetFor(job, NO_SIM, NC);
     const b = sheetFor(job, NO_SIM, NC.replace('X10', 'X11'));
     expect(a.header.fileHash).not.toBe(b.header.fileHash);
@@ -169,7 +177,7 @@ describe('runSheet (#207)', () => {
     // 46.28 mm across the 100 mm plank, 26.9 mm clear of either face, so it is placed over the fixed
     // jaw here to make the stop live at all — under the old ESTIMATE box it read 109.2 mm and
     // reached from anywhere on the blank, which is what put a stop on every sheet.
-    const job = defaultEngraveJob();
+    const job = dj();
     job.labels = [{ ...job.labels[0]!, position: { x: 23, y: 43 } }];
     const stopStep = () => section(sheetFor(job), 'load').steps.find((s) => s.text.includes('stop'))!;
     expect(stopStep().text).toContain('less than 3 mm, stop');
@@ -180,11 +188,11 @@ describe('runSheet (#207)', () => {
   });
 
   it('opens section 8 with the shipped-vise warning only when the vise is a default', () => {
-    const def = section(sheetFor(defaultEngraveJob()), 'warnings');
+    const def = section(sheetFor(dj()), 'warnings');
     expect(def.steps[0]!.text).toContain('the shipped defaults, measured once on the reference unit');
     expect(def.steps[0]!.bold).toBe(true);
 
-    const measured = section(sheetFor(defaultEngraveJob({ ...DEFAULT_VISE, source: 'measured' })), 'warnings');
+    const measured = section(sheetFor(dj({ ...DEFAULT_VISE, source: 'measured' })), 'warnings');
     expect(measured.steps.some((s) => s.text.includes('measured once on the reference unit'))).toBe(false);
   });
 
@@ -196,10 +204,10 @@ describe('runSheet (#207)', () => {
     const tagged = (sheet: RunSheet) => sheet.sections.flatMap((s) => s.steps).filter((s) => s.unverified !== undefined);
     // A default job carries no tag at all: the mount, the cutter and the origin are walked, and the
     // material scan is held off.
-    expect(tagged(sheetFor(defaultEngraveJob()))).toEqual([]);
+    expect(tagged(sheetFor(dj()))).toEqual([]);
     // The held material scan is where the tag lives, and it names the bench issue — in the origin
     // section, beside the guidance it qualifies.
-    const sheet = sheetFor(defaultEngraveJob(), NO_SIM, NC, { materialScan: true });
+    const sheet = sheetFor(dj(), NO_SIM, NC, { materialScan: true });
     const scan = tagged(sheet);
     expect(scan.length).toBeGreaterThan(0);
     for (const step of scan) expect(step.unverified).toBe('#443');
@@ -209,7 +217,7 @@ describe('runSheet (#207)', () => {
   });
 
   it('carries verifier and simulation warnings verbatim', () => {
-    const job = defaultEngraveJob();
+    const job = dj();
     const sim: RunSheetSim = {
       diagnostics: [
         { severity: 'warning', code: 'fixture-unchecked', message: 'The fixture was not checked.' },
@@ -231,7 +239,7 @@ describe('runSheet (#207)', () => {
   // imported builder, so the operator reads what the sweep saw and did NOT see. Every clause
   // comes from what this job and run carried, not from prose.
   it('carries the run coverage sentence in section 8 (#243)', () => {
-    const job = defaultEngraveJob();
+    const job = dj();
     const warnings = section(sheetFor(job), 'warnings').steps.map((s) => s.text);
     // The vise envelope `toSetup` hands the sweep is named as the fixture it checked.
     expect(warnings.some((t) => t.startsWith('Checked: the tool against the stock and the modelled fixture'))).toBe(true);
@@ -249,7 +257,7 @@ describe('runSheet (#207)', () => {
   // #314 — and it IS named where the run says the check was needed and could not be made: the
   // sheet reads the run's own codes, so the sentence follows the geometry, not the machine.
   it('names the collet nut when the run could not prove it (#314)', () => {
-    const job = defaultEngraveJob();
+    const job = dj();
     const sim: RunSheetSim = {
       diagnostics: [{ severity: 'warning', code: 'holder-vs-fixture-unproven', message: 'An obstacle rises above the stock top and the collet nut is unmeasured.' }],
     };
@@ -267,7 +275,7 @@ describe('runSheet (#207)', () => {
   // no way to know whether this job cuts a trace — and a flat job told it was judged at a groove's
   // mouth would be reading a claim about a check that never happened.
   it('states the sampled engine, the levels checked and the oracle band (#408)', () => {
-    const job = defaultEngraveJob();
+    const job = dj();
     const sim: RunSheetSim = { diagnostics: [], engine: 'column', oracleBand: 0.1463 };
     const warnings = section(buildRunSheet(job, stubGenerated(job), sim, NOW), 'warnings').steps.map((s) => s.text);
     expect(warnings.some((t) => t.includes('sampled column engine'))).toBe(true);
@@ -281,7 +289,7 @@ describe('runSheet (#207)', () => {
     // An exact sweep that checked no prediction says nothing about a band — and naming one would
     // put a tolerance in the sheet for a comparison the run never made. The levels go with it: a
     // sheet that named them would be describing a check that did not happen.
-    const job = defaultEngraveJob();
+    const job = dj();
     const warnings = section(sheetFor(job), 'warnings').steps.map((s) => s.text);
     expect(warnings.some((t) => t.includes('sampled column engine'))).toBe(false);
     expect(warnings.some((t) => t.includes('every level the plan cuts to'))).toBe(false);
@@ -289,7 +297,7 @@ describe('runSheet (#207)', () => {
   });
 
   it('says a path-only run swept no geometry (#243)', () => {
-    const job = defaultEngraveJob();
+    const job = dj();
     const sim: RunSheetSim = { diagnostics: [], outcome: 'path-only' };
     const warnings = section(buildRunSheet(job, stubGenerated(job), sim, NOW), 'warnings').steps.map((s) => s.text);
     expect(warnings.some((t) => t.includes('path-only'))).toBe(true);
@@ -297,7 +305,7 @@ describe('runSheet (#207)', () => {
   });
 
   it('excludes disabled labels from the cut lines and the diagram', () => {
-    const job = defaultEngraveJob();
+    const job = dj();
     job.labels[1]!.enabled = false;
     const sheet = sheetFor(job);
     expect(sheet.diagram.items).toHaveLength(2);
@@ -306,7 +314,7 @@ describe('runSheet (#207)', () => {
   });
 
   it('draws one rectangle per enabled label, inside the stock, with its depth on it', () => {
-    const job = defaultEngraveJob();
+    const job = dj();
     const sheet = sheetFor(job);
     const svg = runSheetDiagramSvg(sheet.diagram);
     expect((svg.match(/data-item-id="/g) ?? []).length).toBe(3);
@@ -322,8 +330,8 @@ describe('runSheet (#207)', () => {
   });
 
   it('mentions sacrificial material only when the job has some', () => {
-    expect(JSON.stringify(sheetFor(defaultEngraveJob()))).not.toContain('Sacrificial material');
-    const job = defaultEngraveJob();
+    expect(JSON.stringify(sheetFor(dj()))).not.toContain('Sacrificial material');
+    const job = dj();
     job.sacrificial = presetPartOnBoard();
     const need = section(sheetFor(job), 'need');
     expect(need.steps.some((s) => s.text.includes('Sacrificial material'))).toBe(true);
@@ -345,7 +353,7 @@ describe('runSheet (#207)', () => {
 
   // #244 — §6 no longer tells the operator to raise Z by hand; it names the generated frame file.
   it('section 6 runs the frame file, not a manual Z offset', () => {
-    const job = defaultEngraveJob();
+    const job = dj();
     const dryRun = section(sheetFor(job), 'dry-run');
     const all = dryRun.steps.map((s) => s.text).join(' ');
     expect(all).toContain(runSheetFrameFileName(job.name));
@@ -359,7 +367,7 @@ describe('runSheet (#207)', () => {
   // the sheet still opens on it (only a stale job is blocked). Sending the operator to a file that
   // was never written is worse than saying nothing.
   it('section 6 does not send the operator after a frame file that was never written', () => {
-    const job = defaultEngraveJob();
+    const job = dj();
     const sheet = buildRunSheet(job, stubGenerated(job, NC, false), NO_SIM, NOW);
     const all = section(sheet, 'dry-run').steps.map((s) => s.text).join(' ');
     expect(all).not.toContain(runSheetFrameFileName(job.name));
@@ -374,7 +382,7 @@ describe('runSheet (#207)', () => {
   // or cut-away reached neither the operator's cut lines nor the diagram. The sheet now reads the
   // one `toPartPlan` funnel, so combined items are present and construction/broken items are not.
   it('gives a combined border its cut line and diagram box (#215)', () => {
-    const job = defaultEngraveJob();
+    const job = dj();
     job.labels = [];
     job.shapes = [];
     job.combined = [
@@ -402,7 +410,7 @@ describe('runSheet (#207)', () => {
   });
 
   it('leaves a construction item off the cut lines, the diagram and the depth threshold (#215)', () => {
-    const job = defaultEngraveJob();
+    const job = dj();
     // A construction label at 9 mm deep: it is only a reference for the cut-away and cuts nothing.
     job.labels = [{ ...job.labels[0]!, id: 'island', text: 'X', depth: 9, construction: true }];
     job.shapes = [];
@@ -427,7 +435,7 @@ describe('runSheet (#207)', () => {
   });
 
   it('drops an item whose reference is broken from the sheet (#215)', () => {
-    const job = defaultEngraveJob();
+    const job = dj();
     job.labels = [];
     job.shapes = [];
     job.combined = [
@@ -466,7 +474,7 @@ describe('runSheet (#207)', () => {
       section(sheetFor(job, NO_SIM, NC, options), 'origin').steps.map((s) => s.text);
 
     it('names the datum the jaws supply, then one step per touch, then the residual', () => {
-      const texts = origin(defaultEngraveJob());
+      const texts = origin(dj());
       expect(texts[0]).toBe('The vise already references X and rotation to within ±0.05 mm, before any touch.');
 
       const touches = texts.filter((t) => t.startsWith('Touch '));
@@ -484,7 +492,7 @@ describe('runSheet (#207)', () => {
     });
 
     it('carries the planner’s own caveats — the static-.nc rotation limit and why Z is probed', () => {
-      const texts = origin(defaultEngraveJob()).join(' ');
+      const texts = origin(dj()).join(' ');
       expect(texts).toContain('a static .nc cannot compensate it');
       expect(texts).toContain('Z is always probed on the engraved face');
     });
@@ -492,7 +500,7 @@ describe('runSheet (#207)', () => {
     it('prints a refusal as a refusal, rather than a sequence it cannot stand behind', () => {
       // A blank with no edge long enough for the probe: every side is well under the planner's
       // 2× tip-diameter minimum, so no axis can be resolved and the plan refuses.
-      const job = defaultEngraveJob();
+      const job = dj();
       job.stock = { length: 1, width: 1, thickness: 3, material: 'pla' };
       const texts = origin(job);
       expect(texts).toHaveLength(1);
@@ -508,7 +516,7 @@ describe('runSheet (#207)', () => {
     it('offers the material-position scan, in physical landmarks and the plan’s own numbers', () => {
       // #496 — the job carries a MEASURED bow, one drop per stock axis; the plan's bands are those
       // drops plus the dial, which is what makes the sides and the ends different figures.
-      const job = defaultEngraveJob();
+      const job = dj();
       job.stock.flatness = {
         xMm: 0.33,
         yMm: 0.1,
@@ -588,7 +596,7 @@ describe('runSheet (#207)', () => {
     // numbers it prints, passed in (`RunSheetOptions.scan`) because this module runs in the sim worker.
     it('prints the shop’s own scan settings when they are passed', () => {
       const scan = { ...SCAN_FALLBACK, coarseStepMm: 0.5, startGapMm: 4, missMarginMm: 2, touchFeed: 120 };
-      const steps = section(sheetFor(defaultEngraveJob(), NO_SIM, NC, { ...SCAN, scan }), 'origin').steps;
+      const steps = section(sheetFor(dj(), NO_SIM, NC, { ...SCAN, scan }), 'origin').steps;
       const send = steps.find((s) => s.code?.startsWith('G38.2'))!;
       // 4 mm gap + (4 mm proud + 2 mm margin) cap = 10 mm of travel, at the shop's feed.
       expect(send.code).toBe('G38.2 Z-10 F120');
@@ -598,7 +606,7 @@ describe('runSheet (#207)', () => {
     });
 
     it('gives every touch a sendable line, its cap, and the way back from a miss (#391 item 1)', () => {
-      const steps = section(sheetFor(defaultEngraveJob(), NO_SIM, NC, SCAN), 'origin').steps;
+      const steps = section(sheetFor(dj(), NO_SIM, NC, SCAN), 'origin').steps;
       const codes = steps.filter((s) => s.code !== undefined);
 
       // 3 mm of start gap over the blank's top, plus the plan's own cap: 5 mm on this job. The Z word
@@ -630,7 +638,7 @@ describe('runSheet (#207)', () => {
     // correction that read backwards, a bisection that only went one way, and no answer at all for a
     // first pass that never bracketed the edge.
     it('reads the correction PAST the edge, and says what to do when the pass misses it (#391)', () => {
-      const texts = section(sheetFor(defaultEngraveJob(), NO_SIM, NC, SCAN), 'origin').steps.map((s) => s.text);
+      const texts = section(sheetFor(dj(), NO_SIM, NC, SCAN), 'origin').steps.map((s) => s.text);
 
       // The tip's corner contact sinks the reading a little PAST the real edge, so the edge is
       // measured back toward the blank. The old wording said BEFORE, which is the opposite — and a
@@ -663,7 +671,7 @@ describe('runSheet (#207)', () => {
     // the sheet has to say so: a step that sent the operator walking outward across those edges
     // would send the tip onto the jaw's top, which then stands ABOVE the blank and reads as stock.
     it('reads the gripped edges off the jaw when the blank sits below the jaw tops (#430)', () => {
-      const job = defaultEngraveJob();
+      const job = dj();
       job.stock = { ...job.stock, length: 76, width: 25.35, thickness: 1.5 };
       job.workholding = {
         ...job.workholding,
@@ -694,7 +702,7 @@ describe('runSheet (#207)', () => {
       // and §5 then says so in one step rather than printing an offer it cannot honour. The origin
       // itself still resolves (the jaws reference X and rotation here), which is the point: the two
       // refusals are separate questions.
-      const job = defaultEngraveJob({ ...DEFAULT_VISE, stockProud: 0.05 });
+      const job = dj({ ...DEFAULT_VISE, stockProud: 0.05 });
       const texts = origin(job, SCAN);
       expect(texts.filter((t) => t.startsWith('Touch '))).toHaveLength(3);
       const refused = texts.filter((t) => t.includes('cannot be checked with the probe'));
@@ -709,12 +717,12 @@ describe('runSheet (#207)', () => {
     // the assertion that keeps it that way. It is the whole of the hold: the origin still prints, and
     // `materialScan.spec.ts` still tests the module the block was made of.
     it('does not print the material-position check unless the caller asks for it (#391 hold)', () => {
-      const texts = origin(defaultEngraveJob());
+      const texts = origin(dj());
       expect(texts.some((t) => t.startsWith('OPTIONAL, BEFORE THE FIRST CUT'))).toBe(false);
       expect(texts.some((t) => t.startsWith('Check '))).toBe(false);
       expect(texts.filter((t) => t.startsWith('Touch '))).toHaveLength(3);
       // The same job, asked for: the block is there, so the hold is a switch and not a deletion.
-      expect(origin(defaultEngraveJob(), SCAN).some((t) => t.startsWith('OPTIONAL, BEFORE THE FIRST CUT'))).toBe(true);
+      expect(origin(dj(), SCAN).some((t) => t.startsWith('OPTIONAL, BEFORE THE FIRST CUT'))).toBe(true);
     });
   });
 
@@ -723,7 +731,7 @@ describe('runSheet (#207)', () => {
   // names no cutter, so a sheet with nothing to draw stays the sheet it was.
   describe('the cutter profile (#489)', () => {
     it('draws the job tool, monochrome and self-contained, with the V groove at the deepest cut', () => {
-      const job = defaultEngraveJob();
+      const job = dj();
       job.tool = flatEndMill(3.175, {
         name: '30° engraving bit',
         typeText: 'Engraving',
@@ -749,7 +757,7 @@ describe('runSheet (#207)', () => {
     });
 
     it('is absent when the job names no cutter', () => {
-      const job = defaultEngraveJob();
+      const job = dj();
       job.tool = null;
       job.toolKey = 'user:not-in-this-house';
       const sheet = sheetFor(job);
@@ -757,7 +765,7 @@ describe('runSheet (#207)', () => {
     });
 
     it('embeds the same drawing in the Markdown, under the cutter section', () => {
-      const sheet = sheetFor(defaultEngraveJob());
+      const sheet = sheetFor(dj());
       const md = renderRunSheetMarkdown(sheet);
       const need = md.indexOf('## 1 · What you need');
       const drawing = md.indexOf(sheet.toolProfileSvg!);
@@ -780,7 +788,7 @@ describe('runSheet (#207)', () => {
     };
 
     it('is absent from a job with no sacrificial material, and its sheet is unchanged', () => {
-      const sheet = sheetFor(defaultEngraveJob());
+      const sheet = sheetFor(dj());
       expect(sheet.stackUp).toBeUndefined();
       expect('stackUp' in sheet).toBe(false);
       // The wording is the pre-#213 sheet's, untouched.
@@ -789,7 +797,7 @@ describe('runSheet (#207)', () => {
     });
 
     it('draws the board, the jaws at its overhang, and the part on top', () => {
-      const job = defaultEngraveJob();
+      const job = dj();
       job.sacrificial = presetPartOnBoard(); // 12 mm board, 10 mm overhang all round
       const s = sheetFor(job).stackUp!;
       expect(s.datumZ).toBe(0);
@@ -811,7 +819,7 @@ describe('runSheet (#207)', () => {
     });
 
     it('draws a strip between each jaw and the part, flush with the part top', () => {
-      const job = defaultEngraveJob();
+      const job = dj();
       job.sacrificial = presetJawStrips(); // 6 mm, flush, left and right
       const s = sheetFor(job).stackUp!;
 
@@ -829,7 +837,7 @@ describe('runSheet (#207)', () => {
     });
 
     it('does not draw a front or back strip — it lies behind the part in this view', () => {
-      const job = defaultEngraveJob();
+      const job = dj();
       job.sacrificial = {
         ...presetPartOnBoard(),
         sides: {
@@ -852,7 +860,7 @@ describe('runSheet (#207)', () => {
     });
 
     it('renders one rect per box, each dimension, and the Z0 datum on the SVG', () => {
-      const job = defaultEngraveJob();
+      const job = dj();
       job.sacrificial = presetPartOnBoard();
       const svg = runSheetStackUpSvg(sheetFor(job).stackUp!);
       expect((svg.match(/data-stackup-id="/g) ?? []).length).toBe(4);
@@ -868,7 +876,7 @@ describe('runSheet (#207)', () => {
     });
 
     it('tells the operator to fix the part to the board, and that Z0 is the PART, not the board', () => {
-      const job = defaultEngraveJob();
+      const job = dj();
       job.sacrificial = presetPartOnBoard();
       const sheet = sheetFor(job);
 
@@ -886,7 +894,7 @@ describe('runSheet (#207)', () => {
     });
 
     it('names which jaw each strip is gripped by', () => {
-      const job = defaultEngraveJob();
+      const job = dj();
       job.sacrificial = presetJawStrips();
       const load = section(sheetFor(job), 'load').steps.map((s) => s.text).join(' ');
       expect(load).toContain('Put the left strip between the fixed jaw and the part');
@@ -897,7 +905,7 @@ describe('runSheet (#207)', () => {
   // #470 — §3's load line is the FIRST setup's ORIENTATION, not a constant: a remounted stock sits
   // with another stock face up, and a quarter turn puts the other dimension between the jaws.
   it('reads the load line off the setup’s orientation', () => {
-    const base = defaultEngraveJob();
+    const base = dj();
     base.stock = { ...base.stock, length: 120, width: 80 };
     const load = (orientation: Orientation) => {
       const job: EngraveJob = {
@@ -922,7 +930,7 @@ describe('runSheet (#207)', () => {
   });
 
   it('snapshots the whole RunSheet for the default job', () => {
-    const job = defaultEngraveJob();
+    const job = dj();
     // The default job's label ids come from a random generator; pin them so the snapshot is stable.
     job.labels.forEach((label, i) => {
       label.id = `label-${i}`;
@@ -935,7 +943,7 @@ describe('runSheet (#207)', () => {
   // that pair — the sheet of a job that DOES have a bound, so the block's wording and position are
   // pinned rather than only asserted with a `.toContain`.
   it('snapshots the whole RunSheet for a job with a depth bound (#345)', () => {
-    const job = defaultEngraveJob();
+    const job = dj();
     job.labels.forEach((label, i) => {
       label.id = `label-${i}`;
     });
@@ -964,10 +972,10 @@ describe('runSheet (#207)', () => {
     /**
      * The default job with its first label at the blank's own ceiling: a 12 mm blank that keeps
      * 10 mm → a 2 mm limit (#440). Built ONCE per call so the caller can address `labels[0].id` —
-     * the ids are minted per job, so a second `defaultEngraveJob()` would name a different label.
+     * the ids are minted per job, so a second `dj()` would name a different label.
      */
     function undersideJob(claim?: 'computed' | 'user'): EngraveJob {
-      const base = { ...defaultEngraveJob(), minFloor: 10 };
+      const base = { ...dj(), minFloor: 10 };
       const first = base.labels[0]!;
       return {
         ...base,
@@ -1017,7 +1025,7 @@ describe('runSheet (#207)', () => {
     it('clears the cutter by the job’s OWN jaw clearance, not a constant', () => {
       // #394 — the 'CASE' line is moved over the fixed jaw's face, because the stop is only printed
       // for a cut the cutter gets over a jaw and the measured box of a centred line never does.
-      const base = defaultEngraveJob(); // deepest cut 2.0 mm, jawClearance 1.0
+      const base = dj(); // deepest cut 2.0 mm, jawClearance 1.0
       const job: EngraveJob = { ...base, labels: [{ ...base.labels[0]!, position: { x: 23, y: 43 } }] };
       const stop = section(sheetFor(job), 'load').steps.find((s) =>
         s.text.includes('would work below the jaw tops'),
@@ -1036,7 +1044,7 @@ describe('runSheet (#207)', () => {
       // test #369 added, now read against the MEASURED box (#394) — a number below the face would be
       // a stop the app's own jaw check does not make, so it is dropped and the sentence says why
       // instead of printing a limit nobody has to keep.
-      const job = defaultEngraveJob();
+      const job = dj();
       const clear: EngraveJob = {
         ...job,
         labels: [{ ...job.labels[0]!, text: 'Name', size: 8, position: { x: 50, y: 30 } }],
@@ -1138,7 +1146,7 @@ describe('runSheet — the thread program (#445 B2)', () => {
   });
 
   const threadJob = (): EngraveJob => ({
-    ...defaultEngraveJob(),
+    ...dj(),
     labels: [],
     shapes: [],
     threads: [
@@ -1234,7 +1242,7 @@ describe('runSheet — the thread program (#445 B2)', () => {
   });
 
   it('a job with no thread has no pilot step — the sheet is unchanged for every other job', () => {
-    const job = defaultEngraveJob();
+    const job = dj();
     expect(texts(sheetFor(job), 'need').some((t) => t.includes('never the pilot'))).toBe(false);
     // …and adding the new fields as nulls changes nothing about that sheet: nothing new is gated on
     // `threads`, so the two builds are the same document.
@@ -1306,7 +1314,7 @@ describe('runSheet — the facing phase (#432 slice 3)', () => {
 
   /** A job that carries a facing choice, and the finish that put it there. */
   function facingJob(facing: EngraveJob['facing'], finish: 'rough' | 'finished' | 'printed' | 'unknown' = 'rough'): EngraveJob {
-    const job = defaultEngraveJob();
+    const job = dj();
     return {
       ...job,
       facing,
@@ -1322,7 +1330,7 @@ describe('runSheet — the facing phase (#432 slice 3)', () => {
     section(sheet, id).steps.map((s) => `${s.text} ${s.value ?? ''}`);
 
   it('adds no facing section to a job written before #432 — the key absent means no change', () => {
-    const sheet = sheetFor(defaultEngraveJob());
+    const sheet = sheetFor(dj());
     expect(sheet.sections.some((s) => s.id === 'facing')).toBe(false);
   });
 
@@ -1431,7 +1439,7 @@ describe('runSheet — the facing phase (#432 slice 3)', () => {
   });
 
   it('says the finish is not recorded when the job carries no stock entry', () => {
-    const job = { ...defaultEngraveJob(), facing: { enabled: true, depth: 0.5 } };
+    const job = { ...dj(), facing: { enabled: true, depth: 0.5 } };
     const sheet = buildRunSheet(job, generatedWithFacing(job, { facingNc: 'x', facingCam: CAM }), NO_SIM, NOW);
     expect(texts(sheet, 'facing').join(' ')).toContain('finish is not recorded');
   });
@@ -1517,7 +1525,7 @@ describe('runSheet — the facing phase (#432 slice 3)', () => {
   });
 
   it('sends the dry run on to the skim rather than straight to the cut, only on a facing job', () => {
-    const plain = texts(sheetFor(defaultEngraveJob()), 'dry-run').join(' ');
+    const plain = texts(sheetFor(dj()), 'dry-run').join(' ');
     expect(plain).toContain('Otherwise load');
     const job = facingJob({ enabled: true, depth: 0.5 });
     const facing = texts(
@@ -1533,7 +1541,7 @@ describe('runSheet — the facing phase (#432 slice 3)', () => {
 // CLI and the sim worker do not have. Absent means the old colourless sentence — never a guess.
 describe('#491 the cutter’s case on the run sheet', () => {
   const cutterStep = (options: RunSheetOptions) =>
-    section(sheetFor(defaultEngraveJob(), NO_SIM, NC, options), 'need').steps.find((s) =>
+    section(sheetFor(dj(), NO_SIM, NC, options), 'need').steps.find((s) =>
       s.text.startsWith('The cutter'),
     )!;
 
@@ -1546,9 +1554,9 @@ describe('#491 the cutter’s case on the run sheet', () => {
   });
 
   it('leaves a sheet built without the option byte-identical to before the field existed', () => {
-    // One job and one generated result: `defaultEngraveJob()` mints fresh label ids each call, so
+    // One job and one generated result: `dj()` mints fresh label ids each call, so
     // two of them would differ for a reason that has nothing to do with the new option.
-    const job = defaultEngraveJob();
+    const job = dj();
     const generated = stubGenerated(job);
     expect(JSON.stringify(buildRunSheet(job, generated, NO_SIM, NOW))).toBe(
       JSON.stringify(buildRunSheet(job, generated, NO_SIM, NOW, undefined, {})),
@@ -1563,7 +1571,7 @@ describe('#491 the cutter’s case on the run sheet', () => {
 // own sentence so the paper and the app cannot say two things.
 describe('the surface spread (#475)', () => {
   it('plans the cut-extent touches and the Z0 rule on every sheet', () => {
-    const job = defaultEngraveJob();
+    const job = dj();
     const steps = section(sheetFor(job), 'origin').steps;
     const all = steps.map((s) => s.text).join('\n');
     expect(all).toContain("The blank's top is measured at 5 points across the cut");
@@ -1578,7 +1586,7 @@ describe('the surface spread (#475)', () => {
   });
 
   it('prints the measured refusal with the finding’s exact sentence', () => {
-    const job = defaultEngraveJob();
+    const job = dj();
     const plan = surfaceSpreadPlan(job)!;
     const readings: SurfaceReading[] = plan.touches.map(() => ({ z: 0, source: 'probe' }));
     readings[readings.length - 1] = { z: -(plan.band.width + 0.01), source: 'stated' };
@@ -1591,7 +1599,7 @@ describe('the surface spread (#475)', () => {
   });
 
   it('prints the landing range when the spread fits', () => {
-    const job = defaultEngraveJob();
+    const job = dj();
     const plan = surfaceSpreadPlan(job)!;
     const readings: SurfaceReading[] = plan.touches.map(() => ({ z: 0, source: 'probe' }));
     const steps = section(sheetFor(job, NO_SIM, NC, { surfaceReadings: readings }), 'origin').steps;
@@ -1630,7 +1638,7 @@ describe('runSheet — the through cut and its tabs (#218)', () => {
   });
 
   it('states the breakthrough and the board left under it, and gives tab removal its own step', () => {
-    const job = defaultEngraveJob();
+    const job = dj();
     const sheet = buildRunSheet(job, { ...stubGenerated(job), through: throughFacts() }, NO_SIM, NOW);
     const cut = sectionText(sheet, 'cut');
     expect(cut).toContain('cuts 2 pieces out of the blank and through into the board');
@@ -1647,7 +1655,7 @@ describe('runSheet — the through cut and its tabs (#218)', () => {
   });
 
   it('omits the tab step when no cut-out has tabs, and says nothing without through facts', () => {
-    const job = defaultEngraveJob();
+    const job = dj();
     const noTabs: RunSheetGenerated['through'] = {
       breakthroughMm: 0.3,
       boardThicknessMm: null,
@@ -1663,7 +1671,7 @@ describe('runSheet — the through cut and its tabs (#218)', () => {
   });
 
   it('prints the facts in a later program’s own section too', () => {
-    const job = defaultEngraveJob();
+    const job = dj();
     const sheet = buildRunSheet(
       job,
       {
@@ -1696,7 +1704,7 @@ describe('runSheet — the drill program (#434)', () => {
   });
 
   const drillJob = (): EngraveJob => {
-    const base = defaultEngraveJob();
+    const base = dj();
     return {
       ...base,
       labels: [],
@@ -1804,7 +1812,7 @@ describe('runSheet — every program gets its own Cut section (#419)', () => {
 
   // Reuse the drill fixture from #434's block: the same bit, the same numbers, as program 2.
   const drillJob2 = (): EngraveJob => {
-    const base = defaultEngraveJob();
+    const base = dj();
     return {
       ...base,
       labels: [],
@@ -1922,7 +1930,7 @@ describe('runSheet — every program gets its own Cut section (#419)', () => {
   });
 
   it('gives any later engraving program its own file, frame and CAM estimate', () => {
-    const job = defaultEngraveJob();
+    const job = dj();
     const generated: RunSheetGenerated = {
       ...stubGenerated(job),
       programs: [
@@ -1941,7 +1949,7 @@ describe('runSheet — every program gets its own Cut section (#419)', () => {
   });
 
   it('warns, bold, when a later program has no frame file', () => {
-    const job = defaultEngraveJob();
+    const job = dj();
     const generated: RunSheetGenerated = {
       ...stubGenerated(job),
       programs: [program(NC, `${NC}\n;frame\n`, ENGR), program(OTHER_NC, null, ENGR)],
@@ -1954,7 +1962,7 @@ describe('runSheet — every program gets its own Cut section (#419)', () => {
   });
 
   it('keeps a list with only program 1 — or no list at all — byte-identical', () => {
-    const job = defaultEngraveJob();
+    const job = dj();
     const without = buildRunSheet(job, stubGenerated(job), NO_SIM, NOW);
     const withOne: RunSheetGenerated = {
       ...stubGenerated(job),
@@ -1968,7 +1976,7 @@ describe('runSheet — every program gets its own Cut section (#419)', () => {
   });
 
   it('skips a facing entry when it numbers the engraving programs', () => {
-    const job = defaultEngraveJob();
+    const job = dj();
     const generated: RunSheetGenerated = {
       ...stubGenerated(job),
       programs: [
@@ -1996,7 +2004,7 @@ describe('runSheet — the finish pass (#250)', () => {
   });
 
   it('prints a roughing and a finishing row for every split item, with the allowance provenance', () => {
-    const job = defaultEngraveJob();
+    const job = dj();
     const ids = job.labels.map((l) => l.id);
     const stub = stubGenerated(job);
     const generated: RunSheetGenerated = {
@@ -2013,7 +2021,7 @@ describe('runSheet — the finish pass (#250)', () => {
   });
 
   it('a rest pair’s first program states only the roughing removal and points at the later file', () => {
-    const job = defaultEngraveJob();
+    const job = dj();
     const ids = job.labels.map((l) => l.id);
     const stub = stubGenerated(job);
     const sheet = buildRunSheet(

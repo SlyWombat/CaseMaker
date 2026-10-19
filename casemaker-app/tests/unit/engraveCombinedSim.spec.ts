@@ -29,12 +29,20 @@ import type {
   EngraveRectShape,
 } from '@/types/engraveJob';
 
+// #516 item 5 — the default job no longer seeds a cutter; the recommendation names `flat-1.0`.
+// These engine tests need the job to name its cutter, so `dj()` applies that recommendation.
+function dj(...args: Parameters<typeof defaultEngraveJob>): EngraveJob {
+  const job = defaultEngraveJob(...args);
+  job.toolKey = 'flat-1.0';
+  return job;
+}
+
 type ManifoldInstance = InstanceType<(typeof tl)['Manifold']>;
 type CrossSectionInstance = InstanceType<(typeof tl)['CrossSection']>;
 
 /** A ⌀3 circle island in a 10 × 6 panel, both reference-only; the cut-away is the one cut. */
 function islandJob(): EngraveJob {
-  const base = defaultEngraveJob();
+  const base = dj();
   const panel: EngraveRectShape = {
     id: 'panel',
     kind: 'rect',
@@ -72,7 +80,7 @@ function islandJob(): EngraveJob {
 
 /** Raised text: a construction label "HI" left standing inside a cleared 18 × 11 panel (#215). */
 function raisedTextJob(): EngraveJob {
-  const base = defaultEngraveJob();
+  const base = dj();
   const text: EngraveLabel = {
     id: 'txt',
     text: 'HI',
@@ -115,7 +123,7 @@ function raisedTextJob(): EngraveJob {
  * x∈[45,75], both y∈[20,40]; the overlap is x∈[45,65].
  */
 function overlapJob(): EngraveJob {
-  const base = defaultEngraveJob();
+  const base = dj();
   const a: EngraveRectShape = {
     id: 'a',
     kind: 'rect',
@@ -143,7 +151,7 @@ function overlapJob(): EngraveJob {
 
 /** A plain 10 × 6 pocket 1 mm deep — the simplest shape for the finish pass's two removals. */
 function rectJob(): EngraveJob {
-  const base = defaultEngraveJob();
+  const base = dj();
   const rect: EngraveRectShape = {
     id: 'r',
     kind: 'rect',

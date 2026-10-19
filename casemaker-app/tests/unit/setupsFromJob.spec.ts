@@ -7,6 +7,14 @@
 
 import { describe, expect, it } from 'vitest';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
+
+// #516 item 5 — the default job no longer seeds a cutter; the recommendation names `flat-1.0`.
+// These engine tests need the job to name its cutter, so `dj()` applies that recommendation.
+function dj(...args: Parameters<typeof defaultEngraveJob>): ReturnType<typeof defaultEngraveJob> {
+  const job = defaultEngraveJob(...args);
+  job.toolKey = 'flat-1.0';
+  return job;
+}
 import { sweptCuts } from '@/engine/cnc/engrave/partPlan';
 import { FACING_REMOVAL_ID, isSyntheticRemovalId, removalsFrom } from '@/engine/cnc/setups';
 import type { EngraveCircleShape, EngraveDrill, EngraveDrillArrayItem, EngraveDrillItem, EngraveThreadItem } from '@/types/engraveJob';
@@ -65,7 +73,7 @@ const thread = (over: Partial<EngraveThreadItem> = {}): EngraveThreadItem => ({
 
 /** The default job with a controlled item set: three labels out, only what the test adds. */
 function jobWith(items: { shapes?: EngraveCircleShape[]; drills?: EngraveDrill[]; threads?: EngraveThreadItem[] }) {
-  const job = defaultEngraveJob();
+  const job = dj();
   job.labels = [];
   job.shapes = items.shapes ?? [];
   job.drills = items.drills ?? [];
@@ -93,7 +101,7 @@ describe('#471 removals from the job document', () => {
   });
 
   it('keeps the default job’s three labels, naming each by its item', () => {
-    const job = defaultEngraveJob();
+    const job = dj();
     const removals = removalsFrom(job);
     expect(removals.map((r) => r.id)).toEqual(job.labels.map((l) => l.id));
     expect(removals.every((r) => r.name !== '')).toBe(true);
@@ -118,7 +126,7 @@ describe('#471 removals from the job document', () => {
     expect(removalsFrom(jobWith({ drills: [array()] }))[0]!.connected).toBeUndefined();
     expect(removalsFrom(jobWith({ drills: [array({ count: { x: 1, y: 1 } })] }))[0]!.connected).toBe(true);
     expect(removalsFrom(jobWith({ threads: [thread()] }))[0]!.connected).toBe(true);
-    expect(removalsFrom(defaultEngraveJob())[0]!.connected).toBeUndefined();
+    expect(removalsFrom(dj())[0]!.connected).toBeUndefined();
   });
 
   it('a through hole opens to the bottom as well and spans the whole stock', () => {

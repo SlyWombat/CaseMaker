@@ -273,7 +273,8 @@ describe('drill findings (#220)', () => {
 
   it('warns that an unrecorded cutter is not proven centre-cutting', () => {
     const job: EngraveJob = { ...singleHole(), toolKey: 'flat-1.0' }; // centreCutting is null
-    expect(defaultEngraveJob().toolKey).toBe('flat-1.0');
+    // #516 item 5 — a fresh default job no longer seeds `flat-1.0`; it starts with no cutter.
+    expect(defaultEngraveJob().toolKey).toBe('');
     const f = validateJob(job).find((x) => x.code === 'plunge-unproven');
     expect(f?.severity).toBe('warning');
   });

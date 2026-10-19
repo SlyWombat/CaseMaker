@@ -367,6 +367,7 @@ describe('postZ1 (#173)', () => {
 describe('postZ1 round trip (#173)', () => {
   it('the default engrave job posts, parses and runs with zero errors, endpoints matching the IR', () => {
     const job = defaultEngraveJob();
+    job.toolKey = 'flat-1.0'; // #516 item 5 — the default job no longer seeds a cutter
     const tool = jobTool(job);
     expect(tool).not.toBeNull();
     if (!tool) return;

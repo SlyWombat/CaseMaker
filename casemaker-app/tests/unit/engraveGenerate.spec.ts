@@ -42,6 +42,18 @@ import type { ToolpathIR } from '@/engine/cnc/cam/ir';
 import { cuttingForTrace, cuttingRadiusForSweep, flatEndMill, isVTraceTool, traceRadiusAt, type Tool } from '@/engine/cnc/tool';
 import type { EngraveCutout, EngraveDrill, EngraveJob, EngraveKeepOut, EngraveLabel, EngraveLineItem, EngraveStrokeLabelItem, EngraveThreadItem, EngraveTraceItem, EngraveVectorShape } from '@/types/engraveJob';
 
+/**
+ * #516 item 5 — the default job no longer seeds a cutter; the recommendation names `flat-1.0` for
+ * the default job's three labels. These tests exercise the ENGINE, which requires the job to name
+ * its cutter (the panel applies the recommendation before the engine runs), so `dj()` is the
+ * default job with that recommendation applied.
+ */
+function dj(...args: Parameters<typeof defaultEngraveJob>): EngraveJob {
+  const job = defaultEngraveJob(...args);
+  job.toolKey = 'flat-1.0';
+  return job;
+}
+
 describe('engraveGenerate with a saved machine frame (#297)', () => {
   const read = calibrationFromReplies(new Map(Object.entries(Z1_FRAME_REPLIES)), {
     machineId: 'Z1',
@@ -53,8 +65,8 @@ describe('engraveGenerate with a saved machine frame (#297)', () => {
   it('still produces a clean program, and the same .nc, under the saved frame', () => {
     // The frame moves where M6, G28 and the probe go IN MACHINE COORDINATES. It must not move a
     // single work-coordinate cut, so the text a user saves is the same bytes either way.
-    const without = generate(tl, defaultEngraveJob());
-    const withFrame = generate(tl, defaultEngraveJob(), read.calibration);
+    const without = generate(tl, dj());
+    const withFrame = generate(tl, dj(), read.calibration);
     expect(withFrame.ok).toBe(true);
     expect(withFrame.nc).toBe(without.nc);
     expect(withFrame.verify!.findings.filter((f) => f.severity === 'error')).toEqual([]);
@@ -62,15 +74,15 @@ describe('engraveGenerate with a saved machine frame (#297)', () => {
 
   it('ignores a frame saved for a different machine, exactly as the simulation does', () => {
     const other = { ...read.calibration, machineId: 'Z1-other' };
-    const g = generate(tl, defaultEngraveJob(), other);
+    const g = generate(tl, dj(), other);
     expect(g.ok).toBe(true);
-    expect(g.nc).toBe(generate(tl, defaultEngraveJob()).nc);
+    expect(g.nc).toBe(generate(tl, dj()).nc);
   });
 });
 
 describe('engraveGenerate (#206)', () => {
   it('takes the default job all the way to a clean .nc', () => {
-    const g = generate(tl, defaultEngraveJob());
+    const g = generate(tl, dj());
     expect(g.ok).toBe(true);
     expect(g.stage).toBe('done');
     expect(g.nc).not.toBeNull();
@@ -85,7 +97,7 @@ describe('engraveGenerate (#206)', () => {
   });
 
   it('stamps the real package version into the CAM header, never dev (#231 item 4)', () => {
-    const g = generate(tl, defaultEngraveJob());
+    const g = generate(tl, dj());
     expect(g.nc).not.toBeNull();
     // The exact header line the app writes; a headless run must match it byte for byte.
     expect(g.nc).toContain(`;@MKR|CAM|id=${CAM_ID}|name=${CAM_NAME}|v=${APP_VERSION}`);
@@ -93,7 +105,7 @@ describe('engraveGenerate (#206)', () => {
   });
 
   it('is pure: the same job produces byte-identical nc', () => {
-    const job = defaultEngraveJob();
+    const job = dj();
     const a = generate(tl, job);
     const b = generate(tl, structuredClone(job) as EngraveJob);
     expect(a.nc).not.toBeNull();
@@ -101,7 +113,7 @@ describe('engraveGenerate (#206)', () => {
   });
 
   it('stops at findings for a cut deeper than the stock allows', () => {
-    const job = defaultEngraveJob();
+    const job = dj();
     const deep: EngraveJob = {
       ...job,
       labels: job.labels.map((l, i) => (i === 0 ? { ...l, depth: 11.5 } : l)),
@@ -114,7 +126,7 @@ describe('engraveGenerate (#206)', () => {
   });
 
   it('stops at feeds for a step-over past the cutter radius (#191)', () => {
-    const job: EngraveJob = { ...defaultEngraveJob(), cutOverride: { stepOver: 0.6 } }; // radius is 0.5
+    const job: EngraveJob = { ...dj(), cutOverride: { stepOver: 0.6 } }; // radius is 0.5
     const g = generate(tl, job);
     expect(g.ok).toBe(false);
     expect(g.stage).toBe('feeds');
@@ -128,7 +140,7 @@ describe('engraveGenerate (#206)', () => {
     // job carries the same cutter under a plain name, and this case is about the SIZE that fails
     // the text rather than about a refusal it did not ask for.
     const job: EngraveJob = {
-      ...defaultEngraveJob(),
+      ...dj(),
       toolKey: 'flat-3.175x12-metal',
       tool: flatEndMill(3.175, {
         id: '112111313812',
@@ -148,7 +160,7 @@ describe('engraveGenerate (#206)', () => {
   // #213 — `validateVise` has accepted the sacrificial stack since `454110a`, but this call never
   // passed it, so the generate path's `vise-grip-shallow` still judged the raw stock.
   it('judges vise-grip-shallow on what the jaws actually grip (#213)', () => {
-    const base = defaultEngraveJob();
+    const base = dj();
     // 10 mm proud on a 12 mm blank leaves 2 mm of raw stock in the jaws — under GRIP_MIN (3).
     const shallow: EngraveJob = {
       ...base,
@@ -169,7 +181,7 @@ describe('engraveGenerate (#206)', () => {
   // height alone is no longer a refusal), and print the figure without a float tail
   // (3 − 3.1 = -0.10000000000000009).
   it('takes a 3 mm default job through the pipeline: noted by name, nothing thrown, no float tails (#406, #488)', () => {
-    const base = defaultEngraveJob();
+    const base = dj();
     const thin: EngraveJob = {
       ...base,
       stock: { ...base.stock, thickness: 3 },
@@ -231,7 +243,7 @@ describe('an under-surface void limits the cut (#231 item 3)', () => {
     cornerRadius: 0,
   });
   const job = (aDepth: number, keepOuts?: EngraveKeepOut[]): EngraveJob => ({
-    ...defaultEngraveJob(),
+    ...dj(),
     labels: [],
     shapes: [shapeA(aDepth), shapeB(2.0)],
     ...(keepOuts ? { keepOuts } : {}),
@@ -284,7 +296,7 @@ describe('an under-surface void limits the cut (#231 item 3)', () => {
     // The acceptance pair: 2 mm over the membrane is refused, and the same 2 mm cut on solid
     // stock is not — the depth alone is never the problem.
     const clear: EngraveJob = {
-      ...defaultEngraveJob(),
+      ...dj(),
       labels: [],
       shapes: [shapeB(2.0)],
       keepOuts: [pocket],
@@ -297,7 +309,7 @@ describe('an under-surface void limits the cut (#231 item 3)', () => {
 
   it('warns for a LABEL over the void too — the item kind makes no difference (#171)', () => {
     const jobWithLabel: EngraveJob = {
-      ...defaultEngraveJob(),
+      ...dj(),
       labels: [
         {
           id: 'over',
@@ -353,7 +365,7 @@ describe('an under-surface void limits the cut (#231 item 3)', () => {
   it('warns for a TRACE crossing the void (#270)', () => {
     // x 35…65 across the pocket's 35…65, at its centreline.
     const g = generate(tl, {
-      ...defaultEngraveJob(),
+      ...dj(),
       labels: [],
       shapes: [],
       traces: [traceLine({ x: 35, y: 30 })],
@@ -371,7 +383,7 @@ describe('an under-surface void limits the cut (#231 item 3)', () => {
   it('leaves the same trace unwarned when it is clear of the void (#270)', () => {
     // Moved to y 52, behind the pocket's 20…40 — the only difference is where the line sits.
     const g = generate(tl, {
-      ...defaultEngraveJob(),
+      ...dj(),
       labels: [],
       shapes: [],
       traces: [traceLine({ x: 35, y: 52 })],
@@ -384,7 +396,7 @@ describe('an under-surface void limits the cut (#231 item 3)', () => {
     // A drill into the pocket is a breach the VERIFIER owns (`cut-too-deep`); this warning is about
     // the finish of a pocketed floor, and a drilled hole has none. #270 asked for this to stay.
     const g = generate(tl, {
-      ...defaultEngraveJob(),
+      ...dj(),
       labels: [],
       shapes: [],
       drills: [drillOver],
@@ -475,7 +487,7 @@ describe('a job that states its print limits on the printer’s layer grid (#285
     return {
       // The blank is 3.81 mm, so the vise is the stock-derived default (#231 item 2): the shipped
       // flat 4 mm is taller than the whole badge and refuses it outright.
-      ...defaultEngraveJob(viseForNewJob(undefined, blank.stock)),
+      ...dj(viseForNewJob(undefined, blank.stock)),
       stock: blank.stock,
       keepOuts: blank.pocket ? [blank.pocket] : [],
       labels: [],
@@ -575,7 +587,7 @@ describe('the per-item void bound agrees with the region scan (#365)', () => {
   /** The badge blank with its magnet pocket, and ONE measured line over it. */
   function badgeLine(text: string, x: number, y: number, extra: EngraveKeepOut[] = []): EngraveJob {
     const blank = badgeBlankFor(defaultBadgeParams());
-    const base = defaultEngraveJob(viseForNewJob(undefined, blank.stock));
+    const base = dj(viseForNewJob(undefined, blank.stock));
     return {
       ...base,
       stock: blank.stock,
@@ -673,7 +685,7 @@ describe('a trace item reaches the program (#287)', () => {
   });
 
   const jobWithTrace = (): EngraveJob => {
-    const base = defaultEngraveJob();
+    const base = dj();
     return { ...base, labels: [base.labels[0]!], shapes: [], traces: [traceLine(10)] };
   };
 
@@ -710,7 +722,7 @@ describe('a trace item reaches the program (#287)', () => {
   it('leaves a job with no traces alone', () => {
     // The identity the byte-identity of every pre-#287 program rests on: no trace, no extra
     // operation, no extra predicted level.
-    const g = generate(tl, defaultEngraveJob());
+    const g = generate(tl, dj());
     expect(g.cam!.operations).toBe(3);
     expect(g.predicted).toHaveLength(3);
     expect(g.nc).not.toContain('Trace');
@@ -722,7 +734,7 @@ describe('a trace item reaches the program (#287)', () => {
   // must carry the trace's own endpoints at the item's depth, negative Z.
   it('cuts the trace where the item says, at the item depth', () => {
     const g = generate(tl, {
-      ...defaultEngraveJob(),
+      ...dj(),
       labels: [],
       shapes: [],
       // 15 mm long from x 80 to 95 at y 10, 0.8 mm deep: the whole job, so every coordinate in
@@ -776,7 +788,7 @@ describe('the feed catalogue reaches the worker (#324)', () => {
    */
   function job(): EngraveJob {
     return {
-      ...defaultEngraveJob(),
+      ...dj(),
       toolKey: 'flat-3.175x12-metal',
       tool: flatEndMill(3.175, {
         id: VENDOR_ID,
@@ -784,7 +796,7 @@ describe('the feed catalogue reaches the worker (#324)', () => {
         fluteLength: 12,
         shoulderLength: 12,
       }),
-      stock: { ...defaultEngraveJob().stock, material: 'hardwood' },
+      stock: { ...dj().stock, material: 'hardwood' },
       labels: [],
       shapes: [
         {
@@ -882,7 +894,7 @@ describe('the frame file (#244)', () => {
   });
 
   it('produces a verified frame program beside a clean job', () => {
-    const g = generate(tl, defaultEngraveJob());
+    const g = generate(tl, dj());
     expect(g.ok).toBe(true);
     expect(g.frameNc).not.toBeNull();
     expect(g.frameNc!.startsWith(';@MKR|BEGIN')).toBe(true);
@@ -899,8 +911,8 @@ describe('the frame file (#244)', () => {
 
   it('offers no frame when the job is refused', () => {
     const deep: EngraveJob = {
-      ...defaultEngraveJob(),
-      labels: defaultEngraveJob().labels.map((l, i) => (i === 0 ? { ...l, depth: 11.5 } : l)),
+      ...dj(),
+      labels: dj().labels.map((l, i) => (i === 0 ? { ...l, depth: 11.5 } : l)),
     };
     const g = generate(tl, deep);
     expect(g.ok).toBe(false);
@@ -934,7 +946,7 @@ describe('a V-bit trace job (#405)', () => {
    * numbers from `docs/bench/single-barrel.job.json`.
    */
   const traceJob = (traces: EngraveTraceItem[], over: Partial<EngraveJob> = {}): EngraveJob => {
-    const base = defaultEngraveJob();
+    const base = dj();
     return {
       ...base,
       name: 'single barrel',
@@ -978,7 +990,7 @@ describe('a V-bit trace job (#405)', () => {
    * the default job's `CASE` label, re-laid at 8 mm on a 38.1 × 76.2 mm blank.
    */
   const regionLabel = (over: Partial<EngraveLabel> = {}): EngraveLabel => ({
-    ...defaultEngraveJob().labels[0]!,
+    ...dj().labels[0]!,
     position: { x: 19, y: 28 },
     size: 8,
     depth: 1,
@@ -1380,7 +1392,7 @@ describe('engraveGenerate with a milled thread (#445)', () => {
     'thread.chordToleranceMm': { value: 0.01, source: 'seeded' },
   } as unknown as ShopDefaults;
   const job = (threads: EngraveThreadItem[]): EngraveJob => ({
-    ...defaultEngraveJob(),
+    ...dj(),
     labels: [],
     shapes: [],
     traces: [],
@@ -1435,7 +1447,7 @@ describe('engraveGenerate with a milled thread (#445)', () => {
 
   it('a thread beside another cut is refused by the findings gate before any CAM', () => {
     const g = gen([THREAD()]);
-    const mixed: EngraveJob = { ...job([THREAD()]), labels: defaultEngraveJob().labels };
+    const mixed: EngraveJob = { ...job([THREAD()]), labels: dj().labels };
     const out = engraveGenerate(tl, mixed, MILL, [], null, undefined, { defaults: DEFAULTS });
     expect(out.ok).toBe(false);
     expect(out.stage).toBe('findings');
@@ -1455,7 +1467,7 @@ describe('engraveGenerate with a milled thread (#445)', () => {
 
 describe('facing the stock’s top (#432 slices 1–2)', () => {
   const faced = (over: Partial<EngraveJob> = {}): EngraveJob => ({
-    ...defaultEngraveJob(),
+    ...dj(),
     facing: { enabled: true, depth: 0.5 },
     ...over,
   });
@@ -1492,7 +1504,7 @@ describe('facing the stock’s top (#432 slices 1–2)', () => {
   }
 
   it('emits the facing pass as its own verified program and leaves the engraving byte-identical', () => {
-    const plain = generate(tl, defaultEngraveJob());
+    const plain = generate(tl, dj());
     const g = generate(tl, faced(), null, [], undefined, SHOP);
     expect(
       g.ok,
@@ -1634,13 +1646,13 @@ describe('facing the stock’s top (#432 slices 1–2)', () => {
   });
 
   it('emits no facing file when facing is off or its depth is zero', () => {
-    const plain = generate(tl, defaultEngraveJob());
+    const plain = generate(tl, dj());
     for (const facing of [
       undefined,
       { enabled: false, depth: 0.5 },
       { enabled: true, depth: 0 },
     ]) {
-      const g = generate(tl, { ...defaultEngraveJob(), facing }, null, [], undefined, SHOP);
+      const g = generate(tl, { ...dj(), facing }, null, [], undefined, SHOP);
       expect(g.ok).toBe(true);
       expect(g.nc).toBe(plain.nc);
       expect(g.facingNc).toBeNull();
@@ -1659,7 +1671,7 @@ describe('facing the stock’s top (#432 slices 1–2)', () => {
   // The worker case runs PLA because it is the one plastic the starting feed table covers — an
   // acrylic job is refused earlier for feeds, which would mask the facing half under test.
   it('refuses the whole run on a material facing is not offered for, and keeps facing for wood', () => {
-    const plastic = faced({ stock: { ...defaultEngraveJob().stock, material: 'pla' } });
+    const plastic = faced({ stock: { ...dj().stock, material: 'pla' } });
     const g = generate(tl, plastic, null, [], undefined, SHOP);
     expect(g.ok).toBe(false);
     expect(g.stage).toBe('findings');
@@ -1689,7 +1701,7 @@ describe('facing the stock’s top (#432 slices 1–2)', () => {
 
   it('refuses a facing depth that eats the minimum floor, before any CAM', () => {
     const thickness = 3;
-    const g = generate(tl, faced({ stock: { ...defaultEngraveJob().stock, thickness }, minFloor: 1, facing: { enabled: true, depth: 2.5 } }));
+    const g = generate(tl, faced({ stock: { ...dj().stock, thickness }, minFloor: 1, facing: { enabled: true, depth: 2.5 } }));
     expect(g.ok).toBe(false);
     expect(g.stage).toBe('findings');
     const finding = g.findings.find((f) => f.code === 'facing-too-deep');
@@ -1708,7 +1720,7 @@ describe('facing the stock’s top (#432 slices 1–2)', () => {
   });
 
   it('refuses the facing FILE, not the run, when no flat cutter can face the blank', () => {
-    const plain = generate(tl, defaultEngraveJob());
+    const plain = generate(tl, dj());
     const g = generate(tl, faced(), null, [], undefined, { tools: [] });
     expect(g.ok).toBe(true);
     expect(g.stage).toBe('done');
@@ -1772,7 +1784,7 @@ describe('facing the stock’s top (#432 slices 1–2)', () => {
   it('faces a thread job with its own flat, and leaves the thread program to the thread mill', () => {
     const MILL: Tool = flatEndMill(4, { name: '4 mm thread mill', typeText: 'Thread Mill', shape: 'thread', tipDiameter: 4, diameter: 4, fluteLength: 20 });
     const job: EngraveJob = {
-      ...defaultEngraveJob(),
+      ...dj(),
       labels: [],
       shapes: [],
       traces: [],
@@ -1825,8 +1837,8 @@ describe('the mount reaches the verifier and the facing pass (#442)', () => {
   });
 
   it('a cut over the clamp is refused, and the same job without the mount passes', () => {
-    expect(generate(tl, defaultEngraveJob()).ok).toBe(true);
-    const g = generate(tl, defaultEngraveJob(), null, [], undefined, { mount: mountOf(OVER_LABELS) });
+    expect(generate(tl, dj()).ok).toBe(true);
+    const g = generate(tl, dj(), null, [], undefined, { mount: mountOf(OVER_LABELS) });
     expect(g.ok).toBe(false);
     expect(g.stage).toBe('verify');
     const f = g.verify!.findings.find((x) => x.code === 'clamp-in-path');
@@ -1834,7 +1846,7 @@ describe('the mount reaches the verifier and the facing pass (#442)', () => {
   });
 
   it('a skim that would run into the mount is refused, and names the band it could not face', () => {
-    const faced: EngraveJob = { ...defaultEngraveJob(), facing: { enabled: true, depth: 0.5 } };
+    const faced: EngraveJob = { ...dj(), facing: { enabled: true, depth: 0.5 } };
     const g = generate(tl, faced, null, [], undefined, { tools: [FACING_TOOL, ...TOOL_LIBRARY], mount: mountOf(OVER_BACK_EDGE) });
     // The engraving is untouched and the run still succeeded — only the skim is withheld (#432).
     expect(g.ok, `${g.stage} ${JSON.stringify(g.errors)}`).toBe(true);
@@ -1887,7 +1899,7 @@ describe('engraveGenerate — one program per setup (#419 J3)', () => {
   const vacuumWords = (nc: string): string[] => [...nc.matchAll(/\bM33[12]\b/g)].map((m) => m[0]);
 
   it('posts one program per setup, with the vacuum spanning the run and not each file', () => {
-    const job = defaultEngraveJob();
+    const job = dj();
     const [a, b] = job.labels.map((l) => l.id);
     const two = setUp(job, [[a!], [b!]], [job.toolKey, TOOL_B.key]);
     const g = generate(tl, two, null, [], undefined, { tools: [TOOL_B, ...TOOL_LIBRARY] });
@@ -1919,7 +1931,7 @@ describe('engraveGenerate — one program per setup (#419 J3)', () => {
   });
 
   it('keeps the single-program fields pointing at the first program', () => {
-    const job = defaultEngraveJob();
+    const job = dj();
     const [a, b] = job.labels.map((l) => l.id);
     const g = generate(tl, setUp(job, [[a!], [b!]], [job.toolKey, TOOL_B.key]), null, [], undefined, {
       tools: [TOOL_B, ...TOOL_LIBRARY],
@@ -1930,7 +1942,7 @@ describe('engraveGenerate — one program per setup (#419 J3)', () => {
   });
 
   it('writes both vacuum words when the job is one program, whatever the setups say', () => {
-    const job = defaultEngraveJob();
+    const job = dj();
     const ids = job.labels.map((l) => l.id);
     const g = generate(tl, setUp(job, [ids], [job.toolKey]));
     expect(g.ok).toBe(true);
@@ -1939,7 +1951,7 @@ describe('engraveGenerate — one program per setup (#419 J3)', () => {
   });
 
   it('cuts a middle program with neither vacuum word', () => {
-    const job = defaultEngraveJob();
+    const job = dj();
     const [a, b, c] = job.labels.map((l) => l.id);
     const g = generate(tl, setUp(job, [[a!], [b!], [c!]], [job.toolKey, TOOL_B.key, job.toolKey]), null, [], undefined, {
       tools: [TOOL_B, ...TOOL_LIBRARY],
@@ -1955,8 +1967,8 @@ describe('engraveGenerate — one program per setup (#419 J3)', () => {
     // PLA: the 0.6 mm cutter's feeds row (#410) is plastic, and this case is about the rest pass,
     // not about a material's feed table.
     const job: EngraveJob = {
-      ...defaultEngraveJob(),
-      stock: { ...defaultEngraveJob().stock, material: 'pla' },
+      ...dj(),
+      stock: { ...dj().stock, material: 'pla' },
     };
     const ids = job.labels.map((l) => l.id);
     const base = setUp(job, [ids], [job.toolKey]);
@@ -1996,7 +2008,7 @@ describe('engraveGenerate — one program per setup (#419 J3)', () => {
   });
 
   it('splits a single-cutter setup into rough and finish operations in one program (#250)', () => {
-    const job = defaultEngraveJob();
+    const job = dj();
     const ids = job.labels.map((l) => l.id);
     const one = setUp(job, [ids], [job.toolKey]);
     const g = generate(tl, one, null, [], undefined, {
@@ -2021,8 +2033,8 @@ describe('engraveGenerate — one program per setup (#419 J3)', () => {
 
   it('roughs with the first cutter and finishes with the rest cutter (#250)', () => {
     const job: EngraveJob = {
-      ...defaultEngraveJob(),
-      stock: { ...defaultEngraveJob().stock, material: 'pla' },
+      ...dj(),
+      stock: { ...dj().stock, material: 'pla' },
     };
     const ids = job.labels.map((l) => l.id);
     const base = setUp(job, [ids], [job.toolKey]);
@@ -2055,8 +2067,8 @@ describe('engraveGenerate — one program per setup (#419 J3)', () => {
 
   it('leaves items assigned to a later cutter out of the clearing program', () => {
     const job: EngraveJob = {
-      ...defaultEngraveJob(),
-      stock: { ...defaultEngraveJob().stock, material: 'pla' },
+      ...dj(),
+      stock: { ...dj().stock, material: 'pla' },
     };
     const [a, b] = job.labels.map((l) => l.id);
     const base = setUp(job, [[a!, b!]], [job.toolKey]);
@@ -2087,7 +2099,7 @@ describe('engraveGenerate — one program per setup (#419 J3)', () => {
   });
 
   it('refuses an assignment that names an item twice, or leaves one unassigned', () => {
-    const job = defaultEngraveJob();
+    const job = dj();
     const [a, b] = job.labels.map((l) => l.id);
     const base = setUp(job, [[a!, b!]], [job.toolKey]);
     const duplicated: EngraveJob = {
@@ -2122,7 +2134,7 @@ describe('engraveGenerate — one program per setup (#419 J3)', () => {
   });
 
   it('refuses a setup naming no cutter', () => {
-    const job = defaultEngraveJob();
+    const job = dj();
     const ids = job.labels.map((l) => l.id);
     const g = generate(tl, setUp(job, [ids], []), null, [], undefined, { tools: [TOOL_B] });
     expect(g.ok).toBe(false);
@@ -2131,7 +2143,7 @@ describe('engraveGenerate — one program per setup (#419 J3)', () => {
   });
 
   it('a legacy job is one program, and its frame file still carries no vacuum word', () => {
-    const g = generate(tl, defaultEngraveJob());
+    const g = generate(tl, dj());
     expect(g.ok).toBe(true);
     expect(g.programs).toHaveLength(1);
     expect(g.programs[0]!.nc).toBe(g.nc);
@@ -2179,7 +2191,7 @@ describe('the per-cutter assignment (#472)', () => {
   });
 
   it('makes one ref per (setup, tool), each with the items that cutter owns', () => {
-    const job = defaultEngraveJob();
+    const job = dj();
     const [a, b] = job.labels.map((l) => l.id);
     const refs = setupPrograms(
       setupWith(job, [job.toolKey, TOOL_B.key], { [job.toolKey]: [a!], [TOOL_B.key]: [b!] }),
@@ -2191,14 +2203,14 @@ describe('the per-cutter assignment (#472)', () => {
   });
 
   it('gives the first cutter every item when a multi-tool setup states no map', () => {
-    const job = defaultEngraveJob();
+    const job = dj();
     const ids = job.labels.map((l) => l.id);
     const refs = setupPrograms(setupWith(job, [job.toolKey, TOOL_B.key]));
     expect(refs.map((r) => r.itemIds)).toEqual([ids, []]);
   });
 
   it('drops an assignment that names a cutter or item the setup no longer holds', () => {
-    const job = defaultEngraveJob();
+    const job = dj();
     const [a, b] = job.labels.map((l) => l.id);
     const findings = setupProgramFindings(
       setupWith(job, [job.toolKey], {
@@ -2214,7 +2226,7 @@ describe('the per-cutter assignment (#472)', () => {
   });
 
   it('refuses a first cutter with nothing assigned', () => {
-    const job = defaultEngraveJob();
+    const job = dj();
     const ids = job.labels.map((l) => l.id);
     const findings = setupProgramFindings(
       setupWith(job, [job.toolKey, TOOL_B.key], { [job.toolKey]: [], [TOOL_B.key]: ids }),
@@ -2241,7 +2253,7 @@ describe('through-cuts and cut-outs (#218)', () => {
     cutoutOver: Partial<EngraveCutout> = {},
     jobOver: Partial<EngraveJob> = {},
   ): EngraveJob {
-    const base = defaultEngraveJob();
+    const base = dj();
     return {
       ...base,
       labels: [],

@@ -7,7 +7,7 @@
  * schema so a list imported later is validated rather than trusted.
  *
  * `TOOL_LIBRARY` is the `builtin` tier of the tool registry (#305) and stays one PERMANENTLY —
- * the shipped default job names `flat-1.0` (`engrave/defaults.ts:120`), so a job has to resolve
+ * the default job's first recommendation names `flat-1.0` (a built-in), so a job has to resolve
  * with no service at all, and a later tier must not be able to take that away. Resolving a key is
  * `toolRegistry.resolveTool`, which is the only place a key becomes a `Tool`.
  *

@@ -15,6 +15,14 @@ import { buildTimeline, parseGcode, Z1 } from '@/engine/cnc';
 import { sweepTimeline } from '@/workers/geometry/sweep';
 import { jobTool, toSetup } from '@/engine/cnc/engrave/jobSetup';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
+
+// #516 item 5 — the default job no longer seeds a cutter; the recommendation names `flat-1.0`.
+// These engine tests need the job to name its cutter, so `dj()` applies that recommendation.
+function dj(...args: Parameters<typeof defaultEngraveJob>): ReturnType<typeof defaultEngraveJob> {
+  const job = defaultEngraveJob(...args);
+  job.toolKey = 'flat-1.0';
+  return job;
+}
 import {
   boundFloor,
   boundsFor,
@@ -48,7 +56,7 @@ import { itemDepthBoundFindings } from '@/workers/sim/engraveGeometry';
 
 /** A printed blank's facts, as a job carries them (#285/#345): no wasm, so the numbers are exact. */
 function printedJob(colour: EngraveJob['stock']['colour'], flatness?: EngraveJob['stock']['flatness']): EngraveJob {
-  return { ...defaultEngraveJob(), stock: { ...defaultEngraveJob().stock, colour, flatness } };
+  return { ...dj(), stock: { ...dj().stock, colour, flatness } };
 }
 
 const PRINT_0_2 = { kind: 'printed', capMm: 9.0, layerHeight: 0.2, firstLayerHeight: 0.2 } as const;
@@ -98,7 +106,7 @@ describe('the depth-bound model (#345)', () => {
 
   it('a bound carries its own margin where its rule is a different quantity', () => {
     // The stock's underside is `minFloor` (material that must remain), never `boundaryMargin`.
-    const under = undersideBound({ ...defaultEngraveJob(), minFloor: 1.0 });
+    const under = undersideBound({ ...dj(), minFloor: 1.0 });
     expect(under.margin).toBe(1.0);
     expect(under.at).toBe(12);
     // A floor at 11 mm is exactly what the 1 mm floor allows; 11.1 is through it.
@@ -125,9 +133,9 @@ describe('the depth-bound model (#345)', () => {
     // `at − margin`: what a `DepthLimit` field is made of, and the bound's OWN margin wins where it
     // has one — which is the stock's underside (`minFloor`) and every void.
     expect(boundFloor(voidBound('p', 1.51), 0.2)).toBeCloseTo(1.31, 9);
-    expect(boundFloor(undersideBound(defaultEngraveJob()), 0.2)).toBeCloseTo(11, 9);
+    expect(boundFloor(undersideBound(dj()), 0.2)).toBeCloseTo(11, 9);
     // The job's own margin does not move the underside: 11 is what `minFloor` leaves either way.
-    expect(boundFloor(undersideBound(defaultEngraveJob()), 0.05)).toBeCloseTo(11, 9);
+    expect(boundFloor(undersideBound(dj()), 0.05)).toBeCloseTo(11, 9);
     // A plane nearer the face than the margin leaves nothing to cut, not a negative depth.
     expect(voidFloor(0.1, 0.2)).toBe(0);
   });
@@ -136,7 +144,7 @@ describe('the depth-bound model (#345)', () => {
     // The layer grid is what makes one printed layer a distance a printer can hold, so a blank that
     // states no print has nothing to align a Z-error margin to — and it is also the blank the app
     // knows least about. The LEAST-known blank must not get the THINNEST membrane.
-    const blind = defaultEngraveJob(); // no print, minFloor 1.0
+    const blind = dj(); // no print, minFloor 1.0
     expect(voidMargin(blind, 0.2)).toBe(1.0);
     // A user who typed a boundary margin bigger than their own floor still gets that margin: the
     // rule is `max`, not "always the floor".
@@ -147,7 +155,7 @@ describe('the depth-bound model (#345)', () => {
   });
 
   it('gives every item the split, the void under it and the underside, in that order', () => {
-    const job = defaultEngraveJob();
+    const job = dj();
     const label = { ...job.labels[0]!, depthIntent: 'surface' as const };
     const planes = { split: 0.8, overVoid: { name: 'Magnet pocket', breach: 1.4 } };
     expect(boundsFor(job, label, planes).map((b) => b.source)).toEqual(['split', 'void', 'underside']);
@@ -163,7 +171,7 @@ describe('the depth-bound model (#345)', () => {
 describe('the house margins and the job’s own (#345)', () => {
   it('seeds a new job’s four per-job fields from the settings, and leaves `margins` absent', () => {
     const margins: MarginSettings = { boundaryMargin: 0.3, zTolerance: 0.1, minFloor: 2, edgeMargin: 3, breakthrough: 0.5, jawClearance: 1.5, source: 'user' };
-    const job = defaultEngraveJob(undefined, margins);
+    const job = dj(undefined, margins);
     expect(job.minFloor).toBe(2);
     expect(job.edgeMargin).toBe(3);
     expect(job.breakthrough).toBe(0.5);
@@ -174,14 +182,14 @@ describe('the house margins and the job’s own (#345)', () => {
     // stored document needs migrating and every `.nc` keeps the numbers it was cut with.
     expect(job.margins).toBeUndefined();
     // The shipped set is what these fields used to be hard-coded to, so a fresh install is unchanged.
-    expect(defaultEngraveJob()).toMatchObject({ minFloor: 1.0, edgeMargin: 1.0, breakthrough: 0.3, jawClearance: 1.0 });
+    expect(dj()).toMatchObject({ minFloor: 1.0, edgeMargin: 1.0, breakthrough: 0.3, jawClearance: 1.0 });
   });
 
   it('defaults the boundary margin to one printed layer, or the common 0.2 without a print', () => {
     expect(DEFAULT_BOUNDARY_MARGIN_MM).toBe(0.2);
     expect(defaultBoundaryMargin(printedJob(PRINT_0_2))).toBe(0.2);
     expect(defaultBoundaryMargin(printedJob({ kind: 'printed', capMm: 9, layerHeight: 0.3 }))).toBe(0.3);
-    expect(defaultBoundaryMargin(defaultEngraveJob())).toBe(0.2);
+    expect(defaultBoundaryMargin(dj())).toBe(0.2);
   });
 
   it('resolves a job with no margins from the settings, reading the blank’s own layers', () => {
@@ -288,7 +296,7 @@ describe('the run sheet prints the margins (#345)', () => {
       height: 10,
       cornerRadius: 0,
     };
-    return { ...defaultEngraveJob(), keepOuts: [pocket] };
+    return { ...dj(), keepOuts: [pocket] };
   }
 
   function marginsStepOf(job: EngraveJob, margins?: Parameters<typeof buildRunSheet>[4]) {
@@ -322,7 +330,7 @@ describe('the run sheet prints the margins (#345)', () => {
 
   it('leaves a job with no bound alone — the block would have nothing to say in it', () => {
     // The shipped default: one colour, solid stock. Its sheet is what it always was.
-    expect(marginsStepOf(defaultEngraveJob())).toBeUndefined();
+    expect(marginsStepOf(dj())).toBeUndefined();
     // A print with no item stating an intent is the same case: a split nobody asked about.
     expect(marginsStepOf(printedJob(PRINT_0_2))).toBeUndefined();
     // An item WITH an intent is a bound, so the block appears.
@@ -346,7 +354,7 @@ describe('the run sheet prints the margins (#345)', () => {
 
 describe('the margins reach the program only where a bound does (#345)', () => {
   it('posts byte-identical nc for a job with no bound, whatever margin is in force', () => {
-    const job = defaultEngraveJob();
+    const job = dj();
     const absent = generate(tl, job);
     const stated = generate(tl, job, null, [], { boundaryMargin: 0.5, zTolerance: 0.4, source: 'user' });
     expect(absent.ok).toBe(true);
@@ -367,7 +375,7 @@ describe('the margins reach the program only where a bound does (#345)', () => {
       height: 20,
       cornerRadius: 0,
     };
-    const base = defaultEngraveJob();
+    const base = dj();
     const label = { ...(base.labels[0] as EngraveLabel) };
     return {
       ...base,
@@ -429,7 +437,7 @@ describe('the margins reach the program only where a bound does (#345)', () => {
       height: 20,
       cornerRadius: 0,
     };
-    const base = defaultEngraveJob();
+    const base = dj();
     const label = { ...(base.labels[0] as EngraveLabel) };
     const job: EngraveJob = {
       // Split depth 12 − 10.6 = 1.4, so a reveal needs 1.4 + 0.2 = 1.6 — shallower than the
@@ -469,7 +477,7 @@ describe('the label depth a blank allows (#362)', () => {
    *  that wants a colour boundary states the print it is about (`PRINT_0_2`). */
   function badgeJob(over: Partial<EngraveJob> = {}): EngraveJob {
     const blank = badgeBlankFor(defaultBadgeParams({ print: undefined }));
-    const base = defaultEngraveJob();
+    const base = dj();
     return {
       ...base,
       stock: blank.stock,
@@ -479,7 +487,7 @@ describe('the label depth a blank allows (#362)', () => {
     };
   }
   const label = (over: Partial<EngraveLabel> = {}): EngraveLabel => ({
-    ...(defaultEngraveJob().labels[0] as EngraveLabel),
+    ...(dj().labels[0] as EngraveLabel),
     ...over,
   });
 
@@ -777,7 +785,7 @@ describe('the label depth a blank allows (#362)', () => {
     // the answer is the depth the label ITSELF asks for; the underside only lowers it when that
     // asks for more than the blank can keep under the floor. Before #440 the ceiling was the
     // answer here, and `redepthLabelsForBlank` wrote it onto every unclaimed label.
-    const job: EngraveJob = { ...defaultEngraveJob(), minFloor: 10, keepOuts: [] };
+    const job: EngraveJob = { ...dj(), minFloor: 10, keepOuts: [] };
     // The demo plank's jaws reach its lines (the 100 × 60 acceptance job is re-depthed to 3 / 3 / 3
     // by that bound), so these cases state a line clear of them: this is about the underside being
     // a cap, not about the jaw rule.
@@ -809,8 +817,8 @@ describe('the label depth a blank allows (#362)', () => {
     // The issue's own example, inverted: a 60 mm blank with nothing else constraining it used to
     // recommend 59 mm. It now recommends what the design asks for.
     const thick: EngraveJob = {
-      ...defaultEngraveJob(),
-      stock: { ...defaultEngraveJob().stock, thickness: 60 },
+      ...dj(),
+      stock: { ...dj().stock, thickness: 60 },
       keepOuts: [],
     };
     const face = label({ text: 'Face', depth: 0.5 });
@@ -925,7 +933,7 @@ describe('the label depth a blank allows (#362)', () => {
     // finding the hand-off left on it — and the walk's 1.0 mm is DEEPER than the 0.905 the jaws allow
     // a line beside them, so a blank-wide jaw check would refuse the job the wizard just built.
     const blank = badgeBlankFor(defaultBadgeParams());
-    const base = defaultEngraveJob();
+    const base = dj();
     const job: EngraveJob = {
       ...base,
       stock: blank.stock,

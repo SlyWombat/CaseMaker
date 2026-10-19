@@ -7,7 +7,7 @@
  * here now, and gets the same answer.
  *
  * **Three tiers, and the built-ins are permanent.** `TOOL_LIBRARY` is the `builtin` tier and is
- * never replaced: the shipped default job names `flat-1.0` (`engrave/defaults.ts:120`), so a job
+ * never replaced: the default job's first recommendation names `flat-1.0` (a built-in), so a job
  * has to resolve with no service, no file and no network at all. Above it come the house service's
  * two documents, each with its own setter: its tool list — Studio catalogue clones (`cat:`) and the
  * user's own definitions (`user:`) — through `setRegistry`, and the physical inventory (`inv:`)
@@ -42,6 +42,17 @@ export interface ToolNamingJob {
    */
   tool?: Tool | null;
 }
+
+/**
+ * The value of `toolKey` on a job that has NO cutter yet (#516 item 5). A fresh default job and
+ * the `--from-3mf` / badge import routes start here; the recommendation fills a real key on the
+ * first Generate (or the first visit to Tools).
+ *
+ * It is an empty string rather than `null` or an absent key so `job.toolKey` stays a plain string:
+ * no saved document needs migrating, and the CAM workers keep reading `job.toolKey` unchanged.
+ * `toolForJob` resolves it to `null` exactly as it resolves a key that is not in the library.
+ */
+export const NO_TOOL_KEY = '';
 
 /**
  * What `getTools()` returns. Held rather than rebuilt so the identity is stable between calls —

@@ -490,6 +490,17 @@ describe('validateJob (#200)', () => {
     expect(validateJob(job).some((f) => f.code === 'tool-missing')).toBe(true);
   });
 
+  it('gives a job with no cutter yet no tool finding, and a no-items job none either (#516)', () => {
+    // The empty key a fresh default job starts with is the pre-recommendation state, not an error.
+    expect(defaultEngraveJob().toolKey).toBe('');
+    expect(validateJob(defaultEngraveJob()).some((f) => f.code === 'tool-missing')).toBe(false);
+    // And a job with no work has no tool finding regardless.
+    const empty = defaultEngraveJob();
+    empty.labels = [];
+    empty.shapes = [];
+    expect(validateJob(empty).some((f) => f.code === 'tool-missing')).toBe(false);
+  });
+
   it('errors when no enabled label has text', () => {
     const job = defaultEngraveJob();
     for (const l of job.labels) l.text = '   ';
@@ -583,6 +594,7 @@ describe('validateJob (#200)', () => {
 
   it('warns when a trace’s strokes merge under the cutter (#219)', () => {
     const job = defaultEngraveJob(); // flat-1.0 -> r = 0.5, so strokes closer than 1.0 mm merge
+    job.toolKey = 'flat-1.0'; // #516 item 5 — the default job no longer seeds the cutter
     job.traces = [
       { id: 'tr', kind: 'line', position: { x: 50, y: 30 }, rotation: 0, depth: 0.5, enabled: true, points: [[-5, 0], [5, 0], [5, 0.8], [-5, 0.8]], closed: false },
     ];
@@ -952,7 +964,9 @@ describe('engraveJobStore (#200)', () => {
         orientation: { top: 'top', bottom: 'bottom', left: 'left', right: 'right', front: 'front', back: 'back' },
         mount: { kind: 'vise' },
         itemIds: [job.labels[0]!.id],
-        tools: [job.toolKey],
+        // #516 item 5 — the default job no longer seeds a cutter, and a setup's tools must name a
+        // real key, so this states `flat-1.0` rather than `job.toolKey`.
+        tools: ['flat-1.0'],
       },
     ];
 
@@ -1436,7 +1450,8 @@ describe('JobSetup (#419 J2)', () => {
       back: 'back',
     });
     expect(setup!.mount).toEqual({ kind: 'vise' });
-    expect(setup!.tools).toEqual([job.toolKey]);
+    // #516 item 5 — a fresh default job has no cutter, so the implicit setup names no tools.
+    expect(setup!.tools).toEqual([]);
     // Enabled cutting items, in document order across the six lists.
     expect(setup!.itemIds).toEqual([labelIds[0]!, labelIds[2]!, 'shp-on', 'cmb', 'trc', 'vec', 'drl']);
     expect(setup!.registration).toBeUndefined();

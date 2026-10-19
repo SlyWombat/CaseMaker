@@ -8,6 +8,14 @@ import { cleanup, render, screen } from '@testing-library/react';
 import { RunSheetView } from '@/components/panels/RunSheetView';
 import { buildRunSheet, type RunSheet, type RunSheetGenerated, type RunSheetOptions } from '@/engine/cnc/engrave/runSheet';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
+
+// #516 item 5 — the default job no longer seeds a cutter; the recommendation names `flat-1.0`.
+// These engine tests need the job to name its cutter, so `dj()` applies that recommendation.
+function dj(...args: Parameters<typeof defaultEngraveJob>): ReturnType<typeof defaultEngraveJob> {
+  const job = defaultEngraveJob(...args);
+  job.toolKey = 'flat-1.0';
+  return job;
+}
 import { dedupeFindings, jobTool, validateJob } from '@/engine/cnc/engrave/jobSetup';
 import { feedsFor } from '@/engine/cnc/feeds';
 import { Z1 } from '@/engine/cnc';
@@ -43,7 +51,7 @@ afterEach(cleanup);
 
 describe('RunSheetView — the stack-up elevation (#213 §6)', () => {
   it('draws the side view when the job has sacrificial material', () => {
-    const job = defaultEngraveJob();
+    const job = dj();
     job.sacrificial = presetPartOnBoard();
     render(<RunSheetView sheet={sheetFor(job)} />);
 
@@ -56,13 +64,13 @@ describe('RunSheetView — the stack-up elevation (#213 §6)', () => {
   });
 
   it('leaves the side view off a job with no sacrificial material', () => {
-    render(<RunSheetView sheet={sheetFor(defaultEngraveJob())} />);
+    render(<RunSheetView sheet={sheetFor(dj())} />);
     expect(screen.queryByTestId('run-sheet-stackup')).toBeNull();
     expect(screen.getByTestId('run-sheet-diagram')).toBeTruthy();
   });
 
   it('draws the cutter profile under the section that names the cutter (#489)', () => {
-    render(<RunSheetView sheet={sheetFor(defaultEngraveJob())} />);
+    render(<RunSheetView sheet={sheetFor(dj())} />);
     const profile = screen.getByTestId('run-sheet-tool-profile');
     expect(profile.querySelector('svg')).not.toBeNull();
     expect(profile.closest('[data-section-id="need"]')).not.toBeNull();
@@ -72,7 +80,7 @@ describe('RunSheetView — the stack-up elevation (#213 §6)', () => {
   });
 
   it('leaves the cutter profile off a job that names no cutter (#489)', () => {
-    const job = defaultEngraveJob();
+    const job = dj();
     job.tool = null;
     job.toolKey = 'user:not-in-this-house';
     render(<RunSheetView sheet={sheetFor(job)} />);
@@ -82,7 +90,7 @@ describe('RunSheetView — the stack-up elevation (#213 §6)', () => {
   it('prints the machine the job is written for (#347)', () => {
     // The operator's copy is what tells them which machine to set up, so the row is on the page and
     // not only in the data (`runSheet.spec.ts` asserts where the value comes from).
-    render(<RunSheetView sheet={sheetFor(defaultEngraveJob())} />);
+    render(<RunSheetView sheet={sheetFor(dj())} />);
     expect(screen.getByTestId('run-sheet-machine').textContent).toBe(Z1.name);
   });
 
@@ -91,7 +99,7 @@ describe('RunSheetView — the stack-up elevation (#213 §6)', () => {
   // it on to reach such a step: a `G38.2` buried inside a sentence would be a command the operator
   // has to reassemble by hand, which is the bug the review found in the step that preceded it.
   it('puts a step’s sendable line on the page, in its own run (#391)', () => {
-    render(<RunSheetView sheet={sheetFor(defaultEngraveJob(), { materialScan: true })} />);
+    render(<RunSheetView sheet={sheetFor(dj(), { materialScan: true })} />);
 
     // Every line the block asks the operator to type: the touch itself, the Alarm clear after a
     // miss, and the lift after every touch.

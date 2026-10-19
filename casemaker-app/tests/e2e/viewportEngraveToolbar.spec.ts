@@ -135,7 +135,12 @@ test('the depth legend stays put and inside the pane while the camera orbits (#3
   });
   await page.getByTestId('sidebar-button-cnc-engrave').click();
   await expect(page.getByTestId('engrave-preview-legend')).toBeVisible({ timeout: 60_000 });
-  // Let the preview build and the section-open AutoFrame settle.
+  // #516 item 5 — the default job starts tool-less; the recommendation lands on first load and the
+  // preview rebuilds with the floors it names. Wait for those floors (the legend's depth swatches)
+  // rather than a fixed delay, so the legend's box is the settled one before its position is read —
+  // the same wait `engrave.spec.ts`'s #288 test uses for the default job's 2, 1 and 0.5 mm cuts.
+  for (const d of ['2', '1', '0.5']) await expect(page.getByTestId(`engrave-legend-${d}`)).toBeVisible({ timeout: 60_000 });
+  // Let the section-open AutoFrame settle.
   await page.waitForTimeout(700);
 
   const legend = page.getByTestId('engrave-preview-legend');

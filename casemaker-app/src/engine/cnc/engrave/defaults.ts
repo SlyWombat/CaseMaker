@@ -4,6 +4,7 @@ import { Z1 } from '@/engine/cnc/machine';
 import { noneSacrificial } from '@/engine/cnc/sacrificial';
 import { MARGIN_DEFAULTS, type MarginSettings } from '@/engine/cnc/engrave/depthBounds';
 import { newId } from '@/utils/id';
+import { NO_TOOL_KEY } from '@/engine/cnc/toolRegistry';
 import type { EngraveJob, ViseParams } from '@/types/engraveJob';
 
 /**
@@ -156,9 +157,10 @@ export function defaultEngraveJob(
     ],
     // No shape pockets (#214): the shipped acceptance job is the three-label one (#209).
     shapes: [],
-    // The 1.0 mm flat end mill in TOOL_LIBRARY. Its lengths are `null` (unknown), so the
-    // holder gate will say "cannot be proven" — #208 records the owned cutters' real lengths.
-    toolKey: 'flat-1.0',
+    // #516 item 5 — a fresh job starts with NO cutter: the recommendation is made once the work is
+    // in (first Generate / first visit to Tools), so nothing here names `flat-1.0` any more. The
+    // empty key is the same "no cutter chosen yet" the `--from-3mf` / badge routes begin from.
+    toolKey: NO_TOOL_KEY,
     workholding: {
       kind: 'vise',
       vise: { ...vise },

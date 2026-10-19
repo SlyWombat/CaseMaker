@@ -34,6 +34,14 @@ import {
 } from '@/engine/cnc/engrave/runSheet';
 import { toPartPlan } from '@/engine/cnc/engrave/partPlan';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
+
+// #516 item 5 — the default job no longer seeds a cutter; the recommendation names `flat-1.0`.
+// These engine tests need the job to name its cutter, so `dj()` applies that recommendation.
+function dj(...args: Parameters<typeof defaultEngraveJob>): ReturnType<typeof defaultEngraveJob> {
+  const job = defaultEngraveJob(...args);
+  job.toolKey = 'flat-1.0';
+  return job;
+}
 import { dedupeFindings, jobTool, validateJob } from '@/engine/cnc/engrave/jobSetup';
 import { cuttingDiameter } from '@/engine/cnc/tool';
 import { feedsFor } from '@/engine/cnc/feeds';
@@ -85,7 +93,7 @@ describe('runRecord (#277)', () => {
   // -------------------------------------------------------------------------------------------
 
   it('fills the app half and leaves every measured field blank', () => {
-    const job = defaultEngraveJob();
+    const job = dj();
     const generated = stubGenerated(job);
     const run = buildRunRecord(job, generated, NOW);
     const tool = jobTool(job)!;
@@ -117,7 +125,7 @@ describe('runRecord (#277)', () => {
   });
 
   it('carries one blank per row the printed run sheet asks the operator to fill', () => {
-    const job = defaultEngraveJob();
+    const job = dj();
     const run = buildRunRecord(job, stubGenerated(job), NOW);
     const plan = toPartPlan(job);
 
@@ -142,7 +150,7 @@ describe('runRecord (#277)', () => {
   });
 
   it('keeps an estimate of zero rather than reading it as absent', () => {
-    const job = defaultEngraveJob();
+    const job = dj();
     const generated = stubGenerated(job);
     const run = buildRunRecord(job, { ...generated, cam: { ...generated.cam!, estimatedSeconds: 0 } }, NOW);
     expect(run.estimatedSeconds).toBe(0);
@@ -151,7 +159,7 @@ describe('runRecord (#277)', () => {
   });
 
   it('round trips through its own text, unchanged', () => {
-    const job = defaultEngraveJob();
+    const job = dj();
     const run = buildRunRecord(job, stubGenerated(job), NOW);
     const text = serializeRunRecord(run);
     expect(text.endsWith('\n')).toBe(true);
@@ -166,7 +174,7 @@ describe('runRecord (#277)', () => {
 
   /** A built record with `over` applied — the hand-edit at the bench, in memory. */
   function edited(over: Partial<RunRecord>): RunRecord {
-    const job = defaultEngraveJob();
+    const job = dj();
     return { ...buildRunRecord(job, stubGenerated(job), NOW), ...over };
   }
 

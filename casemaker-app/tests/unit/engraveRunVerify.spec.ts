@@ -13,6 +13,14 @@ import { tl } from './helpers/manifoldExec';
 import { regions } from './helpers/engravePipeline';
 import { engraveGenerate } from '@/workers/sim/engraveGenerate';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
+
+// #516 item 5 — the default job no longer seeds a cutter; the recommendation names `flat-1.0`.
+// These engine tests need the job to name its cutter, so `dj()` applies that recommendation.
+function dj(...args: Parameters<typeof defaultEngraveJob>): ReturnType<typeof defaultEngraveJob> {
+  const job = defaultEngraveJob(...args);
+  job.toolKey = 'flat-1.0';
+  return job;
+}
 import { jobDepthLimit } from '@/engine/cnc/engrave/partPlan';
 import { toSetup } from '@/engine/cnc/engrave/jobSetup';
 import { noneSacrificial, presetPartOnBoard } from '@/engine/cnc/sacrificial';
@@ -44,7 +52,7 @@ function cutoutJob(
   cutoutOver: Partial<EngraveCutout> = {},
   jobOver: Partial<EngraveJob> = {},
 ): EngraveJob {
-  const base = defaultEngraveJob();
+  const base = dj();
   return {
     ...base,
     labels: [],
@@ -110,7 +118,7 @@ const pocket: EngraveKeepOut = {
 };
 
 function overMembraneJob(depth: number): EngraveJob {
-  const base = defaultEngraveJob();
+  const base = dj();
   return {
     ...base,
     keepOuts: [pocket],

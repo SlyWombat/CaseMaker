@@ -106,12 +106,14 @@ export function preflightHub(input: PreflightHubInput): PreflightHubReport {
   //
   // A setup naming no cutter contributes no scope — there is no `(setup, tool)` to ask about — but
   // its `setup-no-tool` finding is not lost: `validateJob` carries it into every scope's rows as
-  // job-as-data. A job with no setups at all falls back to the single scope such a job would have,
-  // so the gate is never vacuously green for want of anything to iterate.
+  // job-as-data. A job that yields NO scope at all — no stored setups, or only setups that name no
+  // cutter (the tool-less default of #516 item 5) — falls back to the single scope such a job would
+  // have, so the gate is never vacuously green for want of anything to iterate.
+  const namedScopes: PreflightScope[] = setups.flatMap((setup, i) =>
+    setup.tools.map((toolKey) => ({ setupIndex: i, toolKey })),
+  );
   const scopes: PreflightScope[] =
-    setups.length === 0
-      ? [{ setupIndex: 0, toolKey: input.job.toolKey }]
-      : setups.flatMap((setup, i) => setup.tools.map((toolKey) => ({ setupIndex: i, toolKey })));
+    namedScopes.length === 0 ? [{ setupIndex: 0, toolKey: input.job.toolKey }] : namedScopes;
 
   const groups: PreflightScopeRows[] = scopes.map((scope) => ({
     scope,

@@ -9,6 +9,14 @@ import { tl } from './helpers/manifoldExec';
 import { generate } from './helpers/engravePipeline';
 import { Z1 } from '@/engine/cnc/machine';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
+
+// #516 item 5 — the default job no longer seeds a cutter; the recommendation names `flat-1.0`.
+// These engine tests need the job to name its cutter, so `dj()` applies that recommendation.
+function dj(...args: Parameters<typeof defaultEngraveJob>): ReturnType<typeof defaultEngraveJob> {
+  const job = defaultEngraveJob(...args);
+  job.toolKey = 'flat-1.0';
+  return job;
+}
 import {
   CAMERA_TARGET_MARGIN,
   cameraFiducialCutCount,
@@ -275,7 +283,7 @@ describe('cameraTargetSvg (#189)', () => {
 describe('cameraFiducialJob (#189)', () => {
   it('resizes the stock to the sheet and discards the base job’s items', () => {
     const spec = cameraTargetFor();
-    const base = defaultEngraveJob();
+    const base = dj();
     const job = cameraFiducialJob(spec, base);
     expect(job.stock.length).toBe(spec.sheet.width);
     expect(job.stock.width).toBe(spec.sheet.depth);
@@ -286,7 +294,7 @@ describe('cameraFiducialJob (#189)', () => {
 
   it('builds each cross from two sharp rectangles at one depth', () => {
     const spec = cameraTargetFor();
-    const job = cameraFiducialJob(spec, defaultEngraveJob());
+    const job = cameraFiducialJob(spec, dj());
     const { arm, stroke, depth } = spec.fiducials;
     const first = job.shapes[0]!;
     expect(first.kind).toBe('rect');
@@ -300,7 +308,7 @@ describe('cameraFiducialJob (#189)', () => {
   });
 
   it('generates: the app accepts the job and writes a clean .nc', () => {
-    const job = cameraFiducialJob(cameraTargetFor(), defaultEngraveJob());
+    const job = cameraFiducialJob(cameraTargetFor(), dj());
     const g = generate(tl, job);
     expect(g.ok).toBe(true);
     expect(g.stage).toBe('done');

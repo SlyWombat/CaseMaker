@@ -11,6 +11,14 @@ import { tl } from './helpers/manifoldExec';
 import { generate } from './helpers/engravePipeline';
 import { itemOperationName, itemProfile, resolveItems, toPartPlan } from '@/engine/cnc/engrave/partPlan';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
+
+// #516 item 5 — the default job no longer seeds a cutter; the recommendation names `flat-1.0`.
+// These engine tests need the job to name its cutter, so `dj()` applies that recommendation.
+function dj(...args: Parameters<typeof defaultEngraveJob>): ReturnType<typeof defaultEngraveJob> {
+  const job = defaultEngraveJob(...args);
+  job.toolKey = 'flat-1.0';
+  return job;
+}
 import { parseEngraveJob } from '@/store/engraveJobSchema';
 import { jobTool, toSetup } from '@/engine/cnc/engrave/jobSetup';
 import { createSimSession } from '@/workers/sim/session';
@@ -65,7 +73,7 @@ function vector(
 
 describe('EngraveVectorShape (#217): through the schema', () => {
   it('round-trips an imported outline, contours unchanged', () => {
-    const job = defaultEngraveJob();
+    const job = dj();
     const v = vector([squareRing(50, 30, 10)]);
     const parsed = parseEngraveJob({ ...job, vectors: [v] });
     expect(parsed.ok).toBe(true);
@@ -77,7 +85,7 @@ describe('EngraveVectorShape (#217): through the schema', () => {
   });
 
   it('a pre-#217 document keeps no vectors key', () => {
-    const parsed = parseEngraveJob(defaultEngraveJob());
+    const parsed = parseEngraveJob(dj());
     expect(parsed.ok).toBe(true);
     if (!parsed.ok) return;
     expect('vectors' in parsed.job).toBe(false);
@@ -85,7 +93,7 @@ describe('EngraveVectorShape (#217): through the schema', () => {
 
   it('refuses more contours than the importer allows', () => {
     const rings = Array.from({ length: MAX_OUTLINE_CONTOURS + 1 }, (_, i) => squareRing(i, 0, 1));
-    const parsed = parseEngraveJob({ ...defaultEngraveJob(), vectors: [vector(rings)] });
+    const parsed = parseEngraveJob({ ...dj(), vectors: [vector(rings)] });
     expect(parsed.ok).toBe(false);
     if (parsed.ok) return;
     expect(parsed.errors.join(' ')).toMatch(/contours|limit|too/i);
@@ -97,7 +105,7 @@ describe('EngraveVectorShape (#217): through the schema', () => {
     const big = Array.from({ length: ringCount }, () =>
       Array.from({ length: perRing }, (_, i): [number, number] => [i, 0]),
     );
-    const parsed = parseEngraveJob({ ...defaultEngraveJob(), vectors: [vector(big)] });
+    const parsed = parseEngraveJob({ ...dj(), vectors: [vector(big)] });
     expect(parsed.ok).toBe(false);
     if (parsed.ok) return;
     expect(parsed.errors.join(' ')).toMatch(/points|limit/i);
@@ -118,7 +126,7 @@ describe('EngraveVectorShape (#217): through itemProfile / toPartPlan', () => {
   });
 
   it('toPartPlan carries the vector into engraves', () => {
-    const job: EngraveJob = { ...defaultEngraveJob(), labels: [], shapes: [], vectors: [vector([squareRing(0, 0, 10)])] };
+    const job: EngraveJob = { ...dj(), labels: [], shapes: [], vectors: [vector([squareRing(0, 0, 10)])] };
     const plan = toPartPlan(job);
     expect(plan.engraves).toHaveLength(1);
     expect(plan.engraves[0]!.id).toBe('v');
@@ -127,7 +135,7 @@ describe('EngraveVectorShape (#217): through itemProfile / toPartPlan', () => {
 
   it('a frame may reference an imported outline', () => {
     const job: EngraveJob = {
-      ...defaultEngraveJob(),
+      ...dj(),
       labels: [],
       shapes: [],
       vectors: [vector([squareRing(0, 0, 10)])],
@@ -180,7 +188,7 @@ describe('EngraveVectorShape (#217): the fill rule, read by Manifold', () => {
 describe('EngraveVectorShape (#217): end to end', () => {
   it('a job that is only an imported outline generates, simulates and passes the oracle', () => {
     const job: EngraveJob = {
-      ...defaultEngraveJob(),
+      ...dj(),
       labels: [],
       shapes: [],
       vectors: [vector([squareRing(0, 0, 10)], 'NonZero', { depth: 1 })],

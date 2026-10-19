@@ -93,7 +93,7 @@ describe('engraveRunStore (#206)', () => {
   beforeEach(() => {
     useEngraveRunStore.getState().reset();
     setEngraveRunClientLoader(null);
-    useEngraveJobStore.getState().replace(defaultEngraveJob());
+    useEngraveJobStore.getState().replace({ ...defaultEngraveJob(), toolKey: 'flat-1.0' }); // #516 item 5 — the default job no longer seeds a cutter
     // No Makera catalogue unless a test loads one: it is module state (`feeds.ts`), so it outlives a
     // test that set it (#324).
     clearFeedCatalogue();
@@ -423,7 +423,7 @@ describe('engraveRunStore (#432 R10) — the facing pick’s condition table', (
 
   beforeEach(() => {
     useEngraveRunStore.getState().reset();
-    useEngraveJobStore.getState().replace(defaultEngraveJob());
+    useEngraveJobStore.getState().replace({ ...defaultEngraveJob(), toolKey: 'flat-1.0' }); // #516 item 5 — the default job no longer seeds a cutter
     resetInventoryConditions();
   });
 

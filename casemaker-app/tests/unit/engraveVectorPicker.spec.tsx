@@ -61,7 +61,7 @@ beforeEach(() => {
   // #451 — one case below puts a shop default in place, and it would otherwise leak into the rest.
   resetShopDefaultsStore();
   act(() => {
-    useEngraveJobStore.setState({ job: defaultEngraveJob() });
+    useEngraveJobStore.setState({ job: { ...defaultEngraveJob(), toolKey: 'flat-1.0' } }); // #516 item 5 — the default job no longer seeds a cutter
   });
   useEngravePreviewStore.getState().dispose();
   vi.mocked(openTextFile).mockReset();

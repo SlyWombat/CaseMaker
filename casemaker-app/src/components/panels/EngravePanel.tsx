@@ -1,6 +1,7 @@
 import { featureSim } from '@/platform/features';
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type JSX, type ReactNode, type RefObject } from 'react';
 import { newItemDepthFor, newTargetObjectId, useEngraveJobStore } from '@/store/engraveJobStore';
+import { useEngraveJobFileStore } from '@/store/engraveJobFileStore';
 import { useProjectStore } from '@/store/projectStore';
 import { useEngravePreviewStore } from '@/store/engravePreviewStore';
 import { expandEngraveRow, useEngraveRowStore } from '@/store/engraveRowStore';
@@ -191,6 +192,34 @@ const SEVERITY_COLOR: Record<JobFinding['severity'], string> = { error: '#f0b4ad
 /** A leading letter, uppercased — the engine's reasons are clauses, the panel prints sentences. */
 function sentenceCase(text: string): string {
   return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
+/**
+ * #516 item 5 — the cutter key the first Generate should apply. Reads the preview's current pick;
+ * when the preview has not landed yet (`loading`/`idle`) it waits for it, so a Generate pressed
+ * before the preview finished still picks the cutter and builds the program in one press. Resolves
+ * null when no cutter is eligible, the preview errors, or the wait times out.
+ */
+function awaitPreviewRecommendationKey(timeoutMs = 30_000): Promise<string | null> {
+  const got = useEngravePreviewStore.getState();
+  if (got.preview?.recommendation?.key) return Promise.resolve(got.preview.recommendation.key);
+  if (got.status === 'ready' || got.status === 'error') return Promise.resolve(null);
+  return new Promise((resolve) => {
+    let settled = false;
+    const settle = (key: string | null): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      unsub();
+      resolve(key);
+    };
+    const timer = setTimeout(() => settle(null), timeoutMs);
+    const unsub = useEngravePreviewStore.subscribe((state) => {
+      const key = state.preview?.recommendation?.key ?? null;
+      if (key !== null) settle(key);
+      else if (state.status === 'ready' || state.status === 'error') settle(null);
+    });
+  });
 }
 
 /** A finish as the sentence “The stock is …” finishes (#413's four values). */
@@ -1046,6 +1075,10 @@ export function EngravePanel(): JSX.Element {
     if (key === null) return;
     const source = job.sources?.tool;
     if (source === 'user' || source === 'measured') return;
+    // #516 item 5 — the first recommendation lands on the first edit or Generate, not on load: a
+    // clean (just-opened or just-saved) tool-less document keeps its empty key, so opening a saved
+    // job does not immediately dirty it.
+    if (job.toolKey === '' && !useEngraveJobFileStore.getState().dirty) return;
     if (job.toolKey !== key) setTool(key, 'computed');
   }, [rec?.key, job.sources?.tool, job.toolKey, setTool]);
 
@@ -1304,6 +1337,14 @@ export function EngravePanel(): JSX.Element {
   }`;
 
   async function generate(): Promise<void> {
+    // #516 item 5 — the first Generate recommends the cutter for a tool-less job, so one press both
+    // picks the tool and builds the program (the sacrificial swatch reads the sim scene it loads).
+    // A tool the operator chose or measured is left alone.
+    const source = job.sources?.tool;
+    if (job.toolKey === '' && source !== 'user' && source !== 'measured') {
+      const key = rec?.key ?? (await awaitPreviewRecommendationKey());
+      if (key) setTool(key, 'computed');
+    }
     await run.generate();
   }
 

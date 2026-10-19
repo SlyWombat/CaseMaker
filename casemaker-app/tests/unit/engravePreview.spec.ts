@@ -13,7 +13,8 @@ import { preview, regions } from './helpers/engravePipeline';
 import { createEngravePreviewer, FLOOR_THICKNESS_MM, LOST_THICKNESS_MM } from '@/workers/sim/engravePreview';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { effectiveMargins, MARGIN_DEFAULTS } from '@/engine/cnc/engrave/depthBounds';
-import { jobTool, type JobFinding } from '@/engine/cnc/engrave/jobSetup';
+import type { JobFinding } from '@/engine/cnc/engrave/jobSetup';
+import { resolveTool } from '@/engine/cnc/toolRegistry';
 import { toPartPlan } from '@/engine/cnc/engrave/partPlan';
 import { cuttingRadiusForSweep, flatEndMill, type Tool } from '@/engine/cnc/tool';
 import { grooveRadiusAt, vCone } from '@/engine/cnc/vProfile';
@@ -35,6 +36,18 @@ import {
   SPLIT_TOP_COLOR,
   SPLIT_BOTTOM_COLOR,
 } from '@/components/viewport/engraveRamp';
+
+/**
+ * #516 item 5 — the default job no longer seeds a cutter; the recommendation names `flat-1.0` for
+ * the default job's three labels. These tests exercise the ENGINE, which requires the job to name
+ * its cutter (the panel applies the recommendation before the engine runs), so `dj()` is the
+ * default job with that recommendation applied.
+ */
+function dj(...args: Parameters<typeof defaultEngraveJob>): EngraveJob {
+  const job = defaultEngraveJob(...args);
+  job.toolKey = 'flat-1.0';
+  return job;
+}
 
 /** Signed volume of a triangle soup (divergence theorem), absolute value in mm³. */
 function meshVolume(m: NodeMeshOutput): number {
@@ -65,7 +78,7 @@ function buildPreview(job: EngraveJob) {
 
 describe('engravePreview (#205)', () => {
   it('cuts the default job to Σ(openedArea × depth) of the uncut prism', () => {
-    const job = defaultEngraveJob();
+    const job = dj();
     const p = buildPreview(job);
     const uncut = job.stock.length * job.stock.width * job.stock.thickness;
     const expected = p.engravability.reduce((sum, row) => {
@@ -79,13 +92,13 @@ describe('engravePreview (#205)', () => {
   });
 
   it('returns one floor mesh per cut label, at that label’s own depth', () => {
-    const p = buildPreview(defaultEngraveJob());
+    const p = buildPreview(dj());
     expect(p.floors.map((f) => f.depth)).toEqual([2.0, 1.0, 0.5]);
     for (const floor of p.floors) expect(meshVolume(floor.mesh)).toBeGreaterThan(0);
   });
 
   it('draws the stepped jaws, the rails, the screws and a provisional bed (#520)', () => {
-    const p = buildPreview(defaultEngraveJob());
+    const p = buildPreview(dj());
     const ids = p.fixture.map((f) => f.id);
     expect(ids[0]).toBe('vise-fixed-jaw');
     expect(ids[1]).toBe('vise-moving-jaw');
@@ -106,7 +119,7 @@ describe('engravePreview (#205)', () => {
       { thickness: 12, length: 100, width: 60 },
       { thickness: 50, length: 50, width: 50 },
     ].map(({ thickness, length, width }) => {
-      const job = defaultEngraveJob();
+      const job = dj();
       job.stock.thickness = thickness;
       job.stock.length = length;
       job.stock.width = width;
@@ -127,14 +140,14 @@ describe('engravePreview (#205)', () => {
   });
 
   it('carries the registration band for the mount’s datum edge (§5.4)', () => {
-    const p = buildPreview(defaultEngraveJob());
+    const p = buildPreview(dj());
     expect(p.registration).toHaveLength(1);
     expect(p.registration[0]).toMatchObject({ edge: 'left', source: 'datum' });
     expect(p.registration[0]!.uncertainty).toBeGreaterThan(0);
   });
 
   it('leaves a label that is too deep out of the cut and reports it', () => {
-    const job = defaultEngraveJob();
+    const job = dj();
     job.labels = [{ ...job.labels[0]!, id: 'too-deep', text: 'DEEP', depth: 11.5 }];
     const p = buildPreview(job);
     const uncut = job.stock.length * job.stock.width * job.stock.thickness;
@@ -149,7 +162,7 @@ describe('engravePreview (#205)', () => {
   // label with it on screen. The preview and `engraveGenerate` share `engraveCutRegions` and
   // `keepOutFindings`, so this pins the panel half of that pair.
   it('warns about a cut over a declared void, and only for the cut that covers it (#171)', () => {
-    const job = defaultEngraveJob();
+    const job = dj();
     const [case_, maker] = job.labels;
     // Size 8 keeps both boxes small enough to sit clearly inside / clearly outside the void.
     job.labels = [
@@ -182,7 +195,7 @@ describe('engravePreview (#205)', () => {
   // preview passes it the same radius the run does, so a trace crossing a void is warned about
   // while the line is being placed rather than only after Generate.
   it('warns about a TRACE over the void in the live preview too (#270)', () => {
-    const job = defaultEngraveJob();
+    const job = dj();
     job.labels = [];
     job.shapes = [];
     job.traces = [
@@ -220,7 +233,7 @@ describe('engravePreview (#205)', () => {
   });
 
   it('reports the tool recommendation with the compromise size suggestion appended', () => {
-    const job = defaultEngraveJob();
+    const job = dj();
     // A 4 mm label cannot survive the 3.175 mm cutter, so the compromise message gains the
     // measured cap-height suggestion (#201's suggestCapHeight, composed in the worker).
     job.labels = [{ ...job.labels[0]!, text: 'MAKER', size: 4, depth: 1 }];
@@ -243,7 +256,7 @@ describe('engravePreview (#205)', () => {
     // (1) A label that loses detail plus a ⌀20 circle under the 3.175 mm cutter. The circle has no
     // glyphs: it proves `floors` walks `plan.engraves`, not `job.labels`, and that the reason is
     // still a complete string. The worst item here is the label, so this is the label branch.
-    const job = defaultEngraveJob();
+    const job = dj();
     job.toolKey = 'flat-3.175x12-metal';
     job.labels = [{ ...job.labels[0]!, id: 'lbl', text: 'MAKER', size: 4, depth: 1 }];
     job.shapes = [
@@ -290,7 +303,7 @@ describe('engravePreview (#205)', () => {
   });
 
   it('returns null when the generation is older than one already answered', () => {
-    const job = defaultEngraveJob();
+    const job = dj();
     const fresh = preview(previewer, job, 1000);
     expect(fresh).not.toBeNull();
     expect(preview(previewer, job, 999)).toBeNull();
@@ -313,7 +326,7 @@ describe('engravePreview — sacrificial material (#213)', () => {
   }
 
   it('draws no sacrificial bodies and keeps the jaws on the part with none', () => {
-    const job = defaultEngraveJob();
+    const job = dj();
     const L = job.stock.length;
     const p = buildPreview(job);
     expect(p.sacrificial).toEqual([]);
@@ -323,7 +336,7 @@ describe('engravePreview — sacrificial material (#213)', () => {
   });
 
   it('draws the two strips and moves the jaws out by the strip thickness ("Strips between the jaws")', () => {
-    const job = defaultEngraveJob();
+    const job = dj();
     job.sacrificial = presetJawStrips();
     const L = job.stock.length;
     const p = buildPreview(job);
@@ -342,7 +355,7 @@ describe('engravePreview — sacrificial material (#213)', () => {
   });
 
   it('draws the under-board and moves the jaws out by its overhang ("Part on a larger board")', () => {
-    const job = defaultEngraveJob();
+    const job = dj();
     job.sacrificial = presetPartOnBoard();
     const L = job.stock.length;
     const p = buildPreview(job);
@@ -374,7 +387,9 @@ describe('engravePreview — drills and traces are in the picture (#288)', () =>
 
   /** The default job's cutter radius — asserted, not assumed, so a library change cannot hide here. */
   const R = (() => {
-    const r = cuttingRadiusForSweep(jobTool(defaultEngraveJob())!);
+    // #516 item 5 — a fresh default job no longer seeds `flat-1.0`, so the radius is resolved from
+    // the built-in directly; the recommendation still names it for the default job's three labels.
+    const r = cuttingRadiusForSweep(resolveTool('flat-1.0')!);
     if (!r.ok) throw new Error('the default job’s cutter is not sweepable');
     return r.radius;
   })();
@@ -392,7 +407,7 @@ describe('engravePreview — drills and traces are in the picture (#288)', () =>
 
   /** One shallow label, so the drill's and the trace's own volume stands out against it. */
   function oneLabelJob(): EngraveJob {
-    const job = defaultEngraveJob();
+    const job = dj();
     job.labels = [{ ...job.labels[0]!, id: 'lbl', depth: 0.5 }];
     return job;
   }
@@ -611,7 +626,7 @@ describe('engravePreview — V-carve outlines (#221)', () => {
     });
 
   const vJob = (): EngraveJob => {
-    const base = defaultEngraveJob();
+    const base = dj();
     return {
       ...base,
       stock: {
@@ -659,27 +674,27 @@ describe('engravePreview — V-carve outlines (#221)', () => {
   });
 
   it('draws no outlines for a flat end mill: its three levels are one polygon set', () => {
-    expect(build(defaultEngraveJob()).outlines).toEqual([]);
+    expect(build(dj()).outlines).toEqual([]);
   });
 });
 
 describe('EngraveJob schema — #205’s cutOverride', () => {
   it('round-trips a v2 job that carries a cut override', () => {
-    const result = parseEngraveJob({ ...defaultEngraveJob(), cutOverride: { rpm: 9000, stepOver: 0.4 } });
+    const result = parseEngraveJob({ ...dj(), cutOverride: { rpm: 9000, stepOver: 0.4 } });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.job.cutOverride).toEqual({ rpm: 9000, stepOver: 0.4 });
   });
 
   it('leaves cutOverride absent on a v2 job that has none', () => {
-    const result = parseEngraveJob(defaultEngraveJob());
+    const result = parseEngraveJob(dj());
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.job.cutOverride).toBeUndefined();
   });
 
   it('stamps a version-1 job to v3 with no cut override (#213’s transform, #425’s stamp)', () => {
-    const v2 = defaultEngraveJob();
+    const v2 = dj();
     const v1: Record<string, unknown> = { ...v2, schemaVersion: 1 };
     delete v1.sacrificial;
     delete v1.breakthrough;
@@ -764,7 +779,7 @@ describe('engravePreview — declared under-surface voids (#271)', () => {
   }
 
   it('outlines the footprint and states what the ceiling leaves', () => {
-    const job = defaultEngraveJob();
+    const job = dj();
     job.keepOuts = [
       {
         id: 'pocket',
@@ -797,7 +812,7 @@ describe('engravePreview — declared under-surface voids (#271)', () => {
   });
 
   it('resolves the arc kinds too, and drops a disabled void', () => {
-    const job = defaultEngraveJob();
+    const job = dj();
     job.keepOuts = [
       {
         id: 'hole',
@@ -841,7 +856,7 @@ describe('engravePreview — declared under-surface voids (#271)', () => {
     // comes from `keepOutLimit` rather than being composed where the label is drawn.
     const blank = badgeBlankFor(defaultBadgeParams({ print: { layerHeight: 0.2, firstLayerHeight: 0.2 } }));
     const job: EngraveJob = {
-      ...defaultEngraveJob(),
+      ...dj(),
       stock: blank.stock,
       keepOuts: blank.pocket ? [blank.pocket] : [],
     };
@@ -875,7 +890,7 @@ describe('engravePreview — the colour boundary (#285, #345)', () => {
       print ? { print: { layerHeight: 0.2, firstLayerHeight: 0.2 } } : { print: undefined },
     );
     const blank = badgeBlankFor(badge);
-    const base = defaultEngraveJob(viseForNewJob(undefined, blank.stock));
+    const base = dj(viseForNewJob(undefined, blank.stock));
     return {
       ...base,
       stock: blank.stock,
@@ -1008,7 +1023,7 @@ describe('engravePreview — the bench’s cutter conditions (#442)', () => {
     // The default job names the 1.0 mm built-in, so its own cutter is the one to mark broken. The
     // summary is built by `toolCondition`'s own function — the very one `toolRegistryStore` fills the
     // lookup with — so this is not a hand-shaped summary that could differ from the app's.
-    const job = defaultEngraveJob();
+    const job = dj();
     const summary = itemConditionSummary({
       id: job.toolKey,
       quantity: 1,
@@ -1047,7 +1062,7 @@ describe('engravePreview — the lost layer (§5.7)', () => {
   }
 
   it('counts design − as-cut per region item, matching the engravability row', () => {
-    const job = defaultEngraveJob();
+    const job = dj();
     const p = buildPreview(job);
 
     // The shipped acceptance job's 8 mm label keeps 98.8 % (#209), so every label has some loss.
@@ -1067,7 +1082,7 @@ describe('engravePreview — the lost layer (§5.7)', () => {
   });
 
   it('does not paint a fully dropped glyph as lost: `item-empty` already refuses it by name', () => {
-    const job = defaultEngraveJob();
+    const job = dj();
     job.labels = [{ ...job.labels[0]!, id: 'tiny', text: 'I', size: 1.5, depth: 0.5 }];
     const p = buildPreview(job);
 
@@ -1083,7 +1098,7 @@ describe('engravePreview — the lost layer (§5.7)', () => {
   });
 
   it('leaves an item with an ERROR finding out of the picture, and out of the lost layer too', () => {
-    const job = defaultEngraveJob();
+    const job = dj();
     job.labels = job.labels.map((l, i) => (i === 1 ? { ...l, depth: 11.5 } : l));
     const p = buildPreview(job);
 
@@ -1097,7 +1112,7 @@ describe('engravePreview — the lost layer (§5.7)', () => {
   // the opened area of every cut at or shallower than that stage's depth. A test that compared the
   // stages to each other would pass even if all of them were the finished stock.
   it('returns the cumulative stock at each cut depth, starting at the uncut design', () => {
-    const job = defaultEngraveJob();
+    const job = dj();
     const p = buildPreview(job);
     const uncut = job.stock.length * job.stock.width * job.stock.thickness;
 
@@ -1128,7 +1143,7 @@ describe('engravePreview — the lost layer (§5.7)', () => {
   });
 
   it('has no stages when nothing is cut — the slider has no second state to show', () => {
-    const job = defaultEngraveJob();
+    const job = dj();
     job.labels.forEach((l) => {
       l.enabled = false;
     });
@@ -1139,7 +1154,7 @@ describe('engravePreview — the lost layer (§5.7)', () => {
   });
 
   it('has no lost layer for a drill or a trace — neither design is an area the cutter falls short of', () => {
-    const job = defaultEngraveJob();
+    const job = dj();
     job.labels = [{ ...job.labels[0]!, id: 'lbl', depth: 0.5 }];
     job.drills = [
       {

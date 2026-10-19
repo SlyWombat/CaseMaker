@@ -4641,8 +4641,7 @@
           "description": "Snapshot of the cutter the job was written with, or null."
         },
         "toolKey": {
-          "description": "Registry key of the cutter the job starts with.",
-          "minLength": 1,
+          "description": "Registry key of the cutter the job starts with; empty means no cutter is chosen yet.",
           "type": "string"
         },
         "traces": {

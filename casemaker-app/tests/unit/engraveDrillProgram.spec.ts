@@ -237,6 +237,7 @@ describe('the drill is one more (setup, tool) entry (#434 × #472)', () => {
 
   it('splits an engrave + drill setup into two programs, and the drills leave program 1', () => {
     const base = defaultEngraveJob();
+    base.toolKey = 'flat-1.0'; // #516 item 5 — the default job no longer seeds a cutter
     const label = { ...base.labels[0]!, id: 'title' };
     const port = hole(2);
     const job: EngraveJob = {

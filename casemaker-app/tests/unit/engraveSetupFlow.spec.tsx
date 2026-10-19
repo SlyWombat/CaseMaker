@@ -15,6 +15,14 @@ import {
 } from '@/store/engravePreviewStore';
 import { useEngraveRunStore } from '@/store/engraveRunStore';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
+
+// #516 item 5 — the default job no longer seeds a cutter; the recommendation names `flat-1.0`.
+// These engine tests need the job to name its cutter, so `dj()` applies that recommendation.
+function dj(...args: Parameters<typeof defaultEngraveJob>): ReturnType<typeof defaultEngraveJob> {
+  const job = defaultEngraveJob(...args);
+  job.toolKey = 'flat-1.0';
+  return job;
+}
 import {
   applyAnswers,
   blankViseFindings,
@@ -40,7 +48,7 @@ beforeEach(() => {
   setEngravePreviewClientLoader(async () => NO_PREVIEW);
   useSettingsStore.getState().resetSettings();
   act(() => {
-    useEngraveJobStore.setState({ job: defaultEngraveJob() });
+    useEngraveJobStore.setState({ job: dj() });
   });
   useEngraveRunStore.getState().reset();
   useEngravePreviewStore.getState().dispose();
@@ -61,7 +69,7 @@ function toBlankStep(): void {
 
 describe('guided job setup — the pure answers (#254)', () => {
   it('every value applyAnswers writes carries a source, and measured is never demoted', () => {
-    const job = defaultEngraveJob();
+    const job = dj();
     // Pretend thickness was a caliper reading.
     job.sources = { stock: { thickness: 'measured' } };
 
@@ -83,7 +91,7 @@ describe('guided job setup — the pure answers (#254)', () => {
   });
 
   it('catches the #231 case — a 3.81 mm blank in the shipped 4 mm-proud vise', () => {
-    const job = defaultEngraveJob(); // 12 mm stock, stockProud 4
+    const job = dj(); // 12 mm stock, stockProud 4
     const answers = defaultSetupAnswers(job);
     answers.stock = { ...answers.stock, thickness: 3.81 };
 
@@ -108,7 +116,7 @@ describe('guided job setup — the pure answers (#254)', () => {
   });
 
   it('offers the seated stock-proud on a blank no taller than the ledge step (#406, #488)', () => {
-    const job = defaultEngraveJob(); // stockProud 4
+    const job = dj(); // stockProud 4
     const answers = defaultSetupAnswers(job);
     answers.stock = { ...answers.stock, thickness: 3 };
     // The proud-exceeds-thickness refusal is real…
@@ -121,7 +129,7 @@ describe('guided job setup — the pure answers (#254)', () => {
   });
 
   it('shows `vise-default` once on the blank step, not once per validator (#353)', () => {
-    const job = defaultEngraveJob();
+    const job = dj();
     const answers = defaultSetupAnswers(job);
 
     // Both passes used to answer it, and the step printed both copies. Now the vise validator
@@ -134,7 +142,7 @@ describe('guided job setup — the pure answers (#254)', () => {
   });
 
   it('carries a custom sacrificial setup through untouched until the choice changes', () => {
-    const job = defaultEngraveJob();
+    const job = dj();
     const answers = defaultSetupAnswers(job);
     // A job that already has strips: the seeded answers keep them.
     answers.sacrificial = presetJawStrips();

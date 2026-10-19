@@ -1521,7 +1521,11 @@ const engraveJobV1Schema = z.object({
   machineId: machineIdSchema,
   stock: stockSchema.describe('The blank being cut.'),
   labels: z.array(labelSchema).describe('Text labels engraved into the stock.'),
-  toolKey: z.string().min(1).describe('Registry key of the cutter the job starts with.'),
+  // #516 item 5 — an EMPTY key is legal at every version: a fresh default job (and the `--from-3mf`
+  // / badge routes) starts with no cutter and the recommendation fills a real key in later. A v1
+  // document predates "no cutter", so none was ever written with one, but the schema need not
+  // enforce history — empty just means "no cutter is chosen yet".
+  toolKey: z.string().describe('Registry key of the cutter the job starts with; empty means no cutter is chosen yet.'),
   workholding: z
     .object({
       kind: z.literal('vise').describe('Always vise in version 1.'),

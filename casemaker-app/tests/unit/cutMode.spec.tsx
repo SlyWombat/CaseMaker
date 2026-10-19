@@ -91,7 +91,7 @@ beforeEach(() => {
   resetEngravePackageStore();
   useEngraveRunStore.getState().reset();
   act(() => {
-    useEngraveJobStore.setState({ job: defaultEngraveJob() });
+    useEngraveJobStore.setState({ job: { ...defaultEngraveJob(), toolKey: 'flat-1.0' } }); // #516 item 5 — the default job no longer seeds a cutter
   });
   useEngravePreviewStore.getState().dispose();
 });
@@ -147,7 +147,7 @@ describe('EngravePanel — the Design/Cut switch (#419 §3)', () => {
   });
 
   it('shows a green gate when the generated program is clean', () => {
-    const job = defaultEngraveJob();
+    const job = { ...defaultEngraveJob(), toolKey: 'flat-1.0' }; // #516 item 5 — the default job no longer seeds a cutter
     act(() => {
       useEngraveRunStore.setState({ generated: generatedFor(job), phase: 'ready', simStatus: null });
     });
@@ -165,7 +165,7 @@ describe('EngravePanel — the Design/Cut switch (#419 §3)', () => {
   });
 
   it('lands a red row on the page in the owner`s words', () => {
-    const job = defaultEngraveJob();
+    const job = { ...defaultEngraveJob(), toolKey: 'flat-1.0' }; // #516 item 5 — the default job no longer seeds a cutter
     const deep: EngraveJob = {
       ...job,
       labels: job.labels.map((l, i) => (i === 0 ? { ...l, depth: 11.5 } : l)),
@@ -184,7 +184,7 @@ describe('EngravePanel — the Design/Cut switch (#419 §3)', () => {
   });
 
   it('Back to Design expands the item the first red row names', () => {
-    const job = defaultEngraveJob();
+    const job = { ...defaultEngraveJob(), toolKey: 'flat-1.0' }; // #516 item 5 — the default job no longer seeds a cutter
     const labelId = job.labels[0]!.id;
     const deep: EngraveJob = {
       ...job,
@@ -213,6 +213,21 @@ describe('EngravePanel — the Design/Cut switch (#419 §3)', () => {
     render(<EngravePanel />);
     expect(pressed('cnc-mode-cut')).toBe('true');
     expect(screen.getByTestId('engrave-preflight')).toBeTruthy();
+  });
+
+  it('blocks Cut for a tool-less job — the missing program, not a cutter finding (#516 item 5)', () => {
+    act(() => {
+      useEngraveJobStore.setState({ job: defaultEngraveJob() }); // no cutter named yet
+    });
+    render(<EngravePanel />);
+    openCut();
+
+    expect(pressed('cnc-mode-cut')).toBe('true');
+    expect(screen.getByTestId('engrave-preflight').getAttribute('data-state')).toBe('blocked');
+    expect(screen.getByText('no-generate')).toBeTruthy();
+    expect(screen.getByTestId('engrave-preflight-first-blocking').textContent).toContain('Generate first.');
+    // The tool-less state is the normal pre-recommendation state, not an error of its own.
+    expect(screen.queryByText('setup-no-tool')).toBeNull();
   });
 
   it('returns to Design when another job is opened', () => {

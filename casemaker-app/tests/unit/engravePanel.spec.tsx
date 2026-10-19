@@ -94,7 +94,10 @@ beforeEach(() => {
   resetEngraveRows();
   resetEngraveRemovalUndo();
   act(() => {
-    useEngraveJobStore.setState({ job: defaultEngraveJob() });
+    // #516 item 5 — the default job no longer seeds a cutter, but these panel tests exercise
+    // Generate/sheet/facing paths that need one, so the store job states `flat-1.0` (the
+    // recommendation the panel would apply once the preview lands).
+    useEngraveJobStore.setState({ job: { ...defaultEngraveJob(), toolKey: 'flat-1.0' } });
   });
   useEngravePreviewStore.getState().dispose(); // cancel any debounce the reset scheduled
 });
@@ -2080,7 +2083,8 @@ describe('EngravePanel (#432 review R11) — the facing row', () => {
 
   function faceJob(facing: { enabled: boolean; depth: number } | undefined): void {
     act(() => {
-      useEngraveJobStore.setState({ job: { ...defaultEngraveJob(), facing } });
+      // #516 item 5 — the default job no longer seeds a cutter; the sheet/generate paths need one.
+      useEngraveJobStore.setState({ job: { ...defaultEngraveJob(), toolKey: 'flat-1.0', facing } });
     });
   }
 

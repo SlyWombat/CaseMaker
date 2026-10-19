@@ -38,6 +38,9 @@ import { tl } from './helpers/manifoldExec';
 function defaultJob(over: Partial<EngraveJob> = {}): EngraveJob {
   const job = defaultEngraveJob();
   job.labels.forEach((l, i) => (l.id = `lbl-fixed-${i + 1}`));
+  // #516 item 5 — the default job no longer seeds a cutter; the recommendation names `flat-1.0`
+  // for the default job's three labels, so the golden is the recommended cutter's output.
+  job.toolKey = 'flat-1.0';
   return { ...job, ...over };
 }
 
@@ -84,7 +87,7 @@ describe('#332: the file names its cutter by OUR registry key', () => {
     // and without the line a file written for a clone cannot say which cutter it was written for.
     const nc = defaultJobNc(defaultJob());
     const lines = nc.split('\n').filter((l) => l.startsWith(';@CM|TOOL|'));
-    expect(lines).toEqual([`;@CM|TOOL|key=${defaultEngraveJob().toolKey}`]);
+    expect(lines).toEqual([`;@CM|TOOL|key=${defaultJob().toolKey}`]);
   });
 
   it('a clone still writes `id=0` on the MKR line, with the key as the only name it has', () => {

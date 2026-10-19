@@ -10,6 +10,14 @@ import { describe, expect, it } from 'vitest';
 import { arrayBufferToBase64, base64ToArrayBuffer } from '@/engine/import/base64';
 import { sha256Hex } from '@/engine/import/meshStock';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
+
+// #516 item 5 — the default job no longer seeds a cutter; the recommendation names `flat-1.0`.
+// These engine tests need the job to name its cutter, so `dj()` applies that recommendation.
+function dj(...args: Parameters<typeof defaultEngraveJob>): ReturnType<typeof defaultEngraveJob> {
+  const job = defaultEngraveJob(...args);
+  job.toolKey = 'flat-1.0';
+  return job;
+}
 import {
   MAX_EMBEDDED_SOURCE_BYTES,
   SOURCE_MISSING_SENTENCE,
@@ -190,7 +198,7 @@ describe('a job with its sources (#425 §4)', () => {
   /** A design job whose ONE outline still carries the geometry the design made. */
   function designJob(contours: [number, number][][]): EngraveJob {
     return {
-      ...defaultEngraveJob(),
+      ...dj(),
       labels: [],
       shapes: [],
       vectors: [

@@ -1,6 +1,6 @@
 import { rectProfile } from '@/engine/compiler/profile';
 import type { MillProfile } from '@/engine/cnc/machine';
-import { getTools, toolForJob } from '@/engine/cnc/toolRegistry';
+import { getTools, NO_TOOL_KEY, toolForJob } from '@/engine/cnc/toolRegistry';
 import {
   cuttingDiameter,
   cuttingRadiusForSweep,
@@ -449,7 +449,9 @@ export function jobSetups(job: EngraveJob): JobSetup[] {
       orientation: { ...IDENTITY_ORIENTATION },
       mount: { kind: job.workholding.kind },
       itemIds,
-      tools: [job.toolKey],
+      // #516 item 5 — no cutter chosen yet means no tools for the implicit setup; the fallback in
+      // `setupTools` then posts no program rather than one that names the empty key.
+      tools: job.toolKey === NO_TOOL_KEY ? [] : [job.toolKey],
     },
   ];
 }
@@ -1146,17 +1148,19 @@ export function validateJob(
     }
   }
 
-  if (
-    !enabled.some(itemHasWork) &&
-    !enabledTraces.some(traceHasWork) &&
-    enabledDrills.length === 0 &&
-    enabledThreads.length === 0 &&
-    // ANY enabled primitive counts as stated work: a refused cone/sphere already has its own
-    // by-name error, so "nothing to do" would be a second, misleading complaint about the shape
-    // the person drew.
-    enabledPrimitives.length === 0 &&
-    enabledCutouts.length === 0
-  ) {
+  // #516 item 5 — "has work" is the negation of the `no-items` test below, computed once so the
+  // tool-missing gate reads the same answer. ANY enabled primitive counts as stated work: a
+  // refused cone/sphere already has its own by-name error, so "nothing to do" would be a second,
+  // misleading complaint about the shape the person drew.
+  const hasWork =
+    enabled.some(itemHasWork) ||
+    enabledTraces.some(traceHasWork) ||
+    enabledDrills.length > 0 ||
+    enabledThreads.length > 0 ||
+    enabledPrimitives.length > 0 ||
+    enabledCutouts.length > 0;
+
+  if (!hasWork) {
     findings.push({
       severity: 'error',
       code: 'no-items',
@@ -1165,7 +1169,11 @@ export function validateJob(
     });
   }
 
-  if (jobTool(job) === null) {
+  // #516 item 5 — a job with no items has no tool finding, and a job with items but NO cutter
+  // chosen yet (the empty key a fresh default job / import route starts from) is the normal
+  // pre-recommendation state, not an error. The finding is only for a REAL key that names nothing:
+  // a stale or hand-typed cutter the library does not hold.
+  if (jobTool(job) === null && hasWork && job.toolKey !== NO_TOOL_KEY) {
     findings.push({
       severity: 'error',
       code: 'tool-missing',
@@ -1277,7 +1285,11 @@ function fmt3(n: number): number {
  * silent.
  */
 export function setupTools(setup: JobSetup, job: EngraveJob): string[] {
-  return setup.tools.length > 0 ? [...setup.tools] : [job.toolKey];
+  if (setup.tools.length > 0) return [...setup.tools];
+  // #516 item 5 — a setup naming none falls back to the job's cutter only when the job HAS one;
+  // a job with no cutter yet posts no program (the recommendation fills it in on the first
+  // Generate / first visit to Tools).
+  return job.toolKey === NO_TOOL_KEY ? [] : [job.toolKey];
 }
 
 /**
@@ -1341,11 +1353,16 @@ export function setupProgramFindings(job: EngraveJob): JobFinding[] {
   jobSetups(job).forEach((setup, i) => {
     const tools = setupTools(setup, job);
     if (setup.tools.length === 0) {
-      findings.push({
-        severity: 'error',
-        code: 'setup-no-tool',
-        message: `Setup ${i + 1} names no cutter, so there is nothing to write a program for.`,
-      });
+      // #516 item 5 — a SAVED setup that names no cutter is refused (`setup-no-tool`); the derived
+      // IMPLICIT setup of a tool-less job names none because the job has none to name, which is the
+      // normal pre-recommendation state, not an error. Either way there is no cutter to iterate.
+      if (job.setups !== undefined) {
+        findings.push({
+          severity: 'error',
+          code: 'setup-no-tool',
+          message: `Setup ${i + 1} names no cutter, so there is nothing to write a program for.`,
+        });
+      }
       return;
     }
 

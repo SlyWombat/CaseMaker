@@ -33,6 +33,14 @@ import {
   type LabelSeedInputs,
 } from '@/engine/cnc/engrave/blankLabelSeed';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
+
+// #516 item 5 — the default job no longer seeds a cutter; the recommendation names `flat-1.0`.
+// These engine tests need the job to name its cutter, so `dj()` applies that recommendation.
+function dj(...args: Parameters<typeof defaultEngraveJob>): ReturnType<typeof defaultEngraveJob> {
+  const job = defaultEngraveJob(...args);
+  job.toolKey = 'flat-1.0';
+  return job;
+}
 import { badgeBlankFor } from '@/engine/cnc/engrave/fromBadge';
 import { defaultBadgeParams } from '@/types/badge';
 import { defaultBlankParams, type BlankParams } from '@/types/blank';
@@ -58,7 +66,11 @@ const KEY = 'casemaker.engraveJob.v3';
 
 async function freshStore() {
   vi.resetModules();
-  return await import('@/store/engraveJobStore');
+  const mod = await import('@/store/engraveJobStore');
+  // #516 item 5 — the store's fresh job starts with no cutter; the recommendation names `flat-1.0`.
+  // These tests generate from that job, so apply the recommendation the panel would on first Generate.
+  mod.useEngraveJobStore.getState().setTool('flat-1.0', 'computed');
+  return mod;
 }
 
 /** The badge route's own blank, in the seed's shape — the same extraction `takeBadgeBlank` does. */
@@ -82,7 +94,7 @@ const measure = labelGlyphMeasure([]);
 function seed(over: Partial<LabelSeedInputs> = {}) {
   return blankLabelSeed({
     blank: BLANK,
-    edgeMargin: defaultEngraveJob().edgeMargin,
+    edgeMargin: dj().edgeMargin,
     font: DEFAULT_FONT_ID,
     weight: 'bold',
     measure,
@@ -310,8 +322,8 @@ describe('#364 — the bare-blank seed', () => {
 
 describe('#363 — the gate that decides whether the labels may be replaced', () => {
   it('recognises the untouched default job', () => {
-    expect(isShippedDemoLabelSet(defaultEngraveJob())).toBe(true);
-    expect(mayRelayoutLabels(defaultEngraveJob())).toBe(true);
+    expect(isShippedDemoLabelSet(dj())).toBe(true);
+    expect(mayRelayoutLabels(dj())).toBe(true);
   });
 
   it('opens for a job the OLD badge route had already re-depth-ed (review)', () => {
@@ -319,7 +331,7 @@ describe('#363 — the gate that decides whether the labels may be replaced', ()
     // plank put them, re-depth-ed to the badge's 0.51 mm and stamped `computed` by the walk. That
     // stamp is the app's own past answer — not a person's — so treating it as a claim, or comparing
     // the depth, left these jobs unseeded for good and a second take never re-laid them.
-    const old = defaultEngraveJob();
+    const old = dj();
     old.labels = old.labels.map((l) => ({ ...l, depth: 0.51 }));
     old.sources = {
       labels: Object.fromEntries(old.labels.map((l) => [l.id, { depth: 'computed' as const }])),
@@ -336,7 +348,7 @@ describe('#363 — the gate that decides whether the labels may be replaced', ()
 
   it('stands aside the moment a label says something the shipped set does not', () => {
     const touched = (mutate: (job: EngraveJob) => void): boolean => {
-      const job = defaultEngraveJob();
+      const job = dj();
       mutate(job);
       return mayRelayoutLabels(job);
     };
@@ -374,7 +386,7 @@ describe('#363 — the gate that decides whether the labels may be replaced', ()
     // `computed`, and a `'reveal'` on each floor because the badge's second colour makes one
     // meaningful. Before the follow-up `demoShape` compared `depthIntent` by VALUE, so this job
     // looked touched for ever — the same trap the depth comparison was.
-    const split = defaultEngraveJob();
+    const split = dj();
     split.labels = split.labels.map((l) => ({ ...l, depth: 0.51, depthIntent: 'reveal' as const }));
     split.sources = {
       labels: Object.fromEntries(
@@ -608,7 +620,7 @@ describe('#363 — the store hand-off', () => {
 
   it('is not affected by a job loaded from storage that already carries a claim', async () => {
     backing.clear();
-    const seeded = defaultEngraveJob();
+    const seeded = dj();
     const id = seeded.labels[0]!.id;
     seeded.labels[0] = { ...seeded.labels[0]!, depth: 1.2 };
     seeded.sources = { labels: { [id]: { depth: 'user' } } };

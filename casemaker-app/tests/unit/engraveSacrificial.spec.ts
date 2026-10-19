@@ -13,12 +13,20 @@ import { describe, it, expect } from 'vitest';
 import { tl } from './helpers/manifoldExec';
 import { generate, regions } from './helpers/engravePipeline';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
+
+// #516 item 5 — the default job no longer seeds a cutter; the recommendation names `flat-1.0`.
+// These engine tests need the job to name its cutter, so `dj()` applies that recommendation.
+function dj(...args: Parameters<typeof defaultEngraveJob>): ReturnType<typeof defaultEngraveJob> {
+  const job = defaultEngraveJob(...args);
+  job.toolKey = 'flat-1.0';
+  return job;
+}
 import { jobDepthLimit } from '@/engine/cnc/engrave/partPlan';
 import { noneSacrificial, presetJawStrips } from '@/engine/cnc/sacrificial';
 import type { EngraveJob, EngraveKeepOut } from '@/types/engraveJob';
 
 /** The default blank: 100 × 60 × 12, minFloor 1 → the stock limit is 11 over the part. */
-const job = (over: Partial<EngraveJob> = {}): EngraveJob => ({ ...defaultEngraveJob(), ...over });
+const job = (over: Partial<EngraveJob> = {}): EngraveJob => ({ ...dj(), ...over });
 
 describe('jobDepthLimit composes the sacrificial table (#213 §3)', () => {
   it('with no sacrificial material is the plain stock limit, 0 off the blank', () => {
@@ -66,7 +74,7 @@ describe('an item may run over an edge onto sacrificial material (#213 §3)', ()
    * refuse on bare stock, and must allow once there is strip beside it.
    */
   const overEdge = (over: Partial<EngraveJob> = {}): EngraveJob => {
-    const base = defaultEngraveJob();
+    const base = dj();
     return {
       ...base,
       labels: [

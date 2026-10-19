@@ -11,6 +11,14 @@ import { tl } from './helpers/manifoldExec';
 import { generate } from './helpers/engravePipeline';
 import { createSimSession, type SimLoadOpts, type SimSession } from '@/workers/sim/session';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
+
+// #516 item 5 — the default job no longer seeds a cutter; the recommendation names `flat-1.0`.
+// These engine tests need the job to name its cutter, so `dj()` applies that recommendation.
+function dj(...args: Parameters<typeof defaultEngraveJob>): ReturnType<typeof defaultEngraveJob> {
+  const job = defaultEngraveJob(...args);
+  job.toolKey = 'flat-1.0';
+  return job;
+}
 import {
   ORACLE_AREA_FLOOR,
   oracleBand,
@@ -53,7 +61,7 @@ const over = (p: OracleReport) => p.worst.overCut;
 
 describe('engraveOracle (#206 §3)', () => {
   it('passes the default job, every level inside the band', () => {
-    const job = defaultEngraveJob();
+    const job = dj();
     const g = generate(tl, job);
     expect(g.nc).not.toBeNull();
     const tool = jobTool(job)!;
@@ -80,7 +88,7 @@ describe('engraveOracle (#206 §3)', () => {
   // by hand instead — the same coarse raster, posted through the real post-processor — so the
   // oracle's under-cut direction is still proven to look at real content.
   it('catches an under-cut: a coarse raster leaves an uncut spine', () => {
-    const job = defaultEngraveJob();
+    const job = dj();
     const tool = jobTool(job)!;
     const depth = 1;
 
@@ -124,7 +132,7 @@ describe('engraveOracle (#206 §3)', () => {
   });
 
   it('catches an over-cut: shifting every X by +0.5 mm', () => {
-    const job = defaultEngraveJob();
+    const job = dj();
     const g = generate(tl, job);
     expect(g.nc).not.toBeNull();
     // Only the emitted X words: every header field is lowercase (`x=`), so this cannot touch the
@@ -159,7 +167,7 @@ describe('engraveOracle (#206 §3)', () => {
   it('passes a single-line trace, and would refuse it if the trace were not predicted (#287)', () => {
     // The trace is the DEEPEST item in the job, so its floor is a level of its own — the level the
     // control below removes.
-    const base = defaultEngraveJob();
+    const base = dj();
     const job: EngraveJob = {
       ...base,
       labels: [{ ...base.labels[0]!, depth: 0.5 }],
@@ -231,7 +239,7 @@ describe('engraveOracle (#206 §3)', () => {
       'thread.spindleRpm': { value: 10000, source: 'seeded' },
       'thread.chordToleranceMm': { value: 0.01, source: 'seeded' },
     } as unknown as ShopDefaults;
-    const base = defaultEngraveJob();
+    const base = dj();
     const job: EngraveJob = {
       ...base,
       labels: [],
@@ -331,7 +339,7 @@ describe('engraveOracle (#206 §3)', () => {
       'thread.spindleRpm': { value: 10000, source: 'seeded' },
       'thread.chordToleranceMm': { value: 0.01, source: 'seeded' },
     } as unknown as ShopDefaults;
-    const base = defaultEngraveJob();
+    const base = dj();
     const job: EngraveJob = {
       ...base,
       labels: [],

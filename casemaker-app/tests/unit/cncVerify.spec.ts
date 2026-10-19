@@ -16,6 +16,14 @@ import { stubSetup } from '@/engine/cnc/setup';
 import { rectProfile, aabbOfProfile } from '@/engine/compiler/profile';
 import { HOP_Z } from '@/engine/cnc/cam/ir';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
+
+// #516 item 5 — the default job no longer seeds a cutter; the recommendation names `flat-1.0`.
+// These engine tests need the job to name its cutter, so `dj()` applies that recommendation.
+function dj(...args: Parameters<typeof defaultEngraveJob>): ReturnType<typeof defaultEngraveJob> {
+  const job = defaultEngraveJob(...args);
+  job.toolKey = 'flat-1.0';
+  return job;
+}
 import { jobTool, toSetup } from '@/engine/cnc/engrave/jobSetup';
 import {
   noneSacrificial,
@@ -68,7 +76,7 @@ function program(body: string[], over: Partial<VerifyContext> = {}): { text: str
 
 describe('cncVerify (#174): the default job and the authored fixture', () => {
   it.skipIf(!existsSync(DEFAULT_NC))('the default engrave job, posted (#173), passes every check', () => {
-    const job = defaultEngraveJob();
+    const job = dj();
     const tool = jobTool(job);
     expect(tool).not.toBeNull();
     if (!tool) return;
