@@ -68,6 +68,16 @@ export const DEFAULT_MAX_CELLS = 4_000_000;
 export const DEFAULT_STOCK_TO_LEAVE_MM = 0.3;
 
 /**
+ * The finishing tip-field compute budget (#540): the ball drop is O(covered cells × disc-stencil
+ * cells), so a large ball on a fine grid is billions of inner-loop ops with no cutoff — enough to
+ * hang the worker. Above this cap {@link finishTipField} REFUSES honestly (it states the op count
+ * and the fix), mirroring the exact sweep's `sweep-budget-exceeded` rather than running to a hang.
+ * 300 M evaluations is comfortably past any real small-ball/coarse-grid job yet well under the
+ * ~2.8 billion a 3 mm ball at 0.1 mm over a near-cap grid would cost.
+ */
+export const DEFAULT_MAX_FINISH_TIP_OPS = 300_000_000;
+
+/**
  * A TOP-Z HEIGHTFIELD over an (x, y) grid in the WORK frame (z = 0 = stock top). `z[j*nx + i]` is
  * the highest surface Z of the placed goal mesh above column (i, j), or {@link topZ} where no
  * triangle covered the cell (the goal is silent there). Columns are square — both axes at
@@ -298,6 +308,8 @@ export interface SurfaceOpts {
   safeZ?: number;
   /** Intra-pass hop above the stock top, mm; absent → {@link HOP_Z}. */
   hopZ?: number;
+  /** Finishing tip-field op budget; absent → {@link DEFAULT_MAX_FINISH_TIP_OPS} (#540). */
+  maxFinishTipOps?: number;
 }
 
 export interface Surface3dArgs {
@@ -337,6 +349,9 @@ export function generateSurface3dIR(args: Surface3dArgs): Surface3dResult {
   const alongStep = positive(opts.alongStepMm) ? (opts.alongStepMm as number) : hf.pitch;
   const safeZ = opts.safeZ ?? SAFE_Z;
   const hopZ = opts.hopZ ?? HOP_Z;
+  const maxFinishTipOps = positive(opts.maxFinishTipOps)
+    ? (opts.maxFinishTipOps as number)
+    : DEFAULT_MAX_FINISH_TIP_OPS;
 
   const notes: string[] = [
     'Feeds are the job’s 2.5D feeds reused unchanged; cutting feeds for 3D engagement are the bench slice (#536) and are not tuned here.',
@@ -350,7 +365,7 @@ export function generateSurface3dIR(args: Surface3dArgs): Surface3dResult {
   }
 
   const roughMoves = roughingMoves(hf, feeds, allowance, alongStep, safeZ, hopZ);
-  const finishMoves = finishingMoves(hf, tool, feeds, alongStep, safeZ, hopZ);
+  const finishMoves = finishingMoves(hf, tool, feeds, alongStep, safeZ, hopZ, maxFinishTipOps);
 
   const depth = Math.max(0, hf.topZ - hf.minZ);
   const roughing: CamOperation = {
@@ -430,7 +445,7 @@ function ballRise(ball: boolean, radius: number, d: number): number {
 }
 
 /** The gouge-safe tip field: the tool dropped onto the heightfield until it just touches. */
-function finishTipField(hf: GoalHeightfield, tool: SurfaceTool): Float32Array {
+function finishTipField(hf: GoalHeightfield, tool: SurfaceTool, maxOps: number): Float32Array {
   const { nx, ny, z, covered, pitch, topZ } = hf;
   const tip = new Float32Array(nx * ny);
   tip.fill(topZ);
@@ -445,6 +460,18 @@ function finishTipField(hf: GoalHeightfield, tool: SurfaceTool): Float32Array {
     }
   }
   if (stencil.length === 0) stencil.push({ di: 0, dj: 0, rise: 0 });
+  // #540 — the inner drop runs the stencil at every covered cell. Bound that work BEFORE the loop:
+  // a large ball on a fine grid is billions of ops that would hang the worker. Over budget, refuse
+  // honestly (stating the op count and the way out), as the exact sweep raises sweep-budget-exceeded.
+  const ops = hf.coveredCount * stencil.length;
+  if (ops > maxOps) {
+    throw new Error(
+      `3D finishing would need ${ops} tip evaluations (${hf.coveredCount} covered cells × ` +
+        `${stencil.length} stencil cells for a ${(tool.radius * 2).toFixed(2)} mm cutter at a ` +
+        `${pitch.toFixed(4)} mm grid), over the ${maxOps} budget. Use a coarser grid (a larger flat ` +
+        `pitch) or a smaller ball so the finishing pass fits the budget.`,
+    );
+  }
   for (let j = 0; j < ny; j++) {
     for (let i = 0; i < nx; i++) {
       const idx = j * nx + i;
@@ -519,6 +546,15 @@ function roughingMoves(
 ): CamMove[] {
   const moves: CamMove[] = [];
   if (hf.coveredCount === 0) return moves;
+  // #541 — the layer loop steps L down by `stepDown` until it passes `deepest`. A zero or negative
+  // step-down (a placeholder or bad feed row through the flat proxy) never terminates it, so refuse
+  // here rather than hang: a non-positive step-down cannot layer a roughing pass.
+  if (!(feeds.stepDown > 0)) {
+    throw new Error(
+      `3D roughing needs a positive step-down; the feeds gave ${feeds.stepDown} mm. ` +
+        `A zero or negative step-down cannot layer the rough passes — check the feed row for this tool and material.`,
+    );
+  }
   const { pitch, x0, y0, topZ, minZ } = hf;
   // The clamp surface: how high the tool must stay at each covered column.
   const floorAt = (i: number, j: number): number => {
@@ -586,11 +622,12 @@ function finishingMoves(
   alongStep: number,
   safeZ: number,
   hopZ: number,
+  maxFinishTipOps: number,
 ): CamMove[] {
   const moves: CamMove[] = [];
   if (hf.coveredCount === 0) return moves;
   const { pitch, x0, y0 } = hf;
-  const tip = finishTipField(hf, tool);
+  const tip = finishTipField(hf, tool, maxFinishTipOps);
   const rows = rasterRows(hf, feeds.finishStepOver);
   let flip = false;
   for (const j of rows) {

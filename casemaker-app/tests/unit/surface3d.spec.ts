@@ -347,3 +347,83 @@ describe('generateSurface3dIR — roughing never breaches the goal', () => {
     expect(probed).toBeGreaterThan(5);
   });
 });
+
+describe('generateGoalProgram — an invalid goal is refused, not surfaced (#539)', () => {
+  // The pure-goal dispatch runs before the item pipeline's validateJob, so it must gate on the same
+  // goal-object-oversize/zero-volume check itself rather than sampling and posting an unmakeable goal.
+  it('returns a blocking goal-object-oversize finding for a goal larger than the stock', () => {
+    const job: EngraveJob = {
+      ...defaultEngraveJob(),
+      labels: [],
+      shapes: [],
+      // Default stock is 100 x 60 x 12 mm; a 200 mm-wide goal cannot be carved from it.
+      targetObject: goal(rampTris(), { position: { x: 50, y: 30, z: 0 }, size: { x: 200, y: 30, z: 5 } }),
+    };
+    const out = generateGoalProgram(job, job.targetObject!, makeFlatTool(3.175), [], null, {});
+    expect(out.ok).toBe(false);
+    expect(out.stage).toBe('findings');
+    expect(out.findings.some((f) => f.severity === 'error' && f.code === 'goal-object-oversize')).toBe(true);
+    expect(out.errors.length).toBeGreaterThan(0);
+    // It refused rather than posting a program.
+    expect(out.nc).toBeNull();
+    expect(out.cam).toBeNull();
+    expect(out.programs).toEqual([]);
+  });
+
+  it('returns a blocking finding for a zero-volume (flat) goal', () => {
+    const job: EngraveJob = {
+      ...defaultEngraveJob(),
+      labels: [],
+      shapes: [],
+      targetObject: goal(rampTris(), { position: { x: 50, y: 30, z: 0 }, size: { x: 20, y: 20, z: 0 } }),
+    };
+    const out = generateGoalProgram(job, job.targetObject!, makeFlatTool(3.175), [], null, {});
+    expect(out.ok).toBe(false);
+    expect(out.findings.some((f) => f.code === 'goal-object-oversize')).toBe(true);
+    expect(out.nc).toBeNull();
+  });
+});
+
+describe('generateSurface3dIR — the finishing pass has a compute budget (#540)', () => {
+  const buildIr = (opts: Record<string, unknown>) =>
+    generateSurface3dIR({
+      heightfield: sampleGoalHeightfield(goal(rampTris()), { pitchMm: 0.1 }),
+      tool: BALL,
+      toolObj: flatEndMill(1, { shape: 'ball', name: 'ball' }),
+      toolNumber: 1,
+      spindleRpm: 12000,
+      air: true,
+      feeds: FEEDS,
+      rapid: RAPID,
+      labelId: 'goal-1',
+      opts,
+    });
+
+  it('refuses honestly rather than running the billions of ops when over budget', () => {
+    expect(() => buildIr({ maxFinishTipOps: 1 })).toThrow(/budget/i);
+  });
+
+  it('produces the finishing pass under a generous budget', () => {
+    const { finishing } = buildIr({ maxFinishTipOps: 1_000_000_000 });
+    expect(finishing.moves.length).toBeGreaterThan(0);
+  });
+});
+
+describe('generateSurface3dIR — roughing refuses a non-positive step-down (#541)', () => {
+  it.each([0, -0.5])('throws rather than infinite-looping when stepDown is %s', (stepDown) => {
+    const hf = sampleGoalHeightfield(goal(rampTris()), { pitchMm: 0.1 });
+    expect(() =>
+      generateSurface3dIR({
+        heightfield: hf,
+        tool: FLAT_TOOL,
+        toolObj: flatEndMill(2, { name: 'flat' }),
+        toolNumber: 1,
+        spindleRpm: 12000,
+        air: true,
+        feeds: { ...FEEDS, stepDown },
+        rapid: RAPID,
+        labelId: 'goal-1',
+      }),
+    ).toThrow(/step-down/i);
+  });
+});

@@ -37,6 +37,7 @@ import type {
   EngraveJob,
   EngraveKeepOut,
   EngravePrimitive,
+  EngraveTargetObject,
   EngraveThread,
   EngraveTraceItem,
   JobSetup,
@@ -500,6 +501,56 @@ export function toSetup(job: EngraveJob, machine: MillProfile, fixture?: Fixture
  * included angle. The worker passes the located reading (`shop.drill` / `shop.defaults`); a caller
  * with no location gets the same labelled fallback the CAM uses, never an unlabelled literal.
  */
+/**
+ * Validate a GOAL target object (#533): it must have volume and fit the blank it would be carved
+ * from — a goal flat in one direction, or larger than the stock in footprint or depth, cannot be
+ * reproduced. Factored out of {@link validateJob} (same findings, same messages) so the pure-goal
+ * generate dispatch (#539) can gate on it before it samples and posts a surfacing program, instead
+ * of surfacing an invalid goal that no `validateJob` call ever saw. Returns an `error`
+ * `goal-object-oversize` when the goal is unmakeable, otherwise the `goal-object-no-toolpath` info.
+ */
+export function validateGoalObject(
+  target: EngraveTargetObject,
+  stock: { length: number; width: number; thickness: number },
+): JobFinding[] {
+  const findings: JobFinding[] = [];
+  const { length, width, thickness } = stock;
+  const hasVolume = target.size.x > 0 && target.size.y > 0 && target.size.z > 0;
+  const fitsFootprint = target.size.x <= length && target.size.y <= width;
+  const fitsDepth = target.size.z <= thickness;
+  if (!hasVolume) {
+    findings.push({
+      severity: 'error',
+      code: 'goal-object-oversize',
+      message:
+        `The goal object "${target.name}" is flat in at least one direction ` +
+        `(${fmt3(target.size.x)}×${fmt3(target.size.y)}×${fmt3(target.size.z)} mm); a goal needs ` +
+        `volume to drive a 3D cut toward.`,
+    });
+  } else if (!fitsFootprint || !fitsDepth) {
+    findings.push({
+      severity: 'error',
+      code: 'goal-object-oversize',
+      message:
+        `The goal object "${target.name}" is ` +
+        `${fmt3(target.size.x)}×${fmt3(target.size.y)}×${fmt3(target.size.z)} mm, larger than the ` +
+        `${fmt3(length)}×${fmt3(width)}×${fmt3(thickness)} mm blank it would be carved from; ` +
+        `it cannot be reproduced from this stock. Use a larger blank or scale the goal.`,
+    });
+  } else {
+    // A sane goal, recognised but not yet machinable on the mixed-job path: 3D toolpath generation
+    // is slice D (#534), which the PURE-goal dispatch now runs — so this info is the mixed path's.
+    findings.push({
+      severity: 'info',
+      code: 'goal-object-no-toolpath',
+      message:
+        `The goal object "${target.name}" is the shape to make. It fits the blank, but 3D ` +
+        `toolpath generation is not built yet, so this job posts no cut for it.`,
+    });
+  }
+  return findings;
+}
+
 export function validateJob(
   job: EngraveJob,
   drillPoint: { deg: number; source: string } | null = null,
@@ -639,42 +690,9 @@ export function validateJob(
   if (job.targetObject?.enabled === true) {
     const target = job.targetObject;
     if ((target.role ?? 'reference') === 'goal') {
-      // A GOAL (#533) IS the work, so it is never warned as uncut. It is validated instead: it must
-      // have volume, and it must fit the blank it would be carved from — a goal taller than the
-      // stock, or wider than its footprint, cannot be reproduced from this stock.
-      const { length, width } = job.stock;
-      const hasVolume = target.size.x > 0 && target.size.y > 0 && target.size.z > 0;
-      const fitsFootprint = target.size.x <= length && target.size.y <= width;
-      const fitsDepth = target.size.z <= thickness;
-      if (!hasVolume) {
-        findings.push({
-          severity: 'error',
-          code: 'goal-object-oversize',
-          message:
-            `The goal object "${target.name}" is flat in at least one direction ` +
-            `(${fmt3(target.size.x)}×${fmt3(target.size.y)}×${fmt3(target.size.z)} mm); a goal needs ` +
-            `volume to drive a 3D cut toward.`,
-        });
-      } else if (!fitsFootprint || !fitsDepth) {
-        findings.push({
-          severity: 'error',
-          code: 'goal-object-oversize',
-          message:
-            `The goal object "${target.name}" is ` +
-            `${fmt3(target.size.x)}×${fmt3(target.size.y)}×${fmt3(target.size.z)} mm, larger than the ` +
-            `${fmt3(length)}×${fmt3(width)}×${fmt3(thickness)} mm blank it would be carved from; ` +
-            `it cannot be reproduced from this stock. Use a larger blank or scale the goal.`,
-        });
-      } else {
-        // A sane goal, recognised but not yet machinable: 3D toolpath generation is slice D (#534).
-        findings.push({
-          severity: 'info',
-          code: 'goal-object-no-toolpath',
-          message:
-            `The goal object "${target.name}" is the shape to make. It fits the blank, but 3D ` +
-            `toolpath generation is not built yet, so this job posts no cut for it.`,
-        });
-      }
+      // A GOAL (#533) IS the work, so it is never warned as uncut. It is validated instead
+      // ({@link validateGoalObject}), which the pure-goal generate path reuses (#539).
+      findings.push(...validateGoalObject(target, job.stock));
     } else {
       // A REFERENCE (#435). Saying so once, as a warning, keeps "why is my imported part not being
       // cut?" from being answered by silence; it never blocks the other work.

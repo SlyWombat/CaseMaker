@@ -69,7 +69,7 @@ import {
 import { isMetalTool } from '@/engine/cnc/registerCutter';
 import { MATERIAL_LABELS, isMetalMaterial } from '@/engine/cnc/materials';
 import { toPartPlan, labelProfile, jobDepthLimit, keepOutNameAt, type PartPlan } from '@/engine/cnc/engrave/partPlan';
-import { dedupeFindings, jobSetups, setupProgramFindings, toSetup, validateJob, type JobFinding } from '@/engine/cnc/engrave/jobSetup';
+import { dedupeFindings, jobSetups, setupProgramFindings, toSetup, validateGoalObject, validateJob, type JobFinding } from '@/engine/cnc/engrave/jobSetup';
 import { jobForSetup, setupPrograms, type JobProgramRef } from '@/engine/cnc/engrave/programs';
 import {
   restJobFor,
@@ -2312,6 +2312,26 @@ export function generateGoalProgram(
     verify: null,
     errors: [{ stage, message }],
   });
+
+  // #539 — the pure-goal dispatch runs BEFORE the item pipeline's `validateJob`, so the
+  // `goal-object-oversize`/zero-volume check (#533) never reaches a goal that is surfaced here.
+  // Run the SAME validation and refuse an unmakeable goal with its blocking finding, rather than
+  // sampling and posting a program the Cut gate would otherwise have to catch with no finding.
+  const goalFindings = validateGoalObject(goal, job.stock);
+  const blocking = goalFindings.filter((f) => f.severity === 'error');
+  if (blocking.length > 0) {
+    return {
+      ...base,
+      ok: false,
+      stage: 'findings',
+      findings: goalFindings,
+      feeds: null,
+      cam: null,
+      nc: null,
+      verify: null,
+      errors: blocking.map((f) => ({ stage: 'findings' as EngraveStage, message: f.message })),
+    };
+  }
 
   if (tool === null) return fail('feeds', 'the job has no usable cutter');
   const mill = jobMachine(job, calibration);
