@@ -293,7 +293,7 @@ export function resolveMachine(
   calibration?: MachineCalibration | null,
 ): MillProfile {
   if (!calibration || calibration.machineId !== base.id) return base;
-  const derived = deriveCoordinateFrame(calibration.frame);
+  const derived = deriveCoordinateFrame(calibration.frame, base);
   return {
     ...base,
     anchor1: calibration.frame.anchor1,

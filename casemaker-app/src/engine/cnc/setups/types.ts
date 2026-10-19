@@ -65,6 +65,12 @@ export interface SetupsInput {
   mounts?: Partial<Record<Face, MountSpec>>;
   /** The face the operator puts up first. Default `top`. */
   firstUp?: Face;
+  /**
+   * The optional 4th-axis module's stock envelope (`machine.rotary.envelope`), mm (#448). Absent
+   * means no rotary offer: the planner only offers the rotary when it would help AND the stock fits
+   * the machine's own envelope, so the figure is read from the record rather than restated here.
+   */
+  rotaryEnvelope?: { diameter: number; length: number };
 }
 
 /** How the stock sits for one setup: which STOCK face is at each MACHINE face. */

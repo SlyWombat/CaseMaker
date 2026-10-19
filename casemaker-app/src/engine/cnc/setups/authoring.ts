@@ -217,7 +217,11 @@ export function materializeSetups(job: EngraveJob): JobSetup[] {
  * keyed by its up face. The first stored setup supplies the default mount and `firstUp`, so a
  * fresh suggestion agrees with where the operator already starts.
  */
-export function setupsInput(job: EngraveJob, setups: readonly JobSetup[] = jobSetups(job)): SetupsInput {
+export function setupsInput(
+  job: EngraveJob,
+  setups: readonly JobSetup[] = jobSetups(job),
+  rotaryEnvelope?: SetupsInput['rotaryEnvelope'],
+): SetupsInput {
   const mounts: Partial<Record<Face, MountSpec>> = {};
   for (const setup of setups) mounts[faceUpOf(setup)] = setup.mount;
   const first = setups[0];
@@ -227,6 +231,7 @@ export function setupsInput(job: EngraveJob, setups: readonly JobSetup[] = jobSe
     mount: first?.mount ?? { kind: job.workholding.kind },
     mounts,
     ...(first ? { firstUp: faceUpOf(first) } : {}),
+    ...(rotaryEnvelope !== undefined ? { rotaryEnvelope } : {}),
   };
 }
 
@@ -240,8 +245,12 @@ export function setupsInput(job: EngraveJob, setups: readonly JobSetup[] = jobSe
  * removal that does not exist) but never from the document; `readSetups` reports it. A duplicate
  * assignment is likewise cut once, in the first setup that names it, without rewriting the list.
  */
-export function planFromSetups(job: EngraveJob, settings: SetupsSettings): SetupsPlan {
-  const input = setupsInput(job);
+export function planFromSetups(
+  job: EngraveJob,
+  settings: SetupsSettings,
+  rotaryEnvelope?: SetupsInput['rotaryEnvelope'],
+): SetupsPlan {
+  const input = setupsInput(job, jobSetups(job), rotaryEnvelope);
   const byId = new Map(input.removals.map((r) => [r.id, r]));
   const used = new Set<string>();
   const ordered = jobSetups(job).map((setup) => {
@@ -262,8 +271,12 @@ export function planFromSetups(job: EngraveJob, settings: SetupsSettings): Setup
 }
 
 /** The plan a fresh, unsaved job would get: the engine's greedy suggestion. */
-export function suggestedPlan(job: EngraveJob, settings: SetupsSettings): SetupsPlan {
-  return planSetups(setupsInput(job), settings);
+export function suggestedPlan(
+  job: EngraveJob,
+  settings: SetupsSettings,
+  rotaryEnvelope?: SetupsInput['rotaryEnvelope'],
+): SetupsPlan {
+  return planSetups(setupsInput(job, jobSetups(job), rotaryEnvelope), settings);
 }
 
 /**
@@ -278,8 +291,9 @@ export function suggestedPlan(job: EngraveJob, settings: SetupsSettings): Setups
 export function addSetupOffer(
   job: EngraveJob,
   settings: SetupsSettings,
+  rotaryEnvelope?: SetupsInput['rotaryEnvelope'],
 ): { face: Face | null; reason: string | null } {
-  const input = setupsInput(job);
+  const input = setupsInput(job, jobSetups(job), rotaryEnvelope);
   const plan = planSetups(input, settings);
   const held = new Set(jobSetups(job).map((setup) => faceUpOf(setup)));
   const unholdable = new Set(plan.unholdable.map((u) => u.face));

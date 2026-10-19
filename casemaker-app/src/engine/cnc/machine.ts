@@ -215,6 +215,24 @@ export interface MillProfile extends MachineIdentity {
    */
   axisSteps: AxisSteps;
   maxRpm: number;
+  /**
+   * The Z1's tool-change derivation constants, mm (#448) — promoted from bare module constants so
+   * a profile carries them as data. They are MODEL constants, not a calibration's: a machine's own
+   * read of the frame must not move the sensor or the change position it was never a measurement of.
+   */
+  sensorOffsetFromAnchor1: number;
+  changePositionExtraX: number;
+  /**
+   * Provenance for the model's limits and the two derivation constants above (#448). One string per
+   * sourced field — the {@link RotaryProfile} pattern — because a vendor figure and a compiled
+   * `ATCHandler.cpp` constant do not share a source.
+   */
+  sources: {
+    maxCutFeed: string;
+    maxRpm: string;
+    sensorOffsetFromAnchor1: string;
+    changePositionExtraX: string;
+  };
   /** `isATC=0`: a manual tool change, which is what makes `M490.1`/`M490.2` the tool-change path. */
   hasATC: false;
   toolSlots: 0;
@@ -286,7 +304,7 @@ export interface MillProfile extends MachineIdentity {
     changePosition: Vec2;
     /** Z the head lifts to right after the length probe, before the final lift to clearance. */
     safeZ: Mm;
-    /** XY of the tool-length sensor: `anchor1 + 181` on each axis. See {@link SENSOR_OFFSET_FROM_ANCHOR1}. */
+    /** XY of the tool-length sensor: `anchor1 + sensorOffsetFromAnchor1` on each axis. See {@link FrameDerivationOffsets}. */
     sensor: Vec2;
     /**
      * Z the probe move is commanded TOWARD. It stops early, at the tool tip's contact, and
@@ -299,6 +317,16 @@ export interface MillProfile extends MachineIdentity {
     probeFastFeed: number;
     probeSlowFeed: number;
     probeRetract: Mm;
+    /**
+     * Provenance for the four probe/height numbers above (#448), read from the `atc.*` group
+     * (`config-get sd`, 2026-10-06). One string per field, like {@link RotaryProfile.sources}.
+     */
+    sources: {
+      safeZ: string;
+      probeFastFeed: string;
+      probeSlowFeed: string;
+      probeRetract: string;
+    };
   };
   /**
    * The collet nut — the widest thing above the cutter (#204). `null` = not measured yet (#208),
@@ -364,25 +392,38 @@ export interface CoordinateFrame {
 }
 
 /**
- * How far past `anchor1`, on each axis, the Z1's tool-length sensor sits, mm: 181
- * (`ATCHandler.cpp:266`, hard-coded for this model — the same number on X and Y, which is why
- * it is one constant and not a `Vec2`).
+ * The two `ATCHandler.cpp` constants the tool-change derivation adds to a frame, mm (#448).
+ * They are MODEL constants for the Z1, not measurements: `deriveCoordinateFrame` uses them for
+ * BOTH the shipped and the calibrated frame, so a machine's own read must not move them. Their
+ * provenance travels on the machine record's `sources`.
  */
-export const SENSOR_OFFSET_FROM_ANCHOR1 = 181;
+export interface FrameDerivationOffsets {
+  /**
+   * How far past `anchor1`, on each axis, the Z1's tool-length sensor sits, mm
+   * (`ATCHandler.cpp:266`, hard-coded for this model — the same number on X and Y, which is why
+   * it is one number and not a `Vec2`).
+   */
+  sensorOffsetFromAnchor1: number;
+  /**
+   * The +X the manual change macro adds on top of `toolrack_offset_x`, mm (`ATCHandler.cpp:134`).
+   * A fixed reach from the tool rack's own corner, not a clearance figure.
+   */
+  changePositionExtraX: number;
+}
 
-/**
- * The +X the manual change macro adds on top of `toolrack_offset_x`, mm (`ATCHandler.cpp:134`).
- * A fixed reach from the tool rack's own corner, not a clearance figure.
- */
-export const CHANGE_POSITION_EXTRA_X = 132;
+/** The Z1's {@link FrameDerivationOffsets}: the two `ATCHandler.cpp` model constants. */
+export const Z1_DERIVATION_OFFSETS: FrameDerivationOffsets = {
+  sensorOffsetFromAnchor1: 181,
+  changePositionExtraX: 132,
+};
 
 /** The positions the tool-change macro is driven to, every one derived from a frame. */
 export interface DerivedDatums {
   /** The second anchor, `anchor1 + anchor2Offset`. */
   anchor2: Vec2;
-  /** The tool-length sensor, `anchor1 + 181` on each axis. */
+  /** The tool-length sensor, `anchor1 + sensorOffsetFromAnchor1` on each axis. */
   sensor: Vec2;
-  /** Where the head parks for a manual change, `anchor1 + toolrackOffset + (132, 0)`. */
+  /** Where the head parks for a manual change, `anchor1 + toolrackOffset + (changePositionExtraX, 0)`. */
   changePosition: Vec2;
 }
 
@@ -400,14 +441,14 @@ export interface DerivedDatums {
  * chain (`ATCHandler::fill_Autoclean_scripts` sweeps between them), so a change position that
  * lands on `clearance_x` is a coincidence of the shipped defaults rather than a check.
  */
-export function deriveCoordinateFrame(frame: CoordinateFrame): DerivedDatums {
+export function deriveCoordinateFrame(frame: CoordinateFrame, offsets: FrameDerivationOffsets): DerivedDatums {
   const [ax, ay] = frame.anchor1;
   const [c2x, c2y] = frame.anchor2Offset;
   const [tx, ty] = frame.toolrackOffset;
   return {
     anchor2: [ax + c2x, ay + c2y],
-    sensor: [ax + SENSOR_OFFSET_FROM_ANCHOR1, ay + SENSOR_OFFSET_FROM_ANCHOR1],
-    changePosition: [ax + tx + CHANGE_POSITION_EXTRA_X, ay + ty],
+    sensor: [ax + offsets.sensorOffsetFromAnchor1, ay + offsets.sensorOffsetFromAnchor1],
+    changePosition: [ax + tx + offsets.changePositionExtraX, ay + ty],
   };
 }
 
@@ -466,7 +507,7 @@ export const Z1_FRAME: CoordinateFrame = {
 };
 
 /** The shipped frame's derived positions. `deriveCoordinateFrame` is the only thing that makes them. */
-const Z1_DATUMS = deriveCoordinateFrame(Z1_FRAME);
+const Z1_DATUMS = deriveCoordinateFrame(Z1_FRAME, Z1_DERIVATION_OFFSETS);
 
 /**
  * The Makera Z1.
@@ -543,6 +584,19 @@ export const Z1: MillProfile = {
     source: 'configZ1.default, shipped firmware default — keys absent from /sd/config.txt and unreadable over the bridge',
   },
   maxRpm: 13000,
+  // #448 — the two ATCHandler.cpp derivation constants, promoted from bare module constants so
+  // their provenance travels on the record (see `sources`). They are MODEL constants: a
+  // calibration must not move them (deriveCoordinateFrame reads the base record's copies).
+  sensorOffsetFromAnchor1: Z1_DERIVATION_OFFSETS.sensorOffsetFromAnchor1,
+  changePositionExtraX: Z1_DERIVATION_OFFSETS.changePositionExtraX,
+  // #448 — provenance for the limits and the derivation constants above. One string per field
+  // (the RotaryProfile pattern): a vendor figure and a compiled C++ constant do not share a source.
+  sources: {
+    maxCutFeed: 't_MachineType, Makera library database (the Z1 row) — a vendor figure, not measured',
+    maxRpm: 't_MachineType, Makera library database (the Z1 row) — a vendor figure, not measured',
+    sensorOffsetFromAnchor1: 'ATCHandler.cpp:266, hard-coded for the Z1 model — the same number on X and Y',
+    changePositionExtraX: 'ATCHandler.cpp:134, hard-coded for the Z1 model',
+  },
   hasATC: false,
   toolSlots: 0,
   // MEASURED (#208 B2, 2026-10-06): ENABLED, at −207/−206/−102 — 7/6/2 mm past the vendor's own
@@ -575,6 +629,14 @@ export const Z1: MillProfile = {
     probeFastFeed: 500,
     probeSlowFeed: 100,
     probeRetract: 1,
+    // #448 — the four probe/height numbers are read from the machine's `atc.*` group
+    // (`config-get sd`, 2026-10-06), not the shipped config. Provenance per field.
+    sources: {
+      safeZ: 'config-get sd on the machine, 2026-10-06 (atc.safe_z_mm -20.0)',
+      probeFastFeed: 'config-get sd on the machine, 2026-10-06 (atc.probe.fast_rate_mm_m 500)',
+      probeSlowFeed: 'config-get sd on the machine, 2026-10-06 (atc.probe.slow_rate_mm_m 100)',
+      probeRetract: 'config-get sd on the machine, 2026-10-06 (atc.probe.retract_mm 1)',
+    },
   },
   // Unmeasured, and no longer needed by the sweep (#314, 2026-10-08): the collet grips the shank,
   // never the flutes, so the nut face is at least `shoulderLength` above the tip at any seating
@@ -669,24 +731,38 @@ export interface ClampResult {
  * Over this fraction above the ceiling the value is REFUSED rather than clamped: a small
  * overage is a table written for a faster machine (Makera's 15 000 RPM rows on a 13 000 RPM
  * spindle are +15 %); a large one means the wrong tool, the wrong material, or garbage.
+ *
+ * THE LABELLED FALLBACK for the shop's `clamp.refuseFraction` (#448). The shop default lives in
+ * `location.json` and is read through `readDefault`; this is the number used with no house
+ * service, and the value `clampToMachine` falls back to when a caller passes none.
  */
-export const CLAMP_REFUSE_FRACTION = 0.5;
+export const CLAMP_REFUSE_FRACTION_FALLBACK = 0.5;
 
 /**
  * The single choke point every feed and spindle value passes through before it reaches a
  * toolpath. Clamps a modest overage and says so; refuses a gross one; passes `null` through
  * untouched (an unset value is the caller's problem, not a limit violation).
+ *
+ * `refuseFraction` is the shop's `clamp.refuseFraction` — the band above the ceiling where a
+ * value is refused rather than clamped. It is threaded in so {@link feedsFor} and
+ * {@link catalogueRefusal} (and any other caller) all use the one number; the default is the
+ * labelled fallback above.
  */
-export function clampToMachine(feed: number | null, rpm: number | null, machine: MillProfile): ClampResult {
+export function clampToMachine(
+  feed: number | null,
+  rpm: number | null,
+  machine: MillProfile,
+  refuseFraction: number = CLAMP_REFUSE_FRACTION_FALLBACK,
+): ClampResult {
   const diagnostics: ClampDiagnostic[] = [];
   const one = (value: number | null, limit: number, what: 'feed' | 'rpm', unit: string): number | null => {
     if (value === null) return null;
     if (!(value <= limit)) {
-      if (!Number.isFinite(value) || value > limit * (1 + CLAMP_REFUSE_FRACTION)) {
+      if (!Number.isFinite(value) || value > limit * (1 + refuseFraction)) {
         diagnostics.push({
           severity: 'error',
           code: what === 'feed' ? 'feed-refused' : 'rpm-refused',
-          message: `${what} ${value} ${unit} is more than ${Math.round(CLAMP_REFUSE_FRACTION * 100)} % above the ${machine.name}'s ${limit} ${unit} ceiling: refused, not clamped (wrong tool, wrong material, or corruption)`,
+          message: `${what} ${value} ${unit} is more than ${Math.round(refuseFraction * 100)} % above the ${machine.name}'s ${limit} ${unit} ceiling: refused, not clamped (wrong tool, wrong material, or corruption)`,
         });
         return null;
       }
@@ -799,6 +875,16 @@ export const millProfileSchema = z.object({
     source: z.string().min(1),
   }),
   maxRpm: finite.positive(),
+  sensorOffsetFromAnchor1: finite,
+  changePositionExtraX: finite,
+  // #448 — a profile that states a limit or a derivation constant without its provenance does
+  // not parse, for the same reason a rotary field without a source does not.
+  sources: z.object({
+    maxCutFeed: z.string().min(1),
+    maxRpm: z.string().min(1),
+    sensorOffsetFromAnchor1: z.string().min(1),
+    changePositionExtraX: z.string().min(1),
+  }),
   hasATC: z.literal(false),
   toolSlots: z.literal(0),
   softEndstop: softEndstopSchema,
@@ -822,6 +908,12 @@ export const millProfileSchema = z.object({
     probeFastFeed: finite.positive(),
     probeSlowFeed: finite.positive(),
     probeRetract: finite,
+    sources: z.object({
+      safeZ: z.string().min(1),
+      probeFastFeed: z.string().min(1),
+      probeSlowFeed: z.string().min(1),
+      probeRetract: z.string().min(1),
+    }),
   }),
   holder: holderSchema.nullable(),
   rotary: rotarySchema.optional(),

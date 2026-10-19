@@ -406,6 +406,15 @@ pub const UNMEASURED_SEEDS: &[(&str, f64, &str, &str)] = &[
     ("margins.breakthroughMm", 0.3, "mm", "chosen, not measured: how far a through-cut may pass below the part's underside; seeds each new job"),
     ("margins.measuredThicknessToleranceMm", 0.05, "mm", "not measured: the +/- a caliper-measured stock thickness adds to a job's Z budget; provisional until the bench measures it (#208)"),
     // ── #447 (end)
+    // ── #448 (begin) — the vise's chosen tunables and the clamp band. Each is the number the code
+    // compiled before, and `defaultsClient.ts` states the same bounds and fallbacks. The vise's
+    // PRODUCT geometry (jaw widths, ledge, body depth) is the accessory record Z1_VISE in fixture.ts,
+    // not a setting.
+    ("vise.uncertaintyMm", 0.5, "mm", "chosen, not measured: the band every vise collision box is grown by before a check; covers clamping repeatability, the blank's dome and a hand-set origin's error (#391 review)"),
+    ("vise.defaultStockProudMm", 4.0, "mm", "chosen, not measured: the cap on the stock-derived proud height; #508 derives the real proud from the seat, so this is the no-stock placeholder and the pre-#508 lower bound"),
+    ("vise.minCoverageFraction", 0.5, "x", "chosen, not measured: the share of the stock's width the vise jaws must cover in Y before the short-jaw warning"),
+    ("clamp.refuseFraction", 0.5, "x", "chosen, not measured: the band above the machine's feed/rpm ceiling where a value is refused rather than clamped"),
+    // ── #448 (end)
 ];
 
 /// Yes/no starting values, seeded `chosen`-in-spirit with a note (#414: the maintainer's "option to
@@ -633,6 +642,26 @@ fn known_rule(key: &str, n: Option<f64>) -> Option<Result<(), String>> {
             n.is_some_and(|v| (0.5..=120.0).contains(&v)),
             "0.5 to 120 min",
         )),
+        // ── #448 (begin) — the vise's chosen tunables and the clamp band (`defaultsClient.ts`
+        // states the same bounds). A fraction is a share of the stock's width / a multiple above
+        // the machine ceiling, so each is bounded to keep the check meaningful.
+        "vise.uncertaintyMm" => Some(need(
+            n.is_some_and(|v| (0.0..=5.0).contains(&v)),
+            "0 to 5 mm",
+        )),
+        "vise.defaultStockProudMm" => Some(need(
+            n.is_some_and(|v| (0.1..=20.0).contains(&v)),
+            "0.1 to 20 mm",
+        )),
+        "vise.minCoverageFraction" => Some(need(
+            n.is_some_and(|v| (0.05..=1.0).contains(&v)),
+            "0.05 to 1, a share of the stock's width",
+        )),
+        "clamp.refuseFraction" => Some(need(
+            n.is_some_and(|v| (0.01..=5.0).contains(&v)),
+            "0.01 to 5, a multiple above the ceiling",
+        )),
+        // ── #448 (end)
         "run.pollMs" => Some(need(
             n.is_some_and(|v| (2000.0..=60000.0).contains(&v)),
             "2000 to 60000 ms — never faster than 2 s (#386)",

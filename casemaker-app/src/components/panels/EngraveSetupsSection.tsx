@@ -185,9 +185,10 @@ export function EngraveSetupsSection(): JSX.Element {
   const reading = useMemo(() => readSetups(job), [job]);
   const settings = useMemo(() => setupsSettings(defaults), [defaults]);
   const regSettings = useMemo(() => registrationSettings(defaults).settings, [defaults]);
-  const suggested = useMemo(() => suggestedPlan(job, settings), [job, settings]);
-  const savedPlan = useMemo(() => (job.setups !== undefined ? planFromSetups(job, settings) : null), [job, settings]);
-  const offer = useMemo(() => addSetupOffer(job, settings), [job, settings]);
+  const rotaryEnvelope = useMemo(() => jobMachine(job, calibration).rotary?.envelope, [job, calibration]);
+  const suggested = useMemo(() => suggestedPlan(job, settings, rotaryEnvelope), [job, settings, rotaryEnvelope]);
+  const savedPlan = useMemo(() => (job.setups !== undefined ? planFromSetups(job, settings, rotaryEnvelope) : null), [job, settings, rotaryEnvelope]);
+  const offer = useMemo(() => addSetupOffer(job, settings, rotaryEnvelope), [job, settings, rotaryEnvelope]);
   const removals = useMemo(() => removalsFrom(job), [job]);
   const removalById = useMemo(() => new Map(removals.map((r) => [r.id, r])), [removals]);
 

@@ -26,7 +26,7 @@ import {
 import { TOOL_LIBRARY } from '@/engine/cnc/toolLibrary';
 import { MATERIAL_LABELS } from '@/engine/cnc/materials';
 import { flatEndMill } from '@/engine/cnc/tool';
-import { Z1, CLAMP_REFUSE_FRACTION } from '@/engine/cnc/machine';
+import { Z1, CLAMP_REFUSE_FRACTION_FALLBACK } from '@/engine/cnc/machine';
 
 /** The vendor's id for the 3.175 x 12 mm flat end, which the built-in tier also carries. */
 const VENDOR_ID = '112111313812';
@@ -308,7 +308,7 @@ describe('the machine still has the last word', () => {
     expect(res.diagnostics).toHaveLength(1);
     expect(res.diagnostics[0]).toMatchObject({ severity: 'warning', code: 'rpm-clamped' });
     // +15 %, inside the 50 % refusal band, which is why this one is a clamp and not a refusal.
-    expect(15000 / Z1.maxRpm - 1).toBeLessThan(CLAMP_REFUSE_FRACTION);
+    expect(15000 / Z1.maxRpm - 1).toBeLessThan(CLAMP_REFUSE_FRACTION_FALLBACK);
 
     // #325 — and the label follows the CLAMP, not the row: Makera said 15 000, the 13 000 is the
     // machine's limit, so this field is not Makera's (decision 28). The fields the clamp did not

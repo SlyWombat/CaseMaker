@@ -94,7 +94,7 @@ import { z } from 'zod';
 import { cuttingForTrace, vendorId } from './tool';
 import type { Tool } from './tool';
 import { DEFAULT_V_CARVE_STEPOVER_RATIO } from './vCarveGeometry';
-import { clampToMachine } from './machine';
+import { CLAMP_REFUSE_FRACTION_FALLBACK, clampToMachine } from './machine';
 import type { ClampDiagnostic, MillProfile } from './machine';
 import { MATERIAL_LABELS, STOCK_MATERIALS } from './materials';
 import type { FieldSource, StockMaterial } from '@/types/engraveJob';
@@ -951,20 +951,27 @@ export type FeedsDiagnostic = ClampDiagnostic | CatalogueDiagnostic;
  *     0 mm/min feed is not a slow cut. `feedsFor`'s own `<= 0` refusals below still refuse a
  *     non-positive value someone ASSERTED (an override, a typed feeds-table row — `cncFeeds.spec.ts`
  *     pins that); what changes here is that a vendor table does not get to assert for the user.
- *   - the machine REFUSES it rather than clamping it — more than {@link CLAMP_REFUSE_FRACTION} past
- *     the ceiling. That question is put to `clampToMachine`, the one choke point, so the band is not
- *     restated here. A row within the band is clamped and kept (32 of Makera's rows state 15 000 RPM
+ *   - the machine REFUSES it rather than clamping it — more than the shop's `clamp.refuseFraction`
+ *     past the ceiling. That question is put to `clampToMachine`, the one choke point, so the band is
+ *     not restated here. A row within the band is clamped and kept (32 of Makera's rows state 15 000 RPM
  *     on a 13 000 RPM spindle); a row far past it is the vendor's table answering about a machine
  *     that is not this one.
  *
  * `stepDown` has no ceiling to be past — nothing in this stack clamps a depth of cut — so it is
  * screened for positivity alone. Step-over is not screened at all: it comes from our row (#310).
  */
-function catalogueRefusal(field: CatalogueField, value: number, machine: MillProfile): string | null {
+function catalogueRefusal(
+  field: CatalogueField,
+  value: number,
+  machine: MillProfile,
+  refuseFraction: number = CLAMP_REFUSE_FRACTION_FALLBACK,
+): string | null {
   if (!Number.isFinite(value) || value <= 0) return 'it is not a positive number';
   if (field === 'stepDown') return null;
   const probe =
-    field === 'rpm' ? clampToMachine(null, value, machine) : clampToMachine(value, null, machine);
+    field === 'rpm'
+      ? clampToMachine(null, value, machine, refuseFraction)
+      : clampToMachine(value, null, machine, refuseFraction);
   return probe.diagnostics.some((d) => d.severity === 'error')
     ? `the ${machine.name} refuses a ${CATALOGUE_FIELD[field].label} that high rather than clamping it`
     : null;
@@ -1105,6 +1112,7 @@ function entryFor(
   machine: MillProfile,
   table: readonly FeedsEntry[],
   edge: 'flat' | 'v',
+  refuseFraction: number = CLAMP_REFUSE_FRACTION_FALLBACK,
 ): EntryChoice {
   const entry = table.find(
     (e) => e.material === material && (e.edge ?? 'flat') === edge && diameter >= e.minDiameter && diameter <= e.maxDiameter,
@@ -1174,7 +1182,7 @@ function entryFor(
   // screening is `catalogueRefusal`, the same one the tier above uses, so the two cannot disagree
   // about what "this job cannot use it" means.
   for (const field of CATALOGUE_FIELDS) {
-    const why = catalogueRefusal(field, row[field], machine);
+    const why = catalogueRefusal(field, row[field], machine, refuseFraction);
     if (!why) continue;
     const { label: fieldLabel, unit } = CATALOGUE_FIELD[field];
     return {
@@ -1280,6 +1288,12 @@ export function feedsFor(
    * it asks more of the edge than the contour-parallel pocket the table's row describes.
    */
   context?: { slotting?: boolean },
+  /**
+   * #448 — the shop's `clamp.refuseFraction`: the band above the machine's ceiling where a value
+   * is refused rather than clamped. Threaded in so this resolver and the catalogue screening share
+   * one number with `clampToMachine`; defaults to the labelled fallback.
+   */
+  refuseFraction: number = CLAMP_REFUSE_FRACTION_FALLBACK,
 ): FeedsResult {
   const snapshot = catalogueOf(catalogue);
   // The cutter, in the table's terms: a flat end mill of some diameter, or a V-bit whose cutting
@@ -1291,7 +1305,7 @@ export function feedsFor(
   const edge: 'flat' | 'v' = usable.tool.shape === 'v' ? 'v' : 'flat';
   const diameter = usable.tool.shape === 'v' ? usable.tool.cone.tipRadius * 2 : usable.tool.radius * 2;
 
-  const choice = entryFor(snapshot, material, tool, diameter, machine, table, edge);
+  const choice = entryFor(snapshot, material, tool, diameter, machine, table, edge, refuseFraction);
   if (!choice.ok) return { ok: false, reason: choice.reason };
   const { entry, catalogueOnly } = choice;
 
@@ -1328,7 +1342,7 @@ export function feedsFor(
     const vendorMaterial = catalogueMaterialFor(row.material) ?? row.material;
     for (const field of CATALOGUE_FIELDS) {
       const value = row[field];
-      const why = catalogueRefusal(field, value, machine);
+      const why = catalogueRefusal(field, value, machine, refuseFraction);
       if (!why) {
         params[field] = value;
         used.add(field);
@@ -1387,8 +1401,8 @@ export function feedsFor(
 
   // The single choke point every value passes through before it reaches a toolpath (#184).
   // The plunge feed has no ceiling of its own, so it goes through as a feed.
-  const cutting = clampToMachine(params.feed, params.rpm, machine);
-  const plunge = clampToMachine(params.plungeFeed, null, machine);
+  const cutting = clampToMachine(params.feed, params.rpm, machine, refuseFraction);
+  const plunge = clampToMachine(params.plungeFeed, null, machine, refuseFraction);
   diagnostics.push(...cutting.diagnostics, ...plunge.diagnostics);
   const refused = diagnostics.find((d) => d.severity === 'error');
   if (refused) return { ok: false, reason: refused.message };

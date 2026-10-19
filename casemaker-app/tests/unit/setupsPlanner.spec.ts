@@ -40,6 +40,7 @@ const input = (over: Partial<SetupsInput> = {}): SetupsInput => ({
   stock: STOCK,
   removals: [pocket, holes, chamfer],
   mount: { kind: 'bracket', board: true },
+  rotaryEnvelope: Z1.rotary?.envelope,
   ...over,
 });
 

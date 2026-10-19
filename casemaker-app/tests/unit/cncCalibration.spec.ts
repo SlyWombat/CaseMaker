@@ -13,7 +13,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { Z1, Z1_FRAME, MACHINES, deriveCoordinateFrame } from '@/engine/cnc/machine';
+import { Z1, Z1_FRAME, MACHINES, deriveCoordinateFrame, Z1_DERIVATION_OFFSETS } from '@/engine/cnc/machine';
 import {
   CALIBRATION_KEYS,
   CALIBRATION_KEY_LIST,
@@ -45,7 +45,7 @@ function readMachine(overrides: Record<string, string | undefined> = {}): Machin
 
 describe('the shipped frame (#279, the default half)', () => {
   it('has the vendor anchors and derives every position from them by one formula', () => {
-    const d = deriveCoordinateFrame(Z1_FRAME);
+    const d = deriveCoordinateFrame(Z1_FRAME, Z1_DERIVATION_OFFSETS);
     expect(Z1_FRAME.anchor1).toEqual([-192.4, -194.3]);
     expect(Z1.anchor1).toEqual(Z1_FRAME.anchor1);
     expect(Z1.anchor2).toEqual(d.anchor2);

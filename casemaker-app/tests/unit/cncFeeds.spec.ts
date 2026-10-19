@@ -4,7 +4,7 @@
 import { describe, it, expect } from 'vitest';
 import { FEEDS_TABLE, feedsFor, type FeedsEntry } from '@/engine/cnc/feeds';
 import { flatEndMill, cuttingRadiusForSweep } from '@/engine/cnc/tool';
-import { Z1, CLAMP_REFUSE_FRACTION } from '@/engine/cnc/machine';
+import { Z1, CLAMP_REFUSE_FRACTION_FALLBACK } from '@/engine/cnc/machine';
 
 /**
  * A cutter that lands in a row's range, on the row's OWN edge (#405): a row states the edge its
@@ -255,7 +255,7 @@ describe('feedsFor clamps against the machine', () => {
     expect(res.diagnostics).toHaveLength(1);
     expect(res.diagnostics[0]).toMatchObject({ severity: 'warning', code: 'feed-clamped' });
     // +25 %, inside the 50 % refusal band.
-    expect(1500 / Z1.maxCutFeed - 1).toBeLessThan(CLAMP_REFUSE_FRACTION);
+    expect(1500 / Z1.maxCutFeed - 1).toBeLessThan(CLAMP_REFUSE_FRACTION_FALLBACK);
   });
 
   it('refuses an override rpm of 24000 (+85 %), past the 50 % refusal threshold', () => {
@@ -263,7 +263,7 @@ describe('feedsFor clamps against the machine', () => {
     expect(res.ok).toBe(false);
     if (res.ok) throw new Error('expected a refusal');
     expect(res.reason).toContain('24000');
-    expect(24000 / Z1.maxRpm - 1).toBeGreaterThan(CLAMP_REFUSE_FRACTION);
+    expect(24000 / Z1.maxRpm - 1).toBeGreaterThan(CLAMP_REFUSE_FRACTION_FALLBACK);
   });
 
   it('refuses non-positive depth, feeds and spindle rather than clamping them', () => {

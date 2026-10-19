@@ -16,7 +16,13 @@
  */
 
 import { z } from 'zod';
-import { GRIP_MIN } from '@/engine/cnc/fixture';
+import {
+  GRIP_MIN,
+  VISE_DEFAULT_STOCK_PROUD_FALLBACK,
+  VISE_MIN_COVERAGE_FRACTION_FALLBACK,
+  VISE_UNCERTAINTY_FALLBACK,
+} from '@/engine/cnc/fixture';
+import { CLAMP_REFUSE_FRACTION_FALLBACK } from '@/engine/cnc/machine';
 import { DRILL_POINT_FALLBACK_DEG } from '@/engine/cnc/tool';
 import { REST_MACHINING_FALLBACK } from '@/engine/cnc/engrave/restSettings';
 import { FINISH_STOCK_TO_LEAVE_FALLBACK } from '@/engine/cnc/engrave/finishPass';
@@ -116,6 +122,35 @@ export const KNOWN_DEFAULTS: Readonly<Record<string, KnownDefault>> = {
   'setups.minGripMm': { label: 'least stock to grip', unit: 'mm', rule: z.number().min(0.5).max(50), fallback: GRIP_MIN },
   'setups.remountMinutes': { label: 'remount estimate', unit: 'min', rule: z.number().min(0.5).max(120), fallback: 3 },
   'setups.reregisterMinutes': { label: 're-registration estimate', unit: 'min', rule: z.number().min(0.5).max(120), fallback: 2 },
+  // ── #448 (begin) — the vise's chosen tunables and the clamp band, out of the code and into the
+  // location (`defaults.rs` seeds the same values). The product geometry (jaw widths, ledge, body
+  // depth) is the accessory record `Z1_VISE` in `fixture.ts`, not a setting. Each fallback is the
+  // number the code compiled before, and each is the labelled no-service value.
+  'vise.uncertaintyMm': {
+    label: 'vise box growth before a collision check (chosen)',
+    unit: 'mm',
+    rule: z.number().min(0).max(5),
+    fallback: VISE_UNCERTAINTY_FALLBACK,
+  },
+  'vise.defaultStockProudMm': {
+    label: 'vise default proud height cap (chosen)',
+    unit: 'mm',
+    rule: z.number().min(0.1).max(20),
+    fallback: VISE_DEFAULT_STOCK_PROUD_FALLBACK,
+  },
+  'vise.minCoverageFraction': {
+    label: 'vise jaw Y coverage before a short-jaw warning (chosen)',
+    unit: 'x',
+    rule: z.number().min(0.05).max(1),
+    fallback: VISE_MIN_COVERAGE_FRACTION_FALLBACK,
+  },
+  'clamp.refuseFraction': {
+    label: 'overage past the machine ceiling that refuses instead of clamping (chosen)',
+    unit: 'x',
+    rule: z.number().min(0.01).max(5),
+    fallback: CLAMP_REFUSE_FRACTION_FALLBACK,
+  },
+  // ── #448 (end)
   // #423 — the run screen's watch. 2000 ms is the poll's floor (0.6 s faulted the controller, #386).
   'run.pollMs': { label: 'run status poll', unit: 'ms', rule: z.number().min(2000).max(60000), fallback: 2000 },
   'run.noProgressMs': { label: 'no-progress timeout', unit: 'ms', rule: z.number().min(15000).max(600000), fallback: 30000 },

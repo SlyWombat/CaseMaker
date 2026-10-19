@@ -14,7 +14,7 @@ import {
   machineSchema,
   millProfileSchema,
   printerProfileSchema,
-  CLAMP_REFUSE_FRACTION,
+  CLAMP_REFUSE_FRACTION_FALLBACK,
   type Machine,
 } from '@/engine/cnc/machine';
 
@@ -202,7 +202,7 @@ describe('clampToMachine: the single choke point', () => {
   });
 
   it('REFUSES a gross overage rather than clamping it: wrong tool, wrong material, or corruption', () => {
-    const r = clampToMachine(1200 * (1 + CLAMP_REFUSE_FRACTION) + 1, 24000, Z1);
+    const r = clampToMachine(1200 * (1 + CLAMP_REFUSE_FRACTION_FALLBACK) + 1, 24000, Z1);
     expect(r.feed).toBeNull();
     expect(r.rpm).toBeNull();
     expect(r.diagnostics.map((d) => [d.severity, d.code])).toEqual([
@@ -220,8 +220,8 @@ describe('clampToMachine: the single choke point', () => {
     }
   });
 
-  it('the refuse threshold is one named constant', () => {
-    expect(CLAMP_REFUSE_FRACTION).toBe(0.5);
+  it('the refuse threshold is one named fallback constant', () => {
+    expect(CLAMP_REFUSE_FRACTION_FALLBACK).toBe(0.5);
   });
 });
 

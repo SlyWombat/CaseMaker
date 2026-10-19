@@ -44,17 +44,61 @@ import { hasSacrificial, noneSacrificial, stripHeight, viseJawShift } from './sa
  */
 
 /**
- * How far the ENVELOPE box extends below the stock's underside, mm. It only has to be "far enough
- * that nothing can pass under it" (/Simulation.md §1.1: the holder-into-part check), so this is a
- * generous depth, not a measured body height.
+ * The Z1 low-profile vise's PRODUCT constants (#448), as a sourced accessory record — the same
+ * shape as {@link RotaryProfile}: one `sources` string per field, so a caliper reading and an
+ * unmeasured provisional figure never wear the same provenance.
  *
- * It also sizes the drawn body below the jaw bars (`viseBody`, #508), where it is a fixed height
- * rather than a distance from the stock. Both uses are the same unmeasured quantity — how tall the
- * body is — so they share the one PROVISIONAL figure rather than inventing a second.
+ * The vise is identical on every Z1 (maintainer, 2026-10-13), so these are the product's own
+ * numbers, measured once on the reference unit — the tier BELOW a machine's own saved
+ * `fixtures.vise` (decision 28: default → saved → measured). The per-unit saved vise stays the
+ * saved/measured tier; this record is the shipped default's source.
  *
- * PROVISIONAL (#208): the real vise body is unmeasured.
+ * MEASURED (`docs/bench/2026-10-bench-plan.md`, "Z1 low-profile vise: product constants"): the
+ * soft-jaw top is 10 mm across on BOTH jaws (2026-10-13), the tall bar is 100 mm long in Y
+ * (2026-10-15), and the ledges are 3.1 mm down / 1.9 mm in (2026-10-15). `bodyDepth` is the one
+ * UNMEASURED figure (#208) — a provisional depth, never labelled a measurement.
  */
-export const VISE_BODY_DEPTH = 20;
+export interface ViseProfile {
+  fixedJawThickness: Mm;
+  movingJawThickness: Mm;
+  jawLength: Mm;
+  ledgeStep: Mm;
+  ledgeWidth: Mm;
+  bodyDepth: Mm;
+  sources: {
+    fixedJawThickness: string;
+    movingJawThickness: string;
+    jawLength: string;
+    ledgeStep: string;
+    ledgeWidth: string;
+    bodyDepth: string;
+  };
+}
+
+export const Z1_VISE: ViseProfile = {
+  fixedJawThickness: 10,
+  movingJawThickness: 10,
+  jawLength: 100,
+  ledgeStep: 3.1,
+  ledgeWidth: 1.9,
+  bodyDepth: 20,
+  sources: {
+    fixedJawThickness: 'calipered 2026-10-13 (docs/bench/2026-10-bench-plan.md, "Z1 low-profile vise: product constants")',
+    movingJawThickness: 'calipered 2026-10-13 (docs/bench/2026-10-bench-plan.md, "Z1 low-profile vise: product constants")',
+    jawLength: 'calipered 2026-10-15 (docs/bench/2026-10-bench-plan.md, "Z1 low-profile vise: product constants")',
+    ledgeStep: 'calipered 2026-10-15 (docs/bench/2026-10-bench-plan.md, "Z1 low-profile vise: product constants")',
+    ledgeWidth: 'calipered 2026-10-15 (docs/bench/2026-10-bench-plan.md, "Z1 low-profile vise: product constants")',
+    bodyDepth: 'UNMEASURED (#208) — a provisional depth for "nothing can pass under it", not a measurement',
+  },
+};
+
+/**
+ * How far the ENVELOPE box extends below the stock's underside, mm — the accessory record's
+ * UNMEASURED `bodyDepth` (#208, #448). It only has to be "far enough that nothing can pass under
+ * it" (/Simulation.md §1.1: the holder-into-part check), so this is a generous depth, not a
+ * measured body height. It also sizes the drawn body below the jaw bars (`viseBody`, #508).
+ */
+export const VISE_BODY_DEPTH = Z1_VISE.bodyDepth;
 
 /**
  * The drawn soft-jaw bar's height, mm — PROVISIONAL, and it exists for the picture only (#508).
@@ -100,62 +144,62 @@ export function seatDepth(seat: ViseParams['seat']): Mm {
 export const GRIP_MIN = 3;
 
 /**
- * Where a dimension came from is the whole point (decision 28), so the default uncertainty is
- * a function of the source, never a bare constant at the call site.
- *
- * The two bands were 2 and 0.5 while the jaw widths were only bounded by §11.8's probe bands — "a
- * default is not a measurement". The jaws are calipered now (#208, 2026-10-13/15), so the shipped
- * default rests on readings too and both sources carry the same band, which is a chosen figure
- * rather than a reading the way either of the old two was (see `DEFAULT_UNCERTAINTY`). The function
- * stays: a source that is NOT a measurement would still need a band of its own.
+ * The LABELLED FALLBACK for the shop's `vise.uncertaintyMm` (#448): the band every collision box
+ * is grown by (#204), mm, used with no house service. CHOSEN, not measured (#391 review, item 3):
+ * nothing has calipered the spread of a remount. It has to cover clamping repeatability, the
+ * blank's dome and a hand-set origin's error, and is deliberately the same for a saved measurement
+ * — a reading does not make a remount repeatable. `defaultsClient.ts` reads this fallback for the
+ * registry entry.
  */
-export function uncertaintyFor(source: ViseParams['source']): Mm {
-  return source === 'default' ? DEFAULT_UNCERTAINTY : SAVED_UNCERTAINTY;
+export const VISE_UNCERTAINTY_FALLBACK: Mm = 0.5;
+
+/**
+ * Where a dimension came from is the whole point (decision 28), so the default uncertainty is a
+ * function of the source, never a bare constant at the call site. Since #448 the band is the
+ * shop's `vise.uncertaintyMm`, passed in; the jaws are calipered now (#208, 2026-10-13/15), so the
+ * shipped default rests on readings too and both sources carry the same band — a chosen figure
+ * rather than a reading (see {@link VISE_UNCERTAINTY_FALLBACK}). The function stays: a source that
+ * is NOT a measurement would still need a band of its own.
+ */
+export function uncertaintyFor(source: ViseParams['source'], uncertaintyMm: Mm = VISE_UNCERTAINTY_FALLBACK): Mm {
+  // The band no longer depends on `source` (#448): a shipped default and a saved/measured reading
+  // carry the same chosen residual, so the caller's source stays only to keep the call sites honest.
+  void source;
+  return uncertaintyMm;
 }
 
 /**
- * The band the SHIPPED default carries, mm. It was 2 while the jaws could have been anywhere in
- * §11.8's bands; both jaw widths and the bar's length are calipered now
- * (`docs/bench/2026-10-bench-plan.md`, "Z1 low-profile vise: product constants", 2026-10-13 and
- * 2026-10-15) and the maintainer's ruling is that the vise is identical on every Z1 — so what is
- * left is caliper and mounting error, the same residual a user's own saved measurement carries.
- *
- * The figure is CHOSEN, not measured (#391 review, item 3): nothing has calipered the spread of a
- * remount, and it is not the caliper's own resolution. It is the number that has to cover clamping
- * repeatability, the blank's dome and a hand-set origin's error, and it is deliberately the same
- * for a saved measurement for the same reason — a reading does not make a remount repeatable. What
- * it must NOT try to cover is any of those errors INDIVIDUALLY: the origin is the user's, and it
- * is named on the run sheet rather than absorbed here (#391 review, item 2).
- *
- * `source` stays `'default'`: this is the SHIPPED set, not a reading of anyone's own vise, and the
- * run sheet (`vise-default`) still says where it came from. What changed is that a cut near a jaw
- * face is now judged against a number someone measured rather than against a 2 mm cloud.
+ * The LABELLED FALLBACK for the shop's `vise.defaultStockProudMm` (#448): the working height a
+ * normal blank stands proud of the jaw tops by default, mm — how much of the stock is out of the
+ * jaws so the cutter can reach it. PROVISIONAL (#208 A5 measures the value a real vise wants);
+ * this is the cap on the stock-derived default below, used with no house service. Since #508 it is
+ * the placeholder `DEFAULT_VISE` carries for a caller that cannot say the stock — every stock-
+ * carrying path derives the proud value from the seat instead.
  */
-const DEFAULT_UNCERTAINTY: Mm = 0.5;
-/** A measurement still carries caliper/mounting error — the same figure, for the same reason. */
-const SAVED_UNCERTAINTY: Mm = 0.5;
+export const VISE_DEFAULT_STOCK_PROUD_FALLBACK: Mm = 4;
 
 /**
- * The working height a normal blank stands proud of the jaw tops by default, mm: how much of
- * the stock is out of the jaws so the cutter can reach it. PROVISIONAL (#208 A5 measures the
- * value a real vise wants); this is the cap on the stock-derived default below.
+ * The LABELLED FALLBACK for the shop's `vise.minCoverageFraction` (#448): the share of the stock's
+ * width the jaws must cover in Y before `vise-jaw-short` warns. Chosen, not measured; used with no
+ * house service.
  */
-export const DEFAULT_STOCK_PROUD: Mm = 4;
+export const VISE_MIN_COVERAGE_FRACTION_FALLBACK = 0.5;
 
 /**
  * The soft jaws' ledge: its top sits this far below the jaw top, mm — a caliper reading, not a
  * guess (#208, 2026-10-15, `docs/bench/2026-10-bench-plan.md`). A blank SEATED on the ledges
  * therefore stands `thickness − LEDGE_STEP` proud of the jaw tops, and the ledge, not the stock,
- * is what fixes that.
+ * is what fixes that. Read from {@link Z1_VISE} (#448), where the provenance lives.
  */
-export const LEDGE_STEP: Mm = 3.1;
+export const LEDGE_STEP: Mm = Z1_VISE.ledgeStep;
 
 /**
  * The soft jaws' ledge WIDTH: how far each ledge reaches in under the blank from its jaw face, mm —
  * calipered on 2026-10-15 (#208), with the step above. The blank's down face rests on
  * these two strips, so a cut there leaves it nothing to sit on (#428's `rests-on-cut`).
+ * Read from {@link Z1_VISE} (#448), where the provenance lives.
  */
-export const LEDGE_WIDTH: Mm = 1.9;
+export const LEDGE_WIDTH: Mm = Z1_VISE.ledgeWidth;
 
 /**
  * How far a stock of `thickness` stands proud of the jaw tops by default, mm — the HONEST
@@ -191,12 +235,16 @@ export const LEDGE_WIDTH: Mm = 1.9;
  * truth about it: seated on the ledges, its top is at or below the jaw tops. Since #488 that is a
  * NOTE rather than a refusal, for the same reason as the floor case.
  */
-export function defaultStockProud(thickness: Mm, seat: ViseParams['seat'] = 'ledge'): Mm {
+export function defaultStockProud(
+  thickness: Mm,
+  seat: ViseParams['seat'] = 'ledge',
+  defaultStockProudMm: Mm = VISE_DEFAULT_STOCK_PROUD_FALLBACK,
+): Mm {
   if (seat === 'floor') return thickness - VISE_FLOOR_DEPTH;
   // The ledge seat, with the pre-#508 rule stated as its lower bound. `Math.min` contains
   // `thickness - LEDGE_STEP`, so the max can only ever return the seated value; the bound is kept
   // because it is the model's own statement of "never less proud than this", not because it can win.
-  const lowerBound = Math.min(DEFAULT_STOCK_PROUD, thickness / 2, thickness - LEDGE_STEP);
+  const lowerBound = Math.min(defaultStockProudMm, thickness / 2, thickness - LEDGE_STEP);
   return Math.max(lowerBound, thickness - LEDGE_STEP);
 }
 
@@ -230,14 +278,14 @@ export function defaultStockProud(thickness: Mm, seat: ViseParams['seat'] = 'led
  * through `defaultEngraveJob(vise)` when settings holds one.
  */
 export const DEFAULT_VISE: ViseParams = {
-  stockProud: DEFAULT_STOCK_PROUD, // Per-job, not a vise constant — `defaultStockProud` derives it from the stock and seat.
+  stockProud: VISE_DEFAULT_STOCK_PROUD_FALLBACK, // Per-job, not a vise constant — `defaultStockProud` derives it from the stock and seat.
   seat: 'ledge', // #508: the blank sits on the soft jaws' ledges unless the operator says otherwise.
-  fixedJawThickness: 10, // Calipered 2026-10-13: the soft-jaw top is 10 mm across (#208).
-  movingJawThickness: 10, // Calipered 2026-10-13: 10 on this jaw too — 9 was §11.8's band (#208).
-  jawLength: 100, // Calipered 2026-10-15: the tall bar's length in Y (#208).
+  fixedJawThickness: Z1_VISE.fixedJawThickness, // Calipered 2026-10-13: the soft-jaw top is 10 mm across (#208).
+  movingJawThickness: Z1_VISE.movingJawThickness, // Calipered 2026-10-13: 10 on this jaw too — 9 was §11.8's band (#208).
+  jawLength: Z1_VISE.jawLength, // Calipered 2026-10-15: the tall bar's length in Y (#208).
   jawStartY: -10, // NOT a vise constant (#208): where the blank is clamped along the 100 mm bar.
   source: 'default',
-  uncertainty: DEFAULT_UNCERTAINTY,
+  uncertainty: VISE_UNCERTAINTY_FALLBACK,
 };
 
 /**
@@ -587,6 +635,8 @@ export function validateVise(
   sacrificial: Sacrificial = noneSacrificial(),
   /** The shop's `setups.minGripMm` (`shopDefault(…)`); the labelled fallback when not passed. */
   minGripMm: Mm = GRIP_MIN,
+  /** The shop's `vise.minCoverageFraction`; the labelled fallback when not passed (#448). */
+  minCoverageFraction: number = VISE_MIN_COVERAGE_FRACTION_FALLBACK,
 ): JobFinding[] {
   const findings: JobFinding[] = [];
   const { width, thickness } = stock;
@@ -628,13 +678,13 @@ export function validateVise(
     0,
     Math.min(vise.jawStartY + vise.jawLength, width) - Math.max(vise.jawStartY, 0),
   );
-  if (covered < width / 2) {
+  if (covered < width * minCoverageFraction) {
     findings.push({
       severity: 'warning',
       code: 'vise-jaw-short',
       message:
         `The jaws span Y ${vise.jawStartY} to ${vise.jawStartY + vise.jawLength}, covering ` +
-        `${covered} mm of the stock's ${width} mm width — less than half.`,
+        `${covered} mm of the stock's ${width} mm width — less than the ${Math.round(minCoverageFraction * 100)} % the shop asks for.`,
     });
   }
 

@@ -29,14 +29,14 @@ export function mountFor(input: SetupsInput, face: Face): MountSpec {
   return input.mounts?.[face] ?? input.mount;
 }
 
-/** The rotary's envelope, ⌀ × length, mm (`Rotary.md` — a product constant of the module). */
-const ROTARY = { diameter: 80, length: 150 };
-
 const SIDES: readonly Face[] = ['left', 'right', 'front', 'back'];
 
-function rotaryFits(stock: { x: number; y: number; z: number }): boolean {
+function rotaryFits(
+  stock: { x: number; y: number; z: number },
+  envelope: { diameter: number; length: number },
+): boolean {
   const dims = [stock.x, stock.y, stock.z].sort((a, b) => a - b);
-  return Math.hypot(dims[0]!, dims[1]!) <= ROTARY.diameter && dims[2]! <= ROTARY.length;
+  return Math.hypot(dims[0]!, dims[1]!) <= envelope.diameter && dims[2]! <= envelope.length;
 }
 
 /** Group the removals into directions, greedily by volume. */
@@ -107,11 +107,13 @@ export function buildSetups(
     });
     stock = after;
   }
-  // The rotary only when it saves remounts: two or more SIDE directions (a flip is not a rotary job).
+  // The rotary only when it saves remounts: two or more SIDE directions (a flip is not a rotary job),
+  // and only when the machine has one and the stock fits ITS envelope (#448, read from the record).
   const sides = new Set([...setups.map((s) => s.faceUp), ...unholdable.map((u) => u.face)].filter((f) => SIDES.includes(f)));
+  const envelope = input.rotaryEnvelope;
   const rotaryOffer =
-    sides.size >= 2 && rotaryFits(input.stock)
-      ? `the rotary would reach the ${[...sides].join(', ')} faces in one mount (the stock fits ⌀${ROTARY.diameter} × ${ROTARY.length}) — once it is characterised (CNC-5)`
+    envelope !== undefined && sides.size >= 2 && rotaryFits(input.stock, envelope)
+      ? `the rotary would reach the ${[...sides].join(', ')} faces in one mount (the stock fits ⌀${envelope.diameter} × ${envelope.length}) — once it is characterised (CNC-5)`
       : null;
   return { setups, unholdable, lost, rotaryOffer };
 }

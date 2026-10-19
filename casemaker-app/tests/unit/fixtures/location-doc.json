@@ -1612,6 +1612,34 @@
       "setAt": null,
       "unit": "mm",
       "note": "chosen, not measured: the +/- band around the top a facing skim was posted to leave; the post-facing re-touch accepts a measurement inside it, because a skim never removes exactly its nominal depth"
+    },
+    "vise.uncertaintyMm": {
+      "value": 0.5,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm",
+      "note": "chosen, not measured: the band every vise collision box is grown by before a check; covers clamping repeatability, the blank's dome and a hand-set origin's error (#391 review)"
+    },
+    "vise.defaultStockProudMm": {
+      "value": 4.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm",
+      "note": "chosen, not measured: the cap on the stock-derived proud height; #508 derives the real proud from the seat, so this is the no-stock placeholder and the pre-#508 lower bound"
+    },
+    "vise.minCoverageFraction": {
+      "value": 0.5,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "x",
+      "note": "chosen, not measured: the share of the stock's width the vise jaws must cover in Y before the short-jaw warning"
+    },
+    "clamp.refuseFraction": {
+      "value": 0.5,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "x",
+      "note": "chosen, not measured: the band above the machine's feed/rpm ceiling where a value is refused rather than clamped"
     }
   }
 }
