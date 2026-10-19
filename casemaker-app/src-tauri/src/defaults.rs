@@ -307,6 +307,13 @@ pub const UNMEASURED_SEEDS: &[(&str, f64, &str, &str)] = &[
     // bounds and fallback. It trades cap height against the clearance the dome and the print want.
     ("engrave.blankBandFill", 0.7, "x", "chosen, not measured: how much of a free band the seeded line takes, as a share of it; more fill means a taller cap and less clearance"),
     // ── #451 blank band fill (end)
+    // ── #451 raster trace defaults (begin) — the traced-bitmap dialog's starting numbers (#252):
+    // chosen, not measured. `invert` stays a per-picture toggle, not a shop number. `defaultsClient.ts`
+    // states the same bounds and fallbacks.
+    ("import.traceThreshold", 128.0, "level", "chosen, not measured: the luminance a traced pixel must be darker than to count as ink; 0 to 255"),
+    ("import.traceDespecklePx", 8.0, "px", "chosen, not measured: the smallest ink blob or enclosed hole kept, in pixels of the source image; smaller specks are dropped before tracing"),
+    ("import.traceSimplifyPx", 1.0, "px", "chosen, not measured: how far a traced boundary's pixel staircase may be straightened, in pixels of the source image"),
+    // ── #451 raster trace defaults (end)
     // ── #432 facing (begin) — the depth a facing pass arrives filled in with. CHOSEN, not measured:
     // the maintainer's decision of 2026-10-17 asks the depth every time facing is on and fills in
     // the probed top's spread plus the margin, or one of these two fallbacks without a probe.
@@ -928,6 +935,21 @@ fn known_rule(key: &str, n: Option<f64>) -> Option<Result<(), String>> {
             "0.05 to 1, the share of the free band the line takes",
         )),
         // ── #451 engrave findings (end)
+        // ── #451 raster trace defaults — `defaultsClient.ts` states the same bounds. threshold is a
+        // luminance, 0 to 255, held to whole numbers; despeckle is a pixel count; simplify is a pixel
+        // tolerance with quarter-pixel steps (any number in the range is accepted).
+        "import.traceThreshold" => Some(need(
+            n.is_some_and(|v| (0.0..=255.0).contains(&v) && v.fract() == 0.0),
+            "a whole number of luminance levels, 0 to 255",
+        )),
+        "import.traceDespecklePx" => Some(need(
+            n.is_some_and(|v| (0.0..=1024.0).contains(&v) && v.fract() == 0.0),
+            "a whole number of pixels, 0 to 1024",
+        )),
+        "import.traceSimplifyPx" => Some(need(
+            n.is_some_and(|v| (0.0..=64.0).contains(&v)),
+            "0 to 64 pixels",
+        )),
         // ── #432 facing — `defaultsClient.ts` states the same bounds. Above 0: a facing depth of
         // zero is the job saying it does not face, not a shop seed for how far a skim goes.
         "facing.roughMm" | "facing.unknownMm" => Some(need(

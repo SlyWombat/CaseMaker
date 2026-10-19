@@ -307,6 +307,16 @@ export const KNOWN_DEFAULTS: Readonly<Record<string, KnownDefault>> = {
   // BLANK_BAND_FILL_FALLBACK. Bounded above 0: zero would size the line to no band at all.
   'engrave.blankBandFill': { label: 'blank band fill, as a share of the free band (chosen)', unit: 'x', rule: z.number().min(0.05).max(1), fallback: 0.7 },
   // ── #451 blank band fill (end)
+  // ── #451 raster trace defaults (begin) — the traced-bitmap dialog's starting numbers (#252). CHOSEN,
+  // not measured: threshold is where a pixel stops counting as ink, despeckle is the smallest blob or
+  // pinhole kept, and simplify is how much the pixel staircase is straightened. `invert` stays a
+  // per-picture toggle (dark art vs light art), not a shop number. Fallbacks = `rasterOutline.ts`'s
+  // TRACE_DEFAULTS. The panel and dialog still read the compiled fallback; the consumer rewire lands
+  // with the next release (see the #451 comment).
+  'import.traceThreshold': { label: 'raster trace threshold, pixels darker than this are ink (chosen)', unit: 'level', rule: z.number().int().min(0).max(255), fallback: 128 },
+  'import.traceDespecklePx': { label: 'raster trace despeckle, smallest blob or pinhole kept (chosen)', unit: 'px', rule: z.number().int().min(0).max(1024), fallback: 8 },
+  'import.traceSimplifyPx': { label: 'raster trace corner simplify tolerance (chosen)', unit: 'px', rule: z.number().min(0).max(64), fallback: 1 },
+  // ── #451 raster trace defaults (end)
   // ── #432 facing (begin) — the depth a facing pass arrives filled in with. CHOSEN, not measured:
   // the maintainer's decision of 2026-10-17 asks the depth every time facing is on and fills in the
   // probed top's spread plus the margin, or one of these two fallbacks without a probe. General

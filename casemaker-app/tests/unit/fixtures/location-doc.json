@@ -1564,6 +1564,27 @@
       "unit": "x",
       "note": "chosen, not measured: how much of a free band the seeded line takes, as a share of it; more fill means a taller cap and less clearance"
     },
+    "import.traceThreshold": {
+      "value": 128.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "level",
+      "note": "chosen, not measured: the luminance a traced pixel must be darker than to count as ink; 0 to 255"
+    },
+    "import.traceDespecklePx": {
+      "value": 8.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "px",
+      "note": "chosen, not measured: the smallest ink blob or enclosed hole kept, in pixels of the source image; smaller specks are dropped before tracing"
+    },
+    "import.traceSimplifyPx": {
+      "value": 1.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "px",
+      "note": "chosen, not measured: how far a traced boundary's pixel staircase may be straightened, in pixels of the source image"
+    },
     "facing.roughMm": {
       "value": 0.5,
       "source": "seeded",

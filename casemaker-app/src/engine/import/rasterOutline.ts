@@ -48,6 +48,17 @@ export interface TraceOptions {
   simplify?: number;
 }
 
+/**
+ * #451 — the traced-bitmap dialog's starting numbers are shop defaults (`import.traceThreshold`,
+ * `import.traceDespecklePx`, `import.traceSimplifyPx`). These are the NO-SERVICE FALLBACKS, the
+ * same numbers the location seeds, so behaviour is unchanged either way. `invert` is a per-picture
+ * toggle (dark art on light, or light art on dark) rather than a value somebody chose for this
+ * bench, so its default stays here.
+ *
+ * The panel (`EngravePanel.tsx`) and the dialog (`EngraveImportDialog.tsx`) still read this
+ * compiled fallback directly; wiring them to the shop keys lands with the next release, since the
+ * two files are shared.
+ */
 export const TRACE_DEFAULTS = {
   threshold: 128,
   invert: false,
