@@ -19,7 +19,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { bootstrap } from '../src/platform/headless/bootstrap';
-import { serializeProject } from '../src/store/persistence';
+import { serializeProject } from '../src/store/projectFile';
 import { createDefaultProject } from '../src/store/projectStore';
 
 // The board library and the wasm seam, exactly as every headless entry point resolves them (#476).

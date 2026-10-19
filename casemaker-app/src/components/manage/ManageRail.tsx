@@ -14,7 +14,8 @@
 import type { JSX } from 'react';
 import { MACHINES } from '@/engine/cnc/machine';
 import { TOOL_LIBRARY } from '@/engine/cnc/toolLibrary';
-import { houseBaseUrl, HOUSE_SCHEMA_VERSION } from '@/platform/houseClient';
+import { houseBaseUrl } from '@/platform/houseBaseUrl';
+import { HOUSE_SCHEMA_VERSION } from '@/platform/houseClient';
 import { useToolRegistry } from '@/hooks/useToolRegistry';
 import { useMachineStore } from '@/store/machineStore';
 import { useManageModeStore, type ManageScope } from '@/store/manageModeStore';

@@ -20,12 +20,11 @@ import { featureSim } from '@/platform/features';
 import type { DesignJobPatch, DesignReadingDirection } from '@/engine/cnc/engrave/fromDesign';
 
 /**
- * The largest project we will read, bytes. A `.3mf` is a zip of the whole plate, and the maintainer's
- * own badge project — three text volumes and a magnet pocket — is well under a megabyte; this is a
- * guard against picking something that is not a project at all (a 200 MB STL renamed, a backup
- * archive) and spending the read on it. Generous on purpose: a legitimately dense plate is a few MB.
+ * The largest project we will read, bytes. See `./designLimits`, where the constant lives so
+ * `meshStock.ts` can share it without importing this module's browser-only client graph (#544).
  */
-export const MAX_DESIGN_FILE_BYTES = 64 * 1024 * 1024;
+import { MAX_DESIGN_FILE_BYTES } from './designLimits';
+export { MAX_DESIGN_FILE_BYTES };
 
 /** The one thing this module needs of the sim worker. A fake in tests. */
 export interface DesignImportClient {

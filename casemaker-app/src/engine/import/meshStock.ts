@@ -23,7 +23,7 @@ import { parseStl, type ParsedMesh } from './stlParser';
 import { unzipSync } from 'fflate';
 import { parse3MF } from './threeMfParser';
 import { parsePrusaThreeMf } from './prusa3mf';
-import { MAX_DESIGN_FILE_BYTES } from './designImport';
+import { MAX_DESIGN_FILE_BYTES } from './designLimits';
 
 /** Positions within this of each other are one vertex, mm. A slicer writes floats; 1 µm is plenty. */
 export const WELD_TOLERANCE_MM = 1e-3;

@@ -510,7 +510,10 @@ export const useLibraryStore = create<LibraryState>()((set, get) => ({
       set({ remoteSources: next });
       persist(get().localBoards, get().localTemplates, next);
     } catch (err) {
-      const offline = typeof navigator !== 'undefined' && navigator.onLine === false;
+      // `navigator.onLine` is a browser property Node's own `navigator` global lacks; the cast keeps
+      // this shared store type-checking under the headless (no-DOM) scripts config (#544).
+      const offline =
+        typeof navigator !== 'undefined' && (navigator as { onLine?: boolean }).onLine === false;
       const msg = offline
         ? 'offline — using the cached copy'
         : err instanceof Error

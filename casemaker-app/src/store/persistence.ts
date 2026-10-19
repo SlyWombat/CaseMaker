@@ -1,16 +1,10 @@
 import type { Project } from '@/types';
 import { openTextFile } from '@/utils/openTextFile';
-import { projectSchema } from './projectSchema';
-
-export function serializeProject(project: Project): string {
-  return JSON.stringify(project, null, 2);
-}
-
-export function parseProject(text: string): Project {
-  const raw = JSON.parse(text);
-  const parsed = projectSchema.parse(raw);
-  return parsed as Project;
-}
+// The pure project round-trip lives in `projectFile.ts` so headless scripts can import
+// `serializeProject` / `parseProject` without reaching this module's browser-only picker and
+// download code (#544, same class as #534). Re-exported here so the app's existing imports stay.
+import { serializeProject, parseProject } from './projectFile';
+export { serializeProject, parseProject };
 
 // Issue #70 — File System Access API gives us a real native save/open
 // dialog with filename + folder control. The handle returned is opaque but

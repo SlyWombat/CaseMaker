@@ -42,7 +42,9 @@ import {
   uploadBlocker,
   type EngraveRunView,
 } from '../../../src/store/engraveRunGate';
-import type { SimStatus } from '../../../src/store/simStore';
+// From the shared type module, not `store/simStore`: the store statically imports the browser-only
+// sim client and worker, so this keeps them out of the headless graph (#544, same class as #534).
+import type { SimStatus } from '../../../src/types/simStatus';
 
 /** A program generated from a job, with every gate's answer attached. */
 export interface PreparedProgram {

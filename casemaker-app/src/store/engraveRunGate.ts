@@ -24,7 +24,9 @@ import type { OracleReport } from '@/engine/cnc/engrave/oracle';
 import type { RegistrationOutcome } from '@/engine/cnc/registration/outcome';
 import type { RegistrationPlan } from '@/engine/cnc/registration/plan';
 import type { SimDiagnostic } from '@/workers/sim/session';
-import type { SimStatus } from './simStore';
+// From the shared type module, not the store: this file must stay importable by headless scripts
+// without reaching the browser-only sim store (#544).
+import type { SimStatus } from '@/types/simStatus';
 import { simErrors } from '@/engine/cnc/simGate';
 
 /**

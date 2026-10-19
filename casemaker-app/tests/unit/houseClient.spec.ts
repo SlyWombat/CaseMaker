@@ -4,8 +4,8 @@
 // worth having: the embedded server answers unknown paths with `index.html` and status 200.
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { houseBaseUrl } from '@/platform/houseBaseUrl';
 import {
-  houseBaseUrl,
   DEFAULT_TIMEOUT_MS,
   houseFeeds,
   houseRegisterItem,

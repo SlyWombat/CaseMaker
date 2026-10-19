@@ -34,7 +34,7 @@ import {
   type ReceiptMcpTool,
   type ReceiptRefusal,
 } from '../../../src/platform/headless/receipt';
-import { parseProject, serializeProject } from '../../../src/store/persistence';
+import { parseProject, serializeProject } from '../../../src/store/projectFile';
 import { createDefaultProject } from '../../../src/store/projectStore';
 import type { Project } from '../../../src/types';
 import { engraveJobMain } from '../casemaker/engrave';

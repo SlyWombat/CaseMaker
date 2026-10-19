@@ -395,7 +395,10 @@ export function parseToolPicks(raw: unknown): ToolPicks {
 }
 
 function loadSettings(): AppSettings {
-  if (typeof window === 'undefined' || typeof localStorage === 'undefined') {
+  // `window` is browser-only; read it off `globalThis` so this shared store also type-checks under
+  // the headless (no-DOM) scripts config, where `window` is undeclared (#544).
+  const win = (globalThis as { window?: unknown }).window;
+  if (win === undefined || typeof localStorage === 'undefined') {
     return { ...DEFAULTS, margins: { ...MARGIN_DEFAULTS } };
   }
   try {

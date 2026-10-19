@@ -11,7 +11,7 @@ import { dirname, join } from 'node:path';
 
 import { bootstrap } from '../../../src/platform/headless/bootstrap';
 import { RECEIPT_VERSION } from '../../../src/platform/headless/receipt';
-import { parseProject } from '../../../src/store/persistence';
+import { parseProject } from '../../../src/store/projectFile';
 import { CliExit, isCliExit } from './exit';
 import { commandOutput, HUMAN, type CommandOptions } from './output';
 import { writeProjectStl } from './projectExport';

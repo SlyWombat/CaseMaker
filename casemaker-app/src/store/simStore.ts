@@ -29,8 +29,11 @@ import type { SimDiagnostic, SimFrame, SimLoadOk, SimPath } from '@/workers/sim/
 import type { SimLoadPhase } from '@/engine/jobs/simClient';
 // Type-only, like `SimLoadPhase`: the thread dimensions travel as plain numbers (#445 §4).
 import type { SimThreadSpec } from '@/engine/cnc/cam/threadMill';
+// `SimStatus` lives in `types/simStatus.ts` so a headless caller can name the type without pulling
+// this store (and through it the browser-only sim client and worker) into the scripts graph (#544).
+import type { SimStatus } from '@/types/simStatus';
 
-export type SimStatus = 'idle' | 'loading' | 'ready' | 'refused' | 'error';
+export type { SimStatus } from '@/types/simStatus';
 
 /**
  * Who started the current session (#506). The Simulate panel and the engrave run's verify stage
