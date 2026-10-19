@@ -490,6 +490,12 @@ test('#411 — ten MIXED items and a void on one line at 1440 × 900, and Ctrl-Z
   await page.getByTestId('engrave-add-keepout-rect').click();
   await expect(page.getByTestId('engrave-keepout-row-0')).toBeVisible();
 
+  // #516 item 5 — a fresh job no longer seeds a cutter, so the drill's `plunge-unproven` warning
+  // (the one the next block asserts) has nothing to read. `flat-1.0` is the built-in flat cutter the
+  // default job used to carry, and it records no centre-cutting, so a job that plunges gets the
+  // warning. Fit it the way a person would, through the panel's own cutter select.
+  await page.getByTestId('engrave-tool').selectOption('flat-1.0');
+
   // TWO kinds of `⚠`, because they are two claims: an ERROR blocks Generate and a WARNING does not,
   // and a line that counted them the same would be hiding the difference.
   //
@@ -499,8 +505,8 @@ test('#411 — ten MIXED items and a void on one line at 1440 × 900, and Ctrl-Z
   await page.getByTestId('engrave-label-depth-3').fill('11.5');
   await expect(page.getByTestId('engrave-label-warn-3')).toBeVisible();
   await expect(page.getByTestId('engrave-label-warn-3')).toHaveClass(/engrave-item-row__warn--error/);
-  // The warning is the hole's, and it is the default cutter's own uncertainty rather than anything
-  // typed here: nothing records that the built-in cutter centre-cuts, so a job that plunges gets
+  // The warning is the hole's, and it is the fitted cutter's own uncertainty rather than anything
+  // typed here: nothing records that `flat-1.0` centre-cuts, so a job that plunges gets
   // `plunge-unproven` as a warning (`jobSetup.ts`). It sits on a FOLDED row — the drill's — which is
   // where the `⚠` has to be legible, and it must NOT be wearing the error's class.
   await expect(page.getByTestId('engrave-drill-warn-0')).toBeVisible();

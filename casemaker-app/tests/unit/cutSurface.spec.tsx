@@ -286,12 +286,14 @@ describe('#419 §3 the Cut surface', () => {
     const line = screen.getByTestId('engrave-package').textContent ?? '';
     expect(line).toContain('1 program · 1 setup');
     expect(line).toMatch(/frozen \d{2}:\d{2}/);
-    expect(line).toContain(`key ${pkg.hash.slice(0, 8)}`);
+    expect(line).not.toContain('key');
+    // #550 — the package key lives on the element as data, not in the rendered sentence.
+    expect(screen.getByTestId('engrave-package').getAttribute('data-key')).toBe(pkg.hash);
     expect(screen.getByTestId('engrave-package-state').textContent).toContain(
       'The frozen programs still describe this job.',
     );
-    // The job's stock is not a shelf entry: nothing was taken, and the line says so.
-    expect(screen.getByTestId('engrave-package-reservation').textContent).toContain('not a shelf entry');
+    // The job's stock is not a shelf entry: nothing was taken, and the line says so in operator terms.
+    expect(screen.getByTestId('engrave-package-reservation').textContent).toContain('no blank needs to be held');
   });
 
   it('does not freeze while the gate is red', async () => {
@@ -329,7 +331,7 @@ describe('#419 §3 the Cut surface', () => {
 
     await waitFor(() => expect(screen.getByTestId('engrave-package').dataset.state).toBe('stale'));
     expect(screen.getByTestId('engrave-package-state').textContent).toContain('Its blank stays held for this job.');
-    expect(screen.getByTestId('engrave-package-reservation').textContent).toContain(`Held for ${job.id}`);
+    expect(screen.getByTestId('engrave-package-reservation').textContent).toContain('held for you');
 
     const refreeze = screen.getByTestId('engrave-package-refreeze') as HTMLButtonElement;
     expect(refreeze.disabled).toBe(false);

@@ -63,7 +63,7 @@ export function EngraveJobFileBar(): JSX.Element {
           style={{ flex: 1, padding: 5 }}
           onClick={() => void save()}
         >
-          Save
+          Save job
         </button>
         <button
           type="button"
@@ -73,7 +73,7 @@ export function EngraveJobFileBar(): JSX.Element {
           style={{ flex: 1, padding: 5 }}
           onClick={() => void saveAs()}
         >
-          Save as…
+          Save job as…
         </button>
         <button
           type="button"
@@ -83,7 +83,7 @@ export function EngraveJobFileBar(): JSX.Element {
           style={{ flex: 1, padding: 5 }}
           onClick={() => void open()}
         >
-          Open…
+          Open job…
         </button>
       </div>
 

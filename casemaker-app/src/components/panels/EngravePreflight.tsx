@@ -69,12 +69,13 @@ function Row({ row, index, expanded }: { row: PreflightRow; index: number; expan
       data-testid={`engrave-preflight-row-${index}-${row.code}`}
       data-severity={row.severity}
       data-owner={row.owner}
+      data-code={row.code}
       data-expanded={expanded ? 'true' : 'false'}
       style={{ display: 'flex', gap: 6, fontSize: 12, lineHeight: 1.45, margin: '3px 0', color: '#d1d5db' }}
     >
       <span style={{ color, flexShrink: 0 }}>●</span>
       <span>
-        <code style={{ color }}>{row.code}</code> {row.message}{' '}
+        {row.message}{' '}
         <span style={TAG} data-testid={`engrave-preflight-owner-${index}`}>
           {OWNER_LABEL[row.owner]}
         </span>

@@ -283,13 +283,23 @@ export function EngraveCutSurface({
     setOverrides((current) => ({ ...current, [key]: on }));
   };
 
-  const reservation = ((): string | null => {
+  const reservation = ((): { line: string; detail: string | null } | null => {
     if (pkg === null) return null;
-    if (pkg.stockEntryId === null) return 'This job’s stock is not a shelf entry, so no blank is held.';
+    if (pkg.stockEntryId === null) {
+      return { line: 'You’re supplying this stock yourself, so no blank needs to be held.', detail: null };
+    }
     const shelf = shelfItems.find((item) => item.id === pkg.stockEntryId) ?? null;
     const held = shelf?.reservations.find((entry) => entry.jobId === job.id) ?? null;
-    if (held === null) return 'The blank is not in this browser’s shelf list — check the shelf before cutting.';
-    return `Held for ${job.id}${held.quantity > 1 ? ` · ${held.quantity} blanks` : ''}.`;
+    if (held === null) {
+      return {
+        line: 'No blank is held for this job — check you have one before cutting.',
+        detail: `Shelf entry ${pkg.stockEntryId} has no hold for this job.`,
+      };
+    }
+    return {
+      line: `This job’s blank is held for you${held.quantity > 1 ? ` · ${held.quantity} blanks` : ''}.`,
+      detail: `Held for job ${job.id} under shelf entry ${pkg.stockEntryId}.`,
+    };
   })();
 
   const missingReportIndex =
@@ -301,11 +311,12 @@ export function EngraveCutSurface({
 
   return (
     <div data-testid="engrave-cut-surface">
-      {/* #524 — the Cut surface as a four-step checklist: Gate → Package → Register → Run. Each
-          step is one line when done and opens when it is the step the operator is on. */}
+      {/* #524 — the Cut surface as a four-step checklist: Check the job → Freeze the plan →
+          Register the blank → Run the job. Each step is one line when done and opens when it is
+          the step the operator is on (#550 — the titles are operator actions, not internal jargon). */}
       <Step
         number={1}
-        title="Gate"
+        title="Check the job"
         done={green}
         summary={green ? 'clear' : `${report.errorCount} blocking finding${report.errorCount === 1 ? '' : 's'}`}
         defaultOpen={!green}
@@ -315,7 +326,7 @@ export function EngraveCutSurface({
 
       <Step
         number={2}
-        title="Package"
+        title="Freeze the plan"
         done={packageCurrent}
         summary={
           pkg === null
@@ -330,16 +341,20 @@ export function EngraveCutSurface({
         style={BOX}
         data-testid="engrave-package"
         data-state={pkg === null ? 'none' : packageCurrent ? 'current' : 'stale'}
+        data-key={pkg?.hash}
       >
-        <p style={{ fontSize: 12, color: '#e6edf5', margin: '0 0 4px' }}>
+        <p
+          style={{ fontSize: 12, color: '#e6edf5', margin: '0 0 4px' }}
+          title={pkg === null ? undefined : `package key ${pkg.hash}`}
+        >
           <strong>The package</strong>
           {pkg === null ? (
-            <> — not frozen yet. With the gate clear, Cut freezes the job and takes its blank.</>
+            <> — not frozen yet. Once the check is clear, this step freezes the plan and holds its blank.</>
           ) : (
             <>
               {' '}
               — {pkg.programs.length} program{pkg.programs.length === 1 ? '' : 's'} · {pkg.setups.length} setup
-              {pkg.setups.length === 1 ? '' : 's'} · frozen {clockOf(pkg.frozenAt)} · key {pkg.hash.slice(0, 8)}
+              {pkg.setups.length === 1 ? '' : 's'} · frozen {clockOf(pkg.frozenAt)}
             </>
           )}
         </p>
@@ -354,9 +369,15 @@ export function EngraveCutSurface({
           </p>
         )}
         {reservation !== null && (
-          <p style={MUTED} data-testid="engrave-package-reservation">
-            {reservation}
-          </p>
+          <div style={MUTED} data-testid="engrave-package-reservation">
+            {reservation.line}
+            {reservation.detail !== null && (
+              <details style={{ marginTop: 2 }}>
+                <summary style={{ cursor: 'pointer' }}>shelf details</summary>
+                <span>{reservation.detail}</span>
+              </details>
+            )}
+          </div>
         )}
         {pkg !== null && !packageCurrent && (
           <button
@@ -392,7 +413,7 @@ export function EngraveCutSurface({
       </Step>
 
       {green && packageCurrent && plan !== null && (
-        <Step number={4} title="Run" done={false} summary="the plan and the controls" defaultOpen>
+        <Step number={4} title="Run the job" done={false} summary="the plan and the controls" defaultOpen>
           <details style={{ marginTop: 4 }} data-testid="engrave-cut-plan">
             <summary style={{ fontSize: 11, color: '#9aa4b0', cursor: 'pointer' }}>The plan</summary>
             <div style={{ marginTop: 4 }}>

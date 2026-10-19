@@ -1851,13 +1851,22 @@ export function EngravePanel(): JSX.Element {
         Use the badge blank
       </button>
       {blankNotes && (
-        <div data-testid="engrave-badge-notes">
-          {blankNotes.map((note, i) => (
+        // #550 — the badge prose is reference detail, not a primary control: it pushed the cutter
+        // and Generate below the fold. Fold it behind a one-line summary (the first note names the
+        // blank), like `designNotes` above. The dimension fields and material stay visible.
+        <details data-testid="engrave-badge-notes" style={{ marginTop: 2 }}>
+          <summary data-testid="engrave-badge-summary" style={{ ...MUTED, cursor: 'pointer' }}>
+            {blankNotes[0]}{' '}
+            {blankNotes.length > 1
+              ? `▸ about this blank (${blankNotes.length - 1} note${blankNotes.length === 2 ? '' : 's'})`
+              : ''}
+          </summary>
+          {blankNotes.slice(1).map((note, i) => (
             <p key={i} style={MUTED} data-testid={`engrave-badge-note-${i}`}>
               {note}
             </p>
           ))}
-        </div>
+        </details>
       )}
       {/* #280 — the blank archetype's twin of the badge button above. Dimensions only: a blank
           does not know its material, so this leaves `stock.material` exactly as it is. */}

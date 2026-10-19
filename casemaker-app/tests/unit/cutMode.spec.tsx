@@ -141,8 +141,9 @@ describe('EngravePanel — the Design/Cut switch (#419 §3)', () => {
     expect(screen.queryByTestId('engrave-setup-open')).toBeNull();
     expect(screen.getByTestId('engrave-preflight').getAttribute('data-state')).toBe('blocked');
     expect(screen.getByTestId('engrave-preflight-summary').textContent).toContain('blocking');
-    // `collect()` was actually asked: the run gate names the missing program in its own words.
-    expect(screen.getByText('no-generate')).toBeTruthy();
+    // `collect()` was actually asked: the run gate names the missing program in its own words, and
+    // the code travels on the row as data, not as rendered prose (#550).
+    expect(screen.getByTestId(/^engrave-preflight-row-\d+-no-generate$/).getAttribute('data-code')).toBe('no-generate');
     expect(screen.getByText('Generate first.')).toBeTruthy();
   });
 
@@ -224,7 +225,7 @@ describe('EngravePanel — the Design/Cut switch (#419 §3)', () => {
 
     expect(pressed('cnc-mode-cut')).toBe('true');
     expect(screen.getByTestId('engrave-preflight').getAttribute('data-state')).toBe('blocked');
-    expect(screen.getByText('no-generate')).toBeTruthy();
+    expect(screen.getByTestId(/^engrave-preflight-row-\d+-no-generate$/).getAttribute('data-code')).toBe('no-generate');
     expect(screen.getByTestId('engrave-preflight-first-blocking').textContent).toContain('Generate first.');
     // The tool-less state is the normal pre-recommendation state, not an error of its own.
     expect(screen.queryByText('setup-no-tool')).toBeNull();
