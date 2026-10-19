@@ -1,5 +1,5 @@
 import { featureSim } from '@/platform/features';
-import { useEffect } from 'react';
+import { useEffect, type CSSProperties } from 'react';
 import { Sidebar } from './Sidebar';
 import { StatusBar } from './StatusBar';
 import { Toolbar } from './Toolbar';
@@ -8,6 +8,8 @@ import { FloatersBanner } from './FloatersBanner';
 import { WelcomeOverlay } from '../welcome/WelcomeOverlay';
 import { StartWizard } from '../welcome/StartWizard';
 import { ContextPanel } from './ContextPanel';
+import { useContextPanelWidth } from './useContextPanelWidth';
+import { PanelResizeHandle } from './PanelResizeHandle';
 import { Viewport } from '@/components/viewport/Viewport';
 import { ManageMode } from '@/components/manage/ManageMode';
 import { useRebuildOnProjectChange } from '@/hooks/useRebuildOnProjectChange';
@@ -55,6 +57,9 @@ export function AppShell() {
   // deployment switches that off wholesale (`Sidebar`, `docs/index.ts`).
   const manageRequested = useManageModeStore((s) => s.open);
   const manageOpen = featureSim && manageRequested;
+  // #558 — the right rail's width is the operator's, persisted and handed to `.app-main` as a CSS
+  // custom property the grid column and the drag handle both read.
+  const { width: contextPanelWidth, resizeBy: resizeContextPanel } = useContextPanelWidth();
   // Issue #59 — board visualization cycle removed; no fallback banner needed.
   return (
     <div className="app-shell">
@@ -64,7 +69,10 @@ export function AppShell() {
         </h1>
         <Toolbar />
       </header>
-      <main className="app-main">
+      <main
+        className="app-main"
+        style={{ '--context-panel-width': `${contextPanelWidth}px` } as CSSProperties}
+      >
         {/* Welcome mode owns the full main area — the board-picker catalog
             needs the width; sidebar/context panels are project UI anyway. */}
         {manageOpen ? (
@@ -79,6 +87,7 @@ export function AppShell() {
               <FloatersBanner />
               <Viewport />
             </div>
+            <PanelResizeHandle onResize={resizeContextPanel} />
             <ContextPanel />
           </>
         )}

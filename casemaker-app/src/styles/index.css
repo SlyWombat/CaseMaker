@@ -66,13 +66,20 @@ body, html, #root {
      via a media query) so the grid drops back to two columns. 1024 is where sharing stops
      paying: the two rails take 680 px of it and leave the canvas 344, while below that the
      overlay costs less than a canvas of 220 px or less would. */
-  grid-template-columns: 320px 1fr 360px;
+  /* #558 — the right column is the operator's width (default 360px), driven by the custom
+     property AppShell sets from the persisted value. */
+  grid-template-columns: 320px 1fr var(--context-panel-width, 360px);
   min-height: 0;
+  /* The drag handle's containing block (it is absolutely positioned over the right grid line). */
+  position: relative;
 }
 @media (max-width: 1023px) {
   .app-main {
     grid-template-columns: 320px 1fr;
   }
+  /* #558 — below the rail/drawer edge the panel is a fixed drawer, not a grid column, so there
+     is no boundary for the resize handle to straddle. */
+  .panel-resize-handle { display: none; }
 }
 
 /* Phones (#134) — viewport-first. The rail is a drawer (see .sidebar--drawer), so the
@@ -197,6 +204,34 @@ body, html, #root {
 }
 .context-panel__handle:hover {
   background: var(--cm-color-surface-bright);
+}
+/* Issue #558 — the right rail's draggable left edge. The handle is a child of `.app-main`
+   (position: relative) and `right` rides the SAME custom property that sizes the column, so it
+   always straddles the boundary; the strip itself is transparent and the visible bar appears only
+   on hover/active. Hidden below 1024px, where the panel becomes a drawer. */
+.panel-resize-handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: calc(var(--context-panel-width, 360px) - 4px);
+  width: 8px;
+  cursor: col-resize;
+  z-index: var(--cm-z-context-handle);
+  touch-action: none;
+}
+.panel-resize-handle::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 3px;
+  width: 2px;
+  background: transparent;
+  transition: background 120ms ease;
+}
+.panel-resize-handle:hover::after,
+.panel-resize-handle:active::after {
+  background: var(--cm-color-outline);
 }
 .context-panel__empty {
   color: var(--cm-color-on-surface-variant);
