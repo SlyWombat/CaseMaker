@@ -77,6 +77,11 @@ export default defineConfig(({ mode }) => {
     build: {
       target: 'es2022',
       sourcemap: true,
+      // #546 — emit `.vite/manifest.json` so each build's file list is recorded
+      // canonically. The cPanel deploy derives its own on-host build record from
+      // the actual contents of dist/assets (authoritative: it includes workers
+      // and wasm the manifest may omit), but the manifest is kept as a reference.
+      manifest: true,
       chunkSizeWarningLimit: 800,
       rolldownOptions: {
         output: {

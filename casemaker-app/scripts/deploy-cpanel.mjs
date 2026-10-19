@@ -14,9 +14,29 @@
 //                 (e.g. /home/USER/public_html/casemaker)
 //
 // Usage:
-//   npm run deploy        # build + upload
+//   npm run deploy        # build + upload + prune old builds
 //   npm run deploy -- --skip-build   # upload existing dist/ as-is
-//   npm run deploy -- --dry-run      # walk + log without uploading
+//   npm run deploy -- --dry-run      # walk + log; what WOULD upload and delete
+//   npm run deploy -- --dry-run --prune-fixture <file.json>
+//                                    # exercise the prune plan fully offline
+//                                    # (no host call at all) against a sample
+//                                    # listing — see PRUNE FIXTURE below.
+//
+// Issue #546 — after each deploy the host must hold only the current build and
+// the previous one (v-1). This script:
+//   * never uploads `*.map` (source maps; ~900 MB of the old bloat), and
+//   * after uploading, deletes every file in `assets/` that neither the new
+//     build nor the previous build references. It records each build's asset
+//     list on the host (`assets/build-manifest.json`) so the next deploy knows
+//     what v-1 is, and deletes PERMANENTLY (not a move to `.trash`, which frees
+//     no quota) via cPanel API2 Fileman::fileop op=unlink.
+//
+// PRUNE FIXTURE (--prune-fixture): a JSON file
+//   { "prevRecord": { "assets": ["index-V1.js", ...] },
+//     "remoteAssets": [ { "name": "index-V0.js", "size": 1234 }, ... ] }
+// lets --dry-run compute and print the exact prune plan without touching the
+// host. prevRecord is the v-1 build record; remoteAssets is a listing of
+// assets/ (as Fileman::list_files would return it).
 //
 // CHANGELOG: every successful deploy logs the version + git sha to
 // `dist/VERSION.txt` so you can confirm what's live.
@@ -26,12 +46,22 @@ import { existsSync } from 'node:fs';
 import { join, relative, dirname, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import {
+  BUILD_RECORD_NAME,
+  isSourceMap,
+  assetBasenames,
+  buildRecord,
+  assetsFromRecord,
+  computePrune,
+} from './deploy-prune.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(__dirname, '..', '..');
 const APP_DIR = resolve(__dirname, '..');
 const DIST_DIR = join(APP_DIR, 'dist');
-const ENV_PATH = join(REPO_ROOT, '.env');
+// CASEMAKER_ENV lets a dry run point at a throwaway .env (same override the
+// quota script accepts) without disturbing the real credentials file.
+const ENV_PATH = process.env.CASEMAKER_ENV ?? join(REPO_ROOT, '.env');
 
 // ---------- env loader (no dotenv dep) ----------
 function loadEnv(path) {
@@ -62,6 +92,10 @@ const args = process.argv.slice(2);
 const SKIP_BUILD = args.includes('--skip-build');
 const DRY_RUN = args.includes('--dry-run');
 const VERBOSE = args.includes('--verbose');
+// --prune-fixture <path>: supply a sample { prevRecord, remoteAssets } so the
+// prune plan can be computed and printed with no host call (dry-run only).
+const fixtureIdx = args.indexOf('--prune-fixture');
+const PRUNE_FIXTURE = fixtureIdx >= 0 ? args[fixtureIdx + 1] : null;
 
 // ---------- main ----------
 const env = loadEnv(ENV_PATH);
@@ -158,21 +192,42 @@ async function walk(dir, base = dir) {
   return out;
 }
 
-const files = await walk(DIST_DIR);
-const totalBytes = files.reduce((a, f) => a + f.size, 0);
-console.log(`▸ Found ${files.length} files, ${(totalBytes / 1024 / 1024).toFixed(2)} MB`);
+const walked = await walk(DIST_DIR);
 
-if (DRY_RUN) {
-  for (const f of files) {
-    console.log(`  ${f.rel} (${f.size} B)`);
-  }
-  console.log('\nDRY RUN complete — nothing uploaded.');
-  process.exit(0);
+// #546 — never upload source maps. They are ~7.7 MB each, never needed to serve
+// the app, and were ~900 MB of the accumulated bloat. Excluding them here means
+// they also never enter any build's KEEP set, so the prune step clears every
+// `*.map` already on the host.
+const files = walked.filter((f) => !isSourceMap(f.rel));
+const maps = walked.filter((f) => isSourceMap(f.rel));
+const totalBytes = files.reduce((a, f) => a + f.size, 0);
+const mapBytes = maps.reduce((a, f) => a + f.size, 0);
+console.log(`▸ Found ${files.length} files to upload, ${mib(totalBytes)} MB`);
+console.log(`▸ Excluding ${maps.length} source maps (${mib(mapBytes)} MB) — not uploaded (#546)`);
+
+// The NEW build's complete asset file list (entry + css + every lazy chunk +
+// workers + wasm + fonts), taken from what is physically in dist/assets. This
+// is what the deploy records on the host as the current build, and what the
+// NEXT deploy reads back as v-1.
+const newAssetNames = assetBasenames(files);
+
+function mib(bytes) {
+  return (bytes / 1024 / 1024).toFixed(2);
 }
 
-// ---------- 3. upload via cPanel UAPI ----------
+// ---------- 3. host helpers (cPanel UAPI + API2) ----------
 const baseUrl = `https://${env.CPANEL_HOST}:${PORT}`;
 const auth = `cpanel ${env.CPANEL_USER}:${env.CPANEL_TOKEN}`;
+const ASSETS_DIR = `${env.WEB_ROOT}/assets`;
+// The public site base, used only to read back the previous build record.
+// `cpanel.example.com` → `https://example.com/casemaker/`. PUBLIC_URL overrides.
+const PUBLIC_URL = env.PUBLIC_URL ?? `https://${env.CPANEL_HOST.replace(/^cpanel\./, '')}${DEPLOY_BASE}`;
+
+// cPanel API2 Fileman::fileop wants sourcefiles relative to the account home.
+function relToHome(abs) {
+  const home = `/home/${env.CPANEL_USER}`;
+  return abs.startsWith(`${home}/`) ? abs.slice(home.length + 1) : abs.replace(/^\/+/, '');
+}
 
 async function ensureDir(remoteDir) {
   // cPanel UAPI Fileman::mkdir is the canonical create-dir call. Best-effort —
@@ -204,6 +259,118 @@ async function uploadOne(localPath, remoteDir, name) {
     throw new Error(`upload ${name}: ${JSON.stringify(body.errors)}`);
   }
 }
+
+// --- #546 prune helpers -------------------------------------------------------
+
+// List the files currently in assets/ (read-only). UAPI Fileman::list_files.
+async function remoteListAssets() {
+  const url = new URL('/execute/Fileman/list_files', baseUrl);
+  url.searchParams.set('dir', ASSETS_DIR);
+  url.searchParams.set('types', 'file');
+  const r = await fetch(url, { headers: { Authorization: auth } });
+  if (!r.ok) throw new Error(`list_files: HTTP ${r.status} ${await r.text()}`);
+  const body = await r.json();
+  const rows = body?.data ?? [];
+  return rows
+    .filter((x) => x.type === 'file')
+    .map((x) => ({ name: x.file, size: Number(x.size) || 0 }));
+}
+
+// Read back the previous build's record over the public site (read-only). A
+// miss (first pruned run, or the record not yet present) is treated as "no
+// previous build known" — the prune then keeps only the new build.
+async function readPrevRecord() {
+  const url = `${PUBLIC_URL}assets/${BUILD_RECORD_NAME}`;
+  try {
+    const r = await fetch(url, { headers: { 'cache-control': 'no-cache' } });
+    if (!r.ok) {
+      if (VERBOSE) console.warn(`prev record: HTTP ${r.status} (treating as first pruned run)`);
+      return null;
+    }
+    return await r.json();
+  } catch (e) {
+    if (VERBOSE) console.warn(`prev record: ${e.message} (treating as first pruned run)`);
+    return null;
+  }
+}
+
+// PERMANENT delete (NOT a move to .trash — that frees no quota). cPanel API2
+// Fileman::fileop op=unlink, one file per call for clear error reporting.
+//
+// ⚠ FLAG FOR OWNER CONFIRMATION: cPanel's API2 docs describe op=unlink tersely
+// as "removes a symlink" and expose no UAPI equivalent; in practice it is the
+// call the File Manager's "Skip the trash" delete uses to permanently remove
+// regular files. Confirm against the live host (on a throwaway file first)
+// before trusting it in anger.
+async function deletePermanent(names) {
+  let n = 0;
+  for (const name of names) {
+    const url = new URL('/json-api/cpanel', baseUrl);
+    url.searchParams.set('cpanel_jsonapi_user', env.CPANEL_USER);
+    url.searchParams.set('cpanel_jsonapi_module', 'Fileman');
+    url.searchParams.set('cpanel_jsonapi_func', 'fileop');
+    url.searchParams.set('cpanel_jsonapi_apiversion', '2');
+    url.searchParams.set('op', 'unlink');
+    url.searchParams.set('sourcefiles', relToHome(`${ASSETS_DIR}/${name}`));
+    url.searchParams.set('doubledecode', '0');
+    const r = await fetch(url, { method: 'POST', headers: { Authorization: auth } });
+    if (!r.ok) throw new Error(`delete ${name}: HTTP ${r.status} ${await r.text()}`);
+    const body = await r.json().catch(() => null);
+    if (body?.cpanelresult?.error) throw new Error(`delete ${name}: ${body.cpanelresult.error}`);
+    n++;
+    if (n % 10 === 0 || n === names.length) process.stdout.write(`\r  ${n}/${names.length}`);
+  }
+  process.stdout.write('\n');
+}
+
+function printUnlinkEndpoint() {
+  console.log('  Permanent delete uses (one call per file), API2 token auth:');
+  console.log(`    POST ${baseUrl}/json-api/cpanel`);
+  console.log('      ?cpanel_jsonapi_user=<user>&cpanel_jsonapi_module=Fileman'
+    + '&cpanel_jsonapi_func=fileop&cpanel_jsonapi_apiversion=2');
+  console.log('      &op=unlink&sourcefiles=<assets-path-relative-to-home>&doubledecode=0');
+  console.log('    Header: Authorization: cpanel <user>:<token>   [⚠ confirm op=unlink — see script]');
+}
+
+function printPrunePlan(plan, prevAssetNames, source) {
+  console.log(`\n▸ Prune plan (v-1 from ${source}):`);
+  console.log(`  current build: ${newAssetNames.length} assets; v-1 build: ${prevAssetNames.length} assets`);
+  console.log(`  KEEP ${plan.keepNames.length} files (${mib(plan.keepBytes)} MB), `
+    + `DELETE ${plan.deleteList.length} files (${mib(plan.deleteBytes)} MB)`);
+  for (const d of plan.deleteList) console.log(`  - assets/${d.name} (${d.size} B)`);
+  console.log(`  → would free ${mib(plan.deleteBytes)} MB`);
+}
+
+// ---------- 4. DRY RUN: log what WOULD upload + delete, touch nothing ----------
+if (DRY_RUN) {
+  console.log('\nWould upload:');
+  for (const f of files) console.log(`  + ${f.rel} (${f.size} B)`);
+  console.log(`  + assets/${BUILD_RECORD_NAME}  (new build record, ${newAssetNames.length} assets)`);
+
+  if (PRUNE_FIXTURE) {
+    const fx = JSON.parse(await readFile(PRUNE_FIXTURE, 'utf8'));
+    const prevAssetNames = assetsFromRecord(fx.prevRecord);
+    const remoteAssets = fx.remoteAssets ?? [];
+    const plan = computePrune({ newAssetNames, prevAssetNames, remoteAssets });
+    printPrunePlan(plan, prevAssetNames, `fixture ${PRUNE_FIXTURE}`);
+    printUnlinkEndpoint();
+  } else {
+    console.log('\n▸ Prune plan not computed: pass --prune-fixture <file.json> to compute it');
+    console.log('  offline, or run a live (non-dry) deploy. A live dry run would read the host');
+    console.log(`  (UAPI Fileman::list_files on ${ASSETS_DIR}) read-only to list deletions.`);
+  }
+  console.log('\nDRY RUN complete — nothing uploaded, nothing deleted.');
+  process.exit(0);
+}
+
+// ---------- 5. LIVE: capture v-1 BEFORE overwriting, then upload -------------
+// Read the previous build's file set and the current assets/ listing NOW, so
+// the prune below knows what v-1 is before this deploy's record overwrites it.
+console.log('▸ Reading previous build record + current assets/ listing...');
+const prevRecord = await readPrevRecord();
+const prevAssetNames = assetsFromRecord(prevRecord);
+const remoteAssetsBefore = await remoteListAssets();
+console.log(`  v-1 build: ${prevAssetNames.length} assets; host assets/: ${remoteAssetsBefore.length} files`);
 
 // Pre-create all unique remote subdirectories.
 const remoteDirs = new Set([env.WEB_ROOT]);
@@ -271,6 +438,27 @@ const htaccess = `# Auto-generated by casemaker-app/scripts/deploy-cpanel.mjs
 const tmpHt = join(DIST_DIR, '.htaccess');
 await writeFile(tmpHt, htaccess);
 await uploadOne(tmpHt, env.WEB_ROOT, '.htaccess');
+
+// ---------- 6. record this build, then prune assets/ to current + v-1 --------
+// Record the new build's asset list on the host so the NEXT deploy knows what
+// v-1 is. Uploaded AFTER the capture above, so it overwrites the previous one.
+const recPath = join(DIST_DIR, BUILD_RECORD_NAME);
+await writeFile(
+  recPath,
+  JSON.stringify(buildRecord({ version: pkg.version, sha: gitSha, assetNames: newAssetNames }), null, 2),
+);
+await uploadOne(recPath, ASSETS_DIR, BUILD_RECORD_NAME);
+console.log(`▸ Recorded current build as assets/${BUILD_RECORD_NAME} (${newAssetNames.length} assets)`);
+
+// Prune: keep current ∪ v-1 (∪ the record), delete the rest permanently.
+const plan = computePrune({ newAssetNames, prevAssetNames, remoteAssets: remoteAssetsBefore });
+if (plan.deleteList.length === 0) {
+  console.log('▸ Prune: nothing to delete — assets/ already holds only current + v-1.');
+} else {
+  console.log(`▸ Pruning ${plan.deleteList.length} old files (${mib(plan.deleteBytes)} MB) permanently...`);
+  await deletePermanent(plan.deleteList.map((d) => d.name));
+  console.log(`  freed ~${mib(plan.deleteBytes)} MB`);
+}
 
 console.log(`\n✓ Deploy complete. Live at https://${env.CPANEL_HOST.replace(/^cpanel\./, '')}/casemaker`);
 console.log(`  Version: ${pkg.version}+${gitSha}`);
