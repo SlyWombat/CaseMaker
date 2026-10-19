@@ -5,7 +5,7 @@
 // gate and the mapping under test are the ones the app runs.
 
 import { describe, it, expect, afterEach, beforeEach } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, act } from '@testing-library/react';
 import {
   EngraveMachineUpload,
   type EngraveMachineUploadProps,
@@ -342,5 +342,46 @@ describe('#491 EngraveMachineUpload — the cutter line', () => {
   it('draws no cutter line when the run names no cutter', () => {
     render(<EngraveMachineUpload {...props()} />);
     expect(screen.queryByTestId('engrave-upload-cutter')).toBeNull();
+  });
+});
+
+describe('#538 EngraveMachineUpload — the fitted checkbox resets', () => {
+  const withTool = (toolKey: string): Partial<EngraveMachineUploadProps> => ({ runContext: { toolKey } });
+  const openConfirm = (): void => {
+    fireEvent.click(screen.getByTestId('engrave-upload'));
+  };
+  // The fitted checkbox is scoped by its label — the run panel under the upload mounts its own controls.
+  const fittedBox = (): HTMLInputElement =>
+    screen.getByTestId('engrave-upload-fitted').querySelector('input') as HTMLInputElement;
+  const checkBox = (): void => {
+    // The native `.click()` runs the checkbox activation behaviour (toggles checked + fires the
+    // click/change React wires onChange to), which `fireEvent.click` (a bare dispatch) does not.
+    act(() => {
+      fittedBox().click();
+    });
+  };
+  const sendDisabled = (): boolean =>
+    (screen.getByTestId('engrave-upload-confirm-send') as HTMLButtonElement).disabled;
+
+  it('clears a ticked box when the confirmation is reopened', () => {
+    render(<EngraveMachineUpload {...props(withTool('inv:engraver'))} />);
+    openConfirm();
+    checkBox();
+    expect(fittedBox().checked).toBe(true);
+    expect(sendDisabled()).toBe(false);
+    fireEvent.click(screen.getByTestId('engrave-upload-confirm-cancel'));
+    openConfirm();
+    expect(fittedBox().checked).toBe(false);
+    expect(sendDisabled()).toBe(true);
+  });
+
+  it('clears a ticked box when the posted cutter changes', () => {
+    const { rerender } = render(<EngraveMachineUpload {...props(withTool('inv:engraver'))} />);
+    openConfirm();
+    checkBox();
+    expect(fittedBox().checked).toBe(true);
+    rerender(<EngraveMachineUpload {...props(withTool('inv:other'))} />);
+    expect(fittedBox().checked).toBe(false);
+    expect(sendDisabled()).toBe(true);
   });
 });

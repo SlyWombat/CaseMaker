@@ -1,4 +1,4 @@
-import { useState, type CSSProperties, type JSX } from 'react';
+import { useRef, useState, type CSSProperties, type JSX } from 'react';
 import type { MachineObservation } from '@/platform/machineProbe';
 import { programBytes, uploadProgram, type MachineUploadResult } from '@/platform/machineUpload';
 import type { VerifyReport } from '@/engine/cnc/verify';
@@ -147,6 +147,15 @@ export function EngraveMachineUpload({
   const items = useToolRegistryStore((s) => s.items);
   const cutter =
     runContext?.toolKey === undefined ? null : cutterIdentity(runContext.toolKey, items);
+  // #538 — `fitted` confirms a SPECIFIC cutter. If the file is (re)posted for a different cutter
+  // while the confirmation is open, a checkbox ticked for the previous one must not carry over.
+  // Adjusted during render (guarded, so it settles in one extra pass), like the blocked-guard below.
+  const fittedCutterKey = runContext?.toolKey ?? null;
+  const fittedCutterKeyRef = useRef<string | null>(null);
+  if (fittedCutterKeyRef.current !== fittedCutterKey) {
+    fittedCutterKeyRef.current = fittedCutterKey;
+    if (fitted) setFitted(false);
+  }
 
   // Order matters, and matches `uploadBlocker`'s own reasoning: the run's trust first, then whether
   // there is anywhere to send it. Whether the machine is busy is NOT a clause here (#296): the wizard's
@@ -175,6 +184,7 @@ export function EngraveMachineUpload({
     // unticked, while the box is open, and the one button that writes to the machine must not be the
     // one that remembers an older answer.
     if (blocked !== null || machine === null || program === null) {
+      setFitted(false);
       setStage('idle');
       return;
     }
@@ -209,6 +219,7 @@ export function EngraveMachineUpload({
         vacuumSpan: programOwnsVacuum(program.nc) ? 'whole' : 'none',
       });
     }
+    setFitted(false);
     setStage('idle');
   }
 
@@ -234,6 +245,7 @@ export function EngraveMachineUpload({
         style={{ width: '100%', padding: 7, marginTop: 6 }}
         onClick={() => {
           setResult(null);
+          setFitted(false);
           setStage('confirm');
         }}
       >
@@ -299,7 +311,10 @@ export function EngraveMachineUpload({
               type="button"
               data-testid="engrave-upload-confirm-cancel"
               style={{ flex: 1, padding: 7 }}
-              onClick={() => setStage('idle')}
+              onClick={() => {
+                setFitted(false);
+                setStage('idle');
+              }}
             >
               Cancel
             </button>
