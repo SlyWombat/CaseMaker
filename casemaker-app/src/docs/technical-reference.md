@@ -146,6 +146,20 @@ The compiler is 43 modules. Grouped by what they build:
 | `viewportStore.ts` | UI-only viewport state (showLid/Grid, selectedPortId). |
 | `settingsStore.ts` | App settings (export format/layout, fixtures, house margins, tool picks, machine calibration). localStorage-persisted. **Not** the server port or LAN bind (#372): those are read by `lib.rs` from `config.rs`'s `config.json`, so the settings dialog reaches them over `/api/v1/config` (`platform/houseClient.ts`) instead of keeping a copy here nothing on the Rust side could see. |
 
+### CNC machine, fixtures, beds and 3D surfacing
+
+The CNC side keeps its own records, and the rule is the same as the compiler's: **a number that a
+machine or an accessory owns lives on its record, never hard-coded in a screen** (#448/#451).
+
+| Module | Purpose |
+| :--- | :--- |
+| `engine/cnc/machine.ts` | `MillProfile` and the `MACHINES` table (the Z1 today): the work `envelope` (machine coordinates), the spindle `maxRpm`, `safeZ`, the rapid model and the holder geometry. Every clamp, ceiling and lift a screen or the post reads comes from here — `insideEnvelope`, `one(...)`'s clamps and `rapidEstimate` included. |
+| `engine/cnc/fixture.ts` | The Z1 low-profile vise as a set of **labelled constants** (jaw bar, ledge step/width, body/floor depth) plus the per-record read (`num(fixture.unit, …)`) a `FixtureRecord` can override. The two PROVISIONAL numbers (body floor depth, the finishing step-over's source) are named as such, not dressed as measurements. |
+| `platform/locationClient.ts` | The location document's typed records: `MachineRecord` (address, bed profiles, finished programs), `FixtureRecord` (an accessory's `constants` vs this unit's `unit` measurements, with `provenance`), `BedProfile` and its four `datums` (`surfaceTopZ`, `viseJawTopZ`, `bracketSeatZ`, `rotaryAxis`), each `MeasuredDatum` carrying value, date and instrument. |
+| `platform/bedProfiles.ts` | `switchActiveProfile` and `changedBedProfile` — the Machines card's Bed block actions: switching names a different saved description, "I changed the bed" copies the active profile into a new dated one with its dependent datums cleared and listed. Neither ever sends a machine command. |
+| `engine/cnc/cam/surface3d.ts` | 3D surfacing from a **goal mesh** (#534): `sampleGoalHeightfield` turns a `role: 'goal'` target into a top-Z heightfield, `generateSurface3dIR` emits a raster-roughing + ball-nose finishing toolpath to the linear IR. Undercuts are unrepresentable (one top-Z per cell) and the 2.5D feeds are reused unchanged, labelled (slice F, #536). |
+| `engine/cnc/bedScene.ts` | The viewport's machine-frame picture of the bed + fixtures (the `BedScene` the Bed block renders), drawn from the same records and constants — not hand-placed. |
+
 ### Test API — `window.__caseMaker`
 
 Activated by `VITE_E2E=1` or `MODE=test`. The full surface is documented in `src/testing/windowApi.ts`. Highlights:

@@ -63,7 +63,10 @@ oversight):
   0.33 mm across its width), so the levelling pass runs at the machine's console before cutting and
   the state is cleared after — never in the `.nc`, which the upload gate would refuse. Whether
   `G32` is still needed on a face the app has skimmed is #176's bench question.
-- 3D surfacing.
+- 3D surfacing from a **goal mesh** — now built (#534, §5.4): a job whose only work is a
+  `role: 'goal'` mesh generates a raster-roughing + ball-nose finishing program. What is not built
+  yet is its run-side wiring and the UI proof (slice E, #535), and a heightfield has one top-Z per
+  (x, y), so undercuts and overhangs are unrepresentable — the honest 3-axis answer.
 - V-carving a region whose groove at the colour plane is narrower than one machine step. The app
   refuses it by name (`vcarve-groove-too-narrow`, §8.1); it does open regions otherwise (#221).
 - Laser work.
@@ -94,6 +97,14 @@ not a wiki page):
 | Max feed rate | 1 200 mm/min |
 | Automatic tool changer | **none** — you change cutters by hand |
 
+Every limit a screen acts on — the work envelope, the spindle ceiling, the safe Z the rapids and
+the laser lift read, the rapid model — comes from that machine **profile**, never from a number
+hard-coded in a screen (#448). The vise and every other accessory are the same story: their
+geometry lives on the machine's **fixture records** and bed **datums**, each with a source and a
+"measured when" (#451). The one exception to "nothing is hard-coded" is stated wherever it stands:
+a few PROVISIONAL numbers (the vise body's floor depth, the finishing step-over for 3D) are still
+guesses, and they say so on the record that carries them.
+
 **The three probes.** Three things ship or are sold under nearly identical names, they all
 install the same way and plug into the same connector. Makera's pages rate only one of them
 for non-conductive material like PLA — and the bench says otherwise, so read the table with
@@ -114,8 +125,11 @@ PLA at all.
 
 **The low-profile vise.** The **fixed jaw is on the left**. It locates the part in X and in
 rotation, and leaves it free to slide in Y. It mounts with the wasteboard removed. Its
-dimensions are published nowhere, which is why the app ships defaults and asks you to
-measure your own (chapter 5).
+dimensions are published nowhere, so they are not hard-coded: they live on the machine's
+**fixture record** — the accessory's product constants and this unit's own measurements — and the
+machine's **bed profile** holds the jaw-top datum (§7, the Machines card's **Bed** block). Until
+you measure them they are the shipped defaults, and every reading that quotes them says
+"unmeasured" (chapter 5).
 
 **Cutters: a V-bit is correct at the colour plane.** A V-bit *couples depth to stroke width* —
 cut deeper and the groove grows wider — so the design can only be right at one depth. Since #221
@@ -265,7 +279,10 @@ the app** — nothing is uploaded, and nothing is sent to a machine.
 width and thickness are prefilled from it, each tagged **“from file header”**. A `TOOL`
 record is matched against your cutters and pre-selects the one it names, tagged as matched
 from the header — but the geometry it states is not always reliable, so the dropdown is yours
-to change and a cutter you already chose is **kept** when a file is opened. **Simulate** stays
+to change and a cutter you already chose is **kept** when a file is opened. When the header's
+`TOOL` record matches cutters in **two different tiers** — an owned cutter and the catalogue row it
+was registered from carry the same id — the form does not pick one silently: it asks **which cutter
+was this file cut with?**, one button per candidate, and applies the one you pick (#316). **Simulate** stays
 disabled until both a file and a tool are present. A file with no header is fine; you just
 type the three stock numbers yourself. Whatever you have already chosen — a stock number you
 typed, the cutter in your spindle — survives opening a file; **Reset** is the way back to the
@@ -358,14 +375,33 @@ has been given to it, and it does not know whether your blank is the size you ty
 answers *"does this file's geometry overlap the stock where I think it does"*. It does not
 answer *"will this come out clean"*.
 
+**Try it on a committed sample.** `docs/bench/165-depth-ladder-row-A.nc` is a real app-generated
+program (a 2 mm flat end mill, stock prefilled from its `;@MKR|` header) and is the fastest way to
+see the panel work:
+
+1. Open the **Simulate .nc** panel (sidebar, under the **CNC** divider).
+2. Click **Open .nc…** and pick `docs/bench/165-depth-ladder-row-A.nc` (or drag it onto the panel).
+3. The stock is prefilled **"from file header"**. The file's `;@CM|TOOL` line names a house cutter
+   you may not have — the form says so; pick any **flat end mill** (the built-in one needs no
+   service).
+4. Press **Simulate**. Watch the sweep progress, then read the swept stock: removed material as a
+   ghost, cuts as bright paths, rapids dashed, the tool drawn at its position.
+5. Use the transport bar to play back; the result reports volume removed and the diagnostics.
+
+*Victory:* the viewport draws the swept stock and toolpath and the result panel reports a
+non-empty removed volume with no error-row diagnostics. If the tool is refused, pick the built-in
+flat cutter and press Simulate again.
+
 ---
 
 ## 5 · The job, question by question — CNC-2
 
 > **Status: Partly available** (#200–#207, #419, #425, #469, #471, #495) — the job runs in the
-> app today: the Start wizard, the Design panel, the Cut preflight, the setups and registration
-> steps, the release step, the as-cut preview, the run sheet and the desktop build's own upload
-> and run, with #213, #221, #244, #271, #432, #434 and #492 beside them. The open work is named where
+> app today: the Start wizard, the Design panel (Job / Hold / Cutter with the sticky Generate
+> footer, #521/#523/#524), the Cut preflight, the setups and registration steps, the release step,
+> the as-cut preview, the run sheet, the status strip and Transcript dock (#526/#528) and the
+> desktop build's own upload and run, with #213, #221, #244, #271, #432, #434, #492, #516, #534
+> and #537 beside them. The open work is named where
 > it appears: #208's day-1 runbook, #176's Z-chain and auto-level measurement, and this issue's own
 > remaining facing and registration questions (#432).
 
@@ -376,10 +412,16 @@ section of the **same job document**, so a job can be put down and picked up at 
 
 Two ideas hold the chapter together:
 
-- **One job, two modes.** The CNC surface has a **Design | Cut** switch at the top of the
-  panel. **Design** is where the job is described; **Cut** asks the preflight gate what it
-  thinks and puts the registration step beside the findings. Changing any Design answer marks
-  a frozen Cut package **stale**, so the picture and the files cannot drift apart.
+- **One job, two modes, three groups.** The CNC surface has a **Design | Cut** switch at the top of
+  the panel. **Design** is where the job is described, in three groups — **Job**, **Hold** and
+  **Cutter** — under a sticky **Generate** footer that is never below the fold (#521/#523/#524).
+  **Cut** asks the preflight gate what it thinks and puts the registration step beside the
+  findings. Changing any Design answer marks a frozen Cut package **stale**, so the picture and
+  the files cannot drift apart.
+- **The rail is yours; the strip and the dock are the machine's.** Your answers live in the rail.
+  What the machine is doing lives in the **status strip** under the viewport — state, position,
+  spindle, tool and a Stop — and what it *said* lives in the dock's **Transcript** tab, out of the
+  rail (#526/#528).
 - **The app writes files; you are at the machine.** The work origin, the cutter's length and
   every physical act are yours. The desktop build can run the plan for you — upload, play,
   stop, home — but only after your presses, and the **physical stop is still the stop**.
@@ -389,6 +431,23 @@ stock, the mount, the items, the setups and the frozen package; the files a job 
 (SVG, DXF, image, 3MF) are recorded by hash, and embedded when small enough, so a re-import
 can prove it is the same file. The older v2 document opens unchanged; the app writes v3 from
 then on.
+
+**The Design rail: three groups, one footer (#521/#523/#524).** The long scrolling column is
+gone. Design mode's rail is three groups, each a heading with a one-line summary that stays
+visible when the body is closed:
+
+- **Job** — the stock, facing (one line when the material refuses it), voids, the item editor and
+  the design target objects. The summary states the stock and the item count.
+- **Hold** — how the blank is held: the vise card (one sentence: source · seat · proud/below, with
+  the number fields behind **Edit**) and the sacrificial material. The summary is the one vise
+  sentence.
+- **Cutter** — the tool and its recommendation, the cutting feeds and the margin. The summary says
+  "cutter chosen" or "no cutter chosen" plus the margin.
+
+Below the groups sits a **sticky Generate footer** — the findings as a count that expands, then
+**Generate** and the run rows. It is the one place the job's state is read, and it is never below
+the fold. The **status strip** under the viewport and the dock's **Transcript** tab (§5.7, §5.9)
+carry the live machine; nothing about the machine's state lives in the rail any more.
 
 **1. Where, and on which machine?** The **Start** wizard's first screen is a **Machine** picker
 on every build — one entry today, the **Makera Z1** — with the network **check** under it in the
@@ -455,7 +514,9 @@ the catalogue you synced (#310). With no catalogue row for that cutter and mater
 than offered and then refused.
 
 **3. How is it held, and which way round?** The wizard's third step hands over to **Set up this
-job…**, the guided flow that asks workholding, material, blank and cutter in order (#254). Only
+job…**, the guided flow that asks workholding, material and blank in order (#254). The cutter is
+not one of its questions — the tool is the software's **recommendation**, made once the work is
+defined (step 6), and a fresh job starts with none chosen (#516). Only
 the **low-profile vise** is selectable today (the rotary is written and disabled, CNC-5). The
 vise holds the stock in X and in rotation, with the **fixed jaw on the left**; X runs between
 the jaws, and the stock's front-left corner is the work origin. A turned badge blank has its
@@ -532,6 +593,19 @@ V-bit and states the strategy; the step-over is a fraction of the groove's width
 and the CAM clamps the pitch to the tip radius because the floor is cleared by the tip disc
 alone. The two named refusals and the merge warning are in §8.1.
 
+**3D surfacing from a goal mesh (#534).** A **design target object** can be marked with role
+**goal** — "this is the shape to *make*", as opposed to a reference to position other work
+against. A job whose only work is a goal mesh generates a two-operation surfacing program: a
+**raster roughing** in step-down layers that clears the stock above the goal (leaving the
+roughing allowance), then a **ball-nose finishing** raster that follows the goal's top-Z
+heightfield gouge-safely. A goal with undercuts is sampled to its topmost surface — the honest
+3-axis answer — and the run sheet says so. The feeds are the job's ordinary 2.5D feeds reused
+unchanged, a labelled placeholder until the bench measures 3D engagement (#536); a ball resolves
+its feeds through a flat proxy of its cutting diameter. Two findings guard it: `goal-object-oversize`
+refuses a goal that is flat or larger than the blank, and `goal-object-no-toolpath` is the info a
+*mixed* job (a goal beside ordinary items) gets — the item program cuts, the goal is validated and
+previewed, and no 3D cut is posted for it until slice E (#535) wires the run side.
+
 **5. From which directions?** A 3-axis tool comes straight down. Material on the back, a side or
 the far end is reachable only after the part is turned — and turning it is a re-clamp and a
 re-find. The **Setups** section (#471) is the job's ordered list of holds:
@@ -556,13 +630,20 @@ The planner and its checks are engine code today; the section is the reader and 
 path. The run plan's own phase list is not yet wired into the app, so the times in the rows are
 the engine's estimates, labelled as estimates.
 
-**6. Which cutters?** With the items set, the app works out which cutter keeps the most of each
-glyph and puts the best one first — *"Largest cutter that keeps every label intact."* You can
-pick another; the app keeps your choice and offers the recommendation back. A **Why?**
+**6. Which cutter? It is a recommendation, not a setup question (#516).** A fresh job starts
+with **no cutter chosen** — the Cutter group's summary says so, and the tool select reads
+"Choose a cutter…". Once the work is defined, the app works out which cutter keeps the most of each
+glyph and offers it in the Cutter group as a **recommendation** — *"Recommended: 0.3 mm V-bit —
+the largest cutter that keeps every label intact"* — with a **Use it** button that applies it.
+You can pick another cutter instead; the app keeps your choice and offers the recommendation back.
+The recommendation is per-job arithmetic on this blank, not a setting, and a job that already
+chose its cutter is not re-asked. A **Why?**
 disclosure lists every cutter considered with its worst label and the percentage kept. When a
 label loses detail, a warning under that row says what to do — *"‘Maker' at 4 mm loses 96 % of
 its area with a 1.0 mm cutter — increase to 6 mm or more."* When a label breaks through the
-floor, it is an error, not a warning, and Generate stays disabled until it is fixed.
+floor, it is an error, not a warning, and Generate stays disabled until it is fixed. The
+cutter the job settles on is **confirmed at the run**, not in setup: the upload asks "Which
+cutter is fitted?" (§5.9, #537).
 
 The list holds every cutter a job can name: the app's two built-ins always, and — once the
 **house** (§7) is reachable — **the cutters you own** beside them. The recommendation ranks all
@@ -594,7 +675,10 @@ dead: it leaves Cut and expands the item the first red row names.
 
 The Cut page also carries the **registration step** (#495). It runs the setup's **approved
 registration plan** — home, fit the wired probe, `M491`, the surface seek, the edge scans, home
-again — and shows what every touch found. It is deliberately **not re-derived**: a location
+again — and shows what every touch found. While it runs, the machine's state shows in the
+**status strip** under the viewport, and the touches and the machine's own lines live in the
+dock's **Transcript** tab (#526/#528) — nothing about the live machine renders inside the rail.
+It is deliberately **not re-derived**: a location
 setting can move after approval, and re-planning would silently replace the steps you approved.
 A job with no approved plan says so and runs nothing. The origin is written only from a
 measurement that is usable and inside the plan's margin: `G10 L2 P1 X Y Z` in #387's order,
@@ -661,7 +745,10 @@ the sequence for the job you generated.
 handed to the **release step** (#469): it uploads the frozen list (a first press lists the
 target, every file and the total bytes; only a second press sends), plays the programs in cut
 order, and stops at the **bit change** with the next cutter, its `M491` reading and the Z0
-difference named. Each program needs its own "I am at the machine" tick. The **vacuum stays on
+difference named. Each program needs its own "I am at the machine" tick. Before anything is sent, the upload asks
+**"Which cutter is fitted?"** — a selector that defaults to the cutter this file was posted for
+(named the way the bench names it: case colour, label, box code). Naming a *different* cutter is a
+mismatch and **Send stays disabled** until you pick the one the file was written for (#537). The **vacuum stays on
 across the bit change** and is closed only when the run stops; a stop always sends `M332`. A
 one-program job keeps the single-file upload. Either way the machine is named before anything is
 written, and **Stop** is the app's abort — the machine's own button and the plug remain the real
@@ -694,6 +781,29 @@ simulation cannot see (`/Fabrication.md` §7.6) — the sum of probe repeatabili
 tool-length repeatability and how the collet seats. Writing it down is how the assumed numbers
 become measured ones. The run record also carries the wall clocks per phase, so the next
 estimate is compared with the last measured run.
+
+**Try it on a committed sample.** `docs/bench/single-barrel.job.json` is the same engrave job the
+headless round-trip test pins (`docs/bench/single-barrel.receipt.json`), so it opens in the app and
+generates the program you can compare against the committed receipt. The run itself needs a
+machine on the network; everything up to the upload works in the desktop build without one.
+
+1. Open the **Engrave** surface and press **Open…** in the job file bar; pick
+   `docs/bench/single-barrel.job.json` (the picker accepts `.json`).
+2. The Design rail shows the three groups. **Job** states the stock (38.1 × 76.2 × 3.81 mm PLA);
+   **Hold** states the vise seat; **Cutter** says **no cutter chosen** if your library lacks the
+   key the file names — that is expected.
+3. In **Cutter**, read the recommendation and press **Use it** (or pick any flat cutter the panel
+   offers).
+4. Press **Generate** in the sticky footer. The run rows report "Toolpath generated · Verified ·
+   Simulated", and the footer's findings count reads **0 errors**.
+5. Switch to **Cut**. The gate is clear; the **status strip** under the viewport stays dark until a
+   machine answers.
+6. On a desktop build with a machine reached: the run step's upload asks **"Which cutter is
+   fitted?"** — leave it on the recommended cutter (a different one disables Send with a mismatch
+   warning, #537) and press the confirmation to send.
+
+*Victory:* step 4 generates the `.nc`, its frame and the run sheet with no blocking findings, and
+(step 6, hardware permitting) the upload's cutter confirmation accepts the fitted cutter and sends.
 
 ## 6 · Two-colour badges — CNC-3
 
@@ -887,6 +997,17 @@ drawn muted, claiming no connection, because Machines reads as everything that m
 **Forget** is the only thing here that writes. Bench power is deliberately *not* here: switching
 the machine on is a physical act, not a setting.
 
+**The Bed block (#509/#511).** The machine's card also holds its **bed** — the machine's *active
+bed profile*: its name and date, a one-line summary of the surface (bare bed / wasteboard /
+fixture plate / vacuum bed) and every fixture placement on it (the vise's jaw top, a bracket's
+seat, a rotary module's axis — each with its measured value and when), an **unmeasured** count
+linking to the calipers list (#444), and the profile's history. Three actions, none of which ever
+sends a machine command: **Switch** picks another saved profile and makes it active; **I changed
+the bed** copies the active profile into a NEW dated profile with its dependent datums cleared and
+listed to re-measure; **Measure…** lists the four datums (surface top, jaw top, bracket seat,
+rotary axis) with their state. This is where the vise's and the bed's *measured* numbers live — the
+same ones the job's Hold group and the run sheet read (§2).
+
 ![Machines — the Z1's card](https://raw.githubusercontent.com/SlyWombat/CaseMaker/main/docs/assets/cnc-mockup-manage-machines.png)
 
 *Design mockup — not the shipped screen.*
@@ -1076,7 +1197,7 @@ simulation does report about one is the sweep's own list, next:
 | `primitive-sphere-needs-3d` | error | A sphere primitive (a dimple) has a curved floor, which a flat-floor region cannot represent. A sphere is a dexel job, so it is refused by name rather than approximated as a circle pocket (#435). | Cut it with the 3D engine when it lands (#222), or use a cylinder or box for now. |
 | `target-object-not-cut` | warning | The job carries a target object — an imported STL or 3MF that the cut-aways are positioned against. It is a REFERENCE and is never removed from the stock: no program cuts around it, and the simulation draws no material taken away for it (#435). | Nothing if you only need the reference. Cutting the stock out around the object is the profile cut-out work (#218). |
 | `goal-object-oversize` | error | A target object marked as the shape to MAKE (its role is "goal", not a reference) is larger than the blank — it does not fit the stock's bounding box, so it cannot be reproduced on this stock (#533). | Use a larger blank, or scale the goal down to fit. |
-| `goal-object-no-toolpath` | info | A target object is marked as the shape to MAKE and fits the blank, but no 3D toolpath is generated for it yet — the roughing and ball-nose finishing passes are the 3D CAM still to land (#222, slice D). | Nothing yet: the goal is validated and previewed; cutting it comes with the 3D engine. |
+| `goal-object-no-toolpath` | info | A target object is marked as the shape to MAKE and fits the blank, but this job is the **mixed** path — a goal beside ordinary items — so only the item program cuts. The goal is validated and previewed; the roughing and ball-nose finishing passes are generated only for a **pure-goal** job, whose only work is the goal mesh (#534). | Cut the goal in a job of its own (no items), or wait for slice E (#535) to wire the mixed path's 3D cut. |
 | `setup-no-tool` | error | A saved setup names no cutter, so there is no program to write for it (#419). Every setup is one program, and a program is one tool. | Name a cutter on that setup. |
 | `setup-items-unassigned` | error | A saved setup states a per-cutter item assignment, but an item in the setup is not assigned to any of its cutters — so that item would not be cut at all (#472). | Assign the item to a cutter, or remove it from the setup. |
 | `setup-items-duplicated` | error | A saved setup assigns one item to more than one cutter. An item is cut once; two programs would both cut it (#472). | Give the item to one cutter. |
@@ -1553,3 +1674,28 @@ check. stdout is the JSON-RPC protocol, so the server writes nothing else there;
 progress is returned inside its tool result, not printed.
 
 To take the server away again: `claude mcp remove casemaker`.
+
+#### The committed samples, end to end
+
+The repo carries two samples whose receipts are pinned byte-for-byte by `tests/unit/docsRoundTrip.spec.ts`
+(#484). From the `casemaker-app` directory:
+
+```text
+# A board project → one print-ready STL + its -PRINT-NOTES.txt sidecar.
+npm run casemaker -- export ../docs/bench/bench-sample.caseproj.json --out /tmp/casemaker-sample
+
+# An engrave job → the .nc, its frame, its run sheet and the receipt (human output).
+npm run casemaker -- engrave ../docs/bench/single-barrel.job.json --out /tmp/casemaker-sample
+
+# The same, machine-readable — stdout is exactly the receipt document.
+npm run casemaker -- --json engrave ../docs/bench/single-barrel.job.json --out /tmp/casemaker-sample
+```
+
+Each command exits `0` and prints one receipt. The committed `docs/bench/bench-sample.receipt.json`
+and `docs/bench/single-barrel.receipt.json` are what those same two commands produce **with the
+test's pinned location added** — `--location tests/unit/fixtures/location-doc.json` — which is the
+exact call `tests/unit/docsRoundTrip.spec.ts` makes; add that flag and your receipt reproduces the
+committed one byte-for-byte. Without it, a run reads your own location document (or falls back to
+the shipped defaults, which the receipt says). The `export` of `bench-sample.caseproj.json` is also
+the headless twin of the in-app board walkthrough in
+[Getting Started](https://github.com/SlyWombat/CaseMaker/blob/main/casemaker-app/src/docs/getting-started.md).

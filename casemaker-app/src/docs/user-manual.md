@@ -4,7 +4,7 @@ Every panel, every parameter, every export option. For a quick start, see [Getti
 
 ## Workflow at a glance
 
-1. Pick a **board** in the board picker — 29 built-in profiles (Raspberry Pi,
+1. Pick a **board** in the board picker — 30 built-in profiles (Raspberry Pi,
    Arduino, ESP32 devkits, touch panels, QuinLED, sensors, cameras, …), plus
    boards you import or enable from online sources. Boards marked **★** apply
    a curated quickstart recipe; otherwise you get a blank parametric shell.
@@ -18,7 +18,7 @@ Every panel, every parameter, every export option. For a quick start, see [Getti
 
 The picker's catalog merges three source tiers, resolved in priority order:
 
-- **Built-in** — 29 profiles bundled with the app, each schema-validated with
+- **Built-in** — 30 profiles bundled with the app, each schema-validated with
   a manufacturer source URL.
 - **My library** — profiles you imported (**Import board JSON**) or saved
   from the Board editor's **Save to library**. Stored in this browser;

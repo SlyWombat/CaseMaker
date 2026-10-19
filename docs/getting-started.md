@@ -6,7 +6,7 @@ A 10-minute walkthrough from zero to "enclosure STL on disk."
 
 Case Maker runs entirely in the browser: **<https://electricrv.ca/casemaker>**.
 
-1. On the **Start a New Project** screen, search for your board (29 built-ins,
+1. On the **Start a New Project** screen, search for your board (30 built-ins,
    plus anything you import or enable from an online source).
 2. Click a card to see its specs, connector inventory, and provenance in the
    detail rail. Boards marked **★** have a curated quickstart recipe.
@@ -102,6 +102,30 @@ If you don't have Rust locally, push to `main` and grab the Windows installer fr
 - **`Module not found: manifold-3d/manifold.wasm?url`** — you skipped `vite-plugin-wasm`. Reinstall dev deps.
 - **Worker silently fails after editing `ProjectCompiler.ts`** — open `window.__caseMaker.getJobError()` and `getLastDiag()` in the browser console. A common cause is a dropped import (`buildExternalAssetOps`).
 - **Port 8000 already in use** — set `VITE_PORT=8001 npm run dev`, or change the port in **Settings** in the UI.
+
+## Demo samples — from a committed project to a printed part
+
+You don't have to author anything to see the whole pipeline. The repo ships a committed sample
+project, `docs/bench/bench-sample.caseproj.json` (an ESP32 DevKit V1 case), that round-trips
+byte-for-byte — the same file the headless test pins in `docs/bench/bench-sample.receipt.json`.
+
+**Board/case → export for print, in the app:**
+
+1. Open the app ([electricrv.ca/casemaker](https://electricrv.ca/casemaker) or `npm run dev`) and
+   use **Load** to open `docs/bench/bench-sample.caseproj.json`.
+2. The case rebuilds around the ESP32 DevKit V1: check the **Case parameters** panel and the
+   **Port cutouts** (USB and the two GPIO headers are already wired from the board's components).
+3. Drag the **Wall thickness** slider once to feel the rebuild, then put it back.
+4. Open **Export** and click **STL (binary)**. The file is named
+   `ESP32_DevKit_V1_CLI_sample.stl`; a `-PRINT-NOTES.txt` sidecar travels with it.
+
+*Victory:* the exported STL opens in your slicer, Z-up, millimetres, no rotation — the same bytes
+the headless `export` writes for the same project.
+
+**The same project, headless** — the copy-paste twin is in the CNC guide's
+[§8.6](https://github.com/SlyWombat/CaseMaker/blob/main/casemaker-app/src/docs/cnc-guide.md), where
+`npm run casemaker -- export ../docs/bench/bench-sample.caseproj.json --out /tmp/casemaker-sample`
+writes the identical STL from the command line.
 
 ## Next steps
 

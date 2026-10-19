@@ -83,6 +83,14 @@ cd casemaker-app && npm run docs:sync
 
 A CNC change that adds a diagnostic code or changes what the user sees updates `cnc-guide.md` in the same PR.
 
+**Demo samples live in `docs/bench/`, and the guide chapters cite them by name.** Each capability
+walkthrough (simulate, engrave, board/case export, the headless CLI) points at a committed sample,
+so a reader can follow numbered steps to a working result without authoring anything first. Two of
+those samples' receipts — `docs/bench/single-barrel.receipt.json` and
+`docs/bench/bench-sample.receipt.json` — are pinned byte-for-byte by
+`tests/unit/docsRoundTrip.spec.ts`: a change that moves the CLI's output must regenerate them from
+that spec's own call (its header explains the token map and the pinned clock), never by hand.
+
 `tests/unit/docsMirror.spec.ts` fails if a mirror is stale, and names which
 file to copy which way. It is worth having: the copy of this file that shipped
 inside the app went four months without an update and spent them telling
