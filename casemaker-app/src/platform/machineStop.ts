@@ -36,7 +36,7 @@ import {
   type ConsoleTiming,
   type MachineConsoleTarget,
 } from './machineConsole';
-import { VACUUM_OFF } from './machineVacuum';
+import { ANTISTATIC_OFF, VACUUM_OFF } from './machineVacuum';
 import { readDefault, type ShopDefaults } from './defaultsClient';
 
 export const ABORT_LINE = 'abort';
@@ -115,7 +115,7 @@ function safeStop(s: StopSettings): StopSettings {
  *   - `timeout` / `error` / `unavailable` — the socket failed or this build cannot reach a machine.
  */
 export type StopOutcome =
-  | { kind: 'stopped'; vacuumOff: boolean; status: string }
+  | { kind: 'stopped'; vacuumOff: boolean; antistaticOff?: boolean; status: string }
   | { kind: 'draining'; detail: string }
   | { kind: 'not-running'; status: string }
   | { kind: 'alarm'; detail: string; status: string }
@@ -152,12 +152,14 @@ export async function stopProgram(
  * The stop itself, on a session the caller already holds (#423): the run screen stops the program
  * it is watching on its OWN connection, at a poll boundary, rather than opening a second one beside
  * it. Same rule as {@link stopProgram}: `?` first, abort only a running program, refuse an alarm, and
- * `M332` only after a poll reads `Idle`.
+ * `M332` only after a poll reads `Idle`. `antistatic` (#564) also sends `M332.4` there, when the run
+ * that was stopped is a plastic job whose antistatic the run switched on.
  */
 export async function stopOnSession(
   session: Pick<ConsoleHandle, 'send'>,
   sleep: (ms: number) => Promise<void> = realSleep,
   settings: StopSettings = STOP_FALLBACK,
+  antistatic: boolean = false,
 ): Promise<StopOutcome> {
   const { idlePolls, idlePollMs, abortReplyMs, statusTiming } = safeStop(settings);
   const ask = await session.send('?', statusTiming);
@@ -198,7 +200,13 @@ export async function stopOnSession(
       const state = controllerState(poll.text);
       if (state !== null && state.toLowerCase() === 'idle' && !programRunning(poll.text)) {
         const off = await session.send(VACUUM_OFF);
-        return { kind: 'stopped', vacuumOff: off.kind === 'sent', status: poll.text };
+        const antiOff = antistatic ? await session.send(ANTISTATIC_OFF) : null;
+        return {
+          kind: 'stopped',
+          vacuumOff: off.kind === 'sent',
+          ...(antiOff === null ? {} : { antistaticOff: antiOff.kind === 'sent' }),
+          status: poll.text,
+        };
       }
     }
     if (i + 1 < idlePolls) await sleep(idlePollMs);

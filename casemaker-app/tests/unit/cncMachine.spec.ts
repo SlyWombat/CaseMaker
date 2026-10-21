@@ -74,6 +74,9 @@ describe('the Z1 profile', () => {
     // family's `M331.1`, which this app does not drive).
     expect(Z1.capabilities.vacuum).toBe(true);
     expect(Z1.capabilities.air).toBe(false);
+    // #564 — the antistatic (static-removal) device is mounted: `M331.4`/`M332.4` were confirmed
+    // live at the bench, so the flag is a fact, not a guess.
+    expect(Z1.capabilities.antistatic).toBe(true);
   });
 
   it('dialect flags match the firmware and the vendor FreeCAD definition', () => {

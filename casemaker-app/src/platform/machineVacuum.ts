@@ -41,8 +41,9 @@
  * WHAT THIS MODULE DOES NOT DO. It does not remember anything: "what did I last send" is the panel's
  * fact, not the socket's, because there is no read-back — the status line does not report the vacuum
  * mode (bench, 2026-10-12), so no amount of polling could recover it. It also does not run a job;
- * `M331`/`M332` are the whole surface, and the `M331.x` family (blowing, bed cleaning, static
- * removal) stays unmodelled (`Z1-Firmware-Dialect.md` §11.3, #283).
+ * the MANUAL switch stays the bare `M331`/`M332` pair. The antistatic's `M331.4`/`M332.4` are
+ * exported as constants here (#564) but only the run drives them; the rest of the `M331.x` family
+ * (blowing, bed cleaning) stays unmodelled (`Z1-Firmware-Dialect.md` §11.3, #283).
  */
 
 import { alarmLine, controllerState, jobProgressPercent } from './machineUpload';
@@ -51,6 +52,15 @@ import { attachConsole, type MachineConsoleTarget } from './machineConsole';
 /** The machine's bare `M331`/`M332` — "turning extend out mode on/off", the vacuum (#283). */
 export const VACUUM_ON = 'M331';
 export const VACUUM_OFF = 'M332';
+
+/**
+ * The `M331.4`/`M332.4` sub-codes — "turning static electricity removal mode on/off", the antistatic
+ * (static-removal) device (#564, `/Z1-Firmware-Dialect.md` §11.3). A separable mode in the same
+ * accessory family, independent of the bare vacuum above. The run emits them for plastic jobs
+ * (`machineRun.ts`); the manual vacuum switch stays the bare pair and never touches these.
+ */
+export const ANTISTATIC_ON = 'M331.4';
+export const ANTISTATIC_OFF = 'M332.4';
 
 /** The console line for one state, in one place: the switch and any test agree on the code. */
 export function vacuumLine(on: boolean): string {

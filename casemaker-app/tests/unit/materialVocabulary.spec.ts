@@ -12,6 +12,7 @@ import {
   MATERIAL_LABELS,
   PRINTED_BLANK_MATERIALS,
   STOCK_MATERIALS,
+  isPlasticMaterial,
 } from '@/engine/cnc/materials';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { parseEngraveJob } from '@/store/engraveJobSchema';
@@ -60,5 +61,28 @@ describe('the shelf vocabulary carries PrusaSlicer’s filament classes (#456)',
     expect(new Set(['pa', 'pa-cf', 'pa-gf']).size).toBe(3);
     expect(MATERIAL_LABELS['pa-cf']).not.toBe(MATERIAL_LABELS.pa);
     expect(MATERIAL_LABELS['pa-gf']).not.toBe(MATERIAL_LABELS.pa);
+  });
+});
+
+describe('the plastic class (#564)', () => {
+  it('reads every named plastic — printed blanks, acrylic and unspecified plastic — as plastic', () => {
+    for (const material of [...PRINTED_BLANK_MATERIALS, 'acrylic', 'plastic'] as const) {
+      expect(isPlasticMaterial(material), material).toBe(true);
+    }
+  });
+
+  it('reads no wood and no metal as plastic', () => {
+    for (const material of ['softwood', 'hardwood', 'mdf', 'aluminium-6061', 'aluminium-7075', 'brass', 'copper'] as const) {
+      expect(isPlasticMaterial(material), material).toBe(false);
+    }
+  });
+
+  it('partitions the whole vocabulary: every stock material is exactly one of wood, metal or plastic', () => {
+    for (const material of STOCK_MATERIALS) {
+      const plastic = isPlasticMaterial(material);
+      const wood = material === 'softwood' || material === 'hardwood' || material === 'mdf';
+      const metal = ['aluminium-6061', 'aluminium-7075', 'brass', 'copper'].includes(material);
+      expect(Number(plastic) + Number(wood) + Number(metal), material).toBe(1);
+    }
   });
 });

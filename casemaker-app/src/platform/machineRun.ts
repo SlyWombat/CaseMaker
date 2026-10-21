@@ -45,7 +45,7 @@ import {
   type ConsoleSendResult,
   type ConsoleTiming,
 } from './machineConsole';
-import { VACUUM_OFF, VACUUM_ON } from './machineVacuum';
+import { ANTISTATIC_OFF, ANTISTATIC_ON, VACUUM_OFF, VACUUM_ON } from './machineVacuum';
 import { readDefault, type ShopDefaults } from './defaultsClient';
 
 /** The status poll's floor, ms (#386: 0.6 s faulted the controller). The shop default may only raise it. */
@@ -113,11 +113,11 @@ export type VacuumOwner = 'runner' | 'program' | 'job';
 
 export type RunOutcome =
   | { kind: 'refused'; reason: string }
-  | { kind: 'finished'; last: Progress; homed: boolean; vacuumOff: boolean; vacuumOwner?: VacuumOwner; span?: VacuumSpan }
+  | { kind: 'finished'; last: Progress; homed: boolean; vacuumOff: boolean; antistaticOff?: boolean; vacuumOwner?: VacuumOwner; span?: VacuumSpan }
   | { kind: 'aborted'; stop: StopOutcome; last: Progress }
   | { kind: 'alarm'; alarm: string; last: Progress }
   | { kind: 'unreachable'; last: Progress; misses: number }
-  | { kind: 'never-started'; last: Progress; vacuumOff: boolean; vacuumOwner?: VacuumOwner; span?: VacuumSpan }
+  | { kind: 'never-started'; last: Progress; vacuumOff: boolean; antistaticOff?: boolean; vacuumOwner?: VacuumOwner; span?: VacuumSpan }
   /**
    * Stop was pressed before the machine ever reported progress, and it reads Idle: nothing here can
    * tell whether the program ran, so nothing further is sent — no `M332`, no home (#423 re-review).
@@ -140,6 +140,14 @@ export interface RunDeps {
    * outranks `programOwnsVacuum` and makes the owner `job`.
    */
   vacuumSpan?: VacuumSpan;
+  /**
+   * #564 — switch the antistatic (static-removal) device on at the start and off at the end,
+   * alongside the vacuum's own words. The caller sets it when the job's material is a plastic and
+   * the machine has the device (`capabilities.antistatic`); the program never carries `M331.4` /
+   * `M332.4`, so this is the ONLY thing that switches it — off exactly once per run, at the finish
+   * or, on an abort, through {@link stopOnSession}.
+   */
+  antistatic?: boolean;
   /** True once the person pressed Stop; read at every poll boundary. */
   stopRequested: () => boolean;
   onEvent?: (e: RunEvent) => void;
@@ -220,16 +228,30 @@ export async function runProgram(filename: string, deps: RunDeps): Promise<RunOu
     }
   }
 
+  // 2b — the antistatic, for a plastic job only (#564). Unlike the vacuum the program never carries
+  // `M331.4`, so the run switches it on for EVERY file of a plastic job, whoever owns the vacuum's
+  // words. A failure refuses, exactly as the vacuum's did: nothing is played on a job whose
+  // accessory did not switch on, and a vacuum THIS run switched on goes off again.
+  if (deps.antistatic === true) {
+    const anti = await send(ANTISTATIC_ON);
+    if (anti.kind !== 'sent' || anyAlarm(anti) !== null) {
+      if (vacOwner === 'runner') await send(VACUUM_OFF);
+      return { kind: 'refused', reason: `the antistatic did not switch on (${said(anti).trim() || anti.kind}); nothing was played` };
+    }
+  }
+
   // 3 — play. Only a reply that SAYS no, or a line that was never sent, means it did not start.
   const playSentAt = now();
   const played = await send(play);
   if (played.kind === 'sent' && /\berror\b|not found|no such file|unknown/i.test(played.text)) {
     // Nothing ran, so a runner-owned vacuum goes off again. A program-owned one never went on.
     if (vacOwner === 'runner') await send(VACUUM_OFF);
+    if (deps.antistatic === true) await send(ANTISTATIC_OFF);
     return { kind: 'refused', reason: `the controller did not accept the program: ${played.text.trim()}` };
   }
   if (played.kind === 'refused' || played.kind === 'unavailable') {
     if (vacOwner === 'runner') await send(VACUUM_OFF);
+    if (deps.antistatic === true) await send(ANTISTATIC_OFF);
     return { kind: 'refused', reason: `${play} could not be sent: ${said(played)}` };
   }
   // A timeout or a socket error AFTER the line went out is not a job that failed to start: the
@@ -246,7 +268,7 @@ export async function runProgram(filename: string, deps: RunDeps): Promise<RunOu
     if (wait > 0) await sleep(wait);
 
     if (deps.stopRequested()) {
-      const stop = await stopOnSession({ send }, sleep, deps.settings.stop ?? STOP_FALLBACK);
+      const stop = await stopOnSession({ send }, sleep, deps.settings.stop ?? STOP_FALLBACK, deps.antistatic === true);
       // `not-running` is Idle with no program in progress. After progress was seen, that is the job
       // ending just as Stop was pressed — a finish. Before any, it proves nothing: say so, send nothing.
       if (stop.kind === 'not-running') {
@@ -277,22 +299,35 @@ export async function runProgram(filename: string, deps: RunDeps): Promise<RunOu
     if (!seenProgress && now() - playSentAt >= deps.settings.noProgressMs) {
       // Nothing ran. A vacuum THIS run switched on goes off again — but only on a machine that
       // reads Idle: anything else is a machine doing something this watch cannot see. A program's
-      // own words never executed, so there is nothing to switch either way.
+      // own words never executed, so there is nothing to switch either way. The antistatic this run
+      // switched on goes off on the same Idle-only rule (#564).
       const vacuumOff =
         vacOwner === 'runner' && p.state === 'Idle' ? (await send(VACUUM_OFF)).kind === 'sent' : false;
-      return { kind: 'never-started', last, vacuumOff, vacuumOwner: vacOwner, ...(span === undefined ? {} : { span }) };
+      const antistaticOff =
+        deps.antistatic === true && p.state === 'Idle' ? (await send(ANTISTATIC_OFF)).kind === 'sent' : undefined;
+      return {
+        kind: 'never-started',
+        last,
+        vacuumOff,
+        vacuumOwner: vacOwner,
+        ...(antistaticOff === undefined ? {} : { antistaticOff }),
+        ...(span === undefined ? {} : { span }),
+      };
     }
   }
 
   async function finish(at: Progress): Promise<RunOutcome> {
     // A runner-owned vacuum is switched off and homed here. A program-owned one turned itself off
-    // in its last lines; this run only homes.
+    // in its last lines; this run only homes. The antistatic is always this run's (#564): the
+    // program never carries `M331.4`/`M332.4`, so it is switched off here before the home.
     const off = vacOwner === 'runner' ? await send(VACUUM_OFF) : null;
+    const antiOff = deps.antistatic === true ? await send(ANTISTATIC_OFF) : null;
     const home = await send('$H');
     return {
       kind: 'finished',
       last: at,
       vacuumOff: off !== null && off.kind === 'sent' && anyAlarm(off) === null,
+      ...(antiOff === null ? {} : { antistaticOff: antiOff.kind === 'sent' && anyAlarm(antiOff) === null }),
       vacuumOwner: vacOwner,
       ...(span === undefined ? {} : { span }),
       homed: home.kind === 'sent' && anyAlarm(home) === null,
@@ -348,7 +383,13 @@ export function describeRun(o: RunOutcome): string {
       }.`;
     case 'aborted':
       return o.stop.kind === 'stopped'
-        ? `Stopped at line ${o.last.line ?? '?'}${o.stop.vacuumOff ? ', vacuum off' : ' — the vacuum-off was not confirmed'}. Home the machine when the head is clear.`
+        ? `Stopped at line ${o.last.line ?? '?'}${o.stop.vacuumOff ? ', vacuum off' : ' — the vacuum-off was not confirmed'}${
+            o.stop.antistaticOff === undefined
+              ? ''
+              : o.stop.antistaticOff
+                ? ', antistatic off'
+                : ' — the antistatic-off was not confirmed'
+          }. Home the machine when the head is clear.`
         : `Stop was sent, but: ${'detail' in o.stop ? o.stop.detail : o.stop.kind}. The machine's red button is the emergency stop.`;
     case 'alarm':
       return `The controller said \`${o.alarm}\` — an alarm. Nothing further was sent; the physical stop is the stop.`;

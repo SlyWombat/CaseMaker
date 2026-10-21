@@ -378,3 +378,68 @@ describe('#419 Q-E — the program owns the vacuum, or the runner brackets it', 
     expect(f.lines().at(-2)).toBe('M332');
   });
 });
+
+// #564 — the antistatic (static-removal) device. The run switches it on for plastic jobs only,
+// beside the vacuum, and off at the run's end — the finish AND the abort — exactly once. The
+// program never carries `M331.4`/`M332.4`, so this run is the only thing that switches it.
+describe('#564 — the antistatic runs for plastic jobs only', () => {
+  it('a plastic job switches it on at the start and off at the finish, beside the vacuum', async () => {
+    const f = fake(['<Run|P:10,10,5>', '<Idle|P:51,100,41>']);
+    const o = await runProgram('job.nc', { ...deps(f), antistatic: true });
+    expect(o).toMatchObject({ kind: 'finished', vacuumOff: true, antistaticOff: true });
+    expect(f.lines()).toEqual(['?', 'M331', 'M331.4', 'play /sd/gcodes/job.nc', '?', '?', 'M332', 'M332.4', '$H']);
+  });
+
+  it('a non-plastic job emits no antistatic words anywhere', async () => {
+    const f = fake(['<Run|P:10,10,5>', '<Idle|P:51,100,41>']);
+    const o = await runProgram('job.nc', deps(f));
+    expect(o.kind).toBe('finished');
+    expect(f.lines().filter((l) => l === 'M331.4' || l === 'M332.4')).toEqual([]);
+  });
+
+  it('a plastic job whose program owns the vacuum words still brackets the antistatic itself', async () => {
+    const f = fake(['<Run|P:10,20,5>', '<Idle|P:9,100,4>']);
+    const o = await runProgram('job.nc', { ...deps(f), programOwnsVacuum: true, antistatic: true });
+    expect(o).toMatchObject({ kind: 'finished', antistaticOff: true });
+    // No vacuum words (the program owns them) — but the antistatic is the run's, on and off.
+    expect(f.lines().filter((l) => l === 'M331' || l === 'M332')).toEqual([]);
+    expect(f.lines()).toEqual(['?', 'M331.4', 'play /sd/gcodes/job.nc', '?', '?', 'M332.4', '$H']);
+  });
+
+  it('an aborted plastic job still switches the antistatic off', async () => {
+    let pressed = false;
+    const f = fake(['<Run|P:10,10,5>', '<Run|P:12,20,7>']);
+    const o = await runProgram('job.nc', {
+      ...deps(f, () => pressed),
+      antistatic: true,
+      onEvent: (e) => {
+        if (e.kind === 'poll') pressed = true;
+      },
+    });
+    expect(o.kind).toBe('aborted');
+    if (o.kind !== 'aborted') return;
+    expect(o.stop.kind).toBe('stopped');
+    if (o.stop.kind !== 'stopped') return;
+    expect(o.stop.vacuumOff).toBe(true);
+    expect(o.stop.antistaticOff).toBe(true);
+    const tail = f.lines().slice(f.lines().indexOf('abort') - 1);
+    expect(tail).toEqual(['?', 'abort', '?', 'M332', 'M332.4']);
+    expect(describeRun(o)).toContain('antistatic off');
+  });
+
+  it('a play the controller refuses switches the antistatic back off too', async () => {
+    const f = fake([], { play: 'error: file not found' });
+    const o = await runProgram('job.nc', { ...deps(f), antistatic: true });
+    expect(o.kind).toBe('refused');
+    expect(f.lines()).toEqual(['?', 'M331', 'M331.4', 'play /sd/gcodes/job.nc', 'M332', 'M332.4']);
+  });
+
+  it('never started on an Idle machine: the antistatic this run switched on goes off again', async () => {
+    const f = fake(['<Idle|MPos:0,0,0>']);
+    const o = await runProgram('job.nc', { ...deps(f), antistatic: true });
+    expect(o).toMatchObject({ kind: 'never-started', vacuumOff: true, antistaticOff: true });
+    expect(f.lines().at(-2)).toBe('M332');
+    expect(f.lines().at(-1)).toBe('M332.4');
+    expect(f.lines()).not.toContain('$H');
+  });
+});

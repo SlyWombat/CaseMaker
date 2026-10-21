@@ -265,11 +265,20 @@ export interface MillProfile extends MachineIdentity {
      * 2026-10-07 is a reading of our own traffic now.
      *
      * The rest of the machine's accessory surface is the same family's sub-codes — `M331.2` bed
-     * cleaning, `M331.1` blowing, `M331.4` static removal — plus `M951` time-lapse, none of which
-     * this app emits or reads (#283, #289; `/Z1-Firmware-Dialect.md` §11.3). The Carvera's
-     * internal vacuum, `M801`/`M802`, is a different machine's and is not this.
+     * cleaning, `M331.1` blowing — plus `M951` time-lapse, none of which this app emits or reads
+     * (#283, #289; `/Z1-Firmware-Dialect.md` §11.3). The Carvera's internal vacuum, `M801`/`M802`,
+     * is a different machine's and is not this.
      */
     vacuum: boolean;
+    /**
+     * The `M331.4`/`M332.4` sub-codes — "turning static electricity removal mode on/off", the
+     * antistatic (static-removal) device (#564, `/Z1-Firmware-Dialect.md` §11.3). A SEPARABLE mode
+     * in the same accessory family, independent of the bare vacuum above: the codes are confirmed
+     * live at the bench. `true`: the machine has the device and answers the two sub-codes; the run
+     * switches it on for plastic jobs and off at the run's end (the codes themselves live in
+     * `machineVacuum.ts` beside `VACUUM_ON`/`VACUUM_OFF`).
+     */
+    antistatic: boolean;
   };
   dialect: {
     /** The controller takes `G2`/`G3`; other CAM emits them. */
@@ -610,7 +619,8 @@ export const Z1: MillProfile = {
   },
   // `air: false` — `M7`/`M9` are answered `ok` and blow nothing on this machine; `vacuum: true` —
   // the post writes bare `M331`/`M332` and the machine obeys them (#283, bench 2026-10-12).
-  capabilities: { rotary: true, laser: false, air: false, vacuum: true },
+  // `antistatic: true` — the device is mounted and answers `M331.4`/`M332.4` (#564, bench 2026-10).
+  capabilities: { rotary: true, laser: false, air: false, vacuum: true, antistatic: true },
   dialect: { acceptsArcs: true, cannedCycles: false, grblMode: true, axisPrecision: 3, feedPrecision: 2 },
   // The frame and its derivations, not the numbers themselves: `Z1_DATUMS` is
   // `deriveCoordinateFrame(Z1_FRAME)` and is the only thing that computes a position (#279).
@@ -888,7 +898,7 @@ export const millProfileSchema = z.object({
   hasATC: z.literal(false),
   toolSlots: z.literal(0),
   softEndstop: softEndstopSchema,
-  capabilities: z.object({ rotary: z.boolean(), laser: z.boolean(), air: z.boolean(), vacuum: z.boolean() }),
+  capabilities: z.object({ rotary: z.boolean(), laser: z.boolean(), air: z.boolean(), vacuum: z.boolean(), antistatic: z.boolean() }),
   dialect: z.object({
     acceptsArcs: z.boolean(),
     cannedCycles: z.boolean(),

@@ -33,6 +33,7 @@ import type { StockItem } from '@/platform/stockClient';
 import type { InventoryItem } from '@/platform/houseClient';
 import type { EngraveJob, FilamentFibre } from '@/types/engraveJob';
 import { cuttingDiameter, type Tool } from '@/engine/cnc/tool';
+import { isPlasticMaterial } from '@/engine/cnc/materials';
 import { readDefault, readFlag } from '@/platform/defaultsClient';
 import { newStockId, useStockStore } from './stockStore';
 import { useToolRegistryStore } from './toolRegistryStore';
@@ -483,6 +484,11 @@ export const useMachineRunStore = create<MachineRunState>((set, get) => {
               prepared.context?.vacuumSpan !== undefined ||
               programOwnsVacuum(prepared.context?.nc),
             ...(prepared.context?.vacuumSpan === undefined ? {} : { vacuumSpan: prepared.context.vacuumSpan }),
+            // #564 — the antistatic runs for plastic jobs only. The run's context carries the job's
+            // stock material (runContextFor); a run prepared without one (a file uploaded outside the
+            // job flow) has no material to gate on, so the antistatic stays off.
+            antistatic:
+              prepared.context?.material !== undefined && isPlasticMaterial(prepared.context.material),
             stopRequested: () => f.stop,
             onEvent: (e) => {
               const entry = get().runs[machine];

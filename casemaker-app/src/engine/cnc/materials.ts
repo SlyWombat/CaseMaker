@@ -134,6 +134,22 @@ export function isWoodMaterial(material: StockMaterial): boolean {
 }
 
 /**
+ * Is this stock a plastic — everything {@link STOCK_MATERIALS} can name that is neither a wood nor a
+ * metal? The complement of the two poles the facing rule states (#474: facing is for wood and metal
+ * only), so the answer is derived from those two lists rather than a third list that would have to be
+ * kept in step with them.
+ *
+ * It exists because ONE rule needs it: the antistatic (static-removal) accessory is switched on for
+ * plastic jobs only (#564) — cutting a plastic builds static charge on the swarf; a wood or a metal
+ * does not, and must not get the accessory words. A material added to {@link STOCK_MATERIALS} later
+ * therefore reads as plastic by default unless someone deliberately says it is a wood or a metal,
+ * which is the safe direction for a rule that switches a device on.
+ */
+export function isPlasticMaterial(material: StockMaterial): boolean {
+  return !isWoodMaterial(material) && !isMetalMaterial(material);
+}
+
+/**
  * The classes a slicer can produce: the printed-blank materials (#456), listed rather than derived
  * from the string. A name is not a category — the same reason {@link isMetalMaterial} gives — and a
  * new class must answer this question here instead of being silently under-covered by a heuristic.
