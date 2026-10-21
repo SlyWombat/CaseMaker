@@ -249,7 +249,7 @@ export function EngraveRegistrationStep({ job, target }: EngraveRegistrationStep
       const r = await runRegistration(
         plan,
         {
-          console: { send: (line) => handle.send(line) },
+          console: { send: (line, timing) => handle.send(line, timing) },
           // The at-machine tick already names the wired probe, so the executor's first prompt is
           // answered by it; every other step (the bracket's clamps, the cutter) is a fresh press.
           operator: (step) => (step.kind === 'fit-probe' ? Promise.resolve(true) : askOperator(step)),
@@ -315,7 +315,7 @@ export function EngraveRegistrationStep({ job, target }: EngraveRegistrationStep
     try {
       const a = await applyCorrection(
         result.outcome,
-        { console: { send: (line) => handle.send(line) }, operator: askOperator },
+        { console: { send: (line, timing) => handle.send(line, timing) }, operator: askOperator },
         { confirmed: true },
       );
       if (!aliveRef.current) return;

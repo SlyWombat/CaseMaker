@@ -52,7 +52,7 @@
  */
 
 import { controllerState } from '@/platform/machineUpload';
-import type { ConsoleSendResult } from '@/platform/machineConsole';
+import type { ConsoleSendResult, ConsoleTiming } from '@/platform/machineConsole';
 import type { ShopDefaults } from '@/platform/defaultsClient';
 import { facingRetouchTolerance } from '@/engine/cnc/stockStart';
 import {
@@ -68,8 +68,15 @@ import { referenceOutcome } from './references';
 import { settingsProblem, SURFACE_LIFT_MM } from './settings';
 
 export interface RegistrationConsole {
-  send(line: string): Promise<ConsoleSendResult>;
+  send(line: string, timing?: Partial<ConsoleTiming>): Promise<ConsoleSendResult>;
 }
+
+/**
+ * The reply window for the `M491` two-touch macro (#563): the fast probe gap is ~13 s (108 mm at
+ * F500), so the default 800 ms quiet would close the reply long before the slow `[PRB]` reading
+ * lands. A longer quiet keeps the reader open across the probe moves.
+ */
+const PROBE_TIMING: Partial<ConsoleTiming> = { quietMs: 20_000 };
 
 export type OperatorStep = { kind: 'fit-probe' | 'fit-cutter' | 'confirm-mount'; text: string };
 
@@ -134,8 +141,8 @@ function session(deps: ExecDeps, seekFromMachineZ: number, idlePollLimit: number
   /** How low the probe may be right now, in a sentence — set by each step that moves it down. */
   let depth = 'at a safe height';
 
-  async function send(line: string, opts: { missOk?: boolean } = {}): Promise<string> {
-    const r = await deps.console.send(line);
+  async function send(line: string, opts: { missOk?: boolean; timing?: Partial<ConsoleTiming> } = {}): Promise<string> {
+    const r = await deps.console.send(line, opts.timing);
     const reply = r.kind === 'sent' || r.kind === 'timeout' ? r.text : r.detail;
     const carried = r.kind === 'sent' || r.kind === 'timeout' ? (r.carried?.text ?? '') : '';
     transcript.push({ line, reply: carried ? `${reply}\n(between lines) ${carried}` : reply });
@@ -324,7 +331,7 @@ export async function runRegistration(
     if (!(await deps.operator({ kind: 'fit-probe', text: 'Fit the wired probe in the spindle, then continue.' }))) {
       throw new Stop('stopped: the probe was not fitted');
     }
-    const ref = lastPrb(await io.send('M491'));
+    const ref = lastPrb(await io.send('M491', { timing: PROBE_TIMING }));
     if (ref === null || !ref.touched) throw new Stop('M491 answered no tool-length reading');
     if (plan.mount === 'bracket' && !(await deps.operator({ kind: 'confirm-mount', text: mountConfirmText(plan) }))) {
       throw new Stop('stopped: the clamps were not confirmed where the plan puts them');
@@ -521,7 +528,7 @@ export async function applyCorrection(
     if (!(await deps.operator({ kind: 'fit-cutter', text: fit }))) {
       throw new Stop('stopped: the cutter was not fitted');
     }
-    const ref = lastPrb(await io.send('M491'));
+    const ref = lastPrb(await io.send('M491', { timing: PROBE_TIMING }));
     if (ref === null || !ref.touched) throw new Stop('M491 answered no tool-length reading for the cutter');
     const line = correctionLine(outcome, ref.z);
     await io.send(line);

@@ -395,7 +395,7 @@ export const useEngraveReleaseStore = create<ReleaseState>((set, get) => {
         first.plan,
         first.outcome,
         { removedMm, defaults: useShopDefaultsStore.getState().defaults, engravingCutter: file.toolKey },
-        { console: { send: (line) => handle.send(line) }, operator: (step) => askOperator(machine, step) },
+        { console: { send: (line, timing) => handle.send(line, timing) }, operator: (step) => askOperator(machine, step) },
         { confirmed: true },
       );
       if (get().records[machine] === undefined) return;

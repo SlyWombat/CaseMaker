@@ -8,7 +8,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { ShopDefaultsSchema } from '@/platform/defaultsClient';
-import type { ConsoleSendResult } from '@/platform/machineConsole';
+import type { ConsoleSendResult, ConsoleTiming } from '@/platform/machineConsole';
 import {
   applyCorrection,
   planReferences,
@@ -79,9 +79,11 @@ function fakeZ1(opts: { holes?: ReferenceOpening[]; shift?: { x: number; y: numb
     const inHole = holes.some((h) => x > h.min[0] + RIM && x < h.max[0] - RIM && y > h.min[1] + RIM && y < h.max[1] - RIM);
     return onStock && !inHole ? SURFACE : null;
   };
+  let m491Timing: Partial<ConsoleTiming> | undefined;
   const console = {
-    async send(line: string): Promise<ConsoleSendResult> {
+    async send(line: string, timing?: Partial<ConsoleTiming>): Promise<ConsoleSendResult> {
       lines.push(line);
+      if (line === 'M491') m491Timing = timing;
       if (line === '?') return reply(alarmed ? '<Alarm|MPos:0,0,0>' : '<Idle|MPos:0,0,0>');
       if (line === '$X') return (alarmed = false), reply('ok');
       if (alarmed) return reply('error:Alarm lock');
@@ -117,7 +119,7 @@ function fakeZ1(opts: { holes?: ReferenceOpening[]; shift?: { x: number; y: numb
       return reply(`error:unexpected line ${line}`);
     },
   };
-  return { console, lines, xyAtZ, lowest: () => lowestTouch };
+  return { console, lines, xyAtZ, lowest: () => lowestTouch, m491Timing: () => m491Timing };
 }
 const yes = async () => true;
 async function run(p: RegistrationPlan, fake = fakeZ1()) {
@@ -125,6 +127,15 @@ async function run(p: RegistrationPlan, fake = fakeZ1()) {
   if (!r.ok) throw new Error(r.reason);
   return { ...r, fake };
 }
+
+describe('#563 the M491 read window', () => {
+  it('sends M491 with a probe-length quiet window, not the 800 ms default', async () => {
+    const fake = fakeZ1();
+    await run(plan(), fake);
+    // The fast probe gap is ~13 s (108 mm at F500), so the quiet window must outlast it (#563).
+    expect(fake.m491Timing()?.quietMs).toBeGreaterThanOrEqual(13_000);
+  });
+});
 
 describe('#429 the plan', () => {
   it('reads the probe’s measured diameter and rim spread from the location', () => {
