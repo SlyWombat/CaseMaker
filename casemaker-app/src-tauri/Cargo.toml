@@ -4,10 +4,10 @@ version = "1.0.0"
 description = "Parametric 3D-printable enclosure designer for microcontrollers and SBCs"
 authors = ["SlyWombat"]
 edition = "2021"
-# 1.89 is where `File::try_lock` / `std::fs::TryLockError` stabilized, and `house.rs` uses them for
-# the single-instance lock (#321). A `rust-version` that the code does not honour is a promise to
-# nobody.
-rust-version = "1.89"
+# 1.90 is the floor Tauri 2.12 needs (the Linux build only succeeds on rust:1.90); `house.rs` still
+# uses `File::try_lock` (stabilized in 1.89) for the single-instance lock (#321). A `rust-version`
+# the code does not honour is a promise to nobody.
+rust-version = "1.90"
 
 [lib]
 name = "casemaker_lib"
