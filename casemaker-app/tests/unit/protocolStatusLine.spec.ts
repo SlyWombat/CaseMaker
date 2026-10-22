@@ -3,7 +3,7 @@
 // This pins the parsing of a full line and the nulls for a partial one.
 
 import { describe, expect, it } from 'vitest';
-import { readStatusLine } from '../../src/platform/desktop/protocol';
+import { readStatusLine, workOffset } from '../../src/platform/desktop/protocol';
 
 describe('#526 readStatusLine', () => {
   it('parses a running line: state, positions, rates, tool and progress', () => {
@@ -37,5 +37,22 @@ describe('#526 readStatusLine', () => {
     const s = readStatusLine('<Run|MPos:0,0,0|WPos:0,0,0|F:450,900,50|S:6000,12000,50|P:10,100,5>');
     expect(s.feed).toEqual({ actual: 450, set: 900, override: 50 });
     expect(s.spindle).toEqual({ actual: 6000, set: 12000, override: 50 });
+  });
+});
+
+describe('#567 workOffset', () => {
+  it('is MPos − WPos per axis — the G54 offset on X and Y', () => {
+    const off = workOffset(readStatusLine('<Run|MPos:-10.0,20.0,1.0991|WPos:12.350,38.000,-0.120>'));
+    expect(off).toEqual({ x: -22.35, y: -18.0, z: 1.2191, a: null, b: null });
+  });
+
+  it('reads the homed-rest offset from MPos -1 and the work position', () => {
+    const off = workOffset(readStatusLine('<Idle|MPos:-1,-1,-1|WPos:180.2,183.1,55.2>'));
+    expect(off).toEqual({ x: -181.2, y: -184.1, z: -56.2, a: null, b: null });
+  });
+
+  it('leaves an axis null when one side is missing', () => {
+    const off = workOffset(readStatusLine('<Idle|MPos:-1,-1,-1|WPos:180.2,183.1>'));
+    expect(off).toEqual({ x: -181.2, y: -184.1, z: null, a: null, b: null });
   });
 });

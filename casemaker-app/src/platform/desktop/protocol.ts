@@ -569,6 +569,26 @@ export function readStatusLine(text: string): MachineStatusLine {
 }
 
 /**
+ * The work-coordinate offset (G54) read back from a status line: `MPos − WPos`, per axis (#567).
+ *
+ * The controller reports `WPos = MPos − G54 − TLO` (`Z1-Firmware-Dialect.md` §11.12), so this
+ * difference IS the G54 offset on X and Y — the two axes a registration pre-flight confirms ("G54 ≈
+ * the job's origin" before the surface touch, #567 step 4). On Z it also carries the tool-length
+ * offset, so the Z returned here is `G54_z + TLO_z`, not `G54_z` alone; `M499` reads the tool
+ * length to separate the two. An axis where either side is missing returns null.
+ */
+export function workOffset(line: MachineStatusLine): StatusPosition {
+  const sub = (m: number | null, w: number | null): number | null => (m === null || w === null ? null : m - w);
+  return {
+    x: sub(line.mpos.x, line.wpos.x),
+    y: sub(line.mpos.y, line.wpos.y),
+    z: sub(line.mpos.z, line.wpos.z),
+    a: sub(line.mpos.a, line.wpos.a),
+    b: sub(line.mpos.b, line.wpos.b),
+  };
+}
+
+/**
  * The words the controller uses when it has stopped for its own reasons — a bare line, not a state
  * word: `ALARM: Probe fail` after a `G38.2` finds nothing (`Z1-Firmware-Dialect.md` §11.2), the
  * `ERROR: Probe dead or not set…` line an `M491` macro ends with (§11.9), and Marlin's own
