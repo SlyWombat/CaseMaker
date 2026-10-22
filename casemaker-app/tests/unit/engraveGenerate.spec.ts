@@ -1183,45 +1183,20 @@ describe('a V-bit trace job (#405)', () => {
     expect(merge!.message).toContain('0.107');
   });
 
-  it('REFUSES a METAL-line V-bit on a PLA job, by name', () => {
-    // The 30°/60° engravers Makera lists for metal are not the cutters for a PLA blank — the
-    // maintainer's ruling, and the claim is about the PAIR — so the job stops rather than being
-    // cut on numbers nobody measured (#405 review). The name alone states the line here.
+  it('does NOT refuse the 30° engraving bit on PLA — the (Metal) name is a false signal (#575)', () => {
+    // The 30° engraver is dual-use (the maintainer's 2026-10-22 bench ruling). Its "(Metal)" name
+    // does not make it metal-ONLY, so a PLA job with it generates on the starting table's PLA V row.
     const metal = bit30({ name: 'Engraving V-bit 30 x 0.5 (Metal)', tipDiameter: 0.5, diameter: 3.175 });
-    const job = traceJob([title()], { tool: metal });
-    const g = generate(tl, job);
-    expect(g.ok).toBe(false);
-    expect(g.stage).toBe('findings');
-    expect(g.nc).toBeNull();
-    const refusal = g.findings.find((f) => f.code === 'tool-metal-line');
-    expect(refusal).toBeDefined();
-    expect(refusal!.severity).toBe('error');
-    expect(refusal!.message).toContain(metal.name); // the refusal NAMES the cutter
-    expect(refusal!.message).toContain('PLA');
+    const g = generate(tl, traceJob([title()], { tool: metal }));
+    expect(g.findings.some((f) => f.code === 'tool-metal-line')).toBe(false);
+    expect(g.ok).toBe(true);
+    expect(g.stage).toBe('done');
   });
 
-  it('downgrades the metal-line refusal to a warning and unblocks when overridden (#572)', () => {
-    // The override is a per-job, double-confirmed escape hatch: the finding stays, but as an
-    // acknowledged warning, so Generate proceeds past the findings stage. The SAME cutter without
-    // the override is still refused — the protective default does not move.
-    const metal = bit30({ name: 'Engraving V-bit 30 x 0.5 (Metal)', tipDiameter: 0.5, diameter: 3.175 });
-    const overridden = generate(tl, traceJob([title()], { tool: metal, metalLineOverride: true }));
-    expect(overridden.ok).toBe(true);
-    const finding = overridden.findings.find((f) => f.code === 'tool-metal-line');
-    expect(finding).toBeDefined();
-    expect(finding!.severity).toBe('warning');
-    expect(finding!.message).toContain('chosen despite the material mismatch');
-
-    const refused = generate(tl, traceJob([title()], { tool: metal }));
-    expect(refused.ok).toBe(false);
-    expect(refused.findings.find((f) => f.code === 'tool-metal-line')!.severity).toBe('error');
-  });
-
-  it('refuses a metal-line V-bit named by its BOX CODE too — the `-M-` segment', () => {
-    // `C1-BIT-ENGRAVE-M-60-0.1` states the line in its code as well as in its name: the code is the
-    // half that survives a renamed or shortened cutter, and a job carrying a code files it as the
-    // `Tool`'s `id` (our post writes `id=…`). This cutter's name is a STUB — the real label's
-    // "…for Metal…" phrase is not in it — so the code half is the only thing that can catch it here.
+  it('does not metal-refuse an engraving bit however the line is stated — the feeds gate stands (#575)', () => {
+    // Box code (`-M-`) and owned-label ("for Metal") both name the line, but neither refuses a
+    // V-profile bit now. The feeds resolution is the gate that stops a genuinely-no-row tip: 0.1 mm
+    // is outside the starting table's 0.3–0.5 V band.
     const byCode = bit30({
       name: 'Single Flute Engraving Bit 60 x 0.1',
       id: 'C1-BIT-ENGRAVE-M-60-0.1',
@@ -1229,27 +1204,10 @@ describe('a V-bit trace job (#405)', () => {
       angle: 60,
       halfAngle: 30,
     });
-    const job = traceJob([title()], { tool: byCode });
-    const g = generate(tl, job);
-    expect(g.ok).toBe(false);
-    const refusal = g.findings.find((f) => f.code === 'tool-metal-line');
-    expect(refusal).toBeDefined();
-    expect(refusal!.severity).toBe('error');
-    // …and the same cutter on a METAL blank is exactly what that bit is for: no refusal.
-    const onMetal = generate(tl, traceJob([title()], {
-      tool: byCode,
-      stock: { length: 38.1, width: 76.2, thickness: 3.81, material: 'aluminium-6061' },
-    }));
-    expect(onMetal.findings.some((f) => f.code === 'tool-metal-line')).toBe(false);
-  });
+    const g = generate(tl, traceJob([title()], { tool: byCode }));
+    expect(g.findings.some((f) => f.code === 'tool-metal-line')).toBe(false);
+    expect(g.ok).toBe(false); // feeds: no V row for a 0.1 mm tip
 
-  it('refuses an OWNED metal-line V-bit as the inventory actually files it — label name, id null', () => {
-    // The shape a job really carries for `inv:kz-engrave-m-60-0-1`: `toolRegistry.inventoryEntryFor`
-    // hands the job the inventory's own snapshot, whose `id` is `null` (the box code lives on the
-    // possession as `codes[].value`, not on the cutter). The label names the line as the phrase
-    // "for Metal", which does NOT end in `(Metal)` and is the only statement left — so a reading
-    // that needed the code, or only the `(Metal)` suffix, would let the 60° bit this house owns cut
-    // PLA (#405 review). This is the cutter the review named.
     const owned = bit30({
       name: 'Single Flute Engraving Bit for Metal - 1/8" Shank 60° * 0.1mm',
       id: null,
@@ -1257,15 +1215,8 @@ describe('a V-bit trace job (#405)', () => {
       angle: 60,
       halfAngle: 30,
     });
-    const g = generate(tl, traceJob([title()], { tool: owned }));
-    expect(g.ok).toBe(false);
-    expect(g.stage).toBe('findings');
-    expect(g.nc).toBeNull();
-    const refusal = g.findings.find((f) => f.code === 'tool-metal-line');
-    expect(refusal).toBeDefined();
-    expect(refusal!.severity).toBe('error');
-    expect(refusal!.message).toContain('60'); // the refusal NAMES the cutter it stopped
-    expect(refusal!.message).toContain('PLA');
+    const g2 = generate(tl, traceJob([title()], { tool: owned }));
+    expect(g2.findings.some((f) => f.code === 'tool-metal-line')).toBe(false);
   });
 
   // #407 — the metal-line refusal is about the PAIR (the bit's line and the blank's material), so
@@ -1294,6 +1245,23 @@ describe('a V-bit trace job (#405)', () => {
     expect(refusal!.severity).toBe('error');
     expect(refusal!.message).toContain(flat.name); // the refusal NAMES the cutter
     expect(refusal!.message).toContain('PLA');
+  });
+
+  it('downgrades a FLAT metal cutter refusal to a warning and unblocks when overridden (#572)', () => {
+    // A FLAT cutter's "(Metal)" name still refuses (its geometry IS ground for metal). This bit's
+    // 1.0 mm diameter sits inside the starting table's 0.8–1.6 flat band, so the feeds resolve; the
+    // double-confirmed override is what lets it cut PLA.
+    const flat = metalFlat({ name: '1.0mm Flat End(Metal)', tipDiameter: 1.0, diameter: 1.0 });
+    const refused = generate(tl, traceJob([title()], { toolKey: 'flat-1.0-metal', tool: flat }));
+    expect(refused.ok).toBe(false);
+    expect(refused.findings.find((f) => f.code === 'tool-metal-line')!.severity).toBe('error');
+
+    const overridden = generate(tl, traceJob([title()], { toolKey: 'flat-1.0-metal', tool: flat, metalLineOverride: true }));
+    expect(overridden.ok).toBe(true);
+    const finding = overridden.findings.find((f) => f.code === 'tool-metal-line');
+    expect(finding).toBeDefined();
+    expect(finding!.severity).toBe('warning');
+    expect(finding!.message).toContain('chosen despite the material mismatch');
   });
 
   it('does not refuse the same metal FLAT on a metal blank (#407)', () => {

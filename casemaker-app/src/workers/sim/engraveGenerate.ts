@@ -57,7 +57,7 @@ import { drillBitIR, drillSettings, type DrillBitPlan, type DrillSettings } from
 import type { ShopDefaults } from '@/platform/defaultsClient';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import type { ConditionSummary } from '@/engine/cnc/toolCondition';
-import { type VCone } from '@/engine/cnc/vProfile';
+import { isVShape, type VCone } from '@/engine/cnc/vProfile';
 import { minimumXyStepMm } from '@/engine/cnc/machine';
 import {
   vCarveGrooveRefusal,
@@ -648,6 +648,10 @@ export interface EngraveRegions {
  */
 function metalLineFindings(job: EngraveJob, tool: Tool | null): JobFinding[] {
   if (tool === null || !isMetalTool(tool) || isMetalMaterial(job.stock.material)) return [];
+  // #575 — an engraver/chamfer (a V-profile cone) is not metal-ONLY: the "(Metal)"/"for Metal" name
+  // is a false signal for the dual-use engraving bit, and the feeds resolution already refuses the
+  // genuine "no row for this material" case. Only a FLAT cutter's name states a metal-only line.
+  if (isVShape(tool)) return [];
   const overridden = job.metalLineOverride === true;
   return [
     {
