@@ -31,6 +31,7 @@ import {
 } from '@/engine/cnc/engrave/depthBounds';
 import type { LabelDepthRecommendation } from '@/engine/cnc/engrave/depthBounds';
 import { jobSplit } from '@/engine/cnc/engrave/depthIntent';
+import { EngraveCutWizard } from './EngraveCutWizard';
 import { ORACLE_AREA_FLOOR } from '@/engine/cnc/engrave/oracle';
 import { jobMachine } from '@/engine/cnc/calibration';
 import { useToolRegistry } from '@/hooks/useToolRegistry';
@@ -700,6 +701,8 @@ export function EngravePanel(): JSX.Element {
   const setMetalLineOverride = useEngraveJobStore((s) => s.setMetalLineOverride);
   // #572 — the double-confirm state for the cutter/material override affordance.
   const [confirmMetalOverride, setConfirmMetalOverride] = useState(false);
+  // #573 — the "Cut this blank" guided flow, replacing the panel while it owns the order.
+  const [showCutWizard, setShowCutWizard] = useState(false);
   const setSacrificial = useEngraveJobStore((s) => s.setSacrificial);
   const setCutOverride = useEngraveJobStore((s) => s.setCutOverride);
   const setCutOverrideSource = useEngraveJobStore((s) => s.setCutOverrideSource);
@@ -1761,6 +1764,16 @@ export function EngravePanel(): JSX.Element {
 
       {mode === 'design' ? (
         <>
+      {/* #573 — one guided flow from this job to the probe and the cut, in order. */}
+      <button
+        type="button"
+        data-testid="engrave-cut-this-blank"
+        title="Walk this job from the machine to the cut, one step at a time."
+        style={{ width: '100%', padding: 8, marginBottom: 8, fontWeight: 600 }}
+        onClick={() => setShowCutWizard(true)}
+      >
+        Cut this blank
+      </button>
 
       {/* #425 §6 — the document's Save/Open surface. Design only: the file owns the job, and the
           Cut branch is #419's. */}
@@ -3192,6 +3205,22 @@ export function EngravePanel(): JSX.Element {
             />
           </>
         )
+      )}
+      {showCutWizard && (
+        <div
+          data-testid="engrave-cut-wizard-overlay"
+          style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'var(--cm-color-surface-container-low)', overflow: 'auto', padding: 16 }}
+        >
+          <button
+            type="button"
+            data-testid="engrave-cut-wizard-close"
+            style={{ marginBottom: 8, padding: 6 }}
+            onClick={() => setShowCutWizard(false)}
+          >
+            ← Back to the panel
+          </button>
+          <EngraveCutWizard />
+        </div>
       )}
     </div>
   );

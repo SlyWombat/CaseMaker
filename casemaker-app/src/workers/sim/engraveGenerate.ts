@@ -57,7 +57,7 @@ import { drillBitIR, drillSettings, type DrillBitPlan, type DrillSettings } from
 import type { ShopDefaults } from '@/platform/defaultsClient';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import type { ConditionSummary } from '@/engine/cnc/toolCondition';
-import { isVShape, type VCone } from '@/engine/cnc/vProfile';
+import { type VCone } from '@/engine/cnc/vProfile';
 import { minimumXyStepMm } from '@/engine/cnc/machine';
 import {
   vCarveGrooveRefusal,
@@ -66,8 +66,8 @@ import {
   vCarveStepoverClampNote,
   type VCarvePlane,
 } from '@/engine/cnc/vCarveGeometry';
-import { isMetalTool } from '@/engine/cnc/registerCutter';
-import { MATERIAL_LABELS, isMetalMaterial } from '@/engine/cnc/materials';
+import { MATERIAL_LABELS } from '@/engine/cnc/materials';
+import { cutterOnMetalLine } from '@/engine/cnc/engrave/cutterMaterial';
 import { toPartPlan, labelProfile, jobDepthLimit, keepOutNameAt, type PartPlan } from '@/engine/cnc/engrave/partPlan';
 import { dedupeFindings, jobSetups, setupProgramFindings, toSetup, validateGoalObject, validateJob, type JobFinding } from '@/engine/cnc/engrave/jobSetup';
 import { jobForSetup, setupPrograms, type JobProgramRef } from '@/engine/cnc/engrave/programs';
@@ -647,11 +647,7 @@ export interface EngraveRegions {
  * `null` tool answers nothing: there is no cutter to name.
  */
 function metalLineFindings(job: EngraveJob, tool: Tool | null): JobFinding[] {
-  if (tool === null || !isMetalTool(tool) || isMetalMaterial(job.stock.material)) return [];
-  // #575 — an engraver/chamfer (a V-profile cone) is not metal-ONLY: the "(Metal)"/"for Metal" name
-  // is a false signal for the dual-use engraving bit, and the feeds resolution already refuses the
-  // genuine "no row for this material" case. Only a FLAT cutter's name states a metal-only line.
-  if (isVShape(tool)) return [];
+  if (tool === null || !cutterOnMetalLine(tool, job.stock.material)) return [];
   const overridden = job.metalLineOverride === true;
   return [
     {
