@@ -380,6 +380,10 @@ describe('the oracle refuses a V trace cut short (#408 acceptance 2)', () => {
       expect(report.worst.underCut).toBeLessThanOrEqual(ORACLE_AREA_FLOOR);
       expect(report.worst.overCut).toBeLessThanOrEqual(ORACLE_AREA_FLOOR);
       expect(report.ok).toBe(true);
+      // #580 — the column engine sweeps on a grid, so the floor is resolution-aware (cell area ×
+      // 4), not the absolute sliver floor the exact sweeper uses.
+      expect(report.areaFloor).toBeDefined();
+      expect(report.areaFloor!).toBeGreaterThan(ORACLE_AREA_FLOOR);
     } finally {
       good.session.dispose();
     }

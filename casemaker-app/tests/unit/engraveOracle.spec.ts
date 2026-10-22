@@ -126,6 +126,10 @@ describe('engraveOracle (#206 §3)', () => {
       const report = session.oracle(predicted);
       expect(report.ok).toBe(false);
       expect(under(report)).toBeGreaterThan(0.1); // the seven 0.26 mm spines are ~36 mm²
+      // #580 — the floor is never below the sliver floor. The exact sweeper has no grid, so it is
+      // the constant; the column engine (a V-bit trace) raises it to the cell area × 4.
+      expect(report.areaFloor).toBeDefined();
+      expect(report.areaFloor!).toBe(ORACLE_AREA_FLOOR);
     } finally {
       session.dispose();
     }

@@ -1307,13 +1307,16 @@ export function EngravePanel(): JSX.Element {
   }`;
 
   const rowOracle: RowState = run.oracle ? (run.oracle.ok ? 'tick' : 'cross') : run.phase === 'checking' ? 'pending' : 'idle';
+  // #580 — the resolution-aware floor the verdict used, falling back to the absolute sliver floor
+  // for a hand-built report or an exact-sweep run (no grid).
+  const oracleFloor = run.oracle?.areaFloor ?? ORACLE_AREA_FLOOR;
   const rowOracleText = `Matches prediction — ${
     run.oracle
       ? run.oracle.ok
-        ? `under-cut ${run.oracle.worst.underCut.toFixed(4)} mm², over-cut ${run.oracle.worst.overCut.toFixed(4)} mm², both within the ${ORACLE_AREA_FLOOR} mm² floor (tolerance ${run.oracle.band.toFixed(3)} mm)`
-        : run.oracle.worst.underCut > ORACLE_AREA_FLOOR
-          ? `worst under-cut ${run.oracle.worst.underCut.toFixed(4)} mm² exceeds the ${ORACLE_AREA_FLOOR} mm² floor by ${(run.oracle.worst.underCut - ORACLE_AREA_FLOOR).toFixed(4)} mm² — the file left material the prediction removed (over-cut ${run.oracle.worst.overCut.toFixed(4)} mm²; tolerance ${run.oracle.band.toFixed(3)} mm)`
-          : `worst over-cut ${run.oracle.worst.overCut.toFixed(4)} mm² exceeds the ${ORACLE_AREA_FLOOR} mm² floor by ${(run.oracle.worst.overCut - ORACLE_AREA_FLOOR).toFixed(4)} mm² — the file cut outside the plan (under-cut ${run.oracle.worst.underCut.toFixed(4)} mm²; tolerance ${run.oracle.band.toFixed(3)} mm)`
+        ? `under-cut ${run.oracle.worst.underCut.toFixed(4)} mm², over-cut ${run.oracle.worst.overCut.toFixed(4)} mm², both within the ${oracleFloor} mm² floor (tolerance ${run.oracle.band.toFixed(3)} mm)`
+        : run.oracle.worst.underCut > oracleFloor
+          ? `worst under-cut ${run.oracle.worst.underCut.toFixed(4)} mm² exceeds the ${oracleFloor} mm² floor by ${(run.oracle.worst.underCut - oracleFloor).toFixed(4)} mm² — the file left material the prediction removed (over-cut ${run.oracle.worst.overCut.toFixed(4)} mm²; tolerance ${run.oracle.band.toFixed(3)} mm)`
+          : `worst over-cut ${run.oracle.worst.overCut.toFixed(4)} mm² exceeds the ${oracleFloor} mm² floor by ${(run.oracle.worst.overCut - oracleFloor).toFixed(4)} mm² — the file cut outside the plan (under-cut ${run.oracle.worst.underCut.toFixed(4)} mm²; tolerance ${run.oracle.band.toFixed(3)} mm)`
       : run.phase === 'checking' || run.phase === 'simulating'
         ? 'checking…'
         : 'not checked yet'

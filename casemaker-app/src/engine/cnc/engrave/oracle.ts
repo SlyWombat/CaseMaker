@@ -177,6 +177,13 @@ export interface OracleReport {
   levels: OracleLevel[];
   /** The worst under- and over-cut over every level, mm². */
   worst: { underCut: number; overCut: number };
+  /**
+   * The area floor the verdict used, mm² — `ORACLE_AREA_FLOOR`, or the grid's cell area ×
+   * {@link ORACLE_AREA_FLOOR_CELLS} when the column engine swept (#580). `computeOracle` always
+   * sets it; OPTIONAL so a hand-built report (a test fixture) can omit it and readers fall back
+   * to {@link ORACLE_AREA_FLOOR}.
+   */
+  areaFloor?: number;
 }
 
 /**
@@ -184,6 +191,14 @@ export interface OracleReport {
  * floating-point-thin ring with a tiny non-zero area. Not a CAM defect. mm².
  */
 export const ORACLE_AREA_FLOOR = 1e-3;
+
+/**
+ * #580 — the resolution-aware floor's cell count. The column engine cannot resolve a region
+ * smaller than its grid cell, so a "worst under-cut" of one dexel is a disagreement, not material
+ * left standing. The verdict uses the greater of {@link ORACLE_AREA_FLOOR} and the grid's cell
+ * area × this count — a 2×2 cell block, the smallest region the grid can actually represent.
+ */
+export const ORACLE_AREA_FLOOR_CELLS = 4;
 
 /** Slice this far ABOVE a floor Z so the slice is inside the pocket cut toward that floor, mm. */
 export const ORACLE_SLICE_LIFT_MM = 0.001;
@@ -562,10 +577,16 @@ export function computeOracle(
     if (overCut > worstOver) worstOver = overCut;
   }
 
+  // #580 — the floor is resolution-aware: below the grid's own cell pitch, a "worst under/over-cut"
+  // is one dexel of disagreement, not material left standing. `ORACLE_AREA_FLOOR` stays the lower
+  // bound for a job whose resolution is finer (or one swept by the exact engine, with no grid).
+  const cellArea = threadGrid === null || threadGrid === undefined ? 0 : threadGrid.du * threadGrid.dv;
+  const areaFloor = Math.max(ORACLE_AREA_FLOOR, cellArea * ORACLE_AREA_FLOOR_CELLS);
   return {
-    ok: worstUnder <= ORACLE_AREA_FLOOR && worstOver <= ORACLE_AREA_FLOOR,
+    ok: worstUnder <= areaFloor && worstOver <= areaFloor,
     band,
     levels,
     worst: { underCut: worstUnder, overCut: worstOver },
+    areaFloor,
   };
 }
