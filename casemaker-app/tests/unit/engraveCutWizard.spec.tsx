@@ -214,4 +214,25 @@ describe('EngraveCutWizard (#573)', () => {
     expect(useEngraveJobStore.getState().job.setups).toBeDefined();
     expect(useEngraveJobStore.getState().job.setups!.length).toBeGreaterThan(0);
   });
+
+  it('step 4 names the blocker inline when the oracle fails (#582)', () => {
+    act(() => {
+      useEngraveJobStore.setState({ job: plannedJob() });
+      useEngraveRunStore.setState({
+        generated: { programs: [] } as unknown as ReturnType<typeof useEngraveRunStore.getState>['generated'],
+        oracle: { ok: false, band: 0.089, levels: [], worst: { underCut: 0.0815, overCut: 0 } },
+      });
+    });
+    render(<EngraveCutWizard />);
+    seedMachine();
+
+    fireEvent.click(screen.getByTestId('engrave-cut-next')); // 1 blank
+    fireEvent.click(screen.getByTestId('engrave-cut-next')); // 2 plan
+    fireEvent.click(screen.getByTestId('engrave-cut-next')); // 3 generate
+
+    const blocked = screen.getByTestId('engrave-cut-generate-blocked');
+    // The metric sentence, not the "see the Cut checklist" pointer.
+    expect(blocked.textContent).toContain('worst under-cut 0.0815');
+    expect(blocked.textContent).not.toContain('see the Cut checklist');
+  });
 });

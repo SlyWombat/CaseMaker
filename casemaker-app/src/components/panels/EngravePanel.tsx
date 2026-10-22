@@ -5,7 +5,7 @@ import { useEngraveJobFileStore } from '@/store/engraveJobFileStore';
 import { useProjectStore } from '@/store/projectStore';
 import { useEngravePreviewStore } from '@/store/engravePreviewStore';
 import { expandEngraveRow, useEngraveRowStore } from '@/store/engraveRowStore';
-import { useEngraveRunStore, requiredAckCodes, releaseBlocker, runErrorCodes, saveBlocker, uploadBlocker } from '@/store/engraveRunStore';
+import { useEngraveRunStore, oracleSentence, releaseBlocker, requiredAckCodes, runErrorCodes, saveBlocker, uploadBlocker, verifySimulateSentences } from '@/store/engraveRunStore';
 import { useMachineStore } from '@/store/machineStore';
 import { useSimStore } from '@/store/simStore';
 import { useCncModeStore } from '@/store/cncModeStore';
@@ -32,7 +32,6 @@ import {
 import type { LabelDepthRecommendation } from '@/engine/cnc/engrave/depthBounds';
 import { jobSplit } from '@/engine/cnc/engrave/depthIntent';
 import { EngraveCutWizard } from './EngraveCutWizard';
-import { ORACLE_AREA_FLOOR } from '@/engine/cnc/engrave/oracle';
 import { jobMachine } from '@/engine/cnc/calibration';
 import { useToolRegistry } from '@/hooks/useToolRegistry';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
@@ -1222,9 +1221,7 @@ export function EngravePanel(): JSX.Element {
 
   const verifyFindings = run.generated?.verify?.findings ?? [];
   const verifyErrors = verifyFindings.filter((f) => f.severity === 'error').length;
-  const verifyWarnings = verifyFindings.filter((f) => f.severity === 'warning').length;
   const simErrors = run.simDiagnostics.filter((d) => d.severity === 'error').length;
-  const simWarnings = run.simDiagnostics.filter((d) => d.severity === 'warning').length;
   const runErrors = runErrorCodes(run);
   const ackCodes = requiredAckCodes(run);
   const saveBlockerText = saveBlocker(run);
@@ -1290,37 +1287,13 @@ export function EngravePanel(): JSX.Element {
     : run.phase === 'generating'
       ? 'pending'
       : 'idle';
-  const rowVerifiedText = `Verified — ${
-    run.generated?.verify
-      ? `${verifyErrors} error${verifyErrors === 1 ? '' : 's'}, ${verifyWarnings} warning${verifyWarnings === 1 ? '' : 's'}`
-      : 'not verified yet'
-  }`;
+  const { verified: rowVerifiedText, simulated: rowSimulatedText } = verifySimulateSentences(run);
 
   const rowSimulated: RowState =
     run.simStatus === 'ready' ? (simErrors > 0 ? 'cross' : 'tick') : run.phase === 'simulating' ? 'pending' : run.simStatus ? 'cross' : 'idle';
-  const rowSimulatedText = `Simulated — ${
-    run.simStatus === 'ready'
-      ? `${simErrors} error${simErrors === 1 ? '' : 's'}, ${simWarnings} warning${simWarnings === 1 ? '' : 's'}`
-      : run.simStatus
-        ? `the simulation was ${run.simStatus}`
-        : 'not simulated yet'
-  }`;
 
   const rowOracle: RowState = run.oracle ? (run.oracle.ok ? 'tick' : 'cross') : run.phase === 'checking' ? 'pending' : 'idle';
-  // #580 — the resolution-aware floor the verdict used, falling back to the absolute sliver floor
-  // for a hand-built report or an exact-sweep run (no grid).
-  const oracleFloor = run.oracle?.areaFloor ?? ORACLE_AREA_FLOOR;
-  const rowOracleText = `Matches prediction — ${
-    run.oracle
-      ? run.oracle.ok
-        ? `under-cut ${run.oracle.worst.underCut.toFixed(4)} mm², over-cut ${run.oracle.worst.overCut.toFixed(4)} mm², both within the ${oracleFloor} mm² floor (tolerance ${run.oracle.band.toFixed(3)} mm)`
-        : run.oracle.worst.underCut > oracleFloor
-          ? `worst under-cut ${run.oracle.worst.underCut.toFixed(4)} mm² exceeds the ${oracleFloor} mm² floor by ${(run.oracle.worst.underCut - oracleFloor).toFixed(4)} mm² — the file left material the prediction removed (over-cut ${run.oracle.worst.overCut.toFixed(4)} mm²; tolerance ${run.oracle.band.toFixed(3)} mm)`
-          : `worst over-cut ${run.oracle.worst.overCut.toFixed(4)} mm² exceeds the ${oracleFloor} mm² floor by ${(run.oracle.worst.overCut - oracleFloor).toFixed(4)} mm² — the file cut outside the plan (under-cut ${run.oracle.worst.underCut.toFixed(4)} mm²; tolerance ${run.oracle.band.toFixed(3)} mm)`
-      : run.phase === 'checking' || run.phase === 'simulating'
-        ? 'checking…'
-        : 'not checked yet'
-  }`;
+  const rowOracleText = `Matches prediction — ${oracleSentence(run)}`;
 
   // #432 review R11 — a FACING job has a second program, and a withheld facing file must not be
   // invisible: Save writes one file fewer than the sheet says, and the sheet's own sentence is the

@@ -95,6 +95,44 @@ export function runErrorCodes(v: EngraveRunView): string[] {
 }
 
 /**
+ * The "Matches prediction" sentence body — the metric and the floor the verdict used (#576/#580).
+ * Shared by the panel's run row and the wizard's step-4 blocker (#582), so they cannot disagree.
+ */
+export function oracleSentence(v: EngraveRunView): string {
+  if (!v.oracle) return v.phase === 'checking' || v.phase === 'simulating' ? 'checking…' : 'not checked yet';
+  const floor = v.oracle.areaFloor ?? 1e-3; // #206 — the sliver floor; local so this module stays browser-free
+  if (v.oracle.ok) {
+    return `under-cut ${v.oracle.worst.underCut.toFixed(4)} mm², over-cut ${v.oracle.worst.overCut.toFixed(4)} mm², both within the ${floor} mm² floor (tolerance ${v.oracle.band.toFixed(3)} mm)`;
+  }
+  return v.oracle.worst.underCut > floor
+    ? `worst under-cut ${v.oracle.worst.underCut.toFixed(4)} mm² exceeds the ${floor} mm² floor by ${(v.oracle.worst.underCut - floor).toFixed(4)} mm² — the file left material the prediction removed (over-cut ${v.oracle.worst.overCut.toFixed(4)} mm²; tolerance ${v.oracle.band.toFixed(3)} mm)`
+    : `worst over-cut ${v.oracle.worst.overCut.toFixed(4)} mm² exceeds the ${floor} mm² floor by ${(v.oracle.worst.overCut - floor).toFixed(4)} mm² — the file cut outside the plan (under-cut ${v.oracle.worst.underCut.toFixed(4)} mm²; tolerance ${v.oracle.band.toFixed(3)} mm)`;
+}
+
+/** The "Verified" and "Simulated" sentence bodies, shared by the panel and the wizard (#582). */
+export function verifySimulateSentences(v: EngraveRunView): { verified: string; simulated: string } {
+  const verifyFindings = v.generated?.verify?.findings ?? [];
+  const verifyErrors = verifyFindings.filter((f) => f.severity === 'error').length;
+  const verifyWarnings = verifyFindings.filter((f) => f.severity === 'warning').length;
+  const simErrs = v.simDiagnostics.filter((d) => d.severity === 'error').length;
+  const simWarns = v.simDiagnostics.filter((d) => d.severity === 'warning').length;
+  return {
+    verified: `Verified — ${
+      v.generated?.verify
+        ? `${verifyErrors} error${verifyErrors === 1 ? '' : 's'}, ${verifyWarnings} warning${verifyWarnings === 1 ? '' : 's'}`
+        : 'not verified yet'
+    }`,
+    simulated: `Simulated — ${
+      v.simStatus === 'ready'
+        ? `${simErrs} error${simErrs === 1 ? '' : 's'}, ${simWarns} warning${simWarns === 1 ? '' : 's'}`
+        : v.simStatus
+          ? `the simulation was ${v.simStatus}`
+          : 'not simulated yet'
+    }`,
+  };
+}
+
+/**
  * Why Save is disabled, or null when it is allowed. Order matters: the first true reason is the
  * one the user should fix first.
  */

@@ -56,6 +56,8 @@ export {
   saveBlocker,
   uploadBlocker,
   releaseBlocker,
+  oracleSentence,
+  verifySimulateSentences,
 } from './engraveRunGate';
 export type { EngraveRunPhase, EngraveRunView } from './engraveRunGate';
 

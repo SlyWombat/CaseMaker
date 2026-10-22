@@ -16,7 +16,7 @@
 
 import { useEffect, useRef, useState, type CSSProperties, type JSX } from 'react';
 import { useEngraveJobStore } from '@/store/engraveJobStore';
-import { useEngraveRunStore } from '@/store/engraveRunStore';
+import { oracleSentence, useEngraveRunStore, verifySimulateSentences } from '@/store/engraveRunStore';
 import { useEngravePackageStore } from '@/store/engravePackageStore';
 import { useMachineStore } from '@/store/machineStore';
 import { useFirstRegistration } from '@/store/engraveRegistrationStore';
@@ -46,6 +46,7 @@ export function EngraveCutWizard(): JSX.Element {
   const generated = useEngraveRunStore((s) => s.generated);
   const oracle = useEngraveRunStore((s) => s.oracle);
   const generate = useEngraveRunStore((s) => s.generate);
+  const run = useEngraveRunStore();
   const freeze = useEngravePackageStore((s) => s.freeze);
   const pkg = useEngravePackageStore((s) => s.packageFor(job.id));
 
@@ -81,6 +82,9 @@ export function EngraveCutWizard(): JSX.Element {
   const planApproved = job.setups !== undefined && job.setups[0]?.registration?.plan !== undefined;
   const oracleChecking = generated !== null && oracle === null;
   const generatedOk = generated !== null && oracle !== null && oracle.ok;
+  // #582 — the step names the blocker inline, reusing the panel's run-row sentences.
+  const { verified: verifyText, simulated: simulateText } = verifySimulateSentences(run);
+  const oracleText = oracleSentence(run);
   const frozen = pkg !== null;
   const registered = firstReg !== null && firstReg.outcome.usable === true;
   const gates: boolean[] = [machineReady, cutterOk, planApproved, generatedOk, frozen, registered, false];
@@ -143,7 +147,11 @@ export function EngraveCutWizard(): JSX.Element {
             {oracleChecking && <p data-testid="engrave-cut-generate-checking" style={MUTED}>Checking the simulation…</p>}
             {generatedOk && <p data-testid="engrave-cut-generate-ok" style={{ color: '#a3e4a0' }}>Generated ✓ Verified ✓ Simulated ✓ Matches ✓</p>}
             {generated !== null && !generatedOk && !oracleChecking && (
-              <p data-testid="engrave-cut-generate-blocked" style={{ color: '#f0b4ad' }}>The program is not ready to freeze — see the Cut checklist for what is blocking it.</p>
+              <div data-testid="engrave-cut-generate-blocked" style={{ color: '#f0b4ad' }}>
+                <p style={{ margin: 0 }}>{verifyText}</p>
+                <p style={{ margin: 0 }}>{simulateText}</p>
+                <p style={{ margin: 0 }}>Matches prediction — {oracleText}</p>
+              </div>
             )}
           </div>
         )}
