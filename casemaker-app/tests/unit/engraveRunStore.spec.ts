@@ -7,6 +7,7 @@ import { join } from 'node:path';
 
 import * as store from '@/store/engraveRunStore';
 import * as gate from '@/store/engraveRunGate';
+import { ORACLE_AREA_FLOOR } from '@/engine/cnc/engrave/oracle';
 import {
   useEngraveRunStore,
   setEngraveRunClientLoader,
@@ -101,6 +102,10 @@ describe('engraveRunStore (#206)', () => {
 
   it('refuses Save before anything is generated', () => {
     expect(saveBlocker(view())).toBe('Generate first.');
+  });
+
+  it('oracleSentence falls back to ORACLE_AREA_FLOOR when the report omits the floor (#582)', () => {
+    expect(gate.oracleSentence(view({ oracle: { ok: false, band: 0, levels: [], worst: { underCut: 0.002, overCut: 0 } } }))).toContain(`${ORACLE_AREA_FLOOR} mm² floor`);
   });
 
   it('requires acknowledgement for the named warning codes only', () => {

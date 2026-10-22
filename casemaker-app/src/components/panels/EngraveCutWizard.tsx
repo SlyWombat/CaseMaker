@@ -41,6 +41,7 @@ function stockCutterSignature(job: ReturnType<typeof useEngraveJobStore.getState
 export function EngraveCutWizard(): JSX.Element {
   const job = useEngraveJobStore((s) => s.job);
   const setSetups = useEngraveJobStore((s) => s.setSetups);
+  const setMetalLineOverride = useEngraveJobStore((s) => s.setMetalLineOverride);
   const machine = useMachineStore((s) => s.machine);
   const staleSince = useEngraveRunStore((s) => s.staleSince);
   const generated = useEngraveRunStore((s) => s.generated);
@@ -51,6 +52,8 @@ export function EngraveCutWizard(): JSX.Element {
   const pkg = useEngravePackageStore((s) => s.packageFor(job.id));
 
   const [cursor, setCursor] = useState(0);
+  // #583 — the double-confirm state for the inline cutter override (F3).
+  const [confirmMetalOverride, setConfirmMetalOverride] = useState(false);
   const tool = jobTool(job);
   const target = machine === null ? null : { host: machine.host, port: machine.port };
   const firstReg = useFirstRegistration(job.id, target);
@@ -123,10 +126,25 @@ export function EngraveCutWizard(): JSX.Element {
               {tool === null ? 'No cutter chosen' : tool.name}
             </p>
             {!cutterOk && (
-              <p style={{ color: '#f0b4ad' }} data-testid="engrave-cut-wizard-cutter-refused">
-                {tool !== null ? `"${tool.name}" is on Makera's "for Metal" line, and this job cuts ${MATERIAL_LABELS[job.stock.material]}.` : 'Choose a cutter.'}{' '}
-                Pick another cutter in the Design tab, or use the override there.
-              </p>
+              <div style={{ color: '#f0b4ad' }} data-testid="engrave-cut-wizard-cutter-refused">
+                <p style={{ margin: 0 }}>
+                  {tool !== null ? `"${tool.name}" is on Makera's "for Metal" line, and this job cuts ${MATERIAL_LABELS[job.stock.material]}.` : 'Choose a cutter.'}
+                </p>
+                {!confirmMetalOverride ? (
+                  <button type="button" data-testid="engrave-cut-wizard-use-anyway" onClick={() => setConfirmMetalOverride(true)}>
+                    Use this cutter anyway
+                  </button>
+                ) : (
+                  <>
+                    <p style={{ margin: 0 }}>
+                      This bit is ground and coated for metal; on this material it can chip or snap, and no feed row was written for it — feeds/speeds are a guess.
+                    </p>
+                    <button type="button" data-testid="engrave-cut-wizard-confirm" onClick={() => { setMetalLineOverride(true); setConfirmMetalOverride(false); }}>
+                      I understand the bit may break
+                    </button>
+                  </>
+                )}
+              </div>
             )}
           </div>
         )}
