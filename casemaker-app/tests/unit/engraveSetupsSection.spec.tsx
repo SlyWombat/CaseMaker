@@ -273,13 +273,39 @@ describe('#471 registration — planned only after approval, refused with the en
     expect(screen.getByTestId('engrave-setup-reg-approved-1')).toBeTruthy();
   });
 
-  it('asks for the seat instead of inventing one', () => {
-    act(() => useEngraveJobStore.setState({ job: savedJob() }));
+  it('asks for the seat instead of inventing one (a custom, non-Z1 vise)', () => {
+    const job = savedJob();
+    job.workholding.vise.source = 'saved';
+    act(() => useEngraveJobStore.setState({ job }));
     render(<EngraveSetupsSection />);
     fireEvent.click(screen.getByTestId('engrave-setup-expand-1'));
     fireEvent.click(screen.getByTestId('engrave-setup-plan-reg-1'));
     expect(screen.getByTestId('engrave-setup-reg-need-seat-1').textContent).toContain('Enter the seat’s machine Z');
     expect(useEngraveJobStore.getState().job.setups![0]!.registration).toBeUndefined();
+  });
+
+  it('defaults the vise seat to the shipped Z1 vise’s provisional aim (−55) and plans without a typed Z', () => {
+    act(() => useEngraveJobStore.setState({ job: savedJob() }));
+    render(<EngraveSetupsSection />);
+    fireEvent.click(screen.getByTestId('engrave-setup-expand-1'));
+
+    const seat = screen.getByTestId('engrave-setup-seat-1') as HTMLInputElement;
+    expect(seat.value).toBe('-55');
+
+    // It is an aim, not a stored reading: planning works with no typed value, and nothing is
+    // written until Approve.
+    fireEvent.click(screen.getByTestId('engrave-setup-plan-reg-1'));
+    expect(screen.getByTestId('engrave-setup-reg-summary-1').textContent).toContain('Home, fit the wired probe');
+    expect(useEngraveJobStore.getState().job.setups![0]!.registration).toBeUndefined();
+  });
+
+  it('leaves the seat empty for a measured/custom vise so the operator still types the probe reading', () => {
+    const job = savedJob();
+    job.workholding.vise.source = 'measured';
+    act(() => useEngraveJobStore.setState({ job }));
+    render(<EngraveSetupsSection />);
+    fireEvent.click(screen.getByTestId('engrave-setup-expand-1'));
+    expect((screen.getByTestId('engrave-setup-seat-1') as HTMLInputElement).value).toBe('');
   });
 
   it('a bracket refuses without a measured seat, then plans once the setting exists', () => {

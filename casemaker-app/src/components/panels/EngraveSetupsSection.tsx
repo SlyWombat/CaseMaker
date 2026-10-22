@@ -486,6 +486,7 @@ export function EngraveSetupsSection(): JSX.Element {
               candidateItems={candidates}
               tools={tools}
               mountKinds={setup.mount.kind === 'tape' ? ['vise', 'bracket', 'tape'] : ['vise', 'bracket']}
+              viseSource={job.workholding.vise.source}
               facingPass={index === 0 && job.facing?.enabled === true}
               notice={notice?.index === index ? notice.reason : null}
               remountMinutes={settings.remountMinutes}

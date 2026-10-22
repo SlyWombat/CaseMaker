@@ -21,7 +21,8 @@ import { expandEngraveRow } from '@/store/engraveRowStore';
 import type { RegistrationPlan } from '@/engine/cnc/registration/plan';
 import { FACES, type Face, type Mount, type MountSpec, type Setup } from '@/engine/cnc/setups';
 import type { SetupAuthoringFinding, SetupItemsReading } from '@/engine/cnc/setups';
-import type { JobSetup } from '@/types/engraveJob';
+import { VISE_SEAT_MACHINE_Z } from '@/engine/cnc/fixture';
+import type { JobSetup, ViseParams } from '@/types/engraveJob';
 
 const MUTED: CSSProperties = { fontSize: 11, color: '#9aa4b0', lineHeight: 1.5, margin: '4px 0' };
 const FIELD_LABEL: CSSProperties = { display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, margin: '4px 0' };
@@ -60,6 +61,8 @@ export interface EngraveSetupRowProps {
   tools: readonly ToolLibraryEntry[];
   /** Vise and bracket; tape only when the saved setup already carries it. */
   mountKinds: readonly Mount[];
+  /** The job's vise provenance: `'default'` is the shipped Z1 vise; a custom fixture is `saved`/`measured`. */
+  viseSource: ViseParams['source'];
   /** Setup 1 names the facing pass when the job enables one. */
   facingPass: boolean;
   /** A refused orientation/mount change, in the engine's words. */
@@ -115,7 +118,18 @@ export function EngraveSetupRow(props: EngraveSetupRowProps): JSX.Element {
   const { index, setup, derived, reading, editable, findings } = props;
   const n = index + 1;
   const [open, setOpen] = useState(false);
-  const [seatZ, setSeatZ] = useState('');
+  // The shipped Z1 vise carries a known provisional seat aim (#559); a custom/measured fixture
+  // does not, so its field stays empty and the operator types the probe reading as before.
+  const shippedZ1Vise = setup.mount.kind === 'vise' && props.viseSource === 'default';
+  const [seatZ, setSeatZ] = useState(shippedZ1Vise ? String(VISE_SEAT_MACHINE_Z) : '');
+  // The field says where its aim came from: a default is an AIM, not a reading, and the probe still
+  // writes the true Z — so a shipped-vise default and a typed custom reading must read differently.
+  const seatTitle = shippedZ1Vise
+    ? `The Z1’s provisional vise-seat aim (${VISE_SEAT_MACHINE_Z} mm); the probe still measures the true Z. Override for a non-standard setup.`
+    : 'The machine Z of the surface the stock sits on — measured with one probe touch, never assumed.';
+  const seatHint = shippedZ1Vise
+    ? 'the Z1 vise’s provisional seat aim — the probe still measures the true Z; override for a non-standard setup'
+    : 'the measured surface under the stock; the section invents no number';
   const [preview, setPreview] = useState<{ for: string; value: RegistrationAttempt } | null>(null);
 
   // A plan is a statement about ONE mount and one item list. Change either and it stops describing
@@ -339,14 +353,14 @@ export function EngraveSetupRow(props: EngraveSetupRowProps): JSX.Element {
                         style={FIELD}
                         data-testid={`engrave-setup-seat-${n}`}
                         aria-label={`Setup ${n} seat machine Z`}
-                        title="The machine Z of the surface the stock sits on — measured with one probe touch, never assumed."
+                        title={seatTitle}
                         onChange={(e) => {
                           setSeatZ(e.target.value);
                           setPreview(null);
                         }}
                       />
                       <span style={{ ...MUTED, margin: 0 }}>
-                        the measured surface under the stock; the section invents no number
+                        {seatHint}
                       </span>
                     </label>
                   )}

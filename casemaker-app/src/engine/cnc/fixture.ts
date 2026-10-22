@@ -401,6 +401,19 @@ export const VISE_BED_THICKNESS: Mm = 10;
 export const VISE_BED_HOLE_PITCH: Mm = 20;
 
 /**
+ * The machine Z of the blank's underside when the blank is seated in the Z1 low-profile vise —
+ * the registration planner's AIM for the vise seat (#559): the `engrave-setup-seat-N` field's
+ * default for the shipped Z1 vise, so `Plan registration` works with no hand-typed machine Z.
+ * The probe still measures and writes the true surface (`probePlan.ts`), and the field stays an
+ * operator's override for a non-standard setup.
+ *
+ * PROVISIONAL — ~25 mm above the bed (bed top −80) from the 2026-10-19 bench visual; to be
+ * calipered (#444). The picture-only heights (VISE_BAR_HEIGHT 20 + VISE_BODY_DEPTH 20 +
+ * VISE_BED_THICKNESS 10) over-estimate the real vise height and must NOT be composed here.
+ */
+export const VISE_SEAT_MACHINE_Z: Mm = -55;
+
+/**
  * The vise as the preview DRAWS it, as it actually looks (#520): two stepped soft jaws — a 10 mm
  * land and a 1.9 mm ledge set 3.1 mm below the top (the #208 calipers) — two rails beneath them
  * (the PROVISIONAL 20 mm rail height), the screws the operator counts ("screw 2" is the moving
