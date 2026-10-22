@@ -31,6 +31,7 @@ import {
 } from '@/engine/cnc/engrave/depthBounds';
 import type { LabelDepthRecommendation } from '@/engine/cnc/engrave/depthBounds';
 import { jobSplit } from '@/engine/cnc/engrave/depthIntent';
+import { ORACLE_AREA_FLOOR } from '@/engine/cnc/engrave/oracle';
 import { jobMachine } from '@/engine/cnc/calibration';
 import { useToolRegistry } from '@/hooks/useToolRegistry';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
@@ -1305,7 +1306,11 @@ export function EngravePanel(): JSX.Element {
   const rowOracle: RowState = run.oracle ? (run.oracle.ok ? 'tick' : 'cross') : run.phase === 'checking' ? 'pending' : 'idle';
   const rowOracleText = `Matches prediction — ${
     run.oracle
-      ? `worst under-cut ${run.oracle.worst.underCut.toFixed(4)} mm², over-cut ${run.oracle.worst.overCut.toFixed(4)} mm² (band ${run.oracle.band.toFixed(3)} mm)`
+      ? run.oracle.ok
+        ? `under-cut ${run.oracle.worst.underCut.toFixed(4)} mm², over-cut ${run.oracle.worst.overCut.toFixed(4)} mm², both within the ${ORACLE_AREA_FLOOR} mm² floor (tolerance ${run.oracle.band.toFixed(3)} mm)`
+        : run.oracle.worst.underCut > ORACLE_AREA_FLOOR
+          ? `worst under-cut ${run.oracle.worst.underCut.toFixed(4)} mm² exceeds the ${ORACLE_AREA_FLOOR} mm² floor by ${(run.oracle.worst.underCut - ORACLE_AREA_FLOOR).toFixed(4)} mm² — the file left material the prediction removed (over-cut ${run.oracle.worst.overCut.toFixed(4)} mm²; tolerance ${run.oracle.band.toFixed(3)} mm)`
+          : `worst over-cut ${run.oracle.worst.overCut.toFixed(4)} mm² exceeds the ${ORACLE_AREA_FLOOR} mm² floor by ${(run.oracle.worst.overCut - ORACLE_AREA_FLOOR).toFixed(4)} mm² — the file cut outside the plan (under-cut ${run.oracle.worst.underCut.toFixed(4)} mm²; tolerance ${run.oracle.band.toFixed(3)} mm)`
       : 'not checked yet'
   }`;
 
