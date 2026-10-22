@@ -75,6 +75,17 @@ function fingerprintView(job: EngraveJob): unknown {
   const view: Record<string, unknown> = { ...job };
   delete view.package;
   delete view.runLog;
+  // #574 — the registration plan (setups[*].registration) is the PROBE choreography, not the
+  // cutting program. Approving it after Generate must stale the frozen package but NOT the
+  // Generate (the .nc is unchanged), so the Cut screen can offer a re-freeze in place. Strip it
+  // from the program fingerprint; `packageStaleness` compares the stored setups separately.
+  if (Array.isArray(view.setups)) {
+    view.setups = view.setups.map((setup) => {
+      const withoutRegistration: Record<string, unknown> = { ...(setup as Record<string, unknown>) };
+      delete withoutRegistration.registration;
+      return withoutRegistration;
+    });
+  }
   const sourceFiles = view.sourceFiles;
   if (Array.isArray(sourceFiles)) {
     view.sourceFiles = sourceFiles.map((source: { embedded?: unknown } & Record<string, unknown>) => {
@@ -154,7 +165,19 @@ export function packageStaleness(pkg: FrozenPackage, job: EngraveJob): PackageSt
   if (jobFingerprint(job) !== pkg.jobHash) {
     return { stale: true, reason: 'the job changed since the package was frozen' };
   }
+  // #574 — the registration plan is NOT in the program fingerprint (it does not change the .nc),
+  // but it IS in the stored setups: a plan approved after the freeze stales the package, and the
+  // reason names it so the Cut screen can offer a re-freeze rather than a re-generate.
+  if (!sameRegistration(pkg.setups, jobSetups(job))) {
+    return { stale: true, reason: 'the registration plan changed since the package was frozen' };
+  }
   return { stale: false, reason: null };
+}
+
+/** Whether two setup lists carry the SAME registration plans, by value — the #574 package-only half. */
+function sameRegistration(stored: readonly { registration?: unknown }[], current: readonly { registration?: unknown }[]): boolean {
+  const regs = (setups: readonly { registration?: unknown }[]) => canonicalJson(setups.map((s) => s.registration ?? null));
+  return regs(stored) === regs(current);
 }
 
 /** Why a stored package cannot be trusted, or null when every saved text is the approved one. */
