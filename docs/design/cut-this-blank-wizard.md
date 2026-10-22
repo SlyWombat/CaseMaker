@@ -141,19 +141,32 @@ machine Online
 ## 4. What changes in the code
 
 This is an **orchestration layer**, not new engine. One component (working name
-`EngraveCutWizard`, opened from the Engrave text panel) drives the existing stores/actions:
+`EngraveCutWizard`, opened from the Engrave text panel) owns the order, the gates and
+reset-forward; it does not re-implement any step. Steps split into two kinds (the implementing
+peer's read of the code, 2026-10-22 — the first draft of this section called them all "store
+actions", which three of them are not):
 
-- step 1: the machine connect/identify/status path the Machines card uses;
+**Driven through existing store actions** (the wizard calls them directly):
 - step 2: the cutter choice (`setTool`), the recommended cutter, `setMetalLineOverride` (#572),
   `metalLineFindings` for the check;
-- step 3: the per-setup plan + approve that `EngraveSetupRow` calls (`planRegistration` →
-  the setup's stored plan);
-- step 4: the generate action and its verify/simulate/match results (`engrave-generate-slot`);
-- step 5: the package freeze;
-- step 6: `runRegistration` / `applyCorrection` through the registration store, with the operator
-  callbacks bound to the wizard's at-machine tick and fit-cutter confirm; the G54 pre-flight via
-  `workOffset`;
-- step 7: upload + verify + play, the dry-run option.
+- step 4: `useEngraveRunStore.generate()` and its `generated` result (verify / simulate / match);
+- step 5: `engravePackageStore.freeze(job, programs)`;
+- step 7: `engraveReleaseStore` — plan, uploadAll, startRelease, answerOperator, setAtMachine; the
+  dry-run option.
+
+**Mounted existing components** (decision (a), v1 — these flows live in components, not stores):
+- step 1: the machine connect / identify / status surface (`EngraveMachineRun.tsx` + the Machines
+  card's `attachConsole` / `machineBridge` path) — mount the machine-card portion;
+- step 3: `EngraveSetupRow`'s per-setup plan + approve (`planRegistration` → written to
+  `job.setups[0].registration.plan`);
+- step 6: `EngraveRegistrationStep.tsx` whole — it already carries the operator prompts, the
+  transcript streaming, the surface spread and the G54 pre-flight (`workOffset`); the wizard binds its
+  at-machine tick and fit-cutter confirm to that component's operator callbacks.
+
+The alternative — extracting `useMachineConnect` / `useRegistrationRun` hooks from those three
+components so the wizard drives hook actions — is the cleaner shape but edits three existing
+components; it is the refactor to do **after** the flow has proven itself on the bench, not in this
+build. Embedded components looking heavy inside a stepper is accepted for v1.
 
 The Design/Cut panels and the Setups accordion **stay** as the expert path and keep working
 unchanged; the wizard reads and writes the same job document, so a job started in the wizard can be
