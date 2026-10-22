@@ -37,11 +37,11 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 import { createNodeTransport } from './transport.node.mjs';
 import * as P from '../../src/platform/desktop/protocol.ts';
-import { CAMERA_PORT, captureFrames, saveFrame } from './camera.mjs';
+import { CAMERA_PORT, captureFrames, replayTimelapse, saveFrame } from './camera.mjs';
 import { BENCH_DEFAULTS, describeBenchDefaults, readBenchDefaults } from './benchDefaults.mjs';
 
 /** Flags that never take a value. Without this, `--effective <key>` swallows the key as its value. */
-const BOOLEAN_FLAGS = new Set(['json', 'help', 'effective', 'i-am-at-the-machine', 'all', 'sh']);
+const BOOLEAN_FLAGS = new Set(['json', 'help', 'effective', 'i-am-at-the-machine', 'all', 'sh', 'reconnect']);
 
 /**
  * `run`'s own reply windows (#386 review), which are not a console line's.
@@ -96,7 +96,8 @@ function usage() {
   node tools/z1/z1.mjs read     <host> <path> [--limit <lines>] [--window <ms>] [--out <file>]
   node tools/z1/z1.mjs md5      <host> <path> [<path> ...] [--window <ms>] [--json]
   node tools/z1/z1.mjs config   <host> <key> [<key> ...] [--source <name>] [--effective] [--json]
-  node tools/z1/z1.mjs camera   <host> [--out <file-or-dir>] [--count <n>] [--every <ms>] [--skip <n>] [--port <n>]
+  node tools/z1/z1.mjs camera   <host> [--out <file-or-dir>] [--count <n>] [--every <ms>] [--skip <n>] [--reconnect [--max <ms>] [--idle <ms>]] [--port <n>]
+  node tools/z1/z1.mjs timelapse <host> <path-on-module> [--out <dir>] [--max <ms>] [--from <n>] [--port <n>]
   node tools/z1/z1.mjs defaults [<key> ...] [--location <file>|none] [--json] [--sh]
 
 \`defaults\` (#449) prints the shop defaults the bench tools use — \`run.*\`, \`stop.*\` and \`power.*\` from
@@ -124,6 +125,15 @@ configuration keys and nothing else.
 see camera.mjs). One frame to --out (default docs/bench/img/camera-<timestamp>.jpg); with --count N
 the frames go into --out as a directory, --every <ms> apart. It moves nothing and writes nothing on
 the machine. A frame before and after a move is the cheapest answer to A6 (head- or frame-mounted).
+The LIVE stream STALLS when the machine is busy (a probe starves it after ~4 frames); \`--reconnect\`
+survives that the way Studio does — on a stall (no frame within --idle ms, default 8000) or a drop it
+reopens and keeps going until --count or the --max ms time-box, so a capture can span a whole probe.
+
+\`timelapse\` replays the frames the module RECORDED for one job, by that job's G-code path on the
+module's SD card (not the live view — the module stores a job's frames and plays them back). Frames go
+into --out as a directory; --from <n> starts at a frame index, --max caps the pull (ms). A READ: moves
+and writes nothing. Protocol decoded from Makera Studio (docs/reverse/makera-studio/04-camera.md),
+bench-verification pending.
 
 \`discover --all\` prints **every** datagram received in the window, un-de-duplicated and with nothing
 dropped, each line led by the time it ARRIVED at this listener (ISO, UTC — receipt, never the
@@ -329,24 +339,62 @@ async function main() {
     const everyMs = num(flags.every, 0);
     // The module replays its LAST frame to a new client first (camera.mjs); skip it by default.
     const skip = num(flags.skip, 3);
+    // --reconnect keeps a capture alive across a probe's stream stalls (the way Studio does); --max
+    // caps the whole capture in ms (a time-box), --idle sets the per-connection stall timeout.
+    const reconnect = flags.reconnect === true;
+    const maxMs = num(flags.max, Infinity);
+    const idleMs = num(flags.idle, 8000);
     const stamp = new Date().toISOString().replace(/[:.]/g, '-');
     const here = dirname(fileURLToPath(import.meta.url));
     const defaultOut = resolve(here, '..', '..', '..', 'docs', 'bench', 'img', count === 1 ? `camera-${stamp}.jpg` : `camera-${stamp}`);
     const out = typeof flags.out === 'string' ? resolve(flags.out) : defaultOut;
-    process.stderr.write(`camera: ${count} frame(s) from ws://${host}:${num(flags.port, CAMERA_PORT)}/ws_video — no motion, no write on the machine...\n`);
+    process.stderr.write(`camera: ${count} frame(s) from ws://${host}:${num(flags.port, CAMERA_PORT)}/ws_video${reconnect ? ' (reconnect)' : ''} — no motion, no write on the machine...\n`);
     const result = await captureFrames({
       host,
       port: num(flags.port, CAMERA_PORT),
       count,
       everyMs,
       skip,
+      reconnect,
+      maxMs,
+      idleMs,
+      onEvent: (msg) => process.stderr.write(`camera: ${msg}\n`),
       onFrame: (jpeg, n) => {
         const path = count === 1 ? out : resolve(out, `frame-${String(n).padStart(4, '0')}.jpg`);
         saveFrame(path, jpeg);
         console.log(`${path}  ${jpeg.length} bytes`);
       },
     });
-    process.stderr.write(`${result.frames} frame(s) saved.\n`);
+    process.stderr.write(`${result.frames} frame(s) saved${result.reconnects ? ` across ${result.reconnects} reconnect(s)` : ''}.\n`);
+    return;
+  }
+
+  // Time-lapse replay: pull the frames the module recorded for one job, by its G-code path on the
+  // module's SD card. A READ — moves nothing. Protocol is decoded from the vendor binary, bench-TBD.
+  if (cmd === 'timelapse') {
+    const jobPath = positional[2];
+    if (jobPath === undefined) {
+      console.error('timelapse needs the job\'s G-code path on the module: z1.mjs timelapse <host> <path-on-module> [--out <dir>] [--max <ms>] [--from <n>]');
+      process.exit(2);
+    }
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const here = dirname(fileURLToPath(import.meta.url));
+    const out = typeof flags.out === 'string' ? resolve(flags.out) : resolve(here, '..', '..', '..', 'docs', 'bench', 'img', `timelapse-${stamp}`);
+    process.stderr.write(`timelapse: replaying ${jobPath} from ws://${host}:${num(flags.port, CAMERA_PORT)}/ws_video — no motion, no write on the machine...\n`);
+    const result = await replayTimelapse({
+      host,
+      port: num(flags.port, CAMERA_PORT),
+      path: jobPath,
+      fromFrame: flags.from !== undefined ? num(flags.from, 0) : null,
+      maxMs: num(flags.max, 120000),
+      onEvent: (msg) => process.stderr.write(`timelapse: ${msg}\n`),
+      onFrame: (jpeg, n) => {
+        const path = resolve(out, `frame-${String(n).padStart(4, '0')}.jpg`);
+        saveFrame(path, jpeg);
+        console.log(`${path}  ${jpeg.length} bytes`);
+      },
+    });
+    process.stderr.write(`timelapse: ${result.frames}/${result.total ?? '?'} frame(s) saved (frame_period_us=${result.frame_period_us ?? '?'}).\n`);
     return;
   }
 
@@ -870,6 +918,12 @@ async function main() {
       }
       console.log(`status ok: ${st.ok}`);
       console.log(`text     : ${st.text === null ? '(no reply)' : JSON.stringify(st.text)}`);
+      if (st.text !== null) {
+        const off = P.workOffset(P.readStatusLine(st.text));
+        const mm = (v) => (v === null ? '—' : v.toFixed(3));
+        console.log(`G54 x/y  : X ${mm(off.x)}  Y ${mm(off.y)}   (MPos − WPos)`);
+        console.log(`G54 z    : Z ${mm(off.z)}   (MPos − WPos; carries the tool-length offset — M499 reads it)`);
+      }
       if (st.diagnostics.length > 0) {
         console.log('diagnostics:');
         for (const d of st.diagnostics) console.log(`  ${JSON.stringify(d)}`);
