@@ -1311,6 +1311,13 @@ export interface EngraveJob {
    */
   cutOverride?: Partial<CutParams>;
   /**
+   * #572 — the operator explicitly acknowledged a refused cutter/material pair (a "for Metal" line
+   * on a non-metal stock, `tool-metal-line`). The refusal downgrades to a warning and Generate
+   * unblocks; feeds/speeds are then a guess, not a vendor-measured number. Absent = the protective
+   * refusal stands. Per-job only, never a shop default.
+   */
+  metalLineOverride?: boolean;
+  /**
    * Whether the job FACES the stock first, and how deep (#432) — a skim over the whole top so Z0
    * lands on a cut surface rather than on whatever the blank arrived as.
    *

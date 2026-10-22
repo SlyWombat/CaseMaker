@@ -142,6 +142,35 @@ describe('EngravePanel (#205)', () => {
     expect(screen.getByTestId('engrave-thin-strokes').textContent).toContain('3.175 mm');
   });
 
+  it('overrides a refused metal-line cutter behind a double confirm (#572)', () => {
+    // The finding is worker-only, so this jsdom harness injects it through the preview store —
+    // the same shape the worker's `engraveRegions` returns. The affordance must demand TWO clicks,
+    // and only the second records the override on the job.
+    const preview = {
+      colourBoundaryDepth: null,
+      recommendation: null,
+      findings: [
+        {
+          severity: 'error',
+          code: 'tool-metal-line',
+          message: '"Engraving V-bit 30 x 0.5 (Metal)" is on Makera\'s "for Metal" line, and this job cuts Softwood.',
+        },
+      ],
+    } as unknown as EngravePreview;
+
+    act(() => {
+      useEngravePreviewStore.setState({ preview, status: 'ready' });
+    });
+    render(<EngravePanel />);
+
+    expect(screen.getByTestId('metal-line-use-anyway')).toBeTruthy();
+    fireEvent.click(screen.getByTestId('metal-line-use-anyway'));
+    // The first click only warns; the override is not yet recorded.
+    expect(useEngraveJobStore.getState().job.metalLineOverride).toBeUndefined();
+    fireEvent.click(screen.getByTestId('metal-line-confirm'));
+    expect(useEngraveJobStore.getState().job.metalLineOverride).toBe(true);
+  });
+
   it('changes the vise badge from the shipped set once the vise is saved', () => {
     render(<EngravePanel />);
     // "shipped · reference unit", not "unmeasured": the numbers ARE measured — once, on the unit

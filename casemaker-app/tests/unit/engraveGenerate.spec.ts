@@ -1200,6 +1200,23 @@ describe('a V-bit trace job (#405)', () => {
     expect(refusal!.message).toContain('PLA');
   });
 
+  it('downgrades the metal-line refusal to a warning and unblocks when overridden (#572)', () => {
+    // The override is a per-job, double-confirmed escape hatch: the finding stays, but as an
+    // acknowledged warning, so Generate proceeds past the findings stage. The SAME cutter without
+    // the override is still refused — the protective default does not move.
+    const metal = bit30({ name: 'Engraving V-bit 30 x 0.5 (Metal)', tipDiameter: 0.5, diameter: 3.175 });
+    const overridden = generate(tl, traceJob([title()], { tool: metal, metalLineOverride: true }));
+    expect(overridden.ok).toBe(true);
+    const finding = overridden.findings.find((f) => f.code === 'tool-metal-line');
+    expect(finding).toBeDefined();
+    expect(finding!.severity).toBe('warning');
+    expect(finding!.message).toContain('chosen despite the material mismatch');
+
+    const refused = generate(tl, traceJob([title()], { tool: metal }));
+    expect(refused.ok).toBe(false);
+    expect(refused.findings.find((f) => f.code === 'tool-metal-line')!.severity).toBe('error');
+  });
+
   it('refuses a metal-line V-bit named by its BOX CODE too — the `-M-` segment', () => {
     // `C1-BIT-ENGRAVE-M-60-0.1` states the line in its code as well as in its name: the code is the
     // half that survives a renamed or shortened cutter, and a job carrying a code files it as the

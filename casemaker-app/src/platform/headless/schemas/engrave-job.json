@@ -1063,6 +1063,10 @@
       ],
       "type": "object"
     },
+    "metalLineOverride": {
+      "description": "The operator acknowledged a refused cutter/material pair; downgrades the refusal to a warning.",
+      "type": "boolean"
+    },
     "minFloor": {
       "description": "Minimum allowed distance from the blank's bottom face to a floor, in millimetres.",
       "minimum": 0,

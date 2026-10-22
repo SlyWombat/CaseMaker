@@ -696,6 +696,9 @@ export function EngravePanel(): JSX.Element {
   const removeVector = useEngraveJobStore((s) => s.removeVector);
   const setTool = useEngraveJobStore((s) => s.setTool);
   const setVise = useEngraveJobStore((s) => s.setVise);
+  const setMetalLineOverride = useEngraveJobStore((s) => s.setMetalLineOverride);
+  // #572 — the double-confirm state for the cutter/material override affordance.
+  const [confirmMetalOverride, setConfirmMetalOverride] = useState(false);
   const setSacrificial = useEngraveJobStore((s) => s.setSacrificial);
   const setCutOverride = useEngraveJobStore((s) => s.setCutOverride);
   const setCutOverrideSource = useEngraveJobStore((s) => s.setCutOverrideSource);
@@ -2958,6 +2961,29 @@ export function EngravePanel(): JSX.Element {
                 >
                   <span style={{ color: SEVERITY_COLOR[f.severity], flexShrink: 0 }}>●</span>
                   <span>{f.message}</span>
+                  {f.code === 'tool-metal-line' && f.severity === 'error' && (
+                    <span style={{ flexShrink: 0, marginLeft: 'auto', display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
+                      {!confirmMetalOverride ? (
+                        <button type="button" data-testid="metal-line-use-anyway" onClick={() => setConfirmMetalOverride(true)}>
+                          Use this cutter anyway
+                        </button>
+                      ) : (
+                        <>
+                          <span style={{ color: '#f0b4ad' }}>
+                            This bit is ground and coated for metal; on this material it can chip or snap, and no feed row was written for it — feeds/speeds are a guess.
+                          </span>
+                          <button type="button" data-testid="metal-line-confirm" onClick={() => { setMetalLineOverride(true); setConfirmMetalOverride(false); }}>
+                            I understand the bit may break
+                          </button>
+                        </>
+                      )}
+                    </span>
+                  )}
+                  {f.code === 'tool-metal-line' && f.severity === 'warning' && (
+                    <span style={{ flexShrink: 0, marginLeft: 'auto', color: SEVERITY_COLOR.warning }} data-testid="metal-line-override-active">
+                      override active
+                    </span>
+                  )}
                 </div>
               ))}
             </div>

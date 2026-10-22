@@ -1585,6 +1585,12 @@ const engraveJobV2Schema = engraveJobV1Schema.extend({
   cutOverride: cutOverrideSchema
     .optional()
     .describe("The user's hand edits to feeds and speeds; omit to use the computed values."),
+  // #572's cutter/material override. OPTIONAL, not defaulted: an absent key means the refusal stands,
+  // which is what every job written before the field existed carries.
+  metalLineOverride: z
+    .boolean()
+    .optional()
+    .describe('The operator acknowledged a refused cutter/material pair; downgrades the refusal to a warning.'),
   // #432's facing choice. OPTIONAL, not defaulted, for the byte-for-byte reason every list below
   // gives: an absent key means the job does not face, which is what every stored document says.
   facing: facingSchema.optional().describe('The facing pass to run first; omit to skip facing.'),

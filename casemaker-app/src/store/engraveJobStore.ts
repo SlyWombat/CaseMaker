@@ -711,6 +711,8 @@ export interface EngraveJobState {
   removeLabel: (id: string) => void;
   /** Set the cutter and stamp its source (#254). Defaults to `'user'`. */
   setTool: (key: string, source?: FieldSource) => void;
+  /** #572 — record (or clear) the double-confirmed cutter/material override. */
+  setMetalLineOverride: (override: boolean) => void;
   setVise: (patch: Partial<ViseParams>) => void;
   /** Add a default shape of `kind` (#214) and return its id. */
   addShape: (kind: EngraveShape['kind']) => string;
@@ -1138,6 +1140,8 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
         tool: resolveTool(key),
         sources: { ...(job.sources ?? {}), tool: source },
       })),
+
+    setMetalLineOverride: (override) => apply((job) => ({ ...job, metalLineOverride: override })),
 
     addShape: (kind) => {
       const shape = newShape(kind, get().job, newItemDepthFor(get().job));

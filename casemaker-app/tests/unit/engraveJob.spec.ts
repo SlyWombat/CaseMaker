@@ -69,6 +69,22 @@ describe('EngraveJob schema (#200)', () => {
     expect(parsed.job).toEqual(job);
   });
 
+  it('keeps the #572 metal-line override through a round trip, and leaves it absent by default', () => {
+    // The field must be NAMED by the schema or a round trip strips it (and the override would vanish
+    // on reload). Absent means the protective refusal stands — the default job invents no override.
+    const job = defaultEngraveJob();
+    job.metalLineOverride = true;
+    const parsed = parseEngraveJob(JSON.parse(JSON.stringify(job)));
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.job.metalLineOverride).toBe(true);
+
+    const plain = parseEngraveJob(JSON.parse(JSON.stringify(defaultEngraveJob())));
+    expect(plain.ok).toBe(true);
+    if (!plain.ok) return;
+    expect(plain.job.metalLineOverride).toBeUndefined();
+  });
+
   it('keeps a stated job id and mints one for a document written before the field (#419)', () => {
     // The id is what a stock reservation and `RunContext.jobId` are keyed to, so it must survive a
     // save and load. A document without one gains it on PARSE, with no `schemaVersion` bump — for
