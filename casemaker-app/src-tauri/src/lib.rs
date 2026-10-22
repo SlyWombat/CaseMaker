@@ -17,6 +17,7 @@ mod house;
 mod house_api;
 mod location;
 mod machine;
+mod machine_api;
 mod server;
 mod power;
 mod stock;

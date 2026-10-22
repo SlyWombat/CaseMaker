@@ -65,7 +65,21 @@ impl MachineTransport {
             .ok_or_else(|| format!("unknown connection {conn}"))
     }
 
-    async fn write(&self, conn: u64, data: &[u8]) -> Result<(), String> {
+    /// Connect to a controller's command channel and return a connection id. Shared by the Tauri
+    /// command (`machine_tcp_connect`) and the HTTP machine API (`machine_api.rs`) so the desktop
+    /// webview and a LAN browser reach the SAME sockets through one piece of code.
+    pub async fn connect(&self, host: &str, port: u16, timeout_ms: u64) -> Result<u64, String> {
+        let connect = TcpStream::connect((host, port));
+        let stream = timeout(Duration::from_millis(timeout_ms.max(1)), connect)
+            .await
+            .map_err(|_| format!("connecting to {host}:{port} timed out after {timeout_ms} ms"))?
+            .map_err(|e| format!("could not connect to {host}:{port}: {e}"))?;
+        // Small framed commands and their replies: Nagle would add latency for no benefit.
+        stream.set_nodelay(true).map_err(|e| format!("could not configure the connection: {e}"))?;
+        Ok(self.adopt(stream).await)
+    }
+
+    pub async fn write(&self, conn: u64, data: &[u8]) -> Result<(), String> {
         let c = self.get(conn).await?;
         let mut w = c.writer.lock().await;
         w.write_all(data).await.map_err(|e| format!("write failed: {e}"))?;
@@ -73,7 +87,7 @@ impl MachineTransport {
         Ok(())
     }
 
-    async fn read(&self, conn: u64, max: usize, timeout_ms: u64) -> Result<Vec<u8>, String> {
+    pub async fn read(&self, conn: u64, max: usize, timeout_ms: u64) -> Result<Vec<u8>, String> {
         let c = self.get(conn).await?;
         let mut closed = c.closed.subscribe();
         let mut r = c.reader.lock().await;
@@ -93,7 +107,7 @@ impl MachineTransport {
         }
     }
 
-    async fn close(&self, conn: u64) {
+    pub async fn close(&self, conn: u64) {
         // Remove first, so no new call can find it; then wake any read that is already waiting.
         let removed = self.conns.lock().await.remove(&conn);
         if let Some(c) = removed {
@@ -131,6 +145,11 @@ fn epoch_millis() -> i64 {
 /// rather than mistaken for "no machines found".
 #[tauri::command(rename_all = "snake_case")]
 pub async fn machine_udp_listen(port: u16, window_ms: u64) -> Result<Vec<UdpDatagram>, String> {
+    udp_listen(port, window_ms).await
+}
+
+/// The discovery listen, shared by the Tauri command and the HTTP machine API (`machine_api.rs`).
+pub async fn udp_listen(port: u16, window_ms: u64) -> Result<Vec<UdpDatagram>, String> {
     let socket = UdpSocket::bind(("0.0.0.0", port)).await.map_err(|e| {
         format!("could not bind UDP {port} for discovery: {e} (another program, such as Makera Studio, may be using it)")
     })?;
@@ -170,15 +189,7 @@ pub async fn machine_tcp_connect(
     port: u16,
     timeout_ms: u64,
 ) -> Result<u64, String> {
-    let connect = TcpStream::connect((host.as_str(), port));
-    let stream = timeout(Duration::from_millis(timeout_ms.max(1)), connect)
-        .await
-        .map_err(|_| format!("connecting to {host}:{port} timed out after {timeout_ms} ms"))?
-        .map_err(|e| format!("could not connect to {host}:{port}: {e}"))?;
-    // Small framed commands and their replies: Nagle would add latency for no benefit.
-    stream.set_nodelay(true).map_err(|e| format!("could not configure the connection: {e}"))?;
-
-    Ok(state.adopt(stream).await)
+    state.connect(&host, port, timeout_ms).await
 }
 
 /// Write bytes to an open connection.

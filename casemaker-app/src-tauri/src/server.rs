@@ -226,7 +226,13 @@ fn router(store: Arc<HouseStore>, serving_port: u16, config_path: PathBuf) -> Ro
             serving_port,
             config_path.clone(),
         ))
-        .merge(crate::house_api::routes(store));
+        .merge(crate::house_api::routes(store))
+        // #571 — the machine bridge over HTTP, so a LAN browser served this SPA can drive the
+        // controller (the desktop webview still uses Tauri IPC). Its own registry: the HTTP server
+        // owns these sockets, separate from the Tauri State registry the local webview uses.
+        .merge(crate::machine_api::routes(Arc::new(
+            crate::machine::MachineTransport::default(),
+        )));
     crate::guard::enforce(api, crate::guard::Guard::new(serving_port, config_path))
         .route("/", get(serve_root))
         .route("/*path", get(serve_path))

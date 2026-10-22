@@ -40,6 +40,7 @@ import {
   type UploadOutcome,
 } from './protocol';
 import { tauriTransport } from './transport';
+import { httpTransport } from './httpTransport';
 
 export const DESKTOP_ONLY_MARKER = 'casemaker-desktop-bridge-v1';
 
@@ -108,8 +109,22 @@ export function asVerifiedProgram(
   return { filename, content, report };
 }
 
+/**
+ * The default transport (#571). This desktop bundle runs in two places: the shell's own webview,
+ * where Tauri IPC is present, and a LAN browser that the embedded HTTP server served the same bundle
+ * to, where it is NOT — there `invoke` would throw. `globalThis.isTauri` is the flag the Tauri v2
+ * runtime sets (and what `@tauri-apps/api`'s own `isTauri()` reads); its absence is exactly the
+ * browser case, which uses the server's HTTP machine API instead. This is the runtime probe #181's
+ * note said to add "only alongside a real consumer that needs it" — #571 is that consumer. It reads
+ * the documented `isTauri` flag, not the internals object #181 migrated the app off.
+ */
+export function defaultTransport(): MachineTransport {
+  const hasTauri = !!(globalThis as { isTauri?: unknown }).isTauri;
+  return hasTauri ? tauriTransport : httpTransport;
+}
+
 function transportOf(opts: BridgeOptions): MachineTransport {
-  return opts.transport ?? tauriTransport;
+  return opts.transport ?? defaultTransport();
 }
 
 /** Listen for the machine's UDP broadcast for `opts.windowMs` (the protocol's fallback 3000 ms) and return it. */
