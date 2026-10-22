@@ -177,4 +177,27 @@ describe('EngraveCutWizard (#573)', () => {
     });
     expect(screen.getByTestId('engrave-cut-step-3').dataset.active).toBe('true');
   });
+
+  it('step 4 shows "checking…" and stays gated while the oracle is pending (#578)', () => {
+    act(() => {
+      useEngraveJobStore.setState({ job: plannedJob() });
+      useEngraveRunStore.setState({
+        generated: { programs: [] } as unknown as ReturnType<typeof useEngraveRunStore.getState>['generated'],
+        oracle: null,
+      });
+    });
+    render(<EngraveCutWizard />);
+    seedMachine();
+
+    fireEvent.click(screen.getByTestId('engrave-cut-next')); // 1 blank
+    fireEvent.click(screen.getByTestId('engrave-cut-next')); // 2 plan
+    fireEvent.click(screen.getByTestId('engrave-cut-next')); // 3 generate
+    expect(screen.getByTestId('engrave-cut-step-3').dataset.active).toBe('true');
+
+    // The oracle is async: null means PENDING, so the step says "checking…", never the blocked
+    // sentence, and Next stays disabled until the oracle for this seq lands.
+    expect(screen.getByTestId('engrave-cut-generate-checking')).toBeTruthy();
+    expect(screen.queryByTestId('engrave-cut-generate-blocked')).toBeNull();
+    expect((screen.getByTestId('engrave-cut-next') as HTMLButtonElement).disabled).toBe(true);
+  });
 });

@@ -71,6 +71,7 @@ export function EngraveCutWizard(): JSX.Element {
   const machineReady = machine !== null && machine.status !== null;
   const cutterOk = !cutterRefusedOnMaterial(tool, job.stock.material, job.metalLineOverride);
   const planApproved = job.setups !== undefined && job.setups[0]?.registration?.plan !== undefined;
+  const oracleChecking = generated !== null && oracle === null;
   const generatedOk = generated !== null && oracle !== null && oracle.ok;
   const frozen = pkg !== null;
   const registered = firstReg !== null && firstReg.outcome.usable === true;
@@ -131,8 +132,9 @@ export function EngraveCutWizard(): JSX.Element {
             <button type="button" data-testid="engrave-cut-generate" onClick={() => void generate()}>
               Generate
             </button>
+            {oracleChecking && <p data-testid="engrave-cut-generate-checking" style={MUTED}>Checking the simulation…</p>}
             {generatedOk && <p data-testid="engrave-cut-generate-ok" style={{ color: '#a3e4a0' }}>Generated ✓ Verified ✓ Simulated ✓ Matches ✓</p>}
-            {generated !== null && !generatedOk && (
+            {generated !== null && !generatedOk && !oracleChecking && (
               <p data-testid="engrave-cut-generate-blocked" style={{ color: '#f0b4ad' }}>The program is not ready to freeze — see the Cut checklist for what is blocking it.</p>
             )}
           </div>
