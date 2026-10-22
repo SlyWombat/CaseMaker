@@ -36,7 +36,8 @@ describe('httpTransport', () => {
   it('tcpWrite sends the bytes as a number array and resolves on a 204', async () => {
     fetchMock.mockResolvedValue(noContent());
     await httpTransport.tcpWrite(7, Uint8Array.from([1, 2, 3]));
-    expect(JSON.parse((fetchMock.mock.calls[0][1] as RequestInit).body as string)).toEqual({ conn: 7, data: [1, 2, 3] });
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(JSON.parse(init.body as string)).toEqual({ conn: 7, data: [1, 2, 3] });
   });
 
   it('tcpRead returns a Uint8Array of the server bytes', async () => {
