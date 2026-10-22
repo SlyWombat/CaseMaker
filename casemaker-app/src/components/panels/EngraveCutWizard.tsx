@@ -23,6 +23,7 @@ import { useFirstRegistration } from '@/store/engraveRegistrationStore';
 import { jobTool } from '@/engine/cnc/engrave/jobSetup';
 import { MATERIAL_LABELS } from '@/engine/cnc/materials';
 import { cutterRefusedOnMaterial } from '@/engine/cnc/engrave/cutterMaterial';
+import { materializeSetups } from '@/engine/cnc/setups/authoring';
 import { EngraveRegistrationStep } from './EngraveRegistrationStep';
 import { EngraveSetupsSection } from './EngraveSetupsSection';
 import { MachinesScope } from '@/components/manage/MachinesScope';
@@ -39,6 +40,7 @@ function stockCutterSignature(job: ReturnType<typeof useEngraveJobStore.getState
 
 export function EngraveCutWizard(): JSX.Element {
   const job = useEngraveJobStore((s) => s.job);
+  const setSetups = useEngraveJobStore((s) => s.setSetups);
   const machine = useMachineStore((s) => s.machine);
   const staleSince = useEngraveRunStore((s) => s.staleSince);
   const generated = useEngraveRunStore((s) => s.generated);
@@ -66,6 +68,12 @@ export function EngraveCutWizard(): JSX.Element {
   useEffect(() => {
     if (staleSince !== null) setCursor((c) => Math.min(c, 3));
   }, [staleSince]);
+
+  // #579 — step 3 must land on the control it names: materialise the setups (so the section is
+  // editable, not the "compatibility reading") when the plan step opens.
+  useEffect(() => {
+    if (cursor === 2 && job.setups === undefined) setSetups(materializeSetups(job));
+  }, [cursor, job, setSetups]);
 
   // The gate each step owns — the SAME condition the expert surface enforces.
   const machineReady = machine !== null && machine.status !== null;
@@ -122,7 +130,7 @@ export function EngraveCutWizard(): JSX.Element {
         {cursor === 2 && (
           <div data-testid="engrave-cut-step-content-2">
             <p style={MUTED}>Plan the registration and approve it — the touch, the left and front edge scans, all in the planner's own words.</p>
-            <EngraveSetupsSection />
+            <EngraveSetupsSection initiallyOpen />
           </div>
         )}
 

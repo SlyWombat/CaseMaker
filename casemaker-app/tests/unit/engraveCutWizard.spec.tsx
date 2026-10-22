@@ -200,4 +200,18 @@ describe('EngraveCutWizard (#573)', () => {
     expect(screen.queryByTestId('engrave-cut-generate-blocked')).toBeNull();
     expect((screen.getByTestId('engrave-cut-next') as HTMLButtonElement).disabled).toBe(true);
   });
+
+  it('step 3 materialises the setups for a job that has none (#579)', () => {
+    render(<EngraveCutWizard />);
+    seedMachine();
+
+    fireEvent.click(screen.getByTestId('engrave-cut-next')); // 1 blank
+    fireEvent.click(screen.getByTestId('engrave-cut-next')); // 2 plan
+    expect(screen.getByTestId('engrave-cut-step-2').dataset.active).toBe('true');
+
+    // The step materialises the setups, so the mounted section is editable (the Plan/Approve
+    // controls) rather than the read-only "compatibility reading".
+    expect(useEngraveJobStore.getState().job.setups).toBeDefined();
+    expect(useEngraveJobStore.getState().job.setups!.length).toBeGreaterThan(0);
+  });
 });

@@ -54,6 +54,8 @@ export interface EngraveSetupRowProps {
   reading: SetupItemsReading;
   /** False for the compatibility reading and for a suggested plan: show, do not write. */
   editable: boolean;
+  /** #579 — the wizard opens the first row so the Plan/Approve controls are on screen. */
+  initiallyOpen?: boolean;
   findings: SetupAuthoringFinding[];
   itemName: (id: string) => string;
   /** Cut items that can move to this setup's up face (not already in it). */
@@ -117,7 +119,7 @@ function itemChip(
 export function EngraveSetupRow(props: EngraveSetupRowProps): JSX.Element {
   const { index, setup, derived, reading, editable, findings } = props;
   const n = index + 1;
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(props.initiallyOpen === true);
   // The shipped Z1 vise carries a known provisional seat aim (#559); a custom/measured fixture
   // does not, so its field stays empty and the operator types the probe reading as before.
   const shippedZ1Vise = setup.mount.kind === 'vise' && props.viseSource === 'default';

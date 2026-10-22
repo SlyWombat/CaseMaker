@@ -175,7 +175,7 @@ function draftFromPlan(plan: SetupsPlan, toolKey: string): JobSetup[] {
   }));
 }
 
-export function EngraveSetupsSection(): JSX.Element {
+export function EngraveSetupsSection({ initiallyOpen = false }: { initiallyOpen?: boolean } = {}): JSX.Element {
   const job = useEngraveJobStore((s) => s.job);
   const setSetups = useEngraveJobStore((s) => s.setSetups);
   const defaults = useShopDefaultsStore((s) => s.defaults);
@@ -481,6 +481,7 @@ export function EngraveSetupsSection(): JSX.Element {
               derived={derivedFor(setup, index)}
               reading={rowReading}
               editable={editable}
+              initiallyOpen={index === 0 && initiallyOpen}
               findings={draft === null ? reading.findings.filter((f) => f.setupIndex === index + 1) : []}
               itemName={itemName}
               candidateItems={candidates}
