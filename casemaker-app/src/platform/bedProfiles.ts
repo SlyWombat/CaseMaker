@@ -107,7 +107,44 @@ export function viseFrameFromRegistration(
 }
 
 /**
- * #599 — the machine with its ACTIVE bed profile's jaw-top datum set from the mount tap's reading.
+ * #600 — the machine with its vise placement's frame set from a completed registration. The
+ * arithmetic is `viseFrameFromRegistration`'s (corrected G54 X is the face, +jawStartY the bar
+ * start); the provenance is `measured` for the face and `typed` for the bar start (the legacy
+ * offset). A house migrated before its first good registration had `frame: null` forever until this.
+ */
+export function withVisePlacementFrame(
+  machine: MachineRecord,
+  frame: { fixedJawFaceX: number; jawStartY: number },
+  provenance: { fixedJawFaceX: string; jawStartY: string },
+  now: string,
+): MachineRecord {
+  const profileId = machine.activeBedProfileId;
+  if (profileId === undefined) return machine;
+  return {
+    ...machine,
+    bedProfiles: machine.bedProfiles?.map((p) =>
+      p.id === profileId
+        ? {
+            ...p,
+            placements: p.placements.map((pl) =>
+              pl.where.kind === 'pins' && pl.where.pins === 'vise'
+                ? {
+                    ...pl,
+                    frame: { fixedJawFaceX: frame.fixedJawFaceX, jawStartY: frame.jawStartY },
+                    provenance: { ...pl.provenance, fixedJawFaceX: provenance.fixedJawFaceX, jawStartY: provenance.jawStartY },
+                  }
+                : pl,
+            ),
+            history: [...p.history, { at: now, what: 'the vise placement frame was written from a registration' }],
+          }
+        : p,
+    ),
+    updatedAt: now,
+  };
+}
+
+/**
+ * #600 — the machine with its ACTIVE bed profile's jaw-top datum set from the mount tap's reading.
  * The datum is a raw `MeasuredDatum`: value = the tap's machine Z, `by` = the checked-out probe's id,
  * `at` = the tap's machine XY. The frame is #600's; nothing here touches the placement.
  */

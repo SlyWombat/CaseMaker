@@ -51,7 +51,8 @@ import { surfaceSpreadPlan, type SurfaceSpreadAssessment } from '@/engine/cnc/en
 import { useEngraveJobStore } from '@/store/engraveJobStore';
 import { useEngraveRegistrationStore } from '@/store/engraveRegistrationStore';
 import { machineAt, useLocationStore } from '@/store/locationStore';
-import { withViseJawTopDatum } from '@/platform/bedProfiles';
+import { viseFrameFromRegistration, withViseJawTopDatum, withVisePlacementFrame } from '@/platform/bedProfiles';
+import { DEFAULT_VISE } from '@/engine/cnc/fixture';
 import { useMachineTranscriptStore } from '@/store/machineTranscriptStore';
 import { useSettingsStore } from '@/store/settingsStore';
 
@@ -291,6 +292,16 @@ export function EngraveRegistrationStep({ job, target }: EngraveRegistrationStep
         handleRef.current = null;
         await handle.close();
         return;
+      }
+      // #600 — a usable vise registration fixes the placement frame, so the mount tap and the datum
+      // path read it instead of falling back to the newest registration record every time.
+      if (r.outcome.usable && plan.mount === 'vise') {
+        const machine = machineAt(target);
+        if (machine !== null) {
+          const now = new Date().toISOString();
+          const frame = viseFrameFromRegistration({ measuredAt: now, correctedG54: r.outcome.correctedG54 }, DEFAULT_VISE.jawStartY);
+          await useLocationStore.getState().saveMachine(withVisePlacementFrame(machine, frame, { fixedJawFaceX: `measured:${now}`, jawStartY: 'typed' }, now));
+        }
       }
       // #599 — the mount tap measured the jaw top: write it into the active bed profile's datum.
       if (r.mountTap !== null) {

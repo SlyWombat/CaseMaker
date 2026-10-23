@@ -19,6 +19,7 @@ import {
   newestViseRegistration,
   switchActiveProfile,
   withViseJawTopDatum,
+  withVisePlacementFrame,
   type RegistrationSource,
 } from '@/platform/bedProfiles';
 import type { ShopDefaults } from '@/platform/defaultsClient';
@@ -223,6 +224,17 @@ describe('#599 the mount-tap datum write-back', () => {
     const active = next.bedProfiles!.find((p) => p.id === next.activeBedProfileId)!;
     expect(active.datums.viseJawTopZ!.by).toBe('wired-probe');
     expect(active.history.at(-1)!.what).toContain('no probe accessory');
+  });
+
+  it('#600 writes the vise placement frame from a completed registration', () => {
+    const raw = (JSON.parse(readFileSync(FIXTURE, 'utf8')) as { machines: Array<Record<string, unknown>> }).machines[0]!;
+    const machine = MachineRecordSchema.parse(raw);
+    const next = withVisePlacementFrame(machine, { fixedJawFaceX: -181.2, jawStartY: -203.5 }, { fixedJawFaceX: 'measured:2026-10-23T00:00:00.000Z', jawStartY: 'typed' }, NOW);
+    const active = next.bedProfiles!.find((p) => p.id === next.activeBedProfileId)!;
+    const placement = active.placements.find((p) => p.where.kind === 'pins' && p.where.pins === 'vise')!;
+    expect(placement.frame).toEqual({ fixedJawFaceX: -181.2, jawStartY: -203.5 });
+    expect(placement.provenance.fixedJawFaceX).toContain('measured');
+    expect(active.history.at(-1)!.what).toContain('placement frame');
   });
 });
 
