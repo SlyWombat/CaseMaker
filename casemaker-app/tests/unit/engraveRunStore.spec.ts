@@ -105,7 +105,28 @@ describe('engraveRunStore (#206)', () => {
   });
 
   it('oracleSentence falls back to ORACLE_AREA_FLOOR when the report omits the floor (#582)', () => {
-    expect(gate.oracleSentence(view({ oracle: { ok: false, band: 0, levels: [], worst: { underCut: 0.002, overCut: 0 } } }))).toContain(`${ORACLE_AREA_FLOOR} mm² floor`);
+    // #584 — the floor prints ROUNDED (`toFixed(4)`), not the raw computed number.
+    expect(gate.oracleSentence(view({ oracle: { ok: false, band: 0, levels: [], worst: { underCut: 0.002, overCut: 0 } } }))).toContain(`${ORACLE_AREA_FLOOR.toFixed(4)} mm² floor`);
+  });
+
+  it('oracleSentence names the level and patch of the worst under-cut (#584)', () => {
+    const sentence = gate.oracleSentence(
+      view({
+        oracle: {
+          ok: false,
+          band: 0.089,
+          levels: [],
+          areaFloor: 0.0399,
+          worst: {
+            underCut: 0.0815,
+            overCut: 0,
+            underAt: { z: -0.8, bbox: { min: [19.0, 37.0], max: [19.3, 37.27] } },
+          },
+        },
+      }),
+    );
+    expect(sentence).toContain('0.0399 mm² floor');
+    expect(sentence).toContain('at level Z -0.80, near (19.15, 37.14) — a 0.30 × 0.27 mm patch');
   });
 
   it('requires acknowledgement for the named warning codes only', () => {

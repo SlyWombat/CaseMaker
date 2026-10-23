@@ -126,6 +126,17 @@ describe('engraveOracle (#206 §3)', () => {
       const report = session.oracle(predicted);
       expect(report.ok).toBe(false);
       expect(under(report)).toBeGreaterThan(0.1); // the seven 0.26 mm spines are ~36 mm²
+      // #584 — the report locates the worst disagreement: the level Z and the region's bbox.
+      expect(report.worst.underAt).toBeDefined();
+      expect(report.worst.underAt!.z).toBe(-depth);
+      expect(report.worst.underAt!.bbox.min[0]).toBeGreaterThanOrEqual(10);
+      expect(report.worst.underAt!.bbox.max[0]).toBeLessThanOrEqual(30);
+      expect(report.worst.underAt!.bbox.min[1]).toBeGreaterThanOrEqual(5);
+      expect(report.worst.underAt!.bbox.max[1]).toBeLessThanOrEqual(15);
+      // …and the level it came from carries the same bbox, so `levels[*]` names the failing level.
+      const worstLevel = report.levels.find((l) => l.underCut === report.worst.underCut);
+      expect(worstLevel).toBeDefined();
+      expect(worstLevel!.underBbox).toEqual(report.worst.underAt!.bbox);
       // #580 — the floor is never below the sliver floor. The exact sweeper has no grid, so it is
       // the constant; the column engine (a V-bit trace) raises it to the cell area × 4.
       expect(report.areaFloor).toBeDefined();

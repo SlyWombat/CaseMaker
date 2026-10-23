@@ -55,6 +55,12 @@ type CrossSectionInstance = InstanceType<ManifoldToplevel['CrossSection']>;
 /** A point in the work frame, mm. */
 export type OraclePoint = [number, number];
 
+/** An axis-aligned region in the work frame, mm. */
+export interface OracleBbox {
+  min: OraclePoint;
+  max: OraclePoint;
+}
+
 /** A closed contour in the work frame, mm: outer contours CCW and holes CW. */
 export type OraclePolygon = OraclePoint[];
 
@@ -168,6 +174,14 @@ export interface OracleLevel {
   underCut: number;
   /** Simulated but not predicted: area the file cut OUTSIDE the plan, mm². */
   overCut: number;
+  /**
+   * #584 — the bbox (work/job mm) of the region predicted but not cut at this level, so a reader
+   * can find the disagreement on the blank. `null` when there is no under-cut at this level (a
+   * hand-built report may omit it).
+   */
+  underBbox?: OracleBbox | null;
+  /** #584 — the bbox (work/job mm) of the region cut but not predicted at this level, or `null`. */
+  overBbox?: OracleBbox | null;
 }
 
 export interface OracleReport {
@@ -176,7 +190,17 @@ export interface OracleReport {
   band: number;
   levels: OracleLevel[];
   /** The worst under- and over-cut over every level, mm². */
-  worst: { underCut: number; overCut: number };
+  worst: {
+    underCut: number;
+    overCut: number;
+    /**
+     * #584 — the level Z and bbox (work/job mm) of the WORST under-cut, so the sentence can name
+     * the place without scanning `levels`. `null`/absent when there is no under-cut.
+     */
+    underAt?: { z: number; bbox: OracleBbox } | null;
+    /** #584 — the level Z and bbox of the WORST over-cut, or `null`/absent. */
+    overAt?: { z: number; bbox: OracleBbox } | null;
+  };
   /**
    * The area floor the verdict used, mm² — `ORACLE_AREA_FLOOR`, or the grid's cell area ×
    * {@link ORACLE_AREA_FLOOR_CELLS} when the column engine swept (#580). `computeOracle` always
@@ -465,6 +489,15 @@ function threadLevels(predicted: readonly OraclePredicted[]): number[] {
 }
 
 /**
+ * #584 — the axis-aligned bounds of a disagreement CrossSection, in work/job mm. Only asked of a
+ * section with positive area, so the result is always finite.
+ */
+function bboxOf(cs: CrossSectionInstance): OracleBbox {
+  const b = cs.bounds();
+  return { min: [b.min[0], b.min[1]], max: [b.max[0], b.max[1]] };
+}
+
+/**
  * Compare the simulated side against `predicted`, level by level. Every CrossSection is deleted
  * exactly once, on both the success and the throw path.
  */
@@ -511,6 +544,8 @@ export function computeOracle(
   const levels: OracleLevel[] = [];
   let worstUnder = 0;
   let worstOver = 0;
+  let worstUnderAt: { z: number; bbox: OracleBbox } | null = null;
+  let worstOverAt: { z: number; bbox: OracleBbox } | null = null;
 
   for (const depth of depths) {
     // The work-frame floor Z: the origin is the top face, so a cut is at NEGATIVE Z.
@@ -556,14 +591,19 @@ export function computeOracle(
 
     let underCut: number;
     let overCut: number;
+    let underBbox: OracleBbox | null = null;
+    let overBbox: OracleBbox | null = null;
     if (sliceCS === null) {
       underCut = Math.max(0, shrunk.area());
       overCut = 0;
+      if (underCut > 0) underBbox = bboxOf(shrunk);
     } else {
       const underCS = CS.difference([shrunk, sliceCS]);
       const overCS = CS.difference([sliceCS, grown]);
       underCut = Math.max(0, underCS.area());
       overCut = Math.max(0, overCS.area());
+      if (underCut > 0) underBbox = bboxOf(underCS);
+      if (overCut > 0) overBbox = bboxOf(overCS);
       underCS.delete();
       overCS.delete();
       sliceCS.delete();
@@ -572,9 +612,15 @@ export function computeOracle(
     grown.delete();
     predictedCS.delete();
 
-    levels.push({ z, predictedArea, simulatedArea, underCut, overCut });
-    if (underCut > worstUnder) worstUnder = underCut;
-    if (overCut > worstOver) worstOver = overCut;
+    levels.push({ z, predictedArea, simulatedArea, underCut, overCut, underBbox, overBbox });
+    if (underCut > worstUnder) {
+      worstUnder = underCut;
+      worstUnderAt = underBbox === null ? null : { z, bbox: underBbox };
+    }
+    if (overCut > worstOver) {
+      worstOver = overCut;
+      worstOverAt = overBbox === null ? null : { z, bbox: overBbox };
+    }
   }
 
   // #580 — the floor is resolution-aware: below the grid's own cell pitch, a "worst under/over-cut"
@@ -586,7 +632,7 @@ export function computeOracle(
     ok: worstUnder <= areaFloor && worstOver <= areaFloor,
     band,
     levels,
-    worst: { underCut: worstUnder, overCut: worstOver },
+    worst: { underCut: worstUnder, overCut: worstOver, underAt: worstUnderAt, overAt: worstOverAt },
     areaFloor,
   };
 }

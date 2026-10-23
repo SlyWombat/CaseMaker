@@ -20,7 +20,7 @@
 
 import type { EngraveGenerated, EngraveProgram } from '@/workers/sim/engraveGenerate';
 import type { EngraveJob } from '@/types/engraveJob';
-import type { OracleReport } from '@/engine/cnc/engrave/oracle';
+import type { OracleBbox, OracleReport } from '@/engine/cnc/engrave/oracle';
 import type { RegistrationOutcome } from '@/engine/cnc/registration/outcome';
 import type { RegistrationPlan } from '@/engine/cnc/registration/plan';
 import type { SimDiagnostic } from '@/workers/sim/session';
@@ -95,18 +95,32 @@ export function runErrorCodes(v: EngraveRunView): string[] {
 }
 
 /**
+ * #584 — the "at level Z −0.80, near (x, y) — a 0.3 × 0.27 mm patch" clause the failing sentence
+ * appends, from the worst disagreement's level Z and bbox (job mm). `null` when there is none.
+ */
+function oracleLocation(loc: { z: number; bbox: OracleBbox } | null | undefined): string {
+  if (!loc) return '';
+  const cx = (loc.bbox.min[0] + loc.bbox.max[0]) / 2;
+  const cy = (loc.bbox.min[1] + loc.bbox.max[1]) / 2;
+  const w = loc.bbox.max[0] - loc.bbox.min[0];
+  const h = loc.bbox.max[1] - loc.bbox.min[1];
+  return ` at level Z ${loc.z.toFixed(2)}, near (${cx.toFixed(2)}, ${cy.toFixed(2)}) — a ${w.toFixed(2)} × ${h.toFixed(2)} mm patch`;
+}
+
+/**
  * The "Matches prediction" sentence body — the metric and the floor the verdict used (#576/#580).
  * Shared by the panel's run row and the wizard's step-4 blocker (#582), so they cannot disagree.
  */
 export function oracleSentence(v: EngraveRunView): string {
   if (!v.oracle) return v.phase === 'checking' || v.phase === 'simulating' ? 'checking…' : 'not checked yet';
   const floor = v.oracle.areaFloor ?? 1e-3; // #206 — the sliver floor; local so this module stays browser-free
+  const floorText = floor.toFixed(4); // #584 — the floor is a computed number, print it rounded
   if (v.oracle.ok) {
-    return `under-cut ${v.oracle.worst.underCut.toFixed(4)} mm², over-cut ${v.oracle.worst.overCut.toFixed(4)} mm², both within the ${floor} mm² floor (tolerance ${v.oracle.band.toFixed(3)} mm)`;
+    return `under-cut ${v.oracle.worst.underCut.toFixed(4)} mm², over-cut ${v.oracle.worst.overCut.toFixed(4)} mm², both within the ${floorText} mm² floor (tolerance ${v.oracle.band.toFixed(3)} mm)`;
   }
   return v.oracle.worst.underCut > floor
-    ? `worst under-cut ${v.oracle.worst.underCut.toFixed(4)} mm² exceeds the ${floor} mm² floor by ${(v.oracle.worst.underCut - floor).toFixed(4)} mm² — the file left material the prediction removed (over-cut ${v.oracle.worst.overCut.toFixed(4)} mm²; tolerance ${v.oracle.band.toFixed(3)} mm)`
-    : `worst over-cut ${v.oracle.worst.overCut.toFixed(4)} mm² exceeds the ${floor} mm² floor by ${(v.oracle.worst.overCut - floor).toFixed(4)} mm² — the file cut outside the plan (under-cut ${v.oracle.worst.underCut.toFixed(4)} mm²; tolerance ${v.oracle.band.toFixed(3)} mm)`;
+    ? `worst under-cut ${v.oracle.worst.underCut.toFixed(4)} mm² exceeds the ${floorText} mm² floor by ${(v.oracle.worst.underCut - floor).toFixed(4)} mm²${oracleLocation(v.oracle.worst.underAt)} — the file left material the prediction removed (over-cut ${v.oracle.worst.overCut.toFixed(4)} mm²; tolerance ${v.oracle.band.toFixed(3)} mm)`
+    : `worst over-cut ${v.oracle.worst.overCut.toFixed(4)} mm² exceeds the ${floorText} mm² floor by ${(v.oracle.worst.overCut - floor).toFixed(4)} mm²${oracleLocation(v.oracle.worst.overAt)} — the file cut outside the plan (under-cut ${v.oracle.worst.underCut.toFixed(4)} mm²; tolerance ${v.oracle.band.toFixed(3)} mm)`;
 }
 
 /** The "Verified" and "Simulated" sentence bodies, shared by the panel and the wizard (#582). */

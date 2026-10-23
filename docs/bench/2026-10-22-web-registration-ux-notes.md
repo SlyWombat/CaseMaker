@@ -70,3 +70,19 @@ Design/Cut/Setups/Manage.
 - **Run 4 (12:43, seat −58.79, tolerance 0.7):** centre **−55.005**, (19.55, 38.44) **−55.03**, left extent ✓, right extent ✓ (below −55.38, above −55.68 — the ±0.4 band WAS the run-2 problem), then the **front extent (19.55, 4.88): nothing down to −55.68**. Frame `camera-run4/frame-0012`: the probe tip is at the badge's END — the blank is clamped ≈5 mm further along the jaws (+Y) than the saved G54 origin says. The spread touches run before the edge scans and trust the saved origin, so a re-clamped blank fails them before the scans can find it. Filed #591.
 - **Run 5 (14:22:52 UTC, build 8ea808d5 = #591/#590/#593; seat −58.79, tolerance 0.7) — the registration COMPLETED.** M491 → surface at (19.05, 38.1) **−55.008** → left edge: 3/2/1/0.5 mm on the stock (−55.175…−55.225), 0 and 0.25 read BELOW (−55.28) → edge at ≈ 0 ✓ → front edge: 3/4/5 mm MISS, **inward search** → 6 mm on the stock (−55.066), 5.5 miss, 5.75 on (−55.205) → front edge ≈ **+5.6 − rim** (the +5 mm offset of run 4, found — #593 verified live) → extent touches from the low approach (Z −51.28): centre −55.055, left −55.164, right **−55.505**, front −55.092, back −55.437 (#590 verified: ~6 s per touch vs ~22) → home. Verdict: **"this blank is bowed 0.45 mm across the cut; the floors cannot stay past the colour line and clear of the pocket" — `blank-bowed`, no origin written.** The flow is right; the badge's moving-jaw side is 0.45 lower than its centre, outside the job's 0.2 mm depth band. That is #496 (per-job bow) territory now, not registration. UX nit: the refusal sentence is printed four times in the section. Frames `img/2026-10-23-register/camera-run5/`; result screenshot `20261023-142800-run5-result.png`.
   - Full transcript (153 lines, 26 `[PRB]`): `traces/2026-10-23-run5-transcript.txt`; status trails: `traces/2026-10-23-run{2,4,5}-status-trail.log`. Extent readings (slow touch): centre −55.055 · left (6.65, 44.77) −55.164 · right (34.60, 44.77) −55.505 · front (20.63, 11.20) −55.092 · back (20.63, 78.33) −55.437. Setter: −75.927 / −75.918.
+
+## 2026-10-23 — the badge job's oracle under-cut (#584)
+
+The badge job (`single-pla`, 76.2×38.1 PLA, 30° V-bit, "Single Barrel" + "br"), measured on the
+ce6ffe68 (:8000) build: the resolution-aware floor is right and still fails.
+
+Measured numbers (the ones #584 asks be recorded):
+- column grid pitch **0.1 mm** (cell ≈ **0.00998 mm²**; `sim.columnFlatPitchYMm` fallback),
+- area floor = 4 cells ≈ **0.0399 mm²** (`ORACLE_AREA_FLOOR_CELLS`),
+- worst **under-cut 0.0815 mm² ≈ 8 cells**, over-cut 0.0000 mm², tolerance **0.089 mm** band.
+
+The oracle now reports WHERE: `OracleLevel.underBbox`/`overBbox` carry the disagreement region's bbox
+(work mm) at each level, `OracleReport.worst.underAt`/`overAt` name the worst level's Z and bbox, and
+the "Matches prediction" sentence appends "at level Z −0.80, near (x, y) — a 0.3 × 0.27 mm patch" —
+the floor also prints rounded (`toFixed(4)`), not `0.03990025185160158`. Re-check the live build and
+read the bbox off the sentence to settle which side (prediction offset vs swept floor) is wrong.
