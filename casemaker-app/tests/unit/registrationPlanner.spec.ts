@@ -23,7 +23,6 @@ import {
   retouchAndCorrectAfterFacing,
   retouchSurface,
   runRegistration,
-  scanPositions,
   summarizeOutcome,
   summarizePlan,
   type ExpectedStock,
@@ -122,11 +121,6 @@ describe('#430 the plan', () => {
 
   it('tape: two left points kept clear of the rounded corners', () => {
     expect(plan('tape').scans.filter((s) => s.edge === 'left').map((s) => s.along)).toEqual([5, 71.2]);
-  });
-
-  it('steps coarse to one step short of the edge, then fine — the bench’s own positions', () => {
-    const left = plan('vise').scans[0]!;
-    expect(scanPositions(left).slice(0, 6)).toEqual([3, 2, 1, 0.5, 0, -0.5]);
   });
 
   it('says what it will do', () => {
@@ -300,12 +294,11 @@ describe('#430 the executor, on a fake machine', () => {
     for (const z of z1.xyMovesAtZ.slice(1)) expect(z).toBeCloseTo(park, 6);
     expect(z1.lowest()).toBeGreaterThanOrEqual(SURFACE - S.capBelowSurfaceMm - 1e-9);
 
-    // Each scan: one pass out to its first touch off, then ONE midpoint touch back toward the stock.
+    // #594 — each scan brackets the edge and bisects: it holds both an on and an off touch, and the
+    // edge is the closest pair (read by edgeFrom, not a fixed last-two-midpoint shape).
     for (const sc of r.data.scans) {
-      const firstOff = sc.touches.findIndex((t) => t.kind !== 'stock');
-      expect(firstOff).toBe(sc.touches.length - 2);
-      const mid = sc.touches.at(-1)!;
-      expect(sc.scan.outward * (mid.at - sc.touches[firstOff]!.at)).toBeLessThan(0);
+      expect(sc.touches.some((t) => t.kind === 'stock')).toBe(true);
+      expect(sc.touches.some((t) => t.kind !== 'stock')).toBe(true);
     }
     expect(r.data.scans[0]!.touches.some((t) => t.kind === 'below')).toBe(true); // the jaw top
     // #518 — a miss is a reading: nothing is cleared, and the machine was never in alarm.
@@ -367,9 +360,7 @@ describe('#430 the executor, on a fake machine', () => {
     const left = r.data.scans[0]!;
     expect(left.scan.aboveIsEdge).toBe(true);
     expect(left.touches.some((t) => t.kind === 'above')).toBe(true);
-    // One pass out to the first high reading, then ONE midpoint touch back toward the stock, like a miss.
-    const firstOff = left.touches.findIndex((t) => t.kind !== 'stock');
-    expect(firstOff).toBe(left.touches.length - 2);
+    // #594 — the scan brackets and bisects to the jaw's high reading (the edge), like a miss.
     expect(r.outcome.usable).toBe(true);
     expect(r.outcome.problems).toEqual([]);
     expect(Math.abs(r.outcome.offset.x - 1.2)).toBeLessThanOrEqual(S.fineStepMm / 2);

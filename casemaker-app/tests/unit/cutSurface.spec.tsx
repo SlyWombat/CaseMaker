@@ -18,7 +18,7 @@ import { programHash } from '@/platform/machineRun';
 import { StockItemSchema, type StockItem } from '@/platform/stockClient';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { jobSetups } from '@/engine/cnc/engrave/jobSetup';
-import { planRegistration, type RegistrationPlan } from '@/engine/cnc/registration/plan';
+import { planRegistration } from '@/engine/cnc/registration/plan';
 import { registrationSettings } from '@/engine/cnc/registration/settings';
 import { freezePackage, type FrozenPackage } from '@/engine/cnc/engrave/package';
 import { frozenReleaseSources } from '@/engine/cnc/engrave/release';

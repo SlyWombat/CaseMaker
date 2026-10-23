@@ -14,8 +14,8 @@ export function summarizePlan(plan: RegistrationPlan): string {
     // #429 review: the walls by their labels, and the surface touch where it really is.
     return (
       `Home, fit the wired probe and measure it (M491); touch the surface at (${n(plan.surfacePoint.x)}, ${n(plan.surfacePoint.y)}), ` +
-      `on solid stock clear of every opening; then scan ${plan.scans.map((sc) => sc.label ?? `the ${sc.edge} edge`).join(', ')} — stepping ${n(s.coarseStepMm)} mm, ` +
-      `then ${n(s.fineStepMm)} mm, stopping at the first touch that falls into the opening, every touch capped at the surface − ${n(s.capBelowSurfaceMm)} mm; home when finished.`
+      `on solid stock clear of every opening; then scan ${plan.scans.map((sc) => sc.label ?? `the ${sc.edge} edge`).join(', ')} — bracketing each wall ` +
+      `and bisecting to ${n(s.fineStepMm)} mm, stopping at the first touch that falls into the opening, every touch capped at the surface − ${n(s.capBelowSurfaceMm)} mm; home when finished.`
     );
   }
   const edges =
@@ -31,8 +31,8 @@ export function summarizePlan(plan: RegistrationPlan): string {
       : '';
   return (
     `Home, fit the wired probe and measure it (M491); touch the surface at the cut area's centre ` +
-    `(${n(plan.surfacePoint.x)}, ${n(plan.surfacePoint.y)}); then scan ${edges} — stepping ${n(s.coarseStepMm)} mm, ` +
-    `then ${n(s.fineStepMm)} mm, stopping at the first touch off the stock, every touch capped at the surface − ${n(s.capBelowSurfaceMm)} mm; home when finished.${assumes}`
+    `(${n(plan.surfacePoint.x)}, ${n(plan.surfacePoint.y)}); then scan ${edges} — bracketing each edge ` +
+    `and bisecting to ${n(s.fineStepMm)} mm, stopping at the first touch off the stock, every touch capped at the surface − ${n(s.capBelowSurfaceMm)} mm; home when finished.${assumes}`
   );
 }
 

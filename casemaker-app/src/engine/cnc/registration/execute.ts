@@ -64,7 +64,7 @@ import {
   type SurfaceSpreadAssessment,
   type SurfaceSpreadPlan,
 } from '@/engine/cnc/engrave/surfaceSpread';
-import { scanPositions, type EdgeScan, type RegistrationPlan } from './plan';
+import { type EdgeScan, type RegistrationPlan } from './plan';
 import { classifyTouch, lastPrb, type Prb } from './readings';
 import { computeOutcome, correctionLine, type RegistrationOutcome, type RunData, type ScanRecord, type ScanTouch } from './outcome';
 import { referenceOutcome } from './references';
@@ -241,67 +241,53 @@ async function touch(io: Session, plan: RegistrationPlan, scan: EdgeScan, at: nu
   return { at, prb, kind: classifyTouch(prb, surfaceZ, s.surfaceBandMm) };
 }
 
-/** One pass across an edge; it STOPS at the first touch off the stock, then halves the last step inward.
+/**
+ * One pass across an edge by BRACKET AND BISECTION (#594): the scan holds a point that is ON the
+ * stock — the surface touch, answered a moment before at this axis's coordinate — and probes for the
+ * edge between it and a point that is OFF, halving the bracket until it is the fine step. That finds
+ * the edge in ~log₂ touches whatever the offset, instead of crawling 1 mm then 0.5 mm a touch at a
+ * time (#593's inward search cost a touch per millimetre of offset).
  *
- * #593 — a scan whose FIRST touch misses the stock (the blank sits further along the jaws than the
- * saved origin) is not a refusal: the scan steps INWARD by the coarse step until a touch lands on the
- * stock — bounded by the opposite edge's expected position (`scan.oppositeAt`) — and then runs the
- * outward fine pass from there exactly as a scan that started on the stock does.
+ * A first touch that reads ABOVE the surface is a clamp, not an invitation to search (unchanged);
+ * `aboveIsEdge` (#517) still turns a high reading into the edge, and a reference scan's `label`
+ * names a wall rather than a stock edge (its `oppositeAt` is absent, but the bracket uses the surface
+ * point, so no field is needed).
  */
 async function scanEdge(io: Session, plan: RegistrationPlan, scan: EdgeScan, parkZ: number, surfaceZ: number): Promise<ScanRecord> {
   const touches: ScanTouch[] = [];
-  let lastOn: number | null = null;
-  let foundInward = false;
   const probe = (p: number, travelHigh = false) => touch(io, plan, scan, p, parkZ, surfaceZ, travelHigh);
+  // The known-on coordinate along this scan's axis: the surface touch answered there a moment ago.
+  const surfaceCoord = scan.edge === 'left' || scan.edge === 'right' ? plan.surfacePoint.x : plan.surfacePoint.y;
 
-  const first = await probe(scan.start, plan.mount === 'bracket');
-  touches.push(first);
-  if (first.kind === 'stock') {
-    lastOn = scan.start;
-  } else if (first.kind === 'above' && scan.aboveIsEdge !== true) {
-    // Something above the surface (a clamp): stop the scan here and say so (outcome.ts) — the inward
-    // search is for a blank that is simply not where the job put it, not for an obstacle in the way.
-    return { scan, touches };
-  } else if (scan.oppositeAt !== undefined) {
-    const inward = -scan.outward;
-    for (let p = r3(scan.start + inward * scan.coarseStep); inward * (scan.oppositeAt - p) > 1e-9; p = r3(p + inward * scan.coarseStep)) {
-      const t = await probe(p);
-      touches.push(t);
-      if (t.kind === 'stock') {
-        lastOn = p;
-        foundInward = true;
-        break;
-      }
-      if (t.kind === 'above' && scan.aboveIsEdge !== true) return { scan, touches };
-    }
+  const start = await probe(scan.start, plan.mount === 'bracket');
+  touches.push(start);
+  if (start.kind === 'above' && scan.aboveIsEdge !== true) return { scan, touches };
+
+  let on: number; // the known-on position (stock)
+  let off: number; // the known-off position (past the edge)
+  if (start.kind === 'stock') {
+    on = scan.start;
+    // The edge is outward of the start. Probe the outward limit to bracket it.
+    const limit = await probe(scan.limit);
+    touches.push(limit);
+    if (limit.kind === 'above' && scan.aboveIsEdge !== true) return { scan, touches };
+    if (limit.kind === 'stock') return { scan, touches }; // still on the stock: the edge is beyond the reach
+    off = scan.limit;
+  } else {
+    // The start is off the stock (or the jaw past a recessed blank): the edge is inward of it.
+    off = scan.start;
+    on = surfaceCoord;
   }
 
-  if (lastOn === null) return { scan, touches };
-
-  /** One outward touch from `lastOn`; false when the scan is done (a miss was refined back). */
-  const stepOutward = async (p: number): Promise<boolean> => {
-    const t = await probe(p);
+  // Bisect to half the fine step: the edge is then known to a quarter step, which is the resolution
+  // the reference scans' centre check (#429) reads the walls to.
+  while (Math.abs(on - off) > scan.fineStep / 2) {
+    const mid = r3((on + off) / 2);
+    const t = await probe(mid);
     touches.push(t);
-    if (t.kind !== 'stock') {
-      if ((t.kind !== 'above' || scan.aboveIsEdge === true) && lastOn !== null) {
-        const mid = Math.round(((lastOn + p) / 2) * 1000) / 1000;
-        touches.push(await probe(mid));
-      }
-      return false;
-    }
-    lastOn = p;
-    return true;
-  };
-
-  if (foundInward) {
-    // Already beside the edge (the inward search bracketed it at coarse resolution): step fine only.
-    for (let p = r3(lastOn + scan.outward * scan.fineStep); scan.outward * (scan.limit - p) >= -1e-9; p = r3(p + scan.outward * scan.fineStep)) {
-      if (!(await stepOutward(p))) break;
-    }
-  } else {
-    for (const p of scanPositions(scan).slice(1)) {
-      if (!(await stepOutward(p))) break;
-    }
+    if (t.kind === 'above' && scan.aboveIsEdge !== true) return { scan, touches };
+    if (t.kind === 'stock') on = mid;
+    else off = mid;
   }
   return { scan, touches };
 }

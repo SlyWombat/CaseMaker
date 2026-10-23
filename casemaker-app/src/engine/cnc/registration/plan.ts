@@ -4,10 +4,8 @@
  *
  * WHAT THE PLAN IS. The surface touch at a clean point — the centre of the CUT AREA (§5.9), else the
  * stock's — then one EDGE SCAN per edge the mount leaves to be found. A scan is a line across one
- * edge: it starts `scanInsideMm` inside where the job expects the edge and steps OUTWARD — coarse
- * until one coarse step short of the expected edge, then fine — and STOPS at the first touch off the
- * stock ({@link scanPositions}). The executor then refines that last gap with one touch INWARD of the
- * miss, never further out (`execute.ts`).
+ * edge: it brackets the edge between a point ON the stock (the surface touch's coordinate along the
+ * axis) and a point OFF it, then bisects to the fine step (`execute.ts`, #594).
  *
  * THE SURFACE TOUCH IS BOUNDED (#430 review). The job says where it expects the stock's top (machine
  * Z — from the stock's thickness, the mount and G54 Z); the seek travels only to that surface −
@@ -397,21 +395,4 @@ export function planRegistration(input: PlanInput, s: RegistrationSettings): Pla
       notes,
     },
   };
-}
-
-/**
- * The positions a scan touches, in order, as the bench stepped them on 2026-10-15: COARSE from the
- * start until one coarse step short of the expected edge, then FINE from there out to the limit. The
- * executor stops at the first touch off the stock.
- */
-export function scanPositions(scan: EdgeScan): number[] {
-  const out: number[] = [];
-  const r = (p: number) => Math.round(p * 1000) / 1000;
-  const fineFrom = scan.expectedAt - scan.outward * scan.coarseStep;
-  let p = scan.start;
-  for (; scan.outward * (fineFrom - p) > 1e-9; p += scan.outward * scan.coarseStep) out.push(r(p));
-  for (p = out.length > 0 ? fineFrom : scan.start; scan.outward * (scan.limit - p) >= -1e-9; p += scan.outward * scan.fineStep) {
-    out.push(r(p));
-  }
-  return out;
 }

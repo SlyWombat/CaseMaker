@@ -276,8 +276,8 @@ describe('#475 the executor measures the cut extents', () => {
     expect(r.outcome.problems).toContain(r.spread!.refusal!.message);
 
     // Five planned readings: the registration seek (2 probes) and the four points not its own, plus
-    // the two edge scans' own touches (8 each on this blank).
-    expect(probeSeeks(z1.lines)).toBe(2 + 4 * 2 + 16);
+    // the two edge scans' bracket-and-bisect touches (7 each on this blank, #594).
+    expect(probeSeeks(z1.lines)).toBe(2 + 4 * 2 + 14);
     // #430's bounds are unchanged: nothing probed below the cap, and the run finished homed.
     expect(z1.lowest()).toBeGreaterThanOrEqual(-55.131 - S.capBelowSurfaceMm);
     expect(z1.lines.slice(-2)).toEqual(['G53 G0 Z-3', '$H']);
@@ -315,7 +315,7 @@ describe('#475 the executor measures the cut extents', () => {
     expect(r.outcome.usable).toBe(true);
     // The origin the next step writes is the LOWEST touch, not the registration reading.
     expect(r.outcome.surfaceZ).toBe(-55.08);
-    expect(probeSeeks(z1.lines)).toBe(2 + 4 * 2 + 16);
+    expect(probeSeeks(z1.lines)).toBe(2 + 4 * 2 + 14);
   });
 
   it('#591 — a blank clamped 2 mm along the jaws: the scans find it, and the extent touches land on it', async () => {
@@ -382,6 +382,22 @@ describe('#475 the executor measures the cut extents', () => {
     expect(z1.lines.slice(-2)).toEqual(['G53 G0 Z-3', '$H']);
   });
 
+  it('#594 — a blank 20 mm along the jaws: the bracket-and-bisect finds the edge within the fine step', async () => {
+    // The badge is tall enough that a +20 mm shift still leaves the surface point on the stock, so
+    // only the front scan has to search inward. The bisect costs ~log₂(40 / 0.25) ≈ 8 touches — more
+    // than the ~7 for a near-expected blank, but it finds the edge whatever the offset.
+    const SHIFT = 20;
+    const plan = registrationPlan(BADGE_STOCK, -55.131, { x: 24, y: 43 });
+    const actual: ExpectedStock = { ...BADGE_STOCK, yMin: BADGE_STOCK.yMin + SHIFT, yMax: BADGE_STOCK.yMax + SHIFT };
+    const z1 = fakeZ1({ actual, surface: -55.131, jaw: true });
+
+    const r = await runRegistration(plan, { console: z1.console, operator: yes });
+    if (!r.ok) throw new Error(r.reason);
+
+    expect(r.outcome.measured).toEqual({ x: true, y: true });
+    expect(Math.abs(r.outcome.offset.y - SHIFT)).toBeLessThanOrEqual(S.fineStepMm);
+  });
+
   it('#590 — only the first touch starts at the travel height; the extent touches start just above the band', async () => {
     const job = laminateJob();
     const plan = registrationPlan(LAMINATE_STOCK, -55, { x: 38, y: 12.675 });
@@ -425,6 +441,6 @@ describe('#475 the executor measures the cut extents', () => {
     if (!r.ok) throw new Error(r.reason);
     expect(r.spread).toBeUndefined();
     expect(r.outcome.surfaceZ).toBe(-55.131);
-    expect(probeSeeks(z1.lines)).toBe(2 + 16);
+    expect(probeSeeks(z1.lines)).toBe(2 + 14);
   });
 });

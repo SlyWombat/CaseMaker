@@ -24,7 +24,7 @@
  */
 
 import { estimateIRCycleSeconds, type RapidEstimate, type ToolpathIR } from '../cam/ir';
-import { scanPositions, type PlanResult } from '../registration';
+import { type PlanResult } from '../registration';
 import type { Mount, Setup } from '../setups/types';
 import type { StockFlatness } from '@/platform/stockClient';
 import type { ShopDefaults } from '@/platform/defaultsClient';
@@ -131,9 +131,13 @@ function fromDefault(label: string, who: 'machine' | 'you', s: Sourced): PhasePa
   return { label, who, seconds: s.value, source: s.source, from: s.key };
 }
 
-/** Touches in a registration plan: the surface touch, and each scan's positions up to its limit. */
+/** Touches in a registration plan: the surface touch, plus each scan's bracket-and-bisect probes (#594). */
 export function registrationTouches(plan: Extract<PlanResult, { ok: true }>): number {
-  return 1 + plan.plan.scans.reduce((n, scan) => n + scanPositions(scan).length, 0);
+  return 1 + plan.plan.scans.reduce((n, scan) => {
+    // Two bracket probes (start and limit), then ~log₂ bisections to the fine step.
+    const bracket = Math.abs(scan.start - scan.limit);
+    return n + 2 + Math.ceil(Math.log2(Math.max(2, bracket / scan.fineStep)));
+  }, 0);
 }
 
 /** The setups planner's setups (#428) as the plan needs them. */
