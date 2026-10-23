@@ -403,6 +403,14 @@ describe('#599 the standalone mount tap', () => {
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.reason).toContain('no jaw top');
   });
+
+  it('stops before any move when the probe is not fitted', async () => {
+    const z1 = fakeZ1({ actual: SHIFTED, tap: { x: -186.2, y: -180, z: -56.82 } });
+    const r = await runMountTap({ x: -186.2, y: -180 }, -3, S, { console: z1.console, operator: async () => false }, -100);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reason).toContain('probe was not fitted');
+    expect(z1.lines).toEqual(['?', '$H']);
+  });
 });
 
 describe('#430 the executor, on a fake machine', () => {

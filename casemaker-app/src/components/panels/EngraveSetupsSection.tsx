@@ -12,11 +12,12 @@
  * the row notices. Every plan, every reason and every set of words comes from `engine/cnc/setups`.
  */
 
-import { useMemo, useState, type CSSProperties, type JSX } from 'react';
+import { useMemo, useRef, useState, type CSSProperties, type JSX } from 'react';
 import { useEngraveJobStore } from '@/store/engraveJobStore';
 import { useShopDefaultsStore } from '@/store/shopDefaultsStore';
 import { useSettingsStore } from '@/store/settingsStore';
 import { useMachineStore } from '@/store/machineStore';
+import { useMachineTranscriptStore } from '@/store/machineTranscriptStore';
 import { useEngraveRegistrationStore } from '@/store/engraveRegistrationStore';
 import { useToolRegistry } from '@/hooks/useToolRegistry';
 import { expandEngraveRow } from '@/store/engraveRowStore';
@@ -31,7 +32,7 @@ import { registrationSettings } from '@/engine/cnc/registration/settings';
 import { recommendedSurfaceToleranceMm } from '@/engine/cnc/materials';
 import { primitiveLabel } from '@/engine/cnc/engrave/partPlan';
 import { summarizePlan } from '@/engine/cnc/registration/summary';
-import { runMountTap } from '@/engine/cnc/registration';
+import { runMountTap, type OperatorStep } from '@/engine/cnc/registration';
 import { attachConsole } from '@/platform/machineConsole';
 import type { MountDatum, PlanObstacle, ProbeSpec, RegistrationPlan } from '@/engine/cnc/registration/plan';
 import {
@@ -272,6 +273,19 @@ export function EngraveSetupsSection({ initiallyOpen = false }: { initiallyOpen?
   /** #599 — the standalone mount tap's result, shown beside the Setups section. */
   const [tapNote, setTapNote] = useState<string | null>(null);
   const [tapEpoch, setTapEpoch] = useState(0);
+  /** #599 — the fit-probe prompt for the standalone tap, resolved by the Continue/Cancel buttons. */
+  const [tapPrompt, setTapPrompt] = useState<OperatorStep | null>(null);
+  const tapResolver = useRef<((ok: boolean) => void) | null>(null);
+  const askTapOperator = (step: OperatorStep): Promise<boolean> => {
+    setTapPrompt(step);
+    return new Promise<boolean>((resolve) => {
+      tapResolver.current = (ok) => {
+        tapResolver.current = null;
+        setTapPrompt(null);
+        resolve(ok);
+      };
+    });
+  };
 
   const reading = useMemo(() => readSetups(job), [job]);
   const settings = useMemo(() => setupsSettings(defaults), [defaults]);
@@ -466,9 +480,10 @@ export function EngraveSetupsSection({ initiallyOpen = false }: { initiallyOpen?
         { x: tap.x, y: tap.y },
         tap.fromMachineZ,
         regSettings,
-        { console: { send: (line, timing) => handle.send(line, timing) }, operator: async () => true },
+        { console: { send: (line, timing) => handle.send(line, timing) }, operator: askTapOperator },
         floor,
       );
+      useMachineTranscriptStore.getState().setRegistration(r.transcript.map((t) => `> ${t.line}\n${t.reply}`).join('\n'));
       if (r.ok) {
         const record = machineAt(target);
         if (record !== null) {
@@ -653,6 +668,17 @@ export function EngraveSetupsSection({ initiallyOpen = false }: { initiallyOpen?
         <p style={{ ...MUTED, color: '#e0c07a' }} data-testid="engrave-setups-tap-note">
           {tapNote}
         </p>
+      )}
+      {tapPrompt !== null && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '8px 0' }} data-testid="engrave-setups-tap-prompt">
+          <span style={{ fontSize: 12 }}>{tapPrompt.text}</span>
+          <button type="button" onClick={() => tapResolver.current?.(true)}>
+            Continue
+          </button>
+          <button type="button" onClick={() => tapResolver.current?.(false)}>
+            Cancel
+          </button>
+        </div>
       )}
 
       {reading.source === 'empty' && draft === null ? (

@@ -407,6 +407,9 @@ export async function runMountTap(
     const status = await io.send('?');
     if (controllerState(status) !== 'Idle') throw new Stop(`the machine reads ${controllerState(status) ?? 'no state'}, not Idle`);
     await io.send('$H');
+    if (!(await deps.operator({ kind: 'fit-probe', text: 'Fit the wired probe in the spindle, then continue.' }))) {
+      throw new Stop('stopped: the probe was not fitted');
+    }
     const rest = await io.send('M119');
     if (/Probe:\s*1\b/.test(rest)) throw new Stop('the probe reads touched at rest; check it is seated and plugged in');
     const ref = lastPrb(await io.send('M491', { timing: PROBE_TIMING }));
