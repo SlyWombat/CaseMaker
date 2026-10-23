@@ -215,6 +215,15 @@ describe('#599 the mount-tap datum write-back', () => {
     expect(active.datums.viseJawTopZ).toEqual({ value: -56.82, measuredAt: NOW, by: 'fx-probe-1', at: [-186.2, -153.5] });
     expect(next.bedProfiles).toHaveLength(machine.bedProfiles!.length);
   });
+
+  it('falls back to the legacy wired-probe word when there is no probe accessory', () => {
+    const raw = (JSON.parse(readFileSync(FIXTURE, 'utf8')) as { machines: Array<Record<string, unknown>> }).machines[0]!;
+    const machine = MachineRecordSchema.parse(raw);
+    const next = withViseJawTopDatum(machine, { z: -56.82, at: { x: -186.2, y: -153.5 } }, null, NOW);
+    const active = next.bedProfiles!.find((p) => p.id === next.activeBedProfileId)!;
+    expect(active.datums.viseJawTopZ!.by).toBe('wired-probe');
+    expect(active.history.at(-1)!.what).toContain('no probe accessory');
+  });
 });
 
 describe('#511 the Bed block\'s pure actions', () => {

@@ -472,7 +472,7 @@ export function EngraveSetupsSection({ initiallyOpen = false }: { initiallyOpen?
       if (r.ok) {
         const record = machineAt(target);
         if (record !== null) {
-          await useLocationStore.getState().saveMachine(withViseJawTopDatum(record, { z: r.z, at: r.at }, probe?.id ?? 'wired-probe', new Date().toISOString()));
+          await useLocationStore.getState().saveMachine(withViseJawTopDatum(record, { z: r.z, at: r.at }, probe?.id ?? null, new Date().toISOString()));
         }
         setTapNote('the jaw top is recorded — plan the registration again');
         setTapEpoch((e) => e + 1);

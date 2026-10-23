@@ -293,12 +293,12 @@ export function EngraveRegistrationStep({ job, target }: EngraveRegistrationStep
         return;
       }
       // #599 — the mount tap measured the jaw top: write it into the active bed profile's datum.
-      if (r.mountTap !== null && plan.probe !== null) {
+      if (r.mountTap !== null) {
         const machine = machineAt(target);
         if (machine !== null) {
           await useLocationStore
             .getState()
-            .saveMachine(withViseJawTopDatum(machine, r.mountTap, plan.probe.id, new Date().toISOString()));
+            .saveMachine(withViseJawTopDatum(machine, r.mountTap, plan.probe?.id ?? null, new Date().toISOString()));
         }
       }
       setResult(r);

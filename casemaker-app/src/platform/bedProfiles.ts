@@ -114,11 +114,14 @@ export function viseFrameFromRegistration(
 export function withViseJawTopDatum(
   machine: MachineRecord,
   mountTap: { z: number; at: { x: number; y: number } },
-  probeId: string,
+  probeId: string | null,
   now: string,
 ): MachineRecord {
   const profileId = machine.activeBedProfileId;
   if (profileId === undefined) return machine;
+  // No probe accessory → the legacy instrument word the migration writes (`bedFromLegacy`).
+  const by = probeId ?? 'wired-probe';
+  const what = probeId === null ? 'tapped; no probe accessory registered' : 'tapped';
   return {
     ...machine,
     bedProfiles: machine.bedProfiles?.map((p) =>
@@ -127,8 +130,9 @@ export function withViseJawTopDatum(
             ...p,
             datums: {
               ...p.datums,
-              viseJawTopZ: { value: mountTap.z, measuredAt: now, by: probeId, at: [mountTap.at.x, mountTap.at.y] },
+              viseJawTopZ: { value: mountTap.z, measuredAt: now, by, at: [mountTap.at.x, mountTap.at.y] },
             },
+            history: [...p.history, { at: now, what }],
           }
         : p,
     ),
