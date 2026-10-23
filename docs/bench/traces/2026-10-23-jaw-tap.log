@@ -1,0 +1,59 @@
+2026-10-23T12:03:33.607Z  > G53 G0 Z-40
+    ok
+    (1 frame(s), 915 ms)
+2026-10-23T12:03:34.864Z  > G53 G0 X-186.2 Y-180.0
+    [timeout] no reply within 3000 ms of sending "G53 G0 X-186.2 Y-180.0"
+2026-10-23T12:03:38.170Z  > G91
+    ok
+    (1 frame(s), 962 ms)
+2026-10-23T12:03:39.339Z  > G38.3 Z-20 F150
+    [timeout] no reply within 3000 ms of sending "G38.3 Z-20 F150"
+2026-10-23T12:03:42.560Z  > G0 Z3
+    ok
+    (1 frame(s), 990 ms)
+2026-10-23T12:03:43.781Z  > G90
+    ok
+    (1 frame(s), 871 ms)
+2026-10-23T12:09:06.334Z  > M119
+    X_max:1 Y_max:1 Z_max:0 A_min:1 pins- (XL)P0.24:1 (XL)P0.24:1 (YL)P0.25:1 (YL)P0.25:1 (ZL)P1.1:0 (ZL)P1.1:0 (AL)P1.4:1 (AL)P1.4:1  Probe: 0
+    ok
+    (16 frame(s), 2675 ms)
+2026-10-23T12:09:46.384Z  > $X
+    [Caution: Unlocked]
+    ok
+    (1 frame(s), 2185 ms)
+2026-10-23T12:09:48.770Z  > $H
+    [timeout] no reply within 3000 ms of sending "$H"
+2026-10-23T12:10:04.451Z  > M119
+    X_max:0 Y_max:0 Z_max:0 A_min:1 pins- (XL)P0.24:0 (XL)P0.24:0 (YL)P0.25:0 (YL)P0.25:0 (ZL)P1.1:0 (ZL)P1.1:0 (AL)P1.4:1 (AL)P1.4:1  Probe: 0
+    ok
+    (16 frame(s), 2098 ms)
+2026-10-23T12:10:21.776Z  > G53 G0 Z-40
+    ok
+    (1 frame(s), 1592 ms)
+2026-10-23T12:10:34.227Z  > G53 G0 X-186.2 Y-180.0
+    [timeout] no reply within 3000 ms of sending "G53 G0 X-186.2 Y-180.0"
+2026-10-23T12:10:48.456Z  > M119
+    X_max:0 Y_max:0 Z_max:0 A_min:1 pins- (XL)P0.24:0 (XL)P0.24:0 (YL)P0.25:0 (YL)P0.25:0 (ZL)P1.1:0 (ZL)P1.1:0 (AL)P1.4:1 (AL)P1.4:1  Probe: 0
+    ok
+    (16 frame(s), 2092 ms)
+2026-10-23T12:10:50.759Z  > G91
+    ok
+    (1 frame(s), 1592 ms)
+2026-10-23T12:10:52.589Z  > G38.3 Z-20 F150
+    [timeout] no reply within 3000 ms of sending "G38.3 Z-20 F150"
+2026-10-23T12:11:06.188Z  > G0 Z3
+    ok
+    (1 frame(s), 1580 ms)
+2026-10-23T12:11:07.998Z  > G90
+    ok
+    (1 frame(s), 1562 ms)
+2026-10-23T12:11:13.453Z  > M119
+    X_max:0 Y_max:0 Z_max:0 A_min:1 pins- (XL)P0.24:0 (XL)P0.24:0 (YL)P0.25:0 (YL)P0.25:0 (ZL)P1.1:0 (ZL)P1.1:0 (AL)P1.4:1 (AL)P1.4:1  Probe: 0
+    ok
+    (16 frame(s), 2145 ms)
+2026-10-23T12:11:15.837Z  > G53 G0 Z-5
+    ok
+    (1 frame(s), 1568 ms)
+2026-10-23T12:11:25.054Z  > $H
+    [timeout] no reply within 3000 ms of sending "$H"

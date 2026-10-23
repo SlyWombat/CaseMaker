@@ -1,0 +1,37 @@
+2026-10-23T12:16:14.058Z  > G53 G0 Z-40
+    ok
+    (1 frame(s), 1608 ms)
+2026-10-23T12:16:26.835Z  > G53 G0 X-162.15 Y-161.025
+    ok
+    (1 frame(s), 4176 ms)
+2026-10-23T12:16:38.669Z  > M119
+    X_max:0 Y_max:0 Z_max:0 A_min:1 pins- (XL)P0.24:0 (XL)P0.24:0 (YL)P0.25:0 (YL)P0.25:0 (ZL)P1.1:0 (ZL)P1.1:0 (AL)P1.4:1 (AL)P1.4:1  Probe: 0
+    ok
+    (16 frame(s), 2436 ms)
+2026-10-23T12:16:41.324Z  > G91
+    ok
+    (1 frame(s), 1661 ms)
+2026-10-23T12:16:43.181Z  > G38.3 Z-20 F150
+    [timeout] no reply within 3000 ms of sending "G38.3 Z-20 F150"
+2026-10-23T12:16:50.442Z  > G0 Z1
+    ok
+    (1 frame(s), 1575 ms)
+2026-10-23T12:16:58.869Z  > G38.3 Z-2 F50
+    [PRB:-162.150,-161.025,-54.982:1]
+    ok
+    (2 frame(s), 15006 ms)
+2026-10-23T12:17:17.832Z  > G0 Z3
+    ok
+    (1 frame(s), 1606 ms)
+2026-10-23T12:17:19.673Z  > G90
+    ok
+    (1 frame(s), 1580 ms)
+2026-10-23T12:17:25.211Z  > M119
+    X_max:0 Y_max:0 Z_max:0 A_min:1 pins- (XL)P0.24:0 (XL)P0.24:0 (YL)P0.25:0 (YL)P0.25:0 (ZL)P1.1:0 (ZL)P1.1:0 (AL)P1.4:1 (AL)P1.4:1  Probe: 0
+    ok
+    (16 frame(s), 2100 ms)
+2026-10-23T12:17:27.588Z  > G53 G0 Z-5
+    ok
+    (1 frame(s), 1591 ms)
+2026-10-23T12:17:40.335Z  > $H
+    [timeout] no reply within 3000 ms of sending "$H"

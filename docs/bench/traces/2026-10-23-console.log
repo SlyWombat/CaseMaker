@@ -1,0 +1,5 @@
+2026-10-23T12:24:57.227Z  > M821
+    ok
+    (1 frame(s), 1646 ms)
+2026-10-23T12:25:04.500Z  > $H
+    [timeout] no reply within 3000 ms of sending "$H"
