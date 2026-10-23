@@ -371,6 +371,12 @@ export async function runRegistration(
     if (!(await deps.operator({ kind: 'fit-probe', text: 'Fit the wired probe in the spindle, then continue.' }))) {
       throw new Stop('stopped: the probe was not fitted');
     }
+    // #599 — the probe must read OPEN (untouched) at rest: a touched reading before anything moves
+    // means the plug is bad or wired wrong (the Carvera firmware halts PROBE_FAIL on exactly this).
+    const rest = await io.send('M119');
+    if (/Probe:\s*1\b/.test(rest)) {
+      throw new Stop('the probe reads touched at rest; check it is seated and plugged in');
+    }
     const ref = lastPrb(await io.send('M491', { timing: PROBE_TIMING }));
     if (ref === null || !ref.touched) throw new Stop('M491 answered no tool-length reading');
     if (plan.mount === 'bracket' && !(await deps.operator({ kind: 'confirm-mount', text: mountConfirmText(plan) }))) {

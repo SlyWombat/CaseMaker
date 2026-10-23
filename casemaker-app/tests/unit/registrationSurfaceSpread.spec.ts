@@ -158,6 +158,7 @@ function fakeZ1(opts: {
       if (alarmed) return reply('error:Alarm lock');
       if (line === '$H') return (pos.x = -1), (pos.y = -1), (pos.z = -1), reply('ok');
       if (line === 'G54' || line === 'G92.1') return reply('ok');
+      if (line === 'M119') return reply('X_min:0 Y_min:0 Z_min:0 X_max:0 Y_max:0 Z_max:0 Probe:0');
       if (line === 'M491') {
         const z = tool === 'probe' ? -76.063 : -79.163;
         return reply(`[PRB:-9.890,-12.830,${z - 0.011}:1]\nok\n[PRB:-9.890,-12.830,${z}:1]\nDone ATC`);

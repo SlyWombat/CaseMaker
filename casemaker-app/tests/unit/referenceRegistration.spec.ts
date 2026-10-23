@@ -88,6 +88,7 @@ function fakeZ1(opts: { holes?: ReferenceOpening[]; shift?: { x: number; y: numb
       if (line === '$X') return (alarmed = false), reply('ok');
       if (alarmed) return reply('error:Alarm lock');
       if (['$H', 'G54', 'G92.1'].includes(line) || /^G10 L2 P1 /.test(line)) return reply('ok');
+      if (line === 'M119') return reply('X_min:0 Y_min:0 Z_min:0 X_max:0 Y_max:0 Z_max:0 Probe:0');
       if (line === 'M491') return reply('[PRB:-9.890,-12.830,-76.063:1]\nok');
       if (line === 'G90' || line === 'G91') return (mode = line), reply('ok');
       let m = /^G53 G0 Z(-?[\d.]+)$/.exec(line);

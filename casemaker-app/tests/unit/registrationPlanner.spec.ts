@@ -220,6 +220,8 @@ function fakeZ1(opts: {
   landShift?: number;
   /** The G54 in force for plain `G0` moves, when it is not where the stock is (a stale origin). */
   g54?: { x: number; y: number };
+  /** #599 — `M119` reads the probe touched (`Probe: 1`) at rest, as a bad plug would. */
+  probeTouched?: boolean;
 }) {
   const inForce = opts.g54 ?? G54;
   const surface = opts.surface ?? SURFACE;
@@ -255,6 +257,7 @@ function fakeZ1(opts: {
       if (alarmed) return reply('error:Alarm lock');
       if (line === '$H') return (pos.x = -1), (pos.y = -1), (pos.z = -1), reply('ok');
       if (line === 'G54' || line === 'G92.1') return reply('ok');
+      if (line === 'M119') return reply(opts.probeTouched ? 'X_max:0 Y_max:0 Z_max:0 A_min:1 Probe: 1' : 'X_max:0 Y_max:0 Z_max:0 A_min:1 Probe: 0');
       if (line === 'M491') {
         const z = tool === 'probe' ? -76.063 : -79.163;
         return reply(`[PRB:-9.890,-12.830,${z - 0.011}:1]\nok\n[PRB:-9.890,-12.830,${z}:1]\nDone ATC`);
@@ -330,7 +333,7 @@ describe('#430 the executor, on a fake machine', () => {
     const r = await runRegistration(plan('vise'), { console: z1.console, operator: yes });
     if (!r.ok) throw new Error(r.reason);
 
-    expect(z1.lines.slice(0, 5)).toEqual(['?', '$H', 'G54', 'G92.1', 'M491']);
+    expect(z1.lines.slice(0, 6)).toEqual(['?', '$H', 'G54', 'G92.1', 'M119', 'M491']);
     expect(z1.lines.slice(-2)).toEqual(['G53 G0 Z-3', '$H']);
     for (const line of z1.lines) expect(consoleProblem(line), line).toBeNull();
     // `?` reads Idle right before every G38.3.
@@ -449,6 +452,14 @@ describe('#430 the executor, on a fake machine', () => {
     const r = await runRegistration(plan('vise'), { console: z1.console, operator: yes });
     expect(r.ok).toBe(false);
     expect(z1.lines).toEqual(['?']);
+  });
+
+  it('#599 the probe reading touched at rest stops before any Z move', async () => {
+    const z1 = fakeZ1({ actual: SHIFTED, probeTouched: true });
+    const r = await runRegistration(plan('vise'), { console: z1.console, operator: yes });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reason).toContain('touched at rest');
+    expect(z1.lines).toEqual(['?', '$H', 'G54', 'G92.1', 'M119']);
   });
 
   it('#448: the recovery sentence names the travel height it was given, not −3', async () => {
@@ -602,6 +613,7 @@ describe('#430 a Z-chain replay of the bench’s own answers (2026-10-15)', () =
     $H: ['ok'],
     G54: ['ok'],
     'G92.1': ['ok'],
+    M119: ['X_max:0 Y_max:0 Z_max:0 A_min:1 Probe: 0'],
     M491: [
       'ok\nM497.3\nok\nG53 G0 Z-3.000\nok\nG53 G0 X-9.890 Y-12.830\nok\nG38.6 Z-108.000 F500.000\n[PRB:-9.890,-12.830,-76.074:1]\nok\nG91 G0 Z1.000\nok\nG38.6 Z-2.000 F100.000\n[PRB:-9.890,-12.830,-76.061:1]\nok\nM493.1\nok\nG53 G0 Z-20.000\nok\nDone ATC',
       'ok\nM497.3\nok\nG53 G0 Z-3.000\nok\nG53 G0 X-9.890 Y-12.830\nok\nG38.6 Z-108.000 F500.000\n[PRB:-9.890,-12.830,-79.168:1]\nok\nG91 G0 Z1.000\nok\nG38.6 Z-2.000 F100.000\n[PRB:-9.890,-12.830,-79.158:1]\nok\nM493.1\nok\nG53 G0 Z-20.000\nok\nDone ATC',
