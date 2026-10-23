@@ -41,6 +41,7 @@ const WARN_COLOR = '#e0c07a';
 /** What pressing "Plan registration" answered — an engine plan, a refusal, or a missing input. */
 export type RegistrationAttempt =
   | { kind: 'need-seat'; message: string }
+  | { kind: 'need-datum'; message: string }
   | { kind: 'refused'; reason: string }
   | { kind: 'plan'; method: Mount; plan: RegistrationPlan; summary: string; expected: string };
 
@@ -79,7 +80,7 @@ export interface EngraveSetupRowProps {
   onRemoveSetup: () => void;
   onReplace: (next: JobSetup) => void;
   onPreviewRemount: () => void;
-  planRegistration: (seatZ: string) => RegistrationAttempt;
+  planRegistration: (seatZ: string, useTypedSeat: boolean) => RegistrationAttempt;
 }
 
 function holderWords(mount: MountSpec): string {
@@ -124,6 +125,8 @@ export function EngraveSetupRow(props: EngraveSetupRowProps): JSX.Element {
   // does not, so its field stays empty and the operator types the probe reading as before.
   const shippedZ1Vise = setup.mount.kind === 'vise' && props.viseSource === 'default';
   const [seatZ, setSeatZ] = useState(shippedZ1Vise ? String(VISE_SEAT_MACHINE_Z) : '');
+  // #598 — the expert override: use the typed seat instead of the measured jaw-top datum. Off by default.
+  const [useTypedSeat, setUseTypedSeat] = useState(false);
   // The field says where its aim came from: a default is an AIM, not a reading, and the probe still
   // writes the true Z — so a shipped-vise default and a typed custom reading must read differently.
   const seatTitle = shippedZ1Vise
@@ -143,7 +146,7 @@ export function EngraveSetupRow(props: EngraveSetupRowProps): JSX.Element {
   const candidates = useMemo(() => props.candidateItems, [props.candidateItems]);
 
   function planNow(): void {
-    setPreview({ for: signature, value: props.planRegistration(seatZ) });
+    setPreview({ for: signature, value: props.planRegistration(seatZ, useTypedSeat) });
   }
 
   function approve(): void {
@@ -345,7 +348,24 @@ export function EngraveSetupRow(props: EngraveSetupRowProps): JSX.Element {
 
               {editable && (
                 <>
-                  {setup.mount.kind !== 'bracket' && (
+                  {setup.mount.kind === 'vise' && (
+                    <label style={FIELD_LABEL}>
+                      <input
+                        type="checkbox"
+                        checked={useTypedSeat}
+                        data-testid="engrave-setups-use-typed-seat"
+                        onChange={(e) => {
+                          setUseTypedSeat(e.target.checked);
+                          setPreview(null);
+                        }}
+                      />
+                      <span>Use a typed seat instead</span>
+                      {useTypedSeat && (
+                        <span style={{ ...MUTED, margin: 0 }}>expert override — the measured jaw top is ignored</span>
+                      )}
+                    </label>
+                  )}
+                  {(setup.mount.kind === 'tape' || useTypedSeat) && (
                     <label style={FIELD_LABEL}>
                       <span>Seat machine Z</span>
                       <input
@@ -374,6 +394,11 @@ export function EngraveSetupRow(props: EngraveSetupRowProps): JSX.Element {
 
               {attempt?.kind === 'need-seat' && (
                 <p style={{ ...MUTED, color: WARN_COLOR }} data-testid={`engrave-setup-reg-need-seat-${n}`}>
+                  {attempt.message}
+                </p>
+              )}
+              {attempt?.kind === 'need-datum' && (
+                <p style={{ ...MUTED, color: WARN_COLOR }} data-testid={`engrave-setup-reg-need-datum-${n}`}>
                   {attempt.message}
                 </p>
               )}

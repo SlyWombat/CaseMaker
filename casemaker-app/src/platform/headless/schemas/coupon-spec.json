@@ -1364,6 +1364,37 @@
                             ],
                             "type": "string"
                           },
+                          "mountDatum": {
+                            "anyOf": [
+                              {
+                                "properties": {
+                                  "by": {
+                                    "description": "The probe id/variant that tapped the datum.",
+                                    "type": "string"
+                                  },
+                                  "jawTopZ": {
+                                    "description": "Measured jaw-top machine Z, in millimetres.",
+                                    "type": "number"
+                                  },
+                                  "measuredAt": {
+                                    "description": "When the datum was measured.",
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "jawTopZ",
+                                  "measuredAt",
+                                  "by"
+                                ],
+                                "type": "object"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ],
+                            "default": null,
+                            "description": "The measured mount datum the seek is a search from, or null/absent on the legacy seat path."
+                          },
                           "mountObstacles": {
                             "description": "Clamps and bracket arms the operator must confirm are clear.",
                             "items": {
@@ -1426,6 +1457,63 @@
                               "type": "string"
                             },
                             "type": "array"
+                          },
+                          "probe": {
+                            "anyOf": [
+                              {
+                                "properties": {
+                                  "id": {
+                                    "description": "The checked-out probe accessory id.",
+                                    "type": "string"
+                                  },
+                                  "tip": {
+                                    "description": "The probe tip values that resolved the settings.",
+                                    "properties": {
+                                      "diameterMm": {
+                                        "description": "Probe tip diameter, in millimetres.",
+                                        "type": "number"
+                                      },
+                                      "rimOffsetMm": {
+                                        "description": "Effective probe rim offset, in millimetres.",
+                                        "type": "number"
+                                      },
+                                      "rimOffsetUncertaintyMm": {
+                                        "description": "Rim offset spread, ± millimetres.",
+                                        "type": "number"
+                                      }
+                                    },
+                                    "required": [
+                                      "diameterMm",
+                                      "rimOffsetMm",
+                                      "rimOffsetUncertaintyMm"
+                                    ],
+                                    "type": "object"
+                                  },
+                                  "variant": {
+                                    "anyOf": [
+                                      {
+                                        "type": "string"
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ],
+                                    "description": "The probe variant, or null."
+                                  }
+                                },
+                                "required": [
+                                  "id",
+                                  "variant",
+                                  "tip"
+                                ],
+                                "type": "object"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ],
+                            "default": null,
+                            "description": "The checked-out probe on the plan, or null/absent."
                           },
                           "referenceRotation": {
                             "anyOf": [
@@ -2766,6 +2854,37 @@
                         ],
                         "type": "string"
                       },
+                      "mountDatum": {
+                        "anyOf": [
+                          {
+                            "properties": {
+                              "by": {
+                                "description": "The probe id/variant that tapped the datum.",
+                                "type": "string"
+                              },
+                              "jawTopZ": {
+                                "description": "Measured jaw-top machine Z, in millimetres.",
+                                "type": "number"
+                              },
+                              "measuredAt": {
+                                "description": "When the datum was measured.",
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "jawTopZ",
+                              "measuredAt",
+                              "by"
+                            ],
+                            "type": "object"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ],
+                        "default": null,
+                        "description": "The measured mount datum the seek is a search from, or null/absent on the legacy seat path."
+                      },
                       "mountObstacles": {
                         "description": "Clamps and bracket arms the operator must confirm are clear.",
                         "items": {
@@ -2828,6 +2947,63 @@
                           "type": "string"
                         },
                         "type": "array"
+                      },
+                      "probe": {
+                        "anyOf": [
+                          {
+                            "properties": {
+                              "id": {
+                                "description": "The checked-out probe accessory id.",
+                                "type": "string"
+                              },
+                              "tip": {
+                                "description": "The probe tip values that resolved the settings.",
+                                "properties": {
+                                  "diameterMm": {
+                                    "description": "Probe tip diameter, in millimetres.",
+                                    "type": "number"
+                                  },
+                                  "rimOffsetMm": {
+                                    "description": "Effective probe rim offset, in millimetres.",
+                                    "type": "number"
+                                  },
+                                  "rimOffsetUncertaintyMm": {
+                                    "description": "Rim offset spread, ± millimetres.",
+                                    "type": "number"
+                                  }
+                                },
+                                "required": [
+                                  "diameterMm",
+                                  "rimOffsetMm",
+                                  "rimOffsetUncertaintyMm"
+                                ],
+                                "type": "object"
+                              },
+                              "variant": {
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ],
+                                "description": "The probe variant, or null."
+                              }
+                            },
+                            "required": [
+                              "id",
+                              "variant",
+                              "tip"
+                            ],
+                            "type": "object"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ],
+                        "default": null,
+                        "description": "The checked-out probe on the plan, or null/absent."
                       },
                       "referenceRotation": {
                         "anyOf": [

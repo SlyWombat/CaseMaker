@@ -7,6 +7,7 @@
  */
 
 import { PARK_CLEARANCE_MM, readDefault, type ShopDefaults } from '@/platform/defaultsClient';
+import type { ProbeSpec } from './plan';
 
 export interface RegistrationSettings {
   /** A touch never goes lower than the surface minus this: the scan's travel cap. */
@@ -92,7 +93,7 @@ const KEYS: Record<keyof RegistrationSettings, string> = {
 };
 
 /** The settings, and which of them are fallbacks (there was no location to read them from). */
-export function registrationSettings(defaults: ShopDefaults | null): {
+export function registrationSettings(defaults: ShopDefaults | null, probe?: ProbeSpec | null): {
   settings: RegistrationSettings;
   fallbacks: string[];
 } {
@@ -102,6 +103,13 @@ export function registrationSettings(defaults: ShopDefaults | null): {
     const d = readDefault(defaults, key);
     settings[field] = d.value;
     if (d.source === 'fallback') fallbacks.push(key);
+  }
+  // #598 — a checked-out probe resolves the tip/rim values from the instrument, not the shop fallback.
+  // The shop keys stay the no-probe fallback (unchanged), and `fallbacks` still reports them.
+  if (probe != null) {
+    settings.tipDiameterMm = probe.tip.diameterMm;
+    settings.tipRadiusMm = probe.tip.rimOffsetMm;
+    settings.tipRadiusUncertaintyMm = probe.tip.rimOffsetUncertaintyMm;
   }
   return { settings, fallbacks };
 }

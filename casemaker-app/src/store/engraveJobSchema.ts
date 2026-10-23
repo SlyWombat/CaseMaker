@@ -1290,6 +1290,30 @@ const registrationPlanSchema = z.object({
         .describe('Height band accepted as the surface, in millimetres.'),
     })
     .describe('The surface seek this plan runs.'),
+  mountDatum: z
+    .object({
+      jawTopZ: z.number().finite().describe('Measured jaw-top machine Z, in millimetres.'),
+      measuredAt: z.string().describe('When the datum was measured.'),
+      by: z.string().describe('The probe id/variant that tapped the datum.'),
+    })
+    .nullable()
+    .default(null)
+    .describe('The measured mount datum the seek is a search from, or null/absent on the legacy seat path.'),
+  probe: z
+    .object({
+      id: z.string().describe('The checked-out probe accessory id.'),
+      variant: z.string().nullable().describe('The probe variant, or null.'),
+      tip: z
+        .object({
+          diameterMm: z.number().finite().describe('Probe tip diameter, in millimetres.'),
+          rimOffsetMm: z.number().finite().describe('Effective probe rim offset, in millimetres.'),
+          rimOffsetUncertaintyMm: z.number().finite().describe('Rim offset spread, ± millimetres.'),
+        })
+        .describe('The probe tip values that resolved the settings.'),
+    })
+    .nullable()
+    .default(null)
+    .describe('The checked-out probe on the plan, or null/absent.'),
   scans: z.array(edgeScanSchema).describe('Edge scans the plan runs.'),
   bracketOrigin: bracketOriginSchema
     .nullable()

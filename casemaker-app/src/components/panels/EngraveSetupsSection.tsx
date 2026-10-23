@@ -16,8 +16,10 @@ import { useMemo, useState, type CSSProperties, type JSX } from 'react';
 import { useEngraveJobStore } from '@/store/engraveJobStore';
 import { useShopDefaultsStore } from '@/store/shopDefaultsStore';
 import { useSettingsStore } from '@/store/settingsStore';
+import { useMachineStore } from '@/store/machineStore';
 import { useToolRegistry } from '@/hooks/useToolRegistry';
 import { expandEngraveRow } from '@/store/engraveRowStore';
+import { accessoriesFor, machineAt } from '@/store/locationStore';
 import { newId } from '@/utils/id';
 import { bracketSettings, anchorFrom, bracketDatum, bracketExpectedSurface, clampObstacles, bracketObstacles, defaultClampPlacements } from '@/engine/cnc/mounts/bracket';
 import { jobMachine } from '@/engine/cnc/calibration';
@@ -25,7 +27,7 @@ import { registrationSettings } from '@/engine/cnc/registration/settings';
 import { recommendedSurfaceToleranceMm } from '@/engine/cnc/materials';
 import { primitiveLabel } from '@/engine/cnc/engrave/partPlan';
 import { summarizePlan } from '@/engine/cnc/registration/summary';
-import type { PlanObstacle, RegistrationPlan } from '@/engine/cnc/registration/plan';
+import type { MountDatum, PlanObstacle, ProbeSpec, RegistrationPlan } from '@/engine/cnc/registration/plan';
 import {
   addSetupOffer,
   applySetupChange,
@@ -50,6 +52,7 @@ import {
   type SetupChange,
 } from '@/engine/cnc/setups';
 import { readDefault, type ShopDefaults } from '@/platform/defaultsClient';
+import type { MachineRecord } from '@/platform/locationClient';
 import type { MachineCalibration } from '@/engine/cnc/calibration';
 import type { EngraveJob, JobSetup } from '@/types/engraveJob';
 import { EngraveSetupRow, type RegistrationAttempt } from './EngraveSetupRow';
@@ -88,19 +91,50 @@ function expectedWords(plan: RegistrationPlan): string {
   return `X/Y re-checked on the ${edges.join(' and ')} edge${edges.length === 1 ? '' : 's'}; ${z}`;
 }
 
+/** #598 — a finite number out of an accessory's open `unit` map, or null. */
+function num(v: unknown): number | null {
+  return typeof v === 'number' && Number.isFinite(v) ? v : null;
+}
+
+/** #598 — the probe checked out to `machine`, or null when there is none or its tip values are missing. */
+function probeFor(machine: MachineRecord | null): ProbeSpec | null {
+  if (machine === null) return null;
+  const acc = accessoriesFor(machine).find((a) => a.kind === 'probe');
+  if (acc === undefined) return null;
+  const diameterMm = num(acc.unit.tipDiameterMm);
+  const rimOffsetMm = num(acc.unit.rimOffsetMm);
+  const rimOffsetUncertaintyMm = num(acc.unit.rimOffsetUncertaintyMm);
+  if (diameterMm === null || rimOffsetMm === null || rimOffsetUncertaintyMm === null) return null;
+  return { id: acc.id, variant: acc.variant ?? null, tip: { diameterMm, rimOffsetMm, rimOffsetUncertaintyMm } };
+}
+
+/** #598 — the active bed profile's measured jaw-top datum, or null when it has none. */
+function mountDatumFor(machine: MachineRecord | null): MountDatum | null {
+  if (machine === null || machine.bedProfiles === undefined || machine.activeBedProfileId === undefined) return null;
+  const profile = machine.bedProfiles.find((p) => p.id === machine.activeBedProfileId);
+  const datum = profile?.datums.viseJawTopZ ?? null;
+  if (datum === null) return null;
+  return { jawTopZ: datum.value, measuredAt: datum.measuredAt, by: datum.by };
+}
+
 /**
  * Plan one setup's registration, or say why it cannot be planned.
  *
- * No number is invented here. The vise/tape seat is the operator's typed measurement (there is no
- * stored vise-seat setting); the bracket's seat comes from the measured `bracket.seatMachineZ`, and
- * the bracket's datum, clamps and arms come from the machine's own anchor and the shop defaults —
- * `anchorFrom` / `bracketExpectedSurface` refuse when the machine has not supplied them.
+ * No number is invented here. The vise surface comes from the MEASURED jaw-top datum when the machine
+ * has one (the normal path); the typed seat remains only as the expert override, and the bracket's
+ * surface comes from the measured `bracket.seatMachineZ`. The bracket's datum, clamps and arms come
+ * from the machine's own anchor and the shop defaults — `anchorFrom` / `bracketExpectedSurface`
+ * refuse when the machine has not supplied them.
  */
 function planRegistrationAttempt(args: {
   job: EngraveJob;
   setup: Setup;
   mount: MountSpec;
   seatZ: string;
+  /** The expert override: use the typed seat even when a datum is present. */
+  useTypedSeat: boolean;
+  mountDatum: MountDatum | null;
+  probe: ProbeSpec | null;
   defaults: ShopDefaults | null;
   calibration: MachineCalibration | undefined;
   settings: ReturnType<typeof registrationSettings>['settings'];
@@ -134,16 +168,27 @@ function planRegistrationAttempt(args: {
       mountObstacles: obstacles,
       bracketConfirm: !datum.offsetMeasured,
     };
+  } else if (mount.kind === 'vise' && args.mountDatum !== null && !args.useTypedSeat) {
+    // #598 — the datum path: no seat input; the surface is the measured jaw top + the stock's proud
+    // height (`registrationFor` works it out), and the probe is carried for the record.
+    input = { seekFromMachineZ, cornerRadius: STOCK_CORNER_RADIUS_MM, mountDatum: args.mountDatum, probe: args.probe };
   } else {
+    // The seat path: tape always; a vise without a datum, or with the expert override, types the seat.
     const seat = Number(args.seatZ);
     if (args.seatZ.trim() === '' || !Number.isFinite(seat)) {
+      if (mount.kind === 'vise' && args.mountDatum === null && !args.useTypedSeat) {
+        return {
+          kind: 'need-datum',
+          message: 'Tap the fixed jaw first (one touch), then plan again — the section has no stored jaw top and will not invent one.',
+        };
+      }
       return {
         kind: 'need-seat',
         message:
           'Enter the seat’s machine Z first — the surface the stock sits on, measured with one probe touch. The section has no stored vise seat and will not invent one.',
       };
     }
-    input = { seatMachineZ: seat, seekFromMachineZ, cornerRadius: STOCK_CORNER_RADIUS_MM };
+    input = { seatMachineZ: seat, seekFromMachineZ, cornerRadius: STOCK_CORNER_RADIUS_MM, probe: args.probe };
   }
 
   const result =
@@ -181,11 +226,17 @@ export function EngraveSetupsSection({ initiallyOpen = false }: { initiallyOpen?
   const setSetups = useEngraveJobStore((s) => s.setSetups);
   const defaults = useShopDefaultsStore((s) => s.defaults);
   const calibration = useSettingsStore((s) => s.machineCalibration);
+  const machine = useMachineStore((s) => s.machine);
   const tools = useToolRegistry();
 
   const reading = useMemo(() => readSetups(job), [job]);
   const settings = useMemo(() => setupsSettings(defaults), [defaults]);
-  const regSettings = useMemo(() => registrationSettings(defaults).settings, [defaults]);
+  // #598 — the checked-out probe and the measured jaw-top datum, from the machine at the run target.
+  const target = useMemo(() => (machine === null ? null : { host: machine.host, port: machine.port }), [machine]);
+  const machineRecord = useMemo(() => (target === null ? null : machineAt(target)), [target]);
+  const probe = useMemo(() => probeFor(machineRecord), [machineRecord]);
+  const mountDatum = useMemo(() => mountDatumFor(machineRecord), [machineRecord]);
+  const regSettings = useMemo(() => registrationSettings(defaults, probe).settings, [defaults, probe]);
   const rotaryEnvelope = useMemo(() => jobMachine(job, calibration).rotary?.envelope, [job, calibration]);
   const suggested = useMemo(() => suggestedPlan(job, settings, rotaryEnvelope), [job, settings, rotaryEnvelope]);
   const savedPlan = useMemo(() => (job.setups !== undefined ? planFromSetups(job, settings, rotaryEnvelope) : null), [job, settings, rotaryEnvelope]);
@@ -568,7 +619,7 @@ export function EngraveSetupsSection({ initiallyOpen = false }: { initiallyOpen?
               onRemoveSetup={() => removeSetup(index)}
               onReplace={(next) => replaceSetup(index, next)}
               onPreviewRemount={() => previewRemount(index)}
-              planRegistration={(seatZ) => {
+              planRegistration={(seatZ, useTypedSeat) => {
                 const derived = derivedFor(setup, index);
                 if (!derived) return { kind: 'refused', reason: 'this setup has no cut item to register from yet' };
                 return planRegistrationAttempt({
@@ -576,6 +627,9 @@ export function EngraveSetupsSection({ initiallyOpen = false }: { initiallyOpen?
                   setup: derived,
                   mount: setup.mount,
                   seatZ,
+                  useTypedSeat,
+                  mountDatum,
+                  probe,
                   defaults,
                   calibration,
                   settings: regSettings,

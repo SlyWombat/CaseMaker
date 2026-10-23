@@ -85,6 +85,30 @@ export interface EdgeScan {
   label?: string;
 }
 
+/**
+ * #598 — the probe checked out to the machine, so the planner resolves the tip/rim values from the
+ * instrument rather than the shop fallback (`registrationSettings`). `tip.rimOffsetMm` is the
+ * EFFECTIVE rim offset — the setting `tipRadiusMm`; `tip.rimOffsetUncertaintyMm` maps to
+ * `tipRadiusUncertaintyMm`.
+ */
+export interface ProbeSpec {
+  id: string;
+  variant: string | null;
+  tip: { diameterMm: number; rimOffsetMm: number; rimOffsetUncertaintyMm: number };
+}
+
+/**
+ * #598 — the MEASURED mount datum: the vise's jaw top in machine Z, when it was measured, and by what
+ * (the probe's id/variant that tapped it). The expected surface is `jawTopZ + stockProud`; with a
+ * datum the surface seek is a SEARCH down to `jawTopZ − surfaceToleranceMm`, not a band around an
+ * estimate, and the surface tolerance becomes a plausibility warning rather than a stop.
+ */
+export interface MountDatum {
+  jawTopZ: number;
+  measuredAt: string;
+  by: string;
+}
+
 export interface PlanInput {
   stock: ExpectedStock;
   mount: Mount;
@@ -96,6 +120,19 @@ export interface PlanInput {
    * stock, and using it would offset the whole seek band by the difference between the two tools.
    */
   expectedSurface: { machineZ: number; from: string };
+  /**
+   * #598 — the MEASURED mount datum (the vise's jaw top, machine Z). Present on the normal vise path;
+   * null/absent means the caller could not supply one and turns the plan into a `need-datum` ("tap the
+   * jaw first"), exactly as `need-seat` today. The legacy typed-seat path (the expert override) passes
+   * null and relies on `expectedSurface` + `fixtureBelowSurfaceMm` as before.
+   */
+  mountDatum?: MountDatum | null;
+  /**
+   * #598 — the probe checked out to the machine. Absent with no checked-out probe; the caller resolves
+   * the tip values into the settings first (`registrationSettings`), and this carries the instrument
+   * on the plan for the record.
+   */
+  probe?: ProbeSpec | null;
   /**
    * REQUIRED, and the CALLER's to supply: the machine's own travel height in MACHINE Z — the resolved
    * machine's `toolChange.clearanceZ` (`machine.ts` → `resolveMachine`), the Z the controller lifts to
@@ -150,6 +187,10 @@ export interface RegistrationPlan {
   surfacePoint: { x: number; y: number };
   /** The surface touch: from the machine's travel height (`seekFromMachineZ`), at most this far down; and the band a reading must land in. */
   seek: { fromMachineZ: number; travelMm: number; band: { min: number; max: number } };
+  /** #598 — the measured mount datum the seek is a search from, or null on the legacy seat path. */
+  mountDatum: MountDatum | null;
+  /** #598 — the probe checked out to the machine, whose tip/rim resolved the settings; null with none. */
+  probe: ProbeSpec | null;
   scans: EdgeScan[];
   bracketOrigin: BracketOrigin | null;
   /** Bracket: what stands above the stock, as the operator must confirm it (#427). Empty elsewhere. */
@@ -230,7 +271,17 @@ export function planRegistration(input: PlanInput, s: RegistrationSettings): Pla
   if (!Number.isFinite(exp)) return { ok: false, reason: 'the job does not say where it expects the stock’s top' };
   const seekFromMachineZ = input.seekFromMachineZ;
   if (!Number.isFinite(seekFromMachineZ)) return { ok: false, reason: 'the machine’s travel height is not known' };
-  const band = { min: r3(exp - s.surfaceToleranceMm), max: r3(exp + s.surfaceToleranceMm) };
+  const mountDatum = input.mountDatum ?? null;
+  const probe = input.probe ?? null;
+  // #598 — with a measured vise datum the seek is a SEARCH down to `jawTopZ − tolerance` (over a proud
+  // stock the probe can only meet the stock), not a band around the estimate; the ceiling is the
+  // expected surface + tolerance either way. The legacy seat path — and a datum with the stock recessed
+  // below the jaw tops (#517) — keeps the band's own floor.
+  const seekFloor =
+    mount === 'vise' && mountDatum !== null && exp > mountDatum.jawTopZ
+      ? r3(mountDatum.jawTopZ - s.surfaceToleranceMm)
+      : r3(exp - s.surfaceToleranceMm);
+  const band = { min: seekFloor, max: r3(exp + s.surfaceToleranceMm) };
   if (band.max + s.parkAboveSurfaceMm > seekFromMachineZ) {
     return { ok: false, reason: `the stock's top is expected at machine Z ${exp}: too high to park ${s.parkAboveSurfaceMm} mm above it` };
   }
@@ -334,7 +385,9 @@ export function planRegistration(input: PlanInput, s: RegistrationSettings): Pla
     /** Vise, #517: the stock sits below the jaw tops, so a jaw reads HIGH past the gripped edge — and that is the edge. */
     let jawAboveStock = false;
     if (mount === 'vise') {
-      const proud = input.fixtureBelowSurfaceMm;
+      // #598 — with a datum the proud height is MEASURED (`expectedSurface − jawTopZ`), not the
+      // `seat + ledgeStep` estimate; without one the legacy typed-seat path still supplies it.
+      const proud = mountDatum !== null ? r3(exp - mountDatum.jawTopZ) : input.fixtureBelowSurfaceMm;
       if (proud === undefined || !Number.isFinite(proud)) {
         return { ok: false, reason: 'the vise mount needs how far the jaw tops sit below the stock’s top' };
       }
@@ -346,9 +399,16 @@ export function planRegistration(input: PlanInput, s: RegistrationSettings): Pla
         return { ok: false, reason: `the jaw tops sit ${where} the stock’s top — within the ${s.surfaceBandMm} mm surface band, so a jaw touch would read as the stock` };
       }
       if (proud > 0) {
-        // A surface seek that misses the stock must not land on a jaw and call it the stock.
-        if (s.surfaceToleranceMm >= proud) {
+        // The legacy seat path still refuses a tolerance that reaches the jaw tops (the seek band, not
+        // a search, would read a jaw as the surface). With a measured datum the seek searches to
+        // `jawTopZ − tolerance`, so the tolerance is a plausibility WARNING, not a stop.
+        if (mountDatum === null && s.surfaceToleranceMm >= proud) {
           return { ok: false, reason: `the surface tolerance (${s.surfaceToleranceMm} mm) reaches the jaw tops ${proud} mm below the stock — a seek onto a jaw would read as the surface` };
+        }
+        if (mountDatum !== null && s.surfaceToleranceMm >= proud) {
+          notes.push(
+            `the surface tolerance (${s.surfaceToleranceMm} mm) reaches the jaw tops ${r3(proud)} mm below the stock: the seek searches to ${r3(mountDatum.jawTopZ - s.surfaceToleranceMm)}, so a missing stock would read a jaw as the surface — check the stock is in the vise before registering`,
+          );
         }
         notes.push('the fixed jaw fixes X and rotation: the left-edge scan confirms it, the front-edge scan finds Y');
       } else {
@@ -376,6 +436,11 @@ export function planRegistration(input: PlanInput, s: RegistrationSettings): Pla
     scans.push(scanFor('front', midX, stock, s));
   }
 
+  if (mountDatum !== null) {
+    notes.push(
+      `the mount datum is the measured jaw top at machine Z ${mountDatum.jawTopZ} (${mountDatum.by}, ${mountDatum.measuredAt}); the surface seek searches down to ${band.min}, ${s.surfaceToleranceMm} mm below the jaw top`,
+    );
+  }
   notes.push(
     `the surface is expected at machine Z ${exp} (${input.expectedSurface.from}); a reading outside ${band.min} to ${band.max} stops the run`,
     `every touch stops at the surface − ${s.capBelowSurfaceMm} mm: a touch that finds nothing by then is a miss, not a dive`,
@@ -388,6 +453,8 @@ export function planRegistration(input: PlanInput, s: RegistrationSettings): Pla
       stock,
       surfacePoint,
       seek: { fromMachineZ: seekFromMachineZ, travelMm: travel, band },
+      mountDatum,
+      probe,
       scans,
       bracketOrigin,
       mountObstacles,

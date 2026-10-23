@@ -10,7 +10,7 @@
  */
 
 import { LEDGE_STEP } from '../fixture';
-import { planReferences, planRegistration, type BracketOrigin, type PlanObstacle, type PlanResult, type ReferenceOpening, type RegistrationSettings } from '../registration';
+import { planReferences, planRegistration, type BracketOrigin, type MountDatum, type PlanObstacle, type PlanResult, type ProbeSpec, type ReferenceOpening, type RegistrationSettings } from '../registration';
 import { machineSize, toMachine, type Vec } from './orient';
 import type { MountSpec, Setup } from './types';
 
@@ -33,14 +33,38 @@ export function referenceFeatures(setup: Setup): ReferenceFeature[] {
     });
 }
 
+/** #598 — the surface the stock's top is expected at: the datum's jaw top + proud, or the seat + height. */
+function expectedSurface(
+  setup: Setup,
+  dims: { x: number; y: number; z: number },
+  datum: MountDatum | null,
+  seatMachineZ: number | undefined,
+): { machineZ: number; from: string } {
+  if (datum !== null) {
+    return {
+      machineZ: datum.jawTopZ + (dims.z - LEDGE_STEP),
+      from: `the measured jaw top at machine Z ${datum.jawTopZ} + the stock's ${dims.z - LEDGE_STEP} mm proud (setup ${setup.index})`,
+    };
+  }
+  return {
+    machineZ: (seatMachineZ ?? NaN) + dims.z,
+    from: `the seat at machine Z ${seatMachineZ} + the stock's ${dims.z} mm this way up (setup ${setup.index})`,
+  };
+}
+
 export function registrationFor(
   setup: Setup,
   mount: MountSpec,
   input: {
-    seatMachineZ: number;
+    /** Vise/tape, legacy expert path: the machine Z of the surface the stock sits on. Absent on the datum path. */
+    seatMachineZ?: number;
     /** The resolved machine's `toolChange.clearanceZ`: the seek height, and the bound nothing may exceed. */
     seekFromMachineZ: number;
     cornerRadius: number;
+    /** Vise (#598): the measured jaw-top datum; the expected surface is `jawTopZ + (dims.z − LEDGE_STEP)`. */
+    mountDatum?: MountDatum | null;
+    /** The checked-out probe, carried on the plan for the record. */
+    probe?: ProbeSpec | null;
     bracketOrigin?: BracketOrigin;
     /** Bracket (#427): the clamps and arms as placed, and whether to take the confirming touch. */
     mountObstacles?: PlanObstacle[];
@@ -49,13 +73,16 @@ export function registrationFor(
   settings: RegistrationSettings,
 ): { plan: PlanResult; references: ReferenceFeature[] } {
   const dims = machineSize(setup.rotation, setup.stockBefore.bounds);
+  const datum = mount.kind === 'vise' ? (input.mountDatum ?? null) : null;
   const plan = planRegistration(
     {
       stock: { xMin: 0, yMin: 0, xMax: dims.x, yMax: dims.y, cornerRadius: input.cornerRadius },
       mount: mount.kind,
-      expectedSurface: { machineZ: input.seatMachineZ + dims.z, from: `the seat at machine Z ${input.seatMachineZ} + the stock's ${dims.z} mm this way up (setup ${setup.index})` },
+      expectedSurface: expectedSurface(setup, dims, datum, input.seatMachineZ),
       seekFromMachineZ: input.seekFromMachineZ,
-      fixtureBelowSurfaceMm: mount.kind === 'vise' ? dims.z - LEDGE_STEP : undefined,
+      mountDatum: datum,
+      probe: input.probe ?? null,
+      fixtureBelowSurfaceMm: mount.kind === 'vise' && datum === null ? dims.z - LEDGE_STEP : undefined,
       bracketOrigin: input.bracketOrigin,
       mountObstacles: input.mountObstacles,
       bracketConfirm: input.bracketConfirm,
@@ -104,7 +131,17 @@ export function referenceOpenings(setup: Setup): { openings: ReferenceOpening[];
 export function referenceRegistrationFor(
   setup: Setup,
   mount: MountSpec,
-  input: { seatMachineZ: number; seekFromMachineZ: number; cornerRadius: number; cutCentre?: { x: number; y: number } },
+  input: {
+    /** Vise/tape, legacy expert path: the machine Z of the surface the stock sits on. Absent on the datum path. */
+    seatMachineZ?: number;
+    seekFromMachineZ: number;
+    cornerRadius: number;
+    /** Vise (#598): the measured jaw-top datum. */
+    mountDatum?: MountDatum | null;
+    /** The checked-out probe, carried on the plan for the record. */
+    probe?: ProbeSpec | null;
+    cutCentre?: { x: number; y: number };
+  },
   settings: RegistrationSettings,
 ): PlanResult {
   const dims = machineSize(setup.rotation, setup.stockBefore.bounds);
@@ -112,13 +149,16 @@ export function referenceRegistrationFor(
   if (openings.length === 0) {
     return { ok: false, reason: `no earlier cut can be a reference: ${refused.join('; ') || 'none passes through to this face'}` };
   }
+  const datum = mount.kind === 'vise' ? (input.mountDatum ?? null) : null;
   return planReferences(
     {
       stock: { xMin: 0, yMin: 0, xMax: dims.x, yMax: dims.y, cornerRadius: input.cornerRadius },
       mount: mount.kind,
-      expectedSurface: { machineZ: input.seatMachineZ + dims.z, from: `the seat at machine Z ${input.seatMachineZ} + the stock's ${dims.z} mm this way up (setup ${setup.index})` },
+      expectedSurface: expectedSurface(setup, dims, datum, input.seatMachineZ),
       seekFromMachineZ: input.seekFromMachineZ,
-      fixtureBelowSurfaceMm: mount.kind === 'vise' ? dims.z - LEDGE_STEP : undefined,
+      mountDatum: datum,
+      probe: input.probe ?? null,
+      fixtureBelowSurfaceMm: mount.kind === 'vise' && datum === null ? dims.z - LEDGE_STEP : undefined,
       ...(input.cutCentre ? { cutCentre: input.cutCentre } : {}),
       openings,
       blind,

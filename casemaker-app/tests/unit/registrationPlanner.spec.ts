@@ -26,6 +26,7 @@ import {
   summarizeOutcome,
   summarizePlan,
   type ExpectedStock,
+  type MountDatum,
   type PlanInput,
   type RegistrationPlan,
 } from '@/engine/cnc/registration';
@@ -74,6 +75,16 @@ describe('#430 the settings come from the shop defaults', () => {
     // The seeded values satisfy both, with the bench's jaw 0.47 below the stock.
     expect(S.surfaceToleranceMm).toBeLessThan(0.47);
     expect(S.surfaceToleranceMm).toBeLessThan(S.parkAboveSurfaceMm - 0.5);
+  });
+
+  it('#598 a checked-out probe resolves the tip/rim values over the shop fallback', () => {
+    const probe = { id: 'fx-probe-1', variant: 'wired-touch', tip: { diameterMm: 3.0, rimOffsetMm: 0.9, rimOffsetUncertaintyMm: 0.2 } };
+    const withProbe = registrationSettings(ShopDefaultsSchema.parse(DOC.defaults), probe);
+    expect(withProbe.settings.tipDiameterMm).toBe(3.0);
+    expect(withProbe.settings.tipRadiusMm).toBe(0.9);
+    expect(withProbe.settings.tipRadiusUncertaintyMm).toBe(0.2);
+    // The shop keys stay the no-probe fallback.
+    expect(registrationSettings(ShopDefaultsSchema.parse(DOC.defaults)).settings.tipRadiusMm).toBe(0.7);
   });
 });
 
@@ -125,6 +136,44 @@ describe('#430 the plan', () => {
 
   it('says what it will do', () => {
     expect(summarizePlan(plan())).toContain('stopping at the first touch off the stock');
+  });
+});
+
+describe('#598 the datum and the checked-out probe', () => {
+  const DATUM: MountDatum = { jawTopZ: SURFACE - 1.84, measuredAt: '2026-10-23T00:00:00.000Z', by: 'wired-probe' };
+
+  it('a plan with a datum needs no seat input, and its seek floor is jawTopZ − tolerance', () => {
+    const r = planRegistration(input('vise', { mountDatum: DATUM, fixtureBelowSurfaceMm: undefined }), S);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.plan.mountDatum).toEqual(DATUM);
+    expect(r.plan.seek.band.min).toBeCloseTo(DATUM.jawTopZ - S.surfaceToleranceMm, 3);
+    expect(r.plan.seek.band.max).toBeCloseTo(SURFACE + S.surfaceToleranceMm, 3);
+    expect(r.plan.notes.join(' ')).toContain('the measured jaw top');
+  });
+
+  it('a tolerance that reaches the jaw tops is a WARNING, not a stop, with a datum', () => {
+    // proud 0.72 with a 1.0 tolerance: the legacy seat path refuses ("reaches the jaw tops"); the datum path must not.
+    const datum = { ...DATUM, jawTopZ: SURFACE - 0.72 };
+    const r = planRegistration(input('vise', { mountDatum: datum, fixtureBelowSurfaceMm: undefined }), { ...S, surfaceToleranceMm: 1.0 });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.plan.notes.join(' ')).toContain('reaches the jaw tops');
+  });
+
+  it('a tolerance 1.0 and a datum 1.84 below the stock is NOT refused (the 2026-10-23 refusal case)', () => {
+    const r = planRegistration(input('vise', { mountDatum: DATUM, fixtureBelowSurfaceMm: undefined }), { ...S, surfaceToleranceMm: 1.0 });
+    expect(r.ok).toBe(true);
+  });
+
+  it('a datum wins over the seat estimate: the seat path remains only behind the expert override', () => {
+    // A conflicting seat estimate (0.1 mm proud — within the surface band) is ignored when a datum is present.
+    const r = planRegistration(input('vise', { mountDatum: DATUM, fixtureBelowSurfaceMm: 0.1 }), S);
+    expect(r.ok).toBe(true);
+  });
+
+  it('without a datum the legacy seat path still refuses a tolerance that reaches the jaw tops', () => {
+    expect(planRegistration(input('vise', { fixtureBelowSurfaceMm: 0.72 }), { ...S, surfaceToleranceMm: 1.0 })).toMatchObject({ ok: false });
   });
 });
 

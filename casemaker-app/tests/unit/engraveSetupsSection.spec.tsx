@@ -10,12 +10,16 @@ import { useEngraveJobStore } from '@/store/engraveJobStore';
 import { useShopDefaultsStore, resetShopDefaultsStore } from '@/store/shopDefaultsStore';
 import { useSettingsStore } from '@/store/settingsStore';
 import { resetEngraveRows, useEngraveRowStore } from '@/store/engraveRowStore';
+import { useMachineStore, resetMachineStore } from '@/store/machineStore';
+import { useLocationStore, resetLocationStore } from '@/store/locationStore';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { jobSetups } from '@/engine/cnc/engrave/jobSetup';
 import { orient } from '@/engine/cnc/setups/orient';
 import { ShopDefaultsSchema } from '@/platform/defaultsClient';
 import { setHouseClientLoader, type HouseClient } from '@/platform/houseClient';
 import type { MachineCalibration } from '@/engine/cnc/calibration';
+import type { MachineObservation } from '@/platform/machineProbe';
+import type { LocationView } from '@/platform/locationClient';
 import type { EngraveCircleShape, EngraveDrillItem, EngraveJob, JobSetup } from '@/types/engraveJob';
 
 vi.mock('@/engine/exportTrigger', () => ({ saveText: vi.fn(), saveEngraveProgram: vi.fn() }));
@@ -38,6 +42,41 @@ const CAL: MachineCalibration = {
   source: 'config-get sd on 192.168.10.43',
   measuredAt: '2026-10-07T18:00:00.000Z',
 };
+
+/** A machine observation whose address matches `DATUM_LOCATION`'s machine record (#598). */
+const OBS: MachineObservation = {
+  host: '192.0.2.10',
+  port: 2222,
+  name: 'Z1',
+  busy: null,
+  ip: null,
+  mac: null,
+  status: null,
+  profileId: 'Z1',
+  observedAt: '2026-10-23T00:00:00.000Z',
+  notes: [],
+};
+
+/** A location whose machine carries a measured jaw-top datum and a checked-out probe (#598). */
+const DATUM_LOCATION = {
+  machines: [
+    {
+      id: 'machine-1a2b3c',
+      address: { host: '192.0.2.10', port: 2222 },
+      bedProfiles: [{ id: 'bp-1', datums: { viseJawTopZ: { value: -56.82, measuredAt: '2026-10-23T00:00:00.000Z', by: 'wired-probe', at: null } } }],
+      activeBedProfileId: 'bp-1',
+    },
+  ],
+  accessories: [
+    {
+      id: 'fx-probe-1',
+      kind: 'probe',
+      variant: 'wired-touch',
+      unit: { tipDiameterMm: 2.0, rimOffsetMm: 0.7, rimOffsetUncertaintyMm: 0.25 },
+      whereabouts: { kind: 'machine', machineId: 'machine-1a2b3c', since: '2026-10-23T00:00:00.000Z' },
+    },
+  ],
+} as unknown as LocationView;
 
 function savedJob(): EngraveJob {
   const job = defaultEngraveJob();
@@ -105,6 +144,8 @@ beforeEach(() => {
   resetEngraveRows();
   resetShopDefaultsStore();
   useSettingsStore.getState().resetSettings();
+  resetMachineStore();
+  resetLocationStore();
   act(() => {
     useEngraveJobStore.setState({ job: defaultEngraveJob() });
   });
@@ -262,6 +303,7 @@ describe('#471 registration — planned only after approval, refused with the en
     fireEvent.click(screen.getByTestId('engrave-setup-expand-1'));
 
     expect(screen.getByTestId('engrave-setup-reg-unplanned-1')).toBeTruthy();
+    fireEvent.click(screen.getByTestId('engrave-setups-use-typed-seat'));
     fireEvent.change(screen.getByTestId('engrave-setup-seat-1'), { target: { value: '-66' } });
     fireEvent.click(screen.getByTestId('engrave-setup-plan-reg-1'));
     expect(screen.getByTestId('engrave-setup-reg-summary-1').textContent).toContain('Home, fit the wired probe');
@@ -275,22 +317,23 @@ describe('#471 registration — planned only after approval, refused with the en
     expect(screen.getByTestId('engrave-setup-reg-approved-1')).toBeTruthy();
   });
 
-  it('asks for the seat instead of inventing one (a custom, non-Z1 vise)', () => {
+  it('asks to tap the fixed jaw instead of inventing a datum (a custom, non-Z1 vise)', () => {
     const job = savedJob();
     job.workholding.vise.source = 'saved';
     act(() => useEngraveJobStore.setState({ job }));
     render(<EngraveSetupsSection />);
     fireEvent.click(screen.getByTestId('engrave-setup-expand-1'));
     fireEvent.click(screen.getByTestId('engrave-setup-plan-reg-1'));
-    expect(screen.getByTestId('engrave-setup-reg-need-seat-1').textContent).toContain('Enter the seat’s machine Z');
+    expect(screen.getByTestId('engrave-setup-reg-need-datum-1').textContent).toContain('Tap the fixed jaw first');
     expect(useEngraveJobStore.getState().job.setups![0]!.registration).toBeUndefined();
   });
 
-  it('defaults the vise seat to the shipped Z1 vise’s provisional aim (−55) and plans without a typed Z', () => {
+  it('defaults the vise seat to the shipped Z1 vise’s provisional aim (−55) behind the override', () => {
     act(() => useEngraveJobStore.setState({ job: savedJob() }));
     render(<EngraveSetupsSection />);
     fireEvent.click(screen.getByTestId('engrave-setup-expand-1'));
 
+    fireEvent.click(screen.getByTestId('engrave-setups-use-typed-seat'));
     const seat = screen.getByTestId('engrave-setup-seat-1') as HTMLInputElement;
     expect(seat.value).toBe('-55');
 
@@ -301,13 +344,30 @@ describe('#471 registration — planned only after approval, refused with the en
     expect(useEngraveJobStore.getState().job.setups![0]!.registration).toBeUndefined();
   });
 
-  it('leaves the seat empty for a measured/custom vise so the operator still types the probe reading', () => {
+  it('leaves the seat empty for a measured/custom vise behind the override', () => {
     const job = savedJob();
     job.workholding.vise.source = 'measured';
     act(() => useEngraveJobStore.setState({ job }));
     render(<EngraveSetupsSection />);
     fireEvent.click(screen.getByTestId('engrave-setup-expand-1'));
+    fireEvent.click(screen.getByTestId('engrave-setups-use-typed-seat'));
     expect((screen.getByTestId('engrave-setup-seat-1') as HTMLInputElement).value).toBe('');
+  });
+
+  it('#598 a machine with a measured jaw-top datum plans from it, with no seat input', () => {
+    useMachineStore.setState({ machine: OBS });
+    useLocationStore.setState({ location: DATUM_LOCATION });
+    act(() => useEngraveJobStore.setState({ job: savedJob() }));
+    render(<EngraveSetupsSection />);
+    fireEvent.click(screen.getByTestId('engrave-setup-expand-1'));
+
+    // No seat input is shown on the datum path; the override disclosure is still offered.
+    expect(screen.queryByTestId('engrave-setup-seat-1')).toBeNull();
+    expect(screen.getByTestId('engrave-setups-use-typed-seat')).toBeTruthy();
+
+    fireEvent.click(screen.getByTestId('engrave-setup-plan-reg-1'));
+    expect(screen.getByTestId('engrave-setup-reg-summary-1').textContent).toContain('Home, fit the wired probe');
+    expect(screen.queryByTestId('engrave-setup-reg-need-datum-1')).toBeNull();
   });
 
   it('a bracket refuses without a measured seat, then plans once the setting exists', () => {
