@@ -50,6 +50,8 @@ import { effectiveMargins } from '@/engine/cnc/engrave/depthBounds';
 import { surfaceSpreadPlan, type SurfaceSpreadAssessment } from '@/engine/cnc/engrave/surfaceSpread';
 import { useEngraveJobStore } from '@/store/engraveJobStore';
 import { useEngraveRegistrationStore } from '@/store/engraveRegistrationStore';
+import { machineAt, useLocationStore } from '@/store/locationStore';
+import { withViseJawTopDatum } from '@/platform/bedProfiles';
 import { useMachineTranscriptStore } from '@/store/machineTranscriptStore';
 import { useSettingsStore } from '@/store/settingsStore';
 
@@ -289,6 +291,15 @@ export function EngraveRegistrationStep({ job, target }: EngraveRegistrationStep
         handleRef.current = null;
         await handle.close();
         return;
+      }
+      // #599 — the mount tap measured the jaw top: write it into the active bed profile's datum.
+      if (r.mountTap !== null && plan.probe !== null) {
+        const machine = machineAt(target);
+        if (machine !== null) {
+          await useLocationStore
+            .getState()
+            .saveMachine(withViseJawTopDatum(machine, r.mountTap, plan.probe.id, new Date().toISOString()));
+        }
       }
       setResult(r);
       setPhase('measured');

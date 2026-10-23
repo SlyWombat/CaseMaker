@@ -107,6 +107,36 @@ export function viseFrameFromRegistration(
 }
 
 /**
+ * #599 — the machine with its ACTIVE bed profile's jaw-top datum set from the mount tap's reading.
+ * The datum is a raw `MeasuredDatum`: value = the tap's machine Z, `by` = the checked-out probe's id,
+ * `at` = the tap's machine XY. The frame is #600's; nothing here touches the placement.
+ */
+export function withViseJawTopDatum(
+  machine: MachineRecord,
+  mountTap: { z: number; at: { x: number; y: number } },
+  probeId: string,
+  now: string,
+): MachineRecord {
+  const profileId = machine.activeBedProfileId;
+  if (profileId === undefined) return machine;
+  return {
+    ...machine,
+    bedProfiles: machine.bedProfiles?.map((p) =>
+      p.id === profileId
+        ? {
+            ...p,
+            datums: {
+              ...p.datums,
+              viseJawTopZ: { value: mountTap.z, measuredAt: now, by: probeId, at: [mountTap.at.x, mountTap.at.y] },
+            },
+          }
+        : p,
+    ),
+    updatedAt: now,
+  };
+}
+
+/**
  * The new keys for a machine that has not been migrated, or null when there is nothing to migrate
  * (no wasteboard, no vise, no measured bracket seat) or the bed is already described. Nothing is
  * deleted: every legacy key stays exactly where it was.

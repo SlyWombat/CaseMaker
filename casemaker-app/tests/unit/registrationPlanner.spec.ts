@@ -249,6 +249,8 @@ function fakeZ1(opts: {
   g54?: { x: number; y: number };
   /** #599 — `M119` reads the probe touched (`Probe: 1`) at rest, as a bad plug would. */
   probeTouched?: boolean;
+  /** #599 — a jaw top to answer at this machine XY (the mount tap). */
+  tap?: { x: number; y: number; z: number };
 }) {
   const inForce = opts.g54 ?? G54;
   const surface = opts.surface ?? SURFACE;
@@ -268,6 +270,7 @@ function fakeZ1(opts: {
     if (wx >= a.xMin - RIM && wx <= a.xMax + RIM && wy >= a.yMin - RIM && wy <= a.yMax + RIM) return surface;
     if (opts.jaw && wx < a.xMin && wx > a.xMin - 10) return surface - 0.47;
     if (opts.jawAbove !== undefined && wx < a.xMin && wx > a.xMin - 10) return surface + opts.jawAbove;
+    if (opts.tap && Math.abs(wx - (opts.tap.x - inForce.x)) < 0.5 && Math.abs(wy - (opts.tap.y - inForce.y)) < 0.5) return opts.tap.z;
     return null;
   };
   const console = {
@@ -353,6 +356,34 @@ function fakeZ1(opts: {
 
 const SHIFTED = { ...BLANK, xMin: 1.2, xMax: 39.3, yMin: 0.8, yMax: 77 };
 const yes = async () => true;
+
+describe('#599 the mount tap', () => {
+  const TAP = { x: -186.2, y: -180, fromMachineZ: -3, label: 'the vise fixed-jaw top' };
+  const JAW: MountDatum = { jawTopZ: -56.82, measuredAt: '2026-10-23T00:00:00.000Z', by: 'wired-probe' };
+
+  it('the tap precedes the surface seek and its reading is on the result', async () => {
+    const z1 = fakeZ1({ actual: SHIFTED, tap: { x: TAP.x, y: TAP.y, z: JAW.jawTopZ } });
+    const p = plan('vise', { mountDatum: JAW, mountTap: TAP, fixtureBelowSurfaceMm: undefined });
+    const r = await runRegistration(p, { console: z1.console, operator: yes });
+    if (!r.ok) throw new Error(r.reason);
+
+    const tapIdx = z1.lines.indexOf('G53 G0 X-186.2 Y-180');
+    const surfaceIdx = z1.lines.findIndex((l) => /^G0 X/.test(l));
+    expect(tapIdx).toBeGreaterThan(-1);
+    expect(tapIdx).toBeLessThan(surfaceIdx);
+    expect(r.mountTap).toEqual({ z: -56.82, at: { x: TAP.x, y: TAP.y } });
+    // The post-tap probe must read open again before the surface seek.
+    expect(z1.lines.slice(tapIdx, surfaceIdx)).toContain('M119');
+  });
+
+  it('a tap miss stops with the mount named', async () => {
+    const z1 = fakeZ1({ actual: SHIFTED });
+    const p = plan('vise', { mountDatum: JAW, mountTap: TAP, fixtureBelowSurfaceMm: undefined });
+    const r = await runRegistration(p, { console: z1.console, operator: yes });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reason).toContain('no jaw top');
+  });
+});
 
 describe('#430 the executor, on a fake machine', () => {
   it('runs the bench’s sequence safely: one command per line, Idle before every probe, XY only at park, never below the cap', async () => {

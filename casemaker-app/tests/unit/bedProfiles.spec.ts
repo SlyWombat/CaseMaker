@@ -18,6 +18,7 @@ import {
   changedBedProfile,
   newestViseRegistration,
   switchActiveProfile,
+  withViseJawTopDatum,
   type RegistrationSource,
 } from '@/platform/bedProfiles';
 import type { ShopDefaults } from '@/platform/defaultsClient';
@@ -202,6 +203,17 @@ describe('the bed migrations (#510)', () => {
     )!;
     const parsed = MachineRecordSchema.safeParse({ ...machine, ...migrated });
     expect(parsed.success, JSON.stringify(parsed.error?.issues)).toBe(true);
+  });
+});
+
+describe('#599 the mount-tap datum write-back', () => {
+  it('writes the jaw top into the ACTIVE bed profile, from the tap reading', () => {
+    const raw = (JSON.parse(readFileSync(FIXTURE, 'utf8')) as { machines: Array<Record<string, unknown>> }).machines[0]!;
+    const machine = MachineRecordSchema.parse(raw);
+    const next = withViseJawTopDatum(machine, { z: -56.82, at: { x: -186.2, y: -153.5 } }, 'fx-probe-1', NOW);
+    const active = next.bedProfiles!.find((p) => p.id === next.activeBedProfileId)!;
+    expect(active.datums.viseJawTopZ).toEqual({ value: -56.82, measuredAt: NOW, by: 'fx-probe-1', at: [-186.2, -153.5] });
+    expect(next.bedProfiles).toHaveLength(machine.bedProfiles!.length);
   });
 });
 

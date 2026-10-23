@@ -114,6 +114,11 @@ export type RunResult =
        * origin cannot be written from a refused blank by accident.
        */
       spread?: SurfaceSpreadAssessment;
+      /**
+       * #599 — the mount tap's reading (the fixed-jaw top, machine Z) and where it was taken, or null
+       * when the plan carried no tap. The executor only measures it; writing the datum is the caller's.
+       */
+      mountTap: { z: number; at: { x: number; y: number } } | null;
       transcript: Transcript[];
     }
   | { ok: false; reason: string; transcript: Transcript[] };
@@ -383,6 +388,34 @@ export async function runRegistration(
       throw new Stop('stopped: the clamps were not confirmed where the plan puts them');
     }
 
+    // #599 — the mount tap: one guarded touch on the mount's reference (the fixed-jaw top) before the
+    // surface seek, at the machine XY the plan carries. One line per Idle, and the G38.3 is never
+    // queued behind the rapid — that exact queue gave PROBE_FAIL and MPos 0,0 on 2026-10-23.
+    let mountTap: { z: number; at: { x: number; y: number } } | null = null;
+    if (plan.mountTap !== null && plan.mountDatum !== null) {
+      const tap = plan.mountTap;
+      const jawTopZ = plan.mountDatum.jawTopZ;
+      await io.idle();
+      await io.send(`G53 G0 Z${f(plan.seek.fromMachineZ)}`);
+      await io.send(`G53 G0 X${f(tap.x)} Y${f(tap.y)}`);
+      await io.idle();
+      io.at(`as low as machine Z ${f(jawTopZ - 2)}, 2 mm below the jaw top (the mount tap)`);
+      await io.send('G91');
+      const reply = await io.send(`G38.3 Z-${f(plan.seek.fromMachineZ - (jawTopZ - 2))} F${f(s.touchFeed)}`, { missOk: true });
+      const prb = lastPrb(reply);
+      if (prb === null || !prb.touched || Math.abs(prb.z - jawTopZ) > 2) {
+        throw new Stop(`no jaw top at (${tap.x}, ${tap.y}) down to machine Z ${f(jawTopZ - 2)} — is the vise where the machine record says?`);
+      }
+      await io.send('G0 Z3');
+      await io.send('G90');
+      const after = await io.send('M119');
+      if (/Probe:\s*1\b/.test(after)) {
+        throw new Stop('the probe still reads touched after the mount tap — check it is seated and plugged in');
+      }
+      await io.send(`G53 G0 Z${f(plan.seek.fromMachineZ)}`);
+      mountTap = { z: prb.z, at: { x: tap.x, y: tap.y } };
+    }
+
     // #449 — the slow travel is the shop's `registration.surfaceSlowSeekMm` (1.2 to 2 mm, more than the
     // lift); a plan whose settings break that never got this far (`settingsProblem`).
     const slow = await seekSurface(io, plan, {
@@ -457,6 +490,7 @@ export async function runRegistration(
       data,
       outcome,
       ...(spread === undefined ? {} : { spread }),
+      mountTap,
       transcript: io.transcript,
     };
   } catch (e) {
