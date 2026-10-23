@@ -10,7 +10,7 @@ Maintainer, bench 2026-10-23, after four live registration runs on the badge job
 This replaces the "verify the stock is where the job expects it" shape of `execute.ts` (#430/#475)
 with "measure the mount, then find the stock". Every stop of the 2026-10-23 bench was the old shape
 failing on a normally mounted blank: a provisional seat (#585), a band too tight for a printed blank
-(#589), extent touches placed before the edges were found (#591), a scan that cannot look inward (#592).
+(#589), extent touches placed before the edges were found (#591), a scan that cannot look inward (#593).
 
 ## The four steps
 
@@ -48,7 +48,7 @@ mount is the planned one AND supplies the Z datum the rest of the run needs. No 
   not a band. The reading is the surface. (Tolerance becomes a *plausibility* check against
   `jawTopZ + stockProud ± generous`, worded as a warning, not a stop.)
 - **Edges:** scan each planned edge from a start that may MISS: a missed first touch steps **inward**
-  (coarse) until the stock is found, then outward fine as today (#592). Reach along the jaws is the
+  (coarse) until the stock is found, then outward fine as today (#593). Reach along the jaws is the
   jaw length; across the jaws it is the opening.
 - **Extents (#475 spread):** after the edges, placed by the found offset (#591), approached from just
   above the surface (#590). A spread beyond the depth band is the existing `blank-bowed` refusal.
@@ -74,7 +74,7 @@ surface + (cutter PRB − probe PRB), home — then the job's own run.
 
 1. Step 2 for the vise (jaw tap + record update) and step 3's search-not-band surface seek — this
    alone would have passed runs 1–3.
-2. #592 inward scan — would have passed run 4.
+2. #593 inward scan — would have passed run 4.
 3. Step 1's `M119` check and the probe-type naming.
 4. Step 3's "update the view" + #587/#588 wording.
 5. Bracket and 4th-axis reference taps.
