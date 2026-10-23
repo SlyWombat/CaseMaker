@@ -91,6 +91,13 @@ function Step({
   children: ReactNode;
 }) {
   const [open, setOpen] = useState(defaultOpen ?? false);
+  // #586 — `defaultOpen` names the step the operator is on (the first non-✓). It is re-applied
+  // whenever it becomes true, so a step that turns current — including after a remount or a machine
+  // reconnect that briefly left it folded — opens itself. A step that stops being current is not
+  // force-folded, and a manual fold stays folded until the step becomes current again.
+  useEffect(() => {
+    if (defaultOpen) setOpen(true);
+  }, [defaultOpen]);
   return (
     <details
       data-testid={`engrave-cut-step-${number}`}

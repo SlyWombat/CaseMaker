@@ -18,6 +18,8 @@ import { programHash } from '@/platform/machineRun';
 import { StockItemSchema, type StockItem } from '@/platform/stockClient';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { jobSetups } from '@/engine/cnc/engrave/jobSetup';
+import { planRegistration, type RegistrationPlan } from '@/engine/cnc/registration/plan';
+import { registrationSettings } from '@/engine/cnc/registration/settings';
 import { freezePackage, type FrozenPackage } from '@/engine/cnc/engrave/package';
 import { frozenReleaseSources } from '@/engine/cnc/engrave/release';
 import type { VerifyReport } from '@/engine/cnc/verify';
@@ -130,6 +132,33 @@ function twoSetupJob(): EngraveJob {
 function shelfJob(): EngraveJob {
   const job = defaultEngraveJob();
   job.stockEntry = { kind: 'shelf', shelfId: 'stock-plate1', file: null, form: 'plate', finish: 'finished', conductive: false };
+  return job;
+}
+
+/** A job whose first setup carries an approved vise registration, so step ③ renders its Start. */
+function plannedJob(): EngraveJob {
+  const job = defaultEngraveJob();
+  const { settings } = registrationSettings(null);
+  const planned = planRegistration(
+    {
+      stock: { xMin: 0, yMin: 0, xMax: 38.1, yMax: 76.2, cornerRadius: 3 },
+      mount: 'vise',
+      expectedSurface: { machineZ: -56.172, from: 'the blank as the setup holds it' },
+      seekFromMachineZ: -3,
+      fixtureBelowSurfaceMm: 0.72,
+      cutCentre: { x: 24, y: 43 },
+    },
+    settings,
+  );
+  if (!planned.ok) throw new Error(planned.reason);
+  const setup = jobSetups(job)[0]!;
+  job.setups = [
+    {
+      ...setup,
+      mount: { kind: 'vise' },
+      registration: { method: 'vise', plan: planned.plan, expected: 'XY from the fixed jaw ±0.1 mm, Z from the surface touch' },
+    },
+  ];
   return job;
 }
 
@@ -444,5 +473,29 @@ describe('#419 §3 the Cut surface', () => {
     expect(screen.getAllByTestId('run-plan')).toHaveLength(1);
     expect(screen.getByTestId('machine-strip')).toBeTruthy();
     expect(screen.queryByTestId('engrave-cut-run')).toBeNull();
+  });
+
+  it('#586 — the current step opens when it becomes current, and a machine reconnect does not fold it', async () => {
+    const job = plannedJob();
+    const pkg = frozen(job, [P1]);
+    const gen = generated([P1]);
+    const red = reportOf([row('error', 'tool-too-big', 'the cutter cannot reach the label')]);
+
+    // A red gate folds the Register step (it is not the current step yet).
+    const view = draw({ job, report: red, pkg, generated: gen, canDrive: true });
+    expect(screen.getByTestId('engrave-cut-step-3')).toHaveProperty('open', false);
+
+    // The gate clears: step ③ becomes the step the operator is on and opens itself, so its Start is
+    // visible rather than stranded inside a folded <details>.
+    view.show({ job, report: reportOf(), pkg, generated: gen, canDrive: true });
+    expect(screen.getByTestId('engrave-cut-step-3')).toHaveProperty('open', true);
+    expect(screen.getByTestId('engrave-registration-start')).toBeTruthy();
+
+    // A machine reconnect (the target goes away, then comes back) must not fold it again.
+    view.show({ job, report: reportOf(), pkg, generated: gen, canDrive: false });
+    expect(screen.queryByTestId('engrave-registration-start')).toBeNull(); // no machine to start from
+    view.show({ job, report: reportOf(), pkg, generated: gen, canDrive: true });
+    expect(screen.getByTestId('engrave-cut-step-3')).toHaveProperty('open', true);
+    expect(screen.getByTestId('engrave-registration-start')).toBeTruthy();
   });
 });
