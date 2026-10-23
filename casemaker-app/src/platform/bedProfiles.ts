@@ -144,7 +144,7 @@ export function withVisePlacementFrame(
 }
 
 /**
- * #600 — the machine with its ACTIVE bed profile's jaw-top datum set from the mount tap's reading.
+ * #599 — the machine with its ACTIVE bed profile's jaw-top datum set from the mount tap's reading.
  * The datum is a raw `MeasuredDatum`: value = the tap's machine Z, `by` = the checked-out probe's id,
  * `at` = the tap's machine XY. The frame is #600's; nothing here touches the placement.
  */

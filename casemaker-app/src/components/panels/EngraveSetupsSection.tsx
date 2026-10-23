@@ -27,8 +27,7 @@ import { newId } from '@/utils/id';
 import { bracketSettings, anchorFrom, bracketDatum, bracketExpectedSurface, clampObstacles, bracketObstacles, defaultClampPlacements } from '@/engine/cnc/mounts/bracket';
 import { viseTapPoint } from '@/engine/cnc/mounts/vise';
 import { jobMachine } from '@/engine/cnc/calibration';
-import { DEFAULT_VISE, Z1_VISE } from '@/engine/cnc/fixture';
-import { registrationSettings } from '@/engine/cnc/registration/settings';
+import { Z1_VISE } from '@/engine/cnc/fixture';import { registrationSettings } from '@/engine/cnc/registration/settings';
 import { recommendedSurfaceToleranceMm } from '@/engine/cnc/materials';
 import { primitiveLabel } from '@/engine/cnc/engrave/partPlan';
 import { summarizePlan } from '@/engine/cnc/registration/summary';
@@ -129,6 +128,7 @@ function mountTapFor(
   machine: MachineRecord | null,
   registrations: RegistrationSource[],
   seekFromMachineZ: number,
+  jawStartY: number,
 ): { x: number; y: number; fromMachineZ: number; label: string } | null {
   if (machine === null) return null;
   const profile = machine.bedProfiles?.find((p) => p.id === machine.activeBedProfileId);
@@ -136,7 +136,7 @@ function mountTapFor(
   const viseAcc = accessoriesFor(machine).find((a) => a.kind === 'vise');
   const jawBarWidth = num(viseAcc?.constants.jawBarWidth) ?? Z1_VISE.fixedJawThickness;
   const jawLength = num(viseAcc?.constants.jawLength) ?? Z1_VISE.jawLength;
-  const jawStartY = num(viseAcc?.unit.jawStartY) ?? DEFAULT_VISE.jawStartY;
+  // `jawStartY` is the job's vise setting, passed in — the same value the #600 frame write-back uses.
 
   // The frame source order: the measured placement frame, else the newest usable registration, else none.
   const f = placement?.frame ?? null;
@@ -298,8 +298,8 @@ export function EngraveSetupsSection({ initiallyOpen = false }: { initiallyOpen?
   const registrations = useEngraveRegistrationStore((s) => s.records);
   const seekFromMachineZ = useMemo(() => jobMachine(job, calibration).toolChange.clearanceZ, [job, calibration]);
   const mountTap = useMemo(
-    () => mountTapFor(machineRecord, Object.values(registrations), seekFromMachineZ),
-    [machineRecord, registrations, seekFromMachineZ],
+    () => mountTapFor(machineRecord, Object.values(registrations), seekFromMachineZ, job.workholding.vise.jawStartY),
+    [machineRecord, registrations, seekFromMachineZ, job.workholding.vise.jawStartY],
   );
   const regSettings = useMemo(() => registrationSettings(defaults, probe).settings, [defaults, probe]);
   const rotaryEnvelope = useMemo(() => jobMachine(job, calibration).rotary?.envelope, [job, calibration]);

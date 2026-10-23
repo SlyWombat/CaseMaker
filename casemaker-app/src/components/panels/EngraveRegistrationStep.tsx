@@ -52,7 +52,6 @@ import { useEngraveJobStore } from '@/store/engraveJobStore';
 import { useEngraveRegistrationStore } from '@/store/engraveRegistrationStore';
 import { machineAt, useLocationStore } from '@/store/locationStore';
 import { viseFrameFromRegistration, withViseJawTopDatum, withVisePlacementFrame } from '@/platform/bedProfiles';
-import { DEFAULT_VISE } from '@/engine/cnc/fixture';
 import { useMachineTranscriptStore } from '@/store/machineTranscriptStore';
 import { useSettingsStore } from '@/store/settingsStore';
 
@@ -299,7 +298,7 @@ export function EngraveRegistrationStep({ job, target }: EngraveRegistrationStep
         const machine = machineAt(target);
         if (machine !== null) {
           const now = new Date().toISOString();
-          const frame = viseFrameFromRegistration({ measuredAt: now, correctedG54: r.outcome.correctedG54 }, DEFAULT_VISE.jawStartY);
+          const frame = viseFrameFromRegistration({ measuredAt: now, correctedG54: r.outcome.correctedG54 }, job.workholding.vise.jawStartY);
           await useLocationStore.getState().saveMachine(withVisePlacementFrame(machine, frame, { fixedJawFaceX: `measured:${now}`, jawStartY: 'typed' }, now));
         }
       }
