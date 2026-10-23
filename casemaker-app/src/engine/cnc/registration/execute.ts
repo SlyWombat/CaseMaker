@@ -15,6 +15,8 @@
  *      `G91`, `G38.3 Z-(park + cap)` — so a touch can never go below the surface − cap — `G90`, the
  *      lift to park. Coarse, then fine; the scan stops at the first touch off the stock, then takes
  *      ONE touch midway back toward the stock to halve the last step (never further out than the miss).
+ *      A scan whose FIRST touch misses the stock steps inward by the coarse step until it finds the
+ *      stock (bounded by the opposite edge), then runs the outward fine pass (#593).
  *
  * EVERY PROBE IS `G38.3`, NEVER `G38.2` (#518, maintainer 2026-10-18: "why do we need to error, it causes
  * user panic that something bad happened"). A scan touch past the edge is the EXPECTED answer of a scan,
@@ -123,6 +125,7 @@ export type RunResult =
 export const MAX_IDLE_POLLS = 30;
 
 const f = (n: number) => (Math.round(n * 1000) / 1000).toFixed(3).replace(/\.?0+$/, '') || '0';
+const r3 = (n: number) => Math.round(n * 1000) / 1000;
 
 class Stop extends Error {}
 
@@ -238,23 +241,67 @@ async function touch(io: Session, plan: RegistrationPlan, scan: EdgeScan, at: nu
   return { at, prb, kind: classifyTouch(prb, surfaceZ, s.surfaceBandMm) };
 }
 
-/** One pass outward; it STOPS at the first touch off the stock, then halves the last step inward. */
+/** One pass across an edge; it STOPS at the first touch off the stock, then halves the last step inward.
+ *
+ * #593 — a scan whose FIRST touch misses the stock (the blank sits further along the jaws than the
+ * saved origin) is not a refusal: the scan steps INWARD by the coarse step until a touch lands on the
+ * stock — bounded by the opposite edge's expected position (`scan.oppositeAt`) — and then runs the
+ * outward fine pass from there exactly as a scan that started on the stock does.
+ */
 async function scanEdge(io: Session, plan: RegistrationPlan, scan: EdgeScan, parkZ: number, surfaceZ: number): Promise<ScanRecord> {
   const touches: ScanTouch[] = [];
   let lastOn: number | null = null;
-  for (const p of scanPositions(scan)) {
-    const t = await touch(io, plan, scan, p, parkZ, surfaceZ, plan.mount === 'bracket' && touches.length === 0);
+  let foundInward = false;
+  const probe = (p: number, travelHigh = false) => touch(io, plan, scan, p, parkZ, surfaceZ, travelHigh);
+
+  const first = await probe(scan.start, plan.mount === 'bracket');
+  touches.push(first);
+  if (first.kind === 'stock') {
+    lastOn = scan.start;
+  } else if (first.kind === 'above' && scan.aboveIsEdge !== true) {
+    // Something above the surface (a clamp): stop the scan here and say so (outcome.ts) — the inward
+    // search is for a blank that is simply not where the job put it, not for an obstacle in the way.
+    return { scan, touches };
+  } else if (scan.oppositeAt !== undefined) {
+    const inward = -scan.outward;
+    for (let p = r3(scan.start + inward * scan.coarseStep); inward * (scan.oppositeAt - p) > 1e-9; p = r3(p + inward * scan.coarseStep)) {
+      const t = await probe(p);
+      touches.push(t);
+      if (t.kind === 'stock') {
+        lastOn = p;
+        foundInward = true;
+        break;
+      }
+      if (t.kind === 'above' && scan.aboveIsEdge !== true) return { scan, touches };
+    }
+  }
+
+  if (lastOn === null) return { scan, touches };
+
+  /** One outward touch from `lastOn`; false when the scan is done (a miss was refined back). */
+  const stepOutward = async (p: number): Promise<boolean> => {
+    const t = await probe(p);
     touches.push(t);
     if (t.kind !== 'stock') {
-      // Something above the surface (a clamp): stop the scan here and say so (outcome.ts) — unless the
-      // plan says a high reading on this scan is the jaw past a recessed stock (#517), the edge itself.
       if ((t.kind !== 'above' || scan.aboveIsEdge === true) && lastOn !== null) {
         const mid = Math.round(((lastOn + p) / 2) * 1000) / 1000;
-        touches.push(await touch(io, plan, scan, mid, parkZ, surfaceZ));
+        touches.push(await probe(mid));
       }
-      break;
+      return false;
     }
     lastOn = p;
+    return true;
+  };
+
+  if (foundInward) {
+    // Already beside the edge (the inward search bracketed it at coarse resolution): step fine only.
+    for (let p = r3(lastOn + scan.outward * scan.fineStep); scan.outward * (scan.limit - p) >= -1e-9; p = r3(p + scan.outward * scan.fineStep)) {
+      if (!(await stepOutward(p))) break;
+    }
+  } else {
+    for (const p of scanPositions(scan).slice(1)) {
+      if (!(await stepOutward(p))) break;
+    }
   }
   return { scan, touches };
 }

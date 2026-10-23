@@ -68,6 +68,12 @@ export interface EdgeScan {
   coarseStep: number;
   fineStep: number;
   /**
+   * #593 — where the inward search stops when the scan's first touch misses the stock: the OPPOSITE
+   * edge's expected position (the stock's far edge). Absent on a reference scan, whose bound is the
+   * opening's centre and which never searches inward.
+   */
+  oppositeAt?: number;
+  /**
    * #517 — a reading ABOVE the surface band on this scan is the mount's own top standing over a recessed
    * stock (the vise jaw when the stock sits below the jaw tops): it is where the stock ENDS, not an
    * obstacle in the way. The executor halves back from it like a miss and the outcome takes it as the
@@ -175,6 +181,20 @@ export interface ReferenceEntry {
 
 export type PlanResult = { ok: true; plan: RegistrationPlan } | { ok: false; reason: string };
 
+/** #593 — the opposite edge's expected position: where a scan's inward search stops. */
+function oppositeExpectedAt(edge: Edge, stock: ExpectedStock): number {
+  switch (edge) {
+    case 'left':
+      return stock.xMax;
+    case 'right':
+      return stock.xMin;
+    case 'front':
+      return stock.yMax;
+    case 'back':
+      return stock.yMin;
+  }
+}
+
 function scanFor(edge: Edge, along: number, stock: ExpectedStock, s: RegistrationSettings): EdgeScan {
   const outward: 1 | -1 = edge === 'right' || edge === 'back' ? 1 : -1;
   const expectedAt = edge === 'left' ? stock.xMin : edge === 'right' ? stock.xMax : edge === 'front' ? stock.yMin : stock.yMax;
@@ -185,6 +205,7 @@ function scanFor(edge: Edge, along: number, stock: ExpectedStock, s: Registratio
     outward,
     start: expectedAt - outward * s.scanInsideMm,
     limit: expectedAt + outward * s.scanReachMm,
+    oppositeAt: oppositeExpectedAt(edge, stock),
     coarseStep: s.coarseStepMm,
     fineStep: s.fineStepMm,
   };

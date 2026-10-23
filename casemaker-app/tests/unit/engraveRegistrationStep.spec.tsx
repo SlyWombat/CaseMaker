@@ -109,8 +109,6 @@ function spreadPlanFor(job: EngraveJob) {
 interface FakeOptions {
   /** How far the stock really is from where the plan expects it, mm (edge scans). */
   edgeShiftMm?: number;
-  /** Make the first scan touch a miss, so the first edge has no reading at all. */
-  missFirstScanTouch?: boolean;
   /** Alarm on the registration's tool-length measurement. */
   alarmAtM491?: boolean;
   /** Answer the apply step's M491 with no PRB. */
@@ -129,7 +127,6 @@ function controller(plan: RegistrationPlan, sent: string[], opts: FakeOptions = 
   let m491 = 0;
   let lastX = 0;
   let lastY = 0;
-  let missedScan = false;
   const stockZ = plan.seek.band.max - (plan.seek.band.max - plan.seek.band.min) / 2;
 
   const reply = (text: string): ConsoleSend => ({ ok: true, line: '', text, frames: 1, elapsedMs: 1 });
@@ -170,10 +167,6 @@ function controller(plan: RegistrationPlan, sent: string[], opts: FakeOptions = 
                 (r) => Math.abs(r.x - lastX) <= 0.6 && Math.abs(r.y - lastY) <= 0.6,
               );
               return reply(`[PRB:${lastX},${lastY},${reading?.z ?? stockZ}:1]\nok`);
-            }
-            if (opts.missFirstScanTouch === true && !missedScan) {
-              missedScan = true;
-              return reply(`[PRB:${lastX},${lastY},${stockZ - plan.settings.capBelowSurfaceMm}:0]\nok`);
             }
             const at = scan.edge === 'left' || scan.edge === 'right' ? lastX : lastY;
             const trueEdge = scan.expectedAt + (opts.edgeShiftMm ?? 0);
@@ -342,16 +335,20 @@ describe('#495 — the registration step', () => {
     });
   });
 
-  it('refuses a scan that is already off the stock, writes nothing, and records nothing', async () => {
+  it('#593 — a scan whose first touch misses searches inward and finds the edge, usable but outside the margin', async () => {
     const plan = makePlan(-56.172);
     const job = jobWithPlan(plan);
-    install(plan, { missFirstScanTouch: true });
+    // The stock sits 5 mm along the jaws, past `scanInsideMm` (3): the first touch of each scan is
+    // air, and the executor steps inward until a touch lands on the stock, so the run completes
+    // (usable) and the offset is simply far outside the margin — not a false refusal.
+    install(plan, { edgeShiftMm: 5 });
     render(<EngraveRegistrationStep job={job} target={TARGET} />);
 
     await runStep();
 
-    expect(screen.getByTestId('engrave-registration-verdict').getAttribute('data-usable')).toBe('false');
-    expect(screen.getByTestId('engrave-registration-problems').textContent).toContain('already off the stock');
+    expect(screen.getByTestId('engrave-registration-verdict').getAttribute('data-usable')).toBe('true');
+    expect(screen.getByTestId('engrave-registration-verdict').getAttribute('data-within-margin')).toBe('false');
+    expect(screen.getByTestId('engrave-registration-refusal').textContent).toContain('outside the');
     expect(screen.queryByTestId('engrave-registration-write')).toBeNull();
     expect(sent.some((line) => line.startsWith('G10 L2'))).toBe(false);
     expect(firstRegistrationFor(job.id, TARGET)).toBeNull();

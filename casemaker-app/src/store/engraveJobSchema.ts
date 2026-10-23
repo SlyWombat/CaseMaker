@@ -1181,6 +1181,11 @@ const edgeScanSchema = z.object({
   coarseStep: z.number().finite().describe('Coarse search step, in millimetres.'),
   fineStep: z.number().finite().describe('Fine search step, in millimetres.'),
   label: z.string().optional().describe('Optional label shown next to the scan in the run sheet.'),
+  oppositeAt: z
+    .number()
+    .finite()
+    .optional()
+    .describe('Opposite edge position the inward search is bounded by (#593); absent on a reference scan.'),
 });
 
 /** The stock as the job expected it, work XY — `ExpectedStock`. */

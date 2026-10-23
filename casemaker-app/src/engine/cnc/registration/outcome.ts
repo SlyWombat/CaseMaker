@@ -104,7 +104,10 @@ export function edgeFrom(record: ScanRecord, tipRadius: number): EdgeFinding {
       problem: `a touch on the scan of ${what} read ${r3(above.prb.z)}, higher than the stock — a clamp or a taller jaw is in the way`,
     };
   }
-  if (touches[0]!.kind !== 'stock') {
+  // #593 — a first touch off the stock is no longer a blanket refusal: the executor searched inward
+  // for the edge and records it below. A reference scan (a wall, by its `label`) has no inward
+  // search, so a miss there is still "not where the job expects it".
+  if (touches[0]!.kind !== 'stock' && scan.label !== undefined) {
     return {
       ...base,
       foundAt: null,
@@ -122,6 +125,18 @@ export function edgeFrom(record: ScanRecord, tipRadius: number): EdgeFinding {
     }
   }
   if (lastOn === null || firstOff === null) {
+    // A stock-edge scan that never touched the stock, inward or outward (#593), names the whole
+    // range the probe searched; any other shortfall keeps the plan's own reach sentence.
+    if (lastOn === null && scan.oppositeAt !== undefined) {
+      const axis = scan.edge === 'left' || scan.edge === 'right' ? 'X' : 'Y';
+      const lo = Math.min(scan.start, scan.limit, scan.oppositeAt);
+      const hi = Math.max(scan.start, scan.limit, scan.oppositeAt);
+      return {
+        ...base,
+        foundAt: null,
+        problem: `${what} was not found — the probe searched ${axis} ${r3(lo)} to ${r3(hi)} mm and never touched the stock`,
+      };
+    }
     return { ...base, foundAt: null, problem: `${what} was not found within the scan's reach` };
   }
   return { ...base, foundAt: r3((lastOn + firstOff) / 2 - scan.outward * tipRadius), problem: null };

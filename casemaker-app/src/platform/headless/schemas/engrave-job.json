@@ -1580,6 +1580,10 @@
                               "description": "Scan travel limit, in millimetres.",
                               "type": "number"
                             },
+                            "oppositeAt": {
+                              "description": "Opposite edge position the inward search is bounded by (#593); absent on a reference scan.",
+                              "type": "number"
+                            },
                             "outward": {
                               "anyOf": [
                                 {
@@ -2976,6 +2980,10 @@
                         },
                         "limit": {
                           "description": "Scan travel limit, in millimetres.",
+                          "type": "number"
+                        },
+                        "oppositeAt": {
+                          "description": "Opposite edge position the inward search is bounded by (#593); absent on a reference scan.",
                           "type": "number"
                         },
                         "outward": {

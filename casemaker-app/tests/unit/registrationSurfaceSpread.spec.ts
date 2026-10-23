@@ -357,6 +357,31 @@ describe('#475 the executor measures the cut extents', () => {
     expect(z1.lines.slice(-2)).toEqual(['G53 G0 Z-3', '$H']);
   });
 
+  it('#593 — a blank clamped 5 mm INWARD along the jaws: the front scan searches inward and finds the edge', async () => {
+    // Bench 2026-10-23, run 4: the badge sat +5 mm in Y, past `scanInsideMm` (3), so the front scan's
+    // FIRST touch was already air and the scan never got to step. It now steps inward by the coarse
+    // step until a touch lands on the stock, then runs the outward fine pass.
+    const SHIFT = 5;
+    const job = laminateJob();
+    const plan = registrationPlan(LAMINATE_STOCK, -55, { x: 38, y: 12.675 });
+    const spreadPlan = surfaceSpreadPlan(job, { touchCount: plan.settings.surfaceTouchCount, margin: 0.2 })!;
+    const actual: ExpectedStock = { ...LAMINATE_STOCK, yMin: LAMINATE_STOCK.yMin + SHIFT, yMax: LAMINATE_STOCK.yMax + SHIFT };
+    const zs = [-55, -55.02, -55.04, -55.06, -55.08];
+    const shifted = spreadPlan.touches.map((t, i) => ({ x: t.x, y: t.y + (i === 0 ? 0 : SHIFT), z: zs[i]! }));
+    const z1 = fakeZ1({ actual, surface: zs[0]!, readings: shifted, jaw: true });
+
+    const r = await runRegistration(plan, { console: z1.console, operator: yes }, spreadPlan);
+    if (!r.ok) throw new Error(r.reason);
+
+    // The front edge was found inward of the expected start, so Y is measured and the offset is the
+    // shift to within the scan's fine step — not the false "already off the stock" refusal.
+    expect(r.outcome.measured).toEqual({ x: true, y: true });
+    expect(Math.abs(r.outcome.offset.y - SHIFT)).toBeLessThanOrEqual(S.fineStepMm);
+    // The run still completes with a valid spread verdict and homes at the end.
+    expect(r.spread!.ok).toBe(true);
+    expect(z1.lines.slice(-2)).toEqual(['G53 G0 Z-3', '$H']);
+  });
+
   it('#590 — only the first touch starts at the travel height; the extent touches start just above the band', async () => {
     const job = laminateJob();
     const plan = registrationPlan(LAMINATE_STOCK, -55, { x: 38, y: 12.675 });
