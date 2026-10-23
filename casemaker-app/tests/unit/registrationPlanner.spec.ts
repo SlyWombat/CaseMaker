@@ -24,6 +24,7 @@ import {
   retouchAndCorrectAfterFacing,
   retouchSurface,
   runRegistration,
+  runMountTap,
   summarizeOutcome,
   summarizePlan,
   type ExpectedStock,
@@ -380,6 +381,25 @@ describe('#599 the mount tap', () => {
     const z1 = fakeZ1({ actual: SHIFTED });
     const p = plan('vise', { mountDatum: JAW, mountTap: TAP, fixtureBelowSurfaceMm: undefined });
     const r = await runRegistration(p, { console: z1.console, operator: yes });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reason).toContain('no jaw top');
+  });
+});
+
+describe('#599 the standalone mount tap', () => {
+  it('taps the jaw without a datum and returns the reading', async () => {
+    const z1 = fakeZ1({ actual: SHIFTED, tap: { x: -186.2, y: -180, z: -56.82 } });
+    const r = await runMountTap({ x: -186.2, y: -180 }, -3, S, { console: z1.console, operator: yes }, -100);
+    if (!r.ok) throw new Error(r.reason);
+    expect(r.z).toBe(-56.82);
+    expect(r.at).toEqual({ x: -186.2, y: -180 });
+    expect(z1.lines.slice(0, 4)).toEqual(['?', '$H', 'M119', 'M491']);
+    expect(z1.lines.at(-1)).toBe('$H');
+  });
+
+  it('a miss stops with the mount named', async () => {
+    const z1 = fakeZ1({ actual: SHIFTED });
+    const r = await runMountTap({ x: -186.2, y: -180 }, -3, S, { console: z1.console, operator: yes }, -100);
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.reason).toContain('no jaw top');
   });

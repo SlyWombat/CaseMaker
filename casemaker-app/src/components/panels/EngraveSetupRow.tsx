@@ -41,7 +41,7 @@ const WARN_COLOR = '#e0c07a';
 /** What pressing "Plan registration" answered — an engine plan, a refusal, or a missing input. */
 export type RegistrationAttempt =
   | { kind: 'need-seat'; message: string }
-  | { kind: 'need-datum'; message: string }
+  | { kind: 'need-datum'; message: string; mountTap: { x: number; y: number; fromMachineZ: number } | null }
   | { kind: 'refused'; reason: string }
   | { kind: 'plan'; method: Mount; plan: RegistrationPlan; summary: string; expected: string };
 
@@ -81,6 +81,8 @@ export interface EngraveSetupRowProps {
   onReplace: (next: JobSetup) => void;
   onPreviewRemount: () => void;
   planRegistration: (seatZ: string, useTypedSeat: boolean) => RegistrationAttempt;
+  /** #599 — run the standalone mount tap (no datum yet) and write the reading. */
+  onTapJaw: (tap: { x: number; y: number; fromMachineZ: number }) => void;
 }
 
 function holderWords(mount: MountSpec): string {
@@ -398,9 +400,14 @@ export function EngraveSetupRow(props: EngraveSetupRowProps): JSX.Element {
                 </p>
               )}
               {attempt?.kind === 'need-datum' && (
-                <p style={{ ...MUTED, color: WARN_COLOR }} data-testid={`engrave-setup-reg-need-datum-${n}`}>
-                  {attempt.message}
-                </p>
+                <div data-testid={`engrave-setup-reg-need-datum-${n}`}>
+                  <p style={{ ...MUTED, color: WARN_COLOR, margin: '4px 0' }}>{attempt.message}</p>
+                  {attempt.mountTap !== null && (
+                    <button type="button" data-testid={`engrave-setup-tap-jaw-${n}`} onClick={() => props.onTapJaw(attempt.mountTap!)}>
+                      Tap the fixed jaw
+                    </button>
+                  )}
+                </div>
               )}
               {attempt?.kind === 'refused' && (
                 <p style={{ ...MUTED, color: ERROR_COLOR }} data-testid={`engrave-setup-reg-refusal-${n}`}>

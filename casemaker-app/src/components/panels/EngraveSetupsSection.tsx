@@ -20,8 +20,8 @@ import { useMachineStore } from '@/store/machineStore';
 import { useEngraveRegistrationStore } from '@/store/engraveRegistrationStore';
 import { useToolRegistry } from '@/hooks/useToolRegistry';
 import { expandEngraveRow } from '@/store/engraveRowStore';
-import { accessoriesFor, machineAt } from '@/store/locationStore';
-import { newestViseRegistration, viseFrameFromRegistration, type RegistrationSource } from '@/platform/bedProfiles';
+import { accessoriesFor, machineAt, useLocationStore } from '@/store/locationStore';
+import { newestViseRegistration, viseFrameFromRegistration, withViseJawTopDatum, type RegistrationSource } from '@/platform/bedProfiles';
 import { newId } from '@/utils/id';
 import { bracketSettings, anchorFrom, bracketDatum, bracketExpectedSurface, clampObstacles, bracketObstacles, defaultClampPlacements } from '@/engine/cnc/mounts/bracket';
 import { viseTapPoint } from '@/engine/cnc/mounts/vise';
@@ -31,6 +31,8 @@ import { registrationSettings } from '@/engine/cnc/registration/settings';
 import { recommendedSurfaceToleranceMm } from '@/engine/cnc/materials';
 import { primitiveLabel } from '@/engine/cnc/engrave/partPlan';
 import { summarizePlan } from '@/engine/cnc/registration/summary';
+import { runMountTap } from '@/engine/cnc/registration';
+import { attachConsole } from '@/platform/machineConsole';
 import type { MountDatum, PlanObstacle, ProbeSpec, RegistrationPlan } from '@/engine/cnc/registration/plan';
 import {
   addSetupOffer,
@@ -218,6 +220,7 @@ function planRegistrationAttempt(args: {
         return {
           kind: 'need-datum',
           message: 'Tap the fixed jaw first (one touch), then plan again — the section has no stored jaw top and will not invent one.',
+          mountTap: args.mountTap,
         };
       }
       return {
@@ -266,12 +269,15 @@ export function EngraveSetupsSection({ initiallyOpen = false }: { initiallyOpen?
   const calibration = useSettingsStore((s) => s.machineCalibration);
   const machine = useMachineStore((s) => s.machine);
   const tools = useToolRegistry();
+  /** #599 — the standalone mount tap's result, shown beside the Setups section. */
+  const [tapNote, setTapNote] = useState<string | null>(null);
+  const [tapEpoch, setTapEpoch] = useState(0);
 
   const reading = useMemo(() => readSetups(job), [job]);
   const settings = useMemo(() => setupsSettings(defaults), [defaults]);
   // #598 — the checked-out probe and the measured jaw-top datum, from the machine at the run target.
   const target = useMemo(() => (machine === null ? null : { host: machine.host, port: machine.port }), [machine]);
-  const machineRecord = useMemo(() => (target === null ? null : machineAt(target)), [target]);
+  const machineRecord = useMemo(() => (target === null ? null : machineAt(target)), [target, tapEpoch]);
   const probe = useMemo(() => probeFor(machineRecord), [machineRecord]);
   const mountDatum = useMemo(() => mountDatumFor(machineRecord), [machineRecord]);
   // #599 — the mount tap point (machine XY), from the placement frame or the newest usable registration.
@@ -449,6 +455,35 @@ export function EngraveSetupsSection({ initiallyOpen = false }: { initiallyOpen?
     setDraftState({ job, setups: draftFromPlan(suggested, job.toolKey), plan: suggested });
   }
 
+  /** #599 — run the standalone mount tap (no datum yet) and write the reading into the bed profile. */
+  async function tapJaw(tap: { x: number; y: number; fromMachineZ: number }): Promise<void> {
+    if (target === null) return;
+    setTapNote(null);
+    const handle = attachConsole(target);
+    try {
+      const floor = jobMachine(job, calibration).envelope.z.min;
+      const r = await runMountTap(
+        { x: tap.x, y: tap.y },
+        tap.fromMachineZ,
+        regSettings,
+        { console: { send: (line, timing) => handle.send(line, timing) }, operator: async () => true },
+        floor,
+      );
+      if (r.ok) {
+        const record = machineAt(target);
+        if (record !== null) {
+          await useLocationStore.getState().saveMachine(withViseJawTopDatum(record, { z: r.z, at: r.at }, probe?.id ?? 'wired-probe', new Date().toISOString()));
+        }
+        setTapNote('the jaw top is recorded — plan the registration again');
+        setTapEpoch((e) => e + 1);
+      } else {
+        setTapNote(r.reason);
+      }
+    } finally {
+      await handle.close();
+    }
+  }
+
   function usePlan(): void {
     if (draft !== null) {
       if (draft.setups.length > 0) write(draft.setups);
@@ -614,6 +649,11 @@ export function EngraveSetupsSection({ initiallyOpen = false }: { initiallyOpen?
           {sectionNotice}
         </p>
       )}
+      {tapNote !== null && (
+        <p style={{ ...MUTED, color: '#e0c07a' }} data-testid="engrave-setups-tap-note">
+          {tapNote}
+        </p>
+      )}
 
       {reading.source === 'empty' && draft === null ? (
         <p style={MUTED} data-testid="engrave-setups-empty">
@@ -681,6 +721,7 @@ export function EngraveSetupsSection({ initiallyOpen = false }: { initiallyOpen?
                   settings: regSettings,
                 });
               }}
+              onTapJaw={tapJaw}
             />
           );
         })

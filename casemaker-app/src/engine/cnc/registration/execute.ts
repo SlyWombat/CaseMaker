@@ -68,7 +68,7 @@ import { type EdgeScan, type RegistrationPlan } from './plan';
 import { classifyTouch, lastPrb, type Prb } from './readings';
 import { computeOutcome, correctionLine, type RegistrationOutcome, type RunData, type ScanRecord, type ScanTouch } from './outcome';
 import { referenceOutcome } from './references';
-import { settingsProblem, SURFACE_LIFT_MM } from './settings';
+import { settingsProblem, SURFACE_LIFT_MM, type RegistrationSettings } from './settings';
 
 export interface RegistrationConsole {
   send(line: string, timing?: Partial<ConsoleTiming>): Promise<ConsoleSendResult>;
@@ -353,6 +353,77 @@ async function seekSurface(
 }
 
 /**
+ * #599 — one guarded mount tap at the machine XY `tap`, down to the machine floor `floorZ`. One line
+ * per Idle, and the G38.3 is never queued behind the rapid (that queue gave PROBE_FAIL on
+ * 2026-10-23). Returns the reading — a miss is a `touched:false` reading, null is no reading — and
+ * the caller checks it against the stored datum or the floor. Shared by the in-run tap and the
+ * standalone {@link runMountTap}.
+ */
+async function mountTapTouch(
+  io: Session,
+  tap: { x: number; y: number },
+  seekFromMachineZ: number,
+  settings: RegistrationSettings,
+  floorZ: number,
+): Promise<Prb | null> {
+  await io.idle();
+  await io.send(`G53 G0 Z${f(seekFromMachineZ)}`);
+  await io.send(`G53 G0 X${f(tap.x)} Y${f(tap.y)}`);
+  await io.idle();
+  io.at(`as low as machine Z ${f(floorZ)} (the mount tap)`);
+  await io.send('G91');
+  const reply = await io.send(`G38.3 Z-${f(seekFromMachineZ - floorZ)} F${f(settings.touchFeed)}`, { missOk: true });
+  const prb = lastPrb(reply);
+  await io.send('G0 Z3');
+  await io.send('G90');
+  const after = await io.send('M119');
+  if (/Probe:\s*1\b/.test(after)) {
+    throw new Stop('the probe still reads touched after the mount tap — check it is seated and plugged in');
+  }
+  await io.send(`G53 G0 Z${f(seekFromMachineZ)}`);
+  return prb;
+}
+
+export type MountTapResult =
+  | { ok: true; z: number; at: { x: number; y: number }; transcript: Transcript[] }
+  | { ok: false; reason: string; transcript: Transcript[] };
+
+/**
+ * #599 — a standalone mount tap (no surface seek): the FIRST tap on a machine with no jaw-top datum,
+ * down to the machine's work-envelope Z floor rather than a stored datum. Runs home → M119 rest-check
+ * → M491 → the tap → $H, transcript like a registration; the caller writes the datum and re-plans.
+ */
+export async function runMountTap(
+  tap: { x: number; y: number },
+  seekFromMachineZ: number,
+  settings: RegistrationSettings,
+  deps: ExecDeps,
+  workEnvelopeFloorZ: number,
+): Promise<MountTapResult> {
+  const io = session(deps, seekFromMachineZ, settings.idlePollLimit);
+  const bad = settingsProblem(settings);
+  if (bad !== null) return { ok: false, reason: `nothing was sent: ${bad}`, transcript: [] };
+  try {
+    const status = await io.send('?');
+    if (controllerState(status) !== 'Idle') throw new Stop(`the machine reads ${controllerState(status) ?? 'no state'}, not Idle`);
+    await io.send('$H');
+    const rest = await io.send('M119');
+    if (/Probe:\s*1\b/.test(rest)) throw new Stop('the probe reads touched at rest; check it is seated and plugged in');
+    const ref = lastPrb(await io.send('M491', { timing: PROBE_TIMING }));
+    if (ref === null || !ref.touched) throw new Stop('M491 answered no tool-length reading');
+    const prb = await mountTapTouch(io, tap, seekFromMachineZ, settings, workEnvelopeFloorZ);
+    if (prb === null || !prb.touched) {
+      throw new Stop(`no jaw top at (${tap.x}, ${tap.y}) down to machine Z ${f(workEnvelopeFloorZ)} — is the vise where the machine record says?`);
+    }
+    await io.send('$H');
+    return { ok: true, z: prb.z, at: { x: tap.x, y: tap.y }, transcript: io.transcript };
+  } catch (e) {
+    if (e instanceof Stop) return { ok: false, reason: await io.stopped(e.message), transcript: io.transcript };
+    throw e;
+  }
+}
+
+/**
  * #475 — how many surface touches the run may take, and where. `surfaceSpreadPlan(job)` supplies
  * the cut area's centre and extents and the depth band those regions leave; the executor measures
  * the points and assesses the readings. The caller passes it only when it wants a spread verdict.
@@ -395,24 +466,10 @@ export async function runRegistration(
     if (plan.mountTap !== null && plan.mountDatum !== null) {
       const tap = plan.mountTap;
       const jawTopZ = plan.mountDatum.jawTopZ;
-      await io.idle();
-      await io.send(`G53 G0 Z${f(plan.seek.fromMachineZ)}`);
-      await io.send(`G53 G0 X${f(tap.x)} Y${f(tap.y)}`);
-      await io.idle();
-      io.at(`as low as machine Z ${f(jawTopZ - 2)}, 2 mm below the jaw top (the mount tap)`);
-      await io.send('G91');
-      const reply = await io.send(`G38.3 Z-${f(plan.seek.fromMachineZ - (jawTopZ - 2))} F${f(s.touchFeed)}`, { missOk: true });
-      const prb = lastPrb(reply);
+      const prb = await mountTapTouch(io, { x: tap.x, y: tap.y }, plan.seek.fromMachineZ, s, jawTopZ - 2);
       if (prb === null || !prb.touched || Math.abs(prb.z - jawTopZ) > 2) {
         throw new Stop(`no jaw top at (${tap.x}, ${tap.y}) down to machine Z ${f(jawTopZ - 2)} — is the vise where the machine record says?`);
       }
-      await io.send('G0 Z3');
-      await io.send('G90');
-      const after = await io.send('M119');
-      if (/Probe:\s*1\b/.test(after)) {
-        throw new Stop('the probe still reads touched after the mount tap — check it is seated and plugged in');
-      }
-      await io.send(`G53 G0 Z${f(plan.seek.fromMachineZ)}`);
       mountTap = { z: prb.z, at: { x: tap.x, y: tap.y } };
     }
 
