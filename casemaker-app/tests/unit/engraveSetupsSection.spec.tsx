@@ -4,7 +4,7 @@
 // it (render is never a write), plus the two approvals the run needs.
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { EngraveSetupsSection } from '@/components/panels/EngraveSetupsSection';
 import { useEngraveJobStore } from '@/store/engraveJobStore';
 import { useShopDefaultsStore, resetShopDefaultsStore } from '@/store/shopDefaultsStore';
@@ -14,6 +14,7 @@ import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { jobSetups } from '@/engine/cnc/engrave/jobSetup';
 import { orient } from '@/engine/cnc/setups/orient';
 import { ShopDefaultsSchema } from '@/platform/defaultsClient';
+import { setHouseClientLoader, type HouseClient } from '@/platform/houseClient';
 import type { MachineCalibration } from '@/engine/cnc/calibration';
 import type { EngraveCircleShape, EngraveDrillItem, EngraveJob, JobSetup } from '@/types/engraveJob';
 
@@ -111,6 +112,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  setHouseClientLoader(null);
 });
 
 describe('#471 the Setups section — the states of §2', () => {
@@ -371,5 +373,53 @@ describe('#471 remount — derived on the line, approved on the page', () => {
     fireEvent.click(screen.getByTestId('engrave-remount-done'));
     expect(useEngraveJobStore.getState().job.setups![1]!.remount).toBeDefined();
     expect(useEngraveJobStore.getState().job.setups![1]!.remount!.instruction.length).toBeGreaterThan(0);
+  });
+});
+
+describe('#589 the surface tolerance — shown with the recommendation, writable, invalidates the plan', () => {
+  it('shows the current tolerance with the per-stock recommendation beside it', () => {
+    const job = savedJob();
+    job.stock.material = 'petg';
+    act(() => useEngraveJobStore.setState({ job }));
+    render(<EngraveSetupsSection />);
+
+    const input = screen.getByTestId('engrave-setups-tolerance-input') as HTMLInputElement;
+    expect(input.value).toBe('0.4'); // the labelled fallback with no location read
+    expect(screen.getByTestId('engrave-setups-tolerance').textContent).toContain('±1 mm — printed stock');
+  });
+
+  it('saving a new tolerance writes the house default and strips the approved registration', async () => {
+    let stored: Record<string, unknown> = {};
+    setHouseClientLoader(async () => ({
+      call: async (method, path, body) => {
+        if (method === 'GET' && path === '/defaults') {
+          return { kind: 'ok', text: JSON.stringify(stored), etag: '"v1"' };
+        }
+        if (method === 'PUT' && path.startsWith('/defaults/')) {
+          stored[path.slice('/defaults/'.length)] = body;
+          return { kind: 'ok', text: '', etag: '"v2"' };
+        }
+        return { kind: 'ok', text: '' };
+      },
+    }) as unknown as HouseClient);
+
+    const job = savedJob();
+    job.stock.material = 'petg';
+    // An approved registration, so the change has a plan to invalidate.
+    job.setups![0]!.registration = {
+      method: 'vise',
+      plan: {} as NonNullable<JobSetup['registration']>['plan'],
+      expected: 'planned',
+    };
+    act(() => useEngraveJobStore.setState({ job }));
+    render(<EngraveSetupsSection />);
+
+    fireEvent.change(screen.getByTestId('engrave-setups-tolerance-input'), { target: { value: '1' } });
+    fireEvent.click(screen.getByTestId('engrave-setups-tolerance-save'));
+
+    await waitFor(() => {
+      expect(useEngraveJobStore.getState().job.setups![0]!.registration).toBeUndefined();
+    });
+    expect(stored['registration.surfaceToleranceMm']).toMatchObject({ value: 1, source: 'chosen' });
   });
 });

@@ -183,3 +183,16 @@ export const PRINTED_BLANK_MATERIALS = [
 export function isPrintedBlankMaterial(material: StockMaterial): boolean {
   return PRINTED_BLANK_MATERIALS.some((printed) => printed === material);
 }
+
+/**
+ * #589 — the surface tolerance a normally-mounted blank of this material needs, mm. A printed blank
+ * bows and carries layer scallop (~1 mm); a board sawn from sheet or cast stock is far flatter
+ * (0.4 mm), and a metal blank flatter still (0.2 mm). This is the RECOMMENDATION shown beside the
+ * `registration.surfaceToleranceMm` setting; the planner applies it unless the house setting is
+ * tighter on purpose.
+ */
+export function recommendedSurfaceToleranceMm(material: StockMaterial): { value: number; kind: string } {
+  if (isMetalMaterial(material)) return { value: 0.2, kind: 'metal' };
+  if (isPrintedBlankMaterial(material)) return { value: 1.0, kind: 'printed stock' };
+  return { value: 0.4, kind: 'sheet/cast stock' };
+}

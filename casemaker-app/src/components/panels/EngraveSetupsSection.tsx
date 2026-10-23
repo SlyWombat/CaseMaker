@@ -22,6 +22,7 @@ import { newId } from '@/utils/id';
 import { bracketSettings, anchorFrom, bracketDatum, bracketExpectedSurface, clampObstacles, bracketObstacles, defaultClampPlacements } from '@/engine/cnc/mounts/bracket';
 import { jobMachine } from '@/engine/cnc/calibration';
 import { registrationSettings } from '@/engine/cnc/registration/settings';
+import { recommendedSurfaceToleranceMm } from '@/engine/cnc/materials';
 import { primitiveLabel } from '@/engine/cnc/engrave/partPlan';
 import { summarizePlan } from '@/engine/cnc/registration/summary';
 import type { PlanObstacle, RegistrationPlan } from '@/engine/cnc/registration/plan';
@@ -48,7 +49,7 @@ import {
   type Setup,
   type SetupChange,
 } from '@/engine/cnc/setups';
-import type { ShopDefaults } from '@/platform/defaultsClient';
+import { readDefault, type ShopDefaults } from '@/platform/defaultsClient';
 import type { MachineCalibration } from '@/engine/cnc/calibration';
 import type { EngraveJob, JobSetup } from '@/types/engraveJob';
 import { EngraveSetupRow, type RegistrationAttempt } from './EngraveSetupRow';
@@ -230,6 +231,42 @@ export function EngraveSetupsSection({ initiallyOpen = false }: { initiallyOpen?
 
   const stock = { x: job.stock.length, y: job.stock.width, z: job.stock.thickness };
 
+  // #589 — the registration surface tolerance: the current house number and the per-stock
+  // recommendation beside it. The one write path goes through the shop-defaults store's `set`,
+  // which refetches after a successful write, so the new number is seen without a reload.
+  const tolerance = readDefault(defaults, 'registration.surfaceToleranceMm');
+  const toleranceRec = recommendedSurfaceToleranceMm(job.stock.material);
+  const [tolDraft, setTolDraft] = useState<string | null>(null);
+
+  function saveTolerance(): void {
+    if (tolDraft === null) return;
+    const value = Number(tolDraft);
+    if (!Number.isFinite(value) || value < 0.05) {
+      setTolDraft(null);
+      return;
+    }
+    void useShopDefaultsStore
+      .getState()
+      .set('registration.surfaceToleranceMm', {
+        value,
+        source: 'chosen',
+        setAt: new Date().toISOString(),
+        unit: 'mm',
+        note: null,
+      })
+      .then((ok) => {
+        setTolDraft(null);
+        if (!ok) return;
+        // A changed tolerance invalidates the plan, not the Generate (#574): drop the approved
+        // registrations so the operator plans again with the new number. The Cut screen then offers a
+        // re-freeze, never a re-generate — the .nc does not come from the tolerance.
+        const setups = job.setups;
+        if (setups !== undefined && setups.some((s) => s.registration !== undefined)) {
+          setSetups(setups.map((s) => ({ ...s, registration: undefined })));
+        }
+      });
+  }
+
   function write(next: JobSetup[]): void {
     setSetups(next);
   }
@@ -404,6 +441,37 @@ export function EngraveSetupsSection({ initiallyOpen = false }: { initiallyOpen?
         >
           Add setup
         </button>
+      </div>
+
+      {/* #589 — the registration surface tolerance, where the plan is made: the number a bowed
+          printed blank needs, writable here rather than only through the API. */}
+      <div data-testid="engrave-setups-tolerance" style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '8px 0', flexWrap: 'wrap' }}>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
+          <span>Surface tolerance</span>
+          <input
+            type="number"
+            step="any"
+            min="0.05"
+            max="10"
+            value={tolDraft ?? String(tolerance.value)}
+            style={{ width: 70 }}
+            data-testid="engrave-setups-tolerance-input"
+            aria-label="Registration surface tolerance"
+            onChange={(e) => setTolDraft(e.target.value)}
+          />
+          <span>mm</span>
+        </label>
+        <button
+          type="button"
+          data-testid="engrave-setups-tolerance-save"
+          disabled={tolDraft === null || Number(tolDraft) === tolerance.value}
+          onClick={saveTolerance}
+        >
+          Save
+        </button>
+        <span style={{ ...MUTED, margin: 0 }}>
+          ±{toleranceRec.value} mm — {toleranceRec.kind}
+        </span>
       </div>
 
       {reading.source === 'implicit' && draft === null && (
