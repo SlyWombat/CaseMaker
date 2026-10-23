@@ -65,6 +65,8 @@ export function registrationFor(
     mountDatum?: MountDatum | null;
     /** The checked-out probe, carried on the plan for the record. */
     probe?: ProbeSpec | null;
+    /** #599 — the mount tap point (machine XY), computed by the caller from the bed placement. */
+    mountTap?: { x: number; y: number; fromMachineZ: number; label: string } | null;
     bracketOrigin?: BracketOrigin;
     /** Bracket (#427): the clamps and arms as placed, and whether to take the confirming touch. */
     mountObstacles?: PlanObstacle[];
@@ -82,6 +84,7 @@ export function registrationFor(
       seekFromMachineZ: input.seekFromMachineZ,
       mountDatum: datum,
       probe: input.probe ?? null,
+      mountTap: input.mountTap ?? null,
       fixtureBelowSurfaceMm: mount.kind === 'vise' && datum === null ? dims.z - LEDGE_STEP : undefined,
       bracketOrigin: input.bracketOrigin,
       mountObstacles: input.mountObstacles,
@@ -140,6 +143,8 @@ export function referenceRegistrationFor(
     mountDatum?: MountDatum | null;
     /** The checked-out probe, carried on the plan for the record. */
     probe?: ProbeSpec | null;
+    /** #599 — the mount tap point (machine XY), computed by the caller from the bed placement. */
+    mountTap?: { x: number; y: number; fromMachineZ: number; label: string } | null;
     cutCentre?: { x: number; y: number };
   },
   settings: RegistrationSettings,
@@ -158,6 +163,7 @@ export function referenceRegistrationFor(
       seekFromMachineZ: input.seekFromMachineZ,
       mountDatum: datum,
       probe: input.probe ?? null,
+      mountTap: input.mountTap ?? null,
       fixtureBelowSurfaceMm: mount.kind === 'vise' && datum === null ? dims.z - LEDGE_STEP : undefined,
       ...(input.cutCentre ? { cutCentre: input.cutCentre } : {}),
       openings,

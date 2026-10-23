@@ -91,6 +91,22 @@ export function newestViseRegistration(
 }
 
 /**
+ * #599 — the fixed-jaw frame a registration fixes: the corrected G54 X IS the fixed jaw face (the
+ * stock's left edge), and the bar starts `jawStartY` from the corrected G54 Y (the legacy negative
+ * offset). The one statement of this arithmetic, reused by `bedFromLegacy` and the planner's frame
+ * source order.
+ */
+export function viseFrameFromRegistration(
+  registration: LegacyViseRegistration,
+  jawStartY: number,
+): { fixedJawFaceX: number; jawStartY: number } {
+  return {
+    fixedJawFaceX: round3(registration.correctedG54.x),
+    jawStartY: round3(registration.correctedG54.y + jawStartY),
+  };
+}
+
+/**
  * The new keys for a machine that has not been migrated, or null when there is nothing to migrate
  * (no wasteboard, no vise, no measured bracket seat) or the bed is already described. Nothing is
  * deleted: every legacy key stays exactly where it was.
@@ -179,13 +195,10 @@ export function bedFromLegacy(
     const frame =
       registration === null
         ? null
-        : {
-            // The registration's corrected G54 IS the stock's front-left corner in machine XY:
-            // its X is against the fixed jaw face, its Y is the stock's front edge, and the bar
-            // starts `jawStartY` from there (the legacy negative offset).
-            fixedJawFaceX: round3(registration.correctedG54.x),
-            jawStartY: round3(registration.correctedG54.y + vise.jawStartY),
-          };
+        : // The registration's corrected G54 IS the stock's front-left corner in machine XY: its X is
+          // against the fixed jaw face, its Y is the stock's front edge, and the bar starts `jawStartY`
+          // from there (the legacy negative offset) — `viseFrameFromRegistration` is the one statement.
+          viseFrameFromRegistration(registration, vise.jawStartY);
 
     placements.push({
       id: 'pl-vise',

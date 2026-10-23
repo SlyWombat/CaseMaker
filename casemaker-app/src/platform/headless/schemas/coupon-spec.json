@@ -1451,6 +1451,42 @@
                             },
                             "type": "array"
                           },
+                          "mountTap": {
+                            "anyOf": [
+                              {
+                                "properties": {
+                                  "fromMachineZ": {
+                                    "description": "The travel height the tap starts from, machine Z.",
+                                    "type": "number"
+                                  },
+                                  "label": {
+                                    "description": "What the tap touches, for the operator.",
+                                    "type": "string"
+                                  },
+                                  "x": {
+                                    "description": "The tap point X, machine coordinates, in millimetres.",
+                                    "type": "number"
+                                  },
+                                  "y": {
+                                    "description": "The tap point Y, machine coordinates, in millimetres.",
+                                    "type": "number"
+                                  }
+                                },
+                                "required": [
+                                  "x",
+                                  "y",
+                                  "fromMachineZ",
+                                  "label"
+                                ],
+                                "type": "object"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ],
+                            "default": null,
+                            "description": "The mount tap the executor touches before the surface seek, or null/absent."
+                          },
                           "notes": {
                             "description": "Human-readable notes shown with the plan.",
                             "items": {
@@ -2940,6 +2976,42 @@
                           "type": "object"
                         },
                         "type": "array"
+                      },
+                      "mountTap": {
+                        "anyOf": [
+                          {
+                            "properties": {
+                              "fromMachineZ": {
+                                "description": "The travel height the tap starts from, machine Z.",
+                                "type": "number"
+                              },
+                              "label": {
+                                "description": "What the tap touches, for the operator.",
+                                "type": "string"
+                              },
+                              "x": {
+                                "description": "The tap point X, machine coordinates, in millimetres.",
+                                "type": "number"
+                              },
+                              "y": {
+                                "description": "The tap point Y, machine coordinates, in millimetres.",
+                                "type": "number"
+                              }
+                            },
+                            "required": [
+                              "x",
+                              "y",
+                              "fromMachineZ",
+                              "label"
+                            ],
+                            "type": "object"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ],
+                        "default": null,
+                        "description": "The mount tap the executor touches before the surface seek, or null/absent."
                       },
                       "notes": {
                         "description": "Human-readable notes shown with the plan.",

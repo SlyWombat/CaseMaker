@@ -17,12 +17,16 @@ import { useEngraveJobStore } from '@/store/engraveJobStore';
 import { useShopDefaultsStore } from '@/store/shopDefaultsStore';
 import { useSettingsStore } from '@/store/settingsStore';
 import { useMachineStore } from '@/store/machineStore';
+import { useEngraveRegistrationStore } from '@/store/engraveRegistrationStore';
 import { useToolRegistry } from '@/hooks/useToolRegistry';
 import { expandEngraveRow } from '@/store/engraveRowStore';
 import { accessoriesFor, machineAt } from '@/store/locationStore';
+import { newestViseRegistration, viseFrameFromRegistration, type RegistrationSource } from '@/platform/bedProfiles';
 import { newId } from '@/utils/id';
 import { bracketSettings, anchorFrom, bracketDatum, bracketExpectedSurface, clampObstacles, bracketObstacles, defaultClampPlacements } from '@/engine/cnc/mounts/bracket';
+import { viseTapPoint } from '@/engine/cnc/mounts/vise';
 import { jobMachine } from '@/engine/cnc/calibration';
+import { DEFAULT_VISE, Z1_VISE } from '@/engine/cnc/fixture';
 import { registrationSettings } from '@/engine/cnc/registration/settings';
 import { recommendedSurfaceToleranceMm } from '@/engine/cnc/materials';
 import { primitiveLabel } from '@/engine/cnc/engrave/partPlan';
@@ -117,6 +121,34 @@ function mountDatumFor(machine: MachineRecord | null): MountDatum | null {
   return { jawTopZ: datum.value, measuredAt: datum.measuredAt, by: datum.by };
 }
 
+/** #599 — the mount tap point (machine XY) for the vise, from the bed placement or the newest registration. */
+function mountTapFor(
+  machine: MachineRecord | null,
+  registrations: RegistrationSource[],
+  seekFromMachineZ: number,
+): { x: number; y: number; fromMachineZ: number; label: string } | null {
+  if (machine === null) return null;
+  const profile = machine.bedProfiles?.find((p) => p.id === machine.activeBedProfileId);
+  const placement = profile?.placements.find((p) => p.where.kind === 'pins' && p.where.pins === 'vise');
+  const viseAcc = accessoriesFor(machine).find((a) => a.kind === 'vise');
+  const jawBarWidth = num(viseAcc?.constants.jawBarWidth) ?? Z1_VISE.fixedJawThickness;
+  const jawLength = num(viseAcc?.constants.jawLength) ?? Z1_VISE.jawLength;
+  const jawStartY = num(viseAcc?.unit.jawStartY) ?? DEFAULT_VISE.jawStartY;
+
+  // The frame source order: the measured placement frame, else the newest usable registration, else none.
+  const f = placement?.frame ?? null;
+  let frame: { fixedJawFaceX: number; jawStartY: number } | null = null;
+  if (f !== null && f.fixedJawFaceX !== null && f.jawStartY !== null) {
+    frame = { fixedJawFaceX: f.fixedJawFaceX, jawStartY: f.jawStartY };
+  } else {
+    const reg = newestViseRegistration(registrations, machine.address);
+    frame = reg === null ? null : viseFrameFromRegistration(reg, jawStartY);
+  }
+  if (frame === null) return null;
+  const point = viseTapPoint(frame, { jawBarWidth, jawLength });
+  return { x: point.x, y: point.y, fromMachineZ: seekFromMachineZ, label: 'the vise fixed-jaw top' };
+}
+
 /**
  * Plan one setup's registration, or say why it cannot be planned.
  *
@@ -135,6 +167,8 @@ function planRegistrationAttempt(args: {
   useTypedSeat: boolean;
   mountDatum: MountDatum | null;
   probe: ProbeSpec | null;
+  /** #599 — the mount tap point (machine XY), or null when the fixed jaw's frame is unknown. */
+  mountTap: { x: number; y: number; fromMachineZ: number; label: string } | null;
   defaults: ShopDefaults | null;
   calibration: MachineCalibration | undefined;
   settings: ReturnType<typeof registrationSettings>['settings'];
@@ -170,8 +204,12 @@ function planRegistrationAttempt(args: {
     };
   } else if (mount.kind === 'vise' && args.mountDatum !== null && !args.useTypedSeat) {
     // #598 — the datum path: no seat input; the surface is the measured jaw top + the stock's proud
-    // height (`registrationFor` works it out), and the probe is carried for the record.
-    input = { seekFromMachineZ, cornerRadius: STOCK_CORNER_RADIUS_MM, mountDatum: args.mountDatum, probe: args.probe };
+    // height (`registrationFor` works it out), and the probe is carried for the record. #599 — the
+    // mount tap needs the fixed jaw's machine XY; without a frame there is nothing to tap.
+    if (args.mountTap === null) {
+      return { kind: 'refused', reason: 'place the vise, or register once with the typed seat, so the app knows where the fixed jaw is' };
+    }
+    input = { seekFromMachineZ, cornerRadius: STOCK_CORNER_RADIUS_MM, mountDatum: args.mountDatum, probe: args.probe, mountTap: args.mountTap };
   } else {
     // The seat path: tape always; a vise without a datum, or with the expert override, types the seat.
     const seat = Number(args.seatZ);
@@ -236,6 +274,13 @@ export function EngraveSetupsSection({ initiallyOpen = false }: { initiallyOpen?
   const machineRecord = useMemo(() => (target === null ? null : machineAt(target)), [target]);
   const probe = useMemo(() => probeFor(machineRecord), [machineRecord]);
   const mountDatum = useMemo(() => mountDatumFor(machineRecord), [machineRecord]);
+  // #599 — the mount tap point (machine XY), from the placement frame or the newest usable registration.
+  const registrations = useEngraveRegistrationStore((s) => s.records);
+  const seekFromMachineZ = useMemo(() => jobMachine(job, calibration).toolChange.clearanceZ, [job, calibration]);
+  const mountTap = useMemo(
+    () => mountTapFor(machineRecord, Object.values(registrations), seekFromMachineZ),
+    [machineRecord, registrations, seekFromMachineZ],
+  );
   const regSettings = useMemo(() => registrationSettings(defaults, probe).settings, [defaults, probe]);
   const rotaryEnvelope = useMemo(() => jobMachine(job, calibration).rotary?.envelope, [job, calibration]);
   const suggested = useMemo(() => suggestedPlan(job, settings, rotaryEnvelope), [job, settings, rotaryEnvelope]);
@@ -630,6 +675,7 @@ export function EngraveSetupsSection({ initiallyOpen = false }: { initiallyOpen?
                   useTypedSeat,
                   mountDatum,
                   probe,
+                  mountTap,
                   defaults,
                   calibration,
                   settings: regSettings,

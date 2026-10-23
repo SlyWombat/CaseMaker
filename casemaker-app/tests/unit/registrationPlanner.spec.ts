@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { consoleProblem } from '@/engine/cnc/consoleGate';
 import { ShopDefaultsSchema } from '@/platform/defaultsClient';
+import { viseTapPoint } from '@/engine/cnc/mounts/vise';
 import type { ConsoleSendResult } from '@/platform/machineConsole';
 import {
   applyCorrection,
@@ -174,6 +175,32 @@ describe('#598 the datum and the checked-out probe', () => {
 
   it('without a datum the legacy seat path still refuses a tolerance that reaches the jaw tops', () => {
     expect(planRegistration(input('vise', { fixtureBelowSurfaceMm: 0.72 }), { ...S, surfaceToleranceMm: 1.0 })).toMatchObject({ ok: false });
+  });
+});
+
+describe('#599 the vise tap point', () => {
+  it('with the house fixture the tap is within 1 mm of the bench X −186.2, and mid-bar in Y', () => {
+    const full = JSON.parse(readFileSync(join(HERE, 'fixtures', 'location-doc.json'), 'utf8')) as {
+      machines: Array<{
+        bedProfiles: Array<{ placements: Array<{ where: { kind: string; pins: string | null }; frame: { fixedJawFaceX: number | null; jawStartY: number | null } }> }>;
+      }>;
+      accessories: Array<{ kind: string; constants: Record<string, unknown> }>;
+    };
+    const placement = full.machines[0]!.bedProfiles[0]!.placements.find((p) => p.where.kind === 'pins' && p.where.pins === 'vise')!;
+    const vise = full.accessories.find((a) => a.kind === 'vise')!;
+    const frame = { fixedJawFaceX: placement.frame.fixedJawFaceX!, jawStartY: placement.frame.jawStartY! };
+    const jawLength = vise.constants.jawLength as number;
+    const point = viseTapPoint(frame, { jawBarWidth: vise.constants.jawBarWidth as number, jawLength });
+
+    // The bench tap (2026-10-23) was at machine X −186.2, on the bar mid-way along its length.
+    expect(Math.abs(point.x - -186.2)).toBeLessThanOrEqual(1);
+    const lo = frame.jawStartY + 5;
+    const hi = frame.jawStartY + jawLength - 5;
+    expect(point.y).toBeGreaterThanOrEqual(lo);
+    expect(point.y).toBeLessThanOrEqual(hi);
+    // The bench's mid-BLANK tap Y −180 is also inside the bar's span, so mid-bar is the safe choice.
+    expect(-180).toBeGreaterThanOrEqual(lo);
+    expect(-180).toBeLessThanOrEqual(hi);
   });
 });
 

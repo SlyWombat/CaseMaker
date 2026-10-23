@@ -1314,6 +1314,16 @@ const registrationPlanSchema = z.object({
     .nullable()
     .default(null)
     .describe('The checked-out probe on the plan, or null/absent.'),
+  mountTap: z
+    .object({
+      x: z.number().finite().describe('The tap point X, machine coordinates, in millimetres.'),
+      y: z.number().finite().describe('The tap point Y, machine coordinates, in millimetres.'),
+      fromMachineZ: z.number().finite().describe('The travel height the tap starts from, machine Z.'),
+      label: z.string().describe('What the tap touches, for the operator.'),
+    })
+    .nullable()
+    .default(null)
+    .describe('The mount tap the executor touches before the surface seek, or null/absent.'),
   scans: z.array(edgeScanSchema).describe('Edge scans the plan runs.'),
   bracketOrigin: bracketOriginSchema
     .nullable()

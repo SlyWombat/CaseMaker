@@ -145,11 +145,11 @@
               },
               "count": null,
               "frame": {
-                "fixedJawFaceX": -0.1,
-                "jawStartY": -10.0
+                "fixedJawFaceX": -181.2,
+                "jawStartY": -203.5
               },
               "provenance": {
-                "fixedJawFaceX": "measured:2026-10-16T09:00:00.000Z",
+                "fixedJawFaceX": "measured:2026-10-23T00:00:00.000Z",
                 "jawStartY": "typed"
               }
             }

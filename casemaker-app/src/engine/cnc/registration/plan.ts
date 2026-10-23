@@ -134,6 +134,13 @@ export interface PlanInput {
    */
   probe?: ProbeSpec | null;
   /**
+   * #599 — the mount's reference point for the registration tap, MACHINE XY (the vise's fixed-jaw
+   * top). The caller computes it from the bed placement + vise constants (`mounts/vise.ts`); the
+   * executor touches it once before the surface seek and checks it against the stored datum. Absent
+   * on the bracket and tape.
+   */
+  mountTap?: { x: number; y: number; fromMachineZ: number; label: string } | null;
+  /**
    * REQUIRED, and the CALLER's to supply: the machine's own travel height in MACHINE Z — the resolved
    * machine's `toolChange.clearanceZ` (`machine.ts` → `resolveMachine`), the Z the controller lifts to
    * before any clearance traverse. It is BOTH the height the seek starts from AND the bound the obstacle
@@ -191,6 +198,8 @@ export interface RegistrationPlan {
   mountDatum: MountDatum | null;
   /** #598 — the probe checked out to the machine, whose tip/rim resolved the settings; null with none. */
   probe: ProbeSpec | null;
+  /** #599 — the mount tap the executor touches before the surface seek, or null. */
+  mountTap: { x: number; y: number; fromMachineZ: number; label: string } | null;
   scans: EdgeScan[];
   bracketOrigin: BracketOrigin | null;
   /** Bracket: what stands above the stock, as the operator must confirm it (#427). Empty elsewhere. */
@@ -273,6 +282,7 @@ export function planRegistration(input: PlanInput, s: RegistrationSettings): Pla
   if (!Number.isFinite(seekFromMachineZ)) return { ok: false, reason: 'the machine’s travel height is not known' };
   const mountDatum = input.mountDatum ?? null;
   const probe = input.probe ?? null;
+  const mountTap = input.mountTap ?? null;
   // #598 — with a measured vise datum the seek is a SEARCH down to `jawTopZ − tolerance` (over a proud
   // stock the probe can only meet the stock), not a band around the estimate; the ceiling is the
   // expected surface + tolerance either way. The legacy seat path — and a datum with the stock recessed
@@ -455,6 +465,7 @@ export function planRegistration(input: PlanInput, s: RegistrationSettings): Pla
       seek: { fromMachineZ: seekFromMachineZ, travelMm: travel, band },
       mountDatum,
       probe,
+      mountTap,
       scans,
       bracketOrigin,
       mountObstacles,

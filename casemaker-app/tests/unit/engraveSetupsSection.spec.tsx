@@ -63,7 +63,15 @@ const DATUM_LOCATION = {
     {
       id: 'machine-1a2b3c',
       address: { host: '192.0.2.10', port: 2222 },
-      bedProfiles: [{ id: 'bp-1', datums: { viseJawTopZ: { value: -56.82, measuredAt: '2026-10-23T00:00:00.000Z', by: 'wired-probe', at: null } } }],
+      bedProfiles: [
+        {
+          id: 'bp-1',
+          datums: { viseJawTopZ: { value: -56.82, measuredAt: '2026-10-23T00:00:00.000Z', by: 'wired-probe', at: null } },
+          placements: [
+            { id: 'pl-vise', fixture: 'fx-vise-1', where: { kind: 'pins', pins: 'vise', anchor: null }, count: null, frame: { fixedJawFaceX: -181.2, jawStartY: -203.5 }, provenance: {} },
+          ],
+        },
+      ],
       activeBedProfileId: 'bp-1',
     },
   ],
@@ -73,6 +81,13 @@ const DATUM_LOCATION = {
       kind: 'probe',
       variant: 'wired-touch',
       unit: { tipDiameterMm: 2.0, rimOffsetMm: 0.7, rimOffsetUncertaintyMm: 0.25 },
+      whereabouts: { kind: 'machine', machineId: 'machine-1a2b3c', since: '2026-10-23T00:00:00.000Z' },
+    },
+    {
+      id: 'fx-vise-1',
+      kind: 'vise',
+      constants: { jawBarWidth: 10, jawLength: 100 },
+      unit: { jawStartY: -10 },
       whereabouts: { kind: 'machine', machineId: 'machine-1a2b3c', since: '2026-10-23T00:00:00.000Z' },
     },
   ],
