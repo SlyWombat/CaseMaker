@@ -163,10 +163,11 @@ function controller(plan: RegistrationPlan, sent: string[], opts: FakeOptions = 
                 : Math.abs(lastX - s.along) < 1e-6,
             );
             if (scan === undefined) {
-              // #475 — the cut extents. They send XY rounded to 0.001 mm, so the planned point is
-              // matched at the precision it was actually commanded.
+              // #475/#591 — the cut extents. The executor places each touch by the offset the scans
+              // FOUND, which is only as exact as the scan's fine step and rim correction, so a touch
+              // within that resolution of the planned point reads it — as the real blank would.
               const reading = opts.spreadReadings?.find(
-                (r) => Math.abs(r.x - lastX) < 1e-3 && Math.abs(r.y - lastY) < 1e-3,
+                (r) => Math.abs(r.x - lastX) <= 0.6 && Math.abs(r.y - lastY) <= 0.6,
               );
               return reply(`[PRB:${lastX},${lastY},${reading?.z ?? stockZ}:1]\nok`);
             }

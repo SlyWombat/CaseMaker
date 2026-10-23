@@ -43,9 +43,10 @@
  * `applyCorrection` writes it — the depth is never subtracted from the first reading to stand in
  * for a measurement, because a skim does not remove exactly its nominal depth.
  *
- * THE CUT-EXTENT SPREAD (#475) is an optional half of {@link runRegistration}: after the
- * registration point, the same `seekSurface` measures the plan's cut-extent touch points, the
- * readings are assessed against the depth band (`assessSurfaceReadings`), Z0 becomes the LOWEST
+ * THE CUT-EXTENT SPREAD (#475) is an optional half of {@link runRegistration}: AFTER the edge scans
+ * (#591 — the scans say where the stock is, and the touch points are placed by that offset), the
+ * same `seekSurface` measures the plan's cut-extent touch points from just above the band (#590),
+ * the readings are assessed against the depth band (`assessSurfaceReadings`), Z0 becomes the LOWEST
  * touch, and a spread wider than the band makes the outcome unusable with the `blank-bowed`
  * refusal. The touches stay inside the registration's own validated seek band, so the #430 cap and
  * tolerance hold unchanged.
@@ -283,16 +284,22 @@ function inBand(prb: Prb | null, band: SurfaceBand, which: string): Prb {
  * The surface seek: from the plan's travel height down to the band's floor and no further — a fast
  * `G38.3`, `G0 Z1`, a slow `G38.3`, BOTH readings inside the band — then `G90` at the reading. The
  * registration and the post-facing re-touch share it, so the two seeks cannot drift apart.
+ *
+ * `fromMachineZ` (#590): where the seek starts. The FIRST touch of a run knows nothing and starts at
+ * the plan's travel height; a later one has a reading and the band, and starts just above the band
+ * (`band.max + park`), so it rapids there and probes only `2 × tolerance + park` instead of 50 mm of
+ * air at the probe feed. The band's floor — the "as low as" cap — is the same either way.
  */
 async function seekSurface(
   io: Session,
   plan: RegistrationPlan,
   band: SurfaceBand,
   point: { x: number; y: number } = plan.surfacePoint,
+  fromMachineZ: number = plan.seek.fromMachineZ,
 ): Promise<Prb> {
   const s = plan.settings;
-  const travel = Math.round((plan.seek.fromMachineZ - band.min) * 1000) / 1000;
-  await io.send(`G53 G0 Z${f(plan.seek.fromMachineZ)}`);
+  const travel = Math.round((fromMachineZ - band.min) * 1000) / 1000;
+  await io.send(`G53 G0 Z${f(fromMachineZ)}`);
   await io.send('G90');
   await io.send(moveXY(plan, point.x, point.y));
   await io.idle();
@@ -345,13 +352,32 @@ export async function runRegistration(
       expect: 'the stock is not where the job expects it',
     });
 
-    // #475 — the cut extents. Each planned touch is a full, bounded surface seek at its own XY,
-    // inside the SAME band the registration point was checked against (#430's cap and tolerance):
-    // a reading outside it stops the run rather than quietly widening the measurement. The plan's
-    // first point is the cut area's centre, which is normally the registration point itself — that
-    // reading is reused, so the blank is not touched twice in the same spot.
+    const parkZ = slow.z + s.parkAboveSurfaceMm;
+    await io.send(`G53 G0 Z${f(parkZ)}`);
+    io.at(`at the park height, ${s.parkAboveSurfaceMm} mm above the surface`);
+
+    const scans: ScanRecord[] = [];
+    for (const scan of plan.scans) scans.push(await scanEdge(io, plan, scan, parkZ, slow.z));
+
+    const data: RunData = { probeRefZ: ref.z, surface: slow, scans };
+    // A plan that registers on earlier-setup features has its own outcome (#429); #430's is unchanged.
+    const outcome = plan.references ? referenceOutcome(plan, data) : computeOutcome(plan, data);
+
+    // #475 — the cut extents, AFTER the scans (#591): the plan's touch points are where the cut's
+    // extents are on the stock the job expects; the scans have just measured where the stock IS, so
+    // each touch is placed by the found offset — a blank clamped 5 mm further along the jaws is
+    // touched 5 mm further along, not in the air past its end (bench 2026-10-23, run 4). Each is a
+    // bounded surface seek inside the SAME band the registration point was checked against (#430's
+    // cap and tolerance): a reading outside it stops the run rather than quietly widening the
+    // measurement. The plan's first point is the cut area's centre, normally the registration point
+    // itself — that reading is reused, so the blank is not touched twice in the same spot.
+    // #590 — with a reading in hand, a touch starts just above the band (`band.max + park`) and
+    // probes `2 × tolerance + park`, not the whole drop from the travel height. The high approach
+    // stays where the plan lists something standing above the stock (the bracket's clamps and arms).
     const spreadReadings: SurfaceReading[] = [];
     if (spreadPlan !== undefined) {
+      const lowApproach = plan.mountObstacles.length === 0;
+      const approachZ = Math.round((plan.seek.band.max + s.parkAboveSurfaceMm) * 1000) / 1000;
       for (const touch of spreadPlan.touches) {
         const samePoint =
           Math.abs(touch.x - plan.surfacePoint.x) < 1e-6 && Math.abs(touch.y - plan.surfacePoint.y) < 1e-6;
@@ -363,26 +389,17 @@ export async function runRegistration(
               {
                 ...plan.seek.band,
                 at: `as low as machine Z ${plan.seek.band.min}, ${s.surfaceToleranceMm} mm below the expected surface (the surface touch at ${touch.at})`,
-                expect: 'the stock is not where the job expects it',
+                expect: `the surface at the cut area's ${touch.at} is more than ${s.surfaceToleranceMm} mm below the registration touch (${f(slow.z)}) — the blank is not sitting flat there, or is bowed`,
               },
-              { x: touch.x, y: touch.y },
+              { x: touch.x + outcome.offset.x, y: touch.y + outcome.offset.y },
+              lowApproach ? approachZ : plan.seek.fromMachineZ,
             );
         spreadReadings.push({ z: prb.z, source: 'probe' });
       }
     }
 
-    const parkZ = slow.z + s.parkAboveSurfaceMm;
-    await io.send(`G53 G0 Z${f(parkZ)}`);
-    io.at(`at the park height, ${s.parkAboveSurfaceMm} mm above the surface`);
-
-    const scans: ScanRecord[] = [];
-    for (const scan of plan.scans) scans.push(await scanEdge(io, plan, scan, parkZ, slow.z));
-
     await io.send(`G53 G0 Z${f(plan.seek.fromMachineZ)}`);
     await io.send('$H');
-    const data: RunData = { probeRefZ: ref.z, surface: slow, scans };
-    // A plan that registers on earlier-setup features has its own outcome (#429); #430's is unchanged.
-    const outcome = plan.references ? referenceOutcome(plan, data) : computeOutcome(plan, data);
 
     // #475 — the spread verdict. Z0 is the LOWEST touch (the colour line is a plane and the dome is
     // extra top material), so the outcome carries it even when the blank is refused; a refusal also

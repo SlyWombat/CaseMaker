@@ -134,9 +134,11 @@ function fakeZ1(opts: {
   const RIM = 0.7;
 
   const zAt = (wx: number, wy: number): number | null => {
-    // The executor sends XY rounded to 0.001 mm, so a planned point is matched to the millimetre
-    // it was actually sent to, not to the full-precision floating number.
-    const point = opts.readings?.find((r) => Math.abs(r.x - wx) < 1e-3 && Math.abs(r.y - wy) < 1e-3);
+    // A point reading is a spot on the blank. The executor places the extent touches by the offset
+    // the scans FOUND (#591), which is only as exact as the scan's fine step and rim correction, so
+    // a touch within that resolution of the point reads it — as the real blank would.
+    const MATCH_MM = 0.6;
+    const point = opts.readings?.find((r) => Math.abs(r.x - wx) <= MATCH_MM && Math.abs(r.y - wy) <= MATCH_MM);
     if (point !== undefined) return point.z;
     if (wx >= a.xMin - RIM && wx <= a.xMax + RIM && wy >= a.yMin - RIM && wy <= a.yMax + RIM) {
       return opts.surface;
@@ -314,6 +316,81 @@ describe('#475 the executor measures the cut extents', () => {
     // The origin the next step writes is the LOWEST touch, not the registration reading.
     expect(r.outcome.surfaceZ).toBe(-55.08);
     expect(probeSeeks(z1.lines)).toBe(2 + 4 * 2 + 16);
+  });
+
+  it('#591 — a blank clamped 2 mm along the jaws: the scans find it, and the extent touches land on it', async () => {
+    // Bench 2026-10-23, run 4: the badge sat +5 mm in Y from the saved origin; the front-extent
+    // touch, placed from the EXPECTED stock before any scan, probed the air past its end and the run
+    // stopped before the scans could find the offset. The touches now follow the scans. (The shift
+    // here is within the scan's reach — `scanReachMm` outward; an edge moved INWARD past
+    // `scanInsideMm` is #592, the scan's own limit, not this ordering.)
+    const SHIFT = -2;
+    const job = laminateJob();
+    const plan = registrationPlan(LAMINATE_STOCK, -55, { x: 38, y: 12.675 });
+    const spreadPlan = surfaceSpreadPlan(job, { touchCount: plan.settings.surfaceTouchCount, margin: 0.2 })!;
+    const actual: ExpectedStock = { ...LAMINATE_STOCK, yMin: LAMINATE_STOCK.yMin + SHIFT, yMax: LAMINATE_STOCK.yMax + SHIFT };
+    // The fake's point readings sit where the blank IS, so a touch only reads them when it is placed
+    // by the found offset; the centre reading (reused) stays at the plan's own point.
+    const zs = [-55, -55.02, -55.04, -55.06, -55.08];
+    const shifted = spreadPlan.touches.map((t, i) => ({ x: t.x, y: t.y + (i === 0 ? 0 : SHIFT), z: zs[i]! }));
+    const z1 = fakeZ1({ actual, surface: zs[0]!, readings: shifted, jaw: true });
+
+    const r = await runRegistration(plan, { console: z1.console, operator: yes }, spreadPlan);
+    if (!r.ok) throw new Error(r.reason);
+
+    // The front scan found the edge 2 mm along (to the scan's fine step).
+    expect(r.outcome.measured).toEqual({ x: true, y: true });
+    expect(Math.abs(r.outcome.offset.y - SHIFT)).toBeLessThanOrEqual(0.5);
+    // Every extent touch was placed on the shifted blank and read its own point.
+    expect(r.spread!.touches.map((t) => t.z)).toEqual(zs);
+    expect(r.spread!.ok).toBe(true);
+    // Order: the extent touches come after the LAST scan touch, and are sent to the found Y.
+    const scanTravel = `${S.parkAboveSurfaceMm + S.capBelowSurfaceMm}`;
+    const lastScanTouch = z1.lines.map((l, i) => [l, i] as const).filter(([l]) => l.startsWith(`G38.3 Z-${scanTravel} `)).at(-1)![1];
+    const extentYs = z1.lines
+      .slice(lastScanTouch + 1)
+      .filter((l) => /^G0 X/.test(l))
+      .map((l) => Number(/Y(-?[\d.]+)/.exec(l)![1]));
+    expect(extentYs.length).toBe(4);
+    const plannedYs = spreadPlan.touches.slice(1).map((t) => Math.round((t.y + r.outcome.offset.y) * 1000) / 1000);
+    expect(extentYs).toEqual(plannedYs);
+    expect(z1.lines.slice(-2)).toEqual(['G53 G0 Z-3', '$H']);
+  });
+
+  it('#590 — only the first touch starts at the travel height; the extent touches start just above the band', async () => {
+    const job = laminateJob();
+    const plan = registrationPlan(LAMINATE_STOCK, -55, { x: 38, y: 12.675 });
+    const spreadPlan = surfaceSpreadPlan(job, { touchCount: plan.settings.surfaceTouchCount, margin: 0.2 })!;
+    const zs = [-55, -55.02, -55.04, -55.06, -55.08];
+    const z1 = fakeZ1({ actual: LAMINATE_STOCK, surface: zs[0]!, readings: readingsFor(spreadPlan, zs), jaw: true });
+
+    const r = await runRegistration(plan, { console: z1.console, operator: yes }, spreadPlan);
+    if (!r.ok) throw new Error(r.reason);
+
+    const approachZ = Math.round((plan.seek.band.max + S.parkAboveSurfaceMm) * 1000) / 1000;
+    const fast = S.surfaceFastFeed;
+    // Each surface seek is "G53 G0 Z<from>" … "G38.3 Z-<travel> F<fast>"; pair them up.
+    const seeks: { from: number; travel: number }[] = [];
+    let from: number | null = null;
+    for (const l of z1.lines) {
+      const z = /^G53 G0 Z(-?[\d.]+)$/.exec(l);
+      if (z) from = Number(z[1]);
+      const p = new RegExp(`^G38\\.3 Z-([\\d.]+) F${fast}$`).exec(l);
+      if (p && from !== null) seeks.push({ from, travel: Number(p[1]) });
+    }
+    // The registration seek: from the travel height, the whole drop to the band's floor.
+    expect(seeks[0]).toEqual({ from: -3, travel: Math.round((-3 - plan.seek.band.min) * 1000) / 1000 });
+    // The four extent seeks: from just above the band, probing 2 × tolerance + park.
+    const extents = seeks.slice(1);
+    expect(extents.length).toBe(4);
+    for (const s of extents) {
+      expect(s.from).toBe(approachZ);
+      expect(s.travel).toBe(Math.round((approachZ - plan.seek.band.min) * 1000) / 1000);
+      expect(s.travel).toBeCloseTo(2 * S.surfaceToleranceMm + S.parkAboveSurfaceMm, 3);
+    }
+    // No extent seek went below the cap, and the run finished homed.
+    expect(z1.lowest()).toBeGreaterThanOrEqual(-55 - S.capBelowSurfaceMm);
+    expect(z1.lines.slice(-2)).toEqual(['G53 G0 Z-3', '$H']);
   });
 
   it('does not take the extents when the caller asks for no spread verdict', async () => {
