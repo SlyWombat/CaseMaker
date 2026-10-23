@@ -480,7 +480,7 @@ describe('#510 the bed migration on connect', () => {
 
     expect(service.puts).toHaveLength(1);
     const migrated = service.machines()[0]!;
-    expect(migrated.bedFixtures?.[0]).toMatchObject({ id: 'fx-vise-1', kind: 'vise' });
+    // #597 — the accessories are the house's and land via the #600 write-back, not this machine PUT.
     expect(migrated.bedProfiles?.[0]?.id).toMatch(/^bp-migrated-\d{4}-\d{2}-\d{2}$/);
     expect(migrated.bedProfiles?.[0]?.name).toMatch(/^Current bed \(migrated \d{4}-\d{2}-\d{2}\)$/);
     expect(migrated.activeBedProfileId).toBe(migrated.bedProfiles?.[0]?.id);

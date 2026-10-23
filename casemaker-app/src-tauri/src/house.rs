@@ -856,10 +856,47 @@ fn io_err(path: &Path, e: &std::io::Error) -> HouseError {
 ///
 /// `version` is the document's OWN version (#412): the house and the catalogue are
 /// `HOUSE_SCHEMA_VERSION`, the location is `LOCATION_SCHEMA_VERSION`, and the two move independently.
+/// #597 — the fixture list moved from each machine to the location's `accessories`. Hoist once, on
+/// read: if the location has no `accessories` and a machine still carries `bedFixtures`, move them up
+/// and check each out to its machine. Idempotent (the `accessories` key is the marker).
+fn hoist_bed_fixtures(value: &mut serde_json::Value) {
+    let Some(obj) = value.as_object_mut() else { return };
+    if obj.contains_key("accessories") {
+        return;
+    }
+    let Some(machines) = obj.get_mut("machines").and_then(|m| m.as_array_mut()) else { return };
+    let mut accessories: Vec<serde_json::Value> = Vec::new();
+    for machine in machines.iter_mut() {
+        let Some(m) = machine.as_object_mut() else { continue };
+        let machine_id = m.get("id").and_then(|i| i.as_str()).unwrap_or("").to_string();
+        let since = m.get("updatedAt").and_then(|u| u.as_str()).unwrap_or("").to_string();
+        let Some(fixtures) = m.get_mut("bedFixtures").and_then(|f| f.as_array_mut()) else { continue };
+        for fixture in fixtures.drain(..) {
+            let mut acc = fixture.clone();
+            if let Some(a) = acc.as_object_mut() {
+                a.insert(
+                    "whereabouts".into(),
+                    serde_json::json!({ "kind": "machine", "machineId": machine_id, "since": since }),
+                );
+                a.insert(
+                    "history".into(),
+                    serde_json::json!([{ "at": since, "what": "hoisted from the machine bed fixtures" }]),
+                );
+            }
+            accessories.push(acc);
+        }
+        m.remove("bedFixtures");
+    }
+    if !accessories.is_empty() {
+        obj.insert("accessories".into(), serde_json::Value::Array(accessories));
+    }
+}
+
 fn read_doc<T: for<'de> Deserialize<'de>>(
     path: &Path,
     kind: &str,
     version: u32,
+    migrate: Option<fn(&mut serde_json::Value)>,
 ) -> Result<Option<T>, String> {
     // `try_exists`, not `exists` (#412 review): `exists` reads "could not tell" — a permission
     // error, a dead network share — as "not there", and the caller then writes a fresh empty
@@ -870,7 +907,7 @@ fn read_doc<T: for<'de> Deserialize<'de>>(
         Err(e) => return Err(format!("{}: cannot tell whether it exists: {e}", path.display())),
     }
     let bytes = fs::read(path).map_err(|e| format!("{}: {e}", path.display()))?;
-    let value: serde_json::Value = serde_json::from_slice(&bytes)
+    let mut value: serde_json::Value = serde_json::from_slice(&bytes)
         .map_err(|e| format!("{} is not readable JSON: {e}", path.display()))?;
     let file_kind = value.get("kind").and_then(|k| k.as_str()).unwrap_or("");
     if file_kind != kind {
@@ -889,6 +926,9 @@ fn read_doc<T: for<'de> Deserialize<'de>>(
             "{} is version {found}; this build reads version {version}",
             path.display()
         ));
+    }
+    if let Some(migrate) = migrate {
+        migrate(&mut value);
     }
     let doc: T = serde_json::from_value(value)
         .map_err(|e| format!("{} does not match its own schema: {e}", path.display()))?;
@@ -971,7 +1011,7 @@ impl HouseStore {
         let (location, location_problem) = Self::load_location(&dir);
         let catalogue_path = dir.join(CATALOGUE_FILE);
         let (catalogue, catalogue_problem) =
-            match read_doc::<CatalogueDoc>(&catalogue_path, CATALOGUE_KIND, HOUSE_SCHEMA_VERSION) {
+            match read_doc::<CatalogueDoc>(&catalogue_path, CATALOGUE_KIND, HOUSE_SCHEMA_VERSION, None) {
                 // The same rule as the house, one tier down (#339): a parsed entry is not a servable
                 // one. A corrupted row with a non-`cat:` key would go out on `/tools`, the client's
                 // `isToolKey` would refuse the WHOLE list, and the house would read absent while
@@ -1024,7 +1064,7 @@ impl HouseStore {
     /// the rule `house.json` always had (#320, #339).
     fn load_location(dir: &Path) -> (LocationDoc, Option<String>) {
         let location_path = dir.join(LOCATION_FILE);
-        match read_doc::<LocationDoc>(&location_path, LOCATION_KIND, LOCATION_SCHEMA_VERSION) {
+        match read_doc::<LocationDoc>(&location_path, LOCATION_KIND, LOCATION_SCHEMA_VERSION, Some(hoist_bed_fixtures)) {
             // Parsing is not enough (#320): a hand-edited document can parse and still hold a
             // duplicate key or a tool the client refuses.
             Ok(Some(mut doc)) => {
@@ -1052,7 +1092,7 @@ impl HouseStore {
         }
 
         let house_path = dir.join(HOUSE_FILE);
-        match read_doc::<HouseDoc>(&house_path, HOUSE_KIND, HOUSE_SCHEMA_VERSION) {
+        match read_doc::<HouseDoc>(&house_path, HOUSE_KIND, HOUSE_SCHEMA_VERSION, None) {
             Ok(Some(house)) => match house.validate() {
                 Ok(()) => {
                     let location = LocationDoc::from_house(house, HOUSE_FILE);
@@ -1411,9 +1451,6 @@ impl HouseStore {
                 // but the migration itself arrives as a key-bearing PUT, so the rule is "absent
                 // keeps what is stored" rather than "always keep", as power and the wasteboard do:
                 // those have their own endpoints, the bed does not yet.
-                if record.bed_fixtures.is_none() {
-                    record.bed_fixtures = existing.bed_fixtures.clone();
-                }
                 if record.bed_profiles.is_none() {
                     record.bed_profiles = existing.bed_profiles.clone();
                 }
@@ -1426,7 +1463,6 @@ impl HouseStore {
                 record.power = None;
                 record.wasteboard = None;
                 record.finished_programs = Vec::new();
-                record.bed_fixtures = None;
                 record.bed_profiles = None;
                 record.active_bed_profile_id = None;
                 next.machines.push(record);
@@ -3367,7 +3403,6 @@ mod tests {
             address: Some(crate::location::MachineAddress { host: "192.0.2.10".into(), port: 2222 }),
             calibration: None,
             fixtures: Some(serde_json::json!({ "vise": { "source": "measured" } })),
-            bed_fixtures: None,
             bed_profiles: None,
             active_bed_profile_id: None,
             margins: None,
@@ -3715,7 +3750,7 @@ mod tests {
         let not_a_dir = dir.path().join("plain-file");
         fs::write(&not_a_dir, b"x").unwrap();
         let under = not_a_dir.join(LOCATION_FILE);
-        let read = read_doc::<LocationDoc>(&under, LOCATION_KIND, LOCATION_SCHEMA_VERSION);
+        let read = read_doc::<LocationDoc>(&under, LOCATION_KIND, LOCATION_SCHEMA_VERSION, Some(hoist_bed_fixtures));
         // Unix answers ENOTDIR, which `try_exists` reports as an error; Windows reports this path
         // as not found, which is honestly "not there". Either way it is never a document.
         #[cfg(unix)]
@@ -4073,22 +4108,11 @@ mod tests {
         // #510: the client's one-time migration is a key-bearing machine PUT, and the settings
         // write-through of an OLDER client carries no bed keys at all. The first must write, the
         // second must not wipe — the reason `put_machine` has the `is_none` rule.
-        use crate::location::{
-            BedDatums, BedProfile, BedSurface, FixtureRecord, SurfaceKind,
-        };
+        use crate::location::{BedDatums, BedProfile, BedSurface, SurfaceKind};
 
         let (_dir, store) = store_with_machine().await;
         let (_, etag) = store.location().await.unwrap();
         let mut migrated = a_machine("m-1");
-        migrated.bed_fixtures = Some(vec![FixtureRecord {
-            id: "fx-vise-1".into(),
-            kind: "vise".into(),
-            product: Some("makera-z1-low-profile-vise".into()),
-            variant: None,
-            constants: Default::default(),
-            unit: Default::default(),
-            provenance: Default::default(),
-        }]);
         migrated.bed_profiles = Some(vec![BedProfile {
             id: "bp-1".into(),
             name: "Current bed (migrated 2026-10-18)".into(),
@@ -4120,7 +4144,7 @@ mod tests {
         store.put_machine(migrated, Some(&etag)).await.unwrap();
 
         let view: serde_json::Value = serde_json::from_slice(&store.location().await.unwrap().0).unwrap();
-        assert_eq!(view["machines"][0]["bedFixtures"][0]["id"], serde_json::json!("fx-vise-1"));
+        assert_eq!(view["machines"][0]["bedProfiles"][0]["id"], serde_json::json!("bp-1"));
         assert_eq!(view["machines"][0]["activeBedProfileId"], serde_json::json!("bp-1"));
 
         // An older client's settings write: no bed keys on the wire, so the stored bed survives.
@@ -4130,7 +4154,6 @@ mod tests {
         store.put_machine(older, Some(&etag)).await.unwrap();
         let view: serde_json::Value = serde_json::from_slice(&store.location().await.unwrap().0).unwrap();
         assert_eq!(view["machines"][0]["margins"]["source"], serde_json::json!("user"));
-        assert_eq!(view["machines"][0]["bedFixtures"][0]["id"], serde_json::json!("fx-vise-1"));
         assert_eq!(view["machines"][0]["bedProfiles"][0]["id"], serde_json::json!("bp-1"));
         assert_eq!(view["machines"][0]["activeBedProfileId"], serde_json::json!("bp-1"));
     }

@@ -63,9 +63,9 @@ describe('the bed migrations (#510)', () => {
     expect(surface.scars).not.toBe(machine.wasteboard!.scars);
   });
 
-  it('moves the vise settings into the vise fixture record, provenance included', () => {
+  it('moves the vise settings into the vise accessory record, provenance included', () => {
     const migrated = bedFromLegacy(legacyMachine(), MEASURED_SEAT, null, NOW)!;
-    const fixture = migrated.bedFixtures[0]!;
+    const fixture = migrated.accessories[0]!;
 
     expect(fixture).toMatchObject({
       id: 'fx-vise-1',

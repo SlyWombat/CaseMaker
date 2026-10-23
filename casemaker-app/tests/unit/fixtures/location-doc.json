@@ -90,46 +90,6 @@
           }
         ]
       },
-      "bedFixtures": [
-        {
-          "id": "fx-vise-1",
-          "kind": "vise",
-          "product": "makera-z1-low-profile-vise",
-          "variant": null,
-          "constants": {
-            "jawBarWidth": 10.0,
-            "jawLength": 100.0,
-            "ledgeStep": 3.1,
-            "ledgeWidth": 1.9
-          },
-          "unit": {
-            "stockProud": 1.5,
-            "fixedJawThickness": 10.0,
-            "movingJawThickness": 10.0,
-            "jawLength": 100.0,
-            "jawStartY": -10.0,
-            "uncertainty": 0.1,
-            "jawBarHeight": null,
-            "bodyHeight": null,
-            "maxOpening": null
-          },
-          "provenance": {
-            "jawBarWidth": "measured:2026-10-13T12:00:00.000Z",
-            "jawLength": "measured:2026-10-13T12:00:00.000Z",
-            "ledgeStep": "measured:2026-10-15T09:00:00.000Z",
-            "ledgeWidth": "measured:2026-10-15T09:00:00.000Z",
-            "stockProud": "measured:2026-10-13T12:00:00.000Z",
-            "fixedJawThickness": "measured:2026-10-13T12:00:00.000Z",
-            "movingJawThickness": "measured:2026-10-13T12:00:00.000Z",
-            "jawLength": "measured:2026-10-13T12:00:00.000Z",
-            "jawStartY": "measured:2026-10-13T12:00:00.000Z",
-            "uncertainty": "measured:2026-10-13T12:00:00.000Z",
-            "jawBarHeight": "unmeasured",
-            "bodyHeight": "unmeasured",
-            "maxOpening": "unmeasured"
-          }
-        }
-      ],
       "bedProfiles": [
         {
           "id": "bp-migrated-2026-10-15",
@@ -160,7 +120,12 @@
           },
           "datums": {
             "surfaceTopZ": null,
-            "viseJawTopZ": null,
+            "viseJawTopZ": {
+              "value": -56.82,
+              "measuredAt": "2026-10-23T00:00:00.000Z",
+              "by": "wired-probe",
+              "at": null
+            },
             "bracketSeatZ": {
               "value": -70.2,
               "measuredAt": "2026-10-16T10:00:00.000Z",
@@ -228,7 +193,7 @@
     },
     {
       "key": "user:6f7a8b9c0d",
-      "provenance": "cloned from Makera catalogue “3.175*12mm Flat End(Metal)” on 2026-10-09",
+      "provenance": "cloned from Makera catalogue \u201c3.175*12mm Flat End(Metal)\u201d on 2026-10-09",
       "origin": {
         "id": "00000000-0000-4000-8000-000000000000",
         "syncedAt": "2026-10-09T09:00:00.000Z"
@@ -573,7 +538,7 @@
       "source": "seeded",
       "setAt": null,
       "note": "The FINEST flat row, for the 0.6 mm corn cutter; appended so a 0.8 mm cutter still takes the 0.8-1.6 mm row.",
-      "provenance": "PLACEHOLDER, nothing measured: the 0.8-1.6 mm row's own starting values (S12000, F500, F200 — the Z1's emitted defaults) with the step-down and step-over cut back for a 0.6 mm cutter, which is the least stiff bit the bench owns. No vendor row for this diameter. A coupon is what measures it."
+      "provenance": "PLACEHOLDER, nothing measured: the 0.8-1.6 mm row's own starting values (S12000, F500, F200 \u2014 the Z1's emitted defaults) with the step-down and step-over cut back for a 0.6 mm cutter, which is the least stiff bit the bench owns. No vendor row for this diameter. A coupon is what measures it."
     },
     {
       "id": "feed-pla-v-0.3-0.5",
@@ -593,7 +558,7 @@
       "source": "seeded",
       "setAt": null,
       "note": null,
-      "provenance": "From the 2026-10-15 bench cut (`docs/bench/185-v-groove.nc`): the hand file's own numbers — S12000, F500 along, F200 plunge, one pass to depth — cut a clean V groove in PLA (0.836 mm opening at 1.0 mm deep, the 30° × 0.3 mm bit). Starting values, not a coupon measurement: a coupon is what measures this row."
+      "provenance": "From the 2026-10-15 bench cut (`docs/bench/185-v-groove.nc`): the hand file's own numbers \u2014 S12000, F500 along, F200 plunge, one pass to depth \u2014 cut a clean V groove in PLA (0.836 mm opening at 1.0 mm deep, the 30\u00b0 \u00d7 0.3 mm bit). Starting values, not a coupon measurement: a coupon is what measures this row."
     },
     {
       "id": "feed-petg-v-0.3-0.5",
@@ -613,7 +578,7 @@
       "source": "seeded",
       "setAt": null,
       "note": null,
-      "provenance": "OBSERVED 2026-10-17, not measured: the 30° × 0.3 mm V-bit ran PETG at S12000, F500 along, F200 plunge for 856 s without melting. The numbers are the PLA V row's own starting values; no coupon measured PETG, and this row is a chosen placeholder for the two-colour blank. A coupon is what settles it."
+      "provenance": "OBSERVED 2026-10-17, not measured: the 30\u00b0 \u00d7 0.3 mm V-bit ran PETG at S12000, F500 along, F200 plunge for 856 s without melting. The numbers are the PLA V row's own starting values; no coupon measured PETG, and this row is a chosen placeholder for the two-colour blank. A coupon is what settles it."
     },
     {
       "id": "feed-plastic-v-0.3-0.5",
@@ -633,7 +598,7 @@
       "source": "seeded",
       "setAt": null,
       "note": "The purchased two-colour laminate's V row, chosen from the PETG observation of 2026-10-17 and unmeasured on laminate; the PLA V row stays for PLA.",
-      "provenance": "OBSERVED 2026-10-17, not measured: chosen from the PETG observation of 2026-10-17, unmeasured on laminate — the 30° × 0.3 mm V-bit ran S12000, F500 along, F200 plunge for 856 s without melting. The numbers are the PLA V row's own starting values; no coupon measured plastic, and this row is a chosen placeholder for the two-colour laminate. A coupon is what settles it."
+      "provenance": "OBSERVED 2026-10-17, not measured: chosen from the PETG observation of 2026-10-17, unmeasured on laminate \u2014 the 30\u00b0 \u00d7 0.3 mm V-bit ran S12000, F500 along, F200 plunge for 856 s without melting. The numbers are the PLA V row's own starting values; no coupon measured plastic, and this row is a chosen placeholder for the two-colour laminate. A coupon is what settles it."
     }
   ],
   "defaults": {
@@ -642,7 +607,7 @@
       "source": "seeded",
       "setAt": null,
       "unit": "tabs",
-      "note": "chosen, not measured: holding tabs per cut-out. Four is provisional — the first part cut with tabs replaces it"
+      "note": "chosen, not measured: holding tabs per cut-out. Four is provisional \u2014 the first part cut with tabs replaces it"
     },
     "tabs.widthMm": {
       "value": 4.0,
@@ -704,7 +669,7 @@
       "source": "seeded",
       "setAt": null,
       "unit": "mm",
-      "note": "assumed, not measured: the 3D probe's ball-contact scatter in X, Y and Z, and what is left after a touch. The wired probe measured 0.001 mm in Z (registration.wiredProbeZResidualMm); this stays the conservative figure until the 3D probe is measured the same way (2026-10-08, /Z1-Firmware-Dialect.md §11.7)"
+      "note": "assumed, not measured: the 3D probe's ball-contact scatter in X, Y and Z, and what is left after a touch. The wired probe measured 0.001 mm in Z (registration.wiredProbeZResidualMm); this stays the conservative figure until the 3D probe is measured the same way (2026-10-08, /Z1-Firmware-Dialect.md \u00a711.7)"
     },
     "registration.chuckAxisResidualMm": {
       "value": 0.05,
@@ -1212,7 +1177,7 @@
       "source": "measured",
       "setAt": "2026-10-08T00:00:00.000Z",
       "unit": "mm",
-      "note": "the wired probe's repeatability in Z: five slow (F100) touches on the printed blank in the vise triggered within 0.001 mm of each other, fast (F300) within 0.004 mm and 2-6 um deep (/Z1-Firmware-Dialect.md §11.7, runbook C4, 2026-10-08)"
+      "note": "the wired probe's repeatability in Z: five slow (F100) touches on the printed blank in the vise triggered within 0.001 mm of each other, fast (F300) within 0.004 mm and 2-6 um deep (/Z1-Firmware-Dialect.md \u00a711.7, runbook C4, 2026-10-08)"
     },
     "import.dxfChordToleranceMm": {
       "value": 0.02,
@@ -1261,21 +1226,21 @@
       "source": "seeded",
       "setAt": null,
       "unit": "mm",
-      "note": "chosen, not measured: the blank a simulation starts with when the file states no stock, along X; 100 x 100 x 10 is the documented default (/Simulation.md §6)"
+      "note": "chosen, not measured: the blank a simulation starts with when the file states no stock, along X; 100 x 100 x 10 is the documented default (/Simulation.md \u00a76)"
     },
     "sim.defaultStockWidthMm": {
       "value": 100.0,
       "source": "seeded",
       "setAt": null,
       "unit": "mm",
-      "note": "chosen, not measured: the blank a simulation starts with when the file states no stock, along Y; 100 x 100 x 10 is the documented default (/Simulation.md §6)"
+      "note": "chosen, not measured: the blank a simulation starts with when the file states no stock, along Y; 100 x 100 x 10 is the documented default (/Simulation.md \u00a76)"
     },
     "sim.defaultStockThicknessMm": {
       "value": 10.0,
       "source": "seeded",
       "setAt": null,
       "unit": "mm",
-      "note": "chosen, not measured: the blank a simulation starts with when the file states no stock, in Z; 100 x 100 x 10 is the documented default (/Simulation.md §6)"
+      "note": "chosen, not measured: the blank a simulation starts with when the file states no stock, in Z; 100 x 100 x 10 is the documented default (/Simulation.md \u00a76)"
     },
     "sim.budgetMs": {
       "value": 60000.0,
@@ -1533,7 +1498,7 @@
       "value": 0.05,
       "source": "seeded",
       "setAt": null,
-      "unit": "mm²",
+      "unit": "mm\u00b2",
       "note": "chosen, not measured: material in a neck narrower than the grid can see, above this area, refuses the plan rather than being left standing"
     },
     "engrave.newItemDepthMm": {
@@ -1548,7 +1513,7 @@
       "source": "seeded",
       "setAt": null,
       "unit": "mm",
-      "note": "chosen, not measured: the depth a new hole starts at — deeper than an item's own starting depth because a hole that shallow shows nothing on the preview"
+      "note": "chosen, not measured: the depth a new hole starts at \u2014 deeper than an item's own starting depth because a hole that shallow shows nothing on the preview"
     },
     "engrave.lostDetailWarnRatio": {
       "value": 0.9,
@@ -1590,14 +1555,14 @@
       "source": "seeded",
       "setAt": null,
       "unit": "mm",
-      "note": "chosen, not measured: the facing depth filled in for rough stock — the heavy end of the 0.2 to 0.5 mm skim general practice uses; the person is asked and can change it"
+      "note": "chosen, not measured: the facing depth filled in for rough stock \u2014 the heavy end of the 0.2 to 0.5 mm skim general practice uses; the person is asked and can change it"
     },
     "facing.unknownMm": {
       "value": 0.2,
       "source": "seeded",
       "setAt": null,
       "unit": "mm",
-      "note": "chosen, not measured: the facing depth filled in when the stock's finish is unknown — the light end of the same 0.2 to 0.5 mm skim"
+      "note": "chosen, not measured: the facing depth filled in when the stock's finish is unknown \u2014 the light end of the same 0.2 to 0.5 mm skim"
     },
     "facing.marginMm": {
       "value": 0.1,
@@ -1641,5 +1606,89 @@
       "unit": "x",
       "note": "chosen, not measured: the band above the machine's feed/rpm ceiling where a value is refused rather than clamped"
     }
-  }
+  },
+  "accessories": [
+    {
+      "id": "fx-vise-1",
+      "kind": "vise",
+      "product": "makera-z1-low-profile-vise",
+      "variant": null,
+      "constants": {
+        "jawBarWidth": 10.0,
+        "jawLength": 100.0,
+        "ledgeStep": 3.1,
+        "ledgeWidth": 1.9
+      },
+      "unit": {
+        "stockProud": 1.5,
+        "fixedJawThickness": 10.0,
+        "movingJawThickness": 10.0,
+        "jawLength": 100.0,
+        "jawStartY": -10.0,
+        "uncertainty": 0.1,
+        "jawBarHeight": null,
+        "bodyHeight": null,
+        "maxOpening": null
+      },
+      "provenance": {
+        "jawBarWidth": "measured:2026-10-13T12:00:00.000Z",
+        "jawLength": "measured:2026-10-13T12:00:00.000Z",
+        "ledgeStep": "measured:2026-10-15T09:00:00.000Z",
+        "ledgeWidth": "measured:2026-10-15T09:00:00.000Z",
+        "stockProud": "measured:2026-10-13T12:00:00.000Z",
+        "fixedJawThickness": "measured:2026-10-13T12:00:00.000Z",
+        "movingJawThickness": "measured:2026-10-13T12:00:00.000Z",
+        "jawStartY": "measured:2026-10-13T12:00:00.000Z",
+        "uncertainty": "measured:2026-10-13T12:00:00.000Z",
+        "jawBarHeight": "unmeasured",
+        "bodyHeight": "unmeasured",
+        "maxOpening": "unmeasured"
+      },
+      "whereabouts": {
+        "kind": "machine",
+        "machineId": "machine-1a2b3c",
+        "since": "2026-10-15T09:00:00.000Z"
+      },
+      "history": [
+        {
+          "at": "2026-10-15T09:00:00.000Z",
+          "what": "hoisted from the machine bed fixtures"
+        },
+        {
+          "at": "2026-10-23T00:00:00.000Z",
+          "what": "jaw top measured -56.82 by the wired probe"
+        }
+      ]
+    },
+    {
+      "id": "fx-probe-1",
+      "kind": "probe",
+      "product": null,
+      "variant": "wired-touch",
+      "constants": {},
+      "unit": {
+        "tipDiameterMm": 2.0,
+        "rimOffsetMm": 0.7,
+        "rimOffsetUncertaintyMm": 0.25,
+        "lastM491": null,
+        "lastM119Rest": null
+      },
+      "provenance": {
+        "tipDiameterMm": "measured:2026-10-23T00:00:00.000Z",
+        "rimOffsetMm": "measured:2026-10-23T00:00:00.000Z",
+        "rimOffsetUncertaintyMm": "measured:2026-10-23T00:00:00.000Z"
+      },
+      "whereabouts": {
+        "kind": "machine",
+        "machineId": "machine-1a2b3c",
+        "since": "2026-10-23T00:00:00.000Z"
+      },
+      "history": [
+        {
+          "at": "2026-10-23T00:00:00.000Z",
+          "what": "measured tip 2.0 / rim 0.70 +/- 0.25"
+        }
+      ]
+    }
+  ]
 }

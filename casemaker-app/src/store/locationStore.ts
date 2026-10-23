@@ -52,6 +52,7 @@ import {
   MachineRecordSchema,
   houseLocation,
   housePutMachine,
+  type FixtureRecord,
   type LocationView,
   type MachineRecord,
 } from '@/platform/locationClient';
@@ -296,7 +297,6 @@ export function mergeMachine(
       // The bed (#510) is written by the one-time migration and, later, by the profile UI. Until
       // then this write-through carries the served keys unchanged — `undefined` when the machine
       // has never been migrated, so a settings save does not add empty keys or reset the marker.
-      bedFixtures: server?.bedFixtures,
       bedProfiles: server?.bedProfiles,
       activeBedProfileId: server?.activeBedProfileId,
       updatedAt: now,
@@ -320,6 +320,15 @@ export function machineAt(target: { host: string; port: number }): MachineRecord
       (m) => m.address?.host === target.host && m.address.port === target.port,
     ) ?? null
   );
+}
+
+/**
+ * #597 — the accessories checked out to a machine: the house's `accessories[]`, filtered by the
+ * `whereabouts` each record carries. This is the per-machine view that used to be `machine.bedFixtures`.
+ */
+export function accessoriesFor(machine: MachineRecord): FixtureRecord[] {
+  const accessories = useLocationStore.getState().location?.accessories ?? [];
+  return accessories.filter((a) => a.whereabouts.kind === 'machine' && a.whereabouts.machineId === machine.id);
 }
 
 /**
@@ -484,7 +493,14 @@ async function migrateBedOnce(now: () => string = () => new Date().toISOString()
       at,
     );
     if (migrated === null) return;
-    const outcome = await state.saveMachine({ ...machine, ...migrated, updatedAt: at });
+    // #597 — the accessories are the house's, not the machine's; writing them back to the location
+    // is #600. The bed profiles (which name them by id) still land on the machine as before.
+    const outcome = await state.saveMachine({
+      ...machine,
+      bedProfiles: migrated.bedProfiles,
+      activeBedProfileId: migrated.activeBedProfileId,
+      updatedAt: at,
+    });
     if (outcome === 'ok' && carriedNote !== null) useLocationStore.setState({ writeNote: carriedNote });
     if (outcome !== 'stale') return;
     // `saveMachine` re-read the location on a stale guard: try once against what was served.

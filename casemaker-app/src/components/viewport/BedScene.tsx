@@ -23,6 +23,7 @@ import { Html } from '@react-three/drei';
 import type { MachineRecord } from '@/platform/locationClient';
 import { resolvedMachineById } from '@/engine/cnc/calibration';
 import { bedScene, type BedSceneBox, type BedSceneDatum } from '@/engine/cnc/bedScene';
+import { accessoriesFor } from '@/store/locationStore';
 
 /** True when the browser can give this a WebGL context (false in jsdom and headless tests). */
 function webglAvailable(): boolean {
@@ -136,9 +137,9 @@ export function BedScene({ machine }: { machine: MachineRecord }) {
   const scene = useMemo(
     () =>
       mill !== undefined && profile !== null
-        ? bedScene({ mill, fixtures: machine.bedFixtures ?? [], profile })
+        ? bedScene({ mill, fixtures: accessoriesFor(machine), profile })
         : null,
-    [mill, machine.bedFixtures, profile],
+    [mill, machine, profile],
   );
 
   const hasWebgl = useMemo(() => webglAvailable(), []);

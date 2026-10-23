@@ -108,17 +108,28 @@ const bedProvenance = z.record(z.string(), bedText).superRefine((map, ctx) => {
   }
 });
 
+/** #597 — where an accessory is right now: in the box, or checked out to a machine since a date. */
+const AccessoryWhereSchema = z.union([
+  z.object({ kind: z.literal('box') }).strict(),
+  z.object({ kind: z.literal('machine'), machineId: bedId, since: bedText }).strict(),
+]);
+
 /** One accessory the shop owns: product constants, this unit's measurements, and provenance. */
 export const FixtureRecordSchema = z
   .object({
     id: bedId,
-    /** Open on purpose (`vise`, `bracket`, `top-clamp`, `rotary-module`, …): another accessory is additive. */
+    /** Open on purpose (`vise`, `bracket`, `top-clamp`, `rotary-module`, `probe`, …): another accessory is additive. */
     kind: bedText,
     product: bedText.nullable().default(null),
     variant: bedText.nullable().default(null),
     constants: z.record(z.string(), z.unknown()).default({}),
     unit: z.record(z.string(), z.unknown()).default({}),
     provenance: bedProvenance.default({}),
+    // #597 — the house owns every accessory; a unit is in the box or checked out to one machine.
+    whereabouts: AccessoryWhereSchema.default({ kind: 'box' }),
+    history: z
+      .array(z.object({ at: bedText, what: bedText }).strict())
+      .default([]),
   })
   .strict()
   .superRefine((f, ctx) => {
@@ -376,28 +387,12 @@ export const MachineRecordSchema = z.object({
   finishedPrograms: z
     .array(z.string().min(1).refine((h) => h === h.trim(), 'a hash has no space at either end'))
     .default([]),
-  /**
-   * The accessories this machine owns (#510). `.optional()`, NOT `.default([])`: a machine from
-   * before the bed existed has no key, and parsing it must not gain one — the round-trip rule the
-   * issue pins. `undefined` is also the migration's "not described yet" marker.
-   */
-  bedFixtures: z.array(FixtureRecordSchema).optional(),
   /** The machine's bed profiles, same presence rule; `[]` is a deliberately emptied description. */
   bedProfiles: z.array(BedProfileSchema).optional(),
   /** The one active profile; present exactly when `bedProfiles` holds at least one. */
   activeBedProfileId: bedId.optional(),
   updatedAt: z.string().min(1),
 }).superRefine((m, ctx) => {
-  if (m.bedFixtures !== undefined) {
-    const ids = new Set<string>();
-    m.bedFixtures.forEach((f, i) => {
-      if (ids.has(f.id)) {
-        ctx.addIssue({ code: 'custom', path: ['bedFixtures', i, 'id'], message: `machine has two fixtures called "${f.id}"` });
-      }
-      ids.add(f.id);
-    });
-  }
-
   const profiles = m.bedProfiles;
   if (profiles !== undefined) {
     const ids = new Set<string>();
@@ -406,29 +401,6 @@ export const MachineRecordSchema = z.object({
         ctx.addIssue({ code: 'custom', path: ['bedProfiles', i, 'id'], message: `machine has two bed profiles called "${p.id}"` });
       }
       ids.add(p.id);
-
-      // Placements name a fixture this machine owns, and the vise and the 4th-axis module may not
-      // both be on the bed (open question A, decided exclusive).
-      const placedKinds = new Set<string>();
-      p.placements.forEach((pl, j) => {
-        const fixture = m.bedFixtures?.find((f) => f.id === pl.fixture);
-        if (fixture === undefined) {
-          ctx.addIssue({
-            code: 'custom',
-            path: ['bedProfiles', i, 'placements', j, 'fixture'],
-            message: `places fixture "${pl.fixture}", which this machine does not own`,
-          });
-        } else {
-          placedKinds.add(fixture.kind);
-        }
-      });
-      if (placedKinds.has('vise') && placedKinds.has('rotary-module')) {
-        ctx.addIssue({
-          code: 'custom',
-          path: ['bedProfiles', i, 'placements'],
-          message: 'places the vise and the 4th-axis module: they share the pins, so one at a time',
-        });
-      }
     });
   }
 
@@ -516,7 +488,7 @@ const locationIdentity = {
 
 /** `GET /api/v1/location`: the location without its tool tiers, machines read one at a time. */
 export const LocationViewSchema = z
-  .object({ ...locationIdentity, machines: lenientMachinesSchema })
+  .object({ ...locationIdentity, machines: lenientMachinesSchema, accessories: z.array(FixtureRecordSchema).optional() })
   .transform(({ machines, ...rest }) => ({
     ...rest,
     machines: machines.machines,
@@ -539,6 +511,12 @@ export const LocationDocSchema = z.object({
   // STRICT here, unlike the served view: an import is a whole document the user is choosing to put
   // in place, and one this build could not read back is refused before it is sent.
   machines: machinesSchema,
+  /**
+   * #597 — the accessories the house owns (mounts and probes). A machine's bed profile places one by
+   * id; `whereabouts` on each record says whether it is in the box or checked out to a machine.
+   * `.optional()` so a location written before the hoist round-trips without gaining a key.
+   */
+  accessories: z.array(FixtureRecordSchema).optional(),
   tools: z.array(StoredUserToolSchema).default([]).superRefine((list, ctx) => {
     const keys = new Set<string>();
     list.forEach((t, i) => {
@@ -556,6 +534,41 @@ export const LocationDocSchema = z.object({
   feeds: FeedsTableSchema.default([]),
   /** The shop's tunable defaults, with provenance (`defaultsClient.ts`). */
   defaults: ShopDefaultsSchema.default({}),
+}).superRefine((doc, ctx) => {
+  // #597 — the accessories are the house's, so the placement checks move here from the machine level:
+  // unique ids, every placement names an accessory the location owns, and the vise/rotary exclusion.
+  const accessories = doc.accessories ?? [];
+  const ids = new Set<string>();
+  accessories.forEach((a, i) => {
+    if (ids.has(a.id)) {
+      ctx.addIssue({ code: 'custom', path: ['accessories', i, 'id'], message: `two accessories are called "${a.id}"` });
+    }
+    ids.add(a.id);
+  });
+  doc.machines.forEach((m, mi) => {
+    (m.bedProfiles ?? []).forEach((p, pi) => {
+      const placedKinds = new Set<string>();
+      p.placements.forEach((pl, pj) => {
+        const accessory = accessories.find((a) => a.id === pl.fixture);
+        if (accessory === undefined) {
+          ctx.addIssue({
+            code: 'custom',
+            path: ['machines', mi, 'bedProfiles', pi, 'placements', pj, 'fixture'],
+            message: `places fixture "${pl.fixture}", which the location does not own`,
+          });
+        } else {
+          placedKinds.add(accessory.kind);
+        }
+      });
+      if (placedKinds.has('vise') && placedKinds.has('rotary-module')) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['machines', mi, 'bedProfiles', pi, 'placements'],
+          message: 'places the vise and the 4th-axis module: they share the pins, so one at a time',
+        });
+      }
+    });
+  });
 });
 
 export type LocationDoc = z.infer<typeof LocationDocSchema>;

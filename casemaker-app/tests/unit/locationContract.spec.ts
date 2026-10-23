@@ -61,16 +61,25 @@ describe('the location contract (#412)', () => {
     expect(parsed.success, JSON.stringify(parsed.error?.issues)).toBe(true);
   });
 
-  it('carries the bed model (#510): fixture records, the migrated profile and its active id', () => {
+  it('carries the bed model (#510): accessories, the migrated profile and its active id', () => {
     const parsed = LocationDocSchema.safeParse(doc());
     expect(parsed.success, JSON.stringify(parsed.error?.issues)).toBe(true);
     const m = parsed.data!.machines[0]!;
-    expect(m.bedFixtures?.[0]).toMatchObject({
+    const vise = parsed.data!.accessories?.find((a) => a.id === 'fx-vise-1');
+    expect(vise).toMatchObject({
       id: 'fx-vise-1',
       kind: 'vise',
       product: 'makera-z1-low-profile-vise',
+      whereabouts: { kind: 'machine', machineId: m.id },
     });
-    expect(m.bedFixtures?.[0]?.constants).toMatchObject({ jawBarWidth: 10, ledgeStep: 3.1 });
+    expect(vise?.constants).toMatchObject({ jawBarWidth: 10, ledgeStep: 3.1 });
+    // #597 — the wired probe is checked out to the same machine, with its measured tip/rim unit.
+    const probe = parsed.data!.accessories?.find((a) => a.kind === 'probe');
+    expect(probe).toMatchObject({
+      variant: 'wired-touch',
+      whereabouts: { kind: 'machine', machineId: m.id },
+    });
+    expect(probe?.unit).toMatchObject({ tipDiameterMm: 2.0, rimOffsetMm: 0.7, rimOffsetUncertaintyMm: 0.25 });
     expect(m.bedProfiles?.[0]).toMatchObject({
       id: 'bp-migrated-2026-10-15',
       name: 'Current bed (migrated 2026-10-15)',
@@ -86,7 +95,7 @@ describe('the location contract (#412)', () => {
   it('round-trips a machine from before the bed without gaining its keys (#510)', () => {
     const d = doc();
     const m = d.machines[0]!;
-    delete m.bedFixtures;
+    delete d.accessories;
     delete m.bedProfiles;
     delete m.activeBedProfileId;
     const parsed = LocationDocSchema.safeParse(d);
@@ -94,7 +103,7 @@ describe('the location contract (#412)', () => {
     const text = JSON.stringify(parsed.data);
     // The keys are `.optional()`, not defaulted: an old document must not gain them on the way
     // through this build (the issue's byte-for-byte rule).
-    expect(text).not.toContain('bedFixtures');
+    expect(text).not.toContain('accessories');
     expect(text).not.toContain('bedProfiles');
     expect(text).not.toContain('activeBedProfileId');
     // The legacy section that shares the design's word "fixtures" is still there.
@@ -128,7 +137,7 @@ describe('the location contract (#412)', () => {
       'the vise and the rotary module on the shared pins',
       (d) => {
         const m = d.machines[0]!;
-        const fixtures = m.bedFixtures as Array<Record<string, unknown>>;
+        const fixtures = d.accessories as Array<Record<string, unknown>>;
         fixtures.push({ ...fixtures[0]!, id: 'fx-rotary', kind: 'rotary-module' });
         const profile = (m.bedProfiles as Array<{ placements: Array<Record<string, unknown>> }>)[0]!;
         profile.placements.push({

@@ -391,7 +391,7 @@ describe('#589 the surface tolerance — shown with the recommendation, writable
   it('saving a new tolerance writes the house default and strips the approved registration', async () => {
     let stored: Record<string, unknown> = {};
     setHouseClientLoader(async () => ({
-      call: async (method, path, body) => {
+      call: async (method: string, path: string, body?: unknown) => {
         if (method === 'GET' && path === '/defaults') {
           return { kind: 'ok', text: JSON.stringify(stored), etag: '"v1"' };
         }

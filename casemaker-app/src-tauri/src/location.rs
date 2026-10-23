@@ -100,6 +100,34 @@ pub struct MachineAddress {
 /// `constants` and `unit` are open maps because the accessory families carry different dimensions;
 /// `provenance` maps each key (`"*"` for "all of them") to a location provenance word, optionally
 /// with its date or instrument (`measured:2026-10-15`, `vendor:config.anchor_length`, `default`).
+/// #597 — where an accessory is: in the box, or checked out to one machine since a date. A STRUCT
+/// variant for `Box`, not a unit one, so `{"kind":"box","x":1}` is refused as an unknown key.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", tag = "kind", deny_unknown_fields)]
+pub enum AccessoryWhereabouts {
+    Box {},
+    #[serde(rename_all = "camelCase")]
+    Machine { machine_id: String, since: String },
+}
+
+impl Default for AccessoryWhereabouts {
+    fn default() -> Self {
+        AccessoryWhereabouts::Box {}
+    }
+}
+
+/// #597 — one line of an accessory's history, the same vocabulary the cutter copies use.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AccessoryHistory {
+    pub at: String,
+    pub what: String,
+}
+
+/// One accessory the shop owns. `constants` and `unit` are open maps because the accessory families
+/// carry different dimensions; `provenance` maps each key (`"*"` for "all of them") to a location
+/// provenance word, optionally with its date or instrument (`measured:2026-10-15`,
+/// `vendor:config.anchor_length`, `default`).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct FixtureRecord {
@@ -107,7 +135,7 @@ pub struct FixtureRecord {
     pub kind: String,
     /// `makera-z1-low-profile-vise`, `makera-z1-bracket`, … — null when nobody named it.
     pub product: Option<String>,
-    /// `thin` / `thick` for the bracket, null elsewhere.
+    /// `thin` / `thick` for the bracket, `wired-touch` / `3d` / `tool-setter` for a probe, null elsewhere.
     pub variant: Option<String>,
     #[serde(default)]
     pub constants: serde_json::Map<String, serde_json::Value>,
@@ -115,6 +143,11 @@ pub struct FixtureRecord {
     pub unit: serde_json::Map<String, serde_json::Value>,
     #[serde(default)]
     pub provenance: std::collections::BTreeMap<String, String>,
+    /// #597 — in the box by default; a hoisted record is checked out to its machine.
+    #[serde(default)]
+    pub whereabouts: AccessoryWhereabouts,
+    #[serde(default)]
+    pub history: Vec<AccessoryHistory>,
 }
 
 /// A datum measured ON this bed (§1). There is no "typed" constructor: `validate` refuses
@@ -537,14 +570,17 @@ impl BedProfile {
                 return bad(format!("has two placements called {}", p.id));
             }
             p.place.validate(machine, &self.id, &p.id)?;
-            let Some(fixture) = fixtures.and_then(|list| list.iter().find(|f| f.id == p.fixture))
-            else {
-                return bad(format!(
-                    "places fixture {} which this machine does not own",
-                    p.fixture
-                ));
-            };
-            placed_kinds.push(fixture.kind.as_str());
+            // #597 — the accessories are the house's; the machine-level validate passes `None` and
+            // `LocationDoc::validate` checks the placements against the location's `accessories`.
+            if let Some(list) = fixtures {
+                let Some(fixture) = list.iter().find(|f| f.id == p.fixture) else {
+                    return bad(format!(
+                        "places fixture {} which this machine does not own",
+                        p.fixture
+                    ));
+                };
+                placed_kinds.push(fixture.kind.as_str());
+            }
             if let Some(pins) = p.place.pins {
                 pin_kinds.insert(pins);
             }
@@ -664,13 +700,6 @@ pub struct MachineRecord {
     /// `FixturesSettings` (#203, #213) — the saved vise and sacrificial setup — as the client sent it.
     #[serde(default)]
     pub fixtures: Option<serde_json::Value>,
-    /// The accessories this machine owns (#510): product constants, this unit's measurements and
-    /// provenance. The design's literal key is `fixtures`, which #412 already gave to the settings
-    /// record above; the list lives beside it so the migrated data is not deleted (module comment).
-    /// ABSENT, not `null`, until there is one, so a location written before the bed existed
-    /// round-trips without gaining a key.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub bed_fixtures: Option<Vec<FixtureRecord>>,
     /// The machine's bed profiles (#510), named and dated. `None` is "the bed has not been
     /// described yet" — what the first migration and the wizard (#512) act on; `Some(vec![])` is a
     /// description that was deliberately emptied, so the migration does not run again.
@@ -724,22 +753,11 @@ impl MachineRecord {
             w.validate()?;
         }
         crate::finished_programs::validate_list(&self.id, &self.finished_programs)?;
-        if let Some(fixtures) = &self.bed_fixtures {
-            let mut ids = HashSet::new();
-            for f in fixtures {
-                f.validate(&self.id)?;
-                if !ids.insert(f.id.as_str()) {
-                    return Err(HouseError::BadEntry(format!(
-                        "machine {} has two fixtures called {}",
-                        self.id, f.id
-                    )));
-                }
-            }
-        }
         if let Some(profiles) = &self.bed_profiles {
             let mut ids = HashSet::new();
             for p in profiles {
-                p.validate(&self.id, self.bed_fixtures.as_deref())?;
+                // #597 — the accessories are the house's; the placement check runs at the location level.
+                p.validate(&self.id, None)?;
                 if !ids.insert(p.id.as_str()) {
                     return Err(HouseError::BadEntry(format!(
                         "machine {} has two bed profiles called {}",
@@ -819,6 +837,10 @@ pub struct LocationDoc {
     pub migrated_from: Option<String>,
     #[serde(default)]
     pub machines: Vec<MachineRecord>,
+    /// #597 — the accessories the house owns (mounts and probes); a bed profile places one by id.
+    /// OMITTED while empty, so a location written before the hoist round-trips without gaining a key.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub accessories: Vec<FixtureRecord>,
     #[serde(default)]
     pub tools: Vec<UserTool>,
     #[serde(default)]
@@ -852,6 +874,7 @@ pub struct LocationView<'a> {
     pub created_at: &'a str,
     pub migrated_from: Option<&'a str>,
     pub machines: &'a [MachineRecord],
+    pub accessories: &'a [FixtureRecord],
 }
 
 /// A location id nobody else will mint: the time to the nanosecond, in hex. Not a UUID because no
@@ -875,6 +898,7 @@ impl LocationDoc {
             created_at: crate::catalogue::now_iso(),
             migrated_from: None,
             machines: Vec::new(),
+            accessories: Vec::new(),
             tools: Vec::new(),
             inventory: Vec::new(),
             stock: Vec::new(),
@@ -906,6 +930,7 @@ impl LocationDoc {
             created_at: &self.created_at,
             migrated_from: self.migrated_from.as_deref(),
             machines: &self.machines,
+            accessories: &self.accessories,
         }
     }
 
@@ -943,6 +968,25 @@ impl LocationDoc {
                 )));
             }
         }
+        // #597 — the accessories are the house's: unique ids, and every bed placement names one the
+        // location owns (the machine-level validate deliberately skips this, so it runs here once).
+        let mut accessory_ids = HashSet::new();
+        for a in &self.accessories {
+            a.validate("the location")?;
+            if !accessory_ids.insert(a.id.as_str()) {
+                return Err(HouseError::BadEntry(format!(
+                    "the location has two accessories called {}",
+                    a.id
+                )));
+            }
+        }
+        for m in &self.machines {
+            if let Some(profiles) = &m.bed_profiles {
+                for p in profiles {
+                    p.validate(&m.id, Some(self.accessories.as_slice()))?;
+                }
+            }
+        }
         validate_tiers(&self.tools, &self.inventory)?;
         validate_shelf(&self.stock)?;
         validate_table(&self.feeds)?;
@@ -964,7 +1008,6 @@ mod tests {
             address: Some(MachineAddress { host: "192.168.10.43".into(), port: 2222 }),
             calibration: None,
             fixtures: Some(serde_json::json!({})),
-            bed_fixtures: None,
             bed_profiles: None,
             active_bed_profile_id: None,
             margins: None,
@@ -1003,6 +1046,8 @@ mod tests {
             .unwrap()
             .clone(),
             provenance: [("jawBarWidth".to_string(), "measured:2026-10-13".to_string())].into(),
+            whereabouts: AccessoryWhereabouts::Box {},
+            history: Vec::new(),
         }
     }
 
@@ -1069,7 +1114,6 @@ mod tests {
 
     fn a_machine_with_a_bed() -> MachineRecord {
         let mut m = a_machine("m-1");
-        m.bed_fixtures = Some(vec![a_bed_fixture()]);
         m.bed_profiles = Some(vec![a_bed_profile()]);
         m.active_bed_profile_id = Some("bp-1".into());
         m
@@ -1127,19 +1171,56 @@ mod tests {
     }
 
     #[test]
-    fn a_machine_with_a_bed_round_trips_with_its_fixtures_and_profile() {
-        // #510: the model is stored, so a machine carrying it must come back exactly — the fixture
-        // records, the profile with its surface/datums/placements, and the active id.
+    fn a_machine_with_a_bed_round_trips_with_its_profile() {
+        // #510: the bed model is stored, so a machine carrying it must come back exactly — the
+        // profile with its surface/datums/placements, and the active id. (#597 moved the fixture
+        // records to the location's `accessories`, so they are not part of this machine round-trip.)
         let machine = a_machine_with_a_bed();
         machine.validate().unwrap();
         let v = serde_json::to_value(&machine).unwrap();
-        assert_eq!(v["bedFixtures"][0]["id"], serde_json::json!("fx-vise-1"));
-        assert_eq!(v["bedFixtures"][0]["constants"]["ledgeStep"], serde_json::json!(3.1));
         assert_eq!(v["bedProfiles"][0]["surface"]["kind"], serde_json::json!("wasteboard"));
         assert_eq!(v["bedProfiles"][0]["datums"]["surfaceTopZ"]["by"], serde_json::json!("wired-probe"));
         assert_eq!(v["activeBedProfileId"], serde_json::json!("bp-1"));
         let back: MachineRecord = serde_json::from_value(v).unwrap();
         assert_eq!(back, machine);
+    }
+
+    #[test]
+    fn a_location_round_trips_its_accessories() {
+        // #597 — the accessories are the house's: the vise and the wired probe, both checked out to
+        // the one machine, round-trip with their whereabouts and history.
+        let mut loc = LocationDoc::fresh();
+        let mut vise = a_bed_fixture();
+        vise.whereabouts = AccessoryWhereabouts::Machine {
+            machine_id: "m-1".into(),
+            since: "2026-10-23T00:00:00.000Z".into(),
+        };
+        vise.history = vec![AccessoryHistory {
+            at: "2026-10-23T00:00:00.000Z".into(),
+            what: "jaw top measured -56.82 by the wired probe".into(),
+        }];
+        let mut probe = a_bed_fixture();
+        probe.id = "fx-probe-1".into();
+        probe.kind = "probe".into();
+        probe.variant = Some("wired-touch".into());
+        probe.unit = serde_json::json!({
+            "tipDiameterMm": 2.0, "rimOffsetMm": 0.7, "rimOffsetUncertaintyMm": 0.25
+        })
+        .as_object()
+        .unwrap()
+        .clone();
+        probe.whereabouts = AccessoryWhereabouts::Machine {
+            machine_id: "m-1".into(),
+            since: "2026-10-23T00:00:00.000Z".into(),
+        };
+        loc.accessories = vec![vise.clone(), probe];
+        loc.machines.push(a_machine_with_a_bed());
+        loc.validate().unwrap();
+        let v = serde_json::to_value(&loc).unwrap();
+        assert_eq!(v["accessories"][0]["whereabouts"]["machineId"], serde_json::json!("m-1"));
+        assert_eq!(v["accessories"][1]["kind"], serde_json::json!("probe"));
+        let back: LocationDoc = serde_json::from_value(v).unwrap();
+        assert_eq!(back, loc);
     }
 
     #[test]
@@ -1149,7 +1230,7 @@ mod tests {
         let machine = a_machine("m-1");
         machine.validate().unwrap();
         let v = serde_json::to_value(&machine).unwrap();
-        for key in ["bedFixtures", "bedProfiles", "activeBedProfileId"] {
+        for key in ["bedProfiles", "activeBedProfileId"] {
             assert!(v.get(key).is_none(), "{key} was written: {v}");
         }
         assert!(v.get("fixtures").is_some(), "the legacy fixtures section is still there");
@@ -1195,18 +1276,19 @@ mod tests {
         // An EMPTY list with no active id is a legal, deliberately emptied description — and the
         // marker that the first migration has already run.
         let mut emptied = a_machine("m-1");
-        emptied.bed_fixtures = Some(Vec::new());
         emptied.bed_profiles = Some(Vec::new());
         emptied.validate().unwrap();
     }
 
     #[test]
     fn the_vise_and_the_rotary_module_may_not_share_the_pins() {
-        let mut rotary_fixture = a_bed_fixture();
-        rotary_fixture.id = "fx-rotary".into();
-        rotary_fixture.kind = "rotary-module".into();
+        // #597 — the accessories are the house's, so the placement checks run at the location level.
+        let mut rotary = a_bed_fixture();
+        rotary.id = "fx-rotary".into();
+        rotary.kind = "rotary-module".into();
+        let mut loc = LocationDoc::fresh();
+        loc.accessories = vec![a_bed_fixture(), rotary];
         let mut machine = a_machine_with_a_bed();
-        machine.bed_fixtures.as_mut().unwrap().push(rotary_fixture);
         machine.bed_profiles.as_mut().unwrap()[0].placements.push(BedPlacement {
             id: "pl-rotary".into(),
             fixture: "fx-rotary".into(),
@@ -1219,14 +1301,18 @@ mod tests {
             frame: None,
             provenance: Default::default(),
         });
-        let err = machine.validate().unwrap_err().to_string();
+        loc.machines.push(machine);
+        let err = loc.validate().unwrap_err().to_string();
         assert!(err.contains("mutually exclusive") || err.contains("one at a time"), "{err}");
 
-        // A placement naming a fixture the machine does not own is refused too, so a profile cannot
-        // point at another machine's accessory.
+        // A placement naming a fixture the location does not own is refused too, so a profile cannot
+        // point at another location's accessory.
         let mut stranger = a_machine_with_a_bed();
         stranger.bed_profiles.as_mut().unwrap()[0].placements[0].fixture = "fx-elsewhere".into();
-        assert!(stranger.validate().is_err());
+        let mut loc2 = LocationDoc::fresh();
+        loc2.accessories = vec![a_bed_fixture()];
+        loc2.machines.push(stranger);
+        assert!(loc2.validate().is_err());
     }
 
     #[test]

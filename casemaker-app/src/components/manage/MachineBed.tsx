@@ -21,7 +21,7 @@ import { useState } from 'react';
 import type { BedProfile, FixtureRecord, MachineRecord } from '@/platform/locationClient';
 import { formatDay, mm } from './display';
 import { BedScene } from '@/components/viewport/BedScene';
-import { useLocationStore } from '@/store/locationStore';
+import { accessoriesFor, useLocationStore } from '@/store/locationStore';
 import {
   BED_DATUM_KEYS,
   BED_DATUM_WORDS,
@@ -84,7 +84,7 @@ function placementWords(placement: BedProfile['placements'][number], fixture: Fi
 export function MachineBed({ machine }: { machine: MachineRecord }) {
   const [note, setNote] = useState<string | null>(null);
   const profiles = machine.bedProfiles ?? [];
-  const fixtures = machine.bedFixtures ?? [];
+  const fixtures = accessoriesFor(machine);
   const active = profiles.find((p) => p.id === machine.activeBedProfileId) ?? null;
 
   const save = async (record: MachineRecord, ok: string): Promise<void> => {

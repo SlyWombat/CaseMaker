@@ -30,10 +30,11 @@
 
 import { LEDGE_STEP, LEDGE_WIDTH } from '@/engine/cnc/fixture';
 import type { ShopDefaults } from './defaultsClient';
-import type { BedProfile, MachineRecord } from './locationClient';
+import type { BedProfile, FixtureRecord, MachineRecord } from './locationClient';
 
 export interface MigratedBed {
-  bedFixtures: NonNullable<MachineRecord['bedFixtures']>;
+  /** #597 — the accessories this migration creates (the house's, checked out to this machine). */
+  accessories: FixtureRecord[];
   bedProfiles: NonNullable<MachineRecord['bedProfiles']>;
   activeBedProfileId: string;
 }
@@ -111,7 +112,7 @@ export function bedFromLegacy(
   const profileId = `bp-migrated-${day}`;
   const sources: string[] = [];
 
-  const bedFixtures: NonNullable<MachineRecord['bedFixtures']> = [];
+  const accessories: FixtureRecord[] = [];
   const placements: BedProfile['placements'] = [];
 
   if (wasteboard !== null) sources.push('the wasteboard');
@@ -149,7 +150,7 @@ export function bedFromLegacy(
       provenance[key] = value === null ? 'unmeasured' : source;
     }
 
-    bedFixtures.push({
+    accessories.push({
       id: 'fx-vise-1',
       kind: 'vise',
       product: 'makera-z1-low-profile-vise',
@@ -170,6 +171,9 @@ export function bedFromLegacy(
         ledgeStep: 'measured',
         ledgeWidth: 'measured',
       },
+      // #597 — the accessory belongs to the house and is checked out to the machine it migrates.
+      whereabouts: { kind: 'machine', machineId: machine.id, since: now },
+      history: [{ at: now, what: 'created by migrating the legacy vise settings' }],
     });
 
     const frame =
@@ -260,7 +264,7 @@ export function bedFromLegacy(
   };
 
   return {
-    bedFixtures,
+    accessories,
     bedProfiles: [profile],
     activeBedProfileId: profileId,
   };
