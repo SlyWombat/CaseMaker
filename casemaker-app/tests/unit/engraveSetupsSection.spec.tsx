@@ -66,7 +66,7 @@ const DATUM_LOCATION = {
       bedProfiles: [
         {
           id: 'bp-1',
-          datums: { viseJawTopZ: { value: -56.82, measuredAt: '2026-10-23T00:00:00.000Z', by: 'wired-probe', at: null } },
+          datums: { viseJawTopZ: { value: -56.82, measuredAt: '2026-10-23T00:00:00.000Z', by: 'fx-probe-1', at: null } },
           placements: [
             { id: 'pl-vise', fixture: 'fx-vise-1', where: { kind: 'pins', pins: 'vise', anchor: null }, count: null, frame: { fixedJawFaceX: -181.2, jawStartY: -203.5 }, provenance: {} },
           ],
@@ -392,6 +392,58 @@ describe('#471 registration — planned only after approval, refused with the en
     fireEvent.click(screen.getByTestId('engrave-setup-plan-reg-1'));
     expect(screen.getByTestId('engrave-setup-reg-summary-1').textContent).toContain('Home, fit the wired probe');
     expect(screen.queryByTestId('engrave-setup-reg-need-datum-1')).toBeNull();
+  });
+
+  it('#611 a jaw-top datum tapped by a different probe reads as absent and names that probe', () => {
+    useMachineStore.setState({ machine: OBS });
+    useLocationStore.setState({
+      location: {
+        ...DATUM_LOCATION,
+        machines: [
+          {
+            ...DATUM_LOCATION.machines[0]!,
+            bedProfiles: [
+              {
+                ...DATUM_LOCATION.machines[0]!.bedProfiles![0]!,
+                datums: {
+                  ...DATUM_LOCATION.machines[0]!.bedProfiles![0]!.datums,
+                  viseJawTopZ: { value: -56.82, measuredAt: '2026-10-23T00:00:00.000Z', by: 'wired-probe', at: null },
+                },
+              },
+            ],
+          },
+        ],
+      },
+    });
+    act(() => useEngraveJobStore.setState({ job: savedJob() }));
+    render(<EngraveSetupsSection />);
+    fireEvent.click(screen.getByTestId('engrave-setup-expand-1'));
+    fireEvent.click(screen.getByTestId('engrave-setup-plan-reg-1'));
+
+    const row = screen.getByTestId('engrave-setup-reg-need-datum-1');
+    expect(row.textContent).toContain('wired-probe');
+    expect(row.textContent).toContain('tap the fixed jaw with the current probe first');
+    // The tap is offered with the current probe, and nothing is written until the person acts.
+    expect(screen.getByTestId('engrave-setup-tap-jaw-1')).toBeTruthy();
+    expect(useEngraveJobStore.getState().job.setups![0]!.registration).toBeUndefined();
+  });
+
+  it('#611 with no probe accessory checked out the datum stands — there is nothing to compare against', () => {
+    useMachineStore.setState({ machine: OBS });
+    useLocationStore.setState({
+      location: {
+        ...DATUM_LOCATION,
+        // The vise only: no probe accessory is checked out to the machine.
+        accessories: [DATUM_LOCATION.accessories![1]!],
+      },
+    });
+    act(() => useEngraveJobStore.setState({ job: savedJob() }));
+    render(<EngraveSetupsSection />);
+    fireEvent.click(screen.getByTestId('engrave-setup-expand-1'));
+    fireEvent.click(screen.getByTestId('engrave-setup-plan-reg-1'));
+
+    expect(screen.queryByTestId('engrave-setup-reg-need-datum-1')).toBeNull();
+    expect(screen.getByTestId('engrave-setup-reg-summary-1').textContent).toContain('Home, fit the wired probe');
   });
 
   it('#617 a datum written from the machine card re-plans from the current record', () => {

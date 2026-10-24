@@ -32,6 +32,7 @@ import type { MountDatum, PlanObstacle, ProbeSpec, RegistrationPlan } from '@/en
 import {
   bracketTapFor,
   mountDatumFor,
+  mountDatumMismatch,
   mountTapFor,
   probeFor,
   probeNameFor,
@@ -118,9 +119,13 @@ function planRegistrationAttempt(args: {
   /** The expert override: use the typed seat even when a datum is present. */
   useTypedSeat: boolean;
   mountDatum: MountDatum | null;
+  /** #611 — the datum's `by` when it names a probe other than the one checked out (null otherwise). */
+  mountDatumMismatch: string | null;
   /** #619 — the measured surface-top datum; when present the plan expects the found top, not the ledge estimate. */
   surfaceTopZ: { value: number } | null;
   probe: ProbeSpec | null;
+  /** #603 — the checked-out probe's display name (its product), or null when none is checked out. */
+  probeName: string | null;
   /** #599 — the mount tap point (machine XY), or null when the fixed jaw's frame is unknown. */
   mountTap: { x: number; y: number; fromMachineZ: number; label: string } | null;
   defaults: ShopDefaults | null;
@@ -178,6 +183,16 @@ function planRegistrationAttempt(args: {
     const seat = Number(args.seatZ);
     if (args.seatZ.trim() === '' || !Number.isFinite(seat)) {
       if (mount.kind === 'vise' && args.mountDatum === null && !args.useTypedSeat) {
+        // #611 — a datum tapped by a probe other than the one now checked out names which probe
+        // tapped it and offers the tap with the current probe; an absent datum keeps the plain ask.
+        if (args.mountDatumMismatch !== null) {
+          const current = args.probeName !== null ? `the ${args.probeName} now checked out` : 'the probe now checked out';
+          return {
+            kind: 'need-datum',
+            message: `the jaw top was tapped by ${args.mountDatumMismatch}, not ${current} — tap the fixed jaw with the current probe first`,
+            mountTap: args.mountTap,
+          };
+        }
         return {
           kind: 'need-datum',
           message: 'tap the jaw first — Measure… on the machine card, or run the registration: its first touch is that tap',
@@ -241,6 +256,8 @@ export function EngraveSetupsSection({ initiallyOpen = false }: { initiallyOpen?
   const machineRecord = target === null ? null : machineAt(target);
   const probe = useMemo(() => probeFor(machineRecord), [machineRecord]);
   const mountDatum = useMemo(() => mountDatumFor(machineRecord), [machineRecord]);
+  // #611 — the jaw-top datum's `by` when it names a probe other than the one now checked out.
+  const mountDatumMismatchBy = useMemo(() => mountDatumMismatch(machineRecord), [machineRecord]);
   // #619 — the measured surface top, so a re-plan expects the found top rather than the ledge estimate.
   const surfaceTopZ = useMemo(() => surfaceTopDatumFor(machineRecord), [machineRecord]);
   // #599 — the mount tap point (machine XY), from the placement frame or the newest usable registration.
@@ -676,8 +693,10 @@ export function EngraveSetupsSection({ initiallyOpen = false }: { initiallyOpen?
                   seatZ,
                   useTypedSeat,
                   mountDatum,
+                  mountDatumMismatch: mountDatumMismatchBy,
                   surfaceTopZ,
                   probe,
+                  probeName,
                   mountTap,
                   defaults,
                   calibration,

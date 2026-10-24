@@ -91,7 +91,27 @@ export function mountDatumFor(machine: MachineRecord | null): MountDatum | null 
   const profile = machine.bedProfiles.find((p) => p.id === machine.activeBedProfileId);
   const datum = profile?.datums.viseJawTopZ ?? null;
   if (datum === null) return null;
+  // #611 — the datum is the jaw top as SEEN THROUGH the probe that tapped it (a raw MPos reading);
+  // a different probe now checked out reads a different jaw top, so the datum cannot anchor this
+  // probe's plan and reads as absent. With no probe accessory checked out there is nothing to
+  // compare against, so the datum stands.
+  const checkedOut = probeFor(machine)?.id ?? null;
+  if (checkedOut !== null && datum.by !== checkedOut) return null;
   return { jawTopZ: datum.value, measuredAt: datum.measuredAt, by: datum.by };
+}
+
+/**
+ * #611 — the jaw-top datum's `by` when it names a probe other than the one checked out to `machine`
+ * (`mountDatumFor` then returns null). The caller uses it to say which probe tapped the datum and to
+ * offer the tap with the current probe. Null when the datum matches or is absent.
+ */
+export function mountDatumMismatch(machine: MachineRecord | null): string | null {
+  if (machine === null || machine.bedProfiles === undefined || machine.activeBedProfileId === undefined) return null;
+  const profile = machine.bedProfiles.find((p) => p.id === machine.activeBedProfileId);
+  const datum = profile?.datums.viseJawTopZ ?? null;
+  if (datum === null) return null;
+  const checkedOut = probeFor(machine)?.id ?? null;
+  return checkedOut !== null && datum.by !== checkedOut ? datum.by : null;
 }
 
 /** #619 — the active bed profile's measured surface-top datum, or null when it has none. */
