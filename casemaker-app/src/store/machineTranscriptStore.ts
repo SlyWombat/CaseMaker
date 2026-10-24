@@ -21,19 +21,23 @@ export interface MachineTranscriptState {
   runLines: string | null;
   /** The release notes, joined exactly as the old rail `<pre>` rendered them. */
   releaseNotes: string | null;
+  /** #604 — the transcript header (the machine, the probe, the mount, the found position), or null. */
+  header: string | null;
   setRegistration: (text: string | null) => void;
   setRunLines: (text: string | null) => void;
   setReleaseNotes: (text: string | null) => void;
+  setHeader: (text: string | null) => void;
   reset: () => void;
 }
 
-const EMPTY = { registration: null, runLines: null, releaseNotes: null } as const;
+const EMPTY = { registration: null, runLines: null, releaseNotes: null, header: null } as const;
 
 export const useMachineTranscriptStore = create<MachineTranscriptState>()((set) => ({
   ...EMPTY,
   setRegistration: (registration) => set({ registration }),
   setRunLines: (runLines) => set({ runLines }),
   setReleaseNotes: (releaseNotes) => set({ releaseNotes }),
+  setHeader: (header) => set({ header }),
   reset: () => set({ ...EMPTY }),
 }));
 

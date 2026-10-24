@@ -35,7 +35,7 @@ import { EngraveCutWizard } from './EngraveCutWizard';
 import { jobMachine } from '@/engine/cnc/calibration';
 import { machineDisplayName } from '@/platform/locationClient';
 import { machineRecordByProfile } from '@/store/locationStore';
-import { useToolRegistry } from '@/hooks/useToolRegistry';
+import { mountNameFor, probeNameFor } from '@/engine/cnc/registration/mountContext';import { useToolRegistry } from '@/hooks/useToolRegistry';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import { cuttingDiameter, drillPointAngle, pointLength } from '@/engine/cnc/tool';
 import { drillSettings } from '@/engine/cnc/cam/drillBit';
@@ -69,7 +69,7 @@ import { registrationSettings } from '@/engine/cnc/registration/settings';
 import { buildRunRecord, isMeasuredRun, serializeRunRecord } from '@/engine/cnc/engrave/runRecord';
 import { allRuns, lastTimedRun } from '@/engine/cnc/engrave/runHistory';
 import { useRunRecordStore } from '@/store/runRecordStore';
-import { surfaceSpreadFor } from '@/store/engraveRegistrationStore';
+import { surfaceSpreadFor, firstRegistrationFor } from '@/store/engraveRegistrationStore';
 import { openTextFile } from '@/utils/openTextFile';
 import { feedCatalogueSnapshot, feedsFor, type CutParams } from '@/engine/cnc/feeds';
 import { materialOptionsFor } from '@/engine/cnc/engrave/setupFlow';
@@ -1183,6 +1183,14 @@ export function EngravePanel(): JSX.Element {
       measuredMachine === null
         ? null
         : surfaceSpreadFor(job.id, { host: measuredMachine.host, port: measuredMachine.port });
+    // #604 — the found position from the registration, and the probe/mount the header names.
+    const foundReg =
+      measuredMachine === null
+        ? null
+        : firstRegistrationFor(job.id, { host: measuredMachine.host, port: measuredMachine.port });
+    const machineRecord = machineRecordByProfile(job.machineId);
+    const probeName = probeNameFor(machineRecord);
+    const mountName = mountNameFor(machineRecord, job.workholding.kind);
     // #345 — the house setting the run was gated to, handed over rather than a pre-resolved margin:
     // the sheet resolves it the same way `engraveRunStore` did at Generate, so its depth notes are
     // the numbers the verifier enforced and its recommendation is made from the SETTING.
@@ -1208,6 +1216,12 @@ export function EngravePanel(): JSX.Element {
           // #596 — the machine's name on paper is the nickname the person gave it, else the profile.
           machineName:
             machineDisplayName(machineRecordByProfile(job.machineId), jobMachine(job)) ?? undefined,
+          probeName: probeName ?? undefined,
+          mountName,
+          found:
+            foundReg === null
+              ? undefined
+              : { offset: foundReg.outcome.offset, rotationDeg: foundReg.outcome.rotationDeg },
           surfaceTouchCount:
             measuredSpread?.assessment.plan.touches.length ??
             registrationSettings(shopDefaults).settings.surfaceTouchCount,

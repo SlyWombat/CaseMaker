@@ -41,6 +41,7 @@ import { useHouseStore } from './houseStore';
 import { machineAt, useLocationStore } from './locationStore';
 import { useShopDefaultsStore } from './shopDefaultsStore';
 import { useEngraveJobStore } from './engraveJobStore';
+import { useMachineTranscriptStore } from './machineTranscriptStore';
 
 /**
  * What a run knows about its job, for its end (#414). Everything but the program is OPTIONAL: the job
@@ -381,6 +382,8 @@ function recordProgramOutcome(context: RunContext | null, outcome: RunOutcome): 
         : outcome.kind === 'aborted' || outcome.kind === 'stopped-unconfirmed'
           ? 'stopped'
           : 'failed',
+    // #604 — the run transcript is store-only otherwise and lost on reload; keep it with the run record.
+    transcript: useMachineTranscriptStore.getState().runLines ?? undefined,
   });
 }
 

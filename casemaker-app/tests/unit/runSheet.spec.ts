@@ -140,6 +140,28 @@ describe('runSheet (#207)', () => {
     expect(sheet.header.machine).toBe(Z1.name);
   });
 
+  it('#604 names the probe and mount in the header, and the found section prints only with a record', () => {
+    const job = dj();
+    // No registration: no probe/mount header lines, no found section.
+    const plain = sheetFor(job);
+    expect(plain.header.probe).toBeUndefined();
+    expect(plain.header.mount).toBeUndefined();
+    expect(plain.sections.some((s) => s.id === 'found')).toBe(false);
+
+    const found = sheetFor(job, NO_SIM, NC, {
+      probeName: 'Makera Wired Probe V2',
+      mountName: 'makera-z1-low-profile-vise',
+      found: { offset: { x: 0.3, y: 5.6 }, rotationDeg: 0.4 },
+    });
+    expect(found.header.probe).toBe('Makera Wired Probe V2');
+    expect(found.header.mount).toBe('makera-z1-low-profile-vise');
+    const foundSection = section(found, 'found');
+    const value = foundSection.steps[0]!.value!;
+    expect(value).toContain('0.3');
+    expect(value).toContain('5.6');
+    expect(value).toContain('0.4°');
+  });
+
   it('carries the stock, the three depths, stockProud, the feeds and the hash', () => {
     const job = dj();
     const sheet = sheetFor(job);

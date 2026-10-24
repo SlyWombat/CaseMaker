@@ -2487,6 +2487,10 @@
                 "description": "Registry key of the cutter used.",
                 "minLength": 1,
                 "type": "string"
+              },
+              "transcript": {
+                "description": "The machine-run transcript (the run lines, joined); omit when not recorded.",
+                "type": "string"
               }
             },
             "required": [

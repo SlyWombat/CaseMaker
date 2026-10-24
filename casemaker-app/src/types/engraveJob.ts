@@ -1103,6 +1103,8 @@ export interface JobRunLogEntry {
   outcome: 'finished' | 'stopped' | 'failed';
   /** The run record's `ncHash` (SHA-256, first 8), when the record was written. */
   ncHash?: string;
+  /** #604 — the machine-run transcript (the run lines, joined), persisted so a reload keeps it. */
+  transcript?: string;
 }
 
 export interface EngraveJob {

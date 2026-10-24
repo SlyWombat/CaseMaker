@@ -536,6 +536,10 @@ export interface RunSheetHeader {
    * one it was written for.
    */
   machine: string;
+  /** #604 — the checked-out probe's name, or absent when none. */
+  probe?: string;
+  /** #604 — the mount's name (the vise the job holds with), or absent. */
+  mount?: string;
   /** ISO date (`YYYY-MM-DD`) the sheet was generated. */
   generatedOn: string;
   /** The sanitised job name plus `.nc` — the file the operator loads. */
@@ -1925,6 +1929,16 @@ export interface RunSheetOptions {
    * here. Absent: the profile's own name, as before.
    */
   machineName?: string;
+  /** #604 — the checked-out probe's name, or absent when none. */
+  probeName?: string;
+  /** #604 — the mount's name (the vise the job holds with), or absent. */
+  mountName?: string;
+  /**
+   * #604 — the found position from the registration: how far the measured blank sits from the
+   * plan's nominal origin. Absent: no registration has run on this machine, and no found-position
+   * section prints — an unregistered job's sheet is unchanged.
+   */
+  found?: { offset: { x: number; y: number }; rotationDeg: number | null };
 }
 
 /** A share as the operator reads it. Rounded to the whole percent: a tenth is not a fact about a cutter. */
@@ -2647,6 +2661,18 @@ function colourPlaneStep(job: EngraveJob, plan: PartPlan, film: Mm | null): RunS
   };
 }
 
+/** #604 — the found-position section, printed only when a registration measured the blank. */
+function foundSteps(found: { offset: { x: number; y: number }; rotationDeg: number | null }): RunSheetStep[] {
+  return [
+    {
+      text: 'The registration found the blank and wrote the origin at the found position, not the plan’s nominal one.',
+      value: `offset X ${fmtNum(found.offset.x)} mm · Y ${fmtNum(found.offset.y)} mm${
+        found.rotationDeg === null ? '' : ` · rotated ${fmtNum(found.rotationDeg)}°`
+      }`,
+    },
+  ];
+}
+
 export function buildRunSheet(
   job: EngraveJob,
   generated: RunSheetGenerated,
@@ -2771,6 +2797,8 @@ export function buildRunSheet(
     fileHash: nc === null ? '' : sha256Hex(nc).slice(0, 8),
     estimatedTime: generated.cam ? formatDuration(generated.cam.estimatedSeconds) : 'unknown',
     estimatedTimeNote: rapidAssumptionNote(machine.rapidEstimate),
+    ...(options.probeName !== undefined ? { probe: options.probeName } : {}),
+    ...(options.mountName !== undefined ? { mount: options.mountName } : {}),
   };
 
   // ---- 1 · What you need ---------------------------------------------------------------------
@@ -3462,6 +3490,9 @@ export function buildRunSheet(
       : []),
     { id: 'mount', title: 'Mount the vise', steps: mountSteps },
     { id: 'load', title: 'Load the blank', steps: loadSteps },
+    ...(options.found
+      ? [{ id: 'found', title: 'Found position', steps: foundSteps(options.found) }]
+      : []),
     // #432 review R1 — a facing job probes the origin FIRST, with the probe fitted, and only then
     // puts the facing cutter in: the section order is the physical order, and the two sections are
     // the run's first two acts at the machine either way.

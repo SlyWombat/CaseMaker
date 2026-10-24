@@ -37,6 +37,12 @@ export function probeNameFor(machine: MachineRecord | null): string | null {
   return acc === undefined ? null : (acc.product ?? 'probe');
 }
 
+/** #604 — the mount accessory's name for the job's holding kind, or the kind word when none is checked out. */
+export function mountNameFor(machine: MachineRecord | null, kind: string): string {
+  if (machine === null) return kind;
+  return accessoriesFor(machine).find((a) => a.kind === kind)?.product ?? kind;
+}
+
 /** #598 — the active bed profile's measured jaw-top datum, or null when it has none. */
 export function mountDatumFor(machine: MachineRecord | null): MountDatum | null {
   if (machine === null || machine.bedProfiles === undefined || machine.activeBedProfileId === undefined) return null;

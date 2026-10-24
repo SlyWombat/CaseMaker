@@ -30,6 +30,8 @@ import * as THREE from 'three';
 import { Html } from '@react-three/drei';
 import { useEngravePreviewStore } from '@/store/engravePreviewStore';
 import { useEngraveJobStore } from '@/store/engraveJobStore';
+import { useMachineStore } from '@/store/machineStore';
+import { useFirstRegistration } from '@/store/engraveRegistrationStore';
 import { useViewportStore, isEngraveItemSelected } from '@/store/viewportStore';
 import type { NodeMeshOutput } from '@/workers/geometry/meshOutput';
 import type { EngravePreviewLost, EngravePreviewOutline } from '@/workers/sim/engravePreview';
@@ -46,6 +48,7 @@ import { activateEngraveItem } from './engravePick';
 import { floorsForScrub, scrubStateAt } from './engraveScrub';
 import { warningOutlinesFor, type WarningRing } from './engraveWarning';
 import { EngravePrimitives } from './EngravePrimitives';
+import { foundTransform } from './foundTransform';
 
 /** The same neutral wood tone the simulation's stock uses (#197). */
 const STOCK_COLOR = '#c9a26b';
@@ -599,6 +602,14 @@ export function EngravePreview() {
   const scrubStage = useEngravePreviewStore((s) => s.scrubStage);
   const stock = useEngraveJobStore((s) => s.job.stock);
   const minFloor = useEngraveJobStore((s) => s.job.minFloor);
+  // #604 — the found position: the registration's offset/rotation move the drawn stock (and the
+  // design on it) so the viewport shows where the blank actually sits, not where the plan assumed.
+  const job = useEngraveJobStore((s) => s.job);
+  const machine = useMachineStore((s) => s.machine);
+  const target = machine === null ? null : { host: machine.host, port: machine.port };
+  const registration = useFirstRegistration(job.id, target);
+  const found = registration === null ? null : { offset: registration.outcome.offset, rotationDeg: registration.outcome.rotationDeg };
+  const transform = foundTransform(found);
 
   // Hooks run before the early return; the geometry is null until the first preview lands, and it
   // is replaced (with its old geometry disposed) whenever the slider settles on another stage.
@@ -618,7 +629,8 @@ export function EngravePreview() {
 
   return (
     <group>
-      <mesh geometry={stockGeom} name="engrave-stock">
+      <group name="engrave-found" position={transform.position} rotation={transform.rotation}>
+        <mesh geometry={stockGeom} name="engrave-stock">
         <meshStandardMaterial color={STOCK_COLOR} flatShading metalness={0.05} roughness={0.75} />
       </mesh>
 
@@ -694,6 +706,15 @@ export function EngravePreview() {
         </ProjectedLabel>
       </group>
 
+      </group>
+      {found !== null && (
+        <Html position={[stock.length / 2, stock.width / 2, 2]}>
+          <div className="engrave-found-badge" data-testid="engrave-found-badge">
+            found: X {found.offset.x} mm · Y {found.offset.y} mm
+            {found.rotationDeg === null ? '' : ` · ${found.rotationDeg}°`}
+          </div>
+        </Html>
+      )}
     </group>
   );
 }

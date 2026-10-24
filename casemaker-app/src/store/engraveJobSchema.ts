@@ -1495,6 +1495,7 @@ export const jobRunLogEntrySchema = z
       .enum(['finished', 'stopped', 'failed'])
       .describe('How the run ended: finished, stopped by the operator, or failed.'),
     ncHash: z.string().optional().describe('Hash of the program text actually run; omit when not recorded.'),
+    transcript: z.string().optional().describe('The machine-run transcript (the run lines, joined); omit when not recorded.'),
   })
   .strict()
   .describe('One program run recorded in the job document.');

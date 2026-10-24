@@ -76,6 +76,18 @@ export function RunSheetView({ sheet, onClose }: { sheet: RunSheet; onClose?: ()
               <dt>Machine</dt>
               <dd data-testid="run-sheet-machine">{sheet.header.machine}</dd>
             </div>
+            {sheet.header.probe !== undefined && (
+              <div>
+                <dt>Probe</dt>
+                <dd data-testid="run-sheet-probe">{sheet.header.probe}</dd>
+              </div>
+            )}
+            {sheet.header.mount !== undefined && (
+              <div>
+                <dt>Mount</dt>
+                <dd data-testid="run-sheet-mount">{sheet.header.mount}</dd>
+              </div>
+            )}
             <div>
               <dt>Generated</dt>
               <dd>{sheet.header.generatedOn}</dd>
