@@ -92,9 +92,16 @@ function expectOutputsMatchDisk(receipt: Receipt, outDir: string): void {
   }
 }
 
-/** A committed fixture must already be in the one canonical form `receiptJson` produces. */
+/**
+ * A committed fixture must already be in the one canonical form `receiptJson` produces.
+ *
+ * #610 — CRLF IS A CHECKOUT ARTEFACT, NOT CONTENT. Git stores these JSONs with LF, but a Windows
+ * clone (`core.autocrlf=true`) writes the working copy back as CRLF, and the byte comparison below
+ * then fails on Windows while Linux passes. `.gitattributes` pins the receipts to `eol=lf`; this
+ * normalisation also keeps the check honest for a clone checked out before that rule existed.
+ */
 function readFixture(name: string): string {
-  const text = readFileSync(join(REPO, 'docs', 'bench', name), 'utf8');
+  const text = readFileSync(join(REPO, 'docs', 'bench', name), 'utf8').replace(/\r\n/g, '\n');
   expect(receiptJson(parseReceipt(JSON.parse(text))), `${name} is canonical`).toBe(text);
   return text;
 }

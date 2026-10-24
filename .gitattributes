@@ -1,0 +1,8 @@
+# Byte-canonical fixtures (#610). The CLI hashes the BYTES of its input files into the committed
+# receipts (`docs/bench/*.receipt.json`), and `tests/unit/docsRoundTrip.spec.ts` regenerates those
+# receipts and compares them byte for byte. A Windows clone (core.autocrlf=true) otherwise checks
+# every line out as CRLF: the receipt's inputs hash to different sha256s and different byte counts,
+# and the spec fails there while Linux passes. The blobs in git are already LF; this only stops the
+# checkout rewriting them.
+docs/bench/*.json text eol=lf
+casemaker-app/tests/unit/fixtures/location-doc.json text eol=lf
