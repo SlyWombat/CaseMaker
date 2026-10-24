@@ -20,7 +20,7 @@ import { useMachineStore } from '@/store/machineStore';
 import { useEngraveRegistrationStore } from '@/store/engraveRegistrationStore';
 import { useToolRegistry } from '@/hooks/useToolRegistry';
 import { expandEngraveRow } from '@/store/engraveRowStore';
-import { machineAt } from '@/store/locationStore';
+import { machineAt, useLocationStore } from '@/store/locationStore';
 import { newId } from '@/utils/id';
 import { bracketSettings, anchorFrom, bracketDatum, bracketExpectedSurface, clampObstacles, bracketObstacles, defaultClampPlacements } from '@/engine/cnc/mounts/bracket';
 import { jobMachine } from '@/engine/cnc/calibration';
@@ -216,6 +216,10 @@ export function EngraveSetupsSection({ initiallyOpen = false }: { initiallyOpen?
   const settings = useMemo(() => setupsSettings(defaults), [defaults]);
   // #598 — the checked-out probe and the measured jaw-top datum, from the machine at the run target.
   const target = useMemo(() => (machine === null ? null : { host: machine.host, port: machine.port }), [machine]);
+  // #617 — subscribe to the location store so any write-back (a card tap, a registration frame or
+  // datum, an accessory check-out) re-renders and `machineAt` re-reads the current record; a snapshot
+  // here would plan from a stale machine after a tap taken outside this section.
+  useLocationStore((s) => s.location);
   const machineRecord = target === null ? null : machineAt(target);
   const probe = useMemo(() => probeFor(machineRecord), [machineRecord]);
   const mountDatum = useMemo(() => mountDatumFor(machineRecord), [machineRecord]);

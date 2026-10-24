@@ -385,6 +385,40 @@ describe('#471 registration — planned only after approval, refused with the en
     expect(screen.queryByTestId('engrave-setup-reg-need-datum-1')).toBeNull();
   });
 
+  it('#617 a datum written from the machine card re-plans from the current record', () => {
+    useMachineStore.setState({ machine: OBS });
+    const job = savedJob();
+    job.workholding.vise.source = 'saved';
+    act(() => useEngraveJobStore.setState({ job }));
+    // No jaw-top datum yet: the location's profile has none.
+    useLocationStore.setState({
+      location: {
+        ...DATUM_LOCATION,
+        machines: [
+          {
+            ...DATUM_LOCATION.machines[0]!,
+            bedProfiles: [
+              {
+                ...DATUM_LOCATION.machines[0]!.bedProfiles![0]!,
+                datums: { ...DATUM_LOCATION.machines[0]!.bedProfiles![0]!.datums, viseJawTopZ: null },
+              },
+            ],
+          },
+        ],
+      },
+    });
+    render(<EngraveSetupsSection />);
+    fireEvent.click(screen.getByTestId('engrave-setup-expand-1'));
+    fireEvent.click(screen.getByTestId('engrave-setup-plan-reg-1'));
+    expect(screen.getByTestId('engrave-setup-reg-need-datum-1')).toBeTruthy();
+
+    // The card's tap writes the datum into the location; the section re-reads it and takes the datum path.
+    act(() => useLocationStore.setState({ location: DATUM_LOCATION }));
+    fireEvent.click(screen.getByTestId('engrave-setup-plan-reg-1'));
+    expect(screen.queryByTestId('engrave-setup-reg-need-datum-1')).toBeNull();
+    expect(screen.getByTestId('engrave-setup-reg-summary-1').textContent).toContain('Home, fit the wired probe');
+  });
+
   it('#603 the row names the checked-out probe and the machine', () => {
     useMachineStore.setState({ machine: OBS });
     useLocationStore.setState({
