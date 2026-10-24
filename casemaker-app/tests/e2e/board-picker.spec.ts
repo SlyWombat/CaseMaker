@@ -55,6 +55,19 @@ test('picker: create-from-quickstart applies the curated template', async ({ cm,
   expect(name).toBe('SHT31-D sensor pod');
 });
 
+test('picker: the Radxa Dragon Q8B is a built-in, with its drawing dimensions in the rail', async ({ cm, page }) => {
+  await cm.ready();
+  await page.getByTestId('welcome-search').fill('q8b');
+  const grid = page.locator('[data-testid^="welcome-board-"]');
+  await expect(grid).toHaveCount(1);
+  await page.getByTestId('welcome-board-radxa-dragon-q8b').click();
+  const detail = page.getByTestId('welcome-detail');
+  await expect(detail).toBeVisible();
+  await expect(detail).toContainText('Radxa Dragon Q8B');
+  // The drawing's dimensions, not the label's nominal 100 × 75.
+  await expect(detail).toContainText('100.2 × 74.2');
+});
+
 test('picker: quickstart filter shows only boards with templates', async ({ cm, page }) => {
   await cm.ready();
   await page.getByTestId('welcome-filter-quickstart').click();

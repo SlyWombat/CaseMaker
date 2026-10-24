@@ -6,7 +6,7 @@ import { listBuiltinBoardIds, getBuiltinBoard } from '@/library';
  * (issue #22). Add an id to AUDITED_IDS once the manual audit lands and the
  * JSON profile carries `crossReference` and `measurementMethod`.
  */
-const AUDITED_IDS: string[] = [];
+const AUDITED_IDS: string[] = ['radxa-dragon-q8b'];
 
 describe('Issue #22 — board library audit gate', () => {
   it('every built-in board has at least a source URL', () => {
