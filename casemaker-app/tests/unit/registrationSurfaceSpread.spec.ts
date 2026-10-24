@@ -1,11 +1,13 @@
-// #475 — the registration executor measures the cut's extents, not just the registration point.
+// #475 — the registration executor measures the cut's extents, not just the registration point;
+// #608 — the verdict is the RESIDUAL after a plane fit, so a tilt is followed and only a top that
+// is not one plane refuses.
 //
 // Two blanks, both against a FAKE controller and today's numbers:
 //
-//   - the badge of Appendix C, whose five readings are the issue's own and span 0.21 mm across a
-//     0.2 mm band — the `blank-bowed` refusal;
-//   - the bench's thin laminate (76 × 25.35 × 1.5, 0.075 mm cap), whose 0.08 mm spread fits its
-//     0.225 mm band — a pass, with Z0 at the lowest touch.
+//   - the badge of Appendix C, whose dome (the centre 0.33 mm above every extent) a plane cannot
+//     explain — its residual exceeds the 0.2 mm band, so the `blank-bowed` refusal;
+//   - the bench's thin laminate (76 × 25.35 × 1.5, 0.075 mm cap), whose 0.08 mm near-linear ramp
+//     fits its 0.225 mm band — a pass, with Z0 at the lowest touch.
 //
 // Nothing here reaches a machine.
 
@@ -231,9 +233,9 @@ function probeSeeks(lines: readonly string[]): number {
 }
 
 describe('#475 the executor measures the cut extents', () => {
-  it('REFUSES the bowed badge: 0.21 mm across a 0.2 mm band, no origin, Z0 still named', async () => {
+  it('#608 — REFUSES a top that is not one plane: a dome whose residual outlasts the fit, no origin', async () => {
     const job = badgeJob();
-    const plan = registrationPlan(BADGE_STOCK, -55.131, { x: 24, y: 43 });
+    const plan = registrationPlan(BADGE_STOCK, -55.0, { x: 24, y: 43 });
     const spreadPlan = surfaceSpreadPlan(job, {
       touchCount: plan.settings.surfaceTouchCount,
       margin: 0.2,
@@ -242,8 +244,9 @@ describe('#475 the executor measures the cut extents', () => {
     // reading rather than touching the blank twice in the same spot.
     expect(spreadPlan.touches[0]).toMatchObject({ x: 24, y: 43 });
 
-    // The issue's five readings, in the plan's order: centre, left, right, front, back.
-    const zs = [-55.131, -55.269, -55.232, -55.315, -55.341];
+    // A dome: the centre 0.33 mm above every extent (Appendix C's badge dome). A plane cannot
+    // explain it — the residual (4/5 of the dome height) exceeds the 0.2 mm band.
+    const zs = [-55.0, -55.33, -55.33, -55.33, -55.33];
     const z1 = fakeZ1({
       actual: BADGE_STOCK,
       surface: zs[0]!,
@@ -256,31 +259,31 @@ describe('#475 the executor measures the cut extents', () => {
 
     expect(r.spread).toBeDefined();
     expect(r.spread!.touches.map((t) => t.z)).toEqual(zs);
-    expect(r.spread!.min).toMatchObject({ z: -55.341, touchId: 'surface-5', source: 'probe' });
-    expect(r.spread!.max).toMatchObject({ z: -55.131, touchId: 'surface-1', source: 'probe' });
-    expect(r.spread!.spread).toBe(0.21);
+    expect(r.spread!.min).toMatchObject({ z: -55.33, touchId: 'surface-2', source: 'probe' });
+    expect(r.spread!.max).toMatchObject({ z: -55.0, touchId: 'surface-1', source: 'probe' });
+    expect(r.spread!.spread).toBe(0.33);
+    expect(r.spread!.fit).not.toBeNull();
+    expect(r.spread!.fit!.residual).toBeGreaterThan(0.2);
     expect(r.spread!.ok).toBe(false);
     expect(r.spread!.landing).toBeNull();
-    // #496 — both centre-to-edge drops, on the stock's axes: 0.138 mm to the X extents (left is
-    // the reading that sets it), 0.21 mm to the Y extents. The pair is what the job records.
-    expect(r.spread!.drops).toEqual({ xMm: 0.138, yMm: 0.21 });
-    expect(r.spread!.z0).toEqual({ z: -55.341, touchId: 'surface-5', rule: 'lowest' });
+    expect(r.spread!.z0).toEqual({ z: -55.33, touchId: 'surface-2', rule: 'lowest' });
     expect(r.spread!.refusal).toMatchObject({ severity: 'error', code: 'blank-bowed' });
     expect(r.spread!.refusal?.message).toBe(
-      'this blank is bowed 0.21 mm across the cut; the floors cannot stay past the colour line and clear of the pocket',
+      "this blank's top is not one plane: the touches miss the fitted plane by 0.262 mm, " +
+        'wider than the band — the floors cannot stay past the colour line and clear of the pocket',
     );
 
     // A refusal is a completed measurement (the run is `ok`), but no origin may be written from it:
     // the outcome is unusable and carries the refusal as its problem, and Z0 is still the low touch.
     expect(r.outcome.usable).toBe(false);
-    expect(r.outcome.surfaceZ).toBe(-55.341);
+    expect(r.outcome.surfaceZ).toBe(-55.33);
     expect(r.outcome.problems).toContain(r.spread!.refusal!.message);
 
     // Five planned readings: the registration seek (2 probes) and the four points not its own, plus
     // the two edge scans' bracket-and-bisect touches (7 each on this blank, #594).
     expect(probeSeeks(z1.lines)).toBe(2 + 4 * 2 + 14);
     // #430's bounds are unchanged: nothing probed below the cap, and the run finished homed.
-    expect(z1.lowest()).toBeGreaterThanOrEqual(-55.131 - S.capBelowSurfaceMm);
+    expect(z1.lowest()).toBeGreaterThanOrEqual(-55.0 - S.capBelowSurfaceMm);
     expect(z1.lines.slice(-2)).toEqual(['G53 G0 Z-3', '$H']);
   });
 
@@ -312,7 +315,9 @@ describe('#475 the executor measures the cut extents', () => {
     expect(r.spread!.ok).toBe(true);
     expect(r.spread!.refusal).toBeNull();
     expect(r.spread!.z0).toEqual({ z: -55.08, touchId: 'surface-5', rule: 'lowest' });
-    expect(r.spread!.landing).toEqual({ lower: 0.275, upper: 0.42 });
+    // #608 — the 0.08 mm spread is a near-linear ramp the plane follows; its residual (0.04) is
+    // what the landing range is left from, so the range is wider than the old spread-based one.
+    expect(r.spread!.landing).toEqual({ lower: 0.275, upper: 0.46 });
     expect(r.outcome.usable).toBe(true);
     // The origin the next step writes is the LOWEST touch, not the registration reading.
     expect(r.outcome.surfaceZ).toBe(-55.08);

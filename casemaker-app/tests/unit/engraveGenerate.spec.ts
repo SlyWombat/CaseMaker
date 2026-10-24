@@ -17,6 +17,7 @@ import { UNMEASURED_FEEDS_TABLE, type FeedCatalogueRow } from '@/engine/cnc/feed
 import { buildRunSheet } from '@/engine/cnc/engrave/runSheet';
 import { defaultBoundaryMargin } from '@/engine/cnc/engrave/depthBounds';
 import { labelGlyphMeasure, traceSelfOverlaps, voidLimitForItem } from '@/engine/cnc/engrave/partPlan';
+import { effectiveMargins, MARGIN_DEFAULTS } from '@/engine/cnc/engrave/depthBounds';
 import { bindingVoidsByRegion } from '@/workers/sim/engraveGeometry';
 import { createSimSession } from '@/workers/sim/session';
 import { jobTool, setupProgramFindings, toSetup } from '@/engine/cnc/engrave/jobSetup';
@@ -2414,5 +2415,69 @@ describe('through-cuts and cut-outs (#218)', () => {
     expect(f!.severity).toBe('error');
     expect(f!.message).toContain('100 mm inset');
     expect(f!.message).toContain('no path');
+  });
+});
+
+// #608 — a fitted surface plane is posted against: the program's FEED moves' Z follows the plane,
+// so a tilted blank's colour plane stays at the programmed depth under the tilt. The flat program
+// (no `shop.surface`) is byte-identical to before.
+describe('the fitted surface plane is posted against (#608)', () => {
+  /** Every G1 feed move's resolved XYZ, tracking the modal words the post omits. */
+  function feedMoves(nc: string): { x: number; y: number; z: number }[] {
+    const out: { x: number; y: number; z: number }[] = [];
+    let x = 0;
+    let y = 0;
+    let z = 0;
+    for (const raw of nc.split('\n')) {
+      const line = raw.trim();
+      const isG0 = /^G0\b/.test(line);
+      const isG1 = /^G1\b/.test(line);
+      if (!isG0 && !isG1) continue;
+      const xm = /(?:^|\s)X(-?[\d.]+)/.exec(line);
+      const ym = /(?:^|\s)Y(-?[\d.]+)/.exec(line);
+      const zm = /(?:^|\s)Z(-?[\d.]+)/.exec(line);
+      if (xm) x = Number(xm[1]);
+      if (ym) y = Number(ym[1]);
+      if (zm) z = Number(zm[1]);
+      if (isG1) out.push({ x, y, z });
+    }
+    return out;
+  }
+
+  it('lifts every feed move by the plane at its XY, and leaves the flat program unchanged', () => {
+    const job = dj();
+    const margins = effectiveMargins(job, MARGIN_DEFAULTS);
+    // A realistic tilt: bounded by the depth band (≤ ~0.4 mm over the stock), so even the shallowest
+    // 0.5 mm cut stays below the top face once the lift is applied.
+    const plane = { offset: -55, slopeX: 0.002, slopeY: -0.003 };
+    const z0 = -55; // the reference reading, so the lift at the origin is 0
+    const flat = engraveGenerate(tl, job, jobTool(job), [], null, margins, {});
+    const fitted = engraveGenerate(tl, job, jobTool(job), [], null, margins, { surface: { plane, z0 } });
+
+    expect(flat.ok).toBe(true);
+    expect(fitted.ok).toBe(true);
+    expect(flat.nc).not.toBeNull();
+    expect(fitted.nc).not.toBeNull();
+    // The flat program is untouched — the same bytes as a run with no surface option.
+    expect(fitted.nc).not.toBe(flat.nc);
+
+    const flatMoves = feedMoves(flat.nc!);
+    const fitMoves = feedMoves(fitted.nc!);
+    expect(fitMoves.length).toBe(flatMoves.length);
+    expect(fitMoves.length).toBeGreaterThan(0);
+
+    // Each feed move lands at the flat Z plus the plane's lift at its own XY.
+    const lift = (x: number, y: number): number => plane.offset - z0 + plane.slopeX * x + plane.slopeY * y;
+    const zs = new Set<number>();
+    for (let i = 0; i < fitMoves.length; i++) {
+      const f = flatMoves[i]!;
+      const g = fitMoves[i]!;
+      expect(g.x).toBeCloseTo(f.x, 6);
+      expect(g.y).toBeCloseTo(f.y, 6);
+      expect(g.z).toBeCloseTo(f.z + lift(g.x, g.y), 2);
+      zs.add(Number(g.z.toFixed(3)));
+    }
+    // The posted Z actually VARIES with XY: the tilt spreads one flat depth across many Zs.
+    expect(zs.size).toBeGreaterThan(new Set(flatMoves.map((m) => Number(m.z.toFixed(3)))).size);
   });
 });

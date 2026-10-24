@@ -114,6 +114,7 @@ import type { Polygons } from '@/engine/cnc/cam/pocket';
 import { concatToolpathIR, estimateCycleSeconds, HOP_Z, toolNumberFor, travelStats, type CamMove, type ToolpathIR } from '@/engine/cnc/cam/ir';
 import { generateSurface3dForGoal, type SurfaceFeeds } from '@/engine/cnc/cam/surface3d';
 import { postZ1, type PostContext, type VacuumSpan } from '@/engine/cnc/post/z1';
+import { applySurfaceLift, type SurfacePlane } from '@/engine/cnc/engrave/surfacePlane';
 import { FRAME_Z, runSheetFileName, runSheetFrameFileName } from '@/engine/cnc/engrave/runSheet';
 import type { Setup } from '@/engine/cnc/setup';
 import type { MountObstacles } from '@/engine/cnc/mounts/bracket';
@@ -223,6 +224,14 @@ export interface EngraveShopOpts {
    * so an old caller states `fallback` rather than inventing a number.
    */
   drill?: { settings: DrillSettings; sources: Record<keyof DrillSettings, string> } | null;
+  /**
+   * #608 — the fitted surface plane from registration, so the posted program follows the blank's
+   * tilt instead of cutting a flat floor across it. `plane` is the least-squares plane through the
+   * surface touches (in the readings' machine-Z frame); `z0` is the reference reading the origin was
+   * written from (the LOWEST touch). Only FEED moves are lifted, so air moves and the frame file are
+   * untouched. Absent/null: the program is posted flat, byte-for-byte as before this option existed.
+   */
+  surface?: { plane: SurfacePlane; z0: number } | null;
 }
 
 /** A stage refusal with its reason, so the panel can list it under the right row. */
@@ -3171,9 +3180,14 @@ function generateOneProgram(
   // 7. the post-processor's text, with this file's share of the vacuum words: `span` when the
   // engraving is the run's only program (or the facing file was withheld), `spanAfterFacing(span)`
   // when the facing file has already taken the first word.
+  // #608 — a fitted surface plane (registration measured the blank tilted, and the tilt fits) is
+  // posted against: the FEED moves' Z follow the plane so the colour plane stays at the programmed
+  // depth under the tilted top. The CAM's IR is untouched otherwise; the shift happens here, at the
+  // one seam where the document frame meets the file's Z.
+  const postIr = shop.surface ? applySurfaceLift(ir, shop.surface.plane, shop.surface.z0) : ir;
   let nc: string;
   try {
-    const posted = postZ1(ir, ctx, mill, { vacuum: facing.nc !== null ? spanAfterFacing(span) : span });
+    const posted = postZ1(postIr, ctx, mill, { vacuum: facing.nc !== null ? spanAfterFacing(span) : span });
     if (!posted.ok) return stop('post', { feeds, message: posted.errors.join('; '), facing });
     nc = posted.text;
   } catch (e) {

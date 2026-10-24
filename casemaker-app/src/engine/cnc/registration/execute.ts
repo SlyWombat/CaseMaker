@@ -49,8 +49,9 @@
  * (#591 — the scans say where the stock is, and the touch points are placed by that offset), the
  * same `seekSurface` measures the plan's cut-extent touch points from just above the band (#590),
  * the readings are assessed against the depth band (`assessSurfaceReadings`), Z0 becomes the LOWEST
- * touch, and a spread wider than the band makes the outcome unusable with the `blank-bowed`
- * refusal. The touches stay inside the registration's own validated seek band, so the #430 cap and
+ * touch, and a RESIDUAL wider than the band after a plane fit (#608 — a top that is not one plane)
+ * makes the outcome unusable with the `blank-bowed` refusal; a mere tilt fits the plane and is
+ * followed. The touches stay inside the registration's own validated seek band, so the #430 cap and
  * tolerance hold unchanged.
  */
 
@@ -533,9 +534,11 @@ export async function runRegistration(
     await io.send(`G53 G0 Z${f(plan.seek.fromMachineZ)}`);
     await io.send('$H');
 
-    // #475 — the spread verdict. Z0 is the LOWEST touch (the colour line is a plane and the dome is
-    // extra top material), so the outcome carries it even when the blank is refused; a refusal also
-    // makes the measurement unusable, which stops `applyCorrection` writing an origin from it.
+    // #475/#608 — the spread verdict. Z0 is the LOWEST touch (the colour line is a plane and the
+    // dome is extra top material), so the outcome carries it even when the blank is refused; a
+    // residual wider than the band (a top that is not one plane) also makes the measurement
+    // unusable, which stops `applyCorrection` writing an origin from it. A tilt that fits a plane
+    // leaves the outcome usable — Z0 stays the lowest touch and the program follows the fit.
     let spread: SurfaceSpreadAssessment | undefined;
     if (spreadPlan !== undefined) {
       spread = assessSurfaceReadings(spreadPlan, spreadReadings);

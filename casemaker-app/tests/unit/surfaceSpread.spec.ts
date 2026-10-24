@@ -1,9 +1,10 @@
-// #475 — Z0 on a bowed blank is measured, not a point.
+// #475 — Z0 on a bowed blank is measured, not a point; #608 — a tilt is followed, not refused.
 //
 // The badge fixture is the issue's own: 3.81 mm blank, 3.0 mm split at 0.2 mm layers, the magnet
 // pocket's membrane below. The colour line quantises to 0.8 and the pocket's ceiling to 1.4, so the
-// floors may land from 1.0 to 1.2 — a 0.2 band. The badge measures 0.21 across the cut and the house
-// margin is 0.2: the refusal is the house margin, exactly as the issue's arithmetic says.
+// floors may land from 1.0 to 1.2 — a 0.2 band. #608 changed the verdict from the raw SPREAD to the
+// RESIDUAL after a least-squares plane fit: a 0.45 mm tilt (run 5) fits a plane and is followed, and
+// only a top whose bow outlasts the plane — a dome, whose residual is 4/5 of its height — refuses.
 
 import { describe, it, expect } from 'vitest';
 
@@ -11,11 +12,14 @@ import { badgeBlankFor } from '@/engine/cnc/engrave/fromBadge';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { voidLimitForItem } from '@/engine/cnc/engrave/partPlan';
 import {
+  assessSurfaceReadings,
   assessSurfaceSpread,
   DEFAULT_SURFACE_TOUCH_COUNT,
   surfaceSpreadPlan,
+  surfaceTiltWords,
   Z0_REFERENCE,
   type SurfaceReading,
+  type SurfaceSpreadPlan,
 } from '@/engine/cnc/engrave/surfaceSpread';
 import { registrationSettings } from '@/engine/cnc/registration/settings';
 import { viseForNewJob } from '@/engine/cnc/fixture';
@@ -49,6 +53,50 @@ const BOWED: SurfaceReading[] = [
   { z: -55.341, source: 'stated' },
 ];
 
+/**
+ * #608 — the 2026-10-23 run-5 readings, in plan order. A 0.45 mm tilt toward +X/+Y (the moving-jaw
+ * side reads low), which a plane follows; the centre's 0.2 mm high spot is what the plane leaves as
+ * its residual.
+ */
+const RUN5: SurfaceReading[] = [
+  { z: -55.055, source: 'probe' },
+  { z: -55.164, source: 'probe' },
+  { z: -55.505, source: 'probe' },
+  { z: -55.092, source: 'probe' },
+  { z: -55.437, source: 'probe' },
+];
+
+/**
+ * #608 — a genuinely NON-planar top: a dome whose centre is 0.33 mm above every extent (the badge's
+ * own dome, `docs/design/cnc-job-workflow.md` Appendix C). A plane cannot explain a dome, so the
+ * residual — 4/5 of the dome height — exceeds the 0.2 mm band and the blank still refuses.
+ */
+const NONPLANAR: SurfaceReading[] = [
+  { z: -55.0, source: 'probe' },
+  { z: -55.33, source: 'probe' },
+  { z: -55.33, source: 'probe' },
+  { z: -55.33, source: 'probe' },
+  { z: -55.33, source: 'probe' },
+];
+
+/**
+ * The run-5 cut extents, symmetric around their centre exactly as the bench's touches were (the
+ * badge's cut regions span nearly the full blank, not the single demo line). The symmetry matters:
+ * it is what lets the plane fit the tilt with its residual under the band.
+ */
+function run5Plan(): SurfaceSpreadPlan {
+  const plan = surfaceSpreadPlan(badgeJob())!;
+  const at = ["the cut area's centre", "the cut area's left extent", "the cut area's right extent", "the cut area's front extent", "the cut area's back extent"];
+  const pts: [number, number][] = [
+    [24, 43],
+    [24 - 13.9725, 43],
+    [24 + 13.9725, 43],
+    [24, 43 - 33.566],
+    [24, 43 + 33.566],
+  ];
+  return { ...plan, touches: pts.map(([x, y], i) => ({ id: `surface-${i + 1}`, x, y, at: at[i]! })) };
+}
+
 describe('the surface spread on a bowed blank (#475)', () => {
   it('the band is the badge’s own: colour line + margin below, pocket ceiling above', () => {
     const job = badgeJob();
@@ -78,14 +126,34 @@ describe('the surface spread on a bowed blank (#475)', () => {
     expect(plan.touches[2]!.x).toBe(37.1);
   });
 
-  it('a spread wider than the band REFUSES with the issue’s sentence', () => {
-    const a = assessSurfaceSpread(badgeJob(), BOWED);
-    expect(a.spread).toBe(0.21);
+  it('#608 — the run-5 tilt fits a plane (residual under the band) and is followed, not refused', () => {
+    const plan = run5Plan();
+    const a = assessSurfaceReadings(plan, RUN5);
+    expect(a.spread).toBe(0.45);
+    expect(a.fit).not.toBeNull();
+    expect(a.fit!.kind).toBe('plane');
+    expect(a.fit!.residual).toBeCloseTo(0.196, 2);
+    expect(a.fit!.residual).toBeLessThan(plan.band.width);
+    expect(a.ok).toBe(true);
+    expect(a.refusal).toBeNull();
+    expect(a.landing).not.toBeNull();
+    // The run sheet's words: the fitted plane drops toward +X and +Y (the moving-jaw side is low).
+    expect(surfaceTiltWords(a.tilt)).toBe('0.341 mm toward +X and 0.345 mm toward +Y');
+    // Z0 stays the lowest touch, not the fitted plane's mean.
+    expect(a.z0).toEqual({ z: -55.505, touchId: 'surface-3', rule: 'lowest' });
+  });
+
+  it('#608 — a top that is not one plane (residual wider than the band) still REFUSES', () => {
+    const a = assessSurfaceSpread(badgeJob(), NONPLANAR);
+    expect(a.spread).toBe(0.33);
+    expect(a.fit).not.toBeNull();
+    expect(a.fit!.residual).toBeGreaterThan(0.2);
     expect(a.ok).toBe(false);
     expect(a.landing).toBeNull();
     expect(a.refusal).toMatchObject({ severity: 'error', code: 'blank-bowed' });
     expect(a.refusal?.message).toBe(
-      'this blank is bowed 0.21 mm across the cut; the floors cannot stay past the colour line and clear of the pocket',
+      "this blank's top is not one plane: the touches miss the fitted plane by 0.262 mm, " +
+        'wider than the band — the floors cannot stay past the colour line and clear of the pocket',
     );
   });
 
@@ -96,17 +164,21 @@ describe('the surface spread on a bowed blank (#475)', () => {
     // One named rule: the colour line is a plane and the dome is extra top material (#475).
     expect(Z0_REFERENCE).toBe('lowest');
     expect(a.z0).toEqual({ z: -55.341, touchId: 'surface-5', rule: 'lowest' });
+    // #608 — the 0.21 mm spread bow still fits a plane (residual 0.125 < band), so it now FOLLOWS:
+    // its spread was a mild dome the old spread-only rule refused, not a tilt a plane cannot take.
+    expect(a.ok).toBe(true);
+    expect(a.landing).toEqual({ lower: 1.0, upper: 1.075 });
   });
 
-  it('a spread equal to the band passes, and the floor’s landing range is one depth', () => {
-    const atLimit: SurfaceReading[] = BOWED.map((r) => ({ ...r }));
-    atLimit[0] = { z: -55.141, source: 'probe' }; // max
-    atLimit[4] = { z: -55.341, source: 'probe' }; // min
-    const a = assessSurfaceSpread(badgeJob(), atLimit);
-    expect(a.spread).toBe(0.2);
+  it('#608 — a spread under the band passes, and the landing range is the band less the residual', () => {
+    const flat: SurfaceReading[] = BOWED.map((r) => ({ ...r, z: -55.2 }));
+    const a = assessSurfaceSpread(badgeJob(), flat);
+    expect(a.spread).toBe(0);
     expect(a.ok).toBe(true);
     expect(a.refusal).toBeNull();
-    expect(a.landing).toEqual({ lower: 1.0, upper: 1.0 });
+    // Every reading identical: the plane is flat, the residual 0, and the landing range is the whole band.
+    expect(a.fit!.residual).toBe(0);
+    expect(a.landing).toEqual({ lower: 1.0, upper: 1.2 });
   });
 
   it('one reading per planned touch, in order; a mismatch is a caller error', () => {

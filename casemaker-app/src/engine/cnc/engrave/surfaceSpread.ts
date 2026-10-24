@@ -15,8 +15,10 @@
  *      the colour split plus the boundary margin below, and the void (pocket) limit or the
  *      blank's underside above (`depthBounds`/`partPlan`, never a second arithmetic);
  *   3. measure: min, max and spread, each carrying the reading's provenance;
- *   4. spread within the band -> proceed, with Z0 at the LOWEST touch ({@link Z0_REFERENCE}) and
- *      the floor's landing range printed; spread wider -> refuse with `blank-bowed`.
+ *   4. fit a plane to the touches (#608): a top that TILTS fits the plane (small residual) and is
+ *      FOLLOWED — Z0 stays the LOWEST touch ({@link Z0_REFERENCE}) and the program is posted against
+ *      the fitted surface per XY. Only a bow the tilt cannot explain — the RESIDUAL wider than the
+ *      band — refuses with `blank-bowed`.
  *
  * WHY THE LOWEST TOUCH. The programmed floor depth `D` is measured from Z0. At a touch whose top
  * is `z` above the lowest one, the local floor is `D + z` deep. Referencing Z0 to the lowest touch
@@ -35,6 +37,7 @@
 
 import { aabbOfProfile } from '@/engine/compiler/profile';
 import { ceilingName, splitDepthOf, type DepthBoundSource } from '@/engine/cnc/engrave/depthBounds';
+import { fitSurfacePlane, type SurfacePlaneFit } from '@/engine/cnc/engrave/surfacePlane';
 import {
   toPartPlan,
   voidLimitForFootprint,
@@ -164,8 +167,22 @@ export interface SurfaceSpreadAssessment {
   /** The Z0 the job is cut from, and the touch it came from (null for a midpoint). */
   z0: { z: Mm; touchId: string | null; rule: SurfaceReference };
   /**
+   * #608 — the least-squares plane the touches fit, and how far they still miss it (`residual`).
+   * The verdict is the RESIDUAL against the band, not the raw spread: a tilted top fits a plane and
+   * is followed; only a top whose bow outlasts the plane — residual wider than the band — refuses.
+   * Null when fewer than three touches were taken (a plane needs three).
+   */
+  fit: SurfacePlaneFit | null;
+  /**
+   * #608 — the fitted top's drop across the measured extents on each stock axis, mm, positive toward
+   * +X / +Y. These are the words the run sheet prints ("surface tilted … toward +X/+Y, followed").
+   */
+  tilt: { xMm: Mm; yMm: Mm };
+  /**
    * The range of programmed floor depths, below Z0, that keeps EVERY region inside its band once
    * the spread is applied — `[lower, upper − spread]`. Null when no depth can: the refusal case.
+   * #608 — when a plane is fitted, the spread that matters is the RESIDUAL (the tilt is followed),
+   * so the range reads `[lower, upper − residual]`.
    */
   landing: { lower: Mm; upper: Mm } | null;
   ok: boolean;
@@ -389,6 +406,18 @@ function dropsOf(touches: readonly SurfaceTouchReading[]): { xMm: Mm; yMm: Mm } 
 }
 
 /**
+ * #608 — the run sheet's "surface tilted … toward +X/+Y, followed" sentence, or null when the fitted
+ * plane is flat (both axis drops within rounding of zero). Each axis that actually drops is named
+ * with its direction, so a tilt along one axis alone says that and no more.
+ */
+export function surfaceTiltWords(tilt: { xMm: Mm; yMm: Mm }): string | null {
+  const parts: string[] = [];
+  if (Math.abs(tilt.xMm) > 1e-9) parts.push(`${num(tilt.xMm)} mm toward ${tilt.xMm > 0 ? '+X' : '-X'}`);
+  if (Math.abs(tilt.yMm) > 1e-9) parts.push(`${num(tilt.yMm)} mm toward ${tilt.yMm > 0 ? '+Y' : '-Y'}`);
+  return parts.length === 0 ? null : parts.join(' and ');
+}
+
+/**
  * Measure the blank from the planned touches.
  *
  * `readings` are in the plan's order (the sheet prints that order). Every reading carries its own
@@ -448,9 +477,23 @@ export function assessSurfaceReadings(
     source: maxTouch.source,
   };
   const spread = r3(max.z - min.z);
-  const ok = spread <= plan.band.width + 1e-9;
+
+  // #608 — fit a plane through the touches. A tilt fits the plane (small residual) and is followed;
+  // only the leftover — the bow the tilt cannot explain — is judged against the band. Fewer than
+  // three touches cannot fit a plane, and the old spread rule stands for them.
+  const fit = fitSurfacePlane(touches);
+  const fitAmount = fit?.residual ?? spread;
+  const xs = touches.map((t) => t.x);
+  const ys = touches.map((t) => t.y);
+  const tilt = {
+    // The drop toward +X/+Y: −slope × span, because a reading frame's Z falls (more negative) as the
+    // surface drops, so a negative slope on an axis IS a drop toward that axis's + end.
+    xMm: r3(fit === null ? 0 : -fit.slopeX * (Math.max(...xs) - Math.min(...xs))),
+    yMm: r3(fit === null ? 0 : -fit.slopeY * (Math.max(...ys) - Math.min(...ys))),
+  };
+  const ok = fitAmount <= plan.band.width + 1e-9;
   const landing = ok
-    ? { lower: plan.band.lower?.depth ?? 0, upper: r3(plan.band.upper.depth - spread) }
+    ? { lower: plan.band.lower?.depth ?? 0, upper: r3(plan.band.upper.depth - fitAmount) }
     : null;
   const refusal: BlankBowedFinding | null = ok
     ? null
@@ -458,8 +501,8 @@ export function assessSurfaceReadings(
         severity: 'error',
         code: 'blank-bowed',
         message:
-          `this blank is bowed ${num(spread)} mm across the cut; the floors cannot stay past the ` +
-          'colour line and clear of the pocket',
+          `this blank's top is not one plane: the touches miss the fitted plane by ${num(fitAmount)} mm, ` +
+          'wider than the band — the floors cannot stay past the colour line and clear of the pocket',
       };
 
   return {
@@ -468,6 +511,8 @@ export function assessSurfaceReadings(
     min,
     max,
     spread,
+    fit: fit === null ? null : { ...fit, offset: r3(fit.offset), slopeX: r3(fit.slopeX), slopeY: r3(fit.slopeY), residual: r3(fit.residual) },
+    tilt,
     drops: dropsOf(touches),
     z0: z0Of(touches),
     landing,

@@ -645,11 +645,13 @@ describe('EngravePanel — the run sheet mount (#207)', () => {
     const sheet = await screen.findByTestId('run-sheet');
 
     // The executor's readings, in the plan's order, with their provenance and the landing range.
+    // #608 — the landing range is the band less the RESIDUAL (0.042), not the spread (0.08): the
+    // near-linear ramp fits a plane, so the tilt leaves more room than the old spread-only rule.
     expect(sheet.textContent).toContain("Measured: lowest -56.1 at the cut area's centre (probe)");
     expect(sheet.textContent).toContain('spread 0.08 mm against the 11 mm band');
-    expect(sheet.textContent).toContain('the floors may land from 0 to 10.92 mm below Z0');
+    expect(sheet.textContent).toContain('the floors may land from 0 to 10.958 mm below Z0');
     // The plan-only stop rule is replaced, not duplicated: the sheet knows what this blank measured.
-    expect(sheet.textContent).not.toContain('If the lowest and highest readings differ by more than');
+    expect(sheet.textContent).not.toContain('If the touches miss a fitted plane by more than');
   });
 
   it('refuses the sheet once the job is stale', () => {    render(<EngravePanel />);

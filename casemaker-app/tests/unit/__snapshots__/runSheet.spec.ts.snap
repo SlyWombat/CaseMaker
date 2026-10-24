@@ -236,7 +236,7 @@ exports[`runSheet (#207) > snapshots the whole RunSheet for a job with a depth b
         },
         {
           "bold": true,
-          "text": "If the lowest and highest readings differ by more than 1 mm, do not cut. The app refuses that blank as: “this blank is bowed <spread> mm across the cut; the floors cannot stay past the colour line and clear of the pocket”.",
+          "text": "If the touches miss a fitted plane by more than 1 mm, do not cut. The app fits a plane to the readings and follows it when the leftover — the bow the tilt cannot explain — fits the band; it refuses that blank as: “this blank's top is not one plane: the touches miss the fitted plane by <residual> mm, wider than the band”.",
         },
       ],
       "title": "5 · Set the work origin",
@@ -548,7 +548,7 @@ exports[`runSheet (#207) > snapshots the whole RunSheet for the default job 1`] 
         },
         {
           "bold": true,
-          "text": "If the lowest and highest readings differ by more than 11 mm, do not cut. The app refuses that blank as: “this blank is bowed <spread> mm across the cut; the floors cannot stay past the colour line and clear of the pocket”.",
+          "text": "If the touches miss a fitted plane by more than 11 mm, do not cut. The app fits a plane to the readings and follows it when the leftover — the bow the tilt cannot explain — fits the band; it refuses that blank as: “this blank's top is not one plane: the touches miss the fitted plane by <residual> mm, wider than the band”.",
         },
       ],
       "title": "5 · Set the work origin",

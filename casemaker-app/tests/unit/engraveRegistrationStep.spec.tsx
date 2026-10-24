@@ -292,13 +292,13 @@ describe('#495 — the registration step', () => {
     expect(firstRegistrationFor(job.id, TARGET)).toBeNull();
   });
 
-  it('refuses a blank bowed wider than the cut’s band, writes no origin, and records the measured flatness (#475)', async () => {
-    const plan = makePlan(-55.131);
+  it('#608 — refuses a top that is not one plane (a dome), writes no origin, and records the measured flatness', async () => {
+    const plan = makePlan(-55.0);
     const job = badgeJobWithPlan(plan);
     const spread = spreadPlanFor(job);
-    // The issue's five readings, in the plan's order: centre, left, right, front, back. The first
-    // is the registration touch itself, so the executor reuses that reading.
-    const zs = [-55.131, -55.269, -55.232, -55.315, -55.341];
+    // Appendix C's badge dome: the centre 0.33 mm above every extent. A plane cannot explain a dome,
+    // so the residual (4/5 of the dome height) exceeds the 0.2 mm band and the blank refuses.
+    const zs = [-55.0, -55.33, -55.33, -55.33, -55.33];
     install(plan, {
       spreadReadings: spread.touches.map((t, i) => ({ x: t.x, y: t.y, z: zs[i]! })),
     });
@@ -308,13 +308,14 @@ describe('#495 — the registration step', () => {
     await runStep();
 
     expect(screen.getByTestId('engrave-registration-spread').getAttribute('data-ok')).toBe('false');
-    expect(screen.getByTestId('engrave-registration-spread').textContent).toContain('spread 0.21 mm against the 0.2 mm band');
+    expect(screen.getByTestId('engrave-registration-spread').textContent).toContain('spread 0.33 mm against the 0.2 mm band');
     expect(screen.getByTestId('engrave-registration-spread-refusal').textContent).toBe(
-      'this blank is bowed 0.21 mm across the cut; the floors cannot stay past the colour line and clear of the pocket',
+      "this blank's top is not one plane: the touches miss the fitted plane by 0.262 mm, " +
+        'wider than the band — the floors cannot stay past the colour line and clear of the pocket',
     );
     expect(screen.queryByTestId('engrave-registration-landing')).toBeNull();
     expect(screen.getByTestId('engrave-registration-refusal').textContent).toContain(
-      'No origin is written: this blank is bowed 0.21 mm',
+      "No origin is written: this blank's top is not one plane: the touches miss the fitted plane by 0.262 mm",
     );
     expect(screen.getByTestId('engrave-registration-verdict').getAttribute('data-usable')).toBe('false');
 
@@ -323,12 +324,12 @@ describe('#495 — the registration step', () => {
     expect(screen.queryByTestId('engrave-registration-write')).toBeNull();
     expect(sent.some((line) => line.startsWith('G10 L2'))).toBe(false);
     expect(firstRegistrationFor(job.id, TARGET)).toBeNull();
-    expect(surfaceSpreadFor(job.id, TARGET)?.assessment.spread).toBe(0.21);
+    expect(surfaceSpreadFor(job.id, TARGET)?.assessment.spread).toBe(0.33);
     expect(surfaceSpreadFor(job.id, TARGET)?.assessment.ok).toBe(false);
     // #496 — the job records the pair, each span on its own stock axis, not one ambiguous "across".
     expect(useEngraveJobStore.getState().job.stock.flatness).toMatchObject({
-      xMm: 0.138,
-      yMm: 0.21,
+      xMm: 0.33,
+      yMm: 0.33,
       source: 'measured',
       touchCount: 5,
       measuredAt: expect.any(String),

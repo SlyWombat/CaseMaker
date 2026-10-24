@@ -63,6 +63,7 @@ import type { RestPassFacts, RestProgram } from '@/engine/cnc/engrave/restPass';
 import {
   assessSurfaceSpread,
   surfaceSpreadPlan,
+  surfaceTiltWords,
   Z0_REFERENCE,
   type SurfaceReading,
   type SurfaceReadingSource,
@@ -1490,9 +1491,10 @@ function surfaceSpreadSteps(
   if (readings === undefined || readings.length !== n) {
     steps.push({
       text:
-        `If the lowest and highest readings differ by more than ${bandMm} mm, do not cut. The app ` +
-        'refuses that blank as: “this blank is bowed <spread> mm across the cut; the floors cannot ' +
-        'stay past the colour line and clear of the pocket”.',
+        `If the touches miss a fitted plane by more than ${bandMm} mm, do not cut. The app ` +
+        'fits a plane to the readings and follows it when the leftover — the bow the tilt cannot ' +
+        "explain — fits the band; it refuses that blank as: “this blank's top is not one plane: the " +
+        'touches miss the fitted plane by <residual> mm, wider than the band”.',
       bold: true,
     });
     return steps;
@@ -1503,7 +1505,16 @@ function surfaceSpreadSteps(
     `Measured: lowest ${fmtNum(a.min.z)} at ${a.min.at} (${sourceWords(a.min.source)}), highest ` +
     `${fmtNum(a.max.z)} at ${a.max.at} (${sourceWords(a.max.source)}); spread ${fmtNum(a.spread)} mm ` +
     `against the ${bandMm} mm band.`;
+  const tiltWords = a.fit === null ? null : surfaceTiltWords(a.tilt);
   if (a.ok && a.landing !== null) {
+    if (tiltWords !== null) {
+      steps.push({
+        text:
+          `Surface tilted ${tiltWords}, followed: the program is posted against the fitted plane, so ` +
+          'the colour plane stays at the programmed depth under the tilted top.',
+        value: `tilt followed (residual ${fmtNum(a.fit!.residual)} mm)`,
+      });
+    }
     steps.push({
       text:
         `${measured} Z0 is the lowest reading, so the floors may land from ${fmtNum(a.landing.lower)} to ` +

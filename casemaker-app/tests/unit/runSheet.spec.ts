@@ -40,7 +40,7 @@ function dj(...args: Parameters<typeof defaultEngraveJob>): ReturnType<typeof de
 }
 import { buildCouponPrograms, type CouponSpec } from '@/engine/cnc/engrave/couponJob';
 import { labelJawReach } from '@/engine/cnc/engrave/partPlan';
-import { surfaceSpreadPlan, type SurfaceReading } from '@/engine/cnc/engrave/surfaceSpread';
+import { surfaceSpreadPlan, assessSurfaceSpread, type SurfaceReading } from '@/engine/cnc/engrave/surfaceSpread';
 import { dedupeFindings, jobTool, validateJob } from '@/engine/cnc/engrave/jobSetup';
 import { parseEngraveJob } from '@/store/engraveJobSchema';
 import { feedsFor } from '@/engine/cnc/feeds';
@@ -1580,19 +1580,22 @@ describe('the surface spread (#475)', () => {
     expect(all).toContain('Set Z0 from the LOWEST of these 5 readings');
     expect(all).toContain('A surface spread wider than that band cannot keep every floor past the colour line');
     // No readings: the stop rule quotes the refusal, and does not claim a verdict.
-    expect(all).toContain('If the lowest and highest readings differ by more than');
-    expect(all).toContain('this blank is bowed <spread> mm across the cut');
+    expect(all).toContain('If the touches miss a fitted plane by more than');
+    expect(all).toContain("this blank's top is not one plane: the touches miss the fitted plane by <residual> mm");
     expect(all).not.toContain('Measured: lowest');
   });
 
   it('prints the measured refusal with the finding’s exact sentence', () => {
     const job = dj();
     const plan = surfaceSpreadPlan(job)!;
-    const readings: SurfaceReading[] = plan.touches.map(() => ({ z: 0, source: 'probe' }));
-    readings[readings.length - 1] = { z: -(plan.band.width + 0.01), source: 'stated' };
+    // A dome a plane cannot explain: the centre 2× the band above every extent, so the residual
+    // (4/5 of the dome height) exceeds the band and the blank refuses. The centre's own reading is
+    // 'stated', so the sheet's measured line carries that provenance too.
+    const readings: SurfaceReading[] = plan.touches.map(() => ({ z: -2 * plan.band.width, source: 'probe' as const }));
+    readings[0] = { z: 0, source: 'stated' };
     const steps = section(sheetFor(job, NO_SIM, NC, { surfaceReadings: readings }), 'origin').steps;
-    const spread = Math.round((plan.band.width + 0.01) * 1000) / 1000;
-    const refusal = `this blank is bowed ${spread} mm across the cut; the floors cannot stay past the colour line and clear of the pocket`;
+    const assessment = assessSurfaceSpread(job, readings);
+    const refusal = assessment.refusal!.message;
     expect(steps.some((s) => s.bold === true && s.text === refusal)).toBe(true);
     expect(steps.map((s) => s.text).join('\n')).toContain('(stated)');
     expect(steps.map((s) => s.text).join('\n')).toContain('Do not run this file');
@@ -1607,7 +1610,7 @@ describe('the surface spread (#475)', () => {
     expect(all).toContain('spread 0 mm against the');
     expect(all).toContain('may land from');
     expect(all).toContain('mm below Z0 and nowhere else');
-    expect(steps.some((s) => s.bold === true && s.text.startsWith('this blank is bowed'))).toBe(false);
+    expect(steps.some((s) => s.bold === true && s.text.startsWith("this blank's top is not one plane"))).toBe(false);
   });
 });
 

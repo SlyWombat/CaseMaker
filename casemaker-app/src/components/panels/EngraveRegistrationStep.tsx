@@ -115,8 +115,9 @@ function writerRefusal(
   outcome: RegistrationOutcome,
   spread: SurfaceSpreadAssessment | null = null,
 ): string | null {
-  // #475 — the blank is bowed more than the cut's depth band: no Z0 can keep every floor past the
-  // colour line and clear of the pocket, so this is a refusal before it is an unusable edge scan.
+  // #475/#608 — the blank's top is not one plane (the touches miss the fitted plane by more than the
+  // depth band): no Z0 can keep every floor past the colour line and clear of the pocket, so this is
+  // a refusal before it is an unusable edge scan.
   if (spread !== null && !spread.ok && spread.refusal !== null) {
     return `No origin is written: ${spread.refusal.message}.`;
   }
