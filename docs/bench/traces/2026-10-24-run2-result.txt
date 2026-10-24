@@ -1,0 +1,66 @@
+✓ 1 Check the job
+clear
+
+The gate found nothing blocking — 8 warnings carried.
+
+Setup 1 · cat:019c049a-8169-7405-bad5-712f26af3b54
+●
+Imported vector "br" "single › br" 13.773×21.04 loses 13% of its area to a 0.5 mm 30° V-bit; use a smaller cutter or a larger shape. generate
+●
+Pocket outline "Single Barrel" (19 contours, 10.531×66.915mm): pitch 0.25 mm, clamped to the cutter's 0.25 mm tip radius from the requested 0.359 mm — a wider pitch would leave a ridge of the top colour down strokes narrower than two passes apart. generate
+●
+Pocket outline "br" (5 contours, 13.773×21.04mm): pitch 0.25 mm, clamped to the cutter's 0.25 mm tip radius from the requested 0.364 mm — a wider pitch would leave a ridge of the top colour down strokes narrower than two passes apart. generate
+●
+two or more strokes of Pocket outline "Single Barrel" (19 contours, 10.531×66.915mm) are closer than 0.429 mm (2 × the 0.214 mm surface wall offset): their V openings merge at the top face and leave a ridge of the top colour below the colour plane. generate
+●
+two or more strokes of Pocket outline "br" (5 contours, 13.773×21.04mm) are closer than 0.429 mm (2 × the 0.214 mm surface wall offset): their V openings merge at the top face and leave a ridge of the top colour below the colour plane. generate
+●
+Imported vector "Single Barrel" "single › Single Barrel" 10.531×66.915 cuts 0.985 mm deep over "Magnet pocket" — a 1.51 mm membrane with nothing under it — so expect chatter and a rough finish there. Moving the cut clear of the void will finish better. generate
+●
+Imported vector "br" "single › br" 13.773×21.04 cuts 0.998 mm deep over "Magnet pocket" — a 1.51 mm membrane with nothing under it — so expect chatter and a rough finish there. Moving the cut clear of the void will finish better. generate
+●
+The job seats the blank on the soft jaws' ledge, 3.1 mm below the jaw tops. It states the 3.81 mm blank stands 0.71 mm proud of the jaw tops. vise
+●
+Vise dimensions are the shipped defaults, measured once on the reference unit; they are not a measurement of this machine's own vise. vise
+Back to Design
+✓ 2 Freeze the plan
+1 program · frozen 15:31
+
+The package — 1 program · 1 setup · frozen 15:31
+
+The frozen programs still describe this job.
+
+You’re supplying this stock yourself, so no blank needs to be held.
+
+this job’s stock is not a shelf entry, so no blank is held.
+
+● 3 Register the blank
+left edge, then the top face
+Registration — find the stock, then set the origin
+
+Setup 1 · X/Y re-checked on the left and front edges; Z from the surface touch, within ±0.7 mm
+
+Home, fit the wired probe and measure it (M491); touch the surface at the cut area's centre (19.05, 38.1); then scan the left edge at Y 38.1, the front edge at X 19.05 — bracketing each edge and bisecting to 0.5 mm, stopping at the first touch off the stock, every touch capped at the surface − 0.5 mm; home when finished.
+
+ I am at the machine, with the wired probe fitted and the head clear.Run the registration again
+
+the fast surface touch read machine Z -55.033, outside the expected -57.507 to -55.397. Stopped — the probe may be as low as machine Z -57.507, 0.7 mm below the expected surface (the surface seek), and the machine may be in alarm. To recover: $X, then G90, then lift with G53 G0 Z-3 before any XY move.
+
+The machine was homed after the stop.
+
+Run it again
+● 4 Run the job
+the plan and the controls
+The plan
+Dry run 
+Off — cut for real
+Traverse only — one air pass, no stock
+Full dry run — whole flow, spindle off, in the air
+
+Target: 192.168.10.43 at 192.168.10.43:2222, reached 10/24/2026, 11:29:54 AM.
+
+Upload to machine…
+
+Cutter: 4*0.5mm*30º Engraving(Metal) (cat:019c049a-8169-7405-bad5-712f26af3b54)
+
+Upload is disabled — the simulation does not match the prediction.
