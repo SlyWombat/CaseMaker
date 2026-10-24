@@ -32,6 +32,7 @@ import { inventoryConditions } from '@/engine/cnc/toolCondition';
 import type { MachineCalibration } from '@/engine/cnc';
 import { effectiveMargins } from '@/engine/cnc/engrave/depthBounds';
 import { jobFingerprint } from '@/engine/cnc/engrave/package';
+import type { SurfacePostFit } from '@/engine/cnc/engrave/surfaceSpread';
 import { useSettingsStore } from './settingsStore';
 import { useEngraveJobStore } from './engraveJobStore';
 import { useSimStore } from './simStore';
@@ -114,8 +115,8 @@ export interface EngraveRunState {
   staleSince: number | null;
   /** A thrown failure from any stage that is not already a finding (generate, load, oracle). */
   error: string | null;
-  /** Run the whole pipeline for the job as it is NOW. */
-  generate: () => Promise<void>;
+  /** Run the whole pipeline for the job as it is NOW. `surface` (#608) re-posts against a tilt. */
+  generate: (surface?: SurfacePostFit | null) => Promise<void>;
   setAcknowledged: (v: boolean) => void;
   /**
    * #490 — record a diagnostic that did not come from a sim stage: the panel's error boundary
@@ -141,7 +142,7 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
     error: null as string | null,
   };
 
-  async function run(): Promise<void> {
+  async function run(surface: SurfacePostFit | null = null): Promise<void> {
     const job = useEngraveJobStore.getState().job;
     const mine = ++seq;
     set({ ...empty, phase: 'generating', generated: get().generated });
@@ -215,6 +216,9 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
       // with each one's source. A drill program's plan and its depth findings read this reading
       // rather than re-resolving the location in the worker.
       drill: drillSettings(shopDefaults),
+      // #608 — the fitted tilt the Cut step re-posts against, when it re-generates after a
+      // registration measured one. Absent/null posts flat, byte-for-byte as before.
+      surface: surface === null ? undefined : { plane: surface.plane, z0: surface.z0 },
     };
 
     // The cutter, resolved ONCE on this side (#305): the sim worker cannot see the registry, so

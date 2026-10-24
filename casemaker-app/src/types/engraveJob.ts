@@ -1055,6 +1055,13 @@ export interface FrozenPackage {
   setups: JobSetup[];
   /** The shelf entry this freeze reserved, or null when the job's stock is not on the shelf. */
   stockEntryId: string | null;
+  /**
+   * #608 — the fitted surface plane these programs were POSTED against, or null when they were
+   * posted flat. Absent on a package frozen before the field existed (read as flat). This is what
+   * lets the Cut step refuse to upload a flat package once a registration has measured a tilt the
+   * programs do not follow.
+   */
+  surface?: { plane: { offset: number; slopeX: number; slopeY: number }; z0: number } | null;
 }
 
 /**

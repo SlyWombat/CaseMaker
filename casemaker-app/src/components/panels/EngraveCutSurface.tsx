@@ -50,7 +50,10 @@ import { useSettingsStore } from '@/store/settingsStore';
 import { finishedProgramsFor } from '@/store/locationStore';
 import type { RunContext } from '@/store/machineRunStore';
 import { useEngravePackageStore } from '@/store/engravePackageStore';
-import { useFirstRegistration } from '@/store/engraveRegistrationStore';
+import { useFirstRegistration, useSurfaceSpread } from '@/store/engraveRegistrationStore';
+import { useEngraveRunStore } from '@/store/engraveRunStore';
+import { surfaceRepostBlocker } from '@/store/engraveRunGate';
+import { surfaceTiltWords } from '@/engine/cnc/engrave/surfaceSpread';
 import { useShopDefaultsStore } from '@/store/shopDefaultsStore';
 import { useStockStore } from '@/store/stockStore';
 import type { LaserLift } from '@/platform/machineLaser';
@@ -195,6 +198,39 @@ export function EngraveCutSurface({
    * rather than pretend a fixed clearance checked a top nobody measured.
    */
   const firstRegistration = useFirstRegistration(job.id, target);
+  // #608 — the cut-extent measurement this machine took: its tilt feeds the re-post step line, and
+  // the registration's fitted plane is what the release gate compares the frozen package against.
+  const spreadMeasurement = useSurfaceSpread(job.id, target);
+  const generate = useEngraveRunStore((s) => s.generate);
+  const [reposting, setReposting] = useState(false);
+  const registrationSurface = firstRegistration?.surface ?? null;
+  const surfaceGate = surfaceRepostBlocker(pkg, firstRegistration);
+  const tiltWords = spreadMeasurement === null ? null : surfaceTiltWords(spreadMeasurement.assessment.tilt);
+
+  /**
+   * #608 — re-post the package against the registration's measured tilt: re-run the whole pipeline
+   * (generate → verify → simulate → oracle) with the fitted plane, then re-freeze so the frozen
+   * texts follow the tilt. #577's determinism means only the lifted feeds move; a flat fit never
+   * reaches this (the button is gated on a non-null `registrationSurface`).
+   */
+  const repost = (): void => {
+    if (registrationSurface === null) return;
+    setReposting(true);
+    void generate(registrationSurface).then(() => {
+      const fresh = useEngraveRunStore.getState().generated;
+      setReposting(false);
+      if (fresh === null || !fresh.ok || fresh.programs.length === 0) return;
+      void freeze(job, fresh.programs, registrationSurface).then((result) => {
+        if (result.ok) {
+          setFreezeError(null);
+          setFreezeNote(result.reservation.text);
+        } else {
+          setFreezeError(result.reason);
+        }
+      });
+    });
+  };
+
   const green = report.firstBlocking === null;
   const staleness = pkg === null ? null : packageStaleness(pkg, job);
   const packageCurrent = pkg !== null && staleness?.stale === false;
@@ -450,6 +486,35 @@ export function EngraveCutSurface({
 
       <Step number={3} title="Register the blank" done={false} summary="left edge, then the top face" defaultOpen={green && packageCurrent}>
         <EngraveRegistrationStep job={job} target={target} />
+        {/* #608 — once the registration measured a tilt, the frozen (flat) package must be re-posted
+            against it before anything is uploaded. A re-post re-runs the whole pipeline with the
+            fitted plane and re-freezes; a flat fit never shows this block, and a package that already
+            follows the tilt shows only the "re-posted" line. */}
+        {registrationSurface !== null && (
+          <section style={BOX} data-testid="engrave-cut-repost">
+            {surfaceGate !== null ? (
+              <>
+                <p style={{ fontSize: 12, color: '#f0d79b', margin: '0 0 6px' }}>
+                  The blank is tilted{tiltWords !== null ? ` (${tiltWords})` : ''} — the frozen program is still flat.
+                </p>
+                <p style={WARN} data-testid="engrave-cut-repost-gate">{surfaceGate}.</p>
+                <button
+                  type="button"
+                  data-testid="engrave-cut-repost-button"
+                  disabled={reposting || !generatedReady}
+                  style={{ width: '100%', padding: 7, marginTop: 6 }}
+                  onClick={repost}
+                >
+                  {reposting ? 'Re-posting…' : 'Re-post against the measured tilt…'}
+                </button>
+              </>
+            ) : (
+              <p style={{ fontSize: 12, color: OK, margin: 0 }} data-testid="engrave-cut-repost-done">
+                Re-posted against the measured tilt{tiltWords !== null ? ` (${tiltWords})` : ''}.
+              </p>
+            )}
+          </section>
+        )}
       </Step>
 
       {green && packageCurrent && plan !== null && (
@@ -498,12 +563,12 @@ export function EngraveCutSurface({
                   job={job}
                   programs={releaseSources}
                   runPlan={plan}
-                  blocker={releaseBlocker ?? missingReportBlocker}
+                  blocker={releaseBlocker ?? missingReportBlocker ?? surfaceGate}
                   onProgramLine={onProgramLine}
                 />
               ) : (
                 <EngraveMachineUpload
-                  blocker={uploadBlocker ?? missingReportBlocker}
+                  blocker={uploadBlocker ?? missingReportBlocker ?? surfaceGate}
                   machine={machine}
                   program={
                     singleSource?.verify === null || singleSource === undefined

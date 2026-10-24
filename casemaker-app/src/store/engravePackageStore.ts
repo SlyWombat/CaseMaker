@@ -65,7 +65,9 @@ export interface EngravePackageState {
   packageFor: (jobId: string) => FrozenPackage | null;
   /**
    * Freeze `job` as it is now around the programs just generated, write the block into the
-   * document, and take its blank.
+   * document, and take its blank. `surface` (#608) is the fitted tilt the programs were posted
+   * against — recorded on the package so the release gate can refuse a flat package once a
+   * registration has measured a tilt it does not follow.
    *
    * Refuses a job with no program (`freezePackage`'s rule) — an approved Cut screen always has one.
    * A shelf that cannot be written does NOT refuse the freeze: the package is the run, the
@@ -73,7 +75,11 @@ export interface EngravePackageState {
    * A job that is not the open document is frozen but not written anywhere — there is no document
    * to own it — and the caller sees that in `packageFor`.
    */
-  freeze: (job: EngraveJob, programs: readonly PackageProgramInput[]) => Promise<PackageFreeze>;
+  freeze: (
+    job: EngraveJob,
+    programs: readonly PackageProgramInput[],
+    surface?: { plane: { offset: number; slopeX: number; slopeY: number }; z0: number } | null,
+  ) => Promise<PackageFreeze>;
   /** Let the job's blank go. The package stays in the document (a stale package keeps its text). */
   release: (jobId: string) => Promise<boolean>;
 }
@@ -83,8 +89,8 @@ export const useEngravePackageStore = create<EngravePackageState>()((_set, get) 
 
   packageFor: (jobId) => documentPackage(jobId),
 
-  freeze: async (job, programs) => {
-    const made = freezePackage(job, programs, new Date().toISOString());
+  freeze: async (job, programs, surface = null) => {
+    const made = freezePackage(job, programs, new Date().toISOString(), surface);
     if (!made.ok) return made;
     const pkg = made.package;
 

@@ -106,6 +106,15 @@ export function surfaceLift(plane: SurfacePlane, z0: number, x: number, y: numbe
 }
 
 /**
+ * True when the plane is flat — both slopes within rounding of zero — so the lift is zero at every
+ * XY and the program would be byte-identical to the flat one. This is the test that decides whether
+ * a registration's fit is worth re-posting against (#608): a flat top has nothing to follow.
+ */
+export function isFlatPlane(plane: SurfacePlane): boolean {
+  return Math.abs(plane.slopeX) < 1e-9 && Math.abs(plane.slopeY) < 1e-9;
+}
+
+/**
  * Post an IR against the fitted surface: every FEED move's Z is shifted by the surface lift at its
  * XY, so the floor follows the tilted colour plane. Rapids and hops stay at their nominal clearances
  * — they are air moves above the top, and the lift (bounded by the tilt, far less than `hopZ`) never

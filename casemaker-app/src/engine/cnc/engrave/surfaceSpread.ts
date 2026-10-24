@@ -37,7 +37,7 @@
 
 import { aabbOfProfile } from '@/engine/compiler/profile';
 import { ceilingName, splitDepthOf, type DepthBoundSource } from '@/engine/cnc/engrave/depthBounds';
-import { fitSurfacePlane, type SurfacePlaneFit } from '@/engine/cnc/engrave/surfacePlane';
+import { fitSurfacePlane, isFlatPlane, type SurfacePlane, type SurfacePlaneFit } from '@/engine/cnc/engrave/surfacePlane';
 import {
   toPartPlan,
   voidLimitForFootprint,
@@ -191,6 +191,14 @@ export interface SurfaceSpreadAssessment {
 }
 
 const r3 = (n: number): Mm => Math.round(n * 1000) / 1000;
+
+/**
+ * #608 — the fitted plane's coefficients travel on the registration record and are re-posted from
+ * forever, so they are carried at micrometer resolution: a slope rounded to 0.001 mm/mm is a
+ * 0.015 mm lift error 30 mm out, and the record keeps whatever rounding it was given. The verdict's
+ * residual is a READ-OUT (r3); the coefficients are inputs to a later post.
+ */
+const r6 = (n: number): number => Math.round(n * 1e6) / 1e6;
 
 /** A number as the sheet prints it: three decimals at most, no trailing zeros. */
 const num = (n: number): string => String(r3(n));
@@ -417,6 +425,27 @@ export function surfaceTiltWords(tilt: { xMm: Mm; yMm: Mm }): string | null {
   return parts.length === 0 ? null : parts.join(' and ');
 }
 
+/** The post payload for a registration that measured a TILT: the fitted plane and its reference Z0. */
+export interface SurfacePostFit {
+  plane: SurfacePlane;
+  /** The reference reading the origin was written from — the LOWEST touch. */
+  z0: number;
+}
+
+/**
+ * #608 — what a registration hands the Cut step to re-post against, or null. A top that fits a
+ * plane with any tilt returns `{plane, z0}` (the coefficients at r6, the reference Z0); a FLAT top
+ * — both slopes zero within rounding — returns null, because posting against it changes nothing and
+ * the package must stay byte-identical, not re-freeze.
+ */
+export function surfaceFitForPost(
+  assessment: Pick<SurfaceSpreadAssessment, 'fit' | 'z0' | 'ok'>,
+): SurfacePostFit | null {
+  if (!assessment.ok || assessment.fit === null) return null;
+  if (isFlatPlane(assessment.fit)) return null;
+  return { plane: assessment.fit, z0: assessment.z0.z };
+}
+
 /**
  * Measure the blank from the planned touches.
  *
@@ -511,7 +540,7 @@ export function assessSurfaceReadings(
     min,
     max,
     spread,
-    fit: fit === null ? null : { ...fit, offset: r3(fit.offset), slopeX: r3(fit.slopeX), slopeY: r3(fit.slopeY), residual: r3(fit.residual) },
+    fit: fit === null ? null : { ...fit, offset: r6(fit.offset), slopeX: r6(fit.slopeX), slopeY: r6(fit.slopeY), residual: r3(fit.residual) },
     tilt,
     drops: dropsOf(touches),
     z0: z0Of(touches),

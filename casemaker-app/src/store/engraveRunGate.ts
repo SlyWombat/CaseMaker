@@ -234,6 +234,40 @@ export function releaseBlocker(v: EngraveRunView): string | null {
 }
 
 /**
+ * #608 — why the release cannot start while the frozen package does not follow the registration's
+ * measured tilt, or null when it does.
+ *
+ * A registration that fits a TILT stores `{plane, z0}` on its record (the fit's slopes at r6). The
+ * frozen package was posted either flat — before the tilt was known — or against some fit. Until
+ * the package's `surface` matches the registration's, the flat program would cut the colour plane
+ * at a depth that drifts across the tilt, so the release refuses and points the operator at the
+ * re-post, never silently uploading the flat file.
+ */
+export function surfaceRepostBlocker(
+  pkg: { surface?: { plane: { offset: number; slopeX: number; slopeY: number }; z0: number } | null } | null,
+  registration: { surface?: { plane: { offset: number; slopeX: number; slopeY: number }; z0: number } | null } | null,
+): string | null {
+  if (pkg === null || registration === null || registration.surface == null) return null;
+  if (sameSurface(pkg.surface ?? null, registration.surface)) return null;
+  return 're-post against the tilt first — the frozen program is flat but the blank is tilted';
+}
+
+/** Two post fits are the same surface: the r6 coefficients and the reference Z0 all agree. */
+function sameSurface(
+  a: { plane: { offset: number; slopeX: number; slopeY: number }; z0: number } | null,
+  b: { plane: { offset: number; slopeX: number; slopeY: number }; z0: number },
+): boolean {
+  if (a === null) return false;
+  const r6 = (n: number): number => Math.round(n * 1e6) / 1e6;
+  return (
+    r6(a.plane.offset) === r6(b.plane.offset) &&
+    r6(a.plane.slopeX) === r6(b.plane.slopeX) &&
+    r6(a.plane.slopeY) === r6(b.plane.slopeY) &&
+    r6(a.z0) === r6(b.z0)
+  );
+}
+
+/**
  * Why a FACED job cannot start before its first registration is in app state (#494), or null.
  *
  * #473's release flow plays the face file first, then the operator changes to the engraving cutter.

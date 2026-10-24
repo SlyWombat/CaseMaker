@@ -108,10 +108,19 @@ export type FreezeResult = { ok: true; package: FrozenPackage } | { ok: false; r
 /**
  * Freeze `job` (as it is now) around the programs just generated.
  *
+ * `surface` (#608) is the fitted plane the programs were POSTED against — carried so the Cut step
+ * can later refuse to upload a flat package once a registration has measured a tilt it does not
+ * follow. `null`/omitted is a flat post, and the field is written as null then.
+ *
  * Refuses an empty program list: a package with no files is not a run, and storing one would let
  * the Cut screen offer a job with nothing to cut.
  */
-export function freezePackage(job: EngraveJob, programs: readonly PackageProgramInput[], at: string): FreezeResult {
+export function freezePackage(
+  job: EngraveJob,
+  programs: readonly PackageProgramInput[],
+  at: string,
+  surface: { plane: { offset: number; slopeX: number; slopeY: number }; z0: number } | null = null,
+): FreezeResult {
   if (programs.length === 0) return { ok: false, reason: 'there is no generated program to freeze' };
   const frozen: FrozenProgram[] = programs.map((p) => ({
     setupIndex: p.setupIndex,
@@ -133,6 +142,7 @@ export function freezePackage(job: EngraveJob, programs: readonly PackageProgram
       programs: frozen,
       setups: structuredClone(jobSetups(job)),
       stockEntryId: job.stockEntry?.shelfId ?? null,
+      surface: surface === null ? null : { plane: { ...surface.plane }, z0: surface.z0 },
     },
   };
 }

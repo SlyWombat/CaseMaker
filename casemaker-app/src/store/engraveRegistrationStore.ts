@@ -37,6 +37,13 @@ export interface FirstRegistration {
   /** What the touches measured. */
   outcome: RegistrationOutcome;
   /**
+   * #608 — the fitted surface plane the origin was written from, and the reference Z0, when the
+   * registration measured a TILT. Null (or absent) when the fit is flat — a flat top posts the same
+   * flat program as before. This is what the Cut step re-posts against and what the release gate
+   * compares the frozen package's `surface` to.
+   */
+  surface?: { plane: { offset: number; slopeX: number; slopeY: number }; z0: number } | null;
+  /**
    * When the record was made, ISO 8601 (#457). The measured surface also lives in machine Z on
    * `outcome.surfaceZ`, but a machine coordinate with no date cannot say whether it still describes
    * the blank on the table; the laser's panel prints this so the operator sees how old the reading is.
@@ -63,6 +70,7 @@ interface EngraveRegistrationState {
     target: { host: string; port: number },
     plan: RegistrationPlan,
     outcome: RegistrationOutcome,
+    surface?: { plane: { offset: number; slopeX: number; slopeY: number }; z0: number } | null,
   ) => void;
   /** #475 — remember what the cut-extent touches measured, independent of whether an origin was written. */
   measureSurface: (
@@ -77,7 +85,7 @@ export const useEngraveRegistrationStore = create<EngraveRegistrationState>((set
   records: {},
   surfaces: {},
 
-  record: (jobId, target, plan, outcome) =>
+  record: (jobId, target, plan, outcome, surface = null) =>
     set((s) => ({
       records: {
         ...s.records,
@@ -86,6 +94,7 @@ export const useEngraveRegistrationStore = create<EngraveRegistrationState>((set
           target: { host: target.host, port: target.port },
           plan,
           outcome,
+          surface: surface === null ? null : { plane: { ...surface.plane }, z0: surface.z0 },
           measuredAt: new Date().toISOString(),
         },
       },

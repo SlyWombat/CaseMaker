@@ -15,6 +15,7 @@ import {
   assessSurfaceReadings,
   assessSurfaceSpread,
   DEFAULT_SURFACE_TOUCH_COUNT,
+  surfaceFitForPost,
   surfaceSpreadPlan,
   surfaceTiltWords,
   Z0_REFERENCE,
@@ -179,6 +180,21 @@ describe('the surface spread on a bowed blank (#475)', () => {
     // Every reading identical: the plane is flat, the residual 0, and the landing range is the whole band.
     expect(a.fit!.residual).toBe(0);
     expect(a.landing).toEqual({ lower: 1.0, upper: 1.2 });
+  });
+
+  it('#608 — a tilted fit yields the post payload with r6 slopes; a flat fit yields null', () => {
+    const tilted = assessSurfaceReadings(run5Plan(), RUN5);
+    const post = surfaceFitForPost(tilted);
+    expect(post).not.toBeNull();
+    expect(post!.z0).toBe(-55.505);
+    // The coefficients travel on the record forever and are re-posted from, so they are r6 — the
+    // micrometer-resolution slopes, not the r3 read-out the verdict prints (-0.012 and -0.005).
+    expect(post!.plane.slopeX).toBe(-0.012203);
+    expect(post!.plane.slopeY).toBe(-0.005139);
+    // A FLAT top fits a plane with no tilt: nothing to post, and the package must stay byte-identical.
+    const flat = assessSurfaceSpread(badgeJob(), BOWED.map((r) => ({ ...r, z: -55.2 })));
+    expect(flat.ok).toBe(true);
+    expect(surfaceFitForPost(flat)).toBeNull();
   });
 
   it('one reading per planned touch, in order; a mismatch is a caller error', () => {

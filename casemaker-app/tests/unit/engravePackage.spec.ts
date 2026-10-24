@@ -22,6 +22,7 @@ import {
   packageStaleness,
   type PackageProgramInput,
 } from '@/engine/cnc/engrave/package';
+import { surfaceRepostBlocker } from '@/store/engraveRunGate';
 import { resetEngravePackageStore, useEngravePackageStore } from '@/store/engravePackageStore';
 import { useEngraveJobStore } from '@/store/engraveJobStore';
 import { parseEngraveJob } from '@/store/engraveJobSchema';
@@ -78,6 +79,33 @@ describe('the package engine (#419 §4)', () => {
     const made = freezePackage(defaultEngraveJob(), [], AT);
     expect(made.ok).toBe(false);
     if (!made.ok) expect(made.reason).toContain('no generated program');
+  });
+
+  it('#608 — the package records the fitted plane it was posted against, or null when flat', () => {
+    const job: EngraveJob = { ...defaultEngraveJob(), stockEntry: shelfStock(null) };
+    const tilt = { plane: { offset: -55, slopeX: -0.012202, slopeY: -0.005139 }, z0: -55.505 };
+    const posted = freezePackage(job, [program('G21\nM2\n')], AT, tilt);
+    if (!posted.ok) throw new Error(posted.reason);
+    expect(posted.package.surface).toEqual({ plane: { offset: -55, slopeX: -0.012202, slopeY: -0.005139 }, z0: -55.505 });
+    // A flat post (omitted) is recorded as null, so the gate reads "flat" and does not refuse.
+    const flat = freezePackage(job, [program('G21\nM2\n')], AT);
+    if (!flat.ok) throw new Error(flat.reason);
+    expect(flat.package.surface).toBeNull();
+  });
+
+  it('#608 — the release refuses a flat package once a registration has measured a tilt', () => {
+    const tilt = { plane: { offset: -55, slopeX: -0.012202, slopeY: -0.005139 }, z0: -55.505 };
+    // No registration, or no tilt on it: nothing to refuse.
+    expect(surfaceRepostBlocker({ surface: null }, null)).toBeNull();
+    expect(surfaceRepostBlocker({ surface: null }, { surface: null })).toBeNull();
+    // A tilted registration against a flat package: refuse before the flat program is uploaded.
+    const blocker = surfaceRepostBlocker({ surface: null }, { surface: tilt });
+    expect(blocker).toBe('re-post against the tilt first — the frozen program is flat but the blank is tilted');
+    // Once the package has been re-posted against the SAME fit, the gate lifts.
+    expect(surfaceRepostBlocker({ surface: tilt }, { surface: tilt })).toBeNull();
+    // A different fit is still a mismatch.
+    const other = { plane: { offset: -55, slopeX: 0.001, slopeY: 0 }, z0: -55.505 };
+    expect(surfaceRepostBlocker({ surface: tilt }, { surface: other })).toBe('re-post against the tilt first — the frozen program is flat but the blank is tilted');
   });
 
   it('is stale exactly when the job’s data changed, by value, so a reload cannot hide a change', () => {

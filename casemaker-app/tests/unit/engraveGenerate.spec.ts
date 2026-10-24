@@ -2479,5 +2479,8 @@ describe('the fitted surface plane is posted against (#608)', () => {
     }
     // The posted Z actually VARIES with XY: the tilt spreads one flat depth across many Zs.
     expect(zs.size).toBeGreaterThan(new Set(flatMoves.map((m) => Number(m.z.toFixed(3)))).size);
+    // #608 — the frame file is an air trace at FRAME_Z and never follows the surface: it is
+    // byte-identical whether or not the program was posted against the tilt.
+    expect(fitted.frameNc).toBe(flat.frameNc);
   });
 });

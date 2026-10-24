@@ -47,7 +47,7 @@ import {
 } from '@/engine/cnc/registration/execute';
 import { attachConsole, type ConsoleHandle } from '@/platform/machineConsole';
 import { effectiveMargins } from '@/engine/cnc/engrave/depthBounds';
-import { surfaceSpreadPlan, type SurfaceSpreadAssessment } from '@/engine/cnc/engrave/surfaceSpread';
+import { surfaceSpreadPlan, surfaceFitForPost, type SurfaceSpreadAssessment } from '@/engine/cnc/engrave/surfaceSpread';
 import { useEngraveJobStore } from '@/store/engraveJobStore';
 import { useEngraveRegistrationStore } from '@/store/engraveRegistrationStore';
 import { createFirstBed, machineAt, useLocationStore } from '@/store/locationStore';
@@ -356,7 +356,15 @@ export function EngraveRegistrationStep({ job, target }: EngraveRegistrationStep
         await handle.close();
         return;
       }
-      record(job.id, target, plan, result.outcome);
+      record(
+        job.id,
+        target,
+        plan,
+        result.outcome,
+        // #608 — carry the fitted tilt (plane + reference Z0) on the record when the measurement
+        // fits one; a flat fit records null, so the Cut step re-posts only when there is a tilt.
+        result.spread === undefined ? null : surfaceFitForPost(result.spread),
+      );
       setPhase('recorded');
       handleRef.current = null;
       await handle.close();

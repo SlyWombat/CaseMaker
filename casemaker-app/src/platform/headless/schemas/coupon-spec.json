@@ -2072,6 +2072,52 @@
                 }
               ],
               "description": "Shelf entry id of the stock, or null when not a shelf entry."
+            },
+            "surface": {
+              "anyOf": [
+                {
+                  "additionalProperties": false,
+                  "properties": {
+                    "plane": {
+                      "additionalProperties": false,
+                      "description": "The fitted surface plane the programs were posted against (#608).",
+                      "properties": {
+                        "offset": {
+                          "description": "The plane z at the origin, mm (machine Z).",
+                          "type": "number"
+                        },
+                        "slopeX": {
+                          "description": "dZ per mm of X.",
+                          "type": "number"
+                        },
+                        "slopeY": {
+                          "description": "dZ per mm of Y.",
+                          "type": "number"
+                        }
+                      },
+                      "required": [
+                        "offset",
+                        "slopeX",
+                        "slopeY"
+                      ],
+                      "type": "object"
+                    },
+                    "z0": {
+                      "description": "The reference reading the origin was written from (the lowest touch).",
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "plane",
+                    "z0"
+                  ],
+                  "type": "object"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The surface the programs were posted against, or null/absent when posted flat (#608)."
             }
           },
           "required": [

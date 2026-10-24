@@ -1463,6 +1463,22 @@ export const frozenPackageSchema = z
       .string()
       .nullable()
       .describe('Shelf entry id of the stock, or null when not a shelf entry.'),
+    surface: z
+      .object({
+        plane: z
+          .object({
+            offset: z.number().describe('The plane z at the origin, mm (machine Z).'),
+            slopeX: z.number().describe('dZ per mm of X.'),
+            slopeY: z.number().describe('dZ per mm of Y.'),
+          })
+          .strict()
+          .describe('The fitted surface plane the programs were posted against (#608).'),
+        z0: z.number().describe('The reference reading the origin was written from (the lowest touch).'),
+      })
+      .strict()
+      .nullable()
+      .optional()
+      .describe('The surface the programs were posted against, or null/absent when posted flat (#608).'),
   })
   .strict()
   .describe('The programs and setups frozen by Cut, so a rerun cuts exactly what was approved.');
