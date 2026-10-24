@@ -452,6 +452,14 @@ async function seekSurface(
 }
 
 /**
+ * #599/#607 — how far below the stored reference a mount tap searches, and how far from it a real
+ * reading may land. Two millimetres either way, the same window the vise's tap has had since #599;
+ * named here because it is one rule for every mount, not a number typed twice.
+ */
+const MOUNT_TAP_FLOOR_MM = 2;
+const MOUNT_TAP_SLACK_MM = 2;
+
+/**
  * #599 — one guarded mount tap at the machine XY `tap`, down to the machine floor `floorZ`. One line
  * per Idle, and the G38.3 is never queued behind the rapid (that queue gave PROBE_FAIL on
  * 2026-10-23). Returns the reading — a miss is a `touched:false` reading, null is no reading — and
@@ -498,6 +506,8 @@ export async function runMountTap(
   settings: RegistrationSettings,
   deps: ExecDeps,
   workEnvelopeFloorZ: number,
+  /** #607 — which mount's reference this is, for the miss sentence. The vise is the default. */
+  mount: 'vise' | 'bracket' = 'vise',
 ): Promise<MountTapResult> {
   const io = session(deps, seekFromMachineZ, settings.idlePollLimit);
   const bad = settingsProblem(settings);
@@ -515,7 +525,10 @@ export async function runMountTap(
     if (ref === null || !ref.touched) throw new Stop('M491 answered no tool-length reading');
     const prb = await mountTapTouch(io, tap, seekFromMachineZ, settings, workEnvelopeFloorZ);
     if (prb === null || !prb.touched) {
-      throw new Stop(`no jaw top at (${tap.x}, ${tap.y}) down to machine Z ${f(workEnvelopeFloorZ)} — is the vise where the machine record says?`);
+      // The vise's sentence is the bench-tested one and stays byte for byte; the others name their
+      // own reference the way the operator sees it.
+      const what = mount === 'vise' ? 'jaw top' : 'bracket top';
+      throw new Stop(`no ${what} at (${tap.x}, ${tap.y}) down to machine Z ${f(workEnvelopeFloorZ)} — is the ${mount} where the machine record says?`);
     }
     // #519 item 1 — the standalone tap's reading, as it lands.
     io.saw({ source: 'mount-tap', label: null, x: tap.x, y: tap.y, z: prb.z, touched: prb.touched, kind: null });
@@ -567,12 +580,21 @@ export async function runRegistration(
     // surface seek, at the machine XY the plan carries. One line per Idle, and the G38.3 is never
     // queued behind the rapid — that exact queue gave PROBE_FAIL and MPos 0,0 on 2026-10-23.
     let mountTap: { z: number; at: { x: number; y: number } } | null = null;
-    if (plan.mountTap !== null && plan.mountDatum !== null) {
+    // #607 — the tap is the MOUNT's, not the vise's: which reference it touches is the plan's
+    // (`PlanMountTap.reference`), and the machine Z it expects is `expectZ` — the jaw top, or the
+    // bracket's top = seat + height. The fallback keeps a pre-#607 plan and the typed-seat path
+    // exactly as they were: with no expected reference there is nothing to tap.
+    const tapExpectZ = plan.mountTap === null ? null : (plan.mountTap.expectZ ?? plan.mountDatum?.jawTopZ ?? null);
+    if (plan.mountTap !== null && tapExpectZ !== null) {
       const tap = plan.mountTap;
-      const jawTopZ = plan.mountDatum.jawTopZ;
-      const prb = await mountTapTouch(io, { x: tap.x, y: tap.y }, plan.seek.fromMachineZ, s, jawTopZ - 2);
-      if (prb === null || !prb.touched || Math.abs(prb.z - jawTopZ) > 2) {
-        throw new Stop(`no jaw top at (${tap.x}, ${tap.y}) down to machine Z ${f(jawTopZ - 2)} — is the vise where the machine record says?`);
+      const floorZ = tapExpectZ - MOUNT_TAP_FLOOR_MM;
+      const prb = await mountTapTouch(io, { x: tap.x, y: tap.y }, plan.seek.fromMachineZ, s, floorZ);
+      if (prb === null || !prb.touched || Math.abs(prb.z - tapExpectZ) > MOUNT_TAP_SLACK_MM) {
+        throw new Stop(
+          tap.reference === undefined || tap.reference === 'vise-jaw-top'
+            ? `no jaw top at (${tap.x}, ${tap.y}) down to machine Z ${f(floorZ)} — is the vise where the machine record says?`
+            : `no touch at ${tap.label} (${tap.x}, ${tap.y}) down to machine Z ${f(floorZ)} within ${MOUNT_TAP_SLACK_MM} mm of the stored ${f(tapExpectZ)} — is the ${plan.mount} where the machine record says?`,
+        );
       }
       // #519 item 1 — the tap is a reading too: the viewport marks the fixed-jaw top.
       io.saw({ source: 'mount-tap', label: tap.label, x: tap.x, y: tap.y, z: prb.z, touched: prb.touched, kind: null });

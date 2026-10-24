@@ -206,6 +206,42 @@ export function withSurfaceTopDatum(
 }
 
 /**
+ * #607 — write the measured SEAT beside the bracket onto the active bed profile's `bracketSeatZ`
+ * datum.
+ *
+ * The caller passes the SEAT, not the reading: a tap touches the bracket's top, and the seat is
+ * that reading less the bracket's height (`bracketSeatFromTap`). Taking the subtraction at the
+ * caller keeps the datum and the shop default it is mirrored from one number.
+ */
+export function withBracketSeatDatum(
+  machine: MachineRecord,
+  seat: { z: number; at: { x: number; y: number } },
+  probeId: string | null,
+  now: string,
+): MachineRecord {
+  const profileId = machine.activeBedProfileId;
+  if (profileId === undefined) return machine;
+  const by = probeId ?? 'wired-probe';
+  const what = probeId === null ? 'bracket seat tapped; no probe accessory registered' : 'bracket seat tapped';
+  return {
+    ...machine,
+    bedProfiles: machine.bedProfiles?.map((p) =>
+      p.id === profileId
+        ? {
+            ...p,
+            datums: {
+              ...p.datums,
+              bracketSeatZ: { value: seat.z, measuredAt: now, by, at: [seat.at.x, seat.at.y] },
+            },
+            history: [...p.history, { at: now, what }],
+          }
+        : p,
+    ),
+    updatedAt: now,
+  };
+}
+
+/**
  * The new keys for a machine that has not been migrated, or null when there is nothing to migrate
  * (no wasteboard, no vise, no measured bracket seat) or the bed is already described. Nothing is
  * deleted: every legacy key stays exactly where it was.

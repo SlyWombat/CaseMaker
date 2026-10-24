@@ -29,7 +29,14 @@ import { recommendedSurfaceToleranceMm } from '@/engine/cnc/materials';
 import { primitiveLabel } from '@/engine/cnc/engrave/partPlan';
 import { summarizePlan } from '@/engine/cnc/registration/summary';
 import type { MountDatum, PlanObstacle, ProbeSpec, RegistrationPlan } from '@/engine/cnc/registration/plan';
-import { mountDatumFor, mountTapFor, probeFor, probeNameFor, surfaceTopDatumFor } from '@/engine/cnc/registration/mountContext';
+import {
+  bracketTapFor,
+  mountDatumFor,
+  mountTapFor,
+  probeFor,
+  probeNameFor,
+  surfaceTopDatumFor,
+} from '@/engine/cnc/registration/mountContext';
 import { useMountTap } from '@/hooks/useMountTap';
 import {
   addSetupOffer,
@@ -131,7 +138,13 @@ function planRegistrationAttempt(args: {
     const datum = bracketDatum(anchor.anchor, sizes);
     const dims = machineSize(setup.rotation, setup.stockBefore.bounds);
     const under = mount.board === true ? (job.sacrificial?.under?.thickness ?? 0) : 0;
+    // #607 — the bracket's tap: its front arm's top, and the seat the reading measures back. The
+    // expected top comes from the measured seat, so it is null until the seat has been tapped once.
+    const tap = bracketTapFor({ calibration, machineId: job.machineId, seekFromMachineZ, defaults });
     // The engine's expected-surface read also carries the refusal when the seat was never measured.
+    // #607 — the tap cannot stand in for that first seat: `bracketTapFor` has no point until the
+    // seat AND the arm's own top are measured, so an unmeasured seat keeps the sentence that says
+    // how to measure it (one touch on the surface beside the bracket).
     const expected = bracketExpectedSurface(defaults, dims.z, under);
     if (!expected.ok) return { kind: 'refused', reason: expected.reason };
     const stock = { x: dims.x, y: dims.y, z: dims.z };
@@ -148,6 +161,9 @@ function planRegistrationAttempt(args: {
       bracketOrigin: datum,
       mountObstacles: obstacles,
       bracketConfirm: !datum.offsetMeasured,
+      // #607 — confirm the bracket on its own arm before the stock is found (a no-op per the
+      // executor until the tap has an expected top).
+      mountTap: tap,
     };
   } else if (mount.kind === 'vise' && args.mountDatum !== null && !args.useTypedSeat) {
     // #598 — the datum path: no seat input; the surface is the measured jaw top + the stock's proud
@@ -247,7 +263,8 @@ export function EngraveSetupsSection({ initiallyOpen = false }: { initiallyOpen?
     settings: regSettings,
     floor: jobMachine(job, calibration).envelope.z.min,
     probeId: probe?.id ?? null,
-    successNote: 'the jaw top is recorded — plan the registration again',
+    // #607 — the tap may be the bracket's or the rotary's now, so the note names neither.
+    successNote: 'the mount reference is recorded — plan the registration again',
   });
   const rotaryEnvelope = useMemo(() => jobMachine(job, calibration).rotary?.envelope, [job, calibration]);
   const suggested = useMemo(() => suggestedPlan(job, settings, rotaryEnvelope), [job, settings, rotaryEnvelope]);

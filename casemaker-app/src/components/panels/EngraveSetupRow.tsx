@@ -18,7 +18,7 @@ import { cuttingDiameter } from '@/engine/cnc/tool';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import { summarizePlan } from '@/engine/cnc/registration/summary';
 import { expandEngraveRow } from '@/store/engraveRowStore';
-import type { RegistrationPlan } from '@/engine/cnc/registration/plan';
+import type { PlanMountTap, RegistrationPlan } from '@/engine/cnc/registration/plan';
 import { FACES, type Face, type Mount, type MountSpec, type Setup } from '@/engine/cnc/setups';
 import type { SetupAuthoringFinding, SetupItemsReading } from '@/engine/cnc/setups';
 import { VISE_SEAT_MACHINE_Z } from '@/engine/cnc/fixture';
@@ -41,7 +41,8 @@ const WARN_COLOR = '#e0c07a';
 /** What pressing "Plan registration" answered — an engine plan, a refusal, or a missing input. */
 export type RegistrationAttempt =
   | { kind: 'need-seat'; message: string }
-  | { kind: 'need-datum'; message: string; mountTap: { x: number; y: number; fromMachineZ: number } | null }
+  // #607 — the tap carries which mount reference it is, so the button names the right one.
+  | { kind: 'need-datum'; message: string; mountTap: PlanMountTap | null }
   | { kind: 'refused'; reason: string }
   | { kind: 'plan'; method: Mount; plan: RegistrationPlan; summary: string; expected: string };
 
@@ -423,7 +424,8 @@ export function EngraveSetupRow(props: EngraveSetupRowProps): JSX.Element {
                   <p style={{ ...MUTED, color: WARN_COLOR, margin: '4px 0' }}>{attempt.message}</p>
                   {attempt.mountTap !== null && (
                     <button type="button" data-testid={`engrave-setup-tap-jaw-${n}`} onClick={() => props.onTapJaw(attempt.mountTap!)}>
-                      Tap the fixed jaw
+                      {/* #607 — the tap is the mount's, so the button says which reference it touches. */}
+                      {attempt.mountTap.reference === 'bracket-seat' ? 'Tap the bracket’s front arm' : 'Tap the fixed jaw'}
                     </button>
                   )}
                 </div>

@@ -50,12 +50,19 @@ import { effectiveMargins } from '@/engine/cnc/engrave/depthBounds';
 import { surfaceSpreadPlan, surfaceFitForPost, type SurfaceSpreadAssessment } from '@/engine/cnc/engrave/surfaceSpread';
 import { jobTool } from '@/engine/cnc/engrave/jobSetup';
 import { cuttingDiameter } from '@/engine/cnc/tool';
-import { shopDefault } from '@/store/shopDefaultsStore';
+import { shopDefault, useShopDefaultsStore } from '@/store/shopDefaultsStore';
 import { useEngraveJobStore } from '@/store/engraveJobStore';
 import { useEngraveRegistrationStore } from '@/store/engraveRegistrationStore';
 import { createFirstBed, machineAt, useLocationStore } from '@/store/locationStore';
 import { recordProbeReading } from '@/engine/cnc/registration/mountContext';
-import { viseFrameFromRegistration, withSurfaceTopDatum, withViseJawTopDatum, withVisePlacementFrame } from '@/platform/bedProfiles';
+import {
+  viseFrameFromRegistration,
+  withBracketSeatDatum,
+  withSurfaceTopDatum,
+  withViseJawTopDatum,
+  withVisePlacementFrame,
+} from '@/platform/bedProfiles';
+import { bracketSeatFromTap } from '@/engine/cnc/mounts/bracket';
 import { useMachineTranscriptStore } from '@/store/machineTranscriptStore';
 import { useMachineStore } from '@/store/machineStore';
 import { useRegistrationTouchesStore } from '@/store/registrationTouchesStore';
@@ -349,7 +356,7 @@ export function EngraveRegistrationStep({ job, target }: EngraveRegistrationStep
           await useLocationStore.getState().saveMachine(withSurface);
         }
       }
-      // #599 — the mount tap measured the jaw top: write it into the active bed profile's datum.
+      // #599/#607 — the mount tap measured a reference: write it into the datum that reference IS.
       if (r.mountTap !== null) {
         const machine = machineAt(target);
         if (machine !== null) {
@@ -357,9 +364,37 @@ export function EngraveRegistrationStep({ job, target }: EngraveRegistrationStep
           // #613 — a no-profile machine still needs the bed before the datum can land; the frame is
           // null here (a tap alone does not place the jaw), which a later registration fills.
           const withBed = await createFirstBed(machine, null, now);
-          await useLocationStore
-            .getState()
-            .saveMachine(withViseJawTopDatum(withBed, r.mountTap, plan.probe?.id ?? null, now));
+          const probeId = plan.probe?.id ?? null;
+          const reference = plan.mountTap?.reference ?? 'vise-jaw-top';
+          if (reference === 'bracket-seat') {
+            // #607 — the reading is the bracket's TOP; the datum is the SEAT it stands on, one
+            // bracket height below (`bracketSeatFromTap`). Machine save first, then the shop default
+            // the compiler reads — or the next plan refuses a seat this run has just measured.
+            // The offset is the arm's MEASURED top (`bracket.armTopMm`), carried on the tap.
+            const seat = bracketSeatFromTap(r.mountTap.z, plan.mountTap?.datumOffsetMm ?? 0);
+            await useLocationStore
+              .getState()
+              .saveMachine(withBracketSeatDatum(withBed, { z: seat, at: r.mountTap.at }, probeId, now));
+            const saved = await useShopDefaultsStore.getState().set('bracket.seatMachineZ', {
+              value: seat,
+              source: 'measured',
+              setAt: now,
+              unit: 'mm',
+              note: 'tapped on the bracket’s top face',
+            });
+            if (!saved) {
+              // A note on the RESULT, not a console line: the step renders `outcome.notes` beside
+              // its verdict, and a tap whose seat did not stick must be visible there.
+              r.outcome.notes.push(
+                `the bracket seat was tapped, but the shop default was not saved: ${useShopDefaultsStore.getState().reason ?? 'the write was refused'}`,
+              );
+            }
+          } else {
+            // The vise's datum — the path every pre-#607 run took, unchanged.
+            await useLocationStore
+              .getState()
+              .saveMachine(withViseJawTopDatum(withBed, r.mountTap, probeId, now));
+          }
         }
       }
       // #601 — the probe's last M491 length and M119 rest ride on the checked-out probe accessory.
@@ -555,6 +590,16 @@ export function EngraveRegistrationStep({ job, target }: EngraveRegistrationStep
                 <ul style={{ ...MUTED, paddingLeft: 18 }} data-testid="engrave-registration-problems">
                   {outcome.problems.map((problem, i) => (
                     <li key={i}>{problem}</li>
+                  ))}
+                </ul>
+              )}
+              {/* #607 — the outcome's NOTES, where the operator acts on it: a partial write (the
+                  bracket seat tapped but its shop default refused) is neither a refusal nor a
+                  console line, and the row has to show it. `proudNote` (#619) lands here too. */}
+              {outcome.notes.length > 0 && (
+                <ul style={{ ...MUTED, paddingLeft: 18 }} data-testid="engrave-registration-notes">
+                  {outcome.notes.map((note, i) => (
+                    <li key={i}>{note}</li>
                   ))}
                 </ul>
               )}
