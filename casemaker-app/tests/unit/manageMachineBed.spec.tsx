@@ -64,6 +64,29 @@ describe('#511 the Bed block', () => {
     expect(screen.getByTestId('manage-bed').textContent).toContain('not described');
   });
 
+  it('says what measures each unmeasured datum, in operator language (#616)', () => {
+    const m = machine();
+    // A fresh copy, so the null datums do not leak into the shared fixture for later tests.
+    m.bedProfiles = m.bedProfiles!.map((p) => ({
+      ...p,
+      datums: { surfaceTopZ: null, viseJawTopZ: null, bracketSeatZ: null, rotaryAxis: null },
+    }));
+    render(<MachineBed machine={m} />);
+
+    expect(screen.getByTestId('manage-bed-measure-surfaceTopZ').textContent).toContain(
+      'not measured — run a surface registration',
+    );
+    expect(screen.getByTestId('manage-bed-measure-viseJawTopZ').textContent).toContain(
+      'not measured — press Tap the fixed jaw (probe in the spindle)',
+    );
+    expect(screen.getByTestId('manage-bed-measure-bracketSeatZ').textContent).toContain(
+      'not measured — plan a bracket registration and press Tap the bracket’s front arm',
+    );
+    expect(screen.getByTestId('manage-bed-measure-rotaryAxis').textContent).toContain(
+      'not measured — the rotary module is not characterised yet (#545)',
+    );
+  });
+
   it('Switch writes the location (a new active id) and never sends a machine command', async () => {
     const consoleSends: string[] = [];
     setMachineConsoleLoader(async () => ({

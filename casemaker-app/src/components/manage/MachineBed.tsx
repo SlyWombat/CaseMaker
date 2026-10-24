@@ -12,9 +12,10 @@
  *     datums cleared and listed ("to measure"), and makes it active. The old profile stays in the
  *     list, with its scars and datums.
  *   - **Measure…** lists the four datums (surface top, jaw top, bracket seat, rotary axis) with
- *     their state. The one-touch measurement runs through the registration executor in the wizard
- *     (S3, #430's registration step); until then each row says what it needs and does not pretend a
- *     probe has run.
+ *     their state. The jaw-top one-touch is the Tap the fixed jaw button (#603); a surface
+ *     registration and the bracket registration tap (#607) fill the rest, and the rotary axis is
+ *     not characterised yet (#545). Until a datum is measured each row says what it needs and does
+ *     not pretend a probe has run.
  */
 
 import { useState } from 'react';
@@ -36,6 +37,7 @@ import {
   changedBedProfile,
   switchActiveProfile,
 } from '@/platform/bedProfiles';
+import type { BedDatumKey } from '@/platform/bedProfiles';
 import { surfaceUnmeasuredCount } from '@/engine/cnc/bedScene';
 import { newId } from '@/utils/id';
 
@@ -55,6 +57,17 @@ function surfaceWords(surface: BedProfile['surface']): string {
       return 'vacuum bed';
   }
 }
+
+/**
+ * #616 — what an unmeasured datum row says, in operator language: the measurement that fills each
+ * datum, never the S3/registration-executor placeholder.
+ */
+const UNMEASURED_DATUM_WORDS: Record<BedDatumKey, string> = {
+  surfaceTopZ: 'not measured — run a surface registration',
+  viseJawTopZ: 'not measured — press Tap the fixed jaw (probe in the spindle)',
+  bracketSeatZ: 'not measured — plan a bracket registration and press Tap the bracket’s front arm',
+  rotaryAxis: 'not measured — the rotary module is not characterised yet (#545)',
+};
 
 /** How many numbers in this profile no one has measured yet — the count the card links to #444. */
 function unmeasuredCount(profile: BedProfile, fixtures: FixtureRecord[]): number {
@@ -243,7 +256,7 @@ export function MachineBed({ machine }: { machine: MachineRecord }) {
                   {BED_DATUM_WORDS[key]}:{' '}
                   {datum !== null
                     ? `${mm(datum.value)}, ${datum.by}, measured ${formatDay(datum.measuredAt) ?? datum.measuredAt}`
-                    : 'not measured — one touch via the registration executor in the wizard (S3)'}
+                    : UNMEASURED_DATUM_WORDS[key]}
                   {key === 'viseJawTopZ' && (
                     <>
                       {' '}
