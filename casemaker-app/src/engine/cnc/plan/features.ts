@@ -5,7 +5,7 @@
  *   - VACUUM — on for every cut (the maintainer): `M331` before play, `M332` after.
  *   - AIR RUN — Q14: on by default only for a program this machine has not run (by hash); an
  *     identical repeat defaults off. Either way it can be switched.
- *   - AUTO-LEVEL — Q13: OFF until #176 proves `G32 R1` / `M370` on this machine. Until then the switch
+ *   - AUTO-LEVEL — Q13: OFF until #501 proves `G32 R1` / `M370` on this machine. Until then the switch
  *     is locked, and the strip still says what the rule WILL choose once it is proven: on for domed or
  *     unknown stock with a cut shallower than `plan.autoLevelShallowMm` (Studio's own rule), or on tape;
  *     off for faced stock.
@@ -40,11 +40,14 @@ export interface MachineCapabilities {
 
 /**
  * As of 2026-10-16. Auto-level: `G32 R1` / `M370` are Studio's sequence, never run from our console
- * (#176, Q13). Light: `M821`/`M822` are listed for every machine in Studio's `interface_config.json`
- * (Appendix A.7) and unobserved here — the 2026-10-15 attempt did not run (#422, Q18).
+ * (#176, Q13). #176 closed without running its G32 proof, so the lock now points at the issue that
+ * carries it (#501): the proof is `G32 R1` + `M375.1` on the laminate, then the prepared stroke file
+ * to see whether the firmware compensates only at move endpoints. Light: `M821`/`M822` are listed for
+ * every machine in Studio's `interface_config.json` (Appendix A.7) and unobserved here — the
+ * 2026-10-15 attempt did not run (#422, Q18).
  */
 export const Z1_CAPABILITIES: MachineCapabilities = {
-  autoLevel: { proven: false, gate: '#176', commands: 'G32 R1 … M370' },
+  autoLevel: { proven: false, gate: '#501', commands: 'G32 R1 … M370' },
   light: { proven: false, gate: '#422', commands: 'M821 / M822' },
 };
 

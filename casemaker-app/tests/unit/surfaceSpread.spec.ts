@@ -197,6 +197,47 @@ describe('the surface spread on a bowed blank (#475)', () => {
     expect(surfaceFitForPost(flat)).toBeNull();
   });
 
+describe('#501 — the shape verdict and the console G32 recommendation', () => {
+  const level = { toolRadiusMm: 0.15, clearanceMm: 3, points: 9 };
+
+  it('a tilt (plane holds, drop wider than the band) is named, with the G32 recipe sized to the cut + radius', () => {
+    const plan = { ...run5Plan(), level };
+    const a = assessSurfaceReadings(plan, RUN5);
+    expect(a.ok).toBe(true);
+    expect(a.verdict).toBe('tilt');
+    expect(a.slopeDeg).toBeGreaterThan(0);
+    expect(a.slopeDeg).toBeLessThan(1);
+    expect(a.recommendation).not.toBeNull();
+    // The grid: the cut extents grown by the cutter's radius on every side, 3 × 3, the probe's clearance.
+    expect(a.recommendation!.gcode).toBe('G32 R1 X9.878 Y9.284 A38.122 B76.716 I3 J3 H3');
+    expect(a.recommendation!.dump).toBe('M375.1');
+    expect(a.recommendation!.after).toBe('M370');
+    expect(a.recommendation!.sentence).toContain('follows the tilt');
+    expect(a.recommendation!.sentence).toContain('G32 is never uploaded in a file');
+  });
+
+  it('the same tilt without the level inputs keeps the verdict, and offers no recipe', () => {
+    const a = assessSurfaceReadings(run5Plan(), RUN5);
+    expect(a.verdict).toBe('tilt');
+    expect(a.recommendation).toBeNull();
+  });
+
+  it('a dome is the refusal — never a tilt — and offers no recipe', () => {
+    const a = assessSurfaceSpread(badgeJob(), NONPLANAR, { level });
+    expect(a.verdict).toBe('dome');
+    expect(a.ok).toBe(false);
+    expect(a.recommendation).toBeNull();
+  });
+
+  it('a flat top is flat: no slope, no recipe', () => {
+    const flat = BOWED.map((r) => ({ ...r, z: -55.2 }));
+    const a = assessSurfaceSpread(badgeJob(), flat, { level });
+    expect(a.verdict).toBe('flat');
+    expect(a.slopeDeg).toBe(0);
+    expect(a.recommendation).toBeNull();
+  });
+});
+
   it('one reading per planned touch, in order; a mismatch is a caller error', () => {
     expect(() => assessSurfaceSpread(badgeJob(), BOWED.slice(1))).toThrow(
       'the surface spread needs 5 readings, one per planned touch; got 4',

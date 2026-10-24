@@ -48,6 +48,9 @@ import {
 import { attachConsole, type ConsoleHandle } from '@/platform/machineConsole';
 import { effectiveMargins } from '@/engine/cnc/engrave/depthBounds';
 import { surfaceSpreadPlan, surfaceFitForPost, type SurfaceSpreadAssessment } from '@/engine/cnc/engrave/surfaceSpread';
+import { jobTool } from '@/engine/cnc/engrave/jobSetup';
+import { cuttingDiameter } from '@/engine/cnc/tool';
+import { shopDefault } from '@/store/shopDefaultsStore';
 import { useEngraveJobStore } from '@/store/engraveJobStore';
 import { useEngraveRegistrationStore } from '@/store/engraveRegistrationStore';
 import { createFirstBed, machineAt, useLocationStore } from '@/store/locationStore';
@@ -247,6 +250,20 @@ export function EngraveRegistrationStep({ job, target }: EngraveRegistrationStep
     const spreadPlan = surfaceSpreadPlan(job, {
       touchCount: plan.settings.surfaceTouchCount,
       margin: effectiveMargins(job, houseMargins).boundaryMargin,
+      // #501 — the console G32 recipe's shape, when the measurement comes back a TILT: the cutter's
+      // radius (the grid grows by it), the APPROVED plan's own probe clearance, and the shop's grid
+      // points. Absent when the cutter's diameter is unknown, and then no recipe is offered.
+      level: (() => {
+        const cutter = jobTool(job);
+        const diameter = cutter === null ? null : cuttingDiameter(cutter);
+        return diameter === null
+          ? null
+          : {
+              toolRadiusMm: diameter / 2,
+              clearanceMm: plan.settings.parkAboveSurfaceMm,
+              points: shopDefault('plan.autoLevelPoints').value,
+            };
+      })(),
     });
     try {
       const r = await runRegistration(
@@ -554,6 +571,27 @@ export function EngraveRegistrationStep({ job, target }: EngraveRegistrationStep
                     {spread.max.source}); spread {n(spread.spread)} mm against the{' '}
                     {n(spread.plan.band.width)} mm band.
                   </div>
+                  {/* #501 — WHAT the top is, in one word: a dome (curved over a flat colour line)
+                      keeps the refusal, a tilt is followed by the re-posted program and may be
+                      levelled at the console instead. */}
+                  <div
+                    data-testid="engrave-registration-shape"
+                    data-verdict={spread.verdict}
+                    style={{ fontSize: 11, color: spread.verdict === 'dome' ? BAD : '#d1d5db' }}
+                  >
+                    Surface{' '}
+                    {spread.verdict === 'dome'
+                      ? 'dome — a curved top, not a tilt'
+                      : spread.verdict === 'tilt'
+                        ? `tilt (${n(spread.slopeDeg)}°)`
+                        : 'flat'}
+                    .
+                  </div>
+                  {spread.recommendation !== null && (
+                    <p data-testid="engrave-registration-g32" style={MUTED}>
+                      {spread.recommendation.sentence}
+                    </p>
+                  )}
                   {spread.ok && spread.landing !== null ? (
                     <div data-testid="engrave-registration-landing" style={{ ...MUTED, color: OK }}>
                       Z0 is the lowest reading ({n(spread.z0.z)}), so the floors may land from{' '}

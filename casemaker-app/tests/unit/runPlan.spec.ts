@@ -283,7 +283,7 @@ describe('#421 the machine strip', () => {
     expect(planRun(input({ programs: two, finishedHashes: ['old'], overrides: { airRun: false } })).phases.some((p) => p.kind === 'air-run')).toBe(false);
   });
 
-  it('auto-level (Q13): locked off until #176, saying what it will choose once proven', () => {
+  it('auto-level (Q13): locked off until #501 proves it, saying what it will choose once proven', () => {
     expect(Z1_CAPABILITIES.autoLevel.proven).toBe(false);
     const a = get({ overrides: { autoLevel: true } }, 'auto-level');
     expect(a).toMatchObject({ shown: true, available: false, on: false, overridden: false });

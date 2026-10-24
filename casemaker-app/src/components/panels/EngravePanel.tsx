@@ -1226,6 +1226,20 @@ export function EngravePanel(): JSX.Element {
             measuredSpread?.assessment.plan.touches.length ??
             registrationSettings(shopDefaults).settings.surfaceTouchCount,
           surfaceReadings: measuredSpread?.assessment.touches,
+          // #501 — the console G32 recipe's shape, when this run measured a tilt: the cutter's
+          // radius (the grid grows by it), the APPROVED plan's own probe clearance where there is
+          // one (else the shop's), and the shop's grid points.
+          surfaceLevel: (() => {
+            const cutter = jobTool(job);
+            const diameter = cutter === null ? null : cuttingDiameter(cutter);
+            if (diameter === null) return undefined;
+            const approved = job.setups?.[0]?.registration?.plan.settings.parkAboveSurfaceMm;
+            return {
+              toolRadiusMm: diameter / 2,
+              clearanceMm: approved ?? registrationSettings(shopDefaults).settings.parkAboveSurfaceMm,
+              points: shopDefault('plan.autoLevelPoints').value,
+            };
+          })(),
           toolCase: caseWordsForKey(job.toolKey) ?? undefined,
           // #472 — the two-tool facts the generator measured, so the sheet's second-program section
           // prints the files and numbers this run actually produced rather than re-deriving them.

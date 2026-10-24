@@ -4,7 +4,7 @@
  * a press goes back to whoever owns the plan's overrides — the job flow (#419) mounts this.
  *
  * An unproven capability (the light, until #422's bench check) is NOT drawn. A locked one (auto-level,
- * until #176) is drawn, disabled, with the reason it is locked and what it would choose once proven.
+ * until #501) is drawn, disabled, with the reason it is locked and what it would choose once proven.
  */
 
 import { useId, type CSSProperties, type JSX } from 'react';

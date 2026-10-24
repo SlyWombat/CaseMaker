@@ -341,6 +341,11 @@ describe('#495 — the registration step', () => {
     await runStep();
 
     expect(screen.getByTestId('engrave-registration-spread').getAttribute('data-ok')).toBe('false');
+    // #501 — the refusal is a DOME, in so many words (a tilt would be followed, with the console
+    // grid offered inside the spread block).
+    expect(screen.getByTestId('engrave-registration-shape').getAttribute('data-verdict')).toBe('dome');
+    expect(screen.getByTestId('engrave-registration-shape').textContent).toContain('dome — a curved top, not a tilt');
+    expect(screen.queryByTestId('engrave-registration-g32')).toBeNull();
     expect(screen.getByTestId('engrave-registration-spread').textContent).toContain('spread 0.33 mm against the 0.2 mm band');
     expect(screen.getByTestId('engrave-registration-spread-refusal').textContent).toBe(
       "this blank's top is not one plane: the touches miss the fitted plane by 0.262 mm, " +

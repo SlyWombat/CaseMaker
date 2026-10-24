@@ -65,6 +65,7 @@ import {
   surfaceSpreadPlan,
   surfaceTiltWords,
   Z0_REFERENCE,
+  type SurfaceLevelParameters,
   type SurfaceReading,
   type SurfaceReadingSource,
 } from '@/engine/cnc/engrave/surfaceSpread';
@@ -1440,8 +1441,9 @@ function surfaceSpreadSteps(
   margin: Mm,
   touchCount?: number,
   readings?: readonly SurfaceReading[],
+  level?: SurfaceLevelParameters | null,
 ): RunSheetStep[] {
-  const plan = surfaceSpreadPlan(job, { touchCount, margin });
+  const plan = surfaceSpreadPlan(job, { touchCount, margin, level: level ?? null });
   if (plan === null) return [];
   const n = plan.touches.length;
   const sourceWords = (s: SurfaceReadingSource): string =>
@@ -1504,19 +1506,42 @@ function surfaceSpreadSteps(
     return steps;
   }
 
-  const a = assessSurfaceSpread(job, readings, { touchCount, margin });
+  const a = assessSurfaceSpread(job, readings, { touchCount, margin, level: level ?? null });
   const measured =
     `Measured: lowest ${fmtNum(a.min.z)} at ${a.min.at} (${sourceWords(a.min.source)}), highest ` +
     `${fmtNum(a.max.z)} at ${a.max.at} (${sourceWords(a.max.source)}); spread ${fmtNum(a.spread)} mm ` +
     `against the ${bandMm} mm band.`;
   const tiltWords = a.fit === null ? null : surfaceTiltWords(a.tilt);
+  // #501 — the shape verdict, in the same words the registration section uses. `dome` is the
+  // refusal below; `tilt` is followed, with the console grid offered as the alternative.
+  const shapeWords =
+    a.verdict === 'dome' ? 'dome' : a.verdict === 'tilt' ? `tilt (${fmtNum(a.slopeDeg)}°)` : 'flat';
   if (a.ok && a.landing !== null) {
-    if (tiltWords !== null) {
+    if (a.verdict === 'tilt' && tiltWords !== null) {
       steps.push({
         text:
-          `Surface tilted ${tiltWords}, followed: the program is posted against the fitted plane, so ` +
-          'the colour plane stays at the programmed depth under the tilted top.',
+          `Surface ${shapeWords} — tilted ${tiltWords}, followed: the program is posted against the ` +
+          'fitted plane, so the colour plane stays at the programmed depth under the tilted top.',
         value: `tilt followed (residual ${fmtNum(a.fit!.residual)} mm)`,
+      });
+    } else {
+      steps.push({
+        text:
+          `Surface ${shapeWords}: the fitted plane holds and its drop is inside the band` +
+          `${tiltWords === null ? '' : ` (${tiltWords})`}.`,
+        value: 'surface flat',
+      });
+    }
+    // #501 — the machine-side alternative, for the operator who would rather level at the console.
+    // CONSOLE ONLY: the sheet says so, and nothing here is written into a file.
+    if (a.recommendation !== null) {
+      steps.push({
+        text:
+          'If you would rather level the machine than rely on the re-posted program: run ' +
+          `${a.recommendation.gcode} from the console before the job, then ${a.recommendation.dump} ` +
+          `to dump the grid into the record, and ${a.recommendation.after} after it. ` +
+          'G32 is never uploaded in a file — it is a console command only.',
+        bold: true,
       });
     }
     steps.push({
@@ -1532,9 +1557,10 @@ function surfaceSpreadSteps(
     steps.push({ text: a.refusal!.message, bold: true });
     steps.push({
       text:
-        'Do not run this file: no floor depth can stay past the colour line and clear of the pocket ' +
-        'across this blank. Face or plane the top until the spread fits the band, or use a flatter ' +
-        'blank, then measure again.',
+        `Surface ${shapeWords}: a curved top, not a tilt — the colour line under it is a plane, so ` +
+        'following the top would cut through it. Do not run this file: no floor depth can stay past ' +
+        'the colour line and clear of the pocket across this blank. Face or plane the top until the ' +
+        'spread fits the band, or use a flatter blank, then measure again.',
       bold: true,
     });
   }
@@ -1881,6 +1907,12 @@ export interface RunSheetOptions {
    * machine.
    */
   surfaceReadings?: readonly SurfaceReading[];
+  /**
+   * #501 — the inputs the console `G32` recommendation is sized from (the cutter's radius, the
+   * probe clearance and the grid points). Passed by the caller that has the job and the approved
+   * plan's own settings; absent, the sheet prints the verdict and slope but no console recipe.
+   */
+  surfaceLevel?: SurfaceLevelParameters | null;
   /**
    * The reachability table (#410), when the caller has measured one. **Absent for every job the app
    * and the bench script build** — nothing computes it on a hand-authored job, and no sheet that
@@ -3076,7 +3108,7 @@ export function buildRunSheet(
     // a caller that passes no `surfaceTouchCount`/`surfaceReadings` gets the plan and stop rule.
     ...(registrationRefused
       ? []
-      : surfaceSpreadSteps(job, margins.boundaryMargin, options.surfaceTouchCount, options.surfaceReadings)),
+      : surfaceSpreadSteps(job, margins.boundaryMargin, options.surfaceTouchCount, options.surfaceReadings, options.surfaceLevel)),
     ...(options.materialScan === true ? materialPositionSteps(job, onBoard, BENCH_ISSUE, machine.toolChange.clearanceZ, options.scan) : []),
   ];
 

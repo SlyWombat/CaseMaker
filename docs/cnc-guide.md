@@ -59,10 +59,13 @@ oversight):
 - Automatic probing or origin-setting that you have not approved. The Cut page's registration
   step runs the setup's approved plan and asks before it writes the origin (#495); nothing
   probes, homes or writes on its own.
-- Autolevelling (`G32`) *in the file*. A printed blank can be domed (the badge in hand, about
-  0.33 mm across its width), so the levelling pass runs at the machine's console before cutting and
-  the state is cleared after — never in the `.nc`, which the upload gate would refuse. Whether
-  `G32` is still needed on a face the app has skimmed is #176's bench question.
+- Autolevelling (`G32`) *in the file*. The levelling pass runs at the machine's console before
+  cutting and the state is cleared after — never in the `.nc`, which the upload gate would refuse.
+  #501 tells the two cases apart from the five registration touches: a **tilt** (the whole blank is
+  crooked, colour plane included) is followed by re-posting the program against the fitted plane,
+  and a `G32 R1` console grid is offered as the machine-side alternative; a **dome** (a curved top
+  over a flat colour line) is refused, because following the top would cut through the line.
+  Whether the grid compensates every move or only its endpoints is #501's bench question.
 - 3D surfacing from a **goal mesh** — now built (#534, §5.4): a job whose only work is a
   `role: 'goal'` mesh generates a raster-roughing + ball-nose finishing program. What is not built
   yet is its run-side wiring and the UI proof (slice E, #535), and a heightfield has one top-Z per
@@ -779,9 +782,11 @@ so register first if the blank is thin or the mount crowded.
 
 **The vacuum is the program's own business.** The post writes `M331` before the first cut and
 `M332` after the last for the span the job declares; the run panel's sentence says which of
-those this file does, and a stop always sends `M332`. If the face is domed, level it **at the
-console** — a `G32 R1` pass, or a facing skim from the app — because the upload gate refuses a
-file carrying `G32`/`M370`. Run the job with your hand on the stop.
+those this file does, and a stop always sends `M332`. A **tilted** top can be levelled at the
+console with a `G32 R1` pass instead of relying on the re-posted program (the sheet prints the
+line and the reset), because the upload gate refuses a file carrying `G32`/`M370`; a **domed**
+top is refused outright — face it or choose a flatter blank. Run the job with your hand on the
+stop.
 
 **After the cut.** Measure the actual depth of each floor and compare it with what you asked
 for; the run record's blank lines are for exactly this. The difference is the Z-chain error the

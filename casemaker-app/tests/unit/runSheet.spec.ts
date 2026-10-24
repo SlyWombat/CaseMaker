@@ -1623,6 +1623,31 @@ describe('the surface spread (#475)', () => {
     expect(steps.map((s) => s.text).join('\n')).toContain('Do not run this file');
   });
 
+  it('#501 — a tilt is named with its slope, and the console G32 recipe is offered as the alternative', () => {
+    const job = dj();
+    const plan = surfaceSpreadPlan(job)!;
+    const centreX = plan.touches[0]!.x;
+    // A pure plane — 0.5 mm of fall per mm of X, no bow — which the fit explains exactly. The
+    // default job states no colour split, so its band is the stock's whole depth; the 26.7 mm drop
+    // is wider than that, which is what makes this a tilt and not merely a slope inside the band.
+    const readings: SurfaceReading[] = plan.touches.map((t) => ({ z: (t.x - centreX) * 0.5, source: 'probe' as const }));
+    const level = { toolRadiusMm: 0.15, clearanceMm: 3, points: 9 };
+    const steps = section(
+      sheetFor(job, NO_SIM, NC, { surfaceReadings: readings, surfaceLevel: level }),
+      'origin',
+    ).steps;
+    const all = steps.map((s) => s.text).join('\n');
+    // The verdict word and the slope the fit measured (atan 0.5 = 26.565°).
+    expect(all).toContain('Surface tilt (26.565°)');
+    // The machine-side alternative: console only, sized from the level inputs, with the reset after.
+    expect(all).toContain('G32 R1 X');
+    expect(all).toContain('I3 J3 H3');
+    expect(all).toContain('M375.1');
+    expect(all).toContain('G32 is never uploaded in a file');
+    // The software follow is stated first.
+    expect(all).toContain('posted against the fitted plane');
+  });
+
   it('prints the landing range when the spread fits', () => {
     const job = dj();
     const plan = surfaceSpreadPlan(job)!;

@@ -130,6 +130,23 @@ export interface SurfaceSpreadPlan {
   touches: SurfaceTouchPoint[];
   regions: RegionBand[];
   band: DepthBand;
+  /**
+   * #501 — what the console's `G32` grid would need: the cutter radius to grow the cut extents by,
+   * the probe clearance (`H`) and the total grid points (`I × J`). Supplied by the caller that has
+   * the job and its own settings (the registration step uses the APPROVED plan's park height); null
+   * when the caller passed none, and then no console recommendation is built.
+   */
+  level: SurfaceLevelParameters | null;
+}
+
+/** #501 — the inputs the `G32` console recipe is sized from. */
+export interface SurfaceLevelParameters {
+  /** Half the cutter's cutting diameter: the grid covers the cut plus this much either way. */
+  toolRadiusMm: Mm;
+  /** The `H` word: how far above the first probe point the probe travels. */
+  clearanceMm: Mm;
+  /** Total probe points; the recipe takes the square root for `I` and `J` (9 → 3 × 3). */
+  points: number;
 }
 
 /** One end of the measured spread, with the reading it came from. */
@@ -146,6 +163,33 @@ export interface SurfaceExtremum {
 export interface BlankBowedFinding extends JobFinding {
   severity: 'error';
   code: 'blank-bowed';
+}
+
+/**
+ * #501 — WHAT the measured top is, from the same fit and band the verdict uses:
+ *   - `dome` — the residual outlasts the plane (wider than the band): the top is curved, and the
+ *     colour line under it is a plane, so following the top would cut through it. Today's refusal.
+ *   - `tilt` — the plane holds, and its drop across the measured extents is wider than the band: the
+ *     whole blank (colour plane included) is crooked, and following the top is right. #608 follows
+ *     it by re-posting against the plane; the machine's own grid is offered as the alternative.
+ *   - `flat` — the plane holds and its drop is inside the band: nothing to compensate.
+ */
+export type SurfaceShape = 'flat' | 'tilt' | 'dome';
+
+/**
+ * #501 — the console's own levelling grid, as a RECOMMENDATION for a tilted blank. CONSOLE TEXT ONLY:
+ * `G32`/`M370` are never written into an uploadable file (the upload gate would refuse them), and
+ * nothing here applies a correction to the toolpath.
+ */
+export interface SurfaceLevelRecommendation {
+  /** `G32 R1 X… Y… A… B… I… J… H…`, sized to the cut extents plus the cutter's radius. */
+  gcode: string;
+  /** `M375.1` — dump the grid into the controller's log, which the operator transcribes to the record. */
+  dump: string;
+  /** `M370` — reset the compensation after the job. */
+  after: string;
+  /** The operator sentence: the software-follow first, the machine-side alternative second. */
+  sentence: string;
 }
 
 /** The measured spread and what it permits. */
@@ -188,6 +232,15 @@ export interface SurfaceSpreadAssessment {
   ok: boolean;
   /** The `blank-bowed` refusal, or null when the spread fits. */
   refusal: BlankBowedFinding | null;
+  /** #501 — tilt, dome or flat, from the fit and the band; see {@link SurfaceShape}. */
+  verdict: SurfaceShape;
+  /** #501 — the fitted plane's steepest slope, degrees (0 without a fit). */
+  slopeDeg: number;
+  /**
+   * #501 — for a `tilt`, the console `G32` recipe as an alternative to the software follow, or null
+   * (flat, dome, or a caller that supplied no `level` parameters). NEVER an uploadable file.
+   */
+  recommendation: SurfaceLevelRecommendation | null;
 }
 
 const r3 = (n: number): Mm => Math.round(n * 1000) / 1000;
@@ -327,7 +380,7 @@ function footprintOf(extent: { minX: Mm; minY: Mm; maxX: Mm; maxY: Mm }): ItemFo
  */
 export function surfaceSpreadPlan(
   job: EngraveJob,
-  options: { touchCount?: number; margin?: Mm } = {},
+  options: { touchCount?: number; margin?: Mm; level?: SurfaceLevelParameters | null } = {},
 ): SurfaceSpreadPlan | null {
   const extents = cutExtents(job);
   if (extents === null) return null;
@@ -374,6 +427,7 @@ export function surfaceSpreadPlan(
     touches: touchPoints(extents, { length: job.stock.length, width: job.stock.width }, count),
     regions,
     band,
+    level: options.level ?? null,
   };
 }
 
@@ -459,7 +513,7 @@ export function surfaceFitForPost(
 export function assessSurfaceSpread(
   job: EngraveJob,
   readings: readonly SurfaceReading[],
-  options: { touchCount?: number; margin?: Mm } = {},
+  options: { touchCount?: number; margin?: Mm; level?: SurfaceLevelParameters | null } = {},
 ): SurfaceSpreadAssessment {
   const plan = surfaceSpreadPlan(job, options);
   if (plan === null) throw new Error('this job has no cut regions to measure the surface over');
@@ -524,6 +578,17 @@ export function assessSurfaceReadings(
   const landing = ok
     ? { lower: plan.band.lower?.depth ?? 0, upper: r3(plan.band.upper.depth - fitAmount) }
     : null;
+  // #501 — the SHAPE the readings describe, and the machine-side alternative for a tilt. The plane
+  // fit (#608) already separates the two physically: a crooked whole blank fits a plane, a curved
+  // top leaves a residual. What was missing is the word and the recipe.
+  const verdict: SurfaceShape =
+    !ok
+      ? 'dome'
+      : fit !== null && Math.max(Math.abs(tilt.xMm), Math.abs(tilt.yMm)) > plan.band.width + 1e-9
+        ? 'tilt'
+        : 'flat';
+  const slopeDeg = fit === null ? 0 : r3((Math.atan(Math.hypot(fit.slopeX, fit.slopeY)) * 180) / Math.PI);
+  const recommendation = verdict === 'tilt' ? levelRecommendation(plan, tilt, slopeDeg) : null;
   const refusal: BlankBowedFinding | null = ok
     ? null
     : {
@@ -547,5 +612,45 @@ export function assessSurfaceReadings(
     landing,
     ok,
     refusal,
+    verdict,
+    slopeDeg,
+    recommendation,
+  };
+}
+
+/**
+ * #501 — the console `G32` recipe for a tilted blank, sized from the plan.
+ *
+ * Smoothieware's grid strategy, which is what Makera's Controller drives (`G32 R1 X… Y… A… B… I… J…
+ * H…`): X/Y is the first corner, A/B the opposite one, I/J the point counts and H the probe
+ * clearance above the first point. The area is the measured extents grown by the cutter's RADIUS, so
+ * every cut the job makes stays inside the levelled grid. The recipe is CONSOLE TEXT: `G32`/`M370`
+ * are never written into an uploadable file, and no toolpath is corrected by the app on the strength
+ * of an unproven grid.
+ */
+function levelRecommendation(
+  plan: SurfaceSpreadPlan,
+  tilt: { xMm: Mm; yMm: Mm },
+  slopeDeg: number,
+): SurfaceLevelRecommendation | null {
+  const level = plan.level;
+  if (level === null) return null;
+  const pad = Math.max(0, level.toolRadiusMm);
+  const xs = plan.touches.map((t) => t.x);
+  const ys = plan.touches.map((t) => t.y);
+  const gcode =
+    `G32 R1 X${num(r3(Math.min(...xs) - pad))} Y${num(r3(Math.min(...ys) - pad))} ` +
+    `A${num(r3(Math.max(...xs) + pad))} B${num(r3(Math.max(...ys) + pad))} ` +
+    `I${Math.max(1, Math.round(Math.sqrt(Math.max(1, level.points))))} J${Math.max(1, Math.round(Math.sqrt(Math.max(1, level.points))))} ` +
+    `H${num(level.clearanceMm)}`;
+  return {
+    gcode,
+    dump: 'M375.1',
+    after: 'M370',
+    sentence:
+      `The top is tilted ${num(slopeDeg)}° (${surfaceTiltWords(tilt) ?? 'no measured drop'}): the program is posted against the ` +
+      `fitted plane, so the cut follows the tilt. To level at the machine instead, run ${gcode} from the console ` +
+      `(${level.points}-point grid over the cut plus the cutter's radius, clearance ${num(level.clearanceMm)} mm), ` +
+      'M375.1 to dump the grid into the run record, and M370 after the job. G32 is never uploaded in a file.',
   };
 }
