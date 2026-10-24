@@ -123,7 +123,7 @@
             "viseJawTopZ": {
               "value": -56.82,
               "measuredAt": "2026-10-23T00:00:00.000Z",
-              "by": "wired-probe",
+              "by": "fx-probe-1",
               "at": null
             },
             "bracketSeatZ": {
@@ -1663,7 +1663,7 @@
     {
       "id": "fx-probe-1",
       "kind": "probe",
-      "product": null,
+      "product": "Makera Wired Probe V2",
       "variant": "wired-touch",
       "constants": {},
       "unit": {
@@ -1687,6 +1687,30 @@
         {
           "at": "2026-10-23T00:00:00.000Z",
           "what": "measured tip 2.0 / rim 0.70 +/- 0.25"
+        }
+      ]
+    },
+    {
+      "id": "fx-probe-3d",
+      "kind": "probe",
+      "product": "Makera 3D Wired Probe",
+      "variant": "3d",
+      "constants": {},
+      "unit": {
+        "tipDiameterMm": null,
+        "rimOffsetMm": null,
+        "rimOffsetUncertaintyMm": null,
+        "lastM491": null,
+        "lastM119Rest": null
+      },
+      "provenance": {},
+      "whereabouts": {
+        "kind": "box"
+      },
+      "history": [
+        {
+          "at": "2026-10-23T00:00:00.000Z",
+          "what": "owned; not yet tested"
         }
       ]
     }

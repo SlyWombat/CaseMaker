@@ -35,7 +35,7 @@
 
 use crate::feeds::FeedRow;
 use crate::house::{HouseError, HouseStore, InventoryItem, ToolLibraryEntry};
-use crate::location::MachineRecord;
+use crate::location::{FixtureRecord, MachineRecord};
 use crate::stock::StockItem;
 use axum::body::Body;
 use axum::extract::{OriginalUri, Path, State};
@@ -68,6 +68,7 @@ pub fn routes(store: Arc<HouseStore>) -> Router {
         // #412. The location's identity and machines; the tool tiers stay on their own routes.
         .route("/api/v1/location", get(get_location))
         .route("/api/v1/location/machines/*id", put(put_machine))
+        .route("/api/v1/location/accessories/*id", put(put_accessory).delete(delete_accessory))
         // #412 re-review. Dismiss the "house.json changed after location.json" warning. No body.
         .route("/api/v1/location/house-warning/dismiss", post(dismiss_house_warning))
         // #413. The stock shelf: its own list, `ETag` and guarded writes, as the inventory has.
@@ -660,6 +661,39 @@ async fn put_machine(
     }
     let guard = if_match(&headers);
     match store.put_machine(record, guard.as_deref()).await {
+        Ok(()) => empty(StatusCode::OK),
+        Err(e) => error_response(e),
+    }
+}
+
+/// #601 — create or replace one accessory record, the same guarded write shape as `put_machine`.
+async fn put_accessory(
+    State(store): State<Arc<HouseStore>>,
+    Path(id): Path<String>,
+    headers: HeaderMap,
+    axum::Json(record): axum::Json<FixtureRecord>,
+) -> Response<Body> {
+    if record.id != id {
+        return error_response(HouseError::BadEntry(format!(
+            "the body's id {} does not match the URL's {id}",
+            record.id
+        )));
+    }
+    let guard = if_match(&headers);
+    match store.put_accessory(record, guard.as_deref()).await {
+        Ok(()) => empty(StatusCode::OK),
+        Err(e) => error_response(e),
+    }
+}
+
+/// #601 — retire one accessory record, guarded as `put_accessory` is.
+async fn delete_accessory(
+    State(store): State<Arc<HouseStore>>,
+    Path(id): Path<String>,
+    headers: HeaderMap,
+) -> Response<Body> {
+    let guard = if_match(&headers);
+    match store.delete_accessory(&id, guard.as_deref()).await {
         Ok(()) => empty(StatusCode::OK),
         Err(e) => error_response(e),
     }

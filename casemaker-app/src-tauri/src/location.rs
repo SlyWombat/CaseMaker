@@ -356,7 +356,7 @@ fn finite_positive(v: f64) -> bool {
 }
 
 impl FixtureRecord {
-    fn validate(&self, machine: &str) -> Result<(), HouseError> {
+    pub(crate) fn validate(&self, machine: &str) -> Result<(), HouseError> {
         validate_id(&self.id, "fixture")?;
         if self.kind.trim().is_empty() {
             return Err(HouseError::BadEntry(format!(

@@ -951,6 +951,8 @@ mod tests {
         ("DELETE", "/api/v1/inventory/inv-1", "{}"),
         ("POST", "/api/v1/import", r#"{"kind":"casemaker-house"}"#),
         ("PUT", "/api/v1/location/machines/m-1", r#"{"id":"m-1"}"#),
+        ("PUT", "/api/v1/location/accessories/fx-1", r#"{"id":"fx-1","kind":"probe"}"#),
+        ("DELETE", "/api/v1/location/accessories/fx-1", "{}"),
         ("POST", "/api/v1/location/house-warning/dismiss", "{}"),
         ("POST", "/api/v1/stock", r#"{"id":"s-1"}"#),
         ("PATCH", "/api/v1/stock/s-1", r#"{"id":"s-1"}"#),

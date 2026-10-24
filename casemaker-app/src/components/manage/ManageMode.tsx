@@ -17,6 +17,7 @@
  */
 
 import { useManageModeStore } from '@/store/manageModeStore';
+import { AccessoriesScope } from './AccessoriesScope';
 import { ManageRail } from './ManageRail';
 import { MachinesScope } from './MachinesScope';
 import { MaterialsScope } from './MaterialsScope';
@@ -27,7 +28,15 @@ export function ManageMode() {
   return (
     <div className="manage" data-testid="manage-mode" data-scope={scope}>
       <ManageRail />
-      {scope === 'machines' ? <MachinesScope /> : scope === 'materials' ? <MaterialsScope /> : <ToolsScope />}
+      {scope === 'machines' ? (
+        <MachinesScope />
+      ) : scope === 'materials' ? (
+        <MaterialsScope />
+      ) : scope === 'accessories' ? (
+        <AccessoriesScope />
+      ) : (
+        <ToolsScope />
+      )}
     </div>
   );
 }

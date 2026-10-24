@@ -1471,6 +1471,43 @@ impl HouseStore {
         self.commit(&mut inner, next)
     }
 
+    /// #601 — create or replace one accessory record (a register, an edit, a measurement, a
+    /// check-out). GUARDED on the location's `ETag`, as a machine write is. The whole document is
+    /// validated after the change, so a record that leaves the location unreadable is refused
+    /// rather than committed.
+    pub async fn put_accessory(
+        &self,
+        record: crate::location::FixtureRecord,
+        if_match: Option<&str>,
+    ) -> Result<(), HouseError> {
+        record.validate("the location")?;
+        let mut inner = self.inner.write().await;
+        Self::writable(&inner.location_problem)?;
+        check_precondition(&etag_for(&location_bytes(&inner)?), if_match, "the location")?;
+        let mut next = inner.location.clone();
+        match next.accessories.iter_mut().find(|a| a.id == record.id) {
+            Some(existing) => *existing = record,
+            None => next.accessories.push(record),
+        }
+        next.validate()?;
+        self.commit(&mut inner, next)
+    }
+
+    /// #601 — retire one accessory record. Guarded as `put_accessory` is; the whole document is
+    /// validated after the removal, so an accessory a bed placement still names is refused.
+    pub async fn delete_accessory(&self, id: &str, if_match: Option<&str>) -> Result<(), HouseError> {
+        let mut inner = self.inner.write().await;
+        Self::writable(&inner.location_problem)?;
+        check_precondition(&etag_for(&location_bytes(&inner)?), if_match, "the location")?;
+        let mut next = inner.location.clone();
+        if !next.accessories.iter().any(|a| a.id == id) {
+            return Err(HouseError::NotFound(format!("{id} is not among the accessories")));
+        }
+        next.accessories.retain(|a| a.id != id);
+        next.validate()?;
+        self.commit(&mut inner, next)
+    }
+
     /// The machine's switch config, or why there is none to act on.
     async fn switch_of(&self, machine_id: &str) -> Result<Option<crate::power::PowerSwitch>, HouseError> {
         let inner = self.inner.read().await;
@@ -2144,6 +2181,71 @@ mod tests {
         assert_eq!(entries[0].key, "user:abc");
         assert_eq!(entries[0].tool.name, "2 mm flat end");
         assert_eq!(etag, etag_for(&bytes));
+    }
+
+    #[tokio::test]
+    async fn an_accessory_registers_edits_and_retires_through_the_file() {
+        // #601 — the register door and the check-out/return/retire moves all land through one
+        // guarded accessory write. `*` stands in for the location's current `ETag`, as the guarded
+        // write table's own tests use it.
+        let (dir, store) = store();
+        let probe = crate::location::FixtureRecord {
+            id: "fx-probe-1".into(),
+            kind: "probe".into(),
+            product: Some("Makera Wired Probe V2".into()),
+            variant: Some("wired-touch".into()),
+            constants: serde_json::Map::new(),
+            unit: serde_json::Map::new(),
+            provenance: Default::default(),
+            whereabouts: crate::location::AccessoryWhereabouts::Box {},
+            history: vec![crate::location::AccessoryHistory {
+                at: "2026-10-23T00:00:00.000Z".into(),
+                what: "owned; not yet tested".into(),
+            }],
+        };
+        store.put_accessory(probe, Some("*")).await.unwrap();
+
+        // A new store over the same directory sees it, which is the whole point of the file.
+        let reopened = HouseStore::open(dir.path().to_path_buf());
+        let doc: crate::location::LocationDoc =
+            serde_json::from_slice(&reopened.export().await.unwrap()).unwrap();
+        assert_eq!(doc.accessories.len(), 1);
+        assert_eq!(doc.accessories[0].product.as_deref(), Some("Makera Wired Probe V2"));
+
+        // Check it out: the same id is replaced in place, not duplicated.
+        reopened
+            .put_accessory(
+                crate::location::FixtureRecord {
+                    id: "fx-probe-1".into(),
+                    kind: "probe".into(),
+                    product: Some("Makera Wired Probe V2".into()),
+                    variant: Some("wired-touch".into()),
+                    constants: serde_json::Map::new(),
+                    unit: serde_json::Map::new(),
+                    provenance: Default::default(),
+                    whereabouts: crate::location::AccessoryWhereabouts::Machine {
+                        machine_id: "machine-1a2b3c".into(),
+                        since: "2026-10-23T00:00:00.000Z".into(),
+                    },
+                    history: vec![],
+                },
+                Some("*"),
+            )
+            .await
+            .unwrap();
+        let doc: crate::location::LocationDoc =
+            serde_json::from_slice(&reopened.export().await.unwrap()).unwrap();
+        assert_eq!(doc.accessories.len(), 1);
+        assert!(matches!(
+            &doc.accessories[0].whereabouts,
+            crate::location::AccessoryWhereabouts::Machine { .. }
+        ));
+
+        // Retire it.
+        reopened.delete_accessory("fx-probe-1", Some("*")).await.unwrap();
+        let doc: crate::location::LocationDoc =
+            serde_json::from_slice(&reopened.export().await.unwrap()).unwrap();
+        assert!(doc.accessories.is_empty());
     }
 
     #[tokio::test]

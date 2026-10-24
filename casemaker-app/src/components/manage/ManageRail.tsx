@@ -19,6 +19,7 @@ import { HOUSE_SCHEMA_VERSION } from '@/platform/houseClient';
 import { useToolRegistry } from '@/hooks/useToolRegistry';
 import { useMachineStore } from '@/store/machineStore';
 import { useManageModeStore, type ManageScope } from '@/store/manageModeStore';
+import { useLocationStore } from '@/store/locationStore';
 import { useToolRegistryStore } from '@/store/toolRegistryStore';
 import { formatStamp } from './display';
 
@@ -37,6 +38,7 @@ export function ManageRail() {
   // The rail's count is every definition a job can name, so it reads the registry rather than the
   // service's tiers — the built-ins are two of them whether or not a service is there.
   const tools = useToolRegistry();
+  const accessories = useLocationStore((s) => s.location?.accessories?.length ?? 0);
 
   const profile = machine?.profileId != null ? MACHINES[machine.profileId] : undefined;
   const machineLabel =
@@ -77,6 +79,15 @@ export function ManageRail() {
             title={status === 'checking' ? 'asking this origin' : 'no house service'}
           />
         ),
+      )}
+      {/* #601 — the mounts and probes the house owns. A count beside the word, as the tools rail does. */}
+      {scopeButton(
+        'accessories',
+        '🔩',
+        'Accessories',
+        <span className="nav__count" data-testid="manage-rail-accessories-count">
+          {accessories}
+        </span>,
       )}
       {/* #413 — the stock shelf. No count here: the shelf is read when the scope opens. */}
       {scopeButton('materials', '🧱', 'Materials', <span />)}

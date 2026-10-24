@@ -73,13 +73,24 @@ describe('the location contract (#412)', () => {
       whereabouts: { kind: 'machine', machineId: m.id },
     });
     expect(vise?.constants).toMatchObject({ jawBarWidth: 10, ledgeStep: 3.1 });
-    // #597 — the wired probe is checked out to the same machine, with its measured tip/rim unit.
-    const probe = parsed.data!.accessories?.find((a) => a.kind === 'probe');
+    // #601 — the two owned probes, under their product names: the wired one checked out to the
+    // machine with its measured tip/rim unit, the 3D one in its box, unmeasured.
+    const probe = parsed.data!.accessories?.find((a) => a.id === 'fx-probe-1');
     expect(probe).toMatchObject({
+      product: 'Makera Wired Probe V2',
       variant: 'wired-touch',
       whereabouts: { kind: 'machine', machineId: m.id },
     });
     expect(probe?.unit).toMatchObject({ tipDiameterMm: 2.0, rimOffsetMm: 0.7, rimOffsetUncertaintyMm: 0.25 });
+    const probe3d = parsed.data!.accessories?.find((a) => a.id === 'fx-probe-3d');
+    expect(probe3d).toMatchObject({
+      product: 'Makera 3D Wired Probe',
+      variant: '3d',
+      whereabouts: { kind: 'box' },
+    });
+    expect(probe3d?.unit).toMatchObject({ tipDiameterMm: null, rimOffsetMm: null, rimOffsetUncertaintyMm: null });
+    // #601 — the jaw-top datum was tapped by the wired probe accessory, so `by` is its id.
+    expect(m.bedProfiles?.[0]?.datums.viseJawTopZ).toMatchObject({ by: 'fx-probe-1' });
     expect(m.bedProfiles?.[0]).toMatchObject({
       id: 'bp-migrated-2026-10-15',
       name: 'Current bed (migrated 2026-10-15)',

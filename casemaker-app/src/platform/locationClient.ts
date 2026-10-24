@@ -635,6 +635,36 @@ export async function housePutMachine(
 }
 
 /**
+ * Create or replace one accessory record (#601) — a register, an edit, a measurement, a check-out.
+ * GUARDED (#321) on the location's `ETag`, the same way a machine write is. Held to this build's
+ * schema before it is sent, so a record this build could not read back is refused, not stored.
+ */
+export async function housePutAccessory(
+  record: FixtureRecord,
+  ifMatch: string | null,
+  opts?: HouseRequestOptions,
+): Promise<HouseWrite> {
+  const checked = FixtureRecordSchema.safeParse(record);
+  if (!checked.success) {
+    return { kind: 'refused', status: 400, message: `this accessory would not read back: ${firstIssue(checked.error)}` };
+  }
+  const res = await houseRequest('PUT', `/location/accessories/${encodeURIComponent(record.id)}`, record, {
+    ...opts,
+    ifMatch,
+  });
+  return res.kind === 'ok' ? { kind: 'ok' } : (res as HouseFailure);
+}
+
+/** Retire one accessory (#601): take it off the location's list. Guarded as {@link housePutAccessory}. */
+export async function houseDeleteAccessory(id: string, ifMatch: string | null, opts?: HouseRequestOptions): Promise<HouseWrite> {
+  const res = await houseRequest('DELETE', `/location/accessories/${encodeURIComponent(id)}`, undefined, {
+    ...opts,
+    ifMatch,
+  });
+  return res.kind === 'ok' ? { kind: 'ok' } : (res as HouseFailure);
+}
+
+/**
  * Check an import's text BEFORE it is sent (#412). A location file is held to this build's schemas
  * — machine sections included, which the service stores without reading — so a file the app could
  * not read back is refused here with a reason rather than accepted there and then failing every

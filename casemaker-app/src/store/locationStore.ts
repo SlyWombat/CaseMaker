@@ -50,7 +50,9 @@ import type { MarginSettings } from '@/engine/cnc/engrave/depthBounds';
 import type { MachineObservation } from '@/platform/machineProbe';
 import {
   MachineRecordSchema,
+  houseDeleteAccessory,
   houseLocation,
+  housePutAccessory,
   housePutMachine,
   type FixtureRecord,
   type LocationView,
@@ -93,11 +95,19 @@ export interface LocationState {
   reason: string | null;
   /** What the last machine write said when it did not work — shown on the Machines card. */
   writeNote: string | null;
+  /** What the last accessory write said when it did not work (#601) — shown on the Accessories scope. */
+  accessoryNote: string | null;
   /** Where the depth margins live (#447). */
   marginsHome: MarginsHome;
   refresh: () => Promise<void>;
   /** `stale` is a 412/428: the location was re-read, and the caller should merge and retry. */
   saveMachine: (record: MachineRecord) => Promise<'ok' | 'stale' | 'failed'>;
+  /** #601 — create or replace one accessory record. `stale` is a 412/428, as `saveMachine`'s is. */
+  saveAccessory: (record: FixtureRecord) => Promise<'ok' | 'stale' | 'failed'>;
+  /** #601 — retire one accessory record. `stale` is a 412/428, as `saveMachine`'s is. */
+  removeAccessory: (id: string) => Promise<'ok' | 'stale' | 'failed'>;
+  /** Dismiss the accessory write's refusal sentence. */
+  clearAccessoryNote: () => void;
   /**
    * Append a finished program's FNV hash to a machine's persisted list (#419 §4.5). `added: false`
    * with `ok: true` means the machine already had it — a repeated finish, with no request sent.
@@ -111,6 +121,7 @@ export const useLocationStore = create<LocationState>((set, get) => ({
   etag: null,
   reason: null,
   writeNote: null,
+  accessoryNote: null,
   marginsHome: 'browser',
 
   refresh: async () => {
@@ -144,6 +155,40 @@ export const useLocationStore = create<LocationState>((set, get) => ({
     }
     return 'failed';
   },
+
+  saveAccessory: async (record) => {
+    const res = await housePutAccessory(record, get().etag);
+    if (res.kind === 'ok') {
+      set({ accessoryNote: null });
+      await get().refresh();
+      return 'ok';
+    }
+    const text = res.kind === 'absent' ? res.reason : res.kind === 'refused' ? res.message : res.detail;
+    set({ accessoryNote: text });
+    if (res.kind === 'refused' && (res.status === 412 || res.status === 428)) {
+      await get().refresh();
+      return 'stale';
+    }
+    return 'failed';
+  },
+
+  removeAccessory: async (id) => {
+    const res = await houseDeleteAccessory(id, get().etag);
+    if (res.kind === 'ok') {
+      set({ accessoryNote: null });
+      await get().refresh();
+      return 'ok';
+    }
+    const text = res.kind === 'absent' ? res.reason : res.kind === 'refused' ? res.message : res.detail;
+    set({ accessoryNote: text });
+    if (res.kind === 'refused' && (res.status === 412 || res.status === 428)) {
+      await get().refresh();
+      return 'stale';
+    }
+    return 'failed';
+  },
+
+  clearAccessoryNote: () => set({ accessoryNote: null }),
 
   recordFinishedProgram: async (machineId, hash) => {
     const machine = get().location?.machines.find((m) => m.id === machineId) ?? null;
@@ -789,6 +834,7 @@ export function resetLocationStore(): void {
     etag: null,
     reason: null,
     writeNote: null,
+    accessoryNote: null,
     marginsHome: 'browser',
   });
   pushing = null;
