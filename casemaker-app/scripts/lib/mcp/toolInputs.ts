@@ -134,7 +134,7 @@ export const runSheetInput = z
 export const readLocationInput = z
   .strictObject({
     section: z
-      .enum(['tools', 'stock', 'machines'])
+      .enum(['tools', 'stock', 'machines', 'accessories'])
       .describe('Which section of the machine’s document to read.'),
     location: destination.location,
   })

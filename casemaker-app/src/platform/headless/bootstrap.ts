@@ -29,7 +29,7 @@ import { setInventoryEntries, setRegistry } from '@/engine/cnc/toolRegistry';
 import { BUNDLED_FONT_KEYS, registerBundledFontBytes } from '@/engine/fonts/registry';
 import type { ShopDefaults } from '@/platform/defaultsClient';
 import { InventorySchema, type InventoryItem } from '@/platform/houseClient';
-import { checkLocationImport, type MachineRecord } from '@/platform/locationClient';
+import { checkLocationImport, type FixtureRecord, type MachineRecord } from '@/platform/locationClient';
 import type { StockItem } from '@/platform/stockClient';
 import { inventoryEntryFor } from '@/store/toolRegistryStore';
 
@@ -170,6 +170,8 @@ export interface LoadedLocation {
   machines: MachineRecord[];
   /** The location's stock shelf (#413); empty for a house file, for the same reason. */
   stock: StockItem[];
+  /** #605 — the location's accessories (mounts and probes); empty for a house file. */
+  accessories: FixtureRecord[];
   /** The shop's tunable defaults (#416/#417); null for a house file or a document without them. */
   defaults: ShopDefaults | null;
 }
@@ -207,6 +209,7 @@ export function loadLocation(path?: string | readonly string[]): LoadedLocation 
   let name: string | null;
   let kind: LoadedLocation['kind'];
   let defaults: ShopDefaults | null;
+  let accessories: FixtureRecord[];
   const location = checkLocationImport(raw);
   if (location.kind === 'refused') throw new LocationDocumentError(`${found}: ${location.reason}`);
   if (location.kind === 'location') {
@@ -216,6 +219,7 @@ export function loadLocation(path?: string | readonly string[]): LoadedLocation 
     // parsing the file a second time.
     machines = location.doc.machines;
     stock = location.doc.stock;
+    accessories = location.doc.accessories ?? [];
     // #436 — the shop's own rest-machining numbers live here, not in the source. A document that
     // predates the section reads as `{}`, which `readDefault` answers with the labelled fallback.
     defaults = location.doc.defaults;
@@ -241,13 +245,14 @@ export function loadLocation(path?: string | readonly string[]): LoadedLocation 
     inventory = parsedInventory.data;
     machines = [];
     stock = [];
+    accessories = [];
     name = null;
     kind = 'house';
     defaults = null;
   }
   setRegistry(tools);
   setInventoryEntries(inventory.map(inventoryEntryFor));
-  return { path: found, kind, name, tools, inventory, machines, stock, defaults };
+  return { path: found, kind, name, tools, inventory, machines, stock, accessories, defaults };
 }
 
 // ---------------------------------------------------------------------------------------------

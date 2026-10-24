@@ -103,6 +103,15 @@ describe('the location contract (#412)', () => {
     expect(m.activeBedProfileId).toBe(m.bedProfiles?.[0]?.id);
   });
 
+  it('#605 a machine nickname and the accessories survive the location round trip', () => {
+    const d = doc();
+    d.machines[0]!.nickname = 'Zoomba';
+    const parsed = LocationDocSchema.safeParse(d);
+    expect(parsed.success, JSON.stringify(parsed.error?.issues)).toBe(true);
+    expect(parsed.data!.machines[0]!.nickname).toBe('Zoomba');
+    expect(parsed.data!.accessories?.map((a) => a.id)).toEqual(['fx-vise-1', 'fx-probe-1', 'fx-probe-3d']);
+  });
+
   it('round-trips a machine from before the bed without gaining its keys (#510)', () => {
     const d = doc();
     const m = d.machines[0]!;

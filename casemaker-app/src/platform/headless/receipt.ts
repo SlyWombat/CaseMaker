@@ -217,7 +217,7 @@ export const locationRecordSchema = z
 /** Everything `casemaker location` reports beyond the receipt envelope. */
 export const locationDetailsSchema = z
   .object({
-    section: z.enum(['tools', 'stock', 'machines']).describe('Which section was asked for.'),
+    section: z.enum(['tools', 'stock', 'machines', 'accessories']).describe('Which section was asked for.'),
     document: z
       .object({
         kind: z.enum(['location', 'house']).describe('Which document kind was read.'),
@@ -716,7 +716,9 @@ function locationLines(receipt: Extract<Receipt, { command: 'location' }>): stri
         ? '  (no tools or owned cutters in this document)'
         : details.section === 'stock'
           ? "  (no stock on this document's shelf)"
-          : '  (no machines in this document)',
+          : details.section === 'accessories'
+            ? '  (no accessories in this document)'
+            : '  (no machines in this document)',
     );
     return lines;
   }

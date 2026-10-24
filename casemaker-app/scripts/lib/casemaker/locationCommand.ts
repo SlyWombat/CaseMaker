@@ -15,7 +15,7 @@ import type { MachineRecord } from '../../../src/platform/locationClient';
 import { CliExit, isCliExit } from './exit';
 import { commandOutput, HUMAN, type CommandOptions } from './output';
 
-const SECTIONS = ['tools', 'stock', 'machines'] as const;
+const SECTIONS = ['tools', 'stock', 'machines', 'accessories'] as const;
 type Section = (typeof SECTIONS)[number];
 
 interface Args {
@@ -46,7 +46,7 @@ function fail(message: string): never {
 }
 
 const USAGE =
-  'usage: casemaker location tools|stock|machines [--location <location.json|house.json>]';
+  'usage: casemaker location tools|stock|machines|accessories [--location <location.json|house.json>]';
 
 type LocationReceipt = Extract<Receipt, { command: 'location' }>;
 type LocationRecord = LocationReceipt['details']['records'][number];
@@ -101,6 +101,20 @@ function machineRecords(loaded: LoadedLocation): LocationRecord[] {
   });
 }
 
+/** #605 — the accessories the location owns, each with where it is right now. */
+function accessoryRecords(loaded: LoadedLocation): LocationRecord[] {
+  return loaded.accessories.map((a) => ({
+    label: 'accessory',
+    fields: [
+      a.id,
+      a.kind,
+      a.product ?? 'unnamed',
+      a.variant ?? '',
+      a.whereabouts.kind === 'box' ? 'in its box' : `on ${a.whereabouts.machineId}`,
+    ],
+  }));
+}
+
 /** The whole read as a receipt (#478): the document resolved, and the section's records. */
 export function locationReceipt(loaded: LoadedLocation | null, section: Section): LocationReceipt {
   return {
@@ -134,7 +148,9 @@ export function locationReceipt(loaded: LoadedLocation | null, section: Section)
             ? toolRecords(loaded)
             : section === 'stock'
               ? stockRecords(loaded)
-              : machineRecords(loaded),
+              : section === 'accessories'
+                ? accessoryRecords(loaded)
+                : machineRecords(loaded),
     },
   };
 }

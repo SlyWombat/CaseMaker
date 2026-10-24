@@ -108,6 +108,7 @@ function location(machines = [record()]): LoadedLocation {
     inventory: [],
     machines,
     stock: [],
+    accessories: [],
     defaults: null,
   };
 }

@@ -135,7 +135,7 @@ const TITLES: Record<ToolName, { title: string; description: string }> = {
   },
   read_location: {
     title: 'Read location',
-    description: 'Read the machine’s own document: its tools, its stock shelf or its machines.',
+    description: 'Read the machine’s own document: its tools, its stock shelf, its machines or its accessories.',
   },
 };
 

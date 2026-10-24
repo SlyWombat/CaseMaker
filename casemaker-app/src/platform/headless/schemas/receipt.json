@@ -1030,7 +1030,8 @@
               "enum": [
                 "tools",
                 "stock",
-                "machines"
+                "machines",
+                "accessories"
               ],
               "type": "string"
             }

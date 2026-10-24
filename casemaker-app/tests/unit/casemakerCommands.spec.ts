@@ -58,10 +58,15 @@ describe('#477 casemaker location', () => {
     const machines = locationSectionLines(loaded, 'machines').join('\n');
     expect(machines).toContain('machine-1a2b3c');
     expect(machines).toContain('192.0.2.10:2222');
+
+    const accessories = locationSectionLines(loaded, 'accessories').join('\n');
+    expect(accessories).toContain('fx-vise-1');
+    expect(accessories).toContain('makera-z1-low-profile-vise');
+    expect(accessories).toContain('on machine-1a2b3c');
   });
 
   it('runs each section and names the document it read', async () => {
-    for (const section of ['tools', 'stock', 'machines'] as const) {
+    for (const section of ['tools', 'stock', 'machines', 'accessories'] as const) {
       const out = capture();
       expect(await locationMain([section, '--location', FIXTURE])).toBe(0);
       expect(out.lines[0]).toContain('location "Test bench"');
