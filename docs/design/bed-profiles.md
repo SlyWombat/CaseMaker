@@ -29,7 +29,7 @@ profile, not to a copy of its numbers.
 | Term | Meaning | Lives |
 |---|---|---|
 | **Machine** | one physical unit with serial, firmware, calibration read from `config.txt` | `location.json` → `machines[]` (exists) |
-| **Fixture record** | an accessory the shop owns, with the product's constants and this unit's measurements: the low-profile vise, the L-bracket (thin, thick), top clamps, side clamps, the 4th-axis module, the vacuum bed, the probes | per machine (`fixtures[]`, new; absorbs `settings.fixtures.vise`, `DEFAULT_VISE`, `bracket.*` seeds) |
+| **Fixture record** | an accessory the shop owns, with the product's constants and this unit's measurements: the low-profile vise, the L-bracket (thin, thick), top clamps, side clamps, the 4th-axis module, the vacuum bed, the probes | the location's `accessories[]` (house-owned), placed per machine by a bed profile's placements; the probes are accessory records too (`kind: "probe"`) |
 | **Surface** | what the stock or the fixtures stand on: the bare bed, an MDF wasteboard, an aluminium fixture plate, the vacuum bed | part of a bed profile (absorbs `wasteboard`) |
 | **Placement** | a fixture put on the bed at a place: the vise on its two locating pins, the bracket at anchor 1 or 2, two top clamps, the 4th-axis module on its pins | part of a bed profile |
 | **Datum** | a machine-Z (or XY) measured ON this bed: the surface top, a jaw top, the bracket seat, the rotary axis line; one probe touch each, dated, never typed | part of a bed profile |
@@ -38,7 +38,11 @@ profile, not to a copy of its numbers.
 
 Provenance words are the location's own: `vendor` (Makera's firmware or manual), `default`
 (shipped by us, chosen), `measured` (a probe touch or calipers, with the date and the instrument),
-`typed` (the operator entered it, with the date).
+`typed` (the operator entered it, with the date). There is no fifth word: a datum read by the probe
+is `measured`, and the instrument is named by the datum's `by` field (the probe accessory's id) — a
+datum is never marked `probed`. A datum also carries the `M491` probe-length reading at measurement
+(`probeLengthMm`); comparing datums across probe fits subtracts the two readings, so a longer or
+shorter probe does not read as a changed datum.
 
 ## 2. Data model
 

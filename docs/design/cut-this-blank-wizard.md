@@ -61,7 +61,7 @@ never shows a step the operator cannot act on. Each step below states what the *
   front edge at X …*. This is the per-setup plan the Setups accordion holds today
   (`engrave-setup-plan-reg-1` → `engrave-setup-approve-reg-1`); the wizard calls the same actions and
   stores the same approved plan on the setup.
-- **Operator:** **Approve**. (Or edit: the seat if the vise is not the shipped default; the mount.)
+- **Operator:** **Approve**. (The seat edit is retired: the mount tap measures the jaw top, so there is no seat-Z to type.)
 - **Gate:** `planRegistration` returned `ok` AND the operator approved.
 - **Recovery:** a refusal in the planner's sentence (stock too small for the scan inset; jaw within
   the surface band; surface point not inside the stock) with the field to change.
@@ -196,8 +196,9 @@ origin* → *Fit the cutter* → *Run*. No tab is changed by hand; no body text 
    (Proposal: the button; the Cut checklist remains the expert view of the same state.)
 2. **#516 overlap:** merge the setup wizard's machine/stock pages into steps 1–2, or chain it before?
    (Proposal: merge — two wizards is the problem restated.)
-3. **Non-default vise:** when `vise.source` is not `default`, seat-Z is not known — step 3 asks for
-   the probe reading as the Setups row does today. Is that acceptable for v1?
+3. ~~**Non-default vise:** when `vise.source` is not `default`, seat-Z is not known — step 3 asks for
+   the probe reading as the Setups row does today.~~ Retired: the mount tap is an executor step, so
+   every mount's seat is measured, shipped default or not.
 4. **Where the probe's live transcript lives** in the stepper (inline, or the existing Cut surface).
 
 ## 8. Acceptance

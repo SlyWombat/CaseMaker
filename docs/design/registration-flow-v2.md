@@ -54,8 +54,9 @@ mount is the planned one AND supplies the Z datum the rest of the run needs. No 
   above the surface (#590). A spread beyond the depth band is the existing `blank-bowed` refusal.
 - **Update the view:** the found origin (XY offset, rotation, surface Z) moves the stock in the
   viewport and the setup's reading, *before* the origin is written — the operator sees where the
-  blank actually is relative to the design, and the run sheet records it. The stop sentences compare
-  to the run's own readings (#588) and the step narration shows what is happening (#587).
+  blank actually is relative to the design, and the run sheet records it (#592, landed #604). The
+  stop sentences compare to the run's own readings (#588) and the step narration shows what is
+  happening (#587).
 
 ### 4. Cutter in, continue
 
@@ -78,6 +79,11 @@ surface + (cutter PRB − probe PRB), home — then the job's own run.
 3. Step 1's `M119` check and the probe-type naming.
 4. Step 3's "update the view" + #587/#588 wording.
 5. Bracket and 4th-axis reference taps.
+
+Landed: the mount tap and the datum path (#598/#599/#601), the machine card's tap and the setups
+row (#602/#603), the re-post and the found-stock view (#604), the plausibility relabel (#603) and
+the headless/schema follow-through (#605). Open: the inward scan (#593) and the stop-sentence and
+narration wording (#587/#588).
 
 Bench evidence: `docs/bench/2026-10-22-web-registration-ux-notes.md` (2026-10-23 section), traces
 `docs/bench/traces/2026-10-23-*.log`, frames `docs/bench/img/2026-10-23-register/`.
