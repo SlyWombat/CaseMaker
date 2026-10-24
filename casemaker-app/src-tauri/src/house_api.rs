@@ -878,6 +878,11 @@ mod tests {
         let body = json_of(res).await;
         assert_eq!(body["ok"], serde_json::json!(true));
         assert_eq!(body["schemaVersion"], serde_json::json!(HOUSE_SCHEMA_VERSION));
+        // #566 — the build this binary IS, straight from the stamp `build.rs` wrote into the crate.
+        // The value is whatever git said at compile time (`v1.0.0-…-g…`, possibly `-dirty`), so the
+        // test pins the WIRING, not a literal: a reader must be able to tell which commit is installed.
+        assert_eq!(body["build"], serde_json::json!(env!("CM_BUILD")));
+        assert!(!env!("CM_BUILD").is_empty());
         assert_eq!(body["hasCatalogue"], serde_json::json!(false));
         // A fresh house has no feed rows either, and the two are separate answers: a catalogue
         // synced before the feed tier existed is `hasCatalogue: true, feedRows: 0` (#310).

@@ -157,6 +157,13 @@ export type SyncSummary = z.infer<typeof SyncSummarySchema>;
 const HouseHealthSchema = z.object({
   ok: z.boolean(),
   schemaVersion: z.number().int(),
+  /**
+   * #566 — the commit the service was built from (`git describe`, e.g. `v1.0.0-825-gbea18572`), or
+   * `unknown` from a build made without git. The service's version is not this app's static one:
+   * it answers which binary an installed `.deb` actually is. Defaulted for the same reason the
+   * other late fields are — a service from before #566 answers "present" with no build to name.
+   */
+  build: z.string().default('unknown'),
   /** Whether a Makera catalogue has been imported (#308). False is normal on a fresh machine. */
   hasCatalogue: z.boolean(),
   /**

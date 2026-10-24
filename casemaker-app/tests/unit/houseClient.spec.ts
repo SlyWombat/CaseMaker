@@ -68,6 +68,9 @@ function stubFetch(
 const HEALTH = {
   ok: true,
   schemaVersion: HOUSE_SCHEMA_VERSION,
+  // #566 — the commit the service was built from. The client treats it as a late field like the
+  // others, so a report without it still parses (see the "service that has none" test below).
+  build: 'v1.0.0-826-g2a0b7690',
   hasCatalogue: false,
   feedRows: 0,
   materialSpecRows: 0,
@@ -196,9 +199,15 @@ describe('probeHouse', () => {
 
   it('carries the last sync the service kept, and reads a service that has none (#328)', async () => {
     // A fresh service, and one from before the field: both answer "present" with no last sync.
-    const { lastSync: _omitted, ...before } = HEALTH;
+    // #566 — the same rule for the build string: a service from before it says nothing, and the
+    // client answers `unknown` rather than failing the parse or inventing a version.
+    const { lastSync: _omitted, build: _noBuild, ...before } = HEALTH;
     stubFetch(() => ({ contentType: 'application/json', body: JSON.stringify(before) }));
-    expect(await probeHouse({ base: BASE })).toEqual({ kind: 'present', health: HEALTH, base: BASE });
+    expect(await probeHouse({ base: BASE })).toEqual({
+      kind: 'present',
+      health: { ...HEALTH, build: 'unknown' },
+      base: BASE,
+    });
 
     // After a sync, the counts and the notes — each note with its weight — come with the probe.
     const lastSync = {

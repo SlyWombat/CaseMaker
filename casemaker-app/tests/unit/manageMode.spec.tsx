@@ -56,6 +56,7 @@ vi.mock('@/platform/capabilities', async (orig) => {
 const HEALTH: HouseHealth = {
   ok: true,
   schemaVersion: HOUSE_SCHEMA_VERSION,
+  build: 'v-test',
   hasCatalogue: true,
   feedRows: 0,
   materialSpecRows: 0,

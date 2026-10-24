@@ -55,6 +55,10 @@ function Kv({ label, children }: { label: string; children: ReactNode }) {
 }
 
 export function MachinesScope() {
+  // #566 — the build the house service reports (`/api/v1/health`). Read here, not from the page's
+  // own bundle: on a machine running the installed app the service IS the build being verified,
+  // and a LAN browser talking to it needs that answer rather than the page's.
+  const build = useToolRegistryStore((s) => s.health?.build ?? null);
   const machine = useMachineStore((s) => s.machine);
   const outcome = useMachineStore((s) => s.outcome);
   const reason = useMachineStore((s) => s.reason);
@@ -176,6 +180,16 @@ export function MachinesScope() {
               The machines this app has reached, each as it answered last time. A check asks the
               network; the machine answers or it does not.
             </p>
+            {/* #566 — the commit this installed build came from, from the service's own health
+                report. On k3 the only way to tell one fixed build from the next used to be the
+                binary's md5 and the build timestamp; this is the answer in the place a person
+                checking a fix against the machine already looks. Nothing is drawn where there is
+                no service to ask (the static web build). */}
+            {build !== null && (
+              <p className="hint" data-testid="manage-app-build">
+                Case Maker build <b>{build}</b>
+              </p>
+            )}
           </div>
           {/* #354 — a build that cannot open a socket to a controller does not offer to check one.
               The check, the address box and Connect used to sit here under a sentence saying a check

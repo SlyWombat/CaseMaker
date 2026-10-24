@@ -19,6 +19,7 @@ const MACHINE = VIEW.machines[0]!;
 const HEALTH: HouseHealth = {
   ok: true,
   schemaVersion: 1,
+  build: 'v-test',
   hasCatalogue: false,
   feedRows: 0,
   materialSpecRows: 0,

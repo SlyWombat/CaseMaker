@@ -31,6 +31,7 @@ function minimalService() {
       health: {
         ok: true,
         schemaVersion: HOUSE_SCHEMA_VERSION,
+        build: 'v-test',
         hasCatalogue: false,
         feedRows: 0,
         materialSpecRows: 0,

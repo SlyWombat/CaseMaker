@@ -25,6 +25,7 @@ import { useToolRegistryStore } from '@/store/toolRegistryStore';
 const HEALTH: HouseHealth = {
   ok: true,
   schemaVersion: HOUSE_SCHEMA_VERSION,
+  build: 'v-test',
   hasCatalogue: true,
   feedRows: 1328,
   materialSpecRows: 189,

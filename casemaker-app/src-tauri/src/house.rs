@@ -561,6 +561,13 @@ pub(crate) fn validate_tiers(tools: &[UserTool], inventory: &[InventoryItem]) ->
 pub struct Health {
     pub ok: bool,
     pub schema_version: u32,
+    /// #566 — the build this service IS, as `build.rs` stamped it at compile time:
+    /// `git describe --tags --always --dirty` (`v1.0.0-825-gbea18572`, `…-dirty`), or `unknown`
+    /// when it was compiled without git. The crate version cannot answer this — every build reads
+    /// 1.0.0 — and an installed `.deb` has no other way to say which commit it came from.
+    /// Defaulted so this build's `Health` still deserialises a report written before the field.
+    #[serde(default = "unknown_build")]
+    pub build: String,
     pub has_catalogue: bool,
     /// How many feed rows the stored catalogue holds (#310). A catalogue synced before the feed tier
     /// existed reports `has_catalogue: true` with `feedRows: 0`, which is exactly the state a re-sync
@@ -584,6 +591,12 @@ pub struct Health {
     /// Defaulted, so a reader from before the field sees an empty list.
     #[serde(default)]
     pub warnings: Vec<String>,
+}
+
+/// The build string a report written before #566 carries: the field is absent, and the honest
+/// answer is that it does not know rather than a version nobody built.
+fn unknown_build() -> String {
+    "unknown".to_string()
 }
 
 /// Everything the API can refuse, and why. Mapped to HTTP status codes in `house_api.rs`.
@@ -1141,6 +1154,8 @@ impl HouseStore {
         Health {
             ok: true,
             schema_version: HOUSE_SCHEMA_VERSION,
+            // #566 — the commit this binary was built from, stamped by `build.rs`.
+            build: env!("CM_BUILD").to_string(),
             has_catalogue: !inner.catalogue.tools.is_empty(),
             feed_rows: inner.catalogue.feeds.len(),
             material_spec_rows: inner.catalogue.material_specs.len(),

@@ -73,6 +73,7 @@ describe('#412 the location card', () => {
       health: {
         ok: true,
         schemaVersion: 1,
+        build: 'v-test',
         hasCatalogue: false,
         feedRows: 0,
         materialSpecRows: 0,
@@ -106,6 +107,7 @@ describe('#412 the location card', () => {
         health: {
           ok: true,
           schemaVersion: 1,
+          build: 'v-test',
           hasCatalogue: false,
           feedRows: 0,
           materialSpecRows: 0,
