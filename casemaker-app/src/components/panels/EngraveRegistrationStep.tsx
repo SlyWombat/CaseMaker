@@ -50,7 +50,7 @@ import { effectiveMargins } from '@/engine/cnc/engrave/depthBounds';
 import { surfaceSpreadPlan, type SurfaceSpreadAssessment } from '@/engine/cnc/engrave/surfaceSpread';
 import { useEngraveJobStore } from '@/store/engraveJobStore';
 import { useEngraveRegistrationStore } from '@/store/engraveRegistrationStore';
-import { machineAt, useLocationStore } from '@/store/locationStore';
+import { createFirstBed, machineAt, useLocationStore } from '@/store/locationStore';
 import { viseFrameFromRegistration, withViseJawTopDatum, withVisePlacementFrame } from '@/platform/bedProfiles';
 import { useMachineTranscriptStore } from '@/store/machineTranscriptStore';
 import { useSettingsStore } from '@/store/settingsStore';
@@ -298,17 +298,25 @@ export function EngraveRegistrationStep({ job, target }: EngraveRegistrationStep
         const machine = machineAt(target);
         if (machine !== null) {
           const now = new Date().toISOString();
-          const frame = viseFrameFromRegistration({ measuredAt: now, correctedG54: r.outcome.correctedG54 }, job.workholding.vise.jawStartY);
-          await useLocationStore.getState().saveMachine(withVisePlacementFrame(machine, frame, { fixedJawFaceX: `measured:${now}`, jawStartY: 'typed' }, now));
+          const registration = { measuredAt: now, correctedG54: r.outcome.correctedG54 };
+          const frame = viseFrameFromRegistration(registration, job.workholding.vise.jawStartY);
+          // #613 — a machine with no bed profile gets one here (bare bed, the vise accessory, the
+          // pins placement) so the frame write-back has an active profile to land on.
+          const withBed = await createFirstBed(machine, registration, now);
+          await useLocationStore.getState().saveMachine(withVisePlacementFrame(withBed, frame, { fixedJawFaceX: `measured:${now}`, jawStartY: 'typed' }, now));
         }
       }
       // #599 — the mount tap measured the jaw top: write it into the active bed profile's datum.
       if (r.mountTap !== null) {
         const machine = machineAt(target);
         if (machine !== null) {
+          const now = new Date().toISOString();
+          // #613 — a no-profile machine still needs the bed before the datum can land; the frame is
+          // null here (a tap alone does not place the jaw), which a later registration fills.
+          const withBed = await createFirstBed(machine, null, now);
           await useLocationStore
             .getState()
-            .saveMachine(withViseJawTopDatum(machine, r.mountTap, plan.probe?.id ?? null, new Date().toISOString()));
+            .saveMachine(withViseJawTopDatum(withBed, r.mountTap, plan.probe?.id ?? null, now));
         }
       }
       setResult(r);

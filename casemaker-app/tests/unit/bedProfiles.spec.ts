@@ -16,6 +16,8 @@ import {
   bedFromLegacy,
   bedMigrationDue,
   changedBedProfile,
+  ensureFirstRegistrationBed,
+  firstRegistrationBed,
   newestViseRegistration,
   switchActiveProfile,
   withViseJawTopDatum,
@@ -302,5 +304,77 @@ describe('which registration the migration reads (#510)', () => {
     expect(newestViseRegistration([source('2026-10-16T09:00:00.000Z')], null)).toBeNull();
     expect(newestViseRegistration([], target)).toBeNull();
     expect(newestViseRegistration([source('2026-10-16T09:00:00.000Z', { plan: { mount: 'tape' } })], target)).toBeNull();
+  });
+});
+
+describe('#613 the first-registration bed', () => {
+  it('creates the active profile, the vise accessory and the framed pins placement', () => {
+    // The k3 house shape: no legacy vise settings, no wasteboard — nothing for `bedFromLegacy`.
+    const machine = legacyMachine({ wasteboard: null, fixtures: {} });
+    expect(bedFromLegacy(machine, null, null, NOW)).toBeNull();
+
+    const at = '2026-10-23T10:00:00.000Z';
+    const registration = { measuredAt: at, correctedG54: { x: -0.1, y: 0.0 } };
+    const migrated = firstRegistrationBed(machine, registration, at)!;
+
+    // One active profile, day-named, on a bare bed, with the history line.
+    expect(migrated.activeBedProfileId).toBe('bp-first-2026-10-23');
+    expect(migrated.bedProfiles).toHaveLength(1);
+    expect(migrated.bedProfiles[0]).toMatchObject({
+      id: 'bp-first-2026-10-23',
+      name: 'bed 2026-10-23',
+      basedOn: null,
+    });
+    expect(migrated.bedProfiles[0]!.surface.kind).toBe('bare-bed');
+    expect(migrated.bedProfiles[0]!.history[0]!.what).toBe('created at the first vise registration');
+
+    // The vise accessory lands in the location's accessories[], checked out to this machine, its
+    // unit numbers unmeasured and its constants the Z1 reference unit's own figures.
+    expect(migrated.accessories).toHaveLength(1);
+    expect(migrated.accessories[0]).toMatchObject({
+      id: 'fx-vise-1',
+      kind: 'vise',
+      product: 'makera-z1-low-profile-vise',
+      whereabouts: { kind: 'machine', machineId: machine.id, since: at },
+    });
+    expect(migrated.accessories[0]!.history[0]!.what).toBe('created at the first vise registration');
+    expect(migrated.accessories[0]!.constants).toMatchObject({
+      jawBarWidth: 10,
+      jawLength: 100,
+      ledgeStep: 3.1,
+      ledgeWidth: 1.9,
+    });
+    expect(migrated.accessories[0]!.unit.jawStartY).toBeNull();
+    expect(migrated.accessories[0]!.unit.fixedJawThickness).toBeNull();
+    expect(migrated.accessories[0]!.provenance.jawStartY).toBe('unmeasured');
+    expect(migrated.accessories[0]!.provenance.bodyHeight).toBe('unmeasured');
+
+    // The pins placement carries the frame from the registration: corrected G54 X is the fixed jaw
+    // face, and the bar starts the shipped -10 mm from the corrected G54 Y.
+    const placement = migrated.bedProfiles[0]!.placements[0]!;
+    expect(placement).toMatchObject({
+      id: 'pl-vise',
+      fixture: 'fx-vise-1',
+      where: { kind: 'pins', pins: 'vise' },
+    });
+    expect(placement.frame).toEqual({ fixedJawFaceX: -0.1, jawStartY: -10.0 });
+
+    // The record the write-back saves still parses under the schema the service reads it back with.
+    const saved = ensureFirstRegistrationBed(machine, registration, at);
+    expect(saved.activeBedProfileId).toBe('bp-first-2026-10-23');
+    expect(MachineRecordSchema.safeParse(saved).success).toBe(true);
+  });
+
+  it('leaves a described bed alone, and the tap creates a null-framed placement first', () => {
+    const described = legacyMachine({ bedProfiles: [] });
+    expect(firstRegistrationBed(described, null, NOW)).toBeNull();
+
+    const machine = legacyMachine({ wasteboard: null, fixtures: {} });
+    const tapped = firstRegistrationBed(machine, null, NOW)!;
+    expect(tapped.bedProfiles[0]!.placements[0]!.frame).toBeNull();
+    expect(tapped.bedProfiles[0]!.placements[0]!.provenance).toEqual({});
+    // The tap alone still names the accessory and the active profile, ready for the datum write-back.
+    expect(tapped.accessories[0]!.id).toBe('fx-vise-1');
+    expect(tapped.activeBedProfileId).toBe('bp-first-2026-10-15');
   });
 });

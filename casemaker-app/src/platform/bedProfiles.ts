@@ -28,7 +28,7 @@
  * keys come out. No store, no requests, so every rule below is pinned by `bedProfiles.spec.ts`.
  */
 
-import { LEDGE_STEP, LEDGE_WIDTH } from '@/engine/cnc/fixture';
+import { DEFAULT_VISE, LEDGE_STEP, LEDGE_WIDTH, Z1_VISE } from '@/engine/cnc/fixture';
 import type { ShopDefaults } from './defaultsClient';
 import type { BedProfile, FixtureRecord, MachineRecord } from './locationClient';
 
@@ -351,6 +351,158 @@ export function bedFromLegacy(
     accessories,
     bedProfiles: [profile],
     activeBedProfileId: profileId,
+  };
+}
+
+/**
+ * #613 — the bed a machine with NOTHING legacy gets from its first vise registration (or jaw tap).
+ *
+ * `bedFromLegacy` answers null on the k3 house's shape (`fixtures: {}`, no wasteboard, no measured
+ * seat): there is nothing to migrate, so `migrateBedOnce` writes nothing and the #599/#600
+ * write-backs (`withVisePlacementFrame`, `withViseJawTopDatum`) bounce off `activeBedProfileId ===
+ * undefined`. The first registration therefore CREATES the bed instead: a day-named profile on a
+ * bare bed (open question E), the house's vise accessory built from the Z1 product constants (this
+ * unit's numbers still unmeasured), and the pins placement — its frame from the registration, or
+ * null for the jaw tap (which then still needs a registration before the frame exists).
+ *
+ * The accessory is the location's `accessories[]` content, exactly as `bedFromLegacy` returns it;
+ * the machine-side profile is what `saveMachine` writes. Returns null only when the bed is already
+ * described (`bedProfiles` present): then the write-backs land on the active profile as designed.
+ */
+export function firstRegistrationBed(
+  machine: MachineRecord,
+  registration: LegacyViseRegistration | null,
+  now: string,
+): MigratedBed | null {
+  if (!bedMigrationDue(machine)) return null;
+
+  const day = dayOf(now);
+  const profileId = `bp-first-${day}`;
+
+  // The house's vise accessory, shaped exactly like `bedFromLegacy`'s, but with nothing to read
+  // from a legacy settings record: the unit's numbers are all unmeasured, and the product constants
+  // are the Z1 reference unit's own figures (#208/#448, fixture.ts), never claimed as this unit's.
+  const unit: Record<string, number | null> = {
+    stockProud: null,
+    fixedJawThickness: null,
+    movingJawThickness: null,
+    jawLength: null,
+    jawStartY: null,
+    uncertainty: null,
+    // The design's unmeasured body dimensions: present as explicitly unmeasured, not guessed.
+    jawBarHeight: null,
+    bodyHeight: null,
+    maxOpening: null,
+  };
+  const provenance: Record<string, string> = {};
+  for (const [key, value] of Object.entries(unit)) {
+    provenance[key] = value === null ? 'unmeasured' : 'measured';
+  }
+
+  const accessory: FixtureRecord = {
+    id: 'fx-vise-1',
+    kind: 'vise',
+    product: 'makera-z1-low-profile-vise',
+    variant: null,
+    constants: {
+      // The product's own numbers, measured once on the reference unit — the tier below a saved
+      // or measured per-unit record, the same rule `bedFromLegacy` follows.
+      jawBarWidth: Z1_VISE.fixedJawThickness,
+      jawLength: Z1_VISE.jawLength,
+      ledgeStep: LEDGE_STEP,
+      ledgeWidth: LEDGE_WIDTH,
+    },
+    unit,
+    provenance: {
+      ...provenance,
+      jawBarWidth: 'measured',
+      jawLength: 'measured',
+      ledgeStep: 'measured',
+      ledgeWidth: 'measured',
+    },
+    // #597 — the accessory belongs to the house and is checked out to the machine it describes.
+    whereabouts: { kind: 'machine', machineId: machine.id, since: now },
+    history: [{ at: now, what: 'created at the first vise registration' }],
+  };
+
+  const frame =
+    registration === null
+      ? null
+      : // The same arithmetic as `bedFromLegacy` and the planner's frame source order: the corrected
+        // G54 X is the fixed jaw face, and the bar starts the shipped `DEFAULT_VISE.jawStartY` from
+        // the corrected G54 Y (this unit's jaw start is still unmeasured).
+        viseFrameFromRegistration(registration, DEFAULT_VISE.jawStartY);
+
+  const profile: BedProfile = {
+    id: profileId,
+    name: `bed ${day}`,
+    createdAt: now,
+    basedOn: null,
+    surface: {
+      // Open question E: the bare bed is a surface kind with no size and no scars.
+      kind: 'bare-bed',
+      material: null,
+      length: null,
+      width: null,
+      thickness: null,
+      position: null,
+      provenance: {},
+      scars: [],
+      lastResurfacedAt: null,
+    },
+    datums: {
+      surfaceTopZ: null,
+      viseJawTopZ: null,
+      bracketSeatZ: null,
+      rotaryAxis: null,
+    },
+    placements: [
+      {
+        id: 'pl-vise',
+        fixture: 'fx-vise-1',
+        where: { kind: 'pins', pins: 'vise', anchor: null },
+        count: null,
+        frame,
+        provenance:
+          registration === null
+            ? {}
+            : {
+                fixedJawFaceX: `measured:${registration.measuredAt}`,
+                // The origin is measured; where the bar starts along it is the shipped default.
+                jawStartY: 'typed',
+              },
+      },
+    ],
+    preferredMounting: [],
+    consumables: null,
+    history: [{ at: now, what: 'created at the first vise registration' }],
+  };
+
+  return {
+    accessories: [accessory],
+    bedProfiles: [profile],
+    activeBedProfileId: profileId,
+  };
+}
+
+/**
+ * #613 — the machine with its first-registration bed in place, or the machine unchanged when it is
+ * already described. The write-back call sites fold this onto the record they already hold before
+ * `withVisePlacementFrame` / `withViseJawTopDatum`, so the creation and the write-back go out in the
+ * one `saveMachine`.
+ */
+export function ensureFirstRegistrationBed(
+  machine: MachineRecord,
+  registration: LegacyViseRegistration | null,
+  now: string,
+): MachineRecord {
+  const migrated = firstRegistrationBed(machine, registration, now);
+  if (migrated === null) return machine;
+  return {
+    ...machine,
+    bedProfiles: migrated.bedProfiles,
+    activeBedProfileId: migrated.activeBedProfileId,
+    updatedAt: now,
   };
 }
 

@@ -96,7 +96,7 @@ export function MachineBed({ machine }: { machine: MachineRecord }) {
     return (
       <>
         <span>bed</span>
-        <b data-testid="manage-bed">— not described (set it up in the wizard)</b>
+        <b data-testid="manage-bed">— not described (described by the first registration)</b>
       </>
     );
   }

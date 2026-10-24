@@ -59,7 +59,7 @@ import {
   type MachineRecord,
 } from '@/platform/locationClient';
 import { houseAddFinishedProgram } from '@/platform/finishedProgramsClient';
-import { bedFromLegacy, bedMigrationDue, newestViseRegistration } from '@/platform/bedProfiles';
+import { bedFromLegacy, bedMigrationDue, ensureFirstRegistrationBed, firstRegistrationBed, newestViseRegistration, type LegacyViseRegistration } from '@/platform/bedProfiles';
 import { parseMarginsStrict, useSettingsStore, type FixturesSettings } from './settingsStore';
 import { useMachineStore } from './machineStore';
 import { useToolRegistryStore } from './toolRegistryStore';
@@ -407,6 +407,35 @@ export function accessoriesFor(machine: MachineRecord): FixtureRecord[] {
  */
 export function finishedProgramsFor(target: { host: string; port: number }): readonly string[] {
   return machineAt(target)?.finishedPrograms ?? [];
+}
+
+/**
+ * #613 — the first registration on a machine with no bed profile creates the bed: the vise accessory
+ * is written to the house's `accessories[]` (skipped when it already exists, so the action is
+ * idempotent), and the machine is returned with the new profile + active id folded in, ready for the
+ * caller's `saveMachine` with the frame/datum. Returns the machine unchanged when the bed is already
+ * described. The accessory write retries once on a stale guard; a refused write does not block the
+ * registration.
+ */
+export async function createFirstBed(
+  machine: MachineRecord,
+  registration: LegacyViseRegistration | null,
+  now: string,
+): Promise<MachineRecord> {
+  const migrated = firstRegistrationBed(machine, registration, now);
+  if (migrated === null) return machine;
+  const store = useLocationStore.getState();
+  const acc = migrated.accessories[0]!;
+  const exists = store.location?.accessories?.some((a) => a.id === acc.id) ?? false;
+  if (!exists) {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const ok = await store.saveAccessory(acc);
+      if (ok === 'ok') break;
+      if (ok !== 'stale') return machine; // a refused accessory write must not block the registration.
+      // stale: `saveAccessory` already re-read the location; retry once with the fresh ETag.
+    }
+  }
+  return ensureFirstRegistrationBed(machine, registration, now);
 }
 
 /**

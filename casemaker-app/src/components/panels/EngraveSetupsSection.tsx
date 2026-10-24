@@ -21,7 +21,7 @@ import { useMachineTranscriptStore } from '@/store/machineTranscriptStore';
 import { useEngraveRegistrationStore } from '@/store/engraveRegistrationStore';
 import { useToolRegistry } from '@/hooks/useToolRegistry';
 import { expandEngraveRow } from '@/store/engraveRowStore';
-import { accessoriesFor, machineAt, useLocationStore } from '@/store/locationStore';
+import { accessoriesFor, createFirstBed, machineAt, useLocationStore } from '@/store/locationStore';
 import { newestViseRegistration, viseFrameFromRegistration, withViseJawTopDatum, type RegistrationSource } from '@/platform/bedProfiles';
 import { newId } from '@/utils/id';
 import { bracketSettings, anchorFrom, bracketDatum, bracketExpectedSurface, clampObstacles, bracketObstacles, defaultClampPlacements } from '@/engine/cnc/mounts/bracket';
@@ -487,7 +487,11 @@ export function EngraveSetupsSection({ initiallyOpen = false }: { initiallyOpen?
       if (r.ok) {
         const record = machineAt(target);
         if (record !== null) {
-          await useLocationStore.getState().saveMachine(withViseJawTopDatum(record, { z: r.z, at: r.at }, probe?.id ?? null, new Date().toISOString()));
+          const now = new Date().toISOString();
+          // #613 — a no-profile machine gets its first bed here (a jaw tap, so the placement's
+          // frame is null until a registration measures it); the datum then lands as designed.
+          const withBed = await createFirstBed(record, null, now);
+          await useLocationStore.getState().saveMachine(withViseJawTopDatum(withBed, { z: r.z, at: r.at }, probe?.id ?? null, now));
         }
         setTapNote('the jaw top is recorded — plan the registration again');
         setTapEpoch((e) => e + 1);
