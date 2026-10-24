@@ -130,7 +130,7 @@ export function EngraveSetupRow(props: EngraveSetupRowProps): JSX.Element {
   // The shipped Z1 vise carries a known provisional seat aim (#559); a custom/measured fixture
   // does not, so its field stays empty and the operator types the probe reading as before.
   const shippedZ1Vise = setup.mount.kind === 'vise' && props.viseSource === 'default';
-  const [seatZ, setSeatZ] = useState(shippedZ1Vise ? String(VISE_SEAT_MACHINE_Z) : '');
+  const [seatZ, setSeatZ] = useState('');
   // #598 — the expert override: use the typed seat instead of the measured jaw-top datum. Off by default.
   const [useTypedSeat, setUseTypedSeat] = useState(false);
   // The field says where its aim came from: a default is an AIM, not a reading, and the probe still
@@ -372,6 +372,11 @@ export function EngraveSetupRow(props: EngraveSetupRowProps): JSX.Element {
                         data-testid="engrave-setups-use-typed-seat"
                         onChange={(e) => {
                           setUseTypedSeat(e.target.checked);
+                          // #614 — the provisional aim counts only when the override is ticked: unticked
+                          // (datum absent) must plan to need-datum, not from the seeded default.
+                          if (e.target.checked && shippedZ1Vise && seatZ.trim() === '') {
+                            setSeatZ(String(VISE_SEAT_MACHINE_Z));
+                          }
                           setPreview(null);
                         }}
                       />

@@ -343,6 +343,15 @@ describe('#471 registration — planned only after approval, refused with the en
     expect(useEngraveJobStore.getState().job.setups![0]!.registration).toBeUndefined();
   });
 
+  it('#614 a shipped-vise job with no datum and the override off plans to need-datum, not the seeded seat', () => {
+    act(() => useEngraveJobStore.setState({ job: savedJob() }));
+    render(<EngraveSetupsSection />);
+    fireEvent.click(screen.getByTestId('engrave-setup-expand-1'));
+    fireEvent.click(screen.getByTestId('engrave-setup-plan-reg-1'));
+    expect(screen.getByTestId('engrave-setup-reg-need-datum-1')).toBeTruthy();
+    expect(useEngraveJobStore.getState().job.setups![0]!.registration).toBeUndefined();
+  });
+
   it('defaults the vise seat to the shipped Z1 vise’s provisional aim (−55) behind the override', () => {
     act(() => useEngraveJobStore.setState({ job: savedJob() }));
     render(<EngraveSetupsSection />);
