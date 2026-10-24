@@ -142,6 +142,32 @@ describe('#423 the run panel, in the real tree', () => {
     expect(screen.queryByTestId('engrave-run')).toBeNull();
   });
 
+  // #618 — Pause sits beside Stop while the job runs; the suspend goes out at the run's next poll
+  // boundary, the entry records where it paused, and the same button resumes it.
+  it('pauses at the run’s boundary and resumes from the same button', async () => {
+    setMachineConsoleLoader(async () => client(100));
+    render(upload());
+    await uploadIt();
+    fireEvent.click(screen.getByTestId('engrave-run-at-machine'));
+    fireEvent.click(screen.getByTestId('engrave-run-start'));
+    await waitFor(() => expect(screen.getByTestId('engrave-run-progress').textContent).toContain('20 %'), { timeout: 6000 });
+
+    fireEvent.click(screen.getByTestId('engrave-run-pause'));
+    await waitFor(() => expect(sent).toContain('suspend'), { timeout: 6000 });
+    await waitFor(() => expect(screen.getByTestId('engrave-run-pause').textContent).toContain('Resume'), { timeout: 6000 });
+    expect(useMachineRunStore.getState().runs[machineKey(TARGET)]?.paused).toBe(true);
+    expect((useMachineRunStore.getState().runs[machineKey(TARGET)]?.lines ?? []).join('\n')).toContain('Paused at line');
+
+    fireEvent.click(screen.getByTestId('engrave-run-pause'));
+    await waitFor(() => expect(sent).toContain('resume'), { timeout: 6000 });
+    await waitFor(() => expect(useMachineRunStore.getState().runs[machineKey(TARGET)]?.paused).toBe(false), { timeout: 6000 });
+
+    fireEvent.click(screen.getByTestId('engrave-run-stop'));
+    await waitFor(() => expect(screen.getByTestId('engrave-run-outcome').dataset.state).toBe('aborted'), { timeout: 12000 });
+    expect(sent.filter((l) => l === 'suspend')).toHaveLength(1);
+    expect(sent.filter((l) => l === 'resume')).toHaveLength(1);
+  }, 40000);
+
   // #442's #423 item — "the viewport follows P": the run panel hands the panel the source line the
   // controller reports, and reports each line ONCE, so a follower is not re-seeked per render.
   it('reports the machine’s source line to the panel as it changes, once per change', async () => {

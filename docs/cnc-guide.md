@@ -754,6 +754,14 @@ one-program job keeps the single-file upload. Either way the machine is named be
 written, and **Stop** is the app's abort — the machine's own button and the plug remain the real
 stops. The app does not switch the machine on or off: the plug is a physical act.
 
+**Pause** sits beside Stop while a program runs (#618): it sends the controller's own `suspend` at
+the run's next status poll, the strip reads **Paused**, and the transcript records the line and the
+line number it paused at. The same button **resumes** it (`resume`); the controller restores the
+position and carries on — no restart file and no re-probe. What the firmware does to the spindle, the
+vacuum and Z across a suspend is being established on the bench; the run record keeps both lines
+either way. **Stop** remains the abort, and the generated `<file>-from-L<n>.nc` restart (#249) is the
+recovery after a real stop.
+
 The **web** build cannot reach a machine at all. It ends at the file, which you upload with
 **Makera Studio**; the work origin is set by hand there too.
 

@@ -74,12 +74,18 @@ export function MachineStatusStrip(): JSX.Element | null {
   const vacuum = useEngraveReleaseStore((s) =>
     machine === null ? null : s.records[machineKey(machine)]?.vacuum ?? null,
   );
+  // #618 — the app knows a job it suspended; the controller may read `Idle` once the queue drains.
+  const runPaused = useMachineRunStore((s) => (machine === null ? false : s.runs[machineKey(machine)]?.paused === true));
   const requestStop = useMachineRunStore((s) => s.requestStop);
   if (machine === null) return null;
 
   // `statusLine` is set by the store and the probe; a test fixture may hand only the raw line.
   const line = machine.statusLine ?? (machine.status === null ? null : readStatusLine(machine.status));
-  const state = registrationActive && line?.state === 'Run' ? 'Probing' : stateWord(line?.state ?? null);
+  const state = runPaused
+    ? 'Paused'
+    : registrationActive && line?.state === 'Run'
+      ? 'Probing'
+      : stateWord(line?.state ?? null);
   const wpos = line?.wpos ?? null;
   const idle = state === 'Idle' || state === 'Not answering';
   const program = fmtProgram(line?.progress);

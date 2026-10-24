@@ -2,7 +2,7 @@
 // controller and a fake clock. Nothing here reaches a machine.
 
 import { describe, expect, it } from 'vitest';
-import { STATUS_POLL_TIMING, type ConsoleSendResult } from '@/platform/machineConsole';
+import { STATUS_POLL_TIMING, type ConsoleSendResult, type ConsoleTiming } from '@/platform/machineConsole';
 import { STOP_FALLBACK } from '@/platform/machineStop';
 import { describeRun, playLine, programHash, programOwnsVacuum, readProgress, runProgram, runSettings, RUN_POLL_FLOOR_MS } from '@/platform/machineRun';
 import { readJobProgress } from '@/platform/desktop/protocol';
@@ -441,5 +441,110 @@ describe('#564 — the antistatic runs for plastic jobs only', () => {
     expect(f.lines().at(-2)).toBe('M332');
     expect(f.lines().at(-1)).toBe('M332.4');
     expect(f.lines()).not.toContain('$H');
+  });
+});
+
+describe('#618 pause / resume', () => {
+  /**
+   * A watch that suspends after the first progress poll and resumes when the suspend lands. The
+   * script is the bench's open question made explicit: after the suspend the controller reports
+   * `Idle` with NO `P:` — which is the finish rule — so a paused run that reads it as finished has
+   * failed this test.
+   */
+  it('suspends at a boundary, does not read the suspended Idle as a finish, resumes, and finishes', async () => {
+    const f = fake(['<Run|P:40,40,10>', '<Idle|MPos:0,0,0>', '<Idle|MPos:0,0,0>', '<Run|P:60,60,20>', '<Idle|P:60,100,30>']);
+    let ask: 'suspend' | 'resume' | null = null;
+    const events: string[] = [];
+    const o = await runProgram('job.nc', {
+      ...deps(f),
+      takePauseRequest: () => {
+        const a = ask;
+        ask = null;
+        return a;
+      },
+      onEvent: (e) => {
+        events.push(e.kind);
+        if (e.kind === 'poll' && e.progress.percent === 40) ask = 'suspend';
+        if (e.kind === 'paused') ask = 'resume';
+      },
+    });
+
+    expect(o).toMatchObject({ kind: 'finished', homed: true });
+    const lines = f.lines();
+    expect(lines).toContain('suspend');
+    expect(lines).toContain('resume');
+    expect(lines.indexOf('suspend')).toBeLessThan(lines.indexOf('resume'));
+    // The suspended Idle did NOT end the run: all five scripted polls were taken before the finish.
+    expect(lines.filter((l) => l === '?')).toHaveLength(6); // the gate poll + five watches
+    expect(events).toContain('paused');
+    expect(events).toContain('resumed');
+    // The suspend's reply is waited for with the abort's generous window, not a status poll's.
+    expect(f.timings.find((t) => t.line === 'suspend')?.firstReplyMs).toBe(60_000);
+  });
+
+  it('a Stop while paused ends the job without recording a finish', async () => {
+    const f = fake(['<Run|P:40,40,10>', '<Idle|MPos:0,0,0>', '<Idle|MPos:0,0,0>']);
+    let ask: 'suspend' | 'resume' | null = null;
+    let pressed = false;
+    const o = await runProgram('job.nc', {
+      ...deps(f, () => pressed),
+      takePauseRequest: () => {
+        const a = ask;
+        ask = null;
+        return a;
+      },
+      onEvent: (e) => {
+        if (e.kind === 'poll' && e.progress.percent === 40) ask = 'suspend';
+        // The operator presses Stop while suspended: the machine reads Idle with no P, which must
+        // NOT be read as the job having finished (#618's pause guard).
+        if (e.kind === 'paused') pressed = true;
+      },
+    });
+
+    expect(o.kind).toBe('stopped-unconfirmed');
+    expect(f.lines()).toContain('suspend');
+    expect(f.lines()).not.toContain('M332'); // the stop found nothing running to switch off
+    expect(f.lines()).not.toContain('$H');
+  });
+
+  it('a job that finishes at the same boundary takes no suspend', async () => {
+    const f = fake(['<Idle|P:60,100,30>']);
+    let ask: 'suspend' | null = 'suspend';
+    const o = await runProgram('job.nc', {
+      ...deps(f),
+      takePauseRequest: () => {
+        const a = ask;
+        ask = null;
+        return a;
+      },
+    });
+    expect(o.kind).toBe('finished');
+    expect(f.lines()).not.toContain('suspend');
+  });
+
+  it('a suspend that could not be sent leaves the job running and says so', async () => {
+    const f = fake(['<Run|P:40,40,10>', '<Run|P:50,60,20>', '<Idle|P:60,100,30>']);
+    let ask: 'suspend' | 'resume' | null = 'suspend';
+    const notes: string[] = [];
+    const session = {
+      send: (line: string, timing?: Partial<ConsoleTiming>) =>
+        line === 'suspend'
+          ? Promise.resolve({ kind: 'error' as const, line, detail: 'socket closed' })
+          : f.session.send(line, timing),
+    };
+    const o = await runProgram('job.nc', {
+      ...deps(f),
+      session,
+      takePauseRequest: () => {
+        const a = ask;
+        ask = null;
+        return a;
+      },
+      onEvent: (e) => {
+        if (e.kind === 'note') notes.push(e.text);
+      },
+    });
+    expect(o.kind).toBe('finished');
+    expect(notes.some((n) => n.includes('suspend was not sent'))).toBe(true);
   });
 });

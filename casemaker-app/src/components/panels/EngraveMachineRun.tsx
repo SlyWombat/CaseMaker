@@ -52,6 +52,8 @@ export function EngraveMachineRun({ target, onProgramLine, controlled = false }:
   const defaults = useShopDefaultsStore((s) => s.defaults);
   const start = useMachineRunStore((s) => s.start);
   const requestStop = useMachineRunStore((s) => s.requestStop);
+  const requestPause = useMachineRunStore((s) => s.requestPause);
+  const requestResume = useMachineRunStore((s) => s.requestResume);
   const keepOffcut = useMachineRunStore((s) => s.keepOffcut);
   const skipOffcut = useMachineRunStore((s) => s.skipOffcut);
   const answerStockUsed = useMachineRunStore((s) => s.answerStockUsed);
@@ -153,15 +155,28 @@ export function EngraveMachineRun({ target, onProgramLine, controlled = false }:
       )}
 
       {!controlled && running && (
-        <button
-          type="button"
-          data-testid="engrave-run-stop"
-          disabled={entry.stopAsked}
-          style={{ width: '100%', padding: 7, marginTop: 6 }}
-          onClick={() => requestStop(machine)}
-        >
-          {entry.stopAsked ? 'Stopping…' : 'Stop program — the machine’s red button is the emergency stop'}
-        </button>
+        <>
+          {/* #618 — Pause beside Stop: the suspend goes out at the run's next poll boundary, and the
+              same button resumes a suspended job. Stop stays the one that ends the job. */}
+          <button
+            type="button"
+            data-testid="engrave-run-pause"
+            disabled={entry.stopAsked}
+            style={{ width: '100%', padding: 7, marginTop: 6 }}
+            onClick={() => (entry.paused ? requestResume(machine) : requestPause(machine))}
+          >
+            {entry.paused ? 'Resume program' : 'Pause program — suspend goes out at the next status poll'}
+          </button>
+          <button
+            type="button"
+            data-testid="engrave-run-stop"
+            disabled={entry.stopAsked}
+            style={{ width: '100%', padding: 7, marginTop: 6 }}
+            onClick={() => requestStop(machine)}
+          >
+            {entry.stopAsked ? 'Stopping…' : 'Stop program — the machine’s red button is the emergency stop'}
+          </button>
+        </>
       )}
 
       {entry.progress && (

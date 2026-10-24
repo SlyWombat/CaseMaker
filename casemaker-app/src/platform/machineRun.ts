@@ -37,6 +37,7 @@
  */
 
 import { STOP_FALLBACK, stopOnSession, stopSettings, type StopOutcome, type StopSettings } from './machineStop';
+import { pauseResumeCommands, type PauseAction } from './machinePause';
 import { alarmLine } from './machineUpload';
 import {
   STATUS_POLL_TIMING,
@@ -95,7 +96,15 @@ export type RunEvent =
   | { kind: 'poll'; progress: Progress }
   | { kind: 'missed'; misses: number; detail: string }
   /** Something the run decided, said in the log the operator is reading. */
-  | { kind: 'note'; text: string };
+  | { kind: 'note'; text: string }
+  /**
+   * #618 — the suspend went out and the job is (or may be) suspended. `unconfirmed` is a suspend the
+   * controller did not answer inside its window: the line went out, so the run holds the paused
+   * state rather than reading a later `Idle` as a finish.
+   */
+  | { kind: 'paused'; at: Progress; unconfirmed: boolean }
+  /** #618 — the resume went out; `unconfirmed` as above. */
+  | { kind: 'resumed'; at: Progress; unconfirmed: boolean };
 
 /**
  * Which vacuum words a program's text carries (#419 decision 4), when the app's upload knows and
@@ -150,6 +159,12 @@ export interface RunDeps {
   antistatic?: boolean;
   /** True once the person pressed Stop; read at every poll boundary. */
   stopRequested: () => boolean;
+  /**
+   * #618 — the operator's Pause / Resume, TAKEN at the poll boundary (the getter clears the ask, so a
+   * press is sent once). Stop outranks it: a stop is checked first at the same boundary. The
+   * sequence itself is `machinePause.ts`'s one function; this only says when.
+   */
+  takePauseRequest?: () => PauseAction | null;
   onEvent?: (e: RunEvent) => void;
   sleep?: (ms: number) => Promise<void>;
   now?: () => number;
@@ -263,6 +278,33 @@ export async function runProgram(filename: string, deps: RunDeps): Promise<RunOu
   let seenProgress = false;
   let misses = 0;
   let lastSendAt = playSentAt;
+  /**
+   * #618 — the job is suspended (or a suspend went out unanswered). A paused job is NOT a finished
+   * one: the controller may report it `Idle` with the `P:` field gone, which is exactly the finish
+   * rule below, so the paused flag gates every end-of-run reading until a resume lands.
+   */
+  let paused = false;
+  /**
+   * #618 — a resume went out and the controller has not reported a `P:` since. Until it does, an
+   * `Idle` with no `P:` proves nothing: the machine may not have restarted the file yet. A REAL
+   * finish always says `P` 100 % at least once, so requiring a `P` after a resume cannot hide one —
+   * and if it never comes, the watch keeps watching (the operator can Stop; the bench settles
+   * whether a resumed job keeps its `P:` field at all).
+   */
+  let awaitingProgressAfterResume = false;
+
+  /** Send one pause action's sequence; `wentOut` is whether the first line reached the machine. */
+  const sendPause = async (action: PauseAction): Promise<{ sentAll: boolean; wentOut: boolean }> => {
+    const { lines, timing } = pauseResumeCommands(action);
+    for (const line of lines) {
+      const r = await send(line, timing);
+      if (anyAlarm(r) !== null) return { sentAll: false, wentOut: false };
+      if (r.kind === 'timeout') return { sentAll: false, wentOut: true };
+      if (r.kind !== 'sent') return { sentAll: false, wentOut: false };
+    }
+    return { sentAll: true, wentOut: true };
+  };
+
   for (;;) {
     const wait = pollMs - (now() - lastSendAt);
     if (wait > 0) await sleep(wait);
@@ -271,7 +313,10 @@ export async function runProgram(filename: string, deps: RunDeps): Promise<RunOu
       const stop = await stopOnSession({ send }, sleep, deps.settings.stop ?? STOP_FALLBACK, deps.antistatic === true);
       // `not-running` is Idle with no program in progress. After progress was seen, that is the job
       // ending just as Stop was pressed — a finish. Before any, it proves nothing: say so, send nothing.
+      // #618 — while paused it proves nothing either: a suspended job may have dropped its `P:` (the
+      // bench question), so this run must NOT record a finish for a job it knows it suspended.
       if (stop.kind === 'not-running') {
+        if (paused) return { kind: 'stopped-unconfirmed', status: stop.status };
         return seenProgress ? finish(readProgress(stop.status)) : { kind: 'stopped-unconfirmed', status: stop.status };
       }
       return { kind: 'aborted', stop, last };
@@ -293,9 +338,46 @@ export async function runProgram(filename: string, deps: RunDeps): Promise<RunOu
     const p = readProgress(r.text);
     last = p;
     deps.onEvent?.({ kind: 'poll', progress: p });
-    if (p.percent !== null) seenProgress = true;
-    if (p.percent === 100 && p.state === 'Idle') return finish(p);
-    if (seenProgress && p.percent === null && p.state === 'Idle') return finish(p);
+    if (p.percent !== null) {
+      seenProgress = true;
+      awaitingProgressAfterResume = false;
+    }
+
+    // The END of the job is decided from the machine's own answer first, and only while not paused:
+    // a job that finished at this very boundary must not be handed a `suspend` after its last word.
+    if (!paused) {
+      if (p.percent === 100 && p.state === 'Idle') return finish(p);
+      if (seenProgress && !awaitingProgressAfterResume && p.percent === null && p.state === 'Idle') return finish(p);
+    }
+
+    // #618 — the operator's Pause / Resume, taken at this boundary (Stop above outranks it). The
+    // suspend is a line the controller answers after its queue drains; the resumed job is then
+    // watched exactly as before.
+    const ask = deps.takePauseRequest?.() ?? null;
+    if (ask === 'suspend' && !paused) {
+      const s = await sendPause('suspend');
+      if (s.wentOut) {
+        paused = true;
+        deps.onEvent?.({ kind: 'paused', at: p, unconfirmed: !s.sentAll });
+      } else {
+        deps.onEvent?.({ kind: 'note', text: 'The suspend was not sent; the program is still running.' });
+      }
+      continue;
+    }
+    if (ask === 'resume' && paused) {
+      const s = await sendPause('resume');
+      if (s.wentOut) {
+        paused = false;
+        awaitingProgressAfterResume = true;
+        deps.onEvent?.({ kind: 'resumed', at: p, unconfirmed: !s.sentAll });
+      } else {
+        deps.onEvent?.({ kind: 'note', text: 'The resume was not sent; the job is still suspended at the machine.' });
+      }
+      continue;
+    }
+
+    // A suspended job cannot have "never started" (it plainly did), and is otherwise left watching.
+    if (paused) continue;
     if (!seenProgress && now() - playSentAt >= deps.settings.noProgressMs) {
       // Nothing ran. A vacuum THIS run switched on goes off again — but only on a machine that
       // reads Idle: anything else is a machine doing something this watch cannot see. A program's

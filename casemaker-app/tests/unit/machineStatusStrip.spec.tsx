@@ -7,6 +7,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { cleanup, render, screen } from '@testing-library/react';
 import { MachineStatusStrip } from '@/components/viewport/MachineStatusStrip';
 import { resetMachineStore, useMachineStore } from '@/store/machineStore';
+import { resetMachineRunStore, useMachineRunStore, type RunEntry } from '@/store/machineRunStore';
 import { resetRegistrationTouchesStore, useRegistrationTouchesStore } from '@/store/registrationTouchesStore';
 import { resetEngraveReleaseStore, useEngraveReleaseStore } from '@/store/engraveReleaseStore';
 import type { ReleaseRecord } from '@/store/engraveReleaseStore';
@@ -36,6 +37,7 @@ beforeEach(() => {
   resetMachineStore();
   resetRegistrationTouchesStore();
   resetEngraveReleaseStore();
+  resetMachineRunStore();
 });
 
 afterEach(cleanup);
@@ -76,5 +78,16 @@ describe('#519 item 3 — the strip while a registration runs', () => {
     });
     render(<MachineStatusStrip />);
     expect(screen.getByTestId('machine-status-vacuum').textContent).toBe('vacuum on (as sent)');
+  });
+
+  // #618 — the controller may say Idle once a suspend drains its queue; the app's own knowledge
+  // that it suspended this job is what the operator needs to see.
+  it('reads Paused while the app holds a suspended run, even if the line says Idle', () => {
+    remember('<Idle|MPos:-10,-10,-3|WPos:0,0,0>');
+    useMachineRunStore.setState({
+      runs: { '192.0.2.10:2222': { paused: true } as unknown as RunEntry },
+    });
+    render(<MachineStatusStrip />);
+    expect(screen.getByTestId('machine-status-state').textContent).toBe('Paused');
   });
 });

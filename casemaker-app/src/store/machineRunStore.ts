@@ -28,6 +28,7 @@
 import { create } from 'zustand';
 import { attachConsole } from '@/platform/machineConsole';
 import { programHash, programOwnsVacuum, runProgram, type Progress, type RunOutcome, type RunSettings, type VacuumSpan } from '@/platform/machineRun';
+import type { PauseAction } from '@/platform/machinePause';
 import { copyInMachine, offcutOffer, programCuts, runtimeOf, wearKey, weighRuntime, withRuntime } from '@/engine/cnc/runEnd';
 import type { StockItem } from '@/platform/stockClient';
 import type { InventoryItem } from '@/platform/houseClient';
@@ -396,6 +397,11 @@ export interface RunEntry {
   lines: string[];
   outcome: RunOutcome | null;
   stopAsked: boolean;
+  /**
+   * #618 — the job is suspended at the machine (or a suspend went out unanswered). The panel offers
+   * Resume instead of Pause while this is true; the run watch treats it as "not finished".
+   */
+  paused: boolean;
   /** What the job told the run (#414), or null. */
   context: RunContext | null;
   /** The end of the run, once its outcome is known (#414). */
@@ -414,6 +420,14 @@ export interface MachineRunState {
   /** Start the prepared program; false when one is already running there, or nothing is prepared. */
   start: (target: { host: string; port: number }, settings: RunSettings) => boolean;
   requestStop: (machine: string) => void;
+  /**
+   * #618 — ask the watching run to suspend the job. The line goes out at the next poll boundary (the
+   * run owns the console); a no-op when nothing is running, when a stop is already asked, or when the
+   * job is already paused.
+   */
+  requestPause: (machine: string) => void;
+  /** #618 — ask a suspended run to resume. A no-op unless the job is paused and still running. */
+  requestResume: (machine: string) => void;
   /** The offcut question: one click keeps it on the shelf. */
   keepOffcut: (machine: string) => Promise<void>;
   /** "Ignore scrap" on this run: the offcut is skipped, nothing reaches the shelf. */
@@ -426,8 +440,8 @@ export function machineKey(target: { host: string; port: number }): string {
   return `${target.host}:${target.port}`;
 }
 
-/** The Stop flag a watch reads at its boundaries — outside zustand, so reading it never re-renders. */
-const flags = new Map<string, { stop: boolean }>();
+/** The Stop/Pause flags a watch reads at its boundaries — outside zustand, so reading never re-renders. */
+const flags = new Map<string, { stop: boolean; pauseAsk: PauseAction | null }>();
 
 export const useMachineRunStore = create<MachineRunState>((set, get) => {
   const patch = (machine: string, p: Partial<RunEntry>) =>
@@ -458,6 +472,7 @@ export const useMachineRunStore = create<MachineRunState>((set, get) => {
             lines: [],
             outcome: null,
             stopAsked: false,
+            paused: false,
             context: context ?? null,
             end: null,
             pendingStock: s.runs[machine]?.pendingStock ?? null,
@@ -470,9 +485,9 @@ export const useMachineRunStore = create<MachineRunState>((set, get) => {
       const machine = machineKey(target);
       const prepared = get().runs[machine];
       if (!prepared || prepared.running) return false;
-      const f = { stop: false };
+      const f: { stop: boolean; pauseAsk: PauseAction | null } = { stop: false, pauseAsk: null };
       flags.set(machine, f);
-      patch(machine, { running: true, progress: null, lines: [], outcome: null, stopAsked: false, end: null });
+      patch(machine, { running: true, progress: null, lines: [], outcome: null, stopAsked: false, paused: false, end: null });
       const session = attachConsole(target);
       void (async () => {
         try {
@@ -493,6 +508,13 @@ export const useMachineRunStore = create<MachineRunState>((set, get) => {
             antistatic:
               prepared.context?.material !== undefined && isPlasticMaterial(prepared.context.material),
             stopRequested: () => f.stop,
+            // #618 — the ask is TAKEN (cleared) at the boundary it is sent on, so one press is one
+            // suspend/resume and a later boundary cannot send it again.
+            takePauseRequest: () => {
+              const ask = f.pauseAsk;
+              f.pauseAsk = null;
+              return ask;
+            },
             onEvent: (e) => {
               const entry = get().runs[machine];
               if (!entry) return;
@@ -501,6 +523,27 @@ export const useMachineRunStore = create<MachineRunState>((set, get) => {
               else if (e.kind === 'sent' && e.line !== '?') {
                 patch(machine, { lines: [...entry.lines, `> ${e.line}  ${e.reply.trim().split('\n')[0] ?? ''}`] });
               } else if (e.kind === 'missed') patch(machine, { lines: [...entry.lines, `(no status reply ${e.misses})`] });
+              else if (e.kind === 'paused') {
+                patch(machine, {
+                  paused: true,
+                  lines: [
+                    ...entry.lines,
+                    e.unconfirmed
+                      ? `(Paused at line ${e.at.line ?? '—'} — the controller did not answer the suspend. It may be suspended; Resume or Stop.)`
+                      : `(Paused at line ${e.at.line ?? '—'} — the job is suspended. Resume to continue.)`,
+                  ],
+                });
+              } else if (e.kind === 'resumed') {
+                patch(machine, {
+                  paused: false,
+                  lines: [
+                    ...entry.lines,
+                    e.unconfirmed
+                      ? `(Resume sent without an answer — watching; the job is at line ${e.at.line ?? '—'}.)`
+                      : `(Resumed at line ${e.at.line ?? '—'}.)`,
+                  ],
+                });
+              }
             },
           });
           patch(machine, { outcome });
@@ -544,6 +587,20 @@ export const useMachineRunStore = create<MachineRunState>((set, get) => {
       if (!f || !entry?.running) return;
       f.stop = true;
       patch(machine, { stopAsked: true, lines: [...entry.lines, '(Stop pressed — abort goes out at the next poll)'] });
+    },
+    requestPause: (machine) => {
+      const f = flags.get(machine);
+      const entry = get().runs[machine];
+      if (!f || !entry?.running || entry.paused || entry.stopAsked) return;
+      f.pauseAsk = 'suspend';
+      patch(machine, { lines: [...entry.lines, '(Pause pressed — suspend goes out at the next poll)'] });
+    },
+    requestResume: (machine) => {
+      const f = flags.get(machine);
+      const entry = get().runs[machine];
+      if (!f || !entry?.running || !entry.paused || entry.stopAsked) return;
+      f.pauseAsk = 'resume';
+      patch(machine, { lines: [...entry.lines, '(Resume pressed — resume goes out at the next poll)'] });
     },
     keepOffcut: async (machine) => {
       const end = get().runs[machine]?.end;

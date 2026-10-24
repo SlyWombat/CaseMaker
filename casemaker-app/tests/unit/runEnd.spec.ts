@@ -291,7 +291,7 @@ describe('#414 the run store: once per run, and only on a real finish', () => {
   const cutMinutes = programCuts(CUT_OUT).feedMinutes!;
   const stored = Math.round(cutMinutes * 3 * 1000) / 1000;
   const entry = (over: Partial<ReturnType<typeof useMachineRunStore.getState>['runs'][string]> = {}) => ({
-    running: false, filename: 'j.nc', programHash: 'h', progress: null, lines: [], outcome: finished, stopAsked: false, context: ctx, end: null, pendingStock: null, ...over,
+    running: false, filename: 'j.nc', programHash: 'h', progress: null, lines: [], outcome: finished, stopAsked: false, paused: false, context: ctx, end: null, pendingStock: null, ...over,
   });
 
   beforeEach(() => {

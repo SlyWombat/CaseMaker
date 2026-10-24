@@ -26,6 +26,7 @@ import { useEngraveReleaseStore, type ReleaseFile } from '@/store/engraveRelease
 import { useFirstRegistration } from '@/store/engraveRegistrationStore';
 import { facingRegistrationBlocker } from '@/store/engraveRunGate';
 import { useMachineTranscriptStore } from '@/store/machineTranscriptStore';
+import { machineKey, useMachineRunStore } from '@/store/machineRunStore';
 import { useToolRegistryStore } from '@/store/toolRegistryStore';
 import { cutterIdentity } from '@/engine/cnc/engrave/cutterCaseLine';
 import { EngraveMachineRun } from './EngraveMachineRun';
@@ -213,6 +214,9 @@ export function EngraveReleaseStep({
   // the same function the store calls, so the button's disabled state and the start refusal agree.
   const firstRegistration = useFirstRegistration(job.id, target);
   const facingGate = facingRegistrationBlocker(job, programs, firstRegistration);
+  // #618 — whether the machine's run is suspended, so the Pause button becomes Resume. A boolean
+  // selector: the run entry itself changes on every progress poll, and only this bit matters here.
+  const runPaused = useMachineRunStore((s) => (target === null ? false : s.runs[machineKey(target)]?.paused === true));
 
   useEffect(() => {
     if (host !== undefined && port !== undefined && blocker === null) plan({ host, port }, job, programs);
@@ -406,16 +410,33 @@ export function EngraveReleaseStep({
               </p>
             ))}
 
-          {record.phase === 'running' && (
-            <button
-              type="button"
-              data-testid="engrave-release-stop"
-              disabled={record.stopAsked}
-              style={{ width: '100%', padding: 7, marginTop: 6 }}
-              onClick={() => stop(target)}
-            >
-              {record.stopAsked ? 'Stopping…' : 'Stop program — the machine’s red button is the emergency stop'}
-            </button>
+          {record.phase === 'running' && target !== null && (
+            <>
+              {/* #618 — Pause beside Stop while a program runs; the same button resumes it. The
+                  suspend/resume words are `platform/machinePause.ts`'s one function, sent by the
+                  run's watch at its next poll boundary. */}
+              <button
+                type="button"
+                data-testid="engrave-release-pause"
+                disabled={record.stopAsked}
+                style={{ width: '100%', padding: 7, marginTop: 6 }}
+                onClick={() => {
+                  if (runPaused) useMachineRunStore.getState().requestResume(machineKey(target));
+                  else useMachineRunStore.getState().requestPause(machineKey(target));
+                }}
+              >
+                {runPaused ? 'Resume program' : 'Pause program — suspend goes out at the next status poll'}
+              </button>
+              <button
+                type="button"
+                data-testid="engrave-release-stop"
+                disabled={record.stopAsked}
+                style={{ width: '100%', padding: 7, marginTop: 6 }}
+                onClick={() => stop(target)}
+              >
+                {record.stopAsked ? 'Stopping…' : 'Stop program — the machine’s red button is the emergency stop'}
+              </button>
+            </>
           )}
 
           {record.phase === 'bit-change' && previous !== null && nextAtIndex !== null && (
