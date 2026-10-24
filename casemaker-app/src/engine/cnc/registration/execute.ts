@@ -97,6 +97,8 @@ export function mountConfirmText(plan: RegistrationPlan): string {
 export interface ExecDeps {
   console: RegistrationConsole;
   operator: (step: OperatorStep) => Promise<boolean>;
+  /** #587 — the latest step narration, so the section shows what is running, not a blanket "Talking…". */
+  onStep?: (sentence: string) => void;
 }
 
 export interface Transcript {
@@ -150,6 +152,8 @@ function session(deps: ExecDeps, seekFromMachineZ: number, idlePollLimit: number
   let alarmed = false;
   /** How low the probe may be right now, in a sentence — set by each step that moves it down. */
   let depth = 'at a safe height';
+  /** #588 — whether the run reached its own home step before it stopped. */
+  let homed = false;
 
   async function send(line: string, opts: { missOk?: boolean; timing?: Partial<ConsoleTiming> } = {}): Promise<string> {
     const r = await deps.console.send(line, opts.timing);
@@ -178,9 +182,10 @@ function session(deps: ExecDeps, seekFromMachineZ: number, idlePollLimit: number
     throw new Stop(`the machine did not read Idle in ${idlePolls} status polls`);
   }
 
-  /** Say how low the probe may be from here on (the stop message uses the latest). */
+  /** Say how low the probe may be from here on (the stop message uses the latest), and narrate the step (#587). */
   function at(sentence: string): void {
     depth = sentence;
+    deps.onStep?.(sentence);
   }
 
   /**
@@ -189,8 +194,9 @@ function session(deps: ExecDeps, seekFromMachineZ: number, idlePollLimit: number
    * how low the probe may be and how to recover. Nothing else is sent.
    */
   async function stopped(reason: string): Promise<string> {
+    const inAlarm = alarmed || /ALARM|timeout/i.test(reason);
     if (relative) {
-      for (const line of alarmed || /ALARM|timeout/i.test(reason) ? ['$X', 'G90'] : ['G90']) {
+      for (const line of inAlarm ? ['$X', 'G90'] : ['G90']) {
         try {
           const r = await deps.console.send(line);
           transcript.push({ line, reply: r.kind === 'sent' ? r.text : r.kind });
@@ -199,13 +205,20 @@ function session(deps: ExecDeps, seekFromMachineZ: number, idlePollLimit: number
         }
       }
     }
-    return (
-      `${reason}. Stopped — the probe may be ${depth}, and the machine may be in alarm. ` +
-      `To recover: $X, then G90, then lift with G53 G0 Z${f(seekFromMachineZ)} before any XY move.`
-    );
+    // #588 — the recovery advice is only true when the machine is actually in alarm. A G38.3 miss is
+    // a READING, not an alarm (#518), so a clean stop must not tell a beginner to clear an alarm that
+    // is not there; a run that reached its own home step has nothing to recover at all.
+    if (homed) return `${reason}. Stopped — the probe may be ${depth}. Homed; nothing to recover.`;
+    if (inAlarm) {
+      return (
+        `${reason}. Stopped — the probe may be ${depth}, and the machine may be in alarm. ` +
+        `To recover: $X, then G90, then lift with G53 G0 Z${f(seekFromMachineZ)} before any XY move.`
+      );
+    }
+    return `${reason}. Stopped — the probe may be ${depth}. The machine is Idle; nothing to recover.`;
   }
 
-  return { send, idle, stopped, at, transcript };
+  return { send, idle, stopped, at, markHomed: () => { homed = true; }, transcript };
 }
 
 type Session = ReturnType<typeof session>;
@@ -522,7 +535,7 @@ export async function runRegistration(
               {
                 ...plan.seek.band,
                 at: `as low as machine Z ${plan.seek.band.min}, ${s.surfaceToleranceMm} mm below the expected surface (the surface touch at ${touch.at})`,
-                expect: `the surface at the cut area's ${touch.at} is more than ${s.surfaceToleranceMm} mm below the registration touch (${f(slow.z)}) — the blank is not sitting flat there, or is bowed`,
+                expect: `${touch.at} is more than ${s.surfaceToleranceMm} mm lower than the centre (${f(slow.z)}) — the blank is not sitting flat; loosen the vise, press it down on that side, re-clamp, and run again`,
               },
               { x: touch.x + outcome.offset.x, y: touch.y + outcome.offset.y },
               lowApproach ? approachZ : plan.seek.fromMachineZ,
@@ -533,6 +546,7 @@ export async function runRegistration(
 
     await io.send(`G53 G0 Z${f(plan.seek.fromMachineZ)}`);
     await io.send('$H');
+    io.markHomed();
 
     // #475/#608 — the spread verdict. Z0 is the LOWEST touch (the colour line is a plane and the
     // dome is extra top material), so the outcome carries it even when the blank is refused; a

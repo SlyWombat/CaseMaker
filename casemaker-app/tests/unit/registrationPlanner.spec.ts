@@ -607,6 +607,19 @@ describe('#430 the executor, on a fake machine', () => {
     if (!r.ok) expect(r.reason).toContain(`${S.capBelowSurfaceMm} mm below the surface (a scan touch)`);
   });
 
+  it('#587 narrates each step through onStep', async () => {
+    const z1 = fakeZ1({ actual: SHIFTED });
+    const steps: string[] = [];
+    const r = await runRegistration(plan('vise'), {
+      console: z1.console,
+      operator: yes,
+      onStep: (sentence) => steps.push(sentence),
+    });
+    expect(r.ok).toBe(true);
+    expect(steps.some((s) => s.includes('the surface seek'))).toBe(true);
+    expect(steps.some((s) => s.includes('park height'))).toBe(true);
+  });
+
   it('#518 a scan miss is a reading: no $X follows it; only a stop after a TIMEOUT (an unknown state) unlocks on suspicion', async () => {
     const z1 = fakeZ1({ actual: SHIFTED });
     const flaky = {

@@ -271,6 +271,9 @@ describe('#429 the run', () => {
     // The bounded seek finds nothing down to the band, and the run stops there, saying how low the probe may be.
     expect(r).toMatchObject({ ok: false, reason: expect.stringContaining('the surface seek') });
     expect(fake.lines.filter((l) => l.startsWith('G38.3'))).toHaveLength(1);
+    // #588 — a miss is a reading, not an alarm: the stop says the machine is Idle, never "may be in alarm".
+    expect(r).toMatchObject({ ok: false, reason: expect.stringContaining('The machine is Idle; nothing to recover') });
+    expect(r).toMatchObject({ ok: false, reason: expect.not.stringContaining('may be in alarm') });
   });
 
   it('a hole that is not there makes the result unusable, by its label', async () => {

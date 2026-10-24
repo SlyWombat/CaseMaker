@@ -167,6 +167,8 @@ export function EngraveRegistrationStep({ job, target }: EngraveRegistrationStep
   const [written, setWritten] = useState<ApplyResult | null>(null);
   const [homeNote, setHomeNote] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  /** #587 — the executor's latest step narration, shown instead of a blanket "Talking…". */
+  const [narration, setNarration] = useState<string | null>(null);
 
   const handleRef = useRef<ConsoleHandle | null>(null);
   const resolverRef = useRef<((ok: boolean) => void) | null>(null);
@@ -238,6 +240,7 @@ export function EngraveRegistrationStep({ job, target }: EngraveRegistrationStep
     setWritten(null);
     setHomeNote(null);
     setError(null);
+    setNarration(null);
     const handle = attachConsole(target);
     handleRef.current = handle;
     // #475 — the cut regions' extents, at the touch count the APPROVED plan carries (a shop default
@@ -256,6 +259,10 @@ export function EngraveRegistrationStep({ job, target }: EngraveRegistrationStep
           // The at-machine tick already names the wired probe, so the executor's first prompt is
           // answered by it; every other step (the bracket's clamps, the cutter) is a fresh press.
           operator: (step) => (step.kind === 'fit-probe' ? Promise.resolve(true) : askOperator(step)),
+          // #587 — the executor narrates each step as it moves; surface it live.
+          onStep: (sentence) => {
+            if (aliveRef.current) setNarration(sentence);
+          },
         },
         spreadPlan ?? undefined,
       );
@@ -452,8 +459,8 @@ export function EngraveRegistrationStep({ job, target }: EngraveRegistrationStep
 
           {busy && (
             <div data-testid="engrave-registration-waiting">
-              <p style={MUTED}>
-                {phase === 'writing' ? 'Writing the origin…' : 'Talking to the machine…'}
+              <p style={MUTED} data-testid="engrave-registration-step">
+                {phase === 'writing' ? 'Writing the origin…' : narration ?? 'Talking to the machine…'}
               </p>
               {prompt !== null && (
                 <div data-testid="engrave-registration-operator" style={{ marginTop: 6 }}>
