@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { setHouseClientLoader, type HouseCall, type HouseClient, type HouseHealth, type HouseProbe } from '@/platform/houseClient';
 import { LocationViewSchema, type FixtureRecord } from '@/platform/locationClient';
 import { resetLocationStore, useLocationStore } from '@/store/locationStore';
-import { recordProbeReading } from '@/engine/cnc/registration/mountContext';
+import { recordProbeReading, probeFor } from '@/engine/cnc/registration/mountContext';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -82,5 +82,34 @@ describe('#601 the probe reading write-back', () => {
     await recordProbeReading(MACHINE, { lengthZ: -76.063, rest: 'X_max:0 Y_max:0 Z_max:0 A_min:1 Probe: 0' });
 
     expect(puts).toHaveLength(0);
+  });
+});
+
+describe('#525 the checked-out probe carries its instrument', () => {
+  /** The same house, with the 3D probe checked out to the machine instead of the wired one. */
+  const checkedOut3d = () => ({
+    ...VIEW,
+    accessories: (VIEW.accessories ?? []).map((a) => {
+      if (a.id === 'fx-probe-3d') {
+        return { ...a, whereabouts: { kind: 'machine' as const, machineId: MACHINE.id, since: '2026-10-24T00:00:00.000Z' } };
+      }
+      if (a.id === 'fx-probe-1') return { ...a, whereabouts: { kind: 'box' as const } };
+      return a;
+    }),
+  });
+
+  it('the wired probe is z-only, with its measured tip', () => {
+    useLocationStore.setState({ status: 'present', location: VIEW, etag: '"e1"' });
+    const probe = probeFor(MACHINE)!;
+    expect(probe.instrument).toBe('z-only');
+    expect(probe.tip).toMatchObject({ diameterMm: 2, rimOffsetMm: 0.7 });
+  });
+
+  it('the 3D probe is the xyz instrument with a NULL tip — the planner then refuses, never assumes', () => {
+    useLocationStore.setState({ status: 'present', location: checkedOut3d(), etag: '"e1"' });
+    const probe = probeFor(MACHINE)!;
+    expect(probe.id).toBe('fx-probe-3d');
+    expect(probe.instrument).toBe('xyz');
+    expect(probe.tip).toBeNull();
   });
 });

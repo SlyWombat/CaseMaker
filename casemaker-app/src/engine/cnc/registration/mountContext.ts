@@ -7,7 +7,7 @@
  */
 
 import type { MachineRecord } from '@/platform/locationClient';
-import type { MountDatum, ProbeSpec } from '@/engine/cnc/registration/plan';
+import { probeInstrument, type MountDatum, type ProbeSpec } from '@/engine/cnc/registration/plan';
 import { accessoriesFor, useLocationStore } from '@/store/locationStore';
 import { newestViseRegistration, viseFrameFromRegistration, type RegistrationSource } from '@/platform/bedProfiles';
 import { Z1_VISE } from '@/engine/cnc/fixture';
@@ -18,7 +18,13 @@ export function mountNum(v: unknown): number | null {
   return typeof v === 'number' && Number.isFinite(v) ? v : null;
 }
 
-/** #598 — the probe checked out to `machine`, or null when there is none or its tip values are missing. */
+/**
+ * #598 — the probe checked out to `machine`, or null when there is none. #525 — a probe whose tip
+ * has never been measured comes back with `tip: null` rather than null: the caller can then say
+ * "measure this probe's tip" instead of silently planning with the shop's wired-probe numbers. The
+ * instrument is the variant's (`probeInstrument`), so the planner and the executor know whether
+ * the probe touches sideways.
+ */
 export function probeFor(machine: MachineRecord | null): ProbeSpec | null {
   if (machine === null) return null;
   const acc = accessoriesFor(machine).find((a) => a.kind === 'probe');
@@ -26,8 +32,12 @@ export function probeFor(machine: MachineRecord | null): ProbeSpec | null {
   const diameterMm = mountNum(acc.unit.tipDiameterMm);
   const rimOffsetMm = mountNum(acc.unit.rimOffsetMm);
   const rimOffsetUncertaintyMm = mountNum(acc.unit.rimOffsetUncertaintyMm);
-  if (diameterMm === null || rimOffsetMm === null || rimOffsetUncertaintyMm === null) return null;
-  return { id: acc.id, variant: acc.variant ?? null, tip: { diameterMm, rimOffsetMm, rimOffsetUncertaintyMm } };
+  const variant = acc.variant ?? null;
+  const tip =
+    diameterMm === null || rimOffsetMm === null || rimOffsetUncertaintyMm === null
+      ? null
+      : { diameterMm, rimOffsetMm, rimOffsetUncertaintyMm };
+  return { id: acc.id, variant, instrument: probeInstrument(variant), tip };
 }
 
 /** #603 — the checked-out probe's display name (its product), or null when none is checked out. */
@@ -96,7 +106,7 @@ export function mountTapFor(
 
   // The frame source order: the measured placement frame, else the newest usable registration, else none.
   const f = placement?.frame ?? null;
-  let frame: { fixedJawFaceX: number; jawStartY: number } | null = null;
+  let frame: { fixedJawFaceX: number; jawStartY: number } | null;
   if (f !== null && f.fixedJawFaceX !== null && f.jawStartY !== null) {
     frame = { fixedJawFaceX: f.fixedJawFaceX, jawStartY: f.jawStartY };
   } else {

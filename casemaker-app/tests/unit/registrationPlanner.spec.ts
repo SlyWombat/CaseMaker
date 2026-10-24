@@ -33,6 +33,7 @@ import {
   type RegistrationPlan,
 } from '@/engine/cnc/registration';
 import type { LiveTouch } from '@/engine/cnc/registration/liveTouch';
+import type { ProbeSpec } from '@/engine/cnc/registration/plan';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const DOC = JSON.parse(readFileSync(join(HERE, 'fixtures', 'location-doc.json'), 'utf8')) as { defaults: unknown };
@@ -253,6 +254,13 @@ function fakeZ1(opts: {
   probeTouched?: boolean;
   /** #599 — a jaw top to answer at this machine XY (the mount tap). */
   tap?: { x: number; y: number; z: number };
+  /** #525 — the probe rim the Z touches read (default the wired probe's 0.7 mm). */
+  rim?: number;
+  /**
+   * #525 — the 3D probe's stylus ball radius, mm. A horizontal `G38.3` then answers a contact one
+   * radius outside the stock's edge it reaches (the ball's centre at the trigger), or a miss.
+   */
+  ballR?: number;
 }) {
   const inForce = opts.g54 ?? G54;
   const surface = opts.surface ?? SURFACE;
@@ -266,7 +274,7 @@ function fakeZ1(opts: {
   const lines: string[] = [];
   const xyMovesAtZ: number[] = [];
   const reply = (text: string): ConsoleSendResult => ({ kind: 'sent', line: '', text, frames: 1, elapsedMs: 1 });
-  const RIM = 0.7;
+  const RIM = opts.rim ?? 0.7;
   const zAt = (wx: number, wy: number): number | null => {
     if (opts.clamp && wx >= opts.clamp.xMin && wx <= opts.clamp.xMax) return surface + 2;
     if (wx >= a.xMin - RIM && wx <= a.xMax + RIM && wy >= a.yMin - RIM && wy <= a.yMax + RIM) return surface;
@@ -340,6 +348,25 @@ function fakeZ1(opts: {
         pos.z = target;
         lowest = Math.min(lowest, pos.z);
         return reply(`[PRB:${pos.x.toFixed(3)},${pos.y.toFixed(3)},${target.toFixed(3)}:0]\nok`);
+      }
+      // #525 — a SIDEWAYS probe: the 3D probe's ball contacts the stock's edge it can reach with its
+      // centre one radius outside it, and reports that centre; no contact over the travel is a miss.
+      m = /^G38\.3 ([XY])(-?[\d.]+) F[\d.]+$/.exec(line);
+      if (m) {
+        if (mode !== 'G91') throw new Error('the executor probed in absolute mode');
+        const axis = m[1] === 'X' ? ('x' as const) : ('y' as const);
+        const travel = Number(m[2]);
+        const r = opts.ballR ?? 1.5;
+        const startMachine = pos[axis];
+        const endMachine = startMachine + travel;
+        const lo = (axis === 'x' ? a.xMin : a.yMin) + (axis === 'x' ? inForce.x : inForce.y);
+        const hi = (axis === 'x' ? a.xMax : a.yMax) + (axis === 'x' ? inForce.x : inForce.y);
+        const contactLow = lo - r; // moving + toward the low edge, the centre stops one radius outside
+        const contactHigh = hi + r;
+        const hits =
+          travel > 0 ? startMachine < contactLow && endMachine >= contactLow : startMachine > contactHigh && endMachine <= contactHigh;
+        pos[axis] = hits ? (travel > 0 ? contactLow : contactHigh) : endMachine;
+        return reply(`[PRB:${pos.x.toFixed(3)},${pos.y.toFixed(3)},${pos.z.toFixed(3)}:${hits ? 1 : 0}]\nok`);
       }
       if (/^G10 L2 P1 /.test(line)) return reply('ok');
       return reply(`error:unexpected line ${line}`);
@@ -420,6 +447,56 @@ describe('#599 the mount tap', () => {
     expect(seen.slice(2).every((t) => t.source === 'edge')).toBe(true);
     // Numbering is the landing order, with no gaps and no repeats.
     expect(seen.map((t) => t.seq)).toEqual(seen.map((_, i) => i + 1));
+  });
+});
+
+describe('#525 the 3D probe’s sideways scan, against the fake Z1', () => {
+  const PROBE_3D: ProbeSpec = {
+    id: 'fx-probe-3d',
+    variant: '3d',
+    instrument: 'xyz',
+    tip: { diameterMm: 3, rimOffsetMm: 1.5, rimOffsetUncertaintyMm: 0.05 },
+  };
+  const TAP3 = { x: -186.2, y: -180, fromMachineZ: -3, label: 'the vise fixed-jaw top' };
+  const JAW3: MountDatum = { jawTopZ: -56.82, measuredAt: '2026-10-23T00:00:00.000Z', by: 'wired-probe' };
+
+  const sidePlan = (): RegistrationPlan => {
+    // The plan's settings come from the INSTRUMENT (the 3D probe's ball radius), exactly as the
+    // Setups section resolves them (`registrationSettings(defaults, probe)`).
+    const instrumentSettings = registrationSettings(null, PROBE_3D).settings;
+    const r = planRegistration(
+      input('vise', { probe: PROBE_3D, mountDatum: JAW3, mountTap: TAP3, fixtureBelowSurfaceMm: undefined }),
+      instrumentSettings,
+    );
+    if (!r.ok) throw new Error(r.reason);
+    return r.plan;
+  };
+
+  it('finds the FREE front edge in ONE horizontal touch, and leaves the fixed-jaw edge to the Z scan', async () => {
+    const z1 = fakeZ1({ actual: SHIFTED, tap: { x: TAP3.x, y: TAP3.y, z: JAW3.jawTopZ }, ballR: 1.5, rim: 1.5 });
+    const p = sidePlan();
+    const seen: LiveTouch[] = [];
+    const r = await runRegistration(p, { console: z1.console, operator: yes, onTouch: (t) => seen.push(t) });
+    if (!r.ok) throw new Error(r.reason);
+
+    // Exactly one sideways line, and it is on Y: a vise's X edges are the jaws' own faces.
+    const sideLines = z1.lines.filter((l) => /^G38\.3 [XY]-?[\d.]+ F/.test(l));
+    expect(sideLines).toHaveLength(1);
+    expect(sideLines[0]).toMatch(/^G38\.3 Y/);
+
+    // The front scan is ONE side reading at the ball's centre; the outcome corrects it to the wall.
+    const front = r.data.scans.find((s) => s.scan.edge === 'front')!;
+    expect(front.touches).toHaveLength(1);
+    expect(front.touches[0]!.sideContact).toBe(true);
+    expect(front.touches[0]!.kind).toBe('stock');
+    // The left edge still comes from the Z-only scan, so both axes are measured. Its bisection
+    // resolves to the plan's fine step (the no-location fallback is 0.5 mm), so the X offset is
+    // exact only to ±fineStep/2 — the sideways Y edge is a single exact reading.
+    expect(Math.abs(r.outcome.offset.x - 1.2)).toBeLessThanOrEqual(0.13);
+    expect(r.outcome.offset.y).toBe(0.8);
+    // The live reading (#519) is the sideways one, at the centre the probe reported.
+    const live = seen.find((t) => t.source === 'edge' && (t.label ?? '').includes('front'));
+    expect(live).toMatchObject({ kind: 'stock', touched: true });
   });
 });
 

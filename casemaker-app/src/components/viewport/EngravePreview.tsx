@@ -637,7 +637,9 @@ export function EngravePreview() {
   // Memoized on the JOB and the release, not rebuilt per render: `jobTool` materialises a fresh
   // `Tool`, and a new identity would rebuild the body's geometry every heartbeat tick.
   const cutter = useMemo(() => fittedTool(job, jobTool(job), release, resolveTool), [job, release]);
-  const probeTip = job.setups?.[0]?.registration?.plan.probe?.tip.diameterMm ?? PROBE_SPEC.tipDiameter;
+  // #525 — the plan's probe may carry no measured tip (an unmeasured instrument; the planner refuses
+  // such a plan, so a recorded one has values); the labelled fallback stands in for the drawing.
+  const probeTip = job.setups?.[0]?.registration?.plan.probe?.tip?.diameterMm ?? PROBE_SPEC.tipDiameter;
 
   // Hooks run before the early return; the geometry is null until the first preview lands, and it
   // is replaced (with its old geometry disposed) whenever the slider settles on another stage.

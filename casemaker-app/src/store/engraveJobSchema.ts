@@ -1303,13 +1303,23 @@ const registrationPlanSchema = z.object({
     .object({
       id: z.string().describe('The checked-out probe accessory id.'),
       variant: z.string().nullable().describe('The probe variant, or null.'),
+      // #525 — absent on a plan frozen before the instrument was part of the spec; such a plan was
+      // planned for the Z-only wired probe by construction.
+      instrument: z
+        .enum(['z-only', 'xyz'])
+        .optional()
+        .describe('The probe instrument the plan was made for: z-only (wired) or xyz (3D probe).'),
       tip: z
         .object({
           diameterMm: z.number().finite().describe('Probe tip diameter, in millimetres.'),
           rimOffsetMm: z.number().finite().describe('Effective probe rim offset, in millimetres.'),
           rimOffsetUncertaintyMm: z.number().finite().describe('Rim offset spread, ± millimetres.'),
         })
-        .describe('The probe tip values that resolved the settings.'),
+        // #525 — null for a checked-out probe with no measured tip; the planner refuses such a plan,
+        // so a saved plan carries values, and the nullable shape keeps the record honest.
+        .nullable()
+        .default(null)
+        .describe('The probe tip values that resolved the settings, or null when unmeasured.'),
     })
     .nullable()
     .default(null)

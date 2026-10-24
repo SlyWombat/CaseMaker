@@ -65,8 +65,9 @@ import {
   type SurfaceSpreadAssessment,
   type SurfaceSpreadPlan,
 } from '@/engine/cnc/engrave/surfaceSpread';
-import { type EdgeScan, type RegistrationPlan } from './plan';
+import { type EdgeScan, type RegistrationPlan, probeInstrumentOf } from './plan';
 import { classifyTouch, lastPrb, type Prb } from './readings';
+import { sideCentreWork, sideTouchAllowed, sideTouchSetup } from './probe3d';
 import type { LiveTouch } from './liveTouch';
 import { computeOutcome, correctionLine, type RegistrationOutcome, type RunData, type ScanRecord, type ScanTouch } from './outcome';
 import { referenceOutcome } from './references';
@@ -330,6 +331,63 @@ async function scanEdge(io: Session, plan: RegistrationPlan, scan: EdgeScan, par
   return { scan, touches };
 }
 
+/**
+ * #525 — one SIDEWAYS edge scan with the 3D probe: a lift (at the bracket's travel height), the move
+ * to the plan's outward limit, down to the touch depth and ONE horizontal `G38.3` inward — then back
+ * up. `probe3d.ts` owns the line, the depth (kept clear of the vise's ledge) and the ball's offset;
+ * this only sends and records the reading the same way the Z touch does, so the outcome's edge, the
+ * viewport's dot and the dock's row all come from one reading.
+ *
+ * Only called for an edge `sideTouchAllowed` accepts: a vise's X edges are the jaws' own faces and
+ * keep the Z-only scan (`scanEdge`), because a sideways approach there would drive the ball into a
+ * jaw bar.
+ */
+async function scanEdgeSideways(
+  io: Session,
+  plan: RegistrationPlan,
+  scan: EdgeScan,
+  surfaceZ: number,
+  sentFrom: { x: number; y: number },
+): Promise<ScanRecord> {
+  const tip = plan.probe?.tip ?? null;
+  // The planner refuses an unmeasured probe before any of this; a plan that reached here without one
+  // has been edited, and a sideways correction cannot be guessed.
+  if (tip === null) throw new Stop('the 3D probe has no measured tip — measure it (Manage › Accessories) and plan again');
+  const s = plan.settings;
+  const setup = sideTouchSetup(scan, plan, s, tip.rimOffsetMm, surfaceZ);
+  if (!setup.ok) throw new Stop(setup.reason);
+  const t = setup.touch;
+  const what = scan.label ?? `the ${scan.edge} edge`;
+  if (plan.mount === 'bracket') await io.send(`G53 G0 Z${f(plan.seek.fromMachineZ)}`);
+  await io.send(moveXY(plan, t.x, t.y));
+  await io.send(`G53 G0 Z${f(setup.zMachine)}`);
+  await io.idle();
+  io.at(`sideways toward ${what}, at machine Z ${f(setup.zMachine)}`);
+  await io.send('G91');
+  const reply = await io.send(t.line);
+  const prb = lastPrb(reply);
+  await io.send('G90');
+  await io.send(`G53 G0 Z${f(surfaceZ + s.parkAboveSurfaceMm)}`);
+  if (prb === null) throw new Stop(`the sideways touch on ${what} answered no probe reading`);
+  const kind = prb.touched ? 'stock' : 'miss';
+  const centre = sideCentreWork(prb, t.axis, sentFrom);
+  const alongX = t.axis === 'x';
+  io.saw({
+    source: 'edge',
+    label: what,
+    x: alongX ? centre : scan.along,
+    y: alongX ? scan.along : centre,
+    z: prb.z,
+    touched: prb.touched,
+    kind,
+  });
+  return {
+    scan,
+    // ONE reading: the ball's centre along the axis, with the offset that turns it into the edge.
+    touches: [{ at: centre, prb, kind, sideContact: true, edgeOffsetMm: setup.offsetMm }],
+  };
+}
+
 /** The machine-Z band a surface reading must land in, and the two sentences that explain it. */
 interface SurfaceBand {
   min: number;
@@ -553,7 +611,18 @@ export async function runRegistration(
     io.at(`at the park height, ${s.parkAboveSurfaceMm} mm above the surface`);
 
     const scans: ScanRecord[] = [];
-    for (const scan of plan.scans) scans.push(await scanEdge(io, plan, scan, parkZ, slow.z));
+    // #525 — the 3D probe touches edges SIDEWAYS where the mount allows it (the free front/back
+    // edges on a vise; every edge on the bracket/tape). The jaws block an X approach on a vise, so
+    // those edges keep the Z-only bracket-and-bisect the wired probe uses — the 3D probe triggers
+    // downward too, and the frame's fixed-jaw face is what the left edge confirms.
+    const g54 = { x: r3(slow.x - plan.surfacePoint.x), y: r3(slow.y - plan.surfacePoint.y) };
+    for (const scan of plan.scans) {
+      scans.push(
+        probeInstrumentOf(plan.probe) === 'xyz' && sideTouchAllowed(plan.mount, scan.edge)
+          ? await scanEdgeSideways(io, plan, scan, slow.z, g54)
+          : await scanEdge(io, plan, scan, parkZ, slow.z),
+      );
+    }
 
     const data: RunData = { probeRefZ: ref.z, surface: slow, scans };
     // A plan that registers on earlier-setup features has its own outcome (#429); #430's is unchanged.

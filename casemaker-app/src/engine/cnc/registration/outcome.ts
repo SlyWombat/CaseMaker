@@ -28,6 +28,16 @@ export interface ScanTouch {
   at: number;
   prb: Prb;
   kind: TouchKind;
+  /**
+   * #525 — this reading is the 3D probe's SIDEWAYS touch: `at` is the stylus BALL'S CENTRE along the
+   * scan's axis at the trigger (work coordinates), not a point on the stock that was stepped over.
+   * The edge is that centre less `edgeOffsetMm` (the ball's horizontal centre-to-edge distance at
+   * the touch depth — one radius at the equator, less when the ball meets the top corner), so
+   * `edgeFrom` corrects it directly instead of bracketing it between an on and an off touch.
+   */
+  sideContact?: true;
+  /** The horizontal ball offset for a side contact, mm (`probe3d.ts`'s `ballOffsetMm`). */
+  edgeOffsetMm?: number;
 }
 
 export interface ScanRecord {
@@ -94,6 +104,17 @@ export function edgeFrom(record: ScanRecord, tipRadius: number): EdgeFinding {
   // The name a sentence uses: a feature's wall by its label (#429), else the stock's edge.
   const what = scan.label ?? `the ${scan.edge} edge`;
   if (touches.length === 0) return { ...base, foundAt: null, problem: `the scan of ${what} made no touch` };
+  // #525 — a SIDEWAYS touch finds the edge in one reading: the stylus ball triggers with its centre
+  // standing `edgeOffsetMm` outside the wall, so the wall is the centre less that offset along the
+  // outward direction. There is no on/off bracket to halve. The offset is the module's geometry
+  // (radius at the equator, less when the ball meets the top corner); `tipRadius` is its fallback.
+  const side = touches.find((t) => t.sideContact === true);
+  if (side !== undefined) {
+    if (side.kind !== 'stock') {
+      return { ...base, foundAt: null, problem: `the sideways touch on ${what} found nothing within its travel` };
+    }
+    return { ...base, foundAt: r3(side.at - scan.outward * (side.edgeOffsetMm ?? tipRadius)), problem: null };
+  }
   // A high reading is an obstacle — unless the plan says this scan's high reading is the mount's own top
   // past a recessed stock (#517: the vise jaw above a thin sheet), in which case it is the first touch off.
   const above = touches.find((t) => t.kind === 'above');

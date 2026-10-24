@@ -90,11 +90,42 @@ export interface EdgeScan {
  * instrument rather than the shop fallback (`registrationSettings`). `tip.rimOffsetMm` is the
  * EFFECTIVE rim offset — the setting `tipRadiusMm`; `tip.rimOffsetUncertaintyMm` maps to
  * `tipRadiusUncertaintyMm`.
+ *
+ * #525 — the instrument is part of the spec: a Z-ONLY probe finds an edge by stepping past it and
+ * descending at each point, while the 3D probe triggers SIDEWAYS and finds it in one horizontal
+ * touch whose correction is the stylus ball's radius. `instrument` is derived from the accessory's
+ * variant (`probeInstrument`), optional because a plan frozen before #525 carries none and is a
+ * Z-only instrument by construction.
+ *
+ * `tip` is NULL for a checked-out probe nobody has measured yet — the house's 3D probe today. That
+ * is not a licence to fall back to the shop's wired values: the planner refuses the plan and says
+ * to measure the tip, because a sideways correction with the wrong radius is a silent offset on
+ * every edge it finds.
  */
 export interface ProbeSpec {
   id: string;
   variant: string | null;
-  tip: { diameterMm: number; rimOffsetMm: number; rimOffsetUncertaintyMm: number };
+  /** `xyz` = the Makera 3D probe (sideways touches); absent/`z-only` = the wired probe. */
+  instrument?: ProbeInstrument;
+  /** The measured tip, or null when this instrument's tip has never been measured. */
+  tip: { diameterMm: number; rimOffsetMm: number; rimOffsetUncertaintyMm: number } | null;
+}
+
+/** How a probe can touch: straight down only, or sideways as well (#525). */
+export type ProbeInstrument = 'z-only' | 'xyz';
+
+/**
+ * The instrument an accessory variant names. The house registers the 3D probe as variant `'3d'`
+ * (#601, accessory `fx-probe-3d`); everything else — the wired touch probe, an unstated variant —
+ * is the Z-only probe the current planner was written for.
+ */
+export function probeInstrument(variant: string | null): ProbeInstrument {
+  return variant !== null && /^3d$/i.test(variant.trim()) ? 'xyz' : 'z-only';
+}
+
+/** The instrument a plan's probe was for; an absent field (a pre-#525 plan) is the wired probe. */
+export function probeInstrumentOf(probe: Pick<ProbeSpec, 'instrument'> | null | undefined): ProbeInstrument {
+  return probe?.instrument ?? 'z-only';
 }
 
 /**
@@ -291,6 +322,19 @@ export function planRegistration(input: PlanInput, s: RegistrationSettings): Pla
   const mountDatum = input.mountDatum ?? null;
   const probe = input.probe ?? null;
   const mountTap = input.mountTap ?? null;
+  // #525 — a checked-out probe with no measured tip refuses the plan. Falling back to the shop's
+  // wired-probe values would plan a sideways touch with an assumed radius, which offsets every edge
+  // it finds by the difference — silently. The wired probe's record is measured; the 3D probe's is
+  // not, so the first thing its owner sees is this sentence, not a plausible-looking plan.
+  if (probe !== null && probe.tip === null) {
+    return {
+      ok: false,
+      reason:
+        `measure the ${probeInstrumentOf(probe) === 'xyz' ? '3D probe' : 'checked-out probe'}'s tip first: ` +
+        `it has no measured tip values, and a probe correction cannot be assumed. Measure its tip on a known-width ` +
+        `feature and record it in Manage › Accessories, then plan again`,
+    };
+  }
   // #598 — with a measured vise datum the seek is a SEARCH down to `jawTopZ − tolerance` (over a proud
   // stock the probe can only meet the stock), not a band around the estimate; the ceiling is the
   // expected surface + tolerance either way. The legacy seat path — and a datum with the stock recessed

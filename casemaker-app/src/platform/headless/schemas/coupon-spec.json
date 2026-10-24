@@ -1502,28 +1502,44 @@
                                     "description": "The checked-out probe accessory id.",
                                     "type": "string"
                                   },
-                                  "tip": {
-                                    "description": "The probe tip values that resolved the settings.",
-                                    "properties": {
-                                      "diameterMm": {
-                                        "description": "Probe tip diameter, in millimetres.",
-                                        "type": "number"
-                                      },
-                                      "rimOffsetMm": {
-                                        "description": "Effective probe rim offset, in millimetres.",
-                                        "type": "number"
-                                      },
-                                      "rimOffsetUncertaintyMm": {
-                                        "description": "Rim offset spread, ± millimetres.",
-                                        "type": "number"
-                                      }
-                                    },
-                                    "required": [
-                                      "diameterMm",
-                                      "rimOffsetMm",
-                                      "rimOffsetUncertaintyMm"
+                                  "instrument": {
+                                    "description": "The probe instrument the plan was made for: z-only (wired) or xyz (3D probe).",
+                                    "enum": [
+                                      "z-only",
+                                      "xyz"
                                     ],
-                                    "type": "object"
+                                    "type": "string"
+                                  },
+                                  "tip": {
+                                    "anyOf": [
+                                      {
+                                        "properties": {
+                                          "diameterMm": {
+                                            "description": "Probe tip diameter, in millimetres.",
+                                            "type": "number"
+                                          },
+                                          "rimOffsetMm": {
+                                            "description": "Effective probe rim offset, in millimetres.",
+                                            "type": "number"
+                                          },
+                                          "rimOffsetUncertaintyMm": {
+                                            "description": "Rim offset spread, ± millimetres.",
+                                            "type": "number"
+                                          }
+                                        },
+                                        "required": [
+                                          "diameterMm",
+                                          "rimOffsetMm",
+                                          "rimOffsetUncertaintyMm"
+                                        ],
+                                        "type": "object"
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ],
+                                    "default": null,
+                                    "description": "The probe tip values that resolved the settings, or null when unmeasured."
                                   },
                                   "variant": {
                                     "anyOf": [
@@ -1539,8 +1555,7 @@
                                 },
                                 "required": [
                                   "id",
-                                  "variant",
-                                  "tip"
+                                  "variant"
                                 ],
                                 "type": "object"
                               },
@@ -3078,28 +3093,44 @@
                                 "description": "The checked-out probe accessory id.",
                                 "type": "string"
                               },
-                              "tip": {
-                                "description": "The probe tip values that resolved the settings.",
-                                "properties": {
-                                  "diameterMm": {
-                                    "description": "Probe tip diameter, in millimetres.",
-                                    "type": "number"
-                                  },
-                                  "rimOffsetMm": {
-                                    "description": "Effective probe rim offset, in millimetres.",
-                                    "type": "number"
-                                  },
-                                  "rimOffsetUncertaintyMm": {
-                                    "description": "Rim offset spread, ± millimetres.",
-                                    "type": "number"
-                                  }
-                                },
-                                "required": [
-                                  "diameterMm",
-                                  "rimOffsetMm",
-                                  "rimOffsetUncertaintyMm"
+                              "instrument": {
+                                "description": "The probe instrument the plan was made for: z-only (wired) or xyz (3D probe).",
+                                "enum": [
+                                  "z-only",
+                                  "xyz"
                                 ],
-                                "type": "object"
+                                "type": "string"
+                              },
+                              "tip": {
+                                "anyOf": [
+                                  {
+                                    "properties": {
+                                      "diameterMm": {
+                                        "description": "Probe tip diameter, in millimetres.",
+                                        "type": "number"
+                                      },
+                                      "rimOffsetMm": {
+                                        "description": "Effective probe rim offset, in millimetres.",
+                                        "type": "number"
+                                      },
+                                      "rimOffsetUncertaintyMm": {
+                                        "description": "Rim offset spread, ± millimetres.",
+                                        "type": "number"
+                                      }
+                                    },
+                                    "required": [
+                                      "diameterMm",
+                                      "rimOffsetMm",
+                                      "rimOffsetUncertaintyMm"
+                                    ],
+                                    "type": "object"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ],
+                                "default": null,
+                                "description": "The probe tip values that resolved the settings, or null when unmeasured."
                               },
                               "variant": {
                                 "anyOf": [
@@ -3115,8 +3146,7 @@
                             },
                             "required": [
                               "id",
-                              "variant",
-                              "tip"
+                              "variant"
                             ],
                             "type": "object"
                           },

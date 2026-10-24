@@ -106,7 +106,10 @@ export function registrationSettings(defaults: ShopDefaults | null, probe?: Prob
   }
   // #598 — a checked-out probe resolves the tip/rim values from the instrument, not the shop fallback.
   // The shop keys stay the no-probe fallback (unchanged), and `fallbacks` still reports them.
-  if (probe != null) {
+  // #525 — an UNMEASURED probe (tip null) resolves nothing: the planner refuses the plan, and using
+  // the shop's wired-probe numbers here would hand it a plausible-looking radius that is not this
+  // instrument's.
+  if (probe != null && probe.tip !== null) {
     settings.tipDiameterMm = probe.tip.diameterMm;
     settings.tipRadiusMm = probe.tip.rimOffsetMm;
     settings.tipRadiusUncertaintyMm = probe.tip.rimOffsetUncertaintyMm;
