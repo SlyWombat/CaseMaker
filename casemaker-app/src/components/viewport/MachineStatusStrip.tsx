@@ -1,5 +1,7 @@
 import type { JSX } from 'react';
 import { useMachineStore } from '@/store/machineStore';
+import { useRegistrationTouchesStore } from '@/store/registrationTouchesStore';
+import { useEngraveReleaseStore } from '@/store/engraveReleaseStore';
 import { machineKey, useMachineRunStore } from '@/store/machineRunStore';
 import { readStatusLine, type JobProgress, type StatusRate } from '@/platform/desktop/protocol';
 
@@ -63,12 +65,21 @@ function fmtSpindle(rate: StatusRate | null | undefined): string | null {
 
 export function MachineStatusStrip(): JSX.Element | null {
   const machine = useMachineStore((s) => s.machine);
+  // #519 item 3 — a registration owns the machine: the state reads Probing and the strip shows the
+  // runner's current step in the program's slot ("what the machine is doing now").
+  const registrationActive = useMachineStore((s) => s.registrationActive);
+  const registrationStep = useRegistrationTouchesStore((s) => s.step);
+  // §5 — the vacuum is what the app last SENT (the controller does not report it), so the reading
+  // carries its own qualifier; `unknown` (after an alarm or a drop) is not printed as a state.
+  const vacuum = useEngraveReleaseStore((s) =>
+    machine === null ? null : s.records[machineKey(machine)]?.vacuum ?? null,
+  );
   const requestStop = useMachineRunStore((s) => s.requestStop);
   if (machine === null) return null;
 
   // `statusLine` is set by the store and the probe; a test fixture may hand only the raw line.
   const line = machine.statusLine ?? (machine.status === null ? null : readStatusLine(machine.status));
-  const state = stateWord(line?.state ?? null);
+  const state = registrationActive && line?.state === 'Run' ? 'Probing' : stateWord(line?.state ?? null);
   const wpos = line?.wpos ?? null;
   const idle = state === 'Idle' || state === 'Not answering';
   const program = fmtProgram(line?.progress);
@@ -90,9 +101,23 @@ export function MachineStatusStrip(): JSX.Element | null {
       }}
     >
       <span data-testid="machine-status-state">{state}</span>
-      {program !== null && <span data-testid="machine-status-program">{program}</span>}
+      {/* #519 item 3 — the registration's current step occupies the program's slot while a
+          registration is running; a program's line/percent is the only other thing that slot says. */}
+      {registrationActive && registrationStep !== null ? (
+        <span data-testid="machine-status-step">{registrationStep}</span>
+      ) : (
+        program !== null && <span data-testid="machine-status-program">{program}</span>
+      )}
       {spindle !== null && <span data-testid="machine-status-spindle">{spindle}</span>}
-      {tool !== null && <span data-testid="machine-status-tool">T{tool}</span>}
+      {vacuum !== null && vacuum !== 'unknown' && (
+        <span data-testid="machine-status-vacuum">vacuum {vacuum} (as sent)</span>
+      )}
+      {/* While a registration owns the machine the fitted instrument is the probe, not a T number. */}
+      {registrationActive ? (
+        <span data-testid="machine-status-tool">probe</span>
+      ) : (
+        tool !== null && <span data-testid="machine-status-tool">T{tool}</span>
+      )}
       <span data-testid="machine-status-position">
         X {fmt3(wpos?.x ?? null)} Y {fmt3(wpos?.y ?? null)} Z {fmt3(wpos?.z ?? null)} (work)
       </span>

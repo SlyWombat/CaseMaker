@@ -25,6 +25,7 @@ import {
   resetEngraveRegistrationStore,
   surfaceSpreadFor,
 } from '@/store/engraveRegistrationStore';
+import { resetRegistrationTouchesStore, useRegistrationTouchesStore } from '@/store/registrationTouchesStore';
 import { useSettingsStore } from '@/store/settingsStore';
 import { defaultBadgeParams } from '@/types/badge';
 import type { EngraveJob, EngraveLabel } from '@/types/engraveJob';
@@ -190,6 +191,7 @@ beforeEach(() => {
   sent.length = 0;
   savedJob = useEngraveJobStore.getState().job;
   resetEngraveRegistrationStore();
+  resetRegistrationTouchesStore();
 });
 
 afterEach(() => {
@@ -207,7 +209,10 @@ async function runStep(): Promise<void> {
   await act(async () => {
     fireEvent.click(screen.getByTestId('engrave-registration-start'));
   });
-  await screen.findByTestId('engrave-registration-touches');
+  // #519 item 1 — the per-scan readings left this component for the dock's Touches tab; what lands
+  // here is the verdict (and the readings in the store, asserted below). A run that fails renders
+  // the failure block instead, so the wait names both ends of the run.
+  await screen.findByTestId('engrave-registration-verdict');
 }
 
 async function writeOrigin(): Promise<void> {
@@ -238,11 +243,18 @@ describe('#495 — the registration step', () => {
 
     await runStep();
 
-    // Each scan is drawn with its expected edge and every touch classified by the executor.
-    expect(screen.getByTestId('engrave-registration-scan-0').getAttribute('data-edge')).toBe('left');
-    expect(screen.getByTestId('engrave-registration-scan-1').getAttribute('data-edge')).toBe('front');
-    expect(screen.getByTestId('engrave-registration-touch-0-0').getAttribute('data-kind')).toBe('stock');
-    expect(screen.getAllByText(/MISS — nothing within the cap/).length).toBeGreaterThan(0);
+    // #519 item 1 — every reading the executor landed is in the store, in order: the surface seek
+    // first, then the scans, with each edge's classification. The same readings feed the viewport's
+    // dots and the dock's table (asserted in machineDock.spec.tsx); the rail no longer prints them.
+    const live = useRegistrationTouchesStore.getState().touches;
+    expect(live[0]?.source).toBe('surface');
+    const edges = live.filter((t) => t.source === 'edge');
+    // One label per scan, in the plan's order — the bisection lands several touches per edge.
+    expect([...new Set(edges.map((t) => t.label))]).toEqual(
+      plan.scans.map((s) => s.label ?? `the ${s.edge} edge`),
+    );
+    expect(edges[0]?.kind).toBe('stock');
+    expect(edges.some((t) => t.kind === 'miss')).toBe(true);
     expect(screen.getByTestId('engrave-registration-verdict').getAttribute('data-usable')).toBe('true');
     expect(screen.getByTestId('engrave-registration-verdict').getAttribute('data-within-margin')).toBe('true');
 
@@ -347,6 +359,11 @@ describe('#495 — the registration step', () => {
     expect(firstRegistrationFor(job.id, TARGET)).toBeNull();
     expect(surfaceSpreadFor(job.id, TARGET)?.assessment.spread).toBe(0.33);
     expect(surfaceSpreadFor(job.id, TARGET)?.assessment.ok).toBe(false);
+    // #519 item 1 — the extents are emitted as readings too, and the dock's store closes with the
+    // refusal sentence the rail states in full.
+    const live = useRegistrationTouchesStore.getState();
+    expect(live.touches.some((t) => t.source === 'spread')).toBe(true);
+    expect(live.spreadSentence).toContain('not one plane');
     // #496 — the job records the pair, each span on its own stock axis, not one ambiguous "across".
     expect(useEngraveJobStore.getState().job.stock.flatness).toMatchObject({
       xMm: 0.33,

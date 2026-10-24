@@ -10,16 +10,32 @@ import { MachineDock } from '@/components/viewport/MachineDock';
 import { resetMachineTranscriptStore, useMachineTranscriptStore } from '@/store/machineTranscriptStore';
 import { resetMachineRunStore, useMachineRunStore } from '@/store/machineRunStore';
 import { resetEngraveReleaseStore } from '@/store/engraveReleaseStore';
+import { resetMachineStore, useMachineStore } from '@/store/machineStore';
+import { resetRegistrationTouchesStore, useRegistrationTouchesStore } from '@/store/registrationTouchesStore';
+import type { LiveTouch } from '@/engine/cnc/registration/liveTouch';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 const TARGET = { host: '192.0.2.10', port: 2222 };
+
+const touch = (over: Partial<LiveTouch> & Pick<LiveTouch, 'seq'>): LiveTouch => ({
+  source: 'edge',
+  label: 'the left edge',
+  x: 1,
+  y: 2,
+  z: -56.17,
+  touched: true,
+  kind: 'stock',
+  ...over,
+});
 
 beforeEach(() => {
   cleanup();
   resetMachineTranscriptStore();
   resetMachineRunStore();
   resetEngraveReleaseStore();
+  resetMachineStore();
+  resetRegistrationTouchesStore();
 });
 
 afterEach(cleanup);
@@ -91,5 +107,42 @@ describe('#528 the machine dock — Transcript tab', () => {
 
     expect(screen.getByTestId('machine-dock')).toBeDefined();
     expect(screen.getByTestId('engrave-run-lines')).toBeDefined();
+  });
+});
+
+describe('#519 item 1 — the dock’s Touches tab', () => {
+  it('renders one row per reading as it landed, with the surface row keeping the rail’s testid', () => {
+    useRegistrationTouchesStore.getState().add(touch({ seq: 1, source: 'surface', label: null, z: -56.171 }));
+    useRegistrationTouchesStore.getState().add(touch({ seq: 2 }));
+    useRegistrationTouchesStore.getState().add(touch({ seq: 3, kind: 'miss', touched: false, z: -59 }));
+
+    render(<MachineDock />);
+    fireEvent.click(screen.getByTestId('machine-dock-touches'));
+
+    expect(screen.getByTestId('engrave-registration-touches')).toBeDefined();
+    expect(screen.getByTestId('engrave-registration-surface').textContent).toContain('the surface');
+    expect(screen.getByTestId('engrave-registration-touch-2').getAttribute('data-verdict')).toBe('stock');
+    const miss = screen.getByTestId('engrave-registration-touch-3');
+    expect(miss.getAttribute('data-verdict')).toBe('miss');
+    expect(miss.textContent).toContain('no touch');
+  });
+
+  it('closes the table with the spread sentence when the run assessed one', () => {
+    useRegistrationTouchesStore.getState().add(touch({ seq: 1 }));
+    useRegistrationTouchesStore.getState().setSpreadSentence('Surface spread 0.12 mm against the 0.2 mm band — within it.');
+    render(<MachineDock />);
+    fireEvent.click(screen.getByTestId('machine-dock-touches'));
+    expect(screen.getByTestId('engrave-registration-spread-sentence').textContent).toContain('0.12 mm');
+  });
+
+  it('opens itself and defaults to Touches while a registration owns the machine', () => {
+    useRegistrationTouchesStore.getState().add(touch({ seq: 1 }));
+    useMachineStore.setState({ registrationActive: true });
+    render(<MachineDock />);
+
+    // Expanded without a click, and the Touches tab is the active one.
+    expect(screen.getByTestId('engrave-registration-touches')).toBeDefined();
+    expect(screen.getByTestId('machine-dock-touches').getAttribute('aria-selected')).toBe('true');
+    expect(screen.getByTestId('machine-dock-transcript').getAttribute('aria-selected')).toBe('false');
   });
 });

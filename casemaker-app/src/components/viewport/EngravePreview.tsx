@@ -49,6 +49,7 @@ import { resolveTool } from '@/engine/cnc/toolRegistry';
 import { geometryFromMesh, SACRIFICIAL_COLOR, segmentGeometry } from './simGeometry';
 import { fittedTool, toolPlacement } from './liveMachineTool';
 import { LiveToolHead } from './LiveToolHead';
+import { TouchMarkers } from './TouchMarkers';
 import { floorColor, LOST_COLOR, REGISTRATION_COLOR, VOID_COLOR, WARNING_COLOR } from './engraveRamp';
 import { hatchSegments } from './engraveHatch';
 import { clampLabelBox, projectToCanvas } from './projectedLabel';
@@ -626,6 +627,7 @@ export function EngravePreview() {
   const reachable = useMachineStore((s) => s.heartbeat.reachable);
   const registrationActive = useMachineStore((s) => s.registrationActive);
   const toolLayer = useSimStore((s) => s.layers.tool);
+  const touchesLayer = useSimStore((s) => s.layers.touches);
   const placement = toolPlacement({ reachable, wpos: machine?.statusLine?.wpos ?? null }, null);
   const holder = machine?.profileId != null ? MACHINES[machine.profileId]?.holder ?? null : null;
   // The cutter the machine has NOW (#527): a release's current program once the bit change is
@@ -731,6 +733,11 @@ export function EngravePreview() {
           Y
         </ProjectedLabel>
       </group>
+
+      {/* #519 item 1 — the registration's touch dots. INSIDE the found group (#604) on purpose: the
+          touches are where the probe met the stock, so they move with the stock the viewport draws
+          at its found position, not with the plan frame. */}
+      {touchesLayer && <TouchMarkers />}
 
       </group>
       {/* #527 §6 — the machine layer's body at the live WPos, in the PLAN frame: #604 draws the

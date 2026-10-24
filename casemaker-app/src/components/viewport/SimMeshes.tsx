@@ -19,6 +19,7 @@ import { useShopDefault } from '@/store/shopDefaultsStore';
 import type { NodeMeshOutput } from '@/workers/geometry/meshOutput';
 import { LiveToolHead } from './LiveToolHead';
 import { toolPlacement } from './liveMachineTool';
+import { TouchMarkers } from './TouchMarkers';
 import {
   cleanStockGeometry,
   drawsSacrificial,
@@ -214,6 +215,9 @@ export function SimMeshes() {
 
       {layers.fixture &&
         meshes?.fixture.map((f) => <FixtureBox key={f.id} mesh={f.mesh} label={f.label} />)}
+
+      {/* #519 item 1 — the registration's touch dots, in the work frame this scene draws in. */}
+      {layers.touches && <TouchMarkers />}
     </group>
   );
 }

@@ -67,6 +67,7 @@ import {
 } from '@/engine/cnc/engrave/surfaceSpread';
 import { type EdgeScan, type RegistrationPlan } from './plan';
 import { classifyTouch, lastPrb, type Prb } from './readings';
+import type { LiveTouch } from './liveTouch';
 import { computeOutcome, correctionLine, type RegistrationOutcome, type RunData, type ScanRecord, type ScanTouch } from './outcome';
 import { referenceOutcome } from './references';
 import { settingsProblem, SURFACE_LIFT_MM, type RegistrationSettings } from './settings';
@@ -99,6 +100,12 @@ export interface ExecDeps {
   operator: (step: OperatorStep) => Promise<boolean>;
   /** #587 — the latest step narration, so the section shows what is running, not a blanket "Talking…". */
   onStep?: (sentence: string) => void;
+  /**
+   * #519 item 1 — each reading AS IT LANDS, so the viewport draws the touch and the dock lists it
+   * while the run goes. Optional, and the executor never depends on a listener: a caller that omits
+   * it gets exactly the behaviour it had (the readings still come back in `RunResult`).
+   */
+  onTouch?: (touch: LiveTouch) => void;
 }
 
 export interface Transcript {
@@ -190,6 +197,13 @@ function session(deps: ExecDeps, seekFromMachineZ: number, idlePollLimit: number
     deps.onStep?.(sentence);
   }
 
+  /** #519 item 1 — one reading, numbered in the order the run lands them. */
+  let readings = 0;
+  function saw(touch: Omit<LiveTouch, 'seq'>): void {
+    readings += 1;
+    deps.onTouch?.({ seq: readings, ...touch });
+  }
+
   /**
    * After a stop: if the mode was left relative, put it back — `$X` FIRST, because the Z1 refuses `G90`
    * with `error:Alarm lock` while in alarm (Z1-Firmware-Dialect.md, the 2026-10-08 table) — and say
@@ -220,7 +234,7 @@ function session(deps: ExecDeps, seekFromMachineZ: number, idlePollLimit: number
     return `${reason}. Stopped — the probe may be ${depth}. The machine is Idle; nothing to recover.`;
   }
 
-  return { send, idle, stopped, at, markHomed: () => { homed = true; }, transcript };
+  return { send, idle, stopped, at, saw, markHomed: () => { homed = true; }, transcript };
 }
 
 type Session = ReturnType<typeof session>;
@@ -259,7 +273,10 @@ async function touch(io: Session, plan: RegistrationPlan, scan: EdgeScan, at: nu
   await io.send('G90');
   await io.send(`G53 G0 Z${f(parkZ)}`);
   io.at(`at the park height, ${s.parkAboveSurfaceMm} mm above the surface`);
-  return { at, prb, kind: classifyTouch(prb, surfaceZ, s.surfaceBandMm) };
+  const kind = classifyTouch(prb, surfaceZ, s.surfaceBandMm);
+  // #519 item 1 — the scan's reading, where it was commanded (WORK XY), as it lands.
+  io.saw({ source: 'edge', label: scan.label ?? `the ${scan.edge} edge`, x, y, z: prb.z, touched: prb.touched, kind });
+  return { at, prb, kind };
 }
 
 /**
@@ -442,6 +459,8 @@ export async function runMountTap(
     if (prb === null || !prb.touched) {
       throw new Stop(`no jaw top at (${tap.x}, ${tap.y}) down to machine Z ${f(workEnvelopeFloorZ)} — is the vise where the machine record says?`);
     }
+    // #519 item 1 — the standalone tap's reading, as it lands.
+    io.saw({ source: 'mount-tap', label: null, x: tap.x, y: tap.y, z: prb.z, touched: prb.touched, kind: null });
     await io.send('$H');
     return { ok: true, z: prb.z, at: { x: tap.x, y: tap.y }, probe: { lengthZ: ref.z, rest }, transcript: io.transcript };
   } catch (e) {
@@ -497,6 +516,8 @@ export async function runRegistration(
       if (prb === null || !prb.touched || Math.abs(prb.z - jawTopZ) > 2) {
         throw new Stop(`no jaw top at (${tap.x}, ${tap.y}) down to machine Z ${f(jawTopZ - 2)} — is the vise where the machine record says?`);
       }
+      // #519 item 1 — the tap is a reading too: the viewport marks the fixed-jaw top.
+      io.saw({ source: 'mount-tap', label: tap.label, x: tap.x, y: tap.y, z: prb.z, touched: prb.touched, kind: null });
       mountTap = { z: prb.z, at: { x: tap.x, y: tap.y } };
     }
 
@@ -506,6 +527,16 @@ export async function runRegistration(
       ...plan.seek.band,
       at: `as low as machine Z ${plan.seek.band.min}, ${s.surfaceToleranceMm} mm below the expected surface (the surface seek)`,
       expect: 'the stock is not where the job expects it',
+    });
+    // #519 item 1 — the surface touch, at the plan's own point.
+    io.saw({
+      source: 'surface',
+      label: null,
+      x: plan.surfacePoint.x,
+      y: plan.surfacePoint.y,
+      z: slow.z,
+      touched: slow.touched,
+      kind: null,
     });
 
     // #619 — a datum-path surface ABOVE the expected band is the blank standing prouder than the
@@ -561,6 +592,19 @@ export async function runRegistration(
               lowApproach ? approachZ : plan.seek.fromMachineZ,
             );
         spreadReadings.push({ z: prb.z, source: 'probe' });
+        // #519 item 1 — every extent reading but the reused centre: that one reading is the surface
+        // touch above, and one reading must not draw two dots.
+        if (!samePoint) {
+          io.saw({
+            source: 'spread',
+            label: touch.at,
+            x: touch.x + outcome.offset.x,
+            y: touch.y + outcome.offset.y,
+            z: prb.z,
+            touched: prb.touched,
+            kind: null,
+          });
+        }
       }
     }
 
@@ -663,6 +707,16 @@ export async function retouchSurface(
       max,
       at: `as low as machine Z ${min}, ${opts.toleranceMm} mm below the faced top expected at ${expected} (the re-touch)`,
       expect: 'the faced top is not where the skim should have put it — check that the facing program ran before the re-touch',
+    });
+    // #519 item 1 — the re-touch is a reading on the faced top; mark it like the registration's own.
+    io.saw({
+      source: 'surface',
+      label: 'the faced top (re-touch)',
+      x: plan.surfacePoint.x,
+      y: plan.surfacePoint.y,
+      z: surface.z,
+      touched: surface.touched,
+      kind: null,
     });
     await io.send(`G53 G0 Z${f(plan.seek.fromMachineZ)}`);
     await io.send('$H');

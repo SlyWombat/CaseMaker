@@ -20,9 +20,12 @@
 import { useMemo, type CSSProperties, type JSX } from 'react';
 import { useEngravePreviewStore } from '@/store/engravePreviewStore';
 import { useEngraveJobStore } from '@/store/engraveJobStore';
+import { useRegistrationTouchesStore } from '@/store/registrationTouchesStore';
+import { useSimStore } from '@/store/simStore';
 import { mm } from '@/engine/cnc/engrave/depthBounds';
 import { SACRIFICIAL_COLOR } from './simGeometry';
 import { depthColor, LOST_COLOR, REGISTRATION_COLOR, splitColor, VOID_COLOR } from './engraveRamp';
+import { TOUCH_VERDICT_COLORS, TOUCH_VERDICT_WORDS } from './touchPalette';
 import { scrubStateAt, scrubWords } from './engraveScrub';
 
 /**
@@ -76,6 +79,10 @@ export function EngraveLegend(): JSX.Element | null {
   const setScrubStage = useEngravePreviewStore((s) => s.setScrubStage);
   const stock = useEngraveJobStore((s) => s.job.stock);
   const minFloor = useEngraveJobStore((s) => s.job.minFloor);
+  // #519 item 1 — the touches layer's row: shown only while the layer is on AND there are readings
+  // to describe, so the legend never names dots the scene is not drawing.
+  const touchesOn = useSimStore((s) => s.layers.touches);
+  const touches = useRegistrationTouchesStore((s) => s.touches);
 
   // Distinct depths, shallowest first — the same order and the same ramp the floors are drawn on
   // when the blank states no split. Computed unconditionally (a hook); in the split case the ramp
@@ -203,6 +210,18 @@ export function EngraveLegend(): JSX.Element | null {
             }}
           />
           registration ±{mm(Math.max(...preview.registration.map((b) => b.uncertainty)))} mm
+        </div>
+      )}
+      {/* #519 item 1 — the touches layer, in its own three verdict colours (the same constants the
+          dots are drawn with). Absent while the layer is off or there is nothing to describe. */}
+      {touchesOn && touches.length > 0 && (
+        <div data-testid="engrave-legend-touches" style={{ ...ROW, marginTop: 2 }}>
+          <span style={{ display: 'inline-flex', gap: 1 }}>
+            {(Object.keys(TOUCH_VERDICT_COLORS) as (keyof typeof TOUCH_VERDICT_COLORS)[]).map((v) => (
+              <span key={v} title={TOUCH_VERDICT_WORDS[v]} style={{ ...SWATCH, width: 6, background: TOUCH_VERDICT_COLORS[v] }} />
+            ))}
+          </span>
+          touches
         </div>
       )}
     </div>

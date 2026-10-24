@@ -36,7 +36,7 @@
 import { useEffect, useRef, useState, type CSSProperties, type JSX } from 'react';
 import type { EngraveJob } from '@/types/engraveJob';
 import type { RegistrationPlan } from '@/engine/cnc/registration/plan';
-import type { RegistrationOutcome, ScanRecord } from '@/engine/cnc/registration/outcome';
+import type { RegistrationOutcome } from '@/engine/cnc/registration/outcome';
 import { summarizeOutcome, summarizePlan } from '@/engine/cnc/registration/summary';
 import {
   applyCorrection,
@@ -55,6 +55,7 @@ import { recordProbeReading } from '@/engine/cnc/registration/mountContext';
 import { viseFrameFromRegistration, withSurfaceTopDatum, withViseJawTopDatum, withVisePlacementFrame } from '@/platform/bedProfiles';
 import { useMachineTranscriptStore } from '@/store/machineTranscriptStore';
 import { useMachineStore } from '@/store/machineStore';
+import { useRegistrationTouchesStore } from '@/store/registrationTouchesStore';
 import { useSettingsStore } from '@/store/settingsStore';
 
 const MUTED: CSSProperties = { fontSize: 11, color: '#9aa4b0', lineHeight: 1.5, margin: '4px 0' };
@@ -77,13 +78,6 @@ export interface EngraveRegistrationStepProps {
 }
 
 type Phase = 'idle' | 'running' | 'measured' | 'writing' | 'recorded' | 'failed';
-
-const TOUCH_WORDS: Record<string, string> = {
-  stock: 'on the stock',
-  below: 'BELOW — off the stock (MISS)',
-  above: 'HIGH — something above the surface',
-  miss: 'MISS — nothing within the cap',
-};
 
 const n = (v: number): string => String(Math.round(v * 1000) / 1000);
 
@@ -141,30 +135,6 @@ function marginRefusal(outcome: RegistrationOutcome, spread: SurfaceSpreadAssess
   return measuredXY && !outcome.withinMargin;
 }
 
-/** A scan's touches, in the executor's own classifications. */
-function ScanBlock({ record, index }: { record: ScanRecord; index: number }): JSX.Element {
-  const scan = record.scan;
-  return (
-    <div data-testid={`engrave-registration-scan-${index}`} data-edge={scan.edge} style={{ margin: '5px 0' }}>
-      <div style={{ fontSize: 11, color: '#d1d5db' }}>
-        <strong>{scan.label ?? `The ${scan.edge} edge`}</strong> — expected at {n(scan.expectedAt)} mm
-        {scan.label === undefined ? '' : ` (${scan.edge})`}
-      </div>
-      {record.touches.map((touch, i) => (
-        <div
-          key={i}
-          data-testid={`engrave-registration-touch-${index}-${i}`}
-          data-kind={touch.kind}
-          style={{ ...MUTED, paddingLeft: 10 }}
-        >
-          {n(touch.at)} mm · machine Z {touch.prb.touched ? n(touch.prb.z) : 'no touch'} ·{' '}
-          {TOUCH_WORDS[touch.kind] ?? touch.kind}
-        </div>
-      ))}
-    </div>
-  );
-}
-
 export function EngraveRegistrationStep({ job, target }: EngraveRegistrationStepProps): JSX.Element {
   const { plan, why } = approvedPlan(job);
   const record = useEngraveRegistrationStore((s) => s.record);
@@ -206,6 +176,11 @@ export function EngraveRegistrationStep({ job, target }: EngraveRegistrationStep
     setRegistrationActive(phase === 'running');
     return () => setRegistrationActive(false);
   }, [phase, setRegistrationActive]);
+
+  // #519 item 3 — the runner's step sentence is live only while the run is; the strip reads it.
+  useEffect(() => {
+    if (phase !== 'running') useRegistrationTouchesStore.getState().setStep(null);
+  }, [phase]);
 
   // #528 — the transcript no longer renders in the rail; the dock's Transcript tab reads the store.
   // Write the SAME text the old rail `<pre>`s rendered (`> line\nreply` per entry) so nothing changes
@@ -260,6 +235,9 @@ export function EngraveRegistrationStep({ job, target }: EngraveRegistrationStep
     setHomeNote(null);
     setError(null);
     setNarration(null);
+    // #519 item 1 — a new run's readings replace the last run's dots and table, and they are
+    // stamped with this job so a layer left from another job is never drawn as this one's.
+    useRegistrationTouchesStore.getState().reset(job.id);
     const handle = attachConsole(target);
     handleRef.current = handle;
     // #475 — the cut regions' extents, at the touch count the APPROVED plan carries (a shop default
@@ -281,12 +259,25 @@ export function EngraveRegistrationStep({ job, target }: EngraveRegistrationStep
           // #587 — the executor narrates each step as it moves; surface it live.
           onStep: (sentence) => {
             if (aliveRef.current) setNarration(sentence);
+            // #519 item 3 — the strip prints the same sentence while a registration owns the machine.
+            useRegistrationTouchesStore.getState().setStep(sentence);
           },
+          // #519 item 1 — each reading as it lands: the viewport's dots and the dock's table.
+          onTouch: (touch) => useRegistrationTouchesStore.getState().add(touch),
         },
         spreadPlan ?? undefined,
       );
       if (!aliveRef.current) return;
       if (r.ok && r.spread !== undefined) {
+        // #519 item 1 — the dock's Touches tab closes with the spread sentence (the rail's detailed
+        // spread block stays where the Write decision is).
+        useRegistrationTouchesStore
+          .getState()
+          .setSpreadSentence(
+            r.spread.ok
+              ? `Surface spread ${n(r.spread.spread)} mm against the ${n(r.spread.plan.band.width)} mm band — within it.`
+              : r.spread.refusal?.message ?? null,
+          );
         // The measurement is session data for the sheet even when the blank is refused; the job's
         // flatness record is the measured pair, which is what #432 R9 reads and what the depth
         // recommendation and the material scan plan from (#496). Both spans travel with the count
@@ -529,23 +520,11 @@ export function EngraveRegistrationStep({ job, target }: EngraveRegistrationStep
           )}
 
           {outcome !== null && data !== null && (
-            <div data-testid="engrave-registration-touches" style={{ marginTop: 6 }}>
-              <div
-                data-testid="engrave-registration-surface"
-                data-in-band={
-                  data.surface.z >= plan.seek.band.min && data.surface.z <= plan.seek.band.max
-                    ? 'true'
-                    : 'false'
-                }
-                style={{ fontSize: 11, color: '#d1d5db' }}
-              >
-                <strong>Surface</strong> at ({n(plan.surfacePoint.x)}, {n(plan.surfacePoint.y)}) — read
-                machine Z {n(data.surface.z)}, expected {n(plan.seek.band.min)} to{' '}
-                {n(plan.seek.band.max)}.
-              </div>
-              {data.scans.map((scan, i) => (
-                <ScanBlock key={i} record={scan} index={i} />
-              ))}
+            <div style={{ marginTop: 6 }}>
+              {/* #519 item 1 — the surface line and the per-scan readings moved to the dock's
+                  Touches tab (`engrave-registration-touches`, `-surface`, `-scan-*` travel with
+                  them), fed live by the runner. The verdict, its problems, the spread assessment
+                  and the Write decision stay here, where the operator acts on them (§4). */}
 
               <div
                 data-testid="engrave-registration-verdict"

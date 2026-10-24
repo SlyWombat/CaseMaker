@@ -76,10 +76,16 @@ export interface SimLayers {
   fixture: boolean;
   /** The sacrificial material as cut so far (#213 §4), when the job has any. */
   sacrificial: boolean;
+  /**
+   * #519 item 1 — the registration's touches: a dot per reading on the stock, coloured by verdict
+   * (`registrationTouchesStore`). Independent of every other layer; stays on as a record after the
+   * registration so the spread the sheet reports can be seen.
+   */
+  touches: boolean;
 }
 
 /** All layers on: a fresh load shows the finished part with the whole path. */
-export const DEFAULT_SIM_LAYERS: SimLayers = { removed: true, path: true, rapids: true, tool: true, fixture: true, sacrificial: true };
+export const DEFAULT_SIM_LAYERS: SimLayers = { removed: true, path: true, rapids: true, tool: true, fixture: true, sacrificial: true, touches: true };
 
 /** True when the simulation owns the viewport: a completed load, or a path-only one (#194). */
 export const isSimSceneActive = (s: Pick<SimState, 'status' | 'pathOnly'>): boolean =>

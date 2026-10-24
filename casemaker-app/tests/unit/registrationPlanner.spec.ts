@@ -32,6 +32,7 @@ import {
   type PlanInput,
   type RegistrationPlan,
 } from '@/engine/cnc/registration';
+import type { LiveTouch } from '@/engine/cnc/registration/liveTouch';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const DOC = JSON.parse(readFileSync(join(HERE, 'fixtures', 'location-doc.json'), 'utf8')) as { defaults: unknown };
@@ -383,6 +384,42 @@ describe('#599 the mount tap', () => {
     const r = await runRegistration(p, { console: z1.console, operator: yes });
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.reason).toContain('no jaw top');
+  });
+
+  // #519 item 1 — `ExecDeps.onTouch` is fed each reading AS IT LANDS, in landing order, so the
+  // viewport's dots and the dock's table can fill during the run. The seq is the table's row number.
+  it('emits every reading as it lands — the tap, the surface, then each scan touch', async () => {
+    const z1 = fakeZ1({ actual: SHIFTED, tap: { x: TAP.x, y: TAP.y, z: JAW.jawTopZ } });
+    const p = plan('vise', { mountDatum: JAW, mountTap: TAP, fixtureBelowSurfaceMm: undefined });
+    const seen: LiveTouch[] = [];
+    const r = await runRegistration(p, {
+      console: z1.console,
+      operator: yes,
+      onTouch: (t) => seen.push(t),
+    });
+    if (!r.ok) throw new Error(r.reason);
+
+    expect(seen.length).toBeGreaterThan(2);
+    expect(seen[0]).toMatchObject({
+      seq: 1,
+      source: 'mount-tap',
+      label: TAP.label,
+      x: TAP.x,
+      y: TAP.y,
+      z: JAW.jawTopZ,
+      touched: true,
+      kind: null,
+    });
+    expect(seen[1]).toMatchObject({
+      seq: 2,
+      source: 'surface',
+      x: p.surfacePoint.x,
+      y: p.surfacePoint.y,
+      kind: null,
+    });
+    expect(seen.slice(2).every((t) => t.source === 'edge')).toBe(true);
+    // Numbering is the landing order, with no gaps and no repeats.
+    expect(seen.map((t) => t.seq)).toEqual(seen.map((_, i) => i + 1));
   });
 });
 
