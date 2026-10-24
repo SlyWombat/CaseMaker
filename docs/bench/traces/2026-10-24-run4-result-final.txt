@@ -1,0 +1,91 @@
+● 1 Check the job
+2 blocking findings
+
+2 blocking findings, 8 warnings.
+
+The run
+●
+The job or the machine frame changed since it was generated. Generate again before cutting. run state
+Setup 1 · cat:019c049a-8169-7405-bad5-712f26af3b54
+●
+The package of 16:43 is stale — the job changed since the package was frozen Its blank stays held for this job. run state
+Setup 1 · cat:019c049a-8169-7405-bad5-712f26af3b54
+●
+Imported vector "br" "single › br" 13.773×21.04 loses 13% of its area to a 0.5 mm 30° V-bit; use a smaller cutter or a larger shape. generate
+●
+Pocket outline "Single Barrel" (19 contours, 10.531×66.915mm): pitch 0.25 mm, clamped to the cutter's 0.25 mm tip radius from the requested 0.359 mm — a wider pitch would leave a ridge of the top colour down strokes narrower than two passes apart. generate
+●
+Pocket outline "br" (5 contours, 13.773×21.04mm): pitch 0.25 mm, clamped to the cutter's 0.25 mm tip radius from the requested 0.364 mm — a wider pitch would leave a ridge of the top colour down strokes narrower than two passes apart. generate
+●
+two or more strokes of Pocket outline "Single Barrel" (19 contours, 10.531×66.915mm) are closer than 0.429 mm (2 × the 0.214 mm surface wall offset): their V openings merge at the top face and leave a ridge of the top colour below the colour plane. generate
+●
+two or more strokes of Pocket outline "br" (5 contours, 13.773×21.04mm) are closer than 0.429 mm (2 × the 0.214 mm surface wall offset): their V openings merge at the top face and leave a ridge of the top colour below the colour plane. generate
+●
+Imported vector "Single Barrel" "single › Single Barrel" 10.531×66.915 cuts 0.985 mm deep over "Magnet pocket" — a 1.51 mm membrane with nothing under it — so expect chatter and a rough finish there. Moving the cut clear of the void will finish better. generate
+●
+Imported vector "br" "single › br" 13.773×21.04 cuts 0.998 mm deep over "Magnet pocket" — a 1.51 mm membrane with nothing under it — so expect chatter and a rough finish there. Moving the cut clear of the void will finish better. generate
+●
+The job seats the blank on the soft jaws' ledge, 3.1 mm below the jaw tops. It states the 3.81 mm blank stands 0.71 mm proud of the jaw tops. vise
+●
+Vise dimensions are the shipped defaults, measured once on the reference unit; they are not a measurement of this machine's own vise. vise
+
+First blocking: The job or the machine frame changed since it was generated. Generate again before cutting.
+
+Back to Design
+● 2 Freeze the plan
+stale — freeze again
+
+The package — 1 program · 1 setup · frozen 16:43
+
+The package of 16:43 is stale — the job changed since the package was frozen Its blank stays held for this job.
+
+You’re supplying this stock yourself, so no blank needs to be held.
+Freeze this job again…
+
+this job’s stock is not a shelf entry, so no blank is held.
+
+● 3 Register the blank
+left edge, then the top face
+Registration — find the stock, then set the origin
+
+Setup 1 · X/Y re-checked on the left and front edges; Z from the surface touch, within ±0.7 mm
+
+Home, fit the wired probe and measure it (M491); touch the surface at the cut area's centre (19.05, 38.1); then scan the left edge at Y 38.1, the front edge at X 19.05 — bracketing each edge and bisecting to 0.5 mm, stopping at the first touch off the stock, every touch capped at the surface − 0.5 mm; home when finished.
+
+ I am at the machine, with the wired probe fitted and the head clear.Run the registration again
+Surface at (19.05, 38.1) — read machine Z -55.028, expected -57.507 to -55.397.
+The left edge — expected at 0 mm
+3 mm · machine Z -55.188 · on the stock
+-5 mm · machine Z no touch · MISS — nothing within the cap
+-1 mm · machine Z no touch · MISS — nothing within the cap
+1 mm · machine Z -55.221 · on the stock
+0 mm · machine Z -55.297 · BELOW — off the stock (MISS)
+0.5 mm · machine Z -55.241 · on the stock
+0.25 mm · machine Z -55.279 · BELOW — off the stock (MISS)
+The front edge — expected at 0 mm
+3 mm · machine Z no touch · MISS — nothing within the cap
+20.55 mm · machine Z -55.097 · on the stock
+11.775 mm · machine Z -55.059 · on the stock
+7.388 mm · machine Z -55.06 · on the stock
+5.194 mm · machine Z no touch · MISS — nothing within the cap
+6.291 mm · machine Z -55.041 · on the stock
+5.743 mm · machine Z -55.258 · on the stock
+5.469 mm · machine Z no touch · MISS — nothing within the cap
+5.606 mm · machine Z no touch · MISS — nothing within the cap
+the stock is X off by 1.08 mm, Y off by 6.38 mm; outside the 0.5 mm margin — set the origin from the measurement (after you confirm), or stop and re-seat.
+Surface spread — lowest -55.518 at the cut area's right extent (probe), highest -55.079 at the cut area's centre (probe); spread 0.439 mm against the 0.2 mm band.
+Z0 is the lowest reading (-55.518), so the floors may land from 1 to 1.012 mm below Z0 and nowhere else.
+
+No origin is written: the stock is outside the 0.5 mm margin. the stock is X off by 1.08 mm, Y off by 6.38 mm; outside the 0.5 mm margin — set the origin from the measurement (after you confirm), or stop and re-seat. Re-seat it and run the registration again.
+
+Origin written: G10 L2 P1 X-180.125 Y-192.750 Z-52.129
+
+Registration recorded for the release step, with the plan that was approved.
+
+Run it again
+
+The blank is tilted (0.336 mm toward +X and 0.354 mm toward +Y) — the frozen program is still flat.
+
+re-post against the tilt first — the frozen program is flat but the blank is tilted.
+
+Re-post against the measured tilt…

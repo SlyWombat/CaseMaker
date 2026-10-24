@@ -1,0 +1,8 @@
+Depth keeps the 1 mm minimum floor — at most 2.81 mm on this stock.
+V-carve. The depth you type is the pocket floor; the design is correct at the colour plane, 0.8 mm below the top, resolved from the print. The tip is 0.5 mm wide and its flank is 15.0° from the axis.
+"Single Barrel" at 0.985 mm: 0.599 mm groove at the plane — floor 0.05 mm narrower per side, top opening 0.214 mm wider per side; pass pitch 0.25 mm beside the requested 0.359 mm.
+"br" at 0.998 mm: 0.606 mm groove at the plane — floor 0.053 mm narrower per side, top opening 0.214 mm wider per side; pass pitch 0.25 mm beside the requested 0.364 mm.
+How far every floor stays clear of a plane it must not cross — a void’s ceiling, the colour split. Z tolerance 0.05 mm; a job with no stated margins follows the house setting.
+body floor (PROVISIONAL)
+Matches prediction — worst under-cut 301.3948 mm² exceeds the 0.0399 mm² floor by 301.3549 mm² at level Z -0.98, near (18.84, 38.45) — a 26.25 × 66.86 mm patch — the file left material the prediction removed (over-cut 0.0000 mm²; tolerance 0.085 mm)
+Save is disabled — the simulation does not match the prediction.

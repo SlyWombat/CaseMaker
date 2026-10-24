@@ -57,3 +57,20 @@ recorded on #570. Jaw top: −56.807 / −56.806 today vs −56.818 manual on 20
 
 15:45: machine Idle at home (`MPos:-1,-1,-1`), plug OFF (`power.sh off`: "machine is Idle · plug is
 off"). Badge and the wired probe left in the machine. Browser harness stopped.
+
+## Evening session (build 9b94d1cd = + #619 pt1, #620, #617, #588/#587, #601 follow-up)
+
+Power on 16:41 (`power.sh on` through the CRLF-cleaned helper), page reloaded on the new build, job
+regenerated, plan on the DATUM path (override off), approved, regenerated, frozen 16:43.
+
+| time | step | result |
+|---|---|---|
+| 16:44–16:50 | **run 4, datum path** | M119 open → M491 −75.922 → **in-run tap −56.801** (stored −56.807) → M119 open → surface **−55.028 accepted** 1.77 proud (#619 ✓) → left edge (bisect to 0.25/0.5) → front edge ≈ 5.6 → five extents (lowest −55.518 right, highest −55.079 centre) → home. X off 1.08, Y off 6.38, spread 0.439 |
+| 16:50 | **Use the found position** (#620 ✓) | "Writing the origin…" → prompt "Take the probe out, fit the cutter, then continue" (step 1/2 went stale at the same time — #621, fixed cfb56150 later) |
+| 19:15 | cutter fitted by the maintainer (4 mm shank 0.5 mm 30° engraver) → **Continue** | `M491` −72.544 / −72.529 (cutter) → **`G10 L2 P1 X-180.125 Y-192.750 Z-52.129`** → `$H`, homed 19:16:44. X/Y = the found offsets; Z0 = lowest touch −55.518 + (−72.529 − −75.922) |
+| 19:17 | **Re-post against the measured tilt** (0.336 toward +X, 0.354 toward +Y) | re-generated + re-frozen 19:17 ("Re-posted against the measured tilt") (#608 ✓) |
+| 19:18 | Cut step 4 | **Upload disabled — "the simulation does not match the prediction"**: worst under-cut **301.39 mm²** at level Z −0.98 near (18.84, 38.45), a 26.25 × 66.86 mm patch = the whole pattern → **#623** (lifted file vs flat prediction); the original #584 0.0815 mm² sits underneath |
+
+Verified today: #613, #600, #599, #603, #619 pt1, #620, #608's re-post; blocked: #623 (then #584).
+Records: `traces/2026-10-24-run4-{transcript,transcript-full,result,result-after-use-found,result-after-continue,result-final,after-repost,oracle-lines}.txt`, `-run4-status-trail.log`, `-run4-origin-status-trail.log`; frames `img/2026-10-24-register/camera-run4/`, `camera-run4-origin/`; screenshots `run4-*.png`.
+State at 23:30: Z1 ON, idle at home, cutter fitted, badge in the vise — left on at the maintainer's option for the #623 retest.
