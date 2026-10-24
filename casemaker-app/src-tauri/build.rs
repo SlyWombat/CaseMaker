@@ -11,6 +11,11 @@ const COMMANDS: &[&str] = &[
     "machine_tcp_close",
 ];
 
+// #566 follow-up — the build-string precedence. The crate compiles the same file under `cfg(test)`
+// (lib.rs), so the rule the script runs is the rule its tests pin.
+#[path = "src/build_stamp.rs"]
+mod build_stamp;
+
 fn main() {
     emit_build_string();
     tauri_build::try_build(
@@ -22,16 +27,22 @@ fn main() {
 
 /// #566 — the COMMIT a binary was built from, which the static crate version cannot say.
 ///
-/// `git describe --tags --always --dirty` in the package directory: `v1.0.0-825-gbea18572` for a
-/// clean tree 825 commits past the tag, `…-dirty` when the working tree has uncommitted changes
-/// (a local build), and the short SHA alone when no tag is reachable. With no git at all — a
-/// source archive, a container without the CLI — the string is `unknown`: the health endpoint
-/// then says it does not know rather than claiming a version nobody built.
+/// The sources, strongest first (`build_stamp::pick_build` holds the precedence and its tests):
+///
+/// 1. **`CASEMAKER_BUILD`, when set.** A publish that already knows the sha it is stamping — the
+///    k3 rig's `cm_build.sh` builds from a source tree with no git — sets this, so an image whose
+///    tag names a commit reports that commit instead of `unknown`.
+/// 2. `git describe --tags --always --dirty` in the package directory: `v1.0.0-825-gbea18572` for
+///    a clean tree 825 commits past the tag, `…-dirty` when the working tree has uncommitted
+///    changes (a local build), and the short SHA alone when no tag is reachable.
+/// 3. `unknown` — no stamp and no git (a source archive, a container without the CLI): the health
+///    endpoint then says it does not know rather than claiming a version nobody built.
 ///
 /// The value is handed to the crate as `CM_BUILD` (`house.rs` reads it with `env!`), and this
-/// script reruns when git's HEAD or index moves, so a `cargo run` after a commit does not keep the
-/// old string. The frontend's own build string comes from `vite.config.ts`; the two are computed
-/// independently at build time from the same tree, and in the desktop app both name the same commit.
+/// script reruns when `CASEMAKER_BUILD` changes or git's HEAD or index moves, so a `cargo run`
+/// after a commit, or after the stamp is set or cleared, does not keep the old string. This is the
+/// only commit string the app reports: the health endpoint carries it and the Machines card shows
+/// it, while `vite.config.ts` stamps the package version alone.
 fn emit_build_string() {
     let manifest_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let git = |args: &[&str]| -> Option<String> {
@@ -51,7 +62,12 @@ fn emit_build_string() {
         }
     };
 
-    let build = git(&["describe", "--tags", "--always", "--dirty"]).unwrap_or_else(|| "unknown".to_string());
+    // #566 follow-up — an explicit stamp wins, and the variable being set, changed or cleared is
+    // itself an input: cargo re-runs this script when it differs from the last build.
+    println!("cargo:rerun-if-env-changed=CASEMAKER_BUILD");
+    let explicit = std::env::var("CASEMAKER_BUILD").ok();
+    let described = git(&["describe", "--tags", "--always", "--dirty"]);
+    let build = build_stamp::pick_build(explicit.as_deref(), described.as_deref());
     println!("cargo:rustc-env=CM_BUILD={build}");
 
     // The inputs `git describe` reads: HEAD (branch switches, detached checkouts) and the index

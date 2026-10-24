@@ -5,6 +5,10 @@ use house::{house_dir, HouseLock};
 use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_dialog::DialogExt;
 
+// #566 follow-up — the build-string precedence `build.rs` applies, compiled here for its tests
+// only: the script and the tests run the same function.
+#[cfg(test)]
+mod build_stamp;
 mod catalogue;
 mod config;
 mod config_api;
