@@ -38,8 +38,17 @@ function expectedSurface(
   setup: Setup,
   dims: { x: number; y: number; z: number },
   datum: MountDatum | null,
+  surfaceTopZ: { value: number } | null,
   seatMachineZ: number | undefined,
 ): { machineZ: number; from: string } {
+  // #619 — a measured surface top beats the ledge estimate: the next plan expects the top that was
+  // actually found, not `jawTop + (thickness − ledgeStep)`.
+  if (surfaceTopZ !== null) {
+    return {
+      machineZ: surfaceTopZ.value,
+      from: `the measured surface top at machine Z ${surfaceTopZ.value} (setup ${setup.index})`,
+    };
+  }
   if (datum !== null) {
     return {
       machineZ: datum.jawTopZ + (dims.z - LEDGE_STEP),
@@ -63,6 +72,8 @@ export function registrationFor(
     cornerRadius: number;
     /** Vise (#598): the measured jaw-top datum; the expected surface is `jawTopZ + (dims.z − LEDGE_STEP)`. */
     mountDatum?: MountDatum | null;
+    /** #619 — the measured surface-top datum; when present it beats the ledge estimate for the expected surface. */
+    surfaceTopZ?: { value: number } | null;
     /** The checked-out probe, carried on the plan for the record. */
     probe?: ProbeSpec | null;
     /** #599 — the mount tap point (machine XY), computed by the caller from the bed placement. */
@@ -80,7 +91,7 @@ export function registrationFor(
     {
       stock: { xMin: 0, yMin: 0, xMax: dims.x, yMax: dims.y, cornerRadius: input.cornerRadius },
       mount: mount.kind,
-      expectedSurface: expectedSurface(setup, dims, datum, input.seatMachineZ),
+      expectedSurface: expectedSurface(setup, dims, datum, input.surfaceTopZ ?? null, input.seatMachineZ),
       seekFromMachineZ: input.seekFromMachineZ,
       mountDatum: datum,
       probe: input.probe ?? null,
@@ -142,6 +153,8 @@ export function referenceRegistrationFor(
     cornerRadius: number;
     /** Vise (#598): the measured jaw-top datum. */
     mountDatum?: MountDatum | null;
+    /** #619 — the measured surface-top datum; when present it beats the ledge estimate for the expected surface. */
+    surfaceTopZ?: { value: number } | null;
     /** The checked-out probe, carried on the plan for the record. */
     probe?: ProbeSpec | null;
     /** #599 — the mount tap point (machine XY), computed by the caller from the bed placement. */
@@ -160,7 +173,7 @@ export function referenceRegistrationFor(
     {
       stock: { xMin: 0, yMin: 0, xMax: dims.x, yMax: dims.y, cornerRadius: input.cornerRadius },
       mount: mount.kind,
-      expectedSurface: expectedSurface(setup, dims, datum, input.seatMachineZ),
+      expectedSurface: expectedSurface(setup, dims, datum, input.surfaceTopZ ?? null, input.seatMachineZ),
       seekFromMachineZ: input.seekFromMachineZ,
       mountDatum: datum,
       probe: input.probe ?? null,

@@ -52,7 +52,7 @@ import { useEngraveJobStore } from '@/store/engraveJobStore';
 import { useEngraveRegistrationStore } from '@/store/engraveRegistrationStore';
 import { createFirstBed, machineAt, useLocationStore } from '@/store/locationStore';
 import { recordProbeReading } from '@/engine/cnc/registration/mountContext';
-import { viseFrameFromRegistration, withViseJawTopDatum, withVisePlacementFrame } from '@/platform/bedProfiles';
+import { viseFrameFromRegistration, withSurfaceTopDatum, withViseJawTopDatum, withVisePlacementFrame } from '@/platform/bedProfiles';
 import { useMachineTranscriptStore } from '@/store/machineTranscriptStore';
 import { useSettingsStore } from '@/store/settingsStore';
 
@@ -320,7 +320,15 @@ export function EngraveRegistrationStep({ job, target }: EngraveRegistrationStep
           // #613 — a machine with no bed profile gets one here (bare bed, the vise accessory, the
           // pins placement) so the frame write-back has an active profile to land on.
           const withBed = await createFirstBed(machine, registration, now);
-          await useLocationStore.getState().saveMachine(withVisePlacementFrame(withBed, frame, { fixedJawFaceX: `measured:${now}`, jawStartY: 'typed' }, now));
+          const withFrame = withVisePlacementFrame(withBed, frame, { fixedJawFaceX: `measured:${now}`, jawStartY: 'typed' }, now);
+          // #619 — write the measured surface top so the next plan expects the found top, not the ledge.
+          const withSurface = withSurfaceTopDatum(
+            withFrame,
+            { z: r.data.surface.z, at: plan.surfacePoint },
+            plan.probe?.id ?? null,
+            now,
+          );
+          await useLocationStore.getState().saveMachine(withSurface);
         }
       }
       // #599 — the mount tap measured the jaw top: write it into the active bed profile's datum.

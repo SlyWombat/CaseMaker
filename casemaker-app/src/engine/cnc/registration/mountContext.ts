@@ -73,6 +73,13 @@ export function mountDatumFor(machine: MachineRecord | null): MountDatum | null 
   return { jawTopZ: datum.value, measuredAt: datum.measuredAt, by: datum.by };
 }
 
+/** #619 — the active bed profile's measured surface-top datum, or null when it has none. */
+export function surfaceTopDatumFor(machine: MachineRecord | null): { value: number; measuredAt: string; by: string; at: [number, number] | null } | null {
+  if (machine === null || machine.bedProfiles === undefined || machine.activeBedProfileId === undefined) return null;
+  const profile = machine.bedProfiles.find((p) => p.id === machine.activeBedProfileId);
+  return profile?.datums.surfaceTopZ ?? null;
+}
+
 /** #599 — the mount tap point (machine XY) for the vise, from the bed placement or the newest registration. */
 export function mountTapFor(
   machine: MachineRecord | null,

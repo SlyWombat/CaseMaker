@@ -29,7 +29,7 @@ import { recommendedSurfaceToleranceMm } from '@/engine/cnc/materials';
 import { primitiveLabel } from '@/engine/cnc/engrave/partPlan';
 import { summarizePlan } from '@/engine/cnc/registration/summary';
 import type { MountDatum, PlanObstacle, ProbeSpec, RegistrationPlan } from '@/engine/cnc/registration/plan';
-import { mountDatumFor, mountTapFor, probeFor, probeNameFor } from '@/engine/cnc/registration/mountContext';
+import { mountDatumFor, mountTapFor, probeFor, probeNameFor, surfaceTopDatumFor } from '@/engine/cnc/registration/mountContext';
 import { useMountTap } from '@/hooks/useMountTap';
 import {
   addSetupOffer,
@@ -111,6 +111,8 @@ function planRegistrationAttempt(args: {
   /** The expert override: use the typed seat even when a datum is present. */
   useTypedSeat: boolean;
   mountDatum: MountDatum | null;
+  /** #619 — the measured surface-top datum; when present the plan expects the found top, not the ledge estimate. */
+  surfaceTopZ: { value: number } | null;
   probe: ProbeSpec | null;
   /** #599 — the mount tap point (machine XY), or null when the fixed jaw's frame is unknown. */
   mountTap: { x: number; y: number; fromMachineZ: number; label: string } | null;
@@ -154,7 +156,7 @@ function planRegistrationAttempt(args: {
     if (args.mountTap === null) {
       return { kind: 'refused', reason: 'place the vise, or register once with the typed seat, so the app knows where the fixed jaw is' };
     }
-    input = { seekFromMachineZ, cornerRadius: STOCK_CORNER_RADIUS_MM, mountDatum: args.mountDatum, probe: args.probe, mountTap: args.mountTap };
+    input = { seekFromMachineZ, cornerRadius: STOCK_CORNER_RADIUS_MM, mountDatum: args.mountDatum, surfaceTopZ: args.surfaceTopZ, probe: args.probe, mountTap: args.mountTap };
   } else {
     // The seat path: tape always; a vise without a datum, or with the expert override, types the seat.
     const seat = Number(args.seatZ);
@@ -223,6 +225,8 @@ export function EngraveSetupsSection({ initiallyOpen = false }: { initiallyOpen?
   const machineRecord = target === null ? null : machineAt(target);
   const probe = useMemo(() => probeFor(machineRecord), [machineRecord]);
   const mountDatum = useMemo(() => mountDatumFor(machineRecord), [machineRecord]);
+  // #619 — the measured surface top, so a re-plan expects the found top rather than the ledge estimate.
+  const surfaceTopZ = useMemo(() => surfaceTopDatumFor(machineRecord), [machineRecord]);
   // #599 — the mount tap point (machine XY), from the placement frame or the newest usable registration.
   const registrations = useEngraveRegistrationStore((s) => s.records);
   const seekFromMachineZ = useMemo(() => jobMachine(job, calibration).toolChange.clearanceZ, [job, calibration]);
@@ -655,6 +659,7 @@ export function EngraveSetupsSection({ initiallyOpen = false }: { initiallyOpen?
                   seatZ,
                   useTypedSeat,
                   mountDatum,
+                  surfaceTopZ,
                   probe,
                   mountTap,
                   defaults,

@@ -177,6 +177,34 @@ export function withViseJawTopDatum(
   };
 }
 
+/** #619 — write the measured surface top onto the active bed profile's `surfaceTopZ` datum. */
+export function withSurfaceTopDatum(
+  machine: MachineRecord,
+  surfaceTop: { z: number; at: { x: number; y: number } },
+  probeId: string | null,
+  now: string,
+): MachineRecord {
+  const profileId = machine.activeBedProfileId;
+  if (profileId === undefined) return machine;
+  const by = probeId ?? 'wired-probe';
+  return {
+    ...machine,
+    bedProfiles: machine.bedProfiles?.map((p) =>
+      p.id === profileId
+        ? {
+            ...p,
+            datums: {
+              ...p.datums,
+              surfaceTopZ: { value: surfaceTop.z, measuredAt: now, by, at: [surfaceTop.at.x, surfaceTop.at.y] },
+            },
+            history: [...p.history, { at: now, what: 'surface top measured' }],
+          }
+        : p,
+    ),
+    updatedAt: now,
+  };
+}
+
 /**
  * The new keys for a machine that has not been migrated, or null when there is nothing to migrate
  * (no wasteboard, no vise, no measured bracket seat) or the bed is already described. Nothing is

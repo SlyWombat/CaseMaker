@@ -509,12 +509,13 @@ export async function runRegistration(
     });
 
     // #619 — a datum-path surface ABOVE the expected band is the blank standing prouder than the
-    // ledge estimate (a normally mounted blank need not sit on the ledge): note the measured proud.
-    if (plan.mountDatum !== null && slow.z > plan.seek.band.max) {
-      plan.notes.push(
-        `the blank stands ${f(slow.z - plan.mountDatum.jawTopZ)} mm proud of the jaw tops — expected ${f(plan.seek.band.max - plan.mountDatum.jawTopZ)} on the ledge; the measured top is used`,
-      );
-    }
+    // ledge estimate (a normally mounted blank need not sit on the ledge). The note lands on the
+    // OUTCOME (the run's record), never on the plan — the plan is the approved object and is not the
+    // executor's to mutate. "Expected" is the ledge proud (band max − tolerance − jawTop), not band max − jawTop.
+    const proudNote =
+      plan.mountDatum !== null && slow.z > plan.seek.band.max
+        ? `the blank stands ${f(slow.z - plan.mountDatum.jawTopZ)} mm proud of the jaw tops — expected ${f(plan.seek.band.max - s.surfaceToleranceMm - plan.mountDatum.jawTopZ)} on the ledge; the measured top is used`
+        : null;
 
     const parkZ = slow.z + s.parkAboveSurfaceMm;
     await io.send(`G53 G0 Z${f(parkZ)}`);
@@ -526,6 +527,7 @@ export async function runRegistration(
     const data: RunData = { probeRefZ: ref.z, surface: slow, scans };
     // A plan that registers on earlier-setup features has its own outcome (#429); #430's is unchanged.
     const outcome = plan.references ? referenceOutcome(plan, data) : computeOutcome(plan, data);
+    if (proudNote !== null) outcome.notes.push(proudNote);
 
     // #475 — the cut extents, AFTER the scans (#591): the plan's touch points are where the cut's
     // extents are on the stock the job expects; the scans have just measured where the stock IS, so

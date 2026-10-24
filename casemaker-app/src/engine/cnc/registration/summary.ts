@@ -29,8 +29,14 @@ export function summarizePlan(plan: RegistrationPlan): string {
     plan.mount === 'bracket'
       ? ` It assumes ${clamps.length === 0 ? 'no clamps on the stock' : clamps.join('; ')} — you confirm that before the probe moves.`
       : '';
+  // #619 — the datum path's first act is the mount tap, checked against the stored datum.
+  const tap =
+    plan.mountTap !== null && plan.mountDatum != null
+      ? ` the fixed-jaw top is tapped first and checked against the stored datum (${n(plan.mountDatum.jawTopZ)});`
+      : '';
   return (
-    `Home, fit the wired probe and measure it (M491); touch the surface at the cut area's centre ` +
+    `Home, fit the wired probe and measure it (M491);${tap}` +
+    ` touch the surface at the cut area's centre ` +
     `(${n(plan.surfacePoint.x)}, ${n(plan.surfacePoint.y)}); then scan ${edges} — bracketing each edge ` +
     `and bisecting to ${n(s.fineStepMm)} mm, stopping at the first touch off the stock, every touch capped at the surface − ${n(s.capBelowSurfaceMm)} mm; home when finished.${assumes}`
   );

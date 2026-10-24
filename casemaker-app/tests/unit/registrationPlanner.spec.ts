@@ -628,7 +628,7 @@ describe('#430 the executor, on a fake machine', () => {
     const r = await runRegistration(p, { console: z1.console, operator: yes });
     expect(r.ok).toBe(true);
     if (!r.ok) throw new Error(r.reason);
-    expect(p.notes.some((n) => n.includes('proud'))).toBe(true);
+    expect(r.outcome.notes.some((n) => n.includes('proud'))).toBe(true);
     expect(r.outcome.usable).toBe(true);
   });
 
