@@ -34,6 +34,7 @@ import type { MillProfile } from '@/engine/cnc/machine';
 import { inflate } from '@/engine/cnc/fixture';
 import { hasSacrificial, sacrificialBoxes } from '@/engine/cnc/sacrificial';
 import { cuttingRadiusForSweep, type Tool } from '@/engine/cnc/tool';
+import { surfaceLift, type SurfaceFrame } from '@/engine/cnc/engrave/surfacePlane';
 import { obstructionLabels } from '@/engine/cnc/probePlan';
 import { ARC_CHORD_TOLERANCE_MM, SWEEP_SIMPLIFY_EPS_MM, segmentsForRadius } from '@/engine/compiler/arcResolution';
 import { executeProfile, type ManifoldToplevel } from './evaluateOp';
@@ -94,6 +95,61 @@ export const MAX_CHECKPOINTS = 1000;
 export function isDenseForExactSweep(timeline: Timeline): boolean {
   return timeline.checkpoints.length > MAX_CHECKPOINTS;
 }
+
+/**
+ * #625 — the timeline's SURFACE-frame image: every FEED move's Z is read with the fitted lift
+ * subtracted at its own XY (the exact inverse of `applySurfaceLift`, the same shear #623's
+ * `OracleReport.frame` names for the removal), and the (segment, Z) buckets are re-merged by
+ * `buildTimeline`'s own rule. A flat job re-posted against a tilt then reads as the flat program it
+ * is — the per-move Z differences the lift wrote collapse, so the bucket count, the ramps they
+ * invented and the removal they distorted all fall back to the flat job's own — while a genuinely 3D
+ * program keeps its genuinely distinct levels: the lift is bounded by the tilt, far less than a real
+ * depth step, so it cannot merge levels that are really apart.
+ *
+ * The bucket rule is `buildTimeline`'s: a new checkpoint whenever the (segment, quantised lowest-Z)
+ * key changes, contiguous in program order. The lowest Z is per move in the surface frame —
+ * `min(unlifted z0, unlifted z1)` — not the un-lift of the lifted lowest Z, because the lift differs
+ * at a ramp's two ends. The returned timeline shares the source's events, segments, pauses, air moves
+ * and diagnostics; only its `checkpoints` (and their `summary.checkpoints` count) are rebuilt.
+ */
+export function unliftTimeline(timeline: Timeline, surface: SurfaceFrame): Timeline {
+  const { plane, z0 } = surface;
+  const checkpoints: Checkpoint[] = [];
+  let current: Checkpoint | null = null;
+  for (const cp of timeline.checkpoints) {
+    for (let k = 0; k < cp.steps.length; k++) {
+      const x0 = cp.xy[k * 4] as number;
+      const y0 = cp.xy[k * 4 + 1] as number;
+      const x1 = cp.xy[k * 4 + 2] as number;
+      const y1 = cp.xy[k * 4 + 3] as number;
+      const uz0 = (cp.zs[k * 2] as number) - surfaceLift(plane, z0, x0, y0);
+      const uz1 = (cp.zs[k * 2 + 1] as number) - surfaceLift(plane, z0, x1, y1);
+      const z = Math.min(uz0, uz1);
+      const zKey = Math.round(z * 1000);
+      if (current === null || current.segment !== cp.segment || current.zKey !== zKey) {
+        current = {
+          segment: cp.segment,
+          tool: cp.tool,
+          zKey,
+          z,
+          run: checkpoints.length,
+          steps: [],
+          xy: [],
+          zs: [],
+          nonConstantZ: false,
+        };
+        checkpoints.push(current);
+      }
+      current.steps.push(cp.steps[k] as number);
+      current.xy.push(x0, y0, x1, y1);
+      current.zs.push(uz0, uz1);
+      if (uz0 !== uz1 && (x0 !== x1 || y0 !== y1)) current.nonConstantZ = true;
+      if (z < current.z) current.z = z;
+    }
+  }
+  return { ...timeline, checkpoints, summary: { ...timeline.summary, checkpoints: checkpoints.length } };
+}
+
 /**
  * Below this an intersection with the UNCUT blank is floating-point dust, not material: the
  * blank and the air solid are both exact polygons, so a real overlap is far larger.

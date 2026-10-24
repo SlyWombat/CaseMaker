@@ -40,7 +40,6 @@ import {
   gridSliceAt,
   oracleBand,
   removalSliceAt,
-  shearRemovalToSurface,
   type OraclePredicted,
   type OracleReport,
 } from '@/engine/cnc/engrave/oracle';
@@ -50,7 +49,7 @@ import { partToWork } from '@/engine/cnc/frames';
 import type { ManifoldToplevel } from '../geometry/evaluateOp';
 import { meshOutputOf, type NodeMeshOutput } from '../geometry/meshOutput';
 import { createPlayback, type Playback } from '../geometry/playback';
-import { boxSolid, isDenseForExactSweep, sweepTimeline, type SweepDiagnostic, type SweepResult, type SweepStats } from '../geometry/sweep';
+import { boxSolid, isDenseForExactSweep, sweepTimeline, unliftTimeline, type SweepDiagnostic, type SweepResult, type SweepStats } from '../geometry/sweep';
 import { columnSweep, type ColumnSweepOk, type DrillPointDefault } from '../geometry/columnEngine';
 import type { SimThreadSpec } from '@/engine/cnc/cam/threadMill';
 
@@ -468,10 +467,13 @@ export function createSimSession(tl: ManifoldToplevel, hooks?: SimSessionHooks):
 
   const load = (gcodeText: string, setupArg: Setup, tool: Tool, machineId: string | null, opts?: SimLoadOpts): SimLoadResult => {
     dispose();
-    // #623 — a program posted against the blank's fitted surface is swept on a stock SEATED on that
-    // plane, and every later oracle call is judged in the same frame. A flat load is untouched.
+    // #623/#625 — a program posted against the blank's fitted surface is judged in its SURFACE frame.
+    // The EXACT engine reproduces that frame by UN-LIFTING the program (the exact inverse of
+    // `applySurfaceLift`, #625), so it sweeps the flat program the job really is, on the flat stock,
+    // and the verdict is identical to the flat post by construction. The COLUMN engine (a V/drill/
+    // thread/rotary/dense-flat job) keeps #623's seat + surface grid, because a cone's width depends
+    // on depth and cannot be un-lifted. A flat load (no surface) is untouched.
     const surface = opts?.surface ?? null;
-    const setup = surface === null ? setupArg : seatStockOnSurface(setupArg, surface);
     surfaceFrame = surface;
     let machine;
     if (machineId !== null) {
@@ -484,7 +486,11 @@ export function createSimSession(tl: ManifoldToplevel, hooks?: SimSessionHooks):
       rapid = machine.rapidEstimate;
     }
     const parse = parseGcode(gcodeText);
-    const timeline = buildTimeline(parse, setup, machine);
+    // The LIFTED timeline, built against the UN-seated setup (the seat only raises the stock top,
+    // never the program's Z). `surfaceTimeline` is its surface-frame image: the same program with the
+    // lift taken back out, re-bucketed — the flat program a flat post would have produced.
+    const timeline = buildTimeline(parse, setupArg, machine);
+    const surfaceTimeline = surface === null ? timeline : unliftTimeline(timeline, surface);
     const diagnostics: SimDiagnostic[] = [
       ...parse.diagnostics.map((d): SimDiagnostic => ({ source: 'parser', severity: d.severity, code: d.code, message: d.message, line: d.line })),
       ...timeline.diagnostics.map((d): SimDiagnostic => ({ source: 'runner', severity: d.severity, code: d.code, message: d.message, line: d.line, step: d.step })),
@@ -507,7 +513,7 @@ export function createSimSession(tl: ManifoldToplevel, hooks?: SimSessionHooks):
     // `dense-3d-refused` for crossing `MAX_CHECKPOINTS`, leaving a 3D/relief file path-only, but
     // the FLAT dexel draws it — `denseFlatRoutesToColumn` gates this on a genuine flat end mill and
     // on its not being a rest pass, so a ball/bull (#532) and a rest pass keep their old refusals.
-    if (timeline.summary.rotary || sweepsOnColumn(tool) || denseFlatRoutesToColumn(timeline, tool, opts)) {
+    if (timeline.summary.rotary || sweepsOnColumn(tool) || denseFlatRoutesToColumn(surfaceTimeline, tool, opts)) {
       // A rest pass is measured against the material a previous program left, and only the exact
       // sweeper can start from it. Silently sweeping the blank instead would draw a cut nobody is
       // going to make, so the pair is refused by name (#410).
@@ -519,6 +525,9 @@ export function createSimSession(tl: ManifoldToplevel, hooks?: SimSessionHooks):
             : `tool "${tool.name}" is a ${tool.shape === 'drill' ? 'drill' : tool.shape === 'thread' ? 'thread mill' : 'cone (a V-bit)'}, which the column engine sweeps, and a rest pass is measured on a flat cutter's floor: the column engine cannot start from the material a previous program left`,
         );
       }
+      // #623 — the column engine sweeps the LIFTED program on a stock SEATED on the plane, so a
+      // shallow cut through a tilted top removes real material, not the air a flat stock would have.
+      const setup = surface === null ? setupArg : seatStockOnSurface(setupArg, surface);
       const col = columnSweep(timeline, tool, setup, opts);
       if (!col.ok) {
         // Same contract as a refused exact sweep (#194): keep the runner's work, draw the path,
@@ -568,30 +577,32 @@ export function createSimSession(tl: ManifoldToplevel, hooks?: SimSessionHooks):
         ...(setup.fixture ? { fixtureSource: setup.fixture.source, fixtureUncertainty: setup.fixture.uncertainty } : {}),
       };
     }
-    const out = sweepTimeline(tl, timeline, tool, setup, machine ? { ...opts, machine } : opts);
+    // The EXACT 2.5D sweep: the surface-frame (un-lifted) program on the un-seated stock — the flat
+    // program the job really is, so the removal and the oracle's band are the flat post's own.
+    const out = sweepTimeline(tl, surfaceTimeline, tool, setupArg, machine ? { ...opts, machine } : opts);
     if (!out.ok) {
       // The runner's work is cheap and worth keeping on its own: a refused sweep still yields
       // the path, the pauses and the segments, so the viewport can draw the path with no
       // material. This session owns no wasm handle (#194).
-      live = { kind: 'path', timeline, setup };
+      live = { kind: 'path', timeline: surfaceTimeline, setup: setupArg };
       return {
         ok: false,
         pathOnly: true,
         diagnostics: [...diagnostics, ...out.diagnostics.map(tagSweep)],
-        summary: timeline.summary,
-        pauses: timeline.pauses,
-        segments: timeline.segments,
+        summary: surfaceTimeline.summary,
+        pauses: surfaceTimeline.pauses,
+        segments: surfaceTimeline.segments,
       };
     }
     const sweep = out.value;
     let playback: Playback | null = null;
     try {
-      playback = createPlayback(tl, timeline, sweep);
+      playback = createPlayback(tl, surfaceTimeline, sweep);
       // The fixture, drawn where the user SAID the jaws are (#204): the un-inflated boxes, so
       // the picture is not the grown box the checks use. Built from the same `boxSolid` the
       // sweep checks against, so the shown solid and the tested one can never disagree.
       const fixture: SimFixtureMesh[] = [];
-      for (const box of setup.fixture?.boxes ?? []) {
+      for (const box of setupArg.fixture?.boxes ?? []) {
         const solid = boxSolid(tl, box);
         fixture.push({ id: box.id, label: box.label, mesh: meshOutputOf(solid) });
         solid.delete();
@@ -605,17 +616,17 @@ export function createSimSession(tl: ManifoldToplevel, hooks?: SimSessionHooks):
         fixture,
       };
       diagnostics.push(...sweep.diagnostics.map(tagSweep));
-      live = { kind: 'swept', sweep, playback, timeline, setup };
+      live = { kind: 'swept', sweep, playback, timeline: surfaceTimeline, setup: setupArg };
       return {
         ok: true,
         diagnostics,
-        summary: timeline.summary,
+        summary: surfaceTimeline.summary,
         stats: sweep.stats,
         stockTopZ: sweep.stockTopZ,
         radius: sweep.radius,
         axisClamped: null,
         count: playback.count,
-        checkpoints: timeline.checkpoints.map((cp): CheckpointInfo => ({
+        checkpoints: surfaceTimeline.checkpoints.map((cp): CheckpointInfo => ({
           segment: cp.segment,
           z: cp.z,
           run: cp.run,
@@ -624,10 +635,10 @@ export function createSimSession(tl: ManifoldToplevel, hooks?: SimSessionHooks):
           moveCount: cp.steps.length,
           nonConstantZ: cp.nonConstantZ,
         })),
-        pauses: timeline.pauses,
-        segments: timeline.segments,
+        pauses: surfaceTimeline.pauses,
+        segments: surfaceTimeline.segments,
         meshes,
-        ...(setup.fixture ? { fixtureSource: setup.fixture.source, fixtureUncertainty: setup.fixture.uncertainty } : {}),
+        ...(setupArg.fixture ? { fixtureSource: setupArg.fixture.source, fixtureUncertainty: setupArg.fixture.uncertainty } : {}),
       };
     } catch (e) {
       // Nothing may leak, and a failed load leaves no session. Same order as `dispose`.
@@ -717,19 +728,12 @@ export function createSimSession(tl: ManifoldToplevel, hooks?: SimSessionHooks):
     if (!l || l.kind !== 'swept') throw new Error('oracle: no swept program is loaded');
     const removal = l.sweep.removal;
     if (!removal) throw new Error('oracle: the loaded program removed no material');
-    if (surface === null) {
-      return { ...computeOracle(tl, removalSliceAt(removal), predicted, oracleBand(worstContours(l.timeline))), frame: 'work' };
-    }
-    // The exact sweeper keeps a solid, not a height field, so its frame change is a shear of the
-    // removal into the surface frame — exact for the 2.5D intervals a flat end mill leaves. The
-    // sheared copy is ours and is released on both paths; `removal` itself must outlive this call
-    // (playback and later seeks read it), so it is never the one deleted.
-    const seated = shearRemovalToSurface(removal, surface);
-    try {
-      return { ...computeOracle(tl, removalSliceAt(seated), predicted, oracleBand(worstContours(l.timeline))), frame: 'surface' };
-    } finally {
-      seated.delete();
-    }
+    // #625 — the exact engine swept the SURFACE-FRAME image of the program (the load un-lifted every
+    // FEED by the lift at its XY), so the removal is already the flat program's own, in the work
+    // frame: compare it directly. `frame` still says `'surface'` when the program was posted against
+    // a fitted plane, because that is the frame the numbers speak — which, for the flat program the
+    // un-lift recovers, coincides with the work frame. No shear: the removal is never tilted.
+    return { ...computeOracle(tl, removalSliceAt(removal), predicted, oracleBand(worstContours(l.timeline))), frame: surface === null ? 'work' : 'surface' };
   };
 
   const stateAt = (step: number): MachineState | null => (live ? live.timeline.stateAt(Math.trunc(step)) : null);

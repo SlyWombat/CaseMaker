@@ -287,27 +287,6 @@ export const removalSliceAt =
     removal.slice(zSlice);
 
 /**
- * #623 — the exact sweeper's removal, SHEARED into the blank's fitted surface frame:
- * `z' = z − lift(x, y)`, with X and Y unchanged.
- *
- * A shear is exactly the frame change the comparison needs. The exact sweeper's removal is the
- * material a flat end mill took: at every XY it is the interval from the cut floor up to the top
- * face, and a shear that is linear in X and Y maps each such column to the interval
- * `[floor − lift, top − lift]` at the SAME XY. Sliced horizontally at a level, the region is then
- * the columns whose floor is at or below that level **in the blank's own frame** — the very question
- * `computeOracle` asks, with the tilted work-frame depths taken out of it.
- *
- * The returned solid is the CALLER's to delete; the original removal is untouched (the shear returns
- * a copy). Determinant 1, so the transform cannot flip a face.
- */
-export function shearRemovalToSurface(removal: ManifoldInstance, surface: SurfaceFrame): ManifoldInstance {
-  const { slopeX, slopeY, offset } = surface.plane;
-  const dz = offset - surface.z0;
-  // Column-major 4x4: x' = x, y' = y, z' = z − (dz + slopeX·x + slopeY·y).
-  return removal.transform([1, 0, -slopeX, 0, 0, 1, -slopeY, 0, 0, 0, 1, 0, 0, 0, -dz, 1]);
-}
-
-/**
  * The column engine's answer (#408): the cell squares of its height field whose own floor is at or
  * below `zSlice`.
  *
