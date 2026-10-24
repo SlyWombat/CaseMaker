@@ -63,6 +63,8 @@ import { bedFromLegacy, bedMigrationDue, ensureFirstRegistrationBed, firstRegist
 import { parseMarginsStrict, useSettingsStore, type FixturesSettings } from './settingsStore';
 import { useMachineStore } from './machineStore';
 import { useToolRegistryStore } from './toolRegistryStore';
+import type { InventoryItem } from '@/platform/houseClient';
+import type { ToolCopy } from '@/engine/cnc/toolCondition';
 import { useShopDefaultsStore } from './shopDefaultsStore';
 import { useFeedTableStore } from './feedTableStore';
 import { useEngraveRegistrationStore } from './engraveRegistrationStore';
@@ -398,6 +400,52 @@ export function useMachineRecord(target: { host: string; port: number } | null):
 export function accessoriesFor(machine: MachineRecord): FixtureRecord[] {
   const accessories = useLocationStore.getState().location?.accessories ?? [];
   return accessories.filter((a) => a.whereabouts.kind === 'machine' && a.whereabouts.machineId === machine.id);
+}
+
+/** #602 — a cutter copy, addressed by the item that owns it and its index within `copies`. */
+export interface HeldCopy {
+  item: InventoryItem;
+  index: number;
+  copy: ToolCopy;
+}
+
+/**
+ * #602 — the cutter copies held by one machine: the inventory's `copies[]`, filtered by the
+ * `whereabouts` each copy carries. The spindle's cutters, the way {@link accessoriesFor} is the
+ * bed's mounts. The `index` is the copy's identity within its item, so a return or check-out
+ * rewrites exactly that copy.
+ */
+export function copiesHeldBy(items: readonly InventoryItem[], machineId: string): HeldCopy[] {
+  const out: HeldCopy[] = [];
+  for (const item of items) {
+    item.copies.forEach((copy, index) => {
+      if (copy.whereabouts.kind === 'machine' && copy.whereabouts.machineId === machineId) {
+        out.push({ item, index, copy });
+      }
+    });
+  }
+  return out;
+}
+
+/** #602 — the cutter copies still in their box: the `copies[]` whose `whereabouts` is `box`. */
+export function copiesInBox(items: readonly InventoryItem[]): HeldCopy[] {
+  const out: HeldCopy[] = [];
+  for (const item of items) {
+    item.copies.forEach((copy, index) => {
+      if (copy.whereabouts.kind === 'box') out.push({ item, index, copy });
+    });
+  }
+  return out;
+}
+
+/** #602 — a copy's whereabouts moved to its box (no case: the machine's copy carried none). */
+export function copyInBox(copy: ToolCopy): ToolCopy {
+  return { ...copy, whereabouts: { kind: 'box', case: null } };
+}
+
+/** #602 — a copy's whereabouts moved to a machine. */
+export function copyAtMachine(copy: ToolCopy, machineId: string): ToolCopy {
+  return { ...copy, whereabouts: { kind: 'machine', machineId } };
 }
 
 /**
