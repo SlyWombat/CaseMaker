@@ -220,9 +220,12 @@ describe('#599/#607 the vise tap runs the same code path it always did', () => {
       expect(r.reason).toContain('no jaw top at (-186.2, -180) down to machine Z -58.82');
       expect(r.reason).toContain('is the vise where the machine record says?');
     }
-    // The tap's guarded move goes exactly 2 mm below the stored jaw top (−3 → −58.82).
+    // #615 — the tap knows the jaw top from the datum, so it descends in two stages: a fast seek to
+    // 3 mm above the expected top (−3 → −53.82), then the touch feed for the last 5 mm down to the
+    // jawTopZ − 2 floor (−58.82).
     const searched = console.lines.filter((l) => l.startsWith('G38.3 Z-'));
-    expect(searched).toHaveLength(1);
-    expect(searched[0]!.startsWith('G38.3 Z-55.82 ')).toBe(true);
+    expect(searched).toHaveLength(2);
+    expect(searched[0]!.startsWith('G38.3 Z-50.82 F300')).toBe(true);
+    expect(searched[1]!.startsWith('G38.3 Z-5 F150')).toBe(true);
   });
 });

@@ -448,6 +448,17 @@ describe('#599 the mount tap', () => {
     // Numbering is the landing order, with no gaps and no repeats.
     expect(seen.map((t) => t.seq)).toEqual(seen.map((_, i) => i + 1));
   });
+
+  // #615 — with the jaw top known from the datum, the tap descends in two stages: a fast seek to
+  // 3 mm above the expected top, then the touch feed for the last 5 mm down to the jawTopZ − 2 floor.
+  it('a tap with an expected Z seeks fast, then touches at the touch feed', async () => {
+    const z1 = fakeZ1({ actual: SHIFTED, tap: { x: TAP.x, y: TAP.y, z: JAW.jawTopZ } });
+    const p = plan('vise', { mountDatum: JAW, mountTap: TAP, fixtureBelowSurfaceMm: undefined });
+    const r = await runRegistration(p, { console: z1.console, operator: yes });
+    if (!r.ok) throw new Error(r.reason);
+    const taps = z1.lines.filter((l) => l.startsWith('G38.3 Z-')).slice(0, 2);
+    expect(taps).toEqual(['G38.3 Z-50.82 F300', 'G38.3 Z-5 F150']);
+  });
 });
 
 describe('#525 the 3D probe’s sideways scan, against the fake Z1', () => {
@@ -509,6 +520,8 @@ describe('#599 the standalone mount tap', () => {
     expect(r.at).toEqual({ x: -186.2, y: -180 });
     expect(z1.lines.slice(0, 4)).toEqual(['?', '$H', 'M119', 'M491']);
     expect(z1.lines.at(-1)).toBe('$H');
+    // #615 — the standalone tap has no expected Z, so the whole descent stays ONE touch-feed pass.
+    expect(z1.lines.filter((l) => l.startsWith('G38.3 Z-'))).toEqual(['G38.3 Z-97 F150']);
   });
 
   it('a miss stops with the mount named', async () => {

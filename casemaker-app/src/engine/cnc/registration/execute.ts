@@ -465,6 +465,12 @@ const MOUNT_TAP_SLACK_MM = 2;
  * 2026-10-23). Returns the reading — a miss is a `touched:false` reading, null is no reading — and
  * the caller checks it against the stored datum or the floor. Shared by the in-run tap and the
  * standalone {@link runMountTap}.
+ *
+ * #615 — with an expected Z (`expectZ`), the descent is two-stage: a fast `G38.3` seek down to
+ * {@link RegistrationSettings.parkAboveSurfaceMm} above the expected Z, then the touch feed for the
+ * final few millimetres down to the floor. The fast seek still probes, so a reference standing higher
+ * than expected stops it (the caller's slack check flags that reading); a miss continues to the touch
+ * feed. With no expected Z the whole descent stays the single touch-feed pass it has always been.
  */
 async function mountTapTouch(
   io: Session,
@@ -472,6 +478,8 @@ async function mountTapTouch(
   seekFromMachineZ: number,
   settings: RegistrationSettings,
   floorZ: number,
+  /** #615 — the machine Z the touch expects to meet, or null to descend the full height at the touch feed. */
+  expectZ: number | null = null,
 ): Promise<Prb | null> {
   await io.idle();
   await io.send(`G53 G0 Z${f(seekFromMachineZ)}`);
@@ -479,8 +487,17 @@ async function mountTapTouch(
   await io.idle();
   io.at(`as low as machine Z ${f(floorZ)} (the mount tap)`);
   await io.send('G91');
-  const reply = await io.send(`G38.3 Z-${f(seekFromMachineZ - floorZ)} F${f(settings.touchFeed)}`, { missOk: true });
-  const prb = lastPrb(reply);
+  let prb: Prb | null;
+  if (expectZ === null) {
+    prb = lastPrb(await io.send(`G38.3 Z-${f(seekFromMachineZ - floorZ)} F${f(settings.touchFeed)}`, { missOk: true }));
+  } else {
+    const approachZ = expectZ + settings.parkAboveSurfaceMm;
+    const fast = lastPrb(await io.send(`G38.3 Z-${f(seekFromMachineZ - approachZ)} F${f(settings.surfaceFastFeed)}`, { missOk: true }));
+    prb =
+      fast !== null && fast.touched
+        ? fast
+        : lastPrb(await io.send(`G38.3 Z-${f(approachZ - floorZ)} F${f(settings.touchFeed)}`, { missOk: true }));
+  }
   await io.send('G0 Z3');
   await io.send('G90');
   const after = await io.send('M119');
@@ -588,7 +605,7 @@ export async function runRegistration(
     if (plan.mountTap !== null && tapExpectZ !== null) {
       const tap = plan.mountTap;
       const floorZ = tapExpectZ - MOUNT_TAP_FLOOR_MM;
-      const prb = await mountTapTouch(io, { x: tap.x, y: tap.y }, plan.seek.fromMachineZ, s, floorZ);
+      const prb = await mountTapTouch(io, { x: tap.x, y: tap.y }, plan.seek.fromMachineZ, s, floorZ, tapExpectZ);
       if (prb === null || !prb.touched || Math.abs(prb.z - tapExpectZ) > MOUNT_TAP_SLACK_MM) {
         throw new Stop(
           tap.reference === undefined || tap.reference === 'vise-jaw-top'
