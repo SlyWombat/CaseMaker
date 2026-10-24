@@ -125,6 +125,45 @@ describe('#280 — machineStore', () => {
     expect(useMachineStore.getState().heartbeat.reachable).toBeNull();
   });
 
+  // #527 — a registration run owns the machine: the viewport draws its probe. Session state, so it
+  // is never persisted, and a fresh check or a forget must not leave a stale "registering" claim.
+  it('registrationActive is session state and is cleared by a fresh check or forget', () => {
+    useMachineStore.getState().setProbeResult({ kind: 'found', observation: observation(), calibration: null });
+    useMachineStore.getState().setRegistrationActive(true);
+    expect(useMachineStore.getState().registrationActive).toBe(true);
+    expect(JSON.parse(localStorage.getItem(MACHINE_STORAGE_KEY)!).registrationActive).toBeUndefined();
+
+    useMachineStore.getState().setProbeResult({ kind: 'found', observation: observation(), calibration: null });
+    expect(useMachineStore.getState().registrationActive).toBe(false);
+
+    useMachineStore.getState().setRegistrationActive(true);
+    useMachineStore.getState().forget();
+    expect(useMachineStore.getState().registrationActive).toBe(false);
+  });
+
+  // #527 — the heartbeat's answer is the viewport's live position; it moves status/statusLine and
+  // nothing else, and it is not written (a 2 s poll would churn the record for nothing).
+  it('noteLiveStatusLine folds in the live line without persisting it or moving the record', () => {
+    useMachineStore.getState().setProbeResult({ kind: 'found', observation: observation(), calibration: null });
+    const before = useMachineStore.getState().machine!;
+    const stored = localStorage.getItem(MACHINE_STORAGE_KEY);
+
+    useMachineStore.getState().noteLiveStatusLine('<Run|MPos:1,2,3|WPos:11,22,-0.5>');
+    const after = useMachineStore.getState().machine!;
+
+    expect(after.status).toBe('<Run|MPos:1,2,3|WPos:11,22,-0.5>');
+    expect(after.statusLine?.wpos).toMatchObject({ x: 11, y: 22, z: -0.5 });
+    expect(after.observedAt).toBe(before.observedAt);
+    expect(after.busy).toBe(before.busy);
+    expect(localStorage.getItem(MACHINE_STORAGE_KEY)).toBe(stored);
+  });
+
+  it('noteLiveStatusLine with no remembered machine does nothing', () => {
+    useMachineStore.getState().forget();
+    useMachineStore.getState().noteLiveStatusLine('<Idle|WPos:1,2,3>');
+    expect(useMachineStore.getState().machine).toBeNull();
+  });
+
   it('reloads the machine from storage', async () => {
     useMachineStore.getState().setProbeResult({ kind: 'found', observation: observation(), calibration: null });
     vi.resetModules();

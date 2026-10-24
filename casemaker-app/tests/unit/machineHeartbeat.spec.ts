@@ -13,7 +13,7 @@ import {
   type MachineHeartbeatClient,
 } from '@/platform/machineHeartbeat';
 import { resetMachineNoticeStore, useMachineNoticeStore } from '@/store/machineNoticeStore';
-import { useMachineStore } from '@/store/machineStore';
+import { MACHINE_STORAGE_KEY, useMachineStore } from '@/store/machineStore';
 import type { MachineObservation } from '@/platform/machineProbe';
 
 function observation(over: Partial<MachineObservation> = {}): MachineObservation {
@@ -135,5 +135,37 @@ describe('#555 — machineHeartbeat', () => {
     expect(useMachineStore.getState().heartbeat.reachable).toBe(true);
     expect(useMachineStore.getState().heartbeat.lastSeenAt).toBe(seen);
     expect(useMachineNoticeStore.getState().notice).toBeNull();
+  });
+
+  // #527 — the same `?` answer is the viewport's live position, so the heartbeat keeps the RAW
+  // line beside reachability. A dropped poll must leave the last line alone: `reachable` is what
+  // stops it being drawn as live, and the line is still the last thing the machine said.
+  it('records the status line it read, and the parsed work position with it', async () => {
+    setMachineHeartbeatLoader(async () => ({
+      status: async () => ({ ok: true, text: '<Idle|MPos:1,2,3|WPos:11.5,22.25,-0.5|F:0,0,100>' }),
+    }));
+    rememberMachine();
+
+    startHeartbeat({ host: '192.168.10.43', port: 2222 });
+    await vi.advanceTimersByTimeAsync(0);
+
+    const machine = useMachineStore.getState().machine!;
+    expect(machine.status).toContain('WPos:11.5,22.25,-0.5');
+    expect(machine.statusLine?.wpos).toMatchObject({ x: 11.5, y: 22.25, z: -0.5 });
+  });
+
+  it('does not persist the live line: the record stays the check’s', async () => {
+    const { client } = makeClient();
+    setMachineHeartbeatLoader(async () => client);
+    rememberMachine();
+    const stored = localStorage.getItem(MACHINE_STORAGE_KEY);
+    const observedAt = useMachineStore.getState().machine!.observedAt;
+
+    startHeartbeat({ host: '192.168.10.43', port: 2222 });
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(useMachineStore.getState().machine!.observedAt).toBe(observedAt);
+    expect(localStorage.getItem(MACHINE_STORAGE_KEY)).toBe(stored);
+    stopHeartbeat();
   });
 });

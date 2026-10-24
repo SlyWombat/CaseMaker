@@ -32,6 +32,8 @@ import { useEngravePreviewStore } from '@/store/engravePreviewStore';
 import { useEngraveJobStore } from '@/store/engraveJobStore';
 import { useMachineStore } from '@/store/machineStore';
 import { useFirstRegistration } from '@/store/engraveRegistrationStore';
+import { useEngraveReleaseStore } from '@/store/engraveReleaseStore';
+import { useSimStore } from '@/store/simStore';
 import { useViewportStore, isEngraveItemSelected } from '@/store/viewportStore';
 import type { NodeMeshOutput } from '@/workers/geometry/meshOutput';
 import type { EngravePreviewLost, EngravePreviewOutline } from '@/workers/sim/engravePreview';
@@ -40,7 +42,13 @@ import { mm } from '@/engine/cnc/engrave/depthBounds';
 import { jobMachine } from '@/engine/cnc/calibration';
 import { machineBedPlate } from '@/engine/cnc/bedPlate';
 import { BED_COLOR } from '@/engine/cnc/bedScene';
+import { jobTool } from '@/engine/cnc/engrave/jobSetup';
+import { PROBE_SPEC } from '@/engine/cnc/engrave/registration';
+import { MACHINES } from '@/engine/cnc/machine';
+import { resolveTool } from '@/engine/cnc/toolRegistry';
 import { geometryFromMesh, SACRIFICIAL_COLOR, segmentGeometry } from './simGeometry';
+import { fittedTool, toolPlacement } from './liveMachineTool';
+import { LiveToolHead } from './LiveToolHead';
 import { floorColor, LOST_COLOR, REGISTRATION_COLOR, VOID_COLOR, WARNING_COLOR } from './engraveRamp';
 import { hatchSegments } from './engraveHatch';
 import { clampLabelBox, projectToCanvas } from './projectedLabel';
@@ -607,9 +615,27 @@ export function EngravePreview() {
   const job = useEngraveJobStore((s) => s.job);
   const machine = useMachineStore((s) => s.machine);
   const target = machine === null ? null : { host: machine.host, port: machine.port };
+  const machineKey = machine === null ? null : `${machine.host}:${machine.port}`;
   const registration = useFirstRegistration(job.id, target);
   const found = registration === null ? null : { offset: registration.outcome.offset, rotationDeg: registration.outcome.rotationDeg };
   const transform = foundTransform(found);
+
+  // #527 §6 — the machine layer's body, at the live WPos (`toolPlacement`), under the same `tool`
+  // toggle the simulation's head uses. This scene has no scrub step — no program is simulated here —
+  // so with no machine answering there is no position and nothing is drawn.
+  const reachable = useMachineStore((s) => s.heartbeat.reachable);
+  const registrationActive = useMachineStore((s) => s.registrationActive);
+  const toolLayer = useSimStore((s) => s.layers.tool);
+  const placement = toolPlacement({ reachable, wpos: machine?.statusLine?.wpos ?? null }, null);
+  const holder = machine?.profileId != null ? MACHINES[machine.profileId]?.holder ?? null : null;
+  // The cutter the machine has NOW (#527): a release's current program once the bit change is
+  // confirmed, else the job's own. The probe is the body while a registration owns the machine,
+  // at the tip the APPROVED plan carries (the 3D probe's differs — #525).
+  const release = useEngraveReleaseStore((s) => (machineKey === null ? null : s.records[machineKey] ?? null));
+  // Memoized on the JOB and the release, not rebuilt per render: `jobTool` materialises a fresh
+  // `Tool`, and a new identity would rebuild the body's geometry every heartbeat tick.
+  const cutter = useMemo(() => fittedTool(job, jobTool(job), release, resolveTool), [job, release]);
+  const probeTip = job.setups?.[0]?.registration?.plan.probe?.tip.diameterMm ?? PROBE_SPEC.tipDiameter;
 
   // Hooks run before the early return; the geometry is null until the first preview lands, and it
   // is replaced (with its old geometry disposed) whenever the slider settles on another stage.
@@ -707,6 +733,20 @@ export function EngravePreview() {
       </group>
 
       </group>
+      {/* #527 §6 — the machine layer's body at the live WPos, in the PLAN frame: #604 draws the
+          stock at the found offset, and what the written G54 carries is that translation — never
+          the skew — so the tool takes the offset and not the rotation. */}
+      {toolLayer && (
+        <group position={[transform.position[0], transform.position[1], 0]}>
+          <LiveToolHead
+            at={placement?.at ?? null}
+            tool={cutter}
+            probeTipDiameterMm={registrationActive ? probeTip : null}
+            holder={holder}
+            name="engrave-tool"
+          />
+        </group>
+      )}
       {found !== null && (
         <Html position={[stock.length / 2, stock.width / 2, 2]}>
           <div className="engrave-found-badge" data-testid="engrave-found-badge">

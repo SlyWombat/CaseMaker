@@ -12,11 +12,15 @@
 
 import { useEffect, useMemo } from 'react';
 import * as THREE from 'three';
+import { MACHINES } from '@/engine/cnc/machine';
 import { useSimStore } from '@/store/simStore';
+import { useMachineStore } from '@/store/machineStore';
+import { useShopDefault } from '@/store/shopDefaultsStore';
 import type { NodeMeshOutput } from '@/workers/geometry/meshOutput';
+import { LiveToolHead } from './LiveToolHead';
+import { toolPlacement } from './liveMachineTool';
 import {
   cleanStockGeometry,
-  disposeToolHeadGroup,
   drawsSacrificial,
   FIXTURE_COLOR,
   geometryFromMesh,
@@ -27,7 +31,6 @@ import {
   sacrificialMesh,
   segmentGeometry,
   splitPath,
-  toolHeadGroup,
   toolPositionAt,
   vertexIndexAtStep,
 } from './simGeometry';
@@ -146,11 +149,21 @@ export function SimMeshes() {
   const rapidSegments = split ? vertexIndexAtStep(split.rapidStep, step) : 0;
 
   const toolTip = path ? toolPositionAt(path, step) : null;
-  // #554 — the tool head is built from the tool's own profile, not `info.radius` (a V-bit's radius
-  // is a ~0.1 mm needle). The group's tip sits at the origin and rises along +Z, so the whole
-  // assembly is just positioned at the tip.
-  const toolHead = useMemo(() => toolHeadGroup(tool), [tool]);
-  useEffect(() => () => disposeToolHeadGroup(toolHead), [toolHead]);
+  // #527 §6 — the tool layer's ONE body at the live `WPos` while the machine is answering, else at
+  // the scrub step. The same rule the engrave preview reads (`toolPlacement`), so the two scenes
+  // cannot disagree about what "live" means. While a registration owns the machine the body is the
+  // wired probe, whose tip diameter is the shop's measured `registration.tipDiameterMm` (#449).
+  const machine = useMachineStore((s) => s.machine);
+  const reachable = useMachineStore((s) => s.heartbeat.reachable);
+  const registrationActive = useMachineStore((s) => s.registrationActive);
+  const probeTip = useShopDefault('registration.tipDiameterMm').value;
+  const placement = toolPlacement(
+    { reachable, wpos: machine?.statusLine?.wpos ?? null },
+    toolTip,
+  );
+  // The collet nut from the remembered machine's profile; null is NOT MEASURED, and the generic
+  // stub stands in — the same degradation the fixture check makes (#191 item 4).
+  const holder = machine?.profileId != null ? MACHINES[machine.profileId]?.holder ?? null : null;
 
   const visibleGouges = meshes ? meshes.gouges.filter((g) => step >= g.step) : [];
 
@@ -189,8 +202,14 @@ export function SimMeshes() {
         <LineLayer data={split.rapids} start={0} count={2 * rapidSegments} color={RAPID_COLOR} dashed />
       )}
 
-      {layers.tool && toolTip && toolHead && (
-        <primitive object={toolHead} position={[toolTip[0], toolTip[1], toolTip[2]]} name="sim-tool" />
+      {layers.tool && (
+        <LiveToolHead
+          at={placement?.at ?? null}
+          tool={tool}
+          probeTipDiameterMm={registrationActive ? probeTip : null}
+          holder={holder}
+          name="sim-tool"
+        />
       )}
 
       {layers.fixture &&

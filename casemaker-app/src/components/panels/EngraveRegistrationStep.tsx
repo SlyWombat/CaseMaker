@@ -54,6 +54,7 @@ import { createFirstBed, machineAt, useLocationStore } from '@/store/locationSto
 import { recordProbeReading } from '@/engine/cnc/registration/mountContext';
 import { viseFrameFromRegistration, withSurfaceTopDatum, withViseJawTopDatum, withVisePlacementFrame } from '@/platform/bedProfiles';
 import { useMachineTranscriptStore } from '@/store/machineTranscriptStore';
+import { useMachineStore } from '@/store/machineStore';
 import { useSettingsStore } from '@/store/settingsStore';
 
 const MUTED: CSSProperties = { fontSize: 11, color: '#9aa4b0', lineHeight: 1.5, margin: '4px 0' };
@@ -196,6 +197,15 @@ export function EngraveRegistrationStep({ job, target }: EngraveRegistrationStep
   }, []);
 
   const busy = phase === 'running' || phase === 'writing';
+
+  // #527 — the viewport draws the machine layer's wired probe instead of the cutter while the run
+  // is touching off. Only `running` is a probe run: `writing` has already asked for the cutter, and
+  // every other phase has no instrument in the spindle.
+  const setRegistrationActive = useMachineStore((s) => s.setRegistrationActive);
+  useEffect(() => {
+    setRegistrationActive(phase === 'running');
+    return () => setRegistrationActive(false);
+  }, [phase, setRegistrationActive]);
 
   // #528 — the transcript no longer renders in the rail; the dock's Transcript tab reads the store.
   // Write the SAME text the old rail `<pre>`s rendered (`> line\nreply` per entry) so nothing changes

@@ -6,6 +6,7 @@
 import * as THREE from 'three';
 import type { NodeMeshOutput } from '@/workers/geometry/meshOutput';
 import type { CheckpointInfo, SimPath } from '@/workers/sim/session';
+import type { HolderProfile } from '@/engine/cnc/machine';
 import type { Tool } from '@/engine/cnc/tool';
 import { isVShape, vCone } from '@/engine/cnc/vProfile';
 
@@ -32,6 +33,29 @@ export const FIXTURE_COLOR = '#4b5563'; // the vise jaws
 
 /** The flute length the tool head falls back to when the tool states none (#197). */
 export const TOOL_FLUTE_LENGTH_MM = 12;
+
+/**
+ * #527 §6 — the machine layer's opacity: 40 %, so the jaws, the clamps and the stock read THROUGH
+ * the chuck and the cutter. One number for both bodies (the cutter and the probe): the operator is
+ * judging clearance, and two opacities would make one of them look nearer than the other.
+ */
+export const TOOL_HEAD_OPACITY = 0.4;
+
+/**
+ * PROVISIONAL (#527) — the drawn probe tip's length, mm: how far the measured 2.0 mm plain
+ * cylinder stands out of its stem. The tip's DIAMETER is measured (#208 A8) and its contact point
+ * is the group's origin, so the tip's position — the fact the operator judges against the stock —
+ * does not depend on this number; it is only how much of the body is drawn below the stem.
+ */
+export const PROBE_TIP_LENGTH_MM = 12;
+
+/**
+ * PROVISIONAL (#527) — the drawn stem and shank above the probe tip, mm. Neither is measured; they
+ * put the collet nut at a plausible height above the contact point so the body reads as a probe
+ * rather than a floating needle. Nothing else in the app reads them.
+ */
+const PROBE_STEM_LENGTH_MM = 18;
+const PROBE_SHANK_LENGTH_MM = 8;
 
 /**
  * A mesh as the worker returns it → a three `BufferGeometry`, the same way `bufferToGeometry`
@@ -246,14 +270,61 @@ export function cleanStockGeometry(mesh: NodeMeshOutput): THREE.BufferGeometry {
   return geom;
 }
 
+/** What the machine layer's two bodies share (#527): the measured collet nut, and the opacity. */
+export interface ToolHeadOptions {
+  /**
+   * The collet nut measured on the machine profile (#191 item 4, `userMachineProfile`). `null`
+   * means NOT MEASURED — the head keeps the generic stub it has always drawn, never a made-up nut.
+   */
+  holder?: HolderProfile | null;
+  /** Default {@link TOOL_HEAD_OPACITY} (#527). */
+  opacity?: number;
+}
+
+/** The translucent material every machine-layer body uses (#527). Owned by the group; disposed with it. */
+function headMaterial(opacity: number): THREE.MeshStandardMaterial {
+  return new THREE.MeshStandardMaterial({
+    color: TOOL_COLOR,
+    transparent: true,
+    opacity,
+    // NOT optional: a transparent mesh that writes depth hides everything inside it (#162;
+    // /Simulation.md §8), and this body is drawn AROUND the cutter it must not occlude.
+    depthWrite: false,
+    metalness: 0.3,
+    roughness: 0.4,
+  });
+}
+
+/**
+ * The collet nut above the tool (#527 §6): the profile's measured nut when there is one, else the
+ * generic 6 mm stub the sim has drawn since #554. A nut from the profile is drawn alone — the
+ * profile states its diameter and length and nothing about the spindle above it, so nothing above
+ * it is invented.
+ */
+function addColletNut(
+  addBody: (rTop: number, rBottom: number, height: number, z: number) => void,
+  holder: HolderProfile | null | undefined,
+  z: number,
+  stubR: number,
+): void {
+  if (holder !== null && holder !== undefined) {
+    addBody(holder.nutDiameter / 2, holder.nutDiameter / 2, holder.nutLength, z);
+    return;
+  }
+  addBody(stubR, stubR, 6, z);
+}
+
 /**
  * The cutting-head assembly for the sim's tool layer (#554): the true bit profile (cone for a
  * V/engraving/chamfer bit, a flat body, a hemispherical end for a ball), the shank above the
- * flutes, and a collet/holder stub — instead of `info.radius`, which is a lossy stand-in. Built in
- * the tool's own frame: the TIP sits at the origin and the head rises along +Z, so the caller just
+ * flutes, and the collet nut — instead of `info.radius`, which is a lossy stand-in. Built in the
+ * tool's own frame: the TIP sits at the origin and the head rises along +Z, so the caller just
  * positions the group at the tip. The caller owns the group and must dispose every mesh it holds.
+ *
+ * #527 — TRANSLUCENT at 40 % (`TOOL_HEAD_OPACITY`) so the fixture clearance reads through it, and
+ * the nut comes from the machine profile when one is measured (`ToolHeadOptions.holder`).
  */
-export function toolHeadGroup(tool: Tool | null): THREE.Group | null {
+export function toolHeadGroup(tool: Tool | null, options: ToolHeadOptions = {}): THREE.Group | null {
   if (!tool) return null;
   const tipR = Math.max(0.05, (tool.tipDiameter ?? tool.diameter ?? 1) / 2);
   const cutR = Math.max(tipR, (tool.diameter ?? tool.handleDiameter ?? tipR * 2) / 2);
@@ -261,10 +332,9 @@ export function toolHeadGroup(tool: Tool | null): THREE.Group | null {
   const shankR = Math.max(cutR, (tool.handleDiameter ?? 3.175) / 2);
   const fluteLen = tool.fluteLength ?? TOOL_FLUTE_LENGTH_MM;
   const stickout = tool.stickout ?? Math.max(fluteLen + 6, 20);
-  const holderR = Math.max(shankR + 0.75, 4);
-  const holderLen = 6;
+  const stubR = Math.max(shankR + 0.75, 4);
 
-  const material = new THREE.MeshStandardMaterial({ color: TOOL_COLOR, transparent: true, opacity: 0.9, metalness: 0.3, roughness: 0.4 });
+  const material = headMaterial(options.opacity ?? TOOL_HEAD_OPACITY);
   const group = new THREE.Group();
   // A body of revolution: a cylinder/cone of `height` spanning z ∈ [z, z+height], `rTop` at the
   // top end and `rBottom` at the tip end (CylinderGeometry's axis is +Y; rotate it up to +Z).
@@ -306,11 +376,43 @@ export function toolHeadGroup(tool: Tool | null): THREE.Group | null {
 
   const shankLen = Math.max(0, stickout - headTop);
   addBody(shankR, shankR, shankLen, headTop);
-  addBody(holderR, holderR, holderLen, headTop + shankLen);
+  addColletNut(addBody, options.holder, headTop + shankLen, stubR);
   return group;
 }
 
-/** Dispose every geometry and material a `toolHeadGroup` built (#554). */
+/**
+ * The wired probe's body (#527 §6), drawn in place of the cutter while a registration owns the
+ * machine: the measured plain-cylinder tip (2.0 mm across, no ball — #208 A8), the stem that seats
+ * it, the 1/8" shank the collet grips, and the same collet nut as the cutter. Same frame as
+ * `toolHeadGroup`: the CONTACT POINT (the tip) sits at the origin and the body rises along +Z.
+ * The caller owns the group and must dispose every mesh it holds.
+ *
+ * Only the tip's DIAMETER is measured; the stem's diameter and every length above the tip are
+ * drawn (PROVISIONAL) — they place the body, and the tip's contact point does not depend on them.
+ */
+export function probeHeadGroup(tipDiameterMm: number, options: ToolHeadOptions = {}): THREE.Group {
+  const tipR = Math.max(0.05, tipDiameterMm / 2);
+  const material = headMaterial(options.opacity ?? TOOL_HEAD_OPACITY);
+  const group = new THREE.Group();
+  const addBody = (rTop: number, rBottom: number, height: number, z: number): void => {
+    if (height <= 0) return;
+    const g = new THREE.CylinderGeometry(rTop, rBottom, height, 20);
+    g.rotateX(Math.PI / 2);
+    g.translate(0, 0, z + height / 2);
+    group.add(new THREE.Mesh(g, material));
+  };
+
+  addBody(tipR, tipR, PROBE_TIP_LENGTH_MM, 0);
+  const stemR = Math.max(tipR + 1, 2);
+  addBody(stemR, stemR, PROBE_STEM_LENGTH_MM, PROBE_TIP_LENGTH_MM);
+  const shankR = 3.175 / 2;
+  const shankZ = PROBE_TIP_LENGTH_MM + PROBE_STEM_LENGTH_MM;
+  addBody(shankR, shankR, PROBE_SHANK_LENGTH_MM, shankZ);
+  addColletNut(addBody, options.holder, shankZ + PROBE_SHANK_LENGTH_MM, Math.max(shankR + 0.75, 4));
+  return group;
+}
+
+/** Dispose every geometry and material a `toolHeadGroup` / `probeHeadGroup` built (#554, #527). */
 export function disposeToolHeadGroup(group: THREE.Group | null): void {
   if (!group) return;
   group.traverse((obj) => {

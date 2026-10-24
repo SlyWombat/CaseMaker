@@ -58,6 +58,12 @@ export interface MachineState {
   checkedAt: string | null;
   /** The live heartbeat's conclusion (#555) — reachable / unreachable / last-seen. */
   heartbeat: MachineHeartbeat;
+  /**
+   * #527 — a registration run owns the machine right now, so the viewport draws the wired probe
+   * in place of the cutter. SESSION state, never persisted: it describes a run in progress, and a
+   * reload has no run.
+   */
+  registrationActive: boolean;
   /** Record one probe result. The single write path: the probe produces, the store keeps. */
   setProbeResult: (result: MachineProbeResult) => void;
   /**
@@ -75,6 +81,15 @@ export interface MachineState {
    * keys its vacuum switch on.
    */
   noteHeartbeat: (reachable: boolean) => void;
+  /**
+   * #527 — fold one live `?` answer into the record WITHOUT persisting it. The heartbeat runs every
+   * 2 s and its answer is also the viewport's live position; writing localStorage on every poll
+   * would churn the stored record for nothing (the same reason {@link MachineHeartbeat} is not
+   * written). Identity and `observedAt` stay the check's; only what the machine just said moves.
+   */
+  noteLiveStatusLine: (status: string) => void;
+  /** #527 — the viewport draws the probe, not the cutter, while {@link registrationActive}. */
+  setRegistrationActive: (active: boolean) => void;
 }
 
 interface MachineSlice {
@@ -83,6 +98,8 @@ interface MachineSlice {
   reason: string | null;
   checkedAt: string | null;
   heartbeat: MachineHeartbeat;
+  /** #527 — see {@link MachineState.registrationActive}. Never persisted. */
+  registrationActive: boolean;
 }
 
 const EMPTY: MachineSlice = {
@@ -91,6 +108,7 @@ const EMPTY: MachineSlice = {
   reason: null,
   checkedAt: null,
   heartbeat: { reachable: null, lastSeenAt: null },
+  registrationActive: false,
 };
 
 /** The four outcomes, stated once so a corrupted or older payload cannot invent a fifth. */
@@ -146,6 +164,7 @@ function loadMachine(): MachineSlice {
       checkedAt: typeof parsed.checkedAt === 'string' ? parsed.checkedAt : null,
       // Reachability is a live claim, never a record: the heartbeat re-establishes it on open.
       heartbeat: { reachable: null, lastSeenAt: null },
+      registrationActive: false,
     };
   } catch {
     return { ...EMPTY };
@@ -177,6 +196,8 @@ export const useMachineStore = create<MachineState>()((set, get) => ({
       checkedAt: new Date().toISOString(),
       // A fresh check is a fresh record: reachability is re-established by the heartbeat, not kept.
       heartbeat: { reachable: null, lastSeenAt: null },
+      // A check is not a registration run; a stale "registering" claim must not outlive one.
+      registrationActive: false,
     };
     set(slice);
     persist(slice);
@@ -191,6 +212,7 @@ export const useMachineStore = create<MachineState>()((set, get) => ({
       reason: get().reason,
       checkedAt: get().checkedAt,
       heartbeat: get().heartbeat,
+      registrationActive: get().registrationActive,
     };
     set(slice);
     persist(slice);
@@ -210,6 +232,17 @@ export const useMachineStore = create<MachineState>()((set, get) => ({
       heartbeat: { reachable, lastSeenAt: reachable ? now : get().heartbeat.lastSeenAt },
     });
   },
+
+  noteLiveStatusLine: (status) => {
+    // No machine, nothing to fold into — the heartbeat only runs for a remembered one anyway.
+    const current = get().machine;
+    if (current === null) return;
+    // NOT persisted and `observedAt` untouched: the heartbeat runs every 2 s, and the record's
+    // stamp is the CHECK's moment, not the poll's (see the interface notes).
+    set({ machine: { ...current, status, statusLine: readStatusLine(status) } });
+  },
+
+  setRegistrationActive: (active) => set({ registrationActive: active }),
 }));
 
 export const MACHINE_STORAGE_KEY = MACHINE_KEY;

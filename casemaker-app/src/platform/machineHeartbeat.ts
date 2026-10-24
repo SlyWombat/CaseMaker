@@ -105,15 +105,21 @@ export function startHeartbeat(target: HeartbeatTarget): void {
     }
 
     let reachable = false;
+    let line: string | null = null;
     try {
       const reading = await client.status(target);
       reachable = reading.ok;
+      // #527 — the same answer is the viewport's live position: keep the raw line, not just a bit.
+      // Only the ANSWER is kept, so a failed poll leaves the last reading in place and the
+      // heartbeat's `reachable` is what stops a stale line being drawn as live.
+      line = reading.ok ? reading.text : null;
     } catch {
       // `tcpConnect`/`tcpRead` reject when the peer is gone — exactly the drop this heartbeat exists
       // to notice, so it is a result (unreachable) rather than a fault to propagate.
     }
 
     if (!running) return;
+    if (line !== null) useMachineStore.getState().noteLiveStatusLine(line);
     note(reachable);
     schedule();
   };
