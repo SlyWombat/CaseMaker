@@ -32,6 +32,12 @@ import { inventoryConditions } from '@/engine/cnc/toolCondition';
 import type { MachineCalibration } from '@/engine/cnc';
 import { effectiveMargins } from '@/engine/cnc/engrave/depthBounds';
 import { jobFingerprint } from '@/engine/cnc/engrave/package';
+import {
+  changedInputs,
+  runInputs,
+  type EngraveInputKey,
+  type EngraveRunInputs,
+} from '@/engine/cnc/engrave/runInputs';
 import type { SurfacePostFit } from '@/engine/cnc/engrave/surfaceSpread';
 import { useSettingsStore } from './settingsStore';
 import { useEngraveJobStore } from './engraveJobStore';
@@ -113,6 +119,20 @@ export interface EngraveRunState {
   acknowledged: boolean;
   /** Set when the job changed after a Generate; null while the result still matches. */
   staleSince: number | null;
+  /**
+   * #581 — WHICH input moved under the result, named rather than inferred (`staleSince` only says
+   * "when"). Null before any stale mark; 'job' | 'machine' | 'margins' when one is set.
+   */
+  staleReason: EngraveInputKey | null;
+  /**
+   * #581 — what THIS Generate read, stamped once from the same snapshot it handed the worker. Kept
+   * so the next Generate can compare (the oracle row names the input a verdict flip followed).
+   */
+  inputs: EngraveRunInputs | null;
+  /** #581 — the inputs that differ from the previous Generate's; empty on the first run. */
+  changedSinceLast: EngraveInputKey[];
+  /** #581 — the previous Generate's oracle verdict, so a ✓↔× flip can say what changed. */
+  previousVerdict: boolean | null;
   /** A thrown failure from any stage that is not already a finding (generate, load, oracle). */
   error: string | null;
   /** Run the whole pipeline for the job as it is NOW. `surface` (#608) re-posts against a tilt. */
@@ -139,12 +159,22 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
     simEngine: null as 'exact' | 'column' | null,
     acknowledged: false,
     staleSince: null as number | null,
+    staleReason: null as EngraveInputKey | null,
+    inputs: null as EngraveRunInputs | null,
+    changedSinceLast: [] as EngraveInputKey[],
+    previousVerdict: null as boolean | null,
     error: null as string | null,
   };
 
   async function run(surface: SurfacePostFit | null = null): Promise<void> {
     const job = useEngraveJobStore.getState().job;
     const mine = ++seq;
+    // #581 — WHAT THE RUN BEFORE THIS ONE SAW, captured before the reset below clears the result.
+    // The verdict is the comparison point; the inputs are what the new run's stamp is diffed
+    // against, so a disagreement can name the input that moved.
+    const before = get();
+    const previousVerdict = before.oracle === null ? null : before.oracle.ok;
+    const previousInputs = before.inputs;
     set({ ...empty, phase: 'generating', generated: get().generated });
 
     // ONE machine per run (#297): the saved frame is read once, here, and handed to the generator
@@ -235,6 +265,26 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
     // (`shop.feeds` was read above, in the same snapshot: the worker's `feedsFor` resolves against
     // the shop's table, and the panel's main-thread `feedsFor` reads the same installed rows.)
 
+    // #581 — the run's own stamp, from the values read above (no second read): what the NEXT
+    // Generate compares against, so a disagreement between two runs can name the input that moved.
+    // `previousVerdict` is carried with it — the row only needs the reason when the verdict flips.
+    const inputs = runInputs({
+      job,
+      margins,
+      calibration,
+      shopDefaults,
+      feeds: shop.feeds ?? [],
+      catalogue,
+      tools: shop.tools ?? [],
+      conditions: shop.conditions ?? new Map(),
+      surface,
+    });
+    set({
+      inputs,
+      changedSinceLast: previousInputs === null ? [] : changedInputs(previousInputs, inputs),
+      previousVerdict,
+    });
+
     let client: EngraveRunClient;
     let generated: EngraveGenerated;
     try {
@@ -252,12 +302,17 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
     // the settings object, because a job carrying its own record keeps them whatever the house
     // setting does — comparing the setting would block a run the user did not change.
     const nowMargins = effectiveMargins(useEngraveJobStore.getState().job, useSettingsStore.getState().margins);
-    const stale =
-      useEngraveJobStore.getState().job !== job ||
-      (useSettingsStore.getState().machineCalibration ?? null) !== calibration ||
-      nowMargins.boundaryMargin !== margins.boundaryMargin;
+    const changedJob = useEngraveJobStore.getState().job !== job;
+    const changedMachine = (useSettingsStore.getState().machineCalibration ?? null) !== calibration;
+    const stale = changedJob || changedMachine || nowMargins.boundaryMargin !== margins.boundaryMargin;
     if (stale) {
-      set({ generated, phase: 'blocked', staleSince: Date.now() });
+      // #581 — name which one moved; the generic sentence is only for a caller that cannot know.
+      set({
+        generated,
+        phase: 'blocked',
+        staleSince: Date.now(),
+        staleReason: changedJob ? 'job' : changedMachine ? 'machine' : 'margins',
+      });
       return;
     }
 
@@ -330,6 +385,10 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
     phase: 'idle',
     acknowledged: false,
     staleSince: null,
+    staleReason: null,
+    inputs: null,
+    changedSinceLast: [],
+    previousVerdict: null,
     error: null,
     generate: run,
     setAcknowledged: (v) => set({ acknowledged: v }),
@@ -354,7 +413,7 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
 useEngraveJobStore.subscribe((state, prev) => {
   if (state.job === prev.job) return;
   if (jobFingerprint(state.job) === jobFingerprint(prev.job)) return;
-  markStale();
+  markStale('job');
 });
 
 // So does a change to the machine's saved frame (#301). The program was posted, verified and
@@ -362,10 +421,11 @@ useEngraveJobStore.subscribe((state, prev) => {
 // machine, and Save and Upload must not carry on offering the old result.
 useSettingsStore.subscribe((state, prev) => {
   if (state.machineCalibration === prev.machineCalibration) return;
-  markStale();
+  markStale('machine');
 });
 
-function markStale(): void {
+/** #581 — the mark carries WHICH input moved, so the row can say "the job changed" and not guess. */
+function markStale(reason: EngraveInputKey): void {
   const s = useEngraveRunStore.getState();
-  if (s.generated && s.staleSince === null) useEngraveRunStore.setState({ staleSince: Date.now() });
+  if (s.generated && s.staleSince === null) useEngraveRunStore.setState({ staleSince: Date.now(), staleReason: reason });
 }

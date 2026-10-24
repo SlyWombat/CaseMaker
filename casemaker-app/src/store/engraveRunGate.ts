@@ -28,6 +28,7 @@ import type { SimDiagnostic } from '@/workers/sim/session';
 // without reaching the browser-only sim store (#544).
 import type { SimStatus } from '@/types/simStatus';
 import { simErrors } from '@/engine/cnc/simGate';
+import { inputLabel, staleSentence, type EngraveInputKey } from '@/engine/cnc/engrave/runInputs';
 
 /**
  * The warning codes that mean "a human must look at the machine before this file is run"
@@ -67,6 +68,19 @@ export interface EngraveRunView {
   acknowledged: boolean;
   staleSince: number | null;
   error: string | null;
+  /**
+   * #581 — WHICH input moved under a generated result, when the store knows (it names the edit that
+   * set `staleSince`). Optional so a caller that has no run — a script, a test, the QA harness —
+   * keeps the generic sentence.
+   */
+  staleReason?: EngraveInputKey | null;
+  /**
+   * #581 — the previous Generate's oracle verdict and the inputs that differ from it, so a flip
+   * between two runs can say what changed rather than leaving a silent ✓→×. `previousVerdict`
+   * null means there was no completed run to compare with.
+   */
+  previousVerdict?: boolean | null;
+  changedSinceLast?: readonly EngraveInputKey[];
 }
 
 /** Warning codes across every row, so an acknowledgement is required for the right reasons. */
@@ -108,6 +122,31 @@ function oracleLocation(loc: { z: number; bbox: OracleBbox } | null | undefined)
 }
 
 /**
+ * #581 — WHY the verdict differs from the previous Generate's, in words, or '' when it does not.
+ *
+ * #577 proved the sweep and the oracle deterministic, so a flip means an input moved. The store
+ * records which ones differ; the first in `RUN_INPUT_ORDER` is named and the rest counted. When
+ * the verdict flipped and NOTHING differs, that is said plainly: the same inputs gave a different
+ * verdict, which is the determinism alarm rather than a diagnosis.
+ */
+function flipClause(v: EngraveRunView): string {
+  if (v.oracle === null) return '';
+  const previous = v.previousVerdict;
+  if (previous === null || previous === undefined) return '';
+  if (v.oracle.ok === previous) return '';
+  const changed = v.changedSinceLast ?? [];
+  if (changed.length === 0) {
+    return ' — nothing this run reads changed since the previous Generate; the same inputs gave a different verdict';
+  }
+  const first = inputLabel(changed[0]!);
+  const others =
+    changed.length === 1
+      ? ''
+      : `, along with ${changed.length - 1} other input${changed.length === 2 ? '' : 's'}`;
+  return ` — ${first} changed since the previous Generate${others}`;
+}
+
+/**
  * The "Matches prediction" sentence body — the metric and the floor the verdict used (#576/#580).
  * Shared by the panel's run row and the wizard's step-4 blocker (#582), so they cannot disagree.
  */
@@ -120,12 +159,15 @@ export function oracleSentence(v: EngraveRunView): string {
   // with the pre-re-post one needs to know the frame did not change the question asked.
   const frame = v.oracle.frame === 'surface' ? ", in the blank's fitted surface frame" : '';
   if (v.oracle.ok) {
-    return `under-cut ${v.oracle.worst.underCut.toFixed(4)} mm², over-cut ${v.oracle.worst.overCut.toFixed(4)} mm², both within the ${floorText} mm² floor (tolerance ${v.oracle.band.toFixed(3)} mm${frame})`;
+    return `under-cut ${v.oracle.worst.underCut.toFixed(4)} mm², over-cut ${v.oracle.worst.overCut.toFixed(4)} mm², both within the ${floorText} mm² floor (tolerance ${v.oracle.band.toFixed(3)} mm${frame})${flipClause(v)}`;
   }
   return v.oracle.worst.underCut > floor
-    ? `worst under-cut ${v.oracle.worst.underCut.toFixed(4)} mm² exceeds the ${floorText} mm² floor by ${(v.oracle.worst.underCut - floor).toFixed(4)} mm²${oracleLocation(v.oracle.worst.underAt)} — the file left material the prediction removed (over-cut ${v.oracle.worst.overCut.toFixed(4)} mm²; tolerance ${v.oracle.band.toFixed(3)} mm${frame})`
-    : `worst over-cut ${v.oracle.worst.overCut.toFixed(4)} mm² exceeds the ${floorText} mm² floor by ${(v.oracle.worst.overCut - floor).toFixed(4)} mm²${oracleLocation(v.oracle.worst.overAt)} — the file cut outside the plan (under-cut ${v.oracle.worst.underCut.toFixed(4)} mm²; tolerance ${v.oracle.band.toFixed(3)} mm${frame})`;
+    ? `worst under-cut ${v.oracle.worst.underCut.toFixed(4)} mm² exceeds the ${floorText} mm² floor by ${(v.oracle.worst.underCut - floor).toFixed(4)} mm²${oracleLocation(v.oracle.worst.underAt)} — the file left material the prediction removed (over-cut ${v.oracle.worst.overCut.toFixed(4)} mm²; tolerance ${v.oracle.band.toFixed(3)} mm${frame})${flipClause(v)}`
+    : `worst over-cut ${v.oracle.worst.overCut.toFixed(4)} mm² exceeds the ${floorText} mm² floor by ${(v.oracle.worst.overCut - floor).toFixed(4)} mm²${oracleLocation(v.oracle.worst.overAt)} — the file cut outside the plan (under-cut ${v.oracle.worst.underCut.toFixed(4)} mm²; tolerance ${v.oracle.band.toFixed(3)} mm${frame})${flipClause(v)}`;
 }
+
+// #581 — `staleSentence` (the input that moved, in words) lives with the input stamp itself
+// (`engine/cnc/engrave/runInputs.ts`), so the Cut screen can state the same sentence.
 
 /** The "Verified" and "Simulated" sentence bodies, shared by the panel and the wizard (#582). */
 export function verifySimulateSentences(v: EngraveRunView): { verified: string; simulated: string } {
@@ -156,7 +198,7 @@ export function verifySimulateSentences(v: EngraveRunView): { verified: string; 
  */
 export function saveBlocker(v: EngraveRunView): string | null {
   if (!v.generated) return 'Generate first.';
-  if (v.staleSince !== null) return 'the job or the machine frame changed since it was generated';
+  if (v.staleSince !== null) return staleSentence(v.staleReason);
   const errors = runErrorCodes(v);
   if (errors.length > 0) return `${errors.length} error${errors.length === 1 ? '' : 's'} outstanding`;
   if (v.phase === 'generating' || v.phase === 'simulating' || v.phase === 'checking') return 'the run is still going';

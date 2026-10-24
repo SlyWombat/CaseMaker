@@ -11,6 +11,7 @@ import { ORACLE_AREA_FLOOR } from '@/engine/cnc/engrave/oracle';
 import {
   useEngraveRunStore,
   setEngraveRunClientLoader,
+  oracleSentence,
   saveBlocker,
   uploadBlocker,
   requiredAckCodes,
@@ -28,6 +29,7 @@ import {
 } from '@/engine/cnc/toolCondition';
 import { useSimStore } from '@/store/simStore';
 import { useSettingsStore } from '@/store/settingsStore';
+import { useShopDefaultsStore } from '@/store/shopDefaultsStore';
 import { calibrationFromReplies, type MachineCalibration } from '@/engine/cnc';
 import { clearFeedCatalogue, setFeedCatalogue, type FeedCatalogueRow } from '@/engine/cnc/feeds';
 import { Z1_FRAME_REPLIES } from './fixtures/z1Frame';
@@ -270,7 +272,9 @@ describe('engraveRunStore (#206)', () => {
 
     useEngraveJobStore.getState().setStock({ length: 120 });
     expect(useEngraveRunStore.getState().staleSince).not.toBeNull();
-    expect(saveBlocker(useEngraveRunStore.getState())).toBe('the job or the machine frame changed since it was generated');
+    // #581 — the stale mark says WHICH input moved, not "the job or the machine frame".
+    expect(useEngraveRunStore.getState().staleReason).toBe('job');
+    expect(saveBlocker(useEngraveRunStore.getState())).toBe('the job changed since it was generated');
   });
 
   // #297: the generator (post, verifier, frame file) and the simulation must judge ONE machine. The
@@ -368,10 +372,100 @@ describe('engraveRunStore (#206)', () => {
     useSettingsStore.getState().setMachineCalibration(read.calibration);
     try {
       expect(useEngraveRunStore.getState().staleSince).not.toBeNull();
-      expect(saveBlocker(useEngraveRunStore.getState())).toBe('the job or the machine frame changed since it was generated');
+      expect(useEngraveRunStore.getState().staleReason).toBe('machine');
+      expect(saveBlocker(useEngraveRunStore.getState())).toBe('the machine frame changed since it was generated');
     } finally {
       useSettingsStore.setState({ machineCalibration: undefined });
     }
+  });
+
+  // #581 — two Generates on the same job whose verdicts disagree. #577 proved the sweep and the
+  // oracle deterministic, so an input moved; the run records which, and the Matches prediction row
+  // says so instead of flipping silently.
+  describe('what changed between two Generates (#581)', () => {
+    const DEF = (value: number) => ({ value, source: 'seeded' as const, setAt: null, unit: null, note: null });
+
+    /** A fake run whose oracle verdict the test can flip, with a sim load that ends 'ready'. */
+    function fakeRun(): { flip: (ok: boolean) => void; restore: () => void } {
+      let ok = true;
+      const load = useSimStore.getState().loadProgram;
+      useSimStore.setState({
+        loadProgram: async () => {
+          useSimStore.setState({ status: 'ready', diagnostics: [], pathOnly: false });
+        },
+      });
+      setEngraveRunClientLoader(async () => ({
+        engraveGenerate: async () => clean(),
+        simOracle: async () => ({ ok, band: 0.016, levels: [], worst: { underCut: ok ? 0 : 2, overCut: 0 } }),
+      }));
+      return {
+        flip: (next) => {
+          ok = next;
+        },
+        restore: () => useSimStore.setState({ loadProgram: load }),
+      };
+    }
+
+    afterEach(() => {
+      useShopDefaultsStore.setState({ defaults: null });
+      useSettingsStore.setState({ machineCalibration: undefined });
+    });
+
+    it('names the input that moved when the verdict flips', async () => {
+      useSettingsStore.setState({ machineCalibration: undefined });
+      useShopDefaultsStore.setState({ defaults: { 'drill.peckClearanceMm': DEF(0.4) } });
+      const run = fakeRun();
+      try {
+        await useEngraveRunStore.getState().generate();
+        expect(useEngraveRunStore.getState().oracle?.ok).toBe(true);
+        expect(oracleSentence(useEngraveRunStore.getState())).not.toContain('since the previous Generate');
+
+        run.flip(false);
+        useShopDefaultsStore.setState({ defaults: { 'drill.peckClearanceMm': DEF(0.6) } });
+        await useEngraveRunStore.getState().generate();
+
+        const after = useEngraveRunStore.getState();
+        expect(after.previousVerdict).toBe(true);
+        expect(after.oracle?.ok).toBe(false);
+        expect(after.changedSinceLast).toEqual(['shop']);
+        expect(oracleSentence(after)).toContain('— the shop defaults changed since the previous Generate');
+      } finally {
+        run.restore();
+      }
+    });
+
+    it('says so plainly when the verdict flips and no input moved — the determinism alarm', async () => {
+      useSettingsStore.setState({ machineCalibration: undefined });
+      const run = fakeRun();
+      try {
+        await useEngraveRunStore.getState().generate();
+        run.flip(false);
+        await useEngraveRunStore.getState().generate();
+
+        const after = useEngraveRunStore.getState();
+        expect(after.changedSinceLast).toEqual([]);
+        expect(oracleSentence(after)).toContain(
+          'nothing this run reads changed since the previous Generate; the same inputs gave a different verdict',
+        );
+      } finally {
+        run.restore();
+      }
+    });
+
+    it('stays silent when the verdict holds', async () => {
+      useSettingsStore.setState({ machineCalibration: undefined });
+      const run = fakeRun();
+      try {
+        await useEngraveRunStore.getState().generate();
+        await useEngraveRunStore.getState().generate();
+
+        const after = useEngraveRunStore.getState();
+        expect(after.previousVerdict).toBe(true);
+        expect(oracleSentence(after)).not.toContain('since the previous Generate');
+      } finally {
+        run.restore();
+      }
+    });
   });
 
   // #324 — the catalogue reaches the worker only if the CALLER sends it: `feeds.ts`'s module state
@@ -504,6 +598,9 @@ describe('#395 one gate, two ways to reach it', () => {
     // script. The gate's behaviour is pinned by the tests above; this pins its addressability.
     const src = readFileSync(join(process.cwd(), 'src/store/engraveRunGate.ts'), 'utf8');
     const runtimeImports = [...src.matchAll(/^import\s+(?!type\b)[^'"]*'([^']+)'/gm)].map((m) => m[1]);
-    expect(runtimeImports).toEqual(['@/engine/cnc/simGate']);
+    // #581 added the second one: `runInputs` is pure engine data (`jobFingerprint`, `canonicalJson`,
+    // `programHash`) whose every other import is `import type`, so it loads in a node script exactly
+    // as `simGate` does. A browser import (`platform/features`, a client, a worker) still fails here.
+    expect(runtimeImports).toEqual(['@/engine/cnc/simGate', '@/engine/cnc/engrave/runInputs']);
   });
 });

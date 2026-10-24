@@ -28,6 +28,7 @@
  */
 
 import type { EngraveJob } from '@/types/engraveJob';
+import { staleSentence, type EngraveInputKey } from '@/engine/cnc/engrave/runInputs';
 import type { MachineCalibration } from '@/engine/cnc/calibration';
 import type { StockItem } from '@/platform/stockClient';
 import type { Reachability } from '@/engine/cnc/engrave/reachability';
@@ -48,6 +49,11 @@ export interface PreflightHubInput {
    * frame changed after the Generate. It is in-memory by design; the hub reads it, it does not own it.
    */
   staleSince: number | null;
+  /**
+   * #581 — which input moved under the result (`EngraveRunView.staleReason`), when the caller knows.
+   * Absent keeps the generic sentence: the row is still true, just less specific.
+   */
+  staleReason?: EngraveInputKey | null;
   /**
    * The frozen package for this job, or null when nothing has been frozen. A stale package is an
    * error row here **and keeps its blank**: the hub only says so, it never releases anything
@@ -193,7 +199,7 @@ function runPolicyRows(input: PreflightHubInput, firstScope: PreflightScope): Pr
     rows.push({
       severity: 'error',
       code: 'generated-stale',
-      message: 'The job or the machine frame changed since it was generated. Generate again before cutting.',
+      message: `${staleSentence(input.staleReason).replace(/^the /, 'The ')}. Generate again before cutting.`,
       owner: 'run',
       cause: cause(),
     });

@@ -194,6 +194,11 @@ describe('preflightHub: the run-policy rows', () => {
     expect(report.rows[0]!.code).toBe('generated-stale');
     expect(report.firstBlocking?.code).toBe('generated-stale');
     expect(report.policyRows[0]!.owner).toBe('run');
+    // #581 — with no reason known the row keeps the generic sentence...
+    expect(report.policyRows[0]!.message).toBe('The job or the machine frame changed since it was generated. Generate again before cutting.');
+    // ...and names the input when the run recorded one.
+    const named = hubFor(job, { generated: generatedWith({}), staleSince: 1, staleReason: 'machine' });
+    expect(named.policyRows[0]!.message).toBe('The machine frame changed since it was generated. Generate again before cutting.');
   });
 
   it('states a stale package with the freeze time and the package owner`s reason, holding the blank', () => {

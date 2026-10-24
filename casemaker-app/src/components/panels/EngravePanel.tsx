@@ -1132,6 +1132,8 @@ export function EngravePanel(): JSX.Element {
             job,
             generated: run.generated,
             staleSince: run.staleSince,
+            // #581 — the hub names the input that moved instead of "the job or the machine frame".
+            staleReason: run.staleReason,
             package: jobPackage,
             calibration,
             shelfItem,
@@ -1141,7 +1143,7 @@ export function EngravePanel(): JSX.Element {
             reach: null,
           })
         : null,
-    [mode, job, run.generated, run.staleSince, jobPackage, calibration, shelfItem],
+    [mode, job, run.generated, run.staleSince, run.staleReason, jobPackage, calibration, shelfItem],
   );
 
   const backToDesign = (cause: PreflightCause | null): void => {
