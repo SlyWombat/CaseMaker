@@ -3206,7 +3206,11 @@ function generateOneProgram(
   const postIr = shop.surface ? applySurfaceLift(ir, shop.surface.plane, shop.surface.z0) : ir;
   let nc: string;
   try {
-    const posted = postZ1(postIr, ctx, mill, { vacuum: facing.nc !== null ? spanAfterFacing(span) : span });
+    // #624 — hand the post the fitted frame so its air-cut check judges the lifted feeds against
+    // the local top `lift(x, y)` rather than the flat work Z0.
+    const posted = postZ1(postIr, { ...ctx, surface: shop.surface ?? null }, mill, {
+      vacuum: facing.nc !== null ? spanAfterFacing(span) : span,
+    });
     if (!posted.ok) return stop('post', { feeds, message: posted.errors.join('; '), facing });
     nc = posted.text;
   } catch (e) {

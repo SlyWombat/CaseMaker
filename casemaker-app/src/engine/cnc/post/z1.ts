@@ -29,6 +29,7 @@
 import type { CamMove, ToolpathIR } from '../cam/ir';
 import { estimateIRCycleSeconds } from '../cam/ir';
 import type { MillProfile } from '../machine';
+import { surfaceLift, type SurfaceFrame } from '../engrave/surfacePlane';
 import { formatFixed, sanitizeMkrValue } from './format';
 
 /**
@@ -60,6 +61,13 @@ export interface PostContext {
    * definition has no vendor `g_ID` for the `MKR` line to name (#212).
    */
   toolKey: string;
+  /**
+   * #624 — the fitted surface the FEED Zs were lifted against, when the program was posted via
+   * {@link applySurfaceLift}. After #608 the local stock top is `lift(x, y)`, not work Z0, so the
+   * air-cut check must judge a feed against that local top: a feed at `−depth + lift` is above 0
+   * AND a correct cut whenever `lift > depth`. Absent (a flat post), the top is Z0 as before.
+   */
+  surface?: SurfaceFrame | null;
 }
 
 export type PostResult = { ok: true; text: string } | { ok: false; errors: string[] };
@@ -176,10 +184,14 @@ export function postZ1(
           errors.push(`move ${moveIndex}: feed ${move.f} mm/min is not in (0, ${machine.maxCutFeed}]`);
         }
         // A "cut" above the stock top but below the hop height is cutting air: the CAM or the
-        // depth intent is wrong, and the machine would do it without complaint.
-        if (move.z > 1e-9 && move.z < ir.hopZ) {
+        // depth intent is wrong, and the machine would do it without complaint. #624 — after
+        // #608's `applySurfaceLift` the local top is the plane's lift at this XY, not work Z0,
+        // so a feed that only climbs by the plane's lift is a correct cut, not air; a flat post
+        // (`surface` absent, or a flat plane) keeps the old `Z > 1e-9` refusal.
+        const top = ctx.surface ? surfaceLift(ctx.surface.plane, ctx.surface.z0, move.x, move.y) : 0;
+        if (move.z > top + 1e-9 && move.z < ir.hopZ) {
           errors.push(
-            `move ${moveIndex}: a cutting move at Z=${move.z} is above the stock (Z > 0) yet below hopZ=${ir.hopZ}: a cut in the air`,
+            `move ${moveIndex}: a cutting move at Z=${move.z} is above the stock top (Z > ${top}) yet below hopZ=${ir.hopZ}: a cut in the air`,
           );
         }
       }
