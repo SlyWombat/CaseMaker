@@ -158,8 +158,6 @@ function session(deps: ExecDeps, seekFromMachineZ: number, idlePollLimit: number
   const idlePolls = Number.isInteger(idlePollLimit) && idlePollLimit >= 1 ? idlePollLimit : MAX_IDLE_POLLS;
   const transcript: Transcript[] = [];
   let relative = false;
-  /** Whether the last answer left the machine in alarm (a miss before its `$X`, or any alarm). */
-  let alarmed = false;
   /** How low the probe may be right now, in a sentence — set by each step that moves it down. */
   let depth = 'at a safe height';
   /** #588 — whether the run reached its own home step before it stopped. */
@@ -171,8 +169,6 @@ function session(deps: ExecDeps, seekFromMachineZ: number, idlePollLimit: number
     const carried = r.kind === 'sent' || r.kind === 'timeout' ? (r.carried?.text ?? '') : '';
     transcript.push({ line, reply: carried ? `${reply}\n(between lines) ${carried}` : reply });
     if (r.kind !== 'sent') throw new Stop(`${line}: ${r.kind} — ${reply}`);
-    if (/ALARM/i.test(reply) || /ALARM/i.test(carried)) alarmed = true;
-    if (line === '$X') alarmed = false;
     for (const text of [reply, carried]) {
       if (/\berror:/i.test(text)) throw new Stop(`${line}: the controller answered ${text.trim()}`);
       const alarm = /ALARM[^\n]*/i.exec(text)?.[0];
@@ -205,13 +201,28 @@ function session(deps: ExecDeps, seekFromMachineZ: number, idlePollLimit: number
     deps.onTouch?.({ seq: readings, ...touch });
   }
 
+  /** The machine's own State word, read fresh from `?` — null when it does not answer one. */
+  async function readState(): Promise<string | null> {
+    try {
+      const r = await deps.console.send('?');
+      transcript.push({ line: '?', reply: r.kind === 'sent' ? r.text : r.kind });
+      return r.kind === 'sent' ? controllerState(r.text) : null;
+    } catch {
+      return null;
+    }
+  }
+
   /**
    * After a stop: if the mode was left relative, put it back — `$X` FIRST, because the Z1 refuses `G90`
    * with `error:Alarm lock` while in alarm (Z1-Firmware-Dialect.md, the 2026-10-08 table) — and say
    * how low the probe may be and how to recover. Nothing else is sent.
    */
   async function stopped(reason: string): Promise<string> {
-    const inAlarm = alarmed || /ALARM|timeout/i.test(reason);
+    // #588 — "in alarm" is a machine State, not a sentence. Only a controller that answers `?` with
+    // `<Alarm|…>` is cleared: `$X` to an Idle machine is a no-op with no reply, so it would sit out
+    // the console's whole 60 s first-reply window (the 2026-10-24 58 s park). A `?` that does not
+    // answer reads null, which is never treated as an alarm.
+    const inAlarm = (await readState()) === 'Alarm';
     if (relative) {
       for (const line of inAlarm ? ['$X', 'G90'] : ['G90']) {
         try {

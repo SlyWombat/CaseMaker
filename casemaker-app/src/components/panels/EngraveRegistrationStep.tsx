@@ -46,6 +46,7 @@ import {
   type RunResult,
 } from '@/engine/cnc/registration/execute';
 import { attachConsole, type ConsoleHandle } from '@/platform/machineConsole';
+import { controllerState } from '@/platform/machineUpload';
 import { effectiveMargins } from '@/engine/cnc/engrave/depthBounds';
 import { surfaceSpreadPlan, surfaceFitForPost, type SurfaceSpreadAssessment } from '@/engine/cnc/engrave/surfaceSpread';
 import { jobTool } from '@/engine/cnc/engrave/jobSetup';
@@ -225,9 +226,15 @@ export function EngraveRegistrationStep({ job, target }: EngraveRegistrationStep
   }
 
   /** Stop, then home. The executor's stop sentence has already cleared G90/$X where it could. */
-  async function homeAfterStop(handle: ConsoleHandle, reason: string): Promise<string> {
+  async function homeAfterStop(handle: ConsoleHandle): Promise<string> {
     try {
-      if (/alarm/i.test(reason)) await handle.send('$X');
+      // #588 — "in alarm" is the machine's State, not a sentence. `$X` to an Idle machine is a no-op
+      // with no reply, so it would sit out the console's 60 s first-reply window before `$H` (the
+      // 2026-10-24 58 s park). Read `?` and clear only a controller that answers `<Alarm|…>`.
+      const status = await handle.send('?');
+      if (status.kind === 'sent' && controllerState(status.text) === 'Alarm') {
+        await handle.send('$X');
+      }
       const reply = await handle.send('$H');
       return reply.kind === 'sent'
         ? 'The machine was homed after the stop.'
@@ -325,7 +332,7 @@ export function EngraveRegistrationStep({ job, target }: EngraveRegistrationStep
         }
       }
       if (!r.ok) {
-        const note = await homeAfterStop(handle, r.reason);
+        const note = await homeAfterStop(handle);
         if (!aliveRef.current) return;
         setResult(r);
         setHomeNote(note);

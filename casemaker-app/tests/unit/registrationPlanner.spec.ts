@@ -380,6 +380,10 @@ function fakeZ1(opts: {
     fitCutter: () => (tool = 'cutter'),
     mode: () => mode,
     alarmed: () => alarmed,
+    /** Put the controller in Alarm so the next `?` answers `<Alarm|…>`. */
+    alarm: () => {
+      alarmed = true;
+    },
   };
 }
 
@@ -536,7 +540,8 @@ describe('#599 the standalone mount tap', () => {
     const r = await runMountTap({ x: -186.2, y: -180 }, -3, S, { console: z1.console, operator: async () => false }, -100);
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.reason).toContain('probe was not fitted');
-    expect(z1.lines).toEqual(['?', '$H']);
+    // #588 — the stop reads the State back (`?`) before deciding nothing more to send.
+    expect(z1.lines).toEqual(['?', '$H', '?']);
   });
 });
 
@@ -664,7 +669,8 @@ describe('#430 the executor, on a fake machine', () => {
     const z1 = fakeZ1({ actual: BLANK, idle: false });
     const r = await runRegistration(plan('vise'), { console: z1.console, operator: yes });
     expect(r.ok).toBe(false);
-    expect(z1.lines).toEqual(['?']);
+    // #588 — nothing moves: only the initial `?` and the stop's own State read back.
+    expect(z1.lines).toEqual(['?', '?']);
   });
 
   it('#599 the probe reading touched at rest stops before any Z move', async () => {
@@ -672,21 +678,22 @@ describe('#430 the executor, on a fake machine', () => {
     const r = await runRegistration(plan('vise'), { console: z1.console, operator: yes });
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.reason).toContain('touched at rest');
-    expect(z1.lines).toEqual(['?', '$H', 'G54', 'G92.1', 'M119']);
+    expect(z1.lines).toEqual(['?', '$H', 'G54', 'G92.1', 'M119', '?']);
   });
 
   it('#448: the recovery sentence names the travel height it was given, not −3', async () => {
-    const silent = {
+    // A machine that reads Alarm from the first `?`: the stop's recovery sentence names the height.
+    const alarmed = {
       async send(line: string): Promise<ConsoleSendResult> {
-        return { kind: 'timeout', line, detail: 'no answer', text: '' };
+        return { kind: 'sent', line, text: '<Alarm|MPos:0,0,0>', frames: 1, elapsedMs: 1 };
       },
     };
-    const r = await runRegistration(plan('vise', { seekFromMachineZ: -10 }), { console: silent, operator: yes });
+    const r = await runRegistration(plan('vise', { seekFromMachineZ: -10 }), { console: alarmed, operator: yes });
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.reason).toContain('lift with G53 G0 Z-10 before any XY move');
   });
 
-  it('stops at a failure at ANY step, sends nothing more but G90, and says the machine may be low or alarmed', async () => {
+  it('stops at a failure at ANY step, sends nothing more than a State read and G90', async () => {
     const clean = fakeZ1({ actual: SHIFTED });
     const full = await runRegistration(plan('vise'), { console: clean.console, operator: yes });
     if (!full.ok) throw new Error(full.reason);
@@ -702,10 +709,12 @@ describe('#430 the executor, on a fake machine', () => {
       };
       const r = await runRegistration(plan('vise'), { console: flaky, operator: yes });
       expect(r.ok, `step ${k}`).toBe(false);
-      if (!r.ok) expect(r.reason).toContain('To recover: $X, then G90, then lift');
-      // Up to the failing line, plus at most `$X` and `G90` to leave relative mode — in that order.
+      // #588 — a timeout is an unknown state, not an alarm: the stop reads the machine's State, and
+      // an Idle answer sends no `$X` and no recovery advice.
+      if (!r.ok) expect(r.reason).not.toContain('To recover');
+      // After the failing line the only lines are the State read, and in relative mode `G90` — in that order.
       const after = z1.lines.slice(k);
-      expect(['', '$X,G90', 'G90']).toContain(after.join(','));
+      expect(['?', '?,G90']).toContain(after.join(','));
       // And the machine is never left relative.
       expect(z1.mode(), `step ${k}`).toBe('G90');
     }
@@ -721,6 +730,7 @@ describe('#430 the executor, on a fake machine', () => {
         // machine is then alarmed and relative.
         if (line.startsWith('G38.3') && ++probes === 3) {
           z1.lines.push(line);
+          z1.alarm(); // the hard limit really does put the controller in Alarm
           return { kind: 'sent', line, text: 'ALARM: Hard limit [Z]\nok', frames: 1, elapsedMs: 1 };
         }
         return z1.console.send(line);
@@ -768,7 +778,7 @@ describe('#430 the executor, on a fake machine', () => {
     if (!r.ok) expect(r.reason).toContain('found nothing down to machine Z');
   });
 
-  it('#518 a scan miss is a reading: no $X follows it; only a stop after a TIMEOUT (an unknown state) unlocks on suspicion', async () => {
+  it('#518 a scan miss is a reading: no $X follows it; a stop after a TIMEOUT reads the State and sends G90 alone', async () => {
     const z1 = fakeZ1({ actual: SHIFTED });
     const flaky = {
       async send(line: string): Promise<ConsoleSendResult> {
@@ -782,10 +792,11 @@ describe('#430 the executor, on a fake machine', () => {
     };
     const r = await runRegistration(plan('vise'), { console: flaky, operator: yes });
     expect(r.ok).toBe(false);
-    // Three probes and their misses went by with no `$X`; the only `$X` is the stop's own, after the timeout.
+    // Three probes and their misses went by with no `$X`. The stop's State read answers Idle (the
+    // machine is only relative, never alarmed), so it sends `G90` alone — no `$X` on suspicion.
     const stoppedAt = z1.lines.indexOf('STOPPED');
     expect(z1.lines.slice(0, stoppedAt)).not.toContain('$X');
-    expect(z1.lines.slice(stoppedAt + 1)).toEqual(['$X', 'G90']);
+    expect(z1.lines.slice(stoppedAt + 1)).toEqual(['?', 'G90']);
     expect(z1.mode()).toBe('G90');
     expect(z1.alarmed()).toBe(false);
   });
@@ -832,8 +843,8 @@ describe('#430 the executor, on a fake machine', () => {
     const r = await runRegistration(plan('vise'), { console: cut, operator: yes });
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.reason).toContain(`as low as ${S.surfaceSlowSeekMm - 1} mm below the fast touch's reading (the slow surface touch)`);
-    // Relative mode at the stop, and a timeout: `$X` first, then `G90` (the Z1 refuses G90 in alarm).
-    expect(z1.lines.slice(-2)).toEqual(['$X', 'G90']);
+    // Relative mode at the stop, but the State read answers Idle: `G90` alone, no `$X` on suspicion.
+    expect(z1.lines.slice(-2)).toEqual(['?', 'G90']);
     expect(z1.mode()).toBe('G90');
   });
 
@@ -842,12 +853,16 @@ describe('#430 the executor, on a fake machine', () => {
     const noisy = {
       async send(line: string): Promise<ConsoleSendResult> {
         const r = await z1.console.send(line);
-        return line === 'G92.1' && r.kind === 'sent' ? { ...r, carried: { text: 'ALARM: Hard limit', frames: 1 } } : r;
+        if (line === 'G92.1' && r.kind === 'sent') {
+          z1.alarm(); // the hard limit between lines really does put the controller in Alarm
+          return { ...r, carried: { text: 'ALARM: Hard limit', frames: 1 } };
+        }
+        return r;
       },
     };
     const r = await runRegistration(plan('vise'), { console: noisy, operator: yes });
     expect(r.ok).toBe(false);
-    expect(z1.lines.at(-1)).toBe('G92.1');
+    expect(z1.lines.slice(-2)).toEqual(['G92.1', '?']);
   });
 });
 

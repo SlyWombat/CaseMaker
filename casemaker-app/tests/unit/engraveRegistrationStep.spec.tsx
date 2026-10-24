@@ -112,6 +112,10 @@ interface FakeOptions {
   edgeShiftMm?: number;
   /** Alarm on the registration's tool-length measurement. */
   alarmAtM491?: boolean;
+  /** Alarm on the surface seek's FAST touch (the first G38.3): a stop in relative mode. */
+  alarmAtFastTouch?: boolean;
+  /** #588 — the surface seek's FAST touch finds nothing: a clean, Idle stop (no alarm). */
+  missFastTouch?: boolean;
   /** Answer the apply step's M491 with no PRB. */
   noCutterReading?: boolean;
   /** #475 — the surface the fake answers at each cut-extent touch, keyed by the sent XY. */
@@ -128,6 +132,8 @@ function controller(plan: RegistrationPlan, sent: string[], opts: FakeOptions = 
   let m491 = 0;
   let lastX = 0;
   let lastY = 0;
+  /** The machine's own State word — settable so a test can alarm it; `$X` returns it to Idle. */
+  let state = 'Idle';
   const stockZ = plan.seek.band.max - (plan.seek.band.max - plan.seek.band.min) / 2;
 
   const reply = (text: string): ConsoleSend => ({ ok: true, line: '', text, frames: 1, elapsedMs: 1 });
@@ -137,10 +143,11 @@ function controller(plan: RegistrationPlan, sent: string[], opts: FakeOptions = 
       return {
         async send(line: string): Promise<ConsoleSend> {
           sent.push(line);
-          if (line === '?') return reply('<Idle|MPos:0,0,0>');
+          if (line === '?') return reply(`<${state}|MPos:0,0,0>`);
+          if (line === '$X') return (state = 'Idle'), reply('ok');
           if (line === 'M491') {
             m491 += 1;
-            if (opts.alarmAtM491 === true && m491 === 1) return reply('ALARM: Probe fail');
+            if (opts.alarmAtM491 === true && m491 === 1) return (state = 'Alarm'), reply('ALARM: Probe fail');
             if (opts.noCutterReading === true && m491 > 1) return reply('ok');
             return reply('ok\n[PRB:0,0,-80.000:1]');
           }
@@ -153,6 +160,8 @@ function controller(plan: RegistrationPlan, sent: string[], opts: FakeOptions = 
           }
           if (line.startsWith('G38.3')) {
             g38 += 1;
+            if (opts.alarmAtFastTouch === true && g38 === 1) return (state = 'Alarm'), reply('ALARM: Probe fail');
+            if (opts.missFastTouch === true && g38 === 1) return reply(`[PRB:${lastX},${lastY},${stockZ}:0]\nok`);
             // The first two are the surface seek's fast and slow touch, at the registration point.
             if (g38 <= 2) return reply(`[PRB:${lastX},${lastY},${stockZ}:1]\nok`);
             const scan = plan.scans.find((s) =>
@@ -411,7 +420,49 @@ describe('#495 — the registration step', () => {
     await screen.findByTestId('engrave-registration-failed');
 
     expect(screen.getByTestId('engrave-registration-failed').textContent).toContain('ALARM');
-    expect(sent).toContain('$X');
+    // #588 — the state read answered Alarm, so exactly one `$X` cleared it before `$H`.
+    expect(sent.filter((l) => l === '$X')).toHaveLength(1);
+    expect(sent.indexOf('$X')).toBeLessThan(sent.lastIndexOf('$H'));
+    expect(sent).toContain('$H');
+    expect(firstRegistrationFor(job.id, TARGET)).toBeNull();
+  });
+
+  it('#588 — an Idle stop homes immediately: no `$X` is sent (an Idle machine would sit out the 60 s window)', async () => {
+    const plan = makePlan(-56.172);
+    const job = jobWithPlan(plan);
+    // The fast surface seek finds nothing: a clean stop, the machine reads Idle throughout.
+    install(plan, { missFastTouch: true });
+    render(<EngraveRegistrationStep job={job} target={TARGET} />);
+
+    fireEvent.click(screen.getByTestId('engrave-registration-at-machine'));
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('engrave-registration-start'));
+    });
+    await screen.findByTestId('engrave-registration-failed');
+
+    expect(screen.getByTestId('engrave-registration-failed').textContent).toContain('The machine is Idle; nothing to recover');
+    expect(sent).not.toContain('$X');
+    expect(sent).toContain('$H');
+    expect(firstRegistrationFor(job.id, TARGET)).toBeNull();
+  });
+
+  it('#588 — an alarmed relative stop clears the alarm ONCE: stopped() sends `$X`, homeAfterStop re-reads Idle and does not send a second', async () => {
+    const plan = makePlan(-56.172);
+    const job = jobWithPlan(plan);
+    // The fast surface seek answers a hard-limit alarm mid-`G91`: the stop is alarmed AND relative,
+    // so the executor's `stopped()` clears it; the panel's `homeAfterStop` must not clear it again.
+    install(plan, { alarmAtFastTouch: true });
+    render(<EngraveRegistrationStep job={job} target={TARGET} />);
+
+    fireEvent.click(screen.getByTestId('engrave-registration-at-machine'));
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('engrave-registration-start'));
+    });
+    await screen.findByTestId('engrave-registration-failed');
+
+    expect(screen.getByTestId('engrave-registration-failed').textContent).toContain('may be in alarm');
+    expect(sent.filter((l) => l === '$X')).toHaveLength(1);
+    expect(sent.indexOf('$X')).toBeLessThan(sent.lastIndexOf('$H'));
     expect(sent).toContain('$H');
     expect(firstRegistrationFor(job.id, TARGET)).toBeNull();
   });
