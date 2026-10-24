@@ -106,6 +106,44 @@ export function surfaceLift(plane: SurfacePlane, z0: number, x: number, y: numbe
 }
 
 /**
+ * #623 — the fitted surface a package was POSTED against: the plane and the reference Z0 the origin
+ * was written from (the LOWEST touch).
+ *
+ * ONE VALUE FOR THE WHOLE PACKAGE. It reaches the generator — which lifts the FEED moves at
+ * {@link applySurfaceLift} — and the simulation, which seats the stock on the same plane and judges
+ * the sweep in the same frame. A program posted in this frame but judged in the flat work frame is
+ * how a correct tilt-following post came to read as a whole-pattern under-cut (the 2026-10-24 bench,
+ * issue #623): the comparison has to be told which frame the file speaks.
+ */
+export interface SurfaceFrame {
+  plane: SurfacePlane;
+  /** The reference reading the origin was written from — the LOWEST touch. */
+  z0: number;
+}
+
+/**
+ * #623 — the greatest lift a surface asks for over a work-frame rectangle, never below zero, mm.
+ *
+ * The lift is linear in X and Y, so its maximum over a rectangle is at one of the four corners.
+ * The floor at zero matters: Z0 is the lowest TOUCH, but the fitted plane can sit below it wherever
+ * the residual is, and a lift used to SEAT a stock must only ever add material, never take it away.
+ */
+export function maxSurfaceLift(
+  surface: SurfaceFrame,
+  rect: { x0: number; y0: number; x1: number; y1: number },
+): number {
+  const corners: [number, number][] = [
+    [rect.x0, rect.y0],
+    [rect.x1, rect.y0],
+    [rect.x0, rect.y1],
+    [rect.x1, rect.y1],
+  ];
+  let max = 0;
+  for (const [x, y] of corners) max = Math.max(max, surfaceLift(surface.plane, surface.z0, x, y));
+  return max;
+}
+
+/**
  * True when the plane is flat — both slopes within rounding of zero — so the lift is zero at every
  * XY and the program would be byte-identical to the flat one. This is the test that decides whether
  * a registration's fit is worth re-posting against (#608): a flat top has nothing to follow.

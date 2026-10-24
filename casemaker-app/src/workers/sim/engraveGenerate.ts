@@ -114,7 +114,7 @@ import type { Polygons } from '@/engine/cnc/cam/pocket';
 import { concatToolpathIR, estimateCycleSeconds, HOP_Z, toolNumberFor, travelStats, type CamMove, type ToolpathIR } from '@/engine/cnc/cam/ir';
 import { generateSurface3dForGoal, type SurfaceFeeds } from '@/engine/cnc/cam/surface3d';
 import { postZ1, type PostContext, type VacuumSpan } from '@/engine/cnc/post/z1';
-import { applySurfaceLift, type SurfacePlane } from '@/engine/cnc/engrave/surfacePlane';
+import { applySurfaceLift, type SurfaceFrame } from '@/engine/cnc/engrave/surfacePlane';
 import { FRAME_Z, runSheetFileName, runSheetFrameFileName } from '@/engine/cnc/engrave/runSheet';
 import type { Setup } from '@/engine/cnc/setup';
 import type { MountObstacles } from '@/engine/cnc/mounts/bracket';
@@ -230,8 +230,13 @@ export interface EngraveShopOpts {
    * surface touches (in the readings' machine-Z frame); `z0` is the reference reading the origin was
    * written from (the LOWEST touch). Only FEED moves are lifted, so air moves and the frame file are
    * untouched. Absent/null: the program is posted flat, byte-for-byte as before this option existed.
+   *
+   * #623 — the SAME pair is what the simulation is loaded with (`SimLoadOpts.surface`), so the
+   * program's frame, the seated stock and the oracle's frame are one value. The result repeats it
+   * as `EngraveGenerated.surface`, so a caller never has to guess the frame from what it asked for:
+   * the package states the frame it was posted against.
    */
-  surface?: { plane: SurfacePlane; z0: number } | null;
+  surface?: SurfaceFrame | null;
 }
 
 /** A stage refusal with its reason, so the panel can list it under the right row. */
@@ -510,6 +515,13 @@ export interface EngraveGenerated {
    * so the run sheet's tab-removal step describes the file that actually leaves the tabs.
    */
   through?: ThroughCutFacts | null;
+  /**
+   * #623 — the fitted surface this package was POSTED against, or null on a flat post. The frame
+   * the programs speak: the caller loads the simulation with exactly this value (`SimLoadOpts.surface`)
+   * so the stock is seated on the same plane and the oracle judges in it. Absent/null is a flat
+   * post, which is also what a stored package from before #623 says.
+   */
+  surface?: SurfaceFrame | null;
   /**
    * The regions the CAM cut and the oracle must match (#206 §3): each region item's opened
    * polygons, each drill's discs, and — since #287 — each single-line trace's swept region.
@@ -2500,6 +2512,7 @@ export function engraveGenerate(
       facingToolKey: null,
       facingError: facingMaterialRefusal,
       facingCam: null,
+      surface: null,
       predicted: [],
       programs: [],
       errors: [],
@@ -2512,7 +2525,9 @@ export function engraveGenerate(
   // stays on the path below (the items cut; the goal keeps its `goal-object-no-toolpath` info).
   const goal = job.setups === undefined ? pureGoalObject(job) : null;
   if (goal !== null) {
-    return generateGoalProgram(job, goal, tool, catalogue, calibration, shop);
+    // #623 — the surface-3D goal path posts flat (it never lifts feeds), so its package claims no
+    // surface: the caller judges it in the work frame, which is the frame it was posted in.
+    return { ...generateGoalProgram(job, goal, tool, catalogue, calibration, shop), surface: null };
   }
 
   // #419 J3 — A JOB IS A LIST OF PROGRAMS.
@@ -2536,7 +2551,8 @@ export function engraveGenerate(
     };
     const face = facingProgramOf(one, ref);
     const engraved = one.ok && one.nc !== null && one.verify !== null ? [programOf(one, ref)] : [];
-    return { ...one, programs: [...(face === null ? [] : [face]), ...engraved] };
+    // #623 — the frame the programs were posted against; the panel loads the simulation with it.
+    return { ...one, surface: shop.surface ?? null, programs: [...(face === null ? [] : [face]), ...engraved] };
   }
 
   // A setup that cannot become exactly one program is refused BEFORE anything is cut: the panel's
@@ -2560,6 +2576,7 @@ export function engraveGenerate(
       facingToolKey: null,
       facingError: null,
       facingCam: null,
+      surface: null,
       predicted: [],
       programs: [],
       errors: [],
@@ -2688,6 +2705,8 @@ export function engraveGenerate(
     stage: stopped?.stage ?? (restErrors.length > 0 ? 'findings' : 'done'),
     findings: dedupeFindings([...attempts.flatMap((one) => one.findings), ...restFindings]),
     errors: attempts.flatMap((one) => one.errors),
+    // #623 — the frame the programs were posted against; the panel loads the simulation with it.
+    surface: shop.surface ?? null,
     programs: posted.flatMap((program) => {
       // #473 — the face file is the run's first program, then the setup's own. Only the first
       // program builds it (`generateOneProgram`'s `withFacing`), so only the first posted one can

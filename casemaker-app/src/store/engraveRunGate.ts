@@ -115,12 +115,16 @@ export function oracleSentence(v: EngraveRunView): string {
   if (!v.oracle) return v.phase === 'checking' || v.phase === 'simulating' ? 'checking…' : 'not checked yet';
   const floor = v.oracle.areaFloor ?? 1e-3; // #206 — the sliver floor; local so this module stays browser-free
   const floorText = floor.toFixed(4); // #584 — the floor is a computed number, print it rounded
+  // #623 — a re-posted package is judged in the blank's fitted surface frame, and the row says so:
+  // the numbers otherwise read as if the lift were never applied, and a reader comparing this run
+  // with the pre-re-post one needs to know the frame did not change the question asked.
+  const frame = v.oracle.frame === 'surface' ? ", in the blank's fitted surface frame" : '';
   if (v.oracle.ok) {
-    return `under-cut ${v.oracle.worst.underCut.toFixed(4)} mm², over-cut ${v.oracle.worst.overCut.toFixed(4)} mm², both within the ${floorText} mm² floor (tolerance ${v.oracle.band.toFixed(3)} mm)`;
+    return `under-cut ${v.oracle.worst.underCut.toFixed(4)} mm², over-cut ${v.oracle.worst.overCut.toFixed(4)} mm², both within the ${floorText} mm² floor (tolerance ${v.oracle.band.toFixed(3)} mm${frame})`;
   }
   return v.oracle.worst.underCut > floor
-    ? `worst under-cut ${v.oracle.worst.underCut.toFixed(4)} mm² exceeds the ${floorText} mm² floor by ${(v.oracle.worst.underCut - floor).toFixed(4)} mm²${oracleLocation(v.oracle.worst.underAt)} — the file left material the prediction removed (over-cut ${v.oracle.worst.overCut.toFixed(4)} mm²; tolerance ${v.oracle.band.toFixed(3)} mm)`
-    : `worst over-cut ${v.oracle.worst.overCut.toFixed(4)} mm² exceeds the ${floorText} mm² floor by ${(v.oracle.worst.overCut - floor).toFixed(4)} mm²${oracleLocation(v.oracle.worst.overAt)} — the file cut outside the plan (under-cut ${v.oracle.worst.underCut.toFixed(4)} mm²; tolerance ${v.oracle.band.toFixed(3)} mm)`;
+    ? `worst under-cut ${v.oracle.worst.underCut.toFixed(4)} mm² exceeds the ${floorText} mm² floor by ${(v.oracle.worst.underCut - floor).toFixed(4)} mm²${oracleLocation(v.oracle.worst.underAt)} — the file left material the prediction removed (over-cut ${v.oracle.worst.overCut.toFixed(4)} mm²; tolerance ${v.oracle.band.toFixed(3)} mm${frame})`
+    : `worst over-cut ${v.oracle.worst.overCut.toFixed(4)} mm² exceeds the ${floorText} mm² floor by ${(v.oracle.worst.overCut - floor).toFixed(4)} mm²${oracleLocation(v.oracle.worst.overAt)} — the file cut outside the plan (under-cut ${v.oracle.worst.underCut.toFixed(4)} mm²; tolerance ${v.oracle.band.toFixed(3)} mm${frame})`;
 }
 
 /** The "Verified" and "Simulated" sentence bodies, shared by the panel and the wizard (#582). */

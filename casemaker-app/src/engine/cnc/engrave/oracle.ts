@@ -37,6 +37,7 @@
  */
 
 import { ARC_CHORD_TOLERANCE_MM, SWEEP_SIMPLIFY_EPS_MM, segmentsForRadius } from '@/engine/compiler/arcResolution';
+import { surfaceLift, type SurfaceFrame } from '@/engine/cnc/engrave/surfacePlane';
 import { grooveRadiusAt, type VCone } from '@/engine/cnc/vProfile';
 import { traceSweptProfile } from '@/engine/cnc/engrave/partPlan';
 import { executeProfile, type ManifoldToplevel } from '@/workers/geometry/evaluateOp';
@@ -184,11 +185,28 @@ export interface OracleLevel {
   overBbox?: OracleBbox | null;
 }
 
+/**
+ * #623 — the frame the comparison's numbers are in.
+ *
+ * `'work'` is the program's own frame: the stock's top is flat at the work Z0 (every program before
+ * #608's surface re-post). `'surface'` is the blank's fitted surface frame: the session was loaded
+ * with a {@link SurfaceFrame}, so its stock was seated on that plane and its sweep was judged with
+ * the lift subtracted at each XY. A program posted against the tilt reads the same in both — that is
+ * the point — but a reader (and the bench) must be able to tell which frame the verdict speaks.
+ */
+export type OracleFrame = 'work' | 'surface';
+
 export interface OracleReport {
   ok: boolean;
   /** The derived tolerance used, mm. */
   band: number;
   levels: OracleLevel[];
+  /**
+   * #623 — which frame the simulated side was read in. `computeOracle` itself is frame-agnostic (its
+   * caller hands it the slices), so this is stamped by the session that owns the sweep; absent on a
+   * hand-built report means the caller did not say.
+   */
+  frame?: OracleFrame;
   /** The worst under- and over-cut over every level, mm². */
   worst: {
     underCut: number;
@@ -269,6 +287,27 @@ export const removalSliceAt =
     removal.slice(zSlice);
 
 /**
+ * #623 — the exact sweeper's removal, SHEARED into the blank's fitted surface frame:
+ * `z' = z − lift(x, y)`, with X and Y unchanged.
+ *
+ * A shear is exactly the frame change the comparison needs. The exact sweeper's removal is the
+ * material a flat end mill took: at every XY it is the interval from the cut floor up to the top
+ * face, and a shear that is linear in X and Y maps each such column to the interval
+ * `[floor − lift, top − lift]` at the SAME XY. Sliced horizontally at a level, the region is then
+ * the columns whose floor is at or below that level **in the blank's own frame** — the very question
+ * `computeOracle` asks, with the tilted work-frame depths taken out of it.
+ *
+ * The returned solid is the CALLER's to delete; the original removal is untouched (the shear returns
+ * a copy). Determinant 1, so the transform cannot flip a face.
+ */
+export function shearRemovalToSurface(removal: ManifoldInstance, surface: SurfaceFrame): ManifoldInstance {
+  const { slopeX, slopeY, offset } = surface.plane;
+  const dz = offset - surface.z0;
+  // Column-major 4x4: x' = x, y' = y, z' = z − (dz + slopeX·x + slopeY·y).
+  return removal.transform([1, 0, -slopeX, 0, 0, 1, -slopeY, 0, 0, 0, 1, 0, 0, 0, -dz, 1]);
+}
+
+/**
  * The column engine's answer (#408): the cell squares of its height field whose own floor is at or
  * below `zSlice`.
  *
@@ -282,16 +321,24 @@ export const removalSliceAt =
  * and thousands long, and the union's cost is dominated by contour count — and the runs are
  * unioned in chunks the way `sweep.ts` unions its capsules, since that is the measured shape of
  * this operation.
+ *
+ * #623 — `surface` reads the same grid in the blank's fitted SURFACE frame: a cell's remaining top
+ * is `h − lift(x, y)`, the height above the real top face there rather than above the work Z0. The
+ * session seats its stock on the plane before sweeping (its `initial` is the plane's highest point),
+ * so an untouched cell reads as `seat − lift ≥ 0` — material at or above the top face, never a cut —
+ * and every cut floor reads exactly the depth the CAM programmed.
  */
-export function gridSliceAt(tl: ManifoldToplevel, grid: ColumnGrid): OracleSliceAt {
+export function gridSliceAt(tl: ManifoldToplevel, grid: ColumnGrid, surface: SurfaceFrame | null = null): OracleSliceAt {
   const CS = tl.CrossSection;
   const { nu, nv, u0, du, v0, dv, h } = grid;
   return (zSlice) => {
     const runs: OraclePolygon[] = [];
     for (let j = 0; j < nv; j++) {
+      const y = v0 + j * dv;
       let start = -1;
       for (let i = 0; i <= nu; i++) {
-        const cut = i < nu && (h[j * nu + i] as number) <= zSlice;
+        const top = i < nu ? (h[j * nu + i] as number) : 0;
+        const cut = i < nu && (surface === null ? top : top - surfaceLift(surface.plane, surface.z0, u0 + i * du, y)) <= zSlice;
         if (cut && start < 0) start = i;
         if (!cut && start >= 0) {
           // One rectangle for the whole run — the left edge of its first cell to the right edge of

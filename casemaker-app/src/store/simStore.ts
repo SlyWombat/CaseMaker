@@ -25,6 +25,7 @@ import { generateRestart as buildRestart, stockFromSetup, type RestartResult } f
 import type { Tool } from '@/engine/cnc/tool';
 import { checkpointAtStep } from '@/components/viewport/simGeometry';
 import type { SimDiagnostic, SimFrame, SimLoadOk, SimPath } from '@/workers/sim/session';
+import type { SurfaceFrame } from '@/engine/cnc/engrave/surfacePlane';
 // Type-only: erased at build time, so it does not pull the worker client into the graph.
 import type { SimLoadPhase } from '@/engine/jobs/simClient';
 // Type-only, like `SimLoadPhase`: the thread dimensions travel as plain numbers (#445 §4).
@@ -202,6 +203,12 @@ export interface SimState {
      * it started, so a shared store cannot show the engrave verification as the panel's Result.
      */
     origin?: SimSessionOrigin,
+    /**
+     * #623 — the fitted surface the program was posted against (`EngraveGenerated.surface`), when the
+     * Cut step re-posted against a measured tilt. The session seats the swept stock on that plane
+     * and judges the oracle in the same frame. Omitted/null: a flat post, unchanged.
+     */
+    surface?: SurfaceFrame | null,
   ): Promise<void>;
   /** Run the last load again with twice the time limit (#194). No-op when nothing has been loaded. */
   retryWithLongerBudget(): Promise<void>;
@@ -314,6 +321,11 @@ interface LoadArgs {
    * the restart's verify) sees the same threads, like the machine frame.
    */
   threads: readonly SimThreadSpec[];
+  /**
+   * #623 — the fitted surface the program was posted against, kept so a retry seats the stock on
+   * the same plane it was loaded on — the same rule the machine frame follows.
+   */
+  surface: SurfaceFrame | null;
 }
 let lastLoad: LoadArgs | null = null;
 
@@ -347,6 +359,7 @@ export const useSimStore = create<SimState>()((set, get) => {
         rotaryPitchDeg: args.rotaryPitchDeg,
         spindleOffProximityMm: args.spindleOffProximityMm,
         threads: args.threads,
+        surface: args.surface,
       });
       if (mine !== loadSeq) return; // superseded by a newer load or a dispose
       if (!r.ok) {
@@ -394,7 +407,7 @@ export const useSimStore = create<SimState>()((set, get) => {
     ...EMPTY,
     speed: startingSpeed(),
     budgetMs: startingBudgetMs(),
-    async loadProgram(gcodeText, setup, tool, machineId, calibrationOverride, threads = [], drillPointDefault = null, origin = 'panel') {
+    async loadProgram(gcodeText, setup, tool, machineId, calibrationOverride, threads = [], drillPointDefault = null, origin = 'panel', surface = null) {
       // The saved read of the machine's own frame, if the user has one (#279). Resolved HERE so
       // every load path — a panel, the engrave run, the QA harness — simulates the same machine,
       // and so a retry or a restart cannot drift onto a different frame than the job was loaded on.
@@ -426,6 +439,7 @@ export const useSimStore = create<SimState>()((set, get) => {
         rotaryPitchDeg: rotaryPitch.value,
         spindleOffProximityMm: proximity.value,
         threads,
+        surface,
       };
       await run(lastLoad, fresh ? startingBudgetMs() : get().budgetMs);
     },

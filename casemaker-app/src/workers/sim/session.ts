@@ -40,9 +40,13 @@ import {
   gridSliceAt,
   oracleBand,
   removalSliceAt,
+  shearRemovalToSurface,
   type OraclePredicted,
   type OracleReport,
 } from '@/engine/cnc/engrave/oracle';
+import { maxSurfaceLift, type SurfaceFrame } from '@/engine/cnc/engrave/surfacePlane';
+import { aabbOfProfile } from '@/engine/compiler/profile';
+import { partToWork } from '@/engine/cnc/frames';
 import type { ManifoldToplevel } from '../geometry/evaluateOp';
 import { meshOutputOf, type NodeMeshOutput } from '../geometry/meshOutput';
 import { createPlayback, type Playback } from '../geometry/playback';
@@ -277,6 +281,60 @@ export interface SimLoadOpts {
    * `base − breakthroughMm` and reports the board removal as `removedFromSacrificial`. Absent: 0.
    */
   breakthroughMm?: number | null;
+  /**
+   * #623 — the fitted surface the program was POSTED against (`SurfaceFrame`), or null/absent for a
+   * flat post. Two things follow from it, and they must follow together:
+   *
+   *  - THE STOCK IS SEATED ON THE PLANE. The work Z0 is the LOWEST touch, so the real top face sits
+   *    up to `maxSurfaceLift` ABOVE the flat stock's top; a lifted cut near a shallow level would
+   *    otherwise run through air the flat stock does not have, and the sweep would leave flank the
+   *    program really cuts. The stock's top face is raised to the plane's highest point for the
+   *    sweep (see {@link seatStockOnSurface}).
+   *  - THE ORACLE JUDGES IN THE SAME FRAME. `oracle` reads the sweep with the lift subtracted at
+   *    each XY (the grid's per-cell heights, the removal solid's shear), so a correctly lifted
+   *    program gives the flat post's own result — `OracleReport.frame` says `'surface'` when it did.
+   *
+   * A load WITHOUT this option is byte-for-byte the previous behaviour: stock at the work Z0, verdict
+   * in the work frame.
+   */
+  surface?: SurfaceFrame | null;
+}
+
+/**
+ * #623 — `setup` with its stock's top face raised to the fitted plane's highest point, so the
+ * simulated blank CONTAINS the real one.
+ *
+ * The lift is linear, so its maximum over the blank is at a corner of the part outline (mapped to the
+ * WORK frame, which is where the plane's XY live). Raising `part.thickness` moves the top face up in
+ * the work frame while `wcs.origin` — the Z0 the program is written against — stays where it is;
+ * the placement and the bottom face are untouched. The extra slab above the real top is the one
+ * region the lifted program cuts that a flat-topped stock would have read as air: it removes it, and
+ * no oracle level (all at negative depths) ever asks about material above the top face, so the
+ * comparison is not polluted by it.
+ *
+ * A non-prism part (a cylinder) keeps its own stock: nothing in the engrave path builds one.
+ */
+function seatStockOnSurface(setup: Setup, surface: SurfaceFrame): Setup {
+  const part = setup.part;
+  if (part.kind !== 'prism') return setup;
+  const bb = aabbOfProfile(part.outline);
+  if (bb === null) return setup;
+  const work = [
+    partToWork(setup, [bb.min[0], bb.min[1], part.thickness]),
+    partToWork(setup, [bb.max[0], bb.min[1], part.thickness]),
+    partToWork(setup, [bb.max[0], bb.max[1], part.thickness]),
+    partToWork(setup, [bb.min[0], bb.max[1], part.thickness]),
+  ];
+  const xs = work.map((w) => w[0]);
+  const ys = work.map((w) => w[1]);
+  const seat = maxSurfaceLift(surface, {
+    x0: Math.min(...xs),
+    y0: Math.min(...ys),
+    x1: Math.max(...xs),
+    y1: Math.max(...ys),
+  });
+  if (!(seat > 0)) return setup;
+  return { ...setup, part: { ...part, thickness: part.thickness + seat } };
 }
 
 /**
@@ -338,6 +396,10 @@ export interface SimSession {
    * what lets a V-bit trace reach this at all: the cone's removal has no solid to slice either, and
    * its prediction is a groove rather than one region per item. The caller only reaches this after
    * a load that reported `ok`.
+   *
+   * #623 — judged in the frame the LOAD was given: a `surface` load reads the sweep with the fitted
+   * lift subtracted at each XY and stamps `frame: 'surface'` on the report, so a program posted
+   * against a tilted blank is compared with the flat prediction that blank's design is.
    */
   oracle(predicted: readonly OraclePredicted[]): OracleReport;
   dispose(): void;
@@ -383,11 +445,18 @@ export function createSimSession(tl: ManifoldToplevel, hooks?: SimSessionHooks):
    * account of the run it holds, so the drawn clock does not have to re-derive which machine this is.
    */
   let rapid: RapidEstimate | null = null;
+  /**
+   * #623 — the fitted surface the LOADED program was posted against, or null for a flat post. It is
+   * the frame the sweep was seated in and the frame `oracle` must judge in; set by `load`, cleared
+   * by `dispose`, and never read by anything that does not own both halves.
+   */
+  let surfaceFrame: SurfaceFrame | null = null;
 
   const dispose = (): void => {
     const l = live;
     live = null;
     rapid = null;
+    surfaceFrame = null;
     if (!l) return;
     if (l.kind === 'path' || l.kind === 'column') return; // owns no wasm handle at all
     // Playback first: its anchors and cached unions are built over the sweep's solids.
@@ -397,8 +466,13 @@ export function createSimSession(tl: ManifoldToplevel, hooks?: SimSessionHooks):
     hooks?.onDispose?.('sweep');
   };
 
-  const load = (gcodeText: string, setup: Setup, tool: Tool, machineId: string | null, opts?: SimLoadOpts): SimLoadResult => {
+  const load = (gcodeText: string, setupArg: Setup, tool: Tool, machineId: string | null, opts?: SimLoadOpts): SimLoadResult => {
     dispose();
+    // #623 — a program posted against the blank's fitted surface is swept on a stock SEATED on that
+    // plane, and every later oracle call is judged in the same frame. A flat load is untouched.
+    const surface = opts?.surface ?? null;
+    const setup = surface === null ? setupArg : seatStockOnSurface(setupArg, surface);
+    surfaceFrame = surface;
     let machine;
     if (machineId !== null) {
       const base = MACHINES[machineId];
@@ -625,6 +699,10 @@ export function createSimSession(tl: ManifoldToplevel, hooks?: SimSessionHooks):
    * message's overreach: a FLAT column sweep can be compared, and now is.
    */
   const oracle = (predicted: readonly OraclePredicted[]): OracleReport => {
+    // #623 — the frame the loaded program speaks. A flat post is judged exactly as it always was;
+    // a surface post is read with its lift taken back out at each XY, which is the only way a
+    // correct tilt-following file can match the flat prediction (and the flat post's mismatch).
+    const surface = surfaceFrame;
     const l = live;
     if (l && l.kind === 'column') {
       const grid = l.column.grid;
@@ -633,12 +711,25 @@ export function createSimSession(tl: ManifoldToplevel, hooks?: SimSessionHooks):
           'oracle: this is a ROTARY column sweep, whose grid runs over (X, θ): a 2D region in the work frame cannot be read off it, so the CAM\'s predicted regions cannot be compared with the material it left',
         );
       }
-      return computeOracle(tl, gridSliceAt(tl, grid), predicted, columnOracleBand(worstContours(l.timeline), grid), grid);
+      const report = computeOracle(tl, gridSliceAt(tl, grid, surface), predicted, columnOracleBand(worstContours(l.timeline), grid), grid);
+      return { ...report, frame: surface === null ? 'work' : 'surface' };
     }
     if (!l || l.kind !== 'swept') throw new Error('oracle: no swept program is loaded');
     const removal = l.sweep.removal;
     if (!removal) throw new Error('oracle: the loaded program removed no material');
-    return computeOracle(tl, removalSliceAt(removal), predicted, oracleBand(worstContours(l.timeline)));
+    if (surface === null) {
+      return { ...computeOracle(tl, removalSliceAt(removal), predicted, oracleBand(worstContours(l.timeline))), frame: 'work' };
+    }
+    // The exact sweeper keeps a solid, not a height field, so its frame change is a shear of the
+    // removal into the surface frame — exact for the 2.5D intervals a flat end mill leaves. The
+    // sheared copy is ours and is released on both paths; `removal` itself must outlive this call
+    // (playback and later seeks read it), so it is never the one deleted.
+    const seated = shearRemovalToSurface(removal, surface);
+    try {
+      return { ...computeOracle(tl, removalSliceAt(seated), predicted, oracleBand(worstContours(l.timeline))), frame: 'surface' };
+    } finally {
+      seated.delete();
+    }
   };
 
   const stateAt = (step: number): MachineState | null => (live ? live.timeline.stateAt(Math.trunc(step)) : null);

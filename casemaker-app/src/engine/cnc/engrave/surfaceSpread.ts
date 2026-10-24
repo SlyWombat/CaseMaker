@@ -37,7 +37,7 @@
 
 import { aabbOfProfile } from '@/engine/compiler/profile';
 import { ceilingName, splitDepthOf, type DepthBoundSource } from '@/engine/cnc/engrave/depthBounds';
-import { fitSurfacePlane, isFlatPlane, type SurfacePlane, type SurfacePlaneFit } from '@/engine/cnc/engrave/surfacePlane';
+import { fitSurfacePlane, isFlatPlane, type SurfaceFrame, type SurfacePlaneFit } from '@/engine/cnc/engrave/surfacePlane';
 import {
   toPartPlan,
   voidLimitForFootprint,
@@ -479,12 +479,12 @@ export function surfaceTiltWords(tilt: { xMm: Mm; yMm: Mm }): string | null {
   return parts.length === 0 ? null : parts.join(' and ');
 }
 
-/** The post payload for a registration that measured a TILT: the fitted plane and its reference Z0. */
-export interface SurfacePostFit {
-  plane: SurfacePlane;
-  /** The reference reading the origin was written from — the LOWEST touch. */
-  z0: number;
-}
+/**
+ * The post payload for a registration that measured a TILT: the fitted plane and its reference Z0.
+ * Since #623 this is {@link SurfaceFrame} itself — the same pair the simulation seats its stock on
+ * and judges the sweep in, so the generator and the verdict cannot be handed two different frames.
+ */
+export type SurfacePostFit = SurfaceFrame;
 
 /**
  * #608 — what a registration hands the Cut step to re-post against, or null. A top that fits a

@@ -18,6 +18,7 @@ import type { EngraveJob, EngraveMargins } from '@/types/engraveJob';
 import type { SimWorkerApi, SimFrame, SimLoadResult, SimPath, EngravePreview, EngraveGenerated } from '@/workers/sim.worker';
 import type { EngraveShopOpts } from '@/workers/sim/engraveGenerate';
 import type { OraclePredicted, OracleReport } from '@/engine/cnc/engrave/oracle';
+import type { SurfaceFrame } from '@/engine/cnc/engrave/surfacePlane';
 import type { DesignJobPatch, DesignReadingDirection } from '@/engine/cnc/engrave/fromDesign';
 import { liveShopDefaults, readDefault } from '@/platform/defaultsClient';
 import type { ProbeResiduals } from '@/engine/cnc/probePlan';
@@ -110,6 +111,13 @@ export interface SimLoadOpts {
    * column engine can state the annular band and the over-removal instead of a cylinder.
    */
   threads?: readonly SimThreadSpec[] | null;
+  /**
+   * #623 — the fitted surface the program was posted against, when a registration measured a tilt
+   * and the Cut step re-posted. The session seats its stock on that plane and judges the oracle in
+   * the same frame, so a correctly lifted program gives the flat post's own verdict. Absent/null:
+   * a flat post, judged in the work frame exactly as before.
+   */
+  surface?: SurfaceFrame | null;
 }
 
 /** The two stages of a load (#224). */
@@ -169,6 +177,7 @@ export async function loadSim(gcodeText: string, setup: Setup, tool: Tool, machi
             rotaryPitchDeg: opts?.rotaryPitchDeg ?? null,
             spindleOffProximityMm: opts?.spindleOffProximityMm ?? null,
             threads: opts?.threads ?? null,
+            surface: opts?.surface ?? null,
           },
           opts?.onProgress ? Comlink.proxy(opts.onProgress) : undefined,
         )

@@ -292,6 +292,11 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
           // `simStore` (so the viewport shows the sweep); the origin is what stops the panel
           // presenting this finished Result under its own empty file row.
           'engrave',
+          // #623 — the package's OWN frame, not the `surface` argument this call was made with:
+          // the generator decides whether a program is posted against the fitted plane (a pure
+          // goal job, for one, is not), and the simulation must be seated and judged in the frame
+          // the file actually speaks. `generated.surface` is that answer; null is a flat post.
+          generated.surface ?? null,
         );
     } catch (e) {
       if (mine === seq) set({ phase: 'blocked', error: e instanceof Error ? e.message : String(e) });
