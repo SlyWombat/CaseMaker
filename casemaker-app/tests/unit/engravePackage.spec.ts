@@ -155,6 +155,25 @@ describe('the package engine (#419 §4)', () => {
     expect(st.reason).toContain('registration plan');
   });
 
+  it('#621 — the measured flatness (the registration’s outcome) does not stale the package', () => {
+    const job = defaultEngraveJob();
+    const made = freezePackage(job, [program('G21\nM2\n')], AT);
+    if (!made.ok) throw new Error(made.reason);
+
+    // The registration writes the measured bow onto the stock; that is its outcome, not a change to
+    // the cutting program, so a found position must not invalidate the frozen package.
+    const measured: EngraveJob = {
+      ...job,
+      stock: {
+        ...job.stock,
+        flatness: { xMm: 0.1, yMm: 0.2, source: 'measured', touchCount: 5, measuredAt: '2026-10-24T16:50:00.000Z' },
+      },
+    };
+
+    expect(jobFingerprint(measured)).toBe(jobFingerprint(job));
+    expect(packageStaleness(made.package, measured).stale).toBe(false);
+  });
+
   it('the package hash follows the job and the programs', () => {
     const job = defaultEngraveJob();
     const a = freezePackage(job, [program('G21\nM2\n')], AT);

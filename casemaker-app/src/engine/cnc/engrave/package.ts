@@ -75,6 +75,13 @@ function fingerprintView(job: EngraveJob): unknown {
   const view: Record<string, unknown> = { ...job };
   delete view.package;
   delete view.runLog;
+  // #621 — the measured flatness is the registration's OUTCOME (the blank's bow), not a change to
+  // the cutting program; a found position must not stale a frozen package.
+  if (view.stock !== undefined) {
+    const stock = { ...(view.stock as Record<string, unknown>) };
+    delete stock.flatness;
+    view.stock = stock;
+  }
   // #574 — the registration plan (setups[*].registration) is the PROBE choreography, not the
   // cutting program. Approving it after Generate must stale the frozen package but NOT the
   // Generate (the .nc is unchanged), so the Cut screen can offer a re-freeze in place. Strip it
