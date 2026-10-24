@@ -324,12 +324,14 @@ interface SurfaceBand {
 }
 
 /** A surface reading inside the band, or a stop that says where it landed. */
-function inBand(prb: Prb | null, band: SurfaceBand, which: string): Prb {
+function inBand(prb: Prb | null, band: SurfaceBand, which: string, maxZ: number = band.max): Prb {
   if (prb === null || !prb.touched) {
     throw new Stop(`the ${which} surface touch found nothing down to machine Z ${band.min} — ${band.expect}`);
   }
-  if (prb.z < band.min || prb.z > band.max) {
-    throw new Stop(`the ${which} surface touch read machine Z ${prb.z}, outside the expected ${band.min} to ${band.max}`);
+  // #619 — a reading ABOVE the band is not a miss on the datum path: a normally mounted blank may
+  // stand prouder than the ledge estimate, so the upper bound is widened; only the floor still stops.
+  if (prb.z < band.min || prb.z > maxZ) {
+    throw new Stop(`the ${which} surface touch read machine Z ${prb.z}, outside the expected ${band.min} to ${maxZ}`);
   }
   return prb;
 }
@@ -352,6 +354,12 @@ async function seekSurface(
   fromMachineZ: number = plan.seek.fromMachineZ,
 ): Promise<Prb> {
   const s = plan.settings;
+  // #619 — the datum path accepts a surface up to the jaw top + the stock's full thickness + tolerance:
+  // a normally mounted blank may not sit on the ledge, and a higher reading is the stock, not a miss.
+  const datumMax =
+    plan.mountDatum !== null && plan.stockThicknessMm !== undefined
+      ? plan.mountDatum.jawTopZ + plan.stockThicknessMm + s.surfaceToleranceMm
+      : band.max;
   const travel = Math.round((fromMachineZ - band.min) * 1000) / 1000;
   await io.send(`G53 G0 Z${f(fromMachineZ)}`);
   await io.send('G90');
@@ -359,11 +367,11 @@ async function seekSurface(
   await io.idle();
   io.at(band.at);
   await io.send('G91');
-  inBand(lastPrb(await io.send(`G38.3 Z-${f(travel)} F${f(s.surfaceFastFeed)}`)), band, 'fast');
+  inBand(lastPrb(await io.send(`G38.3 Z-${f(travel)} F${f(s.surfaceFastFeed)}`)), band, 'fast', datumMax);
   await io.send(`G0 Z${f(SURFACE_LIFT_MM)}`);
   await io.idle();
   io.at(`as low as ${f(s.surfaceSlowSeekMm - SURFACE_LIFT_MM)} mm below the fast touch's reading (the slow surface touch)`);
-  const slow = inBand(lastPrb(await io.send(`G38.3 Z-${f(s.surfaceSlowSeekMm)} F${f(s.surfaceSlowFeed)}`)), band, 'slow');
+  const slow = inBand(lastPrb(await io.send(`G38.3 Z-${f(s.surfaceSlowSeekMm)} F${f(s.surfaceSlowFeed)}`)), band, 'slow', datumMax);
   await io.send('G90');
   return slow;
 }
@@ -499,6 +507,14 @@ export async function runRegistration(
       at: `as low as machine Z ${plan.seek.band.min}, ${s.surfaceToleranceMm} mm below the expected surface (the surface seek)`,
       expect: 'the stock is not where the job expects it',
     });
+
+    // #619 — a datum-path surface ABOVE the expected band is the blank standing prouder than the
+    // ledge estimate (a normally mounted blank need not sit on the ledge): note the measured proud.
+    if (plan.mountDatum !== null && slow.z > plan.seek.band.max) {
+      plan.notes.push(
+        `the blank stands ${f(slow.z - plan.mountDatum.jawTopZ)} mm proud of the jaw tops — expected ${f(plan.seek.band.max - plan.mountDatum.jawTopZ)} on the ledge; the measured top is used`,
+      );
+    }
 
     const parkZ = slow.z + s.parkAboveSurfaceMm;
     await io.send(`G53 G0 Z${f(parkZ)}`);

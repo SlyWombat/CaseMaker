@@ -620,6 +620,27 @@ describe('#430 the executor, on a fake machine', () => {
     expect(steps.some((s) => s.includes('park height'))).toBe(true);
   });
 
+  it('#619 a datum-path surface prouder than the ledge is accepted, and the proud is noted', async () => {
+    const DATUM: MountDatum = { jawTopZ: SURFACE - 1.84, measuredAt: '2026-10-23T00:00:00.000Z', by: 'wired-probe' };
+    const p = plan('vise', { mountDatum: DATUM, stockThicknessMm: 3.81 });
+    // 1.06 mm above the band's ceiling — a blank standing prouder than the ledge estimate, not a miss.
+    const z1 = fakeZ1({ actual: SHIFTED, surface: SURFACE + S.surfaceToleranceMm + 1.06 });
+    const r = await runRegistration(p, { console: z1.console, operator: yes });
+    expect(r.ok).toBe(true);
+    if (!r.ok) throw new Error(r.reason);
+    expect(p.notes.some((n) => n.includes('proud'))).toBe(true);
+    expect(r.outcome.usable).toBe(true);
+  });
+
+  it('#619 a datum-path surface below the jaw top still stops as a miss', async () => {
+    const DATUM: MountDatum = { jawTopZ: SURFACE - 1.84, measuredAt: '2026-10-23T00:00:00.000Z', by: 'wired-probe' };
+    const p = plan('vise', { mountDatum: DATUM, stockThicknessMm: 3.81 });
+    const z1 = fakeZ1({ actual: SHIFTED, surface: DATUM.jawTopZ - S.surfaceToleranceMm - 1 });
+    const r = await runRegistration(p, { console: z1.console, operator: yes });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reason).toContain('found nothing down to machine Z');
+  });
+
   it('#518 a scan miss is a reading: no $X follows it; only a stop after a TIMEOUT (an unknown state) unlocks on suspicion', async () => {
     const z1 = fakeZ1({ actual: SHIFTED });
     const flaky = {

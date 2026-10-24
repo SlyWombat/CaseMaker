@@ -86,6 +86,7 @@ export function registrationFor(
       probe: input.probe ?? null,
       mountTap: input.mountTap ?? null,
       fixtureBelowSurfaceMm: mount.kind === 'vise' && datum === null ? dims.z - LEDGE_STEP : undefined,
+      stockThicknessMm: dims.z,
       bracketOrigin: input.bracketOrigin,
       mountObstacles: input.mountObstacles,
       bracketConfirm: input.bracketConfirm,

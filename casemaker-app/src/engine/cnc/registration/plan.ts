@@ -141,6 +141,12 @@ export interface PlanInput {
    */
   mountTap?: { x: number; y: number; fromMachineZ: number; label: string } | null;
   /**
+   * #619 — the stock's thickness, mm, for the datum path's upper surface bound: a normally mounted
+   * blank may stand the full thickness proud of the jaw tops (it need not sit on the ledge), so the
+   * seek accepts a surface up to `jawTop + thickness + tolerance`. Absent on the legacy seat path.
+   */
+  stockThicknessMm?: number;
+  /**
    * REQUIRED, and the CALLER's to supply: the machine's own travel height in MACHINE Z — the resolved
    * machine's `toolChange.clearanceZ` (`machine.ts` → `resolveMachine`), the Z the controller lifts to
    * before any clearance traverse. It is BOTH the height the seek starts from AND the bound the obstacle
@@ -191,6 +197,8 @@ export interface PlanObstacle {
 export interface RegistrationPlan {
   mount: Mount;
   stock: ExpectedStock;
+  /** #619 — the stock's thickness, mm, for the datum path's upper surface bound. */
+  stockThicknessMm?: number;
   surfacePoint: { x: number; y: number };
   /** The surface touch: from the machine's travel height (`seekFromMachineZ`), at most this far down; and the band a reading must land in. */
   seek: { fromMachineZ: number; travelMm: number; band: { min: number; max: number } };
@@ -461,6 +469,7 @@ export function planRegistration(input: PlanInput, s: RegistrationSettings): Pla
     plan: {
       mount,
       stock,
+      stockThicknessMm: input.stockThicknessMm,
       surfacePoint,
       seek: { fromMachineZ: seekFromMachineZ, travelMm: travel, band },
       mountDatum,
