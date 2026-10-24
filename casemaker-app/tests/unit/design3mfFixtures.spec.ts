@@ -727,9 +727,15 @@ describe('the thin fixture end to end (#221 acceptance)', () => {
       ).toBeCloseTo(0, 9);
       expect(cutDepthAtDistance(cone, cone.tipRadius, cut.depth), label).toBeCloseTo(0, 12);
 
-      // And the drawn outlines are exactly those offsets of the design.
+      // And the drawn outlines are those offset constructions of the design. The SURFACE is the
+      // design outset; the FLOOR is the CAM’s own reach (#584) — the first ring, the design eroded
+      // by the PLANE radius, swept by the tip disc. It agrees with the `floorInset` erosion along a
+      // straight wall and lies strictly inside it at a convex corner, which no ring can reach.
       expect(area(v.surface), label).toBeCloseTo(area(offset(v.plane, film * TAN15)), 6);
-      expect(area(v.floor), label).toBeCloseTo(area(offset(v.plane, -e * TAN15)), 6);
+      expect(area(v.floor), label).toBeCloseTo(
+        area(offset(offset(v.plane, -v.planeRadius), cone.tipRadius)),
+        6,
+      );
       expect(area(v.surface), label).toBeGreaterThan(area(v.plane));
       expect(area(v.plane), label).toBeGreaterThan(area(v.floor));
     }
@@ -1030,9 +1036,12 @@ describe('the thick fixture acceptance gates (#221)', () => {
       expect(text, 'the 0.985 floor').toBeDefined();
       expect(logo, 'the 0.998 floor').toBeDefined();
       // The areas the slice was accepted on — a fixture edit that moves the glyphs moves these.
-      expect(text!.predictedArea).toBeCloseTo(365.45, 2);
+      // #584 moved `predictedArea` only: the floor is the CAM’s reach, which rounds off each
+      // convex corner the first ring cannot enter (≈0.07% of the glyph area); the simulation and
+      // its tolerance are untouched.
+      expect(text!.predictedArea).toBeCloseTo(365.21, 2);
       expect(text!.simulatedArea).toBeCloseTo(365.73, 2);
-      expect(logo!.predictedArea).toBeCloseTo(78.11, 2);
+      expect(logo!.predictedArea).toBeCloseTo(78.07, 2);
       expect(logo!.simulatedArea).toBeCloseTo(78.16, 2);
 
       // The colour plane (d = 0.8) and a shallow wall level (d = 0.2) on the same simulated grid.

@@ -1068,7 +1068,14 @@ export function engraveRegions(
       const plane = planeById.get(engrave.id) ?? vCarvePlane(cone, engrave.depth, colourBoundaryDepth);
       const design = byId.get(engrave.id)?.polygons ?? [];
       if (design.length === 0) continue;
-      const floor = plane.floorInset > 0 ? offset(design, -plane.floorInset) : design;
+      // #584 — THE FLOOR IS WHAT THE TOOLPATH CAN REACH, not `design − floorInset`. The two are
+      // the same on a broad face, but `pocketLoops` starts from `design − planeRadius` and the TIP
+      // disc clears `(that) ⊕ tipRadius`; a component too small to survive the first erosion (the
+      // badge's Ø0.61 dot against 0.3004) is DROPPED from the reach — and the `floorInset`
+      // approximation still called it cut, which the oracle read as 0.0815 mm² of under-cut. With
+      // the floor derived from the same two offsets the CAM takes, the prediction cannot promise
+      // a floor the rings do not clear, at any precision.
+      const floor = offset(offset(design, -plane.planeRadius), cone.tipRadius);
       const surface = plane.surfaceOutset > 0 ? offset(design, plane.surfaceOutset) : design;
       vCarveById.set(engrave.id, {
         plane: design,
