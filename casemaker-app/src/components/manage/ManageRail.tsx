@@ -17,7 +17,9 @@ import { TOOL_LIBRARY } from '@/engine/cnc/toolLibrary';
 import { houseBaseUrl } from '@/platform/houseBaseUrl';
 import { HOUSE_SCHEMA_VERSION } from '@/platform/houseClient';
 import { useToolRegistry } from '@/hooks/useToolRegistry';
+import { machineDisplayName } from '@/platform/locationClient';
 import { useMachineStore } from '@/store/machineStore';
+import { useMachineRecord } from '@/store/locationStore';
 import { useManageModeStore, type ManageScope } from '@/store/manageModeStore';
 import { useLocationStore } from '@/store/locationStore';
 import { useToolRegistryStore } from '@/store/toolRegistryStore';
@@ -41,8 +43,11 @@ export function ManageRail() {
   const accessories = useLocationStore((s) => s.location?.accessories?.length ?? 0);
 
   const profile = machine?.profileId != null ? MACHINES[machine.profileId] : undefined;
+  const record = useMachineRecord(machine);
   const machineLabel =
-    machine === null ? 'No machine yet' : `${profile?.name ?? 'A controller'} · ${machine.host}`;
+    machine === null
+      ? 'No machine yet'
+      : `${machineDisplayName(record, profile) ?? 'A controller'} · ${machine.host}`;
 
   const scopeButton = (id: ManageScope, icon: string, label: string, tail: JSX.Element) => (
     <button

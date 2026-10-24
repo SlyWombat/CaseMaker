@@ -36,7 +36,7 @@ beforeEach(() => {
       kind: 'casemaker-location', schemaVersion: 1, id: 'loc-1', name: 'My shop', createdAt: 'x', migratedFrom: null,
       unreadableMachines: [],
       machines: [{
-        id: 'm-1', profileId: 'Z1', name: 'Makera_Z1_000000', serial: null, firmware: null, address: null,
+        id: 'm-1', profileId: 'Z1', name: 'Makera_Z1_000000', nickname: null, serial: null, firmware: null, address: null,
         calibration: null, fixtures: null, margins: null, power: null, wasteboard: null, finishedPrograms: [], updatedAt: 'x',
       }],
     },

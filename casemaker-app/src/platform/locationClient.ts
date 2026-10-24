@@ -360,6 +360,12 @@ export const MachineRecordSchema = z.object({
   id: z.string().min(1),
   profileId: z.string().nullable().default(null),
   name: z.string().nullable().default(null),
+  /**
+   * #596 — the friendly name a person gives the machine ("Zoomba"), set on the machine card (#602).
+   * `name` stays the controller's broadcast name, which `observationApplies` matches observations
+   * on, so the two are never the same claim. Null until the person names it.
+   */
+  nickname: z.string().nullable().default(null),
   serial: z.string().nullable().default(null),
   firmware: z.string().nullable().default(null),
   address: MachineAddressSchema.nullable().default(null),
@@ -436,6 +442,22 @@ export const MachineRecordSchema = z.object({
 
 export type MachineAddress = z.infer<typeof MachineAddressSchema>;
 export type MachineRecord = z.infer<typeof MachineRecordSchema>;
+
+/**
+ * #596 — how a machine is NAMED where a person reads it: the friendly `nickname` first, then the
+ * profile's own name (`Makera Z1`), then the controller's broadcast name (`name`), then the address.
+ * Returns null only when none of those exist (a null record and no profile) — the caller supplies
+ * its own last word ("A controller", "No machine yet").
+ *
+ * `name` is NOT reused: it is the broadcast name `observationApplies` matches observations on and a
+ * job's machine key is the profile id, so a rename is this one field and touches neither.
+ */
+export function machineDisplayName(
+  record: MachineRecord | null,
+  profile: { name: string } | undefined,
+): string | null {
+  return record?.nickname ?? profile?.name ?? record?.name ?? record?.address?.host ?? null;
+}
 
 const machinesSchema = z.array(MachineRecordSchema).superRefine((list, ctx) => {
   const ids = new Set<string>();

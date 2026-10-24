@@ -1908,6 +1908,12 @@ export interface RunSheetOptions {
    * program 1's Cut section with the old "Program 1/Program 2" words, byte-for-byte.
    */
   restPass?: RestPassFacts;
+  /**
+   * #596 — the machine's display name for the sheet's header: the nickname first, then the profile
+   * name. Resolved by the caller (this module is in the sim worker's import graph), never read
+   * here. Absent: the profile's own name, as before.
+   */
+  machineName?: string;
 }
 
 /** A share as the operator reads it. Rounded to the whole percent: a tenth is not a fact about a cutter. */
@@ -2748,7 +2754,7 @@ export function buildRunSheet(
   const machine = jobMachine(job);
   const header: RunSheetHeader = {
     jobName: job.name,
-    machine: machine.name,
+    machine: options.machineName ?? machine.name,
     generatedOn: now.toISOString().slice(0, 10),
     fileName: runSheetFileName(job.name),
     fileHash: nc === null ? '' : sha256Hex(nc).slice(0, 8),

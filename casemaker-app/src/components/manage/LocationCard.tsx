@@ -50,6 +50,7 @@ function MachineKv({ machine }: { machine: MachineRecord }) {
     <div className="kv" data-testid="manage-location-machine">
       <Kv label="profile">{machine.profileId ?? '— unknown'}</Kv>
       <Kv label="name">{machine.name ?? '— nothing announced one'}</Kv>
+      <Kv label="nickname">{machine.nickname ?? '— not named'}</Kv>
       <Kv label="address">
         {machine.address === null ? '—' : `${machine.address.host} : ${machine.address.port}`}
       </Kv>

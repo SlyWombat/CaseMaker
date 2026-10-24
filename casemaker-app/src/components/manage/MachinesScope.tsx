@@ -27,6 +27,7 @@ import { MACHINES, PRINTER_PROFILES, type MillProfile } from '@/engine/cnc/machi
 import { canDriveMachine } from '@/platform/capabilities';
 import { controllerState } from '@/platform/machineUpload';
 import { probeMachine } from '@/platform/machineProbe';
+import { machineDisplayName } from '@/platform/locationClient';
 import {
   MY_MACHINE_FILENAME,
   parseMyMachineFile,
@@ -34,7 +35,7 @@ import {
 } from '@/store/myMachineFile';
 import { useMachineStore } from '@/store/machineStore';
 import { useSettingsStore } from '@/store/settingsStore';
-import { useLocationStore } from '@/store/locationStore';
+import { useLocationStore, useMachineRecord } from '@/store/locationStore';
 import { LocationCard, LocationProblemCard } from './LocationCard';
 import { useToolRegistryStore } from '@/store/toolRegistryStore';
 import { MachineConsole } from './MachineConsole';
@@ -123,6 +124,7 @@ export function MachinesScope() {
   };
 
   const profile = machine?.profileId != null ? MACHINES[machine.profileId] : undefined;
+  const record = useMachineRecord(machine);
   const typed = address.trim().length > 0;
 
   // #247's "my machine" file, in one node used by both cards: it is a fact about the machine setup
@@ -227,7 +229,7 @@ export function MachinesScope() {
         {machine !== null ? (
           <div className="mcard" data-testid="manage-machine-card">
             <h4>
-              {profile?.name ?? machine.name ?? 'A controller'}{' '}
+              {machineDisplayName(record, profile) ?? machine.name ?? 'A controller'}{' '}
               <span className="tag tag--owned">found</span>
               <span className="badge">
                 profile: {machine.profileId ?? 'unknown'}
@@ -361,7 +363,7 @@ export function MachinesScope() {
 
       <aside className="context-panel" data-testid="manage-machine-detail">
         <div className="panel-head">
-          <h3>{machine === null ? 'No machine' : `${profile?.name ?? machine.host} · last check`}</h3>
+          <h3>{machine === null ? 'No machine' : `${machineDisplayName(record, profile) ?? machine.host} · last check`}</h3>
         </div>
         <p className="hint">
           {machine === null

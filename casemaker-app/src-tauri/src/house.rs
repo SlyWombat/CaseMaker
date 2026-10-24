@@ -3500,6 +3500,7 @@ mod tests {
             id: id.to_string(),
             profile_id: Some("Z1".into()),
             name: Some("Makera_Z1_000000".into()),
+            nickname: None,
             serial: None,
             firmware: None,
             address: Some(crate::location::MachineAddress { host: "192.0.2.10".into(), port: 2222 }),

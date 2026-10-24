@@ -33,6 +33,8 @@ import type { LabelDepthRecommendation } from '@/engine/cnc/engrave/depthBounds'
 import { jobSplit } from '@/engine/cnc/engrave/depthIntent';
 import { EngraveCutWizard } from './EngraveCutWizard';
 import { jobMachine } from '@/engine/cnc/calibration';
+import { machineDisplayName } from '@/platform/locationClient';
+import { machineRecordByProfile } from '@/store/locationStore';
 import { useToolRegistry } from '@/hooks/useToolRegistry';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import { cuttingDiameter, drillPointAngle, pointLength } from '@/engine/cnc/tool';
@@ -1203,6 +1205,9 @@ export function EngravePanel(): JSX.Element {
         {
           // A measurement was taken with the APPROVED plan's count; taking the shop's current
           // number here could build a different plan and silently drop the readings.
+          // #596 — the machine's name on paper is the nickname the person gave it, else the profile.
+          machineName:
+            machineDisplayName(machineRecordByProfile(job.machineId), jobMachine(job)) ?? undefined,
           surfaceTouchCount:
             measuredSpread?.assessment.plan.touches.length ??
             registrationSettings(shopDefaults).settings.surfaceTouchCount,

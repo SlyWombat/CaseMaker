@@ -2,8 +2,10 @@ import { useEffect, type JSX } from 'react';
 import { MACHINES } from '@/engine/cnc/machine';
 import { canDriveMachine } from '@/platform/capabilities';
 import { startHeartbeat, stopHeartbeat } from '@/platform/machineHeartbeat';
+import { machineDisplayName } from '@/platform/locationClient';
 import { useMachineNoticeStore } from '@/store/machineNoticeStore';
 import { useMachineStore } from '@/store/machineStore';
+import { useMachineRecord } from '@/store/locationStore';
 import { formatStamp } from '../manage/display';
 
 /**
@@ -50,7 +52,8 @@ export function MachinePin(): JSX.Element {
   const dismiss = useMachineNoticeStore((s) => s.dismiss);
 
   const profile = machine?.profileId != null ? MACHINES[machine.profileId] : undefined;
-  const name = profile?.name ?? machine?.name ?? 'A controller';
+  const record = useMachineRecord(machine);
+  const name = machineDisplayName(record, profile) ?? machine?.name ?? 'A controller';
 
   let dot: DotState;
   let dotTestId: string;

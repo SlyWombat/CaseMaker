@@ -22,7 +22,8 @@ import {
 } from '@/engine/cnc/toolCondition';
 import type { InventoryItem } from '@/platform/houseClient';
 import { CASE_SWATCH } from '@/engine/cnc/caseColour';
-import type { MachineRecord } from '@/platform/locationClient';
+import { MACHINES } from '@/engine/cnc/machine';
+import { machineDisplayName, type MachineRecord } from '@/platform/locationClient';
 import { useHouseStore } from '@/store/houseStore';
 import { useLocationStore } from '@/store/locationStore';
 import { useShopDefault } from '@/store/shopDefaultsStore';
@@ -47,7 +48,9 @@ export function ToolCopies({ item }: { item: InventoryItem }) {
   const summary = itemConditionSummary({ ...item, copies });
   const machineName = (id: string) => {
     const m = machines.find((x) => x.id === id);
-    return m ? (m.name ?? m.profileId ?? m.id) : `${id} (not in this location)`;
+    if (m === undefined) return `${id} (not in this location)`;
+    const profile = m.profileId != null ? MACHINES[m.profileId] : undefined;
+    return machineDisplayName(m, profile) ?? m.profileId ?? m.id;
   };
   const patch = (i: number, p: Partial<ToolCopy>) => setCopies((cs) => cs.map((c, j) => (j === i ? { ...c, ...p } : c)));
   /** A copy's case, or null — a function because the union does not narrow inside callbacks. */
@@ -98,7 +101,7 @@ export function ToolCopies({ item }: { item: InventoryItem }) {
               <option value="box">in its box</option>
               {machines.map((m) => (
                 <option key={m.id} value={m.id}>
-                  in {m.name ?? m.profileId ?? m.id}
+                  in {machineName(m.id)}
                 </option>
               ))}
               {/* A machine this location does not hold (an import, a removed machine) is shown as

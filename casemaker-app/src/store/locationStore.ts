@@ -329,6 +329,9 @@ export function mergeMachine(
       profileId: obs?.profileId ?? server?.profileId ?? local.calibration?.machineId ?? null,
       // A typed address announces no name: the old one is kept only for the same host.
       name: obs ? (obs.name ?? (sameHost ? (server?.name ?? null) : null)) : (server?.name ?? null),
+      // #596 — the nickname is the person's, set on the machine card (#602), never by a check or a
+      // settings edit: the write-through carries the served one unchanged, like power and the bed.
+      nickname: server?.nickname ?? null,
       serial: server?.serial ?? null,
       firmware: server?.firmware ?? null,
       address: obs ? { host: obs.host, port: obs.port } : (server?.address ?? null),
@@ -365,6 +368,27 @@ export function machineAt(target: { host: string; port: number }): MachineRecord
       (m) => m.address?.host === target.host && m.address.port === target.port,
     ) ?? null
   );
+}
+
+/**
+ * #596 — the location's machine record whose `profileId` is `profileId`, or null. A job names its
+ * machine by profile id, so the run sheet and the cut header resolve the nickname this way — the
+ * rename never touches the job.
+ */
+export function machineRecordByProfile(profileId: string | null): MachineRecord | null {
+  if (profileId === null) return null;
+  return useLocationStore.getState().location?.machines.find((m) => m.profileId === profileId) ?? null;
+}
+
+/**
+ * #596 — the location's machine record for a live check, reactively: the record at the address the
+ * check reached. Null with no location, or for an address no machine matches (a check not yet
+ * written through). The hook form, for components that draw the machine's name.
+ */
+export function useMachineRecord(target: { host: string; port: number } | null): MachineRecord | null {
+  const machines = useLocationStore((s) => (s.status === 'present' ? s.location?.machines : undefined));
+  if (target === null || machines === undefined) return null;
+  return machines.find((m) => m.address?.host === target.host && m.address.port === target.port) ?? null;
 }
 
 /**

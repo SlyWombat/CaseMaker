@@ -42,6 +42,7 @@ const MACHINE: MachineRecord = {
   id: 'm-1',
   profileId: 'Z1',
   name: null,
+  nickname: null,
   serial: null,
   firmware: null,
   address: { host: '192.0.2.10', port: 2222 },

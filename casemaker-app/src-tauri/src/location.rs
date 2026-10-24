@@ -686,6 +686,11 @@ pub struct MachineRecord {
     /// The name it broadcast (`Makera_Z1_010290`), or null for a typed address.
     #[serde(default)]
     pub name: Option<String>,
+    /// #596 — the friendly name a person gives the machine ("Zoomba"), set on the machine card
+    /// (#602). `name` stays the broadcast name, which observation matching uses, so the two are
+    /// never the same claim. Null until the person names it.
+    #[serde(default)]
+    pub nickname: Option<String>,
     /// Null until something reads it from the machine (`M482.5`). Never typed in or guessed.
     #[serde(default)]
     pub serial: Option<String>,
@@ -1003,6 +1008,7 @@ mod tests {
             id: id.to_string(),
             profile_id: Some("Z1".into()),
             name: Some("Makera_Z1_010290".into()),
+            nickname: None,
             serial: None,
             firmware: None,
             address: Some(MachineAddress { host: "192.168.10.43".into(), port: 2222 }),
