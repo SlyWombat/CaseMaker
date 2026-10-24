@@ -339,7 +339,7 @@ describe('#471 registration — planned only after approval, refused with the en
     render(<EngraveSetupsSection />);
     fireEvent.click(screen.getByTestId('engrave-setup-expand-1'));
     fireEvent.click(screen.getByTestId('engrave-setup-plan-reg-1'));
-    expect(screen.getByTestId('engrave-setup-reg-need-datum-1').textContent).toContain('Tap the fixed jaw first');
+    expect(screen.getByTestId('engrave-setup-reg-need-datum-1').textContent).toContain('tap the jaw first — Measure… on the machine card');
     expect(useEngraveJobStore.getState().job.setups![0]!.registration).toBeUndefined();
   });
 
@@ -383,6 +383,26 @@ describe('#471 registration — planned only after approval, refused with the en
     fireEvent.click(screen.getByTestId('engrave-setup-plan-reg-1'));
     expect(screen.getByTestId('engrave-setup-reg-summary-1').textContent).toContain('Home, fit the wired probe');
     expect(screen.queryByTestId('engrave-setup-reg-need-datum-1')).toBeNull();
+  });
+
+  it('#603 the row names the checked-out probe and the machine', () => {
+    useMachineStore.setState({ machine: OBS });
+    useLocationStore.setState({
+      location: {
+        ...DATUM_LOCATION,
+        machines: [{ ...DATUM_LOCATION.machines[0]!, nickname: 'Zoomba', name: 'Makera_Z1_000000', profileId: 'Z1' }],
+        accessories: [
+          { ...DATUM_LOCATION.accessories![0]!, product: 'Makera Wired Probe V2' },
+          DATUM_LOCATION.accessories![1]!,
+        ],
+      },
+    });
+    act(() => useEngraveJobStore.setState({ job: savedJob() }));
+    render(<EngraveSetupsSection />);
+    fireEvent.click(screen.getByTestId('engrave-setup-expand-1'));
+
+    expect(screen.getByTestId('engrave-setup-machine-1').textContent).toBe('Zoomba');
+    expect(screen.getByTestId('engrave-setup-probe-1').textContent).toBe('Makera Wired Probe V2');
   });
 
   it('a bracket refuses without a measured seat, then plans once the setting exists', () => {
@@ -460,6 +480,7 @@ describe('#589 the surface tolerance — shown with the recommendation, writable
 
     const input = screen.getByTestId('engrave-setups-tolerance-input') as HTMLInputElement;
     expect(input.value).toBe('0.4'); // the labelled fallback with no location read
+    expect(screen.getByTestId('engrave-setups-tolerance').textContent).toContain('Plausibility width');
     expect(screen.getByTestId('engrave-setups-tolerance').textContent).toContain('±1 mm — printed stock');
   });
 

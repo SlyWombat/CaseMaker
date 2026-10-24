@@ -83,6 +83,10 @@ export interface EngraveSetupRowProps {
   planRegistration: (seatZ: string, useTypedSeat: boolean) => RegistrationAttempt;
   /** #599 — run the standalone mount tap (no datum yet) and write the reading. */
   onTapJaw: (tap: { x: number; y: number; fromMachineZ: number }) => void;
+  /** #603 — the checked-out probe's name, or null when none is checked out. */
+  probeName?: string | null;
+  /** #603 — the machine's display name, or null when there is no location record. */
+  machineName?: string | null;
 }
 
 function holderWords(mount: MountSpec): string {
@@ -184,6 +188,16 @@ export function EngraveSetupRow(props: EngraveSetupRowProps): JSX.Element {
         <span style={TAG} data-testid={`engrave-setup-mount-words-${n}`}>
           {holderWords(setup.mount)}
         </span>
+        {props.machineName != null && (
+          <span style={TAG} data-testid={`engrave-setup-machine-${n}`}>
+            {props.machineName}
+          </span>
+        )}
+        {props.probeName != null && (
+          <span style={TAG} data-testid={`engrave-setup-probe-${n}`}>
+            {props.probeName}
+          </span>
+        )}
         <span className="engrave-setups__items">
           {reading.itemIds.length === 0 ? (
             <span style={{ ...MUTED, margin: 0 }}>no items</span>

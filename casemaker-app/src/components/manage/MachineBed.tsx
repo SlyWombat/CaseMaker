@@ -22,6 +22,14 @@ import type { BedProfile, FixtureRecord, MachineRecord } from '@/platform/locati
 import { formatDay, mm } from './display';
 import { BedScene } from '@/components/viewport/BedScene';
 import { accessoriesFor, useLocationStore } from '@/store/locationStore';
+import { useShopDefaultsStore } from '@/store/shopDefaultsStore';
+import { useSettingsStore } from '@/store/settingsStore';
+import { useEngraveRegistrationStore } from '@/store/engraveRegistrationStore';
+import { canDriveMachine } from '@/platform/capabilities';
+import { mountNum, mountTapFor, probeFor } from '@/engine/cnc/registration/mountContext';
+import { registrationSettings } from '@/engine/cnc/registration/settings';
+import { jobMachine } from '@/engine/cnc/calibration';
+import { useMountTap } from '@/hooks/useMountTap';
 import {
   BED_DATUM_KEYS,
   BED_DATUM_WORDS,
@@ -67,7 +75,7 @@ function placementWords(placement: BedProfile['placements'][number], fixture: Fi
   const bits: string[] = [];
   if (fixture.kind === 'vise') {
     const jaw = profile.datums.viseJawTopZ;
-    if (jaw !== null) bits.push(`jaw top ${mm(jaw.value)}, measured ${formatDay(jaw.measuredAt) ?? jaw.measuredAt}`);
+    if (jaw !== null) bits.push(`jaw top ${mm(jaw.value)}, ${jaw.by}, measured ${formatDay(jaw.measuredAt) ?? jaw.measuredAt}`);
   }
   if (fixture.kind === 'bracket') {
     const seat = profile.datums.bracketSeatZ;
@@ -79,6 +87,64 @@ function placementWords(placement: BedProfile['placements'][number], fixture: Fi
   }
   const kindWord = fixture.kind === 'rotary-module' ? '4th-axis module' : fixture.kind === 'top-clamp' ? 'top clamps' : fixture.kind;
   return bits.length === 0 ? `${kindWord} ${where}` : `${kindWord} ${where} (${bits.join(' · ')})`;
+}
+
+/**
+ * #603 — the jaw-top Measure… row's tap: the same mount tap the Setups row offers in #599, driven
+ * by the shared {@link useMountTap} hook, so the fit-probe prompt, the transcript and the write-back
+ * are one implementation. Offered only where this build can drive a machine, the machine has an
+ * address, and the fixed jaw's frame is known (a registered bed).
+ */
+function BedJawTap({ machine }: { machine: MachineRecord }) {
+  const defaults = useShopDefaultsStore((s) => s.defaults);
+  const calibration = useSettingsStore((s) => s.machineCalibration);
+  const registrations = useEngraveRegistrationStore((s) => s.records);
+
+  const target = machine.address;
+  const probe = probeFor(machine);
+  const profile = jobMachine({ machineId: machine.profileId ?? 'Z1' }, calibration);
+  const viseAcc = accessoriesFor(machine).find((a) => a.kind === 'vise');
+  const mountTap = mountTapFor(machine, Object.values(registrations), profile.toolChange.clearanceZ, mountNum(viseAcc?.unit.jawStartY) ?? -10);
+
+  const api = useMountTap({
+    target,
+    settings: registrationSettings(defaults, probe).settings,
+    floor: profile.envelope.z.min,
+    probeId: probe?.id ?? null,
+    successNote: 'the jaw top is recorded',
+  });
+
+  if (!canDriveMachine || target === null || mountTap === null) return null;
+
+  return (
+    <span data-testid="manage-bed-tap-jaw">
+      <button
+        type="button"
+        className="btn btn--sm"
+        data-testid="manage-bed-tap-jaw-button"
+        onClick={() => void api.tapJaw({ x: mountTap.x, y: mountTap.y, fromMachineZ: mountTap.fromMachineZ })}
+      >
+        Tap the fixed jaw
+      </button>
+      {api.note !== null && (
+        <span className="hint" data-testid="manage-bed-tap-note">
+          {' '}
+          {api.note}
+        </span>
+      )}
+      {api.prompt !== null && (
+        <span className="hint" data-testid="manage-bed-tap-prompt">
+          {api.prompt.text}{' '}
+          <button type="button" className="btn btn--sm" onClick={() => api.resolve(true)}>
+            Continue
+          </button>
+          <button type="button" className="btn btn--sm" onClick={() => api.resolve(false)}>
+            Cancel
+          </button>
+        </span>
+      )}
+    </span>
+  );
 }
 
 export function MachineBed({ machine }: { machine: MachineRecord }) {
@@ -176,8 +242,14 @@ export function MachineBed({ machine }: { machine: MachineRecord }) {
                 <li key={key} data-testid={`manage-bed-measure-${key}`}>
                   {BED_DATUM_WORDS[key]}:{' '}
                   {datum !== null
-                    ? `${mm(datum.value)}, measured ${formatDay(datum.measuredAt) ?? datum.measuredAt}`
+                    ? `${mm(datum.value)}, ${datum.by}, measured ${formatDay(datum.measuredAt) ?? datum.measuredAt}`
                     : 'not measured — one touch via the registration executor in the wizard (S3)'}
+                  {key === 'viseJawTopZ' && (
+                    <>
+                      {' '}
+                      <BedJawTap machine={machine} />
+                    </>
+                  )}
                 </li>
               );
             })}
