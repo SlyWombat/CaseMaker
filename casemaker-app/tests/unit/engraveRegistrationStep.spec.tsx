@@ -292,6 +292,27 @@ describe('#495 — the registration step', () => {
     expect(firstRegistrationFor(job.id, TARGET)).toBeNull();
   });
 
+  it('#620 — outside the margin offers "Use the found position", which writes the origin', async () => {
+    const plan = makePlan(-56.172);
+    const job = jobWithPlan(plan);
+    install(plan, { edgeShiftMm: 0.5 });
+    render(<EngraveRegistrationStep job={job} target={TARGET} />);
+
+    await runStep();
+
+    expect(screen.getByTestId('engrave-registration-use-found')).toBeTruthy();
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('engrave-registration-use-found'));
+    });
+    // The cutter-fit prompt the origin write always asks, then the origin lands and the record is written.
+    await screen.findByTestId('engrave-registration-continue');
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('engrave-registration-continue'));
+    });
+    await screen.findByTestId('engrave-registration-written');
+    expect(firstRegistrationFor(job.id, TARGET)).not.toBeNull();
+  });
+
   it('#608 — refuses a top that is not one plane (a dome), writes no origin, and records the measured flatness', async () => {
     const plan = makePlan(-55.0);
     const job = badgeJobWithPlan(plan);

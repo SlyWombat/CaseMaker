@@ -132,6 +132,14 @@ function writerRefusal(
   return null;
 }
 
+/** #620 — the refusal is ONLY the margin: usable, no spread refusal, measured XY but out of margin. */
+function marginRefusal(outcome: RegistrationOutcome, spread: SurfaceSpreadAssessment | null): boolean {
+  if (!outcome.usable) return false;
+  if (spread !== null && !spread.ok && spread.refusal !== null) return false;
+  const measuredXY = outcome.bracketCheck !== undefined || outcome.currentG54 !== null;
+  return measuredXY && !outcome.withinMargin;
+}
+
 /** A scan's touches, in the executor's own classifications. */
 function ScanBlock({ record, index }: { record: ScanRecord; index: number }): JSX.Element {
   const scan = record.scan;
@@ -345,9 +353,12 @@ export function EngraveRegistrationStep({ job, target }: EngraveRegistrationStep
     }
   }
 
-  async function writeOrigin(): Promise<void> {
+  async function writeOrigin(force = false): Promise<void> {
     if (target === null || plan === null || result?.ok !== true || busy) return;
-    if (writerRefusal(result.outcome, result.spread ?? null) !== null) return;
+    // #620 — the margin refusal can be forced (the operator accepts the found position); the
+    // unusable and spread refusals never can.
+    const refusal = writerRefusal(result.outcome, result.spread ?? null);
+    if (refusal !== null && !(force && marginRefusal(result.outcome, result.spread ?? null))) return;
     setPhase('writing');
     setError(null);
     const handle = handleRef.current ?? attachConsole(target);
@@ -403,6 +414,7 @@ export function EngraveRegistrationStep({ job, target }: EngraveRegistrationStep
   const outcome = result?.ok === true ? result.outcome : null;
   const spread = result?.ok === true ? (result.spread ?? null) : null;
   const refusal = outcome === null ? null : writerRefusal(outcome, spread);
+  const marginOnly = outcome !== null && marginRefusal(outcome, spread);
   const data = result?.ok === true ? result.data : null;
 
   return (
@@ -579,6 +591,16 @@ export function EngraveRegistrationStep({ job, target }: EngraveRegistrationStep
                 <p style={{ ...MUTED, color: BAD }} data-testid="engrave-registration-refusal">
                   {refusal}
                 </p>
+              )}
+              {phase === 'measured' && marginOnly && (
+                <button
+                  type="button"
+                  data-testid="engrave-registration-use-found"
+                  style={{ width: '100%', padding: 7, marginTop: 4 }}
+                  onClick={() => void writeOrigin(true)}
+                >
+                  Use the found position
+                </button>
               )}
             </div>
           )}
