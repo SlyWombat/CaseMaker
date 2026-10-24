@@ -174,6 +174,46 @@ describe('the package engine (#419 §4)', () => {
     expect(packageStaleness(made.package, measured).stale).toBe(false);
   });
 
+  it('#627 — the ordinary origin write (the measured bow AND its provenance) does not stale the package', () => {
+    const job = defaultEngraveJob();
+    const made = freezePackage(job, [program('G21\nM2\n')], AT);
+    if (!made.ok) throw new Error(made.reason);
+
+    // The ordinary Write-the-origin path runs the same registration, which writes the measured bow
+    // onto the stock AND stamps `sources.stock.flatness: 'measured'` beside it (the registration's
+    // `setStock`). Neither is a change to the cutting program, so an origin write must not
+    // invalidate the frozen package.
+    const written: EngraveJob = {
+      ...job,
+      stock: {
+        ...job.stock,
+        flatness: { xMm: 0.1, yMm: 0.2, source: 'measured', touchCount: 5, measuredAt: '2026-10-24T16:50:00.000Z' },
+      },
+      sources: {
+        ...(job.sources ?? {}),
+        stock: { ...(job.sources?.stock ?? {}), flatness: 'measured' as const },
+      },
+    };
+
+    expect(jobFingerprint(written)).toBe(jobFingerprint(job));
+    expect(packageStaleness(made.package, written).stale).toBe(false);
+  });
+
+  it('#627 — a change to the job’s machine (its calibration frame) still stales the package', () => {
+    const job = defaultEngraveJob();
+    const made = freezePackage(job, [program('G21\nM2\n')], AT);
+    if (!made.ok) throw new Error(made.reason);
+
+    // The calibration frame is the machine's (`machine.calibration.frame`, read through
+    // `jobMachine(job, calibration)` keyed by `machineId`); a job pointed at a different machine is
+    // a different program, and must still stale. Stripping the flatness provenance above must not
+    // loosen this.
+    const otherMachine: EngraveJob = { ...job, machineId: 'a-different-mill' };
+
+    expect(jobFingerprint(otherMachine)).not.toBe(jobFingerprint(job));
+    expect(packageStaleness(made.package, otherMachine).stale).toBe(true);
+  });
+
   it('the package hash follows the job and the programs', () => {
     const job = defaultEngraveJob();
     const a = freezePackage(job, [program('G21\nM2\n')], AT);

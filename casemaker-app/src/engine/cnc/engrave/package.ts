@@ -82,6 +82,22 @@ function fingerprintView(job: EngraveJob): unknown {
     delete stock.flatness;
     view.stock = stock;
   }
+  // #627 — the flatness PROVENANCE is the same outcome record: the registration's `setStock` stamps
+  // `sources.stock.flatness: 'measured'` beside the value it writes, so an origin write would still
+  // move the fingerprint after #621 stripped the value alone. Strip the stamp the same way, and drop
+  // the now-empty containers so a job that has only ever had its bow measured still fingerprints as
+  // the job with no provenance at all.
+  if (view.sources !== undefined) {
+    const sources = { ...(view.sources as Record<string, unknown>) };
+    if (sources.stock !== undefined) {
+      const stock = { ...(sources.stock as Record<string, unknown>) };
+      delete stock.flatness;
+      if (Object.keys(stock).length === 0) delete sources.stock;
+      else sources.stock = stock;
+    }
+    if (Object.keys(sources).length === 0) delete view.sources;
+    else view.sources = sources;
+  }
   // #574 — the registration plan (setups[*].registration) is the PROBE choreography, not the
   // cutting program. Approving it after Generate must stale the frozen package but NOT the
   // Generate (the .nc is unchanged), so the Cut screen can offer a re-freeze in place. Strip it
