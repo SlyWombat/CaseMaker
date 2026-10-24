@@ -13,6 +13,7 @@ import type { RegistrationSettings } from '@/engine/cnc/registration/settings';
 import { useMachineTranscriptStore } from '@/store/machineTranscriptStore';
 import { createFirstBed, machineAt, useLocationStore } from '@/store/locationStore';
 import { withViseJawTopDatum } from '@/platform/bedProfiles';
+import { recordProbeReading } from '@/engine/cnc/registration/mountContext';
 
 export interface MountTapInputs {
   /** The machine to talk to, or null when there is no live check to drive. */
@@ -75,6 +76,8 @@ export function useMountTap(inputs: MountTapInputs): MountTapApi {
           // #613 — a no-profile machine gets its first bed here; the datum then lands as designed.
           const withBed = await createFirstBed(record, null, now);
           await useLocationStore.getState().saveMachine(withViseJawTopDatum(withBed, { z: r.z, at: r.at }, inputs.probeId, now));
+          // #601 — the probe's last M491 length and M119 rest ride on the checked-out probe accessory.
+          await recordProbeReading(record, r.probe);
         }
         setNote(inputs.successNote);
       } else {

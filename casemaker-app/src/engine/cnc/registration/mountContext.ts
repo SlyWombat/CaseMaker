@@ -8,7 +8,7 @@
 
 import type { MachineRecord } from '@/platform/locationClient';
 import type { MountDatum, ProbeSpec } from '@/engine/cnc/registration/plan';
-import { accessoriesFor } from '@/store/locationStore';
+import { accessoriesFor, useLocationStore } from '@/store/locationStore';
 import { newestViseRegistration, viseFrameFromRegistration, type RegistrationSource } from '@/platform/bedProfiles';
 import { Z1_VISE } from '@/engine/cnc/fixture';
 import { viseTapPoint } from '@/engine/cnc/mounts/vise';
@@ -41,6 +41,27 @@ export function probeNameFor(machine: MachineRecord | null): string | null {
 export function mountNameFor(machine: MachineRecord | null, kind: string): string {
   if (machine === null) return kind;
   return accessoriesFor(machine).find((a) => a.kind === kind)?.product ?? kind;
+}
+
+/**
+ * #601 — write the probe's last M491 length and M119 rest reading onto the probe checked out to
+ * `machine`. The executor only measures; this is the accessory write the follow-up asks for, in the
+ * same location-write shape the datum uses. No-op with no machine or no checked-out probe.
+ */
+export async function recordProbeReading(
+  machine: MachineRecord | null,
+  probe: { lengthZ: number; rest: string },
+): Promise<void> {
+  if (machine === null) return;
+  const acc = accessoriesFor(machine).find((a) => a.kind === 'probe');
+  if (acc === undefined) return;
+  const now = new Date().toISOString();
+  const rest = /Probe:\s*([01])\b/.exec(probe.rest)?.[1] ?? probe.rest;
+  await useLocationStore.getState().saveAccessory({
+    ...acc,
+    unit: { ...acc.unit, lastM491: { z: probe.lengthZ, at: now }, lastM119Rest: rest },
+    history: [...acc.history, { at: now, what: `probe length ${probe.lengthZ} mm, rest ${rest}` }],
+  });
 }
 
 /** #598 — the active bed profile's measured jaw-top datum, or null when it has none. */

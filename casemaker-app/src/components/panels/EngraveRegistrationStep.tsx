@@ -51,6 +51,7 @@ import { surfaceSpreadPlan, surfaceFitForPost, type SurfaceSpreadAssessment } fr
 import { useEngraveJobStore } from '@/store/engraveJobStore';
 import { useEngraveRegistrationStore } from '@/store/engraveRegistrationStore';
 import { createFirstBed, machineAt, useLocationStore } from '@/store/locationStore';
+import { recordProbeReading } from '@/engine/cnc/registration/mountContext';
 import { viseFrameFromRegistration, withViseJawTopDatum, withVisePlacementFrame } from '@/platform/bedProfiles';
 import { useMachineTranscriptStore } from '@/store/machineTranscriptStore';
 import { useSettingsStore } from '@/store/settingsStore';
@@ -327,6 +328,8 @@ export function EngraveRegistrationStep({ job, target }: EngraveRegistrationStep
             .saveMachine(withViseJawTopDatum(withBed, r.mountTap, plan.probe?.id ?? null, now));
         }
       }
+      // #601 — the probe's last M491 length and M119 rest ride on the checked-out probe accessory.
+      await recordProbeReading(machineAt(target), r.probe);
       setResult(r);
       setPhase('measured');
       if (writerRefusal(r.outcome, r.spread ?? null) !== null) {

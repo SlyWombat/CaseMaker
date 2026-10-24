@@ -122,6 +122,8 @@ export type RunResult =
        * when the plan carried no tap. The executor only measures it; writing the datum is the caller's.
        */
       mountTap: { z: number; at: { x: number; y: number } } | null;
+      /** #601 — the probe's M491 length and M119 rest reading, for the caller to write onto the accessory. */
+      probe: { lengthZ: number; rest: string };
       transcript: Transcript[];
     }
   | { ok: false; reason: string; transcript: Transcript[] };
@@ -399,7 +401,7 @@ async function mountTapTouch(
 }
 
 export type MountTapResult =
-  | { ok: true; z: number; at: { x: number; y: number }; transcript: Transcript[] }
+  | { ok: true; z: number; at: { x: number; y: number }; probe: { lengthZ: number; rest: string }; transcript: Transcript[] }
   | { ok: false; reason: string; transcript: Transcript[] };
 
 /**
@@ -433,7 +435,7 @@ export async function runMountTap(
       throw new Stop(`no jaw top at (${tap.x}, ${tap.y}) down to machine Z ${f(workEnvelopeFloorZ)} — is the vise where the machine record says?`);
     }
     await io.send('$H');
-    return { ok: true, z: prb.z, at: { x: tap.x, y: tap.y }, transcript: io.transcript };
+    return { ok: true, z: prb.z, at: { x: tap.x, y: tap.y }, probe: { lengthZ: ref.z, rest }, transcript: io.transcript };
   } catch (e) {
     if (e instanceof Stop) return { ok: false, reason: await io.stopped(e.message), transcript: io.transcript };
     throw e;
@@ -568,6 +570,7 @@ export async function runRegistration(
       outcome,
       ...(spread === undefined ? {} : { spread }),
       mountTap,
+      probe: { lengthZ: ref.z, rest },
       transcript: io.transcript,
     };
   } catch (e) {
