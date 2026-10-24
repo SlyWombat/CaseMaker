@@ -140,6 +140,43 @@ export interface MountDatum {
   by: string;
 }
 
+/**
+ * #607 — which datum a mount tap's reading measures. The vise's reading IS its jaw-top datum; the
+ * bracket's top is the seat it stands on plus the arm's measured height (`bracket.armTopMm`).
+ *
+ * The rotary is deliberately absent: a touch from above on a chuck/nose lands at the axis plus an
+ * unmeasured radius, so writing `rotaryAxis` from it would be worse than no datum. That geometry
+ * (a flat face at axis height, or the radius) is a bench question of its own — the rotary tap
+ * arrives with it, and the union gains its member then.
+ */
+export type MountTapReference = 'vise-jaw-top' | 'bracket-seat';
+
+/**
+ * #599/#607 — the mount's reference point for the registration tap, as the plan carries it.
+ *
+ * The first four fields are #599's (the vise's fixed-jaw tap). #607 adds the three that let the
+ * executor and the write-back treat a bracket or rotary the same way without knowing the mount:
+ * WHAT the reading is for, what machine Z the touch expects, and how far below the reading the datum
+ * sits. They are optional so a pre-#607 plan (and every test fixture built on one) still reads as
+ * the vise's jaw top.
+ */
+export interface PlanMountTap {
+  x: number;
+  y: number;
+  fromMachineZ: number;
+  label: string;
+  /** #607 — the datum this reading measures; absent means the vise's jaw top. */
+  reference?: MountTapReference;
+  /**
+   * #607 — the machine Z the touch expects to meet (the stored reference surface: the jaw top, or
+   * the bracket's top = seat + height), or null/absent when there is no stored reference to check
+   * against. With one, the executor bounds the tap by it (floor `expectZ − 2`, reading within ±2).
+   */
+  expectZ?: number | null;
+  /** #607 — how far below the reading the DATUM sits: the bracket's own height; 0/absent for the vise. */
+  datumOffsetMm?: number;
+}
+
 export interface PlanInput {
   stock: ExpectedStock;
   mount: Mount;
@@ -165,12 +202,12 @@ export interface PlanInput {
    */
   probe?: ProbeSpec | null;
   /**
-   * #599 — the mount's reference point for the registration tap, MACHINE XY (the vise's fixed-jaw
-   * top). The caller computes it from the bed placement + vise constants (`mounts/vise.ts`); the
-   * executor touches it once before the surface seek and checks it against the stored datum. Absent
-   * on the bracket and tape.
+   * #599/#607 — the mount's reference point for the registration tap, MACHINE XY. The caller
+   * computes it (`mountContext.ts`: the vise's fixed-jaw top, the bracket's front arm, the rotary's
+   * nose); the executor touches it once before the surface seek and checks it against the stored
+   * reference. Absent on the tape.
    */
-  mountTap?: { x: number; y: number; fromMachineZ: number; label: string } | null;
+  mountTap?: PlanMountTap | null;
   /**
    * #619 — the stock's thickness, mm, for the datum path's upper surface bound: a normally mounted
    * blank may stand the full thickness proud of the jaw tops (it need not sit on the ledge), so the
@@ -237,8 +274,8 @@ export interface RegistrationPlan {
   mountDatum: MountDatum | null;
   /** #598 — the probe checked out to the machine, whose tip/rim resolved the settings; null with none. */
   probe: ProbeSpec | null;
-  /** #599 — the mount tap the executor touches before the surface seek, or null. */
-  mountTap: { x: number; y: number; fromMachineZ: number; label: string } | null;
+  /** #599/#607 — the mount tap the executor touches before the surface seek, or null. */
+  mountTap: PlanMountTap | null;
   scans: EdgeScan[];
   bracketOrigin: BracketOrigin | null;
   /** Bracket: what stands above the stock, as the operator must confirm it (#427). Empty elsewhere. */

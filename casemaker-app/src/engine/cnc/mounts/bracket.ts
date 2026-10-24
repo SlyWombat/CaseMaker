@@ -220,6 +220,72 @@ export function bracketExpectedSurface(
 }
 
 // ---------------------------------------------------------------------------------------------------
+// #607 — the registration tap on the bracket's own top.
+
+/**
+ * #607 — the bracket's reference point for the registration tap, in MACHINE XY: the FRONT ARM's top
+ * face, at the middle of its exposed length and the middle of its width.
+ *
+ * The front arm is the free one — `defaultClampPlacements` puts both clamps on the back edge — and it
+ * lies IN FRONT of the stock (work y ∈ [−armWidth, 0]) rather than under it, so the point is exposed
+ * whatever the stock's size: the vise tap's "mid-bar, never the blank's size" rule, moved to the
+ * bracket. `corner` is the bracket datum — the stock's front-left corner in machine XY — and the
+ * bracket is placed without rotation, so the work offset adds straight on.
+ *
+ * THE SLOTS ARE NOT MEASURED, SO THE HEIGHT IS. The bracket's arms carry adjustment slots and fixing
+ * holes (the bench photo, 2026-10-18), and no capture we hold records where they sit along the arm;
+ * a point over a slot would let the probe through to the bed. The point above is therefore the AIM,
+ * and the bench records `bracket.armTopMm` — the arm's TOP FACE above the seat — at this very point,
+ * having first checked it is solid. The tap is not offered until that number exists
+ * (`mountContext.bracketTapFor`), so a slot the photos cannot rule out never writes a seat.
+ */
+export function bracketTapPoint(corner: { x: number; y: number }, s: BracketSettings): { x: number; y: number } {
+  return { x: r3(corner.x + s.armLengthX / 2), y: r3(corner.y - s.armWidth / 2) };
+}
+
+/**
+ * #607 — the measured seat beside the bracket (`bracket.seatMachineZ`), machine Z, or null.
+ *
+ * `readMeasured` is the point: the key is MEASURED-ONLY (no default at all), so a seeded or absent
+ * entry is null rather than a number nobody touched. The tap's expected height and its write-back
+ * both come from this one read.
+ */
+export function bracketSeat(
+  map: ShopDefaults | null,
+): { value: number; source: DefaultSource; setAt: string | null; note: string | null } | null {
+  return readMeasured(map, 'bracket.seatMachineZ');
+}
+
+/**
+ * #607 — the measured TOP FACE of the front arm above the seat (`bracket.armTopMm`), machine mm, or
+ * null. NOT `BracketSettings.height`: that number runs to the tops of the M5 screw heads where they
+ * stand higher, and the probe lands on the arm's face. Measured only — no seed carries it.
+ */
+export function bracketArmTop(
+  map: ShopDefaults | null,
+): { value: number; source: DefaultSource; setAt: string | null; note: string | null } | null {
+  return readMeasured(map, 'bracket.armTopMm');
+}
+
+/**
+ * #607 — the bracket's top face in machine Z: the seat it stands on + the measured ARM TOP. This is
+ * what the registration tap expects to touch.
+ */
+export function bracketTopMachineZ(seatMachineZ: number, armTopMm: number): number {
+  return r3(seatMachineZ + armTopMm);
+}
+
+/**
+ * #607 — the seat a tap on the bracket's top measures back: the reading less the measured ARM TOP
+ * (`bracket.armTopMm`, not `bracket.heightMm`). The write-back stores this as `bracket.seatMachineZ`
+ * (and mirrors it to the bed datum), so the tap and the compiler's `bracketExpectedSurface` cannot
+ * disagree about where the stock sits.
+ */
+export function bracketSeatFromTap(tapMachineZ: number, armTopMm: number): number {
+  return r3(tapMachineZ - armTopMm);
+}
+
+// ---------------------------------------------------------------------------------------------------
 // The obstacles: the bracket's arms and the clamps, in the work frame.
 
 /** The stock's size: X left→right, Y front→back, Z its thickness. Work frame 0..x, 0..y, top at Z0. */

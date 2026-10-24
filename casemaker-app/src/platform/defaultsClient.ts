@@ -468,6 +468,13 @@ export const MEASURED_ONLY: Readonly<Record<string, Omit<KnownDefault, 'fallback
   // The machine Z of the surface the stock sits on beside the bracket — what the surface touch expects
   // the stock's top above. `defaults.rs` bounds it the same way.
   'bracket.seatMachineZ': { label: 'surface beside the bracket, machine Z', unit: 'mm', rule: z.number().min(-150).max(0) },
+  // #607 — the front arm's TOP FACE above the seat: the surface the registration tap lands on,
+  // touched at a point clear of the bracket's slots (`bracketTapPoint`). It is NOT
+  // `bracket.heightMm`: that number runs to the tops of the M5 screw heads where they stand
+  // higher, and a head is not the face the probe lands on. Measured only — until this exists the
+  // bracket tap is not offered, because a tap against the wrong surface would write a seat wrong
+  // by the difference.
+  'bracket.armTopMm': { label: 'front arm top above the seat', unit: 'mm', rule: z.number().min(0.5).max(60) },
 };
 
 /**

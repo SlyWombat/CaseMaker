@@ -7,10 +7,21 @@
  */
 
 import type { MachineRecord } from '@/platform/locationClient';
-import { probeInstrument, type MountDatum, type ProbeSpec } from '@/engine/cnc/registration/plan';
+import type { ShopDefaults } from '@/platform/defaultsClient';
+import { probeInstrument, type MountDatum, type PlanMountTap, type ProbeSpec } from '@/engine/cnc/registration/plan';
 import { accessoriesFor, useLocationStore } from '@/store/locationStore';
 import { newestViseRegistration, viseFrameFromRegistration, type RegistrationSource } from '@/platform/bedProfiles';
 import { Z1_VISE } from '@/engine/cnc/fixture';
+import type { MachineCalibration } from '@/engine/cnc/calibration';
+import {
+  anchorFrom,
+  bracketArmTop,
+  bracketDatum,
+  bracketSeat,
+  bracketSettings,
+  bracketTapPoint,
+  bracketTopMachineZ,
+} from '@/engine/cnc/mounts/bracket';
 import { viseTapPoint } from '@/engine/cnc/mounts/vise';
 
 /** A finite number out of an accessory's open `unit` map, or null. */
@@ -90,13 +101,16 @@ export function surfaceTopDatumFor(machine: MachineRecord | null): { value: numb
   return profile?.datums.surfaceTopZ ?? null;
 }
 
-/** #599 — the mount tap point (machine XY) for the vise, from the bed placement or the newest registration. */
+/**
+ * #599/#607 — the mount tap point (machine XY) for the VISE, from the bed placement or the newest
+ * registration, with the #607 fields filled in for the executor and the write-back.
+ */
 export function mountTapFor(
   machine: MachineRecord | null,
   registrations: RegistrationSource[],
   seekFromMachineZ: number,
   jawStartY: number,
-): { x: number; y: number; fromMachineZ: number; label: string } | null {
+): PlanMountTap | null {
   if (machine === null) return null;
   const profile = machine.bedProfiles?.find((p) => p.id === machine.activeBedProfileId);
   const placement = profile?.placements.find((p) => p.where.kind === 'pins' && p.where.pins === 'vise');
@@ -115,5 +129,58 @@ export function mountTapFor(
   }
   if (frame === null) return null;
   const point = viseTapPoint(frame, { jawBarWidth, jawLength });
-  return { x: point.x, y: point.y, fromMachineZ: seekFromMachineZ, label: 'the vise fixed-jaw top' };
+  // #607 — the reading IS the jaw-top datum, and the executor bounds the touch by the stored one
+  // (null: no datum yet, so a plan that reaches here is on the typed-seat path and taps nothing).
+  return {
+    x: point.x,
+    y: point.y,
+    fromMachineZ: seekFromMachineZ,
+    label: 'the vise fixed-jaw top',
+    reference: 'vise-jaw-top',
+    expectZ: mountDatumFor(machine)?.jawTopZ ?? null,
+    datumOffsetMm: 0,
+  };
+}
+
+/**
+ * #607 — the BRACKET's tap: its front arm's top face (`bracketTapPoint`), and the seat the reading
+ * measures back (the top less the arm's measured height above the seat).
+ *
+ * The placement comes from the machine's own anchor + the bracket's offsets — the same pair the
+ * plan's `bracketExpectedSurface` uses, so the tap cannot aim at a corner the plan does not believe
+ * in.
+ *
+ * TWO MEASUREMENTS ARE REQUIRED, and with either missing there is NO tap (null), not a guessed one:
+ *  - `bracket.seatMachineZ` — the seat beside the bracket (`bracketSeat`); the plan refuses without
+ *    it, so this is always present when a plan exists;
+ *  - `bracket.armTopMm` — the arm's OWN top face above that seat, touched at this very point with the
+ *    slots checked clear. `bracket.heightMm` is NOT it: that number goes to the screw heads' tops
+ *    where they stand higher. A tap against the wrong surface would write a seat wrong by the
+ *    difference, so until the bench records this the bracket tap stays dormant and the plan runs the
+ *    untapped, measured-seat path it always did.
+ */
+export function bracketTapFor(args: {
+  calibration: MachineCalibration | null | undefined;
+  machineId: string;
+  seekFromMachineZ: number;
+  defaults: ShopDefaults | null;
+}): PlanMountTap | null {
+  const anchor = anchorFrom(args.calibration, args.machineId);
+  if (!anchor.ok) return null;
+  const seat = bracketSeat(args.defaults);
+  const armTop = bracketArmTop(args.defaults);
+  if (seat === null || armTop === null) return null;
+  const sizes = bracketSettings(args.defaults);
+  const datum = bracketDatum(anchor.anchor, sizes);
+  const point = bracketTapPoint(datum, sizes.settings);
+  return {
+    x: point.x,
+    y: point.y,
+    fromMachineZ: args.seekFromMachineZ,
+    // The arm named the way the operator sees it — the same words `bracketObstacles` gives it.
+    label: 'the bracket’s front arm (along the front edge, nearest you)',
+    reference: 'bracket-seat',
+    expectZ: bracketTopMachineZ(seat.value, armTop.value),
+    datumOffsetMm: armTop.value,
+  };
 }

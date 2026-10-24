@@ -812,6 +812,13 @@ fn known_rule(key: &str, n: Option<f64>) -> Option<Result<(), String>> {
             n.is_some_and(|v| (-150.0..=0.0).contains(&v)),
             "-150 to 0 (machine Z)",
         )),
+        // #607 — measured only, no seed: the front arm's top face above the seat, touched at a
+        // slot-clear point. NOT `bracket.heightMm`, which runs to the screw heads' tops where they
+        // stand higher. `defaultsClient.ts` states the same bound.
+        "bracket.armTopMm" => Some(need(
+            n.is_some_and(|v| (0.5..=60.0).contains(&v)),
+            "0.5 to 60 mm",
+        )),
         "clamps.topLengthMm" => Some(need(
             n.is_some_and(|v| (5.0..=150.0).contains(&v)),
             "5 to 150 mm",
@@ -1292,6 +1299,10 @@ mod tests {
         assert!(!s.contains_key("bracket.seatMachineZ"));
         assert!(validate_one("bracket.seatMachineZ", &chosen(serde_json::json!(5.0))).is_err());
         validate_one("bracket.seatMachineZ", &chosen(serde_json::json!(-70.2))).unwrap();
+        // #607 — the arm top is measured only too, and bounded as the client bounds it.
+        assert!(!s.contains_key("bracket.armTopMm"));
+        assert!(validate_one("bracket.armTopMm", &chosen(serde_json::json!(0.0))).is_err());
+        validate_one("bracket.armTopMm", &chosen(serde_json::json!(10.0))).unwrap();
         validate_write(
             "bracket.armWidthMm",
             &ShopDefault {
@@ -1349,6 +1360,10 @@ mod tests {
         );
         assert!(
             validate_write("bracket.seatMachineZ", &seeded(serde_json::json!(-70.2))).is_err(),
+            "no seed to claim"
+        );
+        assert!(
+            validate_write("bracket.armTopMm", &seeded(serde_json::json!(10.0))).is_err(),
             "no seed to claim"
         );
         let long_unit = ShopDefault {
