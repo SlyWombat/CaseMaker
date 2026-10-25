@@ -88,6 +88,28 @@ latent path (a blank much prouder than the record expects) that tonight's runs d
 - `createFirstBed` retries once on `stale` and is idempotent on `accessories[].id`; #611's offered tap uses
   the probe now checked out and writes `by` from it; #617's location subscription is a plain selector.
 
+## Second pass — the nine commits landed after this review (e26ad9ae → b73692c7), 2026-10-25 ~06:45
+
+The maintainer: *"make sure you review any work that the peer does."* The follow-up slices (#647 DRO, #646 text
+sweep, #635, #648 indicators, #634, #636, #639, #637, #638) had been gated green and spot-read; an independent
+reviewer then read every source hunk and spec. Result: **no blocker; nothing changes what the machine is sent**
+(the only new command surface is the guarded `M331.4/M332.4`). Filed:
+
+| # | finding | severity |
+|---|---|---|
+| #650 | `saveMachineWithRetry` re-PUTs the SAME record after a 412 — the If-Match guard is defeated and another writer's change is overwritten; #636 spread it to every registration write. Retry must re-apply a reducer to the refreshed record. | major |
+| #651 | `toolDisplayName`: chamfer / tapered-ball / unknown shapes read "N mm flat end"; kinds without a tip diameter are named by the shank; the picker's option text repeats the diameter and merges rows. | major |
+| #652 | Strip: the tool comes from the live job, not the frozen package; a long alarm reason clips Stop; Offline keeps the last coordinates; a manual accessory press wins over a running release's record forever. | minor |
+| #653 | Un-lift grouping against a running minimum; rapid-into-fixture judged in the lifted frame; unmount mid-motion closes the console before `$H`; an empty out-of-margin save; two sentences the text sweep distorted; two stale comments. | minor |
+
+Solid in the second pass: `guardedMode` is one implementation with the right order (`?`, alarm across the
+carried frame, explicit Idle, `P: < 100` refuses); #637's token gate cannot stick; #636 shows the probe result
+before any house write; #634 applies the same quantisation to both ends of feeds and rapids; #635 refuses in
+every new direction. Each commit's unpinned claims are recorded on its issue thread.
+
+Process change from this pass: the manager reads every source hunk of a peer commit before its gate, not the
+hunks named in the report.
+
 ## Method notes
 
 The four reviewers read `git show`/`git diff` at the commit shas and the files at `origin/main`; one ran
