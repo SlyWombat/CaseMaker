@@ -193,7 +193,11 @@ export type JobFindingCode =
   // no honest second file can be written. `nothing` is a warning: the finer cutter is real and
   // measured, but the first programme already removed everything it can open.
   | 'setup-rest-unavailable'
-  | 'setup-rest-nothing';
+  | 'setup-rest-nothing'
+  // #649 — the fitted surface lifts the blank more than the nominal hop, so every rapid in this
+  // program runs higher than usual. A warning: the program is safe (the hop was raised for it), but
+  // the operator may prefer to level the top with G32 and keep the nominal clearance.
+  | 'surface-hop-raised';
 
 export interface JobFinding {
   /**

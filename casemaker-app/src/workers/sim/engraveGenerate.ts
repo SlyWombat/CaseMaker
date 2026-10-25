@@ -114,7 +114,7 @@ import type { Polygons } from '@/engine/cnc/cam/pocket';
 import { concatToolpathIR, estimateCycleSeconds, HOP_Z, toolNumberFor, travelStats, type CamMove, type ToolpathIR } from '@/engine/cnc/cam/ir';
 import { generateSurface3dForGoal, type SurfaceFeeds } from '@/engine/cnc/cam/surface3d';
 import { postZ1, type PostContext, type VacuumSpan } from '@/engine/cnc/post/z1';
-import { applySurfaceLift, type SurfaceFrame } from '@/engine/cnc/engrave/surfacePlane';
+import { applySurfaceLift, maxSurfaceLift, type SurfaceFrame } from '@/engine/cnc/engrave/surfacePlane';
 import { FRAME_Z, runSheetFileName, runSheetFrameFileName } from '@/engine/cnc/engrave/runSheet';
 import type { Setup } from '@/engine/cnc/setup';
 import type { MountObstacles } from '@/engine/cnc/mounts/bracket';
@@ -3122,6 +3122,40 @@ function generateOneProgram(
     } catch (e) {
       return stop('cam', { feeds, message: e instanceof Error ? e.message : String(e) });
     }
+  }
+
+  // #649 — THE HOP CLEARS A LIFTED TOP. `applySurfaceLift` shifts FEED moves only, so a rapid that
+  // ends at the CAM's fixed `HOP_Z` sits inside a blank the tilt lifts more than that — where the
+  // lift exceeds 1 mm the "plunge" starts cutting from inside the material. One number for the
+  // whole program: the CAM's hop plus the plane's HIGHEST lift over the stock, applied to every
+  // rapid that stands at the hop (a `SAFE_Z` retract is already clear), and carried on the IR so
+  // the post's air rule and the verifier's rapid floor judge the same height.
+  const surfaceFrame = shop.surface ?? null;
+  const liftOverStock =
+    surfaceFrame === null ? 0 : maxSurfaceLift(surfaceFrame.plane, surfaceFrame.z0, job.stock.length, job.stock.width);
+  if (liftOverStock > 0) {
+    const hopZ = Math.round((HOP_Z + liftOverStock) * 1000) / 1000;
+    ir = {
+      ...ir,
+      hopZ,
+      operations: ir.operations.map((op) => ({
+        ...op,
+        moves: op.moves.map((m) => (m.kind === 'rapid' && Math.abs(m.z - HOP_Z) <= 1e-9 ? { ...m, z: hopZ } : m)),
+      })),
+    };
+  }
+  if (liftOverStock > HOP_Z) {
+    // The operator's alternative is G32 (#631): level the top from the console and keep the nominal
+    // hop. The raise above already made the program safe, so this informs rather than blocks.
+    const liftMm = Math.round(liftOverStock * 1000) / 1000;
+    findings.push({
+      severity: 'warning',
+      code: 'surface-hop-raised',
+      message:
+        `the fitted tilt lifts the blank ${liftMm} mm at its highest corner — more than the ${HOP_Z} mm hop, ` +
+        `so every rapid in this program runs at ${Math.round((HOP_Z + liftOverStock) * 1000) / 1000} mm. ` +
+        `Run G32 from the console to level the top and the hop stays ${HOP_Z} mm.`,
+    });
   }
 
   // #432 — FACING IS ITS OWN PROGRAM, and this one is untouched by it.

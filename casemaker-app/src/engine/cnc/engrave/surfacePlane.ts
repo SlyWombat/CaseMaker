@@ -106,6 +106,22 @@ export function surfaceLift(plane: SurfacePlane, z0: number, x: number, y: numbe
 }
 
 /**
+ * #649 — THE HIGHEST LIFT THE PLANE PUTS UNDER ANY XY OF THE STOCK, mm. A plane is linear, so the
+ * maximum over the stock's rectangle is at a corner; 0 when it never rises above `z0`. The CAM
+ * raises every hop by this, so an inter-loop rapid still clears the tilted top by the nominal hop
+ * instead of ending inside the blank.
+ */
+export function maxSurfaceLift(plane: SurfacePlane, z0: number, lengthMm: number, widthMm: number): number {
+  const corners: ReadonlyArray<readonly [number, number]> = [
+    [0, 0],
+    [lengthMm, 0],
+    [0, widthMm],
+    [lengthMm, widthMm],
+  ];
+  return Math.max(0, ...corners.map(([x, y]) => surfaceLift(plane, z0, x, y)));
+}
+
+/**
  * #623 — the fitted surface a package was POSTED against: the plane and the reference Z0 the origin
  * was written from (the LOWEST touch).
  *
@@ -132,10 +148,11 @@ export function isFlatPlane(plane: SurfacePlane): boolean {
 
 /**
  * Post an IR against the fitted surface: every FEED move's Z is shifted by the surface lift at its
- * XY, so the floor follows the tilted colour plane. Rapids and hops stay at their nominal clearances
- * — they are air moves above the top, and the lift (bounded by the tilt, far less than `hopZ`) never
- * threatens them. Only feeds move, so the verifier's rapid floor and the frame file (an air trace at
- * `FRAME_Z`) are untouched.
+ * XY, so the floor follows the tilted colour plane. Rapids and hops are NOT lifted — they are air
+ * moves above the top — so the CAM raises the hop by the plane's highest lift over the stock
+ * ({@link maxSurfaceLift}, #649): a rapid ending at the flat `HOP_Z` would sit inside a blank the
+ * tilt lifts more than that. Only feeds move here, so the verifier's rapid floor and the frame file
+ * (an air trace at `FRAME_Z`) are untouched.
  */
 export function applySurfaceLift(ir: ToolpathIR, plane: SurfacePlane, z0: number): ToolpathIR {
   return {
