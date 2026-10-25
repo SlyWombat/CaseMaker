@@ -1,6 +1,6 @@
 # Makera Studio vs Case Maker — capability matrix
 
-**As of `main` fbad1643, 2026-10-25.** Row-per-capability, Studio 0.1.2.0 against Case Maker.
+**As of `main` c0d680ab, 2026-10-25.** Row-per-capability, Studio 0.1.2.0 against Case Maker.
 Companion to `/Makera-Parity.md` (the 2026-10-12 review; its "Us" column is superseded here) and
 to `CASEMAKER-VS-MARKET.md` (the same product against the 20-vendor grid). Every Studio cell cites its
 evidence; every Case Maker cell cites the issue or file it was verified against.
@@ -9,18 +9,19 @@ evidence; every Case Maker cell cites the issue or file it was verified against.
 
 | Status | Rows | Meaning |
 |---|--:|---|
-| **AHEAD** | 39 | Case Maker does something Studio does not, or does it demonstrably better |
-| **PARITY** | 38 | both do it; the mechanism may differ |
+| **AHEAD** | 42 | Case Maker does something Studio does not, or does it demonstrably better |
+| **PARITY** | 37 | both do it; the mechanism may differ |
 | **PARTIAL** | 17 | Case Maker does part of what Studio does |
-| **ABSENT** | 7 | Studio does it, Case Maker does not, and nothing refuses it |
+| **ABSENT** | 6 | Studio does it, Case Maker does not, and nothing refuses it |
 | **REFUSED** | 8 | refused on the record (`/Makera-Parity.md` §14.4 R-n, or a `/Fabrication.md` decision) |
 | **UNKNOWN** | 3 | Studio's side is not established — not a guess in either direction |
-| | **112** | |
+| | **113** | |
 
-**Three biggest gaps.** (1) **A live position readout, and pause/resume at the bench** — Studio shows
-WPos/MPos per axis; Case Maker's Pause/Resume sends the firmware's own suspend/resume at the run's
-next poll boundary (#618, the software half, bench proof pending) and carries no DRO yet (D4, C8;
-#519/#527). (2) **XY probing with the 3D probe and grid auto-levelling** — Studio's
+**Three biggest gaps.** (1) **Pause/resume at the bench, and Studio's status monitor** — Studio shows
+WPos/MPos per axis and a Monitor of limits, probe, cover and temperatures; Case Maker's strip now
+carries the DRO with the tool named (#647) and the run panel sends the firmware's own suspend/resume
+at the next poll boundary (#618, the software half; bench proof pending), while the Monitor's
+`L:`/`C:`/`E:`/`W:`/`H:` fields are unread (#659). (2) **XY probing with the 3D probe and grid auto-levelling** — Studio's
 `Set Origin with 3D Probe` and Auto Workpiece Leveling; Case Maker now touches edges sideways with
 the 3D probe where the mount allows (#525) and emits/pushes the G32 grid route for a dome (#631),
 but corner finding and a bench-proved G32 remain (B9, B10; #525, #501). (3) **Rotary and 3D relief
@@ -50,7 +51,7 @@ moved these cells; the review's "Us" column should not be read for them:
 
 | §14.1 said | Now | Rows |
 |---|---|---|
-| Jog / MDI / overrides "refused until the bridge" (R-10) | A guarded typed console shipped (#302); jog, DRO, overrides and pendant stay refused | C7–C11 |
+| Jog / MDI / overrides "refused until the bridge" (R-10) | A guarded typed console shipped (#302); jog, overrides and pendant stay refused | C7–C11 |
 | Thread milling refused (R-14) | Shipped as a helical thread in an existing pilot (#445) | G8 |
 | Ramping refused (R-16) | Reopened for **metal pockets** only — adaptive clearing with helical/ramped entry (#433, Q9); engraving still plunges | G10 |
 | Stock-to-leave "absent" (M3) | A finish pass with a shop-setting allowance (#250) | G11 |
@@ -64,7 +65,7 @@ moved these cells; the review's "Us" column should not be read for them:
 
 ## A. Connection & status
 
-| Capability | Makera Studio | Case Maker (main ffd997fe) | Status | Next |
+| Capability | Makera Studio | Case Maker (main c0d680ab) | Status | Next |
 |---|---|---|---|---|
 | Transport to the controller | TCP `:2222` (`WIFIStream`), plus `SerialPortStream`, `USBStream` (libusb) and a BLE scanner, all behind one `BaseStream` — RE 01 | TCP `:2222` only: five dumb calls in `src-tauri/src/machine.rs`, framing in `platform/desktop/protocol.ts` (#255); USB is a seam, not a transport (decision 10) | PARTIAL | — |
 | Discovery | UDP datagrams via `QUdpSocket`, payload bytes still `[PENDING]`; typed IP (`AddDeviceFromIPWgt`); saved devices in `t_MyDeviceList` — RE 01, RE 07 | Passive UDP `:3333` listener (Bridge §2, #275); "Connect `<ip>`" on the Machines card; machines kept in `location.json` with a nickname (#596) | PARITY | — |
@@ -79,7 +80,7 @@ moved these cells; the review's "Us" column should not be read for them:
 
 ## B. Homing, probing & tool length
 
-| Capability | Makera Studio | Case Maker (main ffd997fe) | Status | Next |
+| Capability | Makera Studio | Case Maker (main c0d680ab) | Status | Next |
 |---|---|---|---|---|
 | Home `$H` | `$H`; ~31 s; confirmed by state, not by an ack `[BENCH]` — RE 03 | `$H` before every bit change and after every activity (bench rule; `platform/machineRun.ts`, `registration/execute.ts`); waits for `Idle` | PARITY | — |
 | Unlock `$X` | An **Unlock** button on the Control card — Workflow A.6 | Sent by the registration executor on recovery and typeable in the console; no card button | PARTIAL | — |
@@ -100,35 +101,36 @@ moved these cells; the review's "Us" column should not be read for them:
 
 ## C. Machine controls
 
-| Capability | Makera Studio | Case Maker (main ffd997fe) | Status | Next |
+| Capability | Makera Studio | Case Maker (main c0d680ab) | Status | Next |
 |---|---|---|---|---|
 | Spindle switch | `M3S10000` / `M5` toggle — Workflow A.7 | None by hand; the spindle runs only inside a verified program, and the verifier refuses a start at an unestablished Z (#396) | REFUSED | R-10 |
-| Vacuum | Dust-collection switch; on the Z1 the mode is `M331`/`M332` `[BENCH]` — RE 03, Parity §4 | Every program carries `M331`…`M332` (#283); a Machines-card switch only when `Idle` and no job (#390); the span is kept across a multi-program run (#469) | PARITY | — |
+| Vacuum | Dust-collection switch; on the Z1 the mode is `M331`/`M332` `[BENCH]` — RE 03, Parity §4 | Every program carries `M331`…`M332` (#283); a Machines-card switch only when `Idle` and no job (#390); the strip's indicator says on/off/unknown from what was sent, and a release's record expires a manual press (#648/#652); the span is kept across a multi-program run (#469) | PARITY | — |
 | Antistatic | "Anti-Static" assist option — Workflow A.4 | `M331.4`/`M332.4` auto-enabled for plastic jobs, a capability flag on the profile (#564; bench #568) | PARITY | — |
 | Work light | `M821`/`M822` switch, `switch.light.startup_state` — Workflow A.7 | In the run plan's machine strip (`engine/cnc/plan/features.ts`); bench-proved 2026-10-18; no switch drawn yet | PARTIAL | **#422** |
 | Probe laser pointer | `M831`/`M832` on/off toggle — Workflow A.7 | The laser **frame** and **point-to-origin**, off by default, lift guarded at the point of use (#431; `platform/machineLaser.ts`) | AHEAD | — |
 | Laser module | Laser Image / Laser Vector strategies, `M3S0.05` — Parity §2, Workflow A.7 | `capabilities.laser: false` on the Z1 profile; no laser strategy will be written (decision 4; `engine/cnc/machine.ts`) | REFUSED | decision 4 |
 | Jog | Jog pad + QuickMove — Workflow A.6 | None, except the laser dot's `G91 G0` X/Y steps inside point-to-origin (#431) | REFUSED | R-10 |
-| DRO | WPos and MPos per axis — Workflow A.6 | State word and `P:` progress in the status strip (#526); no per-axis readout | ABSENT | **#519**, **#527** |
+| DRO | WPos and MPos per axis — Workflow A.6 | The status strip's DRO (#647): per axis the WORK value large over the MACHINE value, the state as a connection, the cutter or probe by NAME (#646/#651) with its T number and the probe's last M491 in the hover, the vacuum state, and progress from `P:`; A appears only when a rotary module is checked out (#658) | AHEAD | — |
 | Feed / spindle override | Readouts on the Control card; `F:`/`S:` carry a 100.0 % field — Workflow A.6, Bridge §6 | None | REFUSED | R-10 |
 | Pendant / gamepad | `?` — FM §2.E | None | REFUSED | R-10 |
 | MDI / console | `G-Code` / `MDI` tabs, "Enter Command…" — Workflow A.6 | A guarded one-line console: refuses `config-set`, card writes, reset/flash, transfers, the realtime bytes and any line the dispatcher would run as more than one command (#302, #386; `engine/cnc/consoleGate.ts`); desktop and LAN browser | PARITY | — |
 | Stop | Grey Stop = `abort` (queue drains ~18 s); red STOP = realtime halt → `ALARM: Abort during cycle` — Workflow A.5, Dialect §11.13 | `abort`, then `M332` once `Idle` (#424); the realtime bytes are deliberately unwired; the machine's button is the E-stop (Q16) | PARTIAL | — |
 | Power | None (the machine's button; auto-sleep in config) — Workflow A.7 | Optional smart-plug switch on the machine record, never off while running, token in the secure store (#416; `components/manage/MachinePower.tsx`); the bench uses `tools/z1/power.sh`; no CLI/MCP power (#479) | AHEAD | — |
-| Status monitor | Limits, probe, tool sensor, E-stop, cover switch, temperatures, RSSI — Workflow A.7 | None beyond the state word | ABSENT | — |
-| Accessory-mode panel | Toggles for spindle fan, power fan, external output, air, WP charge… — Parity §7 | Vacuum only | PARTIAL | **#289** |
+| Status monitor | Limits, probe, tool sensor, E-stop, cover switch, temperatures, RSSI — Workflow A.7 | None beyond the state word: the frame's `L:`, `C:`, `E:`, `W:` and `H:` groups are unread, and only what the firmware docs and our captures make unambiguous will be shown — behind the strip's state element (#659) | ABSENT | **#659** |
+| Accessory-mode panel | Toggles for spindle fan, power fan, external output, air, WP charge… — Parity §7 | Vacuum, antistatic and work light — a Machines-card switch and a strip indicator for each, on/off/unknown from what was actually sent, changing only on an Idle machine with no job (#564/#648/#652) | PARTIAL | **#289** |
 
 ## D. Job transfer & run
 
-| Capability | Makera Studio | Case Maker (main ffd997fe) | Status | Next |
+| Capability | Makera Studio | Case Maker (main c0d680ab) | Status | Next |
 |---|---|---|---|---|
 | Upload to `/sd/gcodes` | One generic put; name timestamped `yyyyMMddhhmmss.nc`; QuickLZ when `> 4096` bytes with a `.bin` suffix — RE 05 | Receiver-driven framed transfer with an MD5 step, 8192-byte packets; "already present" is checked by hashing the path (#255, #291, #298); `Idle` asked first (#296). No compression | PARTIAL | **#562** |
 | Verified-only wall | None — any file goes up | The upload gate is re-asked at send time (#295/#296); the CLI's `upload`/`play` need the program's FNV hash as the token (#479) | AHEAD | — |
 | Play | `play /sd/gcodes/<f>` `[BENCH]` — RE 05 | Same word, only on `Idle` with no alarm, never streamed (#386; `platform/machineRun.ts`) | PARITY | — |
+| Start from the registration | Set Origin (its probe dialog) → Generate → Send to machine → Run on the Control card — Workflow A.5/A.6 | After the cutter prompt's Continue the chain runs itself — re-post when the registration measured a tilt, the oracle, the upload — to ONE screen: the program, the frozen cutter (already confirmed at the prompt), the verdict, one clearance/at-the-machine statement and ONE Cut press; anything that fails stops there with its own sentence, and the manual steps stay behind a disclosure (#656). The firmware's own `M6` stop is #655's prompt | AHEAD | #656 on the bench |
 | Pause / resume | `suspend` / `resume` with "save current pos… / Restoring saved XYZ positions" — RE 05, Workflow A.5 | The run panel sends the firmware's own suspend/resume at the next status poll boundary and the same button resumes (#618, the software half; bench proof pending). A stopped job still restarts from a generated `<file>-from-L<n>.nc` (#249) | PARTIAL | **#618** |
 | Progress | `Progress: n%`, elapsed, remaining; `EstimatedProcessingTimeFromPathvertex` — Workflow A.6 | `P:<line>,<percent>,<seconds>` every ≥ 2 s, phase progress, the viewport follows `P` (#423, #442); the estimate is #242/#281 | PARITY | — |
 | Job end | Not established | Percent 100 **and** `Idle` (`Idle` alone appears mid-job); end-of-run bookkeeping once (#386, #414; `store/machineRunStore.ts`) | PARITY | — |
-| Tool-change prompts | "Tool Change Required … Confirm / Ignore"; `buffer M6T%1` sequenced at run time — RE 06, Workflow A.4 | One program per tool (Q15); a bit-change pause with cutter confirm and Z0 re-touch between files (#469, #516, #538); the single-file `M6` path waits on the bench | PARITY | **#278** |
+| Tool-change prompts | "Tool Change Required … Confirm / Ignore"; `buffer M6T%1` sequenced at run time — RE 06, Workflow A.4 | One program per tool (Q15); a bit-change pause with cutter confirm and Z0 re-touch between files (#469, #516, #538). The firmware's own `Tool` stop after `T<n> M6` is recognised (#655): the run panel names the tool and its cutter ("The machine is waiting for tool 1 — the 1 mm flat end — to be in the spindle.") and Continue sends `M490.2`, which measures it at the sensor and carries the program on; the strip reads "Waiting for the cutter" | AHEAD | bench: the prompt's Continue |
 | Multi-program run | One file at a time | The release step uploads every program first, then plays them in order with the vacuum span held across bit changes (#469; `store/engraveReleaseStore.ts`) | AHEAD | — |
 | Job queue | None — FM §2.F | None | REFUSED | R-9 |
 | Dry run | Not established (`Scan Now` traces the margin only) | The verified program lifted to a safe plane with the spindle off, re-verified before upload (#547; `engrave/dryRun.ts`) | AHEAD | — |
@@ -138,7 +140,7 @@ moved these cells; the review's "Us" column should not be read for them:
 
 ## E. Camera & monitoring
 
-| Capability | Makera Studio | Case Maker (main ffd997fe) | Status | Next |
+| Capability | Makera Studio | Case Maker (main c0d680ab) | Status | Next |
 |---|---|---|---|---|
 | Live stream | `ws://<host>:82/ws_video`, text `start_stream`, JPEG frames, reconnect after 2 s — RE 04 | `tools/z1/camera.mjs` with reconnect-on-drop (commit 394583a0); nothing in the app | PARTIAL | **#530** |
 | Time-lapse | Recorded on the module per job, replayed over `vpreview` — RE 04 | The harness replays `vpreview` (394583a0); monitoring and time-lapse are refused for the app | REFUSED | R-17 |
@@ -147,7 +149,7 @@ moved these cells; the review's "Us" column should not be read for them:
 
 ## F. Library data
 
-| Capability | Makera Studio | Case Maker (main ffd997fe) | Status | Next |
+| Capability | Makera Studio | Case Maker (main c0d680ab) | Status | Next |
 |---|---|---|---|---|
 | Cutter catalogue | `t_MakeraCutterList`, 129 rows, `cutterId` UUID + `g_ID` — RE 07, Parity §3.2 | Imported from Studio's SQLite as an immutable tier, diffed on re-sync (#308; `src-tauri/src/catalogue.rs`); the same 129 rows | PARITY | — |
 | User cutters | `t_CustomCutterList`, a materialised clone, 0 rows — RE 07 | Clones and typed cutters with provenance (#212, #311), registered from the box code or a QR scan (#309), named in the `.nc` by `;@CM\|TOOL\|key=` (#332) | AHEAD | — |
@@ -162,7 +164,7 @@ moved these cells; the review's "Us" column should not be read for them:
 
 ## G. CAM & output
 
-| Capability | Makera Studio | Case Maker (main ffd997fe) | Status | Next |
+| Capability | Makera Studio | Case Maker (main c0d680ab) | Status | Next |
 |---|---|---|---|---|
 | 2D pocket | type 0 — Parity §2 | Contour-parallel pocketing (#172), shapes and combinations (#214–#216) | PARITY | — |
 | 2D contour / through-cut with tabs | type 1; `supportTabs…` fields — Parity §2, §4 | Through-cuts with holding tabs as shop defaults (#218; `cam/tabSettings.ts`) | PARITY | — |
@@ -186,12 +188,12 @@ moved these cells; the review's "Us" column should not be read for them:
 | Material-removal simulation | `dexeltool.dll` ships, the workflow never reaches it — RE 06, FM §2.D | Exact sweep with checkpointed transport (#182, #193–#199) and a dexel route for dense flat and 3D jobs (#531) | AHEAD | — |
 | Collision / gouge | `?` — FM §2.D | Fixture, holder, gouge, spindle-off-near-material and envelope checks as **errors** (#204, #396) | AHEAD | — |
 | Oracle | None | Volumetric prediction-vs-simulation gate before Save/Upload, resolution-aware floor, located under-cut, deterministic (#206, #580, #584, #577) | AHEAD | **#581** |
-| Time estimate | From path vertices; elapsed/remaining on the Monitor — Workflow A.6 | One trapezoid estimate from the machine's rapid model, in the panel, the sheet and `TIME` (#242, #281); last timed run shown beside it (#277) | PARITY | **#281** |
+| Time estimate | From path vertices; elapsed/remaining on the Monitor — Workflow A.6 | One trapezoid estimate from the machine's rapid model, in the panel, the sheet and `TIME` (#242, #281); last timed run shown beside it (#277). A feed run now ends at a corner, so short strokes are not timed as one long run (#657) — the first cut's comparison read 2:42 predicted against ~4:15 cut | PARITY | **#281** |
 | G-code viewer | `G-Code` tab — Workflow A.6 | Read-only pane synced to the transport (#245); editing refused | PARITY | R-8 |
 
 ## H. Workflow & records
 
-| Capability | Makera Studio | Case Maker (main ffd997fe) | Status | Next |
+| Capability | Makera Studio | Case Maker (main c0d680ab) | Status | Next |
 |---|---|---|---|---|
 | Guided job flow | Machining Wizard: Set Stock → Set Origin → Auto Probe → Assist → Run; a modal that remembers nothing — Workflow A.4 | Start wizard (#280), guided setup (#254), "Cut this blank" seven steps from job to probe (#573), Design/Cut switch with a frozen package (#419) | PARITY | **#512** |
 | Operator run sheet | None — FM §2.F | Generated from the job, registration driven from the plan, frame file named (#207, #272, #244) | AHEAD | — |
@@ -206,7 +208,7 @@ moved these cells; the review's "Us" column should not be read for them:
 
 ## I. Platform
 
-| Capability | Makera Studio | Case Maker (main ffd997fe) | Status | Next |
+| Capability | Makera Studio | Case Maker (main c0d680ab) | Status | Next |
 |---|---|---|---|---|
 | Operating systems | Windows; macOS `?`; no Linux — FM §2.A | Windows desktop (Tauri, NSIS target in `src-tauri/tauri.conf.json`); the web build runs anywhere; macOS/Linux deferred | PARITY | **#322**, **#323**, **#565** |
 | Browser | None | `electricrv.ca/casemaker/?BETA=yes` (#343) and a LAN browser that drives the machine (#571) | AHEAD | — |
@@ -221,7 +223,7 @@ moved these cells; the review's "Us" column should not be read for them:
 
 ## How to keep this current
 
-- **The statuses are dated.** Each cell is true of `main` ffd997fe; re-verify the Case Maker column
+- **The statuses are dated.** Each cell is true of `main` c0d680ab; re-verify the Case Maker column
   on every k3 publish (and whenever a `fabrication` issue closes), the Studio column whenever a
   `docs/reverse/makera-studio/` module promotes a `[PENDING]`.
 - **Closed ≠ shipped, open ≠ absent.** Several rows above cite a commit for an issue the tracker
