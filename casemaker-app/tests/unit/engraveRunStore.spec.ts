@@ -288,7 +288,9 @@ describe('engraveRunStore (#206)', () => {
     });
     if (!read.ok) throw new Error('the fixture should read');
     const first: MachineCalibration = read.calibration;
-    const second: MachineCalibration = { ...first, source: 'a different read, saved mid-run' };
+    // #581 follow-up — a REAL frame change: the stamp is the frame's numbers, not the read's
+    // `source`/`measuredAt`, so a re-read of the same frame is not a different machine (below).
+    const second: MachineCalibration = { ...first, frame: { ...first.frame, anchor1: [first.frame.anchor1[0] + 0.01, first.frame.anchor1[1]] } };
 
     useSettingsStore.setState({ machineCalibration: first });
     let generatedWith: MachineCalibration | null | undefined;
@@ -466,6 +468,75 @@ describe('engraveRunStore (#206)', () => {
         run.restore();
       }
     });
+  });
+
+  // #581 follow-up — an origin write is a NEW job object with the SAME fingerprint: the
+  // registration's `setStock` stamps the measured bow and its provenance, both outside
+  // `jobFingerprint` (#621/#627). The run's staleness is the job's STAMP, not the object's identity,
+  // so that write must not stale a result that still describes the job — and a real edit still must.
+  it('an origin write that replaces the job object does not stale the result', async () => {
+    setEngraveRunClientLoader(async () => ({
+      engraveGenerate: async () => NOTHING,
+      simOracle: async () => ({ ok: true, band: 0.016, levels: [], worst: { underCut: 0, overCut: 0 } }),
+    }));
+    await useEngraveRunStore.getState().generate();
+    expect(useEngraveRunStore.getState().generated).not.toBeNull();
+    expect(useEngraveRunStore.getState().staleSince).toBeNull();
+
+    const before = useEngraveJobStore.getState().job;
+    useEngraveJobStore.getState().replace({
+      ...before,
+      stock: {
+        ...before.stock,
+        flatness: { xMm: 0.33, yMm: 0.1, source: 'measured', touchCount: 5, measuredAt: '2026-10-25T04:10:00.000Z' },
+      },
+      sources: { ...before.sources, stock: { ...before.sources?.stock, flatness: 'measured' } },
+    });
+    expect(useEngraveJobStore.getState().job).not.toBe(before); // a new document object...
+    expect(useEngraveRunStore.getState().staleSince).toBeNull(); // ...with the same program
+
+    useEngraveJobStore.getState().setStock({ length: before.stock.length - 1 });
+    expect(useEngraveRunStore.getState().staleSince).not.toBeNull();
+    expect(useEngraveRunStore.getState().staleReason).toBe('job');
+  });
+
+  // The machine half of the same rule: saving a fresh read of the frame the machine already had is
+  // not a different machine, and a real frame change still stales the pack mid-run.
+  it('a re-read of the SAME machine frame does not stale the run', async () => {
+    const read = calibrationFromReplies(new Map(Object.entries(Z1_FRAME_REPLIES)), {
+      machineId: 'Z1',
+      measuredAt: '2026-10-06T13:01:11.000Z',
+      host: '192.168.10.43',
+    });
+    if (!read.ok) throw new Error('the fixture should read');
+    const first: MachineCalibration = read.calibration;
+    useSettingsStore.setState({ machineCalibration: first });
+    let loads = 0;
+    const realLoad = useSimStore.getState().loadProgram;
+    useSimStore.setState({
+      loadProgram: async () => {
+        loads += 1;
+      },
+    });
+    setEngraveRunClientLoader(async () => ({
+      engraveGenerate: async () => {
+        // The operator takes a new calibration read while the worker is generating; same numbers.
+        useSettingsStore.setState({ machineCalibration: { ...first, source: 'a re-read', measuredAt: '2026-10-25T04:11:00.000Z' } });
+        return clean();
+      },
+      simOracle: async () => ({ ok: true, band: 0.016, levels: [], worst: { underCut: 0, overCut: 0 } }),
+    }));
+    try {
+      await useEngraveRunStore.getState().generate();
+      // Asserted BEFORE the cleanup: clearing the saved frame afterwards IS a change, and rightly
+      // stales the result — this test is about the re-read landing on the same numbers.
+      expect(useEngraveRunStore.getState().staleSince).toBeNull();
+      expect(useEngraveRunStore.getState().staleReason).toBeNull();
+      expect(loads).toBe(1); // the run carried on: the frame it was posted against did not change
+    } finally {
+      useSimStore.setState({ loadProgram: realLoad });
+      useSettingsStore.setState({ machineCalibration: undefined });
+    }
   });
 
   // #324 — the catalogue reaches the worker only if the CALLER sends it: `feeds.ts`'s module state

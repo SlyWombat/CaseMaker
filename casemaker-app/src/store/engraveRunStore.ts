@@ -34,6 +34,7 @@ import { effectiveMargins } from '@/engine/cnc/engrave/depthBounds';
 import { jobFingerprint } from '@/engine/cnc/engrave/package';
 import {
   changedInputs,
+  machineKey,
   runInputs,
   type EngraveInputKey,
   type EngraveRunInputs,
@@ -298,12 +299,18 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
 
     // The job may have been edited while generating: the result already describes an older job. So
     // may the machine's saved frame (#301), and so may the depth margins (#345): the program above
-    // was gated against the one read at the top. The margins are compared by VALUE rather than by
-    // the settings object, because a job carrying its own record keeps them whatever the house
-    // setting does — comparing the setting would block a run the user did not change.
-    const nowMargins = effectiveMargins(useEngraveJobStore.getState().job, useSettingsStore.getState().margins);
-    const changedJob = useEngraveJobStore.getState().job !== job;
-    const changedMachine = (useSettingsStore.getState().machineCalibration ?? null) !== calibration;
+    // was gated against the one read at the top. All three compare the #581 FOLLOW-UP rule — the
+    // run's own STAMPS, never the objects: a write that lands on the same numbers is not a change.
+    // The registration's origin write is exactly that (a new job object through `setStock`, its
+    // `stock.flatness` and provenance excluded from `jobFingerprint` since #621/#627), and so is a
+    // re-read of the frame the machine already had; either must not stale a result that still
+    // describes them. The margins were already compared by value (a job carrying its own record
+    // keeps them whatever the house setting does); they stay that way.
+    const nowJob = useEngraveJobStore.getState().job;
+    const nowCalibration = useSettingsStore.getState().machineCalibration ?? null;
+    const nowMargins = effectiveMargins(nowJob, useSettingsStore.getState().margins);
+    const changedJob = jobFingerprint(nowJob) !== inputs.job;
+    const changedMachine = machineKey(nowCalibration) !== inputs.machine;
     const stale = changedJob || changedMachine || nowMargins.boundaryMargin !== margins.boundaryMargin;
     if (stale) {
       // #581 — name which one moved; the generic sentence is only for a caller that cannot know.
@@ -412,15 +419,24 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
 // so the run would refuse itself before the first upload. Compare fingerprints instead.
 useEngraveJobStore.subscribe((state, prev) => {
   if (state.job === prev.job) return;
-  if (jobFingerprint(state.job) === jobFingerprint(prev.job)) return;
+  // #581 follow-up — compare the job to the RUN'S OWN stamp, not to the previous object: an origin
+  // write (a new object whose `jobFingerprint` is unchanged, #621/#627) must not stale the result.
+  const run = useEngraveRunStore.getState();
+  if (run.inputs === null) return;
+  if (jobFingerprint(state.job) === run.inputs.job) return;
   markStale('job');
 });
 
 // So does a change to the machine's saved frame (#301). The program was posted, verified and
-// simulated against the frame read when Generate started (#297); a different frame is a different
-// machine, and Save and Upload must not carry on offering the old result.
+// simulated against the frame read when Generate started (#297); a DIFFERENT FRAME is a different
+// machine, and Save and Upload must not carry on offering the old result. The comparison is the
+// #581 stamp of the frame (`machineKey` — machineId, frame, soft endstop), not the read: saving a
+// new read of the same numbers is not a different machine.
 useSettingsStore.subscribe((state, prev) => {
   if (state.machineCalibration === prev.machineCalibration) return;
+  const run = useEngraveRunStore.getState();
+  if (run.inputs === null) return;
+  if (machineKey(state.machineCalibration ?? null) === run.inputs.machine) return;
   markStale('machine');
 });
 
