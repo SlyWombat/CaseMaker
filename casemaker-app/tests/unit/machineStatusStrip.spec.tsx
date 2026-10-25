@@ -1,7 +1,10 @@
 // @vitest-environment jsdom
-// #519 item 3 — "what the machine is doing now": while a registration owns the machine the state
-// reads Probing and the runner's current step takes the program's slot (the design's §5 strip). The
-// raw line is fed through `machineStore` exactly as the heartbeat and the uploads leave it.
+// #526/#647 — the status strip's DRO (design: docs/design/status-strip-dro.md, variant B).
+//
+// The strip against fake status lines: the WORK value large over the MACHINE value, the state as a
+// connection, the tool slot's two sources (the job's cutter, the checked-out probe during a
+// registration), the vacuum with no qualifier, and progress from the `P:` field. The line is fed
+// through `machineStore` exactly as the heartbeat leaves it.
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { cleanup, render, screen } from '@testing-library/react';
@@ -10,12 +13,54 @@ import { resetMachineStore, useMachineStore } from '@/store/machineStore';
 import { resetMachineRunStore, useMachineRunStore, type RunEntry } from '@/store/machineRunStore';
 import { resetRegistrationTouchesStore, useRegistrationTouchesStore } from '@/store/registrationTouchesStore';
 import { resetEngraveReleaseStore, useEngraveReleaseStore } from '@/store/engraveReleaseStore';
+import { resetLocationStore, useLocationStore } from '@/store/locationStore';
+import { useEngraveJobStore } from '@/store/engraveJobStore';
+import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
+import { jobTool } from '@/engine/cnc/engrave/jobSetup';
 import type { ReleaseRecord } from '@/store/engraveReleaseStore';
 import type { MachineObservation } from '@/platform/machineProbe';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
-function remember(line: string): void {
+const PROBE = {
+  id: 'fx-probe-1',
+  kind: 'probe',
+  product: 'Makera Wired Probe V2',
+  variant: 'wired-touch',
+  constants: {},
+  unit: { tipDiameterMm: 2, rimOffsetMm: 0.7, lastM491: { z: -72.529, at: '2026-10-24T12:00:00.000Z' } },
+  provenance: {},
+  whereabouts: { kind: 'machine', machineId: 'm1', since: '2026-10-23T00:00:00.000Z' },
+  history: [],
+} as unknown as { id: string };
+
+const LOCATION = {
+  machines: [
+    {
+      id: 'm1',
+      profileId: 'Z1',
+      address: { host: '192.0.2.10', port: 2222 },
+      bedProfiles: [],
+      accessories: [],
+    },
+  ],
+  accessories: [
+    {
+      id: 'fx-probe-1',
+      kind: 'probe',
+      product: 'Makera Wired Probe V2',
+      variant: 'wired-touch',
+      constants: {},
+      unit: { tipDiameterMm: 2, rimOffsetMm: 0.7, lastM491: { z: -72.529, at: '2026-10-24T12:00:00.000Z' } },
+      provenance: {},
+      whereabouts: { kind: 'machine', machineId: 'm1', since: '2026-10-23T00:00:00.000Z' },
+      history: [],
+    },
+  ],
+} as unknown as NonNullable<ReturnType<typeof useLocationStore.getState>['location']>;
+void PROBE;
+
+function remember(line: string | null): void {
   const observation: MachineObservation = {
     name: 'QA Z1',
     host: '192.0.2.10',
@@ -29,7 +74,7 @@ function remember(line: string): void {
     notes: [],
   };
   useMachineStore.getState().setProbeResult({ kind: 'found', observation, calibration: null });
-  useMachineStore.getState().noteLiveStatusLine(line);
+  if (line !== null) useMachineStore.getState().noteLiveStatusLine(line);
 }
 
 beforeEach(() => {
@@ -38,56 +83,135 @@ beforeEach(() => {
   resetRegistrationTouchesStore();
   resetEngraveReleaseStore();
   resetMachineRunStore();
+  resetLocationStore();
+  useLocationStore.setState({ status: 'present', location: LOCATION, etag: '"e1"', reason: null });
+  useEngraveJobStore.getState().replace({ ...defaultEngraveJob(), toolKey: 'flat-1.0' });
 });
 
 afterEach(cleanup);
 
-describe('#519 item 3 — the strip while a registration runs', () => {
-  it('reads Probing for a Run state, and prints the runner’s step in the program slot', () => {
-    remember('<Run|MPos:-10,-10,-3|WPos:0,0,0|F:400,400,100>');
+describe('#647 the DRO — coordinates', () => {
+  it('states the WORK value over the MACHINE value, per axis, at three decimals', () => {
+    // Tonight's G54 against the homed rest: work 178.975 / 191.925 / 53.129, machine −1 / −1 / −1.
+    remember('<Idle|MPos:-1.0000,-1.0000,-1.0000|WPos:178.9750,191.9250,53.1290>');
+    render(<MachineStatusStrip />);
+
+    expect(screen.getByTestId('machine-status-work-x').textContent).toBe('178.975');
+    expect(screen.getByTestId('machine-status-machine-x').textContent).toBe('-1.000');
+    expect(screen.getByTestId('machine-status-work-y').textContent).toBe('191.925');
+    expect(screen.getByTestId('machine-status-work-z').textContent).toBe('53.129');
+    expect(screen.getByTestId('machine-status-machine-z').textContent).toBe('-1.000');
+  });
+
+  it('shows dashes before a status has been read, and no A axis on a 3-axis machine', () => {
+    remember(null);
+    render(<MachineStatusStrip />);
+    expect(screen.getByTestId('machine-status-work-x').textContent).toBe('—');
+    expect(screen.getByTestId('machine-status-machine-x').textContent).toBe('—');
+    expect(screen.queryByTestId('machine-status-axis-a')).toBeNull();
+  });
+
+  it('shows A only when the machine reports it', () => {
+    remember('<Idle|MPos:-1,-2,-3,10|WPos:0,0,0,10>');
+    render(<MachineStatusStrip />);
+    expect(screen.getByTestId('machine-status-work-a').textContent).toBe('10.000');
+    expect(screen.getByTestId('machine-status-machine-a').textContent).toBe('10.000');
+  });
+});
+
+describe('#647 the DRO — state as connection', () => {
+  it('reads the state word in the operator’s vocabulary', () => {
+    remember('<Idle|MPos:-1,-1,-1|WPos:0,0,0>');
+    render(<MachineStatusStrip />);
+    expect(screen.getByTestId('machine-status-state').textContent).toBe('Idle');
+    expect(screen.getByTestId('machine-status-state').getAttribute('data-state')).toBe('Idle');
+  });
+
+  it('names an alarm and carries its reason', () => {
+    remember('<Alarm|MPos:0,0,0>\nALARM: Probe fail');
+    render(<MachineStatusStrip />);
+    expect(screen.getByTestId('machine-status-state').textContent).toContain('Alarm');
+    expect(screen.getByTestId('machine-status-alarm-reason').textContent).toContain('Probe fail');
+  });
+
+  it('says Not answering with no status yet, and Offline when the heartbeat cannot reach it', () => {
+    remember(null);
+    render(<MachineStatusStrip />);
+    expect(screen.getByTestId('machine-status-state').textContent).toBe('Not answering');
+    cleanup();
+    useMachineStore.getState().noteHeartbeat(false);
+    render(<MachineStatusStrip />);
+    expect(screen.getByTestId('machine-status-state').textContent).toBe('Offline');
+  });
+
+  it('reads Paused while the app holds a suspended run, even if the line says Idle', () => {
+    remember('<Idle|MPos:-10,-10,-3|WPos:0,0,0>');
+    useMachineRunStore.setState({ runs: { '192.0.2.10:2222': { paused: true } as unknown as RunEntry } });
+    render(<MachineStatusStrip />);
+    expect(screen.getByTestId('machine-status-state').textContent).toBe('Paused');
+  });
+});
+
+describe('#647 the DRO — the tool slot', () => {
+  it('names the cutter the job runs with, and the hover carries T and the last M491', () => {
+    remember('<Idle|MPos:-1,-1,-1|WPos:0,0,0|T:1>');
+    render(<MachineStatusStrip />);
+    const name = jobTool(useEngraveJobStore.getState().job)!.name;
+    const slot = screen.getByTestId('machine-status-tool');
+    expect(slot.textContent).toBe(name);
+    expect(slot.getAttribute('title')).toContain('T1');
+    expect(slot.getAttribute('title')).toContain('M491 -72.529');
+  });
+
+  it('names the checked-out PROBE while a registration owns the machine', () => {
+    remember('<Run|MPos:-10,-10,-3|WPos:0,0,0|T:6>');
     useMachineStore.getState().setRegistrationActive(true);
     useRegistrationTouchesStore.getState().setStep('as low as machine Z -57.2 (the surface seek)');
     render(<MachineStatusStrip />);
-
     expect(screen.getByTestId('machine-status-state').textContent).toBe('Probing');
+    expect(screen.getByTestId('machine-status-tool').textContent).toBe('Makera Wired Probe V2');
     expect(screen.getByTestId('machine-status-step').textContent).toContain('the surface seek');
-    expect(screen.queryByTestId('machine-status-program')).toBeNull();
   });
+});
 
-  it('outside a registration the same Run state reads Running and shows the program', () => {
-    remember('<Run|MPos:-10,-10,-3|WPos:0,0,0|P:12,40,75>');
-    render(<MachineStatusStrip />);
-
-    expect(screen.getByTestId('machine-status-state').textContent).toBe('Running');
-    expect(screen.getByTestId('machine-status-program').textContent).toContain('line 12');
-    expect(screen.queryByTestId('machine-status-step')).toBeNull();
-  });
-
-  it('while a registration owns the machine the fitted instrument is the probe, not a T number', () => {
-    remember('<Run|MPos:-10,-10,-3|WPos:0,0,0|T:6>');
-    useMachineStore.getState().setRegistrationActive(true);
-    render(<MachineStatusStrip />);
-    expect(screen.getByTestId('machine-status-tool').textContent).toBe('probe');
-  });
-
-  it('prints the vacuum as what the app last SENT, with its qualifier', () => {
+describe('#647 the DRO — vacuum and progress', () => {
+  it('reads vacuum on/off with no qualifier (#646)', () => {
     remember('<Run|MPos:-10,-10,-3|WPos:0,0,0>');
-    // The strip reads only the record's vacuum; the rest of a release record is irrelevant here.
     useEngraveReleaseStore.setState({
       records: { '192.0.2.10:2222': { vacuum: 'on' } as unknown as ReleaseRecord },
     });
     render(<MachineStatusStrip />);
-    expect(screen.getByTestId('machine-status-vacuum').textContent).toBe('vacuum on (as sent)');
+    expect(screen.getByTestId('machine-status-vacuum').textContent).toBe('vacuum on');
   });
 
-  // #618 — the controller may say Idle once a suspend drains its queue; the app's own knowledge
-  // that it suspended this job is what the operator needs to see.
-  it('reads Paused while the app holds a suspended run, even if the line says Idle', () => {
-    remember('<Idle|MPos:-10,-10,-3|WPos:0,0,0>');
-    useMachineRunStore.setState({
-      runs: { '192.0.2.10:2222': { paused: true } as unknown as RunEntry },
-    });
+  it('drives the bar and the remaining time from the P: field', () => {
+    // line 12, 40 %, 75 s elapsed → about 113 s left (1:53).
+    remember('<Run|MPos:-10,-10,-3|WPos:0,0,0|P:12,40,75>');
     render(<MachineStatusStrip />);
-    expect(screen.getByTestId('machine-status-state').textContent).toBe('Paused');
+    expect(screen.getByTestId('machine-status-percent').textContent).toBe('40 %');
+    expect(screen.getByTestId('machine-status-remaining').textContent).toBe('1:53 left');
+  });
+
+  it('omits the progress cell when the line carries no P:', () => {
+    remember('<Idle|MPos:-1,-1,-1|WPos:0,0,0>');
+    render(<MachineStatusStrip />);
+    expect(screen.queryByTestId('machine-status-progress')).toBeNull();
+  });
+});
+
+describe('#647 the DRO — the layout contract', () => {
+  it('does not wrap: a nowrap row with ONE elastic cell (the tool name), everything else fixed', () => {
+    remember('<Run|MPos:-10,-10,-3|WPos:0,0,0|P:12,40,75>');
+    render(<MachineStatusStrip />);
+    const strip = screen.getByTestId('machine-status');
+    expect(strip.style.flexWrap).toBe('nowrap');
+    expect(strip.style.whiteSpace).toBe('nowrap');
+    const tool = screen.getByTestId('machine-status-tool');
+    // The tool name is the only cell that may SHRINK, and it ellipsises rather than pushing the row
+    // onto a second line; the state cell is a fixed width like the others.
+    expect(tool.style.flexShrink).toBe('1');
+    expect(tool.style.textOverflow).toBe('ellipsis');
+    expect(tool.style.overflow).toBe('hidden');
+    expect(screen.getByTestId('machine-status-state').style.flexShrink).toBe('0');
   });
 });

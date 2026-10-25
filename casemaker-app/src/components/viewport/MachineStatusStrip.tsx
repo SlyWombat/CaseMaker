@@ -2,33 +2,66 @@ import type { JSX } from 'react';
 import { useMachineStore } from '@/store/machineStore';
 import { useRegistrationTouchesStore } from '@/store/registrationTouchesStore';
 import { useEngraveReleaseStore } from '@/store/engraveReleaseStore';
+import { useEngraveJobStore } from '@/store/engraveJobStore';
 import { machineKey, useMachineRunStore } from '@/store/machineRunStore';
-import { readStatusLine, type JobProgress, type StatusRate } from '@/platform/desktop/protocol';
+import { accessoriesFor, machineRecordByProfile } from '@/store/locationStore';
+import { probeNameFor } from '@/engine/cnc/registration/mountContext';
+import { jobTool } from '@/engine/cnc/engrave/jobSetup';
+import { readStatusLine, type JobProgress, type StatusPosition } from '@/platform/desktop/protocol';
+import { alarmLine } from '@/platform/machineUpload';
 
 /**
- * #526 — the live machine in one line under the viewport, whenever a machine is remembered.
+ * #526/#647 — the live machine in one line under the viewport, whenever a machine is remembered.
  *
- * The strip is the single home for machine state (§7): it reads the raw `status` the store keeps
- * and the one parser in `protocol.ts` turns it into the facts it shows. Everything live — the
- * viewport's tool body and the touches — reads the same parsed line, so the strip cannot disagree
- * with them. The rail no longer prints machine state (the Cut surface's `MachineStrip` switches are
- * the operator's DECISIONS, not the machine's report; this is the report).
+ * THE DRO (design: `docs/design/status-strip-dro.md`, variant B). The strip answers the operator's
+ * questions left to right: is it running (the state dot and word, which is also the connection) →
+ * where is it (the WORK value large, the MACHINE value small and muted beneath it, per axis) → what
+ * is in it (the cutter or probe by NAME) → what is on (`vacuum off`) → how far along (a bar and the
+ * remaining time from the `P:` field). Everything comes from the same heartbeat line the viewport
+ * and the touches read, parsed by `protocol.ts`: nothing new is read from the machine.
+ *
+ * NO DEFENSIVE QUALIFIERS (#646). The strip states the value; where a provenance fact belongs it is
+ * in the hover (the T number and the probe's last M491), never a caveat on the value itself.
+ *
+ * FIXED-WIDTH CELLS, ONE ELASTIC. At 760 px nothing wraps: each cell is fixed or small, and the tool
+ * name is the only cell that grows, so it is the one that ellipsises.
  */
 
-/** The controller's state word in the operator's words (§5). */
-function stateWord(state: string | null): string {
-  if (state === null) return 'Not answering';
+/** The controller's state word in the operator's words (#647's vocabulary, the Cut step's own). */
+function stateWord(state: string | null, registrationActive: boolean, heartbeatReachable: boolean | null): string {
+  if (state === null) return heartbeatReachable === false ? 'Offline' : 'Not answering';
   switch (state) {
     case 'Idle':
       return 'Idle';
     case 'Home':
       return 'Homing';
     case 'Run':
-      return 'Running';
+      return registrationActive ? 'Probing' : 'Running';
     case 'Alarm':
       return 'Alarm';
+    case 'Hold':
+    case 'Door':
+      return 'Paused';
     default:
       return state;
+  }
+}
+
+/** The dot's colour: the state as a glance, the word as the answer. */
+function stateColour(word: string): string {
+  switch (word) {
+    case 'Idle':
+      return '#4caf50';
+    case 'Running':
+    case 'Probing':
+      return '#4a9eff';
+    case 'Paused':
+    case 'Homing':
+      return '#e0a020';
+    case 'Alarm':
+      return '#e05252';
+    default:
+      return '#7a8794';
   }
 }
 
@@ -37,7 +70,7 @@ function fmt3(n: number | null): string {
   return n === null ? '—' : n.toFixed(3);
 }
 
-/** `75` → `"1:15"`, `12` → `"12 s"` — the job's elapsed time (§5). */
+/** `75` → `"1:15"`, `12` → `"12 s"`. */
 function fmtElapsed(s: number): string {
   if (s < 60) return `${Math.round(s)} s`;
   const m = Math.floor(s / 60);
@@ -45,93 +78,170 @@ function fmtElapsed(s: number): string {
   return `${m}:${sec.toString().padStart(2, '0')}`;
 }
 
-/** The `P:` fact in the operator's words, or null when the line carries no program. */
-function fmtProgram(p: JobProgress | null | undefined): string | null {
-  if (p == null || (p.line === null && p.percent === null)) return null;
-  const parts: string[] = [];
-  if (p.line !== null) parts.push(`line ${p.line}`);
-  if (p.percent !== null) parts.push(`${p.percent} %`);
-  if (p.elapsedS !== null) parts.push(fmtElapsed(p.elapsedS));
-  return parts.join(' · ');
+/** The remaining time the `P:` percent and elapsed imply, or null while there is nothing to divide. */
+function remainingSeconds(p: JobProgress | null | undefined): number | null {
+  if (p == null || p.percent === null || p.elapsedS === null || p.percent <= 0 || p.percent >= 100) return null;
+  return Math.round((p.elapsedS * (100 - p.percent)) / p.percent);
 }
 
-/** The `S:` fact — actual rpm, `off` at zero, the set figure only when actual is missing. */
-function fmtSpindle(rate: StatusRate | null | undefined): string | null {
-  if (rate == null) return null;
-  if (rate.actual !== null) return rate.actual === 0 ? 'spindle off' : `spindle ${rate.actual} rpm`;
-  if (rate.set !== null) return `spindle ${rate.set} rpm (set)`;
-  return null;
+/** One axis: the work value large, the machine value small and muted beneath it. */
+function AxisCell({ axis, work, machine }: { axis: string; work: number | null; machine: number | null }): JSX.Element {
+  return (
+    <span data-testid={`machine-status-axis-${axis.toLowerCase()}`} style={{ display: 'inline-flex', gap: 5, alignItems: 'baseline', whiteSpace: 'nowrap' }}>
+      <span style={{ color: '#8a97a5', fontSize: 11 }}>{axis}</span>
+      <span style={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'flex-end', lineHeight: 1.05 }}>
+        <span
+          data-testid={`machine-status-work-${axis.toLowerCase()}`}
+          style={{ fontSize: 13, fontWeight: 600, fontVariantNumeric: 'tabular-nums', color: '#e8eef4' }}
+        >
+          {fmt3(work)}
+        </span>
+        <span
+          data-testid={`machine-status-machine-${axis.toLowerCase()}`}
+          style={{ fontSize: 10, fontVariantNumeric: 'tabular-nums', color: '#7a8794' }}
+        >
+          {fmt3(machine)}
+        </span>
+      </span>
+    </span>
+  );
+}
+
+/** The three (or four) axis cells, in the mock's order. */
+function Axes({ work, machine }: { work: StatusPosition | null; machine: StatusPosition | null }): JSX.Element {
+  return (
+    <span style={{ display: 'inline-flex', gap: 10, alignItems: 'center', whiteSpace: 'nowrap', flex: 'none' }}>
+      <AxisCell axis="X" work={work?.x ?? null} machine={machine?.x ?? null} />
+      <AxisCell axis="Y" work={work?.y ?? null} machine={machine?.y ?? null} />
+      <AxisCell axis="Z" work={work?.z ?? null} machine={machine?.z ?? null} />
+      {/* A only when the machine reports it: a 3-axis Z1 says nothing about a rotary it does not have. */}
+      {machine?.a != null && <AxisCell axis="A" work={work?.a ?? null} machine={machine.a} />}
+    </span>
+  );
 }
 
 export function MachineStatusStrip(): JSX.Element | null {
   const machine = useMachineStore((s) => s.machine);
-  // #519 item 3 — a registration owns the machine: the state reads Probing and the strip shows the
-  // runner's current step in the program's slot ("what the machine is doing now").
+  const heartbeat = useMachineStore((s) => s.heartbeat);
+  // #519 item 3 — a registration owns the machine: the state reads Probing and the tool slot names
+  // the probe.
   const registrationActive = useMachineStore((s) => s.registrationActive);
   const registrationStep = useRegistrationTouchesStore((s) => s.step);
-  // §5 — the vacuum is what the app last SENT (the controller does not report it), so the reading
-  // carries its own qualifier; `unknown` (after an alarm or a drop) is not printed as a state.
   const vacuum = useEngraveReleaseStore((s) =>
     machine === null ? null : s.records[machineKey(machine)]?.vacuum ?? null,
   );
-  // #618 — the app knows a job it suspended; the controller may read `Idle` once the queue drains.
   const runPaused = useMachineRunStore((s) => (machine === null ? false : s.runs[machineKey(machine)]?.paused === true));
   const requestStop = useMachineRunStore((s) => s.requestStop);
+  // #647 — the tool slot states the tool the job runs with, by name (#646: no qualifier).
+  const job = useEngraveJobStore((s) => s.job);
   if (machine === null) return null;
 
   // `statusLine` is set by the store and the probe; a test fixture may hand only the raw line.
   const line = machine.statusLine ?? (machine.status === null ? null : readStatusLine(machine.status));
   const state = runPaused
     ? 'Paused'
-    : registrationActive && line?.state === 'Run'
-      ? 'Probing'
-      : stateWord(line?.state ?? null);
-  const wpos = line?.wpos ?? null;
-  const idle = state === 'Idle' || state === 'Not answering';
-  const program = fmtProgram(line?.progress);
-  const spindle = fmtSpindle(line?.spindle);
-  const tool = line?.tool ?? null;
+    : stateWord(line?.state ?? null, registrationActive && line?.state === 'Run', heartbeat?.reachable ?? null);
+  const idle = state === 'Idle' || state === 'Not answering' || state === 'Offline';
+  // #647 — an alarm says its reason when the line carries one: `ALARM: Probe fail` is the operator's
+  // next question, and it is already in the reply.
+  const rawStatus = machine.status ?? (typeof machine.statusLine === 'string' ? machine.statusLine : null);
+  // The reason is the line's own alarm words, never the `<Alarm|…>` state line that names the state.
+  const reasonLines = (rawStatus ?? '')
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter((l) => l.length > 0 && !l.startsWith('<'));
+  const reason = state === 'Alarm' ? alarmLine(reasonLines.join('\n')) : null;
+  const progress = line?.progress ?? null;
+
+  const cutter = jobTool(job)?.name ?? null;
+  const toolNumber = line?.tool ?? null;
+  // The strip's machine is the OBSERVATION; the accessories and the probe name live on the saved
+  // machine record it resolves to (#604's accessor).
+  const record = machineRecordByProfile(machine.profileId ?? null);
+  const probeAcc = record === null ? null : accessoriesFor(record).find((a) => a.kind === 'probe') ?? null;
+  const lastM491 = probeAcc?.unit.lastM491;
+  const lastM491Z =
+    typeof lastM491 === 'object' && lastM491 !== null && typeof (lastM491 as { z?: unknown }).z === 'number'
+      ? (lastM491 as { z: number }).z
+      : null;
+  const toolName = registrationActive ? (probeNameFor(record) ?? 'probe') : cutter;
+  const toolTitle = [
+    toolNumber !== null ? `T${toolNumber}` : null,
+    lastM491Z !== null ? `M491 ${fmt3(lastM491Z)}` : null,
+  ]
+    .filter((part): part is string => part !== null)
+    .join(' · ');
+
+  const percent = progress?.percent ?? null;
+  const remaining = remainingSeconds(progress);
 
   return (
     <div
       data-testid="machine-status"
       style={{
         display: 'flex',
+        flexWrap: 'nowrap',
         alignItems: 'center',
         gap: 10,
-        padding: '2px 10px',
+        padding: '3px 10px',
         borderTop: '1px solid #2a2f36',
         fontSize: 11,
         color: '#c8d3de',
-        minHeight: 22,
+        minHeight: 30,
+        overflow: 'hidden',
+        whiteSpace: 'nowrap',
       }}
     >
-      <span data-testid="machine-status-state">{state}</span>
-      {/* #519 item 3 — the registration's current step occupies the program's slot while a
-          registration is running; a program's line/percent is the only other thing that slot says. */}
-      {registrationActive && registrationStep !== null ? (
-        <span data-testid="machine-status-step">{registrationStep}</span>
-      ) : (
-        program !== null && <span data-testid="machine-status-program">{program}</span>
-      )}
-      {spindle !== null && <span data-testid="machine-status-spindle">{spindle}</span>}
-      {vacuum !== null && vacuum !== 'unknown' && (
-        <span data-testid="machine-status-vacuum">vacuum {vacuum} (as sent)</span>
-      )}
-      {/* While a registration owns the machine the fitted instrument is the probe, not a T number. */}
-      {registrationActive ? (
-        <span data-testid="machine-status-tool">probe</span>
-      ) : (
-        tool !== null && <span data-testid="machine-status-tool">T{tool}</span>
-      )}
-      <span data-testid="machine-status-position">
-        X {fmt3(wpos?.x ?? null)} Y {fmt3(wpos?.y ?? null)} Z {fmt3(wpos?.z ?? null)} (work)
+      <span data-testid="machine-status-state" data-state={state} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, flex: 'none' }}>
+        <span aria-hidden="true" style={{ width: 8, height: 8, borderRadius: 4, background: stateColour(state), flex: 'none' }} />
+        <span style={{ fontWeight: 600, color: '#e8eef4' }}>{state}</span>
+        {reason !== null && (
+          <span data-testid="machine-status-alarm-reason" style={{ color: '#e0a0a0', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+            {reason}
+          </span>
+        )}
       </span>
+      <Axes work={line?.wpos ?? null} machine={line?.mpos ?? null} />
+      {/* The registration's current step is the operator's "what is it doing now" while the probe
+          is in: it sits where the program name would, after the coordinates. */}
+      {registrationActive && registrationStep !== null && (
+        <span data-testid="machine-status-step" style={{ overflow: 'hidden', textOverflow: 'ellipsis', color: '#a8b4c0' }}>
+          {registrationStep}
+        </span>
+      )}
+      <span
+        data-testid="machine-status-tool"
+        title={toolTitle}
+        style={{ flex: '0 1 auto', minWidth: 60, overflow: 'hidden', textOverflow: 'ellipsis', fontWeight: 600, color: '#e8eef4' }}
+      >
+        {toolName ?? (toolNumber !== null ? `T${toolNumber}` : 'no cutter')}
+      </span>
+      {vacuum !== null && vacuum !== 'unknown' && (
+        <span data-testid="machine-status-vacuum">
+          <span style={{ color: '#8a97a5' }}>vacuum</span>{' '}
+          <span style={{ fontWeight: 600, color: '#e8eef4' }}>{vacuum}</span>
+        </span>
+      )}
+      {percent !== null && (
+        <span data-testid="machine-status-progress" style={{ display: 'inline-flex', alignItems: 'center', gap: 8, flex: 'none' }}>
+          <span aria-hidden="true" style={{ width: 56, height: 6, borderRadius: 3, background: '#2a2f36', overflow: 'hidden' }}>
+            <span style={{ display: 'block', height: '100%', width: `${Math.max(0, Math.min(100, percent))}%`, background: '#4a9eff' }} />
+          </span>
+          <span data-testid="machine-status-percent" style={{ fontWeight: 600, color: '#e8eef4', fontVariantNumeric: 'tabular-nums' }}>
+            {percent} %
+          </span>
+          {remaining !== null && (
+            <span data-testid="machine-status-remaining" style={{ color: '#8a97a5' }}>
+              {fmtElapsed(remaining)} left
+            </span>
+          )}
+        </span>
+      )}
       {!idle && (
         <button
           type="button"
           data-testid="machine-status-stop"
-          style={{ marginLeft: 'auto', padding: '1px 8px' }}
+          style={{ flex: 'none', padding: '1px 8px' }}
           onClick={() => requestStop(machineKey(machine))}
         >
           Stop
