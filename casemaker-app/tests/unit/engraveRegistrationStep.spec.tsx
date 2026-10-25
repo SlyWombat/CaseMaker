@@ -12,6 +12,7 @@ import {
 } from '@/platform/machineConsole';
 import { EngraveRegistrationStep } from '@/components/panels/EngraveRegistrationStep';
 import { useLocationStore } from '@/store/locationStore';
+import { useEngraveRegistrationStore } from '@/store/engraveRegistrationStore';
 import { badgeBlankFor } from '@/engine/cnc/engrave/fromBadge';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { effectiveMargins } from '@/engine/cnc/engrave/depthBounds';
@@ -308,6 +309,55 @@ describe('#636 — the write-backs read their answer', () => {
     expect(answers).toHaveLength(0); // both answers consumed: one retry, then ok
     const notes = screen.queryByTestId('engrave-registration-notes')?.textContent ?? '';
     expect(notes).not.toContain('not saved');
+  });
+});
+
+describe('#639 a re-run forgets the last clamping', () => {
+  it('clears the record and the surface when the run starts, and a failed run leaves neither', async () => {
+    const plan = makePlan(-55.131);
+    const job = jobWithPlan(plan);
+    const spreadPlan = spreadPlanFor(job);
+    // The previous clamping: a recorded origin and a measured surface (a dome, so the Cut step would
+    // carry its tick). The re-run below alarms out at the first touch after the operator re-seated.
+    useEngraveRegistrationStore.getState().record(job.id, TARGET, plan, {
+      usable: true,
+      surfaceZ: -55.131,
+      offset: { x: 0, y: 0 },
+      measured: { x: true, y: true },
+      problems: [],
+      notes: [],
+      correctedG54: { x: 0, y: 0 },
+    } as never);
+    useEngraveRegistrationStore.getState().measureSurface(job.id, TARGET, {
+      plan: spreadPlan,
+      touches: [],
+      min: { z: -55.3 },
+      max: { z: -55 },
+      spread: 0.3,
+      drops: { xMm: 0.3, yMm: 0 },
+      z0: { z: -55.3, touchId: null, rule: 'lowest' },
+      fit: { kind: 'plane', offset: -55.15, slopeX: 0, slopeY: 0, residual: 0.3 },
+      tilt: { xMm: 0, yMm: 0 },
+      ok: false,
+      verdict: 'dome',
+    } as never);
+    expect(useEngraveRegistrationStore.getState().records[job.id]).toBeDefined();
+    expect(useEngraveRegistrationStore.getState().surfaces[job.id]).toBeDefined();
+
+    install(plan, { alarmAtFastTouch: true });
+    useEngraveJobStore.setState({ job });
+    render(<EngraveRegistrationStep job={job} target={TARGET} />);
+    fireEvent.click(screen.getByTestId('engrave-registration-at-machine'));
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('engrave-registration-start'));
+    });
+    // The start cleared the previous clamping's record and surface...
+    expect(useEngraveRegistrationStore.getState().records[job.id]).toBeUndefined();
+    expect(useEngraveRegistrationStore.getState().surfaces[job.id]).toBeUndefined();
+    // ...and the failed run leaves nothing behind: no "recorded" claim survives a stop.
+    await screen.findByTestId('engrave-registration-failed');
+    expect(useEngraveRegistrationStore.getState().records[job.id]).toBeUndefined();
+    expect(useEngraveRegistrationStore.getState().surfaces[job.id]).toBeUndefined();
   });
 });
 

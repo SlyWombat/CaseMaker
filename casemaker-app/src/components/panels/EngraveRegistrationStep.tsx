@@ -245,6 +245,11 @@ export function EngraveRegistrationStep({ job, target }: EngraveRegistrationStep
 
   async function start(): Promise<void> {
     if (target === null || plan === null || !atMachine || busy) return;
+    // #639 — A NEW RUN FORGETS THE LAST CLAMPING. The record and the surface assessment belong to
+    // the blank as it was; keeping them through a re-run (which may alarm out or be stopped) left
+    // the Cut step claiming "Registration recorded", the dome tick ticked, and Upload enabled
+    // against a blank that had moved.
+    useEngraveRegistrationStore.getState().clear(job.id);
     setPhase('running');
     setResult(null);
     setWritten(null);
@@ -464,6 +469,8 @@ export function EngraveRegistrationStep({ job, target }: EngraveRegistrationStep
   }
 
   function again(): void {
+    // #639 — "Run it again" is a new clamping too: the last run's record and surface go with it.
+    useEngraveRegistrationStore.getState().clear(job.id);
     // A measurement that was not written still holds the console open: release it before a new run.
     const handle = handleRef.current;
     handleRef.current = null;
