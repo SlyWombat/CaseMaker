@@ -11,6 +11,7 @@ import {
   type MachineConsoleClient,
 } from '@/platform/machineConsole';
 import { EngraveRegistrationStep } from '@/components/panels/EngraveRegistrationStep';
+import { useLocationStore } from '@/store/locationStore';
 import { badgeBlankFor } from '@/engine/cnc/engrave/fromBadge';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { effectiveMargins } from '@/engine/cnc/engrave/depthBounds';
@@ -233,6 +234,82 @@ async function writeOrigin(): Promise<void> {
     fireEvent.click(screen.getByTestId('engrave-registration-continue'));
   });
 }
+
+/** A location with the target machine and one bed profile, so the step's write chain runs. */
+function beddedLocation() {
+  useLocationStore.setState({
+    status: 'present',
+    etag: '"e1"',
+    reason: null,
+    location: {
+      machines: [
+        {
+          id: 'm1',
+          profileId: 'Z1',
+          address: { host: TARGET.host, port: TARGET.port },
+          bedProfiles: [
+            {
+              id: 'bp1',
+              datums: { surfaceTopZ: null, viseJawTopZ: null, bracketSeatZ: null, rotaryAxis: null },
+              placements: [],
+              surface: null,
+              history: [],
+            },
+          ],
+          activeBedProfileId: 'bp1',
+          history: [],
+          notes: [],
+          observedAt: '2026-10-25T00:00:00.000Z',
+        },
+      ],
+      accessories: [],
+    } as unknown as NonNullable<ReturnType<typeof useLocationStore.getState>['location']>,
+  });
+}
+
+describe('#636 — the write-backs read their answer', () => {
+  it('a save that does not land is stated on the result, never reported as recorded', async () => {
+    const plan = makePlan(-55.131);
+    const job = jobWithPlan(plan);
+    install(plan);
+    beddedLocation();
+    const calls: string[] = [];
+    useLocationStore.setState({
+      // Every attempt fails (two, because a 'failed' answer gets no retry beyond the stale rule).
+      saveMachine: async () => {
+        calls.push('failed');
+        useLocationStore.setState({ writeNote: 'the location document changed elsewhere' });
+        return 'failed';
+      },
+    });
+    useEngraveJobStore.setState({ job });
+    render(<EngraveRegistrationStep job={job} target={TARGET} />);
+    await runStep();
+
+    expect(calls).toEqual(['failed']);
+    const notes = screen.getByTestId('engrave-registration-notes').textContent ?? '';
+    expect(notes).toContain('the measurement was taken, but the record was not saved: the location document changed elsewhere');
+    expect(notes).not.toContain('recorded');
+  });
+
+  it('a stale guard retries once against the re-read and records on the second answer', async () => {
+    const plan = makePlan(-55.131);
+    const job = jobWithPlan(plan);
+    install(plan);
+    beddedLocation();
+    const answers: Array<'stale' | 'ok'> = ['stale', 'ok'];
+    useLocationStore.setState({
+      saveMachine: async () => answers.shift() ?? 'ok',
+    });
+    useEngraveJobStore.setState({ job });
+    render(<EngraveRegistrationStep job={job} target={TARGET} />);
+    await runStep();
+
+    expect(answers).toHaveLength(0); // both answers consumed: one retry, then ok
+    const notes = screen.queryByTestId('engrave-registration-notes')?.textContent ?? '';
+    expect(notes).not.toContain('not saved');
+  });
+});
 
 describe('#495 — the registration step', () => {
   it.each([

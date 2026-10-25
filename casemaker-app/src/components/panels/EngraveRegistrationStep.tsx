@@ -60,7 +60,7 @@ import { cuttingDiameter } from '@/engine/cnc/tool';
 import { shopDefault, useShopDefaultsStore } from '@/store/shopDefaultsStore';
 import { useEngraveJobStore } from '@/store/engraveJobStore';
 import { useEngraveRegistrationStore } from '@/store/engraveRegistrationStore';
-import { createFirstBed, machineAt, useLocationStore } from '@/store/locationStore';
+import { createFirstBed, machineAt, saveMachineWithRetry, useLocationStore } from '@/store/locationStore';
 import { recordProbeReading } from '@/engine/cnc/registration/mountContext';
 import {
   viseFrameFromRegistration,
@@ -337,71 +337,72 @@ export function EngraveRegistrationStep({ job, target }: EngraveRegistrationStep
         await handle.close();
         return;
       }
-      // #600 — a usable vise registration fixes the placement frame, so the mount tap and the datum
-      // path read it instead of falling back to the newest registration record every time.
-      if (r.outcome.usable && plan.mount === 'vise') {
+      // #636 — THE MEASUREMENT IS ON SCREEN BEFORE ANY HOUSE WRITE. A throw or a refused save in
+      // the chain below used to land in the outer catch as `failed`, and the successful probe result
+      // was never shown; it is set first here, and every write's ANSWER is read below, with the
+      // failure stated on the result rather than swallowed.
+      setResult(r);
+      const writeNotes: string[] = [];
+      try {
         const machine = machineAt(target);
-        if (machine !== null) {
+        if (machine !== null && (r.outcome.usable || r.mountTap !== null)) {
           const now = new Date().toISOString();
-          const registration = { measuredAt: now, correctedG54: r.outcome.correctedG54 };
-          const frame = viseFrameFromRegistration(registration, job.workholding.vise.jawStartY);
-          // #613 — a machine with no bed profile gets one here (bare bed, the vise accessory, the
-          // pins placement) so the frame write-back has an active profile to land on.
-          const withBed = await createFirstBed(machine, registration, now);
-          const withFrame = withVisePlacementFrame(withBed, frame, { fixedJawFaceX: `measured:${now}`, jawStartY: 'typed' }, now);
-          // #619 — write the measured surface top so the next plan expects the found top, not the ledge.
-          const withSurface = withSurfaceTopDatum(
-            withFrame,
-            { z: r.data.surface.z, at: plan.surfacePoint },
-            plan.probe?.id ?? null,
-            now,
-          );
-          await useLocationStore.getState().saveMachine(withSurface);
-        }
-      }
-      // #599/#607 — the mount tap measured a reference: write it into the datum that reference IS.
-      if (r.mountTap !== null) {
-        const machine = machineAt(target);
-        if (machine !== null) {
-          const now = new Date().toISOString();
-          // #613 — a no-profile machine still needs the bed before the datum can land; the frame is
-          // null here (a tap alone does not place the jaw), which a later registration fills.
-          const withBed = await createFirstBed(machine, null, now);
+          const frameRegistration =
+            r.outcome.usable && plan.mount === 'vise'
+              ? { measuredAt: now, correctedG54: r.outcome.correctedG54 }
+              : null;
+          // #613/#636 — ONE bed for the whole run: the frame and the datum land in ONE save, not two
+          // beds in a row (a 'failed' first save could otherwise create a second, frame-less bed).
+          let record = await createFirstBed(machine, frameRegistration, now);
+          if (frameRegistration !== null) {
+            const frame = viseFrameFromRegistration(frameRegistration, job.workholding.vise.jawStartY);
+            record = withVisePlacementFrame(record, frame, { fixedJawFaceX: `measured:${now}`, jawStartY: 'typed' }, now);
+            // #619 — write the measured surface top so the next plan expects the found top.
+            record = withSurfaceTopDatum(record, { z: r.data.surface.z, at: plan.surfacePoint }, plan.probe?.id ?? null, now);
+          }
           const probeId = plan.probe?.id ?? null;
           const reference = plan.mountTap?.reference ?? 'vise-jaw-top';
-          if (reference === 'bracket-seat') {
-            // #607 — the reading is the bracket's TOP; the datum is the SEAT it stands on, one
-            // bracket height below (`bracketSeatFromTap`). Machine save first, then the shop default
-            // the compiler reads — or the next plan refuses a seat this run has just measured.
-            // The offset is the arm's MEASURED top (`bracket.armTopMm`), carried on the tap.
-            const seat = bracketSeatFromTap(r.mountTap.z, plan.mountTap?.datumOffsetMm ?? 0);
-            await useLocationStore
-              .getState()
-              .saveMachine(withBracketSeatDatum(withBed, { z: seat, at: r.mountTap.at }, probeId, now));
+          let bracketSeat: number | null = null;
+          if (r.mountTap !== null) {
+            if (reference === 'bracket-seat') {
+              // #607 — the reading is the bracket's TOP; the datum is the SEAT it stands on, one
+              // bracket height below (`bracketSeatFromTap`), using the arm's measured top.
+              bracketSeat = bracketSeatFromTap(r.mountTap.z, plan.mountTap?.datumOffsetMm ?? 0);
+              record = withBracketSeatDatum(record, { z: bracketSeat, at: r.mountTap.at }, probeId, now);
+            } else {
+              record = withViseJawTopDatum(record, r.mountTap, probeId, now);
+            }
+          }
+          const outcome = await saveMachineWithRetry(record);
+          if (outcome !== 'ok') {
+            // Never "recorded" without 'ok': the measurement stands on screen, the datum does not.
+            writeNotes.push(
+              `the measurement was taken, but the record was not saved: ${useLocationStore.getState().writeNote ?? 'the service refused the write'}. Run the registration again to write it.`,
+            );
+          } else if (bracketSeat !== null) {
+            // The shop default the compiler reads moves with the seat the run just measured.
             const saved = await useShopDefaultsStore.getState().set('bracket.seatMachineZ', {
-              value: seat,
+              value: bracketSeat,
               source: 'measured',
               setAt: now,
               unit: 'mm',
               note: 'tapped on the bracket’s top face',
             });
             if (!saved) {
-              // A note on the RESULT, not a console line: the step renders `outcome.notes` beside
-              // its verdict, and a tap whose seat did not stick must be visible there.
-              r.outcome.notes.push(
+              writeNotes.push(
                 `the bracket seat was tapped, but the shop default was not saved: ${useShopDefaultsStore.getState().reason ?? 'the write was refused'}`,
               );
             }
-          } else {
-            // The vise's datum — the path every pre-#607 run took, unchanged.
-            await useLocationStore
-              .getState()
-              .saveMachine(withViseJawTopDatum(withBed, r.mountTap, probeId, now));
           }
         }
+        // #601 — the probe's last M491 length and M119 rest ride on the checked-out probe accessory.
+        await recordProbeReading(machineAt(target), r.probe);
+      } catch (e) {
+        writeNotes.push(
+          `the measurement was taken, but the record was not saved: ${e instanceof Error ? e.message : String(e)}. Run the registration again to write it.`,
+        );
       }
-      // #601 — the probe's last M491 length and M119 rest ride on the checked-out probe accessory.
-      await recordProbeReading(machineAt(target), r.probe);
+      for (const note of writeNotes) r.outcome.notes.push(note);
       setResult(r);
       setPhase('measured');
       if (writerRefusal(r.outcome) !== null) {

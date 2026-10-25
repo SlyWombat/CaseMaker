@@ -458,6 +458,18 @@ export function finishedProgramsFor(target: { host: string; port: number }): rea
 }
 
 /**
+ * #636 — a machine write with the one retry a stale guard earns: `saveMachine` re-reads the location
+ * on a 412/428 (another window or a CLI wrote it), so the caller's record is retried ONCE against
+ * what is served now. Every datum/frame write goes through this, and every caller must READ the
+ * answer: 'stale' twice and 'failed' are not "recorded".
+ */
+export async function saveMachineWithRetry(record: MachineRecord): Promise<'ok' | 'stale' | 'failed'> {
+  const first = await useLocationStore.getState().saveMachine(record);
+  if (first !== 'stale') return first;
+  return useLocationStore.getState().saveMachine(record);
+}
+
+/**
  * #613 — the first registration on a machine with no bed profile creates the bed: the vise accessory
  * is written to the house's `accessories[]` (skipped when it already exists, so the action is
  * idempotent), and the machine is returned with the new profile + active id folded in, ready for the

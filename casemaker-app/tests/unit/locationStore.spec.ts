@@ -28,6 +28,7 @@ import {
   sameRecord,
   startLocationSync,
   useLocationStore,
+  saveMachineWithRetry,
 } from '@/store/locationStore';
 import { resetHouseStore, useHouseStore } from '@/store/houseStore';
 import { useMachineStore } from '@/store/machineStore';
@@ -566,5 +567,34 @@ describe('#439 an edit whose write failed survives a restart', () => {
       expect(useSettingsStore.getState().margins.edgeMargin).toBe(MARGIN_DEFAULTS.edgeMargin);
       expect(service.puts).toHaveLength(0);
     }
+  });
+});
+
+describe('#636 saveMachineWithRetry', () => {
+  it('retries once on a stale guard and returns the second answer', async () => {
+    const answers: Array<'ok' | 'stale' | 'failed'> = ['stale', 'ok'];
+    const calls: number[] = [];
+    useLocationStore.setState({
+      saveMachine: async () => {
+        calls.push(1);
+        return answers.shift() ?? 'failed';
+      },
+    });
+    const record = { id: 'm1', profileId: 'Z1', address: { host: '192.0.2.10', port: 2222 }, bedProfiles: [], history: [] } as unknown as Parameters<typeof saveMachineWithRetry>[0];
+    expect(await saveMachineWithRetry(record)).toBe('ok');
+    expect(calls).toHaveLength(2);
+  });
+
+  it('does not retry a failed write, and reports a second stale as stale', async () => {
+    const failed: Array<'ok' | 'stale' | 'failed'> = ['failed'];
+    useLocationStore.setState({ saveMachine: async () => failed.shift() ?? 'failed' });
+    const record = {} as unknown as Parameters<typeof saveMachineWithRetry>[0];
+    expect(await saveMachineWithRetry(record)).toBe('failed');
+    expect(failed).toHaveLength(0);
+
+    const stales: Array<'ok' | 'stale' | 'failed'> = ['stale', 'stale'];
+    useLocationStore.setState({ saveMachine: async () => stales.shift() ?? 'failed' });
+    expect(await saveMachineWithRetry(record)).toBe('stale');
+    expect(stales).toHaveLength(0);
   });
 });

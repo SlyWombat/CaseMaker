@@ -12,7 +12,7 @@ import { runMountTap, type OperatorStep } from '@/engine/cnc/registration';
 import type { RegistrationSettings } from '@/engine/cnc/registration/settings';
 import type { PlanMountTap } from '@/engine/cnc/registration/plan';
 import { useMachineTranscriptStore } from '@/store/machineTranscriptStore';
-import { createFirstBed, machineAt, useLocationStore } from '@/store/locationStore';
+import { createFirstBed, machineAt, saveMachineWithRetry, useLocationStore } from '@/store/locationStore';
 import { withBracketSeatDatum, withViseJawTopDatum } from '@/platform/bedProfiles';
 import { bracketSeatFromTap } from '@/engine/cnc/mounts/bracket';
 import { useShopDefaultsStore } from '@/store/shopDefaultsStore';
@@ -96,9 +96,16 @@ export function useMountTap(inputs: MountTapInputs): MountTapApi {
             // #607 — the reading is the bracket's top; the datum is the seat one height below. The
             // shop default is what the compiler reads, so the tap moves it too (or says it could not).
             const seat = bracketSeatFromTap(r.z, tap.datumOffsetMm ?? 0);
-            await useLocationStore
-              .getState()
-              .saveMachine(withBracketSeatDatum(withBed, { z: seat, at: r.at }, inputs.probeId, now));
+            // #636 — the write's answer is read: a stale guard retries once against the re-read, and
+            // a record that did not land is never reported as one that did.
+            const outcome = await saveMachineWithRetry(withBracketSeatDatum(withBed, { z: seat, at: r.at }, inputs.probeId, now));
+            if (outcome !== 'ok') {
+              setNote(
+                `the seat was tapped, but the machine record was not saved: ${useLocationStore.getState().writeNote ?? 'the service refused the write'}. Run the tap again to write it.`,
+              );
+              await recordProbeReading(record, r.probe);
+              return;
+            }
             const saved = await useShopDefaultsStore.getState().set('bracket.seatMachineZ', {
               value: seat,
               source: 'measured',
@@ -115,7 +122,14 @@ export function useMountTap(inputs: MountTapInputs): MountTapApi {
               return;
             }
           } else {
-            await useLocationStore.getState().saveMachine(withViseJawTopDatum(withBed, { z: r.z, at: r.at }, inputs.probeId, now));
+            const outcome = await saveMachineWithRetry(withViseJawTopDatum(withBed, { z: r.z, at: r.at }, inputs.probeId, now));
+            if (outcome !== 'ok') {
+              setNote(
+                `the jaw top was tapped, but the machine record was not saved: ${useLocationStore.getState().writeNote ?? 'the service refused the write'}. Run the tap again to write it.`,
+              );
+              await recordProbeReading(record, r.probe);
+              return;
+            }
           }
           // #601 — the probe's last M491 length and M119 rest ride on the checked-out probe accessory.
           await recordProbeReading(record, r.probe);
