@@ -18,9 +18,10 @@ import { cutterIdentity } from '@/engine/cnc/engrave/cutterCaseLine';
 /**
  * #255 — send the verified program to the machine, from beside Save in the engrave panel.
  *
- * DESKTOP BUILD ONLY. The panel mounts this behind `canDriveMachine`, so the web build has no
- * upload control at all — rather than a button that exists to explain why it cannot work. That is
- * the same boundary `capabilities.ts` draws for the bridge itself (#181).
+ * IT NEEDS A MACHINE, NOT A BUILD TARGET. The panel mounts this only when a machine is connected
+ * (#656 review: the bench drives through `/api/v1/machine/*` from a plain browser, and the public
+ * web target — where no probe can reach a machine — never has one), so there is never an upload
+ * control that exists to explain why it cannot work.
  *
  * TWO PRESSES, ALWAYS. Uploading is the only action in this app that WRITES to the machine
  * (`/Fabrication.md` §8: nothing is sent without an explicit go-ahead), so the first press opens a

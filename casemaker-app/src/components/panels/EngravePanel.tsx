@@ -15,7 +15,6 @@ import { preflightHub } from '@/engine/cnc/preflight';
 import type { PreflightCause } from '@/engine/cnc/preflight';
 import { runContextFor } from '@/store/machineRunStore';
 import { stepAtLine } from '@/engine/cnc/playbackClock';
-import { canDriveMachine } from '@/platform/capabilities';
 import { EngraveCutSurface } from './EngraveCutSurface';
 import { saveEngraveProgram } from '@/engine/exportTrigger';
 import { useSettingsStore } from '@/store/settingsStore';
@@ -3218,7 +3217,6 @@ export function EngravePanel(): JSX.Element {
               generated={run.generated}
               staleSince={run.staleSince}
               machine={machine}
-              canDriveMachine={canDriveMachine}
               runContext={runContext}
               uploadBlocker={uploadBlockerText}
               releaseBlocker={releaseBlockerText}

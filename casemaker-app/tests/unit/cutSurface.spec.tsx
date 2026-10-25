@@ -234,7 +234,6 @@ function Harness(props: Props) {
       generated={props.generated}
       staleSince={props.staleSince ?? null}
       machine={props.canDrive === false ? null : machineObservation()}
-      canDriveMachine={props.canDrive !== false}
       runContext={{}}
       uploadBlocker={null}
       releaseBlocker={null}
@@ -462,7 +461,7 @@ describe('#419 §3 the Cut surface', () => {
     expect(rec?.notes.join('\n')).toContain('no verifier report for its frozen text');
   });
 
-  it('shows ONE plan under Cut, and run controls only when this build may drive a machine', async () => {
+  it('shows ONE plan under Cut, and the run controls only when a machine is connected', async () => {
     const job = twoSetupJob();
     const pkg = frozen(job, [P1, P2]);
     const props = { job, report: reportOf(), pkg, generated: generated([P1, P2]) };
@@ -473,7 +472,8 @@ describe('#419 §3 the Cut surface', () => {
     expect(screen.getByTestId('engrave-cut-plan')).toBeTruthy();
     expect(screen.getByTestId('engrave-cut-run')).toBeTruthy();
 
-    // Same plan, no controls: the web build shows what the run would be but sends nothing.
+    // Same plan, no controls: with no machine there is nothing to send to. The build target is not
+    // consulted (#656 review) — the machine store is the gate, wherever the machine can be driven.
     view.show({ ...props, canDrive: false });
     expect(screen.getAllByTestId('run-plan')).toHaveLength(1);
     expect(screen.getByTestId('machine-strip')).toBeTruthy();

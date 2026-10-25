@@ -135,10 +135,11 @@ export interface EngraveCutSurfaceProps {
   generated: EngraveGenerated | null;
   /** The run store's stale mark; a re-freeze is offered only when it is null. */
   staleSince: number | null;
-  /** The machine the last check reached, or null. */
+  /** The machine the last check reached, or null. THE gate on everything that sends: the machine
+   *  store can only hold a machine a probe reached through the bridge, and the bridge exists
+   *  wherever one can be driven — the desktop shell's webview, or the same bundle served to a LAN
+   *  browser by the embedded server (#656 review: the build target is not that question). */
   machine: MachineObservation | null;
-  /** Desktop build only; in the web build the plan is shown but nothing may be sent. */
-  canDriveMachine: boolean;
   /** `runContextFor(job, tool)` — the job facts each played file's end needs (#414). */
   runContext: Omit<RunContext, 'nc'>;
   /** `uploadBlocker(run)` — the single-file path's gate. */
@@ -172,7 +173,6 @@ export function EngraveCutSurface({
   generated,
   staleSince,
   machine,
-  canDriveMachine,
   runContext,
   uploadBlocker,
   releaseBlocker,
@@ -310,8 +310,13 @@ export function EngraveCutSurface({
   const runContextWithDry = dryRunLevel === 'off' ? runContext : { ...runContext, dryRun: true as const };
   // #656 — THE ORDINARY PATH IS ONE SCREEN. It needs a machine to drive, the real (not dry-run)
   // single program, and its report; multi-program jobs keep the release flow in the disclosure.
+  //
+  // THE MACHINE IS THE GATE, NOT THE BUILD TARGET (#656 review). The bench runs the desktop
+  // bundle in a plain browser at http://<host>:8000, driving through `/api/v1/machine/*`; the web
+  // target is the PUBLIC site, where no probe can ever reach a machine, so `machine !== null`
+  // already excludes it. Keying on the build made the one screen depend on how the bundle was
+  // built rather than on whether a machine can be driven.
   const oneScreen =
-    canDriveMachine &&
     target !== null &&
     machine !== null &&
     dryRunLevel === 'off' &&
@@ -629,7 +634,7 @@ export function EngraveCutSurface({
             </div>
           </details>
 
-          {canDriveMachine && target !== null && (
+          {target !== null && (
             <section style={{ marginTop: 10 }} data-testid="engrave-cut-run">
               {/* #547 — the dry-run selector. Both levels fly the real XY path at a safe Z with the
                   spindle off; `traverse` plays one program, `full` the whole list. */}

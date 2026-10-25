@@ -6,19 +6,15 @@
 // the frozen cutter's own words (`getFrozenProgram`) — the first Generate recommends a cutter from
 // the preview, so a spec cannot know its name any other way.
 //
-// THE ONE SCREEN IS THE DESKTOP BUILD'S. #656's comment says the expert path stays the default when
-// the one screen is not offered — "a multi-program job, the web build, or no machine". So this
-// spec runs against the desktop target and skips elsewhere:
+// WHAT THE ONE SCREEN NEEDS IS A MACHINE, NOT A BUILD TARGET (#656 review). The bench runs this
+// bundle in a plain browser at http://<host>:8000, driving through `/api/v1/machine/*`; the public
+// web target is the one place a machine can never be reached, and `machine !== null` already
+// excludes it. So this spec runs in the DEFAULT (web-target) e2e build like every other spec:
 //
-//   BUILD_TARGET=desktop npx playwright test tests/e2e/cutConfirm.spec.ts
+//   npx playwright test tests/e2e/cutConfirm.spec.ts
 
 import type { Page } from '@playwright/test';
 import { test, expect } from './fixtures/caseMaker';
-
-test.skip(
-  process.env.BUILD_TARGET !== 'desktop',
-  'the Cut one screen renders only in the desktop build (the web build keeps the expert path)',
-);
 
 /** A status line with the monitor fields the popover reads: `S:` temperatures. */
 const STATUS = '<Idle|MPos:0,0,0|WPos:0,0,0|S:0.0,10000.0,100.0,0,25.8,24.0,0,0,0,0>';
