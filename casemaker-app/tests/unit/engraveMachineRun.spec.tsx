@@ -20,11 +20,15 @@ import type { VerifyReport } from '@/engine/cnc/verify';
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 const sent: string[] = [];
-/** A controller: Idle before play; then `runFor` polls of Run before it finishes; Idle after abort. */
-function client(runFor: number): MachineConsoleClient {
+/**
+ * A controller: Idle before play; then `runFor` polls of Run before it finishes; Idle after abort.
+ * #655 — `toolPolls` first answers the firmware's `Tool` state (a `T1 M6` waiting for `M490.2`).
+ */
+function client(runFor: number, opts: { toolPolls?: number } = {}): MachineConsoleClient {
   let played = false;
   let aborted = false;
   let polls = 0;
+  let toolLeft = opts.toolPolls ?? 0;
   return {
     async open() {
       return {
@@ -33,7 +37,14 @@ function client(runFor: number): MachineConsoleClient {
           let text = 'ok';
           if (line === '?') {
             if (!played || aborted) text = '<Idle|MPos:0,0,0>';
-            else text = polls++ < runFor ? '<Run|MPos:0,0,0|P:10,20,5>' : '<Idle|P:9,100,4>';
+            else if (toolLeft > 0) {
+              toolLeft -= 1;
+              text = '<Tool|MPos:-10.090,-12.830,-3.000|WPos:0,0,0|T:0,-9.757,1>';
+            } else text = polls++ < runFor ? '<Run|MPos:0,0,0|P:10,20,5>' : '<Idle|P:9,100,4>';
+          } else if (line === 'M490.2') {
+            // #655 — the bench's continuation: the tool is measured at the sensor and the change ends.
+            toolLeft = 0;
+            text = 'ok\nM493.2 T1\nok\nDone ATC';
           } else if (line.startsWith('play')) {
             played = true;
             text = 'File size 10';
@@ -55,7 +66,11 @@ const MACHINE: MachineObservation = {
   status: '<Idle|MPos:0,0,0>', profileId: 'Z1', observedAt: '2026-10-16T00:00:00.000Z', notes: [],
 };
 const VERIFY: VerifyReport = { ok: true, findings: [], stats: { lines: 1, cuttingMoves: 0, deepestZ: 0, bbox: { min: [0, 0, 0], max: [1, 1, 0] } } };
-const upload = (nc = 'M02\n', onProgramLine?: (line: number | null) => void) => (
+const upload = (
+  nc = 'M02\n',
+  onProgramLine?: (line: number | null) => void,
+  runContext?: { toolKey?: string },
+) => (
   <EngraveMachineUpload
     blocker={null}
     machine={MACHINE}
@@ -63,6 +78,7 @@ const upload = (nc = 'M02\n', onProgramLine?: (line: number | null) => void) => 
     filename="job.nc"
     lift={{ zMachine: -3, zFloorMachine: -102 }}
     onProgramLine={onProgramLine}
+    {...(runContext === undefined ? {} : { runContext })}
   />
 );
 
@@ -226,5 +242,47 @@ describe('runContextFor', () => {
       tool,
     );
     expect(ctx.stockEntryId).toBe('inv:stock-7');
+  });
+});
+
+// #655 — THE FIRMWARE'S TOOL STOP, in the panel. The first cut sat at `Tool` with Pause/Stop only;
+// the prompt names the tool and its cutter, and Continue sends `M490.2`, after which the program
+// runs to its finish.
+describe('#655 the tool-change stop', () => {
+  it('shows the prompt in our words and Continue carries the program on', async () => {
+    setMachineConsoleLoader(async () => client(1, { toolPolls: 8 }));
+    render(upload());
+    await uploadIt();
+    fireEvent.click(screen.getByTestId('engrave-run-at-machine'));
+    fireEvent.click(screen.getByTestId('engrave-run-start'));
+
+    await screen.findByTestId('engrave-run-tool-prompt', undefined, { timeout: 8000 });
+    // An upload with no run context (a file outside the job flow) names the tool number only.
+    expect(screen.getByTestId('engrave-run-tool-words').textContent).toBe(
+      'The machine is waiting for tool 1 to be in the spindle.',
+    );
+    // Nothing to suspend while it waits: Pause is not offered, Stop still is.
+    expect(screen.queryByTestId('engrave-run-pause')).toBeNull();
+    expect(screen.getByTestId('engrave-run-stop')).toBeTruthy();
+
+    fireEvent.click(screen.getByTestId('engrave-run-tool-continue'));
+    await waitFor(() => expect(sent).toContain('M490.2'), { timeout: 8000 });
+    await waitFor(() => expect(screen.getByTestId('engrave-run-outcome').dataset.state).toBe('finished'), { timeout: 8000 });
+    expect(screen.queryByTestId('engrave-run-tool-prompt')).toBeNull();
+  }, 30000);
+});
+
+// The naming half of the same prompt: the run's OWN cutter, by the same display name the strip and
+// the run sheet use.
+describe('#655 the prompt names the run’s cutter', () => {
+  it('says which cutter tool 1 is', () => {
+    const key = machineKey(TARGET);
+    useMachineRunStore.getState().prepare(TARGET, 'job.nc', 'h', { nc: 'M02\n', toolKey: 'flat-1.0' });
+    const entry = useMachineRunStore.getState().runs[key]!;
+    useMachineRunStore.setState({ runs: { [key]: { ...entry, running: true, toolWaiting: { awaited: 1 } } } });
+    render(<EngraveMachineRun target={TARGET} />);
+    expect(screen.getByTestId('engrave-run-tool-words').textContent).toBe(
+      'The machine is waiting for tool 1 — the 1 mm flat end — to be in the spindle.',
+    );
   });
 });

@@ -85,6 +85,19 @@ export function readProgress(text: string): Progress {
   return { state: state === null ? null : state[1]!, line: num(0), percent: num(1), elapsedS: num(2) };
 }
 
+/**
+ * #655 — the tool a pending change waits for: the `T:` field's THIRD value (`…|T:0,-9.757,1|…`
+ * while the state reads `Tool`). The field is `actual,offset,awaited`, read off the 2026-10-08
+ * bench trace — the second value is the tool-length offset, not a rate.
+ */
+function readToolWaiting(text: string): number | null {
+  const m = /(?:^|\|)T:([^|>]*)/.exec(text);
+  const raw = m?.[1]?.split(',')[2]?.trim();
+  if (raw === undefined || raw === '') return null;
+  const v = Number(raw);
+  return Number.isFinite(v) ? v : null;
+}
+
 /** The one line that starts a program — `protocol.ts`'s `playProgramLine` rule. */
 export function playLine(filename: string): string | null {
   const path = `${RUN_DIR}/${filename}`;
@@ -104,7 +117,15 @@ export type RunEvent =
    */
   | { kind: 'paused'; at: Progress; unconfirmed: boolean }
   /** #618 — the resume went out; `unconfirmed` as above. */
-  | { kind: 'resumed'; at: Progress; unconfirmed: boolean };
+  | { kind: 'resumed'; at: Progress; unconfirmed: boolean }
+  /**
+   * #655 — THE FIRMWARE'S `Tool` STATE. `T<n> M6` with that tool not active stops the controller
+   * until the operator's `M490.2`; `awaited` is the T field's third value (the tool it waits for).
+   * Not a stall and not an error: the watch keeps polling and the never-started clock is paused.
+   */
+  | { kind: 'tool-waiting'; at: Progress; awaited: number | null }
+  /** #655 — the operator's Continue (`M490.2`) went out; the program runs on past the tool change. */
+  | { kind: 'tool-continued'; at: Progress };
 
 /**
  * Which vacuum words a program's text carries (#419 decision 4), when the app's upload knows and
@@ -292,6 +313,13 @@ export async function runProgram(filename: string, deps: RunDeps): Promise<RunOu
    * whether a resumed job keeps its `P:` field at all).
    */
   let awaitingProgressAfterResume = false;
+  /**
+   * #655 — the machine is stopped in the firmware's `Tool` state, waiting for `M490.2`. The
+   * never-started clock is paused while it waits (a change can take a minute of hands-on work) and
+   * restarts when the state leaves `Tool`.
+   */
+  let toolWaiting = false;
+  let progressClock = playSentAt;
 
   /** Send one pause action's sequence; `wentOut` is whether the first line reached the machine. */
   const sendPause = async (action: PauseAction): Promise<{ sentAll: boolean; wentOut: boolean }> => {
@@ -343,6 +371,20 @@ export async function runProgram(filename: string, deps: RunDeps): Promise<RunOu
       awaitingProgressAfterResume = false;
     }
 
+    // #655 — THE TOOL-CHANGE STOP, recognised from the state word. It is neither a finish (the
+    // state is not Idle) nor a stall: the operator is being asked to fit the tool, and the program
+    // resumes on `M490.2`. The waiting event fires once on entry; leaving the state — by our
+    // Continue or by a hand at the console — restarts the no-progress clock and says so in the log.
+    const waitingForTool = p.state === 'Tool';
+    if (waitingForTool && !toolWaiting) {
+      toolWaiting = true;
+      deps.onEvent?.({ kind: 'tool-waiting', at: p, awaited: readToolWaiting(r.text) });
+    } else if (!waitingForTool && toolWaiting) {
+      toolWaiting = false;
+      progressClock = now();
+      deps.onEvent?.({ kind: 'note', text: 'The tool change is done — the program is running again.' });
+    }
+
     // The END of the job is decided from the machine's own answer first, and only while not paused:
     // a job that finished at this very boundary must not be handed a `suspend` after its last word.
     if (!paused) {
@@ -375,10 +417,24 @@ export async function runProgram(filename: string, deps: RunDeps): Promise<RunOu
       }
       continue;
     }
+    if (ask === 'continue-tool') {
+      if (!waitingForTool) {
+        deps.onEvent?.({ kind: 'note', text: 'The tool change is already done; nothing was sent.' });
+      } else {
+        const s = await sendPause('continue-tool');
+        if (s.wentOut) {
+          // The store clears its own prompt on this event; the state leaves `Tool` on a later poll.
+          deps.onEvent?.({ kind: 'tool-continued', at: p });
+        } else {
+          deps.onEvent?.({ kind: 'note', text: 'M490.2 was not sent; the machine is still waiting for the tool.' });
+        }
+      }
+      continue;
+    }
 
     // A suspended job cannot have "never started" (it plainly did), and is otherwise left watching.
     if (paused) continue;
-    if (!seenProgress && now() - playSentAt >= deps.settings.noProgressMs) {
+    if (!seenProgress && !toolWaiting && now() - progressClock >= deps.settings.noProgressMs) {
       // Nothing ran. A vacuum THIS run switched on goes off again — but only on a machine that
       // reads Idle: anything else is a machine doing something this watch cannot see. A program's
       // own words never executed, so there is nothing to switch either way. The antistatic this run

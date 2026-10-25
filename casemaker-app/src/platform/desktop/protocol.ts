@@ -517,6 +517,12 @@ export interface MachineStatusLine {
   spindle: StatusRate;
   /** The tool number (`T:`), or null when no tool is fitted. */
   tool: number | null;
+  /**
+   * #655 — the tool number the controller is WAITING for: the `T:` field's third value
+   * (`…|T:0,-9.757,1|…` while the state reads `Tool` after an `M6`, the machine stopped for the
+   * operator's `M490.2`). Null whenever no change is pending.
+   */
+  toolWaiting: number | null;
   progress: JobProgress;
 }
 
@@ -557,13 +563,16 @@ function readRate(field: string | null): StatusRate {
  * already knows the state word and the job's line/percent/elapsed.
  */
 export function readStatusLine(text: string): MachineStatusLine {
+  const tool = readRate(statusField(text, 'T'));
   return {
     state: readJobProgress(text).state,
     wpos: readPosition(statusField(text, 'WPos')),
     mpos: readPosition(statusField(text, 'MPos')),
     feed: readRate(statusField(text, 'F')),
     spindle: readRate(statusField(text, 'S')),
-    tool: readRate(statusField(text, 'T')).actual,
+    tool: tool.actual,
+    // The T field is `actual,offset,awaited` — the third value is not a rate's "override".
+    toolWaiting: tool.override,
     progress: readJobProgress(text),
   };
 }

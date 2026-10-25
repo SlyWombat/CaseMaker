@@ -21,8 +21,12 @@ import { machineKey, useMachineRunStore } from '@/store/machineRunStore';
 import { runKey, useRunConfirmStore } from '@/store/runConfirmStore';
 import { useShopDefaultsStore } from '@/store/shopDefaultsStore';
 import { useMachineTranscriptStore } from '@/store/machineTranscriptStore';
+import { resolveTool } from '@/engine/cnc/toolRegistry';
+import { toolDisplayName } from '@/engine/cnc/toolDisplay';
 
 const MUTED: CSSProperties = { fontSize: 11, color: '#9aa4b0', lineHeight: 1.5, margin: '4px 0' };
+/** #655 — the waiting prompt's box: the same frame the panel's other notices use. */
+const BOX: CSSProperties = { marginTop: 6, padding: 8, border: '1px solid #3a4552', borderRadius: 4, background: '#1b2027' };
 
 export interface EngraveMachineRunProps {
   target: { host: string; port: number };
@@ -54,6 +58,7 @@ export function EngraveMachineRun({ target, onProgramLine, controlled = false }:
   const requestStop = useMachineRunStore((s) => s.requestStop);
   const requestPause = useMachineRunStore((s) => s.requestPause);
   const requestResume = useMachineRunStore((s) => s.requestResume);
+  const requestToolContinue = useMachineRunStore((s) => s.requestToolContinue);
   const keepOffcut = useMachineRunStore((s) => s.keepOffcut);
   const skipOffcut = useMachineRunStore((s) => s.skipOffcut);
   const answerStockUsed = useMachineRunStore((s) => s.answerStockUsed);
@@ -78,6 +83,15 @@ export function EngraveMachineRun({ target, onProgramLine, controlled = false }:
     setRunTranscript(lines.length > 0 ? lines.join('\n') : null);
   }, [entry?.lines, setRunTranscript]);
   if (!entry) return null;
+  // #655 — the firmware's `Tool` stop, in our words: the tool it waits for, named by the run's own
+  // cutter (its context key) so the operator reads the same name the strip and the sheet use.
+  const awaited = entry.toolWaiting?.awaited ?? null;
+  const contextTool = entry.context?.toolKey === undefined ? null : resolveTool(entry.context.toolKey);
+  const cutterName =
+    contextTool !== null && (awaited === null || contextTool.number === null || contextTool.number === awaited)
+      ? toolDisplayName(contextTool)
+      : null;
+  const toolWords = awaited === null ? (contextTool?.number === null || contextTool === null ? 'the cutter' : `tool ${contextTool.number}`) : `tool ${awaited}`;
   const running = entry.running;
 
   const run = () => {
@@ -156,22 +170,42 @@ export function EngraveMachineRun({ target, onProgramLine, controlled = false }:
 
       {!controlled && running && (
         <>
+          {entry.toolWaiting != null && (
+            <div data-testid="engrave-run-tool-prompt" style={{ ...BOX, borderColor: '#5a6b7f' }}>
+              <p style={MUTED} data-testid="engrave-run-tool-words">
+                The machine is waiting for {toolWords}
+                {cutterName === null ? '' : ` — the ${cutterName} —`} to be in the spindle.
+              </p>
+              <button
+                type="button"
+                data-testid="engrave-run-tool-continue"
+                disabled={entry.stopAsked}
+                style={{ width: '100%', padding: 7, marginTop: 4 }}
+                onClick={() => requestToolContinue(machine)}
+              >
+                It is in — Continue
+              </button>
+            </div>
+          )}
           {/* #618 — Pause beside Stop: the suspend goes out at the run's next poll boundary, and the
-              same button resumes a suspended job. Stop stays the one that ends the job. */}
-          <button
-            type="button"
-            data-testid="engrave-run-pause"
-            disabled={entry.stopAsked}
-            style={{ width: '100%', padding: 7, marginTop: 6 }}
-            onClick={() => (entry.paused ? requestResume(machine) : requestPause(machine))}
-          >
-            {/* #640 — a disabled control says why: while a stop is asked, Pause cannot act. */}
-            {entry.stopAsked
-              ? 'Pause unavailable — the program is stopping'
-              : entry.paused
-                ? 'Resume program'
-                : 'Pause program — suspend goes out at the next status poll'}
-          </button>
+              same button resumes a suspended job. Stop stays the one that ends the job. #655 — a
+              machine waiting for a tool has nothing to suspend; Pause is not offered until it moves. */}
+          {entry.toolWaiting == null && (
+            <button
+              type="button"
+              data-testid="engrave-run-pause"
+              disabled={entry.stopAsked}
+              style={{ width: '100%', padding: 7, marginTop: 6 }}
+              onClick={() => (entry.paused ? requestResume(machine) : requestPause(machine))}
+            >
+              {/* #640 — a disabled control says why: while a stop is asked, Pause cannot act. */}
+              {entry.stopAsked
+                ? 'Pause unavailable — the program is stopping'
+                : entry.paused
+                  ? 'Resume program'
+                  : 'Pause program — suspend goes out at the next status poll'}
+            </button>
+          )}
           <button
             type="button"
             data-testid="engrave-run-stop"

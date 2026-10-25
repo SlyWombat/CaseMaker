@@ -402,6 +402,13 @@ export interface RunEntry {
    * Resume instead of Pause while this is true; the run watch treats it as "not finished".
    */
   paused: boolean;
+  /**
+   * #655 — the machine is stopped in the firmware's `Tool` state after a `T<n> M6`, waiting for the
+   * operator's `M490.2`. Non-null while it waits; `awaited` is the tool the controller names (the
+   * T field's third value), null when the line did not say. Absent (an entry written before #655)
+   * reads as "not waiting".
+   */
+  toolWaiting?: { awaited: number | null } | null;
   /** What the job told the run (#414), or null. */
   context: RunContext | null;
   /** The end of the run, once its outcome is known (#414). */
@@ -428,6 +435,11 @@ export interface MachineRunState {
   requestPause: (machine: string) => void;
   /** #618 — ask a suspended run to resume. A no-op unless the job is paused and still running. */
   requestResume: (machine: string) => void;
+  /**
+   * #655 — carry a program on past the firmware's `Tool` stop: the run sends `M490.2` at its next
+   * poll boundary (the machine measures the tool and resumes). A no-op when no run is going.
+   */
+  requestToolContinue: (machine: string) => void;
   /** The offcut question: one click keeps it on the shelf. */
   keepOffcut: (machine: string) => Promise<void>;
   /** "Ignore scrap" on this run: the offcut is skipped, nothing reaches the shelf. */
@@ -473,6 +485,7 @@ export const useMachineRunStore = create<MachineRunState>((set, get) => {
             outcome: null,
             stopAsked: false,
             paused: false,
+            toolWaiting: null,
             context: context ?? null,
             end: null,
             pendingStock: s.runs[machine]?.pendingStock ?? null,
@@ -487,7 +500,7 @@ export const useMachineRunStore = create<MachineRunState>((set, get) => {
       if (!prepared || prepared.running) return false;
       const f: { stop: boolean; pauseAsk: PauseAction | null } = { stop: false, pauseAsk: null };
       flags.set(machine, f);
-      patch(machine, { running: true, progress: null, lines: [], outcome: null, stopAsked: false, paused: false, end: null });
+      patch(machine, { running: true, progress: null, lines: [], outcome: null, stopAsked: false, paused: false, toolWaiting: null, end: null });
       const session = attachConsole(target);
       void (async () => {
         try {
@@ -533,6 +546,18 @@ export const useMachineRunStore = create<MachineRunState>((set, get) => {
                       : `(Paused at line ${e.at.line ?? '—'} — the job is suspended. Resume to continue.)`,
                   ],
                 });
+              } else if (e.kind === 'tool-waiting') {
+                patch(machine, {
+                  toolWaiting: { awaited: e.awaited },
+                  lines: [
+                    ...entry.lines,
+                    `(The machine is waiting for the tool change${
+                      e.awaited === null ? '' : ` (tool ${e.awaited})`
+                    } — the program resumes on Continue.)`,
+                  ],
+                });
+              } else if (e.kind === 'tool-continued') {
+                patch(machine, { toolWaiting: null });
               } else if (e.kind === 'resumed') {
                 patch(machine, {
                   paused: false,
@@ -601,6 +626,13 @@ export const useMachineRunStore = create<MachineRunState>((set, get) => {
       if (!f || !entry?.running || !entry.paused || entry.stopAsked) return;
       f.pauseAsk = 'resume';
       patch(machine, { lines: [...entry.lines, '(Resume pressed — resume goes out at the next poll)'] });
+    },
+    requestToolContinue: (machine) => {
+      const f = flags.get(machine);
+      const entry = get().runs[machine];
+      if (!f || !entry?.running || entry.toolWaiting == null || entry.stopAsked) return;
+      f.pauseAsk = 'continue-tool';
+      patch(machine, { lines: [...entry.lines, '(Continue pressed — M490.2 goes out at the next poll)'] });
     },
     keepOffcut: async (machine) => {
       const end = get().runs[machine]?.end;

@@ -19,8 +19,11 @@
 
 import type { ConsoleTiming } from './machineConsole';
 
-/** Which half of the pair: suspend the running job, or resume the suspended one. */
-export type PauseAction = 'suspend' | 'resume';
+/**
+ * Which request the operator made at the run's boundary: suspend the running job, resume the
+ * suspended one, or — #655 — carry a program on past the firmware's `Tool` (tool-change) stop.
+ */
+export type PauseAction = 'suspend' | 'resume' | 'continue-tool';
 
 /** The console lines one action sends, and the window each is given. */
 export interface PauseCommand {
@@ -34,5 +37,12 @@ export interface PauseCommand {
  */
 export function pauseResumeCommands(action: PauseAction): PauseCommand {
   const timing: Partial<ConsoleTiming> = { firstReplyMs: 60_000, maxMs: 60_000 };
-  return action === 'suspend' ? { lines: ['suspend'], timing } : { lines: ['resume'], timing };
+  if (action === 'suspend') return { lines: ['suspend'], timing };
+  if (action === 'resume') return { lines: ['resume'], timing };
+  // #655 — THE TOOL CHANGE'S SECOND HALF. After `T<n> M6` with that tool not active the controller
+  // stops in state `Tool` (dialect: T:'s third value names the tool it waits for). `M490.2` is the
+  // bench's continuation (2026-10-08, C-series): the head measures the tool at the sensor
+  // (`M493.2 T<n>`), returns, and the program runs on. Generous window like the pair above — it is
+  // a macro that MOVES.
+  return { lines: ['M490.2'], timing };
 }

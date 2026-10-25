@@ -548,3 +548,54 @@ describe('#618 pause / resume', () => {
     expect(notes.some((n) => n.includes('suspend was not sent'))).toBe(true);
   });
 });
+
+describe('#655 the firmware’s Tool state after T1 M6', () => {
+  const TOOL = '<Tool|MPos:-10.090,-12.830,-3.000|WPos:0,0,0|T:0,-9.757,1>';
+
+  it('waits at Tool without failing, and M490.2 carries the program on', async () => {
+    const events: string[] = [];
+    let ask: 'continue-tool' | null = null;
+    const f = fake([TOOL, TOOL, '<Run|MPos:0,0,0|P:5,10,2>', '<Idle|MPos:0,0,0|P:5,100,9>']);
+    const o = await runProgram('job.nc', {
+      ...deps(f),
+      takePauseRequest: () => {
+        const a = ask;
+        ask = null;
+        return a;
+      },
+      onEvent: (e) => {
+        if (e.kind === 'tool-waiting') {
+          events.push(`waiting:${e.awaited}`);
+          ask = 'continue-tool';
+        }
+        if (e.kind === 'tool-continued') events.push('continued');
+      },
+    });
+    expect(events).toEqual(['waiting:1', 'continued']);
+    expect(f.lines()).toContain('M490.2');
+    expect(o.kind).toBe('finished');
+  });
+
+  it('does not call a machine standing at the tool change “never started”', async () => {
+    // The no-progress window is 4 s here, and the machine waits 6 s at `Tool`: the clock is paused
+    // while it waits, so the run must reach the program, not give up on it.
+    const f = fake([TOOL, TOOL, TOOL, '<Run|MPos:0,0,0|P:5,10,2>', '<Idle|P:5,100,9>']);
+    const o = await runProgram('job.nc', { ...deps(f), settings: { ...SETTINGS, noProgressMs: 4000 } });
+    expect(o.kind).toBe('finished');
+    expect(f.lines()).not.toContain('M490.2');
+  });
+
+  it('says so when the machine is carried on by hand', async () => {
+    const notes: string[] = [];
+    const f = fake([TOOL, TOOL, '<Run|MPos:0,0,0|P:5,10,2>', '<Idle|P:5,100,9>']);
+    const o = await runProgram('job.nc', {
+      ...deps(f),
+      onEvent: (e) => {
+        if (e.kind === 'note') notes.push(e.text);
+      },
+    });
+    expect(o.kind).toBe('finished');
+    expect(notes.some((n) => n.includes('The tool change is done'))).toBe(true);
+    expect(f.lines()).not.toContain('M490.2');
+  });
+});

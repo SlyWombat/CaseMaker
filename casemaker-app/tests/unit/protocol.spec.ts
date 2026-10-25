@@ -56,6 +56,17 @@ describe('#561 readStatusLine — coordinates, and the homed-rest invariant', ()
     expect(s.mpos.z).toBe(-1); // −1, not null, not NaN — a reading, not a flag
   });
 
+  it('#655 reads the T field’s THIRD value as the tool a pending change waits for', () => {
+    // The bench's own line while the machine sat in `Tool` after `T1 M6` (2026-10-08): the field is
+    // `actual,offset,awaited` — the second value is the tool-length offset, not a rate's "override".
+    const s = readStatusLine('<Tool|MPos:-10.090,-12.830,-3.000|WPos:0,0,0|T:0,-9.757,1>');
+    expect(s.state).toBe('Tool');
+    expect(s.tool).toBe(0);
+    expect(s.toolWaiting).toBe(1);
+    // A running program waits for nothing: two values, no third.
+    expect(readStatusLine('<Idle|T:1,-9.752>').toolWaiting).toBeNull();
+  });
+
   it('leaves absent fields null — a probe poll has no T and no P', () => {
     const s = readStatusLine('<Run|MPos:0,0,0|WPos:0,0,0>');
     expect(s.tool).toBeNull();

@@ -46,6 +46,9 @@ function stateWord(state: string | null, registrationActive: boolean, heartbeatR
     case 'Hold':
     case 'Door':
       return 'Paused';
+    // #655 — the firmware's Tool state (after `T<n> M6`, an `M490.2` away from running on).
+    case 'Tool':
+      return 'Waiting for the cutter';
     default:
       return state;
   }

@@ -156,6 +156,13 @@ describe('#647 the DRO — state as connection', () => {
     expect(screen.getByTestId('machine-status-state').getAttribute('data-state')).toBe('Idle');
   });
 
+  it('#655 reads the firmware’s Tool state as waiting for the cutter', () => {
+    remember('<Tool|MPos:-10.09,-12.83,-3|WPos:0,0,0|T:0,-9.757,1>');
+    render(<MachineStatusStrip />);
+    expect(screen.getByTestId('machine-status-state').textContent).toBe('Waiting for the cutter');
+    expect(screen.getByTestId('machine-status-state').getAttribute('data-state')).toBe('Waiting for the cutter');
+  });
+
   it('names an alarm and carries its reason', () => {
     remember('<Alarm|MPos:0,0,0>\nALARM: Probe fail');
     render(<MachineStatusStrip />);
