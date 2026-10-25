@@ -33,6 +33,15 @@ or a T number, and an empty "X — Y — Z — (work)" slot.
 5. **Persistent: the strip is under the viewport in every mode** (design, cut, simulate) and reads the same
    heartbeat the app already polls every 2 s — no new machine traffic.
 
+6. **Accessories as indicators, not text.** (The maintainer, 2026-10-25, after seeing the live strip: the vacuum
+   takes real estate "for something that is not that important".) The accessory states — vacuum, antistatic,
+   work light — become small indicators at the far left, beside the state dot, in the status-bar pattern every
+   desktop uses (menu-bar / status-bar icons with a popover): an icon per accessory (not a bare dot — colour alone
+   fails colour-blind operators), filled when on and outlined when off, a tooltip with its name and state, and a
+   click opens a small popover that says what it is in one line and offers the toggle with the same guards the
+   card switches have (only on an Idle machine with no job; an alarm refuses; the reason shown when disabled).
+   The 'vacuum off' text leaves the strip. The matrix row "Accessory-mode panel" (#289) is the long form of this.
+
 Not now: feed/spindle overrides (refused, R-10), jog, per-axis click-to-type (gSender/MASSO; worth it once a jog
 exists), the status-monitor fields (limits, cover, temperatures, RSSI — the matrix's next absent row).
 
