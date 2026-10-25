@@ -177,10 +177,9 @@ function expectSameVerdict(flat: OracleReport, lifted: OracleReport): void {
   expect(flat.frame).toBe('work');
   expect(lifted.frame).toBe('surface');
   // The acceptance: the SAME R, not "the whole area". The residual difference is float32 heights
-  // and — on the column engine — a grid padded by the seat (a cone's reach grows with the stock
-  // top, so one cell width of staircase can land differently). That is bounded by the report's own
-  // area floor, which is the smallest disagreement its resolution can represent; the bench's
-  // flat-frame comparison read 301 mm² over the whole pattern, four orders of magnitude past it.
+  // and the column engine's own staircase. That is bounded by the report's own area floor, which is
+  // the smallest disagreement its resolution can represent; the bench's flat-frame comparison read
+  // 301 mm² over the whole pattern, four orders of magnitude past it.
   expect(lifted.ok).toBe(flat.ok);
   expect(lifted.ok).toBe(true);
   const floor = lifted.areaFloor ?? ORACLE_AREA_FLOOR;
@@ -206,7 +205,7 @@ describe('the surface-frame oracle (#623)', () => {
     expect(blind.worst.underCut).toBeGreaterThan(1);
   });
 
-  it('seats the swept stock on the plane, so a shallow level is cut through real material', () => {
+  it('sweeps the surface-frame image on the FLAT stock — the program is un-lifted, not the stock seated', () => {
     const job = traceJob();
     const tool = jobTool(job)!;
     const liftGen = generate(tl, job, null, [], undefined, { surface: TILT });
@@ -215,15 +214,52 @@ describe('the surface-frame oracle (#623)', () => {
     const flat = createSimSession(tl);
     const flatLoad = flat.load(liftGen.nc, toSetup(job, Z1), tool, Z1.id);
     expect(flatLoad.ok).toBe(true);
-    expect(flatLoad.ok && flatLoad.stockTopZ).toBe(0); // the unseated stock top
+    expect(flatLoad.ok && flatLoad.stockTopZ).toBe(0); // the work frame: the bench's failure
 
-    const seated = createSimSession(tl);
-    const seatedLoad = seated.load(liftGen.nc, toSetup(job, Z1), tool, Z1.id, { surface: TILT });
-    expect(seatedLoad.ok).toBe(true);
-    // Lifted by the plane's highest point over the blank: 0.006 × 60 + 0.004 × 60 = 0.6 mm.
-    expect(seatedLoad.ok && seatedLoad.stockTopZ).toBeCloseTo(0.6, 6);
+    const framed = createSimSession(tl);
+    const framedLoad = framed.load(liftGen.nc, toSetup(job, Z1), tool, Z1.id, { surface: TILT });
+    expect(framedLoad.ok).toBe(true);
+    // #628 — the surface load UN-LIFTS the program instead of seating the stock, so it sweeps the
+    // flat program the job really is, on the flat blank (top at the work Z0). Seating the stock was
+    // the old route (#623): it needed a per-cell lift in the oracle's grid read, and the column
+    // engine's one-Z-per-move sweep could not carry the lifted program's ramping Z.
+    expect(framedLoad.ok && framedLoad.stockTopZ).toBe(0);
     flat.dispose();
-    seated.dispose();
+    framed.dispose();
+  });
+
+  it('a plane with a NON-ZERO z0 and offset: the column engine still reproduces the flat post (#628)', () => {
+    // The bench's own plane shape — fitted to readings in machine Z, so `z0` is the lowest touch
+    // (−55.466) and `offset` is the plane's value at the work origin, not 0. #623's fixtures used
+    // offset 0 / z0 0, where a per-cell lift and a seated stock both happen to reproduce the work
+    // frame; a real registration's do not. Against them, the old seat path read the 2026-10-25
+    // badge job as 1.6602 mm² under / 75.4995 mm² over at the floor level (#628).
+    const benchTilt: SurfaceFrame = {
+      plane: { offset: -54.73947, slopeX: -0.013348, slopeY: -0.005035 },
+      z0: -55.466,
+    };
+    // There IS a seat to be had on this plane — 0.7265 mm at the blank's corner — so the assertion
+    // below is a convention, not a flat-plane artefact.
+    expect(maxSurfaceLift(benchTilt, { x0: 0, y0: 0, x1: 60, y1: 60 })).toBeCloseTo(0.7265, 4);
+    expect(maxSurfaceLift(TILT, { x0: 0, y0: 0, x1: 60, y1: 60 })).toBeCloseTo(0.6, 6);
+
+    const job = traceJob();
+    const tool = jobTool(job)!;
+    const { flat, lifted, blind } = verdicts(job, benchTilt);
+    expect(flat.ok).toBe(true);
+    expectSameVerdict(flat, lifted);
+    expect(blind.ok).toBe(false);
+
+    const framed = createSimSession(tl);
+    const loadResult = framed.load(
+      generate(tl, job, null, [], undefined, { surface: benchTilt }).nc as string,
+      toSetup(job, Z1),
+      tool,
+      Z1.id,
+      { surface: benchTilt },
+    );
+    expect(loadResult.ok && loadResult.stockTopZ).toBe(0);
+    framed.dispose();
   });
 
   it('judges a lifted FLAT-REGION post exactly as the flat one — the exact sweeper, sheared', () => {

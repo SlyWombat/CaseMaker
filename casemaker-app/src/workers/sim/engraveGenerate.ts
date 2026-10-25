@@ -232,9 +232,9 @@ export interface EngraveShopOpts {
    * untouched. Absent/null: the program is posted flat, byte-for-byte as before this option existed.
    *
    * #623 — the SAME pair is what the simulation is loaded with (`SimLoadOpts.surface`), so the
-   * program's frame, the seated stock and the oracle's frame are one value. The result repeats it
-   * as `EngraveGenerated.surface`, so a caller never has to guess the frame from what it asked for:
-   * the package states the frame it was posted against.
+   * program's frame and the oracle's frame are one value (#628 un-lifts the program into it). The
+   * result repeats it as `EngraveGenerated.surface`, so a caller never has to guess the frame from
+   * what it asked for: the package states the frame it was posted against.
    */
   surface?: SurfaceFrame | null;
 }

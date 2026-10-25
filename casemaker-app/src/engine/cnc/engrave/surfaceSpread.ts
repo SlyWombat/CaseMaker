@@ -481,8 +481,9 @@ export function surfaceTiltWords(tilt: { xMm: Mm; yMm: Mm }): string | null {
 
 /**
  * The post payload for a registration that measured a TILT: the fitted plane and its reference Z0.
- * Since #623 this is {@link SurfaceFrame} itself — the same pair the simulation seats its stock on
- * and judges the sweep in, so the generator and the verdict cannot be handed two different frames.
+ * Since #623 this is {@link SurfaceFrame} itself — the same pair the simulation un-lifts the program
+ * into and judges the sweep in (#625, #628), so the generator and the verdict cannot be handed two
+ * different frames.
  */
 export type SurfacePostFit = SurfaceFrame;
 

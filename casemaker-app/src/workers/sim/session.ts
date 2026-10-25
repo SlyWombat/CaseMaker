@@ -43,9 +43,7 @@ import {
   type OraclePredicted,
   type OracleReport,
 } from '@/engine/cnc/engrave/oracle';
-import { maxSurfaceLift, type SurfaceFrame } from '@/engine/cnc/engrave/surfacePlane';
-import { aabbOfProfile } from '@/engine/compiler/profile';
-import { partToWork } from '@/engine/cnc/frames';
+import type { SurfaceFrame } from '@/engine/cnc/engrave/surfacePlane';
 import type { ManifoldToplevel } from '../geometry/evaluateOp';
 import { meshOutputOf, type NodeMeshOutput } from '../geometry/meshOutput';
 import { createPlayback, type Playback } from '../geometry/playback';
@@ -281,59 +279,23 @@ export interface SimLoadOpts {
    */
   breakthroughMm?: number | null;
   /**
-   * #623 — the fitted surface the program was POSTED against (`SurfaceFrame`), or null/absent for a
-   * flat post. Two things follow from it, and they must follow together:
+   * #623/#628 — the fitted surface the program was POSTED against (`SurfaceFrame`), or null/absent
+   * for a flat post. BOTH engines now read it the same way (#628): the timeline is UN-LIFTED —
+   * every feed's Z read back with the lift subtracted at its own XY, the exact inverse of
+   * `applySurfaceLift` (#625) — so the surface-frame program IS the flat program the CAM predicted,
+   * swept on the un-seated stock and judged in the work frame, which for that program is the same
+   * frame. `OracleReport.frame` still says `'surface'` when the file was posted against a plane.
    *
-   *  - THE STOCK IS SEATED ON THE PLANE. The work Z0 is the LOWEST touch, so the real top face sits
-   *    up to `maxSurfaceLift` ABOVE the flat stock's top; a lifted cut near a shallow level would
-   *    otherwise run through air the flat stock does not have, and the sweep would leave flank the
-   *    program really cuts. The stock's top face is raised to the plane's highest point for the
-   *    sweep (see {@link seatStockOnSurface}).
-   *  - THE ORACLE JUDGES IN THE SAME FRAME. `oracle` reads the sweep with the lift subtracted at
-   *    each XY (the grid's per-cell heights, the removal solid's shear), so a correctly lifted
-   *    program gives the flat post's own result — `OracleReport.frame` says `'surface'` when it did.
+   * The column engine cannot sweep the LIFTED program: it gives every feed move ONE tip Z
+   * (`min(z0, z1)`), and a lifted move's Z ramps along the segment — on the 2026-10-25 badge job
+   * 4,070 of 13,015 moves ramped, by up to 0.079 mm over a 7.35 mm glyph segment, and sweeping each
+   * at its deep end read the text floors past the next level (75.5 mm² of over-cut, #628). The
+   * un-lifted program has a constant Z per move again, so the same rule is exact for it.
    *
-   * A load WITHOUT this option is byte-for-byte the previous behaviour: stock at the work Z0, verdict
-   * in the work frame.
+   * A load WITHOUT this option is byte-for-byte the pre-#623 behaviour: stock at the work Z0,
+   * verdict in the work frame.
    */
   surface?: SurfaceFrame | null;
-}
-
-/**
- * #623 — `setup` with its stock's top face raised to the fitted plane's highest point, so the
- * simulated blank CONTAINS the real one.
- *
- * The lift is linear, so its maximum over the blank is at a corner of the part outline (mapped to the
- * WORK frame, which is where the plane's XY live). Raising `part.thickness` moves the top face up in
- * the work frame while `wcs.origin` — the Z0 the program is written against — stays where it is;
- * the placement and the bottom face are untouched. The extra slab above the real top is the one
- * region the lifted program cuts that a flat-topped stock would have read as air: it removes it, and
- * no oracle level (all at negative depths) ever asks about material above the top face, so the
- * comparison is not polluted by it.
- *
- * A non-prism part (a cylinder) keeps its own stock: nothing in the engrave path builds one.
- */
-function seatStockOnSurface(setup: Setup, surface: SurfaceFrame): Setup {
-  const part = setup.part;
-  if (part.kind !== 'prism') return setup;
-  const bb = aabbOfProfile(part.outline);
-  if (bb === null) return setup;
-  const work = [
-    partToWork(setup, [bb.min[0], bb.min[1], part.thickness]),
-    partToWork(setup, [bb.max[0], bb.min[1], part.thickness]),
-    partToWork(setup, [bb.max[0], bb.max[1], part.thickness]),
-    partToWork(setup, [bb.min[0], bb.max[1], part.thickness]),
-  ];
-  const xs = work.map((w) => w[0]);
-  const ys = work.map((w) => w[1]);
-  const seat = maxSurfaceLift(surface, {
-    x0: Math.min(...xs),
-    y0: Math.min(...ys),
-    x1: Math.max(...xs),
-    y1: Math.max(...ys),
-  });
-  if (!(seat > 0)) return setup;
-  return { ...setup, part: { ...part, thickness: part.thickness + seat } };
 }
 
 /**
@@ -467,12 +429,18 @@ export function createSimSession(tl: ManifoldToplevel, hooks?: SimSessionHooks):
 
   const load = (gcodeText: string, setupArg: Setup, tool: Tool, machineId: string | null, opts?: SimLoadOpts): SimLoadResult => {
     dispose();
-    // #623/#625 — a program posted against the blank's fitted surface is judged in its SURFACE frame.
-    // The EXACT engine reproduces that frame by UN-LIFTING the program (the exact inverse of
-    // `applySurfaceLift`, #625), so it sweeps the flat program the job really is, on the flat stock,
-    // and the verdict is identical to the flat post by construction. The COLUMN engine (a V/drill/
-    // thread/rotary/dense-flat job) keeps #623's seat + surface grid, because a cone's width depends
-    // on depth and cannot be un-lifted. A flat load (no surface) is untouched.
+    // #623/#625/#628 — a program posted against the blank's fitted surface is judged in its SURFACE
+    // frame, and BOTH engines read that frame the same way: by UN-LIFTING the program (the exact
+    // inverse of `applySurfaceLift`, #625) so it sweeps the flat program the job really is, on the
+    // flat stock. The verdict is then identical to the flat post's by construction.
+    //
+    // The COLUMN engine took a different route until #628 — a seated stock plus a per-cell lift in
+    // the grid read — and that route cannot be exact: the engine gives every feed move ONE tip Z
+    // (`min(z0, z1)`), while a lifted move's Z ramps along its segment. On the 2026-10-25 badge job
+    // 4,070 of 13,015 cut moves ramped, by up to 0.079 mm over a 7.35 mm glyph segment (the plane's
+    // slope × the segment), so each was swept at its deep end and the text floors read past the next
+    // level: 75.5 mm² of over-cut. Un-lifted, the program's Z is constant per move again and the
+    // rule is exact. A flat load (no surface) is untouched either way.
     const surface = opts?.surface ?? null;
     surfaceFrame = surface;
     let machine;
@@ -486,9 +454,10 @@ export function createSimSession(tl: ManifoldToplevel, hooks?: SimSessionHooks):
       rapid = machine.rapidEstimate;
     }
     const parse = parseGcode(gcodeText);
-    // The LIFTED timeline, built against the UN-seated setup (the seat only raises the stock top,
-    // never the program's Z). `surfaceTimeline` is its surface-frame image: the same program with the
-    // lift taken back out, re-bucketed — the flat program a flat post would have produced.
+    // The LIFTED timeline (the file as posted) and, when the package speaks the surface frame, its
+    // surface-frame image: the same program with the lift taken back out, re-bucketed — the flat
+    // program a flat post would have produced. The SWEEP takes the image; the viewport draws the
+    // file (the timelines share their events).
     const timeline = buildTimeline(parse, setupArg, machine);
     const surfaceTimeline = surface === null ? timeline : unliftTimeline(timeline, surface);
     const diagnostics: SimDiagnostic[] = [
@@ -525,41 +494,41 @@ export function createSimSession(tl: ManifoldToplevel, hooks?: SimSessionHooks):
             : `tool "${tool.name}" is a ${tool.shape === 'drill' ? 'drill' : tool.shape === 'thread' ? 'thread mill' : 'cone (a V-bit)'}, which the column engine sweeps, and a rest pass is measured on a flat cutter's floor: the column engine cannot start from the material a previous program left`,
         );
       }
-      // #623 — the column engine sweeps the LIFTED program on a stock SEATED on the plane, so a
-      // shallow cut through a tilted top removes real material, not the air a flat stock would have.
-      const setup = surface === null ? setupArg : seatStockOnSurface(setupArg, surface);
-      const col = columnSweep(timeline, tool, setup, opts);
+      // #628 — the column engine sweeps the UN-LIFTED (surface-frame) program on the flat stock,
+      // exactly as the exact engine does since #625. See the load's comment for why the seat + grid
+      // lift this replaces could not be exact.
+      const col = columnSweep(surfaceTimeline, tool, setupArg, opts);
       if (!col.ok) {
         // Same contract as a refused exact sweep (#194): keep the runner's work, draw the path,
         // show no material. A rotary refusal owns no wasm handle.
-        live = { kind: 'path', timeline, setup };
+        live = { kind: 'path', timeline: surfaceTimeline, setup: setupArg };
         return {
           ok: false,
           pathOnly: true,
           diagnostics: [...diagnostics, ...col.diagnostics.map(tagSweep)],
-          summary: timeline.summary,
-          pauses: timeline.pauses,
-          segments: timeline.segments,
+          summary: surfaceTimeline.summary,
+          pauses: surfaceTimeline.pauses,
+          segments: surfaceTimeline.segments,
         };
       }
       const fixture: SimFixtureMesh[] = [];
-      for (const box of setup.fixture?.boxes ?? []) {
+      for (const box of setupArg.fixture?.boxes ?? []) {
         const solid = boxSolid(tl, box);
         fixture.push({ id: box.id, label: box.label, mesh: meshOutputOf(solid) });
         solid.delete();
       }
       diagnostics.push(...col.diagnostics.map(tagSweep));
-      live = { kind: 'column', column: col, timeline, setup };
+      live = { kind: 'column', column: col, timeline: surfaceTimeline, setup: setupArg };
       return {
         ok: true,
         diagnostics,
-        summary: timeline.summary,
+        summary: surfaceTimeline.summary,
         stats: col.stats,
         stockTopZ: col.stockTopZ,
         radius: col.radius,
         axisClamped: col.axisClamped,
         count: col.count,
-        checkpoints: timeline.checkpoints.map((cp): CheckpointInfo => ({
+        checkpoints: surfaceTimeline.checkpoints.map((cp): CheckpointInfo => ({
           segment: cp.segment,
           z: cp.z,
           run: cp.run,
@@ -568,13 +537,13 @@ export function createSimSession(tl: ManifoldToplevel, hooks?: SimSessionHooks):
           moveCount: cp.steps.length,
           nonConstantZ: cp.nonConstantZ,
         })),
-        pauses: timeline.pauses,
-        segments: timeline.segments,
+        pauses: surfaceTimeline.pauses,
+        segments: surfaceTimeline.segments,
         // No removal ghost and no gouge solids from the column engine yet: the grid IS the
         // material, so `frameAt` regenerates the stock surface instead (§4.4). A gouge is still
         // reported as a diagnostic; only its drawn solid is pending.
         meshes: { stock: col.stock, result: col.result, removal: null, sacrificial: null, gouges: [], fixture },
-        ...(setup.fixture ? { fixtureSource: setup.fixture.source, fixtureUncertainty: setup.fixture.uncertainty } : {}),
+        ...(setupArg.fixture ? { fixtureSource: setupArg.fixture.source, fixtureUncertainty: setupArg.fixture.uncertainty } : {}),
       };
     }
     // The EXACT 2.5D sweep: the surface-frame (un-lifted) program on the un-seated stock — the flat
@@ -722,7 +691,7 @@ export function createSimSession(tl: ManifoldToplevel, hooks?: SimSessionHooks):
           'oracle: this is a ROTARY column sweep, whose grid runs over (X, θ): a 2D region in the work frame cannot be read off it, so the CAM\'s predicted regions cannot be compared with the material it left',
         );
       }
-      const report = computeOracle(tl, gridSliceAt(tl, grid, surface), predicted, columnOracleBand(worstContours(l.timeline), grid), grid);
+      const report = computeOracle(tl, gridSliceAt(tl, grid), predicted, columnOracleBand(worstContours(l.timeline), grid), grid);
       return { ...report, frame: surface === null ? 'work' : 'surface' };
     }
     if (!l || l.kind !== 'swept') throw new Error('oracle: no swept program is loaded');

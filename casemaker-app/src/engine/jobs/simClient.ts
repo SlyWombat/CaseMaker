@@ -112,10 +112,10 @@ export interface SimLoadOpts {
    */
   threads?: readonly SimThreadSpec[] | null;
   /**
-   * #623 — the fitted surface the program was posted against, when a registration measured a tilt
-   * and the Cut step re-posted. The session seats its stock on that plane and judges the oracle in
-   * the same frame, so a correctly lifted program gives the flat post's own verdict. Absent/null:
-   * a flat post, judged in the work frame exactly as before.
+   * #623/#628 — the fitted surface the program was posted against, when a registration measured a
+   * tilt and the Cut step re-posted. The session UN-LIFTS the program into that frame before the
+   * sweep, so a correctly lifted file is the flat program the job really is and gives the flat
+   * post's own verdict. Absent/null: a flat post, judged in the work frame exactly as before.
    */
   surface?: SurfaceFrame | null;
 }

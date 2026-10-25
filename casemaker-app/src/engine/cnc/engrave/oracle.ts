@@ -37,7 +37,6 @@
  */
 
 import { ARC_CHORD_TOLERANCE_MM, SWEEP_SIMPLIFY_EPS_MM, segmentsForRadius } from '@/engine/compiler/arcResolution';
-import { surfaceLift, type SurfaceFrame } from '@/engine/cnc/engrave/surfacePlane';
 import { grooveRadiusAt, type VCone } from '@/engine/cnc/vProfile';
 import { traceSweptProfile } from '@/engine/cnc/engrave/partPlan';
 import { executeProfile, type ManifoldToplevel } from '@/workers/geometry/evaluateOp';
@@ -186,13 +185,13 @@ export interface OracleLevel {
 }
 
 /**
- * #623 — the frame the comparison's numbers are in.
+ * #623/#628 — the frame the comparison's numbers are in.
  *
  * `'work'` is the program's own frame: the stock's top is flat at the work Z0 (every program before
- * #608's surface re-post). `'surface'` is the blank's fitted surface frame: the session was loaded
- * with a {@link SurfaceFrame}, so its stock was seated on that plane and its sweep was judged with
- * the lift subtracted at each XY. A program posted against the tilt reads the same in both — that is
- * the point — but a reader (and the bench) must be able to tell which frame the verdict speaks.
+ * #608's surface re-post). `'surface'` means the session was loaded with a fitted surface frame: its
+ * program was UN-LIFTED into the surface frame before the sweep (#625, #628), so the comparison is
+ * the flat program's own — which for that program is the same numbers the work frame would give. A
+ * reader (and the bench) still needs to know which frame the verdict speaks.
  */
 export type OracleFrame = 'work' | 'surface';
 
@@ -301,23 +300,21 @@ export const removalSliceAt =
  * unioned in chunks the way `sweep.ts` unions its capsules, since that is the measured shape of
  * this operation.
  *
- * #623 — `surface` reads the same grid in the blank's fitted SURFACE frame: a cell's remaining top
- * is `h − lift(x, y)`, the height above the real top face there rather than above the work Z0. The
- * session seats its stock on the plane before sweeping (its `initial` is the plane's highest point),
- * so an untouched cell reads as `seat − lift ≥ 0` — material at or above the top face, never a cut —
- * and every cut floor reads exactly the depth the CAM programmed.
+ * The grid is read in the frame it was SWEPT in. A surface-posted program is un-lifted before the
+ * sweep (#625, #628), so the grid holds the flat program's own height field and no per-cell lift is
+ * applied here: the level means the same thing in both frames, and `OracleReport.frame` says which
+ * one the numbers speak.
  */
-export function gridSliceAt(tl: ManifoldToplevel, grid: ColumnGrid, surface: SurfaceFrame | null = null): OracleSliceAt {
+export function gridSliceAt(tl: ManifoldToplevel, grid: ColumnGrid): OracleSliceAt {
   const CS = tl.CrossSection;
   const { nu, nv, u0, du, v0, dv, h } = grid;
   return (zSlice) => {
     const runs: OraclePolygon[] = [];
     for (let j = 0; j < nv; j++) {
-      const y = v0 + j * dv;
       let start = -1;
       for (let i = 0; i <= nu; i++) {
         const top = i < nu ? (h[j * nu + i] as number) : 0;
-        const cut = i < nu && (surface === null ? top : top - surfaceLift(surface.plane, surface.z0, u0 + i * du, y)) <= zSlice;
+        const cut = i < nu && top <= zSlice;
         if (cut && start < 0) start = i;
         if (!cut && start >= 0) {
           // One rectangle for the whole run — the left edge of its first cell to the right edge of
