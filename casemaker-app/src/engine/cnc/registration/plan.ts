@@ -442,7 +442,7 @@ export function planRegistration(input: PlanInput, s: RegistrationSettings): Pla
     if (!input.bracketConfirm && !input.bracketOrigin.offsetMeasured) {
       return {
         ok: false,
-        reason: 'the bracket’s offset from the anchor is a default, not measured: the confirming touch is required until it is measured',
+        reason: 'the first touch confirms the bracket’s position: approve the confirming touch, or measure the bracket’s offset from the anchor',
       };
     }
     if (!input.bracketConfirm) {

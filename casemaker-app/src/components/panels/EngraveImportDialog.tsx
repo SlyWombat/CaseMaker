@@ -315,7 +315,7 @@ export function EngraveImportDialog({
         {/* Units — the failure this dialog exists to prevent. */}
         {unitNotes.length > 0 && (
           <div data-testid="engrave-import-unit-warning" style={WARN}>
-            <b>Size assumed from the file — check it before you cut.</b>
+            <b>Size from the file — check it before you cut.</b>
             {unitNotes.map((n, i) => (
               <div key={i}>{n}</div>
             ))}

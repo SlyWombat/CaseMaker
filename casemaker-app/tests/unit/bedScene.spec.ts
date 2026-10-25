@@ -121,12 +121,12 @@ describe('#511 the surface slab', () => {
     expect(slab.max[2]).toBe(-70); // the measured top
   });
 
-  it('is dashed "top not measured" when the top has no datum', () => {
+  it('is dashed "top: no reading" when the top has no datum', () => {
     const p = profile({ surface: boardSurface });
     const s = scene([], p);
     const slab = s.boxes.find((b) => b.id === 'surface')!;
     expect(slab.kind).toBe('dashed');
-    expect(slab.label).toBe('top not measured');
+    expect(slab.label).toBe('top: no reading');
     // The nominal top: BED_TOP_Z + thickness.
     expect(slab.max[2]).toBe(BED_TOP_Z + 10);
   });

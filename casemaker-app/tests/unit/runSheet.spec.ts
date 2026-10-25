@@ -211,7 +211,7 @@ describe('runSheet (#207)', () => {
 
   it('opens section 8 with the shipped-vise warning only when the vise is a default', () => {
     const def = section(sheetFor(dj()), 'warnings');
-    expect(def.steps[0]!.text).toContain('the shipped defaults, measured once on the reference unit');
+    expect(def.steps[0]!.text).toContain('Vise dimensions: shipped defaults (reference unit)');
     expect(def.steps[0]!.bold).toBe(true);
 
     const measured = section(sheetFor(dj({ ...DEFAULT_VISE, source: 'measured' })), 'warnings');
@@ -267,7 +267,7 @@ describe('runSheet (#207)', () => {
     expect(warnings.some((t) => t.startsWith('Checked: the tool against the stock and the modelled fixture'))).toBe(true);
     expect(warnings.some((t) => t.includes('Vise fixed jaw (left)'))).toBe(true);
     // The fixture being the shipped default is said, not implied.
-    expect(warnings.some((t) => t.includes('shipped default, not a measurement'))).toBe(true);
+    expect(warnings.some((t) => t.includes('The modelled fixture is a shipped default'))).toBe(true);
     // #314 — the collet nut is NOT named here. Z1 still states no holder, but the nut's
     // placement is derived from the cutter and every obstacle the vise models sits BELOW the
     // stock top, so the nut cannot reach one and the run never raised

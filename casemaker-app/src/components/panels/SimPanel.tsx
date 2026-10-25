@@ -32,7 +32,7 @@ const EXTENSIONS = ['.nc', '.gcode', '.cnc', '.tap'];
 const DISCLAIMER =
   'This simulation assumes a rigid, ideal machine: no deflection, no runout, no Z-chain error, no chatter.';
 
-const STUB_TITLE = "The part's position on the bed is assumed, not measured.";
+const STUB_TITLE = "The bed is drawn from the part's position.";
 
 const SEVERITY_ORDER: Record<SimDiagnostic['severity'], number> = { error: 0, warning: 1, info: 2 };
 const SEVERITY_COLOR: Record<SimDiagnostic['severity'], string> = {

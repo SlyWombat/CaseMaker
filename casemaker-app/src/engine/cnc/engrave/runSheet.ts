@@ -73,6 +73,7 @@ import {
   type SurfaceReadingSource,
 } from '@/engine/cnc/engrave/surfaceSpread';
 import { restSeamSentence } from '@/engine/cnc/engrave/restSettings';
+import { toolDisplayName } from '@/engine/cnc/toolDisplay';
 import { finishSourceWords, type FinishSettingSource } from '@/engine/cnc/engrave/finishPass';
 import { MATERIAL_LABELS } from '@/engine/cnc/materials';
 import { VISE_BODY_DEPTH, viseEnvelope } from '@/engine/cnc/fixture';
@@ -1859,7 +1860,7 @@ function materialPositionSteps(
         : `Compare with the file: the scanned edges should lie where it says they do — ` +
           `${scanned.map((e) => `${e.axis.toUpperCase()} = ${fmtNum(e.nominalMm)}`).join(' and ')} ` +
           `after the ${biasMm} mm above is taken back toward the blank. The jaw-referenced edges are ` +
-          'not measured: what to confirm there is that the blank is seated against the jaw’s face ' +
+          'jaw-referenced: what to confirm there is that the blank is seated against the jaw’s face ' +
           '(the inside touch found the blank’s own top) and that the jaw is where the fixture says. ' +
           'More than the job’s own margin out, and the blank has moved: re-clamp it, or set the ' +
           'origin from the measured position. Do not cut until the two agree.',
@@ -2421,8 +2422,7 @@ function drillCutSteps(
         `Where those numbers came from: drill.peckDiameters (${facts.sources.peckDiameters}); ` +
         `drill.peckClearanceMm (${facts.sources.peckClearanceMm}); ` +
         `drill.plungeFeed (${facts.sources.plungeFeed}); ` +
-        `drill.spindleRpm (${facts.sources.spindleRpm}). The plunge feed and spindle speed are ` +
-        'placeholders, not measured.',
+        `drill.spindleRpm (${facts.sources.spindleRpm}).`,
     },
   ];
   for (const d of facts.plans) {
@@ -2874,7 +2874,7 @@ export function buildRunSheet(
     },
     {
       text: tool
-        ? `The cutter — ${options.toolCase === undefined ? '' : `${options.toolCase} — `}${tool.name}.`
+        ? `The cutter — ${options.toolCase === undefined ? '' : `${options.toolCase} — `}${toolDisplayName(tool)}.`
         : 'The cutter named by the job.',
       value: diameter === null ? 'cutting diameter unknown' : `⌀ ${fmtNum(diameter)} mm cutting`,
     },

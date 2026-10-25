@@ -726,8 +726,7 @@ export function validateVise(
       // once on the reference unit, and this job's vise has not been measured ITSELF. The sentence
       // says which of the two it is, because "unmeasured defaults" stopped being true on 2026-10-15.
       message:
-        'Vise dimensions are the shipped defaults, measured once on the reference unit; ' +
-        'they are not a measurement of this machine\'s own vise.',
+        'Vise dimensions: shipped defaults (reference unit).',
     });
   }
 

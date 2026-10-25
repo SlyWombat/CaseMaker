@@ -741,8 +741,8 @@ export function recommendedEngraveDepth(
   const shop = options.shopDepth ?? { value: DEFAULT_ENGRAVE_DEPTH_MM, source: 'fallback' as const };
   const provenance =
     shop.source === 'fallback'
-      ? `the built-in ${mm(shop.value)} mm fallback (chosen, not measured; no location states an engraving depth)`
-      : `the shop's ${mm(shop.value)} mm engraving-depth default (${shop.source}, not measured)`;
+      ? `the built-in ${mm(shop.value)} mm fallback (no location states an engraving depth)`
+      : `the shop's ${mm(shop.value)} mm engraving-depth default (${shop.source})`;
   return {
     depth: roundDepth(shop.value),
     source: 'shop-default',

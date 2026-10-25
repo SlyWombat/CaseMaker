@@ -421,7 +421,7 @@ describe('#537 EngraveMachineUpload — the cutter-mismatch selector', () => {
     fireEvent.change(cutterSelect(), { target: { value: 'flat-3.175x12-metal' } });
     // #516 item 3's fix names the RECOMMENDED cutter — colour first when one is known, then label.
     expect(screen.getByTestId('engrave-upload-cutter-mismatch').textContent).toBe(
-      'fit 1 mm flat end (assumed)',
+      'fit 1 mm flat end',
     );
     // The mismatch is a refusal: the fitted tick cannot override it.
     tickFitted();

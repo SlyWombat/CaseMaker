@@ -28,8 +28,8 @@
     },
     {
       "path": "<out>/single-barrel-run-sheet.md",
-      "sha256": "475da161d1c2cb1b3019e3952de0be1f52d68bb5c429a9b2b2d0b09b011a96c3",
-      "bytes": 18016
+      "sha256": "500ce06a2ff9c6e4e7e3aeecb558fb1007e34df2920e151acfe5e1f638a07047",
+      "bytes": 17900
     }
   ],
   "diagnostics": [
@@ -69,7 +69,7 @@
       "code": "vise-default",
       "guideRow": "vise-default",
       "severity": "warning",
-      "message": "Vise dimensions are the shipped defaults, measured once on the reference unit; they are not a measurement of this machine's own vise.",
+      "message": "Vise dimensions: shipped defaults (reference unit).",
       "source": "findings",
       "program": "single barrel"
     },

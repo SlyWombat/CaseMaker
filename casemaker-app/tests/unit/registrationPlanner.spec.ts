@@ -1152,7 +1152,7 @@ describe('#427 the bracket: XY from the datum, an optional confirming touch', ()
 
   it('the bracket’s offset unmeasured: the confirming touch is required', () => {
     const unmeasured = { x: G54.x, y: G54.y, from: 'anchor 1 + a default offset', offsetMeasured: false };
-    expect(planRegistration(input('bracket', { bracketOrigin: unmeasured }), S)).toMatchObject({ ok: false, reason: expect.stringContaining('confirming touch is required') });
+    expect(planRegistration(input('bracket', { bracketOrigin: unmeasured }), S)).toMatchObject({ ok: false, reason: expect.stringContaining('approve the confirming touch') });
     expect(planRegistration(input('bracket', { bracketOrigin: unmeasured, bracketConfirm: true }), S)).toMatchObject({ ok: true });
   });
 

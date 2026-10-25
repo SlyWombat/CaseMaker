@@ -206,8 +206,8 @@ export function computeOutcome(plan: RegistrationPlan, data: RunData): Registrat
 
   // Which axes the mount leaves to be found: the bracket's are the anchor's; the others need both.
   if (plan.mount !== 'bracket') {
-    if (!measured.x) problems.push('X was not measured: no left edge was found');
-    if (!measured.y) problems.push('Y was not measured: no front edge was found');
+    if (!measured.x) problems.push('X: no left edge was found');
+    if (!measured.y) problems.push('Y: no front edge was found');
   }
 
   let offset = { x: r3(mean(dxs)), y: r3(mean(dys)) };

@@ -180,14 +180,14 @@ export function verifySimulateSentences(v: EngraveRunView): { verified: string; 
     verified: `Verified — ${
       v.generated?.verify
         ? `${verifyErrors} error${verifyErrors === 1 ? '' : 's'}, ${verifyWarnings} warning${verifyWarnings === 1 ? '' : 's'}`
-        : 'not verified yet'
+        : 'not run'
     }`,
     simulated: `Simulated — ${
       v.simStatus === 'ready'
         ? `${simErrs} error${simErrs === 1 ? '' : 's'}, ${simWarns} warning${simWarns === 1 ? '' : 's'}`
         : v.simStatus
           ? `the simulation was ${v.simStatus}`
-          : 'not simulated yet'
+          : 'not run'
     }`,
   };
 }

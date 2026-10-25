@@ -54,7 +54,7 @@ describe('the depth a stock kind recommends (#492 J19)', () => {
     expect(rec.plane).toBeNull();
     expect(rec.reason).toContain('1.2 mm');
     expect(rec.reason).toContain('chosen');
-    expect(rec.reason).toContain('not measured');
+    expect(rec.reason).toContain('engraving-depth default (chosen)');
     expect(rec.reason).toContain("depth stays the operator's choice");
 
     // No location at all — the hosted build — still starts somewhere, and says the number is the

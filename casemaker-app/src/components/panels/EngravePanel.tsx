@@ -31,6 +31,7 @@ import {
 } from '@/engine/cnc/engrave/depthBounds';
 import type { LabelDepthRecommendation } from '@/engine/cnc/engrave/depthBounds';
 import { jobSplit } from '@/engine/cnc/engrave/depthIntent';
+import { toolDisplayName } from '@/engine/cnc/toolDisplay';
 import { EngraveCutWizard } from './EngraveCutWizard';
 import { jobMachine } from '@/engine/cnc/calibration';
 import { machineDisplayName } from '@/platform/locationClient';
@@ -426,7 +427,7 @@ function mm3(v: number): string {
 
 function toolOptionLabel(e: ToolLibraryEntry): string {
   const d = cuttingDiameter(e.tool);
-  return d === null ? `${e.tool.name} — cutting diameter unknown` : `${e.tool.name} — Ø ${d} mm cutting`;
+  return d === null ? `${toolDisplayName(e.tool)} — cutting diameter unknown` : `${toolDisplayName(e.tool)} — Ø ${d} mm cutting`;
 }
 
 /**
@@ -447,7 +448,7 @@ function viseBadge(v: ViseParams): string {
  */
 function sacrificialBadge(s: Sacrificial): string {
   if (!hasSacrificial(s)) return 'none';
-  if (s.source === 'default') return 'default · unmeasured';
+  if (s.source === 'default') return 'default';
   if (s.source === 'saved') return 'saved';
   return 'measured · this setup';
 }
@@ -1301,7 +1302,7 @@ export function EngravePanel(): JSX.Element {
           fixtureLabels: viseEnvelope(job.stock, job.workholding.vise, job.sacrificial).boxes.map((b) => b.label),
           fixtureSource: job.workholding.vise.source,
           sacrificialModelled: hasSacrificial(job.sacrificial),
-          toolName: toolEntry?.tool.name ?? null,
+          toolName: toolEntry == null ? null : toolDisplayName(toolEntry.tool),
           codes: run.simDiagnostics.map((d) => d.code),
         });
 
@@ -2642,7 +2643,7 @@ export function EngravePanel(): JSX.Element {
                       ? `worst item "${itemDisplay(c.worst.labelId)}" · ${Math.round(c.worst.ratio * 100)} % kept${c.condition?.best === 'worn' ? ` · worn${conditionSourceWord(c)}` : ''}`
                       : c.condition?.best === 'worn'
                         ? 'worn' + conditionSourceWord(c)
-                        : 'not measured';
+                        : 'no condition recorded';
                 return (
                   <div
                     key={c.key}
@@ -2683,9 +2684,9 @@ export function EngravePanel(): JSX.Element {
             data-source={feeds.catalogue ? 'catalogue' : feeds.entry.status}
           >
             {feeds.catalogue
-              ? "Makera's catalogue — not measured"
+              ? "Makera's catalogue"
               : feeds.entry.status === 'unmeasured'
-                ? 'starting values — unmeasured'
+                ? 'starting values'
                 : 'measured'}
           </span>
         )}

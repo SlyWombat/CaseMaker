@@ -63,10 +63,10 @@ function surfaceWords(surface: BedProfile['surface']): string {
  * datum, never the S3/registration-executor placeholder.
  */
 const UNMEASURED_DATUM_WORDS: Record<BedDatumKey, string> = {
-  surfaceTopZ: 'not measured — run a surface registration',
-  viseJawTopZ: 'not measured — press Tap the fixed jaw (probe in the spindle)',
-  bracketSeatZ: 'not measured — measure the seat beside the bracket first (one touch on the surface beside it); the arm tap checks it on later runs',
-  rotaryAxis: 'not measured — the rotary module is not characterised yet',
+  surfaceTopZ: 'Run a surface registration',
+  viseJawTopZ: 'Tap the fixed jaw (probe in the spindle)',
+  bracketSeatZ: 'Measure the seat beside the bracket — one touch on the surface beside it; the arm tap checks it on later runs',
+  rotaryAxis: 'Fit and characterise the rotary module first',
 };
 
 /** How many numbers in this profile no one has measured yet — the count the card links to #444. */

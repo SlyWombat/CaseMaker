@@ -149,7 +149,7 @@ describe('#601 — the Accessories scope lists the house', () => {
     expect(probe3d.textContent).toContain('Makera 3D Wired Probe');
     expect(probe3d.textContent).toContain('3d');
     expect(probe3d.textContent).toContain('in its box');
-    expect(probe3d.textContent).toContain('not measured');
+    expect(probe3d.textContent).toContain('no readings');
     expect(probe3d.textContent).toContain('owned; not yet tested');
 
     // The vise: a mount with measured numbers.

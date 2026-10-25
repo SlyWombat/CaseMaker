@@ -118,7 +118,7 @@ export function coverageDisclaimer(input: SimCoverageInput): string[] {
     out.push(`Not checked: ${blind.join('; ')}.`);
 
     if (input.fixtureLabels.length > 0 && input.fixtureSource === 'default') {
-      out.push('The modelled fixture is a shipped default, not a measurement.');
+      out.push('The modelled fixture is a shipped default.');
     }
     return out;
   }

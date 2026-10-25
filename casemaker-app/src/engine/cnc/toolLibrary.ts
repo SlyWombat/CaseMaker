@@ -153,7 +153,7 @@ export const TOOL_LIBRARY: readonly ToolLibraryEntry[] = [
     key: 'flat-1.0',
     // The simulation plan's working assumption (`/Simulation.md` §4). Only the diameter is
     // stated there, so the lengths are NOT invented: the holder gate will say "cannot be proven".
-    tool: flatEndMill(1, { number: 1, name: '1 mm flat end (assumed)', handleDiameter: 3.175 }),
+    tool: flatEndMill(1, { number: 1, name: '1 mm flat end', handleDiameter: 3.175 }),
     provenance: "the 1 mm flat end mill /Simulation.md assumes; diameter only, lengths unknown",
   },
 ];

@@ -555,7 +555,7 @@ export function resolvedFeedsTable(): ResolvedFeedTable {
   return {
     table: FEEDS_TABLE,
     from: 'fallback',
-    label: 'the compiled starting table (this location states none), every row still labelled unmeasured',
+    label: 'the compiled starting table (this location states none)',
   };
 }
 

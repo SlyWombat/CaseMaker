@@ -473,7 +473,7 @@ describe('SimPanel', () => {
     await screen.findByTestId('sim-result');
     const text = screen.getByTestId('sim-disclaimer').textContent ?? '';
     expect(text).toContain('the modelled fixture (vise-jaw-front)');
-    expect(text).toContain('a shipped default, not a measurement');
+    expect(text).toContain('The modelled fixture is a shipped default');
     expect(text).toContain('the spindle body, head and gantry');
     // #314 — this run's codes carry no holder question, so the unmeasured collet nut is NOT
     // named: the sweep raises `holder-vs-fixture-unproven` only where an obstacle rises above

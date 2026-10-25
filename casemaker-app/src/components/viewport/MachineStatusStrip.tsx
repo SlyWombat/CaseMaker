@@ -7,6 +7,7 @@ import { machineKey, useMachineRunStore } from '@/store/machineRunStore';
 import { accessoriesFor, machineRecordByProfile } from '@/store/locationStore';
 import { probeNameFor } from '@/engine/cnc/registration/mountContext';
 import { jobTool } from '@/engine/cnc/engrave/jobSetup';
+import { toolDisplayName } from '@/engine/cnc/toolDisplay';
 import { readStatusLine, type JobProgress, type StatusPosition } from '@/platform/desktop/protocol';
 import { alarmLine } from '@/platform/machineUpload';
 
@@ -153,7 +154,9 @@ export function MachineStatusStrip(): JSX.Element | null {
   const reason = state === 'Alarm' ? alarmLine(reasonLines.join('\n')) : null;
   const progress = line?.progress ?? null;
 
-  const cutter = jobTool(job)?.name ?? null;
+  const jobCutter = jobTool(job);
+  // #646 — names are for people: the geometry, not the vendor label (which stays in the hover).
+  const cutter = jobCutter === null ? null : toolDisplayName(jobCutter);
   const toolNumber = line?.tool ?? null;
   // The strip's machine is the OBSERVATION; the accessories and the probe name live on the saved
   // machine record it resolves to (#604's accessor).
@@ -166,6 +169,7 @@ export function MachineStatusStrip(): JSX.Element | null {
       : null;
   const toolName = registrationActive ? (probeNameFor(record) ?? 'probe') : cutter;
   const toolTitle = [
+    jobCutter?.name ?? null,
     toolNumber !== null ? `T${toolNumber}` : null,
     lastM491Z !== null ? `M491 ${fmt3(lastM491Z)}` : null,
   ]

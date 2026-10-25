@@ -35,7 +35,7 @@ describe('coverageDisclaimer', () => {
     expect(s).toContain('the sacrificial material');
     expect(s).toContain('the modelled fixture (vise-jaw-front, vise-jaw-back)');
     expect(s).not.toContain('any fixture — none is modelled');
-    expect(s).toContain('The modelled fixture is a shipped default, not a measurement.');
+    expect(s).toContain('The modelled fixture is a shipped default.');
   });
 
   // #314 — the sentence is named from the run, like the shank caveat below it: the sweep raises

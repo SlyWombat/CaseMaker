@@ -233,7 +233,7 @@ export function bedScene(input: BedSceneInput): BedScene {
     const [fx, fy] = surface.position?.frontLeft ?? [xMin, yMin];
     const fullySized = surface.length !== null && surface.width !== null && surface.position !== null;
     const kind: 'solid' | 'dashed' = top.measured && fullySized ? 'solid' : 'dashed';
-    const label = top.measured ? (fullySized ? undefined : 'provisional size/position') : 'top not measured';
+    const label = top.measured ? (fullySized ? undefined : 'provisional size/position') : 'top: no reading';
     boxes.push(
       box(
         'surface',

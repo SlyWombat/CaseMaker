@@ -83,12 +83,12 @@ describe('#427 the datum: G54 XY from the bracket, Z from the probed top', () =>
     expect(two.ok && two.anchor).toMatchObject({ x: -102.39, y: -148.83 });
   });
 
-  it('the origin is the anchor plus the bracket’s offset, and says the offset is not measured', () => {
+  it('the origin is the anchor plus the bracket’s offset, and says when it was measured', () => {
     const a = anchorFrom(CAL, 'Z1');
     if (!a.ok) throw new Error(a.reason);
     const d = bracketDatum(a.anchor, B);
     expect(d).toMatchObject({ x: -190.89, y: -193.83, uncertainty: 0.1 });
-    expect(d.from).toContain('a default, not measured');
+    expect(d.from).not.toContain('not measured');
     const offset = { ...DEFAULTS, 'bracket.originOffsetXMm': { value: 1.2, source: 'measured' as const, setAt: '2026-10-16T10:00:00.000Z', unit: 'mm', note: null } };
     expect(bracketDatum(a.anchor, bracketSettings(offset))).toMatchObject({ x: -189.69, y: -193.83 });
   });

@@ -195,7 +195,7 @@ export function planReferences(input: ReferencePlanInput, s: RegistrationSetting
     notes: [
       `registered on ${references.map((r) => r.name).join(', ')} — features cut in an earlier setup, read as misses through the face now up`,
       rotation === null
-        ? 'the turn is not measured (no two references read on both axes)'
+        ? 'the turn: no two references were read on both axes'
         : measurable
           ? `the turn is read between ${rotation.between.join(' and ')}, ${rotation.separation} mm apart, to ±${rotation.resolutionMm} mm across the stock`
           : `the turn is NOT measurable: the references are ${rotation.separation} mm apart, so it could be read only to ±${rotation.resolutionMm} mm across the stock`,
@@ -270,8 +270,8 @@ export function referenceOutcome(plan: RegistrationPlan, data: RunData): Registr
   const xs = findings.filter((f) => f.dx !== null).map((f) => f.dx!);
   const ys = findings.filter((f) => f.dy !== null).map((f) => f.dy!);
   const measured = { x: xs.length > 0, y: ys.length > 0 };
-  if (!measured.x) problems.push('X was not measured: no reference was read across X');
-  if (!measured.y) problems.push('Y was not measured: no reference was read across Y');
+  if (!measured.x) problems.push('X: no reference was read across X');
+  if (!measured.y) problems.push('Y: no reference was read across Y');
   const mean = (v: number[]) => (v.length === 0 ? 0 : v.reduce((a, b) => a + b, 0) / v.length);
   const offset = { x: r3(mean(xs)), y: r3(mean(ys)) };
 
@@ -281,7 +281,7 @@ export function referenceOutcome(plan: RegistrationPlan, data: RunData): Registr
   const rot = plan.referenceRotation ?? null;
   if (rot === null || rot.resolutionMm >= s.edgeMarginMm) {
     if (plan.mount === 'tape') problems.push('on tape nothing holds the turn, and these references cannot measure it');
-    else notes.push(rot === null ? 'the turn is not measured: the fixed jaw holds it' : `the turn is not measurable to better than ±${rot.resolutionMm} mm: the fixed jaw holds it`);
+    else notes.push(rot === null ? 'the turn: the fixed jaw holds it' : `the turn: the fixed jaw holds it to ±${rot.resolutionMm} mm`);
   } else {
     const a = refs.find((r) => r.itemId === rot.between[0])!;
     const b = refs.find((r) => r.itemId === rot.between[1])!;

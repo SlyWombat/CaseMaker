@@ -78,10 +78,10 @@ function probeLine(record: FixtureRecord): string | null {
 
 /** The measured cell: the probe's line, or a count of the measured numbers a mount carries. */
 function measuredLine(record: FixtureRecord): string {
-  if (record.kind === 'probe') return probeLine(record) ?? 'not measured';
+  if (record.kind === 'probe') return probeLine(record) ?? 'no readings yet';
   let n = 0;
   for (const value of Object.values(record.unit)) if (typeof value === 'number') n += 1;
-  return n === 0 ? 'not measured' : `${n} measured`;
+  return n === 0 ? 'no readings yet' : `${n} measured`;
 }
 
 /** The accessory's display name: its product, or the kind word when nobody named it. */
@@ -444,7 +444,7 @@ function AccessoryRegister({ onSaved, onClose }: { onSaved: (id: string) => void
               />
             </label>
           </div>
-          <p className="hint">A blank box stays unknown, never 0 — an unmeasured probe is registered untested.</p>
+          <p className="hint">A blank box stays unknown, never 0.</p>
         </>
       ) : (
         <>
@@ -601,7 +601,7 @@ function AccessoryDetail({
       <div className="panel-subhead">Measured record</div>
       {item.kind === 'probe' ? (
         <p className="hint" data-testid="manage-acc-measured">
-          {probeLine(item) ?? 'not measured — nothing recorded for the tip or the rim'}
+          {probeLine(item) ?? 'no readings for the tip or the rim yet'}
         </p>
       ) : (
         <ul className="hint" data-testid="manage-acc-measured">
@@ -613,7 +613,7 @@ function AccessoryDetail({
                 <span className="dim">({item.provenance[key] ?? 'no provenance'})</span>
               </li>
             ))}
-          {Object.entries(item.unit).every(([, v]) => typeof v !== 'number') && <li>not measured</li>}
+          {Object.entries(item.unit).every(([, v]) => typeof v !== 'number') && <li>no reading yet</li>}
         </ul>
       )}
 

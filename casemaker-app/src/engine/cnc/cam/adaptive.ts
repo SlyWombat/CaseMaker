@@ -473,7 +473,7 @@ export function planAdaptive(input: AdaptiveInput): AdaptiveResult {
         ? `helix entry at (${fmt(e.centre[0])}, ${fmt(e.centre[1])}), ${fmt(2 * e.radius)} mm across at ${s.rampAngleDeg}°`
         : `ramp entry from (${fmt(e.a[0])}, ${fmt(e.a[1])}) to (${fmt(e.b[0])}, ${fmt(e.b[1])}) at ${s.rampAngleDeg}°, ${e.legs} leg(s) per level`,
     ),
-    `feeds ${s.cutFeed} / ${s.entryFeed} mm/min and ${s.spindleRpm} rpm are placeholders, not measured (adaptive.cutFeed, adaptive.entryFeed, adaptive.spindleRpm)`,
+    `feeds ${s.cutFeed} / ${s.entryFeed} mm/min and ${s.spindleRpm} rpm are starting values (adaptive.cutFeed, adaptive.entryFeed, adaptive.spindleRpm)`,
   ];
   return {
     ok: true,

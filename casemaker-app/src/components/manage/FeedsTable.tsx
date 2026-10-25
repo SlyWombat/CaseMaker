@@ -254,7 +254,7 @@ export function FeedsPane({ openId, onOpen }: { openId: string | null; onOpen: (
           <h4>{status === 'absent' ? 'This house service has no feeds table' : 'The feeds table could not be read'}</h4>
           <p>
             {status === 'absent'
-              ? 'This service predates the table. Jobs still cut with the compiled starting table, every row labelled unmeasured.'
+              ? 'This service predates the table. Jobs cut with the compiled starting table.'
               : 'The service answered, but its feeds table could not be used. Jobs fall back to the compiled starting table until it can be read.'}
           </p>
           {reason !== null && <div className="why">{reason}</div>}

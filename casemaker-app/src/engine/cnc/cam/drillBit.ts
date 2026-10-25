@@ -178,7 +178,7 @@ export function planDrillBit(input: DrillBitInput): DrillBitResult {
           ? `blind: full diameter to ${input.depth.fullDiameterDepth} mm, tip to ${r3(tipDepth)} mm`
           : `through ${input.depth.thickness} mm: the full diameter clears the underside by ${input.depth.breakthroughMm} mm, tip to ${r3(tipDepth)} mm`,
         `${depths.length} peck(s) of ${r3(peck)} mm (drill.peckDiameters × ${d}), a full retract after each`,
-        `feed ${s.plungeFeed} mm/min and ${s.spindleRpm} rpm are placeholders, not measured (drill.plungeFeed, drill.spindleRpm)`,
+        `feed ${s.plungeFeed} mm/min and ${s.spindleRpm} rpm are starting values (drill.plungeFeed, drill.spindleRpm)`,
       ],
     },
   };

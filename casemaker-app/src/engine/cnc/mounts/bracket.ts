@@ -185,7 +185,7 @@ export function bracketDatum(anchor: AnchorRead, b: BracketSettingsRead): Bracke
   return {
     x: r3(anchor.x + s.originOffset.x),
     y: r3(anchor.y + s.originOffset.y),
-    from: `${anchor.from} + the bracket’s offset (${s.originOffset.x}, ${s.originOffset.y})${offsetMeasured ? ', measured' : ' — a default, not measured'}`,
+    from: `${anchor.from} + the bracket’s offset (${s.originOffset.x}, ${s.originOffset.y})${offsetMeasured ? ', measured' : ''}`,
     uncertainty: s.fitMm,
     offsetMeasured,
   };
