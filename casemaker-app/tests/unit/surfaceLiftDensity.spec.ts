@@ -103,6 +103,63 @@ describe('surface-frame density (#625)', () => {
     }
   });
 
+  // #634 — a plane BELOW the reference (every lift negative; the low side of any noisy fit does
+  // this) used to leave the AIR MOVES in the lifted frame: a retract started at the feed's lifted
+  // end and dipped |lift| into the material the un-lifted floor left, so both engines raised
+  // `rapid-through-stock` on a cut the machine would not gouge. Un-lifting the air moves too puts
+  // them in the same frame as the removal they are checked against.
+  it('a NEGATIVE lift region raises no phantom rapid-through-stock', () => {
+    const NEGATIVE: SurfaceFrame = { plane: { offset: -0.2, slopeX: 0, slopeY: 0 }, z0: 0 };
+    const job = defaultJob();
+    const tool = jobTool(job)!;
+    const flatGen = generate(tl, job);
+    const liftGen = generate(tl, job, null, [], undefined, { surface: NEGATIVE });
+    if (flatGen.nc === null || liftGen.nc === null) {
+      throw new Error(`generate refused — flat ${flatGen.stage} | lifted ${liftGen.stage}`);
+    }
+    const flat = load(job, flatGen.nc, tool, null);
+    const lifted = load(job, liftGen.nc, tool, NEGATIVE);
+    try {
+      expectExactEngine(lifted.result);
+      const ok = lifted.result as SimLoadOk;
+      expect(ok.diagnostics.filter((d) => d.code === 'rapid-through-stock')).toEqual([]);
+      expect(ok.diagnostics.filter((d) => d.code === 'rapid-into-fixture')).toEqual([]);
+
+      const flatReport = flat.session.oracle(flatGen.predicted);
+      const liftedReport = lifted.session.oracle(liftGen.predicted);
+      expect(liftedReport.ok).toBe(true);
+      expect(Math.abs(liftedReport.worst.underCut - flatReport.worst.underCut)).toBeLessThanOrEqual(ORACLE_AREA_FLOOR);
+      expect(Math.abs(liftedReport.worst.overCut - flatReport.worst.overCut)).toBeLessThanOrEqual(ORACLE_AREA_FLOOR);
+    } finally {
+      flat.session.dispose();
+      lifted.session.dispose();
+    }
+  });
+
+  // #634 — the un-lift is applied to the 3-dp POSTED text: fmt(−d + lift) − lift = −d + e with
+  // e ∈ ±0.0005 per move, so every XY feed read as `nonConstantZ` and an off-grid depth flipped the
+  // z key between neighbouring moves (MAX_CHECKPOINTS → the column reroute, #625's symptom back).
+  // Quantising to the axis precision restores the exact level.
+  it('an OFF-GRID depth still buckets as one level per feed, with no non-constant Z', () => {
+    const offGrid = defaultJob();
+    offGrid.labels = offGrid.labels.map((l) => ({ ...l, depth: 0.4996 }));
+    const tool = jobTool(offGrid)!;
+    const liftGen = generate(tl, offGrid, null, [], undefined, { surface: TILT });
+    if (liftGen.nc === null) throw new Error(`generate refused — ${liftGen.stage}`);
+    const lifted = load(offGrid, liftGen.nc, tool, TILT);
+    try {
+      expectExactEngine(lifted.result);
+      const ok = lifted.result as SimLoadOk;
+      expect(ok.checkpoints.length).toBeGreaterThan(0);
+      expect(ok.checkpoints.every((cp) => cp.nonConstantZ === false)).toBe(true);
+      expect(ok.checkpoints.length).toBeLessThanOrEqual(MAX_CHECKPOINTS);
+      // The quantised un-lift is a warn-free path: no checkpoint claims a ramp it does not have.
+      expect(ok.diagnostics.some((d) => d.code === 'ramp-over-removed')).toBe(false);
+    } finally {
+      lifted.session.dispose();
+    }
+  });
+
   it('a genuinely dense flat program still routes to the COLUMN engine even when a surface is set', () => {
     // MAX_CHECKPOINTS + 1 causal runs (each plunge is its own run), exactly as simSessionDenseFlat.
     const lines = ['S1000 M3'];

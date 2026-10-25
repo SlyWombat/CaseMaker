@@ -114,6 +114,15 @@ export function isDenseForExactSweep(timeline: Timeline): boolean {
  */
 export function unliftTimeline(timeline: Timeline, surface: SurfaceFrame): Timeline {
   const { plane, z0 } = surface;
+  // #634 — the AXIS PRECISION the program is posted at (`machine.ts` axisPrecision = 3 dp). The
+  // un-lift is exact against the IR, but the session un-lifts the posted TEXT: `fmt(−d + lift) −
+  // lift = −d + e` with e ∈ ±0.0005 varying per move, so every XY feed read as `nonConstantZ` and an
+  // off-grid depth flipped the z key between neighbouring moves (MAX_CHECKPOINTS, a flat job
+  // rerouted to the column engine). Quantising to the precision the file itself carries recovers the
+  // exact level: the residual is below the smallest step the machine can hold.
+  const q = (n: number): number => Math.round(n * 1000) / 1000;
+  /** Two moves are on the same level when their un-lifted Z agrees within the axis precision. */
+  const SAME_LEVEL_MM = 0.001;
   const checkpoints: Checkpoint[] = [];
   let current: Checkpoint | null = null;
   for (const cp of timeline.checkpoints) {
@@ -122,11 +131,27 @@ export function unliftTimeline(timeline: Timeline, surface: SurfaceFrame): Timel
       const y0 = cp.xy[k * 4 + 1] as number;
       const x1 = cp.xy[k * 4 + 2] as number;
       const y1 = cp.xy[k * 4 + 3] as number;
-      const uz0 = (cp.zs[k * 2] as number) - surfaceLift(plane, z0, x0, y0);
-      const uz1 = (cp.zs[k * 2 + 1] as number) - surfaceLift(plane, z0, x1, y1);
+      let uz0 = q((cp.zs[k * 2] as number) - surfaceLift(plane, z0, x0, y0));
+      let uz1 = q((cp.zs[k * 2 + 1] as number) - surfaceLift(plane, z0, x1, y1));
+      // #634 — ONE LEVEL. On a level feed the two ends differ only by the rounding residual of the
+      // 3-dp posted text (≤ half a micrometre each); below the axis precision that is not a ramp,
+      // and reading it as one made every XY feed a hull (`nonConstantZ`) instead of a 2-D capsule.
+      // A genuine ramp — a 3D relief move — differs by far more than this and is untouched.
+      // (One and a half quanta: two rounding residuals can differ by a full one, plus float noise.)
+      if ((x0 !== x1 || y0 !== y1) && Math.abs(uz0 - uz1) <= SAME_LEVEL_MM * 1.5) {
+        const level = Math.min(uz0, uz1);
+        uz0 = level;
+        uz1 = level;
+      }
       const z = Math.min(uz0, uz1);
       const zKey = Math.round(z * 1000);
-      if (current === null || current.segment !== cp.segment || current.zKey !== zKey) {
+      // #634 — SAME LEVEL WITHIN THE AXIS PRECISION, not "same integer micrometre". The un-lift is
+      // exact against the IR but runs on the 3-dp posted text, so every move carries a rounding
+      // residual up to half the last digit; an absolute key makes moves of ONE level straddle a
+      // bucket boundary at random (452 of them on the off-grid fixture). A tolerance groups a run
+      // of one level deterministically; a genuine step below a micrometre is below what the machine
+      // can hold and merging it costs nothing the band can see.
+      if (current === null || current.segment !== cp.segment || Math.abs(z - current.z) > SAME_LEVEL_MM) {
         current = {
           segment: cp.segment,
           tool: cp.tool,
@@ -147,7 +172,19 @@ export function unliftTimeline(timeline: Timeline, surface: SurfaceFrame): Timel
       if (z < current.z) current.z = z;
     }
   }
-  return { ...timeline, checkpoints, summary: { ...timeline.summary, checkpoints: checkpoints.length } };
+  // #634 — THE AIR MOVES ARE IN THE LIFTED FRAME TOO. Their endpoints come from the runner state =
+  // the file as posted: a retract out of a cut starts at the FEED's end (−d + lift) while the
+  // un-lifted floor is at −d. Wherever the plane sits BELOW the lowest touch (lift < 0), that
+  // |lift| of extra body dipped into the removal column and both engines raised
+  // `rapid-through-stock` for a cut the machine would not gouge. Un-lifting both ends by the lift
+  // at their own XY puts every air move in the same frame as the checkpoints it is checked against
+  // — and lets the retract shortcut (`from[2] === end[2]`) fire again for lift > 0.
+  const airMoves = timeline.airMoves.map((m) => ({
+    ...m,
+    from: [m.from[0], m.from[1], q(m.from[2] - surfaceLift(plane, z0, m.from[0], m.from[1]))] as [number, number, number],
+    to: [m.to[0], m.to[1], q(m.to[2] - surfaceLift(plane, z0, m.to[0], m.to[1]))] as [number, number, number],
+  }));
+  return { ...timeline, checkpoints, airMoves, summary: { ...timeline.summary, checkpoints: checkpoints.length } };
 }
 
 /**
