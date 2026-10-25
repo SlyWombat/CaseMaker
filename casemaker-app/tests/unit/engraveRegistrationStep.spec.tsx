@@ -749,17 +749,17 @@ describe('#638 — the placement frame waits for the acceptance', () => {
     // goes on the record — the next plan and every later jaw tap are aimed from the frame, and the
     // operator is about to re-seat the blank.
     expect(screen.getByTestId('engrave-registration-verdict').getAttribute('data-within-margin')).toBe('false');
-    expect(saves).toHaveLength(1);
-    expect(visePlacementOf(saves[0]!)?.frame ?? null).toBeNull();
-    expect(bedOf(saves[0]!)?.datums.surfaceTopZ ?? null).toBeNull();
+    // #653 — nothing changed on the record, so nothing was written at all: no PUT of an unchanged
+    // machine that a 412 could report as "the record was not saved".
+    expect(saves).toHaveLength(0);
 
     await useFoundPosition();
 
     // "Use the found position" is the acceptance: the frame and the top land with the origin, from
     // the result the run held.
-    expect(saves).toHaveLength(2);
+    expect(saves).toHaveLength(1);
     const recorded = firstRegistrationFor(job.id, TARGET)!;
-    const written = saves[1]!;
+    const written = saves[0]!;
     expect(visePlacementOf(written)?.frame?.fixedJawFaceX).toBeCloseTo(recorded.outcome.correctedG54.x, 3);
     expect(visePlacementOf(written)?.provenance.fixedJawFaceX).toMatch(/^measured:/);
     // The fake answers the surface seek at the band's centre; the writing surface point is the plan's.

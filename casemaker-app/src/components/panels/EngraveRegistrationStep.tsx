@@ -181,11 +181,16 @@ export function EngraveRegistrationStep({ job, target }: EngraveRegistrationStep
     aliveRef.current = true;
     return () => {
       aliveRef.current = false;
-      resolverRef.current?.(false);
-      resolverRef.current = null;
-      const handle = handleRef.current;
-      handleRef.current = null;
-      void handle?.close();
+      // #653 — CANCEL ONLY A PENDING PROMPT. Answering No is the executor's own stop path (the
+      // #495 policy), and it homes and closes as it unwinds. Mid-motion there is no prompt to
+      // answer: the machine may be between a touch and its closing `$H`, and closing the console
+      // here does not stop the move — a later line simply reopens the session. The run finishes and
+      // its own epilogue (home on a stop, then close) runs instead, below.
+      const answer = resolverRef.current;
+      if (answer !== null) {
+        resolverRef.current = null;
+        answer(false);
+      }
     };
   }, []);
 
@@ -319,7 +324,14 @@ export function EngraveRegistrationStep({ job, target }: EngraveRegistrationStep
         },
         spreadPlan ?? undefined,
       );
-      if (!aliveRef.current) return;
+      if (!aliveRef.current) {
+        // #653 — the host has gone but the run has not: finish its epilogue rather than abandon
+        // the console. Only the UI writes below are skipped.
+        if (!r.ok) await homeAfterStop(handle);
+        handleRef.current = null;
+        await handle.close();
+        return;
+      }
       if (r.ok && r.spread !== undefined) {
         // #519 item 1 — the dock's Touches tab closes with the spread sentence (the rail's detailed
         // spread block stays where the Write decision is). #630 — the transcript line carries the
@@ -351,7 +363,11 @@ export function EngraveRegistrationStep({ job, target }: EngraveRegistrationStep
       }
       if (!r.ok) {
         const note = await homeAfterStop(handle);
-        if (!aliveRef.current) return;
+        if (!aliveRef.current) {
+          handleRef.current = null;
+          await handle.close();
+          return;
+        }
         setResult(r);
         setHomeNote(note);
         setPhase('failed');
@@ -406,7 +422,11 @@ export function EngraveRegistrationStep({ job, target }: EngraveRegistrationStep
             }
             return rec;
           };
-          const outcome = await saveMachineWithRetry(machine, update);
+          // #653 — NOTHING TO WRITE, NO WRITE. An out-of-margin vise run with no mount tap builds
+          // nothing (no frame, no top, no datum, no bed — every step of the update above answers the
+          // SAME record when it changes nothing), and a PUT of it could earn a 412 that this code
+          // would report as "the record was not saved" for a run that had nothing to record.
+          const outcome = update(machine) === machine ? ('ok' as const) : await saveMachineWithRetry(machine, update);
           if (outcome !== 'ok') {
             // Never "recorded" without 'ok': the measurement stands on screen, the datum does not.
             writeNotes.push(
@@ -448,7 +468,11 @@ export function EngraveRegistrationStep({ job, target }: EngraveRegistrationStep
         await handle.close();
       }
     } catch (e) {
-      if (!aliveRef.current) return;
+      if (!aliveRef.current) {
+        handleRef.current = null;
+        await handle.close();
+        return;
+      }
       setError(e instanceof Error ? e.message : String(e));
       setPhase('failed');
       handleRef.current = null;
@@ -475,7 +499,11 @@ export function EngraveRegistrationStep({ job, target }: EngraveRegistrationStep
         { console: { send: (line, timing) => handle.send(line, timing) }, operator: askOperator },
         { confirmed: true },
       );
-      if (!aliveRef.current) return;
+      if (!aliveRef.current) {
+        handleRef.current = null;
+        await handle.close();
+        return;
+      }
       if (!a.ok) {
         setWritten(a);
         setPhase('failed');
@@ -535,7 +563,11 @@ export function EngraveRegistrationStep({ job, target }: EngraveRegistrationStep
       handleRef.current = null;
       await handle.close();
     } catch (e) {
-      if (!aliveRef.current) return;
+      if (!aliveRef.current) {
+        handleRef.current = null;
+        await handle.close();
+        return;
+      }
       setError(e instanceof Error ? e.message : String(e));
       setPhase('failed');
       handleRef.current = null;

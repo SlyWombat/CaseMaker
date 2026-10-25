@@ -1859,9 +1859,9 @@ function materialPositionSteps(
           'origin from the measured position. Do not cut until the two agree.'
         : `Compare with the file: the scanned edges should lie where it says they do — ` +
           `${scanned.map((e) => `${e.axis.toUpperCase()} = ${fmtNum(e.nominalMm)}`).join(' and ')} ` +
-          `after the ${biasMm} mm above is taken back toward the blank. The jaw-referenced edges are ` +
-          'jaw-referenced: what to confirm there is that the blank is seated against the jaw’s face ' +
-          '(the inside touch found the blank’s own top) and that the jaw is where the fixture says. ' +
+          `after the ${biasMm} mm above is taken back toward the blank. The jaw-referenced edges ` +
+          'have nothing to bracket: what to confirm is that the blank is seated against the jaw’s ' +
+          'face (the inside touch found the blank’s own top) and that the jaw is where the fixture says. ' +
           'More than the job’s own margin out, and the blank has moved: re-clamp it, or set the ' +
           'origin from the measured position. Do not cut until the two agree.',
     value: `allowed ${fmtNum(job.edgeMargin)} mm`,

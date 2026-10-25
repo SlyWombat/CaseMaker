@@ -156,6 +156,13 @@ export interface AirMove {
   kind: 'rapid' | 'feed-spindle-off';
   from: [number, number, number];
   to: [number, number, number];
+  /**
+   * #653 — the same move in the POSTED (lifted) frame, set only on a surface-frame un-lift
+   * (`unliftTimeline`): `from`/`to` are its un-lifted image, which is the frame the REMOVAL is
+   * compared against, while this is the motion the machine really makes — the frame the checks
+   * against unsheared geometry (the bed, the fixtures, the spindle-off proximity) must judge.
+   */
+  lifted?: { from: [number, number, number]; to: [number, number, number] };
 }
 
 /**

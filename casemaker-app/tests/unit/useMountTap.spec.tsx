@@ -26,7 +26,16 @@ const TARGET = { host: '192.0.2.10', port: 2222 };
 const h = vi.hoisted(() => {
   const close = vi.fn(async (): Promise<void> => {});
   const attach = vi.fn(() => ({ send: vi.fn(async () => ({ kind: 'ok' as const, reply: '' })), close }));
-  return { close, attach, state: { operatorSaid: null as boolean | null, operatorStarted: false } };
+  return {
+    close,
+    attach,
+    state: {
+      operatorSaid: null as boolean | null,
+      operatorStarted: false,
+      /** #653 — a promise the mocked runner awaits after the operator says Yes (mid-motion). */
+      hold: null as Promise<void> | null,
+    },
+  };
 });
 const closeSpy = h.close;
 const attachConsoleSpy = h.attach;
@@ -51,6 +60,9 @@ vi.mock('@/engine/cnc/registration', async (importOriginal) => {
         const ok = await deps.operator({ kind: 'fit-probe', text: 'Fit the wired probe in the spindle, then continue.' });
         h.state.operatorSaid = ok;
         if (!ok) return { ok: false as const, reason: 'stopped: the probe was not fitted', transcript: [] };
+        // #653 — the host may unmount while the machine is still touching; the test holds the run
+        // here until it releases it.
+        if (h.state.hold !== null) await h.state.hold;
         return {
           ok: true as const,
           z: -56.82,
@@ -308,5 +320,51 @@ describe('#642 the bracket-seat write-back', () => {
     );
     // The machine write still landed: the seat is on the bed profile.
     expect(saves.at(-1)!.bedProfiles!.find((p) => p.id === 'bp1')!.datums.bracketSeatZ?.value).toBeCloseTo(-65.32, 3);
+  });
+});
+
+// #653 — the unmount policy, from the other side. Mid-motion there is nothing to cancel: closing
+// the console would not stop the move (the next line reopens the session) and it left the probe at
+// the touch with no closing `$H`. The run keeps the console and the gate until its own `finally`.
+describe('#653 unmount mid-motion', () => {
+  function BusyProbe() {
+    const busy = useMountTapBusyFlag();
+    return <span data-testid="probe-busy">{busy ? 'busy' : 'idle'}</span>;
+  }
+
+  it('lets the run finish instead of closing the console under a move', async () => {
+    let release: () => void = () => {};
+    h.state.hold = new Promise<void>((resolve) => {
+      release = () => {
+        h.state.hold = null;
+        resolve();
+      };
+    });
+    render(<BusyProbe />);
+    const view = render(<Host label="setups" />);
+    fireEvent.click(screen.getByTestId('tap-setups'));
+    await screen.findByTestId('continue-setups');
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('continue-setups'));
+    });
+    await waitFor(() => expect(h.state.operatorSaid).toBe(true));
+
+    view.unmount();
+
+    // Mid-motion: the console stays open and the gate stays held by the running tap.
+    expect(closeSpy).not.toHaveBeenCalled();
+    expect(screen.getByTestId('probe-busy').textContent).toBe('busy');
+
+    await act(async () => {
+      release();
+    });
+
+    // The run's own finally closes the handle and releases the gate.
+    await waitFor(() => expect(closeSpy).toHaveBeenCalled());
+    await waitFor(() => expect(screen.getByTestId('probe-busy').textContent).toBe('idle'));
+  });
+
+  afterEach(() => {
+    h.state.hold = null;
   });
 });

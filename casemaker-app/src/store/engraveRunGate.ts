@@ -297,9 +297,10 @@ export function surfaceRepostBlocker(
   // #635 — BOTH DIRECTIONS. The comparison used to return early whenever the registration recorded
   // NO fit, so a package re-posted against tilt A stayed uploadable after the blank was re-seated
   // and measured as a dome or flat: the lifted program would go up under "the machine levels it and
-  // the program uploads FLAT", and the colour plane would drift by A's tilt. A registration that
-  // ran always measured the surface, so `surface: null` there means "no tilt to follow" (flat or
-  // dome), not "unknown".
+  // the program uploads FLAT", and the colour plane would drift by A's tilt. `surface: null` there
+  // means the registration recorded no tilt — a flat or dome fit, or no fit was attempted at all
+  // (`surfaceSpreadPlan` answers null for a job with no cut regions to measure, #642). None of
+  // those is a tilt to follow, so the flat-side answer is the conservative one either way.
   const posted = pkg.surface ?? null;
   const measured = registration.surface ?? null;
   if (measured === null) {

@@ -125,6 +125,14 @@ export function unliftTimeline(timeline: Timeline, surface: SurfaceFrame): Timel
   const SAME_LEVEL_MM = 0.001;
   const checkpoints: Checkpoint[] = [];
   let current: Checkpoint | null = null;
+  /**
+   * #653 — THE RUN'S FIRST Z, not the running minimum. Grouping against `current.z` (updated to the
+   * minimum) let a DESCENDING 1 µm staircase chain without bound: every step sat within one quantum
+   * of the last, so the whole staircase became one checkpoint extruded from its lowest Z with
+   * `nonConstantZ` false — no ramp over the material between. The window is the snap's own (1.5
+   * quanta), measured from the level the run STARTED at, so a run spans at most that.
+   */
+  let currentStart = 0;
   for (const cp of timeline.checkpoints) {
     for (let k = 0; k < cp.steps.length; k++) {
       const x0 = cp.xy[k * 4] as number;
@@ -151,7 +159,8 @@ export function unliftTimeline(timeline: Timeline, surface: SurfaceFrame): Timel
       // bucket boundary at random (452 of them on the off-grid fixture). A tolerance groups a run
       // of one level deterministically; a genuine step below a micrometre is below what the machine
       // can hold and merging it costs nothing the band can see.
-      if (current === null || current.segment !== cp.segment || Math.abs(z - current.z) > SAME_LEVEL_MM) {
+      if (current === null || current.segment !== cp.segment || Math.abs(z - currentStart) > SAME_LEVEL_MM * 1.5) {
+        currentStart = z;
         current = {
           segment: cp.segment,
           tool: cp.tool,
@@ -183,6 +192,10 @@ export function unliftTimeline(timeline: Timeline, surface: SurfaceFrame): Timel
     ...m,
     from: [m.from[0], m.from[1], q(m.from[2] - surfaceLift(plane, z0, m.from[0], m.from[1]))] as [number, number, number],
     to: [m.to[0], m.to[1], q(m.to[2] - surfaceLift(plane, z0, m.to[0], m.to[1]))] as [number, number, number],
+    // #653 — the bed, the fixtures and the spindle-off proximity are UNSHEARED geometry: a move
+    // displaced by the lift at its XY is judged against them off by 0.2–0.5 mm. Keep the posted
+    // (lifted) move beside the un-lifted image so those checks read the motion the machine makes.
+    lifted: { from: m.from, to: m.to },
   }));
   return { ...timeline, checkpoints, airMoves, summary: { ...timeline.summary, checkpoints: checkpoints.length } };
 }
@@ -728,16 +741,23 @@ export function checkAirMoves(
     checked++;
     const spindleOff = mv.kind === 'feed-spindle-off';
     const margin = spindleOff ? proximityMm : 0;
-    const zLo = Math.min(mv.from[2], mv.to[2]) - margin;
+    // #653 — THE BED AND THE FIXTURES ARE UNSHEARED, so they are judged against the motion the
+    // machine really makes: the POSTED (lifted) move when this timeline is a surface un-lift, else
+    // the move itself. `mv` remains the un-lifted image for the stock check, whose removal is in
+    // that frame.
+    const real = mv.lifted ?? mv;
+    const zLo = Math.min(real.from[2], real.to[2]) - margin;
     if (zLo < bedZ) {
       diagnostics.push(
         spindleOff
           ? { severity: 'error', code: 'spindle-off-near-bed', message: `line ${mv.line}: a feed move with the spindle off within ${proximityMm} mm of the bed` }
-          : { severity: 'error', code: 'rapid-below-bed', message: `line ${mv.line}: a rapid to Z ${Math.min(mv.from[2], mv.to[2]).toFixed(3)}, below the bed at ${bedZ.toFixed(3)}` },
+          : { severity: 'error', code: 'rapid-below-bed', message: `line ${mv.line}: a rapid to Z ${Math.min(real.from[2], real.to[2]).toFixed(3)}, below the bed at ${bedZ.toFixed(3)}` },
       );
       continue;
     }
-    if (zLo >= reachTop) continue; // entirely above the blank AND the fixture: nothing to hit
+    // Skip only when BOTH frames are entirely above the blank and the fixture: one of them below
+    // `reachTop` still has something to check against.
+    if (zLo >= reachTop && Math.min(mv.from[2], mv.to[2]) - margin >= reachTop) continue;
     // Step 7: a retract straight up out of the cut just made. The immediately preceding event
     // must be that cut (so any other move in between disqualifies it), X and Y must not change,
     // and the move must go +Z. Then it is inside the cut's own removal and needs neither a tool
@@ -765,9 +785,22 @@ export function checkAirMoves(
     // solids are exact — the body a hull of cylinders, the fixture a union of boxes — so
     // anything above float dust is real, no derived floor needed.
     if (fixture !== null) {
-      const fhit = body.intersect(fixture);
+      // #653 — the fixture is unsheared too: the lifted move's body, when this is a surface un-lift.
+      const fixtureBody =
+        mv.lifted === undefined
+          ? body
+          : sweptToolBody(
+              tl,
+              [real.from[0], real.from[1], real.from[2] - margin],
+              [real.to[0], real.to[1], real.to[2] - margin],
+              radius + margin,
+              spindleOff ? nMargin : nCap,
+              zTop + margin,
+            );
+      const fhit = fixtureBody.intersect(fixture);
       const fvol = fhit.volume();
       fhit.delete();
+      if (fixtureBody !== body) fixtureBody.delete();
       if (fvol > SLIVER_MM3) {
         pushFixture(
           spindleOff

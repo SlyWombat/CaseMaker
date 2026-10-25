@@ -110,14 +110,17 @@ export function useMountTap(inputs: MountTapInputs): MountTapApi {
     alive.current = true;
     return () => {
       alive.current = false;
-      resolver.current?.(false);
-      resolver.current = null;
-      if (tokenRef.current !== null) {
-        useMountTapGate.getState().end(tokenRef.current);
-        tokenRef.current = null;
+      // #653 — CANCEL ONLY A PENDING PROMPT. Answering No is the runner's own stop path: it homes
+      // and closes as it unwinds. Mid-motion there is no prompt to answer — the machine may be
+      // between a touch and its closing `$H`, and closing the console here does not stop the move
+      // (a later line reopens the session), it only leaves the run to finish under a host that has
+      // gone. With nothing pending, `tapJaw` keeps the console and finishes: its `finally` closes
+      // the handle and releases the gate.
+      const answer = resolver.current;
+      if (answer !== null) {
+        resolver.current = null;
+        answer(false);
       }
-      void handleRef.current?.close();
-      handleRef.current = null;
     };
   }, []);
 

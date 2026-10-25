@@ -281,7 +281,13 @@ export function referenceOutcome(plan: RegistrationPlan, data: RunData): Registr
   const rot = plan.referenceRotation ?? null;
   if (rot === null || rot.resolutionMm >= s.edgeMarginMm) {
     if (plan.mount === 'tape') problems.push('on tape nothing holds the turn, and these references cannot measure it');
-    else notes.push(rot === null ? 'the turn: the fixed jaw holds it' : `the turn: the fixed jaw holds it to ±${rot.resolutionMm} mm`);
+    else
+      notes.push(
+        rot === null
+          ? 'the turn: the fixed jaw holds it'
+          : // #653 — the resolution is the REFERENCES' reading, not a claim about the jaw's grip.
+            `the turn: the fixed jaw holds it; these references measure a turn only to within ±${rot.resolutionMm} mm`,
+      );
   } else {
     const a = refs.find((r) => r.itemId === rot.between[0])!;
     const b = refs.find((r) => r.itemId === rot.between[1])!;

@@ -40,10 +40,11 @@
  *
  * WHAT THIS MODULE DOES NOT DO. It does not remember anything: "what did I last send" is the panel's
  * fact, not the socket's, because there is no read-back — the status line does not report the vacuum
- * mode (bench, 2026-10-12), so no amount of polling could recover it. It also does not run a job;
- * the MANUAL switch stays the bare `M331`/`M332` pair. The antistatic's `M331.4`/`M332.4` are
- * exported as constants here (#564) but only the run drives them; the rest of the `M331.x` family
- * (blowing, bed cleaning) stays unmodelled (`Z1-Firmware-Dialect.md` §11.3, #283).
+ * mode (bench, 2026-10-12), so no amount of polling could recover it. It also does not run a job.
+ * The MANUAL VACUUM switch stays the bare `M331`/`M332` pair; the antistatic's `M331.4`/`M332.4`
+ * (#564) are switched by a plastic job's run AND, since #648, by hand from the strip. The rest of
+ * the `M331.x` family (blowing, bed cleaning) stays unmodelled (`Z1-Firmware-Dialect.md` §11.3,
+ * #283).
  */
 
 import { alarmLine, controllerState, jobProgressPercent } from './machineUpload';
