@@ -276,6 +276,22 @@ describe('profile schemas (#184 work item 1)', () => {
     expect(machineSchema.parse(Z1)).toEqual(Z1);
   });
 
+  it('#530 round-trips the camera endpoint, and refuses one without a port, a path or a source', () => {
+    // The camera is what the pane offers: a profile that loses it in a parse would have a machine
+    // that serves a stream the app no longer knows about.
+    expect(millProfileSchema.parse(Z1).camera).toEqual(Z1.camera);
+    // Optional: a machine with no camera parses without one and stays without one.
+    const { camera: _camera, ...noCamera } = Z1;
+    expect(millProfileSchema.parse(noCamera).camera).toBeUndefined();
+    for (const bad of [
+      { ...Z1, camera: { ...Z1.camera, port: 0 } },
+      { ...Z1, camera: { ...Z1.camera, path: 'ws_video' } },
+      { ...Z1, camera: { ...Z1.camera, source: '' } },
+    ]) {
+      expect(millProfileSchema.safeParse(bad).success).toBe(false);
+    }
+  });
+
   it('parses every printer profile', () => {
     for (const p of PRINTER_PROFILES) {
       expect(printerProfileSchema.parse(p)).toEqual(p);

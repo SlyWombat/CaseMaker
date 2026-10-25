@@ -221,19 +221,23 @@ pub fn start(
 /// `guard.rs` holds the rules; `every_write_under_the_api_is_guarded` below is the test that fails if
 /// this line is ever moved after the last `route`.
 fn router(store: Arc<HouseStore>, serving_port: u16, config_path: PathBuf) -> Router {
+    // The guard is built first because two things read it: the write middleware below, and the
+    // camera route (#530), whose upgrade is a GET but still makes this server open a socket.
+    let guard = crate::guard::Guard::new(serving_port, config_path.clone());
     let api = Router::new()
-        .merge(crate::config_api::routes(
-            serving_port,
-            config_path.clone(),
-        ))
-        .merge(crate::house_api::routes(store))
+        .merge(crate::config_api::routes(serving_port, config_path))
+        .merge(crate::house_api::routes(store.clone()))
         // #571 — the machine bridge over HTTP, so a LAN browser served this SPA can drive the
         // controller (the desktop webview still uses Tauri IPC). Its own registry: the HTTP server
         // owns these sockets, separate from the Tauri State registry the local webview uses.
         .merge(crate::machine_api::routes(Arc::new(
             crate::machine::MachineTransport::default(),
-        )));
-    crate::guard::enforce(api, crate::guard::Guard::new(serving_port, config_path))
+        )))
+        // #530 — the machine's camera, the same shape: the server owns the WebSocket to the ESP32
+        // and the LAN browser reads it on this server's origin. It reads the location too: only a
+        // machine the house knows, on its own camera port, may be dialled.
+        .merge(crate::camera_api::routes(guard.clone(), store));
+    crate::guard::enforce(api, guard)
         .route("/", get(serve_root))
         .route("/*path", get(serve_path))
 }

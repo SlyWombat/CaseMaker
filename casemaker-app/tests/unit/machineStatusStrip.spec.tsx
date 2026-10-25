@@ -18,6 +18,7 @@ import { resolveTool } from '@/engine/cnc/toolRegistry';
 import { toolDisplayName } from '@/engine/cnc/toolDisplay';
 import type { FrozenPackage } from '@/types/engraveJob';
 import { resetLocationStore, useLocationStore } from '@/store/locationStore';
+import { resetCameraPaneStore, useCameraPaneStore } from '@/store/cameraPaneStore';
 import { useEngraveJobStore } from '@/store/engraveJobStore';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { jobTool } from '@/engine/cnc/engrave/jobSetup';
@@ -77,7 +78,7 @@ const LOCATION = {
 } as unknown as NonNullable<ReturnType<typeof useLocationStore.getState>['location']>;
 void PROBE;
 
-function remember(line: string | null): void {
+function remember(line: string | null, profileId: string | null = 'Z1'): void {
   const observation: MachineObservation = {
     name: 'QA Z1',
     host: '192.0.2.10',
@@ -86,7 +87,7 @@ function remember(line: string | null): void {
     ip: null,
     mac: null,
     status: line,
-    profileId: 'Z1',
+    profileId,
     observedAt: '2026-10-24T12:00:00.000Z',
     notes: [],
   };
@@ -102,6 +103,7 @@ beforeEach(() => {
   resetMachineRunStore();
   resetStripAccessoryStore();
   resetLocationStore();
+  resetCameraPaneStore();
   useLocationStore.setState({ status: 'present', location: LOCATION, etag: '"e1"', reason: null });
   useEngraveJobStore.getState().replace({ ...defaultEngraveJob(), toolKey: 'flat-1.0' });
 });
@@ -355,6 +357,26 @@ describe('#659 the state popover', () => {
     const halt = screen.getByTestId('machine-status-monitor-halt');
     expect(halt.textContent).toContain('the cover was opened');
     expect(halt.getAttribute('data-code')).toBe('11');
+  });
+
+  it('#530 offers the camera from the same popover, and the bed is one press away', () => {
+    remember('<Idle|MPos:0,0,0>');
+    render(<MachineStatusStrip />);
+    fireEvent.click(screen.getByTestId('machine-status-state'));
+    fireEvent.click(screen.getByTestId('machine-status-monitor-camera'));
+    expect(useCameraPaneStore.getState().open).toBe(true);
+    // The popover closes behind it: the pane is the thing to look at now.
+    expect(screen.queryByTestId('machine-status-monitor')).toBeNull();
+  });
+
+  it('#530 offers no camera for a machine whose profile names none', () => {
+    // An unknown identity resolves to no profile at all (#280): the strip says what it can, and
+    // does not borrow the Z1's camera for a machine it does not know.
+    remember('<Idle|MPos:0,0,0>', null);
+    render(<MachineStatusStrip />);
+    fireEvent.click(screen.getByTestId('machine-status-state'));
+    expect(screen.getByTestId('machine-status-monitor')).toBeTruthy();
+    expect(screen.queryByTestId('machine-status-monitor-camera')).toBeNull();
   });
 
   it('says the frame carries no extra readings rather than inventing one', () => {

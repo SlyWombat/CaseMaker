@@ -11,6 +11,8 @@ import { setMachineUploadLoader } from '@/platform/machineUpload';
 import { resetMachineRunStore, useMachineRunStore } from '@/store/machineRunStore';
 import { resetRunConfirmStore, runKey, useRunConfirmStore } from '@/store/runConfirmStore';
 import { useEngraveRunStore } from '@/store/engraveRunStore';
+import { resetCameraPaneStore, useCameraPaneStore } from '@/store/cameraPaneStore';
+import { resetMachineStore, useMachineStore } from '@/store/machineStore';
 import { programHash } from '@/platform/machineRun';
 import type { MachineObservation } from '@/platform/machineProbe';
 import type { ReleaseSource } from '@/engine/cnc/engrave/release';
@@ -66,6 +68,8 @@ beforeEach(() => {
   cleanup();
   resetMachineRunStore();
   resetRunConfirmStore();
+  resetCameraPaneStore();
+  resetMachineStore();
   useEngraveRunStore.setState({ acknowledged: false });
   prepareSpy.mockClear();
   startSpy.mockClear();
@@ -151,6 +155,21 @@ describe('#656 the one screen', () => {
     fireEvent.click(screen.getByTestId('engrave-cut-statement'));
     expect((screen.getByTestId('engrave-cut-go') as HTMLButtonElement).disabled).toBe(true);
     expect(screen.getByTestId('engrave-cut-go-blocked').textContent).toContain('re-post against the tilt first');
+  });
+
+  it('#530 opens the machine’s camera from the Cut step — and only when it has one', () => {
+    render(confirm());
+    expect(screen.queryByTestId('engrave-cut-camera')).toBeNull();
+
+    cleanup();
+    // The camera is a profile fact, read from the connected machine; the confirm's own machine
+    // fixture is the same observation the store holds.
+    useMachineStore.getState().setProbeResult({ kind: 'found', observation: MACHINE, calibration: null });
+    render(confirm());
+    fireEvent.click(screen.getByTestId('engrave-cut-camera'));
+    expect(useCameraPaneStore.getState().open).toBe(true);
+    // The one press is untouched: the camera is a look, not a step in the cut.
+    expect((screen.getByTestId('engrave-cut-go') as HTMLButtonElement).disabled).toBe(true);
   });
 
   it('carries the dome verdict’s choice on the same screen', () => {

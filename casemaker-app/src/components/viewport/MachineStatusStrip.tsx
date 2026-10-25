@@ -10,6 +10,8 @@ import { jobTool } from '@/engine/cnc/engrave/jobSetup';
 import { resolveTool } from '@/engine/cnc/toolRegistry';
 import { toolDisplayName } from '@/engine/cnc/toolDisplay';
 import { useStripAccessoryStore } from '@/store/stripAccessoryStore';
+import { useCameraPaneStore } from '@/store/cameraPaneStore';
+import { useMachineCamera } from '@/hooks/useMachineCamera';
 import { readStatusLine, type JobProgress, type StatusPosition } from '@/platform/desktop/protocol';
 import { alarmLine } from '@/platform/machineUpload';
 import { StripAccessories } from './StripAccessories';
@@ -153,6 +155,10 @@ export function MachineStatusStrip(): JSX.Element | null {
   // #652 — the program the machine holds (prepared or running), for its own frozen cutter.
   const prepared = useMachineRunStore((s) => (machine === null ? null : s.runs[machineKey(machine)] ?? null));
   const forgetAccessories = useStripAccessoryStore((s) => s.forget);
+  // #530 — the camera, when the machine's profile has one: a link inside the same popover, so the
+  // strip's one-line rule survives and the bed is still a press away.
+  const camera = useMachineCamera();
+  const openCamera = useCameraPaneStore((s) => s.openPane);
   // #659 — the status monitor's popover, opened from the STATE element (the accessory icons'
   // pattern: nothing added to the strip's text, Escape and an outside click close it).
   const [monitorOpen, setMonitorOpen] = useState(false);
@@ -358,6 +364,35 @@ export function MachineStatusStrip(): JSX.Element | null {
                   </li>
                 )}
               </ul>
+            )}
+            {/* #530 — the bed, from the same place the readings are: absent for a machine whose
+                profile names no camera (and the pane itself is then unreachable). */}
+            {camera !== null && (
+              <button
+                type="button"
+                data-testid="machine-status-monitor-camera"
+                title={camera.source}
+                style={{
+                  display: 'block',
+                  width: '100%',
+                  marginTop: 8,
+                  paddingTop: 7,
+                  border: 'none',
+                  borderTop: '1px solid #2a2f36',
+                  background: 'transparent',
+                  color: '#8fb4ff',
+                  font: 'inherit',
+                  fontSize: 11,
+                  textAlign: 'left',
+                  cursor: 'pointer',
+                }}
+                onClick={() => {
+                  setMonitorOpen(false);
+                  openCamera();
+                }}
+              >
+                Camera — see the bed
+              </button>
             )}
           </div>
         )}

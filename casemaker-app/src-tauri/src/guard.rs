@@ -153,6 +153,39 @@ async fn app_writes_only(State(guard): State<Guard>, req: Request, next: Next) -
     next.run(req).await
 }
 
+/// The two provenance questions of the write guard, for a GET that still makes THIS SERVER open an
+/// outgoing connection on the page's behalf (#530's camera proxy). Returns the refusal sentence, or
+/// `None` when the request was addressed to this server by the page it served.
+///
+/// The third question — a body that declares itself JSON — is about writes that carry bytes, which a
+/// WebSocket upgrade never does, so it does not belong here. The other two belong exactly as much:
+/// a page on another site must not be able to make this server open a socket to a machine (the SSRF
+/// the write guard exists to stop), and a rebound name is the same attack here as there.
+pub fn foreign_page_refusal(guard: &Guard, headers: &HeaderMap) -> Option<String> {
+    let host = header_str(headers, header::HOST).unwrap_or_default();
+    if !addressed_to_this_server(&host, guard.serving_port, configured_host(guard).as_deref()) {
+        return Some(format!(
+            "Case Maker only opens a machine connection for a page it served itself — localhost, an \
+             address the app is served at, or the name it is configured to serve under — and this \
+             request was addressed to {}.",
+            said(&host)
+        ));
+    }
+    let origin = origin_of(headers);
+    if !from_the_page_it_served(origin, &host) {
+        return Some(format!(
+            "Case Maker only opens a machine connection for the page it served at that address \
+             (http://{host}), and this request came from {}.",
+            match origin {
+                Origin::At(stated) => format!("`{stated}`"),
+                Origin::Unreadable => "an `Origin` this server cannot read".to_string(),
+                Origin::Absent => "no origin at all".to_string(),
+            }
+        ));
+    }
+    None
+}
+
 const APPLICATION_JSON: &str = "application/json";
 
 /// `GET`, `HEAD` and `OPTIONS` are not writes. `OPTIONS` is in the list because it is a preflight,
@@ -732,6 +765,50 @@ mod tests {
         // sandboxed frame and a `file://` page send — is text that simply does not match.
         assert!(!from_the_page_it_served(Origin::Unreadable, "127.0.0.1:5173"));
         assert!(!from_the_page_it_served(Origin::At("null"), "127.0.0.1:5173"));
+    }
+
+    /// (#530) The provenance half the camera proxy asks. A page from another site cannot make this
+    /// server open a socket to a machine; the app's own page — and a local client with no origin —
+    /// still can.
+    #[test]
+    fn a_foreign_page_cannot_borrow_a_connection() {
+        let dir = TempDir::new().unwrap();
+        let guard = Guard::new(PORT, dir.path().join("config.json"));
+        let headers = |host: Option<&str>, origin: Option<&str>| {
+            let mut h = HeaderMap::new();
+            if let Some(host) = host {
+                h.insert(header::HOST, host.parse().unwrap());
+            }
+            if let Some(origin) = origin {
+                h.insert(header::ORIGIN, origin.parse().unwrap());
+            }
+            h
+        };
+        assert_eq!(
+            foreign_page_refusal(&guard, &headers(Some(APP_HOST), Some(APP_ORIGIN))),
+            None,
+            "the app's own page"
+        );
+        assert_eq!(
+            foreign_page_refusal(&guard, &headers(Some(APP_HOST), None)),
+            None,
+            "a local client, which could edit the files directly"
+        );
+        for (what, h) in [
+            ("another site's page", headers(Some(APP_HOST), Some("https://evil.example"))),
+            (
+                "a rebound name",
+                headers(Some("evil.example:5173"), Some("http://evil.example:5173")),
+            ),
+            ("no address at all", headers(None, None)),
+        ] {
+            let refusal = foreign_page_refusal(&guard, &h);
+            assert!(refusal.is_some(), "{what} must be refused");
+            assert!(
+                refusal.unwrap().contains("connection"),
+                "{what} refuses with the reason, not a bare word"
+            );
+        }
     }
 
     #[test]

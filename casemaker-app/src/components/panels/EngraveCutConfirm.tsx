@@ -30,6 +30,8 @@ import { useEngraveRunStore } from '@/store/engraveRunStore';
 import { useRunConfirmStore, runKey } from '@/store/runConfirmStore';
 import { oracleSentence } from '@/store/engraveRunGate';
 import { useMachineRunStore, type RunContext } from '@/store/machineRunStore';
+import { useCameraPaneStore } from '@/store/cameraPaneStore';
+import { useMachineCamera } from '@/hooks/useMachineCamera';
 import type { OracleReport } from '@/engine/cnc/engrave/oracle';
 import type { ReleaseSource } from '@/engine/cnc/engrave/release';
 
@@ -125,6 +127,9 @@ export function EngraveCutConfirm({
   const start = useMachineRunStore((s) => s.start);
   const prepare = useMachineRunStore((s) => s.prepare);
   const defaults = useShopDefaultsStore((s) => s.defaults);
+  // #530 — the machine's camera is one press away from the screen where the cut is decided.
+  const camera = useMachineCamera();
+  const openCamera = useCameraPaneStore((s) => s.openPane);
 
   // #646/#652 — the cutter the FROZEN program was posted for, by the name every surface uses.
   const tool = resolveTool(source.toolKey);
@@ -217,6 +222,16 @@ export function EngraveCutConfirm({
         I am at the machine, head clear, stock clamped, and I have checked clearance to the vise and
         the tool's reach.
       </label>
+      {camera !== null && (
+        <button
+          type="button"
+          data-testid="engrave-cut-camera"
+          style={{ font: 'inherit', fontSize: 11, padding: '3px 8px', marginTop: 8 }}
+          onClick={openCamera}
+        >
+          Camera — see the bed
+        </button>
+      )}
       <button
         type="button"
         data-testid="engrave-cut-go"

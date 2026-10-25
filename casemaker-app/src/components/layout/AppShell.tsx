@@ -12,6 +12,7 @@ import { useContextPanelWidth } from './useContextPanelWidth';
 import { PanelResizeHandle } from './PanelResizeHandle';
 import { Viewport } from '@/components/viewport/Viewport';
 import { ManageMode } from '@/components/manage/ManageMode';
+import { CameraPanel } from '@/components/panels/CameraPanel';
 import { useRebuildOnProjectChange } from '@/hooks/useRebuildOnProjectChange';
 import { undoProject, redoProject, useProjectStore } from '@/store/projectStore';
 // Static rather than lazy: `EngravePanel` imports this store from `ContextPanel`, which is in the
@@ -94,6 +95,9 @@ export function AppShell() {
         {wizardOpen && <StartWizard />}
       </main>
       <StatusBar />
+      {/* #530 — the machine's camera, opened from the Cut step or the strip's popover and mounted
+          once here: it renders itself null while closed, so no guard is needed. */}
+      <CameraPanel />
     </div>
   );
 }

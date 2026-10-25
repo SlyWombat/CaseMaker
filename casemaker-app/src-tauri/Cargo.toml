@@ -28,8 +28,17 @@ serde_json = "1"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "signal", "sync", "io-util", "time"] }
 # `json` is for the house service (#306): `axum::Json` and the JSON error bodies. Without it the
 # extractor and the response type are simply not in the crate. `original-uri` is the same service's
-# 404, which names the path it refused rather than answering "not found" to a typo.
-axum = { version = "0.7", default-features = false, features = ["http1", "json", "original-uri", "tokio"] }
+# 404, which names the path it refused rather than answering "not found" to a typo. `ws` is the
+# camera proxy (#530): the LAN browser's WebSocket lands here, and the server owns the socket to the
+# machine's camera module.
+axum = { version = "0.7", default-features = false, features = ["http1", "json", "original-uri", "query", "tokio", "ws"] }
+# #530 — the camera proxy's UPSTREAM client. The ESP32 speaks WebSocket and the embedded server is a
+# LAN browser's only way to reach it; `0.24` is the line axum 0.7.9's own `ws` feature declares, so
+# one protocol implementation serves both halves rather than two that happen to agree today.
+tokio-tungstenite = "0.24"
+# `split` on the two sockets' Stream/Sink halves: the client half is axum's WebSocket, the camera
+# half is tokio-tungstenite's. Already in the graph through tauri; this adds only the `sink` trait.
+futures-util = { version = "0.3", features = ["sink"] }
 # `util` is `ServiceExt::oneshot`, which is how the route tests drive the real router in-process
 # rather than binding a socket and racing it.
 tower = { version = "0.5", features = ["util"] }

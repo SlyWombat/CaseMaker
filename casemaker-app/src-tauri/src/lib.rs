@@ -9,6 +9,7 @@ use tauri_plugin_dialog::DialogExt;
 // only: the script and the tests run the same function.
 #[cfg(test)]
 mod build_stamp;
+mod camera_api;
 mod catalogue;
 mod config;
 mod config_api;

@@ -237,6 +237,13 @@ export interface MillProfile extends MachineIdentity {
   hasATC: false;
   toolSlots: 0;
   /**
+   * #530 — the machine's own camera, when it serves one: the ESP32 module on the Z1 pushes JPEGs
+   * over its own WebSocket. Absent on a machine with no camera, and then the camera panel is not
+   * offered at all (never a pane that can only say "unavailable"). The path and the start word are
+   * the module's, observed at the bench (`tools/z1/camera.mjs`); the port is NOT the command port.
+   */
+  camera?: { port: number; path: string; source: string };
+  /**
    * The controller's software endstops, as read off the machine (`config-get sd`, #208 B2): the
    * Z1's literal is `enabled: true` since #279, bounding cuts short of the declared travel.
    * Carried for the profile's own account of the machine; `insideEnvelope` does NOT consult it,
@@ -608,6 +615,14 @@ export const Z1: MillProfile = {
   },
   hasATC: false,
   toolSlots: 0,
+  // #530 — the camera module observed on 2026-10-08 (#286, `tools/z1/camera.mjs`): a WebSocket on
+  // port 82 sends baseline JPEGs after the text `start_stream`, and its first frames after a
+  // (re)connect replay the previous client's last frame — which is why the stream skips three.
+  camera: {
+    port: 82,
+    path: '/ws_video',
+    source: 'observed on the Z1, 2026-10-08 (#286): ws://<host>:82/ws_video, `start_stream`, binary JPEG frames',
+  },
   // MEASURED (#208 B2, 2026-10-06): ENABLED, at −207/−206/−102 — 7/6/2 mm past the vendor's own
   // 200/200/100, and enforced. `envelope` stays the conservative figure.
   softEndstop: {
@@ -927,6 +942,16 @@ export const millProfileSchema = z.object({
   }),
   holder: holderSchema.nullable(),
   rotary: rotarySchema.optional(),
+  // #530 — the machine's own camera, when it serves one: an OPTIONAL sourced endpoint, the rotary
+  // block's shape. A port is positive (port 0 is no endpoint), the path is absolute, and `source`
+  // is required for the same reason every other provenance string on a profile is.
+  camera: z
+    .object({
+      port: z.number().int().positive(),
+      path: z.string().regex(/^\//, 'a camera path starts with /'),
+      source: z.string().min(1),
+    })
+    .optional(),
 });
 
 export const printerProfileSchema = z.object({
