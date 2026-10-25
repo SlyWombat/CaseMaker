@@ -458,15 +458,40 @@ export function finishedProgramsFor(target: { host: string; port: number }): rea
 }
 
 /**
- * #636 — a machine write with the one retry a stale guard earns: `saveMachine` re-reads the location
- * on a 412/428 (another window or a CLI wrote it), so the caller's record is retried ONCE against
- * what is served now. Every datum/frame write goes through this, and every caller must READ the
- * answer: 'stale' twice and 'failed' are not "recorded".
+ * #650 — a machine write as a RECIPE, not a finished record: the update is applied to the record
+ * the service holds, and re-applied to the re-read record after a stale guard. `withViseJawTopDatum`
+ * and `withVisePlacementFrame` are already shaped for this — they take a machine and answer one.
  */
-export async function saveMachineWithRetry(record: MachineRecord): Promise<'ok' | 'stale' | 'failed'> {
-  const first = await useLocationStore.getState().saveMachine(record);
+export type MachineUpdate = (current: MachineRecord) => MachineRecord;
+
+/** The machine the location now describes, by id — the record a stale retry applies its update to. */
+function machineById(id: string): MachineRecord | null {
+  return useLocationStore.getState().location?.machines.find((m) => m.id === id) ?? null;
+}
+
+/**
+ * #636 — a machine write with the one retry a stale guard earns: `saveMachine` re-reads the location
+ * on a 412/428 (another window or a CLI wrote it), so the write is retried ONCE against what is
+ * served now. Every datum/frame write goes through this, and every caller must READ the answer:
+ * 'stale' twice and 'failed' are not "recorded".
+ *
+ * #650 — THE RETRY RE-APPLIES THE UPDATE. Re-sending the record built from the pre-read snapshot
+ * would overwrite the other writer's change (a CLI's datum, a second window's accessory edit) with
+ * this window's stale copy, while both sides were told ok — the If-Match guard defeated by its own
+ * retry. `update` runs against the refreshed record instead; only the change this caller makes is
+ * re-applied, so everything else the service holds survives.
+ */
+export async function saveMachineWithRetry(machine: MachineRecord, update: MachineUpdate): Promise<'ok' | 'stale' | 'failed'> {
+  const first = await useLocationStore.getState().saveMachine(update(machine));
   if (first !== 'stale') return first;
-  return useLocationStore.getState().saveMachine(record);
+  const fresh = machineById(machine.id);
+  if (fresh === null) {
+    // The other writer removed the machine: there is no record to apply the update to, and
+    // re-creating it from a stale copy would resurrect what they deleted.
+    useLocationStore.setState({ writeNote: 'the machine is no longer in the location' });
+    return 'failed';
+  }
+  return useLocationStore.getState().saveMachine(update(fresh));
 }
 
 /**
@@ -481,9 +506,13 @@ export async function createFirstBed(
   machine: MachineRecord,
   registration: LegacyViseRegistration | null,
   now: string,
-): Promise<MachineRecord> {
+): Promise<MachineUpdate> {
   const migrated = firstRegistrationBed(machine, registration, now);
-  if (migrated === null) return machine;
+  // #650 — the bed is folded onto whatever record the SAVE is applied to, not onto this snapshot:
+  // `saveMachineWithRetry` re-applies the update to the re-read record when another window wrote
+  // first, so their change to a datum or a placement survives this first bed's creation.
+  const bed: MachineUpdate = (current) => ensureFirstRegistrationBed(current, registration, now);
+  if (migrated === null) return (current) => current;
   const store = useLocationStore.getState();
   const acc = migrated.accessories[0]!;
   const exists = store.location?.accessories?.some((a) => a.id === acc.id) ?? false;
@@ -491,11 +520,14 @@ export async function createFirstBed(
     for (let attempt = 0; attempt < 2; attempt++) {
       const ok = await store.saveAccessory(acc);
       if (ok === 'ok') break;
-      if (ok !== 'stale') return machine; // a refused accessory write must not block the registration.
+      // A refused accessory write must not block the registration — and without the accessory a
+      // newly created bed would reference a fixture the location does not hold, so it does not
+      // happen either (the same answer this had before the update shape).
+      if (ok !== 'stale') return (current) => current;
       // stale: `saveAccessory` already re-read the location; retry once with the fresh ETag.
     }
   }
-  return ensureFirstRegistrationBed(machine, registration, now);
+  return bed;
 }
 
 /**

@@ -69,7 +69,7 @@ import { cuttingDiameter } from '@/engine/cnc/tool';
 import { shopDefault, useShopDefaultsStore } from '@/store/shopDefaultsStore';
 import { useEngraveJobStore } from '@/store/engraveJobStore';
 import { useEngraveRegistrationStore } from '@/store/engraveRegistrationStore';
-import { createFirstBed, machineAt, saveMachineWithRetry, useLocationStore } from '@/store/locationStore';
+import { createFirstBed, machineAt, saveMachineWithRetry, useLocationStore, type MachineUpdate } from '@/store/locationStore';
 import { recordProbeReading } from '@/engine/cnc/registration/mountContext';
 import {
   viseFrameFromRegistration,
@@ -379,27 +379,34 @@ export function EngraveRegistrationStep({ job, target }: EngraveRegistrationStep
               : null;
           // #613/#636 — ONE bed for the whole run: the frame and the datum land in ONE save, not two
           // beds in a row (a 'failed' first save could otherwise create a second, frame-less bed).
-          let record = await createFirstBed(machine, frameRegistration, now);
-          if (frameRegistration !== null) {
-            const frame = viseFrameFromRegistration(frameRegistration, job.workholding.vise.jawStartY);
-            record = withVisePlacementFrame(record, frame, { fixedJawFaceX: `measured:${now}`, jawStartY: 'typed' }, now);
-            // #619 — write the measured surface top so the next plan expects the found top.
-            record = withSurfaceTopDatum(record, { z: r.data.surface.z, at: plan.surfacePoint }, plan.probe?.id ?? null, now);
-          }
+          // #650 — the bed and the datums are an UPDATE folded onto the record the service holds, so
+          // a stale guard re-applies them to the re-read record instead of overwriting another
+          // window's change with this run's pre-read copy.
+          const bed = await createFirstBed(machine, frameRegistration, now);
           const probeId = plan.probe?.id ?? null;
           const reference = plan.mountTap?.reference ?? 'vise-jaw-top';
-          let bracketSeat: number | null = null;
-          if (r.mountTap !== null) {
-            if (reference === 'bracket-seat') {
-              // #607 — the reading is the bracket's TOP; the datum is the SEAT it stands on, one
-              // bracket height below (`bracketSeatFromTap`), using the arm's measured top.
-              bracketSeat = bracketSeatFromTap(r.mountTap.z, plan.mountTap?.datumOffsetMm ?? 0);
-              record = withBracketSeatDatum(record, { z: bracketSeat, at: r.mountTap.at }, probeId, now);
-            } else {
-              record = withViseJawTopDatum(record, r.mountTap, probeId, now);
+          const mountTap = r.mountTap;
+          // #607 — the reading is the bracket's TOP; the datum is the SEAT it stands on, one bracket
+          // height below (`bracketSeatFromTap`), using the arm's measured top.
+          const bracketSeat =
+            mountTap !== null && reference === 'bracket-seat' ? bracketSeatFromTap(mountTap.z, plan.mountTap?.datumOffsetMm ?? 0) : null;
+          const update: MachineUpdate = (current) => {
+            let rec = bed(current);
+            if (frameRegistration !== null) {
+              const frame = viseFrameFromRegistration(frameRegistration, job.workholding.vise.jawStartY);
+              rec = withVisePlacementFrame(rec, frame, { fixedJawFaceX: `measured:${now}`, jawStartY: 'typed' }, now);
+              // #619 — write the measured surface top so the next plan expects the found top.
+              rec = withSurfaceTopDatum(rec, { z: r.data.surface.z, at: plan.surfacePoint }, probeId, now);
             }
-          }
-          const outcome = await saveMachineWithRetry(record);
+            if (mountTap !== null) {
+              rec =
+                bracketSeat !== null
+                  ? withBracketSeatDatum(rec, { z: bracketSeat, at: mountTap.at }, probeId, now)
+                  : withViseJawTopDatum(rec, mountTap, probeId, now);
+            }
+            return rec;
+          };
+          const outcome = await saveMachineWithRetry(machine, update);
           if (outcome !== 'ok') {
             // Never "recorded" without 'ok': the measurement stands on screen, the datum does not.
             writeNotes.push(
@@ -486,21 +493,26 @@ export function EngraveRegistrationStep({ job, target }: EngraveRegistrationStep
         if (machine !== null) {
           const now = new Date().toISOString();
           const registration = { measuredAt: now, correctedG54: result.outcome.correctedG54 };
-          let rec = await createFirstBed(machine, registration, now);
-          rec = withVisePlacementFrame(
-            rec,
-            viseFrameFromRegistration(registration, job.workholding.vise.jawStartY),
-            { fixedJawFaceX: `measured:${now}`, jawStartY: 'typed' },
-            now,
-          );
-          // #619 — the surface top the next plan expects is the one this run measured.
-          rec = withSurfaceTopDatum(
-            rec,
-            { z: result.data.surface.z, at: runPlan.surfacePoint },
-            runPlan.probe?.id ?? null,
-            now,
-          );
-          const answer = await saveMachineWithRetry(rec);
+          const bed = await createFirstBed(machine, registration, now);
+          // #650 — folded onto the record the service holds, re-applied after a stale guard.
+          const update: MachineUpdate = (current) => {
+            let rec = bed(current);
+            rec = withVisePlacementFrame(
+              rec,
+              viseFrameFromRegistration(registration, job.workholding.vise.jawStartY),
+              { fixedJawFaceX: `measured:${now}`, jawStartY: 'typed' },
+              now,
+            );
+            // #619 — the surface top the next plan expects is the one this run measured.
+            rec = withSurfaceTopDatum(
+              rec,
+              { z: result.data.surface.z, at: runPlan.surfacePoint },
+              runPlan.probe?.id ?? null,
+              now,
+            );
+            return rec;
+          };
+          const answer = await saveMachineWithRetry(machine, update);
           if (answer === 'ok') frameSavedRef.current = true;
           else {
             result.outcome.notes.push(

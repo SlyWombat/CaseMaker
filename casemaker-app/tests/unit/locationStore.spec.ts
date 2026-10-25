@@ -570,31 +570,109 @@ describe('#439 an edit whose write failed survives a restart', () => {
   });
 });
 
-describe('#636 saveMachineWithRetry', () => {
+describe('#636/#650 saveMachineWithRetry', () => {
+  function machine(over: Partial<MachineRecord> = {}): MachineRecord {
+    return {
+      id: 'm1',
+      profileId: 'Z1',
+      address: { host: '192.0.2.10', port: 2222 },
+      bedProfiles: [],
+      nickname: null,
+      firmware: null,
+      ...over,
+    } as unknown as MachineRecord;
+  }
+
+  /** The location as this window holds it — what a stale retry applies its update to. */
+  function seeded(record: MachineRecord): void {
+    useLocationStore.setState({
+      status: 'present',
+      etag: '"e1"',
+      reason: null,
+      location: { machines: [record], accessories: [] } as unknown as NonNullable<
+        ReturnType<typeof useLocationStore.getState>['location']
+      >,
+    });
+  }
+
   it('retries once on a stale guard and returns the second answer', async () => {
     const answers: Array<'ok' | 'stale' | 'failed'> = ['stale', 'ok'];
     const calls: number[] = [];
+    seeded(machine());
     useLocationStore.setState({
       saveMachine: async () => {
         calls.push(1);
         return answers.shift() ?? 'failed';
       },
     });
-    const record = { id: 'm1', profileId: 'Z1', address: { host: '192.0.2.10', port: 2222 }, bedProfiles: [], history: [] } as unknown as Parameters<typeof saveMachineWithRetry>[0];
-    expect(await saveMachineWithRetry(record)).toBe('ok');
+    expect(await saveMachineWithRetry(machine(), (current) => current)).toBe('ok');
     expect(calls).toHaveLength(2);
   });
 
   it('does not retry a failed write, and reports a second stale as stale', async () => {
     const failed: Array<'ok' | 'stale' | 'failed'> = ['failed'];
     useLocationStore.setState({ saveMachine: async () => failed.shift() ?? 'failed' });
-    const record = {} as unknown as Parameters<typeof saveMachineWithRetry>[0];
-    expect(await saveMachineWithRetry(record)).toBe('failed');
+    expect(await saveMachineWithRetry(machine(), (current) => current)).toBe('failed');
     expect(failed).toHaveLength(0);
 
     const stales: Array<'ok' | 'stale' | 'failed'> = ['stale', 'stale'];
+    seeded(machine());
     useLocationStore.setState({ saveMachine: async () => stales.shift() ?? 'failed' });
-    expect(await saveMachineWithRetry(record)).toBe('stale');
+    expect(await saveMachineWithRetry(machine(), (current) => current)).toBe('stale');
     expect(stales).toHaveLength(0);
+  });
+
+  // #650 — the retry must RE-APPLY the update to the re-read record. Sending the record built from
+  // the pre-read snapshot again would definitely overwrite whatever the other writer changed, while
+  // both sides were told ok: the If-Match guard defeated by its own retry.
+  it('re-applies the update to the re-read record, so another writer’s change survives', async () => {
+    // Our change is the firmware; another window renamed the machine in the meantime.
+    const ours = machine();
+    seeded(ours);
+    const theirs = machine({ nickname: 'changed by another window' });
+    const puts: MachineRecord[] = [];
+    let attempt = 0;
+    useLocationStore.setState({
+      saveMachine: async (record) => {
+        puts.push(record);
+        attempt += 1;
+        if (attempt === 1) {
+          // The stale guard's own re-read: the location now serves the OTHER writer's record.
+          seeded(theirs);
+          return 'stale';
+        }
+        return 'ok';
+      },
+    });
+
+    const answer = await saveMachineWithRetry(ours, (current) => ({ ...current, firmware: 'v2' }));
+    expect(answer).toBe('ok');
+    expect(puts).toHaveLength(2);
+    // The first attempt carries only our change (their write had not landed yet)…
+    expect(puts[0]!.firmware).toBe('v2');
+    expect(puts[0]!.nickname).toBeNull();
+    // …and the retry carries BOTH: their nickname is still there, our firmware is applied on top.
+    expect(puts[1]!.nickname).toBe('changed by another window');
+    expect(puts[1]!.firmware).toBe('v2');
+  });
+
+  it('fails, without re-creating it, when the machine is gone from the re-read location', async () => {
+    const ours = machine();
+    seeded(ours);
+    const answers: Array<'ok' | 'stale' | 'failed'> = ['stale'];
+    useLocationStore.setState({
+      saveMachine: async () => {
+        // The other writer deleted the machine; the stale re-read leaves none of it.
+        useLocationStore.setState({
+          location: { machines: [], accessories: [] } as unknown as NonNullable<
+            ReturnType<typeof useLocationStore.getState>['location']
+          >,
+        });
+        return answers.shift() ?? 'failed';
+      },
+    });
+
+    expect(await saveMachineWithRetry(ours, (current) => current)).toBe('failed');
+    expect(useLocationStore.getState().writeNote).toContain('no longer in the location');
   });
 });

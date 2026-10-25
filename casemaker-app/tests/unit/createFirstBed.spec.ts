@@ -87,7 +87,10 @@ describe('#613 the first registration creates the bed', () => {
       etag: '"loc-1"',
     });
 
-    const withBed = await createFirstBed(K3, REGISTRATION, NOW);
+    // #650 — the helper answers an UPDATE: the bed is folded onto whatever record the save is
+    // applied to, so a stale retry re-creates it on the re-read record.
+    const bed = await createFirstBed(K3, REGISTRATION, NOW);
+    const withBed = bed(K3);
 
     expect(service.puts).toHaveLength(1);
     expect((service.puts[0] as { id: string }).id).toBe('fx-vise-1');
@@ -97,7 +100,7 @@ describe('#613 the first registration creates the bed', () => {
 
     // A second registration on the now-described machine writes nothing more.
     const again = await createFirstBed(withBed, REGISTRATION, NOW);
-    expect(again).toBe(withBed);
+    expect(again(withBed)).toBe(withBed);
     expect(service.puts).toHaveLength(1);
   });
 });

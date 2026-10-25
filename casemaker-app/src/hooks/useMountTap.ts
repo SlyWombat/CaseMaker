@@ -13,7 +13,7 @@ import { runMountTap, type OperatorStep } from '@/engine/cnc/registration';
 import type { RegistrationSettings } from '@/engine/cnc/registration/settings';
 import type { PlanMountTap } from '@/engine/cnc/registration/plan';
 import { useMachineTranscriptStore } from '@/store/machineTranscriptStore';
-import { createFirstBed, machineAt, saveMachineWithRetry, useLocationStore } from '@/store/locationStore';
+import { createFirstBed, machineAt, saveMachineWithRetry, useLocationStore, type MachineUpdate } from '@/store/locationStore';
 import { withBracketSeatDatum, withViseJawTopDatum } from '@/platform/bedProfiles';
 import { bracketSeatFromTap } from '@/engine/cnc/mounts/bracket';
 import { useShopDefaultsStore } from '@/store/shopDefaultsStore';
@@ -166,14 +166,18 @@ export function useMountTap(inputs: MountTapInputs): MountTapApi {
         if (record !== null) {
           const now = new Date().toISOString();
           // #613 — a no-profile machine gets its first bed here; the datum then lands as designed.
-          const withBed = await createFirstBed(record, null, now);
+          // #650 — the bed and the datum are an update folded onto the record the service holds; a
+          // stale guard re-applies them to the re-read record rather than re-sending this window's
+          // pre-read copy over another writer's change.
+          const bed = await createFirstBed(record, null, now);
           if (tap.reference === 'bracket-seat') {
             // #607 — the reading is the bracket's top; the datum is the seat one height below. The
             // shop default is what the compiler reads, so the tap moves it too (or says it could not).
             const seat = bracketSeatFromTap(r.z, tap.datumOffsetMm ?? 0);
             // #636 — the write's answer is read: a stale guard retries once against the re-read, and
             // a record that did not land is never reported as one that did.
-            const outcome = await saveMachineWithRetry(withBracketSeatDatum(withBed, { z: seat, at: r.at }, inputs.probeId, now));
+            const update: MachineUpdate = (current) => withBracketSeatDatum(bed(current), { z: seat, at: r.at }, inputs.probeId, now);
+            const outcome = await saveMachineWithRetry(record, update);
             if (outcome !== 'ok') {
               noteNow(
                 `the seat was tapped, but the machine record was not saved: ${useLocationStore.getState().writeNote ?? 'the service refused the write'}. Run the tap again to write it.`,
@@ -197,7 +201,8 @@ export function useMountTap(inputs: MountTapInputs): MountTapApi {
               return;
             }
           } else {
-            const outcome = await saveMachineWithRetry(withViseJawTopDatum(withBed, { z: r.z, at: r.at }, inputs.probeId, now));
+            const update: MachineUpdate = (current) => withViseJawTopDatum(bed(current), { z: r.z, at: r.at }, inputs.probeId, now);
+            const outcome = await saveMachineWithRetry(record, update);
             if (outcome !== 'ok') {
               noteNow(
                 `the jaw top was tapped, but the machine record was not saved: ${useLocationStore.getState().writeNote ?? 'the service refused the write'}. Run the tap again to write it.`,
