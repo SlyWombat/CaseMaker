@@ -17,11 +17,14 @@ or a T number, and an empty "X — Y — Z — (work)" slot.
    frame (Carbide's click-toggle, Easel's inspector) have years of users asking where it went. Real estate is
    held down by typography (small, muted second line), not by removal. The maintainer's own suggestion was one
    set with hover; they asked for the standard pattern over their preference, and this is it.
-2. **The tool slot names the tool, and says how we know.** "0.5 mm 30° engraver" from the frozen package, "Wired
-   Probe V2" from the checked-out accessory during a registration; a hover gives the T number, the last M491
-   length and WHERE the name came from ("as the job asked for — not measured"). The app does not know what is
-   physically in the collet; the slot never claims it does. Carvera/Studio's tile ("1–6 / None / Probe + TLO") is
-   the reference; the name is the improvement.
+2. **The tool slot names the tool.** "0.5 mm 30° engraver" from the frozen package, "Wired Probe V2" from the
+   checked-out accessory during a registration; a hover gives the T number and the last M491 length. No
+   disclaimers: the slot states the tool the job runs with, the way every other app's tile does.
+   Carvera/Studio's tile ("1–6 / None / Probe + TLO") is the reference; the name is the improvement.
+   Rule for the whole product (the maintainer, 2026-10-25): no defensive qualifiers in operator text — "as the
+   job asked for, not measured", "as sent", "not a measurement of this machine's own …" and the like state a
+   fact the operator did not ask about and read as the app covering itself. State the value; put provenance
+   where provenance lives (the run sheet, the record, a hover), as a fact, not a caveat.
 3. **One state element that is also the connection: colour + plain word, fixed position, modest size.** Idle,
    Running, Paused, Alarm (with its reason), Homing, Probing, Not answering, Offline — one vocabulary, the same
    words the Cut step uses. Not a banner (gSender's 60 px trapezoid "really bothers me").
