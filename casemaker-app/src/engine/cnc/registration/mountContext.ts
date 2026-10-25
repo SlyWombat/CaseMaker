@@ -118,7 +118,16 @@ export function mountDatumMismatch(machine: MachineRecord | null): string | null
 export function surfaceTopDatumFor(machine: MachineRecord | null): { value: number; measuredAt: string; by: string; at: [number, number] | null } | null {
   if (machine === null || machine.bedProfiles === undefined || machine.activeBedProfileId === undefined) return null;
   const profile = machine.bedProfiles.find((p) => p.id === machine.activeBedProfileId);
-  return profile?.datums.surfaceTopZ ?? null;
+  const datum = profile?.datums.surfaceTopZ ?? null;
+  if (datum === null) return null;
+  // #632 — the same rule the jaw-top datum has had since #611: the reading is the surface as seen
+  // THROUGH the probe that took it (a raw MPos number), so a different probe checked out cannot
+  // anchor its expected surface on it. With no probe accessory checked out there is nothing to
+  // compare against, and the datum stands. (The datum still carries no stock-thickness key — a
+  // surface top from a thinner blank is a separate note on #632, not a one-line guard.)
+  const checkedOut = probeFor(machine)?.id ?? null;
+  if (checkedOut !== null && datum.by !== checkedOut) return null;
+  return datum;
 }
 
 /**

@@ -693,7 +693,12 @@ export async function runRegistration(
     const spreadReadings: SurfaceReading[] = [];
     if (spreadPlan !== undefined) {
       const lowApproach = plan.mountObstacles.length === 0;
-      const approachZ = Math.round((plan.seek.band.max + s.parkAboveSurfaceMm) * 1000) / 1000;
+      // #632 — the approach clears the MEASURED surface, not only the plan's high bound. A blank
+      // standing prouder than the record expects (a stale `surfaceTopZ` written by a thinner blank,
+      // or the ledge estimate) reads above `band.max`; approaching from `band.max + park` would
+      // rapid the probe INTO the stock and drag it across the top. The slow centre reading is in
+      // hand before any extent, so the approach is `max(band's high bound, that reading) + park`.
+      const approachZ = Math.round((Math.max(plan.seek.band.max, slow.z) + s.parkAboveSurfaceMm) * 1000) / 1000;
       for (const touch of spreadPlan.touches) {
         const samePoint =
           Math.abs(touch.x - plan.surfacePoint.x) < 1e-6 && Math.abs(touch.y - plan.surfacePoint.y) < 1e-6;

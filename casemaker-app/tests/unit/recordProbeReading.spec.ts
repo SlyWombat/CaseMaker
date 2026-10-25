@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { setHouseClientLoader, type HouseCall, type HouseClient, type HouseHealth, type HouseProbe } from '@/platform/houseClient';
 import { LocationViewSchema, type FixtureRecord } from '@/platform/locationClient';
 import { resetLocationStore, useLocationStore } from '@/store/locationStore';
-import { recordProbeReading, probeFor } from '@/engine/cnc/registration/mountContext';
+import { recordProbeReading, probeFor, surfaceTopDatumFor } from '@/engine/cnc/registration/mountContext';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -112,5 +112,26 @@ describe('#525 the checked-out probe carries its instrument', () => {
     expect(probe.id).toBe('fx-probe-3d');
     expect(probe.instrument).toBe('xyz');
     expect(probe.tip).toBeNull();
+  });
+});
+
+describe('#632 the surface-top datum belongs to the probe that took it', () => {
+  /** The fixture machine with a measured surface top recorded `by` the named probe. */
+  function withSurfaceTop(by: string) {
+    const machine = VIEW.machines[0]!;
+    const bedProfiles = (machine.bedProfiles ?? []).map((p) =>
+      p.id === machine.activeBedProfileId
+        ? { ...p, datums: { ...p.datums, surfaceTopZ: { value: -55.03, measuredAt: '2026-10-24T20:00:00.000Z', by, at: null } } }
+        : p,
+    );
+    return { ...machine, bedProfiles };
+  }
+
+  it('is read through the probe checked out NOW, and only that one', () => {
+    useLocationStore.setState({ status: 'present', location: VIEW, etag: '"e1"' });
+    expect(probeFor(VIEW.machines[0]!)?.id).toBe('fx-probe-1');
+    expect(surfaceTopDatumFor(withSurfaceTop('fx-probe-1'))).toMatchObject({ value: -55.03 });
+    // A raw MPos reading through another probe is a different surface: it cannot anchor a plan.
+    expect(surfaceTopDatumFor(withSurfaceTop('fx-probe-3d'))).toBeNull();
   });
 });

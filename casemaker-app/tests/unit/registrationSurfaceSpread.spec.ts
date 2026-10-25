@@ -408,7 +408,8 @@ describe('#475 the executor measures the cut extents', () => {
     const r = await runRegistration(plan, { console: z1.console, operator: yes }, spreadPlan);
     if (!r.ok) throw new Error(r.reason);
 
-    const approachZ = Math.round((plan.seek.band.max + S.parkAboveSurfaceMm) * 1000) / 1000;
+    // #632 — the approach is the higher of the band's high bound and the MEASURED centre reading.
+    const approachZ = Math.round((Math.max(plan.seek.band.max, zs[0]!) + S.parkAboveSurfaceMm) * 1000) / 1000;
     const fast = S.surfaceFastFeed;
     // Each surface seek is "G53 G0 Z<from>" … "G38.3 Z-<travel> F<fast>"; pair them up.
     const seeks: { from: number; travel: number }[] = [];
@@ -432,6 +433,62 @@ describe('#475 the executor measures the cut extents', () => {
     // No extent seek went below the cap, and the run finished homed.
     expect(z1.lowest()).toBeGreaterThanOrEqual(-55 - S.capBelowSurfaceMm);
     expect(z1.lines.slice(-2)).toEqual(['G53 G0 Z-3', '$H']);
+  });
+
+  it('#632 — a blank PROUDER than the record expects: the extents approach from the measured surface', async () => {
+    const job = laminateJob();
+    // The DATUM path (#598/#619): the seek accepts a centre reading up to jaw top + the stock's full
+    // thickness + tolerance, which sits well ABOVE the band's high bound. That is how a blank
+    // standing prouder than the record expects gets this far — a 6 mm blank after a 3 mm one wrote
+    // `surfaceTopZ`, so the plan's expected surface is 2 mm lower than the top in the jaws.
+    const jawTopZ = -57;
+    const mountDatum = { jawTopZ } as Parameters<typeof planRegistration>[0]['mountDatum'];
+    const input: PlanInput = {
+      stock: LAMINATE_STOCK,
+      mount: 'vise',
+      expectedSurface: { machineZ: -55, from: 'the blank as the setup holds it' },
+      seekFromMachineZ: -3,
+      fixtureBelowSurfaceMm: 0.72,
+      cutCentre: { x: 38, y: 12.675 },
+      mountDatum,
+      stockThicknessMm: 6,
+    };
+    const planned = planRegistration(input, S);
+    if (!planned.ok) throw new Error(planned.reason);
+    const plan = planned.plan;
+    const spreadPlan = surfaceSpreadPlan(job, { touchCount: plan.settings.surfaceTouchCount, margin: 0.2 })!;
+    const measured = Math.round((plan.seek.band.max + 2) * 1000) / 1000;
+    const zs = [measured, measured - 0.02, measured - 0.04, measured - 0.06, measured - 0.08];
+    const z1 = fakeZ1({ actual: LAMINATE_STOCK, surface: measured, readings: readingsFor(spreadPlan, zs), jaw: true });
+
+    const r = await runRegistration(plan, { console: z1.console, operator: yes }, spreadPlan);
+    if (!r.ok) throw new Error(r.reason);
+
+    const clear = Math.round((measured + S.parkAboveSurfaceMm) * 1000) / 1000;
+    // Once the surface is read, NO rapid goes below the measured top + park: every absolute Z rapid
+    // and every XY traverse the run makes is at or above it (approaching at the plan's `band.max +
+    // park` would have put them 2 mm into the top).
+    const rapids = z1.lines
+      .map((l) => /^G53 G0 Z(-?[\d.]+)$/.exec(l))
+      .filter((m): m is RegExpExecArray => m !== null)
+      .map((m) => Number(m[1]));
+    expect(rapids.length).toBeGreaterThan(1);
+    for (const z of rapids) expect(z).toBeGreaterThanOrEqual(clear);
+    for (const z of z1.xyMovesAtZ) expect(z).toBeGreaterThanOrEqual(clear);
+
+    // And the extent seeks really start there — the measured reading + park, not the band's.
+    const fast = S.surfaceFastFeed;
+    const seeks: { from: number; travel: number }[] = [];
+    let from: number | null = null;
+    for (const l of z1.lines) {
+      const z = /^G53 G0 Z(-?[\d.]+)$/.exec(l);
+      if (z) from = Number(z[1]);
+      const p = new RegExp(`^G38\\.3 Z-([\\d.]+) F${fast}$`).exec(l);
+      if (p && from !== null) seeks.push({ from, travel: Number(p[1]) });
+    }
+    const extents = seeks.slice(1);
+    expect(extents.length).toBeGreaterThan(0);
+    for (const s of extents) expect(s.from).toBe(clear);
   });
 
   it('does not take the extents when the caller asks for no spread verdict', async () => {
