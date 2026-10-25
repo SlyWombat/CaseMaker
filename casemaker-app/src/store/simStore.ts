@@ -209,6 +209,11 @@ export interface SimState {
      * and judges the oracle in the same frame. Omitted/null: a flat post, unchanged.
      */
     surface?: SurfaceFrame | null,
+    /**
+     * #629 — half the job's smallest level step, mm, passed to the column engine so it names a ramp
+     * that can cross a level. Omitted/null: the ramp check is off.
+     */
+    rampThresholdMm?: number | null,
   ): Promise<void>;
   /** Run the last load again with twice the time limit (#194). No-op when nothing has been loaded. */
   retryWithLongerBudget(): Promise<void>;
@@ -326,6 +331,12 @@ interface LoadArgs {
    * program into the same frame it was loaded with — the same rule the machine frame follows.
    */
   surface: SurfaceFrame | null;
+  /**
+   * #629 — half the job's smallest level step, mm, passed to the column engine so it names a ramp
+   * that can cross a level. Kept with the load for the same reason `surface` is: a retry must judge
+   * the same threshold. `null` for a job with one level (or none) and for a non-column job.
+   */
+  rampThresholdMm: number | null;
 }
 let lastLoad: LoadArgs | null = null;
 
@@ -360,6 +371,7 @@ export const useSimStore = create<SimState>()((set, get) => {
         spindleOffProximityMm: args.spindleOffProximityMm,
         threads: args.threads,
         surface: args.surface,
+        rampThresholdMm: args.rampThresholdMm,
       });
       if (mine !== loadSeq) return; // superseded by a newer load or a dispose
       if (!r.ok) {
@@ -407,7 +419,7 @@ export const useSimStore = create<SimState>()((set, get) => {
     ...EMPTY,
     speed: startingSpeed(),
     budgetMs: startingBudgetMs(),
-    async loadProgram(gcodeText, setup, tool, machineId, calibrationOverride, threads = [], drillPointDefault = null, origin = 'panel', surface = null) {
+    async loadProgram(gcodeText, setup, tool, machineId, calibrationOverride, threads = [], drillPointDefault = null, origin = 'panel', surface = null, rampThresholdMm = null) {
       // The saved read of the machine's own frame, if the user has one (#279). Resolved HERE so
       // every load path — a panel, the engrave run, the QA harness — simulates the same machine,
       // and so a retry or a restart cannot drift onto a different frame than the job was loaded on.
@@ -440,6 +452,7 @@ export const useSimStore = create<SimState>()((set, get) => {
         spindleOffProximityMm: proximity.value,
         threads,
         surface,
+        rampThresholdMm,
       };
       await run(lastLoad, fresh ? startingBudgetMs() : get().budgetMs);
     },

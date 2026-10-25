@@ -36,6 +36,7 @@ import { resetFeedTableStore, useFeedTableStore } from '@/store/feedTableStore';
 import { useToolRegistryStore } from '@/store/toolRegistryStore';
 import { resetEngraveRegistrationStore, useEngraveRegistrationStore } from '@/store/engraveRegistrationStore';
 import type { FeedRow } from '@/platform/feedClient';
+import { flatEndMill, type Tool } from '@/engine/cnc/tool';
 import { Z1_FRAME_REPLIES } from './fixtures/z1Frame';
 
 const NOTHING: EngraveGenerated = {
@@ -357,6 +358,38 @@ describe('engraveRunStore (#206)', () => {
     }
     expect(generatedWith).toBe(read.calibration);
     expect(loadedWith).toBe(read.calibration);
+  });
+
+  it('derives the ramp threshold from the predicted depths and hands it to the simulation load (#629)', async () => {
+    const engraver: Tool = flatEndMill(0.5, { shape: 'engraving', tipDiameter: 0.5, diameter: 3.175, halfAngle: 15 });
+    useEngraveJobStore.getState().replace({ ...defaultEngraveJob(), toolKey: 'inv:engrave-30-0-5', tool: engraver });
+    let loadedThreshold: number | null | undefined;
+    const realLoad = useSimStore.getState().loadProgram;
+    useSimStore.setState({
+      loadProgram: async (_nc, _setup, _tool, _id, _cal, _threads, _drill, _origin, _surface, threshold) => {
+        loadedThreshold = threshold;
+      },
+    });
+    const generated: EngraveGenerated = {
+      ...clean(),
+      predicted: [
+        { depth: 1, polygons: [] },
+        { depth: 2, polygons: [] },
+        { depth: 3, polygons: [] },
+      ],
+    };
+    setEngraveRunClientLoader(async () => ({
+      engraveGenerate: async () => generated,
+      simOracle: async () => ({ ok: true, band: 0.016, levels: [], worst: { underCut: 0, overCut: 0 } }),
+    }));
+    try {
+      await useEngraveRunStore.getState().generate();
+    } finally {
+      useSimStore.setState({ loadProgram: realLoad });
+      useEngraveJobStore.getState().replace({ ...defaultEngraveJob(), toolKey: 'flat-1.0' });
+    }
+    // The three depths are 1, 2, 3 mm apart by 1 mm: half the smallest level step is 0.5 mm.
+    expect(loadedThreshold).toBeCloseTo(0.5);
   });
 
   // #301: the same rule Save already enforces for an edited job, for the machine's frame.

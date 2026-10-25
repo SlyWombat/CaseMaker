@@ -466,6 +466,15 @@ export interface ColumnSweepOpts {
    * form for it.
    */
   threads?: readonly SimThreadSpec[] | null;
+  /**
+   * The Z ramp, mm, past which a swept XY move is reported as `ramp-over-removed` (#629). A move
+   * whose Z changes along its XY segment is swept at its deep end (`min(z0, z1)`), removing more
+   * than the machine would; the caller passes half the job's smallest level step — the size at which
+   * the deep-end sweep can cross a level — so a thread's ~0.01 mm per chord stays silent and only a
+   * ramp that can over-remove at a lower level is named. Absent: the check is off, so a pre-#629
+   * caller sees no new diagnostics.
+   */
+  rampThresholdMm?: number | null;
 }
 
 export interface ColumnSweepOk {
@@ -1198,6 +1207,43 @@ export function columnSweep(timeline: Timeline, tool: Tool, setup: Setup, opts?:
   const threadSpecs = resolved.kind === 'thread-envelope' ? (opts?.threads ?? []) : [];
   const diagnostics: SweepDiagnostic[] =
     threadSpecs.length > 0 ? resolved.diagnostics.filter((d) => d.code !== 'thread-envelope') : [...resolved.diagnostics];
+  // #629 — a feed whose Z ramps along its XY segment is swept at its deep end (`flatMovesOf` takes
+  // `min(z0, z1)`), so the sim removes more than the machine would. The exact engine names that
+  // `ramp-over-removed`; the column path does the same when the ramp exceeds the caller's threshold
+  // (half the job's smallest level step), so a thread's ~0.01 mm per chord stays silent and only a
+  // ramp that can cross a level is named. One line per qualifying checkpoint, like the exact path.
+  const rampThreshold = opts?.rampThresholdMm ?? null;
+  if (!rotary && rampThreshold !== null && rampThreshold > 0) {
+    for (let k = 0; k < timeline.checkpoints.length; k++) {
+      const cp = timeline.checkpoints[k] as Checkpoint;
+      let worst = 0;
+      let worstLine = -1;
+      let worstStroke = 0;
+      for (let i = 0; i < cp.steps.length; i++) {
+        // Only an XY move ramps: a plunge is swept at its deep end and over-removes nothing across
+        // XY, so it never raises this. The timeline's own `nonConstantZ` draws the same line.
+        const x0 = cp.xy[i * 4] as number;
+        const y0 = cp.xy[i * 4 + 1] as number;
+        const x1 = cp.xy[i * 4 + 2] as number;
+        const y1 = cp.xy[i * 4 + 3] as number;
+        if (x0 === x1 && y0 === y1) continue;
+        const dz = Math.abs((cp.zs[i * 2 + 1] as number) - (cp.zs[i * 2] as number));
+        if (dz > worst) {
+          worst = dz;
+          worstLine = timeline.events[cp.steps[i] as number]?.line ?? -1;
+          worstStroke = Math.hypot(x1 - x0, y1 - y0);
+        }
+      }
+      if (worst > rampThreshold) {
+        diagnostics.push({
+          severity: 'info',
+          code: 'ramp-over-removed',
+          checkpoint: k,
+          message: `a cut that ramps ${worst.toFixed(1)} mm along a ${worstStroke.toFixed(1)} mm stroke at line ${worstLine} was swept at its lowest Z — the picture removes more than the machine would`,
+        });
+      }
+    }
+  }
   if (threadSpecs.length > 0) {
     // The fit checks: the same two the CAM refuses on (#445 D2), restated here because this is the
     // simulation of a FILE — a program loaded from elsewhere never met the CAM's own gate. An

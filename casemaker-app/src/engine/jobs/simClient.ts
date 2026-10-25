@@ -118,6 +118,11 @@ export interface SimLoadOpts {
    * post's own verdict. Absent/null: a flat post, judged in the work frame exactly as before.
    */
   surface?: SurfaceFrame | null;
+  /**
+   * #629 — half the job's smallest level step, mm, passed to the column engine so it names a ramp
+   * that can cross a level. Absent/null: the ramp check is off.
+   */
+  rampThresholdMm?: number | null;
 }
 
 /** The two stages of a load (#224). */
@@ -178,6 +183,7 @@ export async function loadSim(gcodeText: string, setup: Setup, tool: Tool, machi
             spindleOffProximityMm: opts?.spindleOffProximityMm ?? null,
             threads: opts?.threads ?? null,
             surface: opts?.surface ?? null,
+            rampThresholdMm: opts?.rampThresholdMm ?? null,
           },
           opts?.onProgress ? Comlink.proxy(opts.onProgress) : undefined,
         )

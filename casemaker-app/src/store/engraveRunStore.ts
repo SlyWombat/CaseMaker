@@ -24,6 +24,7 @@ import type { SimDiagnostic } from '@/workers/sim/session';
 import type { SimStatus } from './simStore';
 import { jobMount, jobTool, toSetup } from '@/engine/cnc/engrave/jobSetup';
 import { bracketMount } from '@/engine/cnc/mounts/bracket';
+import { isVShape } from '@/engine/cnc/vProfile';
 import { feedCatalogueRows, resolvedFeedsTable } from '@/engine/cnc/feeds';
 import type { FeedCatalogueRow } from '@/engine/cnc/feeds';
 import { jobMachine } from '@/engine/cnc/calibration';
@@ -100,6 +101,24 @@ let clientLoader: () => Promise<EngraveRunClient> = loadClient;
 /** For tests: swap the (lazy) client for a fake. */
 export function setEngraveRunClientLoader(fn: (() => Promise<EngraveRunClient>) | null): void {
   clientLoader = fn ?? loadClient;
+}
+
+/**
+ * Half the job's smallest level step, mm — the ramp the column engine should name (#629). A move
+ * whose Z ramps along its XY leg is swept at its deep end; it over-removes at a lower level only
+ * when the ramp crosses a level boundary, so the threshold is half the smallest gap between the
+ * predicted items' distinct depths. `null` for a job the column engine does not sweep (the exact
+ * engine raises `ramp-over-removed` itself) or one with a single level (nothing to cross into).
+ */
+export function rampThresholdMm(predicted: readonly OraclePredicted[], tool: Tool): number | null {
+  const onColumn =
+    isVShape(tool) || tool.shape === 'drill' || tool.shape === 'thread' || tool.shape === 'ball' || tool.shape === 'bull';
+  if (!onColumn) return null;
+  const depths = [...new Set(predicted.map((p) => p.depth).filter((d) => d > 0))].sort((a, b) => a - b);
+  if (depths.length < 2) return null;
+  let smallest = Infinity;
+  for (let i = 1; i < depths.length; i++) smallest = Math.min(smallest, depths[i]! - depths[i - 1]!);
+  return smallest / 2;
 }
 
 export interface EngraveRunState {
@@ -371,6 +390,9 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
           // goal job, for one, is not), and the simulation must be seated and judged in the frame
           // the file actually speaks. `generated.surface` is that answer; null is a flat post.
           generated.surface ?? null,
+          // #629 — half the job's smallest level step, from the predicted items' distinct depths,
+          // so the column engine names a ramp that crosses a level (null for a non-column job).
+          rampThresholdMm(generated.predicted, tool),
         );
     } catch (e) {
       if (mine === seq) set({ phase: 'blocked', error: e instanceof Error ? e.message : String(e) });
