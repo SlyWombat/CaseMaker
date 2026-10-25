@@ -1,3 +1,25 @@
 2026-10-25T03:22:07.443Z  > M822
     ok
     (1 frame(s), 980 ms)
+2026-10-25T16:47:19.232Z  > $H
+    [timeout] no reply within 3000 ms of sending "$H"
+2026-10-25T16:47:35.905Z  > M821
+    ok
+    (1 frame(s), 914 ms)
+2026-10-25T17:41:58.947Z  > M490.2
+    ok
+    M493.2 T-1
+    ok
+    M497.3
+    ok
+    G53 G0 Z-3.000
+    ok
+    G53 G0 X-9.890 Y-12.830
+    ok
+    G38.6 Z-108.000 F500.000
+    (10 frame(s), 1182 ms)
+2026-10-25T17:52:34.969Z  > $H
+    [timeout] no reply within 3000 ms of sending "$H"
+2026-10-25T18:25:01.785Z  > M822
+    ok
+    (1 frame(s), 891 ms)

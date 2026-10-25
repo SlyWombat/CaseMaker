@@ -129,6 +129,36 @@ G32 ordering settled on #631: with the PROBE in, after the result, before Write 
 
 Closed 23:12: machine Idle at home (`MPos:-1,-1,-1`), M822, plug OFF. **Probe in the Z1, badge seated as the
 maintainer wants it, cutter on the bench.** Browser harness stopped. Resume in the morning on 3360d793 at step 3.
+
+## 2026-10-25 morning — THE FIRST CUT (build 29d0018c)
+
+Overnight (00:30–06:30) the 24-hour review landed #632 (extent approach from the measured surface, the review's
+blocker), #640, #422/#644 (work light + Clear alarm), #647/#648 (the status strip DRO + accessory indicators),
+#646 (operator text), #635, #634, #636, #639, #637, #638, #633, #631(c), #630; k3 on **29d0018c** at power-on.
+Maintainer at the bench 12:45 local: "blank is in, probe is in".
+
+| local | step | result |
+|---|---|---|
+| 12:46 | power on | the controller's first status line was boot junk (`WPos 144/158/78 A 8.0 P:1234,50,1200 H:1`); three reads later the normal frame: Idle at rest, `T:1,-5.622` (a restored TLO). `$H` (no reply, as always), Idle at rest; `M821` |
+| 12:48 | **the new strip** | `Idle · X 178.975/−1.000 · Y 191.850/−1.000 · Z 54.558/−1.000 · A 0.000/0.000 · 0.5 mm engraver` — live from the heartbeat (#647 ✓). Nits: `A` shows because the Z1 reports it as 0 (hide without a rotary); the engraver's name lacks its 30° (#651). **Indicators (#648 ✓)**: light Off → On, vacuum On → Off from the popovers; the controller answered each ("the work light is off now…") |
+| 12:50:05–12:55:39 | **run 9, datum path** (probe in) | homed in 5:34. X off −0.17, Y off 0.08 — within margin. Lowest −55.553 (right extent), highest −55.125 (centre), spread 0.428. **Verdict TILT: "the touches miss the plane by 0.186 mm — 0.014 inside the 0.2 mm band"** (#630's margin sentence ✓) — the same blank read as a DOME at 0.208 last night; the band edge again. Tilt 0.751° (0.338 toward +X, 0.339 toward +Y) → max lift ≈ 0.68 mm < the 1 mm hop (#649 safe) |
+| 12:56–13:03 | Write the origin → "Take the probe out, fit the cutter" → cutter fitted → Continue | M491 → **`G10 L2 P1 X-180.150 Y-192.775 Z-52.661`** → homed. **No stale package** after the origin write (#627/#581 ✓) |
+| 13:07 | Re-post against the tilt → re-frozen 17:07 UTC | **oracle: under-cut 0.0000 mm², over-cut 0.0000 mm², in the blank's fitted surface frame** — the first pass ever on the bench (#623 + #625 + #628 + #584 ✓). Upload held only by the operator checks |
+| 13:03–13:27 | the gap the maintainer called out: *"over 7 minutes with nothing happening"* | the driver read and reported between every step, then an interruption; the product itself asks six confirmations across three screens between the cutter prompt and the cut → **#656** |
+| 13:24–13:27 | clearance acknowledgement (Design panel) → Upload → dialog: cutter selector + "I have fitted this cutter" → Send | `192.168.10.43 received single.nc — 256813 bytes in 32 packets` (md5 verified) |
+| 13:29 | "I am at the machine, head clear, stock clamped" → **Run single.nc** | the Z1 drove to the tool-change position and sat in the firmware's **`Tool`** state, blinking blue ("blinking blue right now"); the run step read `Tool · 0 % · line 0` with no prompt → **#655**. Continued by hand with **`M490.2`** (the 2026-10-08 record): `M493.2 T-1`, the tool measured at the sensor, then the program |
+| 13:42–13:51 | **THE CUT** | `P:` 0 → 100 over ~9 min (13442 moves, the estimate said 2:42 — the estimate is wrong by 3× on this job: record for #? the time estimate); hops at `Z −51.66` (= surface + 1.0), cuts at −53.3…−53.4 (≈ 0.7–0.75 below the surface at the lifted points; the lowest point programmed at −1.0); spindle on; vacuum from the program. Finished Idle at the clearance position (−11.6, −14.6, −3) — **the program did NOT home** ("the machine homes when it finishes" was not true: the home phase belongs to the app's run watch, which had lost the run at the Tool state). `$H` sent by hand 13:52 |
+| 13:5x | the badge | photo `img/2026-10-25-register/20261025-first-cut-badge-photo.jpg`: **"Single Barrel" reads**, the light colour plane exposed in every letter, interiors mottled (top-colour remnants where the floor sits shallow, or glitter in the light layer — calipers to decide); a grey halo = the V's flank through the middle layer; **"br" unreadable** exactly as the gate warned (13 % of its area lost to the 0.5 mm V); chipping at the lower-left edge (clamp) |
+
+Closed 13:55: `$H`, M822, plug OFF ("machine is Idle · plug is off"). Cutter in the Z1, the cut badge out.
+Records: `traces/2026-10-25-run9-{transcript,result,writing,result-after-continue,after-repost,after-upload,cut-watch}.txt`,
+`traces/2026-10-25-morning-status-trail.log` (12:46–13:55), frames `img/2026-10-25-register/camera-run9/` (1200 @ 3 s),
+screenshots `img/2026-10-25-register/20261025-*` (strip, indicators, run, result, prompts, uploaded, cut start/end).
+
+Owed from this cut: calipers (floor depth centre vs ends — the dome question, #631), the cut-time estimate (2:42
+predicted, ~9 min actual), the Tool-state handling (#655), the one-confirmation flow (#656), hide `A` without a
+rotary, the engraver's angle in its name (#651). The first-cut issue #569 is satisfied: a real two-colour blank,
+depth through the colour plane, placement on the design.
 Records: `traces/2026-10-25-run5-run{7,8}-result.txt`, `-run8-transcript.txt` (586 lines, 30 PRB; run 7's
 transcript was lost to *Run it again* — save the transcript after EVERY run), `-run5-status-trail.log` (whole evening).
 

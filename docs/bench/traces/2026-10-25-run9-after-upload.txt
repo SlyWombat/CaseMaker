@@ -1,0 +1,187 @@
+✓ 1 Check the job
+clear
+✓ 2 Freeze the plan
+1 program · frozen 17:07
+● 3 Register the blank
+left edge, then the top face
+Registration — find the stock, then set the origin
+Setup 1 · X/Y re-checked on the left and front edges; Z from the surface touch, within ±0.7 mm
+Home, fit the wired probe and measure it (M491); the fixed-jaw top is tapped first and checked against the stored datum (-56.84); touch the surface at the cut area's centre (19.05, 38.1); then scan the left edge at Y 38.1, the front edge at X 19.05 — bracketing each edge and bisecting to 0.5 mm, stopping at the first touch off the stock, every touch capped at the surface − 0.5 mm; home when finished.
+I am at the machine, with the wired probe fitted and the head clear.Run the registration
+Re-posted against the measured tilt (0.338 mm toward +X and 0.339 mm toward +Y).
+● 4 Run the job
+the plan and the controls
+The plan
+Dry run
+Off — cut for real
+Traverse only — one air pass, no stock
+Full dry run — whole flow, spindle off, in the air
+Target: 192.168.10.43 at 192.168.10.43:2222, reached 10/25/2026, 12:48:14 PM.
+Upload to machine…
+Cutter: 4*0.5mm*30º Engraving(Metal) (cat:019c049a-8169-7405-bad5-712f26af3b54)
+Send single.nc (256813 bytes) to 192.168.10.43 at 192.168.10.43:2222?
+This writes the file to the machine. It does not start the job — once it is on the card, “Run it” below plays it from this app; Makera Studio at the machine can play the same file instead.
+Which cutter is fitted?
+3.175*12mm Flat End(Metal)
+1 mm flat end
+3.175*1*3mm Ball Nose(Metal)
+3.175*1*4mm Ball Nose
+3.175*1.5*4.5mm Ball Nose(Metal)
+3.175*1.5*8mm Ball Nose
+3.175*10mm Ball Nose(Metal)
+3.175*2*12mm Ball Nose
+3.175*2*6mm Ball Nose(Metal)
+3.175*2.5*15mm Ball Nose
+3.175*2.5*7.5mm Ball Nose(Metal)
+3.175*22mm Ball Nose
+4*12mm Ball Nose
+4*12mm Ball Nose(Metal)
+4*22mm Ball Nose
+4*32mm Ball Nose
+6*12mm Ball Nose
+6*18mm Ball Nose(Metal)
+6*22mm Ball Nose
+6*32mm Ball Nose
+3.175*0.6*3mm Corn
+3.175*0.7*4mm Corn
+3.175*0.8*5.5mm Corn
+3.175*0.9*6mm Corn
+3.175*1*3mm Flat End
+3.175*1*3mm Flat End(Metal)
+3.175*1*7mm Corn
+3.175*1.1*7mm Corn
+3.175*1.2*7mm Corn
+3.175*1.3*7.5mm Corn
+3.175*1.4*7.5mm Corn
+3.175*1.5*6mm Flat End(Metal)
+3.175*1.5*8.5mm Corn
+3.175*1.5*8mm Flat End
+3.175*1.6*8.5mm Corn
+3.175*1.7*9.5mm Corn
+3.175*1.8*9.5mm Corn
+3.175*1.9*9.5mm Corn
+3.175*12mm Corn
+3.175*12mm Flat End(Metal)
+3.175*17mm Flat End
+3.175*2*10.5mm Corn
+3.175*2*12mm Flat End
+3.175*2*8mm Flat End(Metal)
+3.175*2.1*10.5mm Corn
+3.175*2.4*10.5mm Corn
+3.175*2.5*10.5mm Corn
+3.175*2.5*12mm Flat End(Metal)
+3.175*2.5*15mm Flat End
+3.175*25mm Flat End
+3.175*3.0*12mm Corn
+3.175*32mm Flat End
+3.175*42mm Flat End
+4*12mm Flat End(Metal)
+4*17mm Flat End(Metal)
+4*22mm Flat End
+4*22mm Flat End(Metal)
+4*25mm Flat End
+4*32mm Flat End
+6*17mm Flat End(Metal)
+6*22mm Flat End
+6*25mm Flat End
+6*25mm Flat End(Metal)
+6*30mm Flat End(Metal)
+6*32mm Flat End
+3.175mm*90º Chamfer
+4mm*90º Chamfer
+6mm*90º Chamfer
+3.175*0.1mm*30º Engraving
+3.175*0.1mm*60º Engraving(Metal)
+3.175*0.2mm*30º Engraving
+3.175*0.2mm*30º Engraving(Metal)
+3.175*0.3mm*30º Engraving
+3.175*0.3mm*30º Engraving(Metal)
+3.175*0.4mm*30º Engraving
+3.175*0.4mm*30º Engraving(Metal)
+3.175*0.5mm*30º Engraving
+3.175*0.5mm*30º Engraving(Metal)
+3.175mm Solder Mask Removal
+4*0.1mm*30º Engraving
+4*0.2mm*30º Engraving
+4*0.3mm*30º Engraving
+4*0.3mm*30º Engraving(Metal)
+4*0.4mm*30º Engraving
+4*0.4mm*30º Engraving(Metal)
+4*0.5mm*30º Engraving
+4*0.5mm*30º Engraving(Metal)
+6*0.3mm*20º Engraving
+6*0.4mm*20º Engraving
+6*0.5mm*20º Engraving
+3.175*0.2*3.5mm Drill
+3.175*0.3*5.5mm Drill
+3.175*0.4*7mm Drill
+3.175*0.5*8.5mm Drill
+3.175*0.6*9.5mm Drill
+3.175*0.7*10mm Drill
+3.175*0.8*10mm Drill
+3.175*0.9*10mm Drill
+3.175*1*10mm Drill
+3.175*1.1*10mm Drill
+3.175*1.2*10mm Drill
+3.175*1.3*12mm Drill
+3.175*1.4*12mm Drill
+3.175*1.5*12mm Drill
+3.175*1.6*12mm Drill
+3.175*1.7*12mm Drill
+3.175*1.8*12mm Drill
+3.175*1.9*12mm Drill
+3.175*12mm Drill
+3.175*2*12mm Drill
+3.175*2.1*12mm Drill
+3.175*2.2*12mm Drill
+3.175*2.3*12mm Drill
+3.175*2.4*12mm Drill
+3.175*2.5*12mm Drill
+3.175*2.6*12mm Drill
+3.175*2.7*12mm Drill
+3.175*2.8*12mm Drill
+3.175*2.9*12mm Drill
+3.175*3*12mm Drill
+3.175*M1*3mm Thread
+3.175*M2*6mm Thread
+3.175*M2.5*7.5mm Thread
+3.175*M3*9mm Thread
+3.175*M4*12mm Thread
+3.175*M5*15mm Thread
+6*M6*18mm Thread
+6*M8*24mm Thread
+6*0.5*30.5mm Ball Nose Engraving
+6*1*30.5mm Ball Nose Engraving
+6*2*30.5mm Ball Nose Engraving
+Two Flute Ball Nose Bit - 1/8" Shank 1mm * 4mm
+Two Flute Ball Nose Bit - 1/8" Shank 2mm * 12mm
+Two Flute Ball Nose Bit - 1/8" Shank 3.175mm * 22mm
+Two Flute Ball Nose Bit for Metal - 1/8" Shank 1mm * 3mm
+Two Flute Ball Nose Bit for Metal - 1/8" Shank 2mm * 6mm
+Two Flute Ball Nose Bit for Metal - 1/8" Shank 3.175mm * 10mm
+Chamfering Bit - 1/8" Shank 90°
+TiN Coating Corn Bit - 1/8" Shank 0.6mm * 3mm
+TiN Coating Corn Bit - 1/8" Shank 1mm * 7mm
+TiN Coating Corn Bit - 1/8" Shank 2mm * 10.5mm
+TiN Coating Corn Bit - 1/8" Shank 3.0mm * 12mm
+TiN Coating Drill Bit - 1/8" Shank 1mm * 10mm
+TiN Coating Drill Bit - 1/8" Shank 2mm * 12mm
+TiN Coating Drill Bit - 1/8" Shank 2.5mm * 12mm
+TiN Coating Drill Bit - 1/8" Shank 3mm * 12mm
+Single Flute Engraving Bit - 1/8" Shank 30° * 0.3mm
+Single Flute Engraving Bit - 1/8" Shank 30° * 0.5mm
+Single Flute Engraving Bit for Metal - 1/8" Shank 30° * 0.2mm
+Single Flute Engraving Bit for Metal - 1/8" Shank 30° * 0.3mm
+Single Flute Engraving Bit for Metal - 1/8" Shank 60° * 0.1mm
+Spiral 'O' Single Flute Bit - 1/8" Shank 2mm * 12mm
+Spiral 'O' Single Flute Bit - 1/8" Shank 3.175mm * 25mm
+Spiral 'O' Single Flute Bit - 1/8" Shank 3.175mm * 42mm
+Spiral 'O' Single Flute Bit for Metal - 1/8" Shank 1mm * 3mm
+Spiral 'O' Single Flute Bit for Metal - 1/8" Shank 1.5mm * 6mm
+Spiral 'O' Single Flute Bit for Metal - 1/8" Shank 2mm * 8mm
+Spiral 'O' Single Flute Bit for Metal - 1/8" Shank [diameter washed out on label; code says 3.175]mm * 12mm
+Thread Milling Bit - 1/8" Shank M3(d2.4mm) * 9mm
+Thread Milling Bit - 1/8" Shank M5(d4) * 15mm
+I have fitted this cutter.
+Send it
+Cancel
