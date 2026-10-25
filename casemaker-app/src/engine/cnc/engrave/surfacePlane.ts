@@ -110,37 +110,15 @@ export function surfaceLift(plane: SurfacePlane, z0: number, x: number, y: numbe
  * was written from (the LOWEST touch).
  *
  * ONE VALUE FOR THE WHOLE PACKAGE. It reaches the generator — which lifts the FEED moves at
- * {@link applySurfaceLift} — and the simulation, which seats the stock on the same plane and judges
- * the sweep in the same frame. A program posted in this frame but judged in the flat work frame is
- * how a correct tilt-following post came to read as a whole-pattern under-cut (the 2026-10-24 bench,
- * issue #623): the comparison has to be told which frame the file speaks.
+ * {@link applySurfaceLift} — and the simulation, which UN-LIFTS the program back into this frame
+ * before it sweeps (#625, #628) and judges it there. A program posted in this frame but judged in
+ * the flat work frame is how a correct tilt-following post came to read as a whole-pattern under-cut
+ * (the 2026-10-24 bench, issue #623): the comparison has to be told which frame the file speaks.
  */
 export interface SurfaceFrame {
   plane: SurfacePlane;
   /** The reference reading the origin was written from — the LOWEST touch. */
   z0: number;
-}
-
-/**
- * #623 — the greatest lift a surface asks for over a work-frame rectangle, never below zero, mm.
- *
- * The lift is linear in X and Y, so its maximum over a rectangle is at one of the four corners.
- * The floor at zero matters: Z0 is the lowest TOUCH, but the fitted plane can sit below it wherever
- * the residual is, and a lift used to SEAT a stock must only ever add material, never take it away.
- */
-export function maxSurfaceLift(
-  surface: SurfaceFrame,
-  rect: { x0: number; y0: number; x1: number; y1: number },
-): number {
-  const corners: [number, number][] = [
-    [rect.x0, rect.y0],
-    [rect.x1, rect.y0],
-    [rect.x0, rect.y1],
-    [rect.x1, rect.y1],
-  ];
-  let max = 0;
-  for (const [x, y] of corners) max = Math.max(max, surfaceLift(surface.plane, surface.z0, x, y));
-  return max;
 }
 
 /**

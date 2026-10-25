@@ -27,7 +27,7 @@ import { useShopDefaultsStore } from '@/store/shopDefaultsStore';
 import { useSettingsStore } from '@/store/settingsStore';
 import { useEngraveRegistrationStore } from '@/store/engraveRegistrationStore';
 import { canDriveMachine } from '@/platform/capabilities';
-import { mountNum, mountTapFor, probeFor } from '@/engine/cnc/registration/mountContext';
+import { mountNum, mountTapFor, probeFor, accessoryNameFor } from '@/engine/cnc/registration/mountContext';
 import { registrationSettings } from '@/engine/cnc/registration/settings';
 import { jobMachine } from '@/engine/cnc/calibration';
 import { useMountTap } from '@/hooks/useMountTap';
@@ -65,8 +65,8 @@ function surfaceWords(surface: BedProfile['surface']): string {
 const UNMEASURED_DATUM_WORDS: Record<BedDatumKey, string> = {
   surfaceTopZ: 'not measured — run a surface registration',
   viseJawTopZ: 'not measured — press Tap the fixed jaw (probe in the spindle)',
-  bracketSeatZ: 'not measured — plan a bracket registration and press Tap the bracket’s front arm',
-  rotaryAxis: 'not measured — the rotary module is not characterised yet (#545)',
+  bracketSeatZ: 'not measured — measure the seat beside the bracket first (one touch on the surface beside it); the arm tap checks it on later runs',
+  rotaryAxis: 'not measured — the rotary module is not characterised yet',
 };
 
 /** How many numbers in this profile no one has measured yet — the count the card links to #444. */
@@ -88,7 +88,7 @@ function placementWords(placement: BedProfile['placements'][number], fixture: Fi
   const bits: string[] = [];
   if (fixture.kind === 'vise') {
     const jaw = profile.datums.viseJawTopZ;
-    if (jaw !== null) bits.push(`jaw top ${mm(jaw.value)}, ${jaw.by}, measured ${formatDay(jaw.measuredAt) ?? jaw.measuredAt}`);
+    if (jaw !== null) bits.push(`jaw top ${mm(jaw.value)}, ${accessoryNameFor(jaw.by)}, measured ${formatDay(jaw.measuredAt) ?? jaw.measuredAt}`);
   }
   if (fixture.kind === 'bracket') {
     const seat = profile.datums.bracketSeatZ;

@@ -699,6 +699,20 @@ export async function runRegistration(
       // rapid the probe INTO the stock and drag it across the top. The slow centre reading is in
       // hand before any extent, so the approach is `max(band's high bound, that reading) + park`.
       const approachZ = Math.round((Math.max(plan.seek.band.max, slow.z) + s.parkAboveSurfaceMm) * 1000) / 1000;
+      // #640 — the extent stop names the floor it really searched to and the mount it is on: the
+      // vise's re-clamp advice is wrong on a bracket or tape, and on the datum path the floor is the
+      // jaw top less a tolerance (#598), not "tolerance below the expected surface".
+      const toleranceFloor = Math.round((plan.seek.band.max - 2 * s.surfaceToleranceMm) * 1000) / 1000;
+      const floorWords =
+        Math.abs(plan.seek.band.min - toleranceFloor) < 1e-6
+          ? `${f(s.surfaceToleranceMm)} mm below the expected surface`
+          : `the search floor above the ${plan.mount === 'vise' ? 'jaw top' : 'bracket seat'} less ${f(s.surfaceToleranceMm)} mm`;
+      const reseatWords =
+        plan.mount === 'vise'
+          ? 'loosen the vise, press it down on that side, re-clamp'
+          : plan.mount === 'bracket'
+            ? 'check the stock lies flat on the bracket\'s seat — a chip under it or the arm holding one side high lifts it'
+            : 'lift the stock and re-seat it flat on the tape';
       for (const touch of spreadPlan.touches) {
         const samePoint =
           Math.abs(touch.x - plan.surfacePoint.x) < 1e-6 && Math.abs(touch.y - plan.surfacePoint.y) < 1e-6;
@@ -709,8 +723,8 @@ export async function runRegistration(
               plan,
               {
                 ...plan.seek.band,
-                at: `as low as machine Z ${plan.seek.band.min}, ${s.surfaceToleranceMm} mm below the expected surface (the surface touch at ${touch.at})`,
-                expect: `${touch.at} is more than ${s.surfaceToleranceMm} mm lower than the centre (${f(slow.z)}) — the blank is not sitting flat; loosen the vise, press it down on that side, re-clamp, and run again`,
+                at: `as low as machine Z ${plan.seek.band.min} (${floorWords}) for the surface touch at ${touch.at}`,
+                expect: `${touch.at} is more than ${s.surfaceToleranceMm} mm lower than the centre (${f(slow.z)}) — the blank is not sitting flat; ${reseatWords}, and run again`,
               },
               { x: touch.x + outcome.offset.x, y: touch.y + outcome.offset.y },
               lowApproach ? approachZ : plan.seek.fromMachineZ,

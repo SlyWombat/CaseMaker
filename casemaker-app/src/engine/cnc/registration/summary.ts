@@ -3,17 +3,20 @@
  * it: what the plan will do, and what the run found. Pure.
  */
 
-import type { RegistrationPlan } from './plan';
+import { probeInstrumentOf, type RegistrationPlan } from './plan';
 import type { RegistrationOutcome } from './outcome';
 
 const n = (v: number) => String(Math.round(v * 100) / 100);
 
 export function summarizePlan(plan: RegistrationPlan): string {
   const s = plan.settings;
+  // #640 — the probe the plan will actually use: the 3D probe touches edges sideways, so the
+  // narration must not send the operator to fit the wired one.
+  const probeWords = probeInstrumentOf(plan.probe) === 'xyz' ? 'the 3D probe' : 'the wired probe';
   if (plan.references) {
     // #429 review: the walls by their labels, and the surface touch where it really is.
     return (
-      `Home, fit the wired probe and measure it (M491); touch the surface at (${n(plan.surfacePoint.x)}, ${n(plan.surfacePoint.y)}), ` +
+      `Home, fit ${probeWords} and measure it (M491); touch the surface at (${n(plan.surfacePoint.x)}, ${n(plan.surfacePoint.y)}), ` +
       `on solid stock clear of every opening; then scan ${plan.scans.map((sc) => sc.label ?? `the ${sc.edge} edge`).join(', ')} — bracketing each wall ` +
       `and bisecting to ${n(s.fineStepMm)} mm, stopping at the first touch that falls into the opening, every touch capped at the surface − ${n(s.capBelowSurfaceMm)} mm; home when finished.`
     );
@@ -29,13 +32,23 @@ export function summarizePlan(plan: RegistrationPlan): string {
     plan.mount === 'bracket'
       ? ` It assumes ${clamps.length === 0 ? 'no clamps on the stock' : clamps.join('; ')} — you confirm that before the probe moves.`
       : '';
-  // #619 — the datum path's first act is the mount tap, checked against the stored datum.
+  // #619/#607/#640 — the plan's FIRST act is its mount tap whenever there is one, checked against
+  // the stored reference: the vise's fixed-jaw top, or the bracket's seat. The #607 bracket tap has
+  // no `mountDatum` (its seat is the datum), so keying this on the datum alone narrated no tap and
+  // sent the operator by surprise to the arm.
+  // (`?? null`: a hand-built plan in a spec may omit the field, and the narration has no business
+  // crashing over a tap that is not there.)
+  const tapPoint = plan.mountTap ?? null;
   const tap =
-    plan.mountTap !== null && plan.mountDatum != null
-      ? ` the fixed-jaw top is tapped first and checked against the stored datum (${n(plan.mountDatum.jawTopZ)});`
-      : '';
+    tapPoint === null
+      ? ''
+      : tapPoint.reference === 'bracket-seat'
+        ? ` the bracket's seat beside the arm is tapped first and checked against the stored seat;`
+        : ` the fixed-jaw top is tapped first and checked against the stored datum${
+            plan.mountDatum == null ? '' : ` (${n(plan.mountDatum.jawTopZ)})`
+          };`;
   return (
-    `Home, fit the wired probe and measure it (M491);${tap}` +
+    `Home, fit ${probeWords} and measure it (M491);${tap}` +
     ` touch the surface at the cut area's centre ` +
     `(${n(plan.surfacePoint.x)}, ${n(plan.surfacePoint.y)}); then scan ${edges} — bracketing each edge ` +
     `and bisecting to ${n(s.fineStepMm)} mm, stopping at the first touch off the stock, every touch capped at the surface − ${n(s.capBelowSurfaceMm)} mm; home when finished.${assumes}`

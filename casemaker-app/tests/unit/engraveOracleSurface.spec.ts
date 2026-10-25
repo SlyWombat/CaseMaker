@@ -24,7 +24,7 @@ import { generate } from './helpers/engravePipeline';
 import { createSimSession, type SimSession } from '@/workers/sim/session';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { jobTool, toSetup } from '@/engine/cnc/engrave/jobSetup';
-import { maxSurfaceLift, type SurfaceFrame } from '@/engine/cnc/engrave/surfacePlane';
+import { surfaceLift, type SurfaceFrame } from '@/engine/cnc/engrave/surfacePlane';
 import { ORACLE_AREA_FLOOR, type OracleReport } from '@/engine/cnc/engrave/oracle';
 import { oracleSentence, uploadBlocker, type EngraveRunView } from '@/store/engraveRunGate';
 import type { EngraveGenerated } from '@/workers/sim/engraveGenerate';
@@ -238,10 +238,10 @@ describe('the surface-frame oracle (#623)', () => {
       plane: { offset: -54.73947, slopeX: -0.013348, slopeY: -0.005035 },
       z0: -55.466,
     };
-    // There IS a seat to be had on this plane — 0.7265 mm at the blank's corner — so the assertion
-    // below is a convention, not a flat-plane artefact.
-    expect(maxSurfaceLift(benchTilt, { x0: 0, y0: 0, x1: 60, y1: 60 })).toBeCloseTo(0.7265, 4);
-    expect(maxSurfaceLift(TILT, { x0: 0, y0: 0, x1: 60, y1: 60 })).toBeCloseTo(0.6, 6);
+    // The plane really does rise 0.7265 mm over the blank's corner (0.72653 − 0.013348·x −
+    // 0.005035·y at (0,0)): the non-zero offset/z0 matter, they are not a flat-plane artefact.
+    expect(surfaceLift(benchTilt.plane, benchTilt.z0, 0, 0)).toBeCloseTo(0.7265, 4);
+    expect(surfaceLift(TILT.plane, TILT.z0, 0, 0)).toBeCloseTo(0, 6);
 
     const job = traceJob();
     const tool = jobTool(job)!;
@@ -295,15 +295,3 @@ describe('the surface-frame oracle (#623)', () => {
   });
 });
 
-describe('maxSurfaceLift (#623)', () => {
-  it('is the plane lift at the rectangle’s highest corner, never below zero', () => {
-    const rect = { x0: 0, y0: 0, x1: 60, y1: 40 };
-    expect(maxSurfaceLift(TILT, rect)).toBeCloseTo(0.006 * 60 + 0.004 * 40, 9);
-    // A plane that DROPS toward +X/+Y: the maximum is at the origin, and a corner below the
-    // reference never turns into negative seating.
-    const down: SurfaceFrame = { plane: { offset: 0, slopeX: -0.01, slopeY: -0.01 }, z0: 0 };
-    expect(maxSurfaceLift(down, rect)).toBe(0);
-    // A flat fit asks for no seat at all.
-    expect(maxSurfaceLift({ plane: { offset: 0, slopeX: 0, slopeY: 0 }, z0: 0 }, rect)).toBe(0);
-  });
-});

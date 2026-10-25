@@ -32,6 +32,7 @@ import type { MountDatum, PlanObstacle, ProbeSpec, RegistrationPlan } from '@/en
 import {
   bracketTapFor,
   mountDatumFor,
+  accessoryNameFor,
   mountDatumMismatch,
   mountTapFor,
   probeFor,
@@ -121,6 +122,8 @@ function planRegistrationAttempt(args: {
   mountDatum: MountDatum | null;
   /** #611 — the datum's `by` when it names a probe other than the one checked out (null otherwise). */
   mountDatumMismatch: string | null;
+  /** #640 — the same probe, by NAME, for the sentence (the id stays for the wiring). */
+  mountDatumMismatchName: string | null;
   /** #619 — the measured surface-top datum; when present the plan expects the found top, not the ledge estimate. */
   surfaceTopZ: { value: number } | null;
   probe: ProbeSpec | null;
@@ -189,7 +192,7 @@ function planRegistrationAttempt(args: {
           const current = args.probeName !== null ? `the ${args.probeName} now checked out` : 'the probe now checked out';
           return {
             kind: 'need-datum',
-            message: `the jaw top was tapped by ${args.mountDatumMismatch}, not ${current} — tap the fixed jaw with the current probe first`,
+            message: `the jaw top was tapped by ${args.mountDatumMismatchName}, not ${current} — tap the fixed jaw with the current probe first`,
             mountTap: args.mountTap,
           };
         }
@@ -258,6 +261,11 @@ export function EngraveSetupsSection({ initiallyOpen = false }: { initiallyOpen?
   const mountDatum = useMemo(() => mountDatumFor(machineRecord), [machineRecord]);
   // #611 — the jaw-top datum's `by` when it names a probe other than the one now checked out.
   const mountDatumMismatchBy = useMemo(() => mountDatumMismatch(machineRecord), [machineRecord]);
+  // #640 — the sentence names the probe, not its location id.
+  const mountDatumMismatchName = useMemo(
+    () => (mountDatumMismatchBy === null ? null : accessoryNameFor(mountDatumMismatchBy)),
+    [mountDatumMismatchBy],
+  );
   // #619 — the measured surface top, so a re-plan expects the found top rather than the ledge estimate.
   const surfaceTopZ = useMemo(() => surfaceTopDatumFor(machineRecord), [machineRecord]);
   // #599 — the mount tap point (machine XY), from the placement frame or the newest usable registration.
@@ -694,6 +702,7 @@ export function EngraveSetupsSection({ initiallyOpen = false }: { initiallyOpen?
                   useTypedSeat,
                   mountDatum,
                   mountDatumMismatch: mountDatumMismatchBy,
+                  mountDatumMismatchName,
                   surfaceTopZ,
                   probe,
                   probeName,

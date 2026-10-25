@@ -322,8 +322,8 @@ interface LoadArgs {
    */
   threads: readonly SimThreadSpec[];
   /**
-   * #623 — the fitted surface the program was posted against, kept so a retry seats the stock on
-   * the same plane it was loaded on — the same rule the machine frame follows.
+   * #623/#628 — the fitted surface the program was posted against, kept so a retry un-lifts the
+   * program into the same frame it was loaded with — the same rule the machine frame follows.
    */
   surface: SurfaceFrame | null;
 }

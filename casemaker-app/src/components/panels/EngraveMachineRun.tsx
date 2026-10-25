@@ -165,7 +165,12 @@ export function EngraveMachineRun({ target, onProgramLine, controlled = false }:
             style={{ width: '100%', padding: 7, marginTop: 6 }}
             onClick={() => (entry.paused ? requestResume(machine) : requestPause(machine))}
           >
-            {entry.paused ? 'Resume program' : 'Pause program — suspend goes out at the next status poll'}
+            {/* #640 — a disabled control says why: while a stop is asked, Pause cannot act. */}
+            {entry.stopAsked
+              ? 'Pause unavailable — the program is stopping'
+              : entry.paused
+                ? 'Resume program'
+                : 'Pause program — suspend goes out at the next status poll'}
           </button>
           <button
             type="button"

@@ -80,10 +80,10 @@ describe('#511 the Bed block', () => {
       'not measured — press Tap the fixed jaw (probe in the spindle)',
     );
     expect(screen.getByTestId('manage-bed-measure-bracketSeatZ').textContent).toContain(
-      'not measured — plan a bracket registration and press Tap the bracket’s front arm',
+      'not measured — measure the seat beside the bracket first (one touch on the surface beside it); the arm tap checks it on later runs',
     );
     expect(screen.getByTestId('manage-bed-measure-rotaryAxis').textContent).toContain(
-      'not measured — the rotary module is not characterised yet (#545)',
+      'not measured — the rotary module is not characterised yet',
     );
   });
 

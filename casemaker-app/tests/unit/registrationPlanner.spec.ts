@@ -394,6 +394,33 @@ describe('#599 the mount tap', () => {
   const TAP = { x: -186.2, y: -180, fromMachineZ: -3, label: 'the vise fixed-jaw top' };
   const JAW: MountDatum = { jawTopZ: -56.82, measuredAt: '2026-10-23T00:00:00.000Z', by: 'wired-probe' };
 
+  // #640 — the narration names the tap the plan will actually make: the vise's jaw top, or the
+  // #607 bracket's seat (which has no mountDatum, so keying the sentence on the datum narrated no
+  // tap at all), and the probe the plan uses.
+  it('narrates the mount tap: the jaw top for a vise, the seat for a bracket, and the plan’s probe', () => {
+    const vise = plan('vise', { mountDatum: JAW, mountTap: TAP, fixtureBelowSurfaceMm: undefined });
+    expect(summarizePlan(vise)).toContain('the fixed-jaw top is tapped first and checked against the stored datum (-56.82)');
+    expect(summarizePlan(vise)).toContain('fit the wired probe');
+
+    const bracketTap = { ...TAP, reference: 'bracket-seat' as const, label: 'the bracket’s front arm' };
+    const bracket = plan('bracket', { mountTap: bracketTap });
+    expect(summarizePlan(bracket)).toContain("the bracket's seat beside the arm is tapped first and checked against the stored seat");
+
+    // An xyz plan is narrated with the 3D probe, not the wired one.
+    const threeDProbe: ProbeSpec = {
+      id: 'p-3d',
+      variant: '3d-touch',
+      instrument: 'xyz',
+      tip: { diameterMm: 3, rimOffsetMm: 1.5, rimOffsetUncertaintyMm: 0.05 },
+    };
+    const threeD = planRegistration(
+      input('vise', { probe: threeDProbe, mountDatum: JAW, mountTap: TAP, fixtureBelowSurfaceMm: undefined }),
+      registrationSettings(null, threeDProbe).settings,
+    );
+    if (!threeD.ok) throw new Error(threeD.reason);
+    expect(summarizePlan(threeD.plan)).toContain('fit the 3D probe');
+  });
+
   it('the tap precedes the surface seek and its reading is on the result', async () => {
     const z1 = fakeZ1({ actual: SHIFTED, tap: { x: TAP.x, y: TAP.y, z: JAW.jawTopZ } });
     const p = plan('vise', { mountDatum: JAW, mountTap: TAP, fixtureBelowSurfaceMm: undefined });

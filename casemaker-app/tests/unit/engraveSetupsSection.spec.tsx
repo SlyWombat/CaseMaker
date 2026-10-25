@@ -79,6 +79,7 @@ const DATUM_LOCATION = {
     {
       id: 'fx-probe-1',
       kind: 'probe',
+      product: 'Makera Wired Probe V2',
       variant: 'wired-touch',
       unit: { tipDiameterMm: 2.0, rimOffsetMm: 0.7, rimOffsetUncertaintyMm: 0.25 },
       whereabouts: { kind: 'machine', machineId: 'machine-1a2b3c', since: '2026-10-23T00:00:00.000Z' },
@@ -407,11 +408,16 @@ describe('#471 registration — planned only after approval, refused with the en
                 ...DATUM_LOCATION.machines[0]!.bedProfiles![0]!,
                 datums: {
                   ...DATUM_LOCATION.machines[0]!.bedProfiles![0]!.datums,
-                  viseJawTopZ: { value: -56.82, measuredAt: '2026-10-23T00:00:00.000Z', by: 'wired-probe', at: null },
+                  viseJawTopZ: { value: -56.82, measuredAt: '2026-10-23T00:00:00.000Z', by: 'fx-probe-old', at: null },
                 },
               },
             ],
           },
+        ],
+        // #640 — the sentence names WHICH probe tapped the datum by its product, not by its id.
+        accessories: [
+          ...(DATUM_LOCATION.accessories ?? []),
+          { id: 'fx-probe-old', kind: 'probe', product: 'Makera Wired Probe V1', variant: 'wired-touch', constants: {}, unit: {}, provenance: {}, whereabouts: { kind: 'box' }, history: [] },
         ],
       },
     });
@@ -421,7 +427,8 @@ describe('#471 registration — planned only after approval, refused with the en
     fireEvent.click(screen.getByTestId('engrave-setup-plan-reg-1'));
 
     const row = screen.getByTestId('engrave-setup-reg-need-datum-1');
-    expect(row.textContent).toContain('wired-probe');
+    expect(row.textContent).toContain('Makera Wired Probe V1');
+    expect(row.textContent).not.toContain('fx-probe-old');
     expect(row.textContent).toContain('tap the fixed jaw with the current probe first');
     // The tap is offered with the current probe, and nothing is written until the person acts.
     expect(screen.getByTestId('engrave-setup-tap-jaw-1')).toBeTruthy();

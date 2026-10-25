@@ -407,9 +407,9 @@ export function createSimSession(tl: ManifoldToplevel, hooks?: SimSessionHooks):
    */
   let rapid: RapidEstimate | null = null;
   /**
-   * #623 — the fitted surface the LOADED program was posted against, or null for a flat post. It is
-   * the frame the sweep was seated in and the frame `oracle` must judge in; set by `load`, cleared
-   * by `dispose`, and never read by anything that does not own both halves.
+   * #623/#628 — the fitted surface the LOADED program was posted against, or null for a flat post.
+   * It is the frame the program was UN-LIFTED into for the sweep and the frame `oracle` judges in;
+   * set by `load`, cleared by `dispose`, and never read by anything that does not own both halves.
    */
   let surfaceFrame: SurfaceFrame | null = null;
 

@@ -51,7 +51,7 @@ mount is the planned one AND supplies the Z datum the rest of the run needs. No 
   (coarse) until the stock is found, then outward fine as today (#593). Reach along the jaws is the
   jaw length; across the jaws it is the opening.
 - **Extents (#475 spread):** after the edges, placed by the found offset (#591), approached from just
-  above the surface (#590). A spread beyond the depth band is the existing `blank-bowed` refusal.
+  above the surface (#590). A residual beyond the depth band is a DOME: the origin is still written, and the machine is levelled with G32 or the operator accepts the named miss (#631).
 - **Update the view:** the found origin (XY offset, rotation, surface Z) moves the stock in the
   viewport and the setup's reading, *before* the origin is written — the operator sees where the
   blank actually is relative to the design, and the run sheet records it (#592, landed #604). The

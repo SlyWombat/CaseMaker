@@ -424,7 +424,10 @@ export function EngraveSetupRow(props: EngraveSetupRowProps): JSX.Element {
                   <p style={{ ...MUTED, color: WARN_COLOR, margin: '4px 0' }}>{attempt.message}</p>
                   {attempt.mountTap !== null && (
                     <button type="button" data-testid={`engrave-setup-tap-jaw-${n}`} onClick={() => props.onTapJaw(attempt.mountTap!)}>
-                      {/* #607 — the tap is the mount's, so the button says which reference it touches. */}
+                      {/* #607 — the tap is the mount's, so the button says which reference it touches.
+                          #640 — the bracket-seat branch is UNREACHABLE today: `bracketTapFor` is null
+                          until the seat is measured, and no bracket plan offers a need-datum tap. The
+                          branch stays, and so does this note: it costs nothing and marks the door. */}
                       {attempt.mountTap.reference === 'bracket-seat' ? 'Tap the bracket’s front arm' : 'Tap the fixed jaw'}
                     </button>
                   )}

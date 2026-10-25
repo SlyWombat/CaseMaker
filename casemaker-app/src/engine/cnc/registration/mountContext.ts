@@ -58,6 +58,18 @@ export function probeNameFor(machine: MachineRecord | null): string | null {
   return acc === undefined ? null : (acc.product ?? 'probe');
 }
 
+/**
+ * #640 — an accessory's display name for a stored `by` id, or the id itself when the accessory is no
+ * longer in the location (an operator reading a stale datum still needs to see WHICH probe it was,
+ * and an id is all we have then). Searches EVERY accessory, not `accessoriesFor(machine)`: the
+ * probe that tapped a datum may have been put away since, and that is exactly when the sentence
+ * must still name it.
+ */
+export function accessoryNameFor(id: string): string {
+  const accessories = useLocationStore.getState().location?.accessories ?? [];
+  return accessories.find((a) => a.id === id)?.product ?? id;
+}
+
 /** #604 — the mount accessory's name for the job's holding kind, or the kind word when none is checked out. */
 export function mountNameFor(machine: MachineRecord | null, kind: string): string {
   if (machine === null) return kind;

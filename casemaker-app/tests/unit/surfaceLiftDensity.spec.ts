@@ -11,8 +11,8 @@
 // (the exact inverse of `applySurfaceLift`) and re-bucket, so the flat job reads as the flat program
 // it is and stays on the exact engine — whose verdict is then identical to the flat post by
 // construction — while a genuinely dense program keeps its genuinely distinct levels and still routes
-// to the column engine. The column engine keeps #623's seat + surface grid; the exact engine no longer
-// seats or shears, because the un-lift IS the surface frame for a flat program.
+// to the column engine. BOTH engines now take the un-lifted program (#628), because the un-lift IS
+// the surface frame for a flat program; neither seats a stock or shears a removal.
 
 import { describe, it, expect } from 'vitest';
 

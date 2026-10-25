@@ -713,9 +713,11 @@ the stock, the feeds and the steps to follow at the machine, derived from how th
 - **Mount the vise**, **load the blank**, and the **side view** of the sacrificial stack (#213).
 - **Set the work origin with the probe**: the method the stock and mount call for, the edge
   touches in physical words, and the **surface touches** across the cut's extents (#475). Z0 is
-  a spread, not a point: the sheet prints the band the readings must fit, the stop rule, and,
-  when readings were supplied, the measured verdict. A spread wider than the band refuses the
-  blank as `blank-bowed` rather than pretending one Z0 fits it.
+  measured, not a point: the sheet prints the band the readings must fit, the stop rule, and,
+  when readings were supplied, the measured verdict — the plane the touches fit and its residual
+  against the band. A top that merely TILTS is followed (the program is posted against the plane);
+  a DOME still writes the origin, and the machine levels it with G32 or the operator accepts the
+  named miss.
 - **Fit the cutter and measure its length** (`M491`), then the **dry run** (the frame file, 20 mm
   up), then the **cut**, the carried warnings, and the record afterwards.
 - On a **facing** job the order is probe → face → re-touch → engrave: the probe sets Z0, the
@@ -906,16 +908,19 @@ the other. The app therefore plans `registration.surfaceTouchCount` surface touc
 across the cut regions' union extents — the centre first, then both extents on each axis — and works
 out the depth BAND the regions leave from the same planes the depth checks use: the colour line plus
 the boundary margin below, and a void's ceiling (or the blank's underside) above. The band is the
-tightest region's. If the spread between the lowest and highest reading fits the band, the floors
-land in a printed range and Z0 is set to the **lowest** touch: the programmed depth is then the
-shallowest floor, and the programmed depth plus the spread is the deepest, so that one number can be
-checked against both planes by hand. If the spread is wider, the run sheet refuses the blank as
-`blank-bowed` (chapter 8.1): no floor depth can stay past the colour line and clear of the pocket at
-once. Face or plane the top until the spread fits, or use a flatter blank, and measure again. On the
-badge in hand the band is 0.2 mm — colour split 0.8 mm plus the 0.2 mm house margin below, the
-magnet pocket's ceiling at 1.2 mm above — and the spread measured across the cut is 0.21 mm: a
-refusal at the house margin. Auto-levelling the cut is not the fix (#176): the colour line is a
-plane under the dome, so levelling the surface would tilt the floor through it.
+tightest region's. A least-squares PLANE is fitted to the readings, and the verdict is the
+RESIDUAL — how far the touches still miss that plane — against the band, not the raw spread. Z0 is
+the **lowest** touch either way: the programmed floor is then `depth` at the low point and deeper by
+the lift elsewhere, which is what each plane is checked against. A top that TILTS fits the plane and
+is FOLLOWED: the Cut step re-posts the program against the fitted surface, so the floor stays at the
+programmed depth under the tilted colour line. A top whose residual outlasts the band is a DOME — a
+curved top a plane cannot follow. It is no longer a dead end: the origin is still written from the
+lowest touch, the machine's own G32 grid levels the curved top (the program uploads flat), or the
+operator writes the origin anyway and accepts the miss the row names. On the badge in hand the band
+is 0.2 mm — colour split 0.8 mm plus the 0.2 mm house margin below, the magnet pocket's ceiling at
+1.2 mm above — and the residual measured across the cut is 0.208 mm: a dome by 0.008 mm. Levelling
+the CUT is not the fix (#176): the colour line is a plane under the dome, so levelling the surface
+would tilt the floor through it.
 
 ---
 
@@ -1195,7 +1200,6 @@ simulation does report about one is the sweep's own list, next:
 | `item-outside-stock` | error | An item hangs off the blank, or off the sacrificial material beside it (#213). Formerly `label-outside-stock`. | Move it back inside the edge margin, or declare a strip or board under the overhang. |
 | `item-over-void` | warning / error | An item cuts over a declared under-surface void (#231), whose membrane has nothing under it (#171). True at any depth — even a shallow cut there will chatter and finish rough. A single-line trace is warned about the same way (#270); a plunge drill is not, because a drill into a void is a breach `cut-too-deep` refuses, and a drilled hole has no pocketed floor to finish. A cut that goes THROUGH the blank — a `through` region or a cut-out's kerf — is an ERROR instead (#218): it leaves the blank and breaks into the cavity, and the membrane is the only material holding the freed piece. | Move the cut clear of the void. A BLIND cut deep enough to break through is refused separately by the verifier as `cut-too-deep`. A through cut is not: `stackDepthLimit` returns the blank's own floor wherever the through mask says the cut leaves the blank, so the void limit never binds it. For a through cut over a void, this error is the only guard. |
 | `item-depth-bound` | error | An item's floor lands on the wrong side of a plane it must stay clear of (#345). Raised for the colour split on a two-colour blank — a label's `depthIntent` chooses which SIDE of the split its floor belongs on, *surface* above it, *reveal* through it (#285) — and for a void's ceiling under the item's own footprint: the label cut over a magnet pocket is told where that ceiling is and how far above it the floor must stay (#345). Only a plane the job knows about can be broken, so a blank that states no split and a label that states no intent (or *custom*) are left alone. Where the split is known it is read off the printer's real layers, not the nominal design height, so changing the layer height moves it; a void's ceiling is read off the layer stack when the blank states its print and off the design's own membrane when it does not. `cut-too-deep` is the per-move backstop for both these planes — the cutter reaches a void's ceiling part-way through a move — and is the only check for an item that is not a label (a drawn shape, a traced path). An item past the stock's minimum floor is `depth-exceeds-stock`. Formerly `item-wrong-colour`. | Set the depth to the other side of the plane, or switch the label's intent. The message names the plane, where it is in mm, and which side the floor must be on. |
-| `blank-bowed` | error | The blank's top is not one plane, and the bow cannot be followed: a least-squares plane is fitted to the surface touches and the RESIDUAL — how far the touches still miss that plane — is wider than the depth band the cuts leave. A blank that merely TILTS in the mount fits the plane (small residual) and is followed, with the program posted against the fitted surface per XY (#608); only a dome, whose centre the plane cannot reach, refuses. The band is the tightest region's, from the colour line plus the boundary margin below to the void's ceiling (or the blank's underside) above. The message carries the residual in mm (#475, #608). Raised when the surface touches are measured, not by `validateJob`. | Do not run the file. Face or plane the top until the residual fits the band, or use a flatter blank, and take the surface touches again. Auto-levelling is not the fix: the colour line is a plane under the dome, so a levelled surface would cut through it (#475; auto-level is #176). |
 
 **Checking the engraving job** (job):
 
