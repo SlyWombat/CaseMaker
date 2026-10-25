@@ -11,6 +11,7 @@ import {
   estimateIRCycleSeconds,
   estimateSeconds,
   HOP_Z,
+  JUNCTION_CORNER_DEG,
   moveSeconds,
   rapidRate,
   SAFE_Z,
@@ -120,6 +121,40 @@ describe('estimateCycleSeconds (#242, #281)', () => {
     // s), and the per-chord reading pays it twenty times.
     expect(perChord).toBeGreaterThan(perRun);
     expect(perChord - perRun).toBeCloseTo(19 * (400 / 60 / 150), 9);
+  });
+
+  it('carries speed across a gentle corner and stops at a sharp one (#657)', () => {
+    // A corner under JUNCTION_CORNER_DEG (5° < 10°) reads as one straight run: two 10 mm legs are one
+    // trapezoid on their 20 mm sum.
+    const a = 5 * (Math.PI / 180);
+    const gentle = estimateCycleSeconds(
+      [rapid(0, 0, 0), cut(10, 0, 0, 400), cut(10 + 10 * Math.cos(a), 10 * Math.sin(a), 0, 400)],
+      RAPID,
+    );
+    expect(gentle).toBeCloseTo(trap(20, 400, 150), 9);
+
+    // A 90° corner is past it: each 10 mm leg is its own trapezoid.
+    const sharp = estimateCycleSeconds([rapid(0, 0, 0), cut(10, 0, 0, 400), cut(10, 10, 0, 400)], RAPID);
+    expect(sharp).toBeCloseTo(trap(10, 400, 150) + trap(10, 400, 150), 9);
+    expect(JUNCTION_CORNER_DEG).toBeGreaterThan(5);
+    expect(JUNCTION_CORNER_DEG).toBeLessThan(90);
+  });
+
+  it("times an engraving's short right-angle strokes per corner, not as one long run (#657)", () => {
+    // The badge's shape at the catalogue's F1000: ten 1 mm legs, each at a right angle to the last.
+    // The planner stops at every corner, so the estimate is ten 1 mm triangles — not the one 10 mm
+    // trapezoid the per-run model would charge, which is exactly the 165 s vs 255 s gap on the cut.
+    const legs: CamMove[] = [rapid(0, 0, 0)];
+    let x = 0;
+    let y = 0;
+    for (let i = 0; i < 10; i++) {
+      if (i % 2 === 0) x += 1;
+      else y += 1;
+      legs.push(cut(x, y, 0, 1000));
+    }
+    const staircase = estimateCycleSeconds(legs, RAPID);
+    expect(staircase).toBeCloseTo(10 * moveSeconds(1, 1000, 150), 9);
+    expect(staircase).toBeGreaterThan(trap(10, 1000, 150));
   });
 
   it('ends the run at a rapid, at a feed change, and at the start of the program', () => {

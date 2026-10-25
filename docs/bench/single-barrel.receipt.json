@@ -18,7 +18,7 @@
   "outputs": [
     {
       "path": "<out>/single-barrel.nc",
-      "sha256": "7fca679ab83a97846b1783d9f3ed5a0617ac0fe25f71ab7affca5bbd19ef3839",
+      "sha256": "6d30031efaecd1f9c68ee29976b26b6fffa33bad384c40e648f13fe74d56dbf3",
       "bytes": 7456
     },
     {
@@ -28,8 +28,8 @@
     },
     {
       "path": "<out>/single-barrel-run-sheet.md",
-      "sha256": "e1fc966dd930fda7582aadcf021b754542b4ff08c9f8b07019bb59b89b0c23a6",
-      "bytes": 17825
+      "sha256": "8f42f254edf9ea04d5dfd802f0d7bb4dfeec7d94c70924015e8de76839681e37",
+      "bytes": 17824
     }
   ],
   "diagnostics": [
@@ -107,7 +107,7 @@
           "operations": 2,
           "cuttingMoves": 305,
           "passes": 2,
-          "estimatedSeconds": 109.12068711510106,
+          "estimatedSeconds": 120.10557460458003,
           "rapidMm": 308.72731156457826,
           "cutMm": 357.07405121549573,
           "baselineRapidMm": 308.72731156457826
@@ -121,8 +121,8 @@
         },
         "sheet": {
           "file": "single-barrel-run-sheet.md",
-          "ncHash": "7fca679a",
-          "estimatedTime": "1 min 49 s"
+          "ncHash": "6d30031e",
+          "estimatedTime": "2 min 0 s"
         },
         "previews": [],
         "images": []

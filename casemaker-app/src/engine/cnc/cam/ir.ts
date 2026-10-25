@@ -289,6 +289,21 @@ export function moveSeconds(distance: number, rate: number, accel: number): numb
 }
 
 /**
+ * The corner angle, in degrees, past which the planner (near-)stops instead of carrying the run's
+ * speed across a junction (#657). Below it two feed segments read as one straight stretch — the
+ * pocket's collinear chords, which #281 protects, carry their speed across — and at or past it the
+ * run ends and the next segment pays its own trapezoid.
+ *
+ * Tuned against the 2026-10-25 badge cut: at the catalogue's F1000 the per-run model printed 165 s
+ * and the machine ran ~255 s (its short V-carve strokes never reach 1000 mm/min); carrying speed
+ * across corners up to this angle and stopping past it reads 249 s on that same program. The value
+ * is a planning constant, not a measurement — it stands in for the `junction_deviation` the
+ * controller's config would state and that the estimate has no read of.
+ */
+export const JUNCTION_CORNER_DEG = 10;
+const JUNCTION_COS = Math.cos((JUNCTION_CORNER_DEG * Math.PI) / 180);
+
+/**
  * Estimated CYCLE time in seconds for one operation's moves — cutting PLUS rapids, timed through
  * the trapezoid (#242, #281). This is THE one estimate: the Engrave panel's row and the run sheet
  * read the `estimatedSeconds` this populates, and `postZ1` writes its program-wide sum into
@@ -306,9 +321,11 @@ export function moveSeconds(distance: number, rate: number, accel: number): numb
  * extra 446 s was an artefact of charging every chord for a stop it never makes. The model holds
  * only for GENTLE junctions: the speed the planner carries across one is `junction_deviation`'s,
  * set by the ANGLE between the two cuts — near the run's rate on near-straight chords, less at a
- * corner, zero at a full reversal — so a run that turns sharply is charged optimistically, since
- * one trapezoid per run has no corner in it. A rapid is a stop at each end by construction, so each
- * gets its own trapezoid.
+ * corner, zero at a full reversal. #657 — so a run now ENDS at a corner past {@link
+ * JUNCTION_CORNER_DEG} and the next segment pays its own trapezoid, because an engraving's short
+ * strokes never reach the commanded feed: the badge's first cut ran ~255 s against the 165 s this
+ * per-run model printed at the catalogue's F1000, and charging the corners is what closes that
+ * gap. A rapid is a stop at each end by construction, so each gets its own trapezoid.
  *
  * A feed is timed at its own `f`; a rapid at `rapidRate` of the machine the job is for. `rapid` is
  * REQUIRED and there is no default: the machine is the caller's to name (#347), a second mill
@@ -319,8 +336,8 @@ export function moveSeconds(distance: number, rate: number, accel: number): numb
 export function estimateCycleSeconds(moves: readonly CamMove[], rapid: RapidEstimate): number {
   let seconds = 0;
   let previous: CamMove | null = null;
-  /** The feed run being accumulated — its `f` and the running length of its segments. */
-  let run: { f: number; length: number } | null = null;
+  /** The feed run being accumulated — its `f`, the running length, and the direction of its last XY segment. */
+  let run: { f: number; length: number; ux: number; uy: number } | null = null;
   const endRun = (): void => {
     if (run !== null) {
       seconds += moveSeconds(run.length, run.f, rapid.accelMmPerS2);
@@ -337,11 +354,29 @@ export function estimateCycleSeconds(moves: readonly CamMove[], rapid: RapidEsti
     const dz = move.z - previous.z;
     const distance = Math.hypot(dx, dy, dz);
     if (move.kind === 'feed') {
+      const xy = Math.hypot(dx, dy);
+      // A pure-Z feed (a plunge) carries no XY direction: it accumulates at its own `f` (the feed
+      // change already split it) and the next XY segment starts the direction afresh.
+      const carriesDirection = xy > 1e-9;
       if (run !== null && run.f === move.f) {
-        run.length += distance;
+        if (carriesDirection) {
+          const ux = dx / xy;
+          const uy = dy / xy;
+          const hasDirection = run.ux !== 0 || run.uy !== 0;
+          if (!hasDirection || ux * run.ux + uy * run.uy >= JUNCTION_COS) {
+            run.length += distance;
+            run.ux = ux;
+            run.uy = uy;
+          } else {
+            endRun();
+            run = { f: move.f, length: distance, ux, uy };
+          }
+        } else {
+          run.length += distance;
+        }
       } else {
         endRun();
-        run = { f: move.f, length: distance };
+        run = { f: move.f, length: distance, ux: carriesDirection ? dx / xy : 0, uy: carriesDirection ? dy / xy : 0 };
       }
     } else {
       endRun();
