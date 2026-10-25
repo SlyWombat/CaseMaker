@@ -35,9 +35,11 @@ if (featureSim) {
   SECTIONS.push(
     {
       id: 'cnc-engrave',
-      label: 'Engrave text',
+      // #662 — THE ENTRY IS THE JOB, not one of its operation types. The id stays (internals are
+      // not renamed); the label is the operator's verb and pairs with Simulate below.
+      label: 'Cut',
       icon: '🪵',
-      hint: 'Carve text into a blank held in the vise, each label at its own depth',
+      hint: 'Set up a job on the machine — text, pockets, cut-outs, holes — and run it',
     },
     {
       id: 'cnc-sim',

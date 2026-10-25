@@ -1,6 +1,9 @@
 import { useMemo, useState, type CSSProperties, type JSX } from 'react';
 import { createPortal } from 'react-dom';
 import { useEngraveJobStore } from '@/store/engraveJobStore';
+import { OperationPicker } from './OperationPicker';
+import { addOperationOfType, jobHasOperations, type OperationTypeId } from './operationTypes';
+import { requestOperation } from './operationIntake';
 import { jobMachine } from '@/engine/cnc/calibration';
 import {
   materialOptionsFor,
@@ -87,6 +90,24 @@ export function EngraveSetupFlow({
   // "same as last job" is a no-op. They are a draft until Finish writes them.
   const [answers, setAnswers] = useState<SetupAnswers>(() => defaultSetupAnswers(job));
   const [index, setIndex] = useState(0);
+  // #662 — THE FIRST QUESTION, when there is nothing to cut yet: what KIND of operation starts the
+  // job. It is asked once, on an empty job; an established job opens straight on its setup
+  // questions, and "Edit setup" never re-asks what the work is.
+  const [askedWhat] = useState(() => !jobHasOperations(job));
+  const [stage, setStage] = useState<'what' | 'steps'>(() => (jobHasOperations(job) ? 'steps' : 'what'));
+
+  /** The first operation of the job: created here, then the setup questions follow. */
+  function pickFirst(type: OperationTypeId): void {
+    if (type === 'surface') {
+      // The PANEL owns the goal file input (this flow is a portal and may be opened from elsewhere);
+      // it asks, and the flow closes so the file dialog is not behind the modal.
+      requestOperation('surface');
+      onClose();
+      return;
+    }
+    addOperationOfType(type);
+    setStage('steps');
+  }
 
   const shown = useMemo(
     () => (only === undefined ? SETUP_STEPS : SETUP_STEPS.filter((st) => only.includes(st.id))),
@@ -258,7 +279,8 @@ export function EngraveSetupFlow({
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <b style={{ flex: 1, fontSize: 13 }}>Set up this job</b>
           <span style={MUTED} data-testid="engrave-setup-progress">
-            {index + 1} / {shown.length}
+            {stage === 'what' ? 1 : stage === 'steps' && askedWhat ? index + 2 : index + 1} /{' '}
+            {shown.length + (askedWhat ? 1 : 0)}
           </span>
           <button type="button" data-testid="engrave-setup-close" onClick={onClose}>
             Close
@@ -266,25 +288,36 @@ export function EngraveSetupFlow({
         </div>
 
         <p style={{ ...MUTED, marginTop: 8 }} data-testid="engrave-setup-step-title">
-          {step.title}
+          {stage === 'what' ? 'What are you cutting?' : step.title}
         </p>
 
-        <div data-testid={`engrave-setup-step-${stepId}`}>
-          {body()}
-          {stepId !== 'blank' && fixSlot()}
-          {findings.length > 0 && (
-            <div data-testid="engrave-setup-findings" style={{ marginTop: 6 }}>
-              {findings.map((f, i) => (
-                <FindingRow key={`${f.code}-${i}`} finding={f} testid={`engrave-setup-step-finding-${f.code}`} />
-              ))}
-            </div>
-          )}
-        </div>
+        {stage === 'what' ? (
+          <div data-testid="engrave-setup-step-what">
+            <OperationPicker
+              testidFor={(id) => `engrave-setup-what-${id}`}
+              onPick={pickFirst}
+              surfaceAllowed
+            />
+          </div>
+        ) : (
+          <div data-testid={`engrave-setup-step-${stepId}`}>
+            {body()}
+            {stepId !== 'blank' && fixSlot()}
+            {findings.length > 0 && (
+              <div data-testid="engrave-setup-findings" style={{ marginTop: 6 }}>
+                {findings.map((f, i) => (
+                  <FindingRow key={`${f.code}-${i}`} finding={f} testid={`engrave-setup-step-finding-${f.code}`} />
+                ))}
+              </div>
+            )}
+          </div>
+        )}
 
         {/* #348 — the actions are their own region, not a row tucked under the last field. A native
             `<select>`'s popup is the browser's own and always paints over what is under it, so no
             gap can keep the buttons uncovered while a list is open; what this buys is clearance, so
             the buttons are not what the list appears to be hiding. */}
+        {stage === 'steps' && (
         <div
           style={{
             display: 'flex',
@@ -315,6 +348,7 @@ export function EngraveSetupFlow({
             {last ? 'Finish' : 'Next'}
           </button>
         </div>
+        )}
       </div>
     </div>,
     document.body,

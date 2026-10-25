@@ -118,6 +118,9 @@ import { EngraveCutoutRow, type CutoutTarget } from './EngraveCutoutRow';
 import { EngraveThreadRow } from './EngraveThreadRow';
 import { EngravePrimitiveRow } from './EngravePrimitiveRow';
 import { EngraveTargetObjectRow } from './EngraveTargetObjectRow';
+import { OperationPicker } from './OperationPicker';
+import { addOperationOfType, jobHasOperations, operationType, type OperationTypeId } from './operationTypes';
+import { setOperationIntake } from './operationIntake';
 import { EngraveTraceRow } from './EngraveTraceRow';
 import { EngraveVectorRow } from './EngraveVectorRow';
 import { EngraveImportDialog } from './EngraveImportDialog';
@@ -685,7 +688,6 @@ export function EngravePanel(): JSX.Element {
   const addDrill = useEngraveJobStore((s) => s.addDrill);
   const updateDrill = useEngraveJobStore((s) => s.updateDrill);
   const removeDrill = useEngraveJobStore((s) => s.removeDrill);
-  const addThread = useEngraveJobStore((s) => s.addThread);
   const updateThread = useEngraveJobStore((s) => s.updateThread);
   const removeThread = useEngraveJobStore((s) => s.removeThread);
   const addPrimitive = useEngraveJobStore((s) => s.addPrimitive);
@@ -1009,6 +1011,16 @@ export function EngravePanel(): JSX.Element {
   // #435 — the reference object's import. Like the design file, this needs the BYTES (the mesh is
   // parsed once and embedded), so it is a plain hidden input rather than the text-file picker.
   const targetInputRef = useRef<HTMLInputElement>(null);
+  /** #662 — the Surface a mesh operation's own input: the file becomes the job's GOAL. */
+  const goalInputRef = useRef<HTMLInputElement>(null);
+  // The wizard asks for the goal import through `operationIntake` (it is a portal and cannot hold
+  // this input). One listener while the panel is mounted, cleared with it.
+  useEffect(() => {
+    setOperationIntake((type) => {
+      if (type === 'surface') goalInputRef.current?.click();
+    });
+    return () => setOperationIntake(null);
+  }, []);
   const [targetImporting, setTargetImporting] = useState(false);
   const [targetError, setTargetError] = useState<string | null>(null);
 
@@ -1039,7 +1051,7 @@ export function EngravePanel(): JSX.Element {
    * X/Y with its TOP on the stock's top face (Z0), which is where a reference part sits when it is
    * being used to lay out pockets.
    */
-  async function readTarget(file: File): Promise<void> {
+  async function readTarget(file: File, role: 'reference' | 'goal' = 'reference'): Promise<void> {
     setTargetError(null);
     setTargetImporting(true);
     try {
@@ -1058,6 +1070,9 @@ export function EngravePanel(): JSX.Element {
         position: { x: job.stock.length / 2, y: job.stock.width / 2, z: 0 },
         rotation: 0,
         enabled: true,
+        // #662 — the Surface a mesh operation: a goal is the shape to MAKE (the engine roughs and
+        // ball-finishes it), where a reference is only something to position against.
+        ...(role === 'goal' ? { role: 'goal' as const } : {}),
       });
       // A new object arrives open, like every other add: its placement is the field the import
       // could not settle.
@@ -1067,6 +1082,19 @@ export function EngravePanel(): JSX.Element {
     } finally {
       setTargetImporting(false);
     }
+  }
+
+  /**
+   * #662 — what a pick in the operation picker does. Every type but one is a store action; Surface
+   * a mesh opens the goal file input, because a mesh is a file and the role is what makes it an
+   * operation. A new operation arrives open: it is a default until its fields are set.
+   */
+  function addOperation(type: OperationTypeId): void {
+    if (type === 'surface') {
+      goalInputRef.current?.click();
+      return;
+    }
+    expandEngraveRow(addOperationOfType(type));
   }
 
   const errors = findings.filter((f) => f.severity === 'error');
@@ -2223,10 +2251,21 @@ export function EngravePanel(): JSX.Element {
           another item to reference unless they are a border. */}
       <details data-testid="engrave-add-menu" style={{ marginTop: 4 }}>
         <summary style={{ cursor: 'pointer', fontSize: 12, color: '#c8d3de' }} data-testid="engrave-add-summary">
-          + Add…
+          + Add operation…
         </summary>
+        {/* #662 — THE ONE ENTRY POINT, and it says what the operation IS. The type table is the
+            same one the wizard's first question and every row's chip read; the historic
+            `engrave-add-*` ids live on these buttons so the flows that already drive them keep
+            working. Everything below is a kind or an import, behind one more fold. */}
+        <OperationPicker
+          testidFor={(id) => operationType(id).addTestId}
+          onPick={addOperation}
+          surfaceAllowed={!jobHasOperations(job)}
+        />
+        <details data-testid="engrave-add-more" open style={{ marginTop: 6 }}>
+          <summary style={{ cursor: 'pointer', fontSize: 11, color: '#9aa4b0' }}>More kinds and imports</summary>
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 4 }}>
-          {ADD_KINDS.map((k) => (
+          {ADD_KINDS.filter((k) => k.value !== 'label' && k.value !== 'rect').map((k) => (
             <button
               key={k.value}
               type="button"
@@ -2284,7 +2323,7 @@ export function EngravePanel(): JSX.Element {
         </div>
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 4, alignItems: 'center' }}>
           <span style={{ ...MUTED, margin: 0 }}>holes:</span>
-          {ADD_DRILL_KINDS.map((k) => (
+          {ADD_DRILL_KINDS.filter((k) => k.value !== 'drill').map((k) => (
             <button
               key={k.value}
               type="button"
@@ -2299,19 +2338,6 @@ export function EngravePanel(): JSX.Element {
               {k.label}
             </button>
           ))}
-        </div>
-        {/* #445 — a milled internal thread. Its pilot is NOT cut by this item: the row and the run
-            sheet say the hole has to exist first (D1), and the CAM orbits inside it. */}
-        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 4, alignItems: 'center' }}>
-          <span style={{ ...MUTED, margin: 0 }}>threads:</span>
-          <button
-            type="button"
-            data-testid="engrave-add-thread"
-            title="Add a milled internal thread — the pilot must already be drilled; the program cuts the thread only."
-            onClick={() => expandEngraveRow(addThread())}
-          >
-            Thread
-          </button>
         </div>
         {/* #435 — 3D cut-away primitives against the target object. A vertical box/cylinder is
             pocketed by the region CAM; cone and sphere are refused BY NAME rather than
@@ -2381,6 +2407,7 @@ export function EngravePanel(): JSX.Element {
             {importError}
           </p>
         )}
+        </details>
       </details>
       <p style={MUTED}>Depth keeps the {job.minFloor} mm minimum floor — at most {maxDepth} mm on this stock.</p>
 
@@ -2395,8 +2422,9 @@ export function EngravePanel(): JSX.Element {
         </span>
       </h3>
       <p style={MUTED}>
-        A reference model the 3D primitives are placed against. It is embedded in the job and drawn
-        in the viewport, but it is not cut — the stock around it is the profile cut-out work (#218).
+        A model the job is placed against. As a reference it is embedded and drawn but never cut —
+        the stock around it is the profile cut-out work (#218). As a goal (Surface a mesh) it is the
+        shape to make, roughed and finished in 3D.
       </p>
       <UndoRemoval section="target" />
       {target !== null && (
@@ -2428,6 +2456,20 @@ export function EngravePanel(): JSX.Element {
           const file = e.target.files?.[0];
           e.target.value = '';
           if (file) void readTarget(file);
+        }}
+      />
+      {/* #662 — the Surface a mesh operation's input. The same reader as the reference above; the
+          role is the difference, and it is what the engine dispatches on (`generateGoalProgram`). */}
+      <input
+        ref={goalInputRef}
+        type="file"
+        accept=".stl,.3mf,model/stl,model/3mf"
+        style={{ display: 'none' }}
+        data-testid="engrave-surface-input"
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          e.target.value = '';
+          if (file) void readTarget(file, 'goal');
         }}
       />
       {targetError && (

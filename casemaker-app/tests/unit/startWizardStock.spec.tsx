@@ -136,16 +136,22 @@ describe('the material-first start (#418)', () => {
       fireEvent.click(screen.getByTestId('start-wizard-stock-next'));
     });
 
-    // The mount, alone: the shelf answered the material and the blank.
+    // The mount. The hand-off seeds an EMPTY job, so the wizard asks what to cut first (#662);
+    // the shelf already answered the material and the blank, so the mount is the only setup
+    // question after that.
     await screen.findByTestId('engrave-setup-flow');
+    expect(screen.getByTestId('engrave-setup-step-what')).toBeDefined();
+    expect(screen.getByTestId('engrave-setup-progress').textContent).toBe('1 / 2');
+    fireEvent.click(screen.getByTestId('engrave-setup-what-pocket'));
     expect(screen.getByTestId('engrave-setup-step-holding')).toBeDefined();
-    expect(screen.getByTestId('engrave-setup-progress').textContent).toBe('1 / 1');
+    expect(screen.getByTestId('engrave-setup-progress').textContent).toBe('2 / 2');
 
     const job = useEngraveJobStore.getState().job;
     expect(job.stock).toMatchObject({ length: 100, width: 100, thickness: 5, material: 'aluminium-6061' });
     expect(job.sources?.stock?.length).toBe('user');
     expect(job.labels).toEqual([]);
-    expect(job.shapes).toEqual([]);
+    // The one operation the wizard's first question added, and nothing else.
+    expect(job.shapes).toHaveLength(1);
     expect(job.stockEntry).toEqual({
       kind: 'shelf',
       shelfId: 'stock-plate1',
@@ -166,7 +172,8 @@ describe('the material-first start (#418)', () => {
     // Named, not reserved: Cut mode (#419) reserves.
     expect(svc.calls.filter((c) => !c.startsWith('GET'))).toEqual([]);
 
-    // Finishing the mount writes the holding answer and leaves the design empty.
+    // Finishing the mount writes the holding answer; the design holds only the operation the
+    // first question asked for, never a label from the project.
     fireEvent.click(screen.getByTestId('engrave-setup-next'));
     expect(useEngraveJobStore.getState().job.labels).toEqual([]);
     expect(useEngraveJobStore.getState().job.stockEntry?.shelfId).toBe('stock-plate1');
@@ -353,6 +360,8 @@ describe('the material-first start (#418)', () => {
     await act(async () => {
       fireEvent.click(screen.getByTestId('start-wizard-stock-next'));
     });
+    await screen.findByTestId('engrave-setup-step-what');
+    fireEvent.click(screen.getByTestId('engrave-setup-what-pocket'));
     await screen.findByTestId('engrave-setup-step-holding');
     // Force the proud past the blank, as a saved vise would: the blank step's fix must still appear.
     useEngraveJobStore.getState().setVise({ stockProud: 5, source: 'saved' });

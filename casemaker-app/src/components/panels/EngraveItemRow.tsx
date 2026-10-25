@@ -57,6 +57,12 @@ export interface EngraveItemRowProps {
   glyph: string;
   /** The kind in a word: the glyph's tooltip, and the `aria-label` stem. */
   kindWord: string;
+  /**
+   * #662 — the OPERATION TYPE this row is, drawn as a chip beside the name (`Engrave`, `V-carve`,
+   * `Pocket`, `Profile`, `Hole`, `Thread`, `Surface a mesh`). Null for a row that is not an
+   * operation — a kept-out void, or a mesh the job only references.
+   */
+  typeLabel?: string | null;
   /** What to draw where the mockup has "Face" / "Pocket A": the item's name, or the kind's word. */
   name: string;
   /**
@@ -121,6 +127,7 @@ export function EngraveItemRow({
   index,
   glyph,
   kindWord,
+  typeLabel = null,
   name,
   summary,
   intent = null,
@@ -219,6 +226,11 @@ export function EngraveItemRow({
               onClick={() => selectEngraveItem(id)}
             >
               <span className="engrave-item-row__name">{name}</span>
+              {typeLabel !== null && (
+                <span className="engrave-item-row__op" data-testid={`${prefix}-type-${index}`}>
+                  {typeLabel}
+                </span>
+              )}
             </button>
           </>
         ) : (
@@ -234,6 +246,11 @@ export function EngraveItemRow({
             {caret}
             {glyphSpan}
             <span className="engrave-item-row__name">{name}</span>
+            {typeLabel !== null && (
+              <span className="engrave-item-row__op" data-testid={`${prefix}-type-${index}`}>
+                {typeLabel}
+              </span>
+            )}
           </button>
         )}
         <span className="engrave-item-row__summary">{summary}</span>

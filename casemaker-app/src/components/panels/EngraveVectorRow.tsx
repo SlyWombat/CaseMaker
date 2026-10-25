@@ -1,5 +1,6 @@
 import type { CSSProperties, JSX } from 'react';
 import { EngraveItemRow } from '@/components/panels/EngraveItemRow';
+import { regionChipLabel, useRegionOperationType } from '@/components/panels/operationTypes';
 import { rowSummary } from '@/components/panels/engraveRowText';
 import type { JobFinding } from '@/engine/cnc/engrave/jobSetup';
 import type { VectorPatch } from '@/store/engraveJobStore';
@@ -46,6 +47,8 @@ export function EngraveVectorRow({
   onRemove,
   findings,
 }: EngraveVectorRowProps): JSX.Element {
+  // #662 - the chip states what THIS cutter makes of a region.
+  const region = useRegionOperationType();
   const depthInvalid = shape.depth > maxDepth;
 
   const positionNum = (axis: 'x' | 'y'): JSX.Element => (
@@ -80,6 +83,7 @@ export function EngraveVectorRow({
       index={index}
       glyph="◫"
       kindWord="Imported outline"
+      typeLabel={regionChipLabel(shape.through, region)}
       name={shape.name?.trim() ? shape.name : shape.sourceName}
       summary={rowSummary(shape.depth)}
       enabled={shape.enabled}

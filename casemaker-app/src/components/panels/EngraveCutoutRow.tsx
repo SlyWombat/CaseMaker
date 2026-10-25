@@ -60,6 +60,7 @@ export function EngraveCutoutRow({
       index={index}
       glyph="⌐"
       kindWord="Cut-out"
+      typeLabel="Profile"
       name={cutout.name?.trim() ? cutout.name : 'Cut-out'}
       summary={tabCount === 0 ? 'no tabs' : `${tabCount} tab${tabCount === 1 ? '' : 's'}`}
       enabled={cutout.enabled}

@@ -174,6 +174,7 @@ export function EngraveLabelRow({
       index={index}
       glyph="T"
       kindWord="Label"
+      typeLabel="Engrave"
       name={label.text.trim() === '' ? '(empty label)' : label.text}
       summary={rowSummary(label.depth)}
       // §5.3 — the word the two-state control below writes, put back on the folded line: a label

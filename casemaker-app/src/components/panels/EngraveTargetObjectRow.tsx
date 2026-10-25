@@ -72,6 +72,7 @@ export function EngraveTargetObjectRow({
       index={index}
       glyph="◎"
       kindWord="Target object"
+      typeLabel={target.role === 'goal' ? 'Surface a mesh' : null}
       name={target.name}
       summary={sizeText}
       enabled={target.enabled}

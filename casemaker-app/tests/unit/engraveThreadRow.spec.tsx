@@ -80,7 +80,10 @@ describe('EngraveThreadRow — the collapsed line', () => {
   it('shows the kind glyph, the fallback name and the threaded length', () => {
     row();
     expect(screen.getByText('⌗')).toBeTruthy();
-    expect(screen.getByText('Thread')).toBeTruthy();
+    // #662 — the line carries the kind word twice now: the row's fallback NAME and the operation
+    // type's chip. Both are the row's own statements, so the spec asserts both by their own testids.
+    expect(screen.getAllByText('Thread')).toHaveLength(2);
+    expect(screen.getByTestId('engrave-thread-type-0').textContent).toBe('Thread');
     // Three places, trailing zeros dropped — the same `rowSummary` every kind uses.
     expect(screen.getByText('5 mm')).toBeTruthy();
     expect(screen.getByTestId('engrave-thread-row-0')).toBeTruthy();

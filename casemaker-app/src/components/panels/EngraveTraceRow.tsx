@@ -143,6 +143,7 @@ export function EngraveTraceRow({
       index={index}
       glyph={trace.kind === 'line' ? '∿' : '𝑡'}
       kindWord={kindLabel}
+      typeLabel="Engrave"
       name={trace.name?.trim() ? trace.name : kindLabel}
       summary={rowSummary(trace.depth)}
       enabled={trace.enabled}

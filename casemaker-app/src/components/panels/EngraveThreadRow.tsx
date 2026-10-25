@@ -91,6 +91,7 @@ export function EngraveThreadRow({
       index={index}
       glyph="⌗"
       kindWord="Thread"
+      typeLabel="Thread"
       name={thread.name?.trim() ? thread.name : 'Thread'}
       summary={rowSummary(thread.depth)}
       enabled={thread.enabled}

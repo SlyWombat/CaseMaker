@@ -916,6 +916,19 @@ body, html, #root {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* #662 — the operation type, beside the name: a word, not an icon, because the type is what the
+   row IS in the job's operations list. Fixed and non-shrinking, like the summary. */
+.engrave-item-row__op {
+  flex: 0 0 auto;
+  margin-left: 6px;
+  padding: 0 4px;
+  border: 1px solid var(--cm-color-outline, #2a2f36);
+  border-radius: 3px;
+  font-size: 10px;
+  line-height: 1.5;
+  color: var(--cm-color-on-surface-muted);
+  white-space: nowrap;
+}
 .engrave-item-row__summary {
   color: var(--cm-color-on-surface-muted);
   font-variant-numeric: tabular-nums;

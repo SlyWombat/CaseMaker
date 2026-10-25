@@ -1,5 +1,6 @@
 import { useState, type CSSProperties, type JSX } from 'react';
 import { EngraveItemRow } from '@/components/panels/EngraveItemRow';
+import { regionChipLabel, useRegionOperationType } from '@/components/panels/operationTypes';
 import { rowSummary } from '@/components/panels/engraveRowText';
 import type { JobFinding } from '@/engine/cnc/engrave/jobSetup';
 import type { ShapePatch } from '@/store/engraveJobStore';
@@ -99,6 +100,8 @@ export function EngraveShapeRow({
   onRemove,
   findings,
 }: EngraveShapeRowProps): JSX.Element {
+  // #662 - the chip states what THIS cutter makes of a region.
+  const region = useRegionOperationType();
   const depthInvalid = shape.depth > maxDepth;
   const [pointsText, setPointsText] = useState(() => (shape.kind === 'polygon' ? pointsToText(shape.points) : ''));
 
@@ -152,6 +155,7 @@ export function EngraveShapeRow({
       index={index}
       glyph={KIND_GLYPH[shape.kind]}
       kindWord={KIND_LABEL[shape.kind]}
+      typeLabel={regionChipLabel(shape.through, region)}
       name={shape.name?.trim() ? shape.name : KIND_LABEL[shape.kind]}
       summary={shape.through === true ? 'through' : rowSummary(shape.depth)}
       enabled={shape.enabled}

@@ -15,7 +15,7 @@ Two things to hold on to before you read on:
 - **Case Maker supports the Z1 only.** Carvera and Carvera Air are different machines; the
   app does not model them.
 - **On the public site the CNC side is a beta switch.** [electricrv.ca/casemaker](https://electricrv.ca/casemaker)
-  hides the Engrave and Simulate sections, the cutting-job door, Manage and this guide
+  hides the Cut and Simulate sections, the cutting-job door, Manage and this guide
   unless the address carries `?BETA=yes`:
   `https://electricrv.ca/casemaker/?BETA=yes`. Dev builds and the desktop build have it on
   without the switch. The switch does not let a browser reach a machine; only the desktop
@@ -42,7 +42,7 @@ you already have (so you can see what it cuts before risking a blank), and **wri
 job — the default is an engraving program for a printed PLA blank, the two-colour badge, held
 in the vise. The job is one document, and it writes up to four files: the program, its frame
 file, a facing file when the job has one, and a run record (§5, step 8). The **desktop** build
-can upload and play them from the Engrave panel — one program, or a whole multi-program list
+can upload and play them from the Cut panel — one program, or a whole multi-program list
 through the release step (§5, step 9).
 
 **What it is not.** It is not automatic machining. The desktop build sends the files and starts
@@ -412,6 +412,11 @@ This is a walkthrough of the default job, start to finish: a printed two-colour 
 the vise, with words engraved to different depths. It is written in the order the app asks the
 questions, because that is the order the answer is needed in — and every answer is also a
 section of the **same job document**, so a job can be put down and picked up at any point.
+
+A **new job starts with one question — what are you cutting?** — and the operation types are its
+answer: **Engrave** (text or single-stroke lines), **V-carve**, **Pocket**, **Profile**, **Hole**,
+**Thread**, or **Surface a mesh** (a goal STL/3MF). Every operation added afterwards is one row in
+the job's list, its type on the row, and its expert fields behind the row's fold.
 
 Two ideas hold the chapter together:
 
@@ -802,7 +807,7 @@ headless round-trip test pins (`docs/bench/single-barrel.receipt.json`), so it o
 generates the program you can compare against the committed receipt. The run itself needs a
 machine on the network; everything up to the upload works in the desktop build without one.
 
-1. Open the **Engrave** surface and press **Open…** in the job file bar; pick
+1. Open the **Cut** surface and press **Open…** in the job file bar; pick
    `docs/bench/single-barrel.job.json` (the picker accepts `.json`).
 2. The Design rail shows the three groups. **Job** states the stock (38.1 × 76.2 × 3.81 mm PLA);
    **Hold** states the vise seat; **Cutter** says **no cutter chosen** if your library lacks the
@@ -823,7 +828,7 @@ machine on the network; everything up to the upload works in the desktop build w
 ## 6 · Two-colour badges — CNC-3
 
 > **Status: Partly available** — CNC-3 (#166). The badge blank is in the app: **Use the badge
-> blank** on the Engrave panel takes the stock and the magnet pocket from the project's badge
+> blank** on the Cut panel takes the stock and the magnet pocket from the project's badge
 > (#271). The surface/reveal depth choice (decision 20) is in the label rows (#170) — on a
 > blank that states how it was printed. Since #368 the badge template and a badge made from
 > the app's own defaults both state a **provisional** print (0.2 mm layers); #166 is the
@@ -846,7 +851,7 @@ the two-colour stack does not have. So the label row offers those two states bes
 number, and typing a depth is the override for anyone who wants one.
 
 **What is on screen today, and what is not.** One button: **Use the badge blank**, at the top
-of the Engrave panel's *Stock* section (chapter 5, step 1). It reads the project's badge —
+of the Cut panel's *Stock* section (chapter 5, step 1). It reads the project's badge —
 76.2 × 38.1 × 3.81 mm PLA by default — and sets the stock to that blank and declares its
 magnet pocket as a void the depth limit respects, then states back in a sentence what it set.
 The blank is **turned to sit in the vise**: its 38.1 mm side across the jaws (X), its 76.2 mm
@@ -1036,7 +1041,7 @@ same ones the job's Hold group and the run sheet read (§2).
 > camera (#189).
 
 **Sending the job to the machine (#181) — shipped.** The desktop build's bridge uploads the
-`.nc` to the Z1 over your network and plays it from the Engrave panel (§5.9): a confirmation
+`.nc` to the Z1 over your network and plays it from the Cut panel (§5.9): a confirmation
 naming the machine and the file before anything is written, a Stop while it runs, and a Home
 after a confirmed stop. It does not probe or set the work origin — those stay yours.
 
@@ -1207,7 +1212,7 @@ simulation does report about one is the sweep's own list, next:
 |---|---|---|---|
 | `depth-exceeds-stock` | error | An item cuts so deep the floor left under it is below the minimum. | Make it shallower or use thicker stock. |
 | `facing-too-deep` | error | The job asks to face its stock's top, and the depth asked is more than the blank has spare above the minimum floor — so the skim alone would break through. Facing also LOWERS every item's own limit, because the floor is measured from the faced surface: an item that just fitted the blank may be refused as `depth-exceeds-stock` once facing is on. | Ask for a lighter skim, or use thicker stock. |
-| `facing-plastic` | error | The job asks for a facing pass on a material that cannot take one — every non-wood, non-metal material, i.e. any plastic (PLA, PETG, ABS, acrylic and the rest), not only a printed blank (#474). A flat cutter smears a plastic top instead of cutting it, so no finish, depth or cutter choice makes the pass work. The job is refused before any program is written: every later program is posted from the top a skim would leave, and there will be no such top. | Turn facing off in the Engrave panel and generate again. |
+| `facing-plastic` | error | The job asks for a facing pass on a material that cannot take one — every non-wood, non-metal material, i.e. any plastic (PLA, PETG, ABS, acrylic and the rest), not only a printed blank (#474). A flat cutter smears a plastic top instead of cutting it, so no finish, depth or cutter choice makes the pass work. The job is refused before any program is written: every later program is posted from the top a skim would leave, and there will be no such top. | Turn facing off in the Cut panel and generate again. |
 | `no-items` | error | The job has no enabled item to cut: no label with text, shape, trace, drilled hole, thread or cuttable 3D primitive. Formerly `no-labels`. | Add one. |
 | `primitive-not-vertical` | error | A 3D primitive opens along X or Y instead of Z, so it is a side-opening undercut. The 2.5D region CAM only cuts down from the top face, so the primitive is refused by name rather than silently turned into a top pocket (#435). | Set its axis to Z, or cut it with the 3D engine (#222). |
 | `primitive-cone-needs-cam` | error | A cone primitive has a sloped wall. The region CAM only cuts walls parallel to the cutter axis, so cutting it would silently approximate the cone as a cylinder. It is refused by name (#435). | Use the V-carve/chamfer work (#221) or the 3D engine (#222), or change the shape. |
@@ -1380,7 +1385,7 @@ one of the app's screens did not finish drawing.
 
 | Code | Severity | What it means in plain words | What to do |
 |---|---|---|---|
-| `panel-render-error` | error | The Engrave panel or its setup flow threw while drawing. The message is the throw's own message and the panel's name; in a dev build the console prints the component stack. The rest of the window keeps working. | Press **Reload the panel**. If it throws again, report it with the console's component stack. |
+| `panel-render-error` | error | The Cut panel or its setup flow threw while drawing. The message is the throw's own message and the panel's name; in a dev build the console prints the component stack. The rest of the window keeps working. | Press **Reload the panel**. If it throws again, report it with the console's component stack. |
 
 **Running a job without the app** (headless — #483). The command-line surface is `casemaker`
 (§8.6): `engrave`, `export`, `location`, `readback` and the `machine` subcommands all run in Node.
@@ -1528,7 +1533,7 @@ not have* — instead of passing the closest match off as the answer.
   round to the radius.
 - **Under-surface void** — a pocket the blank already has, cut into its **bottom** face: the
   magnet pocket of a badge blank is the one V1 works with. You declare it under **Stock** in the
-  Engrave panel — its footprint and its **ceiling**, measured *up* from the bottom face, the
+  Cut panel — its footprint and its **ceiling**, measured *up* from the bottom face, the
   opposite direction from every depth in the panel. What is left above the ceiling is the
   **membrane**, and a cut over the void is allowed only as deep as the membrane less the minimum
   floor. A cut that merely overlaps the void is warned (`item-over-void`); one deep enough to

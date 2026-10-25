@@ -1,5 +1,6 @@
 import type { CSSProperties, JSX } from 'react';
 import { EngraveItemRow } from '@/components/panels/EngraveItemRow';
+import { regionChipLabel, useRegionOperationType } from '@/components/panels/operationTypes';
 import { rowSummary } from '@/components/panels/engraveRowText';
 import type { JobFinding } from '@/engine/cnc/engrave/jobSetup';
 import { primitiveLabel, primitiveReducesToRegion } from '@/engine/cnc/engrave/partPlan';
@@ -60,6 +61,8 @@ export function EngravePrimitiveRow({
   onRemove,
   findings,
 }: EngravePrimitiveRowProps): JSX.Element {
+  // #662 - the chip states what THIS cutter makes of a region.
+  const region = useRegionOperationType();
   const kindWord = KIND_WORD[primitive.kind];
   const tipDiameter = primitive.kind === 'cone' ? primitive.tipDiameter : null;
   const depthInvalid = primitive.depth > maxDepth || (primitive.kind === 'sphere' && primitive.depth > primitive.diameter);
@@ -137,6 +140,7 @@ export function EngravePrimitiveRow({
       index={index}
       glyph={KIND_GLYPH[primitive.kind]}
       kindWord={kindWord}
+      typeLabel={regionChipLabel(undefined, region)}
       name={primitive.name?.trim() ? primitive.name : kindWord}
       summary={rowSummary(primitive.depth)}
       enabled={primitive.enabled}

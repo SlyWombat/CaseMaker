@@ -476,7 +476,7 @@ export function StartWizard(): JSX.Element {
   // (it is what #488's cold font cache did), leaving the wizard gone with nothing in its place.
   if (step === 'setup') {
     return (
-      <PanelErrorBoundary name="Engrave setup flow">
+      <PanelErrorBoundary name="Cut setup flow">
         <EngraveSetupFlow onClose={closeWizard} steps={setupSteps} />
       </PanelErrorBoundary>
     );

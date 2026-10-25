@@ -29,7 +29,7 @@ const SECTION_TITLES: Record<SidebarSectionId, string> = {
   assets: 'External assets',
   export: 'Export',
   'cnc-sim': 'Simulate .nc',
-  'cnc-engrave': 'Engrave text',
+  'cnc-engrave': 'Cut',
 };
 
 function renderSection(id: SidebarSectionId): JSX.Element {
@@ -49,7 +49,7 @@ function renderSection(id: SidebarSectionId): JSX.Element {
     // #490 — a throw while rendering the panel is caught HERE, so the rail's header, the section
     // list and the viewport survive it; the boundary says what threw and offers a reload.
     case 'cnc-engrave': return (
-      <PanelErrorBoundary name="Engrave panel">
+      <PanelErrorBoundary name="Cut panel">
         <EngravePanel />
       </PanelErrorBoundary>
     );

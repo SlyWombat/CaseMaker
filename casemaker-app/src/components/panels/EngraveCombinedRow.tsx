@@ -1,5 +1,6 @@
 import type { CSSProperties, JSX } from 'react';
 import { EngraveItemRow } from '@/components/panels/EngraveItemRow';
+import { regionChipLabel, useRegionOperationType } from '@/components/panels/operationTypes';
 import { rowSummary } from '@/components/panels/engraveRowText';
 import { itemLabel, type JobFinding } from '@/engine/cnc/engrave/jobSetup';
 import type { CombinedPatch } from '@/store/engraveJobStore';
@@ -79,6 +80,8 @@ export function EngraveCombinedRow({
   onRemove,
   findings,
 }: EngraveCombinedRowProps): JSX.Element {
+  // #662 - the chip states what THIS cutter makes of a region.
+  const region = useRegionOperationType();
   const depthInvalid = shape.depth > maxDepth;
 
   /** A plain number field. `undefined` for a field this kind does not carry, so it is not rendered. */
@@ -143,6 +146,7 @@ export function EngraveCombinedRow({
       index={index}
       glyph={KIND_GLYPH[shape.kind]}
       kindWord={KIND_LABEL[shape.kind]}
+      typeLabel={regionChipLabel(shape.through, region)}
       name={shape.name?.trim() ? shape.name : KIND_LABEL[shape.kind]}
       summary={rowSummary(shape.depth)}
       enabled={shape.enabled}

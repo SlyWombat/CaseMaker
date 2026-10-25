@@ -123,6 +123,7 @@ export function EngraveDrillRow({
       index={index}
       glyph="⌖"
       kindWord={kindLabel}
+      typeLabel="Hole"
       name={drill.name?.trim() ? drill.name : kindLabel}
       summary={rowSummary(drill.depth)}
       enabled={drill.enabled}
