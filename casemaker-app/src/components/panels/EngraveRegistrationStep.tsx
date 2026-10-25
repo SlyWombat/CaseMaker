@@ -49,7 +49,12 @@ import {
 import { attachConsole, type ConsoleHandle } from '@/platform/machineConsole';
 import { controllerState } from '@/platform/machineUpload';
 import { effectiveMargins } from '@/engine/cnc/engrave/depthBounds';
-import { surfaceSpreadPlan, surfaceFitForPost } from '@/engine/cnc/engrave/surfaceSpread';
+import {
+  surfaceDomeGuidance,
+  surfaceFitForPost,
+  surfaceMarginWords,
+  surfaceSpreadPlan,
+} from '@/engine/cnc/engrave/surfaceSpread';
 import { jobTool } from '@/engine/cnc/engrave/jobSetup';
 import { cuttingDiameter } from '@/engine/cnc/tool';
 import { shopDefault, useShopDefaultsStore } from '@/store/shopDefaultsStore';
@@ -295,15 +300,11 @@ export function EngraveRegistrationStep({ job, target }: EngraveRegistrationStep
       if (!aliveRef.current) return;
       if (r.ok && r.spread !== undefined) {
         // #519 item 1 — the dock's Touches tab closes with the spread sentence (the rail's detailed
-        // spread block stays where the Write decision is).
+        // spread block stays where the Write decision is). #630 — the transcript line carries the
+        // residual against the band, not the raw spread: the margin is the verdict.
         useRegistrationTouchesStore
           .getState()
-          .setSpreadSentence(
-            r.spread.ok
-              ? `Surface spread ${n(r.spread.spread)} mm against the ${n(r.spread.plan.band.width)} mm band — within it.`
-              : r.spread.recommendation?.sentence ??
-                  `Surface ${r.spread.verdict} — level the machine's own grid first (G32), then upload FLAT.`,
-          );
+          .setSpreadSentence(`Surface ${r.spread.verdict} — ${surfaceMarginWords(r.spread)}.`);
         // The measurement is session data for the sheet even when the blank is refused; the job's
         // flatness record is the measured pair, which is what #432 R9 reads and what the depth
         // recommendation and the material scan plan from (#496). Both spans travel with the count
@@ -620,7 +621,8 @@ export function EngraveRegistrationStep({ job, target }: EngraveRegistrationStep
                   </div>
                   {/* #501 — WHAT the top is, in one word: a dome (curved over a flat colour line)
                       keeps the refusal, a tilt is followed by the re-posted program and may be
-                      levelled at the console instead. */}
+                      levelled at the console instead. #630 — the verdict also says the margin: how
+                      far the residual sits inside (flat/tilt) or outside (dome) the band. */}
                   <div
                     data-testid="engrave-registration-shape"
                     data-verdict={spread.verdict}
@@ -631,8 +633,8 @@ export function EngraveRegistrationStep({ job, target }: EngraveRegistrationStep
                       ? 'dome — a curved top, not a tilt'
                       : spread.verdict === 'tilt'
                         ? `tilt (${n(spread.slopeDeg)}°)`
-                        : 'flat'}
-                    .
+                        : 'flat'}{' '}
+                    — {surfaceMarginWords(spread)}.
                   </div>
                   {spread.recommendation !== null && (
                     <p data-testid="engrave-registration-g32" style={MUTED}>
@@ -650,6 +652,11 @@ export function EngraveRegistrationStep({ job, target }: EngraveRegistrationStep
                       Z0 is still the lowest reading ({n(spread.z0.z)}): the plane re-post cannot follow
                       a dome, so the machine levels the top itself (G32) and the program uploads FLAT.
                     </div>
+                  )}
+                  {spread.verdict === 'dome' && (
+                    <p data-testid="engrave-registration-dome-guidance" style={MUTED}>
+                      {surfaceDomeGuidance(spread)}
+                    </p>
                   )}
                 </div>
               )}

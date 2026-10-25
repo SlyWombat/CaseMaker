@@ -18,7 +18,9 @@ import {
   DEFAULT_SURFACE_TOUCH_COUNT,
   domeAcceptSentence,
   domeCentreMiss,
+  surfaceDomeGuidance,
   surfaceFitForPost,
+  surfaceMarginWords,
   surfaceSpreadPlan,
   surfaceTiltWords,
   Z0_REFERENCE,
@@ -301,5 +303,61 @@ describe('#501 — the shape verdict and the console G32 recommendation', () => 
     const reg = registrationSettings(null);
     expect(reg.settings.surfaceTouchCount).toBe(5);
     expect(reg.fallbacks).toContain('registration.surfaceTouchCount');
+  });
+});
+
+describe('#630 — the verdict says the margin, and a dome names the next steps', () => {
+  it('a followed tilt says the residual is inside the band, with both numbers named', () => {
+    const a = assessSurfaceReadings(run5Plan(), RUN5);
+    const words = surfaceMarginWords(a);
+    expect(words).toContain('miss the plane by');
+    expect(words).toContain('inside the 0.2 mm band');
+    // The residual is the #608 read-out, so the margin is band − residual (0.2 − 0.196 = 0.004).
+    expect(words).toContain('0.004 inside');
+  });
+
+  it('a flat top says the residual is inside the band too', () => {
+    const a = assessSurfaceSpread(badgeJob(), BOWED.map((r) => ({ ...r, z: -55.2 })));
+    const words = surfaceMarginWords(a);
+    expect(words).toContain('inside the 0.2 mm band');
+  });
+
+  it('a dome says how far OUTSIDE the band the residual sits', () => {
+    const a = assessSurfaceSpread(badgeJob(), NONPLANAR);
+    const words = surfaceMarginWords(a);
+    expect(words).toContain('miss the plane by');
+    expect(words).toContain('outside the 0.2 mm band');
+  });
+
+  it('the dome guidance is ORDERED: the machine route, then the accepted one, then the re-seat note', () => {
+    const a = assessSurfaceSpread(badgeJob(), NONPLANAR);
+    const g = surfaceDomeGuidance(a);
+    // 1 — the machine route, first, because it cuts the part as designed.
+    const g32 = g.indexOf('G32 from the console levels the curved top');
+    const accept = g.indexOf('Or write the origin anyway');
+    const reseat = g.indexOf('A thin plastic blank bows centre-high');
+    expect(g32).toBe(0);
+    expect(accept).toBeGreaterThan(g32);
+    expect(reseat).toBeGreaterThan(accept);
+    expect(g).toContain('uploads FLAT');
+    // The accepted clause is the SAME sentence the Cut step's checkbox and the run sheet print
+    // (its first letter lowercased because it follows "Or").
+    expect(g.toLowerCase()).toContain(domeAcceptSentence(a)!.toLowerCase());
+    // 3 — the re-seat note is information only, and names the cause worth trying.
+    expect(g.slice(reseat)).toContain('lighter re-seat');
+    expect(g.slice(reseat)).toContain('chip');
+    // No issue numbers in operator-facing text.
+    expect(g).not.toMatch(/#\d/);
+  });
+
+  it('omits the accepted route when there is no miss to accept', () => {
+    // A FLAT top: the plane fits, nothing overflows the band, so there is no miss to accept and the
+    // sentence must not invent one.
+    const flat = BOWED.slice(0, 3).map((r) => ({ ...r, z: -55.2 }));
+    const a = assessSurfaceSpread(badgeJob(), flat, { touchCount: 3 });
+    expect(domeAcceptSentence(a)).toBeNull();
+    const g = surfaceDomeGuidance(a);
+    expect(g).not.toContain('write the origin anyway');
+    expect(g.startsWith('G32 from the console levels the curved top')).toBe(true);
   });
 });

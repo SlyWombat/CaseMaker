@@ -353,7 +353,19 @@ describe('#495 — the registration step', () => {
     // #501/#631 — the verdict is a DOME, in so many words; the dead-end refusal is gone.
     expect(screen.getByTestId('engrave-registration-shape').getAttribute('data-verdict')).toBe('dome');
     expect(screen.getByTestId('engrave-registration-shape').textContent).toContain('dome — a curved top, not a tilt');
+    // #630 — the verdict says how far OUTSIDE the band the residual sits.
+    expect(screen.getByTestId('engrave-registration-shape').textContent).toContain('miss the plane by');
+    expect(screen.getByTestId('engrave-registration-shape').textContent).toContain('outside the 0.2 mm band');
     expect(screen.getByTestId('engrave-registration-spread').textContent).toContain('spread 0.33 mm against the 0.2 mm band');
+    // #630 (amended) — the operator gets the routes IN ORDER (G32 first, the accepted miss second,
+    // the re-seat note last and as information only), not a dead end. No issue numbers in the text.
+    const guidance = screen.getByTestId('engrave-registration-dome-guidance').textContent!;
+    expect(guidance.indexOf('G32 from the console levels the curved top')).toBe(0);
+    expect(guidance.indexOf('write the origin anyway')).toBeGreaterThan(0);
+    expect(guidance.indexOf('lighter re-seat')).toBeGreaterThan(guidance.indexOf('write the origin anyway'));
+    expect(guidance).toContain('chip');
+    expect(guidance).toContain('uploads FLAT');
+    expect(guidance).not.toMatch(/#\d/);
     // The dome block offers the machine-side route instead of a refusal.
     expect(screen.getByTestId('engrave-registration-dome').textContent).toContain('uploads FLAT');
     expect(screen.queryByTestId('engrave-registration-landing')).toBeNull();
@@ -375,10 +387,11 @@ describe('#495 — the registration step', () => {
     expect(surfaceSpreadFor(job.id, TARGET)?.assessment.spread).toBe(0.33);
     expect(surfaceSpreadFor(job.id, TARGET)?.assessment.verdict).toBe('dome');
     // #519 item 1 — the extents are emitted as readings too, and the dock's store closes with the
-    // dome sentence.
+    // dome sentence. #630 — the transcript line carries the residual against the band.
     const live = useRegistrationTouchesStore.getState();
     expect(live.touches.some((t) => t.source === 'spread')).toBe(true);
     expect(live.spreadSentence).toContain('dome');
+    expect(live.spreadSentence).toContain('outside the');
     // #496 — the job records the pair, each span on its own stock axis, not one ambiguous "across".
     expect(useEngraveJobStore.getState().job.stock.flatness).toMatchObject({
       xMm: 0.33,

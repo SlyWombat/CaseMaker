@@ -1624,6 +1624,19 @@ describe('the surface spread (#475)', () => {
     expect(all).toContain('M375.1');
     expect(all).toContain('G32 is never uploaded in a file');
     expect(all).toContain('G32 has been run from the console for this clamping');
+    // #630 (amended) — the verdict says how far OUTSIDE the band the residual sits, and the paper
+    // states the routes IN ORDER: the G32 route and its tick, then the accepted miss, then the
+    // re-seat note as information only.
+    expect(all).toContain('miss the plane by');
+    expect(all).toContain('outside the');
+    const g32 = all.indexOf('G32 has been run from the console for this clamping');
+    const accept = all.indexOf('accept the un-levelled floor');
+    const reseat = all.indexOf('lighter re-seat');
+    expect(g32).toBeGreaterThan(-1);
+    expect(accept).toBeGreaterThan(g32);
+    expect(reseat).toBeGreaterThan(accept);
+    expect(all.slice(reseat)).toContain('chip');
+    expect(all).not.toMatch(/#\d/);
     // The dead-end "Do not run this file" is gone.
     expect(all).not.toContain('Do not run this file');
   });
@@ -1658,6 +1671,9 @@ describe('the surface spread (#475)', () => {
     const all = steps.map((s) => s.text).join('\n');
     // The verdict word and the slope the fit measured (atan 0.5 = 26.565°).
     expect(all).toContain('Surface tilt (26.565°)');
+    // #630 — the verdict also says how far inside the band the (near-zero) residual sits.
+    expect(all).toContain('miss the plane by');
+    expect(all).toContain('inside the');
     // The machine-side alternative: console only, sized from the level inputs, with the reset after.
     expect(all).toContain('G32 R1 X');
     expect(all).toContain('I3 J3 H3');

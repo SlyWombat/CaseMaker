@@ -63,6 +63,8 @@ import type { RestPassFacts, RestProgram } from '@/engine/cnc/engrave/restPass';
 import {
   assessSurfaceSpread,
   domeAcceptSentence,
+  surfaceDomeReseatNote,
+  surfaceMarginWords,
   surfaceSpreadPlan,
   surfaceTiltWords,
   Z0_REFERENCE,
@@ -1523,14 +1525,15 @@ function surfaceSpreadSteps(
       steps.push({
         text:
           `Surface ${shapeWords} — tilted ${tiltWords}, followed: the program is posted against the ` +
-          'fitted plane, so the colour plane stays at the programmed depth under the tilted top.',
+          `fitted plane, so the colour plane stays at the programmed depth under the tilted top — ` +
+          `${surfaceMarginWords(a)}.`,
         value: `tilt followed (residual ${fmtNum(a.fit!.residual)} mm)`,
       });
     } else {
       steps.push({
         text:
           `Surface ${shapeWords}: the fitted plane holds and its drop is inside the band` +
-          `${tiltWords === null ? '' : ` (${tiltWords})`}.`,
+          `${tiltWords === null ? '' : ` (${tiltWords})`} — ${surfaceMarginWords(a)}.`,
         value: 'surface flat',
       });
     }
@@ -1561,7 +1564,7 @@ function surfaceSpreadSteps(
     steps.push({
       text:
         `Surface ${shapeWords}: a curved top, not a tilt — the machine's own leveling follows a curved ` +
-        'top and the program uploads FLAT (no plane re-post).',
+        `top and the program uploads FLAT (no plane re-post) — ${surfaceMarginWords(a)}.`,
       value: `dome — G32 levels the machine (residual ${residualMm} mm)`,
       bold: true,
     });
@@ -1587,6 +1590,10 @@ function surfaceSpreadSteps(
         record: 'operator accepted the un-levelled floor (yes)',
       });
     }
+    // #630 (amended) — LAST, information only: the physical cause, after both routes have been
+    // stated. The sheet's own steps above already carry the machine route and the accepted one, so
+    // only this note is appended.
+    steps.push({ text: surfaceDomeReseatNote() });
   }
   return steps;
 }

@@ -540,6 +540,53 @@ export function domeAcceptSentence(a: SurfaceSpreadAssessment): string | null {
 }
 
 /**
+ * #630 — how far the residual sits from the band, in the words the verdict prints. On a usable top
+ * (flat, or a tilt the plane follows) the residual is INSIDE the band: "the touches miss the plane
+ * by 0.197 mm — 0.003 inside the 0.2 mm band". On a dome it is OUTSIDE by the same arithmetic, and
+ * the operator reads how much too much. The residual is the #608 read-out, the band the plan's own
+ * width, so the sentence carries both numbers the transcript and the run record keep.
+ *
+ * `fit` is null only below three touches (no plane), where the old spread rule still stands; the
+ * fallback then reads the raw spread, exactly as the verdict's `fitAmount` does.
+ */
+export function surfaceMarginWords(
+  assessment: Pick<SurfaceSpreadAssessment, 'fit' | 'plan' | 'ok' | 'spread'>,
+): string {
+  const band = assessment.plan.band.width;
+  const residual = r3(assessment.fit?.residual ?? assessment.spread);
+  const gap = r3(assessment.ok ? band - residual : residual - band);
+  const side = assessment.ok ? 'inside' : 'outside';
+  return `the touches miss the plane by ${num(residual)} mm — ${num(gap)} ${side} the ${num(band)} mm band`;
+}
+
+/**
+ * #630 (amended) — a dome's operator's next moves, IN THIS ORDER.
+ *
+ * 1. THE MACHINE ROUTE, because it cuts the part as designed: G32 from the console levels the
+ *    curved top itself and the program uploads FLAT.
+ * 2. THE ACCEPTED ROUTE, the alternative the Cut step's checkbox and the run sheet both offer:
+ *    write the origin anyway and knowingly take the miss the verdict names — the SAME sentence
+ *    (`domeAcceptSentence`), so paper and screen cannot disagree about the consequence. Omitted
+ *    when there is no miss to accept (the dome fits after all).
+ * 3. LAST, as information only: the physical cause worth trying if the operator wants to — a thin
+ *    plastic blank bows centre-high under jaw pressure, so a lighter re-seat or a chip check may
+ *    remove the dome.
+ */
+export function surfaceDomeGuidance(a: SurfaceSpreadAssessment): string {
+  const accept = domeAcceptSentence(a);
+  const accepted = accept === null ? '' : ` Or ${accept.charAt(0).toLowerCase()}${accept.slice(1)}.`;
+  return `G32 from the console levels the curved top and the program uploads FLAT.${accepted} ${surfaceDomeReseatNote()}`;
+}
+
+/** The third move on its own — the sheet prints its routes as its own steps. Information only. */
+export function surfaceDomeReseatNote(): string {
+  return (
+    'A thin plastic blank bows centre-high under jaw pressure; a lighter re-seat, or a check for a ' +
+    'chip under it, may remove the dome if you want to try.'
+  );
+}
+
+/**
  * The post payload for a registration that measured a TILT: the fitted plane and its reference Z0.
  * Since #623 this is {@link SurfaceFrame} itself — the same pair the simulation un-lifts the program
  * into and judges the sweep in (#625, #628), so the generator and the verdict cannot be handed two
