@@ -20,6 +20,15 @@
  * `engraveRegistrationStore` — the ONE registration record #494's release gate reads. An unusable
  * or out-of-margin measurement writes nothing and records nothing, so the release stays blocked.
  *
+ * #638 — THE PLACEMENT FRAME WAITS FOR THE ACCEPTANCE. The vise placement frame and the surface top
+ * are the house records a LATER plan and every later jaw tap are aimed from, so they follow the same
+ * rule as the origin: a run whose XY is outside the margin writes neither (the operator is about to
+ * re-seat the blank, and "Re-seat it" must not leave the record pointing at where the blank used to
+ * be). They are held on the pending result and written when the operator accepts the measurement —
+ * "Use the found position" (#620), or the ordinary Write once the margin has cleared. The record's
+ * plan is the one the measurement RAN under, stashed at start(), never the render-time one a later
+ * edit could have replaced.
+ *
  * `RegistrationOutcome` is SESSION state (#495 decision): the document holds the approved plan, not
  * the last measurement.
  *
@@ -163,6 +172,10 @@ export function EngraveRegistrationStep({ job, target }: EngraveRegistrationStep
   const handleRef = useRef<ConsoleHandle | null>(null);
   const resolverRef = useRef<((ok: boolean) => void) | null>(null);
   const aliveRef = useRef(true);
+  /** #638 — the plan the measurement RAN under (not the render-time one), for its write-backs. */
+  const runPlanRef = useRef<RegistrationPlan | null>(null);
+  /** #638 — whether the run's placement frame landed at measurement time. */
+  const frameSavedRef = useRef(false);
 
   useEffect(() => {
     aliveRef.current = true;
@@ -256,6 +269,10 @@ export function EngraveRegistrationStep({ job, target }: EngraveRegistrationStep
     setHomeNote(null);
     setError(null);
     setNarration(null);
+    // #638 — the plan this run is measured under travels with its result: a later setup edit must
+    // not change what the record says was approved and run.
+    runPlanRef.current = plan;
+    frameSavedRef.current = false;
     // #519 item 1 — a new run's readings replace the last run's dots and table, and they are
     // stamped with this job so a layer left from another job is never drawn as this one's.
     useRegistrationTouchesStore.getState().reset(job.id);
@@ -352,8 +369,12 @@ export function EngraveRegistrationStep({ job, target }: EngraveRegistrationStep
         const machine = machineAt(target);
         if (machine !== null && (r.outcome.usable || r.mountTap !== null)) {
           const now = new Date().toISOString();
+          // #638 — a measurement outside the margin writes NO frame and NO surface top: the blank
+          // is to be re-seated, and `mountTapFor` prefers this frame for every later tap point, so
+          // writing it here would aim them where this run found the jaw, not where it now is. The
+          // operator's acceptance (`writeOrigin`) writes them from the held result instead.
           const frameRegistration =
-            r.outcome.usable && plan.mount === 'vise'
+            r.outcome.usable && r.outcome.withinMargin && plan.mount === 'vise'
               ? { measuredAt: now, correctedG54: r.outcome.correctedG54 }
               : null;
           // #613/#636 — ONE bed for the whole run: the frame and the datum land in ONE save, not two
@@ -384,19 +405,24 @@ export function EngraveRegistrationStep({ job, target }: EngraveRegistrationStep
             writeNotes.push(
               `the measurement was taken, but the record was not saved: ${useLocationStore.getState().writeNote ?? 'the service refused the write'}. Run the registration again to write it.`,
             );
-          } else if (bracketSeat !== null) {
-            // The shop default the compiler reads moves with the seat the run just measured.
-            const saved = await useShopDefaultsStore.getState().set('bracket.seatMachineZ', {
-              value: bracketSeat,
-              source: 'measured',
-              setAt: now,
-              unit: 'mm',
-              note: 'tapped on the bracket’s top face',
-            });
-            if (!saved) {
-              writeNotes.push(
-                `the bracket seat was tapped, but the shop default was not saved: ${useShopDefaultsStore.getState().reason ?? 'the write was refused'}`,
-              );
+          } else {
+            // #638 — the frame is on the house record only when the save that carried it landed;
+            // otherwise the acceptance write tries again from the held result.
+            if (frameRegistration !== null) frameSavedRef.current = true;
+            if (bracketSeat !== null) {
+              // The shop default the compiler reads moves with the seat the run just measured.
+              const saved = await useShopDefaultsStore.getState().set('bracket.seatMachineZ', {
+                value: bracketSeat,
+                source: 'measured',
+                setAt: now,
+                unit: 'mm',
+                note: 'tapped on the bracket’s top face',
+              });
+              if (!saved) {
+                writeNotes.push(
+                  `the bracket seat was tapped, but the shop default was not saved: ${useShopDefaultsStore.getState().reason ?? 'the write was refused'}`,
+                );
+              }
             }
           }
         }
@@ -424,7 +450,10 @@ export function EngraveRegistrationStep({ job, target }: EngraveRegistrationStep
   }
 
   async function writeOrigin(force = false): Promise<void> {
-    if (target === null || plan === null || result?.ok !== true || busy) return;
+    // #638 — the plan the measurement ran under, not the render's (a setup edit between the run and
+    // the press must not rewrite what was measured; the outcome and its record travel together).
+    const runPlan = runPlanRef.current;
+    if (target === null || runPlan === null || result?.ok !== true || busy) return;
     // #620 — the margin refusal can be forced (the operator accepts the found position); the
     // unusable refusals never can.
     const refusal = writerRefusal(result.outcome);
@@ -440,22 +469,56 @@ export function EngraveRegistrationStep({ job, target }: EngraveRegistrationStep
         { confirmed: true },
       );
       if (!aliveRef.current) return;
-      setWritten(a);
       if (!a.ok) {
+        setWritten(a);
         setPhase('failed');
         handleRef.current = null;
         await handle.close();
         return;
       }
+      // #638 — THE FRAME FOLLOWS THE ACCEPTANCE. A run outside the margin wrote no placement frame
+      // and no surface top at measurement time (see `start`); pressing this button IS the operator
+      // accepting the found position, so both land here, with the origin they belong to. A frame
+      // whose measurement-time save failed is retried the same way. `frameSavedRef` is what keeps
+      // the ordinary in-margin write from landing twice.
+      if (!frameSavedRef.current && runPlan.mount === 'vise') {
+        const machine = machineAt(target);
+        if (machine !== null) {
+          const now = new Date().toISOString();
+          const registration = { measuredAt: now, correctedG54: result.outcome.correctedG54 };
+          let rec = await createFirstBed(machine, registration, now);
+          rec = withVisePlacementFrame(
+            rec,
+            viseFrameFromRegistration(registration, job.workholding.vise.jawStartY),
+            { fixedJawFaceX: `measured:${now}`, jawStartY: 'typed' },
+            now,
+          );
+          // #619 — the surface top the next plan expects is the one this run measured.
+          rec = withSurfaceTopDatum(
+            rec,
+            { z: result.data.surface.z, at: runPlan.surfacePoint },
+            runPlan.probe?.id ?? null,
+            now,
+          );
+          const answer = await saveMachineWithRetry(rec);
+          if (answer === 'ok') frameSavedRef.current = true;
+          else {
+            result.outcome.notes.push(
+              `the origin was written, but the placement frame was not saved: ${useLocationStore.getState().writeNote ?? 'the service refused the write'}. Run the registration again to write it.`,
+            );
+          }
+        }
+      }
       record(
         job.id,
         target,
-        plan,
+        runPlan,
         result.outcome,
         // #608 — carry the fitted tilt (plane + reference Z0) on the record when the measurement
         // fits one; a flat fit records null, so the Cut step re-posts only when there is a tilt.
         result.spread === undefined ? null : surfaceFitForPost(result.spread),
       );
+      setWritten(a);
       setPhase('recorded');
       handleRef.current = null;
       await handle.close();

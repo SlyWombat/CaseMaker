@@ -12,6 +12,7 @@ import {
 } from '@/platform/machineConsole';
 import { EngraveRegistrationStep } from '@/components/panels/EngraveRegistrationStep';
 import { useLocationStore } from '@/store/locationStore';
+import type { MachineRecord } from '@/platform/locationClient';
 import { useEngraveRegistrationStore } from '@/store/engraveRegistrationStore';
 import { badgeBlankFor } from '@/engine/cnc/engrave/fromBadge';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
@@ -658,5 +659,162 @@ describe('#495 — the registration step', () => {
     expect(screen.getByTestId('engrave-registration-no-machine').textContent).toContain('No machine is connected');
     expect(screen.queryByTestId('engrave-registration-start')).toBeNull();
     expect(sent).toEqual([]);
+  });
+});
+
+
+describe('#638 — the placement frame waits for the acceptance', () => {
+  /**
+   * A location whose machine has one bed with a VISE placement and nothing measured on it — the
+   * record `mountTapFor` prefers for every later tap point. The saves are captured so a test can
+   * read exactly what each write would have put on the house record.
+   */
+  function placedLocation(): MachineRecord[] {
+    const saves: MachineRecord[] = [];
+    useLocationStore.setState({
+      status: 'present',
+      etag: '"e1"',
+      reason: null,
+      location: {
+        machines: [
+          {
+            id: 'm1',
+            profileId: 'Z1',
+            address: { host: TARGET.host, port: TARGET.port },
+            bedProfiles: [
+              {
+                id: 'bp1',
+                datums: { surfaceTopZ: null, viseJawTopZ: null, bracketSeatZ: null, rotaryAxis: null },
+                placements: [
+                  {
+                    id: 'pl-vise',
+                    fixture: 'fx-vise-1',
+                    where: { kind: 'pins', pins: 'vise', anchor: null },
+                    count: null,
+                    frame: null,
+                    provenance: {},
+                  },
+                ],
+                surface: null,
+                history: [],
+              },
+            ],
+            activeBedProfileId: 'bp1',
+            history: [],
+            notes: [],
+            observedAt: '2026-10-25T00:00:00.000Z',
+          },
+        ],
+        accessories: [],
+      } as unknown as NonNullable<ReturnType<typeof useLocationStore.getState>['location']>,
+      saveMachine: async (record: MachineRecord) => {
+        saves.push(record);
+        return 'ok';
+      },
+    });
+    return saves;
+  }
+
+  function bedOf(record: MachineRecord) {
+    return record.bedProfiles?.find((p) => p.id === record.activeBedProfileId) ?? null;
+  }
+
+  function visePlacementOf(record: MachineRecord) {
+    const bed = bedOf(record);
+    return bed?.placements.find((pl) => pl.where.kind === 'pins' && pl.where.pins === 'vise') ?? null;
+  }
+
+  async function useFoundPosition(): Promise<void> {
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('engrave-registration-use-found'));
+    });
+    await screen.findByTestId('engrave-registration-continue');
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('engrave-registration-continue'));
+    });
+    await screen.findByTestId('engrave-registration-written');
+  }
+
+  it('holds the frame and the surface top on a run outside the margin, and writes them when the operator uses the found position', async () => {
+    const plan = makePlan(-56.172);
+    const job = jobWithPlan(plan);
+    install(plan, { edgeShiftMm: 0.5 });
+    const saves = placedLocation();
+    useEngraveJobStore.setState({ job });
+    render(<EngraveRegistrationStep job={job} target={TARGET} />);
+
+    await runStep();
+
+    // The blank is found 0.5 mm off: usable, outside the margin. Nothing that says WHERE the jaw is
+    // goes on the record — the next plan and every later jaw tap are aimed from the frame, and the
+    // operator is about to re-seat the blank.
+    expect(screen.getByTestId('engrave-registration-verdict').getAttribute('data-within-margin')).toBe('false');
+    expect(saves).toHaveLength(1);
+    expect(visePlacementOf(saves[0]!)?.frame ?? null).toBeNull();
+    expect(bedOf(saves[0]!)?.datums.surfaceTopZ ?? null).toBeNull();
+
+    await useFoundPosition();
+
+    // "Use the found position" is the acceptance: the frame and the top land with the origin, from
+    // the result the run held.
+    expect(saves).toHaveLength(2);
+    const recorded = firstRegistrationFor(job.id, TARGET)!;
+    const written = saves[1]!;
+    expect(visePlacementOf(written)?.frame?.fixedJawFaceX).toBeCloseTo(recorded.outcome.correctedG54.x, 3);
+    expect(visePlacementOf(written)?.provenance.fixedJawFaceX).toMatch(/^measured:/);
+    // The fake answers the surface seek at the band's centre; the writing surface point is the plan's.
+    const stockZ = plan.seek.band.max - (plan.seek.band.max - plan.seek.band.min) / 2;
+    const top = bedOf(written)?.datums.surfaceTopZ;
+    expect(top?.value).toBeCloseTo(stockZ, 3);
+    expect(top?.at).toEqual([plan.surfacePoint.x, plan.surfacePoint.y]);
+  });
+
+  it('writes the frame at measurement time when the blank is inside the margin, and does not write it twice', async () => {
+    const plan = makePlan(-56.172);
+    const job = jobWithPlan(plan);
+    install(plan);
+    const saves = placedLocation();
+    useEngraveJobStore.setState({ job });
+    render(<EngraveRegistrationStep job={job} target={TARGET} />);
+
+    await runStep();
+
+    expect(screen.getByTestId('engrave-registration-verdict').getAttribute('data-within-margin')).toBe('true');
+    expect(saves).toHaveLength(1);
+    const stockZ = plan.seek.band.max - (plan.seek.band.max - plan.seek.band.min) / 2;
+    expect(visePlacementOf(saves[0]!)?.frame).not.toBeNull();
+    expect(bedOf(saves[0]!)?.datums.surfaceTopZ?.value).toBeCloseTo(stockZ, 3);
+
+    await writeOrigin();
+    await screen.findByTestId('engrave-registration-recorded');
+
+    // The frame is the measured face, on the record BEFORE the origin was written…
+    const recorded = firstRegistrationFor(job.id, TARGET)!;
+    expect(visePlacementOf(saves[0]!)?.frame?.fixedJawFaceX).toBeCloseTo(recorded.outcome.correctedG54.x, 3);
+    // …and the acceptance found it already there: no second frame write.
+    expect(saves).toHaveLength(1);
+  });
+
+  it('records the plan the measurement ran under, not the one rendered at the press', async () => {
+    const planA = makePlan(-56.172);
+    const planB = makePlan(-55.0);
+    const jobA = jobWithPlan(planA);
+    // The same job, its setup's approved plan replaced after the run — an edit the write must not
+    // retroactively call "the plan that was measured".
+    const jobB = attachPlan(jobA, planB);
+    install(planA);
+    useEngraveJobStore.setState({ job: jobA });
+    const { rerender } = render(<EngraveRegistrationStep job={jobA} target={TARGET} />);
+    await runStep();
+
+    useEngraveJobStore.setState({ job: jobB });
+    rerender(<EngraveRegistrationStep job={jobB} target={TARGET} />);
+
+    await writeOrigin();
+    await screen.findByTestId('engrave-registration-recorded');
+
+    const recorded = firstRegistrationFor(jobA.id, TARGET)!;
+    expect(recorded.plan).toEqual(planA);
+    expect(recorded.plan).not.toEqual(planB);
   });
 });
