@@ -33,6 +33,10 @@ import { checkpointAtStep } from '@/components/viewport/simGeometry';
 import { getTools, resolveTool } from '@/engine/cnc/toolRegistry';
 import { useToolRegistryStore, type HouseStatus } from '@/store/toolRegistryStore';
 import { useManageModeStore } from '@/store/manageModeStore';
+import { useMachineStore } from '@/store/machineStore';
+import type { MachineObservation } from '@/platform/machineProbe';
+import { releaseFileName } from '@/engine/cnc/engrave/release';
+import { toolDisplayName } from '@/engine/cnc/toolDisplay';
 import type { NodeMeshOutput } from '@/workers/geometry/meshOutput';
 import { stubSetup, Z1 } from '@/engine/cnc';
 import { flatEndMill } from '@/engine/cnc/tool';
@@ -119,6 +123,19 @@ export interface CaseMakerTestApi {
    * never read pixels.
    */
   engraveReset(): void;
+  /**
+   * #530/#656/#659 e2e — a connected machine WITHOUT one. E2E has no controller, and the Cut one
+   * screen, the status strip and its state popover are all gated on `machine !== null`; this puts
+   * the observation a probe would have written on the store, and (optionally) the live line a
+   * heartbeat would have read. Testing surface only: no app code calls it.
+   */
+  setMachine(observation: MachineObservation, statusLine?: string): void;
+  /**
+   * #656 e2e — the FROZEN program as the Cut one screen names it: the file name and the cutter's
+   * display name, computed by the same functions that screen uses. A spec cannot know which cutter
+   * the first Generate recommended any other way. Null until a package is frozen.
+   */
+  getFrozenProgram(): { filename: string; toolKey: string; cutterName: string } | null;
   getEngraveRunState(): {
     phase: string;
     stale: boolean;
@@ -382,6 +399,23 @@ export function installCaseMakerTestApi(): void {
       // #277 — records opened by an earlier test live in localStorage, where they would otherwise
       // put a "last measured" line under a later test's estimate.
       useRunRecordStore.getState().clear();
+    },
+    setMachine(observation, statusLine) {
+      // The app's own "a check found it" path (and its persistence), then the live line the
+      // heartbeat would have read — the strip's monitor rows come from `S:` on that line.
+      useMachineStore.getState().setProbeResult({ kind: 'found', observation, calibration: null });
+      if (statusLine !== undefined) useMachineStore.getState().noteLiveStatusLine(statusLine);
+    },
+    getFrozenProgram() {
+      const job = useEngraveJobStore.getState().job;
+      const toolKey = job.package?.programs[0]?.toolKey ?? null;
+      if (toolKey === null) return null;
+      const tool = resolveTool(toolKey);
+      return {
+        filename: releaseFileName(job.name, 1, 1, false),
+        toolKey,
+        cutterName: tool === null ? toolKey : toolDisplayName(tool),
+      };
     },
     openRunRecordText(text) {
       const result = useRunRecordStore.getState().openText(text);
