@@ -53,7 +53,7 @@ import { useEngravePackageStore } from '@/store/engravePackageStore';
 import { useFirstRegistration, useSurfaceSpread } from '@/store/engraveRegistrationStore';
 import { useEngraveRunStore } from '@/store/engraveRunStore';
 import { surfaceRepostBlocker } from '@/store/engraveRunGate';
-import { surfaceTiltWords } from '@/engine/cnc/engrave/surfaceSpread';
+import { domeAcceptSentence, surfaceTiltWords } from '@/engine/cnc/engrave/surfaceSpread';
 import { useShopDefaultsStore } from '@/store/shopDefaultsStore';
 import { useStockStore } from '@/store/stockStore';
 import type { LaserLift } from '@/platform/machineLaser';
@@ -213,14 +213,20 @@ export function EngraveCutSurface({
   const spreadAssessment = spreadMeasurement?.assessment ?? null;
   const domeStanding = spreadAssessment?.verdict === 'dome';
   const [g32Acked, setG32Acked] = useState(false);
-  // A fresh measurement is a fresh clamping: the tick does not carry over from the last one.
+  // #631 (c) — the operator may skip G32 and accept the un-levelled floor instead: the dome verdict's
+  // alternative route, a deliberate decision recorded beside the G32 tick. The consequence (the
+  // centre miss) is stated in the label, never hidden.
+  const [floorAccepted, setFloorAccepted] = useState(false);
+  // A fresh measurement is a fresh clamping: neither tick carries over from the last one.
   useEffect(() => {
     setG32Acked(false);
+    setFloorAccepted(false);
   }, [spreadAssessment]);
   const domeG32Blocker =
-    domeStanding && !g32Acked
-      ? 'run G32 from the console for this clamping and tick the box — the machine levels the domed top before the flat program uploads'
+    domeStanding && !g32Acked && !floorAccepted
+      ? 'confirm how the dome is handled before uploading — run G32 from the console for this clamping and tick the box, or write the origin anyway and accept the un-levelled floor'
       : null;
+  const domeAccept = spreadAssessment === null ? null : domeAcceptSentence(spreadAssessment);
 
   /**
    * #608 — re-post the package against the registration's measured tilt: re-run the whole pipeline
@@ -550,6 +556,17 @@ export function EngraveCutSurface({
               />{' '}
               G32 has been run from the console for this clamping
             </label>
+            {domeAccept !== null && (
+              <label style={{ fontSize: 12, color: '#e6edf5', display: 'block', marginTop: 8 }}>
+                <input
+                  type="checkbox"
+                  checked={floorAccepted}
+                  data-testid="engrave-cut-dome-accept-floor"
+                  onChange={(e) => setFloorAccepted(e.target.checked)}
+                />{' '}
+                {domeAccept}
+              </label>
+            )}
           </section>
         )}
       </Step>

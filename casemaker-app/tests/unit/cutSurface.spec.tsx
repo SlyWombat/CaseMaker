@@ -536,4 +536,48 @@ describe('#419 §3 the Cut surface', () => {
     fireEvent.click(screen.getByTestId('engrave-cut-dome-g32-ack'));
     expect((screen.getByTestId('engrave-upload') as HTMLButtonElement).disabled).toBe(false);
   });
+
+  it('#631 (c) — a dome also offers "write the origin anyway", which records the decision and clears Upload', async () => {
+    const job = defaultEngraveJob();
+    const made = generated([P1]);
+    // The same dome, but the operator skips G32: the accept-floor route states the centre miss
+    // (c + maxBelow − band) and clears the gate on its own.
+    useEngraveRegistrationStore.getState().measureSurface(job.id, TARGET, {
+      verdict: 'dome',
+      tilt: { xMm: 0, yMm: 0 },
+      fit: { kind: 'plane', offset: -0.4, slopeX: 0, slopeY: 0, residual: 0.32 },
+      plan: { band: { width: 0.2 } },
+      touches: [
+        { id: 'surface-1', x: 24, y: 43, z: 0, at: "the cut area's centre", source: 'stated' },
+        { id: 'surface-2', x: 11, y: 43, z: -0.4, at: "the cut area's left extent", source: 'probe' },
+        { id: 'surface-3', x: 37, y: 43, z: -0.4, at: "the cut area's right extent", source: 'probe' },
+        { id: 'surface-4', x: 24, y: 10, z: -0.4, at: "the cut area's front extent", source: 'probe' },
+        { id: 'surface-5', x: 24, y: 76, z: -0.4, at: "the cut area's back extent", source: 'probe' },
+      ],
+      recommendation: {
+        gcode: 'G32 R1 X1 Y1 A2 B2 I3 J3 H3',
+        dump: 'M375.1',
+        after: 'M370',
+        sentence:
+          'The top is a dome, not a tilt: the machine’s own leveling follows a curved top and the program uploads FLAT. ' +
+          'Run G32 R1 X1 Y1 A2 B2 I3 J3 H3 from the console, M375.1 to dump the grid, M370 after. G32 is never uploaded in a file.',
+      },
+    } as unknown as SurfaceSpreadAssessment);
+
+    draw({ job, report: reportOf(), pkg: null, generated: made });
+    await waitFor(() => expect(screen.getByTestId('engrave-package').dataset.state).toBe('current'));
+
+    // The alternative route carries the computed miss (here 0.4 + 0 − 0.2 = 0.2 mm at the centre).
+    const accept = screen.getByTestId('engrave-cut-dome-accept-floor') as HTMLInputElement;
+    expect(accept.closest('label')?.textContent).toContain('Write the origin anyway');
+    expect(accept.closest('label')?.textContent).toContain('up to 0.2 mm at the centre');
+
+    // Upload is gated until one of the two routes is chosen.
+    expect((screen.getByTestId('engrave-upload') as HTMLButtonElement).disabled).toBe(true);
+
+    // Choosing "write the origin anyway" records the decision and clears the block.
+    fireEvent.click(accept);
+    expect(accept.checked).toBe(true);
+    expect((screen.getByTestId('engrave-upload') as HTMLButtonElement).disabled).toBe(false);
+  });
 });

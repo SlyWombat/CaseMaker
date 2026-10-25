@@ -1628,6 +1628,20 @@ describe('the surface spread (#475)', () => {
     expect(all).not.toContain('Do not run this file');
   });
 
+  it('#631 (c) — a dome also prints the operator-accepted route with its recorded decision', () => {
+    const job = dj();
+    const plan = surfaceSpreadPlan(job)!;
+    const readings: SurfaceReading[] = plan.touches.map(() => ({ z: -2 * plan.band.width, source: 'probe' as const }));
+    readings[0] = { z: 0, source: 'stated' };
+    const level = { toolRadiusMm: 0.15, clearanceMm: 3, points: 9 };
+    const steps = section(sheetFor(job, NO_SIM, NC, { surfaceReadings: readings, surfaceLevel: level }), 'origin').steps;
+    const all = steps.map((s) => s.text).join('\n');
+    // The alternative route is printed beside the G32 tick, with the consequence stated (the number
+    // is the same `domeAcceptSentence` the Cut step's checkbox carries).
+    expect(all).toContain('Write the origin anyway — the floor may miss the colour line by up to ');
+    expect(steps.some((s) => s.record === 'operator accepted the un-levelled floor (yes)')).toBe(true);
+  });
+
   it('#501 — a tilt is named with its slope, and the console G32 recipe is offered as the alternative', () => {
     const job = dj();
     const plan = surfaceSpreadPlan(job)!;

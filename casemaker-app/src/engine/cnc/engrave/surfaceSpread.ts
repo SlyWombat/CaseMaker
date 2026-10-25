@@ -475,6 +475,71 @@ export function surfaceTiltWords(tilt: { xMm: Mm; yMm: Mm }): string | null {
 }
 
 /**
+ * #631 (c) — what the operator-accepted dome route names: the miss the operator takes, and where
+ * the sentence says it lands.
+ */
+export interface DomeCentreMiss {
+  /** N, mm — how far the floor can sit off the colour line at the reference point. */
+  mm: Mm;
+  /** The reference point the sentence names: the plan's centre, or the highest point above the plane. */
+  at: 'centre' | 'highest point';
+}
+
+/**
+ * #631 (c) — the miss the operator-accepted dome route names: how far the floor can sit off the
+ * colour line when the origin is written from the LOWEST touch and the program uploads FLAT (no
+ * plane re-post, no machine levelling).
+ *
+ * The fitted plane is the colour line's proxy, and the touches sit either side of it. The floor is
+ * referenced from Z0 = the LOWEST touch, so at a touch `t` it is deeper by `t.z − z0`. The worst
+ * miss is at the point that stands highest above the plane, `c`, plus the furthest any touch falls
+ * BELOW it, `maxBelow` — the full bow the band must absorb. What overflows the band is the miss:
+ *
+ *   N = c + maxBelow − band, floored at 0
+ *
+ * The reference point is the touch the plan labels `"the cut area's centre"`; without that label it
+ * is the touch with the largest positive deviation above the plane (the highest point), and the
+ * sentence then names the highest point rather than the centre. The residual is NOT used: it equals
+ * `maxBelow` only when the largest deviation sits below the plane, and when the centre IS the
+ * largest deviation `residual − band + c` doubles `c` and overstates the miss. Null when there is no
+ * fit, no touches, or N ≤ 0 (the dome fits after all).
+ */
+export function domeCentreMiss(a: SurfaceSpreadAssessment): DomeCentreMiss | null {
+  if (a.fit === null) return null;
+  const touches = a.touches ?? [];
+  if (touches.length === 0) return null;
+  const planeZ = (t: { x: number; y: number }): number =>
+    a.fit!.offset + a.fit!.slopeX * t.x + a.fit!.slopeY * t.y;
+
+  const CENTRE_LABEL = "the cut area's centre";
+  const labelled = touches.find((t) => t.at === CENTRE_LABEL);
+  const highest = touches.reduce((best, t) =>
+    best === null || t.z - planeZ(t) > best.z - planeZ(best) ? t : best,
+    null as SurfaceTouchReading | null,
+  );
+  const centre = labelled ?? highest;
+  if (centre === null) return null;
+
+  const c = centre.z - planeZ(centre);
+  const maxBelow = Math.max(0, ...touches.map((t) => planeZ(t) - t.z));
+  const mm = r3(Math.max(0, c + maxBelow - a.plan.band.width));
+  if (mm <= 0) return null;
+  return { mm, at: labelled !== undefined ? 'centre' : 'highest point' };
+}
+
+/**
+ * #631 (c) — the operator-accepted route's sentence, the SAME words the Cut step's checkbox and the
+ * run sheet both print, so the two cannot disagree about the consequence. Null when {@link
+ * domeCentreMiss} is null (no fit, or the dome fits after all), and then no "write the origin anyway"
+ * route is offered.
+ */
+export function domeAcceptSentence(a: SurfaceSpreadAssessment): string | null {
+  const miss = domeCentreMiss(a);
+  if (miss === null) return null;
+  return `Write the origin anyway — the floor may miss the colour line by up to ${num(miss.mm)} mm at the ${miss.at}`;
+}
+
+/**
  * The post payload for a registration that measured a TILT: the fitted plane and its reference Z0.
  * Since #623 this is {@link SurfaceFrame} itself — the same pair the simulation un-lifts the program
  * into and judges the sweep in (#625, #628), so the generator and the verdict cannot be handed two

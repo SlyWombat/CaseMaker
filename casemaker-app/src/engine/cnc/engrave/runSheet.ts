@@ -62,6 +62,7 @@ import { fmtDiameter } from '@/engine/cnc/engrave/recommendTool';
 import type { RestPassFacts, RestProgram } from '@/engine/cnc/engrave/restPass';
 import {
   assessSurfaceSpread,
+  domeAcceptSentence,
   surfaceSpreadPlan,
   surfaceTiltWords,
   Z0_REFERENCE,
@@ -1573,6 +1574,19 @@ function surfaceSpreadSteps(
         'domed top in real time, the program stays FLAT, and G32 is never uploaded in a file.',
       record: 'G32 run from the console for this clamping (yes)',
     });
+    // #631 (c) — the operator-accepted route: skip G32 and knowingly take the centre miss. The
+    // sentence (and its number) is the same one the Cut step's checkbox prints, so paper and screen
+    // cannot disagree about the consequence.
+    const accept = domeAcceptSentence(a);
+    if (accept !== null) {
+      steps.push({
+        text:
+          `${accept}: skip G32 and accept the un-levelled floor — the operator knowingly takes the ` +
+          'miss at the centre instead of levelling the machine.',
+        bold: true,
+        record: 'operator accepted the un-levelled floor (yes)',
+      });
+    }
   }
   return steps;
 }

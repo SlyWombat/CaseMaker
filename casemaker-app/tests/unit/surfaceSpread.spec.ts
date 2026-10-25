@@ -16,6 +16,8 @@ import {
   assessSurfaceReadings,
   assessSurfaceSpread,
   DEFAULT_SURFACE_TOUCH_COUNT,
+  domeAcceptSentence,
+  domeCentreMiss,
   surfaceFitForPost,
   surfaceSpreadPlan,
   surfaceTiltWords,
@@ -230,6 +232,50 @@ describe('#501 — the shape verdict and the console G32 recommendation', () => 
     expect(a.recommendation!.sentence).toContain('dome, not a tilt');
     expect(a.recommendation!.sentence).toContain('uploads FLAT');
     expect(a.recommendation!.sentence).toContain('G32 is never uploaded in a file');
+  });
+
+  it('#631 (c) — run 8’s dome names the exact operator-accepted miss', () => {
+    // Run 8's five readings (2026-10-24, k3 badge blank, #630): centre-high, the four extents below
+    // it on a tilted blank. The miss is c + maxBelow − band, floored — NOT residual-based.
+    const RUN8: SurfaceReading[] = [
+      { z: -55.085, source: 'probe' },
+      { z: -55.197, source: 'probe' },
+      { z: -55.568, source: 'probe' },
+      { z: -55.137, source: 'probe' },
+      { z: -55.476, source: 'probe' },
+    ];
+    const a = assessSurfaceSpread(badgeJob(), RUN8, { level });
+    expect(a.verdict).toBe('dome');
+    // The centre is the highest point (its deviation equals the residual), so a residual-based
+    // figure would double it; the honest miss is the centre height + the furthest below-plane touch.
+    expect(a.fit!.residual).toBeCloseTo(0.224, 3);
+    const miss = domeCentreMiss(a);
+    expect(miss).not.toBeNull();
+    expect(miss!.at).toBe('centre');
+    expect(miss!.mm).toBe(0.171);
+    expect(domeAcceptSentence(a)).toBe(
+      'Write the origin anyway — the floor may miss the colour line by up to 0.171 mm at the centre',
+    );
+  });
+
+  it('#631 (c) — without a centre-labelled touch the miss names the highest point', () => {
+    const plan = surfaceSpreadPlan(badgeJob(), { level })!;
+    const noCentre: SurfaceSpreadPlan = {
+      ...plan,
+      touches: plan.touches.map((t, i) => ({ ...t, at: i === 0 ? 'the peak' : t.at })),
+    };
+    const a = assessSurfaceReadings(noCentre, NONPLANAR);
+    expect(a.verdict).toBe('dome');
+    const miss = domeCentreMiss(a);
+    expect(miss!.at).toBe('highest point');
+    expect(domeAcceptSentence(a)).toContain('at the highest point');
+  });
+
+  it('#631 (c) — a top that fits the band offers no "write the origin anyway" route', () => {
+    const flat = assessSurfaceSpread(badgeJob(), BOWED.map((r) => ({ ...r, z: -55.2 })), { level });
+    expect(flat.verdict).toBe('flat');
+    expect(domeCentreMiss(flat)).toBeNull();
+    expect(domeAcceptSentence(flat)).toBeNull();
   });
 
   it('a flat top is flat: no slope, no recipe', () => {
