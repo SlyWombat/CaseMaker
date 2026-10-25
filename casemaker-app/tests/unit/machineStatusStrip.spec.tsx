@@ -175,13 +175,14 @@ describe('#647 the DRO — the tool slot', () => {
 });
 
 describe('#647 the DRO — vacuum and progress', () => {
-  it('reads vacuum on/off with no qualifier (#646)', () => {
+  it('carries no vacuum TEXT — the mode lives in the accessory indicators (#648)', () => {
     remember('<Run|MPos:-10,-10,-3|WPos:0,0,0>');
     useEngraveReleaseStore.setState({
       records: { '192.0.2.10:2222': { vacuum: 'on' } as unknown as ReleaseRecord },
     });
     render(<MachineStatusStrip />);
-    expect(screen.getByTestId('machine-status-vacuum').textContent).toBe('vacuum on');
+    expect(screen.queryByTestId('machine-status-vacuum')).toBeNull();
+    expect(screen.getByTestId('machine-status-accessory-vacuum').getAttribute('data-mode')).toBe('on');
   });
 
   it('drives the bar and the remaining time from the P: field', () => {

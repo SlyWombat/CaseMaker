@@ -97,6 +97,21 @@ export type VacuumOutcome =
  * only then send the code. A running program is thereby left alone.
  */
 export async function toggleVacuum(target: MachineConsoleTarget, on: boolean): Promise<VacuumOutcome> {
+  return guardedMode(target, on ? VACUUM_ON : VACUUM_OFF, 'vacuum');
+}
+
+/**
+ * #564/#648 — the antistatic (static-removal) device, the same guarded seam and the same rule as the
+ * vacuum: `M331.4` on, `M332.4` off, only on an explicit Idle with no program running, an alarm
+ * refusing before anything is sent. One implementation (`guardedMode`), so the two modes cannot
+ * drift apart in what they will accept.
+ */
+export async function toggleAntistatic(target: MachineConsoleTarget, on: boolean): Promise<VacuumOutcome> {
+  return guardedMode(target, on ? ANTISTATIC_ON : ANTISTATIC_OFF, 'antistatic device');
+}
+
+/** The guard + send every mode command shares. `what` names the mode in the refusal sentences. */
+async function guardedMode(target: MachineConsoleTarget, code: string, what: string): Promise<VacuumOutcome> {
   const session = attachConsole(target);
   try {
     // 1. What is the machine doing NOW? `uploadProgram`'s rule, over the console's own connection
@@ -133,13 +148,13 @@ export async function toggleVacuum(target: MachineConsoleTarget, on: boolean): P
     if (state === null) {
       return {
         kind: 'error',
-        detail: `could not confirm the machine is idle before switching the vacuum: its status line was not readable (${ask.text})`,
+        detail: `could not confirm the machine is idle before switching ${what}: its status line was not readable (${ask.text})`,
       };
     }
     if (state.toLowerCase() !== 'idle') {
       return {
         kind: 'busy',
-        detail: `it reports ${state} rather than Idle — a program owns the vacuum while it runs, so nothing was sent`,
+        detail: `it reports ${state} rather than Idle — a program owns the ${what} while it runs, so nothing was sent`,
         status: ask.text,
       };
     }
@@ -154,17 +169,17 @@ export async function toggleVacuum(target: MachineConsoleTarget, on: boolean): P
     if (percent !== null && percent < 100) {
       return {
         kind: 'busy',
-        detail: `it reports Idle, but its status line says a program is ${percent}% through — the job has not finished with the vacuum yet, so nothing was sent`,
+        detail: `it reports Idle, but its status line says a program is ${percent}% through — the job has not finished with ${what} yet, so nothing was sent`,
         status: ask.text,
       };
     }
 
     // 2. Now the code. The mode has no read-back, so the answer is the controller's own `ok`, and a
     //    socket failure leaves the state UNKNOWN rather than assumed: the line may have gone out.
-    const result = await session.send(vacuumLine(on));
+    const result = await session.send(code);
     switch (result.kind) {
       case 'sent':
-        return { kind: 'toggled', on, status: ask.text };
+        return { kind: 'toggled', on: code === VACUUM_ON || code === ANTISTATIC_ON, status: ask.text };
       case 'refused':
         return { kind: 'refused', detail: result.detail };
       case 'timeout':

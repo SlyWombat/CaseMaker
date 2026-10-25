@@ -10,6 +10,7 @@ import { jobTool } from '@/engine/cnc/engrave/jobSetup';
 import { toolDisplayName } from '@/engine/cnc/toolDisplay';
 import { readStatusLine, type JobProgress, type StatusPosition } from '@/platform/desktop/protocol';
 import { alarmLine } from '@/platform/machineUpload';
+import { StripAccessories } from './StripAccessories';
 
 /**
  * #526/#647 — the live machine in one line under the viewport, whenever a machine is remembered.
@@ -196,6 +197,28 @@ export function MachineStatusStrip(): JSX.Element | null {
         whiteSpace: 'nowrap',
       }}
     >
+      {/* #648 — the accessories at the far left: icons with a popover, so the vacuum no longer takes
+          the strip's text. The guards are the card switches' own (Idle, no job, an alarm refusing);
+          the reason shows in the popover when the machine cannot be switched now. */}
+      <StripAccessories
+        target={machineKey(machine)}
+        host={machine.host}
+        port={machine.port}
+        vacuumFromRecord={vacuum === 'on' ? true : vacuum === 'off' ? false : null}
+        disabledReason={
+          state === 'Alarm'
+            ? 'The controller is in an alarm — clear it at the machine first.'
+            : state === 'Running' || state === 'Probing'
+              ? 'A program is running — stop it first.'
+              : state === 'Paused'
+                ? 'The program is paused — resume or stop it first.'
+                : state === 'Homing'
+                  ? 'The machine is homing — wait for Idle.'
+                  : state === 'Not answering' || state === 'Offline'
+                    ? 'The machine is not answering.'
+                    : null
+        }
+      />
       <span data-testid="machine-status-state" data-state={state} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, flex: 'none' }}>
         <span aria-hidden="true" style={{ width: 8, height: 8, borderRadius: 4, background: stateColour(state), flex: 'none' }} />
         <span style={{ fontWeight: 600, color: '#e8eef4' }}>{state}</span>
@@ -220,12 +243,6 @@ export function MachineStatusStrip(): JSX.Element | null {
       >
         {toolName ?? (toolNumber !== null ? `T${toolNumber}` : 'no cutter')}
       </span>
-      {vacuum !== null && vacuum !== 'unknown' && (
-        <span data-testid="machine-status-vacuum">
-          <span style={{ color: '#8a97a5' }}>vacuum</span>{' '}
-          <span style={{ fontWeight: 600, color: '#e8eef4' }}>{vacuum}</span>
-        </span>
-      )}
       {percent !== null && (
         <span data-testid="machine-status-progress" style={{ display: 'inline-flex', alignItems: 'center', gap: 8, flex: 'none' }}>
           <span aria-hidden="true" style={{ width: 56, height: 6, borderRadius: 3, background: '#2a2f36', overflow: 'hidden' }}>
