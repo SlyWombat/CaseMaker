@@ -39,10 +39,18 @@ fn main() {
 ///    endpoint then says it does not know rather than claiming a version nobody built.
 ///
 /// The value is handed to the crate as `CM_BUILD` (`house.rs` reads it with `env!`), and this
-/// script reruns when `CASEMAKER_BUILD` changes or git's HEAD or index moves, so a `cargo run`
-/// after a commit, or after the stamp is set or cleared, does not keep the old string. This is the
-/// only commit string the app reports: the health endpoint carries it and the Machines card shows
-/// it, while `vite.config.ts` stamps the package version alone.
+/// script reruns when `CASEMAKER_BUILD` changes or git's state moves, so a `cargo run` after a
+/// commit, or after the stamp is set or cleared, does not keep the old string. This is the only
+/// commit string the app reports: the health endpoint carries it and the Machines card shows it,
+/// while `vite.config.ts` stamps the package version alone.
+///
+/// #641 — WHAT "GIT'S STATE" IS, as cargo inputs. Watching only HEAD and the index was false for
+/// the two common cases: a plain working-tree EDIT touches neither (editing a source file rebuilt
+/// a binary still stamped CLEAN), and a commit that leaves the index alone — `--amend -m`,
+/// `--allow-empty`, `reset --soft`, a fast-forward — moves only the branch ref or `packed-refs`
+/// (the old sha stuck). The inputs are therefore HEAD, the index, `packed-refs`, the ref HEAD
+/// names, `refs/heads/`, and the crate's own sources. The rig does not rely on any of this: it
+/// stamps with `CASEMAKER_BUILD` (#566).
 fn emit_build_string() {
     let manifest_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let git = |args: &[&str]| -> Option<String> {
@@ -70,14 +78,28 @@ fn emit_build_string() {
     let build = build_stamp::pick_build(explicit.as_deref(), described.as_deref());
     println!("cargo:rustc-env=CM_BUILD={build}");
 
-    // The inputs `git describe` reads: HEAD (branch switches, detached checkouts) and the index
-    // (a file becoming dirty or clean). `--git-path` resolves both through a worktree's `.git` file.
-    for name in ["HEAD", "index"] {
+    // The inputs `git describe --dirty` reads (#641): HEAD (branch switches, detached checkouts),
+    // the index (a file becoming dirty or clean), `packed-refs` and the ref HEAD names together with
+    // `refs/heads/` (a commit that does not rewrite the index still moves one of them), and the
+    // crate's own sources (a working-tree edit touches none of the git files). `--git-path`
+    // resolves each through a worktree's `.git` file. Cargo scans a DIRECTORY argument recursively.
+    let mut inputs: Vec<std::path::PathBuf> = Vec::new();
+    for name in ["HEAD", "index", "packed-refs", "refs/heads"] {
         if let Some(path) = git(&["rev-parse", "--git-path", name]) {
-            let path = manifest_dir.join(path);
-            if path.exists() {
-                println!("cargo:rerun-if-changed={}", path.display());
-            }
+            inputs.push(manifest_dir.join(path));
+        }
+    }
+    if let Some(sym) = git(&["symbolic-ref", "-q", "HEAD"]) {
+        if let Some(path) = git(&["rev-parse", "--git-path", &sym]) {
+            inputs.push(manifest_dir.join(path));
+        }
+    }
+    inputs.push(manifest_dir.join("src"));
+    inputs.push(manifest_dir.join("Cargo.toml"));
+    inputs.push(manifest_dir.join("build.rs"));
+    for path in inputs {
+        if path.exists() {
+            println!("cargo:rerun-if-changed={}", path.display());
         }
     }
 }

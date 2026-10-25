@@ -99,10 +99,17 @@ function expectOutputsMatchDisk(receipt: Receipt, outDir: string): void {
  * clone (`core.autocrlf=true`) writes the working copy back as CRLF, and the byte comparison below
  * then fails on Windows while Linux passes. `.gitattributes` pins the receipts to `eol=lf`; this
  * normalisation also keeps the check honest for a clone checked out before that rule existed.
+ *
+ * #641 — `.gitattributes` only governs a NEW checkout: an existing CRLF working copy keeps its
+ * bytes until the files are re-checked out, so a byte failure here can be a stale checkout rather
+ * than changed content. The message says so.
  */
 function readFixture(name: string): string {
   const text = readFileSync(join(REPO, 'docs', 'bench', name), 'utf8').replace(/\r\n/g, '\n');
-  expect(receiptJson(parseReceipt(JSON.parse(text))), `${name} is canonical`).toBe(text);
+  expect(
+    receiptJson(parseReceipt(JSON.parse(text))),
+    `${name} is canonical — if this clone predates the eol=lf rule, re-check out the fixtures`,
+  ).toBe(text);
   return text;
 }
 
