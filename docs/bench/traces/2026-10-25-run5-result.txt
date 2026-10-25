@@ -1,0 +1,20 @@
+Registration — find the stock, then set the origin
+
+Setup 1 · X/Y re-checked on the left and front edges; Z from the surface touch, within ±0.7 mm
+
+Home, fit the wired probe and measure it (M491); the fixed-jaw top is tapped first and checked against the stored datum (-56.8); touch the surface at the cut area's centre (19.05, 38.1); then scan the left edge at Y 38.1, the front edge at X 19.05 — bracketing each edge and bisecting to 0.5 mm, stopping at the first touch off the stock, every touch capped at the surface − 0.5 mm; home when finished.
+
+the stock is X off by 0.08 mm, Y off by -0.17 mm; within the 0.5 mm margin — confirmed.
+edges are corrected by the measured 0.7 mm effective rim offset
+the blank stands 1.793 mm proud of the jaw tops — expected 0.71 on the ledge; the measured top is used
+Surface spread — lowest -55.472 at the cut area's right extent (probe), highest -55.02 at the cut area's centre (probe); spread 0.452 mm against the 0.2 mm band.
+Surface tilt (0.784°).
+
+The top is tilted 0.784° (0.352 mm toward +X and 0.358 mm toward +Y): the program is posted against the fitted plane, so the cut follows the tilt. To level at the machine instead, run G32 R1 X5.329 Y4.627 A33.774 B72.259 I3 J3 H3 from the console (9-point grid over the cut plus the cutter's radius, clearance 3 mm), M375.1 to dump the grid into the run record, and M370 after the job. G32 is never uploaded in a file.
+
+Z0 is the lowest reading (-55.472), so the floors may land from 1 to 1.008 mm below Z0 and nowhere else.
+
+Writing the origin also asks you to take the probe out and fit the cutter; its M491 sets Z0 in this order.
+
+Write the origin from this measurement
+Run it again

@@ -1,0 +1,7 @@
+Registration — find the stock, then set the origin
+
+Setup 1 · X/Y re-checked on the left and front edges; Z from the surface touch, within ±0.7 mm
+
+Home, fit the wired probe and measure it (M491); the fixed-jaw top is tapped first and checked against the stored datum (-56.8); touch the surface at the cut area's centre (19.05, 38.1); then scan the left edge at Y 38.1, the front edge at X 19.05 — bracketing each edge and bisecting to 0.5 mm, stopping at the first touch off the stock, every touch capped at the surface − 0.5 mm; home when finished.
+
+as low as 1 mm below the fast touch's reading (the slow surface touch)

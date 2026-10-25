@@ -74,3 +74,42 @@ regenerated, plan on the DATUM path (override off), approved, regenerated, froze
 Verified today: #613, #600, #599, #603, #619 pt1, #620, #608's re-post; blocked: #623 (then #584).
 Records: `traces/2026-10-24-run4-{transcript,transcript-full,result,result-after-use-found,result-after-continue,result-final,after-repost,oracle-lines}.txt`, `-run4-status-trail.log`, `-run4-origin-status-trail.log`; frames `img/2026-10-24-register/camera-run4/`, `camera-run4-origin/`; screenshots `run4-*.png`.
 State at 23:30: Z1 ON, idle at home, cutter fitted, badge in the vise — left on at the maintainer's option for the #623 retest.
+Switched OFF at 23:35.
+
+## Session 2, 2026-10-24 evening (local 17:59–19:20; screenshots carry UTC stamps 22:08–23:16) — build 65034e22, then 264b3df8
+
+k3 on 65034e22 (= 1881f8f8 + #623 oracle in the surface frame + #610 + #566 + #616 + #624 + #607). Power on
+17:59 (`power.sh on`, controller came up in `Home`, Idle at rest 18:00); M821; the maintainer swapped the
+cutter for the Wired Probe V2 on request. Page reloaded, job regenerated, datum plan approved, re-generated,
+frozen 18:08 (UTC 22:08).
+
+| local | step | result |
+|---|---|---|
+| 18:08:59–18:14:39 | **run 5, datum path** | completed and homed: in-run jaw tap (datum re-written **−56.754**, vs −56.801 last night — the probe was re-fitted tonight, so its installed length differs; #611's point, within the tap's ±2 mm check) → surface −55.02 at centre, **1.793 proud** → left/front edges → five extents (lowest −55.472 right, highest −55.02 centre), spread 0.452 vs 0.2 band → **X off 0.08, Y off −0.17 — within the 0.5 margin** (last night's origin is in G54), so the ordinary **Write the origin from this measurement** path was exercised for the first time. Tilt **0.784°** (0.352 toward +X, 0.358 toward +Y) |
+| 18:15–18:16 | Write the origin → "Take the probe out, fit the cutter, then continue" → cutter fitted → Continue | M491 ×2 → **`G10 L2 P1 X-180.050 Y-192.925 Z-54.086`** → homed 18:16. Z0 differs from last night's −52.129 by ~2 mm = the cutter's stickout after tonight's re-fit (the delta probe→cutter was 3.39 last night, 1.39 tonight) |
+| 18:16 | Cut step after the origin write | **"The package of 22:08 is stale — the job or the machine frame changed"** → **#627** (the origin write's flatness provenance stamp moved the fingerprint; #621 covered only the found-position path). Masked tonight by the re-post |
+| 19:02 | **Re-post against the measured tilt** | re-generated + re-frozen 19:02; **oracle: under-cut 1.6339 mm² at Z −0.98 near (14.92, 38.75), a 15.59 × 66.24 mm patch, over-cut 74.4797 mm², tolerance 0.085, "in the blank's fitted surface frame"** — last night the same step read 301.39 mm² in the work frame → **#623 verified, closed**. The residual is #625 (the lift tips the flat job onto the column engine; its staircase fails the oracle) |
+| 19:10 | publish **264b3df8** (#584 V-floor prediction, #615, #625, #588 status-gated $X, #611, #566 env stamp, + #627 still pending) | health ok; house intact (jaw top −56.754, frame −180.05 / −202.925, 3 accessories). Browser session dropped by the publish, as always |
+| 19:14 | flat oracle on 264b3df8 (regenerate, no registration) | **"under-cut 0.0000 mm², over-cut 0.0000 mm², both within the 0.0399 mm² floor"** — #584's 0.0815 mm² is gone (the Ø0.61 dot the V cannot floor is no longer predicted as floored) |
+| 19:16 | datum plan approved, re-generated, frozen (UTC 23:16) | step 3 staged |
+| 19:52:18–19:57:12 | **run 6, datum path, on 264b3df8** (probe re-fitted) | completed and homed in **4:54** (run 5: 5:40 — #615's two-stage tap descent): X off 0.08, Y off 0.08 — confirmed; lowest −55.466 (right extent), highest −54.997 (centre), spread 0.469; **tilt 0.817°** (0.373 toward +X, 0.338 toward +Y). Repeatability vs run 5: tilt 0.784 → 0.817°, lowest −55.472 → −55.466, offsets within 0.1 mm |
+| 19:57–20:06 | Write the origin → cutter fitted (third re-fit tonight) → Continue | M491 ×2 → **`G10 L2 P1 X-179.975 Y-192.850 Z-49.936`** → homed 20:06. Z0 moved 4.15 mm from run 5's −54.086: the cutter's stickout changes with every hand re-fit; M491 absorbs it |
+| 20:10 | Re-post against the tilt (0.373/0.338) → re-frozen 00:10 UTC | **oracle: under-cut 1.6602 mm² at Z −0.98 near (11.29, 39.20), a 9.34 × 65.32 mm patch, over-cut 75.4995 mm², "in the blank's fitted surface frame"** — unchanged from run 5 (1.6339 / 74.4797) although #625 and #584 are on this build. The badge is a V-bit job → **column engine**; #625 reworked only the exact sweeper. → **#628** (the column path's surface-frame judging, #623 follow-up). **Upload still disabled; no cut tonight** |
+
+Findings → issues: **#627** (origin write stales the package), **#628** (column-engine surface-frame oracle wrong
+on the real job; my run-5 attribution of the residual to #625 was wrong — corrected on #625). Verified
+tonight: #623 (frame: 301 → 1.6 mm²), #584 (flat verdict 0/0 on 264b3df8), #615 (tap time), the ordinary
+origin-write path ×2, #620/#619 again, #608's re-post ×2, #603/#599's tap write-back (datum −56.754 by
+fx-probe-1). Owed: #628 → then the badge re-post must read 0/0 → the first cut (#569) → #570; #588 (a clean
+stop), #618 (pause on a scrap blank).
+
+Records: `traces/2026-10-25-run5-run6-{result,writing}.txt` (regstate tags), `-run6-result-after-continue.txt`,
+`-run6-after-repost.txt`, `-run6-transcript.txt` (614 lines, 32 PRB, the G10); frames `img/2026-10-25-register/camera-run6/`.
+
+Findings → issues: **#627** (origin write stales the package). Verified: #623 (frame), #620/#619 again, the
+ordinary origin-write path, #608's re-post, #603/#599's tap write-back. Owed on 264b3df8: #625 + #584 together
+(the badge re-post must read 0/0), #615 (tap descent time), #588 (no 60 s park at a stop), the first cut (#569).
+
+Records: `traces/2026-10-25-run5-{status-trail.log,after-run,result,writing,result-after-continue,after-repost,transcript}.txt`
+(transcript 610 lines, two M491s, the G10), frames `img/2026-10-25-register/camera-run5/` (500 @ 3 s from
+18:05) and `camera-run5b/`, screenshots `img/2026-10-25-register/*run5*.png` + the driver's `img/2026-10-23-register/2026102{4,5}-22*`.
