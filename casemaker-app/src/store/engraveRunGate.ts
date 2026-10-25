@@ -129,7 +129,7 @@ function oracleLocation(loc: { z: number; bbox: OracleBbox } | null | undefined)
  * the verdict flipped and NOTHING differs, that is said plainly: the same inputs gave a different
  * verdict, which is the determinism alarm rather than a diagnosis.
  */
-function flipClause(v: EngraveRunView): string {
+function flipClause(v: OracleSentenceInput): string {
   if (v.oracle === null) return '';
   const previous = v.previousVerdict;
   if (previous === null || previous === undefined) return '';
@@ -147,10 +147,22 @@ function flipClause(v: EngraveRunView): string {
 }
 
 /**
+ * What the "Matches prediction" sentence reads: the report, the phase that says whether a check is
+ * still running, and the #581 comparison facts. Narrowed from {@link EngraveRunView} so a caller
+ * holding a report (the Cut step's one screen) builds those four facts instead of a whole view.
+ */
+export interface OracleSentenceInput {
+  oracle: OracleReport | null;
+  phase?: EngraveRunPhase | null;
+  previousVerdict?: boolean | null;
+  changedSinceLast?: readonly EngraveInputKey[];
+}
+
+/**
  * The "Matches prediction" sentence body — the metric and the floor the verdict used (#576/#580).
  * Shared by the panel's run row and the wizard's step-4 blocker (#582), so they cannot disagree.
  */
-export function oracleSentence(v: EngraveRunView): string {
+export function oracleSentence(v: OracleSentenceInput): string {
   if (!v.oracle) return v.phase === 'checking' || v.phase === 'simulating' ? 'checking…' : 'not checked yet';
   const floor = v.oracle.areaFloor ?? 1e-3; // #206 — the sliver floor; local so this module stays browser-free
   const floorText = floor.toFixed(4); // #584 — the floor is a computed number, print it rounded

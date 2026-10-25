@@ -199,7 +199,8 @@ export function EngraveCutConfirm({
         data-testid="engrave-cut-confirm-oracle"
         data-ok={oracleOk ? 'true' : 'false'}
       >
-        <strong>The check</strong> — {oracleSentence({ generated: null, oracle, simDiagnostics: [], simStatus: oracle === null ? null : 'ready', phase: oracle === null ? 'idle' : oracle.ok ? 'ready' : 'blocked', acknowledged: true, staleSince: null, staleReason: null, inputs: null, changedSinceLast: [], previousVerdict: null, error: null } as never)}.
+        <strong>The check</strong> —{' '}
+        {oracleSentence({ oracle, phase: oracle === null ? 'idle' : oracle.ok ? 'ready' : 'blocked' })}.
       </p>
       {dome !== null && <DomeChoice {...dome} />}
       <label style={{ display: 'block', marginTop: 8, fontSize: 12, color: '#c8d3de' }}>
