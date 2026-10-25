@@ -7,7 +7,7 @@
 // through `machineStore` exactly as the heartbeat leaves it.
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { MachineStatusStrip } from '@/components/viewport/MachineStatusStrip';
 import { resetMachineStore, useMachineStore } from '@/store/machineStore';
 import { resetMachineRunStore, useMachineRunStore, type RunEntry } from '@/store/machineRunStore';
@@ -327,5 +327,43 @@ describe('#652 the strip’s follow-ups', () => {
     render(<MachineStatusStrip />);
     expect(screen.getByTestId('machine-status-accessory-vacuum').getAttribute('data-mode')).toBe('on');
     expect(useStripAccessoryStore.getState().modes[target]).toBeUndefined();
+  });
+});
+
+// #659 — THE STATUS MONITOR behind a click on the state element: nothing added to the strip's text,
+// the readings in operator words, Escape closes.
+describe('#659 the state popover', () => {
+  it('shows the spindle and power temperatures, and closes on Escape', () => {
+    remember(
+      '<Idle|MPos:0,0,0|WPos:0,0,0|S:0.0,10000.0,100.0,0,25.8,24.0,0,0,0,0>',
+    );
+    render(<MachineStatusStrip />);
+    expect(screen.queryByTestId('machine-status-monitor')).toBeNull();
+    fireEvent.click(screen.getByTestId('machine-status-state'));
+    expect(screen.getByTestId('machine-status-monitor')).toBeTruthy();
+    expect(screen.getByTestId('machine-status-monitor-spindle').textContent).toBe('Spindle 25.8 °C');
+    expect(screen.getByTestId('machine-status-monitor-power').textContent).toBe('Power board 24.0 °C');
+    expect(screen.queryByTestId('machine-status-monitor-halt')).toBeNull();
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(screen.queryByTestId('machine-status-monitor')).toBeNull();
+  });
+
+  it('names a halt reason — the cover, a probe fault — in operator words', () => {
+    remember('<Alarm|MPos:0,0,0|H:11>');
+    render(<MachineStatusStrip />);
+    fireEvent.click(screen.getByTestId('machine-status-state'));
+    const halt = screen.getByTestId('machine-status-monitor-halt');
+    expect(halt.textContent).toContain('the cover was opened');
+    expect(halt.getAttribute('data-code')).toBe('11');
+  });
+
+  it('says the frame carries no extra readings rather than inventing one', () => {
+    remember('<Idle|MPos:-1,-1,-1|WPos:0,0,0>');
+    render(<MachineStatusStrip />);
+    fireEvent.click(screen.getByTestId('machine-status-state'));
+    expect(screen.getByTestId('machine-status-monitor-none').textContent).toBe(
+      "This machine's status frame carries no extra readings.",
+    );
+    expect(screen.queryByTestId('machine-status-monitor-spindle')).toBeNull();
   });
 });

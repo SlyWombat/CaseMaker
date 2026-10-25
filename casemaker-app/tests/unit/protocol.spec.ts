@@ -98,3 +98,40 @@ describe('#561 the finished contract — percent 100 AND Idle', () => {
     expect(s.progress.percent).toBe(100);
   });
 });
+
+// #659 — THE STATUS MONITOR's readings, from the same frame: the spindle and power temperatures in
+// `S:`, the firmware's halt reason in `H:` and its own leveling correction in `O:`. The captured
+// line is the bench's own (2026-10-12 run, D4 row A); `H:`/`O:` are the firmware source's fields
+// (`Kernel::get_query_string`), which this machine sends only while halted / while leveling.
+describe('#659 the status monitor fields', () => {
+  const CAPTURED =
+    '<Run|MPos:-162.0500,-162.2000,-3.0000,0.0000,0.0000|WPos:18.4500,20.0000,32.7000,0.0000,0.0000|F:0.0,2000.0,100.0|S:8889.7,12000.0,100.0,0,35.9,24.9,0,0,0,0|T:1,0.000,1|L:0, 0, 0, 0.0,100.0|P:0,12,6|C:3,1,0,1|E:0,0,0,692,7610|OTA:0,0>';
+
+  it('reads the spindle and power temperatures out of the S field', () => {
+    const m = readStatusLine(CAPTURED).monitor;
+    expect(m.spindleTempC).toBe(35.9);
+    expect(m.powerTempC).toBe(24.9);
+    expect(m.halt).toBeNull();
+    expect(m.levellingMm).toBeNull();
+  });
+
+  it('names the firmware’s halt reason in operator words', () => {
+    // H:3 on the bench (2026-10-08) was PROBE_FAIL; H:11 is COVER_OPEN — the cover's own reading
+    // in this frame.
+    expect(readStatusLine('<Alarm|MPos:0,0,0|H:3>').monitor.halt).toEqual({
+      code: 3,
+      words: 'a probe touch did not trigger',
+    });
+    expect(readStatusLine('<Alarm|MPos:0,0,0|H:11>').monitor.halt?.words).toBe('the cover was opened');
+    // A code the firmware's enum does not define is still reported — by its number, never guessed.
+    expect(readStatusLine('<Alarm|MPos:0,0,0|H:99>').monitor.halt?.words).toBe('the machine halted (reason code 99)');
+  });
+
+  it('reads the machine’s own leveling correction, and leaves absent fields null', () => {
+    expect(readStatusLine('<Run|MPos:0,0,0|O:0.412>').monitor.levellingMm).toBe(0.412);
+    const none = readStatusLine('<Idle|MPos:0,0,0>').monitor;
+    expect(none).toEqual({ spindleTempC: null, powerTempC: null, halt: null, levellingMm: null });
+    // A short or unreadable S field is not a temperature: it reads null, never a made-up value.
+    expect(readStatusLine('<Idle|S:0,10000>').monitor.spindleTempC).toBeNull();
+  });
+});

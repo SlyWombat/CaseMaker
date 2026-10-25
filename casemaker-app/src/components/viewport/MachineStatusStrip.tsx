@@ -1,4 +1,4 @@
-import { useEffect, type JSX } from 'react';
+import { useEffect, useRef, useState, type JSX } from 'react';
 import { useMachineStore } from '@/store/machineStore';
 import { useRegistrationTouchesStore } from '@/store/registrationTouchesStore';
 import { useEngraveReleaseStore } from '@/store/engraveReleaseStore';
@@ -153,6 +153,27 @@ export function MachineStatusStrip(): JSX.Element | null {
   // #652 — the program the machine holds (prepared or running), for its own frozen cutter.
   const prepared = useMachineRunStore((s) => (machine === null ? null : s.runs[machineKey(machine)] ?? null));
   const forgetAccessories = useStripAccessoryStore((s) => s.forget);
+  // #659 — the status monitor's popover, opened from the STATE element (the accessory icons'
+  // pattern: nothing added to the strip's text, Escape and an outside click close it).
+  const [monitorOpen, setMonitorOpen] = useState(false);
+  const monitorRoot = useRef<HTMLSpanElement | null>(null);
+  useEffect(() => {
+    if (!monitorOpen) return;
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') setMonitorOpen(false);
+    };
+    const onDown = (e: MouseEvent): void => {
+      if (monitorRoot.current !== null && e.target instanceof Node && !monitorRoot.current.contains(e.target)) {
+        setMonitorOpen(false);
+      }
+    };
+    document.addEventListener('keydown', onKey);
+    document.addEventListener('mousedown', onDown);
+    return () => {
+      document.removeEventListener('keydown', onKey);
+      document.removeEventListener('mousedown', onDown);
+    };
+  }, [monitorOpen]);
   const target = machine === null ? null : machineKey(machine);
   // #652 — A RELEASE'S OWN VACUUM WORDS EXPIRE THE MANUAL ONES. The accessory store keeps what a
   // press concluded per target and nothing clears it, so a manual press before a run masked the
@@ -179,6 +200,8 @@ export function MachineStatusStrip(): JSX.Element | null {
     .filter((l) => l.length > 0 && !l.startsWith('<'));
   const reason = state === 'Alarm' ? alarmLine(reasonLines.join('\n')) : null;
   const progress = line?.progress ?? null;
+  // #659 — what the popover reads (null before any status line).
+  const monitor = line?.monitor ?? null;
 
   // #652 — THE TOOL IS THE FROZEN PACKAGE'S, NOT THE LIVE JOB'S. The program the machine holds names
   // its cutter on the run's context; with nothing uploaded, the package's first program does. A
@@ -254,9 +277,90 @@ export function MachineStatusStrip(): JSX.Element | null {
                     : null
         }
       />
-      <span data-testid="machine-status-state" data-state={state} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, flex: 'none' }}>
-        <span aria-hidden="true" style={{ width: 8, height: 8, borderRadius: 4, background: stateColour(state), flex: 'none' }} />
-        <span style={{ fontWeight: 600, color: '#e8eef4' }}>{state}</span>
+      {/* #659 — THE STATUS MONITOR sits behind a click on the state element: spindle and power
+          temperatures, the firmware's halt reason (which is where the cover and a probe fault
+          appear), and the machine's own leveling correction. The state dot and word remain the
+          strip's only text about the machine's condition. */}
+      <span ref={monitorRoot} style={{ position: 'relative', display: 'inline-flex', flex: 'none' }}>
+        <button
+          type="button"
+          data-testid="machine-status-state"
+          data-state={state}
+          aria-expanded={monitorOpen}
+          aria-label={`${state} — status readings`}
+          title="Status readings"
+          onClick={() => setMonitorOpen((open) => !open)}
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 6,
+            flex: 'none',
+            padding: 0,
+            border: 'none',
+            background: 'transparent',
+            color: 'inherit',
+            font: 'inherit',
+            cursor: 'pointer',
+          }}
+        >
+          <span aria-hidden="true" style={{ width: 8, height: 8, borderRadius: 4, background: stateColour(state), flex: 'none' }} />
+          <span style={{ fontWeight: 600, color: '#e8eef4' }}>{state}</span>
+        </button>
+        {monitorOpen && (
+          <div
+            data-testid="machine-status-monitor"
+            role="dialog"
+            aria-label="Status readings"
+            style={{
+              position: 'absolute',
+              left: 0,
+              top: '100%',
+              marginTop: 4,
+              width: 260,
+              padding: 10,
+              background: '#1c2229',
+              border: '1px solid #2a2f36',
+              borderRadius: 6,
+              boxShadow: '0 6px 20px rgba(0,0,0,0.45)',
+              zIndex: 40,
+              whiteSpace: 'normal',
+              fontSize: 11,
+              color: '#c8d3de',
+            }}
+          >
+            {monitor === null ? (
+              <p style={{ margin: 0, color: '#a8b4c0' }} data-testid="machine-status-monitor-none">
+                No status line has been read yet.
+              </p>
+            ) : monitor.spindleTempC === null &&
+              monitor.powerTempC === null &&
+              monitor.halt === null &&
+              monitor.levellingMm === null ? (
+              <p style={{ margin: 0, color: '#a8b4c0' }} data-testid="machine-status-monitor-none">
+                This machine's status frame carries no extra readings.
+              </p>
+            ) : (
+              <ul style={{ margin: 0, paddingLeft: 14, lineHeight: 1.6 }}>
+                {monitor.spindleTempC !== null && (
+                  <li data-testid="machine-status-monitor-spindle">Spindle {monitor.spindleTempC.toFixed(1)} °C</li>
+                )}
+                {monitor.powerTempC !== null && (
+                  <li data-testid="machine-status-monitor-power">Power board {monitor.powerTempC.toFixed(1)} °C</li>
+                )}
+                {monitor.halt !== null && (
+                  <li data-testid="machine-status-monitor-halt" data-code={monitor.halt.code}>
+                    Halted — {monitor.halt.words} (reason {monitor.halt.code})
+                  </li>
+                )}
+                {monitor.levellingMm !== null && (
+                  <li data-testid="machine-status-monitor-levelling">
+                    Leveling — the machine is applying up to {monitor.levellingMm.toFixed(3)} mm of correction
+                  </li>
+                )}
+              </ul>
+            )}
+          </div>
+        )}
       </span>
       {/* #652 — the alarm's reason gets its OWN elastic cell: inside the fixed-width state cell a
           long ALARM:/ERROR: line widened the row past `overflow: hidden` and clipped Stop. */}

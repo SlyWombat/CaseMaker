@@ -523,7 +523,93 @@ export interface MachineStatusLine {
    * operator's `M490.2`). Null whenever no change is pending.
    */
   toolWaiting: number | null;
+  /** #659 — the readings the frame carries beyond position, rates and progress. */
+  monitor: StatusMonitor;
   progress: JobProgress;
+}
+
+/**
+ * #659 — THE STATUS MONITOR's readings, from the fields the frame carries and we used to skip.
+ *
+ * WHAT EACH ONE IS, from the Z1's own firmware source (`MakeraInc/CarveraFirmware`,
+ * `src/libs/Kernel.cpp` `Kernel::get_query_string`), not from a guess:
+ *
+ *  - `S:` is `current_rpm,target_rpm,factor,vacuum_mode,spindle_temp,power_temp,0,0,extout_mode` —
+ *    the fifth value is the SPINDLE temperature and the sixth the POWER board's, °C;
+ *  - `H:<n>` is the firmware's halt reason, sent only while halted, and its enum
+ *    (`src/libs/Kernel.h`) names what stopped the machine — including `COVER_OPEN` and
+ *    `PROBE_FAIL`, which is where the cover and the probe appear in this frame;
+ *  - `O:<mm>` is present while the machine's own leveling is active, and is the grid's LARGEST
+ *    correction.
+ *
+ * WHAT IS DELIBERATELY NOT READ. `C:` carries the machine model, a factory bitfield and the
+ * inch/absolute mode (the bitfield's bits are not documented); `L:` is the LASER's mode/power, not
+ * limits; `E:` in our captures does not match the upstream endstop list; `W:` is the wireless
+ * probe's voltage (this machine has none); `A:` is the tool changer's state (this machine changes
+ * tools by hand); `OTA:` is not built by the firmware source at all. None of them is shown — a
+ * field nobody can explain is not an operator reading.
+ */
+export interface StatusMonitor {
+  /** Spindle temperature, °C (`S:` value 5), or null when the frame does not carry it. */
+  spindleTempC: number | null;
+  /** Power-board temperature, °C (`S:` value 6), or null. */
+  powerTempC: number | null;
+  /** The firmware's halt reason (`H:`), named in operator words, or null when not halted. */
+  halt: { code: number; words: string } | null;
+  /** The largest correction the machine's own leveling is applying, mm (`O:`), or null. */
+  levellingMm: number | null;
+}
+
+/** The firmware's `HALT_REASON` enum (`Kernel.h`), in the operator's words. */
+const HALT_WORDS: Readonly<Record<number, string>> = {
+  1: 'the machine was halted by hand',
+  2: 'homing failed',
+  3: 'a probe touch did not trigger',
+  4: 'calibration failed',
+  5: 'the tool changer could not home',
+  6: 'the tool changer read an invalid tool',
+  7: 'the tool changer found no tool',
+  8: 'the tool changer found a tool it did not expect',
+  9: 'the spindle overheated',
+  10: 'a soft limit was reached',
+  11: 'the cover was opened',
+  12: 'the probe is not reading correctly',
+  13: 'the emergency stop was pressed',
+  14: 'the power board overheated',
+  15: 'a move was sent before homing',
+  21: 'a hard limit was hit',
+  22: 'the X motor reported an error',
+  23: 'the Y motor reported an error',
+  24: 'the Z motor reported an error',
+  25: 'the spindle stalled',
+  26: 'the SD card reported an error',
+  41: 'the spindle reported an alarm',
+};
+
+/** A finite number from `parts[i]`, or null. */
+function value(parts: readonly string[], i: number): number | null {
+  const raw = parts[i]?.trim();
+  if (raw === undefined || raw === '') return null;
+  const v = Number(raw);
+  return Number.isFinite(v) ? v : null;
+}
+
+/** #659 — the monitor's readings from the `S:`, `H:` and `O:` fields. */
+function readMonitor(text: string): StatusMonitor {
+  const s = statusField(text, 'S');
+  const sParts = s === null ? [] : s.split(',');
+  const h = statusField(text, 'H');
+  const hCode = h === null ? null : value(h.split(','), 0);
+  const o = statusField(text, 'O');
+  return {
+    spindleTempC: value(sParts, 4),
+    powerTempC: value(sParts, 5),
+    halt:
+      hCode === null
+        ? null
+        : { code: hCode, words: HALT_WORDS[hCode] ?? `the machine halted (reason code ${hCode})` },
+    levellingMm: o === null ? null : value(o.split(','), 0),
+  };
 }
 
 /** The `KEY:value` field of a status line, or null — fields are `|`-separated (#526). */
@@ -573,6 +659,7 @@ export function readStatusLine(text: string): MachineStatusLine {
     tool: tool.actual,
     // The T field is `actual,offset,awaited` — the third value is not a rate's "override".
     toolWaiting: tool.override,
+    monitor: readMonitor(text),
     progress: readJobProgress(text),
   };
 }
