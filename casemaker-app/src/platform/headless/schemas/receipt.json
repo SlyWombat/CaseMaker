@@ -2,15 +2,15 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "oneOf": [
     {
-      "description": "The receipt of an engrave run.",
+      "description": "The receipt of a job run.",
       "properties": {
         "command": {
           "const": "engrave",
-          "description": "The command that produced this receipt.",
+          "description": "The command this receipt describes: always `engrave` — `cut` is the same command, and the receipt does not change with its spelling.",
           "type": "string"
         },
         "details": {
-          "description": "The engrave command’s own details.",
+          "description": "The job command’s own details.",
           "properties": {
             "coupon": {
               "anyOf": [

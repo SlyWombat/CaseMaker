@@ -1,5 +1,6 @@
 import type { CSSProperties, JSX } from 'react';
 import { EngraveItemRow } from '@/components/panels/EngraveItemRow';
+import { itemOperationName } from '@/engine/cnc/engrave/partPlan';
 import { regionChipLabel, useRegionOperationType } from '@/components/panels/operationTypes';
 import { rowSummary } from '@/components/panels/engraveRowText';
 import type { JobFinding } from '@/engine/cnc/engrave/jobSetup';
@@ -84,7 +85,7 @@ export function EngraveVectorRow({
       glyph="◫"
       kindWord="Imported outline"
       typeLabel={regionChipLabel(shape.through, region)}
-      name={shape.name?.trim() ? shape.name : shape.sourceName}
+      name={itemOperationName(shape)}
       summary={rowSummary(shape.depth)}
       enabled={shape.enabled}
       enabledTitle="A disabled outline is kept in the job but not cut."

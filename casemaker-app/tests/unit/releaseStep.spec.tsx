@@ -604,7 +604,7 @@ describe('#469 the release step', () => {
     await waitFor(() => expect(record()?.phase).toBe('failed'), { timeout: 15000 });
     const notes = record()?.notes.join('\n') ?? '';
     expect(notes).toContain('outside the expected');
-    expect(notes).toContain('No engraving program was played');
+    expect(notes).toContain('No program was played');
     expect(sent.filter((l) => l.startsWith('play'))).toEqual(['play /sd/gcodes/Faced-job-p1.nc']);
     expect(sent.filter((l) => l.startsWith('G10 L2'))).toHaveLength(0);
     // The face file is the only program that ran; the vacuum was closed after the refusal.
@@ -634,7 +634,7 @@ describe('#469 the release step', () => {
     await waitFor(() => expect(record()?.phase).toBe('failed'), { timeout: 15000 });
     const notes = record()?.notes.join('\n') ?? '';
     expect(notes).toContain('M491 answered no tool-length reading for the cutter');
-    expect(notes).toContain('No engraving program was played');
+    expect(notes).toContain('No program was played');
     expect(sent.filter((l) => l.startsWith('play'))).toEqual(['play /sd/gcodes/Faced-job-p1.nc']);
     expect(sent.filter((l) => l.startsWith('G10 L2'))).toHaveLength(0);
     expect(sent).toContain('M332');

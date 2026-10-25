@@ -1391,7 +1391,7 @@ export function EngravePanel(): JSX.Element {
       : run.generated.facingNc === null
         ? 'the facing program was not produced' +
           (run.generated.facingError === null ? '' : `: ${run.generated.facingError}`) +
-          '. The engraving program can still be run, but the top will not be skimmed — clear the reason and generate again.'
+          '. The program can still be run, but the top will not be skimmed — clear the reason and generate again.'
         : facingCam !== null
           ? `${facingCam.toolName}, ⌀ ${facingCam.diameterMm} mm flat, ${facingCam.passes} × ${facingCam.stepDown} mm passes`
           : `${run.generated.facingToolKey ?? 'its own cutter'}`
@@ -2029,7 +2029,7 @@ export function EngravePanel(): JSX.Element {
               type="button"
               data-testid="engrave-facing-on"
               aria-pressed={facingOn}
-              title="Skim the whole top before engraving, then re-touch Z0 on the new surface."
+              title="Skim the whole top before cutting, then re-touch Z0 on the new surface."
               onClick={() => chooseFacing(true)}
             >
               Face the top
@@ -2039,7 +2039,7 @@ export function EngravePanel(): JSX.Element {
             type="button"
             data-testid="engrave-facing-off"
             aria-pressed={!facingOn}
-            title="Engrave the top as it arrives."
+            title="Cut the top as it arrives."
             onClick={() => chooseFacing(false)}
           >
             Leave it

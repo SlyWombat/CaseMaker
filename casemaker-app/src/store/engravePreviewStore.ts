@@ -47,7 +47,7 @@ export type EngravePreviewClient = {
 };
 
 const loadClient = async (): Promise<EngravePreviewClient> => {
-  if (!featureSim) throw new Error('the engrave preview is not enabled in this build');
+  if (!featureSim) throw new Error('the job preview is not enabled in this build');
   return import('@/engine/jobs/simClient');
 };
 let clientLoader: () => Promise<EngravePreviewClient> = loadClient;

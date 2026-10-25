@@ -3,7 +3,7 @@ import { EngraveItemRow } from '@/components/panels/EngraveItemRow';
 import { regionChipLabel, useRegionOperationType } from '@/components/panels/operationTypes';
 import { rowSummary } from '@/components/panels/engraveRowText';
 import type { JobFinding } from '@/engine/cnc/engrave/jobSetup';
-import { primitiveLabel, primitiveReducesToRegion } from '@/engine/cnc/engrave/partPlan';
+import { primitiveLabel, primitiveOperationName, primitiveReducesToRegion } from '@/engine/cnc/engrave/partPlan';
 import type { PrimitivePatch } from '@/store/engraveJobStore';
 import type { EngravePrimitive, EngravePrimitiveAxis } from '@/types/engraveJob';
 
@@ -141,7 +141,7 @@ export function EngravePrimitiveRow({
       glyph={KIND_GLYPH[primitive.kind]}
       kindWord={kindWord}
       typeLabel={regionChipLabel(undefined, region)}
-      name={primitive.name?.trim() ? primitive.name : kindWord}
+      name={primitiveOperationName(primitive)}
       summary={rowSummary(primitive.depth)}
       enabled={primitive.enabled}
       enabledTitle="A disabled primitive is kept in the job but not cut."

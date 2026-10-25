@@ -41,7 +41,7 @@ describe('#477 the old script paths remain entry points', () => {
   it('scripts/engrave-job.ts still runs and prints the command usage, exiting 1', () => {
     const r = run('scripts/engrave-job.ts');
     expect(r.status).toBe(1);
-    expect(r.stderr).toContain('casemaker engrave: usage: casemaker engrave');
+    expect(r.stderr).toContain('casemaker cut: usage: casemaker cut');
   }, 120_000);
 
   it('scripts/feeds-readback.ts still runs and prints the command usage, exiting 1', () => {

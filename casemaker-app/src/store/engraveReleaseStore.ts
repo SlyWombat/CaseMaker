@@ -354,7 +354,7 @@ export const useEngraveReleaseStore = create<ReleaseState>((set, get) => {
   const afterFacingNote = (r: Extract<AfterFacingResult, { ok: false }>): string => {
     const what = r.step === 're-touch' ? 'The re-touch of the faced top refused' : 'Writing Z0 for the engraving cutter failed';
     const sep = /[.!?]$/.test(r.reason) ? ' ' : '. ';
-    return `${what}: ${r.reason}${sep}No engraving program was played.`;
+    return `${what}: ${r.reason}${sep}No program was played.`;
   };
 
   /**
@@ -379,7 +379,7 @@ export const useEngraveReleaseStore = create<ReleaseState>((set, get) => {
     const blocked = facingRegistrationBlocker(rec.job, rec.files, first);
     if (blocked !== null || first === null) {
       patch(machine, { phase: 'failed', active: null, next: null, atMachine: false, operatorStep: null });
-      say(machine, `The engraving program did not start: ${blocked ?? 'the first registration is not in app state'}.`);
+      say(machine, `The program did not start: ${blocked ?? 'the first registration is not in app state'}.`);
       await closeSpan(machine, 'No program is running after the face program.');
       return;
     }
@@ -387,7 +387,7 @@ export const useEngraveReleaseStore = create<ReleaseState>((set, get) => {
     patch(machine, { phase: 'retouch', active: null, next: null, operatorStep: null, atMachine: false, stopAsked: false });
     say(
       machine,
-      `Re-touching the faced top and writing Z0 for the engraving cutter (${file.toolKey}); no engraving program has started.`,
+      `Re-touching the faced top and writing Z0 for the engraving cutter (${file.toolKey}); no program has started.`,
     );
     const handle = attachConsole(rec.target);
     try {
@@ -402,7 +402,7 @@ export const useEngraveReleaseStore = create<ReleaseState>((set, get) => {
       if (!r.ok) {
         patch(machine, { phase: 'failed', active: null, next: null, atMachine: false, operatorStep: null });
         say(machine, afterFacingNote(r));
-        await closeSpan(machine, 'The engraving program was not played, so the release step is closing the vacuum span.');
+        await closeSpan(machine, 'The program was not played, so the release step is closing the vacuum span.');
         return;
       }
       patch(machine, { operatorStep: null, retouchedFor: index });
@@ -413,9 +413,9 @@ export const useEngraveReleaseStore = create<ReleaseState>((set, get) => {
       patch(machine, { phase: 'failed', active: null, next: null, atMachine: false, operatorStep: null });
       say(
         machine,
-        `The post-facing step could not run: ${e instanceof Error ? e.message : String(e)}. No engraving program was played.`,
+        `The post-facing step could not run: ${e instanceof Error ? e.message : String(e)}. No program was played.`,
       );
-      await closeSpan(machine, 'The engraving program was not played, so the release step is closing the vacuum span.');
+      await closeSpan(machine, 'The program was not played, so the release step is closing the vacuum span.');
     } finally {
       await handle.close();
     }
@@ -673,7 +673,7 @@ export const useEngraveReleaseStore = create<ReleaseState>((set, get) => {
       operatorAnswers.delete(machine);
       patch(machine, { operatorStep: null });
       resolve?.(ok);
-      say(machine, ok ? 'Operator continued the post-facing step.' : 'Operator stopped the post-facing step; it will not write the origin or start the engraving program.');
+      say(machine, ok ? 'Operator continued the post-facing step.' : 'Operator stopped the post-facing step; it will not write the origin or start the program.');
     },
 
     stop: (target) => {

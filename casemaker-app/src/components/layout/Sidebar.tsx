@@ -43,9 +43,9 @@ if (featureSim) {
     },
     {
       id: 'cnc-sim',
-      label: 'Simulate .nc',
+      label: 'Simulate',
       icon: '🧪',
-      hint: 'Open a G-code file and watch it cut, before the machine does',
+      hint: 'Play a program — this job’s or an imported .nc — and watch it cut, before the machine does',
     },
   );
 }

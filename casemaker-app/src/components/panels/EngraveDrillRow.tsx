@@ -1,5 +1,6 @@
 import type { CSSProperties, JSX } from 'react';
 import { EngraveItemRow } from '@/components/panels/EngraveItemRow';
+import { drillOperationName } from '@/engine/cnc/engrave/partPlan';
 import { rowSummary } from '@/components/panels/engraveRowText';
 import type { JobFinding } from '@/engine/cnc/engrave/jobSetup';
 import type { DrillPatch } from '@/store/engraveJobStore';
@@ -124,7 +125,7 @@ export function EngraveDrillRow({
       glyph="⌖"
       kindWord={kindLabel}
       typeLabel="Hole"
-      name={drill.name?.trim() ? drill.name : kindLabel}
+      name={drillOperationName(drill)}
       summary={rowSummary(drill.depth)}
       enabled={drill.enabled}
       enabledTitle="A disabled drill is kept in the job but not cut."

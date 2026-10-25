@@ -1,6 +1,7 @@
 import type { CSSProperties, JSX } from 'react';
 import { FontPicker, WeightPicker } from '@/components/panels/FontPicker';
 import { EngraveItemRow } from '@/components/panels/EngraveItemRow';
+import { itemOperationName } from '@/engine/cnc/engrave/partPlan';
 import { rowSummary, intentWord } from '@/components/panels/engraveRowText';
 import type { JobFinding } from '@/engine/cnc/engrave/jobSetup';
 import { mm } from '@/engine/cnc/engrave/depthBounds';
@@ -175,7 +176,7 @@ export function EngraveLabelRow({
       glyph="T"
       kindWord="Label"
       typeLabel="Engrave"
-      name={label.text.trim() === '' ? '(empty label)' : label.text}
+      name={itemOperationName(label)}
       summary={rowSummary(label.depth)}
       // §5.3 — the word the two-state control below writes, put back on the folded line: a label
       // whose depth was chosen by the colour rule says so without the row being opened. `custom` and

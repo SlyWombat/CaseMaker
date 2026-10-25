@@ -649,7 +649,7 @@ export function planProbing(
     // The mechanical fix is the real de-risking of §7.3: it is what lets a static .nc work.
     notes.push('rotation is fixed mechanically by the fixture, so no compensation is needed');
   }
-  notes.push('Z is always probed on the engraved face: no fixture can supply it');
+  notes.push('Z is always probed on the face to be cut: no fixture can supply it');
 
   return {
     touches,

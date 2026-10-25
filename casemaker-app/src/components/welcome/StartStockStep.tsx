@@ -412,10 +412,10 @@ export function StartStockStep({
         <p style={MUTED} data-testid="start-wizard-stock-facing" data-state={facing.on ? 'on' : 'off'}>
           Facing: {facing.on ? 'on' : 'off'} by default — {facing.reason}.{' '}
           {facingRefused
-            ? 'The job starts with that answer and the Engrave panel does not offer facing on this stock.'
+            ? 'The job starts with that answer and the Cut panel does not offer facing on this stock.'
             : facing.on
-              ? `The job starts with a ${mm(facingDepth)} mm skim; the Engrave panel shows that depth and can change it.`
-              : 'The job starts with that answer; the Engrave panel can face it instead.'}
+              ? `The job starts with a ${mm(facingDepth)} mm skim; the Cut panel shows that depth and can change it.`
+              : 'The job starts with that answer; the Cut panel can face it instead.'}
         </p>
       )}
     </div>

@@ -146,8 +146,8 @@ function staleStockLines(
 
   if (detail.length === 0) return [];
   return [
-    `The engrave job’s stock was taken from this part and no longer matches it (${detail.join(', ')}). ` +
-      `Press “${bridge}” in Engrave text to take the new numbers across.`,
+    `The job’s stock was taken from this part and no longer matches it (${detail.join(', ')}). ` +
+      `Press “${bridge}” in Cut to take the new numbers across.`,
   ];
 }
 
@@ -206,7 +206,7 @@ function BadgeEditor({ badge }: { badge: BadgeParams }) {
     // nothing to say: the stock note above already fires only on a hand-off.
   } else if (wanted.pocket && !jobRect) {
     stale.push(
-      'This badge has a magnet pocket and the engrave job declares no matching void for it. Press ' +
+      'This badge has a magnet pocket and the job declares no matching void for it. Press ' +
         '“Use the badge blank” to declare it, or the cutter will gouge the pocket.',
     );
   } else if (wantedPocket && jobRect) {
@@ -216,7 +216,7 @@ function BadgeEditor({ badge }: { badge: BadgeParams }) {
       Math.abs(jobRect.zCeiling - wantedPocket.zCeiling) > 1e-6;
     if (moved) {
       stale.push(
-        `The engrave job declares a ${mm(jobRect.width)} × ${mm(jobRect.height)} mm pocket ${mm(
+        `The job declares a ${mm(jobRect.width)} × ${mm(jobRect.height)} mm pocket ${mm(
           jobRect.zCeiling,
         )} mm deep; this badge’s is ${mm(wantedPocket.width)} × ${mm(wantedPocket.height)} mm, ${mm(
           wantedPocket.zCeiling,
@@ -225,7 +225,7 @@ function BadgeEditor({ badge }: { badge: BadgeParams }) {
     }
   } else if (jobPocket) {
     stale.push(
-      'The engrave job still declares a magnet pocket this badge no longer has. Press “Use the ' +
+      'The job still declares a magnet pocket this badge no longer has. Press “Use the ' +
         'badge blank” to clear it.',
     );
   }
@@ -234,7 +234,7 @@ function BadgeEditor({ badge }: { badge: BadgeParams }) {
     <div className="panel-stack" data-testid="part-panel">
       <p style={HINT}>
         The two-colour badge blank itself: its outline, where the colour changes, and the magnet
-        that holds it on. The name goes on in Engrave text.
+        that holds it on. The name goes on in Cut.
       </p>
 
       <h3 style={SUBHEAD}>Outline</h3>
@@ -377,7 +377,7 @@ function BadgeEditor({ badge }: { badge: BadgeParams }) {
           <LabelledField
             label="Layer height"
             unit="mm"
-            hint="How the blank was sliced: the colour boundary lands on this grid, so this number moves where the split sits — and with it every recommended depth and every colour reading. Editing it here does not reach into an existing job: the engrave job keeps the print it was handed until you press “Use the badge blank”, which takes the new grid — and re-reads the label depths against it. Set it to the print you actually made."
+            hint="How the blank was sliced: the colour boundary lands on this grid, so this number moves where the split sits — and with it every recommended depth and every colour reading. Editing it here does not reach into an existing job: the job keeps the print it was handed until you press “Use the badge blank”, which takes the new grid — and re-reads the label depths against it. Set it to the print you actually made."
           >
             <input
               type="number"
@@ -540,14 +540,14 @@ function BlankEditor({ blank }: { blank: BlankParams }) {
     <div className="panel-stack" data-testid="part-panel">
       <p style={HINT}>
         The blank itself — the piece of stock the CNC is about to cut. What gets cut into it is the
-        engrave job’s business; this is only the material’s shape.
+        job’s business; this is only the material’s shape.
       </p>
 
       <h3 style={SUBHEAD}>Outline</h3>
       <LabelledField
         label="Size"
         unit="mm"
-        hint="The blank’s length (X) and width (Y). These become the engrave job’s stock, and the corner radius does not — the job works to the bounding rectangle."
+        hint="The blank’s length (X) and width (Y). These become the job’s stock, and the corner radius does not — the job works to the bounding rectangle."
       >
         <div style={ROW}>
           <input
@@ -595,7 +595,7 @@ function BlankEditor({ blank }: { blank: BlankParams }) {
       <LabelledField
         label="Thickness"
         unit="mm"
-        hint="Back face to cut face. The engrave job’s usable depth is this minus its own floor allowance."
+        hint="Back face to cut face. The job’s usable depth is this minus its own floor allowance."
       >
         <input
           type="number"
@@ -610,7 +610,7 @@ function BlankEditor({ blank }: { blank: BlankParams }) {
       <LabelledField
         label="Corner radius"
         unit="mm"
-        hint="Rounding on the four corners, measured on the finished part; 0 is a plain rectangle. Nothing downstream models it, so this changes the printed part and not the engraving — the job works to the bounding rectangle, which leaves a little phantom material at each corner."
+        hint="Rounding on the four corners, measured on the finished part; 0 is a plain rectangle. Nothing downstream models it, so this changes the printed part and not the cut — the job works to the bounding rectangle, which leaves a little phantom material at each corner."
       >
         <input
           type="number"

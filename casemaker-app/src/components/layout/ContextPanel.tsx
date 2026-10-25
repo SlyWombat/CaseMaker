@@ -28,7 +28,7 @@ const SECTION_TITLES: Record<SidebarSectionId, string> = {
   features: 'Features',
   assets: 'External assets',
   export: 'Export',
-  'cnc-sim': 'Simulate .nc',
+  'cnc-sim': 'Simulate',
   'cnc-engrave': 'Cut',
 };
 

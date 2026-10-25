@@ -94,7 +94,7 @@ export type EngraveRunClient = {
 };
 
 const loadClient = async (): Promise<EngraveRunClient> => {
-  if (!featureSim) throw new Error('the engrave run is not enabled in this build');
+  if (!featureSim) throw new Error('the run is not enabled in this build');
   return import('@/engine/jobs/simClient');
 };
 let clientLoader: () => Promise<EngraveRunClient> = loadClient;

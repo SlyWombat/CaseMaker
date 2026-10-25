@@ -197,7 +197,7 @@ export const engraveDetailsSchema = z
     coupon: engraveCouponSchema.nullable().describe('The coupon summary, or null for a job or design run.'),
     pair: engravePairSchema.nullable().describe('The two-program summary, or null when only one program ran.'),
   })
-  .describe('The engrave command’s own details.');
+  .describe('The job command’s own details.');
 
 /** Everything `casemaker export` reports beyond the receipt envelope. */
 export const exportDetailsSchema = z
@@ -449,8 +449,8 @@ const envelope = {
  */
 export const receiptSchema = z.discriminatedUnion('command', [
   z
-    .object({ ...envelope, command: z.literal('engrave').describe('The command that produced this receipt.'), details: engraveDetailsSchema })
-    .describe('The receipt of an engrave run.'),
+    .object({ ...envelope, command: z.literal('engrave').describe('The command this receipt describes: always `engrave` — `cut` is the same command, and the receipt does not change with its spelling.'), details: engraveDetailsSchema })
+    .describe('The receipt of a job run.'),
   z
     .object({ ...envelope, command: z.literal('export').describe('The command that produced this receipt.'), details: exportDetailsSchema })
     .describe('The receipt of a project export.'),

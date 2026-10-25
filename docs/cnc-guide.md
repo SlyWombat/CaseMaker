@@ -3,7 +3,7 @@
 This is the user guide for Case Maker's CNC work, written for someone who owns a
 **Makera Z1** and has never driven a CNC before. It covers the whole workflow: simulating
 a G-code file, and engraving text into a printed PLA blank held in the vise — the two-colour
-badge is the first job. Chapter 5 says which parts of the engraving side are in the app today.
+badge is the first job. Chapter 5 says which parts of the job are in the app today.
 
 Two things to hold on to before you read on:
 
@@ -39,7 +39,7 @@ if a sentence says "will", it is not shipping yet. Everything is in millimetres.
 
 **What it is.** Case Maker can do two CNC things for a Makera Z1: **simulate** a G-code file
 you already have (so you can see what it cuts before risking a blank), and **write** a cutting
-job — the default is an engraving program for a printed PLA blank, the two-colour badge, held
+job — the default is a job for a printed PLA blank, the two-colour badge, held
 in the vise. The job is one document, and it writes up to four files: the program, its frame
 file, a facing file when the job has one, and a run record (§5, step 8). The **desktop** build
 can upload and play them from the Cut panel — one program, or a whole multi-program list
@@ -263,7 +263,8 @@ simulation works from an assumed one until you give it a better number.
 You have a `.nc` file — from Makera Studio, from another CAM tool, or from Case Maker's own
 engraver — and you want to see what it does before it touches a blank.
 
-The **Simulate .nc** entry sits in the sidebar under a **CNC** divider, below Export. It is
+The **Simulate** entry sits in the sidebar under a **CNC** divider, below Export. It plays a
+program — this job’s, or any `.nc` file you open — and it is
 present in rack mode too.
 
 ![The sidebar with the two CNC entries](https://raw.githubusercontent.com/SlyWombat/CaseMaker/main/docs/assets/cnc/cnc-mockup-sidebar.png)
@@ -382,7 +383,7 @@ answer *"will this come out clean"*.
 program (a 2 mm flat end mill, stock prefilled from its `;@MKR|` header) and is the fastest way to
 see the panel work:
 
-1. Open the **Simulate .nc** panel (sidebar, under the **CNC** divider).
+1. Open the **Simulate** panel (sidebar, under the **CNC** divider).
 2. Click **Open .nc…** and pick `docs/bench/165-depth-ladder-row-A.nc` (or drag it onto the panel).
 3. The stock is prefilled **"from file header"**. The file's `;@CM|TOOL` line names a house cutter
    you may not have — the form says so; pick any **flat end mill** (the built-in one needs no
@@ -570,7 +571,7 @@ can also be imported as a job** (#437): **Import a design (.3mf)…** reads a Pr
 and turns its blank, its magnet pocket and every volume it cuts into this job; the cutter, the
 vise and the margins are left as they are.
 
-**Facing — skim the finish off before engraving (#432, #474, #493).** Facing is offered on wood
+**Facing — skim the finish off before the cut (#432, #474, #493).** Facing is offered on wood
 and metal only. On any plastic it is never offered, whatever finish the blank states — printed
 PLA or PETG, a purchased acrylic or ABS sheet, or a two-colour engraving laminate. The refusal
 names the material: `facing is not offered on <material>: a flat cutter smears a plastic top`,
@@ -582,8 +583,8 @@ drop per stock axis, written only by a measurement — #496), else the shop's ro
 figure. A bow is a property of the piece as clamped, so it is never assumed from the blank alone:
 until this job's own surface has been touched, no bow is claimed.
 A facing job is **two programs** — a facing pass with its own flat cutter,
-then the engraving program from the faced top — each with its own tool-length calibration and
-its own Z0. The run sheet orders them probe → face → re-touch → engrave.
+then the program from the faced top — each with its own tool-length calibration and
+its own Z0. The run sheet orders them probe → face → re-touch → cut.
 
 **Depth is bounded by every plane the job knows.** Each floor has to stay clear of a void's
 ceiling, the stock's underside, a layer boundary or a laminate's colour cap by the **boundary
@@ -725,7 +726,7 @@ the stock, the feeds and the steps to follow at the machine, derived from how th
   named miss.
 - **Fit the cutter and measure its length** (`M491`), then the **dry run** (the frame file, 20 mm
   up), then the **cut**, the carried warnings, and the record afterwards.
-- On a **facing** job the order is probe → face → re-touch → engrave: the probe sets Z0, the
+- On a **facing** job the order is probe → face → re-touch → cut: the probe sets Z0, the
   facing cutter is fitted first, and after the skim the change step fits the **engraving**
   cutter and re-touches the faced top. The re-touch is a measurement, not a fixed depth: it
   checks the reading against the top the skim was posted to leave, ± the shop's
@@ -802,7 +803,7 @@ tool-length repeatability and how the collet seats. Writing it down is how the a
 become measured ones. The run record also carries the wall clocks per phase, so the next
 estimate is compared with the last measured run.
 
-**Try it on a committed sample.** `docs/bench/single-barrel.job.json` is the same engrave job the
+**Try it on a committed sample.** `docs/bench/single-barrel.job.json` is the same job the
 headless round-trip test pins (`docs/bench/single-barrel.receipt.json`), so it opens in the app and
 generates the program you can compare against the committed receipt. The run itself needs a
 machine on the network; everything up to the upload works in the desktop build without one.
@@ -1132,12 +1133,12 @@ but something is assumed or unmeasured), or **info** (worth knowing).
 | `cut-from-unknown-xy` | info | A cut starting from an unknown X,Y is swept as a plunge at its end point only. | Expect a small gap at the start. |
 
 **Verifying the program** (verifier). These are the codes the *verifier* raises when it reads a saved
-program back — what the **Verified** row in the engrave flow is: the parser, the dialect whitelist,
+program back — what the **Verified** row in the job flow is: the parser, the dialect whitelist,
 the runner and the depth checks run over the file itself, and every error any of them finds is
 carried under one of these names. Two of them (`parse-error`, `runner-error`) wrap the reading and
 running passes above; the rest are the checks the runner does not do on its own.
 
-**It runs on what the app produces, and is not a gate on imports.** The three callers are the engrave
+**It runs on what the app produces, and is not a gate on imports.** The three callers are the job
 run, a restart, and the bench file generator — so a file you open or import is read and simulated,
 never verified, and nothing below checks a foreign program's depths, feeds or spindle starts. What a
 simulation does report about one is the sweep's own list, next:
@@ -1206,7 +1207,7 @@ simulation does report about one is the sweep's own list, next:
 | `item-over-void` | warning / error | An item cuts over a declared under-surface void (#231), whose membrane has nothing under it (#171). True at any depth — even a shallow cut there will chatter and finish rough. A single-line trace is warned about the same way (#270); a plunge drill is not, because a drill into a void is a breach `cut-too-deep` refuses, and a drilled hole has no pocketed floor to finish. A cut that goes THROUGH the blank — a `through` region or a cut-out's kerf — is an ERROR instead (#218): it leaves the blank and breaks into the cavity, and the membrane is the only material holding the freed piece. | Move the cut clear of the void. A BLIND cut deep enough to break through is refused separately by the verifier as `cut-too-deep`. A through cut is not: `stackDepthLimit` returns the blank's own floor wherever the through mask says the cut leaves the blank, so the void limit never binds it. For a through cut over a void, this error is the only guard. |
 | `item-depth-bound` | error | An item's floor lands on the wrong side of a plane it must stay clear of (#345). Raised for the colour split on a two-colour blank — a label's `depthIntent` chooses which SIDE of the split its floor belongs on, *surface* above it, *reveal* through it (#285) — and for a void's ceiling under the item's own footprint: the label cut over a magnet pocket is told where that ceiling is and how far above it the floor must stay (#345). Only a plane the job knows about can be broken, so a blank that states no split and a label that states no intent (or *custom*) are left alone. Where the split is known it is read off the printer's real layers, not the nominal design height, so changing the layer height moves it; a void's ceiling is read off the layer stack when the blank states its print and off the design's own membrane when it does not. `cut-too-deep` is the per-move backstop for both these planes — the cutter reaches a void's ceiling part-way through a move — and is the only check for an item that is not a label (a drawn shape, a traced path). An item past the stock's minimum floor is `depth-exceeds-stock`. Formerly `item-wrong-colour`. | Set the depth to the other side of the plane, or switch the label's intent. The message names the plane, where it is in mm, and which side the floor must be on. |
 
-**Checking the engraving job** (job):
+**Checking the job** (job):
 
 | Code | Severity | What it means in plain words | What to do |
 |---|---|---|---|
@@ -1259,7 +1260,7 @@ simulation does report about one is the sweep's own list, next:
 | `thread-flute-unproven` | warning | Nothing recorded for the thread mill states its flute length, so the run-out below the last full thread has not been shown to clear the flutes (#208 records the owned cutters' lengths). | Record the cutter's flute length. |
 | `tool-missing` | error | The job names a tool that is not in the library. | Pick a real tool. |
 | `tool-metal-line` | error | The cutter is on Makera's "for Metal" line — its name says so (the `(Metal)` suffix a catalogue row uses, or the phrase `for Metal` the printed label carries), or its box code holds the `-M-` segment — and this job cuts wood or plastic. Its geometry and its coating are ground for metal, and no feed row was written for it on this material, so the pass is refused (#405). | Use a wood/plastic engraving bit for this blank, or change the stock to a metal before cutting. |
-| `vise-jaw-collision` | error | A cut's swept extent comes inside the job's jaw clearance of a jaw face (the extent is an engrave's own outline — a pocket, or a label's glyph outline, both cut with the toolpath held inside it — a trace's stroke plus its radius, or a drill/thread disc), or the cut works so far below the jaw tops that the cutter's flute cannot reach it with the clearance kept (#488). A blank below the jaw tops is not refused by itself: what matters is where its cuts are. | Move the cut in from the jaw, or raise the blank on a packer and state how far it then stands proud; for the depth case, use a cutter with a longer flute. |
+| `vise-jaw-collision` | error | A cut's swept extent comes inside the job's jaw clearance of a jaw face (the extent is an operation's own outline — a pocket, or a label's glyph outline, both cut with the toolpath held inside it — a trace's stroke plus its radius, or a drill/thread disc), or the cut works so far below the jaw tops that the cutter's flute cannot reach it with the clearance kept (#488). A blank below the jaw tops is not refused by itself: what matters is where its cuts are. | Move the cut in from the jaw, or raise the blank on a packer and state how far it then stands proud; for the depth case, use a cutter with a longer flute. |
 | `vise-default` | warning | The vise dimensions are unmeasured defaults, so collisions cannot be trusted. | Measure your vise. |
 | `vise-stock-not-proud` | warning | The blank sits at or below the jaw tops. Since #488 this is a note, not a refusal: the job's cuts were measured against the jaw faces and every one keeps the jaw clearance, so no packer is needed. | Nothing, unless a `vise-jaw-collision` names the cut that does not clear. |
 | `vise-seat` | info | Which seat the blank's underside rests on — the soft jaws' ledge (3.1 mm below the jaw tops) or the vise body's floor (20 mm, PROVISIONAL until the bench calipers it, #508) — and how far that leaves the blank standing proud. It is a statement about the setup, not a fault in it. | Nothing, unless the proud it states is not what you see; then change the seat on the vise row or state the proud yourself. |
@@ -1388,7 +1389,7 @@ one of the app's screens did not finish drawing.
 | `panel-render-error` | error | The Cut panel or its setup flow threw while drawing. The message is the throw's own message and the panel's name; in a dev build the console prints the component stack. The rest of the window keeps working. | Press **Reload the panel**. If it throws again, report it with the console's component stack. |
 
 **Running a job without the app** (headless — #483). The command-line surface is `casemaker`
-(§8.6): `engrave`, `export`, `location`, `readback` and the `machine` subcommands all run in Node.
+(§8.6): `cut`, `export`, `location`, `readback` and the `machine` subcommands all run in Node.
 One capability needs the app's browser environment and is refused by name rather than throwing
 `document is not defined`. The browser-only export trigger is not a headless capability: the
 commands write files directly, so it is excluded from the headless compile rather than stubbed.
@@ -1502,8 +1503,8 @@ not have* — instead of passing the closest match off as the answer.
 
 | Symptom | What it means |
 |---|---|
-| **Save is disabled** (engrave) | One of the three gates has not passed (#206). The failing row — Toolpath generated, Verified, Simulated — says which, with the reason beside it. Fix it and generate again. |
-| **My text disappeared** (engrave) | The cutter's radius opened the glyph and removed the stroke (#201). Read the `item-detail-lost` / `item-chars-lost` row; use a bigger size or a smaller cutter. |
+| **Save is disabled** (the job) | One of the three gates has not passed (#206). The failing row — Toolpath generated, Verified, Simulated — says which, with the reason beside it. Fix it and generate again. |
+| **My text disappeared** (the job) | The cutter's radius opened the glyph and removed the stroke (#201). Read the `item-detail-lost` / `item-chars-lost` row; use a bigger size or a smaller cutter. |
 | **The simulation says the cutter hits the vise** | A `holder-collision` or fixture finding (#203). The jaws and the blank's height above them disagree; re-check the vise numbers and how proud the blank sits. |
 | **The simulator refuses my file** | See the refusal banner's code: `laser-job`, `rotary-job`, `dense-3d-refused`, or `tool-refused`. Chapter 8.1 explains each. |
 | **The part came out mirrored / rotated / offset** | The work origin or the placement is wrong. The app's `placement: stub` badge means it assumed the position; on the machine, re-probe the origin. Also check `stock-axes-unverified` — which stock dimension runs along X is unverified. |
@@ -1557,11 +1558,11 @@ Run it from the `casemaker-app` directory:
 ```text
 cd casemaker-app
 npm run casemaker -- --help
-npm run casemaker -- engrave ../docs/bench/single-barrel.job.json --out /tmp/run
+npm run casemaker -- cut ../docs/bench/single-barrel.job.json --out /tmp/run
 ```
 
-`npm run casemaker -- <command>` is the everyday form, and the named aliases `npm run engrave`,
-`export:project`, `location`, `readback:feeds` and `readback:run` call the same command. The
+`npm run casemaker -- <command>` is the everyday form, and the named aliases `npm run cut` (and `npm run engrave`, its
+old name), `export:project`, `location`, `readback:feeds` and `readback:run` call the same command. The
 package's `bin` is `scripts/casemaker.mjs`, so a global install or `npx casemaker` reaches it too.
 
 **`--json` goes anywhere on the line.** Without it, a command prints a human result. With it,
@@ -1572,9 +1573,9 @@ nothing else. It takes no value: `--json=true` is refused before anything runs.
 
 | Command | What it does |
 |---|---|
-| `engrave <job.json> [--out <dir>]` | Generates, verifies, simulates and writes one job: the `.nc`, its frame and its run sheet. `--out` defaults to the job's own directory. |
-| `engrave --coupon <spec.json> [--out <dir>]` | Sweeps a coupon spec into one program per value, with its preview and its fill-in record. |
-| `engrave --from-3mf <design.3mf>` | Cuts a 3MF design instead of a job. `--turn ccw\|cw`, `--tool <key>`, `--rest <key\|none>`, `--overlap <mm>`, `--third-tool <pct>`, `--location <file>` adjust it. The 3MF reader takes geometry only — a texture is not an outline. |
+| `cut <job.json> [--out <dir>]` | Generates, verifies, simulates and writes one job: the `.nc`, its frame and its run sheet. `--out` defaults to the job's own directory. |
+| `cut --coupon <spec.json> [--out <dir>]` | Sweeps a coupon spec into one program per value, with its preview and its fill-in record. |
+| `cut --from-3mf <design.3mf>` | Cuts a 3MF design instead of a job. `--turn ccw\|cw`, `--tool <key>`, `--rest <key\|none>`, `--overlap <mm>`, `--third-tool <pct>`, `--location <file>` adjust it. The 3MF reader takes geometry only — a texture is not an outline. |
 | `export <project.json> [--out <dir>]` | Compiles a project and writes one print-ready binary STL, with its `-PRINT-NOTES.txt` sidecar. |
 | `location tools\|stock\|machines` | Reads the machine's own document — the app's `location.json`, or a `house.json` — and prints one section. `--location <file>` names the document. |
 | `readback feeds <record.json>` | Takes a filled coupon record and writes its measurements into the `feeds.ts` region. `--dry-run` prints and writes nothing. |
@@ -1674,7 +1675,7 @@ tools are:
 | `patch_case` | Changes case parameters through the app's own patch path, so dependent fields follow; a rejected patch changes nothing. |
 | `compile_project` | Compiles a project to its build plan: node ids and the placement report. |
 | `export_parts` | Lays the compiled parts out print-ready and writes one binary STL with its `-PRINT-NOTES.txt` sidecar. |
-| `generate_program` | Generates, verifies and simulates a job or a 3MF design and writes the `.nc`, frame and run sheet. Returns the engrave receipt. |
+| `generate_program` | Generates, verifies and simulates a job or a 3MF design and writes the `.nc`, frame and run sheet. Returns the job receipt. |
 | `run_sheet` | Builds a job like `generate_program` and returns its run sheet as Markdown, beside the receipt. |
 | `read_location` | Reads the machine's own document: its tools, stock shelf or machines. |
 
@@ -1707,11 +1708,11 @@ The repo carries two samples whose receipts are pinned byte-for-byte by `tests/u
 # A board project → one print-ready STL + its -PRINT-NOTES.txt sidecar.
 npm run casemaker -- export ../docs/bench/bench-sample.caseproj.json --out /tmp/casemaker-sample
 
-# An engrave job → the .nc, its frame, its run sheet and the receipt (human output).
-npm run casemaker -- engrave ../docs/bench/single-barrel.job.json --out /tmp/casemaker-sample
+# A job → the .nc, its frame, its run sheet and the receipt (human output).
+npm run casemaker -- cut ../docs/bench/single-barrel.job.json --out /tmp/casemaker-sample
 
 # The same, machine-readable — stdout is exactly the receipt document.
-npm run casemaker -- --json engrave ../docs/bench/single-barrel.job.json --out /tmp/casemaker-sample
+npm run casemaker -- --json cut ../docs/bench/single-barrel.job.json --out /tmp/casemaker-sample
 ```
 
 Each command exits `0` and prints one receipt. The committed `docs/bench/bench-sample.receipt.json`

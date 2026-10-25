@@ -1778,7 +1778,7 @@ const engraveJobV3Schema = engraveJobV2Schema
  * the MCP schema generator emits one document rather than three migrated copies.
  */
 export const engraveJobDocumentSchema = engraveJobV3Schema.describe(
-  'A Case Maker engrave job: the stock, the cutter, the workholding and every feature to cut.',
+  'A Case Maker job: the stock, the cutter, the workholding and every feature to cut.',
 );
 
 /** The version this build writes. A higher literal is refused by name, never parsed. */

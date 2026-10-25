@@ -1,5 +1,6 @@
 import { useState, type CSSProperties, type JSX } from 'react';
 import { EngraveItemRow } from '@/components/panels/EngraveItemRow';
+import { traceOperationName } from '@/engine/cnc/engrave/partPlan';
 import { rowSummary } from '@/components/panels/engraveRowText';
 import { STROKE_FONTS } from '@/engine/fonts/stroke/strokeFont';
 import type { JobFinding } from '@/engine/cnc/engrave/jobSetup';
@@ -144,7 +145,7 @@ export function EngraveTraceRow({
       glyph={trace.kind === 'line' ? '∿' : '𝑡'}
       kindWord={kindLabel}
       typeLabel="Engrave"
-      name={trace.name?.trim() ? trace.name : kindLabel}
+      name={traceOperationName(trace)}
       summary={rowSummary(trace.depth)}
       enabled={trace.enabled}
       enabledTitle="A disabled trace is kept in the job but not cut."

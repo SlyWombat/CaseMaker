@@ -56,7 +56,7 @@ test('the job file is the owner: Save, a refused Open, then an Open that replace
     page.waitForEvent('download'),
     page.getByTestId('engrave-job-save').click(),
   ]).then(([download]) => download);
-  expect(saved.suggestedFilename()).toBe('Untitled_engrave_job.cutjob.json');
+  expect(saved.suggestedFilename()).toBe('Untitled_job.cutjob.json');
   const savedPath = await saved.path();
   expect(savedPath).not.toBeNull();
   const doc = JSON.parse(readFileSync(savedPath!, 'utf8')) as {
@@ -67,7 +67,7 @@ test('the job file is the owner: Save, a refused Open, then an Open that replace
   expect(doc.schemaVersion).toBe(3);
   expect(doc.labels[0]!.text).toBe('CASE');
   expect('package' in doc).toBe(false);
-  await expect(page.getByTestId('engrave-job-file-name')).toContainText('Untitled_engrave_job.cutjob.json');
+  await expect(page.getByTestId('engrave-job-file-name')).toContainText('Untitled_job.cutjob.json');
   await expect(page.getByTestId('engrave-job-dirty')).toBeHidden();
 
   // A file that does not parse changes nothing at all.
@@ -82,7 +82,7 @@ test('the job file is the owner: Save, a refused Open, then an Open that replace
   await expect(page.getByTestId('engrave-job-notice')).toHaveAttribute('data-kind', 'error');
   await revealFirstLabel(page);
   await expect(page.getByTestId('engrave-label-text-0')).toHaveValue('CASE');
-  await expect(page.getByTestId('engrave-job-file-name')).toContainText('Untitled_engrave_job.cutjob.json');
+  await expect(page.getByTestId('engrave-job-file-name')).toContainText('Untitled_job.cutjob.json');
 
   // A good file replaces the open document: the label row shows the file's text, the bar its name.
   const editedDoc = { ...doc, name: 'From disk', labels: [{ ...doc.labels[0]!, text: 'OPENED' }] };

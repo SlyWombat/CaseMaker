@@ -1665,7 +1665,7 @@ describe('facing the stock’s top (#432 slices 1–2)', () => {
     expect(finding?.severity).toBe('error');
     expect(finding?.message).toBe(
       'facing is not offered on PLA: a flat cutter smears a plastic top. ' +
-        'Turn facing off in the Engrave panel and generate again.',
+        'Turn facing off in the Cut panel and generate again.',
     );
     // Nothing was posted: not the face file, not the engraving, and no program list to release.
     expect(g.facingNc).toBeNull();

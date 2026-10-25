@@ -10,6 +10,7 @@
   "scripts": {
     "casemaker": "tsx --tsconfig tsconfig.scripts.json scripts/casemaker.ts",
     "engrave": "npm run casemaker -- engrave",
+    "cut": "npm run casemaker -- cut",
     "export:project": "npm run casemaker -- export",
     "location": "npm run casemaker -- location",
     "readback:feeds": "npm run casemaker -- readback feeds",

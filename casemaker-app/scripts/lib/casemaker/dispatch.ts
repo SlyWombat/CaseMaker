@@ -15,7 +15,7 @@ import { HUMAN, type CommandOptions } from './output';
 export type CommandHandler = (argv: string[], options: CommandOptions) => Promise<number>;
 
 export interface CasemakerHandlers {
-  /** `engrave`, including `--coupon` and `--from-3mf`. */
+  /** `cut` (the old name `engrave` still routes here), including `--coupon` and `--from-3mf`. */
   engrave: CommandHandler;
   /** `export <project.json>`. */
   exportProject: CommandHandler;
@@ -35,9 +35,9 @@ export interface CliIo {
 export const USAGE = [
   'usage: casemaker <command> [options]',
   '',
-  '  casemaker engrave <job.json> [--out <dir>]',
-  '  casemaker engrave --coupon <coupon-spec.json> [--out <dir>]',
-  '  casemaker engrave --from-3mf <design.3mf> [--turn ccw|cw] [--tool <key>]',
+  '  casemaker cut <job.json> [--out <dir>]',
+  '  casemaker cut --coupon <coupon-spec.json> [--out <dir>]',
+  '  casemaker cut --from-3mf <design.3mf> [--turn ccw|cw] [--tool <key>]',
   '          [--rest <key|none>] [--overlap <mm>] [--third-tool <pct>] [--out <dir>]',
   '          [--location <location.json|house.json>]',
   '  casemaker export <project.json> [--out <dir>] [--location <location.json|house.json>]',
@@ -55,7 +55,8 @@ export const USAGE = [
   'exactly that receipt document and progress goes to stderr. status, version, hashes and finished',
   'only read; upload, play, home and probe move the machine and require --confirm — a program hash',
   'for the two that run one, the literal word (home, probe) for the two that have no program.',
-  'Nothing here switches power (#479: the plug is outside Case Maker).',
+  'Nothing here switches power (#479: the plug is outside Case Maker). `casemaker engrave` is the',
+  'same command under its old name and prints the same receipt.',
 ].join('\n');
 
 /** `--json` takes no value: the receipt has one shape, so there is no format to negotiate. */
@@ -86,7 +87,10 @@ export async function dispatch(
   }
 
   switch (command) {
+    case 'cut':
     case 'engrave':
+      // #662 — the entry is the job, and `cut` is its verb. `engrave` is kept as the alias so
+      // every documented invocation, bench script and receipt comparison keeps working.
       return handlers.engrave(rest, options);
     case 'export':
       return handlers.exportProject(rest, options);

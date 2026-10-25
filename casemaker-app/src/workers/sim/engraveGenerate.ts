@@ -2503,7 +2503,7 @@ export function engraveGenerate(
         {
           severity: 'error',
           code: 'facing-plastic',
-          message: `${facingMaterialRefusal}. Turn facing off in the Engrave panel and generate again.`,
+          message: `${facingMaterialRefusal}. Turn facing off in the Cut panel and generate again.`,
         },
       ],
       feeds: null,

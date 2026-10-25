@@ -1,5 +1,6 @@
 import { useState, type CSSProperties, type JSX } from 'react';
 import { EngraveItemRow } from '@/components/panels/EngraveItemRow';
+import { itemOperationName } from '@/engine/cnc/engrave/partPlan';
 import { regionChipLabel, useRegionOperationType } from '@/components/panels/operationTypes';
 import { rowSummary } from '@/components/panels/engraveRowText';
 import type { JobFinding } from '@/engine/cnc/engrave/jobSetup';
@@ -156,7 +157,7 @@ export function EngraveShapeRow({
       glyph={KIND_GLYPH[shape.kind]}
       kindWord={KIND_LABEL[shape.kind]}
       typeLabel={regionChipLabel(shape.through, region)}
-      name={shape.name?.trim() ? shape.name : KIND_LABEL[shape.kind]}
+      name={itemOperationName(shape)}
       summary={shape.through === true ? 'through' : rowSummary(shape.depth)}
       enabled={shape.enabled}
       enabledTitle="A disabled shape is kept in the job but not cut."

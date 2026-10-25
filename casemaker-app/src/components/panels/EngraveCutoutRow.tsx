@@ -1,5 +1,6 @@
 import type { CSSProperties, JSX } from 'react';
 import { EngraveItemRow } from '@/components/panels/EngraveItemRow';
+import { cutoutOperationName } from '@/engine/cnc/engrave/partPlan';
 import type { JobFinding } from '@/engine/cnc/engrave/jobSetup';
 import type { CutoutPatch } from '@/store/engraveJobStore';
 import type { EngraveCutout } from '@/types/engraveJob';
@@ -61,7 +62,7 @@ export function EngraveCutoutRow({
       glyph="⌐"
       kindWord="Cut-out"
       typeLabel="Profile"
-      name={cutout.name?.trim() ? cutout.name : 'Cut-out'}
+      name={cutoutOperationName(cutout, cutout.of === 'stock-inset' ? null : (targets.find((t) => t.id === cutout.of)?.label ?? null))}
       summary={tabCount === 0 ? 'no tabs' : `${tabCount} tab${tabCount === 1 ? '' : 's'}`}
       enabled={cutout.enabled}
       enabledTitle="A disabled cut-out is kept in the job but not cut."

@@ -109,7 +109,7 @@ export function defaultEngraveJob(
     // #419 — the job's own identity, minted here so a fresh job is a complete document rather than
     // one whose id appears only after a parse. Like the label ids below it, a copy gets its own id.
     id: newId('job'),
-    name: 'Untitled engrave job',
+    name: 'Untitled job',
     // #347 — the one mill this app models, READ from the profile rather than typed. A job's
     // machine decides which materials the setup offers and which envelope the stock is bounded by,
     // so it has to be stated in the document like every other fact the job runs on.

@@ -583,7 +583,7 @@ describe('EngravePanel — the run sheet mount (#207)', () => {
     // overlay appears on a later tick rather than synchronously.
     const sheet = await screen.findByTestId('run-sheet');
     const expected = runSheetFileName(useEngraveJobStore.getState().job.name);
-    expect(expected).toBe('Untitled-engrave-job.nc');
+    expect(expected).toBe('Untitled-job.nc');
     expect(sheet.textContent).toContain(expected);
 
     // Save's file name is the sheet's, not the mesh-export sanitiser's — asserted, not trusted.
@@ -596,7 +596,7 @@ describe('EngravePanel — the run sheet mount (#207)', () => {
     expect(savedName).toBe(useEngraveJobStore.getState().job.name);
     // The frame the panel hands over is the run's own verified one — never re-derived here.
     expect(savedFrame).toBe(useEngraveRunStore.getState().generated!.frameNc);
-    expect(runSheetFrameFileName(savedName)).toBe('Untitled-engrave-job-frame.nc');
+    expect(runSheetFrameFileName(savedName)).toBe('Untitled-job-frame.nc');
     // §6 and the saved file agree about the name, which is the whole point of the shared sanitiser.
     expect(sheet.textContent).toContain(runSheetFrameFileName(savedName));
   });

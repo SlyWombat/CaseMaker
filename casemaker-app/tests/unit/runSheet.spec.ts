@@ -516,7 +516,7 @@ describe('runSheet (#207)', () => {
     it('carries the planner’s own caveats — the static-.nc rotation limit and why Z is probed', () => {
       const texts = origin(dj()).join(' ');
       expect(texts).toContain('a static .nc cannot compensate it');
-      expect(texts).toContain('Z is always probed on the engraved face');
+      expect(texts).toContain('Z is always probed on the face to be cut');
     });
 
     it('prints a refusal as a refusal, rather than a sequence it cannot stand behind', () => {
@@ -939,11 +939,11 @@ describe('runSheet (#207)', () => {
     };
     // The identity every one-setup job carries: the length between the jaws, top face up.
     const identity = load({ top: 'top', bottom: 'bottom', left: 'left', right: 'right', front: 'front', back: 'back' });
-    expect(identity.text).toBe("The blank's length runs left–right between the jaws. The face to be engraved is up.");
+    expect(identity.text).toBe("The blank's length runs left–right between the jaws. The face to be cut is up.");
     expect(identity.value).toBe('120 mm');
     // Tipped so the stock's FRONT face is up: the length is still the way round the jaws.
     const tipped = load({ top: 'front', bottom: 'back', left: 'left', right: 'right', front: 'top', back: 'bottom' });
-    expect(tipped.text).toContain("The stock's front face is up — that is the face to be engraved.");
+    expect(tipped.text).toContain("The stock's front face is up — that is the face to be cut.");
     expect(tipped.value).toBe('120 mm');
     // Quarter-turned: the WIDTH now runs between the jaws, and the width is the number printed.
     const turned = load({ top: 'top', bottom: 'bottom', left: 'front', right: 'back', front: 'left', back: 'right' });
@@ -1447,7 +1447,7 @@ describe('runSheet — the facing phase (#432 slice 3)', () => {
     expect(steps[0]!.text).toContain('still has a 0.5 mm facing pass');
     expect(steps[0]!.text).toContain('The facing program was not produced');
     expect(steps[0]!.text).toContain('facing is not offered on PLA');
-    expect(steps[0]!.text).toContain('turn facing off in the Engrave panel');
+    expect(steps[0]!.text).toContain('turn facing off in the Cut panel');
     expect(steps[0]!.value).toBe('facing on, not offered');
     expect(steps[0]!.bold).toBe(true);
   });
@@ -1531,7 +1531,7 @@ describe('runSheet — the facing phase (#432 slice 3)', () => {
     const faceAt = facing.findIndex((s) => s.text.includes(runSheetFaceFileName(job.name)));
     const retouchAt = facing.findIndex((s) => s.record === 'faced surface Z (mm)');
     const engraveFitAt = facing.findIndex((s) => s.record === 'the engraving cutter’s PRB (mm)');
-    const engraveZ0At = facing.findIndex((s) => s.record === 'Z0 for the engraving program (mm)');
+    const engraveZ0At = facing.findIndex((s) => s.record === 'Z0 for the program (mm)');
     expect(faceAt).toBeGreaterThanOrEqual(0);
     expect(retouchAt).toBeGreaterThan(faceAt);
     expect(engraveFitAt).toBeGreaterThan(retouchAt);

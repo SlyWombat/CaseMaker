@@ -438,7 +438,7 @@ test('#411 — ten items each on one line, remove at the front of the line, and 
   // The undo puts it back at the index it came from, not at the end of the list.
   await page.getByTestId('engrave-undo').click();
   await expect(page.getByTestId('engrave-item-count')).toHaveText('10');
-  await expect(page.locator('[data-testid="engrave-label-row-0"] .engrave-item-row__name')).toHaveText('CASE');
+  await expect(page.locator('[data-testid="engrave-label-row-0"] .engrave-item-row__name')).toHaveText('Engrave "CASE"');
   await expect(page.getByTestId('engrave-undo-strip')).toHaveCount(0);
 });
 
@@ -633,7 +633,7 @@ test('#411 — ten MIXED items and a void on one line at 1440 × 900, and Ctrl-Z
   await expect(page.getByTestId('engrave-undo')).toBeFocused();
   await page.keyboard.press('Control+z');
   await expect(page.getByTestId('engrave-item-count')).toHaveText('10');
-  await expect(page.locator('[data-testid="engrave-label-row-0"] .engrave-item-row__name')).toHaveText('CASE');
+  await expect(page.locator('[data-testid="engrave-label-row-0"] .engrave-item-row__name')).toHaveText('Engrave "CASE"');
   await expect(page.getByTestId('engrave-undo-strip')).toHaveCount(0);
   // …and it comes BACK the same way it went: the Undo button was inside the strip, so taking the
   // undo removes the focused element and focus would fall to `<body>` a second time. It lands on
@@ -646,6 +646,6 @@ test('#411 — ten MIXED items and a void on one line at 1440 × 900, and Ctrl-Z
   // about the case, not the engrave job, and is deliberately not asserted here.)
   await page.keyboard.press('Control+z');
   await expect(page.getByTestId('engrave-item-count')).toHaveText('10');
-  await expect(page.locator('[data-testid="engrave-label-row-0"] .engrave-item-row__name')).toHaveText('CASE');
+  await expect(page.locator('[data-testid="engrave-label-row-0"] .engrave-item-row__name')).toHaveText('Engrave "CASE"');
   await expect(page.getByTestId('engrave-undo-strip')).toHaveCount(0);
 });

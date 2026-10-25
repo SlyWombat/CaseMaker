@@ -207,16 +207,17 @@ function parseArgs(argv: string[]): Args {
 }
 
 function fail(message: string): never {
-  console.error(`casemaker engrave: ${message}`);
+  console.error(`casemaker cut: ${message}`);
   throw new CliExit(1);
 }
 
 const USAGE =
-  'usage: casemaker engrave <job.json> [--out <dir>]\n' +
-  '       casemaker engrave --coupon <coupon-spec.json> [--out <dir>]\n' +
-  '       casemaker engrave --from-3mf <design.3mf> [--turn ccw|cw] [--tool <key>]\n' +
+  'usage: casemaker cut <job.json> [--out <dir>]\n' +
+  '       casemaker cut --coupon <coupon-spec.json> [--out <dir>]\n' +
+  '       casemaker cut --from-3mf <design.3mf> [--turn ccw|cw] [--tool <key>]\n' +
   '              [--rest <key|none>] [--overlap <mm>] [--third-tool <pct>] [--out <dir>]\n' +
-  '       [--location <location.json|house.json>]  (any input; default: the app’s own location)';
+  '       [--location <location.json|house.json>]  (any input; default: the app’s own location)\n' +
+  '       (casemaker engrave is the same command under its old name; the receipt is the same)';
 
 /** A pipeline that stopped, as the receipt needs it (#478). */
 interface EngraveFailure {

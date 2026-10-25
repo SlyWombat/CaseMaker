@@ -871,7 +871,7 @@ export async function retouchSurface(
     if (
       !(await deps.operator({
         kind: 'fit-probe',
-        text: 'Fit the wired probe again: the faced top is measured before the engraving file is posted from it.',
+        text: 'Fit the wired probe again: the faced top is measured before the program file is posted from it.',
       }))
     ) {
       throw new Stop('stopped: the probe was not fitted');

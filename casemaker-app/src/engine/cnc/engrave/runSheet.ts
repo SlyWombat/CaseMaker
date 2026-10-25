@@ -1228,7 +1228,7 @@ function facingSteps(
     steps.push({
       text: on
         ? `The facing program was not produced: ${refusal}. This job still has a ` +
-          `${fmtNum(facing.depth)} mm facing pass; turn facing off in the Engrave panel and generate ` +
+          `${fmtNum(facing.depth)} mm facing pass; turn facing off in the Cut panel and generate ` +
           'again before running it.'
         : `No facing pass — ${refusal}.`,
       bold: on,
@@ -1261,7 +1261,7 @@ function facingSteps(
       text:
         'The facing program was not produced' +
         (generated.facingError == null ? '' : `: ${generated.facingError}`) +
-        '. The engraving program can still be run, but the top will not be skimmed — clear the ' +
+        '. The program can still be run, but the top will not be skimmed — clear the ' +
         'reason and generate again.',
       bold: true,
     });
@@ -1275,7 +1275,7 @@ function facingSteps(
       text:
         `The skim runs with the facing cutter fitted above — ${cam.toolName}, ⌀ ` +
         `${fmtNum(cam.diameterMm)} mm flat — not the engraving bit. The release step uploads ` +
-        `${faceFile} with the run and plays it FIRST, before the engraving program.`,
+        `${faceFile} with the run and plays it FIRST, before the program.`,
       value: `⌀ ${fmtNum(cam.diameterMm)} mm`,
     });
     steps.push({
@@ -1317,13 +1317,13 @@ function facingSteps(
   });
   steps.push({
     text:
-      'Set Z0 for the engraving program from the re-touch and those two readings, NOT by touching ' +
+      'Set Z0 for the program from the re-touch and those two readings, NOT by touching ' +
       'the surface again: Z0 = the faced surface Z you just recorded + (the engraving cutter’s PRB ' +
       '− the probe’s PRB recorded when you set the origin). With the engraving cutter fitted, write ' +
       'it with G10 L2: that command zeroes the tool-length offset to the current tool. Home ' +
       `again once it is written, then load ${runSheetFileName(job.name)}.`,
     value: 'Z0 = faced surface + (engraving PRB − probe PRB)',
-    record: 'Z0 for the engraving program (mm)',
+    record: 'Z0 for the program (mm)',
   });
   return steps;
 }
@@ -1389,7 +1389,7 @@ function registrationSteps(
           ? "Z0: the blank's top face — probe it with the probe you just fitted."
           : "Z0: the blank's top face — probe it, or touch off on it.") +
       (facingRun
-        ? ' Record the reading AND the probe’s PRB: this job is skimmed before it is engraved, so ' +
+        ? ' Record the reading AND the probe’s PRB: this job is skimmed before it is cut, so ' +
           'this surface and the probe’s reading are what the facing cutter’s Z0 is worked out from ' +
           'and — after the re-touch on the faced top — the engraving cutter’s too.'
         : ' Record the reading AND the tool that made it: on a job cut by two cutters the second ' +
@@ -3015,8 +3015,8 @@ export function buildRunSheet(
       text:
         `The blank's ${betweenJaws} runs left–right between the jaws. ` +
         (orientation.top === 'top'
-          ? 'The face to be engraved is up.'
-          : `The stock's ${orientation.top} face is up — that is the face to be engraved.`),
+          ? 'The face to be cut is up.'
+          : `The stock's ${orientation.top} face is up — that is the face to be cut.`),
       value: `${fmtNum(betweenJaws === 'length' ? length : width)} mm`,
     },
     {
@@ -3125,7 +3125,7 @@ export function buildRunSheet(
             text:
               'Fit the wired probe, not a cutter. Run tool-length calibration from the app’s console ' +
               'or Studio (M491) and record the PROBE’s PRB: this job is skimmed before it is ' +
-              'engraved, so the probe sets Z0 and its reading is the reference each cutter’s Z0 is ' +
+              'cut, so the probe sets Z0 and its reading is the reference each cutter’s Z0 is ' +
               'worked out against — the facing cutter’s below, and the engraving cutter’s after the ' +
               're-touch.',
             code: 'M491',

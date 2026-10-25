@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": {},
-  "description": "A Case Maker engrave job: the stock, the cutter, the workholding and every feature to cut.",
+  "description": "A Case Maker job: the stock, the cutter, the workholding and every feature to cut.",
   "properties": {
     "breakthrough": {
       "description": "How far a through cut goes past the blank's bottom face, in millimetres.",

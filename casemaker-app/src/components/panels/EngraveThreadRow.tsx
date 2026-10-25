@@ -1,5 +1,6 @@
 import type { CSSProperties, JSX } from 'react';
 import { EngraveItemRow } from '@/components/panels/EngraveItemRow';
+import { threadOperationName } from '@/engine/cnc/engrave/partPlan';
 import { rowSummary } from '@/components/panels/engraveRowText';
 import { FASTENERS, type FastenerSize } from '@/engine/compiler/fasteners';
 import type { JobFinding } from '@/engine/cnc/engrave/jobSetup';
@@ -92,7 +93,7 @@ export function EngraveThreadRow({
       glyph="⌗"
       kindWord="Thread"
       typeLabel="Thread"
-      name={thread.name?.trim() ? thread.name : 'Thread'}
+      name={threadOperationName(thread)}
       summary={rowSummary(thread.depth)}
       enabled={thread.enabled}
       enabledTitle="A disabled thread is kept in the job but not cut."

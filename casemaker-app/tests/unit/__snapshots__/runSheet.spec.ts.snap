@@ -98,9 +98,9 @@ exports[`runSheet (#207) > snapshots the whole RunSheet for a job with a depth b
     "estimatedTime": "1 min 35 s",
     "estimatedTimeNote": "cutting + rapids through the trapezoid, timed on a rapid model of 1200 mm/min XY / 600 mm/min Z at 150 mm/s² (config read 2026-10-07 + stopwatch 2026-10-08) — a planning estimate, not a measured cycle time.",
     "fileHash": "a377421c",
-    "fileName": "Untitled-engrave-job.nc",
+    "fileName": "Untitled-job.nc",
     "generatedOn": "2026-10-04",
-    "jobName": "Untitled engrave job",
+    "jobName": "Untitled job",
     "machine": "Makera Z1",
   },
   "sections": [
@@ -149,7 +149,7 @@ exports[`runSheet (#207) > snapshots the whole RunSheet for a job with a depth b
       "id": "load",
       "steps": [
         {
-          "text": "The blank's length runs left–right between the jaws. The face to be engraved is up.",
+          "text": "The blank's length runs left–right between the jaws. The face to be cut is up.",
           "value": "100 mm",
         },
         {
@@ -204,7 +204,7 @@ exports[`runSheet (#207) > snapshots the whole RunSheet for a job with a depth b
           "text": "Rotation is measured, and a static .nc cannot compensate it (Smoothieware has no variables): apply it in Studio's dialogs, or re-post with the rotation baked into the geometry",
         },
         {
-          "text": "Z is always probed on the engraved face: no fixture can supply it",
+          "text": "Z is always probed on the face to be cut: no fixture can supply it",
         },
         {
           "record": "surface Z at each point (mm), and how each was taken (probe / touch-off)",
@@ -245,11 +245,11 @@ exports[`runSheet (#207) > snapshots the whole RunSheet for a job with a depth b
       "id": "dry-run",
       "steps": [
         {
-          "text": "Load Untitled-engrave-job-frame.nc and run it. The cutter traces the job's outline in the air, 20 mm above the work — no Z offset to set. Watch that the trace stays over the blank and clear of the jaws.",
+          "text": "Load Untitled-job-frame.nc and run it. The cutter traces the job's outline in the air, 20 mm above the work — no Z offset to set. Watch that the trace stays over the blank and clear of the jaws.",
           "value": "20 mm above the work",
         },
         {
-          "text": "If the trace is not where the job should land, stop and change the job. Otherwise load Untitled-engrave-job.nc and cut.",
+          "text": "If the trace is not where the job should land, stop and change the job. Otherwise load Untitled-job.nc and cut.",
         },
       ],
       "title": "6 · Dry run",
@@ -418,9 +418,9 @@ exports[`runSheet (#207) > snapshots the whole RunSheet for the default job 1`] 
     "estimatedTime": "1 min 35 s",
     "estimatedTimeNote": "cutting + rapids through the trapezoid, timed on a rapid model of 1200 mm/min XY / 600 mm/min Z at 150 mm/s² (config read 2026-10-07 + stopwatch 2026-10-08) — a planning estimate, not a measured cycle time.",
     "fileHash": "a377421c",
-    "fileName": "Untitled-engrave-job.nc",
+    "fileName": "Untitled-job.nc",
     "generatedOn": "2026-10-04",
-    "jobName": "Untitled engrave job",
+    "jobName": "Untitled job",
     "machine": "Makera Z1",
   },
   "sections": [
@@ -461,7 +461,7 @@ exports[`runSheet (#207) > snapshots the whole RunSheet for the default job 1`] 
       "id": "load",
       "steps": [
         {
-          "text": "The blank's length runs left–right between the jaws. The face to be engraved is up.",
+          "text": "The blank's length runs left–right between the jaws. The face to be cut is up.",
           "value": "100 mm",
         },
         {
@@ -516,7 +516,7 @@ exports[`runSheet (#207) > snapshots the whole RunSheet for the default job 1`] 
           "text": "Rotation is measured, and a static .nc cannot compensate it (Smoothieware has no variables): apply it in Studio's dialogs, or re-post with the rotation baked into the geometry",
         },
         {
-          "text": "Z is always probed on the engraved face: no fixture can supply it",
+          "text": "Z is always probed on the face to be cut: no fixture can supply it",
         },
         {
           "record": "surface Z at each point (mm), and how each was taken (probe / touch-off)",
@@ -557,11 +557,11 @@ exports[`runSheet (#207) > snapshots the whole RunSheet for the default job 1`] 
       "id": "dry-run",
       "steps": [
         {
-          "text": "Load Untitled-engrave-job-frame.nc and run it. The cutter traces the job's outline in the air, 20 mm above the work — no Z offset to set. Watch that the trace stays over the blank and clear of the jaws.",
+          "text": "Load Untitled-job-frame.nc and run it. The cutter traces the job's outline in the air, 20 mm above the work — no Z offset to set. Watch that the trace stays over the blank and clear of the jaws.",
           "value": "20 mm above the work",
         },
         {
-          "text": "If the trace is not where the job should land, stop and change the job. Otherwise load Untitled-engrave-job.nc and cut.",
+          "text": "If the trace is not where the job should land, stop and change the job. Otherwise load Untitled-job.nc and cut.",
         },
       ],
       "title": "6 · Dry run",

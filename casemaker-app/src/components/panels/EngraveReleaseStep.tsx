@@ -128,7 +128,7 @@ function ChangePanel({
               then to fit the engraving cutter.
             </li>
             <li>
-              No engraving program starts if the re-touch lands outside the shop’s retouch tolerance, or if the
+              No program starts if the re-touch lands outside the shop’s retouch tolerance, or if the
               correction fails: the faced top is not where the skim was posted to leave it.
             </li>
           </>
@@ -154,7 +154,7 @@ function ChangePanel({
           onChange={(e) => setOk(e.target.checked)}
         />{' '}
         {previous.kind === 'facing'
-          ? 'The ENGRAVING cutter is in hand and I am ready for the release step to re-touch the faced top and set Z0 before the engraving program starts.'
+          ? 'The ENGRAVING cutter is in hand and I am ready for the release step to re-touch the faced top and set Z0 before the program starts.'
           : 'The cutter is changed, calibrated (M491), and Z0 is set from the two readings.'}
       </label>
       {/* D-17 — the at-machine tick is per PROGRAM: the bit-change pause cleared it, and program
@@ -284,7 +284,7 @@ export function EngraveReleaseStep({
         <p style={{ ...MUTED, color: '#f0d79b' }} data-testid="engrave-release-facing-note">
           This job faces the stock first: program 1 is the face file, posted to the probed top and carrying the
           vacuum’s ON word. After it, change to the ENGRAVING cutter — not the facing cutter — and re-touch the faced
-          surface with the probe: the engraving programs assume the surface the skim left, and are posted to it, not
+          surface with the probe: the program assumes the surface the skim left, and is posted to it, not
           to the surface the face file found.
         </p>
       )}
@@ -464,7 +464,7 @@ export function EngraveReleaseStep({
           {record.phase === 'retouch' && (
             <div style={BOX} data-testid="engrave-release-retouch">
               <p style={{ fontSize: 12, color: '#e6edf5', margin: '0 0 6px' }}>
-                The faced top is being re-touched and Z0 written for the engraving cutter. No engraving program
+                The faced top is being re-touched and Z0 written for the engraving cutter. No program
                 has started; it starts only after this succeeds.
               </p>
               {record.operatorStep !== null ? (

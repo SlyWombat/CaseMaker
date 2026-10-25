@@ -76,6 +76,21 @@ describe('#477 casemaker dispatch', () => {
     expect(calls.machine).toEqual([['status']]);
   });
 
+  it('#662 — `cut` is the verb and `engrave` its alias: the same handler, the same arguments', async () => {
+    const viaCut = fakes(3);
+    const viaEngrave = fakes(3);
+    expect(await dispatch(['cut', 'job.json', '--out', 'x', '--json'], viaCut.handlers, io().io)).toBe(3);
+    expect(await dispatch(['engrave', 'job.json', '--out', 'x', '--json'], viaEngrave.handlers, io().io)).toBe(3);
+    // One handler, one argument list, one option set: the two spellings cannot produce different
+    // output, because the only difference is the word that selected the handler.
+    expect(viaCut.calls).toEqual(viaEngrave.calls);
+    expect(viaCut.options).toEqual(viaEngrave.options);
+    expect(viaCut.calls.engrave).toEqual([['job.json', '--out', 'x']]);
+    // The usage names the verb and states the old name as the same command.
+    expect(USAGE).toContain('casemaker cut <job.json>');
+    expect(USAGE).toContain('same command under its old name');
+  });
+
   it('prints usage for help and for no command, and nothing goes to a handler', async () => {
     const { handlers, calls } = fakes();
     const help = io();
@@ -162,8 +177,9 @@ describe('#477 casemaker dispatch', () => {
     for (const name of ['pilot:coupon', 'sample:export', 'thread:coupon', 'magnet:coupon', 'fit:coupon']) {
       expect(pkg.scripts[name]).toBeTruthy();
     }
-    // The new aliases route through the one command.
-    for (const name of ['engrave', 'export:project', 'location', 'readback:feeds', 'readback:run']) {
+    // The new aliases route through the one command. #662 — the job verb is `cut`; `engrave` stays
+    // as the alias, so every documented invocation keeps working.
+    for (const name of ['cut', 'engrave', 'export:project', 'location', 'readback:feeds', 'readback:run']) {
       expect(pkg.scripts[name]).toContain('casemaker');
     }
     // And the old script files are wrappers around the extracted commands, not copies.

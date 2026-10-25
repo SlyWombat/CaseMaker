@@ -53,7 +53,7 @@ describe('registrationFor (#272)', () => {
     // The two caveats the sheet has to carry: the file cannot compensate rotation, and Z is the
     // one datum no fixture supplies.
     expect(plan.notes.join(' ')).toContain('a static .nc cannot compensate it');
-    expect(plan.notes.join(' ')).toContain('Z is always probed on the engraved face');
+    expect(plan.notes.join(' ')).toContain('Z is always probed on the face to be cut');
   });
 
   it('is §7.3’s V1 sequence when the job says the jaws are good enough', () => {
