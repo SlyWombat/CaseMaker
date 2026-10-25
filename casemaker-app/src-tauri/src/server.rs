@@ -230,9 +230,12 @@ fn router(store: Arc<HouseStore>, serving_port: u16, config_path: PathBuf) -> Ro
         // #571 — the machine bridge over HTTP, so a LAN browser served this SPA can drive the
         // controller (the desktop webview still uses Tauri IPC). Its own registry: the HTTP server
         // owns these sockets, separate from the Tauri State registry the local webview uses.
-        .merge(crate::machine_api::routes(Arc::new(
-            crate::machine::MachineTransport::default(),
-        )))
+        // #660 — it reads the location too: a request reaches a machine the house knows, on a port
+        // its profile serves, or it reaches nothing.
+        .merge(crate::machine_api::routes(
+            Arc::new(crate::machine::MachineTransport::default()),
+            store.clone(),
+        ))
         // #530 — the machine's camera, the same shape: the server owns the WebSocket to the ESP32
         // and the LAN browser reads it on this server's origin. It reads the location too: only a
         // machine the house knows, on its own camera port, may be dialled.

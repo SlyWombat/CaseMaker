@@ -1436,6 +1436,18 @@ impl HouseStore {
         Ok((bytes, etag))
     }
 
+    /// The location's machine records, WITHOUT building the whole document (#660).
+    ///
+    /// The machine bridge and the camera proxy resolve EVERY connect against these, and `location()`
+    /// serialises the whole view — tools, inventory, stock, feeds — for the endpoint that serves it.
+    /// A status poll every couple of seconds does not need that. The refusal is `location()`'s own:
+    /// a document that cannot be read has no machines this server can vouch for.
+    pub async fn machines(&self) -> Result<Vec<MachineRecord>, HouseError> {
+        let inner = self.inner.read().await;
+        Self::writable(&inner.location_problem)?;
+        Ok(inner.location.machines.clone())
+    }
+
     /// Create or replace one machine record, by id (#412). GUARDED on the location's `ETag`, as the
     /// tool and inventory writes are on theirs (#321): a machine save based on a location somebody
     /// else has since changed is refused rather than winning silently. An upsert rather than a

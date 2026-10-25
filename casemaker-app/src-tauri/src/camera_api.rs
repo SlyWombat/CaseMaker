@@ -29,7 +29,7 @@
 use crate::guard::{foreign_page_refusal, Guard};
 use crate::house::HouseStore;
 use crate::house_api::json_error;
-use crate::location::LocationDoc;
+use crate::machine_profiles::{machines_in, standard_ports, PortsOf};
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{Query, State};
 use axum::http::{HeaderMap, StatusCode};
@@ -51,38 +51,23 @@ const CAMERA_PATH: &str = "/ws_video";
 /// this is a little more patient, and a failure is reported to the pane rather than left hanging.
 const UPSTREAM_TIMEOUT: Duration = Duration::from_secs(5);
 
-/// Which port a profile's camera listens on, or `None` for a machine with no camera.
-///
-/// The single Rust-side copy of the fact `engine/cnc/machine.ts` holds for the client (`Z1.camera`).
-/// It is a table rather than a number because the check is per-profile: a record that names a
-/// profile this build does not know is a machine whose camera this build cannot vouch for, and it
-/// is refused rather than offered the Z1's port.
-fn profile_camera_port(profile_id: &str) -> Option<u16> {
-    match profile_id {
-        "Z1" => Some(82),
-        _ => None,
-    }
-}
-
-/// How the route learns a profile's camera port. Production is {@link profile_camera_port}; the
-/// forwarding test injects a stand-in camera's ephemeral port, which no profile could ever name.
-type PortOf = Arc<dyn Fn(&str) -> Option<u16> + Send + Sync>;
-
 #[derive(Clone)]
 struct CameraState {
     guard: Guard,
     house: Arc<HouseStore>,
-    port_of: PortOf,
+    /// The profile port table (#660 — shared with the `/api/v1/machine/*` bridge). Only the CAMERA
+    /// port is honoured here; the forwarding test injects a stand-in camera's ephemeral port.
+    port_of: PortsOf,
 }
 
 /// The `/api/v1/machine/camera` route, carrying the provenance guard and the house's location.
 /// Merged into the API router BEFORE the guard layer, like `machine_api` — the layer then covers
 /// this route by construction, and a GET passes it untouched.
 pub fn routes(guard: Guard, house: Arc<HouseStore>) -> Router {
-    build(guard, house, Arc::new(profile_camera_port))
+    build(guard, house, standard_ports())
 }
 
-fn build(guard: Guard, house: Arc<HouseStore>, port_of: PortOf) -> Router {
+fn build(guard: Guard, house: Arc<HouseStore>, port_of: PortsOf) -> Router {
     Router::new()
         .route("/api/v1/machine/camera", get(camera))
         .with_state(CameraState {
@@ -143,17 +128,13 @@ fn host_problem(host: &str) -> Option<String> {
 /// machines, so it refuses too — the route opens a socket, and "I could not read the list" is not
 /// the same answer as "this is one of ours".
 async fn unknown_machine(state: &CameraState, host: &str, port: u16) -> Option<String> {
-    let (bytes, _etag) = match state.house.location().await {
-        Ok(location) => location,
-        Err(e) => return Some(format!("the location cannot be read, so no machine is known: {e}")),
-    };
-    let doc: LocationDoc = match serde_json::from_slice(&bytes) {
-        Ok(doc) => doc,
-        Err(e) => return Some(format!("the location cannot be read, so no machine is known: {e}")),
+    let machines = match machines_in(&state.house).await {
+        Ok(machines) => machines,
+        Err(refusal) => return Some(refusal),
     };
 
     let mut known_host = false;
-    for machine in &doc.machines {
+    for machine in &machines {
         let Some(address) = &machine.address else {
             continue;
         };
@@ -161,7 +142,11 @@ async fn unknown_machine(state: &CameraState, host: &str, port: u16) -> Option<S
             continue;
         }
         known_host = true;
-        let camera_port = machine.profile_id.as_deref().and_then(|id| (state.port_of)(id));
+        let camera_port = machine
+            .profile_id
+            .as_deref()
+            .and_then(|id| (state.port_of)(id))
+            .and_then(|ports| ports.camera);
         if camera_port == Some(port) {
             return None;
         }
@@ -241,6 +226,7 @@ async fn proxy(mut client: WebSocket, url: String) {
 mod tests {
     use super::*;
     use crate::location::MachineRecord;
+    use crate::machine_profiles::MachinePorts;
     use tempfile::TempDir;
     use tokio::net::TcpListener;
     use tokio_tungstenite::tungstenite::client::IntoClientRequest;
@@ -274,7 +260,13 @@ mod tests {
         let app = build(
             Guard::new(port, dir.path().join("config.json")),
             store,
-            Arc::new(move |_| Some(camera_port)),
+            Arc::new(move |_| {
+                Some(MachinePorts {
+                    command: 2222,
+                    camera: Some(camera_port),
+                    discovery: 3333,
+                })
+            }),
         );
         let server = tokio::spawn(async move {
             axum::serve(listener, app).await.unwrap();
@@ -388,7 +380,7 @@ mod tests {
         let state = CameraState {
             guard: Guard::new(1, dir.path().join("config.json")),
             house: store.clone(),
-            port_of: Arc::new(profile_camera_port),
+            port_of: standard_ports(),
         };
         assert_eq!(unknown_machine(&state, "192.0.2.10", 82).await, None);
         assert!(unknown_machine(&state, "192.0.2.10", 2222)
