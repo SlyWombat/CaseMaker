@@ -293,9 +293,22 @@ export function surfaceRepostBlocker(
   pkg: { surface?: { plane: { offset: number; slopeX: number; slopeY: number }; z0: number } | null } | null,
   registration: { surface?: { plane: { offset: number; slopeX: number; slopeY: number }; z0: number } | null } | null,
 ): string | null {
-  if (pkg === null || registration === null || registration.surface == null) return null;
-  if (sameSurface(pkg.surface ?? null, registration.surface)) return null;
-  return 're-post against the tilt first — the frozen program is flat but the blank is tilted';
+  if (pkg === null || registration === null) return null;
+  // #635 — BOTH DIRECTIONS. The comparison used to return early whenever the registration recorded
+  // NO fit, so a package re-posted against tilt A stayed uploadable after the blank was re-seated
+  // and measured as a dome or flat: the lifted program would go up under "the machine levels it and
+  // the program uploads FLAT", and the colour plane would drift by A's tilt. A registration that
+  // ran always measured the surface, so `surface: null` there means "no tilt to follow" (flat or
+  // dome), not "unknown".
+  const posted = pkg.surface ?? null;
+  const measured = registration.surface ?? null;
+  if (measured === null) {
+    return posted === null ? null : 're-generate flat — the frozen program follows a tilt, and the blank measures none now';
+  }
+  if (posted !== null && sameSurface(posted, measured)) return null;
+  return posted === null
+    ? 're-post against the tilt first — the frozen program is flat but the blank is tilted'
+    : 're-post against the new tilt — the frozen program follows a different tilt than the blank measures now';
 }
 
 /** Two post fits are the same surface: the r6 coefficients and the reference Z0 all agree. */

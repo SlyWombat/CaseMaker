@@ -103,9 +103,20 @@ describe('the package engine (#419 §4)', () => {
     expect(blocker).toBe('re-post against the tilt first — the frozen program is flat but the blank is tilted');
     // Once the package has been re-posted against the SAME fit, the gate lifts.
     expect(surfaceRepostBlocker({ surface: tilt }, { surface: tilt })).toBeNull();
-    // A different fit is still a mismatch.
+    // #635 — a DIFFERENT fit is a mismatch in the other direction too: the package follows one
+    // tilt, the blank now measures another, so the program must be re-posted, not shipped.
     const other = { plane: { offset: -55, slopeX: 0.001, slopeY: 0 }, z0: -55.505 };
-    expect(surfaceRepostBlocker({ surface: tilt }, { surface: other })).toBe('re-post against the tilt first — the frozen program is flat but the blank is tilted');
+    expect(surfaceRepostBlocker({ surface: tilt }, { surface: other })).toBe(
+      're-post against the new tilt — the frozen program follows a different tilt than the blank measures now',
+    );
+    // #635 — and a package posted against a tilt does NOT stay uploadable after the blank is
+    // re-seated and measures NO tilt (a dome or a flat): the lifted program would cut the colour
+    // plane off by the old tilt.
+    expect(surfaceRepostBlocker({ surface: tilt }, { surface: null })).toBe(
+      're-generate flat — the frozen program follows a tilt, and the blank measures none now',
+    );
+    // With no registration at all there is nothing to compare, and nothing to refuse.
+    expect(surfaceRepostBlocker({ surface: tilt }, null)).toBeNull();
   });
 
   it('is stale exactly when the job’s data changed, by value, so a reload cannot hide a change', () => {
