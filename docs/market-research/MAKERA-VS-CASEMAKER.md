@@ -1,6 +1,6 @@
 # Makera Studio vs Case Maker — capability matrix
 
-**As of `main` ffd997fe, 2026-10-24.** Row-per-capability, Studio 0.1.2.0 against Case Maker.
+**As of `main` fbad1643, 2026-10-25.** Row-per-capability, Studio 0.1.2.0 against Case Maker.
 Companion to `/Makera-Parity.md` (the 2026-10-12 review; its "Us" column is superseded here) and
 to `CASEMAKER-VS-MARKET.md` (the same product against the 20-vendor grid). Every Studio cell cites its
 evidence; every Case Maker cell cites the issue or file it was verified against.
@@ -11,19 +11,21 @@ evidence; every Case Maker cell cites the issue or file it was verified against.
 |---|--:|---|
 | **AHEAD** | 39 | Case Maker does something Studio does not, or does it demonstrably better |
 | **PARITY** | 38 | both do it; the mechanism may differ |
-| **PARTIAL** | 15 | Case Maker does part of what Studio does |
-| **ABSENT** | 9 | Studio does it, Case Maker does not, and nothing refuses it |
+| **PARTIAL** | 17 | Case Maker does part of what Studio does |
+| **ABSENT** | 7 | Studio does it, Case Maker does not, and nothing refuses it |
 | **REFUSED** | 8 | refused on the record (`/Makera-Parity.md` §14.4 R-n, or a `/Fabrication.md` decision) |
 | **UNKNOWN** | 3 | Studio's side is not established — not a guess in either direction |
 | | **112** | |
 
-**Three biggest gaps.** (1) **Pause/resume and a live position readout** — Studio suspends with
-position save/restore and shows WPos/MPos per axis; Case Maker has `abort` only and no DRO
-(D4, C8; #519/#527). (2) **XY probing with the 3D probe and grid auto-levelling** — Studio's
-`Set Origin with 3D Probe` and Auto Workpiece Leveling; Case Maker finds edges with the Z-only wired
-probe and fits a plane, but the 3D probe is a record nobody reads and `G32` is unproven (B9, B10;
-#525, #501). (3) **Rotary and 3D relief in the UI** — Studio ships both strategies; ours are a
-design and a backend respectively (G6, G7; #545, #535).
+**Three biggest gaps.** (1) **A live position readout, and pause/resume at the bench** — Studio shows
+WPos/MPos per axis; Case Maker's Pause/Resume sends the firmware's own suspend/resume at the run's
+next poll boundary (#618, the software half, bench proof pending) and carries no DRO yet (D4, C8;
+#519/#527). (2) **XY probing with the 3D probe and grid auto-levelling** — Studio's
+`Set Origin with 3D Probe` and Auto Workpiece Leveling; Case Maker now touches edges sideways with
+the 3D probe where the mount allows (#525) and emits/pushes the G32 grid route for a dome (#631),
+but corner finding and a bench-proved G32 remain (B9, B10; #525, #501). (3) **Rotary and 3D relief
+in the UI** — Studio ships both strategies; ours are a design and a backend respectively (G6, G7;
+#545, #535).
 
 **Three biggest leads.** (1) **The simulation gate** — exact sweep, collision/gouge errors, a
 volumetric oracle and a dry-run file before anything is uploaded; Studio's dexel simulator is
@@ -73,7 +75,7 @@ moved these cells; the review's "Us" column should not be read for them:
 | Live reachability | `StateMachineManager` owns the connection state; detail `[PENDING]` — RE 02 | Heartbeat `?` every 2 s with an online/offline notice and a pinned machine section (#555/#556, commit 25aaedcd; `platform/machineHeartbeat.ts`) | PARITY | — |
 | Reconnect after a network drop | Command channel `[PENDING]`; the camera stream auto-reconnects after 2 s — RE 01, RE 04 | One connection per explicit action, nothing persistent to reconnect (Bridge §8); the Z1 itself drops off the LAN and only a plug cycle brings it back (**#304**, **#499**) | UNKNOWN | **#304** |
 | Reading a reply | The MDI log's bare `ok` is rendered by the client, not read off the wire `[BENCH]` — RE 02 | Success is judged by the next `?`; frames with no line in flight are *carried*, never merged into a reply, and an alarm in them still refuses (`#386` item 3; Bridge §6) | AHEAD | — |
-| Front end over the LAN | None — Qt desktop; the Makera App shows the camera only (FM §2.A note) | A LAN browser served by `casemaker --bind-all` drives the same sockets through `/api/v1/machine/*` (#571; `platform/desktop/httpTransport.ts`, `src-tauri/src/machine_api.rs`, same-origin `guard.rs`) | AHEAD | **#389** |
+| Front end over the LAN | None — Qt desktop; the Makera App shows the camera only (FM §2.A note) | A LAN browser served by `casemaker --bind-all` drives the same sockets through `/api/v1/machine/*` (#571; `platform/desktop/httpTransport.ts`, `src-tauri/src/machine_api.rs`, same-origin `guard.rs`); `/api/v1/health` reports the build's commit, and a git-less publish stamps it with `CASEMAKER_BUILD` (#566) | AHEAD | — |
 
 ## B. Homing, probing & tool length
 
@@ -86,14 +88,14 @@ moved these cells; the review's "Us" column should not be read for them:
 | Z surface touch | `G38.2 Z-108 F500 → G91 G0 Z1 → G38.2 Z-2 F100 → G10 L20 P0 Z0` — Workflow A.5 | Fast `G38.3` to the expected surface − tolerance, `G0 Z1`, slow `G38.3`; both readings inside a per-stock plausibility band (#589) | PARITY | — |
 | A probe miss | `G38.2` → `ALARM: Probe fail` → `$X` — RE 03 | Every probe is `G38.3`: a miss is `[PRB:…:0]`, the machine stays `Idle`, no `$X` (`execute.ts`; #518, maintainer 2026-10-18) | AHEAD | **#518** (close) |
 | XY edges with the Z-only wired probe | The wired probe is Z-only; XY origin needs the 3D probe (`Set Origin with 3D Probe`) — Workflow A.5, cnc-guide §2 | Edge scans by Z touches: bracket-and-bisect (#594), inward search on a missed first touch (#593, commit 2fc50ded), extents after the edges (#591) | AHEAD | **#593**, **#570** |
-| Mount datum | Anchor bracket is a preset (`Relative to: Anchor1`); rotary X/Y/Z offsets are config strings — Workflow A.4, Parity §7 | One tap on the vise's fixed-jaw top → `jawTopZ`, compared with the record, written back as `probed` with history; the first tap creates the bed profile (#598–#600, #613). Bracket and rotary taps open | AHEAD | **#607** |
-| 3D probe (sideways XYZ) | `Probe3DTaskManager`, `OperationDetailsCfg3DProbeDlg`, corner finding — RE 03, Workflow A.5 | The "Makera 3D Wired Probe" is a registered accessory (#601) but nothing reads its variant; no sideways touches | ABSENT | **#525** |
-| Grid auto-levelling | Auto Workpiece Leveling (clearance 5 mm, 3×3 points) — Workflow A.4 | Five extent touches → plane fit, program re-posted against the tilted plane; only the residual (bow) refuses (#608). `G32` unproven on the Z1 | PARTIAL | **#501** |
+| Mount datum | Anchor bracket is a preset (`Relative to: Anchor1`); rotary X/Y/Z offsets are config strings — Workflow A.4, Parity §7 | One tap on the vise's fixed-jaw top → `jawTopZ`, compared with the record, written back as `probed` with history; the first tap creates the bed profile (#598–#600, #613). The bracket's seat tap landed with the same write-back (#607; its arm tap is dormant until the seat is measured). The rotary's tap needs the module's nose geometry (#626) | AHEAD | — |
+| 3D probe (sideways XYZ) | `Probe3DTaskManager`, `OperationDetailsCfg3DProbeDlg`, corner finding — RE 03, Workflow A.5 | The "Makera 3D Wired Probe" is a registered accessory (#601) whose variant drives the plan: edge touches go SIDEWAYS where the mount allows it (vise free front/back, every edge on the bracket/tape) with the probe's own ball radius, and the narration names the probe (#525). No corner finding | PARTIAL | **#525** |
+| Grid auto-levelling | Auto Workpiece Leveling (clearance 5 mm, 3×3 points) — Workflow A.4 | Five extent touches → plane fit, program re-posted against the tilted plane (#608, #623); a dome is no longer refused (#631) — the row offers the console's G32 grid (sized for the cut and the cutter), gates upload on it, or takes the operator's accepted centre miss. G32's own bench proof is still the open end | PARTIAL | **#501** |
 | Area scan before cutting | `Scan Now` → `M495 X Y C D` margin trace with the probe fitted — Workflow A.4 | `<job>-frame.nc` (#244), the laser frame (#431) and the lifted dry-run program (#547) | PARITY | — |
 | Writing the work origin | `G10 L20 P0 Z0` after the Z touch (resets the TLO reference, #387) — Workflow A.5 | `G10 L2 P1 X Y Z` from the found stock (`execute.ts`); `G10 L2 P1 X Y` from the laser dot (#431) | PARITY | — |
 | G54 read-back | WPos shown on the Control card — Workflow A.6 | `MPos − WPos` on X/Y as the registration pre-flight check (#567) | PARITY | — |
 | Which probe is fitted | "Please change to: Probe / Then press Confirm" dialog — Workflow A.4 | The plan names the checked-out probe (#598); the operator fits it through a callback; `M119` checks the input | PARITY | — |
-| Probe records | None; probe speeds/heights are config strings — Parity §7, Workflow A.7 | `accessories[]` with tip Ø, rim offset ±, `lastM491`, `lastM119Rest`, whereabouts and history (#597/#601; `src-tauri/src/house.rs`) | AHEAD | **#611** |
+| Probe records | None; probe speeds/heights are config strings — Parity §7, Workflow A.7 | `accessories[]` with tip Ø, rim offset ±, `lastM491`, `lastM119Rest`, whereabouts and history (#597/#601; `src-tauri/src/house.rs`). A datum records the probe that tapped it and is refused by a different one (#611; the surface top too, #632) | AHEAD | — |
 | Tool setter | `M6` drives to the fixed sensor; `ToolSensorPWR` is Carvera-only — Workflow A.5/A.7 | `M491` uses the Z1's sensor; the emulator animates the macro (#182); the sensor position follows the machine's own `anchor1` (#279, `engine/cnc/calibration.ts`) | PARITY | — |
 
 ## C. Machine controls
@@ -123,7 +125,7 @@ moved these cells; the review's "Us" column should not be read for them:
 | Upload to `/sd/gcodes` | One generic put; name timestamped `yyyyMMddhhmmss.nc`; QuickLZ when `> 4096` bytes with a `.bin` suffix — RE 05 | Receiver-driven framed transfer with an MD5 step, 8192-byte packets; "already present" is checked by hashing the path (#255, #291, #298); `Idle` asked first (#296). No compression | PARTIAL | **#562** |
 | Verified-only wall | None — any file goes up | The upload gate is re-asked at send time (#295/#296); the CLI's `upload`/`play` need the program's FNV hash as the token (#479) | AHEAD | — |
 | Play | `play /sd/gcodes/<f>` `[BENCH]` — RE 05 | Same word, only on `Idle` with no alarm, never streamed (#386; `platform/machineRun.ts`) | PARITY | — |
-| Pause / resume | `suspend` / `resume` with "save current pos… / Restoring saved XYZ positions" — RE 05, Workflow A.5 | None; a stopped job restarts from a generated `<file>-from-L<n>.nc` (#249) | ABSENT | — |
+| Pause / resume | `suspend` / `resume` with "save current pos… / Restoring saved XYZ positions" — RE 05, Workflow A.5 | The run panel sends the firmware's own suspend/resume at the next status poll boundary and the same button resumes (#618, the software half; bench proof pending). A stopped job still restarts from a generated `<file>-from-L<n>.nc` (#249) | PARTIAL | **#618** |
 | Progress | `Progress: n%`, elapsed, remaining; `EstimatedProcessingTimeFromPathvertex` — Workflow A.6 | `P:<line>,<percent>,<seconds>` every ≥ 2 s, phase progress, the viewport follows `P` (#423, #442); the estimate is #242/#281 | PARITY | — |
 | Job end | Not established | Percent 100 **and** `Idle` (`Idle` alone appears mid-job); end-of-run bookkeeping once (#386, #414; `store/machineRunStore.ts`) | PARITY | — |
 | Tool-change prompts | "Tool Change Required … Confirm / Ignore"; `buffer M6T%1` sequenced at run time — RE 06, Workflow A.4 | One program per tool (Q15); a bit-change pause with cutter confirm and Z0 re-touch between files (#469, #516, #538); the single-file `M6` path waits on the bench | PARITY | **#278** |
