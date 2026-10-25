@@ -1259,3 +1259,30 @@ describe('#427 the bracket: XY from the datum, an optional confirming touch', ()
     expect(applied.ok).toBe(false);
   });
 });
+
+describe('#633 the datum path widens its own seek, never the re-touch band', () => {
+  it('refuses an unfaced top at the re-touch, in the window the widened ceiling used to pass', async () => {
+    const DATUM: MountDatum = { jawTopZ: SURFACE - 1.84, measuredAt: '2026-10-23T00:00:00.000Z', by: 'wired-probe' };
+    const p = plan('vise', { mountDatum: DATUM, stockThicknessMm: 3.81 });
+    const z1 = fakeZ1({ actual: SHIFTED });
+    const r = await runRegistration(p, { console: z1.console, operator: yes });
+    if (!r.ok) throw new Error(r.reason);
+
+    // The skim never ran: the re-touch meets the UNFACED top again. That reading is outside the
+    // re-touch band (expected ± tolerance) but INSIDE the datum path's #619 ceiling — the window in
+    // which the widened ceiling used to let an unfaced top pass and be written as Z0.
+    const unfaced = r.outcome.surfaceZ;
+    const widened = DATUM.jawTopZ + 3.81 + S.surfaceToleranceMm;
+    const expected = Math.round((unfaced - 0.5) * 1000) / 1000;
+    const min = Math.round((expected - 0.25) * 1000) / 1000;
+    const max = Math.round((expected + 0.25) * 1000) / 1000;
+    expect(unfaced).toBeGreaterThan(max);
+    expect(unfaced).toBeLessThan(widened);
+
+    const rt = await retouchSurface(p, r.outcome, { removedMm: 0.5, toleranceMm: 0.25 }, { console: z1.console, operator: yes });
+    expect(rt.ok).toBe(false);
+    if (rt.ok) return;
+    expect(rt.reason).toContain(`outside the expected ${min} to ${max}`);
+    expect(z1.lines.some((l) => l.startsWith('G10 L2'))).toBe(false);
+  });
+});

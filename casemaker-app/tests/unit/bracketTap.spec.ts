@@ -228,4 +228,47 @@ describe('#599/#607 the vise tap runs the same code path it always did', () => {
     expect(searched[0]!.startsWith('G38.3 Z-50.82 F300')).toBe(true);
     expect(searched[1]!.startsWith('G38.3 Z-5 F150')).toBe(true);
   });
+
+  /** Answers the questions, then TOUCHES the tap at `z` — a surface where the reference is expected. */
+  function tapTouchConsole(z: number): { lines: string[]; send: (line: string) => Promise<ConsoleSendResult> } {
+    const lines: string[] = [];
+    const reply = (text: string): ConsoleSendResult => ({ kind: 'sent', line: '', text, frames: 1, elapsedMs: 1 });
+    return {
+      lines,
+      async send(line: string) {
+        lines.push(line);
+        if (line === '?') return reply('<Idle|MPos:0,0,0>');
+        if (line === 'M119') return reply('X_max:0 Y_max:0 Z_max:0 A_min:1 Probe: 0');
+        if (line === 'M491') return reply('ok\n[PRB:-9.890,-12.830,-76.074:1]\nok');
+        if (line.startsWith('G38.3')) return reply(`[PRB:-186.200,-180.000,${z.toFixed(3)}:1]\nok`);
+        return reply('ok');
+      },
+    };
+  }
+
+  it('#633 a tap that TOUCHES above the stored jaw top says so, not "no jaw top"', async () => {
+    const tap = { x: -186.2, y: -180, fromMachineZ: -3, label: 'the vise fixed-jaw top' };
+    const planned = planRegistration(
+      {
+        stock: { xMin: 0, yMin: 0, xMax: 38.1, yMax: 76.2, cornerRadius: 3 },
+        mount: 'vise',
+        expectedSurface: { machineZ: -56.172, from: 'the jaw top and the blank’s proud height' },
+        seekFromMachineZ: -3,
+        mountDatum: JAW,
+        mountTap: tap,
+      },
+      S,
+    );
+    if (!planned.ok) throw new Error(planned.reason);
+    // The fast stage meets something 5 mm ABOVE the stored jaw top (a chip, the wrong vise) — a touch
+    // outside the 2 mm slack, not a miss: "no jaw top … down to machine Z" would send the operator
+    // looking for a surface the probe did find.
+    const console = tapTouchConsole(JAW.jawTopZ + 5);
+    const r = await runRegistration(planned.plan, { console, operator: async () => true });
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.reason).toContain('a touch at machine Z -51.82 at (-186.2, -180), 5 mm above the stored jaw top -56.82');
+    expect(r.reason).toContain('is the vise where the machine record says?');
+    expect(r.reason).not.toContain('no jaw top at');
+  });
 });

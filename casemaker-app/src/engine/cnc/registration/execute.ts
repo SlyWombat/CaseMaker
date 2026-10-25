@@ -423,6 +423,18 @@ function inBand(prb: Prb | null, band: SurfaceBand, which: string, maxZ: number 
 }
 
 /**
+ * #619/#633 — the datum path's surface ceiling: the jaw top + the stock's full thickness + tolerance.
+ * A normally mounted blank may not sit on the ledge, so a reading above the plan's band can still be
+ * the stock rather than a miss. Only the registration's OWN seeks use it; the re-touch keeps its
+ * band (see {@link seekSurface}).
+ */
+function datumCeiling(plan: RegistrationPlan): number {
+  return plan.mountDatum !== null && plan.stockThicknessMm !== undefined
+    ? plan.mountDatum.jawTopZ + plan.stockThicknessMm + plan.settings.surfaceToleranceMm
+    : plan.seek.band.max;
+}
+
+/**
  * The surface seek: from the plan's travel height down to the band's floor and no further — a fast
  * `G38.3`, `G0 Z1`, a slow `G38.3`, BOTH readings inside the band — then `G90` at the reading. The
  * registration and the post-facing re-touch share it, so the two seeks cannot drift apart.
@@ -431,21 +443,28 @@ function inBand(prb: Prb | null, band: SurfaceBand, which: string, maxZ: number 
  * the plan's travel height; a later one has a reading and the band, and starts just above the band
  * (`band.max + park`), so it rapids there and probes only `2 × tolerance + park` instead of 50 mm of
  * air at the probe feed. The band's floor — the "as low as" cap — is the same either way.
+ *
+ * `ceilingMm` (#633) — the highest reading a touch may report, and it is REQUIRED: a caller says
+ * which bound it means. The registration's own seeks pass the datum path's widened bound
+ * ({@link datumCeiling}, #619: a blank mounted normally may stand prouder than the ledge estimate);
+ * the post-facing re-touch passes its own band's `max`, because there the band IS the expectation
+ * the skim is checked against. Before this, every caller inherited the widening — the re-touch
+ * accepted an UNFACED top (0.5 mm ≥ its tolerance above where the skim should have left it) and
+ * the origin was written from it.
  */
 async function seekSurface(
   io: Session,
   plan: RegistrationPlan,
   band: SurfaceBand,
-  point: { x: number; y: number } = plan.surfacePoint,
-  fromMachineZ: number = plan.seek.fromMachineZ,
+  opts: {
+    point?: { x: number; y: number };
+    fromMachineZ?: number;
+    ceilingMm: number;
+  },
 ): Promise<Prb> {
   const s = plan.settings;
-  // #619 — the datum path accepts a surface up to the jaw top + the stock's full thickness + tolerance:
-  // a normally mounted blank may not sit on the ledge, and a higher reading is the stock, not a miss.
-  const datumMax =
-    plan.mountDatum !== null && plan.stockThicknessMm !== undefined
-      ? plan.mountDatum.jawTopZ + plan.stockThicknessMm + s.surfaceToleranceMm
-      : band.max;
+  const point = opts.point ?? plan.surfacePoint;
+  const fromMachineZ = opts.fromMachineZ ?? plan.seek.fromMachineZ;
   const travel = Math.round((fromMachineZ - band.min) * 1000) / 1000;
   await io.send(`G53 G0 Z${f(fromMachineZ)}`);
   await io.send('G90');
@@ -453,11 +472,11 @@ async function seekSurface(
   await io.idle();
   io.at(band.at);
   await io.send('G91');
-  inBand(lastPrb(await io.send(`G38.3 Z-${f(travel)} F${f(s.surfaceFastFeed)}`)), band, 'fast', datumMax);
+  inBand(lastPrb(await io.send(`G38.3 Z-${f(travel)} F${f(s.surfaceFastFeed)}`)), band, 'fast', opts.ceilingMm);
   await io.send(`G0 Z${f(SURFACE_LIFT_MM)}`);
   await io.idle();
   io.at(`as low as ${f(s.surfaceSlowSeekMm - SURFACE_LIFT_MM)} mm below the fast touch's reading (the slow surface touch)`);
-  const slow = inBand(lastPrb(await io.send(`G38.3 Z-${f(s.surfaceSlowSeekMm)} F${f(s.surfaceSlowFeed)}`)), band, 'slow', datumMax);
+  const slow = inBand(lastPrb(await io.send(`G38.3 Z-${f(s.surfaceSlowSeekMm)} F${f(s.surfaceSlowFeed)}`)), band, 'slow', opts.ceilingMm);
   await io.send('G90');
   return slow;
 }
@@ -618,8 +637,19 @@ export async function runRegistration(
       const floorZ = tapExpectZ - MOUNT_TAP_FLOOR_MM;
       const prb = await mountTapTouch(io, { x: tap.x, y: tap.y }, plan.seek.fromMachineZ, s, floorZ, tapExpectZ);
       if (prb === null || !prb.touched || Math.abs(prb.z - tapExpectZ) > MOUNT_TAP_SLACK_MM) {
+        const vise = tap.reference === undefined || tap.reference === 'vise-jaw-top';
+        // #633 — a TOUCH outside the slack is not a miss. The fast stage meets the fixed jaw (or an
+        // obstruction) above the stored reference; reporting "no jaw top … down to machine Z" sends
+        // the operator looking for a surface the probe did find. Say where it touched, and how far
+        // from the stored reference that is.
+        if (prb !== null && prb.touched) {
+          const off = r3(prb.z - tapExpectZ);
+          throw new Stop(
+            `a touch at machine Z ${f(prb.z)} at (${tap.x}, ${tap.y}), ${f(Math.abs(off))} mm ${off > 0 ? 'above' : 'below'} the stored ${vise ? 'jaw top' : tap.label} ${f(tapExpectZ)} — is the ${plan.mount} where the machine record says?`,
+          );
+        }
         throw new Stop(
-          tap.reference === undefined || tap.reference === 'vise-jaw-top'
+          vise
             ? `no jaw top at (${tap.x}, ${tap.y}) down to machine Z ${f(floorZ)} — is the vise where the machine record says?`
             : `no touch at ${tap.label} (${tap.x}, ${tap.y}) down to machine Z ${f(floorZ)} within ${MOUNT_TAP_SLACK_MM} mm of the stored ${f(tapExpectZ)} — is the ${plan.mount} where the machine record says?`,
         );
@@ -631,11 +661,18 @@ export async function runRegistration(
 
     // #449 — the slow travel is the shop's `registration.surfaceSlowSeekMm` (1.2 to 2 mm, more than the
     // lift); a plan whose settings break that never got this far (`settingsProblem`).
-    const slow = await seekSurface(io, plan, {
-      ...plan.seek.band,
-      at: `as low as machine Z ${plan.seek.band.min}, ${s.surfaceToleranceMm} mm below the expected surface (the surface seek)`,
-      expect: 'the stock is not where the job expects it',
-    });
+    const slow = await seekSurface(
+      io,
+      plan,
+      {
+        ...plan.seek.band,
+        at: `as low as machine Z ${plan.seek.band.min}, ${s.surfaceToleranceMm} mm below the expected surface (the surface seek)`,
+        expect: 'the stock is not where the job expects it',
+      },
+      // #633 — the datum path's OWN widening (#619): a blank mounted normally may stand prouder
+      // than the ledge estimate, and this seek is the one that accepts it.
+      { ceilingMm: datumCeiling(plan) },
+    );
     // #519 item 1 — the surface touch, at the plan's own point.
     io.saw({
       source: 'surface',
@@ -726,8 +763,12 @@ export async function runRegistration(
                 at: `as low as machine Z ${plan.seek.band.min} (${floorWords}) for the surface touch at ${touch.at}`,
                 expect: `${touch.at} is more than ${s.surfaceToleranceMm} mm lower than the centre (${f(slow.z)}) — the blank is not sitting flat; ${reseatWords}, and run again`,
               },
-              { x: touch.x + outcome.offset.x, y: touch.y + outcome.offset.y },
-              lowApproach ? approachZ : plan.seek.fromMachineZ,
+              {
+                point: { x: touch.x + outcome.offset.x, y: touch.y + outcome.offset.y },
+                fromMachineZ: lowApproach ? approachZ : plan.seek.fromMachineZ,
+                // The same top the centre seek measured, so the same datum-path ceiling.
+                ceilingMm: datumCeiling(plan),
+              },
             );
         spreadReadings.push({ z: prb.z, source: 'probe' });
         // #519 item 1 — every extent reading but the reused centre: that one reading is the surface
@@ -835,12 +876,19 @@ export async function retouchSurface(
     ) {
       throw new Stop('stopped: the probe was not fitted');
     }
-    const surface = await seekSurface(io, plan, {
-      min,
-      max,
-      at: `as low as machine Z ${min}, ${opts.toleranceMm} mm below the faced top expected at ${expected} (the re-touch)`,
-      expect: 'the faced top is not where the skim should have put it — check that the facing program ran before the re-touch',
-    });
+    const surface = await seekSurface(
+      io,
+      plan,
+      {
+        min,
+        max,
+        at: `as low as machine Z ${min}, ${opts.toleranceMm} mm below the faced top expected at ${expected} (the re-touch)`,
+        expect: 'the faced top is not where the skim should have put it — check that the facing program ran before the re-touch',
+      },
+      // #633 — the re-touch band is the expectation the skim is checked against; the datum path's
+      // wider ceiling does not apply here, or an unfaced top would pass and be written as Z0.
+      { ceilingMm: max },
+    );
     // #519 item 1 — the re-touch is a reading on the faced top; mark it like the registration's own.
     io.saw({
       source: 'surface',
