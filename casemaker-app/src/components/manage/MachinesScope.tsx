@@ -40,6 +40,8 @@ import { LocationCard, LocationProblemCard } from './LocationCard';
 import { useToolRegistryStore } from '@/store/toolRegistryStore';
 import { MachineConsole } from './MachineConsole';
 import { MachineVacuum } from './MachineVacuum';
+import { MachineLight } from './MachineLight';
+import { MachineUnlock } from './MachineUnlock';
 import { MachineStop } from './MachineStop';
 import { MachineLaserOptions } from './MachineLaserOptions';
 import { formatStamp, mm } from './display';
@@ -329,6 +331,15 @@ export function MachinesScope() {
               host={machine.host}
               port={machine.port}
             />
+            {/* #422 — the work light, the vacuum switch's shape: asked live, idle-only, `unknown`
+                until it has sent something, and keyed on the observation for the same reset rule. */}
+            <MachineLight
+              key={`light:${machine.host}:${machine.port}@${machine.observedAt}`}
+              host={machine.host}
+              port={machine.port}
+            />
+            {/* #644 — clear the alarm lock ($X), offered only against a machine that reports Alarm. */}
+            <MachineUnlock host={machine.host} port={machine.port} />
             {/* #424 — Stop: `abort` for a running program, labelled as not the emergency stop. */}
             <MachineStop host={machine.host} port={machine.port} />
             {/* #431 — the probe laser's two options, both off by default. */}
