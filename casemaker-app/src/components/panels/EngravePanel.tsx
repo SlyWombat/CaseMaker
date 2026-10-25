@@ -425,9 +425,17 @@ function mm3(v: number): string {
   return String(Math.round(v * 1000) / 1000);
 }
 
+/**
+ * #651 — the option's text. The display name already carries the cutting size, so the old
+ * "— Ø N mm cutting" suffix repeated it without telling any two options apart; and a native
+ * `<select>` shows no `title`, so two rows whose name and size agree (different vendors, different
+ * flute lengths) rendered identically. The vendor label is the field that distinguishes them.
+ */
 function toolOptionLabel(e: ToolLibraryEntry): string {
-  const d = cuttingDiameter(e.tool);
-  return d === null ? `${toolDisplayName(e.tool)} — cutting diameter unknown` : `${toolDisplayName(e.tool)} — Ø ${d} mm cutting`;
+  const name = toolDisplayName(e.tool);
+  const unknown = cuttingDiameter(e.tool) === null ? ' — cutting diameter unknown' : '';
+  // A shank-diameter kind with no tip is already named by its vendor label; do not print it twice.
+  return name.includes(e.tool.name) ? `${name}${unknown}` : `${name}${unknown} · ${e.tool.name}`;
 }
 
 /**

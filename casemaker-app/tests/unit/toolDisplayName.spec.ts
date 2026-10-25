@@ -24,7 +24,41 @@ describe('#646 the tool display name', () => {
     expect(toolDisplayName(tool({ shape: 'flat', tipDiameter: 3.175, diameter: 3.175 }))).toBe('3.17 mm flat end'); // 3.175 is 3.1749… in binary
   });
 
-  it('never reads the vendor label', () => {
+  it('never reads the vendor label when the geometry states the size', () => {
     expect(toolDisplayName(tool({ shape: 'flat', tipDiameter: 2, name: '4*0.5mm*30º Engraving(Metal)' }))).not.toContain('Engraving');
+  });
+
+  // #651 — every shape has its own name. A chamfer, a tapered ball and an unparsed row all fell to
+  // "flat end" before this, on the surface that answers "what is in the spindle".
+  it('#651 names the remaining shapes', () => {
+    expect(toolDisplayName(tool({ shape: 'chamfer', tipDiameter: 1, angle: 90 }))).toBe('1 mm 90° chamfer');
+    expect(toolDisplayName(tool({ shape: 'chamfer', tipDiameter: 1, angle: null }))).toBe('1 mm chamfer');
+    expect(toolDisplayName(tool({ shape: 'tapered-ball', tipDiameter: 3, cornerRadius: 1.5 }))).toBe('3 mm tapered ball R1.5');
+    expect(toolDisplayName(tool({ shape: 'tapered-ball', tipDiameter: 3, cornerRadius: null }))).toBe('3 mm tapered ball');
+    expect(toolDisplayName(tool({ shape: 'bull', tipDiameter: 3, cornerRadius: 0.5 }))).toBe('3 mm bull nose');
+    expect(toolDisplayName(tool({ shape: 'thread', tipDiameter: 2 }))).toBe('2 mm thread mill');
+    expect(toolDisplayName(tool({ shape: 'drill', tipDiameter: 1 }))).toBe('1 mm drill');
+  });
+
+  it('#651 never guesses a kind for a row it cannot classify', () => {
+    expect(toolDisplayName(tool({ shape: 'unknown', name: 'Corner Radius End Mill 3x6' }))).toBe('unknown cutter (Corner Radius End Mill 3x6)');
+    expect(toolDisplayName(tool({ shape: 'unknown', name: '', typeText: '' }))).toBe('unknown cutter');
+  });
+
+  // #651 — `diameter=` is the SHANK for engravers, drills and chamfers (Makera writes it there), so
+  // a 1 mm drill is never announced as "3.18 mm drill". With no tip the vendor label is the name.
+  it('#651 names a shank-diameter kind by its TIP, never by the shank', () => {
+    expect(toolDisplayName(tool({ shape: 'drill', tipDiameter: 1, diameter: 3.175 }))).toBe('1 mm drill');
+    expect(toolDisplayName(tool({ shape: 'drill', tipDiameter: null, diameter: 3.175, name: '1mm Drill(Metal)' }))).toBe(
+      'drill (1mm Drill(Metal))',
+    );
+    expect(
+      toolDisplayName(tool({ shape: 'engraving', tipDiameter: null, diameter: 3.175, angle: 30, name: '4*0.5mm*30º Engraving(Metal)' })),
+    ).toBe('engraver (4*0.5mm*30º Engraving(Metal))');
+    expect(toolDisplayName(tool({ shape: 'chamfer', tipDiameter: null, diameter: 6, name: '' , typeText: 'Chamfer' }))).toBe(
+      'chamfer (Chamfer)',
+    );
+    // No tip and no label at all: say the kind, and that nothing names its size.
+    expect(toolDisplayName(tool({ shape: 'drill', tipDiameter: null, diameter: 3.175, name: '', typeText: '' }))).toBe('unknown drill');
   });
 });
