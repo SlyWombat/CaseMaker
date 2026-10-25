@@ -26,6 +26,19 @@ import type { MachineObservation } from '@/platform/machineProbe';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
+/** #658 — a rotary module checked out to the strip's machine. */
+const ROTARY = {
+  id: 'fx-rotary-1',
+  kind: 'rotary-module',
+  product: 'Makera rotary',
+  variant: null,
+  constants: {},
+  unit: {},
+  provenance: {},
+  whereabouts: { kind: 'machine', machineId: 'm1', since: '2026-10-23T00:00:00.000Z' },
+  history: [],
+} as unknown as { id: string };
+
 const PROBE = {
   id: 'fx-probe-1',
   kind: 'probe',
@@ -116,8 +129,19 @@ describe('#647 the DRO — coordinates', () => {
     expect(screen.queryByTestId('machine-status-axis-a')).toBeNull();
   });
 
-  it('shows A only when the machine reports it', () => {
+  it('#658 shows A only when a rotary MODULE is checked out, not because the frame carries one', () => {
+    // The Z1's own frame always carries a fourth value (0.0000 on a machine with no module), so the
+    // frame is not the signal; the accessory checkout is.
     remember('<Idle|MPos:-1,-2,-3,10|WPos:0,0,0,10>');
+    render(<MachineStatusStrip />);
+    expect(screen.queryByTestId('machine-status-axis-a')).toBeNull();
+    cleanup();
+
+    useLocationStore.setState({
+      location: { ...LOCATION, accessories: [ROTARY] } as unknown as NonNullable<
+        ReturnType<typeof useLocationStore.getState>['location']
+      >,
+    });
     render(<MachineStatusStrip />);
     expect(screen.getByTestId('machine-status-work-a').textContent).toBe('10.000');
     expect(screen.getByTestId('machine-status-machine-a').textContent).toBe('10.000');

@@ -112,14 +112,23 @@ function AxisCell({ axis, work, machine }: { axis: string; work: number | null; 
 }
 
 /** The three (or four) axis cells, in the mock's order. */
-function Axes({ work, machine }: { work: StatusPosition | null; machine: StatusPosition | null }): JSX.Element {
+function Axes({
+  work,
+  machine,
+  hasRotary,
+}: {
+  work: StatusPosition | null;
+  machine: StatusPosition | null;
+  hasRotary: boolean;
+}): JSX.Element {
   return (
     <span style={{ display: 'inline-flex', gap: 10, alignItems: 'center', whiteSpace: 'nowrap', flex: 'none' }}>
       <AxisCell axis="X" work={work?.x ?? null} machine={machine?.x ?? null} />
       <AxisCell axis="Y" work={work?.y ?? null} machine={machine?.y ?? null} />
       <AxisCell axis="Z" work={work?.z ?? null} machine={machine?.z ?? null} />
-      {/* A only when the machine reports it: a 3-axis Z1 says nothing about a rotary it does not have. */}
-      {machine?.a != null && <AxisCell axis="A" work={work?.a ?? null} machine={machine.a} />}
+      {/* #658 — A only when a rotary module is checked out: the Z1's own frame always carries a
+          fourth value (0.0000 on a machine with no module), so the frame is not the signal. */}
+      {hasRotary && <AxisCell axis="A" work={work?.a ?? null} machine={machine?.a ?? null} />}
     </span>
   );
 }
@@ -182,6 +191,9 @@ export function MachineStatusStrip(): JSX.Element | null {
   // The strip's machine is the OBSERVATION; the accessories and the probe name live on the saved
   // machine record it resolves to (#604's accessor).
   const record = machineRecordByProfile(machine.profileId ?? null);
+  // #658 — the rotary AXIS exists only when a rotary module is checked out to this machine. Not
+  // `capabilities.rotary` or the profile's rotary block: those are static and true on a bare Z1.
+  const hasRotary = record !== null && accessoriesFor(record).some((a) => a.kind === 'rotary-module');
   const probeAcc = record === null ? null : accessoriesFor(record).find((a) => a.kind === 'probe') ?? null;
   const lastM491 = probeAcc?.unit.lastM491;
   const lastM491Z =
@@ -256,7 +268,11 @@ export function MachineStatusStrip(): JSX.Element | null {
       )}
       {/* #652 — a machine that stopped answering shows NO live-looking numbers: the last WPos/MPos
           are what it said before it went quiet, so the DRO prints "—" instead. */}
-      <Axes work={heartbeat?.reachable === false ? null : line?.wpos ?? null} machine={heartbeat?.reachable === false ? null : line?.mpos ?? null} />
+      <Axes
+        work={heartbeat?.reachable === false ? null : line?.wpos ?? null}
+        machine={heartbeat?.reachable === false ? null : line?.mpos ?? null}
+        hasRotary={hasRotary}
+      />
       {/* The registration's current step is the operator's "what is it doing now" while the probe
           is in: it sits where the program name would, after the coordinates. */}
       {registrationActive && registrationStep !== null && (
