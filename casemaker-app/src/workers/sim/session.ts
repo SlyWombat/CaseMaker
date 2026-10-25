@@ -43,7 +43,7 @@ import {
   type OraclePredicted,
   type OracleReport,
 } from '@/engine/cnc/engrave/oracle';
-import type { SurfaceFrame } from '@/engine/cnc/engrave/surfacePlane';
+import { surfaceLift, type SurfaceFrame } from '@/engine/cnc/engrave/surfacePlane';
 import type { ManifoldToplevel } from '../geometry/evaluateOp';
 import { meshOutputOf, type NodeMeshOutput } from '../geometry/meshOutput';
 import { createPlayback, type Playback } from '../geometry/playback';
@@ -715,6 +715,15 @@ export function createSimSession(tl: ManifoldToplevel, hooks?: SimSessionHooks):
 
   const stateAt = (step: number): MachineState | null => (live ? live.timeline.stateAt(Math.trunc(step)) : null);
 
+  /**
+   * The work-frame Z the viewport draws (#634): the loaded program's, with the fitted lift taken
+   * back out. The material is the surface-frame image the sweep un-lifted (`surfaceTimeline`), so
+   * the path the tool tip traces must be the same frame — otherwise the tip floats the tilt above
+   * the floor it cut. A flat post (`surfaceFrame` null) passes every Z through unchanged.
+   */
+  const unliftZ = (x: number, y: number, z: number): number =>
+    surfaceFrame === null ? z : z - surfaceLift(surfaceFrame.plane, surfaceFrame.z0, x, y);
+
   const toolPath = (fromStep: number, toStep: number): Float32Array => {
     const l = live;
     if (!l || l.timeline.events.length === 0) return new Float32Array(0);
@@ -726,7 +735,7 @@ export function createSimSession(tl: ManifoldToplevel, hooks?: SimSessionHooks):
     for (let i = from; i <= to; i++) {
       if (i > from) s = applyEvent(s, l.timeline.events[i] as Parameters<typeof applyEvent>[1], l.setup);
       const [x, y, z] = s.work;
-      if (x !== null && y !== null && z !== null) pts.push(x, y, z);
+      if (x !== null && y !== null && z !== null) pts.push(x, y, unliftZ(x, y, z));
     }
     return Float32Array.from(pts);
   };
@@ -795,7 +804,7 @@ export function createSimSession(tl: ManifoldToplevel, hooks?: SimSessionHooks):
         // else: a feed with no known feed value takes 0 s.
       }
       cum += dt;
-      xyz.push(x, y, z);
+      xyz.push(x, y, unliftZ(x, y, z));
       step.push(i);
       t.push(cum);
       kind.push(ev.mode === 'rapid' ? 0 : s.spindle === 'off' ? 2 : 1);

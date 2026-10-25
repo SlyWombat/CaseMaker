@@ -14,6 +14,7 @@ import { capsuleArea, MAX_CHECKPOINTS } from '@/workers/geometry/sweep';
 import { parseGcode, setupFromHeader, stubSetup, resolveTool, type Setup } from '@/engine/cnc';
 import { presetJawStrips } from '@/engine/cnc/sacrificial';
 import { flatEndMill } from '@/engine/cnc/tool';
+import type { SurfaceFrame } from '@/engine/cnc/engrave/surfacePlane';
 import { segmentsForRadius } from '@/engine/compiler/arcResolution';
 import { createFrameCoalescer } from '@/engine/jobs/frameCoalescer';
 import { loadSim, terminateSim } from '@/engine/jobs/simClient';
@@ -394,6 +395,34 @@ describe('simPath: the whole path, with kinds and times (#197)', () => {
     expect(p.step).toHaveLength(0);
     expect(p.kind).toHaveLength(0);
     expect(p.t).toHaveLength(0);
+  });
+});
+
+describe('#634 the drawn path is the blank\'s fitted surface frame', () => {
+  // A one-axis tilt: lift = 0.006·x, so a cut at −0.5 posts as −0.5 + 0.006·x (ramping along X).
+  const TILT: SurfaceFrame = { plane: { offset: 0, slopeX: 0.006, slopeY: 0 }, z0: 0 };
+
+  it('a lifted post draws its feed Zs un-lifted, and a flat post is unchanged', () => {
+    const flatSrc = 'S1000 M3\nG0 X10 Y10 Z1\nG1 Z-0.5 F100\nG1 X30 F500\nG0 Z1\n';
+    // −0.44 = −0.5 + 0.006·10 at the plunge; −0.32 = −0.5 + 0.006·30 at the cut's end.
+    const liftedSrc = 'S1000 M3\nG0 X10 Y10 Z1\nG1 Z-0.44 F100\nG1 X30 Z-0.32 F500\nG0 Z1\n';
+
+    const flat = createSimSession(tl);
+    expect(flat.load(flatSrc, setup(), tool, null).ok).toBe(true);
+    const flatZs = Array.from(flat.simPath().xyz).filter((_, i) => i % 3 === 2);
+    flat.dispose();
+
+    const lifted = createSimSession(tl);
+    expect(lifted.load(liftedSrc, setup(), tool, null, { surface: TILT }).ok).toBe(true);
+    const liftedZs = Array.from(lifted.simPath().xyz).filter((_, i) => i % 3 === 2);
+    lifted.dispose();
+
+    // The FEED vertices (the plunge end and the cut end) un-lift back to the flat depth −0.5,
+    // matching the un-lifted checkpoints the material was swept from — the tip no longer floats.
+    expect(liftedZs[1]).toBeCloseTo(-0.5, 3);
+    expect(liftedZs[2]).toBeCloseTo(-0.5, 3);
+    // A flat post (no surface) is byte-identical: the un-lift is a no-op.
+    expect(flatZs).toEqual([1, -0.5, -0.5, 1]);
   });
 });
 
