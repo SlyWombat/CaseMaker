@@ -55,6 +55,11 @@ Manufacture (personal tier), **ES** Easel, **BT** Bantam Tools Desktop CNC (Bant
 
 ## 2. Case Maker gaps
 
+Tracking: umbrella **#676** (the matrix to 90 % YES in both Case Maker columns — 21 of the 23 non-refused rows), with the
+per-row issues: #535/#536 surface a mesh (unlocks 3D roughing and parallel finishing), #667 rest pass, #664 open paths,
+#668 bore, #669 chamfer, #665 advanced V-carve, #671 scallop/pencil, #673 inlay, #672 image relief, #670 texture,
+#674 fluting/prism, #675 per-hole peck; rotary wrap stays #545.
+
 Refusals checked first (`MAKERA-VS-CASEMAKER.md` §G, `/Makera-Parity.md` §14.4): laser modules (decision 4),
 R-7 toolpath template library, R-12 Gerber, R-13 STEP, R-15 nesting/tiling, R-16 ramping (reopened for metal
 pockets only), R-14 thread milling (superseded, shipped #445). None of the items below are refused ones.
