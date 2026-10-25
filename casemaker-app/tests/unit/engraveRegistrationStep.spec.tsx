@@ -334,12 +334,12 @@ describe('#495 — the registration step', () => {
     expect(firstRegistrationFor(job.id, TARGET)).not.toBeNull();
   });
 
-  it('#608 — refuses a top that is not one plane (a dome), writes no origin, and records the measured flatness', async () => {
+  it('#631 — a dome writes the origin (Z0 = lowest), shows the G32 route, and records no plane re-post', async () => {
     const plan = makePlan(-55.0);
     const job = badgeJobWithPlan(plan);
     const spread = spreadPlanFor(job);
     // Appendix C's badge dome: the centre 0.33 mm above every extent. A plane cannot explain a dome,
-    // so the residual (4/5 of the dome height) exceeds the 0.2 mm band and the blank refuses.
+    // so the residual (4/5 of the dome height) exceeds the 0.2 mm band and the verdict is `dome`.
     const zs = [-55.0, -55.33, -55.33, -55.33, -55.33];
     install(plan, {
       spreadReadings: spread.touches.map((t, i) => ({ x: t.x, y: t.y, z: zs[i]! })),
@@ -350,34 +350,35 @@ describe('#495 — the registration step', () => {
     await runStep();
 
     expect(screen.getByTestId('engrave-registration-spread').getAttribute('data-ok')).toBe('false');
-    // #501 — the refusal is a DOME, in so many words (a tilt would be followed, with the console
-    // grid offered inside the spread block).
+    // #501/#631 — the verdict is a DOME, in so many words; the dead-end refusal is gone.
     expect(screen.getByTestId('engrave-registration-shape').getAttribute('data-verdict')).toBe('dome');
     expect(screen.getByTestId('engrave-registration-shape').textContent).toContain('dome — a curved top, not a tilt');
-    expect(screen.queryByTestId('engrave-registration-g32')).toBeNull();
     expect(screen.getByTestId('engrave-registration-spread').textContent).toContain('spread 0.33 mm against the 0.2 mm band');
-    expect(screen.getByTestId('engrave-registration-spread-refusal').textContent).toBe(
-      "this blank's top is not one plane: the touches miss the fitted plane by 0.262 mm, " +
-        'wider than the band — the floors cannot stay past the colour line and clear of the pocket',
-    );
+    // The dome block offers the machine-side route instead of a refusal.
+    expect(screen.getByTestId('engrave-registration-dome').textContent).toContain('uploads FLAT');
     expect(screen.queryByTestId('engrave-registration-landing')).toBeNull();
-    expect(screen.getByTestId('engrave-registration-refusal').textContent).toContain(
-      "No origin is written: this blank's top is not one plane: the touches miss the fitted plane by 0.262 mm",
-    );
-    expect(screen.getByTestId('engrave-registration-verdict').getAttribute('data-usable')).toBe('false');
+    expect(screen.queryByTestId('engrave-registration-refusal')).toBeNull();
+    // The origin IS written: the outcome is usable and the write button is offered.
+    expect(screen.getByTestId('engrave-registration-verdict').getAttribute('data-usable')).toBe('true');
+    expect(screen.getByTestId('engrave-registration-write')).toBeTruthy();
 
-    // A refusal writes nothing and records no origin, but the MEASUREMENT is still kept: the run
-    // sheet prints the refusal, and #432 R9 reads the blank's measured flatness.
-    expect(screen.queryByTestId('engrave-registration-write')).toBeNull();
-    expect(sent.some((line) => line.startsWith('G10 L2'))).toBe(false);
-    expect(firstRegistrationFor(job.id, TARGET)).toBeNull();
+    await writeOrigin();
+    await screen.findByTestId('engrave-registration-recorded');
+    expect(sent.some((line) => line.startsWith('G10 L2'))).toBe(true);
+    const recorded = firstRegistrationFor(job.id, TARGET);
+    expect(recorded).not.toBeNull();
+    // A dome cannot be re-posted against: the record carries no fitted surface.
+    expect(recorded!.surface).toBeNull();
+
+    // The MEASUREMENT is still kept: the run sheet prints the dome route, and #432 R9 reads the
+    // blank's measured flatness.
     expect(surfaceSpreadFor(job.id, TARGET)?.assessment.spread).toBe(0.33);
-    expect(surfaceSpreadFor(job.id, TARGET)?.assessment.ok).toBe(false);
+    expect(surfaceSpreadFor(job.id, TARGET)?.assessment.verdict).toBe('dome');
     // #519 item 1 — the extents are emitted as readings too, and the dock's store closes with the
-    // refusal sentence the rail states in full.
+    // dome sentence.
     const live = useRegistrationTouchesStore.getState();
     expect(live.touches.some((t) => t.source === 'spread')).toBe(true);
-    expect(live.spreadSentence).toContain('not one plane');
+    expect(live.spreadSentence).toContain('dome');
     // #496 — the job records the pair, each span on its own stock axis, not one ambiguous "across".
     expect(useEngraveJobStore.getState().job.stock.flatness).toMatchObject({
       xMm: 0.33,

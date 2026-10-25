@@ -17,8 +17,9 @@
  *   3. measure: min, max and spread, each carrying the reading's provenance;
  *   4. fit a plane to the touches (#608): a top that TILTS fits the plane (small residual) and is
  *      FOLLOWED — Z0 stays the LOWEST touch ({@link Z0_REFERENCE}) and the program is posted against
- *      the fitted surface per XY. Only a bow the tilt cannot explain — the RESIDUAL wider than the
- *      band — refuses with `blank-bowed`.
+ *      the fitted surface per XY. A bow the tilt cannot explain — the RESIDUAL wider than the band —
+ *      is a DOME (#631): the origin is still written (Z0 = lowest) but the plane re-post cannot
+ *      follow it, so the machine levels the top itself (`G32`) and the program uploads FLAT.
  *
  * WHY THE LOWEST TOUCH. The programmed floor depth `D` is measured from Z0. At a touch whose top
  * is `z` above the lowest one, the local floor is `D + z` deep. Referencing Z0 to the lowest touch
@@ -43,7 +44,6 @@ import {
   voidLimitForFootprint,
   type ItemFootprint,
 } from '@/engine/cnc/engrave/partPlan';
-import type { JobFinding } from '@/engine/cnc/engrave/jobSetup';
 import type { EngraveJob } from '@/types/engraveJob';
 import type { Mm } from '@/types/units';
 
@@ -159,16 +159,12 @@ export interface SurfaceExtremum {
   source: SurfaceReadingSource;
 }
 
-/** The refusal's finding, exactly the shape the job's other errors take. */
-export interface BlankBowedFinding extends JobFinding {
-  severity: 'error';
-  code: 'blank-bowed';
-}
-
 /**
  * #501 — WHAT the measured top is, from the same fit and band the verdict uses:
  *   - `dome` — the residual outlasts the plane (wider than the band): the top is curved, and the
- *     colour line under it is a plane, so following the top would cut through it. Today's refusal.
+ *     colour line under it is a plane, so following the top would cut through it. #631 writes the
+ *     origin anyway (Z0 = lowest) and leaves the levelling to the machine's own `G32` grid; the
+ *     program uploads FLAT (no plane re-post).
  *   - `tilt` — the plane holds, and its drop across the measured extents is wider than the band: the
  *     whole blank (colour plane included) is crooked, and following the top is right. #608 follows
  *     it by re-posting against the plane; the machine's own grid is offered as the alternative.
@@ -224,21 +220,20 @@ export interface SurfaceSpreadAssessment {
   tilt: { xMm: Mm; yMm: Mm };
   /**
    * The range of programmed floor depths, below Z0, that keeps EVERY region inside its band once
-   * the spread is applied — `[lower, upper − spread]`. Null when no depth can: the refusal case.
-   * #608 — when a plane is fitted, the spread that matters is the RESIDUAL (the tilt is followed),
-   * so the range reads `[lower, upper − residual]`.
+   * the spread is applied — `[lower, upper − spread]`. Null when no depth can: a dome has no
+   * plane-follow landing range. #608 — when a plane is fitted, the spread that matters is the
+   * RESIDUAL (the tilt is followed), so the range reads `[lower, upper − residual]`.
    */
   landing: { lower: Mm; upper: Mm } | null;
+  /** True when the fitted plane keeps every floor in band (flat or tilt); false for a dome. */
   ok: boolean;
-  /** The `blank-bowed` refusal, or null when the spread fits. */
-  refusal: BlankBowedFinding | null;
   /** #501 — tilt, dome or flat, from the fit and the band; see {@link SurfaceShape}. */
   verdict: SurfaceShape;
   /** #501 — the fitted plane's steepest slope, degrees (0 without a fit). */
   slopeDeg: number;
   /**
-   * #501 — for a `tilt`, the console `G32` recipe as an alternative to the software follow, or null
-   * (flat, dome, or a caller that supplied no `level` parameters). NEVER an uploadable file.
+   * #501 — for a `tilt` OR a `dome`, the console `G32` recipe (the machine's own levelling), or
+   * null (flat, or a caller that supplied no `level` parameters). NEVER an uploadable file.
    */
   recommendation: SurfaceLevelRecommendation | null;
 }
@@ -579,9 +574,10 @@ export function assessSurfaceReadings(
   const landing = ok
     ? { lower: plan.band.lower?.depth ?? 0, upper: r3(plan.band.upper.depth - fitAmount) }
     : null;
-  // #501 — the SHAPE the readings describe, and the machine-side alternative for a tilt. The plane
-  // fit (#608) already separates the two physically: a crooked whole blank fits a plane, a curved
-  // top leaves a residual. What was missing is the word and the recipe.
+  // #501/#631 — the SHAPE the readings describe, and the machine-side G32 recipe for a tilt OR a
+  // dome. The plane fit (#608) separates the two physically: a crooked whole blank fits a plane, a
+  // curved top leaves a residual. A tilt is followed by the re-posted program; a dome is levelled by
+  // the machine itself and the program uploads FLAT — neither is refused.
   const verdict: SurfaceShape =
     !ok
       ? 'dome'
@@ -589,16 +585,8 @@ export function assessSurfaceReadings(
         ? 'tilt'
         : 'flat';
   const slopeDeg = fit === null ? 0 : r3((Math.atan(Math.hypot(fit.slopeX, fit.slopeY)) * 180) / Math.PI);
-  const recommendation = verdict === 'tilt' ? levelRecommendation(plan, tilt, slopeDeg) : null;
-  const refusal: BlankBowedFinding | null = ok
-    ? null
-    : {
-        severity: 'error',
-        code: 'blank-bowed',
-        message:
-          `this blank's top is not one plane: the touches miss the fitted plane by ${num(fitAmount)} mm, ` +
-          'wider than the band — the floors cannot stay past the colour line and clear of the pocket',
-      };
+  const recommendation =
+    verdict === 'tilt' || verdict === 'dome' ? levelRecommendation(plan, verdict, tilt, slopeDeg) : null;
 
   return {
     plan,
@@ -612,7 +600,6 @@ export function assessSurfaceReadings(
     z0: z0Of(touches),
     landing,
     ok,
-    refusal,
     verdict,
     slopeDeg,
     recommendation,
@@ -620,7 +607,7 @@ export function assessSurfaceReadings(
 }
 
 /**
- * #501 — the console `G32` recipe for a tilted blank, sized from the plan.
+ * #501 — the console `G32` recipe for a tilted OR domed blank, sized from the plan.
  *
  * Smoothieware's grid strategy, which is what Makera's Controller drives (`G32 R1 X… Y… A… B… I… J…
  * H…`): X/Y is the first corner, A/B the opposite one, I/J the point counts and H the probe
@@ -631,6 +618,7 @@ export function assessSurfaceReadings(
  */
 function levelRecommendation(
   plan: SurfaceSpreadPlan,
+  verdict: SurfaceShape,
   tilt: { xMm: Mm; yMm: Mm },
   slopeDeg: number,
 ): SurfaceLevelRecommendation | null {
@@ -644,14 +632,17 @@ function levelRecommendation(
     `A${num(r3(Math.max(...xs) + pad))} B${num(r3(Math.max(...ys) + pad))} ` +
     `I${Math.max(1, Math.round(Math.sqrt(Math.max(1, level.points))))} J${Math.max(1, Math.round(Math.sqrt(Math.max(1, level.points))))} ` +
     `H${num(level.clearanceMm)}`;
-  return {
-    gcode,
-    dump: 'M375.1',
-    after: 'M370',
-    sentence:
-      `The top is tilted ${num(slopeDeg)}° (${surfaceTiltWords(tilt) ?? 'no measured drop'}): the program is posted against the ` +
-      `fitted plane, so the cut follows the tilt. To level at the machine instead, run ${gcode} from the console ` +
-      `(${level.points}-point grid over the cut plus the cutter's radius, clearance ${num(level.clearanceMm)} mm), ` +
-      'M375.1 to dump the grid into the run record, and M370 after the job. G32 is never uploaded in a file.',
-  };
+  const dump = 'M375.1';
+  const after = 'M370';
+  const gridWords = `(${level.points}-point grid over the cut plus the cutter's radius, clearance ${num(level.clearanceMm)} mm)`;
+  const consoleWords = `run ${gcode} from the console ${gridWords}, ${dump} to dump the grid into the run ` +
+    `record, and ${after} after the job. G32 is never uploaded in a file.`;
+  const sentence =
+    verdict === 'dome'
+      ? `The top is a dome, not a tilt: the machine's own leveling follows a curved top and the program ` +
+        `uploads FLAT (no plane re-post). ${consoleWords}`
+      : `The top is tilted ${num(slopeDeg)}° (${surfaceTiltWords(tilt) ?? 'no measured drop'}): the program is ` +
+        `posted against the fitted plane, so the cut follows the tilt. To level at the machine instead — ` +
+        `G32 levels a dome the same way — ${consoleWords}`;
+  return { gcode, dump, after, sentence };
 }

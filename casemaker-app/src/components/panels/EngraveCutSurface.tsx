@@ -206,6 +206,21 @@ export function EngraveCutSurface({
   const registrationSurface = firstRegistration?.surface ?? null;
   const surfaceGate = surfaceRepostBlocker(pkg, firstRegistration);
   const tiltWords = spreadMeasurement === null ? null : surfaceTiltWords(spreadMeasurement.assessment.tilt);
+  // #631 — a dome verdict: the plane re-post cannot follow a curved top, so the machine levels it
+  // itself (G32 from the console). The recipe and the operator's confirmation live here; Upload is
+  // gated on the tick until it lands, and the statement is recorded in the run sheet (G32 is never
+  // in a file).
+  const spreadAssessment = spreadMeasurement?.assessment ?? null;
+  const domeStanding = spreadAssessment?.verdict === 'dome';
+  const [g32Acked, setG32Acked] = useState(false);
+  // A fresh measurement is a fresh clamping: the tick does not carry over from the last one.
+  useEffect(() => {
+    setG32Acked(false);
+  }, [spreadAssessment]);
+  const domeG32Blocker =
+    domeStanding && !g32Acked
+      ? 'run G32 from the console for this clamping and tick the box — the machine levels the domed top before the flat program uploads'
+      : null;
 
   /**
    * #608 — re-post the package against the registration's measured tilt: re-run the whole pipeline
@@ -515,6 +530,28 @@ export function EngraveCutSurface({
             )}
           </section>
         )}
+        {domeStanding && (
+          <section style={BOX} data-testid="engrave-cut-dome-g32">
+            <p style={{ fontSize: 12, color: '#f0d79b', margin: '0 0 6px' }}>
+              The blank's top is a dome — a plane re-post cannot follow it. The machine's own leveling
+              follows a curved top; the program uploads FLAT.
+            </p>
+            {spreadAssessment?.recommendation != null && (
+              <p style={MUTED} data-testid="engrave-cut-dome-g32-recipe">
+                {spreadAssessment.recommendation.sentence}
+              </p>
+            )}
+            <label style={{ fontSize: 12, color: '#e6edf5' }}>
+              <input
+                type="checkbox"
+                checked={g32Acked}
+                data-testid="engrave-cut-dome-g32-ack"
+                onChange={(e) => setG32Acked(e.target.checked)}
+              />{' '}
+              G32 has been run from the console for this clamping
+            </label>
+          </section>
+        )}
       </Step>
 
       {green && packageCurrent && plan !== null && (
@@ -563,12 +600,12 @@ export function EngraveCutSurface({
                   job={job}
                   programs={releaseSources}
                   runPlan={plan}
-                  blocker={releaseBlocker ?? missingReportBlocker ?? surfaceGate}
+                  blocker={releaseBlocker ?? missingReportBlocker ?? surfaceGate ?? domeG32Blocker}
                   onProgramLine={onProgramLine}
                 />
               ) : (
                 <EngraveMachineUpload
-                  blocker={uploadBlocker ?? missingReportBlocker ?? surfaceGate}
+                  blocker={uploadBlocker ?? missingReportBlocker ?? surfaceGate ?? domeG32Blocker}
                   machine={machine}
                   program={
                     singleSource?.verify === null || singleSource === undefined

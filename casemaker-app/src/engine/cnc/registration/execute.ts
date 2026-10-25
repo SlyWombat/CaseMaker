@@ -50,9 +50,9 @@
  * same `seekSurface` measures the plan's cut-extent touch points from just above the band (#590),
  * the readings are assessed against the depth band (`assessSurfaceReadings`), Z0 becomes the LOWEST
  * touch, and a RESIDUAL wider than the band after a plane fit (#608 — a top that is not one plane)
- * makes the outcome unusable with the `blank-bowed` refusal; a mere tilt fits the plane and is
- * followed. The touches stay inside the registration's own validated seek band, so the #430 cap and
- * tolerance hold unchanged.
+ * is a DOME (#631): the origin is still written and the machine levels the top itself; a mere tilt
+ * fits the plane and is followed. The touches stay inside the registration's own validated seek
+ * band, so the #430 cap and tolerance hold unchanged.
  */
 
 import { controllerState } from '@/platform/machineUpload';
@@ -731,19 +731,14 @@ export async function runRegistration(
     await io.send('$H');
     io.markHomed();
 
-    // #475/#608 — the spread verdict. Z0 is the LOWEST touch (the colour line is a plane and the
-    // dome is extra top material), so the outcome carries it even when the blank is refused; a
-    // residual wider than the band (a top that is not one plane) also makes the measurement
-    // unusable, which stops `applyCorrection` writing an origin from it. A tilt that fits a plane
-    // leaves the outcome usable — Z0 stays the lowest touch and the program follows the fit.
+    // #475/#608/#631 — the spread verdict. Z0 is the LOWEST touch (the colour line is a plane and
+    // the dome is extra top material), so the outcome carries it for flat, tilt AND dome alike. A
+    // tilt that fits a plane is followed by the re-posted program; a dome (residual wider than the
+    // band) no longer refuses — the origin is still written and the machine levels the top itself.
     let spread: SurfaceSpreadAssessment | undefined;
     if (spreadPlan !== undefined) {
       spread = assessSurfaceReadings(spreadPlan, spreadReadings);
       outcome.surfaceZ = spread.z0.z;
-      if (!spread.ok && spread.refusal !== null) {
-        outcome.usable = false;
-        outcome.problems.push(spread.refusal.message);
-      }
     }
     return {
       ok: true,

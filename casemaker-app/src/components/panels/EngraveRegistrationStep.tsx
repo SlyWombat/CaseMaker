@@ -27,8 +27,9 @@
  * (`surfaceSpreadPlan(job)` at the approved plan's touch count and the house boundary margin the
  * sheet uses), reusing the executor's
  * `seekSurface` and its #430 bounds. The step shows the min/max/spread and the band; Z0 in the
- * recorded outcome is the LOWEST touch. A spread wider than the band is the `blank-bowed` refusal:
- * the outcome is unusable, so no origin is written and the write button is withheld. The measured
+ * recorded outcome is the LOWEST touch. A spread wider than the band is a DOME (#631): the origin
+ * is still written (Z0 = lowest) and the machine levels the top itself (`G32`), while the plane
+ * re-post is refused and the program uploads FLAT. The measured
  * spread is written to `stock.flatness` (`source: 'measured'`) and kept in the store for the run
  * sheet, which prints the measured landing range.
  */
@@ -48,7 +49,7 @@ import {
 import { attachConsole, type ConsoleHandle } from '@/platform/machineConsole';
 import { controllerState } from '@/platform/machineUpload';
 import { effectiveMargins } from '@/engine/cnc/engrave/depthBounds';
-import { surfaceSpreadPlan, surfaceFitForPost, type SurfaceSpreadAssessment } from '@/engine/cnc/engrave/surfaceSpread';
+import { surfaceSpreadPlan, surfaceFitForPost } from '@/engine/cnc/engrave/surfaceSpread';
 import { jobTool } from '@/engine/cnc/engrave/jobSetup';
 import { cuttingDiameter } from '@/engine/cnc/tool';
 import { shopDefault, useShopDefaultsStore } from '@/store/shopDefaultsStore';
@@ -117,17 +118,11 @@ function approvedPlan(job: EngraveJob): { plan: RegistrationPlan | null; why: st
  * it was sent). A measurement outside the edge margin is still "usable" but is exactly the refusal
  * #495 §4 names, so it gets no origin. The one exception is the bracket's X/Y taken on trust: there
  * is no measured deviation to be outside a margin when the confirming touch was not taken.
+ *
+ * #631 — a dome no longer refuses the origin: Z0 is the lowest touch and the machine levels the top
+ * itself, so the surface verdict is not part of this question.
  */
-function writerRefusal(
-  outcome: RegistrationOutcome,
-  spread: SurfaceSpreadAssessment | null = null,
-): string | null {
-  // #475/#608 — the blank's top is not one plane (the touches miss the fitted plane by more than the
-  // depth band): no Z0 can keep every floor past the colour line and clear of the pocket, so this is
-  // a refusal before it is an unusable edge scan.
-  if (spread !== null && !spread.ok && spread.refusal !== null) {
-    return `No origin is written: ${spread.refusal.message}.`;
-  }
+function writerRefusal(outcome: RegistrationOutcome): string | null {
   if (!outcome.usable) {
     return `No origin is written from this measurement: ${outcome.problems.join('; ')}.`;
   }
@@ -138,10 +133,9 @@ function writerRefusal(
   return null;
 }
 
-/** #620 — the refusal is ONLY the margin: usable, no spread refusal, measured XY but out of margin. */
-function marginRefusal(outcome: RegistrationOutcome, spread: SurfaceSpreadAssessment | null): boolean {
+/** #620 — the refusal is ONLY the margin: usable, measured XY but out of margin. */
+function marginRefusal(outcome: RegistrationOutcome): boolean {
   if (!outcome.usable) return false;
-  if (spread !== null && !spread.ok && spread.refusal !== null) return false;
   const measuredXY = outcome.bracketCheck !== undefined || outcome.currentG54 !== null;
   return measuredXY && !outcome.withinMargin;
 }
@@ -307,7 +301,8 @@ export function EngraveRegistrationStep({ job, target }: EngraveRegistrationStep
           .setSpreadSentence(
             r.spread.ok
               ? `Surface spread ${n(r.spread.spread)} mm against the ${n(r.spread.plan.band.width)} mm band — within it.`
-              : r.spread.refusal?.message ?? null,
+              : r.spread.recommendation?.sentence ??
+                  `Surface ${r.spread.verdict} — level the machine's own grid first (G32), then upload FLAT.`,
           );
         // The measurement is session data for the sheet even when the blank is refused; the job's
         // flatness record is the measured pair, which is what #432 R9 reads and what the depth
@@ -408,7 +403,7 @@ export function EngraveRegistrationStep({ job, target }: EngraveRegistrationStep
       await recordProbeReading(machineAt(target), r.probe);
       setResult(r);
       setPhase('measured');
-      if (writerRefusal(r.outcome, r.spread ?? null) !== null) {
+      if (writerRefusal(r.outcome) !== null) {
         handleRef.current = null;
         await handle.close();
       }
@@ -424,9 +419,9 @@ export function EngraveRegistrationStep({ job, target }: EngraveRegistrationStep
   async function writeOrigin(force = false): Promise<void> {
     if (target === null || plan === null || result?.ok !== true || busy) return;
     // #620 — the margin refusal can be forced (the operator accepts the found position); the
-    // unusable and spread refusals never can.
-    const refusal = writerRefusal(result.outcome, result.spread ?? null);
-    if (refusal !== null && !(force && marginRefusal(result.outcome, result.spread ?? null))) return;
+    // unusable refusals never can.
+    const refusal = writerRefusal(result.outcome);
+    if (refusal !== null && !(force && marginRefusal(result.outcome))) return;
     setPhase('writing');
     setError(null);
     const handle = handleRef.current ?? attachConsole(target);
@@ -481,8 +476,8 @@ export function EngraveRegistrationStep({ job, target }: EngraveRegistrationStep
 
   const outcome = result?.ok === true ? result.outcome : null;
   const spread = result?.ok === true ? (result.spread ?? null) : null;
-  const refusal = outcome === null ? null : writerRefusal(outcome, spread);
-  const marginOnly = outcome !== null && marginRefusal(outcome, spread);
+  const refusal = outcome === null ? null : writerRefusal(outcome);
+  const marginOnly = outcome !== null && marginRefusal(outcome);
   const data = result?.ok === true ? result.data : null;
 
   return (
@@ -651,8 +646,9 @@ export function EngraveRegistrationStep({ job, target }: EngraveRegistrationStep
                       else.
                     </div>
                   ) : (
-                    <div data-testid="engrave-registration-spread-refusal" style={{ ...MUTED, color: BAD }}>
-                      {spread.refusal?.message}
+                    <div data-testid="engrave-registration-dome" style={{ ...MUTED, color: WARN }}>
+                      Z0 is still the lowest reading ({n(spread.z0.z)}): the plane re-post cannot follow
+                      a dome, so the machine levels the top itself (G32) and the program uploads FLAT.
                     </div>
                   )}
                 </div>

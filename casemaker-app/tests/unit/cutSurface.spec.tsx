@@ -27,6 +27,8 @@ import type { EngraveGenerated, EngraveProgram } from '@/workers/sim/engraveGene
 import { resetMachineRunStore } from '@/store/machineRunStore';
 import { resetEngraveReleaseStore, useEngraveReleaseStore } from '@/store/engraveReleaseStore';
 import { resetEngravePackageStore, useEngravePackageStore } from '@/store/engravePackageStore';
+import { resetEngraveRegistrationStore, useEngraveRegistrationStore } from '@/store/engraveRegistrationStore';
+import type { SurfaceSpreadAssessment } from '@/engine/cnc/engrave/surfaceSpread';
 import { useEngraveJobStore } from '@/store/engraveJobStore';
 import { resetRunConfirmStore } from '@/store/runConfirmStore';
 import { clearStoredBaseline, resetLocationStore } from '@/store/locationStore';
@@ -258,6 +260,7 @@ beforeEach(() => {
   resetEngraveReleaseStore();
   useEngraveJobStore.getState().reset();
   resetEngravePackageStore();
+  resetEngraveRegistrationStore();
   resetLocationStore();
   clearStoredBaseline();
   resetStockStore();
@@ -497,5 +500,40 @@ describe('#419 §3 the Cut surface', () => {
     view.show({ job, report: reportOf(), pkg, generated: gen, canDrive: true });
     expect(screen.getByTestId('engrave-cut-step-3')).toHaveProperty('open', true);
     expect(screen.getByTestId('engrave-registration-start')).toBeTruthy();
+  });
+
+  it('#631 — a dome refuses the plane re-post and gates Upload on the G32 tick', async () => {
+    const job = defaultEngraveJob();
+    const made = generated([P1]);
+    // A dome measurement on this machine: the Cut step shows the G32 route and holds Upload until
+    // the operator confirms the grid was run from the console.
+    useEngraveRegistrationStore.getState().measureSurface(job.id, TARGET, {
+      verdict: 'dome',
+      tilt: { xMm: 0, yMm: 0 },
+      recommendation: {
+        gcode: 'G32 R1 X1 Y1 A2 B2 I3 J3 H3',
+        dump: 'M375.1',
+        after: 'M370',
+        sentence:
+          'The top is a dome, not a tilt: the machine’s own leveling follows a curved top and the program uploads FLAT. ' +
+          'Run G32 R1 X1 Y1 A2 B2 I3 J3 H3 from the console, M375.1 to dump the grid, M370 after. G32 is never uploaded in a file.',
+      },
+    } as unknown as SurfaceSpreadAssessment);
+
+    draw({ job, report: reportOf(), pkg: null, generated: made });
+    await waitFor(() => expect(screen.getByTestId('engrave-package').dataset.state).toBe('current'));
+
+    // The dome route is shown with the recipe and the operator's tick; no tilt re-post section.
+    expect(screen.getByTestId('engrave-cut-dome-g32')).toBeTruthy();
+    expect(screen.getByTestId('engrave-cut-dome-g32-recipe').textContent).toContain('G32 R1 X');
+    expect(screen.queryByTestId('engrave-cut-repost')).toBeNull();
+
+    // Upload is gated until the operator confirms G32 ran for this clamping.
+    expect((screen.getByTestId('engrave-upload') as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByTestId('engrave-upload-blocked').textContent).toContain('G32');
+
+    // The tick lifts the gate.
+    fireEvent.click(screen.getByTestId('engrave-cut-dome-g32-ack'));
+    expect((screen.getByTestId('engrave-upload') as HTMLButtonElement).disabled).toBe(false);
   });
 });

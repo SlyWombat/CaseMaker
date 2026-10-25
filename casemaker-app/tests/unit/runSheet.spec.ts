@@ -40,7 +40,7 @@ function dj(...args: Parameters<typeof defaultEngraveJob>): ReturnType<typeof de
 }
 import { buildCouponPrograms, type CouponSpec } from '@/engine/cnc/engrave/couponJob';
 import { labelJawReach } from '@/engine/cnc/engrave/partPlan';
-import { surfaceSpreadPlan, assessSurfaceSpread, type SurfaceReading } from '@/engine/cnc/engrave/surfaceSpread';
+import { surfaceSpreadPlan, type SurfaceReading } from '@/engine/cnc/engrave/surfaceSpread';
 import { dedupeFindings, jobTool, validateJob } from '@/engine/cnc/engrave/jobSetup';
 import { parseEngraveJob } from '@/store/engraveJobSchema';
 import { feedsFor } from '@/engine/cnc/feeds';
@@ -1607,20 +1607,25 @@ describe('the surface spread (#475)', () => {
     expect(all).not.toContain('Measured: lowest');
   });
 
-  it('prints the measured refusal with the finding’s exact sentence', () => {
+  it('#631 — a dome prints the G32 route (upload FLAT), not a dead-end refusal', () => {
     const job = dj();
     const plan = surfaceSpreadPlan(job)!;
     // A dome a plane cannot explain: the centre 2× the band above every extent, so the residual
-    // (4/5 of the dome height) exceeds the band and the blank refuses. The centre's own reading is
-    // 'stated', so the sheet's measured line carries that provenance too.
+    // (4/5 of the dome height) exceeds the band and the verdict is `dome`. The centre's own reading
+    // is 'stated', so the sheet's measured line carries that provenance too.
     const readings: SurfaceReading[] = plan.touches.map(() => ({ z: -2 * plan.band.width, source: 'probe' as const }));
     readings[0] = { z: 0, source: 'stated' };
-    const steps = section(sheetFor(job, NO_SIM, NC, { surfaceReadings: readings }), 'origin').steps;
-    const assessment = assessSurfaceSpread(job, readings);
-    const refusal = assessment.refusal!.message;
-    expect(steps.some((s) => s.bold === true && s.text === refusal)).toBe(true);
-    expect(steps.map((s) => s.text).join('\n')).toContain('(stated)');
-    expect(steps.map((s) => s.text).join('\n')).toContain('Do not run this file');
+    const level = { toolRadiusMm: 0.15, clearanceMm: 3, points: 9 };
+    const steps = section(sheetFor(job, NO_SIM, NC, { surfaceReadings: readings, surfaceLevel: level }), 'origin').steps;
+    const all = steps.map((s) => s.text).join('\n');
+    expect(all).toContain('(stated)');
+    expect(all).toContain('uploads FLAT');
+    expect(all).toContain('G32 R1 X');
+    expect(all).toContain('M375.1');
+    expect(all).toContain('G32 is never uploaded in a file');
+    expect(all).toContain('G32 has been run from the console for this clamping');
+    // The dead-end "Do not run this file" is gone.
+    expect(all).not.toContain('Do not run this file');
   });
 
   it('#501 — a tilt is named with its slope, and the console G32 recipe is offered as the alternative', () => {

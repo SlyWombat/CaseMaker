@@ -1512,8 +1512,9 @@ function surfaceSpreadSteps(
     `${fmtNum(a.max.z)} at ${a.max.at} (${sourceWords(a.max.source)}); spread ${fmtNum(a.spread)} mm ` +
     `against the ${bandMm} mm band.`;
   const tiltWords = a.fit === null ? null : surfaceTiltWords(a.tilt);
-  // #501 — the shape verdict, in the same words the registration section uses. `dome` is the
-  // refusal below; `tilt` is followed, with the console grid offered as the alternative.
+  // #501/#631 — the shape verdict, in the same words the registration section uses. `tilt` is
+  // followed (the re-posted program, with the console grid as the alternative); `dome` is levelled
+  // by the machine's own G32 grid and the program uploads FLAT — never refused.
   const shapeWords =
     a.verdict === 'dome' ? 'dome' : a.verdict === 'tilt' ? `tilt (${fmtNum(a.slopeDeg)}°)` : 'flat';
   if (a.ok && a.landing !== null) {
@@ -1553,15 +1554,24 @@ function surfaceSpreadSteps(
     });
   } else {
     steps.push({ text: measured });
-    // The refusal's own sentence, exactly as the finding carries it (#475).
-    steps.push({ text: a.refusal!.message, bold: true });
+    // #631 — a dome is no longer a dead end: the origin is still written (Z0 = the lowest touch),
+    // the machine's own G32 grid levels the curved top, and the program uploads FLAT.
+    const residualMm = a.fit === null ? 0 : fmtNum(a.fit.residual);
     steps.push({
       text:
-        `Surface ${shapeWords}: a curved top, not a tilt — the colour line under it is a plane, so ` +
-        'following the top would cut through it. Do not run this file: no floor depth can stay past ' +
-        'the colour line and clear of the pocket across this blank. Face or plane the top until the ' +
-        'spread fits the band, or use a flatter blank, then measure again.',
+        `Surface ${shapeWords}: a curved top, not a tilt — the machine's own leveling follows a curved ` +
+        'top and the program uploads FLAT (no plane re-post).',
+      value: `dome — G32 levels the machine (residual ${residualMm} mm)`,
       bold: true,
+    });
+    if (a.recommendation !== null) {
+      steps.push({ text: a.recommendation.sentence, bold: true });
+    }
+    steps.push({
+      text:
+        'Tick it once G32 has been run from the console for this clamping — the machine levels the ' +
+        'domed top in real time, the program stays FLAT, and G32 is never uploaded in a file.',
+      record: 'G32 run from the console for this clamping (yes)',
     });
   }
   return steps;
@@ -1901,7 +1911,7 @@ export interface RunSheetOptions {
    * #475 — the measured surface readings, in the plan's order (the order {@link surfaceSpreadSteps}
    * prints). The registration step supplies them from the run it measured
    * (`engraveRegistrationStore`'s `surfaceSpreadFor`), so a sheet for an already-registered job
-   * prints the measured spread and the landing range, or the `blank-bowed` refusal. Absent: the
+   * prints the measured spread and the landing range, or the dome's G32 route (#631). Absent: the
    * sheet prints the touch plan, the band, the Z0 rule and the stop rule, but cannot say whether
    * this blank passes — which is every sheet opened before the job has been registered on this
    * machine.

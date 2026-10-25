@@ -4,7 +4,8 @@
 // pocket's membrane below. The colour line quantises to 0.8 and the pocket's ceiling to 1.4, so the
 // floors may land from 1.0 to 1.2 — a 0.2 band. #608 changed the verdict from the raw SPREAD to the
 // RESIDUAL after a least-squares plane fit: a 0.45 mm tilt (run 5) fits a plane and is followed, and
-// only a top whose bow outlasts the plane — a dome, whose residual is 4/5 of its height — refuses.
+// a top whose bow outlasts the plane — a dome, whose residual is 4/5 of its height — is no longer
+// refused (#631): the origin is still written and the machine levels it itself.
 
 import { describe, it, expect } from 'vitest';
 
@@ -136,7 +137,6 @@ describe('the surface spread on a bowed blank (#475)', () => {
     expect(a.fit!.residual).toBeCloseTo(0.196, 2);
     expect(a.fit!.residual).toBeLessThan(plan.band.width);
     expect(a.ok).toBe(true);
-    expect(a.refusal).toBeNull();
     expect(a.landing).not.toBeNull();
     // The run sheet's words: the fitted plane drops toward +X and +Y (the moving-jaw side is low).
     expect(surfaceTiltWords(a.tilt)).toBe('0.341 mm toward +X and 0.345 mm toward +Y');
@@ -144,18 +144,16 @@ describe('the surface spread on a bowed blank (#475)', () => {
     expect(a.z0).toEqual({ z: -55.505, touchId: 'surface-3', rule: 'lowest' });
   });
 
-  it('#608 — a top that is not one plane (residual wider than the band) still REFUSES', () => {
+  it('#608 — a top that is not one plane (residual wider than the band) is a DOME and no longer refuses', () => {
     const a = assessSurfaceSpread(badgeJob(), NONPLANAR);
     expect(a.spread).toBe(0.33);
     expect(a.fit).not.toBeNull();
     expect(a.fit!.residual).toBeGreaterThan(0.2);
     expect(a.ok).toBe(false);
     expect(a.landing).toBeNull();
-    expect(a.refusal).toMatchObject({ severity: 'error', code: 'blank-bowed' });
-    expect(a.refusal?.message).toBe(
-      "this blank's top is not one plane: the touches miss the fitted plane by 0.262 mm, " +
-        'wider than the band — the floors cannot stay past the colour line and clear of the pocket',
-    );
+    expect(a.verdict).toBe('dome');
+    // #631 — Z0 is still the lowest touch, so the origin is written from the dome just as from a tilt.
+    expect(a.z0).toEqual({ z: -55.33, touchId: 'surface-2', rule: 'lowest' });
   });
 
   it('min and max carry the reading’s provenance, and Z0 comes from the LOWEST touch', () => {
@@ -176,7 +174,6 @@ describe('the surface spread on a bowed blank (#475)', () => {
     const a = assessSurfaceSpread(badgeJob(), flat);
     expect(a.spread).toBe(0);
     expect(a.ok).toBe(true);
-    expect(a.refusal).toBeNull();
     // Every reading identical: the plane is flat, the residual 0, and the landing range is the whole band.
     expect(a.fit!.residual).toBe(0);
     expect(a.landing).toEqual({ lower: 1.0, upper: 1.2 });
@@ -222,11 +219,17 @@ describe('#501 — the shape verdict and the console G32 recommendation', () => 
     expect(a.recommendation).toBeNull();
   });
 
-  it('a dome is the refusal — never a tilt — and offers no recipe', () => {
+  it('#631 — a dome is named, keeps its verdict, and offers the G32 recipe (upload FLAT)', () => {
     const a = assessSurfaceSpread(badgeJob(), NONPLANAR, { level });
     expect(a.verdict).toBe('dome');
     expect(a.ok).toBe(false);
-    expect(a.recommendation).toBeNull();
+    expect(a.recommendation).not.toBeNull();
+    expect(a.recommendation!.gcode).toContain('G32 R1 X');
+    expect(a.recommendation!.dump).toBe('M375.1');
+    expect(a.recommendation!.after).toBe('M370');
+    expect(a.recommendation!.sentence).toContain('dome, not a tilt');
+    expect(a.recommendation!.sentence).toContain('uploads FLAT');
+    expect(a.recommendation!.sentence).toContain('G32 is never uploaded in a file');
   });
 
   it('a flat top is flat: no slope, no recipe', () => {
