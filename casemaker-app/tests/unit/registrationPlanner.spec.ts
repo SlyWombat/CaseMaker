@@ -444,6 +444,53 @@ describe('#599 the mount tap', () => {
     if (!r.ok) expect(r.reason).toContain('no jaw top');
   });
 
+  // #642 — the #607 BRACKET tap had no executor spec: `bracketTap.spec.ts` pinned the plan-level
+  // shape and a PRE-#607 miss, but nothing ran `runRegistration` with `reference: 'bracket-seat'`.
+  // These pin the floor (expectZ − 2), the reading riding the result, and the bracket's own miss
+  // sentence. The bracket's origin here IS the G54, so the fake's work-frame geometry holds.
+  const BRACKET_TAP = {
+    x: -186.2,
+    y: -180,
+    fromMachineZ: -3,
+    label: 'the bracket’s front arm',
+    reference: 'bracket-seat' as const,
+    expectZ: -48.9,
+    datumOffsetMm: 8.5,
+  };
+  const bracketTapPlan = (): RegistrationPlan =>
+    plan('bracket', {
+      cutCentre: { x: 19.05, y: 38.1 },
+      expectedSurface: { machineZ: SURFACE, from: 'the seat + the stock’s thickness' },
+      bracketOrigin: { x: G54.x, y: G54.y, from: 'the anchor', offsetMeasured: true },
+      mountObstacles: [],
+      mountTap: BRACKET_TAP,
+    });
+
+  it('#642 runs a bracket-seat tap: the floor is expectZ − 2 and the reading is on the result', async () => {
+    const z1 = fakeZ1({ actual: SHIFTED, tap: { x: BRACKET_TAP.x, y: BRACKET_TAP.y, z: BRACKET_TAP.expectZ } });
+    const p = bracketTapPlan();
+    const r = await runRegistration(p, { console: z1.console, operator: yes });
+    if (!r.ok) throw new Error(r.reason);
+
+    expect(r.mountTap).toEqual({ z: BRACKET_TAP.expectZ, at: { x: BRACKET_TAP.x, y: BRACKET_TAP.y } });
+    // #615's two-stage descent, bounded by the BRACKET's own expected top: the fast seek runs from
+    // the travel height to the park above it (−3 → −45.9), then the touch feed covers the last
+    // park + 2 mm down to `expectZ − 2` (−45.9 → −50.9) — the same rule the vise's tap uses.
+    const searched = z1.lines.filter((l) => l.startsWith('G38.3 Z-')).slice(0, 2);
+    expect(searched).toEqual(['G38.3 Z-42.9 F300', 'G38.3 Z-5 F150']);
+  });
+
+  it('#642 a bracket-seat tap miss names the arm and the stored top', async () => {
+    // No `tap` in the fake: both stages find nothing, so the reading is a miss.
+    const z1 = fakeZ1({ actual: SHIFTED });
+    const r = await runRegistration(bracketTapPlan(), { console: z1.console, operator: yes });
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.reason).toContain('no touch at the bracket’s front arm (-186.2, -180) down to machine Z -50.9');
+    expect(r.reason).toContain('within 2 mm of the stored -48.9');
+    expect(r.reason).toContain('is the bracket where the machine record says?');
+  });
+
   // #519 item 1 — `ExecDeps.onTouch` is fed each reading AS IT LANDS, in landing order, so the
   // viewport's dots and the dock's table can fill during the run. The seq is the table's row number.
   it('emits every reading as it lands — the tap, the surface, then each scan touch', async () => {

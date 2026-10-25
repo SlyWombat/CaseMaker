@@ -537,6 +537,42 @@ describe('#419 §3 the Cut surface', () => {
     expect((screen.getByTestId('engrave-upload') as HTMLButtonElement).disabled).toBe(false);
   });
 
+  it('#642 a fresh measurement is a fresh clamping: the G32 tick resets', async () => {
+    const job = defaultEngraveJob();
+    const made = generated([P1]);
+    const dome = (): SurfaceSpreadAssessment =>
+      ({
+        verdict: 'dome',
+        tilt: { xMm: 0, yMm: 0 },
+        recommendation: {
+          gcode: 'G32 R1 X1 Y1 A2 B2 I3 J3 H3',
+          dump: 'M375.1',
+          after: 'M370',
+          sentence:
+            'The top is a dome, not a tilt: the machine’s own leveling follows a curved top and the program uploads FLAT. ' +
+            'Run G32 R1 X1 Y1 A2 B2 I3 J3 H3 from the console, M375.1 to dump the grid, M370 after. G32 is never uploaded in a file.',
+        },
+      }) as unknown as SurfaceSpreadAssessment;
+    useEngraveRegistrationStore.getState().measureSurface(job.id, TARGET, dome());
+
+    draw({ job, report: reportOf(), pkg: null, generated: made });
+    await waitFor(() => expect(screen.getByTestId('engrave-package').dataset.state).toBe('current'));
+
+    // The tick is the operator saying "the grid was run for THIS clamping".
+    fireEvent.click(screen.getByTestId('engrave-cut-dome-g32-ack'));
+    expect((screen.getByTestId('engrave-upload') as HTMLButtonElement).disabled).toBe(false);
+
+    // A new registration measures the blank again — a new clamping, with a top the old grid may not
+    // describe. Both confirmations belong to the old blank and must not carry over.
+    act(() => {
+      useEngraveRegistrationStore.getState().measureSurface(job.id, TARGET, dome());
+    });
+
+    expect((screen.getByTestId('engrave-cut-dome-g32-ack') as HTMLInputElement).checked).toBe(false);
+    expect((screen.getByTestId('engrave-upload') as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByTestId('engrave-upload-blocked').textContent).toContain('G32');
+  });
+
   it('#631 (c) — a dome also offers "write the origin anyway", which records the decision and clears Upload', async () => {
     const job = defaultEngraveJob();
     const made = generated([P1]);

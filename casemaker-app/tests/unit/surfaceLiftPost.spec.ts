@@ -150,6 +150,18 @@ describe('the post air-cut rule against the fitted surface (#624)', () => {
     expect(fitted.ok).toBe(true);
   });
 
+  it('refuses a feed ABOVE the local top under a tilt (#642)', () => {
+    // The same fitted tilt: a feed at lift(80, 40) + 0.1 mm is 0.1 mm into the air above the LOCAL
+    // stock top. The lifted accept above must not turn the rule into "anything positive passes":
+    // the bound moves with the plane, it does not vanish.
+    const lift = surfaceLift(TILT.plane, TILT.z0, 80, 40);
+    const ir = makeIr([operation(1, 'above', 'a', 0.5, [rapid(0, 0, 1), cut(80, 40, lift + 0.1, 200)])]);
+
+    const fitted = postZ1(ir, { ...CTX, surface: TILT }, Z1);
+    expect(fitted.ok).toBe(false);
+    if (!fitted.ok) expect(fitted.errors.join(' ')).toMatch(/cut in the air/);
+  });
+
   it('posts a lifted trace end to end: the worker hands the post the fitted frame (#624)', () => {
     const gen = generate(tl, liftedTraceJob(), null, [], undefined, { surface: TILT });
     if (gen.nc === null) {

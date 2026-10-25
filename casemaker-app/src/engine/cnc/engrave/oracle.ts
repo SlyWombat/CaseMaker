@@ -592,57 +592,69 @@ export function computeOracle(
     }
     if (parts.length === 0) continue;
 
-    let predictedCS: CrossSectionInstance;
-    if (parts.length === 1) {
-      predictedCS = parts[0] as CrossSectionInstance;
-      parts.length = 0; // ownership moved to predictedCS
-    } else {
-      predictedCS = CS.union(parts);
+    // #642 — the promise above ("deleted exactly once, on both the success and the throw path") was
+    // kept only on the success path: a throw from `union`/`offset`/`sliceAt`/`area` leaked the
+    // sections already built, in wasm memory nothing frees. EVERY section this level owns is held
+    // here and deleted in ONE `finally`, which runs on both paths; a section is never deleted twice.
+    let predictedCS: CrossSectionInstance | null = null;
+    let shrunk: CrossSectionInstance | null = null;
+    let grown: CrossSectionInstance | null = null;
+    let sliceCS: CrossSectionInstance | null = null;
+    let underCS: CrossSectionInstance | null = null;
+    let overCS: CrossSectionInstance | null = null;
+    try {
+      if (parts.length === 1) {
+        predictedCS = parts.shift() as CrossSectionInstance; // ownership moved out of `parts`
+      } else {
+        predictedCS = CS.union(parts);
+      }
+
+      shrunk = predictedCS.offset(-band, 'Round', 2, roundSegments);
+      grown = predictedCS.offset(band, 'Round', 2, roundSegments);
+      // The slice that sits just inside the material cut toward this floor. `null` means the engine
+      // removed nothing at or below the level: every predicted point is then an under-cut, and
+      // nothing can be an over-cut — the two `difference` calls below would both be answering a
+      // question about an empty set, so they are not asked.
+      sliceCS = sliceAt(z + ORACLE_SLICE_LIFT_MM);
+
+      const predictedArea = predictedCS.area();
+      const simulatedArea = sliceCS === null ? 0 : sliceCS.area();
+
+      let underCut: number;
+      let overCut: number;
+      let underBbox: OracleBbox | null = null;
+      let overBbox: OracleBbox | null = null;
+      if (sliceCS === null) {
+        underCut = Math.max(0, shrunk.area());
+        overCut = 0;
+        if (underCut > 0) underBbox = bboxOf(shrunk);
+      } else {
+        underCS = CS.difference([shrunk, sliceCS]);
+        overCS = CS.difference([sliceCS, grown]);
+        underCut = Math.max(0, underCS.area());
+        overCut = Math.max(0, overCS.area());
+        if (underCut > 0) underBbox = bboxOf(underCS);
+        if (overCut > 0) overBbox = bboxOf(overCS);
+      }
+
+      levels.push({ z, predictedArea, simulatedArea, underCut, overCut, underBbox, overBbox });
+      if (underCut > worstUnder) {
+        worstUnder = underCut;
+        worstUnderAt = underBbox === null ? null : { z, bbox: underBbox };
+      }
+      if (overCut > worstOver) {
+        worstOver = overCut;
+        worstOverAt = overBbox === null ? null : { z, bbox: overBbox };
+      }
+    } finally {
+      // `parts` is emptied only by the single-section branch; a throw from `union` leaves them here.
       for (const p of parts) p.delete();
-    }
-
-    const shrunk = predictedCS.offset(-band, 'Round', 2, roundSegments);
-    const grown = predictedCS.offset(band, 'Round', 2, roundSegments);
-    // The slice that sits just inside the material cut toward this floor. `null` means the engine
-    // removed nothing at or below the level: every predicted point is then an under-cut, and
-    // nothing can be an over-cut — the two `difference` calls below would both be answering a
-    // question about an empty set, so they are not asked.
-    const sliceCS = sliceAt(z + ORACLE_SLICE_LIFT_MM);
-
-    const predictedArea = predictedCS.area();
-    const simulatedArea = sliceCS === null ? 0 : sliceCS.area();
-
-    let underCut: number;
-    let overCut: number;
-    let underBbox: OracleBbox | null = null;
-    let overBbox: OracleBbox | null = null;
-    if (sliceCS === null) {
-      underCut = Math.max(0, shrunk.area());
-      overCut = 0;
-      if (underCut > 0) underBbox = bboxOf(shrunk);
-    } else {
-      const underCS = CS.difference([shrunk, sliceCS]);
-      const overCS = CS.difference([sliceCS, grown]);
-      underCut = Math.max(0, underCS.area());
-      overCut = Math.max(0, overCS.area());
-      if (underCut > 0) underBbox = bboxOf(underCS);
-      if (overCut > 0) overBbox = bboxOf(overCS);
-      underCS.delete();
-      overCS.delete();
-      sliceCS.delete();
-    }
-    shrunk.delete();
-    grown.delete();
-    predictedCS.delete();
-
-    levels.push({ z, predictedArea, simulatedArea, underCut, overCut, underBbox, overBbox });
-    if (underCut > worstUnder) {
-      worstUnder = underCut;
-      worstUnderAt = underBbox === null ? null : { z, bbox: underBbox };
-    }
-    if (overCut > worstOver) {
-      worstOver = overCut;
-      worstOverAt = overBbox === null ? null : { z, bbox: overBbox };
+      predictedCS?.delete();
+      shrunk?.delete();
+      grown?.delete();
+      sliceCS?.delete();
+      underCS?.delete();
+      overCS?.delete();
     }
   }
 

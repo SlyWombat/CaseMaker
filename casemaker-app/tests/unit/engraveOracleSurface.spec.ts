@@ -262,6 +262,20 @@ describe('the surface-frame oracle (#623)', () => {
     framed.dispose();
   });
 
+  it('#642 a plane that DIPS below z0 under part of the cut: the exact engine matches the flat post', () => {
+    // The least friendly shape the fit can take: the offset is 0.5 mm BELOW the reference touch, and
+    // the plane rises in +X, so the lift changes sign inside the pocket itself. The un-lift is a
+    // per-move subtraction in either direction, so the sweep must reproduce the flat removal on both
+    // sides of the crossing — not only where the lift is positive (#623's fixtures).
+    const dipping: SurfaceFrame = { plane: { offset: -0.5, slopeX: 0.01, slopeY: 0 }, z0: 0 };
+    expect(surfaceLift(dipping.plane, dipping.z0, 42, 30)).toBeLessThan(0);
+    expect(surfaceLift(dipping.plane, dipping.z0, 58, 30)).toBeGreaterThan(0);
+
+    const { flat, lifted } = verdicts(pocketJob(), dipping);
+    expect(flat.ok).toBe(true);
+    expectSameVerdict(flat, lifted);
+  });
+
   it('judges a lifted FLAT-REGION post exactly as the flat one — the exact sweeper, sheared', () => {
     // A pocket on a flat end mill stays on the EXACT sweeper when lifted (its run count is well
     // under the 2.5D cap), so this is the shear's own case: the removal is a union of 2.5D tool

@@ -108,14 +108,32 @@ export interface RunInputSources {
 export function runInputs(sources: RunInputSources): EngraveRunInputs {
   return {
     job: jobFingerprint(sources.job),
-    margins: `${sources.margins.boundaryMargin}|${sources.margins.zTolerance}`,
+    margins: marginsKey(sources.margins),
     machine: machineKey(sources.calibration),
     shop: shopKey(sources.shopDefaults),
-    feeds: hashOf(sources.feeds),
-    catalogue: hashOf(sources.catalogue),
+    feeds: feedsKey(sources.feeds),
+    catalogue: catalogueKey(sources.catalogue),
     cutters: cuttersKey(sources.tools, sources.conditions),
     surface: surfaceKey(sources.surface),
   };
+}
+
+/**
+ * #642 — the same stamps, one input at a time, for a WATCHER. The run store subscribes to the stores
+ * a Generate read; when one of them moves it must recompute that input's stamp from the same values
+ * `runInputs` hashes and compare it with this run's. Exported rather than re-derived, so a watcher
+ * and the stamp it checks cannot disagree about what an input is.
+ */
+export function marginsKey(margins: EngraveMargins): string {
+  return `${margins.boundaryMargin}|${margins.zTolerance}`;
+}
+
+export function feedsKey(feeds: readonly FeedsEntry[]): string {
+  return hashOf(feeds);
+}
+
+export function catalogueKey(rows: readonly FeedCatalogueRow[]): string {
+  return hashOf(rows);
 }
 
 /** The machine's FRAME, not its reading: `measuredAt`/`source` do not describe the machine. */

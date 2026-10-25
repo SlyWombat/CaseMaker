@@ -31,7 +31,11 @@ import { useSimStore } from '@/store/simStore';
 import { useSettingsStore } from '@/store/settingsStore';
 import { useShopDefaultsStore } from '@/store/shopDefaultsStore';
 import { calibrationFromReplies, type MachineCalibration } from '@/engine/cnc';
-import { clearFeedCatalogue, setFeedCatalogue, type FeedCatalogueRow } from '@/engine/cnc/feeds';
+import { clearFeedCatalogue, setFeedCatalogue, setLocatedFeedTable, type FeedCatalogueRow, type StoredFeedRow } from '@/engine/cnc/feeds';
+import { resetFeedTableStore, useFeedTableStore } from '@/store/feedTableStore';
+import { useToolRegistryStore } from '@/store/toolRegistryStore';
+import { resetEngraveRegistrationStore, useEngraveRegistrationStore } from '@/store/engraveRegistrationStore';
+import type { FeedRow } from '@/platform/feedClient';
 import { Z1_FRAME_REPLIES } from './fixtures/z1Frame';
 
 const NOTHING: EngraveGenerated = {
@@ -673,5 +677,143 @@ describe('#395 one gate, two ways to reach it', () => {
     // `programHash`) whose every other import is `import type`, so it loads in a node script exactly
     // as `simGate` does. A browser import (`platform/features`, a client, a worker) still fails here.
     expect(runtimeImports).toEqual(['@/engine/cnc/simGate', '@/engine/cnc/engrave/runInputs']);
+  });
+});
+
+// #642 — EVERY INPUT THE STAMP RECORDS has a watcher. Before this only the job and the machine frame
+// marked a held result stale, so the shop defaults, the feeds table, the synced catalogue, the
+// cutters' conditions, the depth margins and the registration's fitted surface could move under a
+// result and Save/Upload stayed green — while the #581 stamp knew all eight. Each test below moves
+// one input after a Generate and reads the reason named on the run.
+describe('#642 the run watches every input it stamps', () => {
+  const DEF = (value: number) => ({ value, source: 'chosen' as const, setAt: null, unit: null, note: null });
+  const TARGET = { host: '192.0.2.10', port: 2222 };
+  const ROW: StoredFeedRow = {
+    material: 'softwood',
+    edge: null,
+    minDiameter: 0.8,
+    maxDiameter: 3.2,
+    params: { rpm: 12000, feed: 500, plungeFeed: 200, stepDown: 0.5, stepOverFraction: 0.45, peckFraction: 1, air: true },
+    source: 'seeded',
+    provenance: 'A shop row.',
+  };
+
+  /** A generated, non-stale result: the state every watcher below has to notice a change under. */
+  async function held(): Promise<void> {
+    setEngraveRunClientLoader(async () => ({
+      engraveGenerate: async () => NOTHING,
+      simOracle: async () => ({ ok: true, band: 0.016, levels: [], worst: { underCut: 0, overCut: 0 } }),
+    }));
+    await useEngraveRunStore.getState().generate();
+    expect(useEngraveRunStore.getState().generated).not.toBeNull();
+    expect(useEngraveRunStore.getState().staleSince).toBeNull();
+  }
+
+  afterEach(() => {
+    setEngraveRunClientLoader(null);
+    useShopDefaultsStore.setState({ defaults: null });
+    resetFeedTableStore();
+    setLocatedFeedTable(null);
+    clearFeedCatalogue();
+    resetInventoryConditions();
+    resetEngraveRegistrationStore();
+  });
+
+  it('names the shop defaults when a value moves afterwards', async () => {
+    await held();
+    useShopDefaultsStore.setState({ defaults: { 'drill.peckClearanceMm': DEF(0.4) } });
+    expect(useEngraveRunStore.getState().staleReason).toBe('shop');
+    expect(saveBlocker(useEngraveRunStore.getState())).toBe('the shop defaults changed since it was generated');
+  });
+
+  it('a re-read of the shop defaults to the same values is not a change', async () => {
+    useShopDefaultsStore.setState({ defaults: { 'drill.peckClearanceMm': DEF(0.4) } });
+    await held();
+    // A new object (a fresh read), the same numbers: `shopKey` hashes values, not the document.
+    useShopDefaultsStore.setState({ defaults: { 'drill.peckClearanceMm': DEF(0.4) } });
+    expect(useEngraveRunStore.getState().staleSince).toBeNull();
+  });
+
+  it('names the feed table when a row arrives afterwards', async () => {
+    await held();
+    setLocatedFeedTable([ROW]);
+    useFeedTableStore.setState({
+      rows: [{ id: 'feed-1', setAt: null, note: null, ...ROW } as FeedRow],
+    });
+    expect(useEngraveRunStore.getState().staleReason).toBe('feeds');
+  });
+
+  it('names the feed catalogue when a sync replaces its rows afterwards', async () => {
+    await held();
+    const CAT: FeedCatalogueRow = { cutterId: '112111313812', material: 'Hardwood', rpm: 9800, feed: 700, plungeFeed: 250, stepDown: 0.7 };
+    setFeedCatalogue([CAT]);
+    useToolRegistryStore.setState({ feedCount: 1 });
+    expect(useEngraveRunStore.getState().staleReason).toBe('catalogue');
+  });
+
+  it('names the cutter list when an inventory condition moves afterwards', async () => {
+    await held();
+    const copy: ToolCopy = {
+      id: 'abc-1',
+      condition: 'broken',
+      whereabouts: { kind: 'box' },
+      runtimeWarnMinutes: null,
+      notes: null,
+      runtimeMinutes: null,
+    };
+    setInventoryConditions([{ id: 'abc', quantity: 1, copies: [copy] }], (id) => `inv:${id}`);
+    useToolRegistryStore.setState({ items: [] });
+    expect(useEngraveRunStore.getState().staleReason).toBe('cutters');
+  });
+
+  it('names the depth margins when only zTolerance moves afterwards', async () => {
+    await held();
+    const before = useSettingsStore.getState().margins;
+    try {
+      useSettingsStore.setState({ margins: { ...before, zTolerance: before.zTolerance + 0.05 } });
+      expect(useEngraveRunStore.getState().staleReason).toBe('margins');
+    } finally {
+      useSettingsStore.setState({ margins: before });
+    }
+  });
+
+  it('a zTolerance change DURING the generate stales the result, not just boundaryMargin', async () => {
+    // The mid-run check after `engraveGenerate` returns must compare the run's own margin STAMP: on a
+    // first run no held result exists for the watcher to mark, so only this check can catch it.
+    const before = useSettingsStore.getState().margins;
+    setEngraveRunClientLoader(async () => ({
+      engraveGenerate: async () => {
+        useSettingsStore.setState({ margins: { ...before, zTolerance: before.zTolerance + 0.05 } });
+        return NOTHING;
+      },
+      simOracle: async () => ({ ok: true, band: 0.016, levels: [], worst: { underCut: 0, overCut: 0 } }),
+    }));
+    try {
+      await useEngraveRunStore.getState().generate();
+      expect(useEngraveRunStore.getState().staleSince).not.toBeNull();
+      expect(useEngraveRunStore.getState().staleReason).toBe('margins');
+    } finally {
+      useSettingsStore.setState({ margins: before });
+    }
+  });
+
+  it('names the fitted surface frame when a registration replaces it afterwards', async () => {
+    await held();
+    useEngraveRegistrationStore
+      .getState()
+      .record(useEngraveJobStore.getState().job.id, TARGET, {} as never, {} as never, {
+        plane: { offset: -0.2, slopeX: 0.002, slopeY: 0 },
+        z0: -56,
+      });
+    expect(useEngraveRunStore.getState().staleReason).toBe('surface');
+    expect(saveBlocker(useEngraveRunStore.getState())).toBe('the fitted surface frame changed since it was generated');
+  });
+
+  it('a FLAT registration after Generate is not a different surface frame', async () => {
+    await held();
+    useEngraveRegistrationStore
+      .getState()
+      .record(useEngraveJobStore.getState().job.id, TARGET, {} as never, {} as never, null);
+    expect(useEngraveRunStore.getState().staleSince).toBeNull();
   });
 });

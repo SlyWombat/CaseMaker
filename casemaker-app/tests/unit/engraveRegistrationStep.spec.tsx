@@ -795,6 +795,28 @@ describe('#638 — the placement frame waits for the acceptance', () => {
     expect(saves).toHaveLength(1);
   });
 
+  it('#642 the surface top written is the CENTRE reading, not the spread’s lowest touch', async () => {
+    const plan = makePlan(-55.0);
+    const job = badgeJobWithPlan(plan);
+    const spread = spreadPlanFor(job);
+    // The badge dome: centre −55.0, every extent −55.33. The outcome's `surfaceZ` is Z0 — the LOWEST
+    // touch — so a write-back that used it would record a top 0.33 mm below the one the centre
+    // actually measured. Reading `r.data.surface.z` (the centre) is the point of #619's write.
+    const zs = [-55.0, -55.33, -55.33, -55.33, -55.33];
+    install(plan, { spreadReadings: spread.touches.map((t, i) => ({ x: t.x, y: t.y, z: zs[i]! })) });
+    const saves = placedLocation();
+    useEngraveJobStore.setState({ job });
+    render(<EngraveRegistrationStep job={job} target={TARGET} />);
+
+    await runStep();
+    await writeOrigin();
+    await screen.findByTestId('engrave-registration-recorded');
+
+    const recorded = firstRegistrationFor(job.id, TARGET)!;
+    expect(recorded.outcome.surfaceZ).toBe(-55.33);
+    expect(bedOf(saves[0]!)?.datums.surfaceTopZ?.value).toBeCloseTo(-55.0, 3);
+  });
+
   it('records the plan the measurement ran under, not the one rendered at the press', async () => {
     const planA = makePlan(-56.172);
     const planB = makePlan(-55.0);

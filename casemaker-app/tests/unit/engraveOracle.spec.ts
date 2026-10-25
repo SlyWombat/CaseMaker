@@ -21,6 +21,7 @@ function dj(...args: Parameters<typeof defaultEngraveJob>): ReturnType<typeof de
 }
 import {
   ORACLE_AREA_FLOOR,
+  computeOracle,
   oracleBand,
   type OraclePredicted,
   type OracleReport,
@@ -394,6 +395,41 @@ describe('engraveOracle (#206 §3)', () => {
       expect(over(report)).toBeLessThanOrEqual(ORACLE_AREA_FLOOR);
     } finally {
       session.dispose();
+    }
+  });
+});
+
+// #642 — `computeOracle`'s promise ("every CrossSection is deleted exactly once, on both the success
+// and the throw path") had no try/finally behind it and no throw-path test: a wasm failure in
+// `offset` left the level's sections allocated with nothing to free them. This drives the throw and
+// asks each section the library made whether it was deleted — `isDeleted` is embind's own answer.
+describe('#642 computeOracle frees every section it built when a level throws', () => {
+  it('deletes the predicted section when the first offset throws after it was built', () => {
+    type Cs = { offset: (...args: unknown[]) => unknown; isDeleted: () => boolean };
+    // Embind gives each instance its own prototype object (probed: the class prototype is not the
+    // instance's), so the throwing `offset` is an OWN property on the one section `ofPolygons`
+    // returns — exactly the section a real wasm failure in `offset` would strand.
+    const CS = tl.CrossSection as unknown as { ofPolygons: (...args: unknown[]) => Cs };
+    const realOf = CS.ofPolygons;
+    const made: Cs[] = [];
+    CS.ofPolygons = (...args: unknown[]) => {
+      const cs = realOf.apply(CS, args);
+      made.push(cs);
+      cs.offset = () => {
+        throw new Error('wasm: a section could not be built (test)');
+      };
+      return cs;
+    };
+    try {
+      const predicted: OraclePredicted[] = [
+        { depth: 1, polygons: [[[0, 0], [10, 0], [10, 10], [0, 10]]] },
+      ];
+      expect(() => computeOracle(tl, () => null, predicted, 0.05)).toThrow('a section could not be built');
+      // The one section the level had built before the throw is freed by the finally…
+      expect(made).toHaveLength(1);
+      expect(made[0]!.isDeleted()).toBe(true);
+    } finally {
+      CS.ofPolygons = realOf;
     }
   });
 });

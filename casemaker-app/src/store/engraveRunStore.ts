@@ -33,9 +33,15 @@ import type { MachineCalibration } from '@/engine/cnc';
 import { effectiveMargins } from '@/engine/cnc/engrave/depthBounds';
 import { jobFingerprint } from '@/engine/cnc/engrave/package';
 import {
+  catalogueKey,
   changedInputs,
+  cuttersKey,
+  feedsKey,
   machineKey,
+  marginsKey,
   runInputs,
+  shopKey,
+  surfaceKey,
   type EngraveInputKey,
   type EngraveRunInputs,
 } from '@/engine/cnc/engrave/runInputs';
@@ -44,6 +50,9 @@ import { useSettingsStore } from './settingsStore';
 import { useEngraveJobStore } from './engraveJobStore';
 import { useSimStore } from './simStore';
 import { shopDefault, useShopDefaultsStore } from './shopDefaultsStore';
+import { useFeedTableStore } from './feedTableStore';
+import { useToolRegistryStore } from './toolRegistryStore';
+import { useEngraveRegistrationStore } from './engraveRegistrationStore';
 import { drillSettings } from '@/engine/cnc/cam/drillBit';
 import type { EngraveRunPhase } from './engraveRunGate';
 
@@ -311,7 +320,10 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
     const nowMargins = effectiveMargins(nowJob, useSettingsStore.getState().margins);
     const changedJob = jobFingerprint(nowJob) !== inputs.job;
     const changedMachine = machineKey(nowCalibration) !== inputs.machine;
-    const stale = changedJob || changedMachine || nowMargins.boundaryMargin !== margins.boundaryMargin;
+    // #642 — the margins are compared by their STAMP (both numbers), not `boundaryMargin` alone:
+    // `inputs.margins` carries `zTolerance` too, and it can move on its own.
+    const changedMargins = marginsKey(nowMargins) !== inputs.margins;
+    const stale = changedJob || changedMachine || changedMargins;
     if (stale) {
       // #581 — name which one moved; the generic sentence is only for a caller that cannot know.
       set({
@@ -432,12 +444,18 @@ useEngraveJobStore.subscribe((state, prev) => {
 // machine, and Save and Upload must not carry on offering the old result. The comparison is the
 // #581 stamp of the frame (`machineKey` — machineId, frame, soft endstop), not the read: saving a
 // new read of the same numbers is not a different machine.
+//
+// #642 — and so do the depth margins, the settings store's other stamped input: they gate the
+// program (`effectiveMargins`), and a change to `zTolerance` alone used to go unnoticed.
 useSettingsStore.subscribe((state, prev) => {
-  if (state.machineCalibration === prev.machineCalibration) return;
   const run = useEngraveRunStore.getState();
   if (run.inputs === null) return;
-  if (machineKey(state.machineCalibration ?? null) === run.inputs.machine) return;
-  markStale('machine');
+  if (state.machineCalibration !== prev.machineCalibration && machineKey(state.machineCalibration ?? null) !== run.inputs.machine) {
+    markStale('machine');
+  }
+  if (state.margins !== prev.margins) {
+    staleIfMoved('margins', marginsKey(effectiveMargins(useEngraveJobStore.getState().job, state.margins)));
+  }
 });
 
 /** #581 — the mark carries WHICH input moved, so the row can say "the job changed" and not guess. */
@@ -445,3 +463,49 @@ function markStale(reason: EngraveInputKey): void {
   const s = useEngraveRunStore.getState();
   if (s.generated && s.staleSince === null) useEngraveRunStore.setState({ staleSince: Date.now(), staleReason: reason });
 }
+
+/**
+ * #642 — SUBSCRIBE TO WHAT THE STAMP STAMPS. The gates read the #581 stamp, but only the job and the
+ * machine frame were watched: the shop defaults, the feeds table, the synced catalogue, the cutters'
+ * conditions and the registration's fitted surface could all move after Generate and leave Save and
+ * Upload green. Each watcher recomputes ITS input's stamp from the same values the run hashed (the
+ * `*Key` functions `runInputs` itself uses) and marks the run stale with that input named. The
+ * comparisons are STAMPS, never object identity, like the two subscriptions above: a re-read of the
+ * same numbers is not a change.
+ */
+function staleIfMoved(key: EngraveInputKey, current: string): void {
+  const run = useEngraveRunStore.getState();
+  if (run.inputs === null) return;
+  if (current === run.inputs[key]) return;
+  markStale(key);
+}
+
+useShopDefaultsStore.subscribe((state, prev) => {
+  // A re-read of the same document is a new object with the same values; `shopKey` settles it.
+  if (state.defaults === prev.defaults) return;
+  staleIfMoved('shop', shopKey(state.defaults));
+});
+
+useFeedTableStore.subscribe((state, prev) => {
+  // `rows` is the source; a busy flag or a notice is not a table. The engine's snapshot is installed
+  // by the store's read (`setLocatedFeedTable`), so it already holds the rows this state describes.
+  if (state.rows === prev.rows) return;
+  staleIfMoved('feeds', feedsKey(resolvedFeedsTable().table));
+});
+
+useToolRegistryStore.subscribe((state, prev) => {
+  // Any refresh can replace the tool list, the catalogue snapshot or the inventory's conditions; the
+  // engine snapshots are installed before the store's set, so they are read here as they now stand.
+  if (state.entries === prev.entries && state.feedCount === prev.feedCount && state.items === prev.items) return;
+  staleIfMoved('catalogue', catalogueKey(feedCatalogueRows()));
+  staleIfMoved('cutters', cuttersKey(getTools(), inventoryConditions()));
+});
+
+useEngraveRegistrationStore.subscribe((state, prev) => {
+  // The Cut step re-posts against the FIRST registration's fitted surface; a new registration is a new
+  // frame to post against. Read the CURRENT job's record: after a job switch the job subscription has
+  // already marked the run stale, and `markStale` keeps the first reason.
+  if (state.records === prev.records) return;
+  const job = useEngraveJobStore.getState().job;
+  staleIfMoved('surface', surfaceKey(state.records[job.id]?.surface ?? null));
+});
