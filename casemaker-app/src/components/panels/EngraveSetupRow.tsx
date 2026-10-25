@@ -84,6 +84,8 @@ export interface EngraveSetupRowProps {
   planRegistration: (seatZ: string, useTypedSeat: boolean) => RegistrationAttempt;
   /** #599 — run the standalone mount tap (no datum yet) and write the reading. */
   onTapJaw: (tap: { x: number; y: number; fromMachineZ: number }) => void;
+  /** #637 — a tap is running somewhere in this window: the button is disabled, not orphaned. */
+  tapBusy: boolean;
   /** #603 — the checked-out probe's name, or null when none is checked out. */
   probeName?: string | null;
   /** #603 — the machine's display name, or null when there is no location record. */
@@ -423,7 +425,7 @@ export function EngraveSetupRow(props: EngraveSetupRowProps): JSX.Element {
                 <div data-testid={`engrave-setup-reg-need-datum-${n}`}>
                   <p style={{ ...MUTED, color: WARN_COLOR, margin: '4px 0' }}>{attempt.message}</p>
                   {attempt.mountTap !== null && (
-                    <button type="button" data-testid={`engrave-setup-tap-jaw-${n}`} onClick={() => props.onTapJaw(attempt.mountTap!)}>
+                    <button type="button" data-testid={`engrave-setup-tap-jaw-${n}`} disabled={props.tapBusy} onClick={() => props.onTapJaw(attempt.mountTap!)}>
                       {/* #607 — the tap is the mount's, so the button says which reference it touches.
                           #640 — the bracket-seat branch is UNREACHABLE today: `bracketTapFor` is null
                           until the seat is measured, and no bracket plan offers a need-datum tap. The

@@ -39,7 +39,7 @@ import {
   probeNameFor,
   surfaceTopDatumFor,
 } from '@/engine/cnc/registration/mountContext';
-import { useMountTap } from '@/hooks/useMountTap';
+import { useMountTap, useMountTapBusyFlag } from '@/hooks/useMountTap';
 import {
   addSetupOffer,
   applySetupChange,
@@ -283,6 +283,7 @@ export function EngraveSetupsSection({ initiallyOpen = false }: { initiallyOpen?
     const profile = machineRecord.bedProfiles?.find((p) => p.id === machineRecord.activeBedProfileId);
     return machineDisplayName(machineRecord, profile);
   }, [machineRecord]);
+  const tapBusy = useMountTapBusyFlag();
   const mountTapApi = useMountTap({
     target,
     settings: regSettings,
@@ -631,10 +632,10 @@ export function EngraveSetupsSection({ initiallyOpen = false }: { initiallyOpen?
       {mountTapApi.prompt !== null && (
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '8px 0' }} data-testid="engrave-setups-tap-prompt">
           <span style={{ fontSize: 12 }}>{mountTapApi.prompt.text}</span>
-          <button type="button" onClick={() => mountTapApi.resolve(true)}>
+          <button type="button" data-testid="engrave-mount-tap-continue" onClick={() => mountTapApi.resolve(true)}>
             Continue
           </button>
-          <button type="button" onClick={() => mountTapApi.resolve(false)}>
+          <button type="button" data-testid="engrave-mount-tap-cancel" onClick={() => mountTapApi.resolve(false)}>
             Cancel
           </button>
         </div>
@@ -713,6 +714,7 @@ export function EngraveSetupsSection({ initiallyOpen = false }: { initiallyOpen?
                 });
               }}
               onTapJaw={mountTapApi.tapJaw}
+              tapBusy={tapBusy}
             />
           );
         })

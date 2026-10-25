@@ -30,7 +30,7 @@ import { canDriveMachine } from '@/platform/capabilities';
 import { mountNum, mountTapFor, probeFor, accessoryNameFor } from '@/engine/cnc/registration/mountContext';
 import { registrationSettings } from '@/engine/cnc/registration/settings';
 import { jobMachine } from '@/engine/cnc/calibration';
-import { useMountTap } from '@/hooks/useMountTap';
+import { useMountTap, useMountTapBusyFlag } from '@/hooks/useMountTap';
 import {
   BED_DATUM_KEYS,
   BED_DATUM_WORDS,
@@ -119,6 +119,7 @@ function BedJawTap({ machine }: { machine: MachineRecord }) {
   const viseAcc = accessoriesFor(machine).find((a) => a.kind === 'vise');
   const mountTap = mountTapFor(machine, Object.values(registrations), profile.toolChange.clearanceZ, mountNum(viseAcc?.unit.jawStartY) ?? -10);
 
+  const tapBusy = useMountTapBusyFlag();
   const api = useMountTap({
     target,
     settings: registrationSettings(defaults, probe).settings,
@@ -135,6 +136,7 @@ function BedJawTap({ machine }: { machine: MachineRecord }) {
         type="button"
         className="btn btn--sm"
         data-testid="manage-bed-tap-jaw-button"
+        disabled={tapBusy}
         onClick={() => void api.tapJaw({ x: mountTap.x, y: mountTap.y, fromMachineZ: mountTap.fromMachineZ })}
       >
         Tap the fixed jaw
@@ -148,10 +150,10 @@ function BedJawTap({ machine }: { machine: MachineRecord }) {
       {api.prompt !== null && (
         <span className="hint" data-testid="manage-bed-tap-prompt">
           {api.prompt.text}{' '}
-          <button type="button" className="btn btn--sm" onClick={() => api.resolve(true)}>
+          <button type="button" className="btn btn--sm" data-testid="engrave-mount-tap-continue" onClick={() => api.resolve(true)}>
             Continue
           </button>
-          <button type="button" className="btn btn--sm" onClick={() => api.resolve(false)}>
+          <button type="button" className="btn btn--sm" data-testid="engrave-mount-tap-cancel" onClick={() => api.resolve(false)}>
             Cancel
           </button>
         </span>

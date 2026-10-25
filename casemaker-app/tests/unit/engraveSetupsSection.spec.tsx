@@ -23,6 +23,21 @@ import type { LocationView } from '@/platform/locationClient';
 import type { EngraveCircleShape, EngraveDrillItem, EngraveJob, JobSetup } from '@/types/engraveJob';
 
 vi.mock('@/engine/exportTrigger', () => ({ saveText: vi.fn(), saveEngraveProgram: vi.fn() }));
+// #637 — the mount-tap runner is stubbed so the HOOK's plumbing (prompt, busy, completion) is what
+// these tests drive; the protocol itself is bracketTap.spec's subject.
+const operatorPrompts: string[] = [];
+vi.mock('@/engine/cnc/registration', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/engine/cnc/registration')>();
+  return {
+    ...actual,
+    runMountTap: vi.fn(async (_tap: unknown, _from: unknown, _settings: unknown, deps: { operator: (s: { kind?: string; text: string }) => Promise<boolean> }) => {
+      operatorPrompts.push('fit-probe');
+      const ok = await deps.operator({ kind: 'fit-probe', text: 'Fit the wired probe in the spindle, then continue.' });
+      if (!ok) return { ok: false as const, reason: 'stopped: the probe was not fitted', transcript: [] };
+      return { ok: true as const, z: -56.82, at: { x: -186.2, y: -180 }, probe: { lengthZ: -76.063, rest: 'Probe: 0' }, transcript: [{ line: '?', reply: '<Idle|MPos:-1,-1,-1>' }] };
+    }),
+  };
+});
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -435,6 +450,56 @@ describe('#471 registration — planned only after approval, refused with the en
     expect(useEngraveJobStore.getState().job.setups![0]!.registration).toBeUndefined();
   });
 
+  // #637 — the tap's prompt carries testids, the button is disabled while the tap runs, and
+  // Continue completes it through the shared hook.
+  it('#637 the mount tap prompts with testids, disables while busy, and completes on Continue', async () => {
+    useMachineStore.setState({ machine: OBS });
+    useLocationStore.setState({
+      location: {
+        ...DATUM_LOCATION,
+        accessories: (DATUM_LOCATION.accessories ?? []).map((a) =>
+          a.kind === 'probe' ? { ...a, constants: {}, provenance: {}, history: [] } : a,
+        ),
+        machines: [
+          {
+            ...DATUM_LOCATION.machines[0]!,
+            bedProfiles: [
+              {
+                ...DATUM_LOCATION.machines[0]!.bedProfiles![0]!,
+                datums: {
+                  ...DATUM_LOCATION.machines[0]!.bedProfiles![0]!.datums,
+                  viseJawTopZ: { value: -56.82, measuredAt: '2026-10-23T00:00:00.000Z', by: 'wired-probe', at: null },
+                },
+                history: [],
+              },
+            ],
+          },
+        ],
+      },
+    });
+    // The write-back is not this spec's subject: the save answers ok so the note is the success one.
+    useLocationStore.setState({ saveMachine: async () => 'ok' });
+    act(() => useEngraveJobStore.setState({ job: savedJob() }));
+    render(<EngraveSetupsSection />);
+    fireEvent.click(screen.getByTestId('engrave-setup-expand-1'));
+    fireEvent.click(screen.getByTestId('engrave-setup-plan-reg-1'));
+
+    const tapButton = screen.getByTestId('engrave-setup-tap-jaw-1') as HTMLButtonElement;
+    fireEvent.click(tapButton);
+    // The runner is at the operator prompt: Continue is there, by testid, and the row's button is
+    // disabled while the tap runs (a second press would orphan the console handle).
+    await screen.findByTestId('engrave-mount-tap-continue');
+    expect(screen.getByTestId('engrave-mount-tap-cancel')).toBeTruthy();
+    expect((screen.getByTestId('engrave-setup-tap-jaw-1') as HTMLButtonElement).disabled).toBe(true);
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('engrave-mount-tap-continue'));
+    });
+    await waitFor(() => expect(screen.getByTestId('engrave-setups-tap-note').textContent).toContain('recorded'));
+    expect((screen.getByTestId('engrave-setup-tap-jaw-1') as HTMLButtonElement).disabled).toBe(false);
+    expect(operatorPrompts.length).toBeGreaterThan(0);
+  });
+
   it('#611 with no probe accessory checked out the datum stands — there is nothing to compare against', () => {
     useMachineStore.setState({ machine: OBS });
     useLocationStore.setState({
@@ -462,6 +527,9 @@ describe('#471 registration — planned only after approval, refused with the en
     useLocationStore.setState({
       location: {
         ...DATUM_LOCATION,
+        accessories: (DATUM_LOCATION.accessories ?? []).map((a) =>
+          a.kind === 'probe' ? { ...a, constants: {}, provenance: {}, history: [] } : a,
+        ),
         machines: [
           {
             ...DATUM_LOCATION.machines[0]!,

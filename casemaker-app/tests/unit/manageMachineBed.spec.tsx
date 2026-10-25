@@ -2,8 +2,8 @@
 // #511 — the Machines card's Bed block: renders every surface kind, and Switch writes the location
 // without ever sending a machine command.
 
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { setHouseClientLoader, type HouseClient } from '@/platform/houseClient';
 import { setMachineConsoleLoader } from '@/platform/machineConsole';
 import { readFileSync } from 'node:fs';
@@ -16,6 +16,24 @@ import { resetLocationStore, useLocationStore } from '@/store/locationStore';
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 const HERE = dirname(fileURLToPath(import.meta.url));
+vi.mock('@/platform/capabilities', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/platform/capabilities')>();
+  return { ...actual, canDriveMachine: true };
+});
+// #637 — the mount-tap runner is stubbed so the card host's plumbing (prompt, busy, completion) is
+// what this test drives.
+vi.mock('@/engine/cnc/registration', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/engine/cnc/registration')>();
+  return {
+    ...actual,
+    runMountTap: vi.fn(async (_tap: unknown, _from: unknown, _settings: unknown, deps: { operator: (s: { kind?: string; text: string }) => Promise<boolean> }) => {
+      const ok = await deps.operator({ kind: 'fit-probe', text: 'Fit the wired probe in the spindle, then continue.' });
+      if (!ok) return { ok: false as const, reason: 'stopped: the probe was not fitted', transcript: [] };
+      return { ok: true as const, z: -56.82, at: { x: -186.2, y: -180 }, probe: { lengthZ: -76.063, rest: 'Probe: 0' }, transcript: [{ line: '?', reply: '<Idle|MPos:-1,-1,-1>' }] };
+    }),
+  };
+});
+
 const VIEW = LocationViewSchema.parse(
   JSON.parse(readFileSync(join(HERE, 'fixtures', 'location-doc.json'), 'utf8')),
 );
@@ -131,5 +149,27 @@ describe('#511 the Bed block', () => {
     expect(consoleSends).toEqual([]);
     // And nothing but the location write and its re-read crossed the service client.
     expect(calls.every((c) => c.path.startsWith('/location'))).toBe(true);
+  });
+});
+
+describe('#637 the Bed card drives the shared mount tap', () => {
+  it('prompts with testids, disables while busy, and completes on Continue', async () => {
+    const m = machine();
+    useLocationStore.setState({ status: 'present', location: { ...VIEW, machines: [m] }, etag: '"x"' });
+    // The write-back is not this test's subject.
+    useLocationStore.setState({ saveMachine: async () => 'ok' });
+    render(<MachineBed machine={m} />);
+
+    const tapButton = screen.getByTestId('manage-bed-tap-jaw-button') as HTMLButtonElement;
+    fireEvent.click(tapButton);
+    await screen.findByTestId('engrave-mount-tap-continue');
+    expect(screen.getByTestId('engrave-mount-tap-cancel')).toBeTruthy();
+    expect((screen.getByTestId('manage-bed-tap-jaw-button') as HTMLButtonElement).disabled).toBe(true);
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('engrave-mount-tap-continue'));
+    });
+    await waitFor(() => expect(screen.getByTestId('manage-bed-tap-note').textContent).toContain('recorded'));
+    expect((screen.getByTestId('manage-bed-tap-jaw-button') as HTMLButtonElement).disabled).toBe(false);
   });
 });

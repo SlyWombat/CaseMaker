@@ -6,8 +6,9 @@
  * same fit-probe prompt, the same transcript, and the same write-back, never two copies that drift.
  */
 
-import { useRef, useState } from 'react';
-import { attachConsole } from '@/platform/machineConsole';
+import { useEffect, useRef, useState } from 'react';
+import { create } from 'zustand';
+import { attachConsole, type ConsoleHandle } from '@/platform/machineConsole';
 import { runMountTap, type OperatorStep } from '@/engine/cnc/registration';
 import type { RegistrationSettings } from '@/engine/cnc/registration/settings';
 import type { PlanMountTap } from '@/engine/cnc/registration/plan';
@@ -17,6 +18,43 @@ import { withBracketSeatDatum, withViseJawTopDatum } from '@/platform/bedProfile
 import { bracketSeatFromTap } from '@/engine/cnc/mounts/bracket';
 import { useShopDefaultsStore } from '@/store/shopDefaultsStore';
 import { recordProbeReading } from '@/engine/cnc/registration/mountContext';
+
+/**
+ * #637 — ONE TAP AT A TIME, ACROSS HOSTS. The hook is used by the Setups row and by the machine
+ * card's Bed block at the same time; two presses would overwrite the pending operator prompt's
+ * resolver, and the first tap's promise — and its console handle — would never be released. A
+ * module-level gate both hosts read, so pressing either button disables both.
+ *
+ * The gate holds a TOKEN, not a boolean: only the press that took it may release it. A tap whose
+ * host unmounts mid-run releases its own token in the cleanup, and its detached promise's `finally`
+ * then finds a newer tap's token and leaves it alone — a stale release cannot re-enable the other
+ * host's button under a running tap.
+ */
+interface MountTapGate {
+  owner: object | null;
+  /** Take the gate for `token`; false when a tap already holds it. */
+  begin: (token: object) => boolean;
+  /** Release the gate — no-op unless `token` still holds it. */
+  end: (token: object) => void;
+}
+
+const useMountTapGate = create<MountTapGate>()((set, get) => ({
+  owner: null,
+  begin: (token) => {
+    if (get().owner !== null) return false;
+    set({ owner: token });
+    return true;
+  },
+  end: (token) => {
+    if (get().owner === token) set({ owner: null });
+  },
+}));
+
+/** #637 — is a mount tap running anywhere in this window? Hosts disable their buttons on it. */
+export function useMountTapBusyFlag(): boolean {
+  // A boolean selector: stable by value, so `useSyncExternalStore` sees no change on unrelated sets.
+  return useMountTapGate((s) => s.owner !== null);
+}
 
 /** #607 — the mount kind a reference belongs to, in `runMountTap`'s own words. */
 function mountKindOf(reference: PlanMountTap['reference']): 'vise' | 'bracket' {
@@ -56,8 +94,39 @@ export function useMountTap(inputs: MountTapInputs): MountTapApi {
   const [note, setNote] = useState<string | null>(null);
   const [prompt, setPrompt] = useState<OperatorStep | null>(null);
   const resolver = useRef<((ok: boolean) => void) | null>(null);
+  const handleRef = useRef<ConsoleHandle | null>(null);
+  /** The gate token this instance's tap holds, or null when it is not running one. */
+  const tokenRef = useRef<object | null>(null);
+  const alive = useRef(true);
+
+  // #637 — UNMOUNT CANCELS AND CLOSES. Switching Design → Cut while the fit-probe prompt is pending
+  // used to leave the promise hanging and the console attachment open, with setState firing on an
+  // unmounted component (the registration step has had this cleanup since #495).
+  //
+  // The effect body re-arms `alive`: React's dev-mode StrictMode runs this cleanup once on mount,
+  // and a flag that stayed false would swallow every note in a dev build (`machineConsole.ts` keeps
+  // its handle alive for the same reason).
+  useEffect(() => {
+    alive.current = true;
+    return () => {
+      alive.current = false;
+      resolver.current?.(false);
+      resolver.current = null;
+      if (tokenRef.current !== null) {
+        useMountTapGate.getState().end(tokenRef.current);
+        tokenRef.current = null;
+      }
+      void handleRef.current?.close();
+      handleRef.current = null;
+    };
+  }, []);
 
   const resolve = (ok: boolean): void => resolver.current?.(ok);
+
+  /** A note is a render of a host that may already have gone (Design → Cut mid-tap). */
+  const noteNow = (text: string): void => {
+    if (alive.current) setNote(text);
+  };
 
   const askOperator = (step: OperatorStep): Promise<boolean> => {
     setPrompt(step);
@@ -74,8 +143,14 @@ export function useMountTap(inputs: MountTapInputs): MountTapApi {
     tap: { x: number; y: number; fromMachineZ: number } & Pick<PlanMountTap, 'reference' | 'datumOffsetMm'>,
   ): Promise<void> {
     if (inputs.target === null) return;
+    // #637 — a second press (the other host's button, or a double press) must not orphan the first
+    // tap's console handle: the shared gate refuses it outright.
+    const token = {};
+    if (!useMountTapGate.getState().begin(token)) return;
+    tokenRef.current = token;
     setNote(null);
     const handle = attachConsole(inputs.target);
+    handleRef.current = handle;
     try {
       const r = await runMountTap(
         { x: tap.x, y: tap.y },
@@ -100,7 +175,7 @@ export function useMountTap(inputs: MountTapInputs): MountTapApi {
             // a record that did not land is never reported as one that did.
             const outcome = await saveMachineWithRetry(withBracketSeatDatum(withBed, { z: seat, at: r.at }, inputs.probeId, now));
             if (outcome !== 'ok') {
-              setNote(
+              noteNow(
                 `the seat was tapped, but the machine record was not saved: ${useLocationStore.getState().writeNote ?? 'the service refused the write'}. Run the tap again to write it.`,
               );
               await recordProbeReading(record, r.probe);
@@ -114,7 +189,7 @@ export function useMountTap(inputs: MountTapInputs): MountTapApi {
               note: 'tapped on the bracket’s front arm',
             });
             if (!saved) {
-              setNote(
+              noteNow(
                 `the bracket seat was tapped, but the shop default was not saved: ${useShopDefaultsStore.getState().reason ?? 'the write was refused'}`,
               );
               // The machine save above still stands; report the partial result and return.
@@ -124,7 +199,7 @@ export function useMountTap(inputs: MountTapInputs): MountTapApi {
           } else {
             const outcome = await saveMachineWithRetry(withViseJawTopDatum(withBed, { z: r.z, at: r.at }, inputs.probeId, now));
             if (outcome !== 'ok') {
-              setNote(
+              noteNow(
                 `the jaw top was tapped, but the machine record was not saved: ${useLocationStore.getState().writeNote ?? 'the service refused the write'}. Run the tap again to write it.`,
               );
               await recordProbeReading(record, r.probe);
@@ -134,11 +209,14 @@ export function useMountTap(inputs: MountTapInputs): MountTapApi {
           // #601 — the probe's last M491 length and M119 rest ride on the checked-out probe accessory.
           await recordProbeReading(record, r.probe);
         }
-        setNote(inputs.successNote);
+        noteNow(inputs.successNote);
       } else {
-        setNote(r.reason);
+        noteNow(r.reason);
       }
     } finally {
+      tokenRef.current = null;
+      handleRef.current = null;
+      useMountTapGate.getState().end(token);
       await handle.close();
     }
   }
