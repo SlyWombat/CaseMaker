@@ -34,7 +34,7 @@
  */
 
 import { type Tool, type ToolShape } from './tool';
-import { grooveRadiusAt, vCone, type VCone } from './vProfile';
+import { grooveRadiusAt, vConeGeometry, vFluteLength, type VCone } from './vProfile';
 import type { Condition } from './toolCondition';
 
 /** The three places a profile is drawn. `print` is the monochrome run-sheet version. */
@@ -290,7 +290,10 @@ function valueFor(tool: Tool, code: CutterDimensionCode): { field: CutterField; 
     case 'LS':
       return { field: 'shoulderLength', value: positive(tool.shoulderLength) };
     case 'LC':
-      return { field: 'fluteLength', value: positive(tool.fluteLength) };
+      // A V-bit's flute length is its cone height, derived from the diameter and angle when the
+      // record leaves it empty — the same way TI derives from AN. `field` stays `fluteLength` so the
+      // dimension still lights the flute box the editor owns.
+      return { field: 'fluteLength', value: positive(tool.fluteLength) ?? vFluteLength(tool) };
     case 'CR':
       return { field: 'cornerRadius', value: nonNegative(tool.cornerRadius) };
     case 'TI': {
@@ -500,9 +503,12 @@ function axialLayout(tool: Tool, cone: VCone | null, bodyR: number | null, tipR:
   const shankR = handle === null ? null : handle / 2;
   const displayR = clamp(bodyR ?? tipR ?? 1.5, 0.75, 3.5);
 
+  // The cone's own tip radius — not the `tipR` argument — is the geometry a V-bit's cone height is
+  // measured from: a chamfer whose tip is unstated still has a cone (`vConeGeometry` gives it a point
+  // tip of 0), and its height is then `bodyR / tanHalf`, not "unknown".
   const coneHeight =
-    cone !== null && bodyR !== null && tipR !== null && bodyR > tipR
-      ? (bodyR - tipR) / cone.tanHalf
+    cone !== null && bodyR !== null && bodyR > cone.tipRadius
+      ? (bodyR - cone.tipRadius) / cone.tanHalf
       : null;
 
   const cutTopKnownVal = flute ?? coneHeight;
@@ -715,8 +721,8 @@ function buildProfile(tool: Tool, cone: VCone | null, lay: Layout, options: Cutt
     }
     case 'engraving':
     case 'chamfer': {
-      const tipStated = tipR !== null;
-      const rTipDraw = tipR ?? Math.max(0.02, displayR * 0.15);
+      const tipStated = tipR !== null || cone !== null;
+      const rTipDraw = cone !== null ? cone.tipRadius : tipR ?? Math.max(0.02, displayR * 0.15);
       const rBodyDraw = bodyR ?? rShank;
       const tanHalf = cone?.tanHalf ?? Math.tan(30 * DEG);
       const coneHeight =
@@ -1261,8 +1267,12 @@ function describeProfile(
       `At ${fmtMm(grooveDepth)} mm deep the V groove is Ø ${fmtMm(width)} mm across its top opening.`,
     );
   } else if (cone !== null) {
+    const tipWord =
+      tool.shape === 'chamfer' && tool.tipDiameter === null
+        ? 'a point tip (a chamfer states none)'
+        : 'the stated tip diameter';
     parts.push(
-      'The V cone is drawn from the stated tip diameter and half angle; no job depth was supplied for its groove width.',
+      `The V cone is drawn from ${tipWord} and half angle; no job depth was supplied for its groove width.`,
     );
   }
   if (refusal !== null) parts.push(`The simulator refuses it: ${refusal.reason}.`);
@@ -1287,7 +1297,7 @@ function niceBarMm(scale: number, minUnits: number, maxUnits: number): { mm: num
 
 /** The layout a tool's numbers produce, before any scale is chosen. */
 function layoutFor(tool: Tool): { lay: Layout; cone: VCone | null } {
-  const cone = vCone(tool);
+  const cone = vConeGeometry(tool);
   const dc = cuttingDiameterSource(tool);
   const tip = positive(tool.tipDiameter);
   return {

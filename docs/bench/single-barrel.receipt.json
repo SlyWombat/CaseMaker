@@ -28,8 +28,8 @@
     },
     {
       "path": "<out>/single-barrel-run-sheet.md",
-      "sha256": "500ce06a2ff9c6e4e7e3aeecb558fb1007e34df2920e151acfe5e1f638a07047",
-      "bytes": 17900
+      "sha256": "e1fc966dd930fda7582aadcf021b754542b4ff08c9f8b07019bb59b89b0c23a6",
+      "bytes": 17825
     }
   ],
   "diagnostics": [

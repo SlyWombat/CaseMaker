@@ -130,6 +130,44 @@ describe('cutterProfile (#489)', () => {
     expect(an).toMatchObject({ field: 'angle', value: 15, text: '15°' });
   });
 
+  it('derives a V-bit flute length (LC) from its angle and cutting diameter (#654)', () => {
+    // The 90° chamfer: a point tip (unstated) and tan(45°) = 1, so LC = DC / 2.
+    const chamfer = tool('chamfer', {
+      tipDiameter: null,
+      diameter: 3.175,
+      angle: 90,
+      fluteLength: null,
+      shoulderLength: null,
+    });
+    const chamferLc = cutterDimensionSpecs(chamfer).find((s) => s.code === 'LC')!;
+    expect(chamferLc.missing).toBe(false);
+    expect(chamferLc.value).toBeCloseTo(1.5875, 4);
+    expect(chamferLc.text).toBe('1.588');
+
+    // A 30° engraver: half angle 15°, so LC = (DC − D1) / (2 · tan 15°).
+    const engraver = tool('engraving', {
+      tipDiameter: 0.3,
+      diameter: 3.175,
+      halfAngle: 15,
+      fluteLength: null,
+      shoulderLength: null,
+    });
+    const engraverLc = cutterDimensionSpecs(engraver).find((s) => s.code === 'LC')!;
+    expect(engraverLc.missing).toBe(false);
+    expect(engraverLc.value).toBeCloseTo(5.3648, 3);
+
+    // A stated flute still wins over the derivation.
+    const stated = tool('chamfer', { tipDiameter: null, diameter: 3.175, angle: 90, fluteLength: 7 });
+    expect(cutterDimensionSpecs(stated).find((s) => s.code === 'LC')!.value).toBe(7);
+
+    // The chamfer's cone is drawn at its stated angle, so the LC dimension and the 90° TI agree:
+    // nothing the drawing once left dashed (`?`) is still dashed.
+    const model = buildCutterProfile(chamfer, FULL);
+    expect(model.dimensions.find((d) => d.code === 'LC')!.missing).toBe(false);
+    expect(model.missingFields).not.toContain('fluteLength');
+    expect(model.missingFields).not.toContain('tipDiameter');
+  });
+
   it('puts AN clear of the flank a narrow V measures (#489 review)', () => {
     // A 30° engraver is 15° a side: a label centred on the arc sits on the cone's own edge. AN
     // reads outward from the measured flank; TI spans the whole point and stays centred.

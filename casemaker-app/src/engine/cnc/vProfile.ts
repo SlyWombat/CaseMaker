@@ -103,6 +103,44 @@ export function flankHeightAboveTip(cone: VCone, rho: number): number {
 }
 
 /**
+ * The cone a V-bit presents for GEOMETRY and DISPLAY, as opposed to the simulator's {@link vCone}.
+ *
+ * They differ on one point: a chamfer's tip. `vCone` refuses a missing tip because for an ENGRAVER a
+ * missing tip would read as the shank-wide groove (3.175 mm) the bit does not have. A chamfer's
+ * missing tip is the opposite — it is a POINT: Makera leaves the tip empty on every chamfer row and
+ * box (`C1-BIT-CHAMFER-90` names the angle and nothing else), and a chamfer mill comes to a point by
+ * definition. So a chamfer with no tip gets a 0 here, which makes its cone height — the flute length
+ * — derivable from the diameter and angle it DOES state.
+ *
+ * The simulator still asks {@link vCone}, and is still told "no" for a chamfer with no tip: a point
+ * tip is assumed, not proven, and a V trace planned against an assumption is exactly what the rule
+ * exists to prevent.
+ */
+export function vConeGeometry(tool: Tool): VCone | null {
+  if (!isVShape(tool)) return null;
+  if (tool.tipDiameter !== null) return vCone(tool);
+  if (tool.shape !== 'chamfer') return null;
+  return vCone({ ...tool, tipDiameter: 0 });
+}
+
+/**
+ * The flute length of a V-bit, derived from geometry the record DOES state: the cutting diameter
+ * (the shank `diameter` the cone flares to) and the angle. `(diameter − tip) / (2 · tan(halfAngle))`
+ * is the height at which the cone reaches the shank, which is where the flutes end.
+ *
+ * `null` when the tool is not a cone, or does not state a diameter and an angle (or a tip, for an
+ * engraver — see {@link vConeGeometry}).
+ */
+export function vFluteLength(tool: Tool): number | null {
+  const cone = vConeGeometry(tool);
+  if (cone === null) return null;
+  const shank = tool.diameter;
+  if (shank === null || !(shank > 0)) return null;
+  const height = flankHeightAboveTip(cone, shank / 2);
+  return height > 0 ? height : null;
+}
+
+/**
  * The groove width a TRACE cuts at `depth`, for a `Tool` — the number every width question wants.
  * `null` when the tool is not a cone (a flat end mill's width is its diameter, `cuttingDiameter`).
  */

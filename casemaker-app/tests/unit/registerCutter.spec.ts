@@ -693,6 +693,27 @@ describe('itemFromEntry — a catalogue row registered as owned', () => {
       'spare',
     );
   });
+
+  it('fills a V-bit flute length from its angle and diameter (#654)', () => {
+    const chamfer = catalogueRow({
+      shape: 'chamfer',
+      name: 'Chamfering Bit - 1/8" Shank 90°',
+      tipDiameter: null,
+      diameter: 3.175,
+      angle: 90,
+      halfAngle: null,
+      fluteLength: null,
+      shoulderLength: null,
+    });
+    const item = itemFromEntry(chamfer, { quantity: 1, now: NOW });
+    expect(item.tool.fluteLength).toBeCloseTo(1.5875, 4);
+
+    // A row that states a flute keeps it; a flat end mill is not a V-bit and stays as it was.
+    const stated = itemFromEntry(catalogueRow({ fluteLength: 4 }), { quantity: 1, now: NOW });
+    expect(stated.tool.fluteLength).toBe(4);
+    const flat = itemFromEntry(catalogueRow({}), { quantity: 1, now: NOW });
+    expect(flat.tool.fluteLength).toBe(4);
+  });
 });
 
 describe('itemFromForm — the Type door', () => {

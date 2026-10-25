@@ -23,6 +23,7 @@ import { newId } from '@/utils/id';
 import { isMetalCutterName, shapeFromType, type Tool, type ToolShape } from './tool';
 import type { ToolLibraryEntry } from './toolLibrary';
 import { catalogueIdOf, tierOf } from './toolTiers';
+import { vFluteLength } from './vProfile';
 
 /**
  * What a printed box code says about the cutter inside.
@@ -443,6 +444,11 @@ export function quantityProblem(value: string): string | null {
  * catalogue still lists it (#308) — but Makera's `id` stays on the copy: it is the definition's own
  * identity and the house's is `Origin.id`. The clone does not inherit the `g_ID`; the definition is
  * Makera's and only the row and its codes are ours, which is what `origin` records.
+ *
+ * A V-bit's `fluteLength` is filled in here when the row leaves it empty (#654): an engraver or
+ * chamfer's flute is its cone height, derivable from the diameter and angle the row states, and a
+ * registered cutter with a real flute length is what the run sheet, the holder gate and the feeds
+ * then read — not a `?` that the operator still has to resolve by hand.
  */
 export function itemFromEntry(entry: ToolLibraryEntry, choice: EntryChoice): InventoryItem {
   const catalogueId = catalogueIdOf(entry.key);
@@ -451,7 +457,7 @@ export function itemFromEntry(entry: ToolLibraryEntry, choice: EntryChoice): Inv
     : null;
   return {
     id: newId(),
-    tool: { ...entry.tool },
+    tool: { ...entry.tool, fluteLength: entry.tool.fluteLength ?? vFluteLength(entry.tool) },
     origin,
     quantity: choice.quantity,
     codes: choice.code ? [choice.code] : [],
