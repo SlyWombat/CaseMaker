@@ -97,9 +97,25 @@ pub async fn machines_in(house: &HouseStore) -> Result<Vec<MachineRecord>, Strin
         .map_err(|e| format!("the location cannot be read, so no machine is known: {e}"))
 }
 
+/// Is `port` the COMMAND port of some profile this build knows? #661's discovery vouch reaches a
+/// machine the house has NOT recorded, and only on its command port: that is the port a first check
+/// talks to. The vouch never opens the camera or any other port.
+pub fn any_profile_commands(ports: &dyn Fn(&str) -> Option<MachinePorts>, port: u16) -> bool {
+    PROFILES
+        .iter()
+        .filter_map(|(id, _)| ports(id))
+        .any(|p| p.command == port)
+}
+
 /// THE KNOWN-MACHINE REFUSAL for a TCP target. `None` means "this is a machine of ours, on a port
 /// its profile serves"; `Some(sentence)` is the refusal to send, naming which of the three things
 /// failed — the address, the profile, or the port.
+///
+/// `vouched` is #661's exception, and it is deliberately NARROW: a host the server itself heard
+/// announce on the discovery port, recently enough, may reach a profile's COMMAND port even with no
+/// machine record — the wizard's first check of a machine, which is what writes the record. Every
+/// other fact about a vouched host is unknown, so every other port is refused; once the record
+/// exists it is the record that is read, and the vouch stops mattering.
 ///
 /// Kept over the machine list rather than the store so the rule is a pure function with its own
 /// tests; the caller reads the location once.
@@ -108,6 +124,7 @@ pub fn target_refusal(
     ports: &dyn Fn(&str) -> Option<MachinePorts>,
     host: &str,
     port: u16,
+    vouched: bool,
 ) -> Option<String> {
     let mut host_known = false;
     let mut profile_known = false;
@@ -128,16 +145,29 @@ pub fn target_refusal(
         }
     }
     if !host_known {
-        Some(format!("`{host}` is not a machine this house knows."))
-    } else if !profile_known {
-        Some(format!(
-            "`{host}` is a machine this house knows, but its profile is not one this build knows."
-        ))
-    } else {
-        Some(format!(
-            "`{host}` is a machine this house knows, but its profile does not serve port {port}."
-        ))
+        if vouched {
+            if any_profile_commands(ports, port) {
+                return None;
+            }
+            return Some(format!(
+                "`{host}` announced itself on the network, but a machine this house has not \
+                 recorded is reachable only on its command port — not on port {port}. Add it in \
+                 Manage › Machines."
+            ));
+        }
+        return Some(format!(
+            "`{host}` is not a machine this house knows. Let it announce itself on the network, or \
+             add it in Manage › Machines."
+        ));
     }
+    if !profile_known {
+        return Some(format!(
+            "`{host}` is a machine this house knows, but its profile is not one this build knows."
+        ));
+    }
+    Some(format!(
+        "`{host}` is a machine this house knows, but its profile does not serve port {port}."
+    ))
 }
 
 #[cfg(test)]
@@ -160,7 +190,7 @@ mod tests {
         let machines = [machine("192.0.2.10", Some("Z1"))];
         for port in [2222, 82, 3333] {
             assert_eq!(
-                target_refusal(&machines, &ports_for, "192.0.2.10", port),
+                target_refusal(&machines, &ports_for, "192.0.2.10", port, false),
                 None,
                 "the Z1 serves {port}"
             );
@@ -173,18 +203,22 @@ mod tests {
             machine("192.0.2.10", Some("Z1")),
             machine("192.0.2.12", Some("OTHER")),
         ];
-        // An address the house does not have at all.
-        let unknown_host = target_refusal(&machines, &ports_for, "192.0.2.11", 2222).unwrap();
+        // An address the house does not have at all — and the sentence says how a machine becomes
+        // known, rather than leaving the person with a refusal and no way forward (#661).
+        let unknown_host = target_refusal(&machines, &ports_for, "192.0.2.11", 2222, false).unwrap();
         assert!(unknown_host.contains("not a machine this house knows"), "{unknown_host}");
+        assert!(unknown_host.contains("Let it announce itself on the network"), "{unknown_host}");
+        assert!(unknown_host.contains("Manage › Machines"), "{unknown_host}");
         // A machine it does have, on a port no profile serves.
-        let wrong_port = target_refusal(&machines, &ports_for, "192.0.2.10", 9999).unwrap();
+        let wrong_port = target_refusal(&machines, &ports_for, "192.0.2.10", 9999, false).unwrap();
         assert!(wrong_port.contains("does not serve port 9999"), "{wrong_port}");
         // A machine whose profile this build cannot name: no ports it can vouch for.
-        let unknown_profile = target_refusal(&machines, &ports_for, "192.0.2.12", 2222).unwrap();
+        let unknown_profile =
+            target_refusal(&machines, &ports_for, "192.0.2.12", 2222, false).unwrap();
         assert!(unknown_profile.contains("profile is not one this build knows"), "{unknown_profile}");
         // A record with NO profile is the same answer as one naming a profile we do not know.
         let none = [machine("192.0.2.13", None)];
-        assert!(target_refusal(&none, &ports_for, "192.0.2.13", 2222)
+        assert!(target_refusal(&none, &ports_for, "192.0.2.13", 2222, false)
             .unwrap()
             .contains("profile is not one this build knows"));
     }
@@ -193,9 +227,40 @@ mod tests {
     fn a_record_without_an_address_names_no_target() {
         let mut bare = machine("192.0.2.10", Some("Z1"));
         bare.address = None;
-        assert!(target_refusal(&[bare], &ports_for, "192.0.2.10", 2222)
+        assert!(target_refusal(&[bare], &ports_for, "192.0.2.10", 2222, false)
             .unwrap()
             .contains("not a machine this house knows"));
+    }
+
+    // #661 — THE DISCOVERY VOUCH, as a rule: a host the server heard, with no record, reaches the
+    // COMMAND port and nothing else.
+    #[test]
+    fn a_vouch_opens_the_command_port_and_no_other() {
+        let machines: [MachineRecord; 0] = [];
+        assert_eq!(
+            target_refusal(&machines, &ports_for, "192.0.2.20", 2222, true),
+            None,
+            "a machine that announced itself may be checked"
+        );
+        // The vouch never reaches the camera, the discovery port, or anything else: those need a
+        // record that names the machine's profile.
+        for port in [82, 3333, 9999] {
+            let refusal = target_refusal(&machines, &ports_for, "192.0.2.20", port, true).unwrap();
+            assert!(refusal.contains("reachable only on its command port"), "{port}: {refusal}");
+            assert!(refusal.contains(&format!("not on port {port}")), "{port}: {refusal}");
+            assert!(refusal.contains("Manage › Machines"), "{port}: {refusal}");
+        }
+        // And without a vouch nothing opens at all.
+        assert!(target_refusal(&machines, &ports_for, "192.0.2.20", 2222, false)
+            .unwrap()
+            .contains("not a machine this house knows"));
+    }
+
+    #[test]
+    fn the_command_port_is_the_profiles_own() {
+        assert!(any_profile_commands(&ports_for, 2222));
+        assert!(!any_profile_commands(&ports_for, 82));
+        assert!(!any_profile_commands(&ports_for, 3333));
     }
 
     #[test]

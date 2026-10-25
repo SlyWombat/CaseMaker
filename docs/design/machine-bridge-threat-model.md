@@ -33,11 +33,22 @@ client can write with `curl`, so the guard bounds what a *browser* can be tricke
 what a program can ask for. Before #660 the server was a relay: a client on the LAN could have it
 connect to any address it could reach and move bytes through it, the Z1's command port included.
 
+## The discovery vouch (#661)
+
+A machine the house has not recorded yet has no address question 2 can check — and the wizard's
+first check is exactly the step that turns discovery into a record. So the server's own UDP
+discovery listen vouches for what it hears: the source address of each datagram is remembered for
+five minutes, and a `tcp/connect` to such a host is accepted **on a profile's command port only**.
+The vouch is the server's own observation (no request can add a host to it), it never opens the
+camera or any other port, it expires, and once the record exists the record is what the rule reads.
+An unvouched unknown address is refused with the way forward in the sentence: let the machine
+announce itself on the network, or add it in Manage › Machines.
+
 ## What is claimed
 
 - The server dials only machines in its own location document, on ports the machine's profile
   serves. An unknown address, a port no profile serves, and a record whose profile this build does
-  not know are all refused **before** a socket is opened.
+  not know are all refused **before** a socket is opened — with the one bounded exception above.
 - A profile added to the client without a row in `machine_profiles.rs` fails closed: its machines
   are refused rather than offered another profile's ports.
 

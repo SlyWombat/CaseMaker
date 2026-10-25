@@ -31,7 +31,7 @@
 
 use crate::house::HouseStore;
 use crate::house_api::json_error;
-use crate::machine::{udp_listen, MachineTransport};
+use crate::machine::{udp_listen_with_peers, MachineTransport};
 use crate::machine_profiles::{
     any_profile_discovers, machines_in, standard_ports, target_refusal, PortsOf,
 };
@@ -41,23 +41,80 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::post;
 use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
+
+/// How long the server's own discovery vouches for a machine it heard (#661).
+pub const VOUCH_WINDOW: Duration = Duration::from_secs(300);
+
+/// #661 — THE DISCOVERY VOUCH. A machine the house has not recorded yet has no address the
+/// known-machine rule can check, and the wizard's FIRST check is exactly what turns discovery into a
+/// record: `probeMachine` listens, then connects to the address it heard. So the server remembers
+/// the senders of the discovery datagrams it itself received, for {@link VOUCH_WINDOW}, and the rule
+/// accepts such a host on a profile's COMMAND port — never the camera, never any other port.
+///
+/// The vouch is observation, not a request fact: nothing a caller sends can add a host to it. It is
+/// per host, time-bound, and stops mattering the moment the record exists (the record is read first
+/// and the vouch is not consulted for a machine the house knows).
+#[derive(Debug)]
+pub struct DiscoveredHosts {
+    window: Duration,
+    heard: tokio::sync::Mutex<HashMap<String, Instant>>,
+}
+
+impl Default for DiscoveredHosts {
+    fn default() -> Self {
+        Self::new(VOUCH_WINDOW)
+    }
+}
+
+impl DiscoveredHosts {
+    pub fn new(window: Duration) -> Self {
+        Self {
+            window,
+            heard: tokio::sync::Mutex::new(HashMap::new()),
+        }
+    }
+
+    /// Record that this host announced itself just now. Expired entries go with it, so the map
+    /// cannot grow without bound on a busy LAN.
+    async fn note(&self, host: String) {
+        let mut heard = self.heard.lock().await;
+        heard.retain(|_, at| at.elapsed() <= self.window);
+        heard.insert(host, Instant::now());
+    }
+
+    /// Has this host announced itself within the window? Prunes on the way through, so a quiet
+    /// machine stops being vouched for without a sweeper.
+    async fn vouches(&self, host: &str) -> bool {
+        let mut heard = self.heard.lock().await;
+        heard.retain(|_, at| at.elapsed() <= self.window);
+        heard.contains_key(host)
+    }
+}
 
 #[derive(Clone)]
 struct MachineApiState {
     transport: Arc<MachineTransport>,
     house: Arc<HouseStore>,
     ports: PortsOf,
+    discovered: Arc<DiscoveredHosts>,
 }
 
 /// The `/api/v1/machine/*` surface, with its own connection registry and the house it resolves
 /// targets against. Merge into the API router BEFORE the guard layer, so every call here is judged
 /// the same as any other `/api/v1` write.
 pub fn routes(transport: Arc<MachineTransport>, house: Arc<HouseStore>) -> Router {
-    build(transport, house, standard_ports())
+    build(transport, house, standard_ports(), Arc::new(DiscoveredHosts::default()))
 }
 
-fn build(transport: Arc<MachineTransport>, house: Arc<HouseStore>, ports: PortsOf) -> Router {
+fn build(
+    transport: Arc<MachineTransport>,
+    house: Arc<HouseStore>,
+    ports: PortsOf,
+    discovered: Arc<DiscoveredHosts>,
+) -> Router {
     Router::new()
         .route("/api/v1/machine/tcp/connect", post(tcp_connect))
         .route("/api/v1/machine/tcp/write", post(tcp_write))
@@ -68,6 +125,7 @@ fn build(transport: Arc<MachineTransport>, house: Arc<HouseStore>, ports: PortsO
             transport,
             house,
             ports,
+            discovered,
         })
 }
 
@@ -103,7 +161,12 @@ async fn tcp_connect(State(state): State<MachineApiState>, Json(req): Json<Conne
         Ok(machines) => machines,
         Err(refusal) => return target_forbidden(refusal),
     };
-    if let Some(refusal) = target_refusal(&machines, state.ports.as_ref(), &req.host, req.port) {
+    // #661 — a machine that announced itself recently may be checked before it is recorded; the
+    // rule itself keeps that to the command port.
+    let vouched = state.discovered.vouches(&req.host).await;
+    if let Some(refusal) =
+        target_refusal(&machines, state.ports.as_ref(), &req.host, req.port, vouched)
+    {
         return target_forbidden(refusal);
     }
     match state.transport.connect(&req.host, req.port, req.timeout_ms).await {
@@ -171,8 +234,16 @@ async fn udp_listen_handler(State(state): State<MachineApiState>, Json(req): Jso
             req.port
         ));
     }
-    match udp_listen(req.port, req.window_ms).await {
-        Ok(datagrams) => Json(datagrams).into_response(),
+    match udp_listen_with_peers(req.port, req.window_ms).await {
+        Ok(heard) => {
+            // #661 — the vouch is fed HERE, by the server's own socket, and nowhere else: a caller
+            // can make the server listen, but cannot tell it who is out there.
+            for datagram in &heard {
+                state.discovered.note(datagram.peer.ip().to_string()).await;
+            }
+            let datagrams: Vec<_> = heard.into_iter().map(|heard| heard.datagram).collect();
+            Json(datagrams).into_response()
+        }
         Err(e) => upstream_error(e),
     }
 }
@@ -226,12 +297,27 @@ mod tests {
 
     /// The route on a house that holds `machines`, with `ports` as its profile table.
     async fn app_in(dir: &TempDir, machines: Vec<MachineRecord>, ports: MachinePorts) -> Router {
+        app_in_with(dir, machines, ports, Arc::new(DiscoveredHosts::default())).await
+    }
+
+    /// The same, with the discovery vouch handed in — so a test can keep its window short.
+    async fn app_in_with(
+        dir: &TempDir,
+        machines: Vec<MachineRecord>,
+        ports: MachinePorts,
+        discovered: Arc<DiscoveredHosts>,
+    ) -> Router {
         let store = Arc::new(HouseStore::open_with(dir.path().to_path_buf(), None));
         for machine in machines {
             // `*` is the guard's own "whatever is there now" — a test seeding its own house.
             store.put_machine(machine, Some("*")).await.unwrap();
         }
-        build(Arc::new(MachineTransport::default()), store, Arc::new(move |_| Some(ports)))
+        build(
+            Arc::new(MachineTransport::default()),
+            store,
+            Arc::new(move |_| Some(ports)),
+            discovered,
+        )
     }
 
     /// The common case: one known machine, the stand-in's command port.
@@ -319,10 +405,11 @@ mod tests {
             .unwrap();
         assert_eq!(res.status(), StatusCode::FORBIDDEN);
         let json = body_json(res).await;
-        assert!(
-            json["error"].as_str().unwrap().contains("not a machine this house knows"),
-            "{json}"
-        );
+        let error = json["error"].as_str().unwrap();
+        assert!(error.contains("not a machine this house knows"), "{json}");
+        // #661 — the refusal says how a machine becomes known.
+        assert!(error.contains("Let it announce itself on the network"), "{json}");
+        assert!(error.contains("Manage › Machines"), "{json}");
 
         let quiet = tokio::time::timeout(Duration::from_millis(200), async {
             listener.accept().await
@@ -437,5 +524,115 @@ mod tests {
             .unwrap();
         assert_eq!(res.status(), StatusCode::OK);
         assert_eq!(body_json(res).await, serde_json::json!([]));
+    }
+
+    // #661 — THE DISCOVERY VOUCH, end to end. A datagram the server itself hears lets the wizard's
+    // first check reach a machine the house has not recorded, on its command port; once the window
+    // passes the same request is refused, with the way forward in the sentence.
+    #[tokio::test]
+    async fn a_machine_that_announced_itself_may_be_checked_until_the_vouch_expires() {
+        let controller = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let command = controller.local_addr().unwrap().port();
+        // A discovery port picked by the OS and released, so the listen can bind it.
+        let probe = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
+        let discovery = probe.local_addr().unwrap().port();
+        drop(probe);
+
+        let dir = TempDir::new().unwrap();
+        // A short vouch window, so "expires" is a test rather than a five-minute wait.
+        let discovered = Arc::new(DiscoveredHosts::new(Duration::from_millis(150)));
+        let app = app_in_with(
+            &dir,
+            vec![],
+            MachinePorts {
+                command,
+                camera: Some(82),
+                discovery,
+            },
+            discovered,
+        )
+        .await;
+
+        // The machine announces itself while the server listens. Repeated because the two are
+        // concurrent: the first datagrams may arrive before the listen's socket is bound.
+        let announcer = std::thread::spawn(move || {
+            let socket = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
+            for _ in 0..20 {
+                let _ = socket.send_to(b"{\"name\":\"makera_z1_010290\"}", ("127.0.0.1", discovery));
+                std::thread::sleep(Duration::from_millis(10));
+            }
+        });
+        let res = app
+            .clone()
+            .oneshot(post_json(
+                "/api/v1/machine/udp/listen",
+                serde_json::json!({ "port": discovery, "window_ms": 150 }),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        announcer.join().unwrap();
+
+        // The first check connects: the stand-in controller accepts it.
+        let accepted = tokio::spawn(async move { controller.accept().await.unwrap() });
+        let res = app
+            .clone()
+            .oneshot(post_json(
+                "/api/v1/machine/tcp/connect",
+                serde_json::json!({ "host": "127.0.0.1", "port": command, "timeout_ms": 1000 }),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK, "the vouch is what let this connect");
+        accepted.await.unwrap();
+
+        // The window passes: the same request is refused, and the sentence says how to become known.
+        tokio::time::sleep(Duration::from_millis(250)).await;
+        let res = app
+            .oneshot(post_json(
+                "/api/v1/machine/tcp/connect",
+                serde_json::json!({ "host": "127.0.0.1", "port": command, "timeout_ms": 1000 }),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::FORBIDDEN);
+        let json = body_json(res).await;
+        assert!(
+            json["error"].as_str().unwrap().contains("Let it announce itself on the network"),
+            "{json}"
+        );
+    }
+
+    // #661 — the vouch is for the COMMAND port only. A machine that has announced itself still
+    // cannot be reached on its camera (or anything else) until the house has recorded it.
+    #[tokio::test]
+    async fn a_vouched_host_is_refused_on_the_camera_port() {
+        let dir = TempDir::new().unwrap();
+        let discovered = Arc::new(DiscoveredHosts::default());
+        discovered.note("192.0.2.20".to_string()).await;
+        let app = app_in_with(
+            &dir,
+            vec![],
+            MachinePorts {
+                command: 2222,
+                camera: Some(82),
+                discovery: 3333,
+            },
+            discovered,
+        )
+        .await;
+        let res = app
+            .oneshot(post_json(
+                "/api/v1/machine/tcp/connect",
+                serde_json::json!({ "host": "192.0.2.20", "port": 82, "timeout_ms": 1000 }),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::FORBIDDEN);
+        let json = body_json(res).await;
+        assert!(
+            json["error"].as_str().unwrap().contains("reachable only on its command port"),
+            "{json}"
+        );
     }
 }

@@ -137,6 +137,17 @@ fn epoch_millis() -> i64 {
         .unwrap_or(0)
 }
 
+/// One discovery datagram AND the address it came from (#661).
+///
+/// The peer is a fact of the socket, not of the payload, so it travels beside the datagram rather
+/// than inside it: the client's JSON is `{at, text}` and must not grow a field a parser could be
+/// surprised by. The server uses it to vouch for a machine it has heard but not yet recorded.
+pub struct HeardDatagram {
+    pub datagram: UdpDatagram,
+    /// The sender's address as the socket saw it — for the Z1, its LAN address on the broadcast.
+    pub peer: std::net::SocketAddr,
+}
+
 /// Listen on `0.0.0.0:port` for `window_ms` and return each datagram with the time it arrived.
 ///
 /// Discovery is passive: the machine broadcasts, we listen (`Z1-Bridge-Protocol.md` §2). Nothing
@@ -150,12 +161,22 @@ pub async fn machine_udp_listen(port: u16, window_ms: u64) -> Result<Vec<UdpData
 
 /// The discovery listen, shared by the Tauri command and the HTTP machine API (`machine_api.rs`).
 pub async fn udp_listen(port: u16, window_ms: u64) -> Result<Vec<UdpDatagram>, String> {
+    Ok(udp_listen_with_peers(port, window_ms)
+        .await?
+        .into_iter()
+        .map(|heard| heard.datagram)
+        .collect())
+}
+
+/// The same listen, keeping who sent each datagram (#661). The HTTP API records those senders for a
+/// few minutes; the desktop command has no use for an address it could reach anyway.
+pub async fn udp_listen_with_peers(port: u16, window_ms: u64) -> Result<Vec<HeardDatagram>, String> {
     let socket = UdpSocket::bind(("0.0.0.0", port)).await.map_err(|e| {
         format!("could not bind UDP {port} for discovery: {e} (another program, such as Makera Studio, may be using it)")
     })?;
 
     let deadline = Instant::now() + Duration::from_millis(window_ms);
-    let mut out: Vec<UdpDatagram> = Vec::new();
+    let mut out: Vec<HeardDatagram> = Vec::new();
     let mut buf = [0u8; 256];
     loop {
         let now = Instant::now();
@@ -163,14 +184,17 @@ pub async fn udp_listen(port: u16, window_ms: u64) -> Result<Vec<UdpDatagram>, S
             break;
         }
         match timeout(deadline - now, socket.recv_from(&mut buf)).await {
-            Ok(Ok((n, _addr))) => {
+            Ok(Ok((n, addr))) => {
                 // Stamped here, the moment the socket handed the bytes over and before any decoding:
                 // the time belongs to arrival, not to how long it took to read the text (#275).
                 let at = epoch_millis();
                 if let Ok(text) = std::str::from_utf8(&buf[..n]) {
                     let trimmed = text.trim();
                     if !trimmed.is_empty() {
-                        out.push(UdpDatagram { at, text: trimmed.to_string() });
+                        out.push(HeardDatagram {
+                            datagram: UdpDatagram { at, text: trimmed.to_string() },
+                            peer: addr,
+                        });
                     }
                 }
             }
