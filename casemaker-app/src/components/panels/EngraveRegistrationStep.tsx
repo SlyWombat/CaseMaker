@@ -176,6 +176,8 @@ export function EngraveRegistrationStep({ job, target }: EngraveRegistrationStep
   const runPlanRef = useRef<RegistrationPlan | null>(null);
   /** #638 — whether the run's placement frame landed at measurement time. */
   const frameSavedRef = useRef(false);
+  /** #652 — the vise's typed jaw start the run measured against, so a later edit cannot move it. */
+  const runJawStartYRef = useRef<number | null>(null);
 
   useEffect(() => {
     aliveRef.current = true;
@@ -278,6 +280,7 @@ export function EngraveRegistrationStep({ job, target }: EngraveRegistrationStep
     // not change what the record says was approved and run.
     runPlanRef.current = plan;
     frameSavedRef.current = false;
+    runJawStartYRef.current = job.workholding.vise.jawStartY;
     // #519 item 1 — a new run's readings replace the last run's dots and table, and they are
     // stamped with this job so a layer left from another job is never drawn as this one's.
     useRegistrationTouchesStore.getState().reset(job.id);
@@ -527,7 +530,9 @@ export function EngraveRegistrationStep({ job, target }: EngraveRegistrationStep
             let rec = bed(current);
             rec = withVisePlacementFrame(
               rec,
-              viseFrameFromRegistration(registration, job.workholding.vise.jawStartY),
+              // #652 — the jaw start THIS run was measured with (stashed at start), not the render's:
+              // a typed value edited between the measurement and the acceptance must not move the face.
+              viseFrameFromRegistration(registration, runJawStartYRef.current ?? job.workholding.vise.jawStartY),
               { fixedJawFaceX: `measured:${now}`, jawStartY: 'typed' },
               now,
             );

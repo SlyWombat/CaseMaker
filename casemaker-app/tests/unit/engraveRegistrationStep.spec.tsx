@@ -817,6 +817,34 @@ describe('#638 — the placement frame waits for the acceptance', () => {
     expect(bedOf(saves[0]!)?.datums.surfaceTopZ?.value).toBeCloseTo(-55.0, 3);
   });
 
+  it('#652 the accepted frame uses the jaw start the run measured with, not a later edit', async () => {
+    const plan = makePlan(-56.172);
+    const job = jobWithPlan(plan);
+    install(plan, { edgeShiftMm: 0.5 });
+    const saves = placedLocation();
+    useEngraveJobStore.setState({ job });
+    const { rerender } = render(<EngraveRegistrationStep job={job} target={TARGET} />);
+
+    await runStep();
+
+    // The typed jaw start is edited after the measurement, before the operator accepts the position.
+    // The frame's Y is correctedG54.y + the jaw start the RUN measured against.
+    const runJawStartY = job.workholding.vise.jawStartY;
+    const edited: EngraveJob = {
+      ...job,
+      workholding: { ...job.workholding, vise: { ...job.workholding.vise, jawStartY: runJawStartY + 5 } },
+    };
+    useEngraveJobStore.setState({ job: edited });
+    rerender(<EngraveRegistrationStep job={edited} target={TARGET} />);
+
+    await useFoundPosition();
+
+    const recorded = firstRegistrationFor(job.id, TARGET)!;
+    const frame = visePlacementOf(saves[saves.length - 1]!)?.frame;
+    expect(frame?.jawStartY).toBeCloseTo(recorded.outcome.correctedG54.y + runJawStartY, 3);
+    expect(frame?.jawStartY).not.toBeCloseTo(recorded.outcome.correctedG54.y + runJawStartY + 5, 3);
+  });
+
   it('records the plan the measurement ran under, not the one rendered at the press', async () => {
     const planA = makePlan(-56.172);
     const planB = makePlan(-55.0);

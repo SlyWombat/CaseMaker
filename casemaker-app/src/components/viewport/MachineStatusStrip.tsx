@@ -1,4 +1,4 @@
-import type { JSX } from 'react';
+import { useEffect, type JSX } from 'react';
 import { useMachineStore } from '@/store/machineStore';
 import { useRegistrationTouchesStore } from '@/store/registrationTouchesStore';
 import { useEngraveReleaseStore } from '@/store/engraveReleaseStore';
@@ -7,7 +7,9 @@ import { machineKey, useMachineRunStore } from '@/store/machineRunStore';
 import { accessoriesFor, machineRecordByProfile } from '@/store/locationStore';
 import { probeNameFor } from '@/engine/cnc/registration/mountContext';
 import { jobTool } from '@/engine/cnc/engrave/jobSetup';
+import { resolveTool } from '@/engine/cnc/toolRegistry';
 import { toolDisplayName } from '@/engine/cnc/toolDisplay';
+import { useStripAccessoryStore } from '@/store/stripAccessoryStore';
 import { readStatusLine, type JobProgress, type StatusPosition } from '@/platform/desktop/protocol';
 import { alarmLine } from '@/platform/machineUpload';
 import { StripAccessories } from './StripAccessories';
@@ -136,6 +138,17 @@ export function MachineStatusStrip(): JSX.Element | null {
   const requestStop = useMachineRunStore((s) => s.requestStop);
   // #647 — the tool slot states the tool the job runs with, by name (#646: no qualifier).
   const job = useEngraveJobStore((s) => s.job);
+  // #652 — the program the machine holds (prepared or running), for its own frozen cutter.
+  const prepared = useMachineRunStore((s) => (machine === null ? null : s.runs[machineKey(machine)] ?? null));
+  const forgetAccessories = useStripAccessoryStore((s) => s.forget);
+  const target = machine === null ? null : machineKey(machine);
+  // #652 — A RELEASE'S OWN VACUUM WORDS EXPIRE THE MANUAL ONES. The accessory store keeps what a
+  // press concluded per target and nothing clears it, so a manual press before a run masked the
+  // record of what the program then sent (M331 on, icon off). When the release's record moves it is
+  // the newer statement; the manual entries for this target go.
+  useEffect(() => {
+    if (target !== null && vacuum !== null && vacuum !== 'unknown') forgetAccessories(target);
+  }, [vacuum, target, forgetAccessories]);
   if (machine === null) return null;
 
   // `statusLine` is set by the store and the probe; a test fixture may hand only the raw line.
@@ -155,7 +168,14 @@ export function MachineStatusStrip(): JSX.Element | null {
   const reason = state === 'Alarm' ? alarmLine(reasonLines.join('\n')) : null;
   const progress = line?.progress ?? null;
 
-  const jobCutter = jobTool(job);
+  // #652 — THE TOOL IS THE FROZEN PACKAGE'S, NOT THE LIVE JOB'S. The program the machine holds names
+  // its cutter on the run's context; with nothing uploaded, the package's first program does. A
+  // cutter changed in Design after the freeze must not relabel a program the package already froze
+  // with the old one. Only a job with NO frozen package falls back to its own tool key.
+  const frozenKey = job.package?.programs[0]?.toolKey ?? null;
+  const runKey = prepared?.context?.toolKey ?? null;
+  const toolKey = runKey ?? frozenKey;
+  const jobCutter = toolKey === null ? jobTool(job) : resolveTool(toolKey);
   // #646 — names are for people: the geometry, not the vendor label (which stays in the hover).
   const cutter = jobCutter === null ? null : toolDisplayName(jobCutter);
   const toolNumber = line?.tool ?? null;
@@ -222,13 +242,21 @@ export function MachineStatusStrip(): JSX.Element | null {
       <span data-testid="machine-status-state" data-state={state} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, flex: 'none' }}>
         <span aria-hidden="true" style={{ width: 8, height: 8, borderRadius: 4, background: stateColour(state), flex: 'none' }} />
         <span style={{ fontWeight: 600, color: '#e8eef4' }}>{state}</span>
-        {reason !== null && (
-          <span data-testid="machine-status-alarm-reason" style={{ color: '#e0a0a0', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-            {reason}
-          </span>
-        )}
       </span>
-      <Axes work={line?.wpos ?? null} machine={line?.mpos ?? null} />
+      {/* #652 — the alarm's reason gets its OWN elastic cell: inside the fixed-width state cell a
+          long ALARM:/ERROR: line widened the row past `overflow: hidden` and clipped Stop. */}
+      {reason !== null && (
+        <span
+          data-testid="machine-status-alarm-reason"
+          title={reason}
+          style={{ flex: '1 1 auto', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', color: '#e0a0a0' }}
+        >
+          {reason}
+        </span>
+      )}
+      {/* #652 — a machine that stopped answering shows NO live-looking numbers: the last WPos/MPos
+          are what it said before it went quiet, so the DRO prints "—" instead. */}
+      <Axes work={heartbeat?.reachable === false ? null : line?.wpos ?? null} machine={heartbeat?.reachable === false ? null : line?.mpos ?? null} />
       {/* The registration's current step is the operator's "what is it doing now" while the probe
           is in: it sits where the program name would, after the coordinates. */}
       {registrationActive && registrationStep !== null && (

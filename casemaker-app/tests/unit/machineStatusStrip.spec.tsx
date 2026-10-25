@@ -13,6 +13,10 @@ import { resetMachineStore, useMachineStore } from '@/store/machineStore';
 import { resetMachineRunStore, useMachineRunStore, type RunEntry } from '@/store/machineRunStore';
 import { resetRegistrationTouchesStore, useRegistrationTouchesStore } from '@/store/registrationTouchesStore';
 import { resetEngraveReleaseStore, useEngraveReleaseStore } from '@/store/engraveReleaseStore';
+import { resetStripAccessoryStore, useStripAccessoryStore } from '@/store/stripAccessoryStore';
+import { resolveTool } from '@/engine/cnc/toolRegistry';
+import { toolDisplayName } from '@/engine/cnc/toolDisplay';
+import type { FrozenPackage } from '@/types/engraveJob';
 import { resetLocationStore, useLocationStore } from '@/store/locationStore';
 import { useEngraveJobStore } from '@/store/engraveJobStore';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
@@ -83,6 +87,7 @@ beforeEach(() => {
   resetRegistrationTouchesStore();
   resetEngraveReleaseStore();
   resetMachineRunStore();
+  resetStripAccessoryStore();
   resetLocationStore();
   useLocationStore.setState({ status: 'present', location: LOCATION, etag: '"e1"', reason: null });
   useEngraveJobStore.getState().replace({ ...defaultEngraveJob(), toolKey: 'flat-1.0' });
@@ -214,5 +219,82 @@ describe('#647 the DRO — the layout contract', () => {
     expect(tool.style.textOverflow).toBe('ellipsis');
     expect(tool.style.overflow).toBe('hidden');
     expect(screen.getByTestId('machine-status-state').style.flexShrink).toBe('0');
+  });
+});
+
+describe('#652 the strip’s follow-ups', () => {
+  /** The job as the document holds it, with a frozen package naming `programs[0].toolKey`. */
+  function withFrozenCutter(toolKey: string): void {
+    const job = useEngraveJobStore.getState().job;
+    useEngraveJobStore.getState().replace({
+      ...job,
+      package: { programs: [{ toolKey }] } as unknown as FrozenPackage,
+    });
+  }
+
+  function named(key: string): string {
+    return toolDisplayName(resolveTool(key)!);
+  }
+
+  it('names the FROZEN package’s cutter, not the job edited after the freeze', () => {
+    // The package froze setup 1 with the 3.175 flat end; Design then picks the 1 mm cutter.
+    useEngraveJobStore.setState({ job: { ...useEngraveJobStore.getState().job, toolKey: 'flat-1.0' } });
+    withFrozenCutter('flat-3.175x12-metal');
+    remember('<Idle|MPos:-1,-1,-1|WPos:0,0,0>');
+    render(<MachineStatusStrip />);
+    expect(screen.getByTestId('machine-status-tool').textContent).toBe(named('flat-3.175x12-metal'));
+  });
+
+  it('prefers the program the machine holds, when one is uploaded', () => {
+    // The package (and the job) name the 1 mm cutter; the program actually uploaded is the 3.175.
+    withFrozenCutter('flat-1.0');
+    useMachineRunStore.setState({
+      runs: {
+        '192.0.2.10:2222': { context: { nc: 'G90', toolKey: 'flat-3.175x12-metal' } } as unknown as RunEntry,
+      },
+    });
+    remember('<Idle|MPos:-1,-1,-1|WPos:0,0,0>');
+    render(<MachineStatusStrip />);
+    expect(screen.getByTestId('machine-status-tool').textContent).toBe(named('flat-3.175x12-metal'));
+  });
+
+  it('falls back to the job’s own cutter only when nothing is frozen', () => {
+    useEngraveJobStore.setState({ job: { ...useEngraveJobStore.getState().job, toolKey: 'flat-1.0' } });
+    remember('<Idle|MPos:-1,-1,-1|WPos:0,0,0>');
+    render(<MachineStatusStrip />);
+    expect(screen.getByTestId('machine-status-tool').textContent).toBe(named('flat-1.0'));
+  });
+
+  it('shows no live-looking numbers when the machine has gone Offline', () => {
+    remember('<Idle|MPos:-1.0000,-1.0000,-1.0000|WPos:178.9750,191.9250,53.1290>');
+    useMachineStore.getState().noteHeartbeat(false);
+    render(<MachineStatusStrip />);
+    expect(screen.getByTestId('machine-status-work-x').textContent).toBe('—');
+    expect(screen.getByTestId('machine-status-machine-z').textContent).toBe('—');
+  });
+
+  it('gives a long alarm reason its own elastic cell, outside the fixed state cell', () => {
+    remember('<Alarm|MPos:0,0,0>\nALARM: Probe fail — the probe was not seated in the spindle before the run started');
+    render(<MachineStatusStrip />);
+    const reason = screen.getByTestId('machine-status-alarm-reason');
+    expect(reason.style.flexShrink).toBe('1');
+    expect(reason.style.overflow).toBe('hidden');
+    expect(reason.style.textOverflow).toBe('ellipsis');
+    // The state cell stays fixed; the reason no longer lives inside it.
+    expect(screen.getByTestId('machine-status-state').style.flexShrink).toBe('0');
+    expect(screen.getByTestId('machine-status-state').contains(reason)).toBe(false);
+    expect(reason.getAttribute('title')).toContain('Probe fail');
+  });
+
+  it('a release’s vacuum record expires a manual press on the same target', () => {
+    const target = '192.0.2.10:2222';
+    // The operator pressed the vacuum off by hand; a program then ran with its own M331 and the
+    // release recorded 'on'. The manual entry must not mask what the program sent.
+    useStripAccessoryStore.getState().note(target, 'vacuum', false);
+    useEngraveReleaseStore.setState({ records: { [target]: { vacuum: 'on' } as unknown as ReleaseRecord } });
+    remember('<Run|MPos:-10,-10,-3|WPos:0,0,0>');
+    render(<MachineStatusStrip />);
+    expect(screen.getByTestId('machine-status-accessory-vacuum').getAttribute('data-mode')).toBe('on');
+    expect(useStripAccessoryStore.getState().modes[target]).toBeUndefined();
   });
 });
