@@ -1,0 +1,16 @@
+Registration — find the stock, then set the origin
+
+Setup 1 · X/Y re-checked on the left and front edges; Z from the surface touch, within ±0.7 mm
+
+Home, fit the wired probe and measure it (M491); the fixed-jaw top is tapped first and checked against the stored datum (-56.74); touch the surface at the cut area's centre (19.05, 38.1); then scan the left edge at Y 38.1, the front edge at X 19.05 — bracketing each edge and bisecting to 0.5 mm, stopping at the first touch off the stock, every touch capped at the surface − 0.5 mm; home when finished.
+
+The measurement is not usable, and no origin will be written from it: this blank's top is not one plane: the touches miss the fitted plane by 0.208 mm, wider than the band — the floors cannot stay past the colour line and clear of the pocket.
+this blank's top is not one plane: the touches miss the fitted plane by 0.208 mm, wider than the band — the floors cannot stay past the colour line and clear of the pocket
+edges are corrected by the measured 0.7 mm effective rim offset
+Surface spread — lowest -55.57 at the cut area's right extent (probe), highest -55.086 at the cut area's centre (probe); spread 0.484 mm against the 0.2 mm band.
+Surface dome — a curved top, not a tilt.
+this blank's top is not one plane: the touches miss the fitted plane by 0.208 mm, wider than the band — the floors cannot stay past the colour line and clear of the pocket
+
+No origin is written: this blank's top is not one plane: the touches miss the fitted plane by 0.208 mm, wider than the band — the floors cannot stay past the colour line and clear of the pocket.
+
+Run it again

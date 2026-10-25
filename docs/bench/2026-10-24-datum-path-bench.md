@@ -106,6 +106,32 @@ stop), #618 (pause on a scrap blank).
 Records: `traces/2026-10-25-run5-run6-{result,writing}.txt` (regstate tags), `-run6-result-after-continue.txt`,
 `-run6-after-repost.txt`, `-run6-transcript.txt` (614 lines, 32 PRB, the G10); frames `img/2026-10-25-register/camera-run6/`.
 
+### Late evening: #628 landed, then the dome (runs 7–8 on 3f1278a1)
+
+#628's root cause (case-maker-3e, reproduced to four decimals from the run-6 readings): the column engine sweeps
+each feed at ONE tip Z (the deeper end) while a surface post ramps Z along every segment, so at the floor level
+most of the text crossed the threshold. Fix: the column path un-lifts the program like #625. Landed 830054ae with
+#627 (3f1278a1), published 20:50; health now names the build (#566 closed).
+
+| local | step | result |
+|---|---|---|
+| 22:05:41–22:11:08 | **run 7, datum path on 3f1278a1** (probe re-fitted a 3rd time) | homed in 5:27. **Verdict DOME — "the touches miss the fitted plane by 0.208 mm, wider than the band" — no origin written**, only *Run it again*. Lowest −55.570 (right), highest −55.086 (centre), spread 0.484 |
+| 22:11:44–22:17:10 | **run 8** (Run it again, no hands) | identical to 0.002 mm: lowest −55.568, highest −55.085, residual 0.208, dome |
+
+Per point, relative to each run's centre, runs 5/6/8 agree to ≤ 0.015 mm (run 8 = run 6 shifted −0.10 mm by the
+probe re-fit; M491 absorbs that). The plane through the four extents sits ≈ 0.21 mm below the centre: **the blank is
+domed centre-high by about the job's 0.2 mm band**; runs 5/6 passed by 0.008/0.003, runs 7/8 failed by 0.008 —
+same shape, a verdict flipping on noise at the band edge → **#630**. The maintainer: *"as a user, that is what I am
+cutting, it is seated and ready. Would makera refuse to cut this."* — Makera would not (one Z touch, or G32
+auto-level, which follows a dome) → **#631**: a dome writes the origin and offers the console G32 route, Upload
+gated on the operator's G32 tick (landed 3360d793 23:05, published; the operator-accepted-plane route (c) deferred).
+G32 ordering settled on #631: with the PROBE in, after the result, before Write the origin.
+
+Closed 23:12: machine Idle at home (`MPos:-1,-1,-1`), M822, plug OFF. **Probe in the Z1, badge seated as the
+maintainer wants it, cutter on the bench.** Browser harness stopped. Resume in the morning on 3360d793 at step 3.
+Records: `traces/2026-10-25-run5-run{7,8}-result.txt`, `-run8-transcript.txt` (586 lines, 30 PRB; run 7's
+transcript was lost to *Run it again* — save the transcript after EVERY run), `-run5-status-trail.log` (whole evening).
+
 Findings → issues: **#627** (origin write stales the package). Verified: #623 (frame), #620/#619 again, the
 ordinary origin-write path, #608's re-post, #603/#599's tap write-back. Owed on 264b3df8: #625 + #584 together
 (the badge re-post must read 0/0), #615 (tap descent time), #588 (no 60 s park at a stop), the first cut (#569).
