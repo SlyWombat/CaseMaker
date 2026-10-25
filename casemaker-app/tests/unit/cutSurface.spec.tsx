@@ -6,7 +6,7 @@
 // says "green" and what it refuses to do when it does not. The stock shelf is the same guarded fake
 // the package store's own spec uses; nothing reaches a machine.
 
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { EngraveCutSurface } from '@/components/panels/EngraveCutSurface';
 import type { MachineObservation } from '@/platform/machineProbe';
@@ -30,6 +30,7 @@ import { resetEngravePackageStore, useEngravePackageStore } from '@/store/engrav
 import { resetEngraveRegistrationStore, useEngraveRegistrationStore } from '@/store/engraveRegistrationStore';
 import type { SurfaceSpreadAssessment } from '@/engine/cnc/engrave/surfaceSpread';
 import { useEngraveJobStore } from '@/store/engraveJobStore';
+import { useEngraveRunStore } from '@/store/engraveRunStore';
 import { resetRunConfirmStore } from '@/store/runConfirmStore';
 import { clearStoredBaseline, resetLocationStore } from '@/store/locationStore';
 import { resetStockStore, useStockStore } from '@/store/stockStore';
@@ -261,6 +262,7 @@ beforeEach(() => {
   useEngraveJobStore.getState().reset();
   resetEngravePackageStore();
   resetEngraveRegistrationStore();
+  useEngraveRunStore.getState().reset();
   resetLocationStore();
   clearStoredBaseline();
   resetStockStore();
@@ -615,5 +617,68 @@ describe('#419 §3 the Cut surface', () => {
     fireEvent.click(accept);
     expect(accept.checked).toBe(true);
     expect((screen.getByTestId('engrave-upload') as HTMLButtonElement).disabled).toBe(false);
+  });
+});
+
+// #656 — THE CHAIN AND THE ONE SCREEN, at the Cut surface's own level.
+describe('#656 from the cutter prompt to the cut', () => {
+  const OK_ORACLE = { ok: true, band: 0.016, levels: [], worst: { underCut: 0, overCut: 0 } };
+
+  it('continues on its own: a measured tilt re-posts the frozen package once', async () => {
+    const job = plannedJob();
+    const pkg = frozen(job, [P1]);
+    const generateSpy = vi.fn(async () => {});
+    useEngraveRunStore.setState({ generate: generateSpy as never });
+    // The registration recorded a tilt; the frozen package is flat, so the surface gate holds.
+    const surface = { plane: { offset: 0, slopeX: 0.01, slopeY: 0 }, z0: -55 };
+    useEngraveRegistrationStore.getState().record(job.id, TARGET, {} as never, {} as never, surface);
+
+    draw({ job, report: reportOf(), pkg, generated: generated([P1]), canDrive: true });
+
+    await waitFor(() => expect(generateSpy).toHaveBeenCalledTimes(1));
+    expect(generateSpy).toHaveBeenCalledWith(surface);
+  });
+
+  it('does not re-post when the package already follows the tilt', async () => {
+    const job = plannedJob();
+    const pkg = { ...frozen(job, [P1]), surface: { plane: { offset: 0, slopeX: 0.01, slopeY: 0 }, z0: -55 } };
+    const generateSpy = vi.fn(async () => {});
+    useEngraveRunStore.setState({ generate: generateSpy as never });
+    useEngraveRegistrationStore.getState().record(job.id, TARGET, {} as never, {} as never, {
+      plane: { offset: 0, slopeX: 0.01, slopeY: 0 },
+      z0: -55,
+    });
+
+    draw({ job, report: reportOf(), pkg, generated: generated([P1]), canDrive: true });
+    await Promise.resolve();
+    expect(generateSpy).not.toHaveBeenCalled();
+  });
+
+  it('offers the one screen and holds the steps behind a closed disclosure', () => {
+    const job = plannedJob();
+    const pkg = frozen(job, [P1]);
+    useEngraveRunStore.setState({ oracle: OK_ORACLE as never });
+    draw({ job, report: reportOf(), pkg, generated: generated([P1]), canDrive: true });
+
+    expect(screen.getByTestId('engrave-cut-confirm')).toBeTruthy();
+    expect(screen.getByTestId('engrave-cut-confirm-program').textContent).toContain('job');
+    // One press, held until the one statement is ticked.
+    expect((screen.getByTestId('engrave-cut-go') as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(screen.getByTestId('engrave-cut-statement'));
+    expect((screen.getByTestId('engrave-cut-go') as HTMLButtonElement).disabled).toBe(false);
+    // The expert path is there, unchanged, folded.
+    expect((screen.getByTestId('engrave-cut-expert') as HTMLDetailsElement).open).toBe(false);
+    expect(screen.getByTestId('engrave-cut-plan')).toBeTruthy();
+  });
+
+  it('leaves a multi-program job to the release flow, with the disclosure open', () => {
+    const job = plannedJob();
+    const pkg = frozen(job, [P1, P2]);
+    useEngraveRunStore.setState({ oracle: OK_ORACLE as never });
+    draw({ job, report: reportOf(), pkg, generated: generated([P1, P2]), canDrive: true });
+
+    expect(screen.queryByTestId('engrave-cut-confirm')).toBeNull();
+    expect((screen.getByTestId('engrave-cut-expert') as HTMLDetailsElement).open).toBe(true);
+    expect(screen.getByTestId('engrave-cut-run')).toBeTruthy();
   });
 });

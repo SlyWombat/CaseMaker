@@ -63,6 +63,8 @@ import { EngraveReleaseStep } from './EngraveReleaseStep';
 import { MachineStrip } from './MachineStrip';
 import { RunPlanView } from './RunPlanView';
 import { EngraveRegistrationStep } from './EngraveRegistrationStep';
+import { EngraveCutConfirm, DomeChoice, type DomeChoiceProps } from './EngraveCutConfirm';
+import { EngraveMachineRun } from './EngraveMachineRun';
 
 const MUTED: CSSProperties = { fontSize: 11, color: '#9aa4b0', lineHeight: 1.5, margin: '4px 0' };
 const WARN: CSSProperties = { ...MUTED, color: '#f0b8a8' };
@@ -202,6 +204,9 @@ export function EngraveCutSurface({
   // the registration's fitted plane is what the release gate compares the frozen package against.
   const spreadMeasurement = useSurfaceSpread(job.id, target);
   const generate = useEngraveRunStore((s) => s.generate);
+  // #656 — the verdict the one screen prints: the run store's oracle for the current package (a
+  // re-post replaces it, and the sentence follows).
+  const runOracle = useEngraveRunStore((s) => s.oracle);
   const [reposting, setReposting] = useState(false);
   const registrationSurface = firstRegistration?.surface ?? null;
   const surfaceGate = surfaceRepostBlocker(pkg, firstRegistration);
@@ -252,6 +257,21 @@ export function EngraveCutSurface({
     });
   };
 
+  /**
+   * #656 — CONTINUE ON OUR OWN. The operator's Continue at the cutter prompt is the last
+   * confirmation of the ordinary path: once the registration records, a package that does not yet
+   * follow a measured tilt is re-posted here — once — and the one screen waits for the oracle.
+   */
+  const chainReposted = useRef(false);
+  useEffect(() => {
+    if (firstRegistration === null || chainReposted.current) return;
+    if (registrationSurface === null || surfaceGate === null) return;
+    chainReposted.current = true;
+    repost();
+    // `repost` is re-created each render; the ref makes this a one-shot per clamping.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [firstRegistration, registrationSurface, surfaceGate]);
+
   const green = report.firstBlocking === null;
   const staleness = pkg === null ? null : packageStaleness(pkg, job);
   const packageCurrent = pkg !== null && staleness?.stale === false;
@@ -288,6 +308,27 @@ export function EngraveCutSurface({
   // #547 — a dry run must never consume the blank: the single-file run context says so, and the
   // release path sets the same flag per file from `ReleaseProgram.dryRun`.
   const runContextWithDry = dryRunLevel === 'off' ? runContext : { ...runContext, dryRun: true as const };
+  // #656 — THE ORDINARY PATH IS ONE SCREEN. It needs a machine to drive, the real (not dry-run)
+  // single program, and its report; multi-program jobs keep the release flow in the disclosure.
+  const oneScreen =
+    canDriveMachine &&
+    target !== null &&
+    machine !== null &&
+    dryRunLevel === 'off' &&
+    releaseSources.length === 1 &&
+    singleSource !== undefined &&
+    singleSource.verify !== null;
+  const [expertOpen, setExpertOpen] = useState(false);
+  const domeProps: DomeChoiceProps | null = domeStanding
+    ? {
+        accept: domeAccept,
+        g32Acked,
+        floorAccepted,
+        onG32: setG32Acked,
+        onFloor: setFloorAccepted,
+        recommendation: spreadAssessment?.recommendation?.sentence ?? null,
+      }
+    : null;
   /**
    * #457 — the surface this job's registration measured on THIS machine, and what stands above it.
    * Session state (#494): a reload forgets it, and the lasers then say "no registration recorded"
@@ -536,43 +577,50 @@ export function EngraveCutSurface({
             )}
           </section>
         )}
-        {domeStanding && (
-          <section style={BOX} data-testid="engrave-cut-dome-g32">
-            <p style={{ fontSize: 12, color: '#f0d79b', margin: '0 0 6px' }}>
-              The blank's top is a dome — a plane re-post cannot follow it. The machine's own leveling
-              follows a curved top; the program uploads FLAT.
-            </p>
-            {spreadAssessment?.recommendation != null && (
-              <p style={MUTED} data-testid="engrave-cut-dome-g32-recipe">
-                {spreadAssessment.recommendation.sentence}
-              </p>
-            )}
-            <label style={{ fontSize: 12, color: '#e6edf5' }}>
-              <input
-                type="checkbox"
-                checked={g32Acked}
-                data-testid="engrave-cut-dome-g32-ack"
-                onChange={(e) => setG32Acked(e.target.checked)}
-              />{' '}
-              G32 has been run from the console for this clamping
-            </label>
-            {domeAccept !== null && (
-              <label style={{ fontSize: 12, color: '#e6edf5', display: 'block', marginTop: 8 }}>
-                <input
-                  type="checkbox"
-                  checked={floorAccepted}
-                  data-testid="engrave-cut-dome-accept-floor"
-                  onChange={(e) => setFloorAccepted(e.target.checked)}
-                />{' '}
-                {domeAccept}
-              </label>
-            )}
-          </section>
-        )}
       </Step>
 
       {green && packageCurrent && plan !== null && (
-        <Step number={4} title="Run the job" done={false} summary="the plan and the controls" defaultOpen>
+        <Step
+          number={4}
+          title="Cut"
+          done={false}
+          summary={oneScreen ? 'one press' : 'the plan and the controls'}
+          defaultOpen
+        >
+          {/* #656 — THE ONE SCREEN. The ordinary path: the program, the cutter (already confirmed at
+              the prompt), the check's verdict, the dome choice when the top is curved, ONE statement
+              and ONE Cut press that uploads, prepares and starts. */}
+          {oneScreen && machine !== null && target !== null && singleSource !== undefined && (
+            <>
+              <EngraveCutConfirm
+                job={job}
+                machine={machine}
+                source={singleSource}
+                filename={releaseFileName(job.name, 1, 1, false)}
+                oracle={runOracle}
+                blocker={uploadBlocker ?? missingReportBlocker ?? surfaceGate}
+                dome={domeProps}
+                domeBlocker={domeG32Blocker}
+                runContext={runContextWithDry}
+                onLiveStatus={onLiveStatus}
+              />
+              <EngraveMachineRun target={target} onProgramLine={onProgramLine} />
+            </>
+          )}
+          {/* #656 — THE EXPERT PATH, unchanged behind a disclosure: the plan, the dry-run choices,
+              the manual upload with its own confirmation and cutter selector, and the multi-program
+              release flow. It is open by default when the one screen is not offered (a multi-program
+              job, the web build, or no machine). */}
+          <details
+            style={{ marginTop: 6 }}
+            data-testid="engrave-cut-expert"
+            open={oneScreen ? expertOpen : true}
+            onToggle={(e) => setExpertOpen(e.currentTarget.open)}
+          >
+            <summary style={{ fontSize: 11, color: '#9aa4b0', cursor: 'pointer' }}>
+              The steps — plan, dry run, manual upload and the release flow
+            </summary>
+            {!oneScreen && domeProps !== null && <DomeChoice {...domeProps} />}
           <details style={{ marginTop: 4 }} data-testid="engrave-cut-plan">
             <summary style={{ fontSize: 11, color: '#9aa4b0', cursor: 'pointer' }}>The plan</summary>
             <div style={{ marginTop: 4 }}>
@@ -644,6 +692,7 @@ export function EngraveCutSurface({
               )}
             </section>
           )}
+          </details>
         </Step>
       )}
     </div>
