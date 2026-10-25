@@ -4,7 +4,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { toolDisplayName } from '@/engine/cnc/toolDisplay';
-import { flatEndMill, type Tool } from '@/engine/cnc/tool';
+import { flatEndMill, parseLabelAngle, type Tool } from '@/engine/cnc/tool';
 
 const tool = (over: Partial<Tool>): Tool => ({ ...flatEndMill(1, { number: 1, name: 'vendor label' }), ...over });
 
@@ -60,5 +60,24 @@ describe('#646 the tool display name', () => {
     );
     // No tip and no label at all: say the kind, and that nothing names its size.
     expect(toolDisplayName(tool({ shape: 'drill', tipDiameter: null, diameter: 3.175, name: '', typeText: '' }))).toBe('unknown drill');
+  });
+
+  it('#658 reads a cone angle from a vendor label, and only from a degree sign', () => {
+    // The three label shapes the catalogue shows: the angle reads off the °/º sign; a length never does.
+    expect(parseLabelAngle('4*0.5mm*30º Engraving(Metal)')).toBe(30);
+    expect(parseLabelAngle('3.175*1*4mm Ball Nose')).toBeNull(); // 4 mm flute, not 4°
+    expect(parseLabelAngle('3.175*12mm Flat End')).toBeNull(); // 12 mm flute, not 12°
+    // The house's own label spells the degree sign as °: both signs are the same statement.
+    expect(parseLabelAngle('Single Flute Engraving Bit - 1/8" Shank 60° * 0.1mm')).toBe(60);
+  });
+
+  it('#658 names a label-only engraver by its tip and the label angle', () => {
+    expect(
+      toolDisplayName(tool({ shape: 'engraving', tipDiameter: 0.5, angle: null, name: '4*0.5mm*30º Engraving(Metal)' })),
+    ).toBe('0.5 mm 30° engraver');
+    // A stated `angle` still wins over the label.
+    expect(
+      toolDisplayName(tool({ shape: 'engraving', tipDiameter: 0.5, angle: 60, name: '4*0.5mm*30º Engraving(Metal)' })),
+    ).toBe('0.5 mm 60° engraver');
   });
 });

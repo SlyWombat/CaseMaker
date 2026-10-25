@@ -18,7 +18,7 @@
  * a kind it may not be.
  */
 
-import type { Tool, ToolShape } from './tool';
+import { parseLabelAngle, type Tool, type ToolShape } from './tool';
 
 /** `0.5` → `"0.5"`, `1.00` → `"1"`, `3.175` → `"3.17"` — enough for a name, never a false precision. */
 function number(n: number): string {
@@ -82,8 +82,18 @@ export function toolDisplayName(tool: Tool): string {
     return label === null ? `unknown ${kind}` : `${kind} (${label})`;
   }
   // `tool.angle` is the INCLUDED angle (the field the schema describes); the half-angle field is
-  // `halfAngle`. Operators know the included angle, so that is what the name prints.
-  const cone = (tool.shape === 'engraving' || tool.shape === 'chamfer') && tool.angle !== null && tool.angle > 0 ? ` ${number(tool.angle)}°` : '';
+  // `halfAngle`. Operators know the included angle, so that is what the name prints. #658 — a
+  // catalogue engraver's `angle` is empty and the angle lives only in the vendor label
+  // (`4*0.5mm*30º …`), so the label is the fallback, never a guess at a value the record omits.
+  const coneAngle =
+    tool.shape === 'engraving' || tool.shape === 'chamfer'
+      ? tool.angle !== null && tool.angle > 0
+        ? tool.angle
+        : label === null
+          ? null
+          : parseLabelAngle(label)
+      : null;
+  const cone = coneAngle !== null && coneAngle > 0 ? ` ${number(coneAngle)}°` : '';
   // A tapered ball is told apart from a plain ball by its nose radius.
   const radius =
     tool.shape === 'tapered-ball' && tool.cornerRadius !== null && tool.cornerRadius > 0 ? ` R${number(tool.cornerRadius)}` : '';

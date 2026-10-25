@@ -150,6 +150,23 @@ export function isMetalCutterName(name: string): boolean {
   return /\(metal\)$/i.test(n) || /\bfor\s+metal\b(?![\w-])/i.test(n);
 }
 
+/**
+ * The included cone angle a vendor LABEL states, or null when it states none (#658).
+ *
+ * A Makera catalogue row's `angle` field is empty for engravers — the angle lives only in the
+ * label's text (`4*0.5mm*30º Engraving(Metal)`, `Single Flute Engraving Bit … 60° * 0.1mm`). The
+ * degree sign is what makes the angle unambiguous against the other numbers the same string
+ * carries: `3.175*1*4mm` names a 4 mm FLUTE (a length, no degree sign) and `3.175*12mm Flat End` a
+ * 12 mm flute, so neither reads an angle. A number immediately before `°` or `º` is the included
+ * angle, the number the operator knows it by.
+ */
+export function parseLabelAngle(text: string): number | null {
+  const match = text.match(/(\d+(?:\.\d+)?)\s*[°º]/);
+  if (match === null) return null;
+  const angle = Number(match[1]);
+  return Number.isFinite(angle) && angle > 0 ? angle : null;
+}
+
 /** A flat end mill of the given cutting diameter, for tests and for the app's own jobs. */
 export function flatEndMill(cuttingDiameter: number, opts: Partial<Tool> = {}): Tool {
   return {
