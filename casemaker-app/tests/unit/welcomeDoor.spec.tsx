@@ -121,6 +121,11 @@ describe('#680 the cutting door', () => {
     const starters = screen.getByTestId('welcome-starters');
     expect(starters.textContent).toContain('Name badge');
     expect(starters.textContent).toContain('Bare blank');
+    // Only what the CNC cuts (#346): the printed archetypes have the cards above; "no way a rack
+    // mount is being carved". Since #683 took step 2's template cards out, this is their one list.
+    for (const id of ['protective-case', 'mini-rack-10in', 'tool-insert', 'toolbox']) {
+      expect(screen.queryByTestId(`welcome-starter-${id}`), `${id} is printed, not cut`).toBeNull();
+    }
 
     fireEvent.click(screen.getByTestId('welcome-starter-badge-blank'));
     expect(useStartWizardStore.getState().open).toBe(true);

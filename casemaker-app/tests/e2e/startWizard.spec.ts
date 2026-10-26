@@ -27,9 +27,10 @@ test('welcome → wizard → blank → the Engrave panel, with the stock already
   await expect(page.getByTestId('start-wizard-next')).toHaveText('Continue without a machine');
   await page.getByTestId('start-wizard-next').click();
 
-  // Step 2 — the stock. The starter templates live beneath it, not in a second flow.
-  await expect(page.getByTestId('start-wizard-step-job')).toBeVisible();
-  await page.getByTestId('start-wizard-job-blank').click();
+  // Step 2 — the stock itself. The starters are the door's (#680), not a list under the step.
+  await expect(page.getByTestId('start-wizard-step-stock')).toBeVisible();
+  await page.getByTestId('start-wizard-close').click();
+  await page.getByTestId('welcome-starter-blank').click();
 
   // Step 3 — the SAME modal, one counter: the project is made and the mount question follows.
   await expect(page.getByTestId('engrave-setup-step-holding')).toBeVisible();

@@ -141,15 +141,17 @@ function skipToStockStep(): void {
 }
 
 /**
- * Pick a JOB TYPE — the click whose hand-off is async. `chooseJob` awaits the labels' faces before
- * it seeds the job (#365 review), so a bare `fireEvent.click` returns while the store write and the
- * step change are still a microtask away, and a spec that read either one straight after would be
- * asserting on the state from BEFORE the hand-off. `vitest`'s fake fonts are already parsed, but the
- * await is unconditional, so this is the shape the component really runs in.
+ * Open a STARTER — the welcome door's only template path since #683 took the cards out of step 2.
+ * The door calls `openWizard('machine', id)` and the wizard's mount effect hands the id to
+ * `chooseJob`, whose hand-off is async: it awaits the labels' faces before it seeds the job (#365
+ * review), so a bare store write returns while the project write and the step change are still a
+ * microtask away, and a spec that read either one straight after would be asserting on the state
+ * from BEFORE the hand-off. `vitest`'s fake fonts are already parsed, but the await is
+ * unconditional, so this is the shape the component really runs in.
  */
-async function chooseJob(id: string): Promise<void> {
+async function openStarter(id: string): Promise<void> {
   await act(async () => {
-    fireEvent.click(screen.getByTestId(`start-wizard-job-${id}`));
+    useStartWizardStore.getState().openWizard('machine', id);
   });
 }
 
@@ -245,7 +247,7 @@ describe('#280/#682 — step 1, the machine check', () => {
     // Next is enabled with no machine at all.
     expect((screen.getByTestId('start-wizard-next') as HTMLButtonElement).disabled).toBe(false);
     fireEvent.click(screen.getByTestId('start-wizard-next'));
-    expect(screen.getByTestId('start-wizard-step-job')).toBeDefined();
+    expect(screen.getByTestId('start-wizard-step-stock')).toBeDefined();
   });
 
   it('a build with no socket does not ask to connect one: the note, Cancel, Continue (#346)', () => {
@@ -266,7 +268,7 @@ describe('#280/#682 — step 1, the machine check', () => {
       // Continue is the advancing button, and it says what it does.
       expect(screen.getByTestId('start-wizard-next').textContent).toBe('Continue without a machine');
       fireEvent.click(screen.getByTestId('start-wizard-next'));
-      expect(screen.getByTestId('start-wizard-step-job')).toBeDefined();
+      expect(screen.getByTestId('start-wizard-step-stock')).toBeDefined();
     } finally {
       caps.drive = true;
     }
@@ -315,24 +317,10 @@ describe('#280/#682 — step 1, the machine check', () => {
   });
 });
 
-describe('#280 — step 2, the stock (and its starter templates)', () => {
-  it('offers only what the CNC cuts: the badge blank and the bare blank (#346)', () => {
-    render(<StartWizard />);
-    skipToStockStep();
-    for (const id of ['badge-blank', 'blank']) {
-      expect(screen.getByTestId(`start-wizard-job-${id}`), `${id} should be offered`).toBeDefined();
-    }
-    // The printed archetypes have the welcome screen; "no way a rack mount is being carved".
-    for (const id of ['protective-case', 'mini-rack-10in', 'tool-insert', 'toolbox']) {
-      expect(screen.queryByTestId(`start-wizard-job-${id}`), `${id} is printed, not cut`).toBeNull();
-    }
-    expect(screen.getAllByTestId(/^start-wizard-job-/)).toHaveLength(2);
-  });
-
+describe('#280 — step 2, the stock', () => {
   it('choosing the blank creates the project, opens Engrave, and moves the same wizard to holding', async () => {
     render(<StartWizard />);
-    skipToStockStep();
-    await chooseJob('blank');
+    await openStarter('blank');
 
     const s = useProjectStore.getState();
     expect(s.project.case.blank?.enabled).toBe(true);
@@ -347,8 +335,7 @@ describe('#280 — step 2, the stock (and its starter templates)', () => {
 
   it('seeds the engrave job’s stock from the blank — dimensions only, tagged computed', async () => {
     render(<StartWizard />);
-    skipToStockStep();
-    await chooseJob('blank');
+    await openStarter('blank');
 
     const job = useEngraveJobStore.getState().job;
     expect(job.stock.length).toBe(100);
@@ -366,15 +353,13 @@ describe('#280 — step 2, the stock (and its starter templates)', () => {
   // hand-off seeded `case.blank` only, so this spec passed trivially on the 12 mm default and only
   // the panel's button brought the badge across. The numbers are now the hand-off's own.
   it('the badge job reaches the setup flow with no vise error (#344, #352)', async () => {
-    useStartWizardStore.getState().openWizard();
     render(
       <>
         <EngravePanel />
         <WizardHost />
       </>,
     );
-    skipToStockStep();
-    await chooseJob('badge-blank');
+    await openStarter('badge-blank');
     expect(screen.getByTestId('engrave-setup-step-holding')).toBeTruthy();
     expect(screen.getByTestId('start-wizard-progress').textContent).toBe('Step 3 of 4 · Holding');
     // The blank the hand-off seeded raises no #231 refusal (the vise followed the badge).
@@ -413,9 +398,8 @@ describe('#280 — step 2, the stock (and its starter templates)', () => {
     // up at once (it never waited), while the job is byte-for-byte the one that was there before.
     fonts.gate = true;
     render(<StartWizard />);
-    skipToStockStep();
     await act(async () => {
-      fireEvent.click(screen.getByTestId('start-wizard-job-badge-blank'));
+      useStartWizardStore.getState().openWizard('machine', 'badge-blank');
     });
 
     expect(useProjectStore.getState().welcomeMode).toBe(false);
@@ -440,8 +424,7 @@ describe('#280 — step 2, the stock (and its starter templates)', () => {
       job: { ...job, stock: { ...job.stock, length: 999 }, sources: { stock: { length: 'measured' } } },
     });
     render(<StartWizard />);
-    skipToStockStep();
-    await chooseJob('blank');
+    await openStarter('blank');
 
     const after = useEngraveJobStore.getState().job;
     expect(after.stock.length).toBe(999);

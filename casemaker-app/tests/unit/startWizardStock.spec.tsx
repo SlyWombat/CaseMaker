@@ -417,13 +417,6 @@ describe('the material-first start (#418)', () => {
     expect((screen.getByTestId('start-wizard-stock-material') as HTMLSelectElement).value).toBe('brass');
   });
 
-  it('the templates are still offered beneath the stock step', async () => {
-    fakeShelf(SHELF);
-    await toStockStep();
-    expect(screen.getByTestId('start-wizard-job-blank')).toBeDefined();
-    expect(screen.getByTestId('start-wizard-job-badge-blank')).toBeDefined();
-  });
-
   it('asks before replacing a job that has items, and Keep it leaves the job alone', async () => {
     fakeShelf(SHELF);
     const before = { ...defaultEngraveJob(), labels: defaultEngraveJob().labels.slice(0, 1) };
@@ -505,10 +498,11 @@ describe('stockEntry follows the stock (#418 review)', () => {
   it('a template start clears an entry an earlier start named', async () => {
     fakeShelf(SHELF);
     useEngraveJobStore.setState({ job: { ...defaultEngraveJob(), stockEntry: entry } });
-    await toStockStep();
-    await act(async () => {
-      fireEvent.click(screen.getByTestId('start-wizard-job-blank'));
+    // The door's starter (#680) is the one template path since #683 took the cards out of step 2.
+    act(() => {
+      useStartWizardStore.getState().openWizard('machine', 'blank');
     });
+    render(<WizardHost />);
     await screen.findByTestId('engrave-setup-step-holding');
     expect(useEngraveJobStore.getState().job).not.toHaveProperty('stockEntry');
   });

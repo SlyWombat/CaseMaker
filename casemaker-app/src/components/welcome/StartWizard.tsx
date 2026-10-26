@@ -181,8 +181,9 @@ export function StartWizard(): JSX.Element {
   const closeWizard = useStartWizardStore((s) => s.closeWizard);
   const initialStep = useStartWizardStore((s) => s.initialStep);
   // #680 — a starter job on the welcome door opens this wizard with its blank already the stock.
-  // The template id is the door's word for it; `chooseJob` (step 2's own template path) does the
-  // rest: project, seeded stock, step 3, and the counters move as they always have.
+  // The template id is the door's word for it; `chooseJob` (the one template path since #683 took
+  // the cards out of step 2) does the rest: project, seeded stock, step 3, and the counters move
+  // as they always have.
   const starter = useStartWizardStore((s) => s.starter);
   const starterRan = useRef(false);
   const machine = useMachineStore((s) => s.machine);
@@ -584,13 +585,7 @@ export function StartWizard(): JSX.Element {
 
       {step === 'stock' && (
         <>
-          <StockStep
-            seed={seed}
-            onPending={setPending}
-            onTemplate={(id) => {
-              void chooseJob(id);
-            }}
-          />
+          <StockStep seed={seed} onPending={setPending} />
           {confirmReplace !== null && (
             <div
               data-testid="start-wizard-replace-confirm"

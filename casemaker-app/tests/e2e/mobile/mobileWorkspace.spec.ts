@@ -258,13 +258,9 @@ test('the remove control on an item line is a real touch target at phone width (
  */
 test('the Part panel fits the phone, and its numbers reach the part (#282)', async ({ cm, page }) => {
   await cm.ready();
-  await page.getByTestId('welcome-start-cnc').click();
-  // #346: the web build offers no check; Continue without a machine is the advancing button.
-  await page.getByTestId('start-wizard-next').click();
-  await page.waitForSelector('[data-testid="start-wizard-step-job"]');
-  await page.getByTestId('start-wizard-job-badge-blank').click();
-  // #681 — the blank route stays in the SAME wizard, on the holding step; its close is the one
-  // control every step has.
+  // The badge's starter on the door (#680) is the one template path since #683 took the cards out
+  // of step 2; it opens the wizard on the holding step with the blank already the stock.
+  await page.getByTestId('welcome-starter-badge-blank').click();
   await page.waitForSelector('[data-testid="engrave-setup-step-holding"]');
   await page.getByTestId('start-wizard-close').click();
   await page.waitForSelector('[data-testid="sidebar"]', { timeout: 30_000 });
