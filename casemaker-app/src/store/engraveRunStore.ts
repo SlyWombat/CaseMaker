@@ -270,6 +270,13 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
       finish: {
         stockToLeaveMm: shopDefault('finish.stockToLeaveMm'),
       },
+      // #535 — the goal operation's heightfield pitch, from the SAME snapshot and for the same
+      // worker-realm reason. A pure goal job samples its heightfield at this pitch unless the
+      // operation states its own; the source travels so the row and the run sheet print where the
+      // number came from. Absent, the CAM's labelled `DEFAULT_GRID_PITCH_MM`.
+      surfaceGrid: {
+        pitchMm: shopDefault('sim.columnFlatPitchYMm'),
+      },
       // #434 — the drill numbers (`drill.peckDiameters`, `drill.peckClearanceMm`,
       // `drill.pointAngleDeg`, `drill.plungeFeed`, `drill.spindleRpm`) from the SAME snapshot,
       // with each one's source. A drill program's plan and its depth findings read this reading

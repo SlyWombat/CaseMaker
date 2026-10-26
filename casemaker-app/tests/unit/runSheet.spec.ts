@@ -2121,3 +2121,56 @@ describe('runSheet — the finish pass (#250)', () => {
     expect(cut.some((t) => t.includes('A later program in this run is the finishing pass'))).toBe(true);
   });
 });
+
+describe('runSheet — a goal job’s surface lines (#535)', () => {
+  const facts = {
+    resolutionNote: 'sampled on a 0.1 mm grid',
+    gridPitchMm: 0.1,
+    gridCells: 1000,
+    stepDownMm: 0.25,
+    roughStepOverMm: 1.2,
+    finishStepOverMm: 0.15,
+    stockToLeaveMm: 0.3,
+    roughingLayers: 4,
+    notes: [
+      'The cutting feed, plunge feed, step-down and step-over are the job’s 2.5D feeds, reused unchanged.',
+      'Resolution: sampled on a 0.1 mm grid.',
+    ],
+  };
+
+  it('prints the passes’ own levels and the engine’s notes in the cut section', () => {
+    const job = { ...dj(), labels: [], shapes: [] } as EngraveJob;
+    const stub = stubGenerated(job);
+    const sheet = buildRunSheet(job, { ...stub, surface3d: facts }, NO_SIM, NOW);
+    const cut = section(sheet, 'cut').steps.map((s) => s.text);
+
+    expect(cut.some((t) => t.startsWith('Surface a mesh.'))).toBe(true);
+    expect(cut.some((t) => t.includes('4 Z layers'))).toBe(true);
+    expect(cut.some((t) => t.includes('0.25 mm step-down'))).toBe(true);
+    expect(cut.some((t) => t.includes('0.15 mm step-over'))).toBe(true);
+    // The engine's own notes are the sheet's lines: no second wording of the same facts.
+    expect(cut.some((t) => t.includes('reused unchanged'))).toBe(true);
+    expect(cut.some((t) => t.includes('Resolution: sampled on a 0.1 mm grid.'))).toBe(true);
+    // The feeds line keeps the spindle/feed/vacuum facts and no longer claims the passes or the
+    // step-over, which belong to the goal operation.
+    expect(cut.some((t) => t.includes('Spindle, feed and plunge.'))).toBe(true);
+    expect(cut.some((t) => t.includes('passes ·'))).toBe(false);
+  });
+
+  it('says the roughing pass has nothing to remove when no stock stands above the goal', () => {
+    const job = { ...dj(), labels: [], shapes: [] } as EngraveJob;
+    const stub = stubGenerated(job);
+    const sheet = buildRunSheet(job, { ...stub, surface3d: { ...facts, roughingLayers: 0 } }, NO_SIM, NOW);
+    const cut = section(sheet, 'cut').steps.map((s) => s.text);
+    expect(cut.some((t) => t.includes('Roughing has nothing to remove'))).toBe(true);
+  });
+
+  it('an item job keeps its own cut line: no surface steps without the facts', () => {
+    const job = dj();
+    const steps = section(buildRunSheet(job, stubGenerated(job), NO_SIM, NOW), 'cut').steps;
+    const text = steps.map((s) => s.text);
+    expect(text.some((t) => t.includes('Surface a mesh.'))).toBe(false);
+    // The full parameters line — its passes and step-over live in the step's value.
+    expect(steps.some((s) => (s.value ?? '').includes('passes ·'))).toBe(true);
+  });
+});

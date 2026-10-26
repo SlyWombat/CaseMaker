@@ -69,6 +69,43 @@ describe('3D goal object (#533, slice C)', () => {
     expect(parseEngraveJob(JSON.parse(JSON.stringify(job))).ok).toBe(false);
   });
 
+  it('#535 — round-trips the goal operation’s surface settings intact', () => {
+    const surface = {
+      roughStepDownMm: 0.3,
+      roughStepOverMm: 1.1,
+      finishStepOverMm: 0.2,
+      gridPitchMm: 0.15,
+      stockToLeaveMm: 0.25,
+    };
+    const job = jobWithTarget({ ...baseTarget, role: 'goal', surface });
+    const parsed = parseEngraveJob(JSON.parse(JSON.stringify(job)));
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    // The schema is strict and strips unknown keys; `surface` must survive BOTH edits.
+    expect(parsed.job.targetObject).toEqual({ ...baseTarget, role: 'goal', surface });
+  });
+
+  it('#535 — refuses a surface setting the CAM could not run', () => {
+    for (const bad of [
+      { roughStepDownMm: 0 },
+      { roughStepOverMm: -0.5 },
+      { gridPitchMm: 0 },
+      { gridPitchMm: 5 },
+      { stockToLeaveMm: -0.1 },
+    ]) {
+      const job = jobWithTarget({ ...baseTarget, role: 'goal', surface: bad as never });
+      expect(parseEngraveJob(JSON.parse(JSON.stringify(job))).ok).toBe(false);
+    }
+  });
+
+  it('#535 — a goal with no surface block keeps it absent (the engine defaults)', () => {
+    const job = jobWithTarget({ ...baseTarget, role: 'goal' });
+    const parsed = parseEngraveJob(JSON.parse(JSON.stringify(job)));
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.job.targetObject?.surface).toBeUndefined();
+  });
+
   it('a GOAL mesh validates WITHOUT target-object-not-cut', () => {
     const found = codes(jobWithTarget({ ...baseTarget, role: 'goal' }));
     expect(found).not.toContain('target-object-not-cut');

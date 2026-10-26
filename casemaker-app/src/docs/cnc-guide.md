@@ -66,10 +66,12 @@ oversight):
   and a `G32 R1` console grid is offered as the machine-side alternative; a **dome** (a curved top
   over a flat colour line) is refused, because following the top would cut through the line.
   Whether the grid compensates every move or only its endpoints is #501's bench question.
-- 3D surfacing from a **goal mesh** — now built (#534, §5.4): a job whose only work is a
-  `role: 'goal'` mesh generates a raster-roughing + ball-nose finishing program. What is not built
-  yet is its run-side wiring and the UI proof (slice E, #535), and a heightfield has one top-Z per
-  (x, y), so undercuts and overhangs are unrepresentable — the honest 3-axis answer.
+- 3D surfacing from a **goal mesh** — now built (#534, #535, §5.4): a job whose only work is a
+  `role: 'goal'` mesh generates a raster-roughing + ball-nose finishing program, and the goal row's
+  **Technical** fold carries the operation's cutter, step-down/step-overs, grid pitch and
+  allowance. What is not built is measured 3D engagement feeds (bench work, #536) and roughing a
+  goal with one cutter and finishing it with another; a heightfield has one top-Z per (x, y), so
+  undercuts and overhangs are unrepresentable — the honest 3-axis answer.
 - V-carving a region whose groove at the colour plane is narrower than one machine step. The app
   refuses it by name (`vcarve-groove-too-narrow`, §8.1); it does open regions otherwise (#221).
 - Laser work.
@@ -602,18 +604,29 @@ V-bit and states the strategy; the step-over is a fraction of the groove's width
 and the CAM clamps the pitch to the tip radius because the floor is cleared by the tip disc
 alone. The two named refusals and the merge warning are in §8.1.
 
-**3D surfacing from a goal mesh (#534).** A **design target object** can be marked with role
+**3D surfacing from a goal mesh (#534, #535).** A **design target object** can be marked with role
 **goal** — "this is the shape to *make*", as opposed to a reference to position other work
 against. A job whose only work is a goal mesh generates a two-operation surfacing program: a
 **raster roughing** in step-down layers that clears the stock above the goal (leaving the
 roughing allowance), then a **ball-nose finishing** raster that follows the goal's top-Z
 heightfield gouge-safely. A goal with undercuts is sampled to its topmost surface — the honest
-3-axis answer — and the run sheet says so. The feeds are the job's ordinary 2.5D feeds reused
-unchanged, a labelled placeholder until the bench measures 3D engagement (#536); a ball resolves
-its feeds through a flat proxy of its cutting diameter. Two findings guard it: `goal-object-oversize`
-refuses a goal that is flat or larger than the blank, and `goal-object-no-toolpath` is the info a
-*mixed* job (a goal beside ordinary items) gets — the item program cuts, the goal is validated and
-previewed, and no 3D cut is posted for it until slice E (#535) wires the run side.
+3-axis answer — and the run sheet says so.
+
+The goal row's **Technical** fold carries the operation's own numbers: the **cutter** (one cutter
+cuts both passes — a ball or bull nose finishes the surface round; a flat cutter finishes it
+faceted), the **roughing step-down** and **step-over**, the **finishing step-over**, the
+**heightfield grid pitch** and the **stock to leave**. Each is prefilled from the default the
+engine would otherwise use — the feeds row's step-down and step-over for the passes, the shop's
+`finish.stockToLeaveMm` for the allowance and `sim.columnFlatPitchYMm` for the grid — and the row
+says which default it is showing. A typed number overrides it for this goal alone; the reset
+returns the default. The feeds are the job's ordinary 2.5D feeds reused unchanged, a labelled
+placeholder until the bench measures 3D engagement (#536); a ball resolves its feeds through a
+flat proxy of its cutting diameter. The heightfield is **sampled**, so a goal program is
+simulated on the FLAT dexel and the Simulate panel states the grid it ran on — "simulated on a
+0.1 mm grid" — rather than the exact sweep's tolerance band. Two findings guard it:
+`goal-object-oversize` refuses a goal that is flat or larger than the blank, and
+`goal-object-no-toolpath` is the info a *mixed* job (a goal beside ordinary items) gets — the item
+program cuts, the goal is validated and previewed, and no 3D cut is posted for it.
 
 **5. From which directions?** A 3-axis tool comes straight down. Material on the back, a side or
 the far end is reachable only after the part is turned — and turning it is a re-clamp and a

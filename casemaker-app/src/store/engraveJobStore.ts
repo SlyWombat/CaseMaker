@@ -69,6 +69,7 @@ import type {
   EngraveSlotShape,
   EngraveSpherePrimitive,
   EngraveStrokeLabelItem,
+  EngraveSurfaceSettings,
   EngraveTargetObject,
   EngraveThread,
   EngraveTraceItem,
@@ -165,10 +166,15 @@ export type PrimitivePatch = Partial<Omit<EngraveBoxPrimitive, 'kind' | 'positio
 /**
  * A hand edit to the reference object (#435). Its bytes, hash and parsed size are the import's
  * facts and cannot be patched — placement, rotation, name and visibility are the row's fields.
+ *
+ * #535 — a goal's `surface` settings patch in the same way: a PARTIAL is merged, and a key set to
+ * `undefined` is REMOVED, which is how the row's reset returns one number to the engine default.
  */
 export type TargetObjectPatch = Partial<Pick<EngraveTargetObject, 'name' | 'rotation' | 'enabled'>> & {
   /** A partial placement: the store merges it into the object's own X/Y/Z. */
   position?: Partial<EngraveTargetObject['position']>;
+  /** A partial of the goal operation's settings; `undefined` on a key clears it. */
+  surface?: Partial<EngraveSurfaceSettings>;
 };
 
 /**
@@ -1349,15 +1355,25 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
       apply((job) => {
         const target = job.targetObject;
         if (!target) return job;
-        return {
-          ...job,
-          targetObject: {
-            ...target,
-            ...patch,
-            // Merge a partial position rather than replacing the whole object.
-            position: patch.position ? { ...target.position, ...patch.position } : target.position,
-          },
+        const next: EngraveTargetObject = {
+          ...target,
+          ...patch,
+          // Merge a partial position rather than replacing the whole object.
+          position: patch.position ? { ...target.position, ...patch.position } : target.position,
         };
+        // #535 — merge a partial `surface` (a key set to `undefined` is REMOVED, the row's reset),
+        // and drop the block entirely once every key is gone, so a goal back on its defaults
+        // serialises exactly as one that never carried the block.
+        if (patch.surface) {
+          const merged: Record<string, number> = { ...(target.surface ?? {}) };
+          for (const [key, value] of Object.entries(patch.surface)) {
+            if (value === undefined) delete merged[key];
+            else merged[key] = value;
+          }
+          if (Object.keys(merged).length === 0) delete next.surface;
+          else next.surface = merged as EngraveSurfaceSettings;
+        }
+        return { ...job, targetObject: next };
       }),
 
     removeTargetObject: () => {

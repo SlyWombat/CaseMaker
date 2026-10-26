@@ -652,6 +652,45 @@ describe('toSetup (#200)', () => {
 });
 
 describe('engraveJobStore (#200)', () => {
+  it('#535 — merges a goal surface patch, clears a key set to undefined, and drops an empty block', async () => {
+    backing.clear();
+    const { useEngraveJobStore } = await freshStore();
+    const s = () => useEngraveJobStore.getState();
+    s().setTargetObject({
+      id: 'tgt-1',
+      name: 'goal.stl',
+      format: 'stl',
+      sha256: 'a'.repeat(64),
+      data: 'AAAA',
+      size: { x: 10, y: 8, z: 4 },
+      position: { x: 5, y: 5, z: 0 },
+      rotation: 0,
+      enabled: true,
+      role: 'goal',
+      surface: { roughStepDownMm: 0.3, gridPitchMm: 0.2 },
+    });
+
+    // A partial patch merges, leaving the other keys alone.
+    s().updateTargetObject({ surface: { finishStepOverMm: 0.4 } });
+    expect(s().job.targetObject?.surface).toEqual({
+      roughStepDownMm: 0.3,
+      gridPitchMm: 0.2,
+      finishStepOverMm: 0.4,
+    });
+
+    // `undefined` is the row's reset: the key is REMOVED, not stored as undefined.
+    s().updateTargetObject({ surface: { gridPitchMm: undefined } });
+    expect(s().job.targetObject?.surface).toEqual({ roughStepDownMm: 0.3, finishStepOverMm: 0.4 });
+    expect(Object.keys(s().job.targetObject?.surface ?? {})).not.toContain('gridPitchMm');
+
+    // The last key cleared drops the block entirely, so the document serialises as one that never
+    // carried it — and the reload keeps that shape.
+    s().updateTargetObject({ surface: { roughStepDownMm: undefined, finishStepOverMm: undefined } });
+    expect(s().job.targetObject?.surface).toBeUndefined();
+    const second = await freshStore();
+    expect(second.useEngraveJobStore.getState().job.targetObject?.surface).toBeUndefined();
+  });
+
   it('updateLabel then a reload from localStorage restores the edit', async () => {
     backing.clear();
     const first = await freshStore();

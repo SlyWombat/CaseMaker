@@ -333,7 +333,37 @@ export interface Surface3dResult {
   roughing: CamOperation;
   /** The ball-nose finishing operation. */
   finishing: CamOperation;
+  /**
+   * #535 — how many Z layers the roughing pass stepped through (the final layer included). The
+   * operator-facing "levels" number, reported rather than re-derived by a caller.
+   */
+  roughingLayers: number;
   /** Labelled placeholders and limitations for the run sheet (feeds, undercuts, flat finish). */
+  notes: string[];
+}
+
+/**
+ * #535 — a goal program's surfacing facts, as the operation row and the run sheet quote them.
+ * Every number is one the CAM ran with, never a second resolution of the same question.
+ */
+export interface GoalSurfaceFacts {
+  /** The heightfield's own resolution sentence ("sampled on a 0.1 mm grid"). */
+  resolutionNote: string;
+  /** The pitch the heightfield was sampled at, mm — after any coarsening. */
+  gridPitchMm: number;
+  /** The cells the heightfield held, `nx × ny`. */
+  gridCells: number;
+  /** Roughing step-down per Z layer, mm. */
+  stepDownMm: number;
+  /** Roughing raster pitch, mm. */
+  roughStepOverMm: number;
+  /** Finishing raster pitch, mm. */
+  finishStepOverMm: number;
+  /** Roughing allowance left on the goal surface, mm. */
+  stockToLeaveMm: number;
+  /** Z layers the roughing pass stepped through. */
+  roughingLayers: number;
+  /** The engine's notes for the run sheet: the feeds, undercuts and a flat finishing cutter. */
   notes: string[];
 }
 
@@ -354,7 +384,7 @@ export function generateSurface3dIR(args: Surface3dArgs): Surface3dResult {
     : DEFAULT_MAX_FINISH_TIP_OPS;
 
   const notes: string[] = [
-    'Feeds are the job’s 2.5D feeds reused unchanged; cutting feeds for 3D engagement are the bench slice (#536) and are not tuned here.',
+    'The cutting feed, plunge feed, step-down and step-over are the job’s 2.5D feeds, reused unchanged. Measured 3D engagement numbers are not in the feeds table.',
     'A heightfield has one top-Z per (x, y): undercuts and overhangs cannot be expressed, so hidden material below the topmost surface is left standing (the 3-axis answer).',
     `Resolution: ${hf.resolutionNote}.`,
   ];
@@ -364,7 +394,8 @@ export function generateSurface3dIR(args: Surface3dArgs): Surface3dResult {
     );
   }
 
-  const roughMoves = roughingMoves(hf, feeds, allowance, alongStep, safeZ, hopZ);
+  const rough = roughingMoves(hf, feeds, allowance, alongStep, safeZ, hopZ);
+  const roughMoves = rough.moves;
   const finishMoves = finishingMoves(hf, tool, feeds, alongStep, safeZ, hopZ, maxFinishTipOps);
 
   const depth = Math.max(0, hf.topZ - hf.minZ);
@@ -398,7 +429,7 @@ export function generateSurface3dIR(args: Surface3dArgs): Surface3dResult {
     operations: [roughing, finishing],
   };
 
-  return { ir, roughing, finishing, notes };
+  return { ir, roughing, finishing, roughingLayers: rough.layers, notes };
 }
 
 /**
@@ -543,9 +574,9 @@ function roughingMoves(
   alongStep: number,
   safeZ: number,
   hopZ: number,
-): CamMove[] {
+): { moves: CamMove[]; layers: number } {
   const moves: CamMove[] = [];
-  if (hf.coveredCount === 0) return moves;
+  if (hf.coveredCount === 0) return { moves, layers: 0 };
   // #541 — the layer loop steps L down by `stepDown` until it passes `deepest`. A zero or negative
   // step-down (a placeholder or bad feed row through the flat proxy) never terminates it, so refuse
   // here rather than hang: a non-positive step-down cannot layer a roughing pass.
@@ -607,7 +638,7 @@ function roughingMoves(
     }
   }
   if (moves.length > 0) moves.push({ kind: 'rapid', x: moves[moves.length - 1]!.x, y: moves[moves.length - 1]!.y, z: safeZ });
-  return moves;
+  return { moves, layers: levels.length };
 }
 
 /**

@@ -539,6 +539,22 @@ export function SimPanel() {
             <span data-testid="sim-backend" title={BACKEND_TITLE} style={TAG}>
               {info.stats.engine === 'exact' ? 'exact sweep' : 'column sweep'}
             </span>
+            {/* #535 — the flat column grid's own pitch, after any coarsening (`stats.resolution`
+                carries the grid the sweep built, `dThetaDeg` being the FLAT Y pitch in mm). A
+                dexel's every number is good to one cell, and the exact sweep's tolerance band
+                does not apply to it; the design doc requires the UI to say the grid, never the
+                exact sweep's confidence. Not drawn for a rotary grid, whose second axis is θ. */}
+            {info.stats.engine === 'column' &&
+              info.summary?.rotary !== true &&
+              info.stats.resolution && (
+                <span
+                  data-testid="sim-grid"
+                  title="The column engine samples the blank on this grid, so every number this sweep reports is good to one cell. The exact sweep's tolerance band does not apply."
+                  style={TAG}
+                >
+                  simulated on a {Number(info.stats.resolution.dThetaDeg.toFixed(3))} mm grid
+                </span>
+              )}
           </h3>
           <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
             <div>

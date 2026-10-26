@@ -81,6 +81,7 @@ import { hasSacrificial, stripHeight, viseJawShift } from '@/engine/cnc/sacrific
 import { jobMachine } from '@/engine/cnc/calibration';
 import { facingDefault, facingRefusal, finishOf } from '@/engine/cnc/stockStart';
 import type { FacingCamSummary } from '@/engine/cnc/cam/facing';
+import type { GoalSurfaceFacts } from '@/engine/cnc/cam/surface3d';
 import type { InkMeasure } from '@/engine/cnc/engrave/inkBox';
 import type { VerifyReport } from '@/engine/cnc/verify';
 // #243 — the blind-spot sentence is the Simulate panel's OWN builder, imported rather than
@@ -344,6 +345,12 @@ export interface RunSheetGenerated {
    * the numbers in the file.
    */
   facingCam?: FacingCamSummary | null;
+  /**
+   * #535 — a PURE GOAL job's surfacing facts (`EngraveGenerated.surface3d`): the passes' numbers
+   * and the heightfield's resolution. Present only on the goal path; absent on every item job and
+   * on a result stored by an older build, so the sheet then reads exactly as it did before.
+   */
+  surface3d?: GoalSurfaceFacts | null;
   /**
    * #419 J3 — the run's programs in cut order (`EngraveGenerated.programs`). Present on every
    * generated result this build produces; OPTIONAL because a result stored by an older build (or a
@@ -2495,6 +2502,31 @@ function finishAllowanceStep(facts: RunSheetFinishFacts): RunSheetStep {
   };
 }
 
+/**
+ * #535 — a PURE GOAL job's surface steps: what the two passes did, then the engine's own notes
+ * (the feeds, the undercuts a heightfield cannot express, the resolution, and a flat finishing
+ * cutter). Every number is `surface3d`'s, printed rather than re-derived here.
+ */
+function surfaceSteps(facts: GoalSurfaceFacts): RunSheetStep[] {
+  const rough =
+    facts.roughingLayers === 0
+      ? 'Roughing has nothing to remove: no stock stands above the goal surface and its allowance.'
+      : `Roughing in ${facts.roughingLayers} Z layer${facts.roughingLayers === 1 ? '' : 's'} at ` +
+        `${fmtNum(facts.stepDownMm)} mm step-down and ${fmtNum(facts.roughStepOverMm)} mm step-over, ` +
+        `leaving ${fmtNum(facts.stockToLeaveMm)} mm of stock on the surface.`;
+  const steps: RunSheetStep[] = [
+    {
+      text: `Surface a mesh. ${rough} Finishing follows the surface at ${fmtNum(facts.finishStepOverMm)} mm step-over.`,
+      value:
+        `${facts.roughingLayers} layer${facts.roughingLayers === 1 ? '' : 's'} · ` +
+        `${fmtNum(facts.stepDownMm)} mm step-down · ${fmtNum(facts.finishStepOverMm)} mm finish step-over · ` +
+        `${fmtNum(facts.stockToLeaveMm)} mm left`,
+    },
+  ];
+  for (const note of facts.notes) steps.push({ text: note });
+  return steps;
+}
+
 /** The frame/load pair for a later program: its own dry run, then the file. */
 function programRunSteps(program: RunSheetProgram, number: number): RunSheetStep[] {
   const steps: RunSheetStep[] = [];
@@ -3255,21 +3287,38 @@ export function buildRunSheet(
     // a step-over here would hand the operator a number for a cut the program never makes — and
     // for a V bit it is the TIP's fraction of the TIP (0.45 × 0.3 mm), which reads like a real
     // pitch. A job with any region item keeps the full line: those loops DO step over.
+    //
+    // #535 — A GOAL JOB'S PASSES ARE ITS OWN. Its step-down and step-overs need not be the feeds
+    // row's (the operation can state each), so this line keeps the spindle/feed/vacuum facts and
+    // the surface steps below print the passes' own numbers.
     const traceOnly =
       items.length === 0 && (job.traces?.some((t) => t.enabled && !t.construction) ?? false);
-    const step: RunSheetStep = {
-      text: traceOnly
-        ? `Spindle, feed and plunge. Vacuum ${params.air ? 'on' : 'off'}.`
-        : `Spindle, feed, plunge, passes and step-down. Vacuum ${params.air ? 'on' : 'off'}.`,
-      value: traceOnly
-        ? `${params.rpm} RPM · ${fmtNum(params.feed)} mm/min feed · ${fmtNum(params.plungeFeed)} mm/min ` +
-          'plunge · a single stroke on every line, cut straight to depth — no step-over'
-        : `${params.rpm} RPM · ${fmtNum(params.feed)} mm/min feed · ${fmtNum(params.plungeFeed)} mm/min ` +
-          `plunge · ${generated.cam?.passes ?? 1} × ${fmtNum(params.stepDown)} mm passes · ` +
-          `${fmtNum(params.stepOver)} mm step-over`,
-    };
+    const surfaceFacts = generated.surface3d ?? null;
+    const step: RunSheetStep =
+      surfaceFacts !== null
+        ? {
+            text: `Spindle, feed and plunge. Vacuum ${params.air ? 'on' : 'off'}.`,
+            value:
+              `${params.rpm} RPM · ${fmtNum(params.feed)} mm/min feed · ` +
+              `${fmtNum(params.plungeFeed)} mm/min plunge`,
+          }
+        : traceOnly
+          ? {
+              text: `Spindle, feed and plunge. Vacuum ${params.air ? 'on' : 'off'}.`,
+              value:
+                `${params.rpm} RPM · ${fmtNum(params.feed)} mm/min feed · ${fmtNum(params.plungeFeed)} mm/min ` +
+                'plunge · a single stroke on every line, cut straight to depth — no step-over',
+            }
+          : {
+              text: `Spindle, feed, plunge, passes and step-down. Vacuum ${params.air ? 'on' : 'off'}.`,
+              value:
+                `${params.rpm} RPM · ${fmtNum(params.feed)} mm/min feed · ${fmtNum(params.plungeFeed)} mm/min ` +
+                `plunge · ${generated.cam?.passes ?? 1} × ${fmtNum(params.stepDown)} mm passes · ` +
+                `${fmtNum(params.stepOver)} mm step-over`,
+            };
     cutSteps.push(step);
     programParams = step;
+    if (surfaceFacts !== null) cutSteps.push(...surfaceSteps(surfaceFacts));
     // #487 — what the ordering did, in the operator's terms: air travel against cutting travel,
     // and the same program under the order this CAM used before it. "Optimised" that cannot be
     // checked on paper is a feeling; the two numbers are the check. A job whose CAM carried no

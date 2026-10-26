@@ -314,6 +314,83 @@ describe('generateGoalProgram — the worker dispatches a pure goal job', () => 
   });
 });
 
+describe('generateGoalProgram — the goal operation’s own numbers (#535)', () => {
+  /** The ramp job with the goal placed over the middle; `surface` is the operation's block. */
+  function goalJob(over: Partial<EngraveTargetObject> = {}): EngraveJob {
+    return {
+      ...defaultEngraveJob(),
+      labels: [],
+      shapes: [],
+      targetObject: goal(rampTris(), { position: { x: 50, y: 30, z: 0 }, ...over }),
+    };
+  }
+
+  it('reports the defaults it ran with: the feeds row’s step-down, the shop’s grid pitch and allowance', () => {
+    const job = goalJob();
+    const out = generateGoalProgram(job, job.targetObject!, makeFlatTool(3.175), [], null, {
+      finish: { stockToLeaveMm: { value: 0.25, source: 'chosen' } },
+      surfaceGrid: { pitchMm: { value: 0.2, source: 'chosen' } },
+    });
+    expect(out.ok).toBe(true);
+    expect(out.feeds?.ok).toBe(true);
+    if (!out.feeds?.ok) return;
+    const facts = out.surface3d!;
+    // The feeds row's own numbers stand in where the operation states none.
+    expect(facts.stepDownMm).toBe(out.feeds.params.stepDown);
+    expect(facts.roughStepOverMm).toBe(out.feeds.params.stepOver);
+    expect(facts.finishStepOverMm).toBe(out.feeds.params.stepOver);
+    // The two shop defaults are the ones handed in, and the resolution sentence says the pitch.
+    expect(facts.stockToLeaveMm).toBe(0.25);
+    expect(facts.gridPitchMm).toBe(0.2);
+    expect(facts.resolutionNote).toContain('0.2');
+    expect(facts.gridCells).toBeGreaterThan(0);
+    expect(facts.roughingLayers).toBeGreaterThan(0);
+    // The notes are the engine's own sentences, with no issue numbers in operator-facing text.
+    expect(facts.notes.join(' ')).not.toContain('#');
+    expect(facts.notes.some((n) => n.startsWith('Resolution:'))).toBe(true);
+  });
+
+  it('the operation’s block overrides each default, and the facts report the numbers it ran', () => {
+    const job = goalJob({
+      surface: {
+        roughStepDownMm: 0.25,
+        roughStepOverMm: 1.2,
+        finishStepOverMm: 0.15,
+        gridPitchMm: 0.5,
+        stockToLeaveMm: 0,
+      },
+    });
+    const out = generateGoalProgram(job, job.targetObject!, makeFlatTool(3.175), [], null, {
+      // The shop's own numbers are handed in too: the operation's block must win over both.
+      finish: { stockToLeaveMm: { value: 0.25, source: 'chosen' } },
+      surfaceGrid: { pitchMm: { value: 0.2, source: 'chosen' } },
+    });
+    expect(out.ok).toBe(true);
+    const facts = out.surface3d!;
+    expect(facts.stepDownMm).toBe(0.25);
+    expect(facts.roughStepOverMm).toBe(1.2);
+    expect(facts.finishStepOverMm).toBe(0.15);
+    expect(facts.gridPitchMm).toBe(0.5);
+    expect(facts.resolutionNote).toContain('0.5');
+    expect(facts.stockToLeaveMm).toBe(0);
+    // The ramp's top is at the stock top and its deepest point 1.0 mm down (K·20); with a 0.25 mm
+    // step-down and no allowance the layers are −0.25, −0.5, −0.75 and the floor −1.0.
+    expect(facts.roughingLayers).toBe(4);
+  });
+
+  it('a round cutter roughs and finishes, and the IR names both operations', () => {
+    const job = goalJob({ surface: { roughStepDownMm: 0.5, gridPitchMm: 0.4 } });
+    const out = generateGoalProgram(job, job.targetObject!, makeFlatTool(3.175, { shape: 'ball' }), [], null, {});
+    expect(out.ok).toBe(true);
+    expect(out.cam?.operations).toBe(2);
+    expect(out.cam?.roughOperations).toBe(1);
+    expect(out.cam?.finishOperations).toBe(1);
+    // A pure goal program is still not promoted: the dexel check is the simulation, and the
+    // release flow reads the top-level file.
+    expect(out.programs).toEqual([]);
+  });
+});
+
 describe('generateSurface3dIR — roughing never breaches the goal', () => {
   it('leaves at least the allowance above the heightfield everywhere it cuts', () => {
     const hf = sampleGoalHeightfield(goal(rampTris()), { pitchMm: 0.1 });

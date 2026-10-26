@@ -4690,6 +4690,43 @@
                 "z"
               ],
               "type": "object"
+            },
+            "surface": {
+              "additionalProperties": false,
+              "description": "The goal mesh’s surfacing settings (step-down, step-overs, grid pitch, allowance); omit every key to use the defaults.",
+              "properties": {
+                "finishStepOverMm": {
+                  "description": "Finishing raster pitch between scan lines, in millimetres; omit for the feeds row’s step-over.",
+                  "exclusiveMinimum": 0,
+                  "maximum": 20,
+                  "type": "number"
+                },
+                "gridPitchMm": {
+                  "description": "Heightfield sampling pitch on both axes, in millimetres; omit for the shop’s flat-grid Y pitch.",
+                  "maximum": 2,
+                  "minimum": 0.02,
+                  "type": "number"
+                },
+                "roughStepDownMm": {
+                  "description": "Roughing step-down per Z layer, in millimetres; omit for the feeds row’s.",
+                  "exclusiveMinimum": 0,
+                  "maximum": 20,
+                  "type": "number"
+                },
+                "roughStepOverMm": {
+                  "description": "Roughing raster pitch between scan lines, in millimetres; omit for the feeds row’s step-over.",
+                  "exclusiveMinimum": 0,
+                  "maximum": 20,
+                  "type": "number"
+                },
+                "stockToLeaveMm": {
+                  "description": "Roughing allowance left on the goal surface, in millimetres; omit for the shop’s finish stock-to-leave.",
+                  "maximum": 2,
+                  "minimum": 0,
+                  "type": "number"
+                }
+              },
+              "type": "object"
             }
           },
           "required": [

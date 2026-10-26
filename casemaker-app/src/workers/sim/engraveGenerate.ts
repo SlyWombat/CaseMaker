@@ -112,7 +112,12 @@ import {
 import { buildThroughMask, type MaskCutout } from '@/engine/cnc/engrave/throughMask';
 import type { Polygons } from '@/engine/cnc/cam/pocket';
 import { concatToolpathIR, estimateCycleSeconds, HOP_Z, toolNumberFor, travelStats, type CamMove, type ToolpathIR } from '@/engine/cnc/cam/ir';
-import { generateSurface3dForGoal, type SurfaceFeeds } from '@/engine/cnc/cam/surface3d';
+import {
+  DEFAULT_STOCK_TO_LEAVE_MM,
+  generateSurface3dForGoal,
+  type GoalSurfaceFacts,
+  type SurfaceFeeds,
+} from '@/engine/cnc/cam/surface3d';
 import { postZ1, type PostContext, type VacuumSpan } from '@/engine/cnc/post/z1';
 import { applySurfaceLift, maxSurfaceLift, type SurfaceFrame } from '@/engine/cnc/engrave/surfacePlane';
 import { FRAME_Z, runSheetFileName, runSheetFrameFileName } from '@/engine/cnc/engrave/runSheet';
@@ -215,6 +220,13 @@ export interface EngraveShopOpts {
    * `.nc` and every direct-engine caller rely on. `engraveRunStore` always supplies it.
    */
   finish?: { stockToLeaveMm: FinishStockToLeave } | null;
+  /**
+   * #535 — the shop's `sim.columnFlatPitchYMm` (the FLAT heightfield pitch), resolved on the
+   * CALLER's side like `finish`: the goal operation samples its heightfield at this pitch when it
+   * states none of its own, and the source travels so the run sheet and the row can say where the
+   * number came from. Absent/null is no location: the CAM's labelled `DEFAULT_GRID_PITCH_MM`.
+   */
+  surfaceGrid?: { pitchMm: { value: number; source: 'seeded' | 'chosen' | 'measured' | 'fallback' } } | null;
   /**
    * #434 — the drill-bit numbers (`drill.peckDiameters`, `drill.peckClearanceMm`,
    * `drill.pointAngleDeg`, `drill.plungeFeed`, `drill.spindleRpm`) with each one's source,
@@ -515,6 +527,13 @@ export interface EngraveGenerated {
    * so the run sheet's tab-removal step describes the file that actually leaves the tabs.
    */
   through?: ThroughCutFacts | null;
+  /**
+   * #535 — a PURE GOAL job's surfacing facts: the numbers the roughing/finishing passes ran with
+   * and the heightfield they sampled. Present only on the goal path (a job whose only work is a
+   * `role: 'goal'` mesh); absent on every item job and on a result stored by an older build, so
+   * the row and the run sheet say nothing rather than inventing a number.
+   */
+  surface3d?: GoalSurfaceFacts | null;
   /**
    * #623 — the fitted surface this package was POSTED against, or null on a flat post. The frame
    * the programs speak: the caller loads the simulation with exactly this value (`SimLoadOpts.surface`)
@@ -2375,14 +2394,21 @@ export function generateGoalProgram(
   const resolved = feedsFor(catalogue, job.stock.material, feedTool, mill, job.cutOverride, shop.feeds ?? undefined);
   if (!resolved.ok) return fail('feeds', resolved.reason, resolved);
 
+  // #535 — the goal operation's own settings, each falling back to the default it overrides: the
+  // feeds row's step-down/step-over, and the shop's finish allowance and flat-grid pitch.
+  const settings = goal.surface ?? {};
+  const stockToLeaveMm = settings.stockToLeaveMm ?? shop.finish?.stockToLeaveMm.value;
+  const gridPitchMm = settings.gridPitchMm ?? shop.surfaceGrid?.pitchMm.value ?? null;
+
   const feeds: SurfaceFeeds = {
     feed: resolved.params.feed,
     plungeFeed: resolved.params.plungeFeed,
-    stepDown: resolved.params.stepDown,
-    roughStepOver: resolved.params.stepOver,
+    stepDown: settings.roughStepDownMm ?? resolved.params.stepDown,
+    roughStepOver: settings.roughStepOverMm ?? resolved.params.stepOver,
     // A ball finish wants a finer step-over than a flat pocket's; no measured 3D number exists yet
-    // (slice F), so the pocketing step-over stands as the labelled placeholder.
-    finishStepOver: resolved.params.stepOver,
+    // (slice F), so the pocketing step-over stands as the labelled placeholder unless the goal
+    // operation states its own.
+    finishStepOver: settings.finishStepOverMm ?? resolved.params.stepOver,
   };
 
   let surfaced: ReturnType<typeof generateSurface3dForGoal>;
@@ -2395,7 +2421,8 @@ export function generateGoalProgram(
       air: job.cutOverride?.air ?? true,
       feeds,
       rapid: mill.rapidEstimate,
-      opts: { stockToLeaveMm: shop.finish?.stockToLeaveMm.value },
+      sample: gridPitchMm === null ? undefined : { pitchMm: gridPitchMm },
+      opts: { stockToLeaveMm },
     });
   } catch (e) {
     return fail('cam', e instanceof Error ? e.message : String(e), resolved);
@@ -2431,6 +2458,19 @@ export function generateGoalProgram(
     cam: summarize(surfaced.ir),
     nc,
     verify: null,
+    // #535 — the operation's own facts, for its row and the run sheet: the numbers the CAM ran
+    // with and the grid it sampled. A caller with no generated result has no facts to print.
+    surface3d: {
+      resolutionNote: surfaced.heightfield.resolutionNote,
+      gridPitchMm: surfaced.heightfield.pitch,
+      gridCells: surfaced.heightfield.nx * surfaced.heightfield.ny,
+      stepDownMm: feeds.stepDown,
+      roughStepOverMm: feeds.roughStepOver,
+      finishStepOverMm: feeds.finishStepOver,
+      stockToLeaveMm: stockToLeaveMm ?? DEFAULT_STOCK_TO_LEAVE_MM,
+      roughingLayers: surfaced.roughingLayers,
+      notes: surfaced.notes,
+    } satisfies GoalSurfaceFacts,
   };
 }
 

@@ -621,6 +621,23 @@ const primitiveSchema = z
  */
 const MAX_TARGET_OBJECT_BASE64_CHARS = Math.ceil((4 * 1024 * 1024) / 3) * 4;
 
+/**
+ * #535 — a goal mesh's surfacing settings. Every field OPTIONAL: an absent key is "use the
+ * default" (the feeds row, or the shop's finish allowance and flat-grid pitch), so a document
+ * that carries none round-trips as it was written. The bounds keep a hand-edited document from
+ * asking for a grid of zero rows or a negative allowance, which the CAM could not run.
+ */
+const surfaceSettingsSchema = z
+  .object({
+    roughStepDownMm: z.number().finite().positive().max(20).optional().describe('Roughing step-down per Z layer, in millimetres; omit for the feeds row’s.'),
+    roughStepOverMm: z.number().finite().positive().max(20).optional().describe('Roughing raster pitch between scan lines, in millimetres; omit for the feeds row’s step-over.'),
+    finishStepOverMm: z.number().finite().positive().max(20).optional().describe('Finishing raster pitch between scan lines, in millimetres; omit for the feeds row’s step-over.'),
+    gridPitchMm: z.number().finite().min(0.02).max(2).optional().describe('Heightfield sampling pitch on both axes, in millimetres; omit for the shop’s flat-grid Y pitch.'),
+    stockToLeaveMm: z.number().finite().min(0).max(2).optional().describe('Roughing allowance left on the goal surface, in millimetres; omit for the shop’s finish stock-to-leave.'),
+  })
+  .strict()
+  .describe('A goal mesh’s surfacing settings; every key omitted takes its default.');
+
 const targetObjectSchema = z
   .object({
     id: z.string().min(1).describe('Unique id for the reference object.'),
@@ -665,6 +682,12 @@ const targetObjectSchema = z
       .enum(['reference', 'goal'])
       .optional()
       .describe("What the mesh is to the job: 'reference' (positioned against, not cut; the default when absent) or 'goal' (the shape to make)."),
+    // #535 — the goal's own surfacing settings. Optional like `role`: an absent block is the
+    // engine's defaults, and a document written before this slice round-trips unchanged. The key
+    // MUST live here as well as in `types/engraveJob.ts`, or the strict schema strips it.
+    surface: surfaceSettingsSchema
+      .optional()
+      .describe('The goal mesh’s surfacing settings (step-down, step-overs, grid pitch, allowance); omit every key to use the defaults.'),
   })
   .strict()
   .describe('An embedded mesh (STL/3MF): a reference the cutting volumes are positioned against, or a goal shape to make.');

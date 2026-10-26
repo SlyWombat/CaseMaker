@@ -460,10 +460,35 @@ export interface EngraveTargetObject {
    * slice — so old documents keep today's behaviour. `'goal'` marks the mesh as the shape to make.
    */
   role?: EngraveTargetRole;
+  /**
+   * The goal operation's own settings (#535). OPTIONAL, and every field in it optional: absent
+   * means the engine's default for that number — the feeds row's step-down and step-over, the
+   * shop's `finish.stockToLeaveMm` and `sim.columnFlatPitchYMm` — so a document written before
+   * this block existed rounds-trips byte-for-byte and a goal left alone cuts the same program.
+   */
+  surface?: EngraveSurfaceSettings;
 }
 
 /** The role an embedded mesh plays (#533): a part to position against, or a shape to make. */
 export type EngraveTargetRole = 'reference' | 'goal';
+
+/**
+ * A goal mesh's surfacing settings (#535): the numbers the roughing and finishing passes run
+ * with. Each one overrides the default named in its comment; `undefined` is "use that default",
+ * never a zero.
+ */
+export interface EngraveSurfaceSettings {
+  /** Roughing step-down per Z layer, mm. Default: the feeds row's step-down. */
+  roughStepDownMm?: Mm;
+  /** Roughing raster pitch between scan lines, mm. Default: the feeds row's step-over. */
+  roughStepOverMm?: Mm;
+  /** Finishing raster pitch between scan lines, mm. Default: the feeds row's step-over. */
+  finishStepOverMm?: Mm;
+  /** Heightfield sampling pitch (both axes), mm. Default: the shop's `sim.columnFlatPitchYMm`. */
+  gridPitchMm?: Mm;
+  /** Roughing allowance left on the goal surface, mm. Default: the shop's `finish.stockToLeaveMm`. */
+  stockToLeaveMm?: Mm;
+}
 
 /**
  * Holding tabs for a cut-out (#218): bridges of material left UNCUT across the kerf so the part

@@ -61,6 +61,19 @@ const READY_COLUMN = {
   meshes: { stock: {}, result: {}, removal: null, gouges: [] },
 } as unknown as SimLoadResult;
 
+/**
+ * #535 — a FLAT column run: the grid's Y pitch is the shop's flat pitch in mm, and the panel states
+ * it. A rotary grid's second axis is θ, so the same field is not printed as millimetres there.
+ */
+const READY_FLAT_COLUMN = {
+  ok: true,
+  diagnostics: [],
+  summary: { diagnosticCounts: {}, rotary: false },
+  stats: { engine: 'column', removedVolume: 12, ms: { total: 20 }, resolution: { dx: 0.1, dThetaDeg: 0.1 } },
+  count: 4,
+  meshes: { stock: {}, result: {}, removal: null, gouges: [] },
+} as unknown as SimLoadResult;
+
 const REFUSED = {
   ok: false,
   pathOnly: false,
@@ -442,7 +455,23 @@ describe('SimPanel', () => {
     await screen.findByTestId('sim-result');
     // READY reports the exact sweeper's own `stats.engine`, which is the field the badge reads.
     expect(screen.getByTestId('sim-backend').textContent).toContain('exact');
+    // #535 — the exact sweep has no grid, so no resolution tag is drawn for it.
+    expect(screen.queryByTestId('sim-grid')).toBeNull();
     expect(screen.queryByTestId('sim-axis-clamped')).toBeNull();
+  });
+
+  it('#535 — a flat column run states the grid it was simulated on', async () => {
+    setSimClientLoader(async () => fakeClient(READY_FLAT_COLUMN));
+    openPlainFile();
+    act(() => useSimSetupStore.getState().setTool(CHOSEN_TOOL));
+    render(<SimPanel />);
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('sim-simulate'));
+    });
+    await screen.findByTestId('sim-result');
+    expect(screen.getByTestId('sim-backend').textContent).toContain('column');
+    expect(screen.getByTestId('sim-grid').textContent).toContain('simulated on a 0.1 mm grid');
   });
 
   it('surfaces the clamped rotary count with the result, not only in diagnostics (#239)', async () => {

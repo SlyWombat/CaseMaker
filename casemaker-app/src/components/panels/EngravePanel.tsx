@@ -2434,6 +2434,32 @@ export function EngravePanel(): JSX.Element {
           findings={findings.filter((f) => f.code === 'target-object-not-cut')}
           onChange={(patch) => updateTargetObject(patch)}
           onRemove={() => removeTargetObject()}
+          // #535 — a goal's operation owns its cutter and four numbers. The defaults are the
+          // ones the engine falls back to: the feeds row's step-down/step-over, the shop's flat
+          // grid pitch and finish allowance. The row only places them and words their source.
+          surface={
+            target.role === 'goal'
+              ? {
+                  cutter:
+                    tool === null ? null : { key: job.toolKey, name: toolDisplayName(tool), shape: tool.shape },
+                  cutters: toolOptions.map((e) => ({ key: e.key, label: toolOptionLabel(e) })),
+                  feeds:
+                    params === null
+                      ? null
+                      : {
+                          stepDown: params.stepDown,
+                          stepOver: params.stepOver,
+                          typed:
+                            job.cutOverride?.stepDown !== undefined ||
+                            job.cutOverride?.stepOver !== undefined,
+                        },
+                  gridPitch: shopDefault('sim.columnFlatPitchYMm'),
+                  stockToLeave: shopDefault('finish.stockToLeaveMm'),
+                }
+              : undefined
+          }
+          surfaceFacts={target.role === 'goal' ? (run.generated?.surface3d ?? null) : null}
+          onCutterChange={(key) => setTool(key)}
         />
       )}
       <button
