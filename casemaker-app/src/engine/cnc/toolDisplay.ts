@@ -26,7 +26,7 @@
  * the hover does.
  */
 
-import { isMetalCutterName, parseLabelAngle, type Tool, type ToolShape } from './tool';
+import { isMetalCutterName, parseLabelAngle, statedCuttingSize, type Tool, type ToolShape } from './tool';
 
 /**
  * A millimetre value for a name: at most three decimals, trailing zeros dropped, never a binary
@@ -37,26 +37,12 @@ function mm(n: number): string {
   return String(Number(n.toFixed(3)));
 }
 
-/**
- * The kinds whose `diameter=` field is the SHANK, not a cutting size (`tool.ts`): Makera writes the
- * shank there for engravers, drills and chamfers. Their cutting size is `tipDiameter` or nothing.
- */
-const SHANK_DIAMETER_KINDS: ReadonlySet<ToolShape> = new Set(['engraving', 'chamfer', 'drill']);
-
 /** The vendor's own words for the cutter, when the record carries any (name, else `type=`). */
 function vendorLabel(tool: Tool): string | null {
   const name = tool.name.trim();
   if (name !== '') return name;
   const type = tool.typeText.trim();
   return type === '' ? null : type;
-}
-
-/** The cutting size the record honestly states, in mm, or null when it states none. */
-function cuttingSizeMm(tool: Tool): number | null {
-  const diameter = SHANK_DIAMETER_KINDS.has(tool.shape) ? tool.tipDiameter : (tool.tipDiameter ?? tool.diameter);
-  // A zero cutting diameter is not a cutter this build can name: treat it as unstated, not as a
-  // truthful "0 mm", which would let a point-like chamfer row read as a size.
-  return diameter === null || diameter <= 0 ? null : diameter;
 }
 
 /** The shape in the operator's words, or null for one this build cannot classify. */
@@ -116,7 +102,8 @@ export function toolDisplay(tool: Tool): ToolDisplay {
   // #651 — never a guessed kind: an unparsed catalogue row says so. #687 — and never the vendor
   // label as a parenthetical, which was the fourth name form the operator had to read.
   if (kind === null) return { name: 'unknown cutter', metal };
-  const size = cuttingSizeMm(tool);
+  // #699 — the size and the recommendation share one rule for what a record STATES.
+  const size = statedCuttingSize(tool);
   if (size === null) {
     // A shank-diameter kind with no tip, or a row whose size never parsed. Say the kind and that
     // the size is missing; the vendor label stays in the hover.

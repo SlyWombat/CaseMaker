@@ -12,7 +12,7 @@ import {
 } from '@/engine/cnc/engrave/recommendTool';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { labelProfile, toPartPlan } from '@/engine/cnc/engrave/partPlan';
-import { flatEndMill, cuttingRadiusForSweep, type Tool } from '@/engine/cnc/tool';
+import { flatEndMill, cuttingDiameter, cuttingRadiusForSweep, statedCuttingSize, type Tool } from '@/engine/cnc/tool';
 import { TOOL_LIBRARY, type ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import { measureLabels, type LabelEngravability } from '@/workers/sim/engraveGeometry';
 import {
@@ -22,8 +22,12 @@ import {
   type ItemWithCopies,
   type ToolCopy,
 } from '@/engine/cnc/toolCondition';
-import type { FeedCatalogueRow } from '@/engine/cnc/feeds';
-import type { EngraveJob } from '@/types/engraveJob';
+import { catalogueCoverageFor, type FeedCatalogueRow } from '@/engine/cnc/feeds';
+import { validateJob } from '@/engine/cnc/engrave/jobSetup';
+import { badgeBlankFor } from '@/engine/cnc/engrave/fromBadge';
+import { viseForNewJob } from '@/engine/cnc/fixture';
+import { defaultBadgeParams } from '@/types/badge';
+import type { EngraveJob, EngraveLabel } from '@/types/engraveJob';
 
 /** A library entry built around `flatEndMill`, with lengths/ratios supplied per case. */
 function tool(key: string, diameter: number, opts: Partial<Tool> = {}): ToolLibraryEntry {
@@ -625,3 +629,130 @@ function compromiseOf(rec: ToolRecommendation): ToolCandidate {
   expect(c, `the recommended candidate ${rec.key}`).toBeDefined();
   return c!;
 }
+
+
+// #699 — THE K3 WALK. The house inventory holds a 90° chamfer whose record states no tip, and the
+// badge's V-carve recommendation picked it: its SHANK (3.175 mm) was being read as a cutting
+// diameter, and the catalogue could not veto an owned cutter without a vendor id. The fix has one
+// rule — a computed pick must state its cutting size — and this is the fixture that holds it: the
+// badge blank, PLA, the house's chamfer/engraver/flat, and a PLA row for each cutter that has a
+// vendor id. The pick is the 1 mm flat end the mockup names.
+describe('recommendTool — the computed pick states its size and its material row (#699)', () => {
+  // Makera's catalogue has NO PLA row at all (#455: `t_MaterialList` lists no printed-blank
+  // filament). A PLA job is answered by the ABS row through the app's labelled mapping — the
+  // "PLA row" the issue means is the row this app can use for PLA.
+  const PLA = 'ABS';
+  const FLAT_PLA_ID = '900000000701';
+  const ENGRAVER_PLA_ID = '900000000702';
+
+  const flat = (): ToolLibraryEntry => ({
+    key: 'inv:kz-flat-1',
+    tool: flatEndMill(1.0, { id: FLAT_PLA_ID, name: '1mm Flat End', shoulderLength: 12 }),
+    provenance: 'k3 house inventory',
+  });
+  const engraver = (): ToolLibraryEntry => ({
+    key: 'inv:kz-engraver-03',
+    tool: flatEndMill(0.3, {
+      id: ENGRAVER_PLA_ID,
+      name: 'Single Flute Engraving Bit 30 x 0.3',
+      typeText: 'Engraving',
+      shape: 'engraving',
+      tipDiameter: 0.3,
+      diameter: 3.175,
+      angle: 30,
+      halfAngle: 15,
+      shoulderLength: 12,
+    }),
+    provenance: 'k3 house inventory',
+  });
+  /** The incident's cutter: a point chamfer. `diameter=` is the 3.175 mm SHANK, never its cut. */
+  const chamfer = (): ToolLibraryEntry => ({
+    key: 'inv:kz-chamfer-90',
+    tool: flatEndMill(0.3, {
+      name: 'C1-BIT-CHAMFER-90',
+      typeText: 'Chamfer',
+      shape: 'chamfer',
+      tipDiameter: null,
+      diameter: 3.175,
+      angle: 90,
+      halfAngle: 45,
+      shoulderLength: 12,
+    }),
+    provenance: 'k3 house inventory',
+  });
+  const plasticRow = (cutterId: string): FeedCatalogueRow => ({
+    cutterId,
+    material: PLA,
+    rpm: 12000,
+    feed: 500,
+    plungeFeed: 200,
+    stepDown: 0.4,
+  });
+  const catalogue = [plasticRow(FLAT_PLA_ID), plasticRow(ENGRAVER_PLA_ID)];
+
+  /**
+   * The badge the wizard builds: its blank and its pocket, PLA, and the one line the operator typed
+   * — placed where the fixed blank layout puts it (#700; that slice owns the placement, this one the
+   * cutter). The line is 8 mm and reads along Y, the way the badge route lays a name out.
+   */
+  function badgeJob(): EngraveJob {
+    const blank = badgeBlankFor(defaultBadgeParams());
+    const base = defaultEngraveJob(viseForNewJob(undefined, blank.stock));
+    return {
+      ...base,
+      stock: { ...blank.stock, material: 'pla' },
+      keepOuts: blank.pocket ? [blank.pocket] : [],
+      labels: [
+        {
+          ...(base.labels[0] as EngraveLabel),
+          id: 'name',
+          text: 'Zoomba',
+          size: 8,
+          position: { x: 19.05, y: 38.1 },
+          rotation: 90,
+          depth: 0.5,
+        },
+      ],
+      shapes: [],
+      toolKey: '',
+      tool: null,
+    };
+  }
+
+  it('never recommends the sizeless chamfer, and the pick has a stated size and a direct PLA row', () => {
+    const job = badgeJob();
+    const rec = recommendTool(job, [chamfer(), engraver(), flat()], catalogue, (_key) => [row('name', 1)]);
+
+    // The old reading — `cuttingDiameter`'s `diameter=` fallback — calls the shank a size; the rule
+    // this issue adds does not, and the candidate is out before it can be measured.
+    expect(cuttingDiameter(chamfer().tool)).toBe(3.175);
+    expect(statedCuttingSize(chamfer().tool)).toBeNull();
+    expect(candidate(rec, 'inv:kz-chamfer-90').excluded).toBe('unknown-size');
+
+    // The pick: the 1 mm flat end (the mockup's own recommendation), not the 0.3 mm engraver.
+    expect(rec.key).toBe('inv:kz-flat-1');
+    expect(rec.compromise).toBe(false);
+    const pickEntry = [flat(), engraver()].find((e) => e.key === rec.key)!;
+    expect(statedCuttingSize(pickEntry.tool)).toBe(1);
+    const coverage = catalogueCoverageFor(catalogue, 'pla', pickEntry.tool);
+    expect(coverage.kind).toBe('covered');
+    // The row that answers PLA is the ABS one, and the pick's note says so in words: a mapping
+    // this app makes, not a vendor statement about PLA (#455).
+    if (coverage.kind === 'covered') expect(coverage.via).toBe('abs');
+    const pick = candidate(rec, rec.key!);
+    expect(pick.catalogueNote).toContain('ABS row standing in');
+    expect(pick.catalogueNote).toContain('mapping this app makes');
+  });
+
+  it('leaves the k3 job with the recommended cutter generating with no blocking finding', () => {
+    const job: EngraveJob = { ...badgeJob(), toolKey: 'inv:kz-flat-1', tool: flat().tool };
+    const findings = validateJob(job);
+    expect(findings.filter((f) => f.severity === 'error')).toEqual([]);
+  });
+
+  it('says the sizes are missing when every cutter is sizeless, rather than blaming the material', () => {
+    const rec = recommendTool(badgeJob(), [chamfer()], catalogue, (_key) => [row('name', 1)]);
+    expect(rec.key).toBeNull();
+    expect(rec.reason).toBe('No cutter in the list states a cutting diameter.');
+  });
+});

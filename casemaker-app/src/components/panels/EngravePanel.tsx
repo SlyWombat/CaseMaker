@@ -99,6 +99,7 @@ import {
   measuredTopSpreadMm,
 } from '@/engine/cnc/stockStart';
 import { MATERIAL_LABELS } from '@/engine/cnc/materials';
+import { groupRejections, isActionableRejection, shouldGroupCatalogueRows } from './recommendationRejections';
 import { useShopDefaultsStore, shopDefault } from '@/store/shopDefaultsStore';
 import { blankStockFor } from '@/engine/cnc/engrave/fromBlank';
 import { readDesignFile } from '@/engine/import/designImport';
@@ -402,19 +403,6 @@ function toolOptionLabel(e: ToolLibraryEntry): string {
 /** The option's hover: the vendor's label and the provenance, neither of which is the name. */
 function toolOptionTitle(e: ToolLibraryEntry): string {
   return e.tool.name.trim() === '' ? e.provenance : `${e.tool.name} · ${e.provenance}`;
-}
-
-/**
- * #687 — which rejections are worth a line in "Why?". A cutter ruled out because it is broken, has
- * no feeds for this material, or is not in the catalogue for it tells the operator something they
- * can act on: replace the copy, change the material, choose another bit. `not-flat` does not — a
- * ball nose cannot become a flat end, and the old 160-row list said "not a flat end mill" against
- * ball noses the same panel was calling "flat end". That was a naming bug wearing a reason's clothes.
- */
-function isActionableRejection(
-  c: ToolCandidate,
-): c is ToolCandidate & { excluded: 'broken' | 'no-feeds' | 'no-catalogue-row' } {
-  return c.excluded === 'broken' || c.excluded === 'no-feeds' || c.excluded === 'no-catalogue-row';
 }
 
 /**
@@ -1548,6 +1536,10 @@ export function EngravePanel(): JSX.Element {
   const recPickApplied = recPick !== null && rec !== null && rec.key !== null && rec.key === job.toolKey;
   // #687 — only the rejections the operator can act on get a line (see `isActionableRejection`).
   const actionableRejections = rec?.candidates.filter(isActionableRejection) ?? [];
+  // #699 — the catalogue rows are one sentence when there are many of them, not a wall of
+  // near-identical ones; one or two keep their own row and their catalogue sentence.
+  const rejectionGroups = groupRejections(rec?.candidates ?? []);
+  const catalogueRowsGrouped = shouldGroupCatalogueRows(rejectionGroups.noCatalogueRow.length);
   const whySummary = `Why? — ${actionableRejections.length} cutter${actionableRejections.length === 1 ? '' : 's'} rejected`;
 
   // #516 — the tool is the software's recommendation once the work is defined. When the preview
@@ -3085,7 +3077,10 @@ export function EngravePanel(): JSX.Element {
                 {whySummary}
               </summary>
               <div style={{ marginTop: 4 }}>
-                {actionableRejections.map((c) => {
+                {[
+                  ...rejectionGroups.individual,
+                  ...(catalogueRowsGrouped ? [] : rejectionGroups.noCatalogueRow),
+                ].map((c) => {
                   const candidateEntry = tools.find((e) => e.key === c.key);
                   const name =
                     candidateEntry === undefined
@@ -3097,12 +3092,16 @@ export function EngravePanel(): JSX.Element {
                         // reading "every copy is marked broken" sounds like the operator's own
                         // verdict on the shipped definition.
                         'every copy is marked broken' + conditionSourceWord(c)
-                      : c.excluded === 'no-catalogue-row'
-                        ? // #455/#458 — the catalogue's own words. "No cutting parameters" is
-                          // the opposite of true here: the starting table answers these cutters
-                          // and it is the catalogue that named the materials it is listed for.
-                          (c.catalogueNote ?? 'not listed by the catalogue for this material')
-                        : 'no cutting parameters for this material';
+                      : c.excluded === 'unknown-size'
+                        ? // #699 — the number the recommendation itself cannot state. Actionable:
+                          // the record can be given a tip diameter, or another bit chosen.
+                          'its cutting diameter is not stated'
+                        : c.excluded === 'no-catalogue-row'
+                          ? // #455/#458 — the catalogue's own words. "No cutting parameters" is
+                            // the opposite of true here: the starting table answers these cutters
+                            // and it is the catalogue that named the materials it is listed for.
+                            (c.catalogueNote ?? 'not listed by the catalogue for this material')
+                          : 'no cutting parameters for this material';
                   return (
                     <div
                       key={c.key}
@@ -3114,6 +3113,21 @@ export function EngravePanel(): JSX.Element {
                     </div>
                   );
                 })}
+                {catalogueRowsGrouped && rejectionGroups.noCatalogueRow.length > 0 && (
+                  <div
+                    data-testid="engrave-candidate-group-no-catalogue-row"
+                    style={{ display: 'flex', justifyContent: 'space-between', gap: 8, fontSize: 11, lineHeight: 1.6 }}
+                  >
+                    <span style={MUTED}>
+                      {rejectionGroups.noCatalogueRow.length} cutter
+                      {rejectionGroups.noCatalogueRow.length === 1 ? '' : 's'} not listed by the catalogue
+                    </span>
+                    <span style={{ color: '#e0a19b' }}>
+                      {rejectionGroups.noCatalogueRow.length === 1 ? 'has' : 'have'} no catalogue row for{' '}
+                      {MATERIAL_LABELS[job.stock.material]}
+                    </span>
+                  </div>
+                )}
               </div>
             </details>
           )}

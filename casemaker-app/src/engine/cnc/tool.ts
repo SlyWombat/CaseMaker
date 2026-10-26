@@ -208,6 +208,28 @@ export function cuttingDiameter(tool: Tool): number | null {
 }
 
 /**
+ * #699 — the cutting size the record honestly STATES, mm, or null when it states none.
+ *
+ * `cuttingDiameter` is a best effort and is right for matching a FILE against a cutter: a
+ * `diameter=` on a flat end is its cut. For the SHANK-diameter kinds it is not. Makera writes the
+ * 3.175 mm shank into `diameter` for an engraver, a drill and a chamfer, and the size that cuts is
+ * `tipDiameter` or nothing. A chamfer's missing tip is a POINT in the geometry (`vCone` reads it
+ * that way, #669), but a point is not a size a recommendation can state: a V-carve's groove width
+ * at the colour plane IS the design, so a cutter that cannot say how wide it is cannot be the
+ * computed pick.
+ *
+ * Zero and negative are unstated, not a size. The one rule, shared by the display form (#651/#687,
+ * which needs an honest name) and the recommendation (#699, which needs a defensible default):
+ * what the record says it cuts with.
+ */
+export const SHANK_DIAMETER_KINDS: ReadonlySet<ToolShape> = new Set(['engraving', 'chamfer', 'drill']);
+
+export function statedCuttingSize(tool: Tool): number | null {
+  const diameter = SHANK_DIAMETER_KINDS.has(tool.shape) ? tool.tipDiameter : (tool.tipDiameter ?? tool.diameter);
+  return diameter === null || diameter <= 0 ? null : diameter;
+}
+
+/**
  * The vendor `g_ID` a tool actually STATES, or null when it has none (#316 review).
  *
  * `Tool.id` is the `id=` field verbatim, and a cutter with no vendor id does not leave the field

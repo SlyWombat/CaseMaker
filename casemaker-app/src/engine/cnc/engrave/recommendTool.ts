@@ -63,7 +63,7 @@ import {
   type FeedsEntry,
 } from '@/engine/cnc/feeds';
 import { jobMachine } from '@/engine/cnc/calibration';
-import { cuttingDiameter, cuttingForTrace } from '@/engine/cnc/tool';
+import { cuttingForTrace, statedCuttingSize } from '@/engine/cnc/tool';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import { conditionRank, type ConditionSummary } from '@/engine/cnc/toolCondition';
 import type { EngraveAnyItem, EngraveJob, EngravePrimitive } from '@/types/engraveJob';
@@ -73,13 +73,14 @@ import { lostDetailRatioFrom, type LabelEngravability } from '@/workers/sim/engr
 /**
  * Why a tool was dropped before measuring (#211: flat-ends only, and only cutters that exist;
  * #442: and only cutters that are not marked broken; #455: and only cutters the catalogue lists
- * for this material, when it lists the cutter at all).
+ * for this material, when it lists the cutter at all; #699: and only cutters whose record states
+ * a cutting size).
  */
-export type ToolExclusion = 'not-flat' | 'no-feeds' | 'broken' | 'no-catalogue-row';
+export type ToolExclusion = 'not-flat' | 'no-feeds' | 'broken' | 'no-catalogue-row' | 'unknown-size';
 
 export interface ToolCandidate {
   key: string;
-  /** Cutting diameter, mm (`cuttingDiameter`) — and 0 when the tool states neither, even if excluded. */
+  /** The cutting size the record STATES (`statedCuttingSize`), and 0 when it states none. */
   diameter: number;
   qualifies: boolean;
   /** Worst label for this cutter: the lowest ratio, and any characters lost. Null if unmeasured. */
@@ -92,7 +93,10 @@ export interface ToolCandidate {
    * Null is NOT "worn": it ranks as an unstated condition and carries no note.
    */
   condition: ConditionSummary | null;
-  /** Why it was excluded before measuring, if it was: 'not-flat' | 'no-feeds' | 'broken' | 'no-catalogue-row'. */
+  /**
+   * Why it was excluded before measuring, if it was: 'not-flat' | 'no-feeds' | 'broken' |
+   * 'no-catalogue-row' | 'unknown-size'.
+   */
   excluded?: ToolExclusion;
   /**
    * The catalogue's own sentence about this cutter and the job's material (#455), or null/absent
@@ -311,18 +315,27 @@ function compromiseReason(job: EngraveJob, pick: ToolCandidate): string {
 function noCandidateReason(
   toolCount: number,
   brokenCount: number,
+  unknownSizeCount: number,
   catalogueNotes: readonly string[],
 ): string {
   if (toolCount === 0) return 'There are no cutters in the tool list to recommend from.';
-  const base =
-    catalogueNotes.length > 0
+  // #699 — when every cutter fell for the same missing number, saying "no flat end mill or V-bit
+  // has cutting parameters" would misdescribe the list: the list may be all cones.
+  const allSizeless = unknownSizeCount > 0 && unknownSizeCount === toolCount;
+  const base = allSizeless
+    ? 'No cutter in the list states a cutting diameter.'
+    : catalogueNotes.length > 0
       ? 'No cutter in the list can be recommended for this material.'
       : 'No cutter in the list is a flat end mill — or, on a trace-only or region job, a V-bit — with cutting parameters for this material.';
+  const sizeless =
+    unknownSizeCount === 0 || allSizeless
+      ? ''
+      : ` ${unknownSizeCount} cutter${unknownSizeCount === 1 ? '' : 's'} ${unknownSizeCount === 1 ? 'states' : 'state'} no cutting diameter.`;
   const broken =
     brokenCount === 0
       ? ''
       : ` ${brokenCount} other cutter${brokenCount === 1 ? '' : 's'} ${brokenCount === 1 ? 'is' : 'are'} marked broken.`;
-  return base + catalogueClause(catalogueNotes) + broken;
+  return base + sizeless + catalogueClause(catalogueNotes) + broken;
 }
 
 /**
@@ -432,7 +445,9 @@ export function recommendTool(
 
   const candidates: ToolCandidate[] = tools.map((entry) => {
     const tool = entry.tool;
-    const diameter = cuttingDiameter(tool) ?? 0;
+    // #699 — the size a recommendation can state, not `cuttingDiameter`'s fallback to a shank.
+    const statedSize = statedCuttingSize(tool);
+    const diameter = statedSize ?? 0;
     const reach = reachOf(entry);
     const reachKnown = reach !== null;
     // An unknown reach cannot be shown to foul, so it stays OK (the note above carries it).
@@ -442,6 +457,12 @@ export function recommendTool(
 
     const usable = cuttingForTrace(tool);
     if (!usable.ok) return { ...base, qualifies: false, excluded: 'not-flat' as const };
+    // #699 — A CUTTER THAT CANNOT STATE ITS CUTTING SIZE IS NEVER THE COMPUTED PICK. A chamfer
+    // with no tip is a point in the geometry, but a recommendation's job is to name the width the
+    // cut will be; a V-carve's groove at the colour plane IS its width, so "unknown" is not a
+    // default an operator can accept without checking. The cutter stays in the list and is named
+    // in Why?, so a hand pick remains possible (#455's warning rule).
+    if (statedSize === null) return { ...base, qualifies: false, excluded: 'unknown-size' as const };
     // #221 — a V-bit on a region job IS the cutter, not a `not-flat` exclusion. The V-carve
     // pockets the floor at the item's depth with the tip, and the design is correct at the colour
     // plane. It is not measured as a flat disc against the glyph, because a cone has no single
@@ -549,6 +570,7 @@ export function recommendTool(
   }
 
   const broken = candidates.filter((c) => c.excluded === 'broken').length;
+  const unknownSize = candidates.filter((c) => c.excluded === 'unknown-size').length;
   // The catalogue's refusals, in the order the cutters were listed, for the no-pick sentence.
   const catalogueNotes = candidates
     .filter((c) => c.excluded === 'no-catalogue-row')
@@ -557,7 +579,7 @@ export function recommendTool(
   return {
     key: null,
     compromise: false,
-    reason: noCandidateReason(tools.length, broken, catalogueNotes),
+    reason: noCandidateReason(tools.length, broken, unknownSize, catalogueNotes),
     conditionNote: null,
     catalogueNote: null,
     selectedNote,
