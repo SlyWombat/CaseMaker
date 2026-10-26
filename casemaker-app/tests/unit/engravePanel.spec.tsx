@@ -12,7 +12,7 @@ import { useEngraveRunStore } from '@/store/engraveRunStore';
 import { useMachineStore } from '@/store/machineStore';
 import { resetEngraveReleaseStore } from '@/store/engraveReleaseStore';
 import { resetEngravePackageStore } from '@/store/engravePackageStore';
-import { resetCncMode } from '@/store/cncModeStore';
+import { resetCncMode, useCncModeStore } from '@/store/cncModeStore';
 import { resetEngraveRows } from '@/store/engraveRowStore';
 import {
   resetEngraveRegistrationStore,
@@ -248,7 +248,7 @@ describe('EngravePanel — the Generate blocker (#688)', () => {
     expect(screen.getByTestId('engrave-feeds-refused').textContent).toContain('V-bit');
     // …and now at the button too, in words that name the cutter and the material (§3.6's copy).
     expect(screen.getByTestId('engrave-generate-blocker').textContent).toBe(
-      'No feeds for the 0.2 mm 30° engraver on PLA — choose a flat end mill ▸ Fix',
+      'No feeds for the ⌀ 0.2 mm 30° engraver on PLA — choose a flat end mill ▸ Fix',
     );
 
     fireEvent.click(screen.getByTestId('engrave-generate-fix'));
@@ -626,6 +626,7 @@ describe('EngravePanel — the run sheet mount (#207)', () => {
   beforeEach(() => {
     useEngraveRunStore.getState().reset();
     resetEngraveRegistrationStore();
+    resetCncMode();
     vi.mocked(saveEngraveProgram).mockClear();
   });
 
@@ -637,15 +638,15 @@ describe('EngravePanel — the run sheet mount (#207)', () => {
   // #688 — the finished state is FOUR ticks and ONE labelled time, not two paragraphs a person has
   // to reconcile (design §3.6, audit B14/B15). The simulation's own checked/not-checked sentences
   // and under/over-cut numbers belong to its panel (#691); the clearance question to Cut step 1
-  // (#689). Neither is drawn here.
-  it('reads as four ticks and one labelled time once the run is ready (#688)', () => {
+  // (#689). Neither is drawn here — but Save still waits on that acknowledgement, because the .nc
+  // it writes is a path to the machine.
+  it('reads as four ticks and one labelled time, and Save waits for the Cut statement (#688)', () => {
     render(<EngravePanel />);
     act(() => {
       useEngraveRunStore.setState({
         generated: readyGenerated(';@MKR|BEGIN\nG21 G90\nM02'),
         simStatus: 'ready',
-        // A warning whose code used to demand the clearance acknowledgement. Design's Save writes
-        // the program without that tick now, so this run is Save-able with `acknowledged: false`.
+        // A warning whose code demands the clearance acknowledgement.
         simDiagnostics: [
           {
             source: 'sweep',
@@ -685,9 +686,17 @@ describe('EngravePanel — the run sheet mount (#207)', () => {
     expect(screen.queryByTestId('engrave-ack')).toBeNull();
     expect(screen.queryByTestId('engrave-ack-label')).toBeNull();
 
-    // …and the program can still be saved without the clearance tick.
-    expect((screen.getByTestId('engrave-save') as HTMLButtonElement).disabled).toBe(false);
-    expect(screen.queryByTestId('engrave-save-blocked')).toBeNull();
+    // Save writes the file that goes to Makera Studio, so it does NOT skip the clearance
+    // acknowledgement: it is blocked and says where the statement lives, with a Fix that takes
+    // the operator there.
+    const save = screen.getByTestId('engrave-save') as HTMLButtonElement;
+    expect(save.disabled).toBe(true);
+    expect(screen.getByTestId('engrave-save-blocked').textContent).toBe(
+      'Save is disabled — tick the clearance check in Cut, step 1. ▸ Fix',
+    );
+    fireEvent.click(screen.getByTestId('engrave-save-fix'));
+    expect(useCncModeStore.getState().mode).toBe('cut');
+    act(() => resetCncMode());
   });
 
   it('opens the sheet for a verified job, and Save writes the sheet’s file name', async () => {

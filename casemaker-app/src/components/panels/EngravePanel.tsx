@@ -571,6 +571,14 @@ function Group({
 /** The four run rows' states (#206): a tick, a cross, a spinner, or nothing yet. */
 type RowState = 'tick' | 'cross' | 'pending' | 'idle';
 
+/**
+ * #688 — the exact sentence `saveBlocker` returns when the clearance acknowledgement is missing.
+ * Save's blocker line uses the match to know that Cut is where this one is resolved (and gets the
+ * Fix); every other Save blocker is a Design fact. #689 writes the same words where Cut step 1
+ * asks the question, so the sentence and the control it names cannot drift apart.
+ */
+const CLEARANCE_ACK_BLOCKER = 'tick the clearance check in Cut, step 1';
+
 const ROW_MARK: Record<RowState, string> = { tick: '✓', cross: '✗', pending: '…', idle: '·' };
 const ROW_COLOR: Record<RowState, string> = { tick: '#8fd694', cross: '#f0b4ad', pending: '#c8d3de', idle: '#66707a' };
 
@@ -1765,11 +1773,10 @@ export function EngravePanel(): JSX.Element {
   const verifyErrors = verifyFindings.filter((f) => f.severity === 'error').length;
   const simErrors = run.simDiagnostics.filter((d) => d.severity === 'error').length;
   const runErrors = runErrorCodes(run);
-  // #688 — Design's Save writes the program; the clearance statement is Cut step 1's (#689), so
-  // the checkbox that used to sit here is gone and Save does not wait behind it. Upload and
-  // Release still do (their default), because the program cannot reach the machine until the
-  // operator has said they looked.
-  const saveBlockerText = saveBlocker(run, { requireAcknowledgement: false });
+  // #688 — Save writes the .nc that goes to Makera Studio: a path to the machine, so it waits on
+  // the clearance acknowledgement exactly as Upload and Release do. The statement's home is Cut
+  // step 1 (#689); the sentence names it and the Fix beside Save takes the operator there.
+  const saveBlockerText = saveBlocker(run);
   // #255 — the machine upload. `uploadBlocker` is never weaker than `saveBlocker` (see its own
   // note), so Save and Upload state one rule between them rather than two that agree by luck.
   const uploadBlockerText = uploadBlocker(run);
@@ -3754,7 +3761,27 @@ export function EngravePanel(): JSX.Element {
             </button>
             {saveBlockerText !== null && (
               <p style={MUTED} data-testid="engrave-save-blocked">
-                Save is disabled — {saveBlockerText}.
+                Save is disabled — {saveBlockerText}.{' '}
+                {/* #688 — only the acknowledgement is something Cut can resolve, so only that
+                    blocker gets the Fix. The sentence and #689's Cut step 1 use the same words. */}
+                {saveBlockerText === CLEARANCE_ACK_BLOCKER && (
+                  <button
+                    type="button"
+                    data-testid="engrave-save-fix"
+                    style={{
+                      background: 'none',
+                      border: 'none',
+                      padding: 0,
+                      font: 'inherit',
+                      color: '#8fb8e0',
+                      cursor: 'pointer',
+                      textDecoration: 'underline',
+                    }}
+                    onClick={() => showMode('cut')}
+                  >
+                    ▸ Fix
+                  </button>
+                )}
               </p>
             )}
 

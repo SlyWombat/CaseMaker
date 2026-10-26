@@ -20,6 +20,15 @@ async function openEngravePanel(page: Page): Promise<void> {
 }
 
 /**
+ * #688 — Design no longer carries the clearance checkbox: the statement's home is Cut step 1
+ * (#689). Until that step is on screen, acknowledge through the same run-store field the Cut
+ * statement writes; `saveBlocker`'s gate is the production one either way.
+ */
+async function acknowledgeClearance(page: Page): Promise<void> {
+  await page.evaluate(() => window.__caseMaker!.engraveAcknowledge());
+}
+
+/**
  * A 12 × 12 mm plate: one closed, FILLED path, and the size stated in millimetres on the element —
  * so the parser takes the file's own units instead of assuming 96 px/inch, and the dialog has
  * nothing to warn about (#217). Written here rather than checked in, so the drawing and the row
@@ -50,9 +59,11 @@ test('the default job generates, verifies, simulates and saves a .nc', async ({ 
   expect(state.stage).toBe('done');
   expect(state.oracleOk).toBe(true);
   expect(state.verifyErrors).toBe(0);
-  // #688 — Design's Save writes the program without a clearance tick; that statement is Cut
-  // step 1's (#689). The run is savable the moment it is ready.
-  expect(state.canSave).toBe(true);
+  // #688 — Save writes the .nc that goes to Makera Studio, so it waits on the clearance
+  // acknowledgement; the statement's home is Cut step 1 (#689), so acknowledge it here.
+  expect(state.canSave).toBe(false);
+  await expect(page.getByTestId('engrave-save')).toBeDisabled();
+  await acknowledgeClearance(page);
   await expect(page.getByTestId('engrave-save')).toBeEnabled();
 
   const downloadPromise = page.waitForEvent('download');
@@ -73,7 +84,8 @@ test('editing the job after Generate makes the result stale and blocks Save', as
 
   await page.getByTestId('engrave-generate').click();
   await expect(page.getByTestId('engrave-run-oracle')).toHaveAttribute('data-state', 'tick', { timeout: 180_000 });
-  // #688 — no clearance tick stands between a ready run and Save.
+  // #688 — the acknowledgement lives in Cut step 1 now; the Save path is still gated on it.
+  await acknowledgeClearance(page);
   await expect(page.getByTestId('engrave-save')).toBeEnabled();
 
   // Change a label's depth: the run no longer describes the job on screen. #411 folds a job's
@@ -102,6 +114,7 @@ test("the saved .nc, reloaded as a stranger's file, removes the same volume", as
   expect(inApp.removedVolume).toBeGreaterThan(0);
 
   // Save the exact bytes, then open them in "Simulate .nc" as though they came from someone else.
+  await acknowledgeClearance(page);
   const downloadPromise = page.waitForEvent('download');
   await page.getByTestId('engrave-save').click();
   const path = await (await downloadPromise).path();
@@ -194,8 +207,10 @@ test('the run sheet opens for a verified job, names the saved file, and prints w
 
   await page.getByTestId('engrave-generate').click();
   await expect(page.getByTestId('engrave-run-oracle')).toHaveAttribute('data-state', 'tick', { timeout: 180_000 });
-  // #688 — a ready run needs no clearance tick before the sheet or Save.
+  // #688 — the sheet itself needs no acknowledgement; Save does, because its file goes to the
+  // machine. The statement's home is Cut step 1 (#689).
   await expect(page.getByTestId('engrave-run-sheet')).toBeEnabled();
+  await acknowledgeClearance(page);
 
   // Save writes THREE files (#273, #277): the job, the frame beside it, then the run record. Awaiting
   // only the first download is what let the frame go missing unnoticed.
@@ -240,7 +255,8 @@ test('a filled run record shows its measured run beside the estimate', async ({ 
 
   await page.getByTestId('engrave-generate').click();
   await expect(page.getByTestId('engrave-run-oracle')).toHaveAttribute('data-state', 'tick', { timeout: 180_000 });
-  // #688 — no clearance tick stands between a ready run and Save.
+  // #688 — the acknowledgement lives in Cut step 1 now; the Save path is still gated on it.
+  await acknowledgeClearance(page);
   await expect(page.getByTestId('engrave-save')).toBeEnabled();
 
   const downloads: { name: string; file: Download }[] = [];

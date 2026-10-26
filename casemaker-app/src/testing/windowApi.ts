@@ -124,6 +124,13 @@ export interface CaseMakerTestApi {
    */
   engraveReset(): void;
   /**
+   * #688 — the clearance acknowledgement's UI home is Cut step 1 (#689). Until that step is on
+   * screen, the Design e2e specs cannot tick it there; this writes the same run-store field the
+   * Cut statement writes, so the Save path stays testable. Testing surface only: no app code calls
+   * it, and `saveBlocker`'s gate is untouched.
+   */
+  engraveAcknowledge(): void;
+  /**
    * #530/#656/#659 e2e — a connected machine WITHOUT one. E2E has no controller, and the Cut one
    * screen, the status strip and its state popover are all gated on `machine !== null`; this puts
    * the observation a probe would have written on the store, and (optionally) the live line a
@@ -402,6 +409,9 @@ export function installCaseMakerTestApi(): void {
       // put a "last measured" line under a later test's estimate.
       useRunRecordStore.getState().clear();
     },
+    engraveAcknowledge() {
+      useEngraveRunStore.getState().setAcknowledged(true);
+    },
     setMachine(observation, statusLine) {
       // The app's own "a check found it" path (and its persistence), then the live line the
       // heartbeat would have read — the strip's monitor rows come from `S:` on that line.
@@ -439,9 +449,8 @@ export function installCaseMakerTestApi(): void {
         simStatus: r.simStatus,
         oracleOk: r.oracle?.ok ?? null,
         worst: r.oracle ? { ...r.oracle.worst } : null,
-        // #688 — Design's Save writes the program; the clearance statement belongs to Cut step 1.
-        canSave: saveBlocker(r, { requireAcknowledgement: false }) === null,
-        saveReason: saveBlocker(r, { requireAcknowledgement: false }),
+        canSave: saveBlocker(r) === null,
+        saveReason: saveBlocker(r),
         error: r.error,
       };
     },

@@ -321,11 +321,10 @@ describe('engraveRunStore (#206)', () => {
     expect(requiredAckCodes(view({ generated: g }))).toEqual(['vise-default']);
   });
 
-  // #688 — Design's Save writes the program; the clearance statement is the RUN's and belongs to
-  // Cut step 1 (#689). The panel therefore asks `saveBlocker` to judge everything except the
-  // acknowledgement, while Upload and Release keep the default — a program still cannot reach the
-  // machine before the operator has said they looked.
-  it('lets Design save without the clearance acknowledgement, but not Upload', () => {
+  // #688 — Design's Save writes the .nc that goes to Makera Studio: a path to the machine, so it
+  // waits on the clearance acknowledgement exactly as Upload and Release do. The statement's home
+  // is Cut step 1 (#689), and the sentence names it because the checkbox is no longer beside Save.
+  it('requires the clearance acknowledgement for Save as well as Upload', () => {
     const okGen: EngraveGenerated = {
       ...clean(),
       findings: [],
@@ -338,9 +337,10 @@ describe('engraveRunStore (#206)', () => {
       acknowledged: false,
       simDiagnostics: [{ severity: 'warning', code: 'vise-default', message: 'x' }] as EngraveRunView['simDiagnostics'],
     });
-    expect(saveBlocker(v)).toBe('tick the clearance checkbox below');
-    expect(saveBlocker(v, { requireAcknowledgement: false })).toBeNull();
-    expect(uploadBlocker(v)).toBe('tick the clearance checkbox below');
+    expect(saveBlocker(v)).toBe('tick the clearance check in Cut, step 1');
+    expect(uploadBlocker(v)).toBe('tick the clearance check in Cut, step 1');
+    // The same run, acknowledged in Cut step 1, is what Save writes.
+    expect(saveBlocker({ ...v, acknowledged: true })).toBeNull();
   });
 
   it('blocks Save on any error, on a failed oracle and on a stale result', () => {

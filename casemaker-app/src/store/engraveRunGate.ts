@@ -264,16 +264,7 @@ export function verifySimulateSentences(v: EngraveRunView): { verified: string; 
  * Why Save is disabled, or null when it is allowed. Order matters: the first true reason is the
  * one the user should fix first.
  */
-export function saveBlocker(
-  v: EngraveRunView,
-  /**
-   * #688 — the Design panel's Save writes the program; the clearance statement is the RUN's, and
-   * Cut step 1 owns it (#689). Passing `false` there keeps the panel from disabling Save behind a
-   * checkbox that no longer lives beside it; Upload and Release keep the default, so a program
-   * still cannot go to the machine before the operator has said they looked.
-   */
-  opts?: { requireAcknowledgement?: boolean },
-): string | null {
+export function saveBlocker(v: EngraveRunView): string | null {
   if (!v.generated) return 'Generate first.';
   if (v.staleSince !== null) return staleSentence(v.staleReason);
   const errors = runErrorCodes(v);
@@ -283,10 +274,8 @@ export function saveBlocker(
   if (v.simStatus !== 'ready') return 'the simulation did not finish';
   if (!v.oracle) return 'the prediction has not been checked';
   if (!v.oracle.ok) return 'the simulation does not match the prediction';
-  if (opts?.requireAcknowledgement !== false) {
-    const missing = requiredAckCodes(v);
-    if (missing.length > 0 && !v.acknowledged) return 'tick the clearance check in Cut, step 1';
-  }
+  const missing = requiredAckCodes(v);
+  if (missing.length > 0 && !v.acknowledged) return 'tick the clearance check in Cut, step 1';
   return null;
 }
 
