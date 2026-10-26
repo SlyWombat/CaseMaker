@@ -4994,6 +4994,9 @@
                       "assumed"
                     ],
                     "type": "string"
+                  },
+                  "seed": {
+                    "type": "boolean"
                   }
                 },
                 "type": "object"
