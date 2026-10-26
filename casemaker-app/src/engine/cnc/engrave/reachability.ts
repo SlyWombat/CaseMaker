@@ -226,7 +226,14 @@ export function reachabilityFor(
       // and out of `finerThan`'s rest pair, while still being OFFERED.
       vCarve,
       excluded: candidate.excluded ?? null,
-      excludedNote: candidate.excluded === 'no-catalogue-row' ? (candidate.catalogueNote ?? null) : null,
+      // #699b — the same carrier for the job's own refusal as for the catalogue's: the table cell
+      // prints the cutter's own sentence, not a class name.
+      excludedNote:
+        candidate.excluded === 'no-catalogue-row'
+          ? (candidate.catalogueNote ?? null)
+          : candidate.excluded === 'metal-line'
+            ? (candidate.refusal ?? null)
+            : null,
       rows: vCarve ? [] : cells,
       bestRatio: vCarve || ratios.length === 0 ? 0 : Math.max(...ratios),
       worstRatio: vCarve || ratios.length === 0 ? 0 : Math.min(...ratios),
@@ -329,6 +336,10 @@ function exclusionWords(excluded: ToolCandidate['excluded'] | null, note: string
   // what "not recommended" must say. The generic phrase is only for a note that somehow is not
   // there, and a caller reading it still learns the reason class.
   if (excluded === 'no-catalogue-row') return note ?? 'the catalogue lists no row for it in this material';
+  // #699b — the job's own refusal (the metal line on a non-metal blank), carried as its short
+  // sentence. A cell must not go blank because the mechanism that refused the cutter is newer than
+  // the switch.
+  if (excluded === 'metal-line') return note ?? 'the job’s own material check refuses it';
   return null;
 }
 

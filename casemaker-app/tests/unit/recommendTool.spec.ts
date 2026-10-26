@@ -5,6 +5,7 @@
 import { describe, it, expect, vi } from 'vitest';
 
 import { tl } from './helpers/manifoldExec';
+import { generate } from './helpers/engravePipeline';
 import {
   recommendTool,
   type ToolCandidate,
@@ -754,5 +755,81 @@ describe('recommendTool — the computed pick states its size and its material r
     const rec = recommendTool(badgeJob(), [chamfer()], catalogue, (_key) => [row('name', 1)]);
     expect(rec.key).toBeNull();
     expect(rec.reason).toBe('No cutter in the list states a cutting diameter.');
+  });
+
+  // #699b — THE HOUSE'S OTHER 1 mm FLAT IS THE PROBLEM. The k3 walk on 4674e81a picked the
+  // 3.175*1*3mm Flat End(Metal): the two cutters tie on stated size, and the metal key sorts first,
+  // so nothing but a gate keeps it out of the pick — and the job's own #572 check refuses it on
+  // PLA. This is the fixture that holds both halves: the recommender names the plain flat, and the
+  // badge + text job generates through the real pipeline with no blocking finding.
+  describe('never picks a cutter the job’s own gates refuse (#699b)', () => {
+    const METAL_PLA_ID = '900000000703';
+    const PLAIN_PLA_ID = '900000000704';
+
+    const plainFlat = (): ToolLibraryEntry => ({
+      key: 'inv:kz-plain-flat-1',
+      tool: flatEndMill(1.0, { id: PLAIN_PLA_ID, name: '1mm Flat End', shoulderLength: 12 }),
+      provenance: 'k3 house inventory',
+    });
+    const metalFlat = (): ToolLibraryEntry => ({
+      key: 'inv:kz-metal-flat-1',
+      // Makera's own name for the bit; `(Metal)` is what carries the line (`isMetalTool` reads it).
+      tool: flatEndMill(1.0, {
+        id: METAL_PLA_ID,
+        name: '3.175*1*3mm Flat End(Metal)',
+        shoulderLength: 12,
+      }),
+      provenance: 'k3 house inventory',
+    });
+    // A plastic row for each, so #455 and the feeds pre-filter pass both cutters: the ONLY thing
+    // that separates them in this fixture is the job's own material gate.
+    const gateCatalogue = [plasticRow(METAL_PLA_ID), plasticRow(PLAIN_PLA_ID)];
+
+    it('picks the plain 1 mm flat, and the metal one carries its own refusal', () => {
+      const rec = recommendTool(badgeJob(), [metalFlat(), plainFlat()], gateCatalogue, (_key) => [
+        row('name', 1),
+      ]);
+
+      // The tie that used to send the metal cutter to the pick: one stated size, and the metal
+      // key sorts first, so only the gate can separate them.
+      const metal = candidate(rec, 'inv:kz-metal-flat-1');
+      expect(metal.diameter).toBe(candidate(rec, 'inv:kz-plain-flat-1').diameter);
+      expect(metal.excluded).toBe('metal-line');
+      expect(metal.refusal).toContain('for Metal');
+      expect(metal.refusal).toContain('PLA');
+      expect(rec.key).toBe('inv:kz-plain-flat-1');
+      expect(rec.compromise).toBe(false);
+    });
+
+    it('leaves the badge + text job generating with no blocking finding', () => {
+      const rec = recommendTool(badgeJob(), [metalFlat(), plainFlat()], gateCatalogue, (_key) => [
+        row('name', 1),
+      ]);
+      const job: EngraveJob = { ...badgeJob(), toolKey: rec.key!, tool: plainFlat().tool };
+      const g = generate(tl, job, null, gateCatalogue);
+      expect(g.ok).toBe(true);
+      expect(g.stage).toBe('done');
+      expect(g.findings.filter((f) => f.severity === 'error')).toEqual([]);
+      expect(g.findings.filter((f) => f.code === 'tool-metal-line')).toEqual([]);
+      expect(g.verify?.findings.filter((f) => f.severity === 'error')).toEqual([]);
+    });
+
+    it('the gate is the job’s own: Generate refuses the metal flat on the same job', () => {
+      // The other half of the claim: the cutter the old rule picked is not merely a preference —
+      // the program will not run it on PLA.
+      const job: EngraveJob = { ...badgeJob(), toolKey: 'inv:kz-metal-flat-1', tool: metalFlat().tool };
+      const g = generate(tl, job, null, gateCatalogue);
+      expect(g.ok).toBe(false);
+      expect(g.findings.some((f) => f.code === 'tool-metal-line')).toBe(true);
+    });
+
+    it('keeps the metal cutter when the operator has acknowledged the pair (#572)', () => {
+      // The override is the operator's decision: the job's gate then allows the pair, so the
+      // recommendation must not keep refusing it.
+      const job: EngraveJob = { ...badgeJob(), metalLineOverride: true };
+      const rec = recommendTool(job, [metalFlat(), plainFlat()], gateCatalogue, (_key) => [row('name', 1)]);
+      expect(candidate(rec, 'inv:kz-metal-flat-1').excluded).toBeUndefined();
+      expect(rec.key).toBe('inv:kz-metal-flat-1');
+    });
   });
 });

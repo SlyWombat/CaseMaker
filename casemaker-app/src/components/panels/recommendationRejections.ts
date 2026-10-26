@@ -3,8 +3,9 @@
  *
  * The recommendation has always kept every candidate; the panel decides what is worth a line. A
  * rejection is ACTIONABLE when the operator can do something about it: replace a broken copy,
- * change the material, choose another bit, or state a cutter's size. `not-flat` is not: a ball nose
- * cannot become a flat end.
+ * change the material, choose another bit, state a cutter's size, or — #699b — answer the job's own
+ * refusal (a metal-line bit on a plastic blank can be acknowledged by the operator, or the stock
+ * changed). `not-flat` is not: a ball nose cannot become a flat end.
  *
  * #699 — THE CATALOGUE ROWS ARE ONE LINE, NOT FORTY. A catalogue with no PLA row for most of a
  * house's bits produced 43 rows whose only difference was the vendor's material list; the wall
@@ -16,7 +17,12 @@
 
 import type { ToolCandidate } from '@/engine/cnc/engrave/recommendTool';
 
-export type ActionableExclusion = 'broken' | 'no-feeds' | 'no-catalogue-row' | 'unknown-size';
+export type ActionableExclusion =
+  | 'broken'
+  | 'no-feeds'
+  | 'no-catalogue-row'
+  | 'unknown-size'
+  | 'metal-line';
 
 /** A rejection the operator can act on, and the shape its row needs. */
 export type ActionableRejection = ToolCandidate & { excluded: ActionableExclusion };
@@ -26,7 +32,8 @@ export function isActionableRejection(c: ToolCandidate): c is ActionableRejectio
     c.excluded === 'broken' ||
     c.excluded === 'no-feeds' ||
     c.excluded === 'no-catalogue-row' ||
-    c.excluded === 'unknown-size'
+    c.excluded === 'unknown-size' ||
+    c.excluded === 'metal-line'
   );
 }
 
@@ -38,11 +45,14 @@ export interface RejectionGroups {
 }
 
 type NoCatalogueRow = ToolCandidate & { excluded: 'no-catalogue-row' };
-type Individual = ToolCandidate & { excluded: 'broken' | 'no-feeds' | 'unknown-size' };
+type Individual = ToolCandidate & { excluded: 'broken' | 'no-feeds' | 'unknown-size' | 'metal-line' };
 
 const isNoCatalogueRow = (c: ToolCandidate): c is NoCatalogueRow => c.excluded === 'no-catalogue-row';
 const isIndividual = (c: ToolCandidate): c is Individual =>
-  c.excluded === 'broken' || c.excluded === 'no-feeds' || c.excluded === 'unknown-size';
+  c.excluded === 'broken' ||
+  c.excluded === 'no-feeds' ||
+  c.excluded === 'unknown-size' ||
+  c.excluded === 'metal-line';
 
 export function groupRejections(candidates: readonly ToolCandidate[]): RejectionGroups {
   return {

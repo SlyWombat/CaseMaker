@@ -3101,7 +3101,10 @@ export function EngravePanel(): JSX.Element {
                             // the opposite of true here: the starting table answers these cutters
                             // and it is the catalogue that named the materials it is listed for.
                             (c.catalogueNote ?? 'not listed by the catalogue for this material')
-                          : 'no cutting parameters for this material';
+                          : c.excluded === 'metal-line'
+                            ? // #699b — the job's OWN refusal, in the same words the finding uses.
+                              (c.refusal ?? 'on Makera\'s "for Metal" line, and this job’s material refuses it')
+                            : 'no cutting parameters for this material';
                   return (
                     <div
                       key={c.key}

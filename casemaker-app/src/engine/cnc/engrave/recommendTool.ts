@@ -63,10 +63,12 @@ import {
   type FeedsEntry,
 } from '@/engine/cnc/feeds';
 import { jobMachine } from '@/engine/cnc/calibration';
+import { MATERIAL_LABELS } from '@/engine/cnc/materials';
 import { cuttingForTrace, statedCuttingSize } from '@/engine/cnc/tool';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import { conditionRank, type ConditionSummary } from '@/engine/cnc/toolCondition';
-import type { EngraveAnyItem, EngraveJob, EngravePrimitive } from '@/types/engraveJob';
+import type { EngraveAnyItem, EngraveJob, EngravePrimitive, StockMaterial } from '@/types/engraveJob';
+import { cutterRefusedOnMaterial } from './cutterMaterial';
 import { primitiveLabel, primitiveReducesToRegion } from './partPlan';
 import { lostDetailRatioFrom, type LabelEngravability } from '@/workers/sim/engraveGeometry';
 
@@ -74,9 +76,16 @@ import { lostDetailRatioFrom, type LabelEngravability } from '@/workers/sim/engr
  * Why a tool was dropped before measuring (#211: flat-ends only, and only cutters that exist;
  * #442: and only cutters that are not marked broken; #455: and only cutters the catalogue lists
  * for this material, when it lists the cutter at all; #699: and only cutters whose record states
- * a cutting size).
+ * a cutting size; #699b: and only cutters one of the job's OWN checks accepts — a metal-line
+ * cutter on a blank that is not metal is refused by the program itself).
  */
-export type ToolExclusion = 'not-flat' | 'no-feeds' | 'broken' | 'no-catalogue-row' | 'unknown-size';
+export type ToolExclusion =
+  | 'not-flat'
+  | 'no-feeds'
+  | 'broken'
+  | 'no-catalogue-row'
+  | 'unknown-size'
+  | 'metal-line';
 
 export interface ToolCandidate {
   key: string;
@@ -95,9 +104,16 @@ export interface ToolCandidate {
   condition: ConditionSummary | null;
   /**
    * Why it was excluded before measuring, if it was: 'not-flat' | 'no-feeds' | 'broken' |
-   * 'no-catalogue-row' | 'unknown-size'.
+   * 'no-catalogue-row' | 'unknown-size' | 'metal-line'.
    */
   excluded?: ToolExclusion;
+  /**
+   * The job's OWN reason for refusing this cutter (#699b), in the panel's "Why?" words, when
+   * `excluded === 'metal-line'`: "on Makera's \"for Metal\" line, and this job cuts PLA". The
+   * engine and the panel read the same check (`cutterRefusedOnMaterial`), so the row cannot
+   * disagree with the finding the program raises. Undefined for every other exclusion.
+   */
+  refusal?: string;
   /**
    * The catalogue's own sentence about this cutter and the job's material (#455), or null/absent
    * when it has nothing to add. When `excluded === 'no-catalogue-row'` it is the exclusion's reason
@@ -311,31 +327,46 @@ function compromiseReason(job: EngraveJob, pick: ToolCandidate): string {
  * parameters for this material" would be false — the starting table answers a PLA job happily. What
  * is true is that nothing can be RECOMMENDED for the material, and the catalogue's sentences say
  * which cutters and why.
+ *
+ * The job's own gates get the same clause (#699b), and the same base rule: when the whole list is
+ * on the metal line there is no material refusal to describe — the job's own check is what refused
+ * every one of them.
  */
 function noCandidateReason(
   toolCount: number,
   brokenCount: number,
   unknownSizeCount: number,
   catalogueNotes: readonly string[],
+  metalLineCount: number,
+  material: StockMaterial,
 ): string {
   if (toolCount === 0) return 'There are no cutters in the tool list to recommend from.';
   // #699 — when every cutter fell for the same missing number, saying "no flat end mill or V-bit
   // has cutting parameters" would misdescribe the list: the list may be all cones.
   const allSizeless = unknownSizeCount > 0 && unknownSizeCount === toolCount;
-  const base = allSizeless
-    ? 'No cutter in the list states a cutting diameter.'
-    : catalogueNotes.length > 0
-      ? 'No cutter in the list can be recommended for this material.'
-      : 'No cutter in the list is a flat end mill — or, on a trace-only or region job, a V-bit — with cutting parameters for this material.';
+  // #699b — the whole house on the metal line is a MATERIAL fact, not a detail clause: the base
+  // sentence must not claim the list lacks flat end mills when it is full of them.
+  const allMetalLine = metalLineCount > 0 && metalLineCount === toolCount;
+  const base = allMetalLine
+    ? `Every cutter in the list is on Makera's "for Metal" line, and this job cuts ${MATERIAL_LABELS[material]}.`
+    : allSizeless
+      ? 'No cutter in the list states a cutting diameter.'
+      : catalogueNotes.length > 0
+        ? 'No cutter in the list can be recommended for this material.'
+        : 'No cutter in the list is a flat end mill — or, on a trace-only or region job, a V-bit — with cutting parameters for this material.';
   const sizeless =
     unknownSizeCount === 0 || allSizeless
       ? ''
       : ` ${unknownSizeCount} cutter${unknownSizeCount === 1 ? '' : 's'} ${unknownSizeCount === 1 ? 'states' : 'state'} no cutting diameter.`;
+  const metalLine =
+    metalLineCount === 0 || allMetalLine
+      ? ''
+      : ` ${metalLineCount} cutter${metalLineCount === 1 ? '' : 's'} ${metalLineCount === 1 ? 'is' : 'are'} on Makera's "for Metal" line, which this ${MATERIAL_LABELS[material]} job refuses.`;
   const broken =
     brokenCount === 0
       ? ''
       : ` ${brokenCount} other cutter${brokenCount === 1 ? '' : 's'} ${brokenCount === 1 ? 'is' : 'are'} marked broken.`;
-  return base + sizeless + catalogueClause(catalogueNotes) + broken;
+  return base + sizeless + catalogueClause(catalogueNotes) + metalLine + broken;
 }
 
 /**
@@ -475,6 +506,22 @@ export function recommendTool(
     if (condition !== null && condition.usable === 0) {
       return { ...base, qualifies: false, excluded: 'broken' as const };
     }
+    // #699b — A CUTTER ONE OF THE JOB'S OWN GATES REFUSES IS NEVER THE COMPUTED PICK. Makera's
+    // "for Metal" line is refused on a blank that is not metal (#572): the program raises
+    // `tool-metal-line` as an error and will not run, so handing that cutter back as the default
+    // pick is a dead end — exactly the k3 walk, where the house's metal 1 mm flat won a tie with
+    // the plain one and Generate then refused it on PLA. The predicate is the SAME one the
+    // program uses (`cutterRefusedOnMaterial`), so this filter and the finding cannot disagree;
+    // and the operator's double-confirmed override (#572) keeps the cutter in the list, because
+    // the job's gate allows it then.
+    if (cutterRefusedOnMaterial(tool, job.stock.material, job.metalLineOverride)) {
+      return {
+        ...base,
+        qualifies: false,
+        excluded: 'metal-line' as const,
+        refusal: `on Makera's "for Metal" line, and this job cuts ${MATERIAL_LABELS[job.stock.material]}`,
+      };
+    }
     // #455 — what the catalogue LISTS this cutter for, before what numbers exist. A cutter the
     // catalogue lists and does not list for this material is out by name, with the vendor's own
     // material words in `catalogueNote`; an owned cutter it cannot name stays in with the note. The
@@ -571,6 +618,7 @@ export function recommendTool(
 
   const broken = candidates.filter((c) => c.excluded === 'broken').length;
   const unknownSize = candidates.filter((c) => c.excluded === 'unknown-size').length;
+  const metalLine = candidates.filter((c) => c.excluded === 'metal-line').length;
   // The catalogue's refusals, in the order the cutters were listed, for the no-pick sentence.
   const catalogueNotes = candidates
     .filter((c) => c.excluded === 'no-catalogue-row')
@@ -579,7 +627,14 @@ export function recommendTool(
   return {
     key: null,
     compromise: false,
-    reason: noCandidateReason(tools.length, broken, unknownSize, catalogueNotes),
+    reason: noCandidateReason(
+      tools.length,
+      broken,
+      unknownSize,
+      catalogueNotes,
+      metalLine,
+      job.stock.material,
+    ),
     conditionNote: null,
     catalogueNote: null,
     selectedNote,

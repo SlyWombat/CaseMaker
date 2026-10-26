@@ -29,11 +29,13 @@ function candidate(key: string, excluded?: ToolExclusion): ToolCandidate {
 }
 
 describe('#699 the rejections the panel lists', () => {
-  it('counts broken, no-feeds, no-catalogue-row and unknown-size as actionable', () => {
+  it('counts broken, no-feeds, no-catalogue-row, unknown-size and metal-line as actionable', () => {
     expect(isActionableRejection(candidate('a', 'broken'))).toBe(true);
     expect(isActionableRejection(candidate('a', 'no-feeds'))).toBe(true);
     expect(isActionableRejection(candidate('a', 'no-catalogue-row'))).toBe(true);
     expect(isActionableRejection(candidate('a', 'unknown-size'))).toBe(true);
+    // #699b — the job's own material refusal: the operator can acknowledge it or change the stock.
+    expect(isActionableRejection(candidate('a', 'metal-line'))).toBe(true);
     // A ball nose cannot become a flat end, and a cutter that got through is not a rejection.
     expect(isActionableRejection(candidate('a', 'not-flat'))).toBe(false);
     expect(isActionableRejection(candidate('a'))).toBe(false);
@@ -55,11 +57,12 @@ describe('#699 the rejections the panel lists', () => {
       candidate('chamfer', 'unknown-size'),
       candidate('corn-2', 'no-catalogue-row'),
       candidate('wet', 'no-feeds'),
+      candidate('metal', 'metal-line'),
       candidate('ok'),
     ]);
     expect(groups.noCatalogueRow.map((c) => c.key)).toEqual(['corn-1', 'corn-2']);
-    expect(groups.individual.map((c) => c.key)).toEqual(['broken-1', 'chamfer', 'wet']);
+    expect(groups.individual.map((c) => c.key)).toEqual(['broken-1', 'chamfer', 'wet', 'metal']);
     // Nothing is lost from the list: a qualifying or not-flat row is simply not a rejection.
-    expect(groups.noCatalogueRow.length + groups.individual.length).toBe(5);
+    expect(groups.noCatalogueRow.length + groups.individual.length).toBe(6);
   });
 });
