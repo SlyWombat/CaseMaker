@@ -78,6 +78,27 @@ export const DEFAULT_STOCK_TO_LEAVE_MM = 0.3;
 export const DEFAULT_MAX_FINISH_TIP_OPS = 300_000_000;
 
 /**
+ * #671 — the crease angle the PENCIL pass follows when the operation states none, degrees. The
+ * mark is a change of slope across one grid cell sharper than this: a 90° wall's foot marks a
+ * line; a cylinder, a dome and a ramp do not.
+ */
+export const DEFAULT_PENCIL_CREASE_DEG = 20;
+
+/**
+ * #671 — the steepest-slope crowding clamp for the SCALLOP pass. The contour spacing is the
+ * surface step-over divided by the slope's secant (`sqrt(1 + s²)`), so a vertical wall would ask
+ * for infinitely many passes; past this factor the spacing stops shrinking. `8` is a slope of
+ * ~82.6°, and the pass's note says so when the clamp binds.
+ */
+export const MAX_SCALLOP_CROWDING = 8;
+
+/**
+ * #671 — the scallop pass's contour cap. Each contour is a marching-squares walk of the distance
+ * field; past this many the pass REFUSES by name (as #540's tip budget does) rather than spin.
+ */
+export const DEFAULT_MAX_SCALLOP_CONTOURS = 4000;
+
+/**
  * A TOP-Z HEIGHTFIELD over an (x, y) grid in the WORK frame (z = 0 = stock top). `z[j*nx + i]` is
  * the highest surface Z of the placed goal mesh above column (i, j), or {@link topZ} where no
  * triangle covered the cell (the goal is silent there). Columns are square — both axes at
@@ -310,6 +331,18 @@ export interface SurfaceOpts {
   hopZ?: number;
   /** Finishing tip-field op budget; absent → {@link DEFAULT_MAX_FINISH_TIP_OPS} (#540). */
   maxFinishTipOps?: number;
+  /**
+   * #671 — add the SCALLOP pass after the parallel finish: offset contours of the goal's
+   * footprint, spaced so the step measured ALONG THE SURFACE is the finishing step-over. Absent
+   * or false leaves today's program byte for byte.
+   */
+  scallop?: boolean;
+  /** #671 — add the PENCIL pass after the scallop: one path along every concave crease. */
+  pencil?: boolean;
+  /** #671 — the crease angle the pencil pass follows, degrees; absent → {@link DEFAULT_PENCIL_CREASE_DEG}. */
+  pencilCreaseDeg?: number;
+  /** #671 — the scallop contour cap; absent → {@link DEFAULT_MAX_SCALLOP_CONTOURS}. */
+  maxScallopContours?: number;
 }
 
 export interface Surface3dArgs {
@@ -338,8 +371,30 @@ export interface Surface3dResult {
    * operator-facing "levels" number, reported rather than re-derived by a caller.
    */
   roughingLayers: number;
+  /** #671 — the scallop pass and its own numbers, or null when it did not run. */
+  scallop: { operation: CamOperation; facts: ScallopPassFacts } | null;
+  /** #671 — the pencil pass and its own numbers, or null when it did not run. */
+  pencil: { operation: CamOperation; facts: PencilPassFacts } | null;
   /** Labelled placeholders and limitations for the run sheet (feeds, undercuts, flat finish). */
   notes: string[];
+}
+
+/** #671 — what the SCALLOP pass did, as the row and the run sheet quote it. */
+export interface ScallopPassFacts {
+  /** Contour loops the pass followed, outermost first. */
+  contours: number;
+  /** The step-over the pass held, measured along the surface, mm. */
+  stepOverMm: number;
+  /** True when the steep-slope clamp ({@link MAX_SCALLOP_CROWDING}) bound — the note says so. */
+  clamped: boolean;
+}
+
+/** #671 — what the PENCIL pass did. */
+export interface PencilPassFacts {
+  /** Crease paths the pass followed. */
+  paths: number;
+  /** The crease angle it marked, degrees. */
+  creaseDeg: number;
 }
 
 /**
@@ -363,6 +418,13 @@ export interface GoalSurfaceFacts {
   stockToLeaveMm: number;
   /** Z layers the roughing pass stepped through. */
   roughingLayers: number;
+  /**
+   * #671 — the scallop pass's numbers, or null when it did not run. ABSENT on a result stored by
+   * a build before #671, which is why a reader asks `!= null` rather than `!== null`.
+   */
+  scallop?: { contours: number; stepOverMm: number; clamped: boolean } | null;
+  /** #671 — the pencil pass's numbers, or null when it did not run; absent before #671. */
+  pencil?: { paths: number; creaseDeg: number } | null;
   /** The engine's notes for the run sheet: the feeds, undercuts and a flat finishing cutter. */
   notes: string[];
 }
@@ -396,7 +458,10 @@ export function generateSurface3dIR(args: Surface3dArgs): Surface3dResult {
 
   const rough = roughingMoves(hf, feeds, allowance, alongStep, safeZ, hopZ);
   const roughMoves = rough.moves;
-  const finishMoves = finishingMoves(hf, tool, feeds, alongStep, safeZ, hopZ, maxFinishTipOps);
+  // #671 — ONE tip field, four passes: the finishing raster, the scallop contours and the pencil
+  // paths all ride the same gouge-safe drop, so no pass can promise a depth another one refuses.
+  const tip = finishTipField(hf, tool, maxFinishTipOps);
+  const finishMoves = finishingMoves(hf, tip, feeds, alongStep, safeZ, hopZ);
 
   const depth = Math.max(0, hf.topZ - hf.minZ);
   const roughing: CamOperation = {
@@ -417,6 +482,70 @@ export function generateSurface3dIR(args: Surface3dArgs): Surface3dResult {
     moves: finishMoves,
     estimatedSeconds: estimateCycleSeconds(finishMoves, args.rapid),
   };
+  const operations: CamOperation[] = [roughing, finishing];
+
+  // #671 — THE SCALLOP PASS: offset contours of the goal's footprint, each projected onto the tip
+  // field, spaced so the step measured ALONG THE SURFACE is the finishing step-over.
+  let scallop: Surface3dResult['scallop'] = null;
+  if (opts.scallop === true && hf.coveredCount > 0) {
+    const pass = scallopMoves(
+      hf,
+      tip,
+      feeds,
+      alongStep,
+      safeZ,
+      hopZ,
+      positive(opts.maxScallopContours) ? (opts.maxScallopContours as number) : DEFAULT_MAX_SCALLOP_CONTOURS,
+    );
+    if (pass.contours > 0) {
+      const operation: CamOperation = {
+        number: operations.length + 1,
+        name: `[T${args.toolNumber}] 3D scallop`,
+        labelId: args.labelId,
+        depth,
+        passKind: 'finish',
+        moves: pass.moves,
+        estimatedSeconds: estimateCycleSeconds(pass.moves, args.rapid),
+      };
+      operations.push(operation);
+      scallop = {
+        operation,
+        facts: { contours: pass.contours, stepOverMm: feeds.finishStepOver, clamped: pass.clamped },
+      };
+      notes.push(
+        `The scallop pass follows ${pass.contours} offset contour${pass.contours === 1 ? '' : 's'} of the goal’s ` +
+          `outline, spaced so the step measured along the surface is ${feeds.finishStepOver} mm` +
+          (pass.clamped
+            ? ` — on slopes past ${(Math.atan(Math.sqrt(MAX_SCALLOP_CROWDING * MAX_SCALLOP_CROWDING - 1)) * 180 / Math.PI).toFixed(0)}° the contour spacing stops shrinking (${MAX_SCALLOP_CROWDING}× at most).`
+            : '.'),
+      );
+    }
+  }
+
+  // #671 — THE PENCIL PASS: one path along every concave crease the heightfield shows.
+  let pencil: Surface3dResult['pencil'] = null;
+  if (opts.pencil === true && hf.coveredCount > 0) {
+    const creaseDeg = positive(opts.pencilCreaseDeg) ? (opts.pencilCreaseDeg as number) : DEFAULT_PENCIL_CREASE_DEG;
+    const pass = pencilMoves(hf, tip, feeds, safeZ, hopZ, creaseDeg);
+    if (pass.paths > 0) {
+      const operation: CamOperation = {
+        number: operations.length + 1,
+        name: `[T${args.toolNumber}] 3D pencil`,
+        labelId: args.labelId,
+        depth,
+        passKind: 'finish',
+        moves: pass.moves,
+        estimatedSeconds: estimateCycleSeconds(pass.moves, args.rapid),
+      };
+      operations.push(operation);
+      pencil = { operation, facts: { paths: pass.paths, creaseDeg } };
+      notes.push(
+        `The pencil pass follows ${pass.paths} concave crease${pass.paths === 1 ? '' : 's'} — where the ` +
+          `surface’s slope changes by more than ${creaseDeg}° across one grid cell — at the same gouge-safe ` +
+          'drop as the finishing pass.',
+      );
+    }
+  }
 
   const ir: ToolpathIR = {
     frame: 'flat',
@@ -426,10 +555,10 @@ export function generateSurface3dIR(args: Surface3dArgs): Surface3dResult {
     air: args.air,
     safeZ,
     hopZ,
-    operations: [roughing, finishing],
+    operations,
   };
 
-  return { ir, roughing, finishing, roughingLayers: rough.layers, notes };
+  return { ir, roughing, finishing, roughingLayers: rough.layers, scallop, pencil, notes };
 }
 
 /**
@@ -648,17 +777,15 @@ function roughingMoves(
  */
 function finishingMoves(
   hf: GoalHeightfield,
-  tool: SurfaceTool,
+  tip: Float32Array,
   feeds: SurfaceFeeds,
   alongStep: number,
   safeZ: number,
   hopZ: number,
-  maxFinishTipOps: number,
 ): CamMove[] {
   const moves: CamMove[] = [];
   if (hf.coveredCount === 0) return moves;
   const { pitch, x0, y0 } = hf;
-  const tip = finishTipField(hf, tool, maxFinishTipOps);
   const rows = rasterRows(hf, feeds.finishStepOver);
   let flip = false;
   for (const j of rows) {
@@ -691,4 +818,465 @@ function finishingMoves(
 
 function positive(v: number | null | undefined): boolean {
   return typeof v === 'number' && Number.isFinite(v) && v > 0;
+}
+
+// ---------------------------------------------------------------------------
+// #671 — THE SCALLOP PASS: offset contours of the goal's footprint, projected onto the tip field.
+// ---------------------------------------------------------------------------
+
+/**
+ * The tip field at an arbitrary XY: the MAX of the four cells bracketing the point. A cell's tip
+ * is already the gouge-safe drop, and the max can only ride HIGHER than any of them, so a path
+ * that crosses between cells can never dip below the safe drop the tip field promises.
+ */
+function tipAt(hf: GoalHeightfield, tip: Float32Array, x: number, y: number): number {
+  const i0 = Math.min(hf.nx - 1, Math.max(0, Math.floor((x - hf.x0) / hf.pitch)));
+  const j0 = Math.min(hf.ny - 1, Math.max(0, Math.floor((y - hf.y0) / hf.pitch)));
+  const i1 = Math.min(hf.nx - 1, i0 + 1);
+  const j1 = Math.min(hf.ny - 1, j0 + 1);
+  return Math.max(
+    tip[j0 * hf.nx + i0] as number,
+    tip[j0 * hf.nx + i1] as number,
+    tip[j1 * hf.nx + i0] as number,
+    tip[j1 * hf.nx + i1] as number,
+  );
+}
+
+/** The 1-D squared Euclidean distance transform (Felzenszwalb–Huttenlocher), in place. */
+function edt1d(f: Float64Array, d: Float64Array, n: number, v: Int32Array, z: Float64Array): void {
+  let k = 0;
+  v[0] = 0;
+  z[0] = -Infinity;
+  z[1] = Infinity;
+  for (let q = 1; q < n; q++) {
+    let s = (f[q]! + q * q - (f[v[k]!]! + v[k]! * v[k]!)) / (2 * q - 2 * v[k]!);
+    while (s <= z[k]!) {
+      k--;
+      s = (f[q]! + q * q - (f[v[k]!]! + v[k]! * v[k]!)) / (2 * q - 2 * v[k]!);
+    }
+    k++;
+    v[k] = q;
+    z[k] = s;
+    z[k + 1] = Infinity;
+  }
+  k = 0;
+  for (let q = 0; q < n; q++) {
+    while (z[k + 1]! < q) k++;
+    d[q] = (q - v[k]!) * (q - v[k]!) + f[v[k]!]!;
+  }
+}
+
+/**
+ * #671 — the exact Euclidean distance from each cell to the nearest cell the goal does not cover,
+ * in mm. Uncovered cells are 0, so a contour of this field never leaves the footprint; the grid is
+ * surrounded by one virtual uncovered ring so a goal that runs to the blank's edge still has a
+ * boundary (its own outline, half a cell out). Rows then columns of the 1-D transform give the
+ * exact 2-D answer on a grid — no chamfer approximation.
+ */
+function distanceField(hf: GoalHeightfield): Float32Array {
+  const { nx, ny, covered, pitch } = hf;
+  const INF = 1e12;
+  // The padded field: (nx+2) × (ny+2), the border uncovered.
+  const ex = nx + 2;
+  const ey = ny + 2;
+  const n = Math.max(ex, ey);
+  const f = new Float64Array(n);
+  const d = new Float64Array(n);
+  const v = new Int32Array(n);
+  const z = new Float64Array(n + 1);
+  const grid = new Float64Array(ex * ey);
+  for (let j = 0; j < ey; j++) {
+    for (let i = 0; i < ex; i++) {
+      const inner = i >= 1 && i <= nx && j >= 1 && j <= ny && covered[(j - 1) * nx + (i - 1)] === 1;
+      grid[j * ex + i] = inner ? INF : 0;
+    }
+  }
+  for (let j = 0; j < ey; j++) {
+    for (let i = 0; i < ex; i++) f[i] = grid[j * ex + i]!;
+    edt1d(f, d, ex, v, z);
+    for (let i = 0; i < ex; i++) grid[j * ex + i] = d[i]!;
+  }
+  for (let i = 0; i < ex; i++) {
+    for (let j = 0; j < ey; j++) f[j] = grid[j * ex + i]!;
+    edt1d(f, d, ey, v, z);
+    for (let j = 0; j < ey; j++) grid[j * ex + i] = d[j]!;
+  }
+  const out = new Float32Array(nx * ny);
+  for (let j = 0; j < ny; j++) {
+    for (let i = 0; i < nx; i++) {
+      out[j * nx + i] = Math.sqrt(grid[(j + 1) * ex + (i + 1)]!) * pitch;
+    }
+  }
+  return out;
+}
+
+/** The heightfield's gradient magnitude at a covered cell (central, one-sided at the footprint edge). */
+function slopeAt(hf: GoalHeightfield, i: number, j: number): number {
+  const { nx, ny, covered, z } = hf;
+  const h = (ii: number, jj: number): number | null =>
+    ii < 0 || ii >= nx || jj < 0 || jj >= ny || covered[jj * nx + ii] === 0
+      ? null
+      : (z[jj * nx + ii] as number);
+  const g = (a: number | null, b: number | null, span: number): number => {
+    if (a !== null && b !== null) return (a - b) / (2 * hf.pitch * span);
+    if (a !== null) return (h(i, j)! - a) / (hf.pitch * span);
+    if (b !== null) return (h(i, j)! - b) / (hf.pitch * span);
+    return 0;
+  };
+  const gx = g(h(i + 1, j), h(i - 1, j), 1);
+  const gy = g(h(i, j + 1), h(i, j - 1), 1);
+  return Math.hypot(gx, gy);
+}
+
+/**
+ * #671 — iso-lines of the distance field at `level`, as polylines in work XY. Marching squares
+ * with linear crossings; the two saddle cases are resolved by the cell's mean value, so the walk
+ * is deterministic. Uncovered neighbours read 0, which is exactly what the field holds there, so
+ * a contour closes inside the footprint.
+ */
+function contourLoops(hf: GoalHeightfield, field: Float32Array, level: number): [number, number][][] {
+  const { nx, ny, x0, y0, pitch } = hf;
+  const at = (i: number, j: number): number =>
+    i < 0 || i >= nx || j < 0 || j >= ny ? 0 : (field[j * nx + i] as number);
+  const px = (i: number): number => x0 + i * pitch;
+  const py = (j: number): number => y0 + j * pitch;
+  const cross = (va: number, vb: number, p1: [number, number], p2: [number, number]): [number, number] => {
+    const t = vb === va ? 0.5 : (level - va) / (vb - va);
+    return [p1[0] + t * (p2[0] - p1[0]), p1[1] + t * (p2[1] - p1[1])];
+  };
+  const segs: { a: [number, number]; b: [number, number] }[] = [];
+  for (let j = 0; j < ny - 1; j++) {
+    for (let i = 0; i < nx - 1; i++) {
+      const a = at(i, j);
+      const b = at(i + 1, j);
+      const c = at(i + 1, j + 1);
+      const e = at(i, j + 1);
+      const code = (a >= level ? 1 : 0) | (b >= level ? 2 : 0) | (c >= level ? 4 : 0) | (e >= level ? 8 : 0);
+      if (code === 0 || code === 15) continue;
+      const bot = (): [number, number] => cross(a, b, [px(i), py(j)], [px(i + 1), py(j)]);
+      const right = (): [number, number] => cross(b, c, [px(i + 1), py(j)], [px(i + 1), py(j + 1)]);
+      const top = (): [number, number] => cross(e, c, [px(i), py(j + 1)], [px(i + 1), py(j + 1)]);
+      const left = (): [number, number] => cross(a, e, [px(i), py(j)], [px(i), py(j + 1)]);
+      switch (code) {
+        case 1:
+        case 14:
+          segs.push({ a: left(), b: bot() });
+          break;
+        case 2:
+        case 13:
+          segs.push({ a: bot(), b: right() });
+          break;
+        case 3:
+        case 12:
+          segs.push({ a: left(), b: right() });
+          break;
+        case 4:
+        case 11:
+          segs.push({ a: right(), b: top() });
+          break;
+        case 6:
+        case 9:
+          segs.push({ a: bot(), b: top() });
+          break;
+        case 7:
+        case 8:
+          segs.push({ a: left(), b: top() });
+          break;
+        case 5:
+        case 10: {
+          const mid = (a + b + c + e) / 4;
+          const highCorners = code === 5 ? mid >= level : mid < level;
+          if (highCorners) {
+            segs.push({ a: left(), b: top() });
+            segs.push({ a: bot(), b: right() });
+          } else {
+            segs.push({ a: left(), b: bot() });
+            segs.push({ a: right(), b: top() });
+          }
+          break;
+        }
+        default:
+          break;
+      }
+    }
+  }
+  // Join the segments end to end into polylines. Shared crossings are computed from the same two
+  // cell values in the same order, so the coordinates are bit-identical and the keys match.
+  const key = (p: [number, number]): string => `${p[0]}|${p[1]}`;
+  const ends = new Map<string, number[]>();
+  segs.forEach((s, k) => {
+    for (const p of [s.a, s.b]) {
+      const list = ends.get(key(p));
+      if (list === undefined) ends.set(key(p), [k]);
+      else list.push(k);
+    }
+  });
+  const used = new Uint8Array(segs.length);
+  const loops: [number, number][][] = [];
+  for (let k = 0; k < segs.length; k++) {
+    if (used[k] === 1) continue;
+    used[k] = 1;
+    const first = segs[k]!;
+    const chain: [number, number][] = [first.a, first.b];
+    let curKey = key(first.b);
+    for (;;) {
+      if (curKey === key(chain[0]!)) break;
+      const next = (ends.get(curKey) ?? []).find((ix) => used[ix] === 0);
+      if (next === undefined) break;
+      used[next] = 1;
+      const s = segs[next]!;
+      const nextPoint = key(s.a) === curKey ? s.b : s.a;
+      chain.push(nextPoint);
+      curKey = key(nextPoint);
+    }
+    // A closed loop repeats its start as the last point; drop the repeat (the caller closes it).
+    if (chain.length > 1 && key(chain[chain.length - 1]!) === key(chain[0]!)) chain.pop();
+    if (chain.length >= 2) loops.push(chain);
+  }
+  return loops;
+}
+
+/**
+ * #671 — THE SCALLOP PASS. Contours of the footprint's distance field, spaced by
+ * `finishStepOver / sqrt(1 + s²)` with `s` the steepest slope in the band to be crossed: the
+ * distance measured ALONG THE SURFACE is held at the finishing step-over (clamped at
+ * {@link MAX_SCALLOP_CROWDING} where the wall is too steep for that to be useful). Each contour
+ * rides the tip field, so it is gouge-safe by the same construction as the finishing raster.
+ */
+function scallopMoves(
+  hf: GoalHeightfield,
+  tip: Float32Array,
+  feeds: SurfaceFeeds,
+  alongStep: number,
+  safeZ: number,
+  hopZ: number,
+  maxContours: number,
+): { moves: CamMove[]; contours: number; clamped: boolean } {
+  const moves: CamMove[] = [];
+  if (hf.coveredCount === 0) return { moves, contours: 0, clamped: false };
+  const step = feeds.finishStepOver;
+  if (!(step > 0)) {
+    throw new Error(
+      `3D scallop finishing needs a positive step-over; the feeds gave ${step} mm. ` +
+        'A zero or negative step-over cannot space the contours — check the feed row for this tool and material.',
+    );
+  }
+  const D = distanceField(hf);
+  let maxD = 0;
+  for (let k = 0; k < D.length; k++) if ((hf.covered[k] as number) === 1 && D[k]! > maxD) maxD = D[k]!;
+  if (!(maxD > 0)) return { moves, contours: 0, clamped: false };
+
+  // The slope field, once: the band scan per level is then a lookup.
+  const slope = new Float32Array(hf.nx * hf.ny);
+  for (let j = 0; j < hf.ny; j++) {
+    for (let i = 0; i < hf.nx; i++) {
+      if (hf.covered[j * hf.nx + i] === 1) slope[j * hf.nx + i] = slopeAt(hf, i, j);
+    }
+  }
+  // The work, bounded BEFORE the loop: every level walks the grid (the band scan and the marching
+  // squares). Refuse honestly rather than grind a worker, as #540's tip budget does.
+  const estimatedLevels = Math.min(maxContours, Math.ceil((maxD * MAX_SCALLOP_CROWDING) / step) + 1);
+  const ops = estimatedLevels * hf.nx * hf.ny;
+  if (ops > 4_000_000_000) {
+    throw new Error(
+      `3D scallop finishing would need about ${ops} grid evaluations (${estimatedLevels} contours over a ` +
+        `${hf.nx}×${hf.ny} grid), which is too much for one pass. Use a coarser grid pitch, a larger ` +
+        'step-over, or a smaller goal.',
+    );
+  }
+
+  const levels: number[] = [];
+  let d = step / 2;
+  let delta = step;
+  let clamped = false;
+  while (d < maxD) {
+    if (levels.length > maxContours) {
+      throw new Error(
+        `3D scallop finishing would need more than ${maxContours} contours at a ${step} mm surface ` +
+          `step-over over a ${maxD.toFixed(2)} mm footprint. Use a larger step-over, or a coarser grid.`,
+      );
+    }
+    levels.push(d);
+    let s = 0;
+    for (let k = 0; k < D.length; k++) {
+      const dk = D[k]!;
+      if ((hf.covered[k] as number) === 1 && dk >= d && dk <= d + delta) {
+        const sk = slope[k]!;
+        if (sk > s) s = sk;
+      }
+    }
+    let crowd = Math.sqrt(1 + s * s);
+    if (crowd > MAX_SCALLOP_CROWDING) {
+      crowd = MAX_SCALLOP_CROWDING;
+      clamped = true;
+    }
+    delta = step / crowd;
+    d += delta;
+  }
+
+  let contours = 0;
+  for (const level of levels) {
+    for (const loop of contourLoops(hf, D, level)) {
+      const pts = decimateLoop(loop, alongStep);
+      if (pts.length < 2) continue;
+      const first = pts[0]!;
+      moves.push({ kind: 'rapid', x: first[0], y: first[1], z: hopZ });
+      moves.push({ kind: 'feed', x: first[0], y: first[1], z: tipAt(hf, tip, first[0], first[1]), f: feeds.plungeFeed });
+      for (let p = 1; p < pts.length; p++) {
+        const q = pts[p]!;
+        moves.push({ kind: 'feed', x: q[0], y: q[1], z: tipAt(hf, tip, q[0], q[1]), f: feeds.feed });
+      }
+      // Close the loop: the contour is a closed curve, so the last point returns to the first.
+      const last = pts[pts.length - 1]!;
+      if (last[0] !== first[0] || last[1] !== first[1]) {
+        moves.push({ kind: 'feed', x: first[0], y: first[1], z: tipAt(hf, tip, first[0], first[1]), f: feeds.feed });
+      }
+      moves.push({ kind: 'rapid', x: first[0], y: first[1], z: hopZ });
+      contours++;
+    }
+  }
+  if (moves.length > 0) moves.push({ kind: 'rapid', x: moves[moves.length - 1]!.x, y: moves[moves.length - 1]!.y, z: safeZ });
+  return { moves, contours, clamped };
+}
+
+/** Drop loop points closer than `alongStep` to the last kept one (the first and last always stay). */
+function decimateLoop(loop: [number, number][], alongStep: number): [number, number][] {
+  if (loop.length <= 2) return loop;
+  const out: [number, number][] = [loop[0]!];
+  for (let p = 1; p < loop.length; p++) {
+    const q = loop[p]!;
+    const last = out[out.length - 1]!;
+    if (Math.hypot(q[0] - last[0], q[1] - last[1]) >= alongStep || p === loop.length - 1) out.push(q);
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------------------
+// #671 — THE PENCIL PASS: one path along every concave crease the heightfield shows.
+// ---------------------------------------------------------------------------
+
+/**
+ * The cells where the surface turns CONCAVE by more than the crease angle: the second difference
+ * along x, y or either diagonal (over covered neighbours only) is steeper than `tan(creaseDeg)`
+ * per unit length. A wall's foot marks a line; a dome (`c < 0`), a ramp (`c = 0`) and a convex
+ * edge mark nothing, and an uncovered neighbour is absent rather than a false wall at the edge.
+ */
+function pencilMarks(hf: GoalHeightfield, creaseDeg: number): Uint8Array {
+  const { nx, ny, covered, z, pitch } = hf;
+  const marks = new Uint8Array(nx * ny);
+  const threshold = Math.tan((creaseDeg * Math.PI) / 180);
+  const h = (i: number, j: number): number => z[j * nx + i] as number;
+  const ok = (i: number, j: number): boolean =>
+    i >= 0 && i < nx && j >= 0 && j < ny && covered[j * nx + i] === 1;
+  const dirs: [number, number, number][] = [
+    [1, 0, 1],
+    [0, 1, 1],
+    [1, 1, Math.SQRT2],
+    [1, -1, Math.SQRT2],
+  ];
+  for (let j = 0; j < ny; j++) {
+    for (let i = 0; i < nx; i++) {
+      if (covered[j * nx + i] === 0) continue;
+      const here = h(i, j);
+      for (const [di, dj, span] of dirs) {
+        if (!ok(i - di, j - dj) || !ok(i + di, j + dj)) continue;
+        const second = (h(i - di, j - dj) + h(i + di, j + dj) - 2 * here) / (pitch * span);
+        if (second > threshold) {
+          marks[j * nx + i] = 1;
+          break;
+        }
+      }
+    }
+  }
+  return marks;
+}
+
+/**
+ * Trace the marked cells into paths: 8-connected, deterministic — the lowest unvisited cell starts
+ * a path, then a greedy walk follows the neighbour that best continues the current direction
+ * (first in a fixed offset order on a tie). Junctions split into more paths, which is honest: each
+ * one is still a stretch of crease, cut at the same tip.
+ */
+function tracePencilPaths(marks: Uint8Array, hf: GoalHeightfield): [number, number][][] {
+  const { nx, ny, x0, y0, pitch } = hf;
+  const visited = new Uint8Array(marks.length);
+  const offs: [number, number][] = [
+    [1, 0],
+    [1, 1],
+    [0, 1],
+    [-1, 1],
+    [-1, 0],
+    [-1, -1],
+    [0, -1],
+    [1, -1],
+  ];
+  const paths: [number, number][][] = [];
+  for (let k0 = 0; k0 < marks.length; k0++) {
+    if (marks[k0] === 0 || visited[k0] === 1) continue;
+    const cells: number[] = [k0];
+    visited[k0] = 1;
+    let cur = k0;
+    let dir: [number, number] | null = null;
+    for (;;) {
+      const ci = cur % nx;
+      const cj = (cur - ci) / nx;
+      let best: number | null = null;
+      let bestScore = -Infinity;
+      for (const [di, dj] of offs) {
+        const ii = ci + di;
+        const jj = cj + dj;
+        if (ii < 0 || ii >= nx || jj < 0 || jj >= ny) continue;
+        const idx = jj * nx + ii;
+        if (marks[idx] === 0 || visited[idx] === 1) continue;
+        const len = Math.hypot(di, dj);
+        const score = dir === null ? 0 : (dir[0] * di + dir[1] * dj) / len;
+        if (score > bestScore) {
+          bestScore = score;
+          best = idx;
+        }
+      }
+      if (best === null) break;
+      const ni = best % nx;
+      const nj = (best - ni) / nx;
+      dir = [Math.sign(ni - ci), Math.sign(nj - cj)];
+      visited[best] = 1;
+      cells.push(best);
+      cur = best;
+    }
+    if (cells.length >= 2) {
+      paths.push(cells.map((idx) => {
+        const i = idx % nx;
+        const j = (idx - i) / nx;
+        return [x0 + i * pitch, y0 + j * pitch] as [number, number];
+      }));
+    }
+  }
+  return paths;
+}
+
+/** #671 — THE PENCIL PASS: every traced crease, cut at the tip field like the finishing raster. */
+function pencilMoves(
+  hf: GoalHeightfield,
+  tip: Float32Array,
+  feeds: SurfaceFeeds,
+  safeZ: number,
+  hopZ: number,
+  creaseDeg: number,
+): { moves: CamMove[]; paths: number } {
+  const moves: CamMove[] = [];
+  if (hf.coveredCount === 0) return { moves, paths: 0 };
+  const paths = tracePencilPaths(pencilMarks(hf, creaseDeg), hf);
+  for (const path of paths) {
+    const first = path[0]!;
+    moves.push({ kind: 'rapid', x: first[0], y: first[1], z: hopZ });
+    moves.push({ kind: 'feed', x: first[0], y: first[1], z: tipAt(hf, tip, first[0], first[1]), f: feeds.plungeFeed });
+    for (let p = 1; p < path.length; p++) {
+      const q = path[p]!;
+      moves.push({ kind: 'feed', x: q[0], y: q[1], z: tipAt(hf, tip, q[0], q[1]), f: feeds.feed });
+    }
+    const last = path[path.length - 1]!;
+    moves.push({ kind: 'rapid', x: last[0], y: last[1], z: hopZ });
+  }
+  if (moves.length > 0) moves.push({ kind: 'rapid', x: moves[moves.length - 1]!.x, y: moves[moves.length - 1]!.y, z: safeZ });
+  return { moves, paths: paths.length };
 }

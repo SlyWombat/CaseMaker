@@ -1,6 +1,6 @@
 import type { CSSProperties, JSX } from 'react';
 import { EngraveItemRow } from '@/components/panels/EngraveItemRow';
-import type { GoalSurfaceFacts } from '@/engine/cnc/cam/surface3d';
+import { DEFAULT_PENCIL_CREASE_DEG, type GoalSurfaceFacts } from '@/engine/cnc/cam/surface3d';
 import type { JobFinding } from '@/engine/cnc/engrave/jobSetup';
 import type { TargetObjectPatch } from '@/store/engraveJobStore';
 import type { EngraveSurfaceSettings, EngraveTargetObject } from '@/types/engraveJob';
@@ -336,6 +336,44 @@ export function EngraveTargetObjectRow({
               min={0.01}
               onChange={(v) => setSurface({ finishStepOverMm: v })}
             />
+            {/* #671 — the two extra finishing passes, each opt-in. Absent reads as off, which is
+                the rough + parallel finish every pre-#671 job already cuts. */}
+            <label style={ROW_INLINE}>
+              <input
+                type="checkbox"
+                checked={settings.scallop === true}
+                data-testid={`engrave-target-surface-scallop-${index}`}
+                aria-label="Add a scallop pass"
+                title="Also cut offset contours of the outline after the parallel finish, spaced so the step measured along the surface is the finishing step-over. It cleans the ridges the parallel finish leaves on slopes."
+                onChange={(e) => setSurface({ scallop: e.target.checked ? true : undefined })}
+              />
+              <span style={{ fontSize: 11, color: '#9aa4b0' }}>scallop pass</span>
+            </label>
+            <label style={ROW_INLINE}>
+              <input
+                type="checkbox"
+                checked={settings.pencil === true}
+                data-testid={`engrave-target-surface-pencil-${index}`}
+                aria-label="Add a pencil pass"
+                title="Also run one pass along every concave crease after the scallop — the corners the finishing raster leaves proud."
+                onChange={(e) => setSurface({ pencil: e.target.checked ? true : undefined })}
+              />
+              <span style={{ fontSize: 11, color: '#9aa4b0' }}>pencil pass</span>
+            </label>
+            {settings.pencil === true && (
+              <SurfaceField
+                field="pencilCreaseDeg"
+                label="pencil crease"
+                unit="°"
+                title="The pencil pass follows creases where the surface's slope changes by more than this across one grid cell, degrees."
+                index={index}
+                value={settings.pencilCreaseDeg}
+                fallback={DEFAULT_PENCIL_CREASE_DEG}
+                sourceWords="the CAM’s default"
+                min={1}
+                onChange={(v) => setSurface({ pencilCreaseDeg: v })}
+              />
+            )}
             <SurfaceField
               field="gridPitchMm"
               label="grid pitch"
@@ -368,7 +406,14 @@ export function EngraveTargetObjectRow({
                 {Number(surfaceFacts.stepDownMm.toFixed(3))} mm step-down and{' '}
                 {Number(surfaceFacts.roughStepOverMm.toFixed(3))} mm step-over, leaving{' '}
                 {Number(surfaceFacts.stockToLeaveMm.toFixed(3))} mm; finishing at{' '}
-                {Number(surfaceFacts.finishStepOverMm.toFixed(3))} mm step-over.{' '}
+                {Number(surfaceFacts.finishStepOverMm.toFixed(3))} mm step-over
+                {surfaceFacts.scallop == null
+                  ? ''
+                  : `, then a scallop pass on ${surfaceFacts.scallop.contours} contour${surfaceFacts.scallop.contours === 1 ? '' : 's'}`}
+                {surfaceFacts.pencil == null
+                  ? ''
+                  : `, then a pencil pass on ${surfaceFacts.pencil.paths} crease${surfaceFacts.pencil.paths === 1 ? '' : 's'} at ${Number(surfaceFacts.pencil.creaseDeg.toFixed(0))}°`}
+                .{' '}
                 {surfaceFacts.resolutionNote.charAt(0).toUpperCase() + surfaceFacts.resolutionNote.slice(1)}.
               </p>
             )}

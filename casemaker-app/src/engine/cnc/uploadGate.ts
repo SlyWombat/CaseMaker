@@ -41,6 +41,13 @@ export interface SurfaceProgramCheck {
   readonly gridPitchMm: number | null;
   /** The Z layers the CAM's roughing pass stepped through. */
   readonly roughingLayers: number;
+  /**
+   * #671 — the passes the sweep judged, by the IR's own operation names (rough, parallel finish,
+   * and whichever of scallop and pencil the operation asked for). The grid says what the sweep is
+   * good to; this says what it covered, so a program that lost a pass says so in its own record.
+   * Absent on a check stored by a build before #671.
+   */
+  readonly passes?: readonly string[];
   /** The heightfield's resolution sentence the CAM stated. */
   readonly resolutionNote: string;
   /** The program's XY extent, for the console's laser frame (the verifier's role on a 2D file). */

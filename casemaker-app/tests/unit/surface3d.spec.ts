@@ -31,6 +31,8 @@ import {
 import { clearTargetObjectMeshCache } from '@/engine/import/targetObject';
 import { generateGoalProgram } from '@/workers/sim/engraveGenerate';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
+import { buildRunSheet } from '@/engine/cnc/engrave/runSheet';
+import { parseEngraveJob } from '@/store/engraveJobSchema';
 import { flatEndMill as makeFlatTool } from '@/engine/cnc/tool';
 import type { EngraveJob, EngraveTargetObject } from '@/types/engraveJob';
 import type { RapidEstimate, CamMove } from '@/engine/cnc/cam/ir';
@@ -515,5 +517,224 @@ describe('generateSurface3dIR — roughing refuses a non-positive step-down (#54
         labelId: 'goal-1',
       }),
     ).toThrow(/step-down/i);
+  });
+});
+
+// === #671 — the scallop and pencil finishing passes =============================================
+
+/** A closed box as 12 triangles; the heightfield's top over it is `z1`. */
+function boxTris(x0: number, x1: number, y0: number, y1: number, z0: number, z1: number): Tri[] {
+  const c = [
+    [x0, y0, z0], [x1, y0, z0], [x1, y1, z0], [x0, y1, z0],
+    [x0, y0, z1], [x1, y0, z1], [x1, y1, z1], [x0, y1, z1],
+  ] as [number, number, number][];
+  const quad = (a: number, b: number, q: number, d: number): Tri[] => [
+    [c[a]!, c[b]!, c[q]!],
+    [c[a]!, c[q]!, c[d]!],
+  ];
+  return [
+    ...quad(4, 5, 6, 7),
+    ...quad(0, 3, 2, 1),
+    ...quad(0, 1, 5, 4),
+    ...quad(2, 3, 7, 6),
+    ...quad(1, 2, 6, 5),
+    ...quad(3, 0, 4, 7),
+  ];
+}
+
+/** A step: a base slab under the whole footprint and a 0-top plateau over x < 10 (floor at −2). */
+function stepTris(): Tri[] {
+  return [...boxTris(0, 20, 0, 20, -4, -2), ...boxTris(0, 10, 0, 20, -2, 0)];
+}
+
+/** The step's goal height at (x, y): the plateau at 0 for x < 10, the floor at −2 beyond. */
+const stepH = (x: number): number => (x < 10 ? 0 : -2);
+
+/** A ramp of slope `k` (0.05 is the spec's gentle one; 1 is 45°). */
+function rampTrisK(k: number): Tri[] {
+  const p = (x: number, y: number): [number, number, number] => [x, y, -k * x];
+  return [
+    [p(0, 0), p(20, 0), p(20, 20)],
+    [p(0, 0), p(20, 20), p(0, 20)],
+  ];
+}
+
+describe('generateSurface3dIR — the scallop and pencil passes (#671)', () => {
+  function build(
+    heightfield: ReturnType<typeof sampleGoalHeightfield>,
+    opts: Parameters<typeof generateSurface3dIR>[0]['opts'],
+  ) {
+    return generateSurface3dIR({
+      heightfield,
+      tool: BALL,
+      toolObj: flatEndMill(1, { shape: 'ball', name: 'ball' }),
+      toolNumber: 1,
+      spindleRpm: 12000,
+      air: true,
+      feeds: FEEDS,
+      rapid: RAPID,
+      labelId: 'goal-1',
+      opts,
+    });
+  }
+
+  it('appends scallop then pencil AFTER the parallel finish, and off is the old two-pass program', () => {
+    const hf = sampleGoalHeightfield(goal(stepTris()), { pitchMm: 0.4 });
+    const off = build(hf, {});
+    expect(off.ir.operations.map((o) => o.name)).toEqual(['[T1] 3D rough — 0.3 mm to leave', '[T1] 3D finish']);
+    expect(off.scallop).toBeNull();
+    expect(off.pencil).toBeNull();
+
+    const on = build(hf, { scallop: true, pencil: true });
+    expect(on.ir.operations.map((o) => o.name)).toEqual([
+      '[T1] 3D rough — 0.3 mm to leave',
+      '[T1] 3D finish',
+      '[T1] 3D scallop',
+      '[T1] 3D pencil',
+    ]);
+    expect(on.ir.operations.map((o) => o.passKind)).toEqual(['rough', 'finish', 'finish', 'finish']);
+    // WHAT STANDS BETWEEN THEM: the roughing and the parallel finish are byte-identical when the
+    // extras are switched on — same allowance, same raster, same tip field. The extras are added
+    // after them, not woven through.
+    expect(on.roughing.moves).toEqual(off.roughing.moves);
+    expect(on.finishing.moves).toEqual(off.finishing.moves);
+    expect(on.scallop!.facts.contours).toBeGreaterThan(1);
+    expect(on.scallop!.facts.stepOverMm).toBe(FEEDS.finishStepOver);
+    expect(on.pencil!.facts.paths).toBeGreaterThan(0);
+    expect(on.notes.join(' ')).toContain('scallop pass');
+    expect(on.notes.join(' ')).toContain('pencil pass');
+  });
+
+  it('spaces the scallop contours by the slope’s secant: a steep face needs more of them', () => {
+    const gentle = build(sampleGoalHeightfield(goal(rampTrisK(0.05)), { pitchMm: 0.4 }), { scallop: true });
+    const steep = build(sampleGoalHeightfield(goal(rampTrisK(1)), { pitchMm: 0.4 }), { scallop: true });
+    // Same footprint, same step-over: the 45° face's surface step-over needs sqrt(2) more contours.
+    expect(gentle.scallop!.facts.contours).toBeGreaterThan(1);
+    expect(steep.scallop!.facts.contours).toBeGreaterThan(gentle.scallop!.facts.contours);
+    expect(steep.scallop!.facts.clamped).toBe(false);
+  });
+
+  it('projects every scallop point onto the surface: a convex dome is followed, never cut through', () => {
+    const R = 5;
+    const hf = sampleGoalHeightfield(goal(domeTris(R)), { pitchMm: 0.2 });
+    const on = build(hf, { scallop: true });
+    const dome = (x: number, y: number): number => {
+      const r2 = (x - 10) ** 2 + (y - 10) ** 2;
+      return r2 >= R * R ? -R : -(R - Math.sqrt(R * R - r2));
+    };
+    const tol = FEEDS.finishStepOver + 3 * hf.pitch;
+    let checked = 0;
+    for (const m of on.scallop!.operation.moves) {
+      if (m.kind !== 'feed') continue;
+      // Interior only: within the tool radius of the footprint edge the ball legitimately lifts.
+      if (Math.hypot(m.x - 10, m.y - 10) > R - 1) continue;
+      expect(m.z).toBeGreaterThanOrEqual(dome(m.x, m.y) - tol);
+      expect(m.z).toBeLessThanOrEqual(dome(m.x, m.y) + tol);
+      checked++;
+    }
+    expect(checked).toBeGreaterThan(20);
+  });
+
+  it('the pencil follows the step’s crease and leaves a dome and a ramp alone', () => {
+    const step = build(sampleGoalHeightfield(goal(stepTris()), { pitchMm: 0.4 }), { pencil: true });
+    expect(step.pencil!.facts.paths).toBeGreaterThan(0);
+    const feeds = step.pencil!.operation.moves.filter((m) => m.kind === 'feed');
+    const xs = feeds.map((m) => m.x);
+    const ys = feeds.map((m) => m.y);
+    // A line along the wall's foot: one cell wide in X, spanning the wall in Y.
+    expect(Math.max(...xs) - Math.min(...xs)).toBeLessThan(1.2);
+    expect(Math.max(...ys) - Math.min(...ys)).toBeGreaterThan(5);
+    expect(Math.min(...xs)).toBeGreaterThan(9.2);
+    expect(Math.max(...xs)).toBeLessThan(11.2);
+    // GOUGE SAFETY: every point rides the safe drop — strictly ABOVE the floor it cannot reach,
+    // because the ball's flank rests on the wall, and never below the goal anywhere.
+    for (const m of feeds) {
+      expect(m.z).toBeGreaterThan(stepH(m.x) + 0.1);
+    }
+
+    const dome = build(sampleGoalHeightfield(goal(domeTris(5)), { pitchMm: 0.4 }), { pencil: true });
+    expect(dome.pencil).toBeNull();
+    const ramp = build(sampleGoalHeightfield(goal(rampTris()), { pitchMm: 0.4 }), { pencil: true });
+    expect(ramp.pencil).toBeNull();
+  });
+
+  it('the new passes cut on the dexel grid, and the full program never gouges the goal', () => {
+    // The heightfield's top-Z model is conservative at a vertical face (the boundary cell reads the
+    // plateau's top), so the foot cell that gets the pencil path is one cell out from the wall.
+    const hf = sampleGoalHeightfield(goal(stepTris()), { pitchMm: 0.4 });
+    const full = build(hf, { scallop: true, pencil: true });
+    const setup = prism(40, 40, 10);
+    expect(full.ir.operations).toHaveLength(4);
+
+    // THE CHECK: the full program, swept on the grid, removes material and leaves none below the goal.
+    const grid = sweep(setup, BALL_CUTTER, full.ir.operations.flatMap((op) => op.moves), hf.pitch);
+    for (const x of [11, 12, 14, 16, 18]) {
+      for (const y of [4, 10, 16]) {
+        expect(heightAt(grid, x, y)).toBeGreaterThanOrEqual(stepH(x) - 0.15);
+      }
+    }
+    // Each new pass is REAL: swept alone from the stock top it cuts where it says and nowhere else.
+    const pencilOnly = sweep(setup, BALL_CUTTER, full.pencil!.operation.moves, hf.pitch);
+    const footprint = full.pencil!.operation.moves.filter((m) => m.kind === 'feed');
+    const pathX = footprint[0]!.x;
+    expect(heightAt(pencilOnly, pathX, 10)).toBeLessThan(-0.05); // the corner line, cut
+    expect(heightAt(pencilOnly, 15, 10)).toBe(0); // the open floor, untouched
+    const scallopOnly = sweep(setup, BALL_CUTTER, full.scallop!.operation.moves, hf.pitch);
+    expect(heightAt(scallopOnly, 15, 10)).toBeLessThan(-0.5); // the floor, cut by the contours
+  });
+});
+
+describe('generateGoalProgram — the extra finishing passes reach the program and its check (#671)', () => {
+  function stepJob(surface?: EngraveTargetObject['surface']): EngraveJob {
+    return {
+      ...defaultEngraveJob(),
+      labels: [],
+      shapes: [],
+      targetObject: goal(stepTris(), { position: { x: 50, y: 30, z: 0 }, ...(surface === undefined ? {} : { surface }) }),
+    };
+  }
+
+  it('carries the pass list on the surface check and the facts on the operation', () => {
+    const job = stepJob({ scallop: true, pencil: true });
+    const out = generateGoalProgram(job, job.targetObject!, makeFlatTool(3.175), [], null, {});
+    expect(out.ok, JSON.stringify(out.errors)).toBe(true);
+    expect(out.programs[0]!.surfaceCheck?.passes).toEqual([
+      '[T1] 3D rough — 0.3 mm to leave',
+      '[T1] 3D finish',
+      '[T1] 3D scallop',
+      '[T1] 3D pencil',
+    ]);
+    expect(out.surface3d?.scallop?.contours ?? 0).toBeGreaterThan(0);
+    expect(out.surface3d?.pencil?.paths ?? 0).toBeGreaterThan(0);
+    const texts = buildRunSheet(job, out, null).sections.flatMap((s) => s.steps.map((st) => st.text));
+    const surface = texts.find((t) => t.includes('Surface a mesh'));
+    expect(surface).toBeDefined();
+    expect(surface).toContain('scallop pass');
+    expect(surface).toContain('pencil pass');
+  });
+
+  it('absent means off: the old two-pass program, and its check says two passes', () => {
+    const job = stepJob();
+    const out = generateGoalProgram(job, job.targetObject!, makeFlatTool(3.175), [], null, {});
+    expect(out.ok).toBe(true);
+    expect(out.programs[0]!.surfaceCheck?.passes).toHaveLength(2);
+    expect(out.surface3d?.scallop ?? null).toBeNull();
+    expect(out.surface3d?.pencil ?? null).toBeNull();
+    const texts = buildRunSheet(job, out, null).sections.flatMap((s) => s.steps.map((st) => st.text));
+    const surface = texts.find((t) => t.includes('Surface a mesh'));
+    expect(surface).not.toContain('scallop pass');
+  });
+
+  it('round-trips the three settings; a crease outside 1–80° is refused', () => {
+    // The schema wants a real 64-hex sha; the spec's goal stub uses a short test id.
+    const withSha = (surface: EngraveTargetObject['surface']): EngraveJob => {
+      const job = stepJob(surface);
+      return { ...job, targetObject: { ...job.targetObject!, sha256: 'a'.repeat(64) } };
+    };
+    const parsed = parseEngraveJob(withSha({ scallop: true, pencil: true, pencilCreaseDeg: 25 }));
+    expect(parsed.ok, parsed.ok ? '' : parsed.errors.join('; ')).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.job.targetObject?.surface).toEqual({ scallop: true, pencil: true, pencilCreaseDeg: 25 });
+    expect(parseEngraveJob(withSha({ pencilCreaseDeg: 0.5 })).ok).toBe(false);
   });
 });

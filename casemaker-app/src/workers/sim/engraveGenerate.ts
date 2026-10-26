@@ -2965,6 +2965,10 @@ export function generateGoalProgram(
     // operation states its own.
     finishStepOver: settings.finishStepOverMm ?? resolved.params.stepOver,
   };
+  // #671 — the two extra finishing passes are OPT-IN: absent = today's rough + parallel finish.
+  const scallop = settings.scallop === true;
+  const pencil = settings.pencil === true;
+  const pencilCreaseDeg = settings.pencilCreaseDeg;
 
   let surfaced: ReturnType<typeof generateSurface3dForGoal>;
   try {
@@ -2977,7 +2981,12 @@ export function generateGoalProgram(
       feeds,
       rapid: mill.rapidEstimate,
       sample: gridPitchMm === null ? undefined : { pitchMm: gridPitchMm },
-      opts: { stockToLeaveMm },
+      opts: {
+        stockToLeaveMm,
+        scallop,
+        pencil,
+        ...(pencilCreaseDeg === undefined ? {} : { pencilCreaseDeg }),
+      },
     });
   } catch (e) {
     return fail('cam', e instanceof Error ? e.message : String(e), resolved);
@@ -3009,10 +3018,15 @@ export function generateGoalProgram(
   // sweep (the 2.5D verifier cannot judge a 3D program), recorded with the heightfield's grid and
   // the CAM's roughing layers; the run store stamps the dexel grid the simulation actually ran on
   // once the sweep has happened.
+  //
+  // #671 — the check also carries the PASSES it was made over. The grid says what the sweep is
+  // good to; the pass list says what that sweep judged, so a dropped finishing pass is visible in
+  // the frozen package instead of assumed.
   const surfaceCheck: SurfaceProgramCheck = {
     kind: 'surface',
     gridPitchMm: surfaced.heightfield.pitch,
     roughingLayers: surfaced.roughingLayers,
+    passes: surfaced.ir.operations.map((op) => op.name),
     resolutionNote: surfaced.heightfield.resolutionNote,
     bbox: pathBbox(surfaced.ir),
   };
@@ -3052,6 +3066,8 @@ export function generateGoalProgram(
       finishStepOverMm: feeds.finishStepOver,
       stockToLeaveMm: stockToLeaveMm ?? DEFAULT_STOCK_TO_LEAVE_MM,
       roughingLayers: surfaced.roughingLayers,
+      scallop: surfaced.scallop === null ? null : surfaced.scallop.facts,
+      pencil: surfaced.pencil === null ? null : surfaced.pencil.facts,
       notes: surfaced.notes,
     } satisfies GoalSurfaceFacts,
   };

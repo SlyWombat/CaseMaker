@@ -66,12 +66,14 @@ oversight):
   and a `G32 R1` console grid is offered as the machine-side alternative; a **dome** (a curved top
   over a flat colour line) is refused, because following the top would cut through the line.
   Whether the grid compensates every move or only its endpoints is #501's bench question.
-- 3D surfacing from a **goal mesh** — now built (#534, #535, §5.4): a job whose only work is a
-  `role: 'goal'` mesh generates a raster-roughing + ball-nose finishing program, and the goal row's
-  **Technical** fold carries the operation's cutter, step-down/step-overs, grid pitch and
-  allowance. What is not built is measured 3D engagement feeds (bench work, #536) and roughing a
-  goal with one cutter and finishing it with another; a heightfield has one top-Z per (x, y), so
-  undercuts and overhangs are unrepresentable — the honest 3-axis answer.
+- 3D surfacing from a **goal mesh** — now built (#534, #535, #671, §5.4): a job whose only work is
+  a `role: 'goal'` mesh generates a raster-roughing + ball-nose finishing program, with optional
+  **scallop** (offset contours) and **pencil** (corner) finishing passes after it, and the goal
+  row's **Technical** fold carries the operation's cutter, step-down/step-overs, grid pitch,
+  allowance, the two pass switches and the pencil crease angle. What is not built is measured 3D
+  engagement feeds (bench work, #536) and roughing a goal with one cutter and finishing it with
+  another; a heightfield has one top-Z per (x, y), so undercuts and overhangs are unrepresentable —
+  the honest 3-axis answer.
 - V-carving a region whose groove at the colour plane is narrower than one machine step. The app
   refuses it by name (`vcarve-groove-too-narrow`, §8.1); it does open regions otherwise (#221).
 - Laser work.
@@ -660,13 +662,30 @@ V-bit and states the strategy; the step-over is a fraction of the groove's width
 and the CAM clamps the pitch to the tip radius because the floor is cleared by the tip disc
 alone. The two named refusals and the merge warning are in §8.1.
 
-**3D surfacing from a goal mesh (#534, #535).** A **design target object** can be marked with role
-**goal** — "this is the shape to *make*", as opposed to a reference to position other work
-against. A job whose only work is a goal mesh generates a two-operation surfacing program: a
+**3D surfacing from a goal mesh (#534, #535, #671).** A **design target object** can be marked
+with role **goal** — "this is the shape to *make*", as opposed to a reference to position other
+work against. A job whose only work is a goal mesh generates a two-operation surfacing program: a
 **raster roughing** in step-down layers that clears the stock above the goal (leaving the
 roughing allowance), then a **ball-nose finishing** raster that follows the goal's top-Z
 heightfield gouge-safely. A goal with undercuts is sampled to its topmost surface — the honest
 3-axis answer — and the run sheet says so.
+
+Two more finishing passes can be switched on in the goal's Technical fold, and they run in this
+order after the parallel finish (#671):
+
+- **scallop pass** — offset contours of the goal's outline, each projected onto the same
+  gouge-safe tip field, spaced so the step measured ALONG THE SURFACE is the finishing step-over
+  (`step-over / sqrt(1 + slope²)`, band by band; past about 82° a wall crowds the spacing at most
+  8× and the run sheet says when that bound was reached). It cleans the ridges the parallel raster
+  leaves on slopes. It reuses the finishing step-over — there is no separate number.
+- **pencil pass** — one path along every concave crease sharper than the **pencil crease** angle
+  (default 20°, stated as the CAM's default until typed): the heightfield's second difference
+  across x, y or either diagonal marks a corner line, and each traced line is cut at the same
+  gouge-safe drop. A dome and a ramp mark nothing; a wall's foot marks a line.
+
+Both are off unless the fold says otherwise, so a job written before #671 cuts exactly as it
+did. The program's check (the material sweep on the flat dexel) records the passes it judged as
+well as the grid it ran on, and the run sheet states the contour and crease counts.
 
 The goal row's **Technical** fold carries the operation's own numbers: the **cutter** (one cutter
 cuts both passes — a ball or bull nose finishes the surface round; a flat cutter finishes it

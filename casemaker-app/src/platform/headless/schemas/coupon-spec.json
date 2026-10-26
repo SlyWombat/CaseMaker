@@ -4844,6 +4844,16 @@
                   "minimum": 0.02,
                   "type": "number"
                 },
+                "pencil": {
+                  "description": "Add a pencil pass along the concave creases after the scallop; omit for off.",
+                  "type": "boolean"
+                },
+                "pencilCreaseDeg": {
+                  "description": "The crease angle the pencil pass follows, in degrees; omit for the CAM’s 20°.",
+                  "maximum": 80,
+                  "minimum": 1,
+                  "type": "number"
+                },
                 "roughStepDownMm": {
                   "description": "Roughing step-down per Z layer, in millimetres; omit for the feeds row’s.",
                   "exclusiveMinimum": 0,
@@ -4855,6 +4865,10 @@
                   "exclusiveMinimum": 0,
                   "maximum": 20,
                   "type": "number"
+                },
+                "scallop": {
+                  "description": "Add a scallop pass after the parallel finish: offset contours held to the finishing step-over measured along the surface; omit for off.",
+                  "type": "boolean"
                 },
                 "stockToLeaveMm": {
                   "description": "Roughing allowance left on the goal surface, in millimetres; omit for the shop’s finish stock-to-leave.",

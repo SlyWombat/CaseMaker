@@ -191,3 +191,53 @@ describe('#535 the goal’s operation controls', () => {
     expect(screen.queryByTestId('engrave-target-technical-0')).toBeNull();
   });
 });
+
+// #671 — the two extra finishing passes: each checkbox sends its key (off is sent as undefined so
+// the document keeps the pre-#671 shape), the crease number appears only with the pencil pass on,
+// and the report speaks for the passes that ran.
+describe('#671 the extra finishing passes', () => {
+  it('sends the scallop and pencil choices, and off is undefined', () => {
+    const { onChange } = row();
+    openTechnical();
+    fireEvent.click(screen.getByTestId('engrave-target-surface-scallop-0'));
+    expect(onChange).toHaveBeenLastCalledWith({ surface: { scallop: true } });
+    fireEvent.click(screen.getByTestId('engrave-target-surface-pencil-0'));
+    expect(onChange).toHaveBeenLastCalledWith({ surface: { pencil: true } });
+  });
+
+  it('turning a pass back off sends undefined, so the block drops the key', () => {
+    const { onChange } = row({ target: { surface: { scallop: true, pencil: true } } });
+    openTechnical();
+    fireEvent.click(screen.getByTestId('engrave-target-surface-scallop-0'));
+    expect(onChange).toHaveBeenLastCalledWith({ surface: { scallop: undefined } });
+  });
+
+  it('offers the crease angle only with the pencil pass on, prefilled from the CAM’s default', () => {
+    row({ target: { surface: { pencil: true } } });
+    openTechnical();
+    const crease = screen.getByTestId('engrave-target-surface-pencilCreaseDeg-0') as HTMLInputElement;
+    expect(crease.value).toBe('20');
+    expect(screen.getByTestId('engrave-target-surface-pencilCreaseDeg-source-0').textContent).toContain(
+      'the CAM’s default',
+    );
+    fireEvent.change(crease, { target: { value: '30' } });
+    expect(screen.getByTestId('engrave-target-surface-pencilCreaseDeg-0')).toBeTruthy();
+  });
+
+  it('hides the crease field when the pencil pass is off', () => {
+    row({ target: { surface: { scallop: true } } });
+    openTechnical();
+    expect(screen.queryByTestId('engrave-target-surface-pencilCreaseDeg-0')).toBeNull();
+  });
+
+  it('reports the passes the last program ran', () => {
+    row({
+      target: { surface: { scallop: true, pencil: true } },
+      surfaceFacts: { ...FACTS, scallop: { contours: 12, stepOverMm: 0.4, clamped: false }, pencil: { paths: 3, creaseDeg: 20 } },
+    });
+    openTechnical();
+    const report = screen.getByTestId('engrave-target-surface-report-0').textContent ?? '';
+    expect(report).toContain('a scallop pass on 12 contours');
+    expect(report).toContain('a pencil pass on 3 creases at 20°');
+  });
+});

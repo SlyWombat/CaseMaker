@@ -2617,13 +2617,30 @@ function surfaceSteps(facts: GoalSurfaceFacts): RunSheetStep[] {
       : `Roughing in ${facts.roughingLayers} Z layer${facts.roughingLayers === 1 ? '' : 's'} at ` +
         `${fmtNum(facts.stepDownMm)} mm step-down and ${fmtNum(facts.roughStepOverMm)} mm step-over, ` +
         `leaving ${fmtNum(facts.stockToLeaveMm)} mm of stock on the surface.`;
+  // #671 — the passes run in the order they are listed: the parallel finish, then the scallop
+  // contours, then the pencil paths along the corners.
+  const passes = [`Finishing follows the surface at ${fmtNum(facts.finishStepOverMm)} mm step-over.`];
+  if (facts.scallop != null) {
+    passes.push(
+      `Then a scallop pass on ${facts.scallop.contours} offset contour${facts.scallop.contours === 1 ? '' : 's'}, ` +
+        `the step held at ${fmtNum(facts.scallop.stepOverMm)} mm measured along the surface.`,
+    );
+  }
+  if (facts.pencil != null) {
+    passes.push(
+      `Then a pencil pass along ${facts.pencil.paths} concave crease${facts.pencil.paths === 1 ? '' : 's'} ` +
+        `(${fmtNum(facts.pencil.creaseDeg)}° or sharper), at the same gouge-safe drop.`,
+    );
+  }
   const steps: RunSheetStep[] = [
     {
-      text: `Surface a mesh. ${rough} Finishing follows the surface at ${fmtNum(facts.finishStepOverMm)} mm step-over.`,
+      text: `Surface a mesh. ${rough} ${passes.join(' ')}`,
       value:
         `${facts.roughingLayers} layer${facts.roughingLayers === 1 ? '' : 's'} · ` +
         `${fmtNum(facts.stepDownMm)} mm step-down · ${fmtNum(facts.finishStepOverMm)} mm finish step-over · ` +
-        `${fmtNum(facts.stockToLeaveMm)} mm left`,
+        `${fmtNum(facts.stockToLeaveMm)} mm left` +
+        (facts.scallop == null ? '' : ' · scallop') +
+        (facts.pencil == null ? '' : ' · pencil'),
     },
   ];
   for (const note of facts.notes) steps.push({ text: note });

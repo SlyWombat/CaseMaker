@@ -511,6 +511,19 @@ export interface EngraveSurfaceSettings {
   gridPitchMm?: Mm;
   /** Roughing allowance left on the goal surface, mm. Default: the shop's `finish.stockToLeaveMm`. */
   stockToLeaveMm?: Mm;
+  /**
+   * #671 — add the SCALLOP pass after the parallel finish: offset contours of the goal's outline,
+   * spaced so the step measured ALONG THE SURFACE is `finishStepOverMm`. Absent = off, which is
+   * the rough + parallel finish every pre-#671 job already cut.
+   */
+  scallop?: boolean;
+  /**
+   * #671 — add the PENCIL pass after the scallop: one path along every concave crease sharper than
+   * `pencilCreaseDeg`. Absent = off.
+   */
+  pencil?: boolean;
+  /** #671 — the crease angle the pencil pass follows, degrees. Default: the CAM's own 20°. */
+  pencilCreaseDeg?: number;
 }
 
 /**
