@@ -263,10 +263,10 @@ test('the Part panel fits the phone, and its numbers reach the part (#282)', asy
   await page.getByTestId('start-wizard-next').click();
   await page.waitForSelector('[data-testid="start-wizard-step-job"]');
   await page.getByTestId('start-wizard-job-badge-blank').click();
-  await page.waitForTimeout(300);
-  if ((await page.locator('[data-testid="engrave-setup-close"]').count()) > 0) {
-    await page.getByTestId('engrave-setup-close').click();
-  }
+  // #681 — the blank route stays in the SAME wizard, on the holding step; its close is the one
+  // control every step has.
+  await page.waitForSelector('[data-testid="engrave-setup-step-holding"]');
+  await page.getByTestId('start-wizard-close').click();
   await page.waitForSelector('[data-testid="sidebar"]', { timeout: 30_000 });
   await page.evaluate(async () => { await window.__caseMaker!.waitForIdle(); });
 

@@ -14,7 +14,7 @@ import { useEngraveJobStore } from '@/store/engraveJobStore';
 import { resetMachineStore } from '@/store/machineStore';
 import { createDefaultProject, useProjectStore } from '@/store/projectStore';
 import { useSettingsStore } from '@/store/settingsStore';
-import { resetStartWizard } from '@/store/startWizardStore';
+import { resetStartWizard, useStartWizardStore } from '@/store/startWizardStore';
 import { resetStockStore } from '@/store/stockStore';
 import { useViewportStore } from '@/store/viewportStore';
 import type { JobStockEntry } from '@/types/engraveJob';
@@ -72,8 +72,17 @@ afterEach(() => {
   setHouseClientLoader(null);
 });
 
+/** The wizard as `AppShell` mounts it: closing it unmounts the modal. */
+function WizardHost() {
+  const open = useStartWizardStore((s) => s.open);
+  return open ? <StartWizard /> : <></>;
+}
+
 async function toStockStep(): Promise<void> {
-  render(<StartWizard />);
+  act(() => {
+    useStartWizardStore.getState().openWizard();
+  });
+  render(<WizardHost />);
   await act(async () => {
     fireEvent.click(screen.getByTestId('start-wizard-next'));
   });
@@ -136,22 +145,16 @@ describe('the material-first start (#418)', () => {
       fireEvent.click(screen.getByTestId('start-wizard-stock-next'));
     });
 
-    // The mount. The hand-off seeds an EMPTY job, so the wizard asks what to cut first (#662);
-    // the shelf already answered the material and the blank, so the mount is the only setup
-    // question after that.
-    await screen.findByTestId('engrave-setup-flow');
-    expect(screen.getByTestId('engrave-setup-step-what')).toBeDefined();
-    expect(screen.getByTestId('engrave-setup-progress').textContent).toBe('1 / 2');
-    fireEvent.click(screen.getByTestId('engrave-setup-what-pocket'));
+    // Step 3 of the SAME wizard. The hand-off seeds an EMPTY job and the shelf already answered
+    // the material and the blank, so the mount is the next question — one modal, one counter.
     expect(screen.getByTestId('engrave-setup-step-holding')).toBeDefined();
-    expect(screen.getByTestId('engrave-setup-progress').textContent).toBe('2 / 2');
+    expect(screen.getByTestId('start-wizard-progress').textContent).toBe('Step 3 of 4 · Holding');
+    expect(screen.queryByTestId('engrave-setup-flow')).toBeNull();
 
     const job = useEngraveJobStore.getState().job;
     expect(job.stock).toMatchObject({ length: 100, width: 100, thickness: 5, material: 'aluminium-6061' });
     expect(job.sources?.stock?.length).toBe('user');
     expect(job.labels).toEqual([]);
-    // The one operation the wizard's first question added, and nothing else.
-    expect(job.shapes).toHaveLength(1);
     expect(job.stockEntry).toEqual({
       kind: 'shelf',
       shelfId: 'stock-plate1',
@@ -172,11 +175,21 @@ describe('the material-first start (#418)', () => {
     // Named, not reserved: Cut mode (#419) reserves.
     expect(svc.calls.filter((c) => !c.startsWith('GET'))).toEqual([]);
 
-    // Finishing the mount writes the holding answer; the design holds only the operation the
-    // first question asked for, never a label from the project.
+    // Step 4 — the grouped picker; Create makes the one operation asked for and lands in Design.
     fireEvent.click(screen.getByTestId('engrave-setup-next'));
-    expect(useEngraveJobStore.getState().job.labels).toEqual([]);
-    expect(useEngraveJobStore.getState().job.stockEntry?.shelfId).toBe('stock-plate1');
+    expect(screen.getByTestId('start-wizard-progress').textContent).toBe(
+      'Step 4 of 4 · What are you cutting?',
+    );
+    fireEvent.click(screen.getByTestId('engrave-setup-what-pocket'));
+    fireEvent.click(screen.getByTestId('start-wizard-create'));
+    expect(screen.queryByTestId('start-wizard')).toBeNull();
+
+    // The design holds only the operation step 4 asked for, never a label from the project, and
+    // the name of the piece survives the exit.
+    const after = useEngraveJobStore.getState().job;
+    expect(after.labels).toEqual([]);
+    expect(after.shapes).toHaveLength(1);
+    expect(after.stockEntry?.shelfId).toBe('stock-plate1');
   });
 
   it('a laminate row names its assumed cap, and the job takes the cap and its provenance (#492)', async () => {
@@ -190,7 +203,7 @@ describe('the material-first start (#418)', () => {
     await act(async () => {
       fireEvent.click(screen.getByTestId('start-wizard-stock-next'));
     });
-    await screen.findByTestId('engrave-setup-flow');
+    await screen.findByTestId('engrave-setup-step-holding');
 
     const job = useEngraveJobStore.getState().job;
     expect(job.stock.material).toBe('plastic');
@@ -226,7 +239,7 @@ describe('the material-first start (#418)', () => {
     await act(async () => {
       fireEvent.click(screen.getByTestId('start-wizard-stock-next'));
     });
-    await screen.findByTestId('engrave-setup-flow');
+    await screen.findByTestId('engrave-setup-step-holding');
     const job = useEngraveJobStore.getState().job;
     expect(job.stock).toMatchObject({ length: 80, width: 50, thickness: 6 });
     expect(job.stockEntry).toMatchObject({ kind: 'made', shelfId: null, form: 'plate', finish: 'unknown' });
@@ -253,7 +266,7 @@ describe('the material-first start (#418)', () => {
     await act(async () => {
       fireEvent.click(screen.getByTestId('start-wizard-stock-next'));
     });
-    await screen.findByTestId('engrave-setup-flow');
+    await screen.findByTestId('engrave-setup-step-holding');
     expect(svc.calls).toContain('POST /stock');
     const saved = svc.items().find((i) => (i as { material?: string }).material === 'brass')!;
     expect(useEngraveJobStore.getState().job.stockEntry).toMatchObject({ kind: 'made', shelfId: saved.id, form: 'block' });
@@ -282,9 +295,40 @@ describe('the material-first start (#418)', () => {
     await act(async () => {
       fireEvent.click(screen.getByTestId('start-wizard-stock-next'));
     });
-    await screen.findByTestId('engrave-setup-flow');
+    await screen.findByTestId('engrave-setup-step-holding');
     expect(useEngraveJobStore.getState().job.stock.material).toBe(material);
     expect(useEngraveJobStore.getState().job.facing).toEqual({ enabled: false, depth: 0 });
+  });
+
+  it('Back to stock after the project was made: a changed piece re-sizes the drawn part', async () => {
+    fakeShelf(null);
+    await toStockStep();
+    fireEvent.click(screen.getByTestId('start-wizard-stock-door-make'));
+    fireEvent.change(screen.getByTestId('start-wizard-make-length'), { target: { value: '60' } });
+    fireEvent.change(screen.getByTestId('start-wizard-make-width'), { target: { value: '40' } });
+    fireEvent.change(screen.getByTestId('start-wizard-make-thickness'), { target: { value: '8' } });
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('start-wizard-stock-next'));
+    });
+    await screen.findByTestId('engrave-setup-step-holding');
+    expect(useProjectStore.getState().project.case.blank).toMatchObject({ width: 60, height: 40, thickness: 8 });
+
+    fireEvent.click(screen.getByTestId('start-wizard-back'));
+    fireEvent.change(screen.getByTestId('start-wizard-make-length'), { target: { value: '80' } });
+    fireEvent.change(screen.getByTestId('start-wizard-make-width'), { target: { value: '50' } });
+    fireEvent.change(screen.getByTestId('start-wizard-make-thickness'), { target: { value: '6' } });
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('start-wizard-stock-next'));
+    });
+    await screen.findByTestId('engrave-setup-step-holding');
+
+    // The part IS the stock: a step-2 change inside this run is a new start, not an edit under the
+    // old-sized part.
+    expect(useProjectStore.getState().project.case.blank).toMatchObject({ width: 80, height: 50, thickness: 6 });
+    expect(useEngraveJobStore.getState().job.stock).toMatchObject({ length: 80, width: 50, thickness: 6 });
+    expect(useEngraveJobStore.getState().job.stockEntry).toMatchObject({ kind: 'made' });
+    // Nothing was on the job to lose, so nothing was asked.
+    expect(screen.queryByTestId('start-wizard-replace-confirm')).toBeNull();
   });
 
   it('round stock is not on offer to type; a disc on the shelf is refused by name', async () => {
@@ -333,7 +377,7 @@ describe('the material-first start (#418)', () => {
     await act(async () => {
       fireEvent.click(screen.getByTestId('start-wizard-replace-yes'));
     });
-    await screen.findByTestId('engrave-setup-flow');
+    await screen.findByTestId('engrave-setup-step-holding');
     expect(useEngraveJobStore.getState().job.labels).toEqual([]);
   });
 
@@ -346,30 +390,30 @@ describe('the material-first start (#418)', () => {
       fireEvent.click(screen.getByTestId('start-wizard-stock-next'));
     });
     expect(screen.queryByTestId('start-wizard-replace-confirm')).toBeNull();
-    await screen.findByTestId('engrave-setup-flow');
+    await screen.findByTestId('engrave-setup-step-holding');
   });
 
-  it('the skipped blank and cutter steps still say what is wrong, on the mount step', async () => {
-    fakeShelf(null);
-    await toStockStep();
-    fireEvent.click(screen.getByTestId('start-wizard-stock-door-make'));
-    // 4.5 mm: the shipped vise stands it 4 mm proud on a 3.1 mm step, more than the seated value.
-    fireEvent.change(screen.getByTestId('start-wizard-make-length'), { target: { value: '60' } });
-    fireEvent.change(screen.getByTestId('start-wizard-make-width'), { target: { value: '30' } });
-    fireEvent.change(screen.getByTestId('start-wizard-make-thickness'), { target: { value: '4.5' } });
-    await act(async () => {
-      fireEvent.click(screen.getByTestId('start-wizard-stock-next'));
+  it('the blank checks that lost their own step still speak, on the holding step', () => {
+    // A job whose stock is thinner than the vise stands it: the #231 refusal the old blank step
+    // owned. It is shown where the operator can act on it — the holding step of the one wizard.
+    const stock = { ...defaultEngraveJob().stock, length: 60, width: 30, thickness: 4.5 };
+    useEngraveJobStore.setState({ job: { ...defaultEngraveJob(), stock } });
+    act(() => {
+      useEngraveJobStore.getState().setVise({ stockProud: 5, source: 'saved' });
     });
-    await screen.findByTestId('engrave-setup-step-what');
-    fireEvent.click(screen.getByTestId('engrave-setup-what-pocket'));
-    await screen.findByTestId('engrave-setup-step-holding');
-    // Force the proud past the blank, as a saved vise would: the blank step's fix must still appear.
-    useEngraveJobStore.getState().setVise({ stockProud: 5, source: 'saved' });
-    cleanup();
-    const { EngraveSetupFlow } = await import('@/components/panels/EngraveSetupFlow');
-    render(<EngraveSetupFlow onClose={() => {}} steps={['holding']} />);
+    act(() => {
+      useStartWizardStore.getState().openWizard('holding');
+    });
+    render(<StartWizard />);
+
     expect(screen.getByTestId('engrave-setup-fix-slot')).toBeDefined();
-    expect(screen.getByTestId('engrave-setup-step-finding-vise-stock-proud-exceeds-thickness')).toBeDefined();
+    expect(screen.getByTestId('engrave-setup-fix-slot').textContent).toContain(
+      'taller than this 4.5 mm blank',
+    );
+    const row = screen.getByTestId('engrave-setup-step-finding-vise-stock-proud-exceeds-thickness');
+    // The sentence is operator text; the CODE stays in the test id (A10, D1).
+    expect(row.textContent).toContain('nothing is left in the jaws');
+    expect(row.textContent).not.toContain('vise-stock-proud-exceeds-thickness');
   });
 });
 
@@ -397,7 +441,7 @@ describe('stockEntry follows the stock (#418 review)', () => {
     await act(async () => {
       fireEvent.click(screen.getByTestId('start-wizard-job-blank'));
     });
-    await screen.findByTestId('engrave-setup-flow');
+    await screen.findByTestId('engrave-setup-step-holding');
     expect(useEngraveJobStore.getState().job).not.toHaveProperty('stockEntry');
   });
 });

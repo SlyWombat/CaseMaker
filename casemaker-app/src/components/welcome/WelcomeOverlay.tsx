@@ -284,7 +284,7 @@ export function WelcomeOverlay() {
             {featureSim && (
               <button
                 className="wb-btn wb-btn--primary"
-                onClick={openWizard}
+                onClick={() => openWizard()}
                 data-testid="welcome-start-cnc"
                 title="Check for a machine, pick what you are making, then set up the cut"
               >

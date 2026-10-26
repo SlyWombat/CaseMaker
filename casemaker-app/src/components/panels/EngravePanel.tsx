@@ -11,6 +11,7 @@ import { useSimStore } from '@/store/simStore';
 import { useCncModeStore } from '@/store/cncModeStore';
 import { useEngravePackageStore } from '@/store/engravePackageStore';
 import { useStockStore } from '@/store/stockStore';
+import { useStartWizardStore } from '@/store/startWizardStore';
 import { preflightHub } from '@/engine/cnc/preflight';
 import type { PreflightCause } from '@/engine/cnc/preflight';
 import { runContextFor } from '@/store/machineRunStore';
@@ -144,7 +145,6 @@ import { setOperationIntake } from './operationIntake';
 import { EngraveTraceRow } from './EngraveTraceRow';
 import { EngraveVectorRow } from './EngraveVectorRow';
 import { EngraveImportDialog } from './EngraveImportDialog';
-import { EngraveSetupFlow } from './EngraveSetupFlow';
 import { EngraveSetupsSection } from './EngraveSetupsSection';
 import { RunSheetView } from './RunSheetView';
 import { coverageDisclaimer, type SimRunOutcome } from './simCoverage';
@@ -503,12 +503,15 @@ function Group({
   title,
   summary,
   defaultOpen,
+  action,
   children,
 }: {
   testid: string;
   title: string;
   summary: string;
   defaultOpen?: boolean;
+  /** #681 — the group's own way into the wizard (the mockup's `edit`), without opening the group. */
+  action?: { testid: string; label: string; onClick: () => void };
   children: ReactNode;
 }) {
   const [open, setOpen] = useState(defaultOpen ?? false);
@@ -524,7 +527,24 @@ function Group({
         style={{ cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 8 }}
       >
         <span style={{ fontSize: 12, fontWeight: 600, color: '#c8d3de' }}>{title}</span>
-        <span style={{ ...MUTED, margin: 0, textAlign: 'right' }}>{summary}</span>
+        <span style={{ display: 'flex', alignItems: 'baseline', gap: 6, textAlign: 'right' }}>
+          <span style={{ ...MUTED, margin: 0 }}>{summary}</span>
+          {action && (
+            <button
+              type="button"
+              data-testid={action.testid}
+              style={{ ...MUTED, margin: 0, padding: '1px 6px', cursor: 'pointer' }}
+              onClick={(e) => {
+                // A button inside a summary would otherwise toggle the group as well.
+                e.preventDefault();
+                e.stopPropagation();
+                action.onClick();
+              }}
+            >
+              {action.label}
+            </button>
+          )}
+        </span>
       </summary>
       <div style={{ marginTop: 4 }}>{children}</div>
     </details>
@@ -1409,12 +1429,13 @@ export function EngravePanel(): JSX.Element {
     showMode('design');
   };
 
+  // #681 — the setup is a step of the ONE cutting-job wizard. Stock and Hold re-open it at their
+  // own step, with the shell's one counter; there is no second modal in the panel.
+  const openWizard = useStartWizardStore((s) => s.openWizard);
   // The run sheet is built on demand from the current job and the last generated result, and
   // shown as an overlay (#207). A stale result is not offered: the sheet would describe a job the
   // user has since changed.
   const [sheet, setSheet] = useState<RunSheet | null>(null);
-  // The guided job setup (#254) is a path into this panel, not a gate in front of it.
-  const [setupOpen, setSetupOpen] = useState(false);
   // #277 — the last measured run of THIS job's program, out of the record files this browser has
   // been handed (the panel's own "Open run record…", plus whatever the readback committed).
   const importedRecords = useRunRecordStore((s) => s.imported);
@@ -2146,9 +2167,9 @@ export function EngravePanel(): JSX.Element {
         <button
           type="button"
           data-testid="engrave-setup-open"
-          title="Answer workholding, material, blank and cutter in order — then return here."
+          title="Re-open the cutting-job wizard at the holding step — the same wizard, the same counter."
           style={{ flex: 1, padding: 6 }}
-          onClick={() => setSetupOpen(true)}
+          onClick={() => openWizard('holding')}
         >
           Set up this job…
         </button>
@@ -2215,7 +2236,18 @@ export function EngravePanel(): JSX.Element {
         defaultOpen
       >
       {/* 1 — stock */}
-      <h3 style={SUBHEAD}>Stock</h3>
+      <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 8 }}>
+        <h3 style={SUBHEAD}>Stock</h3>
+        <button
+          type="button"
+          data-testid="engrave-stock-edit"
+          style={{ ...MUTED, margin: 0, padding: '1px 6px', cursor: 'pointer' }}
+          title="Re-open the cutting-job wizard at the stock step — the same wizard, the same counter."
+          onClick={() => openWizard('stock')}
+        >
+          edit
+        </button>
+      </div>
       {/* #271 route 1 — take the blank from the project's badge rather than typing it. Sets the
           stock and declares the magnet pocket in one press; every other field is left alone, so a
           label that no longer fits the smaller blank is reported (not silently moved). */}
@@ -3216,6 +3248,7 @@ export function EngravePanel(): JSX.Element {
         testid="engrave-group-hold"
         title="Hold"
         summary={`Vise — ${viseBadge(job.workholding.vise)} · blank on the ${job.workholding.vise.seat}`}
+        action={{ testid: 'engrave-hold-edit', label: 'edit', onClick: () => openWizard('holding') }}
       >
       {/* 4 — vise */}
       {/* #523 — the vise is a card: the one sentence always visible, the fields open on Edit. */}
@@ -3592,7 +3625,6 @@ export function EngravePanel(): JSX.Element {
       </footer>
 
       {sheet && <RunSheetView sheet={sheet} onClose={() => setSheet(null)} />}
-      {setupOpen && <EngraveSetupFlow onClose={() => setSetupOpen(false)} />}
       {pendingOutline && (
         <EngraveImportDialog
           outline={pendingOutline}

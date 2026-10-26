@@ -69,6 +69,20 @@ export type OperationTypeId =
   | 'flute'
   | 'prism';
 
+/**
+ * #681 — the four groups the wizard's step 4 draws the operations in, in the mockup's order and
+ * words (`docs/design/first-job-flow-mockups.html`, station 4). The panel's "Add operation" will
+ * read the same table (#685), so the picker has one shape wherever it appears.
+ */
+export type OperationGroupId = 'engrave-carve' | 'cut-away' | 'holes' | '3d';
+
+export const OPERATION_GROUPS: readonly { id: OperationGroupId; label: string }[] = [
+  { id: 'engrave-carve', label: 'Engrave & carve' },
+  { id: 'cut-away', label: 'Cut away' },
+  { id: 'holes', label: 'Holes' },
+  { id: '3d', label: '3D' },
+];
+
 export interface OperationTypeDef {
   id: OperationTypeId;
   /** The word a row's chip shows and a picker button reads. */
@@ -77,25 +91,32 @@ export interface OperationTypeDef {
   blurb: string;
   /** The historic/host testid its picker button carries. */
   addTestId: string;
+  /** Which group of the grouped picker lists it in (#681). */
+  group: OperationGroupId;
 }
 
 /** The order every picker lists them in — the matrix's own order, the text operation first. */
 export const OPERATION_TYPES: readonly OperationTypeDef[] = [
-  { id: 'engrave', label: 'Engrave', blurb: 'Text, or single-stroke lines', addTestId: 'engrave-add-label' },
-  { id: 'v-carve', label: 'V-carve', blurb: 'A region cut by the job’s V-bit', addTestId: 'engrave-add-v-carve' },
-  { id: 'v-carve-variable', label: 'V-carve (variable depth)', blurb: 'The V follows the design’s width down to its centre', addTestId: 'engrave-add-v-carve-variable' },
-  { id: 'inlay', label: 'Inlay', blurb: 'A female pocket, and the male plug to glue into it', addTestId: 'engrave-add-inlay' },
-  { id: 'pocket', label: 'Pocket', blurb: 'A flat-bottomed region', addTestId: 'engrave-add-rect' },
-  { id: 'profile', label: 'Profile', blurb: 'A cut-out through the blank, held with tabs', addTestId: 'engrave-add-profile' },
-  { id: 'chamfer', label: 'Chamfer the edge', blurb: 'Break a profile’s or pocket’s edge at an angle', addTestId: 'engrave-add-chamfer' },
-  { id: 'hole', label: 'Hole', blurb: 'A hole, or a grid of them', addTestId: 'engrave-add-drill' },
-  { id: 'bore', label: 'Bore to size', blurb: 'A hole wider than the cutter, helixed down its wall', addTestId: 'engrave-add-bore' },
-  { id: 'thread', label: 'Thread', blurb: 'A milled internal thread', addTestId: 'engrave-add-thread' },
-  { id: 'surface', label: 'Surface a mesh', blurb: 'Rough and finish a goal mesh or picture', addTestId: 'engrave-add-surface' },
-  { id: 'texture', label: 'Texture a surface', blurb: 'A seeded pattern of short strokes over a region', addTestId: 'engrave-add-texture' },
-  { id: 'flute', label: 'Flute along a line', blurb: 'A groove that ramps in and out along its ends', addTestId: 'engrave-add-flute' },
-  { id: 'prism', label: 'Raise a prism', blurb: 'A shape standing on sloped sides, cut by the V-bit', addTestId: 'engrave-add-prism' },
+  { id: 'engrave', label: 'Engrave text', blurb: 'Text, or single-stroke lines', addTestId: 'engrave-add-label', group: 'engrave-carve' },
+  { id: 'v-carve', label: 'V-carve', blurb: 'A region cut by the job’s V-bit', addTestId: 'engrave-add-v-carve', group: 'engrave-carve' },
+  { id: 'v-carve-variable', label: 'V-carve (variable depth)', blurb: 'The V follows the design’s width down to its centre', addTestId: 'engrave-add-v-carve-variable', group: 'engrave-carve' },
+  { id: 'inlay', label: 'Inlay', blurb: 'A female pocket, and the male plug to glue into it', addTestId: 'engrave-add-inlay', group: 'engrave-carve' },
+  { id: 'pocket', label: 'Pocket', blurb: 'A flat-bottomed region', addTestId: 'engrave-add-rect', group: 'cut-away' },
+  { id: 'profile', label: 'Profile', blurb: 'A cut-out through the blank, held with tabs', addTestId: 'engrave-add-profile', group: 'cut-away' },
+  { id: 'chamfer', label: 'Chamfer the edge', blurb: 'Break a profile’s or pocket’s edge at an angle', addTestId: 'engrave-add-chamfer', group: 'cut-away' },
+  { id: 'hole', label: 'Hole', blurb: 'A hole, or a grid of them', addTestId: 'engrave-add-drill', group: 'holes' },
+  { id: 'bore', label: 'Bore to size', blurb: 'A hole wider than the cutter, helixed down its wall', addTestId: 'engrave-add-bore', group: 'holes' },
+  { id: 'thread', label: 'Thread', blurb: 'A milled internal thread', addTestId: 'engrave-add-thread', group: 'holes' },
+  { id: 'surface', label: 'Surface a mesh', blurb: 'Rough and finish a goal mesh or picture', addTestId: 'engrave-add-surface', group: '3d' },
+  { id: 'texture', label: 'Texture a surface', blurb: 'A seeded pattern of short strokes over a region', addTestId: 'engrave-add-texture', group: 'engrave-carve' },
+  { id: 'flute', label: 'Flute along a line', blurb: 'A groove that ramps in and out along its ends', addTestId: 'engrave-add-flute', group: 'engrave-carve' },
+  { id: 'prism', label: 'Raise a prism', blurb: 'A shape standing on sloped sides, cut by the V-bit', addTestId: 'engrave-add-prism', group: 'engrave-carve' },
 ];
+
+/** The types in one group, in the table's order. */
+export function operationTypesInGroup(group: OperationGroupId): readonly OperationTypeDef[] {
+  return OPERATION_TYPES.filter((t) => t.group === group);
+}
 
 const BY_ID = new Map(OPERATION_TYPES.map((t) => [t.id, t]));
 

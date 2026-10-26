@@ -398,15 +398,15 @@ test('a dialog is above every element of the viewport pane (#348)', async ({ cm,
   expect(Number.isFinite(bare!.label), 'the wrapper carries a numeric z-index').toBe(true);
   expect(bare!.label!, 'a projected label sits under the viewport chrome').toBeLessThan(bare!.toolbar!);
 
-  // The reported screen: the setup flow at step 2 (material), with the preview still mounted behind
-  // it — the report was '…asured defaults' printed over "What is it made of?".
+  // The reported screen: the cutting-job wizard open on its holding step, with the preview still
+  // mounted behind it — the report was '…asured defaults' printed over "What is it made of?".
+  // Since #681 it is ONE wizard: the panel's edit opens it at the step it names.
   await page.getByTestId('engrave-setup-open').click();
-  await expect(page.getByTestId('engrave-setup-flow')).toBeVisible();
-  await page.getByTestId('engrave-setup-next').click();
-  await expect(page.getByTestId('engrave-setup-step-material')).toBeVisible();
+  await expect(page.getByTestId('start-wizard')).toBeVisible();
+  await expect(page.getByTestId('engrave-setup-step-holding')).toBeVisible();
 
   const stack = await page.evaluate(() => {
-    const overlay = document.querySelector('[data-testid="engrave-setup-flow"]') as HTMLElement;
+    const overlay = document.querySelector('[data-testid="start-wizard"]') as HTMLElement;
     const pane = document.querySelector('.viewport-wrapper') as HTMLElement;
     const named = (el: Element): string => {
       const id = el.getAttribute('data-testid');

@@ -116,7 +116,7 @@ afterEach(() => {
 });
 
 /** Click through step 1 without checking for a machine. */
-function skipToJobStep(): void {
+function skipToStockStep(): void {
   fireEvent.click(screen.getByTestId('start-wizard-next'));
 }
 
@@ -306,10 +306,10 @@ describe('#280 — step 1, the machine check', () => {
   });
 });
 
-describe('#280 — step 2, what are you making', () => {
+describe('#280 — step 2, the stock (and its starter templates)', () => {
   it('offers only what the CNC cuts: the badge blank and the bare blank (#346)', () => {
     render(<StartWizard />);
-    skipToJobStep();
+    skipToStockStep();
     for (const id of ['badge-blank', 'blank']) {
       expect(screen.getByTestId(`start-wizard-job-${id}`), `${id} should be offered`).toBeDefined();
     }
@@ -320,23 +320,25 @@ describe('#280 — step 2, what are you making', () => {
     expect(screen.getAllByTestId(/^start-wizard-job-/)).toHaveLength(2);
   });
 
-  it('choosing the blank creates the project, opens the Engrave panel and hands off to the setup', async () => {
+  it('choosing the blank creates the project, opens Engrave, and moves the same wizard to holding', async () => {
     render(<StartWizard />);
-    skipToJobStep();
+    skipToStockStep();
     await chooseJob('blank');
 
     const s = useProjectStore.getState();
     expect(s.project.case.blank?.enabled).toBe(true);
     expect(s.welcomeMode).toBe(false);
     expect(useViewportStore.getState().activeSidebarSection).toBe('cnc-engrave');
-    // Step 3 is the flow's own overlay, not a second dialog stacked on ours.
-    expect(screen.getByTestId('engrave-setup-flow')).toBeDefined();
-    expect(screen.queryByTestId('start-wizard')).toBeNull();
+    // The SAME modal, now on step 3: one wizard, one counter — no second dialog (#681).
+    expect(screen.getByTestId('start-wizard')).toBeDefined();
+    expect(screen.getByTestId('engrave-setup-step-holding')).toBeDefined();
+    expect(screen.getByTestId('start-wizard-progress').textContent).toBe('Step 3 of 4 · Holding');
+    expect(screen.queryByTestId('engrave-setup-flow')).toBeNull();
   });
 
   it('seeds the engrave job’s stock from the blank — dimensions only, tagged computed', async () => {
     render(<StartWizard />);
-    skipToJobStep();
+    skipToStockStep();
     await chooseJob('blank');
 
     const job = useEngraveJobStore.getState().job;
@@ -362,9 +364,12 @@ describe('#280 — step 2, what are you making', () => {
         <WizardHost />
       </>,
     );
-    skipToJobStep();
+    skipToStockStep();
     await chooseJob('badge-blank');
-    expect(screen.getByTestId('engrave-setup-flow')).toBeTruthy();
+    expect(screen.getByTestId('engrave-setup-step-holding')).toBeTruthy();
+    expect(screen.getByTestId('start-wizard-progress').textContent).toBe('Step 3 of 4 · Holding');
+    // The blank the hand-off seeded raises no #231 refusal (the vise followed the badge).
+    expect(screen.queryByTestId('engrave-setup-step-finding-vise-stock-proud-exceeds-thickness')).toBeNull();
 
     // The hand-off itself is the seed (#352): the badge's blank is the stock, no button pressed —
     // and since #383 it is the blank TURNED a quarter turn, because that is how the vise holds it:
@@ -382,13 +387,13 @@ describe('#280 — step 2, what are you making', () => {
     expect(job.labels).toHaveLength(1);
     expect(job.labels[0]!.text).toBe('Name');
 
-    fireEvent.click(screen.getByTestId('engrave-setup-next')); // holding -> material
-    fireEvent.click(screen.getByTestId('engrave-setup-next')); // material -> blank
-    const blankStep = screen.getByTestId('engrave-setup-step-blank');
-    expect(blankStep.textContent).not.toContain('vise-stock-proud-exceeds-thickness');
-    // …and it is the badge's blank the flow is asking about, not the 12 mm default it seeded before.
-    expect((screen.getByTestId('engrave-setup-stock-thickness') as HTMLInputElement).value).toBe('3.81');
-    // #352 — the step says where those numbers came from, rather than letting 3.81 look typed.
+    // Back to step 2: the step is seeded from the job the job now has, and it says where those
+    // numbers came from rather than letting 3.81 look typed (#352).
+    fireEvent.click(screen.getByTestId('start-wizard-back'));
+    expect(screen.getByTestId('start-wizard-step-stock')).toBeDefined();
+    expect(screen.getByTestId('start-wizard-progress').textContent).toBe('Step 2 of 4 · Stock');
+    // …and it is the badge's blank the step is asking about, not the 12 mm default it seeded before.
+    expect((screen.getByTestId('start-wizard-make-thickness') as HTMLInputElement).value).toBe('3.81');
     expect(screen.getByTestId('engrave-setup-stock-provenance').textContent).toContain('the template');
   });
 
@@ -399,7 +404,7 @@ describe('#280 — step 2, what are you making', () => {
     // up at once (it never waited), while the job is byte-for-byte the one that was there before.
     fonts.gate = true;
     render(<StartWizard />);
-    skipToJobStep();
+    skipToStockStep();
     await act(async () => {
       fireEvent.click(screen.getByTestId('start-wizard-job-badge-blank'));
     });
@@ -407,12 +412,12 @@ describe('#280 — step 2, what are you making', () => {
     expect(useProjectStore.getState().welcomeMode).toBe(false);
     expect(useEngraveJobStore.getState().job.stock.length).toBe(defaultEngraveJob().stock.length);
     expect(useEngraveJobStore.getState().job.labels).toHaveLength(3); // the demo set, untouched
-    expect(screen.queryByTestId('engrave-setup-flow')).toBeNull();
+    expect(screen.queryByTestId('engrave-setup-step-holding')).toBeNull();
 
     fonts.release?.();
     // …and once they land, the whole of the hand-off runs: the badge's stock, its ONE seeded line,
-    // and step 3.
-    expect(await screen.findByTestId('engrave-setup-flow')).toBeTruthy();
+    // and step 3 of the same modal.
+    expect(await screen.findByTestId('engrave-setup-step-holding')).toBeTruthy();
     const job = useEngraveJobStore.getState().job;
     // …the turned blank (#383), so its 38.1 mm span is the stock's LENGTH.
     expect(job.stock.length).toBeCloseTo(38.1, 6);
@@ -426,7 +431,7 @@ describe('#280 — step 2, what are you making', () => {
       job: { ...job, stock: { ...job.stock, length: 999 }, sources: { stock: { length: 'measured' } } },
     });
     render(<StartWizard />);
-    skipToJobStep();
+    skipToStockStep();
     await chooseJob('blank');
 
     const after = useEngraveJobStore.getState().job;
@@ -468,7 +473,7 @@ describe('#432 slice 4 — a new job starts with the finish’s facing choice', 
 
   it('a rough piece is seeded facing on, with the shop’s rough skim', async () => {
     render(<StartWizard />);
-    skipToJobStep();
+    skipToStockStep();
     typePiece('rough');
     await start();
 
@@ -479,7 +484,7 @@ describe('#432 slice 4 — a new job starts with the finish’s facing choice', 
 
   it('a finished piece is seeded facing off — the face is cut as it is', async () => {
     render(<StartWizard />);
-    skipToJobStep();
+    skipToStockStep();
     typePiece('finished');
     await start();
 
@@ -488,13 +493,103 @@ describe('#432 slice 4 — a new job starts with the finish’s facing choice', 
 
   it('the stock step says what the job will start with, depth and all', () => {
     render(<StartWizard />);
-    skipToJobStep();
+    skipToStockStep();
     typePiece('rough');
 
     const line = screen.getByTestId('start-wizard-stock-facing');
     expect(line.getAttribute('data-state')).toBe('on');
     expect(line.textContent).toContain('rough stock is faced first');
     expect(line.textContent).toContain('0.5 mm skim');
+  });
+});
+
+// #681 — the wizard must carry a job to its item on the paths where something is missing. A job
+// needs no machine and no cutter: both are answered later, and neither gates a step.
+describe('#681 — the wizard with nothing to lean on', () => {
+  /** The stock step's "type a piece" door: a 60 × 40 × 8 mm piece. */
+  function typePiece(): void {
+    fireEvent.click(screen.getByTestId('start-wizard-stock-door-make'));
+    fireEvent.change(screen.getByTestId('start-wizard-make-length'), { target: { value: '60' } });
+    fireEvent.change(screen.getByTestId('start-wizard-make-width'), { target: { value: '40' } });
+    fireEvent.change(screen.getByTestId('start-wizard-make-thickness'), { target: { value: '8' } });
+  }
+
+  /** Stock → holding → operation, the middle of the one wizard. */
+  async function toOperationStep(): Promise<void> {
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('start-wizard-stock-next'));
+    });
+    expect(screen.getByTestId('engrave-setup-step-holding')).toBeDefined();
+    expect(screen.getByTestId('start-wizard-progress').textContent).toBe('Step 3 of 4 · Holding');
+    fireEvent.click(screen.getByTestId('engrave-setup-next'));
+    expect(screen.getByTestId('start-wizard-progress').textContent).toBe(
+      'Step 4 of 4 · What are you cutting?',
+    );
+  }
+
+  it('no machine on the network: the check says so, Next is never gated, and the item is still made', async () => {
+    useClient(fakeClient()); // discover → [] = nothing answered
+    act(() => {
+      useStartWizardStore.getState().openWizard();
+    });
+    render(<WizardHost />);
+
+    fireEvent.click(screen.getByTestId('start-wizard-check'));
+    const state = await screen.findByTestId('start-wizard-machine-state');
+    expect(state.getAttribute('data-state')).toBe('not-found');
+    expect((screen.getByTestId('start-wizard-next') as HTMLButtonElement).disabled).toBe(false);
+
+    fireEvent.click(screen.getByTestId('start-wizard-next'));
+    typePiece();
+    await toOperationStep();
+    fireEvent.change(screen.getByTestId('start-wizard-op-text'), { target: { value: 'Bench free' } });
+    fireEvent.click(screen.getByTestId('start-wizard-create'));
+    expect(screen.queryByTestId('start-wizard')).toBeNull();
+
+    const job = useEngraveJobStore.getState().job;
+    expect(job.labels).toHaveLength(1);
+    expect(job.labels[0]!.text).toBe('Bench free');
+  });
+
+  it('no cutter: the job still gets its item, with no bit named on it', async () => {
+    act(() => {
+      useStartWizardStore.getState().openWizard();
+    });
+    render(<WizardHost />);
+    skipToStockStep();
+    typePiece();
+    await toOperationStep();
+    // The default job names no cutter (#516), and this path added none.
+    expect(useEngraveJobStore.getState().job.toolKey ?? '').toBe('');
+
+    fireEvent.change(screen.getByTestId('start-wizard-op-text'), { target: { value: 'No bit yet' } });
+    fireEvent.click(screen.getByTestId('start-wizard-create'));
+
+    const job = useEngraveJobStore.getState().job;
+    expect(job.toolKey ?? '').toBe('');
+    expect(job.labels).toHaveLength(1);
+    expect(job.labels[0]!.text).toBe('No bit yet');
+  });
+
+  it('nothing chosen on the stock step: Next waits, says what step it leads to, and how to unblock it', () => {
+    act(() => {
+      useStartWizardStore.getState().openWizard();
+    });
+    render(<WizardHost />);
+    skipToStockStep();
+
+    const next = screen.getByTestId('start-wizard-stock-next') as HTMLButtonElement;
+    expect(next.disabled).toBe(true);
+    // The button that leaves step 2 says what step 3 is.
+    expect(next.textContent).toBe('Next: holding');
+    // …and ONE sentence, in the step, says what to do — with the controls to do it right above.
+    expect(screen.getByTestId('start-wizard-stock-unblock').textContent).toBe(
+      'Choose the stock above — a piece on the shelf, a size you type, or a file.',
+    );
+
+    typePiece();
+    expect((screen.getByTestId('start-wizard-stock-next') as HTMLButtonElement).disabled).toBe(false);
+    expect(screen.queryByTestId('start-wizard-stock-unblock')).toBeNull();
   });
 });
 

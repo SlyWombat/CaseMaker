@@ -52,16 +52,18 @@ test('new project → shelf stock → mount → empty design, the stock drawn', 
   await expect(page.getByTestId('start-wizard-stock-facing')).toHaveAttribute('data-state', 'on');
   await page.getByTestId('start-wizard-stock-next').click();
 
-  // Step 3 — the job wizard. A fresh job has nothing to cut, so it asks what to cut first (#662);
-  // the mount question is the one the hand-off already knew it needed.
-  await expect(page.getByTestId('engrave-setup-flow')).toBeVisible();
-  await expect(page.getByTestId('engrave-setup-step-what')).toBeVisible();
-  await expect(page.getByTestId('engrave-setup-progress')).toHaveText('1 / 2');
-  await page.getByTestId('engrave-setup-what-pocket').click();
+  // Step 3 — the same wizard, on the mount. A fresh job has nothing to cut yet, so the operation
+  // is step 4 (#681); the mount question is the one the hand-off already knew it needed.
   await expect(page.getByTestId('engrave-setup-step-holding')).toBeVisible();
-  await expect(page.getByTestId('engrave-setup-progress')).toHaveText('2 / 2');
-  await page.getByTestId('engrave-setup-next').click();
+  await expect(page.getByTestId('start-wizard-progress')).toHaveText('Step 3 of 4 · Holding');
   await expect(page.getByTestId('engrave-setup-flow')).toHaveCount(0);
+  await page.getByTestId('engrave-setup-next').click();
+
+  // Step 4 — the grouped picker; Create makes the pocket and lands in Design.
+  await expect(page.getByTestId('start-wizard-progress')).toHaveText('Step 4 of 4 · What are you cutting?');
+  await page.getByTestId('engrave-setup-what-pocket').click();
+  await page.getByTestId('start-wizard-create').click();
+  await expect(page.getByTestId('start-wizard')).toHaveCount(0);
 
   // The design: the panel on the shelf's piece, with the one pocket the wizard asked for and no
   // labels — the project supplied none.

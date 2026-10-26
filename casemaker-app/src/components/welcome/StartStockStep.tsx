@@ -36,11 +36,30 @@ import type { JobStockFinish, JobStockForm, StockMaterial } from '@/types/engrav
  * Every rule is in `engine/cnc/stockStart.ts` and `engine/import/meshStock.ts`.
  */
 
-/** What the wizard applies when "Next: mount" is pressed. */
+/** What the wizard applies when the stock step is left. */
 export type PendingStock =
   | { kind: 'choice'; choice: StockChoice; saveToShelf: StockItem | null }
   /** A PrusaSlicer project with negative volumes: the stock AND the design, through #410's reader. */
   | { kind: 'design'; file: File; sha256: string };
+
+/**
+ * #681 — where the stock step STARTS, when the wizard was re-opened from the panel's Stock `edit`.
+ * The current job's own numbers, on the "type a piece" door, so an edit is an edit and not a
+ * retype; an absent seed is the new-job flow (the shelf first, nothing chosen).
+ */
+export interface StartStockSeed {
+  form: JobStockForm;
+  material: StockMaterial;
+  length: number;
+  width: number;
+  thickness: number;
+  finish: JobStockFinish;
+  /**
+   * All three dims are the app's own derivation (`computed`), not a typed or measured answer — the
+   * template hand-off's stamp. The step says so until one of them is edited (#352's sentence).
+   */
+  computed?: boolean;
+}
 
 const MUTED: CSSProperties = { fontSize: 11, color: '#9aa4b0', lineHeight: 1.5, margin: '4px 0' };
 const NOTE: CSSProperties = { ...MUTED, borderLeft: '2px solid #3a5a7a', paddingLeft: 6 };
@@ -76,9 +95,12 @@ function entryLine(item: StockItem): string {
 
 export function StartStockStep({
   onChange,
+  seed,
 }: {
   /** The current answer, or null when there is none yet (or the one there is was refused). */
   onChange: (pending: PendingStock | null) => void;
+  /** The job's own stock when the step is re-opened to edit it (#681); absent for a new job. */
+  seed?: StartStockSeed;
 }): JSX.Element {
   const machineId = useEngraveJobStore((s) => s.job.machineId);
   const jobMaterial = useEngraveJobStore((s) => s.job.stock.material);
@@ -92,13 +114,25 @@ export function StartStockStep({
 
   const materials = useMemo(() => materialOptionsFor(machine), [machine]);
   const [material, setMaterial] = useState<StockMaterial>(() =>
-    materials.some((m) => m.value === jobMaterial) ? jobMaterial : (materials[0]?.value ?? 'softwood'),
+    seed !== undefined && materials.some((m) => m.value === seed.material)
+      ? seed.material
+      : materials.some((m) => m.value === jobMaterial)
+        ? jobMaterial
+        : (materials[0]?.value ?? 'softwood'),
   );
-  const [door, setDoor] = useState<Door>('shelf');
+  const [door, setDoor] = useState<Door>(seed === undefined ? 'shelf' : 'make');
   const [shelfId, setShelfId] = useState<string | null>(null);
-  const [form, setForm] = useState<JobStockForm>('plate');
-  const [dims, setDims] = useState({ length: '', width: '', thickness: '' });
-  const [finish, setFinish] = useState<JobStockFinish>('unknown');
+  const [form, setForm] = useState<JobStockForm>(seed?.form ?? 'plate');
+  const [dims, setDims] = useState(() =>
+    seed === undefined
+      ? { length: '', width: '', thickness: '' }
+      : {
+          length: String(seed.length),
+          width: String(seed.width),
+          thickness: String(seed.thickness),
+        },
+  );
+  const [finish, setFinish] = useState<JobStockFinish>(seed?.finish ?? 'unknown');
   const [save, setSave] = useState(false);
   // One id for the entry a kept piece becomes, drawn once — not on every recompute of the answer.
   const [newId] = useState(() => newStockId());
@@ -335,6 +369,17 @@ export function StartStockStep({
               </label>
             ))}
           </div>
+          {/* #352 — where seeded numbers came from. It goes the moment one of them is edited,
+              because then the number IS the operator's and the sentence would be a lie. */}
+          {seed?.computed === true &&
+            dims.length === String(seed.length) &&
+            dims.width === String(seed.width) &&
+            dims.thickness === String(seed.thickness) && (
+              <p style={MUTED} data-testid="engrave-setup-stock-provenance">
+                These numbers came from the template you picked, not from a bench measurement — change
+                any you measured.
+              </p>
+            )}
           <p style={MUTED}>
             Rod, tube and disc are not offered: a job here cuts a rectangular block held in the vise, and round stock
             needs the rotary. Sphere stock is not offered at all.

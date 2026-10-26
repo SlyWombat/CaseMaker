@@ -6,7 +6,9 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { EngravePanel } from '@/components/panels/EngravePanel';
+import { StartWizard } from '@/components/welcome/StartWizard';
 import { useEngraveJobStore } from '@/store/engraveJobStore';
+import { resetStartWizard, useStartWizardStore } from '@/store/startWizardStore';
 import { useSettingsStore } from '@/store/settingsStore';
 import {
   setEngravePreviewClientLoader,
@@ -47,6 +49,7 @@ const NO_PREVIEW: EngravePreviewClient = { engravePreview: async () => null };
 beforeEach(() => {
   setEngravePreviewClientLoader(async () => NO_PREVIEW);
   useSettingsStore.getState().resetSettings();
+  resetStartWizard();
   act(() => {
     useEngraveJobStore.setState({ job: dj() });
   });
@@ -59,13 +62,6 @@ afterEach(() => {
   useEngravePreviewStore.getState().dispose();
   setEngravePreviewClientLoader(null);
 });
-
-/** Walk the flow to the blank step (holding -> material -> blank). */
-function toBlankStep(): void {
-  fireEvent.click(screen.getByTestId('engrave-setup-open'));
-  fireEvent.click(screen.getByTestId('engrave-setup-next'));
-  fireEvent.click(screen.getByTestId('engrave-setup-next'));
-}
 
 describe('guided job setup — the pure answers (#254)', () => {
   it('every value applyAnswers writes carries a source, and measured is never demoted', () => {
@@ -188,29 +184,67 @@ describe('the material list the job may be cut in (#347)', () => {
   });
 });
 
-describe('guided job setup — the flow in the panel (#254)', () => {
-  it('opens from the panel, is absent until asked for, and writes the #231 fix', () => {
-    render(<EngravePanel />);
-    expect(screen.queryByTestId('engrave-setup-flow')).toBeNull();
+describe('guided job setup — the flow in the panel (#254, #681)', () => {
+  /** The ONE wizard, mounted the way `AppShell` mounts it: it unmounts when it closes. */
+  function WizardHost() {
+    const open = useStartWizardStore((s) => s.open);
+    return open ? <StartWizard /> : <></>;
+  }
 
-    toBlankStep();
-    expect(screen.getByTestId('engrave-setup-step-blank')).toBeTruthy();
+  function renderPanel(): void {
+    render(
+      <>
+        <EngravePanel />
+        <WizardHost />
+      </>,
+    );
+  }
 
-    // 3.81 mm blank against the 4 mm-proud default: the fix is offered at the step.
-    fireEvent.change(screen.getByTestId('engrave-setup-stock-thickness'), { target: { value: '3.81' } });
-    expect(screen.getByTestId('engrave-setup-step-blank').textContent).toContain(
-      'vise-stock-proud-exceeds-thickness',
+  it('opens from the panel, is absent until asked for, and writes the #231 fix at the holding step', async () => {
+    renderPanel();
+    expect(screen.queryByTestId('start-wizard')).toBeNull();
+
+    fireEvent.click(screen.getByTestId('engrave-setup-open'));
+    expect(screen.getByTestId('engrave-setup-step-holding')).toBeTruthy();
+    // One wizard, one counter — the panel's edit names a step of the SAME modal.
+    expect(screen.getByTestId('start-wizard-progress').textContent).toBe('Step 3 of 4 · Holding');
+    expect(screen.queryByTestId('engrave-setup-progress')).toBeNull();
+
+    // A 3.81 mm blank under the shipped 4 mm-proud vise is #231. The blank is step 2 now, and
+    // `setStock` makes the vise follow the thickness (#344), so the disagreement this step catches
+    // is the one a SAVED vise states: put the shipped value back and re-open at holding.
+    fireEvent.click(screen.getByTestId('start-wizard-back'));
+    expect(screen.getByTestId('start-wizard-progress').textContent).toBe('Step 2 of 4 · Stock');
+    fireEvent.change(screen.getByTestId('start-wizard-make-thickness'), { target: { value: '3.81' } });
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('start-wizard-stock-next'));
+    });
+    fireEvent.click(screen.getByTestId('start-wizard-close'));
+    act(() => {
+      useEngraveJobStore.getState().setVise({ stockProud: 4, source: 'saved' });
+    });
+    fireEvent.click(screen.getByTestId('engrave-setup-open'));
+
+    const row = screen.getByTestId('engrave-setup-step-finding-vise-stock-proud-exceeds-thickness');
+    // The sentence is operator text; the code lives only in the test id (A10, D1).
+    expect(row.textContent).toContain('nothing is left in the jaws');
+    expect(row.textContent).not.toContain('vise-stock-proud-exceeds-thickness');
+    // The fix itself says what it would write, in the operator's own numbers.
+    expect(screen.getByTestId('engrave-setup-fix-slot').textContent).toContain(
+      'taller than this 3.81 mm blank',
     );
     // The seated value, not half the blank: the fix button names the number it would write.
     expect(screen.getByTestId('engrave-setup-fix-proud').textContent).toContain('0.71');
     fireEvent.click(screen.getByTestId('engrave-setup-fix-proud'));
-    expect(screen.getByTestId('engrave-setup-step-blank').textContent).not.toContain(
-      'vise-stock-proud-exceeds-thickness',
-    );
+    expect(screen.queryByTestId('engrave-setup-step-finding-vise-stock-proud-exceeds-thickness')).toBeNull();
 
-    // Finish: the job now carries the blank and the corrected vise, every value tagged.
-    fireEvent.click(screen.getByTestId('engrave-setup-next')); // finish (blank is the last step)
-    expect(screen.queryByTestId('engrave-setup-flow')).toBeNull();
+    // Step 4 creates nothing new for a job that already has its operation, and the wizard closes.
+    fireEvent.click(screen.getByTestId('engrave-setup-next'));
+    expect(screen.getByTestId('start-wizard-progress').textContent).toBe(
+      'Step 4 of 4 · What are you cutting?',
+    );
+    fireEvent.click(screen.getByTestId('start-wizard-create'));
+    expect(screen.queryByTestId('start-wizard')).toBeNull();
 
     const job = useEngraveJobStore.getState().job;
     expect(job.stock.thickness).toBe(3.81);
@@ -221,9 +255,9 @@ describe('guided job setup — the flow in the panel (#254)', () => {
     expect(screen.getByTestId('engrave-vise-badge').textContent).toMatch(/^saved/);
   });
 
-  it('renders the blank step’s shipped-vise warning once, not once per validator (#353)', () => {
-    render(<EngravePanel />);
-    toBlankStep();
+  it('renders the shipped-vise warning once, not once per validator (#353)', () => {
+    renderPanel();
+    fireEvent.click(screen.getByTestId('engrave-setup-open'));
     // The row is keyed by code, so two copies would be two elements with the same testid — which
     // is exactly what the review saw. One row, and its words, is the fix.
     const rows = screen.getAllByTestId('engrave-setup-step-finding-vise-default');
@@ -231,25 +265,40 @@ describe('guided job setup — the flow in the panel (#254)', () => {
     expect(rows[0]!.textContent).toContain('Vise dimensions: shipped defaults (reference unit)');
   });
 
-  it('“Same as last job” finishes in one click without changing the numbers', () => {
-    render(<EngravePanel />);
-    fireEvent.click(screen.getByTestId('engrave-setup-open'));
-    const before = useEngraveJobStore.getState().job.stock;
-    fireEvent.click(screen.getByTestId('engrave-setup-same'));
-    expect(screen.queryByTestId('engrave-setup-flow')).toBeNull();
-    expect(useEngraveJobStore.getState().job.stock).toEqual(before);
-    // …but the values are now asserted, so they carry sources.
-    expect(useEngraveJobStore.getState().job.sources!.stock!.length).toBe('user');
+  it('the panel’s Stock and Hold edit controls open that step of the same wizard, with the same counter', () => {
+    renderPanel();
+
+    fireEvent.click(screen.getByTestId('engrave-stock-edit'));
+    expect(screen.getByTestId('start-wizard-progress').textContent).toBe('Step 2 of 4 · Stock');
+    expect(screen.getByTestId('start-wizard-step-stock')).toBeDefined();
+    fireEvent.click(screen.getByTestId('start-wizard-close'));
+
+    fireEvent.click(screen.getByTestId('engrave-hold-edit'));
+    expect(screen.getByTestId('start-wizard-progress').textContent).toBe('Step 3 of 4 · Holding');
+    expect(screen.getByTestId('engrave-setup-step-holding')).toBeDefined();
+    // There is no second numbering anywhere in the modal.
+    expect(screen.queryByTestId('engrave-setup-progress')).toBeNull();
   });
 
-  it('lets the sacrificial and material answers through to the job', () => {
-    render(<EngravePanel />);
+  it('lets the sacrificial and material answers through to the job', async () => {
+    renderPanel();
     fireEvent.click(screen.getByTestId('engrave-setup-open'));
+
+    // The waste board writes as it is chosen: there is no later Finish to collect it.
     fireEvent.change(screen.getByTestId('engrave-setup-sacrificial'), { target: { value: 'strips' } });
-    fireEvent.click(screen.getByTestId('engrave-setup-next')); // material
-    fireEvent.change(screen.getByTestId('engrave-setup-material'), { target: { value: 'hardwood' } });
-    fireEvent.click(screen.getByTestId('engrave-setup-next')); // blank
-    fireEvent.click(screen.getByTestId('engrave-setup-next')); // finish (blank is the last step)
+    expect(useEngraveJobStore.getState().job.sacrificial).toEqual(presetJawStrips());
+
+    // The material is step 2's answer; writing it returns to this same holding step.
+    fireEvent.click(screen.getByTestId('start-wizard-back'));
+    fireEvent.change(screen.getByTestId('start-wizard-stock-material'), { target: { value: 'hardwood' } });
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('start-wizard-stock-next'));
+    });
+    expect(screen.getByTestId('start-wizard-progress').textContent).toBe('Step 3 of 4 · Holding');
+
+    fireEvent.click(screen.getByTestId('engrave-setup-next'));
+    fireEvent.click(screen.getByTestId('start-wizard-create'));
+    expect(screen.queryByTestId('start-wizard')).toBeNull();
 
     const job = useEngraveJobStore.getState().job;
     expect(job.stock.material).toBe('hardwood');

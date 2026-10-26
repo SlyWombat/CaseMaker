@@ -27,15 +27,16 @@ test('welcome → wizard → blank → the Engrave panel, with the stock already
   await expect(page.getByTestId('start-wizard-next')).toHaveText('Continue without a machine');
   await page.getByTestId('start-wizard-next').click();
 
-  // Step 2 — the project.
+  // Step 2 — the stock. The starter templates live beneath it, not in a second flow.
   await expect(page.getByTestId('start-wizard-step-job')).toBeVisible();
   await page.getByTestId('start-wizard-job-blank').click();
 
-  // Step 3 — the engrave setup takes over, over the project step 2 just made.
-  await expect(page.getByTestId('engrave-setup-flow')).toBeVisible();
-  await expect(page.getByTestId('start-wizard')).toHaveCount(0);
-  await page.getByTestId('engrave-setup-close').click();
+  // Step 3 — the SAME modal, one counter: the project is made and the mount question follows.
+  await expect(page.getByTestId('engrave-setup-step-holding')).toBeVisible();
+  await expect(page.getByTestId('start-wizard-progress')).toHaveText('Step 3 of 4 · Holding');
   await expect(page.getByTestId('engrave-setup-flow')).toHaveCount(0);
+  await page.getByTestId('start-wizard-close').click();
+  await expect(page.getByTestId('start-wizard')).toHaveCount(0);
 
   // The blank's rail: Part, Export and the two CNC panels, and nothing board-shaped.
   await expect(page.getByTestId('sidebar-button-part')).toBeVisible();
