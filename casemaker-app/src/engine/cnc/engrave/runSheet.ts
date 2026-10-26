@@ -32,7 +32,7 @@ import { cutterLegend, cutterProfileSvg } from '@/engine/cnc/cutterProfile';
 // #221 — the V-carve facts are the CAM's own arithmetic and cone resolution, imported rather than
 // re-derived: the sheet, the panel and the program must not print different plane radii or pitches.
 import { vCone } from '@/engine/cnc/vProfile';
-import { vCarvePlane, vCarveStepover } from '@/engine/cnc/vCarveGeometry';
+import { vCarveLevels, vCarvePlane, vCarveStepover } from '@/engine/cnc/vCarveGeometry';
 import { colourBoundaryDepthFor } from '@/engine/cnc/layerStack';
 import { axesWord, describeTouch, kindWord, PROBE_SPEC, readsWord, registrationFor, sideWords } from '@/engine/cnc/engrave/registration';
 import {
@@ -3550,6 +3550,31 @@ export function buildRunSheet(
       // the `vcarve-stepover-clamped` finding reads). The design is correct at the colour plane, so
       // the floor inset and the surface outset are what the operator should expect to see in the
       // blank; the effective pitch is what the program actually runs.
+      // #665 — a VARIABLE-depth item is the medial-axis carve: the depth follows the design's
+      // width, cut as a ladder of level sets, and the floor's core is a flat end mill pocket's —
+      // added over the core, in its own program (#677 makes it automatic). Its step replaces the
+      // plane statement, which describes a constant floor this item does not have.
+      if (item.variableDepth === true) {
+        const levelPitch =
+          params === null || !(cone.tanHalf > 0)
+            ? null
+            : Math.min(params.stepDown, params.stepOver / cone.tanHalf);
+        const levels = levelPitch !== null && levelPitch > 0 ? vCarveLevels(cone, item.depth, levelPitch) : null;
+        cutSteps.push({
+          text:
+            `${item.name}${note}${depthSourceWords(job, item, margins.boundaryMargin, measure)} — ` +
+            'VARIABLE depth: the V follows the design’s width, its flank on the edge, from the ' +
+            'outside in' +
+            (levels === null
+              ? ''
+              : ` — ${levels.length} level${levels.length === 1 ? '' : 's'} at ${fmtNum(levelPitch as number)} mm`) +
+            `, down to ${fmtNum(item.depth)} mm at its centre. Where that cap cannot reach, the ` +
+            'middle stands as a core; add a flat end mill pocket over it at that depth — its own ' +
+            'program — to give the job a flat bottom.',
+          value: `${fmtNum(item.depth)} mm at the centre${levels === null ? '' : ` · ${levels.length} levels`}`,
+        });
+        continue;
+      }
       const plane = vCarvePlane(cone, item.depth, film);
       const ratio =
         params === null || cone.tipRadius <= 0 ? null : params.stepOver / (2 * cone.tipRadius);

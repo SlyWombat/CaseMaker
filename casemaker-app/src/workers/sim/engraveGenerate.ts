@@ -62,6 +62,7 @@ import type { ConditionSummary } from '@/engine/cnc/toolCondition';
 import { vCone, type VCone } from '@/engine/cnc/vProfile';
 import { minimumXyStepMm } from '@/engine/cnc/machine';
 import {
+  coreOffsetRadius,
   vCarveGrooveRefusal,
   vCarvePlane,
   vCarveStepover,
@@ -938,6 +939,32 @@ function vCarveFindings(
   const mm = (v: number): string => String(Math.round(v * 1000) / 1000);
 
   for (const item of plan.engraves) {
+    // #665 — a VARIABLE-depth item has no colour plane and no constant floor: its depth follows
+    // the region's width, so the plane model's checks (the clamp, the film, the groove width)
+    // describe a cut it does not make. Its own checking is the CORE — the middle the V's width
+    // cannot reach at the cap — which the job has to clear with a flat-cutter pocket.
+    if (item.variableDepth === true) {
+      const design = designById.get(item.id);
+      if (design === undefined || design.length === 0) continue;
+      const core = offset(design, -coreOffsetRadius(cone, item.depth));
+      if (core.length === 0) continue;
+      const CS = tl.CrossSection;
+      const coreCs = CS.ofPolygons(core);
+      const coreArea = coreCs.area();
+      coreCs.delete();
+      if (coreArea > 1) {
+        findings.push({
+          severity: 'warning',
+          code: 'vcarve-variable-core',
+          labelId: item.id,
+          message:
+            `${item.name} is ${mm(item.depth)} mm deep at its centre, but the V's width runs out ` +
+            `before the middle: ${mm(coreArea)} mm² of floor is not reached by the V. Add a Pocket ` +
+            `over that area at ${mm(item.depth)} mm, cut by a flat end mill in its own program.`,
+        });
+      }
+      continue;
+    }
     const plane = planeById.get(item.id);
     if (plane === undefined) continue;
 
@@ -1160,7 +1187,16 @@ export function engraveRegions(
     cone === null
       ? ratioAtFor(tl, job, radius ?? 0)
       : ratioAtFor(tl, job, cone.tipRadius, planeRadiusFor);
-  const engFindings = measured.length === 0 ? [] : engravabilityFindings(job, measured, ratioAt, tool, shop.lostDetailWarnRatio ?? null);
+  // #665 — the engravability measurement judges a region against ONE cutter width at the plane;
+  // a variable-depth item's width follows its own design at every point, so its `item-empty`
+  // (a plane radius of 0 on a point-tip bit) would refuse a cut that is entirely sound.
+  const variableIds = new Set(plan.engraves.filter((e) => e.variableDepth === true).map((e) => e.id));
+  const engFindings =
+    measured.length === 0
+      ? []
+      : engravabilityFindings(job, measured, ratioAt, tool, shop.lostDetailWarnRatio ?? null).filter(
+          (f) => f.labelId === undefined || !variableIds.has(f.labelId),
+        );
 
   // #171/#345 — the cut regions a void check reads are built ONCE, below: the engrave openings,
   // the swept traces (#270) and — since #218 — each cut-out's kerf. A void-free job is the common
@@ -1168,6 +1204,21 @@ export function engraveRegions(
   // debounce.
 
   const byId = new Map(measured.map((m) => [m.labelId, m] as const));
+  /**
+   * #665 — a region's DESIGN polygons. The measurement opens the region at the cutter's plane
+   * radius; a VARIABLE-depth item has no single plane (a point-tip V on a blank with no film
+   * measures a radius of 0), so its design is the profile itself — the ladder erodes it at each
+   * level and the oracle reads the same set.
+   */
+  const designOf = (engrave: PartPlan['engraves'][number]): Polygons => {
+    const measuredPolygons = byId.get(engrave.id)?.polygons;
+    if (measuredPolygons !== undefined && measuredPolygons.length > 0) return measuredPolygons;
+    if (engrave.variableDepth !== true) return [];
+    const cs = executeProfile(tl, engrave.profile);
+    const polygons = cs.toPolygons() as Polygons;
+    cs.delete();
+    return polygons;
+  };
   const itemById = new Map<string, EngraveItem>();
   for (const l of job.labels) itemById.set(l.id, l);
   for (const s of job.shapes) itemById.set(s.id, s);
@@ -1183,7 +1234,7 @@ export function engraveRegions(
     const offset = makeClipperOffset(tl);
     for (const engrave of plan.engraves) {
       const plane = planeById.get(engrave.id) ?? vCarvePlane(cone, engrave.depth, colourBoundaryDepth);
-      const design = byId.get(engrave.id)?.polygons ?? [];
+      const design = designOf(engrave);
       if (design.length === 0) continue;
       // #584 — THE FLOOR IS WHAT THE TOOLPATH CAN REACH, not `design − floorInset`. The two are
       // the same on a broad face, but `pocketLoops` starts from `design − planeRadius` and the TIP
@@ -1198,6 +1249,9 @@ export function engraveRegions(
         plane: design,
         floor,
         surface,
+        // #665 — the medial-axis carve: the CAM builds its ladder, and the oracle predicts the
+        // ring at each level rather than this floor.
+        ...(engrave.variableDepth === true ? { variable: true } : {}),
         // With no film (or a cut that never reaches it) the plane IS the floor, so the design
         // outline is drawn at the cut depth; otherwise it sits at the colour boundary.
         planeDepth: plane.film > 0 && engrave.depth >= plane.film ? plane.film : engrave.depth,
@@ -1383,7 +1437,7 @@ export function engraveRegions(
       text: regionText(itemById.get(e.id)),
       name: e.name,
       depth: e.depth,
-      polygons: byId.get(e.id)?.polygons ?? [],
+      polygons: designOf(e),
       ...(vCarve === undefined ? {} : { vCarve }),
       ...(e.through === true ? { through: true as const } : {}),
     };
@@ -1556,14 +1610,49 @@ export function engraveRegions(
     // under-cut (#221). A flat region's floor IS its polygons.
     // #669 — a V region's FLOOR is its own level's answer; above it the cone is wider, so the
     // entry carries the flank's tan and the oracle grows the section per level.
-    ...regions.map(
-      (c): OraclePredicted => ({
-        depth: c.depth,
-        polygons: c.vCarve?.floor ?? c.polygons,
-        itemId: c.id,
-        ...(c.vCarve !== undefined && cone !== null ? { vRegion: { tanHalf: cone.tanHalf } } : {}),
-      }),
-    ),
+    //
+    // #665 — a VARIABLE-depth region has no single floor: its answer at level `d` is the design
+    // eroded by `d·tanHalf` MINUS the core the cap cannot reach, and that ring is exact at any
+    // level because every deeper pass's outer flank lies on the same wall line. Two levels are
+    // predicted — the cap and a shallow tenth — and the `vRegion` growth is NOT set: the entries
+    // already ARE the mouth at their depth, and growing them would double-count.
+    ...regions.flatMap((c): OraclePredicted[] => {
+      if (c.vCarve?.variable === true && cone !== null) {
+        const design = c.polygons;
+        const cap = c.depth;
+        const carveOffset = makeClipperOffset(tl);
+        const ringAt = (level: number): Polygons => {
+          // The removal at level z is ONE ring: the wall's lower part from `z·tan` in, through the
+          // deepest pass's flat swath, to where its INNER flank has risen back to this level —
+          // `(2·cap − z)·tan + 2·r1` from the boundary. Beyond that the inner mound stands, and
+          // the rest cutter clears it at the cap.
+          const outer = carveOffset(design, -level * cone.tanHalf);
+          const innerBoundary = (2 * cap - level) * cone.tanHalf + 2 * cone.tipRadius;
+          const inner = carveOffset(design, -innerBoundary);
+          if (inner.length === 0 || outer.length === 0) return outer;
+          const CS = tl.CrossSection;
+          const a = CS.ofPolygons(outer);
+          const b = CS.ofPolygons(inner);
+          const d = a.subtract(b);
+          const out = d.toPolygons() as Polygons;
+          d.delete();
+          a.delete();
+          b.delete();
+          return out;
+        };
+        return [cap * ORACLE_SHALLOW_DEPTH_FRACTION, cap].map(
+          (level): OraclePredicted => ({ depth: level, polygons: ringAt(level), itemId: c.id }),
+        );
+      }
+      return [
+        {
+          depth: c.depth,
+          polygons: c.vCarve?.floor ?? c.polygons,
+          itemId: c.id,
+          ...(c.vCarve !== undefined && cone !== null ? { vRegion: { tanHalf: cone.tanHalf } } : {}),
+        },
+      ];
+    }),
     ...(cone === null
       ? traceCuts.map((c): OraclePredicted => ({ depth: c.depth, polygons: c.polygons, itemId: c.id }))
       : plan.traces.map((t): OraclePredicted => ({ depth: t.depth, polygons: [], itemId: t.id, groove: { paths: t.paths, closed: t.closed, cone } }))),

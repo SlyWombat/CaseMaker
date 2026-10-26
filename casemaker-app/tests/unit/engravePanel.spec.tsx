@@ -887,6 +887,44 @@ describe('EngravePanel — bore to size (#668)', () => {
   });
 });
 
+// #665 — V-CARVE (VARIABLE DEPTH): the picker adds a region with the flag set, and the shape row's
+// fold switches it back to the plane cut. The default job's cutter is a flat end mill, so the
+// control is not offered at all — a flat cutter pockets one depth.
+describe('EngravePanel — V-carve variable depth (#665)', () => {
+  const V_TOOL = flatEndMill(3.175, {
+    name: '3.175 mm 90° V',
+    typeText: 'Chamfer',
+    shape: 'chamfer',
+    tipDiameter: null,
+    diameter: 3.175,
+    angle: 90,
+    halfAngle: null,
+  });
+
+  it('adds a variable-depth region from the picker and switches it back with the row', () => {
+    act(() => {
+      useEngraveJobStore.setState({
+        job: { ...defaultEngraveJob(), toolKey: 'test:v-90', tool: V_TOOL },
+      });
+    });
+    render(<EngravePanel />);
+    fireEvent.click(screen.getByTestId('engrave-add-v-carve-variable'));
+    expect(useEngraveJobStore.getState().job.shapes[0]!.vCarveDepth).toBe('variable');
+    const select = screen.getByTestId('engrave-shape-vcarve-depth-0') as HTMLSelectElement;
+    expect(select.value).toBe('variable');
+    expect(screen.getByTestId('engrave-shape-vcarve-note-0').textContent).toContain('flat bottom');
+    fireEvent.change(select, { target: { value: 'plane' } });
+    expect(useEngraveJobStore.getState().job.shapes[0]!.vCarveDepth).toBe('plane');
+    expect(screen.queryByTestId('engrave-shape-vcarve-note-0')).toBeNull();
+  });
+
+  it('does not offer the control to a flat cutter', () => {
+    render(<EngravePanel />);
+    fireEvent.click(screen.getByTestId('engrave-add-rect'));
+    expect(screen.queryByTestId('engrave-shape-vcarve-depth-0')).toBeNull();
+  });
+});
+
 // #669 — CHAMFER THE EDGE: a chamfer row picks a rim and a width, and says which side of the edge
 // the cutter runs. The job's default cutter is a flat end mill, so the row states that a cone is
 // what a chamfer needs rather than pretending a bevel can be cut with it.

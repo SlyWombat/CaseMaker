@@ -28,6 +28,9 @@ import type { Mm } from '@/types/units';
 
 const NUM: CSSProperties = { width: 60 };
 const MUTED: CSSProperties = { fontSize: 11, color: '#9aa4b0', lineHeight: 1.5, margin: '2px 0' };
+
+/** `2` / `0.5` — a number as a sentence uses it. */
+const fmt = (n: number): string => `${Number(n.toFixed(3))}`;
 const INVALID: CSSProperties = { borderColor: '#7a2828', color: '#f0b4ad' };
 const ROW_INLINE: CSSProperties = { display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 6, marginTop: 4 };
 const FIELD_LABEL: CSSProperties = { display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11, color: '#9aa4b0' };
@@ -97,6 +100,11 @@ export interface EngraveShapeRowProps {
    * row's item is not in a setup or the job has no cutter. The panel owns the registry reading.
    */
   rest?: RestChoice | null;
+  /**
+   * #665 — the variable-depth control, present only when the job's cutter is a cone: the level
+   * pitch the CAM will run, or null when the feeds row did not resolve for this cutter.
+   */
+  vCarve?: { pitchMm: number | null } | null;
 }
 
 export function EngraveShapeRow({
@@ -107,6 +115,7 @@ export function EngraveShapeRow({
   onRemove,
   findings,
   rest = null,
+  vCarve = null,
 }: EngraveShapeRowProps): JSX.Element {
   // #662 - the chip states what THIS cutter makes of a region.
   const region = useRegionOperationType();
@@ -163,7 +172,11 @@ export function EngraveShapeRow({
       index={index}
       glyph={KIND_GLYPH[shape.kind]}
       kindWord={KIND_LABEL[shape.kind]}
-      typeLabel={regionChipLabel(shape.through, region)}
+      typeLabel={
+        shape.through !== true && shape.vCarveDepth === 'variable' && region === 'v-carve'
+          ? 'V-carve (variable)'
+          : regionChipLabel(shape.through, region)
+      }
       name={itemOperationName(shape)}
       summary={shape.through === true ? 'through' : rowSummary(shape.depth)}
       enabled={shape.enabled}
@@ -310,6 +323,34 @@ export function EngraveShapeRow({
       ) : (
         <p style={{ ...MUTED, ...(depthInvalid ? { color: SEVERITY_COLOR.error } : null) }} data-testid={`engrave-shape-maxdepth-${index}`}>
           Max depth {maxDepth} mm here — the stock thickness less the minimum floor.
+        </p>
+      )}
+      {/* #665 — a region cut by a cone can follow the design's width instead of one depth. Only
+          shown for a cone (a flat cutter pockets at a single depth) and never on a through cut,
+          which has no floor to follow. */}
+      {vCarve !== null && shape.through !== true && (
+        <div style={ROW_INLINE}>
+          <label style={FIELD_LABEL}>
+            <span>V-carve depth</span>
+            <select
+              value={shape.vCarveDepth ?? 'plane'}
+              data-testid={`engrave-shape-vcarve-depth-${index}`}
+              aria-label={`Shape ${index + 1} V-carve depth`}
+              title="Plane cuts one constant floor at the colour plane. Variable follows the design's width down to its centre, level by level; where the V's width runs out, the middle is left standing and a flat end mill Pocket clears the flat bottom."
+              onChange={(e) => onChange({ vCarveDepth: e.target.value === 'variable' ? 'variable' : 'plane' })}
+            >
+              <option value="plane">plane (one depth)</option>
+              <option value="variable">variable (the medial axis)</option>
+            </select>
+          </label>
+        </div>
+      )}
+      {vCarve !== null && shape.through !== true && shape.vCarveDepth === 'variable' && (
+        <p style={MUTED} data-testid={`engrave-shape-vcarve-note-${index}`}>
+          The V follows the design’s width —{' '}
+          {vCarve.pitchMm === null ? 'the level pitch comes from the feeds row' : `${fmt(vCarve.pitchMm)} mm per level`}{' '}
+          — down to {fmt(shape.depth)} mm at the centre. Where the V cannot reach, the middle
+          stands as a core: add a flat end mill pocket over it at that depth for the flat bottom.
         </p>
       )}
       {rest !== null && <RestCutterControl rest={rest} testidPrefix="engrave-shape" index={index} />}

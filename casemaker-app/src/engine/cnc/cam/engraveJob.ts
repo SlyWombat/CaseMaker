@@ -30,7 +30,7 @@ import { segmentsForRadius } from '@/engine/compiler/arcResolution';
 import type { ManifoldToplevel } from '@/workers/geometry/evaluateOp';
 import type { CutParams } from '../feeds';
 import { cuttingForTrace, type Tool } from '../tool';
-import { vCarvePassPitch } from '../vCarveGeometry';
+import { vCarveLevels, vCarvePassPitch } from '../vCarveGeometry';
 import { boreMoves, drillMoves, orderHolesNearest } from './drill';
 import {
   estimateCycleSeconds,
@@ -75,6 +75,13 @@ export interface VCarveRegion {
   planeRadius: number;
   floorInset: number;
   surfaceOutset: number;
+  /**
+   * #665 — cut the MEDIAL-AXIS depth map instead of the constant floor. The ladder replaces the
+   * pocket: at each level `d` the tool traces the design eroded by `tipRadius + d·tanHalf` at
+   * `z = −d`, shallowest first. Where the cap cannot reach, the middle stands as a core this pass
+   * does NOT cut; the flat bottom is a flat end mill Pocket over the core, its own program.
+   */
+  variable?: boolean;
 }
 
 /**
@@ -274,6 +281,12 @@ interface Prepared {
   firstCut: [number, number];
   /** A drilled region's moves, computed at prepare time (#220). Present => `buildMoves` is not used. */
   drillMoves?: CamMove[];
+  /**
+   * #665 — a variable V-carve's level sets, shallowest first: each rung its own rings and its own
+   * single Z. Kept apart from `passList` because the ladder pairs ONE ring set with ONE depth per
+   * rung, where a pass entry pairs every ring with every depth.
+   */
+  ladder?: PreparedPass[];
 }
 
 /**
@@ -599,6 +612,39 @@ export function generateEngrave(
         drillMoves: drillMoves(holes, label.depth, params.peck, params, peckClearanceMm),
       };
     }
+    if (label.vCarve?.variable === true) {
+      // #665 — THE MEDIAL-AXIS LADDER. Each level `d` is the design eroded by `tipRadius +
+      // d·tanHalf` — the line where the flank meets the boundary at the surface — traced at
+      // `z = −d`, SHALLOWEST FIRST: every pass rides over the groove the previous one opened, so
+      // the bit's outer flank is in air at the wall. The core (what the cap's width cannot reach)
+      // is left standing here on purpose: `vcarve-variable-core` names its area, and the flat
+      // bottom is a flat end mill Pocket over it at `depth`, in its own program.
+      if (cone === null) {
+        throw new Error(
+          `generateEngrave: "${label.name ?? label.text}" asks for a variable-depth V-carve, and a ` +
+            'flat cutter pockets a region at one depth; use a V-bit',
+        );
+      }
+      // The feeds row caps the bite: its step-down is a depth, its step-over a radial width on the
+      // flank. The tighter one sets the pitch, so neither the row nor the scallop is exceeded.
+      const pitch = Math.min(params.stepDown, params.stepOver / cone.tanHalf);
+      if (!(pitch > 0)) {
+        throw new Error(`generateEngrave: the variable V-carve's level pitch resolved to ${pitch} mm; it must be > 0`);
+      }
+      const ladder: PreparedPass[] = [];
+      for (const level of vCarveLevels(cone, label.depth, pitch)) {
+        const rings = offset(label.polygons, -level.radius);
+        if (rings.length === 0) continue; // this level's contour has collapsed into the medial axis
+        ladder.push({ rings: [rings], passes: [-level.depth] });
+      }
+      if (ladder.length === 0) {
+        throw new Error(
+          `generateEngrave: "${label.name ?? label.text}" is narrower than its cutter's tip at every ` +
+            'level, so a variable-depth V-carve has nothing to cut; use a smaller bit',
+        );
+      }
+      return { label, passList: [], ladder, firstCut: firstCuttingPoint(ladder[0]!.rings) };
+    }
     const onePass: PreparedPass = {
       rings: ringsFor(label),
       passes: zPasses(label.depth, params.stepDown),
@@ -657,6 +703,42 @@ export function generateEngrave(
       const moves = item.drillMoves;
       const last = moves[moves.length - 1];
       if (last) cursor = [last.x, last.y];
+      operations.push({
+        number: operations.length + 1,
+        name: `[T${toolNumber}]${descriptor} ${item.label.depth.toFixed(1)}mm`,
+        labelId: item.label.id,
+        depth: item.label.depth,
+        moves,
+        estimatedSeconds: estimateCycleSeconds(moves, rapid),
+      });
+      continue;
+    }
+    if (item.ladder !== undefined) {
+      // #665 — THE LADDER IS ONE OPERATION: every rung's loops in the order the ladder set them
+      // (shallowest first), each contour placed nearest the tool's last position. The travel
+      // numbers are priced like every other region's, so the sheet's ordering sentence covers it.
+      const loops: PlacedLoop[] = [];
+      let at: [number, number] = [cursor[0], cursor[1]];
+      for (const rung of item.ladder) {
+        const placed = placeLoops(rung, 'proximity', at);
+        loops.push(...placed);
+        const last = placed[placed.length - 1];
+        if (last !== undefined) at = [last.entry[0], last.entry[1]];
+      }
+      const moves = buildMoves(loops, params);
+      const skipFirst = operations.length === 0;
+      regionRapidMm += entryTravel(cursor, loops, skipFirst);
+      // The pre-#487 order chose every entry as if the tool stood at (0, 0); re-placed the same
+      // way the flat path does, so the ladder's report is comparable to the pocket's.
+      let baseAt: [number, number] = [0, 0];
+      for (const rung of item.ladder) {
+        const base = placeLoops(rung, 'document', baseAt);
+        baselineRegionRapidMm += entryTravel(baseAt, base, skipFirst);
+        const last = base[base.length - 1];
+        if (last !== undefined) baseAt = [last.entry[0], last.entry[1]];
+      }
+      regionCutMm += loops.reduce((sum, loop) => sum + loopLength(loop), 0);
+      if (loops.length > 0) cursor = loops[loops.length - 1]!.entry;
       operations.push({
         number: operations.length + 1,
         name: `[T${toolNumber}]${descriptor} ${item.label.depth.toFixed(1)}mm`,

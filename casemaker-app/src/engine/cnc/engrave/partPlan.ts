@@ -97,7 +97,19 @@ export interface PartPlan {
     /** The first layer's own height, mm (#285); absent = the same as `layerHeight`. */
     firstLayerHeight?: Mm;
   };
-  engraves: { id: string; name: string; profile: Profile; depth: Mm; through?: boolean }[];
+  engraves: {
+    id: string;
+    name: string;
+    profile: Profile;
+    depth: Mm;
+    through?: boolean;
+    /**
+     * #665 — the item asked for a MEDIAL-AXIS V-carve (`vCarveDepth: 'variable'`). Carried here so
+     * the region builder, the CAM and the oracle get the flag from one funnel; read only when the
+     * job's cutter is a cone.
+     */
+    variableDepth?: boolean;
+  }[];
   /**
    * PROFILE CUT-OUTS (#218), a fifth sibling: the outline a `cam/profile.ts` path follows, plus
    * its side, inset, tab spec and the depth it cuts to. The OUTLINE is the referenced item's
@@ -1935,6 +1947,7 @@ export function toPartPlan(job: EngraveJob, options: PartPlanOptions = {}): Part
     // the flag as well, so the verifier's mask and the preview can tell it from a blind pocket
     // at the same depth.
     const through = 'through' in item && item.through === true;
+    const variableDepth = 'vCarveDepth' in item && item.vCarveDepth === 'variable';
     engraves.push({
       id: item.id,
       // The ready-made operation name (#214/#215), carried on the one funnel so the region
@@ -1943,6 +1956,7 @@ export function toPartPlan(job: EngraveJob, options: PartPlanOptions = {}): Part
       profile,
       depth: through ? job.stock.thickness + job.breakthrough : item.depth,
       through,
+      ...(variableDepth ? { variableDepth: true } : {}),
     });
   }
 

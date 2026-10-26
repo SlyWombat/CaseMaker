@@ -22,6 +22,7 @@ describe('#662 the operation types', () => {
     expect(OPERATION_TYPES.map((t) => t.id)).toEqual([
       'engrave',
       'v-carve',
+      'v-carve-variable',
       'pocket',
       'profile',
       'chamfer',
@@ -54,6 +55,10 @@ describe('#662 the operation types', () => {
     expect(operationTypeOfItem({ kind: 'stroke-label' }, 'pocket')).toBe('engrave');
     expect(operationTypeOfItem({ kind: 'rect' }, 'pocket')).toBe('pocket');
     expect(operationTypeOfItem({ kind: 'rect' }, 'v-carve')).toBe('v-carve');
+    // #665 — a region that asks for the medial-axis carve is its own operation, and only on a
+    // job whose cutter makes a V-carve at all.
+    expect(operationTypeOfItem({ kind: 'rect', vCarveDepth: 'variable' }, 'v-carve')).toBe('v-carve-variable');
+    expect(operationTypeOfItem({ kind: 'rect', vCarveDepth: 'variable' }, 'pocket')).toBe('pocket');
     expect(operationTypeOfItem({ kind: 'circle', through: true }, 'pocket')).toBe('profile');
     expect(operationTypeOfItem({ kind: 'cutout' }, 'pocket')).toBe('profile');
     // #669 — a chamfer is its own operation on an item's outline.
@@ -94,6 +99,9 @@ describe('#662 the operation types', () => {
         added.push(`shape:${kind}`);
         return 'i2';
       },
+      updateShape: (id: string, patch: Record<string, unknown>) => {
+        added.push(`update:${id}:${JSON.stringify(patch)}`);
+      },
       addCutout: () => {
         added.push('cutout');
         return 'i3';
@@ -114,6 +122,8 @@ describe('#662 the operation types', () => {
     try {
       expect(addOperationOfType('engrave')).toBe('i1');
       expect(addOperationOfType('v-carve')).toBe('i2');
+      // #665 — the variable type adds the same rect and switches its depth model.
+      expect(addOperationOfType('v-carve-variable')).toBe('i2');
       expect(addOperationOfType('pocket')).toBe('i2');
       expect(addOperationOfType('profile')).toBe('i3');
       // #669 — Chamfer the edge adds a chamfer item.
@@ -123,7 +133,18 @@ describe('#662 the operation types', () => {
       // diameter (its own spec proves the value).
       expect(addOperationOfType('bore')).toBe('i4');
       expect(addOperationOfType('thread')).toBe('i5');
-      expect(added).toEqual(['label', 'shape:rect', 'shape:rect', 'cutout', 'chamfer', 'drill:drill', 'drill:drill', 'thread']);
+      expect(added).toEqual([
+        'label',
+        'shape:rect', // v-carve
+        'shape:rect', // v-carve-variable's region…
+        'update:i2:{"vCarveDepth":"variable"}', // …switched to the medial-axis depth
+        'shape:rect', // pocket
+        'cutout',
+        'chamfer',
+        'drill:drill',
+        'drill:drill',
+        'thread',
+      ]);
     } finally {
       useEngraveJobStore.setState(before);
     }

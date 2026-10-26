@@ -423,6 +423,17 @@ STL/3MF). Every operation added
 afterwards is one row in the job's list, its type on the row, and its expert fields behind the
 row's fold.
 
+**V-carve (variable depth) (#665)** is the same region cut by the V-bit, but its depth follows the
+region's own WIDTH instead of one floor: every point is cut to its distance from the edge over
+`tan(halfAngle)`, deepest at the region's centre, so the V's flank always meets the edge at the top
+face. The program cuts the map as a ladder of level sets, shallowest first — each pass rides over
+the groove the one before it opened — and the row's fold states the level pitch (the feeds row's
+step-down or its step-over converted down the flank, whichever is tighter). Where the region is
+wider than the chosen depth allows, the middle stands as a **core** the V cannot reach;
+`vcarve-variable-core` states its area, and the **flat bottom** is a flat end mill Pocket over that
+area at that depth, its own program (the engine's automatic clearance is #677). A flat end mill on a
+variable-depth region is refused by name (`vcarve-variable-needs-cone`).
+
 **Chamfer the edge (#669)** breaks an edge rather than cutting a hole or a pocket: one flat bevel
 along a rim, cut by the job's V/chamfer bit with its flank held against the edge. The row picks the
 rim (a shape's, an imported outline's or a combined shape's own outline — often the part's
@@ -1316,8 +1327,8 @@ simulation does report about one is the sweep's own list, next:
 | `chamfer-too-deep` | error | The bevel reaches below the pocket's floor (an inside edge) or through the blank (a part's edge), so the tip would cut past the material. | Use a smaller chamfer, or cut a deeper pocket. |
 | `chamfer-reach-unproven` | error | The cutter states no cutting diameter, so the width its cone reaches cannot be worked out. | Record the cutter's cutting diameter. |
 | `chamfer-order` | error | The chamfer's program runs on the wrong side of the cut that leaves its edge: a pocket's rim must be chamfered AFTER the pocket opens it, and a part's edge BEFORE its cut-out frees the part. The two never share a program — a cut-out profiles with a flat end mill, a chamfer needs a cone — so the setups' order is what decides it. | Move the chamfer's setup earlier (a part's edge) or later (a pocket's rim). |
-| `bore-no-diameter` | error | A bore to size has no hole diameter stated. A bore makes the hole the job asks for, not the cutter's own width, so without the diameter there is nothing to helix the wall to (#668). | State the hole's diameter on the row. |
-| `bore-needs-end-mill` | error | A bore to size is cut by helixing an end mill down the wall of the hole, so a V-bit, a ball nose or a drill bit cannot make it (#668). | Choose a flat end mill for the job that bores. |
+| `vcarve-variable-needs-cone` | error | A region asks for a variable-depth V-carve (the medial-axis depth map) and the job's cutter is not a cone — a flat end mill pockets one constant depth and would drop the request. | Use a V-bit. || `bore-no-diameter` | error | A bore to size has no hole diameter stated. A bore makes the hole the job asks for, not the cutter's own width, so without the diameter there is nothing to helix the wall to (#668). | State the hole's diameter on the row. |
+| `vcarve-variable-core` | warning | A variable-depth V-carve has a MIDDLE its cutter cannot reach at the stated depth: the V follows the design's width down, and where the width needs more than the depth allows, the floor stands as a core the rest of the region does not. The carve itself is sound; the design needs a flat bottom, and the automatic clearance is #677. The message states the area. | Add a Pocket over that area at the same depth, cut by a flat end mill in its own program. || `bore-needs-end-mill` | error | A bore to size is cut by helixing an end mill down the wall of the hole, so a V-bit, a ball nose or a drill bit cannot make it (#668). | Choose a flat end mill for the job that bores. |
 | `bore-narrow` | error | A bore's hole is not wider than the cutter, so there is no centre path to helix on; the cut would just be a plunge hole the cutter's own width (#668). | Cut a bigger hole, or use a smaller cutter. |
 | `thread-wrong-tool` | error | The job has a thread, but the tool is not a thread mill. A thread is cut by orbiting a small cutter inside the pilot; a flat end mill cannot cut one (#445). | Pick a thread mill. |
 | `thread-mixed-tools` | error | The thread is enabled beside other work (a label, a shape, a trace, a drill). A thread program has ONE tool, and the toolpath has no way to describe a change part-way through. | Cut the thread in a program of its own, after the pilot and the other work. |

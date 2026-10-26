@@ -844,6 +844,10 @@ export function EngravePanel(): JSX.Element {
   // the CAM use), and the pass spacing from `vCarveStepover` at the feeds row's own ratio. None of
   // this is re-derived here; the panel only places the numbers the CAM already states.
   const cone = tool ? vCone(tool) : null;
+  // #665 — the variable V-carve's level pitch, from the same two row numbers the CAM uses
+  // (`min(stepDown, stepOver / tanHalf)`); null until the feeds row and the cone are both known.
+  const vCarvePitchMm =
+    cone !== null && params !== null ? Math.min(params.stepDown, params.stepOver / cone.tanHalf) : null;
   const hasRegions = hasRegionItems(job);
   // #434 — A DRILL BIT IS A DRILL-ONLY CUTTER. One program has one tool, so the select offers the
   // registry's drills only when the job's cutting work is all drilled holes; the cutter already
@@ -2310,6 +2314,7 @@ export function EngravePanel(): JSX.Element {
           maxDepth={maxDepth}
           findings={findingsFor(shape.id)}
           rest={shape.construction === true ? null : restFor(shape.id)}
+          vCarve={cone === null ? null : { pitchMm: vCarvePitchMm }}
           onChange={(patch) => updateShape(shape.id, patch)}
           onRemove={() => removeShape(shape.id)}
         />

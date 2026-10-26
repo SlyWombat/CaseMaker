@@ -145,6 +145,12 @@ export type JobFindingCode =
   | 'chamfer-too-deep'
   | 'chamfer-reach-unproven'
   | 'chamfer-order'
+  // Advanced V-carve (#665). A region can ask for the MEDIAL-AXIS depth map; only a cone can cut
+  // it, because the depth follows the flank's width at every point.
+  | 'vcarve-variable-needs-cone'
+  // `vcarve-variable-core` is the opposite note: the carve is sound, and the middle is the flat
+  // cutter's — a warning that names the area to pocket.
+  | 'vcarve-variable-core'
   // Through-cuts and cut-outs (#218). `through-needs-board`: no under-board, or one thinner than
   // the breakthrough plus a millimetre. `through-tool-reach`: the cutter's flutes/shank do not
   // cover `thickness + breakthrough`. `tab-unplaceable`, `cutout-empty` and `loose-piece` are
@@ -1164,6 +1170,23 @@ export function validateJob(
         });
       }
     }
+  }
+
+  // ADVANCED V-CARVE (#665): a variable-depth region's depth follows the cone's width at every
+  // point, so a flat cutter would pocket it at one depth and silently drop the request. The cap
+  // is the item's own depth, whose floor bound the every-item depth checks already hold.
+  for (const item of enabled) {
+    if (!('vCarveDepth' in item) || item.vCarveDepth !== 'variable') continue;
+    const carveTool = jobTool(job);
+    if (carveTool === null || vCone(carveTool) !== null) continue;
+    findings.push({
+      severity: 'error',
+      code: 'vcarve-variable-needs-cone',
+      labelId: item.id,
+      message:
+        `${itemLabel(item)} is a variable-depth V-carve, so its depth follows the cutter's flank ` +
+        `at every point; "${carveTool.name}" is a ${carveTool.shape} cutter with no cone. Use a V-bit.`,
+    });
   }
 
   // MILLED THREADS (#445, #434 phase 2). A thread mill does not drill (D1): every check here

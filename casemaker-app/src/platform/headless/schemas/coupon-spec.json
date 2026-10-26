@@ -128,6 +128,14 @@
                     "description": "Cut through the blank to the sacrificial board; the floor is the breakthrough rule and depth is then only the checked pocket depth.",
                     "type": "boolean"
                   },
+                  "vCarveDepth": {
+                    "description": "A V-carved region's depth: 'plane' (absent — the constant floor at the colour plane) or 'variable' (the medial-axis depth map, cut as a ladder of level sets).",
+                    "enum": [
+                      "plane",
+                      "variable"
+                    ],
+                    "type": "string"
+                  },
                   "width": {
                     "description": "Ring width in millimetres.",
                     "exclusiveMinimum": 0,
@@ -210,6 +218,14 @@
                   "through": {
                     "description": "Cut through the blank to the sacrificial board; the floor is the breakthrough rule and depth is then only the checked pocket depth.",
                     "type": "boolean"
+                  },
+                  "vCarveDepth": {
+                    "description": "A V-carved region's depth: 'plane' (absent — the constant floor at the colour plane) or 'variable' (the medial-axis depth map, cut as a ladder of level sets).",
+                    "enum": [
+                      "plane",
+                      "variable"
+                    ],
+                    "type": "string"
                   },
                   "width": {
                     "description": "Frame width in millimetres.",
@@ -297,6 +313,14 @@
                   "through": {
                     "description": "Cut through the blank to the sacrificial board; the floor is the breakthrough rule and depth is then only the checked pocket depth.",
                     "type": "boolean"
+                  },
+                  "vCarveDepth": {
+                    "description": "A V-carved region's depth: 'plane' (absent — the constant floor at the colour plane) or 'variable' (the medial-axis depth map, cut as a ladder of level sets).",
+                    "enum": [
+                      "plane",
+                      "variable"
+                    ],
+                    "type": "string"
                   }
                 },
                 "required": [
@@ -3819,6 +3843,14 @@
                     "description": "Cut through the blank to the sacrificial board; the floor is the breakthrough rule and depth is then only the checked pocket depth.",
                     "type": "boolean"
                   },
+                  "vCarveDepth": {
+                    "description": "A V-carved region's depth: 'plane' (absent — the constant floor at the colour plane) or 'variable' (the medial-axis depth map, cut as a ladder of level sets).",
+                    "enum": [
+                      "plane",
+                      "variable"
+                    ],
+                    "type": "string"
+                  },
                   "width": {
                     "description": "Width along X before rotation, in millimetres.",
                     "exclusiveMinimum": 0,
@@ -3897,6 +3929,14 @@
                   "through": {
                     "description": "Cut through the blank to the sacrificial board; the floor is the breakthrough rule and depth is then only the checked pocket depth.",
                     "type": "boolean"
+                  },
+                  "vCarveDepth": {
+                    "description": "A V-carved region's depth: 'plane' (absent — the constant floor at the colour plane) or 'variable' (the medial-axis depth map, cut as a ladder of level sets).",
+                    "enum": [
+                      "plane",
+                      "variable"
+                    ],
+                    "type": "string"
                   }
                 },
                 "required": [
@@ -3969,6 +4009,14 @@
                   "through": {
                     "description": "Cut through the blank to the sacrificial board; the floor is the breakthrough rule and depth is then only the checked pocket depth.",
                     "type": "boolean"
+                  },
+                  "vCarveDepth": {
+                    "description": "A V-carved region's depth: 'plane' (absent — the constant floor at the colour plane) or 'variable' (the medial-axis depth map, cut as a ladder of level sets).",
+                    "enum": [
+                      "plane",
+                      "variable"
+                    ],
+                    "type": "string"
                   },
                   "width": {
                     "description": "Slot width in millimetres.",
@@ -4060,6 +4108,14 @@
                   "through": {
                     "description": "Cut through the blank to the sacrificial board; the floor is the breakthrough rule and depth is then only the checked pocket depth.",
                     "type": "boolean"
+                  },
+                  "vCarveDepth": {
+                    "description": "A V-carved region's depth: 'plane' (absent — the constant floor at the colour plane) or 'variable' (the medial-axis depth map, cut as a ladder of level sets).",
+                    "enum": [
+                      "plane",
+                      "variable"
+                    ],
+                    "type": "string"
                   }
                 },
                 "required": [
@@ -5410,6 +5466,14 @@
               "through": {
                 "description": "Cut through the blank to the sacrificial board; the floor is the breakthrough rule and depth is then only the checked pocket depth.",
                 "type": "boolean"
+              },
+              "vCarveDepth": {
+                "description": "A V-carved region's depth: 'plane' (absent — the constant floor at the colour plane) or 'variable' (the medial-axis depth map, cut as a ladder of level sets).",
+                "enum": [
+                  "plane",
+                  "variable"
+                ],
+                "type": "string"
               },
               "width": {
                 "description": "Bounding-box width of the outline in millimetres.",

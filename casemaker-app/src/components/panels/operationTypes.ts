@@ -14,6 +14,10 @@
  *  - `v-carve` and `pocket` — one region item, named by the cutter: a V-bit turns a region into a
  *    V-carve (constant-floor V region), any other cutter pockets it flat. Both are OFFERED (the
  *    matrix's UI holds both) and the row's chip states what the job's cutter makes of the item;
+ *  - `v-carve-variable` — the same region cut to the MEDIAL-AXIS depth map (#665): the V follows
+ *    the design's width down, level by level; where its width runs out the core stands and a flat
+ *    end mill Pocket clears the flat bottom (the warning names the area). The picker adds a rect
+ *    with the flag; the shape row's fold switches it;
  *  - `profile` — a cut-out through the blank, held with tabs (a cutout item or a through shape);
  *  - `chamfer` — one flat bevel along a profile's part edge or a pocket's rim, cut by the cone's
  *    flank (#669): a `chamfer` item naming its rim, so the bevel follows an edge the job cuts;
@@ -41,6 +45,7 @@ import { isVShape } from '@/engine/cnc/vProfile';
 export type OperationTypeId =
   | 'engrave'
   | 'v-carve'
+  | 'v-carve-variable'
   | 'pocket'
   | 'profile'
   | 'chamfer'
@@ -63,6 +68,7 @@ export interface OperationTypeDef {
 export const OPERATION_TYPES: readonly OperationTypeDef[] = [
   { id: 'engrave', label: 'Engrave', blurb: 'Text, or single-stroke lines', addTestId: 'engrave-add-label' },
   { id: 'v-carve', label: 'V-carve', blurb: 'A region cut by the job’s V-bit', addTestId: 'engrave-add-v-carve' },
+  { id: 'v-carve-variable', label: 'V-carve (variable depth)', blurb: 'The V follows the design’s width down to its centre', addTestId: 'engrave-add-v-carve-variable' },
   { id: 'pocket', label: 'Pocket', blurb: 'A flat-bottomed region', addTestId: 'engrave-add-rect' },
   { id: 'profile', label: 'Profile', blurb: 'A cut-out through the blank, held with tabs', addTestId: 'engrave-add-profile' },
   { id: 'chamfer', label: 'Chamfer the edge', blurb: 'Break a profile’s or pocket’s edge at an angle', addTestId: 'engrave-add-chamfer' },
@@ -91,7 +97,10 @@ export function regionOperationType(cutterIsV: boolean): 'v-carve' | 'pocket' {
  * construction/reference item, a kept-out void, or a mesh used as a reference).
  */
 export function operationTypeOfItem(
-  item: { kind: string; through?: boolean; construction?: boolean; mode?: 'drill' | 'bore' } | null | undefined,
+  item:
+    | { kind: string; through?: boolean; construction?: boolean; mode?: 'drill' | 'bore'; vCarveDepth?: 'plane' | 'variable' }
+    | null
+    | undefined,
   region: 'v-carve' | 'pocket',
 ): OperationTypeId | null {
   if (item === null || item === undefined) return null;
@@ -120,7 +129,10 @@ export function operationTypeOfItem(
     case 'cylinder':
     case 'cone':
     case 'sphere':
-      return item.through === true ? 'profile' : region;
+      if (item.through === true) return 'profile';
+      // #665 — a region asking for the medial-axis carve is its own operation, and only a cone
+      // makes it a V-carve at all.
+      return item.vCarveDepth === 'variable' && region === 'v-carve' ? 'v-carve-variable' : region;
     default:
       return null;
   }
@@ -157,6 +169,13 @@ export function addOperationOfType(type: Exclude<OperationTypeId, 'surface'>): s
     case 'v-carve':
     case 'pocket':
       return store.addShape('rect');
+    case 'v-carve-variable': {
+      // #665 — the same region item with the depth model switched; the row's fold can switch it
+      // back to the plane cut.
+      const id = store.addShape('rect');
+      store.updateShape(id, { vCarveDepth: 'variable' });
+      return id;
+    }
     case 'profile':
       return store.addCutout();
     case 'chamfer':

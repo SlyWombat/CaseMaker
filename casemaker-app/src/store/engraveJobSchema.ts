@@ -156,6 +156,15 @@ const shapeBaseSchema = z.object({
       "Cut through the blank to the sacrificial board; the floor is the breakthrough rule and " +
         'depth is then only the checked pocket depth.',
     ),
+  // #665 — a V-carve's depth model. Optional, so a pre-#665 document keeps no key and reads as
+  // the constant-floor cut it always meant.
+  vCarveDepth: z
+    .enum(['plane', 'variable'])
+    .optional()
+    .describe(
+      "A V-carved region's depth: 'plane' (absent — the constant floor at the colour plane) or " +
+        "'variable' (the medial-axis depth map, cut as a ladder of level sets).",
+    ),
 });
 
 const shapeKindsSchema = z.discriminatedUnion('kind', [
