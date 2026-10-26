@@ -1,5 +1,6 @@
 import { glyphProfile } from '@/engine/compiler/glyphs';
 import { DEFAULT_INLAY_GLUE_GAP_MM } from './inlay';
+import { textureCarries, textureNumbers, textureOperationName, textureStrokes } from './texture';
 import { segmentsForRadius } from '@/engine/compiler/arcResolution';
 import {
   aabbOfProfile,
@@ -1973,6 +1974,11 @@ export function toPartPlan(job: EngraveJob, options: PartPlanOptions = {}): Part
     names.set(item.id, itemOperationName(item));
     // A construction item is reference-only (#215): it resolves, but cuts nothing.
     if (item.construction) continue;
+    // #670 — a TEXTURE region is not pocketed: its pattern's strokes are traces, appended to that
+    // list below. It still resolves a profile, so a frame or a cut-out may still name it. A
+    // combined shape cannot carry one (its profile has holes); `validateJob` says so by name and
+    // the item keeps its ordinary region behaviour here rather than vanishing.
+    if ('texture' in item && item.texture !== undefined && textureCarries(item.kind)) continue;
     // A through region (#218) has no typed depth: its floor is the setup's `thickness +
     // breakthrough`, which is exactly what the region builder used to invent for itself. Carry
     // the flag as well, so the verifier's mask and the preview can tell it from a blind pocket
@@ -2064,6 +2070,25 @@ export function toPartPlan(job: EngraveJob, options: PartPlanOptions = {}): Part
     const { paths, closed } = tracePaths(item, job.tool);
     if (paths.length === 0) continue;
     traces.push({ id: item.id, name: traceOperationName(item), paths, closed, depth: item.depth });
+  }
+  // #670 — TEXTURES join the same list, after the ordinary traces, in document order. The paths
+  // are DERIVED here from the document's numbers (a seed and two lengths), never stored: the
+  // pattern is a pure function of the shape and those numbers, so the same document posts the
+  // same program byte for byte. A texture that cuts through, has no depth, or sits on a shape the
+  // pattern cannot be clipped to produces nothing — `validateJob` names the reason.
+  for (const item of job.shapes) {
+    if (!item.enabled || item.construction || item.texture === undefined) continue;
+    if (!textureCarries(item.kind) || item.through === true) continue;
+    const numbers = textureNumbers(item.texture, item.depth);
+    const strokes = textureStrokes(item, numbers);
+    if (strokes.paths.length === 0) continue;
+    traces.push({
+      id: item.id,
+      name: textureOperationName(numbers.pattern),
+      paths: strokes.paths,
+      closed: strokes.paths.map(() => false),
+      depth: item.depth,
+    });
   }
 
   // Plunge drills (#220) are a third sibling list: hole centres only, no profile and no region

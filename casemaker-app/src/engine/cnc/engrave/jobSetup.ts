@@ -3,6 +3,7 @@ import type { MillProfile } from '@/engine/cnc/machine';
 import { getTools, NO_TOOL_KEY, toolForJob } from '@/engine/cnc/toolRegistry';
 import {
   cuttingDiameter,
+  cuttingForTrace,
   cuttingRadiusForSweep,
   drillPointAngle,
   pointLength,
@@ -33,6 +34,7 @@ import {
 import { FASTENERS } from '@/engine/compiler/fasteners';
 import { vCone, vFluteLength } from '@/engine/cnc/vProfile';
 import { inlayGlueGap, inlayMarked, inlayNumbers } from './inlay';
+import { textureNumbers, textureStrokes } from './texture';
 import { reliefNumbers } from '@/engine/cnc/cam/relief';
 import type {
   EngraveAnyItem,
@@ -41,11 +43,13 @@ import type {
   EngraveDrill,
   EngraveJob,
   EngraveKeepOut,
+  EngraveShape,
   EngravePrimitive,
   EngraveTargetObject,
   EngraveThread,
   EngraveTraceItem,
   JobSetup,
+  TextureMark,
 } from '@/types/engraveJob';
 import type { Mount, Orientation } from '@/engine/cnc/setups/types';
 
@@ -159,6 +163,16 @@ export type JobFindingCode =
   | 'inlay-needs-cone'
   | 'inlay-gap'
   | 'inlay-plane-depth'
+  // Surface textures (#670). A texture is a pattern of stroke TRACES over one simple region:
+  // `texture-shape` is the region kind that cannot hold one (a profile with holes, or a half that
+  // is also an inlay), `texture-through` the surface finish that is not a cut-through,
+  // `texture-tool` the cutter the trace path refuses by name, and the two warnings say the
+  // pattern came out empty or was capped (`texture-empty`, `texture-crowded`).
+  | 'texture-shape'
+  | 'texture-through'
+  | 'texture-tool'
+  | 'texture-empty'
+  | 'texture-crowded'
   // Through-cuts and cut-outs (#218). `through-needs-board`: no under-board, or one thinner than
   // the breakthrough plus a millimetre. `through-tool-reach`: the cutter's flutes/shank do not
   // cover `thickness + breakthrough`. `tab-unplaceable`, `cutout-empty` and `loose-piece` are
@@ -1294,6 +1308,89 @@ export function validateJob(
         });
       }
     }
+  }
+
+  // SURFACE TEXTURES (#670). A texture is a seeded pattern of stroke traces over one simple
+  // region, cut at the shape's own `depth`. The plan derives nothing for a document finding here
+  // (a through texture, an inlay marker, a combined region), so each refusal is the reason a
+  // marked shape produces no strokes rather than a second opinion on the plan's numbers. The two
+  // warnings report the DERIVED pattern, from the same `textureStrokes` the plan calls.
+  const textureTool = jobTool(job);
+  const traceTool = textureTool === null ? null : cuttingForTrace(textureTool);
+  const texturedShapes = job.shapes.filter(
+    (s): s is EngraveShape & { texture: TextureMark } =>
+      s.enabled && !s.construction && s.texture !== undefined,
+  );
+  for (const item of texturedShapes) {
+    const who = itemLabel(item);
+    if (item.inlay !== undefined) {
+      findings.push({
+        severity: 'error',
+        code: 'texture-shape',
+        labelId: item.id,
+        message:
+          `${who} carries both a texture and an inlay half; the same region cannot be a pattern ` +
+          'of strokes and a pocket. Clear one of the two markers.',
+      });
+      continue;
+    }
+    if (item.through === true) {
+      findings.push({
+        severity: 'error',
+        code: 'texture-through',
+        labelId: item.id,
+        message:
+          `${who} is a texture, which is a surface finish, not a cut through the blank. Turn ` +
+          '`through` off and state the pattern’s depth.',
+      });
+      continue;
+    }
+    if (textureTool !== null && traceTool !== null && !traceTool.ok) {
+      findings.push({
+        severity: 'error',
+        code: 'texture-tool',
+        labelId: item.id,
+        message:
+          `${who} is a texture, and a texture is cut as traces; "${textureTool.name}" ` +
+          `(${textureTool.shape}) is not a trace cutter. Use a V-bit for dimpled strokes or a ` +
+          'flat end mill for flat-bottomed ones.',
+      });
+      continue;
+    }
+    const numbers = textureNumbers(item.texture, item.depth);
+    const strokes = textureStrokes(item, numbers);
+    if (strokes.paths.length === 0) {
+      findings.push({
+        severity: 'warning',
+        code: 'texture-empty',
+        labelId: item.id,
+        message:
+          `${who}’s ${numbers.pattern} pattern comes out empty at a ${fmt3(numbers.pitchMm)} mm ` +
+          'pitch over this region; widen the region or narrow the pitch.',
+      });
+    } else if (strokes.capped) {
+      findings.push({
+        severity: 'warning',
+        code: 'texture-crowded',
+        labelId: item.id,
+        message:
+          `${who}’s pattern wants more than the 4000-` +
+          `${numbers.pattern === 'scallop' ? 'run' : 'stroke'} cap at a ${fmt3(numbers.pitchMm)} mm ` +
+          'pitch; the program cuts the first 4000. Widen the pitch to cut the whole region.',
+      });
+    }
+  }
+  for (const item of job.combined ?? []) {
+    if (!item.enabled || item.texture === undefined) continue;
+    findings.push({
+      severity: 'error',
+      code: 'texture-shape',
+      labelId: item.id,
+      message:
+        `${itemLabel(item)} carries a texture, but a texture sits on a rectangle, circle, slot ` +
+        'or polygon: a border, frame or cutaway has holes, so the pattern has no one region to ' +
+        'fill. Draw the area as a shape of its own.',
+    });
   }
 
   // MILLED THREADS (#445, #434 phase 2). A thread mill does not drill (D1): every check here

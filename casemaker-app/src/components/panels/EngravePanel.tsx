@@ -132,6 +132,7 @@ import {
   inlayNumbers,
   type InlayNumbers,
 } from '@/engine/cnc/engrave/inlay';
+import { textureNumbers, textureStrokes, type TextureNumbers } from '@/engine/cnc/engrave/texture';
 import { jobFileName } from '@/engine/cnc/engrave/jobFile';
 import { decodePng } from '@/engine/import/png';
 import { base64ToArrayBuffer } from '@/engine/import/base64';
@@ -1270,6 +1271,23 @@ export function EngravePanel(): JSX.Element {
             },
     };
   };
+
+  // #670 — THE TEXTURE: the numbers the CAM runs with and the strokes they derive, from the same
+  // module the plan calls. Derived once per shape edit, not per render of every row.
+  const textureById = useMemo(() => {
+    const map = new Map<string, { numbers: TextureNumbers; strokes: number; capped: boolean }>();
+    for (const shape of job.shapes) {
+      if (shape.texture === undefined) continue;
+      const numbers = textureNumbers(shape.texture, shape.depth);
+      const derived = textureStrokes(shape, numbers);
+      map.set(shape.id, { numbers, strokes: derived.paths.length, capped: derived.capped });
+    }
+    return map;
+  }, [job.shapes]);
+  const textureFor = (
+    shape: EngraveShape,
+  ): { numbers: TextureNumbers; strokes: number; capped: boolean } | undefined =>
+    shape.texture === undefined ? undefined : textureById.get(shape.id);
 
   const rec = preview?.recommendation ?? null;
   const recPick = rec?.key ? rec.candidates.find((c) => c.key === rec.key) ?? null : null;
@@ -2438,6 +2456,7 @@ export function EngravePanel(): JSX.Element {
                 }
           }
           inlay={shape.construction === true ? null : (inlayFor(shape) ?? null)}
+          texture={shape.construction === true ? null : (textureFor(shape) ?? null)}
           onChange={(patch) => updateShape(shape.id, patch)}
           onRemove={() => removeShape(shape.id)}
         />

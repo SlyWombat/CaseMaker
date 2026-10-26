@@ -168,6 +168,41 @@ const inlayMarkSchema = z
   .strict()
   .describe('A V-carve inlay half: its role and the glue-gap numbers it runs or was built for.');
 
+/**
+ * #670 — a surface texture, as the document stores it: the pattern and its numbers. Strict, so a
+ * hand-edited key is refused; the paths the pattern derives are never stored, only the seed and
+ * the spacing that reproduce them.
+ */
+const textureMarkSchema = z
+  .object({
+    pattern: z
+      .enum(['stipple', 'scallop'])
+      .describe("The texture's pattern: 'stipple' (short seeded strokes) or 'scallop' (rows of semicircular bumps)."),
+    pitchMm: z
+      .number()
+      .finite()
+      .positive()
+      .max(50)
+      .optional()
+      .describe('Stroke and row spacing in millimetres; omit for the CAM default (1 mm).'),
+    strokeMm: z
+      .number()
+      .finite()
+      .positive()
+      .max(200)
+      .optional()
+      .describe('A stipple stroke’s length in millimetres; omit for the CAM default (1 mm). Ignored by scallop.'),
+    seed: z
+      .number()
+      .int()
+      .min(0)
+      .max(2 ** 31 - 1)
+      .optional()
+      .describe('The stipple’s jitter and direction seed; the same seed gives the same pattern. Omit for 1.'),
+  })
+  .strict()
+  .describe('A surface texture (#670): a seeded stroke pattern over this region, cut as traces at the shape’s depth.');
+
 const shapeBaseSchema = z.object({
   id: z.string().min(1).describe('Unique id for this item within the job.'),
   name: z.string().optional().describe('Optional human-readable name for the item list.'),
@@ -211,6 +246,10 @@ const shapeBaseSchema = z.object({
   inlay: inlayMarkSchema
     .optional()
     .describe('This region is one half of a V-carve inlay (#673); omit for an ordinary region.'),
+  // #670 — a surface texture. Optional, so a pre-#670 document keeps no key and pockets as it did.
+  texture: textureMarkSchema
+    .optional()
+    .describe('Cut a seeded stroke pattern over this region instead of a pocket (#670); omit for an ordinary region.'),
 });
 
 const shapeKindsSchema = z.discriminatedUnion('kind', [

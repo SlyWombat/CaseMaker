@@ -31,6 +31,7 @@ describe('#662 the operation types', () => {
       'bore',
       'thread',
       'surface',
+      'texture',
     ]);
     // Every type says what it makes, and carries the picker's test id.
     for (const type of OPERATION_TYPES) {
@@ -65,6 +66,13 @@ describe('#662 the operation types', () => {
     expect(operationTypeOfItem({ kind: 'rect', inlay: { role: 'female' } }, 'v-carve')).toBe('inlay');
     expect(operationTypeOfItem({ kind: 'cutaway', inlay: { role: 'male' } }, 'v-carve')).toBe('inlay');
     expect(operationTypeOfItem({ kind: 'rect', inlay: { role: 'female' }, construction: true }, 'v-carve')).toBeNull();
+    // #670 — a texture region is its own operation whatever the cutter makes of a plain region,
+    // and the marker reads before the inlay one (the plan gives it precedence; `texture-shape`
+    // refuses a region carrying both).
+    expect(operationTypeOfItem({ kind: 'rect', texture: { pattern: 'stipple' } }, 'v-carve')).toBe('texture');
+    expect(operationTypeOfItem({ kind: 'rect', texture: { pattern: 'scallop' } }, 'pocket')).toBe('texture');
+    expect(operationTypeOfItem({ kind: 'rect', texture: { pattern: 'stipple' }, inlay: { role: 'female' } }, 'v-carve')).toBe('texture');
+    expect(operationTypeOfItem({ kind: 'rect', texture: { pattern: 'stipple' }, construction: true }, 'v-carve')).toBeNull();
     expect(operationTypeOfItem({ kind: 'circle', through: true }, 'pocket')).toBe('profile');
     expect(operationTypeOfItem({ kind: 'cutout' }, 'pocket')).toBe('profile');
     // #669 — a chamfer is its own operation on an item's outline.
@@ -139,6 +147,8 @@ describe('#662 the operation types', () => {
       // diameter (its own spec proves the value).
       expect(addOperationOfType('bore')).toBe('i4');
       expect(addOperationOfType('thread')).toBe('i5');
+      // #670 — Texture a surface adds a rect carrying a stipple marker.
+      expect(addOperationOfType('texture')).toBe('i2');
       expect(added).toEqual([
         'label',
         'shape:rect', // v-carve
@@ -150,6 +160,8 @@ describe('#662 the operation types', () => {
         'drill:drill',
         'drill:drill',
         'thread',
+        'shape:rect', // texture
+        'update:i2:{"texture":{"pattern":"stipple"}}',
       ]);
     } finally {
       useEngraveJobStore.setState(before);

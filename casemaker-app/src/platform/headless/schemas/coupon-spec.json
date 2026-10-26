@@ -166,6 +166,42 @@
                     "description": "Rotation in degrees counter-clockwise about position.",
                     "type": "number"
                   },
+                  "texture": {
+                    "additionalProperties": false,
+                    "description": "Cut a seeded stroke pattern over this region instead of a pocket (#670); omit for an ordinary region.",
+                    "properties": {
+                      "pattern": {
+                        "description": "The texture's pattern: 'stipple' (short seeded strokes) or 'scallop' (rows of semicircular bumps).",
+                        "enum": [
+                          "stipple",
+                          "scallop"
+                        ],
+                        "type": "string"
+                      },
+                      "pitchMm": {
+                        "description": "Stroke and row spacing in millimetres; omit for the CAM default (1 mm).",
+                        "exclusiveMinimum": 0,
+                        "maximum": 50,
+                        "type": "number"
+                      },
+                      "seed": {
+                        "description": "The stipple’s jitter and direction seed; the same seed gives the same pattern. Omit for 1.",
+                        "maximum": 2147483647,
+                        "minimum": 0,
+                        "type": "integer"
+                      },
+                      "strokeMm": {
+                        "description": "A stipple stroke’s length in millimetres; omit for the CAM default (1 mm). Ignored by scallop.",
+                        "exclusiveMinimum": 0,
+                        "maximum": 200,
+                        "type": "number"
+                      }
+                    },
+                    "required": [
+                      "pattern"
+                    ],
+                    "type": "object"
+                  },
                   "through": {
                     "description": "Cut through the blank to the sacrificial board; the floor is the breakthrough rule and depth is then only the checked pocket depth.",
                     "type": "boolean"
@@ -298,6 +334,42 @@
                   "rotation": {
                     "description": "Rotation in degrees counter-clockwise about position.",
                     "type": "number"
+                  },
+                  "texture": {
+                    "additionalProperties": false,
+                    "description": "Cut a seeded stroke pattern over this region instead of a pocket (#670); omit for an ordinary region.",
+                    "properties": {
+                      "pattern": {
+                        "description": "The texture's pattern: 'stipple' (short seeded strokes) or 'scallop' (rows of semicircular bumps).",
+                        "enum": [
+                          "stipple",
+                          "scallop"
+                        ],
+                        "type": "string"
+                      },
+                      "pitchMm": {
+                        "description": "Stroke and row spacing in millimetres; omit for the CAM default (1 mm).",
+                        "exclusiveMinimum": 0,
+                        "maximum": 50,
+                        "type": "number"
+                      },
+                      "seed": {
+                        "description": "The stipple’s jitter and direction seed; the same seed gives the same pattern. Omit for 1.",
+                        "maximum": 2147483647,
+                        "minimum": 0,
+                        "type": "integer"
+                      },
+                      "strokeMm": {
+                        "description": "A stipple stroke’s length in millimetres; omit for the CAM default (1 mm). Ignored by scallop.",
+                        "exclusiveMinimum": 0,
+                        "maximum": 200,
+                        "type": "number"
+                      }
+                    },
+                    "required": [
+                      "pattern"
+                    ],
+                    "type": "object"
                   },
                   "through": {
                     "description": "Cut through the blank to the sacrificial board; the floor is the breakthrough rule and depth is then only the checked pocket depth.",
@@ -435,6 +507,42 @@
                   "rotation": {
                     "description": "Rotation in degrees counter-clockwise about position.",
                     "type": "number"
+                  },
+                  "texture": {
+                    "additionalProperties": false,
+                    "description": "Cut a seeded stroke pattern over this region instead of a pocket (#670); omit for an ordinary region.",
+                    "properties": {
+                      "pattern": {
+                        "description": "The texture's pattern: 'stipple' (short seeded strokes) or 'scallop' (rows of semicircular bumps).",
+                        "enum": [
+                          "stipple",
+                          "scallop"
+                        ],
+                        "type": "string"
+                      },
+                      "pitchMm": {
+                        "description": "Stroke and row spacing in millimetres; omit for the CAM default (1 mm).",
+                        "exclusiveMinimum": 0,
+                        "maximum": 50,
+                        "type": "number"
+                      },
+                      "seed": {
+                        "description": "The stipple’s jitter and direction seed; the same seed gives the same pattern. Omit for 1.",
+                        "maximum": 2147483647,
+                        "minimum": 0,
+                        "type": "integer"
+                      },
+                      "strokeMm": {
+                        "description": "A stipple stroke’s length in millimetres; omit for the CAM default (1 mm). Ignored by scallop.",
+                        "exclusiveMinimum": 0,
+                        "maximum": 200,
+                        "type": "number"
+                      }
+                    },
+                    "required": [
+                      "pattern"
+                    ],
+                    "type": "object"
                   },
                   "through": {
                     "description": "Cut through the blank to the sacrificial board; the floor is the breakthrough rule and depth is then only the checked pocket depth.",
@@ -4007,6 +4115,42 @@
                     "description": "Rotation in degrees counter-clockwise about position.",
                     "type": "number"
                   },
+                  "texture": {
+                    "additionalProperties": false,
+                    "description": "Cut a seeded stroke pattern over this region instead of a pocket (#670); omit for an ordinary region.",
+                    "properties": {
+                      "pattern": {
+                        "description": "The texture's pattern: 'stipple' (short seeded strokes) or 'scallop' (rows of semicircular bumps).",
+                        "enum": [
+                          "stipple",
+                          "scallop"
+                        ],
+                        "type": "string"
+                      },
+                      "pitchMm": {
+                        "description": "Stroke and row spacing in millimetres; omit for the CAM default (1 mm).",
+                        "exclusiveMinimum": 0,
+                        "maximum": 50,
+                        "type": "number"
+                      },
+                      "seed": {
+                        "description": "The stipple’s jitter and direction seed; the same seed gives the same pattern. Omit for 1.",
+                        "maximum": 2147483647,
+                        "minimum": 0,
+                        "type": "integer"
+                      },
+                      "strokeMm": {
+                        "description": "A stipple stroke’s length in millimetres; omit for the CAM default (1 mm). Ignored by scallop.",
+                        "exclusiveMinimum": 0,
+                        "maximum": 200,
+                        "type": "number"
+                      }
+                    },
+                    "required": [
+                      "pattern"
+                    ],
+                    "type": "object"
+                  },
                   "through": {
                     "description": "Cut through the blank to the sacrificial board; the floor is the breakthrough rule and depth is then only the checked pocket depth.",
                     "type": "boolean"
@@ -4136,6 +4280,42 @@
                     "description": "Rotation in degrees counter-clockwise about position.",
                     "type": "number"
                   },
+                  "texture": {
+                    "additionalProperties": false,
+                    "description": "Cut a seeded stroke pattern over this region instead of a pocket (#670); omit for an ordinary region.",
+                    "properties": {
+                      "pattern": {
+                        "description": "The texture's pattern: 'stipple' (short seeded strokes) or 'scallop' (rows of semicircular bumps).",
+                        "enum": [
+                          "stipple",
+                          "scallop"
+                        ],
+                        "type": "string"
+                      },
+                      "pitchMm": {
+                        "description": "Stroke and row spacing in millimetres; omit for the CAM default (1 mm).",
+                        "exclusiveMinimum": 0,
+                        "maximum": 50,
+                        "type": "number"
+                      },
+                      "seed": {
+                        "description": "The stipple’s jitter and direction seed; the same seed gives the same pattern. Omit for 1.",
+                        "maximum": 2147483647,
+                        "minimum": 0,
+                        "type": "integer"
+                      },
+                      "strokeMm": {
+                        "description": "A stipple stroke’s length in millimetres; omit for the CAM default (1 mm). Ignored by scallop.",
+                        "exclusiveMinimum": 0,
+                        "maximum": 200,
+                        "type": "number"
+                      }
+                    },
+                    "required": [
+                      "pattern"
+                    ],
+                    "type": "object"
+                  },
                   "through": {
                     "description": "Cut through the blank to the sacrificial board; the floor is the breakthrough rule and depth is then only the checked pocket depth.",
                     "type": "boolean"
@@ -4257,6 +4437,42 @@
                   "rotation": {
                     "description": "Rotation in degrees counter-clockwise about position.",
                     "type": "number"
+                  },
+                  "texture": {
+                    "additionalProperties": false,
+                    "description": "Cut a seeded stroke pattern over this region instead of a pocket (#670); omit for an ordinary region.",
+                    "properties": {
+                      "pattern": {
+                        "description": "The texture's pattern: 'stipple' (short seeded strokes) or 'scallop' (rows of semicircular bumps).",
+                        "enum": [
+                          "stipple",
+                          "scallop"
+                        ],
+                        "type": "string"
+                      },
+                      "pitchMm": {
+                        "description": "Stroke and row spacing in millimetres; omit for the CAM default (1 mm).",
+                        "exclusiveMinimum": 0,
+                        "maximum": 50,
+                        "type": "number"
+                      },
+                      "seed": {
+                        "description": "The stipple’s jitter and direction seed; the same seed gives the same pattern. Omit for 1.",
+                        "maximum": 2147483647,
+                        "minimum": 0,
+                        "type": "integer"
+                      },
+                      "strokeMm": {
+                        "description": "A stipple stroke’s length in millimetres; omit for the CAM default (1 mm). Ignored by scallop.",
+                        "exclusiveMinimum": 0,
+                        "maximum": 200,
+                        "type": "number"
+                      }
+                    },
+                    "required": [
+                      "pattern"
+                    ],
+                    "type": "object"
                   },
                   "through": {
                     "description": "Cut through the blank to the sacrificial board; the floor is the breakthrough rule and depth is then only the checked pocket depth.",
@@ -4398,6 +4614,42 @@
                   "rotation": {
                     "description": "Rotation in degrees counter-clockwise about position.",
                     "type": "number"
+                  },
+                  "texture": {
+                    "additionalProperties": false,
+                    "description": "Cut a seeded stroke pattern over this region instead of a pocket (#670); omit for an ordinary region.",
+                    "properties": {
+                      "pattern": {
+                        "description": "The texture's pattern: 'stipple' (short seeded strokes) or 'scallop' (rows of semicircular bumps).",
+                        "enum": [
+                          "stipple",
+                          "scallop"
+                        ],
+                        "type": "string"
+                      },
+                      "pitchMm": {
+                        "description": "Stroke and row spacing in millimetres; omit for the CAM default (1 mm).",
+                        "exclusiveMinimum": 0,
+                        "maximum": 50,
+                        "type": "number"
+                      },
+                      "seed": {
+                        "description": "The stipple’s jitter and direction seed; the same seed gives the same pattern. Omit for 1.",
+                        "maximum": 2147483647,
+                        "minimum": 0,
+                        "type": "integer"
+                      },
+                      "strokeMm": {
+                        "description": "A stipple stroke’s length in millimetres; omit for the CAM default (1 mm). Ignored by scallop.",
+                        "exclusiveMinimum": 0,
+                        "maximum": 200,
+                        "type": "number"
+                      }
+                    },
+                    "required": [
+                      "pattern"
+                    ],
+                    "type": "object"
                   },
                   "through": {
                     "description": "Cut through the blank to the sacrificial board; the floor is the breakthrough rule and depth is then only the checked pocket depth.",
@@ -5830,6 +6082,42 @@
                 "description": "Name of the design file the outline came from.",
                 "minLength": 1,
                 "type": "string"
+              },
+              "texture": {
+                "additionalProperties": false,
+                "description": "Cut a seeded stroke pattern over this region instead of a pocket (#670); omit for an ordinary region.",
+                "properties": {
+                  "pattern": {
+                    "description": "The texture's pattern: 'stipple' (short seeded strokes) or 'scallop' (rows of semicircular bumps).",
+                    "enum": [
+                      "stipple",
+                      "scallop"
+                    ],
+                    "type": "string"
+                  },
+                  "pitchMm": {
+                    "description": "Stroke and row spacing in millimetres; omit for the CAM default (1 mm).",
+                    "exclusiveMinimum": 0,
+                    "maximum": 50,
+                    "type": "number"
+                  },
+                  "seed": {
+                    "description": "The stipple’s jitter and direction seed; the same seed gives the same pattern. Omit for 1.",
+                    "maximum": 2147483647,
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "strokeMm": {
+                    "description": "A stipple stroke’s length in millimetres; omit for the CAM default (1 mm). Ignored by scallop.",
+                    "exclusiveMinimum": 0,
+                    "maximum": 200,
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "pattern"
+                ],
+                "type": "object"
               },
               "through": {
                 "description": "Cut through the blank to the sacrificial board; the floor is the breakthrough rule and depth is then only the checked pocket depth.",

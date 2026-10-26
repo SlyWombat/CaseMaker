@@ -6,8 +6,13 @@ import { regionChipLabel, useRegionOperationType } from '@/components/panels/ope
 import { rowSummary } from '@/components/panels/engraveRowText';
 import type { JobFinding } from '@/engine/cnc/engrave/jobSetup';
 import type { ShapePatch } from '@/store/engraveJobStore';
-import type { EngraveShape } from '@/types/engraveJob';
+import type { EngraveShape, TexturePattern } from '@/types/engraveJob';
 import { DEFAULT_INLAY_GLUE_GAP_MM, type InlayNumbers } from '@/engine/cnc/engrave/inlay';
+import {
+  DEFAULT_MAX_TEXTURE_STROKES,
+  textureOperationName,
+  type TextureNumbers,
+} from '@/engine/cnc/engrave/texture';
 import type { Mm } from '@/types/units';
 
 /**
@@ -114,6 +119,11 @@ export interface EngraveShapeRowProps {
    * matching male blank as its own job (`null` while the job cannot make one).
    */
   inlay?: { numbers: InlayNumbers | null; onSaveMale: (() => void) | null } | null;
+  /**
+   * #670 — the texture's own facts, present on a region carrying a texture marker: the numbers
+   * the CAM runs with, how many strokes the pattern derives, and whether the cap shortened it.
+   */
+  texture?: { numbers: TextureNumbers; strokes: number; capped: boolean } | null;
 }
 
 export function EngraveShapeRow({
@@ -126,12 +136,20 @@ export function EngraveShapeRow({
   rest = null,
   vCarve = null,
   inlay = null,
+  texture = null,
 }: EngraveShapeRowProps): JSX.Element {
   // #662 - the chip states what THIS cutter makes of a region.
   const region = useRegionOperationType();
   const depthInvalid = shape.depth > maxDepth;
   // #673 — the female inlay half's marker, narrowed once so the glue-gap write carries the role.
   const femaleInlay = shape.inlay?.role === 'female' ? shape.inlay : null;
+  // #670 — a texture's marker, narrowed once: every write below carries the pattern with it.
+  const mark = shape.texture ?? null;
+  /** Write one number into the marker, keeping the pattern and the other numbers. */
+  const setTexture = (patch: Partial<{ pattern: TexturePattern; pitchMm: Mm; strokeMm: Mm; seed: number }>): void => {
+    if (mark === null) return;
+    onChange({ texture: { ...mark, ...patch } });
+  };
   const [pointsText, setPointsText] = useState(() => (shape.kind === 'polygon' ? pointsToText(shape.points) : ''));
 
   const numField = (key: NumField, label: string, title: string, invalid = false): JSX.Element => (
@@ -185,11 +203,18 @@ export function EngraveShapeRow({
       glyph={KIND_GLYPH[shape.kind]}
       kindWord={KIND_LABEL[shape.kind]}
       typeLabel={
-        shape.through !== true && shape.vCarveDepth === 'variable' && region === 'v-carve'
-          ? 'V-carve (variable)'
-          : regionChipLabel(shape.through, region)
+        // #670 — a texture is its own operation whatever the cutter makes of the region.
+        shape.texture !== undefined
+          ? 'Texture'
+          : shape.through !== true && shape.vCarveDepth === 'variable' && region === 'v-carve'
+            ? 'V-carve (variable)'
+            : regionChipLabel(shape.through, region)
       }
-      name={itemOperationName(shape)}
+      name={
+        shape.texture === undefined
+          ? itemOperationName(shape)
+          : textureOperationName(mark?.pattern ?? shape.texture.pattern)
+      }
       summary={shape.through === true ? 'through' : rowSummary(shape.depth)}
       enabled={shape.enabled}
       enabledTitle="A disabled shape is kept in the job but not cut."
@@ -410,6 +435,105 @@ export function EngraveShapeRow({
           >
             Save the male blank…
           </button>
+        </div>
+      )}
+      {/* #670 — THE TEXTURE: the pattern, its spacing numbers, and the strokes they derive. The
+          depth above is the pattern's floor; the note prints the numbers the CAM will run, from
+          the same `textureStrokes` the plan calls. */}
+      {texture !== null && mark !== null && (
+        <div data-testid={`engrave-shape-texture-${index}`} style={{ marginTop: 4 }}>
+          <p style={MUTED}>
+            A texture cuts a seeded pattern of short strokes over this region instead of a pocket;
+            each stroke is a trace, cut at the depth above.
+          </p>
+          <div style={ROW_INLINE}>
+            <label style={FIELD_LABEL}>
+              <span>pattern</span>
+              <select
+                value={mark.pattern}
+                data-testid={`engrave-shape-texture-pattern-${index}`}
+                aria-label={`Shape ${index + 1} texture pattern`}
+                title="Stipple: short jittered strokes in every cell. Scallop: rows of semicircular bumps."
+                onChange={(e) => setTexture({ pattern: e.target.value === 'scallop' ? 'scallop' : 'stipple' })}
+              >
+                <option value="stipple">stipple</option>
+                <option value="scallop">scallop</option>
+              </select>
+            </label>
+            <label style={FIELD_LABEL}>
+              <span>pitch</span>
+              <input
+                type="number"
+                min={0.1}
+                step="0.1"
+                value={fmt(texture.numbers.pitchMm)}
+                data-testid={`engrave-shape-texture-pitch-${index}`}
+                aria-label={`Shape ${index + 1} texture pitch`}
+                title="Stroke and row spacing, mm. Past a few thousand strokes the pattern is capped: widen the pitch."
+                style={NUM}
+                onChange={(e) => {
+                  const v = Number(e.target.value);
+                  if (Number.isFinite(v) && v > 0) setTexture({ pitchMm: v });
+                }}
+              />
+              <span>mm</span>
+            </label>
+            {mark.pattern === 'stipple' && (
+              <>
+                <label style={FIELD_LABEL}>
+                  <span>stroke</span>
+                  <input
+                    type="number"
+                    min={0.1}
+                    step="0.1"
+                    value={fmt(texture.numbers.strokeMm)}
+                    data-testid={`engrave-shape-texture-stroke-${index}`}
+                    aria-label={`Shape ${index + 1} texture stroke length`}
+                    title="A stipple stroke's length, mm. A longer stroke than the pitch overlaps its neighbours."
+                    style={NUM}
+                    onChange={(e) => {
+                      const v = Number(e.target.value);
+                      if (Number.isFinite(v) && v > 0) setTexture({ strokeMm: v });
+                    }}
+                  />
+                  <span>mm</span>
+                </label>
+                <label style={FIELD_LABEL}>
+                  <span>seed</span>
+                  <input
+                    type="number"
+                    min={0}
+                    step="1"
+                    value={fmt(texture.numbers.seed)}
+                    data-testid={`engrave-shape-texture-seed-${index}`}
+                    aria-label={`Shape ${index + 1} texture seed`}
+                    title="The stipple's jitter and direction seed. The same seed gives the same pattern; a different seed lays out a different one."
+                    style={NUM}
+                    onChange={(e) => {
+                      const v = Number(e.target.value);
+                      if (Number.isInteger(v) && v >= 0) setTexture({ seed: v });
+                    }}
+                  />
+                </label>
+              </>
+            )}
+          </div>
+          <p
+            style={{ ...MUTED, ...(texture.strokes === 0 ? { color: SEVERITY_COLOR.error } : texture.capped ? { color: SEVERITY_COLOR.warning } : null) }}
+            data-testid={`engrave-shape-texture-note-${index}`}
+          >
+            {texture.strokes === 0
+              ? `The pattern comes out empty at a ${fmt(texture.numbers.pitchMm)} mm pitch over this region; widen the region or narrow the pitch.`
+              : `${texture.strokes} stroke${texture.strokes === 1 ? '' : 's'} at a ${fmt(texture.numbers.pitchMm)} mm pitch ` +
+                `(${texture.numbers.pitchSource})` +
+                (texture.numbers.pattern === 'stipple'
+                  ? ` and a ${fmt(texture.numbers.strokeMm)} mm stroke (${texture.numbers.strokeSource}), seed ${texture.numbers.seed}`
+                  : '') +
+                `, cut ${fmt(texture.numbers.depthMm)} mm deep.` +
+                (texture.capped
+                  ? ` More than the ${DEFAULT_MAX_TEXTURE_STROKES}-${texture.numbers.pattern === 'scallop' ? 'run' : 'stroke'} cap: the first ${DEFAULT_MAX_TEXTURE_STROKES} are cut.`
+                  : '')}
+          </p>
         </div>
       )}
       {rest !== null && <RestCutterControl rest={rest} testidPrefix="engrave-shape" index={index} />}

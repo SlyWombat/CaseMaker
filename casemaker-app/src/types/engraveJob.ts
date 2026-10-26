@@ -239,6 +239,34 @@ export interface EngraveShapeBase {
    * blank (see `engine/cnc/engrave/inlay.ts`).
    */
   inlay?: InlayMark;
+  /**
+   * #670 — a SURFACE TEXTURE: this region is not pocketed. A seeded pattern of short strokes is
+   * derived at plan time and cut as traces at the shape's own `depth` (see
+   * `engine/cnc/engrave/texture.ts`). The document stores the pattern's numbers, never the paths.
+   */
+  texture?: TextureMark;
+}
+
+/** #670 — the patterns the texture engine knows. */
+export type TexturePattern = 'stipple' | 'scallop';
+
+/**
+ * #670 — a texture, as the DOCUMENT holds it: the pattern and its numbers.
+ *
+ * Every number is optional; an absent one reads as the CAM's labelled default
+ * (`engine/cnc/engrave/texture.ts`), the #671/#672 precedent. The depth is the shape's OWN
+ * `depth` field, not a second number here. The seed is part of the document because the same
+ * document must post the same program byte for byte: the pattern is `mulberry32(seed)`, never
+ * `Math.random`.
+ */
+export interface TextureMark {
+  pattern: TexturePattern;
+  /** Stroke and row spacing, mm. Absent = the CAM default (1 mm). */
+  pitchMm?: Mm;
+  /** A stipple stroke's length, mm. Absent = the CAM default (1 mm). Ignored by `scallop`. */
+  strokeMm?: Mm;
+  /** The stipple's jitter/direction seed. Absent = the CAM default (1). */
+  seed?: number;
 }
 
 /**

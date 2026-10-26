@@ -33,11 +33,13 @@
  *  - `surface` — a goal mesh or a PNG relief (#672), roughed and ball-finished in 3D (#534). The
  *    engine posts it for a PURE goal job, so the picker offers it only while the list is empty,
  *    and picking it sets the imported object's `role: 'goal'` — the control the UI did not have
- *    (matrix gap A1).
+ *    (matrix gap A1);
+ *  - `texture` — a seeded pattern of short strokes over a region, cut as traces by a V-bit or a
+ *    flat end mill (#670): the picker adds a rect carrying a `texture` marker, and the row states
+ *    the pattern, pitch, stroke length and seed.
  *
  * NOT offered here, per the matrix (gaps, not omissions): open-path lines from SVG/DXF (#B2),
- * variable-depth V-carve (#B3), rotary wrap (#B1), greyscale image relief (#B4). Facing is a job
- * option, not an operation type, and stays where it is.
+ * rotary wrap (#B1). Facing is a job option, not an operation type, and stays where it is.
  *
  * Internal names (item kinds, stores, testids) are untouched; this is the operator-facing layer.
  */
@@ -58,7 +60,8 @@ export type OperationTypeId =
   | 'hole'
   | 'bore'
   | 'thread'
-  | 'surface';
+  | 'surface'
+  | 'texture';
 
 export interface OperationTypeDef {
   id: OperationTypeId;
@@ -83,6 +86,7 @@ export const OPERATION_TYPES: readonly OperationTypeDef[] = [
   { id: 'bore', label: 'Bore to size', blurb: 'A hole wider than the cutter, helixed down its wall', addTestId: 'engrave-add-bore' },
   { id: 'thread', label: 'Thread', blurb: 'A milled internal thread', addTestId: 'engrave-add-thread' },
   { id: 'surface', label: 'Surface a mesh', blurb: 'Rough and finish a goal mesh or picture', addTestId: 'engrave-add-surface' },
+  { id: 'texture', label: 'Texture a surface', blurb: 'A seeded pattern of short strokes over a region', addTestId: 'engrave-add-texture' },
 ];
 
 const BY_ID = new Map(OPERATION_TYPES.map((t) => [t.id, t]));
@@ -105,14 +109,18 @@ export function regionOperationType(cutterIsV: boolean): 'v-carve' | 'pocket' {
  */
 export function operationTypeOfItem(
   item:
-    | { kind: string; through?: boolean; construction?: boolean; mode?: 'drill' | 'bore'; vCarveDepth?: 'plane' | 'variable'; inlay?: { role: 'female' | 'male' } }
+    | { kind: string; through?: boolean; construction?: boolean; mode?: 'drill' | 'bore'; vCarveDepth?: 'plane' | 'variable'; inlay?: { role: 'female' | 'male' }; texture?: { pattern: string } }
     | null
     | undefined,
   region: 'v-carve' | 'pocket',
 ): OperationTypeId | null {
   if (item === null || item === undefined) return null;
   if (item.construction === true) return null;
-  // #673 — an inlay half is its own operation type whatever its role; the row says which half.
+  // #670 — a texture region is cut as a pattern of strokes, not pocketed; it reads first because
+  // the PLAN gives the marker precedence when a shape carries both (`texture-shape` refuses the
+  // pair). #673 — an inlay half is its own operation type whatever its role; the row says which
+  // half.
+  if (item.texture !== undefined) return 'texture';
   if (item.inlay !== undefined) return 'inlay';
   switch (item.kind) {
     case 'label':
@@ -190,6 +198,13 @@ export function addOperationOfType(type: Exclude<OperationTypeId, 'surface'>): s
       // saves the matching male blank as its own job.
       const id = store.addShape('rect');
       store.updateShape(id, { inlay: { role: 'female' } });
+      return id;
+    }
+    case 'texture': {
+      // #670 — a rect carrying a STIPPLE marker; the row's fold states the pattern and its
+      // numbers, and the depth field is the pattern's floor.
+      const id = store.addShape('rect');
+      store.updateShape(id, { texture: { pattern: 'stipple' } });
       return id;
     }
     case 'profile':

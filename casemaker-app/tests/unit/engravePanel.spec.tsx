@@ -2826,3 +2826,71 @@ describe('EngravePanel — inlay (#673)', () => {
     }
   });
 });
+
+// #670 — THE TEXTURE: the pattern's numbers, the strokes they derive, and the marker they write.
+describe('EngravePanel — texture (#670)', () => {
+  const TEXTURE: EngraveShape = {
+    id: 'panel',
+    name: 'grip',
+    kind: 'rect',
+    position: { x: 50, y: 30 },
+    rotation: 0,
+    depth: 0.8,
+    enabled: true,
+    width: 10,
+    height: 6,
+    cornerRadius: 0,
+    texture: { pattern: 'stipple', pitchMm: 2, strokeMm: 1, seed: 3 },
+  };
+
+  function showTextureJob(): void {
+    act(() =>
+      useEngraveJobStore.setState({
+        job: { ...defaultEngraveJob(), labels: [], traces: [], shapes: [TEXTURE] },
+      }),
+    );
+    render(<EngravePanel />);
+    expand('engrave-shape');
+  }
+
+  const marker = () => useEngraveJobStore.getState().job.shapes[0]!.texture;
+
+  it('chips the region as a Texture and states the strokes the pattern derives', () => {
+    showTextureJob();
+    expect(screen.getByTestId('engrave-shape-type-0').textContent).toBe('Texture');
+    expect(screen.getByText('Texture stipple')).toBeTruthy();
+    const note = screen.getByTestId('engrave-shape-texture-note-0').textContent ?? '';
+    // The numbers the CAM will run, from the same module the plan calls — not the marker's raw
+    // fields.
+    expect(note).toMatch(/\d+ strokes? at a 2 mm pitch/);
+    expect(note).toContain('1 mm stroke');
+    expect(note).toContain('seed 3');
+    expect(note).toContain('0.8 mm deep');
+  });
+
+  it('writes the pattern, the pitch and the seed onto the marker', () => {
+    showTextureJob();
+    fireEvent.change(screen.getByTestId('engrave-shape-texture-pattern-0'), { target: { value: 'scallop' } });
+    expect(marker()).toMatchObject({ pattern: 'scallop', pitchMm: 2 });
+    // A scallop has no stroke length and no seed: the fields are not offered.
+    expect(screen.queryByTestId('engrave-shape-texture-seed-0')).toBeNull();
+    fireEvent.change(screen.getByTestId('engrave-shape-texture-pitch-0'), { target: { value: '2.5' } });
+    expect(marker()).toMatchObject({ pattern: 'scallop', pitchMm: 2.5 });
+    fireEvent.change(screen.getByTestId('engrave-shape-texture-pattern-0'), { target: { value: 'stipple' } });
+    fireEvent.change(screen.getByTestId('engrave-shape-texture-seed-0'), { target: { value: '8' } });
+    expect(marker()).toMatchObject({ pattern: 'stipple', seed: 8, pitchMm: 2.5 });
+  });
+
+  it('adds a stipple rect from the picker, with its row open', () => {
+    render(<EngravePanel />);
+    fireEvent.click(screen.getByTestId('engrave-add-texture'));
+    const shapes = useEngraveJobStore.getState().job.shapes;
+    const added = shapes[shapes.length - 1]!;
+    expect(added.texture).toEqual({ pattern: 'stipple' });
+    // The row arrived open (#411), so its editor is on screen; its note counts the strokes at the
+    // CAM's own defaults.
+    const note = screen.getByTestId(`engrave-shape-texture-note-${shapes.length - 1}`).textContent ?? '';
+    expect(note).toContain('1 mm pitch');
+    expect(note).toContain('seed 1');
+  });
+});

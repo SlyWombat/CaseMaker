@@ -421,8 +421,8 @@ section of the **same job document**, so a job can be put down and picked up at 
 
 A **new job starts with one question — what are you cutting?** — and the operation types are its
 answer: **Engrave** (text or single-stroke lines), **V-carve**, **Pocket**, **Profile**,
-**Chamfer the edge**, **Hole**, **Bore to size**, **Thread**, or **Surface a mesh** (a goal mesh
-or a picture relief). Every operation added
+**Chamfer the edge**, **Hole**, **Bore to size**, **Thread**, **Surface a mesh** (a goal mesh or
+a picture relief), or **Texture a surface** (a seeded pattern of short strokes). Every operation added
 afterwards is one row in the job's list, its type on the row, and its expert fields behind the
 row's fold.
 
@@ -466,6 +466,25 @@ self-align when clamped. Both halves use the same V-bit (`inlay-needs-cone`); a 
 above zero and below the pocket depth is refused (`inlay-gap`), and a variable-depth region cannot
 be an inlay half (`inlay-plane-depth`). After both runs, glue the male's machined face down into
 the female's pocket and plane the male blank away to the plug's base.
+
+**Texture a surface (#670)** cuts a decorative pattern of short strokes over a region instead of
+pocketing it. The picker adds a **stipple**: a grid of cells one **pitch** apart (default 1 mm,
+stated as the CAM's default until typed), each holding one short stroke (default 1 mm) at a seeded
+direction. Switching the row's pattern to **scallop** lays rows of semicircular bumps of radius
+pitch/2 instead. The **seed** (default 1) is stored in the job, and every stroke is derived from
+it — the same document posts the same program byte for byte, and a new seed lays out a different
+pattern with the same stroke count. Every stroke is a TRACE: the cutter's centre follows it at the
+region's depth, clipped to the region's outline, so a V-bit's flank leaves the dimples and a flat
+end mill leaves flat-bottomed strokes (`texture-tool` refuses a ball or bull nose — a ball-nosed
+texture is a SURFACE, which is Image to relief's job). Every stroke of one texture is cut at the
+one depth, so a stroke that crosses ground an earlier one opened meets air and can never bite
+deeper — the removal order needs no other rule. The pattern is anchored to the blank's own grid:
+moving or shrinking the region removes strokes rather than reshuffling the ones that remain row
+by row. A border, frame or cutaway cannot carry one, and neither can an inlay half
+(`texture-shape`); `through` is refused on a surface finish (`texture-through`); a pattern that
+comes out empty is a warning (`texture-empty`); and past 4,000 paths — strokes, or a scallop's
+row runs — the cap keeps the first 4,000 and reports the count (`texture-crowded`). The strokes themselves are derived at generate
+time and never stored in the job.
 
 **Chamfer the edge (#669)** breaks an edge rather than cutting a hole or a pocket: one flat bevel
 along a rim, cut by the job's V/chamfer bit with its flank held against the edge. The row picks the
@@ -1382,6 +1401,11 @@ simulation does report about one is the sweep's own list, next:
 | `inlay-needs-cone` | error | An inlay half is a V-carve inlay — the plug's slope and the pocket's wall are the same cone's flank, and that wedge is what self-aligns — but the job's cutter has no cone (#673). | Use a V-bit. |
 | `inlay-gap` | error | The glue gap must be above zero (it is the clearance the plug keeps) and below the pocket depth (a plug that reaches the floor has no gap to glue into); a male half also carries the numbers it was built for — its cut depth and the inset its plug island is eroded by (the tip's, `pocket × tan(halfAngle)`) — and a male whose numbers no longer match its cut cannot close. | Put the gap between zero and the pocket depth, or save the male blank again from the female's job. |
 | `inlay-plane-depth` | error | A variable-depth V-carve has no matching plug — the male is the PLANE V's mirror, so the pair would not close (#673). | Set the V-carve depth back to plane. |
+| `texture-shape` | error | A texture sits on a rectangle, circle, slot or polygon — one exact inside test with no holes. A border, frame or cutaway has holes, so the pattern has no one region to fill; a region carrying an inlay marker is a pocket half, not a pattern (#670). | Draw the textured area as its own shape, or clear the marker it conflicts with. |
+| `texture-through` | error | A texture is a surface finish: a pattern of short strokes at one depth, not a cut through the blank (#670). | Turn `through` off and state the pattern's depth. |
+| `texture-tool` | error | A texture is cut as traces, and the trace path takes a V-bit or a flat end mill; the job's cutter is one it refuses by name — a ball nose, a bull nose, a drill or a thread mill (#670). | Use a V-bit for dimpled strokes or a flat end mill for flat-bottomed ones; a ball-nosed texture is a surface, which Surface a mesh relief cuts. |
+| `texture-empty` | warning | The pattern derives no stroke inside the region at the stated pitch — a pitch wider than the region is a pattern that misses it (#670). | Widen the region or narrow the pitch. |
+| `texture-crowded` | warning | The pattern wants more than the 4,000-stroke cap, so the program cuts the first 4,000 in generation order (#670). | Widen the pitch so the whole region is cut. |
 | `bore-narrow` | error | A bore's hole is not wider than the cutter, so there is no centre path to helix on; the cut would just be a plunge hole the cutter's own width (#668). | Cut a bigger hole, or use a smaller cutter. |
 | `thread-wrong-tool` | error | The job has a thread, but the tool is not a thread mill. A thread is cut by orbiting a small cutter inside the pilot; a flat end mill cannot cut one (#445). | Pick a thread mill. |
 | `thread-mixed-tools` | error | The thread is enabled beside other work (a label, a shape, a trace, a drill). A thread program has ONE tool, and the toolpath has no way to describe a change part-way through. | Cut the thread in a program of its own, after the pilot and the other work. |

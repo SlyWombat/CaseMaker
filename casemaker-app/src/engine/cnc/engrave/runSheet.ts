@@ -33,6 +33,12 @@ import { cutterLegend, cutterProfileSvg } from '@/engine/cnc/cutterProfile';
 // re-derived: the sheet, the panel and the program must not print different plane radii or pitches.
 import { vCone } from '@/engine/cnc/vProfile';
 import { inlayGlueGap, inlayMarked, inlayMm, inlayNumbers } from './inlay';
+import {
+  DEFAULT_MAX_TEXTURE_STROKES,
+  textureNumbers,
+  textureOperationName,
+  textureStrokes,
+} from './texture';
 import { vCarveLevels, vCarvePlane, vCarveStepover } from '@/engine/cnc/vCarveGeometry';
 import { colourBoundaryDepthFor } from '@/engine/cnc/layerStack';
 import { axesWord, describeTouch, kindWord, PROBE_SPEC, readsWord, registrationFor, sideWords } from '@/engine/cnc/engrave/registration';
@@ -2651,6 +2657,55 @@ function inlaySteps(job: EngraveJob): RunSheetStep[] {
 }
 
 /**
+ * #670 — a TEXTURE, in the operator's terms: the pattern, the numbers the CAM runs with (from the
+ * same `textureNumbers`/`textureStrokes` the plan calls) and what each stroke is. One step per
+ * textured region, after the inlay steps: a texture never changes WHICH blank is loaded, so it has
+ * no glue-up to explain — only the pattern's repeatability.
+ */
+function textureSteps(job: EngraveJob): RunSheetStep[] {
+  const steps: RunSheetStep[] = [];
+  for (const item of job.shapes) {
+    if (!item.enabled || item.construction || item.texture === undefined) continue;
+    if (item.through === true) continue;
+    const numbers = textureNumbers(item.texture, item.depth);
+    const strokes = textureStrokes(item, numbers);
+    const name = itemLabel(item);
+    const pattern = textureOperationName(numbers.pattern);
+    // A stipple's paths are strokes and its seed is the reason they repeat; a scallop's are row
+    // runs with no randomness at all, so the seed sentence is the stipple's alone.
+    const noun = numbers.pattern === 'scallop' ? 'run' : 'stroke';
+    const count = `${strokes.paths.length} ${noun}${strokes.paths.length === 1 ? '' : 's'}`;
+    const detail =
+      numbers.pattern === 'stipple'
+        ? `${fmtNum(numbers.strokeMm)} mm strokes at a ${fmtNum(numbers.pitchMm)} mm pitch ` +
+          `(${numbers.pitchSource}, stroke ${numbers.strokeSource}), seed ${numbers.seed}`
+        : `semicircular bumps at a ${fmtNum(numbers.pitchMm)} mm pitch (${numbers.pitchSource})`;
+    if (strokes.paths.length === 0) {
+      steps.push({
+        text:
+          `${name}: ${pattern} comes out empty at these numbers, so the program cuts nothing there. ` +
+          'Widen the region or narrow the pitch.',
+        value: `${pattern} · empty`,
+      });
+      continue;
+    }
+    steps.push({
+      text:
+        `${name}: ${pattern}. ${count} — ${detail} — cut ${fmtNum(numbers.depthMm)} mm deep, each ` +
+        "one a trace at the cutter's own centre line." +
+        (numbers.pattern === 'stipple' ? ' The stored seed lays the same pattern every run.' : '') +
+        (strokes.capped
+          ? ` The pattern wants more than the ${DEFAULT_MAX_TEXTURE_STROKES}-path cap; the first ` +
+            `${DEFAULT_MAX_TEXTURE_STROKES} are cut.`
+          : ''),
+      value:
+        `${pattern} · ${count} · ${fmtNum(numbers.pitchMm)} mm pitch · ${fmtNum(numbers.depthMm)} mm deep`,
+    });
+  }
+  return steps;
+}
+
+/**
  * #535 — a PURE GOAL job's surface steps: what the two passes did, then the engine's own notes
  * (the feeds, the undercuts a heightfield cannot express, the resolution, and a flat finishing
  * cutter). Every number is `surface3d`'s, printed rather than re-derived here.
@@ -3452,6 +3507,8 @@ export function buildRunSheet(
   // #673 — an INLAY half opens the cut section with which blank this is and what happens to the
   // pair after both runs. The numbers are `inlayNumbers`'s, never re-derived here.
   cutSteps.push(...inlaySteps(job));
+  // #670 — a TEXTURE's pattern follows: the strokes and the numbers that repeat them.
+  cutSteps.push(...textureSteps(job));
   // The one-program parameters step, kept by reference: a two-tool job relabels it PROGRAM 1 and
   // prints program 2's beside it (#437 item 8), and doing that by finding it again in the list
   // would be a search over prose.
