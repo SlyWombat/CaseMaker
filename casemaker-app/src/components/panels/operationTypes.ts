@@ -95,23 +95,124 @@ export interface OperationTypeDef {
   group: OperationGroupId;
 }
 
-/** The order every picker lists them in — the matrix's own order, the text operation first. */
+/**
+ * The order every picker lists them in — the matrix's own order, the text operation first.
+ *
+ * The words are the mockup's own chips (`docs/design/first-job-flow-mockups.html`, station 4):
+ * "V-carve, variable depth", "Texture", "Flute", "Prism", "Chamfer". One table, so the wizard,
+ * the panel's add picker and every row's chip say the same words (#685, §4).
+ */
 export const OPERATION_TYPES: readonly OperationTypeDef[] = [
   { id: 'engrave', label: 'Engrave text', blurb: 'Text, or single-stroke lines', addTestId: 'engrave-add-label', group: 'engrave-carve' },
   { id: 'v-carve', label: 'V-carve', blurb: 'A region cut by the job’s V-bit', addTestId: 'engrave-add-v-carve', group: 'engrave-carve' },
-  { id: 'v-carve-variable', label: 'V-carve (variable depth)', blurb: 'The V follows the design’s width down to its centre', addTestId: 'engrave-add-v-carve-variable', group: 'engrave-carve' },
+  { id: 'v-carve-variable', label: 'V-carve, variable depth', blurb: 'The V follows the design’s width down to its centre', addTestId: 'engrave-add-v-carve-variable', group: 'engrave-carve' },
   { id: 'inlay', label: 'Inlay', blurb: 'A female pocket, and the male plug to glue into it', addTestId: 'engrave-add-inlay', group: 'engrave-carve' },
   { id: 'pocket', label: 'Pocket', blurb: 'A flat-bottomed region', addTestId: 'engrave-add-rect', group: 'cut-away' },
-  { id: 'profile', label: 'Profile', blurb: 'A cut-out through the blank, held with tabs', addTestId: 'engrave-add-profile', group: 'cut-away' },
-  { id: 'chamfer', label: 'Chamfer the edge', blurb: 'Break a profile’s or pocket’s edge at an angle', addTestId: 'engrave-add-chamfer', group: 'cut-away' },
+  // #685 — "Cut out" is not a word beside "Profile": the profile IS the cut-out, so the chip
+  // carries the historic cut-out test id and the second vocabulary has one fewer kind.
+  { id: 'profile', label: 'Profile', blurb: 'A cut-out through the blank, held with tabs', addTestId: 'engrave-add-cutout', group: 'cut-away' },
+  { id: 'chamfer', label: 'Chamfer', blurb: 'Break a profile’s or pocket’s edge at an angle', addTestId: 'engrave-add-chamfer', group: 'cut-away' },
   { id: 'hole', label: 'Hole', blurb: 'A hole, or a grid of them', addTestId: 'engrave-add-drill', group: 'holes' },
   { id: 'bore', label: 'Bore to size', blurb: 'A hole wider than the cutter, helixed down its wall', addTestId: 'engrave-add-bore', group: 'holes' },
   { id: 'thread', label: 'Thread', blurb: 'A milled internal thread', addTestId: 'engrave-add-thread', group: 'holes' },
   { id: 'surface', label: 'Surface a mesh', blurb: 'Rough and finish a goal mesh or picture', addTestId: 'engrave-add-surface', group: '3d' },
-  { id: 'texture', label: 'Texture a surface', blurb: 'A seeded pattern of short strokes over a region', addTestId: 'engrave-add-texture', group: 'engrave-carve' },
-  { id: 'flute', label: 'Flute along a line', blurb: 'A groove that ramps in and out along its ends', addTestId: 'engrave-add-flute', group: 'engrave-carve' },
-  { id: 'prism', label: 'Raise a prism', blurb: 'A shape standing on sloped sides, cut by the V-bit', addTestId: 'engrave-add-prism', group: 'engrave-carve' },
+  { id: 'texture', label: 'Texture', blurb: 'A seeded pattern of short strokes over a region', addTestId: 'engrave-add-texture', group: 'engrave-carve' },
+  { id: 'flute', label: 'Flute', blurb: 'A groove that ramps in and out along its ends', addTestId: 'engrave-add-flute', group: 'engrave-carve' },
+  { id: 'prism', label: 'Prism', blurb: 'A shape standing on sloped sides, cut by the V-bit', addTestId: 'engrave-add-prism', group: 'engrave-carve' },
 ];
+
+/** The options the old second vocabulary ("More kinds and imports") carried, by their own word. */
+export type OperationOptionId =
+  | 'line'
+  | 'stroke-label'
+  | 'circle'
+  | 'slot'
+  | 'polygon'
+  | 'border'
+  | 'frame'
+  | 'cutaway'
+  | 'drill-array'
+  | 'box'
+  | 'cylinder'
+  | 'cone'
+  | 'sphere';
+
+/**
+ * One option inside the picker (#685): the second vocabulary is gone as a separate list, and each
+ * of its kinds is an option of the operation it always was.
+ */
+export interface OperationOptionDef {
+  id: OperationOptionId;
+  /** The option chip's word. */
+  label: string;
+  /** The chip's test id — the historic `engrave-add-*` id it already had. */
+  testId: string;
+  /** One sentence on what picking it adds (the chip's title). */
+  title: string;
+  /** Drawn disabled until the job has an item to reference (frame, cut-away). */
+  needsReference?: boolean;
+}
+
+/** A row of options under the operation that owns them. `3d-shape` is the primitives' fold. */
+export interface OperationOptionRow {
+  operation: OperationTypeId | '3d-shape';
+  /** The row's small heading: the operation's own word. */
+  label: string;
+  options: readonly OperationOptionDef[];
+}
+
+/**
+ * #685 — the fold. Circle/Slot/Polygon (and Border/Frame/Cut-away, the combined regions) are
+ * Pocket options; Line and single-line text are Engrave text; Hole array is a Hole; the four 3D
+ * primitives are Cut away's "3D shape". Cut out is the Profile chip itself, so it has no row.
+ */
+export const OPERATION_OPTIONS: readonly OperationOptionRow[] = [
+  {
+    operation: 'engrave',
+    label: 'Engrave text',
+    options: [
+      { id: 'line', label: 'Line', testId: 'engrave-add-line', title: 'Add a polyline the cutter traces — the groove is exactly the cutter’s width.' },
+      { id: 'stroke-label', label: 'Single-line text', testId: 'engrave-add-stroke-label', title: 'Add text in a single-stroke font, traced as a line rather than pocketed.' },
+    ],
+  },
+  {
+    operation: 'pocket',
+    label: 'Pocket',
+    options: [
+      { id: 'circle', label: 'Circle', testId: 'engrave-add-circle', title: 'Add a circle pocket.' },
+      { id: 'slot', label: 'Slot', testId: 'engrave-add-slot', title: 'Add a slot pocket.' },
+      { id: 'polygon', label: 'Polygon', testId: 'engrave-add-polygon', title: 'Add a polygon pocket.' },
+      { id: 'border', label: 'Border', testId: 'engrave-add-border', title: 'Add a border built from other items.' },
+      { id: 'frame', label: 'Frame', testId: 'engrave-add-frame', title: 'Add a frame built from other items.', needsReference: true },
+      { id: 'cutaway', label: 'Cut-away', testId: 'engrave-add-cutaway', title: 'Add a cut-away built from other items.', needsReference: true },
+    ],
+  },
+  {
+    operation: 'hole',
+    label: 'Hole',
+    options: [
+      { id: 'drill-array', label: 'Hole array', testId: 'engrave-add-drill-array', title: 'Add a rectangular array of plunge-drilled holes.' },
+    ],
+  },
+  {
+    operation: '3d-shape',
+    label: '3D shape',
+    options: [
+      { id: 'box', label: 'Box', testId: 'engrave-add-primitive-box', title: 'Add a vertical box pocketed by the region CAM.' },
+      { id: 'cylinder', label: 'Cylinder', testId: 'engrave-add-primitive-cylinder', title: 'Add a vertical cylinder pocketed by the region CAM.' },
+      { id: 'cone', label: 'Cone', testId: 'engrave-add-primitive-cone', title: 'Add a cone. Its sloped wall is not cut yet, so the row says it is refused rather than approximating it.' },
+      { id: 'sphere', label: 'Sphere', testId: 'engrave-add-primitive-sphere', title: 'Add a sphere. Cutting it is not offered yet, so the row says it is refused rather than approximating a circle pocket.' },
+    ],
+  },
+];
+
+/** The options that belong under one group's operations, in the table's order. */
+export function operationOptionsInGroup(group: OperationGroupId): readonly OperationOptionRow[] {
+  return OPERATION_OPTIONS.filter((row) => {
+    if (row.operation === '3d-shape') return group === 'cut-away';
+    return operationType(row.operation).group === group;
+  });
+}
 
 /** The types in one group, in the table's order. */
 export function operationTypesInGroup(group: OperationGroupId): readonly OperationTypeDef[] {

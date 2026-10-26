@@ -7,6 +7,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { EngravePanel } from '@/components/panels/EngravePanel';
+import { OPERATION_OPTIONS, OPERATION_TYPES } from '@/components/panels/operationTypes';
 import { useEngraveJobStore, undoEngraveRemoval, resetEngraveRemovalUndo, REMOVAL_UNDO_MS } from '@/store/engraveJobStore';
 import { useEngraveRunStore } from '@/store/engraveRunStore';
 import { useMachineStore } from '@/store/machineStore';
@@ -361,6 +362,31 @@ describe('EngravePanel — the Add menu (#214)', () => {
     expect(screen.getByTestId('engrave-shape-row-0')).toBeTruthy();
     expect(screen.getByTestId('engrave-shape-width-0')).toBeTruthy();
     expect(screen.getByTestId('engrave-shape-height-0')).toBeTruthy();
+  });
+
+  // #685 — the panel's "+ Add operation" is the SAME grouped picker the wizard's step 4 draws,
+  // and the old second vocabulary ("More kinds and imports") is now its OPTIONS, not a list.
+  it('draws the one grouped picker, with the folded kinds as its options (#685)', () => {
+    render(<EngravePanel />);
+
+    for (const group of ['engrave-carve', 'cut-away', 'holes', '3d']) {
+      expect(screen.getByTestId(`operation-picker-group-${group}`)).toBeTruthy();
+    }
+    // Every operation keeps the historic id the flows already drive.
+    for (const type of OPERATION_TYPES) {
+      expect(screen.getByTestId(type.addTestId)).toBeTruthy();
+    }
+    // The kinds that used to be a second list are options of the operation they belong to.
+    for (const option of OPERATION_OPTIONS.flatMap((row) => row.options)) {
+      expect(screen.getByTestId(option.testId)).toBeTruthy();
+    }
+    // Surface a mesh is a whole-job operation, and this job already has items: the card is
+    // disabled with its reason beside it.
+    expect((screen.getByTestId('engrave-add-surface') as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByTestId('operation-picker-surface-hint').textContent).toBe(
+      'a whole-job operation; it starts an empty job',
+    );
+    expect(screen.queryByText('More kinds and imports')).toBeNull();
   });
 
   it('gives each shape kind its own editor fields', () => {

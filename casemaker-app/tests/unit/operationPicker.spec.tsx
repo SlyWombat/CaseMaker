@@ -1,16 +1,19 @@
 // @vitest-environment jsdom
-// #662/#681 — step 4 of the one cutting-job wizard: "What are you cutting?".
+// #662/#681/#685 — step 4 of the one cutting-job wizard: "What are you cutting?".
 //
-// The picker is our grouped one, and the button that leaves it CREATES the answer and lands in
-// Design. A job with nothing to cut opens on Engrave text with the field it needs; Create waits
-// for the text, and the sentence beside it says what to type (#679 §3.5 — never a placeholder
-// "New text"). An established job starts with nothing selected and Create finishes without adding
-// a duplicate. A pick that needs a file (Surface a mesh) asks the panel that owns the input.
+// The picker is the SHARED grouped one (`OperationPicker`, `operationTypes.ts`): the fourteen
+// operations in the mockup's four groups, in the table's own order and words. The button that
+// leaves the step CREATES the answer and lands in Design. A job with nothing to cut opens on
+// Engrave text with the field it needs; Create waits for that field, and the sentence beside it
+// says what to type (§3.5 — never a placeholder "New text"). A template's job starts with nothing
+// selected and Create finishes without adding a duplicate. Surface a mesh is the one whole-job
+// operation: its card is disabled with its reason on a job that has items (B6), and on an empty
+// job its one essential field is the FILE, read here into the job's goal (#685).
 
 import { beforeEach, afterEach, describe, expect, it } from 'vitest';
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { StartWizard } from '@/components/welcome/StartWizard';
-import { setOperationIntake } from '@/components/panels/operationIntake';
+import { OPERATION_TYPES } from '@/components/panels/operationTypes';
 import { DEFAULT_FONT_ID } from '@/engine/fonts/registry';
 import { useEngraveJobStore, newItemDepthFor } from '@/store/engraveJobStore';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
@@ -18,6 +21,39 @@ import { resetStartWizard, useStartWizardStore } from '@/store/startWizardStore'
 import type { EngraveJob } from '@/types/engraveJob';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+
+/** The tetrahedron `targetObject.spec.ts` reads: a real, non-flat STL. */
+const ASCII_STL = `solid tet
+facet normal 0 0 1
+  outer loop
+    vertex 0 0 0
+    vertex 10 0 0
+    vertex 0 10 0
+  endloop
+endfacet
+facet normal 0 1 0
+  outer loop
+    vertex 0 0 0
+    vertex 10 0 0
+    vertex 0 0 10
+  endloop
+endfacet
+facet normal 1 0 0
+  outer loop
+    vertex 0 0 0
+    vertex 0 0 10
+    vertex 0 10 0
+  endloop
+endfacet
+facet normal 1 1 1
+  outer loop
+    vertex 10 0 0
+    vertex 0 10 0
+    vertex 0 0 10
+  endloop
+endfacet
+endsolid tet
+`;
 
 /** The default job with every operation removed — a job nobody has said what to cut yet. */
 function emptyJob(): EngraveJob {
@@ -58,22 +94,42 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
-  setOperationIntake(null);
 });
 
-describe('#681 — step 4, what are you cutting', () => {
+describe('#685 — step 4, what are you cutting', () => {
   it('opens on the grouped picker with Engrave text chosen and Create waiting for its text', () => {
     openOperationStep();
 
     expect(screen.getByTestId('start-wizard-progress').textContent).toBe(
       'Step 4 of 4 · What are you cutting?',
     );
-    // The mockup's four groups, and every type inside them.
+    // This run opened AT step 4, so it is a re-entry: the button adds to a job that exists.
+    expect(screen.getByTestId('start-wizard-create').textContent).toBe('Add the operation');
+
+    // The four groups, and the fourteen operations in the mockup's words and grouped order
+    // (`first-job-flow-mockups.html`, station 4) — the same table the panel's picker reads.
     for (const group of ['engrave-carve', 'cut-away', 'holes', '3d']) {
-      expect(screen.getByTestId(`start-wizard-op-group-${group}`)).toBeTruthy();
+      expect(screen.getByTestId(`operation-picker-group-${group}`)).toBeTruthy();
     }
-    for (const type of ['engrave', 'v-carve', 'pocket', 'profile', 'hole', 'thread', 'surface']) {
-      expect(screen.getByTestId(`engrave-setup-what-${type}`)).toBeTruthy();
+    const chips = within(screen.getByTestId('operation-picker')).getAllByRole('button');
+    expect(chips.map((chip) => chip.textContent)).toEqual([
+      'Engrave text',
+      'V-carve',
+      'V-carve, variable depth',
+      'Inlay',
+      'Texture',
+      'Flute',
+      'Prism',
+      'Pocket',
+      'Profile',
+      'Chamfer',
+      'Hole',
+      'Bore to size',
+      'Thread',
+      'Surface a mesh',
+    ]);
+    for (const type of OPERATION_TYPES) {
+      expect(screen.getByTestId(`engrave-setup-what-${type.id}`)).toBeTruthy();
     }
 
     // An empty job starts on Engrave text, with the one field that operation needs.
@@ -125,11 +181,12 @@ describe('#681 — step 4, what are you cutting', () => {
     const create = screen.getByTestId('start-wizard-create') as HTMLButtonElement;
     expect(create.disabled).toBe(false);
 
-    // Surface a mesh is a whole-job operation, so an established job is told why it is not here
-    // rather than shown a control that cannot run.
-    expect(screen.queryByTestId('engrave-setup-what-surface')).toBeNull();
-    expect(screen.getByTestId('start-wizard-op-surface-hint').textContent).toBe(
-      'a whole-job operation; starts an empty job with it',
+    // Surface a mesh is a whole-job operation: a job that has items gets a DISABLED card with its
+    // reason beside it, not a sentence in place of the card (principle 4, B6).
+    const surface = screen.getByTestId('engrave-setup-what-surface') as HTMLButtonElement;
+    expect(surface.disabled).toBe(true);
+    expect(screen.getByTestId('operation-picker-surface-hint').textContent).toBe(
+      'a whole-job operation; it starts an empty job',
     );
 
     const before = useEngraveJobStore.getState().job.labels.length;
@@ -138,16 +195,41 @@ describe('#681 — step 4, what are you cutting', () => {
     expect(screen.queryByTestId('start-wizard')).toBeNull();
   });
 
-  it('asks the panel for the one pick that needs a file, and closes', () => {
-    const asked: string[] = [];
-    setOperationIntake((type) => asked.push(type));
+  it('Surface a mesh asks for its file, and Create waits until one reads', async () => {
     openOperationStep();
     fireEvent.click(screen.getByTestId('engrave-setup-what-surface'));
-    expect(asked).toEqual(['surface']);
-    expect(useStartWizardStore.getState().open).toBe(false);
+
+    // Its ONE essential field is the mesh file — not text, and not a size.
+    expect(screen.getByTestId('start-wizard-op-field').textContent).toContain('Surface a mesh');
+    const input = screen.getByTestId('start-wizard-op-surface-file') as HTMLInputElement;
+    expect(input.getAttribute('accept')).toContain('.stl');
+    expect((screen.getByTestId('start-wizard-create') as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByTestId('start-wizard-create-unblock').textContent).toBe(
+      'Choose the mesh to surface.',
+    );
+
+    // The read is a real one (file bytes, then a hash), so give it a real wait rather than the
+    // 1 s default that a busy parallel run can miss.
+    const WAIT = { timeout: 5000 };
+
+    // A file that is not a mesh is refused with its sentence, and Create still waits.
+    fireEvent.change(input, { target: { files: [new File(['hello'], 'notes.txt')] } });
+    expect((await screen.findByTestId('start-wizard-op-surface-error', undefined, WAIT)).textContent).toBe(
+      'notes.txt is not an STL, 3MF or PNG file.',
+    );
+    expect((screen.getByTestId('start-wizard-create') as HTMLButtonElement).disabled).toBe(true);
+
+    // The mesh it needs: read once, embedded, and made the job's whole goal.
+    fireEvent.change(input, { target: { files: [new File([ASCII_STL], 'tet.stl')] } });
+    expect(await screen.findByText('tet.stl', undefined, WAIT)).toBeTruthy();
+    expect(screen.queryByTestId('start-wizard-op-surface-error')).toBeNull();
+    expect((screen.getByTestId('start-wizard-create') as HTMLButtonElement).disabled).toBe(false);
+
+    fireEvent.click(screen.getByTestId('start-wizard-create'));
     expect(screen.queryByTestId('start-wizard')).toBeNull();
-    // No operation was invented from a pick that could not read a file.
-    expect(useEngraveJobStore.getState().job.labels ?? []).toHaveLength(0);
-    expect(useEngraveJobStore.getState().job.shapes ?? []).toHaveLength(0);
+    const job = useEngraveJobStore.getState().job;
+    expect(job.targetObject).toMatchObject({ name: 'tet.stl', format: 'stl', role: 'goal' });
+    expect(job.labels).toHaveLength(0);
+    expect(job.shapes).toHaveLength(0);
   });
 });

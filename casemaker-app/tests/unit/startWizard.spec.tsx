@@ -551,6 +551,8 @@ describe('#681 — the wizard with nothing to lean on', () => {
     fireEvent.click(screen.getByTestId('start-wizard-next'));
     typePiece();
     await toOperationStep();
+    // A run that began here CREATES the job; only a re-entry adds an operation (#681/#685).
+    expect(screen.getByTestId('start-wizard-create').textContent).toBe('Create the job');
     fireEvent.change(screen.getByTestId('start-wizard-op-text'), { target: { value: 'Bench free' } });
     fireEvent.click(screen.getByTestId('start-wizard-create'));
     expect(screen.queryByTestId('start-wizard')).toBeNull();

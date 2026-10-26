@@ -157,6 +157,48 @@ export async function readTargetObjectFile(
   };
 }
 
+/**
+ * #685 — the whole TARGET OBJECT a picked goal file makes: the reader above, then the placement
+ * every goal import uses (centred in X/Y with its top flush on the stock's top face), marked as
+ * the shape to MAKE.
+ *
+ * The wizard's Surface a mesh pick asks for this file, and a wizard portal cannot own the panel's
+ * file input, so the step reads the file the same way the panel's goal door does. The panel keeps
+ * its own copy for now (#685 leaves the panel swap to the picker alone).
+ */
+export async function readGoalObjectFile(
+  file: File,
+  id: string,
+  stock: { length: number; width: number },
+): Promise<{ ok: true; target: EngraveTargetObject } | { ok: false; error: string }> {
+  // A PICTURE has no physical size: fit it onto the blank, aspect kept — the same door as the
+  // panel's goal import (#672).
+  const isPng = /\.png$/i.test(file.name);
+  const result = await readTargetObjectFile(
+    file,
+    id,
+    isPng
+      ? { fit: { maxWidth: Math.max(1, stock.length - 4), maxHeight: Math.max(1, stock.width - 4) } }
+      : {},
+  );
+  if (!result.ok) return result;
+  return {
+    ok: true,
+    target: {
+      id: result.id,
+      name: result.name,
+      format: result.format,
+      sha256: result.sha256,
+      data: result.data,
+      size: result.size,
+      position: { x: stock.length / 2, y: stock.width / 2, z: 0 },
+      rotation: 0,
+      enabled: true,
+      role: 'goal',
+    },
+  };
+}
+
 const meshCache = new Map<string, ParsedMesh>();
 
 /**

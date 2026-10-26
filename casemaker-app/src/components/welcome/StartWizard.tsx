@@ -20,7 +20,6 @@ import { embedSource } from '@/engine/cnc/engrave/jobSources';
 import { useStockStore } from '@/store/stockStore';
 import { expandEngraveRow } from '@/store/engraveRowStore';
 import { addOperationOfType, jobHasOperations } from '@/components/panels/operationTypes';
-import { requestOperation } from '@/components/panels/operationIntake';
 import type { Project } from '@/types/project';
 import type { EngraveJob, JobStockEntry } from '@/types/engraveJob';
 import { defaultSetupAnswers, type SetupAnswers } from '@/engine/cnc/engrave/setupFlow';
@@ -517,6 +516,13 @@ export function StartWizard(): JSX.Element {
           depth: choice.depth,
           font: choice.font,
         });
+      } else if (choice.type === 'surface') {
+        // #685 — Surface a mesh is the one operation whose item is not a store "add": the file
+        // that was read in the step IS the goal object, and it is the whole job.
+        if (choice.target !== null) {
+          useEngraveJobStore.getState().setTargetObject(choice.target);
+          id = choice.target.id;
+        }
       } else {
         id = addOperationOfType(choice.type);
       }
@@ -616,16 +622,7 @@ export function StartWizard(): JSX.Element {
       {step === 'holding' && <HoldingStep job={job} answers={answers} onAnswers={applyAnswers} />}
 
       {step === 'operation' && (
-        <OperationStep
-          job={job}
-          hasOperations={hasOperations}
-          onChoiceChange={onOperationChoice}
-          onSurface={() => {
-            // The panel owns the goal file input; close this modal so the dialog is not behind it.
-            requestOperation('surface');
-            closeWizard();
-          }}
-        />
+        <OperationStep job={job} hasOperations={hasOperations} onChoiceChange={onOperationChoice} />
       )}
     </>
   );

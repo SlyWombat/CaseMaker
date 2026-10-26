@@ -123,7 +123,7 @@ import { EngraveThreadRow } from './EngraveThreadRow';
 import { EngravePrimitiveRow } from './EngravePrimitiveRow';
 import { EngraveTargetObjectRow } from './EngraveTargetObjectRow';
 import { OperationPicker } from './OperationPicker';
-import { addOperationOfType, jobHasOperations, operationType, type OperationTypeId } from './operationTypes';
+import { addOperationOfType, jobHasOperations, operationType, type OperationOptionDef, type OperationTypeId } from './operationTypes';
 import {
   inlayGlueGap,
   inlayMaleJob,
@@ -149,12 +149,10 @@ import { formatDuration } from '@/engine/cnc/plan/format';
 import type {
   EngraveAnyItem,
   EngraveChamfer,
-  EngraveCombinedShape,
   EngraveDrill,
   EngraveJob,
   EngraveKeepOut,
   EngraveLabel,
-  EngravePrimitive,
   EngraveShape,
   FieldSource,
   JobStockFinish,
@@ -317,66 +315,10 @@ function SourceTag({ source, testid }: { source: FieldSource; testid: string }):
   );
 }
 
-/** The kinds the panel can add with its "Add" control (#214): a label plus the four shapes. */
-const ADD_KINDS: readonly { value: EngraveShape['kind'] | 'label'; label: string }[] = [
-  { value: 'label', label: 'Label' },
-  { value: 'rect', label: 'Rectangle' },
-  { value: 'circle', label: 'Circle' },
-  { value: 'slot', label: 'Slot' },
-  { value: 'polygon', label: 'Polygon' },
-];
-
-/**
- * The three COMBINED kinds (#215, work item 3), added from the same menu but to `job.combined`.
- * A frame and a cut-away name another item, so they cannot be added to an empty job (the schema
- * rejects an empty reference id) — the button is disabled until there is one to reference.
- */
-const ADD_COMBINED_KINDS: readonly { value: EngraveCombinedShape['kind']; label: string; needsRef: boolean }[] = [
-  { value: 'border', label: 'Border', needsRef: false },
-  { value: 'frame', label: 'Frame', needsRef: true },
-  { value: 'cutaway', label: 'Cut-away', needsRef: true },
-];
-
-/**
- * The two TRACE kinds (#219), added from the same menu but to `job.traces`. A trace is a
- * single-line cut — the cutter's centre follows the path, so the groove is exactly the cutter's
- * width — which is how fine script and hairlines are engraved. It needs no reference, so both
- * entries are always available.
- */
-const ADD_TRACE_KINDS: readonly { value: 'line' | 'stroke-label'; label: string }[] = [
-  { value: 'line', label: 'Line' },
-  { value: 'stroke-label', label: 'Single-line text' },
-];
-
-/**
- * The two DRILL kinds (#220, added by the panel in #260), added from the same menu but to
- * `job.drills`. A drill is its own list, like `traces`: it is not a region, so it never reaches
- * the shape editor or the `engraves` pipeline. Neither entry needs a reference.
- */
-const ADD_DRILL_KINDS: readonly { value: 'drill' | 'drill-array'; label: string }[] = [
-  { value: 'drill', label: 'Hole' },
-  { value: 'drill-array', label: 'Hole array' },
-];
-
-/**
- * The four 3D PRIMITIVE kinds (#435), added to `job.primitives` from the Items menu. Only the
- * vertical box and cylinder reduce to a region; the menu still offers all four, because refusing
- * a shape BY NAME (cone needs #221/#222, sphere is a dexel job for #222) is the design, and a
- * person drawing a target object may need to state the shape before a cutter exists for it.
- */
-const ADD_PRIMITIVE_KINDS: readonly { value: EngravePrimitive['kind']; label: string }[] = [
-  { value: 'box', label: 'Box' },
-  { value: 'cylinder', label: 'Cylinder' },
-  { value: 'cone', label: 'Cone' },
-  { value: 'sphere', label: 'Sphere' },
-];
-
-/**
- * The one CUT-OUT kind (#218), added from the same menu but to `job.cutouts`. It is not a cleared
- * region: the cutter follows a closed path and removes a kerf through the blank, held by tabs.
- * The new row starts around the blank's own edge, the one outline every job has.
- */
-const ADD_CUTOUT_KINDS: readonly { value: 'cutout'; label: string }[] = [{ value: 'cutout', label: 'Cut out' }];
+// #685 — the kinds this menu used to list in a second vocabulary (shapes, combined items, traces,
+// drills, primitives, the cut-out) are now OPTIONS of the operations they belong to, in
+// `operationTypes.ts` (`OPERATION_OPTIONS`). The picker draws them; the panel only maps a picked
+// option to its store action (`addFolded`).
 
 /**
  * The four VOID kinds (#271), added to `job.keepOuts` from the Stock section — NOT from the
@@ -804,7 +746,6 @@ export function EngravePanel(): JSX.Element {
   const job = useEngraveJobStore((s) => s.job);
   const setJobMargins = useEngraveJobStore((s) => s.setJobMargins);
   const setStock = useEngraveJobStore((s) => s.setStock);
-  const addLabel = useEngraveJobStore((s) => s.addLabel);
   const updateLabel = useEngraveJobStore((s) => s.updateLabel);
   const removeLabel = useEngraveJobStore((s) => s.removeLabel);
   const addShape = useEngraveJobStore((s) => s.addShape);
@@ -829,7 +770,6 @@ export function EngravePanel(): JSX.Element {
   const setTargetObject = useEngraveJobStore((s) => s.setTargetObject);
   const updateTargetObject = useEngraveJobStore((s) => s.updateTargetObject);
   const removeTargetObject = useEngraveJobStore((s) => s.removeTargetObject);
-  const addCutout = useEngraveJobStore((s) => s.addCutout);
   const updateCutout = useEngraveJobStore((s) => s.updateCutout);
   const removeCutout = useEngraveJobStore((s) => s.removeCutout);
   const addKeepOut = useEngraveJobStore((s) => s.addKeepOut);
@@ -1471,6 +1411,33 @@ export function EngravePanel(): JSX.Element {
       return;
     }
     expandEngraveRow(addOperationOfType(type));
+  }
+
+  /**
+   * #685 — what a FOLDED option does. The old second vocabulary's kinds were always one of these
+   * operations, so each still makes exactly the item it always made, and arrives open (#411).
+   */
+  function addFolded(option: OperationOptionDef): void {
+    const id = option.id;
+    if (id === 'line' || id === 'stroke-label') {
+      expandEngraveRow(addTrace(id));
+      return;
+    }
+    if (id === 'circle' || id === 'slot' || id === 'polygon') {
+      expandEngraveRow(addShape(id));
+      return;
+    }
+    if (id === 'border' || id === 'frame' || id === 'cutaway') {
+      const made = addCombined(id);
+      if (made !== null) expandEngraveRow(made);
+      return;
+    }
+    if (id === 'drill-array') {
+      expandEngraveRow(addDrill('drill-array'));
+      return;
+    }
+    // box | cylinder | cone | sphere
+    expandEngraveRow(addPrimitive(id));
   }
 
   const errors = findings.filter((f) => f.severity === 'error');
@@ -2842,169 +2809,38 @@ export function EngravePanel(): JSX.Element {
           onRemove={() => removeVector(shape.id)}
         />
       ))}
-      {/* The one "Add" control (#214 work item 5): a menu with the five kinds. The label entry
-          keeps the historic `engrave-add-label` test id (#205) as its own menu item, so the
-          pre-#214 label flow is still one click. #215 adds the three combined kinds, which need
-          another item to reference unless they are a border. */}
+      {/* The one "Add" control: the SAME grouped operation picker the wizard's step 4 draws
+          (#685). Its historic `engrave-add-*` ids are kept, so the flows that already drive them
+          keep working; the old "More kinds and imports" list is no longer a second vocabulary but
+          the picker's own options (see `operationTypes.ts`). */}
       <details data-testid="engrave-add-menu" style={{ marginTop: 4 }}>
         <summary style={{ cursor: 'pointer', fontSize: 12, color: '#c8d3de' }} data-testid="engrave-add-summary">
           + Add operation…
         </summary>
-        {/* #662 — THE ONE ENTRY POINT, and it says what the operation IS. The type table is the
-            same one the wizard's first question and every row's chip read; the historic
+        {/* #662/#685 — THE ONE ENTRY POINT, and it says what the operation IS. The type table is
+            the same one the wizard's step 4 and every row's chip read; the historic
             `engrave-add-*` ids live on these buttons so the flows that already drive them keep
-            working. Everything below is a kind or an import, behind one more fold. */}
+            working. The old second list ("More kinds and imports") is folded in as OPTIONS of the
+            operation each kind belongs to: Circle/Slot/Polygon (and the combined regions) under
+            Pocket, Line and single-line text under Engrave text, Hole array under Hole, the four
+            primitives under Cut away's 3D shape, and the two file routes under the picker (#685,
+            B6). */}
         <OperationPicker
+          mode="add"
           testidFor={(id) => operationType(id).addTestId}
           onPick={addOperation}
           surfaceAllowed={!jobHasOperations(job)}
+          onOption={addFolded}
+          optionEnabled={(option) => option.needsReference !== true || hasReferenceable}
+          onImportOutline={() => void importOutline()}
+          onImportImage={() => void importImage()}
+          importing={importing}
         />
-        <details data-testid="engrave-add-more" open style={{ marginTop: 6 }}>
-          <summary style={{ cursor: 'pointer', fontSize: 11, color: '#9aa4b0' }}>More kinds and imports</summary>
-        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 4 }}>
-          {ADD_KINDS.filter((k) => k.value !== 'label' && k.value !== 'rect').map((k) => (
-            <button
-              key={k.value}
-              type="button"
-              data-testid={`engrave-add-${k.value}`}
-              title={k.value === 'label' ? 'Add a text label.' : `Add a ${k.label.toLowerCase()} pocket.`}
-              // #411 — a NEW item arrives open: it is a default until its fields are set, and the
-              // person who just asked for it is looking for exactly those fields.
-              onClick={() => (k.value === 'label' ? expandEngraveRow(addLabel()) : expandEngraveRow(addShape(k.value as EngraveShape['kind'])))}
-            >
-              {k.label}
-            </button>
-          ))}
-        </div>
-        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 4, alignItems: 'center' }}>
-          <span style={{ ...MUTED, margin: 0 }}>combined:</span>
-          {ADD_COMBINED_KINDS.map((k) => (
-            <button
-              key={k.value}
-              type="button"
-              data-testid={`engrave-add-${k.value}`}
-              disabled={k.needsRef && !hasReferenceable}
-              title={
-                k.needsRef && !hasReferenceable
-                  ? `A ${k.label.toLowerCase()} follows another item; add a label or a shape first.`
-                  : `Add a ${k.label.toLowerCase()} built from other items.`
-              }
-              // #411 — open on arrival, like every other add. A frame/cut-away can refuse (no
-              // reference), and then there is no row to open.
-              onClick={() => {
-                const id = addCombined(k.value);
-                if (id) expandEngraveRow(id);
-              }}
-            >
-              {k.label}
-            </button>
-          ))}
-        </div>
-        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 4, alignItems: 'center' }}>
-          <span style={{ ...MUTED, margin: 0 }}>single-line:</span>
-          {ADD_TRACE_KINDS.map((k) => (
-            <button
-              key={k.value}
-              type="button"
-              data-testid={`engrave-add-${k.value}`}
-              title={
-                k.value === 'line'
-                  ? 'Add a polyline the cutter traces — the groove is exactly the cutter’s width.'
-                  : 'Add text in a single-stroke font, traced as a line rather than pocketed.'
-              }
-              onClick={() => expandEngraveRow(addTrace(k.value))}
-            >
-              {k.label}
-            </button>
-          ))}
-        </div>
-        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 4, alignItems: 'center' }}>
-          <span style={{ ...MUTED, margin: 0 }}>holes:</span>
-          {ADD_DRILL_KINDS.filter((k) => k.value !== 'drill').map((k) => (
-            <button
-              key={k.value}
-              type="button"
-              data-testid={`engrave-add-${k.value}`}
-              title={
-                k.value === 'drill'
-                  ? 'Add one plunge-drilled hole, exactly the cutter’s diameter.'
-                  : 'Add a rectangular array of plunge-drilled holes.'
-              }
-              onClick={() => expandEngraveRow(addDrill(k.value))}
-            >
-              {k.label}
-            </button>
-          ))}
-        </div>
-        {/* #435 — 3D cut-away primitives against the target object. A vertical box/cylinder is
-            pocketed by the region CAM; cone and sphere are refused BY NAME rather than
-            approximated (sphere is a dexel job, #222). */}
-        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 4, alignItems: 'center' }}>
-          <span style={{ ...MUTED, margin: 0 }}>3D:</span>
-          {ADD_PRIMITIVE_KINDS.map((k) => (
-            <button
-              key={k.value}
-              type="button"
-              data-testid={`engrave-add-primitive-${k.value}`}
-              title={
-                k.value === 'box' || k.value === 'cylinder'
-                  ? `Add a vertical ${k.label.toLowerCase()} pocketed by the region CAM.`
-                  : k.value === 'cone'
-                    ? 'Add a cone. Its sloped wall needs the V-carve/chamfer work or the 3D engine, so it is refused by name rather than approximated.'
-                    : 'Add a sphere. It is a 3D sweep job, so it is refused by name rather than approximated as a circle pocket.'
-              }
-              onClick={() => expandEngraveRow(addPrimitive(k.value))}
-            >
-              {k.label}
-            </button>
-          ))}
-        </div>
-        {/* #218 — a profile cut-out that frees a part from the blank, held by tabs until it is
-            removed. Its path is the referenced outline (or the blank edge) plus the inset. */}
-        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 4, alignItems: 'center' }}>
-          <span style={{ ...MUTED, margin: 0 }}>cut-outs:</span>
-          {ADD_CUTOUT_KINDS.map((k) => (
-            <button
-              key={k.value}
-              type="button"
-              data-testid={`engrave-add-${k.value}`}
-              title="Cut a part out of the blank along a closed path, through into the board, and hold it with tabs you remove by hand."
-              onClick={() => expandEngraveRow(addCutout())}
-            >
-              {k.label}
-            </button>
-          ))}
-        </div>
-        {/* #217: import an SVG or DXF as a filled cut region. The file is parsed once; the
-            contour list is what the job keeps. #252: trace a bitmap to the same kind of thing —
-            the picture is thresholded and its boundaries become the contours. */}
-        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 4, alignItems: 'center' }}>
-          <span style={{ ...MUTED, margin: 0 }}>from a file:</span>
-          <button
-            type="button"
-            data-testid="engrave-add-import-outline"
-            disabled={importing}
-            title="Import an SVG or DXF drawing: its closed, filled shapes become a pocket, and its open paths become Engrave (line) operations. Text and images are reported, not dropped."
-            onClick={() => void importOutline()}
-          >
-            {importing ? 'Reading…' : 'Import outline or lines…'}
-          </button>
-          <button
-            type="button"
-            data-testid="engrave-add-trace-image"
-            disabled={importing}
-            title="Trace a bitmap — PNG, JPEG, GIF, WebP or BMP — into a cut region. Threshold, despeckle and corner smoothing are live in the dialog."
-            onClick={() => void importImage()}
-          >
-            {importing ? 'Reading…' : 'Trace image…'}
-          </button>
-        </div>
         {importError && (
           <p style={{ ...MUTED, color: SEVERITY_COLOR.error }} data-testid="engrave-import-error">
             {importError}
           </p>
         )}
-        </details>
       </details>
       <p style={MUTED}>Depth keeps the {job.minFloor} mm minimum floor — at most {maxDepth} mm on this stock.</p>
 
