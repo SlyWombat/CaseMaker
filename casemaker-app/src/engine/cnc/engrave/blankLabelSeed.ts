@@ -130,6 +130,13 @@ export interface LabelSeedInputs {
    */
   bandFill?: number;
   /**
+   * The depth the line starts at, mm. A blank ROUTE omits it and lets its own
+   * `redepthLabelsForBlank` walk write the number (STARTING_DEPTH stands in until then); a caller
+   * that is creating an OPERATION with an operator-stated depth (#700) passes it, so the line it
+   * makes is the depth the wizard asked for in the same write.
+   */
+  depth?: Mm;
+  /**
    * Which way the line reads on the BENCH: along X (the default) or along Y (#383). A badge blank
    * taken by the badge route is clamped with its long side along Y, and a name reads along that
    * long side — so that route asks for `'y'`. The layout below is unchanged either way: the blank
@@ -319,8 +326,9 @@ function inTextFrame(blank: SeedBlank): SeedBlank {
  *     also turned `rotation: 90` so the text reads that way. `position` is the ink box's CENTRE,
  *     which is what `labelProfile` centres a label on too, so the clearance either side of the
  *     band is the same number.
- *   - **The depth** — `STARTING_DEPTH`, and the caller's `redepthLabelsForBlank` walk replaces it
- *     before anything reads it, so one place owns the number and its provenance (#362).
+ *   - **The depth** — the caller's `depth`, or `STARTING_DEPTH` for a blank route, whose
+ *     `redepthLabelsForBlank` walk replaces it before anything reads it, so one place owns the
+ *     number and its provenance (#362).
  *
  * Null when no size at or above 1 mm fits — a blank too small to hold a single line at all. Nothing
  * is seeded then; the person gets the demo labels' own findings, which is the honest report.
@@ -374,7 +382,7 @@ export function blankLabelSeed(inputs: LabelSeedInputs): EngraveLabel | null {
         // (length − v, u) — the same `ccw` turn `inTextFrame` made, undone.
         position: alongY ? { x: inputs.blank.length - placed.y, y: placed.x } : placed,
         rotation: alongY ? 90 : 0,
-        depth: STARTING_DEPTH,
+        depth: inputs.depth ?? STARTING_DEPTH,
         enabled: true,
       };
     }

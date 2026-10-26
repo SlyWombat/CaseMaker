@@ -524,11 +524,10 @@ export function StartWizard(): JSX.Element {
     let id: string | null = null;
     if (choice !== null) {
       if (choice.type === 'engrave') {
-        id = addOperationOfType('engrave');
-        // The placeholder "New text" is never what was asked for: the line is made with the text
-        // (and depth, and face) the operator gave it, in the same write.
-        useEngraveJobStore.getState().updateLabel(id, {
-          text: choice.text,
+        // #700 — the placeholder "New text" is never what was asked for, and neither is the
+        // generic centre-of-stock placement: the line is made with the operator's text, depth and
+        // face AND laid out to fit the blank it will be cut on, in one store write.
+        id = useEngraveJobStore.getState().addEngraveText(choice.text, {
           depth: choice.depth,
           font: choice.font,
         });

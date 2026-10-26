@@ -340,6 +340,22 @@ export function newThreadDepthMm(): number {
   return shopDefault(NEW_THREAD_DEPTH_KEY).value;
 }
 
+/**
+ * Which way a NEW line reads on this job's blank (#700).
+ *
+ * The badge route clamps the blank with its long side along Y and lays its name out along it
+ * (#383); the badge's own pocket keep-out is what identifies that blank here. Everywhere else the
+ * job's first line is the precedent — a line added beside a rotated one reads the same way — and a
+ * job with no lines takes the default (along X). Pure, so the store action and any later caller
+ * ask one question.
+ */
+function textAlongFor(job: EngraveJob): 'x' | 'y' {
+  if ((job.keepOuts ?? []).some((k) => k.id === BADGE_POCKET_KEEP_OUT_ID && k.enabled)) return 'y';
+  const face = job.labels[0];
+  const rotation = face === undefined ? 0 : ((face.rotation % 180) + 180) % 180;
+  return rotation === 90 ? 'y' : 'x';
+}
+
 function newLabel(job: EngraveJob, depth: number): EngraveLabel {
   return {
     id: newEngraveLabelId(),
@@ -785,6 +801,22 @@ export interface EngraveJobState {
   ) => void;
   /** Add a default label and return its id. */
   addLabel: () => string;
+  /**
+   * #700 — add an OPERATION's engrave text, laid out on the blank as it stands, and return its id.
+   *
+   * `addLabel` is the generic door: a centre-of-stock line with a fixed 10 mm size, which is right
+   * for a placeholder a person then drags. The wizard's step 4 is not a placeholder — the operator
+   * typed the text and pressed Create — so the line it makes has to fit the blank it will be cut
+   * on. That is `blankLabelSeed`'s own layout (the free band beside a blank's pocket, inset by the
+   * edge margin, sized to the band and centred), which the badge route already uses for its seeded
+   * name (#363/#383): a badge reads along Y, a bare blank along X. The line is stamped as the
+   * PERSON's (`layout: 'user'`, `depth: 'user'`), exactly as the wizard's former `addLabel` +
+   * `updateLabel` pair stamped it, so a later blank change does not re-lay their text.
+   *
+   * The fallback, when nothing fits at 1 mm or the blank is empty, is `addLabel`'s own centre
+   * placement: the findings then report the blank honestly rather than the action throwing.
+   */
+  addEngraveText: (text: string, opts: { depth: number; font: string }) => string;
   updateLabel: (id: string, patch: Partial<EngraveLabel>) => void;
   removeLabel: (id: string) => void;
   /** Set the cutter and stamp its source (#254). Defaults to `'user'`. */
@@ -1142,6 +1174,43 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
     addLabel: () => {
       const label = newLabel(get().job, newItemDepthFor(get().job));
       apply((job) => ({ ...job, labels: [...job.labels, label] }));
+      return label.id;
+    },
+
+    addEngraveText: (text, opts) => {
+      const job = get().job;
+      const pocket = (job.keepOuts ?? []).find((k) => k.id === BADGE_POCKET_KEEP_OUT_ID);
+      const face = job.labels[0];
+      const seed = blankLabelSeed({
+        blank: {
+          length: job.stock.length,
+          width: job.stock.width,
+          pocket: pocket?.kind === 'rect' ? pocket : null,
+        },
+        edgeMargin: job.edgeMargin,
+        text,
+        font: opts.font,
+        weight: face?.weight ?? 'bold',
+        depth: opts.depth,
+        // #383/#700 — a badge's name reads along its long side; another blank follows its own line.
+        textAlong: textAlongFor(job),
+        // The shop's band fill (#451), read here because `blankLabelSeed` is pure.
+        bandFill: shopDefault('engrave.blankBandFill').value,
+        measure: labelGlyphMeasure(job.customFonts ?? []),
+      });
+      // Nothing at 1 mm fits, or the text is empty: the generic centre placement is the honest
+      // fallback, and the job's own findings say why the blank refuses it.
+      const label = seed ?? { ...newLabel(job, opts.depth), text, font: opts.font };
+      apply((current) => ({
+        ...current,
+        labels: [...current.labels, label],
+        // The wizard's former `addLabel` + `updateLabel` pair stamped the text and its layout as
+        // the person's; this write keeps that (the operator typed the text and pressed Create).
+        sources: {
+          ...(current.sources ?? {}),
+          labels: { ...(current.sources?.labels ?? {}), [label.id]: { depth: 'user', layout: 'user' } },
+        },
+      }));
       return label.id;
     },
 
