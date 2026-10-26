@@ -11,7 +11,7 @@
 // job its one essential field is the FILE, read here into the job's goal (#685).
 
 import { beforeEach, afterEach, describe, expect, it } from 'vitest';
-import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { StartWizard } from '@/components/welcome/StartWizard';
 import { OPERATION_TYPES } from '@/components/panels/operationTypes';
 import { DEFAULT_FONT_ID } from '@/engine/fonts/registry';
@@ -208,9 +208,10 @@ describe('#685 — step 4, what are you cutting', () => {
       'Choose the mesh to surface.',
     );
 
-    // The read is a real one (file bytes, then a hash), so give it a real wait rather than the
-    // 1 s default that a busy parallel run can miss.
-    const WAIT = { timeout: 5000 };
+    // The read is a real one (file bytes, then a hash), so every wait below is on the STATE it
+    // settles — not on a fixed window. A busy full-suite run can stretch the read; waiting for the
+    // sentence or the button absorbs that, and stops the moment the state is there.
+    const WAIT = { timeout: 15_000 };
 
     // A file that is not a mesh is refused with its sentence, and Create still waits.
     fireEvent.change(input, { target: { files: [new File(['hello'], 'notes.txt')] } });
@@ -219,11 +220,15 @@ describe('#685 — step 4, what are you cutting', () => {
     );
     expect((screen.getByTestId('start-wizard-create') as HTMLButtonElement).disabled).toBe(true);
 
-    // The mesh it needs: read once, embedded, and made the job's whole goal.
+    // The mesh it needs: read once, embedded, and made the job's whole goal. The name paints in
+    // the step before the effect that reports the choice to the shell, whose footer owns Create —
+    // so wait for the BUTTON, which is the state this assertion is about.
     fireEvent.change(input, { target: { files: [new File([ASCII_STL], 'tet.stl')] } });
-    expect(await screen.findByText('tet.stl', undefined, WAIT)).toBeTruthy();
-    expect(screen.queryByTestId('start-wizard-op-surface-error')).toBeNull();
-    expect((screen.getByTestId('start-wizard-create') as HTMLButtonElement).disabled).toBe(false);
+    await waitFor(() => {
+      expect(screen.queryByTestId('start-wizard-op-surface-error')).toBeNull();
+      expect((screen.getByTestId('start-wizard-create') as HTMLButtonElement).disabled).toBe(false);
+    }, WAIT);
+    expect(screen.getByText('tet.stl')).toBeTruthy();
 
     fireEvent.click(screen.getByTestId('start-wizard-create'));
     expect(screen.queryByTestId('start-wizard')).toBeNull();

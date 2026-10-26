@@ -6,7 +6,7 @@
 
 import { setTimeout as sleep } from 'node:timers/promises';
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { KNOWN_DEFAULTS } from '@/platform/defaultsClient';
 import {
   CARRY_READ_MS,
@@ -1150,10 +1150,20 @@ describe('#449 the transport windows are shop defaults, with labelled fallbacks'
   });
 
   it('identify gives each ask the fallback window when the caller passes none', async () => {
-    const transport = new FakeTransport();
-    await runIdentify(transport, 1, '192.168.10.16');
-    // One drain per ask (M482.5, then M482.4), each at the compiled fallback.
-    expect(transport.readTimeouts.filter((ms) => ms === IDENTIFY_WINDOW_MS)).toHaveLength(2);
+    // The channel hands each read the time remaining against a deadline it just set, so the value
+    // the fake sees is `fallback` minus however long the machine took between two `Date.now()`
+    // calls. Freezing the clock makes that gap zero and the claim exact: the window each ask was
+    // given IS the compiled fallback. The old equality on `Date.now()` readings flaked on a busy
+    // full-suite run, when the gap could round the second value down by a millisecond.
+    vi.useFakeTimers({ now: 0 });
+    try {
+      const transport = new FakeTransport();
+      await runIdentify(transport, 1, '192.168.10.16');
+      // One drain per ask (M482.5, then M482.4), each at the compiled fallback.
+      expect(transport.readTimeouts).toEqual([IDENTIFY_WINDOW_MS, IDENTIFY_WINDOW_MS]);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('an upload cancels at the fallback inactivity window when the caller passes none', async () => {
