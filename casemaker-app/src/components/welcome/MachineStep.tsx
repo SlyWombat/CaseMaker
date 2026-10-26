@@ -9,10 +9,10 @@
  *
  * - The location's machine is the step's machine: its name and address are on screen and the check
  *   runs when the step opens (E4 — never connected automatically though the location knows it).
- * - ONE line of state, in the machine strip's words. `homed` is deliberately absent: the status line
- *   carries no homed flag, and the app's rule is that homed-ness is evidence from a `$H` the app
- *   sent (`tests/unit/protocol.spec.ts`), never something a socket reading may infer. A check does
- *   not home anything, so this line cannot say it.
+ * - ONE line of state, in the machine strip's words, plus `homed` when the `?` frame itself says
+ *   so: the controller is Idle with MPos at the Z1's homed rest (#693's `readMachineRest`, the
+ *   bench-verified reading). The check still sends no `$H`; when the frame does not say it, the
+ *   word is absent rather than guessed.
  * - Next is never gated: a job can be written, verified and simulated with no machine, and the
  *   offline line says so where the operator is looking.
  * - The address field and Connect live under `another machine…` — the one fold, for a machine whose
@@ -26,6 +26,7 @@ import { formatStamp } from '@/components/manage/display';
 import { stateColour, stateWord } from '@/components/viewport/machineWords';
 import { canDriveMachine } from '@/platform/capabilities';
 import { readStatusLine } from '@/platform/desktop/protocol';
+import { readMachineRest } from '@/platform/machineChangeRun';
 import type { MachineObservation } from '@/platform/machineProbe';
 import type { MachineRecord } from '@/platform/locationClient';
 import type { MachineCheckOutcome } from '@/store/machineStore';
@@ -181,7 +182,13 @@ export function MachineStep({
       : outcome === 'not-found'
         ? stateWord(null, false, false)
         : stateWord(null, false, null);
-  const word = found ? `Online · ${wordBase}` : wordBase;
+  // `homed` is a reading of the frame the check just fetched (#693): Idle with MPos at the Z1's
+  // homed rest. It is not a `$H` the app sent; a frame that does not say it gets no word.
+  const homed =
+    found && machine !== null && machine.status !== null
+      ? readMachineRest(machine.status)?.homed === true
+      : false;
+  const word = found ? `Online · ${wordBase}${homed ? ' · homed' : ''}` : wordBase;
   const checked = found ? timeOfDay(machine.observedAt) : null;
 
   // Last seen belongs to the machine this line is about. When a house record exists, another

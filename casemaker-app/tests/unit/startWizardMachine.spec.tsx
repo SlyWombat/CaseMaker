@@ -37,7 +37,7 @@ vi.mock('@/platform/capabilities', async (orig) => {
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 const HOUSE_HOST = '192.168.10.43';
-/** A complete status line, as the controller sends it (`?`), with the machine at its homed rest. */
+/** A complete status line, as the controller sends it (`?`), with the machine at the Z1's homed rest (-1, -1, -1). */
 const IDLE_LINE = '<Idle|MPos:-1.000,-1.000,-1.000|F:0,0,100|S:0,0,100|T:0>';
 
 type Location = NonNullable<ReturnType<typeof useLocationStore.getState>['location']>;
@@ -110,13 +110,31 @@ describe('#682 — step 1 is the house’s machine', () => {
     await waitFor(() => expect(stateLine().getAttribute('data-state')).toBe('found'));
     expect(screen.getByTestId('start-wizard-machine-name').textContent).toBe('Makera Z1 “Zoomba”');
     expect(screen.getByTestId('start-wizard-machine-address').textContent).toBe(HOUSE_HOST);
-    expect(stateLine().textContent).toContain('Online · Idle');
     const machine = useMachineStore.getState().machine;
     expect(machine?.host).toBe(HOUSE_HOST);
-    expect(stateLine().textContent).toContain(`· checked ${hhmm(machine!.observedAt)}`);
-    // No `homed`: the status line carries no homed flag and a check sends no `$H` (protocol.spec).
-    expect(stateLine().textContent).not.toContain('homed');
+    // #693's reader: Idle with MPos at the Z1's homed rest is `homed`; the check sends no `$H`.
+    expect(stateLine().textContent).toBe(
+      `Online · Idle · homed · checked ${hhmm(machine!.observedAt)}`,
+    );
     expect((screen.getByTestId('start-wizard-next') as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it('an Idle line away from the homed rest does not say homed', async () => {
+    withHouse();
+    useClient({
+      ...bench(),
+      status: async () => ({
+        ok: true,
+        text: '<Idle|MPos:10.000,20.000,-1.000|F:0,0,100|S:0,0,100|T:0>',
+      }),
+    });
+    render(<StartWizard />);
+
+    await waitFor(() => expect(stateLine().getAttribute('data-state')).toBe('found'));
+    expect(stateLine().textContent).toContain('Online · Idle');
+    expect(stateLine().textContent).not.toContain('homed');
+    const machine = useMachineStore.getState().machine;
+    expect(stateLine().textContent).toContain(`· checked ${hhmm(machine!.observedAt)}`);
   });
 
   it('checks once on open; Check again is the same check on demand', async () => {
