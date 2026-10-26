@@ -8,9 +8,10 @@
  *
  * THE FILE BAR IS TOLD THE TRUTH. The bound file is not known here — the entry is a snapshot, not a
  * live handle — so the bar shows the recent's file name with no handle: Save asks for a file (Save
- * as…), exactly as it does for a downloaded job. `newJob()` runs first so a handle from the job that
- * was open before this one is released before the document is replaced (its autosave must not write
- * this job over the previous file).
+ * as…), exactly as it does for a downloaded job. The notice says WHEN the snapshot was taken, so an
+ * operator saving over a file another session has moved on since knows what they are overwriting.
+ * `newJob()` runs first so a handle from the job that was open before this one is released before
+ * the document is replaced (its autosave must not write this job over the previous file).
  */
 
 import { parseJobFile } from '@/engine/cnc/engrave/jobFile';
@@ -20,13 +21,20 @@ import { useEngraveJobFileStore } from './engraveJobFileStore';
 import { useEngraveJobStore } from './engraveJobStore';
 import { clearHistory, useProjectStore } from './projectStore';
 import { useViewportStore } from './viewportStore';
-import type { RecentJob } from './recentJobsStore';
+import { recentJobText, recentSavedAtWords, type RecentJob } from './recentJobsStore';
 
 export type OpenRecentResult = { ok: true } | { ok: false; error: string };
 
-/** Reopen one recent job: parse, replace, build its blank, land in Design. */
+/** Reopen one recent job: fetch its snapshot, parse, replace, build its blank, land in Design. */
 export async function openRecentJob(recent: RecentJob): Promise<OpenRecentResult> {
-  const parsed = await parseJobFile(recent.text);
+  const text = await recentJobText(recent.fileName);
+  if (text === null) {
+    return {
+      ok: false,
+      error: 'the saved copy of this job is no longer available — open it from its file',
+    };
+  }
+  const parsed = await parseJobFile(text);
   if (!parsed.ok) {
     return { ok: false, error: parsed.errors[0] ?? 'the file is not a job document' };
   }
@@ -43,9 +51,9 @@ export async function openRecentJob(recent: RecentJob): Promise<OpenRecentResult
   useEngraveJobFileStore.setState({
     handle: null,
     fileName: recent.fileName,
-    savedText: recent.text,
+    savedText: text,
     dirty: false,
-    notice: { kind: 'ok', text: `Opened ${recent.name}.` },
+    notice: { kind: 'ok', text: `Opened ${recent.name}${recentSavedAtWords(recent.at)}.` },
     packageError: parsed.package !== null && !parsed.package.ok ? parsed.package.reason : null,
     sourceError: parsed.sourceError,
   });
