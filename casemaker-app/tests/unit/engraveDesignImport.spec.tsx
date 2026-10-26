@@ -152,8 +152,8 @@ describe('EngravePanel — the design import entry (#410)', () => {
     // refusal — the same rule the sweep, Manage and the CNC guide follow.
     features.sim = false;
     render(<EngravePanel />);
-    // #686 — the door is the File menu's fourth item now, so the menu has to be open for its
-    // absence to mean anything: a closed menu would answer null in either build.
+    // #686 — the door lives in the File menu now, so the menu has to be open for its absence to
+    // mean anything: a closed menu would answer null in either build.
     fireEvent.click(screen.getByTestId('engrave-file-menu-toggle'));
     expect(screen.getByTestId('engrave-file-menu')).toBeTruthy();
     expect(screen.getByTestId('engrave-job-save')).toBeTruthy();
@@ -161,11 +161,14 @@ describe('EngravePanel — the design import entry (#410)', () => {
     expect(screen.queryByTestId('engrave-design-input')).toBeNull();
   });
 
-  it('offers the design door as the File menu’s fourth item in a simulator build (#686)', () => {
+  it('offers the design door as the File menu’s last item in a simulator build (#686)', () => {
     render(<EngravePanel />);
     fireEvent.click(screen.getByTestId('engrave-file-menu-toggle'));
     const items = screen.getByTestId('engrave-file-menu').querySelectorAll('[role="menuitem"]');
+    // #686 follow-up — "New cutting job…" is the first item; the design read is still last, after
+    // the three file actions it belongs beside.
     expect([...items].map((el) => el.getAttribute('data-testid'))).toEqual([
+      'engrave-job-new',
       'engrave-job-save',
       'engrave-job-save-as',
       'engrave-job-open',
