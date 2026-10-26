@@ -1,0 +1,27 @@
+Design
+Cut
+✓ 1 Check the job
+clear
+✓ 2 Freeze the plan
+1 program · frozen 13:07
+
+The package — 1 program · 1 setup · frozen 13:07
+
+The frozen programs still describe this job.
+
+You’re supplying this stock yourself, so no blank needs to be held.
+
+this job’s stock is not a shelf entry, so no blank is held.
+
+● 3 Register the blank
+left edge, then the top face
+Registration — find the stock, then set the origin
+
+No machine is connected. Reach it first, then come back to register.
+
+This job has no saved setup yet. Plan its registration in Design → Setups, approve it, then run it here.
+
+● 4 Cut
+the plan and the controls
+The steps — plan, dry run, manual upload and the release flow
+The plan

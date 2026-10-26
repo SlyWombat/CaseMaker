@@ -1,0 +1,247 @@
+Design
+Cut
+Cut this blank
+Save job
+Save job as…
+Open job…
+Not saved to a file yet · unsaved changes
+
+the job file is the owner — the package, the run log and the sources live in it, not in this browser.
+
+Set up this job…
+Import a design (.3mf)…
+Job
+Stock 76.2 × 38.1 × 3.81 mm · pla
+Stock
+Use the badge blankUse the blank
+length X
+typed
+width Y
+typed
+thickness
+typed
+material
+softwood
+hardwood
+MDF
+PLA
+PETG
+plastic (unspecified)
+ABS
+Acrylic
+PET
+ASA
+HIPS
+PA (nylon)
+PA-CF
+PA-GF
+PC
+PP
+TPU
+PVA
+Aluminium 6061
+Aluminium 7075
+Brass
+Copper
+typed
+
+X runs between the vise jaws. The fixed jaw is on the left.
+
+Facing
+
+PLA — facing is not offered on PLA: a flat cutter smears a plastic top.
+
+Voids under the face 0
+collapse all
+expand all
+
+A pocket the blank already has, cut into its bottom face. The ceiling is measured up from that face — the opposite direction from every depth in this panel. The job refuses any cut that would break through the material left over one.
+
+add a void:
+Rectangle
+Circle
+Slot
+Polygon
+Items 1
+collapse all
+expand all
+✕
+▸
+T
+Engrave "New text"
+Engrave
+0.5 mm
+⚠
++ Add operation…
+
+Depth keeps the 1 mm minimum floor — at most 2.81 mm on this stock.
+
+Target object 0
+
+A model the job is placed against. As a reference it is embedded and drawn but never cut — the stock around it is the profile cut-out work (#218). As a goal (Surface a mesh) it is the shape to make, roughed and finished in 3D.
+
+Import a target object…
+Cutter
+cutter chosen · margin 0.2 mm
+Toolrecommended: 3.175 mm
+Choose a cutter…
+3.17 mm flat end · 3.175*12mm Flat End(Metal)
+1 mm flat end
+1 mm ball · 3.175*1*3mm Ball Nose(Metal)
+1 mm ball · 3.175*1*4mm Ball Nose
+1.5 mm ball · 3.175*1.5*4.5mm Ball Nose(Metal)
+1.5 mm ball · 3.175*1.5*8mm Ball Nose
+3.17 mm ball · 3.175*10mm Ball Nose(Metal)
+2 mm ball · 3.175*2*12mm Ball Nose
+2 mm ball · 3.175*2*6mm Ball Nose(Metal)
+2.5 mm ball · 3.175*2.5*15mm Ball Nose
+2.5 mm ball · 3.175*2.5*7.5mm Ball Nose(Metal)
+3.17 mm ball · 3.175*22mm Ball Nose
+4 mm ball · 4*12mm Ball Nose
+4 mm ball · 4*12mm Ball Nose(Metal)
+4 mm ball · 4*22mm Ball Nose
+4 mm ball · 4*32mm Ball Nose
+6 mm ball · 6*12mm Ball Nose
+6 mm ball · 6*18mm Ball Nose(Metal)
+6 mm ball · 6*22mm Ball Nose
+6 mm ball · 6*32mm Ball Nose
+0.6 mm flat end · 3.175*0.6*3mm Corn
+0.7 mm flat end · 3.175*0.7*4mm Corn
+0.8 mm flat end · 3.175*0.8*5.5mm Corn
+0.9 mm flat end · 3.175*0.9*6mm Corn
+1 mm flat end · 3.175*1*3mm Flat End
+1 mm flat end · 3.175*1*3mm Flat End(Metal)
+1 mm flat end · 3.175*1*7mm Corn
+1.1 mm flat end · 3.175*1.1*7mm Corn
+1.2 mm flat end · 3.175*1.2*7mm Corn
+1.3 mm flat end · 3.175*1.3*7.5mm Corn
+1.4 mm flat end · 3.175*1.4*7.5mm Corn
+1.5 mm flat end · 3.175*1.5*6mm Flat End(Metal)
+1.5 mm flat end · 3.175*1.5*8.5mm Corn
+1.5 mm flat end · 3.175*1.5*8mm Flat End
+1.6 mm flat end · 3.175*1.6*8.5mm Corn
+1.7 mm flat end · 3.175*1.7*9.5mm Corn
+1.8 mm flat end · 3.175*1.8*9.5mm Corn
+1.9 mm flat end · 3.175*1.9*9.5mm Corn
+3.17 mm flat end · 3.175*12mm Corn
+3.17 mm flat end · 3.175*12mm Flat End(Metal)
+3.17 mm flat end · 3.175*17mm Flat End
+2 mm flat end · 3.175*2*10.5mm Corn
+2 mm flat end · 3.175*2*12mm Flat End
+2 mm flat end · 3.175*2*8mm Flat End(Metal)
+2.1 mm flat end · 3.175*2.1*10.5mm Corn
+2.4 mm flat end · 3.175*2.4*10.5mm Corn
+2.5 mm flat end · 3.175*2.5*10.5mm Corn
+2.5 mm flat end · 3.175*2.5*12mm Flat End(Metal)
+2.5 mm flat end · 3.175*2.5*15mm Flat End
+3.17 mm flat end · 3.175*25mm Flat End
+3 mm flat end · 3.175*3.0*12mm Corn
+3.17 mm flat end · 3.175*32mm Flat End
+3.17 mm flat end · 3.175*42mm Flat End
+4 mm flat end · 4*12mm Flat End(Metal)
+4 mm flat end · 4*17mm Flat End(Metal)
+4 mm flat end · 4*22mm Flat End
+4 mm flat end · 4*22mm Flat End(Metal)
+4 mm flat end · 4*25mm Flat End
+4 mm flat end · 4*32mm Flat End
+6 mm flat end · 6*17mm Flat End(Metal)
+6 mm flat end · 6*22mm Flat End
+6 mm flat end · 6*25mm Flat End
+6 mm flat end · 6*25mm Flat End(Metal)
+6 mm flat end · 6*30mm Flat End(Metal)
+6 mm flat end · 6*32mm Flat End
+0.1 mm 90° chamfer · 3.175mm*90º Chamfer
+0.1 mm 90° chamfer · 4mm*90º Chamfer
+0.1 mm 90° chamfer · 6mm*90º Chamfer
+0.1 mm 30° engraver · 3.175*0.1mm*30º Engraving
+0.1 mm 60° engraver · 3.175*0.1mm*60º Engraving(Metal)
+0.2 mm 30° engraver · 3.175*0.2mm*30º Engraving
+0.2 mm 30° engraver · 3.175*0.2mm*30º Engraving(Metal)
+0.3 mm 30° engraver · 3.175*0.3mm*30º Engraving
+0.3 mm 30° engraver · 3.175*0.3mm*30º Engraving(Metal)
+0.4 mm 30° engraver · 3.175*0.4mm*30º Engraving
+0.4 mm 30° engraver · 3.175*0.4mm*30º Engraving(Metal)
+0.5 mm 30° engraver · 3.175*0.5mm*30º Engraving
+0.5 mm 30° engraver · 3.175*0.5mm*30º Engraving(Metal)
+0.3 mm engraver · 3.175mm Solder Mask Removal
+0.1 mm 30° engraver · 4*0.1mm*30º Engraving
+0.2 mm 30° engraver · 4*0.2mm*30º Engraving
+0.3 mm 30° engraver · 4*0.3mm*30º Engraving
+0.3 mm 30° engraver · 4*0.3mm*30º Engraving(Metal)
+0.4 mm 30° engraver · 4*0.4mm*30º Engraving
+0.4 mm 30° engraver · 4*0.4mm*30º Engraving(Metal)
+0.5 mm 30° engraver · 4*0.5mm*30º Engraving
+0.5 mm 30° engraver · 4*0.5mm*30º Engraving(Metal)
+0.3 mm 20° engraver · 6*0.3mm*20º Engraving
+0.4 mm 20° engraver · 6*0.4mm*20º Engraving
+0.5 mm 20° engraver · 6*0.5mm*20º Engraving
+0.73 mm thread mill · 3.175*M1*3mm Thread
+1.54 mm thread mill · 3.175*M2*6mm Thread
+1.96 mm thread mill · 3.175*M2.5*7.5mm Thread
+2.42 mm thread mill · 3.175*M3*9mm Thread
+3.15 mm thread mill · 3.175*M4*12mm Thread
+4 mm thread mill · 3.175*M5*15mm Thread
+4.75 mm thread mill · 6*M6*18mm Thread
+6 mm thread mill · 6*M8*24mm Thread
+0.5 mm ball · 6*0.5*30.5mm Ball Nose Engraving
+1 mm ball · 6*1*30.5mm Ball Nose Engraving
+2 mm ball · 6*2*30.5mm Ball Nose Engraving
+1 mm ball · Two Flute Ball Nose Bit - 1/8" Shank 1mm * 4mm
+2 mm ball · Two Flute Ball Nose Bit - 1/8" Shank 2mm * 12mm
+3.17 mm ball · Two Flute Ball Nose Bit - 1/8" Shank 3.175mm * 22mm
+1 mm ball · Two Flute Ball Nose Bit for Metal - 1/8" Shank 1mm * 3mm
+2 mm ball · Two Flute Ball Nose Bit for Metal - 1/8" Shank 2mm * 6mm
+3.17 mm ball · Two Flute Ball Nose Bit for Metal - 1/8" Shank 3.175mm * 10mm
+chamfer (Chamfering Bit - 1/8" Shank 90°)
+0.6 mm flat end · TiN Coating Corn Bit - 1/8" Shank 0.6mm * 3mm
+1 mm flat end · TiN Coating Corn Bit - 1/8" Shank 1mm * 7mm
+2 mm flat end · TiN Coating Corn Bit - 1/8" Shank 2mm * 10.5mm
+3 mm flat end · TiN Coating Corn Bit - 1/8" Shank 3.0mm * 12mm
+0.3 mm 30° engraver · Single Flute Engraving Bit - 1/8" Shank 30° * 0.3mm
+0.5 mm 30° engraver · Single Flute Engraving Bit - 1/8" Shank 30° * 0.5mm
+0.2 mm 30° engraver · Single Flute Engraving Bit for Metal - 1/8" Shank 30° * 0.2mm
+0.3 mm 30° engraver · Single Flute Engraving Bit for Metal - 1/8" Shank 30° * 0.3mm
+0.1 mm 60° engraver · Single Flute Engraving Bit for Metal - 1/8" Shank 60° * 0.1mm
+2 mm flat end · Spiral 'O' Single Flute Bit - 1/8" Shank 2mm * 12mm
+3.17 mm flat end · Spiral 'O' Single Flute Bit - 1/8" Shank 3.175mm * 25mm
+3.17 mm flat end · Spiral 'O' Single Flute Bit - 1/8" Shank 3.175mm * 42mm
+1 mm flat end · Spiral 'O' Single Flute Bit for Metal - 1/8" Shank 1mm * 3mm
+1.5 mm flat end · Spiral 'O' Single Flute Bit for Metal - 1/8" Shank 1.5mm * 6mm
+2 mm flat end · Spiral 'O' Single Flute Bit for Metal - 1/8" Shank 2mm * 8mm
+3.17 mm flat end · Spiral 'O' Single Flute Bit for Metal - 1/8" Shank [diameter washed out on label; code says 3.175]mm * 12mm
+2.4 mm thread mill · Thread Milling Bit - 1/8" Shank M3(d2.4mm) * 9mm
+4 mm thread mill · Thread Milling Bit - 1/8" Shank M5(d4) * 15mm
+computed
+
+V-carve. The depth you type is the pocket floor; the design is correct at the colour plane — this blank states no film, so the plane is the floor. The tip is 0.0 mm wide and its flank is 45.0° from the axis.
+
+"New text" at 0.5 mm: 0 mm groove at the plane — floor 0 mm narrower per side, top opening 0.5 mm wider per side; the pass pitch was not resolved for this job.
+
+Recommended: 3.175 mm V-bit — V-carve — the design is cut at the colour plane, so the groove width there is the design (reach not recorded). Use it
+
+No catalogue row can name this cutter — it carries no Makera cutter id — so its recommendation rests on the operator.
+
+Why? — 160 cutters considered
+Cuttingstarting values
+spindle
+12000 rpm
+feed
+500 mm/min
+plunge
+200 mm/min
+step-down
+0.5 mm
+step-over
+1.42875 mm
+Override
+Depth margins
+0.2 mm the house default
+
+How far every floor stays clear of a plane it must not cross — a void’s ceiling, the colour split. Z tolerance 0.05 mm; a job with no stated margins follows the house setting.
+
+For this blank: 0.2 mm — the wired probe adds 0.001 mm; flatness not yet measured: no bow claim.
+Hold
+Vise — shipped · reference unit · blank on the ledge
+1 warning · 0 errors show
+Generate
+Generate toolpathOpen run record…

@@ -1,0 +1,546 @@
+<title>First Job Flow</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: a drafting sheet — one column of numbered stations, each a desktop-width screen mockup with its notes beside it; mono for every number the operator reads. */
+:root {
+  --bg: #f3f5f8;        /* cool paper */
+  --panel: #ffffff;     /* the screen frames */
+  --fg: #16202c;
+  --muted: #5b6878;
+  --line: #d6dde6;
+  --line-strong: #aeb9c6;
+  --accent: #1d5fb4;    /* drafting blue */
+  --accent-ink: #ffffff;
+  --accent-soft: #e4edf9;
+  --ok: #1f7a3f;
+  --ok-soft: #e3f2e8;
+  --warn: #9a5b00;
+  --warn-soft: #fbefd9;
+  --bad: #b3261e;
+  --bad-soft: #fbe5e3;
+  --note: #f8f1e1;      /* annotation paper */
+  --note-ink: #4a3a10;
+  --sans: "IBM Plex Sans", "Segoe UI", system-ui, -apple-system, sans-serif;
+  --mono: "IBM Plex Mono", "SFMono-Regular", Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #121820; --panel: #1a222d; --fg: #e6ebf1; --muted: #9aa8b8; --line: #2c3745; --line-strong: #445263;
+  --accent: #6fa3ec; --accent-ink: #0d1520; --accent-soft: #1d2d44; --ok: #5fc27f; --ok-soft: #173224;
+  --warn: #e0a84a; --warn-soft: #3a2c12; --bad: #f08a83; --bad-soft: #40201e; --note: #2a2516; --note-ink: #e6d9b0;
+  color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #121820; --panel: #1a222d; --fg: #e6ebf1; --muted: #9aa8b8; --line: #2c3745; --line-strong: #445263;
+  --accent: #6fa3ec; --accent-ink: #0d1520; --accent-soft: #1d2d44; --ok: #5fc27f; --ok-soft: #173224;
+  --warn: #e0a84a; --warn-soft: #3a2c12; --bad: #f08a83; --bad-soft: #40201e; --note: #2a2516; --note-ink: #e6d9b0;
+  color-scheme: dark }
+
+body { background: var(--bg); color: var(--fg); font: 15px/1.5 var(--sans); }
+.wrap { max-width: 1180px; margin: 0 auto; padding-block: 32px 64px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+h1, h2, h3 { text-wrap: balance; margin: 0; font-weight: 600; letter-spacing: -0.01em; }
+h1 { font-size: 2rem; line-height: 1.15; }
+h2 { font-size: 1.3rem; }
+h3 { font-size: 1rem; }
+p { margin: 0; max-width: 68ch; }
+.eyebrow { font: 500 0.75rem/1 var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+.mono, .n { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+.muted { color: var(--muted); }
+a { color: var(--accent); }
+
+header.top { display: grid; gap: 14px; padding-bottom: 28px; border-bottom: 2px solid var(--fg); margin-bottom: 36px; }
+.status { display: inline-flex; align-items: center; gap: 8px; padding: 4px 10px; border: 1px solid var(--warn); color: var(--warn); border-radius: 999px; font: 500 0.8rem var(--mono); width: max-content; }
+.status::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--warn); }
+
+/* the flow strip */
+.flow { display: flex; flex-wrap: wrap; gap: 6px 0; align-items: stretch; margin: 28px 0 8px; }
+.flow .st { display: grid; gap: 2px; padding: 10px 14px; border: 1px solid var(--line-strong); background: var(--panel); min-width: 0; flex: 1 1 130px; position: relative; }
+.flow .st + .st { margin-left: 18px; }
+.flow .st + .st::before { content: ""; position: absolute; left: -19px; top: 50%; width: 18px; height: 1px; background: var(--line-strong); }
+.flow .st + .st::after { content: ""; position: absolute; left: -6px; top: calc(50% - 4px); border: 4px solid transparent; border-left-color: var(--line-strong); }
+.flow .st b { font-weight: 600; }
+.flow .st small { color: var(--muted); font-size: 0.8rem; }
+.flow .st.mode { border-color: var(--accent); }
+.flow .st .k { font: 500 0.7rem var(--mono); color: var(--accent); letter-spacing: 0.06em; }
+
+section { margin-top: 48px; display: grid; gap: 16px; }
+section > .head { display: grid; gap: 6px; }
+.lede { color: var(--muted); max-width: 72ch; }
+
+/* today vs target */
+.vs { border-top: 1px solid var(--line-strong); }
+.vs .r { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; padding: 14px 0; border-bottom: 1px solid var(--line); }
+.vs .r > div { min-width: 0; }
+.vs .lbl { font: 500 0.7rem var(--mono); letter-spacing: 0.08em; text-transform: uppercase; display: block; margin-bottom: 4px; }
+.vs .today .lbl { color: var(--bad); } .vs .target .lbl { color: var(--ok); }
+.vs q { quotes: "“" "”"; }
+.vs .ids { font: 0.75rem var(--mono); color: var(--muted); margin-left: 6px; }
+
+/* a station = mockup + notes */
+.station { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 24px; align-items: start; }
+.station > * { min-width: 0; }
+.notes { display: grid; gap: 10px; background: var(--note); color: var(--note-ink); padding: 14px 16px; border-left: 3px solid var(--warn); font-size: 0.9rem; }
+.notes h3 { font-size: 0.8rem; font-family: var(--mono); letter-spacing: 0.06em; text-transform: uppercase; font-weight: 500; }
+.notes ul { margin: 0; padding-left: 18px; display: grid; gap: 6px; }
+.notes .issue { font-family: var(--mono); font-size: 0.8rem; }
+
+/* the screen frame */
+.screen { background: var(--panel); border: 1px solid var(--line-strong); box-shadow: 0 1px 0 var(--line), 0 12px 30px -18px rgba(0,0,0,.35); font-size: 0.9rem; overflow: hidden; }
+.screen .bar { display: flex; align-items: center; gap: 10px; padding: 8px 14px; border-bottom: 1px solid var(--line); background: var(--bg); }
+.screen .bar .dots { display: inline-flex; gap: 5px; } .screen .bar .dots i { width: 9px; height: 9px; border-radius: 50%; background: var(--line-strong); display: block; }
+.screen .bar .ttl { font: 500 0.8rem var(--mono); color: var(--muted); margin-left: auto; }
+.screen .body { padding: 18px 20px; display: grid; gap: 14px; }
+.modal { max-width: 640px; margin: 10px auto; border: 1px solid var(--line-strong); background: var(--panel); box-shadow: 0 10px 30px -14px rgba(0,0,0,.4); }
+.modal .mh { display: flex; align-items: baseline; gap: 12px; padding: 12px 18px; border-bottom: 1px solid var(--line); }
+.modal .mh .step { font: 500 0.75rem var(--mono); color: var(--accent); letter-spacing: 0.06em; text-transform: uppercase; }
+.modal .mh h3 { font-size: 1.05rem; }
+.modal .mh .x { margin-left: auto; color: var(--muted); font-size: 0.85rem; }
+.modal .mb { padding: 16px 18px; display: grid; gap: 14px; }
+.modal .mf { display: flex; justify-content: flex-end; gap: 8px; padding: 12px 18px; border-top: 1px solid var(--line); background: var(--bg); }
+.backdrop { background: repeating-linear-gradient(135deg, var(--bg) 0 8px, var(--panel) 8px 16px); padding: 10px; }
+
+.btn { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border: 1px solid var(--line-strong); border-radius: 4px; background: var(--panel); color: var(--fg); font: 500 0.85rem var(--sans); white-space: nowrap; }
+.btn.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+.btn.ghost { border-color: transparent; color: var(--accent); }
+.btn.disabled { opacity: 0.55; }
+.btn.big { padding: 10px 18px; font-size: 0.95rem; }
+
+.frow { display: grid; grid-template-columns: 110px minmax(0, 1fr); gap: 10px 14px; align-items: center; }
+.frow > label { color: var(--muted); font-size: 0.85rem; }
+.frow .v { display: flex; flex-wrap: wrap; gap: 8px 10px; align-items: center; min-width: 0; }
+.in { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--line-strong); border-radius: 4px; padding: 4px 8px; background: var(--panel); min-height: 30px; }
+.in .n { min-width: 4.5ch; text-align: right; }
+.in .u { color: var(--muted); font-size: 0.8rem; }
+.in.sel::after { content: "▾"; color: var(--muted); font-size: 0.8rem; }
+.lead { font-size: 0.8rem; color: var(--muted); }
+.hint { font-size: 0.85rem; color: var(--muted); }
+.fold { font-size: 0.85rem; color: var(--accent); }
+.fold::before { content: "▸ "; }
+
+.state { display: inline-flex; align-items: center; gap: 8px; }
+.dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
+.dot.ok { background: var(--ok); } .dot.off { background: var(--line-strong); } .dot.warn { background: var(--warn); } .dot.bad { background: var(--bad); }
+
+.forms { display: flex; flex-wrap: wrap; gap: 8px; }
+.form { display: grid; justify-items: center; gap: 4px; padding: 8px 10px; border: 1px solid var(--line-strong); border-radius: 4px; font-size: 0.8rem; min-width: 74px; }
+.form.on { border-color: var(--accent); background: var(--accent-soft); }
+.form svg { display: block; width: 40px; height: 28px; }
+.form svg * { fill: none; stroke: currentColor; stroke-width: 1.4; }
+
+.radio { display: inline-flex; align-items: center; gap: 8px; }
+.radio::before { content: ""; width: 14px; height: 14px; border-radius: 50%; border: 1.5px solid var(--line-strong); box-sizing: border-box; }
+.radio.on::before { border: 4.5px solid var(--accent); }
+.radio.dis { color: var(--muted); }
+.check::before { content: "☐ "; color: var(--muted); }
+
+.ops { display: grid; gap: 10px; }
+.ops .g { display: grid; grid-template-columns: 120px minmax(0, 1fr); gap: 6px 12px; align-items: baseline; }
+.ops .g > span { color: var(--muted); font-size: 0.8rem; }
+.ops .g .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip { padding: 4px 10px; border: 1px solid var(--line-strong); border-radius: 999px; font-size: 0.82rem; white-space: nowrap; }
+.chip.on { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); font-weight: 500; }
+.chip.dis { color: var(--muted); border-style: dashed; }
+.tag { font: 500 0.7rem var(--mono); padding: 2px 6px; border-radius: 3px; background: var(--ok-soft); color: var(--ok); vertical-align: middle; }
+.tag.grey { background: var(--bg); color: var(--muted); }
+
+/* the design panel */
+.panel { display: grid; grid-template-columns: 1fr; }
+.panel .filebar { display: flex; align-items: center; gap: 10px; padding: 10px 16px; border-bottom: 1px solid var(--line); background: var(--bg); flex-wrap: wrap; }
+.panel .filebar .name { font-weight: 600; }
+.seg { display: inline-flex; border: 1px solid var(--line-strong); border-radius: 4px; overflow: hidden; margin-left: auto; }
+.seg span { padding: 5px 14px; font-size: 0.85rem; } .seg span.on { background: var(--fg); color: var(--bg); }
+.grp { border-bottom: 1px solid var(--line); }
+.grp .gh { display: flex; align-items: center; gap: 10px; padding: 9px 16px; background: var(--bg); font: 500 0.72rem var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+.grp .gh .tog { margin-left: auto; font-family: var(--sans); text-transform: none; letter-spacing: 0; }
+.grp .gb { padding: 10px 16px; display: grid; gap: 8px; }
+.line { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; min-width: 0; }
+.line .act { margin-left: auto; color: var(--accent); font-size: 0.85rem; }
+.item { display: grid; grid-template-columns: 22px 28px minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 8px 10px; border: 1px solid var(--line); border-radius: 4px; }
+.item .ic { width: 28px; height: 28px; border-radius: 4px; background: var(--accent-soft); color: var(--accent); display: grid; place-items: center; font: 600 0.9rem var(--mono); }
+.item .meta { color: var(--muted); font-size: 0.82rem; }
+.footer { position: sticky; bottom: 0; padding: 12px 16px; display: grid; gap: 10px; background: var(--panel); border-top: 2px solid var(--line-strong); }
+.footer .ticks { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 0.85rem; }
+.footer .ticks span::before { content: "✓ "; color: var(--ok); }
+.block { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; padding: 10px 12px; border: 1px solid var(--bad); background: var(--bad-soft); border-radius: 4px; font-size: 0.88rem; }
+.block b { font-weight: 600; }
+.twostate { display: grid; gap: 10px; }
+.twostate .cap { font: 500 0.7rem var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+
+/* cut mode */
+.strip { display: flex; flex-wrap: wrap; gap: 6px 16px; align-items: center; padding: 8px 16px; background: var(--fg); color: var(--bg); font: 0.82rem var(--mono); }
+.strip .dot { box-shadow: 0 0 0 2px var(--fg); }
+.steps { display: grid; }
+.cstep { display: grid; grid-template-columns: 26px minmax(0, 1fr); gap: 8px 12px; padding: 12px 16px; border-bottom: 1px solid var(--line); align-items: start; }
+.cstep .m { width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; font: 600 0.75rem var(--mono); border: 1.5px solid var(--line-strong); color: var(--muted); }
+.cstep.done .m { background: var(--ok); border-color: var(--ok); color: #fff; }
+.cstep.now .m { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.cstep.now { background: var(--accent-soft); }
+.cstep .t { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: baseline; }
+.cstep .t b { font-weight: 600; }
+.cstep .t .meta { color: var(--muted); font-size: 0.85rem; }
+.cstep .acts { grid-column: 2; display: flex; gap: 8px; flex-wrap: wrap; }
+
+/* tables */
+.tbl { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+.tbl th { text-align: left; font: 500 0.7rem var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); padding: 8px 10px 8px 0; border-bottom: 1px solid var(--line-strong); }
+.tbl td { padding: 9px 10px 9px 0; border-bottom: 1px solid var(--line); vertical-align: top; }
+.tbl td:first-child { white-space: nowrap; }
+.scroll { overflow-x: auto; }
+.tbl .not { color: var(--bad); text-decoration: line-through; text-decoration-color: var(--bad); text-decoration-thickness: 1px; }
+
+.three { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
+.three > div { border-top: 3px solid var(--line-strong); padding-top: 10px; display: grid; gap: 6px; font-size: 0.9rem; }
+.three > div.rm { border-color: var(--bad); } .three > div.mv { border-color: var(--warn); } .three > div.kp { border-color: var(--ok); }
+.three ul { margin: 0; padding-left: 18px; display: grid; gap: 4px; }
+
+.acc { counter-reset: a; display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.acc li { display: grid; grid-template-columns: 30px minmax(0, 1fr); gap: 10px; }
+.acc li::before { counter-increment: a; content: counter(a); font: 500 0.8rem var(--mono); color: var(--accent); border: 1px solid var(--accent); border-radius: 50%; width: 22px; height: 22px; display: grid; place-items: center; }
+
+.work .tbl td a { font-family: var(--mono); font-size: 0.85rem; }
+.gate { padding: 14px 16px; border: 1px solid var(--warn); background: var(--warn-soft); color: var(--fg); max-width: none; }
+
+@media (max-width: 860px) {
+  .station { grid-template-columns: 1fr; }
+  .vs .r { grid-template-columns: 1fr; gap: 8px; }
+  .three { grid-template-columns: 1fr; }
+  .frow { grid-template-columns: 1fr; gap: 4px; }
+  .ops .g { grid-template-columns: 1fr; }
+  .flow .st + .st { margin-left: 0; } .flow .st + .st::before, .flow .st + .st::after { display: none; }
+  .flow { gap: 6px; }
+}
+@media (prefers-reduced-motion: no-preference) { .btn, .chip { transition: background .15s; } }
+</style>
+
+<div class="wrap">
+<header class="top">
+  <span class="eyebrow">Case Maker · CNC · design v1 · 2026-10-26</span>
+  <h1>First Job Flow</h1>
+  <p class="lede">The screens an operator meets from “I want to cut something” to the run, as one design the panels follow. Seven stations, one numbering, one vocabulary. Each mockup carries the exact copy; the notes beside it say what it replaces and which work item builds it.</p>
+  <span class="status">Proposed · awaiting the maintainer's approval · umbrella #679</span>
+</header>
+
+<div class="flow" aria-label="The flow">
+  <div class="st"><span class="k">DOOR</span><b>Start a cutting job</b><small>welcome page</small></div>
+  <div class="st"><span class="k">STEP 1 OF 4</span><b>Machine</b><small>the house's, checked</small></div>
+  <div class="st"><span class="k">STEP 2 OF 4</span><b>Stock</b><small>material · form · size</small></div>
+  <div class="st"><span class="k">STEP 3 OF 4</span><b>Holding</b><small>mount · orientation</small></div>
+  <div class="st"><span class="k">STEP 4 OF 4</span><b>Operation</b><small>what are you cutting?</small></div>
+  <div class="st mode"><span class="k">MODE</span><b>Design</b><small>Job · Cutter · Hold · Generate</small></div>
+  <div class="st mode"><span class="k">MODE</span><b>Cut</b><small>Checked · Frozen · Register · Run</small></div>
+</div>
+<p class="hint">Wizard → Design → Cut. Nothing else counts steps; nothing else connects a machine; nothing else saves.</p>
+
+<section>
+  <div class="head"><h2>Today against the target</h2><p class="lede">Six of the forty-five audit findings, each with the words the operator reads now and the words they will read. The full list is in the audit; every id below maps to a child issue.</p></div>
+  <div class="vs">
+    <div class="r"><div class="today"><span class="lbl">Today</span>Generate disabled with the wizard's own defaults (PLA, Engrave, the recommended V bit). Tooltip: <q>Fix the errors above first.</q> Findings: <q>1 warning · 0 errors</q>.<span class="ids">B9</span></div><div class="target"><span class="lbl">Target</span>The button carries its blocker: <q>No feeds for the 90° chamfer bit on PLA — choose a flat end mill</q> with a <b>Fix</b> link that opens the cutter list at the recommendation.</div></div>
+    <div class="r"><div class="today"><span class="lbl">Today</span>Three sequences, three numberings: <q>1/3 · 2/3 · Next: mount</q>, then <q>1 / 2 · 2 / 2</q>, then <q>1 / 3</q> again from the panel. Two cut flows (Cut mode, 4 steps; Cut this blank, a full page of 7).<span class="ids">A1 B3 C2</span></div><div class="target"><span class="lbl">Target</span>One wizard, <q>Step n of 4</q>. Cut mode is the one cut flow; its four lines are the seven steps.</div></div>
+    <div class="r"><div class="today"><span class="lbl">Today</span>Two save systems on one screen: the top bar's <q>Save · Load · New · Export…</q> (the print project) and the panel's <q>Save job · Save job as… · Open job…</q>.<span class="ids">B2</span></div><div class="target"><span class="lbl">Target</span>One file bar: the job's name, its saved time, a Save / Save as… / Open… menu. The project controls are hidden on CNC pages.</div></div>
+    <div class="r"><div class="today"><span class="lbl">Today</span><q>plate ▾ · L (X) · W (Y) · T</q>, no units, no Z, nothing that says what a plate, block or sheet is. <q>Rod, tube and disc are not offered…</q><span class="ids">A7</span></div><div class="target"><span class="lbl">Target</span>Forms as pictures with one defining sentence each, Disc and Rod among them; <q>length X · width Y · thickness Z</q>, <q>mm</q> on every field.</div></div>
+    <div class="r"><div class="today"><span class="lbl">Today</span>Material defaults to <b>softwood</b>; the shelf answers <q>Nothing in softwood on the shelf.</q> The machine step offers <q>192.168.1.50</q> and two paragraphs on what a machine is.<span class="ids">A3 A4 E4</span></div><div class="target"><span class="lbl">Target</span>The house's material first; the house's machine preselected and checked on open, one line of state.</div></div>
+    <div class="r"><div class="today"><span class="lbl">Today</span>Cutters under four name forms: <q>3.17 mm flat end · 3.175*12mm Flat End(Metal)</q>, <q>chamfer (Chamfering Bit - 1/8" Shank 90°)</q>, <q>[diameter washed out on label; code says 3.175]</q>. Codes and issue numbers in text: <q>vise-default</q>, <q>(#218)</q>, <q>(#191)</q>.<span class="ids">B8 D1</span></div><div class="target"><span class="lbl">Target</span>One form: <span class="mono">⌀ 3.175 mm flat end · 12 mm flute</span>, grouped by kind. No codes, no issue numbers, a unit on every field, three decimals at most.</div></div>
+  </div>
+</section>
+
+<!-- ============ STATION 0: the door ============ -->
+<section id="door">
+  <div class="head"><span class="eyebrow">Station 0</span><h2>The door</h2><p class="lede">The cutting job gets an entry of its own on the welcome page, beside the print projects. Opening it hides the board library.</p></div>
+  <div class="station">
+    <div class="screen">
+      <div class="bar"><span class="dots"><i></i><i></i><i></i></span><span class="ttl">Case Maker · welcome</span></div>
+      <div class="body">
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:14px">
+          <div style="border:1px solid var(--line-strong);border-radius:6px;padding:14px;display:grid;gap:8px">
+            <span class="eyebrow">Print</span><h3>Start a new project</h3>
+            <p class="hint">Pick a board; its enclosure generates around the real connector and mounting-hole geometry.</p>
+            <div class="in sel" style="width:max-content"><span class="muted">Search 31 boards…</span></div>
+          </div>
+          <div style="border:2px solid var(--accent);border-radius:6px;padding:14px;display:grid;gap:8px;background:var(--accent-soft)">
+            <span class="eyebrow">CNC</span><h3>Start a cutting job</h3>
+            <p class="hint">Cut something on the CNC: a badge, a plate, a pocket, an engraving.</p>
+            <div><span class="btn primary big">Start a cutting job</span></div>
+            <div class="hint">Recent: <a href="#">Zoomba badge</a> · <a href="#">coupon-2</a> · <a href="#">rack-tag</a></div>
+            <div class="hint">Starters: <a href="#">Name badge</a> · <a href="#">Bare blank</a></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <aside class="notes"><h3>Replaces</h3>
+      <ul><li>The CNC entry as one of three buttons beside the board search, the wizard modal over “Pelican-style protective enclosure… ~480 MIN PRINT”.</li><li>The template cards in the stock step (50–80 words each, “ported from samples/badge-blank/make_badge.py”) become starter jobs here.</li><li>The “Use the badge blank · Use the blank” headline in the panel.</li></ul>
+      <h3>Audit</h3><p>A2 · A6 · B4 · E1 · E2</p>
+      <h3>Work item</h3><p class="issue">#680</p>
+    </aside>
+  </div>
+</section>
+
+<!-- ============ STATION 1: machine ============ -->
+<section id="machine">
+  <div class="head"><span class="eyebrow">Station 1</span><h2>Step 1 of 4 · Machine</h2><p class="lede">The house's machine, checked when the step opens. One line of state in the machine strip's words. The address lives behind one fold.</p></div>
+  <div class="station">
+    <div class="screen"><div class="bar"><span class="dots"><i></i><i></i><i></i></span><span class="ttl">New cutting job</span></div>
+      <div class="backdrop"><div class="modal">
+        <div class="mh"><span class="step">Step 1 of 4</span><h3>Machine</h3><span class="x">Close ✕</span></div>
+        <div class="mb">
+          <div class="line"><b>Makera Z1 “Zoomba”</b><span class="mono muted">192.168.10.43</span></div>
+          <div class="line"><span class="state"><span class="dot ok"></span>Online · Idle · homed</span><span class="muted">· checked <span class="mono">09:02</span></span><span class="btn" style="margin-left:auto">Check again</span></div>
+          <div class="fold">another machine…</div>
+          <div class="twostate" style="border-top:1px dashed var(--line);padding-top:10px"><span class="cap">when it does not answer</span>
+            <div class="line"><span class="state"><span class="dot off"></span>Offline · last seen <span class="mono">2026-10-25 13:55</span></span><span class="btn" style="margin-left:auto">Check again</span></div>
+            <p class="hint">The job can be written, checked and simulated now; the machine is needed at Cut.</p></div>
+        </div>
+        <div class="mf"><span class="btn primary">Next: stock →</span></div>
+      </div></div>
+    </div>
+    <aside class="notes"><h3>Replaces</h3>
+      <ul><li>A select with one entry, two paragraphs (“Every job is written for one machine…”, “This is a check rather than a question…”), a `Check for a machine` button, the placeholder <span class="mono">192.168.1.50</span>.</li><li>Three places to connect a machine. This step and the Cut strip read from the same location record; Manage › Machines keeps the full card.</li></ul>
+      <h3>Rule</h3><p>Next is never gated on the machine. The state line uses exactly the strip's words.</p>
+      <h3>Audit</h3><p>A3 · E4 · C3</p><h3>Work item</h3><p class="issue">#682 (numbering: #681)</p>
+    </aside>
+  </div>
+</section>
+
+<!-- ============ STATION 2: stock ============ -->
+<section id="stock">
+  <div class="head"><span class="eyebrow">Station 2</span><h2>Step 2 of 4 · Stock</h2><p class="lede">Material first, the house's by default and grouped. The form is a picture with one sentence that says what it is. Size in the panel's words with the unit on every field. The shelf shows only when it holds something.</p></div>
+  <div class="station">
+    <div class="screen"><div class="bar"><span class="dots"><i></i><i></i><i></i></span><span class="ttl">New cutting job</span></div>
+      <div class="backdrop"><div class="modal">
+        <div class="mh"><span class="step">Step 2 of 4</span><h3>Stock</h3><span class="x">Close ✕</span></div>
+        <div class="mb">
+          <div class="frow">
+            <label>Material</label><div class="v"><span class="in sel"><b>PLA</b></span><span class="hint">Plastics · Woods · Metals, this house's first</span></div>
+            <label>Form</label><div class="v" style="display:grid;gap:8px">
+              <div class="forms">
+                <span class="form on"><svg viewBox="0 0 40 28"><path d="M4 16 L18 8 L36 12 L22 20 Z"/><path d="M4 16 v4 L22 24 v-4 M22 20 L36 12 v4 L22 24"/></svg>Plate</span>
+                <span class="form"><svg viewBox="0 0 40 28"><path d="M8 10 L20 4 L32 10 L20 16 Z"/><path d="M8 10 v12 L20 28 v-12 M20 16 L32 10 v12 L20 28"/></svg>Block</span>
+                <span class="form"><svg viewBox="0 0 40 28"><path d="M3 15 L19 8 L37 11 L21 18 Z"/><path d="M3 15 v1.5 L21 19.5 v-1.5 M21 18 L37 11 v1.5 L21 19.5"/></svg>Sheet</span>
+                <span class="form"><svg viewBox="0 0 40 28"><path d="M4 16 L18 8 L36 12 L22 20 Z"/><path d="M4 16 v4 L22 24 v-4 M22 20 L36 12 v4 L22 24"/><path d="M8 17 l12-6 M8 19 l12-6" stroke-dasharray="1.5 1.5"/></svg>Printed</span>
+                <span class="form"><svg viewBox="0 0 40 28"><ellipse cx="20" cy="12" rx="15" ry="6"/><path d="M5 12 v4 a15 6 0 0 0 30 0 v-4"/></svg>Disc</span>
+                <span class="form"><svg viewBox="0 0 40 28"><ellipse cx="8" cy="14" rx="4" ry="8"/><path d="M8 6 h26 a4 8 0 0 1 0 16 H8"/></svg>Rod</span>
+              </div>
+              <p class="hint"><b>Plate</b> — flat stock cut from the top; thicker than a sheet, lower than it is wide. The vise holds it on its long edges.</p>
+            </div>
+            <label>Size</label><div class="v">
+              <span class="in"><span class="u">length X</span><span class="n">76.2</span><span class="u">mm</span></span>
+              <span class="in"><span class="u">width Y</span><span class="n">38.1</span><span class="u">mm</span></span>
+              <span class="in"><span class="u">thickness Z</span><span class="n">3.81</span><span class="u">mm</span></span>
+            </div>
+            <label>Finish</label><div class="v"><span class="in sel">as bought</span><span class="hint">plastic is cut as it is; wood and metal are faced first</span></div>
+            <label>Shelf</label><div class="v" style="display:grid;gap:6px">
+              <span class="radio">PLA plate <span class="mono">76.2 × 38.1 × 3.81 mm</span> · 4 on the shelf</span>
+              <span class="radio">offcut from job 12 · <span class="mono">60 × 38.1 × 3.81 mm</span></span>
+              <span class="check hint">keep this piece on the shelf</span>
+            </div>
+          </div>
+          <div class="fold">Load an STL or 3MF as the stock…</div>
+          <div class="twostate" style="border-top:1px dashed var(--line);padding-top:10px"><span class="cap">when Rod is picked</span>
+            <p class="hint"><b>Rod</b> — round stock. A short rod sits in the vise on its side for a face job; a rod cut around needs the rotary (step 3 will offer it).</p></div>
+        </div>
+        <div class="mf"><span class="btn">← Back</span><span class="btn primary">Next: holding →</span></div>
+      </div></div>
+    </div>
+    <aside class="notes"><h3>Replaces</h3>
+      <ul><li>The softwood default and the 22-name flat list.</li><li><span class="mono">plate ▾ · L (X) · W (Y) · T</span> with no units and no Z; the T field wrapping on a phone.</li><li>“Rod, tube and disc are not offered… Sphere stock is not offered at all.” as a paragraph on the default path.</li><li>The shelf door that reads “Nothing in softwood on the shelf”; the Finish list with <q>not known</q> last; the two consequence paragraphs; the bare <q>Choose File</q> control.</li></ul>
+      <h3>Forms, one sentence each</h3>
+      <ul><li><b>Plate</b> flat, cut from the top.</li><li><b>Block</b> as tall as it is wide; sides may be cut in later setups.</li><li><b>Sheet</b> ≤ 3 mm; tape on the bed.</li><li><b>Printed</b> from a printer; layers known.</li><li><b>Disc / Rod</b> round; vise or tape for a face job, the rotary when cut around.</li></ul>
+      <h3>Audit</h3><p>A4 · A5 · A7 · A8 · A9 · E2</p><h3>Work item</h3><p class="issue">#683</p>
+    </aside>
+  </div>
+</section>
+
+<!-- ============ STATION 3: holding ============ -->
+<section id="holding">
+  <div class="head"><span class="eyebrow">Station 3</span><h2>Step 3 of 4 · Holding</h2><p class="lede">The mount this stock calls for is preselected. The picture carries the orientation facts the panel used to print as prose. The numbers live behind Technical.</p></div>
+  <div class="station">
+    <div class="screen"><div class="bar"><span class="dots"><i></i><i></i><i></i></span><span class="ttl">New cutting job</span></div>
+      <div class="backdrop"><div class="modal">
+        <div class="mh"><span class="step">Step 3 of 4</span><h3>Holding</h3><span class="x">Close ✕</span></div>
+        <div class="mb">
+          <div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(200px,240px);gap:16px;align-items:start">
+            <div style="display:grid;gap:10px">
+              <span class="radio on"><b>Vise</b> <span class="hint">what a 3.81 mm plate calls for</span></span>
+              <span class="radio">Tape on the bed</span>
+              <span class="radio dis">Rotary chuck <span class="hint">· needs round stock</span></span>
+              <div class="frow" style="margin-top:6px"><label>Under the part</label><div class="v"><span class="in sel">none</span><span class="hint">a board when a cut goes through</span></div></div>
+              <div class="fold">Technical: jaw numbers (shipped defaults), stock proud of the jaws <span class="mono">0.71 mm</span></div>
+            </div>
+            <div style="display:grid;gap:6px">
+              <svg viewBox="0 0 240 150" style="width:100%;max-width:100%;display:block;border:1px solid var(--line);background:var(--bg)" aria-label="Top view of the vise">
+                <rect x="18" y="30" width="34" height="90" fill="var(--line-strong)"/><rect x="188" y="30" width="34" height="90" fill="var(--line)" stroke="var(--line-strong)"/>
+                <rect x="52" y="52" width="136" height="46" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="1.5"/>
+                <text x="120" y="79" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="11" fill="var(--fg)">76.2 × 38.1</text>
+                <text x="35" y="22" text-anchor="middle" font-family="IBM Plex Sans, sans-serif" font-size="10" fill="var(--muted)">fixed jaw</text>
+                <text x="205" y="22" text-anchor="middle" font-family="IBM Plex Sans, sans-serif" font-size="10" fill="var(--muted)">moving jaw</text>
+                <path d="M60 128 H180" stroke="var(--fg)" stroke-width="1" marker-end="url(#a)"/><text x="120" y="142" text-anchor="middle" font-family="IBM Plex Sans, sans-serif" font-size="10" fill="var(--fg)">X runs between the jaws</text>
+                <path d="M232 100 V60" stroke="var(--fg)" stroke-width="1"/><text x="236" y="80" font-family="IBM Plex Sans, sans-serif" font-size="10" fill="var(--fg)" transform="rotate(90 236 80)">Y</text>
+                <defs><marker id="a" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto"><path d="M0 0 L6 3 L0 6 Z" fill="var(--fg)"/></marker></defs>
+              </svg>
+              <p class="hint">Top view. The fixed jaw is on the left; the blank sits on the soft jaws' ledge.</p>
+            </div>
+          </div>
+        </div>
+        <div class="mf"><span class="btn">← Back</span><span class="btn primary">Next: operation →</span></div>
+      </div></div>
+    </div>
+    <aside class="notes"><h3>Replaces</h3>
+      <ul><li>“◉ Vise ○ Rotary chuck — A rotary chuck is asked about here but not yet offered.” A disabled option needs no sentence; it carries its reason.</li><li>“● vise-default Vise dimensions: shipped defaults (reference unit).” in operator text, and the same line again as a warning in the panel's findings.</li><li>“X runs between the vise jaws. The fixed jaw is on the left.” under the stock in the panel; the jaws drawn three times the blank's size in the viewport.</li></ul>
+      <h3>Audit</h3><p>A10 · B4 · B12 · B16</p><h3>Work item</h3><p class="issue">#684</p>
+    </aside>
+  </div>
+</section>
+
+<!-- ============ STATION 4: operation ============ -->
+<section id="operation">
+  <div class="head"><span class="eyebrow">Station 4</span><h2>Step 4 of 4 · What are you cutting?</h2><p class="lede">The fourteen operations of the matrix in four groups. The chosen one asks for the single thing it needs, here the text. The same picker is the panel's “Add operation”.</p></div>
+  <div class="station">
+    <div class="screen"><div class="bar"><span class="dots"><i></i><i></i><i></i></span><span class="ttl">New cutting job</span></div>
+      <div class="backdrop"><div class="modal">
+        <div class="mh"><span class="step">Step 4 of 4</span><h3>What are you cutting?</h3><span class="x">Close ✕</span></div>
+        <div class="mb">
+          <div class="ops">
+            <div class="g"><span>Engrave &amp; carve</span><div class="chips"><span class="chip on">Engrave text</span><span class="chip">V-carve</span><span class="chip">V-carve, variable depth</span><span class="chip">Inlay</span><span class="chip">Texture</span><span class="chip">Flute</span><span class="chip">Prism</span></div></div>
+            <div class="g"><span>Cut away</span><div class="chips"><span class="chip">Pocket</span><span class="chip">Profile</span><span class="chip">Chamfer</span><span class="chip">3D shape</span></div></div>
+            <div class="g"><span>Holes</span><div class="chips"><span class="chip">Hole</span><span class="chip">Bore to size</span><span class="chip">Thread</span></div></div>
+            <div class="g"><span>3D</span><div class="chips"><span class="chip">Surface a mesh</span><span class="hint">a whole-job operation; it starts an empty job</span></div></div>
+          </div>
+          <div style="border-top:1px solid var(--line);padding-top:12px" class="frow">
+            <label>Engrave text</label><div class="v"><span class="in" style="min-width:200px"><b>Zoomba</b></span><span class="in"><span class="u">depth</span><span class="n">0.5</span><span class="u">mm</span></span><span class="in sel">Inter</span></div>
+          </div>
+        </div>
+        <div class="mf"><span class="btn">← Back</span><span class="btn primary">Create the job</span></div>
+      </div></div>
+    </div>
+    <aside class="notes"><h3>Replaces</h3>
+      <ul><li>Fourteen equal cards with no groups, no selection state and no Next, arriving where “Next: mount” was promised.</li><li>Picking Engrave silently adds <q>New text</q> at 0.5 mm with a warning triangle. The one thing an engraving needs is the text.</li><li>The panel's second vocabulary under “More kinds and imports” (<q>combined: Border Frame Cut-away · single-line: · holes: Hole array · 3D: Box Cylinder Cone Sphere · cut-outs: Cut out</q>): Circle/Slot/Polygon are Pocket shapes, Line is Engrave, Hole array is a Hole option, Cut out is Profile, the primitives are “3D shape”.</li><li>The Voids block with four buttons above the Items: collapsed at 0, opened by its own +.</li></ul>
+      <h3>Audit</h3><p>A10 · E3 · B6 · B5</p><h3>Work item</h3><p class="issue">#685</p>
+    </aside>
+  </div>
+</section>
+
+<!-- ============ STATION 5: design ============ -->
+<section id="design">
+  <div class="head"><span class="eyebrow">Station 5</span><h2>Design</h2><p class="lede">The panel after the redesign: three groups, a sticky footer, one file bar. The recommendation is applied and named. Generate says what blocks it, at the button, with the fix.</p></div>
+  <div class="station">
+    <div class="screen"><div class="bar"><span class="dots"><i></i><i></i><i></i></span><span class="ttl">Case Maker · CNC</span></div>
+      <div class="panel">
+        <div class="filebar"><span class="name">Zoomba badge</span><span class="hint">saved <span class="mono">09:14</span> ▾</span><span class="hint muted">Save · Save as… · Open…</span><span class="seg"><span class="on">Design</span><span>Cut</span></span></div>
+        <div class="grp"><div class="gh">Job<span class="tog">▾</span></div><div class="gb">
+          <div class="line"><span class="muted">Stock</span><b>plate</b><span class="mono">76.2 × 38.1 × 3.81 mm</span>· PLA · as bought<span class="act">edit</span></div>
+          <div class="line"><span class="muted">Items (1)</span><span class="act btn ghost" style="padding:2px 8px">+ Add operation ▾</span></div>
+          <div class="item"><span class="muted">▸</span><span class="ic">T</span><div><div><b>Engrave “Zoomba”</b></div><div class="meta">Engrave text · <span class="mono">0.5 mm</span> deep · 1 mm flat end</div></div><span class="muted">⋯</span></div>
+          <div class="line hint"><span>▸ Voids under the face (0)</span><span>▸ Target object (0)</span></div>
+        </div></div>
+        <div class="grp"><div class="gh">Cutter<span class="tog">▾</span></div><div class="gb">
+          <div class="line"><b>⌀ 1 mm flat end</b><span class="mono muted">· 7 mm flute</span><span class="tag">recommended</span><span class="act">change</span></div>
+          <div class="line hint">Cutting — Makera's catalogue row for PLA: <span class="mono">12 000 rpm · 500 mm/min · 0.25 mm per pass</span><span class="act">Technical</span></div>
+        </div></div>
+        <div class="grp"><div class="gh">Hold<span class="tog">▸</span></div><div class="gb"><div class="line hint">Vise · shipped defaults · the blank on the ledge, <span class="mono">0.71 mm</span> proud<span class="act">edit</span></div></div></div>
+        <div class="footer">
+          <div class="twostate"><span class="cap">when blocked</span>
+            <div class="block"><span class="btn disabled">Generate</span><span><b>No feeds for the 90° chamfer bit on PLA.</b> Choose a flat end mill.</span><span class="btn ghost" style="margin-left:auto">Fix →</span></div></div>
+          <div class="twostate"><span class="cap">when it generates</span>
+            <div class="line"><span class="btn primary big">Generate</span><span class="hint">1 note <span class="act" style="margin-left:6px">show</span></span></div>
+            <div class="ticks"><span>generated</span><span>verified</span><span>simulated</span><span>matches the design</span><span class="mono" style="margin-left:auto">about 2 min 16 s</span></div></div>
+        </div>
+      </div>
+    </div>
+    <aside class="notes"><h3>Replaces</h3>
+      <ul><li>Title <q>Cut</q> · tabs · a <q>Cut this blank</q> headline button · <q>Save job · Save job as… · Open job…</q> under the top bar's <q>Save · Load · New · Export…</q> · “the job file is the owner — the package, the run log and the sources live in it, not in this browser.”</li><li>Grey <q>typed</q> chips on the three numbers the operator typed thirty seconds ago; a two-line Facing paragraph on plastic; Depth margins as two engineering sentences.</li><li>A ~160-entry flat cutter select; <q>Recommended… [Use it]</q> for the cutter already selected; <q>Why? — 160 cutters considered</q> listing “not a flat end mill” against ball noses named “flat end”.</li><li>Generate disabled with <q>Fix the errors above first.</q> beside <q>0 errors</q>; three paragraphs of Checked / Not checked under the button; <q>~2:16</q> here and <q>3:40</q> in the simulator.</li></ul>
+      <h3>Rules</h3><ul><li>One display name form for a cutter, everywhere: <span class="mono">⌀ 3.175 mm flat end · 12 mm flute</span>.</li><li>A disabled Generate carries the sentence that unblocks it and a Fix link.</li><li>The clearance acknowledgement moves to Cut step 1; the oracle numbers to Simulate.</li></ul>
+      <h3>Audit</h3><p>B1 B2 B4 B5 B7 B8 B9 B10 B11 B12 B13 B14 B15 D2 D4</p><h3>Work items</h3><p class="issue">#686 panel · #687 cutters · #688 Generate · #691 Simulate</p>
+    </aside>
+  </div>
+</section>
+
+<!-- ============ STATION 6: cut ============ -->
+<section id="cut">
+  <div class="head"><span class="eyebrow">Station 6</span><h2>Cut</h2><p class="lede">The one cut flow. The strip is the machine's one home. Four lines; the open step is the only one with a body, one sentence and one action.</p></div>
+  <div class="station">
+    <div class="screen"><div class="bar"><span class="dots"><i></i><i></i><i></i></span><span class="ttl">Case Maker · CNC</span></div>
+      <div class="panel">
+        <div class="filebar"><span class="name">Zoomba badge</span><span class="hint">saved <span class="mono">09:16</span> ▾</span><span class="seg"><span>Design</span><span class="on">Cut</span></span></div>
+        <div class="strip"><span>Zoomba</span><span>192.168.10.43</span><span class="state"><span class="dot ok"></span>Online · Idle · homed</span><span>T1 ⌀ 1 mm flat end</span><span>vacuum off</span><span style="margin-left:auto">work light ○</span></div>
+        <div class="steps">
+          <div class="cstep done"><span class="m">✓</span><div class="t"><b>1 Checked</b><span class="meta">1 program · <span class="mono">2 min 16 s</span> · 1 note · clearance acknowledged</span><span class="act" style="margin-left:auto">details</span></div></div>
+          <div class="cstep done"><span class="m">✓</span><div class="t"><b>2 Frozen</b><span class="meta"><span class="mono">09:16</span> · the programs match the design</span></div></div>
+          <div class="cstep now"><span class="m">3</span><div class="t"><b>Register the blank</b><span class="meta">left edge, then the top face · 4 touches</span></div>
+            <div class="acts"><span class="check">I am at the machine, the probe is fitted</span><span class="btn primary">Start registering</span></div></div>
+          <div class="cstep"><span class="m">4</span><div class="t"><b>Run</b><span class="meta">vacuum on · fit the 1 mm flat end · <span class="mono">2 min 16 s</span></span><span class="act" style="margin-left:auto">the plan</span></div></div>
+        </div>
+        <div style="padding:10px 16px" class="hint">← Back to design</div>
+      </div>
+    </div>
+    <aside class="notes"><h3>Replaces</h3>
+      <ul><li>The full-page seven-step <q>Cut this blank</q> wizard whose step 1 dumps the Manage › Machines card inline (“Case Maker build a22d782d”, “My shop default namelocation location.json · created…”, a stray bed thumbnail).</li><li>The freeze box that says the same thing twice; step 3 saying both “left edge, then the top face” and “This job has no saved setup yet”; step 4's “the release flow” and “manual upload”.</li></ul>
+      <h3>Mapping</h3><p>The seven designed steps are these four lines: 1 Machine = the strip · 2 Blank and cutter = Checked · 3–5 = Frozen · 6 = Register · 7 = Run.</p>
+      <h3>Audit</h3><p>C1 · C2 · C3 · B14</p><h3>Work item</h3><p class="issue">#689</p>
+    </aside>
+  </div>
+</section>
+
+<!-- ============ vocabulary ============ -->
+<section id="words">
+  <div class="head"><h2>One vocabulary</h2><p class="lede">The words every screen uses, and the ones they stop using.</p></div>
+  <div class="scroll"><table class="tbl">
+    <thead><tr><th>Thing</th><th>Say</th><th>Not</th></tr></thead>
+    <tbody>
+      <tr><td>the mode</td><td>Design · Cut</td><td><span class="not">Cut</span> as a rail label, a panel title, a headline button</td></tr>
+      <tr><td>the item</td><td>operation (Engrave text, Pocket, Hole…)</td><td><span class="not">kind</span> · <span class="not">shape</span> · <span class="not">trace</span> · <span class="not">label</span></td></tr>
+      <tr><td>stock size</td><td>length X · width Y · thickness Z, <span class="mono">mm</span> on each</td><td><span class="not">L (X) · W (Y) · T</span></td></tr>
+      <tr><td>stock form</td><td>Plate · Block · Sheet · Printed · Disc · Rod, each with its sentence</td><td><span class="not">plate block sheet</span> unexplained</td></tr>
+      <tr><td>a cutter</td><td><span class="mono">⌀ 3.175 mm flat end · 12 mm flute</span> (+ a <span class="tag grey">metal</span> tag)</td><td><span class="not">3.175*12mm Flat End(Metal)</span> · <span class="not">3.17</span> · <span class="not">chamfer (Chamfering Bit…)</span></td></tr>
+      <tr><td>provenance</td><td>one sentence in the Technical fold: “typed by you 09:12”, “Makera's catalogue row”</td><td>a grey <span class="not">typed</span> chip on every field</td></tr>
+      <tr><td>a refusal</td><td>the sentence and the fix, at the control</td><td><span class="not">Fix the errors above first.</span></td></tr>
+      <tr><td>numbers</td><td>≤ 3 decimals, trailing zeros dropped, unit after</td><td><span class="not">1.42875 mm</span> · <span class="not">0.0000 mm²</span></td></tr>
+      <tr><td>codes</td><td>none on screen</td><td><span class="not">#218</span> · <span class="not">#191</span> · <span class="not">vise-default</span> · <span class="not">reference unit</span></td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<!-- ============ remove / move / keep ============ -->
+<section id="verdicts">
+  <div class="head"><h2>Remove · move · keep</h2></div>
+  <div class="three">
+    <div class="rm"><h3>Remove</h3><ul><li>The second modal and its numbering</li><li>The full-page Cut-this-blank wizard and its inline Machines card</li><li>“Use the badge blank” headline; the template cards in the stock step</li><li>The disabled-rotary sentence; <q>New text</q></li><li>Checked / Not checked paragraphs under Generate</li><li>Issue numbers and codes in text</li><li>The project Save/Load/New/Export on CNC pages</li></ul></div>
+    <div class="mv"><h3>Move</h3><ul><li>The fourteen-type picker → step 4 and “Add operation”, grouped</li><li>The machine check → the strip</li><li>The oracle numbers → Simulate</li><li>The clearance acknowledgement → Cut step 1</li><li>“X runs between the jaws” → the Holding picture</li><li>Provenance → one sentence in the Technical fold</li></ul></div>
+    <div class="kp"><h3>Keep</h3><ul><li>The gate and its four ticks</li><li>The registration plan and its words</li><li>The run sheet</li><li>Every refusal's sentence (in its new place)</li><li>The matrix's fourteen operation names</li><li>Every testid the panel redesign kept</li><li>The engine: nothing here changes a toolpath</li></ul></div>
+  </div>
+</section>
+
+<!-- ============ acceptance ============ -->
+<section id="acceptance">
+  <div class="head"><h2>Acceptance, when built</h2></div>
+  <ol class="acc">
+    <li><span>A new operator on this house, with no machine on the network, reaches a generated, verified, simulated engraving of their own text from the door in <b>under two minutes and eight clicks</b>, changing no default, and never sees a disabled control without its reason.</span></li>
+    <li><span>Every screen has exactly one step counter: “Step n of 4” in the wizard, “1–4” in Cut.</span></li>
+    <li><span>The walk-through transcripts contain no <span class="mono">#\d</span>, no <span class="mono">-default</span> or <span class="mono">-refused</span> tokens, no vendor label as a cutter name, no field without a unit, no decimal beyond three places.</span></li>
+    <li><span>The built flow's captures match these mockups screen for screen.</span></li>
+  </ol>
+</section>
+
+<!-- ============ work items ============ -->
+<section id="work" class="work">
+  <div class="head"><h2>Work items</h2><p class="lede">One issue per screen or area, the audit ids inside each. All thirteen are gated on this design.</p></div>
+  <p class="gate"><b>Gate.</b> Nothing is implemented until the maintainer approves this flow and these mockups on #679. After approval the slices are assigned in the order below; #692 lands last and closes the umbrella.</p>
+  <div class="scroll"><table class="tbl">
+    <thead><tr><th>Issue</th><th>Screen or area</th><th>Audit ids</th></tr></thead>
+    <tbody>
+      <tr><td><a href="https://github.com/SlyWombat/CaseMaker/issues/681">#681</a></td><td>One wizard, one numbering: “Step n of 4”</td><td class="mono">A1 B3 A10 E1</td></tr>
+      <tr><td><a href="https://github.com/SlyWombat/CaseMaker/issues/680">#680</a></td><td>The door: “Start a cutting job”, recent and starter jobs</td><td class="mono">A2 A6 B4 E1 E2</td></tr>
+      <tr><td><a href="https://github.com/SlyWombat/CaseMaker/issues/682">#682</a></td><td>Step 1 Machine: the house machine, checked on open</td><td class="mono">A3 E4 C3</td></tr>
+      <tr><td><a href="https://github.com/SlyWombat/CaseMaker/issues/683">#683</a></td><td>Step 2 Stock: grouped materials, forms as pictures, X·Y·Z mm, round stock</td><td class="mono">A4 A5 A7 A8 A9 E2</td></tr>
+      <tr><td><a href="https://github.com/SlyWombat/CaseMaker/issues/684">#684</a></td><td>Step 3 Holding: the mount the stock calls for, orientation picture</td><td class="mono">A10 B4 B12 B16</td></tr>
+      <tr><td><a href="https://github.com/SlyWombat/CaseMaker/issues/685">#685</a></td><td>Step 4 Operation: grouped picker that asks for the text</td><td class="mono">A10 E3 B6 B5</td></tr>
+      <tr><td><a href="https://github.com/SlyWombat/CaseMaker/issues/688">#688</a></td><td>Generate names its blocker (the dead end)</td><td class="mono">B9 B14 B15 B10</td></tr>
+      <tr><td><a href="https://github.com/SlyWombat/CaseMaker/issues/686">#686</a></td><td>Design panel: Job · Cutter · Hold, sticky footer, one file bar</td><td class="mono">B1 B2 B4 B5 B7 B11 B12 B13 D2 D4</td></tr>
+      <tr><td><a href="https://github.com/SlyWombat/CaseMaker/issues/687">#687</a></td><td>Cutters: one display name, grouped list, actionable Why?</td><td class="mono">B8 D5 D3</td></tr>
+      <tr><td><a href="https://github.com/SlyWombat/CaseMaker/issues/689">#689</a></td><td>Cut mode is the one cut flow; the Cut-this-blank page goes</td><td class="mono">C1 C2 C3 B14</td></tr>
+      <tr><td><a href="https://github.com/SlyWombat/CaseMaker/issues/691">#691</a></td><td>Simulate: display names; the oracle and “not checked” live here</td><td class="mono">D5 B14 B15</td></tr>
+      <tr><td><a href="https://github.com/SlyWombat/CaseMaker/issues/690">#690</a></td><td>Language sweep: no codes, units everywhere, ≤ 3 decimals, one casing</td><td class="mono">D1 D3 D4 B7 B10 C1</td></tr>
+      <tr><td><a href="https://github.com/SlyWombat/CaseMaker/issues/692">#692</a></td><td>Acceptance e2e spec; lands last, closes #679</td><td class="mono">all</td></tr>
+    </tbody>
+  </table></div>
+  <p class="hint">Sources: <span class="mono">docs/design/first-job-audit-2026-10-26.md</span> (the 45 findings with captures) · <span class="mono">docs/design/first-job-flow.md</span> (this design in text) · the walk-through captures in <span class="mono">docs/bench/img/2026-10-26-walkthrough/</span>.</p>
+</section>
+</div>

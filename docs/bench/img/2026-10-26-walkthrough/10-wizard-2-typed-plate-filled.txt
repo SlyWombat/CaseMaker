@@ -1,0 +1,58 @@
+Start a cutting job
+2 / 3
+Close
+Material — first, because it decides the feeds and which stock is on offer
+softwood
+hardwood
+MDF
+PLA
+PETG
+plastic (unspecified)
+ABS
+Acrylic
+PET
+ASA
+HIPS
+PA (nylon)
+PA-CF
+PA-GF
+PC
+PP
+TPU
+PVA
+Aluminium 6061
+Aluminium 7075
+Brass
+Copper
+On the shelf
+Type a piece
+Load STL / 3MF
+plate
+block
+sheet
+printed blank
+L (X)
+W (Y)
+T
+
+Rod, tube and disc are not offered: a job here cuts a rectangular block held in the vise, and round stock needs the rotary. Sphere stock is not offered at all.
+
+also put it on the shelf
+Finish
+rough (sawn, as bought)
+finished face
+printed
+not known
+
+Plate 76.2 × 38.1 × 3.81 mm of PLA, as typed.
+
+Facing: off by default — facing is not offered on PLA: a flat cutter smears a plastic top. The job starts with that answer and the Cut panel does not offer facing on this stock.
+
+Or start from a template — its blank becomes the stock, and the setup asks the rest.
+
+Name badge blank (two-colour)
+The 76 × 38 mm two-colour name-badge blank, ported from samples/badge-blank/make_badge.py: a magnet pocket in the back colour and a plain engraved face on the top colour. Engrave the name in the Engrave-text panel, then machine it on the CNC.
+Blank — just cut something
+A bare blank and nothing else: no enclosure, no board, no cavity, no lid. The project IS the stock you are about to machine. Engrave on it in the Engrave-text panel — text, shapes, drills, imported outlines — and simulate the result before the machine runs. For a two-colour badge with a magnet pocket, use the Name badge template instead.
+Back
+Next: mount

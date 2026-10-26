@@ -1,0 +1,252 @@
+Start a New Project
+
+Pick a board — its enclosure generates around the real connector and mounting-hole geometry. Import board JSON or add online sources to grow the library.
+
+🪚 Set up a cutting job…
+⛁ Sources ▸
+⤓ Import board JSON
+All · 31
+★ Quickstart
+My library · 0
+All manufacturers
+Adafruit Industries
+Arduino
+BeagleBoard.org
+Case Maker
+DOIT
+ElectricRV
+ELEGOO
+Espressif
+Guition
+M5Stack
+Micro:bit Educational Foundation
+NVIDIA
+PJRC
+Quindor / quinled.info
+Radxa
+Raspberry Pi Foundation
+Raspberry Pi Ltd
+Shenzhen Ailipu (ELP)
+Ubiquiti
+Waveshare
+NO BOARD? START FROM A PROJECT TYPE
+Mini rack — 10" network rack
+Parametric snap-together 10" mini rack for small network gear (emulates 'Mini Rack' by Meuon, Printables 1307276, CC-BY 4.0). Defaults match the original: 252 mm wide, 250 mm deep, 16 slots (~280 mm tall) on the universal 16.5 mm screw pitch — M5 cap screws clamp shelves/faceplates through the side panels and hold everything together. UNLIKE the original (Prusa XL only), every dimension here regenerates parametrically: shrink width/depth/slots to fit YOUR printer, and the fit checker names any part that still won't fit, even placed diagonally. Includes keystone patch plate, blank faceplates, short + long vented shelves, and a cable tray; optional wall mounting via gusseted screw ears or a french cleat. Screw holes, keystone jacks, and snap tabs never scale.
+~2400 MIN PRINT
+Protective case (waterproof, hinged, latched)
+Pelican-style protective enclosure with TPU gasket, piano-segmented hinge, two spring-cam latches, rugged corners, vertical ribs, and feet. Replace the empty interior with your host PCB after creating the project.
+~480 MIN PRINT
+Tool insert — pocketed plate
+A plate of round and hex pockets on a uniform centred grid, sized to your own tools — sockets, bits, wrenches, drivers. Starts as the 120 × 80 × 6 mm default with one pocket; add the rest in the Tool insert panel, which names any item the plate cannot hold. Plate width, depth, thickness, clearance, chamfer, floor and pitch gap are all yours to set.
+~75 MIN PRINT
+200 × 200 × 100 mm box
+Large general-purpose flat-lid box (~200 × 200 × 100 mm outer). No host board — drop in whichever boards / parts you want.
+~360 MIN PRINT
+Name badge blank (two-colour)
+The 76 × 38 mm two-colour name-badge blank, ported from samples/badge-blank/make_badge.py: a magnet pocket in the back colour and a plain engraved face on the top colour. Engrave the name in the Engrave-text panel, then machine it on the CNC.
+~35 MIN PRINT
+Blank — just cut something
+A bare blank and nothing else: no enclosure, no board, no cavity, no lid. The project IS the stock you are about to machine. Engrave on it in the Engrave-text panel — text, shapes, drills, imported outlines — and simulate the result before the machine runs. For a two-colour badge with a magnet pocket, use the Name badge template instead.
+~25 MIN PRINT
+Stacking toolbox
+A bin and a lid that register on each other with no connector at all: the bin's inset base drops into the module below and lands on a seating ledge inside it, so a stack comes out square with nothing to bolt. Modules of different heights still line up, and the bin's floor takes a drop-in hole grid for pegs and partitions. 300 × 200 mm is the classic euro-container footprint and prints on a small bed.
+~240 MIN PRINT
+Adafruit SHT31-D (STEMMA QT)
+Adafruit Industries
+25.4 × 17.78 mm
+★
+BUILT-IN
+CAD-verified
+Arduino GIGA R1 WiFi
+Arduino
+101.6 × 53.3 mm
+★
+BUILT-IN
+Arduino Nano ESP32
+Arduino
+45 × 18 mm
+BUILT-IN
+Arduino Uno R3
+Arduino
+68.6 × 53.4 mm
+★
+BUILT-IN
+BeagleBone Black
+BeagleBoard.org
+86.4 × 53.3 mm
+BUILT-IN
+ELEGOO ESP32 WROOM-32 (USB-C, 30-pin)
+ELEGOO
+52.5 × 29.2 mm
+BUILT-IN
+CAD-verified
+ELP-USBGS1200P01-H120 (AR0234 USB camera)
+Shenzhen Ailipu (ELP)
+38 × 38 mm
+★
+BUILT-IN
+Hand-measured
+ESP32-C61-DevKitC-1 (N8R2)
+Espressif
+25.4 × 51.8 mm
+★
+BUILT-IN
+Datasheet
+ESP32 DevKit V1 (30-pin)
+DOIT
+51.5 × 28.3 mm
+★
+BUILT-IN
+CAD-verified
+ESP32-S3-DevKitC-1 (44-pin)
+Espressif
+25.5 × 63.5 mm
+BUILT-IN
+Waveshare ESP32-S3-Touch-LCD-4.3B
+Waveshare
+112.4 × 75.1 mm
+★
+BUILT-IN
+Datasheet
+Generic Zero-sized board (blank)
+Case Maker
+65 × 30 mm
+BUILT-IN
+Guition JC4880P443C 4.3" ESP32-P4 panel (shelled)
+Guition
+117.01 × 69.41 mm
+★
+BUILT-IN
+Datasheet
+NVIDIA Jetson Nano Dev Kit (B01)
+NVIDIA
+100 × 80 mm
+BUILT-IN
+M5Stack Core2
+M5Stack
+54 × 54 mm
+BUILT-IN
+BBC micro:bit V2
+Micro:bit Educational Foundation
+51.6 × 42 mm
+BUILT-IN
+QuinLED-Dig-Octa (Brainboard-32-8L)
+Quindor / quinled.info
+150 × 105 mm
+BUILT-IN
+QuinLED-Dig-Quad (v3)
+Quindor / quinled.info
+100.56 × 48.21 mm
+BUILT-IN
+QuinLED-Dig-Uno (v3)
+Quindor / quinled.info
+48.52 × 39.37 mm
+BUILT-IN
+Radxa Dragon Q8B
+Radxa
+100.2 × 74.2 mm
+BUILT-IN
+CAD-verified
+Raspberry Pi 3 Model B+
+Raspberry Pi Foundation
+85 × 56 mm
+BUILT-IN
+Raspberry Pi 3 Model B
+Raspberry Pi Foundation
+85 × 56 mm
+BUILT-IN
+Raspberry Pi 4 Model B
+Raspberry Pi Foundation
+85 × 56 mm
+★
+BUILT-IN
+Raspberry Pi 5
+Raspberry Pi Ltd
+85 × 56 mm
+BUILT-IN
+Raspberry Pi Pico W
+Raspberry Pi Ltd
+51 × 21 mm
+BUILT-IN
+Raspberry Pi Pico (W)
+Raspberry Pi Ltd
+51 × 21 mm
+BUILT-IN
+Raspberry Pi Zero 2 W
+Raspberry Pi Ltd
+65 × 30 mm
+★
+BUILT-IN
+SlyTherm (ESP32-S3 4.3" + MSR-2 mmWave)
+ElectricRV
+142 × 75.1 mm
+★
+BUILT-IN
+Hand-measured
+Snap-fit test fixture
+Case Maker
+50 × 40 mm
+★
+BUILT-IN
+Teensy 4.1
+PJRC
+61 × 17.78 mm
+BUILT-IN
+Ubiquiti UniFi U7 Pro Outdoor (device shell)
+Ubiquiti
+170 × 208 mm
+★
+BUILT-IN
+QUICK START TEMPLATES
+Pi 4 server tray
+Pi 4B with hex-vent screw-down lid and 4 corner mounting tabs.
+~180 MIN PRINT
+Pi 4 with PoE+ HAT
+Pi 4B + PoE+ HAT, screw-down lid, slot ventilation.
+~210 MIN PRINT
+Pi Zero 2W tablet
+Pi Zero 2W + HyperPixel 4.0 in a recessed-bezel frame.
+~150 MIN PRINT
+Arduino DMX controller
+Arduino Uno R3 + CQRobot DMX MAX485 shield with screw-down lid.
+~200 MIN PRINT
+GIGA R1 + DMX shield
+Arduino GIGA R1 WiFi + CQRobot DMX shield, slot-vented screw-down lid.
+~240 MIN PRINT
+ESP32 dev tray
+ESP32 DevKit V1 in an open flat-lid tray for prototyping.
+~90 MIN PRINT
+ESP32-C61 dev tray
+ESP32-C61-DevKitC-1 (Wi-Fi 6, dual USB-C) in a press-fit flat-lid tray with both USB-C cutouts and back-wall clearance for the overhanging PCB antenna.
+~60 MIN PRINT
+SHT31-D sensor pod
+Adafruit SHT31-D (STEMMA QT) temperature/humidity breakout in a small vented snap-fit pod: hex vents on three faces so the sensor reads ambient air, side-wall cutouts for both STEMMA QT cables, screwless snap retention.
+~40 MIN PRINT
+ELP AR0234 camera enclosure
+ELP-USBGS1200P01-H120 (1080P global-shutter USB camera, 120° lens) in a screw-down enclosure with a lens lid hole and a USB-A pass-through cutout sized for the pigtail plug.
+~75 MIN PRINT
+ESP32-S3 4.3" touch panel
+Waveshare ESP32-S3-Touch-LCD-4.3B (4.3" 800x480 capacitive touch) in a screw-down bezel case: the lid frames the active-area window, with USB-C and the 16-position 3.5mm terminal block brought out to the edges.
+~150 MIN PRINT
+SlyTherm (4.3" touch + MSR-2 radar)
+ESP32-S3 4.3" touch panel extended with a snap-clip bay for a Seeed MSR-2 mmWave radar module held 10mm off the floor, radar facing out the front alongside the screen.
+~170 MIN PRINT
+Guition 4.3" panel — desk stand
+Desk stand for the Guition JC4880P443C (4.3" 480x800 ESP32-P4 touch panel in its vendor shell). Picture-frame plate the panel screws into on its four M2 bosses, leaning back 15° on a braced foot. No lid — the frame's open centre keeps the back USB-C ports and pin header reachable.
+~200 MIN PRINT
+Guition 4.3" panel — wall mount
+Wall mount for the Guition JC4880P443C. Two parts: a wall plate that screws to the drywall (open middle so the cable comes straight out of the wall, two counterbored screw holes), and a body that snaps onto it — four cantilever fingers on the plate click into windows in the body's shroud. The shroud houses the USB-C plug and wire slack.
+~260 MIN PRINT
+Guition 4.3" panel — wall shelf
+A wall shelf for the Guition JC4880P443C. One part: a back plate with a screw ear each side, a floor and two side walls that hold the finished module, and 45° lead-ins at the mouth so it drops in instead of catching. The module is not fastened — it nests, standing up with its face out and fully visible, and lifts straight out to service. The pocket is sized from the module's own envelope.
+~200 MIN PRINT
+UniFi U7 Pro Outdoor — bench stand
+Bench-test desk stand for the Ubiquiti UniFi U7 Pro Outdoor AP (1.2 kg). A column leaning back 12° carries a male T-bracket; the AP's rear mounting channel slides down onto it until the channel's closed top end seats — no screws, gravity holds it. Wide 12 mm foot with side gussets keeps the front-heavy unit from tipping. FIT WARNING: Ubiquiti publishes no dimensions for the rear channel, so the bracket profile ships with estimates. Before printing, caliper YOUR unit's channel: width behind the retention lips, opening between the lips, lip depth from the back face, total depth to the channel floor, channel length, and the distance from the AP's bottom edge up to the channel's closed end. First-print iteration expected.
+~420 MIN PRINT
+Snap-fit test cube
+Small ~60×50×12 mm test fixture for physically validating snap-fit cantilever geometry.
+~30 MIN PRINT
+
+Select a board to see its specs, connector inventory, and provenance.
+
+Double-click a card to create the project straight away. Boards marked ★ apply their curated quickstart recipe.

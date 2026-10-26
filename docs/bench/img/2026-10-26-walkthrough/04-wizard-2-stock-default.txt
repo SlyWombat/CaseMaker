@@ -1,0 +1,40 @@
+Start a cutting job
+2 / 3
+Close
+Material — first, because it decides the feeds and which stock is on offer
+softwood
+hardwood
+MDF
+PLA
+PETG
+plastic (unspecified)
+ABS
+Acrylic
+PET
+ASA
+HIPS
+PA (nylon)
+PA-CF
+PA-GF
+PC
+PP
+TPU
+PVA
+Aluminium 6061
+Aluminium 7075
+Brass
+Copper
+On the shelf
+Type a piece
+Load STL / 3MF
+
+Nothing in softwood on the shelf. Type the piece, and tick "put it on the shelf" to keep it.
+
+Or start from a template — its blank becomes the stock, and the setup asks the rest.
+
+Name badge blank (two-colour)
+The 76 × 38 mm two-colour name-badge blank, ported from samples/badge-blank/make_badge.py: a magnet pocket in the back colour and a plain engraved face on the top colour. Engrave the name in the Engrave-text panel, then machine it on the CNC.
+Blank — just cut something
+A bare blank and nothing else: no enclosure, no board, no cavity, no lid. The project IS the stock you are about to machine. Engrave on it in the Engrave-text panel — text, shapes, drills, imported outlines — and simulate the result before the machine runs. For a two-colour badge with a magnet pocket, use the Name badge template instead.
+Back
+Next: mount

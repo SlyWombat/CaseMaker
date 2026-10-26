@@ -1,0 +1,34 @@
+Set up this job
+1 / 2
+Close
+
+What are you cutting?
+
+Engrave
+Text, or single-stroke lines
+V-carve
+A region cut by the job’s V-bit
+V-carve (variable depth)
+The V follows the design’s width down to its centre
+Inlay
+A female pocket, and the male plug to glue into it
+Pocket
+A flat-bottomed region
+Profile
+A cut-out through the blank, held with tabs
+Chamfer the edge
+Break a profile’s or pocket’s edge at an angle
+Hole
+A hole, or a grid of them
+Bore to size
+A hole wider than the cutter, helixed down its wall
+Thread
+A milled internal thread
+Surface a mesh
+Rough and finish a goal mesh or picture
+Texture a surface
+A seeded pattern of short strokes over a region
+Flute along a line
+A groove that ramps in and out along its ends
+Raise a prism
+A shape standing on sloped sides, cut by the V-bit

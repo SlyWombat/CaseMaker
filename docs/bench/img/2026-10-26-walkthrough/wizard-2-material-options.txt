@@ -1,0 +1,22 @@
+softwood
+hardwood
+MDF
+PLA
+PETG
+plastic (unspecified)
+ABS
+Acrylic
+PET
+ASA
+HIPS
+PA (nylon)
+PA-CF
+PA-GF
+PC
+PP
+TPU
+PVA
+Aluminium 6061
+Aluminium 7075
+Brass
+Copper
