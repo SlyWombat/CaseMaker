@@ -13,6 +13,7 @@ import type { MachineObservation } from '@/platform/machineProbe';
 import type { PreflightHubReport } from '@/engine/cnc/preflight/hub';
 import type { PreflightRow } from '@/engine/cnc/preflight/types';
 import { setHouseClientLoader, type HouseCall, type HouseClient } from '@/platform/houseClient';
+import type { LocationView } from '@/platform/locationClient';
 import { setMachineUploadLoader } from '@/platform/machineUpload';
 import { programHash } from '@/platform/machineRun';
 import { StockItemSchema, type StockItem } from '@/platform/stockClient';
@@ -32,7 +33,8 @@ import type { SurfaceSpreadAssessment } from '@/engine/cnc/engrave/surfaceSpread
 import { useEngraveJobStore } from '@/store/engraveJobStore';
 import { useEngraveRunStore } from '@/store/engraveRunStore';
 import { resetRunConfirmStore } from '@/store/runConfirmStore';
-import { clearStoredBaseline, resetLocationStore } from '@/store/locationStore';
+import { clearStoredBaseline, resetLocationStore, useLocationStore } from '@/store/locationStore';
+import { resetMachineChange, useMachineChangeStore } from '@/store/machineChangeStore';
 import { resetManageMode, useManageModeStore } from '@/store/manageModeStore';
 import { resetStockStore, useStockStore } from '@/store/stockStore';
 import type { EngraveJob } from '@/types/engraveJob';
@@ -209,6 +211,35 @@ function machineObservation(): MachineObservation {
   };
 }
 
+/**
+ * #695 — a location whose machine has a vise profile and a rotary profile, with `active` one of
+ * them. The frozen job's setup mount is the vise, so the rotary-active record is the disagreement.
+ */
+function locationWith(active: 'vise' | 'rotary'): LocationView {
+  const placement = (mount: 'vise' | 'rotary') => ({
+    id: `pl-${mount}`,
+    fixture: `fx-${mount}`,
+    where: { kind: 'pins' as const, pins: mount, anchor: null },
+    count: null,
+    frame: null,
+    provenance: {},
+  });
+  return {
+    machines: [
+      {
+        id: 'machine-695',
+        address: { host: TARGET.host, port: TARGET.port },
+        bedProfiles: [
+          { id: 'bp-vise', placements: [placement('vise')], datums: {} },
+          { id: 'bp-rotary', placements: [placement('rotary')], datums: {} },
+        ],
+        activeBedProfileId: active === 'vise' ? 'bp-vise' : 'bp-rotary',
+      },
+    ],
+    accessories: [],
+  } as unknown as LocationView;
+}
+
 interface Props {
   job: EngraveJob;
   report: PreflightHubReport;
@@ -265,6 +296,7 @@ beforeEach(() => {
   useEngraveRunStore.getState().reset();
   resetLocationStore();
   clearStoredBaseline();
+  resetMachineChange();
   resetStockStore();
   resetManageMode();
   useStockStore.setState({ status: 'present', items: shelfItems, etag: '"s-1"' });
@@ -768,6 +800,51 @@ describe('#419 §3 the Cut surface', () => {
     fireEvent.click(accept);
     expect(accept.checked).toBe(true);
     expect((screen.getByTestId('engrave-upload') as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it('#695 — a frozen mount the machine no longer holds: step 1 offers the change, step 2 is stale', () => {
+    const job = defaultEngraveJob();
+    const pkg = frozen(job, [P1]);
+    // The package was frozen for the job's vise setup; the machine's active bed holds the rotary.
+    useLocationStore.setState({ status: 'ready', location: locationWith('rotary'), etag: '"loc-1"' } as never);
+    draw({ job, report: reportOf(), pkg, generated: generated([P1]) });
+
+    // Step 1 is the open step; its one sentence names the disagreement, with the one action.
+    expect(screen.getByTestId('engrave-cut-step-1-summary').textContent).toContain(
+      'the machine no longer holds the vise',
+    );
+    const sentence = screen.getByTestId('engrave-cut-mount-sentence').textContent ?? '';
+    expect(sentence).toContain('frozen for the vise');
+    expect(sentence).toContain('the rotary on the pins');
+
+    fireEvent.click(screen.getByTestId('engrave-cut-change-machine'));
+    const request = useMachineChangeStore.getState().request;
+    expect(useMachineChangeStore.getState().open).toBe(true);
+    expect(request.target).toBe('vise');
+    expect(request.forJob).toEqual({
+      name: job.name,
+      holding: 'frozen for the vise',
+      frozen: true,
+      frozenMount: 'vise',
+    });
+
+    // The package is not current: step 2 says stale and names the MACHINE, and it offers no
+    // re-freeze press — the job did not change, the machine did.
+    expect(screen.getByTestId('engrave-cut-step-2-summary').textContent).toContain('stale — freeze again');
+    const box = screen.getByTestId('engrave-package');
+    expect(box.dataset.state).toBe('stale');
+    expect(box.textContent).toContain('the machine no longer holds the vise');
+    expect(screen.queryByTestId('engrave-package-refreeze')).toBeNull();
+
+    // The wizard writes the vise back (the refresh re-renders from the record): both lines clear.
+    act(() => {
+      useLocationStore.setState({ location: locationWith('vise') });
+    });
+    expect(screen.queryByTestId('engrave-cut-mount')).toBeNull();
+    expect(screen.getByTestId('engrave-cut-step-2-summary').textContent).toContain(
+      'the programs match the design',
+    );
+    expect(screen.getByTestId('engrave-package').dataset.state).toBe('current');
   });
 });
 

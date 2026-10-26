@@ -51,7 +51,7 @@ import { jobMachine } from '@/engine/cnc/calibration';
 import { jobTool, toSetup } from '@/engine/cnc/engrave/jobSetup';
 import { flatEndMill } from '@/engine/cnc/tool';
 import { useSettingsStore } from '@/store/settingsStore';
-import { finishedProgramsFor } from '@/store/locationStore';
+import { finishedProgramsFor, useLocationStore } from '@/store/locationStore';
 import type { RunContext } from '@/store/machineRunStore';
 import { useEngravePackageStore } from '@/store/engravePackageStore';
 import { useEngraveRegistrationStore, useFirstRegistration, useSurfaceSpread } from '@/store/engraveRegistrationStore';
@@ -62,6 +62,13 @@ import { domeAcceptSentence, surfaceTiltWords } from '@/engine/cnc/engrave/surfa
 import { useShopDefaultsStore } from '@/store/shopDefaultsStore';
 import { useStockStore } from '@/store/stockStore';
 import type { LaserLift } from '@/platform/machineLaser';
+import {
+  MACHINE_MOUNT_WORDS,
+  activeMountOf,
+  profileHolds,
+  type MachineMountKind,
+} from '@/platform/machineChange';
+import { openMachineChange } from '@/components/machine-change';
 import { EngravePreflight } from './EngravePreflight';
 import { EngraveMachineUpload } from './EngraveMachineUpload';
 import { EngraveReleaseStep } from './EngraveReleaseStep';
@@ -81,6 +88,37 @@ const BOX: CSSProperties = {
   borderRadius: 4,
   background: '#1b2027',
 };
+
+/**
+ * #695 — the job's own words for the mount its package was frozen for. The job model's mounts are
+ * the setups engine's (`vise`/`bracket`/`tape`); `rotary` is accepted because the machine-change
+ * request can carry it even though today's job cannot state it.
+ */
+function jobMountWords(kind: string | null | undefined): string {
+  switch (kind) {
+    case 'vise':
+      return 'the vise';
+    case 'rotary':
+      return 'the rotary';
+    case 'bracket':
+      return 'the bracket and clamps';
+    case 'tape':
+      return 'tape';
+    default:
+      return 'mount';
+  }
+}
+
+/**
+ * #695 — the mount the wizard should put on the machine for this frozen job. A bracket and tape
+ * both need the pins clear (the bracket's anchors and the taped blank sit on the bare bed), so
+ * both ask the wizard for `bed`; the wizard's kinds are the pins states, not the job's wording.
+ */
+function mountTargetFor(kind: string | null | undefined): MachineMountKind | undefined {
+  if (kind === 'vise' || kind === 'rotary' || kind === 'bed') return kind;
+  if (kind === 'bracket' || kind === 'tape') return 'bed';
+  return undefined;
+}
 
 /** #524/#689 — one numbered checklist step: a one-line summary that is always visible, its state
  *  in the marker (✓ done, ● the step the operator is on, ○ still to come), and a body. Only the
@@ -203,6 +241,9 @@ export function EngraveCutSurface({
   const openManage = useManageModeStore((s) => s.openManage);
   const shelfItems = useStockStore((s) => s.items);
   const defaults = useShopDefaultsStore((s) => s.defaults);
+  // #695 — the machine RECORD (not the LAN observation): the bed profile the wizard writes is the
+  // one the job's frozen mount is checked against.
+  const locationMachine = useLocationStore((s) => s.location?.machines[0] ?? null);
   const [overrides, setOverrides] = useState<FeatureOverrides>({});
   const [freezeError, setFreezeError] = useState<string | null>(null);
   const [refreezing, setRefreezing] = useState(false);
@@ -313,6 +354,28 @@ export function EngraveCutSurface({
 
   const green = report.firstBlocking === null;
   const staleness = pkg === null ? null : packageStaleness(pkg, job);
+  // #695 — THE FROZEN JOB'S MOUNT, AGAINST THE MACHINE'S ACTIVE BED. The package stores the
+  // setup's mount (`JobSetup.mount`); the machine record's active profile either holds it or does
+  // not, read by the SAME predicate #693's wizard uses (`profileHolds`). A package whose mount has
+  // gone must not read as current: step 1 names the disagreement with the one action that can fix
+  // it, and step 2 treats the package as stale. With no location read there is no profile to
+  // judge, and nothing is claimed.
+  const frozenMount = pkg?.setups[0]?.mount.kind ?? null;
+  const activeProfile =
+    locationMachine === null
+      ? null
+      : ((locationMachine.bedProfiles ?? []).find((p) => p.id === locationMachine.activeBedProfileId) ?? null);
+  const mountMismatch =
+    pkg !== null && frozenMount !== null && activeProfile !== null && !profileHolds(activeProfile, frozenMount);
+  // The machine's own words for what it holds now, for step 1's sentence and the record it asks
+  // the wizard to change ("Nothing on the pins" reads as "nothing on the pins" mid-sentence).
+  const machineNow = locationMachine === null ? null : MACHINE_MOUNT_WORDS[activeMountOf(locationMachine)];
+  const machineNowWords =
+    machineNow === null
+      ? null
+      : machineNow === 'Nothing on the pins'
+        ? 'nothing on the pins'
+        : `the ${machineNow.toLowerCase()}`;
   const packageCurrent = pkg !== null && staleness?.stale === false;
   const reports = useMemo(() => reportsByHash(generated), [generated]);
   const surfaceChecks = useMemo(() => surfaceChecksByHash(generated), [generated]);
@@ -492,9 +555,11 @@ export function EngraveCutSurface({
   // #689 — THE FOUR-LINE FLOW: ✓ 1 Checked · ✓ 2 Frozen · ● 3 Register the blank · ○ 4 Run.
   // `checked` is the gate PLUS the clearance acknowledgement that now lives in step 1. A stale
   // package is step 2's business, not a reason to hold step 1 open: with the gate clear otherwise,
-  // step 1 is done and step 2 is the one that opens for the re-freeze press.
-  const checked = (green || onlyPackageStale) && (!ackRequired || acknowledged);
-  const frozen = packageCurrent;
+  // step 1 is done and step 2 is the one that opens for the re-freeze press. #695 — a frozen
+  // mount the machine no longer holds is step 1's business: its sentence and action live there,
+  // so step 1 stays open until the machine is right; step 2 reads the same fact as stale.
+  const checked = (green || onlyPackageStale) && (!ackRequired || acknowledged) && !mountMismatch;
+  const frozen = packageCurrent && !mountMismatch;
   const registrationPlan = job.setups?.[0]?.registration?.plan ?? null;
   // A registration is a measurement on THIS machine; with no machine connected, a record for this
   // job still says the blank was registered in this session.
@@ -523,7 +588,9 @@ export function EngraveCutSurface({
     ? null
     : pkg === null
       ? 'Freeze the job in step 2 before running it.'
-      : 'Freeze the job again in step 2 — it changed since it was frozen.';
+      : mountMismatch
+        ? `The machine no longer holds ${jobMountWords(frozenMount)} — use Change the machine… in step 1.`
+        : 'Freeze the job again in step 2 — it changed since it was frozen.';
 
   const programCount = generated?.programs.length ?? pkg?.programs.length ?? 0;
   const noteCount = report.rows.filter((row) => row.severity === 'info').length;
@@ -541,16 +608,18 @@ export function EngraveCutSurface({
   if (ackRequired) step1Meta.push(acknowledged ? 'clearance acknowledged' : 'clearance not acknowledged');
   const step1Summary = checked
     ? step1Meta.join(' · ') || 'clear'
-    : report.errorCount > 0
-      ? `${report.errorCount} blocking finding${report.errorCount === 1 ? '' : 's'}`
-      : ackRequired
-        ? 'clearance not acknowledged'
-        : 'clear';
+    : mountMismatch
+      ? `the machine no longer holds ${jobMountWords(frozenMount)}`
+      : report.errorCount > 0
+        ? `${report.errorCount} blocking finding${report.errorCount === 1 ? '' : 's'}`
+        : ackRequired
+          ? 'clearance not acknowledged'
+          : 'clear';
 
   const step2Summary =
     pkg === null
       ? 'not frozen yet'
-      : packageCurrent
+      : frozen
         ? `${clockOf(pkg.frozenAt)} · the programs match the design`
         : 'stale — freeze again';
 
@@ -583,11 +652,47 @@ export function EngraveCutSurface({
       ? null
       : `program ${missingReportIndex + 1} has no verifier report in this session; generate the job again before sending it`;
 
+  /** #695 — ask the wizard for the mount the frozen job needs. */
+  const changeMachineForMount = (): void => {
+    const targetMount = mountTargetFor(frozenMount);
+    openMachineChange({
+      ...(targetMount === undefined ? {} : { target: targetMount }),
+      forJob: {
+        name: job.name,
+        holding: `frozen for ${jobMountWords(frozenMount)}`,
+        frozen: true,
+        frozenMount,
+      },
+      // The wizard's `refreeze` is its copy of `!profileHolds(newProfile, frozenMount)`. This
+      // screen reads the record again rather than keeping a second copy: the refresh re-renders
+      // step 1's sentence and step 2's stale state from the new active profile.
+      onDone: () => void useLocationStore.getState().refresh(),
+    });
+  };
+
   return (
     <div data-testid="engrave-cut-surface">
       {/* #524/#689 — the Cut surface as a four-line checklist: Checked → Frozen → Register the
           blank → Run. Each line is one sentence; only the step the operator is on has a body. */}
       <Step number={1} title="Checked" done={checked} current={currentStep === 1} summary={step1Summary}>
+        {/* #695 — the frozen job's mount is gone from the machine. One sentence, one action; the
+            same check the wizard makes (`profileHolds`) decides whether this is here at all. */}
+        {mountMismatch && (
+          <div style={BOX} data-testid="engrave-cut-mount">
+            <p style={WARN} data-testid="engrave-cut-mount-sentence">
+              This job was frozen for {jobMountWords(frozenMount)}, and the machine now has{' '}
+              {machineNowWords ?? 'a different mount'}.
+            </p>
+            <button
+              type="button"
+              className="btn btn--sm"
+              data-testid="engrave-cut-change-machine"
+              onClick={changeMachineForMount}
+            >
+              Change the machine…
+            </button>
+          </div>
+        )}
         <EngravePreflight report={report} onBackToDesign={onBackToDesign} />
         {/* #689 — the clearance acknowledgement moved here from the Generate footer. It is the
             run gate's own flag; the sentence is the one the operator has always ticked. */}
@@ -611,7 +716,7 @@ export function EngraveCutSurface({
         <section
           style={BOX}
           data-testid="engrave-package"
-          data-state={pkg === null ? 'none' : packageCurrent ? 'current' : 'stale'}
+          data-state={pkg === null ? 'none' : frozen ? 'current' : 'stale'}
           data-key={pkg?.hash}
         >
           {pkg === null ? (
@@ -622,6 +727,13 @@ export function EngraveCutSurface({
             <p style={WARN} data-testid="engrave-package-state">
               The package of {clockOf(pkg.frozenAt)} is stale —{' '}
               {staleness?.reason ?? 'the job changed since it was frozen.'}
+            </p>
+          ) : mountMismatch ? (
+            // #695 — the job itself still matches the package; the MACHINE no longer holds the
+            // mount it was frozen for. The fix is step 1's action, not a re-freeze.
+            <p style={WARN} data-testid="engrave-package-state">
+              The package of {clockOf(pkg.frozenAt)} is stale — the machine no longer holds{' '}
+              {jobMountWords(frozenMount)} this job was frozen for. Change the machine in step 1.
             </p>
           ) : null}
           {reservation !== null && (
