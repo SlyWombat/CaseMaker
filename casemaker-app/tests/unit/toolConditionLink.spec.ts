@@ -104,7 +104,13 @@ describe('#454 the condition follows the physical cutter', () => {
     );
 
     const tools = [BUILTIN_31, ownedEntry('inv:worn', ownedWide)];
-    const rec = recommendTool(jobWithLabel(), tools, [], allRows, inventoryConditions());
+    // #699b — both entries are the same metal-line 3.175 mm bit, and the default blank is
+    // softwood: the job's own gate would exclude both before the condition table is read. This
+    // test is about the condition tie, not the material pair, so the operator's acknowledgement
+    // (#572) keeps the pair runnable.
+    const job = jobWithLabel();
+    job.metalLineOverride = true;
+    const rec = recommendTool(job, tools, [], allRows, inventoryConditions());
 
     // Both entries rank as worn, so the pick goes to the key order; what must not happen is the
     // built-in standing in as an untested cutter. Its summary names the shop's own copies, and

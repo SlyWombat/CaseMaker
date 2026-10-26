@@ -1024,6 +1024,11 @@ describe('engravePreview — the bench’s cutter conditions (#442)', () => {
     // summary is built by `toolCondition`'s own function — the very one `toolRegistryStore` fills the
     // lookup with — so this is not a hand-shaped summary that could differ from the app's.
     const job = dj();
+    // #699b — the only other built-in is the 3.175 mm metal-line flat, and the default blank is
+    // softwood: the job's own metal-line gate would refuse it before this test could see the
+    // fallback. This test is about the broken copy, not the material pair, so the operator's
+    // acknowledgement (#572) keeps the pair runnable; what is observed below is the fallback.
+    job.metalLineOverride = true;
     const summary = itemConditionSummary({
       id: job.toolKey,
       quantity: 1,
