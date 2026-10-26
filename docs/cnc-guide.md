@@ -418,8 +418,23 @@ section of the **same job document**, so a job can be put down and picked up at 
 
 A **new job starts with one question — what are you cutting?** — and the operation types are its
 answer: **Engrave** (text or single-stroke lines), **V-carve**, **Pocket**, **Profile**, **Hole**,
-**Thread**, or **Surface a mesh** (a goal STL/3MF). Every operation added afterwards is one row in
-the job's list, its type on the row, and its expert fields behind the row's fold.
+**Bore to size**, **Thread**, or **Surface a mesh** (a goal STL/3MF). Every operation added
+afterwards is one row in the job's list, its type on the row, and its expert fields behind the
+row's fold.
+
+**Bore to size (#668)** is the hole the box of bits cannot make: a **Hole** row whose width is the
+job's own — M3 to M6 clearance, a counterbore, a socket for a magnet — cut by helixing an end mill
+down the wall. Pick it and the row opens on the hole ⌀ (a clearance hole over the job's cutter, and
+any diameter wider than the cutter will do); the row's fold states the helix pitch, which is the
+tighter of the feeds row's step-down and the shop's `bore.rampAngleDeg`. The cut ramps down the
+wall a level at a time; at each level a spiral inward to the cutter's radius and a full hub lap
+clear the core BEFORE the next descent, so a hole wider than the cutter never leaves a standing
+centre — and a through hole is cleared to the blank's underside before the cutter crosses it, so
+no loose core is ever side-milled. The last level ends with a full-depth lap of the wall. Through
+or blind, with the Hole row's depth and through rules. A hole at or narrower
+than the cutter is refused (`bore-narrow`), a cutter that cannot ramp is refused by name
+(`bore-needs-end-mill`), and so is a bore with no diameter (`bore-no-diameter`). A counterbore over
+a pilot hole is a drill row and a blind bore row at the same position.
 
 A **region row** (Engrave text, V-carve, Pocket, an imported outline, a cuttable primitive) also
 carries its setup's **rest pass**: **Finish the corners with a smaller cutter** in the row's fold
@@ -1283,6 +1298,9 @@ simulation does report about one is the sweep's own list, next:
 | `released-onto-board` | warning | A cut-out has no holding tabs, so the part is freed onto the board at the end of the cut and held only by the tape, glue or screws that fixed the blank (#218). | Add holding tabs, or make sure the blank is held firmly enough that a released part cannot move. |
 | `loose-piece` | error | The through cuts leave a piece of the blank disconnected from the material the mount holds, so it can move under the cutter once freed (#218). | Leave a connecting bridge of material, move the cut away from the blank's edges, or add holding tabs. |
 | `drill-mixed-tools` | error | A drill bit is the cutter of a drill-only program, and the job (or the setup) assigns it work a drill cannot cut — a region, a trace or a thread. One program has one tool, and a drill bit cuts drilled holes only (#434). | Assign the other work to an end mill, or put it in its own setup. |
+| `bore-no-diameter` | error | A bore to size has no hole diameter stated. A bore makes the hole the job asks for, not the cutter's own width, so without the diameter there is nothing to helix the wall to (#668). | State the hole's diameter on the row. |
+| `bore-needs-end-mill` | error | A bore to size is cut by helixing an end mill down the wall of the hole, so a V-bit, a ball nose or a drill bit cannot make it (#668). | Choose a flat end mill for the job that bores. |
+| `bore-narrow` | error | A bore's hole is not wider than the cutter, so there is no centre path to helix on; the cut would just be a plunge hole the cutter's own width (#668). | Cut a bigger hole, or use a smaller cutter. |
 | `thread-wrong-tool` | error | The job has a thread, but the tool is not a thread mill. A thread is cut by orbiting a small cutter inside the pilot; a flat end mill cannot cut one (#445). | Pick a thread mill. |
 | `thread-mixed-tools` | error | The thread is enabled beside other work (a label, a shape, a trace, a drill). A thread program has ONE tool, and the toolpath has no way to describe a change part-way through. | Cut the thread in a program of its own, after the pilot and the other work. |
 | `thread-cutter-fit` | error | The thread mill's cutting diameter does not fit the thread: it is at least as wide as the thread's minor-diameter pilot (it cannot enter), or it spans less than the thread's radial depth, (major − minor) / 2, so the tooth cannot reach the major diameter (#445). | Use a thread mill narrower than the pilot and at least as wide as the radial depth. |

@@ -261,6 +261,8 @@ pub const UNMEASURED_SEEDS: &[(&str, f64, &str, &str)] = &[
     ("adaptive.stepDownMm", 1.0, "mm", "chosen, not measured: the deepest level adaptive clearing cuts at once"),
     ("adaptive.helixDiameterFraction", 0.5, "x", "chosen, not measured: the helix entry's diameter as a fraction of the cutter diameter; the helix is refused where its bore does not fit"),
     ("adaptive.rampAngleDeg", 2.0, "deg", "chosen, not measured: the descent angle of the helix and ramp entries"),
+    // #668 — the bore's helix angle, its own key (adaptive clearing is not wired; a bore runs today).
+    ("bore.rampAngleDeg", 2.0, "deg", "chosen, not measured: how steeply a bore's helix descends, its lead per revolution"),
     ("adaptive.cutFeed", 600.0, "mm/min", "placeholder, not measured; not a vendor number: the adaptive clearing feed until a measured row replaces it"),
     ("adaptive.entryFeed", 200.0, "mm/min", "placeholder, not measured; not a vendor number: the helix and ramp entry feed until a measured row replaces it"),
     ("adaptive.spindleRpm", 12000.0, "rpm", "placeholder, not measured; not a vendor number: the adaptive spindle speed until a measured row replaces it"),
@@ -1053,6 +1055,10 @@ fn known_rule(key: &str, n: Option<f64>) -> Option<Result<(), String>> {
             "0.1 to 0.95 diameters",
         )),
         "adaptive.rampAngleDeg" => Some(need(
+            n.is_some_and(|v| (0.5..=30.0).contains(&v)),
+            "0.5 to 30 degrees",
+        )),
+        "bore.rampAngleDeg" => Some(need(
             n.is_some_and(|v| (0.5..=30.0).contains(&v)),
             "0.5 to 30 degrees",
         )),

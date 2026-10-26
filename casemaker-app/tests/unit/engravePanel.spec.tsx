@@ -849,6 +849,44 @@ describe('EngravePanel — plunge drills (#260)', () => {
   });
 });
 
+// #668 — BORE TO SIZE: the picker's own type. A bore is the drill item with `mode: 'bore'` and a
+// stated hole diameter, so it adds from the same menu, opens on the hole ⌀ rather than the
+// cutter's width, and states the helix pitch the CAM will cut.
+describe('EngravePanel — bore to size (#668)', () => {
+  it('adds a bore at a clearance diameter and states its helix pitch', () => {
+    render(<EngravePanel />);
+    fireEvent.click(screen.getByTestId('engrave-add-bore'));
+    const drill = useEngraveJobStore.getState().job.drills![0]!;
+    expect(drill.mode).toBe('bore');
+    // The job's cutter is ⌀1 mm: a new bore is a clearance hole over it — ⌀2, not the cutter's own.
+    expect(drill.diameter).toBe(2);
+    expect(screen.getByTestId('engrave-drill-row-0')).toBeTruthy();
+    expect(screen.getByTestId('engrave-drill-row-0').textContent).toContain('Bore');
+    // The row's technical fold states the pitch the CAM uses, resolved from the feeds row and the
+    // shop's ramp angle.
+    const pitch = screen.getByTestId('engrave-drill-bore-pitch-0').textContent ?? '';
+    // Both of the pitch's sources, and where the shop's came from.
+    expect(pitch).toContain('per turn');
+    expect(pitch).toContain('step-down');
+    expect(pitch).toContain('ramp (fallback)');
+  });
+
+  it('writes the hole ⌀, and refuses a hole no wider than the cutter', () => {
+    render(<EngravePanel />);
+    fireEvent.click(screen.getByTestId('engrave-add-bore'));
+    fireEvent.change(screen.getByTestId('engrave-drill-diameter-0'), { target: { value: '4.5' } });
+    expect(useEngraveJobStore.getState().job.drills![0]!.diameter).toBe(4.5);
+    expect(screen.queryByTestId('engrave-drill-finding-0-bore-narrow')).toBeNull();
+
+    // ⌀1 against a ⌀1 cutter has no centre path: the finding names it and Generate is gated.
+    fireEvent.change(screen.getByTestId('engrave-drill-diameter-0'), { target: { value: '1' } });
+    expect(useEngraveJobStore.getState().job.drills![0]!.diameter).toBe(1);
+    const finding = screen.getByTestId('engrave-drill-finding-0-bore-narrow');
+    expect(finding.textContent).toContain('not wider than');
+    expect((screen.getByTestId('engrave-generate') as HTMLButtonElement).disabled).toBe(true);
+  });
+});
+
 // #434 — a drill bit is a DRILL-ONLY cutter: one program has one tool, and the bit cannot open a
 // region. The panel offers the registry's drill only when the job's cutting work is all holes, and
 // states the point angle (and where it came from) for the drill it has selected.

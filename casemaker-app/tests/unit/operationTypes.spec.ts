@@ -25,6 +25,7 @@ describe('#662 the operation types', () => {
       'pocket',
       'profile',
       'hole',
+      'bore',
       'thread',
       'surface',
     ]);
@@ -56,6 +57,10 @@ describe('#662 the operation types', () => {
     expect(operationTypeOfItem({ kind: 'cutout' }, 'pocket')).toBe('profile');
     expect(operationTypeOfItem({ kind: 'drill' }, 'pocket')).toBe('hole');
     expect(operationTypeOfItem({ kind: 'drill-array' }, 'pocket')).toBe('hole');
+    // #668 — a bore is the same item with `mode: 'bore'`: a hole whose width the job states, not
+    // the cutter's.
+    expect(operationTypeOfItem({ kind: 'drill', mode: 'bore' }, 'pocket')).toBe('bore');
+    expect(operationTypeOfItem({ kind: 'drill-array', mode: 'bore' }, 'pocket')).toBe('bore');
     expect(operationTypeOfItem({ kind: 'thread' }, 'pocket')).toBe('thread');
     // Not operations: a construction item, a kept-out void, an unknown kind.
     expect(operationTypeOfItem({ kind: 'rect', construction: true }, 'pocket')).toBeNull();
@@ -105,8 +110,11 @@ describe('#662 the operation types', () => {
       expect(addOperationOfType('pocket')).toBe('i2');
       expect(addOperationOfType('profile')).toBe('i3');
       expect(addOperationOfType('hole')).toBe('i4');
+      // #668 — Bore to size is the same `drill` item with the bore's mode; the store seeds the
+      // diameter (its own spec proves the value).
+      expect(addOperationOfType('bore')).toBe('i4');
       expect(addOperationOfType('thread')).toBe('i5');
-      expect(added).toEqual(['label', 'shape:rect', 'shape:rect', 'cutout', 'drill:drill', 'thread']);
+      expect(added).toEqual(['label', 'shape:rect', 'shape:rect', 'cutout', 'drill:drill', 'drill:drill', 'thread']);
     } finally {
       useEngraveJobStore.setState(before);
     }

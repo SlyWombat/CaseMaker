@@ -55,7 +55,8 @@ import {
 } from '@/engine/cnc/tool';
 import { threadMillIR, threadSettings, type ThreadMillPlan, type ThreadSettingsResult } from '@/engine/cnc/cam/threadMill';
 import { drillBitIR, drillSettings, type DrillBitPlan, type DrillSettings } from '@/engine/cnc/cam/drillBit';
-import type { ShopDefaults } from '@/platform/defaultsClient';
+import { borePitchMm, boreRampAngleFrom } from '@/engine/cnc/cam/drill';
+import { readDefault, type ShopDefaults } from '@/platform/defaultsClient';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import type { ConditionSummary } from '@/engine/cnc/toolCondition';
 import { type VCone } from '@/engine/cnc/vProfile';
@@ -359,6 +360,11 @@ export interface EngraveProgram {
    * as a whole (a job may cut its regions with one tool and its profiles with another).
    */
   through?: ThroughCutFacts | null;
+  /**
+   * #668 — the bore facts when THIS program helices a hole to size. Null on every other file: the
+   * run sheet's pitch step belongs to the program that cuts the wall, not to the run as a whole.
+   */
+  bore?: BoreProgramFacts | null;
 }
 
 /**
@@ -415,6 +421,34 @@ export interface ThroughCutFacts {
     spans: number;
     /** Tabs asked for but not placed; 0 on a run that reached CAM. */
     unplaceable: number;
+  }[];
+}
+
+/**
+ * #668 — what the BORES in one program cut, for the run sheet's pitch step. One entry per bore
+ * item, in document order, with the numbers the CAM ran it at. The pitch and the two numbers it
+ * was resolved from travel together, because the sheet's whole point is to say WHICH of them is
+ * binding: a helix capped by the feeds row's step-down is the row's number, and one capped by the
+ * ramp angle is the shop's.
+ */
+export interface BoreProgramFacts {
+  items: {
+    id: string;
+    name: string;
+    /** The hole's diameter, mm — what the bore asks for. */
+    holeDiameterMm: number;
+    /** The cutter's cutting diameter, mm. */
+    cutterDiameterMm: number;
+    /** The helix's centre-path radius: hole radius less cutter radius, mm. */
+    centreRadiusMm: number;
+    /** The helix's descent per revolution, mm — `min(step-down, 2π·Rc·tan(ramp angle))`. */
+    pitchMm: number;
+    /** The feeds row's step-down cap, mm — one of the pitch's two sources. */
+    stepDownMm: number;
+    /** The shop's ramp angle used, degrees — the pitch's other source. */
+    rampAngleDeg: number;
+    /** Where `rampAngleDeg` came from (`bore.rampAngleDeg`'s reading: seeded, chosen, fallback). */
+    rampSource: string;
   }[];
 }
 
@@ -539,6 +573,13 @@ export interface EngraveGenerated {
    * so the run sheet's tab-removal step describes the file that actually leaves the tabs.
    */
   through?: ThroughCutFacts | null;
+  /**
+   * #668 — what the BORES in this program cut: one entry per bore item, with the hole's diameter,
+   * the cutter's, and the helix pitch the CAM ran it at together with both numbers the pitch came
+   * from. Present only when the program carries a bore; absent/null everywhere else, so the run
+   * sheet's bore step describes the file that really helices and says nothing on any other.
+   */
+  bore?: BoreProgramFacts | null;
   /**
    * #535 — a PURE GOAL job's surfacing facts: the numbers the roughing/finishing passes ran with
    * and the heightfield they sampled. Present only on the goal path (a job whose only work is a
@@ -1314,7 +1355,17 @@ export function engraveRegions(
   const drillToolRadius =
     tool !== null && tool.shape === 'drill' ? (cuttingDiameter(tool) ?? 0) / 2 || null : null;
   for (const d of plan.drills) {
-    const drillRadius = radius ?? drillToolRadius;
+    // #668 — A BORE'S disc is the HOLE's, not the cutter's: the preview and the oracle see the
+    // cylinder the job asked for. A bore that states no diameter records itself as a bore at the
+    // cutter's radius, so the CAM refuses the pair by name rather than plunging a cutter-wide hole
+    // the job never asked for.
+    const boreRadius =
+      d.mode === 'bore'
+        ? d.diameter !== null && d.diameter > 0
+          ? d.diameter / 2
+          : (radius ?? drillToolRadius ?? 0)
+        : null;
+    const drillRadius = boreRadius ?? radius ?? drillToolRadius;
     const depth = d.through ? throughDepth : d.depth;
     regions.push({
       id: d.id,
@@ -1324,8 +1375,14 @@ export function engraveRegions(
       name: drillRadius === null ? d.name : `${d.name} ⌀${drillRadius * 2}`,
       depth,
       polygons: drillRadius === null ? [] : drillPolygons(tl, d.holes, drillRadius),
-      drill: { holes: d.holes.map(([x, y]) => [x, y] as [number, number]) },
-      ...(d.through ? { through: true as const } : {}),
+      drill: {
+        holes: d.holes.map(([x, y]) => [x, y] as [number, number]),
+        ...(boreRadius === null ? {} : { bore: { radius: boreRadius } }),
+      },
+      // #668 — a through bore's level list includes the BLANK's bottom, so it clears its core to
+      // the underside before the cutter crosses it (a level is added at `stockThickness`); no
+      // other cut reads it.
+      ...(d.through ? { through: true as const, stockThickness: job.stock.thickness } : {}),
     });
   }
 
@@ -2829,6 +2886,7 @@ function programOf(one: Omit<EngraveGenerated, 'programs'>, ref: JobProgramRef):
     drill: one.drill ?? null,
     finish: one.finish ?? null,
     through: one.through ?? null,
+    bore: one.bore ?? null,
   };
 }
 
@@ -3019,6 +3077,10 @@ function generateOneProgram(
       ? null
       : { stockToLeaveMm: shop.finish.stockToLeaveMm.value, mode: finishMode };
   let finishFacts: FinishPassFacts | null = null;
+  // #668 — the bore facts the run sheet prints: the pitch the CAM cut and both numbers it came
+  // from. Filled after the CAM succeeds, from the same `plan`, tool and feeds it ran with and the
+  // same `borePitchMm` it calls — one formula, one reading.
+  let boreFacts: BoreProgramFacts | null = null;
   // #432 — the facing depth the plan carries, or 0 when the job does not face. It decides whether
   // the facing artefact is built at all; it never touches the ENGRAVING program, which stays in the
   // document's frame (Z0 = the faced surface) because the re-touch re-zeros Z there between the two
@@ -3158,13 +3220,30 @@ function generateOneProgram(
     }
 
     // 3. the CAM core (#172), on the SAME opened polygons stage 1 measured.
+    // #668 — the shop's ramp angle for a bore's helix, read HERE (the worker's realm can resolve
+    // `readDefault` against the caller's defaults map, the `drillSettings` precedent) so the CAM
+    // and the run sheet's facts below take one number, not two resolutions. A job with no bore
+    // never reads it.
+    const boreRamp = readDefault(shop.defaults ?? null, 'bore.rampAngleDeg');
     try {
       // A job with no REGION item has nothing for the region CAM to open — and since #405 it must not
       // be handed an empty list either: a trace-only job can now reach this line with a CONE for a
       // tool, and `generateEngrave` refuses a V-bit by name (rightly: opening a region needs the
       // offset radius). The two CAMs return IRs describing the same machine state, so a job with no
       // regions simply IS the trace IR, and its `.nc` is unchanged.
-      const regionIr = regions.length === 0 ? null : generateEngrave(tl, regions, tool, resolved.params, mill.rapidEstimate, 'nearest', shop.peckClearanceMm ?? null, finishSpec);
+      const regionIr = regions.length === 0
+        ? null
+        : generateEngrave(
+            tl,
+            regions,
+            tool,
+            resolved.params,
+            mill.rapidEstimate,
+            'nearest',
+            shop.peckClearanceMm ?? null,
+            finishSpec,
+            boreRamp.value,
+          );
       // #287 — single-line traces (#219) are their own CAM: the cutter's centre follows the path,
       // so there is no region to open, no offset and no pocketing. They are appended AFTER the
       // region operations, so a trace can shift no pocket's ordering, and a job with none joins an
@@ -3213,6 +3292,32 @@ function generateOneProgram(
       }
     } catch (e) {
       return stop('cam', { feeds, message: e instanceof Error ? e.message : String(e) });
+    }
+
+    // #668 — what the bores in THIS program cut, for the run sheet's pitch step. The cutter radius
+    // is the one `generateEngrave` offsets by (`cuttingForTrace`'s flat radius, not a second
+    // reading of the tool), and the pitch is the same `borePitchMm` call the CAM makes.
+    const boreUsable = cuttingForTrace(tool);
+    const cutterRadius = boreUsable.ok && boreUsable.tool.shape === 'flat' ? boreUsable.tool.radius : null;
+    if (cutterRadius !== null) {
+      const rampAngleDeg = boreRampAngleFrom(boreRamp.value);
+      const items: BoreProgramFacts['items'] = [];
+      for (const d of plan.drills) {
+        if (d.mode !== 'bore' || d.diameter === null || !(d.diameter > 0)) continue;
+        const centreRadiusMm = d.diameter / 2 - cutterRadius;
+        items.push({
+          id: d.id,
+          name: d.name,
+          holeDiameterMm: d.diameter,
+          cutterDiameterMm: cutterRadius * 2,
+          centreRadiusMm,
+          pitchMm: borePitchMm(resolved.params.stepDown, centreRadiusMm, rampAngleDeg),
+          stepDownMm: resolved.params.stepDown,
+          rampAngleDeg,
+          rampSource: boreRamp.source,
+        });
+      }
+      if (items.length > 0) boreFacts = { items };
     }
   }
 
@@ -3414,6 +3519,7 @@ function generateOneProgram(
       drill: drillFacts,
       finish: finishFacts,
       through: cutoutFacts,
+      bore: boreFacts,
       cam,
       nc,
       verify,

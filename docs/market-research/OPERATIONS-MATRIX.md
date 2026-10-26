@@ -1,6 +1,6 @@
 # Operations matrix — CAM operation types across the category, and what Case Maker posts and offers
 
-Status as of 2026-10-25, Case Maker `main` 7bac458d (GitHub issue #663). Companion to
+Status as of 2026-10-25, Case Maker `main` ebd9a28f (GitHub issue #663). Companion to
 `MAKERA-VS-CASEMAKER.md` (§G "CAM & output") and `/Makera-Parity.md` §2 (the 14 Studio strategy types).
 
 The maintainer's words: "operation palettes we need to track and make sure that we offer the same
@@ -37,7 +37,7 @@ Manufacture (personal tier), **ES** Easel, **BT** Bantam Tools Desktop CNC (Bant
 | Engrave text (outline font) | Basic engraving; Advanced engraving (Pro) [CC1] | Quick Engrave; Production Plate Engraving [VC1] | not established | not established | Conversational CAM text [BT1]† | not established | Fill/Line on text (no separate op name read) [LB1] | text subsystem (Parity §8) [MK1] | not established | YES: `EngraveLabel` outline fonts, bold/condensed, per-label depth (`workers/sim/engraveGenerate.ts`, `partPlan.ts`) | YES: "Label" (`EngraveLabelRow.tsx`) |
 | Single-line trace / stroke-font text | not established | not established | not established | not established | not established | Trace [KM1] | Line [LB1] | not established | Vector: Path [SM1]† | YES: `line` and `stroke-label` traces, flat or V bit (`cam/trace.ts`) | YES: "Line", "Single-line text" (`EngraveTraceRow.tsx`) |
 | Drill / peck drill | Drilling, styles full depth / peck [CC3]† | Drilling Toolpath [VC1]; peck option† | Drill [FU10]† | Convert Circles to Drill Holes; pecking drill [ES2]† | holes (helical) [BT1]† | Drill (pecks) [KM1] | — | 2D Drilling (2), 3D Drilling (10) [MK1] | not established | YES: `drill`, `drill-array`, through; pecks from shop settings, no canned cycles (`cam/drill.ts`, `cam/drillBit.ts`) | YES: "Hole", "Hole array" (`EngraveDrillRow.tsx`); no per-item peck control found |
-| Bore (helical hole to size) | not established | not established | Bore [FU5] | not established | holes use a helical path [BT1]† | not established | — | not established | not established | PARTIAL: circle pocket; no helical bore op | PARTIAL: via "Circle" pocket |
+| Bore (helical hole to size) | not established | not established | Bore [FU5] | not established | holes use a helical path [BT1]† | not established | — | not established | not established | YES: `bore` mode on a hole — helical ramp at the wall, the core cleared LEVEL BY LEVEL (spiral to the cutter's radius plus a hub lap at each Z), a full-depth final lap; pitch = the feeds row's step-down or the shop's `bore.rampAngleDeg` (`cam/drill.ts` `boreMoves`/`boreLevels`, #668) | YES: “Bore to size” in the operation picker, hole ⌀ and helix pitch in the row (`EngraveDrillRow.tsx`, #668) |
 | Thread mill | not established | Thread Milling Toolpath [VC1] | Thread [FU7]† | not established | not established | not established | — | 2D Thread mill (9), 3D (12) [MK1] | not established | PARTIAL: internal ISO-metric helical thread in an existing pilot, one hole per item (`cam/threadMill.ts`) | YES: `EngraveThreadRow.tsx` |
 | Chamfer (edge) | not established | not established | 2D Chamfer [FU6]† | not established | not established | not established | — | 2D Chamfer (13), 3D Chamfer (14) [MK1] | not established | NO (a chamfer bit is modelled as a V profile only; `engine/cnc/vProfile.ts`) | NO |
 | Texture | Texture toolpath [CC2]† | Efficient Texture Toolpath [VC1] | not established | not established | not established | not established | — | not established | not established | NO | NO |
@@ -57,7 +57,7 @@ Manufacture (personal tier), **ES** Easel, **BT** Bantam Tools Desktop CNC (Bant
 
 Tracking: umbrella **#676** (the matrix to 90 % YES in both Case Maker columns — 21 of the 23 non-refused rows), with the
 per-row issues: #535/#536 surface a mesh (unlocks 3D roughing and parallel finishing), #667 rest pass, #664 open paths,
-#668 bore, #669 chamfer, #665 advanced V-carve, #671 scallop/pencil, #673 inlay, #672 image relief, #670 texture,
+#668 bore (landed), #669 chamfer, #665 advanced V-carve, #671 scallop/pencil, #673 inlay, #672 image relief, #670 texture,
 #674 fluting/prism, #675 per-hole peck; rotary wrap stays #545.
 
 Refusals checked first (`MAKERA-VS-CASEMAKER.md` §G, `/Makera-Parity.md` §14.4): laser modules (decision 4),

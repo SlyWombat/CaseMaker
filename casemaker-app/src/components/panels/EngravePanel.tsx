@@ -40,6 +40,8 @@ import { useToolRegistry } from '@/hooks/useToolRegistry';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import { cuttingDiameter, drillPointAngle, pointLength } from '@/engine/cnc/tool';
 import { drillSettings } from '@/engine/cnc/cam/drillBit';
+import { borePitchMm, boreRampAngleFrom } from '@/engine/cnc/cam/drill';
+import { readDefault } from '@/platform/defaultsClient';
 import { caseWordsForKey } from '@/engine/cnc/toolCondition';
 import { dedupeFindings, itemKindWord, itemRowName, jobSetups, jobTool, validateJob, type JobFinding } from '@/engine/cnc/engrave/jobSetup';
 import type { RestChoice } from '@/components/panels/RestCutterControl';
@@ -115,7 +117,7 @@ import { EngraveLabelRow } from './EngraveLabelRow';
 import { EngraveKeepOutRow } from './EngraveKeepOutRow';
 import { EngraveShapeRow } from './EngraveShapeRow';
 import { EngraveCombinedRow } from './EngraveCombinedRow';
-import { EngraveDrillRow } from './EngraveDrillRow';
+import { EngraveDrillRow, type BorePitchFacts } from './EngraveDrillRow';
 import { EngraveCutoutRow, type CutoutTarget } from './EngraveCutoutRow';
 import { EngraveThreadRow } from './EngraveThreadRow';
 import { EngravePrimitiveRow } from './EngravePrimitiveRow';
@@ -134,6 +136,7 @@ import { viseEnvelope } from '@/engine/cnc/fixture';
 import type {
   EngraveAnyItem,
   EngraveCombinedShape,
+  EngraveDrill,
   EngraveJob,
   EngraveKeepOut,
   EngraveLabel,
@@ -925,6 +928,26 @@ export function EngravePanel(): JSX.Element {
   const drillDiameter = tool !== null && tool.shape === 'drill' ? cuttingDiameter(tool) : null;
   const drillTipLength =
     drillPoint?.ok === true && drillDiameter !== null ? pointLength(drillDiameter, drillPoint.deg) : null;
+  // #668 — a bore row's helix pitch, resolved HERE from the same feeds row the CAM runs with and
+  // the shop's own `bore.rampAngleDeg`, through the CAM's own `borePitchMm`. The row prints this
+  // number; nothing on the screen computes a second pitch.
+  const boreRamp = readDefault(shopDefaults ?? null, 'bore.rampAngleDeg');
+  const borePitchFor = (drill: EngraveDrill): BorePitchFacts | null => {
+    if (drill.mode !== 'bore' || drill.diameter === undefined || !(drill.diameter > 0)) return null;
+    const cutter = tool === null ? null : cuttingDiameter(tool);
+    if (cutter === null || !(cutter > 0) || params === null) return null;
+    const centreRadius = drill.diameter / 2 - cutter / 2;
+    if (!(centreRadius > 0)) return null;
+    const rampAngleDeg = boreRampAngleFrom(boreRamp.value);
+    return {
+      pitchMm: borePitchMm(params.stepDown, centreRadius, rampAngleDeg),
+      stepDownMm: params.stepDown,
+      rampAngleDeg,
+      rampSource: boreRamp.source,
+      // The CAM spirals when the wall lap cannot reach the centre: a hole wider than twice the cutter.
+      spirals: centreRadius > cutter / 2,
+    };
+  };
   const finish = finishOf(job);
   // #474/#493 — no plastic is faced (wood and metal only), so the material refuses it whatever the
   // finish says; the panel withholds the choice rather than merely seeding it off.
@@ -2285,6 +2308,7 @@ export function EngravePanel(): JSX.Element {
           index={i}
           maxDepth={maxDepth}
           findings={findingsFor(drill.id)}
+          borePitch={borePitchFor(drill)}
           onChange={(patch) => updateDrill(drill.id, patch)}
           onRemove={() => removeDrill(drill.id)}
         />

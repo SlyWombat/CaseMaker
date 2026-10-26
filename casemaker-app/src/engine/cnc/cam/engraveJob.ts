@@ -31,7 +31,7 @@ import type { ManifoldToplevel } from '@/workers/geometry/evaluateOp';
 import type { CutParams } from '../feeds';
 import { cuttingForTrace, type Tool } from '../tool';
 import { vCarvePassPitch } from '../vCarveGeometry';
-import { drillMoves, orderHolesNearest } from './drill';
+import { boreMoves, drillMoves, orderHolesNearest } from './drill';
 import {
   estimateCycleSeconds,
   HOP_Z,
@@ -126,14 +126,28 @@ export interface FinishPassSpec {
    * region is drilled, not pocketed: `polygons` is the union of cutter-radius discs (built by
    * the region builder for preview and oracle only) and CAM emits `drillMoves` instead of the
    * pocket loop. `depth` is the hole's flat floor.
+   *
+   * #668 — `bore` makes it a HOLE TO SIZE: the cutter helixes down the wall of a hole `radius`
+   * wide (`boreMoves`) instead of plunging, and `polygons` is that hole's disc — the region
+   * builder puts the HOLE's radius here, not the cutter's, so the preview and the oracle see the
+   * cylinder the job asked for.
    */
-  drill?: { holes: [number, number][] };
+  drill?: {
+    holes: [number, number][];
+    bore?: { radius: number };
+  };
   /**
    * This region cuts through the blank into the under-board (#218). `depth` already carries
    * `thickness + breakthrough`; the flag is what marks the operation as a `'through'` pass and
    * what the preview/verifier read as "the floor is the board, not the part".
+   *
+   * #668 — a through region also carries the BLANK's own thickness, because a bore cuts its core
+   * level by level and must clear the core to the blank's underside before the cutter crosses it
+   * (`boreLevels`): the level that frees the core has to be the one that clears it.
    */
   through?: boolean;
+  /** #668 — the blank's thickness, mm, on a through region (see `through`); unread by any other cut. */
+  stockThickness?: number;
 }
 
 /**
@@ -475,6 +489,10 @@ function entryTravel(
  * roughing pass that leaves `stockToLeaveMm` on walls and floor, then a finishing pass at full depth
  * on the ideal outline; `mode` selects which of the two THIS program writes, because the tool split
  * that decides the programs is #472's. A V region, and a program with no allowance, is untouched.
+ *
+ * #668 — `boreRampAngleDeg` is the shop's `bore.rampAngleDeg` (how steeply a bore's helix descends),
+ * read on the main thread like `peckClearanceMm`; `null`/absent leaves the labelled fallback in
+ * charge. It reaches only the bore path — a job with no bore is byte-identical whatever it is.
  */
 export function generateEngrave(
   tl: ManifoldToplevel,
@@ -485,6 +503,7 @@ export function generateEngrave(
   order: 'nearest' = 'nearest',
   peckClearanceMm: number | null = null,
   finish: FinishPassSpec | null = null,
+  boreRampAngleDeg: number | null = null,
 ): ToolpathIR {
   const usable = cuttingForTrace(tool);
   if (!usable.ok) throw new Error(`generateEngrave: ${usable.reason}`);
@@ -534,10 +553,45 @@ export function generateEngrave(
 
   const prepared: Prepared[] = labels.map((label) => {
     if (label.drill) {
+      const holes = orderHolesNearest(label.drill.holes);
+      const bore = label.drill.bore;
+      if (bore !== undefined) {
+        // A BORE TO SIZE (#668): the cutter helixes down the hole's wall, laps it at full depth and
+        // spirals the floor clean. Its first cutting point is the helix's start — the hole's edge
+        // along +X — so the ordering is costed against where the tool really enters.
+        if (cone !== null) {
+          throw new Error(
+            `generateEngrave: "${label.name ?? label.text}" is a bore, and a bore helixes down the ` +
+              'wall of the hole with the side of a flat end mill; a V-bit cannot cut one',
+          );
+        }
+        const centreRadius = bore.radius - flatRadius;
+        if (!(centreRadius > 0)) {
+          throw new Error(
+            `generateEngrave: "${label.name ?? label.text}" asks for a ⌀${bore.radius * 2} mm hole, ` +
+              `which is not wider than the ⌀${flatRadius * 2} mm cutter; a bore needs a hole wider than the cutter`,
+          );
+        }
+        const first = holes[0];
+        return {
+          label,
+          passList: [],
+          firstCut: first === undefined ? [0, 0] : [first[0] + centreRadius, first[1]],
+          drillMoves: boreMoves(
+            holes,
+            label.depth,
+            bore.radius,
+            flatRadius,
+            params,
+            boreRampAngleDeg,
+            // A through bore clears its core to the blank's underside before crossing it.
+            label.through === true ? (label.stockThickness ?? null) : null,
+          ),
+        };
+      }
       // Drilled region (#220): no rings to pocket. The holes are visited nearest-neighbour and
       // the FIRST becomes the operation's first cutting point, so the ordering and the emitted
       // path agree exactly as they do for a pocket.
-      const holes = orderHolesNearest(label.drill.holes);
       return {
         label,
         passList: [],

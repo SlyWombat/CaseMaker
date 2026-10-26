@@ -224,6 +224,12 @@ export interface RunSheetProgram {
    * that cuts no cut-out and on a result stored by an older build.
    */
   through?: RunSheetThroughFacts | null;
+  /**
+   * #668 — the bores THIS program helices to size, when it has any. Structurally the worker's
+   * `BoreProgramFacts`, so the generated object is assignable unchanged; absent on every program
+   * that cuts no bore and on a result stored by an older build.
+   */
+  bore?: RunSheetBoreFacts | null;
 }
 
 /**
@@ -256,6 +262,34 @@ export interface RunSheetThroughFacts {
     /** Spans it could not place; a non-zero count is a finding, never a silent omission. */
     unplaceable: number;
   }[];
+}
+
+/**
+ * #668 — what a program's BORES cut, structurally `BoreProgramFacts` from `engraveGenerate`. The
+ * pitch travels with both numbers it was resolved from (the feeds row's step-down and the shop's
+ * ramp angle with its source), because the sheet's step says which of the two is binding — and
+ * that is the operator's answer to "why is this helix this slow".
+ */
+export interface RunSheetBoreFacts {
+  items: readonly RunSheetBoreItem[];
+}
+
+export interface RunSheetBoreItem {
+  id: string;
+  name: string;
+  /** The hole's diameter, mm — what the bore asks for. */
+  holeDiameterMm: number;
+  /** The cutter's cutting diameter, mm. */
+  cutterDiameterMm: number;
+  /** The helix's centre-path radius: hole radius less cutter radius, mm. */
+  centreRadiusMm: number;
+  /** The helix's descent per revolution, mm. */
+  pitchMm: number;
+  /** The feeds row's step-down cap, mm. */
+  stepDownMm: number;
+  /** The shop's ramp angle used, degrees, and where it came from. */
+  rampAngleDeg: number;
+  rampSource: string;
 }
 
 /** #434 — the drill program's settings, their per-key sources, and one plan per drilled item. */
@@ -330,6 +364,13 @@ export interface RunSheetGenerated {
    * a job with no cut-out, and on a result stored by an older build.
    */
   through?: RunSheetThroughFacts | null;
+  /**
+   * #668 — the bores the FIRST program helices to size, when it cuts any (the top-level result
+   * describes program 1, exactly as `drill` does). A later program's facts travel on
+   * `programs[n].bore`. Absent or null on a job with no bore, and on a result stored by an older
+   * build.
+   */
+  bore?: RunSheetBoreFacts | null;
   /**
    * #432 slice 3 — the FACING program: the skim of the blank's top, its own `.nc` beside the job
    * (`runSheetFaceFileName`), or null when none was produced. Optional because a generated object
@@ -2627,6 +2668,34 @@ function drillProgramSectionSteps(
   ];
 }
 
+/**
+ * #668 — a bore's helix, in the operator's terms: the pitch per turn, WHICH of its two sources
+ * caps it, and the rest of the path. One step per bore item (the `drillCutSteps` pattern), so a
+ * program with holes of different diameters states each one's own pitch rather than one number
+ * that only fits the first.
+ */
+function boreSteps(facts: RunSheetBoreFacts): RunSheetStep[] {
+  return facts.items.map((item) => {
+    const rampTighter = item.pitchMm < item.stepDownMm - 1e-9;
+    const stepDown = `the feeds row’s ${fmtNum(item.stepDownMm)} mm step-down`;
+    const ramp = `the ${fmtNum(item.rampAngleDeg)}° ramp angle (the shop’s bore.rampAngleDeg, ${item.rampSource})`;
+    const cap = rampTighter ? ramp : stepDown;
+    const other = rampTighter ? stepDown : ramp;
+    const floor =
+      item.centreRadiusMm > item.cutterDiameterMm / 2
+        ? 'and clears the disc at every level on the way down, then laps the wall at full depth'
+        : 'then laps the wall at full depth, a lap that already reaches the hole’s centre';
+    return {
+      text:
+        `${item.name} is a bore to size: a ⌀${fmtNum(item.holeDiameterMm)} mm hole cut by the ` +
+        `⌀${fmtNum(item.cutterDiameterMm)} mm cutter, helixing at a ${fmtNum(item.centreRadiusMm)} mm ` +
+        `centre radius. It drops ${fmtNum(item.pitchMm)} mm per turn — ${cap} is the tighter of it and ` +
+        `${other} — ${floor}.`,
+      value: `${fmtNum(item.pitchMm)} mm per turn`,
+    };
+  });
+}
+
 /** A later engraving program that carries no drill or rest facts of its own. */
 function engraveProgramSectionSteps(program: RunSheetProgram, number: number): RunSheetStep[] {
   const cam = program.cam;
@@ -2641,6 +2710,7 @@ function engraveProgramSectionSteps(program: RunSheetProgram, number: number): R
           : `${cam.operations} operation${cam.operations === 1 ? '' : 's'} · about ${formatDuration(cam.estimatedSeconds)}`,
     },
     ...(program.finish == null ? [] : [finishAllowanceStep(program.finish)]),
+    ...(program.bore == null ? [] : boreSteps(program.bore)),
     ...programRunSteps(program, number),
     ...throughCutSteps(program.through),
   ];
@@ -3318,6 +3388,10 @@ export function buildRunSheet(
             };
     cutSteps.push(step);
     programParams = step;
+    // #668 — a bore program states its helix pitch beside the parameters it was cut with: the
+    // pitch is the number the operator watches on the first hole, and both its sources travel in
+    // the fact, so this line can say which one is binding without re-reading a setting.
+    if (generated.bore != null) cutSteps.push(...boreSteps(generated.bore));
     if (surfaceFacts !== null) cutSteps.push(...surfaceSteps(surfaceFacts));
     // #487 — what the ordering did, in the operator's terms: air travel against cutting travel,
     // and the same program under the order this CAM used before it. "Optimised" that cannot be

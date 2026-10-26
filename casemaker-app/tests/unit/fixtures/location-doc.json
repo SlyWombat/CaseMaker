@@ -1453,6 +1453,13 @@
       "unit": "deg",
       "note": "chosen, not measured: the descent angle of the helix and ramp entries"
     },
+    "bore.rampAngleDeg": {
+      "value": 2.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "deg",
+      "note": "chosen, not measured: how steeply a bore's helix descends, its lead per revolution"
+    },
     "adaptive.cutFeed": {
       "value": 600.0,
       "source": "seeded",

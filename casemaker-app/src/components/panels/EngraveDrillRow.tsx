@@ -10,12 +10,17 @@ import type { EngraveDrill } from '@/types/engraveJob';
  * One plunge drill of an engrave job (#220, panel work #260): a single hole or a rectangular
  * array of the same hole.
  *
- * There is deliberately NO diameter field — the hole IS the cutter's (a bigger hole is a circle
- * pocket, #214) — so the row edits placement, depth, the through flag and, for an array, the
- * lattice. The `through` toggle cuts to the sacrificial board instead of to a typed depth; the
+ * There is deliberately NO diameter field on a drill — the hole IS the cutter's (a bigger hole is
+ * a circle pocket, #214) — so the row edits placement, depth, the through flag and, for an array,
+ * the lattice. The `through` toggle cuts to the sacrificial board instead of to a typed depth; the
  * job's findings refuse it when no board is fitted (`through-needs-board`) or the bit's flutes do
  * not reach the breakthrough (`through-tool-reach`), so the row does not hide a field the model
  * carries (#218).
+ *
+ * #668 — A BORE TO SIZE is the same item with `mode: 'bore'`: the cutter helixes down a hole wider
+ * than itself, so the row gains the one field a bore owns (the hole's ⌀) and states the helix's
+ * pitch, which the panel resolves from the SAME feeds row and shop ramp angle the CAM cuts with.
+ * Everything else — placement, depth, through, the array lattice — is the drill row's, unchanged.
  *
  * `count` fields commit only whole numbers ≥ 1, because the schema refuses a fractional count
  * outright (a silently floored lattice is not what the user typed) and a bad value would make the
@@ -34,6 +39,27 @@ const FIELD_LABEL: CSSProperties = { display: 'inline-flex', alignItems: 'center
 
 const SEVERITY_COLOR: Record<JobFinding['severity'], string> = { error: '#f0b4ad', warning: '#e0c07a', info: '#7fa6c9' };
 
+/** `2` / `0.5` — a number as a sentence or a chip uses it. */
+const fmt = (n: number): string => `${Number(n.toFixed(3))}`;
+
+/**
+ * #668 — a bore's helix numbers as the panel resolves them: the same feeds row and the same shop
+ * ramp angle the CAM reads, put through the same `borePitchMm`. The row prints them; it never
+ * computes a second pitch of its own.
+ */
+export interface BorePitchFacts {
+  /** The helix's descent per revolution, mm. */
+  pitchMm: number;
+  /** The feeds row's step-down cap, mm — one of the pitch's two sources. */
+  stepDownMm: number;
+  /** The shop's `bore.rampAngleDeg`, degrees — the other source. */
+  rampAngleDeg: number;
+  /** Where the ramp angle came from (`seeded`, `chosen`, `fallback`). */
+  rampSource: string;
+  /** Whether the floor spiral runs: false when the wall lap already reaches the hole's centre. */
+  spirals: boolean;
+}
+
 export interface EngraveDrillRowProps {
   drill: EngraveDrill;
   /** Position of this row in `job.drills`; only used for stable test ids. */
@@ -44,6 +70,8 @@ export interface EngraveDrillRowProps {
   onRemove: () => void;
   /** Findings about THIS drill (the panel filters the job's list by `labelId`). */
   findings: readonly JobFinding[];
+  /** #668 — a bore's helix pitch, resolved by the panel; null when the job's feeds did not resolve. */
+  borePitch?: BorePitchFacts | null;
 }
 
 export function EngraveDrillRow({
@@ -53,9 +81,11 @@ export function EngraveDrillRow({
   onChange,
   onRemove,
   findings,
+  borePitch = null,
 }: EngraveDrillRowProps): JSX.Element {
   const isArray = drill.kind === 'drill-array';
-  const kindLabel = isArray ? 'Hole array' : 'Hole';
+  const isBore = drill.mode === 'bore';
+  const kindLabel = isBore ? (isArray ? 'Bore array' : 'Bore') : isArray ? 'Hole array' : 'Hole';
   const depthInvalid = drill.depth > maxDepth;
 
   const positionNum = (axis: 'x' | 'y'): JSX.Element => (
@@ -117,19 +147,21 @@ export function EngraveDrillRow({
     // #411 — the collapsed line, and the editor below it. The kind is the glyph `⌖` on the line and
     // its word in the tooltip; a drilled hole has no name of its own, so an unnamed one reads "Hole"
     // / "Hole array" rather than as a blank field, exactly as the shape rows read their kind.
+    // #668 — a bore wears `⌾` and says "Bore", because it is the one hole whose width is not the
+    // cutter's.
     <EngraveItemRow
       id={drill.id}
       selectable
       prefix="engrave-drill"
       index={index}
-      glyph="⌖"
+      glyph={isBore ? '⌾' : '⌖'}
       kindWord={kindLabel}
-      typeLabel="Hole"
+      typeLabel={isBore ? 'Bore' : 'Hole'}
       name={drillOperationName(drill)}
       summary={rowSummary(drill.depth)}
       enabled={drill.enabled}
       enabledTitle="A disabled drill is kept in the job but not cut."
-      removeTitle="Remove this drill."
+      removeTitle={`Remove this ${isBore ? 'bore' : 'drill'}.`}
       removeNoun={kindLabel}
       findings={findings}
       onToggleEnabled={(enabled) => onChange({ enabled })}
@@ -150,8 +182,45 @@ export function EngraveDrillRow({
       </label>
 
       <p style={MUTED}>
-        The hole is exactly the cutter&rsquo;s diameter — for a bigger hole, add a circle pocket instead.
+        {isBore
+          ? 'A hole to size: the cutter helixes down the wall, laps it at full depth and spirals the floor clean, so the hole may be wider than the cutter.'
+          : 'The hole is exactly the cutter’s diameter — for a bigger hole, add a circle pocket instead.'}
       </p>
+
+      {isBore && (
+        <div style={ROW_INLINE}>
+          <label style={FIELD_LABEL}>
+            <span>hole ⌀</span>
+            <input
+              type="number"
+              min={0}
+              step="0.1"
+              value={drill.diameter ?? ''}
+              data-testid={`engrave-drill-diameter-${index}`}
+              aria-label={`${kindLabel} ${index + 1} hole diameter`}
+              title="The hole's diameter, mm — the size this bore makes, which may be wider than the cutter."
+              style={NUM}
+              onChange={(e) => {
+                const v = Number(e.target.value);
+                if (Number.isFinite(v) && v > 0) onChange({ diameter: v });
+              }}
+            />
+            <span>mm</span>
+          </label>
+        </div>
+      )}
+      {isBore && (
+        <p style={MUTED} data-testid={`engrave-drill-bore-pitch-${index}`}>
+          {borePitch === null
+            ? 'The helix pitch is resolved once the job’s cutter and the feeds row are known.'
+            : `The helix drops ${fmt(borePitch.pitchMm)} mm per turn — the feeds row’s ` +
+              `${fmt(borePitch.stepDownMm)} mm step-down or the shop’s ${fmt(borePitch.rampAngleDeg)}° ramp ` +
+              `(${borePitch.rampSource}), whichever is tighter — ` +
+              (borePitch.spirals
+                ? 'clearing the disc at each level, then laps the wall at full depth.'
+                : 'then laps the wall at full depth, a lap that reaches the hole’s centre.')}
+        </p>
+      )}
 
       <div style={ROW_INLINE}>
         {positionNum('x')}

@@ -16,6 +16,9 @@
  *    matrix's UI holds both) and the row's chip states what the job's cutter makes of the item;
  *  - `profile` — a cut-out through the blank, held with tabs (a cutout item or a through shape);
  *  - `hole` — a plunge hole or a grid of them (the `drill` / `drill-array` items);
+ *  - `bore` — a hole to size, helixed down its wall by the job's end mill (#668): the same
+ *    `drill` / `drill-array` items with `mode: 'bore'` and a stated diameter, so a clearance
+ *    hole wider than any bit in the box is one operation, not a circle pocket;
  *  - `thread` — a milled internal thread;
  *  - `surface` — a goal STL/3MF, roughed and ball-finished in 3D (#534). The engine posts it for a
  *    PURE goal job, so the picker offers it only while the list is empty, and picking it sets the
@@ -33,7 +36,15 @@ import { jobTool } from '@/engine/cnc/engrave/jobSetup';
 import { isVShape } from '@/engine/cnc/vProfile';
 
 /** The operation types the wizard, the picker and the row chips share. */
-export type OperationTypeId = 'engrave' | 'v-carve' | 'pocket' | 'profile' | 'hole' | 'thread' | 'surface';
+export type OperationTypeId =
+  | 'engrave'
+  | 'v-carve'
+  | 'pocket'
+  | 'profile'
+  | 'hole'
+  | 'bore'
+  | 'thread'
+  | 'surface';
 
 export interface OperationTypeDef {
   id: OperationTypeId;
@@ -52,6 +63,7 @@ export const OPERATION_TYPES: readonly OperationTypeDef[] = [
   { id: 'pocket', label: 'Pocket', blurb: 'A flat-bottomed region', addTestId: 'engrave-add-rect' },
   { id: 'profile', label: 'Profile', blurb: 'A cut-out through the blank, held with tabs', addTestId: 'engrave-add-profile' },
   { id: 'hole', label: 'Hole', blurb: 'A hole, or a grid of them', addTestId: 'engrave-add-drill' },
+  { id: 'bore', label: 'Bore to size', blurb: 'A hole wider than the cutter, helixed down its wall', addTestId: 'engrave-add-bore' },
   { id: 'thread', label: 'Thread', blurb: 'A milled internal thread', addTestId: 'engrave-add-thread' },
   { id: 'surface', label: 'Surface a mesh', blurb: 'Rough and finish a goal STL/3MF', addTestId: 'engrave-add-surface' },
 ];
@@ -75,7 +87,7 @@ export function regionOperationType(cutterIsV: boolean): 'v-carve' | 'pocket' {
  * construction/reference item, a kept-out void, or a mesh used as a reference).
  */
 export function operationTypeOfItem(
-  item: { kind: string; through?: boolean; construction?: boolean } | null | undefined,
+  item: { kind: string; through?: boolean; construction?: boolean; mode?: 'drill' | 'bore' } | null | undefined,
   region: 'v-carve' | 'pocket',
 ): OperationTypeId | null {
   if (item === null || item === undefined) return null;
@@ -88,7 +100,7 @@ export function operationTypeOfItem(
       return 'engrave';
     case 'drill':
     case 'drill-array':
-      return 'hole';
+      return item.mode === 'bore' ? 'bore' : 'hole';
     case 'thread':
       return 'thread';
     case 'cutout':
@@ -143,6 +155,8 @@ export function addOperationOfType(type: Exclude<OperationTypeId, 'surface'>): s
       return store.addCutout();
     case 'hole':
       return store.addDrill('drill');
+    case 'bore':
+      return store.addDrill('drill', { mode: 'bore' });
     case 'thread':
       return store.addThread();
   }

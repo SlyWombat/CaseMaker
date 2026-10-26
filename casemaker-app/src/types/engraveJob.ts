@@ -286,6 +286,18 @@ export interface EngraveDrillBase {
    * (`through-tool-reach`).
    */
   through: boolean;
+  /**
+   * #668 — how the hole is cut. Absent reads as `'drill'` (a plunge/peck hole the cutter's own
+   * diameter wide), so every saved job round-trips unchanged. `'bore'` is a HOLE TO SIZE: an end
+   * mill helixes down the wall at `diameter` and clears the floor — the hole may be wider than
+   * the cutter.
+   */
+  mode?: 'drill' | 'bore';
+  /**
+   * #668 — the HOLE's diameter for a bore, mm. A drill's hole is the cutter's own diameter and
+   * reads nothing here. A bore without one is refused by name (`bore-no-diameter`).
+   */
+  diameter?: Mm;
 }
 
 /** One plunge-drilled hole at `position`: the cutter's own diameter, its floor at `depth`. */

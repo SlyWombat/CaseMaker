@@ -420,6 +420,12 @@
                 "exclusiveMinimum": 0,
                 "type": "number"
               },
+              "diameter": {
+                "description": "A bore's HOLE diameter in millimetres; a drill's hole is the cutter's own diameter and reads nothing here.",
+                "exclusiveMinimum": 0,
+                "maximum": 200,
+                "type": "number"
+              },
               "enabled": {
                 "description": "False keeps the drill in the document but out of the program.",
                 "type": "boolean"
@@ -432,6 +438,14 @@
               "kind": {
                 "const": "drill",
                 "description": "One hole, as wide as the job's cutter.",
+                "type": "string"
+              },
+              "mode": {
+                "description": "How the hole is cut: 'drill' (a plunge/peck hole the cutter's own diameter wide; the default when absent) or 'bore' (a hole to size, helixed down the wall at `diameter`).",
+                "enum": [
+                  "drill",
+                  "bore"
+                ],
                 "type": "string"
               },
               "name": {
@@ -505,6 +519,12 @@
                 "exclusiveMinimum": 0,
                 "type": "number"
               },
+              "diameter": {
+                "description": "A bore's HOLE diameter in millimetres; a drill's hole is the cutter's own diameter and reads nothing here.",
+                "exclusiveMinimum": 0,
+                "maximum": 200,
+                "type": "number"
+              },
               "enabled": {
                 "description": "False keeps the drill in the document but out of the program.",
                 "type": "boolean"
@@ -517,6 +537,14 @@
               "kind": {
                 "const": "drill-array",
                 "description": "A rectangular array of identical holes.",
+                "type": "string"
+              },
+              "mode": {
+                "description": "How the hole is cut: 'drill' (a plunge/peck hole the cutter's own diameter wide; the default when absent) or 'bore' (a hole to size, helixed down the wall at `diameter`).",
+                "enum": [
+                  "drill",
+                  "bore"
+                ],
                 "type": "string"
               },
               "name": {

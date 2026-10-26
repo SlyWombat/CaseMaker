@@ -126,6 +126,12 @@ export type JobFindingCode =
   | 'drill-outside-stock'
   | 'plunge-unproven'
   | 'drill-too-deep'
+  // Bores to size (#668). A bore is a hole cut by an end mill helixing down its wall, so it has
+  // three data-plus-tool checks of its own: a hole wider than the cutter (`bore-narrow`), a flat
+  // end mill to cut it with (`bore-needs-end-mill`), and a stated hole diameter (`bore-no-diameter`).
+  | 'bore-narrow'
+  | 'bore-needs-end-mill'
+  | 'bore-no-diameter'
   // Through-cuts and cut-outs (#218). `through-needs-board`: no under-board, or one thinner than
   // the breakthrough plus a millimetre. `through-tool-reach`: the cutter's flutes/shank do not
   // cover `thickness + breakthrough`. `tab-unplaceable`, `cutout-empty` and `loose-piece` are
@@ -862,6 +868,44 @@ export function validateJob(
   const { length, width } = job.stock;
   for (const drill of enabledDrills) {
     const who = drillOperationName(drill);
+    // #668 — A BORE TO SIZE is the same item cut a different way: an end mill helixes down the
+    // wall of a hole wider than itself. Its three refusals are data-plus-tool facts, raised here
+    // so a bad job is named before any toolpath exists (the CAM refuses the same pairs itself).
+    const isBore = drill.mode === 'bore';
+    const holeRadius = isBore && drill.diameter !== undefined && drill.diameter > 0 ? drill.diameter / 2 : null;
+    if (isBore) {
+      if (holeRadius === null) {
+        findings.push({
+          severity: 'error',
+          code: 'bore-no-diameter',
+          labelId: drill.id,
+          message:
+            `${who} is a bore with no hole diameter. State the diameter of the hole to cut — ` +
+            'a bore makes the hole the job asks for, not the cutter’s width.',
+        });
+      }
+      if (drillTool !== null && drillTool.shape !== 'flat') {
+        findings.push({
+          severity: 'error',
+          code: 'bore-needs-end-mill',
+          labelId: drill.id,
+          message:
+            `${who} helixes down the wall of the hole, so it needs a flat end mill; ` +
+            `"${drillTool.name}" is a ${drillTool.shape} cutter and cannot ramp.`,
+        });
+      }
+      if (holeRadius !== null && drillRadius !== null && holeRadius <= drillRadius) {
+        findings.push({
+          severity: 'error',
+          code: 'bore-narrow',
+          labelId: drill.id,
+          message:
+            `${who} asks for a ⌀${fmt3(holeRadius * 2)} mm hole, which is not wider than the ` +
+            `⌀${fmt3(drillRadius * 2)} mm cutter. A bore needs a hole wider than the cutter — ` +
+            'cut a bigger hole or use a smaller cutter.',
+        });
+      }
+    }
     // A drill bit's tip is the deepest point of the hole; a flat end mill's floor is its depth.
     const tipDepth = drill.depth + drillPointLength;
     const depthAtFloor = drillIsBit ? tipDepth : drill.depth;
@@ -901,11 +945,12 @@ export function validateJob(
             `${thickness} mm stock, below the ${job.minFloor} mm minimum.`,
       });
     }
-    // A hole is a disc of the cutter's radius, so it is off the stock when its RIM crosses an
-    // edge, not just its centre.
-    if (drillRadius !== null) {
+    // A hole is a disc — the cutter's radius for a drill, the HOLE's own radius for a bore — so it
+    // is off the stock when its RIM crosses an edge, not just its centre.
+    const rimRadius = holeRadius ?? drillRadius;
+    if (rimRadius !== null) {
       for (const [hx, hy] of drillHoles(drill)) {
-        if (hx - drillRadius < 0 || hx + drillRadius > length || hy - drillRadius < 0 || hy + drillRadius > width) {
+        if (hx - rimRadius < 0 || hx + rimRadius > length || hy - rimRadius < 0 || hy + rimRadius > width) {
           findings.push({
             severity: 'error',
             code: 'drill-outside-stock',

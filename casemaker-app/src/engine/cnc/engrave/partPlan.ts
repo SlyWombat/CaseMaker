@@ -136,8 +136,21 @@ export interface PartPlan {
    * no profile to carry — just the hole centres. `name` is the tool-independent part of the
    * operation name (`Drill "port"`, `Drill 3×2 @10×10`); the region builder appends the diameter,
    * which only it knows, the way it already appends the depth.
+   *
+   * #668 — `mode` is `'drill'` (the plunge above) or `'bore'`, a HOLE TO SIZE helixed down by an
+   * end mill; `diameter` is the HOLE's diameter in mm for a bore (`null` when the item states
+   * none), and is not read for a drill. Both are carried so the region builder, the preview and
+   * the oracle can put the hole's disc where the cut really removes material.
    */
-  drills: { id: string; name: string; holes: [Mm, Mm][]; depth: Mm; through: boolean }[];
+  drills: {
+    id: string;
+    name: string;
+    holes: [Mm, Mm][];
+    depth: Mm;
+    through: boolean;
+    mode: 'drill' | 'bore';
+    diameter: Mm | null;
+  }[];
   /**
    * MILLED THREADS (#445, #434 phase 2), a fourth sibling. A thread is not a region either: the
    * thread mill orbits inside a pilot that already exists, so there is no profile to carry — the
@@ -840,12 +853,14 @@ export function drillHoles(drill: EngraveDrill): [Mm, Mm][] {
  * The operation's display name for a drill — the DESCRIPTOR only, without the `[T#]` prefix, the
  * diameter or the depth suffix, exactly as `itemOperationName` contracts. The diameter is not
  * known here (`toPartPlan` is tool-agnostic), so the region builder appends it: the `;@MKR|TOOLPATH`
- * line reads `[T1]Drill "port" ⌀3.175 2.0mm`.
+ * line reads `[T1]Drill "port" ⌀3.175 2.0mm`. A BORE (#668) is the same item cut a different way,
+ * so it names itself `Bore "port" ⌀4.5 3.0mm` — the same verb slot, the kind the operator picked.
  */
 export function drillOperationName(drill: EngraveDrill): string {
+  const verb = drill.mode === 'bore' ? 'Bore' : 'Drill';
   const named = drill.name ? ` "${drill.name}"` : '';
-  if (drill.kind === 'drill') return `Drill${named}`;
-  return `Drill${named} ${drill.count.x}×${drill.count.y} @${drill.pitch.x}×${drill.pitch.y}`;
+  if (drill.kind === 'drill') return `${verb}${named}`;
+  return `${verb}${named} ${drill.count.x}×${drill.count.y} @${drill.pitch.x}×${drill.pitch.y}`;
 }
 
 /* ---------------------------------------------------------------------------------------------
@@ -1766,7 +1781,13 @@ export function sweptCuts(job: EngraveJob, plan: PartPlan = toPartPlan(job, { un
     for (const [x, y] of drill.holes) box = coverPoint(box, x, y);
     // A drill's hole is the cutter's own diameter, so the sweep is its flat radius; the depth
     // argument is 0 because only a V-bit's radius varies with depth and a V-bit cannot drill.
-    if (box !== null) add(drill.id, drill.name, drill.depth, box, sweepRadiusForJob(job, 0));
+    // #668 — a BORE's hole is the job's own diameter, so the sweep is the HOLE's radius (a bore
+    // is always wider than its cutter, and the finding refuses one that is not).
+    const radius =
+      drill.mode === 'bore' && drill.diameter !== null && drill.diameter > 0
+        ? drill.diameter / 2
+        : sweepRadiusForJob(job, 0);
+    if (box !== null) add(drill.id, drill.name, drill.depth, box, radius);
   }
   for (const thread of plan.threads) {
     const [x, y] = thread.position;
@@ -1947,7 +1968,9 @@ export function toPartPlan(job: EngraveJob, options: PartPlanOptions = {}): Part
 
   // Plunge drills (#220) are a third sibling list: hole centres only, no profile and no region
   // pipeline. A disabled drill is skipped, like a disabled region item; `through` is carried
-  // through for the region builder, which turns it into the local stock thickness.
+  // through for the region builder, which turns it into the local stock thickness. #668 — `mode`
+  // and the bore's `diameter` travel the same way: the region builder needs the hole's radius for
+  // its disc, and `validateJob` needs both for the bore's own refusals.
   const drills: PartPlan['drills'] = [];
   for (const item of job.drills ?? []) {
     if (!item.enabled) continue;
@@ -1957,6 +1980,8 @@ export function toPartPlan(job: EngraveJob, options: PartPlanOptions = {}): Part
       holes: drillHoles(item),
       depth: item.depth,
       through: item.through,
+      mode: item.mode ?? 'drill',
+      diameter: item.diameter ?? null,
     });
   }
 

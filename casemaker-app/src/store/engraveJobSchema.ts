@@ -486,6 +486,20 @@ const drillBaseSchema = z.object({
   through: z
     .boolean()
     .describe('Drill through the blank into the sacrificial board, following the breakthrough rule.'),
+  // #668 — a plunge drill (absent) or a helical BORE to size. Optional rather than defaulted: an
+  // absent key stays absent, so a document written before this slice round-trips byte-for-byte and
+  // the read site (`item.mode ?? 'drill'`) treats absent as a drill.
+  mode: z
+    .enum(['drill', 'bore'])
+    .optional()
+    .describe("How the hole is cut: 'drill' (a plunge/peck hole the cutter's own diameter wide; the default when absent) or 'bore' (a hole to size, helixed down the wall at `diameter`)."),
+  diameter: z
+    .number()
+    .finite()
+    .positive()
+    .max(200)
+    .optional()
+    .describe("A bore's HOLE diameter in millimetres; a drill's hole is the cutter's own diameter and reads nothing here."),
 });
 
 const drillSchema = z.discriminatedUnion('kind', [

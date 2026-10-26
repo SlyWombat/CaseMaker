@@ -18,10 +18,12 @@ import {
 import { defaultStockProud, seatedVise, todayISODate, viseForNewJob } from '@/engine/cnc/fixture';
 import { sacrificialForNewJob } from '@/engine/cnc/sacrificial';
 import { resolveTool } from '@/engine/cnc/toolRegistry';
+import { cuttingDiameter } from '@/engine/cnc/tool';
 import { applyAnswers, type SetupAnswers } from '@/engine/cnc/engrave/setupFlow';
 import {
   itemKindWord,
   itemRowName,
+  jobTool,
   type EngraveNamedItem,
 } from '@/engine/cnc/engrave/jobSetup';
 import { effectiveMargins, recommendLabelDepth, recommendedEngraveDepth } from '@/engine/cnc/engrave/depthBounds';
@@ -519,7 +521,13 @@ function newTrace(kind: EngraveTraceItem['kind'], job: EngraveJob, depth: number
  * items' one: a hole that begins as shallow as a label shows nothing on the preview, so the two
  * start from different numbers and each says why.
  */
-function newDrill(kind: EngraveDrill['kind'], job: EngraveJob, depth: number): EngraveDrill {
+function newDrill(
+  kind: EngraveDrill['kind'],
+  job: EngraveJob,
+  depth: number,
+  mode: 'drill' | 'bore' = 'drill',
+  diameter: number | null = null,
+): EngraveDrill {
   const base = {
     id: newEngraveDrillId(),
     position: { x: job.stock.length / 2, y: job.stock.width / 2 },
@@ -528,10 +536,27 @@ function newDrill(kind: EngraveDrill['kind'], job: EngraveJob, depth: number): E
     enabled: true,
     through: false,
   };
+  // #668 — a bore carries the two fields a drill has no use for. Absent on a drill, so the item
+  // and every document written before this slice stay byte-identical.
+  const bore = mode === 'bore' ? { mode: 'bore' as const, ...(diameter === null ? {} : { diameter }) } : {};
   if (kind === 'drill-array') {
-    return { ...base, kind: 'drill-array', count: { x: 2, y: 2 }, pitch: { x: 10, y: 10 } };
+    return { ...base, ...bore, kind: 'drill-array', count: { x: 2, y: 2 }, pitch: { x: 10, y: 10 } };
   }
-  return { ...base, kind: 'drill' };
+  return { ...base, ...bore, kind: 'drill' };
+}
+
+/**
+ * #668 — the hole diameter a NEW bore starts at: the job's cutter plus a millimetre, rounded UP to
+ * the next half millimetre. That is a clearance hole rather than a press fit, and it is always
+ * wider than the cutter, so a fresh row opens on a cut the engine can make instead of on
+ * `bore-narrow`. A job with no cutter falls back to ⌀6 mm; the row states the real number either
+ * way, and the finding refuses a hole that is not wider than the cutter.
+ */
+export function boreSeedDiameterMm(job: EngraveJob): number {
+  const tool = jobTool(job);
+  const cutter = tool === null ? null : cuttingDiameter(tool);
+  if (cutter === null || !(cutter > 0)) return 6;
+  return Math.ceil((cutter + 1) / 0.5) * 0.5;
 }
 
 /**
@@ -744,8 +769,11 @@ export interface EngraveJobState {
    * `toLineTraces` (an id already minted); this is only the document write, like `addVector`.
    */
   addLine: (line: EngraveLineItem) => void;
-  /** Add a default plunge drill of `kind` (#220) and return its id. */
-  addDrill: (kind: EngraveDrill['kind']) => string;
+  /**
+   * Add a default hole of `kind` (#220) and return its id. `mode: 'bore'` (#668) makes it a HOLE
+   * TO SIZE, seeded with a clearance diameter over the job's cutter; absent is a plunge drill.
+   */
+  addDrill: (kind: EngraveDrill['kind'], opts?: { mode?: 'drill' | 'bore' }) => string;
   /** Merge a hand edit into one drill (#220). A partial `position` is merged, not replaced. */
   updateDrill: (id: string, patch: DrillPatch) => void;
   removeDrill: (id: string) => void;
@@ -1268,8 +1296,12 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
       );
     },
 
-    addDrill: (kind) => {
-      const drill = newDrill(kind, get().job, newDrillDepthMm());
+    addDrill: (kind, opts) => {
+      const job = get().job;
+      const mode = opts?.mode ?? 'drill';
+      // #668 — a new bore starts at a clearance hole over the job's own cutter (see
+      // `boreSeedDiameterMm`); a drill stays exactly the item it was.
+      const drill = newDrill(kind, job, newDrillDepthMm(), mode, mode === 'bore' ? boreSeedDiameterMm(job) : null);
       apply((job) => ({ ...job, drills: [...(job.drills ?? []), drill] }));
       return drill.id;
     },

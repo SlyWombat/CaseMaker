@@ -275,6 +275,10 @@ export const KNOWN_DEFAULTS: Readonly<Record<string, KnownDefault>> = {
   'adaptive.stepDownMm': { label: 'adaptive step-down (chosen)', unit: 'mm', rule: z.number().min(0.05).max(10), fallback: 1 },
   'adaptive.helixDiameterFraction': { label: 'helix entry diameter, in cutter diameters (chosen)', unit: 'x', rule: z.number().min(0.1).max(0.95), fallback: 0.5 },
   'adaptive.rampAngleDeg': { label: 'helix and ramp entry angle (chosen)', unit: 'deg', rule: z.number().min(0.5).max(30), fallback: 2 },
+  // #668 — the bore's helix angle. Its OWN key, not `adaptive.rampAngleDeg`: the bore runs today,
+  // adaptive clearing is not wired, and two features sharing a number would tie the bore's descent
+  // to a setting named for something else.
+  'bore.rampAngleDeg': { label: 'bore helix ramp angle (chosen)', unit: 'deg', rule: z.number().min(0.5).max(30), fallback: 2 },
   // ── #451 adaptive settings (begin) — the entry clearance and the planner's three refusal limits.
   // CHOSEN, not measured: `adaptive.ts` plans a pocket, and each of these is where it gives up rather
   // than a number the machine reads. The clearance is the step ABOVE the floor just cut that a rapid
