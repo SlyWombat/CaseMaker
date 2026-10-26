@@ -1,6 +1,6 @@
 # Operations matrix — CAM operation types across the category, and what Case Maker posts and offers
 
-Status as of 2026-10-26, Case Maker `main` 81e52160 (GitHub issue #663). Companion to
+Status as of 2026-10-26, Case Maker `main` 570c69d6 (GitHub issue #663). Companion to
 `MAKERA-VS-CASEMAKER.md` (§G "CAM & output") and `/Makera-Parity.md` §2 (the 14 Studio strategy types).
 
 The maintainer's words: "operation palettes we need to track and make sure that we offer the same
@@ -50,7 +50,7 @@ Manufacture (personal tier), **ES** Easel, **BT** Bantam Tools Desktop CNC (Bant
 | Rotary / 4th axis | not established | Wrapped Rotary Axis Toolpaths [VC1] | — (4-axis paid tier only) [FU8] | not established | 4th-axis text; 4th Axis accessory [BT1]† | Indexed Operations (not called rotary) [KM1] | Rotary Mode [LB3] | Rotation Relief (11) [MK1] | 4-axis Model [SM1]† | NO — designed (`/Rotary.md`, #545); column engine parameterised (#239); nothing reaches the IR | NO |
 | Facing / surfacing the stock | not established | not established | Face† (page not opened) | not established | facing [BT1]† | Level [KM1] | — | not one of the 14 types [MK1] | not established | YES: raster skim to Z0, wood/metal only (`cam/facing.ts`, `engine/cnc/engrave/facingTool.ts`) | YES: facing switch + depth (`EngravePanel.tsx`, `setFacing`) and the start wizard's seed |
 | Image to relief (greyscale to depth) | not established | PhotoVCarve Strategy [VC1] | not established | not established | not established | not established | Image [LB1] | Trace Image (tutorial) [MK3]; Laser Image | Relief: Carve (greyscale) [SM1]† | NO as such: image trace gives a thresholded cut region only (`import/rasterOutline.ts`) | PARTIAL: "Trace image…" |
-| Inlay | Pro inlays (advanced V-carve) † [CC1] | Auto-inlay Toolpaths; VCarve Inlays (Pro) [VC1] | not established | not established | not established | not established | — | not established | not established | NO | NO |
+| Inlay | Pro inlays (advanced V-carve) † [CC1] | Auto-inlay Toolpaths; VCarve Inlays (Pro) [VC1] | not established | not established | not established | not established | — | not established | not established | YES: the female pocket is a plane V-carve at the region's depth, and the male is a derived JOB — the design mirrored in Y, the complement cut around the plug at `pocket − glue gap`, the island eroded by `gap × tan(halfAngle)` (`engine/cnc/engrave/inlay.ts`, #673) | YES: “Inlay” in the operation picker, the glue-gap field and the derived plug numbers on the shape row, and “Save the male blank…” (`EngraveShapeRow.tsx`, #673) |
 | Fluting / prism / moulding | not established | Fluting; Raised Prism Machining; moulding named [VC1] | not established | not established | not established | not established | — | not established | not established | NO | NO |
 
 ## 2. Case Maker gaps

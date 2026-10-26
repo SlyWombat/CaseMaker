@@ -126,6 +126,48 @@ const polygonPointSchema = z
   .tuple([z.number().finite(), z.number().finite()])
   .describe('An [x, y] point in millimetres, relative to the item position.');
 
+/**
+ * #673 — one half of a V-carve inlay, as the document stores it. The FEMALE keeps the operator's
+ * number (the glue gap); the MALE keeps the numbers it was BUILT for, which its sheet quotes and
+ * its geometry needs. Strict, so a hand-edited key is refused rather than silently dropped.
+ */
+const inlayMarkSchema = z
+  .object({
+    role: z
+      .enum(['female', 'male'])
+      .describe("Which half this region is: the female pocket ('female') or the complement cut around the mirrored plug ('male')."),
+    glueGapMm: z
+      .number()
+      .finite()
+      .positive()
+      .max(20)
+      .optional()
+      .describe('Glue gap between the plug’s end and the female’s floor, in millimetres; omit for the inlay default (0.2 mm).'),
+    pocketDepthMm: z
+      .number()
+      .finite()
+      .positive()
+      .max(20)
+      .optional()
+      .describe('Male only: the female pocket depth this male was built for, in millimetres.'),
+    tanHalf: z
+      .number()
+      .finite()
+      .positive()
+      .max(10)
+      .optional()
+      .describe('Male only: the cone half-angle tangent this male was built for.'),
+    islandInsetMm: z
+      .number()
+      .finite()
+      .nonnegative()
+      .max(20)
+      .optional()
+      .describe('Male only: the plug island’s erosion, in millimetres (the glue gap times the half-angle tangent).'),
+  })
+  .strict()
+  .describe('A V-carve inlay half: its role and the glue-gap numbers it runs or was built for.');
+
 const shapeBaseSchema = z.object({
   id: z.string().min(1).describe('Unique id for this item within the job.'),
   name: z.string().optional().describe('Optional human-readable name for the item list.'),
@@ -165,6 +207,10 @@ const shapeBaseSchema = z.object({
       "A V-carved region's depth: 'plane' (absent — the constant floor at the colour plane) or " +
         "'variable' (the medial-axis depth map, cut as a ladder of level sets).",
     ),
+  // #673 — an inlay half. Optional, so a pre-#673 document keeps no key.
+  inlay: inlayMarkSchema
+    .optional()
+    .describe('This region is one half of a V-carve inlay (#673); omit for an ordinary region.'),
 });
 
 const shapeKindsSchema = z.discriminatedUnion('kind', [

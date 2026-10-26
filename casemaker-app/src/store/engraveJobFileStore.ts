@@ -69,6 +69,15 @@ export function setJobFileIO(next: JobFileIO | null): void {
   io = next ?? defaultIO;
 }
 
+/**
+ * #673 — write a SECOND job document through the same Save As… path the open job uses, without
+ * touching the open document. The one caller is the inlay pair: the male blank is a derived job
+ * file the operator saves and opens as its own job.
+ */
+export async function saveJobFileText(text: string, suggestedName: string): Promise<SaveTextOutcome> {
+  return io.save(text, suggestedName);
+}
+
 /** A handle's own file name when the platform exposes one. */
 function handleName(handle: ProjectFileHandle, fallback: string): string {
   const name = (handle as { name?: unknown }).name;

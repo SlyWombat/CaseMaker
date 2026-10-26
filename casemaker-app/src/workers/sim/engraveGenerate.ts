@@ -1001,8 +1001,9 @@ function vCarveFindings(
     // the region's width, so the plane model's checks (the clamp, the film, the groove width)
     // describe a cut it does not make. #677 — its CORE is derived and reported by the RUN, not
     // here: only the run knows the setup's later cutters, so it alone can say whether the core is
-    // cleared, and by which end mill.
-    if (item.variableDepth === true) continue;
+    // cleared, and by which end mill. #673 — an INLAY half has no colour plane either: its flank
+    // is on the design at the top face.
+    if (item.variableDepth === true || item.inlay !== undefined) continue;
     const plane = planeById.get(item.id);
     if (plane === undefined) continue;
 
@@ -1228,8 +1229,21 @@ export function engraveRegions(
     const engrave = engraveById.get(labelId);
     if (engrave === undefined || cone === null) return 0;
     const plane = vCarvePlane(cone, engrave.depth, colourBoundaryDepth);
-    planeById.set(labelId, plane);
-    return plane.planeRadius;
+    // #673 — an INLAY has no colour plane: the flank is on the design at the TOP face and the
+    // floor is the design eroded by the cut's whole depth, which is the variable carve's frame
+    // with a flat cap. The plane radius is therefore `tip + depth·tan`, and the floor inset the
+    // whole depth's slant.
+    const effective =
+      engrave.inlay !== undefined
+        ? {
+            ...plane,
+            planeRadius: cone.tipRadius + engrave.depth * cone.tanHalf,
+            floorInset: engrave.depth * cone.tanHalf,
+            surfaceOutset: 0,
+          }
+        : plane;
+    planeById.set(labelId, effective);
+    return effective.planeRadius;
   };
   if (cone !== null) {
     for (const engrave of plan.engraves) planeRadiusFor(engrave.id);
@@ -1250,12 +1264,17 @@ export function engraveRegions(
   // DERIVED core is inside its parent design, so any breach it could report is the parent's
   // finding, said against a row that exists.
   const variableIds = new Set(plan.engraves.filter((e) => e.variableDepth === true).map((e) => e.id));
+  // #673 — an inlay's floor is the design eroded by its own depth, not a cutter-width limit: the
+  // opening ratio and the empty check describe a colour-plane carve it does not make.
+  const inlayIds = new Set(plan.engraves.filter((e) => e.inlay !== undefined).map((e) => e.id));
   const derivedIds = new Set((derivedCores ?? []).map((core) => core.id));
   const engFindings =
     measured.length === 0
       ? []
       : engravabilityFindings(job, measured, ratioAt, tool, shop.lostDetailWarnRatio ?? null).filter(
-          (f) => f.labelId === undefined || (!variableIds.has(f.labelId) && !derivedIds.has(f.labelId)),
+          (f) =>
+            f.labelId === undefined ||
+            (!variableIds.has(f.labelId) && !inlayIds.has(f.labelId) && !derivedIds.has(f.labelId)),
         );
 
   // #171/#345 — the cut regions a void check reads are built ONCE, below: the engrave openings,
@@ -1271,6 +1290,14 @@ export function engraveRegions(
    * level and the oracle reads the same set.
    */
   const designOf = (engrave: PartPlan['engraves'][number]): Polygons => {
+    // #673 — an INLAY's design is the TOP boundary (the profile): its flank stands on the design
+    // at the top face, so the measured opening at a plane is not the design.
+    if (engrave.inlay !== undefined) {
+      const cs = executeProfile(tl, engrave.profile);
+      const polygons = cs.toPolygons() as Polygons;
+      cs.delete();
+      return polygons;
+    }
     const measuredPolygons = byId.get(engrave.id)?.polygons;
     if (measuredPolygons !== undefined && measuredPolygons.length > 0) return measuredPolygons;
     if (engrave.variableDepth !== true) return [];
@@ -1312,6 +1339,8 @@ export function engraveRegions(
         // #665 — the medial-axis carve: the CAM builds its ladder, and the oracle predicts the
         // ring at each level rather than this floor.
         ...(engrave.variableDepth === true ? { variable: true } : {}),
+        // #673 — an inlay half: the CAM bounds the floor's pass pitch by the glue gap.
+        ...(engrave.inlay === undefined ? {} : { inlay: engrave.inlay }),
         // With no film (or a cut that never reaches it) the plane IS the floor, so the design
         // outline is drawn at the cut depth; otherwise it sits at the colour boundary.
         planeDepth: plane.film > 0 && engrave.depth >= plane.film ? plane.film : engrave.depth,
@@ -1536,6 +1565,7 @@ export function engraveRegions(
       depth: e.depth,
       polygons: designOf(e),
       ...(vCarve === undefined ? {} : { vCarve }),
+      ...(e.inlay === undefined ? {} : { inlay: e.inlay }),
       ...(e.through === true ? { through: true as const } : {}),
     };
   });

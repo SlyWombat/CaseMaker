@@ -88,6 +88,48 @@
                     "minLength": 1,
                     "type": "string"
                   },
+                  "inlay": {
+                    "additionalProperties": false,
+                    "description": "This region is one half of a V-carve inlay (#673); omit for an ordinary region.",
+                    "properties": {
+                      "glueGapMm": {
+                        "description": "Glue gap between the plug’s end and the female’s floor, in millimetres; omit for the inlay default (0.2 mm).",
+                        "exclusiveMinimum": 0,
+                        "maximum": 20,
+                        "type": "number"
+                      },
+                      "islandInsetMm": {
+                        "description": "Male only: the plug island’s erosion, in millimetres (the glue gap times the half-angle tangent).",
+                        "maximum": 20,
+                        "minimum": 0,
+                        "type": "number"
+                      },
+                      "pocketDepthMm": {
+                        "description": "Male only: the female pocket depth this male was built for, in millimetres.",
+                        "exclusiveMinimum": 0,
+                        "maximum": 20,
+                        "type": "number"
+                      },
+                      "role": {
+                        "description": "Which half this region is: the female pocket ('female') or the complement cut around the mirrored plug ('male').",
+                        "enum": [
+                          "female",
+                          "male"
+                        ],
+                        "type": "string"
+                      },
+                      "tanHalf": {
+                        "description": "Male only: the cone half-angle tangent this male was built for.",
+                        "exclusiveMinimum": 0,
+                        "maximum": 10,
+                        "type": "number"
+                      }
+                    },
+                    "required": [
+                      "role"
+                    ],
+                    "type": "object"
+                  },
                   "inset": {
                     "description": "Distance of the ring from the referenced item's outline, in millimetres.",
                     "minimum": 0,
@@ -184,6 +226,48 @@
                     "minLength": 1,
                     "type": "string"
                   },
+                  "inlay": {
+                    "additionalProperties": false,
+                    "description": "This region is one half of a V-carve inlay (#673); omit for an ordinary region.",
+                    "properties": {
+                      "glueGapMm": {
+                        "description": "Glue gap between the plug’s end and the female’s floor, in millimetres; omit for the inlay default (0.2 mm).",
+                        "exclusiveMinimum": 0,
+                        "maximum": 20,
+                        "type": "number"
+                      },
+                      "islandInsetMm": {
+                        "description": "Male only: the plug island’s erosion, in millimetres (the glue gap times the half-angle tangent).",
+                        "maximum": 20,
+                        "minimum": 0,
+                        "type": "number"
+                      },
+                      "pocketDepthMm": {
+                        "description": "Male only: the female pocket depth this male was built for, in millimetres.",
+                        "exclusiveMinimum": 0,
+                        "maximum": 20,
+                        "type": "number"
+                      },
+                      "role": {
+                        "description": "Which half this region is: the female pocket ('female') or the complement cut around the mirrored plug ('male').",
+                        "enum": [
+                          "female",
+                          "male"
+                        ],
+                        "type": "string"
+                      },
+                      "tanHalf": {
+                        "description": "Male only: the cone half-angle tangent this male was built for.",
+                        "exclusiveMinimum": 0,
+                        "maximum": 10,
+                        "type": "number"
+                      }
+                    },
+                    "required": [
+                      "role"
+                    ],
+                    "type": "object"
+                  },
                   "kind": {
                     "const": "frame",
                     "description": "A frame around an existing item, with a gap.",
@@ -265,6 +349,48 @@
                     "description": "Unique id for this item within the job.",
                     "minLength": 1,
                     "type": "string"
+                  },
+                  "inlay": {
+                    "additionalProperties": false,
+                    "description": "This region is one half of a V-carve inlay (#673); omit for an ordinary region.",
+                    "properties": {
+                      "glueGapMm": {
+                        "description": "Glue gap between the plug’s end and the female’s floor, in millimetres; omit for the inlay default (0.2 mm).",
+                        "exclusiveMinimum": 0,
+                        "maximum": 20,
+                        "type": "number"
+                      },
+                      "islandInsetMm": {
+                        "description": "Male only: the plug island’s erosion, in millimetres (the glue gap times the half-angle tangent).",
+                        "maximum": 20,
+                        "minimum": 0,
+                        "type": "number"
+                      },
+                      "pocketDepthMm": {
+                        "description": "Male only: the female pocket depth this male was built for, in millimetres.",
+                        "exclusiveMinimum": 0,
+                        "maximum": 20,
+                        "type": "number"
+                      },
+                      "role": {
+                        "description": "Which half this region is: the female pocket ('female') or the complement cut around the mirrored plug ('male').",
+                        "enum": [
+                          "female",
+                          "male"
+                        ],
+                        "type": "string"
+                      },
+                      "tanHalf": {
+                        "description": "Male only: the cone half-angle tangent this male was built for.",
+                        "exclusiveMinimum": 0,
+                        "maximum": 10,
+                        "type": "number"
+                      }
+                    },
+                    "required": [
+                      "role"
+                    ],
+                    "type": "object"
                   },
                   "islands": {
                     "description": "Ids of items kept standing inside the cleared area.",
@@ -3808,6 +3934,48 @@
                     "minLength": 1,
                     "type": "string"
                   },
+                  "inlay": {
+                    "additionalProperties": false,
+                    "description": "This region is one half of a V-carve inlay (#673); omit for an ordinary region.",
+                    "properties": {
+                      "glueGapMm": {
+                        "description": "Glue gap between the plug’s end and the female’s floor, in millimetres; omit for the inlay default (0.2 mm).",
+                        "exclusiveMinimum": 0,
+                        "maximum": 20,
+                        "type": "number"
+                      },
+                      "islandInsetMm": {
+                        "description": "Male only: the plug island’s erosion, in millimetres (the glue gap times the half-angle tangent).",
+                        "maximum": 20,
+                        "minimum": 0,
+                        "type": "number"
+                      },
+                      "pocketDepthMm": {
+                        "description": "Male only: the female pocket depth this male was built for, in millimetres.",
+                        "exclusiveMinimum": 0,
+                        "maximum": 20,
+                        "type": "number"
+                      },
+                      "role": {
+                        "description": "Which half this region is: the female pocket ('female') or the complement cut around the mirrored plug ('male').",
+                        "enum": [
+                          "female",
+                          "male"
+                        ],
+                        "type": "string"
+                      },
+                      "tanHalf": {
+                        "description": "Male only: the cone half-angle tangent this male was built for.",
+                        "exclusiveMinimum": 0,
+                        "maximum": 10,
+                        "type": "number"
+                      }
+                    },
+                    "required": [
+                      "role"
+                    ],
+                    "type": "object"
+                  },
                   "kind": {
                     "const": "rect",
                     "description": "A rectangular pocket with rounded corners.",
@@ -3895,6 +4063,48 @@
                     "minLength": 1,
                     "type": "string"
                   },
+                  "inlay": {
+                    "additionalProperties": false,
+                    "description": "This region is one half of a V-carve inlay (#673); omit for an ordinary region.",
+                    "properties": {
+                      "glueGapMm": {
+                        "description": "Glue gap between the plug’s end and the female’s floor, in millimetres; omit for the inlay default (0.2 mm).",
+                        "exclusiveMinimum": 0,
+                        "maximum": 20,
+                        "type": "number"
+                      },
+                      "islandInsetMm": {
+                        "description": "Male only: the plug island’s erosion, in millimetres (the glue gap times the half-angle tangent).",
+                        "maximum": 20,
+                        "minimum": 0,
+                        "type": "number"
+                      },
+                      "pocketDepthMm": {
+                        "description": "Male only: the female pocket depth this male was built for, in millimetres.",
+                        "exclusiveMinimum": 0,
+                        "maximum": 20,
+                        "type": "number"
+                      },
+                      "role": {
+                        "description": "Which half this region is: the female pocket ('female') or the complement cut around the mirrored plug ('male').",
+                        "enum": [
+                          "female",
+                          "male"
+                        ],
+                        "type": "string"
+                      },
+                      "tanHalf": {
+                        "description": "Male only: the cone half-angle tangent this male was built for.",
+                        "exclusiveMinimum": 0,
+                        "maximum": 10,
+                        "type": "number"
+                      }
+                    },
+                    "required": [
+                      "role"
+                    ],
+                    "type": "object"
+                  },
                   "kind": {
                     "const": "circle",
                     "description": "A round pocket.",
@@ -3969,6 +4179,48 @@
                     "description": "Unique id for this item within the job.",
                     "minLength": 1,
                     "type": "string"
+                  },
+                  "inlay": {
+                    "additionalProperties": false,
+                    "description": "This region is one half of a V-carve inlay (#673); omit for an ordinary region.",
+                    "properties": {
+                      "glueGapMm": {
+                        "description": "Glue gap between the plug’s end and the female’s floor, in millimetres; omit for the inlay default (0.2 mm).",
+                        "exclusiveMinimum": 0,
+                        "maximum": 20,
+                        "type": "number"
+                      },
+                      "islandInsetMm": {
+                        "description": "Male only: the plug island’s erosion, in millimetres (the glue gap times the half-angle tangent).",
+                        "maximum": 20,
+                        "minimum": 0,
+                        "type": "number"
+                      },
+                      "pocketDepthMm": {
+                        "description": "Male only: the female pocket depth this male was built for, in millimetres.",
+                        "exclusiveMinimum": 0,
+                        "maximum": 20,
+                        "type": "number"
+                      },
+                      "role": {
+                        "description": "Which half this region is: the female pocket ('female') or the complement cut around the mirrored plug ('male').",
+                        "enum": [
+                          "female",
+                          "male"
+                        ],
+                        "type": "string"
+                      },
+                      "tanHalf": {
+                        "description": "Male only: the cone half-angle tangent this male was built for.",
+                        "exclusiveMinimum": 0,
+                        "maximum": 10,
+                        "type": "number"
+                      }
+                    },
+                    "required": [
+                      "role"
+                    ],
+                    "type": "object"
                   },
                   "kind": {
                     "const": "slot",
@@ -4055,6 +4307,48 @@
                     "description": "Unique id for this item within the job.",
                     "minLength": 1,
                     "type": "string"
+                  },
+                  "inlay": {
+                    "additionalProperties": false,
+                    "description": "This region is one half of a V-carve inlay (#673); omit for an ordinary region.",
+                    "properties": {
+                      "glueGapMm": {
+                        "description": "Glue gap between the plug’s end and the female’s floor, in millimetres; omit for the inlay default (0.2 mm).",
+                        "exclusiveMinimum": 0,
+                        "maximum": 20,
+                        "type": "number"
+                      },
+                      "islandInsetMm": {
+                        "description": "Male only: the plug island’s erosion, in millimetres (the glue gap times the half-angle tangent).",
+                        "maximum": 20,
+                        "minimum": 0,
+                        "type": "number"
+                      },
+                      "pocketDepthMm": {
+                        "description": "Male only: the female pocket depth this male was built for, in millimetres.",
+                        "exclusiveMinimum": 0,
+                        "maximum": 20,
+                        "type": "number"
+                      },
+                      "role": {
+                        "description": "Which half this region is: the female pocket ('female') or the complement cut around the mirrored plug ('male').",
+                        "enum": [
+                          "female",
+                          "male"
+                        ],
+                        "type": "string"
+                      },
+                      "tanHalf": {
+                        "description": "Male only: the cone half-angle tangent this male was built for.",
+                        "exclusiveMinimum": 0,
+                        "maximum": 10,
+                        "type": "number"
+                      }
+                    },
+                    "required": [
+                      "role"
+                    ],
+                    "type": "object"
                   },
                   "kind": {
                     "const": "polygon",
@@ -5438,6 +5732,48 @@
                 "required": [
                   "name",
                   "sha256"
+                ],
+                "type": "object"
+              },
+              "inlay": {
+                "additionalProperties": false,
+                "description": "This region is one half of a V-carve inlay (#673); omit for an ordinary region.",
+                "properties": {
+                  "glueGapMm": {
+                    "description": "Glue gap between the plug’s end and the female’s floor, in millimetres; omit for the inlay default (0.2 mm).",
+                    "exclusiveMinimum": 0,
+                    "maximum": 20,
+                    "type": "number"
+                  },
+                  "islandInsetMm": {
+                    "description": "Male only: the plug island’s erosion, in millimetres (the glue gap times the half-angle tangent).",
+                    "maximum": 20,
+                    "minimum": 0,
+                    "type": "number"
+                  },
+                  "pocketDepthMm": {
+                    "description": "Male only: the female pocket depth this male was built for, in millimetres.",
+                    "exclusiveMinimum": 0,
+                    "maximum": 20,
+                    "type": "number"
+                  },
+                  "role": {
+                    "description": "Which half this region is: the female pocket ('female') or the complement cut around the mirrored plug ('male').",
+                    "enum": [
+                      "female",
+                      "male"
+                    ],
+                    "type": "string"
+                  },
+                  "tanHalf": {
+                    "description": "Male only: the cone half-angle tangent this male was built for.",
+                    "exclusiveMinimum": 0,
+                    "maximum": 10,
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "role"
                 ],
                 "type": "object"
               },

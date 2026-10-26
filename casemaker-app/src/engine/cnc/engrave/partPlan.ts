@@ -1,4 +1,5 @@
 import { glyphProfile } from '@/engine/compiler/glyphs';
+import { DEFAULT_INLAY_GLUE_GAP_MM } from './inlay';
 import { segmentsForRadius } from '@/engine/compiler/arcResolution';
 import {
   aabbOfProfile,
@@ -109,6 +110,14 @@ export interface PartPlan {
      * job's cutter is a cone.
      */
     variableDepth?: boolean;
+    /**
+     * #673 — the item is an INLAY half. Its design is the TOP BOUNDARY (the profile), not the
+     * opening at a colour plane: the flank stands on the design at the top face and the floor is
+     * the design eroded by the cut's whole depth. The glue gap travels with it because the CAM
+     * bounds the floor's pass pitch by it (the ridges between passes must stay inside the gap).
+     * Read only when the job's cutter is a cone.
+     */
+    inlay?: { role: 'female' | 'male'; glueGapMm: number };
   }[];
   /**
    * PROFILE CUT-OUTS (#218), a fifth sibling: the outline a `cam/profile.ts` path follows, plus
@@ -629,13 +638,18 @@ export function itemProfile(
     case 'cutaway': {
       const outer = ctx?.profileOf(item.outer) ?? null;
       if (!outer) return emptyProfile();
+      // #673 — a MALE inlay half cuts the complement AROUND the plug, and the plug must sit
+      // inside the female's opening by the glue gap's slant (`g·tanθ`): the island is eroded by
+      // the inset the male stored when it was built. A profile node, so the geometry worker
+      // evaluates it — the preview, the CAM and the verifier all see the same edge.
+      const inset = item.inlay?.role === 'male' ? (item.inlay.islandInsetMm ?? 0) : 0;
       const islands: Profile[] = [];
       for (const id of item.islands) {
         const island = ctx?.profileOf(id) ?? null;
         // A cutaway with a bad island reference does not resolve at all — `resolveItems` drops
         // it. Reaching here without a profile means an empty result rather than a half-cut panel.
         if (!island) return emptyProfile();
-        islands.push(island);
+        islands.push(inset > 0 ? pOffset(island, -inset, 'round') : island);
       }
       return pDifference([outer, ...islands]);
     }
@@ -1965,6 +1979,10 @@ export function toPartPlan(job: EngraveJob, options: PartPlanOptions = {}): Part
     // at the same depth.
     const through = 'through' in item && item.through === true;
     const variableDepth = 'vCarveDepth' in item && item.vCarveDepth === 'variable';
+    const inlay =
+      'inlay' in item && item.inlay !== undefined
+        ? { role: item.inlay.role, glueGapMm: item.inlay.glueGapMm ?? DEFAULT_INLAY_GLUE_GAP_MM }
+        : undefined;
     engraves.push({
       id: item.id,
       // The ready-made operation name (#214/#215), carried on the one funnel so the region
@@ -1974,6 +1992,7 @@ export function toPartPlan(job: EngraveJob, options: PartPlanOptions = {}): Part
       depth: through ? job.stock.thickness + job.breakthrough : item.depth,
       through,
       ...(variableDepth ? { variableDepth: true } : {}),
+      ...(inlay === undefined ? {} : { inlay }),
     });
   }
 

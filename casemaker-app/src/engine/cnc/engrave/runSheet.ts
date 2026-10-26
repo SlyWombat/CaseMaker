@@ -1,6 +1,6 @@
 import type { RapidEstimate } from '@/engine/cnc/cam/ir';
 import { aabbOfProfile } from '@/engine/compiler/profile';
-import { jobSetups, jobTool, type JobFinding } from '@/engine/cnc/engrave/jobSetup';
+import { itemLabel, jobSetups, jobTool, type JobFinding } from '@/engine/cnc/engrave/jobSetup';
 import {
   idJawReach,
   jawGapFor,
@@ -32,6 +32,7 @@ import { cutterLegend, cutterProfileSvg } from '@/engine/cnc/cutterProfile';
 // #221 — the V-carve facts are the CAM's own arithmetic and cone resolution, imported rather than
 // re-derived: the sheet, the panel and the program must not print different plane radii or pitches.
 import { vCone } from '@/engine/cnc/vProfile';
+import { inlayGlueGap, inlayMarked, inlayMm, inlayNumbers } from './inlay';
 import { vCarveLevels, vCarvePlane, vCarveStepover } from '@/engine/cnc/vCarveGeometry';
 import { colourBoundaryDepthFor } from '@/engine/cnc/layerStack';
 import { axesWord, describeTouch, kindWord, PROBE_SPEC, readsWord, registrationFor, sideWords } from '@/engine/cnc/engrave/registration';
@@ -2606,6 +2607,50 @@ function finishAllowanceStep(facts: RunSheetFinishFacts): RunSheetStep {
 }
 
 /**
+ * #673 — an INLAY half, in the operator's terms: which blank this is, the numbers the pair closes
+ * with (`inlayNumbers`'s, never re-derived), and what happens after both runs. One step per marked
+ * region on the female's side; the male's step is its own job's instructions, because the glue-up
+ * is a physical act between two runs.
+ */
+function inlaySteps(job: EngraveJob): RunSheetStep[] {
+  const marked = inlayMarked(job);
+  if (marked.length === 0) return [];
+  const tool = jobTool(job);
+  const cone = tool === null ? null : vCone(tool);
+  if (cone === null) return [];
+  const steps: RunSheetStep[] = [];
+  for (const { item, mark } of marked) {
+    const name = itemLabel(item);
+    if (mark.role === 'female') {
+      const check = inlayNumbers(cone, item.depth, inlayGlueGap(mark));
+      if (!check.ok) continue;
+      const n = check.numbers;
+      steps.push({
+        text:
+          `This is the FEMALE blank: ${name} is the pocket the plug glues into — ` +
+          `${inlayMm(n.pocketDepthMm)} mm deep with a ${inlayMm(n.glueGapMm)} mm glue gap. Save the male ` +
+          `blank from the row, cut it from the second blank with the same V-bit, and glue its machined face ` +
+          `down into this pocket: the plug's edge sits ${inlayMm(n.topInsetMm)} mm inside the design and its ` +
+          `end stops ${inlayMm(n.glueGapMm)} mm above this floor.`,
+        value: `female · ${inlayMm(n.pocketDepthMm)} mm pocket · ${inlayMm(n.glueGapMm)} mm gap`,
+      });
+    } else {
+      const gap = mark.glueGapMm === undefined ? null : mark.glueGapMm;
+      steps.push({
+        text:
+          `This is the MALE blank: ${name} cuts the complement around the plug, so the plug stands ` +
+          `${inlayMm(item.depth)} mm proud of the carved face. Cut it with the same V-bit as the female, glue ` +
+          `this machined face down into her pocket` +
+          (gap === null ? '' : ` (its marker records a ${inlayMm(gap)} mm glue gap)`) +
+          `, and when the glue cures plane the male blank away down to the plug's base.`,
+        value: `male · ${inlayMm(item.depth)} mm plug`,
+      });
+    }
+  }
+  return steps;
+}
+
+/**
  * #535 — a PURE GOAL job's surface steps: what the two passes did, then the engine's own notes
  * (the feeds, the undercuts a heightfield cannot express, the resolution, and a flat finishing
  * cutter). Every number is `surface3d`'s, printed rather than re-derived here.
@@ -3404,6 +3449,9 @@ export function buildRunSheet(
 
   // ---- 7 · Cut -------------------------------------------------------------------------------
   const cutSteps: RunSheetStep[] = [];
+  // #673 — an INLAY half opens the cut section with which blank this is and what happens to the
+  // pair after both runs. The numbers are `inlayNumbers`'s, never re-derived here.
+  cutSteps.push(...inlaySteps(job));
   // The one-program parameters step, kept by reference: a two-tool job relabels it PROGRAM 1 and
   // prints program 2's beside it (#437 item 8), and doing that by finding it again in the list
   // would be a search over prose.

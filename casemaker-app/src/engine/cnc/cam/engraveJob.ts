@@ -83,6 +83,12 @@ export interface VCarveRegion {
    * core at `depth` after this one (#677).
    */
   variable?: boolean;
+  /**
+   * #673 — an INLAY half's region: the design is the TOP boundary and the floor is the design
+   * eroded by the cut's whole depth. The CAM takes the glue gap so the floor's pass pitch can be
+   * bounded by it — a pass ridge higher than the gap would bottom the plug out.
+   */
+  inlay?: { role: 'female' | 'male'; glueGapMm: number };
 }
 
 /**
@@ -544,6 +550,26 @@ export function generateEngrave(
   const ringsFor = (label: EngraveRegion, extraRadius = 0): Polygons[] => {
     if (cone === null) return pocketLoops(label.polygons, flatRadius + extraRadius, params.stepOver, offset);
     const planeRadius = label.vCarve?.planeRadius ?? cone.tipRadius;
+    // #673 — AN INLAY's passes move the flank down a plane radius that stands on the design, so
+    // the pitch is bounded by the GLUE GAP rather than by the tip (an inlay bit may state its tip
+    // as a point, which has no width to bound anything with). Two cases:
+    //  - the FEMALE's floor is what the plug's end must clear: a ridge higher than the gap would
+    //    bottom the plug out, and the ridge between passes is `(pitch/2)·tanθ`, so the pitch is at
+    //    most `2·gap/tanθ`;
+    //  - the MALE's floor is its GLUE face — glue fills a ridge, and its flanks are shaped by the
+    //    outermost ring alone — so it runs at the row's ordinary step-over.
+    if (label.vCarve?.inlay !== undefined) {
+      const { role, glueGapMm } = label.vCarve.inlay;
+      if (!(planeRadius > 0) || !(glueGapMm > 0) || !(cone.tanHalf > 0)) {
+        throw new Error(
+          `generateEngrave: "${label.name ?? label.text}" is an inlay half with no usable glue gap ` +
+            `(${glueGapMm} mm) or plane radius (${planeRadius} mm) — fix the inlay's numbers before cutting`,
+        );
+      }
+      const pitch =
+        role === 'female' ? Math.min(params.stepOver, (2 * glueGapMm) / cone.tanHalf) : params.stepOver;
+      return pocketLoops(label.polygons, planeRadius, pitch, offset, pitch);
+    }
     if (!(planeRadius > 0) || !(tipWidth > 0)) {
       throw new Error(
         `generateEngrave: "${label.name ?? label.text}" has no groove at the colour plane (a point ` +

@@ -18,6 +18,10 @@
  *    the design's width down, level by level; where its width runs out the core stands and the
  *    setup's flat end mill pockets it flat in its own program after the V-carve (#677). The
  *    picker adds a rect with the flag; the shape row's fold switches it;
+ *  - `inlay` — a V-carve inlay half (#673): the female pocket (the region at its own depth, with
+ *    the glue gap on the row) or the male plug's job, which is GENERATED from the female's — the
+ *    design mirrored, the complement cut around it (the picker adds the female; the row saves the
+ *    male as its own job);
  *  - `profile` — a cut-out through the blank, held with tabs (a cutout item or a through shape);
  *  - `chamfer` — one flat bevel along a profile's part edge or a pocket's rim, cut by the cone's
  *    flank (#669): a `chamfer` item naming its rim, so the bevel follows an edge the job cuts;
@@ -46,6 +50,7 @@ export type OperationTypeId =
   | 'engrave'
   | 'v-carve'
   | 'v-carve-variable'
+  | 'inlay'
   | 'pocket'
   | 'profile'
   | 'chamfer'
@@ -69,6 +74,7 @@ export const OPERATION_TYPES: readonly OperationTypeDef[] = [
   { id: 'engrave', label: 'Engrave', blurb: 'Text, or single-stroke lines', addTestId: 'engrave-add-label' },
   { id: 'v-carve', label: 'V-carve', blurb: 'A region cut by the job’s V-bit', addTestId: 'engrave-add-v-carve' },
   { id: 'v-carve-variable', label: 'V-carve (variable depth)', blurb: 'The V follows the design’s width down to its centre', addTestId: 'engrave-add-v-carve-variable' },
+  { id: 'inlay', label: 'Inlay', blurb: 'A female pocket, and the male plug to glue into it', addTestId: 'engrave-add-inlay' },
   { id: 'pocket', label: 'Pocket', blurb: 'A flat-bottomed region', addTestId: 'engrave-add-rect' },
   { id: 'profile', label: 'Profile', blurb: 'A cut-out through the blank, held with tabs', addTestId: 'engrave-add-profile' },
   { id: 'chamfer', label: 'Chamfer the edge', blurb: 'Break a profile’s or pocket’s edge at an angle', addTestId: 'engrave-add-chamfer' },
@@ -98,13 +104,15 @@ export function regionOperationType(cutterIsV: boolean): 'v-carve' | 'pocket' {
  */
 export function operationTypeOfItem(
   item:
-    | { kind: string; through?: boolean; construction?: boolean; mode?: 'drill' | 'bore'; vCarveDepth?: 'plane' | 'variable' }
+    | { kind: string; through?: boolean; construction?: boolean; mode?: 'drill' | 'bore'; vCarveDepth?: 'plane' | 'variable'; inlay?: { role: 'female' | 'male' } }
     | null
     | undefined,
   region: 'v-carve' | 'pocket',
 ): OperationTypeId | null {
   if (item === null || item === undefined) return null;
   if (item.construction === true) return null;
+  // #673 — an inlay half is its own operation type whatever its role; the row says which half.
+  if (item.inlay !== undefined) return 'inlay';
   switch (item.kind) {
     case 'label':
     case 'trace':
@@ -174,6 +182,13 @@ export function addOperationOfType(type: Exclude<OperationTypeId, 'surface'>): s
       // back to the plane cut.
       const id = store.addShape('rect');
       store.updateShape(id, { vCarveDepth: 'variable' });
+      return id;
+    }
+    case 'inlay': {
+      // #673 — a plane V region marked as a FEMALE inlay half; the row states the glue gap and
+      // saves the matching male blank as its own job.
+      const id = store.addShape('rect');
+      store.updateShape(id, { inlay: { role: 'female' } });
       return id;
     }
     case 'profile':

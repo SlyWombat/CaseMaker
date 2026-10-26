@@ -232,6 +232,40 @@ export interface EngraveShapeBase {
    * named is wider than the core. Read only when the job's cutter is a cone.
    */
   vCarveDepth?: 'plane' | 'variable';
+  /**
+   * #673 — this region is a half of a V-CARVE INLAY: the design is cut as a pocket in one blank
+   * (the FEMALE) and as the complement around the mirrored design in a second blank (the MALE),
+   * and the two wedges are glued together. One marker per half; an inlay is two JOBS, one per
+   * blank (see `engine/cnc/engrave/inlay.ts`).
+   */
+  inlay?: InlayMark;
+}
+
+/**
+ * #673 — one half of an inlay, as the DOCUMENT holds it.
+ *
+ * The FEMALE stores what the operator decides: the role and the glue gap (`glueGapMm`, default
+ * 0.2 mm — the module's labelled default). Her pocket depth is the shape's own `depth`.
+ *
+ * The MALE stores the numbers it was BUILT for, as provenance, plus the one derived number its
+ * geometry needs (`islandInsetMm` = `glueGapMm · tan(halfAngle)`, the erosion of the island it
+ * carves around). A male is generated from a female by an action, not edited by hand; the run
+ * sheet says to generate it again if the female changed.
+ */
+export interface InlayMark {
+  role: 'female' | 'male';
+  /** The glue gap, mm: the vertical clearance between the plug's end and the female's floor. */
+  glueGapMm?: Mm;
+  /** Male only: the female pocket depth the male was built for, mm. */
+  pocketDepthMm?: Mm;
+  /** Male only: the cone's half-angle tangent the male was built for. */
+  tanHalf?: number;
+  /**
+   * Male only: the plug island's erosion at the male's TOP face, mm (`pocketDepthMm · tanHalf`).
+   * The V's hole GROWS with depth, so the island's top face is the plug's TIP — the female
+   * floor's extent — and its base at the male's floor is the visible ring.
+   */
+  islandInsetMm?: Mm;
 }
 
 /** A rectangle pocket. `cornerRadius` 0 = sharp — the cutter rounds it anyway. */

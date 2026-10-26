@@ -32,6 +32,7 @@ import {
 } from '@/engine/cnc/engrave/partPlan';
 import { FASTENERS } from '@/engine/compiler/fasteners';
 import { vCone, vFluteLength } from '@/engine/cnc/vProfile';
+import { inlayGlueGap, inlayMarked, inlayNumbers } from './inlay';
 import type {
   EngraveAnyItem,
   EngraveChamfer,
@@ -151,6 +152,12 @@ export type JobFindingCode =
   // `vcarve-variable-core` is the opposite note: the carve is sound, and the middle is the flat
   // cutter's — a warning that names the area to pocket.
   | 'vcarve-variable-core'
+  // V-carve inlays (#673). A half of an inlay is the cone's flank by definition
+  // (`inlay-needs-cone`), its glue gap must derive into a real plug (`inlay-gap`), and its pocket
+  // is the PLANE V's — a variable-depth region has no matching plug (`inlay-plane-depth`).
+  | 'inlay-needs-cone'
+  | 'inlay-gap'
+  | 'inlay-plane-depth'
   // Through-cuts and cut-outs (#218). `through-needs-board`: no under-board, or one thinner than
   // the breakthrough plus a millimetre. `through-tool-reach`: the cutter's flutes/shank do not
   // cover `thickness + breakthrough`. `tab-unplaceable`, `cutout-empty` and `loose-piece` are
@@ -1193,6 +1200,96 @@ export function validateJob(
         `${itemLabel(item)} is a variable-depth V-carve, so its depth follows the cutter's flank ` +
         `at every point; "${carveTool.name}" is a ${carveTool.shape} cutter with no cone. Use a V-bit.`,
     });
+  }
+
+  // V-CARVE INLAYS (#673). Two checks per half, both data-plus-tool: the pair is a cone's flank
+  // (a flat cutter makes no wedge), and the numbers must derive — the glue gap above zero and
+  // below the pocket depth. A MALE half is generated, not edited, so its check is that the
+  // numbers it stores still describe the cut it carries.
+  for (const { item, mark } of inlayMarked(job)) {
+    const who = itemLabel(item);
+    const inlayTool = jobTool(job);
+    const inlayCone = inlayTool === null ? null : vCone(inlayTool);
+    if (inlayTool === null || inlayCone === null) {
+      findings.push({
+        severity: 'error',
+        code: 'inlay-needs-cone',
+        labelId: item.id,
+        message:
+          inlayTool === null
+            ? `${who} is an inlay half, and an inlay is cut by a V-bit's flank: choose a V-bit first.`
+            : `${who} is an inlay half, and an inlay is cut by a V-bit's flank; "${inlayTool.name}" ` +
+              `is a ${inlayTool.shape} cutter with no cone. Use a V-bit.`,
+      });
+      continue;
+    }
+    if (mark.role === 'female' && 'vCarveDepth' in item && item.vCarveDepth === 'variable') {
+      findings.push({
+        severity: 'error',
+        code: 'inlay-plane-depth',
+        labelId: item.id,
+        message:
+          `${who} is a variable-depth V-carve, and an inlay's plug is the PLANE V's mirror: ` +
+          'a variable-depth region has no matching plug. Set the V-carve depth back to plane.',
+      });
+      continue;
+    }
+    if (mark.role === 'female') {
+      const check = inlayNumbers(inlayCone, item.depth, inlayGlueGap(mark));
+      if (!check.ok) {
+        findings.push({
+          severity: 'error',
+          code: 'inlay-gap',
+          labelId: item.id,
+          message: `${who} cannot pair with a plug: ${check.reason}.`,
+        });
+      }
+      continue;
+    }
+    // The male's numbers are the ones it was BUILT for: its cut depth is the plug's, and its
+    // island's erosion is what keeps the plug inside the female's wall.
+    if (mark.islandInsetMm === undefined) {
+      findings.push({
+        severity: 'error',
+        code: 'inlay-gap',
+        labelId: item.id,
+        message:
+          `${who} is a male inlay half with no plug inset stored; save the male blank from the ` +
+          'female’s job again rather than editing this one.',
+      });
+      continue;
+    }
+    if (
+      mark.pocketDepthMm !== undefined &&
+      mark.tanHalf !== undefined &&
+      Math.abs(mark.islandInsetMm - mark.pocketDepthMm * mark.tanHalf) > 1e-6
+    ) {
+      findings.push({
+        severity: 'error',
+        code: 'inlay-gap',
+        labelId: item.id,
+        message:
+          `${who} erodes its plug island by ${fmt3(mark.islandInsetMm)} mm, but the island's top ` +
+          `face is the plug's tip: at a ${fmt3(mark.pocketDepthMm)} mm pocket the inset is ` +
+          `${fmt3(mark.pocketDepthMm * mark.tanHalf)} mm. Save the male blank from the female’s ` +
+          'job again.',
+      });
+      continue;
+    }
+    if (mark.pocketDepthMm !== undefined && mark.glueGapMm !== undefined) {
+      const expected = mark.pocketDepthMm - mark.glueGapMm;
+      if (Math.abs(item.depth - expected) > 1e-6) {
+        findings.push({
+          severity: 'error',
+          code: 'inlay-gap',
+          labelId: item.id,
+          message:
+            `${who} cuts ${fmt3(item.depth)} mm deep, but the numbers it was built for ` +
+            `(${fmt3(mark.pocketDepthMm)} mm pocket, ${fmt3(mark.glueGapMm)} mm gap) need ` +
+            `${fmt3(expected)} mm. Save the male blank from the female’s job again.`,
+        });
+      }
+    }
   }
 
   // MILLED THREADS (#445, #434 phase 2). A thread mill does not drill (D1): every check here

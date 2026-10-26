@@ -23,6 +23,7 @@ describe('#662 the operation types', () => {
       'engrave',
       'v-carve',
       'v-carve-variable',
+      'inlay',
       'pocket',
       'profile',
       'chamfer',
@@ -59,6 +60,11 @@ describe('#662 the operation types', () => {
     // job whose cutter makes a V-carve at all.
     expect(operationTypeOfItem({ kind: 'rect', vCarveDepth: 'variable' }, 'v-carve')).toBe('v-carve-variable');
     expect(operationTypeOfItem({ kind: 'rect', vCarveDepth: 'variable' }, 'pocket')).toBe('pocket');
+    // #673 — an inlay half is its own operation whatever the cutter makes the row; the row says
+    // which half, and a construction item never is one.
+    expect(operationTypeOfItem({ kind: 'rect', inlay: { role: 'female' } }, 'v-carve')).toBe('inlay');
+    expect(operationTypeOfItem({ kind: 'cutaway', inlay: { role: 'male' } }, 'v-carve')).toBe('inlay');
+    expect(operationTypeOfItem({ kind: 'rect', inlay: { role: 'female' }, construction: true }, 'v-carve')).toBeNull();
     expect(operationTypeOfItem({ kind: 'circle', through: true }, 'pocket')).toBe('profile');
     expect(operationTypeOfItem({ kind: 'cutout' }, 'pocket')).toBe('profile');
     // #669 — a chamfer is its own operation on an item's outline.

@@ -438,6 +438,21 @@ two programs meet without a step. A setup that names no flat end mill after the 
 standing, and `vcarve-variable-core` says so with its area. A flat end mill on a variable-depth
 region is refused by name (`vcarve-variable-needs-cone`).
 
+**Inlay (#673)** cuts a two-colour design as a PAIR of blanks. The operation adds a region carrying
+the **female** marker; its depth is the pocket depth and the row's **glue gap** (default 0.2 mm) is
+the vertical clearance the plug keeps off the pocket's floor. **Save the male blank…** builds the
+matching MALE job — its own document, its own copy of the blank, the design **mirrored** for the
+glue-up flip — with one cutaway cutting the complement around the plug. An inlay is two JOBS
+because a job is one blank: each is generated, simulated, packaged and run on its own blank, and
+each run sheet says which half it is. The numbers all derive from the pocket depth, the glue gap
+and the V-bit's half-angle: the plug is `pocket − gap` deep, its edge sits `gap × tan(halfAngle)`
+inside the design (so the visible ring is that width) and its end is exactly the pocket floor's
+extent, stopping the gap above the floor — the plug never reaches the floor and the two flanks
+self-align when clamped. Both halves use the same V-bit (`inlay-needs-cone`); a gap that is not
+above zero and below the pocket depth is refused (`inlay-gap`), and a variable-depth region cannot
+be an inlay half (`inlay-plane-depth`). After both runs, glue the male's machined face down into
+the female's pocket and plane the male blank away to the plug's base.
+
 **Chamfer the edge (#669)** breaks an edge rather than cutting a hole or a pocket: one flat bevel
 along a rim, cut by the job's V/chamfer bit with its flank held against the edge. The row picks the
 rim (a shape's, an imported outline's or a combined shape's own outline — often the part's
@@ -1350,6 +1365,9 @@ simulation does report about one is the sweep's own list, next:
 | `chamfer-order` | error | The chamfer's program runs on the wrong side of the cut that leaves its edge: a pocket's rim must be chamfered AFTER the pocket opens it, and a part's edge BEFORE its cut-out frees the part. The two never share a program — a cut-out profiles with a flat end mill, a chamfer needs a cone — so the setups' order is what decides it. | Move the chamfer's setup earlier (a part's edge) or later (a pocket's rim). |
 | `vcarve-variable-needs-cone` | error | A region asks for a variable-depth V-carve (the medial-axis depth map) and the job's cutter is not a cone — a flat end mill pockets one constant depth and would drop the request. | Use a V-bit. || `bore-no-diameter` | error | A bore to size has no hole diameter stated. A bore makes the hole the job asks for, not the cutter's own width, so without the diameter there is nothing to helix the wall to (#668). | State the hole's diameter on the row. |
 | `vcarve-variable-core` | warning | A variable-depth V-carve leaves a MIDDLE the V's width cannot reach at the stated depth: the V follows the design's width down, and where the width needs more than the depth allows, the floor stands as a core. The carve itself is sound and the flat bottom is a flat end mill's own program (#677) — this is raised only when the engine cannot clear it: the setup names no flat end mill after the V, or the one it names is wider than the core. The message states the area and the depth. | Add a flat end mill after the V in the setup — it pockets the core at the same depth in its own program. If the named cutter is wider than the core, use a smaller one. || `bore-needs-end-mill` | error | A bore to size is cut by helixing an end mill down the wall of the hole, so a V-bit, a ball nose or a drill bit cannot make it (#668). | Choose a flat end mill for the job that bores. |
+| `inlay-needs-cone` | error | An inlay half is a V-carve inlay — the plug's slope and the pocket's wall are the same cone's flank, and that wedge is what self-aligns — but the job's cutter has no cone (#673). | Use a V-bit. |
+| `inlay-gap` | error | The glue gap must be above zero (it is the clearance the plug keeps) and below the pocket depth (a plug that reaches the floor has no gap to glue into); a male half also carries the numbers it was built for — its cut depth and the inset its plug island is eroded by (the tip's, `pocket × tan(halfAngle)`) — and a male whose numbers no longer match its cut cannot close. | Put the gap between zero and the pocket depth, or save the male blank again from the female's job. |
+| `inlay-plane-depth` | error | A variable-depth V-carve has no matching plug — the male is the PLANE V's mirror, so the pair would not close (#673). | Set the V-carve depth back to plane. |
 | `bore-narrow` | error | A bore's hole is not wider than the cutter, so there is no centre path to helix on; the cut would just be a plunge hole the cutter's own width (#668). | Cut a bigger hole, or use a smaller cutter. |
 | `thread-wrong-tool` | error | The job has a thread, but the tool is not a thread mill. A thread is cut by orbiting a small cutter inside the pilot; a flat end mill cannot cut one (#445). | Pick a thread mill. |
 | `thread-mixed-tools` | error | The thread is enabled beside other work (a label, a shape, a trace, a drill). A thread program has ONE tool, and the toolpath has no way to describe a change part-way through. | Cut the thread in a program of its own, after the pilot and the other work. |

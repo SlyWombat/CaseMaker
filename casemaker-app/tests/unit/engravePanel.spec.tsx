@@ -37,6 +37,7 @@ import { runSheetFileName, runSheetFrameFileName } from '@/engine/cnc/engrave/ru
 import { saveEngraveProgram } from '@/engine/exportTrigger';
 import { clearFeedCatalogue, setFeedCatalogue, type FeedCatalogueRow } from '@/engine/cnc/feeds';
 import { setInventoryEntries, resetRegistry } from '@/engine/cnc/toolRegistry';
+import { setJobFileIO } from '@/store/engraveJobFileStore';
 import { flatEndMill } from '@/engine/cnc/tool';
 import { vCone } from '@/engine/cnc/vProfile';
 import { vCarvePlane, vCarveStepover, vCarveStepoverClampNote } from '@/engine/cnc/vCarveGeometry';
@@ -2749,5 +2750,79 @@ describe('EngravePanel — 3D primitives and the target object (#435)', () => {
     expect(input.accept).toContain('.3mf');
     expand('engrave-target');
     expect(screen.getByTestId('engrave-target-finding-0-target-object-not-cut')).toBeTruthy();
+  });
+});
+
+// #673 — THE INLAY HALF: the glue gap, the derived plug numbers, and the male blank's own job.
+describe('EngravePanel — inlay (#673)', () => {
+  const V_TOOL = flatEndMill(3.175, {
+    name: '3.175 mm 90° V',
+    typeText: 'Chamfer',
+    shape: 'chamfer',
+    tipDiameter: null,
+    diameter: 3.175,
+    angle: 90,
+    halfAngle: null,
+  });
+
+  const INLAY: EngraveShape = {
+    id: 'plate',
+    name: 'plate',
+    kind: 'rect',
+    position: { x: 50, y: 30 },
+    rotation: 0,
+    depth: 2,
+    enabled: true,
+    width: 20,
+    height: 10,
+    cornerRadius: 0,
+    inlay: { role: 'female' },
+  };
+
+  function showJob(): void {
+    act(() =>
+      useEngraveJobStore.setState({
+        job: {
+          ...defaultEngraveJob(),
+          labels: [],
+          traces: [],
+          toolKey: 'inv:v-673',
+          tool: V_TOOL,
+          shapes: [INLAY],
+        },
+      }),
+    );
+    render(<EngravePanel />);
+    expand('engrave-shape');
+  }
+
+  it('states the derived plug numbers and writes the glue gap onto the marker', () => {
+    showJob();
+    const note = screen.getByTestId('engrave-shape-inlay-note-0').textContent ?? '';
+    expect(note).toContain('Pocket 2 mm · plug 1.8 mm');
+    expect(note).toContain('0.2 mm inside the design');
+    fireEvent.change(screen.getByTestId('engrave-shape-inlay-gap-0'), { target: { value: '0.3' } });
+    expect(useEngraveJobStore.getState().job.shapes[0]!.inlay).toEqual({ role: 'female', glueGapMm: 0.3 });
+  });
+
+  it('saves the male blank as its own job file', async () => {
+    const save = vi.fn(async (_text: string, _name: string) => ({ kind: 'downloaded' as const }));
+    setJobFileIO({ save, write: vi.fn(), open: vi.fn() });
+    try {
+      showJob();
+      await act(async () => {
+        fireEvent.click(screen.getByTestId('engrave-shape-inlay-male-0'));
+      });
+      expect(save).toHaveBeenCalledTimes(1);
+      const [text, name] = save.mock.calls[0]! as unknown as [string, string];
+      expect(name).toMatch(/male\.cutjob\.json$/);
+      const parsed = parseEngraveJob(JSON.parse(text) as unknown);
+      expect(parsed.ok).toBe(true);
+      if (!parsed.ok) return;
+      expect(parsed.job.name).toContain('— male');
+      expect(parsed.job.combined?.[0]?.inlay?.role).toBe('male');
+    } finally {
+      setJobFileIO(null);
+    }
   });
 });

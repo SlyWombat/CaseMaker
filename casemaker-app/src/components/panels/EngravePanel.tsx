@@ -125,6 +125,16 @@ import { EngravePrimitiveRow } from './EngravePrimitiveRow';
 import { EngraveTargetObjectRow } from './EngraveTargetObjectRow';
 import { OperationPicker } from './OperationPicker';
 import { addOperationOfType, jobHasOperations, operationType, type OperationTypeId } from './operationTypes';
+import {
+  inlayGlueGap,
+  inlayMaleJob,
+  inlayMaleJobName,
+  inlayNumbers,
+  type InlayNumbers,
+} from '@/engine/cnc/engrave/inlay';
+import { jobFileName } from '@/engine/cnc/engrave/jobFile';
+import { saveJobFileText } from '@/store/engraveJobFileStore';
+import { parseEngraveJob } from '@/store/engraveJobSchema';
 import { setOperationIntake } from './operationIntake';
 import { EngraveTraceRow } from './EngraveTraceRow';
 import { EngraveVectorRow } from './EngraveVectorRow';
@@ -837,9 +847,16 @@ export function EngravePanel(): JSX.Element {
       .map((e) => ({ key: e.key, name: toolDisplayName(e.tool), diameter: cuttingDiameter(e.tool) as number }))
       .sort((a, b) => a.diameter - b.diameter);
     // #677 — a VARIABLE-depth shape under a cone with ONE later cutter: the second cutter is the
-    // core clearance, not a rest pass, and the chip says which.
+    // core clearance, not a rest pass, and the chip says which. The same precondition the
+    // generator applies (`coreCutterFor` above): a later cutter owning items keeps #472's rest
+    // model, so the chip must not promise a clearance that pair does not make.
+    const laterKey = setup.tools[1];
     const coreClearance =
-      isVariableCarve(itemId) && setup.tools.length === 2 && roughTool !== null && vCone(roughTool) !== null;
+      isVariableCarve(itemId) &&
+      setup.tools.length === 2 &&
+      roughTool !== null &&
+      vCone(roughTool) !== null &&
+      (laterKey === undefined || (setup.toolItems?.[laterKey]?.length ?? 0) === 0);
     return {
       rough: roughTool === null ? null : { key: roughEntry!.key, name: toolDisplayName(roughTool), diameter: roughDiameter },
       roughIsV: roughTool !== null && vCone(roughTool) !== null,
@@ -1207,6 +1224,38 @@ export function EngravePanel(): JSX.Element {
   const errors = findings.filter((f) => f.severity === 'error');
   const blockedByFeeds = feeds !== null && !feeds.ok;
   const blocked = errors.length > 0 || blockedByFeeds;
+
+  // #673 — THE INLAY HALF: the derived plug numbers (null when they do not derive) and the action
+  // that saves the MALE blank as its own job. The action is offered only when the female's job has
+  // no blocking finding — a male built from a job that cannot cut would be a second broken job.
+  const saveMaleInlay = async (): Promise<void> => {
+    if (tool === null) return;
+    const inlayCone = vCone(tool);
+    if (inlayCone === null) return;
+    const result = inlayMaleJob(job, inlayCone);
+    if (!result.ok) return;
+    const parsed = parseEngraveJob(result.job);
+    await saveJobFileText(
+      JSON.stringify(parsed.ok ? parsed.job : result.job, null, 2),
+      jobFileName(inlayMaleJobName(job.name)),
+    );
+  };
+  const inlayFor = (
+    shape: EngraveShape,
+  ): { numbers: InlayNumbers | null; onSaveMale: (() => void) | null } | undefined => {
+    if (shape.inlay === undefined || shape.inlay.role !== 'female') return undefined;
+    const check = cone === null ? null : inlayNumbers(cone, shape.depth, inlayGlueGap(shape.inlay));
+    const numbers = check !== null && check.ok ? check.numbers : null;
+    return {
+      numbers,
+      onSaveMale:
+        numbers === null || blocked
+          ? null
+          : () => {
+              void saveMaleInlay();
+            },
+    };
+  };
 
   const rec = preview?.recommendation ?? null;
   const recPick = rec?.key ? rec.candidates.find((c) => c.key === rec.key) ?? null : null;
@@ -2349,6 +2398,7 @@ export function EngravePanel(): JSX.Element {
                   coreCutterName: shape.vCarveDepth === 'variable' ? coreCutterFor(shape.id) : null,
                 }
           }
+          inlay={shape.construction === true ? null : (inlayFor(shape) ?? null)}
           onChange={(patch) => updateShape(shape.id, patch)}
           onRemove={() => removeShape(shape.id)}
         />
