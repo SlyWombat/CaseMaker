@@ -20,7 +20,7 @@ import { defaultStockProud, seatedVise, todayISODate, viseForNewJob } from '@/en
 import { sacrificialForNewJob } from '@/engine/cnc/sacrificial';
 import { resolveTool } from '@/engine/cnc/toolRegistry';
 import { cuttingDiameter } from '@/engine/cnc/tool';
-import { applyAnswers, type SetupAnswers } from '@/engine/cnc/engrave/setupFlow';
+import { applyHoldAnswers, type SetupAnswers } from '@/engine/cnc/engrave/setupFlow';
 import {
   itemKindWord,
   itemRowName,
@@ -1024,8 +1024,11 @@ export interface EngraveJobState {
    * no effect on a field the job does not override — the source is the value's, not a label.
    */
   setCutOverrideSource: (key: keyof CutParams, source: FieldSource) => void;
-  /** Apply a whole guided job setup in one write, stamping every value's source (#254). */
-  applySetup: (answers: SetupAnswers) => void;
+  /**
+   * Apply step 3's holding answers — the vise and the sacrificial — in one write (#254, #684).
+   * The stock and its provenance are step 2's; they are left exactly as they are.
+   */
+  applyHoldAnswers: (answers: SetupAnswers) => void;
   /**
    * Set this job's own depth margins, or clear them back to the house setting (#345). The
    * panel's "use the recommendation" passes `{ ...rec, source: 'recommended' }`; `null` deletes
@@ -2052,7 +2055,7 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
         return { ...job, sources: { ...(job.sources ?? {}), cut } };
       }),
 
-    applySetup: (answers) => apply((job) => applyAnswers(job, answers)),
+    applyHoldAnswers: (answers) => apply((job) => applyHoldAnswers(job, answers)),
 
     setJobMargins: (margins) =>
       apply((job) => {

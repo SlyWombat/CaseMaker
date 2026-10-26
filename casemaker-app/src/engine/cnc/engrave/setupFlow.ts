@@ -194,6 +194,23 @@ export function applyAnswers(job: EngraveJob, a: SetupAnswers): EngraveJob {
   };
 }
 
+/**
+ * The step-3 write: the holding answers ARE the workholding and the sacrificial, and nothing else.
+ *
+ * #684 review — the arrival write (the mount the stock calls for) goes through here. A whole-setup
+ * write would replace `sources.stock` with the answers' four fields, and the answers do not carry
+ * every stock-source key: a laminate's assumed cap (`sources.stock.colour`) has no answer field, so
+ * replacing the record dropped it and the job could no longer say the cap was an assumption. The
+ * stock is step 2's document; step 3 writes only what it asked about.
+ */
+export function applyHoldAnswers(job: EngraveJob, a: SetupAnswers): EngraveJob {
+  return {
+    ...job,
+    workholding: { kind: 'vise', vise: { ...a.vise } },
+    sacrificial: a.sacrificial,
+  };
+}
+
 /** Findings a step should show: the panel's own validators, filtered to that step's concern. */
 const STEP_CODES: Record<SetupStepId, ReadonlySet<JobFinding['code']>> = {
   holding: new Set([

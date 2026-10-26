@@ -27,6 +27,7 @@ function dj(...args: Parameters<typeof defaultEngraveJob>): ReturnType<typeof de
 }
 import {
   applyAnswers,
+  applyHoldAnswers,
   blankViseFindings,
   defaultSetupAnswers,
   materialOptionsFor,
@@ -144,6 +145,33 @@ describe('guided job setup — the pure answers (#254)', () => {
     // A job that already has strips: the seeded answers keep them.
     answers.sacrificial = presetJawStrips();
     expect(applyAnswers(job, answers).sacrificial).toEqual(presetJawStrips());
+  });
+});
+
+describe('#684 review — step 3 writes only the holding answers', () => {
+  it('leaves the stock and a stock source the answers cannot carry untouched', () => {
+    const base = dj();
+    const job = {
+      ...base,
+      stock: {
+        ...base.stock,
+        material: 'plastic' as const,
+        colour: { kind: 'laminate' as const, capMm: 0.075 },
+      },
+      sources: { ...(base.sources ?? {}), stock: { length: 'user' as const, colour: 'assumed' as const } },
+    };
+    const answers = defaultSetupAnswers(job);
+    const vise = { ...answers.vise, stockProud: 0.2 };
+    const after = applyHoldAnswers(job, { ...answers, vise });
+
+    // The stock and its provenance are step 2's: a laminate's assumed cap has no answer field, so
+    // a whole-setup write replaced the map and lost the fact that the cap was an assumption.
+    expect(after.stock).toEqual(job.stock);
+    expect(after.sources?.stock?.colour).toBe('assumed');
+    expect(after.sources?.stock?.length).toBe('user');
+    // The holding answers do land, each stamped by its own object.
+    expect(after.workholding.vise).toEqual(vise);
+    expect(after.sacrificial).toEqual(answers.sacrificial);
   });
 });
 

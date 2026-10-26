@@ -262,10 +262,15 @@ export function StartWizard(): JSX.Element {
     setStep('holding');
   }
 
-  /** Holding answers write as they change: there is no later Finish to collect them. */
-  function applyAnswers(next: SetupAnswers): void {
+  /**
+   * Holding answers write as they change: there is no later Finish to collect them. The write is
+   * the holding's own — the stock and its provenance belong to step 2 and are left untouched
+   * (#684 review: a laminate's assumed cap has no answer field to carry it through a whole-setup
+   * write, so writing the stock dropped it).
+   */
+  function applyHoldAnswers(next: SetupAnswers): void {
     setAnswers(next);
-    useEngraveJobStore.getState().applySetup(next);
+    useEngraveJobStore.getState().applyHoldAnswers(next);
   }
 
   async function chooseJob(id: string): Promise<void> {
@@ -622,7 +627,7 @@ export function StartWizard(): JSX.Element {
         </>
       )}
 
-      {step === 'holding' && <HoldingStep job={job} answers={answers} onAnswers={applyAnswers} />}
+      {step === 'holding' && <HoldingStep job={job} answers={answers} onAnswers={applyHoldAnswers} />}
 
       {step === 'operation' && (
         <OperationStep job={job} hasOperations={hasOperations} onChoiceChange={onOperationChoice} />
