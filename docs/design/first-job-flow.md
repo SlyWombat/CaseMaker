@@ -29,6 +29,11 @@ until the maintainer approves the flow and the mockups.*
    with its source in words, once, in its own place (decision 28), not as a chip on every input.
 7. **Nothing is explained twice**, and a sentence that explains a disabled control is a defect: hide the
    control, or enable it.
+8. **The machine's state is a fact the product reads, not a question it asks.** What is on the bed now (the
+   active bed profile: the vise or the rotary on the pins, the wasteboard, the boards and tape in stock) is
+   known; the job is held in what is there, or the operator is taken through changing it. **Every change to
+   the machine has a wizard of its own** (fixture on or off, cutter, probe, wasteboard), entered from
+   wherever the need arises and returning there.
 
 ## 2. The flow
 
@@ -38,7 +43,8 @@ until the maintainer approves the flow and the mockups.*
    ▼  NEW CUTTING JOB — one modal, "Step n of 4"
    1 Machine     the house's machine, checked on open: "Makera Z1 ‘Zoomba’ · Online · Idle · homed"   [Next]
    2 Stock       material (house first) · form (picture) · L × W × T mm · shelf when it has something    [Next]
-   3 Holding     vise / tape / rotary (what this stock calls for, drawn) · sacrificial · orientation     [Next]
+   3 Holding     in what is on the machine now (drawn) · how the stock sits in it · orientation         [Next]
+   │               └─ "Change the machine…" ──▶ the machine-change wizard (§3.8) ──▶ back to step 3
    4 Operation   "What are you cutting?" (grouped picker) → the one field it needs (the text, the file)  [Create job]
    │
    ▼  DESIGN  (the panel: Job · Cutter · Hold, a sticky footer with findings + Generate)
@@ -90,10 +96,15 @@ files) are offered on the same card.
 - Material defaults to the house's last material (PLA here), grouped Plastics / Woods / Metals; the
   catalogue's "plastic (unspecified)" is last in its group.
 - **Forms are pictures with one defining sentence each**: Plate (flat, cut from the top), Block (as tall as
-  it is wide; sides may be cut in later setups), Sheet (≤ 3 mm; tape), Printed blank (from a printer,
-  layers known), Disc and Rod (round; the vise holds a short one on its flat, the rotary holds a long one).
-  Nothing is "not offered" on the default path; a round form that needs the rotary says so under its
-  picture when picked.
+  it is wide; sides may be cut in later setups), Sheet (thin; in the vise on a waste board, or taped to the
+  bed), Printed blank (from a printer, layers known), Disc and Rod (round; the vise holds a short one on
+  its flat, the rotary holds a long one). Nothing is "not offered" on the default path; a round form that
+  needs the rotary says so under its picture when picked.
+- **The form word decides nothing by itself.** Today plate, block and sheet are the same thing in the engine
+  (the same three fields, the same mount, the same facing rule); the word is a label. In the target the
+  *numbers* decide: step 3 works out how this thickness sits in what is on the machine (on the ledge, on a
+  waste board, gripped as a block, taped) and says so. The form stays as the picture that sets the size
+  fields (Disc and Rod need a diameter) and the sentence that tells a new operator what the words mean.
 - Fields are `length X · width Y · thickness Z`, each with `mm`, the same words the panel uses.
 - The shelf appears only when it has something; "keep this piece on the shelf" is a tick under the size.
   Templates (badge blank, bare blank) move to the door's card as recent/starter jobs, not into this step.
@@ -102,18 +113,36 @@ files) are offered on the same card.
 
 ```
  Step 3 of 4 · Holding                                                    [ Close ]
- ◉ Vise  (what a 3.81 mm plate calls for)      ┌ top view ─────────────┐
- ○ Tape on the bed                             │ fixed jaw │ plate     │   X runs between the jaws;
- ○ Rotary chuck — needs round stock            │     ┃     │ 76 × 38   │   the fixed jaw is on the left
- Under the part   [ none ▾ ]  (a board when a cut goes through)        └───────────────────────┘
- ▸ Technical: jaw numbers (the shipped defaults), stock proud of the jaws 0.71 mm
+ On the machine now   Vise on the pins · wasteboard under · 2 mm MDF boards ×4, tape    (the active bed profile)
+                                                                        [ Change the machine… ]
+ How is the plate held?                         ┌ top view ─────────────┐
+ ◉ In the vise, on the jaw ledge                │ fixed jaw │ plate     │   X runs between the jaws;
+     3.81 mm stands 0.71 mm proud of the jaws   │     ┃     │ 76 × 38   │   the fixed jaw is on the left
+ ○ In the vise, on a waste board between the jaws  (2 mm MDF ▾)  — for a through cut, or thin stock
+ ○ In the vise, gripped as a block — the sides free                      └───────────────────────┘
+ ○ On the bed, taped          needs the vise off the pins · Change the machine…
+ ○ On the bed, bracket and clamps   needs the vise off the pins · Change the machine…
+ ○ In the rotary chuck        needs the rotary on the pins · Change the machine…
+ ▸ Which way round: face up (the printed face ▾) · against the fixed jaw (the long edge ▾) · nearest you (the left end ▾)
+ ▸ Technical: jaw numbers (shipped defaults) · board 2 mm (typed) · beside-the-part strips
                                                              [ Back ]   [ Next: operation ]
 ```
 
-- The mount the stock calls for is preselected; a mount that is not possible for this stock is shown
-  disabled with the reason as its one line, never an extra sentence below.
-- The picture carries the orientation facts the panel used to print as prose; the `vise-default`
-  provenance lives in the Technical fold.
+- **The step opens on what is on the machine now**, read from the location's active bed profile, in one
+  line. The options are *how this stock sits in that mechanism*, computed from the numbers: a 3.81 mm
+  plate on the 3.1 mm ledge stands 0.71 mm proud, so the ledge is the default; a 2 mm sheet would sit
+  1.1 mm below the jaw tops, so "on a waste board between the jaws" is the default and the ledge option
+  says why it is not. A block taller than the jaws is gripped with its sides free. The waste board is the
+  §5.2 "sacrificial under" with a name an operator uses, chosen from the boards the location has or typed.
+- **Options the installed mechanism cannot give are shown, not hidden**, with their one-line cost
+  ("needs the vise off the pins") and the escape: `Change the machine…` opens the machine-change wizard
+  (§3.8) and returns here with the new state drawn. Nothing is "not yet offered"; an accessory the house
+  does not own reads "not owned" with no further sentence.
+- The picture is per mechanism (vise: fixed jaw left, X between the jaws; bed: the bracket corner or the
+  front edge; rotary: the axis along X) and carries the orientation facts the panel used to print as prose.
+  The three landmark questions of `cnc-job-workflow.md` §5.2 (face up, against the reference, nearest you)
+  sit behind one fold and are asked only when the stock has a face worth telling apart (a finish, layers).
+- Provenance (`vise-default`, the board's source) lives in the Technical fold.
 
 ### 3.5 Step 4 of 4 — Operation
 
@@ -191,6 +220,33 @@ files) are offered on the same card.
   the full card for the house).
 - A step's body is one sentence and one action; the next thing to do is always the only open step.
 
+### 3.8 Changing the machine (a wizard of its own)
+
+Entered from Holding ("Change the machine…"), from Manage › Machines, and from Cut when the frozen job's
+mount disagrees with what is on the machine. It is the one shape every physical change to the machine
+takes: fixture off or on, cutter change, probe in or out, wasteboard resurfacing.
+
+```
+ Change the machine                                                         [ Close ]
+ 1 What changes      Vise off the pins → Rotary on the pins        for: Zoomba badge, held in the rotary chuck
+ 2 Make it safe      ● Home                 $H · Idle · homed ✓
+                     ● Work light on        M821 ✓
+                     ● Spindle cold, cutter out                      [ I have checked ]
+ 3 Take off the vise    ○ the two pin bolts   ○ lift straight up   ○ on its shelf        [ Done ]  (a picture each)
+ 4 Fit the rotary       ○ onto the pins   ○ the 4th-axis cable   ○ chuck key in the tray   [ Done ]
+                        axis datum: shipped value (±0.5) · [ Measure now ] or [ use the shipped value ]
+ 5 Confirm           the bed is now: Rotary on the pins · wasteboard under
+                     written to the machine's record: 2026-10-26 09:20 · vise → rotary · for Zoomba badge
+                     ● Work light off · ● Home                                        [ Back to the job ]
+```
+
+- One physical action per line, the machine's own state answering it (the strip's words), per the bench
+  rules: home before hands in the machine, the light on while they are there, home when done.
+- The outcome is a change of the active bed profile and a history entry; the job that asked is re-checked
+  against it (a frozen job's package is re-frozen when the mount changed, per the gate).
+- The same wizard is the directed cutter change inside a run (`cnc-job-workflow.md` decision 15): steps 2,
+  the change, 5.
+
 ## 4. Vocabulary and conventions (the rules the mockups follow)
 
 | Thing | Word | Not |
@@ -202,6 +258,8 @@ files) are offered on the same card.
 | a cutter | `⌀ 3.175 mm flat end · 12 mm flute` (+ "metal" tag) | the vendor label, `3.17`, `chamfer (…)` |
 | provenance | one sentence in the Technical fold ("typed by you 09:12", "Makera's catalogue row") | a grey chip on every field |
 | a refusal | the sentence + the fix, at the control | a disabled control with "fix the errors above" |
+| what is on the machine | "On the machine now: vise on the pins · wasteboard under" | bed profile, placement, pins kind |
+| the board under the part | waste board (between the jaws / on the bed) | sacrificial material, sacrificial under |
 | numbers | ≤ 3 decimals, trailing zeros dropped, unit after | 1.42875 mm, 0.0000 mm² |
 | codes | none on screen | `#218`, `vise-default` |
 

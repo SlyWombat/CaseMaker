@@ -224,12 +224,12 @@ section > .head { display: grid; gap: 6px; }
   <div class="st"><span class="k">DOOR</span><b>Start a cutting job</b><small>welcome page</small></div>
   <div class="st"><span class="k">STEP 1 OF 4</span><b>Machine</b><small>the house's, checked</small></div>
   <div class="st"><span class="k">STEP 2 OF 4</span><b>Stock</b><small>material · form · size</small></div>
-  <div class="st"><span class="k">STEP 3 OF 4</span><b>Holding</b><small>mount · orientation</small></div>
+  <div class="st"><span class="k">STEP 3 OF 4</span><b>Holding</b><small>in what is on the machine · ⤷ change it</small></div>
   <div class="st"><span class="k">STEP 4 OF 4</span><b>Operation</b><small>what are you cutting?</small></div>
   <div class="st mode"><span class="k">MODE</span><b>Design</b><small>Job · Cutter · Hold · Generate</small></div>
   <div class="st mode"><span class="k">MODE</span><b>Cut</b><small>Checked · Frozen · Register · Run</small></div>
 </div>
-<p class="hint">Wizard → Design → Cut. Nothing else counts steps; nothing else connects a machine; nothing else saves.</p>
+<p class="hint">Wizard → Design → Cut. Nothing else counts steps; nothing else connects a machine; nothing else saves. Any physical change to the machine (fixture, cutter, probe, wasteboard) is one more wizard, entered where the need arises and returning there.</p>
 
 <section>
   <div class="head"><h2>Today against the target</h2><p class="lede">Six of the forty-five audit findings, each with the words the operator reads now and the words they will read. The full list is in the audit; every id below maps to a child issue.</p></div>
@@ -319,7 +319,7 @@ section > .head { display: grid; gap: 6px; }
                 <span class="form"><svg viewBox="0 0 40 28"><ellipse cx="20" cy="12" rx="15" ry="6"/><path d="M5 12 v4 a15 6 0 0 0 30 0 v-4"/></svg>Disc</span>
                 <span class="form"><svg viewBox="0 0 40 28"><ellipse cx="8" cy="14" rx="4" ry="8"/><path d="M8 6 h26 a4 8 0 0 1 0 16 H8"/></svg>Rod</span>
               </div>
-              <p class="hint"><b>Plate</b> — flat stock cut from the top; thicker than a sheet, lower than it is wide. The vise holds it on its long edges.</p>
+              <p class="hint"><b>Plate</b> — flat stock cut from the top; thicker than a sheet, lower than it is wide. How it is held is worked out in the next step from its numbers.</p>
             </div>
             <label>Size</label><div class="v">
               <span class="in"><span class="u">length X</span><span class="n">76.2</span><span class="u">mm</span></span>
@@ -343,7 +343,8 @@ section > .head { display: grid; gap: 6px; }
     <aside class="notes"><h3>Replaces</h3>
       <ul><li>The softwood default and the 22-name flat list.</li><li><span class="mono">plate ▾ · L (X) · W (Y) · T</span> with no units and no Z; the T field wrapping on a phone.</li><li>“Rod, tube and disc are not offered… Sphere stock is not offered at all.” as a paragraph on the default path.</li><li>The shelf door that reads “Nothing in softwood on the shelf”; the Finish list with <q>not known</q> last; the two consequence paragraphs; the bare <q>Choose File</q> control.</li></ul>
       <h3>Forms, one sentence each</h3>
-      <ul><li><b>Plate</b> flat, cut from the top.</li><li><b>Block</b> as tall as it is wide; sides may be cut in later setups.</li><li><b>Sheet</b> ≤ 3 mm; tape on the bed.</li><li><b>Printed</b> from a printer; layers known.</li><li><b>Disc / Rod</b> round; vise or tape for a face job, the rotary when cut around.</li></ul>
+      <ul><li><b>Plate</b> flat, cut from the top.</li><li><b>Block</b> as tall as it is wide; sides may be cut in later setups.</li><li><b>Sheet</b> thin; in the vise on a waste board, or taped to the bed.</li><li><b>Printed</b> from a printer; layers known.</li><li><b>Disc / Rod</b> round; vise or tape for a face job, the rotary when cut around.</li></ul>
+      <h3>The word decides nothing</h3><p>Today plate, block and sheet are the same thing in the engine: the same three fields, the same mount, the same facing rule. The form stays as the picture that sets the size fields and tells a new operator what the words mean; step 3 works out how the numbers sit in what is on the machine.</p>
       <h3>Audit</h3><p>A4 · A5 · A7 · A8 · A9 · E2</p><h3>Work item</h3><p class="issue">#683</p>
     </aside>
   </div>
@@ -351,19 +352,24 @@ section > .head { display: grid; gap: 6px; }
 
 <!-- ============ STATION 3: holding ============ -->
 <section id="holding">
-  <div class="head"><span class="eyebrow">Station 3</span><h2>Step 3 of 4 · Holding</h2><p class="lede">The mount this stock calls for is preselected. The picture carries the orientation facts the panel used to print as prose. The numbers live behind Technical.</p></div>
+  <div class="head"><span class="eyebrow">Station 3</span><h2>Step 3 of 4 · Holding</h2><p class="lede">The step opens on what is on the machine now. The options are how this stock sits in that mechanism, worked out from its numbers. What the machine cannot do as it stands is shown with its cost and the way out: change the machine.</p></div>
   <div class="station">
     <div class="screen"><div class="bar"><span class="dots"><i></i><i></i><i></i></span><span class="ttl">New cutting job</span></div>
-      <div class="backdrop"><div class="modal">
+      <div class="backdrop"><div class="modal" style="max-width:700px">
         <div class="mh"><span class="step">Step 3 of 4</span><h3>Holding</h3><span class="x">Close ✕</span></div>
         <div class="mb">
+          <div class="line" style="padding:8px 10px;border:1px solid var(--line);border-radius:4px;background:var(--bg)"><span class="muted">On the machine now</span><b>Vise on the pins</b><span>· wasteboard under · 2 mm MDF boards ×4 · tape</span><span class="btn" style="margin-left:auto">Change the machine…</span></div>
           <div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(200px,240px);gap:16px;align-items:start">
-            <div style="display:grid;gap:10px">
-              <span class="radio on"><b>Vise</b> <span class="hint">what a 3.81 mm plate calls for</span></span>
-              <span class="radio">Tape on the bed</span>
-              <span class="radio dis">Rotary chuck <span class="hint">· needs round stock</span></span>
-              <div class="frow" style="margin-top:6px"><label>Under the part</label><div class="v"><span class="in sel">none</span><span class="hint">a board when a cut goes through</span></div></div>
-              <div class="fold">Technical: jaw numbers (shipped defaults), stock proud of the jaws <span class="mono">0.71 mm</span></div>
+            <div style="display:grid;gap:9px">
+              <span class="hint" style="font-weight:500;color:var(--fg)">How is the plate held?</span>
+              <span class="radio on"><span><b>In the vise, on the jaw ledge</b><br><span class="hint"><span class="mono">3.81 mm</span> stands <span class="mono">0.71 mm</span> proud of the jaws</span></span></span>
+              <span class="radio"><span>In the vise, on a waste board between the jaws <span class="in sel" style="padding:1px 6px;min-height:0;font-size:0.8rem">2 mm MDF</span><br><span class="hint">for a through cut, or stock too thin to stand proud</span></span></span>
+              <span class="radio"><span>In the vise, gripped as a block<br><span class="hint">the sides free; for a block taller than the jaws</span></span></span>
+              <span class="radio dis"><span>On the bed, taped<br><span class="hint">needs the vise off the pins · <span style="color:var(--accent)">Change the machine…</span></span></span></span>
+              <span class="radio dis"><span>On the bed, bracket and clamps<br><span class="hint">needs the vise off the pins · <span style="color:var(--accent)">Change the machine…</span></span></span></span>
+              <span class="radio dis"><span>In the rotary chuck<br><span class="hint">needs the rotary on the pins · <span style="color:var(--accent)">Change the machine…</span></span></span></span>
+              <div class="fold">Which way round: face up <b>the printed face</b> · against the fixed jaw <b>the long edge</b> · nearest you <b>the left end</b></div>
+              <div class="fold">Technical: jaw numbers (shipped defaults) · board <span class="mono">2 mm</span> (typed) · strips beside the part</div>
             </div>
             <div style="display:grid;gap:6px">
               <svg viewBox="0 0 240 150" style="width:100%;max-width:100%;display:block;border:1px solid var(--line);background:var(--bg)" aria-label="Top view of the vise">
@@ -377,6 +383,8 @@ section > .head { display: grid; gap: 6px; }
                 <defs><marker id="a" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto"><path d="M0 0 L6 3 L0 6 Z" fill="var(--fg)"/></marker></defs>
               </svg>
               <p class="hint">Top view. The fixed jaw is on the left; the blank sits on the soft jaws' ledge.</p>
+              <div class="twostate" style="border-top:1px dashed var(--line);padding-top:8px"><span class="cap">a 2 mm sheet, same machine</span>
+                <p class="hint">◉ <b>On a waste board between the jaws</b> · <span class="mono">2 mm</span> MDF · the sheet stands <span class="mono">0.9 mm</span> proud<br>○ On the jaw ledge · it would sit <span class="mono">1.1 mm</span> below the jaw tops</p></div>
             </div>
           </div>
         </div>
@@ -384,8 +392,37 @@ section > .head { display: grid; gap: 6px; }
       </div></div>
     </div>
     <aside class="notes"><h3>Replaces</h3>
-      <ul><li>“◉ Vise ○ Rotary chuck — A rotary chuck is asked about here but not yet offered.” A disabled option needs no sentence; it carries its reason.</li><li>“● vise-default Vise dimensions: shipped defaults (reference unit).” in operator text, and the same line again as a warning in the panel's findings.</li><li>“X runs between the vise jaws. The fixed jaw is on the left.” under the stock in the panel; the jaws drawn three times the blank's size in the viewport.</li></ul>
-      <h3>Audit</h3><p>A10 · B4 · B12 · B16</p><h3>Work item</h3><p class="issue">#684</p>
+      <ul><li>“◉ Vise ○ Rotary chuck — A rotary chuck is asked about here but not yet offered.” An option the machine cannot give as it stands carries its cost and the way out, not an apology.</li><li>“Sacrificial material [none ▾]” → the waste board, named as the operator names it, from the boards the location has.</li><li>“● vise-default Vise dimensions: shipped defaults (reference unit).” in operator text, and the same line again as a warning in the panel's findings.</li><li>“X runs between the vise jaws. The fixed jaw is on the left.” under the stock in the panel; the jaws drawn three times the blank's size in the viewport.</li></ul>
+      <h3>Reads</h3><p>The location's active bed profile: what is on the pins (vise or rotary, never both), the wasteboard, the boards and tape in stock. Already modelled; not yet read by any job screen.</p>
+      <h3>Audit</h3><p>A10 · B4 · B12 · B16</p><h3>Work items</h3><p class="issue">#684 holding · #693 change the machine</p>
+    </aside>
+  </div>
+</section>
+
+<!-- ============ STATION 3a: change the machine ============ -->
+<section id="change">
+  <div class="head"><span class="eyebrow">Station 3a · the escape</span><h2>Change the machine</h2><p class="lede">One wizard for every physical change: a fixture off or on, a cutter, the probe, the wasteboard. Entered from Holding, from Manage, or from Cut when the frozen job disagrees with what is on the bed. One action per line, the machine's own state answering it.</p></div>
+  <div class="station">
+    <div class="screen"><div class="bar"><span class="dots"><i></i><i></i><i></i></span><span class="ttl">Change the machine</span></div>
+      <div class="backdrop"><div class="modal" style="max-width:700px">
+        <div class="mh"><span class="step">Change the machine</span><h3>Vise off · rotary on</h3><span class="x">Close ✕</span></div>
+        <div class="mb" style="gap:0;padding:0">
+          <div class="cstep done"><span class="m">✓</span><div class="t"><b>1 What changes</b><span class="meta">Vise on the pins → Rotary on the pins · for <b>Zoomba badge</b>, held in the rotary chuck</span></div></div>
+          <div class="cstep done"><span class="m">✓</span><div class="t" style="display:grid;gap:4px"><b>2 Make it safe</b><span class="meta">Home · <span class="mono">$H</span> · Idle · homed ✓</span><span class="meta">Work light on · <span class="mono">M821</span> ✓</span><span class="meta">Spindle cold, cutter out · I have checked ✓</span></div></div>
+          <div class="cstep now"><span class="m">3</span><div class="t" style="display:grid;gap:6px"><b>Take off the vise</b>
+            <div class="line"><span class="check">the two pin bolts</span><span class="check">lift it straight up</span><span class="check">on its shelf</span></div>
+            <div class="hint">a picture for each step</div></div>
+            <div class="acts"><span class="btn primary">Done</span></div></div>
+          <div class="cstep"><span class="m">4</span><div class="t" style="display:grid;gap:4px"><b>Fit the rotary</b><span class="meta">onto the pins · the 4th-axis cable · chuck key in the tray</span><span class="meta">axis datum: shipped value (±0.5) · <span style="color:var(--accent)">Measure now</span> or <span style="color:var(--accent)">use the shipped value</span></span></div></div>
+          <div class="cstep"><span class="m">5</span><div class="t" style="display:grid;gap:4px"><b>Confirm</b><span class="meta">the bed is now: Rotary on the pins · wasteboard under</span><span class="meta">written to the machine's record: <span class="mono">2026-10-26 09:20</span> · vise → rotary · for Zoomba badge</span><span class="meta">Work light off · Home</span></div></div>
+        </div>
+        <div class="mf"><span class="btn">← Back</span><span class="btn disabled">Back to the job</span></div>
+      </div></div>
+    </div>
+    <aside class="notes"><h3>Rules</h3>
+      <ul><li>Home before hands go in the machine; the work light on while they are there; home when done. These are the bench rules today, as memory and bench tools; here they become the product's.</li><li>The outcome is a change of the active bed profile and a history entry. The job that asked is re-checked against it; a frozen job is re-frozen if its mount changed.</li><li>The directed cutter change inside a run is this same wizard: steps 2, the change, 5.</li></ul>
+      <h3>Replaces</h3><ul><li>Nothing: today there is no way to tell the product the vise has come off, and the only guided physical steps are the run's bit change and the registration touches.</li></ul>
+      <h3>Work item</h3><p class="issue">#693</p>
     </aside>
   </div>
 </section>
@@ -492,6 +529,8 @@ section > .head { display: grid; gap: 6px; }
       <tr><td>a cutter</td><td><span class="mono">⌀ 3.175 mm flat end · 12 mm flute</span> (+ a <span class="tag grey">metal</span> tag)</td><td><span class="not">3.175*12mm Flat End(Metal)</span> · <span class="not">3.17</span> · <span class="not">chamfer (Chamfering Bit…)</span></td></tr>
       <tr><td>provenance</td><td>one sentence in the Technical fold: “typed by you 09:12”, “Makera's catalogue row”</td><td>a grey <span class="not">typed</span> chip on every field</td></tr>
       <tr><td>a refusal</td><td>the sentence and the fix, at the control</td><td><span class="not">Fix the errors above first.</span></td></tr>
+      <tr><td>what is on the machine</td><td>“On the machine now: vise on the pins · wasteboard under”</td><td><span class="not">bed profile</span> · <span class="not">placement</span> · <span class="not">pins kind</span></td></tr>
+      <tr><td>the board under the part</td><td>waste board (between the jaws, on the bed)</td><td><span class="not">sacrificial material</span> · <span class="not">sacrificial under</span></td></tr>
       <tr><td>numbers</td><td>≤ 3 decimals, trailing zeros dropped, unit after</td><td><span class="not">1.42875 mm</span> · <span class="not">0.0000 mm²</span></td></tr>
       <tr><td>codes</td><td>none on screen</td><td><span class="not">#218</span> · <span class="not">#191</span> · <span class="not">vise-default</span> · <span class="not">reference unit</span></td></tr>
     </tbody>
@@ -521,7 +560,7 @@ section > .head { display: grid; gap: 6px; }
 
 <!-- ============ work items ============ -->
 <section id="work" class="work">
-  <div class="head"><h2>Work items</h2><p class="lede">One issue per screen or area, the audit ids inside each. All thirteen are gated on this design.</p></div>
+  <div class="head"><h2>Work items</h2><p class="lede">One issue per screen or area, the audit ids inside each. All fourteen are gated on this design.</p></div>
   <p class="gate"><b>Gate.</b> Nothing is implemented until the maintainer approves this flow and these mockups on #679. After approval the slices are assigned in the order below; #692 lands last and closes the umbrella.</p>
   <div class="scroll"><table class="tbl">
     <thead><tr><th>Issue</th><th>Screen or area</th><th>Audit ids</th></tr></thead>
@@ -531,6 +570,7 @@ section > .head { display: grid; gap: 6px; }
       <tr><td><a href="https://github.com/SlyWombat/CaseMaker/issues/682">#682</a></td><td>Step 1 Machine: the house machine, checked on open</td><td class="mono">A3 E4 C3</td></tr>
       <tr><td><a href="https://github.com/SlyWombat/CaseMaker/issues/683">#683</a></td><td>Step 2 Stock: grouped materials, forms as pictures, X·Y·Z mm, round stock</td><td class="mono">A4 A5 A7 A8 A9 E2</td></tr>
       <tr><td><a href="https://github.com/SlyWombat/CaseMaker/issues/684">#684</a></td><td>Step 3 Holding: the mount the stock calls for, orientation picture</td><td class="mono">A10 B4 B12 B16</td></tr>
+      <tr><td><a href="https://github.com/SlyWombat/CaseMaker/issues/693">#693</a></td><td>Change the machine: one wizard for every physical change (fixture, cutter, probe, wasteboard)</td><td class="mono">principle 8</td></tr>
       <tr><td><a href="https://github.com/SlyWombat/CaseMaker/issues/685">#685</a></td><td>Step 4 Operation: grouped picker that asks for the text</td><td class="mono">A10 E3 B6 B5</td></tr>
       <tr><td><a href="https://github.com/SlyWombat/CaseMaker/issues/688">#688</a></td><td>Generate names its blocker (the dead end)</td><td class="mono">B9 B14 B15 B10</td></tr>
       <tr><td><a href="https://github.com/SlyWombat/CaseMaker/issues/686">#686</a></td><td>Design panel: Job · Cutter · Hold, sticky footer, one file bar</td><td class="mono">B1 B2 B4 B5 B7 B11 B12 B13 D2 D4</td></tr>
