@@ -69,7 +69,7 @@ import {
 import { MATERIAL_LABELS } from '@/engine/cnc/materials';
 import { cutterOnMetalLine } from '@/engine/cnc/engrave/cutterMaterial';
 import { toPartPlan, labelProfile, jobDepthLimit, keepOutNameAt, type PartPlan } from '@/engine/cnc/engrave/partPlan';
-import { dedupeFindings, jobSetups, setupProgramFindings, toSetup, validateGoalObject, validateJob, type JobFinding } from '@/engine/cnc/engrave/jobSetup';
+import { dedupeFindings, jobSetups, pureGoalObject, setupProgramFindings, toSetup, validateGoalObject, validateJob, type JobFinding } from '@/engine/cnc/engrave/jobSetup';
 import { jobForSetup, setupPrograms, type JobProgramRef } from '@/engine/cnc/engrave/programs';
 import {
   restJobFor,
@@ -2283,30 +2283,10 @@ function generateRestPair(
 }
 
 /**
- * The goal object a PURE 3D-surfacing job is (#534, slice D), or `null`.
- *
- * A pure goal job carries an enabled `role: 'goal'` mesh and NO authoring items — no labels,
- * shapes, traces, drills, threads, cut-outs, primitives, vectors, combined shapes or keep-outs.
- * Mixing a goal with ordinary item work is slice E's to resolve (the item program still cuts; the
- * goal keeps its `goal-object-no-toolpath` info from `validateJob`), so the dispatch below takes
- * ONLY the pure case and leaves every mixed job on exactly today's path.
+ * The goal object a PURE 3D-surfacing job is (#534, slice D), or `null` — `pureGoalObject` from
+ * `jobSetup`, the ONE definition the validation and the setup bookkeeping read too (#535), so the
+ * dispatch and the panel cannot disagree about which jobs are pure-goal.
  */
-function pureGoalObject(job: EngraveJob): EngraveTargetObject | null {
-  const t = job.targetObject;
-  if (t === undefined || t.role !== 'goal' || !t.enabled) return null;
-  const hasItems =
-    job.labels.length > 0 ||
-    job.shapes.length > 0 ||
-    (job.cutouts?.length ?? 0) > 0 ||
-    (job.combined?.length ?? 0) > 0 ||
-    (job.traces?.length ?? 0) > 0 ||
-    (job.vectors?.length ?? 0) > 0 ||
-    (job.keepOuts?.length ?? 0) > 0 ||
-    (job.drills?.length ?? 0) > 0 ||
-    (job.threads?.length ?? 0) > 0 ||
-    (job.primitives?.length ?? 0) > 0;
-  return hasItems ? null : t;
-}
 
 /**
  * The empty program-fields shell a goal result fills, so its return matches `EngraveGenerated`.

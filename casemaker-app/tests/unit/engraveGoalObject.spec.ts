@@ -109,9 +109,34 @@ describe('3D goal object (#533, slice C)', () => {
   it('a GOAL mesh validates WITHOUT target-object-not-cut', () => {
     const found = codes(jobWithTarget({ ...baseTarget, role: 'goal' }));
     expect(found).not.toContain('target-object-not-cut');
-    // The goal is recognised but not yet machinable (toolpaths are slice D, #534).
+    // The default job carries the demo labels, so this is the MIXED path: the item program cuts,
+    // and the goal keeps the note that its own passes are not posted here (#535).
     expect(found).toContain('goal-object-no-toolpath');
     expect(found).not.toContain('goal-object-oversize');
+  });
+
+  it('#535 — a PURE goal job is work: no no-items, no empty-setup error, no mixed-path note', () => {
+    // An empty job whose one operation is the goal mesh: the flow Surface a mesh is built for.
+    const job: EngraveJob = {
+      ...defaultEngraveJob(),
+      labels: [],
+      shapes: [],
+      targetObject: { ...baseTarget, role: 'goal' },
+    };
+    const found = codes(job);
+    expect(found).not.toContain('no-items');
+    expect(found).not.toContain('setup-tool-no-items');
+    expect(found).not.toContain('goal-object-no-toolpath');
+    expect(found).not.toContain('goal-object-oversize');
+    // Nothing blocks Generate: the surfacing program is the job.
+    expect(validateJob(job).filter((f) => f.severity === 'error')).toEqual([]);
+  });
+
+  it('#535 — a goal beside ANY item stays on the mixed path and keeps its note', () => {
+    const job: EngraveJob = { ...defaultEngraveJob(), targetObject: { ...baseTarget, role: 'goal' } };
+    expect(codes(job)).toContain('goal-object-no-toolpath');
+    // The work test agrees: it is not "nothing to cut" either way.
+    expect(codes(job)).not.toContain('no-items');
   });
 
   it('a REFERENCE object (role absent) still gets target-object-not-cut', () => {

@@ -509,11 +509,15 @@ export function toSetup(job: EngraveJob, machine: MillProfile, fixture?: Fixture
  * reproduced. Factored out of {@link validateJob} (same findings, same messages) so the pure-goal
  * generate dispatch (#539) can gate on it before it samples and posts a surfacing program, instead
  * of surfacing an invalid goal that no `validateJob` call ever saw. Returns an `error`
- * `goal-object-oversize` when the goal is unmakeable, otherwise the `goal-object-no-toolpath` info.
+ * `goal-object-oversize` when the goal is unmakeable. The `goal-object-no-toolpath` info is the
+ * MIXED path's (a goal beside ordinary items, which the item program cuts instead of the goal);
+ * a pure goal job is surfaced, so it gets no such note — pass `mixed: true` from a job that has
+ * other work.
  */
 export function validateGoalObject(
   target: EngraveTargetObject,
   stock: { length: number; width: number; thickness: number },
+  opts: { mixed?: boolean } = {},
 ): JobFinding[] {
   const findings: JobFinding[] = [];
   const { length, width, thickness } = stock;
@@ -539,18 +543,47 @@ export function validateGoalObject(
         `${fmt3(length)}×${fmt3(width)}×${fmt3(thickness)} mm blank it would be carved from; ` +
         `it cannot be reproduced from this stock. Use a larger blank or scale the goal.`,
     });
-  } else {
-    // A sane goal, recognised but not yet machinable on the mixed-job path: 3D toolpath generation
-    // is slice D (#534), which the PURE-goal dispatch now runs — so this info is the mixed path's.
+  } else if (opts.mixed === true) {
+    // #535 — the MIXED path's note: one job's program is the item work, so this goal is validated
+    // and previewed but not cut. A pure goal job is surfaced instead and gets no note.
     findings.push({
       severity: 'info',
       code: 'goal-object-no-toolpath',
       message:
-        `The goal object "${target.name}" is the shape to make. It fits the blank, but 3D ` +
-        `toolpath generation is not built yet, so this job posts no cut for it.`,
+        `The goal object "${target.name}" is the shape to make, and it fits the blank. This job ` +
+        `cuts other work too, and its program is that work: the goal is validated and previewed, ` +
+        `and the roughing and finishing passes run when the goal is the job's only operation.`,
     });
   }
   return findings;
+}
+
+/**
+ * The goal object a PURE 3D-surfacing job carries (#534, #535), or `null`.
+ *
+ * A pure goal job carries an enabled `role: 'goal'` mesh and NO authoring items — no labels,
+ * shapes, traces, drills, threads, cut-outs, primitives, vectors, combined shapes or keep-outs —
+ * and no stated setups. Mixing a goal with ordinary item work stays on the item path (the item
+ * program cuts; the goal keeps its `goal-object-no-toolpath` info). THE ONE DEFINITION: the
+ * generate dispatch, `validateJob`'s work test and the setup bookkeeping all read this, so a job
+ * cannot be "pure goal" to one and "empty" to another.
+ */
+export function pureGoalObject(job: EngraveJob): EngraveTargetObject | null {
+  const t = job.targetObject;
+  if (t === undefined || (t.role ?? 'reference') !== 'goal' || !t.enabled) return null;
+  if (job.setups !== undefined) return null;
+  const hasItems =
+    job.labels.length > 0 ||
+    job.shapes.length > 0 ||
+    (job.cutouts?.length ?? 0) > 0 ||
+    (job.combined?.length ?? 0) > 0 ||
+    (job.traces?.length ?? 0) > 0 ||
+    (job.vectors?.length ?? 0) > 0 ||
+    (job.keepOuts?.length ?? 0) > 0 ||
+    (job.drills?.length ?? 0) > 0 ||
+    (job.threads?.length ?? 0) > 0 ||
+    (job.primitives?.length ?? 0) > 0;
+  return hasItems ? null : t;
 }
 
 export function validateJob(
@@ -693,8 +726,9 @@ export function validateJob(
     const target = job.targetObject;
     if ((target.role ?? 'reference') === 'goal') {
       // A GOAL (#533) IS the work, so it is never warned as uncut. It is validated instead
-      // ({@link validateGoalObject}), which the pure-goal generate path reuses (#539).
-      findings.push(...validateGoalObject(target, job.stock));
+      // ({@link validateGoalObject}), which the pure-goal generate path reuses (#539). #535 — the
+      // "posts no cut for it" info belongs to a MIXED job only; a pure goal job is surfaced.
+      findings.push(...validateGoalObject(target, job.stock, { mixed: pureGoalObject(job) === null }));
     } else {
       // A REFERENCE (#435). Saying so once, as a warning, keeps "why is my imported part not being
       // cut?" from being answered by silence; it never blocks the other work.
@@ -1152,13 +1186,19 @@ export function validateJob(
   // tool-missing gate reads the same answer. ANY enabled primitive counts as stated work: a
   // refused cone/sphere already has its own by-name error, so "nothing to do" would be a second,
   // misleading complaint about the shape the person drew.
+  //
+  // #535 — a PURE GOAL job's work is the goal mesh itself: it posts the surfacing program, so it
+  // must not read as "nothing to cut" (a job emptied of its items to add Surface a mesh is the
+  // ordinary way to build one).
+  const pureGoal = pureGoalObject(job);
   const hasWork =
     enabled.some(itemHasWork) ||
     enabledTraces.some(traceHasWork) ||
     enabledDrills.length > 0 ||
     enabledThreads.length > 0 ||
     enabledPrimitives.length > 0 ||
-    enabledCutouts.length > 0;
+    enabledCutouts.length > 0 ||
+    pureGoal !== null;
 
   if (!hasWork) {
     findings.push({
@@ -1328,6 +1368,10 @@ function words(ids: readonly string[]): string {
  */
 export function setupProgramFindings(job: EngraveJob): JobFinding[] {
   const findings: JobFinding[] = [];
+  // #535 — A PURE GOAL JOB's derived setup has no items BY DESIGN: the goal mesh is the setup's
+  // one program (the surfacing pass). The rest-pass bookkeeping below measures a clearing program
+  // from the setup's items, which does not apply, so there is nothing here to refuse.
+  if (pureGoalObject(job) !== null) return findings;
   // Every enabled cutting item by id, for the drill-tool check below (#434): a drill bit owns
   // drills, never a region/trace/thread. Disabled and construction items are not work.
   const workById = new Map<string, string>();
