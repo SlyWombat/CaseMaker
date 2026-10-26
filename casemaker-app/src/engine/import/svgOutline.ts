@@ -2,7 +2,7 @@ import { GLYPH_CHORD_TOLERANCE_MM } from '@/engine/compiler/glyphs';
 import { flattenCubic, flattenQuadratic } from '@/engine/compiler/curveFlatten';
 import { segmentsForRadius } from '@/engine/compiler/arcResolution';
 import type { Vec2, Mm } from '@/types';
-import { finalizeOutline, MAX_OUTLINE_FILE_BYTES, type OutlineParseResult } from './outlineTypes';
+import { finalizeOutline, MAX_OUTLINE_FILE_BYTES, type OutlineParseResult, type OutlinePath } from './outlineTypes';
 
 /**
  * SVG outline import (#217): the filled, closed shapes of an SVG as flattened rings in mm.
@@ -14,9 +14,12 @@ import { finalizeOutline, MAX_OUTLINE_FILE_BYTES, type OutlineParseResult } from
  * `<g>`.
  *
  * OUT, each reported in `notes` so the dialog can name it rather than silently dropping it:
- * strokes without fill (a stroked line has no area — that is #219's trace feature), `<text>`,
- * `<image>`, gradients/patterns, clipping and masks, and open paths/subpaths. `<polyline>`,
- * `<line>` and paths that never `Z` are open and are skipped.
+ * `<text>`, `<image>`, gradients/patterns, clipping and masks. #664 — the drawing's STROKES (a
+ * `<polyline>`/`<line>`, or any path/subpath that never `Z`s) import as LINES, not regions.
+ * #678 — a stroke-only shape's CLOSED subpaths import as CLOSED lines: a stroked rectangle,
+ * circle or outline is an "outline: on path" cut, which is the commonest thing an operator asks a
+ * drawing to trace, and skipping it left advice ("fill it to import the region") nobody can act on.
+ * DXF has no stroke concept; its closed loops stay regions.
  *
  * Coordinates: SVG user units are scaled to mm by the root's `width`/`height` and `viewBox`,
  * falling back to 96 px/inch when neither carries a physical unit. SVG's Y is down and the
@@ -542,11 +545,13 @@ function parsePointsAttr(value: string | null): Vec2[] {
 
 interface Collector {
   collected: { points: Vec2[]; rule: 'NonZero' | 'EvenOdd' }[];
-  /** #664 — open polylines (SVG user units, element transforms applied), imported as lines. */
-  open: Vec2[][];
+  /**
+   * #664/#678 — the drawing's STROKES (SVG user units, element transforms applied), imported as
+   * lines. `closed` is the drawing's own: a stroke-only shape's ring is a ring.
+   */
+  lines: { points: Vec2[]; closed: boolean }[];
   rules: Set<'NonZero' | 'EvenOdd'>;
   notes: string[];
-  strokes: number;
   /** Open subpaths SKIPPED because their shape is filled (SVG closes those to fill them). */
   openPaths: number;
   sawCss: boolean;
@@ -696,7 +701,7 @@ function walk(el: Element, parentM: Mat, view: ViewTransform, inherited: {
             [num(el, 'x1'), num(el, 'y1')] as Vec2,
             [num(el, 'x2'), num(el, 'y2')] as Vec2,
           ];
-    if (pts.length >= 2) c.open.push(pts.map((p) => applyMat(localM, p)));
+    if (pts.length >= 2) c.lines.push({ points: pts.map((p) => applyMat(localM, p)), closed: false });
     return;
   }
 
@@ -719,14 +724,11 @@ function walk(el: Element, parentM: Mat, view: ViewTransform, inherited: {
 
   const { rings, open } = shapeRings(el, node, tol);
   if (strokeOnly) {
-    // #664 — a stroke-only shape's OPEN subpaths are the drawing's strokes: they import as lines
-    // (the trace feature, wired). Its closed subpaths still need a fill to be a region; they are
-    // named rather than dropped silently.
-    for (const sub of open) c.open.push(sub.map((p) => applyMat(localM, p)));
-    if (rings.length > 0) {
-      c.strokes++;
-      c.notes.push('Skipped a stroked closed shape: fill it to import the region, or draw it as a Line trace.');
-    }
+    // #664 — a stroke-only shape's subpaths are the drawing's strokes: they import as lines (the
+    // trace feature, wired). #678 — its CLOSED ones are rings, so they import as CLOSED lines: the
+    // cut is the ring, not a pocket. Nothing is skipped here any more.
+    for (const sub of open) c.lines.push({ points: sub.map((p) => applyMat(localM, p)), closed: false });
+    for (const ring of rings) c.lines.push({ points: ring.map((p) => applyMat(localM, p)), closed: true });
     return;
   }
   if (effectiveFill.startsWith('url(')) {
@@ -772,7 +774,7 @@ export function parseSvgOutline(text: string, sourceName = 'outline.svg'): Outli
 
   const notes: string[] = [];
   const view = resolveViewTransform(root, notes);
-  const c: Collector = { collected: [], open: [], rules: new Set(), notes, strokes: 0, openPaths: 0, sawCss: false };
+  const c: Collector = { collected: [], lines: [], rules: new Set(), notes, openPaths: 0, sawCss: false };
   walk(root, IDENTITY, view, {}, c);
 
   if (c.sawCss) {
@@ -790,14 +792,22 @@ export function parseSvgOutline(text: string, sourceName = 'outline.svg'): Outli
     c.notes.push('Shapes use mixed fill rules; the outline is read as NonZero.');
   }
 
-  // #664 — the open polylines in the job's frame: SVG user units → mm, Y flipped, centred with
-  // the contours by `finalizeOutline`.
-  const paths: [Mm, Mm][][] = c.open
-    .filter((line) => line.length >= 2)
-    .map((line) => line.map(([x, y]): [Mm, Mm] => [(x - view.originX) * view.scale, -(y - view.originY) * view.scale]));
+  // #664/#678 — the strokes in the job's frame: SVG user units → mm, Y flipped, centred with the
+  // contours by `finalizeOutline`, each keeping the drawing's own `closed`.
+  const paths: OutlinePath[] = c.lines
+    .filter((line) => line.points.length >= 2)
+    .map((line) => ({
+      points: line.points.map(([x, y]): [Mm, Mm] => [(x - view.originX) * view.scale, -(y - view.originY) * view.scale]),
+      closed: line.closed,
+    }));
   const deduped = [...new Set(c.notes)];
+  const openCount = paths.filter((path) => !path.closed).length;
+  const closedCount = paths.length - openCount;
   if (paths.length > 0) {
-    deduped.push(`${paths.length} open path${paths.length === 1 ? '' : 's'} imported as line${paths.length === 1 ? '' : 's'}.`);
+    const parts: string[] = [];
+    if (openCount > 0) parts.push(`${openCount} open path${openCount === 1 ? '' : 's'}`);
+    if (closedCount > 0) parts.push(`${closedCount} closed path${closedCount === 1 ? '' : 's'}`);
+    deduped.push(`${parts.join(' and ')} imported as line${paths.length === 1 ? '' : 's'}.`);
   }
   return finalizeOutline({ format: 'svg', sourceName, contours, paths, fillRule, notes: deduped });
 }

@@ -10,6 +10,21 @@ import type { Mm } from '@/types';
  */
 
 /**
+ * #678 — ONE imported LINE: a polyline in mm plus whether the drawing closed it.
+ *
+ * A STROKE-ONLY SVG shape contributes its rings with `closed: true` (a stroked rectangle is an
+ * `Outline: on path` outline, the commonest "trace this" artwork), and its open subpaths with
+ * `closed: false`. DXF has no stroke concept, so its closed LWPOLYLINEs stay REGIONS and only its
+ * open chains arrive here, always open.
+ */
+export interface OutlinePath {
+  /** The polyline in mm, in the same centred frame as the contours. */
+  points: [Mm, Mm][];
+  /** True when the drawing closed this path back on its first point. */
+  closed: boolean;
+}
+
+/**
  * Where an outline came from. `svg`/`dxf` are the vector parsers (#217); `raster` is a traced
  * bitmap (#252); `3mf` is one volume's footprint out of a PrusaSlicer project (#410) — the same
  * rings by the time anyone downstream sees them.
@@ -26,11 +41,12 @@ export interface OutlineImport {
   /** Rings in mm, bounding-box centre at the origin — the item's contour frame. */
   contours: [Mm, Mm][][];
   /**
-   * #664 — OPEN polylines in the SAME centred frame as `contours`: the drawing's strokes, which
-   * the trace engine cuts as `line` items. Optional (absent reads as none), so every older caller
-   * and fixture is unchanged and a closed-only file imports byte-identically.
+   * #664 — the drawing's STROKES in the SAME centred frame as `contours`, which the trace engine
+   * cuts as `line` items. #678 — each carries whether the drawing closed it: a stroke-only shape's
+   * ring imports as a closed line whose cut IS the ring. Optional (absent reads as none), so every
+   * older caller and fixture is unchanged and a fills-only file imports byte-identically.
    */
-  paths?: [Mm, Mm][][];
+  paths?: OutlinePath[];
   /** How to read the rings' winding. */
   fillRule: OutlineFillRule;
   /** Size from the source's own units/geometry, mm. The panel shows and can rescale it. */
@@ -117,9 +133,11 @@ export function scaleOutlineToWidth(outline: OutlineImport, targetWidthMm: Mm): 
   return {
     ...outline,
     contours: outline.contours.map(scaleRing),
-    // #664 — the open paths follow the same scale, so a resized import keeps its strokes on the
-    // drawing they were drawn with.
-    ...(outline.paths === undefined ? {} : { paths: outline.paths.map(scaleRing) }),
+    // #664 — the paths follow the same scale, so a resized import keeps its strokes on the
+    // drawing they were drawn with. #678 — their closed flags are untouched by a scale.
+    ...(outline.paths === undefined
+      ? {}
+      : { paths: outline.paths.map((path) => ({ points: scaleRing(path.points), closed: path.closed })) }),
     width: targetWidthMm,
     height: outline.height * factor,
   };
@@ -135,13 +153,17 @@ export function finalizeOutline(args: {
   format: OutlineFormat;
   sourceName: string;
   contours: [Mm, Mm][][];
-  /** #664 — open polylines in the source frame; centred WITH the contours so they stay aligned. */
-  paths?: [Mm, Mm][][];
+  /** #664/#678 — the strokes in the source frame; centred WITH the contours so they stay aligned. */
+  paths?: OutlinePath[];
   fillRule: OutlineFillRule;
   notes: string[];
 }): OutlineParseResult {
   const { format, sourceName, contours, fillRule, notes } = args;
-  const paths = (args.paths ?? []).filter((path) => path.length >= 2);
+  // A stroke is a polyline; a RING needs three points to enclose anything, so a two-point path the
+  // drawing marked closed is imported open rather than as a degenerate ring.
+  const paths = (args.paths ?? [])
+    .map((path) => (path.closed && path.points.length < 3 ? { ...path, closed: false } : path))
+    .filter((path) => path.points.length >= 2);
   if (contours.length > MAX_OUTLINE_CONTOURS) {
     return {
       ok: false,
@@ -151,10 +173,10 @@ export function finalizeOutline(args: {
   if (paths.length > MAX_OUTLINE_PATHS) {
     return {
       ok: false,
-      error: `The file has ${paths.length} open paths; the limit is ${MAX_OUTLINE_PATHS}.`,
+      error: `The file has ${paths.length} paths; the limit is ${MAX_OUTLINE_PATHS}.`,
     };
   }
-  const points = countOutlinePoints(contours) + countOutlinePoints(paths);
+  const points = countOutlinePoints(contours) + countOutlinePoints(paths.map((path) => path.points));
   if (points > MAX_OUTLINE_POINTS) {
     return {
       ok: false,
@@ -164,10 +186,13 @@ export function finalizeOutline(args: {
   // #664 — ONE FRAME: when a file has both fills and strokes, they are centred together and the
   // size is the union's, so the lines stay on the drawing they belong to. A file with no open
   // paths takes exactly the pre-#664 path (same centring, same size).
-  const all = [...contours, ...paths];
+  const all = [...contours, ...paths.map((path) => path.points)];
   const centredAll = recentreOutline(all);
   const centred = centredAll.slice(0, contours.length);
-  const centredPaths = centredAll.slice(contours.length);
+  const centredPaths = centredAll.slice(contours.length).map((points, i) => ({
+    points,
+    closed: paths[i]!.closed,
+  }));
   const b = outlineBounds(centredAll);
   return {
     ok: true,

@@ -388,7 +388,9 @@ export function parseDxfOutline(
     format: 'dxf',
     sourceName,
     contours: rings as [Mm, Mm][][],
-    paths: openPaths as [Mm, Mm][][],
+    // #678 — a DXF has no stroke concept: its closed loops are REGIONS (`rings` above), so every
+    // path here is an open chain.
+    paths: openPaths.map((points) => ({ points: points as [Mm, Mm][], closed: false })),
     fillRule: 'NonZero',
     notes,
   });

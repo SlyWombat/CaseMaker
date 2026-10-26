@@ -91,10 +91,17 @@ export interface LineTraceFields {
 }
 
 /**
- * #664 — an accepted `OutlineImport`'s OPEN paths as `line` items: one per path, each an Engrave
+ * #664 — an accepted `OutlineImport`'s paths as `line` items: one per path, each an Engrave
  * operation cut by the trace rules. The paths share the import's centred frame with the contours,
  * so giving every item the same position/rotation keeps the strokes on the drawing they were
- * drawn with. A file with no open paths yields an empty list (the closed-only import is unchanged).
+ * drawn with. A file with no paths yields an empty list (a fills-only import is unchanged).
+ *
+ * #678 — a CLOSED path (a stroke-only shape's ring) becomes a `closed: true` line, so the cut is
+ * the ring rather than a pocket. A RING LONGER THAN THE CAP is still a ring: its chunks are OPEN
+ * items sharing their seam vertex, and the LAST chunk gets the ring's first point appended, so the
+ * union of the items is exactly the closed path. No chunk is `closed: true` — a closed item feeds
+ * from its own last point back to its own first, which for a chunk would cut a chord across the
+ * ring.
  */
 export function toLineTraces(outline: OutlineImport, fields: LineTraceFields): EngraveLineItem[] {
   const paths = outline.paths ?? [];
@@ -116,16 +123,31 @@ export function toLineTraces(outline: OutlineImport, fields: LineTraceFields): E
     }
     return chunks;
   };
-  const lines: { points: Point[] }[] = [];
-  for (const path of paths) for (const points of chunksOf(path)) lines.push({ points });
+  const lines: { points: Point[]; closed: boolean }[] = [];
+  for (const path of paths) {
+    const points = path.points.map(([x, y]): Point => [x, y]);
+    if (path.closed && points.length >= 3 && points.length <= MAX_LINE_POINTS) {
+      lines.push({ points, closed: true });
+      continue;
+    }
+    const chunks = chunksOf(points);
+    if (path.closed && chunks.length > 1) {
+      // A ring past the cap: open chunks, the last returning to the ring's first point.
+      const first = points[0]!;
+      const lastChunk = chunks[chunks.length - 1]!;
+      const last = lastChunk[lastChunk.length - 1]!;
+      if (last[0] !== first[0] || last[1] !== first[1]) lastChunk.push([first[0], first[1]]);
+    }
+    for (const chunk of chunks) lines.push({ points: chunk, closed: false });
+  }
   const many = lines.length > 1;
-  return lines.map(({ points }, i) => ({
+  return lines.map(({ points, closed }, i) => ({
     kind: 'line' as const,
     id: fields.idFor(i),
     position: { x: fields.position.x, y: fields.position.y },
     rotation: fields.rotation ?? 0,
     points,
-    closed: false,
+    closed,
     depth: fields.depth,
     enabled: fields.enabled ?? true,
     ...(fields.name === undefined || fields.name.trim() === ''

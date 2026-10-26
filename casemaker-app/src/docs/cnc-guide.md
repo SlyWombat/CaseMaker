@@ -555,13 +555,17 @@ the pair (`rest ⌀1 mm`), and the setups line and the run sheet name it as *“
 rest”*. A Profile row has no rest region — a contour is a kerf, not a floor area — and says so.
 
 **Import outline or lines… (SVG/DXF, #664).** A drawing imports as what it is: the closed, filled
-shapes become one Pocket-style region (the vector row), and every **open path or polyline** becomes
-an **Engrave (line)** row — one per path, at the same scale and position, cut by the trace rules
+shapes become one Pocket-style region (the vector row), and every **path or polyline** becomes an
+**Engrave (line)** row — one per path, at the same scale and position, cut by the trace rules
 (a flat cutter's kerf, a V-bit's groove). A lines-only file — artwork drawn as strokes — is
-addable on its own. A filled open path still does not import: SVG closes it to fill it, and the
-importer names it instead of guessing; a stroke-only *closed* shape is a line drawing of a region
-and is not imported either. The dialog shows both counts before you accept, and the target width
-scales the lines with the shapes.
+addable on its own. A **stroke-only closed shape** (#678) is an *outline: on path* drawing of a
+ring — a stroked rectangle, circle or outline — and imports as a **closed** line whose cut IS the
+ring (a stroked ring longer than one line item's 5 000-point cap is split into open pieces that
+meet end to end, the last returning to the first point, so the cut is still the ring). A filled
+open path still does not import: SVG closes it to fill it, and the importer names it instead of
+guessing. DXF has no stroke concept, so its closed LWPOLYLINEs stay regions and only its open
+chains become lines. The dialog counts the closed shapes and the open and closed lines before you
+accept, and the target width scales the lines with the shapes.
 
 Two ideas hold the chapter together:
 

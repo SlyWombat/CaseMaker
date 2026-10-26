@@ -257,10 +257,29 @@ describe('parseSvgOutline (#217): Y flip and orientation', () => {
 });
 
 describe('parseSvgOutline (#217): out-of-scope content is reported', () => {
-  it('a strokes-only file imports as zero contours and names strokes', () => {
+  it('#678 — a stroke-only CLOSED shape imports as a closed line, not a skipped shape', () => {
     const r = ok(parseSvgOutline(svg('<path d="M0 0 H10 V10 H0 Z" fill="none" stroke="#000"/>', 'width="10mm" viewBox="0 0 10 10"')));
     expect(r.contours).toEqual([]);
-    expect(r.notes.some((n) => /stroke/i.test(n))).toBe(true);
+    expect(r.paths).toHaveLength(1);
+    expect(r.paths![0]!.closed).toBe(true);
+    expect(r.paths![0]!.points).toEqual([[-5, 5], [5, 5], [5, -5], [-5, -5]]);
+    expect(r.notes.some((n) => /1 closed path imported as line/i.test(n))).toBe(true);
+    expect(r.notes.some((n) => /Skipped a stroked closed shape/i.test(n))).toBe(false);
+  });
+
+  it('#678 — a stroked <rect> imports as a closed ring, the headline case', () => {
+    const r = ok(
+      parseSvgOutline(
+        svg('<rect x="0" y="0" width="10" height="6" fill="none" stroke="#000"/>', 'width="10mm" viewBox="0 0 10 6"'),
+      ),
+    );
+    expect(r.contours).toEqual([]);
+    expect(r.paths).toHaveLength(1);
+    expect(r.paths![0]!.closed).toBe(true);
+    // A rectangle is four corners; the ring closes implicitly (the flag, not a repeated point).
+    expect(r.paths![0]!.points).toHaveLength(4);
+    expect(r.width).toBeCloseTo(10, 6);
+    expect(r.height).toBeCloseTo(6, 6);
   });
 
   it('text is reported and a stroke-only open path imports as a line (#664)', () => {
@@ -272,7 +291,8 @@ describe('parseSvgOutline (#217): out-of-scope content is reported', () => {
     expect(r.contours).toEqual([]);
     expect(r.notes.some((n) => /text/i.test(n))).toBe(true);
     expect(r.paths).toHaveLength(1);
-    expect(r.paths![0]).toEqual([[-5, 5], [5, -5]]);
+    expect(r.paths![0]!.closed).toBe(false);
+    expect(r.paths![0]!.points).toEqual([[-5, 5], [5, -5]]);
     expect(r.notes.some((n) => /open path.*imported as line/i.test(n))).toBe(true);
   });
 
@@ -280,7 +300,8 @@ describe('parseSvgOutline (#217): out-of-scope content is reported', () => {
     const r = ok(parseSvgOutline(svg('<polyline points="0,0 10,0 10,10" fill="none" stroke="#000"/>', 'width="10mm" viewBox="0 0 10 10"')));
     expect(r.contours).toEqual([]);
     expect(r.paths).toHaveLength(1);
-    expect(r.paths![0]).toEqual([[-5, 5], [5, 5], [5, -5]]);
+    expect(r.paths![0]!.closed).toBe(false);
+    expect(r.paths![0]!.points).toEqual([[-5, 5], [5, 5], [5, -5]]);
   });
 
   it('#664 — a FILLED open subpath still does not import, and says why', () => {
@@ -304,7 +325,7 @@ describe('parseSvgOutline (#217): out-of-scope content is reported', () => {
     expect(r.contours).toHaveLength(1);
     expect(r.paths).toHaveLength(1);
     expect(Math.min(...r.contours[0]!.map((p) => p[0]))).toBeCloseTo(-15, 6);
-    expect(Math.max(...r.paths![0]!.map((p) => p[0]))).toBeCloseTo(15, 6);
+    expect(Math.max(...r.paths![0]!.points.map((p) => p[0]))).toBeCloseTo(15, 6);
     expect(r.width).toBeCloseTo(30, 6);
   });
 });

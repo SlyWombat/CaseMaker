@@ -156,13 +156,33 @@ describe('EngravePanel — the import dialog size control (#217)', () => {
     expect(screen.getByTestId('engrave-import-final-size').textContent).toContain('40.00 × 20.00');
   });
 
-  it('refuses an empty (strokes-only) file and names the reason', async () => {
-    await openImport('line.svg', STROKE_ONLY);
-    expect(screen.getByTestId('engrave-import-empty')).toBeTruthy();
-    expect(screen.getByTestId('engrave-import-notes').textContent).toContain('stroke');
-    expect((screen.getByTestId('engrave-import-accept') as HTMLButtonElement).disabled).toBe(true);
+  it('#678 — a stroke-only CLOSED shape imports as a closed line, not an empty file', async () => {
+    await openImport('ring.svg', STROKE_ONLY);
+    // It is no longer "empty": the ring is addable and the header counts it as a closed line.
+    expect(screen.queryByTestId('engrave-import-empty')).toBeNull();
+    const header = screen.getByTestId('engrave-import-dialog').textContent ?? '';
+    expect(header).toContain('1 closed line');
+    expect(header).not.toContain('open line');
+    expect(screen.getByTestId('engrave-import-notes').textContent).toContain('1 closed path imported as line');
+    expect((screen.getByTestId('engrave-import-accept') as HTMLButtonElement).disabled).toBe(false);
+
     fireEvent.click(screen.getByTestId('engrave-import-accept'));
-    expect(useEngraveJobStore.getState().job.vectors ?? []).toHaveLength(0);
+    const traces = useEngraveJobStore.getState().job.traces ?? [];
+    expect(traces).toHaveLength(1);
+    const line = traces[0]!;
+    expect(line.kind).toBe('line');
+    if (line.kind !== 'line') return;
+    expect(line.closed).toBe(true);
+    expect(line.points.length).toBeGreaterThanOrEqual(3);
+    // The document round trip: what the import wrote is what the job loads again.
+    const parsed = parseEngraveJob(JSON.parse(JSON.stringify(useEngraveJobStore.getState().job)));
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    const kept = parsed.job.traces![0]!;
+    expect(kept.kind).toBe('line');
+    if (kept.kind !== 'line') return;
+    expect(kept.closed).toBe(true);
+    expect(kept.points).toEqual(line.points);
   });
 
   it('disables accept while the target width is invalid', async () => {
@@ -209,7 +229,7 @@ describe('#664 — open paths import as Engrave (line) operations', () => {
   it('a lines-only drawing is addable, and accepting it adds one line item', async () => {
     await openImport('stroke.svg', OPEN_LINE);
     expect(screen.queryByTestId('engrave-import-empty')).toBeNull();
-    expect(screen.getByTestId('engrave-import-dialog').textContent).toContain('1 line');
+    expect(screen.getByTestId('engrave-import-dialog').textContent).toContain('1 open line');
     expect((screen.getByTestId('engrave-import-accept') as HTMLButtonElement).disabled).toBe(false);
 
     fireEvent.click(screen.getByTestId('engrave-import-accept'));
@@ -380,5 +400,54 @@ describe('engraveJobStore — imported vectors (#217)', () => {
     const parsed = parseEngraveJob(JSON.parse(stored!));
     expect(parsed.ok).toBe(true);
     if (parsed.ok) expect(parsed.job.vectors?.[0]?.sourceName).toBe('logo.svg');
+  });
+});
+
+// #678 — the dialog's count line and empty state, truthful in every mix: fills only, open lines
+// only, closed lines only, and the two together.
+describe('#678 — the import dialog counts open and closed lines separately', () => {
+  const CLOSED_RING = svg('<rect x="0" y="0" width="10" height="6" fill="none" stroke="#000"/>', 'width="10mm" viewBox="0 0 10 6"');
+  const BOTH = svg(
+    '<rect x="0" y="0" width="10" height="6" fill="none" stroke="#000"/><path d="M0 8 L10 8" fill="none" stroke="#000"/>',
+    'width="10mm" viewBox="0 0 10 10"',
+  );
+  const TEXT_ONLY = svg('<text x="0" y="5">Hi</text>', 'width="10mm" viewBox="0 0 10 10"');
+
+  it('a closed-lines-only file reads "1 closed line" and adds a closed item', async () => {
+    await openImport('ring.svg', CLOSED_RING);
+    const header = screen.getByTestId('engrave-import-dialog').textContent ?? '';
+    expect(header).toContain('1 closed line');
+    expect(header).not.toContain('open line');
+    expect(header).not.toContain('closed shape');
+    fireEvent.click(screen.getByTestId('engrave-import-accept'));
+    const line = (useEngraveJobStore.getState().job.traces ?? [])[0]!;
+    expect(line.kind === 'line' ? line.closed : null).toBe(true);
+  });
+
+  it('a mixed file names each kind', async () => {
+    await openImport('both.svg', BOTH);
+    const header = screen.getByTestId('engrave-import-dialog').textContent ?? '';
+    expect(header).toContain('1 open line');
+    expect(header).toContain('1 closed line');
+    fireEvent.click(screen.getByTestId('engrave-import-accept'));
+    const traces = useEngraveJobStore.getState().job.traces ?? [];
+    expect(traces).toHaveLength(2);
+    expect(traces.map((t) => (t.kind === 'line' ? t.closed : null)).sort()).toEqual([false, true]);
+  });
+
+  it('a fills-only file still reads as it did, with no line clause', async () => {
+    await openImport('square.svg', MM_SQUARE);
+    const header = screen.getByTestId('engrave-import-dialog').textContent ?? '';
+    expect(header).toContain('1 closed shape');
+    expect(header).not.toContain(' open line');
+    expect(header).not.toContain(' closed line');
+  });
+
+  it('the empty state survives — and no longer claims a stroked ring needs a fill', async () => {
+    await openImport('text.svg', TEXT_ONLY);
+    const empty = screen.getByTestId('engrave-import-empty');
+    expect(empty).toBeTruthy();
+    expect(empty.textContent).not.toContain('still needs its fill');
+    expect((screen.getByTestId('engrave-import-accept') as HTMLButtonElement).disabled).toBe(true);
   });
 });

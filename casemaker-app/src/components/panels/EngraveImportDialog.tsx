@@ -185,8 +185,11 @@ export function EngraveImportDialog({
   const otherNotes = outline.notes.filter((n) => !n.includes('assuming'));
 
   // #664 — a lines-only file (artwork drawn as strokes) IS addable: its paths become Engrave
-  // (line) operations, and the contours may be none.
+  // (line) operations, and the contours may be none. #678 — a stroked CLOSED shape imports as a
+  // closed line, so the count says which is which.
   const pathCount = scaled.paths?.length ?? 0;
+  const openCount = (scaled.paths ?? []).filter((path) => !path.closed).length;
+  const closedCount = pathCount - openCount;
   // A region needs both dimensions; a LINE may be perfectly horizontal or vertical, so a single
   // non-zero extent is enough for a lines-only drawing.
   const hasGeometry =
@@ -197,7 +200,7 @@ export function EngraveImportDialog({
   const points = useMemo(() => {
     let n = 0;
     for (const ring of scaled.contours) n += ring.length;
-    for (const line of scaled.paths ?? []) n += line.length;
+    for (const line of scaled.paths ?? []) n += line.points.length;
     return n;
   }, [scaled]);
   const stride = Math.max(1, Math.ceil(points / PREVIEW_MAX_POINTS));
@@ -216,9 +219,12 @@ export function EngraveImportDialog({
           {outline.format === 'raster' ? 'Trace image' : 'Import outline'} — {outline.sourceName}
         </h3>
         <p style={MUTED}>
-          {outline.format.toUpperCase()} · {outline.contours.length} closed shape
-          {outline.contours.length === 1 ? '' : 's'}
-          {pathCount > 0 ? ` · ${pathCount} line${pathCount === 1 ? '' : 's'}` : ''} · {points} point
+          {outline.format.toUpperCase()}
+          {outline.contours.length > 0
+            ? ` · ${outline.contours.length} closed shape${outline.contours.length === 1 ? '' : 's'}`
+            : ''}
+          {openCount > 0 ? ` · ${openCount} open line${openCount === 1 ? '' : 's'}` : ''}
+          {closedCount > 0 ? ` · ${closedCount} closed line${closedCount === 1 ? '' : 's'}` : ''} · {points} point
           {points === 1 ? '' : 's'}
           {outline.contours.length > 0 ? ` · ${outline.fillRule === 'EvenOdd' ? 'even-odd' : 'non-zero'} fill` : ''}
         </p>
@@ -241,20 +247,25 @@ export function EngraveImportDialog({
               stroke="#8fb3d9"
               strokeWidth={Math.max(scaled.width, scaled.height, 1) * 0.006}
             />
-            {/* #664 — the open paths as they will be traced: lines, not fills. */}
-            {(scaled.paths ?? []).map((line, i) => (
-              <polyline
-                key={`path-${i}`}
-                data-testid={`engrave-import-preview-line-${i}`}
-                points={line
-                  .filter((_, j) => j % stride === 0 || j === line.length - 1)
-                  .map(([x, y]) => `${x.toFixed(3)},${(-y).toFixed(3)}`)
-                  .join(' ')}
-                fill="none"
-                stroke="#8fb3d9"
-                strokeWidth={Math.max(scaled.width, scaled.height, 1) * 0.006}
-              />
-            ))}
+            {/* #664 — the paths as they will be traced: lines, not fills. #678 — a closed one is
+                drawn as a polygon so a ring previews as a ring. */}
+            {(scaled.paths ?? []).map((path, i) => {
+              const pts = path.points
+                .filter((_, j) => j % stride === 0 || j === path.points.length - 1)
+                .map(([x, y]) => `${x.toFixed(3)},${(-y).toFixed(3)}`)
+                .join(' ');
+              const common = {
+                'data-testid': `engrave-import-preview-line-${i}`,
+                fill: 'none',
+                stroke: '#8fb3d9',
+                strokeWidth: Math.max(scaled.width, scaled.height, 1) * 0.006,
+              } as const;
+              return path.closed ? (
+                <polygon key={`path-${i}`} points={pts} {...common} />
+              ) : (
+                <polyline key={`path-${i}`} points={pts} {...common} />
+              );
+            })}
           </svg>
         </div>
 
@@ -349,9 +360,10 @@ export function EngraveImportDialog({
 
         {!hasGeometry && (
           <div data-testid="engrave-import-empty" style={ERROR}>
-            Nothing to cut — this file has no closed, filled shapes and no open stroke paths. A
-            stroked CLOSED shape still needs its fill to import as a region; convert text to
-            outlines in the drawing program first.
+            Nothing to cut — this file has no closed, filled shapes and no stroke paths. Stroked
+            shapes (open or closed) import as Engrave lines, so a drawing whose strokes are all
+            hidden or clipped counts as empty; convert text to outlines in the drawing program
+            first.
             {outline.format === 'raster' && (
               <div style={{ marginTop: 4 }}>
                 For a traced picture that means the threshold found no ink: move it towards the
