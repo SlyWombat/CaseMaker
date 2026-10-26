@@ -11,10 +11,9 @@
 // form only; a unit beside every numeric field; no decimal past three places; every disabled
 // control carries a reason sentence.
 //
-// The checks #690 owns — Cut step 1's scope keys ("Setup 1 · cat:…") and owner tags ("job" /
-// "vise" / "run gate"), and the panel's stock fields that print no unit — are marked `test.fail`
-// with the issue named. They flip green when #690 lands; an unexpected PASS is reported as a
-// failure, which is the signal to remove the mark.
+// The checks #690 owned — Cut step 1's scope keys ("Setup 1 · cat:…") and owner tags ("job" /
+// "vise" / "run gate"), and the panel's stock fields that print no unit — pass now that #690 has
+// landed: the marks were removed in that commit, and these are ordinary assertions.
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -204,11 +203,6 @@ test.describe('first job acceptance (§6)', () => {
   });
 
   test('no issue numbers, code tokens, internal ids or preflight owner tags', () => {
-    // #690 (case-maker-3e) owns these on main today: issue numbers in the target-object help
-    // ("(#218)"), Cut step 1's findings printing their scope key ("Setup 1 · flat-1.0") and their
-    // owner tags ("job" / "vise" / "run gate"). Remove this mark when #690 lands; an unexpected
-    // pass is reported as a failure, which is the signal.
-    test.fail(true, '#690 removes issue numbers, scope keys and owner tags from the flow');
     const CODE =
       /#\d+|\b(?:cat|inv|bp|fx):|\blbl-|\b[a-z][a-z0-9]*(?:-[a-z0-9]+)*-(?:default|refused)\b|\b(?:flat|ball|bull|chamfer|engraver|drill|thread)-\d[\w.]*/g;
     const problems: string[] = [];
@@ -228,9 +222,6 @@ test.describe('first job acceptance (§6)', () => {
   });
 
   test('a unit sits beside every numeric field', () => {
-    // #690 owns the panel fields that print no unit (the stock's length X / width Y / thickness);
-    // the wizard's own fields already carry mm. Remove this mark when #690 lands.
-    test.fail(true, '#690 puts a unit on the panel’s stock fields');
     // `s` alone is not a unit token: it would match the possessive in "the blank’s". A seconds
     // field says "sec"/"second(s)", or a number beside an `s`.
     const UNIT = /mm|°|degrees?\b|rpm|%|\bmin\b|\bsec(?:ond)?s?\b|\d\s*s\b/i;

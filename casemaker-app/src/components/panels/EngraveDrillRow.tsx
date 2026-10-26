@@ -279,7 +279,7 @@ export function EngraveDrillRow({
             checked={drill.through}
             data-testid={`engrave-drill-through-${index}`}
             aria-label={`${kindLabel} ${index + 1} through`}
-            title="Cut all the way through the blank. Needs a sacrificial board (#213) and the through-cut rules (#218), so it is refused until those land."
+            title="Cut all the way through the blank and into the board under it. It needs a sacrificial board under the part; without one the job refuses it."
             onChange={(e) => onChange({ through: e.target.checked })}
           />
           <span>through</span>

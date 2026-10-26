@@ -71,6 +71,7 @@ import {
 } from '@/engine/cnc/vCarveGeometry';
 import { MATERIAL_LABELS } from '@/engine/cnc/materials';
 import { cutterOnMetalLine } from '@/engine/cnc/engrave/cutterMaterial';
+import { toolDisplayName } from '@/engine/cnc/toolDisplay';
 import { toPartPlan, labelProfile, jobDepthLimit, keepOutNameAt, type PartPlan } from '@/engine/cnc/engrave/partPlan';
 import {
   dedupeFindings,
@@ -851,9 +852,9 @@ function metalLineFindings(job: EngraveJob, tool: Tool | null): JobFinding[] {
       severity: overridden ? 'warning' : 'error',
       code: 'tool-metal-line',
       message: overridden
-        ? `"${tool.name}" is on Makera's "for Metal" line, and this job cuts ${MATERIAL_LABELS[job.stock.material]}: ` +
+        ? `${toolDisplayName(tool)} is on Makera's "for Metal" line, and this job cuts ${MATERIAL_LABELS[job.stock.material]}: ` +
           `chosen despite the material mismatch — feeds and speeds are a guess, and the bit can chip or snap.`
-        : `"${tool.name}" is on Makera's "for Metal" line, and this job cuts ${MATERIAL_LABELS[job.stock.material]}: ` +
+        : `${toolDisplayName(tool)} is on Makera's "for Metal" line, and this job cuts ${MATERIAL_LABELS[job.stock.material]}: ` +
           `the bit's geometry and its coating are ground for metal, and no feed row was written for it on this material. ` +
           `Pick a wood/plastic cutter for this blank, or change the stock to a metal before cutting.`,
     },

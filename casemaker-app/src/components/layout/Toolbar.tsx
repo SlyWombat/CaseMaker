@@ -232,7 +232,7 @@ export function Toolbar() {
       title={
         manageOpen
           ? 'Leave the house — back to what you had open'
-          : 'The house and its machines — your cutters, the Makera catalogue, and what the bench answered (#311)'
+          : 'The house and its machines — your cutters, the Makera catalogue, and what the bench answered'
       }
       onClick={() => (manageOpen ? closeManage() : openManage())}
     >

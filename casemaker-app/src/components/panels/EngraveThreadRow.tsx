@@ -151,7 +151,7 @@ export function EngraveThreadRow({
             checked={thread.through}
             data-testid={`engrave-thread-through-${index}`}
             aria-label={`Thread ${index + 1} through`}
-            title="Thread all the way through the blank. Needs a sacrificial board (#213) and the through-cut rules (#218), so it is refused until those land."
+            title="Thread all the way through the blank and into the board under it. It needs a sacrificial board under the part; without one the job refuses it."
             onChange={(e) => onChange({ through: e.target.checked })}
           />
           <span>through</span>

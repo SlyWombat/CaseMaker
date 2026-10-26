@@ -264,7 +264,7 @@ export function EngraveMachineUpload({
         type="button"
         data-testid="engrave-upload"
         disabled={blocked !== null || stage === 'sending'}
-        title={blocked ?? `Send the verified program to ${label} (#255).`}
+        title={blocked ?? `Send the verified program to ${label}.`}
         style={{ width: '100%', padding: 7, marginTop: 6 }}
         onClick={() => {
           setResult(null);

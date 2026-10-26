@@ -623,9 +623,11 @@ doors are open today:
 - **Off the shelf** — the location's own stock for that material: purchased sizes, offcuts with
   the job they came from, quantity and reservations. A piece is consumed by the job that takes
   it, so a shelf entry at zero is shown and refused.
-- **Make** — type the form and the dimensions: **plate** or **block** (L × W × T), **rod**
-  (⌀ × L), **tube** (⌀o × ⌀i × L) or **disc** (⌀ × T). A piece made here can be put on the
-  shelf in the same step.
+- **Make** — type the form and its size, in mm: **sheet**, **plate** or **block** (length X ×
+  width Y × thickness Z), **disc** (⌀ × thickness, cut on its flat face) or **rod** (⌀ × length,
+  held standing on its end and cut on that ⌀ end). A rod longer than the vise's grip (20 mm) is
+  the rotary's, and the form says so instead of offering it. A **tube** is refused by name — its
+  hole leaves no face a job can cut. A piece made here can be put on the shelf in the same step.
 - **Load** — an STL or 3MF used as the stock. A prism (identical slices) cuts as a block of that
   outline; a PrusaSlicer 3MF with negative volumes is recognised and offered as **stock +
   design** in one step (#410, #437).
@@ -636,12 +638,15 @@ the facing question reads (below). A purchased **two-colour engraving laminate**
 (#492). A laminate is not a print and carries no printed layers or filament; its colour plane
 is the cap itself. A printed blank, by contrast, states its print — layer height, first layer,
 and the two colours — and the app snaps the colour boundary to the printer's real layer grid
-(chapter 6).
+(chapter 6). A disc or a rod is cut on a **round** face: a cut that reaches the corner of the
+square the job plans in is off the material, and the job raises a finding naming the item
+instead of cutting air.
 
-The two templates are still offered beneath the doors. **Use the badge blank** takes the stock
-and the magnet pocket from the project's badge, so nobody retypes 76.2 × 38.1 × 3.81 mm
-(chapter 6). A blank taken from the badge is **turned a quarter turn** to sit in the vise: its
-38.1 mm side runs across the jaws, its 76.2 mm side along them, so a name reads along Y (#383).
+The badge is a **starter on the welcome door** — **Name badge** opens this wizard with the
+badge's blank, its magnet pocket and its print already the job's, so nobody retypes
+76.2 × 38.1 × 3.81 mm (chapter 6). A blank taken from the badge is **turned a quarter turn** to
+sit in the vise: its 38.1 mm side runs across the jaws, its 76.2 mm side along them, so a name
+reads along Y (#383).
 Taking a blank also brings the vise's **stock proud** with it when the vise is still the shipped
 default — half the blank, at most 4 mm (#344) — because a flat 4 mm stands taller than a 3.81 mm
 badge. A vise you saved or measured is never touched.

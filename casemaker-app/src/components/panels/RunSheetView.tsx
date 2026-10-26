@@ -25,9 +25,9 @@ import './runSheet.css';
  */
 
 /**
- * #505 — the visible note says the operator's fact. The tracker reference that will confirm the
- * step on a real machine stays in the data and on the tag's `title`, not in the sentence: a
- * printed sheet is read at the bench, where an issue number is bookkeeping for someone else.
+ * #505 — the visible note says the operator's fact, and so does the hover: a printed sheet is read
+ * at the bench, where an issue number is bookkeeping for someone else. #690 took the tracker
+ * reference off the `title` too; it stays in the step's data (`step.unverified`), where it belongs.
  */
 function unverifiedNote(): string {
   return 'Not yet confirmed on the machine.';
@@ -46,7 +46,7 @@ function StepBody({ step }: { step: RunSheetStep }): JSX.Element {
         </span>
       )}
       {step.unverified !== undefined && (
-        <em className="run-sheet-unverified" title={`Bench issue ${step.unverified}`}>
+        <em className="run-sheet-unverified" title="This step has not been walked at the machine yet.">
           {unverifiedNote()}
         </em>
       )}

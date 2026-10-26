@@ -2752,7 +2752,7 @@ export function EngravePanel(): JSX.Element {
         </summary>
       <p style={MUTED}>
         A model the job is placed against. As a reference it is embedded and drawn but never cut —
-        the stock around it is the profile cut-out work (#218). As a goal (Surface a mesh) it is the
+        the stock around it is the profile cut-out work. As a goal (Surface a mesh) it is the
         shape to make, roughed and finished in 3D.
       </p>
       <UndoRemoval section="target" />

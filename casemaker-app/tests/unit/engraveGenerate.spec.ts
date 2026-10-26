@@ -41,6 +41,7 @@ import { viseForNewJob } from '@/engine/cnc/fixture';
 import { defaultBadgeParams } from '@/types/badge';
 import type { ToolpathIR } from '@/engine/cnc/cam/ir';
 import { cuttingForTrace, cuttingRadiusForSweep, flatEndMill, isVTraceTool, traceRadiusAt, type Tool } from '@/engine/cnc/tool';
+import { toolDisplayName } from '@/engine/cnc/toolDisplay';
 import type { EngraveCutout, EngraveDrill, EngraveJob, EngraveKeepOut, EngraveLabel, EngraveLineItem, EngraveStrokeLabelItem, EngraveThreadItem, EngraveTraceItem, EngraveVectorShape } from '@/types/engraveJob';
 
 /**
@@ -1244,7 +1245,8 @@ describe('a V-bit trace job (#405)', () => {
     const refusal = g.findings.find((f) => f.code === 'tool-metal-line');
     expect(refusal).toBeDefined();
     expect(refusal!.severity).toBe('error');
-    expect(refusal!.message).toContain(flat.name); // the refusal NAMES the cutter
+    // #690 — the refusal NAMES the cutter, in the one display form the app prints.
+    expect(refusal!.message).toContain(toolDisplayName(flat));
     expect(refusal!.message).toContain('PLA');
   });
 
@@ -1291,7 +1293,7 @@ describe('a V-bit trace job (#405)', () => {
     const refusal = g.findings.find((f) => f.code === 'tool-metal-line');
     expect(refusal).toBeDefined();
     expect(refusal!.severity).toBe('error');
-    expect(refusal!.message).toContain(coded.name);
+    expect(refusal!.message).toContain(toolDisplayName(coded));
   });
 
   it('is swept by the COLUMN engine, and the run sheet says so (#405)', () => {
