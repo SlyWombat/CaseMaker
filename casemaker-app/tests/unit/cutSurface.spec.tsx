@@ -333,6 +333,32 @@ describe('#419 §3 the Cut surface', () => {
     expect(screen.getByTestId('engrave-package-reservation').textContent).toContain('no blank needs to be held');
   });
 
+  it('#703 — steps 1 and 4 print the program’s estimate, not the plan’s setup-inclusive total', () => {
+    const job = defaultEngraveJob();
+    const pkg = frozen(job, [P1]);
+    // The program's cycle estimate — the number the Generate row and the simulator show — is 86 s:
+    // "about 1 min 26 s (estimated)". The plan's own total is a different figure (setup plus the
+    // cut), and it keeps its place in the plan's fold.
+    const made: EngraveGenerated = {
+      ...generated([P1]),
+      cam: { operations: 1, cuttingMoves: 1, estimatedSeconds: 86, passes: 1 },
+    };
+    draw({ job, report: reportOf(), pkg, generated: made });
+
+    const step1 = screen.getByTestId('engrave-cut-step-1-summary').textContent ?? '';
+    const step4 = screen.getByTestId('engrave-cut-step-4-summary').textContent ?? '';
+    expect(step1).toContain('about 1 min 26 s (estimated)');
+    expect(step4).toContain('about 1 min 26 s (estimated)');
+
+    // The fold still says the plan's setup-inclusive total, and the two step lines never print it:
+    // one cut has one time (audit B15).
+    const total = screen.getByTestId('run-plan-total').textContent ?? '';
+    const totalTime = total.replace(/^Total (at least )?/, '').replace(/ — .*$/, '').trim();
+    expect(totalTime).not.toBe('1 min 26 s');
+    expect(step1).not.toContain(totalTime);
+    expect(step4).not.toContain(totalTime);
+  });
+
   it('#689 — the clearance acknowledgement lives in step 1 and blocks Run until it is ticked', async () => {
     const job = plannedJob();
     const pkg = frozen(job, [P1]);

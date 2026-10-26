@@ -527,9 +527,16 @@ export function EngraveCutSurface({
 
   const programCount = generated?.programs.length ?? pkg?.programs.length ?? 0;
   const noteCount = report.rows.filter((row) => row.severity === 'info').length;
+  // #703 — ONE TIME FOR THE CUT (audit B15). The run plan's total is the SETUP plus the cut, and
+  // in a package that carries no toolpath the cut's own phase has no number at all — so the
+  // 6 min 8 s the two steps printed was that plan total, not this cut's time. The steps print the
+  // PROGRAM's cycle estimate instead, in the same words the Generate row and the simulator use
+  // (#688); the setup-inclusive total stays in the plan's own fold, where the phase table names it.
+  const cutEstimate =
+    generated?.cam == null ? null : `about ${formatDuration(generated.cam.estimatedSeconds)} (estimated)`;
   const step1Meta: string[] = [];
   if (programCount > 0) step1Meta.push(`${programCount} program${programCount === 1 ? '' : 's'}`);
-  if (plan !== null) step1Meta.push(formatDuration(plan.totalSeconds));
+  if (cutEstimate !== null) step1Meta.push(cutEstimate);
   if (noteCount > 0) step1Meta.push(`${noteCount} note${noteCount === 1 ? '' : 's'}`);
   if (ackRequired) step1Meta.push(acknowledged ? 'clearance acknowledged' : 'clearance not acknowledged');
   const step1Summary = checked
@@ -566,7 +573,7 @@ export function EngraveCutSurface({
   if (plan?.features.find((feature) => feature.feature === 'vacuum')?.on === true) step4Meta.push('vacuum on');
   const cutter = jobTool(job);
   if (cutter !== null && releaseSources.length <= 1) step4Meta.push(`fit the ${toolDisplayName(cutter)}`);
-  if (plan !== null) step4Meta.push(formatDuration(plan.totalSeconds));
+  if (cutEstimate !== null) step4Meta.push(cutEstimate);
   const step4Summary = step4Meta.join(' · ');
 
   const missingReportIndex =
