@@ -164,6 +164,16 @@ export interface OraclePredicted {
    * own cell centres; it is derived per level from the moves and the tip depth above.
    */
   thread?: OracleThread;
+  /**
+   * #669 — set when `polygons` is a V-CARVED region's FLOOR, so the entry can be read at levels
+   * ABOVE its own. A V region's cross-section at a level `d` shallower than its floor is the floor
+   * polygons grown by `(depth − d)·tanHalf` — the cone widening as it rises — and without this the
+   * entry would contribute its narrow floor at a shallow level another item created (a V trace's
+   * mouth, a chamfer's bevel) while the simulation removed the wider mouth: an over-cut that is
+   * the prediction's fault, not the file's. `polygons` stays the floor, so the entry's OWN level is
+   * unchanged and the common case pays no offset.
+   */
+  vRegion?: { tanHalf: number };
 }
 
 /** The comparison at one distinct floor Z. */
@@ -404,6 +414,26 @@ function grooveRegionAt(tl: ManifoldToplevel, groove: OracleGroove, tipDepth: nu
 }
 
 /**
+ * #669 — a V region's cross-section at a level ABOVE its floor: the floor polygons grown by the
+ * cone's rise over the difference (`(depth − level)·tanHalf`, see {@link OraclePredicted.vRegion}).
+ * The offset is the same round join and chord resolution `makeClipperOffset` uses, so the grown
+ * boundary matches the cutter's own polygonisation at that level.
+ */
+function vRegionAt(
+  tl: ManifoldToplevel,
+  floor: readonly OraclePolygon[],
+  grow: number,
+  segments: number,
+): CrossSectionInstance {
+  const CS = tl.CrossSection;
+  const cs = CS.ofPolygons(floor as OraclePolygon[]);
+  if (!(grow > 0)) return cs;
+  const grown = cs.offset(grow, 'Round', 2, segments);
+  cs.delete();
+  return grown;
+}
+
+/**
  * The extra level a GROOVE prediction is judged at, or none (`[]`) when there is no groove.
  *
  * Derived from the shallowest groove's own depth rather than set to a millimetre, so a job of
@@ -593,7 +623,9 @@ export function computeOracle(
         : p.thread !== undefined
           ? (threadSlices[pi]?.(z + ORACLE_SLICE_LIFT_MM) ?? null)
           : p.polygons.length > 0
-            ? CS.ofPolygons(p.polygons)
+            ? p.vRegion !== undefined && p.depth > depth + 1e-9
+              ? vRegionAt(tl, p.polygons, (p.depth - depth) * p.vRegion.tanHalf, roundSegments)
+              : CS.ofPolygons(p.polygons)
             : null;
       if (cs) parts.push(cs);
     }

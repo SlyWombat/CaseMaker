@@ -8,6 +8,59 @@
       "minimum": 0,
       "type": "number"
     },
+    "chamfers": {
+      "description": "Chamfers along a profile edge or a pocket rim; omit for none.",
+      "items": {
+        "properties": {
+          "enabled": {
+            "description": "False keeps the chamfer in the document but out of the program.",
+            "type": "boolean"
+          },
+          "id": {
+            "description": "Unique id for this chamfer within the job.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "kind": {
+            "const": "chamfer",
+            "description": "A chamfer along a profile's part edge or a pocket's rim, cut by a V/chamfer bit's flank.",
+            "type": "string"
+          },
+          "name": {
+            "description": "Optional human-readable name for the item list.",
+            "type": "string"
+          },
+          "of": {
+            "description": "The id of the item whose outline the bevel follows; absent while none is chosen.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "side": {
+            "description": "The cutter's side of the rim's outline: 'outside' for a part's edge, 'inside' for a pocket's rim.",
+            "enum": [
+              "outside",
+              "inside"
+            ],
+            "type": "string"
+          },
+          "width": {
+            "description": "Width of the chamfer on the top face, in millimetres; its depth follows from the cutter.",
+            "exclusiveMinimum": 0,
+            "maximum": 50,
+            "type": "number"
+          }
+        },
+        "required": [
+          "kind",
+          "id",
+          "enabled",
+          "side",
+          "width"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
     "combined": {
       "description": "Shapes derived from other items (border, frame, cutaway); omit for none.",
       "items": {

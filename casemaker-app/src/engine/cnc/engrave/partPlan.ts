@@ -40,6 +40,7 @@ import type { FixtureEnvelope } from '@/engine/cnc/setup';
 import { supportedFootprint } from '@/engine/cnc/sacrificial';
 import { sweepRadiusForJob } from '@/engine/cnc/toolRegistry';
 import type { Tool } from '@/engine/cnc/tool';
+import type { EngraveChamfer } from '@/types/engraveJob';
 import { grooveWidthAt, vCone } from '@/engine/cnc/vProfile';
 import { defaultBoundaryMargin, voidFloor, voidMargin } from '@/engine/cnc/engrave/depthBounds';
 import { inkBoxOf, type InkBox, type InkMeasure } from '@/engine/cnc/engrave/inkBox';
@@ -118,6 +119,22 @@ export interface PartPlan {
     /** The blank's thickness, mm — the tab top is `-(thickness - tabs.height)`. */
     thickness: Mm;
     tabs: CutoutTabs;
+  }[];
+  /**
+   * #669 — CHAMFERS along a rim, a seventh sibling. A chamfer is not a region: one closed bevel
+   * follows an edge, cut by a cone's flank. The plan is tool-agnostic, so it carries the rim's
+   * OUTLINE and the cut-out's own facts; the worker derives the edge, the tool offset (the tip
+   * radius) and the depth (`width / tan(halfAngle)`) from the cutter it resolves.
+   */
+  chamfers: {
+    id: string;
+    name: string;
+    /** The referenced rim's outline, stock frame — the item's own profile. */
+    outline: Profile;
+    /** The cutter's side of that outline: a part's edge (outside) or a pocket's rim (inside). */
+    side: 'outside' | 'inside';
+    /** The chamfer's width on the top face, mm. */
+    width: Mm;
   }[];
   /**
    * SINGLE-LINE traces (#219), a SIBLING of `engraves` rather than more entries in it. A trace
@@ -477,6 +494,16 @@ function primitiveProfile(primitive: EngravePrimitive): Profile {
  * `itemOperationName`, but the referenced item's name is supplied by the caller because the
  * cut-out itself holds only an id.
  */
+/**
+ * The operation's display name for a chamfer (#669) — the descriptor only, without the `[T#]`
+ * prefix or the depth suffix. The rim is named where the caller knows it (the row, the findings,
+ * the plan), because the chamfer records only its id.
+ */
+export function chamferOperationName(chamfer: EngraveChamfer, rimName: string | null): string {
+  const named = chamfer.name ? ` "${chamfer.name}"` : '';
+  return `Chamfer${named}${rimName === null ? '' : ` of ${rimName}`}`;
+}
+
 export function cutoutOperationName(cutout: EngraveCutout, targetName: string | null): string {
   const named = cutout.name ? ` "${cutout.name}"` : '';
   const target =
@@ -1939,6 +1966,24 @@ export function toPartPlan(job: EngraveJob, options: PartPlanOptions = {}): Part
     });
   }
 
+  // CHAMFERS (#669), a seventh sibling. Their rim is the REFERENCED ITEM's own profile — its
+  // outline, at the item's own geometry — and the chamfer states which side of it the cutter runs.
+  // A chamfer whose rim never resolved is absent here, exactly as a cut-out with a broken
+  // reference is: `validateJob` reports it and no path is generated.
+  const chamfers: PartPlan['chamfers'] = [];
+  for (const chamfer of job.chamfers ?? []) {
+    if (!chamfer.enabled || chamfer.of === undefined) continue;
+    const region = profiles.get(chamfer.of);
+    if (region === undefined) continue;
+    chamfers.push({
+      id: chamfer.id,
+      name: chamferOperationName(chamfer, names.get(chamfer.of) ?? null),
+      outline: region,
+      side: chamfer.side,
+      width: chamfer.width,
+    });
+  }
+
   // 3D primitives (#435) join the SAME region funnel only where they reduce to a flat-floor
   // region: a box or cylinder opening out of the top face. Nothing references a primitive, so
   // there is no dependency ordering to respect and no entry in `profiles`. The refused forms are
@@ -2041,6 +2086,7 @@ export function toPartPlan(job: EngraveJob, options: PartPlanOptions = {}): Part
     },
     engraves,
     cutouts,
+    chamfers,
     traces,
     drills,
     threads,

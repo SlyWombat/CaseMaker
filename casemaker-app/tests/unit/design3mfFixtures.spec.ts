@@ -1039,7 +1039,13 @@ describe('the thick fixture acceptance gates (#221)', () => {
       // #584 moved `predictedArea` only: the floor is the CAM’s reach, which rounds off each
       // convex corner the first ring cannot enter (≈0.07% of the glyph area); the simulation and
       // its tolerance are untouched.
-      expect(text!.predictedArea).toBeCloseTo(365.21, 2);
+      // #669 — the TEXT level's prediction now carries the LOGO region's section at that level,
+      // grown by the cone as it rises above the logo's 0.998 floor (`OraclePredicted.vRegion`,
+      // (0.998 − 0.985)·tan 15° ≈ 0.0035 mm of outset around every glyph). The old 365.21 was the
+      // logo's FLOOR area, 0.51 mm² narrower than the mouth the simulation really removes; the
+      // z = −0.998 level itself is unchanged (its own floor, no growth). Both floors still check
+      // with ZERO under- and over-cut (asserted above), which is the point of the growth.
+      expect(text!.predictedArea).toBeCloseTo(365.72, 2);
       expect(text!.simulatedArea).toBeCloseTo(365.73, 2);
       expect(logo!.predictedArea).toBeCloseTo(78.07, 2);
       expect(logo!.simulatedArea).toBeCloseTo(78.16, 2);

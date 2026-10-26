@@ -294,6 +294,36 @@ const cutoutSchema = z.object({
 });
 
 /**
+ * #669 — a CHAMFER along a rim: one flat bevel on the top edge of a profile's part or a pocket's
+ * wall, cut by the cone's flank. `of` names the rim's item; the tool's side is derived from that
+ * item's kind, and the bevel's depth from `width` and the cutter's cone — neither is stored.
+ */
+const chamferSchema = z.object({
+  kind: z
+    .literal('chamfer')
+    .describe("A chamfer along a profile's part edge or a pocket's rim, cut by a V/chamfer bit's flank."),
+  id: z.string().min(1).describe('Unique id for this chamfer within the job.'),
+  name: z.string().optional().describe('Optional human-readable name for the item list.'),
+  enabled: z.boolean().describe('False keeps the chamfer in the document but out of the program.'),
+  of: z
+    .string()
+    .min(1)
+    .optional()
+    .describe(
+      'The id of the item whose outline the bevel follows; absent while none is chosen.',
+    ),
+  side: z
+    .enum(['outside', 'inside'])
+    .describe("The cutter's side of the rim's outline: 'outside' for a part's edge, 'inside' for a pocket's rim."),
+  width: z
+    .number()
+    .finite()
+    .positive()
+    .max(50)
+    .describe('Width of the chamfer on the top face, in millimetres; its depth follows from the cutter.'),
+});
+
+/**
  * An imported vector outline (#217). It shares the shape base but is NOT a member of the
  * `EngraveShape` union: it is its own list on the job (`vectors`), like `combined` (#215) and
  * `traces` (#219), so the panel's exhaustive simple-shape switch and the hand-built shape editor
@@ -1740,6 +1770,11 @@ const engraveJobV2Schema = engraveJobV1Schema.extend({
     .array(cutoutSchema)
     .optional()
     .describe('Profile cut-outs that free the part from the stock; omit for none.'),
+  // #669's chamfers. OPTIONAL, not defaulted, for the same byte-for-byte reason as `cutouts`.
+  chamfers: z
+    .array(chamferSchema)
+    .optional()
+    .describe('Chamfers along a profile edge or a pocket rim; omit for none.'),
   // #246/#254's per-field provenance. OPTIONAL, not defaulted: a job that has never had a
   // cutting override or a guided setup applied carries no key.
   sources: jobSourcesSchema

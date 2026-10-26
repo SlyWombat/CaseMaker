@@ -58,6 +58,11 @@ export function newEngraveCutoutId(): string {
   return newId('cut');
 }
 
+/** Fresh chamfer id (#669). A chamfer is its own list entry, and its own kind of operation. */
+export function newEngraveChamferId(): string {
+  return newId('chm');
+}
+
 /**
  * Fresh under-surface void id (#271). A void is NOT an item — it is a fact about the blank, so it
  * lives in its own list with its own prefix and never reaches the `engraves` pipeline.

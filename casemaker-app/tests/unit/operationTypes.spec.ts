@@ -24,6 +24,7 @@ describe('#662 the operation types', () => {
       'v-carve',
       'pocket',
       'profile',
+      'chamfer',
       'hole',
       'bore',
       'thread',
@@ -55,6 +56,8 @@ describe('#662 the operation types', () => {
     expect(operationTypeOfItem({ kind: 'rect' }, 'v-carve')).toBe('v-carve');
     expect(operationTypeOfItem({ kind: 'circle', through: true }, 'pocket')).toBe('profile');
     expect(operationTypeOfItem({ kind: 'cutout' }, 'pocket')).toBe('profile');
+    // #669 — a chamfer is its own operation on an item's outline.
+    expect(operationTypeOfItem({ kind: 'chamfer' }, 'pocket')).toBe('chamfer');
     expect(operationTypeOfItem({ kind: 'drill' }, 'pocket')).toBe('hole');
     expect(operationTypeOfItem({ kind: 'drill-array' }, 'pocket')).toBe('hole');
     // #668 — a bore is the same item with `mode: 'bore'`: a hole whose width the job states, not
@@ -95,6 +98,10 @@ describe('#662 the operation types', () => {
         added.push('cutout');
         return 'i3';
       },
+      addChamfer: () => {
+        added.push('chamfer');
+        return 'i6';
+      },
       addDrill: (kind: string) => {
         added.push(`drill:${kind}`);
         return 'i4';
@@ -109,12 +116,14 @@ describe('#662 the operation types', () => {
       expect(addOperationOfType('v-carve')).toBe('i2');
       expect(addOperationOfType('pocket')).toBe('i2');
       expect(addOperationOfType('profile')).toBe('i3');
+      // #669 — Chamfer the edge adds a chamfer item.
+      expect(addOperationOfType('chamfer')).toBe('i6');
       expect(addOperationOfType('hole')).toBe('i4');
       // #668 — Bore to size is the same `drill` item with the bore's mode; the store seeds the
       // diameter (its own spec proves the value).
       expect(addOperationOfType('bore')).toBe('i4');
       expect(addOperationOfType('thread')).toBe('i5');
-      expect(added).toEqual(['label', 'shape:rect', 'shape:rect', 'cutout', 'drill:drill', 'drill:drill', 'thread']);
+      expect(added).toEqual(['label', 'shape:rect', 'shape:rect', 'cutout', 'chamfer', 'drill:drill', 'drill:drill', 'thread']);
     } finally {
       useEngraveJobStore.setState(before);
     }

@@ -91,7 +91,7 @@
  */
 
 import { z } from 'zod';
-import { cuttingForTrace, vendorId } from './tool';
+import { cuttingDiameter, cuttingForTrace, vendorId } from './tool';
 import type { Tool } from './tool';
 import { DEFAULT_V_CARVE_STEPOVER_RATIO } from './vCarveGeometry';
 import { CLAMP_REFUSE_FRACTION_FALLBACK, clampToMachine } from './machine';
@@ -1302,8 +1302,20 @@ export function feedsFor(
   // cone whose header states no tip or angle.
   const usable = cuttingForTrace(tool);
   if (!usable.ok) return { ok: false, reason: usable.reason };
-  const edge: 'flat' | 'v' = usable.tool.shape === 'v' ? 'v' : 'flat';
-  const diameter = usable.tool.shape === 'v' ? usable.tool.cone.tipRadius * 2 : usable.tool.radius * 2;
+  // #669 — A CHAMFER BIT RESOLVES THE FLAT ROW FOR ITS CUTTING DIAMETER. The V rows are keyed to an
+  // engraver's TIP (0.3–0.5 mm); a chamfer's tip is a point or a small flat, a diameter no V row
+  // carries, and on wood there is no V row at all. What a chamfer pass actually engages is the
+  // cone's flank up to its cutting diameter, which is the width a flat row is written for, so that
+  // row's numbers stand and the source sentence below says which row they came from.
+  const chamfer = tool.shape === 'chamfer';
+  const edge: 'flat' | 'v' = !chamfer && usable.tool.shape === 'v' ? 'v' : 'flat';
+  // A chamfer's row is matched on the cone's BASE (`diameter` — the shank Makera writes there),
+  // never `cuttingDiameter`, which answers with the TIP and would ask for a 0.2 mm flat row.
+  const diameter = chamfer
+    ? (tool.diameter !== null && tool.diameter > 0 ? tool.diameter : (cuttingDiameter(tool) ?? 0))
+    : usable.tool.shape === 'v'
+      ? usable.tool.cone.tipRadius * 2
+      : usable.tool.radius * 2;
 
   const choice = entryFor(snapshot, material, tool, diameter, machine, table, edge, refuseFraction);
   if (!choice.ok) return { ok: false, reason: choice.reason };

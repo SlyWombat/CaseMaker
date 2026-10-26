@@ -51,7 +51,7 @@ import {
   V_BIT_CARVE_SENTENCE,
   type ToolCandidate,
 } from '@/engine/cnc/engrave/recommendTool';
-import { vCone } from '@/engine/cnc/vProfile';
+import { vCone, vFluteLength } from '@/engine/cnc/vProfile';
 import {
   vCarvePlane,
   vCarveStepover,
@@ -118,6 +118,7 @@ import { EngraveKeepOutRow } from './EngraveKeepOutRow';
 import { EngraveShapeRow } from './EngraveShapeRow';
 import { EngraveCombinedRow } from './EngraveCombinedRow';
 import { EngraveDrillRow, type BorePitchFacts } from './EngraveDrillRow';
+import { EngraveChamferRow, type ChamferFacts, type ChamferRimOption } from './EngraveChamferRow';
 import { EngraveCutoutRow, type CutoutTarget } from './EngraveCutoutRow';
 import { EngraveThreadRow } from './EngraveThreadRow';
 import { EngravePrimitiveRow } from './EngravePrimitiveRow';
@@ -135,6 +136,7 @@ import { coverageDisclaimer, type SimRunOutcome } from './simCoverage';
 import { viseEnvelope } from '@/engine/cnc/fixture';
 import type {
   EngraveAnyItem,
+  EngraveChamfer,
   EngraveCombinedShape,
   EngraveDrill,
   EngraveJob,
@@ -400,6 +402,7 @@ function itemRowIds(job: EngraveJob): string[] {
     ...(job.primitives ?? []).map((i) => i.id),
     ...(job.cutouts ?? []).map((i) => i.id),
     ...(job.vectors ?? []).map((i) => i.id),
+    ...(job.chamfers ?? []).map((i) => i.id),
   ];
 }
 
@@ -693,6 +696,8 @@ export function EngravePanel(): JSX.Element {
   const addDrill = useEngraveJobStore((s) => s.addDrill);
   const updateDrill = useEngraveJobStore((s) => s.updateDrill);
   const removeDrill = useEngraveJobStore((s) => s.removeDrill);
+  const updateChamfer = useEngraveJobStore((s) => s.updateChamfer);
+  const removeChamfer = useEngraveJobStore((s) => s.removeChamfer);
   const updateThread = useEngraveJobStore((s) => s.updateThread);
   const removeThread = useEngraveJobStore((s) => s.removeThread);
   const addPrimitive = useEngraveJobStore((s) => s.addPrimitive);
@@ -1732,6 +1737,7 @@ export function EngravePanel(): JSX.Element {
   const cutoutCount = job.cutouts?.length ?? 0;
   const vectorCount = job.vectors?.length ?? 0;
   const primitiveCount = job.primitives?.length ?? 0;
+  const chamferCount = job.chamfers?.length ?? 0;
   const target = job.targetObject ?? null;
   const hasReferenceable = job.labels.length + job.shapes.length + combinedCount + vectorCount > 0;
   // #218 — the `of` picker's choices. The words are the item list's own (`itemRowName` /
@@ -1740,6 +1746,37 @@ export function EngravePanel(): JSX.Element {
     const name = itemRowName(it);
     return { id: it.id, label: name === '' ? itemKindWord(it) : `${itemKindWord(it)} “${name}”` };
   });
+  // #669 — the rims a chamfer can follow: every item whose own profile is a closed edge — a
+  // shape, an imported outline or a combined shape (a construction item is a part's outline just
+  // as much as a cut one). The item list's own words, so a row and a finding name the same edge
+  // the same way.
+  const chamferRims: ChamferRimOption[] = [...job.shapes, ...(job.combined ?? []), ...(job.vectors ?? [])]
+    .filter((it) => it.enabled)
+    .map((it) => {
+      const name = itemRowName(it);
+      return { id: it.id, label: name === '' ? itemKindWord(it) : `${itemKindWord(it)} “${name}”` };
+    });
+  /** A rim the row NAMES but the picker does not hold: say which kind of dead end it is. */
+  const chamferRimIssue = (chamfer: EngraveChamfer): string | null => {
+    if (chamfer.of === undefined || chamferRims.some((r) => r.id === chamfer.of)) return null;
+    const known = [...job.shapes, ...(job.combined ?? []), ...(job.vectors ?? [])].some(
+      (it) => it.id === chamfer.of,
+    );
+    return known ? 'disabled' : 'not in the job';
+  };
+  // #669 — the chamfer row's derived numbers come from the job's own cutter: the cone's angle and
+  // its reach (`vFluteLength · tan`), the same arithmetic the finding and the CAM use.
+  const chamferCone = tool === null ? null : vCone(tool);
+  const chamferFlute = tool === null ? null : vFluteLength(tool);
+  const chamferFacts: ChamferFacts = {
+    cutterName: tool === null ? null : toolDisplayName(tool),
+    halfAngleDeg: chamferCone === null ? null : chamferCone.halfAngleDeg,
+    reachMm:
+      chamferCone === null || chamferFlute === null ? null : chamferFlute * chamferCone.tanHalf,
+    tipDiameterMm: chamferCone === null ? null : chamferCone.tipRadius * 2,
+    tipSource:
+      chamferCone === null || tool === null ? null : tool.tipDiameter !== null ? 'stated' : 'point, by kind',
+  };
 
   const stockNum = (key: 'length' | 'width' | 'thickness', label: string, title: string): JSX.Element => {
     const src = job.sources?.stock?.[key];
@@ -2245,7 +2282,7 @@ export function EngravePanel(): JSX.Element {
       <h3 style={SUBHEAD}>
         Items{' '}
         <span style={{ ...TAG, marginLeft: 4 }} data-testid="engrave-item-count">
-          {job.labels.length + job.shapes.length + combinedCount + traceCount + drillCount + threadCount + primitiveCount + cutoutCount + vectorCount}
+          {job.labels.length + job.shapes.length + combinedCount + traceCount + drillCount + threadCount + primitiveCount + cutoutCount + vectorCount + chamferCount}
         </span>
         <RowFolds testidPrefix="engrave-item" ids={itemRowIds(job)} firstButtonRef={itemsFoldRef} />
       </h3>
@@ -2345,6 +2382,19 @@ export function EngravePanel(): JSX.Element {
           findings={findingsFor(cutout.id)}
           onChange={(patch) => updateCutout(cutout.id, patch)}
           onRemove={() => removeCutout(cutout.id)}
+        />
+      ))}
+      {(job.chamfers ?? []).map((chamfer, i) => (
+        <EngraveChamferRow
+          key={chamfer.id}
+          chamfer={chamfer}
+          index={i}
+          rims={chamferRims}
+          missingRimLabel={chamferRimIssue(chamfer)}
+          facts={chamferFacts}
+          findings={findingsFor(chamfer.id)}
+          onChange={(patch) => updateChamfer(chamfer.id, patch)}
+          onRemove={() => removeChamfer(chamfer.id)}
         />
       ))}
       {(job.vectors ?? []).map((shape, i) => (

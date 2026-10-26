@@ -122,8 +122,11 @@ describe('#382 columnCutterFor — the simulator\'s resolver, not the CAM\'s', (
     const box = columnCutterFor({ ...THREAD, name: 'C1-BIT-THREAD-M5-15', diameter: null });
     expect(box.ok).toBe(false);
     expect(!box.ok && box.reason).toMatch(/no cutting diameter.*thread size/);
-    // A box-code chamfer (`C1-BIT-CHAMFER-90`) states no tip: refused as #405 refuses it, not a guessed point.
-    expect(columnCutterFor({ ...CHAMFER, tipDiameter: null }).ok).toBe(false);
+    // A box-code chamfer (`C1-BIT-CHAMFER-90`) states no tip: since #669 that is a POINT, not a
+    // guess — a chamfer mill comes to a point by definition, and the chamfer operation needs the
+    // cone the bit really is. An ENGRAVER with no tip stays refused (the shank-wide-groove rule).
+    expect(columnCutterFor({ ...CHAMFER, tipDiameter: null }).ok).toBe(true);
+    expect(columnCutterFor({ ...CHAMFER, tipDiameter: null, shape: 'engraving' }).ok).toBe(false);
     expect(columnCutterFor({ ...DRILL, tipDiameter: null, diameter: null }).ok).toBe(false);
     expect(columnCutterFor({ ...DRILL, angle: 200 }, SHOP).ok).toBe(false);
     // A ball nose now simulates on the dexel (#532, #222 slice A) — its admission is covered in
@@ -280,14 +283,17 @@ describe('#382 end to end: a #434 peck-drilling program through the session', ()
     }
   });
 
-  it('a box-code chamfer (no tip) is refused through the session with a message that names the tip', () => {
+  it('a box-code chamfer (no tip) loads as a point-tip cone through the session (#669)', () => {
     const { text } = program(DRILL);
     const session = createSimSession(tl);
-    const r = session.load(text, setup, { ...CHAMFER, name: 'C1-BIT-CHAMFER-90', tipDiameter: null }, 'Z1');
-    expect(r.ok).toBe(false);
-    const refused = r.diagnostics.find((d) => d.code === 'tool-refused');
-    expect(refused?.message).toMatch(/tip/);
-    session.dispose();
+    try {
+      const r = session.load(text, setup, { ...CHAMFER, name: 'C1-BIT-CHAMFER-90', tipDiameter: null }, 'Z1');
+      // #669 — the chamfer operation's own cutter: the cone a chamfer mill really is, with a
+      // POINT tip. (An ENGRAVER with no tip is still refused; see the resolver test above.)
+      expect(r.ok, JSON.stringify(r.ok ? [] : r.diagnostics)).toBe(true);
+    } finally {
+      session.dispose();
+    }
   });
 
   it('a rest pass with a drill is refused by name, and the message says drill', () => {

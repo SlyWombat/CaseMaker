@@ -15,6 +15,8 @@
  *    V-carve (constant-floor V region), any other cutter pockets it flat. Both are OFFERED (the
  *    matrix's UI holds both) and the row's chip states what the job's cutter makes of the item;
  *  - `profile` — a cut-out through the blank, held with tabs (a cutout item or a through shape);
+ *  - `chamfer` — one flat bevel along a profile's part edge or a pocket's rim, cut by the cone's
+ *    flank (#669): a `chamfer` item naming its rim, so the bevel follows an edge the job cuts;
  *  - `hole` — a plunge hole or a grid of them (the `drill` / `drill-array` items);
  *  - `bore` — a hole to size, helixed down its wall by the job's end mill (#668): the same
  *    `drill` / `drill-array` items with `mode: 'bore'` and a stated diameter, so a clearance
@@ -41,6 +43,7 @@ export type OperationTypeId =
   | 'v-carve'
   | 'pocket'
   | 'profile'
+  | 'chamfer'
   | 'hole'
   | 'bore'
   | 'thread'
@@ -62,6 +65,7 @@ export const OPERATION_TYPES: readonly OperationTypeDef[] = [
   { id: 'v-carve', label: 'V-carve', blurb: 'A region cut by the job’s V-bit', addTestId: 'engrave-add-v-carve' },
   { id: 'pocket', label: 'Pocket', blurb: 'A flat-bottomed region', addTestId: 'engrave-add-rect' },
   { id: 'profile', label: 'Profile', blurb: 'A cut-out through the blank, held with tabs', addTestId: 'engrave-add-profile' },
+  { id: 'chamfer', label: 'Chamfer the edge', blurb: 'Break a profile’s or pocket’s edge at an angle', addTestId: 'engrave-add-chamfer' },
   { id: 'hole', label: 'Hole', blurb: 'A hole, or a grid of them', addTestId: 'engrave-add-drill' },
   { id: 'bore', label: 'Bore to size', blurb: 'A hole wider than the cutter, helixed down its wall', addTestId: 'engrave-add-bore' },
   { id: 'thread', label: 'Thread', blurb: 'A milled internal thread', addTestId: 'engrave-add-thread' },
@@ -105,6 +109,8 @@ export function operationTypeOfItem(
       return 'thread';
     case 'cutout':
       return 'profile';
+    case 'chamfer':
+      return 'chamfer';
     case 'rect':
     case 'circle':
     case 'slot':
@@ -153,6 +159,8 @@ export function addOperationOfType(type: Exclude<OperationTypeId, 'surface'>): s
       return store.addShape('rect');
     case 'profile':
       return store.addCutout();
+    case 'chamfer':
+      return store.addChamfer();
     case 'hole':
       return store.addDrill('drill');
     case 'bore':
@@ -176,9 +184,10 @@ export function jobHasOperations(job: {
   primitives?: readonly unknown[];
   cutouts?: readonly unknown[];
   vectors?: readonly unknown[];
+  chamfers?: readonly unknown[];
   targetObject?: { role?: 'reference' | 'goal' } | null;
 }): boolean {
-  const lists = [job.labels, job.shapes, job.traces, job.drills, job.threads, job.primitives, job.cutouts, job.vectors];
+  const lists = [job.labels, job.shapes, job.traces, job.drills, job.threads, job.primitives, job.cutouts, job.vectors, job.chamfers];
   if (lists.some((list) => (list?.length ?? 0) > 0)) return true;
   return job.targetObject?.role === 'goal';
 }

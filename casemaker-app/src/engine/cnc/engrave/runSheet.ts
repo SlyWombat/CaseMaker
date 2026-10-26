@@ -230,6 +230,11 @@ export interface RunSheetProgram {
    * that cuts no bore and on a result stored by an older build.
    */
   bore?: RunSheetBoreFacts | null;
+  /**
+   * #669 — the chamfers THIS program cuts, when it cuts any. Structurally the worker's
+   * `ChamferProgramFacts`; absent on every program with no bevel.
+   */
+  chamfer?: RunSheetChamferFacts | null;
 }
 
 /**
@@ -290,6 +295,31 @@ export interface RunSheetBoreItem {
   /** The shop's ramp angle used, degrees, and where it came from. */
   rampAngleDeg: number;
   rampSource: string;
+}
+
+/**
+ * #669 — what a program's CHAMFERS cut, structurally `ChamferProgramFacts` from `engraveGenerate`.
+ * The width, the DEPTH derived from it and the cutter's cone, and which kind of rim the bevel
+ * breaks — the sheet says when each run: a pocket's rim after the pocket, a part's edge before the
+ * cut-out releases it.
+ */
+export interface RunSheetChamferFacts {
+  items: readonly RunSheetChamferItem[];
+}
+
+export interface RunSheetChamferItem {
+  id: string;
+  name: string;
+  /** The bevel's width on the top face, mm. */
+  widthMm: number;
+  /** The tip plane's depth below the top face, mm. */
+  depthMm: number;
+  /** The side of the rim's outline the cutter runs: a part's edge (outside) or a pocket's rim (inside). */
+  side: 'outside' | 'inside';
+  /** The cutter's tip diameter, mm — how far the bevel's bottom can stand off the wall. */
+  tipDiameterMm: number;
+  /** `'stated'` on the cutter's record, or `'point, by kind'` for a chamfer that states none. */
+  tipSource: 'stated' | 'point, by kind';
 }
 
 /** #434 — the drill program's settings, their per-key sources, and one plan per drilled item. */
@@ -371,6 +401,12 @@ export interface RunSheetGenerated {
    * build.
    */
   bore?: RunSheetBoreFacts | null;
+  /**
+   * #669 — the chamfers the FIRST program cuts, when it cuts any. A later program's facts travel
+   * on `programs[n].chamfer`. Absent or null on a job with no chamfer, and on a result stored by
+   * an older build.
+   */
+  chamfer?: RunSheetChamferFacts | null;
   /**
    * #432 slice 3 — the FACING program: the skim of the blank's top, its own `.nc` beside the job
    * (`runSheetFaceFileName`), or null when none was produced. Optional because a generated object
@@ -2696,6 +2732,28 @@ function boreSteps(facts: RunSheetBoreFacts): RunSheetStep[] {
   });
 }
 
+/**
+ * #669 — a chamfer's bevel, in the operator's terms: the width on the top face, the depth the
+ * cutter's cone takes it to, which side of the edge the tool runs, and WHEN it runs relative to
+ * the cut that leaves the edge. One step per chamfer (the `boreSteps` pattern), because two
+ * bevels can differ in width and side.
+ */
+function chamferSteps(facts: RunSheetChamferFacts): RunSheetStep[] {
+  return facts.items.map((item) => {
+    const when =
+      item.side === 'outside'
+        ? 'before the profile cuts the part free'
+        : 'after the pocket that opens the rim';
+    return {
+      text:
+        `${item.name} cuts a ${fmtNum(item.widthMm)} mm chamfer ${item.side === 'outside' ? 'on the part’s outer edge' : 'on the pocket’s rim'} — ` +
+        `the bevel reaches ${fmtNum(item.depthMm)} mm below the top face — ${when}. ` +
+        `Tip ${fmtNum(item.tipDiameterMm)} mm (${item.tipSource}).`,
+      value: `${fmtNum(item.widthMm)} mm chamfer`,
+    };
+  });
+}
+
 /** A later engraving program that carries no drill or rest facts of its own. */
 function engraveProgramSectionSteps(program: RunSheetProgram, number: number): RunSheetStep[] {
   const cam = program.cam;
@@ -2711,6 +2769,7 @@ function engraveProgramSectionSteps(program: RunSheetProgram, number: number): R
     },
     ...(program.finish == null ? [] : [finishAllowanceStep(program.finish)]),
     ...(program.bore == null ? [] : boreSteps(program.bore)),
+    ...(program.chamfer == null ? [] : chamferSteps(program.chamfer)),
     ...programRunSteps(program, number),
     ...throughCutSteps(program.through),
   ];
@@ -3392,6 +3451,9 @@ export function buildRunSheet(
     // pitch is the number the operator watches on the first hole, and both its sources travel in
     // the fact, so this line can say which one is binding without re-reading a setting.
     if (generated.bore != null) cutSteps.push(...boreSteps(generated.bore));
+    // #669 — the bevels this program cuts, with the depth derived from each width and the order
+    // against the cut that leaves the edge.
+    if (generated.chamfer != null) cutSteps.push(...chamferSteps(generated.chamfer));
     if (surfaceFacts !== null) cutSteps.push(...surfaceSteps(surfaceFacts));
     // #487 — what the ordering did, in the operator's terms: air travel against cutting travel,
     // and the same program under the order this CAM used before it. "Optimised" that cannot be

@@ -887,6 +887,53 @@ describe('EngravePanel — bore to size (#668)', () => {
   });
 });
 
+// #669 — CHAMFER THE EDGE: a chamfer row picks a rim and a width, and says which side of the edge
+// the cutter runs. The job's default cutter is a flat end mill, so the row states that a cone is
+// what a chamfer needs rather than pretending a bevel can be cut with it.
+describe('EngravePanel — chamfer the edge (#669)', () => {
+  it('adds a chamfer, and asks for a rim when the job has none', () => {
+    render(<EngravePanel />);
+    // The default job is three text labels: no shape's outline to follow.
+    fireEvent.click(screen.getByTestId('engrave-add-chamfer'));
+    const chamfer = useEngraveJobStore.getState().job.chamfers![0]!;
+    expect(chamfer.side).toBe('outside');
+    expect(chamfer.width).toBe(0.5);
+    expect(chamfer.of).toBeUndefined();
+    expect(screen.getByTestId('engrave-chamfer-row-0')).toBeTruthy();
+    expect(screen.getByTestId('engrave-chamfer-finding-0-chamfer-needs-edge')).toBeTruthy();
+    // No cone cutter on the default job's flat end mill.
+    expect(screen.getByTestId('engrave-chamfer-derived-0').textContent).toContain('no usable cone');
+  });
+
+  it('follows a pocket’s outline once one exists, and writes the width and the side', () => {
+    render(<EngravePanel />);
+    fireEvent.click(screen.getByTestId('engrave-add-rect'));
+    const shapeId = useEngraveJobStore.getState().job.shapes[0]!.id;
+    fireEvent.click(screen.getByTestId('engrave-add-chamfer'));
+    expect(useEngraveJobStore.getState().job.chamfers![0]!.of).toBe(shapeId);
+    fireEvent.change(screen.getByTestId('engrave-chamfer-width-0'), { target: { value: '1.5' } });
+    expect(useEngraveJobStore.getState().job.chamfers![0]!.width).toBe(1.5);
+    fireEvent.change(screen.getByTestId('engrave-chamfer-side-0'), { target: { value: 'inside' } });
+    expect(useEngraveJobStore.getState().job.chamfers![0]!.side).toBe('inside');
+    // A flat end mill cannot cut a bevel, and the row names the shape it is rather than hiding it.
+    expect(screen.getByTestId('engrave-chamfer-finding-0-chamfer-needs-cone')).toBeTruthy();
+  });
+
+  it('never shows a rim the chamfer does not have', () => {
+    render(<EngravePanel />);
+    fireEvent.click(screen.getByTestId('engrave-add-rect'));
+    const shapeId = useEngraveJobStore.getState().job.shapes[0]!.id;
+    fireEvent.click(screen.getByTestId('engrave-add-chamfer'));
+    // Disabling the rim takes it out of the picker; the select must still name the document's rim
+    // (with the word for why) rather than falling through to the first remaining option.
+    act(() => useEngraveJobStore.getState().updateShape(shapeId, { enabled: false }));
+    const select = screen.getByTestId('engrave-chamfer-of-0') as HTMLSelectElement;
+    expect(select.value).toBe(shapeId);
+    const chosen = select.selectedOptions[0];
+    expect(chosen?.textContent).toContain('(disabled)');
+  });
+});
+
 // #434 — a drill bit is a DRILL-ONLY cutter: one program has one tool, and the bit cannot open a
 // region. The panel offers the registry's drill only when the job's cutting work is all holes, and
 // states the point angle (and where it came from) for the drill it has selected.

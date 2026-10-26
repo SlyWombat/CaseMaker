@@ -6,6 +6,7 @@ import { DEFAULT_STROKE_FONT_ID } from '@/engine/fonts/stroke/strokeFont';
 import {
   defaultEngraveJob,
   newEngraveDrillId,
+  newEngraveChamferId,
   newEngraveCutoutId,
   newEngraveKeepOutId,
   newEngraveLabelId,
@@ -47,6 +48,7 @@ import type {
   EngraveCombinedShape,
   EngraveConePrimitive,
   EngraveCutawayShape,
+  EngraveChamfer,
   EngraveCutout,
   EngraveCylinderPrimitive,
   EngraveDrill,
@@ -145,6 +147,9 @@ export type VectorPatch = Partial<
  */
 export type DrillPatch = Partial<Omit<EngraveDrillItem, 'kind'>> &
   Partial<Omit<EngraveDrillArrayItem, 'kind'>>;
+
+/** A hand edit to one chamfer (#669). The whole item minus its discriminant, like `DrillPatch`. */
+export type ChamferPatch = Partial<Omit<EngraveChamfer, 'kind'>>;
 
 /**
  * A hand edit to one milled thread (#445). The whole item minus its discriminant, so a row can
@@ -560,6 +565,42 @@ export function boreSeedDiameterMm(job: EngraveJob): number {
 }
 
 /**
+ * #669 — the rim a NEW chamfer starts on: the job's first enabled item with a profile (a shape,
+ * an imported outline or a combined shape). Null when the job has none yet — the chamfer is still
+ * added (a document may be built up in any order) and `chamfer-needs-edge` asks for one.
+ */
+export function defaultChamferTarget(job: EngraveJob): string | null {
+  // A part's outline is usually a CONSTRUCTION item (the cut-out follows it), so `construction`
+  // does not disqualify a rim; only `enabled` does.
+  const shape = job.shapes.find((s) => s.enabled);
+  if (shape !== undefined) return shape.id;
+  const vector = (job.vectors ?? []).find((v) => v.enabled);
+  if (vector !== undefined) return vector.id;
+  const combined = (job.combined ?? []).find((c) => c.enabled);
+  if (combined !== undefined) return combined.id;
+  return null;
+}
+
+/**
+ * #669 — a brand-new chamfer. `0.5 mm` is the starting width: the case-edge break the operation
+ * was asked for, and small enough that every chamfer bit in the house reaches it. The rim is the
+ * job's first, so a row opened on an existing job has a real edge under it.
+ */
+function newChamfer(job: EngraveJob): EngraveChamfer {
+  const target = defaultChamferTarget(job);
+  return {
+    kind: 'chamfer',
+    id: newEngraveChamferId(),
+    enabled: true,
+    // A part's edge is the operation's demand ("case lids/edges want a broken edge"); a pocket's
+    // rim is one control away on the row.
+    side: 'outside',
+    width: 0.5,
+    ...(target === null ? {} : { of: target }),
+  };
+}
+
+/**
  * A brand-new milled thread (#445), centred on the stock like a new drill.
  *
  * `M3` is the starting size for the reason the bench plan gives (its pilot is the 2.5 mm drill
@@ -777,6 +818,11 @@ export interface EngraveJobState {
   /** Merge a hand edit into one drill (#220). A partial `position` is merged, not replaced. */
   updateDrill: (id: string, patch: DrillPatch) => void;
   removeDrill: (id: string) => void;
+  /** Add a chamfer on the job's first rim (#669) and return its id. */
+  addChamfer: () => string;
+  /** Merge a hand edit into one chamfer (#669). */
+  updateChamfer: (id: string, patch: ChamferPatch) => void;
+  removeChamfer: (id: string) => void;
   /** Add a default milled thread (#445) and return its id. */
   addThread: () => string;
   /** Merge a hand edit into one thread (#445). A partial `position` is merged, not replaced. */
@@ -1330,6 +1376,32 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
         (job) => ({ ...job, drills: (job.drills ?? []).filter((d) => d.id !== id) }),
         removalWhat(drill),
         (job) => ({ ...job, drills: insertAt(job.drills ?? [], at, drill) }),
+      );
+    },
+
+    addChamfer: () => {
+      const chamfer = newChamfer(get().job);
+      apply((job) => ({ ...job, chamfers: [...(job.chamfers ?? []), chamfer] }));
+      return chamfer.id;
+    },
+
+    updateChamfer: (id, patch) =>
+      apply((job) => ({
+        ...job,
+        chamfers: (job.chamfers ?? []).map((chamfer) =>
+          chamfer.id === id ? ({ ...chamfer, ...patch } as EngraveChamfer) : chamfer,
+        ),
+      })),
+
+    removeChamfer: (id) => {
+      const list = get().job.chamfers ?? [];
+      const at = list.findIndex((c) => c.id === id);
+      const chamfer = list[at];
+      if (!chamfer) return;
+      removeWithUndo(
+        (job) => ({ ...job, chamfers: (job.chamfers ?? []).filter((c) => c.id !== id) }),
+        removalWhat(chamfer),
+        (job) => ({ ...job, chamfers: insertAt(job.chamfers ?? [], at, chamfer) }),
       );
     },
 

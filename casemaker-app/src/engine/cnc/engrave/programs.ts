@@ -73,15 +73,35 @@ export function jobForSetup(job: EngraveJob, ref: JobProgramRef, tool?: Tool | n
   const keep = <T extends { id: string }>(items: readonly T[] | undefined): T[] | undefined =>
     items === undefined ? undefined : items.filter((item) => ids.has(item.id));
   const { setups: _setups, ...rest } = job;
+  /**
+   * #669 — A PROGRAM KEEPS THE OUTLINES ITS ITEMS NAME. A chamfer follows a rim the item names,
+   * and that item is often cut in ANOTHER program (a cut-out profiles with a flat end mill; a
+   * chamfer needs a cone — the two can never share one). Without the rim's outline the sub-job's
+   * chamfer would be a broken reference, so a named item the program does NOT own arrives as a
+   * CONSTRUCTION copy: referenceable, never cut. The same rule keeps a cut-out's `of` resolvable
+   * across a setup split.
+   */
+  const referenced = new Set<string>();
+  for (const c of job.cutouts ?? []) if (ids.has(c.id) && c.of !== 'stock-inset') referenced.add(c.of);
+  for (const c of job.chamfers ?? []) if (ids.has(c.id) && c.of !== undefined) referenced.add(c.of);
+  const referenceOnly = <T extends { id: string }>(list: readonly T[] | undefined): T[] =>
+    (list ?? [])
+      .filter((item) => referenced.has(item.id) && !ids.has(item.id))
+      .map((item) => ({ ...item, construction: true }));
+
   return {
     ...rest,
     toolKey: ref.toolKey,
     ...(tool !== undefined && tool !== null ? { tool } : {}),
     labels: job.labels.filter((item) => ids.has(item.id)),
-    shapes: job.shapes.filter((item) => ids.has(item.id)),
-    ...(job.combined !== undefined ? { combined: keep(job.combined) } : {}),
+    shapes: [...job.shapes.filter((item) => ids.has(item.id)), ...referenceOnly(job.shapes)],
+    ...(job.combined !== undefined
+      ? { combined: [...(keep(job.combined) ?? []), ...referenceOnly(job.combined)] }
+      : {}),
     ...(job.traces !== undefined ? { traces: keep(job.traces) } : {}),
-    ...(job.vectors !== undefined ? { vectors: keep(job.vectors) } : {}),
+    ...(job.vectors !== undefined
+      ? { vectors: [...(keep(job.vectors) ?? []), ...referenceOnly(job.vectors)] }
+      : {}),
     ...(job.drills !== undefined ? { drills: keep(job.drills) } : {}),
     ...(job.threads !== undefined ? { threads: keep(job.threads) } : {}),
     // #435 — a primitive is cut only by the setup that owns it, like every other item.
@@ -89,6 +109,9 @@ export function jobForSetup(job: EngraveJob, ref: JobProgramRef, tool?: Tool | n
     // #218 — the cut-out list is cutting work too: a program that does not own the item must not
     // cut its outline, and the program that owns it must.
     ...(job.cutouts !== undefined ? { cutouts: keep(job.cutouts) } : {}),
+    // #669 — a chamfer rides with the cut whose edge it breaks; the finding `chamfer-order`
+    // compares the programs' order for one.
+    ...(job.chamfers !== undefined ? { chamfers: keep(job.chamfers) } : {}),
   } as EngraveJob;
 }
 

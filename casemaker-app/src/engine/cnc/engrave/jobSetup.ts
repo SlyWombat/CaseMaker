@@ -14,6 +14,7 @@ import { viseEnvelope } from '@/engine/cnc/fixture';
 import { validateSacrificial, viseJawShift } from '@/engine/cnc/sacrificial';
 import { stubSetup, type FixtureEnvelope, type Setup, type Workholding } from '@/engine/cnc/setup';
 import {
+  chamferOperationName,
   cutoutOperationName,
   drillHoles,
   drillOperationName,
@@ -30,8 +31,10 @@ import {
   type SweptCut,
 } from '@/engine/cnc/engrave/partPlan';
 import { FASTENERS } from '@/engine/compiler/fasteners';
+import { vCone, vFluteLength } from '@/engine/cnc/vProfile';
 import type {
   EngraveAnyItem,
+  EngraveChamfer,
   EngraveCutout,
   EngraveDrill,
   EngraveJob,
@@ -132,6 +135,16 @@ export type JobFindingCode =
   | 'bore-narrow'
   | 'bore-needs-end-mill'
   | 'bore-no-diameter'
+  // Chamfers (#669). A bevel on a profile's edge or a pocket's rim is the cone's flank, so it has
+  // four data-plus-tool checks: a cone cutter (`chamfer-needs-cone`), a rim to cut
+  // (`chamfer-needs-edge`), a width the cone reaches (`chamfer-too-wide`) and a tip that clears
+  // the floor (`chamfer-too-deep`); `chamfer-reach-unproven` is the cutter that states no diameter.
+  | 'chamfer-needs-cone'
+  | 'chamfer-needs-edge'
+  | 'chamfer-too-wide'
+  | 'chamfer-too-deep'
+  | 'chamfer-reach-unproven'
+  | 'chamfer-order'
   // Through-cuts and cut-outs (#218). `through-needs-board`: no under-board, or one thinner than
   // the breakthrough plus a millimetre. `through-tool-reach`: the cutter's flutes/shank do not
   // cover `thickness + breakthrough`. `tab-unplaceable`, `cutout-empty` and `loose-piece` are
@@ -270,7 +283,14 @@ export function itemLabel(item: EngraveAnyItem): string {
  * traces, the drills and the under-surface voids each have a line of their own there even though a
  * combined shape cannot reference one.
  */
-export type EngraveNamedItem = EngraveAnyItem | EngraveTraceItem | EngraveDrill | EngraveThread | EngraveKeepOut | EngraveCutout;
+export type EngraveNamedItem =
+  | EngraveAnyItem
+  | EngraveTraceItem
+  | EngraveDrill
+  | EngraveThread
+  | EngraveKeepOut
+  | EngraveCutout
+  | EngraveChamfer;
 
 /**
  * The KIND in a word — "Rectangle", "Cut-away", "Single-line text", "Hole array" (#411).
@@ -314,6 +334,8 @@ export function itemKindWord(item: EngraveNamedItem): string {
       return 'Thread';
     case 'cutout':
       return 'Cut-out';
+    case 'chamfer':
+      return 'Chamfer';
   }
 }
 
@@ -442,6 +464,9 @@ export function jobSetups(job: EngraveJob): JobSetup[] {
     // #218 — a cut-out is cutting work like any other item: it belongs to the setup (and so to a
     // cutter's program) or a job with only cut-outs has no program assigned to it at all.
     ...(job.cutouts ?? []),
+    // #669 — a chamfer is cutting work too, and it must ride in its TARGET's setup: one program
+    // has one tool, and the bevel follows an edge that program's cut leaves.
+    ...(job.chamfers ?? []),
   ];
   const itemIds = items
     .filter((item) => item.enabled && item.construction !== true)
@@ -582,6 +607,7 @@ export function pureGoalObject(job: EngraveJob): EngraveTargetObject | null {
     job.labels.length > 0 ||
     job.shapes.length > 0 ||
     (job.cutouts?.length ?? 0) > 0 ||
+    (job.chamfers?.length ?? 0) > 0 ||
     (job.combined?.length ?? 0) > 0 ||
     (job.traces?.length ?? 0) > 0 ||
     (job.vectors?.length ?? 0) > 0 ||
@@ -621,6 +647,9 @@ export function validateJob(
   // PROFILE CUT-OUTS (#218) are a sixth list. A cut-out has no `construction`; a disabled one
   // does nothing. Every enabled cut-out cuts through by definition.
   const enabledCutouts = (job.cutouts ?? []).filter((c) => c.enabled);
+  // CHAMFERS (#669) are a seventh list. A chamfer has no `construction`; a disabled one does
+  // nothing, and an enabled one must name a rim the job really cuts.
+  const enabledChamfers = (job.chamfers ?? []).filter((c) => c.enabled);
   const { thickness } = job.stock;
 
   // #432 — the facing skim is material the items no longer have under them. Every item's depth is
@@ -965,6 +994,178 @@ export function validateJob(
     }
   }
 
+  // CHAMFERS (#669): a bevel is cut by a CONE's flank along a rim the job cuts, so every check
+  // here is a data-plus-tool fact: the rim must be a profile's part edge or a pocket's wall, the
+  // cutter must be a cone, its cone must reach the width, and the tip must stay above the floor.
+  // The depth is DERIVED — `width / tan(halfAngle)` — never a document field.
+  if (enabledChamfers.length > 0) {
+    const chamferTool = jobTool(job);
+    const cone = chamferTool === null ? null : vCone(chamferTool);
+    const fluteLength = chamferTool === null ? null : vFluteLength(chamferTool);
+    const reach = cone !== null && fluteLength !== null ? fluteLength * cone.tanHalf : null;
+    // The rim an operator may name: an item whose own profile is a closed edge — a shape, an
+    // imported outline or a combined shape. Neither labels nor primitives: a glyph's outline is
+    // not a rim a bevel follows, and a primitive is a 3D cut-away, not an edge.
+    const rims = new Map<string, EngraveNamedItem>();
+    for (const item of [
+      ...(job.shapes as readonly EngraveNamedItem[]),
+      ...((job.combined ?? []) as readonly EngraveNamedItem[]),
+      ...((job.vectors ?? []) as readonly EngraveNamedItem[]),
+    ]) {
+      rims.set(item.id, item);
+    }
+    const anyById = new Map<string, EngraveNamedItem>([
+      ...all.map((item) => [item.id, item as EngraveNamedItem] as const),
+      ...((job.traces ?? []).map((item) => [item.id, item as EngraveNamedItem] as const)),
+      ...((job.drills ?? []).map((item) => [item.id, item as EngraveNamedItem] as const)),
+      ...((job.threads ?? []).map((item) => [item.id, item as EngraveNamedItem] as const)),
+      ...((job.cutouts ?? []).map((item) => [item.id, item as EngraveNamedItem] as const)),
+      ...((job.chamfers ?? []).map((item) => [item.id, item as EngraveNamedItem] as const)),
+    ]);
+    const rimName = (item: EngraveNamedItem): string => itemLabel(item as EngraveAnyItem);
+    // One program per (setup, tool). A chamfer is cut by the cone, so a cut-out or a flat-milled
+    // pocket is necessarily ANOTHER program — and the order between programs is the operator's,
+    // through the setups' order. This is the order the material comes out in, at the program
+    // level: a pocket's rim after the pocket, a part's edge before the cut-out frees it.
+    const programs = jobSetups(job).flatMap((setup) =>
+      setupTools(setup, job).map((toolKey, toolIndex) => new Set(toolItemsFor(setup, toolKey, toolIndex))),
+    );
+    const programOf = (id: string): number => programs.findIndex((items) => items.has(id));
+    const floorOf = (item: EngraveNamedItem | undefined): number | null => {
+      if (item === undefined || !('kind' in item)) return null;
+      if ('through' in item && item.through === true) return thickness;
+      return 'depth' in item && typeof item.depth === 'number' ? item.depth : null;
+    };
+    const isThroughRim = (item: EngraveNamedItem | undefined): boolean =>
+      item === undefined || !('kind' in item) || ('through' in item && item.through === true);
+    for (const chamfer of enabledChamfers) {
+      const target = chamfer.of === undefined ? undefined : anyById.get(chamfer.of);
+      const rim = chamfer.of === undefined ? undefined : rims.get(chamfer.of);
+      const who = chamferOperationName(chamfer, rim === undefined ? null : rimName(rim));
+      if (chamfer.of === undefined) {
+        findings.push({
+          severity: 'error',
+          code: 'chamfer-needs-edge',
+          labelId: chamfer.id,
+          message:
+            `${who} has no rim yet. A chamfer follows a shape’s or an imported outline’s edge — ` +
+            'choose one on the row.',
+        });
+      } else if (target === undefined) {
+        findings.push({
+          severity: 'error',
+          code: 'item-reference',
+          labelId: chamfer.id,
+          message: `${who} follows "${chamfer.of}", which is not in the job.`,
+        });
+      } else if (!target.enabled) {
+        findings.push({
+          severity: 'error',
+          code: 'item-reference',
+          labelId: chamfer.id,
+          message: `${who} follows "${chamfer.of}", which is disabled.`,
+        });
+      } else if (rim === undefined) {
+        findings.push({
+          severity: 'error',
+          code: 'chamfer-needs-edge',
+          labelId: chamfer.id,
+          message:
+            `${who} names ${rimName(target)}, which has no closed edge to chamfer. A chamfer ` +
+            'follows a shape, an imported outline or a combined shape.',
+        });
+      } else if (job.setups !== undefined) {
+        // The order findings read the WHOLE document's setups. A sub-job — one program's items,
+        // its `setups[]` stripped by `jobForSetup` — has no order to judge, and judging it there
+        // would fire on every chamfer whose program is not the first.
+        const here = programOf(chamfer.id);
+        if (chamfer.side === 'outside') {
+          // A part's edge: every cut-out that frees this outline must run AFTER the bevel, or the
+          // bevel is cut into a released piece.
+          const freeing = (job.cutouts ?? []).filter((c) => c.enabled && c.of === rim.id);
+          const later = freeing.map((c) => programOf(c.id)).filter((at) => at >= 0);
+          const early = later.filter((at) => at <= here);
+          if (here >= 0 && early.length > 0) {
+            findings.push({
+              severity: 'error',
+              code: 'chamfer-order',
+              labelId: chamfer.id,
+              message:
+                `${who} is program ${here + 1}, but the cut-out that frees ${rimName(rim)} is ` +
+                `program ${early[0]! + 1}. A part’s edge is chamfered BEFORE its cut-out frees the ` +
+                'part — put this chamfer’s setup earlier.',
+            });
+          }
+        } else {
+          // A pocket's rim: the pocket must be cut FIRST, by another program — a pocket cut by
+          // this same cone has a sloping wall, which a bevel does not follow.
+          const there = programOf(rim.id);
+          if (here >= 0 && there >= 0 && there >= here) {
+            findings.push({
+              severity: 'error',
+              code: 'chamfer-order',
+              labelId: chamfer.id,
+              message:
+                `${who} is program ${here + 1} and its rim ${rimName(rim)} is program ${there + 1}. ` +
+                'A pocket’s rim is chamfered AFTER a flat end mill has opened it — the pocket needs ' +
+                'its own program, earlier in the run.',
+            });
+          }
+        }
+      }
+      if (chamferTool === null) continue; // `tool-missing` names the absent cutter already
+      if (cone === null) {
+        findings.push({
+          severity: 'error',
+          code: 'chamfer-needs-cone',
+          labelId: chamfer.id,
+          message:
+            `${who} is one flat bevel cut by a cone’s flank, and "${chamferTool.name}" is a ` +
+            `${chamferTool.shape} cutter with none. Use a V-bit or a chamfer bit.`,
+        });
+        continue;
+      }
+      if (reach === null) {
+        findings.push({
+          severity: 'error',
+          code: 'chamfer-reach-unproven',
+          labelId: chamfer.id,
+          message:
+            `${who} needs the cutter’s cutting diameter to know how wide a chamfer its cone ` +
+            `reaches, and "${chamferTool.name}" states none. Record the cutter’s diameter.`,
+        });
+      } else if (chamfer.width > reach + 1e-9) {
+        findings.push({
+          severity: 'error',
+          code: 'chamfer-too-wide',
+          labelId: chamfer.id,
+          message:
+            `${who} asks for a ${fmt3(chamfer.width)} mm chamfer, but "${chamferTool.name}"’s cone ` +
+            `reaches ${fmt3(reach)} mm in one pass (its ${fmt3(fluteLength as number)} mm flute at ` +
+            `${fmt3(cone.halfAngleDeg * 2)}°). Use a wider chamfer bit, or a chamfer up to ` +
+            `${fmt3(reach)} mm.`,
+        });
+      }
+      // The tip plane is the bevel's bottom: `width / tan(halfAngle)` below the top face. A
+      // PART's edge is bounded by the blank's underside; a POCKET's rim by the pocket's own floor.
+      const depth = chamfer.width / cone.tanHalf;
+      const floor = chamfer.side === 'outside' ? thickness : floorOf(rim);
+      if (floor !== null && depth >= floor - 1e-9) {
+        findings.push({
+          severity: 'error',
+          code: 'chamfer-too-deep',
+          labelId: chamfer.id,
+          message:
+            `${who} reaches ${fmt3(depth)} mm below the top face, and ` +
+            (chamfer.side === 'outside' || isThroughRim(rim)
+              ? `the blank is only ${fmt3(floor)} mm thick`
+              : `the pocket’s floor is only ${fmt3(floor)} mm down`) +
+            '; the tip would cut past it. Use a smaller chamfer.',
+        });
+      }
+    }
+  }
+
   // MILLED THREADS (#445, #434 phase 2). A thread mill does not drill (D1): every check here
   // assumes the pilot, and the pilot's existence is a WARNING with the uncertainty named, because
   // no program in this app cut it and no document proves it. The CAM is the exact gate for the
@@ -1243,6 +1444,7 @@ export function validateJob(
     enabledThreads.length > 0 ||
     enabledPrimitives.length > 0 ||
     enabledCutouts.length > 0 ||
+    enabledChamfers.length > 0 ||
     pureGoal !== null;
 
   if (!hasWork) {

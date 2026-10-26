@@ -62,6 +62,13 @@ export function isVShape(tool: Tool): boolean {
  * field is missing would otherwise look like a 3.175 mm-wide V and be simulated as one. A missing
  * tip is a missing cutter, not a shank-wide groove.
  *
+ * #669 — THE ONE EXCEPTION: a CHAMFER's unstated tip is a POINT. A chamfer mill comes to a point by
+ * definition, and Makera leaves the tip empty on every chamfer row (`C1-BIT-CHAMFER-90` names the
+ * angle and nothing else). #654 already read it that way for geometry and display
+ * ({@link vConeGeometry}); the chamfer OPERATION is the bit's own use, and the simulator has to see
+ * the cone it really is — a point tip there is the tool's definition, not an assumption. An
+ * ENGRAVER's missing tip stays refused, for the shank-wide-groove reason above.
+ *
  * The angle is `halfAngle` when the file states it, and half of `angle` when it states only the
  * INCLUDED angle — the two are the same bit, and a file that writes one and not the other must not
  * be refused for it. A 0 in either field is UNSET, not an angle (see {@link statedAngle}), and a
@@ -70,7 +77,7 @@ export function isVShape(tool: Tool): boolean {
  */
 export function vCone(tool: Tool): VCone | null {
   if (!isVShape(tool)) return null;
-  const tip = tool.tipDiameter;
+  const tip = tool.tipDiameter === null && tool.shape === 'chamfer' ? 0 : tool.tipDiameter;
   if (tip === null || !(tip >= 0)) return null;
   const included = statedAngle(tool.angle);
   const half = statedAngle(tool.halfAngle) ?? (included === null ? null : included / 2);

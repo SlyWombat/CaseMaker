@@ -59,7 +59,7 @@ import { borePitchMm, boreRampAngleFrom } from '@/engine/cnc/cam/drill';
 import { readDefault, type ShopDefaults } from '@/platform/defaultsClient';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import type { ConditionSummary } from '@/engine/cnc/toolCondition';
-import { type VCone } from '@/engine/cnc/vProfile';
+import { vCone, type VCone } from '@/engine/cnc/vProfile';
 import { minimumXyStepMm } from '@/engine/cnc/machine';
 import {
   vCarveGrooveRefusal,
@@ -107,11 +107,13 @@ import {
   kerfPolygons,
   placeTabs,
   profilePath,
+  signedArea,
   tabRectangles,
   type ProfileCut,
   type ProfileSpan,
 } from '@/engine/cnc/cam/profile';
 import { buildThroughMask, type MaskCutout } from '@/engine/cnc/engrave/throughMask';
+import { generateChamfer, type ChamferCut } from '@/engine/cnc/cam/chamfer';
 import type { Polygons } from '@/engine/cnc/cam/pocket';
 import { concatToolpathIR, estimateCycleSeconds, HOP_Z, toolNumberFor, travelStats, type CamMove, type ToolpathIR } from '@/engine/cnc/cam/ir';
 import {
@@ -145,7 +147,7 @@ import {
 } from './engraveGeometry';
 import { colourBoundaryFor, stackDepthLimit, type StackDepthLimit } from './stackDepthLimit';
 import { ceilingName, effectiveMargins, MARGIN_DEFAULTS } from '@/engine/cnc/engrave/depthBounds';
-import type { OraclePredicted, OracleThreadMove } from '@/engine/cnc/engrave/oracle';
+import { ORACLE_SHALLOW_DEPTH_FRACTION, type OraclePredicted, type OracleThreadMove } from '@/engine/cnc/engrave/oracle';
 import type { SurfaceProgramCheck } from '@/engine/cnc/uploadGate';
 
 /** The stage that stopped the pipeline, or `done` when everything passed. */
@@ -365,6 +367,11 @@ export interface EngraveProgram {
    * run sheet's pitch step belongs to the program that cuts the wall, not to the run as a whole.
    */
   bore?: BoreProgramFacts | null;
+  /**
+   * #669 — the chamfer facts when THIS program cuts a bevel. Null on every other file: the run
+   * sheet's bevel step belongs to the program that cuts the edge.
+   */
+  chamfer?: ChamferProgramFacts | null;
 }
 
 /**
@@ -449,6 +456,33 @@ export interface BoreProgramFacts {
     rampAngleDeg: number;
     /** Where `rampAngleDeg` came from (`bore.rampAngleDeg`'s reading: seeded, chosen, fallback). */
     rampSource: string;
+  }[];
+}
+
+/**
+ * #669 — what the CHAMFERS in one program cut, for the run sheet's bevel step. One entry per
+ * chamfer, in document order, with the width, the derived tip depth and the side — plus WHICH kind
+ * of rim it breaks, because the sheet says when it runs: a pocket's rim after the pocket, a part's
+ * edge before the cut-out.
+ */
+export interface ChamferProgramFacts {
+  items: {
+    id: string;
+    name: string;
+    /** The bevel's width on the top face, mm. */
+    widthMm: number;
+    /** The tip plane's depth below the top face, mm — the bevel's bottom. */
+    depthMm: number;
+    /** The side of the rim's outline the cutter runs: 'outside' breaks a part's edge, 'inside' a pocket's rim. */
+    side: 'outside' | 'inside';
+    /** The cutter's tip diameter, mm — the radius the bevel's bottom stands off the wall by. */
+    tipDiameterMm: number;
+    /**
+     * Where that tip came from. `'stated'` is the cutter's own record; `'point, by kind'` is a
+     * chamfer with none stated, which is a point by the bit's shape — an assumption worth naming,
+     * because a real flat would mark the wall at the bevel's bottom by its radius.
+     */
+    tipSource: 'stated' | 'point, by kind';
   }[];
 }
 
@@ -581,6 +615,11 @@ export interface EngraveGenerated {
    */
   bore?: BoreProgramFacts | null;
   /**
+   * #669 — what the CHAMFERS in this program cut: one entry per bevel, with its width, the derived
+   * tip depth and the side. Present only when the program carries a chamfer.
+   */
+  chamfer?: ChamferProgramFacts | null;
+  /**
    * #535 — a PURE GOAL job's surfacing facts: the numbers the roughing/finishing passes ran with
    * and the heightfield they sampled. Present only on the goal path (a job whose only work is a
    * `role: 'goal'` mesh); absent on every item job and on a result stored by an older build, so
@@ -695,6 +734,12 @@ export interface EngraveRegions {
    * walked `plan.engraves` on its own, so it never drew a drill's hole or a trace's groove).
    */
   cuts: CutRegion[];
+  /**
+   * #669 — the CHAMFERS' passes, ready for `cam/chamfer.ts`: each bevel's centre path (the rim's
+   * edge offset by the tip radius on the air side) and its tip-plane depth. Empty when the job has
+   * none or its cutter is not a cone (the finding refuses that pairing).
+   */
+  chamfers: ChamferCut[];
   predicted: OraclePredicted[];
   tool: Tool | null;
   radius: number | null;
@@ -1395,7 +1440,105 @@ export function engraveRegions(
   // enumerated (#288): the prediction below and `engravePreview`'s picture are both its projection,
   // so a fourth class (#218's cut-outs) lands in the program, the oracle and the preview together.
   const traceCuts: CutRegion[] = traceRadius === null ? [] : traceCutRegions(tl, plan, traceRadius);
-  const cuts: CutRegion[] = [...regions, ...traceCuts, ...cutoutCuts];
+  // #669 — CHAMFERS: one closed bevel each, along its rim's edge. The EDGE is the cut-out's own
+  // rim (its side and inset travel with the cut-out item) or a pocket's wall; the TOOL PATH is
+  // that edge offset by the TIP RADIUS on the air side — the one offset that puts the cone's
+  // flank on the bevel and keeps the tip's flat out of the wall (see `cam/chamfer.ts`). The tip
+  // plane is the bevel's bottom, `width / tan(halfAngle)` down.
+  //
+  // THE PREDICTION AND THE PICTURE ARE THE SWEPT BAND, not just the bevel. At a level `d` the
+  // cone's cross-section is a disc of `tipRadius + (h − d)·tan(halfAngle)` around the tool path,
+  // so what the simulator removes there is a band on BOTH sides of the path — and the offcut side
+  // is still solid when a part's edge is chamfered (the chamfer runs before the profile), so that
+  // gouge is real material taken out. A pocket's rim is the other case: the tool runs over the
+  // pocket's air, and only the bevel side is material. The band is clipped to the blank, because
+  // a chamfer at the stock's own edge hangs the cutter over air.
+  const chamferCone = tool === null ? null : vCone(tool);
+  const chamferCuts: ChamferCut[] = [];
+  const chamferRings: CutRegion[] = [];
+  const chamferPredicted: OraclePredicted[] = [];
+  if (chamferCone !== null && plan.chamfers.length > 0) {
+    const offset = makeClipperOffset(tl);
+    const CS = tl.CrossSection;
+    const stockCS = executeProfile(tl, plan.stock.outline);
+    const stockRect = CS.ofPolygons(stockCS.toPolygons() as Polygons);
+    stockCS.delete();
+    const clipped = (polygons: Polygons): Polygons => {
+      if (polygons.length === 0) return [];
+      const cs = CS.ofPolygons(polygons);
+      const both = cs.intersect(stockRect);
+      const out = both.toPolygons() as Polygons;
+      both.delete();
+      cs.delete();
+      return out;
+    };
+    /**
+     * The band the cone removes at a level whose bevel is `bevel` mm wide. A POCKET's rim loses the
+     * bevel OUTSIDE its wall — the tool runs over the pocket's air and only the material side is
+     * cut, from the edge out to the bevel's line. A PART's edge loses both: the bevel into the
+     * part, and the cone's gouge into the offcut out to `2·tipRadius + bevel` (the offcut is still
+     * solid when the chamfer runs before the profile).
+     */
+    const sweptBand = (edge: Polygons, side: 'outside' | 'inside', bevel: number): Polygons => {
+      if (!(bevel > 0) || edge.length === 0) return [];
+      const inner = side === 'outside' ? offset(edge, -bevel) : edge;
+      const outer = side === 'outside' ? offset(edge, 2 * chamferCone.tipRadius + bevel) : offset(edge, bevel);
+      const a = CS.ofPolygons(outer);
+      const b = CS.ofPolygons(inner);
+      const d = a.subtract(b);
+      const out = clipped(d.toPolygons() as Polygons);
+      d.delete();
+      a.delete();
+      b.delete();
+      return out;
+    };
+    /**
+     * The rim's edge as a REGION: outer rings only, CCW, at the cut-out's own inset on its side.
+     * (`profilePath` is the CAM's path builder — it reverses an inside path to the milling
+     * direction, which is a MOVE order, not a fill — so the band arithmetic above does its own
+     * offset here and keeps the winding a polygon set is read with.)
+     */
+    const edgeRegion = (outline: Polygons, side: 'outside' | 'inside', inset: number): Polygons => {
+      const raw = inset > 0 ? offset(outline, side === 'outside' ? inset : -inset) : outline;
+      return raw.filter((contour) => contour.length >= 3 && signedArea(contour) > 1e-9);
+    };
+    for (const c of plan.chamfers) {
+      const outlineCS = executeProfile(tl, c.outline);
+      const outline = outlineCS.toPolygons() as Polygons;
+      outlineCS.delete();
+      if (outline.length === 0) continue;
+      // The edge is the rim's own outline; the chamfer states which side the cutter runs.
+      const edge = edgeRegion(outline, 'outside', 0);
+      if (edge.length === 0) continue;
+      const toolSide: 'outside' | 'inside' = c.side;
+      // The path is a TIP RADIUS off the edge on the air side. A point tip puts it ON the edge,
+      // where an offset of 0 is not a call worth making (Clipper's zero delta is not an identity);
+      // the winding still follows the profile CAM's convention.
+      const path =
+        chamferCone.tipRadius > 0
+          ? profilePath(edge, toolSide, chamferCone.tipRadius, 0, offset)
+          : toolSide === 'inside'
+            ? edge.map((contour) => [...contour].reverse())
+            : edge;
+      if (path.length === 0) continue;
+      const depth = c.width / chamferCone.tanHalf;
+      chamferCuts.push({ id: c.id, name: c.name, path, depth });
+      // The picture shows the bevel's MOUTH at the top face.
+      chamferRings.push({ id: c.id, name: c.name, depth, polygons: sweptBand(edge, c.side, c.width) });
+      // The oracle judges the band at the shallow level the groove prediction uses — the widest
+      // section, where a wrong offset or width shows. The bevel has closed to `1 − fraction` of
+      // its width there.
+      const shallow = ORACLE_SHALLOW_DEPTH_FRACTION * depth;
+      chamferPredicted.push({
+        depth: shallow,
+        polygons: sweptBand(edge, c.side, (depth - shallow) * chamferCone.tanHalf),
+        itemId: c.id,
+      });
+    }
+    stockRect.delete();
+  }
+
+  const cuts: CutRegion[] = [...regions, ...traceCuts, ...cutoutCuts, ...chamferRings];
 
   // #408 — a V TRACE's PREDICTION is a groove, not a region. What a cone removes at a level depends
   // on how far below its tip that level is, so a trace entry cannot be the mouth's polygon set the
@@ -1411,7 +1554,16 @@ export function engraveRegions(
     // A V region's prediction is its FLOOR at `depth` — the floor polygons the geometry built,
     // not the plane design. The oracle simulates at the floor and would call the wider design an
     // under-cut (#221). A flat region's floor IS its polygons.
-    ...regions.map((c): OraclePredicted => ({ depth: c.depth, polygons: c.vCarve?.floor ?? c.polygons, itemId: c.id })),
+    // #669 — a V region's FLOOR is its own level's answer; above it the cone is wider, so the
+    // entry carries the flank's tan and the oracle grows the section per level.
+    ...regions.map(
+      (c): OraclePredicted => ({
+        depth: c.depth,
+        polygons: c.vCarve?.floor ?? c.polygons,
+        itemId: c.id,
+        ...(c.vCarve !== undefined && cone !== null ? { vRegion: { tanHalf: cone.tanHalf } } : {}),
+      }),
+    ),
     ...(cone === null
       ? traceCuts.map((c): OraclePredicted => ({ depth: c.depth, polygons: c.polygons, itemId: c.id }))
       : plan.traces.map((t): OraclePredicted => ({ depth: t.depth, polygons: [], itemId: t.id, groove: { paths: t.paths, closed: t.closed, cone } }))),
@@ -1419,6 +1571,8 @@ export function engraveRegions(
     // through depth. Every placed tab is subtracted; an unplaced one is not, and its material is
     // correctly predicted as cut away.
     ...cutoutPredicted,
+    // #669 — a chamfer's wedge is predicted as the RING the bevel removes at the shallow level.
+    ...chamferPredicted,
   ];
 
   // #218 — the verifier's through mask, built from the SAME geometry: every through region's
@@ -1476,6 +1630,7 @@ export function engraveRegions(
     profiles,
     throughMask,
     cuts,
+    chamfers: chamferCuts,
     predicted,
     tool,
     radius,
@@ -2887,6 +3042,7 @@ function programOf(one: Omit<EngraveGenerated, 'programs'>, ref: JobProgramRef):
     finish: one.finish ?? null,
     through: one.through ?? null,
     bore: one.bore ?? null,
+    chamfer: one.chamfer ?? null,
   };
 }
 
@@ -2987,7 +3143,7 @@ function generateOneProgram(
   // which is the only post this app has; a second mill is a second post, and this line is where a
   // job naming it would have to be refused until there is one.
   const mill = jobMachine(job, calibration);
-  const { plan, regions, profiles, throughMask, predicted, findings } = engraveRegions(tl, job, tool, margins, shop, mill, catalogue);
+  const { plan, regions, profiles, throughMask, chamfers, predicted, findings } = engraveRegions(tl, job, tool, margins, shop, mill, catalogue);
   /**
    * #667 — WHAT THIS PROGRAM IS ASKED TO REMOVE. `predicted` is the design at its stated depths,
    * which is right for a program that reaches full depth; a ROUGH-ONLY program (the first file of
@@ -3081,6 +3237,9 @@ function generateOneProgram(
   // from. Filled after the CAM succeeds, from the same `plan`, tool and feeds it ran with and the
   // same `borePitchMm` it calls — one formula, one reading.
   let boreFacts: BoreProgramFacts | null = null;
+  // #669 — the chamfer facts the run sheet prints: the width, the derived tip depth and which kind
+  // of rim each bevel breaks. Filled where the CAM is built, from the same plan and cone.
+  let chamferFacts: ChamferProgramFacts | null = null;
   // #432 — the facing depth the plan carries, or 0 when the job does not face. It decides whether
   // the facing artefact is built at all; it never touches the ENGRAVING program, which stays in the
   // document's frame (Z0 = the faced surface) because the re-touch re-zeros Z there between the two
@@ -3257,17 +3416,32 @@ function generateOneProgram(
       // that would be cut into a piece that can shift under the tape. The profile class is
       // therefore last, and it is the only class that cuts into the board.
       const traceIr = generateTrace(plan.traces, tool, resolved.params, mill.rapidEstimate);
+      // #669 — THE CHAMFERS COME BETWEEN THE REGIONS AND THE CUT-OUTS. The order is the material:
+      // a pocket's rim must EXIST before its chamfer can follow it, so a pocket chamfer runs after
+      // the region CAM; a part's edge must still be in one piece when it is chamfered, so a
+      // profile's chamfer runs before the cut-out. One chamfer program between the two satisfies
+      // both, and it is one file because the job's cutter is the one cone that cuts every bevel.
+      const chamferIr =
+        chamfers.length === 0
+          ? null
+          : generateChamfer(chamfers, tool, resolved.params, mill.rapidEstimate);
       const profileResult =
         profiles.length === 0
           ? null
           : generateProfile(profiles, tool, profileFeeds!.params, mill.rapidEstimate);
       const beforeCutouts =
         regionIr === null ? traceIr : traceIr.operations.length > 0 ? concatToolpathIR(regionIr, traceIr) : regionIr;
-      ir =
-        profileResult === null
+      const beforeProfiles =
+        chamferIr === null
           ? beforeCutouts
           : beforeCutouts.operations.length > 0
-            ? concatToolpathIR(beforeCutouts, profileResult.ir)
+            ? concatToolpathIR(beforeCutouts, chamferIr)
+            : chamferIr;
+      ir =
+        profileResult === null
+          ? beforeProfiles
+          : beforeProfiles.operations.length > 0
+            ? concatToolpathIR(beforeProfiles, profileResult.ir)
             : profileResult.ir;
       if (profileResult !== null) {
         const byId = new Map(profiles.map((p) => [p.id, p] as const));
@@ -3318,6 +3492,25 @@ function generateOneProgram(
         });
       }
       if (items.length > 0) boreFacts = { items };
+    }
+
+    // #669 — what the chamfers in THIS program cut. The depth is derived once, from the same cone
+    // the CAM offsets by; the plan's `width` is the top-face leg the operator set.
+    const chamferCone = vCone(tool);
+    if (chamferCone !== null) {
+      const items: ChamferProgramFacts['items'] = [];
+      for (const c of plan.chamfers) {
+        items.push({
+          id: c.id,
+          name: c.name,
+          widthMm: c.width,
+          depthMm: c.width / chamferCone.tanHalf,
+          side: c.side,
+          tipDiameterMm: chamferCone.tipRadius * 2,
+          tipSource: tool.tipDiameter !== null ? 'stated' : 'point, by kind',
+        });
+      }
+      if (items.length > 0) chamferFacts = { items };
     }
   }
 
@@ -3520,6 +3713,7 @@ function generateOneProgram(
       finish: finishFacts,
       through: cutoutFacts,
       bore: boreFacts,
+      chamfer: chamferFacts,
       cam,
       nc,
       verify,

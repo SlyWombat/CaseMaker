@@ -552,6 +552,45 @@ export interface EngraveCutout {
 /** The one cut-out kind, named both ways the plan's prose uses: item and list entry. */
 export type EngraveCutoutItem = EngraveCutout;
 
+/**
+ * #669 — a CHAMFER along a rim: the cone's flank held against the top edge of a profile's part or
+ * a pocket's wall, cutting one flat bevel of `width` on the top face and `width / tan(halfAngle)`
+ * down the wall. A separate list, like `cutouts` and `threads`, because a chamfer is not a region
+ * and has no depth of its own — its depth is DERIVED from the width and the cutter's cone.
+ *
+ * `of` names the ITEM whose outline is the rim, and `side` says which side of that outline the
+ * cutter runs — the air side of the edge. `'outside'` breaks a PART's edge (the material is inside
+ * the outline; the tool runs over the offcut, which is why the chamfer comes before the cut-out
+ * that frees the part), `'inside'` breaks a POCKET's rim (the material is outside the region; the
+ * tool runs over the pocket's air, which is why the chamfer comes after the pocket).
+ *
+ * Naming the item, rather than the cut-out that follows it, is what lets the two live in different
+ * programs at all: a cut-out profiles with a FLAT end mill and a chamfer is cut by a CONE, so they
+ * can never share one — and the reference survives the program split only because the rim's
+ * outline is the item's own.
+ */
+export interface EngraveChamfer {
+  kind: 'chamfer';
+  id: string;
+  /** Optional human name, shown in operations and findings. */
+  name?: string;
+  enabled: boolean;
+  /**
+   * The id of the item whose outline the bevel follows — a shape, an imported outline or a
+   * combined shape whose profile is the rim. ABSENT while a fresh chamfer has no rim to name yet:
+   * `chamfer-needs-edge` asks for one, and the document still parses, so a chamfer added before
+   * its pocket is not an unloadable job.
+   */
+  of?: string;
+  /** The side of the rim's outline the cutter runs: a part's edge (outside) or a pocket's rim (inside). */
+  side: 'outside' | 'inside';
+  /** The chamfer's width ON THE TOP FACE, mm. Positive; bounded by the cutter's cone. */
+  width: Mm;
+}
+
+/** The one chamfer kind, named both ways the plan's prose uses: item and list entry. */
+export type EngraveChamferItem = EngraveChamfer;
+
 /** The winding a vector outline's contours are read with (#217) — Manifold's two fill rules. */
 export type VectorFillRule = 'NonZero' | 'EvenOdd';
 
@@ -1214,6 +1253,16 @@ export interface EngraveJob {
    * defaulted) for the same reason as `combined`, `traces` and `vectors`.
    */
   cutouts?: EngraveCutout[];
+  /**
+   * CHAMFERS (#669): one flat bevel along a profile's part edge or a pocket's rim, cut by the
+   * cone's flank. A separate list, like `cutouts` and `threads`, so every exhaustive item switch
+   * keeps compiling and old documents keep parsing; `toPartPlan` carries them to
+   * `PartPlan.chamfers` and CAM writes one closed pass each.
+   *
+   * Optional, so a pre-#669 document round-trips byte-for-byte; the schema keeps it absent (not
+   * defaulted) for the same reason as every list above it. Consumers read `job.chamfers ?? []`.
+   */
+  chamfers?: EngraveChamfer[];
   /**
    * Combined shapes (#215): borders, frames and cut-aways built from other items or from the
    * stock. A separate list, like `labels` and `shapes`, so the panel's exhaustive `EngraveShape`

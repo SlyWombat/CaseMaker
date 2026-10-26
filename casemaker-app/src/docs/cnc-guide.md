@@ -417,10 +417,22 @@ questions, because that is the order the answer is needed in — and every answe
 section of the **same job document**, so a job can be put down and picked up at any point.
 
 A **new job starts with one question — what are you cutting?** — and the operation types are its
-answer: **Engrave** (text or single-stroke lines), **V-carve**, **Pocket**, **Profile**, **Hole**,
-**Bore to size**, **Thread**, or **Surface a mesh** (a goal STL/3MF). Every operation added
+answer: **Engrave** (text or single-stroke lines), **V-carve**, **Pocket**, **Profile**,
+**Chamfer the edge**, **Hole**, **Bore to size**, **Thread**, or **Surface a mesh** (a goal
+STL/3MF). Every operation added
 afterwards is one row in the job's list, its type on the row, and its expert fields behind the
 row's fold.
+
+**Chamfer the edge (#669)** breaks an edge rather than cutting a hole or a pocket: one flat bevel
+along a rim, cut by the job's V/chamfer bit with its flank held against the edge. The row picks the
+rim (a shape's, an imported outline's or a combined shape's own outline — often the part's
+construction outline), the **side** — *outside* a part's edge, which is bevelled BEFORE the cut-out
+frees the part; or *inside* a pocket's rim, bevelled AFTER the pocket opens it — and the **width**
+on the top face. The bevel's depth is derived, `width / tan(halfAngle)`, and so is the widest
+chamfer the bit can cut in one pass; a wider one is refused (`chamfer-too-wide`) rather than
+stepped, because a cone's flank is tangent to one bevel plane and no second pass can extend it. The
+chamfer is its own program — a cone cannot profile — so the row states the order against its rim's
+cut, and `chamfer-order` refuses a run where the two programs are the wrong way round.
 
 **Bore to size (#668)** is the hole the box of bits cannot make: a **Hole** row whose width is the
 job's own — M3 to M6 clearance, a counterbore, a socket for a magnet — cut by helixing an end mill
@@ -1298,6 +1310,12 @@ simulation does report about one is the sweep's own list, next:
 | `released-onto-board` | warning | A cut-out has no holding tabs, so the part is freed onto the board at the end of the cut and held only by the tape, glue or screws that fixed the blank (#218). | Add holding tabs, or make sure the blank is held firmly enough that a released part cannot move. |
 | `loose-piece` | error | The through cuts leave a piece of the blank disconnected from the material the mount holds, so it can move under the cutter once freed (#218). | Leave a connecting bridge of material, move the cut away from the blank's edges, or add holding tabs. |
 | `drill-mixed-tools` | error | A drill bit is the cutter of a drill-only program, and the job (or the setup) assigns it work a drill cannot cut — a region, a trace or a thread. One program has one tool, and a drill bit cuts drilled holes only (#434). | Assign the other work to an end mill, or put it in its own setup. |
+| `chamfer-needs-cone` | error | A chamfer is one flat bevel cut by a cone's flank, and the job's cutter is not a cone (a flat end mill, a ball nose, a drill bit or a thread mill). | Use a V-bit or a chamfer bit. |
+| `chamfer-needs-edge` | error | A chamfer names no rim, or names an item with no closed edge to follow — a text label, a hole, a cut-out. A chamfer follows a shape, an imported outline or a combined shape. | Choose a rim on the chamfer row. |
+| `chamfer-too-wide` | error | The chamfer is wider than the cutter's cone reaches in one pass — `(DC − D1) / 2` for a 90° bit. A single flat bevel cannot be stepped across, so the width is refused rather than approximated. The message names both numbers. | Use a wider chamfer bit, or a smaller chamfer. |
+| `chamfer-too-deep` | error | The bevel reaches below the pocket's floor (an inside edge) or through the blank (a part's edge), so the tip would cut past the material. | Use a smaller chamfer, or cut a deeper pocket. |
+| `chamfer-reach-unproven` | error | The cutter states no cutting diameter, so the width its cone reaches cannot be worked out. | Record the cutter's cutting diameter. |
+| `chamfer-order` | error | The chamfer's program runs on the wrong side of the cut that leaves its edge: a pocket's rim must be chamfered AFTER the pocket opens it, and a part's edge BEFORE its cut-out frees the part. The two never share a program — a cut-out profiles with a flat end mill, a chamfer needs a cone — so the setups' order is what decides it. | Move the chamfer's setup earlier (a part's edge) or later (a pocket's rim). |
 | `bore-no-diameter` | error | A bore to size has no hole diameter stated. A bore makes the hole the job asks for, not the cutter's own width, so without the diameter there is nothing to helix the wall to (#668). | State the hole's diameter on the row. |
 | `bore-needs-end-mill` | error | A bore to size is cut by helixing an end mill down the wall of the hole, so a V-bit, a ball nose or a drill bit cannot make it (#668). | Choose a flat end mill for the job that bores. |
 | `bore-narrow` | error | A bore's hole is not wider than the cutter, so there is no centre path to helix on; the cut would just be a plunge hole the cutter's own width (#668). | Cut a bigger hole, or use a smaller cutter. |
