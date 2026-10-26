@@ -72,7 +72,17 @@ import {
 import { MATERIAL_LABELS } from '@/engine/cnc/materials';
 import { cutterOnMetalLine } from '@/engine/cnc/engrave/cutterMaterial';
 import { toPartPlan, labelProfile, jobDepthLimit, keepOutNameAt, type PartPlan } from '@/engine/cnc/engrave/partPlan';
-import { dedupeFindings, jobSetups, pureGoalObject, setupProgramFindings, toSetup, validateGoalObject, validateJob, type JobFinding } from '@/engine/cnc/engrave/jobSetup';
+import {
+  dedupeFindings,
+  jobSetups,
+  pureGoalObject,
+  setupProgramFindings,
+  toSetup,
+  toolItemsFor,
+  validateGoalObject,
+  validateJob,
+  type JobFinding,
+} from '@/engine/cnc/engrave/jobSetup';
 import { jobForSetup, setupPrograms, type JobProgramRef } from '@/engine/cnc/engrave/programs';
 import {
   restJobFor,
@@ -373,6 +383,17 @@ export interface EngraveProgram {
    * sheet's bevel step belongs to the program that cuts the edge.
    */
   chamfer?: ChamferProgramFacts | null;
+  /**
+   * #677 — the core facts when THIS program clears the middle a variable-depth V-carve cannot
+   * reach. Null on every other file: the run sheet's flat-bottom step belongs to the program that
+   * pockets the core, and the areas are the ones the CAM cut rather than a second measurement.
+   */
+  core?: CoreProgramFacts | null;
+}
+
+/** #677 — one program's clearance of the standing cores, one entry per variable region. */
+export interface CoreProgramFacts {
+  cores: { of: string; name: string; areaMm2: number; depthMm: number }[];
 }
 
 /**
@@ -700,6 +721,35 @@ function regionText(item: EngraveItem | undefined): string {
 }
 
 /**
+ * #677 — below this area the "core" is polygonisation dust between the deepest tip flat and the
+ * wall, not floor worth a program of its own: the same 1 mm² bar the #665 warning kept.
+ */
+export const CORE_MIN_AREA_MM2 = 1;
+
+/**
+ * #677 — one derived CORE: the middle of a variable-depth V-carve that the V's width cannot reach
+ * at the cap, as the flat cutter's next program pockets it.
+ *
+ * `polygons` is `offset(design, −coreOffsetRadius(cone, depth))` — the far edge of the deepest tip
+ * flat — so the pocket's wall is TANGENT to the V's sloped flank at the floor and never cuts into
+ * it. `id` is `core:<itemId>`: never a document id, so nothing that looks an id up in the job can
+ * mistake the core for an item.
+ */
+export interface CoreCut {
+  id: string;
+  /** The variable-depth region this core stands under. */
+  of: string;
+  /** That region's own operation name, for the finding and the sheet. */
+  ofName: string;
+  /** The derived operation's name (`Core clearance of …`). */
+  name: string;
+  /** The cap depth, mm below the top face — the floor the V reaches at its centre line. */
+  depth: number;
+  polygons: Polygons;
+  areaMm2: number;
+}
+
+/**
  * The measured opening of a job: the plan, its engravability measurements, the ready-to-cut regions
  * and every cut the program makes. Exported so `engraveOracle.spec.ts` can build a bad-step-over
  * toolpath off the SAME polygons `engraveGenerate` would have cut, without re-deriving them — and so
@@ -741,6 +791,14 @@ export interface EngraveRegions {
    * none or its cutter is not a cone (the finding refuses that pairing).
    */
   chamfers: ChamferCut[];
+  /**
+   * #677 — THE CORES a variable-depth V-carve leaves standing at its cap: `offset(design,
+   * −coreOffsetRadius)`, the middle the V's width cannot reach. Derived here, where the design
+   * polygons and the cone meet, so the core the finding measures, the region the flat cutter
+   * pockets and the sheet's area are one geometry. Empty unless the program's cutter is a cone
+   * and one of its regions asks for the variable carve.
+   */
+  cores: CoreCut[];
   predicted: OraclePredicted[];
   tool: Tool | null;
   radius: number | null;
@@ -941,30 +999,10 @@ function vCarveFindings(
   for (const item of plan.engraves) {
     // #665 — a VARIABLE-depth item has no colour plane and no constant floor: its depth follows
     // the region's width, so the plane model's checks (the clamp, the film, the groove width)
-    // describe a cut it does not make. Its own checking is the CORE — the middle the V's width
-    // cannot reach at the cap — which the job has to clear with a flat-cutter pocket.
-    if (item.variableDepth === true) {
-      const design = designById.get(item.id);
-      if (design === undefined || design.length === 0) continue;
-      const core = offset(design, -coreOffsetRadius(cone, item.depth));
-      if (core.length === 0) continue;
-      const CS = tl.CrossSection;
-      const coreCs = CS.ofPolygons(core);
-      const coreArea = coreCs.area();
-      coreCs.delete();
-      if (coreArea > 1) {
-        findings.push({
-          severity: 'warning',
-          code: 'vcarve-variable-core',
-          labelId: item.id,
-          message:
-            `${item.name} is ${mm(item.depth)} mm deep at its centre, but the V's width runs out ` +
-            `before the middle: ${mm(coreArea)} mm² of floor is not reached by the V. Add a Pocket ` +
-            `over that area at ${mm(item.depth)} mm, cut by a flat end mill in its own program.`,
-        });
-      }
-      continue;
-    }
+    // describe a cut it does not make. #677 — its CORE is derived and reported by the RUN, not
+    // here: only the run knows the setup's later cutters, so it alone can say whether the core is
+    // cleared, and by which end mill.
+    if (item.variableDepth === true) continue;
     const plane = planeById.get(item.id);
     if (plane === undefined) continue;
 
@@ -1131,8 +1169,27 @@ export function engraveRegions(
   shop: EngraveShopOpts = {},
   machine: MillProfile | null = null,
   catalogue: readonly FeedCatalogueRow[] = [],
+  /**
+   * #677 — regions the DOCUMENT does not hold: the variable V-carve's cores, handed to the flat
+   * cutter's program by the run's generator. They join the plan as ordinary engraves (see
+   * `PartPlanOptions.derivedEngraves`), so everything below — the measurement, the CAM, the
+   * prediction, the verifier — reads them exactly as it reads a drawn pocket.
+   */
+  derivedCores?: readonly CoreCut[],
 ): EngraveRegions {
-  const plan = toPartPlan(job);
+  const plan = toPartPlan(
+    job,
+    derivedCores === undefined || derivedCores.length === 0
+      ? {}
+      : {
+          derivedEngraves: derivedCores.map((core) => ({
+            id: core.id,
+            name: core.name,
+            profile: { kind: 'p-poly', contours: core.polygons },
+            depth: core.depth,
+          })),
+        },
+  );
   const mill = machine ?? jobMachine(job);
   const perChar = perCharFor(job);
   // The cutter, split into the things the pipeline needs from it (#405, #221). `radius` is the
@@ -1189,13 +1246,16 @@ export function engraveRegions(
       : ratioAtFor(tl, job, cone.tipRadius, planeRadiusFor);
   // #665 — the engravability measurement judges a region against ONE cutter width at the plane;
   // a variable-depth item's width follows its own design at every point, so its `item-empty`
-  // (a plane radius of 0 on a point-tip bit) would refuse a cut that is entirely sound.
+  // (a plane radius of 0 on a point-tip bit) would refuse a cut that is entirely sound. #677 — a
+  // DERIVED core is inside its parent design, so any breach it could report is the parent's
+  // finding, said against a row that exists.
   const variableIds = new Set(plan.engraves.filter((e) => e.variableDepth === true).map((e) => e.id));
+  const derivedIds = new Set((derivedCores ?? []).map((core) => core.id));
   const engFindings =
     measured.length === 0
       ? []
       : engravabilityFindings(job, measured, ratioAt, tool, shop.lostDetailWarnRatio ?? null).filter(
-          (f) => f.labelId === undefined || !variableIds.has(f.labelId),
+          (f) => f.labelId === undefined || (!variableIds.has(f.labelId) && !derivedIds.has(f.labelId)),
         );
 
   // #171/#345 — the cut regions a void check reads are built ONCE, below: the engrave openings,
@@ -1261,6 +1321,39 @@ export function engraveRegions(
       });
       designById.set(engrave.id, design);
       surfaceById.set(engrave.id, surface);
+    }
+  }
+
+  // #677 — THE CORE. Where a variable-depth region is wider than its cap allows, the V's width
+  // runs out before the middle and the deepest tip flat cannot reach in past
+  // `coreOffsetRadius = 2·r1 + cap·tanHalf`. That middle is the flat bottom, and the setup's flat
+  // end mill pockets exactly it at the cap in its own program. Derived here, from the SAME design
+  // polygons the ladder carves, so the pocket's wall is tangent to the V's sloped flank at the
+  // floor: the ring at the cap ends where the core begins.
+  const cores: CoreCut[] = [];
+  if (cone !== null) {
+    const coreOffset = makeClipperOffset(tl);
+    for (const engrave of plan.engraves) {
+      if (engrave.variableDepth !== true) continue;
+      const design = designById.get(engrave.id);
+      if (design === undefined) continue;
+      const polygons = coreOffset(design, -coreOffsetRadius(cone, engrave.depth));
+      if (polygons.length === 0) continue;
+      const cs = tl.CrossSection.ofPolygons(polygons);
+      const areaMm2 = cs.area();
+      cs.delete();
+      // Below a square millimetre the "core" is polygonisation dust between the wall and the tip
+      // flat, not floor worth a program of its own — the same bar the #665 warning kept.
+      if (!(areaMm2 > CORE_MIN_AREA_MM2)) continue;
+      cores.push({
+        id: `core:${engrave.id}`,
+        of: engrave.id,
+        ofName: engrave.name,
+        name: `Core clearance of ${engrave.name}`,
+        depth: engrave.depth,
+        polygons,
+        areaMm2,
+      });
     }
   }
   const carveFindings =
@@ -1416,7 +1509,11 @@ export function engraveRegions(
   // takes, so the depth a finding accepts and the depth a program cuts cannot disagree.
   const drillResolved = shop.drill ?? drillSettings(shop.defaults ?? null);
   const findings = dedupeFindings([
-    ...validateJob(job, { deg: drillResolved.settings.pointAngleDeg, source: drillResolved.sources.pointAngleDeg }),
+    ...validateJob(
+      job,
+      { deg: drillResolved.settings.pointAngleDeg, source: drillResolved.sources.pointAngleDeg },
+      { derivedCores: derivedCores?.length ?? 0 },
+    ),
     ...validateVise(job.stock, job.workholding.vise, job.sacrificial),
     ...engFindings,
     ...metalLineFindings(job, tool),
@@ -1624,8 +1721,8 @@ export function engraveRegions(
         const ringAt = (level: number): Polygons => {
           // The removal at level z is ONE ring: the wall's lower part from `z·tan` in, through the
           // deepest pass's flat swath, to where its INNER flank has risen back to this level —
-          // `(2·cap − z)·tan + 2·r1` from the boundary. Beyond that the inner mound stands, and
-          // the rest cutter clears it at the cap.
+          // `(2·cap − z)·tan + 2·r1` from the boundary. Beyond that the inner mound stands — the
+          // CORE — and the flat end mill's own program pockets it at the cap (#677).
           const outer = carveOffset(design, -level * cone.tanHalf);
           const innerBoundary = (2 * cap - level) * cone.tanHalf + 2 * cone.tipRadius;
           const inner = carveOffset(design, -innerBoundary);
@@ -1720,6 +1817,7 @@ export function engraveRegions(
     throughMask,
     cuts,
     chamfers: chamferCuts,
+    cores,
     predicted,
     tool,
     radius,
@@ -2140,7 +2238,12 @@ export function depthLimitReason(stack: StackDepthLimit, job: EngraveJob, x: Mm,
 /**
  * One program's result, before the list is assembled. `generateOneProgram`'s return shape.
  */
-type OneProgram = Omit<EngraveGenerated, 'programs'>;
+type OneProgram = Omit<EngraveGenerated, 'programs'> & {
+  /** #677 — the cores this program's V left standing, for the run to hand to the flat cutter. */
+  cores?: readonly CoreCut[];
+  /** #677 — the cores THIS program cleared: the core-clearance program's own sheet facts. */
+  core?: CoreProgramFacts | null;
+};
 
 /**
  * A program the run will really play: it posted and the verifier passed. `make` builds it again
@@ -2315,6 +2418,59 @@ function assembleRestFacts(link: RestLink, posted: readonly PostedProgram[]): Re
   };
 }
 
+/** `0.5` — a millimetre value as a finding or sheet sentence prints it. */
+function mmValue(v: number): string {
+  return String(Math.round(v * 1000) / 1000);
+}
+
+/**
+ * #677 — A CORE THAT WILL STAND, said where the operator can act on it. One warning per standing
+ * core: the area, the depth, and which cutter the setup must add after the V. `where` is null on a
+ * legacy document (no setups to name), where the advice is to add one.
+ *
+ * No finding is raised for a core the engine CLEARS: a handled condition is not a warning, and the
+ * core program's own section of the sheet states it.
+ */
+function coreWarningFindings(
+  cores: readonly CoreCut[],
+  where: { setupIndex: number; toolKey: string } | null,
+): JobFinding[] {
+  return cores.map((core) => ({
+    severity: 'warning',
+    code: 'vcarve-variable-core',
+    labelId: core.of,
+    message:
+      `${core.ofName} is ${mmValue(core.depth)} mm deep at its centre, but the V's width runs out ` +
+      `before the middle: ${mmValue(core.areaMm2)} mm² of floor is not reached by the V. ` +
+      (where === null
+        ? `Add a setup that names a flat end mill after the V; the engine pockets that area at ` +
+          `${mmValue(core.depth)} mm in its own program.`
+        : `Add a flat end mill after ${where.toolKey} in setup ${where.setupIndex}; the engine ` +
+          `pockets that area at ${mmValue(core.depth)} mm in its own program.`),
+  }));
+}
+
+/**
+ * #677 — a core the named flat cutter cannot enter (the core eroded by its radius is empty), so
+ * the pocket would open nothing and the flat bottom would stand. Said per core, naming the cutter
+ * and the way out.
+ */
+function coreTooNarrowFindings(
+  cores: readonly CoreCut[],
+  cutter: Tool,
+  diameter: number,
+): JobFinding[] {
+  return cores.map((core) => ({
+    severity: 'warning',
+    code: 'vcarve-variable-core',
+    labelId: core.of,
+    message:
+      `The core under ${core.ofName} is ${mmValue(core.areaMm2)} mm² at ${mmValue(core.depth)} mm, ` +
+      `and ${cutter.name} (⌀ ${mmValue(diameter)} mm) is wider than it at every point: the pocket ` +
+      'would open nothing. Use a smaller flat end mill.',
+  }));
+}
+
 /**
  * One setup's rest pair, measured and generated (#472). `null` when the rough program did not
  * post; the finding for why the rest could not be measured is pushed into `findings`.
@@ -2323,6 +2479,13 @@ function assembleRestFacts(link: RestLink, posted: readonly PostedProgram[]): Re
  * generated, then SIMULATED, then the rest is measured against that sweep's own removal, then the
  * second program is generated and swept from the first one's result. Nothing here trusts an offset
  * standing in for a cut.
+ *
+ * #677 — A V FIRST AND ONE FLAT CUTTER AFTER IT IS THE CLEARANCE PAIR, not a rest pair. A cone
+ * cannot be rest-measured (#486), but a variable-depth carve leaves a CORE the V's width cannot
+ * reach, and the flat cutter pockets exactly that core at the cap in its own program. When the
+ * setup's work holds a variable-depth shape and the later cutter owns no items, the rest machinery
+ * is bypassed entirely: the V program is generated with its whole item set, its derived cores are
+ * handed to the flat cutter, and the pair's order is the setup's own tool order.
  */
 function generateRestPair(
   tl: ManifoldToplevel,
@@ -2364,6 +2527,105 @@ function generateRestPair(
     attempts.push(roughOne);
     if (roughOne.ok && roughOne.nc !== null && roughOne.verify !== null) {
       posted.push({ ref: roughRef, one: roughOne, make: makeRough, span: roughSpan });
+    }
+    return { attempts, posted, link: null, cursor: nextCursor };
+  }
+
+  // #677 — THE CLEARANCE PAIR (this function's doc). Preconditions, deliberately narrow: a cone
+  // first, exactly ONE later cutter, that cutter owning no items, and a variable-depth shape among
+  // the setup's work. Anything else keeps #472's rest model and #486's refusal.
+  const flatRef = group.length === 2 ? group[1]! : null;
+  const flatTool = restTools[0] ?? null;
+  const laterOwnsItems =
+    flatRef !== null && toolItemsFor(setup, flatRef.toolKey, 1).some((id) => setup.itemIds.includes(id));
+  const variableWork = setup.itemIds.some((id) =>
+    job.shapes.some(
+      (shape) => shape.id === id && shape.enabled && !shape.construction && shape.vCarveDepth === 'variable',
+    ),
+  );
+  if (vCone(roughTool) !== null && flatRef !== null && !laterOwnsItems && variableWork) {
+    const vJob = jobForSetup(job, roughRef, roughTool);
+    const makeV = (span: VacuumSpan): OneProgram =>
+      generateOneProgram(tl, vJob, roughTool, catalogue, calibration, margins, shop, span, withFacing, 'rough-and-finish');
+    const vOne = makeV(roughSpan);
+    attempts.push(vOne);
+    if (!vOne.ok || vOne.nc === null || vOne.verify === null) {
+      return { attempts, posted, link: null, cursor: nextCursor };
+    }
+    posted.push({ ref: roughRef, one: vOne, make: makeV, span: roughSpan });
+
+    if (flatTool === null) {
+      findings.push({
+        severity: 'error',
+        code: 'setup-rest-unavailable',
+        message:
+          `Setup ${flatRef.setupIndex} names ${flatRef.toolKey} after ${roughRef.toolKey}, but that ` +
+          'cutter is not on this bench. Add it to the tool library, or remove it from the setup.',
+      });
+      return { attempts, posted, link: null, cursor: nextCursor };
+    }
+    if (flatTool.shape !== 'flat') {
+      findings.push({
+        severity: 'error',
+        code: 'setup-rest-unavailable',
+        message:
+          `Setup ${flatRef.setupIndex} names ${flatRef.toolKey} after ${roughRef.toolKey}, but the ` +
+          'core a variable V-carve leaves is a flat bottom, and only a flat end mill clears it. ' +
+          'Name one, or remove the later cutter from the setup.',
+      });
+      return { attempts, posted, link: null, cursor: nextCursor };
+    }
+
+    const cores = vOne.cores ?? [];
+    if (cores.length === 0) {
+      // The V's width reaches the middle at every point: the later cutter has nothing this slice
+      // knows how to give it, and #486's sentence is the honest one.
+      findings.push({
+        severity: 'error',
+        code: 'setup-rest-unavailable',
+        message:
+          `Setup ${roughRef.setupIndex} names ${flatRef.toolKey} after ${roughRef.toolKey}, but ` +
+          `${vBitRestRefusal(vJob, roughTool)}. The V-carve is the whole region job; remove the ` +
+          'later cutter from the setup, or name a flat cutter first.',
+      });
+      return { attempts, posted, link: null, cursor: nextCursor };
+    }
+
+    // A core the cutter cannot reach into is not a program — the pocket would open nothing. Those
+    // cores stay, and the warning says which cutter could take them.
+    const flatDiameter = cuttingDiameter(flatTool) ?? 0;
+    const flatRadius = flatDiameter / 2;
+    const offset = makeClipperOffset(tl);
+    const cuttable =
+      flatRadius > 0 ? cores.filter((core) => offset(core.polygons, -flatRadius).length > 0) : [];
+    const standing = cores.filter((core) => !cuttable.includes(core));
+    if (standing.length > 0) findings.push(...coreTooNarrowFindings(standing, flatTool, flatDiameter));
+
+    if (cuttable.length > 0) {
+      // THE SECOND FILE: the flat cutter pockets the cores at the cap, after the V program — the
+      // setup's own tool order, which is the order the run plays the files in.
+      const coreSpan = spanAt(nextCursor);
+      nextCursor += 1;
+      const coreJob = jobForSetup(job, flatRef, flatTool);
+      const makeCore = (span: VacuumSpan): OneProgram =>
+        generateOneProgram(
+          tl,
+          coreJob,
+          flatTool,
+          catalogue,
+          calibration,
+          margins,
+          shop,
+          span,
+          false,
+          'rough-and-finish',
+          cuttable,
+        );
+      const coreOne = makeCore(coreSpan);
+      attempts.push(coreOne);
+      if (coreOne.ok && coreOne.nc !== null && coreOne.verify !== null) {
+        posted.push({ ref: flatRef, one: coreOne, make: makeCore, span: coreSpan });
+      }
     }
     return { attempts, posted, link: null, cursor: nextCursor };
   }
@@ -2935,16 +3197,22 @@ export function engraveGenerate(
   // issue does not own.
   if (job.setups === undefined) {
     const one = generateOneProgram(tl, job, tool, catalogue, calibration, margins, shop, 'whole', true, 'rough-and-finish');
+    // #677 — a legacy document names ONE cutter, so a variable carve's core cannot be cleared: it
+    // stands, and the warning says what to add. A job that has setups gets the same sentence from
+    // the loop below, with the setup's number on it.
+    const coreWarnings = (one.cores?.length ?? 0) === 0 ? [] : coreWarningFindings(one.cores!, null);
+    const oneReady: OneProgram =
+      coreWarnings.length === 0 ? one : { ...one, findings: dedupeFindings([...one.findings, ...coreWarnings]) };
     const ref: JobProgramRef = {
       setupIndex: 1,
       setupId: jobSetups(job)[0]!.id,
       toolKey: job.toolKey,
       itemIds: [],
     };
-    const face = facingProgramOf(one, ref);
-    const engraved = one.ok && one.nc !== null && one.verify !== null ? [programOf(one, ref)] : [];
+    const face = facingProgramOf(oneReady, ref);
+    const engraved = oneReady.ok && oneReady.nc !== null && oneReady.verify !== null ? [programOf(oneReady, ref)] : [];
     // #623 — the frame the programs were posted against; the panel loads the simulation with it.
-    return { ...one, surface: shop.surface ?? null, programs: [...(face === null ? [] : [face]), ...engraved] };
+    return { ...oneReady, surface: shop.surface ?? null, programs: [...(face === null ? [] : [face]), ...engraved] };
   }
 
   // A setup that cannot become exactly one program is refused BEFORE anything is cut: the panel's
@@ -3034,6 +3302,12 @@ export function engraveGenerate(
         const one = make(span);
         attempts.push(one);
         if (one.ok && one.nc !== null && one.verify !== null) posted.push({ ref, one, make, span });
+        // #677 — a variable carve with no later cutter leaves its CORE standing: say so with the
+        // area and name what to add. A core the clearance program clears raises nothing; the core
+        // program's own section of the sheet states it.
+        if (one.ok && (one.cores?.length ?? 0) > 0) {
+          restFindings.push(...coreWarningFindings(one.cores!, { setupIndex: ref.setupIndex, toolKey: ref.toolKey }));
+        }
         cursor += 1;
         continue;
       }
@@ -3114,7 +3388,7 @@ export function engraveGenerate(
 }
 
 /** One program as the result's list entry, keyed by the FNV of its posted text (decision 3). */
-function programOf(one: Omit<EngraveGenerated, 'programs'>, ref: JobProgramRef): EngraveProgram {
+function programOf(one: OneProgram, ref: JobProgramRef): EngraveProgram {
   const nc = one.nc!;
   return {
     kind: 'engrave',
@@ -3132,6 +3406,7 @@ function programOf(one: Omit<EngraveGenerated, 'programs'>, ref: JobProgramRef):
     through: one.through ?? null,
     bore: one.bore ?? null,
     chamfer: one.chamfer ?? null,
+    core: one.core ?? null,
   };
 }
 
@@ -3226,13 +3501,28 @@ function generateOneProgram(
    * every later rest program finishes.
    */
   finishMode: FinishPassMode = 'rough-and-finish',
-): Omit<EngraveGenerated, 'programs'> {
+  /**
+   * #677 — the cores this program clears: the derived regions a variable V-carve leaves standing,
+   * handed over by the run's generator. Present only on the core-clearance program, whose sub-job
+   * has no items of its own.
+   */
+  derivedCores?: readonly CoreCut[],
+): OneProgram {
   // #347 — the JOB's machine, not the app's only one: the envelope, the spindle ceiling and the
   // frame below are read off the profile the document names. The POST is still `postZ1`'s dialect,
   // which is the only post this app has; a second mill is a second post, and this line is where a
   // job naming it would have to be refused until there is one.
   const mill = jobMachine(job, calibration);
-  const { plan, regions, profiles, throughMask, chamfers, predicted, findings } = engraveRegions(tl, job, tool, margins, shop, mill, catalogue);
+  const { plan, regions, profiles, throughMask, chamfers, cores, predicted, findings } = engraveRegions(
+    tl,
+    job,
+    tool,
+    margins,
+    shop,
+    mill,
+    catalogue,
+    derivedCores,
+  );
   /**
    * #667 — WHAT THIS PROGRAM IS ASKED TO REMOVE. `predicted` is the design at its stated depths,
    * which is right for a program that reaches full depth; a ROUGH-ONLY program (the first file of
@@ -3814,6 +4104,22 @@ function generateOneProgram(
       facingError: facing.error,
       facingCam: facing.cam,
       predicted: predictedForRun,
+      // #677 — the V program's derived cores go UP to the run (which alone can see the setup's
+      // later cutter); the core program's own facts go ON the program (the sheet's step).
+      cores,
+      core:
+        derivedCores === undefined || derivedCores.length === 0
+          ? null
+          : {
+              cores: derivedCores.map((c) => ({
+                of: c.of,
+                // The REGION's operation name, not the derived one: the sheet's sentence is about
+                // the carve whose middle stood, not about this program's own operation.
+                name: c.ofName,
+                areaMm2: c.areaMm2,
+                depthMm: c.depth,
+              })),
+            },
       errors,
     };
   } finally {

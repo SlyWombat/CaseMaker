@@ -79,7 +79,8 @@ export interface VCarveRegion {
    * #665 — cut the MEDIAL-AXIS depth map instead of the constant floor. The ladder replaces the
    * pocket: at each level `d` the tool traces the design eroded by `tipRadius + d·tanHalf` at
    * `z = −d`, shallowest first. Where the cap cannot reach, the middle stands as a core this pass
-   * does NOT cut; the flat bottom is a flat end mill Pocket over the core, its own program.
+   * does NOT cut; the flat bottom is the setup's flat end mill's own program, which pockets the
+   * core at `depth` after this one (#677).
    */
   variable?: boolean;
 }
@@ -617,8 +618,8 @@ export function generateEngrave(
       // d·tanHalf` — the line where the flank meets the boundary at the surface — traced at
       // `z = −d`, SHALLOWEST FIRST: every pass rides over the groove the previous one opened, so
       // the bit's outer flank is in air at the wall. The core (what the cap's width cannot reach)
-      // is left standing here on purpose: `vcarve-variable-core` names its area, and the flat
-      // bottom is a flat end mill Pocket over it at `depth`, in its own program.
+      // is left standing here on purpose: the flat end mill's own program pockets it at `depth`
+      // after this one (#677), and `vcarve-variable-core` warns when no such cutter is set up.
       if (cone === null) {
         throw new Error(
           `generateEngrave: "${label.name ?? label.text}" asks for a variable-depth V-carve, and a ` +

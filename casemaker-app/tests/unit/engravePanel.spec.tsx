@@ -41,7 +41,7 @@ import { flatEndMill } from '@/engine/cnc/tool';
 import { vCone } from '@/engine/cnc/vProfile';
 import { vCarvePlane, vCarveStepover, vCarveStepoverClampNote } from '@/engine/cnc/vCarveGeometry';
 import { itemName, V_BIT_CARVE_SENTENCE, type ToolRecommendation } from '@/engine/cnc/engrave/recommendTool';
-import type { EngraveJob, EngraveTargetObject, EngraveTraceItem } from '@/types/engraveJob';
+import type { EngraveJob, EngraveShape, EngraveTargetObject, EngraveTraceItem } from '@/types/engraveJob';
 import type { EngravePreview } from '@/workers/sim/engravePreview';
 import type { EngraveGenerated, EngraveProgram } from '@/workers/sim/engraveGenerate';
 
@@ -912,7 +912,11 @@ describe('EngravePanel — V-carve variable depth (#665)', () => {
     expect(useEngraveJobStore.getState().job.shapes[0]!.vCarveDepth).toBe('variable');
     const select = screen.getByTestId('engrave-shape-vcarve-depth-0') as HTMLSelectElement;
     expect(select.value).toBe('variable');
-    expect(screen.getByTestId('engrave-shape-vcarve-note-0').textContent).toContain('flat bottom');
+    // #677 — no flat cutter is set up on this job, so the note says which cutter to add; with the
+    // clearance pair the note names it instead.
+    expect(screen.getByTestId('engrave-shape-vcarve-note-0').textContent).toContain(
+      'add a flat end mill to the setup',
+    );
     fireEvent.change(select, { target: { value: 'plane' } });
     expect(useEngraveJobStore.getState().job.shapes[0]!.vCarveDepth).toBe('plane');
     expect(screen.queryByTestId('engrave-shape-vcarve-note-0')).toBeNull();
@@ -922,6 +926,63 @@ describe('EngravePanel — V-carve variable depth (#665)', () => {
     render(<EngravePanel />);
     fireEvent.click(screen.getByTestId('engrave-add-rect'));
     expect(screen.queryByTestId('engrave-shape-vcarve-depth-0')).toBeNull();
+  });
+
+  // #677 — with a flat end mill after the V in the setup, the row states the CORE CLEARANCE: the
+  // note names the cutter, and the second-cutter control is worded as the flat bottom rather than
+  // a rest pass.
+  it('names the clearance cutter and words the second cutter as the core', () => {
+    const V_KEY = 'inv:v-677';
+    const FLAT = flatEndMill(1.5, { name: '1.5 mm flat', fluteLength: 20, shoulderLength: 20 });
+    const FLAT_KEY = 'inv:flat-677';
+    act(() =>
+      setInventoryEntries([
+        { key: V_KEY, tool: V_TOOL, provenance: 'EngravePanel core spec' },
+        { key: FLAT_KEY, tool: FLAT, provenance: 'EngravePanel core spec' },
+      ]),
+    );
+    const shape: EngraveShape = {
+      id: 'plate',
+      name: 'plate',
+      kind: 'rect',
+      position: { x: 50, y: 30 },
+      rotation: 0,
+      depth: 0.5,
+      enabled: true,
+      width: 20,
+      height: 10,
+      cornerRadius: 0,
+      vCarveDepth: 'variable',
+    };
+    act(() =>
+      useEngraveJobStore.setState({
+        job: {
+          ...defaultEngraveJob(),
+          labels: [],
+          traces: [],
+          toolKey: V_KEY,
+          tool: V_TOOL,
+          shapes: [shape],
+          setups: [
+            {
+              id: 'setup-1',
+              orientation: { top: 'top', bottom: 'bottom', left: 'left', right: 'right', front: 'front', back: 'back' },
+              mount: { kind: 'vise' },
+              itemIds: ['plate'],
+              tools: [V_KEY, FLAT_KEY],
+            },
+          ],
+        },
+      }),
+    );
+    render(<EngravePanel />);
+    expand('engrave-shape');
+    expect(screen.getByTestId('engrave-shape-vcarve-note-0').textContent).toContain(
+      '1.5 mm flat end pockets it flat at that depth in its own program',
+    );
+    expect(screen.getByText('Clear the middle the V cannot reach')).toBeTruthy();
+    expect(screen.getByTestId('engrave-shape-rest-note-0').textContent).toContain('pockets the middle');
+    act(() => resetRegistry());
   });
 });
 

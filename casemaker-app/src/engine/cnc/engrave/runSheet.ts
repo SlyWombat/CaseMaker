@@ -235,6 +235,11 @@ export interface RunSheetProgram {
    * `ChamferProgramFacts`; absent on every program with no bevel.
    */
   chamfer?: RunSheetChamferFacts | null;
+  /**
+   * #677 — the CORES this program clears, when it clears any. Structurally the worker's
+   * `CoreProgramFacts`; absent on every program that pockets no core.
+   */
+  core?: RunSheetCoreFacts | null;
 }
 
 /**
@@ -320,6 +325,27 @@ export interface RunSheetChamferItem {
   tipDiameterMm: number;
   /** `'stated'` on the cutter's record, or `'point, by kind'` for a chamfer that states none. */
   tipSource: 'stated' | 'point, by kind';
+}
+
+/**
+ * #677 — what a program's CORE CLEARANCE cut, structurally `CoreProgramFacts` from
+ * `engraveGenerate`: one entry per variable-depth region whose middle the V could not reach, with
+ * the area the pocket clears at the cap. The step says the program runs after the V-carve and
+ * names the depth the flat bottom sits at.
+ */
+export interface RunSheetCoreFacts {
+  cores: readonly RunSheetCoreItem[];
+}
+
+export interface RunSheetCoreItem {
+  /** The variable-depth region the core stands under. */
+  of: string;
+  /** That region's operation name. */
+  name: string;
+  /** The floor the pocket clears, mm². */
+  areaMm2: number;
+  /** The cap depth, mm below the top face. */
+  depthMm: number;
 }
 
 /** #434 — the drill program's settings, their per-key sources, and one plan per drilled item. */
@@ -2754,6 +2780,21 @@ function chamferSteps(facts: RunSheetChamferFacts): RunSheetStep[] {
   });
 }
 
+/**
+ * #677 — a core-clearance program's own step: what stood, where the flat bottom sits, and that this
+ * is the program after the V-carve. One step per core (the `boreSteps` pattern), because a job can
+ * carry two variable regions whose cores differ in area.
+ */
+function coreSteps(facts: RunSheetCoreFacts): RunSheetStep[] {
+  return facts.cores.map((core) => ({
+    text:
+      `The middle of ${core.name} that the V’s width cannot reach is pocketed flat at ` +
+      `${fmtNum(core.depthMm)} mm — ${fmtNum(core.areaMm2)} mm² of floor at the cap — in this ` +
+      'program, after the V-carve that opened the sloped wall.',
+    value: `${fmtNum(core.areaMm2)} mm² at ${fmtNum(core.depthMm)} mm`,
+  }));
+}
+
 /** A later engraving program that carries no drill or rest facts of its own. */
 function engraveProgramSectionSteps(program: RunSheetProgram, number: number): RunSheetStep[] {
   const cam = program.cam;
@@ -2770,6 +2811,7 @@ function engraveProgramSectionSteps(program: RunSheetProgram, number: number): R
     ...(program.finish == null ? [] : [finishAllowanceStep(program.finish)]),
     ...(program.bore == null ? [] : boreSteps(program.bore)),
     ...(program.chamfer == null ? [] : chamferSteps(program.chamfer)),
+    ...(program.core == null ? [] : coreSteps(program.core)),
     ...programRunSteps(program, number),
     ...throughCutSteps(program.through),
   ];
@@ -3552,14 +3594,24 @@ export function buildRunSheet(
       // blank; the effective pitch is what the program actually runs.
       // #665 — a VARIABLE-depth item is the medial-axis carve: the depth follows the design's
       // width, cut as a ladder of level sets, and the floor's core is a flat end mill pocket's —
-      // added over the core, in its own program (#677 makes it automatic). Its step replaces the
-      // plane statement, which describes a constant floor this item does not have.
+      // the run's own core program (#677). Its step replaces the plane statement, which describes
+      // a constant floor this item does not have.
       if (item.variableDepth === true) {
         const levelPitch =
           params === null || !(cone.tanHalf > 0)
             ? null
             : Math.min(params.stepDown, params.stepOver / cone.tanHalf);
         const levels = levelPitch !== null && levelPitch > 0 ? vCarveLevels(cone, item.depth, levelPitch) : null;
+        // #677 — the flat bottom is the run's own CORE CLEARANCE program when the setup names a
+        // flat end mill after the V (the run's program list carries the facts); otherwise the core
+        // stands and the step says what to add.
+        const clearance = runPrograms
+          .flatMap((program) =>
+            program.core == null ? [] : program.core.cores.map((core) => ({ core, program })),
+          )
+          .find((entry) => entry.core.of === item.id);
+        const clearanceNumber =
+          clearance === undefined ? null : programNumberIn(runPrograms, clearance.program.nc);
         cutSteps.push({
           text:
             `${item.name}${note}${depthSourceWords(job, item, margins.boundaryMargin, measure)} — ` +
@@ -3569,8 +3621,12 @@ export function buildRunSheet(
               ? ''
               : ` — ${levels.length} level${levels.length === 1 ? '' : 's'} at ${fmtNum(levelPitch as number)} mm`) +
             `, down to ${fmtNum(item.depth)} mm at its centre. Where that cap cannot reach, the ` +
-            'middle stands as a core; add a flat end mill pocket over it at that depth — its own ' +
-            'program — to give the job a flat bottom.',
+            'middle stands as a core' +
+            (clearance === undefined
+              ? '; add a flat end mill to the setup and the engine pockets it at that depth in its own program.'
+              : `, and ${clearance.program.toolKey} pockets it flat at that depth in its own program` +
+                `${clearanceNumber === null ? '' : `, program ${clearanceNumber}`} — ` +
+                `${fmtNum(clearance.core.areaMm2)} mm² of floor at the cap.`),
           value: `${fmtNum(item.depth)} mm at the centre${levels === null ? '' : ` · ${levels.length} levels`}`,
         });
         continue;

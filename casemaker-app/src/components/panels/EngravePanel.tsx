@@ -793,6 +793,28 @@ export function EngravePanel(): JSX.Element {
   // row renders data, not a second opinion about the registry.
   const setRestCutter = useEngraveJobStore((s) => s.setRestCutter);
   const setups = jobSetups(job);
+  // #677 — THE CORE CLEARANCE, as a row states it: the setup that owns the item, its first cutter
+  // a cone, and a FLAT end mill after it that owns no items of its own — the same pair the
+  // generator turns into the ladder + the core pocket (a later cutter with assigned items keeps
+  // #472's rest model). Null when the core would stand.
+  const coreCutterFor = (itemId: string): string | null => {
+    const setup = setups.find((s) => s.itemIds.includes(itemId));
+    if (setup === undefined) return null;
+    // The generator's own preconditions: a cone first, EXACTLY one later cutter, and that cutter
+    // owning no items — anything else keeps #472's rest model and its refusal.
+    if (setup.tools.length !== 2) return null;
+    const firstKey = setup.tools[0];
+    const first = firstKey === undefined ? null : (tools.find((e) => e.key === firstKey)?.tool ?? null);
+    if (first === null || vCone(first) === null) return null;
+    const laterKey = setup.tools[1];
+    if (laterKey === undefined) return null;
+    const later = tools.find((e) => e.key === laterKey)?.tool ?? null;
+    if (later === null || later.shape !== 'flat') return null;
+    if ((setup.toolItems?.[laterKey]?.length ?? 0) > 0) return null;
+    return toolDisplayName(later);
+  };
+  const isVariableCarve = (itemId: string): boolean =>
+    job.shapes.some((s) => s.id === itemId && s.enabled && !s.construction && s.vCarveDepth === 'variable');
   const restFor = (itemId: string): RestChoice | null => {
     const setupIndex = setups.findIndex((setup) => setup.itemIds.includes(itemId));
     if (setupIndex === -1) return null;
@@ -814,9 +836,14 @@ export function EngravePanel(): JSX.Element {
       })
       .map((e) => ({ key: e.key, name: toolDisplayName(e.tool), diameter: cuttingDiameter(e.tool) as number }))
       .sort((a, b) => a.diameter - b.diameter);
+    // #677 — a VARIABLE-depth shape under a cone with ONE later cutter: the second cutter is the
+    // core clearance, not a rest pass, and the chip says which.
+    const coreClearance =
+      isVariableCarve(itemId) && setup.tools.length === 2 && roughTool !== null && vCone(roughTool) !== null;
     return {
       rough: roughTool === null ? null : { key: roughEntry!.key, name: toolDisplayName(roughTool), diameter: roughDiameter },
       roughIsV: roughTool !== null && vCone(roughTool) !== null,
+      coreClearance,
       options,
       restKey,
       // A REST cutter only matters on a job whose setups are stated (the write materialises them);
@@ -826,8 +853,8 @@ export function EngravePanel(): JSX.Element {
         restEntry === null
           ? null
           : restDiameter === null
-            ? `rest ${toolDisplayName(restEntry.tool)}`
-            : `rest ⌀${Number(restDiameter.toFixed(3))} mm`,
+            ? `${coreClearance ? 'core' : 'rest'} ${toolDisplayName(restEntry.tool)}`
+            : `${coreClearance ? 'core' : 'rest'} ⌀${Number(restDiameter.toFixed(3))} mm`,
       onPick: (key) => setRestCutter(itemId, key),
     };
   };
@@ -2314,7 +2341,14 @@ export function EngravePanel(): JSX.Element {
           maxDepth={maxDepth}
           findings={findingsFor(shape.id)}
           rest={shape.construction === true ? null : restFor(shape.id)}
-          vCarve={cone === null ? null : { pitchMm: vCarvePitchMm }}
+          vCarve={
+            cone === null
+              ? null
+              : {
+                  pitchMm: vCarvePitchMm,
+                  coreCutterName: shape.vCarveDepth === 'variable' ? coreCutterFor(shape.id) : null,
+                }
+          }
           onChange={(patch) => updateShape(shape.id, patch)}
           onRemove={() => removeShape(shape.id)}
         />

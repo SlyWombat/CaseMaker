@@ -189,14 +189,15 @@ describe('variable-depth V-carve (#665)', () => {
     }
   }, 90_000);
 
-  it('names the core a flat-cutter pocket has to clear — the flat bottom', () => {
-    // The rest pass is NOT the clearance cutter here: since #486 a V-bit first on a region job has
-    // no rest pass, and the column engine has no removal solid to measure against anyway. So the
-    // flat bottom is a POCKET the operator adds, and the finding says how much floor it covers.
+  it('names the standing core when the setup carries no flat cutter to clear it', () => {
+    // #677 — one cutter in the setup means no core program: the warning states the area and the
+    // depth and says which cutter to add. With a flat end mill after the V the engine clears the
+    // core itself and raises nothing (see `vCarveCore.spec.ts`).
     const g = generate(tl, variableJob());
     const f = g.findings.find((x) => x.code === 'vcarve-variable-core');
     expect(f?.severity).toBe('warning');
-    expect(f?.message).toContain('Add a Pocket');
+    expect(f?.message).toContain('Add a flat end mill after');
+    expect(f?.message).toContain('in setup 1');
     expect(f?.message).toContain('is not reached by the V');
   }, 60_000);
 
@@ -208,7 +209,9 @@ describe('variable-depth V-carve (#665)', () => {
     expect(step).toBeDefined();
     expect(step).toContain('the V follows the design’s width');
     expect(step).toContain('2 levels');
-    expect(step).toContain('add a flat end mill pocket over it');
+    // #677 — no flat cutter is set up on this job, so the step says what to add; with the clearance
+    // program present it names the cutter and the program instead.
+    expect(step).toContain('add a flat end mill to the setup');
   }, 60_000);
 });
 

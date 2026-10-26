@@ -226,10 +226,10 @@ export interface EngraveShapeBase {
    * constant-floor cut at the colour plane, so every saved job round-trips unchanged. `'variable'`
    * cuts the medial-axis depth map: a point at boundary distance `b` goes to
    * `min(depth, b / tanHalf)`, cut as a ladder of level sets from the shallowest to the deepest.
-   * Where the V's width runs out at the cap, the middle stands as a core the carve cannot reach —
-   * `vcarve-variable-core` names its area, and the flat bottom is a flat end mill Pocket over
-   * that area at `depth`, its own program (the clearance is #677's). Read only when the job's
-   * cutter is a cone.
+   * Where the V's width runs out at the cap, the middle stands as a core the carve cannot reach;
+   * the setup's flat end mill pockets it flat at `depth` in its own program after the V-carve
+   * (#677), and `vcarve-variable-core` warns by name only when no such cutter is set up or the one
+   * named is wider than the core. Read only when the job's cutter is a cone.
    */
   vCarveDepth?: 'plane' | 'variable';
 }

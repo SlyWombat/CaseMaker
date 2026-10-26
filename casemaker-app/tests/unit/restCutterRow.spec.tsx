@@ -37,6 +37,7 @@ function rest(over: Partial<RestChoice> = {}): RestChoice {
   return {
     rough: { key: 'flat-3.175', name: '3.175 mm flat end', diameter: 3.175 },
     roughIsV: false,
+    coreClearance: false,
     options: [
       { key: 'flat-1.0', name: '1 mm flat end', diameter: 1 },
       { key: 'flat-2.0', name: '2 mm flat end', diameter: 2 },

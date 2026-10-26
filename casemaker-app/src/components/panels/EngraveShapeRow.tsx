@@ -102,9 +102,11 @@ export interface EngraveShapeRowProps {
   rest?: RestChoice | null;
   /**
    * #665 — the variable-depth control, present only when the job's cutter is a cone: the level
-   * pitch the CAM will run, or null when the feeds row did not resolve for this cutter.
+   * pitch the CAM will run, or null when the feeds row did not resolve for this cutter. #677 —
+   * `coreCutterName` is the setup's clearance cutter (the flat end mill after the V, when the
+   * setup names one): the flat bottom's own program, or null when the core would stand.
    */
-  vCarve?: { pitchMm: number | null } | null;
+  vCarve?: { pitchMm: number | null; coreCutterName: string | null } | null;
 }
 
 export function EngraveShapeRow({
@@ -336,7 +338,7 @@ export function EngraveShapeRow({
               value={shape.vCarveDepth ?? 'plane'}
               data-testid={`engrave-shape-vcarve-depth-${index}`}
               aria-label={`Shape ${index + 1} V-carve depth`}
-              title="Plane cuts one constant floor at the colour plane. Variable follows the design's width down to its centre, level by level; where the V's width runs out, the middle is left standing and a flat end mill Pocket clears the flat bottom."
+              title="Plane cuts one constant floor at the colour plane. Variable follows the design's width down to its centre, level by level; where the V's width runs out, the middle is left standing and the setup's flat end mill pockets it at the cap, in its own program."
               onChange={(e) => onChange({ vCarveDepth: e.target.value === 'variable' ? 'variable' : 'plane' })}
             >
               <option value="plane">plane (one depth)</option>
@@ -350,7 +352,10 @@ export function EngraveShapeRow({
           The V follows the design’s width —{' '}
           {vCarve.pitchMm === null ? 'the level pitch comes from the feeds row' : `${fmt(vCarve.pitchMm)} mm per level`}{' '}
           — down to {fmt(shape.depth)} mm at the centre. Where the V cannot reach, the middle
-          stands as a core: add a flat end mill pocket over it at that depth for the flat bottom.
+          stands as a core:{' '}
+          {vCarve.coreCutterName === null
+            ? 'add a flat end mill to the setup and the engine pockets it at that depth in its own program.'
+            : `${vCarve.coreCutterName} pockets it flat at that depth in its own program, after the V-carve.`}
         </p>
       )}
       {rest !== null && <RestCutterControl rest={rest} testidPrefix="engrave-shape" index={index} />}

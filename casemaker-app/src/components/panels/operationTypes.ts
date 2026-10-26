@@ -15,9 +15,9 @@
  *    V-carve (constant-floor V region), any other cutter pockets it flat. Both are OFFERED (the
  *    matrix's UI holds both) and the row's chip states what the job's cutter makes of the item;
  *  - `v-carve-variable` — the same region cut to the MEDIAL-AXIS depth map (#665): the V follows
- *    the design's width down, level by level; where its width runs out the core stands and a flat
- *    end mill Pocket clears the flat bottom (the warning names the area). The picker adds a rect
- *    with the flag; the shape row's fold switches it;
+ *    the design's width down, level by level; where its width runs out the core stands and the
+ *    setup's flat end mill pockets it flat in its own program after the V-carve (#677). The
+ *    picker adds a rect with the flag; the shape row's fold switches it;
  *  - `profile` — a cut-out through the blank, held with tabs (a cutout item or a through shape);
  *  - `chamfer` — one flat bevel along a profile's part edge or a pocket's rim, cut by the cone's
  *    flank (#669): a `chamfer` item naming its rim, so the bevel follows an edge the job cuts;

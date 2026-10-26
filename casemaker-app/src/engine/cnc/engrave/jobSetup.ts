@@ -627,6 +627,12 @@ export function pureGoalObject(job: EngraveJob): EngraveTargetObject | null {
 export function validateJob(
   job: EngraveJob,
   drillPoint: { deg: number; source: string } | null = null,
+  /**
+   * #677 — work the DOCUMENT does not hold. The core-clearance program is built from a sub-job
+   * with no items (the core is derived, not drawn), so its validation must count the derived
+   * regions as work or `no-items` would refuse a program that has cutting to do.
+   */
+  options: { derivedCores?: number } = {},
 ): JobFinding[] {
   const findings: JobFinding[] = [];
   const all: EngraveAnyItem[] = [
@@ -1468,6 +1474,7 @@ export function validateJob(
     enabledPrimitives.length > 0 ||
     enabledCutouts.length > 0 ||
     enabledChamfers.length > 0 ||
+    (options.derivedCores ?? 0) > 0 ||
     pureGoal !== null;
 
   if (!hasWork) {
@@ -1579,7 +1586,10 @@ export function validateJob(
   if (tool) findings.push(...traceSelfOverlapFindings(job, (depth) => traceRadiusAt(tool, depth)));
 
   findings.push(...validateSacrificial(job));
-  findings.push(...setupProgramFindings(job));
+  // #677 — a derived-work program (the core clearance) has no items by construction, and its
+  // sub-job has no stored setups: the setup split has nothing to judge there. The run's own
+  // whole-job pass owns that question.
+  if ((options.derivedCores ?? 0) === 0) findings.push(...setupProgramFindings(job));
 
   return findings;
 }

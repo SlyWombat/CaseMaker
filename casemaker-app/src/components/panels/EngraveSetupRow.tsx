@@ -15,6 +15,7 @@
 
 import { useMemo, useState, type CSSProperties, type JSX } from 'react';
 import { cuttingDiameter } from '@/engine/cnc/tool';
+import { vCone } from '@/engine/cnc/vProfile';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import { summarizePlan } from '@/engine/cnc/registration/summary';
 import { expandEngraveRow } from '@/store/engraveRowStore';
@@ -184,7 +185,11 @@ export function EngraveSetupRow(props: EngraveSetupRowProps): JSX.Element {
     const rough = dia(setup.tools[0]);
     const rest = dia(setup.tools[1]);
     if (rough === null || rest === null) return null;
-    return `${rough} rough · ${rest} rest`;
+    // #677 — a V-bit first and a flat cutter after it is the CLEARANCE pair, not a rest pass: the
+    // flat cutter pockets the middle the V's width cannot reach, in its own program.
+    const first = setup.tools[0] === undefined ? undefined : props.tools.find((e) => e.key === setup.tools[0]);
+    const firstIsV = first !== undefined && vCone(first.tool) !== null;
+    return firstIsV ? `${rough} V-carve · ${rest} core` : `${rough} rough · ${rest} rest`;
   })();
 
   return (

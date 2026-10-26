@@ -14,6 +14,8 @@ import { useMachineStore, resetMachineStore } from '@/store/machineStore';
 import { useLocationStore, resetLocationStore } from '@/store/locationStore';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { jobSetups } from '@/engine/cnc/engrave/jobSetup';
+import { flatEndMill } from '@/engine/cnc/tool';
+import { resetRegistry, setInventoryEntries } from '@/engine/cnc/toolRegistry';
 import { orient } from '@/engine/cnc/setups/orient';
 import { ShopDefaultsSchema } from '@/platform/defaultsClient';
 import { setHouseClientLoader, type HouseClient } from '@/platform/houseClient';
@@ -209,6 +211,27 @@ describe('#471 the Setups section — the states of §2', () => {
     act(() => useEngraveJobStore.setState({ job }));
     render(<EngraveSetupsSection />);
     expect(screen.getByTestId('engrave-setup-pair-1').textContent).toBe('⌀3.175 mm rough · ⌀1 mm rest');
+  });
+
+  it('#677 — a V first with a flat cutter after it is named as the core clearance', () => {
+    const V = flatEndMill(3.175, {
+      name: '3.175 mm 90° V',
+      typeText: 'Chamfer',
+      shape: 'chamfer',
+      tipDiameter: null,
+      diameter: 3.175,
+      angle: 90,
+      halfAngle: null,
+    });
+    act(() => setInventoryEntries([{ key: 'inv:v-677', tool: V, provenance: 'setups core spec' }]));
+    const job = defaultEngraveJob();
+    job.toolKey = 'inv:v-677';
+    const first = jobSetups(job)[0]!;
+    job.setups = [{ ...first, tools: ['inv:v-677', 'flat-1.0'] }];
+    act(() => useEngraveJobStore.setState({ job }));
+    render(<EngraveSetupsSection />);
+    expect(screen.getByTestId('engrave-setup-pair-1').textContent).toBe('⌀3.175 mm V-carve · ⌀1 mm core');
+    act(() => resetRegistry());
   });
 
   it('“Edit setups” materialises the implicit setup; the row is then editable', () => {

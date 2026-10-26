@@ -1908,6 +1908,23 @@ export function jobDepthLimit(job: EngraveJob, margin?: Mm, through?: ThroughMas
  */
 export interface PartPlanOptions {
   unparsedFace?: 'throw' | 'estimate';
+  /**
+   * #677 — REGIONS THE DOCUMENT DOES NOT HOLD, built by the caller from the job's own geometry.
+   * The one user is the variable-depth V-carve's CORE: the middle the V's width cannot reach at
+   * the cap, derived by the worker from the design and the cone and pocketed by the setup's flat
+   * cutter in its own program. They join `engraves` AFTER every item region, so the document's
+   * operation order is unchanged, and from there they are ordinary regions — measured, pocketed,
+   * predicted and verified like any other. Nothing here is ever saved.
+   */
+  derivedEngraves?: readonly DerivedEngrave[];
+}
+
+/** #677 — one derived region: a profile the job never stored, cut at one depth. */
+export interface DerivedEngrave {
+  id: string;
+  name: string;
+  profile: Profile;
+  depth: Mm;
 }
 
 export function toPartPlan(job: EngraveJob, options: PartPlanOptions = {}): PartPlan {
@@ -2013,6 +2030,11 @@ export function toPartPlan(job: EngraveJob, options: PartPlanOptions = {}): Part
       depth: primitive.depth,
     });
   }
+
+  // #677 — DERIVED regions (the variable V-carve's core) join the same funnel, after every item
+  // region. They are cut by a program of their own, so their place here is only the CAM's
+  // operation order within that program.
+  for (const derived of options.derivedEngraves ?? []) engraves.push({ ...derived });
 
   // Traces (#219) are their own list: no topological ordering (nothing references one), no
   // profile, no region pipeline. A disabled or construction trace is skipped, like a region item;

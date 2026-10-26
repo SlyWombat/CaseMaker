@@ -33,6 +33,12 @@ export interface RestChoice {
   rough: { key: string; name: string; diameter: number | null } | null;
   /** Whether the rough cutter is a V-bit: the rest bit then flat-bottoms the groove it opened. */
   roughIsV: boolean;
+  /**
+   * #677 — this row is a VARIABLE-depth V-carve, so the second cutter is not a rest pass at all:
+   * it clears the core the V's width cannot reach, a flat bottom at the carve's own depth, in its
+   * own program after the V-carve.
+   */
+  coreClearance: boolean;
   /** The cutters a rest pass may use: smaller than the rough, flat, not a V-bit or a drill. */
   options: readonly RestCutterOption[];
   /** The setup's chosen rest cutter, or null. */
@@ -49,9 +55,9 @@ function dia(d: number): string {
   return `${Number(d.toFixed(3))}`;
 }
 
-/** The chip on the operation's one line: `rest ⌀1 mm`. */
-export function restChipLabel(option: RestCutterOption): string {
-  return `rest ⌀${dia(option.diameter)} mm`;
+/** The chip on the operation's one line: `rest ⌀1 mm`, or `core ⌀1 mm` for a #677 clearance. */
+export function restChipLabel(option: RestCutterOption, coreClearance = false): string {
+  return `${coreClearance ? 'core' : 'rest'} ⌀${dia(option.diameter)} mm`;
 }
 
 export function RestCutterControl({
@@ -68,7 +74,7 @@ export function RestCutterControl({
   return (
     <details data-testid={`${testidPrefix}-rest-${index}`} style={{ marginTop: 6 }}>
       <summary style={{ fontSize: 11, color: '#9aa4b0', cursor: 'pointer' }}>
-        Finish the corners with a smaller cutter
+        {rest.coreClearance ? 'Clear the middle the V cannot reach' : 'Finish the corners with a smaller cutter'}
       </summary>
       <div style={{ marginTop: 4 }}>
         <label style={FIELD_LABEL}>
@@ -77,7 +83,11 @@ export function RestCutterControl({
             value={rest.restKey ?? ''}
             data-testid={`${testidPrefix}-rest-select-${index}`}
             aria-label="Rest cutter"
-            title="The setup's second cutter: it cuts only what the rough cutter leaves."
+            title={
+              rest.coreClearance
+                ? "The setup's second cutter: it pockets the middle the V's width cannot reach, in its own program after the V-carve."
+                : "The setup's second cutter: it cuts only what the rough cutter leaves."
+            }
             disabled={rest.rough === null}
             onChange={(e) => rest.onPick(e.target.value === '' ? null : e.target.value)}
           >
@@ -95,12 +105,18 @@ export function RestCutterControl({
         <p style={MUTED} data-testid={`${testidPrefix}-rest-note-${index}`}>
           {rest.rough === null
             ? 'Choose the job’s cutter first — the rest cutter is the setup’s second.'
-            : chosen === null
-              ? rest.options.length === 0
-                ? 'No smaller flat cutter is in the library, so this job has no rest pair to offer.'
-                : `The rest pass is measured from the first program’s simulated stock: ${rest.rough.name} roughs, and the smaller cutter cuts only the corners and slivers it leaves.`
-              : `${chosen.name} cuts only what ${rest.rough.name} leaves. The pass is measured from the first program’s simulated stock, so nothing already cleared is cut again except the band the two programs overlap.` +
-                (rest.roughIsV ? ' The rough cutter is a V-bit; the rest bit flat-bottoms the groove it opened.' : '')}
+            : rest.coreClearance
+              ? chosen === null
+                ? rest.options.length === 0
+                  ? 'No flat end mill is in the library, so the core the V cannot reach would stand.'
+                  : 'The flat end mill pockets the middle the V’s width cannot reach — a flat bottom at the carve’s own depth, in its own program after the V-carve.'
+                : `${chosen.name} pockets the middle ${rest.rough.name}’s width cannot reach at the cap, in its own program after the V-carve.`
+              : chosen === null
+                ? rest.options.length === 0
+                  ? 'No smaller flat cutter is in the library, so this job has no rest pair to offer.'
+                  : `The rest pass is measured from the first program’s simulated stock: ${rest.rough.name} roughs, and the smaller cutter cuts only the corners and slivers it leaves.`
+                : `${chosen.name} cuts only what ${rest.rough.name} leaves. The pass is measured from the first program’s simulated stock, so nothing already cleared is cut again except the band the two programs overlap.` +
+                  (rest.roughIsV ? ' The rough cutter is a V-bit; the rest bit flat-bottoms the groove it opened.' : '')}
           {rest.setupNumber === null || chosen === null ? '' : ` Setup ${rest.setupNumber}’s second cutter.`}
         </p>
         {chosen === null && rest.restKey !== null && (
