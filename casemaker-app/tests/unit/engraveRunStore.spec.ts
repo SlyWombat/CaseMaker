@@ -114,8 +114,9 @@ describe('engraveRunStore (#206)', () => {
   });
 
   it('oracleSentence falls back to ORACLE_AREA_FLOOR when the report omits the floor (#582)', () => {
-    // #584 — the floor prints ROUNDED (`toFixed(4)`), not the raw computed number.
-    expect(gate.oracleSentence(view({ oracle: { ok: false, band: 0, levels: [], worst: { underCut: 0.002, overCut: 0 } } }))).toContain(`${ORACLE_AREA_FLOOR.toFixed(4)} mm² floor`);
+    // #691 — the floor prints as a §4 figure (three decimals at most, trailing zeros dropped),
+    // not the raw computed number and not `0.0010`.
+    expect(gate.oracleSentence(view({ oracle: { ok: false, band: 0, levels: [], worst: { underCut: 0.002, overCut: 0 } } }))).toContain(`${Number(ORACLE_AREA_FLOOR.toFixed(3))} mm² floor`);
   });
 
   describe('#535 a surface program through the upload and release gates', () => {
@@ -196,8 +197,34 @@ describe('engraveRunStore (#206)', () => {
         },
       }),
     );
-    expect(sentence).toContain('0.0399 mm² floor');
-    expect(sentence).toContain('at level Z -0.80, near (19.15, 37.14) — a 0.30 × 0.27 mm patch');
+    expect(sentence).toContain('0.04 mm² floor');
+    expect(sentence).toContain('worst under-cut 0.082 mm²');
+    expect(sentence).toContain('exceeds the 0.04 mm² floor by 0.042 mm²');
+    expect(sentence).toContain('at level Z -0.8, near (19.15, 37.135) — a 0.3 × 0.27 mm patch');
+    // §4 — no four-decimal figure anywhere in the sentence (#691).
+    expect(sentence).not.toMatch(/\.\d{4}/);
+  });
+
+  it('a failing overage that rounds to zero says "less than 0.001", never "by 0 mm²" (#691)', () => {
+    const sentence = gate.oracleSentence(
+      view({
+        oracle: {
+          ok: false,
+          band: 0.089,
+          levels: [],
+          areaFloor: 0.001,
+          worst: {
+            underCut: 0.0012,
+            overCut: 0,
+            underAt: { z: -0.8, bbox: { min: [19.0, 37.0], max: [19.3, 37.27] } },
+          },
+        },
+      }),
+    );
+    // 0.0012 − 0.001 = 0.0002, which at §4's three decimals would print "by 0 mm²" — a failing
+    // verdict stating no failure. The figure below the printed precision is said in words.
+    expect(sentence).toContain('exceeds the 0.001 mm² floor by less than 0.001 mm²');
+    expect(sentence).not.toContain('by 0 mm²');
   });
 
   describe('#535 the goal program’s check sentence', () => {

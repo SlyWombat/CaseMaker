@@ -231,8 +231,9 @@ describe('EngraveCutWizard (#573)', () => {
     fireEvent.click(screen.getByTestId('engrave-cut-next')); // 3 generate
 
     const blocked = screen.getByTestId('engrave-cut-generate-blocked');
-    // The metric sentence, not the "see the Cut checklist" pointer.
-    expect(blocked.textContent).toContain('worst under-cut 0.0815');
+    // The metric sentence, not the "see the Cut checklist" pointer. #691 — §4 figures: three
+    // decimals at most, so 0.0815 prints 0.082.
+    expect(blocked.textContent).toContain('worst under-cut 0.082');
     expect(blocked.textContent).not.toContain('see the Cut checklist');
   });
 });

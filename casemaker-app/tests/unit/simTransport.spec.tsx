@@ -8,6 +8,8 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { SimTransport } from '@/components/viewport/SimTransport';
 import { setSimClientLoader, useSimStore, type SimClient, type SimState } from '@/store/simStore';
+import { useEngraveRunStore } from '@/store/engraveRunStore';
+import type { EngraveGenerated } from '@/workers/sim/engraveGenerate';
 import type { PausePoint } from '@/engine/cnc';
 import type { SimPath } from '@/workers/sim/session';
 
@@ -85,6 +87,8 @@ beforeEach(() => {
   });
   vi.stubGlobal('cancelAnimationFrame', () => {});
   setSimClientLoader(async () => NO_OP_CLIENT);
+  // #691 — the job's run is a store the read-out now reads; a run left by one test must not leak.
+  useEngraveRunStore.getState().reset();
   setStore();
 });
 
@@ -122,6 +126,28 @@ describe('SimTransport (#198)', () => {
     expect(timed.textContent).not.toContain('(feeds only)');
     expect(timed.getAttribute('title')).toContain('rapids');
     expect(timed.getAttribute('title')).not.toContain('untimed');
+  });
+
+  it('shows the job’s one labelled estimate, not a second duration (#691)', () => {
+    // #691 / audit B15 — the Generate row states the CAM estimate; the transport used to state a
+    // different simulated total for the same cut. A session the engrave run loaded borrows the
+    // run's one figure, with its source word.
+    useEngraveRunStore.setState({
+      generated: { cam: { estimatedSeconds: 136 } } as unknown as EngraveGenerated,
+    });
+    setStore({ origin: 'engrave' });
+    render(<SimTransport />);
+    const readout = screen.getByTestId('sim-time');
+    expect(readout.textContent).toBe('about 2 min 16 s (estimated)');
+    expect(readout.getAttribute('title')).toContain('Generate row');
+    expect(readout.textContent).not.toContain('simulated');
+
+    // An imported program has no CAM estimate: its own simulated clock is the one time it has.
+    cleanup();
+    useEngraveRunStore.getState().reset();
+    setStore({ origin: 'panel' });
+    render(<SimTransport />);
+    expect(screen.getByTestId('sim-time').textContent).toBe('0:00 / 0:10 simulated');
   });
 
   it('dragging the scrubber moves the step on every input event', () => {

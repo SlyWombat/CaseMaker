@@ -109,7 +109,29 @@ export function runErrorCodes(v: EngraveRunView): string[] {
 }
 
 /**
- * #584 — the "at level Z −0.80, near (x, y) — a 0.3 × 0.27 mm patch" clause the failing sentence
+ * §4 — a printed figure: at most three decimals, trailing zeros dropped (`0.04`, `0.001`, `0`),
+ * never `0.0000 mm²`. Returned as a number so a template prints it without a second rounding.
+ * #691 — the oracle numbers now sit in the Simulate panel as facts about the picture, and the
+ * vocabulary's number rule applies there like everywhere else.
+ */
+function figure(v: number): number {
+  return Number(v.toFixed(3));
+}
+
+/**
+ * #691 — §4 for a FAILING clause. A positive quantity below half a thousandth rounds to `0`, and
+ * the sentence would read "exceeds the 0.001 mm² floor by 0 mm²" — a failing verdict that states
+ * no failure. Such a figure prints `less than 0.001` instead. Passing sentences keep `0`, where
+ * zero is the truth; the floor, tolerance and location keep their own figures, where a zero is a
+ * stated threshold or a position, not a rounded-away failure.
+ */
+function figureFailing(v: number): number | string {
+  const rounded = figure(v);
+  return rounded === 0 && v > 0 ? 'less than 0.001' : rounded;
+}
+
+/**
+ * #584 — the "at level Z −0.8, near (x, y) — a 0.3 × 0.27 mm patch" clause the failing sentence
  * appends, from the worst disagreement's level Z and bbox (job mm). `null` when there is none.
  */
 function oracleLocation(loc: { z: number; bbox: OracleBbox } | null | undefined): string {
@@ -118,7 +140,7 @@ function oracleLocation(loc: { z: number; bbox: OracleBbox } | null | undefined)
   const cy = (loc.bbox.min[1] + loc.bbox.max[1]) / 2;
   const w = loc.bbox.max[0] - loc.bbox.min[0];
   const h = loc.bbox.max[1] - loc.bbox.min[1];
-  return ` at level Z ${loc.z.toFixed(2)}, near (${cx.toFixed(2)}, ${cy.toFixed(2)}) — a ${w.toFixed(2)} × ${h.toFixed(2)} mm patch`;
+  return ` at level Z ${figure(loc.z)}, near (${figure(cx)}, ${figure(cy)}) — a ${figure(w)} × ${figure(h)} mm patch`;
 }
 
 /**
@@ -199,17 +221,17 @@ export function oracleSentence(v: OracleSentenceInput): string {
   // never the 0/0 the oracle would report for an empty prediction list.
   if (v.surface) return surfaceCheckSentence(v.surface.gridPitchMm);
   const floor = v.oracle.areaFloor ?? 1e-3; // #206 — the sliver floor; local so this module stays browser-free
-  const floorText = floor.toFixed(4); // #584 — the floor is a computed number, print it rounded
+  const floorText = figure(floor); // #584 — the floor is a computed number, print it rounded (§4)
   // #623 — a re-posted package is judged in the blank's fitted surface frame, and the row says so:
   // the numbers otherwise read as if the lift were never applied, and a reader comparing this run
   // with the pre-re-post one needs to know the frame did not change the question asked.
   const frame = v.oracle.frame === 'surface' ? ", in the blank's fitted surface frame" : '';
   if (v.oracle.ok) {
-    return `under-cut ${v.oracle.worst.underCut.toFixed(4)} mm², over-cut ${v.oracle.worst.overCut.toFixed(4)} mm², both within the ${floorText} mm² floor (tolerance ${v.oracle.band.toFixed(3)} mm${frame})${flipClause(v)}`;
+    return `under-cut ${figure(v.oracle.worst.underCut)} mm², over-cut ${figure(v.oracle.worst.overCut)} mm², both within the ${floorText} mm² floor (tolerance ${figure(v.oracle.band)} mm${frame})${flipClause(v)}`;
   }
   return v.oracle.worst.underCut > floor
-    ? `worst under-cut ${v.oracle.worst.underCut.toFixed(4)} mm² exceeds the ${floorText} mm² floor by ${(v.oracle.worst.underCut - floor).toFixed(4)} mm²${oracleLocation(v.oracle.worst.underAt)} — the file left material the prediction removed (over-cut ${v.oracle.worst.overCut.toFixed(4)} mm²; tolerance ${v.oracle.band.toFixed(3)} mm${frame})${flipClause(v)}`
-    : `worst over-cut ${v.oracle.worst.overCut.toFixed(4)} mm² exceeds the ${floorText} mm² floor by ${(v.oracle.worst.overCut - floor).toFixed(4)} mm²${oracleLocation(v.oracle.worst.overAt)} — the file cut outside the plan (under-cut ${v.oracle.worst.underCut.toFixed(4)} mm²; tolerance ${v.oracle.band.toFixed(3)} mm${frame})${flipClause(v)}`;
+    ? `worst under-cut ${figureFailing(v.oracle.worst.underCut)} mm² exceeds the ${floorText} mm² floor by ${figureFailing(v.oracle.worst.underCut - floor)} mm²${oracleLocation(v.oracle.worst.underAt)} — the file left material the prediction removed (over-cut ${figureFailing(v.oracle.worst.overCut)} mm²; tolerance ${figure(v.oracle.band)} mm${frame})${flipClause(v)}`
+    : `worst over-cut ${figureFailing(v.oracle.worst.overCut)} mm² exceeds the ${floorText} mm² floor by ${figureFailing(v.oracle.worst.overCut - floor)} mm²${oracleLocation(v.oracle.worst.overAt)} — the file cut outside the plan (under-cut ${figureFailing(v.oracle.worst.underCut)} mm²; tolerance ${figure(v.oracle.band)} mm${frame})${flipClause(v)}`;
 }
 
 // #581 — `staleSentence` (the input that moved, in words) lives with the input stamp itself

@@ -26,6 +26,12 @@ describe('coverageDisclaimer', () => {
     expect(s).not.toContain('the collet nut');
   });
 
+  it('prints the comparison band as a §4 figure, trailing zeros dropped (#691)', () => {
+    const s = text({ oracleBand: 0.1 });
+    expect(s).toContain('band is 0.1 mm');
+    expect(s).not.toContain('0.100');
+  });
+
   it('names the obstacles it was given: fixture labels and sacrificial material', () => {
     const s = text({
       fixtureLabels: ['vise-jaw-front', 'vise-jaw-back'],

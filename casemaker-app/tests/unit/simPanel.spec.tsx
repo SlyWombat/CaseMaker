@@ -8,6 +8,9 @@ import { SimPanel } from '@/components/panels/SimPanel';
 import { setSimClientLoader, useSimStore, type SimClient } from '@/store/simStore';
 import { DEFAULT_STOCK, buildSimSetup, useSimSetupStore } from '@/store/simSetupStore';
 import { useSettingsStore } from '@/store/settingsStore';
+import { useEngraveJobStore } from '@/store/engraveJobStore';
+import { useEngraveRunStore } from '@/store/engraveRunStore';
+import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { flatEndMill } from '@/engine/cnc/tool';
 import { resetRegistry, setInventoryEntries, setRegistry } from '@/engine/cnc/toolRegistry';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
@@ -111,6 +114,14 @@ const READY_NUT_UNPROVEN = {
   ],
 } as unknown as SimLoadResult;
 
+/** #691 — the sweep could not prove the chosen cutter's shank, so the panel's own caveat names it. */
+const READY_SHANK_UNPROVEN = {
+  ...READY,
+  diagnostics: [
+    { source: 'sweep', severity: 'warning', code: 'holder-unproven', message: 'the shank length is unstated' },
+  ],
+} as unknown as SimLoadResult;
+
 // --- #249 restart ---------------------------------------------------------------------------
 /** A two-stroke job in our own dialect, for the restart generator. */
 const RESTART_PROGRAM = [
@@ -163,6 +174,18 @@ const REFUSED_PATH_ONLY = {
   segments: [],
 } as unknown as SimLoadResult;
 
+/**
+ * #691 — what the engrave run's own store keeps about the job's simulation, which is what the moved
+ * facts must read. `generated` stays null: the facts under test do not depend on the program object.
+ */
+const JOB_RUN = {
+  simStatus: 'ready' as const,
+  pathOnly: false,
+  simEngine: 'exact' as const,
+  simDiagnostics: [] as SimDiagnostic[],
+  phase: 'ready' as const,
+};
+
 function openPlainFile(): void {
   // No header: stock defaults, and the tool starts unset.
   useSimSetupStore.getState().openFile('plain.nc', 'G0 X0 Y0\nG1 Z-1 F100\n');
@@ -174,6 +197,10 @@ beforeEach(() => {
   // into the next, which is the same leak the sim-setup spec guards against (#316).
   resetRegistry();
   useSettingsStore.setState({ toolPicks: {} });
+  // #691 — the job and its run are stores too; a run left by one test would be presented as the
+  // next test's job facts.
+  useEngraveRunStore.getState().reset();
+  useEngraveJobStore.getState().replace(defaultEngraveJob());
   setSimClientLoader(async () => fakeClient(REFUSED));
 });
 
@@ -525,6 +552,23 @@ describe('SimPanel', () => {
     expect(screen.getByTestId('sim-disclaimer').textContent ?? '').toContain('the collet nut');
   });
 
+  // #691 — the caveat that names the cutter must use its one display name, never the vendor label
+  // (`tool.name`), which is data for the hover.
+  it('names the chosen cutter by its display name in the panel’s own shank caveat (#691)', async () => {
+    setSimClientLoader(async () => fakeClient(READY_SHANK_UNPROVEN));
+    openPlainFile();
+    act(() => useSimSetupStore.getState().setTool(CHOSEN_TOOL));
+    render(<SimPanel />);
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('sim-simulate'));
+    });
+    await screen.findByTestId('sim-result');
+    const text = screen.getByTestId('sim-disclaimer').textContent ?? '';
+    expect(text).toContain('the shank of “⌀ 3.175 mm flat end · 12 mm flute” above the cutter');
+    expect(text).not.toContain('3.175*12mm');
+  });
+
   it('says a path-only run checked nothing but the path', async () => {
     setSimClientLoader(async () => fakeClient(REFUSED_PATH_ONLY));
     openPlainFile();
@@ -594,5 +638,74 @@ describe('SimPanel', () => {
     const refused = await screen.findByTestId('sim-restart-refused');
     expect(refused.textContent).toContain('cut-too-deep');
     expect(screen.queryByTestId('sim-restart-save')).toBeNull();
+  });
+
+  // #691 — the "Checked: … / Not checked: …" sentence and the under/over-cut numbers moved here
+  // from under Generate (audit B14). They are facts about THIS job's picture, read from the run
+  // store's own copy of the run — never from whatever file this panel has open (#506).
+  describe('#691 the job’s own simulation facts', () => {
+    it('claims nothing before this job has been simulated', () => {
+      render(<SimPanel />);
+      expect(screen.queryByTestId('sim-job-facts')).toBeNull();
+      expect(screen.queryByTestId('sim-job-coverage')).toBeNull();
+      expect(screen.queryByTestId('sim-job-oracle')).toBeNull();
+    });
+
+    it('reads an under-cut here as a fact about the picture, in §4 figures', () => {
+      act(() => {
+        useEngraveRunStore.setState({
+          ...JOB_RUN,
+          oracle: { ok: false, band: 0.018, levels: [], worst: { underCut: 0.25, overCut: 0 } },
+        });
+      });
+      render(<SimPanel />);
+
+      const coverage = screen.getByTestId('sim-job-coverage').textContent ?? '';
+      expect(coverage).toContain('Checked: the tool against the stock');
+      expect(coverage).toContain('the modelled fixture');
+      expect(coverage).toContain('Not checked: the spindle body, head and gantry');
+
+      const oracle = screen.getByTestId('sim-job-oracle').textContent ?? '';
+      expect(oracle).toContain('Matches prediction — worst under-cut 0.25 mm² exceeds the 0.001 mm² floor');
+      expect(oracle).toContain('tolerance 0.018 mm');
+      // §4 — no four-decimal figure anywhere in the sentence.
+      expect(oracle).not.toMatch(/\.\d{4}/);
+    });
+
+    it('names the job’s cutter by its one display name in the shank caveat', () => {
+      act(() => {
+        useEngraveJobStore.getState().replace({ ...defaultEngraveJob(), toolKey: CHOSEN_TOOL });
+        useEngraveRunStore.setState({
+          ...JOB_RUN,
+          simDiagnostics: [
+            { source: 'sweep', severity: 'warning', code: 'holder-unproven', message: 'the shank length is unstated' },
+          ],
+        });
+      });
+      render(<SimPanel />);
+
+      const coverage = screen.getByTestId('sim-job-coverage').textContent ?? '';
+      expect(coverage).toContain('the shank of “⌀ 3.175 mm flat end · 12 mm flute” above the cutter');
+      // The vendor label is data, not a name (#691's same rule as the select).
+      expect(coverage).not.toContain('3.175*12mm');
+    });
+  });
+
+  // #687/#691 — the Tool select draws the one display-name form, grouped by kind; the vendor's
+  // label belongs in the hover (audit D5).
+  it('lists the cutters by kind under the one display name, the vendor label in the hover (#691)', () => {
+    openPlainFile();
+    render(<SimPanel />);
+    const select = screen.getByTestId('sim-tool') as HTMLSelectElement;
+    const option = Array.from(select.querySelectorAll('option')).find((o) => o.value === CHOSEN_TOOL) as
+      | HTMLOptionElement
+      | undefined;
+    expect(option).toBeTruthy();
+    expect(option!.textContent).toBe('⌀ 3.175 mm flat end · 12 mm flute · metal');
+    expect(option!.getAttribute('title')).toContain('3.175*12mm Flat End(Metal)');
+    expect(option!.closest('optgroup')?.getAttribute('label')).toBe('flat end');
+    // No row prints the vendor label as the name.
+    const vendorAsName = Array.from(select.querySelectorAll('option')).some((o) => (o.textContent ?? '').includes('3.175*12mm'));
+    expect(vendorAsName).toBe(false);
   });
 });

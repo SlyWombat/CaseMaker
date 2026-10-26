@@ -12,7 +12,9 @@
 
 import { useEffect, type CSSProperties } from 'react';
 import { advance, lineAtStep, totalTime } from '@/engine/cnc/playbackClock';
+import { formatDuration } from '@/engine/cnc/plan/format';
 import { isSimSceneActive, SIM_SPEEDS, useSimStore, type SimSpeed } from '@/store/simStore';
+import { useEngraveRunStore } from '@/store/engraveRunStore';
 import type { PausePoint, ToolState } from '@/engine/cnc';
 
 /**
@@ -140,6 +142,17 @@ function TransportBar() {
   const seconds = useSimStore((s) => s.seconds);
   const stoppedAt = useSimStore((s) => s.stoppedAt);
   const info = useSimStore((s) => s.info);
+  const origin = useSimStore((s) => s.origin);
+  // #691 — ONE time for the cut. A simulation the engrave run loaded for the job's own program has
+  // a CAM estimate, and the Generate row already states it; printing the playback clock's own total
+  // beside it gave two durations for one cut (audit B15). So the job's session borrows the run's
+  // one labelled figure, with its source word, and only an imported file — which has no estimate —
+  // keeps the simulated clock. The scrubber's step position still says where playback is.
+  const jobEstimateSeconds = useEngraveRunStore((s) => s.generated?.cam?.estimatedSeconds ?? null);
+  const jobTime =
+    origin === 'engrave' && jobEstimateSeconds !== null
+      ? `about ${formatDuration(jobEstimateSeconds)} (estimated)`
+      : null;
 
   const lastStep = stepCount > 0 ? stepCount - 1 : 0;
   const total = path ? totalTime(path) : 0;
@@ -297,13 +310,19 @@ function TransportBar() {
           data-testid="sim-time"
           style={READOUT}
           title={
-            path && path.rapidsTimed === false
-              ? 'Simulated time — feeds only, rapids untimed (no machine): this program was loaded with no machine profile, so there is no rapid model to time its rapids with. The total is what the feeds account for, not a cycle time.'
-              : "Simulated time — feeds and rapids both timed through the trapezoid on the machine's rapid model, so this is playback, not a measured cycle time."
+            jobTime !== null
+              ? "The CAM estimate for this job's program, from its own feeds and rapids — the same labelled figure the Generate row shows. The scrubber still tracks the program's steps."
+              : path && path.rapidsTimed === false
+                ? 'Simulated time — feeds only, rapids untimed (no machine): this program was loaded with no machine profile, so there is no rapid model to time its rapids with. The total is what the feeds account for, not a cycle time.'
+                : "Simulated time — feeds and rapids both timed through the trapezoid on the machine's rapid model, so this is playback, not a measured cycle time."
           }
         >
-          {formatTime(seconds)} / {formatTime(total)} simulated
-          {path && path.rapidsTimed === false ? ' (feeds only)' : ''}
+          {jobTime ?? (
+            <>
+              {formatTime(seconds)} / {formatTime(total)} simulated
+              {path && path.rapidsTimed === false ? ' (feeds only)' : ''}
+            </>
+          )}
         </span>
         <span data-testid="sim-step" style={READOUT_MUTED}>
           step {Math.max(0, step)} / {lastStep}

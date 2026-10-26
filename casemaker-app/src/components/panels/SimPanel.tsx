@@ -3,8 +3,13 @@ import { useState, type CSSProperties, type DragEvent, type JSX } from 'react';
 import { useSimSetupStore, buildSimSetup } from '@/store/simSetupStore';
 import { isSimSceneActive, useSimStore } from '@/store/simStore';
 import { resolveTool, Z1 } from '@/engine/cnc';
-import { toolDisplayName } from '@/engine/cnc/toolDisplay';
+import { TOOL_GROUPS, toolDisplay, toolDisplayName } from '@/engine/cnc/toolDisplay';
+import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import { useToolRegistry } from '@/hooks/useToolRegistry';
+import { useEngraveJobStore } from '@/store/engraveJobStore';
+import { oracleSentence, useEngraveRunStore } from '@/store/engraveRunStore';
+import { viseEnvelope } from '@/engine/cnc/fixture';
+import { hasSacrificial } from '@/engine/cnc/sacrificial';
 import type { StartingTool } from '@/engine/cnc';
 import type { DiagnosticSource, SimDiagnostic } from '@/workers/sim/session';
 import { MAX_TEXT_FILE_BYTES, openTextFile } from '@/utils/openTextFile';
@@ -116,6 +121,22 @@ const LINELINK: CSSProperties = {
   cursor: 'pointer',
   textDecoration: 'underline dotted',
 };
+/**
+ * #687/#691 — the tool list's option text is the one display form, with the metal fact spelled as a
+ * last segment because a native `<select>` cannot draw the tag. The vendor label is not the name;
+ * it stays in the option's hover (`title`), beside the provenance, which is where data belongs.
+ * The same two helpers the Design panel's cutter list uses, so the two lists cannot disagree.
+ */
+function toolOptionLabel(e: ToolLibraryEntry): string {
+  const display = toolDisplay(e.tool);
+  return display.metal ? `${display.name} · metal` : display.name;
+}
+
+/** The option's hover: the vendor's label and the provenance, neither of which is the name. */
+function toolOptionTitle(e: ToolLibraryEntry): string {
+  return e.tool.name.trim() === '' ? e.provenance : `${e.tool.name} · ${e.provenance}`;
+}
+
 /** Save a generated restart `.nc`. Plain text, unlike SettingsMenu's JSON export. */
 function downloadNc(text: string, filename: string): void {
   const blob = new Blob([text], { type: 'text/plain' });
@@ -169,6 +190,13 @@ export function SimPanel() {
 
   const tools = useToolRegistry();
   const tool = toolKey ? resolveTool(toolKey) : null;
+  // #691 — the job's own run, and the job it belongs to. The run store keeps its own copy of what
+  // its simulation swept (`simStatus`, `pathOnly`, `simEngine`, `simDiagnostics`) for exactly this
+  // reason: the facts below describe THAT run, never whatever file is open in this panel afterwards
+  // (the same #506 rule that keeps the Result block honest).
+  const run = useEngraveRunStore();
+  const job = useEngraveJobStore((s) => s.job);
+  const jobToolEntry = tools.find((e) => e.key === job.toolKey) ?? null;
   const loading = status === 'loading';
   const canSimulate = gcodeText !== null && tool !== null && !loading;
 
@@ -205,9 +233,47 @@ export function SimPanel() {
     fixtureLabels: (meshes?.fixture ?? []).map((f) => f.label),
     fixtureSource: info?.fixtureSource,
     sacrificialModelled: meshes?.sacrificial != null,
-    toolName: tool?.name ?? null,
+    // #691 — the shank caveat names the cutter the way every other surface names it. `tool.name`
+    // is the vendor's label (`3.175*12mm Flat End(Metal)`), which is data, not a name.
+    toolName: tool === null ? null : toolDisplayName(tool),
     codes: diagnostics.map((d) => d.code),
   });
+
+  // #691 — the "Checked: … / Not checked: …" sentence and the under/over-cut numbers moved here
+  // from under Generate (audit B14): they are facts about this job's picture, so they sit in the
+  // simulation's own panel, built by the SAME two functions the Design panel used — fed from the
+  // run store rather than from whatever this panel has loaded.
+  const jobCoverage =
+    run.simStatus === null
+      ? []
+      : coverageDisclaimer({
+          outcome: run.simStatus === 'ready' ? 'swept' : run.pathOnly ? 'path-only' : 'refused',
+          engine: run.simEngine ?? undefined,
+          oracleBand: run.oracle?.band,
+          fixtureLabels: viseEnvelope(job.stock, job.workholding.vise, job.sacrificial).boxes.map((b) => b.label),
+          fixtureSource: job.workholding.vise.source,
+          sacrificialModelled: hasSacrificial(job.sacrificial),
+          toolName: jobToolEntry === null ? null : toolDisplayName(jobToolEntry.tool),
+          codes: run.simDiagnostics.map((d) => d.code),
+        });
+  // #535 — a goal (surface) program has no 2.5D prediction to compare, so its sentence states the
+  // check that WAS made and never wears "Matches prediction" over a comparison of nothing (#691).
+  const jobSurfaceRun = run.generated?.surface3d != null;
+  const jobOracleText =
+    run.oracle === null
+      ? null
+      : jobSurfaceRun
+        ? oracleSentence({
+            oracle: run.oracle,
+            previousVerdict: run.previousVerdict,
+            changedSinceLast: run.changedSinceLast,
+            surface: { gridPitchMm: run.simGridPitchMm },
+          })
+        : `Matches prediction — ${oracleSentence({
+            oracle: run.oracle,
+            previousVerdict: run.previousVerdict,
+            changedSinceLast: run.changedSinceLast,
+          })}`;
 
   function jumpToLine(line: number): void {
     setJump((j) => ({ line, seq: (j?.seq ?? 0) + 1 }));
@@ -385,11 +451,30 @@ export function SimPanel() {
         <option value="" disabled>
           Choose the tool…
         </option>
-        {tools.map((e) => (
-          <option key={e.key} value={e.key} title={e.provenance}>
-            {toolDisplayName(e.tool)}
-          </option>
-        ))}
+        {/* #687/#691 — grouped by kind in the design's order, each row under the one display name
+            (the vendor's label lives in the hover). A bull nose sits with the flat ends and a
+            tapered ball with the balls; a row this build cannot classify is drawn without a
+            heading rather than under an invented seventh one. */}
+        {TOOL_GROUPS.map((group) => {
+          const entries = tools.filter((e) => group.shapes.includes(e.tool.shape));
+          if (entries.length === 0) return null;
+          return (
+            <optgroup key={group.id} label={group.label}>
+              {entries.map((e) => (
+                <option key={e.key} value={e.key} title={toolOptionTitle(e)}>
+                  {toolOptionLabel(e)}
+                </option>
+              ))}
+            </optgroup>
+          );
+        })}
+        {tools
+          .filter((e) => !TOOL_GROUPS.some((group) => group.shapes.includes(e.tool.shape)))
+          .map((e) => (
+            <option key={e.key} value={e.key} title={toolOptionTitle(e)}>
+              {toolOptionLabel(e)}
+            </option>
+          ))}
       </select>
       {/* The silhouette of the cutter the answers name (#489), so a picked row is recognisable
           before the sweep runs. The dimensioned drawing belongs in House → Tools, not this panel. */}
@@ -724,6 +809,25 @@ export function SimPanel() {
       {ownsSession && status === 'error' && (
         <div data-testid="sim-error" style={{ marginTop: 10, border: '1px solid #7a2828', background: '#2a1416', borderRadius: 4, padding: 8, color: '#f0b4ad', fontSize: 12 }}>
           {error ?? 'the simulation failed'}
+        </div>
+      )}
+
+      {/* This job's own simulation (#691). The "what was not checked" sentence and the
+          under/over-cut numbers used to sit under Generate (audit B14); here they are facts about
+          the picture, beside it. Nothing is claimed before the job has been simulated. */}
+      {run.simStatus !== null && (
+        <div data-testid="sim-job-facts" style={{ marginTop: 12 }}>
+          <h3 style={SUBHEAD}>This job’s simulation</h3>
+          <div data-testid="sim-job-coverage" style={MUTED}>
+            {jobCoverage.map((sentence, i) => (
+              <div key={i}>{sentence}</div>
+            ))}
+          </div>
+          {jobOracleText !== null && (
+            <p data-testid="sim-job-oracle" style={{ ...MUTED, color: '#c8d3de' }}>
+              {jobOracleText}
+            </p>
+          )}
         </div>
       )}
 

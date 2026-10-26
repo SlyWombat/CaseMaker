@@ -822,12 +822,17 @@ the engine's estimates, labelled as estimates.
 **6. Which cutter? It is a recommendation, not a setup question (#516).** A fresh job starts
 with **no cutter chosen** — the Cutter group's summary says so, and the tool select reads
 "Choose a cutter…". Once the work is defined, the app works out which cutter keeps the most of each
-glyph and offers it in the Cutter group as a **recommendation** — *"Recommended: 0.3 mm V-bit —
-the largest cutter that keeps every label intact"* — with a **Use it** button that applies it.
-You can pick another cutter instead; the app keeps your choice and offers the recommendation back.
+glyph and offers it in the Cutter group as a **recommendation**, named in the one display form
+every screen uses and tagged: `⌀ 0.3 mm V … · recommended`, then the reason in the panel's words —
+*"the largest cutter that keeps every label intact"* — and a **metal** tag when the vendor's line
+says so. A **Use it** button appears only when pressing it changes the job's cutter: a
+recommendation already applied has none. You can pick another cutter instead; the app keeps your
+choice and offers the recommendation back.
 The recommendation is per-job arithmetic on this blank, not a setting, and a job that already
 chose its cutter is not re-asked. A **Why?**
-disclosure lists every cutter considered with its worst label and the percentage kept. When a
+disclosure lists only the cutters rejected for a reason you can act on — a broken copy, no feeds
+for this material, or no catalogue row for it — one line each; a cutter ruled out only for being
+the wrong kind is not listed. When a
 label loses detail, a warning under that row says what to do — *"‘Maker' at 4 mm loses 96 % of
 its area with a 1.0 mm cutter — increase to 6 mm or more."* When a label breaks through the
 floor, it is an error, not a warning, and Generate stays disabled until it is fixed. The

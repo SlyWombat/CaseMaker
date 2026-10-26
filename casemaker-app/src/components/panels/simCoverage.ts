@@ -89,7 +89,8 @@ export function coverageDisclaimer(input: SimCoverageInput): string[] {
         "Checked against the CAM's predicted regions at every level the plan cuts to — and, where the job cuts a V-bit trace, whose groove is a different width at each depth, at one derived level just under the top face, where that groove is widest.",
       );
       out.push(
-        `The comparison's band is ${input.oracleBand.toFixed(3)} mm: a boundary that disagrees by less than that is the two engines' own resolution, not a CAM error.`,
+        // §4 — at most three decimals, trailing zeros dropped (`0.1`, never `0.100`).
+        `The comparison's band is ${Number(input.oracleBand.toFixed(3))} mm: a boundary that disagrees by less than that is the two engines' own resolution, not a CAM error.`,
       );
     }
 
