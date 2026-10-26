@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties, type JSX } from 'react';
 import { createPortal } from 'react-dom';
-import { MACHINES } from '@/engine/cnc/machine';
 import { badgeBlankFor } from '@/engine/cnc/engrave/fromBadge';
 import { ensureSeedFontsLoaded } from '@/engine/fonts/registry';
 import { canDriveMachine } from '@/platform/capabilities';
@@ -12,6 +11,7 @@ import { scheduleImmediate } from '@/engine/jobs/JobScheduler';
 import { useProjectStore, clearHistory } from '@/store/projectStore';
 import { useEngraveJobStore } from '@/store/engraveJobStore';
 import { useMachineStore } from '@/store/machineStore';
+import { useLocationStore } from '@/store/locationStore';
 import { useStartWizardStore } from '@/store/startWizardStore';
 import { useViewportStore } from '@/store/viewportStore';
 import { PanelErrorBoundary } from '@/components/ui/PanelErrorBoundary';
@@ -189,10 +189,10 @@ export function StartWizard(): JSX.Element {
   const setProbeResult = useMachineStore((s) => s.setProbeResult);
   const setProject = useProjectStore((s) => s.setProject);
   const setSection = useViewportStore((s) => s.setActiveSidebarSection);
-  const savedCalibration = useSettingsStore((s) => s.machineCalibration);
+  // #682 — step 1 wears the location's machine (name, nickname and address) without a picker.
+  const machines = useLocationStore((s) => s.location?.machines ?? null);
   const setMachineCalibration = useSettingsStore((s) => s.setMachineCalibration);
   const job = useEngraveJobStore((s) => s.job);
-  const setMachine = useEngraveJobStore((s) => s.setMachine);
 
   // THE ONE STEP INDEX. It starts where the opener asked (the panel's Stock/Hold `edit` names a
   // step), and from then on only this shell moves it.
@@ -227,9 +227,6 @@ export function StartWizard(): JSX.Element {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- runs once for the opening starter
   }, [starter]);
 
-  // The job's own machine, as a value the `<select>` can hold. The schema coerces an unknown id to
-  // the Z1 (#347), so a blank control would be a state the store cannot actually be in.
-  const machineChoice = jobMachineOption(job.machineId);
   const hasOperations = jobHasOperations(job);
   const seed = jobStarted ? seedFromJob(job) : undefined;
   // The step this re-entry came to edit: its primary action is Done, not the next step. While a
@@ -558,20 +555,15 @@ export function StartWizard(): JSX.Element {
     <>
       {step === 'machine' && (
         <MachineStep
-          machineChoice={machineChoice}
-          onMachine={setMachine}
+          machines={machines}
           busy={busy}
           outcome={outcome}
           machine={machine}
           reason={reason}
-          calibration={savedCalibration ?? null}
           address={address}
           onAddress={setAddress}
-          onCheck={() => {
-            void runCheck();
-          }}
-          onConnect={() => {
-            void runCheck(address.trim());
+          onCheck={(host) => {
+            void runCheck(host);
           }}
         />
       )}
@@ -739,10 +731,4 @@ export function StartWizard(): JSX.Element {
     </div>,
     document.body,
   );
-}
-
-/** The step-1 machine list's own ids, as the `<select>` holds them (the schema guarantees one). */
-function jobMachineOption(id: string): string {
-  const ids = Object.keys(MACHINES);
-  return ids.includes(id) ? id : (ids[0] ?? '');
 }

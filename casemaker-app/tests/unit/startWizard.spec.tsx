@@ -6,11 +6,16 @@
 // hand-off does not depend on the rebuild finishing.
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 
 import { StartWizard } from '@/components/welcome/StartWizard';
 import { EngravePanel } from '@/components/panels/EngravePanel';
-import { setMachineProbeLoader, type ConfigReadSummary, type MachineProbeClient } from '@/platform/machineProbe';
+import {
+  setMachineProbeLoader,
+  type ConfigReadSummary,
+  type DiscoveredMachineSummary,
+  type MachineProbeClient,
+} from '@/platform/machineProbe';
 import { Z1_FRAME_REPLIES } from './fixtures/z1Frame';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { BADGE_POCKET_KEEP_OUT_ID } from '@/engine/cnc/engrave/fromBadge';
@@ -66,11 +71,14 @@ vi.mock('@/platform/capabilities', async (orig) => {
 /** The Engrave panel is rendered beside the wizard by `AppShell`; a jsdom test has no worker. */
 const NO_PREVIEW: EngravePreviewClient = { engravePreview: async () => null };
 
+/** The bench controller's whole `?` line; a bare `Idle` is not a frame and parses to no state. */
+const IDLE_LINE = '<Idle|MPos:-1.000,-1.000,-1.000|F:0,0,100|S:0,0,100|T:0>';
+
 function fakeClient(over: Partial<MachineProbeClient> = {}): MachineProbeClient {
   return {
     discover: over.discover ?? (async () => []),
     identify: over.identify ?? (async () => ({ ip: '192.168.10.43', mac: 'aa:bb:cc:dd:ee:ff' })),
-    status: over.status ?? (async () => ({ ok: true, text: 'Idle' })),
+    status: over.status ?? (async () => ({ ok: true, text: IDLE_LINE })),
     // A machine that also answers its own frame (#279), as the bench Z1 does: the wizard's check
     // reads it, and these tests assert what the panel then says about which frame is in force.
     readConfig: over.readConfig ?? (async (_target, keys) => answersFor(keys)),
@@ -93,6 +101,17 @@ function useClient(client: MachineProbeClient): void {
   setMachineProbeLoader(async () => client);
 }
 
+/**
+ * #682 — step 1 now checks when it opens. A test that is not about the check leaves that search
+ * unanswered, so its pending microtasks cannot land an update after the test has moved on.
+ */
+function unansweredClient(): MachineProbeClient {
+  return {
+    ...fakeClient(),
+    discover: () => new Promise<DiscoveredMachineSummary[]>(() => {}),
+  };
+}
+
 beforeEach(() => {
   cleanup();
   setEngravePreviewClientLoader(async () => NO_PREVIEW);
@@ -101,6 +120,7 @@ beforeEach(() => {
   // saved frame rather than inheriting the previous one's.
   useSettingsStore.getState().resetSettings();
   resetStartWizard();
+  useClient(unansweredClient());
   useProjectStore.setState({ project: createDefaultProject('rpi-4b'), welcomeMode: true });
   useViewportStore.setState({ activeSidebarSection: null, selection: null });
   useEngraveJobStore.setState({ job: defaultEngraveJob() });
@@ -143,48 +163,35 @@ function WizardHost() {
   return open ? <StartWizard /> : <></>;
 }
 
-describe('#280 — step 1, the machine check', () => {
-  it('reports a found machine with what it said about itself, and its known limits', async () => {
-    useClient(
-      fakeClient({
-        discover: async () => [
-          { name: 'Makera_Z1_010290', host: '192.168.10.43', port: 2222, busy: false },
-        ],
-      }),
+describe('#280/#682 — step 1, the machine check', () => {
+  /** The bench Z1 answering the search on the address it announces. */
+  function foundClient(over: Partial<MachineProbeClient> = {}): MachineProbeClient {
+    return fakeClient({
+      discover: async () => [
+        { name: 'Makera_Z1_010290', host: '192.168.10.43', port: 2222, busy: false },
+      ],
+      ...over,
+    });
+  }
+
+  /** The check runs on open (#682); wait for the report rather than for the element, which exists
+   *  from the first paint as "Checking…". */
+  function waitForState(value: string): Promise<void> {
+    return waitFor(() =>
+      expect(screen.getByTestId('start-wizard-machine-state').getAttribute('data-state')).toBe(value),
     );
+  }
+
+  it('checks on open, names the machine, and saves its own frame (#279, #682)', async () => {
+    useClient(foundClient());
     render(<StartWizard />);
-    fireEvent.click(screen.getByTestId('start-wizard-check'));
 
-    const state = await screen.findByTestId('start-wizard-machine-state');
-    expect(state.getAttribute('data-state')).toBe('found');
-    expect(screen.getByTestId('start-wizard-machine-name').textContent).toContain('Makera_Z1_010290');
-    expect(screen.getByTestId('start-wizard-machine-address').textContent).toContain('192.168.10.43:2222');
-    expect(screen.getByTestId('start-wizard-machine-address').textContent).toContain('idle');
-    expect(screen.getByTestId('start-wizard-machine-identity').textContent).toContain('aa:bb:cc:dd:ee:ff');
-    expect(screen.getByTestId('start-wizard-machine-status').textContent).toContain('Idle');
-    // The profile is the one the NAME resolved to, and its numbers come from there.
-    expect(screen.getByTestId('start-wizard-machine-profile').textContent).toContain('Makera Z1');
-    expect(screen.getByTestId('start-wizard-machine-profile').textContent).toContain('13000 rpm');
-    expect(screen.queryByTestId('start-wizard-machine-unknown')).toBeNull();
-    // #347 — the machine that answered IS the job's machine, so there is nothing to warn about.
-    expect(screen.queryByTestId('start-wizard-machine-mismatch')).toBeNull();
-  });
-
-  it("saves the machine's own frame and says which frame is in force (#279)", async () => {
-    useClient(
-      fakeClient({
-        discover: async () => [
-          { name: 'Makera_Z1_010290', host: '192.168.10.43', port: 2222, busy: false },
-        ],
-      }),
-    );
-    render(<StartWizard />);
-    fireEvent.click(screen.getByTestId('start-wizard-check'));
-
-    await screen.findByTestId('start-wizard-machine-state');
-    const frame = screen.getByTestId('start-wizard-machine-frame');
-    expect(frame.getAttribute('data-state')).toBe('machine-calibrated-frame');
-    expect(frame.textContent).toContain('192.168.10.43');
+    await waitForState('found');
+    expect(screen.getByTestId('start-wizard-machine-name').textContent).toBe('Makera Z1');
+    expect(screen.getByTestId('start-wizard-machine-address').textContent).toBe('192.168.10.43');
+    expect(screen.getByTestId('start-wizard-machine-state').textContent).toContain('Online · Idle');
+    // The removed essay (A3): the frame is still saved, it is no longer printed on step 1.
+    expect(screen.queryByTestId('start-wizard-machine-frame')).toBeNull();
 
     // Saved with its provenance, and with the MACHINE's numbers rather than the vendor's: the
     // bench Z1's anchor1 is 1.51 mm from `configZ1.default`, which is the whole of #279.
@@ -193,53 +200,48 @@ describe('#280 — step 1, the machine check', () => {
     expect(saved?.frame.anchor1).toEqual([-190.89, -193.83]);
   });
 
-  it('warns that the vendor’s defaults are in force when the frame could not be read (#279)', async () => {
+  it('a frame that cannot be read is not saved, and the machine is still Online (#279)', async () => {
     useClient(
-      fakeClient({
-        discover: async () => [
-          { name: 'Makera_Z1_010290', host: '192.168.10.43', port: 2222, busy: false },
-        ],
+      foundClient({
         readConfig: async () => {
           throw new Error('connect timeout');
         },
       }),
     );
     render(<StartWizard />);
-    fireEvent.click(screen.getByTestId('start-wizard-check'));
 
-    await screen.findByTestId('start-wizard-machine-state');
-    expect(screen.getByTestId('start-wizard-machine-frame').getAttribute('data-state')).toBe(
-      'machine-vendor-frame',
-    );
+    await waitForState('found');
+    expect(screen.getByTestId('start-wizard-machine-state').textContent).toContain('Online · Idle');
     expect(useSettingsStore.getState().machineCalibration).toBeUndefined();
   });
 
-  it('reports an unknown machine as unknown, with no numbers', async () => {
+  it('an unknown machine is named honestly and given no profile numbers', async () => {
     useClient(
       fakeClient({
         discover: async () => [{ name: 'SomeLaser_9000', host: '10.0.0.5', port: 2222, busy: false }],
       }),
     );
     render(<StartWizard />);
-    fireEvent.click(screen.getByTestId('start-wizard-check'));
 
-    await screen.findByTestId('start-wizard-machine-state');
-    expect(screen.getByTestId('start-wizard-machine-unknown')).toBeDefined();
+    await waitForState('found');
+    // The broadcast name is the only identity this machine gave; the profile table did not match,
+    // so MACHINES supplied no name and no number.
+    expect(screen.getByTestId('start-wizard-machine-name').textContent).toBe('SomeLaser_9000');
+    expect(screen.getByTestId('start-wizard-machine-address').textContent).toBe('10.0.0.5');
     expect(screen.queryByTestId('start-wizard-machine-profile')).toBeNull();
-    // Said ONCE. The probe used to note the same thing in its own words as well, so the browser
-    // rendered two near-identical paragraphs under each other.
-    expect(screen.getAllByText(/not being given another machine/i)).toHaveLength(1);
-    expect(screen.queryByTestId('start-wizard-machine-note-0')).toBeNull();
+    expect(screen.queryByText(/13000 rpm/)).toBeNull();
   });
 
   it('“nothing answered” is an answer, and it never blocks', async () => {
     useClient(fakeClient());
     render(<StartWizard />);
-    fireEvent.click(screen.getByTestId('start-wizard-check'));
 
-    const state = await screen.findByTestId('start-wizard-machine-state');
-    expect(state.getAttribute('data-state')).toBe('not-found');
-    expect(state.textContent).toMatch(/without a machine/i);
+    await waitForState('not-found');
+    const state = screen.getByTestId('start-wizard-machine-state');
+    expect(state.textContent).toContain('Offline');
+    expect(screen.getByTestId('start-wizard-machine-offline-note').textContent).toContain(
+      'the machine is needed at Cut',
+    );
     // Next is enabled with no machine at all.
     expect((screen.getByTestId('start-wizard-next') as HTMLButtonElement).disabled).toBe(false);
     fireEvent.click(screen.getByTestId('start-wizard-next'));
@@ -253,11 +255,14 @@ describe('#280 — step 1, the machine check', () => {
       const note = screen.getByTestId('start-wizard-machine-note-build');
       expect(note.textContent).toContain('This instance cannot control a machine');
       expect(note.textContent).toContain('local (desktop) instance');
-      // No check, no address box, no Connect, no Back: nothing that pretends a socket exists.
+      // No check, no address box, no Connect, no fold, no Back: nothing that pretends a socket exists.
       expect(screen.queryByTestId('start-wizard-check')).toBeNull();
       expect(screen.queryByTestId('start-wizard-address')).toBeNull();
       expect(screen.queryByTestId('start-wizard-connect-address')).toBeNull();
+      expect(screen.queryByTestId('start-wizard-machine-another')).toBeNull();
       expect(screen.queryByTestId('start-wizard-back')).toBeNull();
+      // …and nothing was checked: the step did not pretend to open a socket.
+      expect(useMachineStore.getState().outcome).toBeNull();
       // Continue is the advancing button, and it says what it does.
       expect(screen.getByTestId('start-wizard-next').textContent).toBe('Continue without a machine');
       fireEvent.click(screen.getByTestId('start-wizard-next'));
@@ -287,22 +292,26 @@ describe('#280 — step 1, the machine check', () => {
       }),
     );
     render(<StartWizard />);
-    fireEvent.click(screen.getByTestId('start-wizard-check'));
 
-    const state = await screen.findByTestId('start-wizard-machine-state');
-    expect(state.getAttribute('data-state')).toBe('error');
-    expect(state.textContent).toContain('udp: bind failed');
+    await waitForState('error');
+    expect(screen.getByTestId('start-wizard-machine-state').textContent).toContain('Not answering');
+    expect(screen.getByTestId('start-wizard-machine-reason').textContent).toContain('udp: bind failed');
   });
 
-  it('connects to a typed address, and admits it knows no model', async () => {
+  it('connects to a typed address under the fold, and admits it knows no model', async () => {
     useClient(fakeClient());
     render(<StartWizard />);
+    await waitForState('not-found'); // the automatic check heard nothing
+
+    fireEvent.click(screen.getByTestId('start-wizard-machine-another'));
     fireEvent.change(screen.getByTestId('start-wizard-address'), { target: { value: '10.0.0.7' } });
     fireEvent.click(screen.getByTestId('start-wizard-connect-address'));
 
-    await screen.findByTestId('start-wizard-machine-state');
-    expect(screen.getByTestId('start-wizard-machine-address').textContent).toContain('10.0.0.7:2222');
-    expect(screen.getByTestId('start-wizard-machine-unknown')).toBeDefined();
+    await waitForState('found');
+    expect(screen.getByTestId('start-wizard-machine-address').textContent).toBe('10.0.0.7');
+    // A typed address announced no name, so no model is claimed for it.
+    expect(screen.queryByTestId('start-wizard-machine-name')).toBeNull();
+    expect(screen.getByTestId('start-wizard-machine-state').textContent).toContain('Online · Idle');
   });
 });
 
@@ -534,9 +543,9 @@ describe('#681 — the wizard with nothing to lean on', () => {
     });
     render(<WizardHost />);
 
-    fireEvent.click(screen.getByTestId('start-wizard-check'));
-    const state = await screen.findByTestId('start-wizard-machine-state');
-    expect(state.getAttribute('data-state')).toBe('not-found');
+    await waitFor(() =>
+      expect(screen.getByTestId('start-wizard-machine-state').getAttribute('data-state')).toBe('not-found'),
+    );
     expect((screen.getByTestId('start-wizard-next') as HTMLButtonElement).disabled).toBe(false);
 
     fireEvent.click(screen.getByTestId('start-wizard-next'));
@@ -593,8 +602,8 @@ describe('#681 — the wizard with nothing to lean on', () => {
   });
 });
 
-describe('#280 — the machine record survives the wizard', () => {
-  it('a found check is kept in the store, not in the component', () => {
+describe('#280/#682 — the machine record survives the wizard', () => {
+  it('the check on open is kept in the store, not in the component', async () => {
     useClient(
       fakeClient({
         discover: async () => [
@@ -603,10 +612,8 @@ describe('#280 — the machine record survives the wizard', () => {
       }),
     );
     render(<StartWizard />);
-    fireEvent.click(screen.getByTestId('start-wizard-check'));
-    return screen.findByTestId('start-wizard-machine-state').then(() => {
-      expect(useMachineStore.getState().machine?.profileId).toBe('Z1');
-      expect(useMachineStore.getState().outcome).toBe('found');
-    });
+
+    await waitFor(() => expect(useMachineStore.getState().outcome).toBe('found'));
+    expect(useMachineStore.getState().machine?.profileId).toBe('Z1');
   });
 });
