@@ -212,6 +212,8 @@ export interface PartPlan {
     through: boolean;
     mode: 'drill' | 'bore';
     diameter: Mm | null;
+    /** #675 — this item's own peck length, mm; absent = the program's own source binds. */
+    peckMm?: Mm;
   }[];
   /**
    * MILLED THREADS (#445, #434 phase 2), a fourth sibling. A thread is not a region either: the
@@ -2170,6 +2172,7 @@ export function toPartPlan(job: EngraveJob, options: PartPlanOptions = {}): Part
       through: item.through,
       mode: item.mode ?? 'drill',
       diameter: item.diameter ?? null,
+      ...(item.peckMm === undefined ? {} : { peckMm: item.peckMm }),
     });
   }
 

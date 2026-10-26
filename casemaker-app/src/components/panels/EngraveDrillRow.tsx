@@ -22,6 +22,10 @@ import type { EngraveDrill } from '@/types/engraveJob';
  * pitch, which the panel resolves from the SAME feeds row and shop ramp angle the CAM cuts with.
  * Everything else — placement, depth, through, the array lattice — is the drill row's, unchanged.
  *
+ * #675 — a plunge drill's PECK lives behind the row's Technical fold: the number in force (the
+ * job's own, or the source that binds — a drill bit's shop setting, or the feeds row), that
+ * source's provenance, and a reset. A bore is helixed, not pecked, and offers none.
+ *
  * `count` fields commit only whole numbers ≥ 1, because the schema refuses a fractional count
  * outright (a silently floored lattice is not what the user typed) and a bad value would make the
  * whole job unloadable. `pitch` is any positive number.
@@ -60,6 +64,20 @@ export interface BorePitchFacts {
   spirals: boolean;
 }
 
+/**
+ * #675 — the peck a plunge drill would cut with, as the panel resolved it: the job's own number
+ * when it states one, otherwise the source that binds (a drill bit's shop setting, or the feeds
+ * row) — and that source's word either way, so a typed value still says what it overrides.
+ */
+export interface DrillPeckFacts {
+  /** The peck length in force, mm. */
+  mm: number;
+  /** True when the job states it. */
+  typed: boolean;
+  /** Where the number would come from otherwise. */
+  source: string;
+}
+
 export interface EngraveDrillRowProps {
   drill: EngraveDrill;
   /** Position of this row in `job.drills`; only used for stable test ids. */
@@ -72,6 +90,8 @@ export interface EngraveDrillRowProps {
   findings: readonly JobFinding[];
   /** #668 — a bore's helix pitch, resolved by the panel; null when the job's feeds did not resolve. */
   borePitch?: BorePitchFacts | null;
+  /** #675 — the plunge drill's peck, resolved by the panel; null on a bore or with no cutter. */
+  peck?: DrillPeckFacts | null;
 }
 
 export function EngraveDrillRow({
@@ -82,6 +102,7 @@ export function EngraveDrillRow({
   onRemove,
   findings,
   borePitch = null,
+  peck = null,
 }: EngraveDrillRowProps): JSX.Element {
   const isArray = drill.kind === 'drill-array';
   const isBore = drill.mode === 'bore';
@@ -296,6 +317,48 @@ export function EngraveDrillRow({
       <p style={{ ...MUTED, ...(depthInvalid ? { color: SEVERITY_COLOR.error } : null) }} data-testid={`engrave-drill-maxdepth-${index}`}>
         Max depth {maxDepth} mm here — the stock thickness less the minimum floor.
       </p>
+
+      {/* #675 — THE PECK, behind the row's Technical fold: the number in force, where it came
+          from, and a reset to the source. A bore is helixed, not pecked, so the fold is not
+          offered there; a job with no cutter has no peck to prefill and hides it too. */}
+      {peck !== null && (
+        <details data-testid={`engrave-drill-technical-${index}`} style={{ marginTop: 6 }}>
+          <summary style={{ fontSize: 11, color: '#9aa4b0', cursor: 'pointer' }}>Technical</summary>
+          <div style={{ marginTop: 4, ...ROW_INLINE }}>
+            <label style={FIELD_LABEL}>
+              <span>peck every</span>
+              <input
+                type="number"
+                min={0.05}
+                step="0.5"
+                value={fmt(peck.mm)}
+                data-testid={`engrave-drill-peck-${index}`}
+                aria-label={`${kindLabel} ${index + 1} peck length`}
+                title="How deep each peck goes before the drill retracts to clear its chips, mm."
+                style={NUM}
+                onChange={(e) => {
+                  const v = Number(e.target.value);
+                  if (Number.isFinite(v) && v > 0) onChange({ peckMm: v });
+                }}
+              />
+              <span>mm</span>
+            </label>
+            <span data-testid={`engrave-drill-peck-source-${index}`} style={{ ...MUTED, margin: 0 }}>
+              {peck.typed ? 'typed in this job' : peck.source}
+            </span>
+            {peck.typed && (
+              <button
+                type="button"
+                data-testid={`engrave-drill-peck-reset-${index}`}
+                title={`Back to ${peck.source}.`}
+                onClick={() => onChange({ peckMm: undefined })}
+              >
+                reset
+              </button>
+            )}
+          </div>
+        </details>
+      )}
     </EngraveItemRow>
   );
 }

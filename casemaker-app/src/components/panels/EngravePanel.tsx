@@ -117,7 +117,7 @@ import { EngraveLabelRow } from './EngraveLabelRow';
 import { EngraveKeepOutRow } from './EngraveKeepOutRow';
 import { EngraveShapeRow } from './EngraveShapeRow';
 import { EngraveCombinedRow } from './EngraveCombinedRow';
-import { EngraveDrillRow, type BorePitchFacts } from './EngraveDrillRow';
+import { EngraveDrillRow, type BorePitchFacts, type DrillPeckFacts } from './EngraveDrillRow';
 import { EngraveChamferRow, type ChamferFacts, type ChamferRimOption } from './EngraveChamferRow';
 import { EngraveCutoutRow, type CutoutTarget } from './EngraveCutoutRow';
 import { EngraveThreadRow } from './EngraveThreadRow';
@@ -990,6 +990,31 @@ export function EngravePanel(): JSX.Element {
   // the shop's own `bore.rampAngleDeg`, through the CAM's own `borePitchMm`. The row prints this
   // number; nothing on the screen computes a second pitch.
   const boreRamp = readDefault(shopDefaults ?? null, 'bore.rampAngleDeg');
+  // #675 — a plunge drill's peck: the job's own number, or the source that binds — the shop's
+  // `drill.peckDiameters × ⌀` for a drill bit, the feeds row's `peck` for a milling cutter. The
+  // same two sources the CAM reads, so the row and the file cannot print different numbers.
+  const peckFor = (drill: EngraveDrill): DrillPeckFacts | null => {
+    if (drill.mode === 'bore' || tool === null) return null;
+    const source =
+      tool.shape === 'drill'
+        ? (() => {
+            const d = cuttingDiameter(tool);
+            const x = drillShop.settings.peckDiameters;
+            if (d === null || !(d > 0) || !(x > 0)) return null;
+            const mm = d * x;
+            return {
+              mm,
+              word: `${Number(x.toFixed(3))} × ⌀${Number(d.toFixed(3))} = ${Number(mm.toFixed(3))} mm (drill.peckDiameters: ${drillShop.sources.peckDiameters})`,
+            };
+          })()
+        : params !== null && params.peck > 0
+          ? { mm: params.peck, word: `the feeds row's peck (${Number(params.peck.toFixed(3))} mm)` }
+          : null;
+    if (source === null) return null;
+    const typed = drill.peckMm !== undefined && drill.peckMm > 0;
+    return { mm: typed ? (drill.peckMm as number) : source.mm, typed, source: source.word };
+  };
+
   const borePitchFor = (drill: EngraveDrill): BorePitchFacts | null => {
     if (drill.mode !== 'bore' || drill.diameter === undefined || !(drill.diameter > 0)) return null;
     const cutter = tool === null ? null : cuttingDiameter(tool);
@@ -2499,6 +2524,7 @@ export function EngravePanel(): JSX.Element {
           maxDepth={maxDepth}
           findings={findingsFor(drill.id)}
           borePitch={borePitchFor(drill)}
+          peck={peckFor(drill)}
           onChange={(patch) => updateDrill(drill.id, patch)}
           onRemove={() => removeDrill(drill.id)}
         />

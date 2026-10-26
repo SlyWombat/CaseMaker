@@ -42,7 +42,7 @@ import { flatEndMill } from '@/engine/cnc/tool';
 import { vCone } from '@/engine/cnc/vProfile';
 import { vCarvePlane, vCarveStepover, vCarveStepoverClampNote } from '@/engine/cnc/vCarveGeometry';
 import { itemName, V_BIT_CARVE_SENTENCE, type ToolRecommendation } from '@/engine/cnc/engrave/recommendTool';
-import type { EngraveJob, EngraveShape, EngraveTargetObject, EngraveTraceItem } from '@/types/engraveJob';
+import type { EngraveDrill, EngraveJob, EngraveShape, EngraveTargetObject, EngraveTraceItem } from '@/types/engraveJob';
 import type { EngravePreview } from '@/workers/sim/engravePreview';
 import type { EngraveGenerated, EngraveProgram } from '@/workers/sim/engraveGenerate';
 
@@ -3015,5 +3015,72 @@ describe('EngravePanel — flute and prism (#674)', () => {
     fireEvent.click(screen.getByTestId('engrave-shape-prism-0'));
     expect(useEngraveJobStore.getState().job.shapes[0]!.prism).toBeUndefined();
     expect(screen.getByTestId('engrave-shape-type-0').textContent).toBe('V-carve');
+  });
+});
+
+// #675 — THE PECK: the setting's number in the Technical fold with its provenance, the job's own
+// over it, a reset back to the source, and no peck at all on a bore (a bore is helixed).
+describe('EngravePanel — per-hole peck (#675)', () => {
+  const DRILL_BIT = flatEndMill(3, {
+    name: '3 mm drill',
+    typeText: 'Drill',
+    shape: 'drill',
+    tipDiameter: 3,
+    diameter: 3,
+    cornerRadius: null,
+    angle: null,
+    centreCutting: null,
+  });
+
+  const HOLE: EngraveDrill = {
+    id: 'port',
+    name: 'port',
+    kind: 'drill',
+    position: { x: 50, y: 30 },
+    rotation: 0,
+    depth: 4,
+    enabled: true,
+    through: false,
+  };
+
+  function show(job: Partial<EngraveJob>): void {
+    act(() =>
+      useEngraveJobStore.setState({
+        job: { ...defaultEngraveJob(), labels: [], traces: [], shapes: [], toolKey: 'inv:drill-3', tool: DRILL_BIT, ...job },
+      }),
+    );
+    render(<EngravePanel />);
+    expand('engrave-drill');
+  }
+
+  it('prefills the peck from the bit’s own source, with its provenance', () => {
+    show({ drills: [HOLE] });
+    const field = screen.getByTestId('engrave-drill-peck-0') as HTMLInputElement;
+    // No location in this test, so `drill.peckDiameters` is its fallback (1) × the ⌀3 bit.
+    expect(field.value).toBe('3');
+    const source = screen.getByTestId('engrave-drill-peck-source-0').textContent ?? '';
+    expect(source).toContain('drill.peckDiameters');
+    expect(source).toContain('⌀3');
+    expect(screen.queryByTestId('engrave-drill-peck-reset-0')).toBeNull();
+  });
+
+  it('writes the job’s own peck, says it is typed, and resets to the source', () => {
+    show({ drills: [HOLE] });
+    fireEvent.change(screen.getByTestId('engrave-drill-peck-0'), { target: { value: '1.5' } });
+    expect(useEngraveJobStore.getState().job.drills![0]!.peckMm).toBe(1.5);
+    expect(screen.getByTestId('engrave-drill-peck-source-0').textContent).toBe('typed in this job');
+    // Out of the schema's bounds is not committed: the job must stay loadable.
+    fireEvent.change(screen.getByTestId('engrave-drill-peck-0'), { target: { value: '0' } });
+    expect(useEngraveJobStore.getState().job.drills![0]!.peckMm).toBe(1.5);
+
+    fireEvent.click(screen.getByTestId('engrave-drill-peck-reset-0'));
+    expect(useEngraveJobStore.getState().job.drills![0]!.peckMm).toBeUndefined();
+    expect(screen.getByTestId('engrave-drill-peck-source-0').textContent).toContain('drill.peckDiameters');
+  });
+
+  it('offers no peck on a bore, which is helixed', () => {
+    show({ drills: [{ ...HOLE, mode: 'bore', diameter: 10 }] });
+    expect(screen.queryByTestId('engrave-drill-technical-0')).toBeNull();
+    expect(screen.queryByTestId('engrave-drill-peck-0')).toBeNull();
   });
 });

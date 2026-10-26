@@ -1610,6 +1610,8 @@ export function engraveRegions(
       drill: {
         holes: d.holes.map(([x, y]) => [x, y] as [number, number]),
         ...(boreRadius === null ? {} : { bore: { radius: boreRadius } }),
+        // #675 — the item's own peck, when it states one; the CAM prefers it over the feeds row.
+        ...(d.peckMm === undefined ? {} : { peckMm: d.peckMm }),
       },
       // #668 — a through bore's level list includes the BLANK's bottom, so it clears its core to
       // the underside before the cutter crosses it (a level is added at `stockThickness`); no
@@ -3755,6 +3757,9 @@ function generateOneProgram(
           depth: item.through
             ? { kind: 'through', thickness: job.stock.thickness, breakthroughMm: job.breakthrough }
             : { kind: 'blind', fullDiameterDepth: item.depth },
+          // #675 — the hole item's own peck, or the shop's `drill.peckDiameters × ⌀`; the plan
+          // records which bound so the run sheet can name it.
+          peckMm: item.peckMm ?? null,
           settings: resolvedDrill.settings,
           pointAngleSource: resolvedDrill.sources.pointAngleDeg,
           stock: { length: job.stock.length, width: job.stock.width },

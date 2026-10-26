@@ -538,6 +538,15 @@ than the cutter is refused (`bore-narrow`), a cutter that cannot ramp is refused
 (`bore-needs-end-mill`), and so is a bore with no diameter (`bore-no-diameter`). A counterbore over
 a pilot hole is a drill row and a blind bore row at the same position.
 
+**Peck every N mm (#675)** is a plunge hole's own peck, behind the Hole row's **Technical** fold.
+With no number typed the fold states the source that binds and its provenance: a **drill bit** pecks
+at `drill.peckDiameters × ⌀` (the shop's chosen setting), a **milling cutter's** plunge drill at the
+feeds row's peck. Typing a number overrides whichever binds for that item — every hole in an array —
+and the row then reads *typed in this job*, with **reset** back to the source. The run sheet names
+which bound: a drill-bit program states the peck per hole with its source, and a milling cutter's
+overridden peck is printed beside the feeds row's number. A bore is helixed, not pecked, and offers
+no peck at all.
+
 A **region row** (Engrave text, V-carve, Pocket, an imported outline, a cuttable primitive) also
 carries its setup's **rest pass**: **Finish the corners with a smaller cutter** in the row's fold
 pairs the rough cutter with a smaller flat one, and the second program cuts only what the first

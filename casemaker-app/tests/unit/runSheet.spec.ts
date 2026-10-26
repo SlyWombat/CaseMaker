@@ -1832,6 +1832,7 @@ describe('runSheet — the drill program (#434)', () => {
           pointLength: 0.901,
           tipDepth: 4.901,
           peck: 3,
+          peckSource: 'drill.peckDiameters × ⌀3',
           holes: [[50, 30]],
         },
       ],
@@ -1854,7 +1855,10 @@ describe('runSheet — the drill program (#434)', () => {
     expect(cutText).toContain('Drill with 3 mm drill');
     expect(cutText).toContain('9000 RPM');
     expect(cutText).toContain('120 mm/min plunge');
-    expect(cutText).toContain('pecks of 1 × ⌀3 = 3 mm');
+    // #675 — the peck is stated with its source: the shop's setting here, unless a hole overrides.
+    expect(cutText).toContain('pecks of 3 mm');
+    expect(cutText).toContain('1 × ⌀3 = 3 mm unless a hole states its own peck');
+    expect(cutText).toContain('pecked every 3 mm (drill.peckDiameters × ⌀3)');
     expect(cutText).toContain('re-entry 0.5 mm');
     expect(cutText).toContain('drill.peckDiameters');
     expect(cutText).toContain('placeholder, not measured');
@@ -1946,6 +1950,7 @@ describe('runSheet — every program gets its own Cut section (#419)', () => {
         pointLength: 0.901,
         tipDepth: 4.901,
         peck: 3,
+        peckSource: 'drill.peckDiameters × ⌀3',
         holes: [[50, 30]],
       },
     ],
@@ -1989,7 +1994,8 @@ describe('runSheet — every program gets its own Cut section (#419)', () => {
     expect(cut2).toContain('Drill with 3 mm drill');
     expect(cut2).toContain('9000 RPM');
     expect(cut2).toContain('120 mm/min plunge');
-    expect(cut2).toContain('pecks of 1 × ⌀3 = 3 mm');
+    expect(cut2).toContain('pecks of 3 mm');
+    expect(cut2).toContain('1 × ⌀3 = 3 mm unless a hole states its own peck');
     expect(cut2).toContain('re-entry 0.5 mm');
     expect(cut2).toContain('drill.peckDiameters');
     expect(cut2).toContain('placeholder, not measured');
@@ -2001,10 +2007,12 @@ describe('runSheet — every program gets its own Cut section (#419)', () => {
     expect(cut2).toContain(DRILL_NC);
     expect(cut2).not.toContain(NC);
 
-    // One copy, in one section: the drill is not also printed under program 1.
+    // One copy, in one section: the drill is not also printed under program 1. (The provenance
+    // STEP is counted rather than the key's name — #675 also names `drill.peckDiameters` inside the
+    // per-hole peck's source.)
     const all = allText(sheet);
     expect(all.split('Drill with 3 mm drill').length - 1).toBe(1);
-    expect(all.split('drill.peckDiameters').length - 1).toBe(1);
+    expect(all.split('Where those numbers came from').length - 1).toBe(1);
     // And §1 does not claim a drill point for a run that engraves first.
     expect(sectionText(sheet, 'need')).not.toContain('The drill’s point');
 

@@ -391,6 +391,13 @@ export interface EngraveDrillBase {
    * reads nothing here. A bore without one is refused by name (`bore-no-diameter`).
    */
   diameter?: Mm;
+  /**
+   * #675 — this hole's own PECK length, mm. Absent = the program's own source: a drill bit's
+   * `drill.peckDiameters × ⌀` (the shop's chosen setting) or a milling cutter's feeds-row `peck`.
+   * Typed here it replaces whichever binds, for THIS item and every hole in it. A bore is helixed,
+   * not pecked, and reads nothing.
+   */
+  peckMm?: Mm;
 }
 
 /** One plunge-drilled hole at `position`: the cutter's own diameter, its floor at `depth`. */

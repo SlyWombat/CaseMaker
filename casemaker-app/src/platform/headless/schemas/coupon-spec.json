@@ -805,6 +805,12 @@
                     "description": "Optional human-readable name for the item list.",
                     "type": "string"
                   },
+                  "peckMm": {
+                    "description": "How deep each peck of this hole goes, in millimetres; omit for the program’s own source (drill.peckDiameters × the bit’s diameter, or the feeds row’s peck). A bore is helixed, not pecked.",
+                    "exclusiveMinimum": 0,
+                    "maximum": 50,
+                    "type": "number"
+                  },
                   "position": {
                     "description": "The first hole centre, in work coordinates.",
                     "properties": {
@@ -903,6 +909,12 @@
                   "name": {
                     "description": "Optional human-readable name for the item list.",
                     "type": "string"
+                  },
+                  "peckMm": {
+                    "description": "How deep each peck of this hole goes, in millimetres; omit for the program’s own source (drill.peckDiameters × the bit’s diameter, or the feeds row’s peck). A bore is helixed, not pecked.",
+                    "exclusiveMinimum": 0,
+                    "maximum": 50,
+                    "type": "number"
                   },
                   "pitch": {
                     "description": "Hole spacing in millimetres along X and Y.",

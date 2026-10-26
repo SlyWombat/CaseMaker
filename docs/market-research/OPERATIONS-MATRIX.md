@@ -1,6 +1,6 @@
 # Operations matrix — CAM operation types across the category, and what Case Maker posts and offers
 
-Status as of 2026-10-26, Case Maker `main` 454809f7 (GitHub issue #663). Companion to
+Status as of 2026-10-26, Case Maker `main` bd737656 (GitHub issue #663). Companion to
 `MAKERA-VS-CASEMAKER.md` (§G "CAM & output") and `/Makera-Parity.md` §2 (the 14 Studio strategy types).
 
 The maintainer's words: "operation palettes we need to track and make sure that we offer the same
@@ -76,9 +76,10 @@ pockets only), R-14 thread milling (superseded, shipped #445). None of the items
   row's "Finish the corners with a smaller cutter" disclosure sets the setup's second cutter; the pair is chipped on
   the row and named on the setups line and the run sheet. A contour (Profile) has no floor area to measure, so it is
   its own follow-up row (#676).
-- **A3. Per-item peck control.** Engine: `drillBit.ts` pecks (`drill.peckDiameters`, `drill.peckClearanceMm`) are shop
-  settings; the Hole row exposes depth/through only. Low priority: the shop-default path is the stated design
-  (`feedback_thresholds_setting_plus_recommendation`).
+- **A3. Per-item peck control. — CLOSED by #675.** Engine: `drillBit.ts` pecks at `drill.peckDiameters × ⌀` and
+  `cam/drill.ts` at the feeds row's peck; a hole item's own `peckMm` overrides whichever binds, and the plan records
+  which one did. UI: the Hole row's Technical fold states the peck with its provenance and takes the job's own
+  (`EngraveDrillRow.tsx`); the run sheet names the source that bound.
 - **A-adjacent (engine gap, listed here because the module exists).** `cam/adaptive.ts` is tested but not imported by any
   job path in `src/`. `MAKERA-VS-CASEMAKER.md` §G row "Ramping / adaptive entry" says "wired into the job (#442)";
   my grep found no such import and the #442 commits I saw concern upload context and tool condition. Resolve before the

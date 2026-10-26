@@ -149,6 +149,11 @@ export interface FinishPassSpec {
   drill?: {
     holes: [number, number][];
     bore?: { radius: number };
+    /**
+     * #675 — the ITEM's own peck length, mm (positive). Absent = the feeds row's `peck`, which is
+     * what a plunge drill has always used. The CAM reads one or the other, never both.
+     */
+    peckMm?: number;
   };
   /**
    * This region cuts through the blank into the under-board (#218). `depth` already carries
@@ -631,12 +636,14 @@ export function generateEngrave(
       }
       // Drilled region (#220): no rings to pocket. The holes are visited nearest-neighbour and
       // the FIRST becomes the operation's first cutting point, so the ordering and the emitted
-      // path agree exactly as they do for a pocket.
+      // path agree exactly as they do for a pocket. #675 — the item's own peck wins over the
+      // feeds row's.
+      const peck = label.drill.peckMm !== undefined && label.drill.peckMm > 0 ? label.drill.peckMm : params.peck;
       return {
         label,
         passList: [],
         firstCut: holes[0] ?? [0, 0],
-        drillMoves: drillMoves(holes, label.depth, params.peck, params, peckClearanceMm),
+        drillMoves: drillMoves(holes, label.depth, peck, params, peckClearanceMm),
       };
     }
     if (label.vCarve?.variable === true) {

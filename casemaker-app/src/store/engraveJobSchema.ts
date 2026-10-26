@@ -667,6 +667,18 @@ const drillBaseSchema = z.object({
     .max(200)
     .optional()
     .describe("A bore's HOLE diameter in millimetres; a drill's hole is the cutter's own diameter and reads nothing here."),
+  // #675 — this hole's own peck length. Optional, so a pre-#675 document keeps no key and the
+  // program's own source (the shop's drill.peckDiameters, or the feeds row) binds.
+  peckMm: z
+    .number()
+    .finite()
+    .positive()
+    .max(50)
+    .optional()
+    .describe(
+      'How deep each peck of this hole goes, in millimetres; omit for the program’s own source ' +
+        '(drill.peckDiameters × the bit’s diameter, or the feeds row’s peck). A bore is helixed, not pecked.',
+    ),
 });
 
 const drillSchema = z.discriminatedUnion('kind', [

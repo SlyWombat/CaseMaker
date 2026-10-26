@@ -78,6 +78,11 @@ export interface DrillBitInput {
   /** Hole centres, work XY. */
   holes: readonly (readonly [number, number])[];
   depth: HoleDepth;
+  /**
+   * #675 — the ITEM's own peck length, mm, when the document states one. Absent/null keeps the
+   * shop's `drill.peckDiameters × ⌀`. The plan reports which bound (`peckSource`).
+   */
+  peckMm?: number | null;
   settings: DrillSettings;
   /** Where `settings.pointAngleDeg` came from — `drillSettings`' own source for it (`fallback` with no location). */
   pointAngleSource: string;
@@ -98,7 +103,9 @@ export interface DrillBitPlan {
   pointLength: number;
   /** The tip's depth below the top, positive mm. */
   tipDepth: number;
+  /** How deep each peck goes, mm, and where the number came from (#675). */
   peck: number;
+  peckSource: string;
   /** The holes in the order they are drilled. */
   holes: [number, number][];
   moves: CamMove[];
@@ -140,7 +147,16 @@ export function planDrillBit(input: DrillBitInput): DrillBitResult {
   if (input.depth.kind === 'through' && !(input.depth.breakthroughMm >= 0 && input.depth.thickness > 0)) {
     return { ok: false, reason: 'a through hole needs the stock thickness and a breakthrough of 0 or more' };
   }
-  const peck = d * s.peckDiameters;
+  // #675 — the item's own peck wins; otherwise the shop's chosen setting. Both are lengths in mm
+  // here, so the plan and the file state one number.
+  const typedPeck = input.peckMm !== undefined && input.peckMm !== null && Number.isFinite(input.peckMm) && input.peckMm > 0
+    ? input.peckMm
+    : null;
+  const peck = typedPeck ?? d * s.peckDiameters;
+  if (!(peck > 0)) {
+    return { ok: false, reason: `the peck length is ${peck} mm; drill.peckDiameters × ⌀${d} must be a length above zero` };
+  }
+  const peckSource = typedPeck !== null ? 'typed in this job' : `drill.peckDiameters × ⌀${r3(d)}`;
   const holes = orderHolesNearest(input.holes);
   // Rounded to the post's own precision, so the file and the plan state the same depth.
   const depths = peckDepths(r3(tipDepth), peck);
@@ -170,6 +186,7 @@ export function planDrillBit(input: DrillBitInput): DrillBitResult {
       pointLength: r3(point),
       tipDepth: r3(tipDepth),
       peck: r3(peck),
+      peckSource,
       holes,
       moves,
       notes: [
@@ -177,7 +194,7 @@ export function planDrillBit(input: DrillBitInput): DrillBitResult {
         input.depth.kind === 'blind'
           ? `blind: full diameter to ${input.depth.fullDiameterDepth} mm, tip to ${r3(tipDepth)} mm`
           : `through ${input.depth.thickness} mm: the full diameter clears the underside by ${input.depth.breakthroughMm} mm, tip to ${r3(tipDepth)} mm`,
-        `${depths.length} peck(s) of ${r3(peck)} mm (drill.peckDiameters × ${d}), a full retract after each`,
+        `${depths.length} peck(s) of ${r3(peck)} mm (${peckSource}), a full retract after each`,
         `feed ${s.plungeFeed} mm/min and ${s.spindleRpm} rpm are starting values (drill.plungeFeed, drill.spindleRpm)`,
       ],
     },

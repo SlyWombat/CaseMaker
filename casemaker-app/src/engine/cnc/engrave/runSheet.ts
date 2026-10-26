@@ -8,6 +8,7 @@ import {
   keepOutLimitParts,
   keepOutMembrane,
   labelGlyphMeasure,
+  drillOperationName,
   labelJawReach,
   sweptCuts,
   toPartPlan,
@@ -190,6 +191,9 @@ export interface RunSheetDrillPlan {
   pointLength: number;
   tipDepth: number;
   peck: number;
+  /** #675 — where the peck came from (`typed in this job`, or the shop's setting). Optional: a
+   *  result stored before it was carried has none, and the sheet says so rather than guessing. */
+  peckSource?: string;
   holes: readonly (readonly [number, number])[];
 }
 
@@ -2531,14 +2535,15 @@ function drillCutSteps(
     text: `Drill with ${facts.toolName ?? 'the drill bit'} — spindle, plunge feed and peck. Vacuum ${vacuumOn ? 'on' : 'off'}.`,
     value:
       `${s.spindleRpm} RPM · ${fmtNum(s.plungeFeed)} mm/min plunge · pecks of ` +
-      `${fmtNum(s.peckDiameters)} × ⌀${fmtNum(d0.diameter)} = ${fmtNum(d0.peck)} mm · ` +
-      `re-entry ${fmtNum(s.peckClearanceMm)} mm above the floor just cut`,
+      `${fmtNum(d0.peck)} mm · re-entry ${fmtNum(s.peckClearanceMm)} mm above the floor just cut`,
   };
   const steps: RunSheetStep[] = [
     params,
     {
       text:
-        `Where those numbers came from: drill.peckDiameters (${facts.sources.peckDiameters}); ` +
+        `Where those numbers came from: drill.peckDiameters (${facts.sources.peckDiameters}) — ` +
+        `${fmtNum(s.peckDiameters)} × ⌀${fmtNum(d0.diameter)} = ${fmtNum(Math.round(s.peckDiameters * d0.diameter * 1000) / 1000)} mm ` +
+        'unless a hole states its own peck; ' +
         `drill.peckClearanceMm (${facts.sources.peckClearanceMm}); ` +
         `drill.plungeFeed (${facts.sources.plungeFeed}); ` +
         `drill.spindleRpm (${facts.sources.spindleRpm}).`,
@@ -2551,9 +2556,11 @@ function drillCutSteps(
     steps.push({
       text:
         `${d.name} — ${d.holes.length} hole(s) on the ${fmtNum(d.angle.deg)}° point ` +
-        `(${d.angle.from}). The full ⌀${fmtNum(d.diameter)} mm reaches ${fmtNum(full)} mm; the ` +
-        `tip carries ${fmtNum(d.pointLength)} mm lower, to ${fmtNum(d.tipDepth)} mm.`,
-      value: `⌀${fmtNum(d.diameter)} mm · tip ${fmtNum(d.tipDepth)} mm`,
+        `(${d.angle.from}), pecked every ${fmtNum(d.peck)} mm ` +
+        `(${d.peckSource ?? 'the stored result did not record the source'}). The full ` +
+        `⌀${fmtNum(d.diameter)} mm reaches ${fmtNum(full)} mm; the tip carries ` +
+        `${fmtNum(d.pointLength)} mm lower, to ${fmtNum(d.tipDepth)} mm.`,
+      value: `⌀${fmtNum(d.diameter)} mm · ${fmtNum(d.peck)} mm pecks · tip ${fmtNum(d.tipDepth)} mm`,
     });
   }
   return { params, steps };
@@ -2767,6 +2774,28 @@ function prismSteps(job: EngraveJob): RunSheetStep[] {
         `flat base (${n.baseSource}). The cut meets the untouched top face ${fmtNum(n.marginMm)} mm ` +
         `out from the shape, and a pointed tip would leave the base ridged.`,
       value: `${fmtNum(n.heightMm)} mm high · ${fmtNum(n.baseMm)} mm base · ${fmtNum(n.marginMm)} mm margin`,
+    });
+  }
+  return steps;
+}
+
+/**
+ * #675 — a MILLING CUTTER's plunge drill (`cam/drill.ts`): its peck comes from the feeds row, so an
+ * item that states its own is named with BOTH numbers — the one the file cuts and the one the row
+ * would have supplied. A drill bit's own program states the peck per hole in `drillCutSteps`
+ * instead, so the two never describe the same hole twice.
+ */
+function drillPeckSteps(job: EngraveJob, feedsPeck: number | null): RunSheetStep[] {
+  const steps: RunSheetStep[] = [];
+  for (const d of job.drills ?? []) {
+    if (!d.enabled || d.mode === 'bore' || d.peckMm === undefined) continue;
+    steps.push({
+      text:
+        `${drillOperationName(d)}: pecked every ${fmtNum(d.peckMm)} mm — typed in this job` +
+        (feedsPeck === null
+          ? '.'
+          : `, where the feeds row would peck every ${fmtNum(feedsPeck)} mm.`),
+      value: `${fmtNum(d.peckMm)} mm per peck`,
     });
   }
   return steps;
@@ -3586,6 +3615,12 @@ export function buildRunSheet(
   const threadMachining = generated.threadMachining ?? null;
   const threadPlans = generated.threads ?? null;
   const drillFacts = generated.drill ?? null;
+  // #675 — a plunge drill cut by a MILLING CUTTER (not a drill bit) has no drill-bit facts, so an
+  // item's own peck is stated here with the feeds row's number beside it.
+  if (drillFacts === null) {
+    const feedsPeck = generated.feeds !== null && generated.feeds.ok ? generated.feeds.params.peck : null;
+    cutSteps.push(...drillPeckSteps(job, feedsPeck));
+  }
   if (drillFacts !== null && drillFacts.plans.length > 0) {
     // #434 — a DRILL program's Cut section. Its numbers are the drill's own (the settings the
     // planner was handed), not `feedsFor`'s: the bit is not a milling cutter and never resolved a
