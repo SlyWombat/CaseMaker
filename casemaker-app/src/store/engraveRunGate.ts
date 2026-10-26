@@ -275,7 +275,7 @@ export function saveBlocker(v: EngraveRunView): string | null {
   if (!v.oracle) return 'the prediction has not been checked';
   if (!v.oracle.ok) return 'the simulation does not match the prediction';
   const missing = requiredAckCodes(v);
-  if (missing.length > 0 && !v.acknowledged) return 'tick the clearance checkbox below';
+  if (missing.length > 0 && !v.acknowledged) return 'tick the clearance check in step 1';
   return null;
 }
 

@@ -1,5 +1,11 @@
 # "Cut this blank" — one guided flow from an open job to the probe and the cut (#573)
 
+> **Superseded, 2026-10-26 (#689).** The full-page seven-step wizard was removed. Cut mode's
+> four-line checklist (Checked · Frozen · Register the blank · Run) is the one cut flow, and the
+> seven steps here map onto those four lines (see `first-job-flow.md` §3.7: 1 Machine = the strip;
+> 2 Blank and cutter = Checked; 3–5 = Frozen; 6 = Register; 7 = Run). This page stays as the design
+> record for the order, the gates and the recovery each step established.
+
 *Design, 2026-10-22, for review. No code is written. Builds on `cnc-job-workflow.md` (the job
 workflow), `cnc-panel-redesign.md` (#521, the Cut checklist), the #516 setup wizard, the
 registration planner/executor (`src/engine/cnc/registration/`), #559 (seat-Z from the vise

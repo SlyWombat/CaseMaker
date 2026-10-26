@@ -313,8 +313,8 @@ export function EngraveRegistrationStep({ job, target }: EngraveRegistrationStep
         plan,
         {
           console: { send: (line, timing) => handle.send(line, timing) },
-          // The at-machine tick already names the wired probe, so the executor's first prompt is
-          // answered by it; every other step (the bracket's clamps, the cutter) is a fresh press.
+          // The at-machine tick already names the probe, so the executor's first prompt is answered
+          // by it; every other step (the bracket's clamps, the cutter) is a fresh press.
           operator: (step) => (step.kind === 'fit-probe' ? Promise.resolve(true) : askOperator(step)),
           // #587 — the executor narrates each step as it moves; surface it live.
           onStep: (sentence) => {
@@ -642,7 +642,7 @@ export function EngraveRegistrationStep({ job, target }: EngraveRegistrationStep
                   data-testid="engrave-registration-at-machine"
                   onChange={(e) => setAtMachine(e.target.checked)}
                 />{' '}
-                I am at the machine, with the wired probe fitted and the head clear.
+                I am at the machine, the probe is fitted.
               </label>
               <button
                 type="button"
@@ -651,7 +651,7 @@ export function EngraveRegistrationStep({ job, target }: EngraveRegistrationStep
                 style={{ width: '100%', padding: 7, marginTop: 6 }}
                 onClick={() => void start()}
               >
-                {phase === 'idle' ? 'Run the registration' : 'Run the registration again'}
+                {phase === 'idle' ? 'Start registering' : 'Start registering again'}
               </button>
             </>
           )}

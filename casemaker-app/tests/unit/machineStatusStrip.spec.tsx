@@ -150,6 +150,16 @@ describe('#647 the DRO — coordinates', () => {
   });
 });
 
+describe('#689 the connection', () => {
+  it('leads with the machine name and its address, so Cut needs no Machines card', () => {
+    remember('<Idle|MPos:-1,-1,-1|WPos:0,0,0>');
+    render(<MachineStatusStrip />);
+
+    expect(screen.getByTestId('machine-status-name').textContent).toBe('Makera Z1');
+    expect(screen.getByTestId('machine-status-host').textContent).toBe('192.0.2.10');
+  });
+});
+
 describe('#647 the DRO — state as connection', () => {
   it('reads the state word in the operator’s vocabulary', () => {
     remember('<Idle|MPos:-1,-1,-1|WPos:0,0,0>');

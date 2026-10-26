@@ -316,17 +316,70 @@ describe('#419 §3 the Cut surface', () => {
     expect(pkg.programs).toHaveLength(1);
     expect(useEngravePackageStore.getState().packages).toHaveLength(1);
 
+    // #689 — the step line carries the package's facts once; the box no longer repeats them.
+    const step2 = screen.getByTestId('engrave-cut-step-2-summary').textContent ?? '';
+    expect(step2).toMatch(/\d{2}:\d{2} · the programs match the design/);
     const line = screen.getByTestId('engrave-package').textContent ?? '';
-    expect(line).toContain('1 program · 1 setup');
-    expect(line).toMatch(/frozen \d{2}:\d{2}/);
-    expect(line).not.toContain('key');
+    expect(line).not.toContain('The package');
+    expect(line).not.toContain('1 program · 1 setup');
+    expect(screen.queryByTestId('engrave-package-state')).toBeNull();
     // #550 — the package key lives on the element as data, not in the rendered sentence.
     expect(screen.getByTestId('engrave-package').getAttribute('data-key')).toBe(pkg.hash);
-    expect(screen.getByTestId('engrave-package-state').textContent).toContain(
-      'The frozen programs still describe this job.',
-    );
+    // The step-1 line holds the program count and the one freezer's time.
+    expect(screen.getByTestId('engrave-cut-step-1-summary').textContent).toContain('1 program');
     // The job's stock is not a shelf entry: nothing was taken, and the line says so in operator terms.
     expect(screen.getByTestId('engrave-package-reservation').textContent).toContain('no blank needs to be held');
+  });
+
+  it('#689 — the clearance acknowledgement lives in step 1 and blocks Run until it is ticked', async () => {
+    const job = plannedJob();
+    const pkg = frozen(job, [P1]);
+    // A warning the run gate recognises: the vise's seat is still the shop default, so somebody
+    // must look at the clearance before anything is sent.
+    const made = {
+      ...generated([P1]),
+      findings: [{ severity: 'warning', code: 'vise-default', message: 'the vise is the shop default' }],
+    } as EngraveGenerated;
+    useEngraveRunStore.setState({
+      oracle: { ok: true, band: 0.016, levels: [], worst: { underCut: 0, overCut: 0 } } as never,
+      acknowledged: false,
+    });
+    draw({ job, report: reportOf(), pkg, generated: made, canDrive: true });
+
+    // Step 1 is the only open step, and the acknowledgement is its one action.
+    expect(screen.getByTestId('engrave-cut-step-1')).toHaveProperty('open', true);
+    expect(screen.getByTestId('engrave-cut-step-1-summary').textContent).toContain('clearance not acknowledged');
+    const ack = screen.getByTestId('engrave-ack') as HTMLInputElement;
+    expect(ack.checked).toBe(false);
+
+    // Run is blocked with its ONE sentence, and the step-4 statement does not stand in for it.
+    const go = screen.getByTestId('engrave-cut-go') as HTMLButtonElement;
+    expect(go.disabled).toBe(true);
+    expect(screen.getByTestId('engrave-cut-go-blocked').textContent).toContain('tick the clearance check in step 1');
+    fireEvent.click(screen.getByTestId('engrave-cut-statement'));
+    expect(go.disabled).toBe(true);
+    expect(screen.getByTestId('engrave-cut-go-blocked').textContent).toContain('tick the clearance check in step 1');
+
+    // Ticking it in step 1 records the gate's own flag and clears the sentence.
+    fireEvent.click(ack);
+    expect(useEngraveRunStore.getState().acknowledged).toBe(true);
+    expect(screen.queryByTestId('engrave-cut-go-blocked')).toBeNull();
+    expect(go.disabled).toBe(false);
+    expect(screen.getByTestId('engrave-cut-step-1-summary').textContent).toContain('clearance acknowledged');
+  });
+
+  it('#689 — Run says there is no machine instead of showing controls that cannot send', () => {
+    const job = plannedJob();
+    const pkg = frozen(job, [P1]);
+    draw({ job, report: reportOf(), pkg, generated: generated([P1]), canDrive: false });
+
+    expect(screen.getByTestId('engrave-cut-no-machine').textContent).toContain(
+      'No machine is connected. Reach it first, then come back to run.',
+    );
+    expect(screen.queryByTestId('engrave-cut-confirm')).toBeNull();
+    expect(screen.queryByTestId('engrave-cut-run')).toBeNull();
+    // The plan is still readable without a machine.
+    expect(screen.getByTestId('engrave-cut-plan')).toBeTruthy();
   });
 
   it('#547 — the dry-run selector surfaces, and a full dry run sends the lifted text under a -dry name', async () => {
@@ -385,7 +438,11 @@ describe('#419 §3 the Cut surface', () => {
     draw({ job: edited, report: reportOf([staleRow]), pkg, generated: generated([P1]) });
 
     await waitFor(() => expect(screen.getByTestId('engrave-package').dataset.state).toBe('stale'));
-    expect(screen.getByTestId('engrave-package-state').textContent).toContain('Its blank stays held for this job.');
+    // #689 — the stale sentence names the reason; the reservation line is the ONE place the hold is
+    // stated, so the box no longer says "its blank stays held" a second time.
+    const staleState = screen.getByTestId('engrave-package-state').textContent ?? '';
+    expect(staleState).toContain('is stale');
+    expect(staleState).not.toContain('Its blank stays held');
     expect(screen.getByTestId('engrave-package-reservation').textContent).toContain('held for you');
 
     const refreeze = screen.getByTestId('engrave-package-refreeze') as HTMLButtonElement;
@@ -406,7 +463,7 @@ describe('#419 §3 the Cut surface', () => {
     const holds = useStockStore.getState().items[0]!.reservations.filter((r) => r.jobId === job.id);
     expect(holds).toHaveLength(1);
     expect(holds[0]!.quantity).toBe(1);
-    expect(screen.getByTestId('engrave-package-reservation-note').textContent).toContain('blank held for this job');
+    expect(screen.getByTestId('engrave-package-reservation').textContent).toContain('held for you');
   });
 
   it('plays the frozen texts even when the live Generate holds different text', async () => {

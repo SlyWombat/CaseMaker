@@ -26,7 +26,6 @@ import { programHash, programOwnsVacuum, runSettings } from '@/platform/machineR
 import { resolveTool } from '@/engine/cnc/toolRegistry';
 import { toolDisplayName } from '@/engine/cnc/toolDisplay';
 import { useShopDefaultsStore } from '@/store/shopDefaultsStore';
-import { useEngraveRunStore } from '@/store/engraveRunStore';
 import { useRunConfirmStore, runKey } from '@/store/runConfirmStore';
 import { oracleSentence } from '@/store/engraveRunGate';
 import { useMachineRunStore, type RunContext } from '@/store/machineRunStore';
@@ -146,10 +145,9 @@ export function EngraveCutConfirm({
   const refused = blocker ?? domeBlocker;
 
   /**
-   * THE ONE PRESS. It carries the three facts the old path asked one at a time — the clearance
-   * acknowledgement (the run gate's own), the cutter-fitted confirmation (the statement here), and
-   * "I am at the machine" (the once-per-program confirmation) — then uploads, prepares and starts
-   * through the same seams the manual path uses.
+   * THE ONE PRESS. The cutter-fitted confirmation and "I am at the machine" are the statement
+   * here; the clearance acknowledgement is Cut step 1's own flag and is never asserted by this
+   * press. It then uploads, prepares and starts through the same seams the manual path uses.
    */
   async function cut(): Promise<void> {
     if (!statement || pressing || refused !== null || !oracleOk) return;
@@ -175,9 +173,8 @@ export function EngraveCutConfirm({
     }
     const hash = programHash(source.nc);
     const key = runKey({ host: machine.host, port: machine.port }, hash);
-    // The statement covered all three of the old ticks; record them now, so nothing asks again.
+    // The statement covered the cutter and the at-machine confirmation; record it now.
     useRunConfirmStore.getState().confirm(key);
-    useEngraveRunStore.getState().setAcknowledged(true);
     const prepared = prepare(
       { host: machine.host, port: machine.port },
       outcome.filename,
@@ -232,14 +229,9 @@ export function EngraveCutConfirm({
           type="checkbox"
           checked={statement}
           data-testid="engrave-cut-statement"
-          onChange={(e) => {
-            setStatement(e.target.checked);
-            // The run gate's own acknowledgement IS this statement, kept in step as it is ticked.
-            useEngraveRunStore.getState().setAcknowledged(e.target.checked);
-          }}
+          onChange={(e) => setStatement(e.target.checked)}
         />{' '}
-        I am at the machine, head clear, stock clamped, and I have checked clearance to the vise and
-        the tool's reach.
+        I am at the machine, head clear, and the stock is clamped.
       </label>
       {camera !== null && (
         <button

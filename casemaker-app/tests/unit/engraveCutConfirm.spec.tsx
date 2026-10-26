@@ -101,8 +101,9 @@ describe('#656 the one screen', () => {
     expect((screen.getByTestId('engrave-cut-go') as HTMLButtonElement).disabled).toBe(true);
     fireEvent.click(screen.getByTestId('engrave-cut-statement'));
     expect((screen.getByTestId('engrave-cut-go') as HTMLButtonElement).disabled).toBe(false);
-    // The statement IS the run gate's acknowledgement, kept in step as it is ticked.
-    expect(useEngraveRunStore.getState().acknowledged).toBe(true);
+    // #689 — the statement is the at-machine/cutter confirmation only. Clearance is Cut step 1's
+    // own tick, so this press neither sets nor stands in for it.
+    expect(useEngraveRunStore.getState().acknowledged).toBe(false);
   });
 
   it('uploads, prepares and starts on the one press, with the frozen program’s own cutter', async () => {

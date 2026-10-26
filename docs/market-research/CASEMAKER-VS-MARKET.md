@@ -82,7 +82,7 @@ with a paid tier (`(Pro)`, `(Plus)`, `(M+)`, `(Starter)`, `(sub)`). No vendor wa
 
 | Capability | MKS | CM | Field (18) — derived |
 |---|---|---|---|
-| First-run / machine setup wizard | N | P — start wizard (#280), "Cut this blank" (#573); the bed wizard is open (**#512**); no flow owns machine facts (R-1) | Y 13 · P 2 · N 3 |
+| First-run / machine setup wizard | N | P — start wizard (#280), Cut mode's four-line flow Checked · Frozen · Register the blank · Run (#689); the bed wizard is open (**#512**); no flow owns machine facts (R-1) | Y 13 · P 2 · N 3 |
 | Homing / limit config | ? | P — `$H` in every flow; soft endstops are read, never written (#279; console refuses `config-set`) | Y 12 · P 1 · N 5 |
 | On-screen jog | ? | R-10 | Y 14 · P 1 · N 3 |
 | Keyboard jog | ? | R-10 | Y 13 · N 3 · ? 2 |

@@ -60,6 +60,12 @@ test('#656 — the one screen names the frozen program and cutter, and ONE state
   // Cut freezes the plan on green; the confirm appearing IS the package being current, so the
   // frozen program is read afterwards — there is nothing to name before the freeze.
   await page.getByTestId('cnc-mode-cut').click();
+  await expect(page.getByTestId('engrave-cut-surface')).toBeVisible();
+  // #689 — clearance is the acknowledgement in Cut step 1 now. Tick it when this job's warnings ask
+  // for it, then open the Run line (only the current step is open by default).
+  const ack = page.getByTestId('engrave-ack');
+  if ((await ack.count()) > 0) await ack.check();
+  await page.getByTestId('engrave-cut-step-4-summary').click();
   await expect(page.getByTestId('engrave-cut-confirm')).toBeVisible({ timeout: 30_000 });
 
   const frozen = await page.evaluate(() => window.__caseMaker!.getFrozenProgram());
@@ -69,7 +75,7 @@ test('#656 — the one screen names the frozen program and cutter, and ONE state
   await expect(page.getByTestId('engrave-cut-confirm-program')).toContainText(frozen!.filename);
   await expect(page.getByTestId('engrave-cut-confirm-cutter')).toContainText(frozen!.cutterName);
 
-  // ONE statement is the whole gate on the press: disabled until it is ticked, enabled after.
+  // ONE statement arms the press: disabled until it is ticked, enabled after. Clearance was step 1.
   const go = page.getByTestId('engrave-cut-go');
   await expect(go).toBeDisabled();
   await page.getByTestId('engrave-cut-statement').check();

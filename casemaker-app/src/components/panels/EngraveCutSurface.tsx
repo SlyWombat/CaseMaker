@@ -37,6 +37,8 @@ import type { PreflightHubReport } from '@/engine/cnc/preflight/hub';
 import { cutPlan } from '@/engine/cnc/engrave/cutPlan';
 import { laserLiftFor } from '@/engine/cnc/engrave/laserSurface';
 import { packageStaleness } from '@/engine/cnc/engrave/package';
+import { formatDuration, registrationTouches } from '@/engine/cnc/plan';
+import { toolDisplayName } from '@/engine/cnc/toolDisplay';
 import {
   frozenReleaseSources,
   releaseCheck,
@@ -52,9 +54,9 @@ import { useSettingsStore } from '@/store/settingsStore';
 import { finishedProgramsFor } from '@/store/locationStore';
 import type { RunContext } from '@/store/machineRunStore';
 import { useEngravePackageStore } from '@/store/engravePackageStore';
-import { useFirstRegistration, useSurfaceSpread } from '@/store/engraveRegistrationStore';
+import { useEngraveRegistrationStore, useFirstRegistration, useSurfaceSpread } from '@/store/engraveRegistrationStore';
 import { useEngraveRunStore } from '@/store/engraveRunStore';
-import { surfaceRepostBlocker } from '@/store/engraveRunGate';
+import { requiredAckCodes, surfaceRepostBlocker } from '@/store/engraveRunGate';
 import { domeAcceptSentence, surfaceTiltWords } from '@/engine/cnc/engrave/surfaceSpread';
 import { useShopDefaultsStore } from '@/store/shopDefaultsStore';
 import { useStockStore } from '@/store/stockStore';
@@ -79,45 +81,50 @@ const BOX: CSSProperties = {
   background: '#1b2027',
 };
 
-/** #524 — one numbered checklist step: a one-line summary that is always visible (with a ✓ when
- *  done) and a body that opens when it is the step the operator is on. No new controls — the
- *  browser's own `<details>` is the mechanism. */
+/** #524/#689 — one numbered checklist step: a one-line summary that is always visible, its state
+ *  in the marker (✓ done, ● the step the operator is on, ○ still to come), and a body. Only the
+ *  current step is open by default, so the next thing to do is the only thing with a body. No new
+ *  controls — the browser's own `<details>` is the mechanism — and a step the operator opens to
+ *  look back at stays open until the current step moves. */
 function Step({
   number,
   title,
   done,
+  current,
   summary,
-  defaultOpen,
   children,
 }: {
   number: number;
   title: string;
   done: boolean;
+  current: boolean;
   summary: string;
-  defaultOpen?: boolean;
   children: ReactNode;
 }) {
-  const [open, setOpen] = useState(defaultOpen ?? false);
-  // #586 — `defaultOpen` names the step the operator is on (the first non-✓). It is re-applied
-  // whenever it becomes true, so a step that turns current — including after a remount or a machine
-  // reconnect that briefly left it folded — opens itself. A step that stops being current is not
-  // force-folded, and a manual fold stays folded until the step becomes current again.
+  // `null` follows the current step; a boolean is the operator's own fold/unfold since then. When
+  // the current step moves, the override resets: the new step opens and the old one folds (#586 —
+  // a step that turns current, including after a machine reconnect, opens itself).
+  const [manual, setManual] = useState<boolean | null>(null);
   useEffect(() => {
-    if (defaultOpen) setOpen(true);
-  }, [defaultOpen]);
+    setManual(null);
+  }, [current]);
+  const open = manual ?? current;
   return (
     <details
       data-testid={`engrave-cut-step-${number}`}
       open={open}
-      onToggle={(e) => setOpen((e.currentTarget as HTMLDetailsElement).open)}
+      onToggle={(e) => {
+        const now = (e.currentTarget as HTMLDetailsElement).open;
+        setManual(now === current ? null : now);
+      }}
       style={{ marginTop: 6, borderTop: '1px solid #2a2f36', paddingTop: 4 }}
     >
       <summary
         data-testid={`engrave-cut-step-${number}-summary`}
         style={{ cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 8 }}
       >
-        <span style={{ fontSize: 12, fontWeight: 600, color: done ? OK : '#c8d3de' }}>
-          {done ? '✓' : '●'} {number} {title}
+        <span style={{ fontSize: 12, fontWeight: 600, color: done ? OK : current ? '#e6edf5' : '#9aa4b0' }}>
+          {done ? '✓' : current ? '●' : '○'} {number} {title}
         </span>
         <span style={{ ...MUTED, margin: 0, textAlign: 'right' }}>{summary}</span>
       </summary>
@@ -195,7 +202,6 @@ export function EngraveCutSurface({
   const shelfItems = useStockStore((s) => s.items);
   const defaults = useShopDefaultsStore((s) => s.defaults);
   const [overrides, setOverrides] = useState<FeatureOverrides>({});
-  const [freezeNote, setFreezeNote] = useState<string | null>(null);
   const [freezeError, setFreezeError] = useState<string | null>(null);
   const [refreezing, setRefreezing] = useState(false);
   /** The Generate a freeze was attempted for; a re-render must not freeze the same one twice. */
@@ -211,6 +217,23 @@ export function EngraveCutSurface({
    * rather than pretend a fixed clearance checked a top nobody measured.
    */
   const firstRegistration = useFirstRegistration(job.id, target);
+  // #689 — the clearance acknowledgement lives in step 1 now, not under Generate. It is the run
+  // gate's own flag; the warning codes that need it come from the Generate (re-post included) and
+  // the sweep, so both are subscribed to and the step re-renders when they arrive.
+  const acknowledged = useEngraveRunStore((s) => s.acknowledged);
+  const setAcknowledged = useEngraveRunStore((s) => s.setAcknowledged);
+  const ackGenerated = useEngraveRunStore((s) => s.generated);
+  const ackDiagnostics = useEngraveRunStore((s) => s.simDiagnostics);
+  const anyRegistration = useEngraveRegistrationStore((s) => s.records[job.id] ?? null);
+  const ackCodes = useMemo(
+    () => requiredAckCodes({ ...useEngraveRunStore.getState(), generated: ackGenerated ?? generated }),
+    [ackGenerated, ackDiagnostics, generated],
+  );
+  const ackRequired = ackCodes.length > 0;
+  // The one sentence that unblocks Run while clearance is unticked. The gate's own saveBlocker says
+  // the same thing; it is repeated here because this surface is also driven without the panel's
+  // pre-computed blockers (tests, and any caller that hands them in null).
+  const ackBlocker = ackRequired && !acknowledged ? 'tick the clearance check in step 1' : null;
   // #608 — the cut-extent measurement this machine took: its tilt feeds the re-post step line, and
   // the registration's fitted plane is what the release gate compares the frozen package against.
   const spreadMeasurement = useSurfaceSpread(job.id, target);
@@ -264,7 +287,6 @@ export function EngraveCutSurface({
       void freeze(job, fresh.programs, registrationSurface).then((result) => {
         if (result.ok) {
           setFreezeError(null);
-          setFreezeNote(result.reservation.text);
         } else {
           setFreezeError(result.reason);
         }
@@ -399,7 +421,6 @@ export function EngraveCutSurface({
     void freeze(job, generated.programs).then((result) => {
       if (result.ok) {
         setFreezeError(null);
-        setFreezeNote(result.reservation.text);
       } else {
         setFreezeError(result.reason);
       }
@@ -436,7 +457,6 @@ export function EngraveCutSurface({
       setRefreezing(false);
       if (result.ok) {
         setFreezeError(null);
-        setFreezeNote(result.reservation.text);
       } else {
         setFreezeError(result.reason);
       }
@@ -467,6 +487,68 @@ export function EngraveCutSurface({
     };
   })();
 
+  // #689 — THE FOUR-LINE FLOW: ✓ 1 Checked · ✓ 2 Frozen · ● 3 Register the blank · ○ 4 Run.
+  // `checked` is the gate PLUS the clearance acknowledgement that now lives in step 1. A stale
+  // package is step 2's business, not a reason to hold step 1 open: with the gate clear otherwise,
+  // step 1 is done and step 2 is the one that opens for the re-freeze press.
+  const checked = (green || onlyPackageStale) && (!ackRequired || acknowledged);
+  const frozen = packageCurrent;
+  const registrationPlan = job.setups?.[0]?.registration?.plan ?? null;
+  // A registration is a measurement on THIS machine; with no machine connected, a record for this
+  // job still says the blank was registered in this session.
+  const registered = firstRegistration !== null || (target === null && anyRegistration !== null);
+  const registeredDone = frozen && registered;
+  const ran =
+    registeredDone &&
+    pkg !== null &&
+    pkg.programs.length > 0 &&
+    pkg.programs.every((program) => finishedHashes.includes(program.hash));
+  const currentStep = !checked ? 1 : !frozen ? 2 : !registeredDone ? 3 : !ran ? 4 : 0;
+
+  const programCount = generated?.programs.length ?? pkg?.programs.length ?? 0;
+  const noteCount = report.rows.filter((row) => row.severity === 'info').length;
+  const step1Meta: string[] = [];
+  if (programCount > 0) step1Meta.push(`${programCount} program${programCount === 1 ? '' : 's'}`);
+  if (plan !== null) step1Meta.push(formatDuration(plan.totalSeconds));
+  if (noteCount > 0) step1Meta.push(`${noteCount} note${noteCount === 1 ? '' : 's'}`);
+  if (ackRequired) step1Meta.push(acknowledged ? 'clearance acknowledged' : 'clearance not acknowledged');
+  const step1Summary = checked
+    ? step1Meta.join(' · ') || 'clear'
+    : report.errorCount > 0
+      ? `${report.errorCount} blocking finding${report.errorCount === 1 ? '' : 's'}`
+      : ackRequired
+        ? 'clearance not acknowledged'
+        : 'clear';
+
+  const step2Summary =
+    pkg === null
+      ? 'not frozen yet'
+      : packageCurrent
+        ? `${clockOf(pkg.frozenAt)} · the programs match the design`
+        : 'stale — freeze again';
+
+  const step3Summary = ((): string => {
+    if (registrationPlan === null) return '';
+    const order = ['left', 'front', 'right', 'back'] as const;
+    const edges = order.filter((edge) => registrationPlan.scans.some((scan) => scan.edge === edge));
+    const touches = registrationTouches({ ok: true, plan: registrationPlan });
+    const touchWords = `${touches} touch${touches === 1 ? '' : 'es'}`;
+    if (edges.length === 0) return touchWords;
+    const list =
+      edges.length === 1
+        ? `${edges[0]} edge`
+        : `${edges.slice(0, -1).join(', ')} and ${edges[edges.length - 1]} edges`;
+    return `${list}, then the top face · ${touchWords}`;
+  })();
+
+  const step4Meta: string[] = [];
+  if (releaseSources.length > 1) step4Meta.push(`${releaseSources.length} programs`);
+  if (plan?.features.find((feature) => feature.feature === 'vacuum')?.on === true) step4Meta.push('vacuum on');
+  const cutter = jobTool(job);
+  if (cutter !== null && releaseSources.length <= 1) step4Meta.push(`fit the ${toolDisplayName(cutter)}`);
+  if (plan !== null) step4Meta.push(formatDuration(plan.totalSeconds));
+  const step4Summary = step4Meta.join(' · ');
+
   const missingReportIndex =
     missingReport === null ? -1 : (pkg?.programs.findIndex((program) => program.hash === missingReport.hash) ?? -1);
   const missingReportBlocker =
@@ -476,104 +558,96 @@ export function EngraveCutSurface({
 
   return (
     <div data-testid="engrave-cut-surface">
-      {/* #524 — the Cut surface as a four-step checklist: Check the job → Freeze the plan →
-          Register the blank → Run the job. Each step is one line when done and opens when it is
-          the step the operator is on (#550 — the titles are operator actions, not internal jargon). */}
-      <Step
-        number={1}
-        title="Check the job"
-        done={green}
-        summary={green ? 'clear' : `${report.errorCount} blocking finding${report.errorCount === 1 ? '' : 's'}`}
-        defaultOpen={!green}
-      >
+      {/* #524/#689 — the Cut surface as a four-line checklist: Checked → Frozen → Register the
+          blank → Run. Each line is one sentence; only the step the operator is on has a body. */}
+      <Step number={1} title="Checked" done={checked} current={currentStep === 1} summary={step1Summary}>
         <EngravePreflight report={report} onBackToDesign={onBackToDesign} />
-      </Step>
-
-      <Step
-        number={2}
-        title="Freeze the plan"
-        done={packageCurrent}
-        summary={
-          pkg === null
-            ? 'not frozen yet'
-            : packageCurrent
-              ? `${pkg.programs.length} program${pkg.programs.length === 1 ? '' : 's'} · frozen ${clockOf(pkg.frozenAt)}`
-              : 'stale — freeze again'
-        }
-        defaultOpen={!packageCurrent}
-      >
-      <section
-        style={BOX}
-        data-testid="engrave-package"
-        data-state={pkg === null ? 'none' : packageCurrent ? 'current' : 'stale'}
-        data-key={pkg?.hash}
-      >
-        <p
-          style={{ fontSize: 12, color: '#e6edf5', margin: '0 0 4px' }}
-          title={pkg === null ? undefined : `package key ${pkg.hash}`}
-        >
-          <strong>The package</strong>
-          {pkg === null ? (
-            <> — not frozen yet. Once the check is clear, this step freezes the plan and holds its blank.</>
-          ) : (
-            <>
-              {' '}
-              — {pkg.programs.length} program{pkg.programs.length === 1 ? '' : 's'} · {pkg.setups.length} setup
-              {pkg.setups.length === 1 ? '' : 's'} · frozen {clockOf(pkg.frozenAt)}
-            </>
-          )}
-        </p>
-        {pkg !== null && (
-          <p
-            style={packageCurrent ? { ...MUTED, color: OK } : WARN}
-            data-testid="engrave-package-state"
-          >
-            {packageCurrent
-              ? 'The frozen programs still describe this job.'
-              : `The package of ${clockOf(pkg.frozenAt)} is stale — ${staleness?.reason ?? 'the job changed since it was frozen.'} Its blank stays held for this job.`}
-          </p>
-        )}
-        {reservation !== null && (
-          <div style={MUTED} data-testid="engrave-package-reservation">
-            {reservation.line}
-            {reservation.detail !== null && (
-              <details style={{ marginTop: 2 }}>
-                <summary style={{ cursor: 'pointer' }}>shelf details</summary>
-                <span>{reservation.detail}</span>
-              </details>
-            )}
+        {/* #689 — the clearance acknowledgement moved here from the Generate footer. It is the
+            run gate's own flag; the sentence is the one the operator has always ticked. */}
+        {ackRequired && (
+          <div style={{ ...BOX, marginTop: 8 }} data-testid="engrave-cut-ack">
+            <label style={{ display: 'flex', alignItems: 'flex-start', gap: 8, fontSize: 12, color: '#e6edf5' }}>
+              <input
+                type="checkbox"
+                data-testid="engrave-ack"
+                checked={acknowledged}
+                onChange={(e) => setAcknowledged(e.target.checked)}
+                style={{ marginTop: 2 }}
+              />
+              <span>I have checked clearance to the vise and the tool's reach myself.</span>
+            </label>
           </div>
         )}
-        {pkg !== null && !packageCurrent && (
-          <button
-            type="button"
-            data-testid="engrave-package-refreeze"
-            disabled={!canRefreeze || refreezing}
-            title={
-              canRefreeze
-                ? 'Freeze the current job around its current programs. The existing hold moves to the new package; it is not doubled.'
-                : 'Generate again first: the generated program is stale too, or the package is not the only blocker.'
-            }
-            style={{ width: '100%', padding: 7, marginTop: 6 }}
-            onClick={refreeze}
-          >
-            {refreezing ? 'Freezing…' : 'Freeze this job again…'}
-          </button>
-        )}
-        {freezeError !== null && (
-          <p style={WARN} data-testid="engrave-package-freeze-error">
-            The package was not frozen — {freezeError}.
-          </p>
-        )}
-        {freezeNote !== null && (
-          <p style={{ ...MUTED, color: OK }} data-testid="engrave-package-reservation-note">
-            {freezeNote}.
-          </p>
-        )}
-      </section>
       </Step>
 
-      <Step number={3} title="Register the blank" done={false} summary="left edge, then the top face" defaultOpen={green && packageCurrent}>
+      <Step number={2} title="Frozen" done={frozen} current={currentStep === 2} summary={step2Summary}>
+        <section
+          style={BOX}
+          data-testid="engrave-package"
+          data-state={pkg === null ? 'none' : packageCurrent ? 'current' : 'stale'}
+          data-key={pkg?.hash}
+        >
+          {pkg === null ? (
+            <p style={{ fontSize: 12, color: '#e6edf5', margin: 0 }}>
+              Once the check is clear, this step freezes the plan and holds its blank.
+            </p>
+          ) : !packageCurrent ? (
+            <p style={WARN} data-testid="engrave-package-state">
+              The package of {clockOf(pkg.frozenAt)} is stale —{' '}
+              {staleness?.reason ?? 'the job changed since it was frozen.'}
+            </p>
+          ) : null}
+          {reservation !== null && (
+            <div style={MUTED} data-testid="engrave-package-reservation">
+              {reservation.line}
+              {reservation.detail !== null && (
+                <details style={{ marginTop: 2 }}>
+                  <summary style={{ cursor: 'pointer' }}>shelf details</summary>
+                  <span>{reservation.detail}</span>
+                </details>
+              )}
+            </div>
+          )}
+          {pkg !== null && !packageCurrent && (
+            <>
+              {!canRefreeze && (
+                <p style={MUTED} data-testid="engrave-package-refreeze-why">
+                  {staleSince !== null || !generatedReady
+                    ? 'Generate the job again first — this session’s program no longer matches it.'
+                    : 'Clear the blocking findings in step 1 first.'}
+                </p>
+              )}
+              <button
+                type="button"
+                data-testid="engrave-package-refreeze"
+                disabled={!canRefreeze || refreezing}
+                title={
+                  canRefreeze
+                    ? 'Freeze the current job around its current programs. The existing hold moves to the new package; it is not doubled.'
+                    : undefined
+                }
+                style={{ width: '100%', padding: 7, marginTop: 6 }}
+                onClick={refreeze}
+              >
+                {refreezing ? 'Freezing…' : 'Freeze this job again…'}
+              </button>
+            </>
+          )}
+          {freezeError !== null && (
+            <p style={WARN} data-testid="engrave-package-freeze-error">
+              The package was not frozen — {freezeError}.
+            </p>
+          )}
+        </section>
+      </Step>
+
+      <Step
+        number={3}
+        title="Register the blank"
+        done={registeredDone}
+        current={currentStep === 3}
+        summary={step3Summary}
+      >
         <EngraveRegistrationStep job={job} target={target} />
         {/* #608 — once the registration measured a tilt, the frozen (flat) package must be re-posted
             against it before anything is uploaded. A re-post re-runs the whole pipeline with the
@@ -606,126 +680,131 @@ export function EngraveCutSurface({
         )}
       </Step>
 
-      {green && packageCurrent && plan !== null && (
-        <Step
-          number={4}
-          title="Cut"
-          done={false}
-          summary={oneScreen ? 'one press' : 'the plan and the controls'}
-          defaultOpen
-        >
-          {/* #656 — THE ONE SCREEN. The ordinary path: the program, the cutter (already confirmed at
-              the prompt), the check's verdict, the dome choice when the top is curved, ONE statement
-              and ONE Cut press that uploads, prepares and starts. */}
-          {oneScreen && machine !== null && target !== null && singleSource !== undefined && (
-            <>
-              <EngraveCutConfirm
-                job={job}
-                machine={machine}
-                source={singleSource}
-                filename={releaseFileName(job.name, 1, 1, false)}
-                oracle={runOracle}
-                blocker={uploadBlocker ?? missingReportBlocker ?? surfaceGate}
-                dome={domeProps}
-                domeBlocker={domeG32Blocker}
-                runContext={runContextWithDry}
-                surfaceCheck={runSurfaceProgram ? { gridPitchMm: runGridPitchMm } : null}
-                onLiveStatus={onLiveStatus}
-              />
-              <EngraveMachineRun target={target} onProgramLine={onProgramLine} />
-            </>
-          )}
-          {/* #656 — THE EXPERT PATH, unchanged behind a disclosure: the plan, the dry-run choices,
-              the manual upload with its own confirmation and cutter selector, and the multi-program
-              release flow. It is open by default when the one screen is not offered (a multi-program
-              job, the web build, or no machine). */}
-          <details
-            style={{ marginTop: 6 }}
-            data-testid="engrave-cut-expert"
-            open={oneScreen ? expertOpen : true}
-            onToggle={(e) => setExpertOpen(e.currentTarget.open)}
-          >
-            <summary style={{ fontSize: 11, color: '#9aa4b0', cursor: 'pointer' }}>
-              The steps — plan, dry run, manual upload and the release flow
-            </summary>
-            {!oneScreen && domeProps !== null && <DomeChoice {...domeProps} />}
-          <details style={{ marginTop: 4 }} data-testid="engrave-cut-plan">
-            <summary style={{ fontSize: 11, color: '#9aa4b0', cursor: 'pointer' }}>The plan</summary>
-            <div style={{ marginTop: 4 }}>
-              <RunPlanView plan={plan} />
-              <MachineStrip features={plan.features} onToggle={toggle} />
-            </div>
-          </details>
-
-          {target !== null && (
-            <section style={{ marginTop: 10 }} data-testid="engrave-cut-run">
-              {/* #547 — the dry-run selector. Both levels fly the real XY path at a safe Z with the
-                  spindle off; `traverse` plays one program, `full` the whole list. */}
-              <div style={BOX} data-testid="engrave-dry-run">
-                <label style={{ fontSize: 12, color: '#e6edf5' }}>
-                  <strong>Dry run</strong>{' '}
-                  <select
-                    value={dryRunLevel}
-                    data-testid="engrave-dry-run-level"
-                    aria-label="Dry-run level"
-                    style={{ marginLeft: 6 }}
-                    onChange={(e) => setDryRunLevel(e.target.value as DryRunLevel | 'off')}
-                  >
-                    <option value="off">Off — cut for real</option>
-                    <option value="traverse">Traverse only — one air pass, no stock</option>
-                    <option value="full">Full dry run — whole flow, spindle off, in the air</option>
-                  </select>
-                </label>
-                {dryRunLevel !== 'off' && (
-                  <p style={MUTED} data-testid="engrave-dry-run-note">
-                    The spindle stays off and every move flies at Z {DRY_RUN_SAFE_Z} above the top face —
-                    nothing is clamped, nothing is cut, and no stock, runtime or finished program is
-                    recorded. {traverseOnly
-                      ? 'A single traverse of the first program — the fastest way to light up the progress bar and head view.'
-                      : 'The whole program list plays through the release flow, bit-change prompts included.'}
-                  </p>
-                )}
-              </div>
-
-              {releaseSources.length > 1 ? (
-                <EngraveReleaseStep
-                  target={target}
+      <Step number={4} title="Run" done={ran} current={currentStep === 4} summary={step4Summary}>
+        {plan === null ? (
+          <p style={MUTED} data-testid="engrave-cut-not-ready">
+            Freeze the plan in step 2 before running it.
+          </p>
+        ) : (
+          <>
+            {target === null && (
+              <p style={MUTED} data-testid="engrave-cut-no-machine">
+                No machine is connected. Reach it first, then come back to run.
+              </p>
+            )}
+            {/* #656 — THE ONE SCREEN. The ordinary path: the program, the cutter (already confirmed
+                at the prompt), the check's verdict, the dome choice when the top is curved, ONE
+                statement and ONE Cut press that uploads, prepares and starts. */}
+            {oneScreen && machine !== null && target !== null && singleSource !== undefined && (
+              <>
+                <EngraveCutConfirm
                   job={job}
-                  programs={releaseSources}
-                  runPlan={plan}
-                  blocker={releaseBlocker ?? missingReportBlocker ?? surfaceGate ?? domeG32Blocker}
-                  onProgramLine={onProgramLine}
-                />
-              ) : (
-                <EngraveMachineUpload
-                  blocker={uploadBlocker ?? missingReportBlocker ?? surfaceGate ?? domeG32Blocker}
                   machine={machine}
-                  program={
-                    singleSource === undefined
-                      ? null
-                      : (() => {
-                          const check = releaseCheck(singleSource);
-                          return check === null ? null : { nc: singleSource.nc, check };
-                        })()
-                  }
-                  filename={releaseFileName(job.name, 1, 1, singleSource?.dryRun === true)}
-                  lift={lift}
-                  onLiveStatus={onLiveStatus}
+                  source={singleSource}
+                  filename={releaseFileName(job.name, 1, 1, false)}
+                  oracle={runOracle}
+                  blocker={ackBlocker ?? uploadBlocker ?? missingReportBlocker ?? surfaceGate}
+                  dome={domeProps}
+                  domeBlocker={domeG32Blocker}
                   runContext={runContextWithDry}
-                  setup={
-                    singleSource === undefined
-                      ? undefined
-                      : { setupIndex: singleSource.setupIndex, setupId: singleSource.setupId }
-                  }
-                  jobEdgeMarginMm={job.edgeMargin}
-                  onProgramLine={onProgramLine}
+                  surfaceCheck={runSurfaceProgram ? { gridPitchMm: runGridPitchMm } : null}
+                  onLiveStatus={onLiveStatus}
                 />
+                <EngraveMachineRun target={target} onProgramLine={onProgramLine} />
+              </>
+            )}
+            {/* #656 — THE EXPERT PATH, unchanged behind a disclosure: the plan, the dry-run
+                choices, the manual upload with its own confirmation and cutter selector, and the
+                multi-program run. It is open by default when the one screen is not offered (a
+                multi-program job, the web build, or no machine). */}
+            <details
+              style={{ marginTop: 6 }}
+              data-testid="engrave-cut-expert"
+              open={oneScreen ? expertOpen : true}
+              onToggle={(e) => setExpertOpen(e.currentTarget.open)}
+            >
+              <summary style={{ fontSize: 11, color: '#9aa4b0', cursor: 'pointer' }}>
+                The plan and the steps
+              </summary>
+              {!oneScreen && domeProps !== null && <DomeChoice {...domeProps} />}
+              <details style={{ marginTop: 4 }} data-testid="engrave-cut-plan">
+                <summary style={{ fontSize: 11, color: '#9aa4b0', cursor: 'pointer' }}>The plan</summary>
+                <div style={{ marginTop: 4 }}>
+                  <RunPlanView plan={plan} />
+                  <MachineStrip features={plan.features} onToggle={toggle} />
+                </div>
+              </details>
+
+              {target !== null && (
+                <section style={{ marginTop: 10 }} data-testid="engrave-cut-run">
+                  {/* #547 — the dry-run selector. Both levels fly the real XY path at a safe Z with
+                      the spindle off; `traverse` plays one program, `full` the whole list. */}
+                  <div style={BOX} data-testid="engrave-dry-run">
+                    <label style={{ fontSize: 12, color: '#e6edf5' }}>
+                      <strong>Dry run</strong>{' '}
+                      <select
+                        value={dryRunLevel}
+                        data-testid="engrave-dry-run-level"
+                        aria-label="Dry-run level"
+                        style={{ marginLeft: 6 }}
+                        onChange={(e) => setDryRunLevel(e.target.value as DryRunLevel | 'off')}
+                      >
+                        <option value="off">Off — cut for real</option>
+                        <option value="traverse">Traverse only — one air pass, no stock</option>
+                        <option value="full">Full dry run — whole flow, spindle off, in the air</option>
+                      </select>
+                    </label>
+                    {dryRunLevel !== 'off' && (
+                      <p style={MUTED} data-testid="engrave-dry-run-note">
+                        The spindle stays off and every move flies at Z {DRY_RUN_SAFE_Z} above the top face —
+                        nothing is clamped, nothing is cut, and no stock, runtime or finished program is
+                        recorded. {traverseOnly
+                          ? 'A single traverse of the first program — the fastest way to light up the progress bar and head view.'
+                          : 'The whole program list plays in order, bit-change prompts included.'}
+                      </p>
+                    )}
+                  </div>
+
+                  {releaseSources.length > 1 ? (
+                    <EngraveReleaseStep
+                      target={target}
+                      job={job}
+                      programs={releaseSources}
+                      runPlan={plan}
+                      blocker={ackBlocker ?? releaseBlocker ?? missingReportBlocker ?? surfaceGate ?? domeG32Blocker}
+                      onProgramLine={onProgramLine}
+                    />
+                  ) : (
+                    <EngraveMachineUpload
+                      blocker={ackBlocker ?? uploadBlocker ?? missingReportBlocker ?? surfaceGate ?? domeG32Blocker}
+                      machine={machine}
+                      program={
+                        singleSource === undefined
+                          ? null
+                          : (() => {
+                              const check = releaseCheck(singleSource);
+                              return check === null ? null : { nc: singleSource.nc, check };
+                            })()
+                      }
+                      filename={releaseFileName(job.name, 1, 1, singleSource?.dryRun === true)}
+                      lift={lift}
+                      onLiveStatus={onLiveStatus}
+                      runContext={runContextWithDry}
+                      setup={
+                        singleSource === undefined
+                          ? undefined
+                          : { setupIndex: singleSource.setupIndex, setupId: singleSource.setupId }
+                      }
+                      jobEdgeMarginMm={job.edgeMargin}
+                      onProgramLine={onProgramLine}
+                    />
+                  )}
+                </section>
               )}
-            </section>
-          )}
-          </details>
-        </Step>
-      )}
+            </details>
+          </>
+        )}
+      </Step>
     </div>
   );
 }

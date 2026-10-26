@@ -195,7 +195,7 @@ moved these cells; the review's "Us" column should not be read for them:
 
 | Capability | Makera Studio | Case Maker (main c0d680ab) | Status | Next |
 |---|---|---|---|---|
-| Guided job flow | Machining Wizard: Set Stock → Set Origin → Auto Probe → Assist → Run; a modal that remembers nothing — Workflow A.4 | Start wizard (#280), guided setup (#254), "Cut this blank" seven steps from job to probe (#573), Design/Cut switch with a frozen package (#419) | PARITY | **#512** |
+| Guided job flow | Machining Wizard: Set Stock → Set Origin → Auto Probe → Assist → Run; a modal that remembers nothing — Workflow A.4 | Start wizard (#280), guided setup (#254), Cut mode's four-line flow from job to run — Checked · Frozen · Register the blank · Run (#689), Design/Cut switch with a frozen package (#419) | PARITY | **#512** |
 | Operator run sheet | None — FM §2.F | Generated from the job, registration driven from the plan, frame file named (#207, #272, #244) | AHEAD | — |
 | Transcripts | The MDI log | Dock Transcript tab with a header naming machine, probe, mount and the found position (#528, #604); console "Copy transcript" | AHEAD | — |
 | Run record & history | No table for it — RE 07 | `<job>-run.json` beside the `.nc` (#277), readback into `runHistory.ts`, finished hashes (#419), stock consumed and runtime counted at run end (#414) | AHEAD | **#284** |

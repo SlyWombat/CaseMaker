@@ -5,6 +5,8 @@ import { useEngraveReleaseStore } from '@/store/engraveReleaseStore';
 import { useEngraveJobStore } from '@/store/engraveJobStore';
 import { machineKey, useMachineRunStore } from '@/store/machineRunStore';
 import { accessoriesFor, machineRecordByProfile } from '@/store/locationStore';
+import { MACHINES } from '@/engine/cnc/machine';
+import { machineDisplayName } from '@/platform/locationClient';
 import { probeNameFor } from '@/engine/cnc/registration/mountContext';
 import { jobTool } from '@/engine/cnc/engrave/jobSetup';
 import { resolveTool } from '@/engine/cnc/toolRegistry';
@@ -223,6 +225,12 @@ export function MachineStatusStrip(): JSX.Element | null {
   // The strip's machine is the OBSERVATION; the accessories and the probe name live on the saved
   // machine record it resolves to (#604's accessor).
   const record = machineRecordByProfile(machine.profileId ?? null);
+  // #689 — the strip is the ONE home for the connection: the machine's name and address lead it, so
+  // Cut never repeats a Machines card. The record's nickname wins; the profile name is next.
+  const machineName =
+    machineDisplayName(record, machine.profileId === null ? undefined : MACHINES[machine.profileId]) ??
+    machine.name ??
+    machine.host;
   // #658 — the rotary AXIS exists only when a rotary module is checked out to this machine. Not
   // `capabilities.rotary` or the profile's rotary block: those are static and true on a bare Z1.
   const hasRotary = record !== null && accessoriesFor(record).some((a) => a.kind === 'rotary-module');
@@ -261,9 +269,27 @@ export function MachineStatusStrip(): JSX.Element | null {
         whiteSpace: 'nowrap',
       }}
     >
-      {/* #648 — the accessories at the far left: icons with a popover, so the vacuum no longer takes
-          the strip's text. The guards are the card switches' own (Idle, no job, an alarm refusing);
-          the reason shows in the popover when the machine cannot be switched now. */}
+      {/* #689 — the connection opens the strip: which machine, at which address, then its state. */}
+      <span style={{ display: 'inline-flex', alignItems: 'baseline', gap: 5, flex: 'none', minWidth: 0, maxWidth: 200 }}>
+        <span
+          data-testid="machine-status-name"
+          style={{ fontWeight: 600, color: '#e8eef4', overflow: 'hidden', textOverflow: 'ellipsis' }}
+          title={machineName}
+        >
+          {machineName}
+        </span>
+        <span aria-hidden="true" style={{ color: '#4a5560' }}>·</span>
+        <span
+          data-testid="machine-status-host"
+          style={{ color: '#9aa4b0', overflow: 'hidden', textOverflow: 'ellipsis' }}
+          title={`${machine.host}:${machine.port}`}
+        >
+          {machine.host}
+        </span>
+      </span>
+      {/* #648 — the accessories beside the machine's name: icons with a popover, so the vacuum no
+          longer takes the strip's text. The guards are the card switches' own (Idle, no job, an alarm
+          refusing); the reason shows in the popover when the machine cannot be switched now. */}
       <StripAccessories
         target={machineKey(machine)}
         host={machine.host}
