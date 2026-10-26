@@ -38,7 +38,8 @@ import { runSheetFileName, runSheetFrameFileName } from '@/engine/cnc/engrave/ru
 import { saveEngraveProgram } from '@/engine/exportTrigger';
 import { clearFeedCatalogue, setFeedCatalogue, type FeedCatalogueRow } from '@/engine/cnc/feeds';
 import { setInventoryEntries, resetRegistry } from '@/engine/cnc/toolRegistry';
-import { setJobFileIO } from '@/store/engraveJobFileStore';
+import { setJobFileIO, useEngraveJobFileStore } from '@/store/engraveJobFileStore';
+import { resetStartWizard, useStartWizardStore } from '@/store/startWizardStore';
 import { flatEndMill } from '@/engine/cnc/tool';
 import { vCone } from '@/engine/cnc/vProfile';
 import { vCarvePlane, vCarveStepover, vCarveStepoverClampNote } from '@/engine/cnc/vCarveGeometry';
@@ -3368,16 +3369,63 @@ describe('EngravePanel — the Design main path (#686)', () => {
     }
   });
 
-  it('the File menu is the one door: Save job, Save job as…, Open job… and the design read', () => {
+  it('the File menu is the one door: a new job, Save job, Save job as…, Open job… and the design read', () => {
     render(<EngravePanel />);
     expect(screen.queryByTestId('engrave-file-menu')).toBeNull();
     fireEvent.click(screen.getByTestId('engrave-file-menu-toggle'));
     const menu = screen.getByTestId('engrave-file-menu');
     const items = [...menu.querySelectorAll('[role="menuitem"]')].map((el) => el.getAttribute('data-testid'));
-    expect(items).toEqual(['engrave-job-save', 'engrave-job-save-as', 'engrave-job-open', 'engrave-design-import']);
+    expect(items).toEqual([
+      'engrave-job-new',
+      'engrave-job-save',
+      'engrave-job-save-as',
+      'engrave-job-open',
+      'engrave-design-import',
+    ]);
     // The deleted owner note's fact survives as the Save item's hover.
     expect(screen.getByTestId('engrave-job-save').getAttribute('title')).toContain('The file is the owner');
     expect(screen.getByTestId('engrave-design-import').textContent).toContain('Read a design (.3mf)');
+  });
+
+  it('starts the next cutting job from the File menu, asking first only when the job is unsaved', () => {
+    // The toolbar's project New is hidden on CNC pages (#686), so this item is a CNC page's way to
+    // begin another job: the one wizard, at step 1. The question is the toolbar's, in job words.
+    act(() => {
+      resetStartWizard();
+      useEngraveJobFileStore.setState({ dirty: false });
+    });
+    render(<EngravePanel />);
+    const menuNew = (): void => {
+      fireEvent.click(screen.getByTestId('engrave-file-menu-toggle'));
+      fireEvent.click(screen.getByTestId('engrave-job-new'));
+    };
+
+    // A saved job goes straight to step 1; the click puts the menu away.
+    menuNew();
+    expect(useStartWizardStore.getState().open).toBe(true);
+    expect(useStartWizardStore.getState().initialStep).toBe('machine');
+    expect(screen.queryByTestId('engrave-file-menu')).toBeNull();
+
+    // Unsaved changes: the question comes first, and "no" opens nothing.
+    act(() => {
+      useStartWizardStore.getState().closeWizard();
+      useEngraveJobFileStore.setState({ dirty: true });
+    });
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
+    menuNew();
+    expect(confirm).toHaveBeenCalledWith(expect.stringContaining('Start a new cutting job?'));
+    expect(useStartWizardStore.getState().open).toBe(false);
+
+    // …and "yes" goes on to the same wizard.
+    confirm.mockReturnValue(true);
+    menuNew();
+    expect(useStartWizardStore.getState().open).toBe(true);
+
+    confirm.mockRestore();
+    act(() => {
+      useEngraveJobFileStore.setState({ dirty: false });
+      useStartWizardStore.getState().closeWizard();
+    });
   });
 
   it('prints the stock as one line, and its edit is the wizard’s step 2 door', () => {

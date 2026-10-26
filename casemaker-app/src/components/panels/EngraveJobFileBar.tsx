@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type CSSProperties, type JSX } from 'react';
 import { useEngraveJobStore } from '@/store/engraveJobStore';
 import { useEngraveJobFileStore } from '@/store/engraveJobFileStore';
+import { useStartWizardStore } from '@/store/startWizardStore';
 
 /**
  * The ONE file bar (#686, design §1): the job's name, when it was last saved, the dirty marker,
@@ -10,6 +11,11 @@ import { useEngraveJobFileStore } from '@/store/engraveJobFileStore';
  * dirty marker and notices are the `engraveJobFileStore`'s, which serializes the open job on every
  * write. The old owner note is gone — the ownership fact ("the file is the owner: the package, the
  * run log and the sources travel with it") is the Save item's hover, where it belongs.
+ *
+ * The menu's first item starts the NEXT job (#686 follow-up): the toolbar's project New is hidden
+ * on CNC pages, so without it a CNC page has no way to begin another cutting job short of leaving
+ * for a print section. It opens the one wizard at step 1, and asks first only when the open job has
+ * unsaved changes — the same rule the toolbar's New applies to the print project.
  */
 
 const MUTED: CSSProperties = { fontSize: 11, color: '#9aa4b0', lineHeight: 1.5, margin: 0 };
@@ -91,6 +97,16 @@ export function EngraveJobFileBar({ onReadDesign, designReading = false }: Engra
     action();
   };
 
+  /**
+   * The next job (#686 follow-up). Opening the wizard loses nothing by itself, but finishing it
+   * replaces the open job — so the one moment worth a question is leaving unsaved changes behind,
+   * and the question is the toolbar's New in the job's words.
+   */
+  function startNewJob(): void {
+    if (dirty && !window.confirm('Start a new cutting job? Unsaved changes will be lost.')) return;
+    useStartWizardStore.getState().openWizard();
+  }
+
   return (
     <section
       aria-label="Job file"
@@ -151,6 +167,17 @@ export function EngraveJobFileBar({ onReadDesign, designReading = false }: Engra
               boxShadow: '0 6px 18px rgba(0,0,0,0.35)',
             }}
           >
+            <button
+              type="button"
+              role="menuitem"
+              data-testid="engrave-job-new"
+              title="Start a new cutting job — the setup wizard opens at step 1. An unsaved job is asked about first."
+              style={MENU_ITEM}
+              onClick={() => choose(startNewJob)}
+            >
+              New cutting job…
+            </button>
+            <div role="separator" style={{ borderTop: '1px solid #2c3540', margin: '3px 0' }} />
             <button
               type="button"
               role="menuitem"
