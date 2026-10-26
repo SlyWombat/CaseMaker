@@ -723,10 +723,11 @@ export function validateVise(
       severity: 'warning',
       code: 'vise-default',
       // Still a warning now that the jaws are calipered: the numbers are the product's, measured
-      // once on the reference unit, and this job's vise has not been measured ITSELF. The sentence
-      // says which of the two it is, because "unmeasured defaults" stopped being true on 2026-10-15.
+      // once on the one the product was designed around, and this job's vise has not been measured
+      // ITSELF. The sentence says which of the two it is in the operator's words (#690b): the
+      // shipped set is a fact, and where it came from belongs in the Technical fold, not here.
       message:
-        'Vise dimensions: shipped defaults (reference unit).',
+        'Vise: the shipped dimensions, not measured on this machine.',
     });
   }
 

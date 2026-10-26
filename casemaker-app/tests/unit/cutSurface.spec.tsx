@@ -567,7 +567,7 @@ describe('#419 §3 the Cut surface', () => {
     // #689 — the stale sentence names the reason; the reservation line is the ONE place the hold is
     // stated, so the box no longer says "its blank stays held" a second time.
     const staleState = screen.getByTestId('engrave-package-state').textContent ?? '';
-    expect(staleState).toContain('is stale');
+    expect(staleState).toContain('is out of date');
     expect(staleState).not.toContain('Its blank stays held');
     expect(screen.getByTestId('engrave-package-reservation').textContent).toContain('held for you');
 

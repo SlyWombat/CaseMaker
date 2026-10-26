@@ -233,11 +233,11 @@ describe('Open (#425 §6)', () => {
     await openDoc(doc);
     const state = useEngraveJobFileStore.getState();
     expect(useEngraveJobStore.getState().job.package).toEqual(doc.package);
-    expect(state.packageError).toContain('does not match its hash');
+    expect(state.packageError).toContain('does not match what was verified');
     expect(state.sourceError).toBeNull();
     expect(state.notice?.kind).toBe('warning');
     expect(state.notice?.text).toContain('Opened bench.cutjob.json.');
-    expect(state.notice?.text).toContain('does not match its hash');
+    expect(state.notice?.text).toContain('does not match what was verified');
   });
 
   it('a source that is reported but not required does not refuse the open', async () => {

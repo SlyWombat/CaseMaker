@@ -406,7 +406,9 @@ function toolOptionTitle(e: ToolLibraryEntry): string {
  * "nobody measured it" — it means nobody measured THIS machine's vise, and the badge says that.
  */
 function viseBadge(v: ViseParams): string {
-  if (v.source === 'default') return 'shipped · reference unit';
+  // #690b — the operator's words: the shipped set is measured, once, on the machine the product was
+  // designed around; it is this vise that has not been measured. "Reference unit" said neither.
+  if (v.source === 'default') return 'shipped · not measured here';
   if (v.source === 'saved') return v.measuredAt ? `saved · ${v.measuredAt}` : 'saved';
   return 'measured · this setup';
 }

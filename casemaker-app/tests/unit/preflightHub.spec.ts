@@ -216,7 +216,7 @@ describe('preflightHub: the run-policy rows', () => {
     const report = hubFor(changed, { package: frozen.ok ? frozen.package : null });
     expect(report.policyRows.map((r) => r.code)).toEqual(['package-stale']);
     expect(report.policyRows[0]!.owner).toBe('run');
-    expect(report.policyRows[0]!.message).toContain('The package of 14:02 is stale');
+    expect(report.policyRows[0]!.message).toContain('The frozen plan from 14:02 is out of date');
     expect(report.policyRows[0]!.message).toContain('Its blank stays held for this job.');
     expect(report.firstBlocking?.code).toBe('package-stale');
   });

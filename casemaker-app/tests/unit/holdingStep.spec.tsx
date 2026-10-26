@@ -449,7 +449,7 @@ describe('#684 — the picture, the folds, and the technical provenance', () => 
 
     const rows = screen.getAllByTestId('engrave-setup-step-finding-vise-default');
     expect(rows).toHaveLength(1);
-    expect(rows[0]!.textContent).toContain('Vise dimensions: shipped defaults (reference unit)');
+    expect(rows[0]!.textContent).toContain('Vise: the shipped dimensions, not measured on this machine');
     const technical = screen.getByTestId('engrave-setup-holding-technical');
     expect(technical.contains(rows[0]!)).toBe(true);
     expect(technical.textContent).toContain('10 mm fixed');

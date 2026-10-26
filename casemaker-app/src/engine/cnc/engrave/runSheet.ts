@@ -84,6 +84,7 @@ import {
 } from '@/engine/cnc/engrave/surfaceSpread';
 import { restSeamSentence } from '@/engine/cnc/engrave/restSettings';
 import { toolDisplayName } from '@/engine/cnc/toolDisplay';
+import { entryFor } from '@/engine/cnc/toolRegistry';
 import { finishSourceWords, type FinishSettingSource } from '@/engine/cnc/engrave/finishPass';
 import { MATERIAL_LABELS } from '@/engine/cnc/materials';
 import { VISE_BODY_DEPTH, viseEnvelope } from '@/engine/cnc/fixture';
@@ -2497,6 +2498,13 @@ function restSwapSteps(facts: RestPassFacts, labels?: RestProgramLabels): RunShe
   ];
 }
 
+/** The cutter a key names, in the operator's one display form (#690b). A key the registry does not
+ *  hold is not printed as a key either: the sentence stays readable without one. */
+function cutterWords(toolKey: string): string {
+  const entry = entryFor(toolKey);
+  return entry === null ? 'a flat end mill' : toolDisplayName(entry.tool);
+}
+
 /** #419 — a rest pair's positions in the run, 1-based among the ENGRAVING programs. */
 interface RestProgramLabels {
   rough: number;
@@ -3850,8 +3858,8 @@ export function buildRunSheet(
             `, down to ${fmtNum(item.depth)} mm at its centre. Where that cap cannot reach, the ` +
             'middle stands as a core' +
             (clearance === undefined
-              ? '; add a flat end mill to the setup and the engine pockets it at that depth in its own program.'
-              : `, and ${clearance.program.toolKey} pockets it flat at that depth in its own program` +
+              ? '; add a flat end mill to the setup and that cutter pockets it at that depth in its own program.'
+              : `, and ${cutterWords(clearance.program.toolKey)} pockets it flat at that depth in its own program` +
                 `${clearanceNumber === null ? '' : `, program ${clearanceNumber}`} — ` +
                 `${fmtNum(clearance.core.areaMm2)} mm² of floor at the cap.`),
           value: `${fmtNum(item.depth)} mm at the centre${levels === null ? '' : ` · ${levels.length} levels`}`,

@@ -192,17 +192,17 @@ export interface PackageStaleness {
  */
 export function packageStaleness(pkg: FrozenPackage, job: EngraveJob): PackageStaleness {
   if (pkg.jobId !== job.id) {
-    return { stale: true, reason: `the package belongs to job ${pkg.jobId}, not ${job.id}` };
+    return { stale: true, reason: 'the frozen plan belongs to a different job' };
   }
-  if (pkg.programs.length === 0) return { stale: true, reason: 'the package holds no program' };
+  if (pkg.programs.length === 0) return { stale: true, reason: 'nothing was frozen for this job yet' };
   if (jobFingerprint(job) !== pkg.jobHash) {
-    return { stale: true, reason: 'the job changed since the package was frozen' };
+    return { stale: true, reason: 'the job changed since it was frozen' };
   }
   // #574 — the registration plan is NOT in the program fingerprint (it does not change the .nc),
   // but it IS in the stored setups: a plan approved after the freeze stales the package, and the
   // reason names it so the Cut screen can offer a re-freeze rather than a re-generate.
   if (!sameRegistration(pkg.setups, jobSetups(job))) {
-    return { stale: true, reason: 'the registration plan changed since the package was frozen' };
+    return { stale: true, reason: 'the registration changed since it was frozen' };
   }
   return { stale: false, reason: null };
 }
@@ -227,7 +227,7 @@ export interface PackageIntegrity {
  * inconsistent). Neither ever causes the text to be dropped or the job to fail to open.
  */
 const PACKAGE_TAMPERED_SENTENCE =
-  'the saved program text does not match its hash; the package will not be offered for a run';
+  'the saved program does not match what was verified; it will not be offered for a run';
 
 /**
  * Is this package INTERNALLY the one it says it is? Recompute every text's FNV key, the frame keys,
@@ -241,7 +241,7 @@ const PACKAGE_TAMPERED_SENTENCE =
  */
 export function validatePackage(pkg: FrozenPackage): PackageIntegrity {
   if (pkg.programs.length === 0) {
-    return { ok: false, reason: 'the package holds no program' };
+    return { ok: false, reason: 'there is no frozen program' };
   }
   const setups = new Set(pkg.setups.map((setup) => setup.id));
   for (const program of pkg.programs) {
@@ -257,12 +257,12 @@ export function validatePackage(pkg: FrozenPackage): PackageIntegrity {
     if (!setups.has(program.setupId)) {
       return {
         ok: false,
-        reason: `the package names setup ${program.setupId}, which it does not carry`,
+        reason: 'the frozen program names a setup it does not carry',
       };
     }
   }
   if (packageHash(pkg.jobHash, pkg.programs) !== pkg.hash) {
-    return { ok: false, reason: 'the package does not match its own hash' };
+    return { ok: false, reason: 'the frozen plan does not match its own fingerprint' };
   }
   return { ok: true, reason: null };
 }

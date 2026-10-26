@@ -197,7 +197,9 @@ describe('variable-depth V-carve (#665)', () => {
     const f = g.findings.find((x) => x.code === 'vcarve-variable-core');
     expect(f?.severity).toBe('warning');
     expect(f?.message).toContain('Add a flat end mill after');
-    expect(f?.message).toContain('in setup 1');
+    // #690b — the setup number is the operator's (1-based); the message used to print the raw
+    // zero-based index, so the second setup read as "setup 1".
+    expect(f?.message).toContain('in setup 2');
     expect(f?.message).toContain('is not reached by the V');
   }, 60_000);
 

@@ -327,7 +327,7 @@ describe('guided job setup — the flow in the panel (#254, #681)', () => {
     // is exactly what the review saw. One row, and its words, is the fix.
     const rows = screen.getAllByTestId('engrave-setup-step-finding-vise-default');
     expect(rows).toHaveLength(1);
-    expect(rows[0]!.textContent).toContain('Vise dimensions: shipped defaults (reference unit)');
+    expect(rows[0]!.textContent).toContain('Vise: the shipped dimensions, not measured on this machine');
   });
 
   it('the panel’s Stock and Hold edit controls open that step of the same wizard, with the same counter', () => {

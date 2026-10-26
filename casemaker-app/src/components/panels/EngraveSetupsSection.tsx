@@ -588,8 +588,7 @@ export function EngraveSetupsSection({ initiallyOpen = false }: { initiallyOpen?
       )}
       {draft !== null && (
         <p style={MUTED} data-testid="engrave-setups-suggested">
-          The engine’s fresh suggestion — its grouping wins over the saved list only when you press Use this
-          plan.
+          A fresh suggestion — its grouping wins over the saved list only when you press Use this plan.
         </p>
       )}
       {reading.stale && (

@@ -725,14 +725,14 @@ export function EngraveCutSurface({
             </p>
           ) : !packageCurrent ? (
             <p style={WARN} data-testid="engrave-package-state">
-              The package of {clockOf(pkg.frozenAt)} is stale —{' '}
+              The frozen plan from {clockOf(pkg.frozenAt)} is out of date —{' '}
               {staleness?.reason ?? 'the job changed since it was frozen.'}
             </p>
           ) : mountMismatch ? (
             // #695 — the job itself still matches the package; the MACHINE no longer holds the
             // mount it was frozen for. The fix is step 1's action, not a re-freeze.
             <p style={WARN} data-testid="engrave-package-state">
-              The package of {clockOf(pkg.frozenAt)} is stale — the machine no longer holds{' '}
+              The frozen plan from {clockOf(pkg.frozenAt)} is out of date — the machine no longer holds{' '}
               {jobMountWords(frozenMount)} this job was frozen for. Change the machine in step 1.
             </p>
           ) : null}
@@ -774,7 +774,7 @@ export function EngraveCutSurface({
           )}
           {freezeError !== null && (
             <p style={WARN} data-testid="engrave-package-freeze-error">
-              The package was not frozen — {freezeError}.
+              Nothing was frozen — {freezeError}.
             </p>
           )}
         </section>

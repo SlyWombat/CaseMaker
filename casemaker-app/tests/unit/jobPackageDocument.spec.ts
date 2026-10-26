@@ -63,7 +63,7 @@ describe('a stored package is checked for integrity, not only for staleness (#42
     };
     expect(validatePackage(tampered)).toEqual({
       ok: false,
-      reason: 'the saved program text does not match its hash; the package will not be offered for a run',
+      reason: 'the saved program does not match what was verified; it will not be offered for a run',
     });
   });
 
@@ -78,14 +78,14 @@ describe('a stored package is checked for integrity, not only for staleness (#42
       programs: [{ ...pkg.programs[0]!, frameNc: 'G0 X2 Y2\n' }],
     };
     expect(validatePackage(tampered).ok).toBe(false);
-    expect(validatePackage(tampered).reason).toContain('does not match its hash');
+    expect(validatePackage(tampered).reason).toContain('does not match what was verified');
   });
 
   it('refuses a package whose own key does not match its programs', () => {
     const pkg = frozen();
     expect(validatePackage({ ...pkg, hash: packageHash('other-fingerprint', pkg.programs) })).toEqual({
       ok: false,
-      reason: 'the package does not match its own hash',
+      reason: 'the frozen plan does not match its own fingerprint',
     });
   });
 
@@ -97,7 +97,7 @@ describe('a stored package is checked for integrity, not only for staleness (#42
     };
     const verdict = validatePackage(tampered);
     expect(verdict.ok).toBe(false);
-    expect(verdict.reason).toContain('setup-gone');
+    expect(verdict.reason).toContain('a setup it does not carry');
   });
 });
 

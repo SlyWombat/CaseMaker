@@ -465,7 +465,7 @@ export function EngraveShapeRow({
           — down to {fmt(shape.depth)} mm at the centre. Where the V cannot reach, the middle
           stands as a core:{' '}
           {vCarve.coreCutterName === null
-            ? 'add a flat end mill to the setup and the engine pockets it at that depth in its own program.'
+            ? 'add a flat end mill to the setup and that cutter pockets it at that depth in its own program.'
             : `${vCarve.coreCutterName} pockets it flat at that depth in its own program, after the V-carve.`}
         </p>
       )}

@@ -203,11 +203,16 @@ test.describe('first job acceptance (§6)', () => {
   });
 
   test('no issue numbers, code tokens, internal ids or preflight owner tags', () => {
+    // #690b — the developer words the issue names are not operator text either: the app's own
+    // implementation nouns ("the engine", "the package", "the release flow") describe how it is
+    // built, not what the person at the machine is doing. Whole words, case-insensitive.
+    const DEV = /\b(?:the engine|the package|the release flow|manual upload|reference unit)\b/gi;
     const CODE =
       /#\d+|\b(?:cat|inv|bp|fx):|\blbl-|\b[a-z][a-z0-9]*(?:-[a-z0-9]+)*-(?:default|refused)\b|\b(?:flat|ball|bull|chamfer|engraver|drill|thread)-\d[\w.]*/g;
     const problems: string[] = [];
     for (const screen of screens) {
       for (const match of screen.text.matchAll(CODE)) problems.push(`${screen.name}: ${match[0]}`);
+      for (const match of screen.text.matchAll(DEV)) problems.push(`${screen.name}: “${match[0]}” is a developer word`);
       if (screen.ownerTags > 0) problems.push(`${screen.name}: ${screen.ownerTags} preflight owner tag(s)`);
     }
     expect(problems, problems.join('\n')).toEqual([]);

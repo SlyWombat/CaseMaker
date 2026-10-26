@@ -212,7 +212,7 @@ function runPolicyRows(input: PreflightHubInput, firstScope: PreflightScope): Pr
         severity: 'error',
         code: 'package-stale',
         message:
-          `The package of ${clockOf(input.package.frozenAt)} is stale — ${staleness.reason ?? 'the job changed since it was frozen.'} ` +
+          `The frozen plan from ${clockOf(input.package.frozenAt)} is out of date — ${staleness.reason ?? 'the job changed since it was frozen.'} ` +
           'Its blank stays held for this job.',
         owner: 'run',
         cause: cause(),

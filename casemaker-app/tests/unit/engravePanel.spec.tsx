@@ -167,7 +167,7 @@ describe('EngravePanel (#205)', () => {
 
   it('changes the vise badge from the shipped set once the vise is saved', () => {
     render(<EngravePanel />);
-    // "shipped · reference unit", not "unmeasured": the numbers ARE measured — once, on the unit
+    // "shipped · not measured here", not "unmeasured": the numbers ARE measured — once, on the unit
     // Makera measured, which is not this user's vise (#208, 2026-10-15).
     expect(screen.getByTestId('engrave-vise-badge').textContent).toMatch(/shipped/);
     fireEvent.click(screen.getByTestId('engrave-vise-save'));

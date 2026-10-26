@@ -211,7 +211,7 @@ describe('runSheet (#207)', () => {
 
   it('opens section 8 with the shipped-vise warning only when the vise is a default', () => {
     const def = section(sheetFor(dj()), 'warnings');
-    expect(def.steps[0]!.text).toContain('Vise dimensions: shipped defaults (reference unit)');
+    expect(def.steps[0]!.text).toContain('Vise: the shipped dimensions, not measured on this machine');
     expect(def.steps[0]!.bold).toBe(true);
 
     const measured = section(sheetFor(dj({ ...DEFAULT_VISE, source: 'measured' })), 'warnings');

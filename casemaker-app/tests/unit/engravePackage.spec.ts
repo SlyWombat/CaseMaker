@@ -163,7 +163,7 @@ describe('the package engine (#419 §4)', () => {
     if (!made.ok) throw new Error(made.reason);
     const st = packageStaleness(made.package, approved);
     expect(st.stale).toBe(true);
-    expect(st.reason).toContain('registration plan');
+    expect(st.reason).toContain('the registration changed');
   });
 
   it('#621 — the measured flatness (the registration’s outcome) does not stale the package', () => {

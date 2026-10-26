@@ -72,6 +72,7 @@ import {
 import { MATERIAL_LABELS } from '@/engine/cnc/materials';
 import { cutterOnMetalLine } from '@/engine/cnc/engrave/cutterMaterial';
 import { toolDisplayName } from '@/engine/cnc/toolDisplay';
+import { entryFor } from '@/engine/cnc/toolRegistry';
 import { toPartPlan, labelProfile, jobDepthLimit, keepOutNameAt, type PartPlan } from '@/engine/cnc/engrave/partPlan';
 import {
   dedupeFindings,
@@ -844,6 +845,13 @@ export interface EngraveRegions {
  *
  * `null` tool answers nothing: there is no cutter to name.
  */
+/** The cutter a key names, in the operator's display form (#690b); null when the registry cannot
+ *  name it, so the caller can word the sentence without printing a key or repeating itself. */
+function cutterWords(toolKey: string): string | null {
+  const entry = entryFor(toolKey);
+  return entry === null ? null : toolDisplayName(entry.tool);
+}
+
 function metalLineFindings(job: EngraveJob, tool: Tool | null): JobFinding[] {
   if (tool === null || !cutterOnMetalLine(tool, job.stock.material)) return [];
   const overridden = job.metalLineOverride === true;
@@ -2515,10 +2523,15 @@ function coreWarningFindings(
       `${core.ofName} is ${mmValue(core.depth)} mm deep at its centre, but the V's width runs out ` +
       `before the middle: ${mmValue(core.areaMm2)} mm² of floor is not reached by the V. ` +
       (where === null
-        ? `Add a setup that names a flat end mill after the V; the engine pockets that area at ` +
+        ? `Add a setup that names a flat end mill after the V; that cutter pockets the area at ` +
           `${mmValue(core.depth)} mm in its own program.`
-        : `Add a flat end mill after ${where.toolKey} in setup ${where.setupIndex}; the engine ` +
-          `pockets that area at ${mmValue(core.depth)} mm in its own program.`),
+        : (() => {
+            const after = cutterWords(where.toolKey);
+            return (
+              `Add a flat end mill ${after === null ? 'after the V' : `after ${after}`} in setup ` +
+              `${where.setupIndex + 1}; it pockets that area at ${mmValue(core.depth)} mm in its own program.`
+            );
+          })()),
   }));
 }
 

@@ -291,7 +291,7 @@ describe('the job file (#425 §6)', () => {
     expect(parsed.job.package?.programs[0]!.nc).toBe(`${NC}G0 X0\n`);
     expect(parsed.package).toEqual({
       ok: false,
-      reason: 'the saved program text does not match its hash; the package will not be offered for a run',
+      reason: 'the saved program does not match what was verified; it will not be offered for a run',
     });
     expect(parsed.sources.map((check) => check.status)).toEqual(['missing']);
     expect(parsed.sourceError).toBeNull();
@@ -338,7 +338,7 @@ describe('the package fingerprint survives the document (#425)', () => {
 
     const edited: EngraveJob = { ...doc, name: 'Renamed' };
     expect(packageStaleness(pkg, edited).stale).toBe(true);
-    expect(packageStaleness(pkg, edited).reason).toBe('the job changed since the package was frozen');
+    expect(packageStaleness(pkg, edited).reason).toBe('the job changed since it was frozen');
   });
 
   it('appending a run log does not stale an approved package', () => {

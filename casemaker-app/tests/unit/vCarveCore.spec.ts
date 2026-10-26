@@ -254,8 +254,10 @@ describe('the clearance pair (#677)', () => {
     const vStep = texts.find((t) => t.includes('VARIABLE depth'));
     expect(vStep).toBeDefined();
     expect(vStep).toContain('pockets it flat at that depth in its own program');
-    // The sheet names the program's cutter by key, as every program section does.
-    expect(vStep).toContain(FLAT_TOOL.key);
+    // #690b — the sheet names the cutter in the operator's words, never by its internal key. This
+    // entry is not in the library this bare spec loads, so the sentence falls back to the kind;
+    // a real job resolves the display name (the specs that register their cutters assert that).
+    expect(vStep).not.toContain(FLAT_TOOL.key);
     const coreStep = texts.find((t) => t.includes('is pocketed flat at 0.5 mm'));
     expect(coreStep).toBeDefined();
     expect(coreStep).toContain('after the V-carve');
