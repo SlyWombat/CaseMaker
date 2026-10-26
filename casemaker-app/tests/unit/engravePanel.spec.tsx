@@ -2894,3 +2894,126 @@ describe('EngravePanel — texture (#670)', () => {
     expect(note).toContain('seed 1');
   });
 });
+
+// #674 — FLUTES and PRISMS: the markers on their rows, the numbers they derive, and the controls
+// each one hides (a prism is one plane region cut from its middle outward, not a ladder or a pair).
+describe('EngravePanel — flute and prism (#674)', () => {
+  const V_TIP = flatEndMill(3.175, {
+    name: '3.175 mm 90° V (0.2 tip)',
+    typeText: 'Chamfer',
+    shape: 'chamfer',
+    tipDiameter: 0.2,
+    diameter: 3.175,
+    angle: 90,
+    halfAngle: null,
+  });
+
+  const FLUTE: EngraveTraceItem = {
+    id: 'grip',
+    name: 'grip',
+    kind: 'line',
+    position: { x: 50, y: 30 },
+    rotation: 0,
+    depth: 2,
+    enabled: true,
+    points: [
+      [-10, 0],
+      [10, 0],
+    ],
+    closed: false,
+    flute: {},
+  };
+
+  const PRISM: EngraveShape = {
+    id: 'plate',
+    name: 'plate',
+    kind: 'rect',
+    position: { x: 50, y: 30 },
+    rotation: 0,
+    depth: 2,
+    enabled: true,
+    width: 20,
+    height: 10,
+    cornerRadius: 0,
+    prism: {},
+  };
+
+  function show(job: Partial<EngraveJob>): void {
+    act(() =>
+      useEngraveJobStore.setState({
+        job: { ...defaultEngraveJob(), labels: [], traces: [], shapes: [], toolKey: 'inv:v-674', tool: V_TIP, ...job },
+      }),
+    );
+    render(<EngravePanel />);
+  }
+
+  it('chips a fluted line as a Flute, states its ramp, and writes it back', () => {
+    show({ traces: [FLUTE] });
+    expand('engrave-trace');
+    expect(screen.getByTestId('engrave-trace-type-0').textContent).toBe('Flute');
+    const note = screen.getByTestId('engrave-trace-flute-note-0').textContent ?? '';
+    // 3 × the 2 mm depth: a 6 mm ramp at each end, and the middle at full depth.
+    expect(note).toContain('6 mm at each end');
+    expect(note).toContain('three times the depth');
+    expect(note).toContain('2 mm deep');
+
+    fireEvent.change(screen.getByTestId('engrave-trace-flute-ramp-0'), { target: { value: '1.5' } });
+    const trace = useEngraveJobStore.getState().job.traces![0]!;
+    expect(trace.kind === 'line' ? trace.flute : null).toEqual({ rampMm: 1.5 });
+    // The note reads the typed ramp and its source.
+    expect(screen.getByTestId('engrave-trace-flute-note-0').textContent).toContain('typed');
+
+    // Unchecking the flute clears the marker; the line stays a plain trace.
+    fireEvent.click(screen.getByTestId('engrave-trace-flute-0'));
+    const after = useEngraveJobStore.getState().job.traces![0]!;
+    expect(after.kind === 'line' ? after.flute : null).toBeUndefined();
+    expect(screen.getByTestId('engrave-trace-type-0').textContent).toBe('Engrave');
+  });
+
+  it('adds a flute and a prism from the picker', () => {
+    render(<EngravePanel />);
+    fireEvent.click(screen.getByTestId('engrave-add-flute'));
+    const trace = useEngraveJobStore.getState().job.traces![0]!;
+    expect(trace.kind).toBe('line');
+    expect(trace.kind === 'line' ? trace.flute : null).toEqual({});
+
+    fireEvent.click(screen.getByTestId('engrave-add-prism'));
+    const shape = useEngraveJobStore.getState().job.shapes[0]!;
+    expect(shape.prism).toEqual({});
+    expect(screen.getByTestId('engrave-shape-type-0').textContent).toBe('Prism');
+  });
+
+  it('chips a prism as a Prism, states its derived numbers, and hides the V-carve and rest controls', () => {
+    show({ shapes: [PRISM] });
+    expand('engrave-shape');
+    expect(screen.getByTestId('engrave-shape-type-0').textContent).toBe('Prism');
+    expect(screen.getByText('Prism rect "plate" 20×10')).toBeTruthy();
+    const note = screen.getByTestId('engrave-shape-prism-note-0').textContent ?? '';
+    expect(note).toContain('stands 2 mm');
+    expect(note).toContain('1 mm flat base');
+    expect(note).toContain('the CAM’s default');
+    expect(note).toContain('5 mm out');
+    // A prism is one plane region: no medial-axis ladder, no rest pair.
+    expect(screen.queryByTestId('engrave-shape-vcarve-depth-0')).toBeNull();
+
+    fireEvent.change(screen.getByTestId('engrave-shape-prism-base-0'), { target: { value: '3' } });
+    expect(useEngraveJobStore.getState().job.shapes[0]!.prism).toEqual({ baseMm: 3 });
+  });
+
+  it('turns a plain pocket into a prism and back from the row', () => {
+    const plain: EngraveShape = { ...PRISM, prism: undefined };
+    show({ shapes: [plain] });
+    expand('engrave-shape');
+    // The job's cutter is a V, so a plain rect is a V-carve until the prism marker replaces it.
+    expect(screen.getByTestId('engrave-shape-type-0').textContent).toBe('V-carve');
+    expect(screen.queryByTestId('engrave-shape-prism-note-0')).toBeNull();
+
+    fireEvent.click(screen.getByTestId('engrave-shape-prism-0'));
+    expect(useEngraveJobStore.getState().job.shapes[0]!.prism).toEqual({});
+    expect(screen.getByTestId('engrave-shape-type-0').textContent).toBe('Prism');
+
+    fireEvent.click(screen.getByTestId('engrave-shape-prism-0'));
+    expect(useEngraveJobStore.getState().job.shapes[0]!.prism).toBeUndefined();
+    expect(screen.getByTestId('engrave-shape-type-0').textContent).toBe('V-carve');
+  });
+});

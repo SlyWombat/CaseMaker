@@ -1233,8 +1233,13 @@ export function engraveRegions(
     // floor is the design eroded by the cut's whole depth, which is the variable carve's frame
     // with a flat cap. The plane radius is therefore `tip + depth·tan`, and the floor inset the
     // whole depth's slant.
+    //
+    // #674 — a PRISM is the same convention for the same reason: its ring's boundary IS the mouth
+    // at the top face (the shape's edge and the derived margin), so the flank stands on it and the
+    // floor is the mouth eroded by the whole height's slant — which is what makes the base `base`
+    // wide and the shape stand at full height.
     const effective =
-      engrave.inlay !== undefined
+      engrave.inlay !== undefined || engrave.prism !== undefined
         ? {
             ...plane,
             planeRadius: cone.tipRadius + engrave.depth * cone.tanHalf,
@@ -1291,8 +1296,9 @@ export function engraveRegions(
    */
   const designOf = (engrave: PartPlan['engraves'][number]): Polygons => {
     // #673 — an INLAY's design is the TOP boundary (the profile): its flank stands on the design
-    // at the top face, so the measured opening at a plane is not the design.
-    if (engrave.inlay !== undefined) {
+    // at the top face, so the measured opening at a plane is not the design. #674 — a PRISM's is
+    // its RING's boundary, the same way.
+    if (engrave.inlay !== undefined || engrave.prism !== undefined) {
       const cs = executeProfile(tl, engrave.profile);
       const polygons = cs.toPolygons() as Polygons;
       cs.delete();
@@ -1782,7 +1788,40 @@ export function engraveRegions(
     }),
     ...(cone === null
       ? traceCuts.map((c): OraclePredicted => ({ depth: c.depth, polygons: c.polygons, itemId: c.id }))
-      : plan.traces.map((t): OraclePredicted => ({ depth: t.depth, polygons: [], itemId: t.id, groove: { paths: t.paths, closed: t.closed, cone } }))),
+      : plan.traces.flatMap((t): OraclePredicted[] => {
+          // #674 — a FLUTE is predicted per SEGMENT at the segment's END depth, because that is
+          // exactly what both sweep engines remove: a move is applied at its own Z. The entry is
+          // the same #408 groove, just one segment wide, so nothing here re-derives the cone.
+          if (t.depths === undefined) {
+            return [{ depth: t.depth, polygons: [], itemId: t.id, groove: { paths: t.paths, closed: t.closed, cone } }];
+          }
+          const entries: OraclePredicted[] = [];
+          for (let pi = 0; pi < t.paths.length; pi++) {
+            const path = t.paths[pi]!;
+            const depths = t.depths[pi];
+            if (depths === undefined || path.length === 0) continue;
+            const last = (t.closed[pi] ?? false) ? path.length : path.length - 1;
+            for (let j = 0; j < last; j++) {
+              // The move's DEEP end: `flatMovesOf` sweeps a segment at `min(z0, z1)` (#629), and Z
+              // is NEGATIVE, so that is the DEEPER of the two points — `max` of the positive
+              // depths. Predicting the shallow end's would leave the sim removing a sliver the
+              // entry never promised.
+              const depth = Math.max(depths[j] ?? 0, depths[(j + 1) % path.length] ?? 0);
+              if (!(depth > 0)) continue;
+              entries.push({
+                depth,
+                polygons: [],
+                itemId: t.id,
+                groove: {
+                  paths: [[[path[j]![0], path[j]![1]], [path[(j + 1) % path.length]![0], path[(j + 1) % path.length]![1]]]],
+                  closed: [false],
+                  cone,
+                },
+              });
+            }
+          }
+          return entries;
+        })),
     // #218 — a cut-out's kerf at the tab top, and the same kerf less its tab rectangles at the
     // through depth. Every placed tab is subtracted; an unplaced one is not, and its material is
     // correctly predicted as cut away.

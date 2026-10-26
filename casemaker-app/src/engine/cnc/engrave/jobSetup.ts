@@ -35,6 +35,8 @@ import { FASTENERS } from '@/engine/compiler/fasteners';
 import { vCone, vFluteLength } from '@/engine/cnc/vProfile';
 import { inlayGlueGap, inlayMarked, inlayNumbers } from './inlay';
 import { textureNumbers, textureStrokes } from './texture';
+import { fluteNumbers, fluteOperationName } from './flute';
+import { prismNumbers } from './prism';
 import { reliefNumbers } from '@/engine/cnc/cam/relief';
 import type {
   EngraveAnyItem,
@@ -173,6 +175,17 @@ export type JobFindingCode =
   | 'texture-tool'
   | 'texture-empty'
   | 'texture-crowded'
+  // Flutes and prisms (#674). `flute-tool` is the cutter the trace path refuses; `flute-short` a
+  // path whose two ramps overlap, so the groove never reaches the stated depth. A prism's four are
+  // the cone its sides need (`prism-needs-cone`), the tip flat its base is cleared by
+  // (`prism-tip`), a base narrower than that flat twice (`prism-base`), and a shape that cannot
+  // carry one (`prism-shape`).
+  | 'flute-tool'
+  | 'flute-short'
+  | 'prism-needs-cone'
+  | 'prism-tip'
+  | 'prism-base'
+  | 'prism-shape'
   // Through-cuts and cut-outs (#218). `through-needs-board`: no under-board, or one thinner than
   // the breakthrough plus a millimetre. `through-tool-reach`: the cutter's flutes/shank do not
   // cover `thickness + breakthrough`. `tab-unplaceable`, `cutout-empty` and `loose-piece` are
@@ -1393,6 +1406,123 @@ export function validateJob(
     });
   }
 
+  // FLUTES (#674). A flute is a line cut with a Z profile instead of a plunge: the tool starts on
+  // the surface and feeds down, and back up at the other end. Two things can be wrong with the
+  // document — a cutter the trace path refuses, and ramps that overlap because the line is short —
+  // and both are stated with the numbers the plan will run.
+  const fluteTool = jobTool(job);
+  const traceCapable = fluteTool === null ? null : cuttingForTrace(fluteTool);
+  for (const trace of job.traces ?? []) {
+    if (!trace.enabled || trace.construction || trace.kind !== 'line' || trace.flute === undefined) continue;
+    const who = fluteOperationName(trace);
+    if (fluteTool !== null && traceCapable !== null && !traceCapable.ok) {
+      findings.push({
+        severity: 'error',
+        code: 'flute-tool',
+        labelId: trace.id,
+        message:
+          `${who} is a flute, and a flute is cut as a trace; "${fluteTool.name}" (${fluteTool.shape}) ` +
+          'is not a trace cutter. Use a V-bit for a V groove or a flat end mill for a flat-bottomed one.',
+      });
+      continue;
+    }
+    const numbers = fluteNumbers(trace.flute, trace.depth);
+    const pathLength = lineLength(trace.points, trace.closed);
+    if (2 * numbers.rampMm >= pathLength) {
+      const peak = pathLength > 0 ? (trace.depth * pathLength) / (2 * numbers.rampMm) : 0;
+      findings.push({
+        severity: 'warning',
+        code: 'flute-short',
+        labelId: trace.id,
+        message:
+          `${who}: the path is ${fmt3(pathLength)} mm long and its two ${fmt3(numbers.rampMm)} mm ` +
+          `ramps overlap, so the groove peaks at ${fmt3(peak)} mm instead of the stated ` +
+          `${fmt3(trace.depth)} mm. Shorten the ramp or lengthen the line.`,
+      });
+    }
+  }
+
+  // RAISED PRISMS (#674). The V's flank IS the shape's side, so a prism needs a cone; its base is
+  // cleared by the tip flat, so it needs a tipped V and a base wider than that flat twice. Each
+  // refusal is the reason the ring the plan derives would not cut what the document asks for.
+  const prismTool = jobTool(job);
+  const prismCone = prismTool === null ? null : vCone(prismTool);
+  for (const item of job.shapes) {
+    if (!item.enabled || item.construction || item.prism === undefined) continue;
+    const who = itemLabel(item);
+    if (item.texture !== undefined || item.inlay !== undefined || item.vCarveDepth === 'variable') {
+      findings.push({
+        severity: 'error',
+        code: 'prism-shape',
+        labelId: item.id,
+        message:
+          `${who} is marked as a prism, and a prism is one plane region: it cannot also be a ` +
+          'texture, an inlay half, or a variable-depth V-carve. Clear the other marker.',
+      });
+      continue;
+    }
+    if (item.through === true) {
+      findings.push({
+        severity: 'error',
+        code: 'prism-shape',
+        labelId: item.id,
+        message:
+          `${who} is a raised prism, which stands ON the blank; a through cut has nothing to ` +
+          'stand on. Turn `through` off.',
+      });
+      continue;
+    }
+    const check = prismNumbers(prismCone, item.depth, item.prism);
+    const n = check.numbers;
+    if (check.ok) continue;
+    if (check.code === 'prism-needs-cone') {
+      findings.push({
+        severity: 'error',
+        code: 'prism-needs-cone',
+        labelId: item.id,
+        message:
+          prismTool === null
+            ? `${who} is a raised prism, and a prism's sides are a V-bit's flank: choose a V-bit first.`
+            : `${who} is a raised prism, and a prism's sides are a V-bit's flank; "${prismTool.name}" ` +
+              `is a ${prismTool.shape} cutter with no cone. Use a V-bit.`,
+      });
+      continue;
+    }
+    if (check.code === 'prism-tip') {
+      findings.push({
+        severity: 'error',
+        code: 'prism-tip',
+        labelId: item.id,
+        message:
+          `${who} is a raised prism, and its base is cleared by the cutter's tip flat; ` +
+          `"${prismTool === null ? 'the cutter' : prismTool.name}" has a point tip, which leaves ` +
+          `the ${fmt3(n.baseMm)} mm base as ridges. Use a V-bit with a tip diameter.`,
+      });
+      continue;
+    }
+    findings.push({
+      severity: 'error',
+      code: 'prism-base',
+      labelId: item.id,
+      message:
+        `${who}'s base is ${fmt3(n.baseMm)} mm, but the tip's flat is ${fmt3(2 * (n.planeRadiusMm - n.slopeWidthMm))} mm ` +
+        "across, so the tip has no path between the shape's slope and the base's outer bevel. " +
+        `Widen the base past ${fmt3(2 * (n.planeRadiusMm - n.slopeWidthMm))} mm, or use a smaller tip.`,
+    });
+  }
+  for (const item of job.combined ?? []) {
+    if (!item.enabled || item.prism === undefined) continue;
+    findings.push({
+      severity: 'error',
+      code: 'prism-shape',
+      labelId: item.id,
+      message:
+        `${itemLabel(item)} is marked as a prism, but a prism sits on a rectangle, circle, slot or ` +
+        'polygon: a border, frame or cutaway has holes, so there is no one outline for the slope ' +
+        'to stand on. Draw the shape as its own region.',
+    });
+  }
+
   // MILLED THREADS (#445, #434 phase 2). A thread mill does not drill (D1): every check here
   // assumes the pilot, and the pilot's existence is a WARNING with the uncertainty named, because
   // no program in this app cut it and no document proves it. The CAM is the exact gate for the
@@ -1790,6 +1920,20 @@ export function validateJob(
   if ((options.derivedCores ?? 0) === 0) findings.push(...setupProgramFindings(job));
 
   return findings;
+}
+
+/** A line item's path length, mm: its segments, plus the closing one for a ring (#674). */
+function lineLength(points: readonly (readonly [number, number])[], closed: boolean): number {
+  let total = 0;
+  for (let i = 1; i < points.length; i++) {
+    total += Math.hypot(points[i]![0] - points[i - 1]![0], points[i]![1] - points[i - 1]![1]);
+  }
+  if (closed && points.length >= 2) {
+    const first = points[0]!;
+    const last = points[points.length - 1]!;
+    total += Math.hypot(first[0] - last[0], first[1] - last[1]);
+  }
+  return total;
 }
 
 /** A printed millimetre figure: rounded to 0.001, trailing zeros dropped (`2.0` → `2`, `2.61`). */

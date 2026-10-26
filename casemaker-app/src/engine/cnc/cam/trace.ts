@@ -57,8 +57,15 @@ export interface TracePaths {
   paths: [Mm, Mm][][];
   /** Whether `paths[i]` returns to its first point. */
   closed: boolean[];
-  /** Positive mm. */
+  /** Positive mm: the groove's deepest point. */
   depth: Mm;
+  /**
+   * #674 — a FLUTE's Z profile: one depth per point (positive mm below the top face), parallel to
+   * `paths`. Absent = the path is cut at `depth` throughout, as it always was. Present = the path
+   * is walked ONCE per depth pass with Z following the profile clamped to the pass — a continuous
+   * feed with no plunge to depth and no retract out of material.
+   */
+  depths?: readonly (readonly number[])[];
 }
 
 /** The point a trace is "reached" at for ordering: the first point of its first non-empty path. */
@@ -107,17 +114,50 @@ function orderNearest(items: readonly TracePaths[]): TracePaths[] {
  * move before the next operation's first rapid is always `safeZ` — the same invariant
  * `buildMoves` keeps.
  *
- * No offset, no ramping, no linking between paths (each path retracts to `hopZ` first): a straight
- * link between two strokes could cross a third and cut it, the same reason `engraveJob` hops.
+ * No offset and no linking between paths (each path retracts to `hopZ` first): a straight link
+ * between two strokes could cross a third and cut it, the same reason `engraveJob` hops.
+ *
+ * #674 — A FLUTE (`trace.depths`) is the one path that DOES ramp. Its Z follows the plan's own
+ * per-point profile, clamped to each pass's depth, as one continuous feed: the profile starts and
+ * ends at the top face, so the plunge is a move in air and the retract lifts off air rather than
+ * out of a groove — no plunge dimple at either end, which is the whole point of a flute. The
+ * profile's steps are the plan's (`flute.ts` subdivides them), and both sweep engines apply a move
+ * at the move's own Z, so the file, the sim and the oracle describe the same staircase.
  */
 function buildTraceMoves(trace: TracePaths, params: CutParams): CamMove[] {
   const moves: CamMove[] = [];
   let last: [number, number] = [0, 0];
   for (const z of zPasses(trace.depth, params.stepDown)) {
+    // The positive depth this pass may reach — the flute profile is clamped to it, so a deep
+    // groove is still stepped rather than cut in one plunge-free dive.
+    const limit = -z;
     for (let pi = 0; pi < trace.paths.length; pi++) {
       const path = trace.paths[pi]!;
       if (path.length === 0) continue;
       const [x0, y0] = path[0]!;
+      const profile = trace.depths?.[pi];
+
+      if (profile !== undefined) {
+        const at = (j: number): number => -Math.min(profile[j] ?? 0, limit);
+        moves.push({ kind: 'rapid', x: x0, y: y0, z: HOP_Z });
+        moves.push({ kind: 'feed', x: x0, y: y0, z: at(0), f: params.plungeFeed });
+        let ex = x0;
+        let ey = y0;
+        for (let j = 1; j < path.length; j++) {
+          const [x, y] = path[j]!;
+          moves.push({ kind: 'feed', x, y, z: at(j), f: params.feed });
+          ex = x;
+          ey = y;
+        }
+        if ((trace.closed[pi] ?? false) && path.length >= 2) {
+          moves.push({ kind: 'feed', x: x0, y: y0, z: at(0), f: params.feed });
+          ex = x0;
+          ey = y0;
+        }
+        moves.push({ kind: 'rapid', x: ex, y: ey, z: HOP_Z });
+        last = [ex, ey];
+        continue;
+      }
 
       moves.push({ kind: 'rapid', x: x0, y: y0, z: HOP_Z });
       moves.push({ kind: 'feed', x: x0, y: y0, z, f: params.plungeFeed });

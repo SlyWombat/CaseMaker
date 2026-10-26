@@ -1,6 +1,6 @@
 # Operations matrix — CAM operation types across the category, and what Case Maker posts and offers
 
-Status as of 2026-10-26, Case Maker `main` 2d02847e (GitHub issue #663). Companion to
+Status as of 2026-10-26, Case Maker `main` 454809f7 (GitHub issue #663). Companion to
 `MAKERA-VS-CASEMAKER.md` (§G "CAM & output") and `/Makera-Parity.md` §2 (the 14 Studio strategy types).
 
 The maintainer's words: "operation palettes we need to track and make sure that we offer the same
@@ -51,14 +51,14 @@ Manufacture (personal tier), **ES** Easel, **BT** Bantam Tools Desktop CNC (Bant
 | Facing / surfacing the stock | not established | not established | Face† (page not opened) | not established | facing [BT1]† | Level [KM1] | — | not one of the 14 types [MK1] | not established | YES: raster skim to Z0, wood/metal only (`cam/facing.ts`, `engine/cnc/engrave/facingTool.ts`) | YES: facing switch + depth (`EngravePanel.tsx`, `setFacing`) and the start wizard's seed |
 | Image to relief (greyscale to depth) | not established | PhotoVCarve Strategy [VC1] | not established | not established | not established | not established | Image [LB1] | Trace Image (tutorial) [MK3]; Laser Image | Relief: Carve (greyscale) [SM1]† | YES: a PNG goal's luminance becomes the top-Z heightfield through one stated map (relief depth × (1 − luminance/255), white at the top face) and the existing goal pipeline surfaces it — roughing, parallel finish, #671's passes, the dexel check (`cam/relief.ts`, `import/png.ts`, #672) | YES: the Surface picker takes a PNG; the goal row's Technical fold sets the relief depth, the direction and the placed width, and states the pixel pitch against the grid and the cutter (`EngraveTargetObjectRow.tsx`, #672) |
 | Inlay | Pro inlays (advanced V-carve) † [CC1] | Auto-inlay Toolpaths; VCarve Inlays (Pro) [VC1] | not established | not established | not established | not established | — | not established | not established | YES: the female pocket is a plane V-carve at the region's depth, and the male is a derived JOB — the design mirrored in Y, the complement cut around the plug at `pocket − glue gap`, the island eroded by `gap × tan(halfAngle)` (`engine/cnc/engrave/inlay.ts`, #673) | YES: “Inlay” in the operation picker, the glue-gap field and the derived plug numbers on the shape row, and “Save the male blank…” (`EngraveShapeRow.tsx`, #673) |
-| Fluting / prism / moulding | not established | Fluting; Raised Prism Machining; moulding named [VC1] | not established | not established | not established | not established | — | not established | not established | NO | NO |
+| Fluting / prism / moulding | not established | Fluting; Raised Prism Machining; moulding named [VC1] | not established | not established | not established | not established | — | not established | not established | YES: a FLUTE is a `line` with a per-point Z profile (0 at both ends, the stated depth between ramps of `rampMm`, default 3× the depth) derived in the plan and cut as one continuous ramped trace, predicted per segment at each move's own depth (`engrave/flute.ts`, `cam/trace.ts`, #674); a PRISM is a plane V-carve of a derived RING around a shape under the inlay's top-face convention, its base `baseMm` wide, its margin `base + 2·height·tan` (`engrave/prism.ts`, #674) | YES: “Flute along a line” and “Raise a prism” in the operation picker; the line row's ramped-ends checkbox and ramp field, the shape row's prism toggle and base field with the derived margin and slope (`EngraveTraceRow.tsx`, `EngraveShapeRow.tsx`, #674) |
 
 ## 2. Case Maker gaps
 
 Tracking: umbrella **#676** (the matrix to 90 % YES in both Case Maker columns — 21 of the 23 non-refused rows), with the
 per-row issues: #535/#536 surface a mesh (unlocks 3D roughing and parallel finishing), #667 rest pass, #664 open paths,
-#668 bore (landed), #669 chamfer, #665 advanced V-carve, #671 scallop/pencil, #673 inlay, #672 image relief, #670 texture
-(landed), #674 fluting/prism, #675 per-hole peck; rotary wrap stays #545.
+#668 bore (landed), #669 chamfer, #665 advanced V-carve, #671 scallop/pencil, #673 inlay, #672 image relief, #670 texture,
+#674 fluting/prism (landed), #675 per-hole peck; rotary wrap stays #545.
 
 Refusals checked first (`MAKERA-VS-CASEMAKER.md` §G, `/Makera-Parity.md` §14.4): laser modules (decision 4),
 R-7 toolpath template library, R-12 Gerber, R-13 STEP, R-15 nesting/tiling, R-16 ramping (reopened for metal

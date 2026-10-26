@@ -32,6 +32,8 @@ describe('#662 the operation types', () => {
       'thread',
       'surface',
       'texture',
+      'flute',
+      'prism',
     ]);
     // Every type says what it makes, and carries the picker's test id.
     for (const type of OPERATION_TYPES) {
@@ -73,6 +75,15 @@ describe('#662 the operation types', () => {
     expect(operationTypeOfItem({ kind: 'rect', texture: { pattern: 'scallop' } }, 'pocket')).toBe('texture');
     expect(operationTypeOfItem({ kind: 'rect', texture: { pattern: 'stipple' }, inlay: { role: 'female' } }, 'v-carve')).toBe('texture');
     expect(operationTypeOfItem({ kind: 'rect', texture: { pattern: 'stipple' }, construction: true }, 'v-carve')).toBeNull();
+    // #674 — a fluted line is a flute; a prism region is a prism, and the prism reads first (the
+    // plan gives its marker precedence; `prism-shape` refuses a region carrying two markers).
+    expect(operationTypeOfItem({ kind: 'line', flute: {} }, 'pocket')).toBe('flute');
+    expect(operationTypeOfItem({ kind: 'line' }, 'pocket')).toBe('engrave');
+    expect(operationTypeOfItem({ kind: 'stroke-label' }, 'pocket')).toBe('engrave');
+    expect(operationTypeOfItem({ kind: 'rect', prism: {} }, 'v-carve')).toBe('prism');
+    expect(operationTypeOfItem({ kind: 'circle', prism: { baseMm: 2 } }, 'pocket')).toBe('prism');
+    expect(operationTypeOfItem({ kind: 'rect', prism: {}, texture: { pattern: 'stipple' } }, 'v-carve')).toBe('prism');
+    expect(operationTypeOfItem({ kind: 'rect', prism: {}, construction: true }, 'v-carve')).toBeNull();
     expect(operationTypeOfItem({ kind: 'circle', through: true }, 'pocket')).toBe('profile');
     expect(operationTypeOfItem({ kind: 'cutout' }, 'pocket')).toBe('profile');
     // #669 — a chamfer is its own operation on an item's outline.
@@ -132,6 +143,13 @@ describe('#662 the operation types', () => {
         added.push('thread');
         return 'i5';
       },
+      addTrace: (kind: string) => {
+        added.push(`trace:${kind}`);
+        return 'i7';
+      },
+      updateTrace: (id: string, patch: Record<string, unknown>) => {
+        added.push(`update:${id}:${JSON.stringify(patch)}`);
+      },
     } as unknown as Partial<typeof before>);
     try {
       expect(addOperationOfType('engrave')).toBe('i1');
@@ -149,6 +167,9 @@ describe('#662 the operation types', () => {
       expect(addOperationOfType('thread')).toBe('i5');
       // #670 — Texture a surface adds a rect carrying a stipple marker.
       expect(addOperationOfType('texture')).toBe('i2');
+      // #674 — Flute along a line adds a line with the marker; Raise a prism a rect with its own.
+      expect(addOperationOfType('flute')).toBe('i7');
+      expect(addOperationOfType('prism')).toBe('i2');
       expect(added).toEqual([
         'label',
         'shape:rect', // v-carve
@@ -162,6 +183,10 @@ describe('#662 the operation types', () => {
         'thread',
         'shape:rect', // texture
         'update:i2:{"texture":{"pattern":"stipple"}}',
+        'trace:line', // flute
+        'update:i7:{"flute":{}}',
+        'shape:rect', // prism
+        'update:i2:{"prism":{}}',
       ]);
     } finally {
       useEngraveJobStore.setState(before);

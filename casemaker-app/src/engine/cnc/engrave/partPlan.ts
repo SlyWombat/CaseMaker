@@ -1,6 +1,8 @@
 import { glyphProfile } from '@/engine/compiler/glyphs';
 import { DEFAULT_INLAY_GLUE_GAP_MM } from './inlay';
 import { textureCarries, textureNumbers, textureOperationName, textureStrokes } from './texture';
+import { fluteNumbers, fluteOperationName, fluteProfile } from './flute';
+import { prismNumbers, prismRingProfile } from './prism';
 import { segmentsForRadius } from '@/engine/compiler/arcResolution';
 import {
   aabbOfProfile,
@@ -40,7 +42,7 @@ import type { Mm } from '@/types/units';
 import { viseEnvelope } from '@/engine/cnc/fixture';
 import type { FixtureEnvelope } from '@/engine/cnc/setup';
 import { supportedFootprint } from '@/engine/cnc/sacrificial';
-import { sweepRadiusForJob } from '@/engine/cnc/toolRegistry';
+import { getTools, sweepRadiusForJob, toolForJob } from '@/engine/cnc/toolRegistry';
 import type { Tool } from '@/engine/cnc/tool';
 import type { EngraveChamfer } from '@/types/engraveJob';
 import { grooveWidthAt, vCone } from '@/engine/cnc/vProfile';
@@ -119,6 +121,13 @@ export interface PartPlan {
      * Read only when the job's cutter is a cone.
      */
     inlay?: { role: 'female' | 'male'; glueGapMm: number };
+    /**
+     * #674 — the item is a RAISED PRISM. Its profile is the RING around the shape (the mouth), and
+     * its design is the TOP BOUNDARY like an inlay's: the flank stands on the mouth at the top face
+     * and the floor is the mouth eroded by the cut's whole depth. `baseMm` travels so the row, the
+     * sheet and the finding quote one number. Read only when the job's cutter is a cone.
+     */
+    prism?: { baseMm: Mm };
   }[];
   /**
    * PROFILE CUT-OUTS (#218), a fifth sibling: the outline a `cam/profile.ts` path follows, plus
@@ -168,7 +177,21 @@ export interface PartPlan {
    * `paths` are in the STOCK frame, one polyline per path (a line item has one; a stroke label
    * one per pen stroke); `closed[i]` says whether `paths[i]` returns to its first point.
    */
-  traces: { id: string; name: string; paths: [Mm, Mm][][]; closed: boolean[]; depth: Mm }[];
+  traces: {
+    id: string;
+    name: string;
+    paths: [Mm, Mm][][];
+    closed: boolean[];
+    depth: Mm;
+    /**
+     * #674 — a FLUTE's Z profile: one DEPTH PER POINT (positive mm below the top face), parallel
+     * to `paths`. Absent on an ordinary trace, which is cut at `depth` throughout. The CAM walks
+     * the path with Z following it, and the prediction decomposes it per segment at each
+     * segment's end depth — the same reduction both sweep engines make, so the file, the sim and
+     * the oracle agree exactly.
+     */
+    depths?: Mm[][];
+  }[];
   /**
    * PLUNGE DRILLS (#220), a third sibling of `engraves`/`traces`. A drill is not a region: the
    * cutter goes straight down at fixed XY and the hole is the cutter's own diameter, so there is
@@ -425,27 +448,27 @@ export function resolveItems(job: EngraveJob): ResolvedItems {
  * document's shape fields. It deliberately parallels `itemLabel` (`jobSetup.ts`) but does not
  * share its wording: a FINDING reads `Rectangle 20×10`, an OPERATION reads `Pocket rect 20×10`.
  */
-export function itemOperationName(item: EngraveAnyItem): string {
+export function itemOperationName(item: EngraveAnyItem, verb: 'Pocket' | 'Prism' = 'Pocket'): string {
   if (!isShape(item)) return `Engrave "${item.text}"`;
   const named = item.name ? ` "${item.name}"` : '';
   switch (item.kind) {
     case 'rect':
-      return `Pocket rect${named} ${item.width}×${item.height}`;
+      return `${verb} rect${named} ${item.width}×${item.height}`;
     case 'circle':
-      return `Pocket circle${named} ⌀${item.diameter}`;
+      return `${verb} circle${named} ⌀${item.diameter}`;
     case 'slot':
-      return `Pocket slot${named} ${item.length}×${item.width}`;
+      return `${verb} slot${named} ${item.length}×${item.width}`;
     case 'polygon':
-      return `Pocket polygon${named} (${item.points.length} points)`;
+      return `${verb} polygon${named} (${item.points.length} points)`;
     case 'border':
-      return `Pocket border${named} ${item.width} wide, ${item.inset} in`;
+      return `${verb} border${named} ${item.width} wide, ${item.inset} in`;
     case 'frame':
-      return `Pocket frame${named} ${item.width} wide, ${item.gap} gap`;
+      return `${verb} frame${named} ${item.width} wide, ${item.gap} gap`;
     case 'cutaway':
-      return `Pocket cutaway${named} (${item.islands.length} island${item.islands.length === 1 ? '' : 's'})`;
+      return `${verb} cutaway${named} (${item.islands.length} island${item.islands.length === 1 ? '' : 's'})`;
     case 'vector': {
       const n = item.contours.length;
-      return `Pocket outline${named} (${n} contour${n === 1 ? '' : 's'}, ${item.width}×${item.height}mm)`;
+      return `${verb} outline${named} (${n} contour${n === 1 ? '' : 's'}, ${item.width}×${item.height}mm)`;
     }
   }
 }
@@ -1950,6 +1973,13 @@ export function toPartPlan(job: EngraveJob, options: PartPlanOptions = {}): Part
   // pays nothing for a question it must answer by throwing.
   const measure = options.unparsedFace === 'estimate' ? labelGlyphMeasure(job.customFonts ?? []) : null;
 
+  // #674 — the cone a PRISM's ring derives from. The job's own snapshot wins (it is part of the
+  // document and every caller — the worker, the panel, a spec — carries it once a job is real);
+  // a snapshot-less job reads its key from the builtin registry, the same fallback `jobTool` makes.
+  const cone = (() => {
+    const tool = toolForJob(job, getTools());
+    return tool === null ? null : vCone(tool);
+  })();
   const profiles = new Map<string, Profile>();
   /** The human name of each resolved item, for a cut-out's operation name (#218). */
   const names = new Map<string, string>();
@@ -1974,6 +2004,23 @@ export function toPartPlan(job: EngraveJob, options: PartPlanOptions = {}): Part
     names.set(item.id, itemOperationName(item));
     // A construction item is reference-only (#215): it resolves, but cuts nothing.
     if (item.construction) continue;
+    // #674 — a PRISM is not pocketed: the V cuts the RING around the shape, so the shape stands.
+    // The ring is DERIVED here (pure profile algebra: an outward offset less the shape), from the
+    // same `prismNumbers` the row, the findings and the sheet read. Its design is the TOP boundary
+    // — the mouth at the top face — which the region builder treats like an inlay's. Without a cone
+    // there is no ring to build, so the shape stays an ordinary region for the preview and
+    // `prism-needs-cone` stops the job.
+    if ('prism' in item && item.prism !== undefined && textureCarries(item.kind) && cone !== null) {
+      const numbers = prismNumbers(cone, item.depth, item.prism).numbers;
+      engraves.push({
+        id: item.id,
+        name: itemOperationName(item, 'Prism'),
+        profile: prismRingProfile(profile, numbers.marginMm),
+        depth: item.depth,
+        prism: { baseMm: numbers.baseMm },
+      });
+      continue;
+    }
     // #670 — a TEXTURE region is not pocketed: its pattern's strokes are traces, appended to that
     // list below. It still resolves a profile, so a frame or a cut-out may still name it. A
     // combined shape cannot carry one (its profile has holes); `validateJob` says so by name and
@@ -2069,6 +2116,22 @@ export function toPartPlan(job: EngraveJob, options: PartPlanOptions = {}): Part
     if (!item.enabled || item.construction) continue;
     const { paths, closed } = tracePaths(item, job.tool);
     if (paths.length === 0) continue;
+    // #674 — a FLUTE: the line's depth becomes a profile along its path, derived HERE so the CAM,
+    // the prediction and the picture read one array. The entry keeps the item's depth (the deepest
+    // point), so the swept-cut check and the self-overlap warning stay conservative.
+    if (item.kind === 'line' && item.flute !== undefined) {
+      const numbers = fluteNumbers(item.flute, item.depth);
+      const profile = fluteProfile(paths[0]!, closed[0] ?? false, item.depth, numbers.rampMm);
+      traces.push({
+        id: item.id,
+        name: fluteOperationName(item),
+        paths: [profile.points],
+        closed: [profile.closed],
+        depth: item.depth,
+        depths: [profile.depths],
+      });
+      continue;
+    }
     traces.push({ id: item.id, name: traceOperationName(item), paths, closed, depth: item.depth });
   }
   // #670 — TEXTURES join the same list, after the ordinary traces, in document order. The paths

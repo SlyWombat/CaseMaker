@@ -245,6 +245,26 @@ export interface EngraveShapeBase {
    * `engine/cnc/engrave/texture.ts`). The document stores the pattern's numbers, never the paths.
    */
   texture?: TextureMark;
+  /**
+   * #674 — a RAISED PRISM: the shape is not pocketed. A V-bit carves a ring AROUND it so it stands
+   * at the shape's own `depth` with its sides sloping at the cone's angle (see
+   * `engine/cnc/engrave/prism.ts`). This marker states the base's width; the cut's outer bound
+   * derives.
+   */
+  prism?: PrismMark;
+}
+
+/**
+ * #674 — a prism's own number, as the DOCUMENT holds it.
+ *
+ * `baseMm` is the FLAT BASE's width around the standing shape — the floor the V's tip clears,
+ * between the shape's slope and the base's outer bevel. The standing height is the shape's own
+ * `depth`; the cut's outer bound (the margin where the slope meets the untouched top face) is
+ * derived as `base + 2·height·tan(halfAngle)`, never stored.
+ */
+export interface PrismMark {
+  /** The flat base's width around the shape, mm. Absent = the CAM default (1 mm). */
+  baseMm?: Mm;
 }
 
 /** #670 — the patterns the texture engine knows. */
@@ -829,6 +849,22 @@ export interface EngraveLineItem extends EngraveTraceBase {
   points: [Mm, Mm][];
   /** Close the ring (feed back to the first point with no retract) — for borders and outlines. */
   closed: boolean;
+  /**
+   * #674 — a FLUTE: the same line, cut as a groove whose depth RAMPS in and out along its ends
+   * instead of plunging to depth and retracting from it (see `engine/cnc/engrave/flute.ts`). The
+   * trace's own `depth` is the groove's deepest point; this marker states the ramp.
+   */
+  flute?: FluteMark;
+}
+
+/**
+ * #674 — a flute's own number, as the DOCUMENT holds it. The depth is the line's own `depth`; the
+ * ramp is a length along the path, and an absent one reads as the CAM's labelled default (three
+ * times the depth — see `engine/cnc/engrave/flute.ts`).
+ */
+export interface FluteMark {
+  /** The ramp's length along the path, mm. Absent = three times the trace's depth. */
+  rampMm?: Mm;
 }
 
 /** Text rendered in a single-stroke font and traced (#219). `font` must be a `StrokeFontId`. */

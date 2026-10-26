@@ -36,7 +36,11 @@
  *    (matrix gap A1);
  *  - `texture` — a seeded pattern of short strokes over a region, cut as traces by a V-bit or a
  *    flat end mill (#670): the picker adds a rect carrying a `texture` marker, and the row states
- *    the pattern, pitch, stroke length and seed.
+ *    the pattern, pitch, stroke length and seed;
+ *  - `flute` — a line whose groove ramps in and out along its ends instead of plunging (#674): the
+ *    picker adds a line carrying a `flute` marker, and the row states the ramp;
+ *  - `prism` — a shape raised by a V-carve ring around it (#674): the picker adds a rect carrying a
+ *    `prism` marker, and the row states the flat base it stands on.
  *
  * NOT offered here, per the matrix (gaps, not omissions): open-path lines from SVG/DXF (#B2),
  * rotary wrap (#B1). Facing is a job option, not an operation type, and stays where it is.
@@ -61,7 +65,9 @@ export type OperationTypeId =
   | 'bore'
   | 'thread'
   | 'surface'
-  | 'texture';
+  | 'texture'
+  | 'flute'
+  | 'prism';
 
 export interface OperationTypeDef {
   id: OperationTypeId;
@@ -87,6 +93,8 @@ export const OPERATION_TYPES: readonly OperationTypeDef[] = [
   { id: 'thread', label: 'Thread', blurb: 'A milled internal thread', addTestId: 'engrave-add-thread' },
   { id: 'surface', label: 'Surface a mesh', blurb: 'Rough and finish a goal mesh or picture', addTestId: 'engrave-add-surface' },
   { id: 'texture', label: 'Texture a surface', blurb: 'A seeded pattern of short strokes over a region', addTestId: 'engrave-add-texture' },
+  { id: 'flute', label: 'Flute along a line', blurb: 'A groove that ramps in and out along its ends', addTestId: 'engrave-add-flute' },
+  { id: 'prism', label: 'Raise a prism', blurb: 'A shape standing on sloped sides, cut by the V-bit', addTestId: 'engrave-add-prism' },
 ];
 
 const BY_ID = new Map(OPERATION_TYPES.map((t) => [t.id, t]));
@@ -109,19 +117,32 @@ export function regionOperationType(cutterIsV: boolean): 'v-carve' | 'pocket' {
  */
 export function operationTypeOfItem(
   item:
-    | { kind: string; through?: boolean; construction?: boolean; mode?: 'drill' | 'bore'; vCarveDepth?: 'plane' | 'variable'; inlay?: { role: 'female' | 'male' }; texture?: { pattern: string } }
+    | {
+        kind: string;
+        through?: boolean;
+        construction?: boolean;
+        mode?: 'drill' | 'bore';
+        vCarveDepth?: 'plane' | 'variable';
+        inlay?: { role: 'female' | 'male' };
+        texture?: { pattern: string };
+        prism?: { baseMm?: number };
+        flute?: { rampMm?: number };
+      }
     | null
     | undefined,
   region: 'v-carve' | 'pocket',
 ): OperationTypeId | null {
   if (item === null || item === undefined) return null;
   if (item.construction === true) return null;
-  // #670 — a texture region is cut as a pattern of strokes, not pocketed; it reads first because
-  // the PLAN gives the marker precedence when a shape carries both (`texture-shape` refuses the
-  // pair). #673 — an inlay half is its own operation type whatever its role; the row says which
-  // half.
+  // #674 — a prism reads first (the plan gives its marker precedence), then a texture, then an
+  // inlay half; `prism-shape` and `texture-shape` refuse a region carrying two of them.
+  if (item.prism !== undefined) return 'prism';
+  // #670 — a texture region is cut as a pattern of strokes, not pocketed.
   if (item.texture !== undefined) return 'texture';
+  // #673 — an inlay half is its own operation type whatever its role; the row says which half.
   if (item.inlay !== undefined) return 'inlay';
+  // #674 — a fluted line is a groove with a ramp, not a plain trace.
+  if (item.flute !== undefined) return 'flute';
   switch (item.kind) {
     case 'label':
     case 'trace':
@@ -205,6 +226,20 @@ export function addOperationOfType(type: Exclude<OperationTypeId, 'surface'>): s
       // numbers, and the depth field is the pattern's floor.
       const id = store.addShape('rect');
       store.updateShape(id, { texture: { pattern: 'stipple' } });
+      return id;
+    }
+    case 'flute': {
+      // #674 — a line carrying a FLUTE marker; the row states the ramp, and the depth field is the
+      // groove's deepest point.
+      const id = store.addTrace('line');
+      store.updateTrace(id, { flute: {} });
+      return id;
+    }
+    case 'prism': {
+      // #674 — a rect carrying a PRISM marker; the row states the flat base, and the depth field
+      // is the shape's standing height.
+      const id = store.addShape('rect');
+      store.updateShape(id, { prism: {} });
       return id;
     }
     case 'profile':

@@ -455,6 +455,38 @@ export function traceCutRegions(
 ): CutRegion[] {
   if (plan.traces.length === 0) return [];
   return plan.traces.flatMap((t): CutRegion[] => {
+    // #674 — a FLUTE is swept per SEGMENT, at the segment's DEEP end: the plan's profile is the Z
+    // the CAM and both engines follow (a move is swept at `min(z0, z1)`), so one entry per
+    // segment is the same reduction the sim makes, not an approximation of it. The entry keeps
+    // the trace's id — the preview matches its own per-segment drawing by it.
+    if (t.depths !== undefined) {
+      const out: CutRegion[] = [];
+      for (let pi = 0; pi < t.paths.length; pi++) {
+        const path = t.paths[pi]!;
+        const depths = t.depths[pi];
+        if (depths === undefined || path.length === 0) continue;
+        const last = (t.closed[pi] ?? false) ? path.length : path.length - 1;
+        for (let j = 0; j < last; j++) {
+          // The move's DEEP end — the same reduction both sweep engines make (#629): `min` of the
+          // negative Zs is `max` of the positive depths.
+          const depth = Math.max(depths[j] ?? 0, depths[(j + 1) % path.length] ?? 0);
+          if (!(depth > 0)) continue;
+          const toolRadius = radiusAt(depth);
+          if (toolRadius === null || toolRadius <= 0) continue;
+          const segment: [number, number][] = [
+            [path[j]![0], path[j]![1]],
+            [path[(j + 1) % path.length]![0], path[(j + 1) % path.length]![1]],
+          ];
+          const cs = executeProfile(tl, traceSweptProfile([segment], [false], toolRadius));
+          try {
+            out.push({ id: t.id, name: t.name, depth, polygons: cs.toPolygons() as [number, number][][] });
+          } finally {
+            cs.delete();
+          }
+        }
+      }
+      return out;
+    }
     const toolRadius = radiusAt(t.depth);
     if (toolRadius === null || toolRadius <= 0) return [];
     const cs = executeProfile(tl, traceSweptProfile(t.paths, t.closed, toolRadius));

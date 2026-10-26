@@ -1,6 +1,7 @@
 import { useState, type CSSProperties, type JSX } from 'react';
 import { EngraveItemRow } from '@/components/panels/EngraveItemRow';
 import { traceOperationName } from '@/engine/cnc/engrave/partPlan';
+import { fluteNumbers, fluteOperationName } from '@/engine/cnc/engrave/flute';
 import { rowSummary } from '@/components/panels/engraveRowText';
 import { STROKE_FONTS } from '@/engine/fonts/stroke/strokeFont';
 import type { JobFinding } from '@/engine/cnc/engrave/jobSetup';
@@ -21,6 +22,20 @@ import type { Mm } from '@/types/units';
  * ≥3 when closed, ≤5000) so a half-typed line never lands the whole job unloadable. The `closed`
  * checkbox is disabled until there are three committed points for the same reason.
  */
+
+/** A line item's path length, mm: its segments plus the closing one for a ring (#674). */
+function lineLength(points: readonly (readonly [number, number])[], closed: boolean): number {
+  let total = 0;
+  for (let i = 1; i < points.length; i++) {
+    total += Math.hypot(points[i]![0] - points[i - 1]![0], points[i]![1] - points[i - 1]![1]);
+  }
+  if (closed && points.length >= 2) {
+    const first = points[0]!;
+    const last = points[points.length - 1]!;
+    total += Math.hypot(first[0] - last[0], first[1] - last[1]);
+  }
+  return total;
+}
 
 const NUM: CSSProperties = { width: 60 };
 const MUTED: CSSProperties = { fontSize: 11, color: '#9aa4b0', lineHeight: 1.5, margin: '2px 0' };
@@ -144,8 +159,8 @@ export function EngraveTraceRow({
       index={index}
       glyph={trace.kind === 'line' ? '∿' : '𝑡'}
       kindWord={kindLabel}
-      typeLabel="Engrave"
-      name={traceOperationName(trace)}
+      typeLabel={trace.kind === 'line' && trace.flute !== undefined ? 'Flute' : 'Engrave'}
+      name={trace.kind === 'line' && trace.flute !== undefined ? fluteOperationName(trace) : traceOperationName(trace)}
       summary={rowSummary(trace.depth)}
       enabled={trace.enabled}
       enabledTitle="A disabled trace is kept in the job but not cut."
@@ -335,6 +350,21 @@ export function EngraveTraceRow({
             <span>closed</span>
           </label>
         )}
+        {/* #674 — a FLUTE: the groove ramps in and out along the line's ends instead of plunging.
+            The depth above is the groove's deepest point; the ramp is its own number. */}
+        {trace.kind === 'line' && (
+          <label style={FIELD_LABEL}>
+            <input
+              type="checkbox"
+              checked={trace.flute !== undefined}
+              data-testid={`engrave-trace-flute-${index}`}
+              aria-label={`${kindLabel} ${index + 1} ramped ends`}
+              title="Cut this line as a flute: the groove ramps down from the surface along its ends, so there is no plunge dimple and no retract out of the groove."
+              onChange={(e) => onChange({ flute: e.target.checked ? {} : undefined })}
+            />
+            <span>ramped ends</span>
+          </label>
+        )}
         {positionNum('x')}
         {positionNum('y')}
         {numField('rotation', 'rot', `Degrees counter-clockwise about the ${trace.kind === 'line' ? 'origin' : 'text centre'}.`)}
@@ -371,6 +401,46 @@ export function EngraveTraceRow({
       <p style={{ ...MUTED, ...(depthInvalid ? { color: SEVERITY_COLOR.error } : null) }} data-testid={`engrave-trace-maxdepth-${index}`}>
         Max depth {maxDepth} mm here — the stock thickness less the minimum floor.
       </p>
+
+      {/* #674 — THE FLUTE'S numbers: the ramp the profile runs with, and the path length it has to
+          share. Derived by `fluteNumbers`, the same call the plan makes. */}
+      {trace.kind === 'line' && trace.flute !== undefined && (() => {
+        const n = fluteNumbers(trace.flute, trace.depth);
+        const length = lineLength(trace.points, trace.closed);
+        const peak = 2 * n.rampMm >= length ? (length > 0 ? (trace.depth * length) / (2 * n.rampMm) : 0) : trace.depth;
+        return (
+          <div data-testid={`engrave-trace-flute-note-${index}`} style={{ marginTop: 4 }}>
+            <div style={ROW_INLINE}>
+              <label style={FIELD_LABEL}>
+                <span>ramp</span>
+                <input
+                  type="number"
+                  min={0.1}
+                  step="0.5"
+                  value={Number(n.rampMm.toFixed(3))}
+                  data-testid={`engrave-trace-flute-ramp-${index}`}
+                  aria-label={`${kindLabel} ${index + 1} flute ramp`}
+                  title="The ramp's length along the path, mm. Three times the depth is the default: the ramp then runs at about 18°."
+                  style={NUM}
+                  onChange={(e) => {
+                    const v = Number(e.target.value);
+                    if (Number.isFinite(v) && v > 0) onChange({ flute: { ...trace.flute, rampMm: v } });
+                  }}
+                />
+                <span>mm</span>
+              </label>
+            </div>
+            <p style={{ ...MUTED, ...(peak < trace.depth - 1e-9 ? { color: SEVERITY_COLOR.warning } : null) }}>
+              {`A ramped groove: it fades in and out over ${Number(n.rampMm.toFixed(3))} mm at each end (${n.rampSource}) and is ${Number(
+                peak.toFixed(3),
+              )} mm deep along the middle. The tool starts on the surface and feeds down, so there is no plunge dimple.` +
+                (peak < trace.depth - 1e-9
+                  ? ` The path is only ${Number(length.toFixed(1))} mm long and shorter than its two ramps, so the groove never reaches the full depth — shorten the ramp or lengthen the line.`
+                  : '')}
+            </p>
+          </div>
+        );
+      })()}
     </EngraveItemRow>
   );
 }

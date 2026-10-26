@@ -162,6 +162,19 @@
                     ],
                     "type": "object"
                   },
+                  "prism": {
+                    "additionalProperties": false,
+                    "description": "Raise this shape as a prism instead of pocketing it (#674); omit for an ordinary region.",
+                    "properties": {
+                      "baseMm": {
+                        "description": "The flat base’s width around the standing shape, in millimetres; omit for the CAM default (1 mm).",
+                        "exclusiveMinimum": 0,
+                        "maximum": 50,
+                        "type": "number"
+                      }
+                    },
+                    "type": "object"
+                  },
                   "rotation": {
                     "description": "Rotation in degrees counter-clockwise about position.",
                     "type": "number"
@@ -329,6 +342,19 @@
                       "x",
                       "y"
                     ],
+                    "type": "object"
+                  },
+                  "prism": {
+                    "additionalProperties": false,
+                    "description": "Raise this shape as a prism instead of pocketing it (#674); omit for an ordinary region.",
+                    "properties": {
+                      "baseMm": {
+                        "description": "The flat base’s width around the standing shape, in millimetres; omit for the CAM default (1 mm).",
+                        "exclusiveMinimum": 0,
+                        "maximum": 50,
+                        "type": "number"
+                      }
+                    },
                     "type": "object"
                   },
                   "rotation": {
@@ -502,6 +528,19 @@
                       "x",
                       "y"
                     ],
+                    "type": "object"
+                  },
+                  "prism": {
+                    "additionalProperties": false,
+                    "description": "Raise this shape as a prism instead of pocketing it (#674); omit for an ordinary region.",
+                    "properties": {
+                      "baseMm": {
+                        "description": "The flat base’s width around the standing shape, in millimetres; omit for the CAM default (1 mm).",
+                        "exclusiveMinimum": 0,
+                        "maximum": 50,
+                        "type": "number"
+                      }
+                    },
                     "type": "object"
                   },
                   "rotation": {
@@ -4111,6 +4150,19 @@
                     ],
                     "type": "object"
                   },
+                  "prism": {
+                    "additionalProperties": false,
+                    "description": "Raise this shape as a prism instead of pocketing it (#674); omit for an ordinary region.",
+                    "properties": {
+                      "baseMm": {
+                        "description": "The flat base’s width around the standing shape, in millimetres; omit for the CAM default (1 mm).",
+                        "exclusiveMinimum": 0,
+                        "maximum": 50,
+                        "type": "number"
+                      }
+                    },
+                    "type": "object"
+                  },
                   "rotation": {
                     "description": "Rotation in degrees counter-clockwise about position.",
                     "type": "number"
@@ -4276,6 +4328,19 @@
                     ],
                     "type": "object"
                   },
+                  "prism": {
+                    "additionalProperties": false,
+                    "description": "Raise this shape as a prism instead of pocketing it (#674); omit for an ordinary region.",
+                    "properties": {
+                      "baseMm": {
+                        "description": "The flat base’s width around the standing shape, in millimetres; omit for the CAM default (1 mm).",
+                        "exclusiveMinimum": 0,
+                        "maximum": 50,
+                        "type": "number"
+                      }
+                    },
+                    "type": "object"
+                  },
                   "rotation": {
                     "description": "Rotation in degrees counter-clockwise about position.",
                     "type": "number"
@@ -4432,6 +4497,19 @@
                       "x",
                       "y"
                     ],
+                    "type": "object"
+                  },
+                  "prism": {
+                    "additionalProperties": false,
+                    "description": "Raise this shape as a prism instead of pocketing it (#674); omit for an ordinary region.",
+                    "properties": {
+                      "baseMm": {
+                        "description": "The flat base’s width around the standing shape, in millimetres; omit for the CAM default (1 mm).",
+                        "exclusiveMinimum": 0,
+                        "maximum": 50,
+                        "type": "number"
+                      }
+                    },
                     "type": "object"
                   },
                   "rotation": {
@@ -4609,6 +4687,19 @@
                       "x",
                       "y"
                     ],
+                    "type": "object"
+                  },
+                  "prism": {
+                    "additionalProperties": false,
+                    "description": "Raise this shape as a prism instead of pocketing it (#674); omit for an ordinary region.",
+                    "properties": {
+                      "baseMm": {
+                        "description": "The flat base’s width around the standing shape, in millimetres; omit for the CAM default (1 mm).",
+                        "exclusiveMinimum": 0,
+                        "maximum": 50,
+                        "type": "number"
+                      }
+                    },
                     "type": "object"
                   },
                   "rotation": {
@@ -5759,6 +5850,19 @@
                     "description": "False keeps the trace in the document but out of the program.",
                     "type": "boolean"
                   },
+                  "flute": {
+                    "additionalProperties": false,
+                    "description": "Cut this line as a flute — a groove that ramps in and out along its ends (#674).",
+                    "properties": {
+                      "rampMm": {
+                        "description": "The ramp’s length along the path, in millimetres; omit for three times the trace’s depth.",
+                        "exclusiveMinimum": 0,
+                        "maximum": 200,
+                        "type": "number"
+                      }
+                    },
+                    "type": "object"
+                  },
                   "id": {
                     "description": "Unique id for this trace within the job.",
                     "minLength": 1,
@@ -6072,6 +6176,19 @@
                   "x",
                   "y"
                 ],
+                "type": "object"
+              },
+              "prism": {
+                "additionalProperties": false,
+                "description": "Raise this shape as a prism instead of pocketing it (#674); omit for an ordinary region.",
+                "properties": {
+                  "baseMm": {
+                    "description": "The flat base’s width around the standing shape, in millimetres; omit for the CAM default (1 mm).",
+                    "exclusiveMinimum": 0,
+                    "maximum": 50,
+                    "type": "number"
+                  }
+                },
                 "type": "object"
               },
               "rotation": {

@@ -133,6 +133,7 @@ import {
   type InlayNumbers,
 } from '@/engine/cnc/engrave/inlay';
 import { textureNumbers, textureStrokes, type TextureNumbers } from '@/engine/cnc/engrave/texture';
+import { prismNumbers, type PrismCheck } from '@/engine/cnc/engrave/prism';
 import { jobFileName } from '@/engine/cnc/engrave/jobFile';
 import { decodePng } from '@/engine/import/png';
 import { base64ToArrayBuffer } from '@/engine/import/base64';
@@ -1288,6 +1289,10 @@ export function EngravePanel(): JSX.Element {
     shape: EngraveShape,
   ): { numbers: TextureNumbers; strokes: number; capped: boolean } | undefined =>
     shape.texture === undefined ? undefined : textureById.get(shape.id);
+  // #674 — a prism's derived numbers, from the same `prismNumbers` the plan, the finding and the
+  // sheet read. Cheap arithmetic, so no memo.
+  const prismFor = (shape: EngraveShape): PrismCheck | undefined =>
+    shape.prism === undefined ? undefined : prismNumbers(cone, shape.depth, shape.prism);
 
   const rec = preview?.recommendation ?? null;
   const recPick = rec?.key ? rec.candidates.find((c) => c.key === rec.key) ?? null : null;
@@ -2446,7 +2451,7 @@ export function EngravePanel(): JSX.Element {
           index={i}
           maxDepth={maxDepth}
           findings={findingsFor(shape.id)}
-          rest={shape.construction === true ? null : restFor(shape.id)}
+          rest={shape.construction === true || shape.prism !== undefined ? null : restFor(shape.id)}
           vCarve={
             cone === null
               ? null
@@ -2457,6 +2462,7 @@ export function EngravePanel(): JSX.Element {
           }
           inlay={shape.construction === true ? null : (inlayFor(shape) ?? null)}
           texture={shape.construction === true ? null : (textureFor(shape) ?? null)}
+          prism={shape.construction === true ? null : (prismFor(shape) ?? null)}
           onChange={(patch) => updateShape(shape.id, patch)}
           onRemove={() => removeShape(shape.id)}
         />

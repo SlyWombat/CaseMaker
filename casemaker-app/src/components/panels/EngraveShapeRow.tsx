@@ -13,6 +13,7 @@ import {
   textureOperationName,
   type TextureNumbers,
 } from '@/engine/cnc/engrave/texture';
+import { DEFAULT_PRISM_BASE_MM, type PrismCheck } from '@/engine/cnc/engrave/prism';
 import type { Mm } from '@/types/units';
 
 /**
@@ -124,6 +125,12 @@ export interface EngraveShapeRowProps {
    * the CAM runs with, how many strokes the pattern derives, and whether the cap shortened it.
    */
   texture?: { numbers: TextureNumbers; strokes: number; capped: boolean } | null;
+  /**
+   * #674 — the prism's own facts, present on a region carrying a prism marker: the numbers the plan
+   * derives (the base, the slope's width either side, the margin where the cut meets the top face)
+   * and whether they derive at all.
+   */
+  prism?: PrismCheck | null;
 }
 
 export function EngraveShapeRow({
@@ -137,6 +144,7 @@ export function EngraveShapeRow({
   vCarve = null,
   inlay = null,
   texture = null,
+  prism = null,
 }: EngraveShapeRowProps): JSX.Element {
   // #662 - the chip states what THIS cutter makes of a region.
   const region = useRegionOperationType();
@@ -145,6 +153,9 @@ export function EngraveShapeRow({
   const femaleInlay = shape.inlay?.role === 'female' ? shape.inlay : null;
   // #670 — a texture's marker, narrowed once: every write below carries the pattern with it.
   const mark = shape.texture ?? null;
+  // #674 — a prism's marker, narrowed once: the base write carries it whole.
+  const prismMark = shape.prism ?? null;
+  const raisePrism = prismMark !== null;
   /** Write one number into the marker, keeping the pattern and the other numbers. */
   const setTexture = (patch: Partial<{ pattern: TexturePattern; pitchMm: Mm; strokeMm: Mm; seed: number }>): void => {
     if (mark === null) return;
@@ -203,17 +214,22 @@ export function EngraveShapeRow({
       glyph={KIND_GLYPH[shape.kind]}
       kindWord={KIND_LABEL[shape.kind]}
       typeLabel={
-        // #670 — a texture is its own operation whatever the cutter makes of the region.
-        shape.texture !== undefined
-          ? 'Texture'
-          : shape.through !== true && shape.vCarveDepth === 'variable' && region === 'v-carve'
-            ? 'V-carve (variable)'
-            : regionChipLabel(shape.through, region)
+        // #674/#670 — a prism and a texture are their own operations whatever the cutter makes of
+        // the region; the plan gives the prism's marker precedence.
+        raisePrism
+          ? 'Prism'
+          : shape.texture !== undefined
+            ? 'Texture'
+            : shape.through !== true && shape.vCarveDepth === 'variable' && region === 'v-carve'
+              ? 'V-carve (variable)'
+              : regionChipLabel(shape.through, region)
       }
       name={
-        shape.texture === undefined
-          ? itemOperationName(shape)
-          : textureOperationName(mark?.pattern ?? shape.texture.pattern)
+        raisePrism
+          ? itemOperationName(shape, 'Prism')
+          : shape.texture === undefined
+            ? itemOperationName(shape)
+            : textureOperationName(mark?.pattern ?? shape.texture.pattern)
       }
       summary={shape.through === true ? 'through' : rowSummary(shape.depth)}
       enabled={shape.enabled}
@@ -362,10 +378,66 @@ export function EngraveShapeRow({
           Max depth {maxDepth} mm here — the stock thickness less the minimum floor.
         </p>
       )}
+      {/* #674 — A RAISED PRISM: the shape stands and the V cuts the ring around it. The same
+          toggle is the picker's entry, so an existing pocket can become one; the depth above is
+          the standing height. The V-carve depth select and the rest fold are hidden while it is
+          on — a prism is one plane region cut from the mouth inward, not a ladder and not a pair. */}
+      <div style={ROW_INLINE}>
+        <label style={FIELD_LABEL}>
+          <input
+            type="checkbox"
+            checked={raisePrism}
+            data-testid={`engrave-shape-prism-${index}`}
+            aria-label={`Shape ${index + 1} raise as a prism`}
+            title="Raise this shape instead of pocketing it: a V-bit carves a ring around it so it stands at the depth above, its sides sloping at the bit's angle."
+            onChange={(e) => onChange({ prism: e.target.checked ? {} : undefined })}
+          />
+          <span>raise as a prism</span>
+        </label>
+        {prismMark !== null && (
+          <label style={FIELD_LABEL}>
+            <span>base</span>
+            <input
+              type="number"
+              min={0.1}
+              step="0.5"
+              value={fmt(prismMark.baseMm ?? DEFAULT_PRISM_BASE_MM)}
+              data-testid={`engrave-shape-prism-base-${index}`}
+              aria-label={`Shape ${index + 1} prism base`}
+              title="The flat base's width around the shape, mm — the floor the V's tip clears. The cut's outer edge is this plus the slope either side."
+              style={NUM}
+              onChange={(e) => {
+                const v = Number(e.target.value);
+                if (Number.isFinite(v) && v > 0) onChange({ prism: { ...prismMark, baseMm: v } });
+              }}
+            />
+            <span>mm</span>
+          </label>
+        )}
+      </div>
+      {prismMark !== null && (
+        <p
+          style={{ ...MUTED, ...(prism !== null && !prism.ok ? { color: SEVERITY_COLOR.error } : null) }}
+          data-testid={`engrave-shape-prism-note-${index}`}
+        >
+          {prism === null
+            ? 'A prism is cut by a V-bit.'
+            : prism.ok
+              ? `The shape stands ${fmt(prism.numbers.heightMm)} mm, its sides sloping over ${fmt(
+                  prism.numbers.slopeWidthMm,
+                )} mm, on a ${fmt(prism.numbers.baseMm)} mm flat base (${prism.numbers.baseSource}); the cut meets ` +
+                `the untouched top face ${fmt(prism.numbers.marginMm)} mm out from the shape.`
+              : prism.code === 'prism-needs-cone'
+                ? 'A prism’s sides are the V-bit’s flank: choose a V-bit.'
+                : prism.code === 'prism-tip'
+                  ? 'A point tip leaves the base as ridges: use a V-bit with a tip diameter.'
+                  : `The base is narrower than the tip’s flat twice, so the tip has no path between the shape’s slope and the base’s outer bevel — widen it or use a smaller tip.`}
+        </p>
+      )}
       {/* #665 — a region cut by a cone can follow the design's width instead of one depth. Only
           shown for a cone (a flat cutter pockets at a single depth) and never on a through cut,
           which has no floor to follow. */}
-      {vCarve !== null && shape.through !== true && (
+      {vCarve !== null && shape.through !== true && !raisePrism && (
         <div style={ROW_INLINE}>
           <label style={FIELD_LABEL}>
             <span>V-carve depth</span>
@@ -382,7 +454,7 @@ export function EngraveShapeRow({
           </label>
         </div>
       )}
-      {vCarve !== null && shape.through !== true && shape.vCarveDepth === 'variable' && (
+      {vCarve !== null && shape.through !== true && !raisePrism && shape.vCarveDepth === 'variable' && (
         <p style={MUTED} data-testid={`engrave-shape-vcarve-note-${index}`}>
           The V follows the design’s width —{' '}
           {vCarve.pitchMm === null ? 'the level pitch comes from the feeds row' : `${fmt(vCarve.pitchMm)} mm per level`}{' '}
@@ -536,7 +608,7 @@ export function EngraveShapeRow({
           </p>
         </div>
       )}
-      {rest !== null && <RestCutterControl rest={rest} testidPrefix="engrave-shape" index={index} />}
+      {rest !== null && !raisePrism && <RestCutterControl rest={rest} testidPrefix="engrave-shape" index={index} />}
     </EngraveItemRow>
   );
 }

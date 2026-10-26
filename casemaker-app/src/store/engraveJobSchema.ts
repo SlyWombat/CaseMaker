@@ -203,6 +203,24 @@ const textureMarkSchema = z
   .strict()
   .describe('A surface texture (#670): a seeded stroke pattern over this region, cut as traces at the shape’s depth.');
 
+/**
+ * #674 — a prism, as the document stores it: the flat base's width. The standing height is the
+ * shape's own `depth` and the cut's outer bound is derived, so neither is stored. Strict, so a
+ * hand-edited key is refused.
+ */
+const prismMarkSchema = z
+  .object({
+    baseMm: z
+      .number()
+      .finite()
+      .positive()
+      .max(50)
+      .optional()
+      .describe('The flat base’s width around the standing shape, in millimetres; omit for the CAM default (1 mm).'),
+  })
+  .strict()
+  .describe('A raised prism (#674): a V-bit carves a ring around this shape so it stands at the shape’s depth.');
+
 const shapeBaseSchema = z.object({
   id: z.string().min(1).describe('Unique id for this item within the job.'),
   name: z.string().optional().describe('Optional human-readable name for the item list.'),
@@ -250,6 +268,10 @@ const shapeBaseSchema = z.object({
   texture: textureMarkSchema
     .optional()
     .describe('Cut a seeded stroke pattern over this region instead of a pocket (#670); omit for an ordinary region.'),
+  // #674 — a raised prism. Optional, so a pre-#674 document keeps no key and pockets as it did.
+  prism: prismMarkSchema
+    .optional()
+    .describe('Raise this shape as a prism instead of pocketing it (#674); omit for an ordinary region.'),
 });
 
 const shapeKindsSchema = z.discriminatedUnion('kind', [
@@ -502,6 +524,23 @@ const traceBaseSchema = z.object({
     .describe('Reference-only: cut nothing, but other items may refer to this trace.'),
 });
 
+/**
+ * #674 — a flute, as the document stores it: the ramp's length along the path. The depth is the
+ * line's own `depth`, so it is not repeated here. Strict.
+ */
+const fluteMarkSchema = z
+  .object({
+    rampMm: z
+      .number()
+      .finite()
+      .positive()
+      .max(200)
+      .optional()
+      .describe('The ramp’s length along the path, in millimetres; omit for three times the trace’s depth.'),
+  })
+  .strict()
+  .describe('A flute (#674): this line’s groove ramps in and out along its ends instead of plunging to depth.');
+
 const traceKindsSchema = z.discriminatedUnion('kind', [
   traceBaseSchema.extend({
     kind: z.literal('line').describe('A free polyline cut as a single pass.'),
@@ -513,6 +552,10 @@ const traceKindsSchema = z.discriminatedUnion('kind', [
     closed: z
       .boolean()
       .describe('True closes the polyline back to its first point (needs at least three points).'),
+    // #674 — a flute. Only a LINE can carry one: glyph strokes are a font's, not a groove.
+    flute: fluteMarkSchema
+      .optional()
+      .describe('Cut this line as a flute — a groove that ramps in and out along its ends (#674).'),
   }),
   traceBaseSchema.extend({
     kind: z.literal('stroke-label').describe('Single-stroke (engraving-style) text.'),

@@ -39,6 +39,8 @@ import {
   textureOperationName,
   textureStrokes,
 } from './texture';
+import { FLUTE_RAMP_STEPS, fluteNumbers, fluteOperationName } from './flute';
+import { prismNumbers } from './prism';
 import { vCarveLevels, vCarvePlane, vCarveStepover } from '@/engine/cnc/vCarveGeometry';
 import { colourBoundaryDepthFor } from '@/engine/cnc/layerStack';
 import { axesWord, describeTouch, kindWord, PROBE_SPEC, readsWord, registrationFor, sideWords } from '@/engine/cnc/engrave/registration';
@@ -2706,6 +2708,71 @@ function textureSteps(job: EngraveJob): RunSheetStep[] {
 }
 
 /**
+ * #674 — a FLUTE, in the operator's terms: the ramp, the step, the peak, and the fact that there
+ * is no plunge. The numbers are `fluteNumbers`' and the plan's own profile step, never re-derived.
+ */
+function fluteSteps(job: EngraveJob): RunSheetStep[] {
+  const steps: RunSheetStep[] = [];
+  for (const trace of job.traces ?? []) {
+    if (!trace.enabled || trace.construction || trace.kind !== 'line' || trace.flute === undefined) continue;
+    const n = fluteNumbers(trace.flute, trace.depth);
+    const pathLength = linePathLength(trace.points, trace.closed);
+    const peak = 2 * n.rampMm >= pathLength ? (pathLength > 0 ? (n.depthMm * pathLength) / (2 * n.rampMm) : 0) : n.depthMm;
+    steps.push({
+      text:
+        `${fluteOperationName(trace)}: a groove ${fmtNum(peak)} mm deep down the middle, ramping in ` +
+        `and out over ${fmtNum(n.rampMm)} mm at each end (${n.rampSource}). The tool starts on the ` +
+        'surface and feeds down, so there is no plunge dimple at either end; the ramp is cut in ' +
+        `steps of ${fmtNum(n.depthMm / FLUTE_RAMP_STEPS)} mm, each one a move the sim and the ` +
+        'oracle both read at its own depth.' +
+        (peak < n.depthMm - 1e-9
+          ? ` The path is ${fmtNum(pathLength)} mm long and shorter than its two ramps, so the groove never reaches the full depth.`
+          : ''),
+      value: `${fmtNum(peak)} mm deep · ${fmtNum(n.rampMm)} mm ramps`,
+    });
+  }
+  return steps;
+}
+
+/** A line item's path length, mm — its segments plus the closing one for a ring. */
+function linePathLength(points: readonly (readonly [number, number])[], closed: boolean): number {
+  let total = 0;
+  for (let i = 1; i < points.length; i++) {
+    total += Math.hypot(points[i]![0] - points[i - 1]![0], points[i]![1] - points[i - 1]![1]);
+  }
+  if (closed && points.length >= 2) {
+    const first = points[0]!;
+    const last = points[points.length - 1]!;
+    total += Math.hypot(first[0] - last[0], first[1] - last[1]);
+  }
+  return total;
+}
+
+/**
+ * #674 — a PRISM, in the operator's terms: what stands, on what base, and how far the cut reaches.
+ * The numbers are `prismNumbers`', the same call the plan, the row and the findings make.
+ */
+function prismSteps(job: EngraveJob): RunSheetStep[] {
+  const steps: RunSheetStep[] = [];
+  const tool = jobTool(job);
+  const cone = tool === null ? null : vCone(tool);
+  for (const item of job.shapes) {
+    if (!item.enabled || item.construction || item.prism === undefined) continue;
+    if (item.through === true || item.texture !== undefined || item.inlay !== undefined || item.vCarveDepth === 'variable') continue;
+    const n = prismNumbers(cone, item.depth, item.prism).numbers;
+    steps.push({
+      text:
+        `${itemLabel(item)}: a raised prism — the shape stands ${fmtNum(n.heightMm)} mm, its sides ` +
+        `sloping at the bit's own angle over ${fmtNum(n.slopeWidthMm)} mm, on a ${fmtNum(n.baseMm)} mm ` +
+        `flat base (${n.baseSource}). The cut meets the untouched top face ${fmtNum(n.marginMm)} mm ` +
+        `out from the shape, and a pointed tip would leave the base ridged.`,
+      value: `${fmtNum(n.heightMm)} mm high · ${fmtNum(n.baseMm)} mm base · ${fmtNum(n.marginMm)} mm margin`,
+    });
+  }
+  return steps;
+}
+
+/**
  * #535 — a PURE GOAL job's surface steps: what the two passes did, then the engine's own notes
  * (the feeds, the undercuts a heightfield cannot express, the resolution, and a flat finishing
  * cutter). Every number is `surface3d`'s, printed rather than re-derived here.
@@ -3509,6 +3576,9 @@ export function buildRunSheet(
   cutSteps.push(...inlaySteps(job));
   // #670 — a TEXTURE's pattern follows: the strokes and the numbers that repeat them.
   cutSteps.push(...textureSteps(job));
+  // #674 — FLUTES and PRISMS: the ramp's numbers, and what stands on what base.
+  cutSteps.push(...fluteSteps(job));
+  cutSteps.push(...prismSteps(job));
   // The one-program parameters step, kept by reference: a two-tool job relabels it PROGRAM 1 and
   // prints program 2's beside it (#437 item 8), and doing that by finding it again in the list
   // would be a search over prose.

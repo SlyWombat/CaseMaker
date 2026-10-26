@@ -458,6 +458,38 @@ export function createEngravePreviewer(tl: ManifoldToplevel): EngravePreviewer {
     // A cut whose item has an ERROR finding is left out — the "drawn uncut, still reported" rule
     // below — and every class reports with `labelId` set to the item's own id, drills and traces
     // included (`jobSetup.ts`), so one `errored` set covers them all.
+    // #674 — a FLUTE is drawn per SEGMENT: one cone solid for each step of the plan's own depth
+    // profile, unioned into one body at the trace's deepest point. The ordinary V branch below
+    // sweeps the WHOLE path at one tip depth, which is exactly what a flute is not; a flat flute
+    // goes through `cuts` like any flat trace (each segment is its own swept region).
+    for (const trace of plan.traces) {
+      if (trace.depths === undefined || cone === null || errored.has(trace.id)) continue;
+      const pieces: ManifoldInstance[] = [];
+      for (let pi = 0; pi < trace.paths.length; pi++) {
+        const path = trace.paths[pi]!;
+        const depths = trace.depths[pi];
+        if (depths === undefined || path.length === 0) continue;
+        const last = (trace.closed[pi] ?? false) ? path.length : path.length - 1;
+        for (let j = 0; j < last; j++) {
+          // The move's DEEP end — the same reduction the sweep makes (#629).
+          const depth = Math.max(depths[j] ?? 0, depths[(j + 1) % path.length] ?? 0);
+          if (!(depth > 0)) continue;
+          const a = path[j]!;
+          const b = path[(j + 1) % path.length]!;
+          const piece = vGrooveSolid(tl, [[[a[0], a[1]], [b[0], b[1]]]], [false], cone, depth, OVERSHOOT_MM);
+          if (piece !== null) pieces.push(piece);
+        }
+      }
+      if (pieces.length === 0) continue;
+      if (pieces.length === 1) {
+        cutBodies.push({ body: pieces[0]!, depth: trace.depth });
+      } else {
+        const body = tl.Manifold.union(pieces);
+        for (const piece of pieces) piece.delete();
+        cutBodies.push({ body, depth: trace.depth });
+      }
+    }
+
     for (const cut of cuts) {
       if (cut.polygons.length === 0) continue;
       if (errored.has(cut.id)) continue;
@@ -465,7 +497,9 @@ export function createEngravePreviewer(tl: ManifoldToplevel): EngravePreviewer {
       // #420 slice 4 — a V-bit TRACE is drawn as the cone swept along its path: the mouth at the
       // top face and the tip's own flat at the floor. Its floor is the tip reach, not the mouth
       // footprint the straight cuts use, so the picture and the oracle agree at both levels.
+      // #674 — a fluted trace was drawn per segment above; its cut entries are skipped here.
       const trace = traceById.get(cut.id);
+      if (trace !== undefined && trace.depths !== undefined) continue;
       if (trace !== undefined && cone !== null) {
         const groove = vGrooveSolid(tl, trace.paths, trace.closed, cone, cut.depth, OVERSHOOT_MM);
         if (groove !== null) {

@@ -422,7 +422,8 @@ section of the **same job document**, so a job can be put down and picked up at 
 A **new job starts with one question — what are you cutting?** — and the operation types are its
 answer: **Engrave** (text or single-stroke lines), **V-carve**, **Pocket**, **Profile**,
 **Chamfer the edge**, **Hole**, **Bore to size**, **Thread**, **Surface a mesh** (a goal mesh or
-a picture relief), or **Texture a surface** (a seeded pattern of short strokes). Every operation added
+a picture relief), **Texture a surface** (a seeded pattern of short strokes), **Flute along a line**
+(a groove that ramps in and out) or **Raise a prism** (a shape standing on sloped sides). Every operation added
 afterwards is one row in the job's list, its type on the row, and its expert fields behind the
 row's fold.
 
@@ -485,6 +486,32 @@ by row. A border, frame or cutaway cannot carry one, and neither can an inlay ha
 comes out empty is a warning (`texture-empty`); and past 4,000 paths — strokes, or a scallop's
 row runs — the cap keeps the first 4,000 and reports the count (`texture-crowded`). The strokes themselves are derived at generate
 time and never stored in the job.
+
+**Flute along a line (#674)** cuts a groove that fades in and out. The cutter starts ON the surface
+at the line's first point, feeds down along the path, holds the stated depth through the middle and
+rises back to the surface at the end — no plunge, so no dimple, and no retract out of the groove.
+The **ramp** is a length along the path (default three times the depth, about an 18° slope), cut as
+a Z profile: the plan steps it at `depth/16` and both the simulation and the oracle read every move
+at its own depth, so the file, the picture and the check describe one staircase. Tick **ramped
+ends** on any line — an open path imported by #664 included — or pick **Flute along a line**. A path
+shorter than its two ramps peaks short of the depth, and `flute-short` says so with both numbers. A
+ball or bull nose is refused (`flute-tool`): a ball flute needs a ball groove model this CAM does
+not have.
+
+**Raise a prism (#674)** makes a shape stand. The shape's own depth is the standing height `H`, and
+the row's **base** is the flat floor around it (default 1 mm). A V-bit cuts a RING around the
+shape: its mouth runs from the shape's outline out to the **margin**, derived as
+`base + 2·H·tan(halfAngle)`, and the floor is that mouth eroded by `H·tan` — so the shape stands at
+full height with its sides sloping at the bit's own angle, on a flat base, with the untouched top
+face beyond the margin. The base's flatness is the tip pad's overlap at the V-carve's own pitch, so
+a tip diameter is required (`prism-tip`), the base must beat twice the tip (`prism-base`), and the
+sides are a cone's flank (`prism-needs-cone`). The cut clears the base from its MIDDLE outward and
+cuts the walls last, so the shape's flank is the final cut; the tip's path never comes nearer the
+shape than its own radius plus the slope's foot, so the shape cannot be undercut. The ring is cut by
+the SAME plane V-carve as any region — the difference from V-carve (variable depth) is that the
+design stands untouched and the ring around it is cut at one flat depth, with no medial-axis ladder
+inside. A prism cannot also be a texture, an inlay half, a variable-depth region or a through cut
+(`prism-shape`).
 
 **Chamfer the edge (#669)** breaks an edge rather than cutting a hole or a pocket: one flat bevel
 along a rim, cut by the job's V/chamfer bit with its flank held against the edge. The row picks the
@@ -1406,6 +1433,12 @@ simulation does report about one is the sweep's own list, next:
 | `texture-tool` | error | A texture is cut as traces, and the trace path takes a V-bit or a flat end mill; the job's cutter is one it refuses by name — a ball nose, a bull nose, a drill or a thread mill (#670). | Use a V-bit for dimpled strokes or a flat end mill for flat-bottomed ones; a ball-nosed texture is a surface, which Surface a mesh relief cuts. |
 | `texture-empty` | warning | The pattern derives no stroke inside the region at the stated pitch — a pitch wider than the region is a pattern that misses it (#670). | Widen the region or narrow the pitch. |
 | `texture-crowded` | warning | The pattern wants more than the 4,000-stroke cap, so the program cuts the first 4,000 in generation order (#670). | Widen the pitch so the whole region is cut. |
+| `flute-tool` | error | A flute is cut as a trace, and the trace path takes a V-bit or a flat end mill; the job's cutter is one it refuses by name — a ball nose, a bull nose, a drill or a thread mill (#674). | Use a V-bit or a flat end mill; a ball flute would need a ball groove model this CAM does not have. |
+| `flute-short` | warning | The line is shorter than its two ramps, so the ramps overlap and the groove peaks below the stated depth (#674). | Shorten the ramp or lengthen the line. |
+| `prism-needs-cone` | error | A prism's sides are a V-bit's flank, and the job's cutter has no cone (#674). | Use a V-bit. |
+| `prism-tip` | error | A prism's base is cleared by the cutter's tip flat; a point tip leaves the base as ridges (#674). | Use a V-bit with a tip diameter. |
+| `prism-base` | error | The base is narrower than the tip's flat twice, so the tip has no path between the shape's slope and the base's outer bevel (#674). | Widen the base, or use a smaller tip. |
+| `prism-shape` | error | A prism sits on a rectangle, circle, slot or polygon, and only on a region that is nothing else: a border, frame or cutaway has holes, and a region cannot also be a texture, an inlay half, a variable-depth carve or a through cut (#674). | Draw the shape as its own region, or clear the other marker. |
 | `bore-narrow` | error | A bore's hole is not wider than the cutter, so there is no centre path to helix on; the cut would just be a plunge hole the cutter's own width (#668). | Cut a bigger hole, or use a smaller cutter. |
 | `thread-wrong-tool` | error | The job has a thread, but the tool is not a thread mill. A thread is cut by orbiting a small cutter inside the pilot; a flat end mill cannot cut one (#445). | Pick a thread mill. |
 | `thread-mixed-tools` | error | The thread is enabled beside other work (a label, a shape, a trace, a drill). A thread program has ONE tool, and the toolpath has no way to describe a change part-way through. | Cut the thread in a program of its own, after the pilot and the other work. |
