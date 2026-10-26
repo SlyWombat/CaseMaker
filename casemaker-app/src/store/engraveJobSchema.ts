@@ -1814,6 +1814,9 @@ const jobSourcesSchema = z.object({
         layout: fieldSourceSchema.optional(),
         depth: fieldSourceSchema.optional(),
         depthIntent: fieldSourceSchema.optional(),
+        // #700 — a blank route's untouched placeholder. Named here or the Zod object strips it on
+        // load, and the wizard's text would add a second line over the seed it never recognised.
+        seed: z.boolean().optional(),
       }),
     )
     .optional()

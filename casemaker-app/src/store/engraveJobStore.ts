@@ -29,11 +29,13 @@ import {
 } from '@/engine/cnc/engrave/jobSetup';
 import { effectiveMargins, recommendLabelDepth, recommendedEngraveDepth } from '@/engine/cnc/engrave/depthBounds';
 import { labelGlyphMeasure, labelJawReach, primitiveLabel, voidLimitForItem } from '@/engine/cnc/engrave/partPlan';
+import { inkBoxOf } from '@/engine/cnc/engrave/inkBox';
 import {
   BLANK_SEED_TEXT,
   blankLabelSeed,
   isShippedDemoLabelSet,
   mayRelayoutLabels,
+  type JobBox,
 } from '@/engine/cnc/engrave/blankLabelSeed';
 import { BADGE_POCKET_KEEP_OUT_ID, type BadgeBlank } from '@/engine/cnc/engrave/fromBadge';
 import { DESIGN_POCKET_KEEP_OUT_ID, designReplacesItems, mergeDesignItems, type DesignJobPatch } from '@/engine/cnc/engrave/fromDesign';
@@ -354,6 +356,43 @@ function textAlongFor(job: EngraveJob): 'x' | 'y' {
   const face = job.labels[0];
   const rotation = face === undefined ? 0 : ((face.rotation % 180) + 180) % 180;
   return rotation === 90 ? 'y' : 'x';
+}
+
+/**
+ * #700 — is this label still a blank route's UNTOUCHED placeholder? The seed stamp says so, and
+ * the layout stamp must still be the route's: a person's edit turns `layout` into `user` and clears
+ * `seed`, so neither a retyped nor a moved line can be mistaken for the placeholder.
+ */
+function isSeedPlaceholder(job: EngraveJob, id: string): boolean {
+  const claim = job.sources?.labels?.[id];
+  return claim?.seed === true && claim.layout === 'computed';
+}
+
+/**
+ * The boxes already on the blank, in the job's frame, for `blankLabelSeed`'s avoid rule (#700).
+ * The measured ink box is used where the face is parsed, with `inkBoxOf`'s documented upper bound
+ * standing in where it is not — the same reading the layout itself sizes a line with.
+ */
+function labelAvoidBoxes(labels: readonly EngraveLabel[], measure: ReturnType<typeof labelGlyphMeasure>): JobBox[] {
+  const boxes: JobBox[] = [];
+  for (const label of labels) {
+    if (!label.enabled || label.construction === true) continue;
+    const ink = inkBoxOf(label.text, label.font, label.weight, label.size, measure);
+    const halfWidth = ink.width / 2;
+    const halfHeight = ink.height / 2;
+    const radians = (label.rotation * Math.PI) / 180;
+    const c = Math.abs(Math.cos(radians));
+    const s = Math.abs(Math.sin(radians));
+    const halfX = halfWidth * c + halfHeight * s;
+    const halfY = halfWidth * s + halfHeight * c;
+    boxes.push({
+      x0: label.position.x - halfX,
+      y0: label.position.y - halfY,
+      x1: label.position.x + halfX,
+      y1: label.position.y + halfY,
+    });
+  }
+  return boxes;
 }
 
 function newLabel(job: EngraveJob, depth: number): EngraveLabel {
@@ -802,19 +841,29 @@ export interface EngraveJobState {
   /** Add a default label and return its id. */
   addLabel: () => string;
   /**
-   * #700 — add an OPERATION's engrave text, laid out on the blank as it stands, and return its id.
+   * #700 — an OPERATION's engrave text: laid out on the blank as it stands, and the blank route's
+   * seeded placeholder is FILLED rather than printed over. Returns the label's id.
    *
    * `addLabel` is the generic door: a centre-of-stock line with a fixed 10 mm size, which is right
    * for a placeholder a person then drags. The wizard's step 4 is not a placeholder — the operator
    * typed the text and pressed Create — so the line it makes has to fit the blank it will be cut
    * on. That is `blankLabelSeed`'s own layout (the free band beside a blank's pocket, inset by the
    * edge margin, sized to the band and centred), which the badge route already uses for its seeded
-   * name (#363/#383): a badge reads along Y, a bare blank along X. The line is stamped as the
-   * PERSON's (`layout: 'user'`, `depth: 'user'`), exactly as the wizard's former `addLabel` +
-   * `updateLabel` pair stamped it, so a later blank change does not re-lay their text.
+   * name (#363/#383): a badge reads along Y, a bare blank along X.
    *
-   * The fallback, when nothing fits at 1 mm or the blank is empty, is `addLabel`'s own centre
-   * placement: the findings then report the blank honestly rather than the action throwing.
+   * THE STARTER'S SEED IS STEP 4'S LINE. The badge starter (and a bare blank) leaves one seeded
+   * placeholder — the "Name" / "Text" line, stamped `seed` by the route — and the operator's text
+   * is exactly what it was for. An UNTOUCHED seed (its `seed` stamp still there, so no person has
+   * edited it) has its text, depth and font replaced in place, same id, re-fitted; no second line.
+   * A seed the operator has edited is theirs: the operation's line is ADDED, and the seed's avoid
+   * rule sends it to the next free band rather than over the edited one (they overlap only when no
+   * band has room left — the findings still say so, and the operator can move it).
+   *
+   * The line is stamped as the PERSON's (`layout: 'user'`, `depth: 'user'`), exactly as the
+   * wizard's former `addLabel` + `updateLabel` pair stamped it, so a later blank change does not
+   * re-lay their text. The fallback, when nothing fits at 1 mm or the blank is empty, keeps the
+   * placeholder's placement (or `addLabel`'s centre): the findings report the blank honestly
+   * rather than the action throwing.
    */
   addEngraveText: (text: string, opts: { depth: number; font: string }) => string;
   updateLabel: (id: string, patch: Partial<EngraveLabel>) => void;
@@ -1179,9 +1228,16 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
 
     addEngraveText: (text, opts) => {
       const job = get().job;
+      const measure = labelGlyphMeasure(job.customFonts ?? []);
+      // #700 — the badge starter (or a bare blank) leaves ONE seeded placeholder line. Step 4's
+      // text is what that line was for, so it FILLS it: same id, new text/depth/font, re-fitted —
+      // never a second line printed on top of the first. A line the operator has touched is not a
+      // placeholder (the seed stamp is cleared by `updateLabel`), and then the new line is added
+      // and placed clear of it.
+      const placeholder = job.labels.find((l) => isSeedPlaceholder(job, l.id)) ?? null;
+      const others = job.labels.filter((l) => l.id !== placeholder?.id);
       const pocket = (job.keepOuts ?? []).find((k) => k.id === BADGE_POCKET_KEEP_OUT_ID);
-      const face = job.labels[0];
-      const seed = blankLabelSeed({
+      const fit = blankLabelSeed({
         blank: {
           length: job.stock.length,
           width: job.stock.width,
@@ -1190,25 +1246,45 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
         edgeMargin: job.edgeMargin,
         text,
         font: opts.font,
-        weight: face?.weight ?? 'bold',
+        weight: placeholder?.weight ?? others[0]?.weight ?? 'bold',
         depth: opts.depth,
         // #383/#700 — a badge's name reads along its long side; another blank follows its own line.
         textAlong: textAlongFor(job),
         // The shop's band fill (#451), read here because `blankLabelSeed` is pure.
         bandFill: shopDefault('engrave.blankBandFill').value,
-        measure: labelGlyphMeasure(job.customFonts ?? []),
+        measure,
+        // A second line takes the next free band rather than printing over the first.
+        avoid: labelAvoidBoxes(others, measure),
       });
-      // Nothing at 1 mm fits, or the text is empty: the generic centre placement is the honest
-      // fallback, and the job's own findings say why the blank refuses it.
-      const label = seed ?? { ...newLabel(job, opts.depth), text, font: opts.font };
+      // Nothing at 1 mm fits, or the text is empty: keep the placeholder's own placement (or the
+      // generic centre placement when there was none); the job's findings say why it is refused.
+      const label =
+        fit ??
+        (placeholder !== null
+          ? { ...placeholder, text, font: opts.font, depth: opts.depth }
+          : { ...newLabel(job, opts.depth), text, font: opts.font });
+      // The wizard's former `addLabel` + `updateLabel` pair stamped the text and its layout as the
+      // person's; this write keeps that (the operator typed the text and pressed Create), and the
+      // placeholder stamp is gone because the line is no longer a placeholder.
+      const claim = { depth: 'user' as const, layout: 'user' as const };
+      if (placeholder !== null) {
+        const filled = { ...label, id: placeholder.id };
+        apply((current) => ({
+          ...current,
+          labels: current.labels.map((l) => (l.id === placeholder.id ? filled : l)),
+          sources: {
+            ...(current.sources ?? {}),
+            labels: { ...(current.sources?.labels ?? {}), [placeholder.id]: claim },
+          },
+        }));
+        return placeholder.id;
+      }
       apply((current) => ({
         ...current,
         labels: [...current.labels, label],
-        // The wizard's former `addLabel` + `updateLabel` pair stamped the text and its layout as
-        // the person's; this write keeps that (the operator typed the text and pressed Create).
         sources: {
           ...(current.sources ?? {}),
-          labels: { ...(current.sources?.labels ?? {}), [label.id]: { depth: 'user', layout: 'user' } },
+          labels: { ...(current.sources?.labels ?? {}), [label.id]: claim },
         },
       }));
       return label.id;
@@ -1239,6 +1315,11 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
         if ('depthIntent' in patch) {
           if (patch.depthIntent === undefined) delete claim.depthIntent;
           else claim.depthIntent = 'user';
+        }
+        // #700 — any person's edit takes the label out of the placeholder set, so the wizard's
+        // operation text adds a second line rather than overwriting what they changed.
+        if (patch.depth !== undefined || LAYOUT_FIELDS.some((key) => key in patch) || 'depthIntent' in patch) {
+          delete claim.seed;
         }
         const claimed = Object.keys(claim).length > 0;
         const sources: EngraveJobSources = {
@@ -1765,7 +1846,9 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
             // a route's to re-lay (#363 review). The walk below adds the depth to this same entry.
             sources: {
               ...(current.sources ?? {}),
-              labels: { [seed.id]: { layout: 'computed' } },
+              // #700 — `seed` marks the line as a PLACEHOLDER the wizard's operation text may fill
+              // in place; `layout: computed` still says a route laid it out (the re-lay gate).
+              labels: { [seed.id]: { layout: 'computed', seed: true } },
             },
           }));
         }
@@ -1910,7 +1993,9 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
             // is what lets the BADGE route recognise this line as a route's if one is taken next.
             sources: {
               ...(current.sources ?? {}),
-              labels: { [seed.id]: { layout: 'computed' } },
+              // #700 — `seed` marks the line as a PLACEHOLDER the wizard's operation text may fill
+              // in place; `layout: computed` still says a route laid it out (the re-lay gate).
+              labels: { [seed.id]: { layout: 'computed', seed: true } },
             },
           }));
         }
@@ -1990,11 +2075,17 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
         // But the same entry may also carry the label's `layout` claim, which is about where the line
         // is and what it says, not how deep it cuts (#363 review). That one is carried ACROSS the
         // write: replacing the whole entry would drop it, and a line the badge route had laid out
-        // would come out of the walk looking as if nobody had ever placed it.
+        // would come out of the walk looking as if nobody had ever placed it. #700's `seed` stamp
+        // rides across for the same reason: this walk is the app's own re-depth, not a person's
+        // edit, and the line is still the placeholder step 4's text may fill.
         const merged: NonNullable<EngraveJobSources['labels']> = { ...stated };
         for (const [id, stamp] of Object.entries(stamps)) {
-          const { layout } = stated[id] ?? {};
-          merged[id] = { ...(layout === undefined ? {} : { layout }), ...stamp };
+          const { layout, seed } = stated[id] ?? {};
+          merged[id] = {
+            ...(layout === undefined ? {} : { layout }),
+            ...(seed === undefined ? {} : { seed }),
+            ...stamp,
+          };
         }
         return { ...job, labels, sources: { ...(job.sources ?? {}), labels: merged } };
       }),

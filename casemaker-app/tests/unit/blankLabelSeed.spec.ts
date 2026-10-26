@@ -440,7 +440,7 @@ describe('#363 — the store hand-off', () => {
     expect(line.depth).toBe(0.5);
     // Both claims on the one line: `layout` says the ROUTE laid it out (which is what lets a later
     // take replace it), `depth` says the walk worked the number out (#363 review).
-    expect(job.sources?.labels).toEqual({ [line.id]: { layout: 'computed', depth: 'computed' } });
+    expect(job.sources?.labels).toEqual({ [line.id]: { layout: 'computed', seed: true, depth: 'computed' } });
   });
 
   it('seeds the MEASURED line once the faces are up, and the estimate until then (#365 review)', async () => {
@@ -495,7 +495,7 @@ describe('#363 — the store hand-off', () => {
     // (`engraveJob.spec.ts` pins that number and its kind); the first badge in this file states none,
     // and the walk then writes the two-key pair the test above reads back.
     expect(job.sources?.labels).toEqual({
-      [second.id]: { layout: 'computed', depth: 'computed', depthIntent: 'computed' },
+      [second.id]: { layout: 'computed', seed: true, depth: 'computed', depthIntent: 'computed' },
     });
   });
 
@@ -582,6 +582,7 @@ describe('#363 — the store hand-off', () => {
     // The stamps are the route's, not the person's: the seed's `layout` and the walk's own two.
     expect(s().job.sources?.labels?.[labels[0]!.id]).toEqual({
       layout: 'computed',
+      seed: true,
       depth: 'computed',
       depthIntent: 'computed',
     });
@@ -690,7 +691,7 @@ describe('#364 — the bare-blank hand-off', () => {
     // (#440: that is what it used to write). The claim is still the walk's, which is what lets a
     // later blank revise the number.
     expect(line.depth).toBe(0.5);
-    expect(job.sources?.labels).toEqual({ [line.id]: { layout: 'computed', depth: 'computed' } });
+    expect(job.sources?.labels).toEqual({ [line.id]: { layout: 'computed', seed: true, depth: 'computed' } });
 
     // The bar #363 set, on the real pipeline: the job the wizard hands over generates clean.
     const g = generate(tl, job);

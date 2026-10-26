@@ -152,7 +152,18 @@ export interface EngraveJobSources {
    */
   labels?: Record<
     string,
-    { layout?: FieldSource; depth?: FieldSource; depthIntent?: FieldSource }
+    {
+      layout?: FieldSource;
+      depth?: FieldSource;
+      depthIntent?: FieldSource;
+      /**
+       * #700 — this label is a blank ROUTE's untouched placeholder, written by a seed (the badge's
+       * "Name", a bare blank's "Text"). The wizard's operation text fills it in place instead of
+       * adding a second line on top. Any person's edit clears the stamp (`updateLabel`), so only a
+       * line nobody has touched is replaced.
+       */
+      seed?: boolean;
+    }
   >;
 }
 

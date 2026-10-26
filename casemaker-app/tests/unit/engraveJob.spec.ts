@@ -785,7 +785,7 @@ describe('engraveJobStore (#200)', () => {
       Object.fromEntries(
         job.labels.map((l) => [
           l.id,
-          { layout: 'computed', depth: 'computed', depthIntent: 'computed' },
+          { layout: 'computed', seed: true, depth: 'computed', depthIntent: 'computed' },
         ]),
       ),
     );

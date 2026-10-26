@@ -146,6 +146,25 @@ export interface LabelSeedInputs {
    */
   textAlong?: 'x' | 'y';
   measure?: InkMeasure;
+  /**
+   * Boxes already on the blank that the new line must not overlap (#700), in the JOB's frame.
+   *
+   * A second line is the case: the first may have been edited by the operator, so the seed must
+   * take the next free band rather than print over it. The boxes are projected into the text frame
+   * and the free bands are split around them; the largest piece wins, which is the other band when
+   * one is clear. When nothing is left, the pre-existing "no free band" fallback (the whole usable
+   * face) stands and the two may overlap — the operator can then move one, and the findings still
+   * report the blank honestly.
+   */
+  avoid?: readonly JobBox[];
+}
+
+/** An axis-aligned box in the job's frame, mm, front-left at the origin. */
+export interface JobBox {
+  x0: Mm;
+  y0: Mm;
+  x1: Mm;
+  y1: Mm;
 }
 
 /**
@@ -266,6 +285,33 @@ export function mayRelayoutLabels(job: Pick<EngraveJob, 'labels' | 'sources'>): 
  * height a horizontal band can be cut out of. A rect at 0° or 180° has the same footprint either
  * way and is answered normally.
  */
+/**
+ * The bands with the `avoid` boxes' extents cut out of them (#700).
+ *
+ * The text frame's v axis is the band axis; a box occupies a v range and the whole band width, so
+ * the band is split above and below it. Boxes that do not reach a band leave it alone. A split
+ * piece contributes only when it has positive height.
+ */
+function avoidBands(
+  bands: readonly { y0: Mm; y1: Mm }[],
+  avoid: readonly { y0: Mm; y1: Mm }[],
+): { y0: Mm; y1: Mm }[] {
+  let out: { y0: Mm; y1: Mm }[] = [...bands];
+  for (const box of avoid) {
+    const next: { y0: Mm; y1: Mm }[] = [];
+    for (const band of out) {
+      if (box.y1 <= band.y0 || box.y0 >= band.y1) {
+        next.push(band);
+        continue;
+      }
+      if (box.y0 > band.y0) next.push({ y0: band.y0, y1: Math.min(band.y1, box.y0) });
+      if (box.y1 < band.y1) next.push({ y0: Math.max(band.y0, box.y1), y1: band.y1 });
+    }
+    out = next;
+  }
+  return out.filter((b) => b.y1 > b.y0);
+}
+
 function freeBands(blank: SeedBlank, edgeMargin: Mm): { y0: Mm; y1: Mm }[] {
   const y0 = edgeMargin;
   const y1 = blank.width - edgeMargin;
@@ -341,12 +387,20 @@ export function blankLabelSeed(inputs: LabelSeedInputs): EngraveLabel | null {
   // between the two points is the same arithmetic as the default case.
   const alongY = inputs.textAlong === 'y';
   const blank = alongY ? inTextFrame(inputs.blank) : inputs.blank;
+  // #700 — the occupied boxes, in the text frame's v axis. A job point (x, y) is the text point
+  // (y, L − x) when the line reads along Y (`inTextFrame`'s turn), so a job x-range becomes the
+  // reversed v-range; along X the v axis is simply the job's y.
+  const avoidRanges = (inputs.avoid ?? []).map((box) =>
+    alongY
+      ? { y0: inputs.blank.length - box.x1, y1: inputs.blank.length - box.x0 }
+      : { y0: box.y0, y1: box.y1 },
+  );
   const usableWidth = blank.length - 2 * edgeMargin;
   if (usableWidth <= 0 || text.trim().length === 0) return null;
 
   // The band with the most room, front first on a tie (`reduce` keeps the first). With no free
   // band at all the line is centred on the blank instead and takes the pocket's warning with it.
-  const bands = freeBands(blank, edgeMargin);
+  const bands = avoidBands(freeBands(blank, edgeMargin), avoidRanges);
   const band = bands.reduce<{ y0: Mm; y1: Mm } | null>(
     (a, b) => (a === null || b.y1 - b.y0 > a.y1 - a.y0 ? b : a),
     null,
