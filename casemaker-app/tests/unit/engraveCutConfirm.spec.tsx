@@ -185,3 +185,21 @@ describe('#656 the one screen', () => {
     expect(onG32).toHaveBeenCalledWith(true);
   });
 });
+
+describe('#535 a surface program’s verdict line', () => {
+  it('states the dexel check and its grid, never the oracle’s vacuous 0/0', () => {
+    render(confirm({ surfaceCheck: { gridPitchMm: 0.1 } }));
+    const line = screen.getByTestId('engrave-cut-confirm-oracle').textContent ?? '';
+    expect(line).toContain('No 2.5D check for a surface program — checked on the 0.1 mm dexel grid');
+    expect(line).not.toContain('0.0000');
+    // The gate is unchanged: the press arms once the ONE statement is ticked.
+    expect((screen.getByTestId('engrave-cut-go') as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(screen.getByTestId('engrave-cut-statement'));
+    expect((screen.getByTestId('engrave-cut-go') as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it('a program that is not a surface program keeps the oracle sentence', () => {
+    render(confirm());
+    expect(screen.getByTestId('engrave-cut-confirm-oracle').textContent).toContain('under-cut');
+  });
+});

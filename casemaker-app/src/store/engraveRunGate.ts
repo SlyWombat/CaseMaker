@@ -156,6 +156,37 @@ export interface OracleSentenceInput {
   phase?: EngraveRunPhase | null;
   previousVerdict?: boolean | null;
   changedSinceLast?: readonly EngraveInputKey[];
+  /**
+   * #535 — set when the run's program is a SURFACE (goal) program. The 2.5D oracle compares zero
+   * predicted levels for one by design, so its report says 0/0 within the floor without having
+   * asked anything; the sentence states the check that WAS made — the sweep of the stock, on the
+   * flat dexel grid the simulation ran — instead of printing that vacuous 0/0. `gridPitchMm` is
+   * the FLAT column grid's Y pitch, or null when the run was not swept on the column engine.
+   */
+  surface?: { gridPitchMm: number | null } | null;
+}
+
+/** A grid pitch in the words a sentence needs it in: `0.1`, never `0.10000000000000001`. */
+function pitchText(mm: number): string {
+  return `${Number(mm.toFixed(3))}`;
+}
+
+/**
+ * #535 — the goal program's check, in words. A goal program's predicted list is empty by design
+ * (a heightfield is not a 2D region), so the 2.5D oracle's 0/0 is not evidence; the check that
+ * was made is the material sweep, and on a column run it carries the grid it is good to.
+ */
+export function surfaceCheckSentence(gridPitchMm: number | null): string {
+  return gridPitchMm === null
+    ? 'No 2.5D check for a surface program — the simulation swept the stock'
+    : `No 2.5D check for a surface program — checked on the ${pitchText(gridPitchMm)} mm dexel grid`;
+}
+
+/** The same fact for a status line that already says "Simulated ✓": `checked on the 0.1 mm dexel grid`. */
+export function surfaceGridWords(gridPitchMm: number | null): string {
+  return gridPitchMm === null
+    ? 'swept by the exact engine'
+    : `checked on the ${pitchText(gridPitchMm)} mm dexel grid`;
 }
 
 /**
@@ -164,6 +195,9 @@ export interface OracleSentenceInput {
  */
 export function oracleSentence(v: OracleSentenceInput): string {
   if (!v.oracle) return v.phase === 'checking' || v.phase === 'simulating' ? 'checking…' : 'not checked yet';
+  // #535 — a surface program has no 2.5D prediction to compare: the sentence names its own check,
+  // never the 0/0 the oracle would report for an empty prediction list.
+  if (v.surface) return surfaceCheckSentence(v.surface.gridPitchMm);
   const floor = v.oracle.areaFloor ?? 1e-3; // #206 — the sliver floor; local so this module stays browser-free
   const floorText = floor.toFixed(4); // #584 — the floor is a computed number, print it rounded
   // #623 — a re-posted package is judged in the blank's fitted surface frame, and the row says so:

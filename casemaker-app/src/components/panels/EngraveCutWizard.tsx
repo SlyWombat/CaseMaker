@@ -16,7 +16,7 @@
 
 import { useEffect, useRef, useState, type CSSProperties, type JSX } from 'react';
 import { useEngraveJobStore } from '@/store/engraveJobStore';
-import { oracleSentence, useEngraveRunStore, verifySimulateSentences } from '@/store/engraveRunStore';
+import { oracleSentence, surfaceGridWords, useEngraveRunStore, verifySimulateSentences } from '@/store/engraveRunStore';
 import { useEngravePackageStore } from '@/store/engravePackageStore';
 import { useMachineStore } from '@/store/machineStore';
 import { useFirstRegistration } from '@/store/engraveRegistrationStore';
@@ -87,7 +87,17 @@ export function EngraveCutWizard(): JSX.Element {
   const generatedOk = generated !== null && oracle !== null && oracle.ok;
   // #582 — the step names the blocker inline, reusing the panel's run-row sentences.
   const { verified: verifyText, simulated: simulateText } = verifySimulateSentences(run);
-  const oracleText = oracleSentence(run);
+  // #535 — a goal program's check is the material sweep, not the 2.5D oracle; its sentence says
+  // that instead of the oracle's vacuous 0/0, and the ✓ line below drops the "Verified/Matches"
+  // marks a surface program never earned.
+  const surfaceRun = generated?.surface3d != null;
+  const oracleText = oracleSentence({
+    oracle: run.oracle,
+    phase: run.phase,
+    previousVerdict: run.previousVerdict,
+    changedSinceLast: run.changedSinceLast,
+    surface: surfaceRun ? { gridPitchMm: run.simGridPitchMm } : null,
+  });
   const frozen = pkg !== null;
   const registered = firstReg !== null && firstReg.outcome.usable === true;
   const gates: boolean[] = [machineReady, cutterOk, planApproved, generatedOk, frozen, registered, false];
@@ -163,7 +173,13 @@ export function EngraveCutWizard(): JSX.Element {
               Generate
             </button>
             {oracleChecking && <p data-testid="engrave-cut-generate-checking" style={MUTED}>Checking the simulation…</p>}
-            {generatedOk && <p data-testid="engrave-cut-generate-ok" style={{ color: '#a3e4a0' }}>Generated ✓ Verified ✓ Simulated ✓ Matches ✓</p>}
+            {generatedOk && (
+              <p data-testid="engrave-cut-generate-ok" style={{ color: '#a3e4a0' }}>
+                {surfaceRun
+                  ? `Generated ✓ Simulated ✓ ${surfaceGridWords(run.simGridPitchMm)}`
+                  : 'Generated ✓ Verified ✓ Simulated ✓ Matches ✓'}
+              </p>
+            )}
             {generated !== null && !generatedOk && !oracleChecking && (
               <div data-testid="engrave-cut-generate-blocked" style={{ color: '#f0b4ad' }}>
                 <p style={{ margin: 0 }}>{verifyText}</p>

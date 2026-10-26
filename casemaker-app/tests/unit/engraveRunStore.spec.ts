@@ -28,6 +28,7 @@ import {
   type ToolCopy,
 } from '@/engine/cnc/toolCondition';
 import { useSimStore } from '@/store/simStore';
+import type { SimLoadOk } from '@/workers/sim/session';
 import { useSettingsStore } from '@/store/settingsStore';
 import { useShopDefaultsStore } from '@/store/shopDefaultsStore';
 import { calibrationFromReplies, type MachineCalibration } from '@/engine/cnc';
@@ -134,6 +135,63 @@ describe('engraveRunStore (#206)', () => {
     );
     expect(sentence).toContain('0.0399 mm² floor');
     expect(sentence).toContain('at level Z -0.80, near (19.15, 37.14) — a 0.30 × 0.27 mm patch');
+  });
+
+  describe('#535 the goal program’s check sentence', () => {
+    const OK = { ok: true, band: 0.1, levels: [], worst: { underCut: 0, overCut: 0 } };
+
+    it('states the dexel check and its grid, never the oracle’s vacuous 0/0', () => {
+      const sentence = oracleSentence({ oracle: OK, surface: { gridPitchMm: 0.1 } });
+      expect(sentence).toBe('No 2.5D check for a surface program — checked on the 0.1 mm dexel grid');
+      // The old sentence's claim — both cuts inside the floor — must not appear: nothing was compared.
+      expect(sentence).not.toContain('0.0000');
+      expect(sentence).not.toContain('under-cut');
+    });
+
+    it('states the sweep without a grid when the exact engine ran it', () => {
+      expect(oracleSentence({ oracle: OK, surface: { gridPitchMm: null } })).toBe(
+        'No 2.5D check for a surface program — the simulation swept the stock',
+      );
+    });
+
+    it('a program that is not a surface program keeps the oracle’s own sentence', () => {
+      expect(oracleSentence({ oracle: OK })).toContain('under-cut');
+    });
+
+    it('the store captures the FLAT grid the sweep ran on, and no grid for a rotary one', async () => {
+      const load = useSimStore.getState().loadProgram;
+      const ready = (rotary: boolean): void => {
+        useSimStore.setState({
+          status: 'ready',
+          diagnostics: [],
+          pathOnly: false,
+          info: {
+            stats: { engine: 'column', resolution: { dx: 0.1, dThetaDeg: 0.12 } },
+            summary: { rotary },
+          } as unknown as SimLoadOk,
+        });
+      };
+      try {
+        useSimStore.setState({
+          loadProgram: async () => ready(false),
+        });
+        setEngraveRunClientLoader(async () => ({
+          engraveGenerate: async () => clean(),
+          simOracle: async () => OK,
+        }));
+        await useEngraveRunStore.getState().generate();
+        expect(useEngraveRunStore.getState().simGridPitchMm).toBe(0.12);
+
+        // A rotary grid's second axis is degrees: it is never stated as a millimetre pitch.
+        useSimStore.setState({
+          loadProgram: async () => ready(true),
+        });
+        await useEngraveRunStore.getState().generate();
+        expect(useEngraveRunStore.getState().simGridPitchMm).toBeNull();
+      } finally {
+        useSimStore.setState({ loadProgram: load });
+      }
+    });
   });
 
   it('requires acknowledgement for the named warning codes only', () => {

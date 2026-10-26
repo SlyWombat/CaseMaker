@@ -75,6 +75,8 @@ export {
   uploadBlocker,
   releaseBlocker,
   oracleSentence,
+  surfaceCheckSentence,
+  surfaceGridWords,
   verifySimulateSentences,
 } from './engraveRunGate';
 export type { EngraveRunPhase, EngraveRunView } from './engraveRunGate';
@@ -143,6 +145,13 @@ export interface EngraveRunState {
    * whatever the Simulate panel loaded afterwards.
    */
   simEngine: 'exact' | 'column' | null;
+  /**
+   * #535 — the FLAT dexel grid's Y pitch the column engine actually swept this run on, mm
+   * (`SimLoadOk.stats.resolution.dThetaDeg`), or null when the run was not a flat column sweep.
+   * Captured here like `simEngine`, and for the same reason: the goal program's check sentence
+   * states the grid THIS run was checked on, not whatever the Simulate panel loaded afterwards.
+   */
+  simGridPitchMm: number | null;
   phase: EngraveRunPhase;
   /** The clearance acknowledgement (see `ACKNOWLEDGE_CODES`), reset on every Generate. */
   acknowledged: boolean;
@@ -186,6 +195,7 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
     simStatus: null as SimStatus | null,
     pathOnly: false,
     simEngine: null as 'exact' | 'column' | null,
+    simGridPitchMm: null as number | null,
     acknowledged: false,
     staleSince: null as number | null,
     staleReason: null as EngraveInputKey | null,
@@ -413,6 +423,15 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
       return;
     }
     set({ phase: 'checking', simStatus: sim.status, simDiagnostics: sim.diagnostics, pathOnly: sim.pathOnly, simEngine: sim.info?.stats.engine ?? null });
+    // #535 — the grid the sweep ran on, for a goal program's check sentence. `resolution.dThetaDeg`
+    // is the FLAT Y pitch in mm; on a rotary grid it is degrees, so it is null there.
+    const gridPitch =
+      sim.info?.stats.engine === 'column' &&
+      sim.info.summary.rotary !== true &&
+      typeof sim.info.stats.resolution?.dThetaDeg === 'number'
+        ? sim.info.stats.resolution.dThetaDeg
+        : null;
+    set({ simGridPitchMm: gridPitch });
 
     try {
       const oracle = await client.simOracle(generated.predicted);
@@ -430,6 +449,7 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
     simStatus: null,
     pathOnly: false,
     simEngine: null,
+    simGridPitchMm: null,
     phase: 'idle',
     acknowledged: false,
     staleSince: null,

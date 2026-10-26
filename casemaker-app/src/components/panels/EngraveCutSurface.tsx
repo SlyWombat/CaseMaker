@@ -207,6 +207,10 @@ export function EngraveCutSurface({
   // #656 — the verdict the one screen prints: the run store's oracle for the current package (a
   // re-post replaces it, and the sentence follows).
   const runOracle = useEngraveRunStore((s) => s.oracle);
+  // #535 — a goal program is checked by the dexel sweep, not the 2.5D oracle; the one screen's
+  // verdict line states that check and the grid it ran on, never the oracle's vacuous 0/0.
+  const runSurfaceProgram = useEngraveRunStore((s) => s.generated?.surface3d != null);
+  const runGridPitchMm = useEngraveRunStore((s) => s.simGridPitchMm);
   const [reposting, setReposting] = useState(false);
   const registrationSurface = firstRegistration?.surface ?? null;
   const surfaceGate = surfaceRepostBlocker(pkg, firstRegistration);
@@ -607,6 +611,7 @@ export function EngraveCutSurface({
                 dome={domeProps}
                 domeBlocker={domeG32Blocker}
                 runContext={runContextWithDry}
+                surfaceCheck={runSurfaceProgram ? { gridPitchMm: runGridPitchMm } : null}
                 onLiveStatus={onLiveStatus}
               />
               <EngraveMachineRun target={target} onProgramLine={onProgramLine} />

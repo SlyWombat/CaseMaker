@@ -106,6 +106,12 @@ export interface EngraveCutConfirmProps {
   domeBlocker: string | null;
   /** The job facts the run's end needs; the cutter key is the FROZEN program's. */
   runContext: Omit<RunContext, 'nc'>;
+  /**
+   * #535 — set when the frozen program is a SURFACE (goal) program: the 2.5D oracle compares no
+   * levels for it, so the verdict line states the check that was made — the material sweep, on
+   * this grid — instead of the oracle's vacuous 0/0. Null on every other program.
+   */
+  surfaceCheck?: { gridPitchMm: number | null } | null;
   onLiveStatus?: (live: { busy: boolean; status: string }) => void;
 }
 
@@ -119,6 +125,7 @@ export function EngraveCutConfirm({
   dome,
   domeBlocker,
   runContext,
+  surfaceCheck = null,
   onLiveStatus,
 }: EngraveCutConfirmProps): JSX.Element {
   const [statement, setStatement] = useState(false);
@@ -205,7 +212,12 @@ export function EngraveCutConfirm({
         data-ok={oracleOk ? 'true' : 'false'}
       >
         <strong>The check</strong> —{' '}
-        {oracleSentence({ oracle, phase: oracle === null ? 'idle' : oracle.ok ? 'ready' : 'blocked' })}.
+        {oracleSentence({
+          oracle,
+          phase: oracle === null ? 'idle' : oracle.ok ? 'ready' : 'blocked',
+          surface: surfaceCheck,
+        })}
+        .
       </p>
       {dome !== null && <DomeChoice {...dome} />}
       <label style={{ display: 'block', marginTop: 8, fontSize: 12, color: '#c8d3de' }}>

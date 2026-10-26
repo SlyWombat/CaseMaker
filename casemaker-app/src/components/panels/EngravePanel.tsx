@@ -1365,7 +1365,20 @@ export function EngravePanel(): JSX.Element {
     run.simStatus === 'ready' ? (simErrors > 0 ? 'cross' : 'tick') : run.phase === 'simulating' ? 'pending' : run.simStatus ? 'cross' : 'idle';
 
   const rowOracle: RowState = run.oracle ? (run.oracle.ok ? 'tick' : 'cross') : run.phase === 'checking' ? 'pending' : 'idle';
-  const rowOracleText = `Matches prediction — ${oracleSentence(run)}`;
+  // #535 — a goal program has no 2.5D prediction to compare. Its row states the check that was
+  // made (the sweep, on the dexel grid it ran) rather than prefixing "Matches prediction" to a
+  // comparison the oracle never made; the tick's meaning (the run's check passed) is unchanged.
+  const surfaceRun = run.generated?.surface3d != null;
+  const oracleInput = {
+    oracle: run.oracle,
+    phase: run.phase,
+    previousVerdict: run.previousVerdict,
+    changedSinceLast: run.changedSinceLast,
+    surface: surfaceRun ? { gridPitchMm: run.simGridPitchMm } : null,
+  };
+  const rowOracleText = surfaceRun
+    ? oracleSentence(oracleInput)
+    : `Matches prediction — ${oracleSentence(oracleInput)}`;
 
   // #432 review R11 — a FACING job has a second program, and a withheld facing file must not be
   // invisible: Save writes one file fewer than the sheet says, and the sheet's own sentence is the
