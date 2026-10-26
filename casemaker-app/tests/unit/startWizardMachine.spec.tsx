@@ -190,7 +190,7 @@ describe('#682 — step 1 is the house’s machine', () => {
     );
     expect((screen.getByTestId('start-wizard-next') as HTMLButtonElement).disabled).toBe(false);
     fireEvent.click(screen.getByTestId('start-wizard-next'));
-    expect(screen.getByTestId('start-wizard-step-job')).toBeDefined();
+    expect(screen.getByTestId('start-wizard-step-stock')).toBeDefined();
   });
 
   it('no machine anywhere: Offline, no invented last-seen, and the job continues', async () => {
@@ -204,7 +204,7 @@ describe('#682 — step 1 is the house’s machine', () => {
     expect(screen.queryByTestId('start-wizard-machine-offline-note')).not.toBeNull();
     expect((screen.getByTestId('start-wizard-next') as HTMLButtonElement).disabled).toBe(false);
     fireEvent.click(screen.getByTestId('start-wizard-next'));
-    expect(screen.getByTestId('start-wizard-step-job')).toBeDefined();
+    expect(screen.getByTestId('start-wizard-step-stock')).toBeDefined();
   });
 
   it('with no location record, a found machine names itself and its address', async () => {
@@ -294,7 +294,7 @@ describe('#682 — step 1 is the house’s machine', () => {
     expect(stateLine().textContent).toBe('Checking…');
     expect((screen.getByTestId('start-wizard-next') as HTMLButtonElement).disabled).toBe(false);
     fireEvent.click(screen.getByTestId('start-wizard-next'));
-    expect(screen.getByTestId('start-wizard-step-job')).toBeDefined();
+    expect(screen.getByTestId('start-wizard-step-stock')).toBeDefined();
 
     await act(async () => {
       release!();

@@ -5333,12 +5333,14 @@
           "type": "string"
         },
         "form": {
-          "description": "Stock form: sheet, plate, block, or a printed blank.",
+          "description": "Stock form: sheet, plate, block, a printed blank, or round stock (disc or rod).",
           "enum": [
             "sheet",
             "plate",
             "block",
-            "printed-blank"
+            "printed-blank",
+            "disc",
+            "rod"
           ],
           "type": "string"
         },
