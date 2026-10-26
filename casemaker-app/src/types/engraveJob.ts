@@ -500,7 +500,11 @@ export interface EngraveTargetObject {
   id: string;
   /** The imported file's name, shown in the row and on findings. */
   name: string;
-  format: 'stl' | '3mf';
+  /**
+   * #672 — `'png'` is an IMAGE RELIEF: the picture's luminance IS the goal's heightfield (no mesh
+   * is built), sampled and surfaced by the same goal pipeline.
+   */
+  format: 'stl' | '3mf' | 'png';
   /** SHA-256 of the raw bytes, lowercase hex — the object's identity and the mesh cache key. */
   sha256: string;
   /** The raw file bytes, base64. Capped at 4 MiB on import (the #425 embedded-source rule). */
@@ -524,6 +528,23 @@ export interface EngraveTargetObject {
    * this block existed rounds-trips byte-for-byte and a goal left alone cuts the same program.
    */
   surface?: EngraveSurfaceSettings;
+  /**
+   * #672 — a PNG goal's relief map: the depth the darkest (or, inverted, the lightest) tone is cut
+   * to and which end of the greys sits at the top face. Absent = the engine's labelled defaults.
+   */
+  relief?: EngraveReliefSettings;
+}
+
+/**
+ * #672 — how a picture's tones become depths. The map itself is one function
+ * (`engine/cnc/cam/relief.ts`); these are its two numbers, both optional so a document that
+ * states neither takes the labelled defaults (`reliefNumbers`).
+ */
+export interface EngraveReliefSettings {
+  /** The deepest cut, mm below the image's top face. Default: the CAM's 1.5 mm. */
+  maxDepthMm?: Mm;
+  /** True puts BLACK at the top face; absent/false puts white there (the natural reading). */
+  invert?: boolean;
 }
 
 /** The role an embedded mesh plays (#533): a part to position against, or a shape to make. */

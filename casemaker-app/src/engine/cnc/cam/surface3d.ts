@@ -37,6 +37,9 @@
 
 import type { EngraveTargetObject } from '@/types/engraveJob';
 import { targetObjectMesh } from '@/engine/import/targetObject';
+import { base64ToArrayBuffer } from '@/engine/import/base64';
+import { decodePng } from '@/engine/import/png';
+import { reliefDepthMm, reliefNumbers } from './relief';
 import {
   estimateCycleSeconds,
   HOP_Z,
@@ -150,9 +153,11 @@ export interface SampleGoalOpts {
  * order, no tolerance that depends on traversal.
  */
 export function sampleGoalHeightfield(
-  target: Pick<EngraveTargetObject, 'sha256' | 'format' | 'data' | 'position' | 'rotation'>,
+  target: Pick<EngraveTargetObject, 'sha256' | 'format' | 'data' | 'position' | 'rotation' | 'size' | 'relief'>,
   opts: SampleGoalOpts = {},
 ): GoalHeightfield {
+  // #672 — a PICTURE is its own heightfield: the same grid, the same frame, the same downstream.
+  if (target.format === 'png') return sampleImageHeightfield(target, opts);
   const mesh = targetObjectMesh(target);
   const topZ = opts.stockTopZ ?? 0;
   const requestedPitch = positive(opts.pitchMm) ? (opts.pitchMm as number) : DEFAULT_GRID_PITCH_MM;
@@ -194,25 +199,10 @@ export function sampleGoalHeightfield(
     yMin = Math.min(yMin, wy);
     yMax = Math.max(yMax, wy);
   }
-  const extentX = xMax - xMin;
-  const extentY = yMax - yMin;
-
-  // The cap, honoured by COARSENING (design doc §2) — never a refusal. Scale the pitch up by the
-  // square root of the overshoot so the cell count lands at the cap.
-  let pitch = requestedPitch;
-  let nx = Math.max(1, Math.ceil(extentX / pitch) + 1);
-  let ny = Math.max(1, Math.ceil(extentY / pitch) + 1);
-  let coarsened = false;
-  if (nx * ny > maxCells) {
-    const scale = Math.sqrt((nx * ny) / maxCells);
-    pitch = requestedPitch * scale;
-    nx = Math.max(1, Math.ceil(extentX / pitch) + 1);
-    ny = Math.max(1, Math.ceil(extentY / pitch) + 1);
-    coarsened = true;
-  }
-
-  const x0 = xMin;
-  const y0 = yMin;
+  const grid = planGrid(xMin, xMax, yMin, yMax, requestedPitch, maxCells);
+  const { pitch, nx, ny, coarsened } = grid;
+  const x0 = grid.x0;
+  const y0 = grid.y0;
   const z = new Float32Array(nx * ny);
   z.fill(topZ);
   const covered = new Uint8Array(nx * ny);
@@ -239,11 +229,175 @@ export function sampleGoalHeightfield(
 
   const resolutionNote = coarsened
     ? `sampled on a ${pitch.toFixed(4)} mm grid (coarsened from the requested ${requestedPitch} mm: ` +
-      `the footprint would need ${Math.ceil(extentX / requestedPitch) * Math.ceil(extentY / requestedPitch)} cells, ` +
+      `the footprint would need ${Math.ceil((xMax - xMin) / requestedPitch) * Math.ceil((yMax - yMin) / requestedPitch)} cells, ` +
       `over the ${maxCells}-cell cap)`
     : `sampled on a ${pitch} mm grid`;
 
   return { nx, ny, x0, y0, pitch, topZ, minZ, z, covered, coveredCount, resolutionNote };
+}
+
+/**
+ * The grid a goal footprint is sampled on: its origin, pitch and cell counts. The cap is honoured
+ * by COARSENING (design doc §2) — never a refusal: the pitch scales up by the square root of the
+ * overshoot so the cell count lands at the cap.
+ */
+function planGrid(
+  xMin: number,
+  xMax: number,
+  yMin: number,
+  yMax: number,
+  requestedPitch: number,
+  maxCells: number,
+): { x0: number; y0: number; pitch: number; nx: number; ny: number; coarsened: boolean } {
+  const extentX = xMax - xMin;
+  const extentY = yMax - yMin;
+  let pitch = requestedPitch;
+  let nx = Math.max(1, Math.ceil(extentX / pitch) + 1);
+  let ny = Math.max(1, Math.ceil(extentY / pitch) + 1);
+  let coarsened = false;
+  if (nx * ny > maxCells) {
+    const scale = Math.sqrt((nx * ny) / maxCells);
+    pitch = requestedPitch * scale;
+    nx = Math.max(1, Math.ceil(extentX / pitch) + 1);
+    ny = Math.max(1, Math.ceil(extentY / pitch) + 1);
+    coarsened = true;
+  }
+  return { x0: xMin, y0: yMin, pitch, nx, ny, coarsened };
+}
+
+/**
+ * #672 — A PICTURE AS A GOAL: its luminance is the top-Z field, sampled on the same grid the
+ * mesh path uses and placed by the same contract — the image's rectangle centred at `position`,
+ * turned `rotation` about that centre, its brightest toned face at the image's `position.z`.
+ *
+ * The pixel's grey is sampled BILINEARLY at the cell centre (pixel centres at half-integers), so a
+ * linear ramp stays linear between pixels rather than stair-stepping. The image's TOP ROW faces
+ * +Y (the far side of the blank), the way a picture lies on the bed. The resolution sentence names
+ * the grid pitch, the picture's size in millimetres and its pitch in mm per pixel — the honest
+ * bound on the detail, before the cutter's own.
+ */
+function sampleImageHeightfield(
+  target: Pick<EngraveTargetObject, 'sha256' | 'format' | 'data' | 'position' | 'rotation' | 'size' | 'relief'>,
+  opts: SampleGoalOpts,
+): GoalHeightfield {
+  const topZ = opts.stockTopZ ?? 0;
+  const requestedPitch = positive(opts.pitchMm) ? (opts.pitchMm as number) : DEFAULT_GRID_PITCH_MM;
+  const maxCells = positive(opts.maxCells) ? (opts.maxCells as number) : DEFAULT_MAX_CELLS;
+  const decoded = decodePng(new Uint8Array(base64ToArrayBuffer(target.data)));
+  if (!decoded.ok) {
+    throw new Error(`the image relief could not be read: ${decoded.error}`);
+  }
+  const { width, height, grey } = decoded.image;
+  const numbers = reliefNumbers(target.relief);
+  const halfX = target.size.x / 2;
+  const halfY = target.size.y / 2;
+  if (!(halfX > 0 && halfY > 0)) {
+    throw new Error('the image relief has no placed size — set its width before generating');
+  }
+  const theta = (target.rotation * Math.PI) / 180;
+  const cos = Math.cos(theta);
+  const sin = Math.sin(theta);
+  // The rotated rectangle's world bbox.
+  let xMin = Infinity;
+  let xMax = -Infinity;
+  let yMin = Infinity;
+  let yMax = -Infinity;
+  for (const [lx, ly] of [
+    [-halfX, -halfY],
+    [halfX, -halfY],
+    [halfX, halfY],
+    [-halfX, halfY],
+  ] as const) {
+    const wx = target.position.x + (lx * cos - ly * sin);
+    const wy = target.position.y + (lx * sin + ly * cos);
+    xMin = Math.min(xMin, wx);
+    xMax = Math.max(xMax, wx);
+    yMin = Math.min(yMin, wy);
+    yMax = Math.max(yMax, wy);
+  }
+  const grid = planGrid(xMin, xMax, yMin, yMax, requestedPitch, maxCells);
+  const x0 = grid.x0;
+  const y0 = grid.y0;
+  const z = new Float32Array(grid.nx * grid.ny);
+  z.fill(topZ);
+  const covered = new Uint8Array(grid.nx * grid.ny);
+  for (let j = 0; j < grid.ny; j++) {
+    const wy = y0 + j * grid.pitch;
+    for (let i = 0; i < grid.nx; i++) {
+      const wx = x0 + i * grid.pitch;
+      // Into the image's own frame (the inverse of the placement's rotation)…
+      const dx = wx - target.position.x;
+      const dy = wy - target.position.y;
+      const lx = dx * cos + dy * sin;
+      const ly = -dx * sin + dy * cos;
+      if (Math.abs(lx) > halfX || Math.abs(ly) > halfY) continue;
+      // …then to continuous pixel coordinates: pixel centres are at half-integers, and the
+      // image's top row faces +Y.
+      const u = ((lx + halfX) / target.size.x) * width;
+      const v = ((halfY - ly) / target.size.y) * height;
+      const g = bilinearGrey(grey, width, height, u, v);
+      const idx = j * grid.nx + i;
+      z[idx] = topZ - reliefDepthMm(g, numbers.maxDepthMm, numbers.invert);
+      covered[idx] = 1;
+    }
+  }
+  const summary = summarise(z, covered, topZ);
+  const pixelPitch = Math.max(target.size.x / width, target.size.y / height);
+  const resolutionNote =
+    (grid.coarsened
+      ? `sampled on a ${grid.pitch.toFixed(4)} mm grid (coarsened from the requested ${requestedPitch} mm: the footprint would need ${Math.ceil((xMax - xMin) / requestedPitch) * Math.ceil((yMax - yMin) / requestedPitch)} cells, over the ${maxCells}-cell cap)`
+      : `sampled on a ${grid.pitch} mm grid`) +
+    ` from a ${width} × ${height} px image over ${round3(target.size.x)} × ${round3(target.size.y)} mm — ` +
+    `${Number(pixelPitch.toFixed(4))} mm per pixel` +
+    (numbers.invert ? `; black is the top face` : '') +
+    `; ${Number(numbers.maxDepthMm.toFixed(3))} mm deep (${numbers.depthSource})`;
+  return {
+    nx: grid.nx,
+    ny: grid.ny,
+    x0,
+    y0,
+    pitch: grid.pitch,
+    topZ,
+    minZ: summary.minZ,
+    z,
+    covered,
+    coveredCount: summary.coveredCount,
+    resolutionNote,
+  };
+}
+
+/** The luminance at continuous pixel coordinates (u, v), bilinear between pixel centres. */
+function bilinearGrey(grey: Uint8Array, width: number, height: number, u: number, v: number): number {
+  const x = Math.min(width - 1, Math.max(0, u - 0.5));
+  const y = Math.min(height - 1, Math.max(0, v - 0.5));
+  const x0 = Math.floor(x);
+  const y0 = Math.floor(y);
+  const x1 = Math.min(width - 1, x0 + 1);
+  const y1 = Math.min(height - 1, y0 + 1);
+  const fx = x - x0;
+  const fy = y - y0;
+  const at = (ii: number, jj: number): number => grey[jj * width + ii] as number;
+  const top = at(x0, y0) * (1 - fx) + at(x1, y0) * fx;
+  const bottom = at(x0, y1) * (1 - fx) + at(x1, y1) * fx;
+  return top * (1 - fy) + bottom * fy;
+}
+
+/** `12.5` — a millimetre figure as a sentence prints it. */
+function round3(v: number): string {
+  return String(Number(v.toFixed(3)));
+}
+
+/** The covered-cell count and the lowest top-Z over the grid. */
+function summarise(z: Float32Array, covered: Uint8Array, topZ: number): { coveredCount: number; minZ: number } {
+  let minZ = topZ;
+  let coveredCount = 0;
+  for (let k = 0; k < z.length; k++) {
+    if (covered[k] === 1) {
+      coveredCount++;
+      if ((z[k] as number) < minZ) minZ = z[k] as number;
+    }
+  }
+  return { coveredCount, minZ };
 }
 
 /** Rasterise one placed triangle into the grid, keeping the max Z per covered cell. */
@@ -567,7 +721,10 @@ export function generateSurface3dIR(args: Surface3dArgs): Surface3dResult {
  * the stock top has no surface to cut.
  */
 export function generateSurface3dForGoal(args: {
-  target: Pick<EngraveTargetObject, 'id' | 'sha256' | 'format' | 'data' | 'position' | 'rotation'>;
+  target: Pick<
+    EngraveTargetObject,
+    'id' | 'sha256' | 'format' | 'data' | 'position' | 'rotation' | 'size' | 'relief'
+  >;
   tool: Tool;
   toolNumber: number;
   spindleRpm: number;

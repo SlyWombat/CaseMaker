@@ -5034,10 +5034,11 @@
           "type": "boolean"
         },
         "format": {
-          "description": "File format of the reference mesh.",
+          "description": "File format of the reference object: a mesh ('stl'/'3mf'), or a 'png' picture whose luminance is the goal heightfield (#672).",
           "enum": [
             "stl",
-            "3mf"
+            "3mf",
+            "png"
           ],
           "type": "string"
         },
@@ -5073,6 +5074,23 @@
             "y",
             "z"
           ],
+          "type": "object"
+        },
+        "relief": {
+          "additionalProperties": false,
+          "description": "A PNG goal’s relief map: its depth and direction (#672); omit for defaults.",
+          "properties": {
+            "invert": {
+              "description": "True puts black at the top face; omit (or false) for white at the top face.",
+              "type": "boolean"
+            },
+            "maxDepthMm": {
+              "description": "The deepest relief cut below the image’s top face, in millimetres; omit for the CAM’s 1.5 mm.",
+              "exclusiveMinimum": 0,
+              "maximum": 20,
+              "type": "number"
+            }
+          },
           "type": "object"
         },
         "role": {

@@ -133,6 +133,9 @@ import {
   type InlayNumbers,
 } from '@/engine/cnc/engrave/inlay';
 import { jobFileName } from '@/engine/cnc/engrave/jobFile';
+import { decodePng } from '@/engine/import/png';
+import { base64ToArrayBuffer } from '@/engine/import/base64';
+import { reliefNumbers } from '@/engine/cnc/cam/relief';
 import { saveJobFileText } from '@/store/engraveJobFileStore';
 import { parseEngraveJob } from '@/store/engraveJobSchema';
 import { setOperationIntake } from './operationIntake';
@@ -1170,7 +1173,8 @@ export function EngravePanel(): JSX.Element {
     }
   }
   /**
-   * #435 — read a picked STL/3MF as the target object. The parser, the size guard, the hash and
+   * #435 — read a picked STL/3MF (or, #672, a PNG relief) as the target object. The parser, the
+   * size guard, the hash and
    * the base64 embedding are all `readTargetObjectFile`'s; this only places the result: centred in
    * X/Y with its TOP on the stock's top face (Z0), which is where a reference part sits when it is
    * being used to lay out pockets.
@@ -1179,7 +1183,17 @@ export function EngravePanel(): JSX.Element {
     setTargetError(null);
     setTargetImporting(true);
     try {
-      const result = await readTargetObjectFile(file, newTargetObjectId());
+      // #672 — a PICTURE has no physical size: the import fits it onto the blank (aspect kept),
+      // and a picture is always the shape to MAKE — a tone map is not something to position
+      // against, so the role is the goal whatever the door.
+      const isPng = /\.png$/i.test(file.name);
+      const result = await readTargetObjectFile(
+        file,
+        newTargetObjectId(),
+        isPng
+          ? { fit: { maxWidth: Math.max(1, job.stock.length - 4), maxHeight: Math.max(1, job.stock.width - 4) } }
+          : {},
+      );
       if (!result.ok) {
         setTargetError(result.error);
         return;
@@ -1196,7 +1210,7 @@ export function EngravePanel(): JSX.Element {
         enabled: true,
         // #662 — the Surface a mesh operation: a goal is the shape to MAKE (the engine roughs and
         // ball-finishes it), where a reference is only something to position against.
-        ...(role === 'goal' ? { role: 'goal' as const } : {}),
+        ...(role === 'goal' || isPng ? { role: 'goal' as const } : {}),
       });
       // A new object arrives open, like every other add: its placement is the field the import
       // could not settle.
@@ -1819,6 +1833,31 @@ export function EngravePanel(): JSX.Element {
   const primitiveCount = job.primitives?.length ?? 0;
   const chamferCount = job.chamfers?.length ?? 0;
   const target = job.targetObject ?? null;
+  // #672 — a picture goal's pixel size, decoded once per image (the document stores the bytes and
+  // the two numbers; the pixels are derived here for the row's resolution sentence).
+  const reliefPixels = useMemo(() => {
+    if (target === null || target.format !== 'png') return null;
+    try {
+      const decoded = decodePng(new Uint8Array(base64ToArrayBuffer(target.data)));
+      return decoded.ok ? { width: decoded.image.width, height: decoded.image.height } : null;
+    } catch {
+      return null;
+    }
+  }, [target === null ? null : target.format, target === null ? null : target.sha256]);
+  const reliefFacts =
+    target !== null && target.format === 'png'
+      ? (() => {
+          const numbers = reliefNumbers(target.relief);
+          return {
+            pixels: reliefPixels,
+            depth: { value: numbers.maxDepthMm, source: numbers.depthSource },
+            typed: target.relief?.maxDepthMm !== undefined,
+            invert: numbers.invert,
+            gridPitch: shopDefault('sim.columnFlatPitchYMm'),
+            cutterDiameter: tool === null ? null : cuttingDiameter(tool),
+          };
+        })()
+      : null;
   const hasReferenceable = job.labels.length + job.shapes.length + combinedCount + vectorCount > 0;
   // #218 — the `of` picker's choices. The words are the item list's own (`itemRowName` /
   // `itemKindWord`), so the row and the list cannot name the same item differently.
@@ -2712,6 +2751,7 @@ export function EngravePanel(): JSX.Element {
               : undefined
           }
           surfaceFacts={target.role === 'goal' ? (run.generated?.surface3d ?? null) : null}
+          relief={reliefFacts}
           onCutterChange={(key) => setTool(key)}
         />
       )}
@@ -2742,7 +2782,7 @@ export function EngravePanel(): JSX.Element {
       <input
         ref={goalInputRef}
         type="file"
-        accept=".stl,.3mf,model/stl,model/3mf"
+        accept=".stl,.3mf,.png,model/stl,model/3mf,image/png"
         style={{ display: 'none' }}
         data-testid="engrave-surface-input"
         onChange={(e) => {

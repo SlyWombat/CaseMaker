@@ -30,9 +30,10 @@
  *    `drill` / `drill-array` items with `mode: 'bore'` and a stated diameter, so a clearance
  *    hole wider than any bit in the box is one operation, not a circle pocket;
  *  - `thread` — a milled internal thread;
- *  - `surface` — a goal STL/3MF, roughed and ball-finished in 3D (#534). The engine posts it for a
- *    PURE goal job, so the picker offers it only while the list is empty, and picking it sets the
- *    imported mesh's `role: 'goal'` — the control the UI did not have (matrix gap A1).
+ *  - `surface` — a goal mesh or a PNG relief (#672), roughed and ball-finished in 3D (#534). The
+ *    engine posts it for a PURE goal job, so the picker offers it only while the list is empty,
+ *    and picking it sets the imported object's `role: 'goal'` — the control the UI did not have
+ *    (matrix gap A1).
  *
  * NOT offered here, per the matrix (gaps, not omissions): open-path lines from SVG/DXF (#B2),
  * variable-depth V-carve (#B3), rotary wrap (#B1), greyscale image relief (#B4). Facing is a job
@@ -81,7 +82,7 @@ export const OPERATION_TYPES: readonly OperationTypeDef[] = [
   { id: 'hole', label: 'Hole', blurb: 'A hole, or a grid of them', addTestId: 'engrave-add-drill' },
   { id: 'bore', label: 'Bore to size', blurb: 'A hole wider than the cutter, helixed down its wall', addTestId: 'engrave-add-bore' },
   { id: 'thread', label: 'Thread', blurb: 'A milled internal thread', addTestId: 'engrave-add-thread' },
-  { id: 'surface', label: 'Surface a mesh', blurb: 'Rough and finish a goal STL/3MF', addTestId: 'engrave-add-surface' },
+  { id: 'surface', label: 'Surface a mesh', blurb: 'Rough and finish a goal mesh or picture', addTestId: 'engrave-add-surface' },
 ];
 
 const BY_ID = new Map(OPERATION_TYPES.map((t) => [t.id, t]));

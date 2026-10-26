@@ -66,11 +66,12 @@ oversight):
   and a `G32 R1` console grid is offered as the machine-side alternative; a **dome** (a curved top
   over a flat colour line) is refused, because following the top would cut through the line.
   Whether the grid compensates every move or only its endpoints is #501's bench question.
-- 3D surfacing from a **goal mesh** — now built (#534, #535, #671, §5.4): a job whose only work is
-  a `role: 'goal'` mesh generates a raster-roughing + ball-nose finishing program, with optional
-  **scallop** (offset contours) and **pencil** (corner) finishing passes after it, and the goal
-  row's **Technical** fold carries the operation's cutter, step-down/step-overs, grid pitch,
-  allowance, the two pass switches and the pencil crease angle. What is not built is measured 3D
+- 3D surfacing from a **goal mesh** — now built (#534, #535, #671, #672, §5.4): a job whose only
+  work is a `role: 'goal'` mesh — or a **PNG picture, carved as a relief** — generates a
+  raster-roughing + ball-nose finishing program, with optional **scallop** (offset contours) and
+  **pencil** (corner) finishing passes after it, and the goal row's **Technical** fold carries the
+  operation's cutter, step-down/step-overs, grid pitch, allowance, the two pass switches and the
+  pencil crease angle (a picture adds its relief depth, direction and placed width). What is not built is measured 3D
   engagement feeds (bench work, #536) and roughing a goal with one cutter and finishing it with
   another; a heightfield has one top-Z per (x, y), so undercuts and overhangs are unrepresentable —
   the honest 3-axis answer.
@@ -420,8 +421,8 @@ section of the **same job document**, so a job can be put down and picked up at 
 
 A **new job starts with one question — what are you cutting?** — and the operation types are its
 answer: **Engrave** (text or single-stroke lines), **V-carve**, **Pocket**, **Profile**,
-**Chamfer the edge**, **Hole**, **Bore to size**, **Thread**, or **Surface a mesh** (a goal
-STL/3MF). Every operation added
+**Chamfer the edge**, **Hole**, **Bore to size**, **Thread**, or **Surface a mesh** (a goal mesh
+or a picture relief). Every operation added
 afterwards is one row in the job's list, its type on the row, and its expert fields behind the
 row's fold.
 
@@ -437,6 +438,19 @@ setup's flat end mill pockets it flat at that depth, in its own program after th
 two programs meet without a step. A setup that names no flat end mill after the V leaves the core
 standing, and `vcarve-variable-core` says so with its area. A flat end mill on a variable-depth
 region is refused by name (`vcarve-variable-needs-cone`).
+
+**Image to relief (#672)** makes a picture into a 3D surface. The **Surface a mesh** picker takes
+a **PNG** as well as a mesh: the file is embedded in the job by its bytes (never the sampled
+heights), its tones become the goal's top-Z field, and the SAME goal pipeline roughs and finishes
+it — the parallel finish, the #671 scallop and pencil passes, the dexel check and the release are
+the mesh goal's own. The row's Technical fold carries the map's two numbers — the **relief depth**
+(default 1.5 mm, stated as the CAM's default until typed) and which end of the tones sits at the
+**top face** (white as drawn, or black) — and the picture's placed **width** (the height follows
+its aspect). The map is one function: `depth = relief × (1 − luminance/255)`, white at the top
+face, Rec.601 luminance for colour; a picture's pixel pitch is stated beside the grid pitch and
+the cutter's ⌀, because an image holds no detail finer than its own pixels and the cut holds none
+finer than the ball. 8-bit greyscale or RGB(A) PNGs, non-interlaced; 16-bit, palette and interlaced
+files are refused at import with the way out, and JPEG needs converting first.
 
 **Inlay (#673)** cuts a two-colour design as a PAIR of blanks. The operation adds a region carrying
 the **female** marker; its depth is the pocket depth and the row's **glue gap** (default 0.2 mm) is

@@ -10,6 +10,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import {
   EngraveTargetObjectRow,
+  type ReliefRowFacts,
   type SurfaceDefaults,
 } from '@/components/panels/EngraveTargetObjectRow';
 import type { GoalSurfaceFacts } from '@/engine/cnc/cam/surface3d';
@@ -65,10 +66,11 @@ interface RowOptions {
   target?: Partial<EngraveTargetObject>;
   surface?: SurfaceDefaults | undefined;
   surfaceFacts?: GoalSurfaceFacts | null;
+  relief?: ReliefRowFacts | null;
 }
 
 /** Render the row; returns the callbacks so a test can read what a control sent. */
-function row({ target = {}, surface = DEFAULTS, surfaceFacts = null }: RowOptions = {}): {
+function row({ target = {}, surface = DEFAULTS, surfaceFacts = null, relief = null }: RowOptions = {}): {
   onChange: ReturnType<typeof vi.fn>;
   onRemove: ReturnType<typeof vi.fn>;
   onCutterChange: ReturnType<typeof vi.fn>;
@@ -85,6 +87,7 @@ function row({ target = {}, surface = DEFAULTS, surfaceFacts = null }: RowOption
       onRemove={onRemove}
       surface={surface}
       surfaceFacts={surfaceFacts}
+      relief={relief}
       onCutterChange={onCutterChange}
     />,
   );
@@ -239,5 +242,64 @@ describe('#671 the extra finishing passes', () => {
     const report = screen.getByTestId('engrave-target-surface-report-0').textContent ?? '';
     expect(report).toContain('a scallop pass on 12 contours');
     expect(report).toContain('a pencil pass on 3 creases at 20°');
+  });
+});
+
+// #672 — a picture goal's relief map: the depth and its source, the direction, the placed width
+// and the resolution the picture can actually hold.
+describe('#672 the relief map', () => {
+  const RELIEF: ReliefRowFacts = {
+    pixels: { width: 512, height: 384 },
+    depth: { value: 1.5, source: 'the CAM’s default' },
+    typed: false,
+    invert: false,
+    gridPitch: { value: 0.1, source: 'seeded' },
+    cutterDiameter: 1,
+  };
+  const PNG: Partial<EngraveTargetObject> = { format: 'png', size: { x: 40, y: 30, z: 1.5 } };
+
+  it('prefills the depth from its default and says where that is', () => {
+    row({ target: PNG, relief: RELIEF });
+    openTechnical();
+    const depth = screen.getByTestId('engrave-target-relief-depth-0') as HTMLInputElement;
+    expect(depth.value).toBe('1.5');
+    expect(screen.getByTestId('engrave-target-relief-depth-source-0').textContent).toContain(
+      'the CAM’s default',
+    );
+    expect(screen.getByTestId('engrave-target-relief-invert-0')).toBeTruthy();
+  });
+
+  it('writes the depth (and the placed size) and the direction', () => {
+    const { onChange } = row({ target: PNG, relief: RELIEF });
+    openTechnical();
+    fireEvent.change(screen.getByTestId('engrave-target-relief-depth-0'), { target: { value: '2.5' } });
+    expect(onChange).toHaveBeenLastCalledWith({ relief: { maxDepthMm: 2.5 }, size: { x: 40, y: 30, z: 2.5 } });
+    fireEvent.change(screen.getByTestId('engrave-target-relief-invert-0'), { target: { value: 'black' } });
+    expect(onChange).toHaveBeenLastCalledWith({ relief: { invert: true } });
+    fireEvent.change(screen.getByTestId('engrave-target-relief-invert-0'), { target: { value: 'white' } });
+    expect(onChange).toHaveBeenLastCalledWith({ relief: { invert: undefined } });
+  });
+
+  it('rescales the width with the picture’s aspect', () => {
+    const { onChange } = row({ target: PNG, relief: RELIEF });
+    openTechnical();
+    fireEvent.change(screen.getByTestId('engrave-target-relief-width-0'), { target: { value: '20' } });
+    expect(onChange).toHaveBeenLastCalledWith({ size: { x: 20, y: 15, z: 1.5 } });
+  });
+
+  it('states the pixel pitch against the grid and the cutter', () => {
+    row({ target: PNG, relief: RELIEF });
+    openTechnical();
+    const text = screen.getByTestId('engrave-target-relief-resolution-0').textContent ?? '';
+    expect(text).toContain('512 × 384 px over 40 × 30 mm');
+    expect(text).toContain('0.078 mm per pixel');
+    expect(text).toContain('the grid samples at 0.1 mm');
+    expect(text).toContain('the cutter is ⌀1 mm');
+  });
+
+  it('has no relief block on a mesh goal', () => {
+    row({ target: {}, relief: null });
+    openTechnical();
+    expect(screen.queryByTestId('engrave-target-relief-0')).toBeNull();
   });
 });

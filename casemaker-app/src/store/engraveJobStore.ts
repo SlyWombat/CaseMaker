@@ -74,6 +74,7 @@ import type {
   EngraveSlotShape,
   EngraveSpherePrimitive,
   EngraveStrokeLabelItem,
+  EngraveReliefSettings,
   EngraveSurfaceSettings,
   EngraveTargetObject,
   EngraveThread,
@@ -183,6 +184,10 @@ export type TargetObjectPatch = Partial<Pick<EngraveTargetObject, 'name' | 'rota
   position?: Partial<EngraveTargetObject['position']>;
   /** A partial of the goal operation's settings; `undefined` on a key clears it. */
   surface?: Partial<EngraveSurfaceSettings>;
+  /** #672 — a partial of a picture goal's relief map; `undefined` on a key clears it. */
+  relief?: Partial<EngraveReliefSettings>;
+  /** #672 — a picture's placed size in millimetres (the width field; the aspect is the row's). */
+  size?: EngraveTargetObject['size'];
 };
 
 /**
@@ -1497,6 +1502,18 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
           }
           if (Object.keys(merged).length === 0) delete next.surface;
           else next.surface = merged as EngraveSurfaceSettings;
+        }
+        // #672 — the same merge for a picture goal's relief map: `undefined` removes a key and the
+        // block goes away once empty, so a relief back on its defaults serialises like one that
+        // never carried the block.
+        if (patch.relief) {
+          const merged: Record<string, number | boolean> = { ...(target.relief ?? {}) };
+          for (const [key, value] of Object.entries(patch.relief)) {
+            if (value === undefined) delete merged[key];
+            else merged[key] = value;
+          }
+          if (Object.keys(merged).length === 0) delete next.relief;
+          else next.relief = merged as EngraveReliefSettings;
         }
         return { ...job, targetObject: next };
       }),

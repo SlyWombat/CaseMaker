@@ -746,7 +746,12 @@ const targetObjectSchema = z
   .object({
     id: z.string().min(1).describe('Unique id for the reference object.'),
     name: z.string().min(1).describe('File name the reference object was imported from.'),
-    format: z.enum(['stl', '3mf']).describe('File format of the reference mesh.'),
+    format: z
+      .enum(['stl', '3mf', 'png'])
+      .describe(
+        "File format of the reference object: a mesh ('stl'/'3mf'), or a 'png' picture whose " +
+          'luminance is the goal heightfield (#672).',
+      ),
     sha256: z
       .string()
       .regex(/^[0-9a-f]{64}$/, 'a lowercase SHA-256 (64 hex characters)')
@@ -792,6 +797,24 @@ const targetObjectSchema = z
     surface: surfaceSettingsSchema
       .optional()
       .describe('The goal mesh’s surfacing settings (step-down, step-overs, grid pitch, allowance); omit every key to use the defaults.'),
+    // #672 — a PNG goal's relief map. Optional, so a pre-#672 document keeps no key.
+    relief: z
+      .object({
+        maxDepthMm: z
+          .number()
+          .finite()
+          .positive()
+          .max(20)
+          .optional()
+          .describe('The deepest relief cut below the image’s top face, in millimetres; omit for the CAM’s 1.5 mm.'),
+        invert: z
+          .boolean()
+          .optional()
+          .describe('True puts black at the top face; omit (or false) for white at the top face.'),
+      })
+      .strict()
+      .optional()
+      .describe('A PNG goal’s relief map: its depth and direction (#672); omit for defaults.'),
   })
   .strict()
   .describe('An embedded mesh (STL/3MF): a reference the cutting volumes are positioned against, or a goal shape to make.');

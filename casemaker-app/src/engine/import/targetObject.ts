@@ -14,6 +14,8 @@ import type { EngraveTargetObject } from '@/types/engraveJob';
 import { arrayBufferToBase64 } from './base64';
 import { parseStl, type ParsedMesh } from './stlParser';
 import { parse3MF } from './threeMfParser';
+import { decodePng } from './png';
+import { DEFAULT_RELIEF_DEPTH_MM } from '@/engine/cnc/cam/relief';
 
 /** The same 4 MiB cap the #425 embedded source files use. */
 export const MAX_TARGET_OBJECT_BYTES = 4 * 1024 * 1024;
@@ -36,18 +38,37 @@ function formatOf(name: string): TargetObjectFormat | null {
   const lower = name.toLowerCase();
   if (lower.endsWith('.stl')) return 'stl';
   if (lower.endsWith('.3mf')) return '3mf';
+  // #672 — a picture is a goal: its luminance is the heightfield the goal pipeline surfaces.
+  if (lower.endsWith('.png')) return 'png';
   return null;
 }
+
+/**
+ * #672 — a picture carries no physical size, so the import FITS it onto the blank: the natural
+ * size is the pixel count at the SVG fallback (25.4/96 mm per pixel, the same assumption the trace
+ * dialog states), scaled to fit `fit` with the aspect kept. The row's width field rescales it
+ * later; the relief depth is the labelled CAM default until the operator states one.
+ */
+export interface ImageFit {
+  maxWidth: number;
+  maxHeight: number;
+}
+
+const NATURAL_MM_PER_PX = 25.4 / 96;
 
 /**
  * Read a picked `.stl` / `.3mf` as a reference object. `id` is supplied by the caller (the store's
  * `newTargetObjectId`), so this module stays free of the store and the id convention lives in one
  * place.
  */
-export async function readTargetObjectFile(file: File, id: string): Promise<TargetObjectRead> {
+export async function readTargetObjectFile(
+  file: File,
+  id: string,
+  opts: { fit?: ImageFit } = {},
+): Promise<TargetObjectRead> {
   const format = formatOf(file.name);
   if (format === null) {
-    return { ok: false, error: `${file.name} is not an STL or 3MF file.` };
+    return { ok: false, error: `${file.name} is not an STL, 3MF or PNG file.` };
   }
   if (file.size > MAX_TARGET_OBJECT_BYTES) {
     const mb = (file.size / (1024 * 1024)).toFixed(1);
@@ -63,6 +84,35 @@ export async function readTargetObjectFile(file: File, id: string): Promise<Targ
     bytes = await file.arrayBuffer();
   } catch {
     return { ok: false, error: `${file.name} could not be read.` };
+  }
+
+  if (format === 'png') {
+    // #672 — the relief's picture: validated by the same decoder the worker samples with, so a
+    // 16-bit or interlaced file is refused HERE with its sentence rather than at Generate.
+    const decoded = decodePng(new Uint8Array(bytes));
+    if (!decoded.ok) {
+      return { ok: false, error: `${file.name} cannot be a relief: ${decoded.error}.` };
+    }
+    const { width, height } = decoded.image;
+    const natural = { x: width * NATURAL_MM_PER_PX, y: height * NATURAL_MM_PER_PX };
+    const scale =
+      opts.fit === undefined ? 1 : Math.min(opts.fit.maxWidth / natural.x, opts.fit.maxHeight / natural.y);
+    let sha256: string;
+    try {
+      const { sha256Hex } = await import('./meshStock');
+      sha256 = await sha256Hex(bytes);
+    } catch {
+      return { ok: false, error: `${file.name} could not be hashed.` };
+    }
+    return {
+      ok: true,
+      id,
+      name: file.name,
+      format: 'png',
+      sha256,
+      data: arrayBufferToBase64(bytes),
+      size: { x: natural.x * scale, y: natural.y * scale, z: DEFAULT_RELIEF_DEPTH_MM },
+    };
   }
 
   let mesh: ParsedMesh;
@@ -114,6 +164,12 @@ const meshCache = new Map<string, ParsedMesh>();
  * malformed document rather than a user error; the viewport treats it as "draw nothing".
  */
 export function targetObjectMesh(target: Pick<EngraveTargetObject, 'sha256' | 'format' | 'data'>): ParsedMesh {
+  // #672 — a picture has no mesh: its heights are sampled from the pixels (surface3d's image
+  // branch). The viewport's draw catches this and draws nothing, which is the honest picture of a
+  // relief that has not been cut yet.
+  if (target.format === 'png') {
+    throw new Error('a picture relief has no mesh to draw — its heights come from the pixels');
+  }
   const cached = meshCache.get(target.sha256);
   if (cached) return cached;
   const bytes = ((): ArrayBuffer => {

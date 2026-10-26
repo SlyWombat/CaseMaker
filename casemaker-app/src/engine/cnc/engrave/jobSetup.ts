@@ -33,6 +33,7 @@ import {
 import { FASTENERS } from '@/engine/compiler/fasteners';
 import { vCone, vFluteLength } from '@/engine/cnc/vProfile';
 import { inlayGlueGap, inlayMarked, inlayNumbers } from './inlay';
+import { reliefNumbers } from '@/engine/cnc/cam/relief';
 import type {
   EngraveAnyItem,
   EngraveChamfer,
@@ -565,16 +566,19 @@ export function validateGoalObject(
 ): JobFinding[] {
   const findings: JobFinding[] = [];
   const { length, width, thickness } = stock;
-  const hasVolume = target.size.x > 0 && target.size.y > 0 && target.size.z > 0;
+  // #672 — a PICTURE goal's depth is its relief map's, not `size.z`: the operator states
+  // `relief.maxDepthMm` (or takes the labelled default), and the blank must hold it.
+  const depth = target.format === 'png' ? reliefNumbers(target.relief).maxDepthMm : target.size.z;
+  const hasVolume = target.size.x > 0 && target.size.y > 0 && depth > 0;
   const fitsFootprint = target.size.x <= length && target.size.y <= width;
-  const fitsDepth = target.size.z <= thickness;
+  const fitsDepth = depth <= thickness;
   if (!hasVolume) {
     findings.push({
       severity: 'error',
       code: 'goal-object-oversize',
       message:
         `The goal object "${target.name}" is flat in at least one direction ` +
-        `(${fmt3(target.size.x)}×${fmt3(target.size.y)}×${fmt3(target.size.z)} mm); a goal needs ` +
+        `(${fmt3(target.size.x)}×${fmt3(target.size.y)}×${fmt3(depth)} mm); a goal needs ` +
         `volume to drive a 3D cut toward.`,
     });
   } else if (!fitsFootprint || !fitsDepth) {
@@ -583,7 +587,7 @@ export function validateGoalObject(
       code: 'goal-object-oversize',
       message:
         `The goal object "${target.name}" is ` +
-        `${fmt3(target.size.x)}×${fmt3(target.size.y)}×${fmt3(target.size.z)} mm, larger than the ` +
+        `${fmt3(target.size.x)}×${fmt3(target.size.y)}×${fmt3(depth)} mm, larger than the ` +
         `${fmt3(length)}×${fmt3(width)}×${fmt3(thickness)} mm blank it would be carved from; ` +
         `it cannot be reproduced from this stock. Use a larger blank or scale the goal.`,
     });

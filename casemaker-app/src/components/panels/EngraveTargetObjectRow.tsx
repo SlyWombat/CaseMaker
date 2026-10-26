@@ -1,6 +1,7 @@
 import type { CSSProperties, JSX } from 'react';
 import { EngraveItemRow } from '@/components/panels/EngraveItemRow';
 import { DEFAULT_PENCIL_CREASE_DEG, type GoalSurfaceFacts } from '@/engine/cnc/cam/surface3d';
+import { DEFAULT_RELIEF_DEPTH_MM } from '@/engine/cnc/cam/relief';
 import type { JobFinding } from '@/engine/cnc/engrave/jobSetup';
 import type { TargetObjectPatch } from '@/store/engraveJobStore';
 import type { EngraveSurfaceSettings, EngraveTargetObject } from '@/types/engraveJob';
@@ -25,6 +26,9 @@ import type { EngraveSurfaceSettings, EngraveTargetObject } from '@/types/engrav
  * has a name, a number and a fold like every other object. It is `selectable` because the viewport
  * draws and picks it (`EngravePrimitives`); the selection highlights the row and the mesh.
  */
+
+/** `2` / `0.5` — a number as a sentence uses it. */
+const fmt = (n: number): string => `${Number(n.toFixed(3))}`;
 
 const NUM: CSSProperties = { width: 60 };
 const MUTED: CSSProperties = { fontSize: 11, color: '#9aa4b0', lineHeight: 1.5, margin: '2px 0' };
@@ -73,6 +77,20 @@ export interface SurfaceDefaults {
   stockToLeave: { value: number; source: string };
 }
 
+/**
+ * #672 — a picture goal's numbers, as the row states them: the pixel size (decoded by the panel),
+ * the resolved relief depth and where it came from, the direction, and the two lengths the
+ * resolution sentence compares the picture's pixel pitch with.
+ */
+export interface ReliefRowFacts {
+  pixels: { width: number; height: number } | null;
+  depth: { value: number; source: string };
+  typed: boolean;
+  invert: boolean;
+  gridPitch: { value: number; source: string };
+  cutterDiameter: number | null;
+}
+
 export interface EngraveTargetObjectRowProps {
   target: EngraveTargetObject;
   /** Row position; the target has one row, so this is always 0. */
@@ -86,6 +104,8 @@ export interface EngraveTargetObjectRowProps {
   surfaceFacts?: GoalSurfaceFacts | null;
   /** #535 — set the job's cutter from the goal row. */
   onCutterChange?: (key: string) => void;
+  /** #672 — a PNG goal's relief facts; absent on a mesh or a reference. */
+  relief?: ReliefRowFacts | null;
 }
 
 /** The cutter's own sentence: one cutter cuts both passes, and its shape decides the finish. */
@@ -176,6 +196,7 @@ export function EngraveTargetObjectRow({
   findings,
   surface,
   surfaceFacts = null,
+  relief = null,
   onCutterChange,
 }: EngraveTargetObjectRowProps): JSX.Element {
   const size = target.size;
@@ -275,6 +296,96 @@ export function EngraveTargetObjectRow({
         <details data-testid={`engrave-target-technical-${index}`} style={{ marginTop: 6 }}>
           <summary style={{ fontSize: 11, color: '#9aa4b0', cursor: 'pointer' }}>Technical</summary>
           <div style={{ marginTop: 4 }}>
+            {/* #672 — A PICTURE RELIEF: the map's two numbers and the resolution the picture can
+                hold. The pixels are the panel's decode of the embedded PNG; the depth says where
+                its default came from; the sentence states the pixel pitch against the grid and
+                the cutter, because a 100 px image is not a 0.05 mm relief. */}
+            {relief != null && (
+              <div data-testid={`engrave-target-relief-${index}`}>
+                <div style={ROW_INLINE}>
+                  <label style={FIELD_LABEL}>
+                    <span>relief depth</span>
+                    <input
+                      type="number"
+                      step="any"
+                      min={0.01}
+                      value={Number(relief.depth.value.toFixed(3))}
+                      data-testid={`engrave-target-relief-depth-${index}`}
+                      aria-label="Relief depth"
+                      title="The deepest relief cut below the image's top face, mm."
+                      style={NUM}
+                      onChange={(e) => {
+                        const v = Number(e.target.value);
+                        if (!Number.isFinite(v) || v <= 0) return;
+                        onChange({ relief: { maxDepthMm: v }, size: { ...target.size, z: v } });
+                      }}
+                    />
+                    <span>mm</span>
+                  </label>
+                  <span data-testid={`engrave-target-relief-depth-source-${index}`} style={SOURCE_WORD}>
+                    {relief.typed ? 'typed' : relief.depth.source}
+                  </span>
+                  {relief.typed && (
+                    <button
+                      type="button"
+                      data-testid={`engrave-target-relief-depth-reset-${index}`}
+                      aria-label="Use the default relief depth"
+                      title="Use the default again."
+                      onClick={() =>
+                        onChange({
+                          relief: { maxDepthMm: undefined },
+                          size: { ...target.size, z: DEFAULT_RELIEF_DEPTH_MM },
+                        })
+                      }
+                    >
+                      ↺
+                    </button>
+                  )}
+                </div>
+                <label style={ROW_INLINE}>
+                  <span style={{ fontSize: 11, color: '#9aa4b0' }}>top face</span>
+                  <select
+                    value={relief.invert ? 'black' : 'white'}
+                    data-testid={`engrave-target-relief-invert-${index}`}
+                    aria-label="Relief direction"
+                    title="Which end of the picture's tones sits at the top face: white as drawn, or black (inverted)."
+                    onChange={(e) => onChange({ relief: { invert: e.target.value === 'black' ? true : undefined } })}
+                  >
+                    <option value="white">white (the picture as drawn)</option>
+                    <option value="black">black (inverted)</option>
+                  </select>
+                </label>
+                <label style={ROW_INLINE}>
+                  <span style={{ fontSize: 11, color: '#9aa4b0' }}>width</span>
+                  <input
+                    type="number"
+                    step="any"
+                    min={1}
+                    value={Number(target.size.x.toFixed(3))}
+                    data-testid={`engrave-target-relief-width-${index}`}
+                    aria-label="Relief width"
+                    title="The picture's placed width on the blank, mm. The height follows the picture's aspect."
+                    style={NUM}
+                    onChange={(e) => {
+                      const w = Number(e.target.value);
+                      if (!Number.isFinite(w) || w <= 0) return;
+                      const aspect = target.size.y / target.size.x;
+                      onChange({ size: { x: w, y: w * aspect, z: target.size.z } });
+                    }}
+                  />
+                  <span>mm</span>
+                </label>
+                <p style={MUTED} data-testid={`engrave-target-relief-resolution-${index}`}>
+                  {relief.pixels === null
+                    ? 'The picture could not be read, so its pixel size is unknown.'
+                    : `${relief.pixels.width} × ${relief.pixels.height} px over ${fmt(target.size.x)} × ${fmt(target.size.y)} mm — ` +
+                      `${fmt(Math.max(target.size.x / relief.pixels.width, target.size.y / relief.pixels.height))} mm per pixel; ` +
+                      `the grid samples at ${fmt(relief.gridPitch.value)} mm` +
+                      (relief.cutterDiameter === null ? '' : ` and the cutter is ⌀${fmt(relief.cutterDiameter)} mm`) +
+                      '.'}
+                </p>
+              </div>
+            )}
             <label style={ROW_INLINE}>
               <span style={{ fontSize: 11, color: '#9aa4b0' }}>cutter</span>
               <select
