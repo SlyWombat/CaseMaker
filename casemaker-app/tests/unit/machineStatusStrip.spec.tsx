@@ -19,6 +19,7 @@ import { toolDisplayName } from '@/engine/cnc/toolDisplay';
 import type { FrozenPackage } from '@/types/engraveJob';
 import { resetLocationStore, useLocationStore } from '@/store/locationStore';
 import { resetManageMode, useManageModeStore } from '@/store/manageModeStore';
+import { useViewportStore } from '@/store/viewportStore';
 import { resetCameraPaneStore, useCameraPaneStore } from '@/store/cameraPaneStore';
 import { useEngraveJobStore } from '@/store/engraveJobStore';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
@@ -104,6 +105,7 @@ beforeEach(() => {
   resetMachineRunStore();
   resetStripAccessoryStore();
   resetManageMode();
+  useViewportStore.setState({ activeSidebarSection: null });
   resetLocationStore();
   resetCameraPaneStore();
   useLocationStore.setState({ status: 'present', location: LOCATION, etag: '"e1"', reason: null });
@@ -162,6 +164,7 @@ describe('#689 the connection', () => {
   });
 
   it('#689 review — with no machine the band says so and opens Manage › Machines', () => {
+    useViewportStore.setState({ activeSidebarSection: 'cnc-engrave' });
     render(<MachineStatusStrip />);
 
     expect(screen.getByTestId('machine-status').getAttribute('data-state')).toBe('no-machine');
@@ -169,6 +172,14 @@ describe('#689 the connection', () => {
     fireEvent.click(screen.getByTestId('machine-status-open-machines'));
     expect(useManageModeStore.getState().open).toBe(true);
     expect(useManageModeStore.getState().scope).toBe('machines');
+  });
+
+  it('#689 review — the no-machine band stays out of a print project', () => {
+    useViewportStore.setState({ activeSidebarSection: 'part' });
+    const { container } = render(<MachineStatusStrip />);
+
+    expect(container.innerHTML).toBe('');
+    expect(screen.queryByTestId('machine-status')).toBeNull();
   });
 });
 

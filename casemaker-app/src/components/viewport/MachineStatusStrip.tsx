@@ -4,6 +4,7 @@ import { useRegistrationTouchesStore } from '@/store/registrationTouchesStore';
 import { useEngraveReleaseStore } from '@/store/engraveReleaseStore';
 import { useEngraveJobStore } from '@/store/engraveJobStore';
 import { useManageModeStore } from '@/store/manageModeStore';
+import { useViewportStore } from '@/store/viewportStore';
 import { machineKey, useMachineRunStore } from '@/store/machineRunStore';
 import { accessoriesFor, machineRecordByProfile } from '@/store/locationStore';
 import { MACHINES } from '@/engine/cnc/machine';
@@ -145,6 +146,13 @@ function Axes({
 export function MachineStatusStrip(): JSX.Element | null {
   const machine = useMachineStore((s) => s.machine);
   const openManage = useManageModeStore((s) => s.openManage);
+  // #689 review — the no-machine band belongs to CNC work only. `Viewport` mounts this strip for
+  // every project, so without this guard the band would sit under a case, rack or toolbox where
+  // there is no machine to connect. The with-machine strip is unchanged and still rides every
+  // project (the operator may want the DRO there too).
+  const cncSection = useViewportStore(
+    (s) => s.activeSidebarSection === 'cnc-engrave' || s.activeSidebarSection === 'cnc-sim',
+  );
   const heartbeat = useMachineStore((s) => s.heartbeat);
   // #519 item 3 — a registration owns the machine: the state reads Probing and the tool slot names
   // the probe.
@@ -198,6 +206,7 @@ export function MachineStatusStrip(): JSX.Element | null {
   // sentence where its Run press is disabled (principle 4), and this line keeps the band from being
   // a blank void in that state.
   if (machine === null) {
+    if (!cncSection) return null;
     return (
       <div
         data-testid="machine-status"
