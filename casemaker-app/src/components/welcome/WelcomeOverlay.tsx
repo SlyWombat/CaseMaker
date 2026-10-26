@@ -3,6 +3,8 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useProjectStore, clearHistory } from '@/store/projectStore';
 import { useLibraryStore, refreshStaleSources, type ImportResult } from '@/store/libraryStore';
 import { useStartWizardStore } from '@/store/startWizardStore';
+import { useRecentJobsStore } from '@/store/recentJobsStore';
+import { openRecentJob } from '@/store/openRecentJob';
 import { listBoards, type RegisteredBoard } from '@/library/registry';
 import {
   listTemplates,
@@ -52,6 +54,15 @@ const MEASUREMENT_BADGES: Record<string, { label: string; title: string }> = {
 
 /** 'all' | 'quickstart' | 'local' | 'remote:<sourceId>' */
 type SourceFilter = string;
+
+/**
+ * #680 — the two starter jobs, by the template ids the wizard's step 2 already uses. The labels are
+ * the door's words (the mockup's "Name badge" / "Bare blank"), not the templates' long names.
+ */
+const STARTERS = [
+  { id: 'badge-blank', label: 'Name badge' },
+  { id: 'blank', label: 'Bare blank' },
+] as const;
 
 function fmtMm(v: number): string {
   return Number.isInteger(v) ? String(v) : v.toFixed(2).replace(/\.?0+$/, '');
@@ -138,6 +149,9 @@ export function WelcomeOverlay() {
   const [importNotice, setImportNotice] = useState<ImportResult | null>(null);
   const [sourcesOpen, setSourcesOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const recents = useRecentJobsStore((s) => s.jobs);
+  const [openingRecent, setOpeningRecent] = useState<string | null>(null);
+  const [recentError, setRecentError] = useState<string | null>(null);
 
   // Refresh week-old source caches in the background on first mount (#132).
   useEffect(() => {
@@ -248,6 +262,18 @@ export function WelcomeOverlay() {
     }
   };
 
+  /** #680 — reopen a recent job. On success the project flips welcome mode off, so this overlay goes. */
+  const openRecent = async (recent: (typeof recents)[number]): Promise<void> => {
+    if (openingRecent !== null) return;
+    setOpeningRecent(recent.fileName);
+    setRecentError(null);
+    const result = await openRecentJob(recent);
+    if (!result.ok) {
+      setOpeningRecent(null);
+      setRecentError(`${recent.name} was not opened: ${result.error}`);
+    }
+  };
+
   const onExport = (id: string) => {
     const json = exportLocalBoard(id);
     if (!json) return;
@@ -269,28 +295,8 @@ export function WelcomeOverlay() {
         <header className="wb-header">
           <div>
             <h1>Start a New Project</h1>
-            <p>
-              Pick a board — its enclosure generates around the real connector and
-              mounting-hole geometry. Import board JSON or add online sources to grow the
-              library.
-            </p>
           </div>
           <div className="wb-header__actions">
-            {/* #274 / #280 — the way IN. Every card on this screen creates a project first, so a
-                cutting job with no enclosure had no door: the engrave and simulate panels are
-                sidebar sections, and a sidebar only exists once a project does. Behind the same
-                switch as those sections (#343): a door onto a project with no CNC section is worse
-                than no door. */}
-            {featureSim && (
-              <button
-                className="wb-btn wb-btn--primary"
-                onClick={() => openWizard()}
-                data-testid="welcome-start-cnc"
-                title="Check for a machine, pick what you are making, then set up the cut"
-              >
-                🪚 Set up a cutting job…
-              </button>
-            )}
             <button
               className={`wb-btn wb-btn--ghost ${sourcesOpen ? 'wb-btn--toggled' : ''}`}
               onClick={() => setSourcesOpen((v) => !v)}
@@ -326,6 +332,83 @@ export function WelcomeOverlay() {
             }}
           />
         </header>
+
+        {/* #680 — the door: each way of starting is a card of its own, the CNC one beside the print
+            projects rather than a button among the board controls. Opening the cutting wizard puts
+            its own plain backdrop over this page (`start-wizard`), so the operator is in the job
+            and nowhere else. A build with no CNC section offers no cutting door (#343). */}
+        <div className="wb-doors" data-testid="welcome-doors">
+          <section className="wb-door" data-testid="welcome-door-print">
+            <span className="wb-door__eyebrow">Print</span>
+            <h2>Start a new project</h2>
+            <p className="wb-door__text">
+              Pick a board — its enclosure generates around the real connector and mounting-hole
+              geometry. Import board JSON or add online sources to grow the library.
+            </p>
+          </section>
+          {featureSim && (
+            <section className="wb-door wb-door--cnc" data-testid="welcome-door-cnc">
+              <span className="wb-door__eyebrow">CNC</span>
+              <h2>Start a cutting job</h2>
+              <p className="wb-door__text">
+                Cut something on the CNC — a badge, a plate, a pocket, an engraving.
+              </p>
+              <div>
+                <button
+                  className="wb-btn wb-btn--primary"
+                  onClick={() => openWizard()}
+                  data-testid="welcome-start-cnc"
+                  title="Check for a machine, pick what you are making, then set up the cut"
+                >
+                  Start a cutting job
+                </button>
+              </div>
+              {/* The last three files the app saved or opened. Absent until there is one: no
+                  sentence says so — the card simply offers what it has. */}
+              {recents.length > 0 && (
+                <div className="wb-door__links" data-testid="welcome-recent-jobs">
+                  <span className="wb-door__label">Recent:</span>
+                  {recents.map((recent, i) => (
+                    <span key={recent.fileName}>
+                      {i > 0 && ' · '}
+                      <button
+                        type="button"
+                        className="wb-door__link"
+                        data-testid={`welcome-recent-${i}`}
+                        title={recent.fileName}
+                        disabled={openingRecent !== null}
+                        onClick={() => void openRecent(recent)}
+                      >
+                        {recent.name}
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              )}
+              <div className="wb-door__links" data-testid="welcome-starters">
+                <span className="wb-door__label">Starters:</span>
+                {STARTERS.map((starter, i) => (
+                  <span key={starter.id}>
+                    {i > 0 && ' · '}
+                    <button
+                      type="button"
+                      className="wb-door__link"
+                      data-testid={`welcome-starter-${starter.id}`}
+                      onClick={() => openWizard('machine', starter.id)}
+                    >
+                      {starter.label}
+                    </button>
+                  </span>
+                ))}
+              </div>
+              {recentError !== null && (
+                <p className="wb-door__text" data-testid="welcome-recent-error">
+                  {recentError}
+                </p>
+              )}
+            </section>
+          )}
+        </div>
 
         {sourcesOpen && <SourcesPanel />}
 

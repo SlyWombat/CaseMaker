@@ -1282,6 +1282,77 @@ body, html, #root {
   max-width: 64ch;
 }
 
+/* #680 — the door: each way of starting is a card of its own, the CNC one beside the print
+   projects. The accent border is the one visual difference: this is the newer door, not a
+   different kind of thing. */
+.wb-doors {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: var(--cm-space-4);
+}
+.wb-door {
+  display: flex;
+  flex-direction: column;
+  gap: var(--cm-space-2);
+  padding: var(--cm-space-4);
+  background: var(--cm-color-surface-container-low);
+  border: var(--cm-border-1);
+  border-radius: var(--cm-radius-lg);
+}
+.wb-door--cnc {
+  border-color: var(--cm-color-primary);
+  background: color-mix(in srgb, var(--cm-color-primary-container) 10%, var(--cm-color-surface-container-low));
+}
+.wb-door__eyebrow {
+  font-family: var(--cm-font-mono);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--cm-color-on-surface-muted);
+}
+.wb-door h2 {
+  margin: 0;
+  font-family: var(--cm-font-display);
+  font-size: 1.125rem;
+  font-weight: 600;
+  color: var(--cm-color-on-surface);
+}
+.wb-door__text {
+  margin: 0;
+  color: var(--cm-color-on-surface-variant);
+  font-size: 0.875rem;
+  line-height: 1.5;
+  max-width: 60ch;
+}
+.wb-door__links {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px;
+  font-size: 0.8125rem;
+  color: var(--cm-color-on-surface-variant);
+}
+.wb-door__label {
+  font-family: var(--cm-font-mono);
+  font-size: 0.6875rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--cm-color-on-surface-muted);
+}
+.wb-door__link {
+  background: none;
+  border: 0;
+  padding: 0;
+  color: var(--cm-color-primary);
+  font: inherit;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.wb-door__link:hover:not(:disabled) { filter: brightness(1.15); }
+.wb-door__link:disabled { opacity: 0.55; cursor: default; }
+
 /* Buttons */
 .wb-btn {
   border: var(--cm-border-1);

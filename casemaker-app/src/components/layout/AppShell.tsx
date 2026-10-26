@@ -20,6 +20,7 @@ import { undoProject, redoProject, useProjectStore } from '@/store/projectStore'
 // eager bundle already, so reaching for it here costs nothing and the shortcut needs it at keypress.
 import { undoEngraveRemoval } from '@/store/engraveJobStore';
 import { useStartWizardStore } from '@/store/startWizardStore';
+import { startRecentJobTracking } from '@/store/recentJobsStore';
 import { useManageModeStore } from '@/store/manageModeStore';
 
 function useUndoRedoShortcuts(): void {
@@ -46,6 +47,11 @@ function useUndoRedoShortcuts(): void {
 export function AppShell() {
   useRebuildOnProjectChange();
   useUndoRedoShortcuts();
+  // #680 — record the last three job files the app opens or saves for the welcome door's card.
+  // Started here, once: the record must be kept whether or not the welcome overlay is on screen.
+  useEffect(() => {
+    startRecentJobTracking();
+  }, []);
   const welcomeMode = useProjectStore((s) => s.welcomeMode);
   // #280 — the wizard mounts HERE, not inside the welcome overlay: its step 2 creates the project,
   // which flips `welcomeMode` off and unmounts the overlay the wizard was launched from.

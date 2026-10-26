@@ -1,4 +1,4 @@
-import { useCallback, useState, type CSSProperties, type JSX } from 'react';
+import { useCallback, useEffect, useRef, useState, type CSSProperties, type JSX } from 'react';
 import { createPortal } from 'react-dom';
 import { MACHINES } from '@/engine/cnc/machine';
 import { badgeBlankFor } from '@/engine/cnc/engrave/fromBadge';
@@ -7,6 +7,7 @@ import { canDriveMachine } from '@/platform/capabilities';
 import { probeMachine } from '@/platform/machineProbe';
 import { useSettingsStore } from '@/store/settingsStore';
 import { findTemplateAcrossSources } from '@/library/templateRegistry';
+import { blankProjectForStock } from '@/library/blankProject';
 import { scheduleImmediate } from '@/engine/jobs/JobScheduler';
 import { useProjectStore, clearHistory } from '@/store/projectStore';
 import { useEngraveJobStore } from '@/store/engraveJobStore';
@@ -100,21 +101,6 @@ function clearStockEntry(): void {
   store.replace(next);
 }
 
-function projectForStock(stock: { length: number; width: number; thickness: number }): Project | null {
-  const template = findTemplateAcrossSources('blank');
-  if (template === undefined) return null;
-  const project = template.build();
-  const blank = project.case.blank;
-  if (blank === undefined) return null;
-  return {
-    ...project,
-    case: {
-      ...project.case,
-      blank: { ...blank, enabled: true, width: stock.length, height: stock.width, thickness: stock.thickness, cornerRadius: 0 },
-    },
-  };
-}
-
 /**
  * Seed the engrave job's stock from the project the wizard just built, once, at hand-off (#280 §3).
  *
@@ -192,6 +178,11 @@ function sameStockChoice(p: PendingStock, job: EngraveJob): boolean {
 export function StartWizard(): JSX.Element {
   const closeWizard = useStartWizardStore((s) => s.closeWizard);
   const initialStep = useStartWizardStore((s) => s.initialStep);
+  // #680 — a starter job on the welcome door opens this wizard with its blank already the stock.
+  // The template id is the door's word for it; `chooseJob` (step 2's own template path) does the
+  // rest: project, seeded stock, step 3, and the counters move as they always have.
+  const starter = useStartWizardStore((s) => s.starter);
+  const starterRan = useRef(false);
   const machine = useMachineStore((s) => s.machine);
   const outcome = useMachineStore((s) => s.outcome);
   const reason = useMachineStore((s) => s.reason);
@@ -227,6 +218,14 @@ export function StartWizard(): JSX.Element {
   );
   const [operationChoice, setOperationChoice] = useState<OperationChoice | null>(null);
   const onOperationChoice = useCallback((choice: OperationChoice | null) => setOperationChoice(choice), []);
+
+  useEffect(() => {
+    if (starter === null || starterRan.current) return;
+    starterRan.current = true;
+    void chooseJob(starter);
+    // The starter is captured once per open; chooseJob owns the project, stock and step from here.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- runs once for the opening starter
+  }, [starter]);
 
   // The job's own machine, as a value the `<select>` can hold. The schema coerces an unknown id to
   // the Z1 (#347), so a blank control would be a state the store cannot actually be in.
@@ -376,7 +375,7 @@ export function StartWizard(): JSX.Element {
       });
 
       const stock = useEngraveJobStore.getState().job.stock;
-      const project = projectForStock(stock);
+      const project = blankProjectForStock(stock);
       if (project === null) {
         setStartError('the blank template is missing from this build');
         return;

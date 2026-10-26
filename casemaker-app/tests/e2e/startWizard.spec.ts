@@ -100,3 +100,29 @@ test('the wizard opens over an empty welcome screen and closes without making an
   // Still on the welcome screen: the wizard is a way in, not a mode.
   await expect(page.getByTestId('welcome-overlay')).toBeVisible();
 });
+
+// #680 — the welcome door's starter job. The card's "Name badge" is the badge-blank template: the
+// same path step 2's template card took, from the door, with the wizard's one counter unchanged.
+test('a starter on the welcome door opens the wizard with its blank as the stock', async ({ cm, page }) => {
+  await cm.ready();
+
+  const door = page.getByTestId('welcome-door-cnc');
+  await expect(door).toBeVisible();
+  await expect(door).toContainText('Cut something on the CNC — a badge, a plate, a pocket, an engraving.');
+  // A fresh browser has no saved job files, and the card says nothing about that.
+  await expect(page.getByTestId('welcome-recent-jobs')).toHaveCount(0);
+  await expect(page.getByTestId('welcome-starters')).toContainText('Name badge');
+  await expect(page.getByTestId('welcome-starters')).toContainText('Bare blank');
+
+  await page.getByTestId('welcome-starter-badge-blank').click();
+  await expect(page.getByTestId('start-wizard')).toBeVisible();
+  await expect(page.getByTestId('start-wizard-progress')).toHaveText('Step 3 of 4 · Holding');
+  await page.getByTestId('start-wizard-close').click();
+  await expect(page.getByTestId('start-wizard')).toHaveCount(0);
+
+  // The badge's blank, turned a quarter turn for the vise (#383): 38.1 across X, 76.2 along Y.
+  await expect(page.getByTestId('engrave-panel')).toBeVisible();
+  await expect(page.getByTestId('engrave-stock-length')).toHaveValue('38.1');
+  await expect(page.getByTestId('engrave-stock-width')).toHaveValue('76.2');
+  await expect(page.getByTestId('engrave-stock-thickness')).toHaveValue('3.81');
+});
