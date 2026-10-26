@@ -20,7 +20,7 @@
  */
 
 import { STATUS_POLL_TIMING, attachConsole, type ConsoleTiming } from './machineConsole';
-import { alarmLine, controllerState } from './machineUpload';
+import { alarmLine, controllerState, jobProgressPercent } from './machineUpload';
 
 /** One status line, read for the three things step 2 needs. */
 export interface MachineRest {
@@ -107,7 +107,8 @@ export async function checkMachine(
 
 /** What asking the machine to home came to. */
 export type HomeAnswer =
-  | { kind: 'homed'; rest: MachineRest; text: string }
+  /** `sent` says whether `$H` actually went out: an already-homed machine answers without moving. */
+  | { kind: 'homed'; rest: MachineRest; text: string; sent: boolean }
   | { kind: 'failed'; detail: string };
 
 export interface HomeOptions {
@@ -154,7 +155,16 @@ export async function homeMachine(
     if (before.state !== 'Idle') {
       return { kind: 'failed', detail: `the machine reads ${before.state} rather than Idle — home it once it has stopped` };
     }
-    if (before.homed) return { kind: 'homed', rest: before, text: ask.text };
+    // #390 — `Idle` appears MID-JOB for the ~4 s spin-down at M05. A `P:` percent below 100 is a
+    // program still finishing, and nothing homes a machine a program still owns.
+    const percent = jobProgressPercent(ask.text);
+    if (percent !== null && percent < 100) {
+      return {
+        kind: 'failed',
+        detail: `it reports Idle, but its status line says a program is ${percent}% through — home it once the job has finished`,
+      };
+    }
+    if (before.homed) return { kind: 'homed', rest: before, text: ask.text, sent: false };
 
     const sent = await session.send('$H');
     if (sent.kind === 'refused' || sent.kind === 'unavailable' || sent.kind === 'error') {
@@ -164,7 +174,7 @@ export async function homeMachine(
     if (alarm !== null) return { kind: 'failed', detail: `the controller is in an alarm (${alarm})` };
     // A macro that answered inside the quiet window may already show the finished rest.
     const first = readMachineRest(sent.text);
-    if (first !== null && first.homed) return { kind: 'homed', rest: first, text: sent.text };
+    if (first !== null && first.homed) return { kind: 'homed', rest: first, text: sent.text, sent: true };
 
     let last: MachineRest | null = first;
     for (let i = 0; i < polls; i++) {
@@ -180,7 +190,7 @@ export async function homeMachine(
       const rest = readMachineRest(r.text);
       if (rest === null) continue;
       last = rest;
-      if (rest.homed) return { kind: 'homed', rest, text: r.text };
+      if (rest.homed) return { kind: 'homed', rest, text: r.text, sent: true };
     }
     return { kind: 'failed', detail: notHomed(last) };
   } finally {

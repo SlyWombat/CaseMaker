@@ -13,10 +13,12 @@
  * has homed.
  *
  * NOTHING IS WRITTEN BEFORE CONFIRM. Steps 3 and 4 only tick local checkboxes. Confirm writes the
- * new bed profile through the guarded machine PUT (`saveMachineWithRetry`, #650), moves the two
- * accessory records (`whereabouts`), then switches the light off and homes the machine again — the
- * bench rule, in the order the mockup prints it. Closing at any earlier point leaves the location
- * exactly as it was, which `machineChangeWizard.spec.tsx` pins.
+ * new bed profile through the guarded machine PUT (`saveMachineWithRetry`, #650) and moves the two
+ * accessory records (`whereabouts`). It does NOT move the machine: the operator may still have a
+ * hand in it when that press lands, so step 5's Work light off and Home are each their own press,
+ * with the machine's answer as the line's tick — and "Back to the job" waits for neither, because
+ * the record is already written. Closing at any earlier point leaves the location exactly as it was,
+ * which `machineChangeWizard.spec.tsx` pins.
  *
  * THE JOB THAT ASKED IS RE-CHECKED. When the caller names a frozen job's mount, the new profile is
  * asked whether it can still hold that mount; if not, step 5 says so in one sentence ("Generate it
@@ -240,10 +242,13 @@ function Wizard({
     at: string;
     refreeze: boolean;
     notes: string[];
-    lightNote: string | null;
-    homeNote: string | null;
     result: MachineChangeResult;
   } | null>(null);
+  // Step 5's two closing actions are the operator's own presses — Confirm never moves the machine.
+  const [finalLight, setFinalLight] = useState<LineState>(NOT_DONE);
+  const [finalLightBusy, setFinalLightBusy] = useState(false);
+  const [finalHome, setFinalHome] = useState<LineState>(NOT_DONE);
+  const [finalHoming, setFinalHoming] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   // The step words are the change as it was ASKED FOR. After Confirm the machine's active profile
@@ -302,8 +307,9 @@ function Wizard({
     setHoming(true);
     setError(null);
     const r = await homeMachine(address);
-    if (r.kind === 'homed') setHome({ done: true, meta: '$H · Idle · homed ✓', note: null });
-    else setHome({ done: false, meta: null, note: `Home did not complete: ${r.detail}.` });
+    if (r.kind === 'homed') {
+      setHome({ done: true, meta: r.sent ? '$H · Idle · homed ✓' : 'Idle · homed ✓', note: null });
+    } else setHome({ done: false, meta: null, note: `Home did not complete: ${r.detail}.` });
     setHoming(false);
   }
 
@@ -317,6 +323,27 @@ function Wizard({
       setLight({ done: false, meta: null, note: `The work light was not switched on: ${r.detail}.` });
     }
     setLightBusy(false);
+  }
+
+  // Step 5's closing lines: each is its own press, answered by the machine, and neither is required
+  // for the record — which is already written by the time they exist.
+  async function doLightOff(): Promise<void> {
+    if (address === null) return;
+    setFinalLightBusy(true);
+    const r = await toggleLight(address, false);
+    if (r.kind === 'toggled') setFinalLight({ done: true, meta: 'M822 ✓', note: null });
+    else setFinalLight({ done: false, meta: null, note: `The work light was not switched off: ${r.detail}.` });
+    setFinalLightBusy(false);
+  }
+
+  async function doFinalHome(): Promise<void> {
+    if (address === null) return;
+    setFinalHoming(true);
+    const r = await homeMachine(address);
+    if (r.kind === 'homed') {
+      setFinalHome({ done: true, meta: r.sent ? '$H · Idle · homed ✓' : 'Idle · homed ✓', note: null });
+    } else setFinalHome({ done: false, meta: null, note: `Home did not complete: ${r.detail}.` });
+    setFinalHoming(false);
   }
 
   // ── Progress ─────────────────────────────────────────────────────────────────────────────────
@@ -347,7 +374,9 @@ function Wizard({
 
   // ── Confirm: the one write ───────────────────────────────────────────────────────────────────
   async function confirm(): Promise<void> {
-    if (target === null || machine === null || address === null) return;
+    // The record write does not need the machine to answer; step 5's closing lines do, and each
+    // says so on its own.
+    if (target === null || machine === null) return;
     setConfirming(true);
     setError(null);
     const at = new Date().toISOString();
@@ -438,23 +467,14 @@ function Wizard({
       }
     }
 
-    // Light off, then home — the bench rule, home last. The record above stands either way.
-    let lightNote: string | null = null;
-    let homeNote: string | null = null;
-    const lo = await toggleLight(address, false);
-    if (lo.kind !== 'toggled') {
-      lightNote = lo.kind === 'busy' ? lo.detail : 'the machine did not take the light-off';
-    }
-    const ho = await homeMachine(address);
-    if (ho.kind !== 'homed') homeNote = ho.detail;
-
+    // NOTHING MOVES HERE. The operator may still have a hand in the machine when this press lands:
+    // step 5's light-off and home are their own presses below, with the machine's answer as each
+    // line's tick. The record is written; "Back to the job" does not wait for either.
     const refreeze = job?.frozen === true && !profileHolds(plan.profile, job.frozenMount ?? null);
     setConfirmed({
       at,
       refreeze,
       notes,
-      lightNote,
-      homeNote,
       result: {
         profileId,
         profileName: plan.profile.name,
@@ -892,12 +912,60 @@ function Wizard({
                       {changeRecordWords(confirmed.result.from, confirmed.result.to)}
                       {job !== null ? ` · for ${job.name}` : ''}
                     </span>
-                    <span className="mc-meta" data-testid="machine-change-light-off">
-                      Work light off
-                      {confirmed.lightNote === null ? ' ✓' : ` — ${confirmed.lightNote}`}
-                      {' · '}Home
-                      {confirmed.homeNote === null ? ' ✓' : ` — ${confirmed.homeNote}`}
-                    </span>
+                    <div className="mc-line" data-done={finalLight.done} data-testid="machine-change-final-light">
+                      <span className="mc-dot" aria-hidden="true" />
+                      <b>Work light off</b>
+                      <span className="mc-meta">
+                        {finalLight.done
+                          ? <span className="mc-mono">{finalLight.meta}</span>
+                          : finalLightBusy
+                            ? 'switching the light off…'
+                            : 'the light can go off now'}
+                      </span>
+                      {!finalLight.done ? (
+                        <button
+                          type="button"
+                          className="mc-btn"
+                          data-testid="machine-change-light-off"
+                          disabled={finalLightBusy || address === null}
+                          onClick={() => void doLightOff()}
+                        >
+                          {finalLightBusy ? 'Switching…' : 'Work light off'}
+                        </button>
+                      ) : null}
+                    </div>
+                    {finalLight.note !== null ? (
+                      <p className="mc-note" data-testid="machine-change-light-off-note">
+                        {finalLight.note}
+                      </p>
+                    ) : null}
+                    <div className="mc-line" data-done={finalHome.done} data-testid="machine-change-final-home">
+                      <span className="mc-dot" aria-hidden="true" />
+                      <b>Home</b>
+                      <span className="mc-meta">
+                        {finalHome.done
+                          ? <span className="mc-mono">{finalHome.meta}</span>
+                          : finalHoming
+                            ? 'homing — the head is moving'
+                            : 'home it with your hands clear'}
+                      </span>
+                      {!finalHome.done ? (
+                        <button
+                          type="button"
+                          className="mc-btn"
+                          data-testid="machine-change-home-again"
+                          disabled={finalHoming || address === null}
+                          onClick={() => void doFinalHome()}
+                        >
+                          {finalHoming ? 'Homing…' : 'Home'}
+                        </button>
+                      ) : null}
+                    </div>
+                    {finalHome.note !== null ? (
+                      <p className="mc-note" data-testid="machine-change-home-again-note">
+                        {finalHome.note}
+                      </p>
+                    ) : null}
                     {confirmed.refreeze ? (
                       <p className="mc-note" data-testid="machine-change-refreeze">
                         {refreezeSentence(job?.name ?? null, job?.frozenMount ?? null)}

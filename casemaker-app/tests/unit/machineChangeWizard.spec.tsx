@@ -340,18 +340,20 @@ describe('#693 walking the change', () => {
     fireEvent.click(screen.getByTestId('machine-change-measure-now'));
     fireEvent.click(screen.getByTestId('machine-change-fit-done'));
 
-    // 5 · Confirm — the one write.
+    // 5 · Confirm — the one write, and it must not move the machine: the operator may still have a
+    // hand in it, so the light-off and the home are the two presses after this one.
     const confirm = await screen.findByTestId('machine-change-confirm-button');
     expect((confirm as HTMLButtonElement).disabled).toBe(false);
+    const linesBeforeConfirm = z1.lines.length;
     fireEvent.click(confirm);
 
     await screen.findByTestId('machine-change-record');
+    expect(z1.lines.slice(linesBeforeConfirm)).toEqual([]);
     expect(screen.getByTestId('machine-change-record').textContent).toContain('vise → rotary');
     expect(screen.getByTestId('machine-change-record').textContent).toContain('for Zoomba badge');
     expect(screen.getByTestId('machine-change-refreeze').textContent).toContain(
       'frozen for the vise, and the vise is no longer on the machine',
     );
-    expect(screen.getByTestId('machine-change-light-off').textContent).toContain('Work light off ✓ · Home ✓');
     // The change as asked for is still the story the confirmed screen tells — the new active
     // profile must not relabel step 1 or the take-off as a rotary-to-rotary change.
     expect(screen.getByTestId('machine-change-step-1').textContent).toContain(
@@ -380,10 +382,24 @@ describe('#693 walking the change', () => {
     expect(writtenVise.whereabouts).toEqual({ kind: 'box' });
     expect(writtenRotary.whereabouts).toMatchObject({ kind: 'machine', machineId: MACHINE_ID });
 
-    // The machine's own commands: the light on in step 2, the light off and a home in step 5.
+    // The two closing lines are their own presses, each answered by the machine. The record is
+    // already written and "Back to the job" does not wait for them.
+    expect(screen.getByTestId('machine-change-final-light').getAttribute('data-done')).toBe('false');
+    expect(screen.getByTestId('machine-change-final-home').getAttribute('data-done')).toBe('false');
+    expect((screen.getByTestId('machine-change-finish') as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.click(screen.getByTestId('machine-change-light-off'));
+    await waitFor(() =>
+      expect(screen.getByTestId('machine-change-final-light').getAttribute('data-done')).toBe('true'),
+    );
+    expect(screen.getByTestId('machine-change-final-light').textContent).toContain('M822 ✓');
+    fireEvent.click(screen.getByTestId('machine-change-home-again'));
+    await waitFor(() =>
+      expect(screen.getByTestId('machine-change-final-home').getAttribute('data-done')).toBe('true'),
+    );
+    expect(screen.getByTestId('machine-change-final-home').textContent).toContain('$H · Idle · homed ✓');
+    // Light off asks `?` and sends M822; home asks `?` and sends `$H` — one action per line.
+    expect(z1.lines.slice(linesBeforeConfirm)).toEqual(['?', 'M822', '?', '$H']);
     expect(z1.lines).toContain('M821');
-    expect(z1.lines).toContain('M822');
-    expect(z1.lines.filter((l) => l === '$H').length).toBeGreaterThanOrEqual(1);
 
     // The caller gets the outcome on the final press, once.
     expect(done).toEqual([]);

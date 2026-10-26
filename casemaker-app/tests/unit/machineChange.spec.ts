@@ -2,12 +2,12 @@
  * #693 — the change-the-machine rules, pinned without a DOM or a socket.
  *
  * The pure half is the OUTCOME: which profile becomes active, what its placements and datums are,
- * what the history says, where the two fixtures' accessory records end up. The machine half is the
- * three answers step 2 reads: a status line's state and homed rest, the offline answer, and `$H`'s
- * wait for Idle-at-rest. `machineChangeWizard.spec.tsx` drives the same write through the modal.
+ * what the history says, where the two fixtures' accessory records end up. The machine's own answers
+ * (the status reading, the offline answer, `$H`'s wait for Idle-at-rest) are `machineChangeRun.spec.ts`;
+ * `machineChangeWizard.spec.tsx` drives the same write through the modal.
  */
 
-import { afterEach, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import {
   MACHINE_MOUNT_WORDS,
   activeMountOf,
@@ -25,18 +25,11 @@ import {
   takeOffSteps,
   targetMountsFor,
 } from '@/platform/machineChange';
-import { checkMachine, homeMachine, readMachineRest } from '@/platform/machineChangeRun';
-import { setMachineConsoleLoader, type ConsoleSend, type MachineConsoleSession } from '@/platform/machineConsole';
-import { readStatusLine } from '@/platform/desktop/protocol';
 import { MachineRecordSchema, type FixtureRecord, type MachineRecord } from '@/platform/locationClient';
 
 const NOW = '2026-10-26T09:20:00.000Z';
 const MACHINE_ID = 'machine-1a2b3c';
 const TARGET = { host: '192.168.10.43', port: 2222 };
-const IDLE = '<Idle|MPos:-1.0000,-1.0000,-1.0000|WPos:147.4000,123.8000,57.6325|T:6,-17.696,-1>';
-const IDLE_AWAY = '<Idle|MPos:-160.5000,-188.0000,-55.0000|WPos:19.6000,4.7000,0.4000>';
-const HOMING = '<Home|MPos:-11.6000,-14.6000,-3.0000>';
-const ALARM = '<Alarm|MPos:0.0000,0.0000,0.0000>';
 
 const VISE: FixtureRecord = {
   id: 'fx-vise-1',
@@ -343,108 +336,5 @@ describe('#693 the frozen job’s mount', () => {
     expect(refreezeSentence('Zoomba badge', 'vise')).toBe(
       '“Zoomba badge” is frozen for the vise, and the vise is no longer on the machine — Generate it again before cutting.',
     );
-  });
-});
-
-describe('#693 the machine’s own answers', () => {
-  it('reads the homed rest, and only the homed rest, as homed', () => {
-    expect(readMachineRest(IDLE)).toMatchObject({ state: 'Idle', x: -1, y: -1, z: -1, homed: true });
-    expect(readMachineRest(IDLE_AWAY)).toMatchObject({ state: 'Idle', homed: false });
-    expect(readMachineRest(HOMING)).toMatchObject({ state: 'Home', homed: false });
-    expect(readMachineRest(ALARM)).toMatchObject({ state: 'Alarm', homed: false });
-    expect(readMachineRest('???')).toBeNull();
-    expect(readMachineRest(null)).toBeNull();
-  });
-
-  it('agrees with the desktop status reader over the bench’s own lines', () => {
-    for (const line of [IDLE, IDLE_AWAY, HOMING, ALARM]) {
-      const mine = readMachineRest(line)!;
-      const theirs = readStatusLine(line);
-      expect(mine.state).toBe(theirs.state);
-      expect([mine.x, mine.y, mine.z]).toEqual([theirs.mpos.x, theirs.mpos.y, theirs.mpos.z]);
-    }
-  });
-});
-
-function fakeConsole(answer: (line: string) => ConsoleSend): { sent: string[] } {
-  const sent: string[] = [];
-  const session: MachineConsoleSession = {
-    async send(line) {
-      sent.push(line);
-      return answer(line);
-    },
-    async close() {},
-  };
-  setMachineConsoleLoader(async () => ({ async open() { return session; } }));
-  return { sent };
-}
-
-afterEach(() => setMachineConsoleLoader(null));
-
-const sent = (line: string, text: string): ConsoleSend => ({ ok: true, line, text, frames: 1, elapsedMs: 10 });
-
-describe('#693 asking the machine', () => {
-  it('answers online with the rest it read', async () => {
-    fakeConsole((line) => sent(line, IDLE));
-    const r = await checkMachine(TARGET);
-    expect(r.kind).toBe('ok');
-    if (r.kind === 'ok') expect(r.rest.homed).toBe(true);
-  });
-
-  it('answers offline with the transport’s own sentence', async () => {
-    fakeConsole((line) => ({ ok: false, reason: 'timeout', line, detail: 'no reply within 6000 ms', text: '' }));
-    const r = await checkMachine(TARGET);
-    expect(r).toEqual({ kind: 'no', detail: 'no reply within 6000 ms' });
-  });
-
-  it('answers an alarm as a machine that cannot be made safe', async () => {
-    fakeConsole((line) => sent(line, `${ALARM}\nALARM: Probe fail`));
-    const r = await checkMachine(TARGET);
-    expect(r.kind).toBe('no');
-    // The first line carrying the dialect's alarm words IS the status line; either way the answer
-    // names the alarm rather than calling the machine ready.
-    if (r.kind === 'no') expect(r.detail).toContain('alarm');
-  });
-
-  it('homes on $H and waits for Idle at the homed rest, not for the macro’s acknowledgement', async () => {
-    let asked = 0;
-    const z1 = fakeConsole((line) => {
-      if (line === '?') {
-        asked += 1;
-        // Idle but away from home first (the guard passes); the homed rest after `$H`.
-        return sent(line, asked === 1 ? IDLE_AWAY : IDLE);
-      }
-      return sent(line, 'ok');
-    });
-    const r = await homeMachine(TARGET, { polls: 2, pollMs: 0 });
-    expect(r.kind).toBe('homed');
-    expect(z1.sent[0]).toBe('?');
-    expect(z1.sent[1]).toBe('$H');
-    expect(z1.sent).toContain('?');
-  });
-
-  it('refuses to home a machine that is running, and sends nothing', async () => {
-    const z1 = fakeConsole((line) => sent(line, '<Run|MPos:-162.0500,-162.2000,-3.0000|P:0,12,4>'));
-    const r = await homeMachine(TARGET, { polls: 2, pollMs: 0 });
-    expect(r.kind).toBe('failed');
-    if (r.kind === 'failed') expect(r.detail).toContain('Run');
-    expect(z1.sent).toEqual(['?']);
-  });
-
-  it('does not call a machine that stays away from home homed', async () => {
-    fakeConsole((line) => (line === '?' ? sent(line, IDLE_AWAY) : sent(line, 'ok')));
-    const r = await homeMachine(TARGET, { polls: 2, pollMs: 0 });
-    expect(r.kind).toBe('failed');
-    if (r.kind === 'failed') expect(r.detail).toContain('not at its homed rest');
-  });
-
-  it('reports a refused $H without claiming the head moved', async () => {
-    fakeConsole((line) =>
-      line === '?'
-        ? sent(line, IDLE_AWAY)
-        : { ok: false, reason: 'refused', line, detail: 'the console refuses that line', text: '' },
-    );
-    const r = await homeMachine(TARGET, { polls: 1, pollMs: 0 });
-    expect(r).toEqual({ kind: 'failed', detail: 'the console refuses that line' });
   });
 });
