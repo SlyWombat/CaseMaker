@@ -294,13 +294,16 @@ describe('guided job setup — the flow in the panel (#254, #681)', () => {
     expect(screen.getByTestId('start-wizard-progress').textContent).toBe('Step 3 of 4 · Holding');
 
     // The edited step's answer is applied as it is made; Done leaves without a walk to step 4, so
-    // no second item can be made by accident.
-    fireEvent.change(screen.getByTestId('engrave-setup-sacrificial'), { target: { value: 'strips' } });
+    // no second item can be made by accident. The 12 mm default blank is taller than the jaws, so
+    // the block mount is the one its numbers call for — no board under it, the sides free.
+    fireEvent.click(screen.getByTestId('engrave-setup-mount-block'));
     fireEvent.click(screen.getByTestId('start-wizard-done'));
     expect(screen.queryByTestId('start-wizard')).toBeNull();
     expect(jobItemCount(useEngraveJobStore.getState().job)).toBe(1);
     expect(useEngraveJobStore.getState().job.labels).toHaveLength(1);
-    expect(useEngraveJobStore.getState().job.sacrificial).toEqual(presetJawStrips());
+    expect(useEngraveJobStore.getState().job.workholding.vise.seat).toBe('floor');
+    expect(useEngraveJobStore.getState().job.workholding.vise.stockProud).toBeCloseTo(-8, 6);
+    expect(useEngraveJobStore.getState().job.sacrificial.under).toBeNull();
 
     // Walking on is still offered; at step 4 the button says what it would do to an existing job.
     fireEvent.click(screen.getByTestId('engrave-setup-open'));
@@ -315,9 +318,12 @@ describe('guided job setup — the flow in the panel (#254, #681)', () => {
     renderPanel();
     fireEvent.click(screen.getByTestId('engrave-setup-open'));
 
-    // The waste board writes as it is chosen: there is no later Finish to collect it.
-    fireEvent.change(screen.getByTestId('engrave-setup-sacrificial'), { target: { value: 'strips' } });
-    expect(useEngraveJobStore.getState().job.sacrificial).toEqual(presetJawStrips());
+    // The waste board writes as it is chosen: there is no later Finish to collect it. The board is
+    // under the part, between the jaws, so it does not push their faces outward.
+    fireEvent.click(screen.getByTestId('engrave-setup-mount-board'));
+    const under = useEngraveJobStore.getState().job.sacrificial.under;
+    expect(under?.thickness).toBe(2);
+    expect(under?.overhang).toEqual({ left: 0, right: 0, front: 0, back: 0 });
 
     // The material is step 2's answer; writing it returns to this same holding step.
     fireEvent.click(screen.getByTestId('start-wizard-back'));
@@ -333,7 +339,7 @@ describe('guided job setup — the flow in the panel (#254, #681)', () => {
 
     const job = useEngraveJobStore.getState().job;
     expect(job.stock.material).toBe('hardwood');
-    expect(job.sacrificial).toEqual(presetJawStrips());
+    expect(job.sacrificial.under?.thickness).toBe(2);
   });
 });
 

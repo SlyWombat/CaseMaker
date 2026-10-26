@@ -7,7 +7,10 @@
 .mc-backdrop {
   position: fixed;
   inset: 0;
-  z-index: var(--cm-z-modal);
+  /* #684 — opened OVER the job wizard (StartWizard is at --cm-z-modal), so it takes the raised
+     layer of the same scale (#348); the inline style carries it for the z-order test, where CSS
+     imports are not processed. */
+  z-index: var(--cm-z-modal-raised);
   background: rgba(8, 11, 15, 0.72);
   display: flex;
   align-items: center;

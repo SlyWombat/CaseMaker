@@ -80,6 +80,9 @@ const BOX: CSSProperties = {
   padding: 12,
   color: '#d1d5db',
 };
+/** #684 — Holding draws a top-view picture beside the mount options, so that one step is wider. */
+const BOX_WIDE: CSSProperties = { ...BOX, width: 'min(700px, 100%)' };
+
 const MUTED: CSSProperties = { fontSize: 11, color: '#9aa4b0', lineHeight: 1.5, margin: '4px 0' };
 const FOOTER: CSSProperties = {
   display: 'flex',
@@ -632,7 +635,7 @@ export function StartWizard(): JSX.Element {
 
   return createPortal(
     <div style={OVERLAY} data-testid="start-wizard">
-      <div style={BOX} role="dialog" aria-label="New cutting job">
+      <div style={step === 'holding' ? BOX_WIDE : BOX} role="dialog" aria-label="New cutting job">
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           {/* THE ONE COUNTER. No second numbering exists: this line is the whole of it (#681, A1). */}
           <b style={{ flex: 1, fontSize: 13 }} data-testid="start-wizard-progress">

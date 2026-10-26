@@ -31,7 +31,8 @@ export function mountFor(input: SetupsInput, face: Face): MountSpec {
 
 const SIDES: readonly Face[] = ['left', 'right', 'front', 'back'];
 
-function rotaryFits(
+/** Whether the rotary's envelope takes this stock; #684 reads it to explain the rotary option. */
+export function rotaryFits(
   stock: { x: number; y: number; z: number },
   envelope: { diameter: number; length: number },
 ): boolean {

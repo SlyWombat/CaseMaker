@@ -501,7 +501,7 @@ function Wizard({
   // ── Render ───────────────────────────────────────────────────────────────────────────────────
   if (machine === null || active === null) {
     return createPortal(
-      <div className="mc-backdrop" data-testid="machine-change-backdrop">
+      <div className="mc-backdrop" data-testid="machine-change-backdrop" style={{ zIndex: 'var(--cm-z-modal-raised)' }}>
         <div
           className="mc-modal"
           role="dialog"
@@ -560,7 +560,7 @@ function Wizard({
             : null;
 
   const body = (
-    <div className="mc-backdrop" data-testid="machine-change-backdrop">
+    <div className="mc-backdrop" data-testid="machine-change-backdrop" style={{ zIndex: 'var(--cm-z-modal-raised)' }}>
       <div
         className="mc-modal"
         role="dialog"
