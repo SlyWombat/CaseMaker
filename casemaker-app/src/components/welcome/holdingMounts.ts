@@ -5,7 +5,9 @@
  * the machine now?" (§3.4). So every option is computed from the stock's numbers and the location's
  * active bed profile, never from the stock's form word: a 3.81 mm plate on the vise's 3.1 mm ledge
  * stands 0.71 mm proud, a 2 mm sheet would sit below the jaw tops and calls for a waste board under
- * it, and a block taller than the jaws is gripped as a block with its sides free.
+ * it, and a block taller than the jaws is gripped as a block with its sides free. The board under a
+ * thin stock must leave that stock PROUD of the jaw tops too: the thinnest board that does is the
+ * default, and when none does the row says how far the stock still sits below.
  *
  * THE MACHINE'S STATE IS READ, NEVER ASKED (principle 8). What is on the pins, the surface under it,
  * the boards and the tape in the house come from the active bed profile — the same records
@@ -96,6 +98,30 @@ export function recommendedMount(stock: { thickness: number }): ViseHoldingMount
   return 'ledge';
 }
 
+/**
+ * How proud a stock on a board of this thickness sits on the jaw ledge, mm: its thickness plus the
+ * board under it, less the seat. `seatedProud`'s board case, shared with the board option's hint.
+ */
+export function boardSeatProud(thickness: number, boardMm: number): number {
+  return thickness + boardMm - seatDepth('ledge');
+}
+
+/**
+ * The board to seat this stock on, mm: the THINNEST house board that leaves the stock PROUD of the
+ * jaw tops (`boardSeatProud > 0`). A board that leaves it flush or below the jaws is never the
+ * recommendation, so when no house board is thick enough this is the thickest one the house has —
+ * the caller then says in one line how far the stock still sits below. With no house board named,
+ * the typed default is the only choice there is.
+ *
+ * `choices` is `boardChoices`: the house's boards, thinnest first.
+ */
+export function defaultBoardMm(stock: { thickness: number }, choices: readonly BoardChoice[]): number {
+  if (choices.length === 0) return DEFAULT_BOARD_MM;
+  const proud = choices.find((b) => boardSeatProud(stock.thickness, b.thickness) > 0);
+  if (proud !== undefined) return proud.thickness;
+  return choices[choices.length - 1]!.thickness;
+}
+
 /** The mount the answers are actually in, read off the seat and the board under the part. */
 export function currentMount(a: SetupAnswers): ViseHoldingMount {
   if (a.sacrificial.under !== null) return 'board';
@@ -105,9 +131,10 @@ export function currentMount(a: SetupAnswers): ViseHoldingMount {
 
 /** How proud a mount leaves the stock: its thickness plus the board under it, less the seat. */
 export function seatedProud(a: SetupAnswers, mount: ViseHoldingMount = currentMount(a)): number {
-  const board = mount === 'board' ? (a.sacrificial.under?.thickness ?? DEFAULT_BOARD_MM) : 0;
-  const seat = mount === 'block' ? 'floor' : 'ledge';
-  return a.stock.thickness + board - seatDepth(seat);
+  if (mount === 'board') {
+    return boardSeatProud(a.stock.thickness, a.sacrificial.under?.thickness ?? DEFAULT_BOARD_MM);
+  }
+  return a.stock.thickness - seatDepth(mount === 'block' ? 'floor' : 'ledge');
 }
 
 /**
@@ -197,8 +224,8 @@ export interface BoardChoice {
 }
 
 /**
- * The boards the house has, THINNEST FIRST: the board under a stock too thin for the ledge should
- * raise it by as little as will do, so the default choice is the thinnest board on the shelf.
+ * The boards the house has, THINNEST FIRST. Order is not the default by itself: the board under a
+ * stock too thin for the ledge is the thinnest one that leaves that stock proud (`defaultBoardMm`).
  */
 export function boardChoices(profile: BedProfile | null): BoardChoice[] {
   const boards = profile?.consumables?.boards ?? [];
@@ -230,6 +257,8 @@ export interface MountOptionArgs {
   /** Every accessory the house owns, in the box or checked out. */
   accessories: readonly FixtureRecord[];
   stock: { length: number; width: number; thickness: number };
+  /** The board under the part when the mount is board, mm; the typed default when not said. */
+  boardMm?: number;
   /** The machine's rotary envelope; the Z1's ⌀80 × 150 when the caller does not say. */
   rotaryEnvelope?: { diameter: number; length: number };
 }
@@ -256,6 +285,7 @@ function costWords(current: MachineMountKind, needed: MachineMountKind): string 
  */
 export function mountOptions(args: MountOptionArgs): MountOption[] {
   const { machine, accessories, stock } = args;
+  const boardMm = args.boardMm ?? DEFAULT_BOARD_MM;
   const now = machineNow(machine);
   const current: MachineMountKind = now?.mount ?? 'vise';
   const envelope = args.rotaryEnvelope ?? Z1_ROTARY_ENVELOPE;
@@ -271,7 +301,7 @@ export function mountOptions(args: MountOptionArgs): MountOption[] {
     // offered (there is no state to read and no change to offer).
     if (now === null) {
       if (mechanism !== 'vise') continue;
-      out.push({ ...base, hint: hintFor(mount, stock), disabled: false, reason: null, escape: null });
+      out.push({ ...base, hint: hintFor(mount, stock, boardMm), disabled: false, reason: null, escape: null });
       continue;
     }
 
@@ -323,22 +353,32 @@ export function mountOptions(args: MountOptionArgs): MountOption[] {
       continue;
     }
 
-    out.push({ ...base, hint: hintFor(mount, stock), disabled: false, reason: null, escape: null });
+    out.push({ ...base, hint: hintFor(mount, stock, boardMm), disabled: false, reason: null, escape: null });
   }
 
   return out;
 }
 
-/** The available option's second line, in the mockup's words and with this stock's numbers. */
-function hintFor(mount: HoldingMount, stock: { thickness: number }): string | null {
+/**
+ * The available option's second line, in the mockup's words and with this stock's numbers. The
+ * board line is the resulting seat, from `seatedProud`'s board case: a board that still leaves the
+ * stock below the jaw tops says so plainly, and never reads as the recommendation.
+ */
+function hintFor(mount: HoldingMount, stock: { thickness: number }, boardMm: number): string | null {
   switch (mount) {
     case 'ledge': {
       const proud = stock.thickness - LEDGE_STEP;
       if (proud > 0) return `${fmt(stock.thickness)} mm stands ${fmt(proud)} mm proud of the jaws`;
       return 'its top would be level with the jaw tops';
     }
-    case 'board':
-      return 'for a through cut, or stock too thin to stand proud';
+    case 'board': {
+      const proud = boardSeatProud(stock.thickness, boardMm);
+      if (proud > 0) {
+        return `${fmt(stock.thickness)} mm on a ${fmt(boardMm)} mm board stands ${fmt(proud)} mm proud of the jaws`;
+      }
+      if (proud === 0) return 'level with the jaw tops — a thicker board, or tape it to the bed';
+      return `still ${fmt(-proud)} mm below the jaw tops — a thicker board, or tape it to the bed`;
+    }
     case 'block':
       return 'the sides free; for a block taller than the jaws';
     default:

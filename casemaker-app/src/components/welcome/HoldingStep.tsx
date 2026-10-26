@@ -5,8 +5,10 @@
  * THIS stock sits in that mechanism. The options are computed from the stock's numbers by
  * `holdingMounts.ts`: a 3.81 mm plate stands 0.71 mm proud on the 3.1 mm ledge and that is the
  * default; a 2 mm sheet sits below the jaw tops, so a waste board under it is the default and the
- * ledge says why it is not; a block taller than the jaws is gripped as a block. The stock's form
- * word (plate/block/sheet) decides nothing here (§3.3's note).
+ * ledge says why it is not; a block taller than the jaws is gripped as a block. The board under a
+ * thin stock is the thinnest one that leaves it proud of the jaw tops, and a board that cannot is
+ * still shown, saying how far the stock sits below. The stock's form word (plate/block/sheet)
+ * decides nothing here (§3.3's note).
  *
  * THE PICTURE CARRIES THE ORIENTATION FACTS the panel used to print as prose (A10, B4): a top view
  * of the mechanism, a fixed jaw on the left, X between the jaws. The three landmark answers sit in
@@ -42,7 +44,6 @@ import { useSettingsStore } from '@/store/settingsStore';
 import { openMachineChange } from '@/components/machine-change';
 import type { EngraveJob, ViseParams } from '@/types/engraveJob';
 import {
-  DEFAULT_BOARD_MM,
   HOLDING_MOUNT_LABELS,
   HOLDING_MOUNT_WORDS,
   applyMount,
@@ -50,6 +51,7 @@ import {
   boardChoices,
   boardProvenance,
   currentMount,
+  defaultBoardMm,
   fmt,
   machineNow,
   mechanismOf,
@@ -201,21 +203,24 @@ export function HoldingStep({ job, answers, onAnswers }: HoldingStepProps): JSX.
   const now = useMemo(() => machineNow(machine), [machine]);
   const rotaryEnvelope = useMemo(() => jobMachine(job, calibration).rotary?.envelope, [job, calibration]);
 
+  const boards = useMemo(() => boardChoices(now?.profile ?? null), [now]);
+  const underMm = answers.sacrificial.under?.thickness ?? null;
+  // The board the stock calls for: the thinnest house board that leaves it proud of the jaws, the
+  // thickest when none does, the typed default when the house names none. The operator's own board
+  // choice, once made, is the answers' and stands.
+  const [boardMm, setBoardMm] = useState<number>(underMm ?? defaultBoardMm(answers.stock, boards));
+  const boardIndex = boards.findIndex((b) => b.thickness === boardMm);
+  const boardValue = boardIndex >= 0 ? `loc:${boardIndex}` : 'typed';
+
   const options = useMemo(
-    () => mountOptions({ machine, accessories, stock: answers.stock, rotaryEnvelope }),
-    [machine, accessories, answers.stock, rotaryEnvelope],
+    () => mountOptions({ machine, accessories, stock: answers.stock, boardMm, rotaryEnvelope }),
+    [machine, accessories, answers.stock, boardMm, rotaryEnvelope],
   );
   const current = currentMount(answers);
 
   // The machine-only options have no way out when this build cannot drive a machine; a disabled
   // control with no escape is hidden (A10), not narrated.
   const shown = options.filter((o) => canDriveMachine || mechanismOf(o.mount) === 'vise');
-
-  const boards = useMemo(() => boardChoices(now?.profile ?? null), [now]);
-  const underMm = answers.sacrificial.under?.thickness ?? null;
-  const [boardMm, setBoardMm] = useState<number>(underMm ?? boards[0]?.thickness ?? DEFAULT_BOARD_MM);
-  const boardIndex = boards.findIndex((b) => b.thickness === boardMm);
-  const boardValue = boardIndex >= 0 ? `loc:${boardIndex}` : 'typed';
 
   // First arrival at the step: the mount the stock calls for, unless someone has asserted a setup.
   // Deliberately once per mount of the step — a later answer is the operator's.

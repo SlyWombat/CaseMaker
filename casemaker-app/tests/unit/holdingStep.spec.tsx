@@ -23,7 +23,9 @@ import {
   applyMount,
   applyRecommendedMount,
   boardChoices,
+  boardSeatProud,
   currentMount,
+  defaultBoardMm,
   fmt,
   machineNow,
   recommendedMount,
@@ -206,12 +208,84 @@ describe('#684 — the machine’s state and the stock’s numbers decide the mo
     expect(radio('board').checked).toBe(true);
     expect(radio('ledge').disabled).toBe(true);
     expect(rowText('ledge')).toContain('it would sit 1.1 mm below the jaw tops');
+    expect(rowText('board')).toContain('2 mm on a 2 mm board stands 0.9 mm proud of the jaws');
+    expect((screen.getByTestId('engrave-setup-sacrificial') as HTMLSelectElement).value).toBe('loc:0');
     const job = useEngraveJobStore.getState().job;
     expect(job.workholding.vise.seat).toBe('ledge');
     expect(job.workholding.vise.stockProud).toBeCloseTo(0.9, 6);
     expect(job.sacrificial.under?.thickness).toBe(2);
     // ONE sacrificial control, and it is the board choice inside the mount.
     expect(screen.getByTestId('engrave-setup-sacrificial')).toBeTruthy();
+  });
+
+  it('a 1 mm sheet on the only 2 mm board still sits below, and the board line says so', () => {
+    seedLocation(
+      machineWith({
+        tape: null,
+        boards: [{ material: 'MDF', size: [300, 200, 2], count: 4 }],
+      }),
+    );
+    openHolding(dj({ length: 76.2, width: 38.1, thickness: 1 }));
+
+    // No house board leaves a 1 mm sheet proud, so the thickest (here, the only) board is
+    // preselected — and its line says plainly how far the stock still sits below the jaws.
+    expect(radio('board').checked).toBe(true);
+    expect((screen.getByTestId('engrave-setup-sacrificial') as HTMLSelectElement).value).toBe('loc:0');
+    expect(rowText('board')).toContain(
+      'still 0.1 mm below the jaw tops — a thicker board, or tape it to the bed',
+    );
+    expect(rowText('board')).not.toContain('stands 0.9 mm proud');
+    const job = useEngraveJobStore.getState().job;
+    expect(job.sacrificial.under?.thickness).toBe(2);
+    expect(job.workholding.vise.stockProud).toBeCloseTo(-0.1, 6);
+  });
+
+  it('a 1 mm sheet takes the 3 mm board over the 2 mm: only the 3 mm leaves it proud', () => {
+    seedLocation(
+      machineWith({
+        tape: null,
+        boards: [
+          { material: 'MDF', size: [300, 200, 2], count: 4 },
+          { material: 'MDF', size: [300, 200, 3], count: 2 },
+        ],
+      }),
+    );
+    openHolding(dj({ length: 76.2, width: 38.1, thickness: 1 }));
+
+    // 1 + 2 − 3.1 is 0.1 below; 1 + 3 − 3.1 is 0.9 proud. The default is the thinnest board that
+    // leaves the stock proud, not simply the thinnest board on the shelf.
+    expect(radio('board').checked).toBe(true);
+    expect((screen.getByTestId('engrave-setup-sacrificial') as HTMLSelectElement).value).toBe('loc:1');
+    expect(rowText('board')).toContain('1 mm on a 3 mm board stands 0.9 mm proud of the jaws');
+    const job = useEngraveJobStore.getState().job;
+    expect(job.sacrificial.under?.thickness).toBe(3);
+    expect(job.workholding.vise.stockProud).toBeCloseTo(0.9, 6);
+  });
+
+  it('a board picked from the select reports the seat it gives, proud or below', () => {
+    seedLocation(
+      machineWith({
+        tape: null,
+        boards: [
+          { material: 'MDF', size: [300, 200, 2], count: 4 },
+          { material: 'MDF', size: [300, 200, 3], count: 2 },
+        ],
+      }),
+    );
+    openHolding(dj({ length: 76.2, width: 38.1, thickness: 1 }));
+    const select = screen.getByTestId('engrave-setup-sacrificial') as HTMLSelectElement;
+
+    fireEvent.change(select, { target: { value: 'loc:0' } });
+    expect(rowText('board')).toContain(
+      'still 0.1 mm below the jaw tops — a thicker board, or tape it to the bed',
+    );
+    expect(useEngraveJobStore.getState().job.sacrificial.under?.thickness).toBe(2);
+    expect(useEngraveJobStore.getState().job.workholding.vise.stockProud).toBeCloseTo(-0.1, 6);
+
+    fireEvent.change(select, { target: { value: 'loc:1' } });
+    expect(rowText('board')).toContain('1 mm on a 3 mm board stands 0.9 mm proud of the jaws');
+    expect(useEngraveJobStore.getState().job.sacrificial.under?.thickness).toBe(3);
+    expect(useEngraveJobStore.getState().job.workholding.vise.stockProud).toBeCloseTo(0.9, 6);
   });
 
   it('a block taller than the jaws is gripped as a block, its sides free', () => {
@@ -300,7 +374,25 @@ describe('#684 — a saved setup is the operator’s, not the stock’s recommen
     expect(recommendedMount({ thickness: 25 })).toBe('block');
   });
 
-  it('lists the house’s boards in the record’s order and picks the thinnest for the board choice', () => {
+  it('defaults to the thinnest board that leaves the stock proud, else the thickest', () => {
+    const two = [{ thickness: 2, material: 'MDF', count: 4 }];
+    const twoAndThree = [...two, { thickness: 3, material: 'MDF', count: 2 }];
+
+    // 1 mm sheet: a 2 mm board leaves it 0.1 mm below; a 3 mm board leaves it 0.9 mm proud.
+    expect(boardSeatProud(1, 2)).toBeCloseTo(-0.1, 9);
+    expect(boardSeatProud(1, 3)).toBeCloseTo(0.9, 9);
+    expect(defaultBoardMm({ thickness: 1 }, two)).toBe(2);
+    expect(defaultBoardMm({ thickness: 1 }, twoAndThree)).toBe(3);
+
+    // 2 mm sheet: the thinnest board already leaves it 0.9 mm proud.
+    expect(boardSeatProud(2, 2)).toBeCloseTo(0.9, 9);
+    expect(defaultBoardMm({ thickness: 2 }, two)).toBe(2);
+
+    // No house board named: the typed default is the only choice there is.
+    expect(defaultBoardMm({ thickness: 1 }, [])).toBe(2);
+  });
+
+  it('lists the house’s boards in the record’s order on the machine line, thinnest first in the choice', () => {
     const machine = machineWith({
       tape: null,
       boards: [
@@ -311,6 +403,7 @@ describe('#684 — a saved setup is the operator’s, not the stock’s recommen
     const now = machineNow(machine);
     expect(now?.text).toBe('Vise on the pins · wasteboard under · 12 mm MDF boards ×1 · 2 mm MDF boards ×4');
     expect(boardChoices(now!.profile).map((b) => b.thickness)).toEqual([2, 12]);
+    expect(defaultBoardMm({ thickness: 2 }, boardChoices(now!.profile))).toBe(2);
   });
 });
 
