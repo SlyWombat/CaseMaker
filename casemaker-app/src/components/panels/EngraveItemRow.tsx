@@ -63,6 +63,11 @@ export interface EngraveItemRowProps {
    * operation — a kept-out void, or a mesh the job only references.
    */
   typeLabel?: string | null;
+  /**
+   * #667 — the rest pair's chip (`rest ⌀1 mm`), drawn beside the type chip when the item's setup
+   * names a second cutter. Null on a row with no rest cutter.
+   */
+  restLabel?: string | null;
   /** What to draw where the mockup has "Face" / "Pocket A": the item's name, or the kind's word. */
   name: string;
   /**
@@ -128,6 +133,7 @@ export function EngraveItemRow({
   glyph,
   kindWord,
   typeLabel = null,
+  restLabel = null,
   name,
   summary,
   intent = null,
@@ -231,6 +237,11 @@ export function EngraveItemRow({
                   {typeLabel}
                 </span>
               )}
+              {restLabel !== null && (
+                <span className="engrave-item-row__op" data-testid={`${prefix}-rest-chip-${index}`}>
+                  {restLabel}
+                </span>
+              )}
             </button>
           </>
         ) : (
@@ -249,6 +260,11 @@ export function EngraveItemRow({
             {typeLabel !== null && (
               <span className="engrave-item-row__op" data-testid={`${prefix}-type-${index}`}>
                 {typeLabel}
+              </span>
+            )}
+            {restLabel !== null && (
+              <span className="engrave-item-row__op" data-testid={`${prefix}-rest-chip-${index}`}>
+                {restLabel}
               </span>
             )}
           </button>

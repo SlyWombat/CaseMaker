@@ -1,6 +1,7 @@
 import type { CSSProperties, JSX } from 'react';
 import { FontPicker, WeightPicker } from '@/components/panels/FontPicker';
 import { EngraveItemRow } from '@/components/panels/EngraveItemRow';
+import { RestCutterControl, type RestChoice } from '@/components/panels/RestCutterControl';
 import { itemOperationName } from '@/engine/cnc/engrave/partPlan';
 import { rowSummary, intentWord } from '@/components/panels/engraveRowText';
 import type { JobFinding } from '@/engine/cnc/engrave/jobSetup';
@@ -50,6 +51,11 @@ export interface EngraveLabelRowProps {
   onRemove: () => void;
   /** Findings about THIS label (the panel filters the job's list by `labelId`). */
   findings: readonly JobFinding[];
+  /**
+   * #667 — the rest pair's control data (the setup's rough and rest cutters), or null when this
+   * row's item is not in a setup or the job has no cutter. The panel owns the registry reading.
+   */
+  rest?: RestChoice | null;
   /** The project's embedded fonts, for the font picker. */
   customFonts?: readonly CustomFont[];
   /**
@@ -79,6 +85,7 @@ export function EngraveLabelRow({
   onChange,
   onRemove,
   findings,
+  rest = null,
   customFonts = [],
   recommended,
   split = null,
@@ -190,6 +197,7 @@ export function EngraveLabelRow({
       findings={findings}
       onToggleEnabled={(enabled) => onChange({ enabled })}
       onRemove={onRemove}
+      restLabel={rest?.chip ?? null}
     >
       {/* #350 — the text gets the line to itself. Sharing one with the font picker and the weight
           toggle collapsed it to a sliver: `flex: 1` gives the input a flex-basis of 0, so it is the
@@ -310,6 +318,7 @@ export function EngraveLabelRow({
           {label.depth === recommended.depth ? '' : ` This label is at ${mm(label.depth)} mm.`}
         </p>
       )}
+      {rest !== null && <RestCutterControl rest={rest} testidPrefix="engrave-label" index={index} />}
     </EngraveItemRow>
   );
 }

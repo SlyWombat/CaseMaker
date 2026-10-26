@@ -41,7 +41,8 @@ import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import { cuttingDiameter, drillPointAngle, pointLength } from '@/engine/cnc/tool';
 import { drillSettings } from '@/engine/cnc/cam/drillBit';
 import { caseWordsForKey } from '@/engine/cnc/toolCondition';
-import { dedupeFindings, itemKindWord, itemRowName, jobTool, validateJob, type JobFinding } from '@/engine/cnc/engrave/jobSetup';
+import { dedupeFindings, itemKindWord, itemRowName, jobSetups, jobTool, validateJob, type JobFinding } from '@/engine/cnc/engrave/jobSetup';
+import type { RestChoice } from '@/components/panels/RestCutterControl';
 import {
   hasRegionItems,
   itemName,
@@ -775,6 +776,51 @@ export function EngravePanel(): JSX.Element {
   const tool = jobTool(job);
   const toolEntry = tools.find((e) => e.key === job.toolKey) ?? null;
   const diameter = toolEntry ? cuttingDiameter(toolEntry.tool) : null;
+  // #667 — THE REST PAIR, for the region rows' control. The engine's unit is the SETUP (its second
+  // tool is the measured rest pass), so a row asks the setup that owns its item. The options are
+  // the flat cutters smaller than the rough one: a region CAM's rest pass runs a flat bit, and a
+  // V-bit rest is refused by the engine. The chip and the control's words are worded here so the
+  // row renders data, not a second opinion about the registry.
+  const setRestCutter = useEngraveJobStore((s) => s.setRestCutter);
+  const setups = jobSetups(job);
+  const restFor = (itemId: string): RestChoice | null => {
+    const setupIndex = setups.findIndex((setup) => setup.itemIds.includes(itemId));
+    if (setupIndex === -1) return null;
+    const setup = setups[setupIndex]!;
+    const roughEntry = setup.tools[0] === undefined ? null : (tools.find((e) => e.key === setup.tools[0]) ?? null);
+    const roughTool = roughEntry?.tool ?? null;
+    const roughDiameter = roughTool === null ? null : cuttingDiameter(roughTool);
+    const restKey = setup.tools[1] ?? null;
+    const restEntry = restKey === null ? null : (tools.find((e) => e.key === restKey) ?? null);
+    const restDiameter = restEntry === null ? null : cuttingDiameter(restEntry.tool);
+    const options = tools
+      .filter((e) => {
+        const d = cuttingDiameter(e.tool);
+        if (d === null || d <= 0) return false;
+        // A region CAM's rest pass is a flat cutter's; a V-bit rest is refused by the engine, and a
+        // drill is not a region cutter at all.
+        if (e.tool.shape !== 'flat') return false;
+        return roughDiameter === null || d < roughDiameter;
+      })
+      .map((e) => ({ key: e.key, name: toolDisplayName(e.tool), diameter: cuttingDiameter(e.tool) as number }))
+      .sort((a, b) => a.diameter - b.diameter);
+    return {
+      rough: roughTool === null ? null : { key: roughEntry!.key, name: toolDisplayName(roughTool), diameter: roughDiameter },
+      roughIsV: roughTool !== null && vCone(roughTool) !== null,
+      options,
+      restKey,
+      // A REST cutter only matters on a job whose setups are stated (the write materialises them);
+      // the number lets a multi-setup job say which setup the row's choice belongs to.
+      setupNumber: job.setups === undefined ? null : setupIndex + 1,
+      chip:
+        restEntry === null
+          ? null
+          : restDiameter === null
+            ? `rest ${toolDisplayName(restEntry.tool)}`
+            : `rest ⌀${Number(restDiameter.toFixed(3))} mm`,
+      onPick: (key) => setRestCutter(itemId, key),
+    };
+  };
   // The rows are the main thread's own catalogue snapshot (#324) — read here so the numbers on
   // screen are the same resolution the worker is handed at Generate, not a module state only this
   // side of the boundary can see.
@@ -2170,6 +2216,7 @@ export function EngravePanel(): JSX.Element {
           customFonts={job.customFonts}
           recommended={depthRecommendation(label)}
           split={split}
+          rest={label.construction === true ? null : restFor(label.id)}
           onChange={(patch) => updateLabel(label.id, patch)}
           onRemove={() => removeLabel(label.id)}
         />
@@ -2181,6 +2228,7 @@ export function EngravePanel(): JSX.Element {
           index={i}
           maxDepth={maxDepth}
           findings={findingsFor(shape.id)}
+          rest={shape.construction === true ? null : restFor(shape.id)}
           onChange={(patch) => updateShape(shape.id, patch)}
           onRemove={() => removeShape(shape.id)}
         />
@@ -2193,6 +2241,7 @@ export function EngravePanel(): JSX.Element {
           maxDepth={maxDepth}
           candidates={referenceableItems(shape.id)}
           findings={findingsFor(shape.id)}
+          rest={shape.construction === true ? null : restFor(shape.id)}
           onChange={(patch) => updateCombined(shape.id, patch)}
           onRemove={() => removeCombined(shape.id)}
         />
@@ -2237,6 +2286,7 @@ export function EngravePanel(): JSX.Element {
           index={i}
           maxDepth={maxDepth}
           findings={findingsFor(primitive.id)}
+          rest={primitiveReducesToRegion(primitive) ? restFor(primitive.id) : null}
           onChange={(patch) => updatePrimitive(primitive.id, patch)}
           onRemove={() => removePrimitive(primitive.id)}
         />
@@ -2259,6 +2309,7 @@ export function EngravePanel(): JSX.Element {
           index={i}
           maxDepth={maxDepth}
           findings={findingsFor(shape.id)}
+          rest={shape.construction === true ? null : restFor(shape.id)}
           onChange={(patch) => updateVector(shape.id, patch)}
           onRemove={() => removeVector(shape.id)}
         />

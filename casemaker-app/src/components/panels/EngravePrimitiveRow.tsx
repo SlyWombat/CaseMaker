@@ -1,5 +1,6 @@
 import type { CSSProperties, JSX } from 'react';
 import { EngraveItemRow } from '@/components/panels/EngraveItemRow';
+import { RestCutterControl, type RestChoice } from '@/components/panels/RestCutterControl';
 import { regionChipLabel, useRegionOperationType } from '@/components/panels/operationTypes';
 import { rowSummary } from '@/components/panels/engraveRowText';
 import type { JobFinding } from '@/engine/cnc/engrave/jobSetup';
@@ -51,6 +52,11 @@ export interface EngravePrimitiveRowProps {
   onRemove: () => void;
   /** Findings about THIS primitive (the panel filters the job's list by `labelId`). */
   findings: readonly JobFinding[];
+  /**
+   * #667 — the rest pair's control data (the setup's rough and rest cutters), or null when this
+   * row's item is not in a setup or the job has no cutter. The panel owns the registry reading.
+   */
+  rest?: RestChoice | null;
 }
 
 export function EngravePrimitiveRow({
@@ -60,6 +66,7 @@ export function EngravePrimitiveRow({
   onChange,
   onRemove,
   findings,
+  rest = null,
 }: EngravePrimitiveRowProps): JSX.Element {
   // #662 - the chip states what THIS cutter makes of a region.
   const region = useRegionOperationType();
@@ -150,6 +157,7 @@ export function EngravePrimitiveRow({
       findings={findings}
       onToggleEnabled={(enabled) => onChange({ enabled })}
       onRemove={onRemove}
+      restLabel={rest?.chip ?? null}
     >
       <label style={ROW_INLINE}>
         <span>name</span>
@@ -291,6 +299,7 @@ export function EngravePrimitiveRow({
       <p style={{ ...MUTED, margin: 0 }} data-testid={`engrave-primitive-label-${index}`}>
         {primitiveLabel(primitive)}
       </p>
+      {rest !== null && <RestCutterControl rest={rest} testidPrefix="engrave-primitive" index={index} />}
     </EngraveItemRow>
   );
 }

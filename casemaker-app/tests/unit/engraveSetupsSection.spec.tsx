@@ -201,6 +201,16 @@ describe('#471 the Setups section — the states of §2', () => {
     expect(useEngraveJobStore.getState().job.setups).toBeUndefined();
   });
 
+  it('#667 — the setups line names the rest pair when the setup has a second cutter', () => {
+    const job = defaultEngraveJob();
+    job.toolKey = 'flat-3.175x12-metal';
+    const first = jobSetups(job)[0]!;
+    job.setups = [{ ...first, tools: ['flat-3.175x12-metal', 'flat-1.0'] }];
+    act(() => useEngraveJobStore.setState({ job }));
+    render(<EngraveSetupsSection />);
+    expect(screen.getByTestId('engrave-setup-pair-1').textContent).toBe('⌀3.175 mm rough · ⌀1 mm rest');
+  });
+
   it('“Edit setups” materialises the implicit setup; the row is then editable', () => {
     render(<EngraveSetupsSection />);
     fireEvent.click(screen.getByTestId('engrave-setups-edit'));

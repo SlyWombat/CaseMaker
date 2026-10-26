@@ -143,6 +143,8 @@ export interface CaseMakerTestApi {
     ok: boolean;
     operations: number | null;
     cuttingMoves: number | null;
+    /** #667 — the run's files in cut order (a rest pair is 2, a one-cutter job 1). */
+    programs: number;
     verifyErrors: number;
     simStatus: string | null;
     oracleOk: boolean | null;
@@ -432,6 +434,7 @@ export function installCaseMakerTestApi(): void {
         ok: r.generated?.ok ?? false,
         operations: r.generated?.cam?.operations ?? null,
         cuttingMoves: r.generated?.cam?.cuttingMoves ?? null,
+        programs: r.generated?.programs.length ?? 0,
         verifyErrors: runErrorCodes(r).length,
         simStatus: r.simStatus,
         oracleOk: r.oracle?.ok ?? null,

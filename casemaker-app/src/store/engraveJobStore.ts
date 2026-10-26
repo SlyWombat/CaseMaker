@@ -36,6 +36,7 @@ import { BADGE_POCKET_KEEP_OUT_ID, type BadgeBlank } from '@/engine/cnc/engrave/
 import { DESIGN_POCKET_KEEP_OUT_ID, designReplacesItems, mergeDesignItems, type DesignJobPatch } from '@/engine/cnc/engrave/fromDesign';
 import { blankStockFor } from '@/engine/cnc/engrave/fromBlank';
 import type { BlankParams } from '@/types/blank';
+import { materializeSetups } from '@/engine/cnc/setups/authoring';
 import type { CutParams } from '@/engine/cnc/feeds';
 import type {
   EngraveBorderShape,
@@ -917,6 +918,17 @@ export interface EngraveJobState {
    * not prune or re-derive anything itself.
    */
   setSetups: (setups: JobSetup[] | null) => void;
+  /**
+   * #667 — pair a setup's rough cutter with a REST cutter: the region row's "Finish the corners
+   * with a smaller cutter". The pair is the setup's `tools[1]`, the engine's own unit, and a job
+   * with no stored setups MATERIALISES them first — the implicit single setup has no list to
+   * write to, and a rest pass is a property of a setup. `null` returns the setup to one cutter.
+   *
+   * A no-op when the item is in no setup or the setup names no first cutter (there is nothing to
+   * pair with). The control offers only smaller cutters; the rest measurement and the setup's
+   * own findings are the authority on the pair, not this write.
+   */
+  setRestCutter: (itemId: string, restKey: string | null) => void;
   /**
    * Merge a hand edit into the feeds/speeds override (#205). A key set to `undefined` clears
    * just that field back to the computed value; `null` clears the whole override. The source
@@ -1840,6 +1852,25 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
           return rest;
         }
         return { ...job, setups };
+      }),
+
+    // #667 — the rest pair, as the setup's second tool. Materialise on first choice: the implicit
+    // setup is derived from `toolKey`, and a second cutter has nowhere to live without a stored
+    // list (the same materialisation the Cut plan step and the setups section already perform).
+    setRestCutter: (itemId, restKey) =>
+      apply((job) => {
+        const setups = materializeSetups(job);
+        const index = setups.findIndex((setup) => setup.itemIds.includes(itemId));
+        if (index === -1) return job;
+        const setup = setups[index]!;
+        const first = setup.tools[0];
+        if (first === undefined) return job;
+        if (restKey !== null && restKey === first) return job;
+        const tools = restKey === null ? [first] : [first, restKey];
+        if (setup.tools.length === tools.length && setup.tools[1] === tools[1]) return job;
+        const next = [...setups];
+        next[index] = { ...setup, tools };
+        return { ...job, setups: next };
       }),
 
     // Any edit to the vise makes it a SAVED value, unless the patch states its own source

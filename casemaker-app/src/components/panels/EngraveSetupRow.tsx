@@ -172,6 +172,21 @@ export function EngraveSetupRow(props: EngraveSetupRowProps): JSX.Element {
     return d === null ? e.tool.name : `${e.tool.name} — Ø ${d} mm cutting`;
   };
 
+  // #667 — the pair this setup cuts with, when the region rows gave it a rest cutter: the number
+  // pair is the one the row's chip and the run sheet's rest section use.
+  const pairWords = ((): string | null => {
+    if (setup.tools.length < 2) return null;
+    const dia = (key: string | undefined): string | null => {
+      const entry = key === undefined ? undefined : props.tools.find((e) => e.key === key);
+      const d = entry === undefined ? null : cuttingDiameter(entry.tool);
+      return d === null ? (key ?? null) : `⌀${Number(d.toFixed(3))} mm`;
+    };
+    const rough = dia(setup.tools[0]);
+    const rest = dia(setup.tools[1]);
+    if (rough === null || rest === null) return null;
+    return `${rough} rough · ${rest} rest`;
+  })();
+
   return (
     <div className="engrave-setups__row" data-testid={`engrave-setup-${n}`}>
       <div className="engrave-setups__row-head">
@@ -191,6 +206,11 @@ export function EngraveSetupRow(props: EngraveSetupRowProps): JSX.Element {
         <span style={TAG} data-testid={`engrave-setup-mount-words-${n}`}>
           {holderWords(setup.mount)}
         </span>
+        {pairWords !== null && (
+          <span style={TAG} data-testid={`engrave-setup-pair-${n}`}>
+            {pairWords}
+          </span>
+        )}
         {props.machineName != null && (
           <span style={TAG} data-testid={`engrave-setup-machine-${n}`}>
             {props.machineName}

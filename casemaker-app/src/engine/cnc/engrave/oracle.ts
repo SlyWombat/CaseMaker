@@ -143,6 +143,13 @@ export interface OraclePredicted {
    * tip radius by. For a thread it is the TIP depth: the deepest level the tooth reaches.
    */
   depth: number;
+  /**
+   * #667 — the document item this prediction describes, when it has one. The oracle does not read
+   * it; a caller that must re-state the prediction for ONE program (a rest pair's rough-only file
+   * splits only some entries) matches entries to items by it. Absent on a thread/groove entry a
+   * caller builds without an item.
+   */
+  itemId?: string;
   /** Outer contours CCW and holes CW, as `measureLabels` / `toPartPlan` produce them. */
   polygons: OraclePolygon[];
   /**

@@ -46,6 +46,7 @@ import { feedsFor, type FeedsEntry, type FeedsResult, type FeedCatalogueRow } fr
 import {
   cuttingDiameter,
   cuttingForTrace,
+  cuttingRadiusForSweep,
   drillPointAngle,
   flatEndMill,
   pointLength,
@@ -1241,10 +1242,10 @@ export function engraveRegions(
       // removal the file really makes.
       if (c.tabs.count > 0) {
         const keptPredicted = spans.flatMap((one) => tabKeptRegions(tl, one, radius));
-        cutoutPredicted.push({ depth: tabTop, polygons: kerf });
-        cutoutPredicted.push({ depth: c.depth, polygons: [...kerf, ...keptPredicted] });
+        cutoutPredicted.push({ depth: tabTop, polygons: kerf, itemId: c.id });
+        cutoutPredicted.push({ depth: c.depth, polygons: [...kerf, ...keptPredicted], itemId: c.id });
       } else {
-        cutoutPredicted.push({ depth: c.depth, polygons: kerf });
+        cutoutPredicted.push({ depth: c.depth, polygons: kerf, itemId: c.id });
       }
     }
   }
@@ -1353,10 +1354,10 @@ export function engraveRegions(
     // A V region's prediction is its FLOOR at `depth` — the floor polygons the geometry built,
     // not the plane design. The oracle simulates at the floor and would call the wider design an
     // under-cut (#221). A flat region's floor IS its polygons.
-    ...regions.map((c): OraclePredicted => ({ depth: c.depth, polygons: c.vCarve?.floor ?? c.polygons })),
+    ...regions.map((c): OraclePredicted => ({ depth: c.depth, polygons: c.vCarve?.floor ?? c.polygons, itemId: c.id })),
     ...(cone === null
-      ? traceCuts.map((c): OraclePredicted => ({ depth: c.depth, polygons: c.polygons }))
-      : plan.traces.map((t): OraclePredicted => ({ depth: t.depth, polygons: [], groove: { paths: t.paths, closed: t.closed, cone } }))),
+      ? traceCuts.map((c): OraclePredicted => ({ depth: c.depth, polygons: c.polygons, itemId: c.id }))
+      : plan.traces.map((t): OraclePredicted => ({ depth: t.depth, polygons: [], itemId: t.id, groove: { paths: t.paths, closed: t.closed, cone } }))),
     // #218 — a cut-out's kerf at the tab top, and the same kerf less its tab rectangles at the
     // through depth. Every placed tab is subtracted; an unplaced one is not, and its material is
     // correctly predicted as cut away.
@@ -2929,6 +2930,14 @@ function generateOneProgram(
   // job naming it would have to be refused until there is one.
   const mill = jobMachine(job, calibration);
   const { plan, regions, profiles, throughMask, predicted, findings } = engraveRegions(tl, job, tool, margins, shop, mill, catalogue);
+  /**
+   * #667 — WHAT THIS PROGRAM IS ASKED TO REMOVE. `predicted` is the design at its stated depths,
+   * which is right for a program that reaches full depth; a ROUGH-ONLY program (the first file of
+   * a rest pair) stops `stockToLeaveMm` above each split item's floor, and its prediction must
+   * say so. Without this the run's oracle reads the finishing allowance as material the file
+   * "left" and refuses a pair that cut exactly as planned.
+   */
+  let predictedForRun = predicted;
   const errors: EngraveFailure[] = [];
 
   const stop = (
@@ -2975,7 +2984,7 @@ function generateOneProgram(
       facingToolKey: extra?.facing?.toolKey ?? null,
       facingError: extra?.facing?.error ?? null,
       facingCam: extra?.facing?.cam ?? null,
-      predicted,
+      predicted: predictedForRun,
       errors,
     };
   };
@@ -3262,6 +3271,37 @@ function generateOneProgram(
       itemIds: [...new Set(ir.operations.filter((op) => op.passKind !== undefined).map((op) => op.labelId))],
     };
   }
+  // #667 — THE ROUGH-ONLY HALF OF A REST PAIR LEAVES THE ALLOWANCE, BUT ONLY WHERE IT SPLITS.
+  // `cam/engraveJob.ts`'s split applies to flat-CUTTER flat regions with a positive roughing
+  // depth: their rings are eroded by the tool radius PLUS the allowance and their deepest pass
+  // stops `leave` above the floor. Drilled regions, traces and cut-outs are NOT split — they run
+  // at their full geometry in this program (a drill's disc, a trace's kerf and a cut-out's kerf
+  // would be erased entirely by that erosion, and the oracle would call the real cut an over-cut),
+  // and an item whose `depth − leave` is not positive has no roughing pass at all (the CAM keeps
+  // its one full-depth pass). So the prediction is restated for exactly the items the CAM split,
+  // and every other entry stands as it is.
+  if (finishFacts !== null && finishFacts.mode === 'rough-only') {
+    const leave = finishFacts.stockToLeaveMm.value;
+    const split = new Set(
+      ir.operations.filter((op) => op.passKind === 'rough').map((op) => op.labelId),
+    );
+    const offset = makeClipperOffset(tl);
+    const radius = tool === null ? null : cuttingRadiusForSweep(tool);
+    const r = radius !== null && radius.ok ? radius.radius : 0;
+    predictedForRun = predicted.map((p) => {
+      if (p.itemId === undefined || !split.has(p.itemId)) return p;
+      if (p.polygons.length === 0 || p.depth <= 0) return p;
+      const roughDepth = p.depth - leave;
+      if (!(roughDepth > 0)) return p;
+      // What the rough rings leave standing: the region eroded by the radius plus the allowance
+      // and swept by the tool — erosion then dilation by the radius.
+      return {
+        ...p,
+        depth: roughDepth,
+        polygons: leave > 0 || r > 0 ? offset(offset(p.polygons, -(r + leave)), r) : p.polygons,
+      };
+    });
+  }
 
   // 4. the depth limit and the setup. They are read by the facing file as well as by the verifier
   // below, and the facing file has to be built BEFORE the engraving is posted — see step 6 — so
@@ -3347,7 +3387,7 @@ function generateOneProgram(
     const verify = verifyProgram(nc, { setup, machine: mill, tool, depthLimit: limit, minRapidZ, ...(limitReasonAt ? { limitReasonAt } : {}), ...mountCtx(shop.mount) });
     if (verify.findings.some((f) => f.severity === 'error')) {
       errors.push({ stage: 'verify', message: `${verify.findings.filter((f) => f.severity === 'error').length} verifier error(s)` });
-      return { ok: false, stage: 'verify', findings, feeds, threads: threadPlans, threadMachining, drill: drillFacts, cam, nc, verify, frameNc: null, frameVerify: null, facingNc: null, facingVerify: null, facingToolKey: null, facingError: null, facingCam: null, predicted, errors };
+      return { ok: false, stage: 'verify', findings, feeds, threads: threadPlans, threadMachining, drill: drillFacts, cam, nc, verify, frameNc: null, frameVerify: null, facingNc: null, facingVerify: null, facingToolKey: null, facingError: null, facingCam: null, predicted: predictedForRun, errors };
     }
 
     // 9. the frame file (#244): the job's XY extent traced in the air, beside the job. Produced by
@@ -3356,12 +3396,12 @@ function generateOneProgram(
     const frame = frameProgram(ir, ctx, mill, setup, tool, limit, shop.mount);
     if ('error' in frame) {
       errors.push({ stage: 'verify', message: `the frame file could not be produced: ${frame.error}` });
-      return { ok: false, stage: 'verify', findings, feeds, threads: threadPlans, threadMachining, drill: drillFacts, cam, nc, verify, frameNc: null, frameVerify: null, facingNc: facing.nc, facingVerify: facing.verify, facingToolKey: facing.toolKey, facingError: facing.error, facingCam: facing.cam, predicted, errors };
+      return { ok: false, stage: 'verify', findings, feeds, threads: threadPlans, threadMachining, drill: drillFacts, cam, nc, verify, frameNc: null, frameVerify: null, facingNc: facing.nc, facingVerify: facing.verify, facingToolKey: facing.toolKey, facingError: facing.error, facingCam: facing.cam, predicted: predictedForRun, errors };
     }
     const frameErrors = frame.verify.findings.filter((f) => f.severity === 'error');
     if (frameErrors.length > 0) {
       errors.push({ stage: 'verify', message: `the frame file has ${frameErrors.length} verifier error(s)` });
-      return { ok: false, stage: 'verify', findings, feeds, threads: threadPlans, threadMachining, drill: drillFacts, cam, nc, verify, frameNc: frame.nc, frameVerify: frame.verify, facingNc: facing.nc, facingVerify: facing.verify, facingToolKey: facing.toolKey, facingError: facing.error, facingCam: facing.cam, predicted, errors };
+      return { ok: false, stage: 'verify', findings, feeds, threads: threadPlans, threadMachining, drill: drillFacts, cam, nc, verify, frameNc: frame.nc, frameVerify: frame.verify, facingNc: facing.nc, facingVerify: facing.verify, facingToolKey: facing.toolKey, facingError: facing.error, facingCam: facing.cam, predicted: predictedForRun, errors };
     }
 
     return {
@@ -3384,7 +3424,7 @@ function generateOneProgram(
       facingToolKey: facing.toolKey,
       facingError: facing.error,
       facingCam: facing.cam,
-      predicted,
+      predicted: predictedForRun,
       errors,
     };
   } finally {

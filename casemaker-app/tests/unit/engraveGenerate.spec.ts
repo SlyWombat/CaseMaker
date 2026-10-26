@@ -2012,6 +2012,11 @@ describe('engraveGenerate — one program per setup (#419 J3)', () => {
     expect(program.cam!.operations).toBe(ids.length * 2);
     expect(program.nc).toContain('(rough)');
     expect(program.nc).toContain('(finish)');
+    // #667 — a single program reaches FULL depth in the same file, so its prediction keeps the
+    // item depths; only a rough-only pair program is asked for its rough floors.
+    for (const p of g.predicted.filter((x) => x.polygons.length > 0)) {
+      expect([...new Set(job.labels.map((l) => l.depth))]).toContain(Number(p.depth.toFixed(6)));
+    }
     // The single-program adapter describes the same first file.
     expect(g.finish).toEqual(program.finish);
     expect(g.cam!.operations).toBe(program.cam!.operations);
@@ -2040,6 +2045,20 @@ describe('engraveGenerate — one program per setup (#419 J3)', () => {
     const [rough, rest] = g.programs;
     expect(rough!.finish!.mode).toBe('rough-only');
     expect(rest!.finish!.mode).toBe('finish-only');
+    // #667 — the rough-only file's prediction asks for what IT removes: each split item's floor
+    // less the allowance, never the full depth the second file finishes. The run's oracle reads
+    // the top-level prediction (program 1), so the finishing stock is not "material it left".
+    const fullDepths = [...new Set(job.labels.map((l) => l.depth))].sort((a, b) => a - b);
+    const roughFloors = fullDepths.map((d) => Math.max(0, d - 0.2));
+    const polygonDepths = g.predicted.filter((p) => p.polygons.length > 0).map((p) => p.depth);
+    expect(polygonDepths.length).toBeGreaterThan(0);
+    for (const depth of polygonDepths) {
+      expect(roughFloors.some((d) => Math.abs(d - depth) < 1e-9)).toBe(true);
+    }
+    // The full depths are NOT what program 1 is asked for.
+    for (const depth of polygonDepths) {
+      expect(fullDepths.some((d) => Math.abs(d - depth) < 1e-9)).toBe(false);
+    }
     expect(rough!.cam!.roughOperations).toBeGreaterThan(0);
     expect(rough!.cam!.finishOperations).toBe(0);
     expect(rest!.cam!.roughOperations).toBe(0);
@@ -2049,6 +2068,142 @@ describe('engraveGenerate — one program per setup (#419 J3)', () => {
     expect(rough!.nc).not.toContain('(finish)');
     expect(rest!.nc).toContain('(finish)');
     expect(rest!.nc).not.toContain('(rough)');
+  });
+
+  it('#667 — the rough-only file’s prediction is what the run’s oracle sweeps', () => {
+    // The app's preflight compares PROGRAM 1's removal against the top-level prediction before
+    // anything may be saved or sent. For a rest pair that program leaves the allowance on every
+    // split item, so the prediction has to be the rough region at the rough floor — not the item's
+    // full depth — or the gate refuses a pair that cut exactly as planned.
+    const job: EngraveJob = {
+      ...dj(),
+      stock: { ...dj().stock, material: 'pla' },
+    };
+    const ids = job.labels.map((l) => l.id);
+    const base = setUp(job, [ids], [job.toolKey]);
+    const two: EngraveJob = {
+      ...base,
+      setups: [{ ...base.setups![0]!, tools: [job.toolKey, TOOL_REST.key] }],
+    };
+    const g = generate(tl, two, null, [], undefined, {
+      tools: [TOOL_REST, ...TOOL_LIBRARY],
+      finish: { stockToLeaveMm: { value: 0.2, source: 'chosen' } },
+    });
+    expect(g.ok).toBe(true);
+    expect(g.programs).toHaveLength(2);
+
+    const session = createSimSession(tl);
+    try {
+      const load = session.load(g.nc!, toSetup(two, Z1), jobTool(two)!, two.machineId, {
+        breakthroughMm: two.breakthrough,
+      });
+      expect(load.ok, JSON.stringify(load.ok ? [] : load.diagnostics)).toBe(true);
+      const report = session.oracle(g.predicted);
+      expect(
+        report.ok,
+        JSON.stringify({ worst: report.worst, levels: report.levels.map((l) => ({ z: l.z, under: l.underCut, over: l.overCut })) }),
+      ).toBe(true);
+    } finally {
+      session.dispose();
+    }
+  });
+
+  it('#667 — a rest pair mixed with a drill, a trace and a cut-out passes the run’s oracle', () => {
+    // The motivating job: a pocket job with holes and a profile cut with the same flat cutter, then
+    // finished with a smaller one. Only the flat REGIONS are split by the rough pass; the drill
+    // disc, the trace kerf and the cut-out kerf run at full geometry in the rough-only program, so
+    // their predictions must stay full — eroding them (the first cut of the #667 fix) made the
+    // oracle call those real cuts over-cuts and refused the pair.
+    const base = dj();
+    // A 1 mm bit with real reach: the demo labels are cut at their own size, and the through cut
+    // is 12.3 mm deep.
+    const profiler = flatEndMill(1, { name: '1 mm flat end (reach)', fluteLength: 20, shoulderLength: 20 });
+    const trace: EngraveTraceItem = {
+      kind: 'line',
+      id: 'line-1',
+      position: { x: 8, y: 8 },
+      rotation: 0,
+      points: [
+        [0, 0],
+        [24, 0],
+      ],
+      closed: false,
+      depth: 0.8,
+      enabled: true,
+    };
+    const drill: EngraveDrill = {
+      kind: 'drill',
+      id: 'drill-1',
+      position: { x: 82, y: 48 },
+      rotation: 0,
+      depth: 13,
+      through: true,
+      enabled: true,
+    };
+    const cutout: EngraveCutout = {
+      kind: 'cutout',
+      id: 'cut-1',
+      name: 'Badge',
+      enabled: true,
+      of: 'stock-inset',
+      side: 'inside',
+      inset: 5,
+      tabs: { count: 4, width: 4, height: 1 },
+    };
+    const job: EngraveJob = {
+      ...base,
+      stock: { ...base.stock, material: 'pla' },
+      toolKey: 'inv:flat-1x20',
+      tool: profiler,
+      sacrificial: presetPartOnBoard(),
+      breakthrough: 0.3,
+      traces: [trace],
+      drills: [drill],
+      cutouts: [cutout],
+    };
+    const ids = [...job.labels.map((l) => l.id), trace.id, drill.id, cutout.id];
+    const one = setUp(job, [ids], [job.toolKey]);
+    const two: EngraveJob = {
+      ...one,
+      setups: [{ ...one.setups![0]!, tools: [job.toolKey, TOOL_REST.key] }],
+    };
+    const g = generate(tl, two, null, [], undefined, {
+      tools: [TOOL_REST, ...TOOL_LIBRARY],
+      finish: { stockToLeaveMm: { value: 0.2, source: 'chosen' } },
+    });
+    expect(
+      g.ok,
+      JSON.stringify({ stage: g.stage, errors: g.errors, findings: g.findings.filter((f) => f.severity === 'error') }),
+    ).toBe(true);
+    expect(g.programs).toHaveLength(2);
+
+    // The unsplit kinds keep their FULL depth in program 1's prediction. A through drill's plan
+    // depth is the blank plus the breakthrough (12.3 mm), whatever depth the item states.
+    const byItem = new Map(g.predicted.map((p) => [p.itemId, p]));
+    expect(byItem.get(drill.id)?.depth).toBeCloseTo(12.3, 6);
+    expect(byItem.get(trace.id)?.depth).toBeCloseTo(0.8, 6);
+    expect(byItem.get(cutout.id)?.depth).toBeCloseTo(12.3, 6);
+    // …while the split labels are asked for their rough floors.
+    for (const label of job.labels) {
+      const predicted = byItem.get(label.id);
+      expect(predicted, label.id).toBeDefined();
+      expect(predicted!.depth).toBeCloseTo(label.depth - 0.2, 6);
+    }
+
+    const session = createSimSession(tl);
+    try {
+      const load = session.load(g.nc!, toSetup(two, Z1), profiler, two.machineId, {
+        breakthroughMm: two.breakthrough,
+      });
+      expect(load.ok, JSON.stringify(load.ok ? [] : load.diagnostics)).toBe(true);
+      const report = session.oracle(g.predicted);
+      expect(
+        report.ok,
+        JSON.stringify({ worst: report.worst, levels: report.levels.map((l) => ({ z: l.z, under: l.underCut, over: l.overCut })) }),
+      ).toBe(true);
+    } finally {
+      session.dispose();
+    }
   });
 
   it('leaves items assigned to a later cutter out of the clearing program', () => {

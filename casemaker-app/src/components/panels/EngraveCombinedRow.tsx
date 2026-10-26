@@ -1,5 +1,6 @@
 import type { CSSProperties, JSX } from 'react';
 import { EngraveItemRow } from '@/components/panels/EngraveItemRow';
+import { RestCutterControl, type RestChoice } from '@/components/panels/RestCutterControl';
 import { itemOperationName } from '@/engine/cnc/engrave/partPlan';
 import { regionChipLabel, useRegionOperationType } from '@/components/panels/operationTypes';
 import { rowSummary } from '@/components/panels/engraveRowText';
@@ -70,6 +71,11 @@ export interface EngraveCombinedRowProps {
   onRemove: () => void;
   /** Findings about THIS shape (the panel filters the job's list by `labelId`). */
   findings: readonly JobFinding[];
+  /**
+   * #667 — the rest pair's control data (the setup's rough and rest cutters), or null when this
+   * row's item is not in a setup or the job has no cutter. The panel owns the registry reading.
+   */
+  rest?: RestChoice | null;
 }
 
 export function EngraveCombinedRow({
@@ -80,6 +86,7 @@ export function EngraveCombinedRow({
   onChange,
   onRemove,
   findings,
+  rest = null,
 }: EngraveCombinedRowProps): JSX.Element {
   // #662 - the chip states what THIS cutter makes of a region.
   const region = useRegionOperationType();
@@ -157,6 +164,7 @@ export function EngraveCombinedRow({
       findings={findings}
       onToggleEnabled={(enabled) => onChange({ enabled })}
       onRemove={onRemove}
+      restLabel={rest?.chip ?? null}
     >
       <label style={ROW_INLINE}>
         <span>name</span>
@@ -255,6 +263,7 @@ export function EngraveCombinedRow({
       <p style={{ ...MUTED, ...(depthInvalid ? { color: SEVERITY_COLOR.error } : null) }} data-testid={`engrave-combined-maxdepth-${index}`}>
         Max depth {maxDepth} mm here — the stock thickness less the minimum floor.
       </p>
+      {rest !== null && <RestCutterControl rest={rest} testidPrefix="engrave-combined" index={index} />}
     </EngraveItemRow>
   );
 }

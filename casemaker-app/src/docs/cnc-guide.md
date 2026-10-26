@@ -421,6 +421,13 @@ answer: **Engrave** (text or single-stroke lines), **V-carve**, **Pocket**, **Pr
 **Thread**, or **Surface a mesh** (a goal STL/3MF). Every operation added afterwards is one row in
 the job's list, its type on the row, and its expert fields behind the row's fold.
 
+A **region row** (Engrave text, V-carve, Pocket, an imported outline, a cuttable primitive) also
+carries its setup's **rest pass**: **Finish the corners with a smaller cutter** in the row's fold
+pairs the rough cutter with a smaller flat one, and the second program cuts only what the first
+program LEFT — measured from its simulated stock, not from an offset drawing of it. The row chips
+the pair (`rest ⌀1 mm`), and the setups line and the run sheet name it as *“⌀3 mm rough · ⌀1 mm
+rest”*. A Profile row has no rest region — a contour is a kerf, not a floor area — and says so.
+
 Two ideas hold the chapter together:
 
 - **One job, two modes, three groups.** The CNC surface has a **Design | Cut** switch at the top of

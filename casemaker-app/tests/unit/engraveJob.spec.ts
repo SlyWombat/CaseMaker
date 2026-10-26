@@ -691,6 +691,45 @@ describe('engraveJobStore (#200)', () => {
     expect(second.useEngraveJobStore.getState().job.targetObject?.surface).toBeUndefined();
   });
 
+  it('#667 — setRestCutter materialises the setups and writes the setup’s second tool', async () => {
+    backing.clear();
+    const { useEngraveJobStore } = await freshStore();
+    const s = () => useEngraveJobStore.getState();
+    s().setTool('flat-3.175x12-metal');
+    const id = s().job.labels[0]!.id;
+    expect(s().job.setups).toBeUndefined();
+
+    s().setRestCutter(id, 'flat-1.0');
+    const setups = s().job.setups!;
+    expect(setups).toHaveLength(1);
+    expect(setups[0]!.tools).toEqual(['flat-3.175x12-metal', 'flat-1.0']);
+    // The materialised list owns every cut item the implicit setup had, in the same order.
+    expect(setups[0]!.itemIds).toEqual(jobSetups({ ...s().job, setups: undefined })[0]!.itemIds);
+    expect(setups[0]!.itemIds).toContain(id);
+
+    // Clearing returns the setup to one cutter; it does not delete the list it materialised.
+    s().setRestCutter(id, null);
+    expect(s().job.setups![0]!.tools).toEqual(['flat-3.175x12-metal']);
+
+    // A rest cutter equal to the rough one is not a pair, and writes nothing.
+    s().setRestCutter(id, 'flat-3.175x12-metal');
+    expect(s().job.setups![0]!.tools).toEqual(['flat-3.175x12-metal']);
+  });
+
+  it('#667 — a multi-setup job writes the rest cutter on the setup that owns the row', async () => {
+    backing.clear();
+    const { useEngraveJobStore } = await freshStore();
+    const s = () => useEngraveJobStore.getState();
+    s().setTool('flat-3.175x12-metal');
+    const first = jobSetups(s().job)[0]!;
+    const a = { ...first, id: 'setup-a', itemIds: [s().job.labels[0]!.id], tools: ['flat-3.175x12-metal'] };
+    const b = { ...first, id: 'setup-b', itemIds: [s().job.labels[1]!.id], tools: ['flat-3.175x12-metal'] };
+    s().setSetups([a, b]);
+    s().setRestCutter(s().job.labels[1]!.id, 'flat-1.0');
+    expect(s().job.setups![0]!.tools).toEqual(['flat-3.175x12-metal']);
+    expect(s().job.setups![1]!.tools).toEqual(['flat-3.175x12-metal', 'flat-1.0']);
+  });
+
   it('updateLabel then a reload from localStorage restores the edit', async () => {
     backing.clear();
     const first = await freshStore();
