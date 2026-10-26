@@ -137,18 +137,24 @@ test('#503 — engrave lines fit and the drawer handle covers nothing', async ({
   test.setTimeout(120_000);
   await page.setViewportSize({ width: 390, height: 844 });
   await cm.ready();
-  await loadBadgeTemplate(page);
-  await openSection(page, 'cnc-engrave');
-  await expect(page.getByTestId('engrave-panel')).toBeVisible();
-
-  // Take the badge's blank through the wizard's stock step — the panel's own button is gone
-  // (#686). This is what makes the stock line print the badge's 38.1 × 76.2 × 3.81 mm (turned a
-  // quarter turn for the vise, #383): the widest stock line the panel can hold, and the content
-  // that used to push column two out.
-  await page.getByTestId('engrave-stock-edit').click();
-  await page.getByTestId('start-wizard-job-badge-blank').click();
+  // #683/#686 — the badge's starter on the door is the one route that still seeds the badge blank
+  // into the job: the wizard's step-2 card and the panel's own button are both gone. Closing the
+  // wizard leaves the stock line printing the badge's 38.1 × 76.2 × 3.81 mm (turned a quarter turn
+  // for the vise, #383) — the widest stock line the panel can hold, and the content that used to
+  // push column two out.
+  await page.getByTestId('welcome-starter-badge-blank').click();
   await expect(page.getByTestId('engrave-setup-step-holding')).toBeVisible();
   await page.getByTestId('start-wizard-close').click();
+  // The starter lands the app on the engrave section itself (`chooseJob` sets it), so the rail
+  // entry must not be pressed again: on this rail a second press on the active section toggles it
+  // off. What the phone layout may still have shut is the context drawer, and its own handle is
+  // the way in (#355).
+  const ctx = page.getByTestId('context-panel');
+  if (!(((await ctx.getAttribute('class')) ?? '').includes('context-panel--open'))) {
+    await page.getByTestId('context-panel-handle').click();
+  }
+  await expect(ctx).toHaveClass(/context-panel--open/);
+  await expect(page.getByTestId('engrave-panel')).toBeVisible();
   await page.evaluate(async () => {
     await window.__caseMaker!.waitForIdle();
   });
@@ -270,10 +276,20 @@ test('#503 — engrave lines fit and the drawer handle covers nothing', async ({
     expect(marginGeom.lineRight, `${viewport.name}: margins line reaches under the handle`).toBeLessThanOrEqual(
       marginGeom.handleLeft + 0.5,
     );
-    // It really is in the handle's vertical band — otherwise the assertion above proves nothing.
-    expect(Math.min(marginGeom.lineBottom, marginGeom.handleBottom)).toBeGreaterThan(
-      Math.max(marginGeom.lineTop, marginGeom.handleTop),
-    );
+    // The line has to clear the handle at EVERY scroll the drawer has, not only at the one it
+    // happens to be painted at. (Before #686 the panel was long enough to scroll the line into the
+    // handle's band; with the shorter panel the drawer scrolls 67 px at tablet width at most, so the
+    // band check could not be met and proved nothing either way.)
+    for (const where of ['top', 'bottom'] as const) {
+      const gap = await page.evaluate((w) => {
+        const panel = document.querySelector('[data-testid="context-panel"]') as HTMLElement;
+        panel.scrollTop = w === 'top' ? 0 : panel.scrollHeight;
+        const line = document.querySelector('[data-testid="engrave-margins-value"]')!.getBoundingClientRect();
+        const handle = document.querySelector('[data-testid="context-panel-handle"]')!.getBoundingClientRect();
+        return line.right - handle.left;
+      }, where);
+      expect(gap, `${viewport.name}: margins line reaches under the handle (${where})`).toBeLessThanOrEqual(0.5);
+    }
 
     await page.screenshot({ path: `test-results/503-${viewport.name}-engrave-margins.png` });
   }

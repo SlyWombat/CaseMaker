@@ -333,7 +333,13 @@ test('#368 — a badge that states its print reaches Engrave with a live colour 
   // had nothing to offer — the whole two-colour half of the app was dormant on the one part it
   // was built for. This walks the user path end to end and reads what they would see.
   await cm.ready();
-  await page.getByTestId('welcome-template-badge-blank').click();
+  // The badge's starter on the door is the product's badge route now: #683 took the template card
+  // out of the wizard's stock step and #686 the panel's own "Use the badge blank" button, so the
+  // starter is what builds the template's project AND writes its blank, magnet pocket and print
+  // into the job (#368). The seed is written on choose; the wizard is closed on holding.
+  await page.getByTestId('welcome-starter-badge-blank').click();
+  await expect(page.getByTestId('engrave-setup-step-holding')).toBeVisible();
+  await page.getByTestId('start-wizard-close').click();
   await page.evaluate(async () => {
     await window.__caseMaker!.waitForIdle();
   });
@@ -341,15 +347,6 @@ test('#368 — a badge that states its print reaches Engrave with a live colour 
   const engrave = page.getByTestId('sidebar-button-cnc-engrave');
   if ((await engrave.getAttribute('aria-pressed')) !== 'true') await engrave.click();
   await expect(page.getByTestId('engrave-panel')).toBeVisible();
-
-  // "Use the badge blank": the job takes the badge's stock, magnet pocket and print together.
-  // #686 deleted the panel's own button — the stock line's edit opens the wizard at step 2, and the
-  // badge starter there answers the step (stock, pocket and print) before the wizard lands on
-  // holding. It is closed there; the seed is written on choose, so nothing waits on a further step.
-  await page.getByTestId('engrave-stock-edit').click();
-  await page.getByTestId('start-wizard-job-badge-blank').click();
-  await expect(page.getByTestId('engrave-setup-step-holding')).toBeVisible();
-  await page.getByTestId('start-wizard-close').click();
 
   // The legend turns from a plain depth key into the two colours plus the plane they part at.
   //
@@ -545,6 +542,14 @@ test('#411 — ten MIXED items and a void on one line at 1440 × 900, and Ctrl-Z
 
   await page.getByTestId('engrave-item-collapse-all').click();
   await page.getByTestId('engrave-keepout-collapse-all').click();
+  // #686 moved the one "Add operation" picker directly under the Items heading, where the mockup
+  // has it — so a picker left open while these ten items were added now sits INSIDE the block this
+  // test measures. It is a control the operator opened, not part of the list's own height, and it
+  // is closed before measuring for the same reason the row folds are: the acceptance is ten rows.
+  const addMenuOpen = await page
+    .getByTestId('engrave-add-menu')
+    .evaluate((el) => (el as HTMLDetailsElement).open);
+  if (addMenuOpen) await page.getByTestId('engrave-add-summary').click();
 
   const geometry = await page.evaluate(() => {
     const itemRows = Array.from(

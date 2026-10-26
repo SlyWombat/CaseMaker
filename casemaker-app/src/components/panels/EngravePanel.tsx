@@ -2552,7 +2552,11 @@ export function EngravePanel(): JSX.Element {
 
       {/* 2 — items: labels, shape pockets and combined shapes, one list (#214/#215). #686 puts the
           ONE "Add operation" picker directly under the heading, where the mockup has it. */}
-      <h3 style={SUBHEAD}>
+      {/* #686 review — the Add control is this heading's own line (`+ Add operation` sits directly
+          under it), so the section gap is not repeated inside the pair: no margin under the heading
+          and none over the control. That is what keeps the list's header inside the ten-rows
+          budget at 1440 × 900 (#411). */}
+      <h3 style={{ ...SUBHEAD, marginBottom: 0 }}>
         Items{' '}
         <span style={{ ...TAG, marginLeft: 4 }} data-testid="engrave-item-count">
           {itemTotal}
@@ -2564,7 +2568,10 @@ export function EngravePanel(): JSX.Element {
           (#685). Its historic `engrave-add-*` ids are kept, so the flows that already drive them
           keep working; the old "More kinds and imports" list is no longer a second vocabulary but
           the picker's own options (see `operationTypes.ts`). */}
-      <details data-testid="engrave-add-menu" style={{ marginTop: 4 }}>
+      {/* #686 review — the mockup puts `+ Add operation` on the Items heading's own line; while it
+          is still the line under it, its spacing is the heading's, not a section gap, so the list's
+          header stays inside the ten-rows-at-1440 × 900 budget (#411). */}
+      <details data-testid="engrave-add-menu" style={{ marginTop: 0 }}>
         <summary style={{ cursor: 'pointer', fontSize: 12, color: '#c8d3de' }} data-testid="engrave-add-summary">
           + Add operation ▾
         </summary>
