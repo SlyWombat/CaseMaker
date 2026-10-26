@@ -12,6 +12,7 @@ import {
 } from '@/platform/machineUpload';
 import { alarmLine as desktopAlarmLine, readJobProgress, type UploadOutcome } from '@/platform/desktop/protocol';
 import type { VerifyReport } from '@/engine/cnc/verify';
+import { verifyCheck, type ProgramCheck } from '@/engine/cnc/uploadGate';
 
 /**
  * Issue #255 — sending a verified program to the machine.
@@ -79,7 +80,7 @@ describe('#255 uploadProgram — the gate runs before the bridge', () => {
     const result = await uploadProgram(TARGET, {
       filename: 'badge.txt',
       nc: ';@MKR|BEGIN\nM02',
-      verify: OK_REPORT,
+      check: verifyCheck(OK_REPORT),
     });
     expect(result.kind).toBe('error');
     if (result.kind !== 'error') return;
@@ -89,7 +90,7 @@ describe('#255 uploadProgram — the gate runs before the bridge', () => {
 
   it('refuses a report that is not ok without loading the bridge', async () => {
     const { loads } = use(fakeClient());
-    const result = await uploadProgram(TARGET, { filename: 'badge.nc', nc: 'M02', verify: BAD_REPORT });
+    const result = await uploadProgram(TARGET, { filename: 'badge.nc', nc: 'M02', check: verifyCheck(BAD_REPORT) });
     expect(result.kind).toBe('error');
     if (result.kind !== 'error') return;
     expect(result.detail).toContain('verifier');
@@ -98,8 +99,49 @@ describe('#255 uploadProgram — the gate runs before the bridge', () => {
 
   it('refuses error findings even when the ok flag says otherwise, without loading the bridge', async () => {
     const { loads } = use(fakeClient());
-    const result = await uploadProgram(TARGET, { filename: 'badge.nc', nc: 'M02', verify: LYING_REPORT });
+    const result = await uploadProgram(TARGET, { filename: 'badge.nc', nc: 'M02', check: verifyCheck(LYING_REPORT) });
     expect(result.kind).toBe('error');
+    expect(loads()).toBe(0);
+  });
+});
+
+describe('#535 uploadProgram — a surface check in place of a verifier report', () => {
+  const SURFACE_CHECK: ProgramCheck = {
+    kind: 'surface',
+    gridPitchMm: 0.1,
+    roughingLayers: 4,
+    resolutionNote: 'sampled on a 0.1 mm grid',
+    bbox: { min: [40, 20], max: [60, 40] },
+  };
+
+  it('sends the program under its surface check, and the client sees that check', async () => {
+    const seen: Array<{ filename: string; content: Uint8Array; check: ProgramCheck }> = [];
+    const { loads } = use(
+      fakeClient({
+        upload: async (_target, program) => {
+          seen.push(program);
+          return { ok: true, bytes: program.content.length, packets: 1, alreadyPresent: false };
+        },
+      }),
+    );
+    const result = await uploadProgram(TARGET, {
+      filename: 'Goal-job.nc',
+      nc: ';@MKR|BEGIN\nM02\n',
+      check: SURFACE_CHECK,
+    });
+    expect(result.kind).toBe('uploaded');
+    expect(loads()).toBe(1);
+    expect(seen).toHaveLength(1);
+    // The check travels with the bytes: the seam's evidence is the sweep, not a report.
+    expect(seen[0]!.check).toEqual(SURFACE_CHECK);
+  });
+
+  it('still refuses a name that is not a .nc, without loading the bridge', async () => {
+    const { loads } = use(fakeClient());
+    const result = await uploadProgram(TARGET, { filename: 'goal.txt', nc: 'M02', check: SURFACE_CHECK });
+    expect(result.kind).toBe('error');
+    if (result.kind !== 'error') return;
+    expect(result.detail).toContain('not a .nc program');
     expect(loads()).toBe(0);
   });
 });
@@ -108,7 +150,7 @@ describe('#255 uploadProgram — the transport', () => {
   it('hands the client the exact bytes and the filename the caller gave', async () => {
     // An array rather than a `let`: the assignment happens inside the client's callback, so a
     // closed-over variable would still read as `null` to the type-checker after the await.
-    const seen: Array<{ filename: string; content: Uint8Array; report: VerifyReport }> = [];
+    const seen: Array<{ filename: string; content: Uint8Array; check: ProgramCheck }> = [];
     use(
       fakeClient({
         upload: async (_target, program) => {
@@ -118,12 +160,12 @@ describe('#255 uploadProgram — the transport', () => {
       }),
     );
     const nc = ';@MKR|BEGIN\nG21 G90\nG1 X1 Y1 F200\nM02\n';
-    const result = await uploadProgram(TARGET, { filename: 'Untitled-engrave-job.nc', nc, verify: OK_REPORT });
+    const result = await uploadProgram(TARGET, { filename: 'Untitled-engrave-job.nc', nc, check: verifyCheck(OK_REPORT) });
 
     expect(seen).toHaveLength(1);
     const program = seen[0]!;
     expect(program.filename).toBe('Untitled-engrave-job.nc');
-    expect(program.report).toBe(OK_REPORT);
+    expect(program.check).toEqual({ kind: 'verify', report: OK_REPORT });
     // The bytes are the program, not a copy of it that could have been altered on the way.
     expect(Array.from(program.content)).toEqual(Array.from(programBytes(nc)));
 
@@ -139,7 +181,7 @@ describe('#255 uploadProgram — the transport', () => {
 
   it('reports a machine that already holds the file as an upload, not a failure', async () => {
     use(fakeClient({ upload: async () => ({ ok: true, bytes: 42, packets: 0, alreadyPresent: true }) }));
-    const result = await uploadProgram(TARGET, { filename: 'job.nc', nc: 'M02', verify: OK_REPORT });
+    const result = await uploadProgram(TARGET, { filename: 'job.nc', nc: 'M02', check: verifyCheck(OK_REPORT) });
     expect(result.kind).toBe('uploaded');
     if (result.kind !== 'uploaded') return;
     // 0 packets is the protocol's own signal (the machine cancelled after the MD5 step matched).
@@ -150,7 +192,7 @@ describe('#255 uploadProgram — the transport', () => {
   it('maps each of the transport’s refusals to its own kind, with its detail', async () => {
     for (const reason of ['refused', 'timeout', 'error'] as const) {
       use(fakeClient({ upload: async () => ({ ok: false, reason, detail: `${reason} detail` }) }));
-      const result = await uploadProgram(TARGET, { filename: 'job.nc', nc: 'M02', verify: OK_REPORT });
+      const result = await uploadProgram(TARGET, { filename: 'job.nc', nc: 'M02', check: verifyCheck(OK_REPORT) });
       expect(result.kind).toBe(reason);
       if (result.kind === 'uploaded' || result.kind === 'unavailable') throw new Error('unreachable');
       expect(result.detail).toBe(`${reason} detail`);
@@ -166,7 +208,7 @@ describe('#255 uploadProgram — the transport', () => {
         },
       }),
     );
-    const result = await uploadProgram(TARGET, { filename: 'job.nc', nc: 'M02', verify: OK_REPORT });
+    const result = await uploadProgram(TARGET, { filename: 'job.nc', nc: 'M02', check: verifyCheck(OK_REPORT) });
     expect(result.kind).toBe('error');
     if (result.kind !== 'error') return;
     expect(result.detail).toContain('ETIMEDOUT');
@@ -177,7 +219,7 @@ describe('#255 uploadProgram — the transport', () => {
     setMachineUploadLoader(async () => {
       throw new Error('Driving the machine requires the desktop build (BUILD_TARGET=desktop).');
     });
-    const result = await uploadProgram(TARGET, { filename: 'job.nc', nc: 'M02', verify: OK_REPORT });
+    const result = await uploadProgram(TARGET, { filename: 'job.nc', nc: 'M02', check: verifyCheck(OK_REPORT) });
     expect(result.kind).toBe('unavailable');
     if (result.kind !== 'unavailable') return;
     expect(result.reason).toContain('desktop build');
@@ -212,7 +254,7 @@ describe('#255 programBytes', () => {
 });
 
 describe('#296 uploadProgram — the machine is asked NOW, not remembered', () => {
-  const run = () => uploadProgram(TARGET, { filename: 'job.nc', nc: 'M02', verify: OK_REPORT });
+  const run = () => uploadProgram(TARGET, { filename: 'job.nc', nc: 'M02', check: verifyCheck(OK_REPORT) });
 
   it('sends nothing to a machine that is running, and says what it reported', async () => {
     let uploads = 0;

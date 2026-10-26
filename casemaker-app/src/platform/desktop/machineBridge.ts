@@ -17,8 +17,7 @@
 // The rule itself is stated once, in `engine/cnc/uploadGate.ts`, because the web-side upload client
 // asks the same question before it reaches for this module and the two answers must not drift.
 
-import type { VerifyReport } from '@/engine/cnc/verify';
-import { programUploadProblem } from '@/engine/cnc/uploadGate';
+import { programUploadProblem, type ProgramCheck } from '@/engine/cnc/uploadGate';
 import {
   COMMAND_TCP_PORT,
   DISCOVERY_UDP_PORT,
@@ -77,8 +76,11 @@ export interface BridgeOptions {
 }
 
 /**
- * A program that has passed the verifier (#174), bound to the exact bytes and filename that were
- * verified. Make one with {@link asVerifiedProgram}; there is no other constructor on purpose.
+ * A program that has passed its check (#174), bound to the exact bytes and filename that were
+ * checked. Make one with {@link asVerifiedProgram}; there is no other constructor on purpose.
+ *
+ * The check is the verifier's report, or — for a 3D goal program the exact verifier cannot judge —
+ * the material sweep's surface check (#535). It is never absent: the union type has no null arm.
  *
  * Residual gap, stated honestly: the verifier's report carries no content hash, so this type binds
  * the bytes at the moment of gating but cannot re-prove that they are the bytes the report
@@ -89,12 +91,12 @@ export interface BridgeOptions {
 export interface VerifiedProgram {
   readonly filename: string;
   readonly content: Uint8Array;
-  readonly report: VerifyReport;
+  readonly check: ProgramCheck;
 }
 
 /**
- * Gate a program for upload. Returns null — never a partial object — when the report is not `ok`,
- * carries any error finding, or the filename is not a `.nc`.
+ * Gate a program for upload. Returns null — never a partial object — when its check refuses it (a
+ * verifier report that is not `ok` or carries an error finding) or the filename is not a `.nc`.
  *
  * The clauses themselves are `programUploadProblem`'s (`engine/cnc/uploadGate.ts`), which the
  * web-side upload client asks too — so "the app will not send this" and "this type refuses it" are
@@ -103,10 +105,10 @@ export interface VerifiedProgram {
 export function asVerifiedProgram(
   filename: string,
   content: Uint8Array,
-  report: VerifyReport,
+  check: ProgramCheck,
 ): VerifiedProgram | null {
-  if (programUploadProblem(filename, report) !== null) return null;
-  return { filename, content, report };
+  if (programUploadProblem(filename, check) !== null) return null;
+  return { filename, content, check };
 }
 
 /**
@@ -241,12 +243,12 @@ export async function uploadVerifiedProgram(
   opts: BridgeOptions & { packetSize?: number; inactivityMs?: number; directory?: string } = {},
 ): Promise<UploadOutcome> {
   // The null guards are for a caller that reached us from plain JS: the type says `VerifiedProgram`
-  // and cannot be, but `program.report` is read below and a crash here would be an unhandled
+  // and cannot be, but `program.check` is read below and a crash here would be an unhandled
   // rejection rather than the refusal this function promises.
-  if (program === null || program === undefined || program.report === null || program.report === undefined) {
-    return { ok: false, reason: 'error', detail: 'refused: the program has not passed the verifier' };
+  if (program === null || program === undefined || program.check === null || program.check === undefined) {
+    return { ok: false, reason: 'error', detail: 'refused: the program has not passed its check' };
   }
-  const problem = programUploadProblem(program.filename, program.report);
+  const problem = programUploadProblem(program.filename, program.check);
   if (problem !== null) {
     return { ok: false, reason: 'error', detail: `refused: ${problem}` };
   }

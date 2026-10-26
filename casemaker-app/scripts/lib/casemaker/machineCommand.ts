@@ -42,6 +42,7 @@ import {
   type MachineTransport,
 } from '../../../src/platform/desktop/protocol.ts';
 import { asVerifiedProgram, uploadVerifiedProgram } from '../../../src/platform/desktop/machineBridge';
+import { verifyCheck } from '../../../src/engine/cnc/uploadGate';
 import {
   setMachineUploadLoader,
   uploadProgram,
@@ -452,7 +453,7 @@ async function uploadThroughApp(
       }
     },
     upload: async (t, p) => {
-      const verified = asVerifiedProgram(p.filename, p.content, p.report);
+      const verified = asVerifiedProgram(p.filename, p.content, p.check);
       if (verified === null) {
         return { ok: false, reason: 'error', detail: 'the program has not passed the verifier' };
       }
@@ -461,7 +462,8 @@ async function uploadThroughApp(
   };
   setMachineUploadLoader(async () => client);
   try {
-    return await uploadProgram(target, program);
+    // #535 — the upload seam speaks one check type; the CLI's programs carry the verifier's report.
+    return await uploadProgram(target, { filename: program.filename, nc: program.nc, check: verifyCheck(program.verify) });
   } finally {
     setMachineUploadLoader(null);
   }

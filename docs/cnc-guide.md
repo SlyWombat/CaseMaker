@@ -622,8 +622,12 @@ says which default it is showing. A typed number overrides it for this goal alon
 returns the default. The feeds are the job's ordinary 2.5D feeds reused unchanged, a labelled
 placeholder until the bench measures 3D engagement (#536); a ball resolves its feeds through a
 flat proxy of its cutting diameter. The heightfield is **sampled**, so a goal program is
-simulated on the FLAT dexel and the Simulate panel states the grid it ran on — "simulated on a
-0.1 mm grid" — rather than the exact sweep's tolerance band. Two findings guard it:
+simulated on the FLAT dexel and the run states the grid it ran on — "simulated on a 0.1 mm
+grid" — rather than the exact sweep's tolerance band. The exact 2.5D verifier cannot judge a 3D
+program, so the goal program's check is that material sweep: it is the program's check on the
+Cut screen, in place of a verifier report, and the program is a release source like any other —
+the package freezes it, its row and the run sheet print its numbers, and the Cut step's one
+press uploads it. Two findings guard it:
 `goal-object-oversize` refuses a goal that is flat or larger than the blank, and
 `goal-object-no-toolpath` is the info a *mixed* job (a goal beside ordinary items) gets — the item
 program cuts, the goal is validated and previewed, and no 3D cut is posted for it.

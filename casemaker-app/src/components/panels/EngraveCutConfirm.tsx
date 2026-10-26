@@ -33,7 +33,7 @@ import { useMachineRunStore, type RunContext } from '@/store/machineRunStore';
 import { useCameraPaneStore } from '@/store/cameraPaneStore';
 import { useMachineCamera } from '@/hooks/useMachineCamera';
 import type { OracleReport } from '@/engine/cnc/engrave/oracle';
-import type { ReleaseSource } from '@/engine/cnc/engrave/release';
+import { releaseCheck, type ReleaseSource } from '@/engine/cnc/engrave/release';
 
 const MUTED: CSSProperties = { fontSize: 11, color: '#9aa4b0', lineHeight: 1.5, margin: '4px 0' };
 const BOX: CSSProperties = { marginTop: 6, padding: 8, border: '1px solid #3a4552', borderRadius: 4, background: '#1b2027' };
@@ -153,11 +153,18 @@ export function EngraveCutConfirm({
    */
   async function cut(): Promise<void> {
     if (!statement || pressing || refused !== null || !oracleOk) return;
+    // #535 — the check is the verifier's report, or a goal program's surface check. The screen is
+    // only offered when one exists; this guard is the honest refusal if that ever stops being true.
+    const check = releaseCheck(source);
+    if (check === null) {
+      setError('this program carries no check — generate the job again before cutting it');
+      return;
+    }
     setPressing(true);
     setError(null);
     const outcome = await uploadProgram(
       { host: machine.host, port: machine.port },
-      { filename, nc: source.nc, verify: source.verify! },
+      { filename, nc: source.nc, check },
     );
     if (outcome.kind === 'busy') onLiveStatus?.({ busy: true, status: outcome.status });
     else if (outcome.kind === 'uploaded') onLiveStatus?.({ busy: false, status: outcome.status });

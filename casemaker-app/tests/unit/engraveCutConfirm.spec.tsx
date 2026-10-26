@@ -132,6 +132,28 @@ describe('#656 the one screen', () => {
     expect(useRunConfirmStore.getState().isConfirmed(runKey(TARGET, programHash(NC)))).toBe(true);
   });
 
+  it('#535 — a surface program’s one press uploads under its dexel check', async () => {
+    const surfaceSource: ReleaseSource = {
+      ...SOURCE,
+      verify: null,
+      surfaceCheck: {
+        kind: 'surface',
+        gridPitchMm: 0.1,
+        roughingLayers: 3,
+        resolutionNote: 'sampled on a 0.1 mm grid',
+        bbox: { min: [0, 0], max: [10, 10] },
+      },
+    };
+    render(confirm({ source: surfaceSource }));
+    fireEvent.click(screen.getByTestId('engrave-cut-statement'));
+    fireEvent.click(screen.getByTestId('engrave-cut-go'));
+
+    await waitFor(() => expect(uploads).toHaveLength(1));
+    expect(uploads[0]!.filename).toBe('badge-1.nc');
+    expect(uploads[0]!.content).toBe(NC);
+    await waitFor(() => expect(startSpy).toHaveBeenCalled());
+  });
+
   it('stops with the upload’s own sentence and starts nothing', async () => {
     uploadKind = 'refused';
     render(confirm());

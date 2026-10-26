@@ -373,7 +373,9 @@ function renderStep(job: EngraveJob, programs: EngraveProgram[] = [P1, P2]): Run
   if (!made.ok) throw new Error(made.reason);
   // #425 §6 — the release is the OPEN document's run, so its outcome has a document to land in.
   useEngraveJobStore.setState({ job: { ...job, package: made.package } });
-  const reports = new Map(programs.map((p) => [p.programHash, p.verify] as const));
+  const reports = new Map(
+    programs.filter((p) => p.verify !== null).map((p) => [p.programHash, p.verify!] as const),
+  );
   const runPlan = cutPlan({ job, pkg: made.package, finishedHashes: [], defaults: null });
   render(
     <EngraveReleaseStep
@@ -981,5 +983,50 @@ describe('#491 the release step names the cutter’s case', () => {
     expect(sentence.textContent).toContain(
       'Change the cutter for program 2 of 2: Yellow case — 3.175*12mm Flat End(Metal) (flat-3.175x12-metal).',
     );
+  });
+
+  it('#535 — a surface program uploads under its dexel check', async () => {
+    const job = defaultEngraveJob();
+    job.name = 'Goal job';
+    job.toolKey = 'flat-1.0';
+    const setupId = jobSetups(job)[0]!.id;
+    const nc = ';@MKR|BEGIN\nG1 Z-0.5\nM02\n';
+    const check = {
+      kind: 'surface' as const,
+      gridPitchMm: 0.1,
+      roughingLayers: 2,
+      resolutionNote: 'sampled on a 0.1 mm grid',
+      bbox: { min: [0, 0] as [number, number], max: [10, 10] as [number, number] },
+    };
+    const surfaceProgram: EngraveProgram = {
+      setupIndex: 1,
+      setupId,
+      toolKey: 'flat-1.0',
+      nc,
+      verify: null,
+      surfaceCheck: check,
+      frameNc: null,
+      frameVerify: null,
+      programHash: programHash(nc),
+      cam: null,
+    };
+    const made = freezePackage(job, [surfaceProgram], '2026-10-17T14:02:00.000Z');
+    if (!made.ok) throw new Error(made.reason);
+    const sources = frozenReleaseSources(
+      job,
+      made.package,
+      new Map(),
+      new Map([[surfaceProgram.programHash, check]]),
+    );
+
+    await act(async () => {
+      useEngraveReleaseStore.getState().plan(TARGET, job, sources);
+      await useEngraveReleaseStore.getState().uploadAll(TARGET);
+    });
+    // The file went: its check is the sweep, and the verified-only refusal never fired.
+    expect(uploaded).toEqual([releaseFileName('Goal job', 1, 1)]);
+    const rec = record();
+    expect(rec?.files[0]?.upload).toBe('uploaded');
+    expect((rec?.notes ?? []).join('\n')).not.toContain('no verifier report');
   });
 });

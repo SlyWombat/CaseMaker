@@ -144,6 +144,7 @@ import {
 import { colourBoundaryFor, stackDepthLimit, type StackDepthLimit } from './stackDepthLimit';
 import { ceilingName, effectiveMargins, MARGIN_DEFAULTS } from '@/engine/cnc/engrave/depthBounds';
 import type { OraclePredicted, OracleThreadMove } from '@/engine/cnc/engrave/oracle';
+import type { SurfaceProgramCheck } from '@/engine/cnc/uploadGate';
 
 /** The stage that stopped the pipeline, or `done` when everything passed. */
 export type EngraveStage = 'findings' | 'feeds' | 'cam' | 'post' | 'verify' | 'done';
@@ -323,7 +324,17 @@ export interface EngraveProgram {
   /** The cutter this file runs — the setup's tool, and the header's `;@CM|TOOL|key=` line. */
   toolKey: string;
   nc: string;
-  verify: VerifyReport;
+  /**
+   * The exact 2.5D verifier's report. #535 — null ONLY on a surface program, which the verifier
+   * cannot judge; such a program carries `surfaceCheck` instead. A program with neither is refused
+   * by the release gates (`programUploadProblem`'s "never none").
+   */
+  verify: VerifyReport | null;
+  /**
+   * #535 — a pure goal job's check: the material sweep that stood in for the 2.5D verifier, with
+   * the dexel grid it ran on and the CAM's roughing layers. Null/absent on every other program.
+   */
+  surfaceCheck?: SurfaceProgramCheck | null;
   /** This program's own frame file (#244), checked by the same verifier; null when not produced. */
   frameNc: string | null;
   frameVerify: VerifyReport | null;
@@ -2429,15 +2440,43 @@ export function generateGoalProgram(
     return fail('post', e instanceof Error ? e.message : String(e), resolved);
   }
 
+  // #535 — THE GOAL PROGRAM JOINS THE RUN. It is a release source like any other: the package
+  // freezes it, the Cut step plays it and the upload seam takes it. Its check is the material
+  // sweep (the 2.5D verifier cannot judge a 3D program), recorded with the heightfield's grid and
+  // the CAM's roughing layers; the run store stamps the dexel grid the simulation actually ran on
+  // once the sweep has happened.
+  const surfaceCheck: SurfaceProgramCheck = {
+    kind: 'surface',
+    gridPitchMm: surfaced.heightfield.pitch,
+    roughingLayers: surfaced.roughingLayers,
+    resolutionNote: surfaced.heightfield.resolutionNote,
+    bbox: pathBbox(surfaced.ir),
+  };
+  const cam = summarize(surfaced.ir);
+  const program: EngraveProgram = {
+    kind: 'engrave',
+    setupIndex: 1,
+    setupId: jobSetups(job)[0]!.id,
+    toolKey: job.toolKey,
+    nc,
+    verify: null,
+    surfaceCheck,
+    frameNc: null,
+    frameVerify: null,
+    programHash: programHash(nc),
+    cam,
+  };
+
   return {
     ...base,
     ok: true,
     stage: 'done',
     findings: [],
     feeds: resolved,
-    cam: summarize(surfaced.ir),
+    cam,
     nc,
     verify: null,
+    programs: [program],
     // #535 — the operation's own facts, for its row and the run sheet: the numbers the CAM ran
     // with and the grid it sampled. A caller with no generated result has no facts to print.
     surface3d: {
@@ -2452,6 +2491,30 @@ export function generateGoalProgram(
       notes: surfaced.notes,
     } satisfies GoalSurfaceFacts,
   };
+}
+
+/**
+ * The XY extent of a program's positioned moves, for the console's laser frame (#535). The
+ * verifier's report normally carries this bbox; a surface program has no report, and its check
+ * carries the same fact so the frame is still the program's own outline.
+ */
+function pathBbox(ir: ToolpathIR): { min: [number, number]; max: [number, number] } {
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const op of ir.operations) {
+    for (const m of op.moves) {
+      if (!Number.isFinite(m.x) || !Number.isFinite(m.y)) continue;
+      minX = Math.min(minX, m.x);
+      minY = Math.min(minY, m.y);
+      maxX = Math.max(maxX, m.x);
+      maxY = Math.max(maxY, m.y);
+    }
+  }
+  return Number.isFinite(minX)
+    ? { min: [minX, minY], max: [maxX, maxY] }
+    : { min: [0, 0], max: [0, 0] };
 }
 
 /**

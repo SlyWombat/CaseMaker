@@ -284,7 +284,10 @@ export function uploadBlocker(v: EngraveRunView): string | null {
   if (save !== null) return save;
   const count = (v.generated?.programs ?? []).length;
   if (count > 1) return `this job is ${count} programs; the app plays one`;
-  if (!v.generated?.verify) return 'the program carries no verifier report';
+  // #535 — a surface program carries no 2.5D report; its check is the dexel sweep, which
+  // saveBlocker has already required to have finished (a simulation that did not is refused
+  // there). "Never none": every runnable result carries a report or a surface program.
+  if (!v.generated?.verify && v.generated?.surface3d == null) return 'the program carries no verifier report';
   return null;
 }
 
@@ -298,7 +301,8 @@ export function uploadBlocker(v: EngraveRunView): string | null {
  *
  * The verifier requirement is per PROGRAM, not just the first: each file is a separate upload and
  * a separate cut, and `generated.verify` describes only program 1 (the adapter the single-file
- * surfaces read). A list is runnable only when every entry carries a report that passed.
+ * surfaces read). A list is runnable only when every entry carries a check that passed — a
+ * verifier report, or (#535) a surface program's dexel check. Never neither.
  *
  * A FACED JOB (#473) plays its face file as program 1. The generator puts it FIRST in
  * `generated.programs` (`kind: 'facing'`, posted `'first'` so the vacuum stays on across the bit
@@ -311,7 +315,9 @@ export function releaseBlocker(v: EngraveRunView): string | null {
   if (save !== null) return save;
   const programs = v.generated?.programs ?? [];
   if (programs.length === 0) return 'no program was produced';
-  if (programs.some((p) => !p.verify?.ok)) return 'a program did not pass the verifier';
+  if (programs.some((p) => !(p.verify?.ok === true || p.surfaceCheck != null))) {
+    return 'a program did not pass the verifier';
+  }
   const generated = v.generated!;
   // #473 — a face file that exists on the result but could not join the list leaves the engraving
   // assuming a surface nobody will skim. Refuse rather than play program 1 as if it were the run.

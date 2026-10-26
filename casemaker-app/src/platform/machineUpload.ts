@@ -26,8 +26,7 @@
  * because a socket is the one thing a unit test cannot have.
  */
 
-import type { VerifyReport } from '@/engine/cnc/verify';
-import { programUploadProblem } from '@/engine/cnc/uploadGate';
+import { programUploadProblem, type ProgramCheck } from '@/engine/cnc/uploadGate';
 import { loadMachineBridge } from './capabilities';
 import { liveShopDefaults, machineTiming } from './defaultsClient';
 
@@ -130,8 +129,8 @@ export interface MachineUploadClient {
   status(target: MachineUploadTarget): Promise<MachineStatusReading>;
   upload(
     target: MachineUploadTarget,
-    /** The program as it will be sent: bytes, and the report that gated them. */
-    program: { filename: string; content: Uint8Array; report: VerifyReport },
+    /** The program as it will be sent: bytes, and the check that gated them. */
+    program: { filename: string; content: Uint8Array; check: ProgramCheck },
   ): Promise<UploadAttempt>;
 }
 
@@ -185,13 +184,13 @@ async function loadRealClient(): Promise<MachineUploadClient> {
       return { ok: reading.ok, text: reading.text };
     },
     upload: async (target, program) => {
-      const verified = bridge.asVerifiedProgram(program.filename, program.content, program.report);
+      const verified = bridge.asVerifiedProgram(program.filename, program.content, program.check);
       if (verified === null) {
         // Unreachable from `uploadProgram`, which asks the same question first. It stays because
         // this is the bridge's own constructor and it is ALLOWED to refuse: reporting its refusal
         // is better than asserting the invariant away with a cast, and if the two gates ever do
         // disagree, this is the line that makes it visible instead of sending the program anyway.
-        return { ok: false, reason: 'error', detail: 'the program has not passed the verifier' };
+        return { ok: false, reason: 'error', detail: 'the program has not passed its check' };
       }
       const t = timing();
       return bridge.uploadVerifiedProgram(target, verified, {
@@ -223,12 +222,12 @@ function reasonOf(e: unknown): string {
  */
 export async function uploadProgram(
   target: MachineUploadTarget,
-  program: { filename: string; nc: string; verify: VerifyReport },
+  program: { filename: string; nc: string; check: ProgramCheck },
 ): Promise<MachineUploadResult> {
   const { filename } = program;
   const content = programBytes(program.nc);
 
-  const problem = programUploadProblem(filename, program.verify);
+  const problem = programUploadProblem(filename, program.check);
   if (problem !== null) return { kind: 'error', filename, detail: problem };
 
   let client: MachineUploadClient;
@@ -294,7 +293,7 @@ export async function uploadProgram(
 
   let attempt: UploadAttempt;
   try {
-    attempt = await client.upload(target, { filename, content, report: program.verify });
+    attempt = await client.upload(target, { filename, content, check: program.check });
   } catch (e) {
     return { kind: 'error', filename, detail: reasonOf(e) };
   }

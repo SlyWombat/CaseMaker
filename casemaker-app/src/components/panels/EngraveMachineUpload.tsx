@@ -1,7 +1,7 @@
 import { useRef, useState, type CSSProperties, type JSX } from 'react';
 import type { MachineObservation } from '@/platform/machineProbe';
 import { programBytes, uploadProgram, type MachineUploadResult } from '@/platform/machineUpload';
-import type { VerifyReport } from '@/engine/cnc/verify';
+import type { ProgramCheck } from '@/engine/cnc/uploadGate';
 import { describeUpload } from './engraveUploadCopy';
 import { EngraveLaserFrame } from './EngraveLaserFrame';
 import { EngraveLaserPoint } from './EngraveLaserPoint';
@@ -61,8 +61,8 @@ export interface EngraveMachineUploadProps {
   blocker: string | null;
   /** The machine the last check reached, or null when none has been. */
   machine: MachineObservation | null;
-  /** The program to send: the verified text and the report that gated it, or null if there is none. */
-  program: { nc: string; verify: VerifyReport } | null;
+  /** The program to send: the text and the check that gated it, or null if there is none. */
+  program: { nc: string; check: ProgramCheck } | null;
   /** The name the machine will receive — `runSheetFileName(job.name)`, so it matches the run sheet. */
   filename: string;
   /**
@@ -214,7 +214,7 @@ export function EngraveMachineUpload({
     // `uploadProgram` does not throw; the await is only for the result.
     const outcome = await uploadProgram(
       { host: machine.host, port: machine.port },
-      { filename, nc: program.nc, verify: program.verify },
+      { filename, nc: program.nc, check: program.check },
     );
     // What the machine said NOW replaces what the wizard remembered, in both directions: a busy answer
     // marks it busy, and an upload that went through implies it was idle.
@@ -396,7 +396,8 @@ export function EngraveMachineUpload({
         <EngraveLaserFrame
           host={machine.host}
           port={machine.port}
-          bounds={frameBounds(program.verify.stats.bbox)}
+          // #535 — the laser frame's outline: the verifier's bbox, or the surface check's own.
+          bounds={frameBounds(program.check.kind === 'verify' ? program.check.report.stats.bbox : program.check.bbox)}
           lift={lift}
         />
       )}

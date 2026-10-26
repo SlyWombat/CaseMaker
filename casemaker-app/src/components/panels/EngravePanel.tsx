@@ -1202,12 +1202,17 @@ export function EngravePanel(): JSX.Element {
   const importedRecords = useRunRecordStore((s) => s.imported);
   const [recordMessage, setRecordMessage] = useState<string | null>(null);
   const lastMeasured = lastTimedRun(job.name, allRuns(importedRecords));
-  const runSheetReady = run.generated !== null && run.generated.verify !== null && run.generated.nc !== null;
+  // #535 — a surface program has no verifier report; its run sheet is gated on the program itself
+  // (the sheet prints the surface facts and the engine's notes for it).
+  const runSheetReady =
+    run.generated !== null &&
+    (run.generated.verify !== null || run.generated.surface3d != null) &&
+    run.generated.nc !== null;
   const runSheetBlocked = run.staleSince !== null;
 
   async function openRunSheet(): Promise<void> {
     const generated = useEngraveRunStore.getState().generated;
-    if (!generated || !generated.verify || generated.nc === null) return;
+    if (!generated || (!generated.verify && generated.surface3d == null) || generated.nc === null) return;
     // `buildRunSheet` typesets every label to lay out the origin diagram, and `resolveFont`
     // throws unless the bundled faces are already parsed (#180). The sim worker loads them, but
     // that cache is per-realm — the main thread must load the job's faces itself first, exactly

@@ -308,9 +308,20 @@ describe('generateGoalProgram — the worker dispatches a pure goal job', () => 
     expect(out.ok).toBe(true);
     expect(out.nc).not.toBeNull();
     expect(out.cam?.operations ?? 0).toBeGreaterThanOrEqual(2);
-    // The exact-sweep verifier cannot judge a 3D ball program; the dexel preview is slice E.
+    // The exact-sweep verifier cannot judge a 3D ball program; the dexel check stands in for it.
     expect(out.verify).toBeNull();
-    expect(out.programs).toEqual([]);
+    // #535 — the goal program IS a release source: one program, its check the surface sweep, never
+    // a verifier report and never nothing.
+    expect(out.programs).toHaveLength(1);
+    const program = out.programs[0]!;
+    expect(program.verify).toBeNull();
+    expect(program.surfaceCheck?.kind).toBe('surface');
+    expect(program.surfaceCheck?.gridPitchMm).toBeCloseTo(DEFAULT_GRID_PITCH_MM);
+    expect(program.surfaceCheck?.roughingLayers).toBeGreaterThan(0);
+    // The ramp's toolpath extent: the goal is placed centred at (50, 30) and measures 20 × 20 mm.
+    expect(program.surfaceCheck?.bbox).toEqual({ min: [40, 20], max: [60, 40] });
+    expect(program.programHash).toMatch(/^[0-9a-f]{8}$/);
+    expect(program.toolKey).toBe(job.toolKey);
   });
 });
 
@@ -385,9 +396,11 @@ describe('generateGoalProgram — the goal operation’s own numbers (#535)', ()
     expect(out.cam?.operations).toBe(2);
     expect(out.cam?.roughOperations).toBe(1);
     expect(out.cam?.finishOperations).toBe(1);
-    // A pure goal program is still not promoted: the dexel check is the simulation, and the
-    // release flow reads the top-level file.
-    expect(out.programs).toEqual([]);
+    // #535 — the round cutter's program is promoted too, and its check records the grid the
+    // operation stated (0.4 mm), not the shop fallback.
+    expect(out.programs).toHaveLength(1);
+    expect(out.programs[0]!.verify).toBeNull();
+    expect(out.programs[0]!.surfaceCheck?.gridPitchMm).toBe(0.4);
   });
 });
 

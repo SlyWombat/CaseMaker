@@ -39,9 +39,11 @@ import { laserLiftFor } from '@/engine/cnc/engrave/laserSurface';
 import { packageStaleness } from '@/engine/cnc/engrave/package';
 import {
   frozenReleaseSources,
+  releaseCheck,
   releaseFileName,
   type ReleaseSource,
 } from '@/engine/cnc/engrave/release';
+import type { SurfaceProgramCheck } from '@/engine/cnc/uploadGate';
 import { DRY_RUN_SAFE_Z, dryRunProgramFor, type DryRunLevel } from '@/engine/cnc/engrave/dryRun';
 import { jobMachine } from '@/engine/cnc/calibration';
 import { jobTool, toSetup } from '@/engine/cnc/engrave/jobSetup';
@@ -166,6 +168,15 @@ function reportsByHash(generated: EngraveGenerated | null): Map<string, VerifyRe
   return reports;
 }
 
+/** #535 — the same map for SURFACE programs: the dexel check that stands in for the report. */
+function surfaceChecksByHash(generated: EngraveGenerated | null): Map<string, SurfaceProgramCheck> {
+  const checks = new Map<string, SurfaceProgramCheck>();
+  for (const program of generated?.programs ?? []) {
+    if (program.surfaceCheck != null) checks.set(program.programHash, program.surfaceCheck);
+  }
+  return checks;
+}
+
 export function EngraveCutSurface({
   job,
   report,
@@ -280,9 +291,10 @@ export function EngraveCutSurface({
   const staleness = pkg === null ? null : packageStaleness(pkg, job);
   const packageCurrent = pkg !== null && staleness?.stale === false;
   const reports = useMemo(() => reportsByHash(generated), [generated]);
+  const surfaceChecks = useMemo(() => surfaceChecksByHash(generated), [generated]);
   const sources: ReleaseSource[] = useMemo(
-    () => (pkg === null ? [] : frozenReleaseSources(job, pkg, reports)),
-    [job, pkg, reports],
+    () => (pkg === null ? [] : frozenReleaseSources(job, pkg, reports, surfaceChecks)),
+    [job, pkg, reports, surfaceChecks],
   );
 
   // #547 — the dry-run selector: `off` (cut for real), `traverse` (one lifted air pass) or `full`
@@ -300,9 +312,13 @@ export function EngraveCutSurface({
   const runSources: ReleaseSource[] = useMemo(() => {
     if (dryRunLevel === 'off') return sources;
     return sources.map((s) => {
-      if (s.verify === null) return s; // the missing-report blocker already refuses; keep it visible
+      // #535 — a surface source has no verifier report but its check is the surface one; the
+      // missing-check blocker already refuses a source with NEITHER, so it stays visible here. A
+      // surface program IS lifted like any other: the lifted text is a genuine 2D air program, and
+      // the dry-run verifier's report becomes the lifted source's check.
+      if (releaseCheck(s) === null) return s;
       const dry = dryRunProgramFor(s.nc, dryRunDeps);
-      return { ...s, nc: dry.nc, verify: dry.verify, hash: dry.hash, dryRun: true };
+      return { ...s, nc: dry.nc, verify: dry.verify, surfaceCheck: null, hash: dry.hash, dryRun: true };
     });
   }, [sources, dryRunLevel, dryRunDeps]);
   // A traverse plays ONE lifted program (a fast head/progress rehearsal); a full dry run plays all.
@@ -326,7 +342,8 @@ export function EngraveCutSurface({
     dryRunLevel === 'off' &&
     releaseSources.length === 1 &&
     singleSource !== undefined &&
-    singleSource.verify !== null;
+    // #535 — a goal program has no verifier report; its surface check is the one that gates it.
+    releaseCheck(singleSource) !== null;
   const [expertOpen, setExpertOpen] = useState(false);
   const domeProps: DomeChoiceProps | null = domeStanding
     ? {
@@ -361,8 +378,9 @@ export function EngraveCutSurface({
     generated !== null &&
     generated.ok === true &&
     generated.programs.length > 0 &&
-    generated.programs.every((program) => program.verify?.ok === true);
-  const missingReport = sources.find((source) => source.verify === null) ?? null;
+    // #535 — a program passes on its verifier report OR its surface check; never neither.
+    generated.programs.every((program) => program.verify?.ok === true || program.surfaceCheck != null);
+  const missingReport = sources.find((source) => releaseCheck(source) === null) ?? null;
 
   // A NEW PACKAGE IS A NEW RUN: the operator's strip switches are about this package's plan.
   // Adjusted during render (guarded, so it settles in one extra pass) rather than in an effect,
@@ -683,9 +701,12 @@ export function EngraveCutSurface({
                   blocker={uploadBlocker ?? missingReportBlocker ?? surfaceGate ?? domeG32Blocker}
                   machine={machine}
                   program={
-                    singleSource?.verify === null || singleSource === undefined
+                    singleSource === undefined
                       ? null
-                      : { nc: singleSource.nc, verify: singleSource.verify }
+                      : (() => {
+                          const check = releaseCheck(singleSource);
+                          return check === null ? null : { nc: singleSource.nc, check };
+                        })()
                   }
                   filename={releaseFileName(job.name, 1, 1, singleSource?.dryRun === true)}
                   lift={lift}

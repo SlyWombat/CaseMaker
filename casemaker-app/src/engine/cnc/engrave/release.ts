@@ -18,6 +18,7 @@
 import type { EngraveProgramKind } from '@/workers/sim/engraveGenerate';
 import type { EngraveJob, FrozenPackage } from '@/types/engraveJob';
 import type { VerifyReport } from '@/engine/cnc/verify';
+import { verifyCheck, type ProgramCheck, type SurfaceProgramCheck } from '@/engine/cnc/uploadGate';
 import { runSheetFileName } from './runSheet';
 
 /**
@@ -45,6 +46,11 @@ export interface ReleaseSource {
   hash: string;
   /** The verifier report for this exact text, or null when this session holds none. */
   verify: VerifyReport | null;
+  /**
+   * #535 — a goal program's check (the dexel sweep), in place of the verifier report. Null/absent
+   * on every 2D program; a source with BOTH null is refused by the upload gate.
+   */
+  surfaceCheck?: SurfaceProgramCheck | null;
   /**
    * #547 — the text is a LIFTED dry-run variant, not the frozen cutting program. It gets its own
    * `-dry` file name (so it never overwrites the real program on the card) and its own run end
@@ -91,6 +97,8 @@ export interface ReleaseProgram {
   nc: string;
   /** The report that gated this text; null when this session holds none (the upload refuses). */
   verify: VerifyReport | null;
+  /** #535 — the surface program's check, in place of a verifier report. Null on every 2D file. */
+  surfaceCheck?: SurfaceProgramCheck | null;
   /** This machine has already finished this program cleanly (#419 §4.5). */
   done: boolean;
   /** #547 — a lifted dry-run variant: `-dry` file name, and the run end records nothing. */
@@ -123,6 +131,7 @@ export function releasePrograms(
     hash: p.hash,
     nc: p.nc,
     verify: p.verify,
+    surfaceCheck: p.surfaceCheck ?? null,
     done: done.has(p.hash),
     dryRun: p.dryRun === true,
   }));
@@ -145,6 +154,7 @@ export function frozenReleaseSources(
   job: Pick<EngraveJob, 'facing'>,
   pkg: Pick<FrozenPackage, 'programs'>,
   reportsByHash: ReadonlyMap<string, VerifyReport>,
+  surfaceChecksByHash: ReadonlyMap<string, SurfaceProgramCheck> = new Map(),
 ): ReleaseSource[] {
   return pkg.programs.map((program, i) => ({
     setupIndex: program.setupIndex,
@@ -154,7 +164,17 @@ export function frozenReleaseSources(
     nc: program.nc,
     hash: program.hash,
     verify: reportsByHash.get(program.hash) ?? null,
+    surfaceCheck: surfaceChecksByHash.get(program.hash) ?? null,
   }));
+}
+
+/**
+ * #535 — the check a source uploads under: the verifier's report, or the goal program's surface
+ * check. Null means this session holds neither for the frozen text, and the upload refuses it.
+ */
+export function releaseCheck(source: Pick<ReleaseSource, 'verify' | 'surfaceCheck'>): ProgramCheck | null {
+  if (source.verify !== null) return verifyCheck(source.verify);
+  return source.surfaceCheck ?? null;
 }
 
 /** The programs still to play, in cut order. */

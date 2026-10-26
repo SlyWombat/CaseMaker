@@ -17,6 +17,7 @@ import {
 } from '@/platform/machineUpload';
 import type { MachineObservation } from '@/platform/machineProbe';
 import type { VerifyReport } from '@/engine/cnc/verify';
+import { verifyCheck } from '@/engine/cnc/uploadGate';
 import { setInventoryEntries, resetRegistry } from '@/engine/cnc/toolRegistry';
 import { flatEndMill } from '@/engine/cnc/tool';
 import {
@@ -71,7 +72,7 @@ function props(over: Partial<EngraveMachineUploadProps> = {}): EngraveMachineUpl
   return {
     blocker: null,
     machine: MACHINE,
-    program: { nc: NC, verify: VERIFY },
+    program: { nc: NC, check: verifyCheck(VERIFY) },
     filename: 'Untitled-engrave-job.nc',
     // The Z1's `toolChange.clearanceZ` and `softEndstop.zMin`, as the panel hands them in — required,
     // never defaulted, and guarded at the point of use (#448).

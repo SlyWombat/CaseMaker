@@ -51,6 +51,7 @@ import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 import { asVerifiedProgram, uploadVerifiedProgram } from '../src/platform/desktop/machineBridge.ts';
+import { verifyCheck } from '../src/engine/cnc/uploadGate.ts';
 import { GCODE_DIR, md5Hex, type MachineTransport } from '../src/platform/desktop/protocol.ts';
 import { createNodeTransport } from '../tools/z1/transport.node.mjs';
 import {
@@ -218,7 +219,8 @@ export async function machineUploadCheck(argv: string[], deps?: UploadCheckDeps)
   const dirFlag = argv.indexOf('--dir');
   const directory = dirFlag === -1 ? undefined : argv[dirFlag + 1]!;
   const programBytes = new TextEncoder().encode(program.nc);
-  const verified = asVerifiedProgram(filename, programBytes, program.verify);
+  // #535 — the seam takes one check type; this script's program carries the verifier's report.
+  const verified = asVerifiedProgram(filename, programBytes, verifyCheck(program.verify));
   if (verified === null) {
     console.error('\nthe gate refused this program — nothing is sent.');
     return 1;

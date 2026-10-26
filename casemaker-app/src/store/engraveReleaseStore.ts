@@ -60,6 +60,7 @@ import {
   carriesVacuumOn,
   jobCarriesVacuumWords,
   programVacuumSpan,
+  releaseCheck,
   releaseNext,
   releasePending,
   releasePrograms,
@@ -565,7 +566,10 @@ export const useEngraveReleaseStore = create<ReleaseState>((set, get) => {
         // matched this session's reports by hash. A frozen program with no match is refused here,
         // with the file's own number, rather than being sent on the strength of a report about some
         // other text. There is no "send anyway" path.
-        if (f.verify === null) {
+        // #535 — the check is the verifier's report, or a goal program's surface check. A frozen
+        // text with neither is refused here, with the file's own number, never sent on trust.
+        const check = releaseCheck(f);
+        if (check === null) {
           files[i] = { ...f, upload: 'failed', uploadNote: 'no verifier report for this frozen text in this session' };
           patch(machine, { files: files.map((x) => ({ ...x })), uploading: null, phase: 'failed' });
           say(
@@ -579,7 +583,7 @@ export const useEngraveReleaseStore = create<ReleaseState>((set, get) => {
         patch(machine, { files: files.map((x) => ({ ...x })), uploading: f.index });
         let result: MachineUploadResult;
         try {
-          result = await uploadProgram(target, { filename: f.filename, nc: f.nc, verify: f.verify });
+          result = await uploadProgram(target, { filename: f.filename, nc: f.nc, check });
         } catch (e) {
           result = { kind: 'error', filename: f.filename, detail: e instanceof Error ? e.message : String(e) };
         }

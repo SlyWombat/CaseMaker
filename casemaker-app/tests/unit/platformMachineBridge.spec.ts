@@ -41,6 +41,7 @@ import {
   type UdpDatagram,
 } from '@/platform/desktop/protocol';
 import type { VerifyReport } from '@/engine/cnc/verify';
+import { verifyCheck, type ProgramCheck } from '@/engine/cnc/uploadGate';
 
 const EMPTY = new Uint8Array(0);
 const CONTENT = new Uint8Array([1, 2, 3]);
@@ -128,19 +129,32 @@ describe('#449 the connect timeout is a shop default with a labelled fallback', 
 
 describe('#255 machine bridge — verified-only gate', () => {
   it('produces a VerifiedProgram only for an ok .nc report', () => {
-    expect(asVerifiedProgram('badge.nc', CONTENT, okReport)).not.toBeNull();
-    expect(asVerifiedProgram('badge.nc', CONTENT, badReport)).toBeNull();
-    expect(asVerifiedProgram('badge.txt', CONTENT, okReport)).toBeNull();
+    expect(asVerifiedProgram('badge.nc', CONTENT, verifyCheck(okReport))).not.toBeNull();
+    expect(asVerifiedProgram('badge.nc', CONTENT, verifyCheck(badReport))).toBeNull();
+    expect(asVerifiedProgram('badge.txt', CONTENT, verifyCheck(okReport))).toBeNull();
   });
 
   it('refuses a report with an error finding even if the ok flag says otherwise', () => {
     const lying: VerifyReport = { ...okReport, findings: badReport.findings };
-    expect(asVerifiedProgram('badge.nc', CONTENT, lying)).toBeNull();
+    expect(asVerifiedProgram('badge.nc', CONTENT, verifyCheck(lying))).toBeNull();
+  });
+
+  it('#535 — accepts a surface check, and the upload gate still asks the one predicate', async () => {
+    const surface: ProgramCheck = {
+      kind: 'surface',
+      gridPitchMm: 0.1,
+      roughingLayers: 3,
+      resolutionNote: 'sampled on a 0.1 mm grid',
+      bbox: { min: [0, 0], max: [20, 20] },
+    };
+    expect(asVerifiedProgram('goal.nc', CONTENT, surface)).not.toBeNull();
+    // The filename clause applies to a surface program too: a name that is not a .nc is refused.
+    expect(asVerifiedProgram('goal.txt', CONTENT, surface)).toBeNull();
   });
 
   it('refuses an unverified program at upload time without opening a socket', async () => {
     // Structurally a VerifiedProgram — the runtime re-check is what refuses it.
-    const forged: VerifiedProgram = { filename: 'badge.nc', content: CONTENT, report: badReport };
+    const forged: VerifiedProgram = { filename: 'badge.nc', content: CONTENT, check: verifyCheck(badReport) };
     const transport = new FakeTransport();
     const outcome = await uploadVerifiedProgram({ host: '10.0.0.1' }, forged, { transport });
     expect(outcome.ok).toBe(false);
@@ -149,7 +163,7 @@ describe('#255 machine bridge — verified-only gate', () => {
   });
 
   it('refuses a non-.nc program at upload time without opening a socket', async () => {
-    const forged: VerifiedProgram = { filename: 'badge.txt', content: CONTENT, report: okReport };
+    const forged: VerifiedProgram = { filename: 'badge.txt', content: CONTENT, check: verifyCheck(okReport) };
     const transport = new FakeTransport();
     const outcome = await uploadVerifiedProgram({ host: '10.0.0.1' }, forged, { transport });
     expect(outcome.ok).toBe(false);
@@ -165,7 +179,7 @@ describe('#255 machine bridge — actions', () => {
       encodeFrame(PTYPE_FILE_DATA, u32be(1)),
       encodeFrame(PTYPE_FILE_END, EMPTY),
     );
-    const program = asVerifiedProgram('badge.nc', CONTENT, okReport);
+    const program = asVerifiedProgram('badge.nc', CONTENT, verifyCheck(okReport));
     expect(program).not.toBeNull();
     if (program === null) throw new Error('expected a verified program');
 
@@ -188,7 +202,7 @@ describe('#255 machine bridge — actions', () => {
       encodeFrame(PTYPE_FILE_VIEW, EMPTY),
       encodeFrame(PTYPE_FILE_END, EMPTY),
     );
-    const program = asVerifiedProgram('badge.nc', CONTENT, okReport);
+    const program = asVerifiedProgram('badge.nc', CONTENT, verifyCheck(okReport));
     if (program === null) throw new Error('expected a verified program');
 
     await uploadVerifiedProgram({ host: '10.0.0.1', port: 2222 }, program, {
@@ -204,7 +218,7 @@ describe('#255 machine bridge — actions', () => {
   it('honours a caller-chosen directory instead of the default', async () => {
     const transport = new FakeTransport();
     transport.queueRead(encodeFrame(PTYPE_FILE_VIEW, EMPTY), encodeFrame(PTYPE_FILE_END, EMPTY));
-    const program = asVerifiedProgram('badge.nc', CONTENT, okReport);
+    const program = asVerifiedProgram('badge.nc', CONTENT, verifyCheck(okReport));
     if (program === null) throw new Error('expected a verified program');
 
     await uploadVerifiedProgram({ host: '10.0.0.1', port: 2222 }, program, {

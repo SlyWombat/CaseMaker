@@ -432,6 +432,23 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
         ? sim.info.stats.resolution.dThetaDeg
         : null;
     set({ simGridPitchMm: gridPitch });
+    // #535 — THE CHECK RECORDS THE SWEEP THAT RAN. A surface program's check was written at
+    // generate time with the heightfield pitch; the dexel grid is the simulation's own (sometimes
+    // coarser, often the same), and the frozen package must state the grid the material was
+    // actually swept on. The program is the result's own entry, so every reader (the Cut screen,
+    // the release step, the upload gate) sees the stamped value.
+    if (generated.programs.some((p) => p.surfaceCheck != null)) {
+      set({
+        generated: {
+          ...generated,
+          programs: generated.programs.map((p) =>
+            p.surfaceCheck == null
+              ? p
+              : { ...p, surfaceCheck: { ...p.surfaceCheck, gridPitchMm: gridPitch } },
+          ),
+        },
+      });
+    }
 
     try {
       const oracle = await client.simOracle(generated.predicted);

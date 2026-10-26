@@ -16,6 +16,7 @@ import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import type { Tool } from '@/engine/cnc/tool';
 import type { MachineObservation } from '@/platform/machineProbe';
 import type { VerifyReport } from '@/engine/cnc/verify';
+import { verifyCheck } from '@/engine/cnc/uploadGate';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -74,7 +75,7 @@ const upload = (
   <EngraveMachineUpload
     blocker={null}
     machine={MACHINE}
-    program={{ nc, verify: VERIFY }}
+    program={{ nc, check: verifyCheck(VERIFY) }}
     filename="job.nc"
     lift={{ zMachine: -3, zFloorMachine: -102 }}
     onProgramLine={onProgramLine}

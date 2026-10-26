@@ -19,6 +19,30 @@ import { test, expect } from './fixtures/caseMaker';
 
 const STL = fileURLToPath(new URL('./fixtures/chamfered-block.stl', import.meta.url));
 
+/** A status line with the monitor fields the state popover reads, for the machine observation. */
+const STATUS = '<Idle|MPos:0,0,0|WPos:0,0,0|S:0.0,10000.0,100.0,0,25.8,24.0,0,0,0,0>';
+
+/** Put a machine on screen without one — the observation a probe would have written. */
+async function rememberMachine(page: import('@playwright/test').Page): Promise<void> {
+  await page.evaluate((line) => {
+    window.__caseMaker!.setMachine(
+      {
+        name: 'QA Z1',
+        host: '192.0.2.10',
+        port: 2222,
+        busy: false,
+        ip: null,
+        mac: null,
+        status: line,
+        profileId: 'Z1',
+        observedAt: '2026-10-25T00:00:00.000Z',
+        notes: [],
+      },
+      line,
+    );
+  }, STATUS);
+}
+
 // The surfacing CAM and the column sweep run in the worker; under swiftshader the whole run
 // takes tens of seconds, so these get well past Playwright's 30 s default.
 test.setTimeout(240_000);
@@ -85,4 +109,18 @@ test('a goal STL from the picker generates, and the UI states its own check and 
   await expect(report).toContainText('mm step-over');
   await expect(report).toContainText('Sampled on a');
   await expect(report).toContainText('mm grid');
+
+  // #535 — THE GOAL PROGRAM IS A RELEASE SOURCE. Cut freezes it, the one screen offers the press,
+  // and its check line is the surface sweep rather than a 2.5D comparison. E2E has no controller,
+  // so the machine is the observation a probe would have written — and the press is NOT pressed.
+  await rememberMachine(page);
+  await page.getByTestId('cnc-mode-cut').click();
+  await expect(page.getByTestId('engrave-cut-confirm')).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByTestId('engrave-cut-confirm-oracle')).toContainText(
+    'No 2.5D check for a surface program — checked on the',
+  );
+  const go = page.getByTestId('engrave-cut-go');
+  await expect(go).toBeDisabled();
+  await page.getByTestId('engrave-cut-statement').check();
+  await expect(go).toBeEnabled();
 });

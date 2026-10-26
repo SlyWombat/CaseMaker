@@ -1,6 +1,6 @@
 # Operations matrix — CAM operation types across the category, and what Case Maker posts and offers
 
-Status as of 2026-10-25, Case Maker `main` 2d7b21f0 (GitHub issue #663). Companion to
+Status as of 2026-10-25, Case Maker `main` e42e4a32 (GitHub issue #663). Companion to
 `MAKERA-VS-CASEMAKER.md` (§G "CAM & output") and `/Makera-Parity.md` §2 (the 14 Studio strategy types).
 
 The maintainer's words: "operation palettes we need to track and make sure that we offer the same
@@ -45,7 +45,7 @@ Manufacture (personal tier), **ES** Easel, **BT** Bantam Tools Desktop CNC (Bant
 | 3D finishing — parallel / raster | 3D finish machining (Pro) [CC1] | 3D Roughing and Finishing [VC1] | 3D Parallel [FU2] | not established | not established | Contour (X/Y raster) [KM1] | — | 3D Contour (type 8) [MK1] | Relief: Carve [SM1]† | YES: ball-nose raster finish, gouge-safe drop (`cam/surface3d.ts`) | YES: the goal row’s Technical fold sets the finishing step-over and the ball/bull cutter that runs it (`EngraveTargetObjectRow.tsx`, #535); the feeds row’s step-over is the default and its source is stated |
 | 3D finishing — scallop / pencil | not established | not established | 3D Scallop [FU3], Pencil [FU4] | not established | not established | not established | — | not established | not established | NO | NO |
 | Rest machining | Rest machining (Pro; Pocket only per community) [CC1][CC4]† | Rest Machining [VC1] | Rest Machining option, with Scallop [FU3]† | not established | not established | not established | — | Main Tool + Clearance Tool (Guided Mode, Workflow A.2) [MK2] | not established | YES for 2D regions: rough + measured rest pair per setup (`engine/cnc/engrave/restPass.ts`, `engraveGenerate.ts` `generateRestPair`, #472); not for 3D | INDIRECT: operator assigns items to a setup's cutters (`EngraveSetupRow.tsx`); no "rest" control |
-| Surface a mesh (STL / 3MF) | 3D toolpaths from an imported model (Pro) [CC1] | STL/OBJ model, 3D Roughing and Finishing [VC1]† | 3D toolpaths on a model [FU8] | not established | not established | Rough + Contour on the model [KM1] | — | 3D Relief (type 6) imports STL (RE 06) [MK5] | Relief / 3-axis Model [SM1]† | YES: `role: 'goal'` mesh → heightfield → rough + finish (`cam/surface3d.ts`, `generateGoalProgram`) | YES: the operation picker’s **Surface a mesh** imports an STL/3MF with `role: 'goal'` and the wizard offers it on an empty job (`operationTypes.ts`, `EngravePanel.tsx`, #662); the row’s Technical fold carries the operation’s cutter, step-down/step-overs, grid pitch and stock-to-leave (`EngraveTargetObjectRow.tsx`, #535); a mesh imported as a reference stays one |
+| Surface a mesh (STL / 3MF) | 3D toolpaths from an imported model (Pro) [CC1] | STL/OBJ model, 3D Roughing and Finishing [VC1]† | 3D toolpaths on a model [FU8] | not established | not established | Rough + Contour on the model [KM1] | — | 3D Relief (type 6) imports STL (RE 06) [MK5] | Relief / 3-axis Model [SM1]† | YES: `role: 'goal'` mesh → heightfield → rough + finish (`cam/surface3d.ts`, `generateGoalProgram`) | YES: the operation picker’s **Surface a mesh** imports an STL/3MF with `role: 'goal'` and the wizard offers it on an empty job (`operationTypes.ts`, `EngravePanel.tsx`, #662); the row’s Technical fold carries the operation’s cutter, step-down/step-overs, grid pitch and stock-to-leave (`EngraveTargetObjectRow.tsx`, #535); the goal program freezes into the Cut package and uploads through the one screen’s press under its dexel check (`engraveGenerate.ts`, `EngraveCutSurface.tsx`, #535); a mesh imported as a reference stays one |
 | Laser line / fill | — | — | not established | — | — | Laser Operations (machine-specific) [KM1] | Line, Fill, Offset Fill, Image [LB1] | Laser Vector (4), Laser Image (3) [MK1] | Luban is 3-in-1 incl. laser; mode names not established [SM3]† | NO — refused, decision 4 (`/Makera-Parity.md` §2). Laser dot positioning only | NO (`EngraveLaserFrame.tsx`, `EngraveLaserPoint.tsx` position only) |
 | Rotary / 4th axis | not established | Wrapped Rotary Axis Toolpaths [VC1] | — (4-axis paid tier only) [FU8] | not established | 4th-axis text; 4th Axis accessory [BT1]† | Indexed Operations (not called rotary) [KM1] | Rotary Mode [LB3] | Rotation Relief (11) [MK1] | 4-axis Model [SM1]† | NO — designed (`/Rotary.md`, #545); column engine parameterised (#239); nothing reaches the IR | NO |
 | Facing / surfacing the stock | not established | not established | Face† (page not opened) | not established | facing [BT1]† | Level [KM1] | — | not one of the 14 types [MK1] | not established | YES: raster skim to Z0, wood/metal only (`cam/facing.ts`, `engine/cnc/engrave/facingTool.ts`) | YES: facing switch + depth (`EngravePanel.tsx`, `setFacing`) and the start wizard's seed |
@@ -66,10 +66,12 @@ pockets only), R-14 thread milling (superseded, shipped #445). None of the items
 
 ### A. The engine posts it; the UI cannot reach it
 
-- **A1. Goal-mesh 3D surfacing (`role: 'goal'`). — CLOSED by #662.** Engine: `generateGoalProgram`, `cam/surface3d.ts`
-  rough + ball finish. UI: the operation picker's **Surface a mesh** imports the mesh with `role: 'goal'` and is
-  offered on an empty job, where the engine posts it as the whole program; a reference import is unchanged.
-  Demand: the 3D relief row of `MAKERA-VS-CASEMAKER.md` §G (PARTIAL).
+- **A1. Goal-mesh 3D surfacing (`role: 'goal'`). — CLOSED by #662, cuttable through the app since #535.** Engine:
+  `generateGoalProgram`, `cam/surface3d.ts` rough + ball finish. UI: the operation picker's **Surface a mesh**
+  imports the mesh with `role: 'goal'` and is offered on an empty job, where the engine posts it as the whole
+  program; the program is a release source like any other (the package freezes it, the one screen's press uploads
+  it under the surface check); a reference import is unchanged. Demand: the 3D relief row of
+  `MAKERA-VS-CASEMAKER.md` §G (PARTIAL).
 - **A2. Rest pass is implicit.** Engine: measured rest pair (`restPass.ts`, #472). UI: only indirect, by assigning items
   to cutters in a setup; no control or sentence saying "this is a rest pass of that rough" in the panel (worth a check,
   not a certain gap — I did not trace the setups UI end to end).

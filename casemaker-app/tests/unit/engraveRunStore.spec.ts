@@ -12,6 +12,7 @@ import {
   useEngraveRunStore,
   setEngraveRunClientLoader,
   oracleSentence,
+  releaseBlocker,
   saveBlocker,
   uploadBlocker,
   requiredAckCodes,
@@ -117,6 +118,68 @@ describe('engraveRunStore (#206)', () => {
     expect(gate.oracleSentence(view({ oracle: { ok: false, band: 0, levels: [], worst: { underCut: 0.002, overCut: 0 } } }))).toContain(`${ORACLE_AREA_FLOOR.toFixed(4)} mm² floor`);
   });
 
+  describe('#535 a surface program through the upload and release gates', () => {
+    const FACTS = {
+      resolutionNote: 'sampled on a 0.1 mm grid',
+      gridPitchMm: 0.1,
+      gridCells: 100,
+      stepDownMm: 0.5,
+      roughStepOverMm: 0.8,
+      finishStepOverMm: 0.4,
+      stockToLeaveMm: 0.3,
+      roughingLayers: 3,
+      notes: [],
+    };
+    const CHECK = {
+      kind: 'surface' as const,
+      gridPitchMm: 0.12,
+      roughingLayers: 3,
+      resolutionNote: 'sampled on a 0.1 mm grid',
+      bbox: { min: [0, 0] as [number, number], max: [20, 20] as [number, number] },
+    };
+
+    /** A goal result: one program, no verifier report, its check the dexel sweep. */
+    function surfaceGenerated(check: typeof CHECK | null, withFacts = true): EngraveGenerated {
+      return {
+        ...clean(),
+        surface3d: withFacts ? FACTS : null,
+        programs: [
+          {
+            setupIndex: 1,
+            setupId: 'setup-1',
+            toolKey: 'flat-1.0',
+            nc: 'G90\nM02',
+            verify: null,
+            surfaceCheck: check,
+            frameNc: null,
+            frameVerify: null,
+            programHash: 'abcd1234',
+            cam: null,
+          },
+        ],
+      };
+    }
+
+    const READY = {
+      simStatus: 'ready' as const,
+      phase: 'ready' as const,
+      oracle: { ok: true, band: 0, levels: [], worst: { underCut: 0, overCut: 0 } },
+    };
+
+    it('Save, Upload and the release are open on the surface check — no verifier report needed', () => {
+      const v = view({ generated: surfaceGenerated(CHECK), ...READY });
+      expect(saveBlocker(v)).toBeNull();
+      expect(uploadBlocker(v)).toBeNull();
+      expect(releaseBlocker(v)).toBeNull();
+    });
+
+    it('a program with neither a report nor a check is still refused', () => {
+      const v = view({ generated: surfaceGenerated(null, false), ...READY });
+      expect(uploadBlocker(v)).toBe('the program carries no verifier report');
+      expect(releaseBlocker(v)).toBe('a program did not pass the verifier');
+    });
+  });
+
   it('oracleSentence names the level and patch of the worst under-cut (#584)', () => {
     const sentence = gate.oracleSentence(
       view({
@@ -175,12 +238,38 @@ describe('engraveRunStore (#206)', () => {
         useSimStore.setState({
           loadProgram: async () => ready(false),
         });
+        // A goal-like result: its program's check states the HEIGHTFIELD pitch at generate time.
+        const generated: EngraveGenerated = {
+          ...clean(),
+          programs: [
+            {
+              setupIndex: 1,
+              setupId: 'setup-1',
+              toolKey: 'flat-1.0',
+              nc: 'G90\nM02',
+              verify: null,
+              surfaceCheck: {
+                kind: 'surface',
+                gridPitchMm: 0.1,
+                roughingLayers: 3,
+                resolutionNote: 'sampled on a 0.1 mm grid',
+                bbox: { min: [0, 0], max: [1, 1] },
+              },
+              frameNc: null,
+              frameVerify: null,
+              programHash: 'abcd1234',
+              cam: null,
+            },
+          ],
+        };
         setEngraveRunClientLoader(async () => ({
-          engraveGenerate: async () => clean(),
+          engraveGenerate: async () => generated,
           simOracle: async () => OK,
         }));
         await useEngraveRunStore.getState().generate();
         expect(useEngraveRunStore.getState().simGridPitchMm).toBe(0.12);
+        // #535 — the check now records the grid the SWEEP ran on (0.12), not the sampled 0.1.
+        expect(useEngraveRunStore.getState().generated?.programs[0]?.surfaceCheck?.gridPitchMm).toBe(0.12);
 
         // A rotary grid's second axis is degrees: it is never stated as a millimetre pitch.
         useSimStore.setState({
