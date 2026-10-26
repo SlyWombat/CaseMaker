@@ -439,8 +439,9 @@ export function installCaseMakerTestApi(): void {
         simStatus: r.simStatus,
         oracleOk: r.oracle?.ok ?? null,
         worst: r.oracle ? { ...r.oracle.worst } : null,
-        canSave: saveBlocker(r) === null,
-        saveReason: saveBlocker(r),
+        // #688 — Design's Save writes the program; the clearance statement belongs to Cut step 1.
+        canSave: saveBlocker(r, { requireAcknowledgement: false }) === null,
+        saveReason: saveBlocker(r, { requireAcknowledgement: false }),
         error: r.error,
       };
     },

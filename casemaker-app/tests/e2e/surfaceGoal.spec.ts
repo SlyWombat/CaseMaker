@@ -3,8 +3,10 @@
 //
 //   1. the goal row's report — the roughing layers the CAM ran and the grid its heightfield was
 //      sampled on;
-//   2. the run's check sentence — the FLAT dexel that checked it ("No 2.5D check for a surface
-//      program — checked on the 0.1 mm dexel grid"), never the 2.5D oracle's vacuous 0/0.
+//   2. the run's check as ONE tick — the FLAT column sweep checked it, rather than the 2.5D
+//      oracle's vacuous 0/0. The sentence behind that tick (the 0.1 mm dexel grid) is stated by
+//      the Cut release screen, asserted below, and belongs to the simulation panel (#691) on the
+//      Design side.
 //
 // The run is real: the worker, the surfacing CAM, the FLAT column sweep and the run store all
 // run. The fixture is the 20 × 20 × 6 mm chamfered block in `fixtures/` (its provenance is the
@@ -12,7 +14,7 @@
 // a flat one — a valid Surface a mesh configuration; the finish is faceted and the row says so.
 //
 // The Simulate panel presents only sessions it started itself (#506), so the grid a Cut run was
-// swept on is stated on the run row, not in that panel.
+// swept on is stated on Cut's release line, not in that panel.
 
 import { fileURLToPath } from 'node:url';
 import { test, expect } from './fixtures/caseMaker';
@@ -87,13 +89,12 @@ test('a goal STL from the picker generates, and the UI states its own check and 
   await expect(page.getByTestId('engrave-run-simulated')).toHaveAttribute('data-state', 'tick', { timeout: 180_000 });
   await expect(page.getByTestId('engrave-run-oracle')).toHaveAttribute('data-state', 'tick', { timeout: 180_000 });
 
-  // The check sentence: the dexel grid the sweep ran on, never a comparison the 2.5D oracle did
-  // not make. The grid number itself is the shop's flat pitch (0.1 mm with no location).
+  // #688 — the Design footer states the check as ONE tick, not a paragraph. The long sentence
+  // (which dexel grid checked the surface program) moved to the simulation's own panel (#691);
+  // Cut's release line still states it, asserted further down.
   const oracleRow = page.getByTestId('engrave-run-oracle');
-  await expect(oracleRow).toContainText('No 2.5D check for a surface program — checked on the');
-  await expect(oracleRow).toContainText('mm dexel grid');
+  await expect(oracleRow).toContainText('matches the design');
   await expect(oracleRow).not.toContainText('0.0000');
-  await expect(oracleRow).not.toContainText('Matches prediction');
 
   // The goal row's own facts, after a Generate: the passes' layers and the sampled grid. The
   // import opens the row; the Technical fold is one more press.

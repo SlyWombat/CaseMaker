@@ -192,11 +192,90 @@ describe('EngravePanel (#205)', () => {
     expect(screen.getByTestId('engrave-feeds-refused').textContent).toContain('step-over');
     expect((screen.getByTestId('engrave-generate') as HTMLButtonElement).disabled).toBe(true);
 
+    // #688 — the button says WHY, in its own sentence, instead of "Fix the errors above first."
+    // The reason is also held to the vocabulary: no issue number, and 3 decimals at most.
+    const blocker = screen.getByTestId('engrave-generate-blocker').textContent ?? '';
+    expect(blocker).toContain('Step-over 2 mm exceeds the 0.5 mm radius');
+    expect(blocker).not.toContain('#');
+    expect((screen.getByTestId('engrave-generate') as HTMLButtonElement).title).not.toContain(
+      'Fix the errors above first',
+    );
+
+    // The Fix opens the fold the undo lives in — the Override is closed by default, so this is
+    // the assertion that the value's refusal lands somewhere actionable.
+    expect((screen.getByTestId('engrave-override') as HTMLDetailsElement).open).toBe(false);
+    fireEvent.click(screen.getByTestId('engrave-generate-fix'));
+    expect((screen.getByTestId('engrave-override') as HTMLDetailsElement).open).toBe(true);
+
     // Emptying the field clears the override, so the refusal (and the only way to undo it) must
     // have stayed on screen while it was refused.
     fireEvent.change(screen.getByTestId('engrave-override-stepOver'), { target: { value: '' } });
     expect(screen.queryByTestId('engrave-feeds-refused')).toBeNull();
     expect((screen.getByTestId('engrave-generate') as HTMLButtonElement).disabled).toBe(false);
+  });
+});
+
+// #688 — the Generate button carries its blocker as its own sentence with a Fix link (design §1
+// principle 4). The reproduced dead end was PLA + Engrave + the recommended V/chamfer bit: no row
+// for that cutter, a tooltip saying "Fix the errors above first." beside "0 errors" (audit B9).
+describe('EngravePanel — the Generate blocker (#688)', () => {
+  const V_KEY = 'inv:blocked-engraver';
+  const V_TOOL = flatEndMill(0.2, {
+    name: '0.2 mm 30° engraving bit',
+    typeText: 'Engraving',
+    shape: 'engraving',
+    tipDiameter: 0.2,
+    diameter: 3.175,
+    halfAngle: 15,
+    angle: 30,
+  });
+
+  it('names a feeds refusal and its Fix opens the cutter list', () => {
+    act(() => setInventoryEntries([{ key: V_KEY, tool: V_TOOL, provenance: 'EngravePanel blocker spec' }]));
+    act(() => {
+      const job = defaultEngraveJob();
+      job.stock = { ...job.stock, material: 'pla' };
+      job.toolKey = V_KEY;
+      job.tool = V_TOOL;
+      job.sources = { ...job.sources, tool: 'user' };
+      useEngraveJobStore.setState({ job });
+    });
+    render(<EngravePanel />);
+
+    const generate = screen.getByTestId('engrave-generate') as HTMLButtonElement;
+    expect(generate.disabled).toBe(true);
+    // The reason is still stated at the cutter, where the numbers would be.
+    expect(screen.getByTestId('engrave-feeds-refused').textContent).toContain('V-bit');
+    // …and now at the button too, in words that name the cutter and the material (§3.6's copy).
+    expect(screen.getByTestId('engrave-generate-blocker').textContent).toBe(
+      'No feeds for the 0.2 mm 30° engraver on PLA — choose a flat end mill ▸ Fix',
+    );
+
+    fireEvent.click(screen.getByTestId('engrave-generate-fix'));
+    expect((screen.getByTestId('engrave-group-cutter') as HTMLDetailsElement).open).toBe(true);
+    expect(document.activeElement).toBe(screen.getByTestId('engrave-tool'));
+
+    act(() => resetRegistry());
+  });
+
+  it('names a blocking finding and its Fix opens the item row it is about', () => {
+    render(<EngravePanel />);
+    // 12 mm stock, 1 mm minimum floor -> at most 11 mm.
+    expand('engrave-label');
+    fireEvent.change(screen.getByTestId('engrave-label-depth-0'), { target: { value: '11.5' } });
+    // Fold the row again: the Fix has to reopen what the finding points at, not just point at it.
+    fireEvent.click(screen.getByTestId('engrave-label-expand-0'));
+    expect(screen.queryByTestId('engrave-label-text-0')).toBeNull();
+
+    const blocker = screen.getByTestId('engrave-generate-blocker').textContent ?? '';
+    expect(blocker).toContain('11.5 mm deep');
+    expect(blocker).toContain('▸ Fix');
+    expect(blocker).not.toContain('#');
+
+    fireEvent.click(screen.getByTestId('engrave-generate-fix'));
+    // The row is open again, and the editor's first field has focus.
+    expect(screen.getByTestId('engrave-label-text-0')).toBeTruthy();
+    expect(document.activeElement).toBe(screen.getByTestId('engrave-label-text-0'));
   });
 });
 
@@ -553,6 +632,62 @@ describe('EngravePanel — the run sheet mount (#207)', () => {
   it('is disabled until a job has generated and verified', () => {
     render(<EngravePanel />);
     expect((screen.getByTestId('engrave-run-sheet') as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  // #688 — the finished state is FOUR ticks and ONE labelled time, not two paragraphs a person has
+  // to reconcile (design §3.6, audit B14/B15). The simulation's own checked/not-checked sentences
+  // and under/over-cut numbers belong to its panel (#691); the clearance question to Cut step 1
+  // (#689). Neither is drawn here.
+  it('reads as four ticks and one labelled time once the run is ready (#688)', () => {
+    render(<EngravePanel />);
+    act(() => {
+      useEngraveRunStore.setState({
+        generated: readyGenerated(';@MKR|BEGIN\nG21 G90\nM02'),
+        simStatus: 'ready',
+        // A warning whose code used to demand the clearance acknowledgement. Design's Save writes
+        // the program without that tick now, so this run is Save-able with `acknowledged: false`.
+        simDiagnostics: [
+          {
+            source: 'sweep',
+            severity: 'warning',
+            code: 'vise-default',
+            message: 'the vise is the shipped reference unit',
+          },
+        ],
+        oracle: { ok: true, band: 0.016, levels: [], worst: { underCut: 0, overCut: 0 } },
+        phase: 'ready',
+        acknowledged: false,
+      });
+    });
+
+    const ticks: readonly (readonly [string, string])[] = [
+      ['engrave-run-toolpath', 'generated'],
+      ['engrave-run-verified', 'verified'],
+      ['engrave-run-simulated', 'simulated'],
+      ['engrave-run-oracle', 'matches the design'],
+    ];
+    for (const [testid, label] of ticks) {
+      const tick = screen.getByTestId(testid);
+      expect(tick.getAttribute('data-state')).toBe('tick');
+      expect(tick.textContent).toContain(label);
+    }
+
+    // ONE time, and it says whose number it is: the program's own estimate, the same figure the
+    // run sheet prints. The simulator's separate readout is not shown beside it as a rival.
+    expect(screen.getByTestId('engrave-run-time').textContent).toBe('about 5 s (estimated)');
+
+    // What moved out, has moved out.
+    expect(screen.queryByTestId('engrave-sim-coverage')).toBeNull();
+    const rowsText = screen.getByTestId('engrave-run-rows').textContent ?? '';
+    expect(rowsText).not.toContain('Checked:');
+    expect(rowsText).not.toContain('Not checked');
+    expect(rowsText).not.toContain('under-cut');
+    expect(screen.queryByTestId('engrave-ack')).toBeNull();
+    expect(screen.queryByTestId('engrave-ack-label')).toBeNull();
+
+    // …and the program can still be saved without the clearance tick.
+    expect((screen.getByTestId('engrave-save') as HTMLButtonElement).disabled).toBe(false);
+    expect(screen.queryByTestId('engrave-save-blocked')).toBeNull();
   });
 
   it('opens the sheet for a verified job, and Save writes the sheet’s file name', async () => {
@@ -1185,54 +1320,6 @@ describe('EngravePanel — milled threads (#445 B3)', () => {
     // `itemRowIds` has to carry the thread's id, or "expand all" leaves this one row folded.
     fireEvent.click(screen.getByTestId('engrave-item-expand-all'));
     expect(screen.getByTestId('engrave-thread-depth-0')).toBeTruthy();
-  });
-});
-
-// #243 §14.2 A2: the Simulated row carries the same blind-spot sentence the Simulate panel
-// builds — imported from `simCoverage`, never written again, so the two cannot disagree.
-describe('EngravePanel — the Simulated row’s coverage sentence (#243)', () => {
-  beforeEach(() => {
-    useEngraveRunStore.getState().reset();
-  });
-
-  it('names the geometry the sweep saw and did not see for a swept run', () => {
-    render(<EngravePanel />);
-    act(() => {
-      useEngraveRunStore.setState({ simStatus: 'ready', pathOnly: false, simDiagnostics: [] });
-    });
-    const cov = screen.getByTestId('engrave-sim-coverage').textContent ?? '';
-    expect(cov).toContain('Checked: the tool against the stock');
-    // #314 — the collet nut is named from the run's own codes, and this run raised none: the
-    // Z1 stating no holder is no longer a blind spot in itself.
-    expect(cov).not.toContain('the collet nut');
-  });
-
-  it('names the collet nut when the run raised the unproven-holder code (#314)', () => {
-    render(<EngravePanel />);
-    act(() => {
-      useEngraveRunStore.setState({
-        simStatus: 'ready',
-        pathOnly: false,
-        simDiagnostics: [{ source: 'sweep', severity: 'warning', code: 'holder-vs-fixture-unproven', message: 'an obstacle rises above the stock top and the collet nut is unmeasured' }],
-      });
-    });
-    expect(screen.getByTestId('engrave-sim-coverage').textContent ?? '').toContain('the collet nut');
-  });
-
-  it('says so in the same place when the run was path-only', () => {
-    render(<EngravePanel />);
-    act(() => {
-      useEngraveRunStore.setState({ simStatus: 'refused', pathOnly: true, simDiagnostics: [] });
-    });
-    expect(screen.getByTestId('engrave-sim-coverage').textContent ?? '').toMatch(/path-only/);
-  });
-
-  it('says nothing was swept when the run was refused outright', () => {
-    render(<EngravePanel />);
-    act(() => {
-      useEngraveRunStore.setState({ simStatus: 'refused', pathOnly: false, simDiagnostics: [] });
-    });
-    expect(screen.getByTestId('engrave-sim-coverage').textContent ?? '').toContain('Nothing was swept');
   });
 });
 

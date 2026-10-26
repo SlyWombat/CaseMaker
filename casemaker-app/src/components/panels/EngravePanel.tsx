@@ -5,7 +5,7 @@ import { useEngraveJobFileStore } from '@/store/engraveJobFileStore';
 import { useProjectStore } from '@/store/projectStore';
 import { useEngravePreviewStore } from '@/store/engravePreviewStore';
 import { expandEngraveRow, useEngraveRowStore } from '@/store/engraveRowStore';
-import { useEngraveRunStore, oracleSentence, releaseBlocker, requiredAckCodes, runErrorCodes, saveBlocker, uploadBlocker, verifySimulateSentences } from '@/store/engraveRunStore';
+import { useEngraveRunStore, releaseBlocker, runErrorCodes, saveBlocker, uploadBlocker } from '@/store/engraveRunStore';
 import { useMachineStore } from '@/store/machineStore';
 import { useSimStore } from '@/store/simStore';
 import { useCncModeStore } from '@/store/cncModeStore';
@@ -145,8 +145,7 @@ import { EngraveVectorRow } from './EngraveVectorRow';
 import { EngraveImportDialog } from './EngraveImportDialog';
 import { EngraveSetupsSection } from './EngraveSetupsSection';
 import { RunSheetView } from './RunSheetView';
-import { coverageDisclaimer, type SimRunOutcome } from './simCoverage';
-import { viseEnvelope } from '@/engine/cnc/fixture';
+import { formatDuration } from '@/engine/cnc/plan/format';
 import type {
   EngraveAnyItem,
   EngraveChamfer,
@@ -307,9 +306,9 @@ function SourceTag({ source, testid }: { source: FieldSource; testid: string }):
         source === 'computed'
           ? 'Computed from the feeds table — no one typed this.'
           : source === 'catalogue'
-            ? "Makera's catalogue (#310) — their starting number for this cutter, not a measurement of this machine."
+            ? "Makera's catalogue — their starting number for this cutter, not a measurement of this machine."
             : source === 'measured'
-              ? 'Taken at the bench (#208).'
+              ? 'Taken at the bench.'
               : 'Typed here — not more trustworthy for that.'
       }
     >
@@ -510,29 +509,34 @@ function findingTally(findings: JobFinding[]): string {
  * A collapsible group in the Design rail (#523): a heading with a one-line summary that stays
  * visible, and a body that opens or closes. The summary carries the group's facts in words so a
  * closed group is not a blank — no new controls, the browser's own `<details>` is the mechanism.
+ *
+ * #688 — the open state is the PANEL's, not the group's: Generate's Fix has to open the group a
+ * blocker names, and a `<details>` that owns its own `open` cannot be opened from outside.
  */
 function Group({
   testid,
   title,
   summary,
-  defaultOpen,
   action,
+  open,
+  onOpenChange,
   children,
 }: {
   testid: string;
   title: string;
   summary: string;
-  defaultOpen?: boolean;
   /** #681 — the group's own way into the wizard (the mockup's `edit`), without opening the group. */
   action?: { testid: string; label: string; onClick: () => void };
+  /** #688 — the panel owns the open state, so Generate's Fix can open a group it names. */
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
   children: ReactNode;
 }) {
-  const [open, setOpen] = useState(defaultOpen ?? false);
   return (
     <details
       data-testid={testid}
       open={open}
-      onToggle={(e) => setOpen((e.currentTarget as HTMLDetailsElement).open)}
+      onToggle={(e) => onOpenChange((e.currentTarget as HTMLDetailsElement).open)}
       style={{ marginTop: 8, borderTop: '1px solid #2a2f36', paddingTop: 4 }}
     >
       <summary
@@ -570,12 +574,6 @@ type RowState = 'tick' | 'cross' | 'pending' | 'idle';
 const ROW_MARK: Record<RowState, string> = { tick: '✓', cross: '✗', pending: '…', idle: '·' };
 const ROW_COLOR: Record<RowState, string> = { tick: '#8fd694', cross: '#f0b4ad', pending: '#c8d3de', idle: '#66707a' };
 
-/** "0:12" for a duration in seconds; the CAM's estimate is a rough number, not a promise. */
-function formatDuration(seconds: number): string {
-  const s = Math.max(0, Math.round(seconds));
-  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
-}
-
 /** One of the four status rows (tick / cross / spinner + text). */
 function RunRow({ testid, state, text }: { testid: string; state: RowState; text: string }): JSX.Element {
   return (
@@ -586,6 +584,75 @@ function RunRow({ testid, state, text }: { testid: string; state: RowState; text
       <span>{text}</span>
     </div>
   );
+}
+
+/**
+ * #688 — one of the FOUR ticks Generate leaves on one line (§3.6): `✓ generated · ✓ verified · ✓
+ * simulated · ✓ matches the design`. The counts and under/over-cut numbers those rows used to
+ * carry are the simulation's own facts and live in its panel (#691).
+ */
+function RunTick({ testid, state, label, last = false }: { testid: string; state: RowState; label: string; last?: boolean }): JSX.Element {
+  return (
+    <span data-testid={testid} data-state={state} style={{ display: 'inline-flex', alignItems: 'baseline', gap: 4 }}>
+      <span aria-hidden style={{ color: ROW_COLOR[state] }}>
+        {ROW_MARK[state]}
+      </span>
+      <span>{label}</span>
+      {!last && (
+        <span aria-hidden style={{ color: '#66707a', marginLeft: 4 }}>
+          ·
+        </span>
+      )}
+    </span>
+  );
+}
+
+/**
+ * #688 — where the Generate blocker's Fix takes the reader. The panel opens the GROUP, expands the
+ * item's row, opens the fold and focuses the control; a job-level finding with no field of its own
+ * (there is none today) still lands on the findings list.
+ */
+interface PanelFix {
+  group: 'engrave-group-job' | 'engrave-group-cutter' | 'engrave-group-hold';
+  /** An item (label/shape/drill/…) whose row the finding names. */
+  itemId?: string;
+  /** The control to focus once the group and folds are open. */
+  focusTestid?: string;
+  /** A `<details>` fold to open on the way (`engrave-override`, `engrave-add-menu`). */
+  openDetails?: string;
+}
+
+/** A sentence a disabled Generate carries, and the control that resolves it. */
+interface GenerateBlocker {
+  sentence: string;
+  fix: PanelFix;
+}
+
+/**
+ * #688 — the control a blocking FINDING names. Most findings point at one item and carry its
+ * `labelId`, so the Fix opens that row. The job-level codes are a small closed set with a known
+ * home, mapped here rather than guessed from the message.
+ */
+function findingFix(f: JobFinding): PanelFix {
+  if (f.labelId !== undefined) return { group: 'engrave-group-job', itemId: f.labelId };
+  const code = f.code;
+  if (code === 'tool-missing') return { group: 'engrave-group-cutter', focusTestid: 'engrave-tool' };
+  if (code === 'no-items') {
+    return { group: 'engrave-group-job', openDetails: 'engrave-add-menu', focusTestid: 'engrave-add-summary' };
+  }
+  if (code.startsWith('goal-object')) return { group: 'engrave-group-job', focusTestid: 'engrave-target-input' };
+  if (code === 'facing-too-deep') return { group: 'engrave-group-job', focusTestid: 'engrave-facing-depth' };
+  if (
+    code.startsWith('vise-') ||
+    code.startsWith('setup-') ||
+    code.startsWith('sacrificial-') ||
+    code.startsWith('side-strip') ||
+    code.startsWith('strip-') ||
+    code.startsWith('under-')
+  ) {
+    return { group: 'engrave-group-hold', openDetails: 'engrave-vise-card', focusTestid: 'engrave-vise-card' };
+  }
+  return { group: 'engrave-group-job' };
 }
 
 const OVERRIDE_FIELDS: readonly { key: keyof Omit<CutParams, 'air'>; label: string; unit: string }[] = [
@@ -774,6 +841,56 @@ export function EngravePanel(): JSX.Element {
   const [confirmMetalOverride, setConfirmMetalOverride] = useState(false);
   // #573 — the guided flow replaced the panel while it owned the order. #689 deleted it: Cut is the
   // one flow now (Cut mode's four-step checklist), so there is no second screen to open.
+  // #688 — the Design groups' open state is the PANEL's, so Generate's Fix can open the one a
+  // blocker names (see `Group`). The defaults are the panel redesign's (§3.6): Job and Cutter
+  // open, Hold closed.
+  const [groupsOpen, setGroupsOpen] = useState<Record<string, boolean>>({});
+  const groupProps = (testid: string, defaultOpen: boolean) => ({
+    open: groupsOpen[testid] ?? defaultOpen,
+    onOpenChange: (open: boolean): void => setGroupsOpen((m) => ({ ...m, [testid]: open })),
+  });
+  // #688 — a pressed Fix, applied after the commit that opens the group, fold or row it names:
+  // an element inside a closed `<details>` cannot take focus, so focusing in the click handler
+  // would silently land nowhere.
+  const panelRef = useRef<HTMLDivElement>(null);
+  const [fixRequest, setFixRequest] = useState<PanelFix | null>(null);
+  function applyFix(fix: PanelFix): void {
+    setGroupsOpen((m) => ({ ...m, [fix.group]: true }));
+    if (fix.itemId !== undefined) expandEngraveRow(fix.itemId);
+    // A fresh object each press: the same Fix pressed twice must run twice.
+    setFixRequest({ ...fix });
+  }
+  useEffect(() => {
+    const request = fixRequest;
+    if (request === null) return;
+    setFixRequest(null);
+    const root = panelRef.current;
+    if (root === null) return;
+    if (request.openDetails !== undefined) {
+      const fold = root.querySelector<HTMLDetailsElement>(`[data-testid="${request.openDetails}"]`);
+      if (fold !== null) fold.open = true;
+    }
+    let target: HTMLElement | null = null;
+    if (request.itemId !== undefined) {
+      for (const row of Array.from(root.querySelectorAll<HTMLElement>('[data-item-id]'))) {
+        if (row.getAttribute('data-item-id') !== request.itemId) continue;
+        target =
+          row.querySelector<HTMLElement>(
+            '.engrave-item-row__body input, .engrave-item-row__body select, .engrave-item-row__body button',
+          ) ?? row.querySelector<HTMLElement>('.engrave-item-row__expand');
+        break;
+      }
+    } else if (request.focusTestid !== undefined) {
+      const el = root.querySelector<HTMLElement>(`[data-testid="${request.focusTestid}"]`);
+      if (el !== null) target = el.tagName === 'DETAILS' ? el.querySelector<HTMLElement>('summary') : el;
+    }
+    // A finding with no field of its own still lands on the list that states it.
+    if (target === null) target = root.querySelector<HTMLElement>('[data-testid="engrave-findings"] summary');
+    if (target !== null && typeof target.scrollIntoView === 'function') {
+      target.scrollIntoView({ block: 'center' });
+    }
+    target?.focus();
+  }, [fixRequest]);
   const setSacrificial = useEngraveJobStore((s) => s.setSacrificial);
   const setCutOverride = useEngraveJobStore((s) => s.setCutOverride);
   const setCutOverrideSource = useEngraveJobStore((s) => s.setCutOverrideSource);
@@ -1349,8 +1466,43 @@ export function EngravePanel(): JSX.Element {
   }
 
   const errors = findings.filter((f) => f.severity === 'error');
-  const blockedByFeeds = feeds !== null && !feeds.ok;
-  const blocked = errors.length > 0 || blockedByFeeds;
+  /**
+   * #688 — WHAT DISABLES GENERATE, SAID AT GENERATE (design §1 principle 4). The old code folded
+   * two unrelated causes into one `blocked` flag and one tooltip, "Fix the errors above first." —
+   * which was seen beside a findings line reading "1 warning · 0 errors" (the reproduced PLA +
+   * V/chamfer dead end, audit B9). A blocking FINDING is named by its own sentence; a feeds
+   * refusal is named by its own, with the cutter or the override fold as its Fix.
+   *
+   * Findings come first: they are errors ON the job, and no cutter choice can resolve one. The
+   * feeds half distinguishes its causes — "no feeds … choose a flat end mill" is only true for a
+   * missing row, never for a refused override or a cutter no CAM here can use.
+   */
+  const generateBlocker: GenerateBlocker | null = (() => {
+    const finding = errors[0];
+    if (finding !== undefined) return { sentence: sentenceCase(finding.message), fix: findingFix(finding) };
+    if (feeds === null || feeds.ok || tool === null) return null;
+    if (feeds.cause === 'values') {
+      return {
+        sentence: sentenceCase(feeds.reason),
+        fix: { group: 'engrave-group-cutter', openDetails: 'engrave-override', focusTestid: 'engrave-override' },
+      };
+    }
+    if (feeds.cause === 'cutter') {
+      return {
+        sentence: `${toolDisplayName(tool)} cannot cut this job — choose another cutter`,
+        fix: { group: 'engrave-group-cutter', focusTestid: 'engrave-tool' },
+      };
+    }
+    const material = MATERIAL_LABELS[job.stock.material];
+    // The mockup's sentence (§3.6). A flat end mill is the alternative only when the job is not
+    // already holding one — telling an operator to choose what they already chose is not a fix.
+    const alternative = tool.shape === 'flat' ? '' : ' — choose a flat end mill';
+    return {
+      sentence: `No feeds for the ${toolDisplayName(tool)} on ${material}${alternative}`,
+      fix: { group: 'engrave-group-cutter', focusTestid: 'engrave-tool' },
+    };
+  })();
+  const blocked = generateBlocker !== null;
 
   // #673 — THE INLAY HALF: the derived plug numbers (null when they do not derive) and the action
   // that saves the MALE blank as its own job. The action is offered only when the female's job has
@@ -1613,8 +1765,11 @@ export function EngravePanel(): JSX.Element {
   const verifyErrors = verifyFindings.filter((f) => f.severity === 'error').length;
   const simErrors = run.simDiagnostics.filter((d) => d.severity === 'error').length;
   const runErrors = runErrorCodes(run);
-  const ackCodes = requiredAckCodes(run);
-  const saveBlockerText = saveBlocker(run);
+  // #688 — Design's Save writes the program; the clearance statement is Cut step 1's (#689), so
+  // the checkbox that used to sit here is gone and Save does not wait behind it. Upload and
+  // Release still do (their default), because the program cannot reach the machine until the
+  // operator has said they looked.
+  const saveBlockerText = saveBlocker(run, { requireAcknowledgement: false });
   // #255 — the machine upload. `uploadBlocker` is never weaker than `saveBlocker` (see its own
   // note), so Save and Upload state one rule between them rather than two that agree by luck.
   const uploadBlockerText = uploadBlocker(run);
@@ -1642,33 +1797,20 @@ export function EngravePanel(): JSX.Element {
     if (step !== null) sim.setStep(step);
   };
 
-  // #243 (§14.2 A2) — the blind-spot half of the Simulated row. The SAME pure builder the
-  // Simulate panel uses, fed from THIS run rather than re-written: the fixture the setup
-  // modelled, whether sacrificial material was included, and the codes the sweep raised — the
-  // unmeasured collet nut among them, but only where the sweep actually needed it (#314).
-  // Importing it is what keeps the two panels from disagreeing about what the sweep saw.
-  const simCoverage: string[] =
-    run.simStatus === null
-      ? []
-      : coverageDisclaimer({
-          outcome: (run.simStatus === 'ready' ? 'swept' : run.pathOnly ? 'path-only' : 'refused') as SimRunOutcome,
-          fixtureLabels: viseEnvelope(job.stock, job.workholding.vise, job.sacrificial).boxes.map((b) => b.label),
-          fixtureSource: job.workholding.vise.source,
-          sacrificialModelled: hasSacrificial(job.sacrificial),
-          toolName: toolEntry == null ? null : toolDisplayName(toolEntry.tool),
-          codes: run.simDiagnostics.map((d) => d.code),
-        });
-
+  // #688 — the four ticks replace the two long paragraphs and the oracle numbers that used to sit
+  // here (audit B14). Those facts — what the sweep checked and did not, and the under/over-cut
+  // numbers — are the simulation's own and move to its panel (#691); the data they need is already
+  // in the run view (`simDiagnostics`, `oracle`, `generated.verify`, `pathOnly`) and the pure
+  // `coverageDisclaimer`/`oracleSentence` builders, so no second source is introduced here.
   const rowToolpath: RowState = cam ? 'tick' : run.phase === 'generating' ? 'pending' : run.generated ? 'cross' : 'idle';
-  const rowToolpathText = `Toolpath generated${
-    cam
-      ? ` (${cam.operations} operation${cam.operations === 1 ? '' : 's'}, ${cam.cuttingMoves} move${cam.cuttingMoves === 1 ? '' : 's'}, ~${formatDuration(cam.estimatedSeconds)})`
-      : run.phase === 'generating'
-        ? ' — working…'
-        : run.generated
-          ? ` — stopped at ${run.generated.stage}`
-          : ''
-  }`;
+  const rowToolpathText =
+    rowToolpath === 'tick'
+      ? 'generated'
+      : rowToolpath === 'pending'
+        ? 'generating…'
+        : rowToolpath === 'cross'
+          ? 'not generated'
+          : 'not generated yet';
 
   const rowVerified: RowState = run.generated?.verify
     ? verifyErrors > 0
@@ -1677,26 +1819,42 @@ export function EngravePanel(): JSX.Element {
     : run.phase === 'generating'
       ? 'pending'
       : 'idle';
-  const { verified: rowVerifiedText, simulated: rowSimulatedText } = verifySimulateSentences(run);
+  const rowVerifiedText =
+    rowVerified === 'tick'
+      ? 'verified'
+      : rowVerified === 'cross'
+        ? 'verification found errors'
+        : rowVerified === 'pending'
+          ? 'verifying…'
+          : 'not verified yet';
 
   const rowSimulated: RowState =
     run.simStatus === 'ready' ? (simErrors > 0 ? 'cross' : 'tick') : run.phase === 'simulating' ? 'pending' : run.simStatus ? 'cross' : 'idle';
+  const rowSimulatedText =
+    rowSimulated === 'tick'
+      ? 'simulated'
+      : rowSimulated === 'cross'
+        ? 'the simulation did not pass'
+        : rowSimulated === 'pending'
+          ? 'simulating…'
+          : 'not simulated yet';
 
   const rowOracle: RowState = run.oracle ? (run.oracle.ok ? 'tick' : 'cross') : run.phase === 'checking' ? 'pending' : 'idle';
-  // #535 — a goal program has no 2.5D prediction to compare. Its row states the check that was
-  // made (the sweep, on the dexel grid it ran) rather than prefixing "Matches prediction" to a
-  // comparison the oracle never made; the tick's meaning (the run's check passed) is unchanged.
-  const surfaceRun = run.generated?.surface3d != null;
-  const oracleInput = {
-    oracle: run.oracle,
-    phase: run.phase,
-    previousVerdict: run.previousVerdict,
-    changedSinceLast: run.changedSinceLast,
-    surface: surfaceRun ? { gridPitchMm: run.simGridPitchMm } : null,
-  };
-  const rowOracleText = surfaceRun
-    ? oracleSentence(oracleInput)
-    : `Matches prediction — ${oracleSentence(oracleInput)}`;
+  const rowOracleText =
+    rowOracle === 'tick'
+      ? 'matches the design'
+      : rowOracle === 'cross'
+        ? 'does not match the design'
+        : rowOracle === 'pending'
+          ? 'checking against the design…'
+          : 'not checked against the design yet';
+
+  /**
+   * #688 — ONE labelled time (audit B15). The Generate row used to say "~2:16" while the simulator
+   * said "3:40"; this is the program's own estimate, the same number the run sheet prints, and it
+   * says in words that it is an estimate.
+   */
+  const runTimeText = cam === null ? null : `about ${formatDuration(cam.estimatedSeconds)} (estimated)`;
 
   // #432 review R11 — a FACING job has a second program, and a withheld facing file must not be
   // invisible: Save writes one file fewer than the sheet says, and the sheet's own sentence is the
@@ -1724,7 +1882,7 @@ export function EngravePanel(): JSX.Element {
           (run.generated.facingError === null ? '' : `: ${run.generated.facingError}`) +
           '. The program can still be run, but the top will not be skimmed — clear the reason and generate again.'
         : facingCam !== null
-          ? `${facingCam.toolName}, ⌀ ${facingCam.diameterMm} mm flat, ${facingCam.passes} × ${facingCam.stepDown} mm passes`
+          ? `${facingCam.toolName}, ⌀ ${mm3(facingCam.diameterMm)} mm flat, ${facingCam.passes} × ${mm3(facingCam.stepDown)} mm passes`
           : `${run.generated.facingToolKey ?? 'its own cutter'}`
   }`;
 
@@ -2104,7 +2262,7 @@ export function EngravePanel(): JSX.Element {
         data-testid={`engrave-override-${key}-source`}
         data-source={src}
         aria-pressed={src === 'measured'}
-        title="Click to mark this value as a bench measurement (#208), or back to typed."
+        title="Click to mark this value as a bench measurement, or back to typed."
         style={{
           ...TAG,
           cursor: 'pointer',
@@ -2172,7 +2330,7 @@ export function EngravePanel(): JSX.Element {
   );
 
   return (
-    <div className="panel-stack" data-testid="engrave-panel">
+    <div className="panel-stack" data-testid="engrave-panel" ref={panelRef}>
       {/* Empty, unseen and ALWAYS here, so there is a live region to write a removal into (#411
           review). See `RemovalAnnouncement` for why the visible strip cannot be the live one. */}
       <RemovalAnnouncement />
@@ -2285,7 +2443,7 @@ export function EngravePanel(): JSX.Element {
         testid="engrave-group-job"
         title="Job"
         summary={`Stock ${job.stock.length} × ${job.stock.width} × ${job.stock.thickness} mm · ${job.stock.material}`}
-        defaultOpen
+        {...groupProps('engrave-group-job', true)}
       >
       {/* 1 — stock */}
       <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 8 }}>
@@ -2785,8 +2943,8 @@ export function EngravePanel(): JSX.Element {
                 k.value === 'box' || k.value === 'cylinder'
                   ? `Add a vertical ${k.label.toLowerCase()} pocketed by the region CAM.`
                   : k.value === 'cone'
-                    ? 'Add a cone. Its sloped wall needs the V-carve/chamfer work (#221) or the 3D engine (#222), so it is refused by name rather than approximated.'
-                    : 'Add a sphere. It is a dexel job (#222), so it is refused by name rather than approximated as a circle pocket.'
+                    ? 'Add a cone. Its sloped wall needs the V-carve/chamfer work or the 3D engine, so it is refused by name rather than approximated.'
+                    : 'Add a sphere. It is a 3D sweep job, so it is refused by name rather than approximated as a circle pocket.'
               }
               onClick={() => expandEngraveRow(addPrimitive(k.value))}
             >
@@ -2942,7 +3100,7 @@ export function EngravePanel(): JSX.Element {
         testid="engrave-group-cutter"
         title="Cutter"
         summary={`${job.toolKey ? 'cutter chosen' : 'no cutter chosen'} · margin ${mmText(margins.boundaryMargin)} mm`}
-        defaultOpen
+        {...groupProps('engrave-group-cutter', true)}
       >
       {/* 3 — tool */}
       <h3 style={SUBHEAD}>Tool</h3>
@@ -3174,23 +3332,25 @@ export function EngravePanel(): JSX.Element {
       {params && (
         <>
           {feedRow('spindle', 'spindle', `${params.rpm} rpm`)}
-          {feedRow('feed', 'feed', `${params.feed} mm/min`)}
-          {feedRow('plunge', 'plunge', `${params.plungeFeed} mm/min`)}
-          {feedRow('step-down', 'step-down', `${params.stepDown} mm`)}
-          {feedRow('step-over', 'step-over', `${params.stepOver} mm`)}
+          {feedRow('feed', 'feed', `${mm3(params.feed)} mm/min`)}
+          {feedRow('plunge', 'plunge', `${mm3(params.plungeFeed)} mm/min`)}
+          {/* #688 (audit B10) — three decimals at most, trailing zeros dropped: a step-over of
+              1.42875 mm read as five decimals of precision the row never claimed. */}
+          {feedRow('step-down', 'step-down', `${mm3(params.stepDown)} mm`)}
+          {feedRow('step-over', 'step-over', `${mm3(params.stepOver)} mm`)}
         </>
       )}
       {/* The override stays mounted even while refused: hiding it would hide the only way to
           undo the override that caused the refusal. */}
       {tool && (
-        <details style={{ marginTop: 6 }}>
+        <details data-testid="engrave-override" style={{ marginTop: 6 }}>
           <summary style={{ fontSize: 11, color: '#9aa4b0', cursor: 'pointer' }}>Override</summary>
           <div style={{ ...FIELD_GRID, marginTop: 6 }}>
             {OVERRIDE_FIELDS.map((f) => overrideNum(f.key, f.label, f.unit))}
           </div>
           <p style={MUTED}>
             Leave a field empty to use the computed value. A step-over wider than the cutter’s
-            radius is refused rather than clamped (#191).
+            radius is refused rather than clamped.
           </p>
         </details>
       )}
@@ -3255,6 +3415,7 @@ export function EngravePanel(): JSX.Element {
         title="Hold"
         summary={`Vise — ${viseBadge(job.workholding.vise)} · blank on the ${job.workholding.vise.seat}`}
         action={{ testid: 'engrave-hold-edit', label: 'edit', onClick: () => openWizard('holding') }}
+        {...groupProps('engrave-group-hold', false)}
       >
       {/* 4 — vise */}
       {/* #523 — the vise is a card: the one sentence always visible, the fields open on Edit. */}
@@ -3487,61 +3648,88 @@ export function EngravePanel(): JSX.Element {
           </p>
         )}
 
-        {/* 8 — generate → verify → simulate → oracle → save (#206) */}
+        {/* 8 — generate → verify → simulate → oracle → save */}
         <h3 style={SUBHEAD}>Generate</h3>
       <div data-testid="engrave-generate-slot">
-        <button
-          type="button"
-          data-testid="engrave-generate"
-          disabled={blocked || running || !simEnabled}
-          title={
-            !simEnabled
-              ? 'This build has no simulation worker.'
-              : blocked
-                ? 'Fix the errors above first.'
-                : 'Generate, verify, simulate and check the toolpath (#206).'
-          }
-          style={{ width: '100%', padding: 7 }}
-          onClick={() => void generate()}
-        >
-          {running ? 'Working…' : 'Generate toolpath'}
-        </button>
+        {/* #688 — the blocker is the button's OWN sentence with its Fix (design §1 principle 4).
+            It used to be one tooltip for two causes, "Fix the errors above first.", which could
+            be — and was — shown beside "0 errors" (audit B9). */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          <button
+            type="button"
+            data-testid="engrave-generate"
+            disabled={blocked || running || !simEnabled}
+            title={
+              !simEnabled
+                ? 'This build has no simulation worker.'
+                : 'Generate the toolpath, verify it, simulate it and check it against the design.'
+            }
+            style={{ padding: '7px 14px' }}
+            onClick={() => void generate()}
+          >
+            {running ? 'Working…' : 'Generate'}
+          </button>
+          {generateBlocker !== null && (
+            <span
+              data-testid="engrave-generate-blocker"
+              style={{ flex: '1 1 180px', fontSize: 12, lineHeight: 1.45, color: SEVERITY_COLOR.error }}
+            >
+              {generateBlocker.sentence}{' '}
+              <button
+                type="button"
+                data-testid="engrave-generate-fix"
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  padding: 0,
+                  font: 'inherit',
+                  color: '#8fb8e0',
+                  cursor: 'pointer',
+                  textDecoration: 'underline',
+                }}
+                onClick={() => applyFix(generateBlocker.fix)}
+              >
+                ▸ Fix
+              </button>
+            </span>
+          )}
+        </div>
 
         {!blocked && (
           <>
-            <div style={{ marginTop: 6 }} data-testid="engrave-run-rows">
-              <RunRow testid="engrave-run-toolpath" state={rowToolpath} text={rowToolpathText} />
-              {/* #277 — what the last measured run of this program actually took, from a record
-                  file a person filled in. It sits BESIDE the estimate, never in place of it: the
-                  `~` above is still the planning figure, and this is a reading with a date. */}
-              {lastMeasured && lastMeasured.minutes !== null && (
-                <p
-                  data-testid="engrave-last-measured"
-                  style={{ margin: '2px 0 4px 18px', fontSize: 11, color: '#9aa4b0', lineHeight: 1.45 }}
-                >
-                  Last measured run: {formatDuration(lastMeasured.minutes * 60)} on {lastMeasured.cutOn} — a
-                  bench reading, not the estimate above.
-                </p>
+            {/* #688 — four ticks and ONE labelled time (§3.6, audit B14/B15). The counts and the
+                under/over-cut numbers the old rows carried belong to the simulation's own panel
+                (#691), whose data is already the run view's. */}
+            <div
+              data-testid="engrave-run-rows"
+              style={{ marginTop: 6, display: 'flex', flexWrap: 'wrap', alignItems: 'baseline', gap: 6, fontSize: 12, color: '#c8d3de' }}
+            >
+              <RunTick testid="engrave-run-toolpath" state={rowToolpath} label={rowToolpathText} />
+              <RunTick testid="engrave-run-verified" state={rowVerified} label={rowVerifiedText} />
+              <RunTick testid="engrave-run-simulated" state={rowSimulated} label={rowSimulatedText} />
+              <RunTick testid="engrave-run-oracle" state={rowOracle} label={rowOracleText} last />
+              {runTimeText !== null && (
+                <span data-testid="engrave-run-time" style={{ marginLeft: 'auto', color: '#9aa4b0' }}>
+                  {runTimeText}
+                </span>
               )}
-              {/* #432 review R11 — the facing program is its own file: name the cutter it runs, or
-                  the reason it was withheld. Absent when the job does not face. */}
-              {facingJob && <RunRow testid="engrave-run-facing" state={rowFacing} text={rowFacingText} />}
-              <RunRow testid="engrave-run-verified" state={rowVerified} text={rowVerifiedText} />
-              <RunRow testid="engrave-run-simulated" state={rowSimulated} text={rowSimulatedText} />
-              {simCoverage.length > 0 && (
-                <div
-                  data-testid="engrave-sim-coverage"
-                  style={{ margin: '2px 0 4px 18px', display: 'flex', flexDirection: 'column', gap: 2 }}
-                >
-                  {simCoverage.map((line, i) => (
-                    <span key={i} style={{ fontSize: 11, color: '#9aa4b0', lineHeight: 1.45 }}>
-                      {line}
-                    </span>
-                  ))}
-                </div>
-              )}
-              <RunRow testid="engrave-run-oracle" state={rowOracle} text={rowOracleText} />
             </div>
+            {/* #432 review R11 — the facing program is its own file: name the cutter it runs, or
+                the reason it was withheld. Absent when the job does not face. */}
+            {facingJob && <RunRow testid="engrave-run-facing" state={rowFacing} text={rowFacingText} />}
+            {/* #277 — what the last measured run of this program actually took, from a record
+                file a person filled in. It sits BESIDE the estimate, never in place of it: the
+                figure above is the program's planning estimate, and this is a reading with a
+                date. */}
+            {lastMeasured && lastMeasured.minutes !== null && (
+              <p
+                data-testid="engrave-last-measured"
+                style={{ margin: '2px 0 4px', fontSize: 11, color: '#9aa4b0', lineHeight: 1.45 }}
+              >
+                Last measured run: {formatDuration(lastMeasured.minutes * 60)} on {lastMeasured.cutOn} — a
+                bench reading, not the estimate above.
+              </p>
+            )}
 
             {runErrors.length > 0 && (
               <p style={{ ...MUTED, color: SEVERITY_COLOR.error }} data-testid="engrave-run-errors">
@@ -3554,26 +3742,11 @@ export function EngravePanel(): JSX.Element {
               </p>
             )}
 
-            {ackCodes.length > 0 && (
-              <label
-                style={{ display: 'block', marginTop: 6, fontSize: 12, color: '#c8d3de' }}
-                data-testid="engrave-ack-label"
-              >
-                <input
-                  type="checkbox"
-                  data-testid="engrave-ack"
-                  checked={run.acknowledged}
-                  onChange={(e) => run.setAcknowledged(e.target.checked)}
-                />{' '}
-                I have checked clearance to the vise and the tool&apos;s reach myself.
-              </label>
-            )}
-
             <button
               type="button"
               data-testid="engrave-save"
               disabled={saveBlockerText !== null}
-              title={saveBlockerText ?? 'Save the generated program — to upload it from here, or to open in Makera Studio.'}
+              title={saveBlockerText ?? 'Save the generated program to carry it to the Cut step, or to open in Makera Studio.'}
               style={{ width: '100%', padding: 7, marginTop: 6 }}
               onClick={() => void saveProgram()}
             >
@@ -3599,7 +3772,7 @@ export function EngravePanel(): JSX.Element {
                 runSheetBlocked
                   ? 'The job changed since it was generated; regenerate before opening the sheet.'
                   : runSheetReady
-                    ? 'Open the printable run sheet for the machine (#207).'
+                    ? 'Open the printable run sheet for the machine.'
                     : 'Generate and verify the job first.'
               }
               style={{ width: '100%', padding: 7, marginTop: 6 }}

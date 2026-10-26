@@ -1088,7 +1088,7 @@ function catalogueOnlyRow(
 /** The row a job resolves against, and whether that row came from the catalogue alone (#347). */
 type EntryChoice =
   | { ok: true; entry: FeedsEntry; catalogueOnly: boolean }
-  | { ok: false; reason: string };
+  | { ok: false; reason: string; cause: 'no-feeds' };
 
 /**
  * Which row `feedsFor` resolves this job against, or why there is none (#310, Route A of #347).
@@ -1119,7 +1119,11 @@ function entryFor(
   );
   if (entry) return { ok: true, entry, catalogueOnly: false };
   if (table.some((e) => e.material === material && (e.edge ?? 'flat') === edge)) {
-    return { ok: false, reason: `no cutting parameters for a ${diameter} mm ${edge === 'v' ? 'V-bit' : 'cutter'} in ${material}` };
+    return {
+      ok: false,
+      cause: 'no-feeds',
+      reason: `no cutting parameters for a ${num3(diameter)} mm ${edge === 'v' ? 'V-bit' : 'cutter'} in ${material}`,
+    };
   }
   // A V-bit with no row for its MATERIAL at all: the vendor's catalogue cannot answer it either —
   // Makera's rows are keyed by `g_ID` and state a flat end mill's numbers, and a cone's cutting
@@ -1128,15 +1132,16 @@ function entryFor(
   if (edge === 'v') {
     return {
       ok: false,
+      cause: 'no-feeds',
       reason:
-        `no cutting parameters for a ${diameter} mm V-bit in ${MATERIAL_LABELS[material]}: the starting ` +
+        `no cutting parameters for a ${num3(diameter)} mm V-bit in ${MATERIAL_LABELS[material]}: the starting ` +
         `table has a V-bit row for PLA, PETG and plastic only, and ${CATALOGUE_LABEL} states a flat end mill's numbers, ` +
         `never a cone's. Pick PLA, PETG or plastic, or a flat end mill for this material.`,
     };
   }
 
   const label = MATERIAL_LABELS[material];
-  const named = `a ${diameter} mm cutter in ${label}`;
+  const named = `a ${num3(diameter)} mm cutter in ${label}`;
   const coverage = catalogueCoverageFor(snapshot.rows, material, tool);
   // The cutter has to carry Makera's own id for any of their rows to name it (#332: a clone's
   // rendered cutter carries no identity of its own — and neither does a `0`, which is what a file
@@ -1144,6 +1149,7 @@ function entryFor(
   if (coverage.kind === 'unlisted' && coverage.why === 'no-vendor-id') {
     return {
       ok: false,
+      cause: 'no-feeds',
       reason:
         `no cutting parameters for ${named}: the starting table has no row for ${label}, and ` +
         `${CATALOGUE_LABEL}'s rows are matched by Makera's own cutter id — which this cutter does ` +
@@ -1154,6 +1160,7 @@ function entryFor(
   if (coverage.kind === 'unlisted') {
     return {
       ok: false,
+      cause: 'no-feeds',
       reason:
         `no cutting parameters for ${named}: the starting table has no row for ${label}, and ` +
         `${CATALOGUE_LABEL} has no row for ${tool.name} in it. A material the starting table does ` +
@@ -1168,6 +1175,7 @@ function entryFor(
   if (coverage.kind === 'not-for-material') {
     return {
       ok: false,
+      cause: 'no-feeds',
       reason:
         `no cutting parameters for ${named}: the starting table has no row for ${label}, and ` +
         `${CATALOGUE_LABEL} lists ${tool.name} for ${listMaterials(coverage.listedFor)}, not ` +
@@ -1187,6 +1195,7 @@ function entryFor(
     const { label: fieldLabel, unit } = CATALOGUE_FIELD[field];
     return {
       ok: false,
+      cause: 'no-feeds',
       reason:
         `${CATALOGUE_LABEL} states a ${fieldLabel} of ${row[field]} ${unit} for ${tool.name} in ` +
         `${label}, which this job cannot use — ${why} — and the starting table has no row for ` +
@@ -1213,6 +1222,25 @@ function catalogueOnlyNote(entry: FeedsEntry): string {
   );
 }
 
+/** Three decimals at most, trailing zeros dropped — the vocabulary every sentence outside obeys. */
+function num3(n: number): string {
+  return String(Number(n.toFixed(3)));
+}
+
+/**
+ * #688 — WHY a job has no feeds, in the one distinction the panel's Generate sentence needs:
+ * whether the answer is "pick a cutter that has numbers" or "change the value that was refused".
+ * The full `reason` stays the technical sentence the Cutting box prints; the cause only chooses the
+ * short blocker at the button, so neither surface has to parse the other's words.
+ */
+export type FeedsFailureCause =
+  /** No row (or no catalogue row this job can use) for this cutter on this material. */
+  | 'no-feeds'
+  /** The cutter itself is one no trace/CAM can use (a shape with no usable cutting geometry). */
+  | 'cutter'
+  /** A resolved value — an override, or one the machine refuses — is the blocker. */
+  | 'values';
+
 export type FeedsResult =
   | {
       ok: true;
@@ -1238,7 +1266,7 @@ export type FeedsResult =
        */
       diagnostics: FeedsDiagnostic[];
     }
-  | { ok: false; reason: string };
+  | { ok: false; reason: string; cause: FeedsFailureCause };
 
 /**
  * Resolve the cutting parameters for a material and a tool, or refuse with a reason.
@@ -1301,7 +1329,7 @@ export function feedsFor(
   // is the same refusal `cuttingRadiusForSweep` made before it — a ball nose, a bull nose, or a
   // cone whose header states no tip or angle.
   const usable = cuttingForTrace(tool);
-  if (!usable.ok) return { ok: false, reason: usable.reason };
+  if (!usable.ok) return { ok: false, cause: 'cutter', reason: usable.reason };
   // #669 — A CHAMFER BIT RESOLVES THE FLAT ROW FOR ITS CUTTING DIAMETER. The V rows are keyed to an
   // engraver's TIP (0.3–0.5 mm); a chamfer's tip is a point or a small flat, a diameter no V row
   // carries, and on wood there is no V row at all. What a chamfer pass actually engages is the
@@ -1318,7 +1346,7 @@ export function feedsFor(
       : usable.tool.radius * 2;
 
   const choice = entryFor(snapshot, material, tool, diameter, machine, table, edge, refuseFraction);
-  if (!choice.ok) return { ok: false, reason: choice.reason };
+  if (!choice.ok) return { ok: false, cause: choice.cause, reason: choice.reason };
   const { entry, catalogueOnly } = choice;
 
   // #310 — the catalogue rung. A row a coupon has measured is NOT eligible: "a catalogue row never
@@ -1397,19 +1425,20 @@ export function feedsFor(
   if (params.stepOver > stepOverLimit) {
     return {
       ok: false,
+      cause: 'values',
       reason:
         edge === 'v'
-          ? `step-over ${params.stepOver} mm exceeds the ${diameter} mm tip width of the V-bit: contour-parallel tip passes would leave an uncut spine, and an override that leaves material is refused rather than clamped`
-          : `step-over ${params.stepOver} mm exceeds the ${toolRadius} mm radius of the ${diameter} mm cutter: contour-parallel loops would leave an uncut spine, and an override that leaves material is refused rather than clamped`,
+          ? `step-over ${num3(params.stepOver)} mm exceeds the ${num3(diameter)} mm tip width of the V-bit: contour-parallel tip passes would leave an uncut spine, and an override that leaves material is refused rather than clamped`
+          : `step-over ${num3(params.stepOver)} mm exceeds the ${num3(toolRadius)} mm radius of the ${num3(diameter)} mm cutter: contour-parallel loops would leave an uncut spine, and an override that leaves material is refused rather than clamped`,
     };
   }
 
-  if (params.stepDown <= 0) return { ok: false, reason: `step-down must be > 0, got ${params.stepDown} mm` };
-  if (params.peck <= 0) return { ok: false, reason: `peck depth must be > 0, got ${params.peck} mm` };
-  if (params.stepOver <= 0) return { ok: false, reason: `step-over must be > 0, got ${params.stepOver} mm` };
-  if (params.feed <= 0) return { ok: false, reason: `cutting feed must be > 0, got ${params.feed} mm/min` };
-  if (params.plungeFeed <= 0) return { ok: false, reason: `plunge feed must be > 0, got ${params.plungeFeed} mm/min` };
-  if (params.rpm <= 0) return { ok: false, reason: `spindle speed must be > 0, got ${params.rpm} RPM` };
+  if (params.stepDown <= 0) return { ok: false, cause: 'values', reason: `step-down must be > 0, got ${num3(params.stepDown)} mm` };
+  if (params.peck <= 0) return { ok: false, cause: 'values', reason: `peck depth must be > 0, got ${num3(params.peck)} mm` };
+  if (params.stepOver <= 0) return { ok: false, cause: 'values', reason: `step-over must be > 0, got ${num3(params.stepOver)} mm` };
+  if (params.feed <= 0) return { ok: false, cause: 'values', reason: `cutting feed must be > 0, got ${num3(params.feed)} mm/min` };
+  if (params.plungeFeed <= 0) return { ok: false, cause: 'values', reason: `plunge feed must be > 0, got ${num3(params.plungeFeed)} mm/min` };
+  if (params.rpm <= 0) return { ok: false, cause: 'values', reason: `spindle speed must be > 0, got ${num3(params.rpm)} RPM` };
 
   // The single choke point every value passes through before it reaches a toolpath (#184).
   // The plunge feed has no ceiling of its own, so it goes through as a feed.
@@ -1417,7 +1446,7 @@ export function feedsFor(
   const plunge = clampToMachine(params.plungeFeed, null, machine, refuseFraction);
   diagnostics.push(...cutting.diagnostics, ...plunge.diagnostics);
   const refused = diagnostics.find((d) => d.severity === 'error');
-  if (refused) return { ok: false, reason: refused.message };
+  if (refused) return { ok: false, cause: 'values', reason: refused.message };
 
   // Which fields the machine MOVED. Read off the choke point's own answer rather than compared
   // against a remembered copy: `clampToMachine` returns the value it settled on, and a ceiling that

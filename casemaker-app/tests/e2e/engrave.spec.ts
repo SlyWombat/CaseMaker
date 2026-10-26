@@ -50,10 +50,9 @@ test('the default job generates, verifies, simulates and saves a .nc', async ({ 
   expect(state.stage).toBe('done');
   expect(state.oracleOk).toBe(true);
   expect(state.verifyErrors).toBe(0);
-  expect(state.canSave).toBe(false); // the acknowledgement is still required
-
-  // Tick the clearance box, then Save.
-  await page.getByTestId('engrave-ack').check();
+  // #688 — Design's Save writes the program without a clearance tick; that statement is Cut
+  // step 1's (#689). The run is savable the moment it is ready.
+  expect(state.canSave).toBe(true);
   await expect(page.getByTestId('engrave-save')).toBeEnabled();
 
   const downloadPromise = page.waitForEvent('download');
@@ -74,7 +73,7 @@ test('editing the job after Generate makes the result stale and blocks Save', as
 
   await page.getByTestId('engrave-generate').click();
   await expect(page.getByTestId('engrave-run-oracle')).toHaveAttribute('data-state', 'tick', { timeout: 180_000 });
-  await page.getByTestId('engrave-ack').check();
+  // #688 — no clearance tick stands between a ready run and Save.
   await expect(page.getByTestId('engrave-save')).toBeEnabled();
 
   // Change a label's depth: the run no longer describes the job on screen. #411 folds a job's
@@ -103,7 +102,6 @@ test("the saved .nc, reloaded as a stranger's file, removes the same volume", as
   expect(inApp.removedVolume).toBeGreaterThan(0);
 
   // Save the exact bytes, then open them in "Simulate .nc" as though they came from someone else.
-  await page.getByTestId('engrave-ack').check();
   const downloadPromise = page.waitForEvent('download');
   await page.getByTestId('engrave-save').click();
   const path = await (await downloadPromise).path();
@@ -196,7 +194,7 @@ test('the run sheet opens for a verified job, names the saved file, and prints w
 
   await page.getByTestId('engrave-generate').click();
   await expect(page.getByTestId('engrave-run-oracle')).toHaveAttribute('data-state', 'tick', { timeout: 180_000 });
-  await page.getByTestId('engrave-ack').check();
+  // #688 — a ready run needs no clearance tick before the sheet or Save.
   await expect(page.getByTestId('engrave-run-sheet')).toBeEnabled();
 
   // Save writes THREE files (#273, #277): the job, the frame beside it, then the run record. Awaiting
@@ -242,7 +240,7 @@ test('a filled run record shows its measured run beside the estimate', async ({ 
 
   await page.getByTestId('engrave-generate').click();
   await expect(page.getByTestId('engrave-run-oracle')).toHaveAttribute('data-state', 'tick', { timeout: 180_000 });
-  await page.getByTestId('engrave-ack').check();
+  // #688 — no clearance tick stands between a ready run and Save.
   await expect(page.getByTestId('engrave-save')).toBeEnabled();
 
   const downloads: { name: string; file: Download }[] = [];
@@ -287,14 +285,15 @@ test('a filled run record shows its measured run beside the estimate', async ({ 
   // The reading appears, with its duration and its date…
   const measured = page.getByTestId('engrave-last-measured');
   await expect(measured).toBeVisible();
-  await expect(measured).toContainText('12:30');
+  // #688 — durations are written the plan's way ({@link formatDuration}), not as a clock face.
+  await expect(measured).toContainText('12 min 30 s');
   await expect(measured).toContainText('2026-10-05');
 
-  // …and the estimate above it is untouched. This is the whole point of the feature: the measured
-  // figure sits beside the planning figure, and neither one replaces the other.
-  const estimate = await page.getByTestId('engrave-run-toolpath').textContent();
-  expect(estimate).not.toContain('12:30');
-  expect(estimate).toMatch(/~\d+:\d\d/);
+  // …and the ONE estimate above it is untouched. This is the whole point of the feature: the
+  // measured figure sits beside the planning figure, and neither one replaces the other.
+  const estimate = await page.getByTestId('engrave-run-time').textContent();
+  expect(estimate).not.toContain('12 min 30 s');
+  expect(estimate).toMatch(/^about .+ \(estimated\)$/);
 
   // The rule, end to end: the same readings with the date deleted are refused, and the line stays
   // as it was. A measurement with no date is a number nobody can place.
@@ -304,7 +303,7 @@ test('a filled run record shows its measured run beside the estimate', async ({ 
   );
   expect(undated.ok).toBe(false);
   expect(undated.reason).toContain('no cutOn date');
-  await expect(measured).toContainText('12:30');
+  await expect(measured).toContainText('12 min 30 s');
 });
 
 test('#368 — a badge that states its print reaches Engrave with a live colour split', async ({

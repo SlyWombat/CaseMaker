@@ -183,6 +183,9 @@ export function EngraveItemRow({
         selected ? ' engrave-item-row--selected' : ''
       }`}
       data-testid={`${prefix}-row-${index}`}
+      // #688 — the Generate blocker's Fix finds the row a finding named. The row's test ids are
+      // positional (a list index), so they cannot answer "where is THIS item"; its own id can.
+      data-item-id={id}
     >
       <div className="engrave-item-row__head">
         <button
