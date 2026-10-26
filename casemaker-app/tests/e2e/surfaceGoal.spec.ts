@@ -1,0 +1,88 @@
+// #535 end to end, in a real browser — a goal mesh is an OPERATION: import an STL through the
+// picker, pick its cutter, Generate, and read back the facts the UI states on its own:
+//
+//   1. the goal row's report — the roughing layers the CAM ran and the grid its heightfield was
+//      sampled on;
+//   2. the run's check sentence — the FLAT dexel that checked it ("No 2.5D check for a surface
+//      program — checked on the 0.1 mm dexel grid"), never the 2.5D oracle's vacuous 0/0.
+//
+// The run is real: the worker, the surfacing CAM, the FLAT column sweep and the run store all
+// run. The fixture is the 20 × 20 × 6 mm chamfered block in `fixtures/` (its provenance is the
+// sibling README). The web build ships only the two built-in flat cutters, so the goal runs with
+// a flat one — a valid Surface a mesh configuration; the finish is faceted and the row says so.
+//
+// The Simulate panel presents only sessions it started itself (#506), so the grid a Cut run was
+// swept on is stated on the run row, not in that panel.
+
+import { fileURLToPath } from 'node:url';
+import { test, expect } from './fixtures/caseMaker';
+
+const STL = fileURLToPath(new URL('./fixtures/chamfered-block.stl', import.meta.url));
+
+// The surfacing CAM and the column sweep run in the worker; under swiftshader the whole run
+// takes tens of seconds, so these get well past Playwright's 30 s default.
+test.setTimeout(240_000);
+
+test('a goal STL from the picker generates, and the UI states its own check and grid', async ({ cm, page }) => {
+  await cm.ready();
+  await page.evaluate(async () => {
+    await window.__caseMaker!.loadBuiltinBoard('rpi-4b');
+    window.__caseMaker!.engraveReset();
+  });
+  await page.getByTestId('sidebar-button-cnc-engrave').click();
+  await expect(page.getByTestId('engrave-panel')).toBeVisible();
+
+  // Surface a mesh is offered on an EMPTY job; the shipped job starts with the three demo
+  // labels, so remove them the way an operator would.
+  const labels = page.getByTestId(/^engrave-label-row-/);
+  await expect(labels).toHaveCount(3);
+  for (let i = 0; i < 3; i++) {
+    await page.getByTestId('engrave-label-remove-0').click();
+    await expect(labels).toHaveCount(2 - i);
+  }
+
+  // The cutter: a built-in flat end mill (the web build has no catalogue).
+  await page.getByTestId('engrave-tool').selectOption('flat-1.0');
+
+  // Import the goal through the operation picker — the one entry point (#662). The pick opens the
+  // panel's file input, so the chooser is the assertion that the picker drives the import.
+  await page.getByTestId('engrave-add-summary').click();
+  const chooser = page.waitForEvent('filechooser');
+  await page.getByTestId('engrave-add-surface').click();
+  await (await chooser).setFiles(STL);
+
+  // The mesh is the job's one operation, and its row says what it is.
+  await expect(page.getByTestId('engrave-target-row-0')).toBeVisible();
+  await expect(page.getByTestId('engrave-target-type-0')).toHaveText('Surface a mesh');
+  await expect(page.getByTestId('engrave-target-error')).toHaveCount(0);
+
+  await page.getByTestId('engrave-generate').click();
+
+  // The run's four rows tick; the oracle row is the goal program's own check.
+  await expect(page.getByTestId('engrave-run-toolpath')).toHaveAttribute('data-state', 'tick', { timeout: 180_000 });
+  await expect(page.getByTestId('engrave-run-simulated')).toHaveAttribute('data-state', 'tick', { timeout: 180_000 });
+  await expect(page.getByTestId('engrave-run-oracle')).toHaveAttribute('data-state', 'tick', { timeout: 180_000 });
+
+  // The check sentence: the dexel grid the sweep ran on, never a comparison the 2.5D oracle did
+  // not make. The grid number itself is the shop's flat pitch (0.1 mm with no location).
+  const oracleRow = page.getByTestId('engrave-run-oracle');
+  await expect(oracleRow).toContainText('No 2.5D check for a surface program — checked on the');
+  await expect(oracleRow).toContainText('mm dexel grid');
+  await expect(oracleRow).not.toContainText('0.0000');
+  await expect(oracleRow).not.toContainText('Matches prediction');
+
+  // The goal row's own facts, after a Generate: the passes' layers and the sampled grid. The
+  // import opens the row; the Technical fold is one more press.
+  if ((await page.getByTestId('engrave-target-technical-0').count()) === 0) {
+    await page.getByTestId('engrave-target-expand-0').click();
+  }
+  await expect(page.getByTestId('engrave-target-technical-0')).toBeVisible();
+  await page.getByTestId('engrave-target-technical-0').locator('summary').click();
+  const report = page.getByTestId('engrave-target-surface-report-0');
+  await expect(report).toBeVisible();
+  await expect(report).toContainText('roughing layer');
+  await expect(report).toContainText('mm step-down');
+  await expect(report).toContainText('mm step-over');
+  await expect(report).toContainText('Sampled on a');
+  await expect(report).toContainText('mm grid');
+});
