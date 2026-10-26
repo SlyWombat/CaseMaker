@@ -10,10 +10,11 @@
  *   - **a file** — `engine/import/meshStock.ts` reads an STL/3MF; {@link stockFromFile} takes its size.
  *
  * WHAT A JOB'S STOCK CAN BE. `EngraveJob.stock` is a rectangle held in the vise: length × width ×
- * thickness. A sheet, plate, block or printed blank IS that. A rod, tube or disc is not, and its
- * bounding box would plan cuts into air off its edge — so those are refused by name, with where they
- * belong (the rotary), rather than approximated. A sphere is not offered at all (decision Q20); the
- * shelf already refuses one (`SPHERE_REFUSAL`).
+ * thickness. A sheet, plate, block or printed blank IS that. A disc or a rod is round, and a face
+ * job on one is cut on its flat top or along its side — the job still plans in the rectangle around
+ * it ({@link boxForForm}), and the form on the entry keeps the round fact for the screens. A tube is
+ * refused by name: its hole leaves no face a job can cut. A sphere is not offered at all (decision
+ * Q20); the shelf already refuses one (`SPHERE_REFUSAL`).
  *
  * WHAT IS NOT CARRIED. A shelf entry's `layers` carry a name and a thickness but no layer height, and
  * its `domeHeight` has no axes. Neither is invented: `colour` stays absent and the notes say so;
@@ -32,14 +33,61 @@ import type { MillProfile } from './machine';
 import { isMetalMaterial, isWoodMaterial, MATERIAL_LABELS } from './materials';
 import type { EngraveFacing, EngraveJob, FieldSource, JobStockEntry, JobStockFinish, JobStockForm, StockMaterial } from '@/types/engraveJob';
 
-/** The rectangular forms a job's stock can take, in the order the wizard offers them. */
-export const JOB_STOCK_FORMS: readonly JobStockForm[] = ['plate', 'block', 'sheet', 'printed-blank'];
+/** The forms a job's stock can take, in the order the wizard's pictures offer them. */
+export const JOB_STOCK_FORMS: readonly JobStockForm[] = ['plate', 'block', 'sheet', 'printed-blank', 'disc', 'rod'];
 
 /** The size of a rectangular stock, mm: length = X, width = Y, thickness = Z. */
 export interface StockBox {
   length: number;
   width: number;
   thickness: number;
+}
+
+/** The fields a form is typed in, mm — a box's three axes, or a round form's diameter and one length. */
+export type StockSizeKey = 'length' | 'width' | 'thickness' | 'diameter';
+export type StockSize = Partial<Record<StockSizeKey, number | null>>;
+
+/**
+ * What each form asks for, in the order it is shown (#683). The rectangular forms ask for the
+ * panel's three words; a disc asks for its diameter and thickness, a rod for its length and diameter.
+ * The form's picture decides these fields and nothing else about the cut.
+ */
+export const STOCK_SIZE_FIELDS: Readonly<Record<JobStockForm, readonly StockSizeKey[]>> = {
+  plate: ['length', 'width', 'thickness'],
+  block: ['length', 'width', 'thickness'],
+  sheet: ['length', 'width', 'thickness'],
+  'printed-blank': ['length', 'width', 'thickness'],
+  disc: ['diameter', 'thickness'],
+  rod: ['length', 'diameter'],
+};
+
+/**
+ * The rectangular box a form's own numbers make, mm. The job plans in one rectangle:
+ *
+ *   - a disc ⌀D × T is D wide, D deep and T tall, cut on its flat top;
+ *   - a rod ⌀D × L is L long, D wide and D tall, cut along its side.
+ *
+ * Null when a number the form needs is missing. A tube is not a job form; `formProblem` refuses it.
+ */
+export function boxForForm(form: JobStockForm, size: StockSize): StockBox | null {
+  const has = (key: StockSizeKey): number | null => {
+    const v = size[key];
+    return v === null || v === undefined ? null : v;
+  };
+  if (form === 'disc') {
+    const diameter = has('diameter');
+    const thickness = has('thickness');
+    return diameter === null || thickness === null ? null : { length: diameter, width: diameter, thickness };
+  }
+  if (form === 'rod') {
+    const diameter = has('diameter');
+    const length = has('length');
+    return diameter === null || length === null ? null : { length, width: diameter, thickness: diameter };
+  }
+  const length = has('length');
+  const width = has('width');
+  const thickness = has('thickness');
+  return length === null || width === null || thickness === null ? null : { length, width, thickness };
 }
 
 /** What a choice does to the new job: its stock, where it came from, and what to tell the user. */
@@ -61,21 +109,19 @@ function mm(v: number): string {
   return String(Number(v.toFixed(3)));
 }
 
-function isJobForm(form: string): form is JobStockForm {
+export function isJobForm(form: string): form is JobStockForm {
   return (JOB_STOCK_FORMS as readonly string[]).includes(form);
 }
 
 /**
- * Why a form cannot be a job's stock, or null. Round stock is named with where it would go — not
- * "unsupported", which would read as a bug.
+ * Why a form cannot be a job's stock, or null. A disc and a rod ARE offered (#683): a short one is
+ * held for a face job, and where a round piece would need the rotary, the form's own sentence says
+ * so rather than the screen refusing it. A tube is refused by name — its hole leaves no face to cut.
  */
 export function formProblem(form: string): string | null {
   if (isJobForm(form)) return null;
-  if (form === 'rod' || form === 'tube' || form === 'disc') {
-    return (
-      `a ${form} is round stock — a job here cuts a rectangular block held in the vise, and round ` +
-      'stock needs the rotary (not characterised yet), so it is not offered'
-    );
+  if (form === 'tube') {
+    return 'a tube is round stock with a hole through it — there is no face a job can cut, and cutting around it needs the rotary';
   }
   if (form === 'sphere') return 'sphere stock is not offered — nothing at the location holds one and nothing here cuts one';
   return `"${form}" is not a stock form a job can start from`;
@@ -120,6 +166,22 @@ function free(item: StockItem): number {
 }
 
 /**
+ * Why a form's own numbers will not do, naming the field the operator sees, or null. A missing
+ * diameter must not be answered as "the length needs a number" — the screen has no length field for
+ * a disc (#683).
+ */
+export function formSizeProblem(form: JobStockForm, size: StockSize, machine: MillProfile): string | null {
+  for (const key of STOCK_SIZE_FIELDS[form]) {
+    const v = size[key];
+    if (v === null || v === undefined || !Number.isFinite(v) || v <= 0) {
+      return `the ${key} needs a number in mm, above 0`;
+    }
+  }
+  const box = boxForForm(form, size);
+  return box === null ? null : boxProblem(box, machine);
+}
+
+/**
  * Why a shelf entry cannot start this job, or null. Shown beside the entry, which stays listed: a
  * piece that is used up or held is a fact about the shelf the operator should see, not a gap (§5.1).
  */
@@ -131,10 +193,9 @@ export function shelfPickProblem(item: StockItem, machine: MillProfile): string 
   if (free(item) <= 0) return `all ${item.quantity} held for other jobs`;
   const form = formProblem(item.form);
   if (form !== null) return form;
-  return boxProblem(
-    { length: item.size.length ?? Number.NaN, width: item.size.width ?? Number.NaN, thickness: item.size.thickness ?? Number.NaN },
-    machine,
-  );
+  const box = boxForForm(item.form as JobStockForm, item.size);
+  if (box === null) return `the ${item.form}'s size is not complete on the shelf`;
+  return boxProblem(box, machine);
 }
 
 /** A shelf entry as this job's stock, or why not. */
@@ -142,10 +203,11 @@ export function stockFromShelf(item: StockItem, machine: MillProfile): StockChoi
   const problem = shelfPickProblem(item, machine);
   if (problem !== null) return { ok: false, reason: problem };
   const form = item.form as JobStockForm;
-  const notes = [
-    `${formLabel(form)} ${mm(item.size.length!)} × ${mm(item.size.width!)} × ${mm(item.size.thickness!)} mm of ` +
-      `${MATERIAL_LABELS[item.material]}, from the shelf (${item.id}). Cut mode reserves it; nothing is held until then.`,
-  ];
+  const box = boxForForm(form, item.size);
+  if (box === null) return { ok: false, reason: `the ${form}'s size is not complete on the shelf` };
+  // The fields on the step already say what the piece is, so the notes carry only what the step
+  // cannot show: the facts the job does NOT take from the shelf (#683, A8).
+  const notes: string[] = [];
   if (item.layers.length > 0) {
     notes.push(
       `Its ${item.layers.length} layers (${item.layers.map((l) => l.name).join(', ')}) are not carried onto the job: ` +
@@ -174,9 +236,9 @@ export function stockFromShelf(item: StockItem, machine: MillProfile): StockChoi
     ok: true,
     choice: {
       stock: {
-        length: item.size.length!,
-        width: item.size.width!,
-        thickness: item.size.thickness!,
+        length: box.length,
+        width: box.width,
+        thickness: box.thickness,
         material: item.material,
         ...(colour !== undefined ? { colour } : {}),
       },
@@ -212,10 +274,9 @@ export function stockFromMade(made: MadeStock, machine: MillProfile, shelfId: st
         finish: made.finish,
         conductive: isMetalMaterial(made.material),
       },
-      notes: [
-        `${formLabel(made.form)} ${mm(made.length)} × ${mm(made.width)} × ${mm(made.thickness)} mm of ` +
-          `${MATERIAL_LABELS[made.material]}, as typed${shelfId ? `, and put on the shelf (${shelfId})` : ''}.`,
-      ],
+      // The size fields are on the screen and the shelf tick is beside them; repeating them as a
+      // sentence was the prose #683 removes (A8).
+      notes: [],
     },
   };
 }
@@ -227,11 +288,18 @@ export function stockFromMade(made: MadeStock, machine: MillProfile, shelfId: st
  * editor seeds it.
  */
 export function shelfItemFromMade(made: MadeStock, id: string, now: string): StockItem {
+  // A round form goes back on the shelf as a round entry — its own fields, not the box around it.
+  const size =
+    made.form === 'disc'
+      ? { diameter: made.length, thickness: made.thickness }
+      : made.form === 'rod'
+        ? { diameter: made.width, length: made.length }
+        : { length: made.length, width: made.width, thickness: made.thickness };
   return {
     id,
     material: made.material,
     form: made.form,
-    size: { length: made.length, width: made.width, thickness: made.thickness },
+    size,
     layers: [],
     capMm: null,
     capSource: null,
@@ -485,6 +553,8 @@ const FORM_LABELS: Record<JobStockForm, string> = {
   block: 'Block',
   sheet: 'Sheet',
   'printed-blank': 'Printed blank',
+  disc: 'Disc',
+  rod: 'Rod',
 };
 
 /** `Plate`, `Printed blank` — the form as a sentence starts it. */

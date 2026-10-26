@@ -1619,8 +1619,12 @@ export interface EngraveJob {
   runLog?: JobRunLogEntry[];
 }
 
-/** The forms a job's stock can take (#418): the rectangular ones. A rod, tube or disc is refused. */
-export type JobStockForm = 'sheet' | 'plate' | 'block' | 'printed-blank';
+/**
+ * The forms a job's stock can take (#418, #683). A disc and a rod are round, but the job still
+ * plans on the rectangle around them: a disc ⌀D × T is D × D × T (cut on its flat top), a rod
+ * ⌀D × L is L × D × D (cut along its side). The form keeps the round fact for the screens.
+ */
+export type JobStockForm = 'sheet' | 'plate' | 'block' | 'printed-blank' | 'disc' | 'rod';
 
 /** A shelf entry's finish (#413) — what decides the facing default (decision Q6, #432). */
 export type JobStockFinish = 'rough' | 'finished' | 'printed' | 'unknown';

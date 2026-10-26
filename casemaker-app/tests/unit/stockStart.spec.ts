@@ -16,8 +16,11 @@ import {
   finishOf,
   measuredTopSpreadMm,
   formProblem,
+  boxForForm,
+  formSizeProblem,
   shelfFor,
   shelfItemFromMade,
+  STOCK_SIZE_FIELDS,
   shelfPickProblem,
   stockFromFile,
   stockFromMade,
@@ -53,7 +56,8 @@ describe('a shelf entry as the stock (#418)', () => {
       finish: 'rough',
       conductive: true,
     });
-    expect(r.choice.notes[0]).toContain('Cut mode reserves it');
+    // The row and the size fields say what this is; no consequence sentence repeats it (#683, A8).
+    expect(r.choice.notes).toEqual([]);
   });
 
   it('a used-up entry is refused with the job that used it', () => {
@@ -104,11 +108,14 @@ describe('a shelf entry as the stock (#418)', () => {
     expect(r.choice.notes.join(' ')).toMatch(/measured and recorded/);
   });
 
-  it('round stock is refused by name, with where it belongs; a sphere is not a form', () => {
-    for (const form of ['rod', 'tube', 'disc']) {
-      expect(formProblem(form)).toMatch(new RegExp(`a ${form} is round stock .* rotary`));
-    }
+  it('a disc and a rod are job forms plan in their box; a tube is refused by name (#683, A7)', () => {
+    // Round stock is offered honestly: a disc is cut on its flat top, a rod along its side, and the
+    // job plans in the rectangle around it (`boxForForm`).
+    expect(formProblem('disc')).toBeNull();
+    expect(formProblem('rod')).toBeNull();
+    expect(formProblem('tube')).toMatch(/a tube is round stock with a hole through it .* rotary/);
     expect(formProblem('sphere')).toMatch(/sphere stock is not offered/);
+
     const rod = StockItemSchema.parse({
       ...PLATE,
       id: 'rod-1',
@@ -116,7 +123,38 @@ describe('a shelf entry as the stock (#418)', () => {
       size: { diameter: 10, length: 100 },
       reservations: [],
     });
-    expect(shelfPickProblem(rod, Z1)).toMatch(/round stock/);
+    expect(shelfPickProblem(rod, Z1)).toBeNull();
+    const r = stockFromShelf(rod, Z1);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.choice.stock).toEqual({ length: 100, width: 10, thickness: 10, material: 'aluminium-6061' });
+    expect(r.choice.entry.form).toBe('rod');
+
+    const tube = StockItemSchema.parse({
+      ...rod,
+      id: 'tube-1',
+      form: 'tube',
+      size: { diameter: 40, innerDiameter: 35, length: 300 },
+    });
+    expect(shelfPickProblem(tube, Z1)).toMatch(/a tube is round stock with a hole through it/);
+  });
+
+  it('each form owns its fields, and a missing diameter is named a diameter (#683, A7)', () => {
+    expect(STOCK_SIZE_FIELDS.disc).toEqual(['diameter', 'thickness']);
+    expect(STOCK_SIZE_FIELDS.rod).toEqual(['length', 'diameter']);
+    expect(formSizeProblem('disc', { diameter: 50, thickness: 5 }, Z1)).toBeNull();
+    expect(formSizeProblem('disc', { thickness: 5 }, Z1)).toBe('the diameter needs a number in mm, above 0');
+    expect(formSizeProblem('rod', { length: 120, diameter: 12 }, Z1)).toBeNull();
+    expect(boxForForm('disc', { diameter: 50, thickness: 5 })).toEqual({ length: 50, width: 50, thickness: 5 });
+    expect(boxForForm('rod', { length: 120, diameter: 12 })).toEqual({ length: 120, width: 12, thickness: 12 });
+
+    // A typed rod goes back to the shelf as round stock, not as its box.
+    const item = shelfItemFromMade(
+      { length: 120, width: 12, thickness: 12, form: 'rod', material: 'aluminium-6061', finish: 'rough' },
+      'rod-new-1',
+      '2026-10-26T10:00:00.000Z',
+    );
+    expect(item.size).toEqual({ length: 120, diameter: 12 });
   });
 
   it('stock larger than the machine is refused, naming the axis', () => {
@@ -495,7 +533,9 @@ describe('the job names where its stock came from (#418) — and only when it do
   it('a shelf pick with no entry id, or a file with no file, is refused', () => {
     expect(parseEngraveJob({ ...defaultEngraveJob(), stockEntry: { ...entry, shelfId: null } }).ok).toBe(false);
     expect(parseEngraveJob({ ...defaultEngraveJob(), stockEntry: { ...entry, kind: 'file' } }).ok).toBe(false);
-    expect(parseEngraveJob({ ...defaultEngraveJob(), stockEntry: { ...entry, form: 'rod' } }).ok).toBe(false);
+    // A tube is not a form a job can start from; a rod is (#683, A7).
+    expect(parseEngraveJob({ ...defaultEngraveJob(), stockEntry: { ...entry, form: 'tube' } }).ok).toBe(false);
+    expect(parseEngraveJob({ ...defaultEngraveJob(), stockEntry: { ...entry, form: 'rod' } }).ok).toBe(true);
   });
 });
 

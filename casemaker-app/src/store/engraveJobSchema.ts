@@ -1365,8 +1365,8 @@ const stockEntrySchema = z
       .nullable()
       .describe('Name and hash of the stock file; null unless kind is "file".'),
     form: z
-      .enum(['sheet', 'plate', 'block', 'printed-blank'])
-      .describe('Stock form: sheet, plate, block, or a printed blank.'),
+      .enum(['sheet', 'plate', 'block', 'printed-blank', 'disc', 'rod'])
+      .describe('Stock form: sheet, plate, block, a printed blank, or round stock (disc or rod).'),
     finish: z
       .enum(['rough', 'finished', 'printed', 'unknown'])
       .describe('Surface the stock arrived with.'),

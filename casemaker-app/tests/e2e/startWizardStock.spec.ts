@@ -48,8 +48,10 @@ test('new project → shelf stock → mount → empty design, the stock drawn', 
   const plate = page.getByTestId('start-wizard-shelf-item-stock-long1');
   await expect(plate).toHaveAttribute('data-state', 'ok');
   await plate.click();
-  await expect(page.getByTestId('start-wizard-stock-summary')).toContainText('120 × 60 × 8');
-  await expect(page.getByTestId('start-wizard-stock-facing')).toHaveAttribute('data-state', 'on');
+  // The shelf row fills the panel's own size fields (#683) — no summary sentence repeats them.
+  await expect(page.getByTestId('start-wizard-make-length')).toHaveValue('120');
+  await expect(page.getByTestId('start-wizard-make-width')).toHaveValue('60');
+  await expect(page.getByTestId('start-wizard-make-thickness')).toHaveValue('8');
   await page.getByTestId('start-wizard-stock-next').click();
 
   // Step 3 — the same wizard, on the mount. A fresh job has nothing to cut yet, so the operation

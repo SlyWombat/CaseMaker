@@ -4,7 +4,7 @@
 // fakes it); `scheduleImmediate` is mocked because jsdom has no geometry worker.
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 
 import locationDoc from './fixtures/location-doc.json';
 import { StartWizard } from '@/components/welcome/StartWizard';
@@ -137,9 +137,12 @@ describe('the material-first start (#418)', () => {
     expect(plate.getAttribute('data-state')).toBe('ok');
     fireEvent.click(plate);
 
-    expect(screen.getByTestId('start-wizard-stock-summary').textContent).toContain('100 × 100 × 5');
-    // Q6: rough plate → facing on by default.
-    expect(screen.getByTestId('start-wizard-stock-facing').getAttribute('data-state')).toBe('on');
+    // The shelf row IS the answer: its numbers sit in the panel's own size fields (#683).
+    expect((screen.getByTestId('start-wizard-make-length') as HTMLInputElement).value).toBe('100');
+    expect((screen.getByTestId('start-wizard-make-width') as HTMLInputElement).value).toBe('100');
+    expect((screen.getByTestId('start-wizard-make-thickness') as HTMLInputElement).value).toBe('5');
+    // No prose repeats what the row and the fields already say (#683, A8).
+    expect(screen.queryByTestId('start-wizard-stock-summary')).toBeNull();
 
     await act(async () => {
       fireEvent.click(screen.getByTestId('start-wizard-stock-next'));
@@ -225,14 +228,13 @@ describe('the material-first start (#418)', () => {
     expect((screen.getByTestId('start-wizard-stock-next') as HTMLButtonElement).disabled).toBe(true);
   });
 
-  it('no service: the shelf door says so, and a typed piece still starts the job', async () => {
+  it('no service: no shelf block and no tick; a typed piece still starts the job', async () => {
     fakeShelf(null);
     await toStockStep();
-    await waitFor(() =>
-      expect(screen.getByTestId('start-wizard-shelf-state').getAttribute('data-state')).toBe('absent'),
-    );
-    fireEvent.click(screen.getByTestId('start-wizard-stock-door-make'));
-    expect((screen.getByTestId('start-wizard-make-save') as HTMLInputElement).disabled).toBe(true);
+    // Nothing on the shelf and nowhere to keep a piece: the block is absent, not a disabled
+    // control with a sentence about a service the operator cannot see (#683, principle 4).
+    expect(screen.queryByTestId('start-wizard-shelf')).toBeNull();
+    expect(screen.queryByTestId('start-wizard-make-save')).toBeNull();
     fireEvent.change(screen.getByTestId('start-wizard-make-length'), { target: { value: '80' } });
     fireEvent.change(screen.getByTestId('start-wizard-make-width'), { target: { value: '50' } });
     fireEvent.change(screen.getByTestId('start-wizard-make-thickness'), { target: { value: '6' } });
@@ -242,7 +244,8 @@ describe('the material-first start (#418)', () => {
     await screen.findByTestId('engrave-setup-step-holding');
     const job = useEngraveJobStore.getState().job;
     expect(job.stock).toMatchObject({ length: 80, width: 50, thickness: 6 });
-    expect(job.stockEntry).toMatchObject({ kind: 'made', shelfId: null, form: 'plate', finish: 'unknown' });
+    // The opening finish is "as bought" (#683, A8), so a made piece is rough unless said otherwise.
+    expect(job.stockEntry).toMatchObject({ kind: 'made', shelfId: null, form: 'plate', finish: 'rough' });
     // Non-square on purpose: an X/Y swap would show here. Length (X) is the blank's width, width (Y)
     // its height — `blankStockFor`'s mapping, read back the other way.
     expect(useProjectStore.getState().project.case.blank).toMatchObject({ width: 80, height: 50, thickness: 6 });
@@ -252,17 +255,16 @@ describe('the material-first start (#418)', () => {
     const svc = fakeShelf(SHELF);
     await toStockStep();
     chooseMaterial('brass');
-    await waitFor(() =>
-      expect(screen.getByTestId('start-wizard-shelf-state').getAttribute('data-state')).toBe('empty'),
-    );
-    fireEvent.click(screen.getByTestId('start-wizard-stock-door-make'));
-    fireEvent.change(screen.getByTestId('start-wizard-make-form'), { target: { value: 'block' } });
+    // Nothing in brass on the shelf, so the block is absent; the service is there, so the tick
+    // is offered beside the size. The shelf gets its first piece this way.
+    const tick = await screen.findByTestId('start-wizard-make-save');
+    expect(screen.queryByTestId('start-wizard-shelf')).toBeNull();
+    fireEvent.click(screen.getByTestId('start-wizard-form-block'));
     fireEvent.change(screen.getByTestId('start-wizard-make-length'), { target: { value: '40' } });
     fireEvent.change(screen.getByTestId('start-wizard-make-width'), { target: { value: '30' } });
     fireEvent.change(screen.getByTestId('start-wizard-make-thickness'), { target: { value: '20' } });
     fireEvent.change(screen.getByTestId('start-wizard-stock-finish'), { target: { value: 'finished' } });
-    fireEvent.click(screen.getByTestId('start-wizard-make-save'));
-    expect(screen.getByTestId('start-wizard-stock-facing').getAttribute('data-state')).toBe('off');
+    fireEvent.click(tick);
     await act(async () => {
       fireEvent.click(screen.getByTestId('start-wizard-stock-next'));
     });
@@ -276,21 +278,21 @@ describe('the material-first start (#418)', () => {
   // off with no depth even when it says it is rough — printed PETG and purchased acrylic alike — and
   // the wizard says why rather than staying silent.
   it.each([
-    ['petg', 'PETG'],
-    ['acrylic', 'Acrylic'],
-  ] as const)('a plastic seeds facing off with no depth, whatever the finish (#474, #493)', async (material, label) => {
+    ['petg'],
+    ['acrylic'],
+  ] as const)('a plastic seeds facing off with no depth, whatever the finish (#474, #493)', async (material) => {
     fakeShelf(SHELF);
     await toStockStep();
     chooseMaterial(material);
-    fireEvent.click(screen.getByTestId('start-wizard-stock-door-make'));
     fireEvent.change(screen.getByTestId('start-wizard-make-length'), { target: { value: '60' } });
     fireEvent.change(screen.getByTestId('start-wizard-make-width'), { target: { value: '40' } });
     fireEvent.change(screen.getByTestId('start-wizard-make-thickness'), { target: { value: '3' } });
     fireEvent.change(screen.getByTestId('start-wizard-stock-finish'), { target: { value: 'rough' } });
 
-    const line = screen.getByTestId('start-wizard-stock-facing');
-    expect(line.getAttribute('data-state')).toBe('off');
-    expect(line.textContent).toContain(`facing is not offered on ${label}: a flat cutter smears a plastic top`);
+    // One line on the step, not a paragraph (#683, A8): plastic is cut as it is.
+    expect(screen.getByTestId('start-wizard-stock-finish-hint').textContent).toContain(
+      'plastic is cut as it is; wood and metal are faced first',
+    );
 
     await act(async () => {
       fireEvent.click(screen.getByTestId('start-wizard-stock-next'));
@@ -303,7 +305,6 @@ describe('the material-first start (#418)', () => {
   it('Back to stock after the project was made: a changed piece re-sizes the drawn part', async () => {
     fakeShelf(null);
     await toStockStep();
-    fireEvent.click(screen.getByTestId('start-wizard-stock-door-make'));
     fireEvent.change(screen.getByTestId('start-wizard-make-length'), { target: { value: '60' } });
     fireEvent.change(screen.getByTestId('start-wizard-make-width'), { target: { value: '40' } });
     fireEvent.change(screen.getByTestId('start-wizard-make-thickness'), { target: { value: '8' } });
@@ -331,7 +332,36 @@ describe('the material-first start (#418)', () => {
     expect(screen.queryByTestId('start-wizard-replace-confirm')).toBeNull();
   });
 
-  it('round stock is not on offer to type; a disc on the shelf is refused by name', async () => {
+  it('a round form is a picture with its rotary sentence, and its size is a diameter (#683, A7)', async () => {
+    fakeShelf(SHELF);
+    await toStockStep();
+    // Six pictures, never a refusal paragraph on the default path.
+    for (const form of ['plate', 'block', 'sheet', 'printed-blank', 'disc', 'rod']) {
+      expect(screen.getByTestId(`start-wizard-form-${form}`)).toBeDefined();
+    }
+    fireEvent.click(screen.getByTestId('start-wizard-form-rod'));
+    expect(screen.getByTestId('start-wizard-form-sentence').textContent).toContain(
+      'a rod cut around needs the rotary (step 3 will offer it)',
+    );
+    // The rod's own fields: length and diameter, and no invented width or thickness.
+    expect(screen.getByTestId('start-wizard-make-length')).toBeDefined();
+    expect(screen.getByTestId('start-wizard-make-diameter')).toBeDefined();
+    expect(screen.queryByTestId('start-wizard-make-width')).toBeNull();
+    expect(screen.queryByTestId('start-wizard-make-thickness')).toBeNull();
+
+    fireEvent.change(screen.getByTestId('start-wizard-make-length'), { target: { value: '120' } });
+    fireEvent.change(screen.getByTestId('start-wizard-make-diameter'), { target: { value: '12' } });
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('start-wizard-stock-next'));
+    });
+    await screen.findByTestId('engrave-setup-step-holding');
+    // The job plans in the rod's own box — 120 long, 12 × 12 across — and the form stays 'rod'.
+    const job = useEngraveJobStore.getState().job;
+    expect(job.stock).toMatchObject({ length: 120, width: 12, thickness: 12 });
+    expect(job.stockEntry).toMatchObject({ kind: 'made', form: 'rod' });
+  });
+
+  it('a disc on the shelf is a piece like any other; a tube is refused by name (#683, A7)', async () => {
     const disc = {
       ...(SHELF[0] as object),
       id: 'stock-disc1',
@@ -339,14 +369,52 @@ describe('the material-first start (#418)', () => {
       size: { diameter: 50, thickness: 5 },
       reservations: [],
     };
-    fakeShelf([...SHELF, disc]);
+    const tube = {
+      ...(SHELF[0] as object),
+      id: 'stock-tube1',
+      form: 'tube',
+      size: { diameter: 40, innerDiameter: 35, length: 300 },
+      reservations: [],
+    };
+    fakeShelf([...SHELF, disc, tube]);
     await toStockStep();
     chooseMaterial('aluminium-6061');
-    await screen.findByTestId('start-wizard-shelf-item-stock-disc1');
-    expect(screen.getByTestId('start-wizard-shelf-item-stock-disc1-reason').textContent).toMatch(/a disc is round stock/);
-    fireEvent.click(screen.getByTestId('start-wizard-stock-door-make'));
-    const forms = Array.from((screen.getByTestId('start-wizard-make-form') as HTMLSelectElement).options).map((o) => o.value);
-    expect(forms).toEqual(['plate', 'block', 'sheet', 'printed-blank']);
+    const discRow = await screen.findByTestId('start-wizard-shelf-item-stock-disc1');
+    expect(discRow.getAttribute('data-state')).toBe('ok');
+    expect(discRow.textContent).toContain('⌀50 × 5 mm');
+    fireEvent.click(discRow);
+    expect((screen.getByTestId('start-wizard-make-diameter') as HTMLInputElement).value).toBe('50');
+    expect((screen.getByTestId('start-wizard-make-thickness') as HTMLInputElement).value).toBe('5');
+
+    const tubeRow = screen.getByTestId('start-wizard-shelf-item-stock-tube1');
+    expect(tubeRow.getAttribute('data-state')).toBe('refused');
+    expect(screen.getByTestId('start-wizard-shelf-item-stock-tube1-reason').textContent).toContain(
+      'a tube is round stock with a hole through it',
+    );
+  });
+
+  it("the material is grouped three ways, this house's own first (#683, A4, A5)", async () => {
+    fakeShelf(SHELF);
+    await toStockStep();
+    // A fresh house is PLA — never the shipped demo's softwood.
+    const select = screen.getByTestId('start-wizard-stock-material') as HTMLSelectElement;
+    expect(select.value).toBe('pla');
+    const groups = Array.from(select.querySelectorAll('optgroup'));
+    expect(groups.map((g) => g.label)).toEqual(['Plastics', 'Woods', 'Metals']);
+    const plastics = Array.from(groups[0]!.querySelectorAll('option')).map((o) => o.value);
+    expect(plastics[plastics.length - 1]).toBe('plastic'); // "plastic (unspecified)" is last
+    expect(plastics).not.toContain('softwood');
+    expect(screen.getByTestId('start-wizard-stock-material-hint').textContent).toContain(
+      "Plastics · Woods · Metals, this house's first",
+    );
+  });
+
+  it('a job that states its material is the house material a new job opens on', async () => {
+    fakeShelf(SHELF);
+    const base = defaultEngraveJob();
+    useEngraveJobStore.setState({ job: { ...base, stock: { ...base.stock, material: 'brass' } } });
+    await toStockStep();
+    expect((screen.getByTestId('start-wizard-stock-material') as HTMLSelectElement).value).toBe('brass');
   });
 
   it('the templates are still offered beneath the stock step', async () => {
@@ -449,7 +517,8 @@ describe('stockEntry follows the stock (#418 review)', () => {
 describe('a mesh loaded as stock takes its finish default from the material (#463)', () => {
   // The classes a slicer can produce — PrusaSlicer's filament words, #456.
   const PRINTED = ['pla', 'petg', 'pet', 'abs', 'asa', 'hips', 'pa', 'pa-cf', 'pa-gf', 'pc', 'pp', 'tpu', 'pva'];
-  // A board sawn from stock: the answer is not settled yet, so it must not be guessed (#463).
+  // Anything else is bought stock, and the step's opening finish is "as bought" (#683, A8) —
+  // the old "not known" default was the last option of the list.
   const NOT_PRINTED = ['softwood', 'hardwood', 'mdf', 'acrylic', 'aluminium-6061', 'brass'];
 
   /** Pick the material, load the same box as stock, and answer with the finish the step chose. */
@@ -457,18 +526,17 @@ describe('a mesh loaded as stock takes its finish default from the material (#46
     fakeShelf(SHELF);
     await toStockStep();
     chooseMaterial(material);
-    fireEvent.click(screen.getByTestId('start-wizard-stock-door-load'));
     fireEvent.change(screen.getByTestId('start-wizard-load-file'), { target: { files: [boxStl()] } });
-    // The finish select appears only once the file has been read as a mesh.
-    const finish = await screen.findByTestId('start-wizard-stock-finish');
-    return (finish as HTMLSelectElement).value;
+    // Wait for the read to land — the file's name is drawn — then read the finish the step chose.
+    await screen.findByTestId('start-wizard-load-name');
+    return (screen.getByTestId('start-wizard-stock-finish') as HTMLSelectElement).value;
   }
 
   it.each(PRINTED)('%s: the finish defaults to printed', async (material) => {
     expect(await loadMesh(material)).toBe('printed');
   });
 
-  it.each(NOT_PRINTED)('%s: the finish stays unknown', async (material) => {
-    expect(await loadMesh(material)).toBe('unknown');
+  it.each(NOT_PRINTED)('%s: the finish stays as bought', async (material) => {
+    expect(await loadMesh(material)).toBe('rough');
   });
 });

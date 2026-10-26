@@ -458,9 +458,12 @@ describe('#280 — step 2, the stock (and its starter templates)', () => {
 // #432 slice 4 — the facing choice is SEEDED onto a job made from a piece of stock, not interpreted
 // at Generate: a job with no `facing` key must keep planning exactly as it did before #432.
 describe('#432 slice 4 — a new job starts with the finish’s facing choice', () => {
-  /** The stock step's "type a piece" door, with a 60 × 40 × 8 mm piece of the given finish. */
+  /**
+   * A typed 60 × 40 × 8 mm piece of the given finish. Softwood on purpose: facing is a wood and
+   * metal question, and the house's PLA opening would refuse it (#683).
+   */
   function typePiece(finish: 'rough' | 'finished' | 'printed' | 'unknown'): void {
-    fireEvent.click(screen.getByTestId('start-wizard-stock-door-make'));
+    fireEvent.change(screen.getByTestId('start-wizard-stock-material'), { target: { value: 'softwood' } });
     fireEvent.change(screen.getByTestId('start-wizard-make-length'), { target: { value: '60' } });
     fireEvent.change(screen.getByTestId('start-wizard-make-width'), { target: { value: '40' } });
     fireEvent.change(screen.getByTestId('start-wizard-make-thickness'), { target: { value: '8' } });
@@ -500,24 +503,24 @@ describe('#432 slice 4 — a new job starts with the finish’s facing choice', 
     expect(useEngraveJobStore.getState().job.facing).toEqual({ enabled: false, depth: 0.2 });
   });
 
-  it('the stock step says what the job will start with, depth and all', () => {
+  it('the finish line states the rule once, with no consequence paragraph (#683, A8)', () => {
     render(<StartWizard />);
     skipToStockStep();
     typePiece('rough');
 
-    const line = screen.getByTestId('start-wizard-stock-facing');
-    expect(line.getAttribute('data-state')).toBe('on');
-    expect(line.textContent).toContain('rough stock is faced first');
-    expect(line.textContent).toContain('0.5 mm skim');
+    expect(screen.getByTestId('start-wizard-stock-finish-hint').textContent).toContain(
+      'plastic is cut as it is; wood and metal are faced first',
+    );
+    // The old sentence about facing and the skim is the job's business, not the step's prose.
+    expect(screen.queryByTestId('start-wizard-stock-facing')).toBeNull();
   });
 });
 
 // #681 — the wizard must carry a job to its item on the paths where something is missing. A job
 // needs no machine and no cutter: both are answered later, and neither gates a step.
 describe('#681 — the wizard with nothing to lean on', () => {
-  /** The stock step's "type a piece" door: a 60 × 40 × 8 mm piece. */
+  /** A typed 60 × 40 × 8 mm piece, with the house's opening material. */
   function typePiece(): void {
-    fireEvent.click(screen.getByTestId('start-wizard-stock-door-make'));
     fireEvent.change(screen.getByTestId('start-wizard-make-length'), { target: { value: '60' } });
     fireEvent.change(screen.getByTestId('start-wizard-make-width'), { target: { value: '40' } });
     fireEvent.change(screen.getByTestId('start-wizard-make-thickness'), { target: { value: '8' } });
