@@ -33,7 +33,7 @@ import { planRegistration, registrationSettings, type RegistrationPlan } from '@
 import { ShopDefaultsSchema } from '@/platform/defaultsClient';
 import { aabbOfProfile } from '@/engine/compiler/profile';
 import { engravedFaceWorkZ, partToWork } from '@/engine/cnc/frames';
-import { badgeBlankFor } from '@/engine/cnc/engrave/fromBadge';
+import { BADGE_POCKET_KEEP_OUT_ID, badgeBlankFor } from '@/engine/cnc/engrave/fromBadge';
 import { validateVise } from '@/engine/cnc/fixture';
 import { defaultBadgeParams } from '@/types/badge';
 import { Z1 } from '@/engine/cnc/machine';
@@ -796,6 +796,37 @@ describe('engraveJobStore (#200)', () => {
     expect(findings.map((f) => f.code)).not.toContain('vise-jaw-collision');
     // …while the warnings that are telling the truth about an unmeasured vise stay.
     expect(findings.map((f) => f.code)).toContain('vise-default');
+  });
+
+  // #686 deleted the panel's "use the project's badge" button (the route is the wizard's stock
+  // step and the door's starters now). Its two store-level promises were asserted through that
+  // button, so they move here, where the write lives.
+  it('lands on the same badge pocket when the blank is taken twice (#271)', async () => {
+    backing.clear();
+    const { useEngraveJobStore } = await freshStore();
+    const s = () => useEngraveJobStore.getState();
+
+    s().takeBadgeBlank(badgeBlankFor(defaultBadgeParams()));
+    s().takeBadgeBlank(badgeBlankFor(defaultBadgeParams()));
+    expect(s().job.keepOuts).toHaveLength(1);
+  });
+
+  it('removes the void the route stamped when the badge has no pocket, and never one a person typed (#271)', async () => {
+    backing.clear();
+    const { useEngraveJobStore } = await freshStore();
+    const s = () => useEngraveJobStore.getState();
+
+    s().takeBadgeBlank(badgeBlankFor(defaultBadgeParams()));
+    // A void of the person's own, beside the stamped one.
+    const typed = s().addKeepOut('circle');
+    expect(s().job.keepOuts).toHaveLength(2);
+
+    s().takeBadgeBlank(badgeBlankFor(defaultBadgeParams({ magnetPocket: null })));
+
+    const ids = s().job.keepOuts!.map((k) => k.id);
+    expect(ids).toEqual([typed]);
+    expect(ids[0]).not.toBe(BADGE_POCKET_KEEP_OUT_ID);
+    expect(ids[0]!.startsWith('ko-')).toBe(true);
   });
 
   it('leaves a depth the user typed alone — and reports the finding it causes rather than hiding it', async () => {

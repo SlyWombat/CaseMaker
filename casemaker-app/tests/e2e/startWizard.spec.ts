@@ -48,17 +48,16 @@ test('welcome → wizard → blank → the Engrave panel, with the stock already
     await expect(page.getByTestId(`sidebar-button-${id}`), `${id} should be hidden`).toHaveCount(0);
   }
 
-  // The panel is open on the seeded job: the blank's own size, tagged as computed.
+  // The panel is open on the seeded job: the blank's own size, on the one stock line (#686).
   await expect(page.getByTestId('engrave-panel')).toBeVisible();
-  await expect(page.getByTestId('engrave-stock-length')).toHaveValue('100');
-  await expect(page.getByTestId('engrave-stock-width')).toHaveValue('60');
-  await expect(page.getByTestId('engrave-stock-thickness')).toHaveValue('12');
-  await expect(page.getByTestId('engrave-stock-length-source')).toBeVisible();
+  await expect(page.getByTestId('engrave-stock-line')).toContainText('100 × 60 × 12 mm');
+  // The line's hover says where the numbers came from — the wizard's seed, not a typed value.
+  await expect(page.getByTestId('engrave-stock-line')).toHaveAttribute('title', /length computed/);
 
-  // The badge's twin button works on the blank too.
-  await expect(page.getByTestId('engrave-stock-from-blank')).toBeEnabled();
-  await page.getByTestId('engrave-stock-from-blank').click();
-  await expect(page.getByTestId('engrave-blank-notes')).toBeVisible();
+  // #686 — the blank's twin route is no longer a button under a field grid: the line's edit opens
+  // the wizard's stock step, where the same blank starter lives. The panel still reads what the
+  // seed wrote, which is what the assertions above prove.
+  await expect(page.getByTestId('engrave-stock-edit')).toBeEnabled();
 
   // And the geometry really is the one centred plate — no placeholder PCB, no shell.
   await page.evaluate(async () => {
@@ -123,7 +122,5 @@ test('a starter on the welcome door opens the wizard with its blank as the stock
 
   // The badge's blank, turned a quarter turn for the vise (#383): 38.1 across X, 76.2 along Y.
   await expect(page.getByTestId('engrave-panel')).toBeVisible();
-  await expect(page.getByTestId('engrave-stock-length')).toHaveValue('38.1');
-  await expect(page.getByTestId('engrave-stock-width')).toHaveValue('76.2');
-  await expect(page.getByTestId('engrave-stock-thickness')).toHaveValue('3.81');
+  await expect(page.getByTestId('engrave-stock-line')).toContainText('38.1 × 76.2 × 3.81 mm');
 });

@@ -265,7 +265,7 @@ describe('guided job setup — the flow in the panel (#254, #681)', () => {
     renderPanel();
     expect(screen.queryByTestId('start-wizard')).toBeNull();
 
-    fireEvent.click(screen.getByTestId('engrave-setup-open'));
+    fireEvent.click(screen.getByTestId('engrave-hold-edit'));
     expect(screen.getByTestId('engrave-setup-step-holding')).toBeTruthy();
     // One wizard, one counter — the panel's edit names a step of the SAME modal.
     expect(screen.getByTestId('start-wizard-progress').textContent).toBe('Step 3 of 4 · Holding');
@@ -284,7 +284,7 @@ describe('guided job setup — the flow in the panel (#254, #681)', () => {
     act(() => {
       useEngraveJobStore.getState().setVise({ stockProud: 4, source: 'saved' });
     });
-    fireEvent.click(screen.getByTestId('engrave-setup-open'));
+    fireEvent.click(screen.getByTestId('engrave-hold-edit'));
 
     const row = screen.getByTestId('engrave-setup-step-finding-vise-stock-proud-exceeds-thickness');
     // The sentence is operator text; the code lives only in the test id (A10, D1).
@@ -311,14 +311,18 @@ describe('guided job setup — the flow in the panel (#254, #681)', () => {
     expect(job.stock.thickness).toBe(3.81);
     expect(job.workholding.vise.stockProud).toBeCloseTo(0.71, 6);
     expect(job.workholding.vise.source).toBe('saved');
-    // Every value the flow wrote is tagged, and shows on the panel.
-    expect(screen.getByTestId('engrave-stock-thickness-source').getAttribute('data-source')).toBe('user');
+    // Every value the flow wrote is tagged, and shows on the panel. #686 — a typed value no longer
+    // wears a chip beside the number (audit D2): the fields the operator typed are named in one
+    // sentence in the Cutter group's Technical fold, and the size itself is on the stock line.
+    expect(screen.getByTestId('engrave-typed-sources').textContent).toContain('stock thickness');
+    expect(screen.getByTestId('engrave-stock-line').textContent).toContain('3.81');
+    expect(screen.queryByTestId('engrave-stock-thickness-source')).toBeNull();
     expect(screen.getByTestId('engrave-vise-badge').textContent).toMatch(/^saved/);
   });
 
   it('renders the shipped-vise warning once, not once per validator (#353)', () => {
     renderPanel();
-    fireEvent.click(screen.getByTestId('engrave-setup-open'));
+    fireEvent.click(screen.getByTestId('engrave-hold-edit'));
     // The row is keyed by code, so two copies would be two elements with the same testid — which
     // is exactly what the review saw. One row, and its words, is the fix.
     const rows = screen.getAllByTestId('engrave-setup-step-finding-vise-default');
@@ -350,7 +354,7 @@ describe('guided job setup — the flow in the panel (#254, #681)', () => {
     });
     renderPanel();
 
-    fireEvent.click(screen.getByTestId('engrave-setup-open')); // openWizard('holding')
+    fireEvent.click(screen.getByTestId('engrave-hold-edit')); // openWizard('holding')
     expect(screen.getByTestId('start-wizard-progress').textContent).toBe('Step 3 of 4 · Holding');
 
     // The edited step's answer is applied as it is made; Done leaves without a walk to step 4, so
@@ -366,7 +370,7 @@ describe('guided job setup — the flow in the panel (#254, #681)', () => {
     expect(useEngraveJobStore.getState().job.sacrificial.under).toBeNull();
 
     // Walking on is still offered; at step 4 the button says what it would do to an existing job.
-    fireEvent.click(screen.getByTestId('engrave-setup-open'));
+    fireEvent.click(screen.getByTestId('engrave-hold-edit'));
     fireEvent.click(screen.getByTestId('engrave-setup-next'));
     expect(screen.getByTestId('start-wizard-progress').textContent).toBe(
       'Step 4 of 4 · What are you cutting?',
@@ -376,7 +380,7 @@ describe('guided job setup — the flow in the panel (#254, #681)', () => {
 
   it('lets the sacrificial and material answers through to the job', async () => {
     renderPanel();
-    fireEvent.click(screen.getByTestId('engrave-setup-open'));
+    fireEvent.click(screen.getByTestId('engrave-hold-edit'));
 
     // The waste board writes as it is chosen: there is no later Finish to collect it. The board is
     // under the part, between the jaws, so it does not push their faces outward.

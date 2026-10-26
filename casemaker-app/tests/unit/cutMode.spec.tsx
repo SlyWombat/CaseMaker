@@ -126,7 +126,7 @@ describe('EngravePanel — the Design/Cut switch (#419 §3)', () => {
     expect(screen.getByTestId('cnc-mode-switch')).toBeTruthy();
     expect(pressed('cnc-mode-design')).toBe('true');
     expect(pressed('cnc-mode-cut')).toBe('false');
-    expect(screen.getByTestId('engrave-setup-open')).toBeTruthy();
+    expect(screen.getByTestId('engrave-stock-edit')).toBeTruthy();
     expect(screen.getByTestId('engrave-generate')).toBeTruthy();
     expect(screen.queryByTestId('engrave-preflight')).toBeNull();
   });
@@ -138,7 +138,7 @@ describe('EngravePanel — the Design/Cut switch (#419 §3)', () => {
     expect(pressed('cnc-mode-cut')).toBe('true');
     expect(screen.getByTestId('engrave-preflight')).toBeTruthy();
     // The Design stack is gone, not merely covered.
-    expect(screen.queryByTestId('engrave-setup-open')).toBeNull();
+    expect(screen.queryByTestId('engrave-stock-edit')).toBeNull();
     expect(screen.getByTestId('engrave-preflight').getAttribute('data-state')).toBe('blocked');
     expect(screen.getByTestId('engrave-preflight-summary').textContent).toContain('blocking');
     // `collect()` was actually asked: the run gate names the missing program in its own words, and
@@ -162,7 +162,7 @@ describe('EngravePanel — the Design/Cut switch (#419 §3)', () => {
     // Back to Design is never dead, green or red.
     fireEvent.click(screen.getByTestId('engrave-back-to-design'));
     expect(pressed('cnc-mode-design')).toBe('true');
-    expect(screen.getByTestId('engrave-setup-open')).toBeTruthy();
+    expect(screen.getByTestId('engrave-stock-edit')).toBeTruthy();
   });
 
   it('lands a red row on the page in the owner`s words', () => {
@@ -201,7 +201,7 @@ describe('EngravePanel — the Design/Cut switch (#419 §3)', () => {
     fireEvent.click(screen.getByTestId('engrave-back-to-design'));
 
     expect(pressed('cnc-mode-design')).toBe('true');
-    expect(screen.getByTestId('engrave-setup-open')).toBeTruthy();
+    expect(screen.getByTestId('engrave-stock-edit')).toBeTruthy();
     expect(useEngraveRowStore.getState().open.has(labelId)).toBe(true);
   });
 
@@ -242,6 +242,6 @@ describe('EngravePanel — the Design/Cut switch (#419 §3)', () => {
 
     expect(pressed('cnc-mode-design')).toBe('true');
     expect(screen.queryByTestId('engrave-preflight')).toBeNull();
-    expect(screen.getByTestId('engrave-setup-open')).toBeTruthy();
+    expect(screen.getByTestId('engrave-stock-edit')).toBeTruthy();
   });
 });

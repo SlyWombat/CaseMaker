@@ -10,7 +10,9 @@
  *      off-screen; Escape was the only close.
  *   2. Engrave panel stock grid — each `1fr` column was floored at its content's
  *      min-content width (label + input + source tag), so the second column hung past
- *      the panel's right edge and the tags were cut to "compu".
+ *      the panel's right edge and the tags were cut to "compu". (#686 deleted the grid:
+ *      the stock is one line now, and this spec measures that line, the file bar and the
+ *      margins line inside Technical — the panel's widest surviving content.)
  *   3. Context-panel drawer handle — fixed to the window's right edge at mid-height,
  *      painted over the content column: the margin chip, stock prose, card borders.
  *   4. The compact ⋯ menu stayed open when one of its commands was chosen, over the
@@ -122,14 +124,16 @@ test('#503 — the Export dialog fits a phone, and its × is reachable', async (
 });
 
 /**
- * The engrave stock grid and the drawer handle, measured at both narrow widths.
+ * The engrave panel's widest lines and the drawer handle, measured at both narrow widths.
  *
  * The panel is a drawer at tablet and phone alike, and the handle is fixed over its right
- * edge. The rule asserted for every stock control and source tag is the same one the issue
- * asks for: nothing in the content column reaches into the handle's strip, and the panel
- * itself never scrolls sideways.
+ * edge. #686 removed the stock field grid this test was written against; the stock is one
+ * line now, so that line, the one file bar and the margins line inside Technical are what
+ * stand in for it. The rule asserted for every line is the one the issue asks for: nothing
+ * in the content column reaches into the handle's strip, and the panel itself never scrolls
+ * sideways.
  */
-test('#503 — engrave stock fields fit and the drawer handle covers nothing', async ({ cm, page }) => {
+test('#503 — engrave lines fit and the drawer handle covers nothing', async ({ cm, page }) => {
   test.setTimeout(120_000);
   await page.setViewportSize({ width: 390, height: 844 });
   await cm.ready();
@@ -137,13 +141,23 @@ test('#503 — engrave stock fields fit and the drawer handle covers nothing', a
   await openSection(page, 'cnc-engrave');
   await expect(page.getByTestId('engrave-panel')).toBeVisible();
 
-  // Take the badge's blank: this is what gives the stock fields their `computed` tags, the
-  // widest unbreakable content in the grid and the thing that used to push column two out.
-  await page.getByTestId('engrave-stock-from-badge').click();
+  // Take the badge's blank through the wizard's stock step — the panel's own button is gone
+  // (#686). This is what makes the stock line print the badge's 38.1 × 76.2 × 3.81 mm (turned a
+  // quarter turn for the vise, #383): the widest stock line the panel can hold, and the content
+  // that used to push column two out.
+  await page.getByTestId('engrave-stock-edit').click();
+  await page.getByTestId('start-wizard-job-badge-blank').click();
+  await expect(page.getByTestId('engrave-setup-step-holding')).toBeVisible();
+  await page.getByTestId('start-wizard-close').click();
   await page.evaluate(async () => {
     await window.__caseMaker!.waitForIdle();
   });
-  await expect(page.getByTestId('engrave-stock-length-source')).toHaveAttribute('data-source', 'computed');
+  await expect(page.getByTestId('engrave-stock-line')).toContainText('38.1 × 76.2 × 3.81');
+
+  // The margins line is inside Technical now (#686). Open the fold before measuring so the
+  // line is laid out, rather than a closed `<details>`'s zero-height box.
+  await page.getByTestId('engrave-cutter-technical').locator('summary').click();
+  await expect(page.getByTestId('engrave-margins-value')).toBeVisible();
 
   for (const viewport of [
     { name: 'phone', width: 390, height: 844 },
@@ -152,23 +166,22 @@ test('#503 — engrave stock fields fit and the drawer handle covers nothing', a
     await page.setViewportSize({ width: viewport.width, height: viewport.height });
     await expect(page.getByTestId('context-panel')).toHaveClass(/context-panel--drawer/);
 
-    // Bring the stock grid into view; the panel is the scroll container.
-    await page.getByTestId('engrave-stock-length').evaluate((el) => el.scrollIntoView({ block: 'center' }));
+    // Bring the stock line into view; the panel is the scroll container.
+    await page.getByTestId('engrave-stock-line').evaluate((el) => el.scrollIntoView({ block: 'center' }));
 
     const m = await page.evaluate(() => {
       const panel = document.querySelector('[data-testid="context-panel"]') as HTMLElement;
       const handle = document.querySelector('[data-testid="context-panel-handle"]') as HTMLElement;
       const pr = panel.getBoundingClientRect();
       const hr = handle.getBoundingClientRect();
+      // The file bar's three visible pieces (the menu itself is closed, so nothing to measure
+      // there), and the stock's one line plus its edit.
       const ids = [
-        'engrave-stock-length',
-        'engrave-stock-width',
-        'engrave-stock-thickness',
-        'engrave-stock-material',
-        'engrave-stock-length-source',
-        'engrave-stock-width-source',
-        'engrave-stock-thickness-source',
-        'engrave-stock-material-source',
+        'engrave-job-file-name',
+        'engrave-job-saved-time',
+        'engrave-file-menu-toggle',
+        'engrave-stock-line',
+        'engrave-stock-edit',
       ];
       const boxes = ids.flatMap((id) => {
         const el = document.querySelector(`[data-testid="${id}"]`) as HTMLElement | null;
@@ -206,8 +219,8 @@ test('#503 — engrave stock fields fit and the drawer handle covers nothing', a
     );
     expect(m.panel.scrollW - m.panel.clientW, `${viewport.name}: the panel scrolls sideways`).toBeLessThanOrEqual(0);
 
-    // Every stock field, its value and its source tag is inside the panel and clear of the handle.
-    expect(m.boxes.length, `${viewport.name}: stock controls found`).toBeGreaterThanOrEqual(7);
+    // Every line and its control is inside the panel and clear of the handle.
+    expect(m.boxes.length, `${viewport.name}: file bar and stock line found`).toBeGreaterThanOrEqual(5);
     for (const b of m.boxes) {
       expect(b.width, `${viewport.name}: ${b.id} has no width`).toBeGreaterThan(0);
       expect(b.left, `${viewport.name}: ${b.id} left edge`).toBeGreaterThanOrEqual(m.panel.left - 0.5);
@@ -216,7 +229,7 @@ test('#503 — engrave stock fields fit and the drawer handle covers nothing', a
       );
       expect(b.clipped, `${viewport.name}: ${b.id} clips its value`).toBe(false);
     }
-    await page.screenshot({ path: `test-results/503-${viewport.name}-engrave-stock-grid.png` });
+    await page.screenshot({ path: `test-results/503-${viewport.name}-engrave-stock-line.png` });
 
     // The reported Cutting rows: feed/plunge values were the ones the handle cut to "500 mm/mi".
     for (const key of ['feed', 'plunge']) {
@@ -245,20 +258,21 @@ test('#503 — engrave stock fields fit and the drawer handle covers nothing', a
     }
     await page.screenshot({ path: `test-results/503-${viewport.name}-engrave-cutting.png` });
 
-    // The concrete chip the issue names: "the house default" at mid-height under the tab.
-    const chip = page.getByTestId('engrave-margins-source');
-    await chip.evaluate((el) => el.scrollIntoView({ block: 'center' }));
-    const chipGeom = await page.evaluate(() => {
-      const c = document.querySelector('[data-testid="engrave-margins-source"]')!.getBoundingClientRect();
+    // The concrete line the issue names — the margin row, which used to sit at mid-height under
+    // the tab. #686 folds it into Technical as one line, so that is what is measured.
+    const marginLine = page.getByTestId('engrave-margins-value');
+    await marginLine.evaluate((el) => el.scrollIntoView({ block: 'center' }));
+    const marginGeom = await page.evaluate(() => {
+      const c = document.querySelector('[data-testid="engrave-margins-value"]')!.getBoundingClientRect();
       const h = document.querySelector('[data-testid="context-panel-handle"]')!.getBoundingClientRect();
-      return { chipRight: c.right, chipTop: c.top, chipBottom: c.bottom, handleLeft: h.left, handleTop: h.top, handleBottom: h.bottom };
+      return { lineRight: c.right, lineTop: c.top, lineBottom: c.bottom, handleLeft: h.left, handleTop: h.top, handleBottom: h.bottom };
     });
-    expect(chipGeom.chipRight, `${viewport.name}: margin chip reaches under the handle`).toBeLessThanOrEqual(
-      chipGeom.handleLeft + 0.5,
+    expect(marginGeom.lineRight, `${viewport.name}: margins line reaches under the handle`).toBeLessThanOrEqual(
+      marginGeom.handleLeft + 0.5,
     );
     // It really is in the handle's vertical band — otherwise the assertion above proves nothing.
-    expect(Math.min(chipGeom.chipBottom, chipGeom.handleBottom)).toBeGreaterThan(
-      Math.max(chipGeom.chipTop, chipGeom.handleTop),
+    expect(Math.min(marginGeom.lineBottom, marginGeom.handleBottom)).toBeGreaterThan(
+      Math.max(marginGeom.lineTop, marginGeom.handleTop),
     );
 
     await page.screenshot({ path: `test-results/503-${viewport.name}-engrave-margins.png` });

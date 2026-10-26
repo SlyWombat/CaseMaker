@@ -946,8 +946,9 @@ export interface EngraveJobState {
   removeKeepOut: (id: string, undoable?: boolean) => void;
   /**
    * Take a `BadgeBlank` as this job's blank (#271 route 1, #352) — the ONE owner of that write,
-   * shared by the panel's "Use the badge blank" and the wizard's hand-off seed so the two cannot
-   * drift into two versions of "the badge is the blank".
+   * shared by the wizard's stock step / hand-off seed and every door starter, so two of them
+   * cannot drift into two versions of "the badge is the blank". (#686 deleted the panel's own
+   * button; the panel now only reads the blank this writes.)
    */
   takeBadgeBlank: (blank: BadgeBlank) => void;
   /**

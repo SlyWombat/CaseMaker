@@ -7,6 +7,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { EngravePanel } from '@/components/panels/EngravePanel';
+import { savedTimeText } from '@/components/panels/EngraveJobFileBar';
 import { OPERATION_OPTIONS, OPERATION_TYPES } from '@/components/panels/operationTypes';
 import { useEngraveJobStore, undoEngraveRemoval, resetEngraveRemovalUndo, REMOVAL_UNDO_MS } from '@/store/engraveJobStore';
 import { useEngraveRunStore } from '@/store/engraveRunStore';
@@ -31,7 +32,6 @@ import { assessSurfaceSpread } from '@/engine/cnc/engrave/surfaceSpread';
 import { jobDepthLimit } from '@/engine/cnc/engrave/partPlan';
 import { BADGE_POCKET_KEEP_OUT_ID, badgeBlankFor } from '@/engine/cnc/engrave/fromBadge';
 import { defaultBadgeParams, type BadgeParams } from '@/types/badge';
-import { useProjectStore } from '@/store/projectStore';
 import { parseEngraveJob } from '@/store/engraveJobSchema';
 import { presetJawStrips } from '@/engine/cnc/sacrificial';
 import { runSheetFileName, runSheetFrameFileName } from '@/engine/cnc/engrave/runSheet';
@@ -74,17 +74,6 @@ const rows = (): HTMLElement[] => screen.queryAllByTestId(/^engrave-label-row-/)
  */
 const expand = (prefix: string, index = 0): void => {
   fireEvent.click(screen.getByTestId(`${prefix}-expand-${index}`));
-};
-
-/**
- * Press a button whose handler AWAITS the labels' faces before it writes (#365 review): the click's
- * effect lands on a microtask, so a `fireEvent.click` alone would assert against a store nobody has
- * written to yet.
- */
-const press = async (el: HTMLElement): Promise<void> => {
-  await act(async () => {
-    fireEvent.click(el);
-  });
 };
 
 beforeEach(() => {
@@ -133,7 +122,9 @@ describe('EngravePanel (#205)', () => {
 
   it('updates the “strokes thinner than” hint when the tool changes', () => {
     render(<EngravePanel />);
-    expect(screen.getByTestId('engrave-thin-strokes').textContent).toContain('1.0 mm');
+    // #686 — every printed figure is the wizard's three-decimal `fmt`, which drops a trailing
+    // zero: the cutter is `1 mm`, not `1.0 mm`.
+    expect(screen.getByTestId('engrave-thin-strokes').textContent).toContain('1 mm');
     // #407 — this is the built-in `(Metal)` row, the only built-in at 3.175 mm: on the default
     // softwood blank the worker's `engraveRegions` refuses the pair (`tool-metal-line`). The hint
     // below is a fact about the selected cutter, computed beside that refusal; this jsdom harness
@@ -1268,7 +1259,7 @@ describe('EngravePanel — the drill bit as a drill-only cutter (#434)', () => {
     // the tip's point length is stated with it.
     const point = screen.getByTestId('engrave-drill-point').textContent ?? '';
     expect(point).toContain('Drill point.');
-    expect(point).toContain('118.0°');
+    expect(point).toContain('118°'); // #686 — `fmt` drops the trailing zero
     expect(point).toContain('drill.pointAngleDeg');
     expect(point).toContain('fallback');
     expect(point).toContain('0.901 mm above the tip');
@@ -1471,39 +1462,24 @@ describe('EngravePanel — under-surface voids (#271)', () => {
 // These tests set `case.badge` on the project, press the button, and read back BOTH the job the
 // store now holds and the limit `jobDepthLimit` derives from it: a button that changed the stock
 // but not the limit (or the reverse) would pass an assertion on either one alone.
-describe('EngravePanel — the badge blank (#271 route 1)', () => {
-  /** Put a badge on the project (or take it off, with `undefined`). */
-  function setBadge(badge: BadgeParams | undefined): void {
+describe('EngravePanel — the badge blank route, as the panel reads it (#271, #686)', () => {
+  // #686 deleted the panel's "use the project's badge" button: the route itself lives in the
+  // wizard's stock step and the welcome door's starters, which own the write. What the panel owes
+  // now is the READOUT of a job that carries the blank, so these seed through the same
+  // `badgeBlankFor` → `takeBadgeBlank` seam and assert the one stock line and the void row. The
+  // store's own promises (the same pocket twice, the stamped void's removal) live in
+  // `engraveJob.spec.ts`, beside the write.
+  function takeBadge(over: Partial<BadgeParams> = {}): void {
     act(() => {
-      const store = useProjectStore.getState();
-      if (badge) store.patchCase({ badge });
-      else {
-        const nextCase = { ...store.project.case };
-        delete nextCase.badge;
-        useProjectStore.setState({ project: { ...store.project, case: nextCase } });
-      }
+      useEngraveJobStore
+        .getState()
+        .takeBadgeBlank(badgeBlankFor(defaultBadgeParams(over)));
     });
   }
 
-  afterEach(() => setBadge(undefined));
-
-  it('offers the button only when the project has an enabled badge', () => {
+  it('shows the badge blank on ONE stock line, with its magnet pocket counted as a void', () => {
+    takeBadge();
     render(<EngravePanel />);
-    const button = (): HTMLButtonElement => screen.getByTestId('engrave-stock-from-badge') as HTMLButtonElement;
-    expect(button().disabled).toBe(true);
-
-    // A badge that exists but is switched off is not a badge project.
-    setBadge(defaultBadgeParams({ enabled: false }));
-    expect(button().disabled).toBe(true);
-
-    setBadge(defaultBadgeParams());
-    expect(button().disabled).toBe(false);
-  });
-
-  it('takes the stock and the magnet pocket from the badge in one press', async () => {
-    setBadge(defaultBadgeParams());
-    render(<EngravePanel />);
-    await press(screen.getByTestId('engrave-stock-from-badge'));
 
     const job = useEngraveJobStore.getState().job;
     // The blank AND the print facts that ride with it (#352, #368): the badge the template makes
@@ -1517,9 +1493,13 @@ describe('EngravePanel — the badge blank (#271 route 1)', () => {
       material: 'pla',
       colour: { kind: 'printed', capMm: 0.81, layerHeight: 0.2, firstLayerHeight: 0.2 },
     });
-    expect((screen.getByTestId('engrave-stock-length') as HTMLInputElement).value).toBe('38.1');
-    // The numbers are the model's, not something someone typed here (decision 28's question).
-    expect(screen.getByTestId('engrave-stock-length-source').dataset.source).toBe('computed');
+    // §4's three-decimal rule is the printing rule: no float tail, no half-typed precision.
+    const line = screen.getByTestId('engrave-stock-line').textContent ?? '';
+    expect(line).toContain('38.1 × 76.2 × 3.81 mm');
+    expect(line).toContain('PLA');
+    // The inline size fields are gone: the wizard's step 2 states the stock now.
+    expect(screen.queryByTestId('engrave-stock-length')).toBeNull();
+    expect(screen.queryByTestId('engrave-stock-length-source')).toBeNull();
 
     // The void is declared, drawn as a row, and stated as a consequence.
     expect(job.keepOuts!.map((k) => k.id)).toEqual([BADGE_POCKET_KEEP_OUT_ID]);
@@ -1534,7 +1514,6 @@ describe('EngravePanel — the badge blank (#271 route 1)', () => {
     const limit = jobDepthLimit(job);
     expect(limit(19.05, 38.1)).toBeCloseTo(1.2, 6);
     expect(limit(5, 5)).toBeCloseTo(2.81, 6);
-    expect(screen.getByTestId('engrave-badge-notes')).toBeTruthy();
   });
 
   it('reads the layer-aligned limit, not the analytic one, once the blank states its print (#351)', () => {
@@ -1542,18 +1521,7 @@ describe('EngravePanel — the badge blank (#271 route 1)', () => {
     // quantised onto the 0.2 mm layer grid: the 1.51 mm of declared membrane becomes a 1.40 mm
     // roof, and the 0.2 mm boundary margin makes the limit 1.20. The row used to print the
     // analytic 1.51 − 0.2 = 1.31 while the verifier refused every cut below 1.20 (#351).
-    //
-    // Seeded through the same `badgeBlankFor` → `takeBadgeBlank` seam `engraveFromBadge.spec` uses,
-    // to hold this spec on the panel's own readout rather than re-covering the wizard's badge→blank
-    // plumbing (the project-badge route is the test above, which now presses the button on a badge
-    // that states its print — #368 gave the schema the mirror that used to strip it).
-    act(() => {
-      useEngraveJobStore
-        .getState()
-        .takeBadgeBlank(
-          badgeBlankFor(defaultBadgeParams({ print: { layerHeight: 0.2, firstLayerHeight: 0.2 } })),
-        );
-    });
+    takeBadge({ print: { layerHeight: 0.2, firstLayerHeight: 0.2 } });
     render(<EngravePanel />);
 
     expand('engrave-keepout'); // #411 — the sentence is in the row's editor now
@@ -1569,31 +1537,6 @@ describe('EngravePanel — the badge blank (#271 route 1)', () => {
     // And the limit the row shows is the limit the verifier takes at that point, not a parallel one.
     const job = useEngraveJobStore.getState().job;
     expect(jobDepthLimit(job)(19.05, 38.1)).toBeCloseTo(1.2, 6);
-  });
-
-  it('lands on the same void when it is pressed twice', async () => {
-    setBadge(defaultBadgeParams());
-    render(<EngravePanel />);
-    await press(screen.getByTestId('engrave-stock-from-badge'));
-    await press(screen.getByTestId('engrave-stock-from-badge'));
-    expect(useEngraveJobStore.getState().job.keepOuts).toHaveLength(1);
-  });
-
-  it('removes the void IT stamped when the badge has no pocket — and never one the user typed', async () => {
-    setBadge(defaultBadgeParams());
-    render(<EngravePanel />);
-    await press(screen.getByTestId('engrave-stock-from-badge'));
-    // A void of the user's own, beside the stamped one.
-    fireEvent.click(screen.getByTestId('engrave-add-keepout-circle'));
-    expect(useEngraveJobStore.getState().job.keepOuts).toHaveLength(2);
-
-    setBadge(defaultBadgeParams({ magnetPocket: null }));
-    await press(screen.getByTestId('engrave-stock-from-badge'));
-
-    const ids = useEngraveJobStore.getState().job.keepOuts!.map((k) => k.id);
-    expect(ids).toHaveLength(1);
-    expect(ids[0]).not.toBe(BADGE_POCKET_KEEP_OUT_ID);
-    expect(ids[0]!.startsWith('ko-')).toBe(true);
   });
 });
 
@@ -1759,8 +1702,10 @@ describe('EngravePanel — where a label’s depth came from (#362 review)', () 
 
     // The row the panel offers is the JOB's number, not the house default — which is the margin the
     // recommendation below was worked out with.
-    expect(screen.getByTestId('engrave-margins-value').textContent).toBe('0.28 mm');
-    expect(screen.getByTestId('engrave-margins-source').textContent).toBe('set for this job');
+    // #686 — the margins are one line in the Cutter group's Technical fold, and the source chip is
+    // gone: the job's own margins are what the line prints, and the run sheet names where they came
+    // from.
+    expect(screen.getByTestId('engrave-margins-value').textContent).toBe('Margins 0.28 mm · Z tolerance 0.05 mm');
 
     const line = recommended(0)!;
     expect(line).toContain('Recommended 0.92 mm');
@@ -1810,8 +1755,7 @@ describe('EngravePanel margins row (#345)', () => {
     render(<EngravePanel />);
     // No `margins` on the job: it follows the house setting, and the row says so rather than
     // claiming the number as the user's.
-    expect(screen.getByTestId('engrave-margins-value').textContent).toBe('0.2 mm');
-    expect(screen.getByTestId('engrave-margins-source').textContent).toBe('the house default');
+    expect(screen.getByTestId('engrave-margins-value').textContent).toBe('Margins 0.2 mm · Z tolerance 0.05 mm');
     // There is nothing of the job's own to go back to yet.
     expect(screen.queryByTestId('engrave-margins-house')).toBeNull();
   });
@@ -1834,14 +1778,12 @@ describe('EngravePanel margins row (#345)', () => {
     // printout would describe the same number two ways.
     const job = useEngraveJobStore.getState().job;
     expect(job.margins).toEqual({ boundaryMargin: 0.331, zTolerance: 0.331, source: 'recommended' });
-    expect(screen.getByTestId('engrave-margins-value').textContent).toBe('0.331 mm');
-    expect(screen.getByTestId('engrave-margins-source').textContent).toBe("this job's recommendation");
+    expect(screen.getByTestId('engrave-margins-value').textContent).toBe('Margins 0.331 mm · Z tolerance 0.331 mm');
 
     // …and the way back is offered only now that there is something to go back from.
     fireEvent.click(screen.getByTestId('engrave-margins-house'));
     expect(useEngraveJobStore.getState().job.margins).toBeUndefined();
-    expect(screen.getByTestId('engrave-margins-value').textContent).toBe('0.2 mm');
-    expect(screen.getByTestId('engrave-margins-source').textContent).toBe('the house default');
+    expect(screen.getByTestId('engrave-margins-value').textContent).toBe('Margins 0.2 mm · Z tolerance 0.05 mm');
   });
 
   it('writes the recommendation into the job’s own margins, not into the house setting', () => {
@@ -3355,5 +3297,231 @@ describe('EngravePanel — the cutter list (#687)', () => {
     const select = screen.getByTestId('engrave-tool') as HTMLSelectElement;
     const metal = Array.from(select.options).find((o) => o.value === 'inv:flat-metal');
     expect(metal?.getAttribute('title')).toContain('3.175*12mm Flat End(Metal)');
+  });
+});
+
+// #686 — the Design panel's main path, as the approved design states it: ONE file bar; three groups
+// whose closed summaries carry their facts; ONE stock line; closed one-line rows for the voids and
+// the target object; the margins and the operator's own typed facts inside the Cutter group's
+// Technical fold; and a sticky footer that is the only place the job's state is read. The behaviour
+// of each control keeps its own tests above — these are the SHAPE promises, which is what the audit
+// found the panel had lost under a hundred controls that all looked equally important.
+describe('EngravePanel — the Design main path (#686)', () => {
+  /** A job the Generate gate refuses: one item deeper than the blank. Any blocked render is also
+   *  the render that carries the footer's blocker sentence and its Fix. */
+  function deepJob(): void {
+    act(() => {
+      const base = useEngraveJobStore.getState().job;
+      useEngraveJobStore.setState({
+        job: { ...base, labels: base.labels.map((l, i) => (i === 0 ? { ...l, depth: 11.5 } : l)) },
+      });
+    });
+  }
+
+  it('reads as the mode switch, one file bar, three groups and one footer', () => {
+    render(<EngravePanel />);
+    expect(screen.getByTestId('cnc-mode-switch')).toBeTruthy();
+
+    // ONE file bar — the job's name, its saved state and the File menu.
+    expect(screen.getAllByTestId('engrave-job-file')).toHaveLength(1);
+    expect(screen.getByTestId('engrave-job-file-name').textContent).toBe(useEngraveJobStore.getState().job.name);
+    // Non-happy (a): a job that has never been saved says so, and still offers Save.
+    expect(screen.getByTestId('engrave-job-saved-time').textContent).toBe('Not saved yet');
+    fireEvent.click(screen.getByTestId('engrave-file-menu-toggle'));
+    expect((screen.getByTestId('engrave-job-save') as HTMLButtonElement).disabled).toBe(false);
+
+    // Three groups, each with a summary that states its fact while closed.
+    for (const id of ['engrave-group-job', 'engrave-group-cutter', 'engrave-group-hold']) {
+      expect(screen.getByTestId(id), id).toBeTruthy();
+    }
+    expect(screen.getByTestId('engrave-group-job-summary').textContent).toContain('items');
+    expect(screen.getByTestId('engrave-group-cutter-summary').textContent).toContain('flat');
+    expect(screen.getByTestId('engrave-group-hold-summary').textContent).toContain('Vise —');
+    expect(screen.getByTestId('engrave-footer')).toBeTruthy();
+  });
+
+  it('prints the last save as a clock time, and an unsaved job as words (#686 §1)', () => {
+    // The bar's one formatting rule: `saved 09:14` from the store's timestamp, and the words
+    // before there is one. The widget is the e2e's business; this is the text it prints.
+    expect(savedTimeText(null)).toBe('Not saved yet');
+    expect(savedTimeText(new Date(2026, 9, 26, 9, 14).getTime())).toBe('saved 09:14');
+    // Both halves pad: a save at five past nine is "saved 09:05", never "saved 9:5".
+    expect(savedTimeText(new Date(2026, 9, 26, 9, 5).getTime())).toBe('saved 09:05');
+  });
+
+  it('no longer carries the controls #686 deleted', () => {
+    render(<EngravePanel />);
+    for (const id of [
+      'engrave-setup-open',
+      'engrave-stock-from-badge',
+      'engrave-stock-from-blank',
+      'engrave-stock-length',
+      'engrave-stock-width',
+      'engrave-stock-thickness',
+      'engrave-stock-material',
+      'engrave-stock-length-source',
+      'engrave-job-owner-note',
+      'engrave-margins-note',
+      'engrave-margins-source',
+    ]) {
+      expect(screen.queryByTestId(id), id).toBeNull();
+    }
+  });
+
+  it('the File menu is the one door: Save job, Save job as…, Open job… and the design read', () => {
+    render(<EngravePanel />);
+    expect(screen.queryByTestId('engrave-file-menu')).toBeNull();
+    fireEvent.click(screen.getByTestId('engrave-file-menu-toggle'));
+    const menu = screen.getByTestId('engrave-file-menu');
+    const items = [...menu.querySelectorAll('[role="menuitem"]')].map((el) => el.getAttribute('data-testid'));
+    expect(items).toEqual(['engrave-job-save', 'engrave-job-save-as', 'engrave-job-open', 'engrave-design-import']);
+    // The deleted owner note's fact survives as the Save item's hover.
+    expect(screen.getByTestId('engrave-job-save').getAttribute('title')).toContain('The file is the owner');
+    expect(screen.getByTestId('engrave-design-import').textContent).toContain('Read a design (.3mf)');
+  });
+
+  it('prints the stock as one line, and its edit is the wizard’s step 2 door', () => {
+    render(<EngravePanel />);
+    const line = screen.getByTestId('engrave-stock-line').textContent ?? '';
+    expect(line).toContain('Stock');
+    expect(line).toContain('plate 100 × 60 × 12 mm');
+    expect(screen.getByTestId('engrave-stock-edit').textContent).toContain('edit');
+    // The facts the inline fields carried survive in the line's hover (and, for the fields the
+    // operator typed, in Technical's one sentence).
+    expect(screen.getByTestId('engrave-stock-line').getAttribute('title')).toContain('wizard’s step 2');
+    act(() => {
+      const base = useEngraveJobStore.getState().job;
+      useEngraveJobStore.setState({ job: { ...base, sources: { stock: { length: 'computed' } } } });
+    });
+    expect(screen.getByTestId('engrave-stock-line').getAttribute('title')).toContain('length computed');
+  });
+
+  it('facing is ONE line on the main path, and its controls are behind it', () => {
+    act(() => {
+      const base = useEngraveJobStore.getState().job;
+      useEngraveJobStore.setState({ job: { ...base, facing: { enabled: true, depth: 0.2 } } });
+    });
+    render(<EngravePanel />);
+    const editor = screen.getByTestId('engrave-facing-editor') as HTMLDetailsElement;
+    expect(editor.open).toBe(false);
+    expect(screen.getByTestId('engrave-facing-line').textContent).toBe('Facing — 0.2 mm off the top ▸ change');
+    // The two-button row is not on the main path: it is inside the line's own disclosure.
+    expect(editor.contains(screen.getByTestId('engrave-facing-on'))).toBe(true);
+    expect(editor.contains(screen.getByTestId('engrave-facing-off'))).toBe(true);
+    // `change` opens the choice and the depth in place.
+    fireEvent.click(screen.getByTestId('engrave-facing-line'));
+    expect(editor.open).toBe(true);
+  });
+
+  it('says facing is not offered on plastic, with no third sentence on the main path', () => {
+    act(() => {
+      const base = useEngraveJobStore.getState().job;
+      useEngraveJobStore.setState({ job: { ...base, stock: { ...base.stock, material: 'petg' } } });
+    });
+    render(<EngravePanel />);
+    expect(screen.getByTestId('engrave-facing-line').textContent).toBe('Facing — not offered on plastic ▸ change');
+  });
+
+  it('shows the voids and the target object as closed one-line rows at 0, each opened by its own +', () => {
+    render(<EngravePanel />);
+    const voids = screen.getByTestId('engrave-voids-fold') as HTMLDetailsElement;
+    expect(voids.open).toBe(false);
+    expect(screen.getByTestId('engrave-keepout-count').textContent).toBe('0');
+    expect(screen.getByTestId('engrave-voids-summary').textContent).toContain('+');
+    // The explanation and the add buttons are behind the row, not on the main path.
+    expect(voids.contains(screen.getByTestId('engrave-add-keepout-circle'))).toBe(true);
+    fireEvent.click(screen.getByTestId('engrave-voids-summary'));
+    expect(voids.open).toBe(true);
+
+    const target = screen.getByTestId('engrave-target-fold') as HTMLDetailsElement;
+    expect(target.open).toBe(false);
+    expect(screen.getByTestId('engrave-target-count').textContent).toBe('0');
+    fireEvent.click(screen.getByTestId('engrave-target-summary'));
+    expect(target.open).toBe(true);
+  });
+
+  it('keeps a typed field’s chip off the field and names it once in the Technical fold', () => {
+    act(() => {
+      const base = useEngraveJobStore.getState().job;
+      useEngraveJobStore.setState({
+        job: {
+          ...base,
+          sources: { ...(base.sources ?? {}), tool: 'user', stock: { thickness: 'user' } },
+        },
+      });
+    });
+    render(<EngravePanel />);
+    // A typed value is the operator's own fact: no chip asks them to re-read it (audit D2)…
+    expect(screen.queryByTestId('engrave-tool-source')).toBeNull();
+    // …and ONE sentence says which fields were theirs.
+    const sentence = screen.getByTestId('engrave-typed-sources').textContent ?? '';
+    expect(sentence).toContain('the cutter');
+    expect(sentence).toContain('stock thickness');
+    // A source the operator cannot read off the number still carries its tag.
+    act(() => {
+      const base = useEngraveJobStore.getState().job;
+      useEngraveJobStore.setState({ job: { ...base, sources: { ...(base.sources ?? {}), tool: 'computed' } } });
+    });
+    expect(screen.getByTestId('engrave-tool-source').dataset.source).toBe('computed');
+  });
+
+  it('states the margins as one line inside Technical, with no prose and no source chip', () => {
+    render(<EngravePanel />);
+    const technical = screen.getByTestId('engrave-cutter-technical') as HTMLDetailsElement;
+    expect(technical.open).toBe(false);
+    expect(screen.getByTestId('engrave-margins').closest('details')).toBe(technical);
+    expect(screen.getByTestId('engrave-margins-value').textContent).toBe('Margins 0.2 mm · Z tolerance 0.05 mm');
+    expect(screen.queryByTestId('engrave-margins-source')).toBeNull();
+    expect(screen.queryByTestId('engrave-margins-note')).toBeNull();
+  });
+
+  it('never prints a figure past the wizard’s three decimals (#686 §4)', () => {
+    act(() => {
+      const base = useEngraveJobStore.getState().job;
+      useEngraveJobStore.setState({
+        job: {
+          ...base,
+          stock: { ...base.stock, length: 1.42875 },
+          margins: { boundaryMargin: 1.42875, zTolerance: 1.42875, source: 'user' },
+        },
+      });
+    });
+    render(<EngravePanel />);
+    const line = screen.getByTestId('engrave-stock-line').textContent ?? '';
+    expect(line).toContain('1.429');
+    expect(line).not.toContain('1.42875');
+    const margins = screen.getByTestId('engrave-margins-value').textContent ?? '';
+    expect(margins).toBe('Margins 1.429 mm · Z tolerance 1.429 mm');
+  });
+
+  it('the footer counts the findings as notes and names each one’s severity in words', () => {
+    deepJob();
+    render(<EngravePanel />);
+    const summary = screen.getByTestId('engrave-findings').querySelector('summary')!;
+    expect(summary.textContent).toMatch(/^\d+ notes? ▸ show$/);
+    fireEvent.click(summary);
+    const rows = screen.getAllByTestId(/^engrave-finding-\d+-/);
+    expect(rows.length).toBeGreaterThan(0);
+    for (const row of rows) {
+      const word = row.querySelector('[data-severity]')!.textContent;
+      expect(['Error', 'Warning', 'Note']).toContain(word);
+    }
+  });
+
+  it('pins Generate’s blocker sentence and its Fix inside the sticky footer, which ends the flow', () => {
+    deepJob();
+    render(<EngravePanel />);
+    const footer = screen.getByTestId('engrave-footer');
+
+    // jsdom has no layout, so the 1024 × 700 promise is asserted structurally, which is what it
+    // rests on: the blocker and Fix are DESCENDANTS of the sticky region, and nothing follows that
+    // region in the panel's flow (the two overlays after it mount only when opened and draw above
+    // the page, not below it).
+    expect(footer.style.position).toBe('sticky');
+    expect(footer.style.bottom).toBe('0px');
+    expect(footer.contains(screen.getByTestId('engrave-generate-blocker'))).toBe(true);
+    expect(footer.contains(screen.getByTestId('engrave-generate-fix'))).toBe(true);
+    expect(screen.getByTestId('engrave-generate-blocker').textContent).toContain('▸ Fix');
+    expect(footer.parentElement?.lastElementChild).toBe(footer);
   });
 });

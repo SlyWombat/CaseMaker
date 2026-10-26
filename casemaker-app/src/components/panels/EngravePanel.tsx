@@ -2,7 +2,6 @@ import { featureSim } from '@/platform/features';
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type JSX, type ReactNode, type RefObject } from 'react';
 import { newItemDepthFor, newTargetObjectId, useEngraveJobStore } from '@/store/engraveJobStore';
 import { useEngraveJobFileStore } from '@/store/engraveJobFileStore';
-import { useProjectStore } from '@/store/projectStore';
 import { useEngravePreviewStore } from '@/store/engravePreviewStore';
 import { expandEngraveRow, useEngraveRowStore } from '@/store/engraveRowStore';
 import { useEngraveRunStore, releaseBlocker, runErrorCodes, saveBlocker, uploadBlocker } from '@/store/engraveRunStore';
@@ -22,8 +21,6 @@ import { useSettingsStore } from '@/store/settingsStore';
 import {
   effectiveMargins,
   houseBoundaryMargin,
-  marginSourceWords,
-  mm as mmText,
   recommendLabelDepth,
   recommendMargins,
   voidMarginWords,
@@ -75,7 +72,6 @@ import { useRunRecordStore } from '@/store/runRecordStore';
 import { surfaceSpreadFor, firstRegistrationFor } from '@/store/engraveRegistrationStore';
 import { openTextFile } from '@/utils/openTextFile';
 import { feedCatalogueSnapshot, feedsFor, type CutParams } from '@/engine/cnc/feeds';
-import { materialOptionsFor } from '@/engine/cnc/engrave/setupFlow';
 import {
   TRACE_DEFAULTS,
   importOutlineFromDisk,
@@ -88,7 +84,6 @@ import {
   type TraceOptions,
 } from '@/engine/import/outlineImport';
 import { newEngraveShapeId, newEngraveTraceId } from '@/engine/cnc/engrave/defaults';
-import { badgeBlankFor } from '@/engine/cnc/engrave/fromBadge';
 import {
   FACING_DEPTH_MAX_MM,
   facingDefault,
@@ -96,12 +91,12 @@ import {
   facingRefusal,
   facingShopFrom,
   finishOf,
+  formLabel,
   measuredTopSpreadMm,
 } from '@/engine/cnc/stockStart';
 import { MATERIAL_LABELS } from '@/engine/cnc/materials';
 import { groupRejections, isActionableRejection, shouldGroupCatalogueRows } from './recommendationRejections';
 import { useShopDefaultsStore, shopDefault } from '@/store/shopDefaultsStore';
-import { blankStockFor } from '@/engine/cnc/engrave/fromBlank';
 import { readDesignFile } from '@/engine/import/designImport';
 import { readTargetObjectFile } from '@/engine/import/targetObject';
 import {
@@ -147,6 +142,7 @@ import { EngraveImportDialog } from './EngraveImportDialog';
 import { EngraveSetupsSection } from './EngraveSetupsSection';
 import { RunSheetView } from './RunSheetView';
 import { formatDuration } from '@/engine/cnc/plan/format';
+import { fmt } from '@/components/welcome/holdingMounts';
 import type {
   EngraveAnyItem,
   EngraveChamfer,
@@ -160,7 +156,6 @@ import type {
   Sacrificial,
   SacrificialSide,
   SacrificialUnder,
-  StockMaterial,
   ViseParams,
 } from '@/types/engraveJob';
 
@@ -180,7 +175,6 @@ import type {
 const MUTED: CSSProperties = { fontSize: 11, color: '#9aa4b0', lineHeight: 1.5, margin: '4px 0' };
 const SUBHEAD: CSSProperties = { margin: '12px 0 4px', fontSize: 12, fontWeight: 600, color: '#c8d3de' };
 /** A heading under one of the numbered sections — the voids live under Stock (#271). */
-const SUBSUB: CSSProperties = { margin: '10px 0 2px', fontSize: 11, fontWeight: 600, color: '#9aa4b0' };
 const FIELD: CSSProperties = { width: 74 };
 // #503 — the label may WRAP, not just shrink. A stock field carries a `computed` source tag after
 // its input; at the panel's ~300 px content width that tag did not fit beside the label and input,
@@ -197,12 +191,14 @@ const FIELD_LABEL: CSSProperties = { display: 'flex', alignItems: 'center', gap:
 const FIELD_GRID: CSSProperties = { display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 6 };
 
 /**
- * A value as a field should PRINT it (#406). Binary float noise a person should never read —
- * `3.2 − 3.1` is `0.10000000000000009`, and a thin blank's `stockProud` can be its negative — is
- * removed at six decimals, four below the 0.001 mm the controller moves in, so anything typed on
- * purpose survives. The stored value is untouched: this is the display only.
+ * A value as a field should PRINT it (#406, §4's three-decimal rule). Binary float noise a person
+ * should never read — `3.2 − 3.1` is `0.10000000000000009`, and a thin blank's `stockProud` can be
+ * its negative — is removed at the 0.001 mm the controller moves in. The stored value is untouched:
+ * this is the display only.
  */
-const shownNumber = (v: number): number => Number(v.toFixed(6));
+function shownNumber(v: number): number {
+  return Number(v.toFixed(3));
+}
 const TAG: CSSProperties = {
   fontSize: 10,
   color: '#9aa4b0',
@@ -290,8 +286,17 @@ const SOURCE_COLOR: Record<FieldSource, string> = {
   assumed: '#d0b26a',
 };
 
-/** The tag that shows a field's provenance (#246/#254), or null when nothing was asserted. */
-function SourceTag({ source, testid }: { source: FieldSource; testid: string }): JSX.Element {
+/**
+ * The tag that shows a field's provenance (#246/#254), or null when nothing was asserted.
+ *
+ * #686, design §2 — a grey `typed` chip beside every number the operator typed thirty seconds ago
+ * is noise (audit D2). The fact that a value is theirs is still stated: one sentence in the Cutter
+ * group's Technical fold names every field that was typed by hand. Computed, Makera's catalogue,
+ * measured and assumed still carry their tag, because those are claims the operator cannot read off
+ * the number itself.
+ */
+function SourceTag({ source, testid }: { source: FieldSource; testid: string }): JSX.Element | null {
+  if (source === 'user') return null;
   return (
     <span
       style={{
@@ -370,11 +375,6 @@ const ATTACH_METHODS: readonly { value: SacrificialUnder['attach']; label: strin
 
 const STRIP_SIDES: readonly (keyof Sacrificial['sides'])[] = ['left', 'right', 'front', 'back'];
 
-/** 1 -> "1.0", 3.175 -> "3.175". The same formatting `recommendTool` uses in its reasons. */
-function fmtDiameter(d: number): string {
-  return Number.isInteger(d) ? d.toFixed(1) : String(d);
-}
-
 /**
  * #454/#458 — a built-in or catalogue key borrows the condition of the shop's copies that
  * correspond to it, so a summarised condition on it is a statement about THOSE copies, not about
@@ -383,11 +383,6 @@ function fmtDiameter(d: number): string {
  */
 function conditionSourceWord(c: ToolCandidate): string {
   return c.condition?.adopted ? ' (the shop’s copies)' : '';
-}
-
-/** A V-carve fact to the micron, as the sheet and the finding print it (`0.052`, `0.242`). */
-function mm3(v: number): string {
-  return String(Math.round(v * 1000) / 1000);
 }
 
 /**
@@ -428,12 +423,22 @@ function sacrificialBadge(s: Sacrificial): string {
   return 'measured · this setup';
 }
 
-/** #523 — the footer's finding count in the operator's words: "2 warnings · 0 errors". */
+/**
+ * #686 — the footer's finding count in the operator's words: `1 note`, `3 notes` (§3.6). The old
+ * "2 warnings · 0 errors" tally was audit B13: a count split by severity beside a list whose rows
+ * carried a colour dot instead of the severity word. Each row now names its severity and the
+ * summary says how many notes there are.
+ */
 function findingTally(findings: JobFinding[]): string {
-  const errors = findings.filter((f) => f.severity === 'error').length;
-  const warnings = findings.filter((f) => f.severity === 'warning').length;
-  return `${warnings} warning${warnings === 1 ? '' : 's'} · ${errors} error${errors === 1 ? '' : 's'}`;
+  return `${findings.length} note${findings.length === 1 ? '' : 's'}`;
 }
+
+/** The severity as the operator reads it in a finding row (#686). */
+const SEVERITY_WORD: Record<JobFinding['severity'], string> = {
+  error: 'Error',
+  warning: 'Warning',
+  info: 'Note',
+};
 
 /**
  * A collapsible group in the Design rail (#523): a heading with a one-line summary that stays
@@ -733,7 +738,6 @@ function RemovalAnnouncement(): JSX.Element {
 export function EngravePanel(): JSX.Element {
   const job = useEngraveJobStore((s) => s.job);
   const setJobMargins = useEngraveJobStore((s) => s.setJobMargins);
-  const setStock = useEngraveJobStore((s) => s.setStock);
   const updateLabel = useEngraveJobStore((s) => s.updateLabel);
   const removeLabel = useEngraveJobStore((s) => s.removeLabel);
   const addShape = useEngraveJobStore((s) => s.addShape);
@@ -763,8 +767,6 @@ export function EngravePanel(): JSX.Element {
   const addKeepOut = useEngraveJobStore((s) => s.addKeepOut);
   const updateKeepOut = useEngraveJobStore((s) => s.updateKeepOut);
   const removeKeepOut = useEngraveJobStore((s) => s.removeKeepOut);
-  const takeBadgeBlank = useEngraveJobStore((s) => s.takeBadgeBlank);
-  const takeBlankStock = useEngraveJobStore((s) => s.takeBlankStock);
   const takeDesign = useEngraveJobStore((s) => s.takeDesign);
   const addVector = useEngraveJobStore((s) => s.addVector);
   const addLine = useEngraveJobStore((s) => s.addLine);
@@ -1046,19 +1048,19 @@ export function EngravePanel(): JSX.Element {
           {filmPending
             ? ' — resolving it from the print…'
             : film !== null
-              ? `, ${mm3(film)} mm below the top, resolved from the print.`
+              ? `, ${fmt(film)} mm below the top, resolved from the print.`
               : ' — this blank states no film, so the plane is the floor.'}{' '}
-          The tip is {mmText(cone.tipRadius * 2)} mm wide and its flank is{' '}
-          {mmText(cone.halfAngleDeg)}° from the axis.
+          The tip is {fmt(cone.tipRadius * 2)} mm wide and its flank is{' '}
+          {fmt(cone.halfAngleDeg)}° from the axis.
         </p>
         {plane !== null && (
           <p style={MUTED} data-testid={`engrave-vcarve-item-${item.id}`}>
-            {item.name} at {mm3(item.depth)} mm: {mm3(plane.grooveWidth)} mm groove at the plane —
-            floor {mm3(plane.floorInset)} mm narrower per side, top opening{' '}
-            {mm3(plane.surfaceOutset)} mm wider per side;{' '}
+            {item.name} at {fmt(item.depth)} mm: {fmt(plane.grooveWidth)} mm groove at the plane —
+            floor {fmt(plane.floorInset)} mm narrower per side, top opening{' '}
+            {fmt(plane.surfaceOutset)} mm wider per side;{' '}
             {stepover === null
               ? 'the pass pitch was not resolved for this job'
-              : `pass pitch ${mm3(stepover.effective)} mm beside the requested ${mm3(stepover.requested)} mm`}
+              : `pass pitch ${fmt(stepover.effective)} mm beside the requested ${fmt(stepover.requested)} mm`}
             {'.'}
           </p>
         )}
@@ -1187,7 +1189,7 @@ export function EngravePanel(): JSX.Element {
   const facingDepthReason =
     facing !== null && Math.abs(facing.depth - facingDepthFill.depthMm) < 1e-9
       ? sentenceCase(facingDepthFill.reason) + '.'
-      : `Your number, not the ${mmText(facingDepthFill.depthMm)} filled in for this finish.`;
+      : `Your number, not the ${fmt(facingDepthFill.depthMm)} filled in for this finish.`;
   /** Turn facing on or off, FILLING IN the depth's default when the job had not chosen one. */
   function chooseFacing(on: boolean): void {
     const depth = facing?.depth ?? facingDepthFill.depthMm;
@@ -1237,50 +1239,9 @@ export function EngravePanel(): JSX.Element {
     });
   };
 
-  // #271 route 1 — the blank this job is for is usually already in the project as `case.badge`,
-  // and the one void V1 needs (the magnet pocket) is the badge's own. Reading it here cannot get
-  // it wrong; retyping 45 × 13 × 2.3 into a keep-out row can. `badgeBlankFor` is pure and only
-  // describes what the badge IS — the writes below are the store's.
-  const badge = useProjectStore((s) => s.project.case.badge);
-  const badgeUsable = badge !== undefined && badge.enabled;
-  const [blankNotes, setBlankNotes] = useState<string[] | null>(null);
-
-  async function useBadgeBlank(): Promise<void> {
-    if (!badge) return;
-    const blank = badgeBlankFor(badge);
-    // #365 review — the store's seed MEASURES the line it lays out, so the face it borrows has to be
-    // parsed before the write. Pressed before the faces were up (the header effect above usually wins
-    // that race, but a button may not depend on it) the seeded line came out at the estimate's 5 mm
-    // cap while the row right beside it said 8. Best-effort: a face that will not load leaves the
-    // seed the estimate, which is what it had before this wait.
-    await ensureSeedFontsLoaded(job.labels, job.customFonts ?? []);
-    // #352 — the write itself lives in the store, because the wizard's hand-off seed makes the same
-    // one. The panel owns only what it shows.
-    takeBadgeBlank(blank);
-    setBlankNotes(blank.notes);
-  }
-
-  // Issue #280 — the bare-blank archetype's twin of the badge button. A `case.blank` is the
-  // stock itself, so taking it across is dimensions only: the material is the user's answer and
-  // a blank cannot know it (#280's "a machine we have no profile for is never given another's
-  // numbers" rule, applied to the material). No void handling — a blank declares none.
-  const blankPart = useProjectStore((s) => s.project.case.blank);
-  const blankPartUsable = blankPart !== undefined && blankPart.enabled;
-  const [blankPartNotes, setBlankPartNotes] = useState<string[] | null>(null);
-
-  async function useBlankStock(): Promise<void> {
-    if (!blankPart) return;
-    // The same wait as the badge button's, for the same reason and with the same best-effort
-    // reading: `takeBlankStock` seeds its line from a MEASUREMENT of the face it borrows (#364,
-    // #365 review).
-    await ensureSeedFontsLoaded(job.labels, job.customFonts ?? []);
-    // #364 — one store method owns the whole write, the panel only shows what it did. It takes the
-    // stock AND the lines (the seed and the re-depth walk), so "Use the blank" no longer leaves the
-    // demo words laid out for a plank on a blank that is not one.
-    takeBlankStock(blankPart);
-    setBlankPartNotes(blankStockFor(blankPart).notes);
-  }
-
+  // #271 route 1 and #280's twin used to hang a "use the project's badge / blank" button under the
+  // stock fields. #686 moved both routes behind the wizard's stock step (`engrave-stock-edit`): the
+  // main path is one stock line, and the sizes are the wizard's answers, not a field grid here.
   // Issue #410 item 4 — the third way a blank gets into this job, and the only one that brings the
   // ITEMS with it: a PrusaSlicer project (`.3mf`). The file is read in the sim worker (it needs a
   // ManifoldToplevel to slice the volumes) and what comes back is the same kind of patch the badge
@@ -1530,7 +1491,7 @@ export function EngravePanel(): JSX.Element {
       ? toolDisplay(recPickEntry.tool)
       : recPick === null
         ? null
-        : { name: `⌀ ${mmText(recPick.diameter)} mm cutter`, metal: false };
+        : { name: `⌀ ${fmt(recPick.diameter)} mm cutter`, metal: false };
   // #687 — "applied" is a fact about the job, not about the preview: the job's cutter is the pick.
   // `Use it` exists only when that is false, so it never offers to change nothing.
   const recPickApplied = recPick !== null && rec !== null && rec.key !== null && rec.key === job.toolKey;
@@ -1848,7 +1809,7 @@ export function EngravePanel(): JSX.Element {
           (run.generated.facingError === null ? '' : `: ${run.generated.facingError}`) +
           '. The program can still be run, but the top will not be skimmed — clear the reason and generate again.'
         : facingCam !== null
-          ? `${facingCam.toolName}, ⌀ ${mm3(facingCam.diameterMm)} mm flat, ${facingCam.passes} × ${mm3(facingCam.stepDown)} mm passes`
+          ? `${facingCam.toolName}, ⌀ ${fmt(facingCam.diameterMm)} mm flat, ${facingCam.passes} × ${fmt(facingCam.stepDown)} mm passes`
           : `${run.generated.facingToolKey ?? 'its own cutter'}`
   }`;
 
@@ -2088,6 +2049,54 @@ export function EngravePanel(): JSX.Element {
   const vectorCount = job.vectors?.length ?? 0;
   const primitiveCount = job.primitives?.length ?? 0;
   const chamferCount = job.chamfers?.length ?? 0;
+  const itemTotal =
+    job.labels.length +
+    job.shapes.length +
+    combinedCount +
+    traceCount +
+    drillCount +
+    threadCount +
+    primitiveCount +
+    cutoutCount +
+    vectorCount +
+    chamferCount;
+  // #686 — the Job group's ONE stock line, and the provenance facts that moved off the inline
+  // fields (design §2): the line's hover and the Cutter group's Technical fold.
+  /** §4's word for the stock's form, lowercase mid-sentence: plate · block · sheet · printed blank. */
+  const stockFormWord = formLabel(job.stockEntry?.form ?? 'plate').toLowerCase();
+  const STOCK_FIELD_WORD: Record<string, string> = {
+    length: 'length',
+    width: 'width',
+    thickness: 'thickness',
+    material: 'material',
+  };
+  const stockSources = job.sources?.stock ?? {};
+  const stockProvenance = (() => {
+    const words = Object.entries(STOCK_FIELD_WORD).flatMap(([key, word]) => {
+      const src = (stockSources as Record<string, FieldSource | undefined>)[key];
+      return src === undefined ? [] : [`${word} ${SOURCE_LABEL[src]}`];
+    });
+    return words.length === 0 ? 'The stock is stated in the wizard’s step 2.' : `Stock — ${words.join(' · ')}.`;
+  })();
+  // #686, design §2 — a typed value's provenance is not a chip beside it (audit D2): the fields the
+  // operator typed are named in ONE sentence in the Cutter group's Technical fold.
+  const typedByUser: string[] = [];
+  for (const [key, word] of Object.entries(STOCK_FIELD_WORD)) {
+    if ((stockSources as Record<string, FieldSource | undefined>)[key] === 'user') typedByUser.push(`stock ${word}`);
+  }
+  if (job.sources?.tool === 'user') typedByUser.push('the cutter');
+  const CUT_FIELD_WORD: Record<string, string> = {
+    rpm: 'spindle speed',
+    feed: 'feed',
+    plungeFeed: 'plunge feed',
+    stepDown: 'step-down',
+    stepOver: 'step-over',
+  };
+  for (const [key, word] of Object.entries(CUT_FIELD_WORD)) {
+    if ((job.sources?.cut as Record<string, FieldSource | undefined> | undefined)?.[key] === 'user') {
+      typedByUser.push(word);
+    }
+  }
   const target = job.targetObject ?? null;
   // #672 — a picture goal's pixel size, decoded once per image (the document stores the bytes and
   // the two numbers; the pixels are derived here for the row's resolution sentence).
@@ -2151,30 +2160,6 @@ export function EngravePanel(): JSX.Element {
     tipDiameterMm: chamferCone === null ? null : chamferCone.tipRadius * 2,
     tipSource:
       chamferCone === null || tool === null ? null : tool.tipDiameter !== null ? 'stated' : 'point, by kind',
-  };
-
-  const stockNum = (key: 'length' | 'width' | 'thickness', label: string, title: string): JSX.Element => {
-    const src = job.sources?.stock?.[key];
-    return (
-      <label style={FIELD_LABEL}>
-        <span>{label}</span>
-        <input
-          type="number"
-          min={0}
-          step="any"
-          value={job.stock[key]}
-          data-testid={`engrave-stock-${key}`}
-          aria-label={`Stock ${label}`}
-          title={title}
-          style={FIELD}
-          onChange={(e) => {
-            const v = Number(e.target.value);
-            if (Number.isFinite(v)) setStock({ [key]: v } as Partial<EngraveJob['stock']>);
-          }}
-        />
-        {src && <SourceTag source={src} testid={`engrave-stock-${key}-source`} />}
-      </label>
-    );
   };
 
   const viseNum = (
@@ -2334,34 +2319,13 @@ export function EngravePanel(): JSX.Element {
 
       {mode === 'design' ? (
         <>
-      {/* #425 §6 — the document's Save/Open surface. Design only: the file owns the job, and the
-          Cut branch is #419's. */}
-      <EngraveJobFileBar />
-
-      {/* The guided job setup (#254) and the design file's way in (#410), one row of two buttons. */}
-      <div style={{ display: 'flex', gap: 6 }}>
-        <button
-          type="button"
-          data-testid="engrave-setup-open"
-          title="Re-open the cutting-job wizard at the holding step — the same wizard, the same counter."
-          style={{ flex: 1, padding: 6 }}
-          onClick={() => openWizard('holding')}
-        >
-          Set up this job…
-        </button>
-        {featureSim && (
-          <button
-            type="button"
-            data-testid="engrave-design-import"
-            disabled={designReading}
-            title="Read a PrusaSlicer project (.3mf): its blank, its magnet pocket and every volume it cuts become this job. The cutter, the vise and the margins are left as they are."
-            style={{ flex: 1, padding: 6 }}
-            onClick={() => designInputRef.current?.click()}
-          >
-            {designReading ? 'Reading the design…' : 'Import a design (.3mf)…'}
-          </button>
-        )}
-      </div>
+      {/* #686 — ONE file bar (design §1): the job's name, its saved time, the dirty marker and a
+          `File ▾` menu. The `.3mf` design read (#410) is the menu's fourth item, so it keeps its
+          testid and its way in without a second headline button. */}
+      <EngraveJobFileBar
+        onReadDesign={featureSim ? () => designInputRef.current?.click() : undefined}
+        designReading={designReading}
+      />
       {featureSim && (
         <>
           {/* A plain file input, hidden, rather than the File System Access picker `openTextFile` uses:
@@ -2408,119 +2372,49 @@ export function EngravePanel(): JSX.Element {
       <Group
         testid="engrave-group-job"
         title="Job"
-        summary={`Stock ${job.stock.length} × ${job.stock.width} × ${job.stock.thickness} mm · ${job.stock.material}`}
+        summary={`${itemTotal} item${itemTotal === 1 ? '' : 's'}`}
         {...groupProps('engrave-group-job', true)}
       >
-      {/* 1 — stock */}
-      <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 8 }}>
-        <h3 style={SUBHEAD}>Stock</h3>
+      {/* 1 — stock, as ONE line (#686, design §2). The wizard's step 2 states the stock; the panel
+          reads it here. The inline fields, their size rows and the blank notes are gone, and the
+          badge / bare-blank headline routes are the door's starters now (#680). */}
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
+        <span
+          data-testid="engrave-stock-line"
+          title={stockProvenance}
+          style={{ fontSize: 12, color: '#d1d5db' }}
+        >
+          <span style={MUTED}>Stock</span> · {stockFormWord} {fmt(job.stock.length)} × {fmt(job.stock.width)} ×{' '}
+          {fmt(job.stock.thickness)} mm · {MATERIAL_LABELS[job.stock.material]}
+        </span>
         <button
           type="button"
           data-testid="engrave-stock-edit"
-          style={{ ...MUTED, margin: 0, padding: '1px 6px', cursor: 'pointer' }}
-          title="Re-open the cutting-job wizard at the stock step — the same wizard, the same counter."
+          style={{ ...MUTED, margin: 0, padding: '1px 6px', cursor: 'pointer', marginLeft: 'auto' }}
+          title="Open the cutting-job wizard at step 2 and state the stock — the same wizard, the same counter."
           onClick={() => openWizard('stock')}
         >
-          edit
+          ▸ edit
         </button>
       </div>
-      {/* #271 route 1 — take the blank from the project's badge rather than typing it. Sets the
-          stock and declares the magnet pocket in one press; every other field is left alone, so a
-          label that no longer fits the smaller blank is reported (not silently moved). */}
-      <button
-        type="button"
-        data-testid="engrave-stock-from-badge"
-        disabled={!badgeUsable}
-        title={
-          badgeUsable
-            ? 'Set the stock to the badge’s blank and declare its magnet pocket. Nothing else in the job changes.'
-            : 'This project has no enabled badge, so there is no blank to take.'
-        }
-        style={{ width: '100%', padding: 4 }}
-        onClick={useBadgeBlank}
-      >
-        Use the badge blank
-      </button>
-      {blankNotes && (
-        // #550 — the badge prose is reference detail, not a primary control: it pushed the cutter
-        // and Generate below the fold. Fold it behind a one-line summary (the first note names the
-        // blank), like `designNotes` above. The dimension fields and material stay visible.
-        <details data-testid="engrave-badge-notes" style={{ marginTop: 2 }}>
-          <summary data-testid="engrave-badge-summary" style={{ ...MUTED, cursor: 'pointer' }}>
-            {blankNotes[0]}{' '}
-            {blankNotes.length > 1
-              ? `▸ about this blank (${blankNotes.length - 1} note${blankNotes.length === 2 ? '' : 's'})`
-              : ''}
-          </summary>
-          {blankNotes.slice(1).map((note, i) => (
-            <p key={i} style={MUTED} data-testid={`engrave-badge-note-${i}`}>
-              {note}
-            </p>
-          ))}
-        </details>
-      )}
-      {/* #280 — the blank archetype's twin of the badge button above. Dimensions only: a blank
-          does not know its material, so this leaves `stock.material` exactly as it is. */}
-      <button
-        type="button"
-        data-testid="engrave-stock-from-blank"
-        disabled={!blankPartUsable}
-        title={
-          blankPartUsable
-            ? 'Set the stock to the blank’s size. The material stays as you set it — a blank does not know what it is made of.'
-            : 'This project has no enabled blank, so there is no blank to take.'
-        }
-        style={{ width: '100%', padding: 4 }}
-        onClick={useBlankStock}
-      >
-        Use the blank
-      </button>
-      {blankPartNotes && (
-        <div data-testid="engrave-blank-notes">
-          {blankPartNotes.map((note, i) => (
-            <p key={i} style={MUTED} data-testid={`engrave-blank-note-${i}`}>
-              {note}
-            </p>
-          ))}
-        </div>
-      )}
-      <div style={FIELD_GRID}>
-        {stockNum('length', 'length X', 'Stock X — it runs between the vise jaws.')}
-        {stockNum('width', 'width Y', 'Stock Y — away from the operator.')}
-        {stockNum('thickness', 'thickness', 'Stock Z — the blank’s thickness. Max depth per label is this less the minimum floor.')}
-        <label style={FIELD_LABEL}>
-          <span>material</span>
-          <select
-            value={job.stock.material}
-            data-testid="engrave-stock-material"
-            aria-label="Stock material"
-            title="Selects the row of the feeds table."
-            style={FIELD}
-            onChange={(e) => setStock({ material: e.target.value as StockMaterial })}
-          >
-            {materialOptionsFor(jobMachine(job)).map((m) => (
-              <option key={m.value} value={m.value}>
-                {m.label}
-              </option>
-            ))}
-          </select>
-          {job.sources?.stock?.material && (
-            <SourceTag source={job.sources.stock.material} testid="engrave-stock-material-source" />
-          )}
-        </label>
-      </div>
-      <p style={MUTED}>X runs between the vise jaws. The fixed jaw is on the left.</p>
 
-      {/* 1a — the skim of the top (#432 slice 4, decision Q6). A two-state choice, not a slider:
-          the stock's finish carries the default and the sentence says what that default is, so the
-          honest number does the work and the control only reports it. The depth is ASKED once
-          facing is on, arriving filled in (`facingDepthDefault`) — the maintainer's decision was
-          that the skim is never taken without someone seeing how far.
-
-          An absent `facing` key is the pre-#432 job: nothing has chosen, and the job does not
-          face. The line under the toggle says what the finish says, so the default is advice the
-          operator can take with one press rather than a state they were put in silently. */}
-      <h4 style={SUBSUB}>Facing</h4>
+      {/* 1a — the skim of the top (#432 slice 4, decision Q6; #686's one line). On wood and metal
+          the choice is one line with its current number; `change` opens the choice and the depth in
+          place. An absent `facing` key is the pre-#432 job: nothing has chosen, and the job does not
+          face. Plastic is not faced at all (#474/#493), so the line says so rather than offering a
+          control the material refuses. */}
+      <details data-testid="engrave-facing-editor" style={{ marginTop: 6 }}>
+        <summary data-testid="engrave-facing-line" style={{ ...MUTED, cursor: 'pointer', margin: 0 }}>
+          Facing —{' '}
+          {facingRefused
+            ? 'not offered on plastic'
+            : facing === null
+              ? 'not chosen'
+              : facingOn
+                ? `${fmt(facing.depth)} mm off the top`
+                : 'off'}{' '}
+          <span style={{ color: '#8fb8e0' }}>▸ change</span>
+        </summary>
       <p style={MUTED} data-testid="engrave-facing-why">
         {facingRefused ? (
           <>
@@ -2601,67 +2495,104 @@ export function EngravePanel(): JSX.Element {
           </p>
         </>
       )}
+      </details>
 
-      {/* 1b — the voids the blank already has (#271). These are what `jobDepthLimit` reads, so
-          the depth limit, the `item-over-void` warning and the run sheet's §1 list all speak of
-          a void only if it is declared here. */}
-      <h4 style={SUBSUB}>
-        Voids under the face{' '}
-        <span style={{ ...TAG, marginLeft: 4 }} data-testid="engrave-keepout-count">
-          {keepOuts.length}
-        </span>
+      {/* 1b — the voids the blank already has (#271). #686's closed one-line row carries the count;
+          the explanation, the expand-all and the add buttons are behind it, so at 0 the main path
+          says only that there are none. These are what `jobDepthLimit` reads, so the depth limit,
+          the `item-over-void` warning and the run sheet's §1 list all speak of a void only if it is
+          declared here. */}
+      <details data-testid="engrave-voids-fold" style={{ marginTop: 6 }}>
+        <summary data-testid="engrave-voids-summary" style={{ ...MUTED, cursor: 'pointer', margin: 0 }}>
+          Voids under the face (<span data-testid="engrave-keepout-count">{keepOuts.length}</span>)
+          <span style={{ marginLeft: 6, color: '#8fb8e0' }}>+</span>
+        </summary>
         <RowFolds testidPrefix="engrave-keepout" ids={keepOuts.map((ko) => ko.id)} firstButtonRef={voidsFoldRef} />
-      </h4>
-      <p style={MUTED}>
-        A pocket the blank already has, cut into its <strong>bottom</strong> face. The ceiling is
-        measured up from that face — the opposite direction from every depth in this panel. The
-        job refuses any cut that would break through the material left over one.
-      </p>
-      <UndoRemoval section="voids" fallbackRef={voidsFoldRef} />
-      {keepOuts.map((ko, i) => (
-        <EngraveKeepOutRow
-          key={ko.id}
-          keepOut={ko}
-          index={i}
-          thickness={job.stock.thickness}
-          // #351 — the WHOLE answer, from the one function the run sheet and the preview also read:
-          // the declared membrane, the layer-aligned roof, the void's own number, the blank's floor
-          // and the `min` of the last two. Passing the parts rather than a bare number is what lets
-          // the row say which of them set the limit instead of attributing every number to the void.
-          depth={keepOutLimitParts(job, keepOutMembrane(job, ko.zCeiling), margins.boundaryMargin)}
-          // #345 — which rule set that margin, from the same `voidMargin` arithmetic
-          // `keepOutLimitParts` ran, so the sentence under the number cannot name a rule the number
-          // is not on.
-          limitBasis={voidMarginWords(job, margins.boundaryMargin)}
-          findings={findingsFor(ko.id)}
-          onChange={(patch) => updateKeepOut(ko.id, patch)}
-          onRemove={() => removeKeepOut(ko.id)}
-        />
-      ))}
-      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 4, alignItems: 'center' }}>
-        <span style={{ ...MUTED, margin: 0 }}>add a void:</span>
-        {ADD_KEEPOUT_KINDS.map((k) => (
-          <button
-            key={k.value}
-            type="button"
-            data-testid={`engrave-add-keepout-${k.value}`}
-            title={`Declare a ${k.label.toLowerCase()} pocket in the blank's bottom face — the depth limit will respect it.`}
-            onClick={() => expandEngraveRow(addKeepOut(k.value))}
-          >
-            {k.label}
-          </button>
+        <p style={MUTED}>
+          A pocket the blank already has, cut into its <strong>bottom</strong> face. The ceiling is
+          measured up from that face — the opposite direction from every depth in this panel. The
+          job refuses any cut that would break through the material left over one.
+        </p>
+        <UndoRemoval section="voids" fallbackRef={voidsFoldRef} />
+        {keepOuts.map((ko, i) => (
+          <EngraveKeepOutRow
+            key={ko.id}
+            keepOut={ko}
+            index={i}
+            thickness={job.stock.thickness}
+            // #351 — the WHOLE answer, from the one function the run sheet and the preview also read:
+            // the declared membrane, the layer-aligned roof, the void's own number, the blank's floor
+            // and the `min` of the last two. Passing the parts rather than a bare number is what lets
+            // the row say which of them set the limit instead of attributing every number to the void.
+            depth={keepOutLimitParts(job, keepOutMembrane(job, ko.zCeiling), margins.boundaryMargin)}
+            // #345 — which rule set that margin, from the same `voidMargin` arithmetic
+            // `keepOutLimitParts` ran, so the sentence under the number cannot name a rule the number
+            // is not on.
+            limitBasis={voidMarginWords(job, margins.boundaryMargin)}
+            findings={findingsFor(ko.id)}
+            onChange={(patch) => updateKeepOut(ko.id, patch)}
+            onRemove={() => removeKeepOut(ko.id)}
+          />
         ))}
-      </div>
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 4, alignItems: 'center' }}>
+          <span style={{ ...MUTED, margin: 0 }}>add a void:</span>
+          {ADD_KEEPOUT_KINDS.map((k) => (
+            <button
+              key={k.value}
+              type="button"
+              data-testid={`engrave-add-keepout-${k.value}`}
+              title={`Declare a ${k.label.toLowerCase()} pocket in the blank's bottom face — the depth limit will respect it.`}
+              onClick={() => expandEngraveRow(addKeepOut(k.value))}
+            >
+              {k.label}
+            </button>
+          ))}
+        </div>
+      </details>
 
-      {/* 2 — items: labels, shape pockets and combined shapes, one list (#214/#215) */}
+      {/* 2 — items: labels, shape pockets and combined shapes, one list (#214/#215). #686 puts the
+          ONE "Add operation" picker directly under the heading, where the mockup has it. */}
       <h3 style={SUBHEAD}>
         Items{' '}
         <span style={{ ...TAG, marginLeft: 4 }} data-testid="engrave-item-count">
-          {job.labels.length + job.shapes.length + combinedCount + traceCount + drillCount + threadCount + primitiveCount + cutoutCount + vectorCount + chamferCount}
+          {itemTotal}
         </span>
         <RowFolds testidPrefix="engrave-item" ids={itemRowIds(job)} firstButtonRef={itemsFoldRef} />
       </h3>
       <UndoRemoval section="items" fallbackRef={itemsFoldRef} />
+      {/* The one "Add" control: the SAME grouped operation picker the wizard's step 4 draws
+          (#685). Its historic `engrave-add-*` ids are kept, so the flows that already drive them
+          keep working; the old "More kinds and imports" list is no longer a second vocabulary but
+          the picker's own options (see `operationTypes.ts`). */}
+      <details data-testid="engrave-add-menu" style={{ marginTop: 4 }}>
+        <summary style={{ cursor: 'pointer', fontSize: 12, color: '#c8d3de' }} data-testid="engrave-add-summary">
+          + Add operation ▾
+        </summary>
+        {/* #662/#685 — THE ONE ENTRY POINT, and it says what the operation IS. The type table is
+            the same one the wizard's step 4 and every row's chip read; the historic
+            `engrave-add-*` ids live on these buttons so the flows that already drive them keep
+            working. The old second list ("More kinds and imports") is folded in as OPTIONS of the
+            operation each kind belongs to: Circle/Slot/Polygon (and the combined regions) under
+            Pocket, Line and single-line text under Engrave text, Hole array under Hole, the four
+            primitives under Cut away's 3D shape, and the two file routes under the picker (#685,
+            B6). */}
+        <OperationPicker
+          mode="add"
+          testidFor={(id) => operationType(id).addTestId}
+          onPick={addOperation}
+          surfaceAllowed={!jobHasOperations(job)}
+          onOption={addFolded}
+          optionEnabled={(option) => option.needsReference !== true || hasReferenceable}
+          onImportOutline={() => void importOutline()}
+          onImportImage={() => void importImage()}
+          importing={importing}
+        />
+        {importError && (
+          <p style={{ ...MUTED, color: SEVERITY_COLOR.error }} data-testid="engrave-import-error">
+            {importError}
+          </p>
+        )}
+      </details>
       {job.labels.map((label, i) => (
         <EngraveLabelRow
           key={label.id}
@@ -2801,51 +2732,17 @@ export function EngravePanel(): JSX.Element {
           onRemove={() => removeVector(shape.id)}
         />
       ))}
-      {/* The one "Add" control: the SAME grouped operation picker the wizard's step 4 draws
-          (#685). Its historic `engrave-add-*` ids are kept, so the flows that already drive them
-          keep working; the old "More kinds and imports" list is no longer a second vocabulary but
-          the picker's own options (see `operationTypes.ts`). */}
-      <details data-testid="engrave-add-menu" style={{ marginTop: 4 }}>
-        <summary style={{ cursor: 'pointer', fontSize: 12, color: '#c8d3de' }} data-testid="engrave-add-summary">
-          + Add operation…
-        </summary>
-        {/* #662/#685 — THE ONE ENTRY POINT, and it says what the operation IS. The type table is
-            the same one the wizard's step 4 and every row's chip read; the historic
-            `engrave-add-*` ids live on these buttons so the flows that already drive them keep
-            working. The old second list ("More kinds and imports") is folded in as OPTIONS of the
-            operation each kind belongs to: Circle/Slot/Polygon (and the combined regions) under
-            Pocket, Line and single-line text under Engrave text, Hole array under Hole, the four
-            primitives under Cut away's 3D shape, and the two file routes under the picker (#685,
-            B6). */}
-        <OperationPicker
-          mode="add"
-          testidFor={(id) => operationType(id).addTestId}
-          onPick={addOperation}
-          surfaceAllowed={!jobHasOperations(job)}
-          onOption={addFolded}
-          optionEnabled={(option) => option.needsReference !== true || hasReferenceable}
-          onImportOutline={() => void importOutline()}
-          onImportImage={() => void importImage()}
-          importing={importing}
-        />
-        {importError && (
-          <p style={{ ...MUTED, color: SEVERITY_COLOR.error }} data-testid="engrave-import-error">
-            {importError}
-          </p>
-        )}
-      </details>
-      <p style={MUTED}>Depth keeps the {job.minFloor} mm minimum floor — at most {maxDepth} mm on this stock.</p>
+      <p style={MUTED}>Depth keeps the {fmt(job.minFloor)} mm minimum floor — at most {fmt(maxDepth)} mm on this stock.</p>
 
-      {/* 2b — the target object (#435): the reference part the 3D primitives are positioned
-          against. It is deliberately NOT in the item list or the item count: it is never cut, and
+      {/* 2b — the target object (#435), a closed one-line row carrying its count (#686, design §2).
+          It is deliberately NOT in the item list or the item count: it is never cut, and
           `validateJob` says so once as a warning. `stock − target` is the profile cut-out work
-          tracked in #218. */}
-      <h3 style={SUBHEAD}>
-        Target object{' '}
-        <span style={{ ...TAG, marginLeft: 4 }} data-testid="engrave-target-count">
-          {target === null ? 0 : 1}
-        </span>
-      </h3>
+          tracked in #218. At 0 the paragraph and the import button are behind the row. */}
+      <details data-testid="engrave-target-fold" style={{ marginTop: 6 }}>
+        <summary data-testid="engrave-target-summary" style={{ ...MUTED, cursor: 'pointer', margin: 0 }}>
+          Target object (<span data-testid="engrave-target-count">{target === null ? 0 : 1}</span>)
+          <span style={{ marginLeft: 6, color: '#8fb8e0' }}>+</span>
+        </summary>
       <p style={MUTED}>
         A model the job is placed against. As a reference it is embedded and drawn but never cut —
         the stock around it is the profile cut-out work (#218). As a goal (Surface a mesh) it is the
@@ -2910,8 +2807,15 @@ export function EngravePanel(): JSX.Element {
           if (file) void readTarget(file);
         }}
       />
+      {targetError && (
+        <p style={{ ...MUTED, color: SEVERITY_COLOR.error }} data-testid="engrave-target-error">
+          {targetError}
+        </p>
+      )}
+      </details>
       {/* #662 — the Surface a mesh operation's input. The same reader as the reference above; the
-          role is the difference, and it is what the engine dispatches on (`generateGoalProgram`). */}
+          role is the difference, and it is what the engine dispatches on (`generateGoalProgram`).
+          Outside the target row's fold: it is the operation picker's door, not the target row's. */}
       <input
         ref={goalInputRef}
         type="file"
@@ -2924,17 +2828,12 @@ export function EngravePanel(): JSX.Element {
           if (file) void readTarget(file, 'goal');
         }}
       />
-      {targetError && (
-        <p style={{ ...MUTED, color: SEVERITY_COLOR.error }} data-testid="engrave-target-error">
-          {targetError}
-        </p>
-      )}
       </Group>
 
       <Group
         testid="engrave-group-cutter"
         title="Cutter"
-        summary={`${job.toolKey ? 'cutter chosen' : 'no cutter chosen'} · margin ${mmText(margins.boundaryMargin)} mm`}
+        summary={tool === null ? 'no cutter chosen' : toolDisplayName(tool)}
         {...groupProps('engrave-group-cutter', true)}
       >
       {/* 3 — tool */}
@@ -2982,12 +2881,12 @@ export function EngravePanel(): JSX.Element {
         <p style={MUTED} data-testid="engrave-drill-point">
           {drillPoint?.ok === true ? (
             <>
-              <b>Drill point.</b> {fmtDiameter(drillPoint.deg)}° included — {drillPoint.from}.
+              <b>Drill point.</b> {fmt(drillPoint.deg)}° included — {drillPoint.from}.
               {drillTipLength !== null && (
                 <>
                   {' '}
-                  The hole is its full ⌀{fmtDiameter(drillDiameter ?? 0)} mm only{' '}
-                  {mm3(drillTipLength)} mm above the tip.
+                  The hole is its full ⌀{fmt(drillDiameter ?? 0)} mm only{' '}
+                  {fmt(drillTipLength)} mm above the tip.
                 </>
               )}
             </>
@@ -2998,7 +2897,7 @@ export function EngravePanel(): JSX.Element {
       )}
       {diameter !== null && !vCarveJob && (
         <p style={MUTED} data-testid="engrave-thin-strokes">
-          Strokes thinner than {fmtDiameter(diameter)} mm cannot be cut — the cutter opens them away entirely.
+          Strokes thinner than {fmt(diameter)} mm cannot be cut — the cutter opens them away entirely.
         </p>
       )}
       {rec && (
@@ -3084,7 +2983,7 @@ export function EngravePanel(): JSX.Element {
                   const candidateEntry = tools.find((e) => e.key === c.key);
                   const name =
                     candidateEntry === undefined
-                      ? `⌀ ${mmText(c.diameter)} mm cutter`
+                      ? `⌀ ${fmt(c.diameter)} mm cutter`
                       : toolDisplayName(candidateEntry.tool);
                   const detail =
                     c.excluded === 'broken'
@@ -3192,12 +3091,12 @@ export function EngravePanel(): JSX.Element {
       {params && (
         <>
           {feedRow('spindle', 'spindle', `${params.rpm} rpm`)}
-          {feedRow('feed', 'feed', `${mm3(params.feed)} mm/min`)}
-          {feedRow('plunge', 'plunge', `${mm3(params.plungeFeed)} mm/min`)}
+          {feedRow('feed', 'feed', `${fmt(params.feed)} mm/min`)}
+          {feedRow('plunge', 'plunge', `${fmt(params.plungeFeed)} mm/min`)}
           {/* #688 (audit B10) — three decimals at most, trailing zeros dropped: a step-over of
               1.42875 mm read as five decimals of precision the row never claimed. */}
-          {feedRow('step-down', 'step-down', `${mm3(params.stepDown)} mm`)}
-          {feedRow('step-over', 'step-over', `${mm3(params.stepOver)} mm`)}
+          {feedRow('step-down', 'step-down', `${fmt(params.stepDown)} mm`)}
+          {feedRow('step-over', 'step-over', `${fmt(params.stepOver)} mm`)}
         </>
       )}
       {/* The override stays mounted even while refused: hiding it would hide the only way to
@@ -3214,60 +3113,55 @@ export function EngravePanel(): JSX.Element {
           </p>
         </details>
       )}
-      {/* #345 — what every floor keeps clear of, and where that number came from. The tag names the
-          source ("the house default", "this job's recommendation", "set for this job"); when the
-          job states no margins of its own it follows the house setting, which is what lets a later
-          change to the setting reach a job nobody has overridden. The recommendation is this
-          blank's own arithmetic, taken in one click. No slider: a margin nobody can reason about is
-          worse than the honest default, so the only controls are "take the recommendation" and
-          "go back to the house's". */}
-      <div data-testid="engrave-margins" style={{ marginTop: 6, borderTop: '1px solid #2a2f36', paddingTop: 6 }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 6, fontSize: 11 }}>
-          <span style={{ color: '#c8d3de', fontWeight: 600 }}>Depth margins</span>
-          <span>
-            <b data-testid="engrave-margins-value">{mmText(margins.boundaryMargin)} mm</b>{' '}
-            <span style={TAG} data-testid="engrave-margins-source">
-              {marginSourceWords(margins.source)}
+      {/* #686, design §3 — the Cutter group's Technical fold. The depth margins are ONE line
+          (`Margins 0.2 mm · Z tolerance 0.05 mm`); the engineering prose and the `(house default)`
+          chip are gone (audit B11/D2), and the controls keep their testids inside the fold. The
+          operator-typed facts also live here as one sentence rather than as a grey chip beside every
+          field they typed. */}
+      <details data-testid="engrave-cutter-technical" style={{ marginTop: 6 }}>
+        <summary style={{ fontSize: 11, color: '#9aa4b0', cursor: 'pointer' }}>Technical</summary>
+        {typedByUser.length > 0 && (
+          <p style={MUTED} data-testid="engrave-typed-sources">
+            Typed by you: {typedByUser.join(', ')}.
+          </p>
+        )}
+        <div data-testid="engrave-margins" style={{ marginTop: 6 }}>
+          <p style={{ ...MUTED, color: '#c8d3de', margin: 0 }} data-testid="engrave-margins-value">
+            Margins {fmt(margins.boundaryMargin)} mm · Z tolerance {fmt(margins.zTolerance)} mm
+          </p>
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center', marginTop: 2 }}>
+            <span style={{ ...MUTED, margin: 0 }} data-testid="engrave-margins-recommended">
+              For this blank: <b>{fmt(recommendation.boundaryMargin)} mm</b> — {recommendation.basis.join('; ')}.
             </span>
-          </span>
+            {recommendMore && (
+              <button
+                type="button"
+                data-testid="engrave-margins-use"
+                title={`Run this job on ${fmt(recommendation.boundaryMargin)} mm — the margin this blank's own arithmetic argues for`}
+                onClick={() =>
+                  setJobMargins({
+                    boundaryMargin: recommendation.boundaryMargin,
+                    zTolerance: recommendation.zTolerance,
+                    source: 'recommended',
+                  })
+                }
+              >
+                Use it
+              </button>
+            )}
+            {job.margins && (
+              <button
+                type="button"
+                data-testid="engrave-margins-house"
+                title={`Drop this job's own margins and follow the house setting (${fmt(houseBoundary)} mm on this blank)`}
+                onClick={() => setJobMargins(null)}
+              >
+                Follow the house setting
+              </button>
+            )}
+          </div>
         </div>
-        <p style={MUTED} data-testid="engrave-margins-note">
-          How far every floor stays clear of a plane it must not cross — a void’s ceiling, the colour
-          split. Z tolerance {mmText(margins.zTolerance)} mm; a job with no stated margins follows
-          the house setting.
-        </p>
-        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center', marginTop: 2 }}>
-          <span style={{ ...MUTED, margin: 0 }} data-testid="engrave-margins-recommended">
-            For this blank: <b>{mmText(recommendation.boundaryMargin)} mm</b> — {recommendation.basis.join('; ')}.
-          </span>
-          {recommendMore && (
-            <button
-              type="button"
-              data-testid="engrave-margins-use"
-              title={`Run this job on ${mmText(recommendation.boundaryMargin)} mm — the margin this blank's own arithmetic argues for`}
-              onClick={() =>
-                setJobMargins({
-                  boundaryMargin: recommendation.boundaryMargin,
-                  zTolerance: recommendation.zTolerance,
-                  source: 'recommended',
-                })
-              }
-            >
-              Use it
-            </button>
-          )}
-          {job.margins && (
-            <button
-              type="button"
-              data-testid="engrave-margins-house"
-              title={`Drop this job's own margins and follow the house setting (${mmText(houseBoundary)} mm on this blank)`}
-              onClick={() => setJobMargins(null)}
-            >
-              Follow the house setting
-            </button>
-          )}
-        </div>
-      </div>
+      </details>
       </Group>
 
       <Group
@@ -3451,6 +3345,15 @@ export function EngravePanel(): JSX.Element {
       <EngraveSetupsSection />
       </Group>
 
+      {/* #686 — the footer is the panel's LAST flow child, so `position: sticky; bottom: 0` pins the
+          whole state block (findings, Generate and its blocker + Fix, the ticks and the time) to the
+          bottom of the panel's own scroll box at a 1024 × 700 window. The preview notice sits above
+          it rather than after it: nothing may follow the sticky region in the flow. */}
+      {previewStatus === 'loading' && (
+        <p style={{ ...MUTED, opacity: 0.7 }} data-testid="engrave-preview-loading">
+          Rebuilding the preview…
+        </p>
+      )}
       {/* #523 — the sticky footer is the one place the job's state is read: the findings as a
           count that expands, then Generate and the run rows — never below the fold. A finding row
           is the sentence alone (#505): `data-code` keeps the code for the tests. */}
@@ -3461,7 +3364,8 @@ export function EngravePanel(): JSX.Element {
         {jobFindings.length > 0 && (
           <details data-testid="engrave-findings">
             <summary style={{ ...MUTED, cursor: 'pointer', margin: 0 }}>
-              {findingTally(jobFindings)} <span style={TAG}>show</span>
+              {findingTally(jobFindings)}{' '}
+              <span style={{ color: '#8fb8e0' }}>▸ show</span>
             </summary>
             <div style={{ marginTop: 4 }}>
               {jobFindings.map((f, i) => (
@@ -3471,7 +3375,11 @@ export function EngravePanel(): JSX.Element {
                   data-code={f.code}
                   style={{ display: 'flex', gap: 6, fontSize: 12, lineHeight: 1.45, margin: '3px 0', color: '#d1d5db' }}
                 >
-                  <span style={{ color: SEVERITY_COLOR[f.severity], flexShrink: 0 }}>●</span>
+                  {/* #686, design §5 — the severity as a WORD, not a colour dot (audit B13): a dot
+                      asks the reader to remember a legend. `data-code` keeps the code for tests. */}
+                  <span style={{ color: SEVERITY_COLOR[f.severity], flexShrink: 0, fontWeight: 600 }} data-severity={f.severity}>
+                    {SEVERITY_WORD[f.severity]}
+                  </span>
                   <span>{f.message}</span>
                   {f.code === 'tool-metal-line' && f.severity === 'error' && (
                     <span style={{ flexShrink: 0, marginLeft: 'auto', display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
@@ -3700,12 +3608,6 @@ export function EngravePanel(): JSX.Element {
           onAccept={acceptOutline}
           onClose={closeImport}
         />
-      )}
-
-      {previewStatus === 'loading' && (
-        <p style={{ ...MUTED, opacity: 0.7 }} data-testid="engrave-preview-loading">
-          Rebuilding the preview…
-        </p>
       )}
         </>
       ) : (

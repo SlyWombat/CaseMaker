@@ -343,7 +343,13 @@ test('#368 — a badge that states its print reaches Engrave with a live colour 
   await expect(page.getByTestId('engrave-panel')).toBeVisible();
 
   // "Use the badge blank": the job takes the badge's stock, magnet pocket and print together.
-  await page.getByTestId('engrave-stock-from-badge').click();
+  // #686 deleted the panel's own button — the stock line's edit opens the wizard at step 2, and the
+  // badge starter there answers the step (stock, pocket and print) before the wizard lands on
+  // holding. It is closed there; the seed is written on choose, so nothing waits on a further step.
+  await page.getByTestId('engrave-stock-edit').click();
+  await page.getByTestId('start-wizard-job-badge-blank').click();
+  await expect(page.getByTestId('engrave-setup-step-holding')).toBeVisible();
+  await page.getByTestId('start-wizard-close').click();
 
   // The legend turns from a plain depth key into the two colours plus the plane they part at.
   //
@@ -504,7 +510,9 @@ test('#411 — ten MIXED items and a void on one line at 1440 × 900, and Ctrl-Z
 
   // A VOID as well, because the review asked for one and it is the panel's other list: the same
   // shell, drawn ABOVE the items, so it pushes the ten rows down — which is the harder version of
-  // "ten items fit at 1440 × 900" and the one worth measuring.
+  // "ten items fit at 1440 × 900" and the one worth measuring. #686 keeps the void list and its add
+  // buttons behind a closed one-line row, so the row is opened first.
+  await page.getByTestId('engrave-voids-summary').click();
   await page.getByTestId('engrave-add-keepout-rect').click();
   await expect(page.getByTestId('engrave-keepout-row-0')).toBeVisible();
 

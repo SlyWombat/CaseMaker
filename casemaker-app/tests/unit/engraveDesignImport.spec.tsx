@@ -152,7 +152,24 @@ describe('EngravePanel — the design import entry (#410)', () => {
     // refusal — the same rule the sweep, Manage and the CNC guide follow.
     features.sim = false;
     render(<EngravePanel />);
+    // #686 — the door is the File menu's fourth item now, so the menu has to be open for its
+    // absence to mean anything: a closed menu would answer null in either build.
+    fireEvent.click(screen.getByTestId('engrave-file-menu-toggle'));
+    expect(screen.getByTestId('engrave-file-menu')).toBeTruthy();
+    expect(screen.getByTestId('engrave-job-save')).toBeTruthy();
     expect(screen.queryByTestId('engrave-design-import')).toBeNull();
     expect(screen.queryByTestId('engrave-design-input')).toBeNull();
+  });
+
+  it('offers the design door as the File menu’s fourth item in a simulator build (#686)', () => {
+    render(<EngravePanel />);
+    fireEvent.click(screen.getByTestId('engrave-file-menu-toggle'));
+    const items = screen.getByTestId('engrave-file-menu').querySelectorAll('[role="menuitem"]');
+    expect([...items].map((el) => el.getAttribute('data-testid'))).toEqual([
+      'engrave-job-save',
+      'engrave-job-save-as',
+      'engrave-job-open',
+      'engrave-design-import',
+    ]);
   });
 });

@@ -68,11 +68,9 @@ test('new project → shelf stock → mount → empty design, the stock drawn', 
   await expect(page.getByTestId('start-wizard')).toHaveCount(0);
 
   // The design: the panel on the shelf's piece, with the one pocket the wizard asked for and no
-  // labels — the project supplied none.
+  // labels — the project supplied none. #686 states the stock as one line, not a field grid.
   await expect(page.getByTestId('engrave-panel')).toBeVisible();
-  await expect(page.getByTestId('engrave-stock-length')).toHaveValue('120');
-  await expect(page.getByTestId('engrave-stock-width')).toHaveValue('60');
-  await expect(page.getByTestId('engrave-stock-thickness')).toHaveValue('8');
+  await expect(page.getByTestId('engrave-stock-line')).toContainText('120 × 60 × 8 mm');
   const job = await page.evaluate(() => JSON.parse(localStorage.getItem('casemaker.engraveJob.v3') ?? 'null'));
   expect(job.labels).toEqual([]);
   // The one operation the wizard's first question added, and nothing else.

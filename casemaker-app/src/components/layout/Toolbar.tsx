@@ -20,6 +20,7 @@ import { SettingsMenu } from '@/components/layout/SettingsMenu';
 import { PartsMenu } from '@/components/layout/PartsMenu';
 import { ExportModal } from '@/components/panels/ExportModal';
 import { useManageModeStore } from '@/store/manageModeStore';
+import { useViewportStore } from '@/store/viewportStore';
 
 const FORMAT_LABEL: Record<string, string> = {
   'stl-binary': 'STL (binary)',
@@ -91,6 +92,12 @@ export function Toolbar() {
   const manageOpen = useManageModeStore((s) => s.open);
   const openManage = useManageModeStore((s) => s.openManage);
   const closeManage = useManageModeStore((s) => s.closeManage);
+  // #686 — the project's New / Save / Save as / Load / Export belong to the PRINT project. On a CNC
+  // page they would write or replace a case that has nothing to do with the job on screen, so they
+  // are hidden there — the same signal the machine status strip uses. Undo/Redo, Manage and the rest
+  // stay: they are app chrome, not project file actions.
+  const activeSidebarSection = useViewportStore((s) => s.activeSidebarSection);
+  const cncSection = activeSidebarSection === 'cnc-engrave' || activeSidebarSection === 'cnc-sim';
 
   // L-key shortcut for lid show/hide is now part of the view-mode picker
   // (#91 — Shift+1..4 cycles Complete / Exploded / Base / Lid). The
@@ -317,7 +324,7 @@ export function Toolbar() {
         <>
           {undoBtn}
           {redoBtn}
-          {saveBtn}
+          {!cncSection && saveBtn}
           {/* Issue #120 — Parts keeps its own popover; it stays inline rather
               than nesting a popover inside the ⋯ menu. */}
           <PartsMenu compact />
@@ -348,11 +355,11 @@ export function Toolbar() {
                   if ((e.target as HTMLElement).closest('button') !== null) setOverflowOpen(false);
                 }}
               >
-                {newBtn}
+                {!cncSection && newBtn}
                 {manageBtn}
-                {saveAsBtn}
-                {loadBtn}
-                {exportBtn}
+                {!cncSection && saveAsBtn}
+                {!cncSection && loadBtn}
+                {!cncSection && exportBtn}
                 {docsBtn}
                 <button
                   type="button"
@@ -374,14 +381,14 @@ export function Toolbar() {
         </>
       ) : (
         <>
-          {newBtn}
+          {!cncSection && newBtn}
           {manageBtn}
           {undoBtn}
           {redoBtn}
-          {saveBtn}
-          {saveAsBtn}
-          {loadBtn}
-          {exportBtn}
+          {!cncSection && saveBtn}
+          {!cncSection && saveAsBtn}
+          {!cncSection && loadBtn}
+          {!cncSection && exportBtn}
           {/* Issue #120 — Parts pulldown replaces the Show-board toggle. Lists
               every top-level node in the current BuildPlan (case, lid, gasket,
               fasteners, accessories) with per-part visibility checkboxes. The

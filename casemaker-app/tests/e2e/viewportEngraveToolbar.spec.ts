@@ -400,8 +400,9 @@ test('a dialog is above every element of the viewport pane (#348)', async ({ cm,
 
   // The reported screen: the cutting-job wizard open on its holding step, with the preview still
   // mounted behind it — the report was '…asured defaults' printed over "What is it made of?".
-  // Since #681 it is ONE wizard: the panel's edit opens it at the step it names.
-  await page.getByTestId('engrave-setup-open').click();
+  // Since #681 it is ONE wizard: the panel's edit opens it at the step it names. #686 moved that
+  // edit onto the Hold line, which is the row that lands on the holding step.
+  await page.getByTestId('engrave-hold-edit').click();
   await expect(page.getByTestId('start-wizard')).toBeVisible();
   await expect(page.getByTestId('engrave-setup-step-holding')).toBeVisible();
 

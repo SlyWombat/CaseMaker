@@ -95,6 +95,8 @@ export interface EngraveJobFileState {
   fileName: string | null;
   /** The text last written to the file; null until the first save/open. */
   savedText: string | null;
+  /** When the text was last written or opened, epoch ms (#686's file bar prints it as HH:MM). */
+  savedAt: number | null;
   /** The serialized document differs from `savedText` (or nothing has been saved yet). */
   dirty: boolean;
   /** A user-initiated save/open is in flight. */
@@ -138,6 +140,7 @@ async function autosaveNow(): Promise<void> {
     const current = serializeJobFile(useEngraveJobStore.getState().job);
     useEngraveJobFileStore.setState({
       savedText: text,
+      savedAt: Date.now(),
       dirty: current !== text,
       notice: { kind: 'ok', text: `Saved ${useEngraveJobFileStore.getState().fileName ?? 'the job'}` },
     });
@@ -170,6 +173,7 @@ const INITIAL = {
   handle: null as ProjectFileHandle | null,
   fileName: null as string | null,
   savedText: null as string | null,
+  savedAt: null as number | null,
   dirty: true,
   busy: false,
   notice: null as JobFileNotice | null,
@@ -196,6 +200,7 @@ export const useEngraveJobFileStore = create<EngraveJobFileState>()((set, get) =
       set({
         busy: false,
         savedText: text,
+        savedAt: Date.now(),
         dirty: current !== text,
         notice: { kind: 'ok', text: `Saved ${state.fileName ?? 'the job'}` },
       });
@@ -225,6 +230,7 @@ export const useEngraveJobFileStore = create<EngraveJobFileState>()((set, get) =
           handle: null,
           fileName: suggested,
           savedText: text,
+          savedAt: Date.now(),
           dirty: current !== text,
           notice: { kind: 'info', text: `Downloaded ${suggested}.` },
         });
@@ -235,6 +241,7 @@ export const useEngraveJobFileStore = create<EngraveJobFileState>()((set, get) =
         handle: outcome.handle,
         fileName: handleName(outcome.handle, suggested),
         savedText: text,
+        savedAt: Date.now(),
         dirty: current !== text,
         notice: { kind: 'ok', text: `Saved ${handleName(outcome.handle, suggested)}` },
       });
@@ -287,6 +294,7 @@ export const useEngraveJobFileStore = create<EngraveJobFileState>()((set, get) =
       handle: picked.handle,
       fileName: picked.name,
       savedText: saved,
+      savedAt: Date.now(),
       dirty: false,
       packageError,
       sourceError: parsed.sourceError,
@@ -309,6 +317,7 @@ export const useEngraveJobFileStore = create<EngraveJobFileState>()((set, get) =
       handle: null,
       fileName: null,
       savedText: null,
+      savedAt: null,
       dirty: true,
       notice: { kind: 'info', text: 'A new job — not saved to a file yet.' },
       packageError: null,

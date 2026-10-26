@@ -25,7 +25,7 @@ test('Design/Cut: Cut runs the gate and Back to Design returns to the stack', as
   // A fresh job is in Design: today's controls, no preflight page.
   await expect(page.getByTestId('cnc-mode-design')).toHaveAttribute('aria-pressed', 'true');
   await expect(page.getByTestId('cnc-mode-cut')).toHaveAttribute('aria-pressed', 'false');
-  await expect(page.getByTestId('engrave-setup-open')).toBeVisible();
+  await expect(page.getByTestId('engrave-stock-line')).toBeVisible();
   await expect(page.getByTestId('engrave-preflight')).toBeHidden();
 
   // Pressing Cut always asks the gate. Nothing has been generated for this job, so the page is
@@ -37,11 +37,11 @@ test('Design/Cut: Cut runs the gate and Back to Design returns to the stack', as
   await expect(page.getByTestId(/^engrave-preflight-row-\d+-no-generate$/)).toBeVisible();
   await expect(page.getByTestId('engrave-preflight-first-blocking')).toContainText('Generate first.');
   // The Design stack is replaced, not merely covered.
-  await expect(page.getByTestId('engrave-setup-open')).toBeHidden();
+  await expect(page.getByTestId('engrave-stock-line')).toBeHidden();
 
   // Back to Design leaves Cut and shows the stack again.
   await page.getByTestId('engrave-back-to-design').click();
   await expect(page.getByTestId('cnc-mode-design')).toHaveAttribute('aria-pressed', 'true');
   await expect(page.getByTestId('engrave-preflight')).toBeHidden();
-  await expect(page.getByTestId('engrave-setup-open')).toBeVisible();
+  await expect(page.getByTestId('engrave-stock-line')).toBeVisible();
 });

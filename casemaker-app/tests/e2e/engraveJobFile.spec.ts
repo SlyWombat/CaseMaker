@@ -21,6 +21,14 @@ async function openEngravePanel(page: Page): Promise<void> {
   await expect(page.getByTestId('engrave-panel')).toBeVisible();
 }
 
+/** #686 — every job-file command is the File menu's now, so choose one from it. */
+async function fileMenu(page: Page, testid: string): Promise<void> {
+  const menu = page.getByTestId('engrave-file-menu');
+  if (!(await menu.isVisible())) await page.getByTestId('engrave-file-menu-toggle').click();
+  await expect(menu).toBeVisible();
+  await page.getByTestId(testid).click();
+}
+
 /** Open the first label's row, where its text field lives (rows start folded). */
 async function revealFirstLabel(page: Page): Promise<void> {
   const expand = page.getByTestId('engrave-label-expand-0').first();
@@ -37,9 +45,15 @@ test('the job file is the owner: Save, a refused Open, then an Open that replace
 
   const bar = page.getByTestId('engrave-job-file');
   await expect(bar).toBeVisible();
-  await expect(page.getByTestId('engrave-job-file-name')).toContainText('Not saved to a file yet');
+  // #686 — the bar names the JOB and says when the file was last written; the file's own name is
+  // the line's hover. A job that has never been saved says so and is marked dirty.
+  await expect(page.getByTestId('engrave-job-file-name')).toContainText('Untitled job');
+  await expect(page.getByTestId('engrave-job-saved-time')).toContainText('Not saved yet');
   await expect(page.getByTestId('engrave-job-dirty')).toBeVisible();
-  await expect(page.getByTestId('engrave-job-owner-note')).toContainText('the job file is the owner');
+  // The deleted owner note's fact is the Save item's hover.
+  await page.getByTestId('engrave-file-menu-toggle').click();
+  await expect(page.getByTestId('engrave-job-save')).toHaveAttribute('title', /the file is the owner/i);
+  await page.getByTestId('engrave-file-menu-toggle').click();
   await revealFirstLabel(page);
   await expect(page.getByTestId('engrave-label-text-0')).toHaveValue('CASE');
 
@@ -54,7 +68,7 @@ test('the job file is the owner: Save, a refused Open, then an Open that replace
   // unused job — and a download fallback binds no handle.
   const saved = await Promise.all([
     page.waitForEvent('download'),
-    page.getByTestId('engrave-job-save').click(),
+    fileMenu(page, 'engrave-job-save'),
   ]).then(([download]) => download);
   expect(saved.suggestedFilename()).toBe('Untitled_job.cutjob.json');
   const savedPath = await saved.path();
@@ -67,7 +81,9 @@ test('the job file is the owner: Save, a refused Open, then an Open that replace
   expect(doc.schemaVersion).toBe(3);
   expect(doc.labels[0]!.text).toBe('CASE');
   expect('package' in doc).toBe(false);
-  await expect(page.getByTestId('engrave-job-file-name')).toContainText('Untitled_job.cutjob.json');
+  await expect(page.getByTestId('engrave-job-file-name')).toContainText('Untitled job');
+  await expect(page.getByTestId('engrave-job-file-name')).toHaveAttribute('title', /Untitled_job\.cutjob\.json/);
+  await expect(page.getByTestId('engrave-job-saved-time')).toContainText(/saved \d\d:\d\d/);
   await expect(page.getByTestId('engrave-job-dirty')).toBeHidden();
 
   // A file that does not parse changes nothing at all.
@@ -75,14 +91,14 @@ test('the job file is the owner: Save, a refused Open, then an Open that replace
   writeFileSync(refused, '{ not a job');
   const [refusedChooser] = await Promise.all([
     page.waitForEvent('filechooser'),
-    page.getByTestId('engrave-job-open').click(),
+    fileMenu(page, 'engrave-job-open'),
   ]);
   await refusedChooser.setFiles(refused);
   await expect(page.getByTestId('engrave-job-notice')).toContainText('refused.cutjob.json was not opened');
   await expect(page.getByTestId('engrave-job-notice')).toHaveAttribute('data-kind', 'error');
   await revealFirstLabel(page);
   await expect(page.getByTestId('engrave-label-text-0')).toHaveValue('CASE');
-  await expect(page.getByTestId('engrave-job-file-name')).toContainText('Untitled_job.cutjob.json');
+  await expect(page.getByTestId('engrave-job-file-name')).toContainText('Untitled job');
 
   // A good file replaces the open document: the label row shows the file's text, the bar its name.
   const editedDoc = { ...doc, name: 'From disk', labels: [{ ...doc.labels[0]!, text: 'OPENED' }] };
@@ -90,11 +106,13 @@ test('the job file is the owner: Save, a refused Open, then an Open that replace
   writeFileSync(edited, JSON.stringify(editedDoc, null, 2));
   const [chooser] = await Promise.all([
     page.waitForEvent('filechooser'),
-    page.getByTestId('engrave-job-open').click(),
+    fileMenu(page, 'engrave-job-open'),
   ]);
   await chooser.setFiles(edited);
   await expect(page.getByTestId('engrave-job-notice')).toContainText('Opened edited.cutjob.json.');
-  await expect(page.getByTestId('engrave-job-file-name')).toContainText('edited.cutjob.json');
+  // The bar names the job the file carried; the file it came from is its hover.
+  await expect(page.getByTestId('engrave-job-file-name')).toContainText('From disk');
+  await expect(page.getByTestId('engrave-job-file-name')).toHaveAttribute('title', /edited\.cutjob\.json/);
   await expect(page.getByTestId('engrave-job-dirty')).toBeHidden();
   await revealFirstLabel(page);
   await expect(page.getByTestId('engrave-label-text-0')).toHaveValue('OPENED');
