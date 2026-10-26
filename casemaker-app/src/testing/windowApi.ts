@@ -129,7 +129,6 @@ export interface CaseMakerTestApi {
    * Cut statement writes, so the Save path stays testable. Testing surface only: no app code calls
    * it, and `saveBlocker`'s gate is untouched.
    */
-  engraveAcknowledge(): void;
   /**
    * #530/#656/#659 e2e — a connected machine WITHOUT one. E2E has no controller, and the Cut one
    * screen, the status strip and its state popover are all gated on `machine !== null`; this puts
@@ -408,9 +407,6 @@ export function installCaseMakerTestApi(): void {
       // #277 — records opened by an earlier test live in localStorage, where they would otherwise
       // put a "last measured" line under a later test's estimate.
       useRunRecordStore.getState().clear();
-    },
-    engraveAcknowledge() {
-      useEngraveRunStore.getState().setAcknowledged(true);
     },
     setMachine(observation, statusLine) {
       // The app's own "a check found it" path (and its persistence), then the live line the

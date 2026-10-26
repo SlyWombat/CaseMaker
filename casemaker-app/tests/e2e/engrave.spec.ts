@@ -20,12 +20,14 @@ async function openEngravePanel(page: Page): Promise<void> {
 }
 
 /**
- * #688 — Design no longer carries the clearance checkbox: the statement's home is Cut step 1
- * (#689). Until that step is on screen, acknowledge through the same run-store field the Cut
- * statement writes; `saveBlocker`'s gate is the production one either way.
+ * #688/#689 — Design no longer carries the clearance checkbox: the statement's home is Cut step 1,
+ * so the operator goes to Cut, ticks it there, and comes back to Design. The run store keeps the
+ * flag, and Save's gate is the production `saveBlocker` either way.
  */
 async function acknowledgeClearance(page: Page): Promise<void> {
-  await page.evaluate(() => window.__caseMaker!.engraveAcknowledge());
+  await page.getByTestId('cnc-mode-cut').click();
+  await page.getByTestId('engrave-ack').check();
+  await page.getByTestId('cnc-mode-design').click();
 }
 
 /**
