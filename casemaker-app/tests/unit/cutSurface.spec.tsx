@@ -33,6 +33,7 @@ import { useEngraveJobStore } from '@/store/engraveJobStore';
 import { useEngraveRunStore } from '@/store/engraveRunStore';
 import { resetRunConfirmStore } from '@/store/runConfirmStore';
 import { clearStoredBaseline, resetLocationStore } from '@/store/locationStore';
+import { resetManageMode, useManageModeStore } from '@/store/manageModeStore';
 import { resetStockStore, useStockStore } from '@/store/stockStore';
 import type { EngraveJob } from '@/types/engraveJob';
 
@@ -265,6 +266,7 @@ beforeEach(() => {
   resetLocationStore();
   clearStoredBaseline();
   resetStockStore();
+  resetManageMode();
   useStockStore.setState({ status: 'present', items: shelfItems, etag: '"s-1"' });
 
   let version = 1;
@@ -355,10 +357,10 @@ describe('#419 §3 the Cut surface', () => {
     // Run is blocked with its ONE sentence, and the step-4 statement does not stand in for it.
     const go = screen.getByTestId('engrave-cut-go') as HTMLButtonElement;
     expect(go.disabled).toBe(true);
-    expect(screen.getByTestId('engrave-cut-go-blocked').textContent).toContain('tick the clearance check in step 1');
+    expect(screen.getByTestId('engrave-cut-go-blocked').textContent).toContain('tick the clearance check in Cut, step 1');
     fireEvent.click(screen.getByTestId('engrave-cut-statement'));
     expect(go.disabled).toBe(true);
-    expect(screen.getByTestId('engrave-cut-go-blocked').textContent).toContain('tick the clearance check in step 1');
+    expect(screen.getByTestId('engrave-cut-go-blocked').textContent).toContain('tick the clearance check in Cut, step 1');
 
     // Ticking it in step 1 records the gate's own flag and clears the sentence.
     fireEvent.click(ack);
@@ -368,14 +370,80 @@ describe('#419 §3 the Cut surface', () => {
     expect(screen.getByTestId('engrave-cut-step-1-summary').textContent).toContain('clearance acknowledged');
   });
 
+  it('#689 review — a stale package disables the one-screen press and the upload until step 2 is frozen again', () => {
+    const job = plannedJob();
+    const pkg = frozen(job, [P1]);
+    // The job moved after the freeze: the old program is still in the package and still uploadable.
+    const edited: EngraveJob = {
+      ...job,
+      labels: job.labels.map((label, i) => (i === 0 ? { ...label, depth: label.depth + 0.1 } : label)),
+    };
+    useEngraveRunStore.setState({
+      oracle: { ok: true, band: 0.016, levels: [], worst: { underCut: 0, overCut: 0 } } as never,
+      acknowledged: false,
+    });
+    draw({
+      job: edited,
+      report: reportOf([row('error', 'package-stale', 'the job changed since it was frozen: label depth changed')]),
+      pkg,
+      generated: generated([P1]),
+    });
+
+    const sentence = 'Freeze the job again in step 2 — it changed since it was frozen.';
+    // The statement is ticked so only the stale package can hold the press.
+    fireEvent.click(screen.getByTestId('engrave-cut-statement'));
+    const go = screen.getByTestId('engrave-cut-go') as HTMLButtonElement;
+    expect(go.disabled).toBe(true);
+    expect(screen.getByTestId('engrave-cut-go-blocked').textContent).toBe(sentence);
+
+    // The expert path's upload takes the same first blocker, and a disabled press sends nothing.
+    const upload = screen.getByTestId('engrave-upload') as HTMLButtonElement;
+    expect(upload.disabled).toBe(true);
+    expect(screen.getByTestId('engrave-upload-blocked').textContent).toContain(sentence);
+    fireEvent.click(upload);
+    expect(screen.queryByTestId('engrave-upload-confirm')).toBeNull();
+    expect(uploads).toHaveLength(0);
+  });
+
+  it('#689 review — a blocking pre-flight finding disables the press with the finding’s own sentence', () => {
+    const job = plannedJob();
+    const pkg = frozen(job, [P1]);
+    useEngraveRunStore.setState({
+      oracle: { ok: true, band: 0.016, levels: [], worst: { underCut: 0, overCut: 0 } } as never,
+      acknowledged: false,
+    });
+    draw({
+      job,
+      report: reportOf([row('error', 'tool-too-big', 'the cutter cannot reach the label')]),
+      pkg,
+      generated: generated([P1]),
+    });
+
+    // The report row's own words, not a generic "clear step 1".
+    fireEvent.click(screen.getByTestId('engrave-cut-statement'));
+    const go = screen.getByTestId('engrave-cut-go') as HTMLButtonElement;
+    expect(go.disabled).toBe(true);
+    expect(screen.getByTestId('engrave-cut-go-blocked').textContent).toBe('the cutter cannot reach the label');
+
+    const upload = screen.getByTestId('engrave-upload') as HTMLButtonElement;
+    expect(upload.disabled).toBe(true);
+    expect(screen.getByTestId('engrave-upload-blocked').textContent).toContain('the cutter cannot reach the label');
+    fireEvent.click(upload);
+    expect(screen.queryByTestId('engrave-upload-confirm')).toBeNull();
+    expect(uploads).toHaveLength(0);
+  });
+
   it('#689 — Run says there is no machine instead of showing controls that cannot send', () => {
     const job = plannedJob();
     const pkg = frozen(job, [P1]);
     draw({ job, report: reportOf(), pkg, generated: generated([P1]), canDrive: false });
 
-    expect(screen.getByTestId('engrave-cut-no-machine').textContent).toContain(
-      'No machine is connected. Reach it first, then come back to run.',
+    expect(screen.getByTestId('engrave-cut-no-machine').textContent).toBe(
+      'No machine is connected — connect one in Manage › Machines.',
     );
+    fireEvent.click(screen.getByTestId('engrave-cut-open-machines'));
+    expect(useManageModeStore.getState().open).toBe(true);
+    expect(useManageModeStore.getState().scope).toBe('machines');
     expect(screen.queryByTestId('engrave-cut-confirm')).toBeNull();
     expect(screen.queryByTestId('engrave-cut-run')).toBeNull();
     // The plan is still readable without a machine.

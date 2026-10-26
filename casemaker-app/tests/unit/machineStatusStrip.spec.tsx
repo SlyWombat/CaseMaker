@@ -18,6 +18,7 @@ import { resolveTool } from '@/engine/cnc/toolRegistry';
 import { toolDisplayName } from '@/engine/cnc/toolDisplay';
 import type { FrozenPackage } from '@/types/engraveJob';
 import { resetLocationStore, useLocationStore } from '@/store/locationStore';
+import { resetManageMode, useManageModeStore } from '@/store/manageModeStore';
 import { resetCameraPaneStore, useCameraPaneStore } from '@/store/cameraPaneStore';
 import { useEngraveJobStore } from '@/store/engraveJobStore';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
@@ -102,6 +103,7 @@ beforeEach(() => {
   resetEngraveReleaseStore();
   resetMachineRunStore();
   resetStripAccessoryStore();
+  resetManageMode();
   resetLocationStore();
   resetCameraPaneStore();
   useLocationStore.setState({ status: 'present', location: LOCATION, etag: '"e1"', reason: null });
@@ -157,6 +159,16 @@ describe('#689 the connection', () => {
 
     expect(screen.getByTestId('machine-status-name').textContent).toBe('Makera Z1');
     expect(screen.getByTestId('machine-status-host').textContent).toBe('192.0.2.10');
+  });
+
+  it('#689 review — with no machine the band says so and opens Manage › Machines', () => {
+    render(<MachineStatusStrip />);
+
+    expect(screen.getByTestId('machine-status').getAttribute('data-state')).toBe('no-machine');
+    expect(screen.getByTestId('machine-status-no-machine').textContent).toBe('No machine connected');
+    fireEvent.click(screen.getByTestId('machine-status-open-machines'));
+    expect(useManageModeStore.getState().open).toBe(true);
+    expect(useManageModeStore.getState().scope).toBe('machines');
   });
 });
 

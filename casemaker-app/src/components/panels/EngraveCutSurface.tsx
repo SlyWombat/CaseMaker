@@ -57,6 +57,7 @@ import { useEngravePackageStore } from '@/store/engravePackageStore';
 import { useEngraveRegistrationStore, useFirstRegistration, useSurfaceSpread } from '@/store/engraveRegistrationStore';
 import { useEngraveRunStore } from '@/store/engraveRunStore';
 import { requiredAckCodes, surfaceRepostBlocker } from '@/store/engraveRunGate';
+import { useManageModeStore } from '@/store/manageModeStore';
 import { domeAcceptSentence, surfaceTiltWords } from '@/engine/cnc/engrave/surfaceSpread';
 import { useShopDefaultsStore } from '@/store/shopDefaultsStore';
 import { useStockStore } from '@/store/stockStore';
@@ -199,6 +200,7 @@ export function EngraveCutSurface({
   onBackToDesign,
 }: EngraveCutSurfaceProps): JSX.Element {
   const freeze = useEngravePackageStore((s) => s.freeze);
+  const openManage = useManageModeStore((s) => s.openManage);
   const shelfItems = useStockStore((s) => s.items);
   const defaults = useShopDefaultsStore((s) => s.defaults);
   const [overrides, setOverrides] = useState<FeatureOverrides>({});
@@ -233,7 +235,7 @@ export function EngraveCutSurface({
   // The one sentence that unblocks Run while clearance is unticked. The gate's own saveBlocker says
   // the same thing; it is repeated here because this surface is also driven without the panel's
   // pre-computed blockers (tests, and any caller that hands them in null).
-  const ackBlocker = ackRequired && !acknowledged ? 'tick the clearance check in step 1' : null;
+  const ackBlocker = ackRequired && !acknowledged ? 'tick the clearance check in Cut, step 1' : null;
   // #608 — the cut-extent measurement this machine took: its tilt feeds the re-post step line, and
   // the registration's fitted plane is what the release gate compares the frozen package against.
   const spreadMeasurement = useSurfaceSpread(job.id, target);
@@ -505,6 +507,24 @@ export function EngraveCutSurface({
     pkg.programs.every((program) => finishedHashes.includes(program.hash));
   const currentStep = !checked ? 1 : !frozen ? 2 : !registeredDone ? 3 : !ran ? 4 : 0;
 
+  // #689 review — STEP 4 STAYS VISIBLE, BUT THE TWO GATES STEP 4 USED TO REQUIRE ARE BLOCKERS
+  // AGAIN, ahead of the run gate on every control. Before #689 step 4 rendered only when the
+  // pre-flight was green and the package current; now that it always renders with a frozen plan,
+  // `saveBlocker` covers neither the report's first blocking finding nor the package's staleness,
+  // so a stale package could upload its old programs and a blocking finding would no longer gate
+  // the press. Step 1 owns the report (its first finding, in the owner's own words); step 2 owns
+  // the package. The package-stale row is step 2's own business, so it never leads the step-1
+  // sentence — the freeze sentence does.
+  const step1Blocking =
+    report.rows.find((row) => row.severity === 'error' && row.code !== 'package-stale') ?? null;
+  const step1Blocker =
+    step1Blocking?.message ?? (!green && !onlyPackageStale ? 'Clear step 1 first.' : null);
+  const step2Blocker = frozen
+    ? null
+    : pkg === null
+      ? 'Freeze the job in step 2 before running it.'
+      : 'Freeze the job again in step 2 — it changed since it was frozen.';
+
   const programCount = generated?.programs.length ?? pkg?.programs.length ?? 0;
   const noteCount = report.rows.filter((row) => row.severity === 'info').length;
   const step1Meta: string[] = [];
@@ -689,7 +709,24 @@ export function EngraveCutSurface({
           <>
             {target === null && (
               <p style={MUTED} data-testid="engrave-cut-no-machine">
-                No machine is connected. Reach it first, then come back to run.
+                No machine is connected —{' '}
+                <button
+                  type="button"
+                  data-testid="engrave-cut-open-machines"
+                  onClick={() => openManage('machines')}
+                  style={{
+                    font: 'inherit',
+                    padding: 0,
+                    border: 0,
+                    background: 'none',
+                    color: '#8ab4f8',
+                    cursor: 'pointer',
+                    textDecoration: 'underline',
+                  }}
+                >
+                  connect one in Manage › Machines
+                </button>
+                .
               </p>
             )}
             {/* #656 — THE ONE SCREEN. The ordinary path: the program, the cutter (already confirmed
@@ -703,7 +740,9 @@ export function EngraveCutSurface({
                   source={singleSource}
                   filename={releaseFileName(job.name, 1, 1, false)}
                   oracle={runOracle}
-                  blocker={ackBlocker ?? uploadBlocker ?? missingReportBlocker ?? surfaceGate}
+                  blocker={
+                    step1Blocker ?? step2Blocker ?? ackBlocker ?? uploadBlocker ?? missingReportBlocker ?? surfaceGate
+                  }
                   dome={domeProps}
                   domeBlocker={domeG32Blocker}
                   runContext={runContextWithDry}
@@ -771,12 +810,28 @@ export function EngraveCutSurface({
                       job={job}
                       programs={releaseSources}
                       runPlan={plan}
-                      blocker={ackBlocker ?? releaseBlocker ?? missingReportBlocker ?? surfaceGate ?? domeG32Blocker}
+                      blocker={
+                        step1Blocker ??
+                        step2Blocker ??
+                        ackBlocker ??
+                        releaseBlocker ??
+                        missingReportBlocker ??
+                        surfaceGate ??
+                        domeG32Blocker
+                      }
                       onProgramLine={onProgramLine}
                     />
                   ) : (
                     <EngraveMachineUpload
-                      blocker={ackBlocker ?? uploadBlocker ?? missingReportBlocker ?? surfaceGate ?? domeG32Blocker}
+                      blocker={
+                        step1Blocker ??
+                        step2Blocker ??
+                        ackBlocker ??
+                        uploadBlocker ??
+                        missingReportBlocker ??
+                        surfaceGate ??
+                        domeG32Blocker
+                      }
                       machine={machine}
                       program={
                         singleSource === undefined

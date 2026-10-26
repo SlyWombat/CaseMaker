@@ -3,6 +3,7 @@ import { useMachineStore } from '@/store/machineStore';
 import { useRegistrationTouchesStore } from '@/store/registrationTouchesStore';
 import { useEngraveReleaseStore } from '@/store/engraveReleaseStore';
 import { useEngraveJobStore } from '@/store/engraveJobStore';
+import { useManageModeStore } from '@/store/manageModeStore';
 import { machineKey, useMachineRunStore } from '@/store/machineRunStore';
 import { accessoriesFor, machineRecordByProfile } from '@/store/locationStore';
 import { MACHINES } from '@/engine/cnc/machine';
@@ -19,7 +20,8 @@ import { alarmLine } from '@/platform/machineUpload';
 import { StripAccessories } from './StripAccessories';
 
 /**
- * #526/#647 — the live machine in one line under the viewport, whenever a machine is remembered.
+ * #526/#647 — the live machine in one line under the viewport, whenever a machine is remembered;
+ * with none remembered, the same band names the absence and opens Manage › Machines (#689 review).
  *
  * THE DRO (design: `docs/design/status-strip-dro.md`, variant B). The strip answers the operator's
  * questions left to right: is it running (the state dot and word, which is also the connection) →
@@ -142,6 +144,7 @@ function Axes({
 
 export function MachineStatusStrip(): JSX.Element | null {
   const machine = useMachineStore((s) => s.machine);
+  const openManage = useManageModeStore((s) => s.openManage);
   const heartbeat = useMachineStore((s) => s.heartbeat);
   // #519 item 3 — a registration owns the machine: the state reads Probing and the tool slot names
   // the probe.
@@ -190,7 +193,48 @@ export function MachineStatusStrip(): JSX.Element | null {
   useEffect(() => {
     if (target !== null && vacuum !== null && vacuum !== 'unknown') forgetAccessories(target);
   }, [vacuum, target, forgetAccessories]);
-  if (machine === null) return null;
+  // #689 review — the strip is the machine's ONE home, so it says the absence rather than vanishing;
+  // the action is the app's existing Manage › Machines, not a new route. The Cut step keeps its own
+  // sentence where its Run press is disabled (principle 4), and this line keeps the band from being
+  // a blank void in that state.
+  if (machine === null) {
+    return (
+      <div
+        data-testid="machine-status"
+        data-state="no-machine"
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 10,
+          padding: '3px 10px',
+          borderTop: '1px solid #2a2f36',
+          fontSize: 11,
+          color: '#9aa4b0',
+          minHeight: 30,
+          overflow: 'hidden',
+          whiteSpace: 'nowrap',
+        }}
+      >
+        <span data-testid="machine-status-no-machine">No machine connected</span>
+        <button
+          type="button"
+          data-testid="machine-status-open-machines"
+          onClick={() => openManage('machines')}
+          style={{
+            font: 'inherit',
+            padding: 0,
+            border: 0,
+            background: 'none',
+            color: '#8ab4f8',
+            cursor: 'pointer',
+            textDecoration: 'underline',
+          }}
+        >
+          Manage › Machines
+        </button>
+      </div>
+    );
+  }
 
   // `statusLine` is set by the store and the probe; a test fixture may hand only the raw line.
   const line = machine.statusLine ?? (machine.status === null ? null : readStatusLine(machine.status));
