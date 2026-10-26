@@ -175,6 +175,38 @@ describe('#684 review — step 3 writes only the holding answers', () => {
   });
 });
 
+describe('round stock — the cut face is a circle, not its box (#683)', () => {
+  /** One small label on 50 mm round stock, its centre at (x, y). */
+  function roundJob(x: number, y: number, form: 'disc' | 'rod' | 'plate' = 'disc') {
+    const job = dj();
+    job.stock = { length: 50, width: 50, thickness: 5, material: 'softwood' };
+    job.stockEntry = { kind: 'made', shelfId: null, file: null, form, finish: 'rough', conductive: false };
+    job.labels = [{ ...job.labels[0]!, text: 'X', size: 2, position: { x, y }, depth: 1 }];
+    return job;
+  }
+
+  it('refuses a label that reaches a box corner, naming the item and the circle', () => {
+    const job = roundJob(3, 3);
+    const off = validateJob(job).find((f) => f.code === 'item-off-round-stock');
+    expect(off).toBeDefined();
+    expect(off!.severity).toBe('error');
+    // #688: the finding points at the item, so the panel draws its Fix beside that item.
+    expect(off!.labelId).toBe(job.labels[0]!.id);
+    expect(off!.message).toContain('⌀50 mm');
+    expect(off!.message).toContain('1 mm in from the edge');
+  });
+
+  it('a centred label is inside the inscribed circle, so there is no finding', () => {
+    expect(validateJob(roundJob(25, 25)).some((f) => f.code === 'item-off-round-stock')).toBe(false);
+  });
+
+  it('is about the round form: the same corner on a plate raises nothing, but a rod does', () => {
+    expect(validateJob(roundJob(3, 3, 'plate')).some((f) => f.code === 'item-off-round-stock')).toBe(false);
+    // A rod's cut face is the same ⌀D circle — it stands on its end.
+    expect(validateJob(roundJob(3, 3, 'rod')).some((f) => f.code === 'item-off-round-stock')).toBe(true);
+  });
+});
+
 describe('the material list the job may be cut in (#347)', () => {
   it('is the starting table’s materials plus the machine’s own, in that order, with no duplicates', () => {
     const values = materialOptionsFor(Z1).map((o) => o.value);

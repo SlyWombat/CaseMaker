@@ -212,6 +212,13 @@ export function StartWizard(): JSX.Element {
   const [projectCreatedHere, setProjectCreatedHere] = useState(false);
   const [busy, setBusy] = useState(false);
   const [pending, setPending] = useState<PendingStock | null>(null);
+  // The one sentence a stock form is blocked with, when the form itself cannot start the job (a rod
+  // past the vise's grip). The step puts it under the picture; here it sits at the Next button.
+  const [stockBlock, setStockBlock] = useState<string | null>(null);
+  const onStockPending = useCallback((next: PendingStock | null, block: string | null) => {
+    setPending(next);
+    setStockBlock(block);
+  }, []);
   const [starting, setStarting] = useState(false);
   const [startError, setStartError] = useState<string | null>(null);
   const [confirmReplace, setConfirmReplace] = useState<{ pending: PendingStock; items: number } | null>(null);
@@ -585,7 +592,7 @@ export function StartWizard(): JSX.Element {
 
       {step === 'stock' && (
         <>
-          <StockStep seed={seed} onPending={setPending} />
+          <StockStep seed={seed} onPending={onStockPending} />
           {confirmReplace !== null && (
             <div
               data-testid="start-wizard-replace-confirm"
@@ -652,7 +659,7 @@ export function StartWizard(): JSX.Element {
 
         {stockUnblock && (
           <p style={UNBLOCK} data-testid="start-wizard-stock-unblock">
-            Choose the stock above — a piece on the shelf, a size you type, or a file.
+            {stockBlock ?? 'Choose the stock above — a piece on the shelf, a size you type, or a file.'}
           </p>
         )}
 

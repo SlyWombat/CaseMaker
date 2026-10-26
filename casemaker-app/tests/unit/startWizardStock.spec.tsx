@@ -349,16 +349,38 @@ describe('the material-first start (#418)', () => {
     expect(screen.queryByTestId('start-wizard-make-width')).toBeNull();
     expect(screen.queryByTestId('start-wizard-make-thickness')).toBeNull();
 
-    fireEvent.change(screen.getByTestId('start-wizard-make-length'), { target: { value: '120' } });
+    fireEvent.change(screen.getByTestId('start-wizard-make-length'), { target: { value: '18' } });
     fireEvent.change(screen.getByTestId('start-wizard-make-diameter'), { target: { value: '12' } });
     await act(async () => {
       fireEvent.click(screen.getByTestId('start-wizard-stock-next'));
     });
     await screen.findByTestId('engrave-setup-step-holding');
-    // The job plans in the rod's own box — 120 long, 12 × 12 across — and the form stays 'rod'.
+    // The rod stands on its end: D × D × L, cut on the ⌀D end, and the form stays 'rod'.
     const job = useEngraveJobStore.getState().job;
-    expect(job.stock).toMatchObject({ length: 120, width: 12, thickness: 12 });
+    expect(job.stock).toMatchObject({ length: 12, width: 12, thickness: 18 });
     expect(job.stockEntry).toMatchObject({ kind: 'made', form: 'rod' });
+  });
+
+  it('a rod past the vise grip is the rotary sentence, under the picture and at the button (#683)', async () => {
+    fakeShelf(SHELF);
+    await toStockStep();
+    fireEvent.click(screen.getByTestId('start-wizard-form-rod'));
+    fireEvent.change(screen.getByTestId('start-wizard-make-length'), { target: { value: '30' } });
+    fireEvent.change(screen.getByTestId('start-wizard-make-diameter'), { target: { value: '12' } });
+    // The form's own sentence says it — not a second red line about a number the operator typed.
+    expect(screen.getByTestId('start-wizard-form-sentence').textContent).toContain(
+      'A rod this long is held in the rotary',
+    );
+    expect(screen.queryByTestId('start-wizard-stock-problem')).toBeNull();
+    // Next is blocked, and the one sentence that unblocks it is at the button.
+    expect((screen.getByTestId('start-wizard-stock-next') as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByTestId('start-wizard-stock-unblock').textContent).toContain(
+      'A rod this long is held in the rotary',
+    );
+    // A shorter rod, on the same picture, is offerable again.
+    fireEvent.change(screen.getByTestId('start-wizard-make-length'), { target: { value: '15' } });
+    expect((screen.getByTestId('start-wizard-stock-next') as HTMLButtonElement).disabled).toBe(false);
+    expect(screen.queryByTestId('start-wizard-stock-unblock')).toBeNull();
   });
 
   it('a disc on the shelf is a piece like any other; a tube is refused by name (#683, A7)', async () => {

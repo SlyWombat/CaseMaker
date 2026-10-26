@@ -94,6 +94,11 @@ export type JobFindingCode =
   | 'item-chars-lost'
   | 'item-detail-lost'
   | 'item-outside-stock'
+  // A cut off the round FACE of a disc or a rod (#683). The job plans in the square around the
+  // round stock, and that square's corners are air: a cut whose extent reaches one passes over
+  // nothing, or into the jaw zone the square says is stock. The face is the inscribed circle of
+  // ⌀D, less the job's edge margin, and every corner of the cut's swept box must be inside it.
+  | 'item-off-round-stock'
   // V-CARVE region findings (#221). The design is correct at the COLOUR PLANE, so the two
   // disqualifying facts are about that plane: a cut that stops above it never reaches the second
   // colour, and a groove at it narrower than the machine's own X/Y step cannot be resolved into
@@ -1853,6 +1858,40 @@ export function validateJob(
           ? `, or raise the blank on a packer so it works above the jaw tops and state how far it then stands proud.`
           : '.'),
     });
+  }
+
+  // A round piece's CUT FACE is a circle inscribed in the square the job plans in (#683, §3.3).
+  // The square's corners are air; a cut that reaches one is a pass over nothing, and at the front or
+  // left it can be over the jaw zone the square reports as stock. Test the swept box's four corners
+  // against the face's circle, less the job's edge margin: a convex box is inside the circle exactly
+  // when all four are. The diameter is the smaller side, so a stored rectangle that is not square
+  // still gets the circle the round face can actually fill.
+  const roundForm = job.stockEntry?.form;
+  if (roundForm === 'disc' || roundForm === 'rod') {
+    const diameter = Math.min(job.stock.length, job.stock.width);
+    const radius = diameter / 2 - job.edgeMargin;
+    const centreX = job.stock.length / 2;
+    const centreY = job.stock.width / 2;
+    for (const cut of swept) {
+      const corners = [
+        [cut.box.minX, cut.box.minY],
+        [cut.box.maxX, cut.box.minY],
+        [cut.box.maxX, cut.box.maxY],
+        [cut.box.minX, cut.box.maxY],
+      ] as const;
+      const off = corners.some(([x, y]) => Math.hypot(x - centreX, y - centreY) > radius + 1e-6);
+      if (!off) continue;
+      findings.push({
+        severity: 'error',
+        code: 'item-off-round-stock',
+        labelId: cut.id,
+        message:
+          `${cut.name} reaches past the ⌀${fmt3(diameter)} mm face of the round stock: the ` +
+          `${fmt3(job.stock.length)} × ${fmt3(job.stock.width)} mm box around it has air at its ` +
+          `corners, and the cut runs into that air. Keep it inside the circle, ` +
+          `${fmt3(job.edgeMargin)} mm in from the edge.`,
+      });
+    }
   }
 
   // The cutter also has to REACH the depth: the jaw tops are at `−stockProud`, so a cut `d` deep

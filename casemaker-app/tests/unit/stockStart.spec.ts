@@ -109,8 +109,8 @@ describe('a shelf entry as the stock (#418)', () => {
   });
 
   it('a disc and a rod are job forms plan in their box; a tube is refused by name (#683, A7)', () => {
-    // Round stock is offered honestly: a disc is cut on its flat top, a rod along its side, and the
-    // job plans in the rectangle around it (`boxForForm`).
+    // Round stock is offered honestly: a disc is cut on its flat top, and a rod STANDS ON ITS END
+    // so its cut face is the ⌀D end, not a curved side. The job plans in the square around it.
     expect(formProblem('disc')).toBeNull();
     expect(formProblem('rod')).toBeNull();
     expect(formProblem('tube')).toMatch(/a tube is round stock with a hole through it .* rotary/);
@@ -120,15 +120,21 @@ describe('a shelf entry as the stock (#418)', () => {
       ...PLATE,
       id: 'rod-1',
       form: 'rod',
-      size: { diameter: 10, length: 100 },
+      size: { diameter: 10, length: 15 },
       reservations: [],
     });
     expect(shelfPickProblem(rod, Z1)).toBeNull();
     const r = stockFromShelf(rod, Z1);
     expect(r.ok).toBe(true);
     if (!r.ok) return;
-    expect(r.choice.stock).toEqual({ length: 100, width: 10, thickness: 10, material: 'aluminium-6061' });
+    expect(r.choice.stock).toEqual({ length: 10, width: 10, thickness: 15, material: 'aluminium-6061' });
     expect(r.choice.entry.form).toBe('rod');
+
+    // A rod taller than the vise's grip is the rotary's (§3.3): the entry stays listed with its
+    // own sentence, and it cannot start the job.
+    const longRod = StockItemSchema.parse({ ...rod, id: 'rod-long', size: { diameter: 10, length: 100 } });
+    expect(shelfPickProblem(longRod, Z1)).toMatch(/A rod this long is held in the rotary/);
+    expect(stockFromShelf(longRod, Z1).ok).toBe(false);
 
     const tube = StockItemSchema.parse({
       ...rod,
@@ -144,17 +150,23 @@ describe('a shelf entry as the stock (#418)', () => {
     expect(STOCK_SIZE_FIELDS.rod).toEqual(['length', 'diameter']);
     expect(formSizeProblem('disc', { diameter: 50, thickness: 5 }, Z1)).toBeNull();
     expect(formSizeProblem('disc', { thickness: 5 }, Z1)).toBe('the diameter needs a number in mm, above 0');
-    expect(formSizeProblem('rod', { length: 120, diameter: 12 }, Z1)).toBeNull();
+    // A rod's length is its height standing on end. Up to the jaws' 20 mm grip the vise holds it;
+    // past that the form's own sentence sends it to the rotary.
+    expect(formSizeProblem('rod', { length: 18, diameter: 12 }, Z1)).toBeNull();
+    expect(formSizeProblem('rod', { length: 20, diameter: 12 }, Z1)).toBeNull();
+    expect(formSizeProblem('rod', { length: 20.1, diameter: 12 }, Z1)).toMatch(/held in the rotary/);
+    expect(formSizeProblem('rod', { length: 120, diameter: 12 }, Z1)).toMatch(/held in the rotary/);
     expect(boxForForm('disc', { diameter: 50, thickness: 5 })).toEqual({ length: 50, width: 50, thickness: 5 });
-    expect(boxForForm('rod', { length: 120, diameter: 12 })).toEqual({ length: 120, width: 12, thickness: 12 });
+    expect(boxForForm('rod', { length: 18, diameter: 12 })).toEqual({ length: 12, width: 12, thickness: 18 });
 
-    // A typed rod goes back to the shelf as round stock, not as its box.
+    // A typed rod goes back to the shelf as round stock, not as its box: D is the box's length, and
+    // its own length is the box's thickness.
     const item = shelfItemFromMade(
-      { length: 120, width: 12, thickness: 12, form: 'rod', material: 'aluminium-6061', finish: 'rough' },
+      { length: 12, width: 12, thickness: 18, form: 'rod', material: 'aluminium-6061', finish: 'rough' },
       'rod-new-1',
       '2026-10-26T10:00:00.000Z',
     );
-    expect(item.size).toEqual({ length: 120, diameter: 12 });
+    expect(item.size).toEqual({ length: 18, diameter: 12 });
   });
 
   it('stock larger than the machine is refused, naming the axis', () => {

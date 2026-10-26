@@ -16,6 +16,7 @@ import {
   formLabel,
   formSizeProblem,
   isJobForm,
+  rodGripProblem,
   shelfFor,
   shelfItemFromMade,
   shelfPickProblem,
@@ -61,9 +62,10 @@ export type PendingStock =
  * The current job's own numbers, so an edit is an edit and not a retype; an absent seed is the
  * new-job flow (nothing chosen).
  *
- * A round form's seed carries the job's BOX: a disc's diameter is its `length`, a rod's diameter is
- * its `width` (`stockStart.ts`'s `boxForForm`). {@link dimsFromSeed} reads it back into the form's
- * own fields.
+ * A round form's seed carries the job's BOX: a disc's diameter is its `length` and its thickness is
+ * its `thickness`; a rod stands on its end, so its diameter is its `length` (and its `width`) and
+ * its own length is its `thickness` (`stockStart.ts`'s `boxForForm`). {@link dimsFromSeed} reads it
+ * back into the form's own fields.
  */
 export interface StartStockSeed {
   form: JobStockForm;
@@ -167,7 +169,7 @@ const FORM_DEFS: readonly FormDef[] = [
     id: 'rod',
     word: 'Rod',
     sentence:
-      'Rod — round stock. A short rod sits in the vise on its side for a face job; a rod cut around needs the rotary (step 3 will offer it).',
+      'Rod — round stock. A short rod stands on its end in the vise, cut on that end; a rod cut around needs the rotary (step 3 will offer it).',
   },
 ];
 
@@ -187,11 +189,11 @@ function text(v: number | null | undefined): string {
   return v === null || v === undefined ? '' : String(Number(v.toFixed(3)));
 }
 
-/** A seed's numbers as the form's own fields. A round form's diameter is in the seed's box. */
+/** A seed's numbers as the form's own fields. A round form's numbers are in the seed's box. */
 function dimsFromSeed(seed?: StartStockSeed): DimState {
   if (seed === undefined) return EMPTY_DIMS;
   if (seed.form === 'disc') return { ...EMPTY_DIMS, diameter: text(seed.length), thickness: text(seed.thickness) };
-  if (seed.form === 'rod') return { ...EMPTY_DIMS, length: text(seed.length), diameter: text(seed.width) };
+  if (seed.form === 'rod') return { ...EMPTY_DIMS, diameter: text(seed.length), length: text(seed.thickness) };
   return { ...EMPTY_DIMS, length: text(seed.length), width: text(seed.width), thickness: text(seed.thickness) };
 }
 
@@ -316,7 +318,7 @@ export function StartStockStep({
   seed,
 }: {
   /** The current answer, or null when there is none yet (or the one there is was refused). */
-  onChange: (pending: PendingStock | null) => void;
+  onChange: (pending: PendingStock | null, block: string | null) => void;
   /** The job's own stock when the step is re-opened to edit it (#681); absent for a new job. */
   seed?: StartStockSeed;
 }): JSX.Element {
@@ -358,7 +360,18 @@ export function StartStockStep({
   // A pick that is already on the shelf is not "kept" again; a loaded file is not typed either.
   const canKeep = shelfOk && shelfId === null && fileRead === null;
 
-  const outcome = useMemo((): { pending: PendingStock | null; problem: string | null; notes: string[] } => {
+  /**
+   * What the step hands the wizard on every input. `block` is the one sentence that stops THIS form
+   * when the form itself cannot start the job — a rod past the vise's grip is the rotary's. It
+   * stands in the form's own sentence under the picture and travels to the Next button; a red line
+   * beside it would say the same thing twice.
+   */
+  const outcome = useMemo((): {
+    pending: PendingStock | null;
+    problem: string | null;
+    notes: string[];
+    block?: string | null;
+  } => {
     if (shelfId !== null) {
       const item = shelf.find((i) => i.id === shelfId);
       if (!item) return { pending: null, problem: null, notes: [] };
@@ -396,6 +409,10 @@ export function StartStockStep({
     const filled = STOCK_SIZE_FIELDS[form].some((key) => dims[key].trim() !== '');
     if (!filled) return { pending: null, problem: null, notes: [] };
     const size = toSize(dims);
+    // A rod past the vise's grip is the rotary's (§3.3). The form's own sentence says so and the
+    // wizard blocks this form; it is not a red line about a number the operator typed.
+    const block = form === 'rod' ? rodGripProblem(size) : null;
+    if (block !== null) return { pending: null, problem: null, notes: [], block };
     const sizeProblem = formSizeProblem(form, size, machine);
     if (sizeProblem !== null) return { pending: null, problem: sizeProblem, notes: [] };
     const box = boxForForm(form, size);
@@ -417,7 +434,7 @@ export function StartStockStep({
   // Tell the wizard. Keyed on the pending answer's identity: `outcome` is a fresh object on every
   // input change, which is exactly when the wizard should hear about it.
   useEffect(() => {
-    onChange(outcome.pending);
+    onChange(outcome.pending, outcome.block ?? null);
   }, [outcome, onChange]);
 
   /** The form's picture: it sets the size fields, and the sentence says what the word means. */
@@ -515,7 +532,7 @@ export function StartStockStep({
         ))}
       </div>
       <p style={MUTED} data-testid="start-wizard-form-sentence">
-        {selectedForm.sentence}
+        {outcome.block ?? selectedForm.sentence}
       </p>
 
       <p style={{ ...MUTED, margin: '8px 0 0' }}>Size</p>
