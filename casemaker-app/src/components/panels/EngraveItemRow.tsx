@@ -106,6 +106,12 @@ export interface EngraveItemRowProps {
   onRemove: () => void;
   /** The editor. Drawn only while the row is open. */
   children: ReactNode;
+  /**
+   * #687 — engineering detail about this item, drawn in a `Technical` fold under the editor. The
+   * V-carve geometry lives here now: it is arithmetic about this item's floor, not a second opinion
+   * about which cutter to use. Omitted by kinds with no detail of their own.
+   */
+  technical?: ReactNode;
 }
 
 /** The item in a word or two, for a control that has to say what it acts on: `CASE`, `label 3`. */
@@ -146,6 +152,7 @@ export function EngraveItemRow({
   onToggleEnabled,
   onRemove,
   children,
+  technical = null,
 }: EngraveItemRowProps): JSX.Element {
   const open = useEngraveRowStore((s) => s.open.has(id));
   const toggle = useEngraveRowStore((s) => s.toggle);
@@ -305,6 +312,12 @@ export function EngraveItemRow({
             </p>
           ))}
           {children}
+          {technical !== null && (
+            <details data-testid={`${prefix}-technical-${index}`} style={{ marginTop: 6 }}>
+              <summary style={{ fontSize: 11, color: '#9aa4b0', cursor: 'pointer' }}>Technical</summary>
+              <div style={{ marginTop: 4 }}>{technical}</div>
+            </details>
+          )}
         </div>
       )}
     </div>

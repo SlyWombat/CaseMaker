@@ -13,16 +13,28 @@
  * default that called them flat ends (a chamfer, a tapered ball, and any row this build could not
  * classify), and every kind without a `tipDiameter` was named by `diameter=` — which for engravers,
  * drills and chamfers is the SHANK (`tool.ts`), so a 1 mm drill read "3.18 mm drill". Every shape has
- * its own name now; a shank-diameter kind with no tip is named by the vendor label, the only honest
- * statement the record makes; and an unclassifiable row is an "unknown cutter (vendor label)", never
- * a kind it may not be.
+ * its own name now, and an unclassifiable row is an "unknown cutter", never a kind it may not be.
+ *
+ * #687 — ONE FORM, AND THE LABEL IS NEVER THE NAME. The form is the vocabulary table's:
+ *
+ *     ⌀ 3.175 mm flat end · 12 mm flute
+ *
+ * with a `metal` tag beside it when the vendor's line says so (a tag, not part of the name — this
+ * module exposes the fact and the caller draws it). Three things the old name did are gone: the
+ * vendor label as the no-size name (`drill (1mm Drill(Metal))`), a curator's note anywhere in it,
+ * and two decimals (`3.17` beside a 3.175 mm cutter). A name never carries a manufacturer's string;
+ * the hover does.
  */
 
-import { parseLabelAngle, type Tool, type ToolShape } from './tool';
+import { isMetalCutterName, parseLabelAngle, type Tool, type ToolShape } from './tool';
 
-/** `0.5` → `"0.5"`, `1.00` → `"1"`, `3.175` → `"3.17"` — enough for a name, never a false precision. */
-function number(n: number): string {
-  return String(Number(n.toFixed(2)));
+/**
+ * A millimetre value for a name: at most three decimals, trailing zeros dropped, never a binary
+ * float's tail (`3.175`, `1`, `0.3`). #687 — `3.175` used to print as `3.17` beside records that
+ * said 3.175, which is two names for one cutter.
+ */
+function mm(n: number): string {
+  return String(Number(n.toFixed(3)));
 }
 
 /**
@@ -39,10 +51,12 @@ function vendorLabel(tool: Tool): string | null {
   return type === '' ? null : type;
 }
 
-/** `N mm` for the cutting size the record honestly states, or null when it states none. */
-function cuttingSize(tool: Tool): string | null {
+/** The cutting size the record honestly states, in mm, or null when it states none. */
+function cuttingSizeMm(tool: Tool): number | null {
   const diameter = SHANK_DIAMETER_KINDS.has(tool.shape) ? tool.tipDiameter : (tool.tipDiameter ?? tool.diameter);
-  return diameter === null ? null : `${number(diameter)} mm`;
+  // A zero cutting diameter is not a cutter this build can name: treat it as unstated, not as a
+  // truthful "0 mm", which would let a point-like chamfer row read as a size.
+  return diameter === null || diameter <= 0 ? null : diameter;
 }
 
 /** The shape in the operator's words, or null for one this build cannot classify. */
@@ -69,17 +83,44 @@ function kindName(shape: ToolShape): string | null {
   }
 }
 
-/** The tool's display name — cutting size, angle for a cone, radius for a tapered ball, and its kind. */
-export function toolDisplayName(tool: Tool): string {
-  const label = vendorLabel(tool);
+/**
+ * What the pickers draw for one cutter.
+ *
+ * `name` is the whole display form; `metal` is the fact a chip states beside it. The vendor label is
+ * deliberately NOT a field: this module will not hand a caller a second name form to print.
+ */
+export interface ToolDisplay {
+  /**
+   * `⌀ 3.175 mm flat end · 12 mm flute` — cutting size, cone angle (V and chamfer), kind, nose
+   * radius (tapered ball), then the flute length when the record states one.
+   *
+   * With no honest cutting size the name is `${kind} — cutting diameter unknown`; an unclassifiable
+   * row is `unknown cutter`. Neither falls back to the vendor's string.
+   */
+  name: string;
+  /** The vendor's line names Makera's "for Metal" range: draw a `metal` tag beside the name. */
+  metal: boolean;
+}
+
+/**
+ * The display form for a cutter, and whether it is on the metal line.
+ *
+ * One source for every screen that names a cutter (the panel's select, its recommendation, the
+ * Simulate panel's Tool select, the strip and the run sheet), so no two can print different names
+ * for the same bit.
+ */
+export function toolDisplay(tool: Tool): ToolDisplay {
+  const metal = isMetalCutterName(tool.name);
   const kind = kindName(tool.shape);
-  // #651 — never a guessed kind: an unparsed catalogue row says so, with the vendor's own words.
-  if (kind === null) return label === null ? 'unknown cutter' : `unknown cutter (${label})`;
-  const size = cuttingSize(tool);
+  const label = vendorLabel(tool);
+  // #651 — never a guessed kind: an unparsed catalogue row says so. #687 — and never the vendor
+  // label as a parenthetical, which was the fourth name form the operator had to read.
+  if (kind === null) return { name: 'unknown cutter', metal };
+  const size = cuttingSizeMm(tool);
   if (size === null) {
-    // A shank-diameter kind with no tip: the record names no cutting size, so the vendor label is
-    // the name. Only reachable for those kinds — every other shape states its cutting diameter.
-    return label === null ? `unknown ${kind}` : `${kind} (${label})`;
+    // A shank-diameter kind with no tip, or a row whose size never parsed. Say the kind and that
+    // the size is missing; the vendor label stays in the hover.
+    return { name: `${kind} — cutting diameter unknown`, metal };
   }
   // `tool.angle` is the INCLUDED angle (the field the schema describes); the half-angle field is
   // `halfAngle`. Operators know the included angle, so that is what the name prints. #658 — a
@@ -93,9 +134,41 @@ export function toolDisplayName(tool: Tool): string {
           ? null
           : parseLabelAngle(label)
       : null;
-  const cone = coneAngle !== null && coneAngle > 0 ? ` ${number(coneAngle)}°` : '';
+  const cone = coneAngle !== null && coneAngle > 0 ? ` ${mm(coneAngle)}°` : '';
   // A tapered ball is told apart from a plain ball by its nose radius.
   const radius =
-    tool.shape === 'tapered-ball' && tool.cornerRadius !== null && tool.cornerRadius > 0 ? ` R${number(tool.cornerRadius)}` : '';
-  return `${size}${cone} ${kind}${radius}`;
+    tool.shape === 'tapered-ball' && tool.cornerRadius !== null && tool.cornerRadius > 0 ? ` R${mm(tool.cornerRadius)}` : '';
+  // #687 — the flute length is the last field of the form (the vocabulary table's example), and it
+  // is omitted rather than invented when the record does not state one.
+  const flute = tool.fluteLength !== null && tool.fluteLength > 0 ? ` · ${mm(tool.fluteLength)} mm flute` : '';
+  return { name: `⌀ ${mm(size)} mm${cone} ${kind}${radius}${flute}`, metal };
 }
+
+/** The display name alone, for a sentence that names the cutter. */
+export function toolDisplayName(tool: Tool): string {
+  return toolDisplay(tool).name;
+}
+
+/**
+ * One group of the cutter list, in the order the design names them (first-job flow §3.6):
+ * flat end · ball · V and chamfer · engraver · drill · thread.
+ *
+ * A bull nose is a flat end with a rounded corner and sits in the flat-end group; a tapered ball is
+ * a ball with a radius. An unclassifiable row belongs to no group and is drawn without one — the
+ * list never invents a seventh heading for it.
+ */
+export interface ToolGroup {
+  id: string;
+  /** The group's heading, in the vocabulary table's words. */
+  label: string;
+  shapes: readonly ToolShape[];
+}
+
+export const TOOL_GROUPS: readonly ToolGroup[] = [
+  { id: 'flat', label: 'flat end', shapes: ['flat', 'bull'] },
+  { id: 'ball', label: 'ball', shapes: ['ball', 'tapered-ball'] },
+  { id: 'chamfer', label: 'V and chamfer', shapes: ['chamfer'] },
+  { id: 'engraver', label: 'engraver', shapes: ['engraving'] },
+  { id: 'drill', label: 'drill', shapes: ['drill'] },
+  { id: 'thread', label: 'thread', shapes: ['thread'] },
+];

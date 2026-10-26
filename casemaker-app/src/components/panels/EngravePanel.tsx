@@ -31,7 +31,7 @@ import {
 } from '@/engine/cnc/engrave/depthBounds';
 import type { LabelDepthRecommendation } from '@/engine/cnc/engrave/depthBounds';
 import { jobSplit } from '@/engine/cnc/engrave/depthIntent';
-import { toolDisplayName } from '@/engine/cnc/toolDisplay';
+import { TOOL_GROUPS, toolDisplay, toolDisplayName } from '@/engine/cnc/toolDisplay';
 import { EngraveCutWizard } from './EngraveCutWizard';
 import { jobMachine } from '@/engine/cnc/calibration';
 import { machineDisplayName } from '@/platform/locationClient';
@@ -49,7 +49,6 @@ import type { RestChoice } from '@/components/panels/RestCutterControl';
 import {
   hasRegionItems,
   itemName,
-  V_BIT_CARVE_SENTENCE,
   type ToolCandidate,
 } from '@/engine/cnc/engrave/recommendTool';
 import { vCone, vFluteLength } from '@/engine/cnc/vProfile';
@@ -451,16 +450,31 @@ function mm3(v: number): string {
 }
 
 /**
- * #651 — the option's text. The display name already carries the cutting size, so the old
- * "— Ø N mm cutting" suffix repeated it without telling any two options apart; and a native
- * `<select>` shows no `title`, so two rows whose name and size agree (different vendors, different
- * flute lengths) rendered identically. The vendor label is the field that distinguishes them.
+ * #687 — the cutter list's option text is the one display form, with the metal fact spelled as a
+ * last segment because a native `<select>` cannot draw the tag. The vendor label is not the name;
+ * it stays in the option's hover (`title`), beside the provenance, which is where data belongs.
  */
 function toolOptionLabel(e: ToolLibraryEntry): string {
-  const name = toolDisplayName(e.tool);
-  const unknown = cuttingDiameter(e.tool) === null ? ' — cutting diameter unknown' : '';
-  // A shank-diameter kind with no tip is already named by its vendor label; do not print it twice.
-  return name.includes(e.tool.name) ? `${name}${unknown}` : `${name}${unknown} · ${e.tool.name}`;
+  const display = toolDisplay(e.tool);
+  return display.metal ? `${display.name} · metal` : display.name;
+}
+
+/** The option's hover: the vendor's label and the provenance, neither of which is the name. */
+function toolOptionTitle(e: ToolLibraryEntry): string {
+  return e.tool.name.trim() === '' ? e.provenance : `${e.tool.name} · ${e.provenance}`;
+}
+
+/**
+ * #687 — which rejections are worth a line in "Why?". A cutter ruled out because it is broken, has
+ * no feeds for this material, or is not in the catalogue for it tells the operator something they
+ * can act on: replace the copy, change the material, choose another bit. `not-flat` does not — a
+ * ball nose cannot become a flat end, and the old 160-row list said "not a flat end mill" against
+ * ball noses the same panel was calling "flat end". That was a naming bug wearing a reason's clothes.
+ */
+function isActionableRejection(
+  c: ToolCandidate,
+): c is ToolCandidate & { excluded: 'broken' | 'no-feeds' | 'no-catalogue-row' } {
+  return c.excluded === 'broken' || c.excluded === 'no-feeds' || c.excluded === 'no-catalogue-row';
 }
 
 /**
@@ -956,6 +970,59 @@ export function EngravePanel(): JSX.Element {
           .map((p) => ({ id: p.id, name: primitiveLabel(p), depth: p.depth })),
       ]
     : [];
+  // #687 — the V-carve box used to sit between the cutter and the recommendation, where it read as
+  // a second opinion about the pick. Its arithmetic is about ONE item's floor, so it lives in that
+  // item row's Technical fold now. Same engine calls and same sentences; only the place moved.
+  const vCarveFactById = new Map(vCarveItems.map((item) => [item.id, item]));
+  const vCarveTechnical = (itemId: string): ReactNode => {
+    const item = vCarveFactById.get(itemId);
+    if (item === undefined || cone === null) return null;
+    const plane = filmPending ? null : vCarvePlane(cone, item.depth, film);
+    const stepover =
+      plane === null ||
+      vCarveRatio === null ||
+      !Number.isFinite(vCarveRatio) ||
+      vCarveRatio <= 0 ||
+      vCarveRatio > 1
+        ? null
+        : vCarveStepover(plane.planeRadius, cone, vCarveRatio);
+    return (
+      <>
+        <p style={{ ...MUTED, color: '#c8d3de' }} data-testid={`engrave-vcarve-depth-note-${item.id}`}>
+          <b>V-carve.</b> The depth you type is the pocket floor; the design is correct at the{' '}
+          <b>colour plane</b>
+          {filmPending
+            ? ' — resolving it from the print…'
+            : film !== null
+              ? `, ${mm3(film)} mm below the top, resolved from the print.`
+              : ' — this blank states no film, so the plane is the floor.'}{' '}
+          The tip is {mmText(cone.tipRadius * 2)} mm wide and its flank is{' '}
+          {mmText(cone.halfAngleDeg)}° from the axis.
+        </p>
+        {plane !== null && (
+          <p style={MUTED} data-testid={`engrave-vcarve-item-${item.id}`}>
+            {item.name} at {mm3(item.depth)} mm: {mm3(plane.grooveWidth)} mm groove at the plane —
+            floor {mm3(plane.floorInset)} mm narrower per side, top opening{' '}
+            {mm3(plane.surfaceOutset)} mm wider per side;{' '}
+            {stepover === null
+              ? 'the pass pitch was not resolved for this job'
+              : `pass pitch ${mm3(stepover.effective)} mm beside the requested ${mm3(stepover.requested)} mm`}
+            {'.'}
+          </p>
+        )}
+        {stepover !== null && stepover.clamped && (
+          // The finding's own sentence, not a paraphrase: this is a note about a correct cut, and
+          // the panel must not invent a second wording (or a second severity).
+          <p
+            style={{ ...MUTED, color: '#e0c07a' }}
+            data-testid={`engrave-vcarve-clamp-${item.id}`}
+          >
+            {vCarveStepoverClampNote(item.name, stepover, cone.tipRadius)}
+          </p>
+        )}
+      </>
+    );
+  };
   // Only the clamps (#317): an `ok: false` result carries `-refused` diagnostics, which the refusal
   // box below already states, and a `catalogue-ignored` is not the machine's doing at all.
   const clamps = feeds?.ok ? feeds.diagnostics.filter((d) => CLAMP_CODES.has(d.code)) : [];
@@ -1341,13 +1408,21 @@ export function EngravePanel(): JSX.Element {
 
   const rec = preview?.recommendation ?? null;
   const recPick = rec?.key ? rec.candidates.find((c) => c.key === rec.key) ?? null : null;
-  // #221 — a V-bit pick is a V-carve, and the box says so rather than calling every recommendation
-  // a flat end. The shape comes from the cutter the key names, never from the candidate's diameter.
-  const recPickCone =
-    recPick === null ? null : (() => {
-        const entry = tools.find((e) => e.key === recPick.key);
-        return entry === undefined ? null : vCone(entry.tool);
-      })();
+  const recPickEntry = recPick === null ? null : (tools.find((e) => e.key === recPick.key) ?? null);
+  // #687 — the pick is NAMED by the one display form. A candidate the registry no longer holds
+  // (an older preview) falls back to its diameter and no kind, never to a vendor string.
+  const recPickDisplay =
+    recPickEntry !== null
+      ? toolDisplay(recPickEntry.tool)
+      : recPick === null
+        ? null
+        : { name: `⌀ ${mmText(recPick.diameter)} mm cutter`, metal: false };
+  // #687 — "applied" is a fact about the job, not about the preview: the job's cutter is the pick.
+  // `Use it` exists only when that is false, so it never offers to change nothing.
+  const recPickApplied = recPick !== null && rec !== null && rec.key !== null && rec.key === job.toolKey;
+  // #687 — only the rejections the operator can act on get a line (see `isActionableRejection`).
+  const actionableRejections = rec?.candidates.filter(isActionableRejection) ?? [];
+  const whySummary = `Why? — ${actionableRejections.length} cutter${actionableRejections.length === 1 ? '' : 's'} rejected`;
 
   // #516 — the tool is the software's recommendation once the work is defined. When the preview
   // has a pick and the operator has not chosen a cutter, the job follows it (source 'computed');
@@ -1870,17 +1945,6 @@ export function EngravePanel(): JSX.Element {
   }
 
   // ---- item naming (labels, shapes and combined shapes are one list downstream, #214/#215) ---
-
-  /** A short name for an item id, for the recommendation's "worst item" line. */
-  function itemDisplay(id: string): string {
-    const item = allItems(job).find((it) => it.id === id);
-    if (item) return 'kind' in item ? item.name ?? item.kind : item.text;
-    const trace = (job.traces ?? []).find((t) => t.id === id);
-    if (trace) return trace.name ?? (trace.kind === 'line' ? 'Line' : `Text "${trace.text}"`);
-    const primitive = (job.primitives ?? []).find((p) => p.id === id);
-    if (primitive) return primitive.name ?? primitiveLabel(primitive);
-    return id;
-  }
 
   // ---- combined shapes (#215 work item 3) --------------------------------------------------
   //
@@ -2497,6 +2561,7 @@ export function EngravePanel(): JSX.Element {
           recommended={depthRecommendation(label)}
           split={split}
           rest={label.construction === true ? null : restFor(label.id)}
+          technical={vCarveTechnical(label.id)}
           onChange={(patch) => updateLabel(label.id, patch)}
           onRemove={() => removeLabel(label.id)}
         />
@@ -2520,6 +2585,7 @@ export function EngravePanel(): JSX.Element {
           inlay={shape.construction === true ? null : (inlayFor(shape) ?? null)}
           texture={shape.construction === true ? null : (textureFor(shape) ?? null)}
           prism={shape.construction === true ? null : (prismFor(shape) ?? null)}
+          technical={vCarveTechnical(shape.id)}
           onChange={(patch) => updateShape(shape.id, patch)}
           onRemove={() => removeShape(shape.id)}
         />
@@ -2533,6 +2599,7 @@ export function EngravePanel(): JSX.Element {
           candidates={referenceableItems(shape.id)}
           findings={findingsFor(shape.id)}
           rest={shape.construction === true ? null : restFor(shape.id)}
+          technical={vCarveTechnical(shape.id)}
           onChange={(patch) => updateCombined(shape.id, patch)}
           onRemove={() => removeCombined(shape.id)}
         />
@@ -2580,6 +2647,7 @@ export function EngravePanel(): JSX.Element {
           maxDepth={maxDepth}
           findings={findingsFor(primitive.id)}
           rest={primitiveReducesToRegion(primitive) ? restFor(primitive.id) : null}
+          technical={vCarveTechnical(primitive.id)}
           onChange={(patch) => updatePrimitive(primitive.id, patch)}
           onRemove={() => removePrimitive(primitive.id)}
         />
@@ -2616,6 +2684,7 @@ export function EngravePanel(): JSX.Element {
           maxDepth={maxDepth}
           findings={findingsFor(shape.id)}
           rest={shape.construction === true ? null : restFor(shape.id)}
+          technical={vCarveTechnical(shape.id)}
           onChange={(patch) => updateVector(shape.id, patch)}
           onRemove={() => removeVector(shape.id)}
         />
@@ -2888,14 +2957,7 @@ export function EngravePanel(): JSX.Element {
         defaultOpen
       >
       {/* 3 — tool */}
-      <h3 style={SUBHEAD}>
-        Tool
-        {rec && recPick && (
-          <span style={{ ...TAG, marginLeft: 4 }} data-testid="engrave-tool-recommended-tag">
-            recommended: {fmtDiameter(recPick.diameter)} mm
-          </span>
-        )}
-      </h3>
+      <h3 style={SUBHEAD}>Tool</h3>
       <select
         value={job.toolKey}
         data-testid="engrave-tool"
@@ -2907,11 +2969,29 @@ export function EngravePanel(): JSX.Element {
         <option value="" disabled>
           Choose a cutter…
         </option>
-        {toolOptions.map((e) => (
-          <option key={e.key} value={e.key} title={e.provenance}>
-            {toolOptionLabel(e)}
-          </option>
-        ))}
+        {/* #687 — grouped by kind in the design's order. A bull nose sits with the flat ends and a
+            tapered ball with the balls; a row this build cannot classify is drawn without a heading
+            rather than under an invented seventh one. */}
+        {TOOL_GROUPS.map((group) => {
+          const entries = toolOptions.filter((e) => group.shapes.includes(e.tool.shape));
+          if (entries.length === 0) return null;
+          return (
+            <optgroup key={group.id} label={group.label}>
+              {entries.map((e) => (
+                <option key={e.key} value={e.key} title={toolOptionTitle(e)}>
+                  {toolOptionLabel(e)}
+                </option>
+              ))}
+            </optgroup>
+          );
+        })}
+        {toolOptions
+          .filter((e) => !TOOL_GROUPS.some((group) => group.shapes.includes(e.tool.shape)))
+          .map((e) => (
+            <option key={e.key} value={e.key} title={toolOptionTitle(e)}>
+              {toolOptionLabel(e)}
+            </option>
+          ))}
       </select>
       {job.sources?.tool && <SourceTag source={job.sources.tool} testid="engrave-tool-source" />}
       {/* #434 — a drill's cutting end is a point, and the hole is its full diameter only a point
@@ -2940,92 +3020,35 @@ export function EngravePanel(): JSX.Element {
           Strokes thinner than {fmtDiameter(diameter)} mm cannot be cut — the cutter opens them away entirely.
         </p>
       )}
-      {/* #221 — the V-carve strategy. On a region job the V-bit IS the cutter; the typed depth is
-          the FLOOR, and the design is correct at the colour plane. Every number below comes from
-          the engine (`vCarvePlane`, `vCarveStepover`, the preview's resolved film, the feeds row's
-          own step-over), so the panel cannot state a pitch the CAM does not run. */}
-      {vCarveJob && cone !== null && (
-        <div
-          data-testid="engrave-vcarve"
-          style={{ margin: '6px 0', border: '1px solid #3a4a5a', background: '#16202a', borderRadius: 4, padding: 6 }}
-        >
-          <p style={{ ...MUTED, color: '#c8d3de', margin: 0 }} data-testid="engrave-vcarve-depth-note">
-            <b>V-carve.</b> The depth you type is the pocket floor; the design is correct at the{' '}
-            <b>colour plane</b>
-            {filmPending
-              ? ' — resolving it from the print…'
-              : film !== null
-                ? `, ${mm3(film)} mm below the top, resolved from the print.`
-                : ' — this blank states no film, so the plane is the floor.'}{' '}
-            The tip is {fmtDiameter(cone.tipRadius * 2)} mm wide and its flank is{' '}
-            {fmtDiameter(cone.halfAngleDeg)}° from the axis.
-          </p>
-          {!filmPending &&
-            vCarveItems.map((item) => {
-              const plane = vCarvePlane(cone, item.depth, film);
-              const stepover =
-                vCarveRatio !== null && Number.isFinite(vCarveRatio) && vCarveRatio > 0 && vCarveRatio <= 1
-                  ? vCarveStepover(plane.planeRadius, cone, vCarveRatio)
-                  : null;
-              const name = item.name;
-              return (
-                <p
-                  key={item.id}
-                  style={MUTED}
-                  data-testid={`engrave-vcarve-item-${item.id}`}
-                >
-                  {name} at {mm3(item.depth)} mm: {mm3(plane.grooveWidth)} mm groove at the plane —
-                  floor {mm3(plane.floorInset)} mm narrower per side, top opening{' '}
-                  {mm3(plane.surfaceOutset)} mm wider per side;{' '}
-                  {stepover === null
-                    ? 'the pass pitch was not resolved for this job'
-                    : `pass pitch ${mm3(stepover.effective)} mm beside the requested ${mm3(stepover.requested)} mm`}
-                  {'.'}
-                </p>
-              );
-            })}
-          {!filmPending &&
-            vCarveItems.map((item) => {
-              const plane = vCarvePlane(cone, item.depth, film);
-              const stepover =
-                vCarveRatio !== null && Number.isFinite(vCarveRatio) && vCarveRatio > 0 && vCarveRatio <= 1
-                  ? vCarveStepover(plane.planeRadius, cone, vCarveRatio)
-                  : null;
-              // The finding's own sentence, not a paraphrase: this is a note about a correct cut,
-              // and the panel must not invent a second wording (or a second severity).
-              if (stepover === null || !stepover.clamped) return null;
-              return (
-                <p
-                  key={`clamp-${item.id}`}
-                  style={{ ...MUTED, color: '#e0c07a' }}
-                  data-testid={`engrave-vcarve-clamp-${item.id}`}
-                >
-                  {vCarveStepoverClampNote(item.name, stepover, cone.tipRadius)}
-                </p>
-              );
-            })}
-        </div>
-      )}
       {rec && (
         <div
           data-testid="engrave-recommendation"
           style={{ margin: '6px 0', border: '1px solid #3a4a5a', background: '#16202a', borderRadius: 4, padding: 6 }}
         >
           <p style={{ ...MUTED, color: '#c8d3de', margin: 0 }}>
-            {recPick ? (
+            {recPick !== null && recPickDisplay !== null ? (
               <>
-                <b>
-                  Recommended: {fmtDiameter(recPick.diameter)} mm{' '}
-                  {recPickCone === null ? 'flat end' : 'V-bit'}
-                </b>{' '}
-                — {rec.reason}{' '}
-                <button
-                  type="button"
-                  data-testid="engrave-use-recommended"
-                  onClick={() => rec.key && setTool(rec.key, 'computed')}
-                >
-                  Use it
-                </button>
+                <b>{recPickDisplay.name}</b>{' '}
+                <span style={{ ...TAG, marginLeft: 0 }} data-testid="engrave-tool-recommended-tag">
+                  recommended
+                </span>
+                {recPickDisplay.metal && (
+                  <span style={{ ...TAG, marginLeft: 4 }} data-testid="engrave-recommendation-metal">
+                    metal
+                  </span>
+                )}
+                {rec.reason ? ` — ${rec.reason}` : ''}{' '}
+                {/* #687 — only when pressing it changes the job's cutter. The audit's complaint was
+                    a `Use it` button beside the cutter it would "change" to itself. */}
+                {!recPickApplied && rec.key !== null && (
+                  <button
+                    type="button"
+                    data-testid="engrave-use-recommended"
+                    onClick={() => rec.key && setTool(rec.key, 'computed')}
+                  >
+                    Use it
+                  </button>
+                )}
               </>
             ) : (
               rec.reason
@@ -3063,20 +3086,24 @@ export function EngravePanel(): JSX.Element {
               {rec.selectedNote}
             </p>
           )}
-          <details style={{ marginTop: 4 }}>
-            <summary style={{ fontSize: 11, color: '#9aa4b0', cursor: 'pointer' }}>
-              Why? — {rec.candidates.length} cutters considered
-            </summary>
-            <div style={{ marginTop: 4 }}>
-              {rec.candidates.map((c) => {
-                const candidateEntry = tools.find((e) => e.key === c.key);
-                const candidateCone = candidateEntry === undefined ? null : vCone(candidateEntry.tool);
-                const detail = c.excluded
-                  ? c.excluded === 'not-flat'
-                    ? // A ball or bull nose, or a V-bit whose file states no usable cone. Since
-                      // #221 a V-bit WITH a cone is offered as a V-carve, not excluded.
-                      'not a flat end mill'
-                    : c.excluded === 'broken'
+          {/* #687 — one line per cutter REJECTED for a reason the operator can act on, and nothing
+              else. The qualifying rows, the compromise rows and every `not-flat` row are gone: they
+              were the 160-line wall, and "not a flat end mill" against a ball nose was a naming bug
+              the display form fixed. A list with nothing actionable draws no disclosure at all. */}
+          {actionableRejections.length > 0 && (
+            <details style={{ marginTop: 4 }}>
+              <summary style={{ fontSize: 11, color: '#9aa4b0', cursor: 'pointer' }}>
+                {whySummary}
+              </summary>
+              <div style={{ marginTop: 4 }}>
+                {actionableRejections.map((c) => {
+                  const candidateEntry = tools.find((e) => e.key === c.key);
+                  const name =
+                    candidateEntry === undefined
+                      ? `⌀ ${mmText(c.diameter)} mm cutter`
+                      : toolDisplayName(candidateEntry.tool);
+                  const detail =
+                    c.excluded === 'broken'
                       ? // #454/#458 — whose copies said so. Without the attribution a built-in
                         // reading "every copy is marked broken" sounds like the operator's own
                         // verdict on the shipped definition.
@@ -3086,30 +3113,21 @@ export function EngravePanel(): JSX.Element {
                           // the opposite of true here: the starting table answers these cutters
                           // and it is the catalogue that named the materials it is listed for.
                           (c.catalogueNote ?? 'not listed by the catalogue for this material')
-                        : 'no cutting parameters for this material'
-                  : c.vCarve
-                    ? // #221 — the strategy sentence: the design is the cone's width at the plane.
-                      V_BIT_CARVE_SENTENCE
-                    : c.worst
-                      ? `worst item "${itemDisplay(c.worst.labelId)}" · ${Math.round(c.worst.ratio * 100)} % kept${c.condition?.best === 'worn' ? ` · worn${conditionSourceWord(c)}` : ''}`
-                      : c.condition?.best === 'worn'
-                        ? 'worn' + conditionSourceWord(c)
-                        : 'no condition recorded';
-                return (
-                  <div
-                    key={c.key}
-                    data-testid={`engrave-candidate-${c.key}`}
-                    style={{ display: 'flex', justifyContent: 'space-between', gap: 8, fontSize: 11, lineHeight: 1.6 }}
-                  >
-                    <span style={MUTED}>
-                      {fmtDiameter(c.diameter)} mm {candidateCone === null ? 'flat end' : 'V-bit'}
-                    </span>
-                    <span style={{ color: c.qualifies ? '#9fd19b' : '#e0a19b' }}>{detail}</span>
-                  </div>
-                );
-              })}
-            </div>
-          </details>
+                        : 'no cutting parameters for this material';
+                  return (
+                    <div
+                      key={c.key}
+                      data-testid={`engrave-candidate-${c.key}`}
+                      style={{ display: 'flex', justifyContent: 'space-between', gap: 8, fontSize: 11, lineHeight: 1.6 }}
+                    >
+                      <span style={MUTED}>{name}</span>
+                      <span style={{ color: '#e0a19b' }}>{detail}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </details>
+          )}
         </div>
       )}
       {!rec && previewStatus === 'loading' && (

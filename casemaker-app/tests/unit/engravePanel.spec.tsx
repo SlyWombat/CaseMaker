@@ -979,7 +979,8 @@ describe('EngravePanel — V-carve variable depth (#665)', () => {
     render(<EngravePanel />);
     expand('engrave-shape');
     expect(screen.getByTestId('engrave-shape-vcarve-note-0').textContent).toContain(
-      '1.5 mm flat end pockets it flat at that depth in its own program',
+      // #687 — the same one display form in a sentence: the flute is part of the name now.
+      '⌀ 1.5 mm flat end · 20 mm flute pockets it flat at that depth in its own program',
     );
     expect(screen.getByText('Clear the middle the V cannot reach')).toBeTruthy();
     expect(screen.getByTestId('engrave-shape-rest-note-0').textContent).toContain('pockets the middle');
@@ -2532,21 +2533,32 @@ describe('EngravePanel — the V-carve strategy (#221)', () => {
     act(() => resetRegistry());
   });
 
+  // #687 — the V-carve arithmetic moved into the item row's Technical fold, and a row's body is
+  // drawn only while the row is open. Opening the first label is part of reading the geometry now.
+  function openTitleRow(): void {
+    fireEvent.click(screen.getByTestId('engrave-label-expand-0'));
+  }
+
   it('states the floor/colour-plane depth note and no longer calls the V-bit a stroke-width limit', () => {
     show();
-    const note = screen.getByTestId('engrave-vcarve-depth-note').textContent ?? '';
+    // A box beside the cutter is the old home; the arithmetic belongs to the item row now.
+    expect(screen.queryByTestId('engrave-vcarve')).toBeNull();
+    openTitleRow();
+    const note = screen.getByTestId('engrave-vcarve-depth-note-title').textContent ?? '';
     expect(note).toContain('V-carve.');
     expect(note).toContain('the pocket floor');
     expect(note).toContain('colour plane');
     expect(note).toContain(`${mm3(FILM)} mm below the top`);
     expect(note).toContain('0.3 mm wide');
-    expect(note).toContain('15.0° from the axis');
+    // #687 — trailing zeros dropped: "15°", not "15.0°" beside a 30° angle in the same sentence.
+    expect(note).toContain('15° from the axis');
     // A V-bit has no flat stroke-width to state: the old hint is suppressed on a V-carve.
     expect(screen.queryByTestId('engrave-thin-strokes')).toBeNull();
   });
 
   it('prints the plane geometry and the effective pitch beside the requested one, from the engine', () => {
     show();
+    openTitleRow();
     const cone = vCone(V_TOOL)!;
     const title = vJob().labels[0]!;
     const plane = vCarvePlane(cone, title.depth, FILM);
@@ -2573,7 +2585,8 @@ describe('EngravePanel — the V-carve strategy (#221)', () => {
   it('says the plane is the floor when the blank states no film', () => {
     const job = vJob();
     show(job, null); // no print on this blank, and no preview to resolve one from
-    expect(screen.getByTestId('engrave-vcarve-depth-note').textContent).toContain(
+    openTitleRow();
+    expect(screen.getByTestId('engrave-vcarve-depth-note-title').textContent).toContain(
       'this blank states no film, so the plane is the floor',
     );
     // With no film the plane IS the floor, so the note still carries per-item arithmetic.
@@ -2587,14 +2600,15 @@ describe('EngravePanel — the V-carve strategy (#221)', () => {
       colour: { kind: 'printed', capMm: job.stock.thickness - 1.2, layerHeight: 0.2 },
     };
     show(job, null); // the preview that resolves the film has not landed yet
-    expect(screen.getByTestId('engrave-vcarve-depth-note').textContent).toContain(
+    openTitleRow();
+    expect(screen.getByTestId('engrave-vcarve-depth-note-title').textContent).toContain(
       'resolving it from the print',
     );
     expect(screen.queryByTestId('engrave-vcarve-item-title')).toBeNull();
     expect(screen.queryByTestId('engrave-vcarve-clamp-title')).toBeNull();
   });
 
-  it('names a V-bit pick a V-bit, and gives its Why? row the V-carve sentence', () => {
+  it('applies and names the V-bit pick, and offers no Use it for the cutter already selected', () => {
     const rec: ToolRecommendation = {
       key: 'inv:v30',
       compromise: false,
@@ -2626,19 +2640,57 @@ describe('EngravePanel — the V-carve strategy (#221)', () => {
     };
     show(vJob(), previewWith(FILM, rec));
 
-    expect(screen.getByTestId('engrave-tool-recommended-tag').textContent).toContain('recommended: 0.3 mm');
+    // #687 — the pick is already the job's cutter, so the box names it, tags it, and does not offer
+    // to "change" to itself. The name is the one display form, not a diameter + a guessed kind.
+    const tag = screen.getByTestId('engrave-tool-recommended-tag');
+    expect(tag.textContent).toBe('recommended');
     const box = screen.getByTestId('engrave-recommendation').textContent ?? '';
-    expect(box).toContain('Recommended: 0.3 mm V-bit');
+    expect(box).toContain('⌀ 0.3 mm 30° engraver');
+    expect(box).toContain('recommended');
     expect(box).toContain(V_BIT_CARVE_SENTENCE);
+    expect(screen.queryByTestId('engrave-use-recommended')).toBeNull();
 
-    // The disclosure names the cone as a V-bit and gives it the strategy sentence, while a flat
-    // candidate keeps the flat name and its own measured row.
-    const vRow = screen.getByTestId('engrave-candidate-inv:v30').textContent ?? '';
-    expect(vRow).toContain('0.3 mm V-bit');
-    expect(vRow).toContain(V_BIT_CARVE_SENTENCE);
-    const flatRow = screen.getByTestId('engrave-candidate-flat-1.0').textContent ?? '';
-    expect(flatRow).toContain('1.0 mm flat end');
-    expect(flatRow).toContain('40 % kept');
+    // Neither candidate was rejected for an actionable reason, so "Why?" prints nothing — not the
+    // qualifying V-bit, and not the 40 %-kept flat end that lost on size.
+    expect(screen.queryByTestId('engrave-candidate-inv:v30')).toBeNull();
+    expect(screen.queryByTestId('engrave-candidate-flat-1.0')).toBeNull();
+  });
+
+  it('offers Use it only when the pick is not the job’s cutter, and applying it changes the cutter', () => {
+    const rec: ToolRecommendation = {
+      key: 'inv:v30',
+      compromise: false,
+      reason: `${V_BIT_CARVE_SENTENCE}.`,
+      conditionNote: null,
+      catalogueNote: null,
+      selectedNote: null,
+      candidates: [
+        {
+          key: 'inv:v30',
+          diameter: 0.3,
+          qualifies: true,
+          worst: null,
+          reachKnown: false,
+          reachOk: true,
+          condition: null,
+          vCarve: true,
+        },
+      ],
+    };
+    const job = vJob();
+    // A hand-picked cutter is a decision the auto-apply must not overwrite (#516); with it in place
+    // the recommendation is advice, and `Use it` is the action that changes the job.
+    job.toolKey = 'flat-1.0';
+    job.sources = { ...job.sources, tool: 'user' };
+    show(job, previewWith(FILM, rec));
+
+    expect(screen.getByTestId('engrave-use-recommended')).toBeTruthy();
+    const box = screen.getByTestId('engrave-recommendation').textContent ?? '';
+    expect(box).toContain('⌀ 0.3 mm 30° engraver');
+    fireEvent.click(screen.getByTestId('engrave-use-recommended'));
+    expect((screen.getByTestId('engrave-tool') as HTMLSelectElement).value).toBe('inv:v30');
+    // The pick is applied now, so the control that would change nothing is gone.
+    expect(screen.queryByTestId('engrave-use-recommended')).toBeNull();
   });
 });
 
@@ -3082,5 +3134,101 @@ describe('EngravePanel — per-hole peck (#675)', () => {
     show({ drills: [{ ...HOLE, mode: 'bore', diameter: 10 }] });
     expect(screen.queryByTestId('engrave-drill-technical-0')).toBeNull();
     expect(screen.queryByTestId('engrave-drill-peck-0')).toBeNull();
+  });
+});
+
+// #687 — the cutter list says one display form per bit, grouped by kind in the design's order. The
+// vendor label is data in the hover; it is never the option's text, and a row with no cutting size
+// says so instead of falling back to `kind (label)`.
+describe('EngravePanel — the cutter list (#687)', () => {
+  const METAL_FLAT = flatEndMill(3.175, {
+    name: '3.175*12mm Flat End(Metal)',
+    fluteLength: 12,
+    shoulderLength: 12,
+  });
+  const BALL = flatEndMill(3, { name: '3 mm Ball Nose', typeText: 'Ball Nose', shape: 'ball' });
+  const ENGRAVER = flatEndMill(0.5, {
+    name: '4*0.5mm*30º Engraving',
+    typeText: 'Engraving',
+    shape: 'engraving',
+    tipDiameter: 0.5,
+    diameter: 3.175,
+    angle: 30,
+    halfAngle: 15,
+  });
+  const CHAMFER = flatEndMill(1, {
+    name: 'Chamfering Bit - 1/8" Shank 90°',
+    typeText: 'Chamfer',
+    shape: 'chamfer',
+    tipDiameter: 1,
+    diameter: 6,
+    angle: 90,
+  });
+  const THREAD = flatEndMill(2, { name: '2 mm Thread Mill', typeText: 'Thread', shape: 'thread', tipDiameter: 2 });
+  const NO_SIZE = flatEndMill(0.5, {
+    name: '4*0.5mm*30º Engraving(Metal)',
+    typeText: 'Engraving',
+    shape: 'engraving',
+    tipDiameter: null,
+    diameter: 3.175,
+    angle: 30,
+  });
+
+  function seed(): void {
+    setInventoryEntries([
+      { key: 'inv:flat-metal', tool: METAL_FLAT, provenance: 'EngravePanel cutter-list spec' },
+      { key: 'inv:ball', tool: BALL, provenance: 'EngravePanel cutter-list spec' },
+      { key: 'inv:engraver', tool: ENGRAVER, provenance: 'EngravePanel cutter-list spec' },
+      { key: 'inv:chamfer', tool: CHAMFER, provenance: 'EngravePanel cutter-list spec' },
+      { key: 'inv:thread', tool: THREAD, provenance: 'EngravePanel cutter-list spec' },
+      { key: 'inv:no-size', tool: NO_SIZE, provenance: 'EngravePanel cutter-list spec' },
+    ]);
+  }
+
+  afterEach(() => {
+    act(() => resetRegistry());
+  });
+
+  it('groups the options by kind in the design’s order', () => {
+    seed();
+    render(<EngravePanel />);
+    const select = screen.getByTestId('engrave-tool') as HTMLSelectElement;
+    const labels = Array.from(select.querySelectorAll('optgroup')).map((g) => g.getAttribute('label'));
+    // The drill group is absent because this job has no drill work and no drill is selected; the
+    // group is created from the entries the select offers, never as an empty heading.
+    expect(labels).toEqual(['flat end', 'ball', 'V and chamfer', 'engraver', 'thread']);
+  });
+
+  it('names every option by the one display form, with the metal fact and no vendor label', () => {
+    seed();
+    render(<EngravePanel />);
+    const select = screen.getByTestId('engrave-tool') as HTMLSelectElement;
+    const texts = Array.from(select.options).map((o) => o.textContent ?? '');
+    expect(texts).toContain('⌀ 3.175 mm flat end · 12 mm flute · metal');
+    expect(texts).toContain('⌀ 3 mm ball');
+    expect(texts).toContain('⌀ 0.5 mm 30° engraver');
+    expect(texts).toContain('⌀ 1 mm 90° chamfer');
+    expect(texts).toContain('⌀ 2 mm thread mill');
+    // No option repeats the vendor's own string, and none prints two decimals for 3.175.
+    expect(texts.some((t) => t.includes('Flat End(Metal)') || t.includes('Ball Nose') || t.includes('Engraving'))).toBe(false);
+    expect(texts.some((t) => t.includes('3.17 '))).toBe(false);
+  });
+
+  it('says a cutter with no cutting size has none, never `kind (label)`', () => {
+    seed();
+    render(<EngravePanel />);
+    const select = screen.getByTestId('engrave-tool') as HTMLSelectElement;
+    const texts = Array.from(select.options).map((o) => o.textContent ?? '');
+    expect(texts).toContain('engraver — cutting diameter unknown · metal');
+    expect(texts.some((t) => t.includes('4*0.5mm*30º'))).toBe(false);
+    expect(texts.some((t) => t.includes('engraver ('))).toBe(false);
+  });
+
+  it('keeps the vendor label in the option’s hover, where data belongs', () => {
+    seed();
+    render(<EngravePanel />);
+    const select = screen.getByTestId('engrave-tool') as HTMLSelectElement;
+    const metal = Array.from(select.options).find((o) => o.value === 'inv:flat-metal');
+    expect(metal?.getAttribute('title')).toContain('3.175*12mm Flat End(Metal)');
   });
 });

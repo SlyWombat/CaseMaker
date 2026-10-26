@@ -1,4 +1,4 @@
-import type { CSSProperties, JSX } from 'react';
+import type { CSSProperties, JSX, ReactNode } from 'react';
 import { EngraveItemRow } from '@/components/panels/EngraveItemRow';
 import { RestCutterControl, type RestChoice } from '@/components/panels/RestCutterControl';
 import { regionChipLabel, useRegionOperationType } from '@/components/panels/operationTypes';
@@ -57,6 +57,8 @@ export interface EngravePrimitiveRowProps {
    * row's item is not in a setup or the job has no cutter. The panel owns the registry reading.
    */
   rest?: RestChoice | null;
+  /** #687 — the row's Technical fold (the V-carve geometry), when this item has any. */
+  technical?: ReactNode;
 }
 
 export function EngravePrimitiveRow({
@@ -67,6 +69,7 @@ export function EngravePrimitiveRow({
   onRemove,
   findings,
   rest = null,
+  technical = null,
 }: EngravePrimitiveRowProps): JSX.Element {
   // #662 - the chip states what THIS cutter makes of a region.
   const region = useRegionOperationType();
@@ -158,6 +161,7 @@ export function EngravePrimitiveRow({
       onToggleEnabled={(enabled) => onChange({ enabled })}
       onRemove={onRemove}
       restLabel={rest?.chip ?? null}
+      technical={technical}
     >
       <label style={ROW_INLINE}>
         <span>name</span>

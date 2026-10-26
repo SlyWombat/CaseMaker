@@ -283,7 +283,8 @@ describe('#655 the prompt names the run’s cutter', () => {
     useMachineRunStore.setState({ runs: { [key]: { ...entry, running: true, toolWaiting: { awaited: 1 } } } });
     render(<EngraveMachineRun target={TARGET} />);
     expect(screen.getByTestId('engrave-run-tool-words').textContent).toBe(
-      'The machine is waiting for tool 1 — the 1 mm flat end — to be in the spindle.',
+      // #687 — the display form carries the ⌀ (and the flute when the record states one).
+      'The machine is waiting for tool 1 — the ⌀ 1 mm flat end — to be in the spindle.',
     );
   });
 });

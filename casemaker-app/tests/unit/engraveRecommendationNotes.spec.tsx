@@ -3,8 +3,8 @@
 //   #442 — the pick's condition note on its own line;
 //   #455/#458 — the catalogue note, the hand-pick warning, and a `no-catalogue-row` candidate's
 //     own reason;
-//   #454/#458 — the `Why?` row's `· worn` / broken suffix naming the shop's copies when the summary
-//     was adopted from them.
+//   #454/#458, #687 — the `Why?` row's broken attribution, and the filter that keeps the list to
+//     rejections the operator can act on.
 //
 // Each note is a DIFFERENT claim from the reason beside it — "why this cutter", "what the catalogue
 // lists it for", "check this one before you cut" — so none may be folded into the reason's
@@ -27,6 +27,8 @@ import {
 } from '@/store/engravePreviewStore';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import type { ToolCandidate } from '@/engine/cnc/engrave/recommendTool';
+import { flatEndMill } from '@/engine/cnc/tool';
+import { resetRegistry, setInventoryEntries } from '@/engine/cnc/toolRegistry';
 import type { EngravePreview } from '@/workers/sim/engravePreview';
 import type { NodeMeshOutput } from '@/workers/geometry/meshOutput';
 
@@ -113,6 +115,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  act(() => resetRegistry());
   useEngravePreviewStore.getState().dispose();
   setEngravePreviewClientLoader(null);
   resetShopDefaultsStore();
@@ -224,59 +227,55 @@ describe('the panel’s catalogue and hand-pick notes (#458)', () => {
   });
 });
 
-// #454/#458 — a built-in or `cat:` key pools the shop's copies that correspond to it, so a
-// condition summarised on it is about THOSE copies. Without the parenthetical the `Why?` row reads
+// #454/#458/#687 — the `Why?` disclosure is a short list of things to DO, not a transcript of the
+// recommender's search. A shared or `cat:` key pools the shop's copies that correspond to it, so a
+// condition summarised on it is about THOSE copies. Without the parenthetical the broken row reads
 // exactly like a condition the operator set on the shipped definition.
-describe('the panel attributes an adopted condition (#454/#458)', () => {
+describe('the panel’s Why? list (#687)', () => {
   const shopCopies = { adopted: true };
 
-  it('says whose copies a worn built-in is, in the worst-item row', () => {
-    const adopted: ToolCandidate = {
-      key: 'flat-3.175x12-metal',
-      diameter: 3.175,
-      qualifies: true,
-      worst: { labelId: 'missing-item', ratio: 0.87, emptyChars: 0 },
-      reachKnown: false,
-      reachOk: true,
-      condition: { best: 'worn', usable: 1, note: '…', ...shopCopies },
-    };
-    useEngravePreviewStore.setState({ preview: previewWith({}, [PICK, adopted]), status: 'ready' });
-    render(<EngravePanel />);
-
-    expect(screen.getByTestId('engrave-candidate-flat-3.175x12-metal').textContent).toContain(
-      '· worn (the shop’s copies)',
-    );
-  });
-
-  it('says whose copies a worn built-in is, in the plain worn row', () => {
-    const adopted: ToolCandidate = {
-      key: 'cat:worn-only',
-      diameter: 1,
-      qualifies: true,
-      worst: null,
-      reachKnown: false,
-      reachOk: true,
-      condition: { best: 'worn', usable: 1, note: '…', ...shopCopies },
-    };
-    useEngravePreviewStore.setState({ preview: previewWith({}, [PICK, adopted]), status: 'ready' });
-    render(<EngravePanel />);
-
-    expect(screen.getByTestId('engrave-candidate-cat:worn-only').textContent).toContain(
-      'worn (the shop’s copies)',
-    );
-  });
-
-  it('says whose copies decided a broken built-in is out', () => {
-    const adopted: ToolCandidate = {
-      key: 'flat-1.0',
+  /** A candidate of one kind, with every field the panel does not read left neutral. */
+  function candidate(over: Partial<ToolCandidate> & Pick<ToolCandidate, 'key'>): ToolCandidate {
+    return {
       diameter: 1,
       qualifies: false,
       worst: null,
       reachKnown: false,
       reachOk: true,
+      condition: null,
+      ...over,
+    };
+  }
+
+  it('lists only rejections the operator can act on, and counts only those', () => {
+    const ball = candidate({ key: 'inv:ball', diameter: 3, excluded: 'not-flat' });
+    const broken = candidate({ key: 'flat-1.0', excluded: 'broken' });
+    useEngravePreviewStore.setState({ preview: previewWith({}, [PICK, ball, broken]), status: 'ready' });
+    render(<EngravePanel />);
+
+    // A ball nose cannot become a flat end: "not a flat end mill" is not a thing to act on.
+    expect(screen.queryByTestId('engrave-candidate-inv:ball')).toBeNull();
+    // The qualifying pick is not a rejection either.
+    expect(screen.queryByTestId('engrave-candidate-flat-1.0')).toBeTruthy();
+    const summary = screen.getByTestId('engrave-recommendation').querySelector('summary')?.textContent ?? '';
+    expect(summary).toContain('Why? — 1 cutter rejected');
+  });
+
+  it('draws no Why? disclosure when every candidate was kept or ruled out by its shape', () => {
+    const ball = candidate({ key: 'inv:ball', diameter: 3, excluded: 'not-flat' });
+    useEngravePreviewStore.setState({ preview: previewWith({}, [PICK, ball]), status: 'ready' });
+    render(<EngravePanel />);
+
+    expect(screen.getByTestId('engrave-recommendation')).toBeTruthy();
+    expect(screen.getByTestId('engrave-recommendation').querySelector('details')).toBeNull();
+  });
+
+  it('says whose copies decided a broken built-in is out', () => {
+    const adopted = candidate({
+      key: 'flat-1.0',
       excluded: 'broken',
       condition: { best: 'broken', usable: 0, note: '…', ...shopCopies },
-    };
+    });
     // `PICK` shares this key, so it is the only candidate: two rows with one test id would make
     // the query ambiguous rather than test anything.
     useEngravePreviewStore.setState({ preview: previewWith({}, [adopted]), status: 'ready' });
@@ -287,23 +286,55 @@ describe('the panel attributes an adopted condition (#454/#458)', () => {
     );
   });
 
-  it('adds no attribution to an owned key, whose summary is its own copies', () => {
-    // The contrast that keeps the three cases above from passing on decoration: an `inv:` key's
-    // worn summary is the operator's own statement and must read exactly as before.
-    const owned: ToolCandidate = {
-      key: 'inv:my-1mm',
-      diameter: 1,
-      qualifies: true,
-      worst: { labelId: 'missing-item', ratio: 0.87, emptyChars: 0 },
-      reachKnown: false,
-      reachOk: true,
-      condition: { best: 'worn', usable: 1, note: '…' },
-    };
-    useEngravePreviewStore.setState({ preview: previewWith({}, [PICK, owned]), status: 'ready' });
+  it('names the rejected cutter by the one display form, never a diameter + a guessed kind', () => {
+    const broken = candidate({ key: 'flat-1.0', excluded: 'broken' });
+    useEngravePreviewStore.setState({ preview: previewWith({}, [PICK, broken]), status: 'ready' });
     render(<EngravePanel />);
 
-    const text = screen.getByTestId('engrave-candidate-inv:my-1mm').textContent ?? '';
-    expect(text).toContain('· worn');
-    expect(text).not.toContain('shop’s copies');
+    const row = screen.getByTestId('engrave-candidate-flat-1.0');
+    expect(row.textContent).toContain('⌀ 1 mm flat end');
+    expect(row.textContent).not.toContain('1.0 mm flat end');
+  });
+});
+
+// #687 — the recommendation is APPLIED and NAMED, in the one display form, with the metal fact as a
+// tag. A preview that resolved no cutter still says why, but has no name, tag or action to draw.
+describe('the recommendation’s name and tag (#687)', () => {
+  it('names the pick by the display form and tags a metal-line cutter, never by its vendor label', () => {
+    setInventoryEntries([
+      {
+        key: 'inv:metal-flat',
+        tool: flatEndMill(3.175, {
+          name: '3.175*12mm Flat End(Metal)',
+          fluteLength: 12,
+          shoulderLength: 12,
+        }),
+        provenance: 'engraveRecommendationNotes spec',
+      },
+    ]);
+    const preview = previewWith({}, [{ ...PICK, key: 'inv:metal-flat', diameter: 3.175 }]);
+    preview.recommendation = { ...preview.recommendation!, key: 'inv:metal-flat' };
+    useEngravePreviewStore.setState({ preview, status: 'ready' });
+    render(<EngravePanel />);
+
+    const box = screen.getByTestId('engrave-recommendation').textContent ?? '';
+    expect(box).toContain('⌀ 3.175 mm flat end · 12 mm flute');
+    expect(screen.getByTestId('engrave-recommendation-metal').textContent).toBe('metal');
+    expect(box).not.toContain('3.175*12mm Flat End(Metal)');
+    expect(box).not.toContain('3.17 mm');
+  });
+
+  it('shows the reason alone when no cutter resolved: no name, tag, Use it or Why?', () => {
+    const preview = previewWith({}, []);
+    preview.recommendation = { ...preview.recommendation!, key: null };
+    useEngravePreviewStore.setState({ preview, status: 'ready' });
+    render(<EngravePanel />);
+
+    const box = screen.getByTestId('engrave-recommendation');
+    expect(box.textContent).toContain('Largest cutter that keeps every item intact.');
+    expect(screen.queryByTestId('engrave-tool-recommended-tag')).toBeNull();
+    expect(screen.queryByTestId('engrave-recommendation-metal')).toBeNull();
+    expect(screen.queryByTestId('engrave-use-recommended')).toBeNull();
+    expect(box.querySelector('details')).toBeNull();
   });
 });

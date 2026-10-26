@@ -112,7 +112,7 @@ exports[`runSheet (#207) > snapshots the whole RunSheet for a job with a depth b
           "value": "100 × 60 × 12 mm softwood",
         },
         {
-          "text": "The cutter — 1 mm flat end.",
+          "text": "The cutter — ⌀ 1 mm flat end.",
           "value": "⌀ 1 mm cutting",
         },
         {
@@ -432,7 +432,7 @@ exports[`runSheet (#207) > snapshots the whole RunSheet for the default job 1`] 
           "value": "100 × 60 × 12 mm softwood",
         },
         {
-          "text": "The cutter — 1 mm flat end.",
+          "text": "The cutter — ⌀ 1 mm flat end.",
           "value": "⌀ 1 mm cutting",
         },
         {

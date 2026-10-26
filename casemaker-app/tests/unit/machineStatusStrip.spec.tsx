@@ -194,9 +194,11 @@ describe('#647 the DRO — the tool slot', () => {
   it('names the cutter the job runs with, and the hover carries T and the last M491', () => {
     remember('<Idle|MPos:-1,-1,-1|WPos:0,0,0|T:1>');
     render(<MachineStatusStrip />);
-    const name = jobTool(useEngraveJobStore.getState().job)!.name;
+    // #687 — the strip draws the one display form, not the registry record's raw label/name.
+    const name = toolDisplayName(jobTool(useEngraveJobStore.getState().job)!);
     const slot = screen.getByTestId('machine-status-tool');
     expect(slot.textContent).toBe(name);
+    expect(slot.textContent).toBe('⌀ 1 mm flat end');
     expect(slot.getAttribute('title')).toContain('T1');
     expect(slot.getAttribute('title')).toContain('M491 -72.529');
   });

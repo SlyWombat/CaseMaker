@@ -3,6 +3,7 @@ import { useState, type CSSProperties, type DragEvent, type JSX } from 'react';
 import { useSimSetupStore, buildSimSetup } from '@/store/simSetupStore';
 import { isSimSceneActive, useSimStore } from '@/store/simStore';
 import { resolveTool, Z1 } from '@/engine/cnc';
+import { toolDisplayName } from '@/engine/cnc/toolDisplay';
 import { useToolRegistry } from '@/hooks/useToolRegistry';
 import type { StartingTool } from '@/engine/cnc';
 import type { DiagnosticSource, SimDiagnostic } from '@/workers/sim/session';
@@ -182,14 +183,16 @@ export function SimPanel() {
    */
   const ownsSession = origin === 'panel' && gcodeText !== null && loadedProgram === gcodeText;
 
-  // #316 — how a row is named in the question and in the answer: the entry's own name, and the tier
-  // word every other screen gives it. A key the registry no longer holds falls back to the key
-  // itself, which is the honest thing to show and cannot happen for a candidate (`toolCandidates`
-  // come from this same list).
-  const describeCandidate = (key: string): DescribedCandidate => ({
-    name: tools.find((e) => e.key === key)?.tool.name ?? key,
-    tier: tierOf(key),
-  });
+  // #687 — a cutter is named by the one display form here too; a key the registry no longer holds
+  // falls back to the key itself, which is the honest thing to show and cannot happen for a
+  // candidate (`toolCandidates` come from this same list).
+  const describeCandidate = (key: string): DescribedCandidate => {
+    const entry = tools.find((e) => e.key === key);
+    return {
+      name: entry === undefined ? key : toolDisplayName(entry.tool),
+      tier: tierOf(key),
+    };
+  };
 
   // #243 — the blind-spot sentence, assembled from what this run actually carried: the fixture
   // obstacles it was given (#204), whether sacrificial material was modelled, and the "cannot be
@@ -384,7 +387,7 @@ export function SimPanel() {
         </option>
         {tools.map((e) => (
           <option key={e.key} value={e.key} title={e.provenance}>
-            {e.tool.name}
+            {toolDisplayName(e.tool)}
           </option>
         ))}
       </select>

@@ -1,4 +1,4 @@
-import type { CSSProperties, JSX } from 'react';
+import type { CSSProperties, JSX, ReactNode } from 'react';
 import { FontPicker, WeightPicker } from '@/components/panels/FontPicker';
 import { EngraveItemRow } from '@/components/panels/EngraveItemRow';
 import { RestCutterControl, type RestChoice } from '@/components/panels/RestCutterControl';
@@ -76,6 +76,8 @@ export interface EngraveLabelRowProps {
    * second opinion about which blank is in the vise and how far off its plane a floor has to stay. Omitted entirely by a caller with no job in hand (the row does not guess).
    */
   split?: LabelSplit | null;
+  /** #687 — the row's Technical fold (the V-carve geometry), when this item has any. */
+  technical?: ReactNode;
 }
 
 export function EngraveLabelRow({
@@ -89,6 +91,7 @@ export function EngraveLabelRow({
   customFonts = [],
   recommended,
   split = null,
+  technical = null,
 }: EngraveLabelRowProps): JSX.Element {
   const depthInvalid = label.depth > maxDepth;
   // #440 — the recommendation CAN be the ceiling, but only where something under the label asks
@@ -198,6 +201,7 @@ export function EngraveLabelRow({
       onToggleEnabled={(enabled) => onChange({ enabled })}
       onRemove={onRemove}
       restLabel={rest?.chip ?? null}
+      technical={technical}
     >
       {/* #350 — the text gets the line to itself. Sharing one with the font picker and the weight
           toggle collapsed it to a sliver: `flex: 1` gives the input a flex-basis of 0, so it is the

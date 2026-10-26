@@ -1,4 +1,4 @@
-import { useState, type CSSProperties, type JSX } from 'react';
+import { useState, type CSSProperties, type JSX, type ReactNode } from 'react';
 import { EngraveItemRow } from '@/components/panels/EngraveItemRow';
 import { RestCutterControl, type RestChoice } from '@/components/panels/RestCutterControl';
 import { itemOperationName } from '@/engine/cnc/engrave/partPlan';
@@ -131,6 +131,8 @@ export interface EngraveShapeRowProps {
    * and whether they derive at all.
    */
   prism?: PrismCheck | null;
+  /** #687 — the row's Technical fold (the V-carve geometry), when this item has any. */
+  technical?: ReactNode;
 }
 
 export function EngraveShapeRow({
@@ -145,6 +147,7 @@ export function EngraveShapeRow({
   inlay = null,
   texture = null,
   prism = null,
+  technical = null,
 }: EngraveShapeRowProps): JSX.Element {
   // #662 - the chip states what THIS cutter makes of a region.
   const region = useRegionOperationType();
@@ -240,6 +243,7 @@ export function EngraveShapeRow({
       onToggleEnabled={(enabled) => onChange({ enabled })}
       onRemove={onRemove}
       restLabel={rest?.chip ?? null}
+      technical={technical}
     >
       {/* The optional name lives in the editor rather than on the line: the line has no room for a
           text field beside the two controls and the summary, and a name nobody has set should read
