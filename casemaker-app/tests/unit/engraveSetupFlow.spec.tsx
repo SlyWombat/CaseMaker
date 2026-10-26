@@ -37,6 +37,7 @@ import { Z1 } from '@/engine/cnc/machine';
 import { MATERIAL_LABELS } from '@/engine/cnc/materials';
 import { parseEngraveJob } from '@/store/engraveJobSchema';
 import { presetJawStrips } from '@/engine/cnc/sacrificial';
+import { jobItemCount } from '@/engine/cnc/stockStart';
 import { validateJob } from '@/engine/cnc/engrave/jobSetup';
 import { validateVise } from '@/engine/cnc/fixture';
 
@@ -278,6 +279,36 @@ describe('guided job setup — the flow in the panel (#254, #681)', () => {
     expect(screen.getByTestId('engrave-setup-step-holding')).toBeDefined();
     // There is no second numbering anywhere in the modal.
     expect(screen.queryByTestId('engrave-setup-progress')).toBeNull();
+  });
+
+  it('a re-entry finishes at the step it came to edit: Done applies the edit and adds no item (#681)', () => {
+    // One item of the operator's own — the three shipped demo lines do not count as items.
+    const one = dj();
+    one.labels = [{ ...one.labels[0]!, text: 'A name' }];
+    act(() => {
+      useEngraveJobStore.setState({ job: one });
+    });
+    renderPanel();
+
+    fireEvent.click(screen.getByTestId('engrave-setup-open')); // openWizard('holding')
+    expect(screen.getByTestId('start-wizard-progress').textContent).toBe('Step 3 of 4 · Holding');
+
+    // The edited step's answer is applied as it is made; Done leaves without a walk to step 4, so
+    // no second item can be made by accident.
+    fireEvent.change(screen.getByTestId('engrave-setup-sacrificial'), { target: { value: 'strips' } });
+    fireEvent.click(screen.getByTestId('start-wizard-done'));
+    expect(screen.queryByTestId('start-wizard')).toBeNull();
+    expect(jobItemCount(useEngraveJobStore.getState().job)).toBe(1);
+    expect(useEngraveJobStore.getState().job.labels).toHaveLength(1);
+    expect(useEngraveJobStore.getState().job.sacrificial).toEqual(presetJawStrips());
+
+    // Walking on is still offered; at step 4 the button says what it would do to an existing job.
+    fireEvent.click(screen.getByTestId('engrave-setup-open'));
+    fireEvent.click(screen.getByTestId('engrave-setup-next'));
+    expect(screen.getByTestId('start-wizard-progress').textContent).toBe(
+      'Step 4 of 4 · What are you cutting?',
+    );
+    expect(screen.getByTestId('start-wizard-create').textContent).toBe('Add the operation');
   });
 
   it('lets the sacrificial and material answers through to the job', async () => {

@@ -51,3 +51,13 @@ export function previousWizardStep(id: WizardStepId): WizardStepId | null {
 export function wizardStepLine(id: WizardStepId): string {
   return `Step ${wizardStepNumber(id)} of ${WIZARD_STEP_COUNT} · ${wizardStep(id).name}`;
 }
+
+/**
+ * The label of the button that LEAVES `id` on this run.
+ *
+ * A run that began as a re-entry is editing a job that already exists, so walking on to step 4
+ * ADDS an operation to it; only a run that started at step 1 creates a job (#681 follow-up).
+ */
+export function wizardNextLabel(id: WizardStepId, reEntry: boolean): string {
+  return id === 'operation' && reEntry ? 'Add the operation' : wizardStep(id).nextLabel;
+}

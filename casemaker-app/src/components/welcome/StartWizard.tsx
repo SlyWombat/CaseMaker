@@ -26,7 +26,7 @@ import { defaultSetupAnswers, type SetupAnswers } from '@/engine/cnc/engrave/set
 import { facingSeed, facingShopFrom, jobItemCount } from '@/engine/cnc/stockStart';
 import { useShopDefaultsStore } from '@/store/shopDefaultsStore';
 import '@/store/stockEntryFollow';
-import { previousWizardStep, wizardStep, wizardStepLine, type WizardStepId } from './wizardSteps';
+import { previousWizardStep, wizardNextLabel, wizardStep, wizardStepLine, type WizardStepId } from './wizardSteps';
 import { MachineStep } from './MachineStep';
 import { StockStep } from './StockStep';
 import { HoldingStep } from './HoldingStep';
@@ -209,6 +209,10 @@ export function StartWizard(): JSX.Element {
   // Re-entry is an EDIT: it opens on an existing job and must not reset it. A new job becomes an
   // edit the moment step 2 creates it, so Back to Stock asks about the stock the job now has.
   const [jobStarted, setJobStarted] = useState(initialStep !== 'machine');
+  // HOW this run was opened, captured at mount: a run that did not start at step 1 was opened by
+  // the panel's Stock/Hold `edit` on an existing job, so it finishes at the step it came to edit.
+  // `jobStarted` cannot answer this later — a new job turns it true when step 2 creates the project.
+  const [reEntry] = useState(initialStep !== 'machine');
   // Whether THIS run made the project. Step 2 after a Back must keep the drawn part equal to the
   // stock it wrote; a panel re-entry edits a job beside a project someone else owns.
   const [projectCreatedHere, setProjectCreatedHere] = useState(false);
@@ -229,6 +233,12 @@ export function StartWizard(): JSX.Element {
   const machineChoice = jobMachineOption(job.machineId);
   const hasOperations = jobHasOperations(job);
   const seed = jobStarted ? seedFromJob(job) : undefined;
+  // The step this re-entry came to edit: its primary action is Done, not the next step. While a
+  // stock replacement is being confirmed, the confirmation owns the footer.
+  const doneStep =
+    reEntry &&
+    step === initialStep &&
+    (step === 'holding' || (step === 'stock' && confirmReplace === null));
 
   // `probeMachine` resolves every failure into one of its four outcomes, so there is nothing to
   // catch here: a thrown probe would be a bug in the probe, not an error to swallow.
@@ -391,8 +401,10 @@ export function StartWizard(): JSX.Element {
    * Everything else writes through `setStock`, so the vise's proud height follows (#344), and names
    * the entry and facing the job now has without touching the project or the undo history.
    */
-  async function editStock(p: PendingStock): Promise<void> {
+  async function editStock(p: PendingStock, closeAfter: boolean): Promise<void> {
     if (p.kind === 'design') {
+      // A design file is a new job, not an edit: it brings its own stock and items and still walks
+      // through Holding, even when Done asked for this step alone.
       await startFromStock(p);
       return;
     }
@@ -402,7 +414,8 @@ export function StartWizard(): JSX.Element {
       // Passing THROUGH the step is not an edit: only a changed answer is written.
       const current = useEngraveJobStore.getState().job;
       if (sameStockChoice(p, current)) {
-        enterHolding();
+        if (closeAfter) closeWizard();
+        else enterHolding();
         return;
       }
       if (p.saveToShelf !== null) {
@@ -438,13 +451,14 @@ export function StartWizard(): JSX.Element {
         facingShopFrom(useShopDefaultsStore.getState().defaults),
       );
       store.replace({ ...after, stockEntry: p.choice.entry, facing });
-      enterHolding();
+      if (closeAfter) closeWizard();
+      else enterHolding();
     } finally {
       setStarting(false);
     }
   }
 
-  function applyStock(p: PendingStock): void {
+  function applyStock(p: PendingStock, closeAfter = false): void {
     if (!jobStarted) {
       void startFromStock(p);
       return;
@@ -452,14 +466,16 @@ export function StartWizard(): JSX.Element {
     // This run made the project, so the part is the stock: a changed answer starts a new job from
     // it (and resizes the drawn blank) rather than editing the document under an old-sized part.
     if (projectCreatedHere) {
-      if (sameStockChoice(p, useEngraveJobStore.getState().job)) enterHolding();
-      else void startFromStock(p);
+      if (sameStockChoice(p, useEngraveJobStore.getState().job)) {
+        if (closeAfter) closeWizard();
+        else enterHolding();
+      } else void startFromStock(p);
       return;
     }
-    void editStock(p);
+    void editStock(p, closeAfter);
   }
 
-  function leaveStock(): void {
+  function leaveStock(closeAfter = false): void {
     if (pending === null) return;
     const current = useEngraveJobStore.getState().job;
     // #418 review — starting from stock replaces the job open now, so a job with items is asked
@@ -476,7 +492,20 @@ export function StartWizard(): JSX.Element {
         return;
       }
     }
-    applyStock(pending);
+    applyStock(pending, closeAfter);
+  }
+
+  /**
+   * A re-entry's primary action (#681 follow-up): apply the edited step and return to Design,
+   * creating no item. Holding writes as it changes, so it has nothing left to collect; the stock
+   * step applies through `leaveStock`, and a design FILE still walks through Holding as a new job.
+   */
+  function done(): void {
+    if (step === 'stock') {
+      leaveStock(true);
+      return;
+    }
+    if (step === 'holding') closeWizard();
   }
 
   /** Step 4's Create: make the operation, open its row and land in Design. */
@@ -665,21 +694,21 @@ export function StartWizard(): JSX.Element {
             <button
               type="button"
               data-testid="start-wizard-stock-next"
-              style={{ padding: '3px 12px' }}
+              style={doneStep ? undefined : { padding: '3px 12px' }}
               disabled={pending === null || starting}
               onClick={next}
             >
-              {starting ? 'Starting…' : wizardStep('stock').nextLabel}
+              {starting ? 'Starting…' : wizardNextLabel('stock', reEntry)}
             </button>
           )}
           {step === 'holding' && (
             <button
               type="button"
               data-testid="engrave-setup-next"
-              style={{ padding: '3px 12px' }}
+              style={doneStep ? undefined : { padding: '3px 12px' }}
               onClick={next}
             >
-              {wizardStep('holding').nextLabel}
+              {wizardNextLabel('holding', reEntry)}
             </button>
           )}
           {step === 'operation' && (
@@ -690,7 +719,20 @@ export function StartWizard(): JSX.Element {
               disabled={operationCreateBlocked(operationChoice) !== null || (operationChoice === null && !hasOperations)}
               onClick={next}
             >
-              {wizardStep('operation').nextLabel}
+              {wizardNextLabel('operation', reEntry)}
+            </button>
+          )}
+          {doneStep && (
+            // The edited step's primary action on a re-entry: finish here, so walking to step 4 is
+            // a choice rather than the price of closing the wizard (#681 follow-up).
+            <button
+              type="button"
+              data-testid="start-wizard-done"
+              style={{ padding: '3px 12px' }}
+              disabled={step === 'stock' && (pending === null || starting)}
+              onClick={done}
+            >
+              Done
             </button>
           )}
         </div>
