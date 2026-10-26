@@ -7,7 +7,7 @@ import { DEFAULT_JAW_CLEARANCE_MM } from '@/engine/cnc/engrave/depthBounds';
 import { FACING_DEPTH_MAX_MM } from '@/engine/cnc/stockStart';
 import { MAX_OUTLINE_CONTOURS, MAX_OUTLINE_POINTS } from '@/engine/import/outlineTypes';
 import { FACES, type Face } from '@/engine/cnc/setups/types';
-import type { EngraveJob } from '@/types/engraveJob';
+import { MAX_LINE_POINTS, type EngraveJob } from '@/types/engraveJob';
 import { newId } from '@/utils/id';
 
 /**
@@ -384,8 +384,8 @@ const traceKindsSchema = z.discriminatedUnion('kind', [
     points: z
       .array(polygonPointSchema)
       .min(2)
-      .max(5000)
-      .describe('Polyline vertices relative to position, in millimetres; 2–5000 points.'),
+      .max(MAX_LINE_POINTS)
+      .describe(`Polyline vertices relative to position, in millimetres; 2–${MAX_LINE_POINTS} points.`),
     closed: z
       .boolean()
       .describe('True closes the polyline back to its first point (needs at least three points).'),

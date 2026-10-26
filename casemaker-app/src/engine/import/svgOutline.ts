@@ -542,9 +542,12 @@ function parsePointsAttr(value: string | null): Vec2[] {
 
 interface Collector {
   collected: { points: Vec2[]; rule: 'NonZero' | 'EvenOdd' }[];
+  /** #664 — open polylines (SVG user units, element transforms applied), imported as lines. */
+  open: Vec2[][];
   rules: Set<'NonZero' | 'EvenOdd'>;
   notes: string[];
   strokes: number;
+  /** Open subpaths SKIPPED because their shape is filled (SVG closes those to fill them). */
   openPaths: number;
   sawCss: boolean;
 }
@@ -553,19 +556,23 @@ function fillRuleOf(value: string | undefined): 'NonZero' | 'EvenOdd' {
   return value?.toLowerCase() === 'evenodd' ? 'EvenOdd' : 'NonZero';
 }
 
-function shapeRings(el: Element, node: string, tol: number, notes: string[]): Vec2[][] {
+function shapeRings(
+  el: Element,
+  node: string,
+  tol: number,
+): { rings: Vec2[][]; open: Vec2[][] } {
   switch (node) {
     case 'rect': {
       const x = num(el, 'x');
       const y = num(el, 'y');
       const w = num(el, 'width');
       const h = num(el, 'height');
-      if (!(w > 0) || !(h > 0)) return [];
+      if (!(w > 0) || !(h > 0)) return { rings: [], open: [] };
       const rxRaw = el.getAttribute('rx');
       const ryRaw = el.getAttribute('ry');
       const rx = Math.min(rxRaw !== null ? num(el, 'rx') : ryRaw !== null ? num(el, 'ry') : 0, w / 2);
       const ry = Math.min(ryRaw !== null ? num(el, 'ry') : rxRaw !== null ? num(el, 'rx') : 0, h / 2);
-      if (!(rx > 0) && !(ry > 0)) return [[[x, y], [x + w, y], [x + w, y + h], [x, y + h]]];
+      if (!(rx > 0) && !(ry > 0)) return { rings: [[[x, y], [x + w, y], [x + w, y + h], [x, y + h]]], open: [] };
       const n = Math.max(2, Math.ceil(segmentsForRadius(Math.max(rx, ry), tol) / 4));
       const ring: Vec2[] = [
         [x + rx, y],
@@ -578,41 +585,44 @@ function shapeRings(el: Element, node: string, tol: number, notes: string[]): Ve
         [x, y + ry],
         ...ellipseArcPoints(x + rx, y + ry, rx, ry, Math.PI, (3 * Math.PI) / 2, n),
       ];
-      return [ring];
+      return { rings: [ring], open: [] };
     }
     case 'circle': {
       const cx = num(el, 'cx');
       const cy = num(el, 'cy');
       const r = num(el, 'r');
-      if (!(r > 0)) return [];
-      return [circlePoints(cx, cy, r, r, segmentsForRadius(r, tol))];
+      if (!(r > 0)) return { rings: [], open: [] };
+      return { rings: [circlePoints(cx, cy, r, r, segmentsForRadius(r, tol))], open: [] };
     }
     case 'ellipse': {
       const cx = num(el, 'cx');
       const cy = num(el, 'cy');
       const rx = num(el, 'rx');
       const ry = num(el, 'ry');
-      if (!(rx > 0) || !(ry > 0)) return [];
-      return [circlePoints(cx, cy, rx, ry, segmentsForRadius(Math.max(rx, ry), tol))];
+      if (!(rx > 0) || !(ry > 0)) return { rings: [], open: [] };
+      return { rings: [circlePoints(cx, cy, rx, ry, segmentsForRadius(Math.max(rx, ry), tol))], open: [] };
     }
     case 'polygon': {
       const pts = parsePointsAttr(el.getAttribute('points'));
-      return pts.length >= 3 ? [pts] : [];
+      return { rings: pts.length >= 3 ? [pts] : [], open: [] };
     }
     case 'path': {
       const subs = parseSvgPath(el.getAttribute('d') ?? '', tol);
       const rings: Vec2[][] = [];
+      const open: Vec2[][] = [];
       for (const sub of subs) {
-        if (!sub.closed) {
-          notes.push('Skipped an open subpath: only closed, filled shapes import.');
-          continue;
+        if (sub.closed) {
+          if (sub.points.length >= 3) rings.push(sub.points);
+        } else if (sub.points.length >= 2) {
+          // #664 — an open subpath is the drawing's stroke, not a region; the caller decides
+          // whether the element is stroke-only (import as a line) or filled (skipped, named).
+          open.push(sub.points);
         }
-        if (sub.points.length >= 3) rings.push(sub.points);
       }
-      return rings;
+      return { rings, open };
     }
     default:
-      return [];
+      return { rings: [], open: [] };
   }
 }
 
@@ -673,8 +683,20 @@ function walk(el: Element, parentM: Mat, view: ViewTransform, inherited: {
   }
 
   if (node === 'polyline' || node === 'line') {
-    c.openPaths++;
-    c.notes.push('Skipped an open path (<polyline>/<line>): only closed, filled shapes import.');
+    // #664 — a polyline/line IS a stroke: import it as a line at its transformed points. Clipped
+    // or masked content stays out, exactly as for a shape.
+    if (hasClipOrMask(el, style)) {
+      c.notes.push('Skipped a clipped or masked shape: clipping and masks are not supported.');
+      return;
+    }
+    const pts =
+      node === 'polyline'
+        ? parsePointsAttr(el.getAttribute('points'))
+        : [
+            [num(el, 'x1'), num(el, 'y1')] as Vec2,
+            [num(el, 'x2'), num(el, 'y2')] as Vec2,
+          ];
+    if (pts.length >= 2) c.open.push(pts.map((p) => applyMat(localM, p)));
     return;
   }
 
@@ -687,10 +709,23 @@ function walk(el: Element, parentM: Mat, view: ViewTransform, inherited: {
   }
 
   const effectiveFill = fill === undefined ? '#000000' : fill;
-  if (effectiveFill === 'none') {
-    if (stroke !== undefined && stroke !== 'none') {
+  const strokeOnly = effectiveFill === 'none' && stroke !== undefined && stroke !== 'none';
+  if (effectiveFill === 'none' && !strokeOnly) return;
+
+  // Chord tolerance in the shape's LOCAL units, so a later `scale()` transform does not inflate
+  // the error past GLYPH_CHORD_TOLERANCE_MM in the finished outline.
+  const localScale = view.scale * matScale(localM);
+  const tol = localScale > 0 ? GLYPH_CHORD_TOLERANCE_MM / localScale : GLYPH_CHORD_TOLERANCE_MM;
+
+  const { rings, open } = shapeRings(el, node, tol);
+  if (strokeOnly) {
+    // #664 — a stroke-only shape's OPEN subpaths are the drawing's strokes: they import as lines
+    // (the trace feature, wired). Its closed subpaths still need a fill to be a region; they are
+    // named rather than dropped silently.
+    for (const sub of open) c.open.push(sub.map((p) => applyMat(localM, p)));
+    if (rings.length > 0) {
       c.strokes++;
-      c.notes.push('Skipped a stroke without fill: a stroked line has no area (that is the trace feature).');
+      c.notes.push('Skipped a stroked closed shape: fill it to import the region, or draw it as a Line trace.');
     }
     return;
   }
@@ -698,16 +733,17 @@ function walk(el: Element, parentM: Mat, view: ViewTransform, inherited: {
     c.notes.push('Fill is a gradient or pattern; the outline is cut, the colour is not.');
   }
 
-  // Chord tolerance in the shape's LOCAL units, so a later `scale()` transform does not inflate
-  // the error past GLYPH_CHORD_TOLERANCE_MM in the finished outline.
-  const localScale = view.scale * matScale(localM);
-  const tol = localScale > 0 ? GLYPH_CHORD_TOLERANCE_MM / localScale : GLYPH_CHORD_TOLERANCE_MM;
-
   const rule = fillRuleOf(fillRule);
-  for (const ring of shapeRings(el, node, tol, c.notes)) {
+  for (const ring of rings) {
     const placed = ring.map((p) => applyMat(localM, p));
     c.collected.push({ points: placed, rule });
     c.rules.add(rule);
+  }
+  if (open.length > 0) {
+    // SVG closes an open subpath to FILL it; this importer does not model that fill, so the
+    // subpath is named. Stroke-only artwork (the common case) imports as lines above.
+    c.openPaths += open.length;
+    c.notes.push('Skipped an open subpath of a filled shape: remove the fill to import it as a line.');
   }
 }
 
@@ -736,7 +772,7 @@ export function parseSvgOutline(text: string, sourceName = 'outline.svg'): Outli
 
   const notes: string[] = [];
   const view = resolveViewTransform(root, notes);
-  const c: Collector = { collected: [], rules: new Set(), notes, strokes: 0, openPaths: 0, sawCss: false };
+  const c: Collector = { collected: [], open: [], rules: new Set(), notes, strokes: 0, openPaths: 0, sawCss: false };
   walk(root, IDENTITY, view, {}, c);
 
   if (c.sawCss) {
@@ -754,6 +790,14 @@ export function parseSvgOutline(text: string, sourceName = 'outline.svg'): Outli
     c.notes.push('Shapes use mixed fill rules; the outline is read as NonZero.');
   }
 
+  // #664 — the open polylines in the job's frame: SVG user units → mm, Y flipped, centred with
+  // the contours by `finalizeOutline`.
+  const paths: [Mm, Mm][][] = c.open
+    .filter((line) => line.length >= 2)
+    .map((line) => line.map(([x, y]): [Mm, Mm] => [(x - view.originX) * view.scale, -(y - view.originY) * view.scale]));
   const deduped = [...new Set(c.notes)];
-  return finalizeOutline({ format: 'svg', sourceName, contours, fillRule, notes: deduped });
+  if (paths.length > 0) {
+    deduped.push(`${paths.length} open path${paths.length === 1 ? '' : 's'} imported as line${paths.length === 1 ? '' : 's'}.`);
+  }
+  return finalizeOutline({ format: 'svg', sourceName, contours, paths, fillRule, notes: deduped });
 }

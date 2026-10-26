@@ -79,13 +79,14 @@ import {
   TRACE_DEFAULTS,
   importOutlineFromDisk,
   importRasterFromDisk,
+  toLineTraces,
   toVectorShape,
   traceRaster,
   type OutlineImport,
   type RasterImage,
   type TraceOptions,
 } from '@/engine/import/outlineImport';
-import { newEngraveShapeId } from '@/engine/cnc/engrave/defaults';
+import { newEngraveShapeId, newEngraveTraceId } from '@/engine/cnc/engrave/defaults';
 import { badgeBlankFor } from '@/engine/cnc/engrave/fromBadge';
 import {
   FACING_DEPTH_MAX_MM,
@@ -707,6 +708,7 @@ export function EngravePanel(): JSX.Element {
   const takeBlankStock = useEngraveJobStore((s) => s.takeBlankStock);
   const takeDesign = useEngraveJobStore((s) => s.takeDesign);
   const addVector = useEngraveJobStore((s) => s.addVector);
+  const addLine = useEngraveJobStore((s) => s.addLine);
   const updateVector = useEngraveJobStore((s) => s.updateVector);
   const removeVector = useEngraveJobStore((s) => s.removeVector);
   const setTool = useEngraveJobStore((s) => s.setTool);
@@ -1637,23 +1639,42 @@ export function EngravePanel(): JSX.Element {
     }
   }
 
-  /** The dialog's accepted (possibly rescaled) outline becomes a job item centred on the stock. */
+  /**
+   * The dialog's accepted (possibly rescaled) outline becomes job items centred on the stock: the
+   * closed shapes as one vector region, and #664 every OPEN path as an Engrave (line) operation.
+   * The paths share the import's centred frame, so the same position/rotation keeps a file's
+   * strokes on its fills. A lines-only file is one or more rows and no shape.
+   */
   function acceptOutline(outline: OutlineImport): void {
+    const position = { x: job.stock.length / 2, y: job.stock.width / 2 };
+    // #451/#492 — the same starting depth the store's own "Add…" entries use, read from the one
+    // stock-aware reader so an imported outline and a drawn shape cannot begin at different
+    // numbers, and a laminate's field arrives at its cap + margin.
+    const depth = newItemDepthFor(job);
+    let firstId: string | null =
+      outline.contours.length > 0
+        ? addVector(
+            toVectorShape(outline, {
+              id: newEngraveShapeId(),
+              position,
+              depth,
+              name: outline.sourceName,
+            }),
+          )
+        : null;
+    const lines = toLineTraces(outline, {
+      idFor: () => newEngraveTraceId(),
+      position,
+      depth,
+      name: outline.sourceName,
+    });
+    for (const line of lines) {
+      addLine(line);
+      firstId ??= line.id;
+    }
     // #411 — like every other add, it arrives open: an imported outline's placement and depth are
-    // exactly what the import dialog could not settle.
-    expandEngraveRow(
-      addVector(
-        toVectorShape(outline, {
-          id: newEngraveShapeId(),
-          position: { x: job.stock.length / 2, y: job.stock.width / 2 },
-          // #451/#492 — the same starting depth the store's own "Add…" entries use, read from the
-          // one stock-aware reader so an imported outline and a drawn shape cannot begin at
-          // different numbers, and a laminate's field arrives at its cap + margin.
-          depth: newItemDepthFor(job),
-          name: outline.sourceName,
-        }),
-      ),
-    );
+    // exactly what the import dialog could not settle. Several imported lines open the first only.
+    if (firstId !== null) expandEngraveRow(firstId);
     closeImport();
   }
 
@@ -2456,10 +2477,10 @@ export function EngravePanel(): JSX.Element {
             type="button"
             data-testid="engrave-add-import-outline"
             disabled={importing}
-            title="Import a closed, filled SVG or DXF outline as a pocket. Strokes, text and images are reported, not dropped."
+            title="Import an SVG or DXF drawing: its closed, filled shapes become a pocket, and its open paths become Engrave (line) operations. Text and images are reported, not dropped."
             onClick={() => void importOutline()}
           >
-            {importing ? 'Reading…' : 'Import outline…'}
+            {importing ? 'Reading…' : 'Import outline or lines…'}
           </button>
           <button
             type="button"

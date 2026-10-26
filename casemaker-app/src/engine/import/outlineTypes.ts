@@ -25,6 +25,12 @@ export interface OutlineImport {
   sourceName: string;
   /** Rings in mm, bounding-box centre at the origin — the item's contour frame. */
   contours: [Mm, Mm][][];
+  /**
+   * #664 — OPEN polylines in the SAME centred frame as `contours`: the drawing's strokes, which
+   * the trace engine cuts as `line` items. Optional (absent reads as none), so every older caller
+   * and fixture is unchanged and a closed-only file imports byte-identically.
+   */
+  paths?: [Mm, Mm][][];
   /** How to read the rings' winding. */
   fillRule: OutlineFillRule;
   /** Size from the source's own units/geometry, mm. The panel shows and can rescale it. */
@@ -50,11 +56,17 @@ export const MAX_OUTLINE_FILE_BYTES = 6 * 1024 * 1024;
 export const MAX_OUTLINE_CONTOURS = 2000;
 
 /**
- * Cap on total points across an imported outline's contours (#217). A complex logo flattens to
- * tens of thousands; 200 000 is the issue's refusal threshold, a parser/memory guard, not a
- * physical limit.
+ * Cap on total points across an imported outline's contours AND open paths (#217, #664). A
+ * complex logo flattens to tens of thousands; 200 000 is the issue's refusal threshold, a
+ * parser/memory guard, not a physical limit.
  */
 export const MAX_OUTLINE_POINTS = 200000;
+
+/**
+ * #664 — cap on OPEN polylines in one file. Each becomes one job item, and a file of thousands
+ * of tiny strokes is not a drawing anyone can run; the refusal names the limit.
+ */
+export const MAX_OUTLINE_PATHS = 2000;
 
 /** Total points across every ring. */
 export function countOutlinePoints(contours: readonly (readonly [Mm, Mm][])[]): number {
@@ -100,11 +112,14 @@ export function recentreOutline(contours: readonly (readonly [Mm, Mm][])[]): [Mm
 export function scaleOutlineToWidth(outline: OutlineImport, targetWidthMm: Mm): OutlineImport {
   if (!(targetWidthMm > 0) || !(outline.width > 0)) return outline;
   const factor = targetWidthMm / outline.width;
+  const scaleRing = (ring: readonly [Mm, Mm][]): [Mm, Mm][] =>
+    ring.map(([x, y]): [Mm, Mm] => [x * factor, y * factor]);
   return {
     ...outline,
-    contours: outline.contours.map((ring) =>
-      ring.map(([x, y]): [Mm, Mm] => [x * factor, y * factor]),
-    ),
+    contours: outline.contours.map(scaleRing),
+    // #664 — the open paths follow the same scale, so a resized import keeps its strokes on the
+    // drawing they were drawn with.
+    ...(outline.paths === undefined ? {} : { paths: outline.paths.map(scaleRing) }),
     width: targetWidthMm,
     height: outline.height * factor,
   };
@@ -120,31 +135,47 @@ export function finalizeOutline(args: {
   format: OutlineFormat;
   sourceName: string;
   contours: [Mm, Mm][][];
+  /** #664 — open polylines in the source frame; centred WITH the contours so they stay aligned. */
+  paths?: [Mm, Mm][][];
   fillRule: OutlineFillRule;
   notes: string[];
 }): OutlineParseResult {
   const { format, sourceName, contours, fillRule, notes } = args;
+  const paths = (args.paths ?? []).filter((path) => path.length >= 2);
   if (contours.length > MAX_OUTLINE_CONTOURS) {
     return {
       ok: false,
       error: `The outline has ${contours.length} contours; the limit is ${MAX_OUTLINE_CONTOURS}.`,
     };
   }
-  const points = countOutlinePoints(contours);
+  if (paths.length > MAX_OUTLINE_PATHS) {
+    return {
+      ok: false,
+      error: `The file has ${paths.length} open paths; the limit is ${MAX_OUTLINE_PATHS}.`,
+    };
+  }
+  const points = countOutlinePoints(contours) + countOutlinePoints(paths);
   if (points > MAX_OUTLINE_POINTS) {
     return {
       ok: false,
       error: `The outline has ${points} points; the limit is ${MAX_OUTLINE_POINTS}.`,
     };
   }
-  const centred = recentreOutline(contours);
-  const b = outlineBounds(centred);
+  // #664 — ONE FRAME: when a file has both fills and strokes, they are centred together and the
+  // size is the union's, so the lines stay on the drawing they belong to. A file with no open
+  // paths takes exactly the pre-#664 path (same centring, same size).
+  const all = [...contours, ...paths];
+  const centredAll = recentreOutline(all);
+  const centred = centredAll.slice(0, contours.length);
+  const centredPaths = centredAll.slice(contours.length);
+  const b = outlineBounds(centredAll);
   return {
     ok: true,
     outline: {
       format,
       sourceName,
       contours: centred,
+      ...(centredPaths.length > 0 ? { paths: centredPaths } : {}),
       fillRule,
       width: b ? b.max[0] - b.min[0] : 0,
       height: b ? b.max[1] - b.min[1] : 0,

@@ -5,7 +5,7 @@ import { rowSummary } from '@/components/panels/engraveRowText';
 import { STROKE_FONTS } from '@/engine/fonts/stroke/strokeFont';
 import type { JobFinding } from '@/engine/cnc/engrave/jobSetup';
 import type { TracePatch } from '@/store/engraveJobStore';
-import type { EngraveTraceItem } from '@/types/engraveJob';
+import { MAX_LINE_POINTS, type EngraveTraceItem } from '@/types/engraveJob';
 import type { Mm } from '@/types/units';
 
 /**
@@ -37,8 +37,8 @@ const POINTS: CSSProperties = {
 
 const SEVERITY_COLOR: Record<JobFinding['severity'], string> = { error: '#f0b4ad', warning: '#e0c07a', info: '#7fa6c9' };
 
-/** The schema's caps, mirrored here so the editor commits only a loadable path (#219). */
-const MAX_POINTS = 5000;
+/** The schema's cap, ONE definition (#664): the editor commits only a loadable path (#219). */
+const MAX_POINTS = MAX_LINE_POINTS;
 
 /**
  * The schema's #409 bounds, mirrored for the same reason: the editor commits only a stroke label

@@ -213,17 +213,28 @@ describe('parseDxfOutline (#217): units', () => {
 });
 
 describe('parseDxfOutline (#217): out-of-scope content is reported', () => {
-  it('an open LINE chain is reported and dropped', () => {
+  it('#664 — an open LINE chain imports as one line, joined end to end', () => {
     const entities = [...line(0, 0, 10, 0), ...line(10, 0, 10, 10), ...line(10, 10, 0, 10)];
     const r = ok(parseDxfOutline(dxf(entities, 4)));
     expect(r.contours).toEqual([]);
-    expect(r.notes.some((n) => /open LINE\/ARC chain/i.test(n))).toBe(true);
+    // One joined polyline through the four corners; centred, so the L's bbox centre is the origin.
+    expect(r.paths).toHaveLength(1);
+    expect(r.paths![0]).toHaveLength(4);
+    expect(r.notes.some((n) => /open path.*imported as line/i.test(n))).toBe(true);
   });
 
-  it('an open LWPOLYLINE is reported and dropped', () => {
+  it('#664 — an open LWPOLYLINE imports as a line with its own vertices', () => {
     const r = ok(parseDxfOutline(dxf(lwPolyline(square, false), 4)));
     expect(r.contours).toEqual([]);
-    expect(r.notes.some((n) => /open LWPOLYLINE/i.test(n))).toBe(true);
+    expect(r.paths).toHaveLength(1);
+    expect(r.paths![0]).toHaveLength(square.length);
+    expect(r.notes.some((n) => /open path.*imported as line/i.test(n))).toBe(true);
+  });
+
+  it('#664 — an open LWPOLYLINE keeps its bulges as arc points', () => {
+    const r = ok(parseDxfOutline(dxf(lwPolyline(square, false, [0, 1, 0, 0]), 4)));
+    expect(r.contours).toEqual([]);
+    expect(r.paths![0]!.length).toBeGreaterThan(square.length);
   });
 
   it('an unsupported entity type is named', () => {

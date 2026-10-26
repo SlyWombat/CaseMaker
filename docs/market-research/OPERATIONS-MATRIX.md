@@ -1,6 +1,6 @@
 # Operations matrix — CAM operation types across the category, and what Case Maker posts and offers
 
-Status as of 2026-10-25, Case Maker `main` 5700e6a0 (GitHub issue #663). Companion to
+Status as of 2026-10-25, Case Maker `main` 7bac458d (GitHub issue #663). Companion to
 `MAKERA-VS-CASEMAKER.md` (§G "CAM & output") and `/Makera-Parity.md` §2 (the 14 Studio strategy types).
 
 The maintainer's words: "operation palettes we need to track and make sure that we offer the same
@@ -28,7 +28,7 @@ Manufacture (personal tier), **ES** Easel, **BT** Bantam Tools Desktop CNC (Bant
 
 | Operation | CC | VC | FU | ES | BT | KM | LB | MK | LU | CM-E (engine) | CM-UI |
 |---|---|---|---|---|---|---|---|---|---|---|---|
-| 2D contour / profile (inside, outside, on the line) | Contour (inside/outside) [CC1] | 2D Production Profiling [VC1] | 2D Contour [FU9]† | Outline: on path / inside / outside [ES1][ES3]† | not established | Outline (internal or external edges); Trace (on/inside/outside) [KM1] | Line [LB1] | 2D Contour (type 1) [MK1] | Vector: Path / Outline [SM1]† | PARTIAL: `cutout` outside/inside of an item or the blank, plus `inset` (`cam/profile.ts`); on the line only as a `line` trace on authored polylines (`cam/trace.ts`) | YES: `EngraveCutoutRow.tsx`, cut-outs menu in `EngravePanel.tsx` |
+| 2D contour / profile (inside, outside, on the line) | Contour (inside/outside) [CC1] | 2D Production Profiling [VC1] | 2D Contour [FU9]† | Outline: on path / inside / outside [ES1][ES3]† | not established | Outline (internal or external edges); Trace (on/inside/outside) [KM1] | Line [LB1] | 2D Contour (type 1) [MK1] | Vector: Path / Outline [SM1]† | YES: `cutout` outside/inside of an item or the blank, plus `inset` (`cam/profile.ts`); on the line as a `line` trace, authored or imported — a file's open paths and open polylines import as Engrave (line) operations (`engine/import/svgOutline.ts`, `dxfOutline.ts`, `cam/trace.ts`, #664) | YES: `EngraveCutoutRow.tsx`, cut-outs menu, and “Import outline or lines…” adds one line row per open path (`EngravePanel.tsx`, #664) |
 | Holding tabs / through cut | "3D tabs" under profiling noted, not a toolpath [VC1]; CC not established | 3D tabs (under profiling) [VC1] | not established | not established | not established | tabs: forum mention only [KM1]† | Tabs/Bridges on Line [LB2] | `supportTabs…` fields [MK2] | Vector tabs [SM1]† | YES: `cutout.tabs` count/width/height, tab = vertical retract (`cam/profile.ts`, `cam/tabSettings.ts`) | YES: tab count/width/height in `EngraveCutoutRow.tsx` |
 | Pocket (with islands) | Pocket toolpath [CC1] | Fast and Efficient Pocketing [VC1] | 2D Pocket†, 2D Adaptive Clearing [FU1] | Fill [ES1]† | rectangular pocket [BT1]† | Pocket; Trace "clear" type [KM1] | Fill; Offset Fill [LB1] | 2D Pocket (type 0) [MK1] | Vector: Fill [SM1]† | YES: contour-parallel pocket (`cam/pocket.ts`); rect/circle/slot/polygon, `vectors`, `combined` border/frame/cutaway; islands via `cutaway.islands` (`types/engraveJob.ts` ~590) | YES: Add menu shapes, Border/Frame/Cut-away, Import outline (SVG/DXF), Trace image (`EngravePanel.tsx`, `EngraveCombinedRow.tsx`) |
 | Slot | not established | not established | Slot† [FU11] | not established | not established | not established | — | not established | not established | PARTIAL: slot-shaped pocket (`EngraveSlotShape`); a cutter-width slotting pass is a `line` trace | YES: "Slot" in the Add menu (`EngravePanel.tsx` `ADD_KINDS`) |
@@ -88,10 +88,12 @@ pockets only), R-14 thread milling (superseded, shipped #445). None of the items
 
 - **B1. Rotary / 4th-axis wrap.** VC, MK, LB, LU, BT (†) — five. Demand: `/Rotary.md` design, #545 (engine), #239;
   Makera ships only axis-crossing relief, so wrap is the open gap.
-- **B2. Open-path profile / trace from imported vectors.** ES (on path), KM (Trace), LU (Path), LB (Line), VC (profile). The SVG
-  importer drops open paths and polylines (`engine/import/svgOutline.ts:675-677`, "only closed, filled shapes import"),
-  though the trace engine already cuts polylines (`cam/trace.ts`). Demand: the DMX-label and badge-style jobs trace
-  artwork as lines; no issue cited.
+- **B2. Open-path profile / trace from imported vectors. — CLOSED by #664.** The SVG and DXF importers now return a
+  file's open paths and polylines as `OutlineImport.paths` (stroke-only open subpaths, `<polyline>`/`<line>`, open
+  `LWPOLYLINE`s, unclosed `LINE`/`ARC` chains), and the dialog accepts a lines-only drawing; accepting adds one
+  Engrave (line) row per path at the drawing's own scale and position, cut by the trace engine. A FILLED open path
+  still does not import (SVG closes it to fill; the importer names it rather than guessing), and a stroke-only CLOSED
+  shape remains a line-drawing case that is out of this slice.
 - **B3. Variable-depth V-carve incl. flat-bottom (advanced V-carve).** CC (Advanced VCarve), VC, MK (type 5, hypothesis).
   Case Maker has the constant-floor V region only. Demand: #609 guilloché / rosette roadmap
   (`docs/design`, 90-degree-bit groove geometry), #268 (Makera §G "Next" for V-carve).

@@ -263,15 +263,49 @@ describe('parseSvgOutline (#217): out-of-scope content is reported', () => {
     expect(r.notes.some((n) => /stroke/i.test(n))).toBe(true);
   });
 
-  it('text and open paths are reported', () => {
+  it('text is reported and a stroke-only open path imports as a line (#664)', () => {
     const r = ok(
       parseSvgOutline(
-        svg('<text x="0" y="5">Hi</text><path d="M0 0 L10 10" stroke="#000"/>', 'width="10mm" viewBox="0 0 10 10"'),
+        svg('<text x="0" y="5">Hi</text><path d="M0 0 L10 10" fill="none" stroke="#000"/>', 'width="10mm" viewBox="0 0 10 10"'),
       ),
     );
     expect(r.contours).toEqual([]);
     expect(r.notes.some((n) => /text/i.test(n))).toBe(true);
-    expect(r.notes.some((n) => /open/i.test(n))).toBe(true);
+    expect(r.paths).toHaveLength(1);
+    expect(r.paths![0]).toEqual([[-5, 5], [5, -5]]);
+    expect(r.notes.some((n) => /open path.*imported as line/i.test(n))).toBe(true);
+  });
+
+  it('#664 — a stroked polyline imports as a line, its points in the job frame', () => {
+    const r = ok(parseSvgOutline(svg('<polyline points="0,0 10,0 10,10" fill="none" stroke="#000"/>', 'width="10mm" viewBox="0 0 10 10"')));
+    expect(r.contours).toEqual([]);
+    expect(r.paths).toHaveLength(1);
+    expect(r.paths![0]).toEqual([[-5, 5], [5, 5], [5, -5]]);
+  });
+
+  it('#664 — a FILLED open subpath still does not import, and says why', () => {
+    const r = ok(parseSvgOutline(svg('<path d="M0 0 L10 10" stroke="#000"/>', 'width="10mm" viewBox="0 0 10 10"')));
+    expect(r.contours).toEqual([]);
+    expect(r.paths ?? []).toEqual([]);
+    expect(r.notes.some((n) => /open subpath of a filled shape/i.test(n))).toBe(true);
+  });
+
+  it('#664 — a filled shape and an open stroke share one centred frame', () => {
+    // The fill spans x 0–10; the stroke runs from x 20 to 30, so the union is 0–30 wide and its
+    // centre is x 15: the fill sits at −15…−5, the stroke at +5…+15.
+    const r = ok(
+      parseSvgOutline(
+        svg(
+          '<path d="M0 0 H10 V10 H0 Z"/><path d="M20 0 L30 0" fill="none" stroke="#000"/>',
+          'width="30mm" viewBox="0 0 30 10"',
+        ),
+      ),
+    );
+    expect(r.contours).toHaveLength(1);
+    expect(r.paths).toHaveLength(1);
+    expect(Math.min(...r.contours[0]!.map((p) => p[0]))).toBeCloseTo(-15, 6);
+    expect(Math.max(...r.paths![0]!.map((p) => p[0]))).toBeCloseTo(15, 6);
+    expect(r.width).toBeCloseTo(30, 6);
   });
 });
 

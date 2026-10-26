@@ -428,6 +428,15 @@ program LEFT — measured from its simulated stock, not from an offset drawing o
 the pair (`rest ⌀1 mm`), and the setups line and the run sheet name it as *“⌀3 mm rough · ⌀1 mm
 rest”*. A Profile row has no rest region — a contour is a kerf, not a floor area — and says so.
 
+**Import outline or lines… (SVG/DXF, #664).** A drawing imports as what it is: the closed, filled
+shapes become one Pocket-style region (the vector row), and every **open path or polyline** becomes
+an **Engrave (line)** row — one per path, at the same scale and position, cut by the trace rules
+(a flat cutter's kerf, a V-bit's groove). A lines-only file — artwork drawn as strokes — is
+addable on its own. A filled open path still does not import: SVG closes it to fill it, and the
+importer names it instead of guessing; a stroke-only *closed* shape is a line drawing of a region
+and is not imported either. The dialog shows both counts before you accept, and the target width
+scales the lines with the shapes.
+
 Two ideas hold the chapter together:
 
 - **One job, two modes, three groups.** The CNC surface has a **Design | Cut** switch at the top of

@@ -1,6 +1,6 @@
 import { openTextFile } from '@/utils/openTextFile';
 import type { Mm } from '@/types';
-import type { EngraveVectorShape } from '@/types/engraveJob';
+import { MAX_LINE_POINTS, type EngraveLineItem, type EngraveVectorShape } from '@/types/engraveJob';
 import { parseSvgOutline } from './svgOutline';
 import { parseDxfOutline } from './dxfOutline';
 import type { OutlineImport, OutlineParseResult } from './outlineTypes';
@@ -19,7 +19,7 @@ import { shopDefault } from '@/store/shopDefaultsStore';
 export const OUTLINE_EXTENSIONS = ['.svg', '.dxf'];
 
 export type { OutlineImport, OutlineParseResult, OutlineFormat, OutlineFillRule } from './outlineTypes';
-export { MAX_OUTLINE_FILE_BYTES, MAX_OUTLINE_CONTOURS, MAX_OUTLINE_POINTS, scaleOutlineToWidth } from './outlineTypes';
+export { MAX_OUTLINE_FILE_BYTES, MAX_OUTLINE_CONTOURS, MAX_OUTLINE_PATHS, MAX_OUTLINE_POINTS, scaleOutlineToWidth } from './outlineTypes';
 export { parseSvgOutline } from './svgOutline';
 export { parseDxfOutline } from './dxfOutline';
 // Raster tracing (#252) is the third format, and by the time an `OutlineImport` exists the
@@ -74,6 +74,66 @@ export interface VectorShapeFields {
  * An accepted `OutlineImport` as a job item (#217). The contours are already mm and centred on
  * the origin, so the item's `position`/`rotation` place them exactly as a polygon's `points`.
  */
+export interface LineTraceFields {
+  position: { x: Mm; y: Mm };
+  depth: Mm;
+  /** Degrees, default 0. */
+  rotation?: number;
+  /** Default true. */
+  enabled?: boolean;
+  /** The import's name; several lines are suffixed `— line N`. */
+  name?: string;
+  /**
+   * One id per ITEM, in order — a long path splits into several items, so the caller mints an id
+   * per item rather than per path.
+   */
+  idFor: (index: number) => string;
+}
+
+/**
+ * #664 — an accepted `OutlineImport`'s OPEN paths as `line` items: one per path, each an Engrave
+ * operation cut by the trace rules. The paths share the import's centred frame with the contours,
+ * so giving every item the same position/rotation keeps the strokes on the drawing they were
+ * drawn with. A file with no open paths yields an empty list (the closed-only import is unchanged).
+ */
+export function toLineTraces(outline: OutlineImport, fields: LineTraceFields): EngraveLineItem[] {
+  const paths = outline.paths ?? [];
+  // #664 — A DOCUMENT LINE HOLDS AT MOST `MAX_LINE_POINTS`. A freehand stroke flattens to
+  // thousands of points, and the schema (and the row's editor) refuse more than the cap — so a
+  // long path is split into CONSECUTIVE items that share their seam vertex: the cut geometry is
+  // unchanged, every item is loadable, and the file is never a refusal Makera's own importer would
+  // not make. One number (`MAX_LINE_POINTS`) keeps the writer and the reader in step.
+  type Point = [Mm, Mm];
+  const chunksOf = (points: readonly Point[]): Point[][] => {
+    const mapped = points.map(([x, y]): Point => [x, y]);
+    if (mapped.length <= MAX_LINE_POINTS) return mapped.length >= 2 ? [mapped] : [];
+    const chunks: Point[][] = [];
+    let start = 0;
+    while (start < mapped.length - 1) {
+      const end = Math.min(mapped.length, start + MAX_LINE_POINTS);
+      chunks.push(mapped.slice(start, end));
+      start = end - 1; // the seam vertex is the last point of one item and the first of the next
+    }
+    return chunks;
+  };
+  const lines: { points: Point[] }[] = [];
+  for (const path of paths) for (const points of chunksOf(path)) lines.push({ points });
+  const many = lines.length > 1;
+  return lines.map(({ points }, i) => ({
+    kind: 'line' as const,
+    id: fields.idFor(i),
+    position: { x: fields.position.x, y: fields.position.y },
+    rotation: fields.rotation ?? 0,
+    points,
+    closed: false,
+    depth: fields.depth,
+    enabled: fields.enabled ?? true,
+    ...(fields.name === undefined || fields.name.trim() === ''
+      ? {}
+      : { name: many ? `${fields.name} — line ${i + 1}` : fields.name }),
+  }));
+}
+
 export function toVectorShape(outline: OutlineImport, fields: VectorShapeFields): EngraveVectorShape {
   return {
     kind: 'vector',

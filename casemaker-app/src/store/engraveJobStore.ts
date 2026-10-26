@@ -739,6 +739,11 @@ export interface EngraveJobState {
   /** Merge a hand edit into one trace (#219). A partial `position` is merged, not replaced. */
   updateTrace: (id: string, patch: TracePatch) => void;
   removeTrace: (id: string) => void;
+  /**
+   * #664 — add an imported open path as an Engrave (line) operation. The item is built by
+   * `toLineTraces` (an id already minted); this is only the document write, like `addVector`.
+   */
+  addLine: (line: EngraveLineItem) => void;
   /** Add a default plunge drill of `kind` (#220) and return its id. */
   addDrill: (kind: EngraveDrill['kind']) => string;
   /** Merge a hand edit into one drill (#220). A partial `position` is merged, not replaced. */
@@ -1232,6 +1237,9 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
       apply((job) => ({ ...job, traces: [...(job.traces ?? []), trace] }));
       return trace.id;
     },
+
+    // #664 — an imported polyline. One write per path, the same shape as `addVector`'s.
+    addLine: (line) => apply((job) => ({ ...job, traces: [...(job.traces ?? []), line] })),
 
     updateTrace: (id, patch) =>
       apply((job) => ({

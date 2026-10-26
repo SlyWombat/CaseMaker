@@ -194,11 +194,11 @@ function near(a: Vec2, b: Vec2, tol: number): boolean {
   return Math.hypot(a[0] - b[0], a[1] - b[1]) <= tol;
 }
 
-/** Join segments end-to-end into closed rings; unclosed chains are counted and dropped. */
-function joinSegments(segments: Segment[], tol: number): { rings: Vec2[][]; open: number } {
+/** Join segments end-to-end into closed rings; an unclosed chain is returned as an open path. */
+function joinSegments(segments: Segment[], tol: number): { rings: Vec2[][]; openChains: Vec2[][] } {
   const remaining = segments.slice();
   const rings: Vec2[][] = [];
-  let open = 0;
+  const openChains: Vec2[][] = [];
   while (remaining.length > 0) {
     const chain = remaining.pop()!.points.slice();
     const extendAt = (at: 'end' | 'start'): boolean => {
@@ -237,14 +237,19 @@ function joinSegments(segments: Segment[], tol: number): { rings: Vec2[][]; open
     if (chain.length >= 3 && near(chain[0]!, chain[chain.length - 1]!, tol)) {
       chain.pop();
       rings.push(chain);
-    } else {
-      open++;
+    } else if (chain.length >= 2) {
+      // #664 — an unclosed chain is a stroke: it imports as a line, not dropped.
+      openChains.push(chain);
     }
   }
-  return { rings, open };
+  return { rings, openChains };
 }
 
-function lwPolylineRing(e: Entity, tol: number, notes: string[]): Vec2[] | null {
+/**
+ * #664 — an LWPOLYLINE as its point path, open or closed. A closed one is a ring (the wrap-around
+ * bulge closes it); an open one is a stroke and keeps its bulges between consecutive vertices.
+ */
+function lwPolylinePath(e: Entity, tol: number): { points: Vec2[]; closed: boolean } {
   const flags = firstValue(e.pairs, 70) ?? 0;
   const closed = (flags & 1) !== 0;
   const verts: { x: number; y: number; bulge: number }[] = [];
@@ -263,18 +268,20 @@ function lwPolylineRing(e: Entity, tol: number, notes: string[]): Vec2[] | null 
       if (Number.isFinite(b)) cur.bulge = b;
     }
   }
-  if (!closed || verts.length < 2) {
-    if (!closed && verts.length >= 2) notes.push('Skipped an open LWPOLYLINE: only closed regions import.');
-    return null;
-  }
-  const ring: Vec2[] = [];
-  for (let i = 0; i < verts.length; i++) {
+  const points: Vec2[] = [];
+  if (verts.length < 2) return { points, closed };
+  const last = closed ? verts.length : verts.length - 1;
+  for (let i = 0; i < last; i++) {
     const v = verts[i]!;
-    ring.push([v.x, v.y]);
+    points.push([v.x, v.y]);
     const w = verts[(i + 1) % verts.length]!;
-    ring.push(...bulgeArc([v.x, v.y], [w.x, w.y], v.bulge, tol));
+    points.push(...bulgeArc([v.x, v.y], [w.x, w.y], v.bulge, tol));
   }
-  return ring.length >= 3 ? ring : null;
+  if (!closed) {
+    const end = verts[verts.length - 1]!;
+    points.push([end.x, end.y]);
+  }
+  return { points, closed };
 }
 
 /**
@@ -307,14 +314,20 @@ export function parseDxfOutline(
   const scale = (p: Vec2): Vec2 => [p[0] * unitMm, p[1] * unitMm];
 
   const rings: Vec2[][] = [];
+  // #664 — open polylines (open LWPOLYLINEs and unclosed LINE/ARC chains) import as lines.
+  const openPaths: Vec2[][] = [];
   const segments: Segment[] = [];
   const unsupported = new Map<string, number>();
 
   for (const e of entities) {
     switch (e.type) {
       case 'LWPOLYLINE': {
-        const ring = lwPolylineRing(e, chordMm / unitMm, notes);
-        if (ring) rings.push(ring.map(scale));
+        const { points, closed } = lwPolylinePath(e, chordMm / unitMm);
+        if (closed) {
+          if (points.length >= 3) rings.push(points.map(scale));
+        } else if (points.length >= 2) {
+          openPaths.push(points.map(scale));
+        }
         break;
       }
       case 'CIRCLE': {
@@ -359,9 +372,7 @@ export function parseDxfOutline(
   if (segments.length > 0) {
     const joined = joinSegments(segments, DXF_JOIN_TOLERANCE_MM / unitMm);
     for (const ring of joined.rings) rings.push(ring.map(scale));
-    if (joined.open > 0) {
-      notes.push(`Skipped ${joined.open} open LINE/ARC chain${joined.open === 1 ? '' : 's'}: only closed loops import.`);
-    }
+    for (const chain of joined.openChains) openPaths.push(chain.map(scale));
   }
 
   if (unsupported.size > 0) {
@@ -370,5 +381,15 @@ export function parseDxfOutline(
   }
 
   // DXF has no fill rule; the standard reading of its closed loops is nonzero.
-  return finalizeOutline({ format: 'dxf', sourceName, contours: rings as [Mm, Mm][][], fillRule: 'NonZero', notes });
+  if (openPaths.length > 0) {
+    notes.push(`${openPaths.length} open path${openPaths.length === 1 ? '' : 's'} imported as line${openPaths.length === 1 ? '' : 's'}.`);
+  }
+  return finalizeOutline({
+    format: 'dxf',
+    sourceName,
+    contours: rings as [Mm, Mm][][],
+    paths: openPaths as [Mm, Mm][][],
+    fillRule: 'NonZero',
+    notes,
+  });
 }

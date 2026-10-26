@@ -20,7 +20,7 @@ import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { openTextFile } from '@/utils/openTextFile';
 import { resetShopDefaultsStore, useShopDefaultsStore } from '@/store/shopDefaultsStore';
 import { ShopDefaultsSchema } from '@/platform/defaultsClient';
-import type { EngraveVectorShape } from '@/types/engraveJob';
+import { MAX_LINE_POINTS, type EngraveVectorShape } from '@/types/engraveJob';
 
 vi.mock('@/utils/openTextFile', () => ({ openTextFile: vi.fn() }));
 
@@ -192,6 +192,108 @@ describe('EngravePanel — the import dialog size control (#217)', () => {
     await openImport('square.svg', MM_SQUARE);
     fireEvent.click(screen.getByTestId('engrave-import-accept'));
     expect(theVector().depth).toBe(3);
+  });
+});
+
+describe('#664 — open paths import as Engrave (line) operations', () => {
+  const OPEN_LINE = svg(
+    '<path d="M0 0 L10 0" fill="none" stroke="#000"/>',
+    'width="10mm" viewBox="0 0 10 10"',
+  );
+  /** A filled square at x 0–10 and an open stroke at x 20–30: one frame, union centre x 15. */
+  const MIXED = svg(
+    '<path d="M0 0 H10 V10 H0 Z"/><path d="M20 0 L30 0" fill="none" stroke="#000"/>',
+    'width="30mm" viewBox="0 0 30 10"',
+  );
+
+  it('a lines-only drawing is addable, and accepting it adds one line item', async () => {
+    await openImport('stroke.svg', OPEN_LINE);
+    expect(screen.queryByTestId('engrave-import-empty')).toBeNull();
+    expect(screen.getByTestId('engrave-import-dialog').textContent).toContain('1 line');
+    expect((screen.getByTestId('engrave-import-accept') as HTMLButtonElement).disabled).toBe(false);
+
+    fireEvent.click(screen.getByTestId('engrave-import-accept'));
+    expect(screen.queryByTestId('engrave-import-dialog')).toBeNull();
+    const traces = useEngraveJobStore.getState().job.traces ?? [];
+    expect(traces).toHaveLength(1);
+    const line = traces[0]!;
+    expect(line.kind).toBe('line');
+    if (line.kind !== 'line') return;
+    expect(line.closed).toBe(false);
+    expect(line.position).toEqual({ x: 50, y: 30 }); // stock centre, like every add
+    expect(line.depth).toBeGreaterThan(0);
+    expect(line.name).toBe('stroke.svg');
+    // No empty vector row: the drawing is its lines.
+    expect(useEngraveJobStore.getState().job.vectors ?? []).toHaveLength(0);
+    expect(screen.getByTestId('engrave-trace-row-0')).toBeTruthy();
+  });
+
+  it('a mixed drawing adds the filled shape AND the line, in one frame', async () => {
+    await openImport('mixed.svg', MIXED);
+    fireEvent.click(screen.getByTestId('engrave-import-accept'));
+
+    const vectors = useEngraveJobStore.getState().job.vectors ?? [];
+    const traces = useEngraveJobStore.getState().job.traces ?? [];
+    expect(vectors).toHaveLength(1);
+    expect(traces).toHaveLength(1);
+    const line = traces[0]!;
+    if (line.kind !== 'line') throw new Error('expected a line');
+    // The same position and rotation keep the stroke on the fill it was drawn with.
+    expect(line.position).toEqual(vectors[0]!.position);
+    expect(line.rotation).toBe(0);
+    expect(line.depth).toBe(vectors[0]!.depth);
+    // The stroke sits to the RIGHT of the square, as drawn.
+    expect(Math.min(...line.points.map(([x]) => x))).toBeCloseTo(5, 6);
+    expect(Math.max(...vectors[0]!.contours[0]!.map(([x]) => x))).toBeCloseTo(-5, 6);
+  });
+
+  it('two open paths import as two lines, each named', async () => {
+    const two = svg(
+      '<path d="M0 0 L10 0" fill="none" stroke="#000"/><path d="M0 5 L10 5" fill="none" stroke="#000"/>',
+      'width="10mm" height="10mm" viewBox="0 0 10 10"',
+    );
+    await openImport('two.svg', two);
+    fireEvent.click(screen.getByTestId('engrave-import-accept'));
+    const traces = useEngraveJobStore.getState().job.traces ?? [];
+    expect(traces).toHaveLength(2);
+    expect(traces.map((t) => t.name)).toEqual(['two.svg — line 1', 'two.svg — line 2']);
+  });
+});
+
+describe('#664 — a long imported stroke stays a loadable job', () => {
+  it('splits a path past the line cap into consecutive items and round-trips through the schema', async () => {
+    // A freehand stroke flattens to thousands of points; this one is 6 001 — past the 5 000 a
+    // `line` item may carry. The import must split it, because a job the app writes that the
+    // schema refuses is a job lost to a default on the next start.
+    const n = 6001;
+    const d = ['M0 0', ...Array.from({ length: n - 1 }, (_, i) => `L${i + 1} 0`)].join(' ');
+    const LONG = svg(`<path d="${d}" fill="none" stroke="#000"/>`, 'width="6000mm" viewBox="0 0 6000 1"');
+    await openImport('long.svg', LONG);
+    expect((screen.getByTestId('engrave-import-accept') as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.click(screen.getByTestId('engrave-import-accept'));
+
+    const traces = useEngraveJobStore.getState().job.traces ?? [];
+    expect(traces).toHaveLength(2);
+    for (const trace of traces) {
+      expect(trace.kind).toBe('line');
+      if (trace.kind !== 'line') return;
+      expect(trace.points.length).toBeGreaterThanOrEqual(2);
+      expect(trace.points.length).toBeLessThanOrEqual(MAX_LINE_POINTS);
+    }
+    // The items concatenate back to the source path: each later item shares the seam vertex with
+    // the one before it, so dropping that repeated point restores the stroke exactly.
+    const restored = traces.flatMap((trace, i) =>
+      trace.kind === 'line' ? (i === 0 ? trace.points : trace.points.slice(1)) : [],
+    );
+    expect(restored).toHaveLength(n);
+    expect(restored.map(([x]) => x)).toEqual(Array.from({ length: n }, (_, i) => i - 3000));
+
+    // THE assertion: the document the app just wrote parses — the next start keeps the job.
+    const parsed = parseEngraveJob(JSON.parse(JSON.stringify(useEngraveJobStore.getState().job)));
+    expect(parsed.ok, parsed.ok ? '' : parsed.errors.join('; ')).toBe(true);
+    if (!parsed.ok) return;
+    const saved = (parsed.job.traces ?? []).filter((t) => t.kind === 'line');
+    expect(saved).toHaveLength(2);
   });
 });
 

@@ -657,6 +657,13 @@ export interface EngraveTraceBase {
   construction?: boolean;
 }
 
+/**
+ * #664 — the most vertices ONE `line` item may carry. The document schema enforces it, the row's
+ * editor guards it, and the vector import splits a longer path into consecutive items that share
+ * their seam vertex — one number, so a job the app writes is always a job the app can read back.
+ */
+export const MAX_LINE_POINTS = 5000;
+
 /** A free polyline the cutter traces, its centre following the points (#219). */
 export interface EngraveLineItem extends EngraveTraceBase {
   kind: 'line';
