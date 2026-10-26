@@ -1,0 +1,265 @@
+/*
+ * #693 — the change-the-machine wizard. One modal in the app's industrial palette, at the dialog
+ * layer of the one stacking scale (`--cm-z-modal`, #348). The rows borrow the mockup's structure:
+ * a numbered/✓ marker, a title, and the step's own body under it.
+ */
+
+.mc-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: var(--cm-z-modal);
+  background: rgba(8, 11, 15, 0.72);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+
+.mc-modal {
+  width: min(700px, 100%);
+  max-height: calc(100vh - 32px);
+  display: flex;
+  flex-direction: column;
+  background: var(--cm-color-surface-container);
+  color: var(--cm-color-on-surface);
+  border: var(--cm-border-1);
+  border-radius: var(--cm-radius-lg);
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.5);
+  font-family: var(--cm-font-body);
+  font-size: 0.8125rem;
+}
+
+.mc-head {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: start;
+  gap: 3px 12px;
+  padding: 14px 18px 10px;
+  border-bottom: var(--cm-border-1);
+}
+
+.mc-eyebrow {
+  font: 500 0.6875rem/1 var(--cm-font-mono);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--cm-color-on-surface-muted);
+}
+
+.mc-head h3 {
+  margin: 0;
+  font: 600 1rem/1.3 var(--cm-font-display);
+  color: var(--cm-color-on-surface);
+}
+
+.mc-close {
+  grid-row: 1 / span 2;
+  grid-column: 2;
+  align-self: start;
+  background: none;
+  border: 0;
+  color: var(--cm-color-on-surface-muted);
+  font-size: 0.9rem;
+  cursor: pointer;
+  padding: 2px 4px;
+}
+
+.mc-close:hover {
+  color: var(--cm-color-on-surface);
+}
+
+.mc-body {
+  overflow-y: auto;
+  padding: 4px 18px 10px;
+}
+
+.mc-step {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr);
+  gap: 10px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--cm-color-outline-variant);
+}
+
+.mc-step:last-child {
+  border-bottom: 0;
+}
+
+.mc-step[data-state='later'] {
+  opacity: 0.55;
+}
+
+.mc-marker {
+  width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--cm-color-outline);
+  border-radius: 50%;
+  font: 500 0.75rem/1 var(--cm-font-mono);
+  color: var(--cm-color-on-surface-muted);
+}
+
+.mc-step[data-state='current'] .mc-marker {
+  border-color: var(--cm-color-primary);
+  color: var(--cm-color-primary);
+}
+
+.mc-step[data-state='done'] .mc-marker {
+  border-color: var(--cm-color-secondary);
+  color: var(--cm-color-secondary);
+}
+
+.mc-text {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+.mc-text > b {
+  font-weight: 600;
+}
+
+.mc-meta {
+  color: var(--cm-color-on-surface-variant);
+  font-size: 0.8125rem;
+  line-height: 1.45;
+}
+
+.mc-mono {
+  font-family: var(--cm-font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.mc-hint {
+  color: var(--cm-color-on-surface-muted);
+  font-size: 0.75rem;
+  line-height: 1.4;
+  margin: 2px 0 0;
+}
+
+.mc-note {
+  color: var(--cm-color-tertiary);
+  font-size: 0.75rem;
+  line-height: 1.4;
+  margin: 4px 0 0;
+}
+
+.mc-btns {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 2px;
+}
+
+.mc-btn {
+  background: var(--cm-color-surface-container-high);
+  color: var(--cm-color-on-surface);
+  border: 1px solid var(--cm-color-outline-variant);
+  border-radius: var(--cm-radius-sm);
+  padding: 5px 11px;
+  font: 500 0.75rem/1.2 var(--cm-font-body);
+  cursor: pointer;
+}
+
+.mc-btn:hover:not(:disabled) {
+  border-color: var(--cm-color-outline);
+}
+
+.mc-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.mc-btn--primary {
+  background: var(--cm-color-primary-container);
+  color: #fff;
+  border-color: transparent;
+}
+
+.mc-choice,
+.mc-checks,
+.mc-confirm,
+.mc-datum {
+  display: grid;
+  gap: 6px;
+}
+
+.mc-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  color: var(--cm-color-on-surface-variant);
+}
+
+.mc-check input {
+  accent-color: var(--cm-color-primary-container);
+}
+
+.mc-check svg {
+  flex: none;
+  color: var(--cm-color-on-surface-muted);
+}
+
+.mc-check[data-done='true'] {
+  color: var(--cm-color-secondary);
+}
+
+.mc-check[data-done='true'] svg {
+  color: var(--cm-color-secondary);
+}
+
+.mc-lines {
+  display: grid;
+  gap: 8px;
+}
+
+.mc-line {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.mc-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--cm-color-outline);
+  flex: none;
+}
+
+.mc-line[data-done='true'] .mc-dot {
+  background: var(--cm-color-secondary);
+}
+
+.mc-datum {
+  padding: 8px 10px;
+  border: 1px dashed var(--cm-color-outline-variant);
+  border-radius: var(--cm-radius-sm);
+}
+
+.mc-fold summary {
+  cursor: pointer;
+  font-size: 0.75rem;
+  color: var(--cm-color-on-surface-muted);
+}
+
+.mc-foot {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 18px;
+  border-top: var(--cm-border-1);
+}
+
+@media (max-width: 560px) {
+  .mc-backdrop {
+    padding: 8px;
+  }
+
+  .mc-modal {
+    max-height: calc(100vh - 16px);
+  }
+}

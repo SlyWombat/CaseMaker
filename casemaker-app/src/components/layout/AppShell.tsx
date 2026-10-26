@@ -7,6 +7,7 @@ import { PlacementBanner } from './PlacementBanner';
 import { FloatersBanner } from './FloatersBanner';
 import { WelcomeOverlay } from '../welcome/WelcomeOverlay';
 import { StartWizard } from '../welcome/StartWizard';
+import { MachineChangeWizard } from '../machine-change';
 import { ContextPanel } from './ContextPanel';
 import { useContextPanelWidth } from './useContextPanelWidth';
 import { PanelResizeHandle } from './PanelResizeHandle';
@@ -93,6 +94,9 @@ export function AppShell() {
           </>
         )}
         {wizardOpen && <StartWizard />}
+        {/* #693 — the change-the-machine wizard, mounted here so it outlives whatever surface opened
+            it (Manage's pane is replaced, not covered). It renders itself null while closed. */}
+        <MachineChangeWizard />
       </main>
       <StatusBar />
       {/* #530 — the machine's camera, opened from the Cut step or the strip's popover and mounted

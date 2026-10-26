@@ -40,6 +40,7 @@ import {
 import type { BedDatumKey } from '@/platform/bedProfiles';
 import { surfaceUnmeasuredCount } from '@/engine/cnc/bedScene';
 import { newId } from '@/utils/id';
+import { openMachineChange } from '@/components/machine-change';
 
 /** The calipers list the unmeasured count links to (#444). */
 const CALIPERS_LIST_URL = 'https://github.com/SlyWombat/CaseMaker/issues/444';
@@ -214,6 +215,20 @@ export function MachineBed({ machine }: { machine: MachineRecord }) {
           </a>
         </span>
         <span className="btn-row" data-testid="manage-bed-actions">
+          {/* #693 — the wizard's Manage entry: with no target it offers the mounts this house can
+              give, in step 1. A build with no socket cannot answer the save lines, so it does not
+              offer the physical change at all (#354's rule). */}
+          {canDriveMachine && (
+            <button
+              type="button"
+              className="btn btn--sm"
+              data-testid="manage-bed-change"
+              title="Take a fixture off the pins and fit another, guided: make it safe, take it off, fit it, confirm"
+              onClick={() => openMachineChange()}
+            >
+              Change the machine…
+            </button>
+          )}
           <label>
             Switch{' '}
             <select
