@@ -4993,6 +4993,7 @@
                 "type": "string"
               },
               "seed": {
+                "description": "An untouched placeholder a blank route seeded; the wizard’s operation text fills it, and any edit clears it (#700).",
                 "type": "boolean"
               }
             },

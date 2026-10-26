@@ -1816,7 +1816,12 @@ const jobSourcesSchema = z.object({
         depthIntent: fieldSourceSchema.optional(),
         // #700 — a blank route's untouched placeholder. Named here or the Zod object strips it on
         // load, and the wizard's text would add a second line over the seed it never recognised.
-        seed: z.boolean().optional(),
+        seed: z
+          .boolean()
+          .optional()
+          .describe(
+            'An untouched placeholder a blank route seeded; the wizard’s operation text fills it, and any edit clears it (#700).',
+          ),
       }),
     )
     .optional()

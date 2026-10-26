@@ -1773,12 +1773,15 @@ describe('EngravePanel — where a label’s depth came from (#362 review)', () 
 
     // The store's own write matches it: the depth and the `surface` intent it implies are on the
     // job, both claimed as the app's own — which is what lets a later, different blank revise them.
-    // `layout` is there too, because this is the line the badge route seeded (#363 review).
+    // `layout` is there too, because this is the line the badge route seeded (#363 review), and
+    // #700's `seed` stamp rides with it: this walk is the app's own re-depth, not a person's edit,
+    // so the line is still the placeholder an operation's text may fill.
     const job = useEngraveJobStore.getState().job;
     expect(job.labels[0]!.depth).toBe(0.92);
     expect(job.labels[0]!.depthIntent).toBe('surface');
     expect(job.sources?.labels?.[job.labels[0]!.id]).toEqual({
       layout: 'computed',
+      seed: true,
       depth: 'computed',
       depthIntent: 'computed',
     });
