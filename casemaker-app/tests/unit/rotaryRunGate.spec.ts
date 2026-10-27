@@ -13,6 +13,7 @@ import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { Z1, type RotaryProfile, type RotarySourcedField } from '@/engine/cnc/machine';
 import { parseEngraveJob } from '@/store/engraveJobSchema';
 import { useEngraveJobStore } from '@/store/engraveJobStore';
+import { jobMachine } from '@/engine/cnc/calibration';
 import {
   resetEngraveJobFileStore,
   setJobFileIO,
@@ -22,6 +23,8 @@ import {
 import {
   ROTARY_NO_MODULE_REFUSAL,
   ROTARY_UNMEASURED_REFUSAL,
+  gateViewFor,
+  withPeriod,
   programFrame,
   releaseBlocker,
   rotaryUnmeasured,
@@ -125,8 +128,10 @@ describe('the rotary safety line (#240/#545)', () => {
     }
     // The exact words are the contract: they are the sentence the panel shows, unchanged.
     expect(ROTARY_UNMEASURED_REFUSAL).toBe(
-      "The rotary module has not been measured on this machine yet — this program can be checked and saved; running it waits for the module's bench check.",
+      "The rotary module has not been measured on this machine yet — this program can be checked and simulated, but saving its .nc and running it wait for the module's bench check.",
     );
+    // #724 W5 — the sentence must not promise what this gate is shutting (Save .nc).
+    expect(ROTARY_UNMEASURED_REFUSAL).not.toContain('checked and saved');
   });
 
   it('an unknown machine cannot show a module at all, so a rotary job gets the no-module sentence', () => {
@@ -176,6 +181,36 @@ describe('the rotary safety line (#240/#545)', () => {
     // A flat job on a machine with no module is an ordinary job, not a rotary one.
     expect(saveBlocker(view({ machine: { rotary: undefined } }))).toBe('Generate first.');
     expect(saveBlocker(view({ machine: null }))).toBe('Generate first.');
+  });
+});
+
+describe('one period at the render site (#724 W5)', () => {
+  it('keeps a sentence’s own period and gives a fragment one', () => {
+    expect(withPeriod(ROTARY_UNMEASURED_REFUSAL)).toBe(ROTARY_UNMEASURED_REFUSAL);
+    expect(withPeriod('the run is still going')).toBe('the run is still going.');
+    expect(withPeriod('  tick the clearance check  ')).toBe('tick the clearance check.');
+    // A sentence that already ends keeps its ONE period; the render site no longer adds a second.
+    expect(withPeriod('the run is still going.')).toBe('the run is still going.');
+  });
+});
+
+describe('the gate’s view carries the machine and the holding (#724 W5)', () => {
+  it('a view with no machine says "no module"; the same run with the job says the bench sentence', () => {
+    const rotaryJob: EngraveJob = {
+      ...defaultEngraveJob(),
+      stock: { ...defaultEngraveJob().stock, length: 100, width: 20, thickness: 20, material: 'pla', shape: 'cylinder', diameter: 20 },
+      workholding: {
+        kind: 'rotary-chuck',
+        rotary: { stickout: 85, gripDiameter: null, jawMode: 'reverse-inner', tailstock: true, source: 'test' },
+      },
+    };
+    const run = view({ generated: emptyResult([rotaryProgram()]) });
+    // The machine-less view a caller with no job makes: nothing to read, so "no module".
+    expect(saveBlocker({ ...run, machine: null })).toBe(ROTARY_NO_MODULE_REFUSAL);
+    // With the job, it is the bench sentence on the profile that HAS the module.
+    expect(saveBlocker(gateViewFor(run, jobMachine(rotaryJob), true))).toBe(ROTARY_UNMEASURED_REFUSAL);
+    // …and a plate job is not a rotary run at all, whatever the view once carried.
+    expect(saveBlocker(gateViewFor(view(), jobMachine(defaultEngraveJob()), false))).not.toBe(ROTARY_UNMEASURED_REFUSAL);
   });
 });
 

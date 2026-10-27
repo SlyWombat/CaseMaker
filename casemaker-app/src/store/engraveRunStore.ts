@@ -75,6 +75,8 @@ export {
   runErrorCodes,
   saveBlocker,
   firstRunError,
+  gateViewFor,
+  withPeriod,
   uploadBlocker,
   releaseBlocker,
   oracleSentence,

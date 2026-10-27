@@ -25,6 +25,7 @@ import { freezePackage, type FrozenPackage } from '@/engine/cnc/engrave/package'
 import { frozenReleaseSources } from '@/engine/cnc/engrave/release';
 import type { VerifyReport } from '@/engine/cnc/verify';
 import type { EngraveGenerated, EngraveProgram } from '@/workers/sim/engraveGenerate';
+import { ROTARY_UNMEASURED_REFUSAL } from '@/store/engraveRunGate';
 import { resetMachineRunStore } from '@/store/machineRunStore';
 import { resetEngraveReleaseStore, useEngraveReleaseStore } from '@/store/engraveReleaseStore';
 import { resetEngravePackageStore, useEngravePackageStore } from '@/store/engravePackageStore';
@@ -248,6 +249,9 @@ interface Props {
   generated: EngraveGenerated | null;
   canDrive?: boolean;
   staleSince?: number | null;
+  /** #724 W5 — the gates' own sentence, as EngravePanel hands it down. */
+  uploadBlocker?: string | null;
+  releaseBlocker?: string | null;
 }
 
 /**
@@ -268,8 +272,8 @@ function Harness(props: Props) {
       staleSince={props.staleSince ?? null}
       machine={props.canDrive === false ? null : machineObservation()}
       runContext={{}}
-      uploadBlocker={null}
-      releaseBlocker={null}
+      uploadBlocker={props.uploadBlocker ?? null}
+      releaseBlocker={props.releaseBlocker ?? null}
       onBackToDesign={() => {}}
     />
   );
@@ -364,6 +368,32 @@ describe('#419 §3 the Cut surface', () => {
     expect(screen.getByTestId('engrave-cut-step-1-summary').textContent).toContain('1 program');
     // The job's stock is not a shelf entry: nothing was taken, and the line says so in operator terms.
     expect(screen.getByTestId('engrave-package-reservation').textContent).toContain('no blank needs to be held');
+  });
+
+  it('the Run step quotes the rotary bench sentence the gates refuse with (#724 W5)', () => {
+    const job = defaultEngraveJob();
+    const rotaryProgram = { ...P1, frame: 'rotary' as const };
+    const pkg = frozen(job, [rotaryProgram]);
+    const view = draw({
+      job,
+      report: reportOf(),
+      pkg,
+      generated: generated([rotaryProgram]),
+      uploadBlocker: ROTARY_UNMEASURED_REFUSAL,
+    });
+
+    // The collapsed line says what the step will say, so it is visible with the step folded.
+    const step4 = screen.getByTestId('engrave-cut-step-4-summary').textContent ?? '';
+    expect(step4).toContain('the rotary’s bench check first');
+    // …and the body quotes the gates' own sentence, with ONE period.
+    const line = screen.getByTestId('engrave-cut-rotary-bench').textContent ?? '';
+    expect(line).toBe(ROTARY_UNMEASURED_REFUSAL);
+    expect(line).not.toContain('..');
+    expect(line).not.toContain('can be checked and saved');
+
+    // A run the gates do not refuse for the rotary carries no bench line.
+    view.show({ job, report: reportOf(), pkg, generated: generated([P1]), uploadBlocker: null });
+    expect(screen.queryByTestId('engrave-cut-rotary-bench')).toBeNull();
   });
 
   it('#703 — steps 1 and 4 print the program’s estimate, not the plan’s setup-inclusive total', () => {

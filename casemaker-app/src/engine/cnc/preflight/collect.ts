@@ -42,7 +42,7 @@ import { validateSacrificial } from '@/engine/cnc/sacrificial';
 import { stockFromShelf } from '@/engine/cnc/stockStart';
 import type { Reachability } from '@/engine/cnc/engrave/reachability';
 import type { VerifyReport } from '@/engine/cnc/verify';
-import { saveBlocker, type EngraveRunView } from '@/store/engraveRunGate';
+import { gateViewFor, saveBlocker, type EngraveRunView } from '@/store/engraveRunGate';
 import type { StockItem } from '@/platform/stockClient';
 import type { EngraveGenerated } from '@/workers/sim/engraveGenerate';
 import type { PreflightCause, PreflightOwner, PreflightRow, PreflightScope } from './types';
@@ -299,7 +299,15 @@ export function collect(input: PreflightInput): PreflightRow[] {
     // `saveBlocker` answers `null` when the run may proceed and a sentence when it may not; the null
     // case is the gate saying "nothing blocks this", which is not a row. The view is real only in its
     // `generated` field — see `NO_RUN_VIEW` for why that is safe in exactly these two states.
-    const block = saveBlocker(gen === null ? NO_RUN_VIEW : { ...NO_RUN_VIEW, generated: gen });
+    // #724 W5 — the view carries the machine and the holding, so a rotary job's gate row says the
+    // bench sentence rather than "no rotary module" about a profile that has one.
+    const block = saveBlocker(
+      gateViewFor(
+        gen === null ? NO_RUN_VIEW : { ...NO_RUN_VIEW, generated: gen },
+        jobMachine(input.job),
+        input.job.workholding.kind === 'rotary-chuck',
+      ),
+    );
     if (block !== null) {
       rows.push({
         severity: 'error',

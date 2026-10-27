@@ -14,6 +14,7 @@ import { useSettingsStore } from '@/store/settingsStore';
 import { useToolRegistryStore } from '@/store/toolRegistryStore';
 import { useToolRegistry } from '@/hooks/useToolRegistry';
 import { cutterIdentity } from '@/engine/cnc/engrave/cutterCaseLine';
+import { withPeriod } from '@/store/engraveRunGate';
 
 /**
  * #255 — send the verified program to the machine, from beside Save in the engrave panel.
@@ -290,7 +291,7 @@ export function EngraveMachineUpload({
 
       {blocked !== null && (
         <p style={MUTED} data-testid="engrave-upload-blocked">
-          Upload is disabled — {blocked}.
+          Upload is disabled — {withPeriod(blocked)}
         </p>
       )}
 

@@ -4,7 +4,7 @@ import { newItemDepthFor, newTargetObjectId, useEngraveJobStore } from '@/store/
 import { useEngraveJobFileStore } from '@/store/engraveJobFileStore';
 import { useEngravePreviewStore } from '@/store/engravePreviewStore';
 import { expandEngraveRow, useEngraveRowStore } from '@/store/engraveRowStore';
-import { useEngraveRunStore, firstRunError, releaseBlocker, runErrorCodes, saveBlocker, uploadBlocker } from '@/store/engraveRunStore';
+import { useEngraveRunStore, firstRunError, gateViewFor, releaseBlocker, runErrorCodes, saveBlocker, uploadBlocker, withPeriod } from '@/store/engraveRunStore';
 import { useMachineStore } from '@/store/machineStore';
 import { useSimStore } from '@/store/simStore';
 import { useCncModeStore } from '@/store/cncModeStore';
@@ -1813,11 +1813,7 @@ export function EngravePanel(): JSX.Element {
   // #240/#545 — the gates also read the machine's rotary provenance and the job's holding, so a
   // rotary job's .nc save is refused until the module is measured (the .cutjob document save never
   // passes through here). One view for all three, so they cannot disagree about the machine.
-  const gateView = {
-    ...run,
-    machine: jobMachine(job, calibration),
-    rotaryHeld: job.workholding.kind === 'rotary-chuck',
-  };
+  const gateView = gateViewFor(run, jobMachine(job, calibration), job.workholding.kind === 'rotary-chuck');
   const saveBlockerText = saveBlocker(gateView);
   // #255 — the machine upload. `uploadBlocker` is never weaker than `saveBlocker` (see its own
   // note), so Save and Upload state one rule between them rather than two that agree by luck.
@@ -3763,7 +3759,7 @@ export function EngravePanel(): JSX.Element {
             </button>
             {saveBlockerText !== null && (
               <p style={MUTED} data-testid="engrave-save-blocked">
-                Save is disabled — {saveBlockerText}.{' '}
+                Save is disabled — {withPeriod(saveBlockerText!)}{' '}
                 {/* #688 — only the acknowledgement is something Cut can resolve, so only that
                     blocker gets the Fix. The sentence and #689's Cut step 1 use the same words. */}
                 {saveBlockerText === CLEARANCE_ACK_BLOCKER && (

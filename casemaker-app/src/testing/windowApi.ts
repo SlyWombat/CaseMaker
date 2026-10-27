@@ -25,7 +25,8 @@ import { useSettingsStore } from '@/store/settingsStore';
 import { useViewportStore } from '@/store/viewportStore';
 import { useSimStore, type SimLayers, type SimState } from '@/store/simStore';
 import { useEngraveJobStore } from '@/store/engraveJobStore';
-import { useEngraveRunStore, saveBlocker, runErrorCodes } from '@/store/engraveRunStore';
+import { useEngraveRunStore, gateViewFor, saveBlocker, runErrorCodes } from '@/store/engraveRunStore';
+import { jobMachine } from '@/engine/cnc/calibration';
 import { useRunRecordStore } from '@/store/runRecordStore';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { useSimSetupStore, buildSimSetup } from '@/store/simSetupStore';
@@ -433,6 +434,10 @@ export function installCaseMakerTestApi(): void {
     },
     getEngraveRunState() {
       const r = useEngraveRunStore.getState();
+      // #724 W5 — the gate needs the machine and the holding. Without them a rotary job read as
+      // one for a machine with no module ("no rotary module" on a profile that has one).
+      const job = useEngraveJobStore.getState().job;
+      const view = gateViewFor(r, jobMachine(job), job.workholding.kind === 'rotary-chuck');
       return {
         phase: r.phase,
         stale: r.staleSince !== null,
@@ -445,8 +450,8 @@ export function installCaseMakerTestApi(): void {
         simStatus: r.simStatus,
         oracleOk: r.oracle?.ok ?? null,
         worst: r.oracle ? { ...r.oracle.worst } : null,
-        canSave: saveBlocker(r) === null,
-        saveReason: saveBlocker(r),
+        canSave: saveBlocker(view) === null,
+        saveReason: saveBlocker(view),
         error: r.error,
       };
     },

@@ -24,7 +24,7 @@ import {
 import type { RunPlan } from '@/engine/cnc/plan';
 import { useEngraveReleaseStore, type ReleaseFile } from '@/store/engraveReleaseStore';
 import { useFirstRegistration } from '@/store/engraveRegistrationStore';
-import { facingRegistrationBlocker } from '@/store/engraveRunGate';
+import { facingRegistrationBlocker, withPeriod } from '@/store/engraveRunGate';
 import { useMachineTranscriptStore } from '@/store/machineTranscriptStore';
 import { machineKey, useMachineRunStore } from '@/store/machineRunStore';
 import { useToolRegistryStore } from '@/store/toolRegistryStore';
@@ -240,7 +240,7 @@ export function EngraveReleaseStep({
   if (blocker !== null) {
     return (
       <p style={MUTED} data-testid="engrave-release-blocked">
-        The release step is disabled — {blocker}.
+        The release step is disabled — {withPeriod(blocker)}
       </p>
     );
   }

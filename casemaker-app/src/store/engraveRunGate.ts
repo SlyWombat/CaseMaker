@@ -297,9 +297,25 @@ export function verifySimulateSentences(v: EngraveRunView): { verified: string; 
  * #545/#240 — THE ONE SENTENCE the pre-bench run path says about a rotary program, verbatim. It is
  * exported so the panel, the tests and the run sheet can quote the same words instead of a second
  * paraphrase drifting from this one.
+ *
+ * #724 W5 — WHAT IT MAY CLAIM. This string is `saveBlocker`'s first reason, so Save .nc is
+ * DISABLED by it; the old wording said "can be checked and saved" next to a dead button. The
+ * `.cutjob` document save never passes through this gate, so the sentence names the .nc: the
+ * program can be checked and simulated, and SAVING ITS .NC and running it wait for the bench.
  */
 export const ROTARY_UNMEASURED_REFUSAL =
-  "The rotary module has not been measured on this machine yet — this program can be checked and saved; running it waits for the module's bench check.";
+  "The rotary module has not been measured on this machine yet — this program can be checked and simulated, but saving its .nc and running it wait for the module's bench check.";
+
+/**
+ * #724 W5 — a blocker sentence printed inside a shorter one keeps ITS period: the container used
+ * to append its own '.', and a full-sentence blocker rendered "bench check..". The strings are
+ * deliberately a mix of fragments ("the run is still going") and sentences, so this normalises at
+ * the RENDER site instead of making every string grow a full stop.
+ */
+export function withPeriod(text: string): string {
+  const t = text.trim();
+  return /[.!?]$/.test(t) ? t : `${t}.`;
+}
 
 /**
  * #545/#240 — the other rotary refusal: the machine cannot turn A at all. A rotary job or a
@@ -333,6 +349,22 @@ export function rotaryUnmeasured(machine: Pick<MillProfile, 'rotary'> | null | u
 /** Which frame a program record is in. Absent reads `flat` (every pre-slice package). */
 export function programFrame(p: { frame?: 'flat' | 'rotary' }): 'flat' | 'rotary' {
   return p.frame === 'rotary' ? 'rotary' : 'flat';
+}
+
+/**
+ * #724 W5 — THE GATE'S VIEW, built in one place. `EngraveRunView` carries two facts the run store
+ * cannot know — the machine profile and whether the JOB is held in the chuck — and a caller that
+ * forgot them made a rotary program look like one for a machine with no module: the E2E API's
+ * `saveReason` answered "This machine has no rotary module" on a profile that has one, because it
+ * asked the gate with no machine at all. Callers with the job build the machine (`jobMachine(job)`)
+ * and hand both facts here; the gate itself stays free of runtime imports (#395).
+ */
+export function gateViewFor(
+  run: EngraveRunView,
+  machine: EngraveRunView['machine'],
+  rotaryHeld: boolean,
+): EngraveRunView {
+  return { ...run, machine, rotaryHeld };
 }
 
 /**

@@ -57,7 +57,13 @@ import type { RunContext } from '@/store/machineRunStore';
 import { useEngravePackageStore } from '@/store/engravePackageStore';
 import { useEngraveRegistrationStore, useFirstRegistration, useSurfaceSpread } from '@/store/engraveRegistrationStore';
 import { useEngraveRunStore } from '@/store/engraveRunStore';
-import { requiredAckCodes, surfaceRepostBlocker } from '@/store/engraveRunGate';
+import {
+  ROTARY_NO_MODULE_REFUSAL,
+  ROTARY_UNMEASURED_REFUSAL,
+  requiredAckCodes,
+  surfaceRepostBlocker,
+  withPeriod,
+} from '@/store/engraveRunGate';
 import { useManageModeStore } from '@/store/manageModeStore';
 import { domeAcceptSentence, surfaceTiltWords } from '@/engine/cnc/engrave/surfaceSpread';
 import { useShopDefaultsStore } from '@/store/shopDefaultsStore';
@@ -642,7 +648,16 @@ export function EngraveCutSurface({
     return `${list}, then the top face · ${touchWords}`;
   })();
 
+  // #724 W5 — THE RUN STEP CARRIES THE ROTARY BENCH SENTENCE. With no machine connected the
+  // one-screen block never renders, and step 4 said only "No machine is connected" — nothing
+  // about why the frozen rotary program cannot go. The step quotes the SAME refusal the gates
+  // hand it (Save, Upload and the release share it), so the words cannot drift.
+  const rotaryGate =
+    [uploadBlocker, releaseBlocker].find(
+      (b) => b === ROTARY_UNMEASURED_REFUSAL || b === ROTARY_NO_MODULE_REFUSAL,
+    ) ?? null;
   const step4Meta: string[] = [];
+  if (plan !== null && rotaryGate !== null) step4Meta.push('the rotary’s bench check first');
   if (releaseSources.length > 1) step4Meta.push(`${releaseSources.length} programs`);
   if (plan?.features.find((feature) => feature.feature === 'vacuum')?.on === true) step4Meta.push('vacuum on');
   const cutter = jobTool(job);
@@ -854,6 +869,9 @@ export function EngraveCutSurface({
           </p>
         ) : (
           <>
+            {rotaryGate !== null && (
+              <p style={MUTED} data-testid="engrave-cut-rotary-bench">{withPeriod(rotaryGate)}</p>
+            )}
             {target === null && (
               <p style={MUTED} data-testid="engrave-cut-no-machine">
                 No machine is connected —{' '}
