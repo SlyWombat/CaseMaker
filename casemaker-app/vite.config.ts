@@ -3,11 +3,12 @@ import react from '@vitejs/plugin-react';
 import wasm from 'vite-plugin-wasm';
 import path from 'node:path';
 import { readFileSync } from 'node:fs';
+import { DEFAULT_DEV_PORT, devServerPort } from './scripts/e2ePort';
 
-// Default port 5173 (Vite's standard). Port 8000 was the historical default
-// but conflicts with kernel-reserved ports on some WSL2 / Hyper-V hosts;
-// pick a port that's free everywhere and let CASEMAKER_PORT override.
-const DEFAULT_PORT = Number(process.env.CASEMAKER_PORT ?? 5173);
+// #704 — the dev/preview port belongs to THIS checkout (derived from its path; see
+// scripts/e2ePort.ts), so two worktrees' e2e runs cannot attach to each other's server. An explicit
+// CASEMAKER_PORT still wins. Desktop mode is the exception, handled below: `vite --mode desktop`
+// must bind exactly the `devUrl` in src-tauri/tauri.conf.json (127.0.0.1:5173, #292).
 
 const pkg = JSON.parse(readFileSync(path.resolve(__dirname, 'package.json'), 'utf8')) as {
   version: string;
@@ -55,6 +56,8 @@ export default defineConfig(({ mode }) => {
   // `BUILD_TARGET=desktop npm …` never works in Windows cmd/PowerShell. Either way the value ends
   // up in `__BUILD_TARGET__`, which src/platform/capabilities.ts reads.
   const BUILD_TARGET = process.env.BUILD_TARGET ?? (mode === 'desktop' ? 'desktop' : 'web');
+  // #704 — a derived per-checkout port for web mode; desktop keeps the fixed devUrl (#292).
+  const devPort = mode === 'desktop' ? DEFAULT_DEV_PORT : devServerPort();
 
   return {
     base: BASE,
@@ -125,10 +128,10 @@ export default defineConfig(({ mode }) => {
     server: {
       host: '127.0.0.1',
       fs: { allow: ['..'] },
-      port: DEFAULT_PORT,
+      port: devPort,
       strictPort: mode === 'desktop',
       watch: { ignored: ['**/src-tauri/**'] },
     },
-    preview: { port: DEFAULT_PORT, strictPort: false },
+    preview: { port: devPort, strictPort: false },
   };
 });

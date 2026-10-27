@@ -1,10 +1,11 @@
 import { defineConfig, devices } from '@playwright/test';
+import { devServerPort } from './scripts/e2ePort';
 
 const isCI = !!process.env.CI;
-// Port 8000 is kernel-reserved on some WSL2 / Hyper-V hosts (and 8001/8002
-// often follow). 5173 is Vite's standard dev port and is free on every
-// host I've tested. CASEMAKER_PORT overrides for hosts where 5173 conflicts.
-const PORT = Number(process.env.CASEMAKER_PORT ?? 5173);
+// #704 — the port belongs to THIS checkout (derived from its path), so two worktrees' runs cannot
+// attach to each other's dev server. An explicit CASEMAKER_PORT still wins; CI keeps 5173. The same
+// derivation is in vite.config.ts, so a hand-started server agrees. See `scripts/e2ePort.ts`.
+const PORT = devServerPort();
 const BASE = `http://127.0.0.1:${PORT}`;
 
 export default defineConfig({
