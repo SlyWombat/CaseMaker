@@ -215,7 +215,8 @@ interface LivePath {
  * A ROTARY job, swept by the column engine (#239, `/Rotary.md` §4.1). It owns no wasm handle:
  * every mesh it hands out is plain buffers built from the grid, so there is nothing for
  * `dispose` to delete and no playback anchor chain to warm. The exact sweeper's `rotary-job`
- * refusal is never reached from here — the timeline's `rotary` flag routes the load.
+ * refusal is never reached from here — the timeline's `summary.rotaryClass` routes the load
+ * ('wrapped' to this engine; an INDEXED job with a flat tool to the exact sweep, #241).
  */
 interface LiveColumn {
   kind: 'column';
@@ -249,9 +250,11 @@ export interface SimLoadOpts {
    * The material a PREVIOUS program left, as the removal mesh its own sweep produced (#410, the
    * rest pass). This program is then swept starting from that part rather than from the blank —
    * see `SweepOpts.priorRemoval`, which is where the subtraction happens. The EXACT sweeper
-   * takes it; a rotary job or a V-bit (the column engine) is REFUSED with `prior-removal-column`
-   * rather than swept without it, because a rest pass simulated against the wrong stock is a
-   * picture of a cut that will not happen.
+   * takes it; a V-bit or a WRAPPED rotary job (the column engine) is REFUSED with
+   * `prior-removal-column`, and an INDEXED rotary job by the exact sweep itself with
+   * `prior-removal-rotary` (#241) — its prior material would have to be read in the stock frame
+   * the faces are turned back into — rather than swept without it, because a rest pass simulated
+   * against the wrong stock is a picture of a cut that will not happen.
    */
   priorRemoval?: NodeMeshOutput;
   /**
