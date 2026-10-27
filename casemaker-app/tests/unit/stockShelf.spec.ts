@@ -42,6 +42,42 @@ describe('the shelf entry (#413), against the shared fixture', () => {
     expect(laminate.layers).toEqual([]);
   });
 
+  // #713 review — the stored tube field was renamed `innerDiameter` → `wall`. A shelf written
+  // before the rename must keep loading, on READ only: the wall is derived, the legacy key never
+  // survives the parse (so every save writes `wall`), and an inside-out legacy tube is refused in
+  // the same words a new one would be.
+  describe('a tube stored before the rename', () => {
+    const tube = (size: Record<string, unknown>): Record<string, unknown> => ({
+      ...(SHELF[0] as Record<string, unknown>),
+      id: 'legacy-tube',
+      form: 'tube',
+      size: { length: 100, ...size },
+    });
+
+    it('loads with its wall derived as (diameter − innerDiameter) / 2, and drops the legacy key', () => {
+      const parsed = StockItemSchema.safeParse(tube({ diameter: 20, innerDiameter: 16 }));
+      expect(parsed.success, JSON.stringify(parsed.error?.issues)).toBe(true);
+      if (!parsed.success) return;
+      expect(parsed.data.size.wall).toBe(2);
+      expect('innerDiameter' in parsed.data.size).toBe(false);
+    });
+
+    it('prefers a stated wall when a record carries both keys', () => {
+      const parsed = StockItemSchema.safeParse(tube({ diameter: 20, wall: 2.5, innerDiameter: 16 }));
+      expect(parsed.success).toBe(true);
+      if (!parsed.success) return;
+      expect(parsed.data.size.wall).toBe(2.5);
+    });
+
+    it('refuses an inside-out legacy tube in its own words', () => {
+      const parsed = StockItemSchema.safeParse(tube({ diameter: 16, innerDiameter: 20 }));
+      expect(parsed.success).toBe(false);
+      if (parsed.success) return;
+      const text = JSON.stringify(parsed.error.issues);
+      expect(text).toContain('wall');
+    });
+  });
+
   it('refuses a sphere by name (Q20)', () => {
     expect(stockProblem({ ...PLATE, form: 'sphere' })).toContain(SPHERE_REFUSAL);
   });

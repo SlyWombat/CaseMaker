@@ -320,6 +320,68 @@ describe('#684 — the machine’s state and the stock’s numbers decide the mo
     expect(radio('rotary').disabled).toBe(true);
   });
 
+  // #713 review — step 2 no longer blocks a long rod, so Holding is where a rod that cannot stand
+  // in the jaws is caught: no vise seat takes it, and the wizard will not let the job leave held in
+  // one.
+  describe('a rod longer than the vise’s grip (#713 review)', () => {
+    const LONG_ROD = { length: 20, width: 20, thickness: 100, shape: 'cylinder' as const, diameter: 20 };
+    const ROD_ENTRY: JobStockEntry = {
+      kind: 'made',
+      shelfId: null,
+      file: null,
+      form: 'rod',
+      finish: 'rough',
+      conductive: false,
+    };
+
+    it('refuses every vise seat with the grip sentence, and blocks Next until the rod is in the chuck', () => {
+      // The machine carries the VISE on the pins: the chuck is one machine change away.
+      seedLocation(machineWith(BOARDS_AND_TAPE), [...DOC.accessories, ROTARY]);
+      openHolding(dj(LONG_ROD, ROD_ENTRY));
+
+      for (const mount of ['ledge', 'board', 'block']) {
+        expect(radio(mount).disabled, mount).toBe(true);
+        expect(rowText(mount)).toContain('the vise holds a rod up to 20 mm standing on its end');
+        expect(rowText(mount)).toContain('this rod is 100 mm');
+        expect(screen.queryByTestId(`engrave-setup-change-${mount}`)).toBeNull();
+      }
+      // The chuck is offered through Change the machine…, because the vise occupies the pins.
+      expect(radio('rotary').disabled).toBe(true);
+      expect(rowText('rotary')).toContain('needs the rotary on the pins');
+      expect(screen.getByTestId('engrave-setup-change-rotary')).toBeTruthy();
+      // …and the footer's rule matches the rows: Next is disabled, with the one sentence.
+      expect((screen.getByTestId('engrave-setup-next') as HTMLButtonElement).disabled).toBe(true);
+      expect(screen.getByTestId('start-wizard-holding-block').textContent).toContain(
+        'hold it in the rotary chuck',
+      );
+    });
+
+    it('lets the job through once the machine has the rotary on the pins and the rod is in the chuck', () => {
+      seedLocation(
+        machineWith(BOARDS_AND_TAPE, (m) => {
+          const placement = m.bedProfiles![0]!.placements[0]!;
+          m.bedProfiles![0]!.placements = [
+            {
+              ...placement,
+              id: 'pl-rotary',
+              where: { kind: 'pins', pins: 'rotary', anchor: null },
+            },
+          ];
+        }),
+        [...DOC.accessories, ROTARY],
+      );
+      openHolding(dj(LONG_ROD, ROD_ENTRY));
+
+      expect(radio('rotary').disabled).toBe(false);
+      act(() => {
+        fireEvent.click(radio('rotary'));
+      });
+      expect(useEngraveJobStore.getState().job.workholding.kind).toBe('rotary-chuck');
+      expect((screen.getByTestId('engrave-setup-next') as HTMLButtonElement).disabled).toBe(false);
+      expect(screen.queryByTestId('start-wizard-holding-block')).toBeNull();
+    });
+  });
+
   it('no machine record: the app’s three vise mounts still work, with no dead escape', () => {
     openHolding(dj({ length: 76.2, width: 38.1, thickness: 3.81 }));
 

@@ -21,7 +21,6 @@
 import { defaultStockProud, jobVise, validateVise } from '@/engine/cnc/fixture';
 import { FEEDS_TABLE } from '@/engine/cnc/feeds';
 import { MATERIAL_LABELS } from '@/engine/cnc/materials';
-import { rodDimsOf } from '@/engine/cnc/stockStart';
 import type { MillProfile } from '@/engine/cnc/machine';
 import {
   hasSacrificial,

@@ -99,6 +99,13 @@ export const StockItemSchema = z
         thickness: mm.nullable().optional(),
         diameter: mm.nullable().optional(),
         wall: mm.nullable().optional(),
+        /**
+         * LEGACY, READ-ONLY (#713 review): a house that stored a tube before the rename keeps its
+         * inner diameter here. It is accepted on READ, converted to `wall` (see the normaliser
+         * below) and never written again — every save emits `wall` alone. A record carrying both
+         * keys prefers `wall`.
+         */
+        innerDiameter: mm.nullable().optional(),
       })
       .strict(),
     layers: z.array(z.object({ name: filled, thickness: mm }).strict()).default([]),
@@ -122,6 +129,26 @@ export const StockItemSchema = z
     addedAt: filled,
   })
   .strict()
+  // #713 review — the shelf's stored tube field was renamed `innerDiameter` → `wall`. A record
+  // written before the rename is READ through this normaliser: when `wall` is absent and the
+  // legacy `innerDiameter` is present, the wall is `(diameter − innerDiameter) / 2`, which the
+  // refinements below then validate like any other (an inside-out legacy tube still fails the
+  // bore rule). The legacy key never survives the parse, so a save always writes `wall`.
+  .transform((item) => {
+    const inner = item.size.innerDiameter;
+    if (inner !== null && inner !== undefined && (item.size.wall === null || item.size.wall === undefined)) {
+      const outer = item.size.diameter;
+      if (outer !== null && outer !== undefined) {
+        const { innerDiameter: _legacy, ...size } = item.size;
+        return { ...item, size: { ...size, wall: (outer - inner) / 2 } };
+      }
+    }
+    if (item.size.innerDiameter !== null && item.size.innerDiameter !== undefined) {
+      const { innerDiameter: _legacy, ...size } = item.size;
+      return { ...item, size };
+    }
+    return item;
+  })
   .superRefine((item, ctx) => {
     const issue = (message: string, path: (string | number)[] = []) =>
       ctx.addIssue({ code: 'custom', message, path });

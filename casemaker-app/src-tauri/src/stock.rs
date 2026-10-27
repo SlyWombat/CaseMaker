@@ -84,6 +84,25 @@ pub struct StockSize {
     /// and the number a cut depth is capped by.
     #[serde(default)]
     pub wall: Option<f64>,
+    /// LEGACY, READ-ONLY (#713 review): a tube stored before the rename carries its inner diameter
+    /// here. Read on the way in, converted to `wall` (see `effective_wall`) and never written
+    /// again — `skip_serializing` keeps every save on `wall` alone. A record with both keys
+    /// prefers `wall`.
+    #[serde(default, skip_serializing)]
+    pub inner_diameter: Option<f64>,
+}
+
+impl StockSize {
+    /// A tube's wall: stated, or derived from a legacy inner diameter as `(outer − inner) / 2`.
+    /// The derivation is the read path's, so an old shelf row validates exactly like a new one —
+    /// including an inside-out legacy tube, whose derived wall fails the same positivity/bore
+    /// checks with the same words.
+    fn effective_wall(&self) -> Option<f64> {
+        self.wall.or_else(|| match (self.diameter, self.inner_diameter) {
+            (Some(outer), Some(inner)) => Some((outer - inner) / 2.0),
+            _ => None,
+        })
+    }
 }
 
 /// One layer of a colour stack, from the top down (the two-colour blank, laminated acrylic).
@@ -213,7 +232,7 @@ impl StockItem {
             }
             StockForm::Tube => {
                 let outer = positive(id, "diameter", s.diameter)?;
-                let wall = positive(id, "wall", s.wall)?;
+                let wall = positive(id, "wall", s.effective_wall())?;
                 positive(id, "length", s.length)?;
                 if 2.0 * wall >= outer {
                     return Err(bad(id, "a tube's wall must leave a bore — two walls are less than its outer diameter"));
@@ -482,6 +501,74 @@ pub(crate) mod tests {
         for (why, item) in cases {
             assert!(matches!(item.validate(), Err(HouseError::BadEntry(_))), "{why} was accepted");
         }
+    }
+
+    #[test]
+    fn a_legacy_tube_reads_its_inner_diameter_as_a_wall() {
+        // #713 review — a row stored before the rename carries `innerDiameter` and no `wall`.
+        let json = r#"{
+            "id": "old-tube",
+            "material": "pla",
+            "form": "tube",
+            "size": { "diameter": 20.0, "innerDiameter": 16.0, "length": 100.0 },
+            "finish": "rough",
+            "flatness": "flat",
+            "conductive": false,
+            "quantity": 1,
+            "source": "other",
+            "addedAt": "2026-10-01T00:00:00.000Z"
+        }"#;
+        let item: StockItem = serde_json::from_str(json).expect("a legacy tube deserialises");
+        item.validate().expect("a legacy tube with a real wall loads");
+        assert_eq!(item.size.effective_wall(), Some(2.0));
+        // It is READ-ONLY: the saved record carries `wall` and never the legacy key again.
+        let saved = serde_json::to_value(StockSize {
+            wall: Some(2.0),
+            inner_diameter: Some(16.0),
+            ..StockSize::default()
+        })
+        .unwrap();
+        assert!(saved.get("wall").is_some());
+        assert!(saved.get("innerDiameter").is_none(), "{saved}");
+    }
+
+    #[test]
+    fn a_tube_with_both_keys_prefers_the_wall() {
+        let json = r#"{
+            "id": "both-tube",
+            "material": "pla",
+            "form": "tube",
+            "size": { "diameter": 20.0, "wall": 2.5, "innerDiameter": 16.0, "length": 100.0 },
+            "finish": "rough",
+            "flatness": "flat",
+            "conductive": false,
+            "quantity": 1,
+            "source": "other",
+            "addedAt": "2026-10-01T00:00:00.000Z"
+        }"#;
+        let item: StockItem = serde_json::from_str(json).expect("both keys deserialise");
+        item.validate().expect("the stated wall is the one that counts");
+        assert_eq!(item.size.effective_wall(), Some(2.5));
+    }
+
+    #[test]
+    fn an_inside_out_legacy_tube_is_refused_in_words() {
+        // The derived wall is ≤ 0, so the same positivity rule refuses it, with the same sentence.
+        let json = r#"{
+            "id": "bad-tube",
+            "material": "pla",
+            "form": "tube",
+            "size": { "diameter": 16.0, "innerDiameter": 20.0, "length": 100.0 },
+            "finish": "rough",
+            "flatness": "flat",
+            "conductive": false,
+            "quantity": 1,
+            "source": "other",
+            "addedAt": "2026-10-01T00:00:00.000Z"
+        }"#;
+        let item: StockItem = serde_json::from_str(json).expect("the record still deserialises");
+        let err = item.validate().unwrap_err();
+        assert!(err.to_string().contains("wall"), "{err}");
     }
 
     #[test]

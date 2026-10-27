@@ -30,6 +30,7 @@ import { previousWizardStep, wizardNextLabel, wizardStep, wizardStepLine, type W
 import { MachineStep } from './MachineStep';
 import { StockStep } from './StockStep';
 import { HoldingStep } from './HoldingStep';
+import { currentMount, mechanismOf, rodViseProblem } from './holdingMounts';
 import { OperationStep, operationCreateBlocked, type OperationChoice } from './OperationStep';
 import type { PendingStock, StartStockSeed } from './StartStockStep';
 
@@ -690,6 +691,21 @@ export function StartWizard(): JSX.Element {
   const stockUnblock =
     step === 'stock' && pending === null && confirmReplace === null && startError === null && !starting;
 
+  // #713 review — a rod longer than the vise's grip has no vise mount, so the wizard must not let
+  // the job LEAVE Holding held in one: while the answers are in a vise seat and the stock is a rod
+  // too long for it, Next is disabled and carries the one sentence that unblocks it (hold it in
+  // the rotary chuck, or change the stock). The mount options already refuse those seats; this is
+  // the footer's same rule, because a job opened on a vise mount would otherwise pass through.
+  const roundStock =
+    job.stockEntry?.form === 'rod' || job.stockEntry?.form === 'tube' || job.stock.shape === 'cylinder';
+  // The answers' mount is the rotary when the job is in the chuck; otherwise the vise answers'
+  // seat names it (the same reading HoldingStep draws its radios from).
+  const currentHolding = answers.workholding === 'rotary' ? 'rotary' : currentMount(answers);
+  const holdingBlock =
+    step === 'holding' && mechanismOf(currentHolding) === 'vise'
+      ? rodViseProblem(answers.stock, roundStock)
+      : null;
+
   return createPortal(
     <div style={OVERLAY} data-testid="start-wizard">
       <div style={step === 'holding' ? BOX_WIDE : BOX} role="dialog" aria-label="New cutting job">
@@ -710,6 +726,11 @@ export function StartWizard(): JSX.Element {
         {stockUnblock && (
           <p style={UNBLOCK} data-testid="start-wizard-stock-unblock">
             Choose the stock above — a piece on the shelf, a size you type, or a file.
+          </p>
+        )}
+        {holdingBlock !== null && (
+          <p style={UNBLOCK} data-testid="start-wizard-holding-block">
+            {holdingBlock}.
           </p>
         )}
 
@@ -754,6 +775,7 @@ export function StartWizard(): JSX.Element {
               type="button"
               data-testid="engrave-setup-next"
               style={doneStep ? undefined : { padding: '3px 12px' }}
+              disabled={holdingBlock !== null}
               onClick={next}
             >
               {wizardNextLabel('holding', reEntry)}

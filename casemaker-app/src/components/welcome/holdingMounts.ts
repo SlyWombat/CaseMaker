@@ -31,6 +31,7 @@ import {
   VISE_FLOOR_DEPTH,
   seatDepth,
 } from '@/engine/cnc/fixture';
+import { ROD_VISE_MAX_LENGTH_MM } from '@/engine/cnc/stockStart';
 import { rotaryFits } from '@/engine/cnc/setups/plan';
 import type { SetupAnswers } from '@/engine/cnc/engrave/setupFlow';
 import { TAPE_DEFAULTS, defaultBracketHold, defaultTapeHold } from '@/engine/cnc/engrave/jobSetup';
@@ -309,6 +310,29 @@ function costWords(current: MachineMountKind, needed: MachineMountKind): string 
  * cost and escape; the job engine's vise-only limit is the last word only when the machine already
  * carries the mount the option needs.
  */
+/**
+ * Why a ROUND stock cannot be held in the vise at all, or null (#713 review). A rod stands on its
+ * end in the jaws, and the vise's grip is its floor depth, so a rod longer than that has no vise
+ * mount — the chuck is the only one. The box says which frame it is in: standing (`D × D × L`, so
+ * the THICKNESS is the rod's length) or the chuck's axis frame (`L × D × D`, so the LENGTH is) —
+ * the rod's own length is read off the frame, never assumed.
+ */
+export function rodViseProblem(
+  stock: { length: number; width: number; thickness: number },
+  round: boolean,
+): string | null {
+  if (!round) return null;
+  // Axis frame: `L × D × D`, so width === thickness and the LENGTH is the rod's. Standing:
+  // `D × D × L`, so the THICKNESS is.
+  const axisFrame = Math.abs(stock.width - stock.thickness) <= 1e-9;
+  const rodLength = axisFrame ? stock.length : stock.thickness;
+  if (rodLength <= ROD_VISE_MAX_LENGTH_MM) return null;
+  return (
+    `the vise holds a rod up to ${fmt(ROD_VISE_MAX_LENGTH_MM)} mm standing on its end — this rod is ` +
+    `${fmt(rodLength)} mm; hold it in the rotary chuck`
+  );
+}
+
 export function mountOptions(args: MountOptionArgs): MountOption[] {
   const { machine, accessories, stock } = args;
   const boardMm = args.boardMm ?? DEFAULT_BOARD_MM;
@@ -336,6 +360,17 @@ export function mountOptions(args: MountOptionArgs): MountOption[] {
     if (!owned) {
       out.push({ ...base, hint: null, disabled: true, reason: 'not owned', escape: null });
       continue;
+    }
+
+    // #713 review — a rod too long for the vise's grip has NO vise mount: it stands on its end in
+    // the jaws and the vise holds it only up to its floor depth. The stock's own refusal, so no
+    // machine change can fix it; the chuck (or a shorter rod) is the way out.
+    if (mechanism === 'vise') {
+      const rodProblem = rodViseProblem(stock, args.round === true);
+      if (rodProblem !== null) {
+        out.push({ ...base, hint: null, disabled: true, reason: rodProblem, escape: null });
+        continue;
+      }
     }
 
     // Stock that cannot sit in the mount is the stock's own refusal; a machine change cannot fix it.
