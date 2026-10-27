@@ -283,6 +283,15 @@ export const ROTARY_UNMEASURED_REFUSAL =
   "The rotary module has not been measured on this machine yet — this program can be checked and saved; running it waits for the module's bench check.";
 
 /**
+ * #545/#240 — the other rotary refusal: the machine cannot turn A at all. A rotary job or a
+ * rotary-frame program must never reach a machine with no module, and a run path that cannot read
+ * a machine record cannot prove one is there — so both cases refuse here rather than falling
+ * through to the bench sentence, which would claim a module exists.
+ */
+export const ROTARY_NO_MODULE_REFUSAL =
+  'This machine has no rotary module — a rotary program cannot run on it.';
+
+/**
  * #545 — does the machine still carry a rotary figure that is not a measurement?
  *
  * The rule is per FIELD (`RotaryProfile.sources`, R-1): each source is the prose that says where
@@ -290,15 +299,15 @@ export const ROTARY_UNMEASURED_REFUSAL =
  * as measured when its source BEGINS with `measured` — equality with the bare word would never lift
  * the refusal, because the recorded form carries the issue and date.
  *
- * An UNKNOWN machine (no record, or no record passed) cannot be proven measured, so a rotary
- * question is refused. A profile with NO rotary block has no rotary figure at all — nothing the
- * bench could replace — so this rule does not hold it back; `true` means "a rotary question
- * exists and the numbers are not measurements yet".
+ * `true` means "a rotary question exists and the numbers are not measurements yet". An UNKNOWN
+ * machine cannot be proven measured, so it reads unmeasured here too; a profile with no rotary
+ * block is a different refusal entirely ({@link ROTARY_NO_MODULE_REFUSAL}) and is decided by the
+ * caller BEFORE this function, because "nothing to measure" is not "measured".
  */
 export function rotaryUnmeasured(machine: Pick<MillProfile, 'rotary'> | null | undefined): boolean {
   if (machine === undefined || machine === null) return true;
   const rotary = machine.rotary;
-  if (rotary === undefined) return false;
+  if (rotary === undefined) return true;
   return Object.values(rotary.sources).some((source) => !source.trim().toLowerCase().startsWith('measured'));
 }
 
@@ -324,6 +333,12 @@ export function programFrame(p: { frame?: 'flat' | 'rotary' }): 'flat' | 'rotary
 export function rotaryRunBlocker(v: EngraveRunView): string | null {
   const rotaryProgram = (v.generated?.programs ?? []).some((p) => programFrame(p) === 'rotary');
   if (v.rotaryHeld !== true && !rotaryProgram) return null;
+  // #240 review — A words must never reach a machine that cannot turn A. An unknown machine is
+  // this case, not the bench one: the record cannot show a module, so claiming one is "unmeasured"
+  // would be inventing the axis.
+  if (v.machine === undefined || v.machine === null || v.machine.rotary === undefined) {
+    return ROTARY_NO_MODULE_REFUSAL;
+  }
   return rotaryUnmeasured(v.machine) ? ROTARY_UNMEASURED_REFUSAL : null;
 }
 
