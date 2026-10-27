@@ -807,13 +807,12 @@ const primitiveSchema = z
   });
 
 /**
- * The embedded reference object (#435), strict like the other owned v3 blocks: an unknown key is
- * refused by path rather than silently dropped. `data` is base64 and capped at the same 4 MiB the
- * import path enforces, so a hand-edited document cannot make the app decode an unbounded string.
- * The hex pattern is the #425 `jobSourceSchema` rule — a lowercase SHA-256 is the object's identity.
+ * The reference / goal object (#435), strict like the other owned v3 blocks: an unknown key is
+ * refused by path rather than silently dropped. `data` is base64 and OPTIONAL (#720): the bytes
+ * live in the app's mesh store keyed by `sha256`, so the persisted job carries only the hash, the
+ * size and the name, and a .cutjob embeds them when the open job still holds them. The hex pattern
+ * is the #425 `jobSourceSchema` rule — a lowercase SHA-256 is the object's identity.
  */
-const MAX_TARGET_OBJECT_BASE64_CHARS = Math.ceil((4 * 1024 * 1024) / 3) * 4;
-
 /**
  * #535 — a goal mesh's surfacing settings. Every field OPTIONAL: an absent key is "use the
  * default" (the feeds row, or the shop's finish allowance and flat-grid pitch), so a document
@@ -850,11 +849,14 @@ const targetObjectSchema = z
       .string()
       .regex(/^[0-9a-f]{64}$/, 'a lowercase SHA-256 (64 hex characters)')
       .describe('Lowercase SHA-256 of the mesh file\'s bytes (64 hex characters).'),
+    // #720 — OPTIONAL: the bytes live beside the job (an IndexedDB blob keyed by the SHA-256),
+    // and the .cutjob file embeds them only when the open job still holds them. A document with no
+    // `data` is a job whose mesh has to be found again (or imported again).
     data: z
       .string()
       .min(1)
-      .max(MAX_TARGET_OBJECT_BASE64_CHARS)
-      .describe('Base64 of the mesh file, at most 4 MiB decoded.'),
+      .optional()
+      .describe('Base64 of the mesh file; omitted while the bytes live in the app’s mesh store or are missing.'),
     size: z
       .object({
         x: z.number().finite().positive().describe('Mesh bounding-box size along X, in millimetres.'),

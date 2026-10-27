@@ -577,8 +577,13 @@ export interface EngraveTargetObject {
   format: 'stl' | '3mf' | 'png';
   /** SHA-256 of the raw bytes, lowercase hex — the object's identity and the mesh cache key. */
   sha256: string;
-  /** The raw file bytes, base64. Capped at 4 MiB on import (the #425 embedded-source rule). */
-  data: string;
+  /**
+   * The raw file bytes, base64 — present in the OPEN job and in a .cutjob file that embeds them.
+   * Absent in the localStorage copy (#720: the bytes live in the app's IndexedDB mesh store, keyed
+   * by `sha256`, so a 12 MB model is not base64'd into a ~5 MB quota), and absent when that blob
+   * is gone — then the job says so and asks for an import again.
+   */
+  data?: string;
   /** Parsed bounding size in mm. */
   size: { x: Mm; y: Mm; z: Mm };
   position: { x: Mm; y: Mm; z: Mm };

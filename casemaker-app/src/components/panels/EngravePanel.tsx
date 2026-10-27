@@ -2130,7 +2130,9 @@ export function EngravePanel(): JSX.Element {
   // #672 — a picture goal's pixel size, decoded once per image (the document stores the bytes and
   // the two numbers; the pixels are derived here for the row's resolution sentence).
   const reliefPixels = useMemo(() => {
-    if (target === null || target.format !== 'png') return null;
+    // #720 — the bytes may be absent (the mesh store lost them, or a reload has not re-attached
+    // them yet): nothing to decode, and the job's finding says what to do about it.
+    if (target === null || target.format !== 'png' || target.data === undefined) return null;
     try {
       const decoded = decodePng(new Uint8Array(base64ToArrayBuffer(target.data)));
       return decoded.ok ? { width: decoded.image.width, height: decoded.image.height } : null;

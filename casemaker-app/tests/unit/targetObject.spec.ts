@@ -5,12 +5,7 @@
 // `crypto.subtle`, so the real path is exercised rather than a stub.
 
 import { describe, it, expect } from 'vitest';
-import {
-  MAX_TARGET_OBJECT_BYTES,
-  clearTargetObjectMeshCache,
-  readTargetObjectFile,
-  targetObjectMesh,
-} from '@/engine/import/targetObject';
+import { clearTargetObjectMeshCache, readTargetObjectFile, targetObjectMesh } from '@/engine/import/targetObject';
 import { base64ToArrayBuffer } from '@/engine/import/base64';
 
 const ASCII = `solid tet
@@ -77,12 +72,25 @@ describe('#435 — reading a target object', () => {
     expect(flatResult.ok).toBe(false);
     if (flatResult.ok) return;
     expect(flatResult.error).toContain('flat in at least one direction');
+  });
 
-    const huge = new File([new Uint8Array(MAX_TARGET_OBJECT_BYTES + 1)], 'huge.stl');
-    const hugeResult = await readTargetObjectFile(huge, 't');
-    expect(hugeResult.ok).toBe(false);
-    if (hugeResult.ok) return;
-    expect(hugeResult.error).toContain('larger than the 4 MB limit');
+  it('#720 — a mesh larger than the old 4 MiB cap imports: there is no cap any more', async () => {
+    // A VALID ASCII STL past the old limit (facets repeated with a changing z): the cap is what
+    // #720 removed, and a real 3D model is often three times its size.
+    const facet = (i: number): string =>
+      `facet normal 0 0 1\n  outer loop\n    vertex 0 0 0\n    vertex 10 0 0\n    vertex 0 10 ${i % 7}\n  endloop\nendfacet\n`;
+    let big = 'solid big\n';
+    for (let i = 0; big.length <= 4.5 * 1024 * 1024; i++) big += facet(i);
+    big += 'endsolid big\n';
+    expect(big.length).toBeGreaterThan(4 * 1024 * 1024);
+
+    const result = await readTargetObjectFile(new File([big], 'big.stl'), 'tgt-big');
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.format).toBe('stl');
+    expect(result.size).toEqual({ x: 10, y: 10, z: 6 });
+    // The embedded payload is the file's bytes, base64'd, with no trimming at any size.
+    expect(result.data.length).toBe(Math.ceil(big.length / 3) * 4);
   });
 
   it('decodes the embedded mesh, and the cache is keyed by the hash', () => {

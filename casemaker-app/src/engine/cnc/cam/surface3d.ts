@@ -283,6 +283,9 @@ function sampleImageHeightfield(
   const topZ = opts.stockTopZ ?? 0;
   const requestedPitch = positive(opts.pitchMm) ? (opts.pitchMm as number) : DEFAULT_GRID_PITCH_MM;
   const maxCells = positive(opts.maxCells) ? (opts.maxCells as number) : DEFAULT_MAX_CELLS;
+  // #720 — the bytes live beside the document; without them there is no picture to sample. The
+  // job's `target-mesh-missing` finding refuses the Generate before this runs.
+  if (target.data === undefined) throw new Error('the image relief has no bytes loaded — import the picture again');
   const decoded = decodePng(new Uint8Array(base64ToArrayBuffer(target.data)));
   if (!decoded.ok) {
     throw new Error(`the image relief could not be read: ${decoded.error}`);

@@ -22,6 +22,7 @@ import { sacrificialForNewJob } from '@/engine/cnc/sacrificial';
 import { resolveTool } from '@/engine/cnc/toolRegistry';
 import { cuttingDiameter } from '@/engine/cnc/tool';
 import { applyHoldAnswers, type SetupAnswers } from '@/engine/cnc/engrave/setupFlow';
+import { getMeshBlob, putMeshBlob } from '@/platform/meshBlobs';
 import {
   itemKindWord,
   itemRowName,
@@ -230,10 +231,22 @@ export const ENGRAVE_JOB_LEGACY_KEY = 'casemaker.engraveJob.v1';
 /** Where a payload that failed validation is parked so it is not silently lost. */
 export const ENGRAVE_JOB_REJECTED_KEY = `${ENGRAVE_JOB_KEY}.rejected`;
 
+/**
+ * #720 — the localStorage copy never carries target-mesh bytes. They live in the mesh blob store
+ * (IndexedDB, keyed by SHA-256): a 12 MB model is ~16 MB base64'd, against a ~5 MB quota. The
+ * OPEN job keeps them in memory, and the .cutjob file still embeds them (a saved job is
+ * self-contained); a reload re-attaches them from the blob store by hash.
+ */
+function withoutMeshData(job: EngraveJob): EngraveJob {
+  if (job.targetObject === undefined || job.targetObject.data === undefined) return job;
+  const { data: _data, ...target } = job.targetObject;
+  return { ...job, targetObject: target };
+}
+
 function persist(job: EngraveJob): void {
   if (typeof localStorage === 'undefined') return;
   try {
-    localStorage.setItem(ENGRAVE_JOB_KEY, JSON.stringify(job));
+    localStorage.setItem(ENGRAVE_JOB_KEY, JSON.stringify(withoutMeshData(job)));
   } catch {
     // ignore quota / private-mode errors
   }
@@ -1160,7 +1173,70 @@ export interface EngraveJobState {
   setJobMargins: (margins: EngraveMargins | null) => void;
   replace: (job: EngraveJob) => void;
   reset: () => void;
+  /**
+   * #720 — where the target mesh's bytes are: absent (no target), 'loading' (the persisted job
+   * names a hash and the blob store is being asked), 'ready' (the open job holds them), or
+   * 'missing' (this browser no longer has them — the job says so and asks for an import again).
+   * Store state, never persisted: the document carries only hash, size and name.
+   */
+  targetBlob: TargetBlobState;
 }
+
+/** #720 — the target mesh's byte state in this session (see `EngraveJobState.targetBlob`). */
+export type TargetBlobState = 'none' | 'loading' | 'ready' | 'missing';
+
+/**
+ * #720 — ask the blob store for the mesh the persisted job names, and put it back into the open
+ * job. Called at store start-up and whenever a document without bytes lands; a miss is a state
+ * the findings read ('missing'), never a silent empty goal. Re-reads the job before writing, so a
+ * reload or an edit in the meantime is not overwritten.
+ */
+export async function reattachTargetBlob(): Promise<void> {
+  const target = useEngraveJobStore.getState().job.targetObject;
+  if (target === undefined || target.data !== undefined) return;
+  const sha = target.sha256;
+  let data: string | null = null;
+  try {
+    data = await getMeshBlob(sha);
+  } catch {
+    data = null;
+  }
+  const current = useEngraveJobStore.getState().job.targetObject;
+  if (current === undefined || current.sha256 !== sha || current.data !== undefined) return;
+  if (data === null) {
+    useEngraveJobStore.setState({ targetBlob: 'missing' });
+    return;
+  }
+  useEngraveJobStore.setState((s) => ({
+    job:
+      s.job.targetObject !== undefined && s.job.targetObject.sha256 === sha
+        ? { ...s.job, targetObject: { ...s.job.targetObject, data } }
+        : s.job,
+    targetBlob: 'ready',
+  }));
+  persist(useEngraveJobStore.getState().job);
+}
+
+/** The blob state a job's target starts in: the open job with bytes is ready, without is loading. */
+function initialTargetBlob(job: EngraveJob): TargetBlobState {
+  if (job.targetObject === undefined) return 'none';
+  return job.targetObject.data === undefined ? 'loading' : 'ready';
+}
+
+/**
+ * #720 — the job read at start-up, put in step with the blob store. A job WRITTEN before this
+ * slice (or read from the v1 legacy slot) still embeds its mesh: its bytes must reach the store
+ * BEFORE the next persist strips them, or the first reload after the upgrade loses the mesh. A
+ * job that starts without bytes asks the store for them instead.
+ */
+export function adoptInitialTargetBlob(job: EngraveJob): void {
+  const target = job.targetObject;
+  if (target === undefined) return;
+  if (target.data !== undefined) void putMeshBlob(target.sha256, target.data).catch(() => undefined);
+  else void reattachTargetBlob();
+}
+
+const initialJob = loadJob();
 
 export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
   /** Arm the 8 s window for whatever is on top now; an empty stack has nothing to retire. */
@@ -1225,7 +1301,8 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
   };
 
   return {
-    job: loadJob(),
+    job: initialJob,
+    targetBlob: initialTargetBlob(initialJob),
 
     // #347 — the id alone, and no other field. See the interface's own doc for why.
     setMachine: (id) => apply((job) => (job.machineId === id ? job : { ...job, machineId: id })),
@@ -1700,7 +1777,18 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
       );
     },
 
-    setTargetObject: (target) => apply((job) => ({ ...job, targetObject: target })),
+    setTargetObject: (target) => {
+      // #720 — the bytes go BESIDE the job in the same write: the open job holds them, the
+      // persisted copy keeps the hash and the blob store keeps the mesh.
+      if (typeof target.data === 'string') {
+        void putMeshBlob(target.sha256, target.data).catch(() => undefined);
+        set({ targetBlob: 'ready' });
+      } else {
+        set({ targetBlob: 'loading' });
+      }
+      apply((job) => ({ ...job, targetObject: target }));
+      if (target.data === undefined) void reattachTargetBlob();
+    },
 
     updateTargetObject: (patch) =>
       apply((job) => {
@@ -2351,9 +2439,22 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
         return { ...job, margins: { ...margins } };
       }),
 
-    replace: (job) => apply(() => job),
+    replace: (job) => {
+      const target = job.targetObject;
+      if (target?.data !== undefined) {
+        void putMeshBlob(target.sha256, target.data).catch(() => undefined);
+        set({ targetBlob: 'ready' });
+      } else {
+        set({ targetBlob: target === undefined ? 'none' : 'loading' });
+      }
+      apply(() => job);
+      if (target !== undefined && target.data === undefined) void reattachTargetBlob();
+    },
 
-    reset: () => apply(() => newDefaultJob()),
+    reset: () => {
+      set({ targetBlob: 'none' });
+      apply(() => newDefaultJob());
+    },
 
     removalUndo: [],
 
@@ -2404,3 +2505,8 @@ export function resetEngraveRemovalUndo(): void {
   clearUndoWindow();
   useEngraveJobStore.setState({ removalUndo: [] });
 }
+
+
+// #720 — the start-up job and the blob store are put in step: a pre-#720 document's embedded mesh
+// is stored, and a hash-only document's bytes are fetched back, before anything reads the job.
+adoptInitialTargetBlob(initialJob);

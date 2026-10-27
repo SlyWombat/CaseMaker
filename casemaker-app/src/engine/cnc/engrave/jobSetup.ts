@@ -240,6 +240,7 @@ export type JobFindingCode =
   // The reference object is never cut (#435): it is what the pockets are FOR. `stock − target` is
   // the profile cut-out work tracked in #218, so this is a warning, not an error.
   | 'target-object-not-cut'
+  | 'target-mesh-missing'
   // A GOAL object (#533): the embedded mesh IS the shape to make, so it is not warned as uncut.
   // `goal-object-oversize` is the sane-size check — the goal's footprint or depth exceeds the
   // blank it would be carved from, so no toolpath could reproduce it from this stock (an error).
@@ -1027,6 +1028,21 @@ export function validateJob(
   // written before #533 keeps today's behaviour exactly.
   if (job.targetObject?.enabled === true) {
     const target = job.targetObject;
+    // #720 — the mesh's BYTES live beside the document now (the persisted job carries the hash,
+    // the size and the name). When this browser no longer holds them, the job says so in words the
+    // operator can act on: a goal cannot be made without its shape, and a reference cannot be
+    // drawn. The import door is the fix in both cases.
+    if (target.data === undefined) {
+      const role = target.role ?? 'reference';
+      findings.push({
+        severity: role === 'goal' ? 'error' : 'warning',
+        code: 'target-mesh-missing',
+        labelId: target.id,
+        message:
+          `The ${role === 'goal' ? 'goal' : 'reference'} mesh “${target.name}” is not in this ` +
+          `browser any more — Import it again.`,
+      });
+    }
     if ((target.role ?? 'reference') === 'goal') {
       // A GOAL (#533) IS the work, so it is never warned as uncut. It is validated instead
       // ({@link validateGoalObject}), which the pure-goal generate path reuses (#539). #535 — the

@@ -32,8 +32,12 @@ export function parse3MF(buf: ArrayBuffer): ParsedMesh {
       );
     }
     if (localVerts.length === 0 || objectTris.length === 0) continue;
-    positions.push(...localVerts);
-    indices.push(...objectTris);
+    // #720 — APPEND, do not spread: a real model's vertex/triangle arrays run to hundreds of
+    // thousands of entries, and `push(...array)` overflows the call stack at that size (observed on
+    // a 318k-triangle terrain: "Maximum call stack size exceeded"). The cap this slice removes was
+    // hiding the ceiling; a 12 MB model reaches it immediately.
+    for (const value of localVerts) positions.push(value);
+    for (const value of objectTris) indices.push(value);
     vertexBase += localVerts.length / 3;
   }
 

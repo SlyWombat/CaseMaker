@@ -1,9 +1,15 @@
 /**
  * The reference object a job's 3D primitives are positioned against (#435).
  *
- * The file is read ONCE at import: it is parsed for its bounding size and embedded as base64, so
- * the job remains self-contained (the #425 embedded-source rule). The SHA-256 is the object's
- * identity and the mesh cache key; re-importing the same bytes therefore decodes once.
+ * The file is read ONCE at import: it is parsed for its bounding size and returned as base64. The
+ * SHA-256 is the object's identity and the mesh cache key; re-importing the same bytes therefore
+ * decodes once.
+ *
+ * #720 — NO SIZE CAP. The bytes do not ride in the persisted job any more: the store keeps them in
+ * an IndexedDB blob keyed by the SHA-256 and the localStorage copy carries only the hash, the size
+ * and the name (the .cutjob file still embeds them, so a saved document stays self-contained). A
+ * 12 MB model is an ordinary goal now; nothing is decimated, because the heightfield is sampled at
+ * the job's grid pitch whatever the mesh's triangle count.
  *
  * Pure parsing lives in `stlParser.ts` / `threeMfParser.ts`; only `readTargetObjectFile` touches
  * the browser's `File` and `crypto.subtle`, and it never throws — every failure is a sentence the
@@ -16,9 +22,6 @@ import { parseStl, type ParsedMesh } from './stlParser';
 import { parse3MF } from './threeMfParser';
 import { decodePng } from './png';
 import { DEFAULT_RELIEF_DEPTH_MM } from '@/engine/cnc/cam/relief';
-
-/** The same 4 MiB cap the #425 embedded source files use. */
-export const MAX_TARGET_OBJECT_BYTES = 4 * 1024 * 1024;
 
 export type TargetObjectFormat = EngraveTargetObject['format'];
 
@@ -69,13 +72,6 @@ export async function readTargetObjectFile(
   const format = formatOf(file.name);
   if (format === null) {
     return { ok: false, error: `${file.name} is not an STL, 3MF or PNG file.` };
-  }
-  if (file.size > MAX_TARGET_OBJECT_BYTES) {
-    const mb = (file.size / (1024 * 1024)).toFixed(1);
-    return {
-      ok: false,
-      error: `${file.name} is ${mb} MB — larger than the ${MAX_TARGET_OBJECT_BYTES / (1024 * 1024)} MB limit for a target object.`,
-    };
   }
   if (file.size === 0) return { ok: false, error: `${file.name} is empty.` };
 
@@ -205,7 +201,7 @@ const meshCache = new Map<string, ParsedMesh>();
  * The parsed mesh for an embedded target object, cached by its SHA-256. A decode failure is a
  * malformed document rather than a user error; the viewport treats it as "draw nothing".
  */
-export function targetObjectMesh(target: Pick<EngraveTargetObject, 'sha256' | 'format' | 'data'>): ParsedMesh {
+export function targetObjectMesh(target: Pick<EngraveTargetObject, 'sha256' | 'format'> & { data?: string }): ParsedMesh {
   // #672 — a picture has no mesh: its heights are sampled from the pixels (surface3d's image
   // branch). The viewport's draw catches this and draws nothing, which is the honest picture of a
   // relief that has not been cut yet.
@@ -214,6 +210,9 @@ export function targetObjectMesh(target: Pick<EngraveTargetObject, 'sha256' | 'f
   }
   const cached = meshCache.get(target.sha256);
   if (cached) return cached;
+  // #720 — the bytes may be missing (the blob store lost them, or they have not been re-attached
+  // yet): the call sites draw nothing, and Generate refuses with the sentence that says so.
+  if (target.data === undefined) throw new Error('the mesh bytes are not loaded');
   const bytes = ((): ArrayBuffer => {
     const binary = atob(target.data);
     const out = new Uint8Array(binary.length);

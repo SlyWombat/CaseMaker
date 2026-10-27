@@ -5446,8 +5446,7 @@
       "description": "Reference mesh the primitives are positioned against; omit for none.",
       "properties": {
         "data": {
-          "description": "Base64 of the mesh file, at most 4 MiB decoded.",
-          "maxLength": 5592408,
+          "description": "Base64 of the mesh file; omitted while the bytes live in the app’s mesh store or are missing.",
           "minLength": 1,
           "type": "string"
         },
@@ -5616,7 +5615,6 @@
         "name",
         "format",
         "sha256",
-        "data",
         "size",
         "position",
         "rotation",
