@@ -660,6 +660,27 @@ export function switchActiveProfile(
 }
 
 /**
+ * #730 — the machine record a JOB runs on: the one whose profile id the job names, else the house's
+ * only machine (a job written before machine ids meant anything). With two machines and a job that
+ * names neither, there is no honest answer and the caller gets null rather than the wrong bed.
+ *
+ * The three readers of the bed's through facts (the run store, the preview store and the panel's
+ * fallback) used `location.machines[0]`; in a two-machine house that judged a job against the first
+ * machine's wasteboard and board stock.
+ */
+export function machineForJob(
+  location: { machines: readonly MachineRecord[] } | null | undefined,
+  machineId: string | null | undefined,
+): MachineRecord | null {
+  const machines = location?.machines ?? [];
+  if (machineId !== null && machineId !== undefined && machineId !== '') {
+    const match = machines.find((m) => m.profileId === machineId);
+    if (match !== undefined) return match;
+  }
+  return machines.length === 1 ? (machines[0] ?? null) : null;
+}
+
+/**
  * #712 — what this machine's bed carries under the stock, for the through-cut gate
  * (`BedUnderFacts`, design `bed-mounts-flow.md` §3.5): the active profile's surface, the
  * wasteboard's thickness when that is the surface, and the thinnest house board thick enough for a

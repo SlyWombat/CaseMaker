@@ -41,7 +41,7 @@ import { borePitchMm, boreRampAngleFrom } from '@/engine/cnc/cam/drill';
 import { readDefault } from '@/platform/defaultsClient';
 import { caseWordsForKey } from '@/engine/cnc/toolCondition';
 import { dedupeFindings, itemKindWord, itemRowName, jobSetups, jobTool, validateJob, type JobFinding } from '@/engine/cnc/engrave/jobSetup';
-import { bedUnderFacts } from '@/platform/bedProfiles';
+import { bedUnderFacts, machineForJob } from '@/platform/bedProfiles';
 import type { RestChoice } from '@/components/panels/RestCutterControl';
 import {
   hasRegionItems,
@@ -945,7 +945,10 @@ export function EngravePanel(): JSX.Element {
   // store reads them (the worker cannot see the location). Without them a taped cut-out over the
   // wasteboard reads "reaches the vise" until the preview lands, and the blocker refuses it.
   const shopDefaults = useShopDefaultsStore((s) => s.defaults);
-  const locationMachine = useLocationStore((s) => s.location?.machines[0] ?? null);
+  // #730 — the record for THIS job's machine (its `machineId` is a profile id), not the house's
+  // first machine: two machines give two beds.
+  const locationView = useLocationStore((s) => s.location);
+  const locationMachine = useMemo(() => machineForJob(locationView, job.machineId), [locationView, job.machineId]);
   const bedFacts = useMemo(
     () =>
       bedUnderFacts(locationMachine, shopDefaults, job.breakthrough + 1, {

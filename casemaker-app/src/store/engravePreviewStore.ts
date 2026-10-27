@@ -24,7 +24,7 @@ import type { FeedCatalogueRow } from '@/engine/cnc/feeds';
 import { inventoryConditions, type ConditionSummary } from '@/engine/cnc/toolCondition';
 import { probeResiduals, type ProbeResiduals } from '@/engine/cnc/probePlan';
 import { effectiveMargins } from '@/engine/cnc/engrave/depthBounds';
-import { bedUnderFacts } from '@/platform/bedProfiles';
+import { bedUnderFacts, machineForJob } from '@/platform/bedProfiles';
 import { useEngraveJobStore } from './engraveJobStore';
 import { useLocationStore } from './locationStore';
 import { useSettingsStore } from './settingsStore';
@@ -130,7 +130,7 @@ export const useEngravePreviewStore = create<EngravePreviewState>()((set) => {
           // bed profile lives in the location and the worker cannot read it. Without them a taped
           // cut-out over the wasteboard is refused in the preview's own words, and the panel's
           // blocker (which reads the preview's findings) refuses a job the run would generate.
-          bed: bedUnderFacts(useLocationStore.getState().location?.machines[0] ?? null, shopDefaults, job.breakthrough + 1, {
+          bed: bedUnderFacts(machineForJob(useLocationStore.getState().location, job.machineId), shopDefaults, job.breakthrough + 1, {
             length: job.stock.length,
             width: job.stock.width,
           }),

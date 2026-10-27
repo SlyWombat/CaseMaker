@@ -24,7 +24,7 @@ import type { SimDiagnostic } from '@/workers/sim/session';
 import type { SimStatus } from './simStore';
 import { clampPlacementsFor, jobMount, jobTool, toSetup } from '@/engine/cnc/engrave/jobSetup';
 import { bracketMount } from '@/engine/cnc/mounts/bracket';
-import { bedUnderFacts } from '@/platform/bedProfiles';
+import { bedUnderFacts, machineForJob } from '@/platform/bedProfiles';
 import { useLocationStore } from './locationStore';
 import { isVShape } from '@/engine/cnc/vProfile';
 import { feedCatalogueRows, resolvedFeedsTable } from '@/engine/cnc/feeds';
@@ -255,7 +255,8 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
     // #712 — the bed's through-cut facts, resolved HERE for the same reason the mount is: the
     // active bed profile lives in the location, and the worker must not read it. The need is the
     // job's own (`breakthrough + 1`), so a board the sentence names is one that really passes.
-    const bed = bedUnderFacts(useLocationStore.getState().location?.machines[0] ?? null, shopDefaults, job.breakthrough + 1, {
+    // #730 — the JOB's machine, not the house's first: `machineId` is its profile id.
+    const bed = bedUnderFacts(machineForJob(useLocationStore.getState().location, job.machineId), shopDefaults, job.breakthrough + 1, {
     length: job.stock.length,
     width: job.stock.width,
   });

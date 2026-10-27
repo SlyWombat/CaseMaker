@@ -15,6 +15,7 @@ import { fileURLToPath } from 'node:url';
 import {
   bedFromLegacy,
   bedUnderFacts,
+  machineForJob,
   bedMigrationDue,
   changedBedProfile,
   ensureFirstRegistrationBed,
@@ -414,5 +415,31 @@ describe('#727 F7 — the board the facts name', () => {
     expect(none).toMatchObject({ boardMm: 2, boardLengthMm: 100 });
     // A caller with no stock keeps the pre-#727 choice exactly.
     expect(bedUnderFacts(machine, null, 1.3)?.boardMm).toBe(2);
+  });
+});
+
+describe('#730 the bed facts follow the JOB’s machine', () => {
+  it('a house with two machines gives the job the bed its machineId names', () => {
+    const raw = JSON.parse(readFileSync(FIXTURE, 'utf8')).machines[0] as Record<string, unknown>;
+    const thin = MachineRecordSchema.parse(JSON.parse(JSON.stringify(raw)));
+    const thick = MachineRecordSchema.parse(JSON.parse(JSON.stringify(raw)));
+    // Two Z1s: profile ids differ, and their wasteboards differ (3 mm vs 10 mm measured).
+    thick.profileId = 'Z1-b';
+    thick.id = 'machine-b';
+    thick.bedProfiles = thick.bedProfiles!.map((prof) => ({
+      ...prof,
+      surface: { ...prof.surface, thickness: 3 },
+    }));
+    const location = { machines: [thin, thick] } as never;
+
+    expect(machineForJob(location, 'Z1-b')?.id).toBe('machine-b');
+    expect(bedUnderFacts(machineForJob(location, 'Z1-b'), null, 1.3, { length: 80, width: 60 })?.wasteboardMm).toBe(3);
+    expect(bedUnderFacts(machineForJob(location, thin.profileId), null, 1.3, { length: 80, width: 60 })?.wasteboardMm).toBe(10);
+    // A job that names no machine (or one the house does not hold) falls back ONLY when there is a
+    // single machine to mean; with two, there is no honest answer and the facts are absent.
+    expect(machineForJob(location, null)).toBeNull();
+    expect(machineForJob(location, 'Z1-unknown')).toBeNull();
+    expect(machineForJob({ machines: [thin] } as never, null)?.id).toBe(thin.id);
+    expect(machineForJob(null, 'Z1')).toBeNull();
   });
 });

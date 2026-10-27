@@ -959,7 +959,9 @@ export function HoldingStep({ job, answers, onAnswers, onRotary, onBedHold }: Ho
   /** The tape the step draws and writes: the job's own when it is taped, else the house roll's. */
   const tape = useMemo(
     () => bedTapeHold(profile, job.workholding.kind === 'tape' ? job.workholding.tape : null, tapeInsetMm),
-    [profile, job.workholding],
+    // #725 review — the shop defaults load ASYNC: without `tapeInsetMm` here the picture keeps the
+    // 2 mm fallback until something else re-renders it.
+    [profile, job.workholding, tapeInsetMm],
   );
   const bracketRead = useMemo(() => bracketSettings(shopDefaults ?? null), [shopDefaults]);
   /** The bracket the step draws and writes: the job's own when it is bracketed, else the default. */

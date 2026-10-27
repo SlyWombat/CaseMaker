@@ -653,3 +653,42 @@ describe('#725 review — a blocker with no control offers no Fix', () => {
     expect(screen.queryByTestId('engrave-generate-fix')).toBeNull();
   });
 });
+
+describe('#730 — the bed facts follow the job’s machine', () => {
+  it('a two-machine house judges the job against ITS machine’s wasteboard, not the first one’s', () => {
+    // Two Z1s: the house's first carries a 10 mm wasteboard, the job's machine a 3 mm one. The job
+    // needs 5 mm under it (a 4 mm breakthrough + 1), so only the second machine's bed refuses it —
+    // reading machines[0] would pass the job on a board that is not under it.
+    const first = bedMachine();
+    const second = bedMachine();
+    second.profileId = 'Z1-b';
+    second.id = 'machine-b';
+    second.bedProfiles = second.bedProfiles!.map((profile) => ({
+      ...profile,
+      surface: { ...profile.surface, thickness: 3 },
+    }));
+    act(() => {
+      useLocationStore.setState({
+        status: 'present',
+        location: {
+          kind: 'casemaker-location',
+          schemaVersion: 1,
+          id: DOC.id,
+          name: DOC.name,
+          createdAt: DOC.createdAt,
+          machines: [first, second],
+          accessories: [...DOC.accessories, ROTARY],
+        } as unknown as LocationView,
+        etag: '"e2"',
+        reason: null,
+      });
+    });
+    act(() => useEngraveJobStore.setState({ job: tapedJob({ machineId: 'Z1-b', breakthrough: 4 }) }));
+    render(<EngravePanel />);
+
+    expect(screen.getByTestId('engrave-generate-blocker').textContent).toContain(
+      'the wasteboard is 3 mm — a through cut needs at least 5 mm under it',
+    );
+    expect((screen.getByTestId('engrave-generate') as HTMLButtonElement).disabled).toBe(true);
+  });
+});
