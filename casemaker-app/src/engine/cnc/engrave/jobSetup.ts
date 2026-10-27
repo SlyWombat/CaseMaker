@@ -906,10 +906,12 @@ function overDepthClause(job: EngraveJob, depth: number, facingDepth: number, fl
   if (map !== null) {
     const wall = job.stock.wall;
     if (wall !== undefined && wall > 0 && wall < map.radius) {
-      return (
-        `it breaks through the tube's ${fmt3(wall)} mm wall into its bore; ` +
-        `at most ${fmt3(floorAllowed)} mm here`
-      );
+      // The refusal fires from the ceiling (wall − floor), so a depth between the two leaves a
+      // thin wall rather than breaking into the bore: name the wall's remaining floor, not a
+      // breakthrough that would not happen.
+      return depth >= wall
+        ? `it breaks through the tube's ${fmt3(wall)} mm wall into its bore; at most ${fmt3(floorAllowed)} mm here`
+        : `it leaves less than the ${fmt3(job.minFloor)} mm floor in the tube's ${fmt3(wall)} mm wall; at most ${fmt3(floorAllowed)} mm here`;
     }
     if (depth > map.radius) {
       return (

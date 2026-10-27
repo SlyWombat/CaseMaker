@@ -515,11 +515,15 @@ describe('validateJob (#200)', () => {
     const through = message(rod({}, 12));
     expect(through).toContain('reach 2 mm past the axis');
     expect(through).not.toContain('-2');
-    // A tube: the WALL is the limit, and the bore is what the cut breaks into.
+    // A tube: the WALL is the limit. Between the ceiling (2) and the wall (3) it leaves a thin
+    // wall; at or past the wall it breaks into the bore.
     const tube = message(rod({ diameter: 25, width: 25, thickness: 25, wall: 3 }, 2.5));
-    expect(tube).toContain("breaks through the tube's 3 mm wall into its bore");
+    expect(tube).toContain("leaves less than the 1 mm floor in the tube's 3 mm wall");
     expect(tube).toContain('at most 2 mm here');
     expect(tube).not.toContain('axis');
+    const bore = message(rod({ diameter: 25, width: 25, thickness: 25, wall: 3 }, 3.5));
+    expect(bore).toContain("breaks through the tube's 3 mm wall into its bore");
+    expect(bore).toContain('at most 2 mm here');
     // The boundary itself is allowed, as it is on a plate.
     expect(validateJob(rod({}, 9)).some((f) => f.code === 'depth-exceeds-stock')).toBe(false);
   });
