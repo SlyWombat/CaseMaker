@@ -640,6 +640,38 @@ describe('SimPanel', () => {
     expect(screen.queryByTestId('sim-restart-save')).toBeNull();
   });
 
+  // #726 W8 — after Generate, the session is the RUN's: the panel presents the job's own program
+  // and its diagnostics, not an empty open-a-file form with a "required" tool.
+  it('a generated job shows the job’s run, not the open-a-file form', () => {
+    act(() => {
+      useEngraveJobStore.getState().replace({
+        ...defaultEngraveJob(),
+        name: 'Tray job',
+        toolKey: CHOSEN_TOOL,
+        stock: { ...defaultEngraveJob().stock, length: 100, width: 60, thickness: 6 },
+      });
+      useEngraveRunStore.setState({
+        ...JOB_RUN,
+        generated: {} as never,
+        simDiagnostics: [
+          { source: 'sweep', severity: 'warning', code: 'holder-unproven', message: 'the shank length is unstated' },
+        ],
+      });
+      useSimStore.setState({ origin: 'engrave', loadedProgram: 'job.nc' });
+    });
+    render(<SimPanel />);
+
+    expect(screen.getByTestId('sim-file-name').textContent).toBe('Tray job');
+    expect(screen.getByTestId('sim-job-run-line').textContent).toContain('100 × 60 × 6 mm');
+    expect(screen.getByTestId('sim-job-run-line').textContent).toContain('the job’s own program');
+    expect(screen.getByTestId('sim-job-diagnostics').textContent).toContain('holder-unproven');
+    // The empty form's demands are gone: no stock fields, no "required" tool, no disabled button.
+    expect(screen.queryByTestId('sim-stock-length')).toBeNull();
+    expect(screen.queryByTestId('sim-tool-required')).toBeNull();
+    expect(screen.queryByTestId('sim-simulate')).toBeNull();
+    expect(screen.queryByTestId('sim-drop-hint')).toBeNull();
+  });
+
   // #691 — the "Checked: … / Not checked: …" sentence and the under/over-cut numbers moved here
   // from under Generate (audit B14). They are facts about THIS job's picture, read from the run
   // store's own copy of the run — never from whatever file this panel has open (#506).

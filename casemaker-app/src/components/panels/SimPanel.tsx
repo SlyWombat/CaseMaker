@@ -211,6 +211,15 @@ export function SimPanel() {
    */
   const ownsSession = origin === 'panel' && gcodeText !== null && loadedProgram === gcodeText;
 
+  /**
+   * #726 W8 — AFTER GENERATE, the session in the store is the RUN's (`origin === 'engrave'`): the
+   * viewport is drawing the job's own sweep, so this panel must present the job's program, stock
+   * and cutter — not an empty open-a-file form asking for a 100 × 100 × 10 stock and a "required"
+   * tool the job already has. Opening a file here switches `origin` back to 'panel' and the form
+   * returns.
+   */
+  const jobRun = origin === 'engrave' && run.generated !== null;
+
   // #687 — a cutter is named by the one display form here too; a key the registry no longer holds
   // falls back to the key itself, which is the honest thing to show and cannot happen for a
   // candidate (`toolCandidates` come from this same list).
@@ -393,6 +402,31 @@ export function SimPanel() {
       onDrop={(e) => void handleDrop(e)}
       style={dragOver ? { outline: '1px dashed #3a5a7a', outlineOffset: 4 } : undefined}
     >
+      {jobRun ? (
+        <div data-testid="sim-job-run">
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span
+              style={{ fontSize: 12, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+              data-testid="sim-file-name"
+            >
+              {job.name.trim() === '' ? 'This job' : job.name}
+            </span>
+            <button type="button" data-testid="sim-open" onClick={() => void handleOpen()}>
+              Open .nc…
+            </button>
+          </div>
+          <p style={MUTED} data-testid="sim-job-run-line">
+            {job.stock.length} × {job.stock.width} × {job.stock.thickness} mm ·{' '}
+            {jobToolEntry === null ? 'no cutter chosen' : toolDisplayName(jobToolEntry.tool)} · the job’s own program
+          </p>
+          {run.simDiagnostics.length > 0 && (
+            <div data-testid="sim-job-diagnostics" style={{ marginTop: 6 }}>
+              {[...groupDiagnostics(run.simDiagnostics, {}).values()].flat().map((row) => diagRow(row))}
+            </div>
+          )}
+        </div>
+      ) : (
+        <>
       {/* 1 — the file */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
         <span style={{ fontSize: 12, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} data-testid="sim-file-name">
@@ -815,6 +849,9 @@ export function SimPanel() {
       {/* This job's own simulation (#691). The "what was not checked" sentence and the
           under/over-cut numbers used to sit under Generate (audit B14); here they are facts about
           the picture, beside it. Nothing is claimed before the job has been simulated. */}
+        </>
+      )}
+
       {run.simStatus !== null && (
         <div data-testid="sim-job-facts" style={{ marginTop: 12 }}>
           <h3 style={SUBHEAD}>This job’s simulation</h3>
