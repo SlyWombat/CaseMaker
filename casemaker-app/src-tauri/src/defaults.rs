@@ -238,6 +238,20 @@ pub const UNMEASURED_SEEDS: &[(&str, f64, &str, &str)] = &[
         15.0,
         "mm",
         "chosen placement, not a measurement: a clamp's side this far in from the corner of the edge it holds",
+    ),
+    // #711 — the tape hold rule (#707 BM-4): taped area against the cutter's bite. The coupon at
+    // the bench measures the ratio.
+    (
+        "tape.holdRatio",
+        100.0,
+        "x",
+        "chosen, not measured: taped area must be this many times the cutter's bite (diameter × step-down) — the tape coupon at the bench sets it",
+    ),
+    (
+        "tape.insetMm",
+        2.0,
+        "mm",
+        "chosen, not measured: the tape strips stop this far in from every edge of the stock",
     ),    // #434 — peck drilling with drill bits: the pecks chosen, the feeds placeholders. None measured.
     ("drill.peckDiameters", 1.0, "x", "chosen, not measured: each peck goes this many drill diameters deep before the drill retracts to clear chips"),
     ("drill.peckClearanceMm", 0.5, "mm", "chosen, not measured: after a peck the drill rapids back down to this far above the floor it just cut"),
@@ -841,6 +855,8 @@ fn known_rule(key: &str, n: Option<f64>) -> Option<Result<(), String>> {
             n.is_some_and(|v| (0.0..=200.0).contains(&v)),
             "0 to 200 mm",
         )),
+        "tape.holdRatio" => Some(need(n.is_some_and(|v| (1.0..=1000.0).contains(&v)), "1 to 1000 x")),
+        "tape.insetMm" => Some(need(n.is_some_and(|v| (0.0..=50.0).contains(&v)), "0 to 50 mm")),
         "tools.wearWeight.plastic"
         | "tools.wearWeight.wood"
         | "tools.wearWeight.aluminium"

@@ -241,6 +241,12 @@ export const KNOWN_DEFAULTS: Readonly<Record<string, KnownDefault>> = {
   'clamps.topHeightMm': { label: 'top clamp height above the stock (not measured)', unit: 'mm', rule: z.number().min(1).max(80), fallback: 12 },
   'clamps.topReachMm': { label: 'top clamp reach onto the stock (not measured)', unit: 'mm', rule: z.number().min(1).max(50), fallback: 8 },
   'clamps.topInFromCornerMm': { label: 'top clamp in from the corner', unit: 'mm', rule: z.number().min(0).max(200), fallback: 15 },
+  // #711 — THE TAPE HOLD RULE (#707 BM-4): the tape's area against the cutter's bite. The ratio is
+  // Case Maker's own until the bench's tape coupon measures it (the design's §7), so it is a
+  // setting with a per-job recommendation, never a constant in code; the inset is the layout
+  // choice the strips stop at, inside every edge where the edge scans land.
+  'tape.holdRatio': { label: 'tape hold ratio (chosen, not measured)', unit: 'x', rule: z.number().min(1).max(1000), fallback: 100 },
+  'tape.insetMm': { label: 'tape inset from every edge (chosen)', unit: 'mm', rule: z.number().min(0).max(50), fallback: 2 },
   // #414 — runtime is weighted by the material cut (the maintainer, 2026-10-16). Chosen, not measured.
   'tools.wearWeight.plastic': { label: 'wear weight, plastic', unit: 'x', rule: z.number().min(0.1).max(20), fallback: 1 },
   'tools.wearWeight.wood': { label: 'wear weight, wood', unit: 'x', rule: z.number().min(0.1).max(20), fallback: 1 },

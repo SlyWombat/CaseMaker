@@ -207,6 +207,11 @@ export type JobFindingCode =
   | 'cutout-needs-flat'
   | 'loose-piece'
   | 'released-onto-board'
+  // #711 — the tape hold rule on a bed job (#707 BM-4): the tape under the STOCK, the tape under a
+  // PIECE a through cut frees, and the note for a block taller than its narrowest width.
+  | 'tape-hold-stock'
+  | 'tape-hold-piece'
+  | 'tape-tall-stock'
   // #434 — a drill bit is the cutter of a DRILL-ONLY program. Hand-edited work that pairs one with
   // a region, trace or thread is refused by name: a drill cannot open a region, and one program has
   // one tool, so the other work has to move to a cutter that can make it.

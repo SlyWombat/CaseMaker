@@ -963,6 +963,20 @@
       "setAt": null,
       "unit": "mm"
     },
+    "tape.holdRatio": {
+      "value": 100.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "x",
+      "note": "chosen, not measured: taped area must be this many times the cutter's bite (diameter × step-down) — the tape coupon at the bench sets it"
+    },
+    "tape.insetMm": {
+      "value": 2.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm",
+      "note": "chosen, not measured: the tape strips stop this far in from every edge of the stock"
+    },
     "margins.boundaryMarginMm": {
       "value": 0.2,
       "source": "seeded",

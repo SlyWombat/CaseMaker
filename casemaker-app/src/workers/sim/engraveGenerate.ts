@@ -126,6 +126,7 @@ import {
   type ProfileSpan,
 } from '@/engine/cnc/cam/profile';
 import { buildThroughMask, type MaskCutout } from '@/engine/cnc/engrave/throughMask';
+import { tapeHoldFindings, type TapedPiece } from '@/engine/cnc/engrave/tapeHold';
 import { generateChamfer, type ChamferCut } from '@/engine/cnc/cam/chamfer';
 import type { Polygons } from '@/engine/cnc/cam/pocket';
 import { concatToolpathIR, estimateCycleSeconds, HOP_Z, raiseTravelOver, toolNumberFor, travelHeightOver, travelStats, type CamMove, type ToolpathIR } from '@/engine/cnc/cam/ir';
@@ -820,6 +821,14 @@ export interface EngraveRegions {
   radius: number | null;
   findings: JobFinding[];
   /**
+   * #711 — every piece a through cut FREES, measured for the tape hold rule (#707 BM-4): each
+   * released cut-out's footprint and the tape under it (the footprint eroded by the job's tape
+   * inset). Empty on a job that is not taped, or one that frees no piece. The rule itself is
+   * judged where the cutter's bite is known (`generateOneProgram`), because it needs the resolved
+   * step-down.
+   */
+  releasedPieces: TapedPiece[];
+  /**
    * The blank's colour split, mm below the engraved face, ON a real layer line (#285), or null
    * when the job states no print and there are no colour layers to speak of.
    *
@@ -953,6 +962,49 @@ function polygonsArea(tl: ManifoldToplevel, polygons: Polygons): number {
   try {
     return cs.area();
   } finally {
+    cs.delete();
+  }
+}
+
+/**
+ * #711 — one freed piece as the tape sees it.
+ *
+ * `enclosed` is the region inside the cut-out's CENTRE path (#218's `enclosedPath`), which is the
+ * piece PLUS the kerf's half-width beyond its edge: the tool cuts a kerf of its own radius around
+ * the path, so the piece's real edge is `toolRadius` inside it. The TAPE under the piece is
+ * therefore the enclosed region eroded by `toolRadius + inset` — the strips stop `inset` inside
+ * every edge of the piece — and the FOOTPRINT the sentence quotes is that region's box narrowed by
+ * the same two radii. A piece smaller than the inset answers 0 mm² of tape (it is refused, which
+ * is right: nothing holds it).
+ *
+ * The offset is the measured geometry, not a box ideal: on a rectangle it reproduces the design's
+ * `(L − 2i)(W − 2i)` (the Star's 64.00 mm² is asserted), and on an irregular piece it measures the
+ * tape that really fits under it rather than an enclosing box it does not fill.
+ */
+function measureTapedPiece(tl: ManifoldToplevel, name: string, enclosed: Polygons, insetMm: number, toolRadius: number): TapedPiece | null {
+  if (enclosed.length === 0) return null;
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const contour of enclosed) {
+    for (const [x, y] of contour) {
+      minX = Math.min(minX, x);
+      minY = Math.min(minY, y);
+      maxX = Math.max(maxX, x);
+      maxY = Math.max(maxY, y);
+    }
+  }
+  const cs = tl.CrossSection.ofPolygons(enclosed, 'Positive');
+  const grow = Math.max(insetMm + toolRadius, 0.5);
+  const eroded = cs.offset(-grow, 'Round', 2, segmentsForRadius(grow));
+  try {
+    // `area()` forces the offset before the handles go (Manifold is lazy).
+    const tapedAreaMm2 = eroded.area();
+    const r3 = (n: number): number => Math.round(n * 1000) / 1000;
+    return { name, widthMm: r3(maxX - minX - 2 * toolRadius), heightMm: r3(maxY - minY - 2 * toolRadius), tapedAreaMm2 };
+  } finally {
+    eroded.delete();
     cs.delete();
   }
 }
@@ -1446,6 +1498,12 @@ export function engraveRegions(
   // is `tab-unplaceable`; either way the part's disconnection is expected, not a second finding.
   const cutoutKerfs: Polygons[] = [];
   const cutoutReleased: Polygons[] = [];
+  // #711 — THE PIECES THE TAPE MUST HOLD. A released cut-out is a piece tape holds INSTEAD of
+  // tabs, and its tape area is its footprint eroded by the job's tape inset (the strips stop
+  // inside every edge). Measured here, where the geometry is; judged where the cutter's bite is
+  // known (`generateOneProgram`).
+  const tapeInset = job.workholding.kind === 'tape' ? job.workholding.tape.inset : null;
+  const releasedPieces: TapedPiece[] = [];
   if (radius !== null && plan.cutouts.length > 0) {
     const offset = makeClipperOffset(tl);
     for (const c of plan.cutouts) {
@@ -1516,7 +1574,16 @@ export function engraveRegions(
       // The part a released cut-out frees is the area ENCLOSED by its centre path. `path` is CW
       // for an inside profile, so it is put back to a fillable winding first: a CW outer reads as
       // empty in the loose-piece cross-section and the part would be counted as the loose piece.
-      if (placed === 0) cutoutReleased.push(enclosedPath(path));
+      if (placed === 0) {
+        const piece = enclosedPath(path);
+        cutoutReleased.push(piece);
+        if (tapeInset !== null && radius !== null) {
+          // The refusal names the ITEM ("“Star”"), not the operation phrase the program carries.
+          const itemName = job.cutouts?.find((x) => x.id === c.id)?.name ?? c.name;
+          const measured = measureTapedPiece(tl, itemName, piece, tapeInset, radius);
+          if (measured !== null) releasedPieces.push(measured);
+        }
+      }
       cutoutCuts.push({
         id: c.id,
         name: c.name,
@@ -1919,6 +1986,7 @@ export function engraveRegions(
     tool,
     radius,
     findings: [...findings, ...looseFindings],
+    releasedPieces,
     colourBoundaryDepth,
     margins,
   };
@@ -3650,7 +3718,7 @@ function generateOneProgram(
   // which is the only post this app has; a second mill is a second post, and this line is where a
   // job naming it would have to be refused until there is one.
   const mill = jobMachine(job, calibration);
-  const { plan, regions, profiles, throughMask, chamfers, cores, predicted, findings } = engraveRegions(
+  const { plan, regions, profiles, throughMask, chamfers, cores, predicted, findings, releasedPieces } = engraveRegions(
     tl,
     job,
     tool,
@@ -3878,6 +3946,34 @@ function generateOneProgram(
     const resolved = feedsFor(catalogue, job.stock.material, tool, mill, job.cutOverride, shop.feeds ?? undefined);
     if (!resolved.ok) return stop('feeds', { feeds: resolved, message: resolved.reason });
     feeds = resolved;
+    // #711 — THE TAPE HOLD RULE (#707 BM-4, design §3.4): the tape must cover `holdRatio × the
+    // cutter's bite` under the stock and under every piece a through cut frees. Judged HERE
+    // because the bite needs the resolved step-down, and a taped job's pieces were measured with
+    // the geometry. Any refusal blocks Generate like the document findings above.
+    if (job.workholding.kind === 'tape') {
+      // The cutter's own width at the deepest cut: a flat end's radius all the way down, a V-bit's
+      // groove wider with depth (#405) — the same function the frame and the trace CAM read.
+      const deepest = Math.max(
+        0,
+        ...regions.map((r) => r.depth),
+        ...plan.traces.map((t) => t.depth),
+        ...profiles.map((p) => p.depth),
+      );
+      const radiusAt = traceRadiusAt(tool, deepest) ?? (cuttingDiameter(tool) ?? 0) / 2;
+      const hold = readDefault(shop.defaults ?? null, 'tape.holdRatio');
+      findings.push(
+        ...tapeHoldFindings({
+          stock: job.stock,
+          tape: job.workholding.tape,
+          cutterWords: tool.shape === 'flat' ? 'flat end' : (tool.typeText.toLowerCase() || 'cutter'),
+          biteDiameterMm: radiusAt > 0 ? radiusAt * 2 : null,
+          stepDownMm: resolved.params.stepDown,
+          holdRatio: hold.value,
+          pieces: releasedPieces,
+        }),
+      );
+      if (findings.some((f) => f.severity === 'error')) return stop('findings', { feeds });
+    }
     // #218 — a cut-out follows its outline with both sides of the cutter engaged: a full-width
     // SLOT. Resolve the same row again with `slotting`, and use THAT answer for the profile CAM
     // only, so the pocket, trace and rest passes keep the row's pocketing numbers.
