@@ -58,6 +58,8 @@ import type { BedProfile } from '@/platform/locationClient';
 import { useLocationStore } from '@/store/locationStore';
 import { useSettingsStore } from '@/store/settingsStore';
 import { useShopDefaultsStore } from '@/store/shopDefaultsStore';
+import { useMediaQuery } from '@/hooks/useMediaQuery';
+import { NARROW_QUERY } from './wizardLayout';
 import { openMachineChange } from '@/components/machine-change';
 import type { BracketHold, EngraveJob, JobStockForm, RotaryChuck, RotaryJawMode, TapeHold, ViseParams } from '@/types/engraveJob';
 import {
@@ -942,6 +944,10 @@ export function HoldingStep({ job, answers, onAnswers, onRotary, onBedHold }: Ho
   const tapeInsetMm = readDefault(shopDefaults ?? null, 'tape.insetMm').value;
   // #714 — the grip's default is the shop's own number (Makera publishes no jaw depth).
   const shopGrip = readDefault(shopDefaults ?? null, 'rotary.gripMm');
+  // #726 W19 — a phone stacks the picture UNDER the options instead of beside them: at 390 px the
+  // two-column grid left the options an 86 px column whose text ran under the picture, and the
+  // caption printed on top of it. The same query the wizard shell reads for its own 16 px edge.
+  const narrow = useMediaQuery(NARROW_QUERY);
   const now = useMemo(() => machineNow(machine), [machine]);
   const profile = now?.profile ?? null;
   const rotaryEnvelope = useMemo(() => jobMachine(job, calibration).rotary?.envelope, [job, calibration]);
@@ -1604,10 +1610,11 @@ export function HoldingStep({ job, answers, onAnswers, onRotary, onBedHold }: Ho
       </div>
 
       <div
+        data-testid="engrave-setup-holding-columns"
         style={{
           display: 'grid',
-          gridTemplateColumns: 'minmax(0, 1fr) minmax(190px, 230px)',
-          gap: 16,
+          gridTemplateColumns: narrow ? 'minmax(0, 1fr)' : 'minmax(0, 1fr) minmax(190px, 230px)',
+          gap: narrow ? 12 : 16,
           alignItems: 'start',
         }}
       >
@@ -1729,7 +1736,14 @@ export function HoldingStep({ job, answers, onAnswers, onRotary, onBedHold }: Ho
             taller, so nothing outside it ever moves. */}
         <div
           data-testid="engrave-setup-holding-picture-slot"
-          style={{ position: 'relative', alignSelf: 'stretch', minHeight: 0 }}
+          style={{
+            position: 'relative',
+            alignSelf: 'stretch',
+            // #726 W19 — a stacked slot has no options column to take its height from, and the
+            // picture inside is absolutely placed: without a height of its own the row would
+            // collapse to nothing. 260 px shows the top view and its caption whole.
+            minHeight: narrow ? 260 : 0,
+          }}
         >
           <div style={{ position: 'absolute', inset: 0, overflowY: 'auto' }}>
             <HoldingPicture

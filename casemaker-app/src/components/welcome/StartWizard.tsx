@@ -13,6 +13,8 @@ import { useEngraveJobStore } from '@/store/engraveJobStore';
 import { useMachineStore } from '@/store/machineStore';
 import { useLocationStore } from '@/store/locationStore';
 import { useStartWizardStore } from '@/store/startWizardStore';
+import { useMediaQuery } from '@/hooks/useMediaQuery';
+import { NARROW_QUERY } from './wizardLayout';
 import { useViewportStore } from '@/store/viewportStore';
 import { PanelErrorBoundary } from '@/components/ui/PanelErrorBoundary';
 import { readDesignFile } from '@/engine/import/designImport';
@@ -61,11 +63,17 @@ import type { PendingStock, StartStockSeed } from './StartStockStep';
  * which flips `welcomeMode` off and unmounts that overlay, and this has to survive it.
  */
 
+/**
+ * #726 P12 — a PLAIN backdrop. Opening the wizard hides the board library behind it, "so the
+ * operator is in the cutting job and nowhere else" (first-job-flow §3.1). The usual translucent
+ * scrim left the welcome library — or the job page, on a phone — legible and busy behind the
+ * dialog; the app's own surface colour, opaque, is the plain one.
+ */
 const OVERLAY: CSSProperties = {
   position: 'fixed',
   inset: 0,
   zIndex: 'var(--cm-z-modal)', // the one stacking scale (#348), src/styles/tokens.css
-  background: 'rgba(8, 11, 15, 0.72)',
+  background: 'var(--cm-color-surface)',
   display: 'flex',
   alignItems: 'center',
   justifyContent: 'center',
@@ -83,6 +91,14 @@ const BOX: CSSProperties = {
 };
 /** #684 — Holding draws a top-view picture beside the mount options, so that one step is wider. */
 const BOX_WIDE: CSSProperties = { ...BOX, width: 'min(700px, 100%)' };
+
+/**
+ * #726 W19/P12 — a phone. The dialog keeps the overlay's 16 px gutter and gains a 16 px content
+ * edge (the desktop box is 12): at 390 px the message, fields and buttons read as one column with
+ * the same margin all round. Holding also STACKS its picture under the options (HoldingStep).
+ */
+const BOX_NARROW: CSSProperties = { ...BOX, padding: 16 };
+const BOX_WIDE_NARROW: CSSProperties = { ...BOX_NARROW, width: 'min(700px, 100%)' };
 
 const MUTED: CSSProperties = { fontSize: 11, color: '#9aa4b0', lineHeight: 1.5, margin: '4px 0' };
 const FOOTER: CSSProperties = {
@@ -227,6 +243,9 @@ export function StartWizard(): JSX.Element {
   // THE ONE STEP INDEX. It starts where the opener asked (the panel's Stock/Hold `edit` names a
   // step), and from then on only this shell moves it.
   const [step, setStep] = useState<WizardStepId>(initialStep);
+  // #726 W19/P12 — the phone layout: a 16 px content edge, and Holding stacks (HoldingStep reads
+  // the same query for its own grid, so the two never disagree at the breakpoint).
+  const narrow = useMediaQuery(NARROW_QUERY);
   // Re-entry is an EDIT: it opens on an existing job and must not reset it. A new job becomes an
   // edit the moment step 2 creates it, so Back to Stock asks about the stock the job now has.
   const [jobStarted, setJobStarted] = useState(initialStep !== 'machine');
@@ -708,7 +727,11 @@ export function StartWizard(): JSX.Element {
 
   return createPortal(
     <div style={OVERLAY} data-testid="start-wizard">
-      <div style={step === 'holding' ? BOX_WIDE : BOX} role="dialog" aria-label="New cutting job">
+      <div
+        style={step === 'holding' ? (narrow ? BOX_WIDE_NARROW : BOX_WIDE) : narrow ? BOX_NARROW : BOX}
+        role="dialog"
+        aria-label="New cutting job"
+      >
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           {/* THE ONE COUNTER. No second numbering exists: this line is the whole of it (#681, A1). */}
           <b style={{ flex: 1, fontSize: 13 }} data-testid="start-wizard-progress">
