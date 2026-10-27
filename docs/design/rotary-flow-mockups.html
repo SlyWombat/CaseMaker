@@ -1,0 +1,770 @@
+<title>Rotary Job Flow</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: a drafting sheet — one column of numbered stations, each a desktop-width screen mockup with its notes beside it; mono for every number the operator reads. */
+:root {
+  --bg: #f3f5f8;        /* cool paper */
+  --panel: #ffffff;     /* the screen frames */
+  --fg: #16202c;
+  --muted: #5b6878;
+  --line: #d6dde6;
+  --line-strong: #aeb9c6;
+  --accent: #1d5fb4;    /* drafting blue */
+  --accent-ink: #ffffff;
+  --accent-soft: #e4edf9;
+  --ok: #1f7a3f;
+  --ok-soft: #e3f2e8;
+  --warn: #9a5b00;
+  --warn-soft: #fbefd9;
+  --bad: #b3261e;
+  --bad-soft: #fbe5e3;
+  --note: #f8f1e1;      /* annotation paper */
+  --note-ink: #4a3a10;
+  --sans: "IBM Plex Sans", "Segoe UI", system-ui, -apple-system, sans-serif;
+  --mono: "IBM Plex Mono", "SFMono-Regular", Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #121820; --panel: #1a222d; --fg: #e6ebf1; --muted: #9aa8b8; --line: #2c3745; --line-strong: #445263;
+  --accent: #6fa3ec; --accent-ink: #0d1520; --accent-soft: #1d2d44; --ok: #5fc27f; --ok-soft: #173224;
+  --warn: #e0a84a; --warn-soft: #3a2c12; --bad: #f08a83; --bad-soft: #40201e; --note: #2a2516; --note-ink: #e6d9b0;
+  color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #121820; --panel: #1a222d; --fg: #e6ebf1; --muted: #9aa8b8; --line: #2c3745; --line-strong: #445263;
+  --accent: #6fa3ec; --accent-ink: #0d1520; --accent-soft: #1d2d44; --ok: #5fc27f; --ok-soft: #173224;
+  --warn: #e0a84a; --warn-soft: #3a2c12; --bad: #f08a83; --bad-soft: #40201e; --note: #2a2516; --note-ink: #e6d9b0;
+  color-scheme: dark }
+
+body { background: var(--bg); color: var(--fg); font: 15px/1.5 var(--sans); }
+.wrap { max-width: 1180px; margin: 0 auto; padding-block: 32px 64px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+h1, h2, h3 { text-wrap: balance; margin: 0; font-weight: 600; letter-spacing: -0.01em; }
+h1 { font-size: 2rem; line-height: 1.15; }
+h2 { font-size: 1.3rem; }
+h3 { font-size: 1rem; }
+p { margin: 0; max-width: 68ch; }
+.eyebrow { font: 500 0.75rem/1 var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+.mono, .n { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+.muted { color: var(--muted); }
+a { color: var(--accent); }
+
+header.top { display: grid; gap: 14px; padding-bottom: 28px; border-bottom: 2px solid var(--fg); margin-bottom: 36px; }
+.status { display: inline-flex; align-items: center; gap: 8px; padding: 4px 10px; border: 1px solid var(--warn); color: var(--warn); border-radius: 999px; font: 500 0.8rem var(--mono); width: max-content; }
+.status::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--warn); }
+
+/* the flow strip */
+.flow { display: flex; flex-wrap: wrap; gap: 6px 0; align-items: stretch; margin: 28px 0 8px; }
+.flow .st { display: grid; gap: 2px; padding: 10px 14px; border: 1px solid var(--line-strong); background: var(--panel); min-width: 0; flex: 1 1 130px; position: relative; }
+.flow .st + .st { margin-left: 18px; }
+.flow .st + .st::before { content: ""; position: absolute; left: -19px; top: 50%; width: 18px; height: 1px; background: var(--line-strong); }
+.flow .st + .st::after { content: ""; position: absolute; left: -6px; top: calc(50% - 4px); border: 4px solid transparent; border-left-color: var(--line-strong); }
+.flow .st b { font-weight: 600; }
+.flow .st small { color: var(--muted); font-size: 0.8rem; }
+.flow .st.mode { border-color: var(--accent); }
+.flow .st .k { font: 500 0.7rem var(--mono); color: var(--accent); letter-spacing: 0.06em; }
+
+section { margin-top: 48px; display: grid; gap: 16px; }
+section > .head { display: grid; gap: 6px; }
+.lede { color: var(--muted); max-width: 72ch; }
+
+/* today vs target */
+.vs { border-top: 1px solid var(--line-strong); }
+.vs .r { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; padding: 14px 0; border-bottom: 1px solid var(--line); }
+.vs .r > div { min-width: 0; }
+.vs .lbl { font: 500 0.7rem var(--mono); letter-spacing: 0.08em; text-transform: uppercase; display: block; margin-bottom: 4px; }
+.vs .today .lbl { color: var(--bad); } .vs .target .lbl { color: var(--ok); }
+.vs q { quotes: "“" "”"; }
+.vs .ids { font: 0.75rem var(--mono); color: var(--muted); margin-left: 6px; }
+
+/* a station = mockup + notes */
+.station { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 24px; align-items: start; }
+.station > * { min-width: 0; }
+.notes { display: grid; gap: 10px; background: var(--note); color: var(--note-ink); padding: 14px 16px; border-left: 3px solid var(--warn); font-size: 0.9rem; }
+.notes h3 { font-size: 0.8rem; font-family: var(--mono); letter-spacing: 0.06em; text-transform: uppercase; font-weight: 500; }
+.notes ul { margin: 0; padding-left: 18px; display: grid; gap: 6px; }
+.notes .issue { font-family: var(--mono); font-size: 0.8rem; }
+
+/* the screen frame */
+.screen { background: var(--panel); border: 1px solid var(--line-strong); box-shadow: 0 1px 0 var(--line), 0 12px 30px -18px rgba(0,0,0,.35); font-size: 0.9rem; overflow: hidden; }
+.screen .bar { display: flex; align-items: center; gap: 10px; padding: 8px 14px; border-bottom: 1px solid var(--line); background: var(--bg); }
+.screen .bar .dots { display: inline-flex; gap: 5px; } .screen .bar .dots i { width: 9px; height: 9px; border-radius: 50%; background: var(--line-strong); display: block; }
+.screen .bar .ttl { font: 500 0.8rem var(--mono); color: var(--muted); margin-left: auto; }
+.screen .body { padding: 18px 20px; display: grid; gap: 14px; }
+.modal { max-width: 640px; margin: 10px auto; border: 1px solid var(--line-strong); background: var(--panel); box-shadow: 0 10px 30px -14px rgba(0,0,0,.4); }
+.modal .mh { display: flex; align-items: baseline; gap: 12px; padding: 12px 18px; border-bottom: 1px solid var(--line); }
+.modal .mh .step { font: 500 0.75rem var(--mono); color: var(--accent); letter-spacing: 0.06em; text-transform: uppercase; }
+.modal .mh h3 { font-size: 1.05rem; }
+.modal .mh .x { margin-left: auto; color: var(--muted); font-size: 0.85rem; }
+.modal .mb { padding: 16px 18px; display: grid; gap: 14px; }
+.modal .mf { display: flex; justify-content: flex-end; gap: 8px; padding: 12px 18px; border-top: 1px solid var(--line); background: var(--bg); }
+.backdrop { background: repeating-linear-gradient(135deg, var(--bg) 0 8px, var(--panel) 8px 16px); padding: 10px; }
+
+.btn { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border: 1px solid var(--line-strong); border-radius: 4px; background: var(--panel); color: var(--fg); font: 500 0.85rem var(--sans); white-space: nowrap; }
+.btn.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+.btn.ghost { border-color: transparent; color: var(--accent); }
+.btn.disabled { opacity: 0.55; }
+.btn.big { padding: 10px 18px; font-size: 0.95rem; }
+
+.frow { display: grid; grid-template-columns: 110px minmax(0, 1fr); gap: 10px 14px; align-items: center; }
+.frow > label { color: var(--muted); font-size: 0.85rem; }
+.frow .v { display: flex; flex-wrap: wrap; gap: 8px 10px; align-items: center; min-width: 0; }
+.in { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--line-strong); border-radius: 4px; padding: 4px 8px; background: var(--panel); min-height: 30px; }
+.in .n { min-width: 4.5ch; text-align: right; }
+.in .u { color: var(--muted); font-size: 0.8rem; }
+.in.sel::after { content: "▾"; color: var(--muted); font-size: 0.8rem; }
+.lead { font-size: 0.8rem; color: var(--muted); }
+.hint { font-size: 0.85rem; color: var(--muted); }
+.fold { font-size: 0.85rem; color: var(--accent); }
+.fold::before { content: "▸ "; }
+
+.state { display: inline-flex; align-items: center; gap: 8px; }
+.dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
+.dot.ok { background: var(--ok); } .dot.off { background: var(--line-strong); } .dot.warn { background: var(--warn); } .dot.bad { background: var(--bad); }
+
+.forms { display: flex; flex-wrap: wrap; gap: 8px; }
+.form { display: grid; justify-items: center; gap: 4px; padding: 8px 10px; border: 1px solid var(--line-strong); border-radius: 4px; font-size: 0.8rem; min-width: 74px; }
+.form.on { border-color: var(--accent); background: var(--accent-soft); }
+.form svg { display: block; width: 40px; height: 28px; }
+.form svg * { fill: none; stroke: currentColor; stroke-width: 1.4; }
+
+.radio { display: inline-flex; align-items: center; gap: 8px; }
+.radio::before { content: ""; width: 14px; height: 14px; border-radius: 50%; border: 1.5px solid var(--line-strong); box-sizing: border-box; }
+.radio.on::before { border: 4.5px solid var(--accent); }
+.radio.dis { color: var(--muted); }
+.check::before { content: "☐ "; color: var(--muted); }
+
+.ops { display: grid; gap: 10px; }
+.ops .g { display: grid; grid-template-columns: 120px minmax(0, 1fr); gap: 6px 12px; align-items: baseline; }
+.ops .g > span { color: var(--muted); font-size: 0.8rem; }
+.ops .g .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip { padding: 4px 10px; border: 1px solid var(--line-strong); border-radius: 999px; font-size: 0.82rem; white-space: nowrap; }
+.chip.on { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); font-weight: 500; }
+.chip.dis { color: var(--muted); border-style: dashed; }
+.tag { font: 500 0.7rem var(--mono); padding: 2px 6px; border-radius: 3px; background: var(--ok-soft); color: var(--ok); vertical-align: middle; }
+.tag.grey { background: var(--bg); color: var(--muted); }
+
+/* the design panel */
+.panel { display: grid; grid-template-columns: 1fr; }
+.panel .filebar { display: flex; align-items: center; gap: 10px; padding: 10px 16px; border-bottom: 1px solid var(--line); background: var(--bg); flex-wrap: wrap; }
+.panel .filebar .name { font-weight: 600; }
+.seg { display: inline-flex; border: 1px solid var(--line-strong); border-radius: 4px; overflow: hidden; margin-left: auto; }
+.seg span { padding: 5px 14px; font-size: 0.85rem; } .seg span.on { background: var(--fg); color: var(--bg); }
+.grp { border-bottom: 1px solid var(--line); }
+.grp .gh { display: flex; align-items: center; gap: 10px; padding: 9px 16px; background: var(--bg); font: 500 0.72rem var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+.grp .gh .tog { margin-left: auto; font-family: var(--sans); text-transform: none; letter-spacing: 0; }
+.grp .gb { padding: 10px 16px; display: grid; gap: 8px; }
+.line { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; min-width: 0; }
+.line .act { margin-left: auto; color: var(--accent); font-size: 0.85rem; }
+.item { display: grid; grid-template-columns: 22px 28px minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 8px 10px; border: 1px solid var(--line); border-radius: 4px; }
+.item .ic { width: 28px; height: 28px; border-radius: 4px; background: var(--accent-soft); color: var(--accent); display: grid; place-items: center; font: 600 0.9rem var(--mono); }
+.item .meta { color: var(--muted); font-size: 0.82rem; }
+.footer { position: sticky; bottom: 0; padding: 12px 16px; display: grid; gap: 10px; background: var(--panel); border-top: 2px solid var(--line-strong); }
+.footer .ticks { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 0.85rem; }
+.footer .ticks span::before { content: "✓ "; color: var(--ok); }
+.block { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; padding: 10px 12px; border: 1px solid var(--bad); background: var(--bad-soft); border-radius: 4px; font-size: 0.88rem; }
+.block b { font-weight: 600; }
+.twostate { display: grid; gap: 10px; }
+.twostate .cap { font: 500 0.7rem var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+
+/* cut mode */
+.strip { display: flex; flex-wrap: wrap; gap: 6px 16px; align-items: center; padding: 8px 16px; background: var(--fg); color: var(--bg); font: 0.82rem var(--mono); }
+.strip .dot { box-shadow: 0 0 0 2px var(--fg); }
+.steps { display: grid; }
+.cstep { display: grid; grid-template-columns: 26px minmax(0, 1fr); gap: 8px 12px; padding: 12px 16px; border-bottom: 1px solid var(--line); align-items: start; }
+.cstep .m { width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; font: 600 0.75rem var(--mono); border: 1.5px solid var(--line-strong); color: var(--muted); }
+.cstep.done .m { background: var(--ok); border-color: var(--ok); color: #fff; }
+.cstep.now .m { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.cstep.now { background: var(--accent-soft); }
+.cstep .t { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: baseline; }
+.cstep .t b { font-weight: 600; }
+.cstep .t .meta { color: var(--muted); font-size: 0.85rem; }
+.cstep .acts { grid-column: 2; display: flex; gap: 8px; flex-wrap: wrap; }
+
+/* tables */
+.tbl { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+.tbl th { text-align: left; font: 500 0.7rem var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); padding: 8px 10px 8px 0; border-bottom: 1px solid var(--line-strong); }
+.tbl td { padding: 9px 10px 9px 0; border-bottom: 1px solid var(--line); vertical-align: top; }
+.tbl td:first-child { white-space: nowrap; }
+.scroll { overflow-x: auto; }
+.tbl .not { color: var(--bad); text-decoration: line-through; text-decoration-color: var(--bad); text-decoration-thickness: 1px; }
+
+.three { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
+.three > div { border-top: 3px solid var(--line-strong); padding-top: 10px; display: grid; gap: 6px; font-size: 0.9rem; }
+.three > div.rm { border-color: var(--bad); } .three > div.mv { border-color: var(--warn); } .three > div.kp { border-color: var(--ok); }
+.three ul { margin: 0; padding-left: 18px; display: grid; gap: 4px; }
+
+.acc { counter-reset: a; display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.acc li { display: grid; grid-template-columns: 30px minmax(0, 1fr); gap: 10px; }
+.acc li::before { counter-increment: a; content: counter(a); font: 500 0.8rem var(--mono); color: var(--accent); border: 1px solid var(--accent); border-radius: 50%; width: 22px; height: 22px; display: grid; place-items: center; }
+
+.work .tbl td a { font-family: var(--mono); font-size: 0.85rem; }
+.gate { padding: 14px 16px; border: 1px solid var(--warn); background: var(--warn-soft); color: var(--fg); max-width: none; }
+
+@media (max-width: 860px) {
+  .station { grid-template-columns: 1fr; }
+  .vs .r { grid-template-columns: 1fr; gap: 8px; }
+  .three { grid-template-columns: 1fr; }
+  .frow { grid-template-columns: 1fr; gap: 4px; }
+  .ops .g { grid-template-columns: 1fr; }
+  .flow .st + .st { margin-left: 0; } .flow .st + .st::before, .flow .st + .st::after { display: none; }
+  .flow { gap: 6px; }
+}
+@media (prefers-reduced-motion: no-preference) { .btn, .chip { transition: background .15s; } }
+/* rotary additions: the header fits a phone (the status pill's max-content widened the grid) */
+header.top { grid-template-columns: minmax(0, 1fr); }
+header.top .status { width: auto; max-width: 100%; justify-self: start; }
+.eyebrow { overflow-wrap: anywhere; }
+/* rotary additions: the drawings */
+.fig { width: 100%; max-width: 100%; display: block; border: 1px solid var(--line); background: var(--bg); }
+.fig text { font-family: "IBM Plex Sans", sans-serif; font-size: 10px; fill: var(--muted); }
+.fig .mono { font-family: "IBM Plex Mono", monospace; }
+.fig .ink { fill: var(--fg); }
+.refuse { display: grid; gap: 4px; padding: 10px 12px; border: 1px solid var(--warn); background: var(--warn-soft); border-radius: 4px; font-size: 0.88rem; }
+.tag.warn { background: var(--warn-soft); color: var(--warn); }
+.sheet { display: grid; grid-template-columns: 28px 170px minmax(0, 1fr); gap: 6px 12px; font-size: 0.88rem; padding: 4px 0; }
+.sheet > b { font-family: var(--mono); color: var(--accent); }
+.sheet > span:nth-child(3n+2) { font-weight: 600; }
+@media (max-width: 860px) { .sheet { grid-template-columns: 28px minmax(0, 1fr); } .sheet > span:nth-child(3n) { grid-column: 2; } }
+</style>
+
+<div class="wrap">
+<header class="top">
+  <span class="eyebrow">Case Maker · CNC · rotary · design v1 · 2026-10-26</span>
+  <h1>Rotary Job Flow</h1>
+  <p class="lede">The first-job flow, extended to a job held in the rotary chuck. The same four steps and the same four Cut lines; what makes a job rotary is the stock (round, or squared) and the mount (the chuck). Each mockup carries the exact copy of <span class="mono">docs/design/rotary-flow.md</span>; the notes beside it say where every default comes from.</p>
+  <span class="status">Proposed · awaiting the maintainer's approval · tracker #545</span>
+</header>
+
+<div class="flow" aria-label="The flow">
+  <div class="st"><span class="k">DOOR</span><b>Name on a dowel</b><small>a starter job</small></div>
+  <div class="st"><span class="k">STEP 2 OF 4</span><b>Stock</b><small>Rod · Tube · ⌀ · length X</small></div>
+  <div class="st"><span class="k">STEP 3 OF 4</span><b>Holding</b><small>in the rotary chuck · ⤷ change it</small></div>
+  <div class="st"><span class="k">STEP 4 OF 4</span><b>Operation</b><small>on the surface · on a face · 3D</small></div>
+  <div class="st mode"><span class="k">MODE</span><b>Design</b><small>the map · the panel · Simulate</small></div>
+  <div class="st mode"><span class="k">MODE</span><b>Cut</b><small>Register the stock · Run</small></div>
+</div>
+<p class="hint">Nothing new counts steps. A rotary job is a first-job job; the rotary is on the pins or the change wizard puts it there. Until the module is measured on this machine, the Run line carries one sentence and the rest of the flow works.</p>
+
+<section>
+  <div class="head"><h2>Principles added for the rotary</h2><p class="lede">First-job principles 1–8 hold unchanged. These six are added.</p></div>
+  <ol class="acc" style="counter-reset:a 8">
+    <li><span><b>A rotary job is a first-job job.</b> No project type, no second wizard. The form and the mount decide.</span></li>
+    <li><span><b>The rotary is on the pins, or the job is taken there.</b> The machine's state is read; the chuck is offered with its cost and the change wizard.</span></li>
+    <li><span><b>The operator thinks on the surface.</b> Items are placed in mm along and around; degrees only on angle fields and the A read-out, with <span class="mono">°</span> every time.</span></li>
+    <li><span><b>Two pictures, one geometry.</b> The map for placing, the turning stock for watching; both draw the same opened regions.</span></li>
+    <li><span><b>The run path waits for the bench, and says so once</b>, at the Run line: <q>The rotary module has not been measured on this machine yet — this program can be checked and saved; running it waits for the module's bench check.</q></span></li>
+    <li><span><b>What the cutter cannot do on a round stock is refused by name, at the item</b>: through the centre, off the line over the axis, into the jaws or the tailstock.</span></li>
+  </ol>
+</section>
+
+<!-- ============ STATION 0+1: door and machine ============ -->
+<section id="door">
+  <div class="head"><span class="eyebrow">Station 0 · Station 1</span><h2>The door and Step 1 of 4 · Machine</h2><p class="lede">One starter job more on the door. The machine step is unchanged; its line already says what is on the pins, and with the rotary there the wasteboard reads off.</p></div>
+  <div class="station">
+    <div class="screen"><div class="bar"><span class="dots"><i></i><i></i><i></i></span><span class="ttl">Case Maker · welcome → new cutting job</span></div>
+      <div class="body">
+        <div style="border:2px solid var(--accent);border-radius:6px;padding:14px;display:grid;gap:8px;background:var(--accent-soft)">
+          <span class="eyebrow">CNC</span><h3>Start a cutting job</h3>
+          <p class="hint">Cut something on the CNC — a badge, a plate, a pocket, an engraving.</p>
+          <div><span class="btn primary big">Start a cutting job</span></div>
+          <div class="hint">Starters: <a href="#">Name badge</a> · <a href="#">Bare blank</a> · <a href="#"><b>Name on a dowel</b></a></div>
+        </div>
+        <div class="modal" style="margin:0 auto">
+          <div class="mh"><span class="step">Step 1 of 4</span><h3>Machine</h3><span class="x">Close ✕</span></div>
+          <div class="mb">
+            <div class="line"><b>Makera Z1 “Zoomba”</b><span class="mono muted">192.168.10.43</span></div>
+            <div class="line"><span class="state"><span class="dot ok"></span>Online · Idle · homed</span><span class="muted">· checked <span class="mono">09:02</span></span><span class="btn" style="margin-left:auto">Check again</span></div>
+            <div class="line"><span class="muted">On the machine now</span><b>Rotary on the pins</b><span>· wasteboard off</span></div>
+          </div>
+          <div class="mf"><span class="btn primary">Next: stock →</span></div>
+        </div>
+      </div>
+    </div>
+    <aside class="notes"><h3>Starter</h3>
+      <ul><li><b>Name on a dowel</b>: PLA rod <span class="mono">⌀20 × 100 mm</span>, the rotary chuck, Engrave text asking for the name. The size is the recommended first rotary stock; the material is the house's. One declarative job file.</li></ul>
+      <h3>Wasteboard off</h3><p>Makera's guide: the module mounts on the two pins and three M5×10 screws <q>after removing the MDF wasteboard</q>. The first-job mockup's "Rotary on the pins · wasteboard under" is corrected here and at station 3a.</p>
+      <h3>DRO</h3><p>The strip shows A beside X Y Z while the rotary is checked out (already built).</p>
+      <h3>Work item</h3><p class="issue">R-UI-15 starter · R-UI-3 wording</p>
+    </aside>
+  </div>
+</section>
+
+<!-- ============ STATION 2: stock ============ -->
+<section id="stock">
+  <div class="head"><span class="eyebrow">Station 2</span><h2>Step 2 of 4 · Stock — round stock</h2><p class="lede">Rod and a new Tube. The numbers say which mount takes them, in the sentence under the picture; nothing is asked twice. The circumference is shown once, because it is the map's height.</p></div>
+  <div class="station">
+    <div class="screen"><div class="bar"><span class="dots"><i></i><i></i><i></i></span><span class="ttl">New cutting job</span></div>
+      <div class="backdrop"><div class="modal">
+        <div class="mh"><span class="step">Step 2 of 4</span><h3>Stock</h3><span class="x">Close ✕</span></div>
+        <div class="mb">
+          <div class="frow">
+            <label>Material</label><div class="v"><span class="in sel"><b>PLA</b></span><span class="hint">Plastics · Woods · Metals, this house's first</span></div>
+            <label>Form</label><div class="v" style="display:grid;gap:8px">
+              <div class="forms">
+                <span class="form"><svg viewBox="0 0 40 28"><path d="M4 16 L18 8 L36 12 L22 20 Z"/><path d="M4 16 v4 L22 24 v-4 M22 20 L36 12 v4 L22 24"/></svg>Plate</span>
+                <span class="form"><svg viewBox="0 0 40 28"><path d="M8 10 L20 4 L32 10 L20 16 Z"/><path d="M8 10 v12 L20 28 v-12 M20 16 L32 10 v12 L20 28"/></svg>Block</span>
+                <span class="form"><svg viewBox="0 0 40 28"><path d="M3 15 L19 8 L37 11 L21 18 Z"/><path d="M3 15 v1.5 L21 19.5 v-1.5 M21 18 L37 11 v1.5 L21 19.5"/></svg>Sheet</span>
+                <span class="form"><svg viewBox="0 0 40 28"><path d="M4 16 L18 8 L36 12 L22 20 Z"/><path d="M4 16 v4 L22 24 v-4 M22 20 L36 12 v4 L22 24"/><path d="M8 17 l12-6 M8 19 l12-6" stroke-dasharray="1.5 1.5"/></svg>Printed</span>
+                <span class="form"><svg viewBox="0 0 40 28"><ellipse cx="20" cy="12" rx="15" ry="6"/><path d="M5 12 v4 a15 6 0 0 0 30 0 v-4"/></svg>Disc</span>
+                <span class="form on"><svg viewBox="0 0 40 28"><ellipse cx="8" cy="14" rx="4" ry="8"/><path d="M8 6 h26 a4 8 0 0 1 0 16 H8"/></svg>Rod</span>
+                <span class="form"><svg viewBox="0 0 40 28"><ellipse cx="8" cy="14" rx="4" ry="8"/><ellipse cx="8" cy="14" rx="2" ry="4"/><path d="M8 6 h26 a4 8 0 0 1 0 16 H8"/></svg>Tube</span>
+              </div>
+              <p class="hint"><b>Rod</b> — round stock: a dowel, a rod. A rod up to <span class="mono">20 mm</span> long stands on its end in the vise; a longer one is held in the rotary chuck and cut around (step 3 offers it).</p>
+            </div>
+            <label>Size</label><div class="v">
+              <span class="in"><span class="u">diameter ⌀</span><span class="n">20</span><span class="u">mm</span></span>
+              <span class="in"><span class="u">length X</span><span class="n">100</span><span class="u">mm</span></span>
+              <span class="hint" style="flex-basis:100%">Around: <span class="mono">62.832 mm</span> at the surface</span>
+            </div>
+            <label>Shelf</label><div class="v"><span class="radio">PLA rod <span class="mono">⌀20 × 100 mm</span> · 3 on the shelf</span></div>
+          </div>
+          <div class="twostate" style="border-top:1px dashed var(--line);padding-top:10px"><span class="cap">when Tube is picked</span>
+            <p class="hint"><b>Tube</b> — round stock with a bore. Held in the rotary chuck and cut around; no cut goes deeper than its wall.</p>
+            <div class="v" style="display:flex;flex-wrap:wrap;gap:8px"><span class="in"><span class="u">diameter ⌀</span><span class="n">25</span><span class="u">mm</span></span><span class="in"><span class="u">wall</span><span class="n">3</span><span class="u">mm</span></span><span class="in"><span class="u">length X</span><span class="n">120</span><span class="u">mm</span></span></div></div>
+          <div class="twostate" style="border-top:1px dashed var(--line);padding-top:10px"><span class="cap">when it does not fit</span>
+            <p class="hint" style="color:var(--bad)"><span class="mono">⌀90 mm</span> does not fit the rotary's <span class="mono">⌀80 × 150 mm</span>.</p></div>
+        </div>
+        <div class="mf"><span class="btn">← Back</span><span class="btn primary">Next: holding →</span></div>
+      </div></div>
+    </div>
+    <aside class="notes"><h3>Which form goes where</h3>
+      <ul><li><b>Rod</b>: the vise on its end up to <span class="mono">20 mm</span> (the vise's floor depth); the chuck when it fits <span class="mono">⌀80 × 150</span>.</li><li><b>Tube</b>: the chuck; the wall caps every depth.</li><li><b>Block</b>: squared stock in the chuck when its diagonal fits (Makera CAM's Square stock).</li><li><b>Disc</b>: on its face, as today; not offered in the chuck.</li><li>Plate, Sheet, Printed: flat; not offered.</li></ul>
+      <h3>Sources</h3><p>⌀80 × 150: Makera's database row for the Z1. ⌀20 × 100: the recommended first rotary stock. Rod rule: the existing rod sentence, which no longer blocks Next once Holding writes the chuck.</p>
+      <h3>Work item</h3><p class="issue">R-UI-1</p>
+    </aside>
+  </div>
+</section>
+
+<!-- ============ STATION 3: holding ============ -->
+<section id="holding">
+  <div class="head"><span class="eyebrow">Station 3</span><h2>Step 3 of 4 · Holding — in the rotary chuck</h2><p class="lede">The step opens on what is on the machine. With the rotary on the pins, the chuck is the default and selecting it writes the job. Four lines, each defaulted; the picture is the front view the cutter works in.</p></div>
+  <div class="station">
+    <div class="screen"><div class="bar"><span class="dots"><i></i><i></i><i></i></span><span class="ttl">New cutting job</span></div>
+      <div class="backdrop"><div class="modal" style="max-width:720px">
+        <div class="mh"><span class="step">Step 3 of 4</span><h3>Holding</h3><span class="x">Close ✕</span></div>
+        <div class="mb">
+          <div class="line" style="padding:8px 10px;border:1px solid var(--line);border-radius:4px;background:var(--bg)"><span class="muted">On the machine now</span><b>Rotary on the pins</b><span>· wasteboard off</span><span class="btn" style="margin-left:auto">Change the machine…</span></div>
+          <div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(220px,280px);gap:16px;align-items:start">
+            <div style="display:grid;gap:9px">
+              <span class="hint" style="font-weight:500;color:var(--fg)">How is the rod held?</span>
+              <span class="radio dis"><span>In the vise, on its end<br><span class="hint">needs the vise on the pins · <span style="color:var(--accent)">Change the machine…</span></span></span></span>
+              <span class="radio on"><span><b>In the rotary chuck</b><br><span class="hint">the rod turns about X; the cutter stays over it</span></span></span>
+              <div class="frow" style="grid-template-columns:90px minmax(0,1fr);margin-left:22px">
+                <label>Jaws</label><div class="v"><span class="in sel">reverse</span></div>
+                <label>Grip</label><div class="v"><span class="in"><span class="n">15</span><span class="u">mm</span></span><span class="hint">in the jaws · stick-out <span class="mono">85 mm</span></span></div>
+                <label>Tailstock</label><div class="v"><span class="hint" style="color:var(--fg)">☑ in — drill a centre hole in the free end first</span></div>
+              </div>
+              <div class="fold">Technical: the chuck and tailstock (Makera's figures and Case Maker's defaults) · the axis datum</div>
+            </div>
+            <div style="display:grid;gap:6px">
+              <svg class="fig" viewBox="0 0 280 150" aria-label="Front view of the rod in the rotary chuck">
+                <defs><marker id="ah" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto"><path d="M0 0 L6 3 L0 6 Z" fill="var(--fg)"/></marker>
+                  <pattern id="hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2="6" stroke="var(--line-strong)" stroke-width="2"/></pattern></defs>
+                <rect x="10" y="40" width="34" height="70" fill="var(--line-strong)"/>
+                <rect x="44" y="50" width="20" height="14" fill="var(--line)" stroke="var(--line-strong)"/><rect x="44" y="86" width="20" height="14" fill="var(--line)" stroke="var(--line-strong)"/>
+                <rect x="44" y="64" width="190" height="22" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="1.5"/>
+                <path d="M234 75 L250 68 L250 82 Z" fill="var(--line-strong)"/><rect x="250" y="58" width="22" height="34" fill="var(--line-strong)"/>
+                <line x1="20" y1="75" x2="276" y2="75" stroke="var(--fg)" stroke-dasharray="4 3" stroke-width="0.8"/>
+                <text x="27" y="34" text-anchor="middle">chuck</text><text x="54" y="46" text-anchor="middle">jaws</text><text x="261" y="52" text-anchor="middle">tailstock</text>
+                <text x="140" y="79" text-anchor="middle" class="mono ink">rod ⌀20</text>
+                <path d="M44 120 H64" stroke="var(--fg)"/><text x="54" y="132" text-anchor="middle" class="mono">grip 15</text>
+                <path d="M64 120 H232" stroke="var(--fg)" marker-end="url(#ah)"/><text x="148" y="132" text-anchor="middle" class="mono">stick-out 85 mm</text>
+                <text x="64" y="146" text-anchor="middle" class="ink">X 0 at the jaws</text><text x="210" y="146" class="ink">X →</text>
+                <path d="M150 58 a22 8 0 0 1 44 0" fill="none" stroke="var(--fg)" marker-end="url(#ah)"/><text x="172" y="22" text-anchor="middle" class="ink">A turns the rod about X</text>
+              </svg>
+              <p class="hint">Front view, looking along Y: the plane the cutter works in. The chuck on the left; X runs from the jaws to the tailstock.</p>
+              <div class="twostate" style="border-top:1px dashed var(--line);padding-top:8px"><span class="cap">with the vise on the pins</span>
+                <p class="hint">○ In the rotary chuck · needs the rotary on the pins · <span style="color:var(--accent)">Change the machine…</span></p></div>
+            </div>
+          </div>
+        </div>
+        <div class="mf"><span class="btn">← Back</span><span class="btn primary">Next: operation →</span></div>
+      </div></div>
+    </div>
+    <aside class="notes"><h3>Defaults and where they come from</h3>
+      <ul><li><b>Jaws reverse</b> — Makera's guide: reverse jaws fitted by default for larger work; standard for small parts. The jaw range is not published; until the bench calipers it, ⌀80 × 150 is the only gate.</li><li><b>Grip 15 mm</b> — Case Maker's default, a shop setting. Makera publishes no jaw depth.</li><li><b>Stick-out</b> — derived: length − grip. Shown, not asked.</li><li><b>Tailstock in</b> — Makera's shipped value (Studio's rotary relief, <span class="mono">haveTailTop: true</span>); the centre hole is Makera's guide.</li><li><b>Chuck on the left, X 0 at the jaws</b> — Makera's preset zero "at the centre of the right edge", read as the chuck's face.</li></ul>
+      <h3>Replaces</h3><ul><li>The chuck option that reads <q>the job is held in the vise</q> and writes nothing. Selecting it now stores the chuck.</li></ul>
+      <h3>Work item</h3><p class="issue">R-UI-2 (answers #697)</p>
+    </aside>
+  </div>
+</section>
+
+<!-- ============ STATION 3a: change the machine ============ -->
+<section id="change">
+  <div class="head"><span class="eyebrow">Station 3a · the escape</span><h2>Change the machine → the rotary</h2><p class="lede">The change wizard already fits the rotary. Its lines follow Makera's guide: the wasteboard comes off, three screws, and the 4th-axis cable is never plugged in with the machine on.</p></div>
+  <div class="station">
+    <div class="screen"><div class="bar"><span class="dots"><i></i><i></i><i></i></span><span class="ttl">Change the machine</span></div>
+      <div class="backdrop"><div class="modal" style="max-width:720px">
+        <div class="mh"><span class="step">Change the machine</span><h3>Vise off · rotary on</h3><span class="x">Close ✕</span></div>
+        <div class="mb" style="gap:0;padding:0">
+          <div class="cstep done"><span class="m">✓</span><div class="t"><b>1 What changes</b><span class="meta">Vise on the pins → Rotary on the pins · for <b>Name on a dowel</b>, held in the rotary chuck</span></div></div>
+          <div class="cstep done"><span class="m">✓</span><div class="t" style="display:grid;gap:4px"><b>2 Make it safe</b><span class="meta">Home · <span class="mono">$H</span> · Idle · homed ✓</span><span class="meta">Work light on · <span class="mono">M821</span> ✓</span><span class="meta">Spindle cold, cutter out · I have checked ✓</span></div></div>
+          <div class="cstep done"><span class="m">✓</span><div class="t" style="display:grid;gap:4px"><b>3 Take off the vise and the wasteboard</b><span class="meta">the two pin bolts · lift the vise straight up · the wasteboard's screws · both on the shelf ✓</span></div></div>
+          <div class="cstep now"><span class="m">4</span><div class="t" style="display:grid;gap:6px"><b>Fit the rotary</b>
+            <div style="display:grid;gap:4px">
+              <span class="check">switch the machine off at its switch — the 4th-axis cable is never plugged in live</span>
+              <span class="check">onto the two pins</span><span class="check">the three M5 × 10 screws</span><span class="check">the 4th-axis cable, rear left</span>
+              <span class="check">switch the machine on</span><span class="meta"><span class="state"><span class="dot warn"></span>waiting for it to answer…</span></span>
+              <span class="check">chuck key in the tray</span>
+            </div>
+            <div class="hint">a picture for each step</div>
+            <div class="meta">axis datum: Makera's shipped value · <span style="color:var(--accent)">Measure now</span> or <span style="color:var(--accent)">use the shipped value</span></div></div>
+            <div class="acts"><span class="btn disabled">Done</span><span class="hint">ticks every line, and the machine answers</span></div></div>
+          <div class="cstep"><span class="m">5</span><div class="t" style="display:grid;gap:4px"><b>Confirm</b><span class="meta">the bed is now: Rotary on the pins · wasteboard off</span><span class="meta">written to the machine's record: <span class="mono">2026-10-26 09:20</span> · vise → rotary · for Name on a dowel</span><span class="meta">Work light off · Home</span></div></div>
+        </div>
+        <div class="mf"><span class="btn">← Back</span><span class="btn disabled">Back to the job</span></div>
+      </div></div>
+    </div>
+    <aside class="notes"><h3>Changes to the built wizard</h3>
+      <ul><li>Step 3 takes off the wasteboard as well (Makera's guide).</li><li>Step 4 gains: the machine off before the cable, three M5×10 screws, the machine on and the wait for it to answer. Power is outside Case Maker: the operator uses the machine's own switch.</li><li>Step 5 writes <q>wasteboard off</q>, not <q>wasteboard under</q>.</li></ul>
+      <h3>The axis datum</h3><p>With no reading here, the module's preset: Studio's rotary offsets (this machine's config: <span class="mono">−7.5 / 69.0 / 17.0</span>). "Measure now" is the side-and-top touch of Cut step 3, not a tap on the chuck body (a touch from above on the body is the axis plus an unmeasured radius).</p>
+      <h3>Home</h3><p>Step 5's Home homes A too when the module answers it: the shipped config gives A a homing switch. The line reports what the machine says.</p>
+      <h3>Work item</h3><p class="issue">R-UI-3</p>
+    </aside>
+  </div>
+</section>
+
+<!-- ============ STATION 4: operation ============ -->
+<section id="operation">
+  <div class="head"><span class="eyebrow">Station 4</span><h2>Step 4 of 4 · What are you cutting? — on a round stock</h2><p class="lede">Three groups, named for where the cut lands. The chosen operation asks for the one thing it needs; text also asks which way it reads.</p></div>
+  <div class="station">
+    <div class="screen"><div class="bar"><span class="dots"><i></i><i></i><i></i></span><span class="ttl">New cutting job</span></div>
+      <div class="backdrop"><div class="modal" style="max-width:700px">
+        <div class="mh"><span class="step">Step 4 of 4</span><h3>What are you cutting?</h3><span class="x">Close ✕</span></div>
+        <div class="mb">
+          <div class="ops">
+            <div class="g"><span>On the surface</span><div class="chips"><span class="chip on">Engrave text</span><span class="chip">V-carve</span><span class="chip">Pocket</span><span class="chip">Flute</span></div></div>
+            <div class="g"><span>On a face</span><div class="chips"><span class="chip">Flat</span><span class="chip">Faces all round</span><span class="chip">Cross-hole</span></div></div>
+            <div class="g"><span>3D</span><div class="chips"><span class="chip">Relief from a mesh</span><span class="tag warn">simulate only</span></div></div>
+          </div>
+          <div style="border-top:1px solid var(--line);padding-top:12px" class="frow">
+            <label>Engrave text</label><div class="v"><span class="in" style="min-width:160px"><b>Zoomba</b></span><span class="in"><span class="u">depth</span><span class="n">0.5</span><span class="u">mm</span></span><span class="in sel">Inter</span><span class="hint">reads</span><span class="in sel">along</span><span class="hint">the rod</span></div>
+          </div>
+          <div class="twostate" style="border-top:1px dashed var(--line);padding-top:10px"><span class="cap">the one field each needs</span>
+            <div class="frow" style="grid-template-columns:130px minmax(0,1fr)">
+              <label>Flat</label><div class="v"><span class="in"><span class="u">at</span><span class="n">0</span><span class="u">°</span></span><span class="in"><span class="u">depth</span><span class="n">1</span><span class="u">mm</span></span></div>
+              <label>Faces all round</label><div class="v"><span class="in"><span class="u">faces</span><span class="n">6</span></span><span class="in"><span class="u">across flats</span><span class="n">17.321</span><span class="u">mm</span></span></div>
+              <label>Cross-hole</label><div class="v"><span class="in"><span class="u">at</span><span class="n">90</span><span class="u">°</span></span><span class="in"><span class="u">⌀</span><span class="n">3</span><span class="u">mm</span></span><span class="check hint">through</span></div>
+              <label>Relief from a mesh</label><div class="v"><span class="btn">Choose an STL or 3MF…</span></div>
+            </div></div>
+        </div>
+        <div class="mf"><span class="btn">← Back</span><span class="btn primary">Create the job</span></div>
+      </div></div>
+    </div>
+    <aside class="notes"><h3>The groups are the classes</h3>
+      <ul><li><b>On the surface</b> (wrap): text and shapes on the map, cut below the surface; A and X move together on every stroke.</li><li><b>On a face</b> (indexed): turn to an angle, hold, cut flat work. A Flat's <q>+ Add operation</q> offers the flat picker at that angle.</li><li><b>3D</b> (relief): Makera's Rotation Relief. Authored, generated, simulated and saved; the machine does not run it. <span class="tag warn">simulate only</span> is a fact tag, like <span class="tag">recommended</span>.</li></ul>
+      <h3>Not an operation</h3><p><b>Cut-off.</b> Makera offers none, and a vertical end mill can only part a rod off by cutting through the centre. The part is sawn off; a Pocket band all the way round marks the line.</p>
+      <h3>V-carve</h3><p>Shown when the rotary simulation sweeps a V-bit (today it sweeps a flat end only). Until then the picker hides it.</p>
+      <h3>Defaults</h3><p>Reads <b>along</b>, like a pencil's lettering. Faces all round: 6, the largest across-flats inside the ⌀ (<span class="mono">⌀ · cos(180°/n)</span>).</p>
+      <h3>Work items</h3><p class="issue">R-UI-4 · R-UI-11 faces · R-UI-12 V · R-UI-13 relief</p>
+    </aside>
+  </div>
+</section>
+
+<!-- ============ STATION 5: the map ============ -->
+<section id="map">
+  <div class="head"><span class="eyebrow">Station 5</span><h2>Design — the map</h2><p class="lede">The engrave preview, when the stock is round: the stock's surface unrolled. Along is X from the jaws; around is a ruler in mm at the surface with the degrees beside it. The seam, the jaws' band and the tailstock's band are drawn. Map or Stock, the same regions.</p></div>
+  <div class="station">
+    <div class="screen"><div class="bar"><span class="dots"><i></i><i></i><i></i></span><span class="ttl">Case Maker · CNC · Name on a dowel</span></div>
+      <div class="body">
+        <div class="line"><b>The map</b><span class="seg" style="margin-left:12px"><span class="on">Map</span><span>Stock</span></span><span class="hint mono" style="margin-left:auto">⌀20 · around 62.832 mm</span></div>
+        <svg class="fig" viewBox="0 0 560 250" aria-label="The unrolled map of the rod's surface">
+          <defs><pattern id="hatch2" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2="6" stroke="var(--line-strong)" stroke-width="2"/></pattern></defs>
+          <!-- map area: x 90..520 = X 0..85 (5.06 px/mm); y 30..218 = around 0..62.832 (2.99 px/mm) -->
+          <rect x="90" y="30" width="430" height="188" fill="var(--panel)" stroke="var(--line-strong)"/>
+          <rect x="90" y="16" width="430" height="14" fill="var(--accent-soft)" opacity="0.6"/><rect x="90" y="218" width="430" height="14" fill="var(--accent-soft)" opacity="0.6"/>
+                    <rect x="90" y="30" width="15" height="188" fill="url(#hatch2)"/><rect x="469" y="30" width="51" height="188" fill="url(#hatch2)"/>
+          <line x1="90" y1="30" x2="520" y2="30" stroke="var(--warn)" stroke-dasharray="6 4" stroke-width="1.5"/><line x1="90" y1="218" x2="520" y2="218" stroke="var(--warn)" stroke-dasharray="6 4" stroke-width="1.5"/>
+          <text x="440" y="27" text-anchor="middle" style="fill:var(--warn)">seam · 0°</text><text x="440" y="229" text-anchor="middle" style="fill:var(--warn)">seam · 360°</text>
+          <!-- ruler -->
+          <g class="mono"><text x="84" y="33" text-anchor="end" class="mono">0 mm · 0°</text><text x="84" y="80" text-anchor="end" class="mono">15.708 · 90°</text><text x="84" y="127" text-anchor="end" class="mono">31.416 · 180°</text><text x="84" y="174" text-anchor="end" class="mono">47.124 · 270°</text><text x="84" y="221" text-anchor="end" class="mono">62.832 · 360°</text></g>
+          <g stroke="var(--line)"><line x1="90" y1="77" x2="520" y2="77"/><line x1="90" y1="124" x2="520" y2="124"/><line x1="90" y1="171" x2="520" y2="171"/></g>
+          <!-- the text item, centred at 180°, along -->
+          <rect x="190" y="114" width="150" height="20" fill="var(--accent-soft)" stroke="var(--accent)" stroke-dasharray="3 2"/>
+          <text x="265" y="129" text-anchor="middle" style="font:600 15px 'IBM Plex Mono',monospace;letter-spacing:6px;fill:var(--accent)">ZOOMBA</text>
+          <text x="265" y="110" text-anchor="middle" class="ink">Engrave “Zoomba” · 0.5 mm · reads along · centred at 180°</text>
+          <text x="97" y="236" text-anchor="middle">jaws</text><text x="494" y="246" text-anchor="middle">tailstock 75–85 mm</text>
+          <!-- along axis -->
+          <g class="mono"><text x="90" y="250" text-anchor="middle" class="mono">0</text><text x="191" y="250" text-anchor="middle" class="mono">20</text><text x="292" y="250" text-anchor="middle" class="mono">40</text><text x="393" y="250" text-anchor="middle" class="mono">60</text></g>
+          <text x="20" y="14" class="ink">around ↑ (mm at the surface)</text><text x="380" y="14" class="ink">along → X mm from the jaws</text>
+        </svg>
+        <div class="line"><span class="in"><span class="u">seam</span><span class="n">0</span><span class="u">°</span></span><span class="in sel"><span class="u">reads</span>along</span><span class="hint">the strip each side of the seam repeats <span class="mono">5 mm</span></span></div>
+        <div class="twostate" style="border-top:1px dashed var(--line);padding-top:10px"><span class="cap">an item in a band, at its row</span>
+          <div class="block"><span><b>“Zoomba” reaches 2 mm into the tailstock's band.</b> Move it 2 mm along, or take the tailstock out.</span><span class="btn ghost" style="margin-left:auto">Fix →</span></div></div>
+      </div>
+    </div>
+    <aside class="notes"><h3>Rules</h3>
+      <ul><li>Items are placed and dimensioned in mm, along and around (author on the surface). A selected item also reads its centre angle in <span class="mono">°</span>.</li><li><b>The seam</b> is where the map's edges meet on the stock, at 0° by default: where A homes. An item may cross it; A is never wrapped, so the cut is continuous, and the map repeats a strip each side so it is drawn whole.</li><li><b>The bands</b>: grip + 3 mm keep-out at the jaws, 10 mm at the tailstock while it is in. Case Maker's defaults with their provenance on hover, until measured.</li><li><b>Map | Stock</b> shows the same opened regions on the cylinder with the A-zero mark. Both use the wider opening around (<span class="mono">r · R / (R − d)</span>) so a stroke that merges on one merges on the other.</li><li>A depth that reaches the centre, or past a tube's wall, is refused at the depth field.</li></ul>
+      <h3>Work item</h3><p class="issue">R-UI-5</p>
+    </aside>
+  </div>
+</section>
+
+<!-- ============ STATION 6: design panel ============ -->
+<section id="design">
+  <div class="head"><span class="eyebrow">Station 6</span><h2>Design — the panel's rotary lines</h2><p class="lede">Three groups, as in the first job. Each gains its rotary lines: the map's summary, the speed the cut sees at the surface, the chuck.</p></div>
+  <div class="station">
+    <div class="screen"><div class="bar"><span class="dots"><i></i><i></i><i></i></span><span class="ttl">Case Maker · CNC</span></div>
+      <div class="panel">
+        <div class="filebar"><span class="name">Name on a dowel</span><span class="hint">saved <span class="mono">09:24</span> ▾</span><span class="seg"><span class="on">Design</span><span>Cut</span></span></div>
+        <div class="grp"><div class="gh">Job<span class="tog">▾</span></div><div class="gb">
+          <div class="line"><span class="muted">Stock</span><b>rod</b><span class="mono">⌀20 × length 100 mm</span>· PLA · around <span class="mono">62.832 mm</span><span class="act">edit</span></div>
+          <div class="line"><span class="muted">Map</span>seam <span class="mono">0°</span> · jaws <span class="mono">0–3 mm</span> · tailstock <span class="mono">75–85 mm</span><span class="act">edit</span></div>
+          <div class="line"><span class="muted">Items (1)</span><span class="act btn ghost" style="padding:2px 8px">+ Add operation ▾</span></div>
+          <div class="item"><span class="muted">▸</span><span class="ic">T</span><div><div><b>Engrave “Zoomba”</b></div><div class="meta">Engrave text · <span class="mono">0.5 mm</span> deep · reads along · centred at <span class="mono">180°</span></div></div><span class="muted">⋯</span></div>
+        </div></div>
+        <div class="grp"><div class="gh">Cutter<span class="tog">▾</span></div><div class="gb">
+          <div class="line"><b>⌀ 1 mm flat end</b><span class="mono muted">· 7 mm flute</span><span class="tag">recommended</span><span class="act">change</span></div>
+          <div class="line hint">Cutting — Makera's catalogue row for PLA: <span class="mono">12 000 rpm · 500 mm/min</span></div>
+          <div class="line hint">At the surface — the rod turns at <span class="mono">5.575 rpm</span>; the cut sees <span class="mono">333 mm/min</span><span class="act">Technical</span></div>
+        </div></div>
+        <div class="grp"><div class="gh">Hold<span class="tog">▸</span></div><div class="gb"><div class="line hint">Rotary chuck · reverse jaws · grip <span class="mono">15 mm</span> · stick-out <span class="mono">85 mm</span> · tailstock in<span class="act">edit</span></div></div></div>
+        <div class="footer">
+          <div class="twostate"><span class="cap">when blocked</span>
+            <div class="block"><span class="btn disabled">Generate</span><span><b>Depth 12 mm reaches the centre of a ⌀20 rod.</b> Choose a depth under 10 mm.</span><span class="btn ghost" style="margin-left:auto">Fix →</span></div></div>
+          <div class="twostate"><span class="cap">when it generates</span>
+            <div class="line"><span class="btn primary big">Generate</span></div>
+            <div class="ticks"><span>generated</span><span>verified</span><span>simulated</span><span>matches the design</span><span class="mono" style="margin-left:auto">about 4 min</span></div></div>
+        </div>
+      </div>
+    </div>
+    <aside class="notes"><h3>At the surface</h3>
+      <p>The program's F stays the catalogue's mm/min; the controller turns it into a speed of A. The line says what the material sees, at the item's floor radius: <span class="mono">rpm = F / (2π·r + 30)</span>, at most 10 rpm; surface = rpm × 2π·r. Makera's firmware feed model; the 10 rpm limit read from this machine's config. When the limit binds: <q>the rod turns at its 10 rpm limit; the cut sees 597 mm/min of 1 200</q>.</p>
+      <h3>Blockers, in the same form</h3><ul><li><q>Depth 12 mm reaches the centre of a ⌀20 rod — choose a depth under 10 mm</q></li><li><q>“Zoomba” runs into the jaws</q> → the map</li></ul>
+      <h3>No machine record</h3><p>Hold reads <q>Rotary chuck · the Z1's rotary, ⌀80 × 150 mm</q> and nothing else; the job is authored and simulated against the profile.</p>
+      <h3>Work item</h3><p class="issue">R-UI-6</p>
+    </aside>
+  </div>
+</section>
+
+<!-- ============ STATION 7: simulate ============ -->
+<section id="simulate">
+  <div class="head"><span class="eyebrow">Station 7</span><h2>Simulate</h2><p class="lede">The stock turns under a still cutter; the path, the removed material and any gouge turn with it. Unroll shows the same result on the map. The scrubber reads A in degrees and turns.</p></div>
+  <div class="station">
+    <div class="screen"><div class="bar"><span class="dots"><i></i><i></i><i></i></span><span class="ttl">Simulate</span></div>
+      <div class="body">
+        <div class="line"><b>Simulate</b><span class="seg" style="margin-left:12px"><span class="on">Stock</span><span>Unroll</span></span></div>
+        <svg class="fig" viewBox="0 0 560 170" aria-label="The rod turning in the chuck under the cutter">
+          <rect x="20" y="50" width="40" height="80" fill="var(--line-strong)"/><rect x="60" y="60" width="22" height="14" fill="var(--line)" stroke="var(--line-strong)"/><rect x="60" y="106" width="22" height="14" fill="var(--line)" stroke="var(--line-strong)"/>
+          <rect x="60" y="74" width="420" height="32" rx="2" fill="var(--accent-soft)" stroke="var(--accent)"/>
+          <ellipse cx="480" cy="90" rx="6" ry="16" fill="var(--accent-soft)" stroke="var(--accent)"/>
+          <path d="M480 90 L500 82 L500 98 Z" fill="var(--line-strong)"/><rect x="500" y="70" width="30" height="40" fill="var(--line-strong)"/>
+          <text x="275" y="95" text-anchor="middle" style="font:600 14px 'IBM Plex Mono',monospace;letter-spacing:6px;fill:var(--accent)">ZOOM</text>
+          <path d="M150 80 q20 -4 40 -2 q30 3 60 0" stroke="var(--ok)" stroke-width="1.5" fill="none"/>
+          <rect x="301" y="20" width="10" height="50" fill="var(--fg)" opacity="0.75"/><text x="318" y="34" class="ink">cutter, over the axis</text>
+          <path d="M240 140 a40 10 0 0 0 80 0" fill="none" stroke="var(--fg)"/><text x="280" y="162" text-anchor="middle" class="ink">the rod turns; the cutter stays still</text>
+          <text x="40" y="44" text-anchor="middle">chuck</text><text x="515" y="64" text-anchor="middle">tailstock</text>
+        </svg>
+        <div style="display:grid;gap:6px;border:1px solid var(--line);padding:10px 12px;border-radius:4px">
+          <div class="line"><span class="btn">▶</span><div style="flex:1;min-width:120px;height:6px;background:var(--line);border-radius:3px;position:relative"><div style="width:35%;height:100%;background:var(--accent);border-radius:3px"></div></div><span class="mono hint">step 1 412 of 3 980</span></div>
+          <div class="line mono hint"><span>A <b style="color:var(--fg)">154.5°</b> · 3 turns</span><span>X 31.2 mm</span><span>above the axis 9.5 mm</span><span style="margin-left:auto">material: 40 updates</span></div>
+        </div>
+        <div class="line"><span class="state"><span class="dot ok"></span><b>Matches the design</b></span><span class="hint">on the map, every cell within <span class="mono">0.1 mm × 0.25°</span> and <span class="mono">0.013 mm</span></span></div>
+        <div class="fold">Technical: grid · the facet allowance · what was not checked</div>
+        <div class="twostate" style="border-top:1px dashed var(--line);padding-top:10px"><span class="cap">Makera's own relief finish, opened as a reference</span>
+          <div class="refuse"><b>Move 3 847 cuts through the centre: the cutter tip reaches 5 mm past the axis.</b><span>The simulation stops there; the moves after it are drawn, not simulated.</span></div></div>
+        <div class="twostate"><span class="cap">other refusals, same form</span>
+          <p class="hint">Move 212 leaves the line over the axis (Y <span class="mono">2.5 mm</span>). A rotary program keeps the cutter over the axis.<br>Move 88 turns the stock while the cutter is <span class="mono">1.2 mm</span> inside it.</p></div>
+      </div>
+    </div>
+    <aside class="notes"><h3>Rules</h3>
+      <ul><li><b>Stock</b> (default): the stock, the ghost, the gouges and the path turn by A in one group; the cutter, chuck and tailstock stay still. The camera does not chase the turn: the rod's bounding box is the same at every angle.</li><li><b>Unroll</b> re-meshes the same columns onto the map, with what was cut.</li><li>A reads in <span class="mono">°</span> within the turn plus the turns, never the unwound total alone. Z reads as <b>above the axis</b>.</li><li>The oracle checks every column of the map: the floor radius inside each letter's opened region, the surface outside, one grid cell each way plus the facet a flat cutter leaves on a curve (<span class="mono">√(Z² + r²) − Z</span>). The numbers live behind Technical.</li><li>Indexed jobs mark each face's index as a tick on the scrubber and show the stock turned to it.</li></ul>
+      <h3>Work item</h3><p class="issue">R-UI-8 · R-UI-7 (the oracle and the refusals)</p>
+    </aside>
+  </div>
+</section>
+
+<!-- ============ STATION 8: cut ============ -->
+<section id="cut">
+  <div class="head"><span class="eyebrow">Station 8</span><h2>Cut — register the stock, and the Run line</h2><p class="lede">The one cut flow. Registration on the rotary is seven touches, one instruction at a time. Until the module is measured, the Run line is the bench sentence and has no button.</p></div>
+  <div class="station">
+    <div class="screen"><div class="bar"><span class="dots"><i></i><i></i><i></i></span><span class="ttl">Case Maker · CNC</span></div>
+      <div class="panel">
+        <div class="filebar"><span class="name">Name on a dowel</span><span class="hint">saved <span class="mono">09:26</span> ▾</span><span class="seg"><span>Design</span><span class="on">Cut</span></span></div>
+        <div class="strip"><span>Zoomba</span><span>192.168.10.43</span><span class="state"><span class="dot ok"></span>Online · Idle · homed</span><span>A 0°</span><span>T1 ⌀ 1 mm flat end</span><span>vacuum off</span><span style="margin-left:auto">work light ○</span></div>
+        <div class="steps">
+          <div class="cstep done"><span class="m">✓</span><div class="t"><b>1 Checked</b><span class="meta">1 program · about 4 min · speed at the surface <span class="mono">333 mm/min</span></span><span class="act" style="margin-left:auto">details</span></div></div>
+          <div class="cstep done"><span class="m">✓</span><div class="t"><b>2 Frozen</b><span class="meta"><span class="mono">09:26</span> · the program matches the design</span></div></div>
+          <div class="cstep now"><span class="m">3</span><div class="t" style="display:grid;gap:4px"><b>Register the stock</b><span class="meta">both sides, then the top at four turns, then the free end · 7 touches</span><span class="meta">axis datum: Makera's shipped value — the side touches measure it on this mounting</span></div>
+            <div class="acts"><span class="check">I am at the machine, the probe is fitted</span><span class="btn primary">Start registering</span></div></div>
+          <div class="cstep"><span class="m">4</span><div class="t" style="display:grid;gap:4px"><b>Run</b><span class="meta" style="color:var(--fg)">The rotary module has not been measured on this machine yet — this program can be checked and saved; running it waits for the module's bench check.</span></div></div>
+        </div>
+        <div style="padding:10px 16px" class="hint">← Back to design</div>
+        <div style="padding:0 16px 14px;display:grid;gap:10px">
+          <div class="twostate" style="border-top:1px dashed var(--line);padding-top:10px"><span class="cap">step 3, one touch at a time</span>
+            <p class="hint">1 The front side, at the axis height · 2 The back side · 3 The top at <span class="mono">0°</span> · 4 at <span class="mono">90°</span> · 5 at <span class="mono">180°</span> · 6 at <span class="mono">270°</span> · 7 The free end, before the tailstock goes in<br>With the tailstock in: the top at four turns again, <span class="mono">60 mm</span> along — 11 touches.</p></div>
+          <div class="twostate"><span class="cap">when the rod is off the axis</span>
+            <div class="block"><span><b>The rod sits 0.4 mm off the axis; “Zoomba” is 0.5 mm deep, so one side would be 0.1 mm and the other 0.9 mm.</b> Re-seat it in the jaws, or bring up the tailstock.</span></div></div>
+          <div class="twostate"><span class="cap">after the bench check</span>
+            <p class="hint">○ 4 Run · vacuum on · fit the ⌀ 1 mm flat end · about 4 min</p></div>
+          <div class="twostate"><span class="cap">a relief job, always</span>
+            <p class="hint">4 Run · Relief on the rotary is checked and simulated here; the machine does not run it.</p></div>
+        </div>
+      </div>
+    </div>
+    <aside class="notes"><h3>The touch plan</h3>
+      <ul><li><b>Both sides</b> at the axis height: their middle is the axis's Y, their spread the diameter (the two-touch centre find Stepcraft and Tormach use).</li><li><b>The top at four turns</b>: the mean less the radius is the axis's Z; the spread is how far the rod sits off the axis, and out of round.</li><li><b>The free end</b>: X, so the map's along matches the rod.</li><li><b>A</b>: where it homes, the seam. An indexed job aligned to a feature adds one touch on it.</li></ul>
+      <h3>The gate</h3><p>Registration is allowed before the bench check: it moves the probe, not a cutter, and its readings are the bench check's own. Run, upload and release refuse with the one sentence. The probed radius replaces the nominal; the run sheet prints both.</p>
+      <h3>Work item</h3><p class="issue">R-UI-9</p>
+    </aside>
+  </div>
+</section>
+
+<!-- ============ STATION 9: run sheet ============ -->
+<section id="runsheet">
+  <div class="head"><span class="eyebrow">Station 9</span><h2>The run sheet — rotary sections</h2><p class="lede">The vise's mounting and origin sections become the rotary's; the feed line becomes the speed at the surface. Every number keeps its source in the sheet's own column.</p></div>
+  <div class="station">
+    <div class="screen"><div class="bar"><span class="dots"><i></i><i></i><i></i></span><span class="ttl">Run sheet · Name on a dowel</span></div>
+      <div class="body">
+        <div class="sheet">
+          <b>2</b><span>Mount the rotary module</span><span>vise and wasteboard off · onto the two pins · three M5 × 10 · the 4th-axis cable rear left with the machine off · chuck key in the tray</span>
+          <b>3</b><span>The stock in the chuck</span><span>PLA rod <span class="mono">⌀20 × 100 mm</span> · reverse jaws · <span class="mono">15 mm</span> in the jaws · <span class="mono">85 mm</span> out · drill a centre hole in the free end · bring the tailstock up after the end touch</span>
+          <b>5</b><span>The origin</span><span>on the axis: Y 0 and Z 0 on the axis line, Z is the height above it · X 0 at the jaws · A <span class="mono">0°</span> at home, the seam</span>
+          <b>6</b><span>Speed at the surface</span><span>posted for <span class="mono">⌀20</span> · probed <span class="mono">⌀19.98</span> · the cut at r <span class="mono">9.5 mm</span><br>F <span class="mono">500 mm/min</span> → the rod turns <span class="mono">5.575 rpm</span> → the cut sees <span class="mono">333 mm/min</span><br>the rotary turns at most <span class="mono">10 rpm</span> (<span class="mono">3 600 °/min</span>) · clearance <span class="mono">13 mm</span> above the axis</span>
+          <b>7</b><span>Which way it turns</span><span>+A: Makera's shipped direction · A unwound at the end (<span class="mono">G92.4 A0 S0</span>)</span>
+          <b>9</b><span>After the run</span><span><span class="mono">$H</span> · tailstock back · saw the part off at X <span class="mono">75 mm</span> (the band's edge)</span>
+        </div>
+      </div>
+    </div>
+    <aside class="notes"><h3>Sources, in the sheet's column</h3>
+      <ul><li>⌀80 × 150 envelope: Makera's figure. Mounting steps, jaws, centre hole: Makera's guide.</li><li>10 rpm, 3 600 °/min: read from this machine's config. The feed model: Makera's firmware, as read.</li><li>Clearance: half the diameter + 3 mm, Makera CAM's rule (Studio's own rotary safe height follows it).</li><li>The unwind: the last line of Makera's own rotary programs.</li><li>Grip and bands: Case Maker's defaults. Probed radius and off-axis: measured, this run.</li></ul>
+      <h3>Work item</h3><p class="issue">R-UI-10</p>
+    </aside>
+  </div>
+</section>
+
+<!-- ============ vocabulary ============ -->
+<section id="words">
+  <div class="head"><h2>Vocabulary added</h2><p class="lede">The first-job vocabulary holds. These are the rotary's words, and the ones the screens stop using.</p></div>
+  <div class="scroll"><table class="tbl">
+    <thead><tr><th>Thing</th><th>Say</th><th>Not</th></tr></thead>
+    <tbody>
+      <tr><td>the module</td><td>the rotary · “Rotary on the pins” · the chuck · the jaws · the tailstock</td><td><span class="not">4th axis</span> (only the cable keeps it) · <span class="not">rotary module</span> · <span class="not">headstock</span></td></tr>
+      <tr><td>round stock</td><td>Rod (a dowel is a rod) · Tube · squared Block</td><td><span class="not">cylinder</span> · <span class="not">bar</span> · <span class="not">dowel</span> as a form word</td></tr>
+      <tr><td>its size</td><td>diameter ⌀ · length X · wall, <span class="mono">mm</span> on each</td><td><span class="not">D</span> · <span class="not">OD/ID</span> · <span class="not">L</span></td></tr>
+      <tr><td>the circumference</td><td>around: <span class="mono">62.832 mm</span> at the surface</td><td><span class="not">circumference</span> · <span class="not">2πR</span></td></tr>
+      <tr><td>the axis direction</td><td><b>along</b> (X, mm from the jaws)</td><td><span class="not">axial</span> · <span class="not">longitudinal</span></td></tr>
+      <tr><td>the turning direction</td><td><b>around</b> (mm on the map; <span class="mono">°</span> on angle fields)</td><td><span class="not">circumferential</span> · <span class="not">radial</span></td></tr>
+      <tr><td>one revolution</td><td>a <b>turn</b> · “3 turns” · “turns at 5.575 rpm”</td><td><span class="not">rev</span> · <span class="not">rotation</span></td></tr>
+      <tr><td>an angle</td><td>a number with <span class="mono">°</span>, every angle field, ≤ 3 decimals</td><td><span class="not">deg</span> · a bare number</td></tr>
+      <tr><td>A position</td><td><span class="mono">A 154.5° · 3 turns</span></td><td><span class="not">A 1 234.5</span></td></tr>
+      <tr><td>where the map's edges meet</td><td>the <b>seam</b> (at 0°)</td><td><span class="not">wrap line</span> · <span class="not">A-zero line</span></td></tr>
+      <tr><td>the unrolled surface</td><td>the <b>map</b></td><td><span class="not">developed view</span> · <span class="not">unwrap</span></td></tr>
+      <tr><td>the line it turns about</td><td>the <b>axis</b> · “above the axis”</td><td><span class="not">centreline</span> · <span class="not">WCS origin</span></td></tr>
+      <tr><td>how much is held</td><td><b>grip</b> · <b>stick-out</b></td><td><span class="not">jaw depth</span> · <span class="not">overhang</span></td></tr>
+      <tr><td>the end features</td><td>the jaws' band · the tailstock's band</td><td><span class="not">keep-out zone</span> · <span class="not">clamp envelope</span></td></tr>
+      <tr><td>what the cut sees</td><td><b>at the surface</b> · “the cut sees 333 mm/min”</td><td><span class="not">surface feed</span> · <span class="not">SFM</span></td></tr>
+      <tr><td>an indexed cut</td><td><b>on a face</b> · Flat · Faces all round · Cross-hole · “turn to 90°”</td><td><span class="not">index</span> · <span class="not">3+1</span></td></tr>
+      <tr><td>the relief class</td><td>Relief from a mesh · <span class="tag warn">simulate only</span></td><td><span class="not">Rotation Relief</span> · <span class="not">class R</span></td></tr>
+      <tr><td>refusals</td><td>“cuts through the centre” · “leaves the line over the axis” · “runs into the jaws” · “turns the stock while the cutter is in it”</td><td><span class="not">axis-crossing</span> · <span class="not">rotary-y-off-axis</span> · <span class="not">wrap-into-clamp</span> · <span class="not">rotary-rapid-engaged</span></td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<!-- ============ options matrix ============ -->
+<section id="options">
+  <div class="head"><h2>Options and their defaults</h2><p class="lede">Every option a rotary job exposes. M Makera's value · D derived · T typed (Case Maker's default) · R read from the machine or the location. “Bench” marks a value the module's bench check replaces with a measurement.</p></div>
+  <div class="scroll"><table class="tbl">
+    <thead><tr><th>Screen</th><th>Option</th><th>Default</th><th>From</th><th>Bench</th></tr></thead>
+    <tbody>
+      <tr><td>Stock</td><td>Diameter ⌀, length X</td><td class="mono">⌀20 × 100 mm (starter)</td><td>T the recommended first rotary stock</td><td></td></tr>
+      <tr><td>Stock</td><td>Fits the rotary</td><td class="mono">⌀ ≤ 80 · length ≤ 150</td><td>M Makera's database row</td><td>jaw range</td></tr>
+      <tr><td>Stock</td><td>Rod in the vise vs the chuck</td><td class="mono">vise ≤ 20 mm long</td><td>D the vise's floor depth</td><td></td></tr>
+      <tr><td>Holding</td><td>Mount</td><td>the one on the pins that holds it</td><td>R the active bed</td><td></td></tr>
+      <tr><td>Holding</td><td>Jaws</td><td>reverse</td><td>M Makera's guide</td><td>✓</td></tr>
+      <tr><td>Holding</td><td>Grip</td><td class="mono">15 mm</td><td>T shop setting</td><td>✓</td></tr>
+      <tr><td>Holding</td><td>Stick-out</td><td>length − grip</td><td>D</td><td></td></tr>
+      <tr><td>Holding</td><td>Tailstock</td><td>in</td><td>M Studio's rotary relief default</td><td>reach</td></tr>
+      <tr><td>Change</td><td>Axis datum</td><td>the module's preset, or measured</td><td>M + R this machine's config</td><td>✓</td></tr>
+      <tr><td>Operation</td><td>Reads</td><td>along</td><td>T</td><td></td></tr>
+      <tr><td>Operation</td><td>Faces all round</td><td class="mono">6 · across flats ⌀·cos(180°/n)</td><td>D</td><td></td></tr>
+      <tr><td>Map</td><td>Seam</td><td class="mono">0°</td><td>D where A homes (shipped config)</td><td>✓</td></tr>
+      <tr><td>Map</td><td>Jaws' band · tailstock's band</td><td class="mono">grip + 3 mm · 10 mm</td><td>T shop settings</td><td>✓</td></tr>
+      <tr><td>Cutter</td><td>Cutter</td><td>the recommendation; a flat end on the surface</td><td>R catalogue + D what the simulation sweeps</td><td></td></tr>
+      <tr><td>Cutter</td><td>F</td><td>the catalogue row</td><td>M Makera's catalogue</td><td>feeds at radius</td></tr>
+      <tr><td>Cutter</td><td>Speed at the surface</td><td class="mono">F/(2πr+30), ≤ 10 rpm</td><td>M Makera's firmware model</td><td>✓</td></tr>
+      <tr><td>Cutter</td><td>A limit · acceleration</td><td class="mono">3 600 °/min · 360 °/s²</td><td>R this machine's config, 2026-10-07</td><td>✓</td></tr>
+      <tr><td>Program</td><td>Clearance</td><td class="mono">½ ⌀ + 3 mm above the axis</td><td>M Makera CAM's rule</td><td></td></tr>
+      <tr><td>Program</td><td>Origin</td><td>on the axis · X 0 at the jaws · A 0° at home</td><td>M firmware feed arithmetic + Makera's preset</td><td>✓</td></tr>
+      <tr><td>Program</td><td>Steps per degree · +A</td><td class="mono">88.889 · Makera's direction</td><td>M shipped config</td><td>✓</td></tr>
+      <tr><td>Program</td><td>Unwind</td><td class="mono">G92.4 A0 S0</td><td>M Makera's own rotary programs</td><td>✓</td></tr>
+      <tr><td>Simulate</td><td>View · oracle</td><td>Stock · one cell + the facet</td><td>D</td><td></td></tr>
+      <tr><td>Cut</td><td>Touch plan</td><td>sides 2 · top 4 · end 1 (+ 4 with the tailstock)</td><td>D</td><td></td></tr>
+      <tr><td>Cut</td><td>Off-axis limit</td><td>the shallowest item's depth band</td><td>D setting + per-job recommendation</td><td>✓</td></tr>
+      <tr><td>Cut</td><td>Run</td><td>refused until every rotary field is measured</td><td>the maintainer's rule</td><td>lifted</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<!-- ============ simulate before the bench ============ -->
+<section id="sim">
+  <div class="head"><h2>Simulate before the bench</h2><p class="lede">A fixture job per class, each with an oracle that needs no bench number; Makera's own programs replay as references.</p></div>
+  <div class="three">
+    <div class="kp"><h3>On the surface</h3><ul><li><b>Name on a dowel</b> — every default; golden numbers: arc <span class="mono">15.708 mm</span> = A <span class="mono">90°</span>; opening <span class="mono">0.526 mm</span> around</li><li><b>Band across the seam</b> — one continuous cut</li><li><b>Pocket band all the way round</b> — floor at r 9 on every column</li><li><b>Into the jaws</b> — the refusal at the row</li></ul></div>
+    <div class="mv"><h3>On a face</h3><ul><li><b>Two flats</b> at 0° and 180°, the chord volume per face</li><li><b>Hex all round</b>, across flats <span class="mono">17.321</span></li><li><b>Cross-hole</b> <span class="mono">⌀3</span> through at 90°</li></ul></div>
+    <div class="rm"><h3>3D · simulate only</h3><ul><li><b>Shallow relief band</b> — stays ≥ 3 mm above the axis; simulates</li><li><b>Through the centre</b> — refused at the first move past the axis</li><li>Makera's relief rough simulates in full; its finish is refused at move 3 847; the air test is the rough with another tool number</li></ul></div>
+  </div>
+  <p class="hint">Bench-only: which way +A turns · steps per degree on the device · the real A speed and the feed scaling · whether Home homes A · the axis height and the chuck face · the preset's repeatability · the jaw range and tailstock reach · the round-stock file header · the unwind on the device · run-out and backlash · feeds at radius.</p>
+</section>
+
+<!-- ============ acceptance ============ -->
+<section id="acceptance">
+  <div class="head"><h2>Acceptance, when built</h2></div>
+  <ol class="acc">
+    <li><span>From the door, with no machine on the network, an operator reaches a <b>generated, verified, simulated, oracle-passing wrap engraving</b> of their own text on a dowel, <b>changing no default</b>, and never sees a disabled control without its reason. One e2e spec.</span></li>
+    <li><span>The same job in Cut, with the module unmeasured: lines 1–2 tick, line 3 offers registration, line 4 reads the bench sentence verbatim and has no button; upload and release refuse with the same sentence.</span></li>
+    <li><span>Selecting “In the rotary chuck” stores the chuck with jaws, grip, stick-out and tailstock.</span></li>
+    <li><span>The change wizard fits the rotary as Makera's guide says, and writes “Rotary on the pins · wasteboard off”.</span></li>
+    <li><span>Every class simulates its fixture in the suite; Makera's two relief programs pin their outcome when present.</span></li>
+    <li><span>The transcripts contain no issue number, no rotary code, no A without <span class="mono">°</span>, no angle field without <span class="mono">°</span>, no length without <span class="mono">mm</span>, no decimal past three; the bench is named once, at the Run line.</span></li>
+    <li><span>The built screens match these mockups, station for station.</span></li>
+  </ol>
+</section>
+
+<!-- ============ work items ============ -->
+<section id="work" class="work">
+  <div class="head"><h2>Work items</h2><p class="lede">Proposed, to be filed under #545, one per screen or area. The engine slices already running come first; the UI slices start from this design once approved.</p></div>
+  <p class="gate"><b>Gate.</b> Nothing on these screens is implemented until the maintainer approves this flow and these mockups on #545. #238 (the bench) then replaces each Makera value with its measurement and lifts the Run refusal; the screens change only at the Run line.</p>
+  <div class="scroll"><table class="tbl">
+    <thead><tr><th>Item</th><th>Screen or area</th><th>Depends on</th></tr></thead>
+    <tbody>
+      <tr><td class="mono">R-UI-1</td><td>Stock: Rod and Tube for the chuck, squared Block, the “around” line</td><td>R-3 data model (#240)</td></tr>
+      <tr><td class="mono">R-UI-2</td><td>Holding writes the chuck: jaws, grip, stick-out, tailstock, the front view (closes #697)</td><td>R-UI-1</td></tr>
+      <tr><td class="mono">R-UI-3</td><td>Change the machine fits the rotary as Makera's guide says</td><td>#693 (landed)</td></tr>
+      <tr><td class="mono">R-UI-4</td><td>Operation: On the surface · On a face · 3D</td><td>R-UI-2</td></tr>
+      <tr><td class="mono">R-UI-5</td><td>The map: along × around, seam, bands, ruler, Map | Stock</td><td>R-3 authoring/CAM (#240)</td></tr>
+      <tr><td class="mono">R-UI-6</td><td>Design panel's rotary lines and blockers</td><td>R-UI-5, #686 (landed)</td></tr>
+      <tr><td class="mono">R-UI-7</td><td>Wrap CAM, the verifier's rotary rules, the oracle on the map</td><td>#240 slice 2</td></tr>
+      <tr><td class="mono">R-UI-8</td><td>Simulate: turning stock, Unroll, A in ° and turns, refusal sentences</td><td>#240 slice 3, #691 (landed)</td></tr>
+      <tr><td class="mono">R-UI-9</td><td>Cut: the rotary touch plan and the Run refusal</td><td>R-3 post (#240), #689 (landed), #626</td></tr>
+      <tr><td class="mono">R-UI-10</td><td>Run sheet: the rotary sections</td><td>#240 slice 3</td></tr>
+      <tr><td class="mono">R-UI-11</td><td>Indexed faces: Flat, Faces all round, Cross-hole</td><td>#241</td></tr>
+      <tr><td class="mono">R-UI-12</td><td>V-bit and ball in the rotary simulation</td><td>#405, #532</td></tr>
+      <tr><td class="mono">R-UI-13</td><td>Relief from a mesh, simulate only</td><td>R-UI-12, #222</td></tr>
+      <tr><td class="mono">R-UI-14</td><td>The simulate-before-bench fixtures; Makera's programs as references</td><td>R-UI-7, R-UI-11</td></tr>
+      <tr><td class="mono">R-UI-15</td><td>The starter job and the acceptance e2e; lands last</td><td>all but R-UI-12/13</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<!-- ============ open questions ============ -->
+<section id="questions">
+  <div class="head"><h2>Questions this design could not settle</h2><p class="lede">Each with the default the mockups show.</p></div>
+  <div class="scroll"><table class="tbl">
+    <thead><tr><th>Question</th><th>Default taken</th></tr></thead>
+    <tbody>
+      <tr><td>Tube as a form now?</td><td>Yes: named by the maintainer; the shelf already stores tubes</td></tr>
+      <tr><td>Squared stock in a three-jaw chuck?</td><td>Offered when it fits by its diagonal (Makera's Square stock); the four top touches guard it</td></tr>
+      <tr><td>Grip length?</td><td><span class="mono">15 mm</span>, a shop setting, until calipered</td></tr>
+      <tr><td>Text along or around?</td><td>Along, like a pencil</td></tr>
+      <tr><td>Which end is the chuck; where is X 0?</td><td>Chuck on the left, X 0 at the jaws (Makera's preset, read as the chuck face)</td></tr>
+      <tr><td>A cut-off operation?</td><td>None; a Pocket band marks the saw line</td></tr>
+      <tr><td>Registration before the bench check?</td><td>Allowed; only Run, upload and release refuse</td></tr>
+      <tr><td>The jaws' and tailstock's bands?</td><td><span class="mono">3 mm</span> and <span class="mono">10 mm</span>, shop settings, until measured</td></tr>
+      <tr><td>Relief after the bench check?</td><td>Still simulate only</td></tr>
+      <tr><td>+A on screen before the bench?</td><td>“Makera's shipped direction”, no clockwise claim</td></tr>
+    </tbody>
+  </table></div>
+  <p class="hint">Sources: <span class="mono">docs/design/rotary-flow.md</span> (this design in text, every source by section) · <span class="mono">Rotary.md</span> (decisions R1–R12) · <span class="mono">docs/design/first-job-flow.md</span> (the flow this extends).</p>
+</section>
+</div>
