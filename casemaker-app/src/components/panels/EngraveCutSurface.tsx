@@ -703,10 +703,23 @@ export function EngraveCutSurface({
         <details
           data-testid="engrave-cut-details"
           open={detailsOpen ?? !checked}
-          onToggle={(e) => setDetailsOpen(e.currentTarget.open)}
           style={{ marginTop: 6 }}
         >
-          <summary style={{ ...MUTED, cursor: 'pointer' }}>details</summary>
+          <summary
+            style={{ ...MUTED, cursor: 'pointer' }}
+            onClick={(event) => {
+              // #726 W20 review — only the OPERATOR moves the fold. The browser fires `toggle` for
+              // a change of the `open` prop too (at mount while the gate is blocked, and again
+              // when it clears), so recording onToggle latched step 1 open for the whole job. The
+              // summary's own activation is cancelled and the state moved here, so a click (or
+              // Enter/Space on the focused summary, which fires a click) is the only thing that
+              // counts.
+              event.preventDefault();
+              setDetailsOpen(!(detailsOpen ?? !checked));
+            }}
+          >
+            details
+          </summary>
           <EngravePreflight report={report} onBackToDesign={onBackToDesign} />
         </details>
         {/* #689 — the clearance acknowledgement moved here from the Generate footer. It is the

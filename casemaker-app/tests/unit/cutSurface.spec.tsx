@@ -408,6 +408,35 @@ describe('#419 §3 the Cut surface', () => {
     expect((screen.getByTestId('engrave-cut-details') as HTMLDetailsElement).open).toBe(true);
   });
 
+  it('#726 W20 review — the fold is the operator’s: a click moves it, and the gate clearing folds it back', () => {
+    const job = plannedJob();
+    const pkg = frozen(job, [P1]);
+    // A job that opens Cut blocked: the clearance tick has not been done yet, so `open` is true
+    // from the first render. The browser fires `toggle` for that prop change too — the state must
+    // not record it as the operator having opened the fold.
+    const made = {
+      ...generated([P1]),
+      findings: [{ severity: 'warning', code: 'vise-default', message: 'the vise is the shop default' }],
+    } as EngraveGenerated;
+    useEngraveRunStore.setState({
+      oracle: { ok: true, band: 0.016, levels: [], worst: { underCut: 0, overCut: 0 } } as never,
+      acknowledged: false,
+    });
+    draw({ job, report: reportOf(), pkg, generated: made, canDrive: true });
+    const details = () => screen.getByTestId('engrave-cut-details') as HTMLDetailsElement;
+    expect(details().open).toBe(true);
+
+    // Ticking the clearance clears the gate: step 1 is one line again.
+    fireEvent.click(screen.getByTestId('engrave-ack'));
+    expect(details().open).toBe(false);
+
+    // The operator's own clicks move it — open, then closed again.
+    fireEvent.click(details().querySelector('summary')!);
+    expect(details().open).toBe(true);
+    fireEvent.click(details().querySelector('summary')!);
+    expect(details().open).toBe(false);
+  });
+
   it('#689 — the clearance acknowledgement lives in step 1 and blocks Run until it is ticked', async () => {
     const job = plannedJob();
     const pkg = frozen(job, [P1]);

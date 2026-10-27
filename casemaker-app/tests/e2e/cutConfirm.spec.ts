@@ -61,10 +61,23 @@ test('#656 — the one screen names the frozen program and cutter, and ONE state
   // frozen program is read afterwards — there is nothing to name before the freeze.
   await page.getByTestId('cnc-mode-cut').click();
   await expect(page.getByTestId('engrave-cut-surface')).toBeVisible();
-  // #689 — clearance is the acknowledgement in Cut step 1 now. Tick it when this job's warnings ask
-  // for it, then open the Run line (only the current step is open by default).
+  // #726 W20 — step 1 is ONE line, and its details are the operator's. This job opens Cut blocked
+  // (the clearance tick is not done), which is exactly the state that used to latch the fold open:
+  // the browser fires `toggle` for the `open` prop at mount, and jsdom never fires it at all, so
+  // only a real browser proves the auto-open is not recorded as a choice. Ticking folds it back.
+  const details = page.getByTestId('engrave-cut-details');
   const ack = page.getByTestId('engrave-ack');
-  if ((await ack.count()) > 0) await ack.check();
+  await expect(ack).toHaveCount(1);
+  await expect(details).toHaveAttribute('open');
+  await ack.check();
+  await expect(details).not.toHaveAttribute('open');
+  // The tick completes step 1, so its body folds with it; the operator's own look at the gate rows
+  // is two clicks — the step, then its details — and both are theirs to make.
+  await page.getByTestId('engrave-cut-step-1-summary').click();
+  await details.locator('summary').first().click();
+  await expect(details).toHaveAttribute('open');
+  await details.locator('summary').first().click();
+  await expect(details).not.toHaveAttribute('open');
   await page.getByTestId('engrave-cut-step-4-summary').click();
   await expect(page.getByTestId('engrave-cut-confirm')).toBeVisible({ timeout: 30_000 });
 
