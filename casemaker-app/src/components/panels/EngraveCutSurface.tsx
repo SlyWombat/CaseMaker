@@ -248,6 +248,8 @@ export function EngraveCutSurface({
   const locationView = useLocationStore((s) => s.location);
   const locationMachine = useMemo(() => machineForJob(locationView, job.machineId), [locationView, job.machineId]);
   const [overrides, setOverrides] = useState<FeatureOverrides>({});
+  /** #726 W20 — whether step 1's detail fold is open; null = follow the gate (open while blocked). */
+  const [detailsOpen, setDetailsOpen] = useState<boolean | null>(null);
   const [freezeError, setFreezeError] = useState<string | null>(null);
   const [refreezing, setRefreezing] = useState(false);
   /** The Generate a freeze was attempted for; a re-render must not freeze the same one twice. */
@@ -696,7 +698,17 @@ export function EngraveCutSurface({
             </button>
           </div>
         )}
-        <EngravePreflight report={report} onBackToDesign={onBackToDesign} />
+        {/* #726 W20 — STEP 1 IS ONE LINE; the gate's rows are its DETAIL (§3.7: "▸ details").
+            It opens by itself while something blocks, and stays where the operator left it after. */}
+        <details
+          data-testid="engrave-cut-details"
+          open={detailsOpen ?? !checked}
+          onToggle={(e) => setDetailsOpen(e.currentTarget.open)}
+          style={{ marginTop: 6 }}
+        >
+          <summary style={{ ...MUTED, cursor: 'pointer' }}>details</summary>
+          <EngravePreflight report={report} onBackToDesign={onBackToDesign} />
+        </details>
         {/* #689 — the clearance acknowledgement moved here from the Generate footer. It is the
             run gate's own flag; the sentence is the one the operator has always ticked. */}
         {ackRequired && (

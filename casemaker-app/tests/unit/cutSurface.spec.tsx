@@ -392,6 +392,22 @@ describe('#419 §3 the Cut surface', () => {
     expect(step4).not.toContain(totalTime);
   });
 
+  it('#726 W20 — step 1 is ONE line; the gate’s rows are its details fold', () => {
+    const job = plannedJob();
+    const pkg = frozen(job, [P1]);
+    // Clear with one warning the operator can read in the line: the rows stay folded.
+    const warning = row('warning', 'note-x', 'a note');
+    draw({ job, report: reportOf([warning]), pkg, generated: generated([P1]), canDrive: true });
+    const details = screen.getByTestId('engrave-cut-details') as HTMLDetailsElement;
+    expect(details.open).toBe(false);
+
+    // A blocking row opens the fold by itself: the sentence must be seen, not hidden.
+    const blocking = row('error', 'err-x', 'the blank is not held');
+    cleanup();
+    draw({ job, report: reportOf([blocking]), pkg, generated: generated([P1]), canDrive: true });
+    expect((screen.getByTestId('engrave-cut-details') as HTMLDetailsElement).open).toBe(true);
+  });
+
   it('#689 — the clearance acknowledgement lives in step 1 and blocks Run until it is ticked', async () => {
     const job = plannedJob();
     const pkg = frozen(job, [P1]);
