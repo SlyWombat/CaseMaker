@@ -42,7 +42,7 @@ import type { MachineMountKind } from '@/platform/machineChange';
 import { useLocationStore } from '@/store/locationStore';
 import { useSettingsStore } from '@/store/settingsStore';
 import { openMachineChange } from '@/components/machine-change';
-import type { EngraveJob, ViseParams } from '@/types/engraveJob';
+import type { EngraveJob, JobStockForm, ViseParams } from '@/types/engraveJob';
 import {
   HOLDING_MOUNT_LABELS,
   HOLDING_MOUNT_WORDS,
@@ -83,28 +83,67 @@ const SVG_MUTED = { ...SVG_TEXT, fill: '#9aa4b0' } as const;
 const SVG_MONO = { fontFamily: 'IBM Plex Mono, monospace', fontSize: 11, fill: '#d1d5db' } as const;
 
 /**
- * The top view for a mechanism. The vise is the mockup's own drawing: the fixed jaw (dark) on the
- * left, the moving jaw on the right, X between them. The bed and rotary views are the same facts
- * for their mechanisms: the bracket corner / the axis line and which way X runs.
+ * #705 — the top view of the mount the step's radio is showing, and a side strip for the height
+ * the top view cannot show. The mount decides the drawing (ledge / a waste board / gripped as a
+ * block / taped to the bed / the bracket / the chuck), so the picture follows the selection; a
+ * disabled option can still be previewed on hover or focus, labelled with what it needs.
+ *
+ * The stock's FORM decides its outline: a disc, and a rod standing on its end, are round seen
+ * from above — the job plans them as the D × D square around them (#683) — so the picture must
+ * not draw that square. Every rectangular form keeps the rectangle and its two numbers.
  */
 export function HoldingPicture({
-  mechanism,
+  mount = 'ledge',
   stock,
-  seat = 'ledge',
+  form = null,
+  proudMm = null,
+  boardMm = null,
+  note = null,
 }: {
-  mechanism: 'vise' | 'bed' | 'rotary';
+  mount?: HoldingMount;
   stock: { length: number; width: number; thickness: number };
-  seat?: 'ledge' | 'floor';
+  form?: JobStockForm | null;
+  /** The option's own proud figure, mm; null when its sentence states none. */
+  proudMm?: number | null;
+  /** The board under the part, mm, when this mount is the waste board. */
+  boardMm?: number | null;
+  /** A disabled option's one line (why it cannot be chosen), shown beside the drawing. */
+  note?: string | null;
 }): JSX.Element {
-  const dims = `${fmt(stock.length)} × ${fmt(stock.width)}`;
-  const caption =
-    mechanism === 'bed'
-      ? "Top view. The bed's front edge is nearest you; the bracket corner is the reference."
-      : mechanism === 'rotary'
-        ? 'Top view. The chuck is on the left; the axis runs along X.'
-        : seat === 'floor'
-          ? 'Top view. The fixed jaw is on the left; the blank sits on the vise body, its sides free.'
-          : 'Top view. The fixed jaw is on the left; the blank sits on the soft jaws’ ledge.';
+  const mechanism = mechanismOf(mount);
+  const round = form === 'disc' || form === 'rod';
+  const dims = round ? `⌀ ${fmt(stock.length)}` : `${fmt(stock.length)} × ${fmt(stock.width)}`;
+  const formWord = form === 'rod' ? 'rod' : form === 'disc' ? 'disc' : 'blank';
+  const rim = round ? ', gripped on its rim' : '';
+  const boardName = boardMm === null ? 'a waste board' : `a ${fmt(boardMm)} mm board`;
+  const caption = ((): string => {
+    switch (mount) {
+      case 'ledge':
+        return `Top view. The fixed jaw is on the left; the ${formWord} sits on the soft jaws’ ledge${rim}.`;
+      case 'board':
+        return `Top view. The fixed jaw is on the left; the ${formWord} sits on ${boardName} between the jaws${rim}.`;
+      case 'block':
+        return `Top view. The fixed jaw is on the left; the ${formWord} is gripped as a block, its sides free.`;
+      case 'bed-tape':
+        return `Top view. The ${formWord} is taped to the bed; the bed's front edge is nearest you.`;
+      case 'bed-bracket':
+        return `Top view. The ${formWord} sits in the bed's corner bracket, clamped.`;
+      case 'rotary':
+        return `Top view. The chuck is on the left; the ${formWord} runs along the axis.`;
+    }
+  })();
+
+  const viseStock = round ? (
+    <circle cx="120" cy="75" r="30" fill="#1e3a4a" stroke="#6aa6c9" strokeWidth="1.5" />
+  ) : (
+    <rect x="52" y="52" width="136" height="46" fill="#1e3a4a" stroke="#6aa6c9" strokeWidth="1.5" />
+  );
+  const bedStock = round ? (
+    <circle cx="127" cy="75" r="30" fill="#1e3a4a" stroke="#6aa6c9" strokeWidth="1.5" />
+  ) : (
+    <rect x="74" y="50" width="106" height="50" fill="#1e3a4a" stroke="#6aa6c9" strokeWidth="1.5" />
+  );
+
   return (
     <div style={{ display: 'grid', gap: 6 }}>
       <svg
@@ -114,6 +153,8 @@ export function HoldingPicture({
         aria-label={`Top view of the ${mechanism === 'bed' ? 'bed' : mechanism === 'rotary' ? 'rotary' : 'vise'}`}
         data-testid="engrave-setup-holding-picture"
         data-mechanism={mechanism}
+        data-mount={mount}
+        data-form={form ?? undefined}
       >
         <defs>
           <marker id="holding-x-arrow" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
@@ -124,7 +165,19 @@ export function HoldingPicture({
           <>
             <rect x="18" y="30" width="34" height="90" fill="#5b6672" />
             <rect x="188" y="30" width="34" height="90" fill="#39424c" stroke="#5b6672" />
-            <rect x="52" y="52" width="136" height="46" fill="#1e3a4a" stroke="#6aa6c9" strokeWidth="1.5" />
+            {mount === 'board' && (
+              <rect
+                data-testid="engrave-setup-holding-picture-board"
+                x="46"
+                y="46"
+                width="148"
+                height="58"
+                fill="#3a3325"
+                stroke="#7a6a45"
+                strokeWidth="1"
+              />
+            )}
+            {viseStock}
             <text x="120" y="79" textAnchor="middle" {...SVG_MONO}>
               {dims}
             </text>
@@ -146,11 +199,52 @@ export function HoldingPicture({
         ) : mechanism === 'bed' ? (
           <>
             <rect x="24" y="26" width="192" height="98" fill="#141a21" stroke="#5b6672" />
-            <path d="M24 96 h34 v28" fill="none" stroke="#5b6672" strokeWidth="4" />
-            <text x="46" y="20" textAnchor="middle" {...SVG_MUTED}>
-              bracket
-            </text>
-            <rect x="74" y="50" width="106" height="50" fill="#1e3a4a" stroke="#6aa6c9" strokeWidth="1.5" />
+            {mount === 'bed-bracket' ? (
+              <>
+                <path d="M24 96 h34 v28" fill="none" stroke="#5b6672" strokeWidth="4" />
+                <text x="46" y="20" textAnchor="middle" {...SVG_MUTED}>
+                  bracket
+                </text>
+                <rect
+                  data-testid="engrave-setup-holding-picture-clamp"
+                  x="58"
+                  y="42"
+                  width="22"
+                  height="10"
+                  fill="#5b6672"
+                />
+                <rect
+                  data-testid="engrave-setup-holding-picture-clamp"
+                  x="174"
+                  y="42"
+                  width="22"
+                  height="10"
+                  fill="#5b6672"
+                />
+              </>
+            ) : (
+              <>
+                <rect
+                  data-testid="engrave-setup-holding-picture-tape"
+                  x="58"
+                  y="42"
+                  width="138"
+                  height="7"
+                  fill="#d8c48a"
+                  opacity="0.65"
+                />
+                <rect
+                  data-testid="engrave-setup-holding-picture-tape"
+                  x="58"
+                  y="101"
+                  width="138"
+                  height="7"
+                  fill="#d8c48a"
+                  opacity="0.65"
+                />
+              </>
+            )}
+            {bedStock}
             <text x="127" y="79" textAnchor="middle" {...SVG_MONO}>
               {dims}
             </text>
@@ -180,6 +274,116 @@ export function HoldingPicture({
       <p className="hint" style={{ margin: 0 }} data-testid="engrave-setup-holding-caption">
         {caption}
       </p>
+      <HoldingSideView mount={mount} proudMm={proudMm} />
+      {note !== null && (
+        <p className="hint" style={{ margin: 0 }} data-testid="engrave-setup-holding-note">
+          {note}
+        </p>
+      )}
+    </div>
+  );
+}
+
+/**
+ * #705 — the height the top view cannot show, as a side strip. A SCHEMATIC: the jaw block and the
+ * ledge/board/floor seat, the stock above it, and the proud figure the option's own sentence
+ * states (or, for a block, how far its top stands above the vise floor). The bed mounts show the
+ * bed and their fixing; the rotary its chuck.
+ */
+function HoldingSideView({
+  mount,
+  proudMm,
+}: {
+  mount: HoldingMount;
+  proudMm: number | null;
+}): JSX.Element {
+  const mechanism = mechanismOf(mount);
+  const proudWords =
+    proudMm === null
+      ? mount === 'bed-tape'
+        ? 'Taped to the bed'
+        : mount === 'bed-bracket'
+          ? 'Corner bracket and clamps'
+          : mount === 'rotary'
+            ? 'In the chuck, along X'
+            : null
+      : mount === 'block'
+        ? proudMm >= 0
+          ? `sides free · ${fmt(proudMm)} mm above the vise floor`
+          : `sides free · the top ${fmt(-proudMm)} mm below the jaw tops`
+        : proudMm >= 0
+          ? `${fmt(proudMm)} mm proud of the jaws`
+          : `still ${fmt(-proudMm)} mm below the jaw tops`;
+  return (
+    <div style={{ display: 'grid', gap: 3 }}>
+      <svg
+        viewBox="0 0 240 70"
+        style={{ width: '100%', maxWidth: '100%', display: 'block', border: '1px solid #2a2f36', background: '#10151b' }}
+        role="img"
+        aria-label="Side view: how the stock sits in the mount"
+        data-testid="engrave-setup-holding-side"
+        data-mount={mount}
+      >
+        {mechanism === 'vise' ? (
+          <>
+            {/* The jaw block; its top is the jaw top the proud figure is measured from. */}
+            <rect x="36" y="26" width="168" height="30" fill="#39424c" stroke="#5b6672" />
+            {mount === 'board' && (
+              <rect
+                data-testid="engrave-setup-holding-side-board"
+                x="82"
+                y="30"
+                width="76"
+                height="8"
+                fill="#3a3325"
+                stroke="#7a6a45"
+              />
+            )}
+            <rect
+              x="94"
+              y={mount === 'block' ? 2 : 10}
+              width="52"
+              height={mount === 'block' ? 42 : 20}
+              fill="#1e3a4a"
+              stroke="#6aa6c9"
+            />
+            <path d="M212 26 V10" stroke="#d1d5db" strokeWidth="1" />
+            <text x="120" y="66" textAnchor="middle" {...SVG_MUTED}>
+              jaws
+            </text>
+          </>
+        ) : mechanism === 'bed' ? (
+          <>
+            <rect x="24" y="48" width="192" height="10" fill="#141a21" stroke="#5b6672" />
+            {mount === 'bed-tape' ? (
+              <path d="M86 48 v-8 M154 48 v-8" stroke="#d8c48a" strokeWidth="5" />
+            ) : (
+              <>
+                <path d="M24 40 h22 v8" fill="none" stroke="#5b6672" strokeWidth="4" />
+                <rect x="60" y="36" width="16" height="8" fill="#5b6672" />
+                <rect x="164" y="36" width="16" height="8" fill="#5b6672" />
+              </>
+            )}
+            <rect x="86" y="20" width="68" height="28" fill="#1e3a4a" stroke="#6aa6c9" />
+            <text x="120" y="66" textAnchor="middle" {...SVG_MUTED}>
+              bed
+            </text>
+          </>
+        ) : (
+          <>
+            <circle cx="44" cy="35" r="17" fill="#39424c" stroke="#5b6672" />
+            <rect x="58" y="29" width="132" height="12" fill="#1e3a4a" stroke="#6aa6c9" />
+            <text x="120" y="66" textAnchor="middle" {...SVG_MUTED}>
+              chuck, along X
+            </text>
+          </>
+        )}
+      </svg>
+      {proudWords !== null && (
+        <p className="hint" style={{ margin: 0 }} data-testid="engrave-setup-holding-proud">
+          {proudWords}
+        </p>
+      )}
     </div>
   );
 }
@@ -217,6 +421,10 @@ export function HoldingStep({ job, answers, onAnswers }: HoldingStepProps): JSX.
     [machine, accessories, answers.stock, boardMm, rotaryEnvelope],
   );
   const current = currentMount(answers);
+  // #705 — the picture follows the radio: the operator's chosen mount, or the option under the
+  // pointer/focus when it is a disabled one that needs a machine change (drawn with its cost line).
+  const [previewMount, setPreviewMount] = useState<HoldingMount | null>(null);
+  const drawnMount: HoldingMount = previewMount ?? current;
 
   // The machine-only options have no way out when this build cannot drive a machine; a disabled
   // control with no escape is hidden (A10), not narrated.
@@ -276,9 +484,16 @@ export function HoldingStep({ job, answers, onAnswers }: HoldingStepProps): JSX.
   const finish = job.stockEntry?.finish;
   const hasFace = (finish !== undefined && finish !== 'unknown') || job.stock.colour !== undefined;
 
-  // What the picture draws: the mechanism on the machine now, or the vise when no machine record
-  // has been read (the app's own mount).
-  const mechanism: 'vise' | 'bed' | 'rotary' = now?.mount ?? 'vise';
+  // #705 — WHAT THE PICTURE DRAWS: the mount on show (the radio, or a hovered/focused option), the
+  // option's own proud figure and board, and — for a disabled option — the line naming what it
+  // needs, so an unavailable mount can be looked at without pretending it can be chosen.
+  const drawnOption = options.find((o) => o.mount === drawnMount) ?? null;
+  const drawnProud =
+    drawnMount === 'ledge' || drawnMount === 'board' || drawnMount === 'block'
+      ? seatedProud(answers, drawnMount)
+      : null;
+  const drawnBoard = drawnMount === 'board' ? (answers.sacrificial.under?.thickness ?? boardMm) : null;
+  const drawnNote = drawnOption?.disabled === true ? drawnOption.reason : null;
 
   return (
     <div data-testid="engrave-setup-step-holding" style={{ marginTop: 8 }}>
@@ -340,6 +555,7 @@ export function HoldingStep({ job, answers, onAnswers }: HoldingStepProps): JSX.
                 option={option}
                 checked={!option.disabled && current === option.mount}
                 onChoose={() => choose(option.mount as ViseHoldingMount)}
+                onPreview={setPreviewMount}
                 onMachineChange={() => {
                   if (option.escape !== null) changeMachine(option.escape, option.holdingWords);
                 }}
@@ -409,9 +625,12 @@ export function HoldingStep({ job, answers, onAnswers }: HoldingStepProps): JSX.
         </div>
 
         <HoldingPicture
-          mechanism={mechanism}
+          mount={drawnMount}
           stock={answers.stock}
-          seat={answers.vise.seat}
+          form={form ?? null}
+          proudMm={drawnProud}
+          boardMm={drawnBoard}
+          note={drawnNote}
         />
       </div>
 
@@ -452,12 +671,15 @@ function MountRow({
   option,
   checked,
   onChoose,
+  onPreview,
   onMachineChange,
   boardControl,
 }: {
   option: MountOption;
   checked: boolean;
   onChoose: () => void;
+  /** #705 — the picture follows the option under the pointer or focus, disabled ones included. */
+  onPreview: (mount: HoldingMount | null) => void;
   onMachineChange: () => void;
   boardControl: JSX.Element | null;
 }): JSX.Element {
@@ -468,7 +690,14 @@ function MountRow({
         ? option.hint
         : null;
   return (
-    <div data-testid={`engrave-setup-mount-row-${option.mount}`} data-disabled={option.disabled}>
+    <div
+      data-testid={`engrave-setup-mount-row-${option.mount}`}
+      data-disabled={option.disabled}
+      onMouseEnter={() => onPreview(option.mount)}
+      onMouseLeave={() => onPreview(null)}
+      onFocus={() => onPreview(option.mount)}
+      onBlur={() => onPreview(null)}
+    >
       <label style={{ ...FIELD_LABEL, opacity: option.disabled ? 0.65 : 1 }}>
         <input
           type="radio"

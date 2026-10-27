@@ -418,9 +418,97 @@ describe('#684 — the picture, the folds, and the technical provenance', () => 
     expect(svg.textContent).toContain('moving jaw');
     expect(svg.textContent).toContain('X runs between the jaws');
     expect(svg.textContent).toContain('76.2 × 38.1');
+    expect(svg.querySelector('circle')).toBeNull();
     expect(screen.getByTestId('engrave-setup-holding-caption').textContent).toContain(
       'The fixed jaw is on the left',
     );
+  });
+
+  it('#705 — a disc is a circle labelled ⌀, and the caption names the disc', () => {
+    seedLocation(machineWith(null));
+    openHolding(
+      dj(
+        { length: 55, width: 55, thickness: 10 },
+        { kind: 'made', shelfId: null, file: null, form: 'disc', finish: 'unknown', conductive: false },
+      ),
+    );
+
+    const svg = screen.getByTestId('engrave-setup-holding-picture');
+    expect(svg.getAttribute('data-form')).toBe('disc');
+    expect(svg.querySelector('circle')).not.toBeNull();
+    expect(svg.textContent).toContain('⌀ 55');
+    expect(svg.textContent).not.toContain('55 × 55');
+    expect(screen.getByTestId('engrave-setup-holding-caption').textContent).toContain('disc');
+  });
+
+  it('#705 — a rod on its end is the same circle, and the caption names the rod', () => {
+    seedLocation(machineWith(null));
+    openHolding(
+      dj(
+        { length: 55, width: 55, thickness: 60 },
+        { kind: 'made', shelfId: null, file: null, form: 'rod', finish: 'unknown', conductive: false },
+      ),
+    );
+
+    const svg = screen.getByTestId('engrave-setup-holding-picture');
+    expect(svg.getAttribute('data-form')).toBe('rod');
+    expect(svg.querySelector('circle')).not.toBeNull();
+    expect(svg.textContent).toContain('⌀ 55');
+    expect(screen.getByTestId('engrave-setup-holding-caption').textContent).toContain('rod');
+  });
+
+  it('#705 — the picture follows the mount radio, and a waste board is drawn under the stock', () => {
+    seedLocation(machineWith(null));
+    openHolding(dj({ length: 76.2, width: 38.1, thickness: 3.81 }));
+
+    const svg = () => screen.getByTestId('engrave-setup-holding-picture');
+    expect(svg().getAttribute('data-mount')).toBe('ledge');
+    expect(screen.getByTestId('engrave-setup-holding-proud').textContent).toContain('0.71 mm proud');
+
+    fireEvent.click(radio('board'));
+    expect(svg().getAttribute('data-mount')).toBe('board');
+    expect(screen.getByTestId('engrave-setup-holding-picture-board')).toBeTruthy();
+    // 3.81 mm on the 2 mm board: 2.71 mm proud of the jaws.
+    expect(screen.getByTestId('engrave-setup-holding-proud').textContent).toContain('2.71 mm proud');
+
+    fireEvent.click(radio('block'));
+    expect(svg().getAttribute('data-mount')).toBe('block');
+    expect(screen.getByTestId('engrave-setup-holding-side').getAttribute('data-mount')).toBe('block');
+    expect(screen.getByTestId('engrave-setup-holding-proud').textContent).toContain('sides free');
+  });
+
+  it('#705 — a disc on a waste board draws a circle on a board', () => {
+    seedLocation(machineWith(null));
+    // 2 mm is thinner than the ledge step, so the stock calls for the board and the step applies it.
+    openHolding(
+      dj(
+        { length: 55, width: 55, thickness: 2 },
+        { kind: 'made', shelfId: null, file: null, form: 'disc', finish: 'unknown', conductive: false },
+      ),
+    );
+
+    const svg = screen.getByTestId('engrave-setup-holding-picture');
+    expect(svg.getAttribute('data-mount')).toBe('board');
+    expect(svg.querySelector('circle')).not.toBeNull();
+    expect(screen.getByTestId('engrave-setup-holding-picture-board')).toBeTruthy();
+    expect(svg.textContent).toContain('⌀ 55');
+  });
+
+  it('#705 — a mount that needs the machine change still draws on hover, labelled with what it needs', () => {
+    seedLocation(machineWith(null));
+    openHolding(dj({ length: 76.2, width: 38.1, thickness: 3.81 }));
+
+    // The bed options are shown (this build can drive a machine) and disabled: the vise is on the
+    // pins. Hovering one draws it, with the cost line — there is no pretend selection.
+    const row = screen.getByTestId('engrave-setup-mount-row-bed-tape');
+    expect(row.getAttribute('data-disabled')).toBe('true');
+    fireEvent.mouseOver(row);
+    expect(screen.getByTestId('engrave-setup-holding-picture').getAttribute('data-mount')).toBe('bed-tape');
+    expect(screen.getByTestId('engrave-setup-holding-note').textContent).toContain(
+      'needs the vise off the pins',
+    );
+    fireEvent.mouseOut(row);
+    expect(screen.getByTestId('engrave-setup-holding-picture').getAttribute('data-mount')).toBe('ledge');
   });
 
   it('asks the landmark orientation only when the stock has a face worth telling apart', () => {
