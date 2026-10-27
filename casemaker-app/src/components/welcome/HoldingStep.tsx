@@ -958,8 +958,9 @@ export function HoldingStep({ job, answers, onAnswers, onRotary, onBedHold }: Ho
         answers.stock,
         shopDefaults ?? null,
         job.workholding.kind === 'bracket' ? job.workholding.bracket : null,
+        bedAnchor(profile) ?? 1,
       ),
-    [answers.stock, shopDefaults, job.workholding],
+    [answers.stock, shopDefaults, job.workholding, profile],
   );
   const [selectedClamp, setSelectedClamp] = useState(0);
   const throughCut = jobHasThroughCut(job);
@@ -1063,20 +1064,39 @@ export function HoldingStep({ job, answers, onAnswers, onRotary, onBedHold }: Ho
   // the bed options are there to be chosen. `wantedBed` remembers the bed row whose Change the
   // machine… opened the wizard, so asking for the bracket comes back with the bracket.
   const bedArrived = useRef<string | null>(null);
-  const wantedBed = useRef<BedMount | null>(null);
+  // The bed row whose Change the machine… opened the wizard, and the profile it was opened on: the
+  // request is honoured only when the wizard wrote a NEW profile (a close with nothing written
+  // leaves the operator where they were).
+  const wantedBed = useRef<{ mount: BedMount; fromProfile: string | null } | null>(null);
   useEffect(() => {
     if (now === null || now.mount !== 'bed') return;
     if (bedArrived.current === now.profile.id) return;
     bedArrived.current = now.profile.id;
-    if (job.workholding.kind !== 'vise') return;
     const wanted = wantedBed.current;
     wantedBed.current = null;
-    if (wanted === null && answers.vise.source !== 'default') return;
-    const mount = wanted ?? defaultBedMount(profile, answers.stock, job.stockEntry?.form ?? null);
+    if (wanted !== null) {
+      if (wanted.fromProfile === now.profile.id) return;
+      // The operator asked for this bed mount: their answer stands over any default.
+      if (wanted.mount === 'bed-tape') onBedHold(bedTapeHold(profile, job.workholding.kind === 'tape' ? job.workholding.tape : null), bedAnswers(answers));
+      else
+        onBedHold(
+          bedBracketHold(
+            answers.stock,
+            shopDefaults ?? null,
+            job.workholding.kind === 'bracket' ? job.workholding.bracket : null,
+            bedAnchor(profile) ?? 1,
+          ),
+          bedAnswers(answers),
+        );
+      return;
+    }
+    if (job.workholding.kind !== 'vise') return;
+    if (answers.vise.source !== 'default') return;
+    const mount = defaultBedMount(profile, answers.stock, job.stockEntry?.form ?? null);
     if (mount === 'bed-tape') onBedHold(bedTapeHold(profile, null), answers);
-    else onBedHold(bedBracketHold(answers.stock, shopDefaults ?? null, null), answers);
+    else onBedHold(bedBracketHold(answers.stock, shopDefaults ?? null, null, bedAnchor(profile) ?? 1), answers);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [now, job.workholding.kind, answers.stock, answers.vise.source]);
+  }, [now, job.workholding.kind, answers.stock, answers.vise.source, profile]);
 
   // #715 — on the bare bed a through cut needs a board under it, and the field's default is the
   // thinnest house board thick enough (§3.5). Once offered, the operator's "none" stands.
@@ -1122,7 +1142,12 @@ export function HoldingStep({ job, answers, onAnswers, onRotary, onBedHold }: Ho
     }
     if (mount === 'bed-bracket') {
       onBedHold(
-        bedBracketHold(answers.stock, shopDefaults ?? null, job.workholding.kind === 'bracket' ? job.workholding.bracket : null),
+        bedBracketHold(
+          answers.stock,
+          shopDefaults ?? null,
+          job.workholding.kind === 'bracket' ? job.workholding.bracket : null,
+          bedAnchor(profile) ?? 1,
+        ),
         bedAnswers(answers),
       );
       return;
@@ -1166,11 +1191,17 @@ export function HoldingStep({ job, answers, onAnswers, onRotary, onBedHold }: Ho
     writeBracket({ ...bracketHold, clamps });
   }
 
-  function changeMachine(target: MachineMountKind | null, holding: string, wanted: BedMount | null = null): void {
+  function changeMachine(
+    target: MachineMountKind | null,
+    holding: string,
+    wanted: BedMount | null = null,
+    fitBracket = false,
+  ): void {
     // Asking for a bed mount opens the wizard from that row; the step comes back with it selected.
-    if (wanted !== null) wantedBed.current = wanted;
+    if (wanted !== null) wantedBed.current = { mount: wanted, fromProfile: profile?.id ?? null };
     openMachineChange({
       ...(target === null ? {} : { target }),
+      ...(fitBracket ? { fitBracket: true } : {}),
       forJob: { name: job.name, holding },
       onDone: () => void useLocationStore.getState().refresh(),
     });
@@ -1356,7 +1387,7 @@ export function HoldingStep({ job, answers, onAnswers, onRotary, onBedHold }: Ho
     const arms = armsAboveStock(answers.stock, answers.sacrificial.under?.thickness ?? 0, bracketRead.settings);
     return (
       <div data-testid="engrave-setup-bed-fields-bed-bracket" style={BED_FIELDS}>
-        <FieldRow label="Bracket">thin, at anchor {anchor}</FieldRow>
+        <FieldRow label="Bracket">thin, at anchor {bracketHold.anchor}</FieldRow>
         <FieldRow label="Clamps">
           <span data-testid="engrave-setup-clamp-count">
             {count} top clamp{count === 1 ? '' : 's'} · {fmt(bracketRead.settings.clamp.height)} mm tall
@@ -1571,7 +1602,12 @@ export function HoldingStep({ job, answers, onAnswers, onRotary, onBedHold }: Ho
                 onPreview={setPreviewMount}
                 onMachineChange={() => {
                   if (option.escape !== null) {
-                    changeMachine(option.escape, option.holdingWords, isBedMount(option.mount) ? option.mount : null);
+                    changeMachine(
+                      option.escape,
+                      option.holdingWords,
+                      isBedMount(option.mount) ? option.mount : null,
+                      option.escapeFitBracket === true,
+                    );
                   }
                 }}
                 boardControl={

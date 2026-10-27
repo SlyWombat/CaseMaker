@@ -40,6 +40,8 @@ export interface MachineChangeResult {
   to: MachineMountKind;
   /** #706 — the MDF wasteboard went off with the rotary ('off'), or came back with the vise ('back'). */
   wasteboard: 'off' | 'back' | null;
+  /** #718 — the anchor the bracket was fitted at, or null when this change fitted none. */
+  bracket: 1 | 2 | null;
   /** True when a frozen job's mount is no longer on the machine — generate it again. */
   refreeze: boolean;
   jobName: string | null;
@@ -50,6 +52,12 @@ export interface MachineChangeRequest {
   target?: MachineMountKind;
   /** The job that asked, or null for a change made from Manage. */
   forJob?: MachineChangeJob | null;
+  /**
+   * #718 — the job wants the bed's BRACKET: the wizard offers the fit step when the active profile
+   * carries no bracket at an anchor, and writes the placement. With `target: 'bed'` this is also
+   * the bracket-only change (nothing on the pins already).
+   */
+  fitBracket?: boolean;
   /** Called once, on the operator's final press, with what changed. */
   onDone?: (result: MachineChangeResult) => void;
 }

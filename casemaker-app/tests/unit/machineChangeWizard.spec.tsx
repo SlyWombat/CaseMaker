@@ -456,6 +456,7 @@ describe('#693 walking the change', () => {
         from: 'vise',
         to: 'rotary',
         wasteboard: 'off',
+        bracket: null,
         refreeze: true,
         jobName: 'Zoomba badge',
       },
@@ -608,6 +609,86 @@ describe('#693 walking the change', () => {
     expect(fresh.surface).toMatchObject({ kind: 'wasteboard', material: 'MDF', thickness: 2 });
     expect(fresh.placements).toEqual([]);
     expect(fresh.history.at(-1)?.what).toContain('rotary off, wasteboard back on');
+  });
+
+  it('#718 — a bed job with no bracket gets one fitted at anchor 1, without moving the pins', async () => {
+    // A bed-current machine (nothing on the pins, the wasteboard back on) with no bracket at an anchor.
+    const toRotary = planMountChange({
+      machine: machine(),
+      to: 'rotary',
+      datum: null,
+      profileId: 'bp-rotary',
+      at: '2026-10-26T09:21:00.000Z',
+      accessories: [VISE, ROTARY],
+    });
+    if ('error' in toRotary) throw new Error(toRotary.error);
+    const toBed = planMountChange({
+      machine: toRotary.machine,
+      to: 'bed',
+      datum: null,
+      profileId: 'bp-bed',
+      at: '2026-10-26T09:30:00.000Z',
+      accessories: toRotary.accessoryWrites,
+    });
+    if ('error' in toBed) throw new Error(toBed.error);
+    const state = seedLocation(toBed.machine);
+    fakeMachine({ status: () => sent('?', IDLE) });
+    openMachineChange({ target: 'bed', fitBracket: true, forJob: { name: 'Tray', holding: 'held in a bracket and clamps on the bed' } });
+    render(<MachineChangeWizard />);
+
+    // 1 · What changes: the bracket at anchor 1, the anchor a choice here (Makera's default is 1).
+    await screen.findByTestId('machine-change-what');
+    expect(screen.getByTestId('machine-change-title').textContent).toContain('Bracket at anchor 1 on');
+    expect(screen.getByTestId('machine-change-what').textContent).toContain('bracket at anchor 1');
+    expect((screen.getByTestId('machine-change-bracket-anchor') as HTMLSelectElement).value).toBe('1');
+
+    // 2 · safe: the machine stays ON for a bracket fit — the light line is here, not after a power-on.
+    await screen.findByTestId('machine-change-home-line');
+    await waitFor(() => expect(screen.getByTestId('machine-change-home-line').getAttribute('data-done')).toBe('true'));
+    fireEvent.click(screen.getByTestId('machine-change-light'));
+    await waitFor(() => expect(screen.getByTestId('machine-change-light-line').getAttribute('data-done')).toBe('true'));
+    fireEvent.click(screen.getByTestId('machine-change-checked'));
+
+    // 3 · nothing was on the pins, so step 3 is the empty line and step 4 opens.
+    await screen.findByTestId('machine-change-fit');
+    expect(screen.getByTestId('machine-change-step-3').getAttribute('data-state')).toBe('done');
+    expect(screen.getByTestId('machine-change-step-4').textContent).toContain('Fit the bracket');
+    const fitText = screen.getByTestId('machine-change-fit').textContent ?? '';
+    for (const word of [
+      "the thin L-bracket into anchor 1's corner",
+      'its two 4 mm dowels',
+      'its three M5 × 20 screws',
+      'two top clamps in the tray',
+      'switch the machine on',
+    ]) {
+      expect(fitText).toContain(word);
+    }
+    for (let i = 0; i < 5; i++) clickCheck(`machine-change-fit-${i}`);
+    fireEvent.click(screen.getByTestId('machine-change-fit-done'));
+
+    // 5 · Confirm names the bracket, and the write carries the placement and the record.
+    const confirm = await screen.findByTestId('machine-change-confirm-button');
+    expect(screen.getByTestId('machine-change-bed-now').textContent).toContain(
+      'Nothing on the pins · bracket at anchor 1 · wasteboard under',
+    );
+    expect(screen.getByTestId('machine-change-record-preview').textContent).toContain('bracket at anchor 1 on');
+    fireEvent.click(confirm);
+    await screen.findByTestId('machine-change-record');
+
+    const machineWrite = state.writes.find((w) => w.method === 'PUT' && w.path.startsWith('/location/machines/'));
+    expect(machineWrite).toBeDefined();
+    const written = machineWrite!.body as MachineRecord;
+    const fresh = written.bedProfiles!.find((p) => p.id === written.activeBedProfileId)!;
+    expect(fresh.placements).toEqual([
+      expect.objectContaining({ id: 'pl-bracket', where: expect.objectContaining({ kind: 'anchor', anchor: 1 }) }),
+    ]);
+    expect(fresh.surface.kind).toBe('wasteboard');
+    expect(fresh.history.at(-1)?.what).toContain('nothing on the pins, bracket at anchor 1, for Tray');
+    const bracketWrite = state.writes.find(
+      (w) => w.method === 'PUT' && w.path === '/location/accessories/fx-bracket-thin',
+    );
+    expect(bracketWrite).toBeDefined();
+    expect((bracketWrite!.body as FixtureRecord).variant).toBe('thin');
   });
 
   it('offers the mounts this house can give when no target was asked for (Manage’s entry)', async () => {

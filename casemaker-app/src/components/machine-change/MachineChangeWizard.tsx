@@ -244,6 +244,8 @@ function Wizard({
   const [fitChecking, setFitChecking] = useState(false);
   const [fitNote, setFitNote] = useState<string | null>(null);
   const [datumChoice, setDatumChoice] = useState<'measure' | 'shipped' | null>(null);
+  // #718 — the anchor the bracket is being fitted at (Makera's origin is Anchor 1).
+  const [bracketAnchor, setBracketAnchor] = useState<1 | 2>(1);
 
   const [confirming, setConfirming] = useState(false);
   const [confirmed, setConfirmed] = useState<{
@@ -268,8 +270,18 @@ function Wizard({
     machine === null || target === null ? null : surfaceChangeFor(machine, target);
   const plannedWasteboard: 'off' | 'back' | null =
     confirmed?.result.wasteboard ?? plannedSurface?.wasteboard ?? null;
+  // #718 — the bracket's fit step appears only when the job asked for the bracket AND the active
+  // profile carries no bracket at an anchor; it writes the placement (and the fixture's record).
+  const activeHasAnchor = active?.placements.some((p) => p.where.kind === 'anchor') ?? false;
+  const bracketFit = request.fitBracket === true && target === 'bed' && !activeHasAnchor;
   const takeWords = takeOffSteps(shownFrom, { wasteboard: plannedWasteboard === 'off' ? 'off' : null });
-  const fitWords = target === null ? null : fitSteps(target, { wasteboard: plannedWasteboard === 'back' ? 'back' : null });
+  const fitWords =
+    target === null
+      ? null
+      : fitSteps(target, {
+          wasteboard: plannedWasteboard === 'back' ? 'back' : null,
+          bracket: bracketFit ? bracketAnchor : null,
+        });
   // #717 — a change that touches the vise or the rotary is made with the machine off at its own
   // switch (Makera's page for each), so step 2 carries the switch and the work light line moves to
   // AFTER the power returns: a powered-off machine has no light.
@@ -400,7 +412,7 @@ function Wizard({
   const targetError =
     target !== null && target !== from && target !== 'bed' && accessoryFor(accessories, target) === null
       ? `The house does not own ${target === 'vise' ? 'a vise' : 'a rotary module'}, so there is nothing to fit.`
-      : target !== null && target === from
+      : target !== null && target === from && !bracketFit
         ? `${MACHINE_MOUNT_WORDS[target]} is already on the machine.`
         : null;
   const targetDone = confirmed !== null || (target !== null && targetError === null);
@@ -452,6 +464,7 @@ function Wizard({
       at,
       jobName: job?.name ?? null,
       accessories: freshAccessories(),
+      bracket: bracketFit ? { anchor: bracketAnchor } : null,
     });
     if ('error' in plan) {
       setError(plan.error);
@@ -473,6 +486,7 @@ function Wizard({
         at,
         jobName: job?.name ?? null,
         accessories: freshAccessories(),
+        bracket: bracketFit ? { anchor: bracketAnchor } : null,
       });
       return 'error' in again ? current : again.machine;
     });
@@ -537,6 +551,7 @@ function Wizard({
         from: plan.from,
         to: plan.to,
         wasteboard: plan.wasteboard,
+        bracket: plan.bracket,
         refreeze,
         jobName: job?.name ?? null,
       },
@@ -628,7 +643,9 @@ function Wizard({
         <header className="mc-head">
           <span className="mc-eyebrow">Change the machine</span>
           <h3 id="machine-change-title" data-testid="machine-change-title">
-            {target === null ? 'Change the machine' : changeHeadline(shownFrom, target)}
+            {target === null
+              ? 'Change the machine'
+              : changeHeadline(shownFrom, target, bracketFit ? bracketAnchor : null)}
           </h3>
           <button
             type="button"
@@ -648,6 +665,7 @@ function Wizard({
             {targetDone ? (
               <span className="mc-meta" data-testid="machine-change-what">
                 {MACHINE_MOUNT_WORDS[shownFrom]} → {targetLabel}
+                {bracketFit ? `, bracket at anchor ${bracketAnchor}` : ''}
                 {job !== null ? (
                   <>
                     {' · for '}
@@ -655,6 +673,23 @@ function Wizard({
                     {job.holding !== undefined && job.holding !== '' ? `, ${job.holding}` : ''}
                   </>
                 ) : null}
+              </span>
+            ) : null}
+            {bracketFit ? (
+              <span className="mc-meta" data-testid="machine-change-bracket-anchor-line">
+                Bracket anchor{' '}
+                <select
+                  className="fld"
+                  aria-label="Bracket anchor"
+                  data-testid="machine-change-bracket-anchor"
+                  value={bracketAnchor}
+                  disabled={confirmed !== null}
+                  onChange={(e) => setBracketAnchor(e.target.value === '2' ? 2 : 1)}
+                >
+                  <option value="1">1</option>
+                  <option value="2">2</option>
+                </select>{' '}
+                — its corner is the work origin, X 0 · Y 0
               </span>
             ) : null}
             {shown === 1 ? (
@@ -997,12 +1032,16 @@ function Wizard({
               <div className="mc-confirm" data-testid="machine-change-confirm">
                 <span className="mc-meta" data-testid="machine-change-bed-now">
                   the bed is now: {targetLabel ?? '—'}
+                  {(confirmed?.result.bracket ?? (bracketFit ? bracketAnchor : null)) !== null
+                    ? ` · bracket at anchor ${confirmed?.result.bracket ?? bracketAnchor}`
+                    : ''}
                   {bedNowWords !== null ? ` · ${bedNowWords}` : ''}
                 </span>
                 {confirmed === null ? (
                   <>
                     <span className="mc-meta" data-testid="machine-change-record-preview">
-                      the machine's record will say: {changeRecordWords(shownFrom, target ?? shownFrom)}
+                      the machine's record will say:{' '}
+                      {changeRecordWords(shownFrom, target ?? shownFrom, bracketFit ? bracketAnchor : null)}
                       {job !== null ? ` · for ${job.name}` : ''}
                     </span>
                     {!safeDone ? (

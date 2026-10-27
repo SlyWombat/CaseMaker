@@ -260,6 +260,11 @@ export interface MountOption {
   reason: string | null;
   /** The mount the machine must carry for this option, when the installed mechanism is the blocker. */
   escape: MachineMountKind | null;
+  /**
+   * #718 — the escape also FITS the bed's bracket (the bed carries none at an anchor yet): the
+   * change wizard's request says so, and its fit step writes the placement.
+   */
+  escapeFitBracket?: boolean;
   /** How the option reads in the machine-change request. */
   holdingWords: string;
 }
@@ -398,7 +403,16 @@ export function mountOptions(args: MountOptionArgs): MountOption[] {
     // bracket at an anchor on the bed (BM-3's fit step records one; until then the row says so).
     if (mechanism === 'bed') {
       if (mount === 'bed-bracket' && bedAnchor(now.profile) === null) {
-        out.push({ ...base, hint: null, disabled: true, reason: 'needs the bracket at anchor 1', escape: null });
+        // #718 — the way out is the change wizard's fit step (target `bed`: nothing moves on the
+        // pins, the bracket goes on at anchor 1).
+        out.push({
+          ...base,
+          hint: null,
+          disabled: true,
+          reason: 'needs the bracket at anchor 1',
+          escape: 'bed',
+          escapeFitBracket: true,
+        });
         continue;
       }
       const hint =
@@ -492,14 +506,18 @@ export function bedTapeHold(profile: BedProfile | null, keep: TapeHold | null): 
   });
 }
 
-/** The bracket a bed job starts from: the Makera kit's thin bracket at anchor 1 and the default clamps. */
+/**
+ * The bracket a bed job starts from: the Makera kit's thin bracket at the bed's anchor (#718 — the
+ * anchor the bed records the bracket at, Makera's 1 when it records none) and the default clamps.
+ */
 export function bedBracketHold(
   stock: { length: number; width: number; thickness: number },
   defaults: ShopDefaults | null,
   keep: BracketHold | null,
+  anchor: 1 | 2 = 1,
 ): BracketHold {
   if (keep !== null) return { ...keep, clamps: keep.clamps.map((c) => ({ ...c })) };
-  return defaultBracketHold({ x: stock.length, y: stock.width, z: stock.thickness }, defaults);
+  return { ...defaultBracketHold({ x: stock.length, y: stock.width, z: stock.thickness }, defaults), anchor };
 }
 
 const NUMBER_WORDS = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten'] as const;

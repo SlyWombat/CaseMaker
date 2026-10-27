@@ -145,6 +145,8 @@ describe('#715 the bracket’s lines (§3.6)', () => {
       { edge: 'back', at: 77.5 },
     ]);
     expect(hold.source).toBe('default');
+    // #718 — a bed that carries the bracket at anchor 2 gives a job there.
+    expect(bedBracketHold({ length: 100, width: 60, thickness: 6 }, null, null, 2).anchor).toBe(2);
   });
 
   it('the clamp’s landmark sentence is the obstacle label’s, one owner', () => {

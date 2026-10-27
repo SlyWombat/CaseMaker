@@ -100,16 +100,20 @@ export function targetMountsFor(
   return out;
 }
 
-/** The wizard's title line: the mockup's "Vise off · rotary on". */
-export function changeHeadline(from: MachineMountKind, to: MachineMountKind): string {
+/** The wizard's title line: the mockup's "Vise off · rotary on" / "Vise off · bracket on". */
+export function changeHeadline(from: MachineMountKind, to: MachineMountKind, bracket: 1 | 2 | null = null): string {
+  // #718 — a bracket-only change keeps the pins as they are; the change is the bracket.
+  if (from === 'bed' && to === 'bed') return bracket === null ? 'Bed unchanged' : `Bracket at anchor ${bracket} on`;
+  const on =
+    bracket !== null && to === 'bed' ? `bracket at anchor ${bracket} on` : to === 'vise' ? 'vise on' : to === 'rotary' ? 'rotary on' : 'bed clear';
   if (from === 'bed') return MACHINE_MOUNT_WORDS[to].replace(' on the pins', ' on');
   const off = from === 'vise' ? 'Vise off' : from === 'rotary' ? 'Rotary off' : 'Bed clear';
-  const on = to === 'vise' ? 'vise on' : to === 'rotary' ? 'rotary on' : 'bed clear';
   return `${off} · ${on}`;
 }
 
 /** "vise → rotary", the words step 5 writes into the record line. */
-export function changeRecordWords(from: MachineMountKind, to: MachineMountKind): string {
+export function changeRecordWords(from: MachineMountKind, to: MachineMountKind, bracket: 1 | 2 | null = null): string {
+  if (from === 'bed' && to === 'bed') return bracket === null ? 'the bed unchanged' : `bracket at anchor ${bracket} on`;
   return `${MOUNT_WORDS_LOWER[from]} → ${MOUNT_WORDS_LOWER[to]}`;
 }
 
@@ -131,6 +135,8 @@ export interface StepWords {
 export interface MountStepOptions {
   /** 'off' when this change removes a wasteboard, 'back' when it restores one, null when it stays. */
   wasteboard?: 'off' | 'back' | null;
+  /** #718 — the anchor a bracket is being FITTED at (the profile carries none yet), or null. */
+  bracket?: 1 | 2 | null;
 }
 
 /**
@@ -218,13 +224,27 @@ export function fitSteps(to: MachineMountKind, opts: MountStepOptions = {}): Ste
           'chuck key in the tray',
         ],
       };
-    case 'bed':
+    case 'bed': {
       // #717 — the ONE change that puts the MDF wasteboard back on: a bed job needs the surface
       // under it. Makera publishes no removal steps, so the screws are the figure's four
       // (inferred); the board is the newest saved wasteboard profile's (surfaceChangeFor).
-      return opts.wasteboard === 'back'
-        ? { title: 'Put the wasteboard back on', items: ['the wasteboard back on', 'its screws', 'switch the machine on'] }
-        : null;
+      // #718 — the bracket is fitted onto that surface (Makera's pictures keep the MDF under it):
+      // the QuickStart's two 4 mm dowels and three M5×20 screws (longer for the thick bracket),
+      // with the clamps in the tray — they go on the plate, after the stock.
+      const items: string[] = [];
+      if (opts.wasteboard === 'back') items.push('the wasteboard back on', 'its screws');
+      if (opts.bracket !== undefined && opts.bracket !== null) {
+        items.push(
+          `the thin L-bracket into anchor ${opts.bracket}'s corner`,
+          'its two 4 mm dowels',
+          'its three M5 × 20 screws',
+          'two top clamps in the tray',
+        );
+      }
+      if (items.length === 0) return null;
+      items.push('switch the machine on');
+      return { title: opts.bracket !== undefined && opts.bracket !== null ? 'Fit the bracket' : 'Put the wasteboard back on', items };
+    }
   }
 }
 
@@ -357,6 +377,11 @@ export interface MountChangeArgs {
   jobName?: string | null;
   /** Every accessory the location holds — the outgoing and incoming fixtures are found here. */
   accessories: readonly FixtureRecord[];
+  /**
+   * #718 — fit the thin L-bracket at this anchor. The step appears only when the active profile
+   * carries no bracket at an anchor; the plan writes the placement and the fixture's record.
+   */
+  bracket?: { anchor: 1 | 2 } | null;
 }
 
 export interface MountChangePlan {
@@ -364,6 +389,8 @@ export interface MountChangePlan {
   to: MachineMountKind;
   /** "Vise off · rotary on". */
   headline: string;
+  /** #718 — the anchor the bracket was fitted at, or null when this change fitted none. */
+  bracket: 1 | 2 | null;
   /** The new profile, not yet saved. */
   profile: BedProfile;
   /** What the change did with the MDF wasteboard (#706): removed it, restored it, or left it. */
@@ -376,11 +403,42 @@ export interface MountChangePlan {
 
 export type MountChangeOutcome = MountChangePlan | { error: string };
 
+/** The Makera kit's thin L-bracket (#718): its record is created on the first fit if the house has none. */
+const BRACKET_FIXTURE_ID = 'fx-bracket-thin';
+const BRACKET_PRODUCT = 'makera-z1-l-bracket';
+
+/** The bracket's fixture record as the fit leaves it: checked out to this machine, at this anchor. */
+function bracketFixture(args: MountChangeArgs, anchor: 1 | 2): FixtureRecord {
+  const existing = args.accessories.find((a) => a.kind === 'bracket');
+  if (existing !== undefined) {
+    return {
+      ...existing,
+      whereabouts: { kind: 'machine', machineId: args.machine.id, since: args.at },
+      history: [...existing.history, { at: args.at, what: `fitted at anchor ${anchor}` }],
+    };
+  }
+  return {
+    id: BRACKET_FIXTURE_ID,
+    kind: 'bracket',
+    product: BRACKET_PRODUCT,
+    variant: 'thin',
+    constants: {},
+    unit: {},
+    provenance: {},
+    whereabouts: { kind: 'machine', machineId: args.machine.id, since: args.at },
+    history: [{ at: args.at, what: `created and fitted at anchor ${anchor}` }],
+  };
+}
+
 /**
  * The one write the wizard's Confirm makes, as a pure function: the active profile copied into a
  * NEW dated profile with the pins placement replaced, the moved fixture's datum cleared or carried,
  * the mountings that no longer name a placement dropped, and a history line saying what changed and
  * for which job. Nothing is deleted: every earlier profile keeps its datums and its picture.
+ *
+ * #718 — a change that only FITS the bracket (nothing on the pins already, and the bed carries no
+ * bracket at an anchor) is the same write with `to === from === 'bed'`: no pins move, and the new
+ * profile gains the bracket's placement and its fixture record.
  */
 export function planMountChange(args: MountChangeArgs): MountChangeOutcome {
   const { machine, to, at } = args;
@@ -389,7 +447,9 @@ export function planMountChange(args: MountChangeArgs): MountChangeOutcome {
     return { error: 'This machine has no bed described yet — set the bed up in Manage first.' };
   }
   const from = activeMountOf(machine);
-  if (to === from) {
+  const bracketAnchor = args.bracket?.anchor ?? null;
+  const bracketOnly = bracketAnchor !== null && to === 'bed' && from === 'bed';
+  if (to === from && !bracketOnly) {
     return { error: `${MACHINE_MOUNT_WORDS[to]} is already on the machine.` };
   }
   const incoming = accessoryFor(args.accessories, to);
@@ -423,14 +483,37 @@ export function planMountChange(args: MountChangeArgs): MountChangeOutcome {
   if (from === 'vise' || to === 'vise') datums.viseJawTopZ = to === 'vise' ? args.datum : null;
   if (from === 'rotary' || to === 'rotary') datums.rotaryAxis = to === 'rotary' ? args.datum : null;
 
+  // #718 — the bracket, only when the bed carries none: the step is offered exactly then.
+  const bracketFitted =
+    bracketAnchor !== null && to === 'bed' && !placements.some((p) => p.where.kind === 'anchor');
+  let bracketRecord: FixtureRecord | null = null;
+  if (bracketFitted) {
+    bracketRecord = bracketFixture(args, bracketAnchor);
+    placements.push({
+      id: 'pl-bracket',
+      fixture: bracketRecord.id,
+      where: { kind: 'anchor', anchor: bracketAnchor, pins: null },
+      count: null,
+      frame: null,
+      provenance: {},
+    });
+  }
+
   const placementIds = new Set(placements.map((p) => p.id));
   const preferredMounting = active.preferredMounting
     .filter((m) => m.mount.placement === null || placementIds.has(m.mount.placement))
     .map((m) => ({ ...m, mount: { ...m.mount } }));
 
-  const headline = changeHeadline(from, to);
+  const headline = changeHeadline(from, to, bracketFitted ? bracketAnchor : null);
   const day = at.slice(0, 10);
-  const changeWords = from === 'bed' ? `${to} on` : to === 'bed' ? `${from} off` : `${from} off, ${to} on`;
+  const changeWords = bracketOnly
+    ? 'nothing on the pins'
+    : from === 'bed'
+      ? `${to} on`
+      : to === 'bed'
+        ? `${from} off`
+        : `${from} off, ${to} on`;
+  const bracketWords = bracketFitted ? `, bracket at anchor ${bracketAnchor}` : '';
   // #706/#717 — the wasteboard's move is part of the change the record keeps: the vise and the
   // rotary mount on the bare bed, and only a change to a bed job puts the board back on.
   const surfaceChange = surfaceChangeFor(machine, to);
@@ -441,7 +524,7 @@ export function planMountChange(args: MountChangeArgs): MountChangeOutcome {
         ? ', wasteboard back on'
         : '';
   const historyWhat =
-    `created from "${active.name}": ${changeWords}${wasteboardWords}` +
+    `created from "${active.name}": ${changeWords}${wasteboardWords}${bracketWords}` +
     (args.jobName ? `, for ${args.jobName}` : '');
 
   const profile: BedProfile = {
@@ -458,6 +541,7 @@ export function planMountChange(args: MountChangeArgs): MountChangeOutcome {
   };
 
   const accessoryWrites: FixtureRecord[] = [];
+  if (bracketRecord !== null) accessoryWrites.push(bracketRecord);
   const outgoing = from === 'bed' ? null : accessoryFor(args.accessories, from);
   if (outgoing !== null) {
     accessoryWrites.push({
@@ -478,6 +562,7 @@ export function planMountChange(args: MountChangeArgs): MountChangeOutcome {
     from,
     to,
     headline,
+    bracket: bracketFitted ? bracketAnchor : null,
     profile,
     wasteboard: surfaceChange.wasteboard,
     machine: {

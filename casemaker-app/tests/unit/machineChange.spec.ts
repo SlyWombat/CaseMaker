@@ -217,6 +217,28 @@ describe('#693 what is on the machine', () => {
       'its screws',
       'switch the machine on',
     ]);
+    // #718 — the bracket's fit step, on the board when one comes back, and on its own otherwise.
+    const bracketItems = [
+      "the thin L-bracket into anchor 1's corner",
+      'its two 4 mm dowels',
+      'its three M5 × 20 screws',
+      'two top clamps in the tray',
+      'switch the machine on',
+    ];
+    expect(fitSteps('bed', { bracket: 1 })?.title).toBe('Fit the bracket');
+    expect(fitSteps('bed', { bracket: 1 })?.items).toEqual(bracketItems);
+    expect(fitSteps('bed', { wasteboard: 'back', bracket: 2 })?.items).toEqual([
+      'the wasteboard back on',
+      'its screws',
+      "the thin L-bracket into anchor 2's corner",
+      'its two 4 mm dowels',
+      'its three M5 × 20 screws',
+      'two top clamps in the tray',
+      'switch the machine on',
+    ]);
+    expect(changeHeadline('vise', 'bed', 1)).toBe('Vise off · bracket at anchor 1 on');
+    expect(changeHeadline('bed', 'bed', 1)).toBe('Bracket at anchor 1 on');
+    expect(changeRecordWords('bed', 'bed', 1)).toBe('bracket at anchor 1 on');
     // Nothing on the pins but a board on the bed: the board is still a take-off.
     expect(takeOffSteps('bed', { wasteboard: 'off' })?.items).toEqual([
       'the wasteboard’s screws',
@@ -337,6 +359,72 @@ describe('#693 the change the wizard writes', () => {
     expect(back.profile.history.at(-1)?.what).toContain('rotary off, vise on');
     expect(back.profile.placements.some((p) => p.where.kind === 'pins' && p.where.pins === 'vise')).toBe(true);
     expect(MachineRecordSchema.safeParse(back.machine).success).toBe(true);
+  });
+
+  it('#718 — fitting the bracket writes its placement and its fixture record, and moves no pins', () => {
+    // A bed job's machine: nothing on the pins, the wasteboard back on, no bracket yet.
+    const toRotary = planMountChange({
+      machine: machineRecord(),
+      to: 'rotary',
+      datum: null,
+      profileId: 'bp-rotary',
+      at: NOW,
+      accessories: [VISE, ROTARY],
+    });
+    if ('error' in toRotary) throw new Error(toRotary.error);
+    const toBed = planMountChange({
+      machine: toRotary.machine,
+      to: 'bed',
+      datum: null,
+      profileId: 'bp-bed',
+      at: '2026-10-26T10:00:00.000Z',
+      accessories: toRotary.accessoryWrites,
+    });
+    if ('error' in toBed) throw new Error(toBed.error);
+
+    const fit = planMountChange({
+      machine: toBed.machine,
+      to: 'bed',
+      datum: null,
+      profileId: 'bp-bracket',
+      at: '2026-10-26T10:30:00.000Z',
+      accessories: toBed.accessoryWrites,
+      bracket: { anchor: 1 },
+      jobName: 'Tray',
+    });
+    if ('error' in fit) throw new Error(fit.error);
+    expect(fit.bracket).toBe(1);
+    expect(fit.from).toBe('bed');
+    expect(fit.to).toBe('bed');
+    expect(fit.headline).toBe('Bracket at anchor 1 on');
+    // The placement is the bracket's, at anchor 1; nothing on the pins moved.
+    expect(fit.profile.placements).toEqual([
+      expect.objectContaining({ id: 'pl-bracket', fixture: 'fx-bracket-thin', where: expect.objectContaining({ kind: 'anchor', anchor: 1 }) }),
+    ]);
+    // The bracket's own record is created and checked out to this machine.
+    expect(fit.accessoryWrites).toEqual([
+      expect.objectContaining({
+        id: 'fx-bracket-thin',
+        kind: 'bracket',
+        variant: 'thin',
+        whereabouts: expect.objectContaining({ kind: 'machine', machineId: MACHINE_ID }),
+      }),
+    ]);
+    expect(fit.profile.history.at(-1)?.what).toContain('nothing on the pins, bracket at anchor 1, for Tray');
+    expect(MachineRecordSchema.safeParse(fit.machine).success).toBe(true);
+    // A second fit at the same bed is the same write — the bracket is already there, so nothing
+    // is added twice; the wizard does not offer the step when the bed carries one.
+    const again = planMountChange({
+      machine: toBed.machine,
+      to: 'bed',
+      datum: null,
+      profileId: 'bp-bracket-2',
+      at: '2026-10-26T11:00:00.000Z',
+      accessories: toBed.accessoryWrites,
+      bracket: { anchor: 2 },
+    });
+    if ('error' in again) throw new Error(again.error);
+    expect(again.profile.placements.filter((p) => p.where.kind === 'anchor')).toHaveLength(1);
   });
 
   it('#717 — a change to a bed job puts the wasteboard back on, from the newest saved board profile', () => {

@@ -18,7 +18,7 @@ import { MachineChangeWizard } from '@/components/machine-change';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { useEngraveJobStore } from '@/store/engraveJobStore';
 import { resetStartWizard, useStartWizardStore } from '@/store/startWizardStore';
-import { resetMachineChange } from '@/store/machineChangeStore';
+import { resetMachineChange, useMachineChangeStore } from '@/store/machineChangeStore';
 import { resetLocationStore, useLocationStore } from '@/store/locationStore';
 import { resetMachineStore } from '@/store/machineStore';
 import { useSettingsStore } from '@/store/settingsStore';
@@ -75,7 +75,7 @@ const BARE_SURFACE: BedProfile['surface'] = {
  * The fixture's machine with NOTHING ON THE PINS (its vise placement removed), its bed optionally
  * carrying the bracket at anchor 1 and optionally a bare bed.
  */
-function bedMachine(opts: { anchor?: boolean; bare?: boolean; consumables?: NonNullable<BedProfile['consumables']> | null } = {}): MachineRecord {
+function bedMachine(opts: { anchor?: boolean; anchorAt?: 1 | 2; bare?: boolean; consumables?: NonNullable<BedProfile['consumables']> | null } = {}): MachineRecord {
   const machine = MachineRecordSchema.parse(JSON.parse(JSON.stringify(DOC.machines[0])));
   const profile = machine.bedProfiles![0]!;
   profile.placements = profile.placements.filter((pl) => pl.where.kind !== 'pins');
@@ -83,7 +83,7 @@ function bedMachine(opts: { anchor?: boolean; bare?: boolean; consumables?: NonN
     profile.placements.push({
       id: 'pl-bracket',
       fixture: 'fx-bracket-thin',
-      where: { kind: 'anchor', anchor: 1, pins: null },
+      where: { kind: 'anchor', anchor: opts.anchorAt ?? 1, pins: null },
       count: null,
       frame: null,
       provenance: {},
@@ -223,15 +223,29 @@ describe('#715 with nothing on the pins, the bed options are real choices', () =
     expect(screen.queryByTestId('engrave-setup-holding-checks')).toBeNull();
   });
 
-  it('the bracket row says what it needs when the bed carries no bracket, and offers no dead change', () => {
+  it('#718 — a bed whose bracket is at anchor 2 writes the job at anchor 2', () => {
+    seedLocation(bedMachine({ anchor: true, anchorAt: 2 }));
+    openHolding(dj({ length: 100, width: 60, thickness: 6 }));
+
+    const held = job().workholding;
+    expect(held.kind).toBe('bracket');
+    if (held.kind === 'bracket') expect(held.bracket.anchor).toBe(2);
+    expect(screen.getByTestId('engrave-setup-bed-fields-bed-bracket').textContent).toContain('thin, at anchor 2');
+  });
+
+  it('the bracket row says what it needs when the bed carries no bracket — and the way out fits one', () => {
     seedLocation(bedMachine());
     openHolding(dj({ length: 100, width: 60, thickness: 6 }));
 
-    // No anchor placement: the default is tape, and the bracket cannot be chosen yet (BM-3 fits it).
+    // No anchor placement: the default is tape, and the row asks for the bracket (#718).
     expect(job().workholding.kind).toBe('tape');
     expect(radio('bed-bracket').disabled).toBe(true);
     expect(rowText('bed-bracket')).toContain('needs the bracket at anchor 1');
-    expect(screen.queryByTestId('engrave-setup-change-bed-bracket')).toBeNull();
+    fireEvent.click(screen.getByTestId('engrave-setup-change-bed-bracket'));
+    const request = useMachineChangeStore.getState().request;
+    expect(request.target).toBe('bed');
+    expect(request.fitBracket).toBe(true);
+    expect(request.forJob?.holding).toBe('held in a bracket and clamps on the bed');
   });
 });
 
