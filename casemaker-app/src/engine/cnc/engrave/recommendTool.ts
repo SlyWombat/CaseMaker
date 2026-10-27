@@ -68,7 +68,9 @@ import { cuttingForTrace, statedCuttingSize } from '@/engine/cnc/tool';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import { conditionRank, type ConditionSummary } from '@/engine/cnc/toolCondition';
 import type { EngraveAnyItem, EngraveJob, EngravePrimitive, StockMaterial } from '@/types/engraveJob';
+import { vCone } from '@/engine/cnc/vProfile';
 import { cutterRefusedOnMaterial } from './cutterMaterial';
+import { inlayMarked } from './inlay';
 import { primitiveLabel, primitiveReducesToRegion } from './partPlan';
 import { lostDetailRatioFrom, type LabelEngravability } from '@/workers/sim/engraveGeometry';
 
@@ -77,7 +79,9 @@ import { lostDetailRatioFrom, type LabelEngravability } from '@/workers/sim/engr
  * #442: and only cutters that are not marked broken; #455: and only cutters the catalogue lists
  * for this material, when it lists the cutter at all; #699: and only cutters whose record states
  * a cutting size; #699b: and only cutters one of the job's OWN checks accepts — a metal-line
- * cutter on a blank that is not metal is refused by the program itself).
+ * cutter on a blank that is not metal is refused by the program itself; #702: and only cutters the
+ * job's own SHAPE checks accept — a bore or cut-out needs a flat end mill, a variable V-carve or an
+ * inlay half needs a cone).
  */
 export type ToolExclusion =
   | 'not-flat'
@@ -85,7 +89,8 @@ export type ToolExclusion =
   | 'broken'
   | 'no-catalogue-row'
   | 'unknown-size'
-  | 'metal-line';
+  | 'metal-line'
+  | 'job-shape';
 
 export interface ToolCandidate {
   key: string;
@@ -104,14 +109,15 @@ export interface ToolCandidate {
   condition: ConditionSummary | null;
   /**
    * Why it was excluded before measuring, if it was: 'not-flat' | 'no-feeds' | 'broken' |
-   * 'no-catalogue-row' | 'unknown-size' | 'metal-line'.
+   * 'no-catalogue-row' | 'unknown-size' | 'metal-line' | 'job-shape'.
    */
   excluded?: ToolExclusion;
   /**
-   * The job's OWN reason for refusing this cutter (#699b), in the panel's "Why?" words, when
-   * `excluded === 'metal-line'`: "on Makera's \"for Metal\" line, and this job cuts PLA". The
-   * engine and the panel read the same check (`cutterRefusedOnMaterial`), so the row cannot
-   * disagree with the finding the program raises. Undefined for every other exclusion.
+   * The job's OWN reason for refusing this cutter (#699b, #702), in the panel's "Why?" words, when
+   * `excluded === 'metal-line'` or `'job-shape'`: "on Makera's \"for Metal\" line, and this job cuts
+   * PLA", "the job bores a hole, and a bore helixes down with a flat end mill". The engine and the
+   * panel read the same checks, so the row cannot disagree with the finding the program raises.
+   * Undefined for every other exclusion.
    */
   refusal?: string;
   /**
@@ -339,6 +345,8 @@ function noCandidateReason(
   catalogueNotes: readonly string[],
   metalLineCount: number,
   material: StockMaterial,
+  shapeCount: number,
+  shapeNotes: readonly string[],
 ): string {
   if (toolCount === 0) return 'There are no cutters in the tool list to recommend from.';
   // #699 — when every cutter fell for the same missing number, saying "no flat end mill or V-bit
@@ -347,13 +355,18 @@ function noCandidateReason(
   // #699b — the whole house on the metal line is a MATERIAL fact, not a detail clause: the base
   // sentence must not claim the list lacks flat end mills when it is full of them.
   const allMetalLine = metalLineCount > 0 && metalLineCount === toolCount;
+  // #702 — likewise when the JOB's own shape gates refused every cutter: the list may hold both
+  // shapes, and the job may need both (a bore and an inlay), which no single cutter can serve.
+  const allShape = shapeCount > 0 && shapeCount === toolCount;
   const base = allMetalLine
     ? `Every cutter in the list is on Makera's "for Metal" line, and this job cuts ${MATERIAL_LABELS[material]}.`
     : allSizeless
       ? 'No cutter in the list states a cutting diameter.'
-      : catalogueNotes.length > 0
-        ? 'No cutter in the list can be recommended for this material.'
-        : 'No cutter in the list is a flat end mill — or, on a trace-only or region job, a V-bit — with cutting parameters for this material.';
+      : allShape
+        ? 'No cutter in the list is one the job’s own operations accept.'
+        : catalogueNotes.length > 0
+          ? 'No cutter in the list can be recommended for this material.'
+          : 'No cutter in the list is a flat end mill — or, on a trace-only or region job, a V-bit — with cutting parameters for this material.';
   const sizeless =
     unknownSizeCount === 0 || allSizeless
       ? ''
@@ -362,11 +375,18 @@ function noCandidateReason(
     metalLineCount === 0 || allMetalLine
       ? ''
       : ` ${metalLineCount} cutter${metalLineCount === 1 ? '' : 's'} ${metalLineCount === 1 ? 'is' : 'are'} on Makera's "for Metal" line, which this ${MATERIAL_LABELS[material]} job refuses.`;
+  // #702 — the gates that refused them, in their own words; a mixed job names both. (Unlike the
+  // metal-line clause, this stays even when every cutter fell: the base sentence cannot name two
+  // different gates, and the operator needs both actions.)
+  const shape =
+    shapeCount === 0
+      ? ''
+      : ` ${shapeCount} cutter${shapeCount === 1 ? '' : 's'} ${shapeCount === 1 ? 'is' : 'are'} refused by the job’s own operations: ${shapeNotes.join(' ')}`;
   const broken =
     brokenCount === 0
       ? ''
       : ` ${brokenCount} other cutter${brokenCount === 1 ? '' : 's'} ${brokenCount === 1 ? 'is' : 'are'} marked broken.`;
-  return base + sizeless + catalogueClause(catalogueNotes) + metalLine + broken;
+  return base + sizeless + catalogueClause(catalogueNotes) + metalLine + shape + broken;
 }
 
 /**
@@ -474,6 +494,29 @@ export function recommendTool(
   // job is in.
   const hasRegions = hasRegionItems(job);
 
+  // #702 — THE JOB'S OWN SHAPE GATES. One cutter serves the whole job, and some operations refuse
+  // a cutter SHAPE: a bore helixes down its hole's wall and a cut-out profiles with the side, so
+  // both need a flat end mill; a variable-depth V-carve's depth follows a cone's flank and an inlay
+  // half is cut by one, so both need a V-bit's cone. These are the same facts `jobSetup.ts` raises
+  // (`bore-needs-end-mill`, `cutout-needs-flat`, `vcarve-variable-needs-cone`, `inlay-needs-cone`)
+  // and `inlay.ts` marks, read here so the pick can never be a cutter Generate refuses. A job that
+  // needs BOTH a flat and a cone has no single-cutter answer: every candidate falls and the no-pick
+  // reason names both gates.
+  const needsFlat =
+    (job.drills ?? []).some((drill) => drill.enabled && drill.mode === 'bore')
+      ? 'the job bores a hole, and a bore helixes down with a flat end mill'
+      : (job.cutouts ?? []).some((cutout) => cutout.enabled)
+        ? 'the job has a cut-out, and a cut-out profiles with a flat end mill'
+        : null;
+  const needsCone =
+    ([...job.shapes, ...(job.combined ?? [])] as EngraveAnyItem[]).some(
+      (item) => item.enabled && 'vCarveDepth' in item && item.vCarveDepth === 'variable',
+    )
+      ? 'the job has a variable-depth V-carve, which needs a V-bit’s flank'
+      : inlayMarked(job).some(({ item }) => item.enabled)
+        ? 'the job has an inlay half, and an inlay is cut by a V-bit’s flank'
+        : null;
+
   const candidates: ToolCandidate[] = tools.map((entry) => {
     const tool = entry.tool;
     // #699 — the size a recommendation can state, not `cuttingDiameter`'s fallback to a shank.
@@ -521,6 +564,15 @@ export function recommendTool(
         excluded: 'metal-line' as const,
         refusal: `on Makera's "for Metal" line, and this job cuts ${MATERIAL_LABELS[job.stock.material]}`,
       };
+    }
+    // #702 — a cutter one of the job's own SHAPE gates refuses is not the pick either. A flat end
+    // mill is the only shape a bore or a cut-out accepts; a cone (`vCone`) is the only one a
+    // variable-depth V-carve or an inlay half accepts. The sentence is the gate's own, so the
+    // panel's row and the finding cannot disagree.
+    const shapeRefusal =
+      usable.tool.shape !== 'flat' ? needsFlat : vCone(tool) === null ? needsCone : null;
+    if (shapeRefusal !== null) {
+      return { ...base, qualifies: false, excluded: 'job-shape' as const, refusal: shapeRefusal };
     }
     // #455 — what the catalogue LISTS this cutter for, before what numbers exist. A cutter the
     // catalogue lists and does not list for this material is out by name, with the vendor's own
@@ -619,6 +671,17 @@ export function recommendTool(
   const broken = candidates.filter((c) => c.excluded === 'broken').length;
   const unknownSize = candidates.filter((c) => c.excluded === 'unknown-size').length;
   const metalLine = candidates.filter((c) => c.excluded === 'metal-line').length;
+  // #702 — the job's shape refusals, deduplicated in candidate order: a job needing both a flat and
+  // a cone names both gates in one sentence.
+  const shapeCount = candidates.filter((c) => c.excluded === 'job-shape').length;
+  const shapeNotes = [
+    ...new Set(
+      candidates
+        .filter((c) => c.excluded === 'job-shape')
+        .map((c) => c.refusal)
+        .filter((note): note is string => note !== null && note !== undefined),
+    ),
+  ];
   // The catalogue's refusals, in the order the cutters were listed, for the no-pick sentence.
   const catalogueNotes = candidates
     .filter((c) => c.excluded === 'no-catalogue-row')
@@ -634,6 +697,8 @@ export function recommendTool(
       catalogueNotes,
       metalLine,
       job.stock.material,
+      shapeCount,
+      shapeNotes,
     ),
     conditionNote: null,
     catalogueNote: null,

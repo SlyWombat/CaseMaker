@@ -3012,7 +3012,10 @@ export function EngravePanel(): JSX.Element {
                           : c.excluded === 'metal-line'
                             ? // #699b — the job's OWN refusal, in the same words the finding uses.
                               (c.refusal ?? 'on Makera\'s "for Metal" line, and this job’s material refuses it')
-                            : 'no cutting parameters for this material';
+                            : c.excluded === 'job-shape'
+                              ? // #702 — the job's own SHAPE gate, in the finding's words.
+                                (c.refusal ?? 'the job’s own operations refuse it')
+                              : 'no cutting parameters for this material';
                   return (
                     <div
                       key={c.key}

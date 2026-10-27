@@ -229,6 +229,29 @@ describe('the panel’s catalogue and hand-pick notes (#458)', () => {
     expect(row.textContent).not.toContain('no cutting parameters');
   });
 
+  it('states the job’s own shape refusal for a cutter the recommendation passed over', () => {
+    // #702 — the job has a bore, and the V-bit that would win on size is refused by the job's own
+    // bore gate. The row says that gate's sentence, not the generic feeds wording.
+    const sentence = 'the job bores a hole, and a bore helixes down with a flat end mill';
+    const excluded: ToolCandidate = {
+      key: 'v-2.0',
+      diameter: 2,
+      qualifies: false,
+      worst: null,
+      reachKnown: true,
+      reachOk: true,
+      condition: null,
+      excluded: 'job-shape',
+      refusal: sentence,
+    };
+    useEngravePreviewStore.setState({ preview: previewWith({}, [PICK, excluded]), status: 'ready' });
+    render(<EngravePanel />);
+
+    const row = screen.getByTestId('engrave-candidate-v-2.0');
+    expect(row.textContent).toContain(sentence);
+    expect(row.textContent).not.toContain('no cutting parameters');
+  });
+
   it('keeps the old wording for a candidate excluded for want of cutting parameters', () => {
     // The guard for the branch above: `no-feeds` still reads as it did, so the new wording is a
     // branch and not a replacement.

@@ -231,7 +231,7 @@ export function reachabilityFor(
       excludedNote:
         candidate.excluded === 'no-catalogue-row'
           ? (candidate.catalogueNote ?? null)
-          : candidate.excluded === 'metal-line'
+          : candidate.excluded === 'metal-line' || candidate.excluded === 'job-shape'
             ? (candidate.refusal ?? null)
             : null,
       rows: vCarve ? [] : cells,
@@ -340,6 +340,7 @@ function exclusionWords(excluded: ToolCandidate['excluded'] | null, note: string
   // sentence. A cell must not go blank because the mechanism that refused the cutter is newer than
   // the switch.
   if (excluded === 'metal-line') return note ?? 'the job’s own material check refuses it';
+  if (excluded === 'job-shape') return note ?? 'the job’s own operations refuse its shape';
   return null;
 }
 

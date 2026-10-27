@@ -28,7 +28,7 @@ import { validateJob } from '@/engine/cnc/engrave/jobSetup';
 import { badgeBlankFor } from '@/engine/cnc/engrave/fromBadge';
 import { viseForNewJob } from '@/engine/cnc/fixture';
 import { defaultBadgeParams } from '@/types/badge';
-import type { EngraveJob, EngraveLabel } from '@/types/engraveJob';
+import type { EngraveCutout, EngraveDrill, EngraveJob, EngraveLabel, EngraveShape } from '@/types/engraveJob';
 
 /** A library entry built around `flatEndMill`, with lengths/ratios supplied per case. */
 function tool(key: string, diameter: number, opts: Partial<Tool> = {}): ToolLibraryEntry {
@@ -830,6 +830,132 @@ describe('recommendTool — the computed pick states its size and its material r
       const rec = recommendTool(job, [metalFlat(), plainFlat()], gateCatalogue, (_key) => [row('name', 1)]);
       expect(candidate(rec, 'inv:kz-metal-flat-1').excluded).toBeUndefined();
       expect(rec.key).toBe('inv:kz-metal-flat-1');
+    });
+  });
+
+  // #702 — THE JOB'S OWN SHAPE GATES. One cutter serves the whole job, and some operations refuse a
+  // cutter's SHAPE: a bore helixes down its wall and a cut-out profiles with the side, so both need
+  // a flat end mill; a variable-depth V-carve and an inlay half are cut by a cone's flank. Each
+  // fixture gives the refused shape the size tie it would otherwise win with, so only the gate can
+  // keep it out of the pick — and the counter-case shows the gate is the program's own.
+  describe('the job’s own shape gates (#702)', () => {
+    const V_PLA_ID = '900000000705';
+    const vBit = (tip: number): ToolLibraryEntry => ({
+      key: 'inv:v-30',
+      tool: flatEndMill(tip, {
+        id: V_PLA_ID,
+        name: '30° V-bit',
+        typeText: 'Engraving',
+        shape: 'engraving',
+        tipDiameter: tip,
+        diameter: 3.175,
+        angle: 30,
+        halfAngle: 15,
+        shoulderLength: 12,
+      }),
+      provenance: 'k3 house inventory',
+    });
+    // The V's plastic row, so the feeds pre-filter lets it reach the shape gate on the PLA badge.
+    const shapeCatalogue = [...catalogue, plasticRow(V_PLA_ID)];
+
+    const rect = (over: Partial<EngraveShape> = {}): EngraveShape =>
+      ({
+        kind: 'rect',
+        id: 'region-1',
+        position: { x: 20, y: 30 },
+        rotation: 0,
+        depth: 0.5,
+        enabled: true,
+        width: 10,
+        height: 8,
+        cornerRadius: 0,
+        ...over,
+      }) as EngraveShape;
+
+    const bore = (): EngraveDrill => ({
+      kind: 'drill',
+      id: 'bore-1',
+      position: { x: 20, y: 5 },
+      rotation: 0,
+      depth: 1.5,
+      enabled: true,
+      through: false,
+      mode: 'bore',
+      diameter: 4,
+    });
+
+    it('a bore refuses the larger V-bit; the flat is picked and the job generates', () => {
+      const job: EngraveJob = { ...jobWithLabel('l1', 'CASE', 1), drills: [bore()] };
+      const rec = recommendTool(job, [vBit(2), flat()], [], (_key) => [row('l1', 1)]);
+      const v = candidate(rec, 'inv:v-30');
+      expect(v.diameter).toBeGreaterThan(candidate(rec, 'inv:kz-flat-1').diameter);
+      expect(v.excluded).toBe('job-shape');
+      expect(v.refusal).toContain('bore');
+      expect(rec.key).toBe('inv:kz-flat-1');
+
+      const withPick: EngraveJob = { ...job, toolKey: rec.key!, tool: flat().tool };
+      const g = generate(tl, withPick, null, []);
+      expect(g.ok).toBe(true);
+      expect(g.stage).toBe('done');
+      expect(g.findings.filter((f) => f.severity === 'error')).toEqual([]);
+
+      // The gate is real: the V the size rule would have picked is refused by the job's own check.
+      const withV: EngraveJob = { ...job, toolKey: 'inv:v-30', tool: vBit(2).tool };
+      expect(validateJob(withV).some((f) => f.code === 'bore-needs-end-mill')).toBe(true);
+    });
+
+    it('a cut-out refuses the larger V-bit too', () => {
+      const cutout = {
+        kind: 'cutout',
+        id: 'co-1',
+        enabled: true,
+        of: 'stock-inset',
+        side: 'outside',
+        inset: 1,
+        tabs: { count: 0, width: 0, height: 0 },
+      } as EngraveCutout;
+      const job: EngraveJob = { ...jobWithLabel('l1', 'CASE', 1), cutouts: [cutout] };
+      const rec = recommendTool(job, [vBit(2), flat()], [], (_key) => [row('l1', 1)]);
+      expect(candidate(rec, 'inv:v-30').excluded).toBe('job-shape');
+      expect(candidate(rec, 'inv:v-30').refusal).toContain('cut-out');
+      expect(rec.key).toBe('inv:kz-flat-1');
+    });
+
+    it('a variable-depth V-carve refuses the larger flat; the V-bit is picked', () => {
+      const job: EngraveJob = { ...badgeJob(), shapes: [rect({ vCarveDepth: 'variable' })] };
+      const rec = recommendTool(job, [flat(), vBit(0.5)], shapeCatalogue, (_key) => [row('name', 1)]);
+      const flatCandidate = candidate(rec, 'inv:kz-flat-1');
+      expect(flatCandidate.diameter).toBeGreaterThan(candidate(rec, 'inv:v-30').diameter);
+      expect(flatCandidate.excluded).toBe('job-shape');
+      expect(flatCandidate.refusal).toContain('variable-depth');
+      expect(rec.key).toBe('inv:v-30');
+      // The gate is real: the flat the size rule would have picked is refused by the job's check.
+      const withFlat: EngraveJob = { ...job, toolKey: 'inv:kz-flat-1', tool: flat().tool };
+      expect(validateJob(withFlat).some((f) => f.code === 'vcarve-variable-needs-cone')).toBe(true);
+    });
+
+    it('an inlay half refuses the larger flat; the V-bit is picked', () => {
+      const job: EngraveJob = {
+        ...badgeJob(),
+        shapes: [rect({ inlay: { role: 'female', glueGapMm: 0.2 } })],
+      };
+      const rec = recommendTool(job, [flat(), vBit(0.5)], shapeCatalogue, (_key) => [row('name', 1)]);
+      expect(candidate(rec, 'inv:kz-flat-1').excluded).toBe('job-shape');
+      expect(candidate(rec, 'inv:kz-flat-1').refusal).toContain('inlay');
+      expect(rec.key).toBe('inv:v-30');
+    });
+
+    it('a job needing a flat AND a cone has no single-cutter answer, and says both gates', () => {
+      const job: EngraveJob = {
+        ...jobWithLabel('l1', 'CASE', 1),
+        drills: [bore()],
+        shapes: [rect({ inlay: { role: 'female', glueGapMm: 0.2 } })],
+      };
+      const rec = recommendTool(job, [flat(), vBit(2)], [], (_key) => [row('l1', 1)]);
+      expect(rec.key).toBeNull();
+      expect(rec.reason).toContain('refused by the job’s own operations');
+      expect(rec.reason).toContain('bores a hole');
+      expect(rec.reason).toContain('inlay half');
     });
   });
 });
