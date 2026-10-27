@@ -3,6 +3,7 @@ import { jobMachine } from '@/engine/cnc/calibration';
 import { isShippedDemoLabelSet } from '@/engine/cnc/engrave/blankLabelSeed';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { materialOptionsFor } from '@/engine/cnc/engrave/setupFlow';
+import type { MillProfile } from '@/engine/cnc/machine';
 import {
   MATERIAL_LABELS,
   isMetalMaterial,
@@ -11,12 +12,14 @@ import {
   isWoodMaterial,
 } from '@/engine/cnc/materials';
 import {
+  ROD_VISE_MAX_LENGTH_MM,
   STOCK_SIZE_FIELDS,
   boxForForm,
   formLabel,
   formSizeProblem,
   isJobForm,
   rodGripProblem,
+  rotaryEnvelopeOf,
   shelfFor,
   shelfItemFromMade,
   shelfPickProblem,
@@ -33,6 +36,7 @@ import { stockProblem, type StockItem } from '@/platform/stockClient';
 import { useEngraveJobStore } from '@/store/engraveJobStore';
 import { newStockId, useStockStore } from '@/store/stockStore';
 import type { JobStockFinish, JobStockForm, StockMaterial } from '@/types/engraveJob';
+import { fmt } from './holdingMounts';
 
 /**
  * Step 2 of the one cutting-job wizard (#683): **the stock, in one screen.**
@@ -62,10 +66,11 @@ export type PendingStock =
  * The current job's own numbers, so an edit is an edit and not a retype; an absent seed is the
  * new-job flow (nothing chosen).
  *
- * A round form's seed carries the job's BOX: a disc's diameter is its `length` and its thickness is
- * its `thickness`; a rod stands on its end, so its diameter is its `length` (and its `width`) and
- * its own length is its `thickness` (`stockStart.ts`'s `boxForForm`). {@link dimsFromSeed} reads it
- * back into the form's own fields.
+ * A round form's seed carries the form's STANDING box: a disc's diameter is its `length` and its
+ * thickness is its `thickness`; a rod or tube stands on its end, so its diameter is its `length`
+ * (and its `width`) and its own length is its `thickness` (`stockStart.ts`'s `boxForForm`). The
+ * wizard normalises a job's axis-frame rod to that box before seeding. {@link dimsFromSeed} reads
+ * the numbers back into the form's own fields; a tube's wall is the job's own `stock.wall`.
  */
 export interface StartStockSeed {
   form: JobStockForm;
@@ -73,6 +78,8 @@ export interface StartStockSeed {
   length: number;
   width: number;
   thickness: number;
+  /** A tube's wall, mm (#713); absent for every other form. */
+  wall?: number;
   finish: JobStockFinish;
   /**
    * All three dims are the app's own derivation (`computed`), not a typed or measured answer — the
@@ -132,58 +139,57 @@ interface FormDef {
   id: JobStockForm;
   /** The word under the picture. */
   word: string;
-  /** The one sentence under the pictures when this form is picked. */
-  sentence: string;
 }
 
-/** The six forms, in the mockup's order, with the mockup's one sentence each. */
+/** The seven forms, in the mockup's order (`docs/design/rotary-flow-mockups.html`, station 2). */
 const FORM_DEFS: readonly FormDef[] = [
-  {
-    id: 'plate',
-    word: 'Plate',
-    sentence:
-      'Plate — flat stock cut from the top; thicker than a sheet, lower than it is wide. How it is held is worked out in the next step from its numbers.',
-  },
-  {
-    id: 'block',
-    word: 'Block',
-    sentence: 'Block — as tall as it is wide; sides may be cut in later setups.',
-  },
-  {
-    id: 'sheet',
-    word: 'Sheet',
-    sentence: 'Sheet — thin stock; in the vise on a waste board between the jaws, or taped to the bed.',
-  },
-  {
-    id: 'printed-blank',
-    word: 'Printed blank',
-    sentence: 'Printed blank — from a printer; layers known.',
-  },
-  {
-    id: 'disc',
-    word: 'Disc',
-    sentence:
-      'Disc — round stock. A short disc sits in the vise or on tape for a face job; a disc cut around needs the rotary (step 3 will offer it).',
-  },
-  {
-    id: 'rod',
-    word: 'Rod',
-    sentence:
-      'Rod — round stock. A short rod stands on its end in the vise, cut on that end; a rod cut around needs the rotary (step 3 will offer it).',
-  },
+  { id: 'plate', word: 'Plate' },
+  { id: 'block', word: 'Block' },
+  { id: 'sheet', word: 'Sheet' },
+  { id: 'printed-blank', word: 'Printed blank' },
+  { id: 'disc', word: 'Disc' },
+  { id: 'rod', word: 'Rod' },
+  { id: 'tube', word: 'Tube' },
 ];
+
+/**
+ * The one sentence under the pictures when a form is picked — the mockup's words, character for
+ * character (`docs/design/rotary-flow.md` §3.3). The block and the envelope refusals carry the
+ * module's OWN numbers, so a different rotary states its own; the Z1's ⌀80 × 150 is the profile's.
+ */
+function formSentence(form: JobStockForm, machine: MillProfile): string {
+  switch (form) {
+    case 'plate':
+      return 'Plate — flat stock cut from the top; thicker than a sheet, lower than it is wide. How it is held is worked out in the next step from its numbers.';
+    case 'block': {
+      const env = rotaryEnvelopeOf(machine);
+      return `Block — squared stock: in the vise as today, or in the chuck when its diagonal fits ⌀${fmt(env.diameter)} × ${fmt(env.length)}.`;
+    }
+    case 'sheet':
+      return 'Sheet — thin stock; in the vise on a waste board between the jaws, or taped to the bed.';
+    case 'printed-blank':
+      return 'Printed blank — from a printer; layers known.';
+    case 'disc':
+      return 'Disc — round stock. A short disc sits in the vise or on tape for a face job; a disc cut around needs the rotary (step 3 will offer it).';
+    case 'rod':
+      return `Rod — round stock: a dowel, a rod. A rod up to ${fmt(ROD_VISE_MAX_LENGTH_MM)} mm long stands on its end in the vise; a longer one is held in the rotary chuck and cut around (step 3 offers it).`;
+    case 'tube':
+      return 'Tube — round stock with a bore. Held in the rotary chuck and cut around; no cut goes deeper than its wall.';
+  }
+}
 
 /** The field word beside each input — the panel's words, with the axis and the round case. */
 const SIZE_LABELS: Readonly<Record<StockSizeKey, string>> = {
   length: 'length X',
   width: 'width Y',
   thickness: 'thickness Z',
-  diameter: 'diameter',
+  diameter: 'diameter ⌀',
+  wall: 'wall',
 };
 
-const SIZE_KEYS: readonly StockSizeKey[] = ['length', 'width', 'thickness', 'diameter'];
+const SIZE_KEYS: readonly StockSizeKey[] = ['length', 'width', 'thickness', 'diameter', 'wall'];
 type DimState = Record<StockSizeKey, string>;
-const EMPTY_DIMS: DimState = { length: '', width: '', thickness: '', diameter: '' };
+const EMPTY_DIMS: DimState = { length: '', width: '', thickness: '', diameter: '', wall: '' };
 
 function text(v: number | null | undefined): string {
   return v === null || v === undefined ? '' : String(Number(v.toFixed(3)));
@@ -193,7 +199,14 @@ function text(v: number | null | undefined): string {
 function dimsFromSeed(seed?: StartStockSeed): DimState {
   if (seed === undefined) return EMPTY_DIMS;
   if (seed.form === 'disc') return { ...EMPTY_DIMS, diameter: text(seed.length), thickness: text(seed.thickness) };
-  if (seed.form === 'rod') return { ...EMPTY_DIMS, diameter: text(seed.length), length: text(seed.thickness) };
+  if (seed.form === 'rod' || seed.form === 'tube') {
+    return {
+      ...EMPTY_DIMS,
+      diameter: text(seed.length),
+      wall: text(seed.wall),
+      length: text(seed.thickness),
+    };
+  }
   return { ...EMPTY_DIMS, length: text(seed.length), width: text(seed.width), thickness: text(seed.thickness) };
 }
 
@@ -201,7 +214,9 @@ function dimsFromSeed(seed?: StartStockSeed): DimState {
 function dimsFromItem(item: StockItem): DimState {
   const s = item.size;
   if (item.form === 'disc') return { ...EMPTY_DIMS, diameter: text(s.diameter), thickness: text(s.thickness) };
-  if (item.form === 'rod') return { ...EMPTY_DIMS, length: text(s.length), diameter: text(s.diameter) };
+  if (item.form === 'rod' || item.form === 'tube') {
+    return { ...EMPTY_DIMS, diameter: text(s.diameter), wall: text(s.wall), length: text(s.length) };
+  }
   return { ...EMPTY_DIMS, length: text(s.length), width: text(s.width), thickness: text(s.thickness) };
 }
 
@@ -215,12 +230,25 @@ function toSize(dims: DimState): StockSize {
   return size;
 }
 
-/** `plate 76.2 × 38.1 × 3.81 mm` / `disc ⌀50 × 5 mm` — a shelf row's size. */
+/** `plate 76.2 × 38.1 × 3.81 mm` / `disc ⌀50 × 5 mm` / `tube ⌀25 × 120 mm, wall 3 mm` — a shelf row. */
 function sizeText(item: StockItem): string {
   const s = item.size;
   if (item.form === 'disc') return `⌀${text(s.diameter)} × ${text(s.thickness)} mm`;
-  if (item.form === 'rod' || item.form === 'tube') return `⌀${text(s.diameter)} × ${text(s.length)} mm`;
+  if (item.form === 'tube') return `⌀${text(s.diameter)} × ${text(s.length)} mm, wall ${text(s.wall)} mm`;
+  if (item.form === 'rod') return `⌀${text(s.diameter)} × ${text(s.length)} mm`;
   return `${text(s.length)} × ${text(s.width)} × ${text(s.thickness)} mm`;
+}
+
+/**
+ * The circumference of a round form's surface, mm (#713): the map's height in §3.7 and the number
+ * the operator lays text against. `Around: 62.832 mm at the surface` for ⌀20. Null until a
+ * positive diameter is typed.
+ */
+function aroundLine(form: JobStockForm, dims: DimState): string | null {
+  if (form !== 'rod' && form !== 'tube') return null;
+  const diameter = Number(dims.diameter);
+  if (dims.diameter.trim() === '' || !Number.isFinite(diameter) || diameter <= 0) return null;
+  return `Around: ${fmt(2 * Math.PI * (diameter / 2))} mm at the surface`;
 }
 
 /**
@@ -263,7 +291,7 @@ function groupMaterials(options: readonly { value: StockMaterial; label: string 
   return groups.filter((g) => g.options.length > 0);
 }
 
-/** The picture under each form: the mockup's own six drawings, one line each. */
+/** The picture under each form: the mockup's own seven drawings, one line each. */
 function FormPicture({ form }: { form: JobStockForm }): JSX.Element {
   const common = { width: 40, height: 28, viewBox: '0 0 40 28', fill: 'none', stroke: 'currentColor', strokeWidth: 1.3 } as const;
   switch (form) {
@@ -310,6 +338,14 @@ function FormPicture({ form }: { form: JobStockForm }): JSX.Element {
           <path d="M8 6 h26 a4 8 0 0 1 0 16 H8" />
         </svg>
       );
+    case 'tube':
+      return (
+        <svg {...common} aria-hidden="true">
+          <ellipse cx="8" cy="14" rx="4" ry="8" />
+          <ellipse cx="8" cy="14" rx="2" ry="4" />
+          <path d="M8 6 h26 a4 8 0 0 1 0 16 H8" />
+        </svg>
+      );
   }
 }
 
@@ -318,7 +354,7 @@ export function StartStockStep({
   seed,
 }: {
   /** The current answer, or null when there is none yet (or the one there is was refused). */
-  onChange: (pending: PendingStock | null, block: string | null) => void;
+  onChange: (pending: PendingStock | null) => void;
   /** The job's own stock when the step is re-opened to edit it (#681); absent for a new job. */
   seed?: StartStockSeed;
 }): JSX.Element {
@@ -361,23 +397,28 @@ export function StartStockStep({
   const canKeep = shelfOk && shelfId === null && fileRead === null;
 
   /**
-   * What the step hands the wizard on every input. `block` is the one sentence that stops THIS form
-   * when the form itself cannot start the job — a rod past the vise's grip is the rotary's. It
-   * stands in the form's own sentence under the picture and travels to the Next button; a red line
-   * beside it would say the same thing twice.
+   * What the step hands the wizard on every input. `sentence` is the form's line under the picture
+   * when the numbers change it — a rod past the vise's grip is the rotary's, and the line says so
+   * (`rodGripProblem`). It is NOT a block: the answer stands, and Next goes on to Holding, which
+   * writes the chuck (#713).
    */
   const outcome = useMemo((): {
     pending: PendingStock | null;
     problem: string | null;
     notes: string[];
-    block?: string | null;
+    sentence?: string | null;
   } => {
     if (shelfId !== null) {
       const item = shelf.find((i) => i.id === shelfId);
       if (!item) return { pending: null, problem: null, notes: [] };
       const r = stockFromShelf(item, machine);
       return r.ok
-        ? { pending: { kind: 'choice', choice: r.choice, saveToShelf: null }, problem: null, notes: r.choice.notes }
+        ? {
+            pending: { kind: 'choice', choice: r.choice, saveToShelf: null },
+            problem: null,
+            notes: r.choice.notes,
+            sentence: item.form === 'rod' ? rodGripProblem(item.size) : null,
+          }
         : { pending: null, problem: r.reason, notes: [] };
     }
     if (fileRead !== null) {
@@ -409,15 +450,14 @@ export function StartStockStep({
     const filled = STOCK_SIZE_FIELDS[form].some((key) => dims[key].trim() !== '');
     if (!filled) return { pending: null, problem: null, notes: [] };
     const size = toSize(dims);
-    // A rod past the vise's grip is the rotary's (§3.3). The form's own sentence says so and the
-    // wizard blocks this form; it is not a red line about a number the operator typed.
-    const block = form === 'rod' ? rodGripProblem(size) : null;
-    if (block !== null) return { pending: null, problem: null, notes: [], block };
+    // A rod past the vise's grip is the rotary's (§3.3). The form's own sentence says so; the
+    // answer still stands, so Next goes on.
+    const sentence = form === 'rod' ? rodGripProblem(size) : null;
     const sizeProblem = formSizeProblem(form, size, machine);
     if (sizeProblem !== null) return { pending: null, problem: sizeProblem, notes: [] };
     const box = boxForForm(form, size);
     if (box === null) return { pending: null, problem: null, notes: [] };
-    const made = { ...box, form, material, finish };
+    const made = { ...box, form, material, finish, wall: size.wall ?? undefined };
     // A tick that cannot be honoured (no shelf in this instance) is not on screen at all.
     const id = save && canKeep ? newId : null;
     const r = stockFromMade(made, machine, id);
@@ -428,13 +468,18 @@ export function StartStockStep({
       const why = stockProblem(item);
       if (why !== null) return { pending: null, problem: `it cannot go on the shelf: ${why}`, notes: [] };
     }
-    return { pending: { kind: 'choice', choice: r.choice, saveToShelf: item }, problem: null, notes: r.choice.notes };
+    return {
+      pending: { kind: 'choice', choice: r.choice, saveToShelf: item },
+      problem: null,
+      notes: r.choice.notes,
+      sentence,
+    };
   }, [shelfId, shelf, machine, fileRead, dims, form, material, finish, save, canKeep, newId]);
 
   // Tell the wizard. Keyed on the pending answer's identity: `outcome` is a fresh object on every
   // input change, which is exactly when the wizard should hear about it.
   useEffect(() => {
-    onChange(outcome.pending, outcome.block ?? null);
+    onChange(outcome.pending);
   }, [outcome, onChange]);
 
   /** The form's picture: it sets the size fields, and the sentence says what the word means. */
@@ -485,6 +530,7 @@ export function StartStockStep({
   const visibleSizeKeys = STOCK_SIZE_FIELDS[form];
   const seededNumbers =
     seed?.computed === true && visibleSizeKeys.every((key) => dims[key] === seedDims[key]);
+  const around = aroundLine(form, dims);
 
   return (
     <div data-testid="start-wizard-step-stock" style={{ marginTop: 8 }}>
@@ -532,7 +578,7 @@ export function StartStockStep({
         ))}
       </div>
       <p style={MUTED} data-testid="start-wizard-form-sentence">
-        {outcome.block ?? selectedForm.sentence}
+        {outcome.sentence ?? formSentence(selectedForm.id, machine)}
       </p>
 
       <p style={{ ...MUTED, margin: '8px 0 0' }}>Size</p>
@@ -555,12 +601,26 @@ export function StartStockStep({
           </label>
         ))}
       </div>
+      {/* #713 — the round form's derived line: the circumference of its surface, the map's height. */}
+      {around !== null && (
+        <p style={MUTED} data-testid="start-wizard-stock-around">
+          {around}
+        </p>
+      )}
       {/* #352 — where seeded numbers came from. It goes the moment one of them is edited, because
           then the number IS the operator's and the sentence would be a lie. */}
       {seededNumbers && (
         <p style={MUTED} data-testid="engrave-setup-stock-provenance">
           These numbers came from the template you picked, not from a bench measurement — change any you
           measured.
+        </p>
+      )}
+
+      {/* #713 — the stock's own refusal, at the size field it is about: a rod or tube outside the
+          rotary's envelope, or a number that is not one. */}
+      {outcome.problem !== null && (
+        <p style={REFUSED} data-testid="start-wizard-stock-problem">
+          {outcome.problem}
         </p>
       )}
 
@@ -693,11 +753,6 @@ export function StartStockStep({
         </p>
       )}
 
-      {outcome.problem !== null && (
-        <p style={REFUSED} data-testid="start-wizard-stock-problem">
-          {outcome.problem}
-        </p>
-      )}
       {outcome.notes.length > 0 && (
         <div data-testid="start-wizard-stock-summary">
           {outcome.notes.map((n, i) => (

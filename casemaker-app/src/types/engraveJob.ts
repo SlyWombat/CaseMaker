@@ -126,7 +126,16 @@ export interface EngraveJobSources {
    */
   stock?: Partial<
     Record<
-      'length' | 'width' | 'thickness' | 'material' | 'fibre' | 'colour' | 'flatness' | 'shape' | 'diameter',
+      | 'length'
+      | 'width'
+      | 'thickness'
+      | 'material'
+      | 'fibre'
+      | 'colour'
+      | 'flatness'
+      | 'shape'
+      | 'diameter'
+      | 'wall',
       FieldSource
     >
   >;
@@ -1531,14 +1540,26 @@ export interface EngraveJob {
     /**
      * The stock's plan shape (#240 §1, `/Rotary.md` R6). ABSENT is a rectangle — every pre-rotary
      * job — and is kept absent through a save/open so those documents round-trip byte-for-byte.
-     * `'cylinder'` says the box around the stock is round stock in the ROTARY CHUCK's axis frame:
-     * X is the rod's length and `width = thickness = diameter`. The box is still what the CAM
-     * plans in until slice 2 wraps it; the word says which way to read it, and nothing pretends a
-     * square is a cylinder.
+     * `'cylinder'` says the box around the stock is round stock. The box is still what the CAM
+     * plans in; the word says which way to read it, and nothing pretends a square is a cylinder.
+     *
+     * TWO FRAMES, ONE ROD (#683, #713): the stock step writes a rod or tube STANDING ON ITS END in
+     * the vise — `D × D × L` — and the Holding step's chuck write normalises it to the axis frame
+     * — `L × D × D` (#240 slice 1). `cylinderFrameOf` within `stockStart.ts` reads which one a
+     * document holds.
      */
     shape?: 'cylinder';
-    /** The rod's diameter, mm — present iff `shape` is `'cylinder'` (schema-enforced). */
+    /**
+     * The rod's or tube's OUTER diameter, mm — present iff `shape` is `'cylinder'` (schema-checked
+     * against the box: the diameter is across one face and the rod's own length along the other).
+     */
     diameter?: Mm;
+    /**
+     * A tube's wall thickness, mm (#713) — the stock's own fact, and the cap every later cut depth
+     * is read against. ABSENT for a rod, and absent for every document written before #713, so
+     * those round-trip byte-for-byte.
+     */
+    wall?: Mm;
     /**
      * The fibre the blank's filament states (#464), BESIDE the material rather than folded into it
      * — see {@link FilamentFibre}. `PETG-CF` is `material: 'petg'` with `fibre: 'cf'`: the feeds
@@ -1789,12 +1810,13 @@ export interface EngraveJob {
 }
 
 /**
- * The forms a job's stock can take (#418, #683). A disc and a rod are round, but the job still
- * plans on the rectangle around them, and the round piece is held so its cut face is flat: a disc
- * ⌀D × T is D × D × T (cut on its flat top), a rod ⌀D × L is D × D × L — standing on its end in
- * the vise, cut on that ⌀D end. The form keeps the round fact for the screens.
+ * The forms a job's stock can take (#418, #683, #713). A disc, a rod and a tube are round, but the
+ * job still plans on the rectangle around them, and the round piece is held so its cut face is
+ * flat: a disc ⌀D × T is D × D × T (cut on its flat top), a rod ⌀D × L is D × D × L — standing on
+ * its end in the vise, cut on that ⌀D end. A tube is a rod with a bore: its box is its OUTER
+ * diameter, and `wall` is how thick its side is. The form keeps the round fact for the screens.
  */
-export type JobStockForm = 'sheet' | 'plate' | 'block' | 'printed-blank' | 'disc' | 'rod';
+export type JobStockForm = 'sheet' | 'plate' | 'block' | 'printed-blank' | 'disc' | 'rod' | 'tube';
 
 /** A shelf entry's finish (#413) — what decides the facing default (decision Q6, #432). */
 export type JobStockFinish = 'rough' | 'finished' | 'printed' | 'unknown';

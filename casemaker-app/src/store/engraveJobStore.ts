@@ -17,7 +17,7 @@ import {
   newEngraveTraceId,
 } from '@/engine/cnc/engrave/defaults';
 import { defaultStockProud, jobVise, seatedVise, todayISODate, viseForNewJob } from '@/engine/cnc/fixture';
-import { rotaryBoxForRod, standingBoxForRod } from '@/engine/cnc/stockStart';
+import { cylinderFrameOf, rodDimsOf, rotaryBoxForRod, standingBoxForRod } from '@/engine/cnc/stockStart';
 import { sacrificialForNewJob } from '@/engine/cnc/sacrificial';
 import { resolveTool } from '@/engine/cnc/toolRegistry';
 import { cuttingDiameter } from '@/engine/cnc/tool';
@@ -509,16 +509,11 @@ function viseAfterStockEdit(job: EngraveJob, patch: Partial<EngraveJob['stock']>
 
 /**
  * The rod a job's box states — its diameter, and its length along the rod — whichever way the rod
- * lies (#240). A rotary job's box is the AXIS FRAME (`L × D × D`, `shape: 'cylinder'`); the stock
- * step's rod stands on its END (`D × D × L`, #683). Null for stock that is not round: a plate or a
- * block never becomes a rod by this reading.
+ * lies (#240, #683, #713). A job's box is either the AXIS FRAME (`L × D × D`) or the stock step's
+ * STANDING frame (`D × D × L`); {@link rodDimsOf} reads both. Null for stock that is not round.
  */
 function rodSizeOf(stock: EngraveJob['stock']): { diameter: number; length: number } | null {
-  if (stock.shape === 'cylinder') {
-    return { diameter: stock.diameter ?? stock.width, length: stock.length };
-  }
-  if (Math.abs(stock.length - stock.width) > 1e-9) return null;
-  return { diameter: stock.width, length: stock.thickness };
+  return rodDimsOf(stock);
 }
 
 /** The job with a source stamped on each of `keys` in `sources.stock` (#254). */
@@ -1313,13 +1308,19 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
           (k) => patch[k] !== undefined,
         );
         const stock = { ...job.stock, ...patch };
-        // #240 — ONE BOX, WHICHEVER WAY THE ROD LIES. A rotary job's box is the axis frame
-        // (`L × D × D`), while the stock step speaks a rod's own numbers in its standing box
-        // (`D × D × L`, #683). Re-express a round-stock write in the frame the job is held in, so
+        // #240/#713 — ONE BOX, WHICHEVER WAY THE ROD LIES. A rotary job's box is the axis frame
+        // (`L × D × D`), while the stock step speaks a rod's or tube's own numbers in its standing
+        // box (`D × D × L`, #683). Re-express a round-stock write in the frame the job is held in, so
         // the workholding and the box cannot disagree. Any other write is taken as stated: the
         // Holding step is where the mount is chosen, and its round-stock rule is what turns the
         // rotary off when the new stock is not round.
+        //
+        // #713 — the stock step RESTATES the whole round fact (shape, diameter, wall) with the box,
+        // so such a write is taken as stated and never re-derived: its box is already the standing
+        // frame. Only a partial edit (a panel's one number) keeps the cross-section invariant.
+        const restatesRound = 'shape' in patch;
         const patchRod =
+          patch.shape === 'cylinder' &&
           patch.length !== undefined &&
           patch.width !== undefined &&
           patch.thickness !== undefined &&
@@ -1328,15 +1329,18 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
         if (job.workholding.kind === 'rotary-chuck' && patchRod) {
           Object.assign(stock, rotaryBoxForRod(patch.width!, patch.thickness!));
           extraKeys.push('diameter');
-        } else if (stock.shape === 'cylinder') {
-          // #240 — a round box's cross-section is ONE number: `width`, `thickness` and `diameter`
-          // move together, so an edit to any of them keeps the schema's equality invariant.
-          const diameter = patch.diameter ?? patch.width ?? patch.thickness;
+        } else if (!restatesRound && stock.shape === 'cylinder') {
+          // #240 — a round box's cross-section is ONE number: `width` and `diameter` move together,
+          // and so does the other axis of the frame the box lies in — `thickness` in the axis frame,
+          // `length` in the standing frame.
+          const frame = cylinderFrameOf(stock) ?? 'axis';
+          const diameter = patch.diameter ?? patch.width ?? (frame === 'standing' ? patch.length : patch.thickness);
           if (diameter !== undefined) {
             stock.width = diameter;
-            stock.thickness = diameter;
             stock.diameter = diameter;
-            extraKeys.push('width', 'thickness', 'diameter');
+            if (frame === 'standing') stock.length = diameter;
+            else stock.thickness = diameter;
+            extraKeys.push('width', 'diameter', frame === 'standing' ? 'length' : 'thickness');
           }
         }
         // `colour`, `flatness` and `fibre` are the stock fields a patch can CLEAR (#285 review,
@@ -1348,9 +1352,11 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
         // stop the runs being weighed as abrasive. An explicit `undefined` says that; an OMITTED
         // key still means "leave it alone", which is what every other caller relies on — a laminate
         // imported from a design that states no print facts keeps the cap its stock entry gave it.
-        // The provenance goes with it — a source for a value that is gone is a lie.
+        // The provenance goes with it — a source for a value that is gone is a lie. #713 — the same
+        // for the round facts: a stock-choice write states them as absent when the new piece is a
+        // rectangle, and they must not survive a rod-to-plate edit.
         const sources = withStockSource(job, [...keys, ...extraKeys], source);
-        for (const key of ['colour', 'flatness', 'fibre'] as const) {
+        for (const key of ['colour', 'flatness', 'fibre', 'shape', 'diameter', 'wall'] as const) {
           if (key in patch && patch[key] === undefined) {
             delete stock[key];
             if (sources.stock) delete sources.stock[key];

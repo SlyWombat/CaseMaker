@@ -1332,14 +1332,25 @@ const stockObjectSchema = z
     shape: z
       .literal('cylinder')
       .optional()
-      .describe('Set to "cylinder" for round stock in the rotary chuck; omit for a rectangular blank.'),
+      .describe(
+        'Set to "cylinder" for round stock (a rod or a tube); omit for a rectangular blank.',
+      ),
     diameter: z
       .number()
       .finite()
       .positive()
       .max(Math.max(STOCK_LIMITS.width, STOCK_LIMITS.thickness))
       .optional()
-      .describe('Rod diameter in millimetres; present exactly when shape is "cylinder".'),
+      .describe('Outer diameter of round stock in millimetres; present exactly when shape is "cylinder".'),
+    // #713 — a tube's wall. OPTIONAL and never defaulted: absent is a rod or a rectangle, and every
+    // document written before #713 keeps its exact shape. A tube entry without one is refused by
+    // the root refinement in its own words.
+    wall: z
+      .number()
+      .finite()
+      .positive()
+      .optional()
+      .describe('Wall thickness of a tube, in millimetres; present when the stock is a tube.'),
     // #464 — the fibre a printed blank's filament states, beside the material. OPTIONAL, not
     // defaulted: a job that has never seen a fibre filament keeps no key and round-trips byte-for-
     // byte, and `setStock` clears it when a later import states none.
@@ -1355,8 +1366,10 @@ const stockObjectSchema = z
       .describe('Bow measured on the clamped piece; omit when the surface has not been measured.'),
   })
   .superRefine((stock, ctx) => {
-    // #240 §1 — a cylinder is stated EXACTLY: the diameter is present, and the box the job plans
-    // in is as wide and as thick as that diameter. A rectangle states no diameter at all.
+    // #240 §1, #713 — a cylinder is stated EXACTLY: the diameter is present, and the box the job
+    // plans in is as wide as that diameter and as deep OR as tall as it. TWO FRAMES, ONE ROD: the
+    // stock step writes the rod standing on its end (`D × D × L`), and the Holding step's chuck
+    // write normalises it to the axis frame (`L × D × D`). A rectangle states no diameter at all.
     if (stock.shape === 'cylinder') {
       if (stock.diameter === undefined) {
         ctx.addIssue({
@@ -1364,15 +1377,17 @@ const stockObjectSchema = z
           path: ['diameter'],
           message: 'round stock states its diameter',
         });
-      } else if (
-        Math.abs(stock.width - stock.diameter) > 1e-9 ||
-        Math.abs(stock.thickness - stock.diameter) > 1e-9
-      ) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          path: ['diameter'],
-          message: 'round stock is as wide and as thick as its diameter',
-        });
+      } else {
+        const across = Math.abs(stock.width - stock.diameter) <= 1e-9;
+        const axis = Math.abs(stock.thickness - stock.diameter) <= 1e-9;
+        const standing = Math.abs(stock.length - stock.diameter) <= 1e-9;
+        if (!across || (!axis && !standing)) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ['diameter'],
+            message: 'round stock is as wide as its diameter, and as thick or as long as it',
+          });
+        }
       }
     } else if (stock.diameter !== undefined) {
       ctx.addIssue({
@@ -1507,7 +1522,7 @@ const fieldSourceSchema = z
 
 /**
  * Where the stock came from (#418, `EngraveJob.stockEntry`). Strict where it can be: the form is
- * one of the rectangular ones a job can hold, and a shelf pick names its entry.
+ * one the job can hold, a shelf pick names its entry, and a tube states its wall (#713).
  */
 const stockEntrySchema = z
   .object({
@@ -1528,8 +1543,8 @@ const stockEntrySchema = z
       .nullable()
       .describe('Name and hash of the stock file; null unless kind is "file".'),
     form: z
-      .enum(['sheet', 'plate', 'block', 'printed-blank', 'disc', 'rod'])
-      .describe('Stock form: sheet, plate, block, a printed blank, or round stock (disc or rod).'),
+      .enum(['sheet', 'plate', 'block', 'printed-blank', 'disc', 'rod', 'tube'])
+      .describe('Stock form: sheet, plate, block, a printed blank, or round stock (disc, rod or tube).'),
     finish: z
       .enum(['rough', 'finished', 'printed', 'unknown'])
       .describe('Surface the stock arrived with.'),
@@ -1944,6 +1959,8 @@ const jobSourcesSchema = z.object({
       // #240 — the round-stock facts a rotary job's axis-frame box carries.
       shape: fieldSourceSchema.optional(),
       diameter: fieldSourceSchema.optional(),
+      // #713 — a tube's wall.
+      wall: fieldSourceSchema.optional(),
     })
     .transform((stock) => {
       // Same complement as `migrateStockPrint`: an old `print` stamp is this job's colour stamp.
@@ -2209,7 +2226,19 @@ const engraveJobV3Schema = engraveJobV2Schema
       .optional()
       .describe('Reference mesh the primitives are positioned against; omit for none.'),
   })
-  .passthrough();
+  .passthrough()
+  .superRefine((job, ctx) => {
+    // #713 — a tube is round stock with a bore, so the job must state how thick its side is: the
+    // wall caps every later cut depth and cannot be read from the box. Its own sentence, naming the
+    // stock field; a rod states none, and every document written before #713 has no such entry.
+    if (job.stockEntry?.form === 'tube' && job.stock.wall === undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['stock', 'wall'],
+        message: 'a tube states its wall, in mm',
+      });
+    }
+  });
 
 /**
  * The CURRENT engrave-job document, exactly as this build writes it (#480). `engraveJobSchema`

@@ -5135,6 +5135,17 @@
               ],
               "type": "string"
             },
+            "wall": {
+              "description": "Where this value came from: computed, a cutter catalogue, the user, a measurement, or an assumption.",
+              "enum": [
+                "computed",
+                "catalogue",
+                "user",
+                "measured",
+                "assumed"
+              ],
+              "type": "string"
+            },
             "width": {
               "description": "Where this value came from: computed, a cutter catalogue, the user, a measurement, or an assumption.",
               "enum": [
@@ -5203,7 +5214,7 @@
           "type": "object"
         },
         "diameter": {
-          "description": "Rod diameter in millimetres; present exactly when shape is \"cylinder\".",
+          "description": "Outer diameter of round stock in millimetres; present exactly when shape is \"cylinder\".",
           "exclusiveMinimum": 0,
           "maximum": 200,
           "type": "number"
@@ -5330,13 +5341,18 @@
         },
         "shape": {
           "const": "cylinder",
-          "description": "Set to \"cylinder\" for round stock in the rotary chuck; omit for a rectangular blank.",
+          "description": "Set to \"cylinder\" for round stock (a rod or a tube); omit for a rectangular blank.",
           "type": "string"
         },
         "thickness": {
           "description": "Stock thickness along Z, in millimetres (the machine limit is 100).",
           "exclusiveMinimum": 0,
           "maximum": 100,
+          "type": "number"
+        },
+        "wall": {
+          "description": "Wall thickness of a tube, in millimetres; present when the stock is a tube.",
+          "exclusiveMinimum": 0,
           "type": "number"
         },
         "width": {
@@ -5398,14 +5414,15 @@
           "type": "string"
         },
         "form": {
-          "description": "Stock form: sheet, plate, block, a printed blank, or round stock (disc or rod).",
+          "description": "Stock form: sheet, plate, block, a printed blank, or round stock (disc, rod or tube).",
           "enum": [
             "sheet",
             "plate",
             "block",
             "printed-blank",
             "disc",
-            "rod"
+            "rod",
+            "tube"
           ],
           "type": "string"
         },

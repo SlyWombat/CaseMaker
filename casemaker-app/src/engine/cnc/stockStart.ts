@@ -10,12 +10,12 @@
  *   - **a file** — `engine/import/meshStock.ts` reads an STL/3MF; {@link stockFromFile} takes its size.
  *
  * WHAT A JOB'S STOCK CAN BE. `EngraveJob.stock` is a rectangle held in the vise: length × width ×
- * thickness. A sheet, plate, block or printed blank IS that. A disc or a rod is round, and its face
- * job is cut on the flat face the rectangle works out to: a disc on its top, a rod STANDING ON ITS
- * END ({@link boxForForm}). The job still plans in the rectangle around it, and the form on the
- * entry keeps the round fact for the screens. A tube is refused by name: its hole leaves no face a
- * job can cut. A sphere is not offered at all (decision Q20); the shelf already refuses one
- * (`SPHERE_REFUSAL`).
+ * thickness. A sheet, plate, block or printed blank IS that. A disc, a rod or a tube is round, and
+ * its face job is cut on the flat face the rectangle works out to: a disc on its top, a rod
+ * STANDING ON ITS END ({@link boxForForm}). The job still plans in the rectangle around it, and the
+ * form on the entry keeps the round fact for the screens. A tube is a rod with a bore — its box is
+ * its OUTER diameter, its `wall` is the stock's own fact (#713), and the rotary holds it. A sphere
+ * is not offered at all (decision Q20); the shelf already refuses one (`SPHERE_REFUSAL`).
  *
  * WHAT IS NOT CARRIED. A shelf entry's `layers` carry a name and a thickness but no layer height, and
  * its `domeHeight` has no axes. Neither is invented: `colour` stays absent and the notes say so;
@@ -33,10 +33,19 @@ import { isShippedDemoLabelSet } from './engrave/blankLabelSeed';
 import { VISE_FLOOR_DEPTH } from './fixture';
 import type { MillProfile } from './machine';
 import { isMetalMaterial, isWoodMaterial, MATERIAL_LABELS } from './materials';
+import { ROTARY_MAX_DIAMETER_MM, ROTARY_MAX_LENGTH_MM } from './rotary/wrap';
 import type { EngraveFacing, EngraveJob, FieldSource, JobStockEntry, JobStockFinish, JobStockForm, StockMaterial } from '@/types/engraveJob';
 
 /** The forms a job's stock can take, in the order the wizard's pictures offer them. */
-export const JOB_STOCK_FORMS: readonly JobStockForm[] = ['plate', 'block', 'sheet', 'printed-blank', 'disc', 'rod'];
+export const JOB_STOCK_FORMS: readonly JobStockForm[] = [
+  'plate',
+  'block',
+  'sheet',
+  'printed-blank',
+  'disc',
+  'rod',
+  'tube',
+];
 
 /** The size of a rectangular stock, mm: length = X, width = Y, thickness = Z. */
 export interface StockBox {
@@ -45,15 +54,18 @@ export interface StockBox {
   thickness: number;
 }
 
-/** The fields a form is typed in, mm — a box's three axes, or a round form's diameter and one length. */
-export type StockSizeKey = 'length' | 'width' | 'thickness' | 'diameter';
+/**
+ * The fields a form is typed in, mm — a box's three axes, or a round form's diameter and one length.
+ * `wall` is a tube's, and only a tube's (#713).
+ */
+export type StockSizeKey = 'length' | 'width' | 'thickness' | 'diameter' | 'wall';
 export type StockSize = Partial<Record<StockSizeKey, number | null>>;
 
 /**
- * What each form asks for, in the order it is shown (#683). The rectangular forms ask for the
- * panel's three words; a disc asks for its diameter and thickness, a rod for its diameter and its
- * length — which is its height standing on end in the vise. The form's picture decides these fields
- * and nothing else about the cut.
+ * What each form asks for, in the order it is shown (#683, #713). The rectangular forms ask for the
+ * panel's three words; a disc asks for its diameter and thickness; a rod for its diameter and its
+ * length — which is its height standing on end in the vise; a tube for its outer diameter, its
+ * wall, and that length. The form's picture decides these fields and nothing else about the cut.
  */
 export const STOCK_SIZE_FIELDS: Readonly<Record<JobStockForm, readonly StockSizeKey[]>> = {
   plate: ['length', 'width', 'thickness'],
@@ -61,7 +73,8 @@ export const STOCK_SIZE_FIELDS: Readonly<Record<JobStockForm, readonly StockSize
   sheet: ['length', 'width', 'thickness'],
   'printed-blank': ['length', 'width', 'thickness'],
   disc: ['diameter', 'thickness'],
-  rod: ['length', 'diameter'],
+  rod: ['diameter', 'length'],
+  tube: ['diameter', 'wall', 'length'],
 };
 
 /**
@@ -93,11 +106,13 @@ export function standingBoxForRod(diameter: number, length: number): StockBox {
  * is held so its cut face is a FLAT one:
  *
  *   - a disc ⌀D × T is D wide, D deep and T tall, cut on its flat top;
- *   - a rod ⌀D × L stands on its end in the vise: D wide, D deep and L tall, cut on that ⌀D end.
- *     Lying on its side the top would be curved — a flat plan would cut full depth only on the
- *     centreline, and the vise would grip the rod on two lines ({@link ROD_VISE_MAX_LENGTH_MM}).
+ *   - a rod or a tube ⌀D × L stands on its end in the vise: D wide, D deep and L tall, cut on that
+ *     ⌀D end. Lying on its side the top would be curved — a flat plan would cut full depth only on
+ *     the centreline, and the vise would grip the round stock on two lines
+ *     ({@link ROD_VISE_MAX_LENGTH_MM}).
  *
- * Null when a number the form needs is missing. A tube is not a job form; `formProblem` refuses it.
+ * A tube's box is its OUTER diameter (#713), exactly a rod's: the wall is a fact the CAM and the
+ * depth refusal read, not a second axis. Null when a number the form needs is missing.
  */
 export function boxForForm(form: JobStockForm, size: StockSize): StockBox | null {
   const has = (key: StockSizeKey): number | null => {
@@ -109,7 +124,7 @@ export function boxForForm(form: JobStockForm, size: StockSize): StockBox | null
     const thickness = has('thickness');
     return diameter === null || thickness === null ? null : { length: diameter, width: diameter, thickness };
   }
-  if (form === 'rod') {
+  if (form === 'rod' || form === 'tube') {
     const diameter = has('diameter');
     const length = has('length');
     return diameter === null || length === null ? null : standingBoxForRod(diameter, length);
@@ -121,14 +136,98 @@ export function boxForForm(form: JobStockForm, size: StockSize): StockBox | null
 }
 
 /**
+ * Which way a round stock's box lies (#683, #240, #713): the chuck's AXIS frame (`L × D × D`) or
+ * the vise's STANDING frame (`D × D × L`). Null when the stock is not round.
+ *
+ * The wizard writes the standing frame, and Holding's chuck write normalises it to the axis frame;
+ * a box that is square in both readings (a very short, fat rod) answers `'axis'`, because the two
+ * readings agree there and the axis frame is what a rotary job holds.
+ */
+export type CylinderFrame = 'axis' | 'standing';
+
+export function cylinderFrameOf(
+  stock: Pick<EngraveJob['stock'], 'length' | 'width' | 'thickness' | 'shape' | 'diameter'>,
+): CylinderFrame | null {
+  if (stock.shape !== 'cylinder') return null;
+  const diameter = stock.diameter ?? stock.width;
+  if (Math.abs(stock.width - diameter) > 1e-9) return null;
+  const axis = Math.abs(stock.thickness - diameter) <= 1e-9;
+  const standing = Math.abs(stock.length - diameter) <= 1e-9;
+  return standing && !axis ? 'standing' : 'axis';
+}
+
+/**
+ * A job's rod as its own numbers — its outer diameter and its length along the stock — whichever
+ * frame the box lies in (#240, #683). Null for stock that is not round: a plate or a block never
+ * becomes a rod by this reading. A square box with no `shape` is the legacy standing rod the
+ * Holding step itself wrote before #713, so it reads as one.
+ */
+export function rodDimsOf(
+  stock: Pick<EngraveJob['stock'], 'length' | 'width' | 'thickness' | 'shape' | 'diameter'>,
+): { diameter: number; length: number } | null {
+  if (stock.shape === 'cylinder') {
+    const frame = cylinderFrameOf(stock) ?? 'axis';
+    return {
+      diameter: stock.diameter ?? stock.width,
+      length: frame === 'standing' ? stock.thickness : stock.length,
+    };
+  }
+  if (Math.abs(stock.length - stock.width) > 1e-9) return null;
+  return { diameter: stock.width, length: stock.thickness };
+}
+
+/** The rotary module's envelope, mm — the machine profile's own numbers when it has a rotary block. */
+export interface RotaryEnvelope {
+  diameter: number;
+  length: number;
+}
+
+/**
+ * The envelope the rotary refuses stock outside (#713, `/Rotary.md` §6.4). A profile states it
+ * (`machine.rotary.envelope`, the Makera database's ⌀80 × 150 on the Z1); a machine with no rotary
+ * block falls back to the published constants, so the sentence always has a number to say.
+ */
+export function rotaryEnvelopeOf(machine: MillProfile): RotaryEnvelope {
+  return (
+    machine.rotary?.envelope ?? { diameter: ROTARY_MAX_DIAMETER_MM, length: ROTARY_MAX_LENGTH_MM }
+  );
+}
+
+/**
+ * Why a rod or tube will not go in the rotary, or null (#713): its outer diameter, then its length,
+ * against the module's envelope. The sentence names the offender and the module's own numbers —
+ * `⌀90 mm does not fit the rotary's ⌀80 × 150 mm.` A block is never refused this way: it stays a
+ * vise job, and its sentence says when the chuck takes it by its diagonal.
+ */
+export function rotaryEnvelopeProblem(size: StockSize, machine: MillProfile): string | null {
+  const env = rotaryEnvelopeOf(machine);
+  const fit = `⌀${mm(env.diameter)} × ${mm(env.length)} mm.`;
+  const diameter = size.diameter;
+  if (diameter !== null && diameter !== undefined && Number.isFinite(diameter) && diameter > env.diameter) {
+    return `⌀${mm(diameter)} mm does not fit the rotary's ${fit}`;
+  }
+  const length = size.length;
+  if (length !== null && length !== undefined && Number.isFinite(length) && length > env.length) {
+    return `${mm(length)} mm does not fit the rotary's ${fit}`;
+  }
+  return null;
+}
+
+/**
  * The tallest rod the vise holds standing on its end, mm: the jaws' grip, from the vise body's floor
  * to the tops of the jaws. The same number the vise model uses for its floor ({@link VISE_FLOOR_DEPTH}),
  * so a rod the wizard offers is one the holding model can seat. A longer rod is the rotary's (§3.3)
- * and the form says so; it is not offered here until the rotary is.
+ * and the form says so under its picture; since #697 can write the chuck, it is NOT a block.
  */
 export const ROD_VISE_MAX_LENGTH_MM: number = VISE_FLOOR_DEPTH;
 
-/** Why a rod's length is past the vise's grip, or null. The length is its height standing on end. */
+/**
+ * Why a rod's length is past the vise's grip, or null. The length is its height standing on end.
+ *
+ * This is the sentence under the form's picture, not a refusal (#713): a long rod is held in the
+ * rotary chuck and Next goes on. The stock step no longer blocks on it, and
+ * `formSizeProblem`/`shelfPickProblem` do not answer with it.
+ */
 export function rodGripProblem(size: StockSize): string | null {
   const length = size.length;
   if (length === null || length === undefined || !Number.isFinite(length)) return null;
@@ -141,7 +240,16 @@ export function rodGripProblem(size: StockSize): string | null {
 
 /** What a choice does to the new job: its stock, where it came from, and what to tell the user. */
 export interface StockChoice {
-  stock: Pick<EngraveJob['stock'], 'length' | 'width' | 'thickness' | 'material' | 'colour'>;
+  /**
+   * The job's stock as the step states it. A rod or a tube carries the round facts — `shape`,
+   * `diameter`, and a tube's `wall` — with the STANDING box `D × D × L` (#713); Holding normalises
+   * the box to the chuck's axis frame when the chuck is chosen. A rectangular form states no round
+   * facts.
+   */
+  stock: Pick<
+    EngraveJob['stock'],
+    'length' | 'width' | 'thickness' | 'material' | 'colour' | 'shape' | 'diameter' | 'wall'
+  >;
   entry: JobStockEntry;
   /**
    * Where the entry's cap came from (#492), when it carried one. The stock's own dimensions and
@@ -163,16 +271,13 @@ export function isJobForm(form: string): form is JobStockForm {
 }
 
 /**
- * Why a form cannot be a job's stock, or null. A disc and a rod ARE offered (#683). A rod longer
- * than the vise's grip is the rotary's: it is not refused here by name — the form's own sentence
- * says it ({@link rodGripProblem}) and that form's Next is blocked with the sentence at the button.
- * A tube is refused by name — its hole leaves no face to cut.
+ * Why a form cannot be a job's stock, or null. A disc, a rod and a tube ARE offered (#683, #713).
+ * A rod longer than the vise's grip is the rotary's: it is not a refusal at all — the form's own
+ * sentence says so ({@link rodGripProblem}) and Next goes on to Holding, which writes the chuck.
+ * A sphere is not offered at all, by the shelf's own word.
  */
 export function formProblem(form: string): string | null {
   if (isJobForm(form)) return null;
-  if (form === 'tube') {
-    return 'a tube is round stock with a hole through it — there is no face a job can cut, and cutting around it needs the rotary';
-  }
   if (form === 'sphere') return 'sphere stock is not offered — nothing at the location holds one and nothing here cuts one';
   return `"${form}" is not a stock form a job can start from`;
 }
@@ -219,6 +324,12 @@ function free(item: StockItem): number {
  * Why a form's own numbers will not do, naming the field the operator sees, or null. A missing
  * diameter must not be answered as "the length needs a number" — the screen has no length field for
  * a disc (#683).
+ *
+ * ROUND FORMS ARE JUDGED BY THE ROTARY, NOT THE VISE (#713): a rod or tube that fits the module's
+ * envelope is a valid answer however long it is — a 120 mm rod is the chuck's job, and its standing
+ * box is never asked to fit the machine's Z travel. The envelope is the only refusal, and a long
+ * rod is not one of its own: {@link rodGripProblem} is the sentence under the picture. A disc is a
+ * face job and a rectangle is a vise job, so both keep `boxProblem`.
  */
 export function formSizeProblem(form: JobStockForm, size: StockSize, machine: MillProfile): string | null {
   for (const key of STOCK_SIZE_FIELDS[form]) {
@@ -227,10 +338,7 @@ export function formSizeProblem(form: JobStockForm, size: StockSize, machine: Mi
       return `the ${key} needs a number in mm, above 0`;
     }
   }
-  if (form === 'rod') {
-    const grip = rodGripProblem(size);
-    if (grip !== null) return grip;
-  }
+  if (form === 'rod' || form === 'tube') return rotaryEnvelopeProblem(size, machine);
   const box = boxForForm(form, size);
   return box === null ? null : boxProblem(box, machine);
 }
@@ -238,6 +346,9 @@ export function formSizeProblem(form: JobStockForm, size: StockSize, machine: Mi
 /**
  * Why a shelf entry cannot start this job, or null. Shown beside the entry, which stays listed: a
  * piece that is used up or held is a fact about the shelf the operator should see, not a gap (§5.1).
+ *
+ * A shelf rod or tube is judged by the rotary's envelope, like a typed one (#713): the grip
+ * sentence is the picture's, and it does not refuse the row.
  */
 export function shelfPickProblem(item: StockItem, machine: MillProfile): string | null {
   if (item.quantity === 0) {
@@ -247,12 +358,13 @@ export function shelfPickProblem(item: StockItem, machine: MillProfile): string 
   if (free(item) <= 0) return `all ${item.quantity} held for other jobs`;
   const form = formProblem(item.form);
   if (form !== null) return form;
+  // A tube's wall is a size fact the job writes (a rod has none), so it must be on the entry.
+  if (item.form === 'tube' && !(item.size.wall != null && item.size.wall > 0)) {
+    return "the tube's wall is not on the shelf";
+  }
   const box = boxForForm(item.form as JobStockForm, item.size);
   if (box === null) return `the ${item.form}'s size is not complete on the shelf`;
-  if (item.form === 'rod') {
-    const grip = rodGripProblem(item.size);
-    if (grip !== null) return grip;
-  }
+  if (item.form === 'rod' || item.form === 'tube') return rotaryEnvelopeProblem(item.size, machine);
   return boxProblem(box, machine);
 }
 
@@ -290,6 +402,18 @@ export function stockFromShelf(item: StockItem, machine: MillProfile): StockChoi
       `It is recorded as domed ${item.domeHeight ?? '?'} mm; the job's bow is not copied from the shelf — it states one only after measuring its own clamped surface.`,
     );
   }
+  // #713 — a round piece states the round facts with the standing box: a rod or a tube writes
+  // `shape: 'cylinder'` and its outer diameter, and a tube its wall. Everything else states them as
+  // ABSENT, so an edit from a rod to a plate takes the round facts away rather than leaving a
+  // rectangle that still claims to be a cylinder.
+  const round: Pick<EngraveJob['stock'], 'shape' | 'diameter' | 'wall'> =
+    form === 'rod' || form === 'tube'
+      ? {
+          shape: 'cylinder',
+          diameter: item.size.diameter ?? box.length,
+          wall: form === 'tube' ? (item.size.wall ?? undefined) : undefined,
+        }
+      : { shape: undefined, diameter: undefined, wall: undefined };
   return {
     ok: true,
     choice: {
@@ -298,6 +422,7 @@ export function stockFromShelf(item: StockItem, machine: MillProfile): StockChoi
         width: box.width,
         thickness: box.thickness,
         material: item.material,
+        ...round,
         ...(colour !== undefined ? { colour } : {}),
       },
       ...(colour !== undefined
@@ -314,16 +439,44 @@ export interface MadeStock extends StockBox {
   form: JobStockForm;
   material: StockMaterial;
   finish: JobStockFinish;
+  /** A tube's wall, mm (#713) — absent for every other form. */
+  wall?: number;
+}
+
+/** A typed piece's own numbers as {@link StockSize}: a round form's diameter and length, not its box. */
+function madeStockSize(made: MadeStock): StockSize {
+  if (made.form === 'disc') return { diameter: made.length, thickness: made.thickness };
+  if (made.form === 'rod' || made.form === 'tube') {
+    return { diameter: made.length, wall: made.wall, length: made.thickness };
+  }
+  return { length: made.length, width: made.width, thickness: made.thickness };
 }
 
 /** A typed piece as this job's stock, or why not. `shelfId` is the entry it was also saved as. */
 export function stockFromMade(made: MadeStock, machine: MillProfile, shelfId: string | null = null): StockChoiceResult {
-  const problem = formProblem(made.form) ?? boxProblem(made, machine);
+  const problem = formProblem(made.form) ?? formSizeProblem(made.form, madeStockSize(made), machine);
   if (problem !== null) return { ok: false, reason: problem };
+  // #713 — a rod or tube writes the cylinder stock with the standing box `D × D × L` and its outer
+  // diameter; a tube adds its wall. A rectangular form states the round facts as absent so a later
+  // edit cannot inherit them.
+  const round: Pick<EngraveJob['stock'], 'shape' | 'diameter' | 'wall'> =
+    made.form === 'rod' || made.form === 'tube'
+      ? {
+          shape: 'cylinder',
+          diameter: made.length,
+          wall: made.form === 'tube' ? made.wall : undefined,
+        }
+      : { shape: undefined, diameter: undefined, wall: undefined };
   return {
     ok: true,
     choice: {
-      stock: { length: made.length, width: made.width, thickness: made.thickness, material: made.material },
+      stock: {
+        length: made.length,
+        width: made.width,
+        thickness: made.thickness,
+        material: made.material,
+        ...round,
+      },
       entry: {
         kind: 'made',
         shelfId,
@@ -348,13 +501,15 @@ export function stockFromMade(made: MadeStock, machine: MillProfile, shelfId: st
 export function shelfItemFromMade(made: MadeStock, id: string, now: string): StockItem {
   // A round form goes back on the shelf as a round entry — its own fields, not the box around it.
   // A rod's box is D × D × L (standing on its end), so its diameter is the box's length and its
-  // own length is the box's thickness.
+  // own length is the box's thickness; a tube adds its wall and keeps the same box (#713).
   const size =
     made.form === 'disc'
       ? { diameter: made.length, thickness: made.thickness }
       : made.form === 'rod'
         ? { diameter: made.length, length: made.thickness }
-        : { length: made.length, width: made.width, thickness: made.thickness };
+        : made.form === 'tube'
+          ? { diameter: made.length, wall: made.wall, length: made.thickness }
+          : { length: made.length, width: made.width, thickness: made.thickness };
   return {
     id,
     material: made.material,
@@ -615,6 +770,7 @@ const FORM_LABELS: Record<JobStockForm, string> = {
   'printed-blank': 'Printed blank',
   disc: 'Disc',
   rod: 'Rod',
+  tube: 'Tube',
 };
 
 /** `Plate`, `Printed blank` — the form as a sentence starts it. */
@@ -648,14 +804,16 @@ export function jobItemCount(job: EngraveJob): number {
 
 /**
  * Does `next` still hold the stock `prev` named an entry for? (#418 review) The entry describes a
- * size and a material; an edit to any of the four means the job's stock is no longer that entry.
- * Provenance, print and flatness are not the piece's identity and do not count.
+ * size and a material; an edit to any of the five means the job's stock is no longer that entry —
+ * a tube's wall is one of them (#713). Provenance, print and flatness are not the piece's identity
+ * and do not count.
  */
 export function stockStillNamed(prev: EngraveJob['stock'], next: EngraveJob['stock']): boolean {
   return (
     prev.length === next.length &&
     prev.width === next.width &&
     prev.thickness === next.thickness &&
+    prev.wall === next.wall &&
     prev.material === next.material
   );
 }

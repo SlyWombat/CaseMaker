@@ -23,7 +23,7 @@ import { addOperationOfType, jobHasOperations } from '@/components/panels/operat
 import type { Project } from '@/types/project';
 import type { BracketHold, EngraveJob, JobStockEntry, RotaryChuck, TapeHold } from '@/types/engraveJob';
 import { defaultSetupAnswers, type SetupAnswers } from '@/engine/cnc/engrave/setupFlow';
-import { facingSeed, facingShopFrom, jobItemCount } from '@/engine/cnc/stockStart';
+import { facingSeed, facingShopFrom, jobItemCount, rodDimsOf } from '@/engine/cnc/stockStart';
 import { useShopDefaultsStore } from '@/store/shopDefaultsStore';
 import '@/store/stockEntryFollow';
 import { previousWizardStep, wizardNextLabel, wizardStep, wizardStepLine, type WizardStepId } from './wizardSteps';
@@ -147,16 +147,18 @@ function seedFromJob(job: EngraveJob): StartStockSeed {
   const computed = (['length', 'width', 'thickness'] as const).every(
     (key) => job.sources?.stock?.[key] === 'computed',
   );
-  // #240 — a rotary job's box is the axis frame (`L × D × D`), but the stock step asks a rod's own
-  // numbers (its diameter and its length). Hand it the rod, not the frame's axes, or an edit would
-  // open showing the diameter and the length swapped.
-  const cylinder = job.stock.shape === 'cylinder';
+  // #240/#713 — a rotary job's box is the axis frame (`L × D × D`), but the stock step asks a rod's
+  // own numbers (its diameter and its length) in its STANDING box. `rodDimsOf` reads whichever
+  // frame the job holds, so an edit opens on the numbers the operator typed and not the axes.
+  const rod = rodDimsOf(job.stock);
+  const tube = entry?.form === 'tube';
   return {
-    form: entry?.form ?? (cylinder ? 'rod' : 'plate'),
+    form: entry?.form ?? (rod !== null ? 'rod' : 'plate'),
     material: job.stock.material,
-    length: cylinder ? job.stock.width : job.stock.length,
-    width: job.stock.width,
-    thickness: cylinder ? job.stock.length : job.stock.thickness,
+    length: rod !== null ? rod.diameter : job.stock.length,
+    width: rod !== null ? rod.diameter : job.stock.width,
+    thickness: rod !== null ? rod.length : job.stock.thickness,
+    ...(tube ? { wall: job.stock.wall } : {}),
     finish: entry?.finish ?? 'unknown',
     computed,
   };
@@ -173,13 +175,18 @@ function sameStockChoice(p: PendingStock, job: EngraveJob): boolean {
   if (p.kind !== 'choice' || p.saveToShelf !== null) return false;
   const s = p.choice.stock;
   const sameColour = s.colour === undefined || JSON.stringify(s.colour) === JSON.stringify(job.stock.colour ?? null);
-  // #240 — a rotary job's box is the axis frame; the stock step reports the rod's standing box.
-  // Same rod, two frames: compare the rod, not the frame, or passing through would rewrite it.
-  if (job.stock.shape === 'cylinder' && p.choice.entry.form === 'rod') {
+  // #240/#713 — a rotary job's box is the axis frame; the stock step reports the rod's standing
+  // box. Same rod, two frames: compare the rod, not the frame, or passing through would rewrite it.
+  // A tube's wall is part of the piece (#713).
+  if (job.stock.shape === 'cylinder' && (p.choice.entry.form === 'rod' || p.choice.entry.form === 'tube')) {
+    const a = rodDimsOf(s);
+    const b = rodDimsOf(job.stock);
     return (
-      s.length === s.width &&
-      s.width === job.stock.width &&
-      s.thickness === job.stock.length &&
+      a !== null &&
+      b !== null &&
+      a.diameter === b.diameter &&
+      a.length === b.length &&
+      (s.wall ?? undefined) === (job.stock.wall ?? undefined) &&
       s.material === job.stock.material &&
       sameColour
     );
@@ -188,6 +195,9 @@ function sameStockChoice(p: PendingStock, job: EngraveJob): boolean {
     s.length === job.stock.length &&
     s.width === job.stock.width &&
     s.thickness === job.stock.thickness &&
+    s.shape === job.stock.shape &&
+    s.diameter === job.stock.diameter &&
+    (s.wall ?? undefined) === (job.stock.wall ?? undefined) &&
     s.material === job.stock.material &&
     sameColour
   );
@@ -228,12 +238,8 @@ export function StartWizard(): JSX.Element {
   const [projectCreatedHere, setProjectCreatedHere] = useState(false);
   const [busy, setBusy] = useState(false);
   const [pending, setPending] = useState<PendingStock | null>(null);
-  // The one sentence a stock form is blocked with, when the form itself cannot start the job (a rod
-  // past the vise's grip). The step puts it under the picture; here it sits at the Next button.
-  const [stockBlock, setStockBlock] = useState<string | null>(null);
-  const onStockPending = useCallback((next: PendingStock | null, block: string | null) => {
+  const onStockPending = useCallback((next: PendingStock | null) => {
     setPending(next);
-    setStockBlock(block);
   }, []);
   const [starting, setStarting] = useState(false);
   const [startError, setStartError] = useState<string | null>(null);
@@ -703,7 +709,7 @@ export function StartWizard(): JSX.Element {
 
         {stockUnblock && (
           <p style={UNBLOCK} data-testid="start-wizard-stock-unblock">
-            {stockBlock ?? 'Choose the stock above — a piece on the shelf, a size you type, or a file.'}
+            Choose the stock above — a piece on the shelf, a size you type, or a file.
           </p>
         )}
 

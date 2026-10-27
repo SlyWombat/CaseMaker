@@ -59,16 +59,16 @@ const SIZE_LABELS: Record<SizeField, string> = {
   width: 'width',
   thickness: 'thickness',
   diameter: '⌀',
-  innerDiameter: 'inner ⌀',
+  wall: 'wall',
 };
 
-/** `100 × 100 × 5` / `⌀10 × 100` — the size in the order the form names it. */
+/** `100 × 100 × 5` / `⌀10 × 100` / `⌀20 × 2 × 100` — the size in the order the form names it. */
 function sizeLine(item: Pick<StockItem, 'form' | 'size'>): string {
   return SIZE_FIELDS[item.form]
     .map((f) => {
       const v = item.size[f];
       const n = v === null || v === undefined ? '—' : mm(v);
-      return f === 'diameter' ? `⌀${n}` : f === 'innerDiameter' ? `⌀${n} inner` : n;
+      return f === 'diameter' ? `⌀${n}` : n;
     })
     .join(' × ');
 }
@@ -101,7 +101,7 @@ interface Draft {
   notes: string;
 }
 
-const EMPTY_SIZE: Record<SizeField, string> = { length: '', width: '', thickness: '', diameter: '', innerDiameter: '' };
+const EMPTY_SIZE: Record<SizeField, string> = { length: '', width: '', thickness: '', diameter: '', wall: '' };
 
 function draftOf(item: StockItem | null): Draft {
   if (item === null) {

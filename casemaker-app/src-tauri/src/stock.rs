@@ -80,8 +80,10 @@ pub struct StockSize {
     pub thickness: Option<f64>,
     #[serde(default)]
     pub diameter: Option<f64>,
+    /// A tube's wall thickness (#713). `wall`, not an inner diameter: it is the fact the job writes
+    /// and the number a cut depth is capped by.
     #[serde(default)]
-    pub inner_diameter: Option<f64>,
+    pub wall: Option<f64>,
 }
 
 /// One layer of a colour stack, from the top down (the two-colour blank, laminated acrylic).
@@ -211,12 +213,12 @@ impl StockItem {
             }
             StockForm::Tube => {
                 let outer = positive(id, "diameter", s.diameter)?;
-                let inner = positive(id, "inner diameter", s.inner_diameter)?;
+                let wall = positive(id, "wall", s.wall)?;
                 positive(id, "length", s.length)?;
-                if inner >= outer {
-                    return Err(bad(id, "a tube's inner diameter must be smaller than its outer"));
+                if 2.0 * wall >= outer {
+                    return Err(bad(id, "a tube's wall must leave a bore — two walls are less than its outer diameter"));
                 }
-                (&["diameter", "innerDiameter", "length"], None)
+                (&["diameter", "wall", "length"], None)
             }
             StockForm::Disc => {
                 positive(id, "diameter", s.diameter)?;
@@ -229,7 +231,7 @@ impl StockItem {
             ("width", s.width),
             ("thickness", s.thickness),
             ("diameter", s.diameter),
-            ("innerDiameter", s.inner_diameter),
+            ("wall", s.wall),
         ] {
             if value.is_some() && !needed.contains(&name) {
                 return Err(bad(id, format!("a {} has no {name}", self.form)));
@@ -398,7 +400,7 @@ pub(crate) mod tests {
             form: "tube".into(),
             size: StockSize {
                 diameter: Some(20.0),
-                inner_diameter: Some(16.0),
+                wall: Some(2.0),
                 length: Some(100.0),
                 ..StockSize::default()
             },
@@ -502,11 +504,11 @@ pub(crate) mod tests {
                 size: StockSize { length: Some(-1.0), ..a_plate("x").size },
                 ..a_plate("x")
             }),
-            ("a tube inside out", StockItem {
+            ("a tube with no bore", StockItem {
                 form: "tube".into(),
                 size: StockSize {
                     diameter: Some(10.0),
-                    inner_diameter: Some(12.0),
+                    wall: Some(6.0),
                     length: Some(5.0),
                     ..StockSize::default()
                 },

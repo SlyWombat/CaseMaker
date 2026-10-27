@@ -13,8 +13,8 @@ import { StartStockStep, type PendingStock, type StartStockSeed } from './StartS
 export interface StockStepProps {
   /** The job's own stock when the step is re-opened to edit it (#681). */
   seed?: StartStockSeed;
-  /** The answer, or null when there is none; `block` is the sentence that stops this form. */
-  onPending: (pending: PendingStock | null, block: string | null) => void;
+  /** The answer, or null when there is none. No form blocks since #713: a long rod is the rotary's. */
+  onPending: (pending: PendingStock | null) => void;
 }
 
 export function StockStep({ seed, onPending }: StockStepProps): JSX.Element {

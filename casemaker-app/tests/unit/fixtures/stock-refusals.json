@@ -42,12 +42,12 @@
     }
   },
   {
-    "why": "a tube inside out",
+    "why": "a tube with no bore",
     "patch": {
       "form": "tube",
       "size": {
         "diameter": 10,
-        "innerDiameter": 12,
+        "wall": 6,
         "length": 5
       }
     }

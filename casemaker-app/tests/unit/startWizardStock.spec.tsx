@@ -333,58 +333,78 @@ describe('the material-first start (#418)', () => {
     expect(screen.queryByTestId('start-wizard-replace-confirm')).toBeNull();
   });
 
-  it('a round form is a picture with its rotary sentence, and its size is a diameter (#683, A7)', async () => {
+  it('a round form is a picture with its sentence, and its size is a diameter (#683, #713)', async () => {
     fakeShelf(SHELF);
     await toStockStep();
-    // Six pictures, never a refusal paragraph on the default path.
-    for (const form of ['plate', 'block', 'sheet', 'printed-blank', 'disc', 'rod']) {
-      expect(screen.getByTestId(`start-wizard-form-${form}`)).toBeDefined();
-    }
-    fireEvent.click(screen.getByTestId('start-wizard-form-rod'));
-    expect(screen.getByTestId('start-wizard-form-sentence').textContent).toContain(
-      'a rod cut around needs the rotary (step 3 will offer it)',
+    // Seven pictures, in the mockup's order, never a refusal paragraph on the default path.
+    const order = ['plate', 'block', 'sheet', 'printed-blank', 'disc', 'rod', 'tube'];
+    const drawn = Array.from(
+      screen.getByTestId('start-wizard-make-form').querySelectorAll('button'),
+    ).map((b) => b.getAttribute('data-testid'));
+    expect(drawn).toEqual(order.map((form) => `start-wizard-form-${form}`));
+    // The block's sentence states which mount takes it, in the module's own numbers.
+    fireEvent.click(screen.getByTestId('start-wizard-form-block'));
+    expect(screen.getByTestId('start-wizard-form-sentence').textContent).toBe(
+      'Block — squared stock: in the vise as today, or in the chuck when its diagonal fits ⌀80 × 150.',
     );
-    // The rod's own fields: length and diameter, and no invented width or thickness.
-    expect(screen.getByTestId('start-wizard-make-length')).toBeDefined();
+    fireEvent.click(screen.getByTestId('start-wizard-form-rod'));
+    expect(screen.getByTestId('start-wizard-form-sentence').textContent).toBe(
+      'Rod — round stock: a dowel, a rod. A rod up to 20 mm long stands on its end in the vise; a longer one is held in the rotary chuck and cut around (step 3 offers it).',
+    );
+    // The rod's own fields: its diameter and its length, and no invented width or thickness.
     expect(screen.getByTestId('start-wizard-make-diameter')).toBeDefined();
+    expect(screen.getByTestId('start-wizard-make-length')).toBeDefined();
     expect(screen.queryByTestId('start-wizard-make-width')).toBeNull();
     expect(screen.queryByTestId('start-wizard-make-thickness')).toBeNull();
+    // Nothing is around until a diameter is typed.
+    expect(screen.queryByTestId('start-wizard-stock-around')).toBeNull();
+
+    fireEvent.change(screen.getByTestId('start-wizard-make-diameter'), { target: { value: '20' } });
+    // The surface a map lays text against: 2π × 10 = 62.832.
+    expect(screen.getByTestId('start-wizard-stock-around').textContent).toBe('Around: 62.832 mm at the surface');
 
     fireEvent.change(screen.getByTestId('start-wizard-make-length'), { target: { value: '18' } });
-    fireEvent.change(screen.getByTestId('start-wizard-make-diameter'), { target: { value: '12' } });
     await act(async () => {
       fireEvent.click(screen.getByTestId('start-wizard-stock-next'));
     });
     await screen.findByTestId('engrave-setup-step-holding');
-    // The rod stands on its end: D × D × L, cut on the ⌀D end, and the form stays 'rod'.
+    // The rod stands on its end: D × D × L, cut on the ⌀D end, and the form stays 'rod'. The round
+    // facts are written, and a rod states no wall.
     const job = useEngraveJobStore.getState().job;
-    expect(job.stock).toMatchObject({ length: 12, width: 12, thickness: 18 });
+    expect(job.stock).toMatchObject({ length: 20, width: 20, thickness: 18, shape: 'cylinder', diameter: 20 });
+    expect(job.stock).not.toHaveProperty('wall');
     expect(job.stockEntry).toMatchObject({ kind: 'made', form: 'rod' });
   });
 
-  it('a rod past the vise grip is the rotary sentence, under the picture and at the button (#683)', async () => {
+  it('a long rod is the rotary sentence under the picture, and Next goes on (#713)', async () => {
     fakeShelf(SHELF);
     await toStockStep();
     fireEvent.click(screen.getByTestId('start-wizard-form-rod'));
-    fireEvent.change(screen.getByTestId('start-wizard-make-length'), { target: { value: '30' } });
     fireEvent.change(screen.getByTestId('start-wizard-make-diameter'), { target: { value: '12' } });
+    fireEvent.change(screen.getByTestId('start-wizard-make-length'), { target: { value: '30' } });
     // The form's own sentence says it — not a second red line about a number the operator typed.
-    expect(screen.getByTestId('start-wizard-form-sentence').textContent).toContain(
-      'A rod this long is held in the rotary',
+    expect(screen.getByTestId('start-wizard-form-sentence').textContent).toBe(
+      'A rod this long is held in the rotary — the vise holds one up to 20 mm tall standing on its end, and this one is 30 mm.',
     );
     expect(screen.queryByTestId('start-wizard-stock-problem')).toBeNull();
-    // Next is blocked, and the one sentence that unblocks it is at the button.
-    expect((screen.getByTestId('start-wizard-stock-next') as HTMLButtonElement).disabled).toBe(true);
-    expect(screen.getByTestId('start-wizard-stock-unblock').textContent).toContain(
-      'A rod this long is held in the rotary',
-    );
-    // A shorter rod, on the same picture, is offerable again.
-    fireEvent.change(screen.getByTestId('start-wizard-make-length'), { target: { value: '15' } });
+    // NOT a block since #713: the answer stands, and Next goes on to Holding, which offers the chuck.
     expect((screen.getByTestId('start-wizard-stock-next') as HTMLButtonElement).disabled).toBe(false);
     expect(screen.queryByTestId('start-wizard-stock-unblock')).toBeNull();
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('start-wizard-stock-next'));
+    });
+    await screen.findByTestId('engrave-setup-step-holding');
+    expect(useEngraveJobStore.getState().job.stock).toMatchObject({
+      shape: 'cylinder',
+      diameter: 12,
+      length: 12,
+      width: 12,
+      thickness: 30,
+    });
   });
 
-  it('a disc on the shelf is a piece like any other; a tube is refused by name (#683, A7)', async () => {
+  it('a tube on the shelf and a typed tube write their wall; the rotary refuses the envelope (#713)', async () => {
     const disc = {
       ...(SHELF[0] as object),
       id: 'stock-disc1',
@@ -396,7 +416,7 @@ describe('the material-first start (#418)', () => {
       ...(SHELF[0] as object),
       id: 'stock-tube1',
       form: 'tube',
-      size: { diameter: 40, innerDiameter: 35, length: 300 },
+      size: { diameter: 40, wall: 2, length: 100 },
       reservations: [],
     };
     fakeShelf([...SHELF, disc, tube]);
@@ -410,10 +430,38 @@ describe('the material-first start (#418)', () => {
     expect((screen.getByTestId('start-wizard-make-thickness') as HTMLInputElement).value).toBe('5');
 
     const tubeRow = screen.getByTestId('start-wizard-shelf-item-stock-tube1');
-    expect(tubeRow.getAttribute('data-state')).toBe('refused');
-    expect(screen.getByTestId('start-wizard-shelf-item-stock-tube1-reason').textContent).toContain(
-      'a tube is round stock with a hole through it',
+    expect(tubeRow.getAttribute('data-state')).toBe('ok');
+    expect(tubeRow.textContent).toContain('⌀40 × 100 mm, wall 2 mm');
+    fireEvent.click(tubeRow);
+    // The tube's number lands in its own fields, wall included, and its surface is shown.
+    expect((screen.getByTestId('start-wizard-make-diameter') as HTMLInputElement).value).toBe('40');
+    expect((screen.getByTestId('start-wizard-make-wall') as HTMLInputElement).value).toBe('2');
+    expect((screen.getByTestId('start-wizard-make-length') as HTMLInputElement).value).toBe('100');
+    expect(screen.getByTestId('start-wizard-stock-around').textContent).toBe('Around: 125.664 mm at the surface');
+
+    // The rotary's envelope is the one size refusal, at the size field, in the module's numbers.
+    fireEvent.change(screen.getByTestId('start-wizard-make-diameter'), { target: { value: '90' } });
+    expect(screen.getByTestId('start-wizard-stock-problem').textContent).toBe(
+      "⌀90 mm does not fit the rotary's ⌀80 × 150 mm.",
     );
+    expect((screen.getByTestId('start-wizard-stock-next') as HTMLButtonElement).disabled).toBe(true);
+
+    // Inside it again, Next goes on, and the tube writes the cylinder stock with its wall.
+    fireEvent.change(screen.getByTestId('start-wizard-make-diameter'), { target: { value: '40' } });
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('start-wizard-stock-next'));
+    });
+    await screen.findByTestId('engrave-setup-step-holding');
+    expect(useEngraveJobStore.getState().job.stock).toMatchObject({
+      length: 40,
+      width: 40,
+      thickness: 100,
+      shape: 'cylinder',
+      diameter: 40,
+      wall: 2,
+    });
+    // Editing a number made the tube the operator's own: the entry is a made tube, still with its wall.
+    expect(useEngraveJobStore.getState().job.stockEntry).toMatchObject({ kind: 'made', form: 'tube' });
   });
 
   it("the material is grouped three ways, this house's own first (#683, A4, A5)", async () => {

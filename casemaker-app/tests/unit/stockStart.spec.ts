@@ -18,6 +18,7 @@ import {
   formProblem,
   boxForForm,
   formSizeProblem,
+  rodGripProblem,
   shelfFor,
   shelfItemFromMade,
   STOCK_SIZE_FIELDS,
@@ -108,12 +109,12 @@ describe('a shelf entry as the stock (#418)', () => {
     expect(r.choice.notes.join(' ')).toMatch(/measured and recorded/);
   });
 
-  it('a disc and a rod are job forms plan in their box; a tube is refused by name (#683, A7)', () => {
-    // Round stock is offered honestly: a disc is cut on its flat top, and a rod STANDS ON ITS END
-    // so its cut face is the ⌀D end, not a curved side. The job plans in the square around it.
+  it('a disc, a rod and a tube are job forms; round stock is judged by the rotary (#683, #713)', () => {
+    // Round stock is offered honestly: a disc is cut on its flat top, and a rod or tube STANDS ON
+    // ITS END so its cut face is the ⌀D end, not a curved side. The job plans in the square around it.
     expect(formProblem('disc')).toBeNull();
     expect(formProblem('rod')).toBeNull();
-    expect(formProblem('tube')).toMatch(/a tube is round stock with a hole through it .* rotary/);
+    expect(formProblem('tube')).toBeNull();
     expect(formProblem('sphere')).toMatch(/sphere stock is not offered/);
 
     const rod = StockItemSchema.parse({
@@ -127,37 +128,81 @@ describe('a shelf entry as the stock (#418)', () => {
     const r = stockFromShelf(rod, Z1);
     expect(r.ok).toBe(true);
     if (!r.ok) return;
-    expect(r.choice.stock).toEqual({ length: 10, width: 10, thickness: 15, material: 'aluminium-6061' });
+    expect(r.choice.stock).toEqual({
+      length: 10,
+      width: 10,
+      thickness: 15,
+      material: 'aluminium-6061',
+      shape: 'cylinder',
+      diameter: 10,
+    });
     expect(r.choice.entry.form).toBe('rod');
 
-    // A rod taller than the vise's grip is the rotary's (§3.3): the entry stays listed with its
-    // own sentence, and it cannot start the job.
+    // A rod taller than the vise's grip is the rotary's (§3.3), not a refusal (#713): the entry
+    // stays listed, and it starts the job — Holding offers the chuck.
     const longRod = StockItemSchema.parse({ ...rod, id: 'rod-long', size: { diameter: 10, length: 100 } });
-    expect(shelfPickProblem(longRod, Z1)).toMatch(/A rod this long is held in the rotary/);
-    expect(stockFromShelf(longRod, Z1).ok).toBe(false);
+    expect(shelfPickProblem(longRod, Z1)).toBeNull();
+    expect(stockFromShelf(longRod, Z1).ok).toBe(true);
 
+    // A tube is a real form; its outer diameter and wall are the stock's own facts.
     const tube = StockItemSchema.parse({
       ...rod,
       id: 'tube-1',
       form: 'tube',
-      size: { diameter: 40, innerDiameter: 35, length: 300 },
+      size: { diameter: 40, wall: 2, length: 100 },
     });
-    expect(shelfPickProblem(tube, Z1)).toMatch(/a tube is round stock with a hole through it/);
+    expect(shelfPickProblem(tube, Z1)).toBeNull();
+    const t = stockFromShelf(tube, Z1);
+    expect(t.ok).toBe(true);
+    if (!t.ok) return;
+    expect(t.choice.stock).toEqual({
+      length: 40,
+      width: 40,
+      thickness: 100,
+      material: 'aluminium-6061',
+      shape: 'cylinder',
+      diameter: 40,
+      wall: 2,
+    });
+
+    // A tube short of its wall is refused by the shelf's own schema, before it can start a job.
+    const noWall = StockItemSchema.safeParse({ ...tube, id: 'tube-nowall', size: { diameter: 40, length: 100 } });
+    expect(noWall.success).toBe(false);
+    if (!noWall.success) expect(noWall.error.issues[0]?.message).toBe('a wall is needed, in mm, above 0');
+
+    // The rotary's envelope is the only size refusal for round stock (#713), with the profile's
+    // numbers: a ⌀90 rod, or one longer than 150 mm, does not fit.
+    const fatRod = StockItemSchema.parse({ ...rod, id: 'rod-fat', size: { diameter: 90, length: 100 } });
+    expect(shelfPickProblem(fatRod, Z1)).toBe('⌀90 mm does not fit the rotary\'s ⌀80 × 150 mm.');
+    const longTube = StockItemSchema.parse({ ...tube, id: 'tube-long', size: { diameter: 40, wall: 2, length: 160 } });
+    expect(shelfPickProblem(longTube, Z1)).toBe("160 mm does not fit the rotary's ⌀80 × 150 mm.");
   });
 
-  it('each form owns its fields, and a missing diameter is named a diameter (#683, A7)', () => {
+  it('each form owns its fields, and a missing diameter is named a diameter (#683, #713)', () => {
     expect(STOCK_SIZE_FIELDS.disc).toEqual(['diameter', 'thickness']);
-    expect(STOCK_SIZE_FIELDS.rod).toEqual(['length', 'diameter']);
+    expect(STOCK_SIZE_FIELDS.rod).toEqual(['diameter', 'length']);
+    expect(STOCK_SIZE_FIELDS.tube).toEqual(['diameter', 'wall', 'length']);
     expect(formSizeProblem('disc', { diameter: 50, thickness: 5 }, Z1)).toBeNull();
     expect(formSizeProblem('disc', { thickness: 5 }, Z1)).toBe('the diameter needs a number in mm, above 0');
-    // A rod's length is its height standing on end. Up to the jaws' 20 mm grip the vise holds it;
-    // past that the form's own sentence sends it to the rotary.
+    // A rod's length is its height standing on end. The vise's grip is only the picture's sentence
+    // (#713): a longer rod is the chuck's job and the answer stands.
     expect(formSizeProblem('rod', { length: 18, diameter: 12 }, Z1)).toBeNull();
     expect(formSizeProblem('rod', { length: 20, diameter: 12 }, Z1)).toBeNull();
-    expect(formSizeProblem('rod', { length: 20.1, diameter: 12 }, Z1)).toMatch(/held in the rotary/);
-    expect(formSizeProblem('rod', { length: 120, diameter: 12 }, Z1)).toMatch(/held in the rotary/);
+    expect(formSizeProblem('rod', { length: 20.1, diameter: 12 }, Z1)).toBeNull();
+    expect(formSizeProblem('rod', { length: 120, diameter: 12 }, Z1)).toBeNull();
+    // The rotary's envelope is the refusal, and it names the module's numbers.
+    expect(formSizeProblem('rod', { length: 100, diameter: 90 }, Z1)).toBe(
+      '⌀90 mm does not fit the rotary\'s ⌀80 × 150 mm.',
+    );
+    expect(formSizeProblem('rod', { length: 160, diameter: 12 }, Z1)).toBe(
+      "160 mm does not fit the rotary's ⌀80 × 150 mm.",
+    );
+    // A tube must state its wall, and its box is the OUTER diameter like a rod's.
+    expect(formSizeProblem('tube', { diameter: 40, length: 100 }, Z1)).toBe('the wall needs a number in mm, above 0');
+    expect(formSizeProblem('tube', { diameter: 40, wall: 2, length: 100 }, Z1)).toBeNull();
     expect(boxForForm('disc', { diameter: 50, thickness: 5 })).toEqual({ length: 50, width: 50, thickness: 5 });
     expect(boxForForm('rod', { length: 18, diameter: 12 })).toEqual({ length: 12, width: 12, thickness: 18 });
+    expect(boxForForm('tube', { length: 18, diameter: 12, wall: 2 })).toEqual({ length: 12, width: 12, thickness: 18 });
 
     // A typed rod goes back to the shelf as round stock, not as its box: D is the box's length, and
     // its own length is the box's thickness.
@@ -167,6 +212,83 @@ describe('a shelf entry as the stock (#418)', () => {
       '2026-10-26T10:00:00.000Z',
     );
     expect(item.size).toEqual({ length: 18, diameter: 12 });
+    // A typed tube keeps its wall on the round trip.
+    const tubeItem = shelfItemFromMade(
+      { length: 12, width: 12, thickness: 18, form: 'tube', material: 'aluminium-6061', finish: 'rough', wall: 2 },
+      'tube-new-1',
+      '2026-10-26T10:00:00.000Z',
+    );
+    expect(tubeItem.size).toEqual({ length: 18, diameter: 12, wall: 2 });
+  });
+
+  it('a long rod is not a refusal: the grip sentence is the picture’s, not a problem (#713)', () => {
+    expect(rodGripProblem({ length: 20, diameter: 12 })).toBeNull();
+    expect(rodGripProblem({ length: 20.1, diameter: 12 })).toMatch(
+      /A rod this long is held in the rotary — the vise holds one up to 20 mm tall/,
+    );
+    expect(rodGripProblem({ length: 120, diameter: 12 })).toMatch(/and this one is 120 mm\./);
+    // The sentence is not the size refusal, so a long rod the rotary takes is a valid answer.
+    expect(formSizeProblem('rod', { length: 120, diameter: 12 }, Z1)).toBeNull();
+    expect(stockFromMade(
+      { length: 12, width: 12, thickness: 120, form: 'rod', material: 'aluminium-6061', finish: 'rough' },
+      Z1,
+    ).ok).toBe(true);
+  });
+
+  it('round stock writes the cylinder and its wall; old documents round-trip byte for byte (#713)', () => {
+    const made = stockFromMade(
+      { length: 12, width: 12, thickness: 18, form: 'tube', material: 'aluminium-6061', finish: 'rough', wall: 2 },
+      Z1,
+    );
+    expect(made.ok).toBe(true);
+    if (!made.ok) return;
+    expect(made.choice.stock).toMatchObject({
+      length: 12,
+      width: 12,
+      thickness: 18,
+      shape: 'cylinder',
+      diameter: 12,
+      wall: 2,
+    });
+    expect(made.choice.entry.form).toBe('tube');
+
+    // A tube as the job states it: the wall is written, survives the schema, and parsing the
+    // output again is byte for byte the same (#713).
+    const shelfTube = StockItemSchema.parse({
+      ...PLATE,
+      id: 'tube-rt',
+      form: 'tube',
+      size: { diameter: 40, wall: 2, length: 100 },
+      reservations: [],
+    });
+    const choice = stockFromShelf(shelfTube, Z1);
+    expect(choice.ok).toBe(true);
+    if (!choice.ok) return;
+    const tubeDoc = { ...defaultEngraveJob(), stock: choice.choice.stock, stockEntry: choice.choice.entry };
+    const tubeParsed = parseEngraveJob(JSON.parse(JSON.stringify(tubeDoc)));
+    expect(tubeParsed.ok).toBe(true);
+    if (!tubeParsed.ok) return;
+    expect(tubeParsed.job.stock).toMatchObject({ shape: 'cylinder', diameter: 40, wall: 2 });
+    const written = JSON.stringify(tubeParsed.job);
+    const reread = parseEngraveJob(JSON.parse(written));
+    expect(reread.ok).toBe(true);
+    if (!reread.ok) return;
+    expect(JSON.stringify(reread.job)).toBe(written);
+
+    // A pre-#713 document — a rod stock with no wall, no tube form — comes back untouched: it
+    // states no `wall`, and parsing its own output again is byte for byte the same.
+    const row: JobStockEntry = { kind: 'shelf', shelfId: 'stock-rod1', file: null, form: 'rod', finish: 'rough', conductive: true };
+    const old = { ...defaultEngraveJob(), stockEntry: row };
+    const parsed = parseEngraveJob(JSON.parse(JSON.stringify(old)));
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.job.stock).not.toHaveProperty('wall');
+    expect(parsed.job.stock).not.toHaveProperty('shape');
+    const saved = JSON.stringify(parsed.job);
+    const again = parseEngraveJob(JSON.parse(saved));
+    expect(again.ok).toBe(true);
+    if (!again.ok) return;
+    expect(JSON.stringify(again.job)).toBe(saved);
   });
 
   it('stock larger than the machine is refused, naming the axis', () => {
@@ -545,8 +667,15 @@ describe('the job names where its stock came from (#418) — and only when it do
   it('a shelf pick with no entry id, or a file with no file, is refused', () => {
     expect(parseEngraveJob({ ...defaultEngraveJob(), stockEntry: { ...entry, shelfId: null } }).ok).toBe(false);
     expect(parseEngraveJob({ ...defaultEngraveJob(), stockEntry: { ...entry, kind: 'file' } }).ok).toBe(false);
-    // A tube is not a form a job can start from; a rod is (#683, A7).
+    // A tube is a form a job can start from when it states its wall (#713); a rod always is (#683, A7).
     expect(parseEngraveJob({ ...defaultEngraveJob(), stockEntry: { ...entry, form: 'tube' } }).ok).toBe(false);
+    expect(
+      parseEngraveJob({
+        ...defaultEngraveJob(),
+        stock: { ...defaultEngraveJob().stock, wall: 2 },
+        stockEntry: { ...entry, form: 'tube' },
+      }).ok,
+    ).toBe(true);
     expect(parseEngraveJob({ ...defaultEngraveJob(), stockEntry: { ...entry, form: 'rod' } }).ok).toBe(true);
   });
 });

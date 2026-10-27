@@ -109,8 +109,13 @@ describe('round stock and the chuck in the document (#240 §1)', () => {
 
     expect(bad({ shape: 'cylinder', width: 10, thickness: 10 }).some((e) => e.includes('round stock states its diameter'))).toBe(true);
     expect(
-      bad({ shape: 'cylinder', diameter: 12 }).some((e) => e.includes('round stock is as wide and as thick as its diameter')),
+      bad({ shape: 'cylinder', diameter: 12 }).some((e) => e.includes('round stock is as wide as its diameter, and as thick or as long as it')),
     ).toBe(true);
+    // A STANDING cylinder — the wizard's D × D × L before Holding normalises it — is stated exactly
+    // too (#713).
+    expect(
+      bad({ shape: 'cylinder', diameter: 12, width: 12, length: 12, thickness: 30 }).some((e) => e.includes('round stock is as wide')),
+    ).toBe(false);
     expect(bad({ diameter: 10 }).some((e) => e.includes('a diameter needs the cylinder shape'))).toBe(true);
   });
 });

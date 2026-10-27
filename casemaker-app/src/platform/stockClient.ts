@@ -51,11 +51,14 @@ export const SIZE_FIELDS: Readonly<Record<StockForm, readonly SizeField[]>> = {
   block: ['length', 'width', 'thickness'],
   'printed-blank': ['length', 'width', 'thickness'],
   rod: ['diameter', 'length'],
-  tube: ['diameter', 'innerDiameter', 'length'],
+  // #713 — a tube's size is its OUTER diameter, its wall and its length. The wall, not an inner
+  // diameter: it is the number every later cut depth is capped by, and the job round-trips it as
+  // `{ diameter, wall, length }`.
+  tube: ['diameter', 'wall', 'length'],
   disc: ['diameter', 'thickness'],
 };
-export type SizeField = 'length' | 'width' | 'thickness' | 'diameter' | 'innerDiameter';
-const ALL_SIZE_FIELDS: readonly SizeField[] = ['length', 'width', 'thickness', 'diameter', 'innerDiameter'];
+export type SizeField = 'length' | 'width' | 'thickness' | 'diameter' | 'wall';
+const ALL_SIZE_FIELDS: readonly SizeField[] = ['length', 'width', 'thickness', 'diameter', 'wall'];
 
 /** Whether a form has a flat top a colour stack can sit in. */
 export function formIsFlat(form: StockForm): boolean {
@@ -95,7 +98,7 @@ export const StockItemSchema = z
         width: mm.nullable().optional(),
         thickness: mm.nullable().optional(),
         diameter: mm.nullable().optional(),
-        innerDiameter: mm.nullable().optional(),
+        wall: mm.nullable().optional(),
       })
       .strict(),
     layers: z.array(z.object({ name: filled, thickness: mm }).strict()).default([]),
@@ -134,8 +137,9 @@ export const StockItemSchema = z
       if (needed.includes(f) && !(present && v > 0)) issue(`a ${f} is needed, in mm, above 0`, ['size', f]);
       if (!needed.includes(f) && present) issue(`a ${form} has no ${f}`, ['size', f]);
     }
-    if (form === 'tube' && (item.size.innerDiameter ?? 0) >= (item.size.diameter ?? 0)) {
-      issue("a tube's inner diameter must be smaller than its outer", ['size', 'innerDiameter']);
+    // #713 — a tube's wall must leave a bore: two walls less than the outer diameter.
+    if (form === 'tube' && 2 * (item.size.wall ?? 0) >= (item.size.diameter ?? 0)) {
+      issue("a tube's wall must leave a bore — two walls are less than its outer diameter", ['size', 'wall']);
     }
     if (item.layers.length > 0) {
       const total = item.size.thickness;
