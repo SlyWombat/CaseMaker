@@ -135,6 +135,8 @@ export function stackDepthLimit(
   job: EngraveJob,
   margin: Mm = defaultBoundaryMargin(job),
   through?: ThroughMask,
+  /** #712 — the wasteboard under a bed job, mm, which takes the under-board's role. */
+  bedBoardMm?: number | null,
 ): StackDepthLimit | null {
   const grid = gridOf(plan, job);
   if (grid === null) return null;
@@ -157,6 +159,7 @@ export function stackDepthLimit(
     minFloor: job.minFloor,
     breakthrough: job.breakthrough,
     ...(through === undefined ? {} : { through }),
+    ...(bedBoardMm === undefined || bedBoardMm === null ? {} : { bedBoardMm }),
   });
 
   let disposed = false;

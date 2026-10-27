@@ -127,6 +127,7 @@ import {
 } from '@/engine/cnc/cam/profile';
 import { buildThroughMask, type MaskCutout } from '@/engine/cnc/engrave/throughMask';
 import { tapeHoldFindings, type TapedPiece } from '@/engine/cnc/engrave/tapeHold';
+import type { BedUnderFacts } from '@/engine/cnc/engrave/jobSetup';
 import { generateChamfer, type ChamferCut } from '@/engine/cnc/cam/chamfer';
 import type { Polygons } from '@/engine/cnc/cam/pocket';
 import { concatToolpathIR, estimateCycleSeconds, HOP_Z, raiseTravelOver, toolNumberFor, travelHeightOver, travelStats, type CamMove, type ToolpathIR } from '@/engine/cnc/cam/ir';
@@ -212,6 +213,13 @@ export interface EngraveShopOpts {
    * excluded as broken and a worn one stays eligible, exactly as before the table was passed.
    */
   conditions?: ReadonlyMap<string, ConditionSummary> | null;
+  /**
+   * #712 — what the machine's bed carries under the stock (the active profile's surface, the
+   * wasteboard's thickness and its depth limit, the house board a bare bed needs), resolved on the
+   * CALLER's side like `mount` because the active bed profile lives in the location. Absent/null is
+   * no location: the through sentences are exactly the pre-#712 ones.
+   */
+  bed?: BedUnderFacts | null;
   /**
    * #442's #427 item — the mount's obstacles (the bracket's arms and the top clamps, with the fit),
    * or `null` when the job is held in the vise. Resolved on the CALLER's side for the same reason
@@ -1660,7 +1668,7 @@ export function engraveRegions(
     ...validateJob(
       job,
       { deg: drillResolved.settings.pointAngleDeg, source: drillResolved.sources.pointAngleDeg },
-      { derivedCores: derivedCores?.length ?? 0 },
+      { derivedCores: derivedCores?.length ?? 0, bed: shop.bed ?? null },
     ),
     // #240 — the vise's validator is the VISE's; a rotary job's holding findings are slice 3's.
     ...(job.workholding.kind === 'vise'
@@ -4276,8 +4284,19 @@ function generateOneProgram(
   // tightened where an under-surface void leaves a thinner membrane (#231 item 3). On a job that
   // states its print (#285) the whole limit comes from the layer stack instead, so the void
   // membrane is layer-aligned and the verifier's number is the one the printer will honour.
-  const stack = stackDepthLimit(tl, plan, job, margins.boundaryMargin, throughMask ?? undefined);
-  const limit: DepthLimit = stack?.limit ?? jobDepthLimit(job, margins.boundaryMargin, throughMask ?? undefined);
+  // #712 — the wasteboard under a BED job takes the under-board's role for the depth limit: a
+  // through cut may enter it by the breakthrough (the verifier's `sacrificialDepthLimit`), and no
+  // board of the operator's own is needed on that surface. Thickness enough to take the
+  // breakthrough, or it does not count (the through gate refuses it by name).
+  const bedBoardMm =
+    (job.workholding.kind === 'tape' || job.workholding.kind === 'bracket') &&
+    shop.bed?.surface === 'wasteboard' &&
+    shop.bed.wasteboardMm !== null &&
+    shop.bed.wasteboardMm >= job.breakthrough + 1
+      ? shop.bed.wasteboardMm
+      : null;
+  const stack = stackDepthLimit(tl, plan, job, margins.boundaryMargin, throughMask ?? undefined, bedBoardMm);
+  const limit: DepthLimit = stack?.limit ?? jobDepthLimit(job, margins.boundaryMargin, throughMask ?? undefined, bedBoardMm);
   const limitReasonAt = stack
     ? (x: number, y: number): string => depthLimitReason(stack, job, x, y)
     : undefined;

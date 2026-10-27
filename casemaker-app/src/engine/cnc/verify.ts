@@ -167,6 +167,13 @@ export interface SacrificialLimitOptions {
    * floor, so the verifier refuses a path that cuts through a holding tab.
    */
   through?: ThroughMask;
+  /**
+   * #712 — the WASTEBOARD under the stock, mm, when the machine's bed carries one and the job is
+   * held there: it is the board a through cut may enter (decision Q7), exactly as an under-board
+   * of the operator's own is, with the part's own footprint (no overhang — the cutter may still
+   * not leave the blank). Absent/null: no wasteboard, and the table is the pre-#712 one.
+   */
+  bedBoardMm?: number | null;
 }
 
 /** Is a work-frame XY inside an axis-aligned sacrificial box's XY footprint? Inclusive edges. */
@@ -204,6 +211,12 @@ export function sacrificialDepthLimit(stock: StockDims, s: Sacrificial, opts: Sa
   const boxes = sacrificialBoxes(stock, s);
   const under = boxes.find((b) => b.id === 'under') ?? null;
   const sides = boxes.filter((b) => b.id !== 'under');
+  // #712 — THE WASTEBOARD IS THE BOARD UNDER. When the machine's bed carries one (and the job is
+  // held there, which the caller decides) it takes the under-board's role with the part's own
+  // footprint: a through cut may enter it by the breakthrough, and the cutter still may not leave
+  // the blank (the footprint is `[0,L]×[0,W]`, so `cut-outside-stock` keeps its meaning).
+  const wasteboardIsBoard = under === null && typeof opts.bedBoardMm === 'number' && opts.bedBoardMm > 0;
+  const boardPresent = under !== null || wasteboardIsBoard;
 
   return (x, y) => {
     // The through mask is consulted FIRST: over the part it may raise the limit to the board, and
@@ -212,11 +225,11 @@ export function sacrificialDepthLimit(stock: StockDims, s: Sacrificial, opts: Sa
     // legitimately reaches a point length below the board allowance (#218). It does nothing
     // without a board; no board means no through cut.
     const local = mask?.(x, y) ?? null;
-    const throughLimit = local !== null && under !== null ? local : partLimit;
+    const throughLimit = local !== null && boardPresent ? local : partLimit;
     if (x >= 0 && x <= L && y >= 0 && y <= W) return throughLimit;
     for (const b of sides) {
       if (insideBox(b, x, y)) {
-        const sideLimit = T + (under !== null && insideBox(under, x, y) ? breakthrough : 0);
+        const sideLimit = T + ((under !== null && insideBox(under, x, y)) || wasteboardIsBoard ? breakthrough : 0);
         return local !== null ? Math.min(sideLimit, local) : sideLimit;
       }
     }

@@ -213,6 +213,10 @@ export type JobFindingCode =
   | 'tape-hold-stock'
   | 'tape-hold-piece'
   | 'tape-tall-stock'
+  // #712 — the bed's own through rules (#707 BM-5): the board must cover the stock, and a cut may
+  // enter the wasteboard only to the shop's depth limit.
+  | 'board-too-small'
+  | 'wasteboard-depth'
   // #434 — a drill bit is the cutter of a DRILL-ONLY program. Hand-edited work that pairs one with
   // a region, trace or thread is refused by name: a drill cannot open a region, and one program has
   // one tool, so the other work has to move to a cutter that can make it.
@@ -297,13 +301,73 @@ export interface JobFinding {
 }
 
 /**
- * The one `through-needs-board` finding (#218). A through cut needs material under the blank to
- * cut INTO: the under-board must be at least `breakthrough + 1` mm thick, so the breakthrough
- * never reaches its far face.
+ * What the machine's bed carries under the stock, for the through-cut gate (#712, design
+ * `bed-mounts-flow.md` §3.5). Built on the caller's side — the active bed profile lives in the
+ * location, which the engine does not read — and ABSENT for a caller with no location, in which
+ * case every through sentence reads exactly as it did before.
  */
-function throughBoardFinding(labelId: string, who: string, job: EngraveJob): JobFinding {
+export interface BedUnderFacts {
+  /** The surface the active profile records under the stock. */
+  surface: 'bare-bed' | 'wasteboard' | 'fixture-plate' | 'vacuum-bed';
+  /** The wasteboard's thickness, mm, when the surface IS the wasteboard; null otherwise. */
+  wasteboardMm: number | null;
+  /** How deep a cut may go into the wasteboard, mm — the shop's `wasteboard.depthLimitMm`. */
+  wasteboardLimitMm: number;
+  /** The house board a bare bed needs: the thinnest that passes `breakthrough + 1`, mm; null when none does. */
+  boardMm: number | null;
+  /** That board's footprint, mm — a stock bigger than it in either direction cannot sit on it. */
+  boardLengthMm: number | null;
+  boardWidthMm: number | null;
+  /** What the board is called in the sentence — `2 mm MDF`. */
+  boardWords: string;
+}
+
+/** Whether the bed facts describe a wasteboard the breakthrough can enter (the board under, Q7). */
+function wasteboardTakesBed(bed: BedUnderFacts, need: number): boolean {
+  return bed.surface === 'wasteboard' && bed.wasteboardMm !== null && bed.wasteboardMm >= need;
+}
+
+/** Whether the house board a bare bed needs is big enough for this stock. */
+function boardCoversStock(bed: BedUnderFacts, job: EngraveJob): boolean {
+  if (bed.boardMm === null || bed.boardLengthMm === null || bed.boardWidthMm === null) return true;
+  return job.stock.length <= bed.boardLengthMm && job.stock.width <= bed.boardWidthMm;
+}
+
+/**
+ * The one `through-needs-board` finding (#218, #712). A through cut needs material under the blank
+ * to cut INTO: the under-board must be at least `breakthrough + 1` mm thick, so the breakthrough
+ * never reaches its far face.
+ *
+ * ON THE BED (#712) the sentence is the design's: the WASTEBOARD is the machine's sacrificial
+ * board (decision Q7), so it counts as the board under when it is thick enough, and a bare bed
+ * needs a board put under it — "“Outline” cuts through the sheet, and only the bed is under it —
+ * put a 2 mm MDF board under it, or tape it on the wasteboard." Null when there is nothing to
+ * refuse (a board or the wasteboard takes the cut), INCLUDING the one case another finding owns:
+ * a default board too small for the stock is `board-too-small`'s refusal, not this one's.
+ */
+function throughBoardFinding(labelId: string, who: string, job: EngraveJob, bed?: BedUnderFacts | null): JobFinding | null {
   const need = job.breakthrough + 1;
   const have = job.sacrificial.under?.thickness ?? 0;
+  const bedHeld = job.workholding.kind === 'tape' || job.workholding.kind === 'bracket';
+  if (bedHeld && bed !== undefined && bed !== null) {
+    // The wasteboard is the board under: no board of the operator's own is needed. Its own depth
+    // rule (`wasteboard-depth`, raised once by `validateJob`) judges how far the cut enters it.
+    if (wasteboardTakesBed(bed, need)) return null;
+    // A bare bed (or a wasteboard too thin to take the breakthrough): a board is required.
+    if (have >= need) return null;
+    if (!boardCoversStock(bed, job)) {
+      // The size refusal is `board-too-small`'s, raised once by `validateJob`: the same fix, said
+      // in one sentence with the board's own size.
+      return null;
+    }
+    const board = bed.boardMm === null ? `a board at least ${fmt3(need)} mm thick` : `a ${bed.boardWords} board`;
+    const message =
+      bed.surface === 'wasteboard'
+        ? `${who} cuts through the blank, and the wasteboard is ${fmt3(bed.wasteboardMm ?? 0)} mm — a ` +
+          `through cut needs at least ${fmt3(need)} mm under it: put ${board} under it, or tape it on the wasteboard.`
+        : `${who} cuts through the blank, and only the bed is under it — put ${board} under it, or tape it on the wasteboard.`;
+    return { severity: 'error', code: 'through-needs-board', labelId, message };
+  }
   return {
     severity: 'error',
     code: 'through-needs-board',
@@ -814,8 +878,17 @@ export function validateJob(
    * with no items (the core is derived, not drawn), so its validation must count the derived
    * regions as work or `no-items` would refuse a program that has cutting to do.
    */
-  options: { derivedCores?: number } = {},
+  options: {
+    derivedCores?: number;
+    /**
+     * #712 — what the machine's bed carries under the stock (`BedUnderFacts`), built by the caller
+     * from the active bed profile. Absent: no location, and the through sentences are the pre-#712
+     * ones (the vise's).
+     */
+    bed?: BedUnderFacts | null;
+  } = {},
 ): JobFinding[] {
+  const bed = options.bed ?? null;
   const findings: JobFinding[] = [];
   const all: EngraveAnyItem[] = [
     ...job.labels,
@@ -1003,8 +1076,41 @@ export function validateJob(
   // depth a through cut reaches, the same number `toPartPlan` gives every through region and
   // cut-out.
   const throughDepth = thickness + job.breakthrough;
+  // #712 — on the bed the WASTEBOARD is the board under when the profile puts it there and it is
+  // thick enough (decision Q7); a board of the operator's own counts anywhere.
+  const bedHeldJob = job.workholding.kind === 'tape' || job.workholding.kind === 'bracket';
   const throughReady =
-    job.sacrificial.under !== null && job.sacrificial.under.thickness >= job.breakthrough + 1;
+    (job.sacrificial.under !== null && job.sacrificial.under.thickness >= job.breakthrough + 1) ||
+    (bedHeldJob && bed !== null && wasteboardTakesBed(bed, job.breakthrough + 1));
+  // #712 — THE BED'S OWN THROUGH RULES, said ONCE (the per-item findings say the rest):
+  //   - the house board a bare bed needs must COVER the stock (the design's size sentence);
+  //   - a cut may enter the wasteboard only to the shop's depth limit.
+  const hasThroughWork =
+    enabled.some((i) => 'through' in i && i.through === true) || enabledCutouts.length > 0 || enabledDrills.some((d) => d.through);
+  if (hasThroughWork && bedHeldJob && bed !== null) {
+    const need = job.breakthrough + 1;
+    const have = job.sacrificial.under?.thickness ?? 0;
+    if (have < need && !wasteboardTakesBed(bed, need) && !boardCoversStock(bed, job)) {
+      const long = bed.boardLengthMm !== null && job.stock.length > bed.boardLengthMm;
+      const extent = long ? `${fmt3(job.stock.length)} mm long` : `${fmt3(job.stock.width)} mm wide`;
+      findings.push({
+        severity: 'error',
+        code: 'board-too-small',
+        message:
+          `The ${bed.boardWords} boards are ${fmt3(bed.boardLengthMm ?? 0)} × ${fmt3(bed.boardWidthMm ?? 0)} mm; ` +
+          `this plate is ${extent} — tape it to the wasteboard, or choose a larger board.`,
+      });
+    }
+    if (have < need && wasteboardTakesBed(bed, need) && job.breakthrough > bed.wasteboardLimitMm) {
+      findings.push({
+        severity: 'error',
+        code: 'wasteboard-depth',
+        message:
+          `A through cut goes ${fmt3(job.breakthrough)} mm into the wasteboard, deeper than the ` +
+          `${fmt3(bed.wasteboardLimitMm)} mm limit — reduce the breakthrough, or put a board under the part.`,
+      });
+    }
+  }
   // A profiler needs SHANK clearance, so its limit is `shoulderLength ?? fluteLength` — the same
   // number the sweep's holder gate uses. A drill bit is judged in its own loop by flute length.
   const profilerReach =
@@ -1016,7 +1122,8 @@ export function validateJob(
     if (!('through' in item) || item.through !== true) continue;
     const who = itemLabel(item);
     if (!throughReady) {
-      findings.push(throughBoardFinding(item.id, who, job));
+      const board = throughBoardFinding(item.id, who, job, bed);
+      if (board !== null) findings.push(board);
     } else if (profilerReach !== null && profilerReach > 0 && throughDepth > profilerReach) {
       findings.push({
         severity: 'error',
@@ -1046,7 +1153,8 @@ export function validateJob(
       });
     }
     if (!throughReady) {
-      findings.push(throughBoardFinding(cutout.id, who, job));
+      const board = throughBoardFinding(cutout.id, who, job, bed);
+      if (board !== null) findings.push(board);
     } else if (profilerReach !== null && profilerReach > 0 && throughDepth > profilerReach) {
       findings.push({
         severity: 'error',
@@ -1138,7 +1246,8 @@ export function validateJob(
       // cover the breakthrough. A drill needs FLUTES to clear chips, so its limit is
       // `fluteLength` (never `shoulderLength`, which is a profiler's shank-clearance number).
       if (!throughReady) {
-        findings.push(throughBoardFinding(drill.id, who, job));
+        const board = throughBoardFinding(drill.id, who, job, bed);
+        if (board !== null) findings.push(board);
       } else if (
         drillTool !== null &&
         drillTool.fluteLength !== null &&

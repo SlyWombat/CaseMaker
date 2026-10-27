@@ -24,6 +24,8 @@ import type { SimDiagnostic } from '@/workers/sim/session';
 import type { SimStatus } from './simStore';
 import { clampPlacementsFor, jobMount, jobTool, toSetup } from '@/engine/cnc/engrave/jobSetup';
 import { bracketMount } from '@/engine/cnc/mounts/bracket';
+import { bedUnderFacts } from '@/platform/bedProfiles';
+import { useLocationStore } from './locationStore';
 import { isVShape } from '@/engine/cnc/vProfile';
 import { feedCatalogueRows, resolvedFeedsTable } from '@/engine/cnc/feeds';
 import type { FeedCatalogueRow } from '@/engine/cnc/feeds';
@@ -249,6 +251,10 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
       // bracket job is given, never what an edited job is checked against.
       clampPlacementsFor(job),
     );
+    // #712 — the bed's through-cut facts, resolved HERE for the same reason the mount is: the
+    // active bed profile lives in the location, and the worker must not read it. The need is the
+    // job's own (`breakthrough + 1`), so a board the sentence names is one that really passes.
+    const bed = bedUnderFacts(useLocationStore.getState().location?.machines[0] ?? null, shopDefaults, job.breakthrough + 1);
     const shop: EngraveShopOpts = {
       lostDetailWarnRatio: shopDefault('engrave.lostDetailWarnRatio').value,
       peckClearanceMm: shopDefault('drill.peckClearanceMm').value,
@@ -267,6 +273,7 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
       // not only by the one the panel shows.
       conditions: inventoryConditions(),
       mount,
+      bed,
       // #472 — the rest pass's two numbers, read from the location in the SAME snapshot as the
       // others. The worker cannot import the defaults client (`houseClient` drags the transport
       // into that realm), so the resolved values and their sources cross as plain data; absent,

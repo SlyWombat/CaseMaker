@@ -1915,11 +1915,13 @@ export function sweptCuts(job: EngraveJob, plan: PartPlan = toPartPlan(job, { un
  * house's to override. It is passed in rather than looked up because this module must stay free of
  * the settings store — the panel and the worker each resolve it once and hand the same number here.
  */
-export function jobDepthLimit(job: EngraveJob, margin?: Mm, through?: ThroughMask): DepthLimit {
+export function jobDepthLimit(job: EngraveJob, margin?: Mm, through?: ThroughMask, bedBoardMm?: number | null): DepthLimit {
   const sacrificial = sacrificialDepthLimit(job.stock, job.sacrificial, {
     minFloor: job.minFloor,
     breakthrough: job.breakthrough,
     ...(through === undefined ? {} : { through }),
+    // #712 — the wasteboard under a bed job counts exactly as an under-board does.
+    ...(bedBoardMm === undefined || bedBoardMm === null ? {} : { bedBoardMm }),
   });
   return (x, y) => {
     const base = sacrificial(x, y);

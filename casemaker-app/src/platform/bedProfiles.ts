@@ -29,7 +29,8 @@
  */
 
 import { DEFAULT_VISE, LEDGE_STEP, LEDGE_WIDTH, Z1_VISE } from '@/engine/cnc/fixture';
-import type { ShopDefaults } from './defaultsClient';
+import type { BedUnderFacts } from '@/engine/cnc/engrave/jobSetup';
+import { readDefault, type ShopDefaults } from './defaultsClient';
 import type { BedProfile, FixtureRecord, MachineRecord } from './locationClient';
 
 export interface MigratedBed {
@@ -656,4 +657,34 @@ export function switchActiveProfile(
   now: string,
 ): MachineRecord {
   return { ...machine, activeBedProfileId, updatedAt: now };
+}
+
+/**
+ * #712 — what this machine's bed carries under the stock, for the through-cut gate
+ * (`BedUnderFacts`, design `bed-mounts-flow.md` §3.5): the active profile's surface, the
+ * wasteboard's thickness when that is the surface, and the thinnest house board thick enough for a
+ * through cut, with its footprint for the size refusal and its own words for the sentence
+ * ("2 mm MDF").
+ *
+ * `null` when the machine records no active profile — a build with no location, whose through
+ * sentences are then exactly the pre-#712 ones. `needMm` is the board a through cut needs
+ * (`breakthrough + 1`, the engine's `through-needs-board` rule); the caller passes it because the
+ * requirement is the JOB's, not the bed's.
+ */
+export function bedUnderFacts(machine: MachineRecord | null, defaults: ShopDefaults | null, needMm: number): BedUnderFacts | null {
+  const profile = machine?.bedProfiles?.find((p) => p.id === machine.activeBedProfileId) ?? null;
+  if (profile === null) return null;
+  const boards = (profile.consumables?.boards ?? [])
+    .filter((b) => b.count > 0 && b.size[2] >= needMm)
+    .sort((a, b) => a.size[2] - b.size[2]);
+  const board = boards[0] ?? null;
+  return {
+    surface: profile.surface.kind,
+    wasteboardMm: profile.surface.kind === 'wasteboard' ? profile.surface.thickness : null,
+    wasteboardLimitMm: readDefault(defaults, 'wasteboard.depthLimitMm').value,
+    boardMm: board?.size[2] ?? null,
+    boardLengthMm: board?.size[0] ?? null,
+    boardWidthMm: board?.size[1] ?? null,
+    boardWords: board === null ? 'board' : `${board.size[2]} mm ${board.material}`,
+  };
 }
