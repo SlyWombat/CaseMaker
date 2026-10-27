@@ -131,6 +131,8 @@ export interface SimState {
    * whichever `.nc` happens to be in the form afterwards.
    */
   loadedProgram: string | null;
+  /** #726 W8 — when this session last took a program, ms (see `SimSetupState.openedAt`). */
+  loadedAt: number | null;
   error: string | null;
   diagnostics: SimDiagnostic[];
   info: SimLoadInfo | null;
@@ -274,6 +276,8 @@ const EMPTY = {
   status: 'idle' as SimStatus,
   origin: null as SimSessionOrigin | null,
   loadedProgram: null as string | null,
+  /** #726 W8 — when this session last took a program, ms (see `SimSetupState.openedAt`). */
+  loadedAt: null as number | null,
   error: null,
   diagnostics: [] as SimDiagnostic[],
   info: null,
@@ -344,7 +348,7 @@ export const useSimStore = create<SimState>()((set, get) => {
   async function run(args: LoadArgs, budgetMs: number): Promise<void> {
     const mine = ++loadSeq;
     // A load starts the session's speed at the shop's seed, as it always reset to 20 before #451.
-    set({ ...EMPTY, speed: startingSpeed(), status: 'loading', budgetMs, phase: 'sweep', origin: args.origin, loadedProgram: args.gcodeText, tool: args.tool });
+    set({ ...EMPTY, speed: startingSpeed(), status: 'loading', budgetMs, phase: 'sweep', origin: args.origin, loadedProgram: args.gcodeText, loadedAt: Date.now(), tool: args.tool });
     try {
       const client = await clientLoader();
       client.setSimSinks(

@@ -324,28 +324,6 @@ describe('engraveRunStore (#206)', () => {
   // #688 — Design's Save writes the .nc that goes to Makera Studio: a path to the machine, so it
   // waits on the clearance acknowledgement exactly as Upload and Release do. The statement's home
   // is Cut step 1 (#689), and the sentence names it because the checkbox is no longer beside Save.
-  it('#726 W16 — a DOCUMENT clearance code (the job’s shipped vise) asks for the tick too', () => {
-    const okGen: EngraveGenerated = {
-      ...clean(),
-      findings: [],
-      verify: { ok: true, findings: [], stats: { lines: 1, cuttingMoves: 1, deepestZ: -1, bbox: { min: [0, 0, -1], max: [1, 1, 0] } } },
-    };
-    // The run's own lists say nothing; the JOB's warning is a vise-default (the shipped vise).
-    const v = view({
-      generated: okGen,
-      simStatus: 'ready',
-      oracle: { ok: true, band: 0.016, levels: [], worst: { underCut: 0, overCut: 0 } },
-      acknowledged: false,
-      documentFindings: [
-        { severity: 'warning', code: 'vise-default' },
-        { severity: 'info', code: 'goal-object-no-toolpath' },
-      ],
-    });
-    expect(requiredAckCodes(v)).toEqual(['vise-default']);
-    expect(saveBlocker(v)).toBe('tick the clearance check in Cut, step 1');
-    expect(saveBlocker({ ...v, acknowledged: true })).toBeNull();
-  });
-
   it('requires the clearance acknowledgement for Save as well as Upload', () => {
     const okGen: EngraveGenerated = {
       ...clean(),

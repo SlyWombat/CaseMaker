@@ -95,18 +95,11 @@ export interface EngraveRunView {
    * reads. The panel sets this from `job.workholding.kind`.
    */
   rotaryHeld?: boolean;
-  /**
-   * #726 W16 — the JOB's own findings, when the caller has them (the panel does). Clearance codes
-   * live in the document as well as in the run (`vise-default` is a document warning), and the
-   * tick is a fact about the job a person checked, not only about this run's lists.
-   */
-  documentFindings?: ReadonlyArray<{ severity: string; code: string }>;
 }
 
 /** Warning codes across every row, so an acknowledgement is required for the right reasons. */
 export function requiredAckCodes(v: EngraveRunView): string[] {
   const codes = new Set<string>();
-  for (const f of v.documentFindings ?? []) if (f.severity === 'warning') codes.add(f.code);
   for (const f of v.generated?.findings ?? []) if (f.severity === 'warning') codes.add(f.code);
   for (const f of v.generated?.verify?.findings ?? []) if (f.severity === 'warning') codes.add(f.code);
   for (const d of v.simDiagnostics) if (d.severity === 'warning') codes.add(d.code);

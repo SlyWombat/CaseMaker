@@ -3153,6 +3153,16 @@ export function generateGoalProgram(
     errors: [{ stage, message }],
   });
 
+  // #726 W16 — THE DOCUMENT'S OWN FINDINGS RIDE WITH A GOAL RUN. The item pipeline has always
+  // merged `validateJob` and the vise's validator into the run's findings; this dispatch returned
+  // an empty list, so a goal job on the shipped default vise never carried `vise-default` — and
+  // Save/Upload/Release asked for no clearance tick while Cut step 1 had no warning to show it.
+  const documentFindings = (): JobFinding[] =>
+    dedupeFindings([
+      ...validateJob(job, null, { bed: shop.bed ?? null, defaults: shop.defaults }),
+      ...(job.workholding.kind === 'vise' ? validateVise(job.stock, job.workholding.vise, job.sacrificial) : []),
+    ]);
+
   // #539 — the pure-goal dispatch runs BEFORE the item pipeline's `validateJob`, so the
   // `goal-object-oversize`/zero-volume check (#533) never reaches a goal that is surfaced here.
   // Run the SAME validation and refuse an unmakeable goal with its blocking finding, rather than
@@ -3164,7 +3174,7 @@ export function generateGoalProgram(
       ...base,
       ok: false,
       stage: 'findings',
-      findings: goalFindings,
+      findings: dedupeFindings([...goalFindings, ...documentFindings()]),
       feeds: null,
       cam: null,
       nc: null,
@@ -3285,7 +3295,7 @@ export function generateGoalProgram(
     ...base,
     ok: true,
     stage: 'done',
-    findings: [],
+    findings: documentFindings(),
     feeds: resolved,
     cam,
     nc,

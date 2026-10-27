@@ -73,6 +73,11 @@ export interface SimHeaderDiagnostic {
 export interface SimSetupState {
   fileName: string | null;
   gcodeText: string | null;
+  /**
+   * #726 W8 — WHEN this file was opened, ms. The Simulate panel compares it with the SIM session's
+   * own start: a job loaded after a file was opened here is the newer statement and takes the panel.
+   */
+  openedAt: number | null;
   stock: SimStock;
   stockSource: { length: FieldSource; width: FieldSource; thickness: FieldSource };
   /** A tool registry key (#305); null = "tool required". */
@@ -142,6 +147,7 @@ function defaultStock(): SimStock {
 const allDefault = (): SimSetupState['stockSource'] => ({ length: 'default', width: 'default', thickness: 'default' });
 
 const EMPTY = {
+  openedAt: null as number | null,
   fileName: null,
   gcodeText: null,
   stock: { ...DEFAULT_STOCK },
@@ -175,6 +181,7 @@ export const useSimSetupStore = create<SimSetupState>()((set, get) => ({
   // location has not answered yet; a load after the answer reads them in `openFile`/`reset`).
   stock: defaultStock(),
   openFile(name, text) {
+    set({ openedAt: Date.now() });
     const parsed = parseGcode(text);
     const fromHeader = setupFromHeader(parsed.header);
 

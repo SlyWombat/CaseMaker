@@ -1802,10 +1802,6 @@ export function EngravePanel(): JSX.Element {
     ...run,
     machine: jobMachine(job, calibration),
     rotaryHeld: job.workholding.kind === 'rotary-chuck',
-    // #726 W16 — the clearance tick is asked for the JOB's clearance codes too: a shipped-default
-    // vise warns in the DOCUMENT (`vise-default`), and the run's own lists never carried it, so a
-    // goal job saved without the tick that its two notes were asking for.
-    documentFindings: findings,
   };
   const saveBlockerText = saveBlocker(gateView);
   // #255 — the machine upload. `uploadBlocker` is never weaker than `saveBlocker` (see its own

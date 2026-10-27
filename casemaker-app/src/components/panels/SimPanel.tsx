@@ -173,6 +173,8 @@ export function SimPanel() {
   const loadedProgram = useSimStore((s) => s.loadedProgram);
   const error = useSimStore((s) => s.error);
   const diagnostics = useSimStore((s) => s.diagnostics);
+  const loadedAt = useSimStore((s) => s.loadedAt);
+  const openedAt = useSimSetupStore((s) => s.openedAt);
   const info = useSimStore((s) => s.info);
   const progress = useSimStore((s) => s.progress);
   const phase = useSimStore((s) => s.phase);
@@ -219,8 +221,13 @@ export function SimPanel() {
    * returns.
    */
   // Opening a file HERE gives this panel its form back (the row shows the file; the run's Result
-  // stays hidden until this panel runs it — that is #506's rule, not this flag's).
-  const jobRun = origin === 'engrave' && run.generated !== null && fileName === null;
+  // stays hidden until this panel runs it — that is #506's rule, not this flag's). The LATER of the
+  // two wins: a run that takes the session after a file was opened here is the newer statement, so
+  // the panel follows the job the viewport is drawing.
+  const jobRun =
+    origin === 'engrave' &&
+    run.generated !== null &&
+    (fileName === null || (loadedAt ?? 0) > (openedAt ?? 0));
 
   // #687 — a cutter is named by the one display form here too; a key the registry no longer holds
   // falls back to the key itself, which is the honest thing to show and cannot happen for a

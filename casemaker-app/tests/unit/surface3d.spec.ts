@@ -324,6 +324,9 @@ describe('generateGoalProgram — the worker dispatches a pure goal job', () => 
     expect(program.surfaceCheck?.bbox).toEqual({ min: [40, 20], max: [60, 40] });
     expect(program.programHash).toMatch(/^[0-9a-f]{8}$/);
     expect(program.toolKey).toBe(job.toolKey);
+    // #726 W16 — the run's findings carry the DOCUMENT's, as the item pipeline's always have: the
+    // shipped default vise's clearance warning is what Save/Upload/Release and Cut step 1 share.
+    expect(out.findings.some((f) => f.code === 'vise-default' && f.severity === 'warning')).toBe(true);
   });
 });
 

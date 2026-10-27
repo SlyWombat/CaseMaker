@@ -31,7 +31,8 @@ import { resetEngravePackageStore, useEngravePackageStore } from '@/store/engrav
 import { resetEngraveRegistrationStore, useEngraveRegistrationStore } from '@/store/engraveRegistrationStore';
 import type { SurfaceSpreadAssessment } from '@/engine/cnc/engrave/surfaceSpread';
 import { useEngraveJobStore } from '@/store/engraveJobStore';
-import { useEngraveRunStore } from '@/store/engraveRunStore';
+import { useEngraveRunStore, saveBlocker } from '@/store/engraveRunStore';
+import { jobMachine } from '@/engine/cnc/calibration';
 import { resetRunConfirmStore } from '@/store/runConfirmStore';
 import { clearStoredBaseline, resetLocationStore, useLocationStore } from '@/store/locationStore';
 import { resetMachineChange, useMachineChangeStore } from '@/store/machineChangeStore';
@@ -420,12 +421,23 @@ describe('#419 §3 the Cut surface', () => {
     expect(go.disabled).toBe(true);
     expect(screen.getByTestId('engrave-cut-go-blocked').textContent).toContain('tick the clearance check in Cut, step 1');
 
+    // #726 W16 — the Design panel's Save gate reads the same run findings and the same flag: the
+    // box that appears here is the one that clears Save there (one source, no deadlock).
+    const gateView = () => ({
+      ...useEngraveRunStore.getState(),
+      generated: made,
+      simStatus: 'ready' as const,
+      machine: jobMachine(job, null),
+      rotaryHeld: false,
+    });
+    expect(saveBlocker(gateView())).toBe('tick the clearance check in Cut, step 1');
     // Ticking it in step 1 records the gate's own flag and clears the sentence.
     fireEvent.click(ack);
     expect(useEngraveRunStore.getState().acknowledged).toBe(true);
     expect(screen.queryByTestId('engrave-cut-go-blocked')).toBeNull();
     expect(go.disabled).toBe(false);
     expect(screen.getByTestId('engrave-cut-step-1-summary').textContent).toContain('clearance acknowledged');
+    expect(saveBlocker(gateView())).toBeNull();
   });
 
   it('#689 review — a stale package disables the one-screen press and the upload until step 2 is frozen again', () => {
