@@ -218,7 +218,9 @@ export function SimPanel() {
    * tool the job already has. Opening a file here switches `origin` back to 'panel' and the form
    * returns.
    */
-  const jobRun = origin === 'engrave' && run.generated !== null;
+  // Opening a file HERE gives this panel its form back (the row shows the file; the run's Result
+  // stays hidden until this panel runs it — that is #506's rule, not this flag's).
+  const jobRun = origin === 'engrave' && run.generated !== null && fileName === null;
 
   // #687 — a cutter is named by the one display form here too; a key the registry no longer holds
   // falls back to the key itself, which is the honest thing to show and cannot happen for a
@@ -417,7 +419,10 @@ export function SimPanel() {
           </div>
           <p style={MUTED} data-testid="sim-job-run-line">
             {job.stock.length} × {job.stock.width} × {job.stock.thickness} mm ·{' '}
-            {jobToolEntry === null ? 'no cutter chosen' : toolDisplayName(jobToolEntry.tool)} · the job’s own program
+            {jobToolEntry === null ? 'no cutter chosen' : toolDisplayName(jobToolEntry.tool)} ·{' '}
+            {/* #726 W8 review — an edit past Generate leaves the sweep on screen behind a program
+                that no longer matches the job: say so rather than "the job's own program". */}
+            {run.staleSince === null ? 'the job’s own program' : 'the job changed since this run — generate again'}
           </p>
           {run.simDiagnostics.length > 0 && (
             <div data-testid="sim-job-diagnostics" style={{ marginTop: 6 }}>

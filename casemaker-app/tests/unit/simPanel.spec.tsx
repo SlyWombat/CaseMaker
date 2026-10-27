@@ -670,6 +670,18 @@ describe('SimPanel', () => {
     expect(screen.queryByTestId('sim-tool-required')).toBeNull();
     expect(screen.queryByTestId('sim-simulate')).toBeNull();
     expect(screen.queryByTestId('sim-drop-hint')).toBeNull();
+
+    // #726 W8 review — an edit past Generate leaves the sweep on screen behind a program that no
+    // longer matches the job; the line says so instead of "the job's own program".
+    act(() => useEngraveRunStore.setState({ staleSince: Date.now() }));
+    expect(screen.getByTestId('sim-job-run-line').textContent).toContain('the job changed since this run');
+
+    // Opening a file here gives the panel its form back: the row shows the file, and the run's
+    // Result stays hidden until this panel runs it (#506's rule, not the flag's).
+    act(() => useSimSetupStore.getState().openFile('stranger.nc', 'G0 X0 Y0'));
+    expect(screen.getByTestId('sim-file-name').textContent).toBe('stranger.nc');
+    expect(screen.queryByTestId('sim-job-run-line')).toBeNull();
+    expect(screen.queryByTestId('sim-result')).toBeNull();
   });
 
   // #691 — the "Checked: … / Not checked: …" sentence and the under/over-cut numbers moved here
