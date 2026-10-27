@@ -1,0 +1,71 @@
+{
+ "schemaVersion": 3,
+ "name": "j18-thread-b-mill-proxy",
+ "machineId": "Z1",
+ "stock": {
+  "length": 40,
+  "width": 30,
+  "thickness": 8,
+  "material": "pla"
+ },
+ "labels": [],
+ "toolKey": "inv:kz-thread-m3-9",
+ "minFloor": 1,
+ "edgeMargin": 1,
+ "customFonts": [],
+ "sacrificial": {
+  "under": null,
+  "sides": {
+   "left": null,
+   "right": null,
+   "front": null,
+   "back": null
+  },
+  "source": "default"
+ },
+ "breakthrough": 0.3,
+ "jawClearance": 1,
+ "shapes": [],
+ "workholding": {
+  "kind": "vise",
+  "vise": {
+   "stockProud": 4,
+   "fixedJawThickness": 10,
+   "movingJawThickness": 10,
+   "jawLength": 100,
+   "jawStartY": -10,
+   "source": "default",
+   "uncertainty": 0.5
+  }
+ },
+ "threads": [
+  {
+   "kind": "thread",
+   "id": "t0",
+   "position": {
+    "x": 12,
+    "y": 15
+   },
+   "enabled": true,
+   "size": "M3",
+   "standard": "metric",
+   "classFit": "6H",
+   "depth": 5,
+   "through": false
+  },
+  {
+   "kind": "thread",
+   "id": "t1",
+   "position": {
+    "x": 28,
+    "y": 15
+   },
+   "enabled": true,
+   "size": "M3",
+   "standard": "metric",
+   "classFit": "6H",
+   "depth": 5,
+   "through": false
+  }
+ ]
+}

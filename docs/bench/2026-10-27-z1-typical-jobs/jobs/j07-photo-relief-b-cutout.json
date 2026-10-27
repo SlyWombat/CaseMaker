@@ -1,0 +1,87 @@
+{
+ "schemaVersion": 3,
+ "name": "j07-photo-relief-b-cutout",
+ "machineId": "Z1",
+ "stock": {
+  "length": 100,
+  "width": 150,
+  "thickness": 10,
+  "material": "pla"
+ },
+ "labels": [],
+ "toolKey": "inv:kz-o-flute-3-175-25",
+ "minFloor": 1,
+ "edgeMargin": 1,
+ "customFonts": [],
+ "sacrificial": {
+  "under": {
+   "thickness": 6,
+   "overhang": {
+    "left": 0,
+    "right": 0,
+    "front": 0,
+    "back": 0
+   },
+   "attach": "tape"
+  },
+  "sides": {
+   "left": null,
+   "right": null,
+   "front": null,
+   "back": null
+  },
+  "source": "default"
+ },
+ "breakthrough": 0.3,
+ "jawClearance": 1,
+ "shapes": [
+  {
+   "id": "outline",
+   "kind": "rect",
+   "position": {
+    "x": 50,
+    "y": 75
+   },
+   "rotation": 0,
+   "depth": 10,
+   "enabled": true,
+   "width": 80,
+   "height": 104,
+   "cornerRadius": 8,
+   "construction": true
+  }
+ ],
+ "workholding": {
+  "kind": "bracket",
+  "bracket": {
+   "anchor": 1,
+   "variant": "thin",
+   "clamps": [
+    {
+     "edge": "back",
+     "at": 50
+    },
+    {
+     "edge": "right",
+     "at": 140
+    }
+   ],
+   "source": "default"
+  }
+ },
+ "cutouts": [
+  {
+   "kind": "cutout",
+   "id": "profile",
+   "enabled": true,
+   "of": "outline",
+   "side": "outside",
+   "inset": 0,
+   "tabs": {
+    "count": 4,
+    "width": 4,
+    "height": 1.5
+   }
+  }
+ ]
+}

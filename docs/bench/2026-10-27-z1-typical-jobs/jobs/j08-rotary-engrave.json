@@ -1,0 +1,56 @@
+{
+ "schemaVersion": 3,
+ "name": "j08-rotary-engrave",
+ "machineId": "Z1",
+ "stock": {
+  "length": 100,
+  "width": 19,
+  "thickness": 19,
+  "material": "pla",
+  "shape": "cylinder",
+  "diameter": 19
+ },
+ "labels": [
+  {
+   "id": "t1",
+   "text": "MAKERA Z1",
+   "font": "sans-default",
+   "weight": "bold",
+   "size": 7,
+   "position": {
+    "x": 50,
+    "y": 9.5
+   },
+   "rotation": 0,
+   "depth": 0.5,
+   "enabled": true
+  }
+ ],
+ "toolKey": "inv:kz-corn-1-7",
+ "minFloor": 1,
+ "edgeMargin": 1,
+ "customFonts": [],
+ "sacrificial": {
+  "under": null,
+  "sides": {
+   "left": null,
+   "right": null,
+   "front": null,
+   "back": null
+  },
+  "source": "default"
+ },
+ "breakthrough": 0.3,
+ "jawClearance": 1,
+ "shapes": [],
+ "workholding": {
+  "kind": "rotary-chuck",
+  "rotary": {
+   "stickout": 110,
+   "gripDiameter": 19,
+   "jawMode": "standard",
+   "tailstock": true,
+   "source": "wiki.makera.com/en/Z1/Accessories/4Axis"
+  }
+ }
+}

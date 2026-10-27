@@ -1,0 +1,1265 @@
+[
+ {
+  "id": "j01-topclamp-alu",
+  "title": "Z1 aluminium Top Clamp (the preloaded first job)",
+  "category": "aluminium plate, cut-out with tabs",
+  "source": {
+   "url": "https://wiki.makera.com/en/Z1/QuickStart",
+   "title": "Makera Z1 Quick Start — Top Clamp first job",
+   "credit": "Makera"
+  },
+  "intended": null,
+  "material": "aluminium-6061",
+  "stock": {
+   "shape": "block",
+   "length": 100,
+   "width": 100,
+   "thickness": 5
+  },
+  "workholding": "bracket + 6 mm under-board",
+  "operations": [
+   "through slot",
+   "profile cut-out with 4 tabs"
+  ],
+  "cutters": [
+   "inv:kz-o-flute-m-3-175-12"
+  ],
+  "outcome": "gap",
+  "refusal": {
+   "code": "no-feeds (stage feeds)",
+   "sentence": "no cutting parameters for a 3.175 mm cutter in Aluminium 6061: the starting table has no row for Aluminium 6061, and Makera's catalogue's rows are matched by Makera's own cutter id — which this cutter does not carry, so no row of theirs can name it. Pick a material the starting table covers, or a cutter Makera sells."
+  },
+  "predictedTimeMin": null,
+  "renderMethod": "independent-heightfield",
+  "files": {
+   "before": "assets/j01-topclamp-alu/before.png"
+  },
+  "jobFiles": [
+   "jobs/j01-topclamp-alu.json"
+  ],
+  "runFolders": [
+   "runs/j01-topclamp-alu"
+  ],
+  "notes": "Refused at feeds: no Aluminium 6061 row for the owned 3.175 metal O-flute. Makera's own table for this bit gives Al 12000/500/200/0.2 (makera.com/products/spiral-o-single-flute-bit-for-metal-1-8-shank), and the synced catalogue.json on this PC has the row; the CLI loads no catalogue and the owned cutter carries no Makera id."
+ },
+ {
+  "id": "j01-topclamp-alu-adjusted",
+  "title": "Top Clamp geometry on a PLA blank (proxy for the refused aluminium)",
+  "category": "aluminium plate, cut-out with tabs",
+  "source": {
+   "url": "https://wiki.makera.com/en/Z1/QuickStart",
+   "title": "Makera Z1 Quick Start — Top Clamp first job",
+   "credit": "Makera"
+  },
+  "intended": null,
+  "material": "pla",
+  "stock": {
+   "shape": "block",
+   "length": 100,
+   "width": 100,
+   "thickness": 5
+  },
+  "workholding": "bracket + 6 mm under-board",
+  "operations": [
+   "through slot",
+   "profile cut-out with 4 tabs"
+  ],
+  "cutters": [
+   "inv:kz-o-flute-3-175-25"
+  ],
+  "outcome": "simulated",
+  "refusal": null,
+  "predictedTimeMin": 10.6,
+  "renderMethod": "independent-heightfield",
+  "files": {
+   "before": "assets/j01-topclamp-alu-adjusted/before.png",
+   "after": "assets/j01-topclamp-alu-adjusted/after.png",
+   "after-top": "assets/j01-topclamp-alu-adjusted/after-top.png"
+  },
+  "jobFiles": [
+   "jobs/j01-topclamp-alu-proxy-adjusted.json"
+  ],
+  "runFolders": [
+   "runs/j01-topclamp-alu-proxy-adjusted"
+  ],
+  "notes": "Proxy, not the source job: PLA instead of 6061, non-metal O-flute. The first proxy with the metal O-flute was refused (tool-metal-line, runs/j01-topclamp-alu-proxy) although Makera rates that bit for plastic (10000/1000/300/1). Sheet says \"33 x 0.5 mm passes\"; the cut-out slot runs at a halved step-down."
+ },
+ {
+  "id": "j02-letters-plastic",
+  "title": "Letters milled into a plastic sheet (Z1, 3.175 flat, 1 mm deep)",
+  "category": "engraved sign/name",
+  "source": {
+   "url": "https://www.cnx-software.com/2026/09/01/makera-z1-desktop-cnc-review-smart-milling-4-axis-module-and-5w-laser-engraving/",
+   "title": "Makera Z1 desktop CNC review (CNX Software)",
+   "credit": "Jean-Luc Aufranc / CNX Software"
+  },
+  "intended": {
+   "file": "assets/j02-letters-plastic/intended.jpg",
+   "url": "https://www.cnx-software.com/wp-content/uploads/2026/09/makera-z1-cnc-milling-engraving-result.jpg",
+   "pageUrl": "https://www.cnx-software.com/2026/09/01/makera-z1-desktop-cnc-review-smart-milling-4-axis-module-and-5w-laser-engraving/",
+   "credit": "Jean-Luc Aufranc / CNX Software",
+   "note": "'CNX Software' letters milled into a beige plastic sheet, still in the machine. Third-party copyrighted photo; use only as an internal reference."
+  },
+  "material": "pla",
+  "stock": {
+   "shape": "block",
+   "length": 120,
+   "width": 60,
+   "thickness": 3
+  },
+  "workholding": "tape",
+  "operations": [
+   "engrave text (pocket) 1 mm"
+  ],
+  "cutters": [
+   "inv:kz-o-flute-3-175-25"
+  ],
+  "outcome": "simulated",
+  "refusal": null,
+  "predictedTimeMin": 2.0,
+  "renderMethod": "independent-heightfield",
+  "files": {
+   "before": "assets/j02-letters-plastic/before.png",
+   "after": "assets/j02-letters-plastic/after.png",
+   "after-top": "assets/j02-letters-plastic/after-top.png"
+  },
+  "jobFiles": [
+   "jobs/j02-letters-plastic.json"
+  ],
+  "runFolders": [
+   "runs/j02-letters-plastic"
+  ],
+  "notes": "Soft plastic sheet restated as PLA; taped (source holding not stated). App feeds 12000/500/200, 2 x 0.5 mm; source 12000/500/150, 0.5 mm stepdown, 7-10 min; app predicts 2.0 min."
+ },
+ {
+  "id": "j03-vise-text",
+  "title": "Small \"CNX Software\" text, part in the low-profile vise (Z1)",
+  "category": "vise-held engraving",
+  "source": {
+   "url": "https://www.cnx-software.com/2026/09/01/makera-z1-desktop-cnc-review-smart-milling-4-axis-module-and-5w-laser-engraving/",
+   "title": "Makera Z1 desktop CNC review (CNX Software)",
+   "credit": "Jean-Luc Aufranc / CNX Software"
+  },
+  "intended": {
+   "file": "assets/j03-vise-text/intended.jpg",
+   "url": "https://www.cnx-software.com/wp-content/uploads/2026/09/makera-z1-small-text-cnc-engraving-test.jpg",
+   "pageUrl": "https://www.cnx-software.com/2026/09/01/makera-z1-desktop-cnc-review-smart-milling-4-axis-module-and-5w-laser-engraving/",
+   "credit": "Jean-Luc Aufranc / CNX Software",
+   "note": "Small text on a plastic block held in the Makera low-profile vise. Third-party copyright."
+  },
+  "material": "pla",
+  "stock": {
+   "shape": "block",
+   "length": 80,
+   "width": 30,
+   "thickness": 6
+  },
+  "workholding": "vise",
+  "operations": [
+   "engrave text 0.5 mm",
+   "closed contour trace 0.5 mm"
+  ],
+  "cutters": [
+   "inv:kz-corn-1-7"
+  ],
+  "outcome": "simulated",
+  "refusal": null,
+  "predictedTimeMin": 2.7,
+  "renderMethod": "independent-heightfield",
+  "files": {
+   "before": "assets/j03-vise-text/before.png",
+   "after": "assets/j03-vise-text/after.png",
+   "after-top": "assets/j03-vise-text/after-top.png"
+  },
+  "jobFiles": [
+   "jobs/j03-vise-text.json"
+  ],
+  "runFolders": [
+   "runs/j03-vise-text"
+  ],
+  "notes": "Synthetic sheet restated as PLA. Source 250 mm/min, 0.25 stepdown, 10-15 min; app 500 mm/min, 0.3 mm passes, 2.7 min."
+ },
+ {
+  "id": "j04-metal-disc-text",
+  "title": "Text engraved on an aluminium disc (Z1)",
+  "category": "name tag in metal",
+  "source": {
+   "url": "https://www.cnx-software.com/2026/09/01/makera-z1-desktop-cnc-review-smart-milling-4-axis-module-and-5w-laser-engraving/",
+   "title": "Makera Z1 desktop CNC review (CNX Software)",
+   "credit": "Jean-Luc Aufranc / CNX Software"
+  },
+  "intended": {
+   "file": "assets/j04-metal-disc-text/intended.jpg",
+   "url": "https://www.cnx-software.com/wp-content/uploads/2026/09/makera-z1-review-aluminum-brass-cnc-milling-test.webp",
+   "pageUrl": "https://www.cnx-software.com/2026/09/01/makera-z1-desktop-cnc-review-smart-milling-4-axis-module-and-5w-laser-engraving/",
+   "credit": "Jean-Luc Aufranc / CNX Software",
+   "note": "An aluminium disc and a brass disc with milled text. Converted from webp. Third-party copyright."
+  },
+  "material": "aluminium-6061",
+  "stock": {
+   "shape": "block",
+   "length": 30,
+   "width": 30,
+   "thickness": 3
+  },
+  "workholding": "vise",
+  "operations": [
+   "engrave text 0.4 mm"
+  ],
+  "cutters": [
+   "inv:kz-o-flute-m-1-3"
+  ],
+  "outcome": "gap",
+  "refusal": {
+   "code": "no-feeds (stage feeds)",
+   "sentence": "no cutting parameters for a 1 mm cutter in Aluminium 6061: the starting table has no row for Aluminium 6061, and Makera's catalogue's rows are matched by Makera's own cutter id — which this cutter does not carry, so no row of theirs can name it. Pick a material the starting table covers, or a cutter Makera sells."
+  },
+  "predictedTimeMin": null,
+  "renderMethod": "independent-heightfield",
+  "files": {
+   "before": "assets/j04-metal-disc-text/before.png"
+  },
+  "jobFiles": [
+   "jobs/j04-metal-disc-text.json"
+  ],
+  "runFolders": [
+   "runs/j04-metal-disc-text"
+  ],
+  "notes": "Refused at feeds (no Aluminium row). Source cut it at 200-250 mm/min, 0.10-0.15 stepdown. A disc blank also cannot be expressed in the job file (rectangular or rotary cylinder only); used a 30x30 square."
+ },
+ {
+  "id": "j05-two-colour-sign",
+  "title": "Red-over-white two-colour plastic sign, 3.175 flat (Z1, vacuum bed)",
+  "category": "two-colour sign",
+  "source": {
+   "url": "https://www.cnx-software.com/2026/09/01/makera-z1-desktop-cnc-review-smart-milling-4-axis-module-and-5w-laser-engraving/",
+   "title": "Makera Z1 desktop CNC review (CNX Software)",
+   "credit": "Jean-Luc Aufranc / CNX Software"
+  },
+  "intended": {
+   "file": "assets/j05-two-colour-sign/intended.jpg",
+   "url": "https://www.cnx-software.com/wp-content/uploads/2026/09/makera-z1-vacuum-bed-cnc-milling-test.jpg",
+   "pageUrl": "https://www.cnx-software.com/2026/09/01/makera-z1-desktop-cnc-review-smart-milling-4-axis-module-and-5w-laser-engraving/",
+   "credit": "Jean-Luc Aufranc / CNX Software",
+   "note": "Red-over-white sheet with white 'CNX Software' text, on the vacuum bed. Third-party copyright."
+  },
+  "material": "plastic",
+  "stock": {
+   "shape": "block",
+   "length": 120,
+   "width": 50,
+   "thickness": 1.6
+  },
+  "workholding": "tape",
+  "operations": [
+   "engrave text through the colour cap"
+  ],
+  "cutters": [
+   "inv:kz-o-flute-3-175-25"
+  ],
+  "outcome": "gap",
+  "refusal": {
+   "code": "no-feeds (stage feeds)",
+   "sentence": "no cutting parameters for a 3.175 mm cutter in plastic (unspecified): the starting table has no row for plastic (unspecified), and Makera's catalogue's rows are matched by Makera's own cutter id — which this cutter does not carry, so no row of theirs can name it. Pick a material the starting table covers, or a cutter Makera sells."
+  },
+  "predictedTimeMin": null,
+  "renderMethod": "independent-heightfield",
+  "files": {
+   "before": "assets/j05-two-colour-sign/before.png"
+  },
+  "jobFiles": [
+   "jobs/j05-two-colour-sign.json"
+  ],
+  "runFolders": [
+   "runs/j05-two-colour-sign"
+  ],
+  "notes": "Refused at feeds: no flat-cutter row for \"plastic\" (the laminate material); the source cut it with a 3.175 2-flute flat at 12000/350-450/100. Vacuum bed cannot be expressed (used tape). Adjusted re-run with the 30-degree 0.3 V-bit (the only plastic row) did not finish in 600 s (runs/j05-two-colour-sign-adjusted, exit 124)."
+ },
+ {
+  "id": "j06-relief-mesh",
+  "title": "3D relief from a mesh (Z1 wolf; stand-in medallion mesh)",
+  "category": "3D relief / goal mesh",
+  "source": {
+   "url": "https://www.cnx-software.com/2026/09/01/makera-z1-desktop-cnc-review-smart-milling-4-axis-module-and-5w-laser-engraving/",
+   "title": "Makera Z1 desktop CNC review (CNX Software)",
+   "credit": "Jean-Luc Aufranc / CNX Software"
+  },
+  "intended": {
+   "file": "assets/j06-relief-mesh/intended.jpg",
+   "url": "https://www.cnx-software.com/wp-content/uploads/2026/09/makera-z1-review-precision-cnc-milling-test.webp",
+   "pageUrl": "https://www.cnx-software.com/2026/09/01/makera-z1-desktop-cnc-review-smart-milling-4-axis-module-and-5w-laser-engraving/",
+   "credit": "Jean-Luc Aufranc / CNX Software",
+   "note": "Wolf-head 3D relief in a framed square, held by the bracket and clamp. Downscaled from a 4032x3024 webp. Third-party copyright."
+  },
+  "material": "pla",
+  "stock": {
+   "shape": "block",
+   "length": 60,
+   "width": 60,
+   "thickness": 8
+  },
+  "workholding": "vise",
+  "operations": [
+   "goal mesh: raster rough + parallel finish (same cutter)"
+  ],
+  "cutters": [
+   "inv:kz-ball-nose-1-4"
+  ],
+  "outcome": "simulated",
+  "refusal": null,
+  "predictedTimeMin": 179.0,
+  "renderMethod": "independent-heightfield",
+  "files": {
+   "before": "assets/j06-relief-mesh/before.png",
+   "after": "assets/j06-relief-mesh/after.png",
+   "after-top": "assets/j06-relief-mesh/after-top.png"
+  },
+  "jobFiles": [
+   "jobs/j06-relief-mesh.json"
+  ],
+  "runFolders": [
+   "runs/j06-relief-mesh"
+  ],
+  "notes": "Wolf model not available: a generated 50x50 medallion heightfield stands in. One cutter roughs and finishes (the app cannot rough with a flat and finish with a ball, as the source did). App predicts 2 h 58 min with the 1 mm ball (source: 8-12 h total for a bigger relief). 2 mm ball variant: 1 h 6 min (runs/j06-relief-mesh-2mm)."
+ },
+ {
+  "id": "j07-photo-relief",
+  "title": "Photo-to-3D relief, ~90 mm, 3 mm deep, then cut out with tabs (Makera blog)",
+  "category": "image relief + cut-out",
+  "source": {
+   "url": "https://www.makera.com/blogs/cnc-beginner-guide/photo-to-3d-cnc-relief-ai",
+   "title": "Photo to 3D CNC relief with AI (Makera blog)",
+   "credit": "Makera"
+  },
+  "intended": null,
+  "material": "pla",
+  "stock": {
+   "shape": "block",
+   "length": 100,
+   "width": 150,
+   "thickness": 10
+  },
+  "workholding": "bracket",
+  "operations": [
+   "PNG relief 3 mm (rough + finish)",
+   "profile cut-out with 4 tabs"
+  ],
+  "cutters": [
+   "inv:kz-ball-nose-2-12",
+   "inv:kz-o-flute-3-175-25"
+  ],
+  "outcome": "simulated",
+  "refusal": null,
+  "predictedTimeMin": 86.8,
+  "renderMethod": "independent-heightfield",
+  "files": {
+   "before": "assets/j07-photo-relief/before.png",
+   "after": "assets/j07-photo-relief/after.png",
+   "after-top": "assets/j07-photo-relief/after-top.png"
+  },
+  "jobFiles": [
+   "jobs/j07-photo-relief.json",
+   "jobs/j07-photo-relief-b-cutout.json"
+  ],
+  "runFolders": [
+   "runs/j07-photo-relief",
+   "runs/j07-photo-relief-b-cutout"
+  ],
+  "notes": "Synthetic stone restated as PLA; a generated greyscale \"face\" PNG stands in for the photo. Two job files because the CLI cannot post a second cutter (see defect D1)."
+ },
+ {
+  "id": "j08-rotary-engrave",
+  "title": "Wrapped text on a 19 mm rod in the rotary chuck",
+  "category": "rotary 4th axis",
+  "source": {
+   "url": "https://wiki.makera.com/en/Z1/Accessories/4Axis",
+   "title": "Makera Z1 4th axis (wiki); no rod-engraving job found",
+   "credit": "Makera"
+  },
+  "intended": {
+   "file": "assets/j08-rotary-engrave/intended.jpg",
+   "url": "https://www.cnx-software.com/wp-content/uploads/2026/09/makera-z1-4th-axis-sculpture-milling-result.webp",
+   "pageUrl": "https://www.cnx-software.com/2026/09/01/makera-z1-desktop-cnc-review-smart-milling-4-axis-module-and-5w-laser-engraving/",
+   "credit": "Jean-Luc Aufranc / CNX Software",
+   "note": "A small bust carved on the 4th axis: a rotary 3D carve, not engraving on a rod. An alternative, Makera's blog hero 'Makera_Z1_4TH_Axis_in_Action' (indexed-milled wood blocks in the chuck, with overlay text), is in img-raw/j08 and not used. Third-party copyright."
+  },
+  "material": "pla",
+  "stock": {
+   "shape": "rod",
+   "diameter": 19,
+   "length": 100
+  },
+  "workholding": "rotary-chuck",
+  "operations": [
+   "wrapped engrave text 0.5 mm"
+  ],
+  "cutters": [
+   "inv:kz-corn-1-7"
+  ],
+  "outcome": "simulated",
+  "refusal": null,
+  "predictedTimeMin": 2.3,
+  "renderMethod": "independent-heightfield",
+  "files": {
+   "before": "assets/j08-rotary-engrave/before.png",
+   "after": "assets/j08-rotary-engrave/after.png",
+   "after-top": "assets/j08-rotary-engrave/after-top.png"
+  },
+  "jobFiles": [
+   "jobs/j08-rotary-engrave.json"
+  ],
+  "runFolders": [
+   "runs/j08-rotary-engrave"
+  ],
+  "notes": "Source intended image is the cnx 4th-axis SCULPTURE (3D rotary carving), which the app cannot express; this entry is a wrapped engraving instead. A-axis sign convention in the render is assumed (the unrolled after-top reads correctly)."
+ },
+ {
+  "id": "j09-pcb",
+  "title": "PCB isolation + drill + outline, 127x101x1.7 (Carvera)",
+  "category": "PCB",
+  "source": {
+   "url": "https://raajthakur1.github.io/Thakur-Raaj-Portfolio/courses/senior_engineering/pcb_milling/",
+   "title": "PCB milling on the Carvera",
+   "credit": "Raaj Thakur"
+  },
+  "intended": {
+   "file": "assets/j09-pcb/intended.jpg",
+   "url": "https://raajthakur1.github.io/Thakur-Raaj-Portfolio/courses/senior_engineering/media/pcb_milling/finished_board.png",
+   "pageUrl": "https://raajthakur1.github.io/Thakur-Raaj-Portfolio/courses/senior_engineering/pcb_milling/",
+   "credit": "Raaj Thakur",
+   "note": "Finished milled PCB with drilled pads. The source is only 258x158 px and was not upscaled."
+  },
+  "material": "pla",
+  "stock": {
+   "shape": "block",
+   "length": 127,
+   "width": 101,
+   "thickness": 1.7
+  },
+  "workholding": "bracket + 6 mm under-board",
+  "operations": [
+   "isolation traces 0.1 mm",
+   "through drills 1 mm",
+   "outline with 3 tabs"
+  ],
+  "cutters": [
+   "inv:kz-engrave-m-30-0-2",
+   "inv:kz-drill-1-10",
+   "inv:kz-corn-1-7"
+  ],
+  "outcome": "cannot-express",
+  "refusal": {
+   "code": "no-feeds (stage feeds)",
+   "sentence": "no cutting parameters for a 0.2 mm V-bit in pla"
+  },
+  "predictedTimeMin": null,
+  "renderMethod": "independent-heightfield",
+  "files": {
+   "before": "assets/j09-pcb/before.png"
+  },
+  "jobFiles": [
+   "jobs/j09-pcb-a-isolation.json"
+  ],
+  "runFolders": [
+   "runs/j09-pcb-a-isolation"
+  ],
+  "notes": "PCB/FR4 is not a material in the job schema; run on PLA as a proxy. Proxy isolation with the 0.2 mm bit refused: no V row under 0.3 mm. Drill program refused: tool-refused (CLI does not pass drill.pointAngleDeg); with the angle typed, its OWN program fails its simulation (rapid-through-stock)."
+ },
+ {
+  "id": "j09-pcb-adjusted",
+  "title": "PCB proxy on PLA: isolation (0.3 mm V) + outline (drills refused)",
+  "category": "PCB",
+  "source": {
+   "url": "https://raajthakur1.github.io/Thakur-Raaj-Portfolio/courses/senior_engineering/pcb_milling/",
+   "title": "PCB milling on the Carvera",
+   "credit": "Raaj Thakur"
+  },
+  "intended": {
+   "file": "assets/j09-pcb/intended.jpg",
+   "url": "https://raajthakur1.github.io/Thakur-Raaj-Portfolio/courses/senior_engineering/media/pcb_milling/finished_board.png",
+   "pageUrl": "https://raajthakur1.github.io/Thakur-Raaj-Portfolio/courses/senior_engineering/pcb_milling/",
+   "credit": "Raaj Thakur",
+   "note": "Finished milled PCB with drilled pads. The source is only 258x158 px and was not upscaled."
+  },
+  "material": "pla",
+  "stock": {
+   "shape": "block",
+   "length": 127,
+   "width": 101,
+   "thickness": 1.7
+  },
+  "workholding": "bracket + 6 mm under-board",
+  "operations": [
+   "isolation traces 0.1 mm",
+   "outline cut-out with 3 tabs"
+  ],
+  "cutters": [
+   "inv:kz-engrave-30-0-3",
+   "inv:kz-corn-1-7"
+  ],
+  "outcome": "simulated",
+  "refusal": null,
+  "predictedTimeMin": 12.8,
+  "renderMethod": "independent-heightfield",
+  "files": {
+   "before": "assets/j09-pcb-adjusted/before.png",
+   "after": "assets/j09-pcb-adjusted/after.png",
+   "after-top": "assets/j09-pcb-adjusted/after-top.png"
+  },
+  "jobFiles": [
+   "jobs/j09-pcb-a-isolation-adjusted.json",
+   "jobs/j09-pcb-c-outline.json"
+  ],
+  "runFolders": [
+   "runs/j09-pcb-a-isolation-adjusted",
+   "runs/j09-pcb-c-outline"
+  ],
+  "notes": "Drills omitted: the drill program is refused by its own simulation (runs/j09-pcb-b-drill-adjusted)."
+ },
+ {
+  "id": "j10-vcarve-coaster",
+  "title": "V-carved coaster, 90-degree V (Shapeoko) — on the 90-degree chamfer bit",
+  "category": "V-carve sign/coaster",
+  "source": {
+   "url": "https://community.carbide3d.com/t/v-carving-depth-of-cut-help-me-understand/13992",
+   "title": "V-carving depth of cut (Carbide 3D forum)",
+   "credit": "Carbide 3D Community"
+  },
+  "intended": {
+   "file": "assets/j10-vcarve-coaster/intended.jpg",
+   "url": "https://community.carbide3d.com/uploads/default/original/3X/0/7/0734e3f52b9e4e96c03487521f05a54d23469690.jpeg",
+   "pageUrl": "https://community.carbide3d.com/t/v-carving-depth-of-cut-help-me-understand/13992",
+   "credit": "Carbide 3D Community forum poster (thread opener)",
+   "note": "Three small oak plaques/coasters, V-carved and paint-filled (wreath, orca, dandelion 'Ruth'). Forum user content, copyright the poster."
+  },
+  "material": "pla",
+  "stock": {
+   "shape": "block",
+   "length": 100,
+   "width": 100,
+   "thickness": 6
+  },
+  "workholding": "tape",
+  "operations": [
+   "V-carve text (plane)",
+   "V-carve heart (variable depth)"
+  ],
+  "cutters": [
+   "inv:kz-chamfer-90"
+  ],
+  "outcome": "refused-right",
+  "refusal": {
+   "code": "item-empty",
+   "sentence": "Engrave text \"HOME\" has nothing this cutter can reach: every stroke is thinner than a 3.175 mm 90° V-bit."
+  },
+  "predictedTimeMin": null,
+  "renderMethod": "independent-heightfield",
+  "files": {
+   "before": "assets/j10-vcarve-coaster/before.png"
+  },
+  "jobFiles": [
+   "jobs/j10-vcarve-coaster.json"
+  ],
+  "runFolders": [
+   "runs/j10-vcarve-coaster"
+  ],
+  "notes": "House has no 90-degree V-bit; its 90-degree chamfer bit has no tip diameter on record, and the job is refused with item-empty (\"thinner than a 3.175 mm 90° V-bit\") plus vcarve-groove-too-narrow (0 µm). Wood restated as PLA."
+ },
+ {
+  "id": "j10-vcarve-coaster-adjusted",
+  "title": "V-carved coaster on PLA with the 30-degree 0.5 mm engraver",
+  "category": "V-carve sign/coaster",
+  "source": {
+   "url": "https://community.carbide3d.com/t/v-carving-depth-of-cut-help-me-understand/13992",
+   "title": "V-carving depth of cut (Carbide 3D forum)",
+   "credit": "Carbide 3D Community"
+  },
+  "intended": {
+   "file": "assets/j10-vcarve-coaster/intended.jpg",
+   "url": "https://community.carbide3d.com/uploads/default/original/3X/0/7/0734e3f52b9e4e96c03487521f05a54d23469690.jpeg",
+   "pageUrl": "https://community.carbide3d.com/t/v-carving-depth-of-cut-help-me-understand/13992",
+   "credit": "Carbide 3D Community forum poster (thread opener)",
+   "note": "Three small oak plaques/coasters, V-carved and paint-filled (wreath, orca, dandelion 'Ruth'). Forum user content, copyright the poster."
+  },
+  "material": "pla",
+  "stock": {
+   "shape": "block",
+   "length": 100,
+   "width": 100,
+   "thickness": 6
+  },
+  "workholding": "tape",
+  "operations": [
+   "V-carve text (plane)",
+   "V-carve heart (variable depth)"
+  ],
+  "cutters": [
+   "inv:kz-engrave-30-0-5"
+  ],
+  "outcome": "simulated",
+  "refusal": null,
+  "predictedTimeMin": 17.5,
+  "renderMethod": "independent-heightfield",
+  "files": {
+   "before": "assets/j10-vcarve-coaster-adjusted/before.png",
+   "after": "assets/j10-vcarve-coaster-adjusted/after.png",
+   "after-top": "assets/j10-vcarve-coaster-adjusted/after-top.png"
+  },
+  "jobFiles": [
+   "jobs/j10-vcarve-coaster-30deg.json"
+  ],
+  "runFolders": [
+   "runs/j10-vcarve-coaster-30deg"
+  ],
+  "notes": "Variable-depth heart with no flat cutter after it: the core is left standing (vcarve-variable-core expected)."
+ },
+ {
+  "id": "j11-inlay",
+  "title": "V-carve inlay star, 5.1 mm pocket, 1.3 mm glue gap (Shapeoko recipe)",
+  "category": "inlay",
+  "source": {
+   "url": "https://community.carbide3d.com/t/vcarve-inlays-with-vcarve-desktop-details-and-discoveries/6552",
+   "title": "VCarve inlays — details and discoveries",
+   "credit": "Carbide 3D Community"
+  },
+  "intended": {
+   "file": "assets/j11-inlay/intended.jpg",
+   "url": "https://community.carbide3d.com/uploads/default/original/2X/9/9c79ec39985a3db09303a45fe0968696f80d7021.jpg",
+   "pageUrl": "https://community.carbide3d.com/t/vcarve-inlays-with-vcarve-desktop-details-and-discoveries/6552",
+   "credit": "Carbide 3D Community forum poster (thread opener)",
+   "note": "Three band logos V-carved into a wood board on the Shapeoko bed. The thumbnail looks like the cut stage (pockets, or plugs before glue-up), not a finished glued and planed inlay. Check before relying on it. Copyright the poster."
+  },
+  "material": "pla",
+  "stock": {
+   "shape": "block",
+   "length": 70,
+   "width": 70,
+   "thickness": 8
+  },
+  "workholding": "vise",
+  "operations": [
+   "inlay female pocket"
+  ],
+  "cutters": [
+   "inv:kz-engrave-30-0-5"
+  ],
+  "outcome": "crashed",
+  "refusal": {
+   "code": "timeout",
+   "sentence": "exit=124 wall=615.5s"
+  },
+  "predictedTimeMin": null,
+  "renderMethod": "independent-heightfield",
+  "files": {
+   "before": "assets/j11-inlay/before.png"
+  },
+  "jobFiles": [
+   "jobs/j11-inlay-female.json"
+  ],
+  "runFolders": [
+   "runs/j11-inlay-female"
+  ],
+  "notes": "With the 30-degree 0.5 mm engraver (closest to the recommended 60-degree), the female did not finish in 600 s (exit 124, no output). The male derived from a small probe female also never finished (runs/c-inlay-m)."
+ },
+ {
+  "id": "j11-inlay-adjusted",
+  "title": "Inlay female on PLA with the 90-degree chamfer bit",
+  "category": "inlay",
+  "source": {
+   "url": "https://community.carbide3d.com/t/vcarve-inlays-with-vcarve-desktop-details-and-discoveries/6552",
+   "title": "VCarve inlays — details and discoveries",
+   "credit": "Carbide 3D Community"
+  },
+  "intended": {
+   "file": "assets/j11-inlay/intended.jpg",
+   "url": "https://community.carbide3d.com/uploads/default/original/2X/9/9c79ec39985a3db09303a45fe0968696f80d7021.jpg",
+   "pageUrl": "https://community.carbide3d.com/t/vcarve-inlays-with-vcarve-desktop-details-and-discoveries/6552",
+   "credit": "Carbide 3D Community forum poster (thread opener)",
+   "note": "Three band logos V-carved into a wood board on the Shapeoko bed. The thumbnail looks like the cut stage (pockets, or plugs before glue-up), not a finished glued and planed inlay. Check before relying on it. Copyright the poster."
+  },
+  "material": "pla",
+  "stock": {
+   "shape": "block",
+   "length": 70,
+   "width": 70,
+   "thickness": 8
+  },
+  "workholding": "vise",
+  "operations": [
+   "inlay female pocket"
+  ],
+  "cutters": [
+   "inv:kz-chamfer-90"
+  ],
+  "outcome": "simulated",
+  "refusal": null,
+  "predictedTimeMin": 3.9,
+  "renderMethod": "independent-heightfield",
+  "files": {
+   "before": "assets/j11-inlay-adjusted/before.png",
+   "after": "assets/j11-inlay-adjusted/after.png",
+   "after-top": "assets/j11-inlay-adjusted/after-top.png"
+  },
+  "jobFiles": [
+   "jobs/j11-inlay-female-90.json"
+  ],
+  "runFolders": [
+   "runs/j11-inlay-female-90"
+  ],
+  "notes": "Source says avoid 90 degrees; used because the 30-degree run hangs."
+ },
+ {
+  "id": "j11-inlay-male",
+  "title": "Inlay male plug (derived by the app's inlayMaleJob)",
+  "category": "inlay",
+  "source": {
+   "url": "https://community.carbide3d.com/t/vcarve-inlays-with-vcarve-desktop-details-and-discoveries/6552",
+   "title": "VCarve inlays — details and discoveries",
+   "credit": "Carbide 3D Community"
+  },
+  "intended": {
+   "file": "assets/j11-inlay/intended.jpg",
+   "url": "https://community.carbide3d.com/uploads/default/original/2X/9/9c79ec39985a3db09303a45fe0968696f80d7021.jpg",
+   "pageUrl": "https://community.carbide3d.com/t/vcarve-inlays-with-vcarve-desktop-details-and-discoveries/6552",
+   "credit": "Carbide 3D Community forum poster (thread opener)",
+   "note": "Three band logos V-carved into a wood board on the Shapeoko bed. The thumbnail looks like the cut stage (pockets, or plugs before glue-up), not a finished glued and planed inlay. Check before relying on it. Copyright the poster."
+  },
+  "material": "pla",
+  "stock": {
+   "shape": "block",
+   "length": 70,
+   "width": 70,
+   "thickness": 8
+  },
+  "workholding": "vise",
+  "operations": [
+   "cutaway around the mirrored plug"
+  ],
+  "cutters": [
+   "inv:kz-chamfer-90"
+  ],
+  "outcome": "simulated",
+  "refusal": null,
+  "predictedTimeMin": 45.0,
+  "renderMethod": "independent-heightfield",
+  "files": {
+   "before": "assets/j11-inlay-male/before.png",
+   "after": "assets/j11-inlay-male/after.png",
+   "after-top": "assets/j11-inlay-male/after-top.png"
+  },
+  "jobFiles": [
+   "jobs/j11-inlay-male-90.json"
+  ],
+  "runFolders": [
+   "runs/j11-inlay-male-90"
+  ],
+  "notes": "Derived with a scratch tsx script calling inlayMaleJob (the CLI has no male step). islandInsetMm came out 5.1 (= pocket depth x tan45), not glue gap x tan45 = 1.3 as the guide words it; unverified. Sheet: \"chamfer — cutting diameter unknown\" next to \"⌀ 3.175 mm cutting\"."
+ },
+ {
+  "id": "j12-alu-medallion",
+  "title": "Aluminium medallion: 1.5 mm star pocket + round profile (Shapeoko)",
+  "category": "aluminium pocket + profile",
+  "source": {
+   "url": "https://blog.patshead.com/2019/07/my-first-attempt-to-cnc-aluminum.html",
+   "title": "My first attempt to CNC aluminum",
+   "credit": "Pat Regan / patshead.com"
+  },
+  "intended": {
+   "file": "assets/j12-alu-medallion/intended.jpg",
+   "url": "https://blog.patshead.com/Assets/ShapeokoAluminumCNC1.jpg",
+   "pageUrl": "https://blog.patshead.com/2019/07/my-first-attempt-to-cnc-aluminum.html",
+   "credit": "Pat Regan / patshead.com",
+   "note": "The wrench-logo pocket in aluminium plate. The author abandoned the job at the contour, so the part is not cut out. Kept at 640 px (native size)."
+  },
+  "material": "aluminium-6061",
+  "stock": {
+   "shape": "block",
+   "length": 70,
+   "width": 70,
+   "thickness": 6.35
+  },
+  "workholding": "vise",
+  "operations": [
+   "star pocket 1.5 mm",
+   "round profile with 4 tabs"
+  ],
+  "cutters": [
+   "inv:kz-o-flute-m-2-8"
+  ],
+  "outcome": "gap",
+  "refusal": {
+   "code": "through-needs-board",
+   "sentence": "The cut-out cuts through the blank, which needs a sacrificial under-board at least 1.3 mm thick; add one under the part or this cut reaches the vise."
+  },
+  "predictedTimeMin": null,
+  "renderMethod": "independent-heightfield",
+  "files": {
+   "before": "assets/j12-alu-medallion/before.png"
+  },
+  "jobFiles": [
+   "jobs/j12-alu-medallion.json"
+  ],
+  "runFolders": [
+   "runs/j12-alu-medallion"
+  ],
+  "notes": "Refused: through-needs-board in the vise (Makera's low-profile vise lifts stock for through cuts — wiki Low-Profile-Vise) and tab-unplaceable on a circle (every CAM puts tabs on arcs). The aluminium feed refusal is behind these."
+ },
+ {
+  "id": "j12-alu-medallion-adjusted",
+  "title": "Medallion on PLA, board under, no tabs",
+  "category": "aluminium pocket + profile",
+  "source": {
+   "url": "https://blog.patshead.com/2019/07/my-first-attempt-to-cnc-aluminum.html",
+   "title": "My first attempt to CNC aluminum",
+   "credit": "Pat Regan / patshead.com"
+  },
+  "intended": {
+   "file": "assets/j12-alu-medallion/intended.jpg",
+   "url": "https://blog.patshead.com/Assets/ShapeokoAluminumCNC1.jpg",
+   "pageUrl": "https://blog.patshead.com/2019/07/my-first-attempt-to-cnc-aluminum.html",
+   "credit": "Pat Regan / patshead.com",
+   "note": "The wrench-logo pocket in aluminium plate. The author abandoned the job at the contour, so the part is not cut out. Kept at 640 px (native size)."
+  },
+  "material": "pla",
+  "stock": {
+   "shape": "block",
+   "length": 70,
+   "width": 70,
+   "thickness": 6.35
+  },
+  "workholding": "vise + 6 mm under-board",
+  "operations": [
+   "star pocket 1.5 mm",
+   "round profile, released"
+  ],
+  "cutters": [
+   "inv:kz-o-flute-2-12"
+  ],
+  "outcome": "simulated",
+  "refusal": null,
+  "predictedTimeMin": 15.1,
+  "renderMethod": "independent-heightfield",
+  "files": {
+   "before": "assets/j12-alu-medallion-adjusted/before.png",
+   "after": "assets/j12-alu-medallion-adjusted/after.png",
+   "after-top": "assets/j12-alu-medallion-adjusted/after-top.png"
+  },
+  "jobFiles": [
+   "jobs/j12-alu-medallion-proxy-adjusted.json"
+  ],
+  "runFolders": [
+   "runs/j12-alu-medallion-proxy-adjusted"
+  ],
+  "notes": "Proxy PLA, non-metal 2 mm O-flute, under-board declared, tabs removed (released-onto-board warning)."
+ },
+ {
+  "id": "j13-tool-tray",
+  "title": "Nomad 3 starter tool tray (bamboo -> PLA), taped",
+  "category": "2.5D pocketed tray",
+  "source": {
+   "url": "https://community.carbide3d.com/t/nomad-3-tool-tray-starter-project-remixed/28163",
+   "title": "Nomad 3 tool tray starter project, remixed",
+   "credit": "Carbide 3D Community"
+  },
+  "intended": {
+   "file": "assets/j13-tool-tray/intended.jpg",
+   "url": "https://community.carbide3d.com/uploads/default/original/3X/1/b/1ba1dfeba36c58b66d26a12580f072dbc308f3b7.jpeg",
+   "pageUrl": "https://community.carbide3d.com/t/nomad-3-tool-tray-starter-project-remixed/28163",
+   "credit": "Carbide 3D Community forum poster",
+   "note": "Bamboo tool tray with square and round pockets, on the Nomad bed. Copyright the poster."
+  },
+  "material": "pla",
+  "stock": {
+   "shape": "block",
+   "length": 150,
+   "width": 100,
+   "thickness": 15
+  },
+  "workholding": "tape + 6 mm under-board",
+  "operations": [
+   "2 rect pockets 8 mm",
+   "slot pocket 6 mm",
+   "profile cut-out with 4 tabs"
+  ],
+  "cutters": [
+   "inv:kz-o-flute-3-175-25"
+  ],
+  "outcome": "simulated",
+  "refusal": null,
+  "predictedTimeMin": 207.8,
+  "renderMethod": "independent-heightfield",
+  "files": {
+   "before": "assets/j13-tool-tray/before.png",
+   "after": "assets/j13-tool-tray/after.png",
+   "after-top": "assets/j13-tool-tray/after-top.png"
+  },
+  "jobFiles": [
+   "jobs/j13-tool-tray.json"
+  ],
+  "runFolders": [
+   "runs/j13-tool-tray"
+  ],
+  "notes": "Dimensions estimated (source PDF unreadable). 3 h 27 min predicted; CLI wall time 95 s."
+ },
+ {
+  "id": "j14-dog-tag",
+  "title": "Engraved anodised-aluminium dog tag, taped (Bantam)",
+  "category": "name tag in metal (V-bit)",
+  "source": {
+   "url": "https://support.bantamtools.com/hc/en-us/articles/360038821814-Engraving-Dog-Tags",
+   "title": "Engraving Dog Tags (Bantam Tools)",
+   "credit": "Bantam Tools"
+  },
+  "intended": null,
+  "material": "aluminium-6061",
+  "stock": {
+   "shape": "block",
+   "length": 51,
+   "width": 28,
+   "thickness": 1
+  },
+  "workholding": "tape",
+  "operations": [
+   "V-engrave text 0.1 mm"
+  ],
+  "cutters": [
+   "inv:kz-engrave-m-60-0-1"
+  ],
+  "outcome": "gap",
+  "refusal": {
+   "code": "no-feeds (stage feeds)",
+   "sentence": "no cutting parameters for a 0.1 mm V-bit in Aluminium 6061: the starting table has a V-bit row for PLA, PETG and plastic only, and Makera's catalogue states a flat end mill's numbers, never a cone's. Pick PLA, PETG or plastic, or a flat end mill for this material."
+  },
+  "predictedTimeMin": null,
+  "renderMethod": "independent-heightfield",
+  "files": {
+   "before": "assets/j14-dog-tag/before.png"
+  },
+  "jobFiles": [
+   "jobs/j14-dog-tag-adjusted.json"
+  ],
+  "runFolders": [
+   "runs/j14-dog-tag-adjusted"
+  ],
+  "notes": "First run refused by minFloor 1 mm on a 1 mm tag (right; minFloor lowered to 0.5). Then refused: \"Makera's catalogue states a flat end mill's numbers, never a cone's\" — false: the synced catalogue has 6061 rows for every metal engraving bit (12000/500/200/0.2) and Makera's store table states them."
+ },
+ {
+  "id": "j15-acrylic-keychain",
+  "title": "Acrylic keychain: engraved name, ring hole, cut out with tabs",
+  "category": "acrylic cut-out",
+  "source": {
+   "url": "https://easel.com/gallery/nSjDUyHE",
+   "title": "Darth Vader keychain (Easel gallery)",
+   "credit": "Easel gallery author"
+  },
+  "intended": {
+   "file": "assets/j15-acrylic-keychain/intended.jpg",
+   "url": "https://assets.easel.com/rails/active_storage/representations/proxy/eyJfcmFpbHMiOnsiZGF0YSI6MzI0MzcwMjcxLCJwdXIiOiJibG9iX2lkIn19--55000783967f74fbd45303dc3ff8cf6080dc163d/eyJfcmFpbHMiOnsiZGF0YSI6eyJmb3JtYXQiOiJqcGVnIiwicmVzaXplX3RvX2xpbWl0IjpbMTIwMCw4MDBdLCJzYXZlciI6eyJxdWFsaXR5Ijo4MH19LCJwdXIiOiJ2YXJpYXRpb24ifX0=--2f8bc4b447fb79a9a03719eb01c73d8341df746d/1508917834_Darth_1.jpg",
+   "pageUrl": "https://easel.com/gallery/nSjDUyHE",
+   "credit": "Easel gallery author (watermark 'scrap wood city')",
+   "note": "Clear cast-acrylic Darth Vader keychain, engraved and black paint-filled. Gallery user content."
+  },
+  "material": "acrylic",
+  "stock": {
+   "shape": "block",
+   "length": 70,
+   "width": 50,
+   "thickness": 3
+  },
+  "workholding": "tape + 6 mm under-board",
+  "operations": [
+   "engrave text",
+   "bore 5 mm through",
+   "profile cut-out with 2 tabs"
+  ],
+  "cutters": [
+   "inv:kz-o-flute-3-175-25"
+  ],
+  "outcome": "gap",
+  "refusal": {
+   "code": "item-empty",
+   "sentence": "Engrave text \"KEYS\" has nothing this cutter can reach: every stroke is thinner than a 3.175 mm cutter."
+  },
+  "predictedTimeMin": null,
+  "renderMethod": "independent-heightfield",
+  "files": {
+   "before": "assets/j15-acrylic-keychain/before.png"
+  },
+  "jobFiles": [
+   "jobs/j15-acrylic-keychain.json"
+  ],
+  "runFolders": [
+   "runs/j15-acrylic-keychain"
+  ],
+  "notes": "Refused (item-empty: 9 mm text cannot be engraved with a 3.175 cutter — right); behind it, acrylic has no feed row for the house cutter although Makera's acrylic guide gives 10000/1000/1 mm for exactly this bit."
+ },
+ {
+  "id": "j15-acrylic-keychain-adjusted",
+  "title": "Keychain on PLA: cut-out + ring bore, then V-engraved name",
+  "category": "acrylic cut-out",
+  "source": {
+   "url": "https://easel.com/gallery/nSjDUyHE",
+   "title": "Darth Vader keychain (Easel gallery)",
+   "credit": "Easel gallery author"
+  },
+  "intended": {
+   "file": "assets/j15-acrylic-keychain/intended.jpg",
+   "url": "https://assets.easel.com/rails/active_storage/representations/proxy/eyJfcmFpbHMiOnsiZGF0YSI6MzI0MzcwMjcxLCJwdXIiOiJibG9iX2lkIn19--55000783967f74fbd45303dc3ff8cf6080dc163d/eyJfcmFpbHMiOnsiZGF0YSI6eyJmb3JtYXQiOiJqcGVnIiwicmVzaXplX3RvX2xpbWl0IjpbMTIwMCw4MDBdLCJzYXZlciI6eyJxdWFsaXR5Ijo4MH19LCJwdXIiOiJ2YXJpYXRpb24ifX0=--2f8bc4b447fb79a9a03719eb01c73d8341df746d/1508917834_Darth_1.jpg",
+   "pageUrl": "https://easel.com/gallery/nSjDUyHE",
+   "credit": "Easel gallery author (watermark 'scrap wood city')",
+   "note": "Clear cast-acrylic Darth Vader keychain, engraved and black paint-filled. Gallery user content."
+  },
+  "material": "pla",
+  "stock": {
+   "shape": "block",
+   "length": 70,
+   "width": 50,
+   "thickness": 3
+  },
+  "workholding": "tape + 6 mm under-board",
+  "operations": [
+   "bore 5 mm through",
+   "profile cut-out with 2 tabs",
+   "V-engrave text 0.3 mm"
+  ],
+  "cutters": [
+   "inv:kz-o-flute-3-175-25",
+   "inv:kz-engrave-30-0-3"
+  ],
+  "outcome": "simulated",
+  "refusal": null,
+  "predictedTimeMin": 8.1,
+  "renderMethod": "independent-heightfield",
+  "files": {
+   "before": "assets/j15-acrylic-keychain-adjusted/before.png",
+   "after": "assets/j15-acrylic-keychain-adjusted/after.png",
+   "after-top": "assets/j15-acrylic-keychain-adjusted/after-top.png"
+  },
+  "jobFiles": [
+   "jobs/j15-acrylic-keychain-proxy-adjusted.json",
+   "jobs/j15-acrylic-keychain-proxy-b-engrave.json"
+  ],
+  "runFolders": [
+   "runs/j15-acrylic-keychain-proxy-adjusted",
+   "runs/j15-acrylic-keychain-proxy-b-engrave"
+  ],
+  "notes": "PLA proxy. Sheet says \"543 x 0.5 mm passes\"."
+ },
+ {
+  "id": "j16-chamfer-part",
+  "title": "Plate with a 1 mm 90-degree edge chamfer, then cut out",
+  "category": "chamfered part",
+  "source": {
+   "url": "https://www.makera.com/products/chamfering-bit",
+   "title": "Chamfering bit (Makera store; no project found)",
+   "credit": "Makera"
+  },
+  "intended": null,
+  "material": "pla",
+  "stock": {
+   "shape": "block",
+   "length": 70,
+   "width": 50,
+   "thickness": 6
+  },
+  "workholding": "tape + 6 mm under-board",
+  "operations": [
+   "outside chamfer 1 mm",
+   "profile cut-out with 2 tabs"
+  ],
+  "cutters": [
+   "inv:kz-chamfer-90",
+   "inv:kz-o-flute-3-175-25"
+  ],
+  "outcome": "simulated",
+  "refusal": null,
+  "predictedTimeMin": 9.8,
+  "renderMethod": "independent-heightfield",
+  "files": {
+   "before": "assets/j16-chamfer-part/before.png",
+   "after": "assets/j16-chamfer-part/after.png",
+   "after-top": "assets/j16-chamfer-part/after-top.png"
+  },
+  "jobFiles": [
+   "jobs/j16-chamfer-a-bevel.json",
+   "jobs/j16-chamfer-b-cutout.json"
+  ],
+  "runFolders": [
+   "runs/j16-chamfer-a-bevel",
+   "runs/j16-chamfer-b-cutout"
+  ],
+  "notes": "PLA. Two job files (CLI one-cutter limit), so the app's chamfer-order check cannot run."
+ },
+ {
+  "id": "j17-faceplate",
+  "title": "Hammond 1590B lid faceplate in aluminium: 3 pot holes, DC jack, window",
+  "category": "enclosure faceplate",
+  "source": {
+   "url": "https://lovemyswitches.com/1590b-enclosure-cnc-pro-bare-aluminum",
+   "title": "1590B enclosure, CNC Pro (Love My Switches)",
+   "credit": "Love My Switches"
+  },
+  "intended": null,
+  "material": "aluminium-6061",
+  "stock": {
+   "shape": "block",
+   "length": 112,
+   "width": 61,
+   "thickness": 3
+  },
+  "workholding": "bracket + 6 mm under-board",
+  "operations": [
+   "4 bores through",
+   "rect window through"
+  ],
+  "cutters": [
+   "inv:kz-o-flute-m-3-175-12"
+  ],
+  "outcome": "gap",
+  "refusal": {
+   "code": "no-feeds (stage feeds)",
+   "sentence": "no cutting parameters for a 3.175 mm cutter in Aluminium 6061: the starting table has no row for Aluminium 6061, and Makera's catalogue's rows are matched by Makera's own cutter id — which this cutter does not carry, so no row of theirs can name it. Pick a material the starting table covers, or a cutter Makera sells."
+  },
+  "predictedTimeMin": null,
+  "renderMethod": "independent-heightfield",
+  "files": {
+   "before": "assets/j17-faceplate/before.png"
+  },
+  "jobFiles": [
+   "jobs/j17-faceplate-alu.json"
+  ],
+  "runFolders": [
+   "runs/j17-faceplate-alu"
+  ],
+  "notes": "Refused at feeds (aluminium). The PLA proxy (runs/j17-faceplate-proxy) generated but its own program failed its simulation: rapid-through-stock (7 rapids). Source image is the blank box, so intended is null."
+ },
+ {
+  "id": "j17-faceplate-adjusted",
+  "title": "Faceplate on PLA (proxy) — refused by its own simulation",
+  "category": "enclosure faceplate",
+  "source": {
+   "url": "https://lovemyswitches.com/1590b-enclosure-cnc-pro-bare-aluminum",
+   "title": "1590B enclosure, CNC Pro (Love My Switches)",
+   "credit": "Love My Switches"
+  },
+  "intended": null,
+  "material": "pla",
+  "stock": {
+   "shape": "block",
+   "length": 112,
+   "width": 61,
+   "thickness": 3
+  },
+  "workholding": "bracket + 6 mm under-board",
+  "operations": [
+   "4 bores through",
+   "rect window through"
+  ],
+  "cutters": [
+   "inv:kz-o-flute-3-175-25"
+  ],
+  "outcome": "crashed",
+  "refusal": {
+   "code": "rapid-through-stock",
+   "sentence": "7 rapids pass through material still present at that point in the program (first at line 976)"
+  },
+  "predictedTimeMin": null,
+  "renderMethod": "independent-heightfield",
+  "files": {
+   "before": "assets/j17-faceplate-adjusted/before.png"
+  },
+  "jobFiles": [
+   "jobs/j17-faceplate-proxy.json"
+  ],
+  "runFolders": [
+   "runs/j17-faceplate-proxy"
+  ],
+  "notes": "Generator defect: the program the app wrote fails the app's own simulation (rapid-through-stock); nothing written."
+ },
+ {
+  "id": "j18-thread-alu",
+  "title": "M3 threads milled into aluminium (Makera thread mill)",
+  "category": "threads",
+  "source": {
+   "url": "https://global.makera.com/products/thread-milling-bit-1-8-shank",
+   "title": "Thread milling bit (Makera store; no job found)",
+   "credit": "Makera"
+  },
+  "intended": null,
+  "material": "aluminium-6061",
+  "stock": {
+   "shape": "block",
+   "length": 40,
+   "width": 30,
+   "thickness": 8
+  },
+  "workholding": "vise",
+  "operations": [
+   "M3 thread x2, 5 mm deep (no pilot in this job)"
+  ],
+  "cutters": [
+   "inv:kz-thread-m3-9"
+  ],
+  "outcome": "simulated",
+  "refusal": null,
+  "predictedTimeMin": 0.8,
+  "renderMethod": "independent-heightfield",
+  "files": {
+   "before": "assets/j18-thread-alu/before.png",
+   "after": "assets/j18-thread-alu/after.png",
+   "after-top": "assets/j18-thread-alu/after-top.png"
+  },
+  "jobFiles": [
+   "jobs/j18-thread-b-mill.json"
+  ],
+  "runFolders": [
+   "runs/j18-thread-b-mill"
+  ],
+  "notes": "INCONSISTENT: the 2.6 mm pilot bore in 6061 is refused (no aluminium row, runs/j18-thread-a-bore) but the thread mill in 6061 is generated at 10000 RPM / 300 mm/min helical — Makera's catalogue says 15000 / 60 for this bit in 6061 — the missing pilot is only a warning (thread-pilot-unproven), so the program is written; the sim (thread-envelope) cuts it into solid stock."
+ },
+ {
+  "id": "j18-thread-adjusted",
+  "title": "M3 threads on PLA: 2.6 mm bore, then thread mill",
+  "category": "threads",
+  "source": {
+   "url": "https://global.makera.com/products/thread-milling-bit-1-8-shank",
+   "title": "Thread milling bit (Makera store; no job found)",
+   "credit": "Makera"
+  },
+  "intended": null,
+  "material": "pla",
+  "stock": {
+   "shape": "block",
+   "length": 40,
+   "width": 30,
+   "thickness": 8
+  },
+  "workholding": "vise",
+  "operations": [
+   "bore 2.6 mm x2",
+   "M3 thread x2"
+  ],
+  "cutters": [
+   "inv:kz-corn-2-0-10-5",
+   "inv:kz-thread-m3-9"
+  ],
+  "outcome": "simulated",
+  "refusal": null,
+  "predictedTimeMin": 3.9,
+  "renderMethod": "independent-heightfield",
+  "files": {
+   "before": "assets/j18-thread-adjusted/before.png",
+   "after": "assets/j18-thread-adjusted/after.png",
+   "after-top": "assets/j18-thread-adjusted/after-top.png"
+  },
+  "jobFiles": [
+   "jobs/j18-thread-a-bore-proxy.json",
+   "jobs/j18-thread-b-mill-proxy.json"
+  ],
+  "runFolders": [
+   "runs/j18-thread-a-bore-proxy",
+   "runs/j18-thread-b-mill-proxy"
+  ],
+  "notes": "Sheet for the bore says \"3648 x 0.5 mm passes\". Render approximates the thread mill as a 2.4 mm flat."
+ }
+]

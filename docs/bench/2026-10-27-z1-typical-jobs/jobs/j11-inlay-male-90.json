@@ -1,0 +1,139 @@
+{
+ "schemaVersion": 3,
+ "id": "job-9mp8zzcvfj",
+ "name": "j11-inlay-male-90",
+ "machineId": "Z1",
+ "stock": {
+  "length": 70,
+  "width": 70,
+  "thickness": 8,
+  "material": "pla"
+ },
+ "labels": [],
+ "shapes": [
+  {
+   "id": "inlay-blank",
+   "name": "blank around the plugs",
+   "kind": "rect",
+   "position": {
+    "x": 35,
+    "y": 35
+   },
+   "rotation": 0,
+   "depth": 3.8,
+   "cornerRadius": 0,
+   "width": 68,
+   "height": 68,
+   "enabled": true,
+   "construction": true
+  },
+  {
+   "id": "inlay-plug-1",
+   "kind": "polygon",
+   "position": {
+    "x": 35,
+    "y": 35
+   },
+   "rotation": 0,
+   "depth": 3.8,
+   "enabled": true,
+   "points": [
+    [
+     0,
+     -22
+    ],
+    [
+     -5.878,
+     -8.09
+    ],
+    [
+     -20.923,
+     -6.798
+    ],
+    [
+     -9.511,
+     3.09
+    ],
+    [
+     -12.931,
+     17.798
+    ],
+    [
+     0,
+     10
+    ],
+    [
+     12.931,
+     17.798
+    ],
+    [
+     9.511,
+     3.09
+    ],
+    [
+     20.923,
+     -6.798
+    ],
+    [
+     5.878,
+     -8.09
+    ]
+   ],
+   "name": "male plug",
+   "construction": true
+  }
+ ],
+ "combined": [
+  {
+   "kind": "cutaway",
+   "id": "inlay-male-1",
+   "name": "male plug",
+   "position": {
+    "x": 0,
+    "y": 0
+   },
+   "rotation": 0,
+   "depth": 3.8,
+   "enabled": true,
+   "outer": "inlay-blank",
+   "islands": [
+    "inlay-plug-1"
+   ],
+   "inlay": {
+    "role": "male",
+    "glueGapMm": 1.3,
+    "pocketDepthMm": 5.1,
+    "tanHalf": 0.9999999999999999,
+    "islandInsetMm": 5.099999999999999
+   }
+  }
+ ],
+ "toolKey": "inv:kz-chamfer-90",
+ "workholding": {
+  "kind": "vise",
+  "vise": {
+   "stockProud": 4,
+   "fixedJawThickness": 10,
+   "movingJawThickness": 10,
+   "jawLength": 100,
+   "jawStartY": -10,
+   "source": "default",
+   "uncertainty": 0.5
+  }
+ },
+ "minFloor": 1,
+ "edgeMargin": 1,
+ "sacrificial": {
+  "under": null,
+  "sides": {
+   "left": null,
+   "right": null,
+   "front": null,
+   "back": null
+  },
+  "source": "default"
+ },
+ "breakthrough": 0.3,
+ "jawClearance": 1,
+ "customFonts": []
+}

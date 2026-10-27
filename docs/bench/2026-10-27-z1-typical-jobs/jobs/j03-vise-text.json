@@ -1,0 +1,88 @@
+{
+ "schemaVersion": 3,
+ "name": "j03-vise-text",
+ "machineId": "Z1",
+ "stock": {
+  "length": 80,
+  "width": 30,
+  "thickness": 6,
+  "material": "pla"
+ },
+ "labels": [
+  {
+   "id": "t1",
+   "text": "CNX Software",
+   "font": "sans-default",
+   "weight": "bold",
+   "size": 7,
+   "position": {
+    "x": 40,
+    "y": 15
+   },
+   "rotation": 0,
+   "depth": 0.5,
+   "enabled": true
+  }
+ ],
+ "toolKey": "inv:kz-corn-1-7",
+ "minFloor": 1,
+ "edgeMargin": 1,
+ "customFonts": [],
+ "sacrificial": {
+  "under": null,
+  "sides": {
+   "left": null,
+   "right": null,
+   "front": null,
+   "back": null
+  },
+  "source": "default"
+ },
+ "breakthrough": 0.3,
+ "jawClearance": 1,
+ "shapes": [],
+ "workholding": {
+  "kind": "vise",
+  "vise": {
+   "stockProud": 3,
+   "fixedJawThickness": 10,
+   "movingJawThickness": 10,
+   "jawLength": 100,
+   "jawStartY": -10,
+   "source": "default",
+   "uncertainty": 0.5
+  }
+ },
+ "traces": [
+  {
+   "id": "frame",
+   "kind": "line",
+   "position": {
+    "x": 40,
+    "y": 15
+   },
+   "rotation": 0,
+   "depth": 0.5,
+   "enabled": true,
+   "points": [
+    [
+     -36,
+     -11
+    ],
+    [
+     36,
+     -11
+    ],
+    [
+     36,
+     11
+    ],
+    [
+     -36,
+     11
+    ]
+   ],
+   "closed": true
+  }
+ ]
+}

@@ -1,0 +1,56 @@
+{
+ "schemaVersion": 3,
+ "name": "j04-metal-disc-text",
+ "machineId": "Z1",
+ "stock": {
+  "length": 30,
+  "width": 30,
+  "thickness": 3,
+  "material": "aluminium-6061"
+ },
+ "labels": [
+  {
+   "id": "t1",
+   "text": "Al",
+   "font": "sans-default",
+   "weight": "bold",
+   "size": 10,
+   "position": {
+    "x": 15,
+    "y": 15
+   },
+   "rotation": 0,
+   "depth": 0.4,
+   "enabled": true
+  }
+ ],
+ "toolKey": "inv:kz-o-flute-m-1-3",
+ "minFloor": 1,
+ "edgeMargin": 1,
+ "customFonts": [],
+ "sacrificial": {
+  "under": null,
+  "sides": {
+   "left": null,
+   "right": null,
+   "front": null,
+   "back": null
+  },
+  "source": "default"
+ },
+ "breakthrough": 0.3,
+ "jawClearance": 1,
+ "shapes": [],
+ "workholding": {
+  "kind": "vise",
+  "vise": {
+   "stockProud": 1.5,
+   "fixedJawThickness": 10,
+   "movingJawThickness": 10,
+   "jawLength": 100,
+   "jawStartY": -10,
+   "source": "default",
+   "uncertainty": 0.5
+  }
+ }
+}

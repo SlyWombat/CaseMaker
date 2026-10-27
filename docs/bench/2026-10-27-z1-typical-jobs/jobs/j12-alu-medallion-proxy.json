@@ -1,0 +1,124 @@
+{
+ "schemaVersion": 3,
+ "name": "j12-alu-medallion-proxy",
+ "machineId": "Z1",
+ "stock": {
+  "length": 70,
+  "width": 70,
+  "thickness": 6.35,
+  "material": "pla"
+ },
+ "labels": [],
+ "toolKey": "inv:kz-o-flute-m-2-8",
+ "minFloor": 1,
+ "edgeMargin": 1,
+ "customFonts": [],
+ "sacrificial": {
+  "under": null,
+  "sides": {
+   "left": null,
+   "right": null,
+   "front": null,
+   "back": null
+  },
+  "source": "default"
+ },
+ "breakthrough": 0.3,
+ "jawClearance": 1,
+ "shapes": [
+  {
+   "id": "disc",
+   "kind": "circle",
+   "position": {
+    "x": 35,
+    "y": 35
+   },
+   "rotation": 0,
+   "depth": 6.35,
+   "enabled": true,
+   "diameter": 60,
+   "construction": true
+  },
+  {
+   "id": "star",
+   "kind": "polygon",
+   "position": {
+    "x": 35,
+    "y": 35
+   },
+   "rotation": 0,
+   "depth": 1.5,
+   "enabled": true,
+   "points": [
+    [
+     0.0,
+     20.0
+    ],
+    [
+     -5.29,
+     7.281
+    ],
+    [
+     -19.021,
+     6.18
+    ],
+    [
+     -8.56,
+     -2.781
+    ],
+    [
+     -11.756,
+     -16.18
+    ],
+    [
+     -0.0,
+     -9.0
+    ],
+    [
+     11.756,
+     -16.18
+    ],
+    [
+     8.56,
+     -2.781
+    ],
+    [
+     19.021,
+     6.18
+    ],
+    [
+     5.29,
+     7.281
+    ]
+   ]
+  }
+ ],
+ "workholding": {
+  "kind": "vise",
+  "vise": {
+   "stockProud": 3,
+   "fixedJawThickness": 10,
+   "movingJawThickness": 10,
+   "jawLength": 100,
+   "jawStartY": -10,
+   "source": "default",
+   "uncertainty": 0.5,
+   "seat": "ledge"
+  }
+ },
+ "cutouts": [
+  {
+   "kind": "cutout",
+   "id": "profile",
+   "enabled": true,
+   "of": "disc",
+   "side": "outside",
+   "inset": 0,
+   "tabs": {
+    "count": 4,
+    "width": 3,
+    "height": 1
+   }
+  }
+ ]
+}

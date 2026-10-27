@@ -1,0 +1,101 @@
+{
+ "schemaVersion": 3,
+ "name": "j01-topclamp-alu-proxy-adjusted",
+ "machineId": "Z1",
+ "stock": {
+  "length": 100,
+  "width": 100,
+  "thickness": 5,
+  "material": "pla"
+ },
+ "labels": [],
+ "toolKey": "inv:kz-o-flute-3-175-25",
+ "minFloor": 1,
+ "edgeMargin": 1,
+ "customFonts": [],
+ "sacrificial": {
+  "under": {
+   "thickness": 6,
+   "overhang": {
+    "left": 0,
+    "right": 0,
+    "front": 0,
+    "back": 0
+   },
+   "attach": "tape"
+  },
+  "sides": {
+   "left": null,
+   "right": null,
+   "front": null,
+   "back": null
+  },
+  "source": "default"
+ },
+ "breakthrough": 0.3,
+ "jawClearance": 1,
+ "shapes": [
+  {
+   "id": "clamp",
+   "kind": "rect",
+   "position": {
+    "x": 45,
+    "y": 40
+   },
+   "rotation": 0,
+   "depth": 5,
+   "enabled": true,
+   "width": 70,
+   "height": 22,
+   "cornerRadius": 4,
+   "construction": true
+  },
+  {
+   "id": "m5slot",
+   "kind": "slot",
+   "position": {
+    "x": 45,
+    "y": 40
+   },
+   "rotation": 0,
+   "depth": 5,
+   "enabled": true,
+   "length": 30,
+   "width": 5.5,
+   "through": true
+  }
+ ],
+ "workholding": {
+  "kind": "bracket",
+  "bracket": {
+   "anchor": 1,
+   "variant": "thin",
+   "clamps": [
+    {
+     "edge": "back",
+     "at": 85
+    },
+    {
+     "edge": "right",
+     "at": 85
+    }
+   ],
+   "source": "default"
+  }
+ },
+ "cutouts": [
+  {
+   "kind": "cutout",
+   "id": "profile",
+   "enabled": true,
+   "of": "clamp",
+   "side": "outside",
+   "inset": 0,
+   "tabs": {
+    "count": 4,
+    "width": 3,
+    "height": 1
+   }
+  }
+ ]
+}

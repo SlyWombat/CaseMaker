@@ -1,0 +1,59 @@
+{
+ "schemaVersion": 3,
+ "name": "j05-two-colour-sign",
+ "machineId": "Z1",
+ "stock": {
+  "length": 120,
+  "width": 50,
+  "thickness": 1.6,
+  "material": "plastic",
+  "colour": {
+   "kind": "laminate",
+   "capMm": 0.2
+  }
+ },
+ "labels": [
+  {
+   "id": "t1",
+   "text": "OPEN",
+   "font": "sans-default",
+   "weight": "bold",
+   "size": 22,
+   "position": {
+    "x": 60,
+    "y": 25
+   },
+   "rotation": 0,
+   "depth": 0.4,
+   "enabled": true
+  }
+ ],
+ "toolKey": "inv:kz-o-flute-3-175-25",
+ "minFloor": 1,
+ "edgeMargin": 1,
+ "customFonts": [],
+ "sacrificial": {
+  "under": null,
+  "sides": {
+   "left": null,
+   "right": null,
+   "front": null,
+   "back": null
+  },
+  "source": "default"
+ },
+ "breakthrough": 0.3,
+ "jawClearance": 1,
+ "shapes": [],
+ "workholding": {
+  "kind": "tape",
+  "tape": {
+   "width": 25,
+   "thickness": 0.1,
+   "inset": 2,
+   "where": null,
+   "squareTo": "front",
+   "source": "default"
+  }
+ }
+}
