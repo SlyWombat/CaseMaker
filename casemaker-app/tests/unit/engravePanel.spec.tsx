@@ -211,6 +211,70 @@ describe('EngravePanel (#205)', () => {
 // #688 — the Generate button carries its blocker as its own sentence with a Fix link (design §1
 // principle 4). The reproduced dead end was PLA + Engrave + the recommended V/chamfer bit: no row
 // for that cutter, a tooltip saying "Fix the errors above first." beside "0 errors" (audit B9).
+describe('#726 W16 — a goal job counts its goal, verifies by the sweep, and asks for the tick', () => {
+  it('a goal mesh is the job’s one item', () => {
+    act(() => {
+      const job = defaultEngraveJob();
+      useEngraveJobStore.setState({
+        job: {
+          ...job,
+          labels: [],
+          shapes: [],
+          targetObject: {
+            id: 'tgt-goal',
+            name: 'Dragon.3mf',
+            format: '3mf',
+            sha256: 'a'.repeat(64),
+            data: 'QUJD',
+            size: { x: 30, y: 30, z: 10 },
+            position: { x: 50, y: 30, z: 0 },
+            rotation: 0,
+            enabled: true,
+            role: 'goal',
+          },
+        },
+      });
+    });
+    render(<EngravePanel />);
+    expect(screen.getByTestId('engrave-item-count').textContent).toBe('1');
+  });
+
+  it('a surface run is checked by the sweep: the verified row states it after the simulation', () => {
+    render(<EngravePanel />);
+    act(() => {
+      useEngraveRunStore.setState({
+        generated: {
+          ok: true,
+          stage: 'done',
+          findings: [],
+          feeds: null,
+          threads: null,
+          cam: { operations: 2, cuttingMoves: 100, estimatedSeconds: 60, passes: 1 },
+          nc: ';@MKR|BEGIN\nG21 G90\nM02',
+          verify: null,
+          surface3d: { gridPitchMm: 0.1, resolutionNote: 'the 0.1 mm dexel grid' },
+          frameNc: null,
+          frameVerify: null,
+          facingNc: null,
+          facingVerify: null,
+          facingToolKey: null,
+          facingError: null,
+          facingCam: null,
+          predicted: [],
+          programs: [],
+          errors: [],
+        } as unknown as EngraveGenerated,
+        simStatus: 'ready',
+        simDiagnostics: [],
+        phase: 'ready',
+        staleSince: null,
+      });
+    });
+    expect(screen.getByTestId('engrave-run-verified').textContent).toContain('checked on the simulation’s grid');
+    expect(screen.getByTestId('engrave-run-verified').textContent).not.toContain('not verified yet');
+  });
+});
+
 describe('EngravePanel — the Generate blocker (#688)', () => {
   const V_KEY = 'inv:blocked-engraver';
   const V_TOOL = flatEndMill(0.2, {

@@ -1802,6 +1802,10 @@ export function EngravePanel(): JSX.Element {
     ...run,
     machine: jobMachine(job, calibration),
     rotaryHeld: job.workholding.kind === 'rotary-chuck',
+    // #726 W16 — the clearance tick is asked for the JOB's clearance codes too: a shipped-default
+    // vise warns in the DOCUMENT (`vise-default`), and the run's own lists never carried it, so a
+    // goal job saved without the tick that its two notes were asking for.
+    documentFindings: findings,
   };
   const saveBlockerText = saveBlocker(gateView);
   // #255 — the machine upload. `uploadBlocker` is never weaker than `saveBlocker` (see its own
@@ -1846,21 +1850,43 @@ export function EngravePanel(): JSX.Element {
           ? 'not generated'
           : 'not generated yet';
 
-  const rowVerified: RowState = run.generated?.verify
-    ? verifyErrors > 0
-      ? 'cross'
-      : 'tick'
-    : run.phase === 'generating'
-      ? 'pending'
-      : 'idle';
+  // #726 W16 — a SURFACE program has no 2.5D verifier report by design (`verify: null`; its check
+  // is the material sweep, #535). The row read "not verified yet" after a good run; it now states
+  // the check that was made, at the step where it is made (the sweep runs with the simulation).
+  // A pure GOAL run: its `verify` is null by design and its check is the material sweep (#535),
+  // which the result records as `surface3d`.
+  const surfaceProgram = run.generated !== null && run.generated.verify === null && run.generated.surface3d != null;
+  const rowVerified: RowState = surfaceProgram
+    ? run.simStatus === 'ready'
+      ? simErrors > 0
+        ? 'cross'
+        : 'tick'
+      : run.phase === 'simulating'
+        ? 'pending'
+        : 'idle'
+    : run.generated?.verify
+      ? verifyErrors > 0
+        ? 'cross'
+        : 'tick'
+      : run.phase === 'generating'
+        ? 'pending'
+        : 'idle';
   const rowVerifiedText =
     rowVerified === 'tick'
-      ? 'verified'
+      ? surfaceProgram
+        ? 'checked on the simulation’s grid'
+        : 'verified'
       : rowVerified === 'cross'
-        ? 'verification found errors'
+        ? surfaceProgram
+          ? 'the sweep found errors'
+          : 'verification found errors'
         : rowVerified === 'pending'
-          ? 'verifying…'
-          : 'not verified yet';
+          ? surfaceProgram
+            ? 'checking on the sweep…'
+            : 'verifying…'
+          : surfaceProgram
+            ? 'not checked yet'
+            : 'not verified yet';
 
   const rowSimulated: RowState =
     run.simStatus === 'ready' ? (simErrors > 0 ? 'cross' : 'tick') : run.phase === 'simulating' ? 'pending' : run.simStatus ? 'cross' : 'idle';
@@ -2171,7 +2197,11 @@ export function EngravePanel(): JSX.Element {
   const vectorCount = job.vectors?.length ?? 0;
   const primitiveCount = job.primitives?.length ?? 0;
   const chamferCount = job.chamfers?.length ?? 0;
+  // #726 W16 — a GOAL mesh is the job's work ("Surface a mesh" is an operation): it counted as 0
+  // items beside "Target object (1)", so the job read as empty while it had a whole 3D program.
+  const goalCount = job.targetObject?.enabled === true && (job.targetObject.role ?? 'reference') === 'goal' ? 1 : 0;
   const itemTotal =
+    goalCount +
     job.labels.length +
     job.shapes.length +
     combinedCount +
