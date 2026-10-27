@@ -115,6 +115,16 @@ const on = () => screen.getByTestId('manage-vacuum-on') as HTMLButtonElement;
 const off = () => screen.getByTestId('manage-vacuum-off') as HTMLButtonElement;
 
 describe('#390 the vacuum switch — where it is', () => {
+  it('#726 W24 — a failed search reaches the Machines page as one sentence', () => {
+    act(() => {
+      useMachineStore.getState().setProbeResult({ kind: 'error', detail: 'ECONNREFUSED' });
+    });
+    render(<MachinesScope />);
+    // The store writes the sentence once; the page prints `reason` raw, so it reads like the start
+    // wizard's line rather than a bare error code.
+    expect(screen.getByText('The search failed: ECONNREFUSED')).toBeTruthy();
+  });
+
   it('a build that cannot open a socket draws no switch at all', () => {
     caps.drive = false;
     withMachine();

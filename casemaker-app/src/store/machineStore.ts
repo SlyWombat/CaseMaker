@@ -192,7 +192,16 @@ export const useMachineStore = create<MachineState>()((set, get) => ({
     const slice: MachineSlice = {
       machine: result.kind === 'found' ? result.observation : null,
       outcome: result.kind,
-      reason: result.kind === 'unavailable' ? result.reason : result.kind === 'error' ? result.detail : null,
+      // #726 W24 — EVERY reader gets one sentence. An 'unavailable' probe is already a sentence;
+      // an 'error' probe's detail is the bare reason (`probeMachine`), so the sentence is built
+      // here, once — the Machines page prints `reason` raw, and the start wizard must not prefix it
+      // again.
+      reason:
+        result.kind === 'unavailable'
+          ? result.reason
+          : result.kind === 'error'
+            ? `The search failed: ${result.detail}`
+            : null,
       checkedAt: new Date().toISOString(),
       // A fresh check is a fresh record: reachability is re-established by the heartbeat, not kept.
       heartbeat: { reachable: null, lastSeenAt: null },

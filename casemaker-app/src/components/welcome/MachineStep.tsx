@@ -272,7 +272,7 @@ export function MachineStep({
             <p style={NOTE} data-testid="start-wizard-machine-reason">
               {outcome === 'unavailable'
                 ? `This build cannot reach a machine: ${reason ?? 'no reason was given.'}`
-                : `The search failed: ${reason ?? 'no detail was given.'}`}
+                : (reason ?? 'The search failed, and no detail was given.')}
             </p>
           )}
 
