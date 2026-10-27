@@ -216,10 +216,37 @@ export function HoldingPicture({
     }
   })();
 
+  // #726 W18 — the blank is drawn to ITS OWN aspect. It used to be one fixed 136 × 46 rectangle
+  // whatever the stock said, so the badge starter's 38.1 × 76.2 blank (the bench's quarter turn,
+  // #383) drew LONG ALONG X — the opposite of its own numbers, and the same picture a typed
+  // 76.2 × 38.1 blank gets. Now the longer side is the longer side: the jaws close on the blank's
+  // X ends (a narrow blank moves them inward), and the dims run along the blank when it is too
+  // narrow to hold them across.
+  const drawn = ((): { w: number; h: number; x: number; y: number } => {
+    const maxW = 136;
+    const maxH = 88;
+    const scale = Math.min(maxW / Math.max(stock.length, 0.001), maxH / Math.max(stock.width, 0.001));
+    const w = Math.max(18, Math.min(maxW, stock.length * scale));
+    const h = Math.max(14, Math.min(maxH, stock.width * scale));
+    return { w, h, x: 120 - w / 2, y: 75 - h / 2 };
+  })();
+  const jawW = 34;
+  const fixedJawX = Math.max(2, drawn.x - jawW);
+  const movingJawX = Math.min(240 - 2 - jawW, drawn.x + drawn.w);
+  const dimsAlongY = drawn.w < 70;
   const viseStock = round ? (
     <circle cx="120" cy="75" r="30" fill="#1e3a4a" stroke="#6aa6c9" strokeWidth="1.5" />
   ) : (
-    <rect x="52" y="52" width="136" height="46" fill="#1e3a4a" stroke="#6aa6c9" strokeWidth="1.5" />
+    <rect
+      data-testid="engrave-setup-holding-picture-stock"
+      x={drawn.x}
+      y={drawn.y}
+      width={drawn.w}
+      height={drawn.h}
+      fill="#1e3a4a"
+      stroke="#6aa6c9"
+      strokeWidth="1.5"
+    />
   );
 
   // #715 — the two bed mounts draw their scene, and its handles, from the bed's own model.
@@ -302,28 +329,34 @@ export function HoldingPicture({
         </defs>
         {mechanism === 'vise' ? (
           <>
-            <rect x="18" y="30" width="34" height="90" fill="#5b6672" />
-            <rect x="188" y="30" width="34" height="90" fill="#39424c" stroke="#5b6672" />
+            <rect x={fixedJawX} y="30" width={jawW} height="90" fill="#5b6672" />
+            <rect x={movingJawX} y="30" width={jawW} height="90" fill="#39424c" stroke="#5b6672" />
             {mount === 'board' && (
               <rect
                 data-testid="engrave-setup-holding-picture-board"
-                x="46"
-                y="46"
-                width="148"
-                height="58"
+                x={drawn.x - 10}
+                y={drawn.y - 10}
+                width={drawn.w + 20}
+                height={drawn.h + 20}
                 fill="#3a3325"
                 stroke="#7a6a45"
                 strokeWidth="1"
               />
             )}
             {viseStock}
-            <text x="120" y="79" textAnchor="middle" {...SVG_MONO}>
+            <text
+              x="120"
+              y="79"
+              textAnchor="middle"
+              {...SVG_MONO}
+              transform={dimsAlongY ? 'rotate(-90 120 79)' : undefined}
+            >
               {dims}
             </text>
-            <text x="35" y="22" textAnchor="middle" {...SVG_MUTED}>
+            <text x={fixedJawX + jawW / 2} y="22" textAnchor="middle" {...SVG_MUTED}>
               fixed jaw
             </text>
-            <text x="205" y="22" textAnchor="middle" {...SVG_MUTED}>
+            <text x={movingJawX + jawW / 2} y="22" textAnchor="middle" {...SVG_MUTED}>
               moving jaw
             </text>
             <path d="M60 128 H180" stroke="#d1d5db" strokeWidth="1" markerEnd="url(#holding-x-arrow)" />

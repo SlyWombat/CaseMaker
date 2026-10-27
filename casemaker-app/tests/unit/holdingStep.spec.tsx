@@ -487,6 +487,32 @@ describe('#684 — the picture, the folds, and the technical provenance', () => 
     );
   });
 
+  it('#726 W18 — the blank is drawn to its own aspect, so the badge starter reads at a glance', () => {
+    seedLocation(machineWith(null));
+    // The badge starter's blank as the bench holds it (#383): 38.1 mm across the jaws (X), 76.2
+    // along them (Y). The picture used to draw every blank 136 × 46 whatever the stock said — this
+    // one came out long along X, the opposite of its own numbers.
+    openHolding(dj({ length: 38.1, width: 76.2, thickness: 3.81 }));
+    const starter = screen.getByTestId('engrave-setup-holding-picture-stock');
+    expect(Number(starter.getAttribute('height'))).toBeGreaterThan(Number(starter.getAttribute('width')));
+    // Too narrow to hold "38.1 × 76.2" across it: the dims run along the blank instead.
+    const label = Array.from(screen.getByTestId('engrave-setup-holding-picture').querySelectorAll('text')).find(
+      (t) => t.textContent === '38.1 × 76.2',
+    );
+    expect(label?.getAttribute('transform')).toBe('rotate(-90 120 79)');
+
+    // The typed route's 76.2 × 38.1 is wide — the same blank the other way round, and drawn so.
+    cleanup();
+    seedLocation(machineWith(null));
+    openHolding(dj({ length: 76.2, width: 38.1, thickness: 3.81 }));
+    const typed = screen.getByTestId('engrave-setup-holding-picture-stock');
+    expect(Number(typed.getAttribute('width'))).toBeGreaterThan(Number(typed.getAttribute('height')));
+    const typedLabel = Array.from(screen.getByTestId('engrave-setup-holding-picture').querySelectorAll('text')).find(
+      (t) => t.textContent === '76.2 × 38.1',
+    );
+    expect(typedLabel?.getAttribute('transform')).toBeNull();
+  });
+
   it('#705 — a disc is a circle labelled ⌀, and the caption names the disc', () => {
     seedLocation(machineWith(null));
     openHolding(
