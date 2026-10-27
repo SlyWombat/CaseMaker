@@ -124,7 +124,10 @@ export interface EngraveJobSources {
    * to `colour` (see `engraveJobSchema.ts`), so nothing in this build reads the old key.
    */
   stock?: Partial<
-    Record<'length' | 'width' | 'thickness' | 'material' | 'fibre' | 'colour' | 'flatness', FieldSource>
+    Record<
+      'length' | 'width' | 'thickness' | 'material' | 'fibre' | 'colour' | 'flatness' | 'shape' | 'diameter',
+      FieldSource
+    >
   >;
   /** Provenance of `toolKey` (#254). Absent = the shipped default cutter. */
   tool?: FieldSource;
@@ -1033,6 +1036,46 @@ export interface ViseParams {
 }
 
 /**
+ * What a job says about the rotary module's three-jaw chuck (#240, `/Rotary.md` §3.4).
+ *
+ * The facts are Makera's, not readings of this machine: the module's wiki page states a three-jaw
+ * chuck with REVERSE jaws fitted by default for larger work (standard jaws for small parts), a
+ * tailstock with an adjustment knob, and — for the jaw capacity — nothing at all. "Not stated" is
+ * `null` rather than a guessed millimetre; `source` names the page. The machine's own rotary
+ * numbers (envelope, steps/°, rate, acceleration, homing, unwind) stay in
+ * `MachineProfile.rotary` with their per-field provenance, never here.
+ *
+ * ABSENT IS THE VISE. A job written before this block existed carries no `rotary-chuck` and keeps
+ * its exact shape; the field only exists on the alternative arm of {@link JobWorkholding}.
+ */
+export interface RotaryChuck {
+  /**
+   * How far the rod stands out of the chuck jaws along X, mm — the cuttable length. On first
+   * selection it is the rod's own length (the axis-frame box's `length`); the grip split is the
+   * operator's to state once the module is measured (slice 3).
+   */
+  stickout: Mm;
+  /** The diameter the jaws close on, mm, or `null` when the chuck does not state its capacity. */
+  gripDiameter: Mm | null;
+  /** Reverse jaws are fitted by default on the module; standard jaws are for small parts. */
+  jawMode: 'standard' | 'reverse';
+  /** Whether the tailstock supports the free end. The wiki recommends a centre hole when it does. */
+  tailstock: boolean;
+  /** The page these facts come from, so a shipped default is never read as a measurement. */
+  source: string;
+}
+
+/**
+ * How the job's stock is held. A discriminated union on `kind` (#240 §1): the vise keeps exactly
+ * the shape every pre-rotary document has, and the rotary chuck is the module's own arm. Readers
+ * that need the vise's numbers for a non-vise job go through `jobVise` (`engine/cnc/fixture.ts`),
+ * which answers the neutral shipped vise rather than inventing a measurement.
+ */
+export type JobWorkholding =
+  | { kind: 'vise'; vise: ViseParams }
+  | { kind: 'rotary-chuck'; rotary: RotaryChuck };
+
+/**
  * A sacrificial board UNDER the part (#213): material the job may cut into, with the work
  * origin and the Z datum still on the PART's top face. Its top face meets the part's underside
  * at Z = `−thickness`, so its own thickness can never reach a cut depth (decision 24's
@@ -1278,6 +1321,13 @@ export interface FrozenProgram {
   frameNc: string | null;
   /** FNV of `frameNc`, or null with it. */
   frameHash: string | null;
+  /**
+   * The frame the POST wrote this program in (#240 §4, `/Rotary.md` §3.3). `'flat'` is the 3-axis
+   * dialect; `'rotary'` is the 4th axis's, where Z is the radius from the axis and A is the stock's
+   * rotation. OPTIONAL and absent on every package frozen before the field existed: absence reads
+   * `flat`, so an old package stays runnable and round-trips without gaining a key.
+   */
+  frame?: 'flat' | 'rotary';
 }
 
 /**
@@ -1388,6 +1438,17 @@ export interface EngraveJob {
     width: Mm;
     thickness: Mm;
     material: StockMaterial;
+    /**
+     * The stock's plan shape (#240 §1, `/Rotary.md` R6). ABSENT is a rectangle — every pre-rotary
+     * job — and is kept absent through a save/open so those documents round-trip byte-for-byte.
+     * `'cylinder'` says the box around the stock is round stock in the ROTARY CHUCK's axis frame:
+     * X is the rod's length and `width = thickness = diameter`. The box is still what the CAM
+     * plans in until slice 2 wraps it; the word says which way to read it, and nothing pretends a
+     * square is a cylinder.
+     */
+    shape?: 'cylinder';
+    /** The rod's diameter, mm — present iff `shape` is `'cylinder'` (schema-enforced). */
+    diameter?: Mm;
     /**
      * The fibre the blank's filament states (#464), BESIDE the material rather than folded into it
      * — see {@link FilamentFibre}. `PETG-CF` is `material: 'petg'` with `fibre: 'cf'`: the feeds
@@ -1516,7 +1577,7 @@ export interface EngraveJob {
    * stick-out.
    */
   tool?: Tool | null;
-  workholding: { kind: 'vise'; vise: ViseParams };
+  workholding: JobWorkholding;
   /**
    * The job's setups (#419 J2, §5.4): one per held position, in run order.
    *

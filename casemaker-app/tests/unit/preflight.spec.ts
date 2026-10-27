@@ -7,6 +7,7 @@
 // every report from the real owner function, so nothing in a fixture can flatter the collector.
 
 import { describe, it, expect } from 'vitest';
+import { jobVise } from '@/engine/cnc/fixture';
 import locationDoc from './fixtures/location-doc.json';
 
 import { collect, type PreflightInput, type PreflightRow } from '@/engine/cnc/preflight';
@@ -139,8 +140,8 @@ describe('preflight: the job as data (validateJob)', () => {
 describe('preflight: the work-holding', () => {
   it('surfaces `validateVise`, which `validateJob` never raises', () => {
     const job = defaultEngraveJob();
-    job.workholding.vise.stockProud = 100; // ≥ the 12 mm stock: nothing is left in the jaws.
-    const expected = validateVise(job.stock, job.workholding.vise, job.sacrificial).find(
+    jobVise(job).stockProud = 100; // ≥ the 12 mm stock: nothing is left in the jaws.
+    const expected = validateVise(job.stock, jobVise(job), job.sacrificial).find(
       (f) => f.code === 'vise-stock-proud-exceeds-thickness',
     );
     expect(expected).toBeDefined();
@@ -354,10 +355,10 @@ describe('preflight: the Generate`s own findings (the worker-only families)', ()
     // `validateVise` is the one whose findings ride in that list while being nobody else's.
     const job = defaultEngraveJob();
     job.labels[0]!.depth = 100; // `depth-exceeds-stock`, raised by `validateJob`.
-    job.workholding.vise.stockProud = 100; // `vise-stock-proud-exceeds-thickness`, `validateVise`'s.
+    jobVise(job).stockProud = 100; // `vise-stock-proud-exceeds-thickness`, `validateVise`'s.
     const worker = dedupeFindings([
       ...validateJob(job),
-      ...validateVise(job.stock, job.workholding.vise, job.sacrificial),
+      ...validateVise(job.stock, jobVise(job), job.sacrificial),
     ]);
     expect(worker.some((f) => f.code === 'depth-exceeds-stock')).toBe(true);
     expect(worker.some((f) => f.code === 'vise-stock-proud-exceeds-thickness')).toBe(true);

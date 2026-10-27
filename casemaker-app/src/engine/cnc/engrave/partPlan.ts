@@ -39,7 +39,7 @@ import type {
 import type { CustomFont } from '@/types/textLabel';
 import { FASTENERS } from '@/engine/compiler/fasteners';
 import type { Mm } from '@/types/units';
-import { viseEnvelope } from '@/engine/cnc/fixture';
+import { jobVise, viseEnvelope } from '@/engine/cnc/fixture';
 import type { FixtureEnvelope } from '@/engine/cnc/setup';
 import { supportedFootprint } from '@/engine/cnc/sacrificial';
 import { getTools, sweepRadiusForJob, toolForJob } from '@/engine/cnc/toolRegistry';
@@ -1742,7 +1742,7 @@ export function jawGapFor(job: EngraveJob, box: SweptBox): {
   /** The vise's own band, carried with the envelope's provenance — the reach's third term. */
   uncertainty: Mm;
 } {
-  const envelope = viseEnvelope(job.stock, job.workholding.vise, job.sacrificial);
+  const envelope = viseEnvelope(job.stock, jobVise(job), job.sacrificial);
   const nearest = nearestJaw(envelope, box);
   return { ...nearest, uncertainty: envelope.uncertainty };
 }

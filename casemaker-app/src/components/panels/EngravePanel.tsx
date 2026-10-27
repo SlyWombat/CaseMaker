@@ -53,7 +53,7 @@ import {
   vCarveStepover,
   vCarveStepoverClampNote,
 } from '@/engine/cnc/vCarveGeometry';
-import { validateVise } from '@/engine/cnc/fixture';
+import { jobVise, validateVise } from '@/engine/cnc/fixture';
 import {
   keepOutLimitParts,
   keepOutMembrane,
@@ -881,7 +881,14 @@ export function EngravePanel(): JSX.Element {
   // the fallback does not attempt them.
   const findings: JobFinding[] =
     preview?.findings ??
-    dedupeFindings([...validateJob(job), ...validateVise(job.stock, job.workholding.vise, job.sacrificial)]);
+    dedupeFindings([
+      ...validateJob(job),
+      // #240 — the vise's own validator is the VISE's. A job in the rotary chuck has no jaw faces
+      // or seat to judge; its holding findings are slice 3's rotary run sheet.
+      ...(job.workholding.kind === 'vise'
+        ? validateVise(job.stock, job.workholding.vise, job.sacrificial)
+        : []),
+    ]);
   const jobFindings = findings.filter((f) => f.labelId === undefined);
   const findingsFor = (labelId: string): JobFinding[] => findings.filter((f) => f.labelId === labelId);
 
@@ -1698,15 +1705,24 @@ export function EngravePanel(): JSX.Element {
   // #688 — Save writes the .nc that goes to Makera Studio: a path to the machine, so it waits on
   // the clearance acknowledgement exactly as Upload and Release do. The statement's home is Cut
   // step 1 (#689); the sentence names it and the Fix beside Save takes the operator there.
-  const saveBlockerText = saveBlocker(run);
+  //
+  // #240/#545 — the gates also read the machine's rotary provenance and the job's holding, so a
+  // rotary job's .nc save is refused until the module is measured (the .cutjob document save never
+  // passes through here). One view for all three, so they cannot disagree about the machine.
+  const gateView = {
+    ...run,
+    machine: jobMachine(job, calibration),
+    rotaryHeld: job.workholding.kind === 'rotary-chuck',
+  };
+  const saveBlockerText = saveBlocker(gateView);
   // #255 — the machine upload. `uploadBlocker` is never weaker than `saveBlocker` (see its own
   // note), so Save and Upload state one rule between them rather than two that agree by luck.
-  const uploadBlockerText = uploadBlocker(run);
+  const uploadBlockerText = uploadBlocker(gateView);
   // #469 / #419 §3 — the Cut surface owns the run controls. It plays the FROZEN list: more than
   // one program goes through the release step, one program through the single-file upload. Both
   // gates are computed here, against the live run view, and handed down so the panel and the
   // surface cannot state two different rules.
-  const releaseBlockerText = releaseBlocker(run);
+  const releaseBlockerText = releaseBlocker(gateView);
   const machine = useMachineStore((s) => s.machine);
   const noteLiveStatus = useMachineStore((s) => s.noteLiveStatus);
   const cam = run.generated?.cam ?? null;
@@ -1877,15 +1893,26 @@ export function EngravePanel(): JSX.Element {
   }
 
   function saveAsMyVise(source: ViseParams['source']): void {
+    // #240 — a rotary job has no vise answers to save.
+    if (job.workholding.kind !== 'vise') return;
     setVise(source === 'default' ? {} : { source });
     // Keep the measured numbers for the next job too ("Save as my vise", #203).
-    useSettingsStore.getState().setVise(useEngraveJobStore.getState().job.workholding.vise);
+    useSettingsStore.getState().setVise(jobVise(useEngraveJobStore.getState().job));
   }
 
   // ---- sacrificial material (#213) ---------------------------------------------------------
 
   const sac = job.sacrificial;
   const under = sac.under;
+
+  // #240 — the Hold card reads the vise the job HOLDS: for a rotary job that is the neutral seat
+  // this slice's flat preview uses (`jobVise`), and the chuck's own facts when the rotary is the
+  // holding. `setVise` does not write a rotary job, so its fields are not offered there.
+  const vise = jobVise(job);
+  const rotaryRod =
+    job.workholding.kind === 'rotary-chuck'
+      ? { diameter: job.stock.diameter ?? job.stock.width, length: job.stock.length }
+      : null;
 
   /** Apply a whole sacrificial model. An edit is the user asserting a setup: it is `'saved'`,
    *  never a shipped `'default'` (decision 28) — a preset already carries `'saved'`. */
@@ -2174,7 +2201,7 @@ export function EngravePanel(): JSX.Element {
       <input
         type="number"
         step="any"
-        value={shownNumber(job.workholding.vise[key])}
+        value={shownNumber(jobVise(job)[key])}
         data-testid={`engrave-vise-${key}`}
         aria-label={`Vise ${label}`}
         title={title}
@@ -3179,19 +3206,29 @@ export function EngravePanel(): JSX.Element {
       <Group
         testid="engrave-group-hold"
         title="Hold"
-        summary={`Vise — ${viseBadge(job.workholding.vise)} · blank on the ${job.workholding.vise.seat}`}
+        summary={
+          rotaryRod === null
+            ? `Vise — ${viseBadge(vise)} · blank on the ${vise.seat}`
+            : `Rotary chuck — ⌀${fmt(rotaryRod.diameter)} × ${fmt(rotaryRod.length)} mm rod`
+        }
         action={{ testid: 'engrave-hold-edit', label: 'edit', onClick: () => openWizard('holding') }}
         {...groupProps('engrave-group-hold', false)}
       >
       {/* 4 — vise */}
       {/* #523 — the vise is a card: the one sentence always visible, the fields open on Edit. */}
+      {rotaryRod !== null ? (
+        <p style={MUTED} data-testid="engrave-rotary-card">
+          In the rotary chuck: a ⌀{fmt(rotaryRod.diameter)} × {fmt(rotaryRod.length)} mm rod along
+          X. The holding step is where the chuck’s jaws, tailstock and grip are set.
+        </p>
+      ) : (
       <details data-testid="engrave-vise-card" style={{ marginTop: 4 }}>
         <summary style={{ cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 8, fontSize: 12, color: '#c8d3de' }}>
           <span>
-            Vise — <span style={TAG} data-testid="engrave-vise-badge">{viseBadge(job.workholding.vise)}</span> blank on the {job.workholding.vise.seat}
-            {job.workholding.vise.stockProud >= 0
-              ? `, ${job.workholding.vise.stockProud} mm proud of the jaw tops`
-              : `, ${-job.workholding.vise.stockProud} mm below the jaw tops`}
+            Vise — <span style={TAG} data-testid="engrave-vise-badge">{viseBadge(vise)}</span> blank on the {vise.seat}
+            {vise.stockProud >= 0
+              ? `, ${vise.stockProud} mm proud of the jaw tops`
+              : `, ${-vise.stockProud} mm below the jaw tops`}
           </span>
           <span style={MUTED}>Edit</span>
         </summary>
@@ -3203,7 +3240,7 @@ export function EngravePanel(): JSX.Element {
             <label style={FIELD_LABEL}>
               <span>blank rests on</span>
               <select
-                value={job.workholding.vise.seat}
+                value={vise.seat}
                 data-testid="engrave-vise-seat"
                 aria-label="Vise blank seat"
                 title="What the blank’s underside rests on: the soft jaws’ ledge, or the vise body’s floor."
@@ -3231,6 +3268,7 @@ export function EngravePanel(): JSX.Element {
           </div>
         </div>
       </details>
+      )}
 
       {/* 5 — sacrificial material (#213): a board under the part and/or strips beside it. */}
       <h3 style={SUBHEAD}>

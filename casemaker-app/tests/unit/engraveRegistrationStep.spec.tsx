@@ -4,6 +4,7 @@
 // outcome in #494's seam. The console is a fake client; nothing reaches a machine.
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { jobVise } from '@/engine/cnc/fixture';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import {
   setMachineConsoleLoader,
@@ -93,7 +94,7 @@ function badgeJobWithPlan(plan: RegistrationPlan): EngraveJob {
     ...base,
     name: 'Bowed badge fixture',
     stock: { ...blank.stock, colour: COLOUR_0_2 },
-    workholding: { kind: 'vise', vise: { ...base.workholding.vise, stockProud: 1.905 } },
+    workholding: { kind: 'vise', vise: { ...jobVise(base), stockProud: 1.905 } },
     keepOuts: blank.pocket ? [blank.pocket] : [],
     labels: [{ ...line, position: { x: 24, y: 43 }, depth: 1.1 }],
   };
@@ -829,10 +830,10 @@ describe('#638 — the placement frame waits for the acceptance', () => {
 
     // The typed jaw start is edited after the measurement, before the operator accepts the position.
     // The frame's Y is correctedG54.y + the jaw start the RUN measured against.
-    const runJawStartY = job.workholding.vise.jawStartY;
+    const runJawStartY = jobVise(job).jawStartY;
     const edited: EngraveJob = {
       ...job,
-      workholding: { ...job.workholding, vise: { ...job.workholding.vise, jawStartY: runJawStartY + 5 } },
+      workholding: { kind: 'vise', vise: { ...jobVise(job), jawStartY: runJawStartY + 5 } },
     };
     useEngraveJobStore.setState({ job: edited });
     rerender(<EngraveRegistrationStep job={edited} target={TARGET} />);

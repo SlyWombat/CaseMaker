@@ -8,6 +8,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
+import { jobVise } from '@/engine/cnc/fixture';
 import { SCAN_FALLBACK } from '@/engine/cnc/engrave/materialScan';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -82,7 +83,7 @@ function stubGenerated(job: EngraveJob, nc: string = NC, frame = true): RunSheet
     // `vise-default`, so `validateJob` alone is no longer the whole list.
     findings: dedupeFindings([
       ...validateJob(job),
-      ...validateVise(job.stock, job.workholding.vise, job.sacrificial),
+      ...validateVise(job.stock, jobVise(job), job.sacrificial),
     ]),
     feeds: tool ? feedsFor([], job.stock.material, tool, Z1, job.cutOverride) : null,
     cam: { operations: 3, cuttingMoves: 1234, estimatedSeconds: 95, passes: 2 },
@@ -698,7 +699,7 @@ describe('runSheet (#207)', () => {
       job.workholding = {
         ...job.workholding,
         kind: 'vise',
-        vise: { ...job.workholding.vise, stockProud: -1.6 },
+        vise: { ...jobVise(job), stockProud: -1.6 },
       };
       const texts = origin(job, SCAN);
       // The offer counts the two kinds of edge rather than promising four touches at every one.

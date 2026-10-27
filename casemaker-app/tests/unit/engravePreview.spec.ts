@@ -7,6 +7,7 @@
 // compared the mesh against another run of the same code would pass on a systematic error.
 
 import { describe, it, expect } from 'vitest';
+import { jobVise } from '@/engine/cnc/fixture';
 
 import { tl } from './helpers/manifoldExec';
 import { preview, regions } from './helpers/engravePipeline';
@@ -123,7 +124,7 @@ describe('engravePreview (#205)', () => {
       job.stock.thickness = thickness;
       job.stock.length = length;
       job.stock.width = width;
-      job.workholding.vise = viseForNewJob(undefined, job.stock);
+      job.workholding = { kind: 'vise', vise: viseForNewJob(undefined, job.stock) };
       return job;
     });
 
@@ -351,7 +352,7 @@ describe('engravePreview — sacrificial material (#213)', () => {
     expect(p.fixture[0]!.mesh.bbox.max[0]).toBe(-6);
     expect(p.fixture[1]!.mesh.bbox.min[0]).toBe(L + 6);
     // …and each jaw keeps its own thickness: the fixed jaw's far side is its thickness past the face.
-    expect(p.fixture[0]!.mesh.bbox.min[0]).toBe(-6 - job.workholding.vise.fixedJawThickness);
+    expect(p.fixture[0]!.mesh.bbox.min[0]).toBe(-6 - jobVise(job).fixedJawThickness);
   });
 
   it('draws the under-board and moves the jaws out by its overhang ("Part on a larger board")', () => {

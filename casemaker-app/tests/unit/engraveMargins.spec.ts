@@ -8,6 +8,7 @@
 // both are listed in this file's last describe as the places a regression would show up first.
 
 import { describe, it, expect } from 'vitest';
+import { jobVise } from '@/engine/cnc/fixture';
 
 import { tl } from './helpers/manifoldExec';
 import { generate } from './helpers/engravePipeline';
@@ -592,7 +593,7 @@ describe('the label depth a blank allows (#362)', () => {
     const job: EngraveJob = {
       ...base,
       stock: { ...base.stock, colour: { kind: 'printed', capMm: 1.2, layerHeight: 0.2, firstLayerHeight: 0.2 } },
-      workholding: { kind: 'vise', vise: { ...base.workholding.vise, stockProud: 2.2 } },
+      workholding: { kind: 'vise', vise: { ...jobVise(base), stockProud: 2.2 } },
       keepOuts: [],
       // Stated BY THE JOB so the whole path runs at 0.28: `effectiveMargins` gives a job its own
       // margin, and `engraveGenerate` judges at `margins.boundaryMargin`. Nothing here is derived

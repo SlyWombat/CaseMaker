@@ -20,13 +20,29 @@
  * sits at the back face (decision 24). `PostContext.zDatum` is a required literal for exactly
  * this reason: a caller cannot post a file without stating the datum the Zs are measured from.
  *
+ * THE ROTARY DIALECT (#240, `/Rotary.md` R6). A rotary-frame IR with the `'rotary-axis'` datum
+ * is posted by its own emitter, in the vendor's rotary structure (`Rotation/NefertitiRough.nc`):
+ * `%`, the plane/unit/work-offset line, `M5`, the tool change, the spindle, a fed line to the
+ * safe height, `G01 Y0 Z<safe>`, the moves with A modal and Y never a word, then the firmware's
+ * `G92.4A0S0` unwind as the LAST motion, `M9`, `M5`, `M30`. Work Z is the distance above the
+ * axis, so the stock's surface is at Z = radius and "safe" is the radius plus `ir.safeZ`.
+ *
+ * NO `;@MKR` HEADER ON A ROTARY FILE. The vendor's rotary output carries none, and the round
+ * stock's `STOCK`/`ORIGIN` forms are §9's open question. FOR THE BENCH, as a candidate only: the
+ * decompiled Studio writer carries `;@MKR|STOCK|id=cylinder|diameter=<D>|length=<L>` — the field
+ * ORDER there is INFERRED and has never been seen in a generated file, and no ORIGIN record for a
+ * round job has been observed at all. Until a Studio-generated rotary `.nc` is read, this post
+ * writes no `;@MKR` line whatsoever and says its provenance in `;@CM|` comments, because writing
+ * the guessed form would be the invention the evidence rule forbids (§9).
+ *
  * PROVENANCE. Every machine number comes from the `MillProfile` (#184); nothing about the
  * machine is typed here. The STRUCTURE — the header field list, the body order, the ending —
  * is written from `/Fabrication.md` §2 and the issue's implementation spec, which read it off
- * Studio's one Z1-generated sample. No vendor line is copied into this file.
+ * Studio's one Z1-generated sample; the rotary structure is read off the vendor's rotary files.
+ * No vendor line is copied into this file.
  */
 
-import type { CamMove, ToolpathIR } from '../cam/ir';
+import type { CamMove, CamOperation, ToolpathIR } from '../cam/ir';
 import { estimateIRCycleSeconds } from '../cam/ir';
 import type { MillProfile } from '../machine';
 import { surfaceLift, type SurfaceFrame } from '../engrave/surfacePlane';
@@ -39,8 +55,9 @@ import { formatFixed, sanitizeMkrValue } from './format';
  * measured from, so the old failure mode — silently assuming the face is at Z0 — is a type
  * error, not a runtime accident. There are exactly two legal values (#237, `/Rotary.md` §3.3):
  * `'probed-top-face'` for the flat frame, and `'rotary-axis'` for the rotary frame (Z = radius
- * from the axis). The second exists so "Z is radius" is expressible rather than smuggled; the
- * flat post still refuses to write it (R-3 adds rotary posting).
+ * from the axis). Each is legal only with its own frame (#240): the flat emitter refuses the
+ * rotary datum and the rotary emitter refuses the flat one, so a frame error is never a silent
+ * posting.
  */
 export interface PostContext {
   jobName: string;
@@ -117,15 +134,189 @@ function mkr(tag: string, ...fields: string[]): string {
 }
 
 /**
+ * The cycle-estimate sentence both dialects carry as a comment: what the figure assumes, and on
+ * what numbers. A `;` comment, not a `;@MKR` record, so a header reader ignores it but the
+ * operator does not; the rates are the profile's own, so the sentence cannot outlive them
+ * (#242/#281).
+ */
+function cycleEstimateNote(machine: MillProfile): string {
+  const rapid = machine.rapidEstimate;
+  return (
+    `; cycle estimate: cutting + rapids through the trapezoid, timed on ${machine.name}'s rapid model ` +
+    `(${rapid.xyMmPerMin} mm/min XY, ${rapid.zMmPerMin} mm/min Z, ${rapid.accelMmPerS2} mm/s² accel, ` +
+    `${rapid.source}) — a planning estimate, not a measured cycle time`
+  );
+}
+
+/**
+ * The rotary-frame emitter (#240): the vendor's rotary structure, with A resolved on every move.
+ *
+ * `ops` is the non-empty operation list `postZ1` filtered, and `errors` carries the refusals the
+ * two dialects share; this function adds the rotary frame's own and returns them all. It writes
+ * no `;@MKR` header (see the module header) and keeps provenance in `;@CM|` records.
+ */
+function postRotary(
+  ir: ToolpathIR,
+  ctx: PostContext,
+  machine: MillProfile,
+  ops: CamOperation[],
+  errors: string[],
+): PostResult {
+  const radius = ir.rotary?.radius;
+  const radiusOk = typeof radius === 'number' && Number.isFinite(radius) && radius > 0;
+  if (!radiusOk) {
+    errors.push(
+      'the toolpath IR is a rotary-frame IR but does not state a usable stock radius (ir.rotary.radius): every Z in a rotary file is a distance above the axis, so the radius those Zs were written for has to be stated',
+    );
+  }
+  if (ctx.zDatum !== 'rotary-axis') {
+    errors.push(
+      "zDatum 'probed-top-face' needs a flat-frame IR: this toolpath is rotary-frame, whose Zs are measured from the rotary axis, not from a top face",
+    );
+  }
+
+  const surface = radiusOk ? (radius as number) : null;
+  let moveIndex = 0;
+  for (const op of ir.operations) {
+    for (const move of op.moves) {
+      // R5 — `a` is OPTIONAL on the type so every flat IR stays constructible unchanged, and the
+      // post is where it becomes required: a rotary move with no A has no angular position, and
+      // inventing one would cut a different path from the one CAM planned.
+      if (move.a === undefined || !Number.isFinite(move.a)) {
+        errors.push(
+          `move ${moveIndex}: a rotary-frame IR needs a finite A position (degrees) on every move, and this one has ${move.a === undefined ? 'none' : String(move.a)}`,
+        );
+      }
+      // R1 — the tool axis passes through the rotary axis, so work Y is 0 for the whole file.
+      // The vendor's own files command Y three times at most and always 0.
+      if (Math.abs(move.y) > 1e-9) {
+        errors.push(
+          `move ${moveIndex}: Y=${move.y} is not 0; a rotary job holds the tool over the axis, so every Y is 0`,
+        );
+      }
+      // The rotary frame's version of the flat air-cut check: the stock's top is the RADIUS, so a
+      // feed between the surface and the hop height above it cuts nothing (R6).
+      if (move.kind === 'feed' && surface !== null && move.z > surface + 1e-9 && move.z < surface + ir.hopZ) {
+        errors.push(
+          `move ${moveIndex}: a cutting move at Z=${move.z} is above the stock's surface (Z > ${surface}) yet below the hop height above it: a cut in the air`,
+        );
+      }
+      moveIndex++;
+    }
+  }
+
+  if (errors.length > 0) return { ok: false, errors };
+
+  const r = radius as number;
+  const axis = (v: number): string => formatFixed(v, machine.dialect.axisPrecision);
+  const feed = (v: number): string => formatFixed(v, machine.dialect.feedPrecision);
+  /** Safe height in the AXIS frame: `safeZ` stays what the IR says — mm above the stock's top. */
+  const safe = r + ir.safeZ;
+  const safeWord = axis(safe);
+
+  // The vendor's rotary file opens with a fed move to its safe height, and that move states a
+  // rate. Use the program's own first feed, so the line names a rate this file is already known
+  // to run at; a rapid-only program states the machine's ceiling.
+  const firstFeed = ops.flatMap((op) => op.moves).find((move) => move.kind === 'feed');
+  const preambleFeed = firstFeed !== undefined && firstFeed.kind === 'feed' ? firstFeed.f : machine.maxCutFeed;
+
+  const lines: string[] = [
+    '%',
+    'G17 G21 G54 G90',
+    'M5',
+    `T${ir.toolNumber}M6`,
+    `M3 S${axis(ir.spindleRpm)}`,
+    // A FED move to a known height BEFORE any XY travel, as the vendor does: after the manual
+    // tool change the head's height is unknown, and the feed establishes it without a rapid.
+    `G01 Z${safeWord} F${feed(preambleFeed)}`,
+    // Y is stated here ONCE and is never a word again in this file (see `emit`).
+    `G01 Y0 Z${safeWord}`,
+    // Provenance, as `;@CM|` records the machine's reader ignores. There is deliberately no
+    // `;@MKR` header: see the module header for the round-stock candidate and why it is not
+    // written until the bench reads a Studio-generated rotary file.
+    `;@CM|TOOL|key=${sanitizeMkrValue(ctx.toolKey)}`,
+    `;@CM|ROTARY|radius=${axis(r)}`,
+    cycleEstimateNote(machine),
+  ];
+
+  // Sticky modal state, exactly as the flat emitter keeps it, plus A.
+  let lastX: string | null = null;
+  let lastZ: string | null = null;
+  let lastA: string | null = null;
+  let lastF: string | null = null;
+
+  // Y IS NEVER A WORD AFTER THE PREAMBLE, and that is a fact about the frame rather than an
+  // omission: Studio's 4-axis mode forces the work Y to 0 and centres the origin on the rotary
+  // axis, which is EXACTLY R6's frame (origin on the axis, Z = radius, Y ≡ 0, X along the axis).
+  // `postRotary` refuses a move whose Y is not 0 rather than writing it, so leaving Y out cannot
+  // hide a tool taken off the axis — the Y a reader sees is the one the preamble stated.
+  const emit = (move: CamMove): void => {
+    const fx = axis(move.x);
+    const fz = axis(move.z);
+    const fa = axis(move.a as number); // every move's `a` was validated above
+    const code = move.kind === 'rapid' ? 'G0' : 'G1';
+    const words: string[] = [];
+    if (fx !== lastX) words.push(`X${fx}`);
+    if (fz !== lastZ) words.push(`Z${fz}`);
+    if (fa !== lastA) words.push(`A${fa}`);
+    if (move.kind === 'feed') {
+      const f = feed(move.f);
+      // A rapid never carries an F — the rate is the controller's own seek rate (#184), and the
+      // vendor's rotary rapids carry none either.
+      if (f !== lastF) words.push(`F${f}`);
+    }
+    if (words.length === 0) return;
+    lines.push(`${code} ${words.join(' ')}`);
+    lastX = fx;
+    lastZ = fz;
+    lastA = fa;
+    if (move.kind === 'feed') lastF = feed(move.f);
+  };
+
+  for (const op of ops) {
+    // Every operation is readable on its own: its first move re-states X, Z and A in full.
+    lastX = null;
+    lastZ = null;
+    lastA = null;
+    for (const move of op.moves) emit(move);
+  }
+
+  // The vendor retracts to its safe height before the unwind, so the unwind is not the last thing
+  // holding the tool at cutting depth.
+  if (lastZ !== safeWord) {
+    const words: string[] = [];
+    if (lastX !== null) words.push(`X${lastX}`);
+    words.push(`Z${safeWord}`);
+    if (lastA !== null) words.push(`A${lastA}`);
+    lines.push(`G0 ${words.join(' ')}`);
+  }
+
+  lines.push(
+    // The firmware's rotary unwind, written EXACTLY as the vendor writes it, with no spaces: `S`
+    // drops whole turns and keeps A modulo 360 (`R` would RESET it to that value). It is the
+    // file's LAST motion word, and it leaves the axis at a known angle after a program whose A
+    // ran unwound — the vendor's files end on it too.
+    'G92.4A0S0',
+    'M9',
+    'M5',
+    'M30',
+  );
+
+  return { ok: true, text: lines.join('\n') + '\n' };
+}
+
+/**
  * Turn a toolpath IR into a `.nc` program, or refuse with the reasons (never a silent
  * assumption).
  *
- * `zDatum` must be the probed top face. Refuses when the IR has no non-empty operation, a
- * move has a non-finite coordinate, a feed is outside `(0, machine.maxCutFeed]`, the spindle
- * speed is above `machine.maxRpm`, a cutting move sits above the stock but below `hopZ` (a
- * cut in the air is a CAM bug), the machine has an automatic tool changer (this post writes
- * the manual-change dialect only), or the IR is not the flat frame (#237: a rotary-frame IR,
- * or the `'rotary-axis'` datum, cannot be posted by the flat dialect).
+ * The frame picks the dialect, and each dialect refuses the other's context (#240): the flat
+ * emitter refuses the `'rotary-axis'` datum and any move carrying an `a`, the rotary emitter
+ * refuses the `'probed-top-face'` datum, a move with no `a`, a non-zero Y and an IR with no
+ * stock radius. Both refuse an IR with no non-empty operation, a move with a non-finite
+ * coordinate, a feed outside `(0, machine.maxCutFeed]`, the spindle speed above
+ * `machine.maxRpm`, a cutting move above the stock but below `hopZ` (a cut in the air is a CAM
+ * bug), and a machine with an automatic tool changer (this post writes the manual-change
+ * dialect only).
  */
 export function postZ1(
   ir: ToolpathIR,
@@ -135,32 +326,12 @@ export function postZ1(
 ): PostResult {
   const errors: string[] = [];
 
-  // #419 decision 4 — this file's share of the run's vacuum words, decided ONCE here so the
-  // preamble and the ending cannot disagree about which program they are in.
-  const span = opts.vacuum ?? 'whole';
-  const vacuumOn = ir.air && (span === 'whole' || span === 'first');
-  const vacuumOff = ir.air && (span === 'whole' || span === 'last');
-
   // An operation with no moves is SKIPPED, not refused: `generateEngrave` emits one for a
   // label whose region is empty, so operation numbers track label order (#173 comment).
   // Only when EVERY operation is empty is there nothing to post.
   const ops = ir.operations.filter((op) => op.moves.length > 0);
   if (ops.length === 0) {
     errors.push('the toolpath IR has no operation with any moves: nothing to post');
-  }
-
-  // A rotary-frame IR must not flow through this post unnoticed (#237): every Z in the flat
-  // dialect is measured from the probed top face, but a rotary IR's Z is the radius from the
-  // axis, so the two Zs are different quantities. There is no rotary posting until R-3.
-  if (ir.frame === 'rotary') {
-    errors.push(
-      'the toolpath IR is a ROTARY-frame IR (work Z = radius from the axis); this post writes the flat 3-axis dialect only, and rotary posting is not implemented yet',
-    );
-  }
-  if (ctx.zDatum === 'rotary-axis') {
-    errors.push(
-      "zDatum 'rotary-axis' is not postable: this post measures every Z from the probed top face, and rotary posting is not implemented yet",
-    );
   }
 
   if (machine.hasATC) {
@@ -173,11 +344,21 @@ export function postZ1(
     errors.push(`spindle speed ${ir.spindleRpm} RPM exceeds the ${machine.name}'s ${machine.maxRpm} RPM ceiling`);
   }
 
+  // The checks BOTH dialects owe: a finite position, and a feed the machine can run. Whether a
+  // move's `a` is required or forbidden, and where the stock's top is, are the frame's own
+  // questions — asked here for the flat frame, in `postRotary` for the rotary one.
   let moveIndex = 0;
   for (const op of ir.operations) {
     for (const move of op.moves) {
       if (!Number.isFinite(move.x) || !Number.isFinite(move.y) || !Number.isFinite(move.z)) {
         errors.push(`move ${moveIndex} has a non-finite coordinate (x=${move.x}, y=${move.y}, z=${move.z})`);
+      }
+      if (ir.frame === 'flat' && move.a !== undefined) {
+        // #240 — the A word belongs to the rotary dialect; silently dropping it would post a
+        // different path from the one CAM planned, so a flat IR carrying one is refused.
+        errors.push(
+          `move ${moveIndex}: the toolpath IR is flat-frame but this move carries A=${move.a}; the flat dialect has no A axis`,
+        );
       }
       if (move.kind === 'feed') {
         if (!(move.f > 0) || move.f > machine.maxCutFeed) {
@@ -187,19 +368,37 @@ export function postZ1(
         // depth intent is wrong, and the machine would do it without complaint. #624 — after
         // #608's `applySurfaceLift` the local top is the plane's lift at this XY, not work Z0,
         // so a feed that only climbs by the plane's lift is a correct cut, not air; a flat post
-        // (`surface` absent, or a flat plane) keeps the old `Z > 1e-9` refusal.
-        const top = ctx.surface ? surfaceLift(ctx.surface.plane, ctx.surface.z0, move.x, move.y) : 0;
-        if (move.z > top + 1e-9 && move.z < ir.hopZ) {
-          errors.push(
-            `move ${moveIndex}: a cutting move at Z=${move.z} is above the stock top (Z > ${top}) yet below hopZ=${ir.hopZ}: a cut in the air`,
-          );
+        // (`surface` absent, or a flat plane) keeps the old `Z > 1e-9` refusal. The rotary
+        // frame's equivalent is in `postRotary`, where the stock top is the radius.
+        if (ir.frame === 'flat') {
+          const top = ctx.surface ? surfaceLift(ctx.surface.plane, ctx.surface.z0, move.x, move.y) : 0;
+          if (move.z > top + 1e-9 && move.z < ir.hopZ) {
+            errors.push(
+              `move ${moveIndex}: a cutting move at Z=${move.z} is above the stock top (Z > ${top}) yet below hopZ=${ir.hopZ}: a cut in the air`,
+            );
+          }
         }
       }
       moveIndex++;
     }
   }
 
+  if (ir.frame === 'rotary') return postRotary(ir, ctx, machine, ops, errors);
+
+  // ---- The flat frame only, from here on.
+  if (ctx.zDatum === 'rotary-axis') {
+    errors.push(
+      "zDatum 'rotary-axis' needs a rotary-frame IR: this toolpath's Zs are measured from the probed top face, so posting it against the rotary axis would put every cut in the wrong place",
+    );
+  }
+
   if (errors.length > 0) return { ok: false, errors };
+
+  // #419 decision 4 — this file's share of the run's vacuum words, decided ONCE here so the
+  // preamble and the ending cannot disagree about which program they are in.
+  const span = opts.vacuum ?? 'whole';
+  const vacuumOn = ir.air && (span === 'whole' || span === 'first');
+  const vacuumOff = ir.air && (span === 'whole' || span === 'last');
 
   const axis = (v: number): string => formatFixed(v, machine.dialect.axisPrecision);
   const feed = (v: number): string => formatFixed(v, machine.dialect.feedPrecision);
@@ -264,10 +463,8 @@ export function postZ1(
     mkr('TIME', `seconds=${Math.round(estimateIRCycleSeconds(ir, rapid))}`),
     // #242/#281: the machine's screen shows the figure above as the job time, so say what it assumes
     // AND on what numbers. A `;` comment (not a `;@MKR` record), so the header reader ignores it but
-    // the operator does not. The rates are the profile's own, so this sentence cannot outlive them.
-    `; cycle estimate: cutting + rapids through the trapezoid, timed on ${machine.name}'s rapid model ` +
-      `(${rapid.xyMmPerMin} mm/min XY, ${rapid.zMmPerMin} mm/min Z, ${rapid.accelMmPerS2} mm/s² accel, ` +
-      `${rapid.source}) — a planning estimate, not a measured cycle time`,
+    // the operator does not.
+    cycleEstimateNote(machine),
     ...ops.map((op, i) => mkr('TOOLPATH', `number=${i + 1}`, `tool_number=${ir.toolNumber}`, `name=${sanitizeMkrValue(op.name)}`)),
     ';@MKR|END',
   ];

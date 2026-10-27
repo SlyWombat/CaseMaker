@@ -42,7 +42,7 @@ import type { MachineMountKind } from '@/platform/machineChange';
 import { useLocationStore } from '@/store/locationStore';
 import { useSettingsStore } from '@/store/settingsStore';
 import { openMachineChange } from '@/components/machine-change';
-import type { EngraveJob, JobStockForm, ViseParams } from '@/types/engraveJob';
+import type { EngraveJob, JobStockForm, RotaryChuck, ViseParams } from '@/types/engraveJob';
 import {
   HOLDING_MOUNT_LABELS,
   HOLDING_MOUNT_WORDS,
@@ -59,7 +59,6 @@ import {
   seatedProud,
   type HoldingMount,
   type MountOption,
-  type ViseHoldingMount,
 } from './holdingMounts';
 
 const MUTED: CSSProperties = { fontSize: 11, color: '#9aa4b0', lineHeight: 1.5, margin: '4px 0' };
@@ -395,9 +394,15 @@ export interface HoldingStepProps {
   answers: SetupAnswers;
   /** Apply the answer immediately: there is no later Finish to collect it. */
   onAnswers: (answers: SetupAnswers) => void;
+  /**
+   * #240 — selecting the rotary chuck (or the vise again) is ONE store write, because the
+   * workholding and the stock box change together: `rotary` null is the vise, and `next` carries
+   * the answers' vise and sacrificial for that write.
+   */
+  onRotary: (rotary: RotaryChuck | null, next: SetupAnswers) => void;
 }
 
-export function HoldingStep({ job, answers, onAnswers }: HoldingStepProps): JSX.Element {
+export function HoldingStep({ job, answers, onAnswers, onRotary }: HoldingStepProps): JSX.Element {
   const location = useLocationStore((s) => s.location);
   // The machine-change wizard reads the location's first machine (#693); the step reads the same
   // record so the line and the escape describe one machine.
@@ -417,10 +422,20 @@ export function HoldingStep({ job, answers, onAnswers }: HoldingStepProps): JSX.
   const boardValue = boardIndex >= 0 ? `loc:${boardIndex}` : 'typed';
 
   const options = useMemo(
-    () => mountOptions({ machine, accessories, stock: answers.stock, boardMm, rotaryEnvelope }),
-    [machine, accessories, answers.stock, boardMm, rotaryEnvelope],
+    () =>
+      mountOptions({
+        machine,
+        accessories,
+        stock: answers.stock,
+        boardMm,
+        rotaryEnvelope,
+        round: job.stockEntry?.form === 'rod' || job.stock.shape === 'cylinder',
+      }),
+    [machine, accessories, answers.stock, boardMm, rotaryEnvelope, job],
   );
-  const current = currentMount(answers);
+  // #240 — the answers' mount is the rotary when the job is in the chuck; otherwise the vise
+  // answers' seat and board name it.
+  const current: HoldingMount = answers.workholding === 'rotary' ? 'rotary' : currentMount(answers);
   // #705 — the picture follows the radio: the operator's chosen mount, or the option under the
   // pointer/focus when it is a disabled one that needs a machine change (drawn with its cost line).
   const [previewMount, setPreviewMount] = useState<HoldingMount | null>(null);
@@ -431,18 +446,29 @@ export function HoldingStep({ job, answers, onAnswers }: HoldingStepProps): JSX.
   const shown = options.filter((o) => canDriveMachine || mechanismOf(o.mount) === 'vise');
 
   // First arrival at the step: the mount the stock calls for, unless someone has asserted a setup.
-  // Deliberately once per mount of the step — a later answer is the operator's.
+  // Deliberately once per mount of the step — a later answer is the operator's. A rotary job is
+  // already asserted: the vise's seat and board say nothing about it (#240).
   const applied = useRef(false);
   useEffect(() => {
     if (applied.current) return;
     applied.current = true;
+    if (job.workholding.kind !== 'vise') return;
     const next = applyRecommendedMount(answers, boardMm);
     if (next !== answers) onAnswers(next);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  function choose(mount: ViseHoldingMount, mm: number = boardMm): void {
-    onAnswers(applyMount(answers, mount, mm));
+  function choose(mount: HoldingMount, mm: number = boardMm): void {
+    // #240 — the chuck holds a rod; the vise answers describe the vise. Either switch is the one
+    // store write that also turns the stock box to the frame the mount holds it in.
+    if (mount === 'rotary') {
+      onRotary(answers.rotary, answers);
+      return;
+    }
+    if (mount === 'bed-tape' || mount === 'bed-bracket') return; // never enabled in this build
+    const next = applyMount(answers, mount, mm);
+    if (job.workholding.kind === 'rotary-chuck') onRotary(null, next);
+    else onAnswers(next);
   }
 
   function changeMachine(target: MachineMountKind | null, holding: string): void {
@@ -467,9 +493,10 @@ export function HoldingStep({ job, answers, onAnswers }: HoldingStepProps): JSX.
   const visibleFindings = findings.filter((f) => f.code !== 'vise-default');
 
   // The #231 fix, seated on the mount the answers are actually in: the board under the part is
-  // part of the height (a 12 mm board is not ignored just because the seat is the ledge).
+  // part of the height (a 12 mm board is not ignored just because the seat is the ledge). A job in
+  // the chuck has no vise seat to fix (#240).
   const fix: ViseParams | null =
-    answers.vise.stockProud < answers.stock.thickness
+    answers.workholding === 'rotary' || answers.vise.stockProud < answers.stock.thickness
       ? null
       : {
           ...answers.vise,
@@ -554,7 +581,7 @@ export function HoldingStep({ job, answers, onAnswers }: HoldingStepProps): JSX.
                 key={option.mount}
                 option={option}
                 checked={!option.disabled && current === option.mount}
-                onChoose={() => choose(option.mount as ViseHoldingMount)}
+                onChoose={() => choose(option.mount)}
                 onPreview={setPreviewMount}
                 onMachineChange={() => {
                   if (option.escape !== null) changeMachine(option.escape, option.holdingWords);
@@ -604,11 +631,13 @@ export function HoldingStep({ job, answers, onAnswers }: HoldingStepProps): JSX.
               {defaultFinding !== null && (
                 <FindingRow finding={defaultFinding} testid="engrave-setup-step-finding-vise-default" />
               )}
-              <p style={MUTED} data-testid="engrave-setup-holding-jaws">
-                Jaws: {fmt(answers.vise.fixedJawThickness)} mm fixed ·{' '}
-                {fmt(answers.vise.movingJawThickness)} mm moving · {fmt(answers.vise.jawLength)} mm long ·{' '}
-                ledge {fmt(LEDGE_STEP)} mm · vise body {fmt(VISE_FLOOR_DEPTH)} mm
-              </p>
+              {answers.workholding === 'vise' && (
+                <p style={MUTED} data-testid="engrave-setup-holding-jaws">
+                  Jaws: {fmt(answers.vise.fixedJawThickness)} mm fixed ·{' '}
+                  {fmt(answers.vise.movingJawThickness)} mm moving · {fmt(answers.vise.jawLength)} mm long ·{' '}
+                  ledge {fmt(LEDGE_STEP)} mm · vise body {fmt(VISE_FLOOR_DEPTH)} mm
+                </p>
+              )}
               {answers.sacrificial.under !== null && (
                 <p style={MUTED} data-testid="engrave-setup-holding-board">
                   Board {fmt(answers.sacrificial.under.thickness)} mm (

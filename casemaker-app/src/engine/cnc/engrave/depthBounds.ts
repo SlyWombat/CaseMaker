@@ -41,6 +41,7 @@
 import { DEFAULT_BREAKTHROUGH } from '@/engine/cnc/sacrificial';
 import { colourBoundaryDepthOf, printedLayerGridOf } from '@/engine/cnc/layerStack';
 import { probeResiduals } from '@/engine/cnc/probePlan';
+import { jobVise } from '@/engine/cnc/fixture';
 import type { EngraveAnyItem, EngraveJob, EngraveLabel, EngraveMargins, FieldSource, MarginSource } from '@/types/engraveJob';
 import type { Mm } from '@/types/units';
 
@@ -936,7 +937,7 @@ export function recommendLabelDepth(
   }
 
   const clearance = Math.max(job.jawClearance, margin);
-  const { stockProud } = job.workholding.vise;
+  const { stockProud } = jobVise(job);
   // #369 — the jaw floor is a Z rule with an XY precondition, and the basis states which one held
   // rather than which number won. `reaches` is that precondition: the swept cut can come over a jaw
   // once the vise's own band is allowed for (#394). The recommendation is advisory — it may hold a

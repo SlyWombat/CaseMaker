@@ -16,7 +16,8 @@ import {
   newEngraveThreadId,
   newEngraveTraceId,
 } from '@/engine/cnc/engrave/defaults';
-import { defaultStockProud, seatedVise, todayISODate, viseForNewJob } from '@/engine/cnc/fixture';
+import { defaultStockProud, jobVise, seatedVise, todayISODate, viseForNewJob } from '@/engine/cnc/fixture';
+import { rotaryBoxForRod, standingBoxForRod } from '@/engine/cnc/stockStart';
 import { sacrificialForNewJob } from '@/engine/cnc/sacrificial';
 import { resolveTool } from '@/engine/cnc/toolRegistry';
 import { cuttingDiameter } from '@/engine/cnc/tool';
@@ -87,6 +88,7 @@ import type {
   JobRunLogEntry,
   JobSetup,
   JobSource,
+  RotaryChuck,
   Sacrificial,
   ViseParams,
 } from '@/types/engraveJob';
@@ -249,8 +251,8 @@ function newDefaultJob(): EngraveJob {
   const job = defaultEngraveJob(viseForNewJob(fixtures.vise), margins);
   // #508 — a fresh job's default vise is seated on the stock it is about to cut: `viseForNewJob`
   // knows no stock, so without this the job would carry `DEFAULT_VISE`'s placeholder proud.
-  const vise = seatedVise(job.workholding.vise, job.stock.thickness);
-  return { ...job, workholding: { ...job.workholding, vise }, sacrificial: sacrificialForNewJob(fixtures.sacrificial) };
+  const vise = seatedVise(jobVise(job), job.stock.thickness);
+  return { ...job, workholding: { kind: 'vise', vise }, sacrificial: sacrificialForNewJob(fixtures.sacrificial) };
 }
 
 function loadJob(): EngraveJob {
@@ -480,12 +482,28 @@ function withoutCutOverride(job: EngraveJob): EngraveJob {
  */
 function viseAfterStockEdit(job: EngraveJob, patch: Partial<EngraveJob['stock']>): ViseParams {
   const thickness = patch.thickness;
-  const { vise } = job.workholding;
+  // #240 — a rotary job has no vise of its own. The neutral seated vise stands in for the answer
+  // the panel reads (`jobVise`), and `setStock` writes it back only when the job is a vise job.
+  const vise = jobVise(job);
   if (thickness === undefined) return vise;
   if (vise.source !== 'default') return vise;
   // #508 — the seat, not just the thickness: a floor-seated blank sits `VISE_FLOOR_DEPTH` down.
   const stockProud = defaultStockProud(thickness, vise.seat);
   return stockProud === vise.stockProud ? vise : { ...vise, stockProud };
+}
+
+/**
+ * The rod a job's box states — its diameter, and its length along the rod — whichever way the rod
+ * lies (#240). A rotary job's box is the AXIS FRAME (`L × D × D`, `shape: 'cylinder'`); the stock
+ * step's rod stands on its END (`D × D × L`, #683). Null for stock that is not round: a plate or a
+ * block never becomes a rod by this reading.
+ */
+function rodSizeOf(stock: EngraveJob['stock']): { diameter: number; length: number } | null {
+  if (stock.shape === 'cylinder') {
+    return { diameter: stock.diameter ?? stock.width, length: stock.length };
+  }
+  if (Math.abs(stock.length - stock.width) > 1e-9) return null;
+  return { diameter: stock.width, length: stock.thickness };
 }
 
 /** The job with a source stamped on each of `keys` in `sources.stock` (#254). */
@@ -873,6 +891,18 @@ export interface EngraveJobState {
   /** #572 — record (or clear) the double-confirmed cutter/material override. */
   setMetalLineOverride: (override: boolean) => void;
   setVise: (patch: Partial<ViseParams>) => void;
+  /**
+   * #240 — hold the rod in the rotary module's three-jaw chuck, or return it to the vise, in ONE
+   * undoable write.
+   *
+   * The workholding and the stock box are one fact, so one action writes both and they cannot
+   * disagree: in the chuck the rod lies along the AXIS FRAME (`length` along X,
+   * `width = thickness = diameter`, `shape: 'cylinder'`), while the same rod in the vise stands on
+   * its END (`D × D × L`, #683). `rotary` null is the vise; the answers' vise and sacrificial are
+   * written in the same step. A job that is not round stock is left unchanged — the Holding step's
+   * own rule is what says the rotary needs a rod.
+   */
+  setRotaryHolding: (rotary: RotaryChuck | null, vise: ViseParams, sacrificial?: Sacrificial) => void;
   /** Add a default shape of `kind` (#214) and return its id. */
   addShape: (kind: EngraveShape['kind']) => string;
   /** Merge a hand edit into one shape (#214). A partial `position` is merged, not replaced. */
@@ -1196,6 +1226,32 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
           (k) => patch[k] !== undefined,
         );
         const stock = { ...job.stock, ...patch };
+        // #240 — ONE BOX, WHICHEVER WAY THE ROD LIES. A rotary job's box is the axis frame
+        // (`L × D × D`), while the stock step speaks a rod's own numbers in its standing box
+        // (`D × D × L`, #683). Re-express a round-stock write in the frame the job is held in, so
+        // the workholding and the box cannot disagree. Any other write is taken as stated: the
+        // Holding step is where the mount is chosen, and its round-stock rule is what turns the
+        // rotary off when the new stock is not round.
+        const patchRod =
+          patch.length !== undefined &&
+          patch.width !== undefined &&
+          patch.thickness !== undefined &&
+          Math.abs(patch.length - patch.width) <= 1e-9;
+        const extraKeys: (keyof EngraveJob['stock'])[] = [];
+        if (job.workholding.kind === 'rotary-chuck' && patchRod) {
+          Object.assign(stock, rotaryBoxForRod(patch.width!, patch.thickness!));
+          extraKeys.push('diameter');
+        } else if (stock.shape === 'cylinder') {
+          // #240 — a round box's cross-section is ONE number: `width`, `thickness` and `diameter`
+          // move together, so an edit to any of them keeps the schema's equality invariant.
+          const diameter = patch.diameter ?? patch.width ?? patch.thickness;
+          if (diameter !== undefined) {
+            stock.width = diameter;
+            stock.thickness = diameter;
+            stock.diameter = diameter;
+            extraKeys.push('width', 'thickness', 'diameter');
+          }
+        }
         // `colour`, `flatness` and `fibre` are the stock fields a patch can CLEAR (#285 review,
         // #345, #464, #492). "Use the badge blank" on a badge that has lost its print must take the
         // colour facts away with it, or the stack limit goes on applying to a blank whose print is
@@ -1206,7 +1262,7 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
         // key still means "leave it alone", which is what every other caller relies on — a laminate
         // imported from a design that states no print facts keeps the cap its stock entry gave it.
         // The provenance goes with it — a source for a value that is gone is a lie.
-        const sources = withStockSource(job, keys, source);
+        const sources = withStockSource(job, [...keys, ...extraKeys], source);
         for (const key of ['colour', 'flatness', 'fibre'] as const) {
           if (key in patch && patch[key] === undefined) {
             delete stock[key];
@@ -1216,7 +1272,9 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
         // The vise follows a blank that changes size (#344) — see `viseAfterStockEdit`.
         const vise = viseAfterStockEdit(job, patch);
         const next = { ...job, stock, sources };
-        return vise === job.workholding.vise
+        // #240 — a rotary job keeps its workholding. The neutral vise above is the panel's
+        // stand-in, not an answer; returning to the vise is the Holding step's own write.
+        return job.workholding.kind !== 'vise' || vise === job.workholding.vise
           ? next
           : { ...next, workholding: { ...job.workholding, vise } };
       }),
@@ -2173,6 +2231,10 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
     // unless the patch already carries a date.
     setVise: (patch) =>
       apply((job) => {
+        // #240 — the vise answers are the VISE's. A job in the rotary chuck has no jaw numbers on
+        // screen to edit; its return to the vise is `setRotaryHolding(null, …)`, which writes the
+        // vise and the standing box together.
+        if (job.workholding.kind !== 'vise') return job;
         // #508 — the SEAT is a mechanism, not a measurement: choosing it on a shipped-default vise
         // re-derives `stockProud` from the seat and leaves the source alone. A patch that states a
         // jaw number, or nothing at all (the panel's "save as my vise"), is the user's own exactly
@@ -2190,6 +2252,31 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
           vise.stockProud = defaultStockProud(job.stock.thickness, vise.seat);
         }
         return { ...job, workholding: { ...job.workholding, vise } };
+      }),
+
+    // #240 — the rotary write owns BOTH halves of the one fact. `apply` makes it one undo entry,
+    // so a Ctrl+Z puts the workholding and the box back together rather than leaving a rod lying
+    // in a frame that says it stands on end.
+    setRotaryHolding: (rotary, vise, sacrificial) =>
+      apply((job) => {
+        const size = rodSizeOf(job.stock);
+        if (size === null) return job;
+        const { shape: _shape, diameter: _diameter, ...box } = job.stock;
+        if (rotary !== null) {
+          return {
+            ...job,
+            stock: { ...box, ...rotaryBoxForRod(size.diameter, size.length) },
+            workholding: { kind: 'rotary-chuck', rotary: { ...rotary } },
+          };
+        }
+        // Back in the vise: the standing rod again, with the answers' vise and sacrificial.
+        if (job.workholding.kind !== 'rotary-chuck') return job;
+        return {
+          ...job,
+          stock: { ...box, ...standingBoxForRod(size.diameter, size.length) },
+          workholding: { kind: 'vise', vise: { ...vise } },
+          ...(sacrificial === undefined ? {} : { sacrificial }),
+        };
       }),
 
     // #205: hand edits sit ON TOP of the computed values, field by field. `undefined` clears one

@@ -30,6 +30,7 @@ import type { EngraveJob, FrozenPackage } from '@/types/engraveJob';
 import type { ShopDefaults } from '@/platform/defaultsClient';
 import type { StockFlatness } from '@/platform/stockClient';
 import { jobMachine } from '@/engine/cnc/calibration';
+import { jobMount } from '@/engine/cnc/engrave/jobSetup';
 import { getTools } from '@/engine/cnc/toolRegistry';
 import { planRun, type FeatureOverrides, type RunPlan } from '@/engine/cnc/plan';
 
@@ -80,7 +81,8 @@ export function cutPlan(input: CutPlanInput): RunPlan {
       hash: program.hash,
     })),
     machine: jobMachine(job),
-    mount: job.workholding.kind,
+    // #240 — a rotary-held job runs in the flat vise frame until slice 2/3 (`jobMount`).
+    mount: jobMount(job),
     stock: { flatness },
     shallowestCutMm: null,
     finishedHashes: input.finishedHashes,

@@ -43,6 +43,12 @@ export interface PackageProgramInput {
   nc: string;
   frameNc: string | null;
   programHash: string;
+  /**
+   * #240 — the frame the post wrote this program in. Optional so every existing caller (and the
+   * tests' program builders) keep working; `freezePackage` records it only when it is stated, and
+   * an absent key reads `flat` everywhere the run path asks.
+   */
+  frame?: 'flat' | 'rotary';
 }
 
 /**
@@ -153,6 +159,10 @@ export function freezePackage(
     hash: p.programHash,
     frameNc: p.frameNc,
     frameHash: p.frameNc === null ? null : programHash(p.frameNc),
+    // #240 — the frame the post wrote, copied from the program. Written only when the program
+    // states it, so a pre-slice fixture (and every package frozen before the field existed) keeps
+    // no key and reads as flat.
+    ...(p.frame === undefined ? {} : { frame: p.frame }),
   }));
   const jobHash = jobFingerprint(job);
   return {

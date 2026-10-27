@@ -6,6 +6,7 @@
 // `machineLaser.ts` then asks one question of the result: is the fixed travel height above it?
 
 import { readFileSync } from 'node:fs';
+import { jobVise } from '@/engine/cnc/fixture';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
@@ -38,7 +39,7 @@ describe('#457 the laser lift bound from the registered surface', () => {
   it('takes the JAW TOPS when a thin blank sits below them (top −57.6, jaw tops −56.6)', () => {
     const job = defaultEngraveJob();
     // The blank stands 1 mm BELOW the jaw tops: work Z −stockProud = +1 above its own top.
-    job.workholding.vise.stockProud = -1;
+    jobVise(job).stockProud = -1;
     const bound = laserSurfaceBound(job, -57.6, DEFAULTS);
     expect(bound.surfaceMachineZ).toBe(-57.6);
     expect(bound.obstacle).toEqual({ label: 'the vise jaws', machineZ: -56.6 });
@@ -51,7 +52,7 @@ describe('#457 the laser lift bound from the registered surface', () => {
   it('leaves the surface as the bound when the jaws sit below the stock, and on tape', () => {
     const proud = defaultEngraveJob();
     // The blank stands 1.905 mm above the jaw tops: work Z −1.905, BELOW the registered top.
-    proud.workholding.vise.stockProud = 1.905;
+    jobVise(proud).stockProud = 1.905;
     expect(laserSurfaceBound(proud, -55.131, DEFAULTS)).toEqual({
       surfaceMachineZ: -55.131,
       obstacle: null,
@@ -97,7 +98,7 @@ describe('#457 the laser lift bound from the registered surface', () => {
 describe('#457 the lift both laser panels receive', () => {
   it('carries the registered surface, its date and the obstacle above it', () => {
     const job = defaultEngraveJob();
-    job.workholding.vise.stockProud = -1;
+    jobVise(job).stockProud = -1;
     const lift = laserLiftFor(job, { surfaceMachineZ: -57.6, measuredAt: '2026-10-18T02:14:00.000Z' }, DEFAULTS);
     expect(lift).toEqual({
       zMachine: -3,

@@ -211,6 +211,10 @@ export async function prepareVerifiedProgram(
     acknowledged,
     staleSince: null,
     error: null,
+    // #240/#545 — the same facts the panel hands the gates, so a headless prepare refuses a rotary
+    // program with the bench sentence instead of being a weaker copy of the app's rule.
+    machine: mill,
+    rotaryHeld: job.workholding.kind === 'rotary-chuck',
   };
   const requiredAcks = requiredAckCodes(view);
   let ackError: string | null = null;

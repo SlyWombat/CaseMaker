@@ -13,7 +13,7 @@
  * the middle of helping the person edit.
  */
 
-import { jobSetups } from '@/engine/cnc/engrave/jobSetup';
+import { jobMount, jobSetups } from '@/engine/cnc/engrave/jobSetup';
 import type { EngraveJob, JobSetup } from '@/types/engraveJob';
 import { removalsFrom, isSyntheticRemovalId } from './fromJob';
 import { buildSetups, planSetups } from './plan';
@@ -228,7 +228,7 @@ export function setupsInput(
   return {
     stock: { x: job.stock.length, y: job.stock.width, z: job.stock.thickness },
     removals: removalsFrom(job),
-    mount: first?.mount ?? { kind: job.workholding.kind },
+    mount: first?.mount ?? { kind: jobMount(job) },
     mounts,
     ...(first ? { firstUp: faceUpOf(first) } : {}),
     ...(rotaryEnvelope !== undefined ? { rotaryEnvelope } : {}),

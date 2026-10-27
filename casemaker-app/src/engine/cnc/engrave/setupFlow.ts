@@ -18,7 +18,7 @@
  *   step, with `stockProudFix` offering the value that resolves it.
  */
 
-import { defaultStockProud, validateVise } from '@/engine/cnc/fixture';
+import { defaultStockProud, jobVise, validateVise } from '@/engine/cnc/fixture';
 import { FEEDS_TABLE } from '@/engine/cnc/feeds';
 import { MATERIAL_LABELS } from '@/engine/cnc/materials';
 import type { MillProfile } from '@/engine/cnc/machine';
@@ -32,6 +32,8 @@ import { dedupeFindings, validateJob, type JobFinding } from '@/engine/cnc/engra
 import type {
   EngraveJob,
   FieldSource,
+  JobWorkholding,
+  RotaryChuck,
   Sacrificial,
   StockMaterial,
   ViseParams,
@@ -85,10 +87,34 @@ export function materialOptionsFor(machine?: MillProfile): MaterialOption[] {
 }
 
 /**
- * What the part is held in. Only a vise exists today; a rotary chuck is CNC-5's work and is
- * offered as a disabled choice so the shape of the question is right before the geometry is.
+ * What the part is held in (#240): the vise, or the rotary module's three-jaw chuck. The rotary
+ * choice is the machine's active mount plus round stock; selecting it is one store write
+ * (`setRotaryHolding`) that states both the workholding and the axis-frame stock box.
  */
 export type WorkholdingChoice = 'vise' | 'rotary';
+
+/**
+ * The chuck facts a rotary job starts from, with the wiki's own gaps kept gaps (#240,
+ * `/Rotary.md` §3.4): the page names reverse jaws fitted by default and a tailstock; the jaw
+ * capacity is not stated, so `gripDiameter` is null rather than an invented millimetre. `stickout`
+ * is the rod's own length on first selection — the whole rod is the cuttable span until slice 3's
+ * grip split refines it.
+ */
+export const ROTARY_CHUCK_SOURCE = 'Makera Z1 wiki, 4-axis accessory (wiki.makera.com/en/Z1/Accessories/4Axis)';
+
+export function defaultRotaryChuck(job: Pick<EngraveJob, 'stock'>): RotaryChuck {
+  // The rod's own length as the job's box states it, whichever way it faces: a standing rod is
+  // D × D × L, an axis-frame rod is L × D × D. The whole rod is the cuttable span until slice 3's
+  // grip split refines it; the diameter is already the box's own number.
+  const length = job.stock.shape === 'cylinder' ? job.stock.length : job.stock.thickness;
+  return {
+    stickout: length,
+    gripDiameter: null,
+    jawMode: 'reverse',
+    tailstock: true,
+    source: ROTARY_CHUCK_SOURCE,
+  };
+}
 
 /** The three sacrificial answers people actually build — plus "keep a custom setup". */
 export type SacrificialChoice = 'none' | 'board' | 'strips' | 'custom';
@@ -112,6 +138,8 @@ export interface SetupAnswers {
   sacrificial: Sacrificial;
   stock: { length: number; width: number; thickness: number; material: StockMaterial };
   vise: ViseParams;
+  /** The chuck facts the rotary choice writes (#240); carried through a re-entry. */
+  rotary: RotaryChuck;
   /**
    * The provenance of each answer. The vise's own `source` and the sacrificial's own `source`
    * travel inside those objects; stock has no other home, so it lives here.
@@ -132,11 +160,13 @@ function carried(existing?: FieldSource): FieldSource {
  * relabelled — the point of #246's third state.
  */
 export function defaultSetupAnswers(job: EngraveJob): SetupAnswers {
+  const rotary = job.workholding.kind === 'rotary-chuck';
   return {
-    workholding: 'vise',
+    workholding: rotary ? 'rotary' : 'vise',
     sacrificial: job.sacrificial,
     stock: { ...job.stock },
-    vise: { ...job.workholding.vise },
+    vise: { ...jobVise(job) },
+    rotary: rotary && job.workholding.kind === 'rotary-chuck' ? { ...job.workholding.rotary } : defaultRotaryChuck(job),
     sources: {
       stock: {
         length: carried(job.sources?.stock?.length),
@@ -182,10 +212,14 @@ export function sacrificialForChoice(choice: SacrificialChoice, current: Sacrifi
  * before any of it exists.
  */
 export function applyAnswers(job: EngraveJob, a: SetupAnswers): EngraveJob {
+  const workholding: JobWorkholding =
+    a.workholding === 'rotary'
+      ? { kind: 'rotary-chuck', rotary: { ...a.rotary } }
+      : { kind: 'vise', vise: { ...a.vise } };
   return {
     ...job,
     stock: { ...a.stock },
-    workholding: { kind: 'vise', vise: { ...a.vise } },
+    workholding,
     sacrificial: a.sacrificial,
     sources: {
       ...(job.sources ?? {}),
@@ -202,11 +236,20 @@ export function applyAnswers(job: EngraveJob, a: SetupAnswers): EngraveJob {
  * every stock-source key: a laminate's assumed cap (`sources.stock.colour`) has no answer field, so
  * replacing the record dropped it and the job could no longer say the cap was an assumption. The
  * stock is step 2's document; step 3 writes only what it asked about.
+ *
+ * #240 — A ROTARY JOB STAYS ROTARY. The vise answers describe the vise; writing them onto a job
+ * held in the rotary chuck would silently change the machine setup under the operator. Selecting
+ * the vise again is the store's explicit `setRotaryHolding(null, …)`, which also restores the
+ * standing stock box; this function never performs that conversion.
  */
 export function applyHoldAnswers(job: EngraveJob, a: SetupAnswers): EngraveJob {
+  const workholding: JobWorkholding =
+    job.workholding.kind === 'rotary-chuck'
+      ? job.workholding
+      : { kind: 'vise', vise: { ...a.vise } };
   return {
     ...job,
-    workholding: { kind: 'vise', vise: { ...a.vise } },
+    workholding,
     sacrificial: a.sacrificial,
   };
 }
@@ -246,10 +289,13 @@ export function stepFindings(step: SetupStepId, job: EngraveJob, a: SetupAnswers
   const codes = STEP_CODES[step];
   if (codes.size === 0) return [];
   const probe = applyAnswers(job, a);
-  const all = dedupeFindings([
-    ...validateJob(probe),
-    ...validateVise(probe.stock, probe.workholding.vise, probe.sacrificial),
-  ]);
+  // #240 — the vise's own checks are the VISE's. A job in the rotary chuck has no jaw faces or
+  // seat to judge, and its holding findings belong to slice 3's rotary run sheet.
+  const viseFindings =
+    probe.workholding.kind === 'vise'
+      ? validateVise(probe.stock, probe.workholding.vise, probe.sacrificial)
+      : [];
+  const all = dedupeFindings([...validateJob(probe), ...viseFindings]);
   return all.filter((f) => codes.has(f.code));
 }
 
@@ -300,7 +346,7 @@ export function withStockAnswer(
   };
 }
 
-/** Set the workholding answer. Only `'vise'` is selectable today (rotary is CNC-5). */
+/** Set the workholding answer. The rotary choice's own write is `setRotaryHolding` (#240). */
 export function withWorkholding(a: SetupAnswers, choice: WorkholdingChoice): SetupAnswers {
   return { ...a, workholding: choice };
 }

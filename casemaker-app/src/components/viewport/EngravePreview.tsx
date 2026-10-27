@@ -41,6 +41,7 @@ import type { EngravePreviewRegistrationBand } from '@/workers/sim/engraveRegist
 import { mm } from '@/engine/cnc/engrave/depthBounds';
 import { jobMachine } from '@/engine/cnc/calibration';
 import { machineBedPlate } from '@/engine/cnc/bedPlate';
+import { jobVise } from '@/engine/cnc/fixture';
 import { BED_COLOR } from '@/engine/cnc/bedScene';
 import { jobTool } from '@/engine/cnc/engrave/jobSetup';
 import { PROBE_SPEC } from '@/engine/cnc/engrave/registration';
@@ -589,7 +590,7 @@ function MachineBed() {
   // Memoised on the job: the box changes only when the job does, so a scrub or a camera move
   // rebuilds nothing (`renderer.info.memory.geometries` must stay bounded — #197).
   const { centre, size } = useMemo(() => {
-    const box = machineBedPlate(job.workholding.vise, job.sacrificial, jobMachine(job, null));
+    const box = machineBedPlate(jobVise(job), job.sacrificial, jobMachine(job, null));
     return {
       centre: [(box.min[0] + box.max[0]) / 2, (box.min[1] + box.max[1]) / 2, (box.min[2] + box.max[2]) / 2] as [number, number, number],
       size: [box.max[0] - box.min[0], box.max[1] - box.min[1], box.max[2] - box.min[2]] as [number, number, number],

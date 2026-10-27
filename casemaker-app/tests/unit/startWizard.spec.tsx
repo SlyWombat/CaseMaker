@@ -6,6 +6,7 @@
 // hand-off does not depend on the rebuild finishing.
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { jobVise } from '@/engine/cnc/fixture';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 
 import { StartWizard } from '@/components/welcome/StartWizard';
@@ -371,7 +372,7 @@ describe('#280 — step 2, the stock', () => {
     const job = useEngraveJobStore.getState().job;
     expect([job.stock.length, job.stock.width, job.stock.thickness]).toEqual([38.1, 76.2, 3.81]);
     // Seated on the jaws' 3.1 mm ledges: 3.81 − 3.1 (#208's calipers, #391 review item 1).
-    expect(job.workholding.vise.stockProud).toBeCloseTo(0.71, 9);
+    expect(jobVise(job).stockProud).toBeCloseTo(0.71, 9);
     // …and the void the badge's model already has came with it (#271 route 1), so nothing floats.
     expect((job.keepOuts ?? []).map((k) => k.id)).toContain(BADGE_POCKET_KEEP_OUT_ID);
     // …and so did the LINES (#363 review): the three demo words were laid out for the 100 × 60 mm

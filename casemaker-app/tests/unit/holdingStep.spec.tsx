@@ -12,6 +12,7 @@
 // `tokens.css` — the same source-reading approach `benchDefaults.spec.ts` uses.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { jobVise } from '@/engine/cnc/fixture';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -211,8 +212,8 @@ describe('#684 — the machine’s state and the stock’s numbers decide the mo
     expect(rowText('board')).toContain('2 mm on a 2 mm board stands 0.9 mm proud of the jaws');
     expect((screen.getByTestId('engrave-setup-sacrificial') as HTMLSelectElement).value).toBe('loc:0');
     const job = useEngraveJobStore.getState().job;
-    expect(job.workholding.vise.seat).toBe('ledge');
-    expect(job.workholding.vise.stockProud).toBeCloseTo(0.9, 6);
+    expect(jobVise(job).seat).toBe('ledge');
+    expect(jobVise(job).stockProud).toBeCloseTo(0.9, 6);
     expect(job.sacrificial.under?.thickness).toBe(2);
     // ONE sacrificial control, and it is the board choice inside the mount.
     expect(screen.getByTestId('engrave-setup-sacrificial')).toBeTruthy();
@@ -237,7 +238,7 @@ describe('#684 — the machine’s state and the stock’s numbers decide the mo
     expect(rowText('board')).not.toContain('stands 0.9 mm proud');
     const job = useEngraveJobStore.getState().job;
     expect(job.sacrificial.under?.thickness).toBe(2);
-    expect(job.workholding.vise.stockProud).toBeCloseTo(-0.1, 6);
+    expect(jobVise(job).stockProud).toBeCloseTo(-0.1, 6);
   });
 
   it('a 1 mm sheet takes the 3 mm board over the 2 mm: only the 3 mm leaves it proud', () => {
@@ -259,7 +260,7 @@ describe('#684 — the machine’s state and the stock’s numbers decide the mo
     expect(rowText('board')).toContain('1 mm on a 3 mm board stands 0.9 mm proud of the jaws');
     const job = useEngraveJobStore.getState().job;
     expect(job.sacrificial.under?.thickness).toBe(3);
-    expect(job.workholding.vise.stockProud).toBeCloseTo(0.9, 6);
+    expect(jobVise(job).stockProud).toBeCloseTo(0.9, 6);
   });
 
   it('a board picked from the select reports the seat it gives, proud or below', () => {
@@ -280,12 +281,12 @@ describe('#684 — the machine’s state and the stock’s numbers decide the mo
       'still 0.1 mm below the jaw tops — a thicker board, or tape it to the bed',
     );
     expect(useEngraveJobStore.getState().job.sacrificial.under?.thickness).toBe(2);
-    expect(useEngraveJobStore.getState().job.workholding.vise.stockProud).toBeCloseTo(-0.1, 6);
+    expect(jobVise(useEngraveJobStore.getState().job).stockProud).toBeCloseTo(-0.1, 6);
 
     fireEvent.change(select, { target: { value: 'loc:1' } });
     expect(rowText('board')).toContain('1 mm on a 3 mm board stands 0.9 mm proud of the jaws');
     expect(useEngraveJobStore.getState().job.sacrificial.under?.thickness).toBe(3);
-    expect(useEngraveJobStore.getState().job.workholding.vise.stockProud).toBeCloseTo(0.9, 6);
+    expect(jobVise(useEngraveJobStore.getState().job).stockProud).toBeCloseTo(0.9, 6);
   });
 
   it('a block taller than the jaws is gripped as a block, its sides free', () => {
@@ -295,8 +296,8 @@ describe('#684 — the machine’s state and the stock’s numbers decide the mo
     expect(radio('block').checked).toBe(true);
     expect(rowText('block')).toContain('the sides free; for a block taller than the jaws');
     const job = useEngraveJobStore.getState().job;
-    expect(job.workholding.vise.seat).toBe('floor');
-    expect(job.workholding.vise.stockProud).toBeCloseTo(5, 6);
+    expect(jobVise(job).seat).toBe('floor');
+    expect(jobVise(job).stockProud).toBeCloseTo(5, 6);
   });
 
   it('a stock that does not fit the rotary is the rotary’s reason, not the machine’s', () => {

@@ -8,7 +8,7 @@ import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import { useToolRegistry } from '@/hooks/useToolRegistry';
 import { useEngraveJobStore } from '@/store/engraveJobStore';
 import { oracleSentence, useEngraveRunStore } from '@/store/engraveRunStore';
-import { viseEnvelope } from '@/engine/cnc/fixture';
+import { jobVise, viseEnvelope } from '@/engine/cnc/fixture';
 import { hasSacrificial } from '@/engine/cnc/sacrificial';
 import type { StartingTool } from '@/engine/cnc';
 import type { DiagnosticSource, SimDiagnostic } from '@/workers/sim/session';
@@ -250,8 +250,8 @@ export function SimPanel() {
           outcome: run.simStatus === 'ready' ? 'swept' : run.pathOnly ? 'path-only' : 'refused',
           engine: run.simEngine ?? undefined,
           oracleBand: run.oracle?.band,
-          fixtureLabels: viseEnvelope(job.stock, job.workholding.vise, job.sacrificial).boxes.map((b) => b.label),
-          fixtureSource: job.workholding.vise.source,
+          fixtureLabels: viseEnvelope(job.stock, jobVise(job), job.sacrificial).boxes.map((b) => b.label),
+          fixtureSource: jobVise(job).source,
           sacrificialModelled: hasSacrificial(job.sacrificial),
           toolName: jobToolEntry === null ? null : toolDisplayName(jobToolEntry.tool),
           codes: run.simDiagnostics.map((d) => d.code),

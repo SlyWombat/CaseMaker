@@ -57,7 +57,7 @@
  * and stops there.
  */
 
-import { inflate, viseEnvelope } from '@/engine/cnc/fixture';
+import { inflate, jobVise, viseEnvelope } from '@/engine/cnc/fixture';
 import type { ObstacleBox } from '@/engine/cnc/setup';
 import { PROBE_SPEC, SIDE_WORDS, type JobSide } from './registration';
 // TYPE ONLY: this module is in the sim worker's import graph (via `runSheet.ts`), and a worker never
@@ -355,7 +355,7 @@ export type MaterialScanResult = MaterialScanPlan | MaterialScanRefusal;
  */
 export function planMaterialScan(job: EngraveJob, scan: MaterialScanSettings = SCAN_FALLBACK): MaterialScanResult {
   const { length, width } = job.stock;
-  const vise = job.workholding.vise;
+  const vise = jobVise(job);
   const tipR = scan.tipDiameterMm / 2;
   const proud = vise.stockProud;
   const dial = scan.readingResolutionMm;

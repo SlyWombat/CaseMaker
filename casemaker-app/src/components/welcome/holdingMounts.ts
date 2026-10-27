@@ -16,12 +16,15 @@
  * pins · Change the machine…`). An accessory the house does not own reads `not owned`, and nothing
  * more: there is no fixture to fit and so no change to offer.
  *
- * WHAT THIS BUILD CAN WRITE. The job engine holds a vise and only a vise (`workholding.kind` is
- * `'vise'`), so the three VISE options are the ones `applyMount` can write. The bed and rotary
- * options are offered because the machine and the design have them, but while the machine already
- * gives one of them the option says what the job will actually do — `held in the vise` — rather
- * than pretending a selection would change the cut. The top-line Change the machine… is the way
- * out either way.
+ * WHAT THIS BUILD CAN WRITE. The job model holds the stock in the vise, seated three ways, or in
+ * the rotary module's three-jaw chuck (#240) — and the chuck holds ROUND stock only: a rod in step
+ * 2, or a box already in the axis frame. The three VISE options are always writable; the rotary
+ * option is writable when the machine carries it and the stock is round, and says why not when the
+ * stock is not (`the rotary holds round stock — say a rod in step 2`). The bed options are offered
+ * because the machine and the design have them, but the job model does not hold a part on the bed,
+ * so while the machine gives one of them the option says what the job will actually do — `held in
+ * the vise` — rather than pretending a selection would change the cut. The top-line Change the
+ * machine… is the way out either way.
  */
 
 import {
@@ -261,6 +264,12 @@ export interface MountOptionArgs {
   boardMm?: number;
   /** The machine's rotary envelope; the Z1's ⌀80 × 150 when the caller does not say. */
   rotaryEnvelope?: { diameter: number; length: number };
+  /**
+   * Whether the job's stock is ROUND (#240): a rod in step 2, or a box already in the axis frame.
+   * The rotary chuck holds round stock; a plate or a block is refused with the sentence that
+   * points back at step 2.
+   */
+  round?: boolean;
 }
 
 const Z1_ROTARY_ENVELOPE = { diameter: 80, length: 150 } as const;
@@ -347,8 +356,26 @@ export function mountOptions(args: MountOptionArgs): MountOption[] {
       continue;
     }
 
-    // The machine gives the mount, but this build's job model holds the stock in the vise.
-    if (mechanism !== 'vise') {
+    // #240 — the machine gives the mount, and this job model can hold it: the ROTARY, but only
+    // round stock. Rectangular stock is the stock's own refusal, so it carries no machine-change
+    // escape — the way out is step 2, not a different mount.
+    if (mechanism === 'rotary') {
+      if (args.round !== true) {
+        out.push({
+          ...base,
+          hint: null,
+          disabled: true,
+          reason: 'the rotary holds round stock — say a rod in step 2',
+          escape: null,
+        });
+        continue;
+      }
+      out.push({ ...base, hint: null, disabled: false, reason: null, escape: null });
+      continue;
+    }
+
+    // The bed is a machine mount, not a job mount in this build.
+    if (mechanism === 'bed') {
       out.push({ ...base, hint: null, disabled: true, reason: 'the job is held in the vise', escape: null });
       continue;
     }

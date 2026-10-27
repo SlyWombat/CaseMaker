@@ -10,6 +10,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
+import { jobVise } from '@/engine/cnc/fixture';
 
 import {
   buildRunRecord,
@@ -61,7 +62,7 @@ function stubGenerated(job: EngraveJob, nc: string = NC): RunSheetGenerated {
     // `vise-default`, so `validateJob` alone is not the whole list.
     findings: dedupeFindings([
       ...validateJob(job),
-      ...validateVise(job.stock, job.workholding.vise, job.sacrificial),
+      ...validateVise(job.stock, jobVise(job), job.sacrificial),
     ]),
     feeds: tool ? feedsFor([], job.stock.material, tool, Z1, job.cutOverride) : null,
     cam: { operations: 3, cuttingMoves: 1234, estimatedSeconds: 95, passes: 2 },

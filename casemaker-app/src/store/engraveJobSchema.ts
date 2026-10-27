@@ -1006,6 +1006,46 @@ const viseSchema = z.object({
 });
 
 /**
+ * The rotary module's chuck, as the job states it (#240 §1, `/Rotary.md` §3.4). The wiki's facts
+ * with the wiki's gaps kept gaps: `gripDiameter` is nullable because Makera does not state the jaw
+ * capacity in either jaw mode. `source` names the page, so a shipped fact is never a measurement.
+ */
+const rotaryChuckSchema = z.object({
+  stickout: z
+    .number()
+    .finite()
+    .positive()
+    .describe('How far the rod stands out of the chuck jaws along X, in millimetres.'),
+  gripDiameter: z
+    .number()
+    .finite()
+    .positive()
+    .nullable()
+    .describe('The diameter the jaws close on, in millimetres, or null when the chuck does not state it.'),
+  jawMode: z
+    .enum(['standard', 'reverse'])
+    .describe('Which jaws are fitted: reverse is the module default, standard is for small parts.'),
+  tailstock: z.boolean().describe('Whether the tailstock supports the free end of the rod.'),
+  source: z.string().min(1).describe('The page these chuck facts come from.'),
+});
+
+/**
+ * How the stock is held (#240 §1). The same two arms as {@link JobWorkholding}, discriminated on
+ * `kind`: the vise arm is byte-for-byte the pre-rotary object, and the rotary arm carries the
+ * chuck. Version 3 is the first version that accepts the rotary arm; v1/v2 stay vise-only.
+ */
+const jobWorkholdingSchema = z.discriminatedUnion('kind', [
+  z.object({
+    kind: z.literal('vise').describe('Held in the vise.'),
+    vise: viseSchema.describe('The vise jaw measurements the job was set up with.'),
+  }),
+  z.object({
+    kind: z.literal('rotary-chuck').describe("Held in the rotary module's three-jaw chuck."),
+    rotary: rotaryChuckSchema.describe('The chuck facts the job was set up with.'),
+  }),
+]);
+
+/**
  * One side strip (#213). `height` is 'flush' (level with the part's top) or a positive height
  * from the part's bottom face, mm.
  */
@@ -1203,6 +1243,22 @@ const stockObjectSchema = z
     material: z
       .enum(STOCK_MATERIALS)
       .describe('Stock material; selects the feeds/speeds table the job starts from.'),
+    // #240 §1 — ROUND STOCK in the rotary chuck. BOTH optional and never defaulted: absent is a
+    // rectangle, which is every pre-rotary document, so those jobs round-trip byte-for-byte. The
+    // pair is validated together below (`shape` states `diameter`, and the planning box it sits in
+    // is width = thickness = diameter), because a `diameter` that disagrees with the box would be
+    // two answers to one question.
+    shape: z
+      .literal('cylinder')
+      .optional()
+      .describe('Set to "cylinder" for round stock in the rotary chuck; omit for a rectangular blank.'),
+    diameter: z
+      .number()
+      .finite()
+      .positive()
+      .max(Math.max(STOCK_LIMITS.width, STOCK_LIMITS.thickness))
+      .optional()
+      .describe('Rod diameter in millimetres; present exactly when shape is "cylinder".'),
     // #464 — the fibre a printed blank's filament states, beside the material. OPTIONAL, not
     // defaulted: a job that has never seen a fibre filament keeps no key and round-trips byte-for-
     // byte, and `setStock` clears it when a later import states none.
@@ -1218,6 +1274,32 @@ const stockObjectSchema = z
       .describe('Bow measured on the clamped piece; omit when the surface has not been measured.'),
   })
   .superRefine((stock, ctx) => {
+    // #240 §1 — a cylinder is stated EXACTLY: the diameter is present, and the box the job plans
+    // in is as wide and as thick as that diameter. A rectangle states no diameter at all.
+    if (stock.shape === 'cylinder') {
+      if (stock.diameter === undefined) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['diameter'],
+          message: 'round stock states its diameter',
+        });
+      } else if (
+        Math.abs(stock.width - stock.diameter) > 1e-9 ||
+        Math.abs(stock.thickness - stock.diameter) > 1e-9
+      ) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['diameter'],
+          message: 'round stock is as wide and as thick as its diameter',
+        });
+      }
+    } else if (stock.diameter !== undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['diameter'],
+        message: 'a diameter needs the cylinder shape',
+      });
+    }
     const colour = stock.colour;
     if (colour === undefined) return;
     // The cap is measured from the engraved face, so it cannot be thicker than the blank. (The
@@ -1692,6 +1774,12 @@ export const frozenProgramSchema = z
     hash: z.string().min(1).describe('Hash of the frozen program text.'),
     frameNc: z.string().nullable().describe('The frozen frame program, or null when none was posted.'),
     frameHash: z.string().nullable().describe('Hash of the frame program, or null.'),
+    // #240 §4 — the frame the POST wrote the program in. OPTIONAL, not defaulted: a package frozen
+    // before this field existed keeps no key and reads as flat, so an old `.cutjob` round-trips.
+    frame: z
+      .enum(['flat', 'rotary'])
+      .optional()
+      .describe('The frame the post wrote: "flat" for the 3-axis dialect, "rotary" for the 4th axis; omit for flat.'),
   })
   .strict()
   .describe('One program frozen when Cut was pressed.');
@@ -1772,6 +1860,9 @@ const jobSourcesSchema = z.object({
       // because zod STRIPS what an object does not name: the far side of a round trip would lose
       // the provenance while keeping the value, which is worse than either.
       flatness: fieldSourceSchema.optional(),
+      // #240 — the round-stock facts a rotary job's axis-frame box carries.
+      shape: fieldSourceSchema.optional(),
+      diameter: fieldSourceSchema.optional(),
     })
     .transform((stock) => {
       // Same complement as `migrateStockPrint`: an old `print` stamp is this job's colour stamp.
@@ -2005,6 +2096,10 @@ const engraveJobV2Schema = engraveJobV1Schema.extend({
 const engraveJobV3Schema = engraveJobV2Schema
   .extend({
     schemaVersion: z.literal(3).describe('Document schema version.'),
+    // #240 §1 — version 3 is the first version that can state the rotary chuck. v1/v2 keep their
+    // vise-only arm (a document at either version predates the module's model), so a v3 document
+    // gains nothing unless it actually says `rotary-chuck`.
+    workholding: jobWorkholdingSchema.describe('How the stock is held.'),
     sourceFiles: z
       .array(jobSourceSchema)
       .optional()

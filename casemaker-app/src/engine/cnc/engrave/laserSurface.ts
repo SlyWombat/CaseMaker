@@ -28,6 +28,7 @@ import type { ShopDefaults } from '@/platform/defaultsClient';
 import type { LaserLift } from '@/platform/machineLaser';
 import type { EngraveJob } from '@/types/engraveJob';
 import { jobMachine } from '@/engine/cnc/calibration';
+import { jobVise } from '@/engine/cnc/fixture';
 import { bracketMount } from '@/engine/cnc/mounts/bracket';
 import { jobMount } from './jobSetup';
 
@@ -66,7 +67,7 @@ export function laserSurfaceBound(
       label: 'the vise jaws',
       // Jaw tops sit `stockProud` below the blank's top, so ABOVE it when the stock is seated low
       // (a negative stockProud). Work Z `−stockProud` → machine Z `surfaceZ − stockProud`.
-      machineZ: r3(surfaceMachineZ - job.workholding.vise.stockProud),
+      machineZ: r3(surfaceMachineZ - jobVise(job).stockProud),
     });
   } else {
     const mount = bracketMount(

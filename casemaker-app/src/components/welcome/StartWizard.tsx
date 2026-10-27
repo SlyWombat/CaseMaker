@@ -21,7 +21,7 @@ import { useStockStore } from '@/store/stockStore';
 import { expandEngraveRow } from '@/store/engraveRowStore';
 import { addOperationOfType, jobHasOperations } from '@/components/panels/operationTypes';
 import type { Project } from '@/types/project';
-import type { EngraveJob, JobStockEntry } from '@/types/engraveJob';
+import type { EngraveJob, JobStockEntry, RotaryChuck } from '@/types/engraveJob';
 import { defaultSetupAnswers, type SetupAnswers } from '@/engine/cnc/engrave/setupFlow';
 import { facingSeed, facingShopFrom, jobItemCount } from '@/engine/cnc/stockStart';
 import { useShopDefaultsStore } from '@/store/shopDefaultsStore';
@@ -147,12 +147,16 @@ function seedFromJob(job: EngraveJob): StartStockSeed {
   const computed = (['length', 'width', 'thickness'] as const).every(
     (key) => job.sources?.stock?.[key] === 'computed',
   );
+  // #240 — a rotary job's box is the axis frame (`L × D × D`), but the stock step asks a rod's own
+  // numbers (its diameter and its length). Hand it the rod, not the frame's axes, or an edit would
+  // open showing the diameter and the length swapped.
+  const cylinder = job.stock.shape === 'cylinder';
   return {
-    form: entry?.form ?? 'plate',
+    form: entry?.form ?? (cylinder ? 'rod' : 'plate'),
     material: job.stock.material,
-    length: job.stock.length,
+    length: cylinder ? job.stock.width : job.stock.length,
     width: job.stock.width,
-    thickness: job.stock.thickness,
+    thickness: cylinder ? job.stock.length : job.stock.thickness,
     finish: entry?.finish ?? 'unknown',
     computed,
   };
@@ -168,12 +172,24 @@ function seedFromJob(job: EngraveJob): StartStockSeed {
 function sameStockChoice(p: PendingStock, job: EngraveJob): boolean {
   if (p.kind !== 'choice' || p.saveToShelf !== null) return false;
   const s = p.choice.stock;
+  const sameColour = s.colour === undefined || JSON.stringify(s.colour) === JSON.stringify(job.stock.colour ?? null);
+  // #240 — a rotary job's box is the axis frame; the stock step reports the rod's standing box.
+  // Same rod, two frames: compare the rod, not the frame, or passing through would rewrite it.
+  if (job.stock.shape === 'cylinder' && p.choice.entry.form === 'rod') {
+    return (
+      s.length === s.width &&
+      s.width === job.stock.width &&
+      s.thickness === job.stock.length &&
+      s.material === job.stock.material &&
+      sameColour
+    );
+  }
   return (
     s.length === job.stock.length &&
     s.width === job.stock.width &&
     s.thickness === job.stock.thickness &&
     s.material === job.stock.material &&
-    (s.colour === undefined || JSON.stringify(s.colour) === JSON.stringify(job.stock.colour ?? null))
+    sameColour
   );
 }
 
@@ -279,6 +295,17 @@ export function StartWizard(): JSX.Element {
   function applyHoldAnswers(next: SetupAnswers): void {
     setAnswers(next);
     useEngraveJobStore.getState().applyHoldAnswers(next);
+  }
+
+  /**
+   * #240 — selecting the rotary chuck (or the vise again) is ONE store write: the workholding and
+   * the stock box change together, because they are one fact. The answers are then re-seeded from
+   * the job that write produced — the box has changed frame, and the blank step's findings must
+   * judge the box the job now holds, not the one it had.
+   */
+  function applyRotaryHolding(rotary: RotaryChuck | null, next: SetupAnswers): void {
+    useEngraveJobStore.getState().setRotaryHolding(rotary, next.vise, next.sacrificial);
+    setAnswers(defaultSetupAnswers(useEngraveJobStore.getState().job));
   }
 
   async function chooseJob(id: string): Promise<void> {
@@ -628,7 +655,14 @@ export function StartWizard(): JSX.Element {
         </>
       )}
 
-      {step === 'holding' && <HoldingStep job={job} answers={answers} onAnswers={applyHoldAnswers} />}
+      {step === 'holding' && (
+        <HoldingStep
+          job={job}
+          answers={answers}
+          onAnswers={applyHoldAnswers}
+          onRotary={applyRotaryHolding}
+        />
+      )}
 
       {step === 'operation' && (
         <OperationStep job={job} hasOperations={hasOperations} onChoiceChange={onOperationChoice} />

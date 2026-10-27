@@ -42,7 +42,7 @@ import {
   traceSweptProfile,
 } from '@/engine/cnc/engrave/partPlan';
 import type { JobFinding } from '@/engine/cnc/engrave/jobSetup';
-import { viseBody } from '@/engine/cnc/fixture';
+import { jobVise, viseBody } from '@/engine/cnc/fixture';
 import { sacrificialBoxes, type SacrificialBox } from '@/engine/cnc/sacrificial';
 import { cuttingRadiusForSweep } from '@/engine/cnc/tool';
 import { toolForJob } from '@/engine/cnc/toolRegistry';
@@ -646,7 +646,7 @@ export function createEngravePreviewer(tl: ManifoldToplevel): EngravePreviewer {
       lost.push({ labelId: engrave.id, area, polygons, mesh });
     }
 
-    const fixture: EngravePreviewFixture[] = viseBody(job.stock, job.workholding.vise, job.sacrificial).boxes.map(
+    const fixture: EngravePreviewFixture[] = viseBody(job.stock, jobVise(job), job.sacrificial).boxes.map(
       (box) => {
         const solid = boxSolid(tl, box);
         const mesh = meshOutputOf(solid);

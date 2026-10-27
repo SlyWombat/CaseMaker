@@ -159,12 +159,20 @@ export function unliftTimeline(timeline: Timeline, surface: SurfaceFrame): Timel
       // bucket boundary at random (452 of them on the off-grid fixture). A tolerance groups a run
       // of one level deterministically; a genuine step below a micrometre is below what the machine
       // can hold and merging it costs nothing the band can see.
-      if (current === null || current.segment !== cp.segment || Math.abs(z - currentStart) > SAME_LEVEL_MM * 1.5) {
+      // #240 (R4) — A travels with the bucket and splits it: a run is one face at one Z. Every
+      // flat program has `null` here, so this is inert for them.
+      if (
+        current === null ||
+        current.segment !== cp.segment ||
+        current.a !== cp.a ||
+        Math.abs(z - currentStart) > SAME_LEVEL_MM * 1.5
+      ) {
         currentStart = z;
         current = {
           segment: cp.segment,
           tool: cp.tool,
           zKey,
+          a: cp.a,
           z,
           run: checkpoints.length,
           steps: [],

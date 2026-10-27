@@ -11,7 +11,7 @@ import {
   DRILL_POINT_FALLBACK_DEG,
   type Tool,
 } from '@/engine/cnc/tool';
-import { viseEnvelope } from '@/engine/cnc/fixture';
+import { jobVise, viseEnvelope } from '@/engine/cnc/fixture';
 import { validateSacrificial, viseJawShift } from '@/engine/cnc/sacrificial';
 import { stubSetup, type FixtureEnvelope, type Setup, type Workholding } from '@/engine/cnc/setup';
 import {
@@ -445,13 +445,17 @@ export function jobTool(job: EngraveJob): Tool | null {
 export function workholdingFor(job: EngraveJob): Workholding {
   const { length, thickness } = job.stock;
   const shift = viseJawShift(job.sacrificial);
+  // #240 — slice 1 is the MODEL, not the rotary cut. A job in the chuck is read through the vise
+  // answers' neutral seat (`jobVise`), so the emulator, the registration plan and the part view
+  // keep one flat frame until slice 2's unrolled map and slice 3's rotary run sheet replace it.
+  const vise = jobVise(job);
   return {
     kind: 'vise',
     jawFaces: [
       { origin: [0 - shift.left, 0, 0], normal: [1, 0, 0] }, // fixed jaw face, normal +X
       { origin: [length + shift.right, 0, 0], normal: [-1, 0, 0] }, // moving jaw face, normal −X
     ],
-    jawHeight: thickness - job.workholding.vise.stockProud,
+    jawHeight: thickness - vise.stockProud,
   };
 }
 
@@ -524,7 +528,7 @@ export function jobSetups(job: EngraveJob): JobSetup[] {
       // A copy: the derived setup is built fresh on every call, so no caller can mutate the
       // identity through one job and change the answer for the next.
       orientation: { ...IDENTITY_ORIENTATION },
-      mount: { kind: job.workholding.kind },
+      mount: { kind: 'vise' },
       itemIds,
       // #516 item 5 — no cutter chosen yet means no tools for the implicit setup; the fallback in
       // `setupTools` then posts no program rather than one that names the empty key.
@@ -544,7 +548,9 @@ export function jobSetups(job: EngraveJob): JobSetup[] {
  * (`bracketMount` answers `null`). A caller reading a program passes its `setupIndex - 1`.
  */
 export function jobMount(job: EngraveJob, setupIndex = 0): Mount {
-  return job.setups?.[setupIndex]?.mount.kind ?? job.workholding.kind;
+  // #240 — a derived setup for a rotary job is still read as the flat vise in slice 1 (see
+  // `workholdingFor`); a stored setup's mount is the document's own.
+  return job.setups?.[setupIndex]?.mount.kind ?? 'vise';
 }
 
 /**
@@ -556,7 +562,7 @@ export function jobMount(job: EngraveJob, setupIndex = 0): Mount {
  */
 export function toSetup(job: EngraveJob, machine: MillProfile, fixture?: FixtureEnvelope): Setup {
   const { length, width, thickness } = job.stock;
-  const vise = job.workholding.vise;
+  const vise = jobVise(job);
   const workholding = workholdingFor(job);
   return stubSetup(
     { kind: 'prism', outline: rectProfile(length, width), thickness },
@@ -1840,7 +1846,10 @@ export function validateJob(
   // an instruction, and it must be shown by the numbers the job holds rather than by a band the
   // real jaw may or may not fill.
   const jawClearance = job.jawClearance;
-  const swept = sweptCuts(job);
+  // #240 — the jaw rule is the VISE's, and a job in the rotary chuck has no jaw faces to reach.
+  // Slice 1 reads no swept cuts for it at all; slice 3's rotary rules are what will judge the cut
+  // against the chuck, the tailstock and the stock's own cylinder.
+  const swept = job.workholding.kind === 'vise' ? sweptCuts(job) : [];
   for (const cut of swept) {
     const { jaw, gap } = jawGapFor(job, cut.box);
     if (gap >= jawClearance) continue;
@@ -1854,7 +1863,7 @@ export function validateJob(
         `Move the cut in from the jaw by ${fmt3(jawClearance - gap)} mm` +
         // #406's packer advice, moved here (#488 item 2): raising the blank only answers a blank
         // that sits below the jaw tops, and it is one of two answers, not the rule.
-        (job.workholding.vise.stockProud <= 0
+        (jobVise(job).stockProud <= 0
           ? `, or raise the blank on a packer so it works above the jaw tops and state how far it then stands proud.`
           : '.'),
     });
@@ -1903,7 +1912,7 @@ export function validateJob(
     null,
   );
   const cuttingTool = jobTool(job);
-  const belowJawTops = deepestCut === null ? 0 : deepestCut.depth - job.workholding.vise.stockProud;
+  const belowJawTops = deepestCut === null ? 0 : deepestCut.depth - jobVise(job).stockProud;
   if (
     cuttingTool !== null &&
     cuttingTool.fluteLength !== null &&
@@ -1926,7 +1935,7 @@ export function validateJob(
   // question and every one of them kept the margin, so the note says the fact and the result: the
   // operator is not asked to find a packer the job does not need.
   if (
-    job.workholding.vise.stockProud <= 0 &&
+    jobVise(job).stockProud <= 0 &&
     swept.length > 0 &&
     !findings.some((f) => f.code === 'vise-jaw-collision')
   ) {
@@ -1934,7 +1943,7 @@ export function validateJob(
       severity: 'warning',
       code: 'vise-stock-not-proud',
       message:
-        `The blank sits ${fmt3(-job.workholding.vise.stockProud)} mm below the jaw tops; the cut ` +
+        `The blank sits ${fmt3(-jobVise(job).stockProud)} mm below the jaw tops; the cut ` +
         `stays at least ${fmt3(jawClearance)} mm clear of the jaws, so it needs no packer.`,
     });
   }

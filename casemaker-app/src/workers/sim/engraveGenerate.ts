@@ -335,6 +335,14 @@ export type EngraveProgramKind = 'facing' | 'engrave';
 export interface EngraveProgram {
   /** #473 — `'facing'` for the blank's skim; absent or `'engrave'` for a setup's program. */
   kind?: EngraveProgramKind;
+  /**
+   * #240 — the frame the POST wrote this file in: `'flat'` for the 3-axis dialect, `'rotary'` for
+   * the 4th axis's (Z = radius from the axis, A on every move). The run path reads THIS fact, not
+   * the job's workholding, to know a package holds a rotary program; `freezePackage` copies it into
+   * the frozen record. Optional and absent on results stored before the field existed (read as
+   * flat), and on the facing file, which is always the flat dialect.
+   */
+  frame?: 'flat' | 'rotary';
   /** 1-based, the operator's "Setup 2". The facing program shares the first setup's index. */
   setupIndex: number;
   setupId: string;
@@ -546,6 +554,12 @@ export interface EngraveGenerated {
   finish?: FinishPassFacts | null;
   /** The exact text to be saved. */
   nc: string | null;
+  /**
+   * #240 — the frame the POST wrote program 1 in (`'flat'` today; `'rotary'` once the wrap CAM
+   * lands). Absent on results stored before the field existed, which read as flat; each
+   * `EngraveProgram` carries its own, because a run is a list of files.
+   */
+  frame?: 'flat' | 'rotary';
   /** #174. */
   verify: VerifyReport | null;
   /**
@@ -1558,7 +1572,10 @@ export function engraveRegions(
       { deg: drillResolved.settings.pointAngleDeg, source: drillResolved.sources.pointAngleDeg },
       { derivedCores: derivedCores?.length ?? 0 },
     ),
-    ...validateVise(job.stock, job.workholding.vise, job.sacrificial),
+    // #240 — the vise's validator is the VISE's; a rotary job's holding findings are slice 3's.
+    ...(job.workholding.kind === 'vise'
+      ? validateVise(job.stock, job.workholding.vise, job.sacrificial)
+      : []),
     ...engFindings,
     ...metalLineFindings(job, tool),
     ...carveFindings,
@@ -3122,6 +3139,7 @@ export function generateGoalProgram(
     setupId: jobSetups(job)[0]!.id,
     toolKey: job.toolKey,
     nc,
+    frame: surfaced.ir.frame,
     verify: null,
     surfaceCheck,
     frameNc: null,
@@ -3497,6 +3515,8 @@ function programOf(one: OneProgram, ref: JobProgramRef): EngraveProgram {
     setupId: ref.setupId,
     toolKey: ref.toolKey,
     nc,
+    // #240 — stated, not inferred: a result stored before the field existed reads as flat.
+    frame: one.frame ?? 'flat',
     verify: one.verify!,
     frameNc: one.frameNc,
     frameVerify: one.frameVerify,
@@ -4199,6 +4219,8 @@ function generateOneProgram(
       chamfer: chamferFacts,
       cam,
       nc,
+      // #240 — the frame the post actually wrote, carried to the run and the frozen package.
+      frame: postIr.frame,
       verify,
       frameNc: frame.nc,
       frameVerify: frame.verify,

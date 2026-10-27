@@ -12,6 +12,7 @@
 // what makes this evidence about the shipped behaviour rather than about a fixture.
 
 import { describe, it, expect, vi } from 'vitest';
+import { jobVise } from '@/engine/cnc/fixture';
 
 vi.mock('@/engine/fonts/registry', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/engine/fonts/registry')>();
@@ -32,8 +33,8 @@ import { validateJob } from '@/engine/cnc/engrave/jobSetup';
 /** The demo job, with its one line moved near the fixed jaw — #488's own near-jaw position. */
 function nearJaw() {
   const job = defaultEngraveJob();
-  job.workholding.vise.stockProud = 2.5;
-  job.workholding.vise.source = 'saved';
+  jobVise(job).stockProud = 2.5;
+  jobVise(job).source = 'saved';
   job.labels = [{ ...job.labels[0]!, position: { x: 24, y: 43 } }];
   return job;
 }

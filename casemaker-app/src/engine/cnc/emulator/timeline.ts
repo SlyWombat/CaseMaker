@@ -100,6 +100,13 @@ export interface Checkpoint {
   tool: ToolState;
   /** Quantised Z in micrometres (work frame). */
   zKey: number;
+  /**
+   * #240 (R4) — the rotary axis in degrees after the run's moves, or `null` for a program that
+   * never commands A (every flat file, and every pre-rotary package). Constant WITHIN a run:
+   * the splitter opens a new one when A changes, so a bucket's cuts all happen on one face and
+   * playback on a round part cannot fold two faces into one solid.
+   */
+  a: number | null;
   /** The Z in mm that bucket stands for: the LOWEST Z of any move in it. */
   z: number;
   /**
@@ -670,11 +677,13 @@ export function buildTimeline(parse: ParseResult, setup: Setup, machine?: MillPr
           diag('warning', 'cut-unknown-z', i, m.line, 'a cutting move at a Z the program never established: not swept, the emulator will not invent one (the picture has a gap here)');
         } else {
           const zKey = Math.round(z * 1000);
-          // Reuse the bucket only while the program is STILL at this (segment, Z): a return
-          // to it later is a new, later checkpoint (see `Checkpoint.run`).
-          let cp = current && current.segment === seg.index && current.zKey === zKey ? current : null;
+          // Reuse the bucket only while the program is STILL at this (segment, A, Z): a return
+          // to it later is a new, later checkpoint (see `Checkpoint.run`). A is keyed EXACTLY,
+          // not quantised: an indexed job holds it constant word-for-word, and a wrap job's A is
+          // unwound degrees, where any change is a cut on a different face (R4).
+          let cp = current && current.segment === seg.index && current.a === m.a && current.zKey === zKey ? current : null;
           if (!cp) {
-            cp = { segment: seg.index, tool: state.tool, zKey, z, run: order.length, steps: [], xy: [], zs: [], nonConstantZ: false };
+            cp = { segment: seg.index, tool: state.tool, zKey, a: m.a, z, run: order.length, steps: [], xy: [], zs: [], nonConstantZ: false };
             order.push(cp);
           }
           current = cp;

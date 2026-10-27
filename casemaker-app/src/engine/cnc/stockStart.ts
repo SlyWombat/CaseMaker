@@ -65,6 +65,30 @@ export const STOCK_SIZE_FIELDS: Readonly<Record<JobStockForm, readonly StockSize
 };
 
 /**
+ * The box a rod takes in the ROTARY CHUCK's axis frame (#240, `/Rotary.md` R6): the rod's LENGTH
+ * along X and its diameter twice across the axis, with `shape` saying the box is round stock. This
+ * is the one function that owns the axis box; the holding write reads no other.
+ */
+export interface CylinderStockBox extends StockBox {
+  shape: 'cylinder';
+  diameter: number;
+}
+
+/** The axis-frame box for a rod in the chuck: `length` along X, `diameter` across Y and Z. */
+export function rotaryBoxForRod(diameter: number, length: number): CylinderStockBox {
+  return { length, width: diameter, thickness: diameter, shape: 'cylinder', diameter };
+}
+
+/**
+ * The box a rod takes STANDING ON ITS END in the vise (#683): its diameter across X and Y, its
+ * length up Z, cut on that end face. The one function that owns the standing box, so the two
+ * boxes a rod can have are derived from the same diameter and length and cannot disagree.
+ */
+export function standingBoxForRod(diameter: number, length: number): StockBox {
+  return { length: diameter, width: diameter, thickness: length };
+}
+
+/**
  * The rectangular box a form's own numbers make, mm. The job plans in one rectangle, and the form
  * is held so its cut face is a FLAT one:
  *
@@ -88,7 +112,7 @@ export function boxForForm(form: JobStockForm, size: StockSize): StockBox | null
   if (form === 'rod') {
     const diameter = has('diameter');
     const length = has('length');
-    return diameter === null || length === null ? null : { length: diameter, width: diameter, thickness: length };
+    return diameter === null || length === null ? null : standingBoxForRod(diameter, length);
   }
   const length = has('length');
   const width = has('width');

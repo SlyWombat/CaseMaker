@@ -20,6 +20,7 @@
 // localStorage at module load.
 
 import { describe, it, expect, vi } from 'vitest';
+import { jobVise } from '@/engine/cnc/fixture';
 
 import { tl } from './helpers/manifoldExec';
 import { generate } from './helpers/engravePipeline';
@@ -744,7 +745,7 @@ describe('#364 — the bare-blank hand-off', () => {
     // nothing to say about the jaws at all.
     expect(job.labels.map((l) => l.text)).toEqual(['CASE', 'MAKER', 'first chips']);
     expect(job.labels.map((l) => l.depth)).toEqual([2, 1, 0.5]);
-    expect(job.workholding.vise.stockProud).toBeCloseTo(0.9, 9);
+    expect(jobVise(job).stockProud).toBeCloseTo(0.9, 9);
 
     const g = generate(tl, job);
     expect(errorCodes(g)).toEqual([]);

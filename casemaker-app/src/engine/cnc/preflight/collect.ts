@@ -154,10 +154,13 @@ export function collect(input: PreflightInput): PreflightRow[] {
   const tagged: { owner: PreflightOwner; finding: JobFinding }[] = [
     ...validateSacrificial(job).map((finding) => ({ owner: 'sacrificial' as const, finding })),
     ...validateJob(job).map((finding) => ({ owner: 'jobSetup' as const, finding })),
-    ...validateVise(job.stock, job.workholding.vise, job.sacrificial).map((finding) => ({
-      owner: 'fixture' as const,
-      finding,
-    })),
+    // #240 — the fixture's own findings are the VISE's. A rotary job's holding checks are slice 3's.
+    ...(job.workholding.kind === 'vise'
+      ? validateVise(job.stock, job.workholding.vise, job.sacrificial).map((finding) => ({
+          owner: 'fixture' as const,
+          finding,
+        }))
+      : []),
     // LAST — the Generate's own list, whose `validateJob` / `validateVise` members must lose to the
     // owners above (see the note over this merge). What survives is the worker's geometry families.
     ...(input.generated?.findings ?? []).map((finding) => ({ owner: 'generate' as const, finding })),

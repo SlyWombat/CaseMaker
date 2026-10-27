@@ -26,6 +26,7 @@
 import type { EngraveJob } from '@/types/engraveJob';
 import type { Edge, Mount, RegistrationPlan } from '@/engine/cnc/registration/plan';
 import { probeResiduals, type ProbeResiduals } from '@/engine/cnc/probePlan';
+import { jobMount } from '@/engine/cnc/engrave/jobSetup';
 import { SIDE_WORDS } from '@/engine/cnc/engrave/registration';
 
 /** Where a band's number comes from, so the picture never hides a default behind a measurement. */
@@ -235,6 +236,6 @@ export function registrationBandsFor(
   // drawn on the wrong face. (The preview does not yet re-orient the stock per setup.)
   if (plan !== undefined && sameFootprint(plan.stock, jobRect(job))) return planBands(plan, residuals);
 
-  const mount: Mount = setup?.mount.kind ?? job.workholding.kind;
+  const mount: Mount = setup?.mount.kind ?? jobMount(job);
   return datumBands(mount, jobRect(job), residuals);
 }

@@ -14,10 +14,12 @@
 
 import { useMemo, useState, type CSSProperties, type JSX } from 'react';
 import { useEngraveJobStore } from '@/store/engraveJobStore';
+import { useEngraveRegistrationStore } from '@/store/engraveRegistrationStore';
 import { useShopDefaultsStore } from '@/store/shopDefaultsStore';
 import { useSettingsStore } from '@/store/settingsStore';
 import { useMachineStore } from '@/store/machineStore';
-import { useEngraveRegistrationStore } from '@/store/engraveRegistrationStore';
+import { jobMount } from '@/engine/cnc/engrave/jobSetup';
+import { jobVise } from '@/engine/cnc/fixture';
 import { useToolRegistry } from '@/hooks/useToolRegistry';
 import { expandEngraveRow } from '@/store/engraveRowStore';
 import { machineAt, useLocationStore } from '@/store/locationStore';
@@ -272,8 +274,8 @@ export function EngraveSetupsSection({ initiallyOpen = false }: { initiallyOpen?
   const registrations = useEngraveRegistrationStore((s) => s.records);
   const seekFromMachineZ = useMemo(() => jobMachine(job, calibration).toolChange.clearanceZ, [job, calibration]);
   const mountTap = useMemo(
-    () => mountTapFor(machineRecord, Object.values(registrations), seekFromMachineZ, job.workholding.vise.jawStartY),
-    [machineRecord, registrations, seekFromMachineZ, job.workholding.vise.jawStartY],
+    () => mountTapFor(machineRecord, Object.values(registrations), seekFromMachineZ, jobVise(job).jawStartY),
+    [machineRecord, registrations, seekFromMachineZ, job],
   );
   const regSettings = useMemo(() => registrationSettings(defaults, probe).settings, [defaults, probe]);
   // #603 — the checked-out probe's name and the machine's display name, on the compact row.
@@ -470,7 +472,7 @@ export function EngraveSetupsSection({ initiallyOpen = false }: { initiallyOpen?
   function addSetup(): void {
     if (offer.face === null) return;
     const base = materializeSetups(job);
-    const mount = base[0]?.mount ?? { kind: job.workholding.kind };
+    const mount = base[0]?.mount ?? { kind: jobMount(job) };
     const o = orient(offer.face, mount, stock);
     if (!o.ok) {
       setSectionNotice(o.reason);
@@ -676,7 +678,7 @@ export function EngraveSetupsSection({ initiallyOpen = false }: { initiallyOpen?
               candidateItems={candidates}
               tools={tools}
               mountKinds={setup.mount.kind === 'tape' ? ['vise', 'bracket', 'tape'] : ['vise', 'bracket']}
-              viseSource={job.workholding.vise.source}
+              viseSource={jobVise(job).source}
               probeName={probeName}
               machineName={machineName}
               facingPass={index === 0 && job.facing?.enabled === true}

@@ -4,6 +4,7 @@
 // fakes it); `scheduleImmediate` is mocked because jsdom has no geometry worker.
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { jobVise } from '@/engine/cnc/fixture';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 
 import locationDoc from './fixtures/location-doc.json';
@@ -167,7 +168,7 @@ describe('the material-first start (#418)', () => {
       conductive: true,
     });
     // The vise followed the 5 mm plate (#344): the shipped 4 mm proud would not seat it.
-    expect(job.workholding.vise.stockProud).toBeLessThanOrEqual(5 - 3.1 + 1e-9);
+    expect(jobVise(job).stockProud).toBeLessThanOrEqual(5 - 3.1 + 1e-9);
 
     // The part IS the stock — what the viewport draws.
     const project = useProjectStore.getState().project;

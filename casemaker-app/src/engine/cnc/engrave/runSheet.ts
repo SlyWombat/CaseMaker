@@ -87,7 +87,7 @@ import { toolDisplayName } from '@/engine/cnc/toolDisplay';
 import { entryFor } from '@/engine/cnc/toolRegistry';
 import { finishSourceWords, type FinishSettingSource } from '@/engine/cnc/engrave/finishPass';
 import { MATERIAL_LABELS } from '@/engine/cnc/materials';
-import { VISE_BODY_DEPTH, viseEnvelope } from '@/engine/cnc/fixture';
+import { VISE_BODY_DEPTH, jobVise, viseEnvelope } from '@/engine/cnc/fixture';
 import { hasSacrificial, stripHeight, viseJawShift } from '@/engine/cnc/sacrificial';
 import { jobMachine } from '@/engine/cnc/calibration';
 import { facingDefault, facingRefusal, finishOf } from '@/engine/cnc/stockStart';
@@ -1099,7 +1099,7 @@ function buildStackUp(job: EngraveJob): RunSheetStackUp | null {
 
   const { length, thickness } = job.stock;
   const { under, sides } = job.sacrificial;
-  const vise = job.workholding.vise;
+  const vise = jobVise(job);
   const shift = viseJawShift(job.sacrificial);
   const jawTopZ = -vise.stockProud;
   const jawBottomZ = -(thickness + VISE_BODY_DEPTH);
@@ -1180,7 +1180,7 @@ function buildStackUp(job: EngraveJob): RunSheetStackUp | null {
 /** The top-view origin diagram's plain geometry, derived from the job and its plan. */
 function buildDiagram(job: EngraveJob, plan: PartPlan): RunSheetDiagram {
   const { length, width } = job.stock;
-  const vise = job.workholding.vise;
+  const vise = jobVise(job);
   const shift = viseJawShift(job.sacrificial);
   const jawMinY = vise.jawStartY;
   const jawMaxY = vise.jawStartY + vise.jawLength;
@@ -1272,7 +1272,7 @@ function coverageFor(job: EngraveJob, generated: RunSheetGenerated, sim: RunShee
   for (const f of generated.findings) codes.add(f.code);
   for (const f of generated.verify?.findings ?? []) codes.add(f.code);
   for (const d of sim?.diagnostics ?? []) codes.add(d.code);
-  const envelope = viseEnvelope(job.stock, job.workholding.vise, job.sacrificial);
+  const envelope = viseEnvelope(job.stock, jobVise(job), job.sacrificial);
   return {
     outcome: sim?.outcome ?? 'swept',
     engine: sim?.engine,
@@ -3173,7 +3173,7 @@ export function buildRunSheet(
   // `margins`, which may be the job's own past recommendation (#345 review).
   const margins = effectiveMargins(job, settings);
   const { length, width, thickness, material } = job.stock;
-  const vise = job.workholding.vise;
+  const vise = jobVise(job);
   // The one funnel all three item lists go through (#214/#215), so a `border`/`frame`/`cutaway`
   // is here too while a `construction` item, a broken reference and a self-intersecting polygon
   // are absent: the sheet describes exactly the cuts the `.nc` makes. `keepOuts` comes off the

@@ -65,6 +65,7 @@ import {
   surfaceSpreadPlan,
 } from '@/engine/cnc/engrave/surfaceSpread';
 import { jobTool } from '@/engine/cnc/engrave/jobSetup';
+import { jobVise } from '@/engine/cnc/fixture';
 import { cuttingDiameter } from '@/engine/cnc/tool';
 import { shopDefault, useShopDefaultsStore } from '@/store/shopDefaultsStore';
 import { useEngraveJobStore } from '@/store/engraveJobStore';
@@ -280,7 +281,7 @@ export function EngraveRegistrationStep({ job, target }: EngraveRegistrationStep
     // not change what the record says was approved and run.
     runPlanRef.current = plan;
     frameSavedRef.current = false;
-    runJawStartYRef.current = job.workholding.vise.jawStartY;
+    runJawStartYRef.current = jobVise(job).jawStartY;
     // #519 item 1 — a new run's readings replace the last run's dots and table, and they are
     // stamped with this job so a layer left from another job is never drawn as this one's.
     useRegistrationTouchesStore.getState().reset(job.id);
@@ -412,7 +413,7 @@ export function EngraveRegistrationStep({ job, target }: EngraveRegistrationStep
           const update: MachineUpdate = (current) => {
             let rec = bed(current);
             if (frameRegistration !== null) {
-              const frame = viseFrameFromRegistration(frameRegistration, job.workholding.vise.jawStartY);
+              const frame = viseFrameFromRegistration(frameRegistration, jobVise(job).jawStartY);
               rec = withVisePlacementFrame(rec, frame, { fixedJawFaceX: `measured:${now}`, jawStartY: 'typed' }, now);
               // #619 — write the measured surface top so the next plan expects the found top.
               rec = withSurfaceTopDatum(rec, { z: r.data.surface.z, at: plan.surfacePoint }, probeId, now);
@@ -532,7 +533,7 @@ export function EngraveRegistrationStep({ job, target }: EngraveRegistrationStep
               rec,
               // #652 — the jaw start THIS run was measured with (stashed at start), not the render's:
               // a typed value edited between the measurement and the acceptance must not move the face.
-              viseFrameFromRegistration(registration, runJawStartYRef.current ?? job.workholding.vise.jawStartY),
+              viseFrameFromRegistration(registration, runJawStartYRef.current ?? jobVise(job).jawStartY),
               { fixedJawFaceX: `measured:${now}`, jawStartY: 'typed' },
               now,
             );

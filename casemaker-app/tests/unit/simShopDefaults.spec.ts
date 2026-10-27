@@ -159,6 +159,8 @@ function fakeTimeline(moves: CutMove[], rotary = true, y = 0): Timeline {
     segment: 0,
     tool: 1,
     zKey: Math.round((moves[0]?.z ?? 0) * 1000),
+    // #240 — a flat fixture: no A word, so the checkpoint carries null.
+    a: null,
     z: moves[0]?.z ?? 0,
     run: 0,
     zs: moves.flatMap((m) => [m.z, m.z]),

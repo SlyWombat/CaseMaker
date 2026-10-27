@@ -4,6 +4,7 @@
 // at module load, so the fake below is installed BEFORE the store is dynamically imported.
 
 import { describe, it, expect, vi } from 'vitest';
+import { jobVise } from '@/engine/cnc/fixture';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -492,7 +493,7 @@ describe('validateJob (#200)', () => {
     const job = defaultEngraveJob();
     // One owner: the vise validator says it, `validateJob` does not repeat it.
     expect(validateJob(job).some((f) => f.code === 'vise-default')).toBe(false);
-    const vise = validateVise(job.stock, job.workholding.vise, job.sacrificial);
+    const vise = validateVise(job.stock, jobVise(job), job.sacrificial);
     expect(vise.filter((f) => f.code === 'vise-default')).toHaveLength(1);
     // The safety net: the two passes merged as every consumer merges them, still one.
     const merged = dedupeFindings([...validateJob(job), ...vise]);
@@ -525,8 +526,8 @@ describe('validateJob (#200)', () => {
 
   it('refuses a cut whose swept extent comes inside the job’s jaw clearance, naming item, jaw and distance (#488)', () => {
     const job = defaultEngraveJob();
-    job.workholding.vise.stockProud = 2.5;
-    job.workholding.vise.source = 'saved';
+    jobVise(job).stockProud = 2.5;
+    jobVise(job).source = 'saved';
     // The demo 'CASE' line sits 26.9 mm clear of both jaw faces when centred on this 100 mm plank;
     // moved to x = 24 its swept extent comes 0.86 mm off the fixed jaw.
     job.labels[0]!.position = { x: 24, y: 43 };
@@ -553,7 +554,7 @@ describe('validateJob (#200)', () => {
     const thin: EngraveJob = {
       ...base,
       stock: { ...base.stock, thickness: 1.5 },
-      workholding: { ...base.workholding, vise: { ...base.workholding.vise, stockProud: -1.6, source: 'saved' } },
+      workholding: { kind: 'vise', vise: { ...jobVise(base), stockProud: -1.6, source: 'saved' } },
       labels: [{ ...base.labels[0]!, text: 'Name', size: 8, position: { x: 50, y: 7.5 }, depth: 0.4 }],
     };
     const note = validateJob(thin).find((f) => f.code === 'vise-stock-not-proud');
@@ -891,7 +892,7 @@ describe('engraveJobStore (#200)', () => {
 
     s().takeBadgeBlank(badgeBlankFor(defaultBadgeParams({ print: undefined })));
     const job = s().job;
-    expect(job.workholding.vise.stockProud).toBeCloseTo(0.71, 9);
+    expect(jobVise(job).stockProud).toBeCloseTo(0.71, 9);
 
     // 'MAKER' and 'first chips' are the 100 × 60 job's own lines, and at 46 and 38 mm wide they run
     // off the badge blank's 76.2 mm length and come over the moving jaw — where a floor that stays
@@ -914,7 +915,7 @@ describe('engraveJobStore (#200)', () => {
     seeded.labels[0] = { ...seeded.labels[0]!, depth: 0.6, depthIntent: 'surface' };
     // As above: the blank is seated at a stand that keeps the jaws out of this line's question, so
     // this test stays about the intent and the void rather than about the seated default (#391).
-    seeded.workholding.vise = { ...seeded.workholding.vise, stockProud: 1.905, source: 'saved' };
+    seeded.workholding = { kind: 'vise', vise: { ...jobVise(seeded), stockProud: 1.905, source: 'saved' } };
     // The `layout` claim is what stands the badge route aside here, and it is the only thing that
     // can: an app-computed `depth`/`depthIntent` is a past answer of the app's own and no longer
     // keeps a job out of the seed (#363 review follow-up — `demoShape` stopped comparing the intent
@@ -1024,11 +1025,11 @@ describe('engraveJobStore (#200)', () => {
     const { useEngraveJobStore } = await freshStore();
     useEngraveJobStore.getState().setVise({ stockProud: 6 });
 
-    expect(useEngraveJobStore.getState().job.workholding.vise.source).toBe('saved');
-    expect(useEngraveJobStore.getState().job.workholding.vise.stockProud).toBe(6);
+    expect(jobVise(useEngraveJobStore.getState().job).source).toBe('saved');
+    expect(jobVise(useEngraveJobStore.getState().job).stockProud).toBe(6);
 
     useEngraveJobStore.getState().setVise({ uncertainty: 1, source: 'measured' });
-    expect(useEngraveJobStore.getState().job.workholding.vise.source).toBe('measured');
+    expect(jobVise(useEngraveJobStore.getState().job).source).toBe('measured');
   });
 
   // #508 — the seat is a SETUP choice, not a vise edit. On a default vise, changing it re-derives
@@ -1038,13 +1039,13 @@ describe('engraveJobStore (#200)', () => {
     const { useEngraveJobStore } = await freshStore();
     const s = () => useEngraveJobStore.getState();
 
-    expect(s().job.workholding.vise).toMatchObject({ source: 'default', seat: 'ledge', stockProud: 8.9 });
+    expect(jobVise(s().job)).toMatchObject({ source: 'default', seat: 'ledge', stockProud: 8.9 });
     s().setVise({ seat: 'floor' });
     // The default 12 mm blank on the 20 mm floor: 8 mm below the jaw tops, and negative is the truth.
-    expect(s().job.workholding.vise).toMatchObject({ source: 'default', seat: 'floor', stockProud: -8 });
+    expect(jobVise(s().job)).toMatchObject({ source: 'default', seat: 'floor', stockProud: -8 });
     // A later thickness change follows the new seat.
     s().setStock({ thickness: 30 }, 'user');
-    expect(s().job.workholding.vise).toMatchObject({ seat: 'floor', stockProud: 10 });
+    expect(jobVise(s().job)).toMatchObject({ seat: 'floor', stockProud: 10 });
   });
 
   it('a seat change never re-derives a saved or measured vise’s numbers', async () => {
@@ -1054,7 +1055,7 @@ describe('engraveJobStore (#200)', () => {
 
     s().setVise({ stockProud: 6 });
     s().setVise({ seat: 'floor' });
-    expect(s().job.workholding.vise).toMatchObject({ source: 'saved', seat: 'floor', stockProud: 6 });
+    expect(jobVise(s().job)).toMatchObject({ source: 'saved', seat: 'floor', stockProud: 6 });
   });
 
   // #345 — the job's own depth margins, and the two states the panel's row moves between.
@@ -1190,7 +1191,7 @@ describe('engraveJobStore (#200)', () => {
     backing.clear();
     const { useEngraveJobStore } = await freshStore();
     const { setStock } = useEngraveJobStore.getState();
-    expect(useEngraveJobStore.getState().job.workholding.vise).toMatchObject({
+    expect(jobVise(useEngraveJobStore.getState().job)).toMatchObject({
       source: 'default',
       // #508 — the fresh job is SEATED: the default 12 mm plank rests on the ledge, so its proud is
       // 12 − 3.1 = 8.9 rather than the shipped placeholder 4.
@@ -1200,6 +1201,7 @@ describe('engraveJobStore (#200)', () => {
     // "Use the badge blank": the same patch the panel's button sends.
     setStock(badgeBlankFor(defaultBadgeParams()).stock, 'computed');
     const { stock, workholding } = useEngraveJobStore.getState().job;
+    if (workholding.kind !== 'vise') throw new Error('expected a vise-held job');
     expect(stock.thickness).toBe(3.81);
     // The seated value, not half the blank — the number `viseForNewJob(…, stock)` gives.
     expect(workholding.vise.stockProud).toBeCloseTo(0.71, 9);
@@ -1216,6 +1218,7 @@ describe('engraveJobStore (#200)', () => {
     useEngraveJobStore.getState().setStock({ thickness: 3.81 }, 'computed');
 
     const { stock, workholding } = useEngraveJobStore.getState().job;
+    if (workholding.kind !== 'vise') throw new Error('expected a vise-held job');
     // The #231/#203 rule: the user's number is kept exactly, and the panel shows why it refuses.
     expect(workholding.vise.stockProud).toBe(6);
     expect(workholding.vise.source).toBe('saved');
@@ -1242,6 +1245,7 @@ describe('engraveJobStore (#200)', () => {
     useEngraveJobStore.getState().setStock(badgeBlankFor(defaultBadgeParams()).stock, 'computed');
 
     const { stock, workholding } = useEngraveJobStore.getState().job;
+    if (workholding.kind !== 'vise') throw new Error('expected a vise-held job');
     expect(workholding.vise.stockProud).toBeCloseTo(0.71, 9);
     expect(validateVise(stock, workholding.vise).some((f) => f.severity === 'error')).toBe(false);
   });
@@ -1249,13 +1253,13 @@ describe('engraveJobStore (#200)', () => {
   it('leaves the vise alone when the patch does not move the thickness (#344)', async () => {
     backing.clear();
     const { useEngraveJobStore } = await freshStore();
-    const before = useEngraveJobStore.getState().job.workholding.vise;
+    const before = jobVise(useEngraveJobStore.getState().job);
 
     useEngraveJobStore.getState().setStock({ width: 50, material: 'pla' });
 
     // Identity, not merely equality: a width or a material says nothing about how tall the blank
     // stands, so nothing that reads the vise is disturbed by an unrelated stock edit.
-    expect(useEngraveJobStore.getState().job.workholding.vise).toBe(before);
+    expect(jobVise(useEngraveJobStore.getState().job)).toBe(before);
   });
 
   it('a corrupt payload falls back to the default and is preserved under .rejected', async () => {

@@ -1,0 +1,208 @@
+// @vitest-environment jsdom
+// #240/#545 — the ONE rotary safety line, and the two save paths it must not be confused with.
+//
+// Save .nc, Upload and the release/one-screen Cut all read `saveBlocker`, so the refusal is stated
+// once. The `.cutjob` DOCUMENT save is a different action with its own store and never reaches
+// this module: a rotary job can be checked, saved as a document and reopened while its `.nc` waits
+// for the module's bench check. Both halves are asserted here, at the same job and the same
+// machine, so the distinction cannot drift.
+
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+
+import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
+import { Z1, type RotaryProfile, type RotarySourcedField } from '@/engine/cnc/machine';
+import { parseEngraveJob } from '@/store/engraveJobSchema';
+import { useEngraveJobStore } from '@/store/engraveJobStore';
+import {
+  resetEngraveJobFileStore,
+  setJobFileIO,
+  useEngraveJobFileStore,
+  type JobFileIO,
+} from '@/store/engraveJobFileStore';
+import {
+  ROTARY_UNMEASURED_REFUSAL,
+  programFrame,
+  releaseBlocker,
+  rotaryUnmeasured,
+  saveBlocker,
+  uploadBlocker,
+  type EngraveRunView,
+} from '@/store/engraveRunGate';
+import type { EngraveGenerated, EngraveProgram } from '@/workers/sim/engraveGenerate';
+import type { ProjectFileHandle, SaveTextOutcome } from '@/store/persistence';
+import type { EngraveJob, RotaryChuck } from '@/types/engraveJob';
+
+const CHUCK: RotaryChuck = {
+  stickout: 30,
+  gripDiameter: null,
+  jawMode: 'reverse',
+  tailstock: true,
+  source: 'Makera Z1 wiki, 4-axis accessory',
+};
+
+/** A rod held in the rotary: the axis-frame box L × D × D, with `shape` saying it is round. */
+function rotaryRodJob(): EngraveJob {
+  const base = defaultEngraveJob();
+  return {
+    ...base,
+    name: 'rod',
+    stock: { ...base.stock, length: 30, width: 10, thickness: 10, shape: 'cylinder', diameter: 10 },
+    workholding: { kind: 'rotary-chuck', rotary: { ...CHUCK } },
+  };
+}
+
+function view(over: Partial<EngraveRunView> = {}): EngraveRunView {
+  return {
+    generated: null,
+    oracle: null,
+    simDiagnostics: [],
+    simStatus: null,
+    phase: 'idle',
+    acknowledged: false,
+    staleSince: null,
+    error: null,
+    ...over,
+  };
+}
+
+function emptyResult(programs: EngraveProgram[] = []): EngraveGenerated {
+  return {
+    ok: false,
+    stage: 'findings',
+    findings: [],
+    feeds: null,
+    threads: null,
+    cam: null,
+    nc: null,
+    verify: null,
+    frameNc: null,
+    frameVerify: null,
+    facingNc: null,
+    facingVerify: null,
+    facingToolKey: null,
+    facingError: null,
+    facingCam: null,
+    predicted: [],
+    programs,
+    errors: [],
+  };
+}
+
+/** A generated program with only the facts the gate reads; it states the ROTARY frame. */
+function rotaryProgram(): EngraveProgram {
+  return {
+    setupIndex: 1,
+    setupId: 'setup-1',
+    toolKey: 'flat-1.0',
+    nc: 'G90\nM02',
+    verify: null,
+    frameNc: null,
+    frameVerify: null,
+    programHash: 'abcd1234',
+    cam: null,
+    frame: 'rotary',
+  };
+}
+
+const MEASURED_SOURCES = Object.fromEntries(
+  (Object.keys(Z1.rotary!.sources) as RotarySourcedField[]).map((key) => [key, 'measured (#238, 2026-10-26)']),
+) as RotaryProfile['sources'];
+
+const MEASURED: RotaryProfile = { ...Z1.rotary!, sources: MEASURED_SOURCES };
+
+describe('the rotary safety line (#240/#545)', () => {
+  it('refuses Save .nc, Upload and the release with the ONE sentence while a source is unmeasured', () => {
+    // Both triggers: the job is held in the chuck (slice 1 — the CAM still writes a flat file),
+    // and a generated program states the rotary frame (the fact that keeps the rule on later).
+    for (const v of [
+      view({ machine: Z1, rotaryHeld: true }),
+      view({ machine: Z1, generated: emptyResult([rotaryProgram()]) }),
+    ]) {
+      expect(saveBlocker(v)).toBe(ROTARY_UNMEASURED_REFUSAL);
+      expect(uploadBlocker(v)).toBe(ROTARY_UNMEASURED_REFUSAL);
+      expect(releaseBlocker(v)).toBe(ROTARY_UNMEASURED_REFUSAL);
+    }
+    // The exact words are the contract: they are the sentence the panel shows, unchanged.
+    expect(ROTARY_UNMEASURED_REFUSAL).toBe(
+      "The rotary module has not been measured on this machine yet — this program can be checked and saved; running it waits for the module's bench check.",
+    );
+  });
+
+  it('an unknown machine cannot be proven measured, so a rotary job is refused', () => {
+    expect(saveBlocker(view({ machine: null, rotaryHeld: true }))).toBe(ROTARY_UNMEASURED_REFUSAL);
+    expect(saveBlocker(view({ rotaryHeld: true }))).toBe(ROTARY_UNMEASURED_REFUSAL);
+  });
+
+  it('every source starting "measured" lifts the rule, and the normal gate answers again', () => {
+    const machine = { rotary: MEASURED };
+    expect(rotaryUnmeasured(machine)).toBe(false);
+    expect(saveBlocker(view({ machine, rotaryHeld: true }))).toBe('Generate first.');
+    expect(uploadBlocker(view({ machine, rotaryHeld: true }))).toBe('Generate first.');
+    expect(releaseBlocker(view({ machine, rotaryHeld: true }))).toBe('Generate first.');
+  });
+
+  it('a profile with NO rotary block has no sources to be unmeasured', () => {
+    expect(rotaryUnmeasured({ rotary: undefined })).toBe(false);
+    expect(rotaryUnmeasured(Z1)).toBe(true);
+  });
+
+  it('a run with no rotary fact is not asked the rotary question at all', () => {
+    expect(saveBlocker(view({ machine: Z1 }))).toBe('Generate first.');
+  });
+});
+
+describe('the frame a program record states (#240)', () => {
+  it('absent reads flat; the stored program keeps what the post wrote', () => {
+    expect(programFrame({})).toBe('flat');
+    expect(programFrame({ frame: 'flat' })).toBe('flat');
+    expect(programFrame({ frame: 'rotary' })).toBe('rotary');
+    expect(programFrame(rotaryProgram())).toBe('rotary');
+  });
+});
+
+describe('the .cutjob document save is NOT the .nc save (#545)', () => {
+  const handle: ProjectFileHandle = { name: 'rod.cutjob.json' };
+  let saves: { text: string; proposed: string }[];
+
+  beforeEach(() => {
+    localStorage.clear();
+    useEngraveJobStore.getState().reset();
+    resetEngraveJobFileStore();
+    saves = [];
+    const io: JobFileIO = {
+      write: async () => undefined,
+      save: async (text, proposed): Promise<SaveTextOutcome> => {
+        saves.push({ text, proposed });
+        return { kind: 'saved', handle };
+      },
+      open: async () => null,
+    };
+    setJobFileIO(io);
+  });
+
+  afterEach(() => {
+    setJobFileIO(null);
+  });
+
+  it('a rotary job saves as a document, and its .nc stays refused', async () => {
+    const job = rotaryRodJob();
+    useEngraveJobStore.getState().replace(job);
+
+    await useEngraveJobFileStore.getState().save();
+
+    // (a) THE DOCUMENT SAVED: bytes on disk, the rotary workholding intact.
+    expect(saves).toHaveLength(1);
+    expect(saves[0]!.proposed).toBe('rod.cutjob.json');
+    const parsed = parseEngraveJob(JSON.parse(saves[0]!.text));
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.job.workholding).toEqual({ kind: 'rotary-chuck', rotary: CHUCK });
+    expect(parsed.job.stock).toMatchObject({ shape: 'cylinder', diameter: 10, length: 30 });
+    expect(useEngraveJobFileStore.getState().dirty).toBe(false);
+
+    // (b) THE .nc SAVE IS REFUSED for the same job on the same machine.
+    expect(
+      saveBlocker(view({ machine: Z1, rotaryHeld: job.workholding.kind === 'rotary-chuck' })),
+    ).toBe(ROTARY_UNMEASURED_REFUSAL);
+  });
+});

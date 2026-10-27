@@ -340,18 +340,24 @@ describe('postZ1 (#173)', () => {
     expect(airCut.ok).toBe(false);
     if (!airCut.ok) expect(airCut.errors.join(' ')).toMatch(/air/i);
 
-    // #237: a rotary-frame IR, or the rotary Z datum, is not postable by the flat dialect.
+    // #237/#240: a rotary-frame IR, or the rotary Z datum, is not postable by the FLAT dialect.
+    // The frame picks the emitter, and each dialect refuses the other's context (the rotary
+    // dialect's own refusals are in `rotaryPost.spec.ts`).
     const rotaryFrame = postZ1(
       makeIr([operation(1, 'a', 'a', 1, [rapid(0, 0, 1), cut(0, 0, -1, 200)])], { frame: 'rotary' }),
       CTX,
       Z1,
     );
     expect(rotaryFrame.ok).toBe(false);
-    if (!rotaryFrame.ok) expect(rotaryFrame.errors.join(' ')).toMatch(/ROTARY-frame/i);
+    if (!rotaryFrame.ok) {
+      // First the frame's own facts: a rotary IR with no stock radius and a flat datum.
+      expect(rotaryFrame.errors.join(' ')).toMatch(/does not state a usable stock radius/);
+      expect(rotaryFrame.errors.join(' ')).toMatch(/'probed-top-face' needs a flat-frame IR/);
+    }
 
     const rotaryDatum = postZ1(TWO_OP, { ...CTX, zDatum: 'rotary-axis' }, Z1);
     expect(rotaryDatum.ok).toBe(false);
-    if (!rotaryDatum.ok) expect(rotaryDatum.errors.join(' ')).toMatch(/rotary-axis/i);
+    if (!rotaryDatum.ok) expect(rotaryDatum.errors.join(' ')).toMatch(/'rotary-axis' needs a rotary-frame IR/);
   });
 
   it('ends on Studio\'s own closing lines', () => {

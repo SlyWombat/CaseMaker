@@ -13,6 +13,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
+import { jobVise } from '@/engine/cnc/fixture';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -90,7 +91,7 @@ function stubGenerated(job: EngraveJob, extraFindings: JobFinding[] = []): RunSh
     findings: [
       ...dedupeFindings([
         ...validateJob(job),
-        ...validateVise(job.stock, job.workholding.vise, job.sacrificial),
+        ...validateVise(job.stock, jobVise(job), job.sacrificial),
       ]),
       ...extraFindings,
     ],

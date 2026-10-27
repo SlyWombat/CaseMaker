@@ -1496,6 +1496,14 @@
             "additionalProperties": false,
             "description": "One program frozen when Cut was pressed.",
             "properties": {
+              "frame": {
+                "description": "The frame the post wrote: \"flat\" for the 3-axis dialect, \"rotary\" for the 4th axis; omit for flat.",
+                "enum": [
+                  "flat",
+                  "rotary"
+                ],
+                "type": "string"
+              },
               "frameHash": {
                 "anyOf": [
                   {
@@ -5019,6 +5027,17 @@
               ],
               "type": "string"
             },
+            "diameter": {
+              "description": "Where this value came from: computed, a cutter catalogue, the user, a measurement, or an assumption.",
+              "enum": [
+                "computed",
+                "catalogue",
+                "user",
+                "measured",
+                "assumed"
+              ],
+              "type": "string"
+            },
             "fibre": {
               "description": "Where this value came from: computed, a cutter catalogue, the user, a measurement, or an assumption.",
               "enum": [
@@ -5064,6 +5083,17 @@
               "type": "string"
             },
             "print": {
+              "description": "Where this value came from: computed, a cutter catalogue, the user, a measurement, or an assumption.",
+              "enum": [
+                "computed",
+                "catalogue",
+                "user",
+                "measured",
+                "assumed"
+              ],
+              "type": "string"
+            },
+            "shape": {
               "description": "Where this value came from: computed, a cutter catalogue, the user, a measurement, or an assumption.",
               "enum": [
                 "computed",
@@ -5151,6 +5181,12 @@
             "capMm"
           ],
           "type": "object"
+        },
+        "diameter": {
+          "description": "Rod diameter in millimetres; present exactly when shape is \"cylinder\".",
+          "exclusiveMinimum": 0,
+          "maximum": 200,
+          "type": "number"
         },
         "fibre": {
           "description": "Fibre in a printed blank: carbon fibre (\"cf\") or glass fibre (\"gf\"); omit for none.",
@@ -5270,6 +5306,11 @@
             "brass",
             "copper"
           ],
+          "type": "string"
+        },
+        "shape": {
+          "const": "cylinder",
+          "description": "Set to \"cylinder\" for round stock in the rotary chuck; omit for a rectangular blank.",
           "type": "string"
         },
         "thickness": {
@@ -6288,80 +6329,145 @@
     },
     "workholding": {
       "description": "How the stock is held.",
-      "properties": {
-        "kind": {
-          "const": "vise",
-          "description": "Always vise in version 1.",
-          "type": "string"
-        },
-        "vise": {
-          "description": "The vise jaw measurements the job was set up with.",
+      "oneOf": [
+        {
           "properties": {
-            "fixedJawThickness": {
-              "description": "Fixed jaw thickness in millimetres.",
-              "type": "number"
-            },
-            "jawLength": {
-              "description": "Jaw length in millimetres.",
-              "type": "number"
-            },
-            "jawStartY": {
-              "description": "Work-coordinate Y where the jaws begin, in millimetres.",
-              "type": "number"
-            },
-            "measuredAt": {
-              "description": "When the jaws were measured; omitted for a default or saved set.",
+            "kind": {
+              "const": "vise",
+              "description": "Held in the vise.",
               "type": "string"
             },
-            "movingJawThickness": {
-              "description": "Moving jaw thickness in millimetres.",
-              "type": "number"
-            },
-            "seat": {
-              "default": "ledge",
-              "description": "What the blank's underside rests on: the soft jaws' ledge or the body floor.",
-              "enum": [
-                "ledge",
-                "floor"
+            "vise": {
+              "description": "The vise jaw measurements the job was set up with.",
+              "properties": {
+                "fixedJawThickness": {
+                  "description": "Fixed jaw thickness in millimetres.",
+                  "type": "number"
+                },
+                "jawLength": {
+                  "description": "Jaw length in millimetres.",
+                  "type": "number"
+                },
+                "jawStartY": {
+                  "description": "Work-coordinate Y where the jaws begin, in millimetres.",
+                  "type": "number"
+                },
+                "measuredAt": {
+                  "description": "When the jaws were measured; omitted for a default or saved set.",
+                  "type": "string"
+                },
+                "movingJawThickness": {
+                  "description": "Moving jaw thickness in millimetres.",
+                  "type": "number"
+                },
+                "seat": {
+                  "default": "ledge",
+                  "description": "What the blank's underside rests on: the soft jaws' ledge or the body floor.",
+                  "enum": [
+                    "ledge",
+                    "floor"
+                  ],
+                  "type": "string"
+                },
+                "source": {
+                  "description": "Where these jaw numbers came from: a default, a saved setup, or a measurement.",
+                  "enum": [
+                    "default",
+                    "saved",
+                    "measured"
+                  ],
+                  "type": "string"
+                },
+                "stockProud": {
+                  "description": "How far the stock stands proud of the jaws, in millimetres.",
+                  "type": "number"
+                },
+                "uncertainty": {
+                  "description": "Measurement uncertainty in millimetres; 0 for values taken as exact.",
+                  "minimum": 0,
+                  "type": "number"
+                }
+              },
+              "required": [
+                "stockProud",
+                "fixedJawThickness",
+                "movingJawThickness",
+                "jawLength",
+                "jawStartY",
+                "source",
+                "uncertainty"
               ],
-              "type": "string"
-            },
-            "source": {
-              "description": "Where these jaw numbers came from: a default, a saved setup, or a measurement.",
-              "enum": [
-                "default",
-                "saved",
-                "measured"
-              ],
-              "type": "string"
-            },
-            "stockProud": {
-              "description": "How far the stock stands proud of the jaws, in millimetres.",
-              "type": "number"
-            },
-            "uncertainty": {
-              "description": "Measurement uncertainty in millimetres; 0 for values taken as exact.",
-              "minimum": 0,
-              "type": "number"
+              "type": "object"
             }
           },
           "required": [
-            "stockProud",
-            "fixedJawThickness",
-            "movingJawThickness",
-            "jawLength",
-            "jawStartY",
-            "source",
-            "uncertainty"
+            "kind",
+            "vise"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "const": "rotary-chuck",
+              "description": "Held in the rotary module's three-jaw chuck.",
+              "type": "string"
+            },
+            "rotary": {
+              "description": "The chuck facts the job was set up with.",
+              "properties": {
+                "gripDiameter": {
+                  "anyOf": [
+                    {
+                      "exclusiveMinimum": 0,
+                      "type": "number"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "The diameter the jaws close on, in millimetres, or null when the chuck does not state it."
+                },
+                "jawMode": {
+                  "description": "Which jaws are fitted: reverse is the module default, standard is for small parts.",
+                  "enum": [
+                    "standard",
+                    "reverse"
+                  ],
+                  "type": "string"
+                },
+                "source": {
+                  "description": "The page these chuck facts come from.",
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "stickout": {
+                  "description": "How far the rod stands out of the chuck jaws along X, in millimetres.",
+                  "exclusiveMinimum": 0,
+                  "type": "number"
+                },
+                "tailstock": {
+                  "description": "Whether the tailstock supports the free end of the rod.",
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "stickout",
+                "gripDiameter",
+                "jawMode",
+                "tailstock",
+                "source"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "kind",
+            "rotary"
           ],
           "type": "object"
         }
-      },
-      "required": [
-        "kind",
-        "vise"
-      ],
-      "type": "object"
+      ]
     }
   },
   "required": [

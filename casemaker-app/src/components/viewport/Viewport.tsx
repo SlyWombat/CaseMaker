@@ -25,6 +25,7 @@ import { useEngravePreviewStore } from '@/store/engravePreviewStore';
 import { useEngraveJobStore } from '@/store/engraveJobStore';
 import { jobMachine } from '@/engine/cnc/calibration';
 import { machineBedPlate } from '@/engine/cnc/bedPlate';
+import { jobVise } from '@/engine/cnc/fixture';
 import type { EngravePreview } from '@/workers/sim/engravePreview';
 import { pathBounds } from './simGeometry';
 
@@ -115,7 +116,7 @@ function activeSceneBoundsFromStores(): { center: THREE.Vector3; diag: number } 
   const bedBox: SceneBox | null = engraveActive
     ? (() => {
         const job = useEngraveJobStore.getState().job;
-        return machineBedPlate(job.workholding.vise, job.sacrificial, jobMachine(job, null));
+        return machineBedPlate(jobVise(job), job.sacrificial, jobMachine(job, null));
       })()
     : null;
   return activeSceneBounds({

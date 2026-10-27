@@ -3,6 +3,7 @@
 // `.nc` a user saves is the text this function returns, never a re-derivation.
 
 import { describe, it, expect } from 'vitest';
+import { jobVise } from '@/engine/cnc/fixture';
 import { readFileSync } from 'node:fs';
 
 import { parseEngraveJob } from '@/store/engraveJobSchema';
@@ -166,7 +167,7 @@ describe('engraveGenerate (#206)', () => {
     // 10 mm proud on a 12 mm blank leaves 2 mm of raw stock in the jaws — under GRIP_MIN (3).
     const shallow: EngraveJob = {
       ...base,
-      workholding: { ...base.workholding, vise: { ...base.workholding.vise, stockProud: 10 } },
+      workholding: { kind: 'vise', vise: { ...jobVise(base), stockProud: 10 } },
     };
     const without = regions(tl, shallow).findings.map((f) => f.code);
     expect(without).toContain('vise-grip-shallow');
@@ -187,9 +188,9 @@ describe('engraveGenerate (#206)', () => {
     const thin: EngraveJob = {
       ...base,
       stock: { ...base.stock, thickness: 3 },
-      workholding: { ...base.workholding, vise: viseForNewJob(undefined, { thickness: 3 }) },
+      workholding: { kind: 'vise', vise: viseForNewJob(undefined, { thickness: 3 }) },
     };
-    expect(thin.workholding.vise.stockProud).toBeLessThanOrEqual(0);
+    expect(jobVise(thin).stockProud).toBeLessThanOrEqual(0);
     for (const findings of [regions(tl, thin).findings, generate(tl, thin).findings]) {
       const codes = findings.map((f) => f.code);
       expect(codes).toContain('vise-stock-not-proud');
@@ -960,7 +961,7 @@ describe('a V-bit trace job (#405)', () => {
       minFloor: 1,
       edgeMargin: 1,
       breakthrough: 0.3,
-      workholding: { ...base.workholding, vise: { ...base.workholding.vise, stockProud: 1.2 } },
+      workholding: { kind: 'vise', vise: { ...jobVise(base), stockProud: 1.2 } },
       traces,
       ...over,
     };

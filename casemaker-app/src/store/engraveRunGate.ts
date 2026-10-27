@@ -20,6 +20,7 @@
 
 import type { EngraveGenerated, EngraveProgram } from '@/workers/sim/engraveGenerate';
 import type { EngraveJob } from '@/types/engraveJob';
+import type { MillProfile } from '@/engine/cnc/machine';
 import type { OracleBbox, OracleReport } from '@/engine/cnc/engrave/oracle';
 import type { RegistrationOutcome } from '@/engine/cnc/registration/outcome';
 import type { RegistrationPlan } from '@/engine/cnc/registration/plan';
@@ -81,6 +82,19 @@ export interface EngraveRunView {
    */
   previousVerdict?: boolean | null;
   changedSinceLast?: readonly EngraveInputKey[];
+  /**
+   * #240/#545 — the machine the job will run on, so the rotary safety line can read
+   * `rotary.sources`. Optional: a caller with no machine (a script, a test) still gets every other
+   * rule, and a rotary-held job with no machine is refused rather than assumed measured.
+   */
+  machine?: Pick<MillProfile, 'rotary'> | null;
+  /**
+   * #240/#545 — the job is held in the rotary chuck. The Save .nc / Upload / Release refusal is
+   * about the JOB's workholding as well as the program's frame: in this slice the CAM still writes
+   * the flat frame for a rotary-held job, so the frozen program cannot be the only fact the gate
+   * reads. The panel sets this from `job.workholding.kind`.
+   */
+  rotaryHeld?: boolean;
 }
 
 /** Warning codes across every row, so an acknowledgement is required for the right reasons. */
@@ -261,10 +275,67 @@ export function verifySimulateSentences(v: EngraveRunView): { verified: string; 
 }
 
 /**
+ * #545/#240 — THE ONE SENTENCE the pre-bench run path says about a rotary program, verbatim. It is
+ * exported so the panel, the tests and the run sheet can quote the same words instead of a second
+ * paraphrase drifting from this one.
+ */
+export const ROTARY_UNMEASURED_REFUSAL =
+  "The rotary module has not been measured on this machine yet — this program can be checked and saved; running it waits for the module's bench check.";
+
+/**
+ * #545 — does the machine still carry a rotary figure that is not a measurement?
+ *
+ * The rule is per FIELD (`RotaryProfile.sources`, R-1): each source is the prose that says where
+ * the figure came from, and the bench replaces it with `measured (#238, <date>)`. So a field counts
+ * as measured when its source BEGINS with `measured` — equality with the bare word would never lift
+ * the refusal, because the recorded form carries the issue and date.
+ *
+ * An UNKNOWN machine (no record, or no record passed) cannot be proven measured, so a rotary
+ * question is refused. A profile with NO rotary block has no rotary figure at all — nothing the
+ * bench could replace — so this rule does not hold it back; `true` means "a rotary question
+ * exists and the numbers are not measurements yet".
+ */
+export function rotaryUnmeasured(machine: Pick<MillProfile, 'rotary'> | null | undefined): boolean {
+  if (machine === undefined || machine === null) return true;
+  const rotary = machine.rotary;
+  if (rotary === undefined) return false;
+  return Object.values(rotary.sources).some((source) => !source.trim().toLowerCase().startsWith('measured'));
+}
+
+/** Which frame a program record is in. Absent reads `flat` (every pre-slice package). */
+export function programFrame(p: { frame?: 'flat' | 'rotary' }): 'flat' | 'rotary' {
+  return p.frame === 'rotary' ? 'rotary' : 'flat';
+}
+
+/**
+ * #545/#240 — why a rotary program may not go to the machine yet, or null when this run is not a
+ * rotary one (or the module has been measured).
+ *
+ * This is the ONE safety line, and it is the first rule in {@link saveBlocker} — which Upload and
+ * Release inherit — so the .nc save, the upload and the release/one-screen Cut cannot disagree
+ * about it. Designing, generating, verifying, simulating and freezing are NOT gated here, and the
+ * `.cutjob` document save never reads this module at all.
+ *
+ * The trigger is the JOB being rotary-held OR any generated program stating `frame: 'rotary'`: in
+ * this slice the CAM still writes the flat frame (slice 2 wraps it), so the workholding is the fact
+ * that makes the save a rotary save; once a rotary program exists, the program's own frame is the
+ * fact that keeps the rule on it.
+ */
+export function rotaryRunBlocker(v: EngraveRunView): string | null {
+  const rotaryProgram = (v.generated?.programs ?? []).some((p) => programFrame(p) === 'rotary');
+  if (v.rotaryHeld !== true && !rotaryProgram) return null;
+  return rotaryUnmeasured(v.machine) ? ROTARY_UNMEASURED_REFUSAL : null;
+}
+
+/**
  * Why Save is disabled, or null when it is allowed. Order matters: the first true reason is the
  * one the user should fix first.
  */
 export function saveBlocker(v: EngraveRunView): string | null {
+  // #545/#240 — the bench line comes first: no other missing piece should hide why a rotary
+  // program cannot go to the machine. Upload and Release call this function, so they inherit it.
+  const rotary = rotaryRunBlocker(v);
+  if (rotary !== null) return rotary;
   if (!v.generated) return 'Generate first.';
   if (v.staleSince !== null) return staleSentence(v.staleReason);
   const errors = runErrorCodes(v);

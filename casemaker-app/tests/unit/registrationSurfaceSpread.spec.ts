@@ -12,6 +12,7 @@
 // Nothing here reaches a machine.
 
 import { readFileSync } from 'node:fs';
+import { jobVise } from '@/engine/cnc/fixture';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
@@ -57,7 +58,7 @@ function badgeJob(): EngraveJob {
   return {
     ...base,
     stock: { ...blank.stock, colour: COLOUR_0_2 },
-    workholding: { kind: 'vise', vise: { ...base.workholding.vise, stockProud: 1.905 } },
+    workholding: { kind: 'vise', vise: { ...jobVise(base), stockProud: 1.905 } },
     keepOuts: blank.pocket ? [blank.pocket] : [],
     labels: [{ ...line, position: { x: 24, y: 43 }, depth: 1.1 }],
   };
@@ -80,7 +81,7 @@ function laminateJob(): EngraveJob {
     workholding: {
       ...base.workholding,
       kind: 'vise',
-      vise: { ...base.workholding.vise, stockProud: -1.6 },
+      vise: { ...jobVise(base), stockProud: -1.6 },
     },
     labels: [{ ...line, text: 'CASE', size: 10, position: { x: 38, y: 12.675 }, depth: 0.1 }],
     keepOuts: [],

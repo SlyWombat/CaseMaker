@@ -55,6 +55,8 @@ function ladder(levels: number[]): Checkpoint {
     segment: 0,
     tool: 1,
     zKey: Math.round(Math.min(...levels) * 1000),
+    // #240 — a flat fixture: no A word, so the checkpoint carries null.
+    a: null,
     z: Math.min(...levels),
     run: 0,
     zs,

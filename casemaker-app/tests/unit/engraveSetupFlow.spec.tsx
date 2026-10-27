@@ -4,6 +4,7 @@
 // panel + flow are driven through jsdom like `engravePanel.spec.tsx`.
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { jobVise } from '@/engine/cnc/fixture';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { EngravePanel } from '@/components/panels/EngravePanel';
 import { StartWizard } from '@/components/welcome/StartWizard';
@@ -84,7 +85,7 @@ describe('guided job setup — the pure answers (#254)', () => {
       material: 'user',
     });
     // The vise and sacrificial carry their own `source`, so they are tagged too.
-    expect(applied.workholding.vise.source).toBeTruthy();
+    expect(jobVise(applied).source).toBeTruthy();
     expect(applied.sacrificial.source).toBeTruthy();
   });
 
@@ -170,7 +171,7 @@ describe('#684 review — step 3 writes only the holding answers', () => {
     expect(after.sources?.stock?.colour).toBe('assumed');
     expect(after.sources?.stock?.length).toBe('user');
     // The holding answers do land, each stamped by its own object.
-    expect(after.workholding.vise).toEqual(vise);
+    expect(jobVise(after)).toEqual(vise);
     expect(after.sacrificial).toEqual(answers.sacrificial);
   });
 });
@@ -309,8 +310,8 @@ describe('guided job setup — the flow in the panel (#254, #681)', () => {
 
     const job = useEngraveJobStore.getState().job;
     expect(job.stock.thickness).toBe(3.81);
-    expect(job.workholding.vise.stockProud).toBeCloseTo(0.71, 6);
-    expect(job.workholding.vise.source).toBe('saved');
+    expect(jobVise(job).stockProud).toBeCloseTo(0.71, 6);
+    expect(jobVise(job).source).toBe('saved');
     // Every value the flow wrote is tagged, and shows on the panel. #686 — a typed value no longer
     // wears a chip beside the number (audit D2): the fields the operator typed are named in one
     // sentence in the Cutter group's Technical fold, and the size itself is on the stock line.
@@ -365,8 +366,8 @@ describe('guided job setup — the flow in the panel (#254, #681)', () => {
     expect(screen.queryByTestId('start-wizard')).toBeNull();
     expect(jobItemCount(useEngraveJobStore.getState().job)).toBe(1);
     expect(useEngraveJobStore.getState().job.labels).toHaveLength(1);
-    expect(useEngraveJobStore.getState().job.workholding.vise.seat).toBe('floor');
-    expect(useEngraveJobStore.getState().job.workholding.vise.stockProud).toBeCloseTo(-8, 6);
+    expect(jobVise(useEngraveJobStore.getState().job).seat).toBe('floor');
+    expect(jobVise(useEngraveJobStore.getState().job).stockProud).toBeCloseTo(-8, 6);
     expect(useEngraveJobStore.getState().job.sacrificial.under).toBeNull();
 
     // Walking on is still offered; at step 4 the button says what it would do to an existing job.

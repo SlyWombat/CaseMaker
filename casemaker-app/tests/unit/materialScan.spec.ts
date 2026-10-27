@@ -10,6 +10,7 @@
 // below move with it and a stale test fails loudly instead of proving nothing.
 
 import { describe, it, expect } from 'vitest';
+import { jobVise } from '@/engine/cnc/fixture';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -369,7 +370,7 @@ describe('planMaterialScan — the bench’s badge blank (#391)', () => {
     // 0.15 mm proud is inside the dial's own tolerance: nothing tells the blank from the jaw.
     const plan = planMaterialScan({
       ...job,
-      workholding: { kind: 'vise', vise: { ...job.workholding.vise, stockProud: 0.05 } },
+      workholding: { kind: 'vise', vise: { ...jobVise(job), stockProud: 0.05 } },
     });
     expect(plan).toMatchObject({ refuse: true, code: 'not-proud-enough' });
     // And a measured bow as deep as the height it stands leaves the same nothing.
@@ -417,7 +418,7 @@ describe('planMaterialScan — a blank below the jaw tops (#430)', () => {
     job.workholding = {
       ...job.workholding,
       kind: 'vise',
-      vise: { ...job.workholding.vise, stockProud: -1.6 },
+      vise: { ...jobVise(job), stockProud: -1.6 },
     };
     return job;
   }
@@ -488,7 +489,7 @@ describe('planMaterialScan — the 3.81 badge above the jaw tops is unchanged (#
     job.workholding = {
       ...job.workholding,
       kind: 'vise',
-      vise: { ...job.workholding.vise, stockProud: 0.71 },
+      vise: { ...jobVise(job), stockProud: 0.71 },
     };
     return job;
   }

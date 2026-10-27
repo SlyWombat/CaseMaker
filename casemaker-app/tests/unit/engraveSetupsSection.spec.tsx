@@ -4,6 +4,7 @@
 // it (render is never a write), plus the two approvals the run needs.
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { jobVise } from '@/engine/cnc/fixture';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { EngraveSetupsSection } from '@/components/panels/EngraveSetupsSection';
 import { useEngraveJobStore } from '@/store/engraveJobStore';
@@ -383,7 +384,7 @@ describe('#471 registration — planned only after approval, refused with the en
 
   it('asks to tap the fixed jaw instead of inventing a datum (a custom, non-Z1 vise)', () => {
     const job = savedJob();
-    job.workholding.vise.source = 'saved';
+    jobVise(job).source = 'saved';
     act(() => useEngraveJobStore.setState({ job }));
     render(<EngraveSetupsSection />);
     fireEvent.click(screen.getByTestId('engrave-setup-expand-1'));
@@ -419,7 +420,7 @@ describe('#471 registration — planned only after approval, refused with the en
 
   it('leaves the seat empty for a measured/custom vise behind the override', () => {
     const job = savedJob();
-    job.workholding.vise.source = 'measured';
+    jobVise(job).source = 'measured';
     act(() => useEngraveJobStore.setState({ job }));
     render(<EngraveSetupsSection />);
     fireEvent.click(screen.getByTestId('engrave-setup-expand-1'));
@@ -554,7 +555,7 @@ describe('#471 registration — planned only after approval, refused with the en
   it('#617 a datum written from the machine card re-plans from the current record', () => {
     useMachineStore.setState({ machine: OBS });
     const job = savedJob();
-    job.workholding.vise.source = 'saved';
+    jobVise(job).source = 'saved';
     act(() => useEngraveJobStore.setState({ job }));
     // No jaw-top datum yet: the location's profile has none.
     useLocationStore.setState({

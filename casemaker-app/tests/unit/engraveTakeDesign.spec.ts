@@ -10,6 +10,7 @@
 // or deletes work they did.
 
 import { describe, it, expect, beforeEach } from 'vitest';
+import { jobVise } from '@/engine/cnc/fixture';
 
 import { useEngraveJobStore } from '@/store/engraveJobStore';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
@@ -190,9 +191,9 @@ describe('takeDesign (#410)', () => {
     // The vise is the one thing that DOES follow, and by #344's rule rather than this route's: the
     // blank is 3.81 mm thick, so the seating is re-derived (`defaultStockProud`) and every other
     // jaw number is left alone.
-    expect(after.workholding.vise.stockProud).toBe(defaultStockProud(3.81));
-    expect(after.workholding.vise.stockProud).not.toBe(before.workholding.vise.stockProud);
-    expect({ ...after.workholding.vise, stockProud: 0 }).toEqual({ ...before.workholding.vise, stockProud: 0 });
+    expect(jobVise(after).stockProud).toBe(defaultStockProud(3.81));
+    expect(jobVise(after).stockProud).not.toBe(jobVise(before).stockProud);
+    expect({ ...jobVise(after), stockProud: 0 }).toEqual({ ...jobVise(before), stockProud: 0 });
   });
 
   it('CLEARS a print the file does not state, so a stale layer grid cannot survive the blank it was for', () => {

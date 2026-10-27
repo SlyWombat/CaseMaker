@@ -19,15 +19,24 @@
  * Assumptions recorded here so they can be revisited (see the file header of
  * `engraveJob.ts` for how the moves are produced):
  *   - No arcs. The IR is linear; only straight moves exist to post (#172 "Do not add arcs").
- *   - No `A` axis. Adding one to a move record later is one line, and adding it now is a
- *     field nobody tests (/Fabrication.md §9.1, decisions 3/11).
+ *   - No `A` axis on a FLAT IR. A rotary IR (#240, `/Rotary.md` R5) carries `a` on every move;
+ *     the flat post refuses a move that has one, and the rotary post refuses one that has not.
  */
 
 import type { Tool } from '../tool';
 
+/**
+ * One straight move, every axis resolved (#240 for `a`).
+ *
+ * `a` is the rotary axis in DEGREES, unwound — it may run past ±360 across a job, and the post
+ * writes it as a Float64 with no modulo (`/Rotary.md` R5, R8). It is `undefined` on every flat
+ * IR, and REQUIRED on every move of a rotary IR: the rotary post refuses a rotary move without
+ * one rather than inventing a position. The `?` is what keeps existing flat IR construction
+ * sites — and the round trip of every pre-#240 document — byte-compatible.
+ */
 export type CamMove =
-  | { kind: 'rapid'; x: number; y: number; z: number }
-  | { kind: 'feed'; x: number; y: number; z: number; f: number };
+  | { kind: 'rapid'; x: number; y: number; z: number; a?: number }
+  | { kind: 'feed'; x: number; y: number; z: number; f: number; a?: number };
 
 /**
  * #250 — which pass of an item's cut this operation is. `rough` leaves the finish allowance
@@ -71,11 +80,17 @@ export interface ToolpathIR {
    * `'flat'` is the frame this file's header documents: Z = 0 on the stock's top face, cuts
    * negative, X/Y the work-frame stock coordinates. `'rotary'` is the 4th axis's own frame —
    * origin on the rotary axis, Z = radial distance above it, Y ≡ 0, X along the axis
-   * (`/Rotary.md` R6). Nothing emits a rotary IR yet: R-0 is a type reservation, so a later
-   * rotary IR cannot flow through the flat post unnoticed (#237). There is deliberately no
-   * `a` on the moves — that is R-3 (decision R5).
+   * (`/Rotary.md` R6). A rotary IR needs {@link rotary} and an `a` on every move; the post
+   * refuses one that is missing either, and refuses a rotary IR at the flat post entirely.
    */
   frame: 'flat' | 'rotary';
+  /**
+   * #240 — the round stock a rotary IR cuts, mm. Present exactly when `frame === 'rotary'`;
+   * absent on every flat IR, so flat construction is unchanged. `radius` is the stock's own
+   * radius (`diameter / 2`), which is the Z of the stock's surface on the axis frame: it is
+   * what the sweep and the run sheet need to read a Z back as a radial depth.
+   */
+  rotary?: { radius: number };
   /** The cutter, as the `.nc` header describes it (#182, `/Simulation.md` §6). */
   tool: Tool;
   /** Tool number, 1 for V1's single-tool jobs. Chosen by {@link toolNumberFor}. */
@@ -413,6 +428,13 @@ function assertSameMachine(a: ToolpathIR, b: ToolpathIR): void {
   // check first keeps the common case — the same `Tool` object passed to both CAM calls — cheap.
   if (a.tool !== b.tool && JSON.stringify(a.tool) !== JSON.stringify(b.tool)) {
     throw new Error('concatToolpathIR: the two toolpaths were cut with different tools');
+  }
+  // #240 — the round stock belongs to the frame: two rotary IRs may only be joined when they cut
+  // the same diameter, or the radius one of them carries would be wrong for the other's moves.
+  if (a.rotary?.radius !== b.rotary?.radius) {
+    throw new Error(
+      `concatToolpathIR: the two toolpaths disagree on the rotary stock radius (${String(a.rotary?.radius)} vs ${String(b.rotary?.radius)})`,
+    );
   }
 }
 

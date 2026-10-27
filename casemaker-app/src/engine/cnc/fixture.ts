@@ -1,5 +1,5 @@
 import type { Mm, Vec3 } from '@/types/units';
-import type { Sacrificial, SacrificialSide, ViseParams } from '@/types/engraveJob';
+import type { EngraveJob, Sacrificial, SacrificialSide, ViseParams } from '@/types/engraveJob';
 import type { FixtureEnvelope, ObstacleBox } from './setup';
 import type { JobFinding } from './engrave/jobSetup';
 import { hasSacrificial, noneSacrificial, stripHeight, viseJawShift } from './sacrificial';
@@ -324,6 +324,20 @@ export function viseForNewJob(
 export function seatedVise(vise: ViseParams, thickness: Mm): ViseParams {
   if (vise.source !== 'default') return { ...vise };
   return { ...vise, stockProud: defaultStockProud(thickness, vise.seat) };
+}
+
+/**
+ * The VISE numbers a reader can use for any job, including one held in the rotary chuck (#240).
+ *
+ * A vise job answers its own `workholding.vise`, exactly as before. A rotary job has no vise, and
+ * the readers that still ask (the run sheet, the preview, the panel's technical fold) are slice 3's
+ * to teach about the chuck — until then they get the SHIPPED default seated on the blank, which is
+ * a labelled default and never a measurement. This is a compatibility answer, not a second stored
+ * truth: nothing writes it back into the document.
+ */
+export function jobVise(job: Pick<EngraveJob, 'workholding' | 'stock'>): ViseParams {
+  if (job.workholding.kind === 'vise') return job.workholding.vise;
+  return seatedVise(DEFAULT_VISE, job.stock.thickness);
 }
 
 /**

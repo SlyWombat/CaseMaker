@@ -10,6 +10,7 @@
  * must be re-measured, not adjusted to make the spec pass.
  */
 import { describe, expect, it } from 'vitest';
+import { jobVise } from '@/engine/cnc/fixture';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -92,8 +93,7 @@ function vCarveJob(design: DesignImport): EngraveJob {
     toolKey: 'inv:kz-engrave-30-0-3',
     tool: bit30(),
     workholding: {
-      ...base.workholding,
-      vise: { ...base.workholding.vise, stockProud: 1.2 },
+      kind: 'vise', vise: { ...jobVise(base), stockProud: 1.2 },
     },
   };
 }
@@ -494,7 +494,7 @@ describe('the thick fixture as a V-carve job (#221)', () => {
     expect(deepestFloor).toBeCloseTo(0.998, 3);
     expect(deepestFloor).toBeLessThan(1.2);
     expect(job.stock.thickness).toBeCloseTo(3.81, 2);
-    expect(job.workholding.vise.stockProud).toBeLessThan(job.stock.thickness);
+    expect(jobVise(job).stockProud).toBeLessThan(job.stock.thickness);
   });
 
   it('generates one program with the same one V-bit and no error finding', () => {
@@ -617,8 +617,7 @@ describe('the thin fixture end to end (#221 acceptance)', () => {
       toolKey: 'inv:kz-engrave-30-0-3',
       tool: bit30(),
       workholding: {
-        ...base.workholding,
-        vise: { ...base.workholding.vise, stockProud: 1.2 },
+        kind: 'vise', vise: { ...jobVise(base), stockProud: 1.2 },
       },
     };
   }
@@ -877,8 +876,7 @@ describe('the thick fixture acceptance gates (#221)', () => {
       toolKey: 'inv:kz-engrave-30-0-3',
       tool: bit30(),
       workholding: {
-        ...base.workholding,
-        vise: { ...base.workholding.vise, stockProud: 1.2 },
+        kind: 'vise', vise: { ...jobVise(base), stockProud: 1.2 },
       },
     };
   }
@@ -962,7 +960,7 @@ describe('the thick fixture acceptance gates (#221)', () => {
     const deepestFloor = Math.max(...regions(tl, job).cuts.map((cut) => cut.depth));
     expect(deepestFloor).toBeCloseTo(0.998, 3);
     expect(deepestFloor).toBeLessThan(1.2);
-    expect(job.workholding.vise.stockProud).toBeLessThan(job.stock.thickness);
+    expect(jobVise(job).stockProud).toBeLessThan(job.stock.thickness);
   });
 
   it('generates one program with the same one V-bit and no error finding', () => {

@@ -5,6 +5,7 @@
 // `window` guard) at module load, so both are faked BEFORE the store is dynamically imported.
 
 import { describe, it, expect, vi } from 'vitest';
+import { jobVise } from '@/engine/cnc/fixture';
 
 // A minimal in-memory Storage, installed before any store import. The unit suite runs on node,
 // where neither localStorage nor window exists and the settings store deliberately no-ops.
@@ -329,7 +330,7 @@ describe('viseEnvelope with sacrificial material (#213)', () => {
 describe('the shipped default, and its provenance (#203)', () => {
   it('uses the shipped default when no saved vise is passed', () => {
     // `defaults.ts` now imports DEFAULT_VISE instead of keeping a second copy of its numbers.
-    expect(defaultEngraveJob().workholding.vise).toEqual(DEFAULT_VISE);
+    expect(jobVise(defaultEngraveJob())).toEqual(DEFAULT_VISE);
   });
 
   it('takes a saved vise passed in, as a copy the caller keeps', () => {
@@ -340,10 +341,10 @@ describe('the shipped default, and its provenance (#203)', () => {
       measuredAt: '2026-09-01',
     };
     const job = defaultEngraveJob(saved);
-    expect(job.workholding.vise).toEqual(saved);
-    expect(job.workholding.vise).not.toBe(saved);
+    expect(jobVise(job)).toEqual(saved);
+    expect(jobVise(job)).not.toBe(saved);
     // A copy: patching the job cannot mutate the caller's object (or DEFAULT_VISE).
-    job.workholding.vise.stockProud = 99;
+    jobVise(job).stockProud = 99;
     expect(saved.stockProud).toBe(DEFAULT_VISE.stockProud);
     expect(DEFAULT_VISE.stockProud).toBe(4);
   });
@@ -445,12 +446,12 @@ describe('measuredAt: the day a measurement was taken (#203 review)', () => {
     const parsed = parseEngraveJob(JSON.parse(JSON.stringify(job)));
     expect(parsed.ok).toBe(true);
     if (!parsed.ok) return;
-    expect(parsed.job.workholding.vise.measuredAt).toBe('2026-09-01');
+    expect(jobVise(parsed.job).measuredAt).toBe('2026-09-01');
   });
 
   it('rejects a non-string measuredAt rather than stripping it', () => {
     const job = defaultEngraveJob();
-    (job.workholding.vise as { measuredAt?: unknown }).measuredAt = 123;
+    (jobVise(job) as { measuredAt?: unknown }).measuredAt = 123;
     expect(parseEngraveJob(job).ok).toBe(false);
   });
 
@@ -459,7 +460,7 @@ describe('measuredAt: the day a measurement was taken (#203 review)', () => {
     vi.resetModules();
     const { useEngraveJobStore } = await import('@/store/engraveJobStore');
     useEngraveJobStore.getState().setVise({ source: 'measured', uncertainty: 0.5, jawLength: 75 });
-    const vise = useEngraveJobStore.getState().job.workholding.vise;
+    const vise = jobVise(useEngraveJobStore.getState().job);
     expect(vise.source).toBe('measured');
     expect(vise.jawLength).toBe(75);
     expect(vise.measuredAt).toBe(todayISODate());
@@ -481,7 +482,7 @@ describe('measuredAt: the day a measurement was taken (#203 review)', () => {
     vi.resetModules();
     await import('@/store/settingsStore');
     const engrave = await import('@/store/engraveJobStore');
-    const vise = engrave.useEngraveJobStore.getState().job.workholding.vise;
+    const vise = jobVise(engrave.useEngraveJobStore.getState().job);
     expect(vise.source).toBe('saved');
     expect(vise.measuredAt).toBe('2026-09-01');
     expect(vise.stockProud).toBe(saved.stockProud);

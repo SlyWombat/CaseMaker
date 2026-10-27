@@ -4,6 +4,7 @@
 // `runSheet.spec.ts`; this file proves the view puts it on the page — or leaves it off.
 
 import { describe, it, expect, afterEach } from 'vitest';
+import { jobVise } from '@/engine/cnc/fixture';
 import { cleanup, render, screen } from '@testing-library/react';
 import { RunSheetView } from '@/components/panels/RunSheetView';
 import { buildRunSheet, type RunSheet, type RunSheetGenerated, type RunSheetOptions } from '@/engine/cnc/engrave/runSheet';
@@ -32,7 +33,7 @@ function sheetFor(job: EngraveJob, options?: RunSheetOptions): RunSheet {
   const generated: RunSheetGenerated = {
     findings: dedupeFindings([
       ...validateJob(job),
-      ...validateVise(job.stock, job.workholding.vise, job.sacrificial),
+      ...validateVise(job.stock, jobVise(job), job.sacrificial),
     ]),
     feeds: tool ? feedsFor([], job.stock.material, tool, Z1, job.cutOverride) : null,
     cam: { operations: 3, cuttingMoves: 1234, estimatedSeconds: 95, passes: 2 },
