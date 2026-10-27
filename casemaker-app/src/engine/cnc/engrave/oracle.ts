@@ -142,8 +142,18 @@ export interface OraclePredicted {
    * Floor of this item's cut, depth below the stock top face, mm (positive). For a groove this is
    * the TRACE'S TIP depth: the level its own floor is at, and the one its region has shrunk to the
    * tip radius by. For a thread it is the TIP depth: the deepest level the tooth reaches.
+   *
+   * ON AN INDEXED ROTARY JOB (#708) the "top face" is the FACE the item is cut on: the depth is
+   * below that face, and {@link a} says which face it is.
    */
   depth: number;
+  /**
+   * #708 — the rotary index this prediction belongs to, degrees. Absent on a flat job; read as
+   * `0` on an indexed one, which is the face a single-index program cuts at A 0. The per-face
+   * oracle groups the predictions by it and compares each group with THAT face's removal turned
+   * back into its own frame.
+   */
+  a?: number;
   /**
    * #667 — the document item this prediction describes, when it has one. The oracle does not read
    * it; a caller that must re-state the prediction for ONE program (a rest pair's rough-only file
@@ -193,6 +203,11 @@ export interface OracleLevel {
   /** Simulated but not predicted: area the file cut OUTSIDE the plan, mm². */
   overCut: number;
   /**
+   * #708 — on a per-face (indexed rotary) report, the rotary index this level belongs to,
+   * degrees. Absent on the flat path, whose frame has one face.
+   */
+  a?: number;
+  /**
    * #584 — the bbox (work/job mm) of the region predicted but not cut at this level, so a reader
    * can find the disagreement on the blank. `null` when there is no under-cut at this level (a
    * hand-built report may omit it).
@@ -230,11 +245,12 @@ export interface OracleReport {
     overCut: number;
     /**
      * #584 — the level Z and bbox (work/job mm) of the WORST under-cut, so the sentence can name
-     * the place without scanning `levels`. `null`/absent when there is no under-cut.
+     * the place without scanning `levels`. `null`/absent when there is no under-cut. #708 — `a`
+     * carries the rotary index on a per-face report, so the refusal names the face.
      */
-    underAt?: { z: number; bbox: OracleBbox } | null;
-    /** #584 — the level Z and bbox of the WORST over-cut, or `null`/absent. */
-    overAt?: { z: number; bbox: OracleBbox } | null;
+    underAt?: { z: number; bbox: OracleBbox; a?: number } | null;
+    /** #584 — the level Z and bbox of the WORST over-cut, or `null`/absent. #708 — as `underAt`. */
+    overAt?: { z: number; bbox: OracleBbox; a?: number } | null;
   };
   /**
    * The area floor the verdict used, mm² — `ORACLE_AREA_FLOOR`, or the grid's cell area ×
@@ -568,6 +584,13 @@ export function computeOracle(
   predicted: readonly OraclePredicted[],
   band: number,
   threadGrid?: ColumnGrid | null,
+  /**
+   * #708 — the work-frame Z of the part's TOP face: 0 on a flat job (the work origin IS the face),
+   * and the stock's RADIUS on an indexed rotary one (the work origin is on the axis). A level's
+   * slice is at `zTop - depth`, so the same depth means the same distance below whichever face the
+   * comparison is about.
+   */
+  zTop = 0,
 ): OracleReport {
   const CS = tl.CrossSection;
   // The offsets are by `band` itself, so the arc being flattened has radius ≈ band.
@@ -609,8 +632,9 @@ export function computeOracle(
   let worstOverAt: { z: number; bbox: OracleBbox } | null = null;
 
   for (const depth of depths) {
-    // The work-frame floor Z: the origin is the top face, so a cut is at NEGATIVE Z.
-    const z = -depth;
+    // The work-frame floor Z: the origin is the top face, so a cut is at NEGATIVE Z (and on a
+    // rotary face, `zTop - depth` — `zTop` is the radius there).
+    const z = zTop - depth;
     // The predicted region at this level: every item whose floor is at or below it — a flat item
     // unchanged, a groove dilated to where its cone reaches at THIS depth. Union of CrossSections
     // (not one `ofPolygons` of concatenated contours) so a hole inside one item is preserved when

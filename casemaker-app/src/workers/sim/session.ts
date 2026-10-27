@@ -41,6 +41,8 @@ import {
   gridSliceAt,
   oracleBand,
   removalSliceAt,
+  type OracleBbox,
+  type OracleLevel,
   type OraclePredicted,
   type OracleReport,
 } from '@/engine/cnc/engrave/oracle';
@@ -420,6 +422,86 @@ const tagSweep = (d: SweepDiagnostic): SimDiagnostic => ({ source: 'sweep', seve
  */
 const worstContours = (timeline: Timeline): number => timeline.checkpoints.reduce((a, cp) => Math.max(a, cp.steps.length * 3), 0);
 
+/** A Manifold handle inside this session, derived from the toplevel it was given. */
+type ManifoldHandle = InstanceType<ManifoldToplevel['Manifold']>;
+
+/**
+ * #708 — the volumetric oracle for an INDEXED rotary live (a `swept` one; `#241` gave its runs one
+ * stock-frame solid each). Per face:
+ *
+ *   - the face's solids are turned back into the FACE frame by `+a` about X — the inverse of the
+ *     `-a` the sweep applied — so the tool's cut sits at the top of the stock again, Y ≡ 0 and
+ *     Z the radius above the axis (R6);
+ *   - the frame's top face is the stock's RADIUS (`sweep.stockTopZ`), so a prediction's depth is
+ *     measured below that face by `computeOracle`'s `zTop`;
+ *   - the predictions are grouped by {@link OraclePredicted.a} (an untagged one belongs to A 0,
+ *     the single face a one-index program cuts), and the flat comparison runs on each group.
+ *
+ * A face named by a prediction but never cut has no solid: its levels come back as pure under-cut,
+ * which is what "the program never turned to that face" should say. The merged report keeps the
+ * flat one's shape, and `a` on every level and on the worst cut lets the sentence name the face.
+ */
+function indexedFaceOracle(tl: ManifoldToplevel, l: { timeline: Timeline; sweep: SweepResult }, predicted: readonly OraclePredicted[]): OracleReport {
+  const zTop = l.sweep.stockTopZ;
+  const band = oracleBand(worstContours(l.timeline));
+  const solidsByFace = new Map<number, ManifoldHandle[]>();
+  l.timeline.checkpoints.forEach((cp, i) => {
+    const solid = l.sweep.perCheckpoint[i];
+    if (!solid) return;
+    const a = cp.a ?? 0;
+    const list = solidsByFace.get(a);
+    if (list === undefined) solidsByFace.set(a, [solid]);
+    else list.push(solid);
+  });
+  const angles = [...new Set([...solidsByFace.keys(), ...predicted.map((p) => p.a ?? 0)])].sort((x, y) => x - y);
+  const levels: OracleLevel[] = [];
+  let ok = true;
+  let areaFloor: number | undefined;
+  let worstUnder = 0;
+  let worstOver = 0;
+  let worstUnderAt: { z: number; bbox: OracleBbox; a?: number } | null = null;
+  let worstOverAt: { z: number; bbox: OracleBbox; a?: number } | null = null;
+  for (const a of angles) {
+    const solids = solidsByFace.get(a) ?? [];
+    const turned = solids.map((s) => s.rotate([a, 0, 0]));
+    const faceSolid: ManifoldHandle | null = turned.length === 0 ? null : turned.length === 1 ? (turned[0] as ManifoldHandle) : tl.Manifold.union(turned);
+    try {
+      const report = computeOracle(
+        tl,
+        faceSolid === null ? () => null : removalSliceAt(faceSolid),
+        predicted.filter((p) => (p.a ?? 0) === a),
+        band,
+        undefined,
+        zTop,
+      );
+      ok = ok && report.ok;
+      if (report.areaFloor !== undefined) areaFloor = areaFloor === undefined ? report.areaFloor : Math.max(areaFloor, report.areaFloor);
+      for (const level of report.levels) levels.push({ ...level, a });
+      if (report.worst.underCut > worstUnder) {
+        worstUnder = report.worst.underCut;
+        worstUnderAt = report.worst.underAt ? { ...report.worst.underAt, a } : null;
+      }
+      if (report.worst.overCut > worstOver) {
+        worstOver = report.worst.overCut;
+        worstOverAt = report.worst.overAt ? { ...report.worst.overAt, a } : null;
+      }
+    } finally {
+      // The turned handles are OURS; the sweep's solids stay alive underneath them until every
+      // slice has been forced above (the lazy-transform trap, /Simulation.md's Manifold note).
+      if (faceSolid !== null && turned.length > 1) faceSolid.delete();
+      for (const t of turned) t.delete();
+    }
+  }
+  return {
+    ok,
+    band,
+    levels,
+    worst: { underCut: worstUnder, overCut: worstOver, underAt: worstUnderAt, overAt: worstOverAt },
+    ...(areaFloor === undefined ? {} : { areaFloor }),
+    frame: 'work',
+  };
+}
+
 export function createSimSession(tl: ManifoldToplevel, hooks?: SimSessionHooks): SimSession {
   let live: Live | null = null;
   let latestGen = Number.NEGATIVE_INFINITY;
@@ -713,9 +795,10 @@ export function createSimSession(tl: ManifoldToplevel, hooks?: SimSessionHooks):
    * session's part is to name the run's own grid, radius and cutter; the model, the cell + facet
    * tolerance and the seam fold live in the oracle.
    *
-   * An INDEXED rotary sweep (#241) is refused: its removal is in the stock frame, one rotated
-   * solid per face, and a prediction is a work-frame region of ONE face — the comparison needs the
-   * face's own rotation, which the per-face oracle slice will own.
+   * An INDEXED rotary sweep (#708) is judged A FACE AT A TIME: its removal is in the stock frame,
+   * one rotated solid per run, so each face's solids are turned back into that face's own frame
+   * and the flat comparison runs there, at the face's own top (the stock's radius). The per-face
+   * reports merge into the flat one's shape, tagged with the face so a refusal can name it.
    */
   const oracle = (predicted: readonly OraclePredicted[]): OracleReport => {
     // #623 — the frame the loaded program speaks. A flat post is judged exactly as it always was;
@@ -746,14 +829,14 @@ export function createSimSession(tl: ManifoldToplevel, hooks?: SimSessionHooks):
       return { ...report, frame: surface === null ? 'work' : 'surface' };
     }
     if (!l || l.kind !== 'swept') throw new Error('oracle: no swept program is loaded');
-    // #241 — an INDEXED rotary sweep is exact, but its removal is in the STOCK frame (each run's
-    // solid was rotated back out of its index), while a prediction names work-frame regions on
-    // one face. Comparing the two would compare different planes, and the per-face comparison
-    // needs the prediction rotated into that face's frame — the oracle slice that will own it.
+    // #708 — AN INDEXED ROTARY SWEEP IS JUDGED A FACE AT A TIME. Its removal is in the STOCK frame
+    // (each run's solid was turned back out of its index by #241), while a prediction names regions
+    // on ONE face in that face's own frame. So each face's solids are turned BACK into its frame
+    // (+a about X), the frame's top face is the stock's radius, and the flat comparison runs on
+    // that; the per-face reports merge into the flat report's shape with every level and the worst
+    // cut tagged with its face, so a refusal can name it.
     if (l.timeline.summary.rotary) {
-      throw new Error(
-        'oracle: this is an INDEXED rotary sweep — its removal is in the stock frame, while the prediction names work-frame regions of one face; the two cannot be compared until the oracle reads a face at a time',
-      );
+      return indexedFaceOracle(tl, l, predicted);
     }
     const removal = l.sweep.removal;
     if (!removal) throw new Error('oracle: the loaded program removed no material');

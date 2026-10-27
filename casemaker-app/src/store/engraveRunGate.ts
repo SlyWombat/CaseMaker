@@ -148,13 +148,15 @@ function figureFailing(v: number): number | string {
  * #584 — the "at level Z −0.8, near (x, y) — a 0.3 × 0.27 mm patch" clause the failing sentence
  * appends, from the worst disagreement's level Z and bbox (job mm). `null` when there is none.
  */
-function oracleLocation(loc: { z: number; bbox: OracleBbox } | null | undefined): string {
+function oracleLocation(loc: { z: number; bbox: OracleBbox; a?: number } | null | undefined): string {
   if (!loc) return '';
   const cx = (loc.bbox.min[0] + loc.bbox.max[0]) / 2;
   const cy = (loc.bbox.min[1] + loc.bbox.max[1]) / 2;
   const w = loc.bbox.max[0] - loc.bbox.min[0];
   const h = loc.bbox.max[1] - loc.bbox.min[1];
-  return ` at level Z ${figure(loc.z)}, near (${figure(cx)}, ${figure(cy)}) — a ${figure(w)} × ${figure(h)} mm patch`;
+  // #708 — an indexed rotary job's disagreement is on ONE FACE, and the sentence names it.
+  const face = loc.a === undefined ? '' : ` on the face at A ${figure(loc.a)}°,`;
+  return `${face} at level Z ${figure(loc.z)}, near (${figure(cx)}, ${figure(cy)}) — a ${figure(w)} × ${figure(h)} mm patch`;
 }
 
 /**
