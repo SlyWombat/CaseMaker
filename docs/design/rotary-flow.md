@@ -303,8 +303,8 @@ existing flat scene with *around* for Y.
 - **Wrap direction** is the item's **Reads: along / around** (text and V-carve); shapes are drawn on the map and
   have none.
 - **Map | Stock.** The toggle shows the same opened regions on the cylinder with the A-zero mark (R11, the
-  "wrap view"); the opening uses the anisotropic radius `r_t · R / (R − d)` around and `r_t` along in both
-  (R10), so the two cannot disagree. Default: **Map** while authoring.
+  "wrap view"); the opening uses the anisotropic radius `R · atan(r_t / (R − d))` around and `r_t` along in
+  both (R10; `r_t · R / (R − d)` is its small-angle approximation), so the two cannot disagree. Default: **Map** while authoring.
 - **Depth on a round stock** is the radius lost: a 0.5 mm engraving on ⌀20 leaves the floor at r = 9.5 mm.
   Depth over the tube's wall, or deep enough to reach the axis, is refused at the field (R8).
 
@@ -541,7 +541,7 @@ an oracle that does not depend on a bench number. Makera's own programs replay a
 
 | Class | Fixture job | What it proves | Oracle | Engine |
 |---|---|---|---|---|
-| W | **Name on a dowel** — PLA rod ⌀20 × 100, reverse jaws, grip 15, tailstock in, `Engrave text “Zoomba”` 0.5 mm, reads along, centred at 180°, ⌀1 mm flat end — every default | the whole flow; the starter | column-space opened region (§4.5); the golden numbers: arc 15.708 mm = A 90°, anisotropic radius 0.526 mm around (r_t 0.5, R 10, d 0.5) | column |
+| W | **Name on a dowel** — PLA rod ⌀20 × 100, reverse jaws, grip 15, tailstock in, `Engrave text “Zoomba”` 0.5 mm, reads along, centred at 180°, ⌀1 mm flat end — every default | the whole flow; the starter | column-space opened region (§4.5); the golden numbers: arc 15.708 mm = A 90°, anisotropic radius 0.52583 mm around (exact `R·atan(r_t/(R−d))`, r_t 0.5, R 10, d 0.5; the small-angle form says 0.526) | column |
 | W | **Band across the seam** — text reads around, centred on the seam | the seam: one continuous cut, no doubled or missing column | same, plus "no column changed outside the region" over the seam | column |
 | W | **Pocket band all the way round** — 5 mm wide, 1 mm deep at X 60 | full-circumference regions; the saw-line pattern | floor at r 9 on every column of the band | column |
 | W | **Into the jaws** — the text moved to X 1 | the band refusal at the row, not at Generate | the sentence and the Fix target | — |

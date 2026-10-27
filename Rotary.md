@@ -519,11 +519,14 @@ mapping, which no flat test can.
 **What the opened-region prediction must use (Decision R10):** the item is **authored on the surface
 map** (arc length at the design radius R — what the user sees on the dowel, and the frame
 `feedback_landmark_geometry_comms` asks for), **A is posted from the surface arc length**, and the
-opening is computed with an **anisotropic radius**: `r_t` along X, `r_t · R / (R − d)` along the arc
-— because a vertical tool at floor depth d subtends `atan(r_t / (R − d))` of arc, which on the
-surface map is wider than `r_t`. For engraving depths the correction is ≤ 11 % on a ⌀20 dowel; for
-anything deeper it is the difference between a legible letter and a merged one, and it must be in the
-same function the viewport's opened-region preview uses so the two cannot disagree (#201's rule).
+opening is computed with an **anisotropic radius**: `r_t` along X, `R · atan(r_t / (R − d))` along
+the arc — the arc the vertical tip's edge subtends at floor depth d, when that edge stands at height
+`R − d` above the axis. `r_t · R / (R − d)` is that arc's **small-angle approximation**: it agrees to
+0.1 % at engraving depths on a ⌀20 dowel but over-claims by 12 % at a 32° half-angle (a 3.175 mm
+cutter on a ⌀6 rod), so the exact form is the one the CAM, the first erosion and the oracle's facet
+allowance share, and the linear form is named only as the approximation it is (#240 slice 2). It must
+be in the same function the viewport's opened-region preview uses so the two cannot disagree
+(#201's rule).
 
 ### 4.6 Indexed jobs on the exact sweeper
 
@@ -736,7 +739,7 @@ origin diagram becomes the axis-centred one.
 | R7 | One column engine, two parameterisations; the rotary one first if the maintainer chooses (§10) | identical grid / min / mesh / cadence; only the footprint differs | §4.1 |
 | R8 | Single-valued columns; Z ≤ 0 refused by name (`axis-crossing`) | W never nears the axis; the finish file's crossing needs class R's representation | §4.3 |
 | R9 | A carried as Float64 or (turns, angle); never Float32 unwound degrees | 153 720° exceeds Float32's 0.01° resolution | §4.4 |
-| R10 | Author on the surface map, post A from surface arc length, open with the anisotropic radius `r_t · R/(R−d)` along the arc | the user reasons from the dowel; the geometry of a vertical tool at floor depth | §4.5 |
+| R10 | Author on the surface map, post A from surface arc length, open with the anisotropic radius `r_t` along X and `R · atan(r_t/(R − d))` along the arc (`r_t · R/(R − d)` is its small-angle approximation) | the user reasons from the dowel; the geometry of a vertical tool's edge at floor depth | §4.5 |
 | R11 | Hybrid viewport: unrolled for authoring/inspection, rotating stock (not tool) for the run | ghost and gouges are truthful only in the stock frame; the map reuses the flat scene; Vectric and Tormach split it the same way | §5 |
 | R12 | Post emits F in mm/min; the run sheet reports surface speed and the 10 rpm cap | the controller converts; the operator needs what the material sees | §6.5 |
 
