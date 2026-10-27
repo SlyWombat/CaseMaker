@@ -20,6 +20,10 @@ import { useEngraveJobStore } from '@/store/engraveJobStore';
 import { resetMachineStore, useMachineStore } from '@/store/machineStore';
 import { resetLocationStore, useLocationStore } from '@/store/locationStore';
 import { resetStartWizard } from '@/store/startWizardStore';
+import { MachineRecordSchema, type MachineRecord } from '@/platform/locationClient';
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 // #346 — vitest runs the WEB target, where the wizard has no socket. The step-1 tests run with the
 // capability on (the desktop build); the no-socket case is covered in startWizard.spec.tsx.
@@ -117,6 +121,29 @@ describe('#682 — step 1 is the house’s machine', () => {
       `Online · Idle · homed · checked ${hhmm(machine!.observedAt)}`,
     );
     expect((screen.getByTestId('start-wizard-next') as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it('#726 W24 — step 1 says what is on the machine, from the active bed profile', async () => {
+    const here = dirname(fileURLToPath(import.meta.url));
+    const doc = JSON.parse(readFileSync(join(here, 'fixtures', 'location-doc.json'), 'utf8')) as { machines: unknown[] };
+    const machine = MachineRecordSchema.parse(JSON.parse(JSON.stringify(doc.machines[0]))) as MachineRecord & {
+      address?: { host: string; port: number };
+    };
+    machine.address = { host: HOUSE_HOST, port: 2222 };
+    useLocationStore.setState({
+      status: 'present',
+      location: { machines: [machine] } as unknown as Location,
+      etag: '"e1"',
+      reason: null,
+    });
+    useClient(bench());
+    render(<StartWizard />);
+
+    await waitFor(() => expect(stateLine().getAttribute('data-state')).toBe('found'));
+    // The design's line (first-job-flow §3.2/§3.4): the bed profile, not a guess.
+    expect(screen.getByTestId('start-wizard-machine-now').textContent).toBe(
+      'On the machine now: Vise on the pins · wasteboard under',
+    );
   });
 
   it('an Idle line away from the homed rest does not say homed', async () => {

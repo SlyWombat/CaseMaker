@@ -25,6 +25,7 @@ import { MACHINES } from '@/engine/cnc/machine';
 import { formatStamp } from '@/components/manage/display';
 import { stateColour, stateWord } from '@/components/viewport/machineWords';
 import { canDriveMachine } from '@/platform/capabilities';
+import { MACHINE_MOUNT_WORDS, activeMountOf, activeProfileOf, surfaceWords } from '@/platform/machineChange';
 import { readStatusLine } from '@/platform/desktop/protocol';
 import { readMachineRest } from '@/platform/machineChangeRun';
 import type { MachineObservation } from '@/platform/machineProbe';
@@ -216,6 +217,14 @@ export function MachineStep({
             </span>
           )}
         </div>
+      )}
+
+      {/* #726 W24 — WHAT IS ON THE MACHINE, from the active bed profile (the design's
+          "On the machine now: Vise on the pins · bare bed"). Absent when the house records no bed. */}
+      {house !== null && activeProfileOf(house) !== null && (
+        <p style={MUTED} data-testid="start-wizard-machine-now">
+          On the machine now: {MACHINE_MOUNT_WORDS[activeMountOf(house)]} · {surfaceWords(activeProfileOf(house)!.surface)}
+        </p>
       )}
 
       {canDriveMachine && (
