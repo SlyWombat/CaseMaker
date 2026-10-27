@@ -440,7 +440,7 @@ describe('EngravePanel — the Add menu (#214)', () => {
     // disabled with its reason beside it.
     expect((screen.getByTestId('engrave-add-surface') as HTMLButtonElement).disabled).toBe(true);
     expect(screen.getByTestId('operation-picker-surface-hint').textContent).toBe(
-      'a whole-job operation; it starts an empty job',
+      'this job already has work — Surface a mesh starts a new, empty job',
     );
     expect(screen.queryByText('More kinds and imports')).toBeNull();
   });

@@ -186,7 +186,7 @@ describe('#685 — step 4, what are you cutting', () => {
     const surface = screen.getByTestId('engrave-setup-what-surface') as HTMLButtonElement;
     expect(surface.disabled).toBe(true);
     expect(screen.getByTestId('operation-picker-surface-hint').textContent).toBe(
-      'a whole-job operation; it starts an empty job',
+      'this job already has work — Surface a mesh starts a new, empty job',
     );
 
     const before = useEngraveJobStore.getState().job.labels.length;

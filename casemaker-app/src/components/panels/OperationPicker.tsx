@@ -117,8 +117,13 @@ export function OperationPicker({
               );
             })}
             {group.id === '3d' && (
+              // #726 W23 — a DISABLED card carries its reason in words on the screen (A10), not
+              // only in a hover title: the generic rule says what the operation is, not why this
+              // job cannot pick it now.
               <span style={HINT} data-testid="operation-picker-surface-hint">
-                a whole-job operation; it starts an empty job
+                {!surfaceAllowed
+                  ? 'this job already has work — Surface a mesh starts a new, empty job'
+                  : 'a whole-job operation; it starts an empty job'}
               </span>
             )}
           </div>

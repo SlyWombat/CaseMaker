@@ -580,6 +580,12 @@ export function EngraveSetupsSection({ initiallyOpen = false }: { initiallyOpen?
         >
           Save
         </button>
+        {/* #726 W23 — a disabled Save says why, on the screen (A10). */}
+        {(tolDraft === null || Number(tolDraft) === tolerance.value) && (
+          <span style={{ ...MUTED, margin: 0 }} data-testid="engrave-setups-tolerance-why">
+            {tolDraft === null ? 'type a tolerance to save it' : 'unchanged'}
+          </span>
+        )}
         <span style={{ ...MUTED, margin: 0 }}>
           ±{toleranceRec.value} mm — {toleranceRec.kind}
         </span>
