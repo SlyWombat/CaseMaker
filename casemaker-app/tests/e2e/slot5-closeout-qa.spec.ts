@@ -99,7 +99,9 @@ test('visual QA: Engrave panel — stock, labels, tool recommendation and depth-
   await page.waitForTimeout(4000);
   const recFresh = await page.getByTestId('engrave-recommendation').innerText().catch(() => '');
   console.log('DIAG #211 fresh selection=%j rec=%j', await page.getByTestId('engrave-tool').inputValue(), recFresh);
-  expect(recFresh).toContain('Recommended');
+  // #687/#699 — the line is the cutter's display name and a lowercase `recommended` tag, then the
+  // reason. The intent is unchanged: a fresh job shows a recommendation sentence of its own.
+  expect(recFresh.toLowerCase()).toContain('recommended');
   await page.screenshot({ path: shot(testInfo, 'slot5-engrave-after-4s.png') });
   const legendCount = await page.getByTestId('engrave-preview-legend').count();
   const loadingCount = await page.getByTestId('engrave-preview-loading').count();

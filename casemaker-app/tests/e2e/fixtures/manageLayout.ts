@@ -130,8 +130,9 @@ export function expectStacked(l: ManageLayout): void {
   expect(l.manageOverflowX, 'manage scrolls sideways').toBeLessThanOrEqual(0);
   expect(l.pageOverflowX, 'page scrolls sideways').toBeLessThanOrEqual(0);
 
-  // Three scope tabs on ONE row, each a real touch target, all on-screen.
-  expect(l.scopes).toHaveLength(3);
+  // FOUR scope tabs (Tools, Materials, Machines, Jobs — Machines since #601) on ONE row, each a
+  // real touch target, all on-screen: the row has to hold all four at the narrowest width.
+  expect(l.scopes).toHaveLength(4);
   expect(new Set(l.scopes.map((s) => Math.round(s.y))).size, 'scope tabs share one row').toBe(1);
   for (const s of l.scopes) {
     expect(s.w, `${s.id} width`).toBeGreaterThanOrEqual(60);

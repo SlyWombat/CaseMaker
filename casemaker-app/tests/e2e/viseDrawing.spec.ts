@@ -29,10 +29,26 @@ async function openEngrave(page: Page): Promise<void> {
   await page.waitForTimeout(700);
 }
 
-/** Set a stock field and let the worker rebuild before the next edit is judged. */
-async function setStock(page: Page, key: 'length' | 'width' | 'thickness', value: number): Promise<void> {
-  await page.getByTestId(`engrave-stock-${key}`).fill(String(value));
-  await expect(page.getByTestId(`engrave-stock-${key}`)).toHaveValue(String(value));
+/**
+ * Set the job's stock — through the wizard's Stock step, which is the only place it is typed since
+ * #686 made the panel's Stock one line with an `edit`. A re-entry opened at step 2 finishes with
+ * Done, so the wizard is closed by the time this returns and the job's stock is written.
+ */
+async function setStockBox(
+  page: Page,
+  box: { length: number; width: number; thickness: number },
+): Promise<void> {
+  await page.getByTestId('engrave-stock-edit').click();
+  await expect(page.getByTestId('start-wizard-step-stock')).toBeVisible();
+  for (const key of ['length', 'width', 'thickness'] as const) {
+    const field = page.getByTestId(`start-wizard-make-${key}`);
+    await field.fill(String(box[key]));
+    await expect(field).toHaveValue(String(box[key]));
+  }
+  // A re-entry at step 2 finishes with Done (#681's follow-up), which applies the stock and puts
+  // the wizard away; Next would walk on to Holding instead.
+  await page.getByTestId('start-wizard-done').click();
+  await expect(page.getByTestId('start-wizard')).toHaveCount(0);
 }
 
 test('the drawn vise is the real one, and the seat still moves the blank (#520)', async ({
@@ -71,9 +87,7 @@ test('the drawn vise is the real one, and the seat still moves the blank (#520)'
 
   // A 50 mm cube. The design is moved and shrunk to fit it, so the picture is about the vise and
   // not about a refused layout.
-  await setStock(page, 'length', 50);
-  await setStock(page, 'width', 50);
-  await setStock(page, 'thickness', 50);
+  await setStockBox(page, { length: 50, width: 50, thickness: 50 });
   for (const [i, size] of [10, 8, 5].entries()) {
     // The size and position live behind the row's chevron.
     await page.getByTestId(`engrave-label-expand-${i}`).click();
