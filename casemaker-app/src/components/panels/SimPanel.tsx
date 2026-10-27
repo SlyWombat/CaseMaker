@@ -261,13 +261,18 @@ export function SimPanel() {
   // from under Generate (audit B14): they are facts about this job's picture, so they sit in the
   // simulation's own panel, built by the SAME two functions the Design panel used — fed from the
   // run store rather than from whatever this panel has loaded.
+  // #726 W9 — a SURFACE program makes no 2.5D prediction to compare (the oracle's 0/0 over an
+  // empty level list is not evidence), so the coverage must not claim the predicted-regions
+  // comparison for it: that sentence contradicted the oracle row's own "No 2.5D check for a
+  // surface program" one line later. The surface check is stated by the oracle row instead.
+  const jobSurfaceRun = run.generated?.surface3d != null;
   const jobCoverage =
     run.simStatus === null
       ? []
       : coverageDisclaimer({
           outcome: run.simStatus === 'ready' ? 'swept' : run.pathOnly ? 'path-only' : 'refused',
           engine: run.simEngine ?? undefined,
-          oracleBand: run.oracle?.band,
+          oracleBand: jobSurfaceRun ? undefined : run.oracle?.band,
           fixtureLabels: viseEnvelope(job.stock, jobVise(job), job.sacrificial).boxes.map((b) => b.label),
           fixtureSource: jobVise(job).source,
           sacrificialModelled: hasSacrificial(job.sacrificial),
@@ -276,7 +281,6 @@ export function SimPanel() {
         });
   // #535 — a goal (surface) program has no 2.5D prediction to compare, so its sentence states the
   // check that WAS made and never wears "Matches prediction" over a comparison of nothing (#691).
-  const jobSurfaceRun = run.generated?.surface3d != null;
   const jobOracleText =
     run.oracle === null
       ? null
@@ -867,15 +871,28 @@ export function SimPanel() {
       {run.simStatus !== null && (
         <div data-testid="sim-job-facts" style={{ marginTop: 12 }}>
           <h3 style={SUBHEAD}>This job’s simulation</h3>
-          <div data-testid="sim-job-coverage" style={MUTED}>
-            {jobCoverage.map((sentence, i) => (
-              <div key={i}>{sentence}</div>
-            ))}
-          </div>
+          {/* #726 W9 — ONE sentence on the main path: what the sweep checked. The engineering
+              prose (the predicted-regions comparison, the two engines' band, the sampled engine,
+              the blind spots) reads in the Technical fold instead of ahead of everything else. */}
+          {jobCoverage.length > 0 && (
+            <p data-testid="sim-job-checked" style={{ ...MUTED, color: '#c8d3de' }}>
+              {jobCoverage[0]}
+            </p>
+          )}
           {jobOracleText !== null && (
             <p data-testid="sim-job-oracle" style={{ ...MUTED, color: '#c8d3de' }}>
               {jobOracleText}
             </p>
+          )}
+          {jobCoverage.length > 1 && (
+            <details data-testid="sim-job-technical">
+              <summary style={{ ...MUTED, cursor: 'pointer' }}>Technical</summary>
+              <div data-testid="sim-job-coverage" style={MUTED}>
+                {jobCoverage.slice(1).map((sentence, i) => (
+                  <div key={i}>{sentence}</div>
+                ))}
+              </div>
+            </details>
           )}
         </div>
       )}

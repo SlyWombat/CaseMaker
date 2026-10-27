@@ -704,10 +704,17 @@ describe('SimPanel', () => {
       });
       render(<SimPanel />);
 
+      // #726 W9 — the main path says ONE sentence: what was checked. The comparison prose is
+      // the Technical fold's, not the first thing above the picture.
+      const checkedLine = screen.getByTestId('sim-job-checked').textContent ?? '';
+      expect(checkedLine).toContain('Checked: the tool against the stock');
+      expect(checkedLine).toContain('the modelled fixture');
+      expect(checkedLine).not.toContain('predicted regions');
+      expect(checkedLine).not.toContain('two engines');
       const coverage = screen.getByTestId('sim-job-coverage').textContent ?? '';
-      expect(coverage).toContain('Checked: the tool against the stock');
-      expect(coverage).toContain('the modelled fixture');
       expect(coverage).toContain('Not checked: the spindle body, head and gantry');
+      expect(coverage).toContain("Checked against the CAM's predicted regions");
+      expect(coverage).toContain("the two engines' own resolution");
 
       const oracle = screen.getByTestId('sim-job-oracle').textContent ?? '';
       expect(oracle).toContain('Matches prediction — worst under-cut 0.25 mm² exceeds the 0.001 mm² floor');
@@ -728,10 +735,35 @@ describe('SimPanel', () => {
       });
       render(<SimPanel />);
 
-      const coverage = screen.getByTestId('sim-job-coverage').textContent ?? '';
+      const coverage = screen.getByTestId('sim-job-technical').textContent ?? '';
       expect(coverage).toContain('the shank of “⌀ 3.175 mm flat end · 12 mm flute” above the cutter');
       // The vendor label is data, not a name (#691's same rule as the select).
       expect(coverage).not.toContain('3.175*12mm');
+    });
+
+    it('#726 W9 — a mesh (surface) run claims no 2.5D comparison, and its prose is Technical', () => {
+      act(() => {
+        useEngraveRunStore.setState({
+          ...JOB_RUN,
+          generated: { surface3d: {} } as never,
+          oracle: { ok: true, band: 0.1, levels: [], worst: { underCut: 0, overCut: 0 } },
+          simGridPitchMm: 0.1,
+        });
+      });
+      render(<SimPanel />);
+
+      // The main path is one checked sentence plus the surface check's own honest line.
+      expect(screen.getByTestId('sim-job-checked').textContent).toContain('Checked: the tool against the stock');
+      expect(screen.getByTestId('sim-job-oracle').textContent).toContain(
+        'No 2.5D check for a surface program — checked on the 0.1 mm dexel grid',
+      );
+      // The contradiction W9 found: the coverage claimed a predicted-regions comparison the
+      // surface program never made, one line above the oracle's "No 2.5D check". Neither that
+      // sentence nor the two-engine band belongs to a run with no prediction.
+      const technical = screen.getByTestId('sim-job-technical').textContent ?? '';
+      expect(technical).not.toContain('predicted regions');
+      expect(technical).not.toContain('two engines');
+      expect(technical).toContain('Not checked:');
     });
   });
 
