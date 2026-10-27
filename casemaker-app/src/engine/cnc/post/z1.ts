@@ -225,11 +225,13 @@ function postRotary(
     'G17 G21 G54 G90',
     'M5',
     `T${ir.toolNumber}M6`,
-    // A FED move to a known height BEFORE the spindle starts (and before any XY travel), as the
-    // vendor does: after the manual tool change the head's height is unknown, and the feed
-    // establishes it without a rapid. The spindle comes on AFTER this move — the verifier's
-    // `spindle-at-unknown-z` rule (#396) is right that `M3` before any Z is established spins the
-    // cutter up wherever the last job left it, and a feed at the safe height cuts nothing.
+    // A FED move to a known height BEFORE the spindle starts (and before any XY travel). This is
+    // the ONE place our rotary preamble differs from the vendor's, deliberately: Makera's own
+    // `Rotation/NefertitiRough.nc` starts the spindle first (`M5 / T1M6 / M3 S12000 / G01Z30.00
+    // F1500 / G01Y0.00Z30.00`), while we feed Z first — the verifier's `spindle-at-unknown-z`
+    // rule (#396) is right that `M3` before any Z is established spins the cutter up wherever the
+    // last job left it, and a feed at the safe height cuts nothing. The flat post already orders
+    // it this way; the golden test pins the relocation as the only difference, by name.
     `G01 Z${safeWord} F${feed(preambleFeed)}`,
     // Y is stated here ONCE and is never a word again in this file (see `emit`).
     `G01 Y0 Z${safeWord}`,

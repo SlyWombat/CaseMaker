@@ -145,17 +145,40 @@ describe.skipIf(!existsSync(VENDOR))('the rotary dialect against the vendor stru
     const ours = shapeOf(posted.text);
     const vendor = shapeOf(readFileSync(VENDOR, 'utf8'));
 
-    // The opening: `%`, the plane/unit/work-offset line, spindle off, the tool change, the
-    // spindle, a fed line to the safe height, and ONE stated Y0 line. The vendor's own order.
-    expect(ours.preamble).toEqual(vendor.preamble);
+    // The opening: `%`, the plane/unit/work-offset line, spindle off, the tool change, a fed line
+    // to the safe height, ONE stated Y0 line — and the spindle.
+    //
+    // THE ONE INTENDED DIFFERENCE, by name: the vendor starts the spindle BEFORE the fed move
+    // (`M5 / T1M6 / M3 S12000 / G01Z30.00 F1500 / G01Y0.00Z30.00`); we feed Z first, because
+    // `M3` before any Z is established spins the cutter up wherever the last job left it
+    // (#396's `spindle-at-unknown-z`, the flat post's order too). The relocation below is
+    // asserted as exactly that, so ANY other drift in the preamble still fails.
+    const spindleAt = (lines: readonly (readonly string[])[]): number =>
+      lines.findIndex((l) => l[0] === 'M3');
+    const fedZAt = (lines: readonly (readonly string[])[]): number =>
+      lines.findIndex((l) => l[0] === 'G1' && l[1] === 'Z');
+    expect(spindleAt(vendor.preamble), 'the vendor starts the spindle first').toBeLessThan(
+      fedZAt(vendor.preamble),
+    );
+    expect(spindleAt(ours.preamble), 'our post starts the spindle after the fed Z move').toBeGreaterThan(
+      fedZAt(ours.preamble),
+    );
+    // …and that relocation is the ONLY difference: moving the vendor's spindle line to the end
+    // makes the two preambles equal, line for line.
+    const vendorSpindle = vendor.preamble[spindleAt(vendor.preamble)]!;
+    const vendorReordered = [
+      ...vendor.preamble.filter((_, i) => i !== spindleAt(vendor.preamble)),
+      vendorSpindle,
+    ];
+    expect(ours.preamble).toEqual(vendorReordered);
     expect(ours.preamble).toEqual([
       [],
       ['G17', 'G21', 'G54', 'G90'],
       ['M5'],
       ['T1', 'M6'],
-      ['M3', 'S'],
       ['G1', 'Z', 'F'],
       ['G1', 'Y', 'Z'],
+      ['M3', 'S'],
     ]);
 
     // The ending, the firmware's unwind included: `G92.4A0S0` EXACTLY (no spaces, S drops whole
