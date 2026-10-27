@@ -665,12 +665,13 @@ describe('the nearest-plastic mapping (#455)', () => {
     expect(standing.note).toContain('not PLA');
   });
 
-  it('does not refuse a cutter the catalogue has never heard of — that rests on the operator', () => {
+  it('does not refuse a cutter the catalogue has never heard of — the pick is the operator’s', () => {
     const absent = catalogueCoverageFor([ABS_ROW], 'pla', flatEndMill(1.0, { id: '999999999999' }));
     expect(absent).toEqual({ kind: 'unlisted', why: 'cutter-absent' });
     const standing = catalogueStandingFor(absent, 'pla', 'anonymous cutter');
     expect(standing.recommend).toBe(true);
-    expect(standing.note).toContain('rests on the operator');
+    // #726 W22 — the note says what the absence means for the operator, in those words.
+    expect(standing.note).toBe("Makera's catalogue has no rows for this cutter, so this pick is yours.");
 
     // With no catalogue synced there is nothing to say, so an offline job reads exactly as before.
     const none = catalogueCoverageFor([], 'pla', makeraCutter());

@@ -221,16 +221,18 @@ function bySmallest(a: ToolCandidate, b: ToolCandidate): number {
 function qualifyingReason(pick: ToolCandidate): string {
   // #221 — a V-carve qualifies on its colour-plane model, not on a glyph-opening measurement.
   if (pick.vCarve) {
+    // #726 W22 — the unrecorded reach is its own sentence, in plain words, rather than the
+    // "(reach not recorded)" parenthetical that read as an engineering footnote.
     return pick.reachKnown
       ? `${V_BIT_CARVE_SENTENCE}.`
-      : `${V_BIT_CARVE_SENTENCE} (reach not recorded).`;
+      : `${V_BIT_CARVE_SENTENCE}. Its reach is not recorded, so it was not checked against the holder.`;
   }
   // An unknown reach is not a refusal — the cutter is still recommended — but it is stated,
   // because a length nobody recorded cannot be checked against the holder gate.
   // "every item" (#214), not "every label": a job may contain only shapes.
   return pick.reachKnown
     ? 'Largest cutter that keeps every item intact.'
-    : 'Largest cutter that keeps every item intact (reach not recorded).';
+    : 'Largest cutter that keeps every item intact. Its reach is not recorded, so it was not checked against the holder.';
 }
 
 /**

@@ -90,23 +90,23 @@ describe('#646 the tool display name', () => {
   it('#651/#687 names a shank-diameter kind by its TIP, never by the shank or the label', () => {
     expect(toolDisplayName(tool({ shape: 'drill', tipDiameter: 1, diameter: 3.175 }))).toBe('⌀ 1 mm drill');
     expect(toolDisplayName(tool({ shape: 'drill', tipDiameter: null, diameter: 3.175, name: '1mm Drill(Metal)' }))).toBe(
-      'drill — cutting diameter unknown',
+      'drill · cutting diameter not stated',
     );
     expect(
       toolDisplayName(
         tool({ shape: 'engraving', tipDiameter: null, diameter: 3.175, angle: 30, name: '4*0.5mm*30º Engraving(Metal)' }),
       ),
-    ).toBe('engraver — cutting diameter unknown');
+    ).toBe('engraver · cutting diameter not stated');
     expect(toolDisplayName(tool({ shape: 'chamfer', tipDiameter: null, diameter: 6, name: '', typeText: 'Chamfer' }))).toBe(
-      'chamfer — cutting diameter unknown',
+      'chamfer · cutting diameter not stated',
     );
     // No tip and no label at all: the same honest sentence, never a guessed "unknown drill".
     expect(toolDisplayName(tool({ shape: 'drill', tipDiameter: null, diameter: 3.175, name: '', typeText: '' }))).toBe(
-      'drill — cutting diameter unknown',
+      'drill · cutting diameter not stated',
     );
     // A zero diameter is not a size to print.
     expect(toolDisplayName(tool({ shape: 'chamfer', tipDiameter: 0, angle: 90 }))).toBe(
-      'chamfer — cutting diameter unknown',
+      'chamfer · cutting diameter not stated',
     );
   });
 

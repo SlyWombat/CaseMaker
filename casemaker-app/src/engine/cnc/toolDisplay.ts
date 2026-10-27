@@ -80,8 +80,10 @@ export interface ToolDisplay {
    * `⌀ 3.175 mm flat end · 12 mm flute` — cutting size, cone angle (V and chamfer), kind, nose
    * radius (tapered ball), then the flute length when the record states one.
    *
-   * With no honest cutting size the name is `${kind} — cutting diameter unknown`; an unclassifiable
-   * row is `unknown cutter`. Neither falls back to the vendor's string.
+   * With no honest cutting size the name keeps the one form's field style — `ball · cutting
+   * diameter not stated`; an unclassifiable row is `unknown cutter`. Neither falls back to the
+   * vendor's string, and neither invents a size (#726 W22: "ball — cutting diameter unknown" read
+   * as a fragment beside the ⌀ names it sits among).
    */
   name: string;
   /** The vendor's line names Makera's "for Metal" range: draw a `metal` tag beside the name. */
@@ -106,8 +108,9 @@ export function toolDisplay(tool: Tool): ToolDisplay {
   const size = statedCuttingSize(tool);
   if (size === null) {
     // A shank-diameter kind with no tip, or a row whose size never parsed. Say the kind and that
-    // the size is missing; the vendor label stays in the hover.
-    return { name: `${kind} — cutting diameter unknown`, metal };
+    // the size is missing; the vendor label stays in the hover. #726 W22 — the same ` · ` field
+    // separator the sized form uses, so every option in a picker reads as one kind of name.
+    return { name: `${kind} · cutting diameter not stated`, metal };
   }
   // `tool.angle` is the INCLUDED angle (the field the schema describes); the half-angle field is
   // `halfAngle`. Operators know the included angle, so that is what the name prints. #658 — a

@@ -3382,7 +3382,7 @@ describe('EngravePanel — the cutter list (#687)', () => {
     render(<EngravePanel />);
     const select = screen.getByTestId('engrave-tool') as HTMLSelectElement;
     const texts = Array.from(select.options).map((o) => o.textContent ?? '');
-    expect(texts).toContain('engraver — cutting diameter unknown · metal');
+    expect(texts).toContain('engraver · cutting diameter not stated · metal');
     expect(texts.some((t) => t.includes('4*0.5mm*30º'))).toBe(false);
     expect(texts.some((t) => t.includes('engraver ('))).toBe(false);
   });

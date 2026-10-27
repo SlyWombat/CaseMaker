@@ -804,16 +804,14 @@ export function catalogueStandingFor(
       if (coverage.why === 'no-vendor-id') {
         return {
           recommend: true,
-          note:
-            `No catalogue row can name this cutter — it carries no Makera cutter id — so its ` +
-            `recommendation rests on the operator.`,
+          // #726 W22 — plain words: "carries no Makera cutter id" described the record, not the
+          // decision the operator is making.
+          note: `${CATALOGUE_LABEL} does not list this cutter, so this pick is yours.`,
         };
       }
       return {
         recommend: true,
-        note:
-          `${CATALOGUE_LABEL} has no rows for this cutter, so its recommendation rests on the ` +
-          `operator.`,
+        note: `${CATALOGUE_LABEL} has no rows for this cutter, so this pick is yours.`,
       };
   }
 }

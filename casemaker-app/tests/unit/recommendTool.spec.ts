@@ -203,7 +203,9 @@ describe('recommendTool (#211)', () => {
     expect(rec.key).toBe('unknown-reach');
     expect(rec.compromise).toBe(false);
     expect(candidate(rec, 'unknown-reach').reachKnown).toBe(false);
-    expect(rec.reason).toContain('reach not recorded');
+    // #726 W22 — the caveat is its own plain sentence, not a parenthetical.
+    expect(rec.reason).toContain('Its reach is not recorded, so it was not checked against the holder.');
+    expect(rec.reason).not.toContain('(reach not recorded)');
   });
 
   it('is deterministic on ties: known reach wins, then the lower key', () => {
@@ -466,9 +468,10 @@ describe('recommendTool and the catalogue’s material list (#455)', () => {
 
     expect(rec.key).toBe('user:mine');
     expect(candidate(rec, 'user:mine').excluded).toBeUndefined();
-    expect(rec.catalogueNote).toContain('rests on the operator');
-    // No catalogue row names it because it carries no Makera id, which is a different sentence.
-    expect(rec.catalogueNote).toContain('carries no Makera cutter id');
+    // #726 W22 — plain words. "It carries no Makera cutter id" described the record, not the
+    // decision; the operator is told what it means for them.
+    expect(rec.catalogueNote).toBe("Makera's catalogue does not list this cutter, so this pick is yours.");
+    expect(rec.catalogueNote).not.toContain('cutter id');
   });
 
   it('warns by name when the job names a cutter the catalogue does not recommend', () => {
