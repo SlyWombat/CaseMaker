@@ -63,7 +63,9 @@ describe('#280 — machineStore', () => {
     expect(useMachineStore.getState().reason).toBe('no raw socket here');
 
     useMachineStore.getState().setProbeResult({ kind: 'error', detail: 'udp: bind failed' });
-    expect(useMachineStore.getState().reason).toBe('udp: bind failed');
+    // #726 W24 — the store writes the sentence once, so every reader (the start wizard, the
+    // Machines page) prints the same words.
+    expect(useMachineStore.getState().reason).toBe('The search failed: udp: bind failed');
   });
 
   it('forget drops the machine but keeps the record of when we last looked', () => {

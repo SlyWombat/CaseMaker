@@ -123,12 +123,15 @@ test("the saved .nc, reloaded as a stranger's file, removes the same volume", as
   expect(path).not.toBeNull();
   const nc = readFileSync(path!, 'utf8');
 
-  // #506 — Generate just loaded that program into the shared `simStore`. Simulate .nc reads its file
-  // row from `simSetupStore`, where nothing was opened, so it must show its empty state — not the
-  // engrave run's finished Result and Diagnostics underneath "No file open".
+  // #726 W8 / #506 — Generate just loaded that program into the shared `simStore`, so the panel
+  // PRESENTS THE RUN: the job's name, its stock and cutter, and its own diagnostics — not an empty
+  // open-a-file form asking for a stock and a cutter the job already has. The run's finished Result
+  // still belongs to the engrave run and is not shown as this panel's own.
   await page.getByTestId('sidebar-button-cnc-sim').click();
   await expect(page.getByTestId('sim-panel')).toBeVisible();
-  await expect(page.getByTestId('sim-file-name')).toHaveText('No file open');
+  await expect(page.getByTestId('sim-job-run')).toBeVisible();
+  await expect(page.getByTestId('sim-job-run-line')).toContainText('the job’s own program');
+  await expect(page.getByTestId('sim-stock-length')).toHaveCount(0);
   await expect(page.getByTestId('sim-result')).toHaveCount(0);
   await expect(page.getByTestId('sim-diagnostics')).toHaveCount(0);
   await page.screenshot({ path: testInfo.outputPath('simulate-after-engrave.png') });
