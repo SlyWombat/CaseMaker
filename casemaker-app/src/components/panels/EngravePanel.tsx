@@ -3177,7 +3177,7 @@ export function EngravePanel(): JSX.Element {
 
       {/* 6 — cutting parameters */}
       <h3 style={SUBHEAD}>
-        Cutting
+        Cutting{' '}
         {feeds?.ok && (
           <span
             style={{

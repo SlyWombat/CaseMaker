@@ -298,7 +298,11 @@ describe('#280/#682 — step 1, the machine check', () => {
 
     await waitForState('error');
     expect(screen.getByTestId('start-wizard-machine-state').textContent).toContain('Not answering');
-    expect(screen.getByTestId('start-wizard-machine-reason').textContent).toContain('udp: bind failed');
+    const reason = screen.getByTestId('start-wizard-machine-reason').textContent ?? '';
+    expect(reason).toContain('udp: bind failed');
+    // #726 W24 — the sentence is printed ONCE ("The search failed: the search failed: …" was the
+    // probe's own detail plus the screen's prefix).
+    expect(reason.match(/search failed/gi)).toHaveLength(1);
   });
 
   it('connects to a typed address under the fold, and admits it knows no model', async () => {

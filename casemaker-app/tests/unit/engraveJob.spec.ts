@@ -518,10 +518,11 @@ describe('validateJob (#200)', () => {
     expect(validateJob(empty).some((f) => f.code === 'tool-missing')).toBe(false);
   });
 
-  it('errors when no enabled label has text', () => {
+  it('errors when no enabled label has text, in the operation’s words (#726 W17)', () => {
     const job = defaultEngraveJob();
     for (const l of job.labels) l.text = '   ';
-    expect(validateJob(job).some((f) => f.code === 'no-items')).toBe(true);
+    const f = validateJob(job).find((x) => x.code === 'no-items');
+    expect(f?.message).toBe('Nothing to cut yet — add an operation, or turn one back on.');
   });
 
   it('refuses a cut whose swept extent comes inside the job’s jaw clearance, naming item, jaw and distance (#488)', () => {

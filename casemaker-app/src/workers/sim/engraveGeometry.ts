@@ -360,7 +360,7 @@ export function engravabilityFindings(
         severity: 'warning',
         code: 'item-detail-lost',
         labelId: row.labelId,
-        message: `Label "${label.text}" loses ${lostPct.toFixed(0)}% of its area to ${cutter}; ${hint}.`,
+        message: `Engrave text "${label.text}" loses ${lostPct.toFixed(0)}% of its area to ${cutter}; ${hint}.`,
       });
     } else if (shape && row.ratio > 0 && row.ratio < bar) {
       // No cap height to offer: say so plainly and point at the two real choices (#214).
@@ -731,7 +731,7 @@ function hasContent(item: EngraveAnyItem): boolean {
 /** Why an item has no opened region at all. A circle smaller than the cutter reads as a hole. */
 function emptyMessage(item: EngraveAnyItem, cutter: string): string {
   if (!isShapeItem(item)) {
-    return `Label "${item.text}" has nothing this cutter can reach: every stroke is thinner than ${cutter}.`;
+    return `Engrave text "${item.text}" has nothing this cutter can reach: every stroke is thinner than ${cutter}.`;
   }
   if (item.kind === 'circle') {
     return `A ${item.diameter} mm hole cannot be cut with ${cutter}: it is smaller than the cutter.`;

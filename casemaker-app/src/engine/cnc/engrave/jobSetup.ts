@@ -396,9 +396,10 @@ function throughBoardFinding(labelId: string, who: string, job: EngraveJob, bed?
 }
 
 /**
- * A human name for an item, for finding messages: `Label "CASE"`, `Circle ⌀6`, `Border …`. */
+ * A human name for an item, for finding messages, in the OPERATION's words (#726 W17):
+ * `Engrave text "CASE"`, `Circle ⌀6`, `Border …`. */
 export function itemLabel(item: EngraveAnyItem): string {
-  if (!('kind' in item)) return `Label "${item.text}"`;
+  if (!('kind' in item)) return `Engrave text "${item.text}"`;
   const name = item.name ? ` "${item.name}"` : '';
   switch (item.kind) {
     case 'rect':
@@ -2158,7 +2159,7 @@ export function validateJob(
       severity: 'error',
       code: 'no-items',
       message:
-        'The job has no enabled label with text, shape, trace, drilled hole, thread, cuttable 3D primitive or cut-out.',
+        'Nothing to cut yet — add an operation, or turn one back on.',
     });
   }
 

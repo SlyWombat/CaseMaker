@@ -298,7 +298,9 @@ export async function probeMachine(opts: MachineProbeOptions = {}): Promise<Mach
     // location: `readDefault` answers the labelled 3000 ms fallback.
     found = await client.discover({ windowMs: opts.windowMs ?? machineTiming(liveShopDefaults()).discoveryWindowMs });
   } catch (e) {
-    return { kind: 'error', detail: `the search failed: ${reasonOf(e)}` };
+    // #726 W24 — the detail is the REASON; the screen supplies the sentence ("The search failed:"
+    // was printed twice when both carried it).
+    return { kind: 'error', detail: reasonOf(e) };
   }
 
   const first = found[0];
