@@ -3387,9 +3387,14 @@ export function buildRunSheet(
   // The bench issue any step that has NOT been walked at the machine names (see the module note):
   // today that is the held stepped material scan and the rest pass's routine.
   const BENCH_ISSUE = '#443';
+  // #717 — Makera's low-profile-vise page, in its own order: home, tool out, power off at the
+  // machine's switch, the board off, the pins, the jaw off for the six screws, the jaw back on
+  // with its locating key seated. The fixed jaw is on the left.
   const mountSteps: RunSheetStep[] = [
-    { text: 'Remove the MDF wasteboard. Seat the vise on its two locating pins; fasten with six M5×20 screws.' },
-    { text: 'The fixed jaw is on the left.' },
+    { text: 'Home the machine, remove any tool, then switch the machine off at its switch.' },
+    { text: 'Remove the MDF wasteboard. Insert the two 4 × 11 mm locating pins.' },
+    { text: 'With the left fixed jaw off, seat the vise on the pins; fasten it with six M5 × 20 screws.' },
+    { text: 'Refit the left fixed jaw with its locating key seated. Switch the machine on.' },
   ];
 
   // ---- 3 · Load the blank --------------------------------------------------------------------

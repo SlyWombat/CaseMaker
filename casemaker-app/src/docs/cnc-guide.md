@@ -129,7 +129,8 @@ contact, conductive or not — and on 2026-10-08 it touched the printed PLA blan
 with a 0.001 mm spread between slow touches (`/Fabrication.md` decision 8, revised that day).
 So the Z touch-off and the surface levelling both use the probe that came in the box, with
 nothing to unplug. The **Makera 3D Probe** is held in reserve; the 3D Probe Rod cannot touch
-PLA at all.
+PLA at all. On a taped or bed-held job the blank sits on MDF and is not connected to the
+aluminium table — the 3D Probe Rod cannot find it unless a screw or pin bridges the two.
 
 **The low-profile vise.** The **fixed jaw is on the left**. It locates the part in X and in
 rotation, and leaves it free to slide in Y. It mounts with the wasteboard removed. Its

@@ -137,10 +137,16 @@ exports[`runSheet (#207) > snapshots the whole RunSheet for a job with a depth b
       "id": "mount",
       "steps": [
         {
-          "text": "Remove the MDF wasteboard. Seat the vise on its two locating pins; fasten with six M5×20 screws.",
+          "text": "Home the machine, remove any tool, then switch the machine off at its switch.",
         },
         {
-          "text": "The fixed jaw is on the left.",
+          "text": "Remove the MDF wasteboard. Insert the two 4 × 11 mm locating pins.",
+        },
+        {
+          "text": "With the left fixed jaw off, seat the vise on the pins; fasten it with six M5 × 20 screws.",
+        },
+        {
+          "text": "Refit the left fixed jaw with its locating key seated. Switch the machine on.",
         },
       ],
       "title": "2 · Mount the vise",
@@ -449,10 +455,16 @@ exports[`runSheet (#207) > snapshots the whole RunSheet for the default job 1`] 
       "id": "mount",
       "steps": [
         {
-          "text": "Remove the MDF wasteboard. Seat the vise on its two locating pins; fasten with six M5×20 screws.",
+          "text": "Home the machine, remove any tool, then switch the machine off at its switch.",
         },
         {
-          "text": "The fixed jaw is on the left.",
+          "text": "Remove the MDF wasteboard. Insert the two 4 × 11 mm locating pins.",
+        },
+        {
+          "text": "With the left fixed jaw off, seat the vise on the pins; fasten it with six M5 × 20 screws.",
+        },
+        {
+          "text": "Refit the left fixed jaw with its locating key seated. Switch the machine on.",
         },
       ],
       "title": "2 · Mount the vise",

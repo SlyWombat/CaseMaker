@@ -54,7 +54,9 @@ G-code semantics are LinuxCNC-flavoured and documented.
   hobby work, with real compromises in rigidity and precision. **Mounting and shipped
   config (`/Rotary.md` §1.2, §1.4):** mounts on the two 4 × 11 mm locating pins and three
   M5×10 screws **after removing the MDF wasteboard** — so rotary and tape-down are
-  mutually exclusive setups, sharing the vise's pin datum; three-jaw chuck with **reverse
+  mutually exclusive setups *in practice*: the module sits over the middle of the table,
+  where a taped blank would go (Makera states no exclusivity for tape itself, #717); it
+  shares the vise's pin datum; three-jaw chuck with **reverse
   jaws fitted by default**; tailstock with an adjustment knob. `configZ1.default` gives
   `88.889 steps/°` (32 000 steps/turn), `3600 °/min` (60 °/s, 10 rpm), `360 °/s²` and
   `home_to_min` with a real endstop — **read from the repository, not measured on the
@@ -1739,7 +1741,9 @@ options exist, and the comparison is not what §7.6 and #175 assumed.
 >   the other way.
 > - Mounting is **two 4 × 11 mm locating pins and six M5×20 screws, and it requires removing
 >   the MDF wasteboard** — so the vise and tape-down are mutually exclusive setups, not two
->   options you switch between freely. The fixed jaw's offset from Anchor 1 is also
+>   options you switch between freely: the vise sits over the middle of the table, where a
+>   taped blank would go (no Makera text makes tape need the board absent, #717). The fixed
+>   jaw's offset from Anchor 1 is also
 >   unpublished, so "anchor-relative origin" does not locate the part without a touch.
 >
 > **This needs a caliper and one photograph, not more argument** (#191): capacity, jaw

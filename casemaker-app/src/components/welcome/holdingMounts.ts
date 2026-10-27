@@ -202,7 +202,8 @@ export interface MachineNow {
   mount: MachineMountKind;
   /** The line's parts: the mount, the surface, the boards, the tape. */
   parts: string[];
-  /** The mockup's "Vise on the pins · wasteboard under · 2 mm MDF boards ×4 · tape". */
+  /** The mockup's line: "Vise on the pins · bare bed · 2 mm MDF boards ×4 · tape" (Makera's vise
+   * page removes the MDF board before the vise goes on — #717). */
   text: string;
 }
 
@@ -469,8 +470,8 @@ export function underFieldWords(profile: BedProfile | null): string | null {
 
 /**
  * The tape a bed job starts from: the house roll the profile states (`consumables.tape`), else
- * Makera's 20 mm at the typed 0.1 mm. A job already taped keeps its own hold — reloading the step
- * shows what the job stores, not a fresh default.
+ * Makera's 20 mm at its store's ~0.2 mm. A job already taped keeps its own hold — reloading the
+ * step shows what the job stores, not a fresh default.
  */
 export function bedTapeHold(profile: BedProfile | null, keep: TapeHold | null): TapeHold {
   if (keep !== null) return { ...keep, where: keep.where === null ? null : { ...keep.where } };

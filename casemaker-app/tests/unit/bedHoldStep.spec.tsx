@@ -55,7 +55,7 @@ vi.mock('@/platform/capabilities', async (orig) => {
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 const BOARDS_AND_TAPE: NonNullable<BedProfile['consumables']> = {
-  tape: { widthMm: 20, thicknessMm: 0.1, provenance: 'typed' },
+  tape: { widthMm: 20, thicknessMm: 0.2, provenance: 'typed' },
   boards: [{ material: 'MDF', size: [100, 100, 2], count: 4 }],
 };
 
@@ -164,7 +164,7 @@ describe('#715 with nothing on the pins, the bed options are real choices', () =
     const held = job().workholding;
     expect(held.kind).toBe('tape');
     if (held.kind === 'tape') {
-      expect(held.tape).toMatchObject({ width: 20, thickness: 0.1, inset: 2, where: null, squareTo: 'front' });
+      expect(held.tape).toMatchObject({ width: 20, thickness: 0.2, inset: 2, where: null, squareTo: 'front' });
     }
     expect(radio('bed-tape').checked).toBe(true);
     expect(rowText('bed-tape')).toContain('two strips of the 20 mm tape, 2 mm in from every edge');

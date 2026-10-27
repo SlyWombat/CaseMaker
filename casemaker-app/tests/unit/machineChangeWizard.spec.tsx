@@ -18,6 +18,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import { MachineChangeWizard } from '@/components/machine-change';
 import { openMachineChange, resetMachineChange } from '@/store/machineChangeStore';
 import { resetLocationStore, useLocationStore } from '@/store/locationStore';
+import { planMountChange } from '@/platform/machineChange';
 import { MachineRecordSchema, type FixtureRecord, type LocationView, type MachineRecord } from '@/platform/locationClient';
 import {
   setHouseClientLoader,
@@ -259,7 +260,11 @@ describe('#693 the wizard with the machine offline', () => {
     await waitFor(() => expect(within(homeLine).getByText(/not answering at 192\.168\.10\.43:2222/)).toBeTruthy());
     expect(within(homeLine).getByText(/no reply within 6000 ms/)).toBeTruthy();
     expect(screen.queryByTestId('machine-change-home-done')).toBeNull();
-    expect((screen.getByTestId('machine-change-light') as HTMLButtonElement).disabled).toBe(true);
+    // #717 — the vise and the rotary fit with the machine off: step 2 asks for its own switch (the
+    // operator's tick, never an app command), and the work light line moves to after the power
+    // returns (step 4), so there is no light button here.
+    expect((screen.getByTestId('machine-change-powered-off') as HTMLButtonElement).disabled).toBe(false);
+    expect(screen.queryByTestId('machine-change-light')).toBeNull();
     expect(screen.getByTestId('machine-change-step-3').getAttribute('data-state')).toBe('later');
     // The manual line is the operator's own eyes, and it can still be answered.
     expect((screen.getByTestId('machine-change-checked') as HTMLButtonElement).disabled).toBe(false);
@@ -327,16 +332,19 @@ describe('#693 walking the change', () => {
     // 2 · Make it safe — the machine is already Idle at its homed rest, so Home is its answer.
     await screen.findByTestId('machine-change-home-line');
     await waitFor(() => expect(screen.getByTestId('machine-change-home-line').getAttribute('data-done')).toBe('true'));
-    fireEvent.click(screen.getByTestId('machine-change-light'));
-    await waitFor(() => expect(screen.getByTestId('machine-change-light-line').getAttribute('data-done')).toBe('true'));
+    // #717 — Makera's power order: the fit is done with the machine off at its own switch.
+    fireEvent.click(screen.getByTestId('machine-change-powered-off'));
+    await waitFor(() => expect(screen.getByTestId('machine-change-power-line').getAttribute('data-done')).toBe('true'));
     fireEvent.click(screen.getByTestId('machine-change-checked'));
 
     // 3 · Take off the vise — and, because the rotary follows it, the MDF wasteboard (#706).
     await screen.findByTestId('machine-change-take');
     const takeText = screen.getByTestId('machine-change-take').textContent ?? '';
+    expect(takeText).toContain('the left fixed jaw off');
+    expect(takeText).toContain('the six M5 × 20 screws');
     expect(takeText).toContain('the wasteboard’s screws');
     expect(takeText).toContain('the wasteboard on its shelf');
-    for (let i = 0; i < 5; i++) clickCheck(`machine-change-take-${i}`);
+    for (let i = 0; i < 6; i++) clickCheck(`machine-change-take-${i}`);
     fireEvent.click(screen.getByTestId('machine-change-take-done'));
 
     // 4 · Fit the rotary in Makera's order: power off, the pins, the screws, the cable, power on,
@@ -345,7 +353,7 @@ describe('#693 walking the change', () => {
     const fitText = screen.getByTestId('machine-change-fit').textContent ?? '';
     let at = -1;
     for (const word of [
-      'switch the machine off at its switch',
+      'the 4th-axis cable is never plugged in live',
       'onto the two pins',
       'the three M5 × 10 screws',
       'the 4th-axis cable, rear left',
@@ -360,6 +368,11 @@ describe('#693 walking the change', () => {
     for (let i = 0; i < 7; i++) clickCheck(`machine-change-fit-${i}`);
     expect((screen.getByTestId('machine-change-use-shipped') as HTMLButtonElement).disabled).toBe(true);
     fireEvent.click(screen.getByTestId('machine-change-measure-now'));
+    // #717 — the power is back; the light comes on now, before any hand goes back in.
+    fireEvent.click(screen.getByTestId('machine-change-light-again'));
+    await waitFor(() =>
+      expect(screen.getByTestId('machine-change-light-after-power').getAttribute('data-done')).toBe('true'),
+    );
     fireEvent.click(screen.getByTestId('machine-change-fit-done'));
     // #706 — the rotary fit's Done asks the machine (the same status read step 2 uses). It answers
     // Idle here; the step collapsing into its summary and step 5 opening IS that answer.
@@ -461,22 +474,27 @@ describe('#693 walking the change', () => {
     openMachineChange({ target: 'rotary' });
     render(<MachineChangeWizard />);
 
-    // 2 · safe: the initial check found it idle and homed; the light and the look are the operator's.
+    // 2 · safe: the initial check found it idle and homed; the switch and the look are the operator's.
     await screen.findByTestId('machine-change-home-line');
     await waitFor(() => expect(screen.getByTestId('machine-change-home-line').getAttribute('data-done')).toBe('true'));
-    fireEvent.click(screen.getByTestId('machine-change-light'));
-    await waitFor(() => expect(screen.getByTestId('machine-change-light-line').getAttribute('data-done')).toBe('true'));
+    fireEvent.click(screen.getByTestId('machine-change-powered-off'));
+    await waitFor(() => expect(screen.getByTestId('machine-change-power-line').getAttribute('data-done')).toBe('true'));
     fireEvent.click(screen.getByTestId('machine-change-checked'));
 
-    // 3 · take the vise and the board off.
+    // 3 · take the vise and the board off: the jaw, six screws, off the pins, the shelf, the board.
     await screen.findByTestId('machine-change-take');
-    for (let i = 0; i < 5; i++) clickCheck(`machine-change-take-${i}`);
+    for (let i = 0; i < 6; i++) clickCheck(`machine-change-take-${i}`);
     fireEvent.click(screen.getByTestId('machine-change-take-done'));
 
     // 4 · the fit — with the machine switched off for the cable, as Makera's guide requires.
     await screen.findByTestId('machine-change-fit');
     for (let i = 0; i < 7; i++) clickCheck(`machine-change-fit-${i}`);
     fireEvent.click(screen.getByTestId('machine-change-measure-now'));
+    // #717 — the light comes on once the power is back, before Done.
+    fireEvent.click(screen.getByTestId('machine-change-light-again'));
+    await waitFor(() =>
+      expect(screen.getByTestId('machine-change-light-after-power').getAttribute('data-done')).toBe('true'),
+    );
 
     // Done asks the machine through the same status read step 2 uses. It is still off: no answer,
     // no advance, and the sentence says what to do at the machine's own switch.
@@ -516,8 +534,8 @@ describe('#693 walking the change', () => {
 
     await screen.findByTestId('machine-change-home-line');
     await waitFor(() => expect(screen.getByTestId('machine-change-home-line').getAttribute('data-done')).toBe('true'));
-    fireEvent.click(screen.getByTestId('machine-change-light'));
-    await waitFor(() => expect(screen.getByTestId('machine-change-light-line').getAttribute('data-done')).toBe('true'));
+    fireEvent.click(screen.getByTestId('machine-change-powered-off'));
+    await waitFor(() => expect(screen.getByTestId('machine-change-power-line').getAttribute('data-done')).toBe('true'));
     fireEvent.click(screen.getByTestId('machine-change-checked'));
 
     // Nothing is on the pins, but the bed has a board: step 3 is NOT skipped — it is the board's
@@ -525,6 +543,71 @@ describe('#693 walking the change', () => {
     const take = await screen.findByTestId('machine-change-take');
     expect(take.textContent).toContain('the wasteboard’s screws');
     expect(screen.getByTestId('machine-change-step-3').getAttribute('data-state')).toBe('current');
+  });
+
+  it('#717 — clearing the pins for a bed job puts the wasteboard back on, after the fixture comes off', async () => {
+    // A machine already swapped to the rotary: its active profile is the bare bed, and the
+    // original wasteboard is still saved on the earlier profile, ready to come back.
+    const toRotary = planMountChange({
+      machine: machine(),
+      to: 'rotary',
+      datum: null,
+      profileId: 'bp-rotary',
+      at: '2026-10-26T09:21:00.000Z',
+      accessories: [VISE, ROTARY],
+    });
+    if ('error' in toRotary) throw new Error(toRotary.error);
+    const state = seedLocation(toRotary.machine);
+    fakeMachine({ status: () => sent('?', IDLE) });
+    openMachineChange({ target: 'bed' });
+    render(<MachineChangeWizard />);
+
+    await screen.findByTestId('machine-change-what');
+    expect(screen.getByTestId('machine-change-what').textContent).toContain(
+      'Rotary on the pins → Nothing on the pins',
+    );
+
+    // 2 · make it safe: the rotary's fit/removal is done with the machine off at its switch.
+    await screen.findByTestId('machine-change-home-line');
+    await waitFor(() => expect(screen.getByTestId('machine-change-home-line').getAttribute('data-done')).toBe('true'));
+    fireEvent.click(screen.getByTestId('machine-change-powered-off'));
+    await waitFor(() => expect(screen.getByTestId('machine-change-power-line').getAttribute('data-done')).toBe('true'));
+    fireEvent.click(screen.getByTestId('machine-change-checked'));
+
+    // 3 · take the rotary off: cable first, three screws, off the pins.
+    await screen.findByTestId('machine-change-take');
+    const takeText = screen.getByTestId('machine-change-take').textContent ?? '';
+    expect(takeText).toContain('the 4th-axis cable, rear left');
+    expect(takeText).toContain('the three M5 × 10 screws');
+    for (let i = 0; i < 4; i++) clickCheck(`machine-change-take-${i}`);
+    fireEvent.click(screen.getByTestId('machine-change-take-done'));
+
+    // 4 · the ONE change that puts the MDF board back on, and the machine back on after it.
+    await screen.findByTestId('machine-change-fit');
+    expect(screen.getByTestId('machine-change-step-4').textContent).toContain('Put the wasteboard back on');
+    expect(screen.getByTestId('machine-change-fit').textContent).toContain('the wasteboard back on');
+    expect(screen.getByTestId('machine-change-fit').textContent).toContain('switch the machine on');
+    for (let i = 0; i < 3; i++) clickCheck(`machine-change-fit-${i}`);
+    fireEvent.click(screen.getByTestId('machine-change-light-again'));
+    await waitFor(() =>
+      expect(screen.getByTestId('machine-change-light-after-power').getAttribute('data-done')).toBe('true'),
+    );
+    fireEvent.click(screen.getByTestId('machine-change-fit-done'));
+
+    // 5 · the bed line reads the restored surface, and the write carries it.
+    const confirm = await screen.findByTestId('machine-change-confirm-button');
+    expect(screen.getByTestId('machine-change-bed-now').textContent).toContain(
+      'Nothing on the pins · wasteboard under',
+    );
+    fireEvent.click(confirm);
+    await screen.findByTestId('machine-change-record');
+    const machineWrite = state.writes.find((w) => w.method === 'PUT' && w.path.startsWith('/location/machines/'));
+    expect(machineWrite).toBeDefined();
+    const written = machineWrite!.body as MachineRecord;
+    const fresh = written.bedProfiles!.find((p) => p.id === written.activeBedProfileId)!;
+    expect(fresh.surface).toMatchObject({ kind: 'wasteboard', material: 'MDF', thickness: 2 });
+    expect(fresh.placements).toEqual([]);
+    expect(fresh.history.at(-1)?.what).toContain('rotary off, wasteboard back on');
   });
 
   it('offers the mounts this house can give when no target was asked for (Manage’s entry)', async () => {

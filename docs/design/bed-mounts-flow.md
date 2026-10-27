@@ -15,7 +15,7 @@ the location — and the place it was found:
 
 - *Makera's Z1 QuickStart*, as the code quotes its cached capture (`engine/cnc/mounts/bracket.ts` header,
   `src-tauri/src/defaults.rs` seed notes): the L-bracket is pinned at the anchor with two 4 mm dowels and
-  three M5 screws; the stock is pushed into its inside corner (its front-left corner); the top clamps hold
+  three M5×20 screws (the kit's longer M5×30 screws are for the thick bracket); the stock is pushed into its inside corner (its front-left corner); the top clamps hold
   the far side; the work origin is "relative to Anchor 1, X offset 0, Y offset 0". *The Z1 vise page*, as
   `/Fabrication.md` §7.3 reads it: the vise mounts on two 4 × 11 mm pins and six M5×20 screws **after
   removing the MDF wasteboard**. *Makera's accessory list* (`cnc-job-workflow.md` §3, "What Makera sells"):
@@ -97,7 +97,7 @@ is read, and every change to the machine has a wizard of its own.
  Welcome ─ [ Start a cutting job ]
    │
    ▼  NEW CUTTING JOB — one modal, "Step n of 4"
-   1 Machine     "Makera Z1 ‘Zoomba’ · Online · Idle · homed" · on the machine now: Vise on the pins · wasteboard under
+   1 Machine     "Makera Z1 ‘Zoomba’ · Online · Idle · homed" · on the machine now: Vise on the pins · bare bed
    2 Stock       material · form · length X · width Y · thickness Z                                   [Next]
    3 Holding     ○ In the vise …   ◉ On the bed, taped   ○ On the bed, bracket and clamps
    │               └─ needs the vise off the pins · Change the machine… ──▶ back to step 3, the bed drawn
@@ -124,7 +124,7 @@ Unchanged. Its existing line "On the machine now" carries the surface, which a b
 ```
  Step 1 of 4 · Machine                                                    [ Close ]
  Makera Z1 “Zoomba” · 192.168.10.43              ● Online · Idle · homed · checked 09:02
- On the machine now: Vise on the pins · wasteboard under                    [ Check again ]
+ On the machine now: Vise on the pins · bare bed                            [ Check again ]
                                                                           [ Next: stock ]
 ```
 
@@ -135,7 +135,7 @@ today, and are the way into the change wizard:
 
 ```
  Step 3 of 4 · Holding                                                    [ Close ]
- On the machine now   Vise on the pins · wasteboard under · 2 mm MDF boards ×4 · tape   [ Change the machine… ]
+ On the machine now   Vise on the pins · bare bed · 2 mm MDF boards ×4 · tape   [ Change the machine… ]
  How is the plate held?
  ◉ In the vise, on the jaw ledge            3.81 mm stands 0.71 mm proud of the jaws
  ○ In the vise, on a waste board between the jaws
@@ -173,7 +173,7 @@ workholding name the mount one way. `jobMount(job)` reads the workholding when t
    Where       the middle of the bed (drag)      │   front · you                                │
  ○ On the bed, bracket and clamps                └──────────────────────────────────────────────┘
      needs the bracket at anchor 1 · Change the machine…
- ▸ Technical: the tape (Makera's 20 mm roll, 0.1 mm typed) · the hold rule · the wasteboard's top
+ ▸ Technical: the tape (Makera's 20 mm roll, ~0.2 mm from its store) · the hold rule · the surface's top
                                                              [ Back ]   [ Next: operation ]
 ```
 
@@ -200,9 +200,9 @@ gains one fit step for the bracket and the bed job's words:
  1 What changes      Vise on the pins → Nothing on the pins, bracket at anchor 1
                      for: Tray, held in a bracket and clamps on the bed
  2 Make it safe      ● Home   $H · Idle · homed ✓   ● Work light on  M821 ✓   ● Spindle cold, cutter out ✓
- 3 Take off the vise ○ the two pin bolts  ○ lift it straight up  ○ on its shelf                         [Done]
+ 3 Take off the vise ○ the left fixed jaw off  ○ the six M5 × 20 screws  ○ lift it straight up off the two pins  ○ on its shelf [Done]
  4 Fit the bracket   ○ the thin L-bracket into anchor 1's corner   ○ its two 4 mm dowels
-                     ○ its three M5 screws   ○ two top clamps in the tray                               [Done]
+                     ○ its three M5 × 20 screws   ○ two top clamps in the tray                           [Done]
  5 Confirm           the bed is now: Nothing on the pins · bracket at anchor 1 · wasteboard under
                      written to the machine's record: 2026-10-26 09:20 · vise off, bracket on · for Tray
                      ● Work light off · ● Home                                        [ Back to the job ]
@@ -212,12 +212,14 @@ gains one fit step for the bracket and the bed job's words:
   under". Tape needs nothing fitted.
 - **Step 4 for the bracket** appears only when the profile has no anchor placement; it writes one
   (`where: { kind: 'anchor', anchor: 1 }`, the thin bracket's fixture record, Makera kit's variant). The words
-  are the QuickStart's as the code quotes them: two 4 mm dowels and three M5 screws. Anchor 1 is the default
+  are the QuickStart's as the code quotes them: two 4 mm dowels and three M5×20 screws (longer for the thick bracket). Anchor 1 is the default
   (Makera's origin is "relative to Anchor 1"); anchor 2 is a choice in step 1 (`anchor 2 = anchor 1 + its
   offset, read from the machine`).
-- **The wasteboard does not move.** A change to the bed keeps the surface exactly as it was
-  (`surfaceChangeFor` keeps it for every change but the rotary's). The bed job then reads what is under it and
-  plans the board under (§3.5) from that. §10 Q1–Q2.
+- **The wasteboard and the fixtures are mutually exclusive (Makera, #717).** The vise and the 4th
+  axis each mount on the **bare bed** — both pages begin "Remove the MDF wasteboard" — so a change to
+  either takes the board off and never puts it back. The one change that puts it back is a change to
+  a bed job (nothing on the pins), which adds a "the wasteboard back on" step (`fitSteps('bed')`):
+  the bed job then reads what is under it and plans the board under (§3.5). §10 Q1–Q2.
 - **The clamps go on after the stock** (run sheet §3.9); the wizard only checks they are in the tray.
 - Bench rules as in every change: home before hands in the machine, the work light on, home when done.
 
@@ -237,8 +239,9 @@ gains one fit step for the bracket and the bed job's words:
   (`plan.ts`: a scan brackets the edge from ON the stock to OFF it), and tape past an edge would be read as a
   step and cut into by a profile. Strips: `ceil((width − 2 × inset) / tape width)`, the last trimmed — two
   for the badge's 38.1 mm. The tape's width is the house's roll (R `consumables.tape.widthMm`), Makera's
-  20 mm by default (M accessory list); its thickness is typed on the profile, 0.1 mm (T bed-profiles §2;
-  `/Fabrication.md` §7.3 gives 0.1–0.2 mm for tape of this kind).
+  20 mm by default (M accessory list); its thickness is ~0.2 mm — Makera's store page for the 20 mm
+  tape states "approximately 0.2mm thick" (C21) — typed on the profile until a coupon measures the
+  roll in hand.
 - **The hold rule — side load against footprint.** The cutter pushes the stock sideways with a force that
   grows with its bite — its diameter times the deepest pass's step-down — and tape resists with its area. So:
 
@@ -285,7 +288,7 @@ gains one fit step for the bracket and the bed job's words:
   field: *"The 2 mm MDF boards are 100 × 100 mm; this plate is 120 mm long — tape it to the wasteboard, or
   choose a larger board."* (D, the board's size from the consumable).
 - **The stack enters Z only as the registration's expectation.** Depths are measured from the probed top
-  (decision 24); the stack (tape 0.1 + board 2 + tape 0.1 + plate) is where the surface touch expects the top,
+  (decision 24); the stack (tape ~0.2 + board 2 + tape ~0.2 + plate) is where the surface touch expects the top,
   and the tape's thickness is recorded on the job (bed-profiles Q C).
 - **Bracket jobs use the same rule.** The board sits inside the bracket under the stock; it lifts the stock,
   so the arms stand that much lower above the top (`bracketObstacles(…, underMm)`, built).
@@ -395,10 +398,10 @@ vise envelope on the bracket; tape passes an empty envelope).
 - **What is drawn**, from the job's mount, in the simulation's fixture grey with provenance by line style
   (solid measured or Makera's, dashed Case Maker's default until calipered — the bed scene's rule, #511):
   the bed plate; the wasteboard slab when it is under, its scars faint; the board under; the tape as a thin
-  layer under the stock (0.1 mm, drawn 0.5 mm so it is visible, labelled with its true thickness); the
+  layer under the stock (~0.2 mm, drawn 0.5 mm so it is visible, labelled with its true thickness); the
   bracket's two arms; each clamp at its place and height. The camera frames the stock and its mount, not the
   whole bed.
-- **Side** shows the stack with each height labelled: "plate 2 · tape 0.1 · board 2 · tape 0.1 · bed", and the
+- **Side** shows the stack with each height labelled: "plate 2 · tape ~0.2 · board 2 · tape ~0.2 · bed", and the
   breakthrough into the board drawn (0.3 mm) with the board's floor.
 - **A collision is drawn where it happens.** A move that reaches a clamp or an arm is never generated (Generate
   refuses it), but a program **opened from a file** is simulated against the job's mount: the clamp turns red
@@ -518,7 +521,7 @@ number keeps its source in the sheet's column.
                               underside clean and dry.
  3  Tape the plate down       two strips of the 20 mm tape along its length, 2 mm in from every edge ·
                               the plate in the middle of the bed, square to its front edge · press it down
-                              firmly for ten seconds · tape 0.1 mm
+                              firmly for ten seconds · tape ~0.2 mm
        (with a board)         tape the 2 mm MDF board to the bed first, then the plate to the board —
                               the board under the whole plate
  5  The origin                X 0 · Y 0 at the plate's front-left corner and Z 0 on its top, found by the
@@ -531,7 +534,7 @@ number keeps its source in the sheet's column.
 
 ```
  2  Mount the bracket         Nothing on the pins. The thin L-bracket in anchor 1's corner: two 4 mm dowels,
-                              three M5 screws.
+                              three M5 × 20 screws.
  3  The plate in the bracket  push the plate into the bracket's corner — front edge against the front arm,
                               left edge against the left arm, flat on the bed · two top clamps on the back
                               edge, 15 mm in from each corner · tighten them
@@ -574,11 +577,11 @@ marks a value a measurement replaces.
 | Screen | Option | Default | From | Bench? |
 |---|---|---|---|---|
 | Holding | The mount | the profile's preferred mount the bed carries now; else sheet ≤ 3 mm → tape, plates and blocks → bracket; else tape | R `preferredMounting` + D `cnc-job-workflow.md` §5.2 | — |
-| Holding | Under it | the profile's surface (wasteboard under / bare bed) | R active bed profile | which, on this machine: §10 Q1 |
+| Holding | Under it | the profile's surface (wasteboard under / bare bed) | R active bed profile | answered: bare bed under the vise (§10 Q1) |
 | Change | Pins cleared for a bed job | vise or rotary off | R `mountTargetFor` (both bed mounts → `bed`) | — |
-| Change | The wasteboard on a change to the bed | stays as it is | R `surfaceChangeFor` (only the rotary moves it) | §10 Q1–Q2 |
+| Change | The wasteboard on a change to the bed | off for the vise and the rotary; back on for a bed job | M Makera's install steps; R `surfaceChangeFor` | §10 Q1–Q2 |
 | Tape | Tape width | 20 mm | M Makera's 20 mm tape; R `consumables.tape.widthMm` | — |
-| Tape | Tape thickness | 0.1 mm | T typed on the profile (bed-profiles §2); `/Fabrication.md` §7.3 0.1–0.2 mm | yes |
+| Tape | Tape thickness | ~0.2 mm | M Makera's store (~0.2 mm); T typed on the profile until a coupon measures the roll | yes |
 | Tape | Layout | strips along the length, 2 mm in from every edge | D the edge scans land just past each edge (`plan.ts`) + T `tape.insetMm` 2 | — |
 | Tape | Strips | ceil((width − 2 × inset) / tape width) | D | — |
 | Tape | Where on the bed | the middle of the surface | T | — |
@@ -607,7 +610,7 @@ marks a value a measurement replaces.
 | CAM | Obstacle grow | tool radius (or shank) + fit + clearance | D `inPath.ts` + the clearance | — |
 | CAM | Travel height on the bracket | tallest clamp top + clearance (13 mm) | D | clamp height |
 | Simulate | Fixture drawn | the job's surface, board, tape, arms, clamps | R/D | — |
-| Simulate | Tape drawn | 0.5 mm, labelled 0.1 mm | T display only | — |
+| Simulate | Tape drawn | 0.5 mm, labelled ~0.2 mm | T display only | — |
 | Cut | Taped touch plan | bed beside 1 · top 5 · left 2 · front 1 = 9 | D `plan.ts` tape row + `surfaceSpreadPlan` 5 + the surface tap | — |
 | Cut | Surface tap offset | 10 mm in front of the front edge | T `tape.surfaceTapOffsetMm` | — |
 | Cut | Bracket touch plan | arm (or bed beside) 1 · top 1 · right 1 · back 1 = 4 | D `plan.ts` bracket row (confirm required while the offset is unmeasured) + #607 | offset measured → 2 |
@@ -653,7 +656,7 @@ sentence on the main path.
    the job shows the same option selected.
 3. **The change wizard** takes the vise off for a bed job, fits the bracket at anchor 1 when the profile has
    none (two dowels, three screws), leaves the wasteboard as it was, and writes "Nothing on the pins · bracket
-   at anchor 1 · wasteboard under".
+   at anchor 1 · wasteboard under (put back on by the change) — Makera takes it off for the vise and the rotary".
 4. **Fixture 3 is refused** with its two sentences and the Fix opening the picture; dragging the clamps to the
    right edge generates (fixture 3a). The verifier, the simulation and the registration plan read the job's
    clamp places, not the defaults (one spec asserts the same boxes reach all three).
@@ -678,7 +681,7 @@ design once approved.
 |---|---|---|---|
 | BM-1 | bed mounts: `JobWorkholding` gains `tape` and `bracket` | the two arms (`TapeHold`, `BracketHold` with `clamps`), the job schema and the MCP/headless schemas (`reference_board_zod_schema_strips`: name every field), `applyHoldAnswers` keeps them, `jobMount`/`jobVise`/`workholdingFor` read them, the vise-only checks skipped | — (the #240 slice-1 pattern) |
 | BM-2 | bed mounts: Holding writes the bed — the two options, their lines, the bed pictures | `mountOptions` with nothing on the pins; tape's lines (under it, board, where, square to); the bracket's lines and the clamp editing on the picture; the default from `preferredMounting`; the web build's Makera kit profile | BM-1 |
-| BM-3 | bed mounts: Change the machine → the bed, fitting the bracket | the bracket fit step when the profile has no anchor placement (anchor 1/2, two 4 mm dowels, three M5 screws, clamps in the tray); the confirm words; the wasteboard left as it was | #693, #706 (landed) |
+| BM-3 | bed mounts: Change the machine → the bed, fitting the bracket | the bracket fit step when the profile has no anchor placement (anchor 1/2, two 4 mm dowels, three M5 × 20 screws, clamps in the tray); the confirm words; the wasteboard back on (Makera takes it off for the vise and the rotary — #717) | #693, #706 (landed) |
 | BM-4 | bed mounts: the tape rules | taped area vs the cutter's bite for the stock and every released piece; `tape-hold-stock`, `tape-hold-piece`, `tape-tall-stock`; settings `tape.holdRatio`, `tape.insetMm` (the three-edit seed rule); chapter-8 rows | BM-1, #218 (landed) |
 | BM-5 | bed mounts: the through cut on the bed | the wasteboard counted as the board under; the board on the bare bed (the thinnest house board that passes); `board-too-small`; the stack for the expected surface; tape thickness on the job | BM-1, #417 (landed) |
 | BM-6 | bed mounts: the job's clamps as obstacles, with the fixture clearance | `bracketMount` reads the job's places, not the defaults; the clearance in `mountInPath` and the sweep; the travel height over the clamps; the arms above the stock; the verifier's sentences in the operator's words | BM-1, #427 (landed) |
@@ -704,8 +707,8 @@ the tape coupon first — and replaces each value with its measurement; the scre
 
 | | Question | Default taken | Why |
 |---|---|---|---|
-| Q1 | What is under the vise on this machine — the wasteboard or the bare bed? The vise page and the run sheet say the wasteboard comes off for the vise; the change wizard (#706) puts it back when the vise returns, and the first-job line reads "Vise on the pins · wasteboard under" | **The active profile says**, and a change to the bed leaves the surface as it was; whichever line is wrong is corrected after one look at the bench | the profile is the machine's recorded state (principle 8); the sources disagree and only the bench can tell |
-| Q2 | Does the bracket seat on the wasteboard or the bare bed? | **As the profile says**; the seat is touched on whatever is there; the Makera kit profile is bare bed | the anchors are in the bed; whether the wasteboard covers them is not in any source on this checkout |
+| Q1 | What is under the vise on this machine — the wasteboard or the bare bed? | **Bare bed.** Makera's vise page begins "Remove the MDF wasteboard", and the maintainer confirmed it (2026-10-27); the vise, the rotary and the vacuum bed all mean a bare bed, and only a change to a bed job puts the board back (#717) | Makera's own install steps + `docs/design/z1-accessory-install.md` |
+| Q2 | Does the bracket seat on the wasteboard or the bare bed? | **As the profile says**; the seat is touched on whatever is there. Makera's pictures show the bracket used with the MDF board on (inferred — bench look), so the shipped kit profile keeps the wasteboard | the anchors are in the bed; the source is Makera's illustrations, not text |
 | Q3 | Can a bed mount share the bed with the vise? | **No** — the bed options need the pins clear | the shipped first-job rule; the vise sits over the bed's middle, and one mechanism at a time keeps the obstacles one set |
 | Q4 | The tape's hold ratio | **100 × (cutter ⌀ × step-down)**, a shop setting | no source publishes tape hold; the coupon (§6) measures it; a setting with a per-job recommendation, never a constant |
 | Q5 | Should a taped job put the wasteboard on when the bed is bare? | **No**; a through cut on the bare bed gets a board under | tape holds on the bed; the board rule covers the only case the bare bed cannot take |

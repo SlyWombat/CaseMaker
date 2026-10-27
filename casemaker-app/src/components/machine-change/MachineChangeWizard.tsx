@@ -48,6 +48,7 @@ import {
   shippedDatumFor,
   shippedDatumProfileName,
   surfaceChangeFor,
+  changePowersOff,
   surfaceWords,
   takeOffSteps,
   targetMountsFor,
@@ -232,6 +233,8 @@ function Wizard({
   const [light, setLight] = useState<LineState>(NOT_DONE);
   const [lightBusy, setLightBusy] = useState(false);
   const [byHand, setByHand] = useState(false);
+  // #717 — the fit's own power cycle is the machine's switch, ticked by the operator (#479).
+  const [poweredOff, setPoweredOff] = useState(false);
 
   const [offChecks, setOffChecks] = useState<boolean[]>([]);
   const [onChecks, setOnChecks] = useState<boolean[]>([]);
@@ -267,6 +270,10 @@ function Wizard({
     confirmed?.result.wasteboard ?? plannedSurface?.wasteboard ?? null;
   const takeWords = takeOffSteps(shownFrom, { wasteboard: plannedWasteboard === 'off' ? 'off' : null });
   const fitWords = target === null ? null : fitSteps(target, { wasteboard: plannedWasteboard === 'back' ? 'back' : null });
+  // #717 — a change that touches the vise or the rotary is made with the machine off at its own
+  // switch (Makera's page for each), so step 2 carries the switch and the work light line moves to
+  // AFTER the power returns: a powered-off machine has no light.
+  const powerOff = target !== null && changePowersOff(from, target);
   const bedNowWords =
     plannedWasteboard === 'off'
       ? 'wasteboard off'
@@ -344,13 +351,14 @@ function Wizard({
   }
 
   /**
-   * #706 — THE ROTARY FIT'S DONE IS THE MACHINE'S OWN ANSWER. Makera's 4th-axis cable is never
-   * plugged in live: the operator switches the machine off for the fit and on again afterwards, and
-   * this press asks `?` through the SAME status read step 2 uses. No answer, no advance — and power
-   * stays the machine's own switch, never this app (#479).
+   * #706/#717 — A POWER-OFF FIT'S DONE IS THE MACHINE'S OWN ANSWER. The 4th axis's cable is never
+   * plugged in live, and #717's vise fit is Makera's power-off install: the operator switches the
+   * machine off for the fit and on again afterwards, and this press asks `?` through the SAME
+   * status read step 2 uses. No answer, no advance — and power stays the machine's own switch,
+   * never this app (#479).
    */
   async function doFitDone(): Promise<void> {
-    if (target === 'rotary' && address !== null) {
+    if (powerOff && address !== null) {
       setFitChecking(true);
       setFitNote(null);
       const a = await checkMachine(address);
@@ -396,16 +404,20 @@ function Wizard({
         ? `${MACHINE_MOUNT_WORDS[target]} is already on the machine.`
         : null;
   const targetDone = confirmed !== null || (target !== null && targetError === null);
-  const safeDone = home.done && light.done && byHand;
+  // #717 — with the fit done powered off, the light line lives in step 4 (after the power
+  // returns); step 2's own answer is the switch. The light still gates the FIT's Done.
+  const safeDone = home.done && byHand && (powerOff ? poweredOff : light.done);
   // #706 — a bed → rotary change still has the wasteboard to take off, so the step's own words
   // decide whether there is anything to do (not the mount alone).
   const takeDone = takeWords === null ? true : takenOff;
   const datumResolved = datumDesc === null || datumChoice !== null;
-  const fitDone = target === 'bed' ? true : fitted && datumResolved;
+  // #717 — a fit is walked whenever there ARE fit steps (a change to a bed job's "wasteboard back
+  // on" is one), and a power-off fit is not done until the light is back on (its line follows it).
+  const fitDone = fitWords === null ? true : fitted && datumResolved && (!powerOff || light.done);
   const firstIncomplete = !targetDone ? 1 : !safeDone ? 2 : !takeDone ? 3 : !fitDone ? 4 : 5;
   const shown = confirmed !== null ? 5 : (view ?? firstIncomplete);
   /** Nothing is on / nothing is fitted: the step is complete without a tick. */
-  const skipped = (n: number): boolean => (n === 3 && takeWords === null) || (n === 4 && target === 'bed');
+  const skipped = (n: number): boolean => (n === 3 && takeWords === null) || (n === 4 && fitWords === null);
   const stateOf = (n: number): 'done' | 'current' | 'later' => {
     // Once the change is written, every step is behind the operator — including the Confirm row.
     if (confirmed !== null) return 'done';
@@ -691,6 +703,11 @@ function Wizard({
                     Home · <span className="mc-mono">{home.meta}</span>
                   </span>
                 ) : null}
+                {powerOff ? (
+                  <span className="mc-meta" data-testid="machine-change-power-done">
+                    Power off at its switch · {poweredOff ? 'switched off ✓' : 'not yet'}
+                  </span>
+                ) : null}
                 {light.done ? (
                   <span className="mc-meta" data-testid="machine-change-light-done">
                     Work light on · <span className="mc-mono">{light.meta}</span>
@@ -737,27 +754,51 @@ function Wizard({
                   </p>
                 ) : null}
 
-                <div className="mc-line" data-done={light.done} data-testid="machine-change-light-line">
-                  <span className="mc-dot" aria-hidden="true" />
-                  <b>Work light on</b>
-                  <span className="mc-meta">{lightWord}</span>
-                  {!light.done ? (
-                    <button
-                      type="button"
-                      className="mc-btn"
-                      data-testid="machine-change-light"
-                      disabled={lightBusy || !home.done || address === null}
-                      onClick={() => void doLightOn()}
-                    >
-                      {lightBusy ? 'Switching…' : 'Work light on'}
-                    </button>
-                  ) : null}
-                </div>
-                {light.note !== null ? (
-                  <p className="mc-note" data-testid="machine-change-light-note">
-                    {light.note}
-                  </p>
-                ) : null}
+                {powerOff ? (
+                  <div className="mc-line" data-done={poweredOff} data-testid="machine-change-power-line">
+                    <span className="mc-dot" aria-hidden="true" />
+                    <b>Power off at its switch</b>
+                    <span className="mc-meta">
+                      {poweredOff
+                        ? 'switched off ✓'
+                        : 'the fit is done with the machine off — switch it off at its switch'}
+                    </span>
+                    {!poweredOff ? (
+                      <button
+                        type="button"
+                        className="mc-btn"
+                        data-testid="machine-change-powered-off"
+                        onClick={() => setPoweredOff(true)}
+                      >
+                        I have switched it off
+                      </button>
+                    ) : null}
+                  </div>
+                ) : (
+                  <>
+                    <div className="mc-line" data-done={light.done} data-testid="machine-change-light-line">
+                      <span className="mc-dot" aria-hidden="true" />
+                      <b>Work light on</b>
+                      <span className="mc-meta">{lightWord}</span>
+                      {!light.done ? (
+                        <button
+                          type="button"
+                          className="mc-btn"
+                          data-testid="machine-change-light"
+                          disabled={lightBusy || !home.done || address === null}
+                          onClick={() => void doLightOn()}
+                        >
+                          {lightBusy ? 'Switching…' : 'Work light on'}
+                        </button>
+                      ) : null}
+                    </div>
+                    {light.note !== null ? (
+                      <p className="mc-note" data-testid="machine-change-light-note">
+                        {light.note}
+                      </p>
+                    ) : null}
+                  </>
+                )}
 
                 <div className="mc-line" data-done={byHand} data-testid="machine-change-spindle-line">
                   <span className="mc-dot" aria-hidden="true" />
@@ -895,11 +936,41 @@ function Wizard({
                     </details>
                   </div>
                 ) : null}
+                {powerOff ? (
+                  <div className="mc-line" data-done={light.done} data-testid="machine-change-light-after-power">
+                    <span className="mc-dot" aria-hidden="true" />
+                    <b>Work light on</b>
+                    <span className="mc-meta">
+                      {light.done ? lightWord : 'the power is back — switch the light on before your hands go back in'}
+                    </span>
+                    {!light.done ? (
+                      <button
+                        type="button"
+                        className="mc-btn"
+                        data-testid="machine-change-light-again"
+                        disabled={lightBusy || address === null}
+                        onClick={() => void doLightOn()}
+                      >
+                        {lightBusy ? 'Switching…' : 'Work light on'}
+                      </button>
+                    ) : null}
+                  </div>
+                ) : null}
+                {light.note !== null && powerOff ? (
+                  <p className="mc-note" data-testid="machine-change-light-note">
+                    {light.note}
+                  </p>
+                ) : null}
                 <button
                   type="button"
                   className="mc-btn mc-btn--primary"
                   data-testid="machine-change-fit-done"
-                  disabled={fitChecking || !fitWords.items.every((_, i) => onChecks[i] === true) || !datumResolved}
+                  disabled={
+                    fitChecking ||
+                    !fitWords.items.every((_, i) => onChecks[i] === true) ||
+                    !datumResolved ||
+                    (powerOff && !light.done)
+                  }
                   onClick={() => void doFitDone()}
                 >
                   {fitChecking ? 'Waiting for the machine…' : 'Done'}
@@ -937,6 +1008,7 @@ function Wizard({
                     {!safeDone ? (
                       <span className="mc-note" data-testid="machine-change-not-safe">
                         The machine is not safe to put hands in yet: {home.done ? '' : 'home it, '}
+                        {powerOff && !poweredOff ? 'switch it off at its switch, ' : ''}
                         {light.done ? '' : 'switch the work light on, '}check the spindle is cold and the cutter is
                         out.
                       </span>

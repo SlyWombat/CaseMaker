@@ -11,6 +11,7 @@ import { describe, expect, it } from 'vitest';
 import {
   MACHINE_MOUNT_WORDS,
   activeMountOf,
+  changePowersOff,
   activeProfileOf,
   changeHeadline,
   changeRecordWords,
@@ -163,30 +164,35 @@ describe('#693 what is on the machine', () => {
     expect(targetMountsFor(machine, [VISE])).toEqual(['bed']);
   });
 
-  it('names the steps in the mockup’s words, with Makera’s wasteboard and power order (#706)', () => {
+  it('names the steps in Makera’s install order, with the wasteboard and power rules (#706/#717)', () => {
     expect(changeHeadline('vise', 'rotary')).toBe('Vise off · rotary on');
     expect(changeRecordWords('vise', 'rotary')).toBe('vise → rotary');
-    expect(takeOffSteps('vise')?.items).toEqual(['the two pin bolts', 'lift it straight up', 'on its shelf']);
-    // A vise → rotary change takes the MDF board off too (Makera's guide: the module mounts on the
-    // bare bed), after the vise itself.
+    // #717 — Makera's vise install, reversed: the jaw off to reach the six screws, then off the pins.
+    expect(takeOffSteps('vise')?.items).toEqual([
+      'the left fixed jaw off',
+      'the six M5 × 20 screws',
+      'lift it straight up off the two pins',
+      'on its shelf',
+    ]);
+    // A legacy record can still show the vise over a wasteboard: the board comes off after it.
     expect(takeOffSteps('vise', { wasteboard: 'off' })?.items).toEqual([
-      'the two pin bolts',
-      'lift it straight up',
+      'the left fixed jaw off',
+      'the six M5 × 20 screws',
+      'lift it straight up off the two pins',
       'on its shelf',
       'the wasteboard’s screws',
       'the wasteboard on its shelf',
     ]);
-    // The rotary comes off power-first: the cable is never unplugged live.
+    // The rotary comes off cable-first: it is never unplugged live (the switch is step 2's line).
     expect(takeOffSteps('rotary')?.items).toEqual([
-      'switch the machine off at its switch — the 4th-axis cable is never unplugged live',
       'the 4th-axis cable, rear left',
       'the three M5 × 10 screws',
       'lift it straight up',
       'on its shelf',
     ]);
-    // The fit is Makera's order: power off, the pins, the three screws, the cable, power on, wait.
+    // The fit is Makera's order: the pins, the three screws, the cable, power on, wait.
     expect(fitSteps('rotary')?.items).toEqual([
-      'switch the machine off at its switch — the 4th-axis cable is never plugged in live',
+      'the 4th-axis cable is never plugged in live',
       'onto the two pins',
       'the three M5 × 10 screws',
       'the 4th-axis cable, rear left',
@@ -194,13 +200,22 @@ describe('#693 what is on the machine', () => {
       'wait for it to answer',
       'chuck key in the tray',
     ]);
-    // The vise's return puts the board back first.
-    expect(fitSteps('vise', { wasteboard: 'back' })?.items).toEqual([
+    // #717 — Makera's vise page, in its own order. The wasteboard is NEVER put back under it: the
+    // first thing Makera says is to remove it.
+    expect(fitSteps('vise')?.items).toEqual([
+      'the two 4 × 11 mm locating pins',
+      'the vise onto the pins',
+      'the left fixed jaw off',
+      'the six M5 × 20 screws',
+      'the fixed jaw back on, its locating key seated',
+      'switch the machine on',
+    ]);
+    expect(fitSteps('vise', { wasteboard: 'back' })?.items).toEqual(fitSteps('vise')?.items);
+    // The ONE change that puts the board back on: clearing the pins for a bed job.
+    expect(fitSteps('bed', { wasteboard: 'back' })?.items).toEqual([
       'the wasteboard back on',
       'its screws',
-      'onto the pins',
-      'the two pin bolts',
-      'the fixed jaw on the left',
+      'switch the machine on',
     ]);
     // Nothing on the pins but a board on the bed: the board is still a take-off.
     expect(takeOffSteps('bed', { wasteboard: 'off' })?.items).toEqual([
@@ -209,6 +224,12 @@ describe('#693 what is on the machine', () => {
     ]);
     expect(takeOffSteps('bed')).toBeNull();
     expect(fitSteps('bed')).toBeNull();
+    // #717 — every change that touches the vise or the rotary is made with the machine off.
+    expect(changePowersOff('vise', 'rotary')).toBe(true);
+    expect(changePowersOff('rotary', 'vise')).toBe(true);
+    expect(changePowersOff('vise', 'bed')).toBe(true);
+    expect(changePowersOff('bed', 'vise')).toBe(true);
+    expect(changePowersOff('bed', 'bed')).toBe(false);
     expect(datumDescriptorFor('rotary')).toEqual({ key: 'rotaryAxis', word: 'axis datum' });
     expect(surfaceWords(machineRecord().bedProfiles![0]!.surface)).toBe('wasteboard under');
     expect(MACHINE_MOUNT_WORDS.rotary).toBe('Rotary on the pins');
@@ -291,7 +312,7 @@ describe('#693 the change the wizard writes', () => {
     expect(parsed.success).toBe(true);
   });
 
-  it('#706 — fitting the vise again puts the wasteboard back, from the newest saved board profile', () => {
+  it('#717 — rotary → vise stays on the BARE bed: Makera takes the wasteboard off for the vise too', () => {
     const toRotary = planMountChange({
       machine: machineRecord(),
       to: 'rotary',
@@ -301,7 +322,6 @@ describe('#693 the change the wizard writes', () => {
       accessories: [VISE, ROTARY],
     });
     if ('error' in toRotary) throw new Error(toRotary.error);
-    // The record the wizard wrote: the rotary active on the bare bed, the two fixtures moved.
     const back = planMountChange({
       machine: toRotary.machine,
       to: 'vise',
@@ -311,12 +331,40 @@ describe('#693 the change the wizard writes', () => {
       accessories: toRotary.accessoryWrites,
     });
     if ('error' in back) throw new Error(back.error);
-    expect(back.wasteboard).toBe('back');
-    expect(back.profile.surface).toMatchObject({ kind: 'wasteboard', material: 'MDF', thickness: 2 });
-    expect(back.profile.history.at(-1)?.what).toContain('rotary off, vise on, wasteboard back on');
+    // No restore step, no "wasteboard under": the vise's own first step is to remove it.
+    expect(back.wasteboard).toBeNull();
+    expect(back.profile.surface).toMatchObject({ kind: 'bare-bed' });
+    expect(back.profile.history.at(-1)?.what).toContain('rotary off, vise on');
     expect(back.profile.placements.some((p) => p.where.kind === 'pins' && p.where.pins === 'vise')).toBe(true);
-    // The written record still parses — the restored surface is a schema-valid wasteboard row.
     expect(MachineRecordSchema.safeParse(back.machine).success).toBe(true);
+  });
+
+  it('#717 — a change to a bed job puts the wasteboard back on, from the newest saved board profile', () => {
+    const toRotary = planMountChange({
+      machine: machineRecord(),
+      to: 'rotary',
+      datum: null,
+      profileId: 'bp-rotary',
+      at: NOW,
+      accessories: [VISE, ROTARY],
+    });
+    if ('error' in toRotary) throw new Error(toRotary.error);
+    const toBed = planMountChange({
+      machine: toRotary.machine,
+      to: 'bed',
+      datum: null,
+      profileId: 'bp-bed',
+      at: '2026-10-26T10:00:00.000Z',
+      accessories: toRotary.accessoryWrites,
+    });
+    if ('error' in toBed) throw new Error(toBed.error);
+    expect(toBed.wasteboard).toBe('back');
+    expect(toBed.profile.surface).toMatchObject({ kind: 'wasteboard', material: 'MDF', thickness: 2 });
+    expect(toBed.profile.history.at(-1)?.what).toContain('rotary off, wasteboard back on');
+    // The written record still parses — the restored surface is a schema-valid wasteboard row.
+    expect(MachineRecordSchema.safeParse(toBed.machine).success).toBe(true);
+    // A bed job can now be held on it; nothing is on the pins.
+    expect(activeMountOf(toBed.machine)).toBe('bed');
   });
 
   it('carries the chosen shipped datum onto the incoming fixture and clears the outgoing one', () => {

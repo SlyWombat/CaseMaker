@@ -55,7 +55,7 @@ const WASTEBOARD: BedProfile = {
   ],
   preferredMounting: [],
   consumables: {
-    tape: { widthMm: 20, thicknessMm: 0.1, provenance: 'typed' },
+    tape: { widthMm: 20, thicknessMm: 0.2, provenance: 'typed' },
     boards: [{ material: 'MDF', size: [100, 100, 2], count: 4 }],
   },
   history: [],
@@ -107,7 +107,7 @@ describe('#715 the tape’s lines (§3.4)', () => {
   it('the tape starts from the house roll, and a taped job keeps its own hold', () => {
     expect(bedTapeHold(WASTEBOARD, null)).toEqual({
       width: 20,
-      thickness: 0.1,
+      thickness: 0.2,
       inset: 2,
       where: null,
       squareTo: 'front',

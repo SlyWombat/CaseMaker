@@ -122,22 +122,43 @@ export interface StepWords {
 }
 
 /**
- * #706 — what the change does with the MDF wasteboard. Makera's 4th-axis guide is explicit: the
- * module mounts **after removing the MDF wasteboard**, and the 4th-axis cable is **never plugged in
- * with the machine powered**. So a vise → rotary change takes the board off too, and rotary → vise
- * puts it back; the steps below carry those actions in their own order.
+ * #706/#717 — what the change does with the MDF wasteboard. Makera's vise, 4th-axis and vacuum-bed
+ * pages each say **"Remove the MDF wasteboard"** before the fixture goes on, so every change TO one
+ * of them takes the board off and leaves it off; the one change that puts it back is a change to a
+ * bed job (nothing on the pins). The 4th-axis cable is **never plugged in with the machine
+ * powered** — power is the machine's own switch throughout (#479).
  */
 export interface MountStepOptions {
   /** 'off' when this change removes a wasteboard, 'back' when it restores one, null when it stays. */
   wasteboard?: 'off' | 'back' | null;
 }
 
+/**
+ * #717 — does this change take the machine's power off? Makera's low-profile-vise and 4th-axis
+ * pages both begin with "Home the machine … then power it off" (and the cable is never plugged in
+ * live), so ANY change that touches one of them is made with the machine off; the wizard's step 2
+ * carries the switch, and the fit's last line switches it back on. Power is the machine's own
+ * switch, never this app (#479).
+ */
+export function changePowersOff(from: MachineMountKind, to: MachineMountKind): boolean {
+  return from !== 'bed' || to !== 'bed';
+}
+
 /** The outgoing fixture's steps. Null when nothing is on the pins. */
 export function takeOffSteps(from: MachineMountKind, opts: MountStepOptions = {}): StepWords | null {
   switch (from) {
     case 'vise': {
-      const items = ['the two pin bolts', 'lift it straight up', 'on its shelf'];
-      // #706 — the board comes off after the vise: the module (and the vise) sit on the bare bed.
+      // #717 — Makera's install, reversed (the removal itself is inferred: Makera publishes none):
+      // the fixed jaw comes off to reach the six screws, then the vise lifts off the two pins. The
+      // machine is already switched off in step 2, at its own switch (#479).
+      const items = [
+        'the left fixed jaw off',
+        'the six M5 × 20 screws',
+        'lift it straight up off the two pins',
+        'on its shelf',
+      ];
+      // A record from before #717 can still show the vise over a wasteboard; if this change takes
+      // the board off, it comes after the vise.
       if (opts.wasteboard === 'off') items.push('the wasteboard’s screws', 'the wasteboard on its shelf');
       return { title: 'Take off the vise', items };
     }
@@ -145,9 +166,8 @@ export function takeOffSteps(from: MachineMountKind, opts: MountStepOptions = {}
       return {
         title: 'Take off the rotary',
         items: [
-          // #706 — power first: the cable is never unplugged live. The machine's own switch, not
-          // this app (#479): nothing here powers, homes or commands it.
-          'switch the machine off at its switch — the 4th-axis cable is never unplugged live',
+          // #706/#717 — the cable is never unplugged live; the switch itself is step 2's line
+          // (the machine's own switch, never this app's — #479).
           'the 4th-axis cable, rear left',
           'the three M5 × 10 screws',
           'lift it straight up',
@@ -167,18 +187,29 @@ export function takeOffSteps(from: MachineMountKind, opts: MountStepOptions = {}
 export function fitSteps(to: MachineMountKind, opts: MountStepOptions = {}): StepWords | null {
   switch (to) {
     case 'vise': {
-      const items: string[] = [];
-      // #706 — the board goes back under the fixture.
-      if (opts.wasteboard === 'back') items.push('the wasteboard back on', 'its screws');
-      items.push('onto the pins', 'the two pin bolts', 'the fixed jaw on the left');
-      return { title: 'Fit the vise', items };
+      // #717 — Makera's Low-Profile Vise page, in its own order: the machine switched off at its
+      // own switch (step 2's line), the two 4 × 11 mm locating pins, the vise on them, the fixed jaw
+      // off to reach the screws, six M5 × 20, the jaw back with its locating key seated, power on.
+      // The wasteboard is NOT put back under the vise: Makera's first step is to remove it.
+      return {
+        title: 'Fit the vise',
+        items: [
+          'the two 4 × 11 mm locating pins',
+          'the vise onto the pins',
+          'the left fixed jaw off',
+          'the six M5 × 20 screws',
+          'the fixed jaw back on, its locating key seated',
+          'switch the machine on',
+        ],
+      };
     }
     case 'rotary':
       return {
         title: 'Fit the rotary',
         items: [
-          // #706 — Makera's order, verbatim in substance: power off, cable last, power on, wait.
-          'switch the machine off at its switch — the 4th-axis cable is never plugged in live',
+          // #706 — Makera's order: the cable is last, never plugged in live, and the machine is
+          // switched on again before the wait (the switch itself is step 2's line).
+          'the 4th-axis cable is never plugged in live',
           'onto the two pins',
           'the three M5 × 10 screws',
           'the 4th-axis cable, rear left',
@@ -188,7 +219,12 @@ export function fitSteps(to: MachineMountKind, opts: MountStepOptions = {}): Ste
         ],
       };
     case 'bed':
-      return null;
+      // #717 — the ONE change that puts the MDF wasteboard back on: a bed job needs the surface
+      // under it. Makera publishes no removal steps, so the screws are the figure's four
+      // (inferred); the board is the newest saved wasteboard profile's (surfaceChangeFor).
+      return opts.wasteboard === 'back'
+        ? { title: 'Put the wasteboard back on', items: ['the wasteboard back on', 'its screws', 'switch the machine on'] }
+        : null;
   }
 }
 
@@ -273,28 +309,33 @@ export interface SurfaceChange {
   wasteboard: 'off' | 'back' | null;
 }
 
+/** The newest saved wasteboard surface other than the active profile's, mm-accurate and cloned. */
+function newestSavedWasteboard(machine: MachineRecord, activeId: string | undefined): BedProfile['surface'] | null {
+  const profiles = machine.bedProfiles ?? [];
+  const board = [...profiles]
+    .filter((p) => p.id !== activeId && p.surface.kind === 'wasteboard')
+    .sort((a, b) => (a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : 0))[0];
+  return board === undefined ? null : (JSON.parse(JSON.stringify(board.surface)) as BedProfile['surface']);
+}
+
 /**
- * #706 — the surface a change to `to` leaves. Makera's 4th-axis guide is explicit: the module
- * mounts on the **bare bed** after the MDF wasteboard comes off. So vise → rotary makes the new
- * profile bare-bed and says "wasteboard off"; rotary → vise restores the newest saved wasteboard
- * surface (with its material, size and scars) and says "wasteboard under". Every other change
- * keeps the surface exactly as it was.
+ * #717 — the surface a change to `to` leaves, as Makera installs each accessory
+ * (`docs/design/z1-accessory-install.md`, "What sits on what"): the low-profile vise and the 4th
+ * axis each begin with **"Remove the MDF wasteboard"**, so a change TO either leaves the BARE bed
+ * and says "wasteboard off" — and neither ever puts the board back. The one change that restores
+ * it is a change to a bed job (`bed`: nothing on the pins), which puts the newest saved wasteboard
+ * profile back on ("wasteboard back on"); that surface's material, size and scars come with it.
+ * Every other surface (a user-made fixture plate, a vacuum bed) is kept exactly as it was.
  */
 export function surfaceChangeFor(machine: MachineRecord, to: MachineMountKind): SurfaceChange {
   const active = activeProfileOf(machine);
   const surface = active?.surface ?? null;
-  if (to === 'rotary' && surface !== null && surface.kind === 'wasteboard') {
-    return { surface: bareBedSurface(), words: 'wasteboard off', wasteboard: 'off' };
+  if (to === 'bed' && surface !== null && surface.kind === 'bare-bed') {
+    const restored = newestSavedWasteboard(machine, active?.id);
+    if (restored !== null) return { surface: restored, words: surfaceWords(restored), wasteboard: 'back' };
   }
-  if (to === 'vise' && surface !== null && surface.kind === 'bare-bed') {
-    const profiles = machine.bedProfiles ?? [];
-    const board = [...profiles]
-      .filter((p) => p.id !== active?.id && p.surface.kind === 'wasteboard')
-      .sort((a, b) => (a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : 0))[0];
-    if (board !== undefined) {
-      const restored = JSON.parse(JSON.stringify(board.surface)) as BedProfile['surface'];
-      return { surface: restored, words: surfaceWords(restored), wasteboard: 'back' };
-    }
+  if (to !== 'bed' && surface !== null && surface.kind === 'wasteboard') {
+    return { surface: bareBedSurface(), words: 'wasteboard off', wasteboard: 'off' };
   }
   const kept = surface === null ? bareBedSurface() : (JSON.parse(JSON.stringify(surface)) as BedProfile['surface']);
   return { surface: kept, words: surfaceWords(kept), wasteboard: null };
@@ -390,8 +431,8 @@ export function planMountChange(args: MountChangeArgs): MountChangeOutcome {
   const headline = changeHeadline(from, to);
   const day = at.slice(0, 10);
   const changeWords = from === 'bed' ? `${to} on` : to === 'bed' ? `${from} off` : `${from} off, ${to} on`;
-  // #706 — the wasteboard's move is part of the change the record keeps: the rotary mounts on the
-  // bare bed, and the vise's return puts the board back.
+  // #706/#717 — the wasteboard's move is part of the change the record keeps: the vise and the
+  // rotary mount on the bare bed, and only a change to a bed job puts the board back on.
   const surfaceChange = surfaceChangeFor(machine, to);
   const wasteboardWords =
     surfaceChange.wasteboard === 'off'

@@ -214,7 +214,7 @@ describe('#709 BM-1 the mount readers read the JOB', () => {
 
   it('the defaults are the design’s, each with its source', () => {
     const tape = defaultTapeHold();
-    expect(tape).toEqual({ width: 20, thickness: 0.1, inset: 2, where: null, squareTo: 'front', source: 'default' });
+    expect(tape).toEqual({ width: 20, thickness: 0.2, inset: 2, where: null, squareTo: 'front', source: 'default' });
     expect(TAPE_DEFAULTS.provenance).toMatch(/20 mm/);
     expect(TAPE_DEFAULTS.provenance).toMatch(/not measured/);
     expect(TAPE_DEFAULTS.provenance).toMatch(/2 mm/);

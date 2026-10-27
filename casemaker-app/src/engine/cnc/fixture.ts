@@ -398,8 +398,8 @@ export const VISE_RAIL_WIDTH: Mm = 25;
 /** PROVISIONAL (#520): the clamp screws on the moving rail — numbered 1..n in the photos. */
 export const VISE_CLAMP_SCREWS = 3;
 
-/** PROVISIONAL (#520): the mounting screws along the fixed rail. */
-export const VISE_MOUNT_SCREWS = 4;
+/** The vise's mounting screws — Makera's Low-Profile Vise page: "six M5×20 screws" (#717). */
+export const VISE_MOUNT_SCREWS = 6;
 
 /**
  * PROVISIONAL (#520): a screw head's drawn size, mm — a small square stand-in for the socket

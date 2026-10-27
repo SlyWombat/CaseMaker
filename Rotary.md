@@ -196,7 +196,9 @@ the page is JS-rendered and the first fetch returned only its title):
 
 - Mounts on **two 4 × 11 mm locating pins and three M5×10 screws**, **after removing the MDF
   wasteboard** — so, like the vise (`/Fabrication.md` §7.3), **rotary and tape-down are mutually
-  exclusive setups**, and the module occupies the same pin datum.
+  exclusive setups in practice**: the module occupies the middle of the table, where a taped blank
+  would go (Makera says nothing about tape needing the board absent, #717). The module occupies
+  the same pin datum.
 - **Three-jaw chuck, reverse jaws fitted by default** for larger work; standard jaws for small parts.
   Jaw capacity in either mode: **not stated by the wiki**; Studio's own strings give the size rule
   (< 20 mm standard, 20–35 mm reverse inner-tooth, > 35 mm reverse outer-tooth — §1.3.1).

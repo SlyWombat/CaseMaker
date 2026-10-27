@@ -2,8 +2,10 @@
  * The anchor bracket and its top clamps as a modelled mount (#427, decision Q10: "plate default: anchor
  * bracket + clamps, the bracket's XY as the datum; a confirming touch is offered, optional").
  *
- * HOW IT IS HELD (Makera's Z1 QuickStart, cached at docs/market-research/raw/makera/Z1-QuickStart.txt):
- * the L-bracket is pinned at the anchor with two 4 mm dowels and three M5 screws; the stock is pushed into
+ * HOW IT IS HELD (Makera's Z1 QuickStart, https://wiki.makera.com/en/Z1/QuickStart — the cached
+ * capture lives under the gitignored docs/market-research/, so the URL is the citation):
+ * the L-bracket is pinned at the anchor with two 4 mm dowels and three M5×20 screws (the kit's
+ * longer M5×30 screws are for the thick bracket); the stock is pushed into
  * its inside corner — the stock's FRONT-LEFT corner — and the top clamps hold the far side. Makera sets the
  * work origin "relative to Anchor 1, X Offset = 0, Y Offset = 0" for exactly that.
  *

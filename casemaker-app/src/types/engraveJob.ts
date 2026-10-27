@@ -1083,7 +1083,8 @@ export interface RotaryChuck {
 export interface TapeHold {
   /** The roll's width, mm — the house roll (Makera's 20 mm tape, §5). */
   width: Mm;
-  /** The tape's thickness under the stock, mm — typed on the bed profile; 0.1 mm is the design's. */
+  /** The tape's thickness under the stock, mm — typed on the bed profile; ~0.2 mm is Makera's
+   * (its store page for the 20 mm tape), not measured on the roll in hand. */
   thickness: Mm;
   /** How far in from every edge the strips stop, mm (2 mm, §3.4: the edge scans land just past them). */
   inset: Mm;

@@ -678,8 +678,9 @@ export function clampPlacementsFor(job: Pick<EngraveJob, 'workholding'>): ClampP
  *
  *   - width 20 mm — Makera's 20 mm double-sided tape (the accessory list); the house roll's own
  *     `consumables.tape.widthMm` replaces it when the bed profile states one (R);
- *   - thickness 0.1 mm — TYPED on the bed profile, `/Fabrication.md` §7.3 gives 0.1–0.2 for this
- *     kind of tape; measured only by a bench coupon;
+ *   - thickness ~0.2 mm — Makera's store page for its 20 mm double-sided tape states
+ *     "approximately 0.2mm thick" (`docs/design/z1-accessory-install.md` C21); typed on the bed
+ *     profile until a bench coupon measures the roll in hand;
  *   - inset 2 mm — Case Maker's own (the edge scans land just past each edge, §3.4), so tape past
  *     an edge would be read as a step.
  */
@@ -693,9 +694,9 @@ export interface TapeDefaults {
 
 export const TAPE_DEFAULTS: TapeDefaults = {
   widthMm: 20,
-  thicknessMm: 0.1,
+  thicknessMm: 0.2,
   insetMm: 2,
-  provenance: "Makera's 20 mm tape; 0.1 mm typed, not measured; 2 mm in from every edge",
+  provenance: "Makera's 20 mm tape; ~0.2 mm (Makera's store), not measured here; 2 mm in from every edge",
 };
 
 /** A new taped job's holding: the design's defaults, `source: 'default'`, nothing measured. */

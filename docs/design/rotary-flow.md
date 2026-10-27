@@ -202,9 +202,10 @@ screws, and the 4th-axis cable is never plugged with the machine on.
  Change the machine · Vise off · rotary on                                  [ Close ]
  1 What changes      Vise on the pins → Rotary on the pins     for: Name on a dowel, held in the rotary chuck
  2 Make it safe      ● Home   $H · Idle · homed ✓   ● Work light on  M821 ✓   ● Spindle cold, cutter out ✓
- 3 Take off the vise and the wasteboard
-                     ○ the two pin bolts  ○ lift the vise straight up  ○ the wasteboard's screws  ○ both on the shelf  [Done]
- 4 Fit the rotary    ○ switch the machine off at its switch — the 4th-axis cable is never plugged in live
+ 3 Take off the vise
+                     ○ the left fixed jaw off  ○ the six M5 × 20 screws  ○ lift the vise straight up off the two pins  ○ on its shelf  [Done]
+                     (the wasteboard is already off — the vise mounts on the bare bed too, #717)
+ 4 Fit the rotary    ○ the 4th-axis cable is never plugged in live
                      ○ onto the two pins   ○ the three M5 × 10 screws   ○ the 4th-axis cable, rear left
                      ○ switch the machine on                      ● waiting for it to answer… Online · Idle ✓
                      ○ chuck key in the tray                                                   [Done]

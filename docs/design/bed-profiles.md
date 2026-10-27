@@ -62,7 +62,7 @@ shorter probe does not read as a changed datum.
   { "id": "bp-2026-10-18-a", "name": "Vise on the pins, bare bed", "createdAt": "2026-10-18T13:00Z",
     "basedOn": "default:z1-vise",                       // the shipped profile it started from, or null
     "surface": { "kind": "bare-bed" },                  // or:
-    // "surface": { "kind": "wasteboard", "material": "MDF", "length": 200, "width": 200, "thickness": 2.0,
+    // "surface": { "kind": "wasteboard", "material": "MDF", "length": 206, "width": 206, "thickness": 6.0,   ← Makera's CAD, inferred (C17); confirm with calipers
     //              "position": { "frontLeft": [x, y], "frame": "machine" }, "provenance": { "thickness": "measured:2026-10-18" },
     //              "scars": [...], "lastResurfacedAt": null }        ← the #417 record, moved here
     "datums": {
@@ -127,7 +127,7 @@ S0  Your machine ─────────────────────
     These are the machine's own numbers; the wizard will place fixtures against them.        │
                                                                            [ Next: start ] │
 S1  Start from ───────────────────────────────────────────────────────────────────────────┐
-    ● Makera kit: bare bed, L-bracket (thin) at anchor 1, two top clamps  — what Makera ships │
+    ● Makera kit: wasteboard, L-bracket (thin) at anchor 1, two top clamps — what Makera ships │
     ○ Low-profile vise on its pins, bare bed                                                 │
     ○ Wasteboard with tape                                                                   │
     ○ 4th-axis module on its pins                                                            │
@@ -245,7 +245,7 @@ its "to measure before the gates stop refusing" list.
 
 | Profile | Surface | Placements | Vendor facts carried | To measure |
 |---|---|---|---|---|
-| **Z1 — Makera kit** | bare bed | L-bracket thin at anchor 1, 2 top clamps | anchors 100 × 15, anchor 1/2 positions from the machine | bracket seat Z, arm height, clamp sizes |
+| **Z1 — Makera kit** | wasteboard | L-bracket thin at anchor 1, 2 top clamps | anchors 100 × 15, anchor 1/2 positions from the machine | bracket seat Z, arm height, clamp sizes |
 | **Z1 — Low-profile vise** | bare bed | vise on its pins | jaw bar 10 × 100, ledge 3.1/1.9 (product, measured) | jaw top Z, fixed jaw face X, bar height, body, max opening |
 | **Z1 — Wasteboard + tape** | wasteboard (size typed on first use) | none | — | surface top Z, board thickness |
 | **Z1 — 4th-axis module** | bare bed | module on its pins | rotary offsets from the machine | axis line, chuck body, jaw reach (#238) |

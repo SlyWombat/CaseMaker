@@ -113,7 +113,7 @@ files) are offered on the same card.
 
 ```
  Step 3 of 4 · Holding                                                    [ Close ]
- On the machine now   Vise on the pins · wasteboard under · 2 mm MDF boards ×4, tape    (the active bed profile)
+ On the machine now   Vise on the pins · bare bed · 2 mm MDF boards ×4, tape    (the active bed profile)
                                                                         [ Change the machine… ]
  How is the plate held?                         ┌ top view ─────────────┐
  ◉ In the vise, on the jaw ledge                │ fixed jaw │ plate     │   X runs between the jaws;
@@ -232,8 +232,8 @@ takes: fixture off or on, cutter change, probe in or out, wasteboard resurfacing
  2 Make it safe      ● Home                 $H · Idle · homed ✓
                      ● Work light on        M821 ✓
                      ● Spindle cold, cutter out                      [ I have checked ]
- 3 Take off the vise    ○ the two pin bolts   ○ lift straight up   ○ on its shelf        [ Done ]  (a picture each)
- 4 Fit the rotary       ○ onto the pins   ○ the 4th-axis cable   ○ chuck key in the tray   [ Done ]
+ 3 Take off the vise    ○ the left fixed jaw off   ○ the six M5 × 20 screws   ○ lift it straight up off the two pins   ○ on its shelf        [ Done ]  (a picture each)
+ 4 Fit the rotary       ○ the 4th-axis cable is never plugged in live   ○ onto the two pins   ○ the three M5 × 10 screws   ○ the 4th-axis cable, rear left   ○ switch the machine on   ○ wait for it to answer   ○ chuck key in the tray   [ Done ]
                         axis datum: shipped value (±0.5) · [ Measure now ] or [ use the shipped value ]
  5 Confirm           the bed is now: Rotary on the pins · wasteboard off
                      written to the machine's record: 2026-10-26 09:20 · vise → rotary · for Zoomba badge
@@ -258,7 +258,7 @@ takes: fixture off or on, cutter change, probe in or out, wasteboard resurfacing
 | a cutter | `⌀ 3.175 mm flat end · 12 mm flute` (+ "metal" tag) | the vendor label, `3.17`, `chamfer (…)` |
 | provenance | one sentence in the Technical fold ("typed by you 09:12", "Makera's catalogue row") | a grey chip on every field |
 | a refusal | the sentence + the fix, at the control | a disabled control with "fix the errors above" |
-| what is on the machine | "On the machine now: vise on the pins · wasteboard under" | bed profile, placement, pins kind |
+| what is on the machine | "On the machine now: vise on the pins · bare bed" | bed profile, placement, pins kind |
 | the board under the part | waste board (between the jaws / on the bed) | sacrificial material, sacrificial under |
 | numbers | ≤ 3 decimals, trailing zeros dropped, unit after | 1.42875 mm, 0.0000 mm² |
 | codes | none on screen | `#218`, `vise-default` |
