@@ -856,9 +856,10 @@ describe('EngravePanel — the run sheet mount (#207)', () => {
 
     expect((screen.getByTestId('engrave-save') as HTMLButtonElement).disabled).toBe(true);
     // The button's own tooltip carries the reason, and the line under it spells it out.
-    expect(screen.getByTestId('engrave-save')!.getAttribute('title')).toContain('1 error outstanding');
-    expect(screen.getByTestId('engrave-save-blocked').textContent).toContain('1 error outstanding');
-    expect(screen.getByTestId('engrave-run-errors').textContent).toContain('1 error outstanding');
+    // #724 B2 — the refusal carries the finding's OWN sentence, not a count of errors.
+    expect(screen.getByTestId('engrave-save')!.getAttribute('title')).toContain('cuts to -1.5 mm; only 1 mm is allowed');
+    expect(screen.getByTestId('engrave-save-blocked').textContent).toContain('cuts to -1.5 mm; only 1 mm is allowed');
+    expect(screen.getByTestId('engrave-run-errors').textContent).toContain('cuts to -1.5 mm; only 1 mm is allowed');
   });
 });
 

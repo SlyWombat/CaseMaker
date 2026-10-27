@@ -1548,7 +1548,22 @@ function gougeAlong(
         const j = ((jj % nv) + nv) % nv;
         const phi = wrap180(j * dv - a);
         if (Math.abs(phi) > phiMax) continue;
-        if (tipZ < (h[j * nu + i] as number)) return true;
+        // THE FOOTPRINT IS THE TOOL'S DISC, read in the plane the CUT reads (#240): a column is
+        // under the tool when `dx² + (Z_t·tanφ)² ≤ r_t²`, the same wedge `applyMove` tests. The
+        // rectangle this check used before (X within r_t AND |φ| ≤ atan(r_t/Z_t)) has corners
+        // √2·r_t away, so it called the corner of every stroke's own end disc material the cutter
+        // never reaches — each stroke's retract then read as a rapid through stock.
+        const arc = tipZ * Math.tan((phi * Math.PI) / 180);
+        if (dx * dx + arc * arc > toolRadius * toolRadius + 1e-9) continue;
+        // THE FLOOR AT THAT COLUMN IS THE CUT'S OWN, face and facet together: along the ray at φ
+        // the tool's face crosses at `ρ = Z_t / cos φ`, which is exactly the surface `applyMove`
+        // writes. Comparing the CENTRELINE height `Z_t` instead calls the facet the same pass just
+        // cut — a few thousandths of a millimetre beside the stroke — material the tool is inside,
+        // so every stroke's own retract read as a rapid through stock.
+        const floorHere = tipZ > 0 ? tipZ / Math.cos((phi * Math.PI) / 180) : 0;
+        // GOUGE_EPSILON, for the reason the flat check gives: the two paths' last bits differed
+        // enough for a `<` to call a retract out of its own groove a gouge.
+        if (floorHere < (h[j * nu + i] as number) - GOUGE_EPSILON) return true;
       }
     }
   }

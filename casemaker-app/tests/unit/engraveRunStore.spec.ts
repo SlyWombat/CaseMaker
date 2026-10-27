@@ -349,7 +349,8 @@ describe('engraveRunStore (#206)', () => {
 
     const withError: EngraveGenerated = { ...okGen, findings: [{ severity: 'error', code: 'item-empty', message: 'x' }] };
     expect(runErrorCodes(view({ generated: withError }))).toEqual(['item-empty']);
-    expect(saveBlocker(view({ generated: withError, simStatus: 'ready' }))).toContain('error');
+    // #724 B2 — the first error's own sentence, not `1 error outstanding`.
+    expect(saveBlocker(view({ generated: withError, simStatus: 'ready' }))).toBe('x');
 
     expect(saveBlocker(view({ generated: okGen, simStatus: 'ready', oracle: { ok: false, band: 0.016, levels: [], worst: { underCut: 2, overCut: 0 } } }))).toBe('the simulation does not match the prediction');
     expect(saveBlocker(view({ generated: okGen, staleSince: Date.now(), simStatus: 'ready' }))).toBe('the job or the machine frame changed since it was generated');
@@ -455,7 +456,8 @@ describe('engraveRunStore (#206)', () => {
       ],
     });
     expect(runErrorCodes(v)).toEqual(['tool-into-fixture']);
-    expect(saveBlocker(v)).toBe('1 error outstanding');
+    // #724 B2 — Save names the simulation's own sentence.
+    expect(saveBlocker(v)).toBe("checkpoint 0: the cutter drives 0.967 mm³ into the fixture 'Vise fixed jaw (left)'");
     expect(uploadBlocker(v)).toBe(saveBlocker(v));
   });
 

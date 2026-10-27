@@ -178,8 +178,9 @@ describe('engraveRunStore — a verifier refusal stops the run (#174)', () => {
     expect(run.simStatus).toBeNull();
     expect(simOracle).not.toHaveBeenCalled();
     expect(runErrorCodes(run)).toContain('cut-too-deep');
-    expect(saveBlocker(run)).toMatch(/^\d+ error/);
-    expect(saveBlocker(run)).toContain('outstanding');
+    // #724 B2 — Save is shut WITH the verifier's own sentence for that finding.
+    const refusal = run.generated!.verify!.findings.find((f) => f.code === 'cut-too-deep' && f.severity === 'error')!;
+    expect(saveBlocker(run)).toBe(refusal.message);
   });
 
   it('does not block the same cut when it stays within the membrane', async () => {

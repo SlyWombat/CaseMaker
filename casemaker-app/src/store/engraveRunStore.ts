@@ -74,6 +74,7 @@ export {
   requiredAckCodes,
   runErrorCodes,
   saveBlocker,
+  firstRunError,
   uploadBlocker,
   releaseBlocker,
   oracleSentence,

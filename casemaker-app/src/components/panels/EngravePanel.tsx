@@ -4,7 +4,7 @@ import { newItemDepthFor, newTargetObjectId, useEngraveJobStore } from '@/store/
 import { useEngraveJobFileStore } from '@/store/engraveJobFileStore';
 import { useEngravePreviewStore } from '@/store/engravePreviewStore';
 import { expandEngraveRow, useEngraveRowStore } from '@/store/engraveRowStore';
-import { useEngraveRunStore, releaseBlocker, runErrorCodes, saveBlocker, uploadBlocker } from '@/store/engraveRunStore';
+import { useEngraveRunStore, firstRunError, releaseBlocker, runErrorCodes, saveBlocker, uploadBlocker } from '@/store/engraveRunStore';
 import { useMachineStore } from '@/store/machineStore';
 import { useSimStore } from '@/store/simStore';
 import { useCncModeStore } from '@/store/cncModeStore';
@@ -1702,6 +1702,9 @@ export function EngravePanel(): JSX.Element {
   const verifyErrors = verifyFindings.filter((f) => f.severity === 'error').length;
   const simErrors = run.simDiagnostics.filter((d) => d.severity === 'error').length;
   const runErrors = runErrorCodes(run);
+  // #724 B2 — the row names the FIRST error in its own words (with its move or line where it has
+  // one); the count alone told the operator that something was wrong and nothing about what.
+  const firstRunErrorText = firstRunError(run)?.message ?? null;
   // #688 — Save writes the .nc that goes to Makera Studio: a path to the machine, so it waits on
   // the clearance acknowledgement exactly as Upload and Release do. The statement's home is Cut
   // step 1 (#689); the sentence names it and the Fix beside Save takes the operator there.
@@ -3553,7 +3556,8 @@ export function EngravePanel(): JSX.Element {
 
             {runErrors.length > 0 && (
               <p style={{ ...MUTED, color: SEVERITY_COLOR.error }} data-testid="engrave-run-errors">
-                {runErrors.length} error{runErrors.length === 1 ? '' : 's'} outstanding.
+                {firstRunErrorText ?? `${runErrors.length} error${runErrors.length === 1 ? '' : 's'} outstanding.`}
+                {runErrors.length > 1 && ` (+${runErrors.length - 1} more error${runErrors.length === 2 ? '' : 's'})`}
               </p>
             )}
             {run.error && (

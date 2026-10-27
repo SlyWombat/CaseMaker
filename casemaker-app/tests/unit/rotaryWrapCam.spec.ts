@@ -198,6 +198,70 @@ function loadAndOracle(job: EngraveJob, g: EngraveGenerated): { load: SimLoadOk;
   return { load: r, report };
 }
 
+// ---- #724 B2 — the rapids never cross the stock ---------------------------------
+
+describe('#724 B2 — a rapid never passes through material', () => {
+  /**
+   * The off-bench exercise's default job failed Simulate with 26 rapids through material. The
+   * cause was the rotary gouge check's FOOTPRINT: it tested a rectangle (X within r_t AND
+   * |φ| ≤ atan(r_t/Z_t)) instead of the tool's disc in the work plane, so the corner of every
+   * stroke's own end disc read as material the cutter never reaches and each stroke's retract
+   * was called a gouge. At every default text size the program now loads clean.
+   */
+  it('loads the dowel program with no rapid through material, at every default text size', () => {
+    for (const size of [5, 6, 8, 10]) {
+      const job = dowel({}, { size });
+      const g = generate(tl, job);
+      expect(g.ok, `size ${size}`).toBe(true);
+      const tool = jobTool(job) ?? THIN_TOOL;
+      const session = createSimSession(tl);
+      try {
+        const r = session.load(g.nc ?? '', toSetup(job, Z1), tool, Z1.id);
+        expect(r.ok, `size ${size}`).toBe(true);
+        if (!r.ok) continue;
+        // The claim is about the COLUMN engine's air-move check, so prove it ran and had air
+        // moves to look at: a load that never routed there has no gouges to find.
+        expect(r.summary.rotaryClass, `size ${size}`).toBe('wrapped');
+        expect(r.stats.airMovesChecked, `size ${size}`).toBeGreaterThan(0);
+        expect(
+          r.diagnostics.filter((d) => d.severity === 'error'),
+          `size ${size}`,
+        ).toEqual([]);
+      } finally {
+        session.dispose();
+      }
+    }
+  }, 120_000);
+
+  it('still calls a rapid that descends into the stock a gouge', () => {
+    // The check must keep its teeth: send the cutter down to Z 5 (the surface is at 10) over
+    // uncut stock, and back to the position the program expected. The detour starts from the
+    // first position the program establishes (X, A and Z all known, so the timeline keeps the
+    // move — a rapid whose start it cannot place is not checked at all) and ends there too, so
+    // every later move runs exactly where it did before and the stock is cut as designed.
+    const job = dowel();
+    const g = generate(tl, job);
+    expect(g.ok).toBe(true);
+    const anchor = g.nc?.match(/^G0 X[^\n]* Z15 A[^\n]*$/m)?.[0] ?? '';
+    expect(anchor).toMatch(/^G0 X[\d.]+ Z15 A[\d.]+$/);
+    const text = (g.nc ?? '').replace(anchor, `${anchor}\nG0 X90 A0 Z5\n${anchor}`);
+    expect(text).not.toBe(g.nc);
+    const tool = jobTool(job) ?? THIN_TOOL;
+    const session = createSimSession(tl);
+    try {
+      const r = session.load(text, toSetup(job, Z1), tool, Z1.id);
+      expect(r.ok).toBe(true);
+      if (!r.ok) return;
+      const gouges = r.diagnostics.filter((d) => d.code === 'rapid-through-stock');
+      expect(gouges).toHaveLength(1);
+      expect(gouges[0]!.message).toContain('rapid');
+      expect(gouges[0]!.message).toContain('first at line');
+    } finally {
+      session.dispose();
+    }
+  }, 120_000);
+});
+
 // ---- The acceptance fixture -----------------------------------------------------
 
 describe('Name on a dowel (#240 slice 2, design §7 W)', () => {

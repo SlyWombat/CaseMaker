@@ -340,7 +340,8 @@ describe('preflight: the Generate`s own findings (the worker-only families)', ()
     // sentence of its own — the findings ARE the reason — so there is no `generate-stopped` row.)
     const gate = rows.find((r) => r.owner === 'engraveRunGate')!;
     expect(gate.code).toBe('no-generate');
-    expect(gate.message).toBe('1 error outstanding');
+    // #724 B2 — the gate names the finding's own sentence, not a count of errors.
+    expect(gate.message).toBe(geometry.message);
     expect(gate.message).toBe(saveBlocker(viewWith(generatedWith({ ok: false, stage: 'findings', nc: null, findings: [geometry] }))));
     expect(rows.some((r) => r.code === 'generate-stopped')).toBe(false);
   });

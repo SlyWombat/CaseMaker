@@ -123,6 +123,23 @@ export function runErrorCodes(v: EngraveRunView): string[] {
 }
 
 /**
+ * #724 B2 — THE FIRST ERROR, as the operator would read it. A run with errors used to be refused
+ * with "N errors outstanding", which names none of them: the refusal has to carry the finding's
+ * own sentence (with its move or line where it has one), the same rule every other blocker
+ * follows. The count remains only as the fallback for a view that named an error with no text.
+ */
+export function firstRunError(v: EngraveRunView): { code: string; message: string } | null {
+  for (const f of v.generated?.findings ?? []) {
+    if (f.severity === 'error') return { code: f.code, message: f.message };
+  }
+  for (const f of v.generated?.verify?.findings ?? []) {
+    if (f.severity === 'error') return { code: f.code, message: f.message };
+  }
+  for (const d of simErrors(v.simDiagnostics)) return { code: d.code, message: d.message };
+  return null;
+}
+
+/**
  * §4 — a printed figure: at most three decimals, trailing zeros dropped (`0.04`, `0.001`, `0`),
  * never `0.0000 mm²`. Returned as a number so a template prints it without a second rounding.
  * #691 — the oracle numbers now sit in the Simulate panel as facts about the picture, and the
@@ -356,7 +373,10 @@ export function saveBlocker(v: EngraveRunView): string | null {
   if (!v.generated) return 'Generate first.';
   if (v.staleSince !== null) return staleSentence(v.staleReason);
   const errors = runErrorCodes(v);
-  if (errors.length > 0) return `${errors.length} error${errors.length === 1 ? '' : 's'} outstanding`;
+  if (errors.length > 0) {
+    const first = firstRunError(v);
+    return first === null ? `${errors.length} error${errors.length === 1 ? '' : 's'} outstanding` : first.message;
+  }
   if (v.phase === 'generating' || v.phase === 'simulating' || v.phase === 'checking') return 'the run is still going';
   if (v.generated.nc === null) return 'no program was produced';
   if (v.simStatus !== 'ready') return 'the simulation did not finish';
