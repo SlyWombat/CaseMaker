@@ -47,11 +47,13 @@ import {
   refreezeSentence,
   shippedDatumFor,
   shippedDatumProfileName,
+  surfaceChangeFor,
   surfaceWords,
   takeOffSteps,
   targetMountsFor,
   type MachineMountKind,
   type MountDatumKey,
+  type SurfaceChange,
 } from '@/platform/machineChange';
 import { checkMachine, homeMachine, type MachineAnswer } from '@/platform/machineChangeRun';
 import { toggleLight } from '@/platform/machineLight';
@@ -235,6 +237,9 @@ function Wizard({
   const [onChecks, setOnChecks] = useState<boolean[]>([]);
   const [takenOff, setTakenOff] = useState(false);
   const [fitted, setFitted] = useState(false);
+  // #706 — the rotary fit's Done waits for the machine's own answer after power-on.
+  const [fitChecking, setFitChecking] = useState(false);
+  const [fitNote, setFitNote] = useState<string | null>(null);
   const [datumChoice, setDatumChoice] = useState<'measure' | 'shipped' | null>(null);
 
   const [confirming, setConfirming] = useState(false);
@@ -253,10 +258,23 @@ function Wizard({
 
   // The step words are the change as it was ASKED FOR. After Confirm the machine's active profile
   // changes, so `from` (read live) would name the incoming fixture on both sides; the frozen copy
-  // keeps step 1 and the take-off title describing what the operator actually did.
+  // keeps step 1 and the take-off title describing what the operator actually did. #706 — the
+  // wasteboard's move is part of the change, and its words are frozen the same way.
   const shownFrom = confirmed?.result.from ?? from;
-  const takeWords = takeOffSteps(shownFrom);
-  const fitWords = target === null ? null : fitSteps(target);
+  const plannedSurface: SurfaceChange | null =
+    machine === null || target === null ? null : surfaceChangeFor(machine, target);
+  const plannedWasteboard: 'off' | 'back' | null =
+    confirmed?.result.wasteboard ?? plannedSurface?.wasteboard ?? null;
+  const takeWords = takeOffSteps(shownFrom, { wasteboard: plannedWasteboard === 'off' ? 'off' : null });
+  const fitWords = target === null ? null : fitSteps(target, { wasteboard: plannedWasteboard === 'back' ? 'back' : null });
+  const bedNowWords =
+    plannedWasteboard === 'off'
+      ? 'wasteboard off'
+      : plannedWasteboard === 'back'
+        ? 'wasteboard under'
+        : active !== null
+          ? surfaceWords(active.surface)
+          : null;
   const datumDesc = target === null ? null : datumDescriptorFor(target);
   const shippedDatum = datumDesc === null ? null : shippedDatumFor(machine, datumDesc.key);
 
@@ -325,6 +343,30 @@ function Wizard({
     setLightBusy(false);
   }
 
+  /**
+   * #706 — THE ROTARY FIT'S DONE IS THE MACHINE'S OWN ANSWER. Makera's 4th-axis cable is never
+   * plugged in live: the operator switches the machine off for the fit and on again afterwards, and
+   * this press asks `?` through the SAME status read step 2 uses. No answer, no advance — and power
+   * stays the machine's own switch, never this app (#479).
+   */
+  async function doFitDone(): Promise<void> {
+    if (target === 'rotary' && address !== null) {
+      setFitChecking(true);
+      setFitNote(null);
+      const a = await checkMachine(address);
+      setFitChecking(false);
+      if (a.kind !== 'ok') {
+        setFitNote(
+          `The machine has not answered — ${a.detail}. Switch it on at its switch, wait for its screen, then press Done again.`,
+        );
+        return;
+      }
+      setFitNote(`The machine answered${a.rest.state !== null ? ` · ${a.rest.state}` : ''} ✓`);
+    }
+    setFitted(true);
+    advance();
+  }
+
   // Step 5's closing lines: each is its own press, answered by the machine, and neither is required
   // for the record — which is already written by the time they exist.
   async function doLightOff(): Promise<void> {
@@ -355,13 +397,15 @@ function Wizard({
         : null;
   const targetDone = confirmed !== null || (target !== null && targetError === null);
   const safeDone = home.done && light.done && byHand;
-  const takeDone = shownFrom === 'bed' ? true : takenOff;
+  // #706 — a bed → rotary change still has the wasteboard to take off, so the step's own words
+  // decide whether there is anything to do (not the mount alone).
+  const takeDone = takeWords === null ? true : takenOff;
   const datumResolved = datumDesc === null || datumChoice !== null;
   const fitDone = target === 'bed' ? true : fitted && datumResolved;
   const firstIncomplete = !targetDone ? 1 : !safeDone ? 2 : !takeDone ? 3 : !fitDone ? 4 : 5;
   const shown = confirmed !== null ? 5 : (view ?? firstIncomplete);
   /** Nothing is on / nothing is fitted: the step is complete without a tick. */
-  const skipped = (n: number): boolean => (n === 3 && shownFrom === 'bed') || (n === 4 && target === 'bed');
+  const skipped = (n: number): boolean => (n === 3 && takeWords === null) || (n === 4 && target === 'bed');
   const stateOf = (n: number): 'done' | 'current' | 'later' => {
     // Once the change is written, every step is behind the operator — including the Confirm row.
     if (confirmed !== null) return 'done';
@@ -480,6 +524,7 @@ function Wizard({
         profileName: plan.profile.name,
         from: plan.from,
         to: plan.to,
+        wasteboard: plan.wasteboard,
         refreeze,
         jobName: job?.name ?? null,
       },
@@ -854,14 +899,16 @@ function Wizard({
                   type="button"
                   className="mc-btn mc-btn--primary"
                   data-testid="machine-change-fit-done"
-                  disabled={!fitWords.items.every((_, i) => onChecks[i] === true) || !datumResolved}
-                  onClick={() => {
-                    setFitted(true);
-                    advance();
-                  }}
+                  disabled={fitChecking || !fitWords.items.every((_, i) => onChecks[i] === true) || !datumResolved}
+                  onClick={() => void doFitDone()}
                 >
-                  Done
+                  {fitChecking ? 'Waiting for the machine…' : 'Done'}
                 </button>
+                {fitNote !== null ? (
+                  <p className="mc-note" data-testid="machine-change-fit-note">
+                    {fitNote}
+                  </p>
+                ) : null}
               </div>
             ) : (
               <span className="mc-meta">
@@ -879,7 +926,7 @@ function Wizard({
               <div className="mc-confirm" data-testid="machine-change-confirm">
                 <span className="mc-meta" data-testid="machine-change-bed-now">
                   the bed is now: {targetLabel ?? '—'}
-                  {active !== null ? ` · ${surfaceWords(active.surface)}` : ''}
+                  {bedNowWords !== null ? ` · ${bedNowWords}` : ''}
                 </span>
                 {confirmed === null ? (
                   <>

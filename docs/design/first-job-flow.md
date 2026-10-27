@@ -235,7 +235,7 @@ takes: fixture off or on, cutter change, probe in or out, wasteboard resurfacing
  3 Take off the vise    ○ the two pin bolts   ○ lift straight up   ○ on its shelf        [ Done ]  (a picture each)
  4 Fit the rotary       ○ onto the pins   ○ the 4th-axis cable   ○ chuck key in the tray   [ Done ]
                         axis datum: shipped value (±0.5) · [ Measure now ] or [ use the shipped value ]
- 5 Confirm           the bed is now: Rotary on the pins · wasteboard under
+ 5 Confirm           the bed is now: Rotary on the pins · wasteboard off
                      written to the machine's record: 2026-10-26 09:20 · vise → rotary · for Zoomba badge
                      ● Work light off · ● Home                                        [ Back to the job ]
 ```

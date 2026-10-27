@@ -121,28 +121,72 @@ export interface StepWords {
   items: string[];
 }
 
+/**
+ * #706 — what the change does with the MDF wasteboard. Makera's 4th-axis guide is explicit: the
+ * module mounts **after removing the MDF wasteboard**, and the 4th-axis cable is **never plugged in
+ * with the machine powered**. So a vise → rotary change takes the board off too, and rotary → vise
+ * puts it back; the steps below carry those actions in their own order.
+ */
+export interface MountStepOptions {
+  /** 'off' when this change removes a wasteboard, 'back' when it restores one, null when it stays. */
+  wasteboard?: 'off' | 'back' | null;
+}
+
 /** The outgoing fixture's steps. Null when nothing is on the pins. */
-export function takeOffSteps(from: MachineMountKind): StepWords | null {
+export function takeOffSteps(from: MachineMountKind, opts: MountStepOptions = {}): StepWords | null {
   switch (from) {
-    case 'vise':
-      return { title: 'Take off the vise', items: ['the two pin bolts', 'lift it straight up', 'on its shelf'] };
+    case 'vise': {
+      const items = ['the two pin bolts', 'lift it straight up', 'on its shelf'];
+      // #706 — the board comes off after the vise: the module (and the vise) sit on the bare bed.
+      if (opts.wasteboard === 'off') items.push('the wasteboard’s screws', 'the wasteboard on its shelf');
+      return { title: 'Take off the vise', items };
+    }
     case 'rotary':
       return {
         title: 'Take off the rotary',
-        items: ['the 4th-axis cable', 'the two pin bolts', 'lift it straight up', 'on its shelf'],
+        items: [
+          // #706 — power first: the cable is never unplugged live. The machine's own switch, not
+          // this app (#479): nothing here powers, homes or commands it.
+          'switch the machine off at its switch — the 4th-axis cable is never unplugged live',
+          'the 4th-axis cable, rear left',
+          'the three M5 × 10 screws',
+          'lift it straight up',
+          'on its shelf',
+        ],
       };
     case 'bed':
-      return null;
+      // #706 — nothing is on the pins, but a wasteboard can still be on the bed and must come off
+      // before the rotary mounts. Without one, there is no take-off step at all.
+      return opts.wasteboard === 'off'
+        ? { title: 'Take off the wasteboard', items: ['the wasteboard’s screws', 'the wasteboard on its shelf'] }
+        : null;
   }
 }
 
 /** The incoming fixture's steps. Null when the bed is left clear. */
-export function fitSteps(to: MachineMountKind): StepWords | null {
+export function fitSteps(to: MachineMountKind, opts: MountStepOptions = {}): StepWords | null {
   switch (to) {
-    case 'vise':
-      return { title: 'Fit the vise', items: ['onto the pins', 'the two pin bolts', 'the fixed jaw on the left'] };
+    case 'vise': {
+      const items: string[] = [];
+      // #706 — the board goes back under the fixture.
+      if (opts.wasteboard === 'back') items.push('the wasteboard back on', 'its screws');
+      items.push('onto the pins', 'the two pin bolts', 'the fixed jaw on the left');
+      return { title: 'Fit the vise', items };
+    }
     case 'rotary':
-      return { title: 'Fit the rotary', items: ['onto the pins', 'the 4th-axis cable', 'chuck key in the tray'] };
+      return {
+        title: 'Fit the rotary',
+        items: [
+          // #706 — Makera's order, verbatim in substance: power off, cable last, power on, wait.
+          'switch the machine off at its switch — the 4th-axis cable is never plugged in live',
+          'onto the two pins',
+          'the three M5 × 10 screws',
+          'the 4th-axis cable, rear left',
+          'switch the machine on',
+          'wait for it to answer',
+          'chuck key in the tray',
+        ],
+      };
     case 'bed':
       return null;
   }
@@ -205,6 +249,57 @@ export function surfaceWords(surface: BedProfile['surface']): string {
   }
 }
 
+/** The bed with nothing on it — the schema's bare-bed row, every measurement empty (#706). */
+export function bareBedSurface(): BedProfile['surface'] {
+  return {
+    kind: 'bare-bed',
+    material: null,
+    length: null,
+    width: null,
+    thickness: null,
+    position: null,
+    provenance: {},
+    scars: [],
+    lastResurfacedAt: null,
+  };
+}
+
+/** What a mount change leaves on the bed, and the words step 5 uses for it (#706). */
+export interface SurfaceChange {
+  surface: BedProfile['surface'];
+  /** "wasteboard off" / "wasteboard under" — the words the change leaves on the bed. */
+  words: string;
+  /** What happened to the wasteboard, or null when it stayed. */
+  wasteboard: 'off' | 'back' | null;
+}
+
+/**
+ * #706 — the surface a change to `to` leaves. Makera's 4th-axis guide is explicit: the module
+ * mounts on the **bare bed** after the MDF wasteboard comes off. So vise → rotary makes the new
+ * profile bare-bed and says "wasteboard off"; rotary → vise restores the newest saved wasteboard
+ * surface (with its material, size and scars) and says "wasteboard under". Every other change
+ * keeps the surface exactly as it was.
+ */
+export function surfaceChangeFor(machine: MachineRecord, to: MachineMountKind): SurfaceChange {
+  const active = activeProfileOf(machine);
+  const surface = active?.surface ?? null;
+  if (to === 'rotary' && surface !== null && surface.kind === 'wasteboard') {
+    return { surface: bareBedSurface(), words: 'wasteboard off', wasteboard: 'off' };
+  }
+  if (to === 'vise' && surface !== null && surface.kind === 'bare-bed') {
+    const profiles = machine.bedProfiles ?? [];
+    const board = [...profiles]
+      .filter((p) => p.id !== active?.id && p.surface.kind === 'wasteboard')
+      .sort((a, b) => (a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : 0))[0];
+    if (board !== undefined) {
+      const restored = JSON.parse(JSON.stringify(board.surface)) as BedProfile['surface'];
+      return { surface: restored, words: surfaceWords(restored), wasteboard: 'back' };
+    }
+  }
+  const kept = surface === null ? bareBedSurface() : (JSON.parse(JSON.stringify(surface)) as BedProfile['surface']);
+  return { surface: kept, words: surfaceWords(kept), wasteboard: null };
+}
+
 // ── The outcome ─────────────────────────────────────────────────────────────────────────────────
 
 export interface MountChangeArgs {
@@ -230,6 +325,8 @@ export interface MountChangePlan {
   headline: string;
   /** The new profile, not yet saved. */
   profile: BedProfile;
+  /** What the change did with the MDF wasteboard (#706): removed it, restored it, or left it. */
+  wasteboard: SurfaceChange['wasteboard'];
   /** The machine record carrying it as active. */
   machine: MachineRecord;
   /** The accessory records to write after the machine PUT: the outgoing one back to the box, the incoming one checked out. */
@@ -293,15 +390,25 @@ export function planMountChange(args: MountChangeArgs): MountChangeOutcome {
   const headline = changeHeadline(from, to);
   const day = at.slice(0, 10);
   const changeWords = from === 'bed' ? `${to} on` : to === 'bed' ? `${from} off` : `${from} off, ${to} on`;
+  // #706 — the wasteboard's move is part of the change the record keeps: the rotary mounts on the
+  // bare bed, and the vise's return puts the board back.
+  const surfaceChange = surfaceChangeFor(machine, to);
+  const wasteboardWords =
+    surfaceChange.wasteboard === 'off'
+      ? ', wasteboard off'
+      : surfaceChange.wasteboard === 'back'
+        ? ', wasteboard back on'
+        : '';
   const historyWhat =
-    `created from "${active.name}": ${changeWords}` + (args.jobName ? `, for ${args.jobName}` : '');
+    `created from "${active.name}": ${changeWords}${wasteboardWords}` +
+    (args.jobName ? `, for ${args.jobName}` : '');
 
   const profile: BedProfile = {
     id: args.profileId,
     name: /^\d{4}-\d{2}-\d{2}$/.test(day) ? `${headline} — ${day}` : headline,
     createdAt: at,
     basedOn: active.id,
-    surface: { ...active.surface, scars: active.surface.scars.map((s) => ({ ...s })) },
+    surface: surfaceChange.surface,
     datums,
     placements,
     preferredMounting,
@@ -331,6 +438,7 @@ export function planMountChange(args: MountChangeArgs): MountChangeOutcome {
     to,
     headline,
     profile,
+    wasteboard: surfaceChange.wasteboard,
     machine: {
       ...machine,
       bedProfiles: [...(machine.bedProfiles ?? []), profile],

@@ -38,6 +38,8 @@ export interface MachineChangeResult {
   profileName: string;
   from: MachineMountKind;
   to: MachineMountKind;
+  /** #706 — the MDF wasteboard went off with the rotary ('off'), or came back with the vise ('back'). */
+  wasteboard: 'off' | 'back' | null;
   /** True when a frozen job's mount is no longer on the machine — generate it again. */
   refreeze: boolean;
   jobName: string | null;
