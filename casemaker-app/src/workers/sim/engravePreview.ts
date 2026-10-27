@@ -42,7 +42,10 @@ import {
   traceSweptProfile,
 } from '@/engine/cnc/engrave/partPlan';
 import type { JobFinding } from '@/engine/cnc/engrave/jobSetup';
+import { clampPlacementsFor, jobMount } from '@/engine/cnc/engrave/jobSetup';
 import { jobVise, viseBody } from '@/engine/cnc/fixture';
+import { bracketMount } from '@/engine/cnc/mounts/bracket';
+import type { ObstacleBox } from '@/engine/cnc/setup';
 import { sacrificialBoxes, type SacrificialBox } from '@/engine/cnc/sacrificial';
 import { cuttingRadiusForSweep } from '@/engine/cnc/tool';
 import { toolForJob } from '@/engine/cnc/toolRegistry';
@@ -646,14 +649,29 @@ export function createEngravePreviewer(tl: ManifoldToplevel): EngravePreviewer {
       lost.push({ labelId: engrave.id, area, polygons, mesh });
     }
 
-    const fixture: EngravePreviewFixture[] = viseBody(job.stock, jobVise(job), job.sacrificial).boxes.map(
-      (box) => {
-        const solid = boxSolid(tl, box);
-        const mesh = meshOutputOf(solid);
-        solid.delete();
-        return { id: box.id, label: box.label, mesh };
-      },
-    );
+    // #725 W2 — the fixture is the JOB's mount, the same boxes the verifier checks: the vise's
+    // jaws for a vise job, the bracket's arms and the job's own clamps for a bracket job, and
+    // nothing above the part for tape (the tape is under the stock). A bed job used to be drawn
+    // with the vise's jaws, a fixture that is not on the machine at all.
+    const mountKind = jobMount(job);
+    const fixtureBoxes: ObstacleBox[] =
+      mountKind === 'bracket'
+        ? (bracketMount(
+            { x: job.stock.length, y: job.stock.width, z: job.stock.thickness },
+            'bracket',
+            shop.defaults ?? null,
+            job.sacrificial.under?.thickness ?? 0,
+            clampPlacementsFor(job),
+          )?.fixture.boxes ?? [])
+        : mountKind === 'vise'
+          ? viseBody(job.stock, jobVise(job), job.sacrificial).boxes
+          : [];
+    const fixture: EngravePreviewFixture[] = fixtureBoxes.map((box) => {
+      const solid = boxSolid(tl, box);
+      const mesh = meshOutputOf(solid);
+      solid.delete();
+      return { id: box.id, label: box.label, mesh };
+    });
 
     // The sacrificial material (#213), one mesh per box, from the same `sacrificialBoxes` the
     // sweep and the verifier consume — never hand-computed here. Each box is an axis-aligned

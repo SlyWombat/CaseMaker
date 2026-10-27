@@ -23,6 +23,8 @@ import {
   shippedDatumFor,
   shippedDatumProfileName,
   surfaceWords,
+  surfaceChangeFor,
+  bareBedSurface,
   takeOffSteps,
   targetMountsFor,
 } from '@/platform/machineChange';
@@ -243,6 +245,8 @@ describe('#693 what is on the machine', () => {
     expect(changeHeadline('vise', 'bed', 1)).toBe('Vise off · bracket at anchor 1 on');
     expect(changeHeadline('bed', 'bed', 1)).toBe('Bracket at anchor 1 on');
     expect(changeRecordWords('bed', 'bed', 1)).toBe('bracket at anchor 1 on');
+    // #725 W14 — a change that also fits the bracket says so in the record, as the headline does.
+    expect(changeRecordWords('vise', 'bed', 1)).toBe('vise → the bed · bracket at anchor 1 on');
     // Nothing on the pins but a board on the bed: the board is still a take-off.
     expect(takeOffSteps('bed', { wasteboard: 'off' })?.items).toEqual([
       'the wasteboard’s screws',
@@ -259,6 +263,31 @@ describe('#693 what is on the machine', () => {
     expect(datumDescriptorFor('rotary')).toEqual({ key: 'rotaryAxis', word: 'axis datum' });
     expect(surfaceWords(machineRecord().bedProfiles![0]!.surface)).toBe('wasteboard under');
     expect(MACHINE_MOUNT_WORDS.rotary).toBe('Rotary on the pins');
+  });
+
+  it('#725 W15 — a change to a bed job restores the machine’s own recorded wasteboard when no profile carries one', () => {
+    // The exercise's machine: one profile, bare (the vise was on it), and the #417 wasteboard
+    // record still says 10 mm measured. The board goes back on, in the record's numbers.
+    const base = machineRecord();
+    const prof = base.bedProfiles![0]!;
+    const machine = machineRecord({
+      wasteboard: {
+        thickness: 10,
+        thicknessSource: 'measured',
+        measuredAt: '2026-10-15T07:00:00.000Z',
+        lastResurfacedAt: null,
+        scars: [{ x: -150, y: -150, width: 40, height: 20, at: '2026-10-15T08:00:00.000Z', jobId: 'job-1' }],
+      },
+      bedProfiles: [{ ...prof, surface: bareBedSurface(), placements: [], preferredMounting: [] }],
+    });
+
+    const change = surfaceChangeFor(machine, 'bed');
+    expect(change.wasteboard).toBe('back');
+    expect(change.words).toBe('wasteboard under');
+    expect(change.surface.kind).toBe('wasteboard');
+    expect(change.surface.thickness).toBe(10);
+    expect(change.surface.provenance.thickness).toBe('measured:2026-10-15T07:00:00.000Z');
+    expect(change.surface.scars).toHaveLength(1);
   });
 });
 

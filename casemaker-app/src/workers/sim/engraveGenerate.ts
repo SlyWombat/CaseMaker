@@ -1668,7 +1668,7 @@ export function engraveRegions(
     ...validateJob(
       job,
       { deg: drillResolved.settings.pointAngleDeg, source: drillResolved.sources.pointAngleDeg },
-      { derivedCores: derivedCores?.length ?? 0, bed: shop.bed ?? null },
+      { derivedCores: derivedCores?.length ?? 0, bed: shop.bed ?? null, defaults: shop.defaults },
     ),
     // #240 — the vise's validator is the VISE's; a rotary job's holding findings are slice 3's.
     ...(job.workholding.kind === 'vise'
@@ -2382,7 +2382,7 @@ function facingProgram(
       ),
       // #710 — the skim's hops and retracts clear the mount too: the raster crosses the whole top,
       // so a clamp would otherwise be refused by every facing pass on a bracket job.
-      travelHeightOver(mount?.obstacles ?? [], job.jawClearance),
+      travelHeightOver(mount?.obstacles ?? [], job.jawClearance, mount?.uncertainty ?? 0),
       machine.rapidEstimate,
     );
     const posted = postZ1(ir, { ...ctx, toolKey }, machine, { vacuum: span });
@@ -2527,7 +2527,8 @@ function simulateProgram(
   priorRemoval?: NodeMeshOutput,
 ): SimLoadResult {
   const mill = jobMachine(job, calibration);
-  const setup = toSetup(job, mill, shop.mount?.fixture ?? undefined);
+  // #725 B7 — the wasteboard rides the setup as the under-board (a through cut may enter it).
+  const setup = toSetup(job, mill, shop.mount?.fixture ?? undefined, shop.bed ?? null);
   const session = createSimSession(tl);
   try {
     return session.load(nc, setup, tool, job.machineId, {
@@ -3461,7 +3462,9 @@ export function engraveGenerate(
     return {
       ok: false,
       stage: 'findings',
-      findings: dedupeFindings([...setupProblems, ...validateJob(job)]),
+      // #725 B7 — the bed facts ride this call too: it is the same document gate as `engraveRegions`,
+      // and a through sentence judged without them would name the vise on a bed job.
+      findings: dedupeFindings([...setupProblems, ...validateJob(job, null, { bed: shop.bed ?? null, defaults: shop.defaults })]),
       feeds: null,
       threads: null,
       threadMachining: null,
@@ -4223,7 +4226,11 @@ function generateOneProgram(
   // defaults — so every hop and retract runs above the clamps, and the verifier (which checks
   // rapids as it checks cuts) refuses any rapid that still passes below one. A vise or tape job has
   // nothing above the stock and keeps the CAM's own floors.
-  ir = raiseTravelOver(ir, travelHeightOver(shop.mount?.obstacles ?? [], job.jawClearance), mill.rapidEstimate);
+  ir = raiseTravelOver(
+    ir,
+    travelHeightOver(shop.mount?.obstacles ?? [], job.jawClearance, shop.mount?.uncertainty ?? 0),
+    mill.rapidEstimate,
+  );
 
   // #432 — FACING IS ITS OWN PROGRAM, and this one is untouched by it.
   //
@@ -4300,7 +4307,8 @@ function generateOneProgram(
   const limitReasonAt = stack
     ? (x: number, y: number): string => depthLimitReason(stack, job, x, y)
     : undefined;
-  const setup = toSetup(job, mill, shop.mount?.fixture ?? undefined);
+  // #725 B7 — the wasteboard rides the setup as the under-board (a through cut may enter it).
+  const setup = toSetup(job, mill, shop.mount?.fixture ?? undefined, shop.bed ?? null);
 
   // 5. the post-processor (#173). Its `ctx` comes first because the facing file is posted from it
   // too (step 6), and the two files share one job name, stock and frame.

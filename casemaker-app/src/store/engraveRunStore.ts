@@ -399,7 +399,9 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
         .getState()
         .loadProgram(
           generated.nc,
-          toSetup(job, jobMachine(job, calibration), mount?.fixture),
+          // #725 B7 — the wasteboard is the setup's under-board for a bed job: a through cut may
+          // enter it, and the sweep's bed floor is the board's underside.
+          toSetup(job, jobMachine(job, calibration), mount?.fixture, bed),
           tool,
           job.machineId,
           calibration,

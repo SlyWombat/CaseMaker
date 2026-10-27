@@ -114,7 +114,10 @@ export function changeHeadline(from: MachineMountKind, to: MachineMountKind, bra
 /** "vise → rotary", the words step 5 writes into the record line. */
 export function changeRecordWords(from: MachineMountKind, to: MachineMountKind, bracket: 1 | 2 | null = null): string {
   if (from === 'bed' && to === 'bed') return bracket === null ? 'the bed unchanged' : `bracket at anchor ${bracket} on`;
-  return `${MOUNT_WORDS_LOWER[from]} → ${MOUNT_WORDS_LOWER[to]}`;
+  const words = `${MOUNT_WORDS_LOWER[from]} → ${MOUNT_WORDS_LOWER[to]}`;
+  // #725 W14 — a change that also fits the bracket says so, as the headline does: the record is
+  // the one place the change is written down, and the bracket is part of it.
+  return bracket !== null && to === 'bed' ? `${words} · bracket at anchor ${bracket} on` : words;
 }
 
 /** One physical step's words: the mockup's three-item lists, one action per line. */
@@ -347,6 +350,37 @@ function newestSavedWasteboard(machine: MachineRecord, activeId: string | undefi
 }
 
 /**
+ * #725 W15 — the wasteboard surface a bed job gets when the profiles hold no wasteboard at all:
+ * the machine's own #417 wasteboard record (its thickness and how it was read, its scars and its
+ * resurfacing). That record is where the board is tracked when no bed profile happened to carry
+ * it — the exercise's machine, whose only profile was migrated with the vise on a bare bed, still
+ * records a 10 mm measured board — so a change to a bed job puts a REAL board back on and says
+ * "wasteboard under", instead of leaving the bed bare with no step at all.
+ */
+function recordedWasteboardSurface(machine: MachineRecord): BedProfile['surface'] | null {
+  const board = machine.wasteboard;
+  if (board === null || board === undefined) return null;
+  return {
+    kind: 'wasteboard',
+    material: null,
+    length: null,
+    width: null,
+    thickness: board.thickness,
+    position: null,
+    provenance: {
+      thickness:
+        board.thicknessSource === 'measured'
+          ? board.measuredAt !== null
+            ? `measured:${board.measuredAt}`
+            : 'measured'
+          : 'typed',
+    },
+    scars: board.scars.map((s) => ({ ...s })),
+    lastResurfacedAt: board.lastResurfacedAt,
+  };
+}
+
+/**
  * #717 — the surface a change to `to` leaves, as Makera installs each accessory
  * (`docs/design/z1-accessory-install.md`, "What sits on what"): the low-profile vise and the 4th
  * axis each begin with **"Remove the MDF wasteboard"**, so a change TO either leaves the BARE bed
@@ -359,7 +393,9 @@ export function surfaceChangeFor(machine: MachineRecord, to: MachineMountKind): 
   const active = activeProfileOf(machine);
   const surface = active?.surface ?? null;
   if (to === 'bed' && surface !== null && surface.kind === 'bare-bed') {
-    const restored = newestSavedWasteboard(machine, active?.id);
+    // #725 W15 — the newest saved wasteboard profile, else the machine's own #417 record: a bed
+    // job needs a board under it, and a house whose profiles never carried one still has that.
+    const restored = newestSavedWasteboard(machine, active?.id) ?? recordedWasteboardSurface(machine);
     if (restored !== null) return { surface: restored, words: surfaceWords(restored), wasteboard: 'back' };
   }
   if (to !== 'bed' && surface !== null && surface.kind === 'wasteboard') {

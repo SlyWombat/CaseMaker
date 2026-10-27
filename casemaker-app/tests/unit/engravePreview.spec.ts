@@ -112,6 +112,31 @@ describe('engravePreview (#205)', () => {
     for (const piece of p.fixture) expect(meshVolume(piece.mesh)).toBeGreaterThan(0);
   });
 
+  it('#725 W2 — the fixture is the JOB’s mount: the bracket and its clamps, none above a taped part', () => {
+    const bracket = dj();
+    bracket.workholding = {
+      kind: 'bracket',
+      bracket: {
+        anchor: 1,
+        variant: 'thin',
+        clamps: [
+          { edge: 'back', at: 22.5 },
+          { edge: 'back', at: 77.5 },
+        ],
+        source: 'saved',
+      },
+    };
+    const p = buildPreview(bracket);
+    // The same boxes the verifier checks (`bracketMount`), never the vise's jaws.
+    expect(p.fixture.map((f) => f.id)).toEqual(['bracket-front-arm', 'bracket-left-arm', 'clamp-1', 'clamp-2']);
+    for (const piece of p.fixture) expect(meshVolume(piece.mesh)).toBeGreaterThan(0);
+
+    const tape = dj();
+    tape.workholding = { kind: 'tape', tape: { width: 20, thickness: 0.2, inset: 2, where: null, squareTo: 'front', source: 'saved' } };
+    // Tape is UNDER the stock: nothing stands above the part, and the vise is not drawn.
+    expect(buildPreview(tape).fixture).toEqual([]);
+  });
+
   it('draws the same vise height for a 3.8 mm blank, a 12 mm blank and a 50 mm cube (#508)', () => {
     // The picture used to be the collision envelope, whose boxes run deeper as the stock thickens;
     // drawn from it, a thicker blank appeared to grow the jaws. The cube is the loud case.

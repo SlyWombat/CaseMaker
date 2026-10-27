@@ -7,7 +7,9 @@ import { describe, expect, it } from 'vitest';
 
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { flatEndMill } from '@/engine/cnc/tool';
-import { validateJob, type BedUnderFacts } from '@/engine/cnc/engrave/jobSetup';
+import { toSetup, validateJob, type BedUnderFacts } from '@/engine/cnc/engrave/jobSetup';
+import { jobMachine } from '@/engine/cnc/calibration';
+import { jobVise } from '@/engine/cnc/fixture';
 import { parseGcode } from '@/engine/cnc/gcode';
 import { generate } from './helpers/engravePipeline';
 import { tl } from './helpers/manifoldExec';
@@ -154,6 +156,27 @@ describe('#712 through the pipeline: the tag on each surface (§6 fixture 2)', (
     expect(g.ok, `${g.stage} ${JSON.stringify(g.errors)}`).toBe(true);
     expect(g.nc).not.toBeNull();
     expect(deepestCutZ(g.nc ?? '')).toBeCloseTo(-2.3, 6);
+  });
+
+  it('#725 B7 — the wasteboard rides the SWEEP’s setup as the under-board, and only there', () => {
+    const job = sheet();
+    const setup = toSetup(job, jobMachine(job, null), undefined, WASTEBOARD);
+    // The exact sweeper models `setup.sacrificial` as a second body: the board's underside is the
+    // bed floor, so the breakthrough a through cut is allowed into it simulates.
+    expect(setup.sacrificial?.under?.thickness).toBe(18);
+    // The DOCUMENT is untouched — the operator never chose a board, and no finding changes.
+    expect(job.sacrificial.under).toBeNull();
+    // A board of the operator's own wins over the machine's.
+    const own = toSetup(
+      { ...job, sacrificial: { ...job.sacrificial, under: { thickness: 2, overhang: { left: 0, right: 0, front: 0, back: 0 }, attach: 'tape' } } },
+      jobMachine(job, null),
+      undefined,
+      WASTEBOARD,
+    );
+    expect(own.sacrificial?.under?.thickness).toBe(2);
+    // A vise job has no wasteboard under it.
+    const vise = toSetup({ ...job, workholding: { kind: 'vise', vise: jobVise(job) } }, jobMachine(job, null), undefined, WASTEBOARD);
+    expect(vise.sacrificial?.under ?? null).toBeNull();
   });
 
   it('a cut-out that frees a piece on a bare bed is refused like any through cut', () => {

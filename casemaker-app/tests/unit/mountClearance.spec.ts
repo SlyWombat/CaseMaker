@@ -84,6 +84,18 @@ describe('#710 the fixture clearance is part of the growth', () => {
     );
   });
 
+  it('#727 F3 — the travel height includes the FIT, because the verifier’s top does', () => {
+    // #727 F3 — the verifier compares a move with `topZ + uncertainty` (inPath.ts), while the raise
+    // used to stop at `topZ + clearance`. With a fit wider than the clearance every raised rapid
+    // is refused by the very check it was raised for. The schema allows clearance 0 and a fit of 2.
+    const fit = 2;
+    const travel = travelHeightOver(clamps, 0, fit);
+    expect(travel).toBe(14);
+    const at = (z: number) =>
+      mountInPath([seg([10, 55, z], [90, 55, z], 'rapid')], clamps, { radius: TOOL_R, uncertainty: fit, clearance: 0 });
+    expect(at(travel!)).toEqual([]);
+  });
+
   it('a rapid at the old travel height over a clamp is refused as a cut is', () => {
     // Z 5 is above the CAM's own 1 mm hop but far below the clamps' 12 mm top.
     const f = mountInPath([seg([10, 55, 5], [90, 55, 5], 'rapid')], clamps, { radius: TOOL_R, uncertainty: B.settings.fitMm, clearance: CLEARANCE });
@@ -156,7 +168,7 @@ function mountWith(topZ: number): MountObstacles {
 describe('#710 a bracket program travels above the clamps', () => {
   const job = (): EngraveJob => ({ ...defaultEngraveJob(), toolKey: 'flat-1.0' });
 
-  it('every work-frame rapid stands at 13 mm, and the program still verifies clean', () => {
+  it('every work-frame rapid stands at the clamps’ top + fit + clearance, and the program verifies clean', () => {
     const g = generate(tl, job(), null, [], undefined, { mount: mountWith(12) });
     expect(g.ok, `${g.stage} ${JSON.stringify(g.errors)}`).toBe(true);
     expect(g.nc).not.toBeNull();
@@ -165,8 +177,8 @@ describe('#710 a bracket program travels above the clamps', () => {
       .map((e) => (e.kind === 'move' ? e.to[2] : null))
       .filter((z): z is number => z !== null);
     expect(rapidZs.length).toBeGreaterThan(0);
-    expect(Math.min(...rapidZs)).toBeGreaterThanOrEqual(13);
-    expect(rapidZs).toContain(13);
+    expect(Math.min(...rapidZs)).toBeCloseTo(12 + B.settings.fitMm + CLEARANCE, 6);
+    expect(rapidZs.some((z) => Math.abs(z - (12 + B.settings.fitMm + CLEARANCE)) < 1e-6)).toBe(true);
   });
 
   it('without a mount standing above the stock the CAM’s own hop and safe heights stand', () => {

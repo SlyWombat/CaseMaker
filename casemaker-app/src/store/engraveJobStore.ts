@@ -2422,18 +2422,34 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
           job.stock.shape === 'cylinder' && size !== null
             ? { ...prism, ...standingBoxForRod(size.diameter, size.length) }
             : job.stock;
+        // #727 F1 — THE MOUNT HAS ONE SOURCE OF TRUTH. `jobMount` reads a stored setup's mount
+        // before the workholding (#419), so a job with saved setups that moved from the vise to the
+        // bed kept answering `vise`: no clamp or arm obstacles, no raised travel, the vise's
+        // envelope in the simulation, and the jaw rule judging a bracket job. The physical holding
+        // that was just written is the truth every stored setup follows.
+        const kind = hold === null ? ('vise' as const) : 'clamps' in hold ? ('bracket' as const) : ('tape' as const);
+        const setups =
+          job.setups === undefined
+            ? undefined
+            : job.setups.map((s) => ({
+                ...s,
+                mount: { kind, ...(kind === 'vise' ? {} : { board: sacrificial.under !== null }) },
+              }));
+        const next = (workholding: EngraveJob['workholding']): EngraveJob => ({
+          ...job,
+          stock: box,
+          workholding,
+          sacrificial,
+          ...(setups === undefined ? {} : { setups }),
+        });
         if (hold !== null) {
-          return {
-            ...job,
-            stock: box,
-            workholding:
-              'clamps' in hold
-                ? { kind: 'bracket', bracket: { ...hold, clamps: hold.clamps.map((c) => ({ ...c })) } }
-                : { kind: 'tape', tape: { ...hold, where: hold.where === null ? null : { ...hold.where } } },
-            sacrificial,
-          };
+          return next(
+            'clamps' in hold
+              ? { kind: 'bracket', bracket: { ...hold, clamps: hold.clamps.map((c) => ({ ...c })) } }
+              : { kind: 'tape', tape: { ...hold, where: hold.where === null ? null : { ...hold.where } } },
+          );
         }
-        return { ...job, stock: box, workholding: { kind: 'vise', vise: { ...vise } }, sacrificial };
+        return next({ kind: 'vise', vise: { ...vise } });
       }),
 
     // #205: hand edits sit ON TOP of the computed values, field by field. `undefined` clears one

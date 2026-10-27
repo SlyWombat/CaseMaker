@@ -274,6 +274,10 @@ function Wizard({
   // profile carries no bracket at an anchor; it writes the placement (and the fixture's record).
   const activeHasAnchor = active?.placements.some((p) => p.where.kind === 'anchor') ?? false;
   const bracketFit = request.fitBracket === true && target === 'bed' && !activeHasAnchor;
+  // #725 W14 — once the change is written, the bracket is a FACT of the result, not of the request:
+  // `bracketFit` turns false as soon as the new profile carries the anchor, so the headline and the
+  // record would read "Bed unchanged" after a bracket-only Confirm. Read the result first.
+  const shownBracket = confirmed?.result.bracket ?? (bracketFit ? bracketAnchor : null);
   const takeWords = takeOffSteps(shownFrom, { wasteboard: plannedWasteboard === 'off' ? 'off' : null });
   const fitWords =
     target === null
@@ -298,6 +302,17 @@ function Wizard({
           : null;
   const datumDesc = target === null ? null : datumDescriptorFor(target);
   const shippedDatum = datumDesc === null ? null : shippedDatumFor(machine, datumDesc.key);
+  /**
+   * #725 P14 — the carried datum in the mount's own words: a reading the ACTIVE bed recorded is
+   * this machine's, so it reads "measured <when>"; one carried from an EARLIER bed is the
+   * "shipped value" the design names (rotary-flow §3.4: "shipped value ±0.5" or "measured 09:20").
+   */
+  const shippedDatumWords =
+    shippedDatum === null || datumDesc === null
+      ? null
+      : machine !== null && activeProfileOf(machine)?.datums[datumDesc.key]?.measuredAt === shippedDatum.measuredAt
+        ? `measured ${formatStamp(shippedDatum.measuredAt) ?? shippedDatum.measuredAt} (±${refitBandMm()})`
+        : `shipped value (±${refitBandMm()})`;
 
   // ── The machine check: on open, and on demand ────────────────────────────────────────────────
   const runCheck = async (): Promise<void> => {
@@ -647,7 +662,7 @@ function Wizard({
           <h3 id="machine-change-title" data-testid="machine-change-title">
             {target === null
               ? 'Change the machine'
-              : changeHeadline(shownFrom, target, bracketFit ? bracketAnchor : null)}
+              : changeHeadline(shownFrom, target, shownBracket)}
           </h3>
           <button
             type="button"
@@ -929,34 +944,40 @@ function Wizard({
                   <div className="mc-datum" data-testid="machine-change-datum">
                     <span className="mc-meta">
                       {datumDesc.word}:{' '}
-                      {shippedDatum !== null ? `shipped value (±${refitBandMm()})` : 'not measured on this machine'}
+                      {shippedDatumWords ?? 'not measured on this machine'}
                       {datumChoice !== null ? ' · ' : ''}
                     </span>
                     {datumChoice === null ? (
-                      <span className="mc-btns">
-                        <button
-                          type="button"
-                          className="mc-btn"
-                          data-testid="machine-change-measure-now"
-                          onClick={() => setDatumChoice('measure')}
-                        >
-                          Measure now
-                        </button>
-                        <button
-                          type="button"
-                          className="mc-btn"
-                          data-testid="machine-change-use-shipped"
-                          disabled={shippedDatum === null}
-                          title={
-                            shippedDatum === null
-                              ? 'No jaw-top reading has been taken on this machine yet — measure one after fitting'
-                              : undefined
-                          }
-                          onClick={() => setDatumChoice('shipped')}
-                        >
-                          use the shipped value
-                        </button>
-                      </span>
+                      <>
+                        <span className="mc-btns">
+                          <button
+                            type="button"
+                            className="mc-btn"
+                            data-testid="machine-change-measure-now"
+                            onClick={() => setDatumChoice('measure')}
+                          >
+                            Measure now
+                          </button>
+                          <button
+                            type="button"
+                            className="mc-btn"
+                            data-testid="machine-change-use-shipped"
+                            disabled={shippedDatum === null}
+                            onClick={() => setDatumChoice('shipped')}
+                          >
+                            use the shipped value
+                          </button>
+                        </span>
+                        {/* #725 W13 — why the button is disabled, VISIBLE and in the mount's own
+                            words (A10: a disabled control's reason is not a hover title), and the
+                            rotary says "axis datum", not the vise's "jaw-top reading". */}
+                        {shippedDatum === null && datumDesc !== null && (
+                          <p className="mc-note" data-testid="machine-change-use-shipped-reason">
+                            No {datumDesc.word} has been measured on this machine yet — measure one after
+                            fitting.
+                          </p>
+                        )}
+                      </>
                     ) : datumChoice === 'shipped' ? (
                       <span className="mc-meta" data-testid="machine-change-datum-shipped">
                         using the shipped value ✓
@@ -1022,7 +1043,7 @@ function Wizard({
               <span className="mc-meta">
                 {fitWords.items.join(' · ')}
                 {datumDesc !== null
-                  ? ` · ${datumDesc.word}: ${shippedDatum !== null ? `shipped value (±${refitBandMm()})` : 'not measured'}`
+                  ? ` · ${datumDesc.word}: ${shippedDatumWords ?? 'not measured'}`
                   : ''}
               </span>
             )}
@@ -1069,7 +1090,7 @@ function Wizard({
                     <span className="mc-meta" data-testid="machine-change-record">
                       written to the machine's record:{' '}
                       <span className="mc-mono">{formatStamp(confirmed.at) ?? confirmed.at}</span> ·{' '}
-                      {changeRecordWords(confirmed.result.from, confirmed.result.to)}
+                      {changeRecordWords(confirmed.result.from, confirmed.result.to, confirmed.result.bracket)}
                       {job !== null ? ` · for ${job.name}` : ''}
                     </span>
                     <div className="mc-line" data-done={finalLight.done} data-testid="machine-change-final-light">

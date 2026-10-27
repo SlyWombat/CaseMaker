@@ -211,21 +211,32 @@ export const HOP_Z = 1;
 
 /**
  * #710 — the travel height a program on a mount needs, mm above the stock's top: the tallest
- * clamp or arm that stands above it, plus the fixture clearance. `null` when nothing stands above
- * the stock (a vise, tape, or a bracket whose arms sit below a taller blank's top) — and then the
- * CAM's own `HOP_Z`/`SAFE_Z` stand.
+ * clamp or arm that stands above it, plus the mount's FIT and the fixture clearance. `null` when
+ * nothing stands above the stock (a vise, tape, or a bracket whose arms sit below a taller blank's
+ * top) — and then the CAM's own `HOP_Z`/`SAFE_Z` stand.
+ *
+ * #727 F3 — THE FIT IS PART OF THE CLEARANCE. The verifier compares a move with the obstacle's top
+ * grown by the mount's fit (`mounts/inPath.ts`, `topZ + uncertainty`: where the clamp MAY be), so a
+ * raise that stopped at `topZ + clearance` came out BELOW the verifier's own top whenever the fit
+ * was wider than the clearance (the schema allows a 0 clearance and a 2 mm fit) — every raised
+ * rapid was then refused by the check it was raised for. The height now clears the top it may be.
  *
  * The design makes this the PROGRAM's height rather than a per-move clearance
  * (`docs/design/bed-mounts-flow.md` §3.7): a bracket job's hops and retracts run above the clamps,
  * so a clamp cannot be hit by ordinary travel at all, and a rapid that still passes below a
  * clamp's top is refused as a cutting move is.
  */
-export function travelHeightOver(obstacles: readonly { topZ: number }[], clearanceMm: number): number | null {
+export function travelHeightOver(
+  obstacles: readonly { topZ: number }[],
+  clearanceMm: number,
+  uncertaintyMm = 0,
+): number | null {
   if (obstacles.length === 0) return null;
   const tallest = Math.max(...obstacles.map((o) => o.topZ));
   if (!(tallest > 0)) return null;
   const clearance = Number.isFinite(clearanceMm) ? Math.max(0, clearanceMm) : 0;
-  return Math.round((tallest + clearance) * 1000) / 1000;
+  const uncertainty = Number.isFinite(uncertaintyMm) ? Math.max(0, uncertaintyMm) : 0;
+  return Math.round((tallest + uncertainty + clearance) * 1000) / 1000;
 }
 
 /**

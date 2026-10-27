@@ -39,7 +39,7 @@ import { textureNumbers, textureStrokes } from './texture';
 import { fluteNumbers, fluteOperationName } from './flute';
 import { prismNumbers } from './prism';
 import { reliefNumbers } from '@/engine/cnc/cam/relief';
-import { bracketSettings, defaultClampPlacements, type ClampPlacement, type StockSize } from '@/engine/cnc/mounts/bracket';
+import { bracketSettings, defaultClampPlacements, validateBracketMount, type ClampPlacement, type StockSize } from '@/engine/cnc/mounts/bracket';
 import type { ShopDefaults } from '@/platform/defaultsClient';
 import type {
   BracketHold,
@@ -217,6 +217,10 @@ export type JobFindingCode =
   // enter the wasteboard only to the shop's depth limit.
   | 'board-too-small'
   | 'wasteboard-depth'
+  // #725 W12 — two clamps on a bracket job placed on top of each other: the mount does not hold,
+  // and Generate refuses it before any path is planned (the Holding step's own check, raised here
+  // so the document gate and the step cannot disagree).
+  | 'clamps-overlap'
   // #434 — a drill bit is the cutter of a DRILL-ONLY program. Hand-edited work that pairs one with
   // a region, trace or thread is refused by name: a drill cannot open a region, and one program has
   // one tool, so the other work has to move to a cutter that can make it.
@@ -737,8 +741,20 @@ export function defaultBracketHold(stock: StockSize, defaults: ShopDefaults | nu
  * `fixture` REPLACES the vise's envelope when the job is held on the bracket (#442's #427 item):
  * one mount is in the machine, so its boxes are the fixture — not the vise's and not both. Absent,
  * the vise's envelope is derived exactly as before (#203).
+ *
+ * #725 B7 — `bed` is the machine's bed under the stock (the same `BedUnderFacts` the through gate
+ * reads). A taped job on a recorded wasteboard gets that board as its under-board in the SETUP
+ * only: the exact sweeper models `setup.sacrificial` as a second body, so its bed floor drops by
+ * the board's thickness and the breakthrough a through cut is allowed into the wasteboard (design
+ * fixture 2c) simulates instead of reading "a rapid below the bed". The DOCUMENT's sacrificial is
+ * untouched — the operator never asked for a board, and nothing here changes a finding.
  */
-export function toSetup(job: EngraveJob, machine: MillProfile, fixture?: FixtureEnvelope): Setup {
+export function toSetup(
+  job: EngraveJob,
+  machine: MillProfile,
+  fixture?: FixtureEnvelope,
+  bed?: BedUnderFacts | null,
+): Setup {
   const { length, width, thickness } = job.stock;
   // #240 slice 2 — a ROTARY job's part is a cylinder on the chuck: there is no vise to model, no
   // sacrificial board under it, and the work origin is the axis (`stubSetup` places a cylinder's
@@ -774,9 +790,32 @@ export function toSetup(job: EngraveJob, machine: MillProfile, fixture?: Fixture
     // mount's obstacle envelope (#203), carried with its provenance so the emulator never
     // mistakes a default for a measurement. The sacrificial model rides along (#213) so the
     // sweep can model it as a second body; absent, every pre-#213 caller is unchanged.
-    { startingTool: 1, fixture: fixture ?? defaultFixture, sacrificial: job.sacrificial },
+    // #725 B7 — the wasteboard, when the bed carries one and the job has no board of its own.
+    { startingTool: 1, fixture: fixture ?? defaultFixture, sacrificial: sacrificialWithBedBoard(job, bed) },
     machine,
   );
+}
+
+/**
+ * #725 B7 — the job's sacrificial model with the machine's wasteboard as the under-board, when the
+ * job is held on the bed, states no board of its own, and the bed records one. The board takes the
+ * part's own footprint (no overhang: the verifier's `bedBoardMm` rule, #712) so the sweep's bed
+ * floor drops by exactly the thickness a through cut may use, and nothing more.
+ */
+function sacrificialWithBedBoard(job: EngraveJob, bed?: BedUnderFacts | null): EngraveJob['sacrificial'] {
+  const mine = job.sacrificial;
+  if (bed === null || bed === undefined) return mine;
+  if (bed.surface !== 'wasteboard' || bed.wasteboardMm === null) return mine;
+  if (mine.under !== null) return mine;
+  if (job.workholding.kind !== 'tape' && job.workholding.kind !== 'bracket') return mine;
+  return {
+    ...mine,
+    under: {
+      thickness: bed.wasteboardMm,
+      overhang: { left: 0, right: 0, front: 0, back: 0 },
+      attach: 'tape',
+    },
+  };
 }
 
 /**
@@ -891,6 +930,13 @@ export function validateJob(
      * ones (the vise's).
      */
     bed?: BedUnderFacts | null;
+    /**
+     * #725 W12 — the location's shop defaults, when the caller can read them: the bracket's and
+     * the clamps' sizes live there, and two clamps on top of each other is a mount that does not
+     * hold. Absent (`undefined`): the caller has no location and the overlap check is skipped
+     * rather than judged with a clamp the house may not own.
+     */
+    defaults?: ShopDefaults | null;
   } = {},
 ): JobFinding[] {
   const bed = options.bed ?? null;
@@ -1129,6 +1175,21 @@ export function validateJob(
           `A through cut goes ${fmt3(job.breakthrough)} mm into the wasteboard, deeper than the ` +
           `${fmt3(bed.wasteboardLimitMm)} mm limit — reduce the breakthrough, or put a board under the part.`,
       });
+    }
+  }
+  // #725 W12 — the bracket's own clamps: two on top of each other is a mount that does not hold.
+  // The Holding step raises the same sentence beside the picture; this is the DOCUMENT gate's copy,
+  // so Generate refuses it before a program is planned (and the blocker's Fix opens Holding).
+  if (job.workholding.kind === 'bracket' && options.defaults !== undefined) {
+    const read = bracketSettings(options.defaults);
+    for (const m of validateBracketMount(
+      { x: job.stock.length, y: job.stock.width, z: job.stock.thickness },
+      job.workholding.bracket.clamps,
+      read,
+    )) {
+      if (m.code === 'clamps-overlap') {
+        findings.push({ severity: 'error', code: 'clamps-overlap', message: m.text });
+      }
     }
   }
   // A profiler needs SHANK clearance, so its limit is `shoulderLength ?? fluteLength` — the same

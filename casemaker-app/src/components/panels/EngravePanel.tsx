@@ -31,7 +31,7 @@ import { jobSplit } from '@/engine/cnc/engrave/depthIntent';
 import { TOOL_GROUPS, toolDisplay, toolDisplayName } from '@/engine/cnc/toolDisplay';
 import { jobMachine } from '@/engine/cnc/calibration';
 import { machineDisplayName } from '@/platform/locationClient';
-import { machineRecordByProfile } from '@/store/locationStore';
+import { machineRecordByProfile, useLocationStore } from '@/store/locationStore';
 import { mountNameFor, probeNameFor } from '@/engine/cnc/registration/mountContext';
 import { useToolRegistry } from '@/hooks/useToolRegistry';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
@@ -41,6 +41,7 @@ import { borePitchMm, boreRampAngleFrom } from '@/engine/cnc/cam/drill';
 import { readDefault } from '@/platform/defaultsClient';
 import { caseWordsForKey } from '@/engine/cnc/toolCondition';
 import { dedupeFindings, itemKindWord, itemRowName, jobSetups, jobTool, validateJob, type JobFinding } from '@/engine/cnc/engrave/jobSetup';
+import { bedUnderFacts } from '@/platform/bedProfiles';
 import type { RestChoice } from '@/components/panels/RestCutterControl';
 import {
   hasRegionItems,
@@ -142,7 +143,8 @@ import { EngraveImportDialog } from './EngraveImportDialog';
 import { EngraveSetupsSection } from './EngraveSetupsSection';
 import { RunSheetView } from './RunSheetView';
 import { formatDuration } from '@/engine/cnc/plan/format';
-import { fmt } from '@/components/welcome/holdingMounts';
+import { bedHoldLine, fmt } from '@/components/welcome/holdingMounts';
+import { activeProfileOf } from '@/platform/machineChange';
 import type {
   EngraveAnyItem,
   EngraveChamfer,
@@ -565,6 +567,11 @@ interface PanelFix {
   focusTestid?: string;
   /** A `<details>` fold to open on the way (`engrave-override`, `engrave-add-menu`). */
   openDetails?: string;
+  /**
+   * #725 B4 — the fix is on the Hold step's picture (a clamp in the cut's path, a cut into an arm):
+   * the panel opens the Holding step, where the clamp's place is edited.
+   */
+  openHolding?: boolean;
 }
 
 /** A sentence a disabled Generate carries, and the control that resolves it. */
@@ -577,10 +584,16 @@ interface GenerateBlocker {
  * #688 — the control a blocking FINDING names. Most findings point at one item and carry its
  * `labelId`, so the Fix opens that row. The job-level codes are a small closed set with a known
  * home, mapped here rather than guessed from the message.
+ *
+ * #725 B4 — the bed's generation-time refusals (a clamp in the cut's path, a cut into an arm) are
+ * fixed on the Holding step's picture, so those codes open Holding rather than an item row.
  */
-function findingFix(f: JobFinding): PanelFix {
-  if (f.labelId !== undefined) return { group: 'engrave-group-job', itemId: f.labelId };
+function findingFix(f: { code: string; labelId?: string }): PanelFix {
   const code = f.code;
+  if (HOLD_FIX_CODES.has(code) || code.startsWith('rotary-')) {
+    return { group: 'engrave-group-hold', openHolding: true };
+  }
+  if (f.labelId !== undefined) return { group: 'engrave-group-job', itemId: f.labelId };
   if (code === 'tool-missing') return { group: 'engrave-group-cutter', focusTestid: 'engrave-tool' };
   if (code === 'no-items') {
     return { group: 'engrave-group-job', openDetails: 'engrave-add-menu', focusTestid: 'engrave-add-summary' };
@@ -599,6 +612,23 @@ function findingFix(f: JobFinding): PanelFix {
   }
   return { group: 'engrave-group-job' };
 }
+
+/**
+ * #725 B4 — the bed's codes whose fix is the Hold picture (§3.7). `clamp-in-path` and
+ * `bracket-in-path` are the verifier's; the tape/board ones are the document gate's. They open
+ * the Holding step, where the clamp is dragged and the board chosen.
+ */
+const HOLD_FIX_CODES: ReadonlySet<string> = new Set([
+  'clamp-in-path',
+  'bracket-in-path',
+  'clamps-overlap',
+  'tape-hold-stock',
+  'tape-hold-piece',
+  'tape-tall-stock',
+  'through-needs-board',
+  'board-too-small',
+]);
+
 
 const OVERRIDE_FIELDS: readonly { key: keyof Omit<CutParams, 'air'>; label: string; unit: string }[] = [
   { key: 'rpm', label: 'spindle', unit: 'rpm' },
@@ -797,6 +827,9 @@ export function EngravePanel(): JSX.Element {
   function applyFix(fix: PanelFix): void {
     setGroupsOpen((m) => ({ ...m, [fix.group]: true }));
     if (fix.itemId !== undefined) expandEngraveRow(fix.itemId);
+    // #725 B4 — the bed's clamp/arm refusals are fixed on the Holding step's picture, not by a
+    // field in this panel: open that step, where the clamp is dragged.
+    if (fix.openHolding === true) useStartWizardStore.getState().openWizard('holding');
     // A fresh object each press: the same Fix pressed twice must run twice.
     setFixRequest({ ...fix });
   }
@@ -804,6 +837,8 @@ export function EngravePanel(): JSX.Element {
     const request = fixRequest;
     if (request === null) return;
     setFixRequest(null);
+    // The Holding step is its own modal over the panel: nothing behind it takes focus.
+    if (request.openHolding === true) return;
     const root = panelRef.current;
     if (root === null) return;
     if (request.openDetails !== undefined) {
@@ -879,10 +914,20 @@ export function EngravePanel(): JSX.Element {
   // same way (#353) — so the form is never blank. Findings raised inside `engraveRegions` and
   // nowhere else (`tool-metal-line`, #407; the engravability ones) appear when the preview lands;
   // the fallback does not attempt them.
+  //
+  // #725 B7 — the fallback judges a bed job with the bed's own through facts, read here as the run
+  // store reads them (the worker cannot see the location). Without them a taped cut-out over the
+  // wasteboard reads "reaches the vise" until the preview lands, and the blocker refuses it.
+  const shopDefaults = useShopDefaultsStore((s) => s.defaults);
+  const locationMachine = useLocationStore((s) => s.location?.machines[0] ?? null);
+  const bedFacts = useMemo(
+    () => bedUnderFacts(locationMachine, shopDefaults, job.breakthrough + 1),
+    [locationMachine, shopDefaults, job.breakthrough],
+  );
   const findings: JobFinding[] =
     preview?.findings ??
     dedupeFindings([
-      ...validateJob(job),
+      ...validateJob(job, null, { bed: bedFacts, defaults: shopDefaults }),
       // #240 — the vise's own validator is the VISE's. A job in the rotary chuck has no jaw faces
       // or seat to judge; its holding findings are slice 3's rotary run sheet.
       ...(job.workholding.kind === 'vise'
@@ -1124,7 +1169,7 @@ export function EngravePanel(): JSX.Element {
   // panel then prints that rather than guessing from the material. The depth's filled-in number and
   // the sentence under it come from the same `facingDepthDefault` call the wizard's seed makes; the
   // panel adds the one input the wizard cannot have at stock-choice time — a measured top (R9).
-  const shopDefaults = useShopDefaultsStore((s) => s.defaults);
+  // (`shopDefaults` is read above the findings fallback, which also needs it — #725 B7.)
   // #434 — the point this drill is planned with, and where its angle came from: the same reading
   // the CAM (`planDrillBit`) and the simulation take — the drill's own record, else the shop's
   // `drill.pointAngleDeg`, with that reading's source.
@@ -1705,6 +1750,12 @@ export function EngravePanel(): JSX.Element {
   // #724 B2 — the row names the FIRST error in its own words (with its move or line where it has
   // one); the count alone told the operator that something was wrong and nothing about what.
   const firstRunErrorText = firstRunError(run)?.message ?? null;
+  // #725 B4 — the SAME first error carries its Fix, at the button (#688's rule), so a
+  // generation-time refusal reaches the operator exactly as a document finding does. Only while
+  // the run is CURRENT (`staleSince` null): an edit re-opens Generate, and the new run's verdict
+  // replaces this one. `firstRunError` (#724 B2) is the one owner of "which error".
+  const currentRunError = run.staleSince === null ? firstRunError(run) : null;
+  const runFix: PanelFix | null = currentRunError === null ? null : findingFix(currentRunError);
   // #688 — Save writes the .nc that goes to Makera Studio: a path to the machine, so it waits on
   // the clearance acknowledgement exactly as Upload and Release do. The statement's home is Cut
   // step 1 (#689); the sentence names it and the Fix beside Save takes the operator there.
@@ -1916,6 +1967,10 @@ export function EngravePanel(): JSX.Element {
     job.workholding.kind === 'rotary-chuck'
       ? { diameter: job.stock.diameter ?? job.stock.width, length: job.stock.length }
       : null;
+  // #725 W1 — a BED job's Hold line is its mount's, not the vise's (§3.7): taped or the bracket,
+  // with the surface under it and the mount's own numbers. `null` for the vise and rotary, whose
+  // lines are below.
+  const bedLine = bedHoldLine(job, activeProfileOf(locationMachine), shopDefaults);
 
   /** Apply a whole sacrificial model. An edit is the user asserting a setup: it is `'saved'`,
    *  never a shipped `'default'` (decision 28) — a preset already carries `'saved'`. */
@@ -3212,9 +3267,12 @@ export function EngravePanel(): JSX.Element {
         testid="engrave-group-hold"
         title="Hold"
         summary={
-          rotaryRod === null
-            ? `Vise — ${viseBadge(vise)} · blank on the ${vise.seat}`
-            : `Rotary chuck — ⌀${fmt(rotaryRod.diameter)} × ${fmt(rotaryRod.length)} mm rod`
+          // #725 W1 — a bed job says its own mount (§3.7's lines), not the vise it is not in.
+          bedLine !== null
+            ? bedLine
+            : rotaryRod === null
+              ? `Vise — ${viseBadge(vise)} · blank on the ${vise.seat}`
+              : `Rotary chuck — ⌀${fmt(rotaryRod.diameter)} × ${fmt(rotaryRod.length)} mm rod`
         }
         action={{ testid: 'engrave-hold-edit', label: 'edit', onClick: () => openWizard('holding') }}
         {...groupProps('engrave-group-hold', false)}
@@ -3225,6 +3283,12 @@ export function EngravePanel(): JSX.Element {
         <p style={MUTED} data-testid="engrave-rotary-card">
           In the rotary chuck: a ⌀{fmt(rotaryRod.diameter)} × {fmt(rotaryRod.length)} mm rod along
           X. The holding step is where the chuck’s jaws, tailstock and grip are set.
+        </p>
+      ) : bedLine !== null ? (
+        // #725 W1 — the bed's card is its mount's one line; the vise's fields are not shown for a
+        // job that is not in the vise. `edit` re-enters Holding, where the tape and clamps are.
+        <p style={MUTED} data-testid="engrave-bed-card">
+          {bedLine}. The holding step is where the tape, the board under it and the clamps are set.
         </p>
       ) : (
       <details data-testid="engrave-vise-card" style={{ marginTop: 4 }}>
@@ -3558,6 +3622,30 @@ export function EngravePanel(): JSX.Element {
               <p style={{ ...MUTED, color: SEVERITY_COLOR.error }} data-testid="engrave-run-errors">
                 {firstRunErrorText ?? `${runErrors.length} error${runErrors.length === 1 ? '' : 's'} outstanding.`}
                 {runErrors.length > 1 && ` (+${runErrors.length - 1} more error${runErrors.length === 2 ? '' : 's'})`}
+                {/* #725 B4 — the same sentence's Fix, in the footer at the button: the verifier's
+                    clamp/arm refusals and the rotary's have always had their sentences, but no
+                    control took the operator to what resolves one. */}
+                {runFix !== null && (
+                  <>
+                    {' '}
+                    <button
+                      type="button"
+                      data-testid="engrave-run-blocker-fix"
+                      style={{
+                        background: 'none',
+                        border: 'none',
+                        padding: 0,
+                        font: 'inherit',
+                        color: '#8fb8e0',
+                        cursor: 'pointer',
+                        textDecoration: 'underline',
+                      }}
+                      onClick={() => applyFix(runFix)}
+                    >
+                      ▸ Fix
+                    </button>
+                  </>
+                )}
               </p>
             )}
             {run.error && (

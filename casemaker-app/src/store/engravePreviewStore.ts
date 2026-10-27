@@ -24,7 +24,9 @@ import type { FeedCatalogueRow } from '@/engine/cnc/feeds';
 import { inventoryConditions, type ConditionSummary } from '@/engine/cnc/toolCondition';
 import { probeResiduals, type ProbeResiduals } from '@/engine/cnc/probePlan';
 import { effectiveMargins } from '@/engine/cnc/engrave/depthBounds';
+import { bedUnderFacts } from '@/platform/bedProfiles';
 import { useEngraveJobStore } from './engraveJobStore';
+import { useLocationStore } from './locationStore';
 import { useSettingsStore } from './settingsStore';
 import { shopDefault, useShopDefaultsStore } from './shopDefaultsStore';
 
@@ -106,6 +108,7 @@ export const useEngravePreviewStore = create<EngravePreviewState>()((set) => {
       // and notes a worn one would otherwise answer for a bench with no conditions set.
       // The warn ratio is the shop's (#451), read here for the same reason: the worker cannot see the
       // location, and the preview's findings must warn at the bar the run would raise.
+      const shopDefaults = useShopDefaultsStore.getState().defaults;
       const preview = await client.engravePreview(
         job,
         getTools(),
@@ -117,9 +120,17 @@ export const useEngravePreviewStore = create<EngravePreviewState>()((set) => {
           lostDetailWarnRatio: shopDefault('engrave.lostDetailWarnRatio').value,
           // #434 — the drill point angle (and the other `drill.*` numbers) with their sources, so
           // the preview's depth findings are judged with the point the run would plan.
-          drill: drillSettings(useShopDefaultsStore.getState().defaults),
+          drill: drillSettings(shopDefaults),
           // #450 slice 3 — the recommendation's feeds check must use the same table the run does.
           feeds: resolvedFeedsTable().table,
+          // #725 W12/W2 — the location's defaults: the bracket's and the clamps' sizes are the
+          // house's, and the preview's own checks and picture must use the ones the run will.
+          defaults: shopDefaults,
+          // #725 B7 — the bed's through-cut facts, resolved HERE like the run store's: the active
+          // bed profile lives in the location and the worker cannot read it. Without them a taped
+          // cut-out over the wasteboard is refused in the preview's own words, and the panel's
+          // blocker (which reads the preview's findings) refuses a job the run would generate.
+          bed: bedUnderFacts(useLocationStore.getState().location?.machines[0] ?? null, shopDefaults, job.breakthrough + 1),
         },
         // §5.4 — the registration band's five residuals, read HERE for the same reason as the
         // margins: the worker cannot see the location, and the band must draw the tolerance the

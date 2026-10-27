@@ -367,6 +367,12 @@ describe('#693 walking the change', () => {
     }
     for (let i = 0; i < 7; i++) clickCheck(`machine-change-fit-${i}`);
     expect((screen.getByTestId('machine-change-use-shipped') as HTMLButtonElement).disabled).toBe(true);
+    // #725 W13 — WHY it is disabled is on the screen, in the rotary's own words (A10: not a hover
+    // title), and no longer the vise's "jaw-top reading".
+    expect(screen.getByTestId('machine-change-use-shipped-reason').textContent).toBe(
+      'No axis datum has been measured on this machine yet — measure one after fitting.',
+    );
+    expect(screen.getByTestId('machine-change-use-shipped').getAttribute('title')).toBeNull();
     fireEvent.click(screen.getByTestId('machine-change-measure-now'));
     // #717 — the power is back; the light comes on now, before any hand goes back in.
     fireEvent.click(screen.getByTestId('machine-change-light-again'));
@@ -675,6 +681,11 @@ describe('#693 walking the change', () => {
     expect(screen.getByTestId('machine-change-record-preview').textContent).toContain('bracket at anchor 1 on');
     fireEvent.click(confirm);
     await screen.findByTestId('machine-change-record');
+    // #725 W14 — after the write the wizard still names the BRACKET: the request's own fit flag
+    // turns false once the new profile carries the anchor, so the RESULT is what the title reads.
+    expect(screen.getByTestId('machine-change-title').textContent).toContain('Bracket at anchor 1 on');
+    expect(screen.getByTestId('machine-change-record').textContent).toContain('bracket at anchor 1 on');
+    expect(screen.getByTestId('machine-change-title').textContent).not.toContain('Bed unchanged');
 
     const machineWrite = state.writes.find((w) => w.method === 'PUT' && w.path.startsWith('/location/machines/'));
     expect(machineWrite).toBeDefined();
@@ -690,6 +701,22 @@ describe('#693 walking the change', () => {
     );
     expect(bracketWrite).toBeDefined();
     expect((bracketWrite!.body as FixtureRecord).variant).toBe('thin');
+  });
+
+  it('#725 P14 — a jaw datum the active bed MEASURED reads “measured”, not “shipped value”', async () => {
+    // The exercise's machine: the vise is off the pins, and the active profile still carries the
+    // jaw-top reading taken on this very bed. That is this machine's measurement, not a carry-over.
+    const base = machine();
+    const bareBed = { ...base, bedProfiles: [{ ...base.bedProfiles![0]!, placements: [], preferredMounting: [] }] };
+    seedLocation(bareBed);
+    fakeMachine({ status: () => sent('?', IDLE) });
+    openMachineChange({ target: 'vise' });
+    render(<MachineChangeWizard />);
+
+    await screen.findByTestId('machine-change-what');
+    const line = screen.getByTestId('machine-change-step-4').textContent ?? '';
+    expect(line).toContain('jaw datum: measured');
+    expect(line).not.toContain('shipped value');
   });
 
   it('offers the mounts this house can give when no target was asked for (Manage’s entry)', async () => {

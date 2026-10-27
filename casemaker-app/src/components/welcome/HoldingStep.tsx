@@ -235,7 +235,9 @@ export function HoldingPicture({
         {selected !== null && bed !== null && (
           <p style={{ fontSize: 11, color: '#9aa4b0', lineHeight: 1.5, margin: 0 }} data-testid="engrave-setup-holding-clamp-label">
             Selected clamp: <b style={{ color: '#d1d5db' }}>{clampLabelFor(stock, selected, bed.clamps)}</b>. Drag it along the edge,
-            round the corner onto the right edge
+            {/* #725 P9 — the corner leads to the OTHER free edge: a clamp already on the right edge
+                is not offered "onto the right edge". */}
+            {' '}round the corner onto the {selected.edge === 'right' ? 'back' : 'right'} edge
             {bed.interactive && bed.bracket !== null && bed.bracket.clamps.length > 1 && (
               <>
                 , or{' '}
@@ -269,7 +271,7 @@ export function HoldingPicture({
             ))}
           </div>
         )}
-        <HoldingSideView mount={mount} proudMm={proudMm} />
+        <HoldingSideView mount={mount} proudMm={proudMm} surface={bed?.surface ?? null} />
         {note !== null && (
           <p className="hint" style={{ margin: 0 }} data-testid="engrave-setup-holding-note">
             {note}
@@ -790,9 +792,12 @@ function BedTopView({
 function HoldingSideView({
   mount,
   proudMm,
+  surface = null,
 }: {
   mount: HoldingMount;
   proudMm: number | null;
+  /** #725 P8 — the surface under the stock, so the slab is labelled what it IS (the wasteboard). */
+  surface?: BedProfile['surface'] | null;
 }): JSX.Element {
   const mechanism = mechanismOf(mount);
   const proudWords =
@@ -862,8 +867,10 @@ function HoldingSideView({
               </>
             )}
             <rect x="86" y="20" width="68" height="28" fill="#1e3a4a" stroke="#6aa6c9" />
-            <text x="120" y="66" textAnchor="middle" {...SVG_MUTED}>
-              bed
+            <text x="120" y="66" textAnchor="middle" {...SVG_MUTED} data-testid="engrave-setup-holding-side-surface">
+              {/* #725 P8 — the slab is what the record says is under the stock: "wasteboard",
+                  never "bed" when a wasteboard is on it. */}
+              {surface === null || surface.kind === 'bare-bed' ? 'bed' : surfaceWords(surface).replace(' under', '')}
             </text>
           </>
         ) : (
@@ -1038,13 +1045,17 @@ export function HoldingStep({ job, answers, onAnswers, onRotary, onBedHold }: Ho
   // #714 — with the module on the pins and a round rod that fits, the CHUCK is the default mount
   // (§3.4). Like the bed's default, it applies to an unasserted setup only, and once per bed
   // profile — an operator's own answer is never overwritten.
+  //
+  // #725 W10 — "unasserted" is `source: 'saved'` or a board of the operator's under the part. A
+  // MEASURED vise is the machine's own calibration, not this job's answer: the wizard seeds it,
+  // and it must not block the mount the machine actually carries (the same on the bed below).
   const rotaryArrived = useRef<string | null>(null);
   useEffect(() => {
     if (now === null || now.mount !== 'rotary') return;
     if (rotaryArrived.current === now.profile.id) return;
     rotaryArrived.current = now.profile.id;
     if (job.workholding.kind !== 'vise') return;
-    if (answers.vise.source !== 'default' || answers.sacrificial.under !== null) return;
+    if (answers.vise.source === 'saved' || answers.sacrificial.under !== null) return;
     const round = job.stockEntry?.form === 'rod' || job.stock.shape === 'cylinder';
     if (!round) return;
     const fits = rotaryFits(
@@ -1091,7 +1102,10 @@ export function HoldingStep({ job, answers, onAnswers, onRotary, onBedHold }: Ho
       return;
     }
     if (job.workholding.kind !== 'vise') return;
-    if (answers.vise.source !== 'default') return;
+    // #725 W10 — a MEASURED vise is the machine's calibration, not an assertion of this job's
+    // mount: with nothing on the pins the vise cannot hold the job at all, so only the operator's
+    // own saved setup stands over the bed's default.
+    if (answers.vise.source === 'saved') return;
     const mount = defaultBedMount(profile, answers.stock, job.stockEntry?.form ?? null);
     if (mount === 'bed-tape') onBedHold(bedTapeHold(profile, null), answers);
     else onBedHold(bedBracketHold(answers.stock, shopDefaults ?? null, null, bedAnchor(profile) ?? 1), answers);
@@ -1697,17 +1711,30 @@ export function HoldingStep({ job, answers, onAnswers, onRotary, onBedHold }: Ho
           )}
         </div>
 
-        <HoldingPicture
-          mount={drawnMount}
-          stock={answers.stock}
-          form={form ?? null}
-          proudMm={drawnProud}
-          boardMm={drawnBoard}
-          note={drawnNote}
-          bed={isBedMount(drawnMount) ? bedPicture : null}
-          checks={bedChecks}
-          rotary={drawnMount === 'rotary' ? rotaryPicture : null}
-        />
+        {/* #725 B6 — the picture column is OUT of the grid's sizing. The preview follows the
+            hovered option, and its height varies by mount; in the flow that changed the wizard's
+            height, so a centred modal re-centred and the row under the pointer moved out from
+            under it — a hover/reflow loop that made the row's button unclickable. The slot takes
+            the options column's height (the row's `stretch`) and scrolls its own picture if one is
+            taller, so nothing outside it ever moves. */}
+        <div
+          data-testid="engrave-setup-holding-picture-slot"
+          style={{ position: 'relative', alignSelf: 'stretch', minHeight: 0 }}
+        >
+          <div style={{ position: 'absolute', inset: 0, overflowY: 'auto' }}>
+            <HoldingPicture
+              mount={drawnMount}
+              stock={answers.stock}
+              form={form ?? null}
+              proudMm={drawnProud}
+              boardMm={drawnBoard}
+              note={drawnNote}
+              bed={isBedMount(drawnMount) ? bedPicture : null}
+              checks={bedChecks}
+              rotary={drawnMount === 'rotary' ? rotaryPicture : null}
+            />
+          </div>
+        </div>
       </div>
 
       {fix !== null && (

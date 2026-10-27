@@ -36,6 +36,7 @@ import { rotaryFits } from '@/engine/cnc/setups/plan';
 import type { SetupAnswers } from '@/engine/cnc/engrave/setupFlow';
 import { TAPE_DEFAULTS, defaultBracketHold, defaultTapeHold } from '@/engine/cnc/engrave/jobSetup';
 import {
+  bracketSettings,
   clampObstacles,
   type BracketSettings,
   type ClampEdge,
@@ -397,6 +398,9 @@ export function mountOptions(args: MountOptionArgs): MountOption[] {
     }
 
     // The installed mechanism cannot give this mount as it stands: its cost and the way out.
+    // #725 B5 — asking for the BRACKET also asks the wizard to fit it: taking the vise off leaves
+    // the bed clear, and the bracket is a second machine change unless the same request carries it
+    // (#718's fit step). The bed row without an anchor says the same (below).
     if (current !== mechanism) {
       out.push({
         ...base,
@@ -404,6 +408,7 @@ export function mountOptions(args: MountOptionArgs): MountOption[] {
         disabled: true,
         reason: costWords(current, mechanism),
         escape: mechanism,
+        ...(mount === 'bed-bracket' ? { escapeFitBracket: true } : {}),
       });
       continue;
     }
@@ -656,6 +661,36 @@ export function clampLabelFor(
 ): string {
   const size: StockSize = { x: stock.length, y: stock.width, z: stock.thickness };
   return clampObstacles(size, [placement], settings)[0]!.label;
+}
+
+/**
+ * #725 W1 — the Design panel's Hold line for a bed job (§3.7's three lines): the mount, the surface
+ * under the stock, the board when one is under it, and the mount's own facts — never the vise's.
+ * Null for a rotary or vise job, whose own lines the panel draws.
+ */
+export function bedHoldLine(
+  job: Pick<EngraveJob, 'workholding' | 'stock' | 'sacrificial'>,
+  profile: BedProfile | null,
+  defaults: ShopDefaults | null,
+): string | null {
+  const held = job.workholding;
+  if (held.kind === 'tape') {
+    const under = underWords(profile) ?? 'the bed';
+    const board =
+      job.sacrificial.under === null ? '' : `a ${fmt(job.sacrificial.under.thickness)} mm board under · `;
+    return `On the bed, taped · ${under} · ${board}${fmt(held.tape.width)} mm tape · ${tapeWhereWords(held.tape)}`;
+  }
+  if (held.kind === 'bracket') {
+    const settings = bracketSettings(defaults).settings;
+    const count = held.bracket.clamps.length;
+    const edges = [...new Set(held.bracket.clamps.map((c) => c.edge))];
+    const edgeWords = edges.length === 1 ? `on the ${edges[0]} edge` : 'on the back and right edges';
+    return (
+      `Bracket at anchor ${held.bracket.anchor} · ${count} clamp${count === 1 ? '' : 's'} ${edgeWords}, ` +
+      `${fmt(settings.clamp.height)} mm tall · X 0 Y 0 at its corner`
+    );
+  }
+  return null;
 }
 
 /** The thinnest house board a through cut needs on this surface, mm; null when the house has none. */
