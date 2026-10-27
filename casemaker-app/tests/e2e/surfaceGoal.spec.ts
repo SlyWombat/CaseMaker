@@ -16,6 +16,8 @@
 // The Simulate panel presents only sessions it started itself (#506), so the grid a Cut run was
 // swept on is stated on Cut's release line, not in that panel.
 
+import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { test, expect } from './fixtures/caseMaker';
 
@@ -48,6 +50,51 @@ async function rememberMachine(page: import('@playwright/test').Page): Promise<v
 // The surfacing CAM and the column sweep run in the worker; under swiftshader the whole run
 // takes tens of seconds, so these get well past Playwright's 30 s default.
 test.setTimeout(240_000);
+
+// #731 — the LAN rig's own origin, reproduced: plain http is NOT a secure context, so the browser
+// hides `crypto.subtle` and every picked .stl/.3mf/PNG failed to hash ("unicorn.stl could not be
+// hashed"). The e2e suite runs on localhost, a secure context, which is why it never saw it. The
+// init script deletes the member before any app code runs; the pick then exercises the pure-TS
+// SHA-256, and the row's hash is compared with Node's digest of the same fixture — the same hex the
+// browser digest would have produced, or the job's stored hashes would not survive the origin.
+test('#731 — on plain http (no crypto.subtle) an STL still loads, with the same SHA', async ({ cm, page }) => {
+  await page.addInitScript(() => {
+    Object.defineProperty(Crypto.prototype, 'subtle', { configurable: true, get: () => undefined });
+  });
+  await cm.ready();
+
+  // The origin under test really has no digest: the fallback is what runs.
+  expect(await page.evaluate(() => (crypto as Crypto).subtle)).toBeUndefined();
+
+  await page.evaluate(async () => {
+    await window.__caseMaker!.loadBuiltinBoard('rpi-4b');
+    window.__caseMaker!.engraveReset();
+  });
+  await page.getByTestId('sidebar-button-cnc-engrave').click();
+  await expect(page.getByTestId('engrave-panel')).toBeVisible();
+
+  // An empty job, so Surface a mesh is offered (the shipped job starts with three demo labels).
+  const labels = page.getByTestId(/^engrave-label-row-/);
+  await expect(labels).toHaveCount(3);
+  for (let i = 0; i < 3; i++) {
+    await page.getByTestId('engrave-label-remove-0').click();
+    await expect(labels).toHaveCount(2 - i);
+  }
+
+  await page.getByTestId('engrave-add-summary').click();
+  const chooser = page.waitForEvent('filechooser');
+  await page.getByTestId('engrave-add-surface').click();
+  await (await chooser).setFiles(STL);
+
+  // The pick succeeds — no "could not be hashed" — and the row states the file's SHA, which is
+  // Node's digest of the same bytes.
+  await expect(page.getByTestId('engrave-target-count')).toHaveText('1');
+  await page.getByTestId('engrave-target-summary').click();
+  await expect(page.getByTestId('engrave-target-row-0')).toBeVisible();
+  await expect(page.getByTestId('engrave-target-error')).toHaveCount(0);
+  const sha = createHash('sha256').update(readFileSync(STL)).digest('hex');
+  await expect(page.getByTestId('engrave-target-row-0')).toContainText(`embedded in the job (${sha.slice(0, 12)}…)`);
+});
 
 test('a goal STL from the picker generates, and the UI states its own check and grid', async ({ cm, page }) => {
   await cm.ready();

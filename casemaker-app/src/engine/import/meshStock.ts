@@ -21,6 +21,7 @@
 
 import { parseStl, type ParsedMesh } from './stlParser';
 import { unzipSync } from 'fflate';
+import { sha256HexBytes } from './sha256';
 import { parse3MF } from './threeMfParser';
 import { parsePrusaThreeMf } from './prusa3mf';
 import { MAX_DESIGN_FILE_BYTES } from './designLimits';
@@ -279,10 +280,22 @@ export function plain3mfProblem(bytes: ArrayBuffer): string | null {
   return null;
 }
 
-/** SHA-256 of a file's bytes, as lower-case hex — the hash the job records beside the file's name. */
+/**
+ * SHA-256 of a file's bytes, as lower-case hex — the hash the job records beside the file's name.
+ *
+ * #731 — `crypto.subtle` is a SECURE-CONTEXT API: a page served over plain http from a LAN address
+ * (k3, the bench rig) does not have it, so `crypto.subtle.digest` threw and every .stl/.3mf/PNG
+ * pick read "could not be hashed". Use the browser's digest when the page offers one, and the
+ * same pure-TS SHA-256 the run record has always used when it does not. Both produce identical
+ * lower-case hex, so stored hashes and the mesh blobs keyed by them do not change with the origin.
+ */
 export async function sha256Hex(bytes: ArrayBuffer): Promise<string> {
-  const digest = await crypto.subtle.digest('SHA-256', bytes);
-  return Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, '0')).join('');
+  const subtle = typeof crypto === 'undefined' ? undefined : crypto.subtle;
+  if (subtle !== undefined) {
+    const digest = await subtle.digest('SHA-256', bytes);
+    return Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, '0')).join('');
+  }
+  return sha256HexBytes(new Uint8Array(bytes));
 }
 
 /** What a picked stock file turned out to be. */
