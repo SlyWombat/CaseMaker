@@ -13,6 +13,7 @@ import {
 } from '@/engine/cnc/tool';
 import { jobVise, viseEnvelope } from '@/engine/cnc/fixture';
 import { rotaryMapOf } from '@/engine/cnc/rotary/wrap';
+import { blankDepthCeiling } from '@/engine/cnc/engrave/depthBounds';
 import { validateSacrificial, viseJawShift } from '@/engine/cnc/sacrificial';
 import { stubSetup, type FixtureEnvelope, type Setup, type Workholding } from '@/engine/cnc/setup';
 import {
@@ -991,7 +992,24 @@ export function validateJob(
         `or start from thicker stock.`,
     });
   }
-  const floorAllowed = thickness - facingDepth - job.minFloor;
+/** How a too-deep sentence ends, in the frame the job is cut in (#724 W4). */
+function overDepthClause(job: EngraveJob, depth: number, facingDepth: number, floorAllowed: number): string {
+  const map = rotaryMapOf(job);
+  if (map !== null) {
+    return (
+      `the cutter tip would be ${fmt3(depth - map.radius)} mm past the rod's ${fmt3(map.radius)} mm radius, ` +
+      `and a rotary cut keeps its floor above the axis — at most ${fmt3(floorAllowed)} mm here`
+    );
+  }
+  const remaining = job.stock.thickness - facingDepth - depth;
+  return `only ${fmt3(remaining)} mm of floor would remain on a ${job.stock.thickness} mm stock, below the ${job.minFloor} mm minimum`;
+}
+
+  // #724 W4 — the floor allowed is the BLANK's ceiling, facing taken: on a plate the thickness
+  // less the floor, on a rotary job the RADIUS (or a tube's wall) less the floor — a ⌀20 rod's
+  // limit is 9 mm, and 19 has no stock under it at all. The same number the row's field, its
+  // sentence and the recommendation use.
+  const floorAllowed = blankDepthCeiling(job) - facingDepth;
 
   for (const item of enabled) {
     // A through region has no typed depth (#218): its floor is the board, and the through gate
@@ -999,28 +1017,22 @@ export function validateJob(
     // carry `through`; a label has no such field.
     if ('through' in item && item.through === true) continue;
     if (item.depth > floorAllowed) {
-      const remaining = thickness - facingDepth - item.depth;
       findings.push({
         severity: 'error',
         code: 'depth-exceeds-stock',
         labelId: item.id,
-        message:
-          `${itemLabel(item)} cuts ${item.depth} mm deep; only ${remaining} mm of floor ` +
-          `would remain on a ${thickness} mm stock, below the ${job.minFloor} mm minimum.`,
+        message: `${itemLabel(item)} cuts ${item.depth} mm deep; ${overDepthClause(job, item.depth, facingDepth, floorAllowed)}.`,
       });
     }
   }
 
   for (const trace of enabledTraces) {
     if (trace.depth > floorAllowed) {
-      const remaining = thickness - facingDepth - trace.depth;
       findings.push({
         severity: 'error',
         code: 'depth-exceeds-stock',
         labelId: trace.id,
-        message:
-          `${traceOperationName(trace)} cuts ${trace.depth} mm deep; only ${remaining} mm of floor ` +
-          `would remain on a ${thickness} mm stock, below the ${job.minFloor} mm minimum.`,
+        message: `${traceOperationName(trace)} cuts ${trace.depth} mm deep; ${overDepthClause(job, trace.depth, facingDepth, floorAllowed)}.`,
       });
     }
   }
@@ -1032,14 +1044,11 @@ export function validateJob(
   // undercut — and each message names the way the shape CAN be cut.
   for (const primitive of enabledPrimitives) {
     if (primitive.depth > floorAllowed) {
-      const remaining = thickness - facingDepth - primitive.depth;
       findings.push({
         severity: 'error',
         code: 'depth-exceeds-stock',
         labelId: primitive.id,
-        message:
-          `${primitiveLabel(primitive)} cuts ${primitive.depth} mm deep; only ${remaining} mm of ` +
-          `floor would remain on a ${thickness} mm stock, below the ${job.minFloor} mm minimum.`,
+        message: `${primitiveLabel(primitive)} cuts ${primitive.depth} mm deep; ${overDepthClause(job, primitive.depth, facingDepth, floorAllowed)}.`,
       });
     }
     const axis = primitive.axis ?? 'z';
@@ -1360,17 +1369,14 @@ export function validateJob(
         });
       }
     } else if (depthAtFloor > floorAllowed) {
-      const remaining = thickness - facingDepth - depthAtFloor;
       findings.push({
         severity: 'error',
         code: 'depth-exceeds-stock',
         labelId: drill.id,
         message: drillIsBit
           ? `${who}'s tip reaches ${fmt3(tipDepth)} mm (${fmt3(drill.depth)} mm of full diameter ` +
-            `plus the ${fmt3(drillPointLength)} mm point); only ${fmt3(remaining)} mm of floor would ` +
-            `remain on a ${thickness} mm stock, below the ${job.minFloor} mm minimum.`
-          : `${who} drills ${drill.depth} mm deep; only ${remaining} mm of floor would remain on a ` +
-            `${thickness} mm stock, below the ${job.minFloor} mm minimum.`,
+            `plus the ${fmt3(drillPointLength)} mm point); ${overDepthClause(job, tipDepth, facingDepth, floorAllowed)}.`
+          : `${who} drills ${drill.depth} mm deep; ${overDepthClause(job, drill.depth, facingDepth, floorAllowed)}.`,
       });
     }
     // A hole is a disc — the cutter's radius for a drill, the HOLE's own radius for a bore — so it

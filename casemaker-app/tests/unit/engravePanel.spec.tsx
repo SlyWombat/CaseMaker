@@ -121,6 +121,36 @@ describe('EngravePanel (#205)', () => {
     expect((screen.getByTestId('engrave-generate') as HTMLButtonElement).disabled).toBe(true);
   });
 
+  it('a rod in the chuck reads its own numbers, and its ceiling is the radius (#724 W3/W4)', () => {
+    act(() => {
+      const base = defaultEngraveJob();
+      useEngraveJobStore.setState({
+        job: {
+          ...base,
+          stock: { ...base.stock, length: 100, width: 20, thickness: 20, material: 'pla', shape: 'cylinder', diameter: 20 },
+          workholding: {
+            kind: 'rotary-chuck',
+            rotary: { stickout: 85, gripDiameter: null, jawMode: 'reverse-inner', tailstock: true, source: 'test' },
+          },
+          toolKey: 'flat-1.0',
+        },
+      });
+    });
+    render(<EngravePanel />);
+
+    // The line speaks the rod, not its axis-frame box (100 × 20 × 20 read as a plate before).
+    expect(screen.getByTestId('engrave-stock-line').textContent).toContain(
+      'rod ⌀20 × length 100 mm · around 62.832 mm',
+    );
+
+    expand('engrave-label');
+    const ceiling = screen.getByTestId('engrave-label-maxdepth-0').textContent!;
+    expect(ceiling).toContain('Max depth 9 mm here — the rod’s 10 mm radius less the minimum floor.');
+    // The old ceiling (thickness 20 − floor 1 = 19) is past the axis; a 19 mm floor is refused.
+    fireEvent.change(screen.getByTestId('engrave-label-depth-0'), { target: { value: '19' } });
+    expect(screen.getByTestId('engrave-label-finding-0-depth-exceeds-stock')).toBeTruthy();
+  });
+
   it('updates the “strokes thinner than” hint when the tool changes', () => {
     render(<EngravePanel />);
     // #686 — every printed figure is the wizard's three-decimal `fmt`, which drops a trailing

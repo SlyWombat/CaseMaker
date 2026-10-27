@@ -14,6 +14,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  blankDepthCeiling,
   LAMINATE_CAP_MARGIN_MM,
   recommendLabelDepth,
   recommendedEngraveDepth,
@@ -147,5 +148,41 @@ describe('the depth a stock kind recommends (#492 J19)', () => {
     // …and no refusal is keyed to the stock kind: the only V gate is the groove's width against the
     // machine step (`vCarveGrooveRefusal`), which this plane passes on a 0.01 mm step.
     expect(plane.grooveWidth).toBeGreaterThan(0.01);
+  });
+});
+
+// #724 W4 — the ceiling is the BLANK's, and a rotary blank's floor is a radius above the axis.
+describe('the ceiling a rotary blank allows (#724 W4)', () => {
+  function rod(over: Partial<EngraveJob['stock']> = {}): EngraveJob {
+    const job = defaultEngraveJob();
+    return {
+      ...job,
+      stock: { ...job.stock, length: 100, width: 20, thickness: 20, material: 'pla', shape: 'cylinder', diameter: 20, ...over },
+      workholding: {
+        kind: 'rotary-chuck',
+        rotary: { stickout: 85, gripDiameter: null, jawMode: 'reverse-inner', tailstock: true, source: 'test' },
+      },
+    };
+  }
+
+  it('a plate keeps thickness − floor; a rod is radius − floor; a tube the smaller of radius and wall', () => {
+    expect(blankDepthCeiling(defaultEngraveJob())).toBe(11); // 12 − 1
+    // ⌀20: 19 was the box's answer and 19 is past the axis; the radius gives 9.
+    expect(blankDepthCeiling(rod())).toBe(9);
+    // A ⌀25 tube with a 3 mm wall: the bore is 3 mm under the surface, so 3 − 1 = 2.
+    expect(blankDepthCeiling(rod({ diameter: 25, width: 25, thickness: 25, wall: 3 }))).toBe(2);
+    // A wall past the radius cannot be cut to; the radius still caps it.
+    expect(blankDepthCeiling(rod({ diameter: 4, width: 4, thickness: 4, wall: 10 }))).toBe(1);
+  });
+
+  it('the recommendation quotes the rod’s ceiling, not the box’s', () => {
+    const job = rod();
+    const rec = recommendLabelDepth(job, job.labels[0]!, {
+      voidLimit: null,
+      jawReach: { jaw: 'fixed', gap: 20, reaches: false, overJaw: false },
+      boundaryMargin: 0.2,
+    })!;
+    expect(rec.basis[0]).toContain("the blank's 1 mm minimum floor allows 9 mm");
+    expect(rec.basis[0]).not.toContain('19');
   });
 });

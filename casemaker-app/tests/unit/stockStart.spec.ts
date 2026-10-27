@@ -28,6 +28,7 @@ import {
   stockFromShelf,
   jobItemCount,
   stockStillNamed,
+  stockSizeWords,
 } from '@/engine/cnc/stockStart';
 import { meshAsStock, plain3mfProblem, readStockFile, sha256Hex } from '@/engine/import/meshStock';
 import { strToU8, zipSync } from 'fflate';
@@ -740,5 +741,33 @@ describe('#418 review fixes', () => {
     expect(stockStillNamed(s, { ...s })).toBe(true);
     expect(stockStillNamed(s, { ...s, length: s.length + 1 })).toBe(false);
     expect(stockStillNamed(s, { ...s, material: 'brass' })).toBe(false);
+  });
+
+  it('a rod keeps its entry through the frame change — the same piece, stated the other way (#724 W3)', () => {
+    // ⌀20 × 100 standing in the vise (D × D × L) and along the chuck's axis (L × D × D).
+    const standing = { ...defaultEngraveJob().stock, length: 20, width: 20, thickness: 100, shape: 'cylinder' as const, diameter: 20 };
+    const axis = { ...standing, length: 100, thickness: 20 };
+    expect(stockStillNamed(standing, axis)).toBe(true);
+    expect(stockStillNamed(axis, standing)).toBe(true);
+    // A real edit is still an edit.
+    expect(stockStillNamed(standing, { ...axis, diameter: 25, width: 25, thickness: 25 })).toBe(false);
+    expect(stockStillNamed({ ...axis, wall: 2 }, { ...axis, wall: 3 })).toBe(false);
+    expect(stockStillNamed(standing, { ...axis, material: 'brass' })).toBe(false);
+    // And a round piece that loses its round fact is a different piece, even in the same box.
+    const { shape: _shape, diameter: _diameter, ...box } = axis;
+    expect(stockStillNamed(axis, { ...box })).toBe(false);
+  });
+
+  it('states a round stock’s own numbers, and a plate’s box (#724 W3)', () => {
+    const standing = { ...defaultEngraveJob().stock, length: 20, width: 20, thickness: 100, shape: 'cylinder' as const, diameter: 20 };
+    expect(stockSizeWords(standing)).toBe('⌀20 × length 100 mm · around 62.832 mm');
+    // The same rod in the chuck's axis frame reads the same line.
+    expect(stockSizeWords({ ...standing, length: 100, thickness: 20 })).toBe('⌀20 × length 100 mm · around 62.832 mm');
+    // A tube adds its wall.
+    expect(stockSizeWords({ ...standing, diameter: 40, length: 40, width: 40, wall: 2 })).toBe(
+      '⌀40 × length 100 mm · wall 2 mm · around 125.664 mm',
+    );
+    // A rectangle states the box it always did.
+    expect(stockSizeWords(defaultEngraveJob().stock)).toBe('100 × 60 × 12 mm');
   });
 });

@@ -98,6 +98,11 @@ export interface EngraveShapeRowProps {
   index: number;
   /** Largest depth this stock allows: `thickness − minFloor`, mm. */
   maxDepth: number;
+  /**
+   * #724 W4 — the words after "Max depth N mm here —": the stock thickness on a plate, the
+   * rod's radius (or the tube's wall) on a rotary job. Omitted, the plate's words stand.
+   */
+  maxDepthWhy?: string;
   onChange: (patch: ShapePatch) => void;
   onRemove: () => void;
   /** Findings about THIS shape (the panel filters the job's list by `labelId`). */
@@ -139,6 +144,7 @@ export function EngraveShapeRow({
   shape,
   index,
   maxDepth,
+  maxDepthWhy = 'the stock thickness less the minimum floor',
   onChange,
   onRemove,
   findings,
@@ -379,7 +385,7 @@ export function EngraveShapeRow({
         </p>
       ) : (
         <p style={{ ...MUTED, ...(depthInvalid ? { color: SEVERITY_COLOR.error } : null) }} data-testid={`engrave-shape-maxdepth-${index}`}>
-          Max depth {maxDepth} mm here — the stock thickness less the minimum floor.
+          Max depth {maxDepth} mm here — {maxDepthWhy}.
         </p>
       )}
       {/* #674 — A RAISED PRISM: the shape stands and the V cuts the ring around it. The same

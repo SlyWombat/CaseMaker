@@ -89,6 +89,11 @@ export interface EngraveTraceRowProps {
   index: number;
   /** Largest depth this stock allows: `thickness − minFloor`, mm. */
   maxDepth: number;
+  /**
+   * #724 W4 — the words after "Max depth N mm here —": the stock thickness on a plate, the
+   * rod's radius (or the tube's wall) on a rotary job. Omitted, the plate's words stand.
+   */
+  maxDepthWhy?: string;
   onChange: (patch: TracePatch) => void;
   onRemove: () => void;
   /** Findings about THIS trace (the panel filters the job's list by `labelId`). */
@@ -99,6 +104,7 @@ export function EngraveTraceRow({
   trace,
   index,
   maxDepth,
+  maxDepthWhy = 'the stock thickness less the minimum floor',
   onChange,
   onRemove,
   findings,
@@ -399,7 +405,7 @@ export function EngraveTraceRow({
       </div>
 
       <p style={{ ...MUTED, ...(depthInvalid ? { color: SEVERITY_COLOR.error } : null) }} data-testid={`engrave-trace-maxdepth-${index}`}>
-        Max depth {maxDepth} mm here — the stock thickness less the minimum floor.
+        Max depth {maxDepth} mm here — {maxDepthWhy}.
       </p>
 
       {/* #674 — THE FLUTE'S numbers: the ramp the profile runs with, and the path length it has to

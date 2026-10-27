@@ -48,6 +48,11 @@ export interface EngravePrimitiveRowProps {
   index: number;
   /** Largest depth this stock allows: `thickness − minFloor`, mm. */
   maxDepth: number;
+  /**
+   * #724 W4 — the words after "Max depth N mm here —": the stock thickness on a plate, the
+   * rod's radius (or the tube's wall) on a rotary job. Omitted, the plate's words stand.
+   */
+  maxDepthWhy?: string;
   onChange: (patch: PrimitivePatch) => void;
   onRemove: () => void;
   /** Findings about THIS primitive (the panel filters the job's list by `labelId`). */
@@ -65,6 +70,7 @@ export function EngravePrimitiveRow({
   primitive,
   index,
   maxDepth,
+  maxDepthWhy = 'the stock thickness less the minimum floor',
   onChange,
   onRemove,
   findings,
@@ -296,7 +302,7 @@ export function EngravePrimitiveRow({
       </p>
 
       <p style={{ ...MUTED, ...(depthInvalid || shapeInvalid ? { color: '#f0b4ad' } : null) }} data-testid={`engrave-primitive-maxdepth-${index}`}>
-        Max depth {maxDepth} mm here — the stock thickness less the minimum floor.
+        Max depth {maxDepth} mm here — {maxDepthWhy}.
         {primitive.kind === 'sphere' && ` A sphere's cap must be no deeper than its diameter (${primitive.diameter} mm).`}
         {primitive.kind === 'cone' && shapeInvalid && ' The tip is wider than the base.'}
       </p>

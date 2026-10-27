@@ -46,6 +46,11 @@ export interface EngraveThreadRowProps {
   index: number;
   /** Largest thread depth this stock allows: `thickness − minFloor`, mm. */
   maxDepth: number;
+  /**
+   * #724 W4 — the words after "Max depth N mm here —": the stock thickness on a plate, the
+   * rod's radius (or the tube's wall) on a rotary job. Omitted, the plate's words stand.
+   */
+  maxDepthWhy?: string;
   onChange: (patch: ThreadPatch) => void;
   onRemove: () => void;
   /** Findings about THIS thread (the panel filters the job's list by `labelId`). */
@@ -56,6 +61,7 @@ export function EngraveThreadRow({
   thread,
   index,
   maxDepth,
+  maxDepthWhy = 'the stock thickness less the minimum floor',
   onChange,
   onRemove,
   findings,
@@ -187,7 +193,7 @@ export function EngraveThreadRow({
       </div>
 
       <p style={{ ...MUTED, ...(depthInvalid ? { color: SEVERITY_COLOR.error } : null) }} data-testid={`engrave-thread-maxdepth-${index}`}>
-        Max depth {maxDepth} mm here — the stock thickness less the minimum floor.
+        Max depth {maxDepth} mm here — {maxDepthWhy}.
       </p>
     </EngraveItemRow>
   );

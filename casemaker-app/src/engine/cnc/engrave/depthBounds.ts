@@ -42,6 +42,7 @@ import { DEFAULT_BREAKTHROUGH } from '@/engine/cnc/sacrificial';
 import { colourBoundaryDepthOf, printedLayerGridOf } from '@/engine/cnc/layerStack';
 import { probeResiduals } from '@/engine/cnc/probePlan';
 import { jobVise } from '@/engine/cnc/fixture';
+import { rotaryMapOf } from '@/engine/cnc/rotary/wrap';
 import type { EngraveAnyItem, EngraveJob, EngraveLabel, EngraveMargins, FieldSource, MarginSource } from '@/types/engraveJob';
 import type { Mm } from '@/types/units';
 
@@ -890,6 +891,22 @@ export interface LabelDepthRecommendation {
  * previous call wrote, and a recommendation that could not revise itself would freeze a label onto
  * the blank it was first measured against (#362 review).
  */
+/**
+ * The deepest floor a blank allows, mm (#440's ceiling, #724 W4). On a flat job it is the stock's
+ * thickness less the minimum floor. A ROTARY cut's floor is a RADIUS above the axis, so 19 mm on a
+ * ⌀20 rod would be past the centre — there is no stock there: the ceiling is the radius less the
+ * floor (9 mm). A TUBE adds its bore: a cut past its wall breaks into it, so the ceiling is the
+ * smaller of the radius and the wall, less the floor. One function, so the field's red state, the
+ * row's sentence and the recommendation cannot state three different limits.
+ */
+export function blankDepthCeiling(job: EngraveJob): number {
+  const map = rotaryMapOf(job);
+  if (map === null) return job.stock.thickness - job.minFloor;
+  const wall = job.stock.wall;
+  const reach = wall !== undefined && wall > 0 ? Math.min(map.radius, wall) : map.radius;
+  return reach - job.minFloor;
+}
+
 export function recommendLabelDepth(
   job: EngraveJob,
   item: EngraveAnyItem,
@@ -961,7 +978,7 @@ export function recommendLabelDepth(
   // The BLANK'S ceiling, `thickness − minFloor` (#440). It is a limit, so it may only CAP an
   // answer — and it is only added to the field of candidates when there is something for it to
   // cap. With no item limit at all, the answer is the label's own depth below, not this number.
-  const ceiling = shallower(job.stock.thickness - job.minFloor);
+  const ceiling = shallower(blankDepthCeiling(job));
   if (candidates.length > 0) {
     candidates.push({
       depth: ceiling,

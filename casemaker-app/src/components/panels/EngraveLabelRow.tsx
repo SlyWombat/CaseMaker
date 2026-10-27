@@ -47,6 +47,11 @@ export interface EngraveLabelRowProps {
   index: number;
   /** Largest depth this stock allows: `thickness − minFloor`, mm. */
   maxDepth: number;
+  /**
+   * #724 W4 — the words after "Max depth N mm here —": the stock thickness on a plate, the
+   * rod's radius (or the tube's wall) on a rotary job. Omitted, the plate's words stand.
+   */
+  maxDepthWhy?: string;
   onChange: (patch: Partial<EngraveLabel>) => void;
   onRemove: () => void;
   /** Findings about THIS label (the panel filters the job's list by `labelId`). */
@@ -84,6 +89,7 @@ export function EngraveLabelRow({
   label,
   index,
   maxDepth,
+  maxDepthWhy = 'the stock thickness less the minimum floor',
   onChange,
   onRemove,
   findings,
@@ -307,7 +313,7 @@ export function EngraveLabelRow({
       </div>
 
       <p style={{ ...MUTED, ...(depthInvalid ? { color: SEVERITY_COLOR.error } : null) }} data-testid={`engrave-label-maxdepth-${index}`}>
-        Max depth {maxDepth} mm here — the stock thickness less the minimum floor.{' '}
+        Max depth {maxDepth} mm here — {maxDepthWhy}.{' '}
         {recommendedAtCeiling
           ? 'The recommendation stops here — a deeper cut would break the blank’s minimum floor.'
           : 'That is the ceiling this blank allows, not the depth the app recommends.'}

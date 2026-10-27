@@ -19,6 +19,7 @@ import { EngraveCutSurface } from './EngraveCutSurface';
 import { saveEngraveProgram } from '@/engine/exportTrigger';
 import { useSettingsStore } from '@/store/settingsStore';
 import {
+  blankDepthCeiling,
   effectiveMargins,
   houseBoundaryMargin,
   recommendLabelDepth,
@@ -94,8 +95,10 @@ import {
   finishOf,
   formLabel,
   measuredTopSpreadMm,
+  stockSizeWords,
 } from '@/engine/cnc/stockStart';
 import { MATERIAL_LABELS } from '@/engine/cnc/materials';
+import { rotaryMapOf } from '@/engine/cnc/rotary/wrap';
 import { groupRejections, isActionableRejection, shouldGroupCatalogueRows } from './recommendationRejections';
 import { useShopDefaultsStore, shopDefault } from '@/store/shopDefaultsStore';
 import { readDesignFile } from '@/engine/import/designImport';
@@ -1168,7 +1171,19 @@ export function EngravePanel(): JSX.Element {
   // box below already states, and a `catalogue-ignored` is not the machine's doing at all.
   const clamps = feeds?.ok ? feeds.diagnostics.filter((d) => CLAMP_CODES.has(d.code)) : [];
 
-  const maxDepth = job.stock.thickness - job.minFloor;
+  // #724 W4 — the ceiling is the BLANK's own: the stock thickness on a plate, but a rotary cut's
+  // floor is a radius above the axis (9 mm on a ⌀20 rod, not 19 — 19 is past the centre), and a
+  // tube's is its wall. The sentence says which number made it, so 9 never reads as a thickness.
+  const maxDepth = blankDepthCeiling(job);
+  const maxDepthWhy = (() => {
+    const map = rotaryMapOf(job);
+    if (map === null) return 'the stock thickness less the minimum floor';
+    const wall = job.stock.wall;
+    if (wall !== undefined && wall > 0 && wall < map.radius) {
+      return `the tube’s ${fmt(wall)} mm wall less the minimum floor`;
+    }
+    return `the rod’s ${fmt(map.radius)} mm radius less the minimum floor`;
+  })();
   // The declared under-surface voids (#271). One row each, under the stock they are a fact about.
   const keepOuts = job.keepOuts ?? [];
 
@@ -2211,7 +2226,15 @@ export function EngravePanel(): JSX.Element {
   // #686 — the Job group's ONE stock line, and the provenance facts that moved off the inline
   // fields (design §2): the line's hover and the Cutter group's Technical fold.
   /** §4's word for the stock's form, lowercase mid-sentence: plate · block · sheet · printed blank. */
-  const stockFormWord = formLabel(job.stockEntry?.form ?? 'plate').toLowerCase();
+  // #724 W3 — the form word comes from the STOCK when it is round: a rod in the chuck's box has
+  // its own facts (`shape: 'cylinder'`, its diameter), and the stock entry may be absent. A tube
+  // states a wall; anything else keeps the entry's word (or a plate's, with no entry).
+  const stockFormWord =
+    job.stock.shape === 'cylinder'
+      ? job.stock.wall !== undefined && job.stock.wall > 0
+        ? 'tube'
+        : 'rod'
+      : formLabel(job.stockEntry?.form ?? 'plate').toLowerCase();
   const STOCK_FIELD_WORD: Record<string, string> = {
     length: 'length',
     width: 'width',
@@ -2534,8 +2557,8 @@ export function EngravePanel(): JSX.Element {
           title={stockProvenance}
           style={{ fontSize: 12, color: '#d1d5db' }}
         >
-          <span style={MUTED}>Stock</span> · {stockFormWord} {fmt(job.stock.length)} × {fmt(job.stock.width)} ×{' '}
-          {fmt(job.stock.thickness)} mm · {MATERIAL_LABELS[job.stock.material]}
+          <span style={MUTED}>Stock</span> · {stockFormWord} {stockSizeWords(job.stock)} ·{' '}
+          {MATERIAL_LABELS[job.stock.material]}
         </span>
         <button
           type="button"
@@ -2756,6 +2779,7 @@ export function EngravePanel(): JSX.Element {
           label={label}
           index={i}
           maxDepth={maxDepth}
+          maxDepthWhy={maxDepthWhy}
           findings={findingsFor(label.id)}
           customFonts={job.customFonts}
           recommended={depthRecommendation(label)}
@@ -2772,6 +2796,7 @@ export function EngravePanel(): JSX.Element {
           shape={shape}
           index={i}
           maxDepth={maxDepth}
+          maxDepthWhy={maxDepthWhy}
           findings={findingsFor(shape.id)}
           rest={shape.construction === true || shape.prism !== undefined ? null : restFor(shape.id)}
           vCarve={
@@ -2796,6 +2821,7 @@ export function EngravePanel(): JSX.Element {
           shape={shape}
           index={i}
           maxDepth={maxDepth}
+          maxDepthWhy={maxDepthWhy}
           candidates={referenceableItems(shape.id)}
           findings={findingsFor(shape.id)}
           rest={shape.construction === true ? null : restFor(shape.id)}
@@ -2810,6 +2836,7 @@ export function EngravePanel(): JSX.Element {
           trace={trace}
           index={i}
           maxDepth={maxDepth}
+          maxDepthWhy={maxDepthWhy}
           findings={findingsFor(trace.id)}
           onChange={(patch) => updateTrace(trace.id, patch)}
           onRemove={() => removeTrace(trace.id)}
@@ -2821,6 +2848,7 @@ export function EngravePanel(): JSX.Element {
           drill={drill}
           index={i}
           maxDepth={maxDepth}
+          maxDepthWhy={maxDepthWhy}
           findings={findingsFor(drill.id)}
           borePitch={borePitchFor(drill)}
           peck={peckFor(drill)}
@@ -2834,6 +2862,7 @@ export function EngravePanel(): JSX.Element {
           thread={thread}
           index={i}
           maxDepth={maxDepth}
+          maxDepthWhy={maxDepthWhy}
           findings={findingsFor(thread.id)}
           onChange={(patch) => updateThread(thread.id, patch)}
           onRemove={() => removeThread(thread.id)}
@@ -2845,6 +2874,7 @@ export function EngravePanel(): JSX.Element {
           primitive={primitive}
           index={i}
           maxDepth={maxDepth}
+          maxDepthWhy={maxDepthWhy}
           findings={findingsFor(primitive.id)}
           rest={primitiveReducesToRegion(primitive) ? restFor(primitive.id) : null}
           technical={vCarveTechnical(primitive.id)}
@@ -2882,6 +2912,7 @@ export function EngravePanel(): JSX.Element {
           shape={shape}
           index={i}
           maxDepth={maxDepth}
+          maxDepthWhy={maxDepthWhy}
           findings={findingsFor(shape.id)}
           rest={shape.construction === true ? null : restFor(shape.id)}
           technical={vCarveTechnical(shape.id)}

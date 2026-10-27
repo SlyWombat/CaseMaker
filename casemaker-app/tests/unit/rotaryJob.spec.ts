@@ -257,6 +257,35 @@ describe('#724 B3 — entering the chuck lands the layout on the free span', () 
   });
 });
 
+// #724 W3 — the frame change is a statement about the SAME piece, so the job keeps the entry it
+// was started from. The subscription that clears an entry when the stock is edited away lives in a
+// side-effect module; importing it here is what makes this a test of the app's own wiring.
+describe('#724 W3 — the stock entry follows the rod through the frame change', () => {
+  beforeEach(() => {
+    useEngraveJobStore.getState().reset();
+  });
+
+  it('keeps a made rod’s entry into the chuck, and still clears it on a real size edit', async () => {
+    await import('@/store/stockEntryFollow');
+    const base = defaultEngraveJob();
+    const rod: EngraveJob = {
+      ...base,
+      stock: { ...base.stock, length: 20, width: 20, thickness: 100, shape: 'cylinder', diameter: 20 },
+      stockEntry: { kind: 'made', shelfId: null, file: null, form: 'rod', finish: 'rough', conductive: false },
+    };
+    useEngraveJobStore.getState().replace(rod);
+    useEngraveJobStore.getState().setRotaryHolding(defaultRotaryChuck(useEngraveJobStore.getState().job), VISE);
+
+    const inChuck = useEngraveJobStore.getState().job;
+    expect(inChuck.workholding.kind).toBe('rotary-chuck');
+    expect(inChuck.stockEntry?.form).toBe('rod');
+
+    // A genuine edit still forgets the piece: ⌀20 → ⌀25 is a different rod.
+    useEngraveJobStore.getState().setStock({ diameter: 25 }, 'user');
+    expect(useEngraveJobStore.getState().job.stockEntry).toBeUndefined();
+  });
+});
+
 describe('the frozen program’s frame (#240 §4)', () => {
   it('copies a stated frame, and writes no key when the program does not state one', () => {
     const job = rotaryRodDoc();

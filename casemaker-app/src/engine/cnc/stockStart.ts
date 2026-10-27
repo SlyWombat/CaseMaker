@@ -809,11 +809,34 @@ export function jobItemCount(job: EngraveJob): number {
  * and do not count.
  */
 export function stockStillNamed(prev: EngraveJob['stock'], next: EngraveJob['stock']): boolean {
-  return (
-    prev.length === next.length &&
-    prev.width === next.width &&
-    prev.thickness === next.thickness &&
-    prev.wall === next.wall &&
-    prev.material === next.material
-  );
+  if (prev.material !== next.material || prev.wall !== next.wall) return false;
+  // #724 W3 — A ROD IS THE SAME PIECE IN EITHER FRAME. Entering the chuck re-states the box
+  // (`D × D × L` standing → `L × D × D` along the axis, #713/#240); that is a statement about the
+  // same piece, not an edit to it, and the box test below deleted the job's entry for it. Both
+  // frames read as the rod's own numbers, so the entry follows the piece.
+  const wasRound = prev.shape === 'cylinder';
+  const isRound = next.shape === 'cylinder';
+  // A round piece that becomes a rectangle is a different piece whatever its box reads.
+  if (wasRound !== isRound) return false;
+  if (wasRound) {
+    const was = rodDimsOf(prev);
+    const now = rodDimsOf(next);
+    return was !== null && now !== null && was.diameter === now.diameter && was.length === now.length;
+  }
+  return prev.length === next.length && prev.width === next.width && prev.thickness === next.thickness;
+}
+
+/**
+ * #724 W3 — the stock's own numbers, as the Job group's one line states them. A round piece
+ * speaks its diameter, its length along the rod and the distance around its surface — never the
+ * box it happens to occupy (a rod in the chuck's box reads `100 × 20 × 20`, a plate's) — and a
+ * tube adds its wall. A rectangular piece states the box.
+ */
+export function stockSizeWords(stock: EngraveJob['stock']): string {
+  const rod = rodDimsOf(stock);
+  if (stock.shape === 'cylinder' && rod !== null) {
+    const wall = stock.wall !== undefined && stock.wall > 0 ? ` · wall ${mm(stock.wall)} mm` : '';
+    return `⌀${mm(rod.diameter)} × length ${mm(rod.length)} mm${wall} · around ${mm(Math.PI * rod.diameter)} mm`;
+  }
+  return `${mm(stock.length)} × ${mm(stock.width)} × ${mm(stock.thickness)} mm`;
 }
