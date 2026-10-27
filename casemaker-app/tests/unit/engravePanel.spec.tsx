@@ -2373,12 +2373,13 @@ describe('EngravePanel (#432 slice 4) — the facing choice', () => {
 
   // #474/#493 — the maintainer, 2026-10-17: facing plastic will never work. The material withholds
   // the choice, so neither a rough printed PETG blank nor a purchased acrylic sheet gets the "face
-  // it" button, and the sentence names the material and says why.
+  // it" button. #726 P2 — it draws no Facing row either: the design keeps Facing "one line only on
+  // wood/metal", so there is no line, no why sentence and no control on plastic.
   it.each([
     ['petg', 'PETG'],
     ['abs', 'ABS'],
     ['acrylic', 'Acrylic'],
-  ] as const)('withholds facing on %s, whatever the finish says', (material, label) => {
+  ] as const)('withholds facing on %s — no row, no control, whatever the finish says', (material, _label) => {
     act(() => {
       const base = defaultEngraveJob();
       useEngraveJobStore.setState({
@@ -2390,9 +2391,8 @@ describe('EngravePanel (#432 slice 4) — the facing choice', () => {
       });
     });
     render(<EngravePanel />);
-    expect(screen.getByTestId('engrave-facing-why').textContent).toContain(
-      `facing is not offered on ${label}: a flat cutter smears a plastic top`,
-    );
+    expect(screen.queryByTestId('engrave-facing-editor')).toBeNull();
+    expect(screen.queryByTestId('engrave-facing-why')).toBeNull();
     expect(screen.queryByTestId('engrave-facing-on')).toBeNull();
     expect(screen.queryByTestId('engrave-facing-off')).toBeNull();
     expect(screen.queryByTestId('engrave-facing-state')).toBeNull();
@@ -3556,13 +3556,77 @@ describe('EngravePanel — the Design main path (#686)', () => {
     expect(editor.open).toBe(true);
   });
 
-  it('says facing is not offered on plastic, with no third sentence on the main path', () => {
+  it('#726 P2 — plastic draws no Facing line at all; facing is one line only on wood/metal', () => {
     act(() => {
       const base = useEngraveJobStore.getState().job;
       useEngraveJobStore.setState({ job: { ...base, stock: { ...base.stock, material: 'petg' } } });
     });
     render(<EngravePanel />);
+    // The material refuses facing, so the row has nothing to say: it is absent, not a line
+    // explaining its own absence.
+    expect(screen.queryByTestId('engrave-facing-editor')).toBeNull();
+    expect(screen.queryByTestId('engrave-facing-line')).toBeNull();
+  });
+
+  it('#726 P2 — a plastic job that still has facing on shows the line, so it can be turned off', () => {
+    act(() => {
+      const base = useEngraveJobStore.getState().job;
+      useEngraveJobStore.setState({
+        job: { ...base, stock: { ...base.stock, material: 'petg' }, facing: { enabled: true, depth: 0.2 } },
+      });
+    });
+    render(<EngravePanel />);
     expect(screen.getByTestId('engrave-facing-line').textContent).toBe('Facing — not offered on plastic ▸ change');
+    expect(screen.getByTestId('engrave-facing-why').textContent).toContain('turn it off before it is generated');
+    fireEvent.click(screen.getByTestId('engrave-facing-line'));
+    expect((screen.getByTestId('engrave-facing-editor') as HTMLDetailsElement).open).toBe(true);
+    expect(screen.getByTestId('engrave-facing-off')).toBeTruthy();
+  });
+
+  it('#726 P3 — a rod draws neither Voids nor Target object, and either row returns to be removed', () => {
+    const rod = (): void => {
+      const base = defaultEngraveJob();
+      useEngraveJobStore.setState({
+        job: {
+          ...base,
+          stock: { ...base.stock, length: 100, width: 20, thickness: 20, material: 'pla', shape: 'cylinder', diameter: 20 },
+        },
+      });
+    };
+
+    act(rod);
+    render(<EngravePanel />);
+    // No flat bottom face to pocket, no bed to surface a mesh on: neither row is offered.
+    expect(screen.queryByTestId('engrave-voids-fold')).toBeNull();
+    expect(screen.queryByTestId('engrave-target-fold')).toBeNull();
+
+    // A job that already carries one keeps its row, so it can be taken away.
+    cleanup();
+    act(() => {
+      rod();
+      const base = useEngraveJobStore.getState().job;
+      useEngraveJobStore.setState({
+        job: {
+          ...base,
+          keepOuts: [
+            {
+              id: 'ko-1',
+              kind: 'rect',
+              position: { x: 10, y: 10 },
+              rotation: 0,
+              enabled: true,
+              zCeiling: 1,
+              width: 5,
+              height: 5,
+              cornerRadius: 0,
+            },
+          ],
+        },
+      });
+    });
+    render(<EngravePanel />);
+    expect(screen.getByTestId('engrave-voids-fold')).toBeTruthy();
+    expect(screen.queryByTestId('engrave-target-fold')).toBeNull();
   });
 
   it('shows the voids and the target object as closed one-line rows at 0, each opened by its own +', () => {

@@ -38,6 +38,17 @@ describe('#280 — the blank project’s rail', () => {
     }
   });
 
+  it('#726 P1 — the CNC entry is the job; "Cut" is the mode inside it', () => {
+    useProjectStore.getState().setProject(findTemplate('blank')!.build());
+    render(<Sidebar />);
+    // first-job-flow §4: "Cut" is the mode (Design · Cut), never a rail label — the rail entry
+    // opens the job, and the mode switch inside says which half of it is on screen.
+    const entry = screen.getByTestId('sidebar-button-cnc-engrave');
+    expect(entry.textContent).toContain('Job');
+    expect(entry.textContent).not.toContain('Cut');
+    expect(screen.getByTestId('sidebar-button-cnc-sim').textContent).toContain('Simulate');
+  });
+
   it('matches the badge’s rail today — the two are separate constants, not one shared list', () => {
     useProjectStore.getState().setProject(findTemplate('badge-blank')!.build());
     render(<Sidebar />);

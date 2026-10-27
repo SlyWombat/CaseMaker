@@ -102,6 +102,16 @@ describe('#280 — the context panel mounts with a section already active', () =
   });
 });
 
+describe('#726 P1 — the cutting panel is titled after the job', () => {
+  it('says "Job", never "Cut", in the panel header', () => {
+    setWidth(1024);
+    useViewportStore.setState({ activeSidebarSection: 'cnc-engrave' });
+    render(<ContextPanel />);
+    const header = screen.getByTestId('context-section-cnc-engrave').querySelector('h3');
+    expect(header?.textContent).toBe('Job');
+  });
+});
+
 describe('#355 — the rail shares the viewport from 1024 up', () => {
   it('is a rail at 1024, the width of every laptop and every desktop e2e run', () => {
     setWidth(1024);

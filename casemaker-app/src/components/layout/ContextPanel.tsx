@@ -29,7 +29,9 @@ const SECTION_TITLES: Record<SidebarSectionId, string> = {
   assets: 'External assets',
   export: 'Export',
   'cnc-sim': 'Simulate',
-  'cnc-engrave': 'Cut',
+  // #726 P1 — the job, not the mode (first-job-flow §4: no "Cut" as a panel title; Design · Cut
+  // is the switch inside this panel, and the rail entry is the job).
+  'cnc-engrave': 'Job',
 };
 
 function renderSection(id: SidebarSectionId): JSX.Element {
@@ -49,7 +51,7 @@ function renderSection(id: SidebarSectionId): JSX.Element {
     // #490 — a throw while rendering the panel is caught HERE, so the rail's header, the section
     // list and the viewport survive it; the boundary says what threw and offers a reload.
     case 'cnc-engrave': return (
-      <PanelErrorBoundary name="Cut panel">
+      <PanelErrorBoundary name="Job panel">
         <EngravePanel />
       </PanelErrorBoundary>
     );

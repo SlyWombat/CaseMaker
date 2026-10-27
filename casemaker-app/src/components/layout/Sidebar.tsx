@@ -36,8 +36,10 @@ if (featureSim) {
     {
       id: 'cnc-engrave',
       // #662 — THE ENTRY IS THE JOB, not one of its operation types. The id stays (internals are
-      // not renamed); the label is the operator's verb and pairs with Simulate below.
-      label: 'Cut',
+      // not renamed). #726 P1 — and the label is the JOB, not the mode: "Cut" is one half of the
+      // Design · Cut switch inside (first-job-flow §4 bans it as a rail label), so the rail names
+      // what the operator opens, and the switch names where they are.
+      label: 'Job',
       icon: '🪵',
       hint: 'Set up a job on the machine — text, pockets, cut-outs, holes — and run it',
     },

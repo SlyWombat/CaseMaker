@@ -2234,6 +2234,10 @@ export function EngravePanel(): JSX.Element {
         ? 'tube'
         : 'rod'
       : formLabel(job.stockEntry?.form ?? 'plate').toLowerCase();
+  // #726 P3 — a ROUND job (a rod or disc in the chuck) has no flat bottom face to pocket and no
+  // bed to surface a mesh on. The Voids and Target object rows are not offered for it; a job that
+  // already carries one still draws its row, so it can be taken away.
+  const roundStock = job.stock.shape === 'cylinder';
   const STOCK_FIELD_WORD: Record<string, string> = {
     length: 'length',
     width: 'width',
@@ -2573,8 +2577,10 @@ export function EngravePanel(): JSX.Element {
       {/* 1a — the skim of the top (#432 slice 4, decision Q6; #686's one line). On wood and metal
           the choice is one line with its current number; `change` opens the choice and the depth in
           place. An absent `facing` key is the pre-#432 job: nothing has chosen, and the job does not
-          face. Plastic is not faced at all (#474/#493), so the line says so rather than offering a
-          control the material refuses. */}
+          face. #726 P2 — plastic is not faced at all (#474/#493), so it draws NO line: the design
+          keeps Facing "one line only on wood/metal". A job that somehow has facing on is the one
+          exception — its line is how it is turned back off. */}
+      {(!facingRefused || facingOn) && (
       <details data-testid="engrave-facing-editor" style={{ marginTop: 6 }}>
         <summary data-testid="engrave-facing-line" style={{ ...MUTED, cursor: 'pointer', margin: 0 }}>
           Facing —{' '}
@@ -2668,12 +2674,9 @@ export function EngravePanel(): JSX.Element {
         </>
       )}
       </details>
+      )}
 
-      {/* 1b — the voids the blank already has (#271). #686's closed one-line row carries the count;
-          the explanation, the expand-all and the add buttons are behind it, so at 0 the main path
-          says only that there are none. These are what `jobDepthLimit` reads, so the depth limit,
-          the `item-over-void` warning and the run sheet's §1 list all speak of a void only if it is
-          declared here. */}
+      {(!roundStock || keepOuts.length > 0) && (
       <details data-testid="engrave-voids-fold" style={{ marginTop: 6 }}>
         <summary data-testid="engrave-voids-summary" style={{ ...MUTED, cursor: 'pointer', margin: 0 }}>
           Voids under the face (<span data-testid="engrave-keepout-count">{keepOuts.length}</span>)
@@ -2721,6 +2724,7 @@ export function EngravePanel(): JSX.Element {
           ))}
         </div>
       </details>
+      )}
 
       {/* 2 — items: labels, shape pockets and combined shapes, one list (#214/#215). #686 puts the
           ONE "Add operation" picker directly under the heading, where the mockup has it. */}
@@ -2925,6 +2929,7 @@ export function EngravePanel(): JSX.Element {
           It is deliberately NOT in the item list or the item count: it is never cut, and
           `validateJob` says so once as a warning. `stock − target` is the profile cut-out work
           tracked in #218. At 0 the paragraph and the import button are behind the row. */}
+      {(!roundStock || target !== null) && (
       <details data-testid="engrave-target-fold" style={{ marginTop: 6 }}>
         <summary data-testid="engrave-target-summary" style={{ ...MUTED, cursor: 'pointer', margin: 0 }}>
           Target object (<span data-testid="engrave-target-count">{target === null ? 0 : 1}</span>)
@@ -3000,6 +3005,7 @@ export function EngravePanel(): JSX.Element {
         </p>
       )}
       </details>
+      )}
       {/* #662 — the Surface a mesh operation's input. The same reader as the reference above; the
           role is the difference, and it is what the engine dispatches on (`generateGoalProgram`).
           Outside the target row's fold: it is the operation picker's door, not the target row's. */}
