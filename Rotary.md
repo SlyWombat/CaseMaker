@@ -151,6 +151,44 @@ paths by the model instead of by the stock length (l. 1052–1075); roughing and
 recommended as separate paths because of chip load (l. 1069). There is **no wrap of 2D vectors** in
 Makera's rotary offering at all — only relief from an imported mesh.
 
+#### 1.3.1 The decompiled Studio (2026-10-27) — the writer, the 4-axis UI and the origin
+
+`MakeraStudio.exe.orig`'s own strings `[DECOMPILED]` (the static pass; file offsets in decimal):
+
+- **The `;@MKR` header writer** (file offset 18 614 450): `;@MKR|MACHINE|id=|uuid1=`,
+  `;@MKR|MATERIAL|id=|name=`, `;@MKR|STOCK|id=` followed by the shape id **`cylinder`** or
+  **`cuboid`** and the fields `|diameter=|height=|width=|length=`, then
+  `;@MKR|ORIGIN|id=|type_name=` with the origin names `topFrontLeft`, `topFrontRight`, `topCenter`,
+  `topBackLeft`, `topBackRight`, `bottomFrontLeft`, …, `leftCenter`; `;@MKR|CAM|id=MakeraStudio|
+  name=MakeraStudio|v=`, `;@MKR|UNIT|value=mm`, `;@MKR|MAXFEEDRATE|value=`, and the tool record
+  `;@MKR|TOOL|…|type=|halfAngle=|angle=|cornerradius=|tipdiameter=|flutelength=|shoulderlength=|
+  sticklength=|handlediameter=`. The stock's shape id is the literal **`cylinder`** (the only round
+  id the writer has; the other is `cuboid`), and the record carries the fields the writer emits —
+  `diameter`, `height`, `width`, `length` — so a round bar reads `;@MKR|STOCK|id=cylinder|diameter=
+  <D>|length=<L>`; **the exact field order on a cylinder is inferred from the writer's literals, not
+  seen in a generated file** (`/Makera-Parity.md` §5 called it "unknown"). The 4-axis project model
+  names the same fact `bIsSquareStockShape` / `roundBarlength`, beside `material4d`, `length4d`,
+  `width4d`, `height4d` (offset 18 532 250).
+- **The 4-axis origin.** Studio's 4-axis mode forces the work Y offset to 0: *"In 4-axis mode, the
+  Y-axis offset will automatically reset to 0"* (the origin confirmation) and *"Currently in 4-axis
+  machining mode. Detected that the Y-axis origin offset is not 0. Reset to 0?"* (offset 18 509 700).
+  Its origin page is *"4Axis Origin / Current Pos / Do ZProbe / Do AutoLevel"* (18 499 900). This is
+  the axis-centred work origin §1.2 derives from the firmware's feed arithmetic, seen from the app
+  side.
+- **The chuck modes and jaw sizes.** *"Securely clamp the stock with the chuck jaws. For stock size
+  under 20 mm, Standard Jaw Setup is recommended; for 20–35 mm, use Reverse Jaw Setup with
+  Inner-Tooth Clamping; for over 35 mm, use Reverse Jaw Setup with Outer-Tooth Clamping"* (offset
+  18 501 581). The dialog also names *"Front-mounted chuck"*, *"Chuck Reverse Mounting — Inner Side /
+  Middle / Outer Side"*, *"Stock holding length"*, *"Workpiece Reference Position"*, *"Use
+  Tailstock"*.
+- **The A-axis conventions.** Studio sends `G92.4 A0 S0` and reports *"A-axis shrunk"*; it can also
+  send `G92.4 A<v> R0` (offset 18 558 400). The `Horizontal` / `Vertical` labels beside `Use
+  Tailstock` are the Rotation Relief dialog's direction control (`reliefdirection` 0 = Horizontal,
+  the stored default).
+- **The cutter choice takes the chuck diameter**: *"No tools found for the current chuck diameter
+  and workpiece material"* (18 400 150) — the 4-axis recommendation reads the stock diameter, which
+  is why the round stock's ⌀ must be known before the first cut.
+
 ### 1.4 The module, read from the Z1 wiki
 
 `https://wiki.makera.com/en/Z1/Accessories/4Axis` (fetched with a browser user agent, 2026-10-05;
@@ -160,15 +198,17 @@ the page is JS-rendered and the first fetch returned only its title):
   wasteboard** — so, like the vise (`/Fabrication.md` §7.3), **rotary and tape-down are mutually
   exclusive setups**, and the module occupies the same pin datum.
 - **Three-jaw chuck, reverse jaws fitted by default** for larger work; standard jaws for small parts.
-  Jaw capacity in either mode: **not stated**.
+  Jaw capacity in either mode: **not stated by the wiki**; Studio's own strings give the size rule
+  (< 20 mm standard, 20–35 mm reverse inner-tooth, > 35 mm reverse outer-tooth — §1.3.1).
 - **Tailstock** with an adjustment knob; *"drilling a center hole at the end is recommended"*.
 - *"The 4th-axis zero point is preset in the software at the center of the right edge of the
   spindle"* — a module datum Studio knows (its UI carries "rotary module X/Y/Z offsets, max A speed
   and acceleration", `/Makera-Parity.md` §7). **What that preset's precision is, and whether it
   survives re-mounting, is unknown.**
 - Cable to a 4th-axis port at the rear-left inside the machine; **do not hot-plug**.
-- No number anywhere for steps, speed, homing, or envelope; the ⌀80 × 150 mm envelope comes only from
-  `t_MachineType`.
+- No number anywhere on the wiki for steps, speed, homing, or envelope; the numbers live in the
+  firmware's shipped config (§1.2) and Studio's strings/config (§1.3.1), and the ⌀80 × 150 mm
+  envelope comes only from `t_MachineType`.
 
 ### 1.5 What exists in the code today, with the lines that do it
 
@@ -737,24 +777,31 @@ Stepcraft, Bantam). That is the input list §6 and the engrave panel should matc
 
 ---
 
-## 9. Unknown until the hardware — and the bench item for each
+## 9. Unknown until the hardware — what Makera's own evidence answers, and what needs the bench
 
-| Unknown | Why it matters | Bench item |
-|---|---|---|
-| Which way +A turns (dir pin is inverted in the shipped config) | the viewport's rotation sign, the wrap's handedness, text mirroring | jog +90°, photograph the chuck mark |
-| Steps per degree on the device vs the shipped 88.889 | every angle in every job | command 360° from a pencil mark; command 3600° and check the mark returns |
-| The real `delta_max_rate` and whether the perimeter scaling behaves as read | §6.5's whole table; chip load | time a pure-A 3600° move at F 1200; time an A-only vs X+A move at known r |
-| Homing: does `$H`/`G28` home A to the switch, and where is A = 0 after it | whether an indexed job can be re-run after power-off | observe at power-up and after homing |
-| The module axis height above the table and the chuck face's X in machine coordinates | the radial envelope check (§6.3), the clearance of a ⌀80 stock under the head at Z max | probe the chuck body top and a mounted dowel; record with uncertainty |
-| What *"zero point preset … at the center of the right edge of the spindle"* means and how precise it is | whether the module datum is a usable `fixture` source or needs probing every time | compare the preset against the probed axis at two mountings |
-| Chuck jaw capacity in standard and reverse mode; tailstock reach | `stock-exceeds-module` and `wrap-into-clamp` | caliper |
-| The `;@MKR|STOCK` record and `ORIGIN` for a round stock | the post's header | generate one Rotation Relief job in Studio and read the header |
-| `G92.4 A S` / `R` behaviour on the device, and whether the rotary files' `G92.4A0S0` leaves X/Y/Z untouched | the parser's `rotary-unwind` semantics | run the unwind after a known position; read the DRO |
-| Run-out and backlash of the belt drive at the chuck and at 150 mm | the eccentricity refusal threshold (§6.2) | dial indicator on a ground pin at two X positions |
-| Feeds for PLA, softwood and hardwood at radius | the feeds table has no rotary column | the dowel job's own depth ladder, like #165 |
+The 2026-10-27 evidence pass read Makera's own artifacts — the firmware's shipped config and
+`Robot.cpp` (§1.2), the vendor rotary programs' measured behaviour (§1.1), the decompiled Studio
+(§1.3.1), the library database, the Z1 wiki (§1.4), and Studio's own `ControllerConfig.txt`. Each
+row now carries what those sources say; **bench only** is reserved for the physical facts no file
+can settle.
 
-None of these can be answered from the files on disk, and this document does not guess at any of
-them. Milestone R-1 is their home.
+| Unknown | Why it matters | Makera's answer (source) | Bench item |
+|---|---|---|---|
+| Which way +A turns (dir pin is inverted in the shipped config) | the viewport's rotation sign, the wrap's handedness, text mirroring | The shipped config inverts A's dir pin (`configZ1.default`, §1.2); the vendor programs wind A negative for their helix (+360 → −80 280 rough, → −153 720 finish, §1.1); Studio's `reliefdirection` is a CAM direction, not the motor sign (§1.3.1). The physical +A is in no file. | **bench only** — jog +90°, photograph the chuck mark |
+| Steps per degree on the device vs the shipped 88.889 | every angle in every job | **88.888889 steps/°** = 32 000 per turn, the shipped `delta_steps_per_mm` (`configZ1.default`, §1.2); the machine's own config never answered the key (§1.2; sweep 2026-10-07). The device's value is in no file. | **bench only** — 360° from a pencil mark; 3600° and check the mark returns |
+| The real `delta_max_rate` and whether the perimeter scaling behaves as read | §6.5's whole table; chip load | **3600 °/min = 60 °/s = 10 rpm** and **360 °/s²** (`configZ1.default`; Studio's `ControllerConfig.txt`; the machine's config read 2026-10-07 — §1.2); the scaling is `2π·r + 30` mm per revolution (`Robot.cpp`, §1.2). The timing under load is in no file. | **bench only** for the timing — F 1200 pure-A 3600°; A-only vs X+A at a known r |
+| Homing: does `$H`/`G28` home A to the switch, and where is A = 0 after it | whether an indexed job can be re-run after power-off | A is configured to home to its **min endstop** (`delta_homing_direction home_to_min`, `delta_min_endstop 1.4^`, `delta_limit_enable true` — `configZ1.default`, §1.2); Studio's zero-point preset and `G92.4` set the WORK A (§1.3, §1.3.1). What the device does at power-up/`$H` is in no file. | **bench only** — observe at power-up and after homing |
+| The module axis height above the table and the chuck face's X in machine coordinates | the radial envelope check (§6.3), the clearance of a ⌀80 stock under the head at Z max | Studio's 4-axis mode forces the work origin onto the axis (Y offset reset to 0, §1.3.1) and its preset sits at the spindle's right-edge centre (wiki, §1.4); the numeric machine X/Z of the chuck face are in no file. | **bench only** — probe the chuck body top and a mounted dowel |
+| What *"zero point preset … at the center of the right edge of the spindle"* means and how precise it is | whether the module datum is a usable `fixture` source or needs probing every time | It is the **4-axis work origin** at the spindle's right-edge centre (wiki, §1.4), set on Studio's "4Axis Origin" page; in 4-axis mode Studio resets the work Y offset to 0 — the axis line (§1.3.1). The precision, and whether it survives re-mounting, is in no file. | **bench only** — preset vs the probed axis at two mountings |
+| Chuck jaw capacity in standard and reverse mode; tailstock reach | `stock-exceeds-module` and `wrap-into-clamp` | Studio's own rule: **< 20 mm standard jaws; 20–35 mm reverse jaws, inner-tooth; > 35 mm reverse jaws, outer-tooth** (§1.3.1); the module envelope is ⌀80 × 150 (`t_MachineType`, §1.4). The absolute jaw/tailstock limits are in no file. | **bench only** — caliper both jaw modes; the tailstock's reach |
+| The `;@MKR\|STOCK` record and `ORIGIN` for a round stock | the post's header | **Answered in part**: the stock's shape id is **`cylinder`** (the writer's only round id; the other is `cuboid`), with the fields `diameter`/`height`/`width`/`length` — a round bar reads `;@MKR\|STOCK\|id=cylinder\|diameter=<D>\|length=<L>` (the field order is inferred from the writer's literals, not seen in a generated file). The `ORIGIN` type names are the same list (`topFrontLeft` … `leftCenter`); **which one a round job writes is not observed**. The writer also emits `;@MKR\|CAM\|id=MakeraStudio…`, `;@MKR\|UNIT\|value=mm` and `;@MKR\|MAXFEEDRATE\|value=` (§1.3.1). | — (confirm against a Studio-generated file when one is to hand) |
+| `G92.4 A S` / `R` behaviour on the device, and whether the rotary files' `G92.4A0S0` leaves X/Y/Z untouched | the parser's `rotary-unwind` semantics | The firmware: `S` drops whole turns, `R` resets to the value modulo 360 (§1.2); Studio sends `G92.4 A0 S0` and reports "A-axis shrunk", and can send ` R0` (§1.3.1); the vendor files end on it (§1.1). Whether the device leaves X/Y/Z untouched is in no file. | **bench only** — the unwind after a known position; read the DRO |
+| Run-out and backlash of the belt drive at the chuck and at 150 mm | the eccentricity refusal threshold (§6.2) | No Makera source states a number. | **bench only** — dial indicator on a ground pin at two X positions |
+| Feeds for PLA, softwood and hardwood at radius | the feeds table has no rotary column | Studio's Rotation Relief default: **F 1000 mm/min, plunge 300, 10 000 rpm, 1 mm step-down, 63 % step-over, a 3.175 mm flat**; the vendor files run F 1125–1500; the controller scales F by `2πr + 30` per revolution (§1.2, §1.3, §1.3.1). No material/radius feed table is in Makera's sources. | **bench only** — our dowel depth ladder |
+
+What the files settle is now stated; what stays **bench only** is the physical sign, the device's
+timings and homing, the fitted module's geometry, the jaw/tailstock limits, the run-out, and a
+material feed table. Milestone R-1 remains their home, and this document still does not guess.
 
 ---
 

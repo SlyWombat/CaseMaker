@@ -668,13 +668,14 @@ export const Z1: MillProfile = {
   // and the depth gate at `shoulderLength` keeps it out of the stock. `null` stays the honest
   // value; it matters only for an obstacle that rises above the stock top.
   holder: null,
-  // The 4th-axis figures (#237, /Rotary.md §3.5), each with its own provenance (#238). `maxRate`
-  // and `acceleration` were READ from the machine's own config on 2026-10-07 (`delta_max_rate` =
-  // 3600, `delta_acceleration` = 360, docs/bench/2026-10-07-config-sweep.json; runbook B9) and match
-  // configZ1.default digit for digit — a config read, still not a measurement. `stepsPerDegree`,
-  // `homing` and the unwind are the shipped file (`delta_steps_per_mm` and `delta_homing_direction`
-  // never answered on the machine: absent from /sd/config.txt). The ⌀80 x 150 envelope is Makera's
-  // own database row. R-1 replaces each string with `measured (#238, <date>)` as its §9 row lands.
+  // The 4th-axis figures (#237, /Rotary.md §3.5), each with its own provenance (#238). After the
+  // 2026-10-27 evidence pass (/Rotary.md §9) every source names Makera's own artifact: the shipped
+  // config (`configZ1.default`), Studio's `ControllerConfig.txt`, the library database's
+  // `t_MachineType` row, and the decompiled Studio's G92.4 strings. `maxRate` and `acceleration`
+  // were also READ from the machine's own config on 2026-10-07 (`delta_max_rate` = 3600,
+  // `delta_acceleration` = 360, docs/bench/2026-10-07-config-sweep.json; runbook B9) and match
+  // configZ1.default digit for digit — a config read, still not a measurement. R-1 replaces each
+  // string with `measured (#238, <date>)` as its §9 row lands.
   rotary: {
     axis: 'A',
     parent: 'y',
@@ -685,12 +686,18 @@ export const Z1: MillProfile = {
     homing: 'home_to_min',
     unwind: 'G92.4 A S',
     sources: {
-      envelope: 't_MachineType, Makera library database (the Z1 row) — a vendor figure, not measured',
-      stepsPerDegree: 'configZ1.default, shipped default (key absent from /sd/config.txt) — unverified',
-      maxRate: 'config-get sd on the machine, 2026-10-07 — a config read, not a measurement',
-      acceleration: 'config-get sd on the machine, 2026-10-07 — a config read, not a measurement',
-      homing: 'configZ1.default, shipped default (key absent from /sd/config.txt) — unverified',
-      unwind: 'configZ1.default / Robot.cpp, corroborated by the vendor rotary files (they end on G92.4A0S0) — unverified on the device',
+      envelope:
+        'Makera’s own figure (t_MachineType row “Makera Z1”: range_A_Diameter 80, range_A_Length 150 — the library database, read 2026-10-26) — not measured',
+      stepsPerDegree:
+        'Makera’s shipped value (configZ1.default delta_steps_per_mm 88.888889 = 32 000 steps per turn; absent from the machine’s /sd/config.txt, sweep 2026-10-07) — unverified on the device',
+      maxRate:
+        'Makera’s shipped value (configZ1.default delta_max_rate 3600 °/min = 60 °/s = 10 rpm; Studio’s ControllerConfig.txt and the machine’s config read 2026-10-07 agree) — a config read, not a measurement',
+      acceleration:
+        'Makera’s shipped value (configZ1.default delta_acceleration 360 °/s²; Studio’s ControllerConfig.txt and the machine’s config read 2026-10-07 agree) — a config read, not a measurement',
+      homing:
+        'Makera’s shipped value (configZ1.default delta_homing_direction home_to_min, delta_min_endstop 1.4^, delta_limit_enable true; absent from the machine’s /sd/config.txt) — unverified on the device',
+      unwind:
+        'Makera’s shipped value (configZ1.default / Robot.cpp: G92.4 A S drops whole turns, R resets to the value modulo 360; Studio sends G92.4 A0 S0 and calls it “A-axis shrunk”, and the vendor rotary files end on it) — unverified on the device',
     },
   },
 };
