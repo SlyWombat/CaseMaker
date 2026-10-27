@@ -578,7 +578,11 @@ interface PanelFix {
 /** A sentence a disabled Generate carries, and the control that resolves it. */
 interface GenerateBlocker {
   sentence: string;
-  fix: PanelFix;
+  /**
+   * #725 review — null when there is no control to offer: a PROGRAM defect of ours gets its
+   * sentence at the button, never a Fix that sends the operator to re-seat the work for our gap.
+   */
+  fix: PanelFix | null;
 }
 
 /**
@@ -943,7 +947,11 @@ export function EngravePanel(): JSX.Element {
   const shopDefaults = useShopDefaultsStore((s) => s.defaults);
   const locationMachine = useLocationStore((s) => s.location?.machines[0] ?? null);
   const bedFacts = useMemo(
-    () => bedUnderFacts(locationMachine, shopDefaults, job.breakthrough + 1),
+    () =>
+      bedUnderFacts(locationMachine, shopDefaults, job.breakthrough + 1, {
+        length: job.stock.length,
+        width: job.stock.width,
+      }),
     [locationMachine, shopDefaults, job.breakthrough],
   );
   const findings: JobFinding[] =
@@ -1480,7 +1488,7 @@ export function EngravePanel(): JSX.Element {
   const generateBlocker: GenerateBlocker | null = (() => {
     const finding = errors[0];
     if (finding !== undefined) {
-      return { sentence: sentenceCase(finding.message), fix: findingFix(finding) ?? { group: 'engrave-group-job' } };
+      return { sentence: sentenceCase(finding.message), fix: findingFix(finding) };
     }
     if (feeds === null || feeds.ok || tool === null) return null;
     if (feeds.cause === 'values') {
@@ -3585,7 +3593,10 @@ export function EngravePanel(): JSX.Element {
               data-testid="engrave-generate-blocker"
               style={{ flex: '1 1 180px', fontSize: 12, lineHeight: 1.45, color: SEVERITY_COLOR.error }}
             >
-              {generateBlocker.sentence}{' '}
+              {generateBlocker.sentence}
+              {generateBlocker.fix !== null && (
+              <>
+              {' '}
               <button
                 type="button"
                 data-testid="engrave-generate-fix"
@@ -3598,10 +3609,12 @@ export function EngravePanel(): JSX.Element {
                   cursor: 'pointer',
                   textDecoration: 'underline',
                 }}
-                onClick={() => applyFix(generateBlocker.fix)}
+                onClick={() => applyFix(generateBlocker.fix!)}
               >
                 ▸ Fix
               </button>
+              </>
+              )}
             </span>
           )}
         </div>

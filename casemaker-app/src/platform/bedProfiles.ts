@@ -671,13 +671,29 @@ export function switchActiveProfile(
  * (`breakthrough + 1`, the engine's `through-needs-board` rule); the caller passes it because the
  * requirement is the JOB's, not the bed's.
  */
-export function bedUnderFacts(machine: MachineRecord | null, defaults: ShopDefaults | null, needMm: number): BedUnderFacts | null {
+export function bedUnderFacts(
+  machine: MachineRecord | null,
+  defaults: ShopDefaults | null,
+  needMm: number,
+  /**
+   * #727 F7 — the stock the board goes under, when the caller knows it. The facts then name the
+   * thinnest board that actually COVERS it (either way round: a board may be turned), not merely
+   * the thinnest: a house that owns a larger board cannot be told its smaller one is too small.
+   * Absent: the thinnest that passes the breakthrough, exactly as before.
+   */
+  stock?: { length: number; width: number },
+): BedUnderFacts | null {
   const profile = machine?.bedProfiles?.find((p) => p.id === machine.activeBedProfileId) ?? null;
   if (profile === null) return null;
   const boards = (profile.consumables?.boards ?? [])
     .filter((b) => b.count > 0 && b.size[2] >= needMm)
     .sort((a, b) => a.size[2] - b.size[2]);
-  const board = boards[0] ?? null;
+  const covers = (b: { size: [number, number, number] }): boolean =>
+    stock === undefined
+      ? false
+      : (stock.length <= b.size[0] && stock.width <= b.size[1]) ||
+        (stock.length <= b.size[1] && stock.width <= b.size[0]);
+  const board = (stock === undefined ? undefined : boards.find(covers)) ?? boards[0] ?? null;
   return {
     surface: profile.surface.kind,
     wasteboardMm: profile.surface.kind === 'wasteboard' ? profile.surface.thickness : null,

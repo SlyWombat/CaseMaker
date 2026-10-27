@@ -52,8 +52,15 @@ export interface TapeHoldInput {
    * and the rule cannot be judged — nothing is claimed.
    */
   biteDiameterMm: number | null;
-  /** The deepest pass's step-down, mm. */
+  /** The deepest pass's step-down, mm — the STOCK's bite (a pocket/engrave pass). */
   stepDownMm: number;
+  /**
+   * #727 F9 — a FREED PIECE's bite, mm: the pass that frees it is the profile cut-out, a full-width
+   * SLOT, and it runs at the slotting step-down (`feeds.ts` halves the pocket row's number until the
+   * slotting coupon measures it). Judging a piece by the pocket step-down refused pieces the actual
+   * profile pass holds. Absent: `stepDownMm`.
+   */
+  pieceStepDownMm?: number;
   /** The shop's `tape.holdRatio`. */
   holdRatio: number;
   /** Every piece a through cut frees, as the worker measured it. */
@@ -97,8 +104,11 @@ export function tapeHoldFindings(input: TapeHoldInput): JobFinding[] {
     return findings;
   }
   const need = requiredHoldArea(input.holdRatio, input.biteDiameterMm, input.stepDownMm);
+  // #727 F9 — the freed pieces are released by the PROFILE pass (a slot), not by the pocketing one.
+  const pieceNeed = requiredHoldArea(input.holdRatio, input.biteDiameterMm, input.pieceStepDownMm ?? input.stepDownMm);
   const bite = `the ⌀${dim(input.biteDiameterMm)} mm ${input.cutterWords}`;
   const numbers = `${area(need)} mm² needed at ${dim(input.holdRatio)} × the cutter’s bite.)`;
+  const pieceNumbers = `${area(pieceNeed)} mm² needed at ${dim(input.holdRatio)} × the cutter’s bite at the profile pass.)`;
 
   const stockArea = tapedArea(stock.length, stock.width, tape.inset);
   if (stockArea < need) {
@@ -113,14 +123,14 @@ export function tapeHoldFindings(input: TapeHoldInput): JobFinding[] {
   }
 
   for (const piece of input.pieces) {
-    if (piece.tapedAreaMm2 >= need) continue;
+    if (piece.tapedAreaMm2 >= pieceNeed) continue;
     findings.push({
       severity: 'error',
       code: 'tape-hold-piece',
       message:
         `“${piece.name}” is cut free as a ${dim(piece.widthMm)} × ${dim(piece.heightMm)} mm piece; ` +
         `the tape under it cannot hold it against ${bite} — leave two tabs, or cut it with a ` +
-        `smaller cutter. (${area(piece.tapedAreaMm2)} mm² taped; ${numbers}`,
+        `smaller cutter. (${area(piece.tapedAreaMm2)} mm² taped; ${pieceNumbers}`,
     });
   }
   return findings;

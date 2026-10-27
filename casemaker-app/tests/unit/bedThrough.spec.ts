@@ -81,6 +81,14 @@ describe('#712 a through cut on the bed (§3.5)', () => {
     expect(codes(big, BARE_BED)).not.toContain('through-needs-board');
   });
 
+  it('#727 F7 — a house board that covers the stock when TURNED is not refused', () => {
+    // A 120 × 90 plate on a board of 90 × 120: the same rectangle, turned. The size rule compared
+    // only length-to-length and width-to-width, so it refused a board that plainly covers.
+    const turned = { ...BARE_BED, boardLengthMm: 90, boardWidthMm: 120 };
+    const job = sheet({ stock: { ...defaultEngraveJob().stock, length: 120, width: 90, thickness: 2, material: 'pla' } });
+    expect(codes(job, turned)).not.toContain('board-too-small');
+  });
+
   it('the WASTEBOARD is the board under: no board needed, and the cut stays in it', () => {
     expect(codes(sheet(), WASTEBOARD)).not.toContain('through-needs-board');
     expect(codes(sheet(), WASTEBOARD)).not.toContain('board-too-small');
@@ -206,7 +214,7 @@ describe('#712 through the pipeline: the tag on each surface (§6 fixture 2)', (
           depth: 2.3,
           enabled: true,
           through: true,
-        } as EngraveJob['drills'][number],
+        } as NonNullable<EngraveJob['drills']>[number],
       ],
     });
     const f = validateJob(drilled, { deg: 118, source: 'test' }, { bed: WASTEBOARD }).find((x) => x.code === 'wasteboard-depth');

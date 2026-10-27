@@ -87,7 +87,7 @@ export interface VerifyContext {
    * covers the clamps and the arms too): the boxes are grown by it on top of the fit, for every
    * move, so a cut passes clear of what holds it rather than merely not touching it. Absent: 0.
    */
-  mountObstacles?: { obstacles: MountObstacle[]; uncertainty: number; clearance?: number };
+  mountObstacles?: { obstacles: MountObstacle[]; uncertainty: number; clearance?: number; topLift?: number };
   /**
    * #240 slice 2 — THE ROTARY FRAME, when this file is a wrapped program. Its presence switches
    * the frame's own rules on and the flat frame's off: Z is a RADIUS from the axis (so the top
@@ -779,6 +779,7 @@ export function verifyProgram(text: string, ctx: VerifyContext): VerifyReport {
           radius: Math.max(...widths) / 2,
           uncertainty: mount.uncertainty,
           clearance,
+          topLift: mount.topLift ?? 0,
           subjectOf: mountSubject,
         })) {
           push(f.code, f.line, f.message);
@@ -786,7 +787,7 @@ export function verifyProgram(text: string, ctx: VerifyContext): VerifyReport {
       }
       // A move with an end the program never placed cannot be clipped. It is safe only when both its ends
       // are known to be above every obstacle's top; otherwise it is reported, never silently left out.
-      const highest = Math.max(...mount.obstacles.map((o) => o.topZ)) + mount.uncertainty + clearance;
+      const highest = Math.max(...mount.obstacles.map((o) => o.topZ)) + mount.uncertainty + clearance + (mount.topLift ?? 0);
       const blind = unplaced.filter((u) => u.lowZ === null || u.lowZ < highest);
       if (blind.length > 0) {
         push(
@@ -814,7 +815,7 @@ export function verifyProgram(text: string, ctx: VerifyContext): VerifyReport {
               from: [sg.from[0], sg.from[1], sg.from[2] + stickout] as [number, number, number],
               to: [sg.to[0], sg.to[1], sg.to[2] + stickout] as [number, number, number],
             }));
-            for (const f of mountInPath(raised, mount.obstacles, { radius: nut.nutDiameter / 2, uncertainty: mount.uncertainty, clearance })) {
+            for (const f of mountInPath(raised, mount.obstacles, { radius: nut.nutDiameter / 2, uncertainty: mount.uncertainty, clearance, topLift: mount.topLift ?? 0 })) {
               push(f.code, f.line, `the collet nut (${fmt(stickout)} mm above the tip): ${f.message}`);
             }
           }

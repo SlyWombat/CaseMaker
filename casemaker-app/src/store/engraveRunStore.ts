@@ -255,7 +255,10 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
     // #712 — the bed's through-cut facts, resolved HERE for the same reason the mount is: the
     // active bed profile lives in the location, and the worker must not read it. The need is the
     // job's own (`breakthrough + 1`), so a board the sentence names is one that really passes.
-    const bed = bedUnderFacts(useLocationStore.getState().location?.machines[0] ?? null, shopDefaults, job.breakthrough + 1);
+    const bed = bedUnderFacts(useLocationStore.getState().location?.machines[0] ?? null, shopDefaults, job.breakthrough + 1, {
+    length: job.stock.length,
+    width: job.stock.width,
+  });
     const shop: EngraveShopOpts = {
       lostDetailWarnRatio: shopDefault('engrave.lostDetailWarnRatio').value,
       peckClearanceMm: shopDefault('drill.peckClearanceMm').value,

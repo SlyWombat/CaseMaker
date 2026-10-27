@@ -534,14 +534,16 @@ export function underFieldWords(profile: BedProfile | null): string | null {
  * Makera's 20 mm at its store's ~0.2 mm. A job already taped keeps its own hold — reloading the
  * step shows what the job stores, not a fresh default.
  */
-export function bedTapeHold(profile: BedProfile | null, keep: TapeHold | null): TapeHold {
+export function bedTapeHold(profile: BedProfile | null, keep: TapeHold | null, insetMm: number = TAPE_DEFAULTS.insetMm): TapeHold {
   if (keep !== null) return { ...keep, where: keep.where === null ? null : { ...keep.where } };
   const roll = profile?.consumables?.tape ?? null;
-  if (roll === null) return defaultTapeHold();
+  if (roll === null) return defaultTapeHold({ ...TAPE_DEFAULTS, insetMm });
   return defaultTapeHold({
     widthMm: roll.widthMm,
     thicknessMm: roll.thicknessMm,
-    insetMm: TAPE_DEFAULTS.insetMm,
+    // #727 F9 — the INSET is the shop's (`tape.insetMm`, seeded at 2), read by the caller; it used
+    // to be the hard-coded default even when the house had changed it.
+    insetMm,
     provenance: roll.provenance,
   });
 }

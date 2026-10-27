@@ -130,7 +130,10 @@ export const useEngravePreviewStore = create<EngravePreviewState>()((set) => {
           // bed profile lives in the location and the worker cannot read it. Without them a taped
           // cut-out over the wasteboard is refused in the preview's own words, and the panel's
           // blocker (which reads the preview's findings) refuses a job the run would generate.
-          bed: bedUnderFacts(useLocationStore.getState().location?.machines[0] ?? null, shopDefaults, job.breakthrough + 1),
+          bed: bedUnderFacts(useLocationStore.getState().location?.machines[0] ?? null, shopDefaults, job.breakthrough + 1, {
+            length: job.stock.length,
+            width: job.stock.width,
+          }),
         },
         // §5.4 — the registration band's five residuals, read HERE for the same reason as the
         // margins: the worker cannot see the location, and the band must draw the tolerance the

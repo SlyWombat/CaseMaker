@@ -339,7 +339,11 @@ function wasteboardTakesBed(bed: BedUnderFacts, need: number): boolean {
 /** Whether the house board a bare bed needs is big enough for this stock. */
 function boardCoversStock(bed: BedUnderFacts, job: EngraveJob): boolean {
   if (bed.boardMm === null || bed.boardLengthMm === null || bed.boardWidthMm === null) return true;
-  return job.stock.length <= bed.boardLengthMm && job.stock.width <= bed.boardWidthMm;
+  // #727 F7 — a board is a rectangle on the bench: it may be TURNED. A 120 × 90 plate sits on a
+  // 90 × 120 board, and judging length-to-length refused one that plainly covers.
+  const along = job.stock.length <= bed.boardLengthMm && job.stock.width <= bed.boardWidthMm;
+  const turned = job.stock.length <= bed.boardWidthMm && job.stock.width <= bed.boardLengthMm;
+  return along || turned;
 }
 
 /**

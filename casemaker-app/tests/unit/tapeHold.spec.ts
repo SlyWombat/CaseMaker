@@ -78,14 +78,32 @@ describe('#711 the stock and the pieces (design §3.7 sentences)', () => {
       cutterWords: 'flat end',
       biteDiameterMm: 3.175,
       stepDownMm: 1,
+      pieceStepDownMm: 1,
       holdRatio: 100,
       pieces: [piece('Star', 12, 12, 64)],
     });
     expect(f.map((x) => x.code)).toEqual(['tape-hold-piece']);
     expect(f[0]!.message).toBe(
       '“Star” is cut free as a 12 × 12 mm piece; the tape under it cannot hold it against the ⌀3.175 mm ' +
-        'flat end — leave two tabs, or cut it with a smaller cutter. (64.00 mm² taped; 317.50 mm² needed at 100 × the cutter’s bite.)',
+        'flat end — leave two tabs, or cut it with a smaller cutter. (64.00 mm² taped; 317.50 mm² needed at 100 × the cutter’s bite at the profile pass.)',
     );
+  });
+
+  it('#727 F9 — a freed piece is judged at the PROFILE pass’s step-down, not the pocket’s', () => {
+    const input = {
+      stock: { length: 100, width: 60, thickness: 2 },
+      tape: TAPE,
+      cutterWords: 'flat end',
+      biteDiameterMm: 1,
+      stepDownMm: 1,
+      holdRatio: 100,
+      pieces: [piece('Star', 12, 12, 64)],
+    } as const;
+    // A ⌀1 cutter at the pocket step-down (1 mm) asks for 100 mm² and the Star does not have it; the
+    // profile pass that frees it is a slot at half the step-down, which asks for 50 — the same Star
+    // holds, so refusing it told the operator to add tabs for a pass that was never the one cutting.
+    expect(tapeHoldFindings({ ...input }).map((x) => x.code)).toEqual(['tape-hold-piece']);
+    expect(tapeHoldFindings({ ...input, pieceStepDownMm: 0.5 })).toEqual([]);
   });
 
   it('the through-cut tag’s piece holds: 936 mm² of tape against 317.5 mm² needed', () => {
@@ -191,18 +209,27 @@ describe('#711 the rule in the pipeline', () => {
     expect(g.findings.filter((f) => f.code.startsWith('tape-'))).toEqual([]);
   });
 
-  it('a cut-out that frees a piece too small for the tape is refused, and the piece is measured', () => {
-    // ⌀1 at a 1 mm step-down: 100 mm² needed. The stock's 96 × 56 mm of tape holds; the Star's
-    // 12 × 12 piece — its footprint eroded by the tool radius and the 2 mm inset — does not.
+  it('#727 F9 — the freed piece is judged at the PROFILE pass, so the Star’s 64 mm² holds', () => {
+    // ⌀1 with the pocket step-down overridden to 1 mm: the pocket rule would ask 100 mm², but the
+    // pass that FREES the Star is the profile slot at half that — 50 mm² — and the Star's 64 mm²
+    // holds. It used to be refused for a pass that never cut it.
     const g = generate(tl, tapedJob({ cutOverride: { stepDown: 1 }, shapes: [STAR], cutouts: [STAR_CUT] }));
+    expect(g.ok, `${g.stage} ${JSON.stringify(g.errors)}`).toBe(true);
+    expect(g.findings.some((x) => x.code === 'tape-hold-piece')).toBe(false);
+    expect(g.findings.some((x) => x.code === 'tape-hold-stock')).toBe(false);
+  });
+
+  it('a piece too small even at the profile pass is refused, and the piece is measured', () => {
+    const small: EngraveJob['shapes'][number] = { ...STAR, id: 'shape-small', name: 'Small', width: 10, height: 10 };
+    const smallCut: EngraveCutout = { ...STAR_CUT, id: 'cut-small', name: 'Small', of: 'shape-small' };
+    const g = generate(tl, tapedJob({ cutOverride: { stepDown: 1 }, shapes: [small], cutouts: [smallCut] }));
     expect(g.ok).toBe(false);
     expect(g.stage).toBe('findings');
     const f = g.findings.filter((x) => x.code === 'tape-hold-piece');
     expect(f).toHaveLength(1);
     expect(f[0]!.severity).toBe('error');
-    expect(f[0]!.message).toMatch(/^“Star” is cut free as a 12 × 12 mm piece; the tape under it cannot hold it/);
-    expect(f[0]!.message).toMatch(/needed at 100 × the cutter’s bite\.\)$/);
-    // The stock's own tape is ample and says nothing.
+    expect(f[0]!.message).toMatch(/^“Small” is cut free as a 10 × 10 mm piece; the tape under it cannot hold it/);
+    expect(f[0]!.message).toMatch(/needed at 100 × the cutter’s bite at the profile pass\.\)$/);
     expect(g.findings.some((x) => x.code === 'tape-hold-stock')).toBe(false);
   });
 

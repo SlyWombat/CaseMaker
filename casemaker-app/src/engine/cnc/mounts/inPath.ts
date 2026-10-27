@@ -99,6 +99,12 @@ export interface MountCheckOpts {
    */
   clearance?: number;
   /**
+   * #727 F2 — the HIGHEST lift of a fitted top over the stock, mm (#649's `maxSurfaceLift`). The
+   * clamps stand on the REAL top, which a tilt lifts; a program's rapids are not lifted, so the
+   * obstacle they must clear is `topZ + fit + lift`. Absent: 0 (a flat top).
+   */
+  topLift?: number;
+  /**
    * #710 — the subject of a refusal, for the item's own name: the verifier answers with the
    * operation's label read from the program's header ("“Tray”"), or null for a file that names
    * none.
@@ -180,7 +186,7 @@ export function mountInPath(segments: PathSegment[], obstacles: MountObstacle[],
   for (const o of obstacles) {
     const min: [number, number] = [o.min[0] - grow, o.min[1] - grow];
     const max: [number, number] = [o.max[0] + grow, o.max[1] + grow];
-    const top = o.topZ + opts.uncertainty;
+    const top = o.topZ + opts.uncertainty + (opts.topLift ?? 0);
     let first: { seg: PathSegment; z: number } | null = null;
     for (const seg of segments) {
       const t = clipToRect(seg.from, seg.to, min, max);

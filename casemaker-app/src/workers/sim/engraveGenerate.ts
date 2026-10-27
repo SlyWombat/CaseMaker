@@ -2216,10 +2216,14 @@ export function frameCorners(ir: ToolpathIR, radius: number, z: number): CamMove
 function mountCtx(
   mount: MountObstacles | null | undefined,
   clearanceMm: number,
-): { mountObstacles?: { obstacles: MountObstacles['obstacles']; uncertainty: number; clearance: number } } {
+  /** #727 F2 — a fitted top's highest lift, which raises the clamps the verifier must clear. */
+  topLiftMm = 0,
+): { mountObstacles?: { obstacles: MountObstacles['obstacles']; uncertainty: number; clearance: number; topLift: number } } {
   // #710 — the fixture clearance (the job's jaw clearance) rides with the obstacles, so the verifier
   // grows every clamp and arm by the tool, the fit AND it, in one place.
-  return mount ? { mountObstacles: { obstacles: mount.obstacles, uncertainty: mount.uncertainty, clearance: clearanceMm } } : {};
+  return mount
+    ? { mountObstacles: { obstacles: mount.obstacles, uncertainty: mount.uncertainty, clearance: clearanceMm, topLift: topLiftMm } }
+    : {};
 }
 
 function frameProgram(
@@ -2231,6 +2235,8 @@ function frameProgram(
   limit: DepthLimit,
   mount: MountObstacles | null | undefined,
   clearanceMm: number,
+  /** #727 F2 — the fitted top's highest lift: the frame trace rides above the lifted clamps too. */
+  topLiftMm = 0,
 ): { nc: string; verify: VerifyReport } | { error: string } {
   // The cutter's footprint in XY, grown by the SAME rule the corner box has always been built with
   // (#244): the disc the toolpath removes. A V-bit's is the groove at the DEEPEST cut in the program
@@ -2274,7 +2280,7 @@ function frameProgram(
   };
   const posted = postZ1(frameIr, ctx, machine, { vacuum: 'none' });
   if (!posted.ok) return { error: posted.errors.join('; ') };
-  const verify = verifyProgram(posted.text, { setup, machine, tool, depthLimit: limit, minRapidZ: frameIr.hopZ, ...mountCtx(mount, clearanceMm) });
+  const verify = verifyProgram(posted.text, { setup, machine, tool, depthLimit: limit, minRapidZ: frameIr.hopZ, ...mountCtx(mount, clearanceMm, topLiftMm) });
   return { nc: posted.text, verify };
 }
 
@@ -2317,6 +2323,12 @@ function facingProgram(
    * engraving program that follows is posted `'last'` to switch it off.
    */
   span: VacuumSpan,
+  /**
+   * #727 F2 — the fitted top's highest lift, mm. The skim is posted against the PROBED top, which a
+   * tilt may stand below the real one by this much, so the clamps' tops sit that far above the
+   * frame the facing passes are written in.
+   */
+  topLiftMm = 0,
 ): {
   nc: string | null;
   verify: VerifyReport | null;
@@ -2382,7 +2394,7 @@ function facingProgram(
       ),
       // #710 — the skim's hops and retracts clear the mount too: the raster crosses the whole top,
       // so a clamp would otherwise be refused by every facing pass on a bracket job.
-      travelHeightOver(mount?.obstacles ?? [], job.jawClearance, mount?.uncertainty ?? 0),
+      travelHeightOver(mount?.obstacles ?? [], job.jawClearance + topLiftMm, mount?.uncertainty ?? 0),
       machine.rapidEstimate,
     );
     const posted = postZ1(ir, { ...ctx, toolKey }, machine, { vacuum: span });
@@ -2395,7 +2407,7 @@ function facingProgram(
       tool,
       depthLimit: limit,
       minRapidZ: ir.hopZ,
-      ...mountCtx(mount, job.jawClearance),
+      ...mountCtx(mount, job.jawClearance, topLiftMm),
     });
     const refused = verify.findings.filter((f) => f.severity === 'error');
     if (refused.length > 0) {
@@ -4004,6 +4016,9 @@ function generateOneProgram(
       );
       const radiusAt = traceRadiusAt(tool, deepest) ?? (cuttingDiameter(tool) ?? 0) / 2;
       const hold = readDefault(shop.defaults ?? null, 'tape.holdRatio');
+      // #727 F9 — the pieces are freed by the PROFILE pass, which resolves the same row with the
+      // slotting context (`feeds.ts`); its step-down is what the released piece's bite is judged at.
+      const slottingRow = feedsFor(catalogue, job.stock.material, tool, mill, job.cutOverride, shop.feeds ?? undefined, { slotting: true });
       findings.push(
         ...tapeHoldFindings({
           stock: job.stock,
@@ -4011,6 +4026,7 @@ function generateOneProgram(
           cutterWords: tool.shape === 'flat' ? 'flat end' : (tool.typeText.toLowerCase() || 'cutter'),
           biteDiameterMm: radiusAt > 0 ? radiusAt * 2 : null,
           stepDownMm: resolved.params.stepDown,
+          pieceStepDownMm: slottingRow.ok ? slottingRow.params.stepDown : resolved.params.stepDown,
           holdRatio: hold.value,
           pieces: releasedPieces,
         }),
@@ -4226,9 +4242,12 @@ function generateOneProgram(
   // defaults — so every hop and retract runs above the clamps, and the verifier (which checks
   // rapids as it checks cuts) refuses any rapid that still passes below one. A vise or tape job has
   // nothing above the stock and keeps the CAM's own floors.
+  // #727 F2 — AND THE LIFT. A fitted top raises the clamps by up to `liftOverStock`, and rapids are
+  // not lifted (`applySurfaceLift` shifts FEEDS only), so the travel clears `top + fit + lift +
+  // clearance`; the verifier's own top gets the same lift through `mountCtx`.
   ir = raiseTravelOver(
     ir,
-    travelHeightOver(shop.mount?.obstacles ?? [], job.jawClearance, shop.mount?.uncertainty ?? 0),
+    travelHeightOver(shop.mount?.obstacles ?? [], job.jawClearance + liftOverStock, shop.mount?.uncertainty ?? 0),
     mill.rapidEstimate,
   );
 
@@ -4353,6 +4372,7 @@ function generateOneProgram(
           catalogue,
           shop.feeds ?? undefined,
           span === 'none' ? 'none' : 'first',
+          liftOverStock,
         )
       : { nc: null, verify: null, toolKey: null, error: null, cam: null };
 
@@ -4391,7 +4411,7 @@ function generateOneProgram(
       minRapidZ,
       ...(limitReasonAt ? { limitReasonAt } : {}),
       ...(rotaryMap === null
-        ? mountCtx(shop.mount, job.jawClearance)
+        ? mountCtx(shop.mount, job.jawClearance, liftOverStock)
         : { rotary: { radius: rotaryMap.radius, stickout: rotaryMap.stickout, tailstock: rotaryMap.tailstock } }),
     });
     if (verify.findings.some((f) => f.severity === 'error')) {
@@ -4409,7 +4429,7 @@ function generateOneProgram(
     let frameNc: string | null = null;
     let frameVerify: VerifyReport | null = null;
     if (rotaryMap === null) {
-      const frame = frameProgram(ir, ctx, mill, setup, tool, limit, shop.mount, job.jawClearance);
+      const frame = frameProgram(ir, ctx, mill, setup, tool, limit, shop.mount, job.jawClearance, liftOverStock);
       if ('error' in frame) {
         errors.push({ stage: 'verify', message: `the frame file could not be produced: ${frame.error}` });
         return { ok: false, stage: 'verify', findings, feeds, threads: threadPlans, threadMachining, drill: drillFacts, cam, nc, verify, frameNc: null, frameVerify: null, facingNc: facing.nc, facingVerify: facing.verify, facingToolKey: facing.toolKey, facingError: facing.error, facingCam: facing.cam, predicted: predictedForRun, errors };

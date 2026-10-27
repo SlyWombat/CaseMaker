@@ -43,6 +43,7 @@ import { resetMachineChange, useMachineChangeStore } from '@/store/machineChange
 import { resetLocationStore, useLocationStore } from '@/store/locationStore';
 import { resetMachineStore } from '@/store/machineStore';
 import { useSettingsStore } from '@/store/settingsStore';
+import { resetShopDefaultsStore, useShopDefaultsStore } from '@/store/shopDefaultsStore';
 import { resetEngraveRows } from '@/store/engraveRowStore';
 import {
   MachineRecordSchema,
@@ -284,6 +285,7 @@ beforeEach(() => {
   resetMachineChange();
   resetLocationStore();
   resetMachineStore();
+  resetShopDefaultsStore();
   useSettingsStore.getState().resetSettings();
   act(() => {
     useEngraveJobStore.setState({ job: defaultEngraveJob() });
@@ -595,5 +597,59 @@ describe('#725 review — a rotary- prefix is not a fix', () => {
     });
     expect(screen.getByTestId('engrave-run-errors').textContent).toContain('turns the stock while the cutter is still in the cut');
     expect(screen.queryByTestId('engrave-run-blocker-fix')).toBeNull();
+  });
+});
+
+describe('#727 F9 — the tape inset is the shop’s', () => {
+  it('a new taped job starts from tape.insetMm, not the hard-coded 2 mm', () => {
+    // The house tapes 6 mm in from every edge; a job arriving on the bed takes that, and its strips
+    // line is computed from it.
+    useShopDefaultsStore.setState({
+      status: 'present',
+      defaults: {
+        ...(DOC.defaults as Record<string, unknown>),
+        'tape.insetMm': { value: 6, source: 'saved', setAt: null, unit: 'mm' },
+      } as never,
+      etag: '"d1"',
+      reason: null,
+    });
+    const base = defaultEngraveJob();
+    openHolding(
+      withMeasuredVise({ ...base, labels: [], shapes: [], stock: { ...base.stock, length: 100, width: 60, thickness: 6 } }),
+      bedMachine({ anchor: false }),
+    );
+
+    // Choose the tape row explicitly: the write (and the arrival's own) reads the shop's inset.
+    fireEvent.click(screen.getByTestId('engrave-setup-mount-bed-tape'));
+    const held = useEngraveJobStore.getState().job.workholding;
+    expect(held.kind).toBe('tape');
+    if (held.kind === 'tape') {
+      expect(held.tape.inset).toBe(6);
+      expect(screen.getByTestId('engrave-setup-mount-row-bed-tape').textContent).toContain('6 mm in from every edge');
+    }
+  });
+});
+
+describe('#725 review — a blocker with no control offers no Fix', () => {
+  it('a program-defect code as the first document error shows its sentence and no Fix button', () => {
+    // The preview's findings are the panel's document gate. A program defect there (defensive: the
+    // preview raises none today) must not fall back to the job group as a "Fix".
+    act(() => {
+      useEngravePreviewStore.setState({
+        status: 'ready',
+        preview: {
+          findings: [
+            {
+              severity: 'error',
+              code: 'rotary-rapid-engaged',
+              message: 'a rapid turns the stock while the cutter is still in the cut',
+            },
+          ],
+        } as never,
+      });
+    });
+    render(<EngravePanel />);
+    expect(screen.getByTestId('engrave-generate-blocker').textContent).toContain('turns the stock');
+    expect(screen.queryByTestId('engrave-generate-fix')).toBeNull();
   });
 });

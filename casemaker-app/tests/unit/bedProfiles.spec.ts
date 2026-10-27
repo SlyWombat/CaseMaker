@@ -14,6 +14,7 @@ import { fileURLToPath } from 'node:url';
 
 import {
   bedFromLegacy,
+  bedUnderFacts,
   bedMigrationDue,
   changedBedProfile,
   ensureFirstRegistrationBed,
@@ -376,5 +377,42 @@ describe('#613 the first-registration bed', () => {
     // The tap alone still names the accessory and the active profile, ready for the datum write-back.
     expect(tapped.accessories[0]!.id).toBe('fx-vise-1');
     expect(tapped.activeBedProfileId).toBe('bp-first-2026-10-15');
+  });
+});
+
+describe('#727 F7 — the board the facts name', () => {
+  it('prefers a house board that COVERS the stock over a thinner one that does not', () => {
+    const machine = MachineRecordSchema.parse(
+      JSON.parse(readFileSync(FIXTURE, 'utf8')).machines[0],
+    ) as MachineRecord;
+    const profile = machine.bedProfiles![0]!;
+    profile.surface = {
+      kind: 'bare-bed',
+      material: null,
+      length: null,
+      width: null,
+      thickness: null,
+      position: null,
+      provenance: {},
+      scars: [],
+      lastResurfacedAt: null,
+    };
+    profile.consumables = {
+      tape: { widthMm: 20, thicknessMm: 0.2, provenance: 'typed' },
+      boards: [
+        { material: 'MDF', size: [100, 100, 2], count: 4 },
+        { material: 'MDF', size: [200, 200, 6], count: 1 },
+      ],
+    };
+    // A 120 × 90 plate: the 2 mm 100 × 100 board is thinnest but too small, so the facts name the
+    // 6 mm board that covers it — the refusal used to read "the 2 mm boards are 100 × 100" beside a
+    // house that owns a board the stock fits.
+    const covering = bedUnderFacts(machine, null, 1.3, { length: 120, width: 90 });
+    expect(covering).toMatchObject({ boardMm: 6, boardLengthMm: 200, boardWidthMm: 200, boardWords: '6 mm MDF' });
+    // With no board that covers, the thinnest is still the one named (the size refusal's sentence).
+    const none = bedUnderFacts(machine, null, 1.3, { length: 250, width: 90 });
+    expect(none).toMatchObject({ boardMm: 2, boardLengthMm: 100 });
+    // A caller with no stock keeps the pre-#727 choice exactly.
+    expect(bedUnderFacts(machine, null, 1.3)?.boardMm).toBe(2);
   });
 });

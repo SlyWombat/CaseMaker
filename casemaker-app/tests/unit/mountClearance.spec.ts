@@ -194,6 +194,36 @@ describe('#710 a bracket program travels above the clamps', () => {
   });
 });
 
+describe('#727 F2 — a tilted top lifts the clamp with it', () => {
+  it('the travel height and the verifier both add the fitted top’s highest lift', () => {
+    // A blank whose top is fitted with a 0.01 slope along X: the far edge stands 1 mm above the
+    // reference. The clamps sit on the REAL top, so their tops are 12 + 1 mm in the program's
+    // frame — travel must clear that, and the verifier's top must include it.
+    const surface = { plane: { offset: 0, slopeX: 0.01, slopeY: 0 }, z0: 0 };
+    const job: EngraveJob = { ...defaultEngraveJob(), toolKey: 'flat-1.0' };
+    const g = generate(tl, job, null, [], undefined, { mount: mountWith(12), surface });
+    expect(g.ok, `${g.stage} ${JSON.stringify(g.errors)}`).toBe(true);
+    const rapidZs = parseGcode(g.nc ?? '')
+      .events.filter((e) => e.kind === 'move' && e.frame === 'work' && e.mode === 'rapid')
+      .map((e) => (e.kind === 'move' ? e.to[2] : null))
+      .filter((z): z is number => z !== null);
+    const expected = 12 + B.settings.fitMm + CLEARANCE + 1;
+    expect(rapidZs.some((z) => Math.abs(z - expected) < 1e-6)).toBe(true);
+    // And the check itself: a rapid half a millimetre BELOW the lifted clamp top is refused; the
+    // flat travel height (13.1) sits exactly on it, and the raise adds the clearance above that.
+    const low = mountInPath([seg([10, 55, 12 + B.settings.fitMm + CLEARANCE - 0.5], [90, 55, 12 + B.settings.fitMm + CLEARANCE - 0.5], 'rapid')], clamps, {
+      radius: TOOL_R,
+      uncertainty: B.settings.fitMm,
+      clearance: CLEARANCE,
+      topLift: 1,
+    });
+    expect(low.map((f) => f.code)).toEqual(['clamp-in-path', 'clamp-in-path']);
+    // At the lifted top exactly, a rapid is clear (the clearance is what the raise adds).
+    const atTop = mountInPath([seg([10, 55, 13.1], [90, 55, 13.1], 'rapid')], clamps, { radius: TOOL_R, uncertainty: B.settings.fitMm, clearance: CLEARANCE, topLift: 1 });
+    expect(atTop).toEqual([]);
+  });
+});
+
 describe('#727 F4 — a drill’s chip-clear peck is not travel', () => {
   it('the peck stays at the CAM’s hop while the hops between holes are raised over the clamps', () => {
     // A pecking hole at X 50, Y 20 — clear of the back clamp, so its own path is not refused. Its
@@ -214,7 +244,7 @@ describe('#727 F4 — a drill’s chip-clear peck is not travel', () => {
           peckMm: 1,
           enabled: true,
           through: false,
-        } as EngraveJob['drills'][number],
+        } as NonNullable<EngraveJob['drills']>[number],
       ],
     };
     const g = generate(tl, job, null, [], undefined, { mount: mountWith(12) });

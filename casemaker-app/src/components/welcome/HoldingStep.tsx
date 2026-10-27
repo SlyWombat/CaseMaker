@@ -935,6 +935,10 @@ export function HoldingStep({ job, answers, onAnswers, onRotary, onBedHold }: Ho
   const accessories = location?.accessories ?? [];
   const calibration = useSettingsStore((s) => s.machineCalibration);
   const shopDefaults = useShopDefaultsStore((s) => s.defaults);
+  // #727 F9 — the tape's inset from every edge is the SHOP's (`tape.insetMm`), not a hard-coded 2:
+  // a house that tapes differently says so once, and every new taped job starts from it. Declared
+  // here, above the arrival effects that write a taped job.
+  const tapeInsetMm = readDefault(shopDefaults ?? null, 'tape.insetMm').value;
   // #714 — the grip's default is the shop's own number (Makera publishes no jaw depth).
   const shopGrip = readDefault(shopDefaults ?? null, 'rotary.gripMm');
   const now = useMemo(() => machineNow(machine), [machine]);
@@ -954,7 +958,7 @@ export function HoldingStep({ job, answers, onAnswers, onRotary, onBedHold }: Ho
   const jobHold = job.workholding.kind === 'tape' || job.workholding.kind === 'bracket' ? job.workholding : null;
   /** The tape the step draws and writes: the job's own when it is taped, else the house roll's. */
   const tape = useMemo(
-    () => bedTapeHold(profile, job.workholding.kind === 'tape' ? job.workholding.tape : null),
+    () => bedTapeHold(profile, job.workholding.kind === 'tape' ? job.workholding.tape : null, tapeInsetMm),
     [profile, job.workholding],
   );
   const bracketRead = useMemo(() => bracketSettings(shopDefaults ?? null), [shopDefaults]);
@@ -1088,7 +1092,7 @@ export function HoldingStep({ job, answers, onAnswers, onRotary, onBedHold }: Ho
     if (wanted !== null) {
       if (wanted.fromProfile === now.profile.id) return;
       // The operator asked for this bed mount: their answer stands over any default.
-      if (wanted.mount === 'bed-tape') onBedHold(bedTapeHold(profile, job.workholding.kind === 'tape' ? job.workholding.tape : null), bedAnswers(answers));
+      if (wanted.mount === 'bed-tape') onBedHold(bedTapeHold(profile, job.workholding.kind === 'tape' ? job.workholding.tape : null, tapeInsetMm), bedAnswers(answers));
       else
         onBedHold(
           bedBracketHold(
@@ -1107,7 +1111,7 @@ export function HoldingStep({ job, answers, onAnswers, onRotary, onBedHold }: Ho
     // own saved setup stands over the bed's default.
     if (answers.vise.source === 'saved') return;
     const mount = defaultBedMount(profile, answers.stock, job.stockEntry?.form ?? null);
-    if (mount === 'bed-tape') onBedHold(bedTapeHold(profile, null), answers);
+    if (mount === 'bed-tape') onBedHold(bedTapeHold(profile, null, tapeInsetMm), answers);
     else onBedHold(bedBracketHold(answers.stock, shopDefaults ?? null, null, bedAnchor(profile) ?? 1), answers);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [now, job.workholding.kind, answers.stock, answers.vise.source, profile]);
@@ -1151,7 +1155,7 @@ export function HoldingStep({ job, answers, onAnswers, onRotary, onBedHold }: Ho
     }
     // #715 — the two bed mounts are the job's own writes, with the board under them.
     if (mount === 'bed-tape') {
-      onBedHold(bedTapeHold(profile, job.workholding.kind === 'tape' ? job.workholding.tape : null), bedAnswers(answers));
+      onBedHold(bedTapeHold(profile, job.workholding.kind === 'tape' ? job.workholding.tape : null, tapeInsetMm), bedAnswers(answers));
       return;
     }
     if (mount === 'bed-bracket') {
@@ -1300,7 +1304,10 @@ export function HoldingStep({ job, answers, onAnswers, onRotary, onBedHold }: Ho
   // stock, and the sentence names the board's own size.
   const boardTooSmall = useMemo(() => {
     if (jobHold === null || profile === null) return null;
-    const bed = bedUnderFacts(machine, shopDefaults ?? null, job.breakthrough + 1);
+    const bed = bedUnderFacts(machine, shopDefaults ?? null, job.breakthrough + 1, {
+      length: job.stock.length,
+      width: job.stock.width,
+    });
     if (bed === null) return null;
     return validateJob(job, null, { bed }).find((f) => f.code === 'board-too-small') ?? null;
   }, [job, machine, shopDefaults, jobHold, profile]);
