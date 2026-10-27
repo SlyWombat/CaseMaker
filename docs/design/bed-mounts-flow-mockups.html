@@ -1,0 +1,745 @@
+<title>Bed Mounts Flow</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: a drafting sheet — one column of numbered stations, each a desktop-width screen mockup with its notes beside it; mono for every number the operator reads. */
+:root {
+  --bg: #f3f5f8;        /* cool paper */
+  --panel: #ffffff;     /* the screen frames */
+  --fg: #16202c;
+  --muted: #5b6878;
+  --line: #d6dde6;
+  --line-strong: #aeb9c6;
+  --accent: #1d5fb4;    /* drafting blue */
+  --accent-ink: #ffffff;
+  --accent-soft: #e4edf9;
+  --ok: #1f7a3f;
+  --ok-soft: #e3f2e8;
+  --warn: #9a5b00;
+  --warn-soft: #fbefd9;
+  --bad: #b3261e;
+  --bad-soft: #fbe5e3;
+  --note: #f8f1e1;      /* annotation paper */
+  --note-ink: #4a3a10;
+  --sans: "IBM Plex Sans", "Segoe UI", system-ui, -apple-system, sans-serif;
+  --mono: "IBM Plex Mono", "SFMono-Regular", Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #121820; --panel: #1a222d; --fg: #e6ebf1; --muted: #9aa8b8; --line: #2c3745; --line-strong: #445263;
+  --accent: #6fa3ec; --accent-ink: #0d1520; --accent-soft: #1d2d44; --ok: #5fc27f; --ok-soft: #173224;
+  --warn: #e0a84a; --warn-soft: #3a2c12; --bad: #f08a83; --bad-soft: #40201e; --note: #2a2516; --note-ink: #e6d9b0;
+  color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #121820; --panel: #1a222d; --fg: #e6ebf1; --muted: #9aa8b8; --line: #2c3745; --line-strong: #445263;
+  --accent: #6fa3ec; --accent-ink: #0d1520; --accent-soft: #1d2d44; --ok: #5fc27f; --ok-soft: #173224;
+  --warn: #e0a84a; --warn-soft: #3a2c12; --bad: #f08a83; --bad-soft: #40201e; --note: #2a2516; --note-ink: #e6d9b0;
+  color-scheme: dark }
+
+body { background: var(--bg); color: var(--fg); font: 15px/1.5 var(--sans); }
+.wrap { max-width: 1180px; margin: 0 auto; padding-block: 32px 64px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+h1, h2, h3 { text-wrap: balance; margin: 0; font-weight: 600; letter-spacing: -0.01em; }
+h1 { font-size: 2rem; line-height: 1.15; }
+h2 { font-size: 1.3rem; }
+h3 { font-size: 1rem; }
+p { margin: 0; max-width: 68ch; }
+.eyebrow { font: 500 0.75rem/1 var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+.mono, .n { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+.muted { color: var(--muted); }
+a { color: var(--accent); }
+
+header.top { display: grid; gap: 14px; padding-bottom: 28px; border-bottom: 2px solid var(--fg); margin-bottom: 36px; }
+.status { display: inline-flex; align-items: center; gap: 8px; padding: 4px 10px; border: 1px solid var(--warn); color: var(--warn); border-radius: 999px; font: 500 0.8rem var(--mono); width: max-content; }
+.status::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--warn); }
+
+/* the flow strip */
+.flow { display: flex; flex-wrap: wrap; gap: 6px 0; align-items: stretch; margin: 28px 0 8px; }
+.flow .st { display: grid; gap: 2px; padding: 10px 14px; border: 1px solid var(--line-strong); background: var(--panel); min-width: 0; flex: 1 1 130px; position: relative; }
+.flow .st + .st { margin-left: 18px; }
+.flow .st + .st::before { content: ""; position: absolute; left: -19px; top: 50%; width: 18px; height: 1px; background: var(--line-strong); }
+.flow .st + .st::after { content: ""; position: absolute; left: -6px; top: calc(50% - 4px); border: 4px solid transparent; border-left-color: var(--line-strong); }
+.flow .st b { font-weight: 600; }
+.flow .st small { color: var(--muted); font-size: 0.8rem; }
+.flow .st.mode { border-color: var(--accent); }
+.flow .st .k { font: 500 0.7rem var(--mono); color: var(--accent); letter-spacing: 0.06em; }
+
+section { margin-top: 48px; display: grid; gap: 16px; }
+section > .head { display: grid; gap: 6px; }
+.lede { color: var(--muted); max-width: 72ch; }
+
+/* today vs target */
+.vs { border-top: 1px solid var(--line-strong); }
+.vs .r { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; padding: 14px 0; border-bottom: 1px solid var(--line); }
+.vs .r > div { min-width: 0; }
+.vs .lbl { font: 500 0.7rem var(--mono); letter-spacing: 0.08em; text-transform: uppercase; display: block; margin-bottom: 4px; }
+.vs .today .lbl { color: var(--bad); } .vs .target .lbl { color: var(--ok); }
+.vs q { quotes: "“" "”"; }
+.vs .ids { font: 0.75rem var(--mono); color: var(--muted); margin-left: 6px; }
+
+/* a station = mockup + notes */
+.station { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 24px; align-items: start; }
+.station > * { min-width: 0; }
+.notes { display: grid; gap: 10px; background: var(--note); color: var(--note-ink); padding: 14px 16px; border-left: 3px solid var(--warn); font-size: 0.9rem; }
+.notes h3 { font-size: 0.8rem; font-family: var(--mono); letter-spacing: 0.06em; text-transform: uppercase; font-weight: 500; }
+.notes ul { margin: 0; padding-left: 18px; display: grid; gap: 6px; }
+.notes .issue { font-family: var(--mono); font-size: 0.8rem; }
+
+/* the screen frame */
+.screen { background: var(--panel); border: 1px solid var(--line-strong); box-shadow: 0 1px 0 var(--line), 0 12px 30px -18px rgba(0,0,0,.35); font-size: 0.9rem; overflow: hidden; }
+.screen .bar { display: flex; align-items: center; gap: 10px; padding: 8px 14px; border-bottom: 1px solid var(--line); background: var(--bg); }
+.screen .bar .dots { display: inline-flex; gap: 5px; } .screen .bar .dots i { width: 9px; height: 9px; border-radius: 50%; background: var(--line-strong); display: block; }
+.screen .bar .ttl { font: 500 0.8rem var(--mono); color: var(--muted); margin-left: auto; }
+.screen .body { padding: 18px 20px; display: grid; gap: 14px; }
+.modal { max-width: 640px; margin: 10px auto; border: 1px solid var(--line-strong); background: var(--panel); box-shadow: 0 10px 30px -14px rgba(0,0,0,.4); }
+.modal .mh { display: flex; align-items: baseline; gap: 12px; padding: 12px 18px; border-bottom: 1px solid var(--line); }
+.modal .mh .step { font: 500 0.75rem var(--mono); color: var(--accent); letter-spacing: 0.06em; text-transform: uppercase; }
+.modal .mh h3 { font-size: 1.05rem; }
+.modal .mh .x { margin-left: auto; color: var(--muted); font-size: 0.85rem; }
+.modal .mb { padding: 16px 18px; display: grid; gap: 14px; }
+.modal .mf { display: flex; justify-content: flex-end; gap: 8px; padding: 12px 18px; border-top: 1px solid var(--line); background: var(--bg); }
+.backdrop { background: repeating-linear-gradient(135deg, var(--bg) 0 8px, var(--panel) 8px 16px); padding: 10px; }
+
+.btn { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border: 1px solid var(--line-strong); border-radius: 4px; background: var(--panel); color: var(--fg); font: 500 0.85rem var(--sans); white-space: nowrap; }
+.btn.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+.btn.ghost { border-color: transparent; color: var(--accent); }
+.btn.disabled { opacity: 0.55; }
+.btn.big { padding: 10px 18px; font-size: 0.95rem; }
+
+.frow { display: grid; grid-template-columns: 110px minmax(0, 1fr); gap: 10px 14px; align-items: center; }
+.frow > label { color: var(--muted); font-size: 0.85rem; }
+.frow .v { display: flex; flex-wrap: wrap; gap: 8px 10px; align-items: center; min-width: 0; }
+.in { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--line-strong); border-radius: 4px; padding: 4px 8px; background: var(--panel); min-height: 30px; }
+.in .n { min-width: 4.5ch; text-align: right; }
+.in .u { color: var(--muted); font-size: 0.8rem; }
+.in.sel::after { content: "▾"; color: var(--muted); font-size: 0.8rem; }
+.lead { font-size: 0.8rem; color: var(--muted); }
+.hint { font-size: 0.85rem; color: var(--muted); }
+.fold { font-size: 0.85rem; color: var(--accent); }
+.fold::before { content: "▸ "; }
+
+.state { display: inline-flex; align-items: center; gap: 8px; }
+.dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
+.dot.ok { background: var(--ok); } .dot.off { background: var(--line-strong); } .dot.warn { background: var(--warn); } .dot.bad { background: var(--bad); }
+
+.forms { display: flex; flex-wrap: wrap; gap: 8px; }
+.form { display: grid; justify-items: center; gap: 4px; padding: 8px 10px; border: 1px solid var(--line-strong); border-radius: 4px; font-size: 0.8rem; min-width: 74px; }
+.form.on { border-color: var(--accent); background: var(--accent-soft); }
+.form svg { display: block; width: 40px; height: 28px; }
+.form svg * { fill: none; stroke: currentColor; stroke-width: 1.4; }
+
+.radio { display: inline-flex; align-items: center; gap: 8px; }
+.radio::before { content: ""; width: 14px; height: 14px; border-radius: 50%; border: 1.5px solid var(--line-strong); box-sizing: border-box; }
+.radio.on::before { border: 4.5px solid var(--accent); }
+.radio.dis { color: var(--muted); }
+.check::before { content: "☐ "; color: var(--muted); }
+
+.ops { display: grid; gap: 10px; }
+.ops .g { display: grid; grid-template-columns: 120px minmax(0, 1fr); gap: 6px 12px; align-items: baseline; }
+.ops .g > span { color: var(--muted); font-size: 0.8rem; }
+.ops .g .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip { padding: 4px 10px; border: 1px solid var(--line-strong); border-radius: 999px; font-size: 0.82rem; white-space: nowrap; }
+.chip.on { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); font-weight: 500; }
+.chip.dis { color: var(--muted); border-style: dashed; }
+.tag { font: 500 0.7rem var(--mono); padding: 2px 6px; border-radius: 3px; background: var(--ok-soft); color: var(--ok); vertical-align: middle; }
+.tag.grey { background: var(--bg); color: var(--muted); }
+
+/* the design panel */
+.panel { display: grid; grid-template-columns: 1fr; }
+.panel .filebar { display: flex; align-items: center; gap: 10px; padding: 10px 16px; border-bottom: 1px solid var(--line); background: var(--bg); flex-wrap: wrap; }
+.panel .filebar .name { font-weight: 600; }
+.seg { display: inline-flex; border: 1px solid var(--line-strong); border-radius: 4px; overflow: hidden; margin-left: auto; }
+.seg span { padding: 5px 14px; font-size: 0.85rem; } .seg span.on { background: var(--fg); color: var(--bg); }
+.grp { border-bottom: 1px solid var(--line); }
+.grp .gh { display: flex; align-items: center; gap: 10px; padding: 9px 16px; background: var(--bg); font: 500 0.72rem var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+.grp .gh .tog { margin-left: auto; font-family: var(--sans); text-transform: none; letter-spacing: 0; }
+.grp .gb { padding: 10px 16px; display: grid; gap: 8px; }
+.line { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; min-width: 0; }
+.line .act { margin-left: auto; color: var(--accent); font-size: 0.85rem; }
+.item { display: grid; grid-template-columns: 22px 28px minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 8px 10px; border: 1px solid var(--line); border-radius: 4px; }
+.item .ic { width: 28px; height: 28px; border-radius: 4px; background: var(--accent-soft); color: var(--accent); display: grid; place-items: center; font: 600 0.9rem var(--mono); }
+.item .meta { color: var(--muted); font-size: 0.82rem; }
+.footer { position: sticky; bottom: 0; padding: 12px 16px; display: grid; gap: 10px; background: var(--panel); border-top: 2px solid var(--line-strong); }
+.footer .ticks { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 0.85rem; }
+.footer .ticks span::before { content: "✓ "; color: var(--ok); }
+.block { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; padding: 10px 12px; border: 1px solid var(--bad); background: var(--bad-soft); border-radius: 4px; font-size: 0.88rem; }
+.block b { font-weight: 600; }
+.twostate { display: grid; gap: 10px; }
+.twostate .cap { font: 500 0.7rem var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+
+/* cut mode */
+.strip { display: flex; flex-wrap: wrap; gap: 6px 16px; align-items: center; padding: 8px 16px; background: var(--fg); color: var(--bg); font: 0.82rem var(--mono); }
+.strip .dot { box-shadow: 0 0 0 2px var(--fg); }
+.steps { display: grid; }
+.cstep { display: grid; grid-template-columns: 26px minmax(0, 1fr); gap: 8px 12px; padding: 12px 16px; border-bottom: 1px solid var(--line); align-items: start; }
+.cstep .m { width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; font: 600 0.75rem var(--mono); border: 1.5px solid var(--line-strong); color: var(--muted); }
+.cstep.done .m { background: var(--ok); border-color: var(--ok); color: #fff; }
+.cstep.now .m { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.cstep.now { background: var(--accent-soft); }
+.cstep .t { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: baseline; }
+.cstep .t b { font-weight: 600; }
+.cstep .t .meta { color: var(--muted); font-size: 0.85rem; }
+.cstep .acts { grid-column: 2; display: flex; gap: 8px; flex-wrap: wrap; }
+
+/* tables */
+.tbl { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+.tbl th { text-align: left; font: 500 0.7rem var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); padding: 8px 10px 8px 0; border-bottom: 1px solid var(--line-strong); }
+.tbl td { padding: 9px 10px 9px 0; border-bottom: 1px solid var(--line); vertical-align: top; }
+.tbl td:first-child { white-space: nowrap; }
+.scroll { overflow-x: auto; }
+.tbl .not { color: var(--bad); text-decoration: line-through; text-decoration-color: var(--bad); text-decoration-thickness: 1px; }
+
+.three { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
+.three > div { border-top: 3px solid var(--line-strong); padding-top: 10px; display: grid; gap: 6px; font-size: 0.9rem; }
+.three > div.rm { border-color: var(--bad); } .three > div.mv { border-color: var(--warn); } .three > div.kp { border-color: var(--ok); }
+.three ul { margin: 0; padding-left: 18px; display: grid; gap: 4px; }
+
+.acc { counter-reset: a; display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.acc li { display: grid; grid-template-columns: 30px minmax(0, 1fr); gap: 10px; }
+.acc li::before { counter-increment: a; content: counter(a); font: 500 0.8rem var(--mono); color: var(--accent); border: 1px solid var(--accent); border-radius: 50%; width: 22px; height: 22px; display: grid; place-items: center; }
+
+.work .tbl td a { font-family: var(--mono); font-size: 0.85rem; }
+.gate { padding: 14px 16px; border: 1px solid var(--warn); background: var(--warn-soft); color: var(--fg); max-width: none; }
+
+@media (max-width: 860px) {
+  .station { grid-template-columns: 1fr; }
+  .vs .r { grid-template-columns: 1fr; gap: 8px; }
+  .three { grid-template-columns: 1fr; }
+  .frow { grid-template-columns: 1fr; gap: 4px; }
+  .ops .g { grid-template-columns: 1fr; }
+  .flow .st + .st { margin-left: 0; } .flow .st + .st::before, .flow .st + .st::after { display: none; }
+  .flow { gap: 6px; }
+}
+@media (prefers-reduced-motion: no-preference) { .btn, .chip { transition: background .15s; } }
+/* rotary additions: the header fits a phone (the status pill's max-content widened the grid) */
+header.top { grid-template-columns: minmax(0, 1fr); }
+header.top .status { width: auto; max-width: 100%; justify-self: start; }
+.eyebrow { overflow-wrap: anywhere; }
+/* rotary additions: the drawings */
+.fig { width: 100%; max-width: 100%; display: block; border: 1px solid var(--line); background: var(--bg); }
+.fig text { font-family: "IBM Plex Sans", sans-serif; font-size: 10px; fill: var(--muted); }
+.fig .mono { font-family: "IBM Plex Mono", monospace; }
+.fig .ink { fill: var(--fg); }
+.refuse { display: grid; gap: 4px; padding: 10px 12px; border: 1px solid var(--warn); background: var(--warn-soft); border-radius: 4px; font-size: 0.88rem; }
+.tag.warn { background: var(--warn-soft); color: var(--warn); }
+.sheet { display: grid; grid-template-columns: 28px 170px minmax(0, 1fr); gap: 6px 12px; font-size: 0.88rem; padding: 4px 0; }
+.sheet > b { font-family: var(--mono); color: var(--accent); }
+.sheet > span:nth-child(3n+2) { font-weight: 600; }
+@media (max-width: 860px) { .sheet { grid-template-columns: 28px minmax(0, 1fr); } .sheet > span:nth-child(3n) { grid-column: 2; } }
+</style>
+
+<style>
+/* bed-mounts additions: two pictures side by side, and the stack elevation */
+.pair { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+@media (max-width: 860px) { .pair { grid-template-columns: 1fr; } }
+.fig .tape { fill: var(--warn-soft); stroke: var(--warn); stroke-dasharray: 3 2; }
+.fig .fx { fill: var(--line-strong); }
+.fig .fxd { fill: var(--line); stroke: var(--line-strong); stroke-dasharray: 4 2; }
+.fig .stock { fill: var(--accent-soft); stroke: var(--accent); stroke-width: 1.5; }
+.fig .bad { fill: var(--bad-soft); stroke: var(--bad); stroke-width: 1.5; }
+.fig .board { fill: var(--note); stroke: var(--line-strong); }
+</style>
+
+<div class="wrap">
+<header class="top">
+  <span class="eyebrow">Case Maker · CNC · bed mounts · design v1 · 2026-10-26</span>
+  <h1>Bed Mounts Flow</h1>
+  <p class="lede">The first-job flow, extended to a job held on the bed: taped down, or pushed into the bracket's corner and clamped. The same four steps and the same four Cut lines; Holding's two bed options become real choices. Each mockup carries the exact copy of <span class="mono">docs/design/bed-mounts-flow.md</span>; the notes beside it say where every default comes from.</p>
+  <span class="status">Proposed · awaiting the maintainer's approval · tracker #707</span>
+</header>
+
+<div class="flow" aria-label="The flow">
+  <div class="st"><span class="k">STEP 3 OF 4</span><b>Holding</b><small>on the bed, taped · bracket and clamps</small></div>
+  <div class="st"><span class="k">THE ESCAPE</span><b>Change the machine</b><small>vise off · bracket on</small></div>
+  <div class="st"><span class="k">STEP 4 OF 4</span><b>Operation</b><small>unchanged</small></div>
+  <div class="st mode"><span class="k">MODE</span><b>Design</b><small>Hold line · blockers · Simulate</small></div>
+  <div class="st mode"><span class="k">MODE</span><b>Cut</b><small>9 touches taped · 4 in the bracket</small></div>
+  <div class="st"><span class="k">PAPER</span><b>Run sheet</b><small>prepare the bed · hold it · the origin</small></div>
+</div>
+<p class="hint">Nothing new counts steps. A bed job is a first-job job; the pins are cleared by the change wizard, and what is under the part is read from the machine's record.</p>
+
+<section>
+  <div class="head"><h2>Principles added for the bed mounts</h2><p class="lede">First-job principles 1–8 hold unchanged. These six are added.</p></div>
+  <ol class="acc" style="counter-reset:a 8">
+    <li><span><b>A bed job is a first-job job.</b> No new step and no new mode; Holding's two bed options become real choices.</span></li>
+    <li><span><b>Nothing on the pins, or the job is taken there — and what is under the part is read.</b> The surface (bare bed, wasteboard) is the machine's record, shown in Holding's top line, never asked again.</span></li>
+    <li><span><b>What holds the part is drawn where it is, at its height.</b> Tape, board, arms and clamps are one model in Holding, Design, Simulate and the run sheet. A clamp is placed on the picture.</span></li>
+    <li><span><b>The cutter keeps clear of what stands above the part.</b> Every move, rapids included, stays a clearance from each clamp and arm, or Generate refuses it by name with the fix.</span></li>
+    <li><span><b>Tape holds what it can be shown to hold, and a through cut always has something under it</b>: the wasteboard, or a board.</span></li>
+    <li><span><b>The bench's numbers are values, used.</b> None refuses a run; where one decides the origin (the bracket's offset), a confirming touch measures it until it is measured once.</span></li>
+  </ol>
+</section>
+
+<!-- ============ STATION 1: holding, vise on the pins ============ -->
+<section id="holding-vise">
+  <div class="head"><span class="eyebrow">Station 1</span><h2>Step 3 of 4 · Holding — with the vise on the pins</h2><p class="lede">The house's usual state. The two bed options are shown with their cost and are the way into the change wizard; once the bed is clear, selecting one writes the job.</p></div>
+  <div class="station">
+    <div class="screen"><div class="bar"><span class="dots"><i></i><i></i><i></i></span><span class="ttl">New cutting job</span></div>
+      <div class="backdrop"><div class="modal" style="max-width:720px">
+        <div class="mh"><span class="step">Step 3 of 4</span><h3>Holding</h3><span class="x">Close ✕</span></div>
+        <div class="mb">
+          <div class="line" style="padding:8px 10px;border:1px solid var(--line);border-radius:4px;background:var(--bg)"><span class="muted">On the machine now</span><b>Vise on the pins</b><span>· wasteboard under · 2 mm MDF boards ×4 · tape</span><span class="btn" style="margin-left:auto">Change the machine…</span></div>
+          <span class="hint" style="font-weight:500;color:var(--fg)">How is the plate held?</span>
+          <div style="display:grid;gap:8px">
+            <span class="radio on"><span><b>In the vise, on the jaw ledge</b><br><span class="hint"><span class="mono">3.81 mm</span> stands <span class="mono">0.71 mm</span> proud of the jaws</span></span></span>
+            <span class="radio"><span>In the vise, on a waste board between the jaws</span></span>
+            <span class="radio"><span>In the vise, gripped as a block</span></span>
+            <span class="radio dis"><span>On the bed, taped<br><span class="hint">needs the vise off the pins · <span style="color:var(--accent)">Change the machine…</span></span></span></span>
+            <span class="radio dis"><span>On the bed, bracket and clamps<br><span class="hint">needs the vise off the pins · <span style="color:var(--accent)">Change the machine…</span></span></span></span>
+            <span class="radio dis"><span>In the rotary chuck<br><span class="hint">needs the rotary on the pins · <span style="color:var(--accent)">Change the machine…</span></span></span></span>
+          </div>
+        </div>
+        <div class="mf"><span class="btn">← Back</span><span class="btn primary">Next: operation →</span></div>
+      </div></div>
+    </div>
+    <aside class="notes"><h3>What each option writes</h3>
+      <ul><li><b>In the vise</b> (three): <span class="mono">vise</span>, unchanged.</li><li><b>On the bed, taped</b>: <span class="mono">tape</span> — tape width and thickness, the inset, where on the bed; the board under when there is one.</li><li><b>On the bed, bracket and clamps</b>: <span class="mono">bracket</span> — the anchor, the variant, the clamp places; the board under when there is one.</li><li>Every option also writes the job's <b>bed</b>: the machine's record it was set up on, and its version.</li></ul>
+      <h3>Today</h3><p>With nothing on the pins the bed options read <q>the job is held in the vise</q> and write nothing. That sentence goes.</p>
+      <h3>The words</h3><p><span class="mono">tape</span> and <span class="mono">bracket</span> are the words the setups engine, the registration and the obstacles already use, so the job names its mount one way.</p>
+      <h3>Work item</h3><p class="issue">BM-1 model · BM-2 Holding</p>
+    </aside>
+  </div>
+</section>
+
+<!-- ============ STATION 1a: change the machine ============ -->
+<section id="change">
+  <div class="head"><span class="eyebrow">Station 1a · the escape</span><h2>Change the machine → the bed</h2><p class="lede">The built wizard already takes the vise off for a bed job. It gains one fit step, for the bracket, when the bed has none at an anchor. The wasteboard does not move.</p></div>
+  <div class="station">
+    <div class="screen"><div class="bar"><span class="dots"><i></i><i></i><i></i></span><span class="ttl">Change the machine</span></div>
+      <div class="backdrop"><div class="modal" style="max-width:720px">
+        <div class="mh"><span class="step">Change the machine</span><h3>Vise off · bracket on</h3><span class="x">Close ✕</span></div>
+        <div class="mb" style="gap:0;padding:0">
+          <div class="cstep done"><span class="m">✓</span><div class="t" style="display:grid;gap:4px"><b>1 What changes</b><span class="meta">Vise on the pins → Nothing on the pins, bracket at anchor 1</span><span class="meta">for: <b>Tray</b>, held in a bracket and clamps on the bed</span></div></div>
+          <div class="cstep done"><span class="m">✓</span><div class="t" style="display:grid;gap:4px"><b>2 Make it safe</b><span class="meta">Home · <span class="mono">$H</span> · Idle · homed ✓</span><span class="meta">Work light on · <span class="mono">M821</span> ✓</span><span class="meta">Spindle cold, cutter out ✓</span></div></div>
+          <div class="cstep done"><span class="m">✓</span><div class="t" style="display:grid;gap:4px"><b>3 Take off the vise</b><span class="meta">the two pin bolts · lift it straight up · on its shelf ✓</span></div></div>
+          <div class="cstep now"><span class="m">4</span><div class="t" style="display:grid;gap:6px"><b>Fit the bracket</b>
+            <div style="display:grid;gap:4px">
+              <span class="check">the thin L-bracket into anchor 1's corner</span>
+              <span class="check">its two 4 mm dowels</span>
+              <span class="check">its three M5 screws</span>
+              <span class="check">two top clamps in the tray</span>
+            </div>
+            <div class="hint">a picture for each step</div></div>
+            <div class="acts"><span class="btn disabled">Done</span><span class="hint">ticks every line</span></div></div>
+          <div class="cstep"><span class="m">5</span><div class="t" style="display:grid;gap:4px"><b>Confirm</b><span class="meta">the bed is now: Nothing on the pins · bracket at anchor 1 · wasteboard under</span><span class="meta">written to the machine's record: <span class="mono">2026-10-26 09:20</span> · vise off, bracket on · for Tray</span><span class="meta">Work light off · Home</span></div></div>
+        </div>
+        <div class="twostate" style="padding:10px 18px;border-top:1px dashed var(--line)"><span class="cap">for a taped job</span>
+          <p class="hint">No step 4. 5 Confirm · the bed is now: Nothing on the pins · wasteboard under</p></div>
+        <div class="mf"><span class="btn">← Back</span><span class="btn disabled">Back to the job</span></div>
+      </div></div>
+    </div>
+    <aside class="notes"><h3>Changes to the built wizard</h3>
+      <ul><li>Step 4 <b>Fit the bracket</b> appears only when the bed has no bracket at an anchor; it records one. Two 4 mm dowels and three M5 screws are Makera's QuickStart words as the code quotes them.</li><li>Anchor 1 by default: Makera's origin is <q>relative to Anchor 1</q>. Anchor 2 is a choice in step 1.</li><li>The clamps go on after the plate; the wizard only checks they are in the tray.</li></ul>
+      <h3>The wasteboard</h3><p>A change to the bed leaves the surface exactly as it was (only the rotary moves it). The sources disagree about what sits under the vise on this machine; the record decides, and one look at the bench settles it (open question 1).</p>
+      <h3>Work item</h3><p class="issue">BM-3</p>
+    </aside>
+  </div>
+</section>
+
+<!-- ============ STATION 2: holding, taped ============ -->
+<section id="taped">
+  <div class="head"><span class="eyebrow">Station 2</span><h2>Step 3 of 4 · Holding — on the bed, taped</h2><p class="lede">After the vise comes off, the step returns with the bed drawn. Tape needs nothing fitted. Two strips inside the footprint; the board under only when a through cut needs one; the hold is checked at Generate, when the cutter is known.</p></div>
+  <div class="station">
+    <div class="screen"><div class="bar"><span class="dots"><i></i><i></i><i></i></span><span class="ttl">New cutting job</span></div>
+      <div class="backdrop"><div class="modal" style="max-width:760px">
+        <div class="mh"><span class="step">Step 3 of 4</span><h3>Holding</h3><span class="x">Close ✕</span></div>
+        <div class="mb">
+          <div class="line" style="padding:8px 10px;border:1px solid var(--line);border-radius:4px;background:var(--bg)"><span class="muted">On the machine now</span><b>Nothing on the pins</b><span>· wasteboard under · 2 mm MDF boards ×4 · tape</span><span class="btn" style="margin-left:auto">Change the machine…</span></div>
+          <div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(220px,300px);gap:16px;align-items:start">
+            <div style="display:grid;gap:9px">
+              <span class="hint" style="font-weight:500;color:var(--fg)">How is the plate held?</span>
+              <span class="radio dis"><span>In the vise, …<br><span class="hint">needs the vise on the pins · <span style="color:var(--accent)">Change the machine…</span></span></span></span>
+              <span class="radio on"><span><b>On the bed, taped</b><br><span class="hint">two strips of the 20 mm tape, 2 mm in from every edge</span></span></span>
+              <div class="frow" style="grid-template-columns:96px minmax(0,1fr);margin-left:22px">
+                <label>Under it</label><div class="v">wasteboard</div>
+                <label>Board under</label><div class="v"><span class="in sel">none</span><span class="hint">none · 2 mm MDF (×4) · typed…</span></div>
+                <label>Where</label><div class="v"><span>the middle of the bed</span><span class="hint">(drag on the picture)</span></div>
+                <label>Square to</label><div class="v"><span>the front edge of the bed</span></div>
+              </div>
+              <span class="radio"><span>On the bed, bracket and clamps<br><span class="hint">needs the bracket at anchor 1 · <span style="color:var(--accent)">Change the machine…</span></span></span></span>
+              <div class="fold">Technical: the tape (Makera's 20 mm roll, 0.1 mm typed) · the hold rule · the wasteboard's top</div>
+            </div>
+            <div style="display:grid;gap:6px">
+              <svg class="fig" viewBox="0 0 300 230" aria-label="Top view of the bed with the plate taped in the middle">
+                <rect x="10" y="10" width="280" height="200" class="fx" opacity="0.35"/>
+                <rect x="30" y="24" width="240" height="172" class="board"/>
+                <text x="150" y="40" text-anchor="middle">wasteboard</text>
+                <rect x="214" y="60" width="40" height="8" fill="none" stroke="var(--line-strong)" stroke-dasharray="2 2"/><text x="234" y="56" text-anchor="middle" style="font-size:8px">a scar</text>
+                <rect x="96" y="86" width="108" height="54" class="stock"/>
+                <rect x="99" y="91" width="102" height="28" class="tape"/><rect x="99" y="120" width="102" height="16" class="tape"/>
+                <text x="150" y="108" text-anchor="middle" class="ink mono">plate 76.2 × 38.1</text>
+                <text x="150" y="132" text-anchor="middle" style="fill:var(--warn)">tape, 2 mm in</text>
+                <path d="M88 146 H212" stroke="var(--fg)" stroke-dasharray="3 3"/><text x="150" y="158" text-anchor="middle" class="ink" style="font-size:9px">square to the front edge</text>
+                <text x="150" y="222" text-anchor="middle" class="ink">front · you</text>
+              </svg>
+              <p class="hint">The bed from above: the wasteboard, its scars faint, the plate where it will go, the tape dashed under it.</p>
+            </div>
+          </div>
+          <div class="twostate" style="border-top:1px dashed var(--line);padding-top:10px"><span class="cap">on the bare bed, with a through cut</span>
+            <div class="frow" style="grid-template-columns:96px minmax(0,1fr)">
+              <label>Under it</label><div class="v">bare bed</div>
+              <label>Board under</label><div class="v"><span class="in sel">2 mm MDF</span><span class="hint">the through cut goes into the board, not the bed</span><span class="hint" style="flex-basis:100%">tape the board to the bed, then the plate to the board</span></div>
+            </div></div>
+          <div class="twostate" style="border-top:1px dashed var(--line);padding-top:10px"><span class="cap">when the board is too small</span>
+            <p class="hint" style="color:var(--bad)">The 2 mm MDF boards are <span class="mono">100 × 100 mm</span>; this plate is <span class="mono">120 mm</span> long — tape it to the wasteboard, or choose a larger board.</p></div>
+        </div>
+        <div class="mf"><span class="btn">← Back</span><span class="btn primary">Next: operation →</span></div>
+      </div></div>
+    </div>
+    <aside class="notes"><h3>Defaults and where they come from</h3>
+      <ul><li><b>The mount</b>: the machine's preferred mount for this stock among those the bed carries now; else sheet ≤ 3 mm on tape, plates and blocks in the bracket; else tape. With no bracket on the bed, tape.</li><li><b>Under it</b>: the machine's record. Not asked.</li><li><b>Tape</b>: the house's roll, Makera's <span class="mono">20 mm</span>; <span class="mono">0.1 mm</span> thick, typed on the record.</li><li><b>2 mm in from every edge</b>: the edge touches land just past each edge; tape there would read as a step and be cut into.</li><li><b>Board under</b>: none on the wasteboard (it is the machine's sacrificial board); on the bare bed a through cut needs the thinnest house board that passes (<span class="mono">≥ 1.3 mm</span>).</li><li><b>Square to the front edge</b>: the program is not rotated; Cut refuses a turn past the 1 mm edge margin.</li></ul>
+      <h3>The hold rule (Technical)</h3><p>Taped area ≥ <span class="mono">100 ×</span> (cutter ⌀ × step-down). A shop setting until a tape coupon measures it. The badge: <span class="mono">2 462.02 mm²</span> taped, <span class="mono">50 mm²</span> needed with the ⌀ 1 mm flat end at 0.5 mm.</p>
+      <h3>Work item</h3><p class="issue">BM-2 · BM-4 · BM-5</p>
+    </aside>
+  </div>
+</section>
+
+<!-- ============ STATION 3: holding, bracket ============ -->
+<section id="bracket">
+  <div class="head"><span class="eyebrow">Station 3</span><h2>Step 3 of 4 · Holding — bracket and clamps</h2><p class="lede">The bracket's corner is X 0 · Y 0. The clamps go on the free edges, back and right; each is a handle dragged along an edge on the picture. Their heights are obstacles the cut keeps clear of.</p></div>
+  <div class="station">
+    <div class="screen"><div class="bar"><span class="dots"><i></i><i></i><i></i></span><span class="ttl">New cutting job</span></div>
+      <div class="backdrop"><div class="modal" style="max-width:760px">
+        <div class="mh"><span class="step">Step 3 of 4</span><h3>Holding</h3><span class="x">Close ✕</span></div>
+        <div class="mb">
+          <div class="line" style="padding:8px 10px;border:1px solid var(--line);border-radius:4px;background:var(--bg)"><span class="muted">On the machine now</span><b>Nothing on the pins</b><span>· bracket at anchor 1 · wasteboard under</span><span class="btn" style="margin-left:auto">Change the machine…</span></div>
+          <div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(220px,320px);gap:16px;align-items:start">
+            <div style="display:grid;gap:9px">
+              <span class="hint" style="font-weight:500;color:var(--fg)">How is the plate held?</span>
+              <span class="radio"><span>On the bed, taped<br><span class="hint">two strips of the 20 mm tape, 2 mm in from every edge</span></span></span>
+              <span class="radio on"><span><b>On the bed, bracket and clamps</b><br><span class="hint">the plate in the bracket's corner at anchor 1</span></span></span>
+              <div class="frow" style="grid-template-columns:96px minmax(0,1fr);margin-left:22px">
+                <label>Bracket</label><div class="v">thin, at anchor 1</div>
+                <label>Clamps</label><div class="v"><span>2 top clamps · <span class="mono">12 mm</span> tall</span><span class="hint" style="flex-basis:100%">drag a clamp along the back or right edge · <span style="color:var(--accent)">+ clamp</span></span></div>
+                <label>Board under</label><div class="v"><span class="in sel">none</span></div>
+              </div>
+              <p class="hint" style="margin-left:22px">the arms stand <span class="mono">4 mm</span> above the plate</p>
+              <div class="fold">Technical: the bracket and clamp sizes (Makera's and Case Maker's, until calipered) · anchor 1 read from this machine</div>
+            </div>
+            <div style="display:grid;gap:6px">
+              <svg class="fig" viewBox="0 0 320 230" aria-label="Top view: the plate in the bracket's corner with two clamps on the back edge">
+                <!-- plate 100 x 60 mm at 2.4 px/mm: x 50..290, y 60..204 (front at the bottom) -->
+                <rect x="50" y="60" width="240" height="144" class="stock"/>
+                <text x="170" y="136" text-anchor="middle" class="ink mono">plate 100 × 60 × 6</text>
+                <rect x="34" y="60" width="16" height="160" class="fx"/><rect x="34" y="204" width="256" height="16" class="fx"/>
+                <text x="26" y="140" text-anchor="middle" transform="rotate(-90 26 140)">left arm</text><text x="170" y="216" text-anchor="middle" style="fill:var(--panel)">front arm</text>
+                <!-- clamps: 30 x 15 mm, reaching 8 mm onto the plate: plate y back edge = 60; reach 8mm = 19px -->
+                <rect x="86" y="7" width="36" height="72" class="fxd"/><rect x="218" y="7" width="36" height="72" class="fxd"/>
+                <circle cx="104" cy="30" r="6" fill="var(--accent)"/><circle cx="236" cy="30" r="6" fill="var(--accent)"/>
+                <text x="104" y="92" text-anchor="middle" class="ink" style="font-size:9px">15 mm in</text><text x="236" y="92" text-anchor="middle" class="ink" style="font-size:9px">15 mm in</text>
+                <circle cx="50" cy="204" r="4" fill="var(--bad)"/><text x="58" y="198" class="ink" style="font-size:9px">X 0 · Y 0 at the bracket's corner</text>
+                <text x="298" y="140" text-anchor="middle" transform="rotate(90 298 140)">right edge — free</text>
+                <text x="250" y="228" text-anchor="end" class="ink" style="font-size:9px">front · you</text>
+              </svg>
+              <p class="hint">Selected clamp: <b>the clamp on the back edge, 15 mm in from the left-hand corner</b>. Drag it along the edge, round the corner onto the right edge, or <span style="color:var(--accent)">remove</span>.</p>
+            </div>
+          </div>
+          <div class="twostate" style="border-top:1px dashed var(--line);padding-top:10px"><span class="cap">the mount's own checks, under the picture</span>
+            <p class="hint" style="color:var(--bad)">the clamp on the back edge hangs past the end of the <span class="mono">60 mm</span> edge — it would not hold</p>
+            <p class="hint">the plate's front edge is <span class="mono">120 mm</span> and the bracket's arm <span class="mono">100 mm</span>: the edge is squared only along the arm</p></div>
+        </div>
+        <div class="mf"><span class="btn">← Back</span><span class="btn primary">Next: operation →</span></div>
+      </div></div>
+    </div>
+    <aside class="notes"><h3>Defaults and where they come from</h3>
+      <ul><li><b>X 0 · Y 0</b>: the plate's front-left corner in the bracket's corner = anchor 1 (read from this machine) + the bracket's offset, <span class="mono">0, 0</span> (Makera's QuickStart) until measured.</li><li><b>Two top clamps on the back edge</b>: Makera's QuickStart, <q>the top clamps hold the far side</q>; <span class="mono">15 mm</span> in from each corner, Case Maker's chosen place.</li><li><b>Clamps</b> <span class="mono">30 × 15 mm</span>, reaching <span class="mono">8 mm</span> onto the plate, <span class="mono">12 mm</span> above it; <b>arms</b> <span class="mono">100 mm</span> long, <span class="mono">10 mm</span> wide and tall: Case Maker's defaults until calipered. The machine's config reads the anchor as <span class="mono">100 × 15</span>; the 15 is named beside the 10 in Technical.</li><li>The thin bracket at anchor 1: Makera's kit.</li></ul>
+      <h3>Moves into the job</h3><p>The clamp places are the job's. Today every bracket program is checked against the two default clamps whatever is on the machine.</p>
+      <h3>Not offered</h3><p>Side clamps: no job has asked.</p>
+      <h3>Work item</h3><p class="issue">BM-2 · BM-6</p>
+    </aside>
+  </div>
+</section>
+
+<!-- ============ STATION 4: design ============ -->
+<section id="design">
+  <div class="head"><span class="eyebrow">Station 4</span><h2>Design — the Hold line and Generate's blockers</h2><p class="lede">One Hold line per mount. Generate names the clamp, the arm, the piece the tape cannot hold, or the bed under a through cut — the sentence and the fix at the button; the numbers in Technical.</p></div>
+  <div class="station">
+    <div class="screen"><div class="bar"><span class="dots"><i></i><i></i><i></i></span><span class="ttl">Case Maker · CNC</span></div>
+      <div class="panel">
+        <div class="filebar"><span class="name">Tray</span><span class="hint">saved <span class="mono">09:24</span> ▾</span><span class="seg"><span class="on">Design</span><span>Cut</span></span></div>
+        <div class="grp"><div class="gh">Job<span class="tog">▾</span></div><div class="gb">
+          <div class="line"><span class="muted">Stock</span><b>plate</b><span class="mono">100 × 60 × 6 mm</span>· PLA<span class="act">edit</span></div>
+          <div class="item"><span class="muted">▸</span><span class="ic">P</span><div><div><b>Pocket “Tray”</b></div><div class="meta">Pocket · <span class="mono">70 × 30 mm</span> · <span class="mono">2 mm</span> deep</div></div><span class="muted">⋯</span></div>
+        </div></div>
+        <div class="grp"><div class="gh">Cutter<span class="tog">▸</span></div><div class="gb"><div class="line"><b>⌀ 3.175 mm flat end</b><span class="mono muted">· 12 mm flute</span><span class="tag">recommended</span><span class="act">change</span></div></div></div>
+        <div class="grp"><div class="gh">Hold<span class="tog">▸</span></div><div class="gb">
+          <div class="line hint">Bracket at anchor 1 · 2 clamps on the back edge, <span class="mono">12 mm</span> tall · X 0 Y 0 at its corner<span class="act">edit</span></div>
+          <div class="twostate" style="border-top:1px dashed var(--line);padding-top:8px"><span class="cap">a taped job</span>
+            <div class="line hint">On the bed, taped · wasteboard under · <span class="mono">20 mm</span> tape · the middle of the bed<span class="act">edit</span></div>
+            <div class="line hint">On the bed, taped · bare bed · a <span class="mono">2 mm</span> MDF board under · <span class="mono">20 mm</span> tape<span class="act">edit</span></div></div>
+        </div></div>
+        <div class="footer">
+          <div class="block"><span class="btn disabled">Generate</span><span><b>“Tray” runs under the clamp on the back edge, 15 mm in from the left-hand corner</b> — slide the clamp along the back edge, or move it to the right edge, clear of the cut.</span><span class="btn ghost" style="margin-left:auto">Fix →</span></div>
+          <div class="twostate"><span class="cap">the other blockers, same form</span>
+            <div class="block"><span class="btn disabled">Generate</span><span><b>“Star” is cut free as a 12 × 12 mm piece; the tape under it cannot hold it against the ⌀ 3.175 mm flat end</b> — leave two tabs, or cut it with a smaller cutter.</span><span class="btn ghost" style="margin-left:auto">Fix →</span></div>
+            <div class="block"><span class="btn disabled">Generate</span><span><b>“Outline” cuts through the sheet, and only the bed is under it</b> — put a 2 mm MDF board under it, or tape it on the wasteboard.</span><span class="btn ghost" style="margin-left:auto">Fix →</span></div>
+            <div class="block"><span class="btn disabled">Generate</span><span><b>“Tray” comes within 1.2 mm of the bracket's front arm, which stands 4 mm above the plate</b> — keep the cut 2.688 mm inside the front edge.</span><span class="btn ghost" style="margin-left:auto">Fix →</span></div>
+            <p class="hint">A note, not a blocker: The block is <span class="mono">30 mm</span> tall and <span class="mono">25 mm</span> wide: tape alone may let it tip — hold it in the bracket and clamps.</p></div>
+          <div class="twostate"><span class="cap">with both clamps on the right edge</span>
+            <div class="line"><span class="btn primary big">Generate</span></div>
+            <div class="ticks"><span>generated</span><span>verified</span><span>simulated</span><span>matches the design</span><span class="mono" style="margin-left:auto">about 6 min</span></div></div>
+        </div>
+      </div>
+    </div>
+    <aside class="notes"><h3>The clearance</h3>
+      <p>Each clamp and arm is grown, for every move, by the tool's widest part beside it, the bracket's fit (<span class="mono">0.1 mm</span>) and the <b>fixture clearance</b>, <span class="mono">1 mm</span> — the job's jaw clearance, renamed because it now covers clamps and arms. The travel height on the bracket is the tallest clamp plus the clearance: <span class="mono">13 mm</span> above the plate.</p>
+      <h3>Fix targets</h3><ul><li>A clamp → the Hold picture with that clamp selected.</li><li>A piece the tape cannot hold → the item's tabs.</li><li>A through cut over the bed → Hold, Board under.</li><li>An arm → the item.</li></ul>
+      <h3>Skipped on the bed</h3><p>Every vise check: the jaw envelope, the <q>X runs between the jaws</q> picture.</p>
+      <h3>Work item</h3><p class="issue">BM-7 · BM-4 · BM-5 · BM-6</p>
+    </aside>
+  </div>
+</section>
+
+<!-- ============ STATION 5: simulate ============ -->
+<section id="simulate">
+  <div class="head"><span class="eyebrow">Station 5</span><h2>Simulate — the bed, the tape, the bracket, the clamps</h2><p class="lede">What holds the part is drawn as solids, at its height, solid where measured or Makera's and dashed where it is Case Maker's default. Side shows the stack. A program opened from a file is simulated against the job's mount and stops at the first move into a clamp.</p></div>
+  <div class="station">
+    <div class="screen"><div class="bar"><span class="dots"><i></i><i></i><i></i></span><span class="ttl">Simulate</span></div>
+      <div class="body">
+        <div class="line"><b>Simulate</b><span class="seg" style="margin-left:12px"><span class="on">Top</span><span>Side</span></span></div>
+        <div class="pair">
+          <svg class="fig" viewBox="0 0 280 190" aria-label="Top view of the simulation: plate in the bracket, a clamp in red where the program reaches it">
+            <rect x="0" y="0" width="280" height="190" class="board" opacity="0.6"/>
+            <rect x="40" y="40" width="200" height="120" class="stock"/>
+            <rect x="70" y="80" width="140" height="60" fill="var(--accent)" opacity="0.25"/>
+            <text x="140" y="114" text-anchor="middle" class="ink mono">Tray</text>
+            <rect x="26" y="40" width="14" height="134" class="fx"/><rect x="26" y="160" width="214" height="14" class="fx"/>
+            <rect x="70" y="10" width="30" height="46" class="bad"/><rect x="180" y="10" width="30" height="46" class="fxd"/>
+            <text x="85" y="8" text-anchor="middle" style="fill:var(--bad);font-size:9px">clamp</text><text x="195" y="8" text-anchor="middle" style="font-size:9px">clamp 12 mm</text>
+            <rect x="83" y="56" width="5" height="34" fill="var(--fg)" opacity="0.8"/>
+            <text x="140" y="186" text-anchor="middle" style="font-size:9px">bracket · wasteboard under</text>
+          </svg>
+          <svg class="fig" viewBox="0 0 280 190" aria-label="Side view of the stack: plate, tape, board, tape, bed">
+            <rect x="20" y="150" width="240" height="24" class="fx"/><text x="140" y="166" text-anchor="middle" style="fill:var(--panel)">bed</text>
+            <rect x="40" y="144" width="200" height="6" class="tape"/>
+            <rect x="40" y="110" width="200" height="34" class="board"/><text x="234" y="136" text-anchor="end">board 2</text>
+            <rect x="60" y="104" width="160" height="6" class="tape"/>
+            <rect x="60" y="70" width="160" height="34" class="stock"/><text x="140" y="91" text-anchor="middle" class="ink">plate 2</text>
+            <rect x="100" y="70" width="18" height="45" fill="var(--panel)" stroke="var(--bad)" stroke-dasharray="2 2"/>
+            <text x="122" y="121" style="fill:var(--bad);font-size:9px">0.3 into the board</text>
+            <text x="226" y="102" class="mono" style="font-size:9px">tape 0.1</text>
+            <text x="140" y="30" text-anchor="middle" class="ink">plate 2 · tape 0.1 · board 2 · tape 0.1 · bed</text>
+            <text x="140" y="44" text-anchor="middle" style="font-size:9px">the tape drawn 0.5 mm, labelled with its true thickness</text>
+          </svg>
+        </div>
+        <div style="display:grid;gap:6px;border:1px solid var(--line);padding:10px 12px;border-radius:4px">
+          <div class="line"><span class="btn">▶</span><div style="flex:1;min-width:120px;height:6px;background:var(--line);border-radius:3px;position:relative"><div style="width:35%;height:100%;background:var(--bad);border-radius:3px"></div></div><span class="mono hint">step 1 412 of 3 980</span></div>
+          <div class="line mono hint"><span>X 26.4 mm</span><span>Y 53.4 mm</span><span>Z −1.5 mm</span></div>
+        </div>
+        <div class="twostate"><span class="cap">a program opened from a file</span>
+          <div class="refuse"><b>Move 1 412 takes the cutter into the clamp on the back edge, 15 mm in from the left-hand corner.</b><span>The simulation stops there.</span></div></div>
+        <div class="line"><span class="state"><span class="dot ok"></span><b>Matches the design</b></span><span class="hint">for the generated program, with the clamps on the right edge</span></div>
+        <div class="fold">Technical: grid · what was not checked</div>
+      </div>
+    </div>
+    <aside class="notes"><h3>Drawn from the job's mount</h3>
+      <ul><li>The bed plate; the wasteboard when it is under, its scars faint; the board under; the tape as a thin layer.</li><li>The bracket's two arms and each clamp at its place and height — the same boxes the verifier checks.</li><li>Solid: measured or Makera's. Dashed: Case Maker's default until calipered.</li><li>Through cuts: the released piece in place on the tape; the mark the cut will leave on the wasteboard, ghosted.</li></ul>
+      <h3>Unchanged</h3><p>The oracle: the bed mounts change what holds the part, not how the cut is judged.</p>
+      <h3>Work item</h3><p class="issue">BM-8</p>
+    </aside>
+  </div>
+</section>
+
+<!-- ============ STATION 6: cut ============ -->
+<section id="cut">
+  <div class="head"><span class="eyebrow">Station 6</span><h2>Cut — register the plate on each mount</h2><p class="lede">The existing touch plans, driven by the job's mount. Taped: nine touches, starting with the bed beside it. In the bracket: four, starting with the bracket's arm, and the clamps ticked before anything moves sideways.</p></div>
+  <div class="station">
+    <div class="screen"><div class="bar"><span class="dots"><i></i><i></i><i></i></span><span class="ttl">Case Maker · CNC</span></div>
+      <div class="panel">
+        <div class="filebar"><span class="name">Zoomba badge</span><span class="hint">saved <span class="mono">09:26</span> ▾</span><span class="seg"><span>Design</span><span class="on">Cut</span></span></div>
+        <div class="strip"><span>Zoomba</span><span>192.168.10.43</span><span class="state"><span class="dot ok"></span>Online · Idle · homed</span><span>T1 ⌀ 1 mm flat end</span><span>vacuum off</span></div>
+        <div class="steps">
+          <div class="cstep done"><span class="m">✓</span><div class="t"><b>1 Checked</b><span class="meta">1 program · about 2 min 16 s</span><span class="act" style="margin-left:auto">details</span></div></div>
+          <div class="cstep done"><span class="m">✓</span><div class="t"><b>2 Frozen</b><span class="meta"><span class="mono">09:26</span> · the program matches the design</span></div></div>
+          <div class="cstep now"><span class="m">3</span><div class="t" style="display:grid;gap:4px"><b>Register the plate</b><span class="meta">the bed beside it, the top at five places, the left edge twice, the front edge · 9 touches</span></div>
+            <div class="acts"><span class="check">I am at the machine, the probe is fitted</span><span class="btn primary">Start registering</span></div></div>
+          <div class="cstep"><span class="m">4</span><div class="t"><b>Run</b><span class="meta">vacuum on · fit the ⌀ 1 mm flat end · about 2 min 16 s</span></div></div>
+        </div>
+        <div style="padding:10px 16px" class="hint">← Back to design</div>
+        <div style="padding:0 16px 14px;display:grid;gap:10px">
+          <div class="twostate" style="border-top:1px dashed var(--line);padding-top:10px"><span class="cap">found, taped</span>
+            <p class="hint">the plate sits <span class="mono">0.12 mm</span> above its thickness: the tape</p></div>
+          <div class="twostate"><span class="cap">when it is not down on the tape</span>
+            <div class="block"><span><b>The plate sits 0.6 mm higher than the tape and its thickness allow — a chip or a fold of tape under it.</b> Lift it, clean both faces and press it down again.</span></div></div>
+          <div class="twostate"><span class="cap">when it is taped crooked</span>
+            <div class="block"><span><b>The plate is turned 1.2° — its far end is 1.6 mm off square, more than the 1 mm edge margin.</b> Lift it and tape it square to the bed's front edge.</span></div></div>
+          <div class="twostate" style="border-top:1px dashed var(--line);padding-top:10px"><span class="cap">the bracket and clamps — Tray</span>
+            <div class="cstep now" style="padding:10px 12px;border:1px solid var(--line)"><span class="m">3</span><div class="t" style="display:grid;gap:4px"><b>Register the plate</b><span class="meta">the bracket's arm, the top, then the right and back edges · 4 touches</span></div>
+              <div class="acts" style="display:grid;gap:6px"><span class="check">the clamps are where the picture puts them: two on the back edge, 15 mm in from each corner</span><span style="display:flex;gap:8px;flex-wrap:wrap"><span class="check">I am at the machine, the probe is fitted</span><span class="btn primary">Start registering</span></span></div></div>
+            <p class="hint">X and Y from the bracket; the confirming touch found the right edge <span class="mono">0.04 mm</span> and the back edge <span class="mono">0.07 mm</span> from where the corner puts them.</p>
+            <p class="hint">○ 4 Run · vacuum on · fit the ⌀ 3.175 mm flat end · about 6 min</p></div>
+          <div class="twostate"><span class="cap">a clamp too tall for the probe</span>
+            <div class="block"><span><b>The clamp on the back edge stands 12 mm above the plate, up to the probe's travel height</b> — use lower clamps or thinner stock.</span></div></div>
+          <div class="twostate" style="border-top:1px dashed var(--line);padding-top:10px"><span class="cap">the machine has changed since the job was set up</span>
+            <div class="block"><span><b>This job was set up on “Nothing on the pins · wasteboard under” (2026-10-26 09:20); the machine now has the vise on the pins.</b></span><span style="margin-left:auto;display:flex;gap:8px;flex-wrap:wrap"><span class="btn">Change the machine…</span><span class="btn">Hold it in what is there</span></span></div></div>
+        </div>
+      </div>
+    </div>
+    <aside class="notes"><h3>Taped · 9 touches</h3>
+      <ul><li><b>The bed beside it</b>, 10 mm in front of the front edge: tape's mount tap; it records the surface's top and checks the stack.</li><li><b>The top at five places</b>: the cut area's centre and four extents; a tilt that fits a plane is followed. This stands in for auto-level until that sequence is proven.</li><li><b>The left edge twice</b>: position and turn. <b>The front edge</b>: Y.</li></ul>
+      <h3>Bracket · 4 touches</h3>
+      <ul><li><b>The bracket's arm</b> once its top face is measured; until then <b>the bed beside the bracket</b>, taken here instead of today's refusal.</li><li><b>The top</b>, clear of the clamps.</li><li><b>The right and back edges</b> confirm the corner while the bracket's offset is not measured; then a tick, off, and the line reads 2 touches.</li><li>Every move in machine coordinates from the bracket's corner.</li></ul>
+      <h3>Run</h3><p>First-job's line. Nothing about a bed mount refuses the run.</p>
+      <h3>Work item</h3><p class="issue">BM-9 · BM-11 (the machine changed)</p>
+    </aside>
+  </div>
+</section>
+
+<!-- ============ STATION 7: run sheet ============ -->
+<section id="runsheet">
+  <div class="head"><span class="eyebrow">Station 7</span><h2>The run sheet — the mounting sections</h2><p class="lede">“Mount the vise” and “Load the blank” become the mount's own. Every number keeps its source in the sheet's column.</p></div>
+  <div class="station">
+    <div class="screen"><div class="bar"><span class="dots"><i></i><i></i><i></i></span><span class="ttl">Run sheet · Zoomba badge · Tray</span></div>
+      <div class="body">
+        <span class="eyebrow">Taped</span>
+        <div class="sheet">
+          <b>2</b><span>Prepare the bed</span><span>Nothing on the pins · wasteboard under. Wipe the wasteboard and the plate's underside clean and dry.</span>
+          <b>3</b><span>Tape the plate down</span><span>two strips of the 20 mm tape along its length, 2 mm in from every edge · the plate in the middle of the bed, square to its front edge · press it down firmly for ten seconds · tape <span class="mono">0.1 mm</span></span>
+          <b></b><span>(with a board)</span><span>tape the 2 mm MDF board to the bed first, then the plate to the board — the board under the whole plate</span>
+          <b>5</b><span>The origin</span><span>X 0 · Y 0 at the plate's front-left corner and Z 0 on its top, found by the probe (9 touches)</span>
+          <b>9</b><span>After the run</span><span><span class="mono">$H</span> · lift the part with a thin blade; peel the tape · the wasteboard's new mark is recorded</span>
+        </div>
+        <span class="eyebrow" style="margin-top:8px">Bracket and clamps</span>
+        <div class="sheet">
+          <b>2</b><span>Mount the bracket</span><span>Nothing on the pins. The thin L-bracket in anchor 1's corner: two 4 mm dowels, three M5 screws.</span>
+          <b>3</b><span>The plate in the bracket</span><span>push the plate into the bracket's corner — front edge against the front arm, left edge against the left arm, flat on the bed · two top clamps on the back edge, 15 mm in from each corner · tighten them</span>
+          <b>5</b><span>The origin</span><span>X 0 · Y 0 at the bracket's corner (anchor 1, read from this machine <span class="mono">2026-10-07</span>); Z 0 on the plate's top, probed · the clamps stand <span class="mono">12 mm</span> above it; travel at <span class="mono">13 mm</span></span>
+          <b>9</b><span>After the run</span><span><span class="mono">$H</span> · loosen the clamps · the bracket stays for the next plate</span>
+        </div>
+      </div>
+    </div>
+    <aside class="notes"><h3>Sources, in the sheet's column</h3>
+      <ul><li>Dowels and screws, the corner, the clamps on the far side: Makera's QuickStart.</li><li>"Clean both faces, two strips, press for ten seconds, note the tape thickness": the job workflow's own words.</li><li>The 20 mm tape: Makera's accessory. The board: the house's, 2 mm MDF.</li><li>Tape thickness: typed. Clamp height, arm sizes: Case Maker's defaults until calipered. Anchor 1: read from this machine.</li></ul>
+      <h3>Need list</h3><p>20 mm double-sided tape and a thin blade (taped); two top clamps and their screws (bracket). Vacuum on for every cut.</p>
+      <h3>Work item</h3><p class="issue">BM-10</p>
+    </aside>
+  </div>
+</section>
+
+<!-- ============ vocabulary ============ -->
+<section id="words">
+  <div class="head"><h2>Vocabulary added</h2><p class="lede">The first-job vocabulary holds. These are the bed's words, and the ones the screens stop using.</p></div>
+  <div class="scroll"><table class="tbl">
+    <thead><tr><th>Thing</th><th>Say</th><th>Not</th></tr></thead>
+    <tbody>
+      <tr><td>the two bed mounts</td><td>“On the bed, taped” · “On the bed, bracket and clamps”</td><td><span class="not">tape-down</span> · <span class="not">anchor-bracket</span> · <span class="not">corner+clamps</span></td></tr>
+      <tr><td>nothing on the pins</td><td>“Nothing on the pins · wasteboard under” / “· bare bed”</td><td><span class="not">bed kind</span> · <span class="not">bed mode</span></td></tr>
+      <tr><td>the machine's MDF plate</td><td>the <b>wasteboard</b></td><td><span class="not">spoilboard</span> · <span class="not">sacrificial bed</span></td></tr>
+      <tr><td>the board under a taped part</td><td>a <b>board under</b> (“a 2 mm MDF board under”)</td><td><span class="not">sacrificial under</span> · <span class="not">shim</span></td></tr>
+      <tr><td>the tape</td><td>tape · “two strips of the 20 mm tape”</td><td><span class="not">DST</span> · <span class="not">adhesive</span></td></tr>
+      <tr><td>the L-bracket</td><td>the <b>bracket</b> · “at anchor 1” · its front arm · its left arm · its corner</td><td><span class="not">anchor bracket</span> · <span class="not">fixture</span> · <span class="not">jig</span></td></tr>
+      <tr><td>a clamp</td><td>“the clamp on the back edge, 15 mm in from the left-hand corner”</td><td><span class="not">top-clamp</span> · <span class="not">hold-down</span> · <span class="not">obstacle</span></td></tr>
+      <tr><td>how far a cut stays from them</td><td>the <b>fixture clearance</b> · “clear of the clamps by 1 mm”</td><td><span class="not">keep-out zone</span> · <span class="not">envelope</span></td></tr>
+      <tr><td>the origin on the bracket</td><td>“X 0 · Y 0 at the bracket's corner”</td><td><span class="not">anchor-relative origin</span></td></tr>
+      <tr><td>the tape's grip</td><td>“the tape under it cannot hold it against the ⌀ 3.175 mm flat end”</td><td><span class="not">hold ratio</span> · <span class="not">side load</span> (Technical only)</td></tr>
+      <tr><td>refusals</td><td>“runs under the clamp…” · “comes within … of the bracket's front arm” · “cuts through …, and only the bed is under it” · “was set up on …; the machine now has …”</td><td><span class="not">clamp-in-path</span> · <span class="not">bracket-in-path</span> · <span class="not">through-needs-board</span> · <span class="not">bed-changed</span></td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<!-- ============ options matrix ============ -->
+<section id="options">
+  <div class="head"><h2>Options and their defaults</h2><p class="lede">Every option a bed job exposes. M Makera's value · D derived · T typed (Case Maker's default) · R read from the machine or the location. “Bench” marks a value a measurement replaces.</p></div>
+  <div class="scroll"><table class="tbl">
+    <thead><tr><th>Screen</th><th>Option</th><th>Default</th><th>From</th><th>Bench</th></tr></thead>
+    <tbody>
+      <tr><td>Holding</td><td>The mount</td><td>the preferred mount the bed carries now; else sheet ≤ 3 mm tape, plates bracket; else tape</td><td>R the machine's record + D the job workflow's rule</td><td></td></tr>
+      <tr><td>Holding</td><td>Under it</td><td>the record's surface</td><td>R</td><td>which, here</td></tr>
+      <tr><td>Change</td><td>The wasteboard</td><td>stays as it is</td><td>R only the rotary moves it</td><td>which, here</td></tr>
+      <tr><td>Tape</td><td>Width · thickness</td><td class="mono">20 mm · 0.1 mm</td><td>M Makera's roll · T typed</td><td>thickness</td></tr>
+      <tr><td>Tape</td><td>Layout</td><td>strips along the length, 2 mm in from every edge</td><td>D the edge touches + T</td><td></td></tr>
+      <tr><td>Tape</td><td>Where · square to</td><td>the middle of the bed · its front edge</td><td>T · D</td><td></td></tr>
+      <tr><td>Tape</td><td>Hold</td><td class="mono">area ≥ 100 × ⌀ × step-down</td><td>T shop setting</td><td>✓ coupon</td></tr>
+      <tr><td>Tape</td><td>Tall-stock note</td><td>height &gt; narrowest width</td><td>D</td><td></td></tr>
+      <tr><td>Board</td><td>On the wasteboard</td><td>none — the wasteboard takes it</td><td>D the wasteboard is the sacrificial board</td><td></td></tr>
+      <tr><td>Board</td><td>On the bare bed, through cut</td><td class="mono">2 mm MDF (≥ 1.3 mm)</td><td>D the through-cut rule + R the house's boards</td><td></td></tr>
+      <tr><td>Board</td><td>Breakthrough · into the wasteboard</td><td class="mono">0.3 mm · ≤ 0.5 mm</td><td>T provisional · T shop setting</td><td>✓</td></tr>
+      <tr><td>Bracket</td><td>Variant · anchor</td><td>thin · anchor 1</td><td>M Makera's kit · QuickStart</td><td></td></tr>
+      <tr><td>Bracket</td><td>Corner from the anchor · fit</td><td class="mono">0, 0 · ±0.1 mm</td><td>M QuickStart · T</td><td>✓</td></tr>
+      <tr><td>Bracket</td><td>Arms</td><td class="mono">100 long · 10 wide · 10 tall</td><td>M length · T width, height (config: 15 wide)</td><td>✓</td></tr>
+      <tr><td>Bracket</td><td>Arm top · seat</td><td>none until measured</td><td>measured only</td><td>✓ touch 1</td></tr>
+      <tr><td>Clamps</td><td>Count and places</td><td>2 on the back edge, 15 mm in from each corner</td><td>M QuickStart + T chosen place</td><td></td></tr>
+      <tr><td>Clamps</td><td>Size · reach · height</td><td class="mono">30 × 15 · 8 · 12 mm</td><td>T seeds</td><td>✓</td></tr>
+      <tr><td>CAM</td><td>Fixture clearance</td><td class="mono">1 mm</td><td>T the job's jaw clearance, renamed</td><td></td></tr>
+      <tr><td>CAM</td><td>Travel height (bracket)</td><td class="mono">tallest clamp + 1 mm</td><td>D</td><td>clamp height</td></tr>
+      <tr><td>Cut</td><td>Taped touches</td><td>bed 1 · top 5 · left 2 · front 1 = 9</td><td>D the tape plan + the five-touch spread</td><td></td></tr>
+      <tr><td>Cut</td><td>Bracket touches</td><td>arm (or bed beside) 1 · top 1 · right 1 · back 1 = 4</td><td>D the bracket plan</td><td>2 once measured</td></tr>
+      <tr><td>Cut</td><td>Turn on tape</td><td class="mono">≤ 1 mm over the length</td><td>T edge margin</td><td></td></tr>
+      <tr><td>Bed</td><td>Version</td><td>the last history line's time</td><td>D</td><td></td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<!-- ============ simulate before the bench ============ -->
+<section id="sim">
+  <div class="head"><h2>Simulate before the bench</h2><p class="lede">Fixture jobs per mount, each with an oracle that needs no bench number. No machine on the network.</p></div>
+  <div class="three">
+    <div class="kp"><h3>Taped</h3><ul><li><b>Taped badge</b> — PLA <span class="mono">76.2 × 38.1 × 3.81</span> on the wasteboard, Engrave “Zoomba” 0.5 mm, every default: the flat oracle unchanged; <span class="mono">2 462.02 ≥ 50 mm²</span>; 9 touches</li><li><b>Through-cut tag</b> — PLA sheet <span class="mono">80 × 60 × 2</span> on the bare bed over a 2 mm board, a <span class="mono">40 × 30</span> cut-out, no tabs: floor at <span class="mono">Z −2.3</span>; the piece held (<span class="mono">936 ≥ 317.5 mm²</span>)</li><li>no board → refused · a <span class="mono">12 × 12</span> “Star” → refused · on the wasteboard → generates</li></ul></div>
+    <div class="mv"><h3>Bracket and clamps</h3><ul><li><b>Tray</b> — PLA <span class="mono">100 × 60 × 6</span>, two default clamps, a <span class="mono">70 × 30 × 2</span> pocket reaching Y 55: <b>refused</b>, one sentence per clamp</li><li>both clamps dragged to the right edge → generates; 4 touches clear of both</li><li>the refused program opened from a file → the clamp red, the scrubber stopped</li><li>a <span class="mono">3.81 mm</span> plate → “the arms stand 6.19 mm above the plate”</li></ul></div>
+    <div class="rm"><h3>Bench only</h3><ul><li>what sits under the vise here; where the bracket seats</li><li>the bracket's corner, fit, arm sizes, arm top, seat</li><li>clamp size, reach, height; tape thickness</li><li><b>the tape coupon</b>: squares of 10, 15, 20, 30 mm cut round until one lets go — sets the hold</li></ul></div>
+  </div>
+</section>
+
+<!-- ============ acceptance ============ -->
+<section id="acceptance">
+  <div class="head"><h2>Acceptance, when built</h2></div>
+  <ol class="acc">
+    <li><span>From the door, with no machine on the network, an operator reaches a <b>generated, verified, simulated</b> engraving on a taped plate, <b>changing no default</b>, never seeing a disabled control without its reason. One e2e spec.</span></li>
+    <li><span>Selecting a bed option stores <span class="mono">tape</span> or <span class="mono">bracket</span> (with the clamp places) and the job's bed; reloading shows it selected.</span></li>
+    <li><span>The change wizard takes the vise off, fits the bracket at anchor 1 when the bed has none, and leaves the wasteboard as it was.</span></li>
+    <li><span>The Tray pocket is refused with its two sentences and the Fix opens the picture; the clamps dragged to the right edge generate. The verifier, the simulation and the registration read the job's clamps.</span></li>
+    <li><span>The tape rules refuse their two fixtures with their sentences; the tag and the wasteboard variant generate.</span></li>
+    <li><span>Cut plans 9 touches taped and 4 in the bracket, in this order and these words; the clamp tick is required before the bracket plan starts.</span></li>
+    <li><span>The run sheet prints the mount's sections; the board line only with a board.</span></li>
+    <li><span>A job reloaded on a changed machine says so in words, with both actions; the receipt carries the record and its version.</span></li>
+    <li><span>The transcripts contain no issue number, no code, no “spoilboard”, “sacrificial” or “obstacle” on the main path, no length without <span class="mono">mm</span>, no decimal past three.</span></li>
+    <li><span>The built screens match these mockups, station for station.</span></li>
+  </ol>
+</section>
+
+<!-- ============ work items ============ -->
+<section id="work" class="work">
+  <div class="head"><h2>Work items</h2><p class="lede">Proposed, to be filed under #707, one per screen or area. BM-1 is the engine; the UI items start from this design once approved.</p></div>
+  <p class="gate"><b>Gate.</b> Nothing on these screens is implemented until the maintainer approves this flow and these mockups on #707. The bench then measures the bench-only list — the tape coupon first — and the screens change nowhere.</p>
+  <div class="scroll"><table class="tbl">
+    <thead><tr><th>Item</th><th>Screen or area</th><th>Depends on</th></tr></thead>
+    <tbody>
+      <tr><td class="mono">BM-1</td><td>The job model gains tape and the bracket (schemas, MCP, the hold answers, the mount readers)</td><td>—</td></tr>
+      <tr><td class="mono">BM-2</td><td>Holding writes the bed: the two options, their lines, the pictures, clamp editing</td><td>BM-1</td></tr>
+      <tr><td class="mono">BM-3</td><td>Change the machine → the bed, fitting the bracket</td><td>#693, #706 (landed)</td></tr>
+      <tr><td class="mono">BM-4</td><td>The tape rules: the stock, released pieces, tall stock; the settings</td><td>BM-1, #218 (landed)</td></tr>
+      <tr><td class="mono">BM-5</td><td>The through cut on the bed: the wasteboard or a board; board size; the stack</td><td>BM-1, #417 (landed)</td></tr>
+      <tr><td class="mono">BM-6</td><td>The job's clamps as obstacles, with the fixture clearance and the travel height</td><td>BM-1, #427 (landed)</td></tr>
+      <tr><td class="mono">BM-7</td><td>Design: the Hold lines and Generate's blockers</td><td>BM-2, BM-4, BM-6, #686 (landed)</td></tr>
+      <tr><td class="mono">BM-8</td><td>Simulate draws the bed, tape, board, arms and clamps</td><td>BM-6, #691 (landed)</td></tr>
+      <tr><td class="mono">BM-9</td><td>Cut registers on the job's mount (9 / 4 touches)</td><td>BM-1, #607 (landed), #592</td></tr>
+      <tr><td class="mono">BM-10</td><td>The run sheet's mounting sections</td><td>BM-1, BM-5</td></tr>
+      <tr><td class="mono">BM-11</td><td>The job binds to the active bed (is #513)</td><td>#510 (landed)</td></tr>
+      <tr><td class="mono">BM-12</td><td>The simulate-before-bench fixtures and the acceptance e2e; lands last</td><td>all above</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<!-- ============ open questions ============ -->
+<section id="questions">
+  <div class="head"><h2>Questions this design could not settle</h2><p class="lede">Each with the default the mockups show.</p></div>
+  <div class="scroll"><table class="tbl">
+    <thead><tr><th>Question</th><th>Default taken</th></tr></thead>
+    <tbody>
+      <tr><td>What sits under the vise here: the wasteboard or the bare bed? The vise page and the run sheet say the wasteboard comes off; the change wizard and the first-job line say it is under.</td><td>The machine's record says; a change to the bed leaves it as it was; one look at the bench corrects whichever line is wrong</td></tr>
+      <tr><td>Does the bracket seat on the wasteboard or the bed?</td><td>As the record says; the seat is touched on whatever is there</td></tr>
+      <tr><td>A bed mount beside the vise?</td><td>No: the bed options need the pins clear</td></tr>
+      <tr><td>The tape's hold</td><td><span class="mono">100 × ⌀ × step-down</span> of taped area, a shop setting, until the coupon</td></tr>
+      <tr><td>Wasteboard on for a taped job on the bare bed?</td><td>No; a through cut gets a board under</td></tr>
+      <tr><td>Side clamps?</td><td>Not offered: no job has asked</td></tr>
+      <tr><td>Arm width: 10 (seed) or 15 (the machine's config)?</td><td>10 until calipered, the 15 named beside it in Technical</td></tr>
+      <tr><td>Bracket variant, anchor</td><td>Thin, anchor 1</td></tr>
+      <tr><td>Auto-level on tape?</td><td>The five top touches and the plane fit, until auto-level's sequence is proven</td></tr>
+      <tr><td>Where and how often the tape's tap lands</td><td>10 mm in front of the front edge, every run</td></tr>
+      <tr><td>One clearance for clamps and jaws?</td><td>Yes, “fixture clearance”, 1 mm</td></tr>
+      <tr><td>The record's version</td><td>The time of its last history line</td></tr>
+      <tr><td>Bed options in the web build?</td><td>Offered, against Makera's kit</td></tr>
+    </tbody>
+  </table></div>
+  <p class="hint">Sources: <span class="mono">docs/design/bed-mounts-flow.md</span> (this design in text, every source named) · <span class="mono">docs/design/first-job-flow.md</span> (the flow this extends) · <span class="mono">docs/design/bed-profiles.md</span> (the machine's bed record).</p>
+</section>
+</div>
