@@ -655,6 +655,51 @@ describe('#725 review — a blocker with no control offers no Fix', () => {
 });
 
 describe('#730 — the bed facts follow the job’s machine', () => {
+  /** The house's first Z1 (wasteboard) plus a second, bare-bed one the job names. */
+  function twoMachines(): void {
+    const first = bedMachine();
+    const second = bedMachine({ bare: true });
+    second.profileId = 'Z1-b';
+    second.id = 'machine-b';
+    act(() => {
+      useLocationStore.setState({
+        status: 'present',
+        location: {
+          kind: 'casemaker-location',
+          schemaVersion: 1,
+          id: DOC.id,
+          name: DOC.name,
+          createdAt: DOC.createdAt,
+          machines: [first, second],
+          accessories: [...DOC.accessories, ROTARY],
+        } as unknown as LocationView,
+        etag: '"e2"',
+        reason: null,
+      });
+    });
+  }
+
+  it('Holding’s picture and board sentence read the job’s machine too', () => {
+    twoMachines();
+    // The job runs on the second machine, whose bed is BARE; the house's first carries a
+    // wasteboard. Reading machines[0] drew "Under it wasteboard" for a job that will be cut on a
+    // bare bed — the step and Generate judging different beds.
+    seedJobAndOpen: {
+      act(() => {
+        useEngraveJobStore.setState({ job: tapedJob({ machineId: 'Z1-b' }) });
+        useStartWizardStore.getState().openWizard('holding');
+      });
+    }
+    render(
+      <>
+        <StartWizard />
+        <MachineChangeWizard />
+      </>,
+    );
+    expect(screen.getByTestId('engrave-setup-bed-fields-bed-tape').textContent).toContain('Under itbare bed');
+    expect(screen.getByTestId('engrave-setup-holding-picture-surface').getAttribute('data-surface')).toBe('bare-bed');
+  });
+
   it('a two-machine house judges the job against ITS machine’s wasteboard, not the first one’s', () => {
     // Two Z1s: the house's first carries a 10 mm wasteboard, the job's machine a 3 mm one. The job
     // needs 5 mm under it (a 4 mm breakthrough + 1), so only the second machine's bed refuses it —

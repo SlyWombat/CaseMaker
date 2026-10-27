@@ -30,6 +30,7 @@ import { useEffect, useMemo, useRef, useState, type CSSProperties, type JSX, typ
 import type { EngraveJob, FrozenPackage } from '@/types/engraveJob';
 import type { EngraveGenerated } from '@/workers/sim/engraveGenerate';
 import type { MachineObservation } from '@/platform/machineProbe';
+import { machineForJob } from '@/platform/bedProfiles';
 import type { VerifyReport } from '@/engine/cnc/verify';
 import type { FeatureKind, FeatureOverrides } from '@/engine/cnc/plan';
 import type { PreflightCause } from '@/engine/cnc/preflight';
@@ -242,8 +243,10 @@ export function EngraveCutSurface({
   const shelfItems = useStockStore((s) => s.items);
   const defaults = useShopDefaultsStore((s) => s.defaults);
   // #695 — the machine RECORD (not the LAN observation): the bed profile the wizard writes is the
-  // one the job's frozen mount is checked against.
-  const locationMachine = useLocationStore((s) => s.location?.machines[0] ?? null);
+  // one the job's frozen mount is checked against. #730 — the JOB's machine (`machineId` is a
+  // profile id), not the house's first: two machines hold two beds.
+  const locationView = useLocationStore((s) => s.location);
+  const locationMachine = useMemo(() => machineForJob(locationView, job.machineId), [locationView, job.machineId]);
   const [overrides, setOverrides] = useState<FeatureOverrides>({});
   const [freezeError, setFreezeError] = useState<string | null>(null);
   const [refreezing, setRefreezing] = useState(false);

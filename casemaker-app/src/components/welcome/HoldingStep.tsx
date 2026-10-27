@@ -52,7 +52,7 @@ import {
 import { TAPE_DEFAULTS } from '@/engine/cnc/engrave/jobSetup';
 import { KNOWN_DEFAULTS, readDefault } from '@/platform/defaultsClient';
 import { canDriveMachine } from '@/platform/capabilities';
-import { bedUnderFacts } from '@/platform/bedProfiles';
+import { bedUnderFacts, machineForJob } from '@/platform/bedProfiles';
 import { surfaceWords, type MachineMountKind } from '@/platform/machineChange';
 import type { BedProfile } from '@/platform/locationClient';
 import { useLocationStore } from '@/store/locationStore';
@@ -929,9 +929,10 @@ function withBedSacrificial(a: SetupAnswers, mm: number | null): SetupAnswers {
 
 export function HoldingStep({ job, answers, onAnswers, onRotary, onBedHold }: HoldingStepProps): JSX.Element {
   const location = useLocationStore((s) => s.location);
-  // The machine-change wizard reads the location's first machine (#693); the step reads the same
-  // record so the line and the escape describe one machine.
-  const machine = location?.machines[0] ?? null;
+  // #730 — the JOB's machine (its `machineId` names a profile id), not the house's first: the
+  // step's profile and its board sentence must judge the same bed Generate will. The change
+  // wizard's own manage-side readers stay on the machine it is changing.
+  const machine = machineForJob(location, job.machineId);
   const accessories = location?.accessories ?? [];
   const calibration = useSettingsStore((s) => s.machineCalibration);
   const shopDefaults = useShopDefaultsStore((s) => s.defaults);
