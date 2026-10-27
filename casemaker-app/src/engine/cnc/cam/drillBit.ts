@@ -169,7 +169,8 @@ export function planDrillBit(input: DrillBitInput): DrillBitResult {
       moves.push({ kind: 'feed', x, y, z, f: s.plungeFeed });
       if (i < depths.length - 1) {
         // A full retract clears the chips (a drill packs its flutes), then back down the open hole.
-        moves.push({ kind: 'rapid', x, y, z: HOP_Z });
+        // #727 F4 — the chip-clear retract is the DRILL's, not travel: the mount raise skips it.
+        moves.push({ kind: 'rapid', x, y, z: HOP_Z, peck: true });
         moves.push({ kind: 'rapid', x, y, z: z + s.peckClearanceMm });
       }
     }

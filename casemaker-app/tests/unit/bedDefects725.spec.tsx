@@ -23,7 +23,7 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { EngravePanel } from '@/components/panels/EngravePanel';
+import { EngravePanel, findingFix } from '@/components/panels/EngravePanel';
 import { StartWizard } from '@/components/welcome/StartWizard';
 import { MachineChangeWizard } from '@/components/machine-change';
 import { bedUnderFacts } from '@/platform/bedProfiles';
@@ -235,11 +235,6 @@ function withMeasuredVise(job: EngraveJob): EngraveJob {
 /** A client that answers every request with "no new preview" — the panel's fallback is under test. */
 const NO_PREVIEW: EngravePreviewClient = { engravePreview: async () => null };
 
-const findingsIn = (): HTMLElement[] => {
-  const list = screen.queryByTestId('engrave-findings');
-  return list === null ? [] : Array.from(list.querySelectorAll<HTMLElement>('[data-testid^="engrave-finding-"]'));
-};
-
 function refused(verifyFindings: Array<{ code: string; message: string }>): EngraveGenerated {
   return {
     ok: false,
@@ -411,6 +406,22 @@ describe('#725 W12 — overlapping clamps are a document error', () => {
     expect(useStartWizardStore.getState().open).toBe(true);
   });
 
+  it('#727 F6 — a clamp hanging past the stock’s edge is refused at Generate too', () => {
+    // The manager's case: a clamp at { back, at: 300 } on a 100 mm plate — the top clamp would hang
+    // in the air, and Holding says so, but Generate used to accept it.
+    const findings = validateJob(
+      bracketJob([
+        { edge: 'back', at: 300 },
+        { edge: 'back', at: 50 },
+      ]),
+      null,
+      { defaults: DOC.defaults as never },
+    );
+    const off = findings.find((f) => f.code === 'clamp-off-stock');
+    expect(off?.severity).toBe('error');
+    expect(off?.message).toContain('hangs past the end of the 100 mm edge');
+  });
+
   it('clamps clear of each other raise nothing', () => {
     const findings = validateJob(
       bracketJob([
@@ -548,5 +559,41 @@ describe('#727 F1 — a bracket job with stored setups keeps its clamp check', (
       clampPlacementsFor(held),
     );
     expect(mount?.obstacles.map((o) => o.id)).toEqual(['bracket-front-arm', 'bracket-left-arm', 'clamp-1', 'clamp-2']);
+  });
+});
+
+describe('#725 review — a rotary- prefix is not a fix', () => {
+  it('maps each rotary code to where its fix really is (or to none)', () => {
+    // A cut class the wrap cannot make: the item's own row when it names one.
+    expect(findingFix({ code: 'rotary-unsupported', labelId: 'lb-1' })).toEqual({
+      group: 'engrave-group-job',
+      itemId: 'lb-1',
+    });
+    expect(findingFix({ code: 'rotary-unsupported' })).toEqual({ group: 'engrave-group-job' });
+    // The blank is not a cylinder: the STOCK step, not the chuck.
+    expect(findingFix({ code: 'rotary-stock' })).toEqual({ group: 'engrave-group-job', openWizardStep: 'stock' });
+    // PROGRAM defects of ours: no control at all — never "re-seat the work for our gap".
+    for (const code of ['rotary-y-off-axis', 'rotary-rapid-engaged', 'rotary-turn-in-stock']) {
+      expect(findingFix({ code })).toBeNull();
+    }
+    // The bed's own refusals keep their Fix: the Hold picture.
+    expect(findingFix({ code: 'clamp-in-path' })).toEqual({ group: 'engrave-group-hold', openWizardStep: 'holding' });
+  });
+
+  it('a program defect’s refusal shows its sentence with NO Fix', () => {
+    render(<EngravePanel />);
+    act(() => {
+      useEngraveRunStore.setState({
+        generated: refused([
+          { code: 'rotary-rapid-engaged', message: 'a rapid turns the stock while the cutter is still in the cut' },
+        ]),
+        simStatus: null,
+        simDiagnostics: [],
+        phase: 'blocked',
+        staleSince: null,
+      });
+    });
+    expect(screen.getByTestId('engrave-run-errors').textContent).toContain('turns the stock while the cutter is still in the cut');
+    expect(screen.queryByTestId('engrave-run-blocker-fix')).toBeNull();
   });
 });

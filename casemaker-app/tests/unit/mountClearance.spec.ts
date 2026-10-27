@@ -118,7 +118,8 @@ describe('#710 the travel height over the tallest clamp or arm', () => {
     const moves: CamMove[] = [
       { kind: 'rapid', x: 0, y: 0, z: HOP_Z },
       { kind: 'feed', x: 0, y: 0, z: -2, f: 200 },
-      { kind: 'rapid', x: 0, y: 0, z: -1.5 }, // a drill's peck retract: NOT travel
+      // A drill's chip-clear peck, in the shape the drill CAM emits (#727 F4): a hop, tagged.
+      { kind: 'rapid', x: 0, y: 0, z: HOP_Z, peck: true },
       { kind: 'feed', x: 0, y: 0, z: -4, f: 200 },
       { kind: 'rapid', x: 10, y: 10, z: SAFE_Z },
     ];
@@ -135,7 +136,7 @@ describe('#710 the travel height over the tallest clamp or arm', () => {
     const raised = raiseTravelOver(ir, travelHeightOver(clamps, CLEARANCE), Z1.rapidEstimate);
     expect(raised.hopZ).toBe(13);
     expect(raised.safeZ).toBe(13);
-    expect(raised.operations[0]!.moves.map((m) => m.z)).toEqual([13, -2, -1.5, -4, 13]);
+    expect(raised.operations[0]!.moves.map((m) => m.z)).toEqual([13, -2, HOP_Z, -4, 13]);
     // The climb is time: the estimate is recomputed rather than left at the old one.
     expect(raised.operations[0]!.estimatedSeconds).toBeGreaterThan(0);
     // Nothing to raise, or a travel below the CAM's floors, is the SAME object (no churn).
@@ -190,6 +191,41 @@ describe('#710 a bracket program travels above the clamps', () => {
       .map((e) => (e.kind === 'move' ? e.to[2] : null))
       .filter((z): z is number => z !== null);
     expect(Math.min(...rapidZs)).toBeLessThanOrEqual(SAFE_Z);
+  });
+});
+
+describe('#727 F4 — a drill’s chip-clear peck is not travel', () => {
+  it('the peck stays at the CAM’s hop while the hops between holes are raised over the clamps', () => {
+    // A pecking hole at X 50, Y 20 — clear of the back clamp, so its own path is not refused. Its
+    // chip-clear retracts are the drill's, not travel: raising them to 13.1 would turn every peck
+    // into a full retract (the comment on `raiseTravelOver` promises it does not).
+    const job: EngraveJob = {
+      ...defaultEngraveJob(),
+      labels: [],
+      toolKey: 'flat-1.0',
+      drills: [
+        {
+          id: 'hole',
+          kind: 'drill',
+          name: 'port',
+          position: { x: 50, y: 20 },
+          rotation: 0,
+          depth: 4,
+          peckMm: 1,
+          enabled: true,
+          through: false,
+        } as EngraveJob['drills'][number],
+      ],
+    };
+    const g = generate(tl, job, null, [], undefined, { mount: mountWith(12) });
+    expect(g.ok, `${g.stage} ${JSON.stringify(g.errors)}`).toBe(true);
+    const rapidZs = parseGcode(g.nc ?? '')
+      .events.filter((e) => e.kind === 'move' && e.frame === 'work' && e.mode === 'rapid')
+      .map((e) => (e.kind === 'move' ? e.to[2] : null))
+      .filter((z): z is number => z !== null);
+    // The chip-clear pecks hold the CAM's hop; the travel between holes clears the clamp.
+    expect(rapidZs).toContain(HOP_Z);
+    expect(rapidZs.some((z) => Math.abs(z - (12 + B.settings.fitMm + CLEARANCE)) < 1e-6)).toBe(true);
   });
 });
 

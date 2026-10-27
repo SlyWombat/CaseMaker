@@ -568,10 +568,11 @@ interface PanelFix {
   /** A `<details>` fold to open on the way (`engrave-override`, `engrave-add-menu`). */
   openDetails?: string;
   /**
-   * #725 B4 — the fix is on the Hold step's picture (a clamp in the cut's path, a cut into an arm):
-   * the panel opens the Holding step, where the clamp's place is edited.
+   * #725 B4 — the fix is in a wizard STEP rather than a field of this panel: the bed's clamp/arm
+   * refusals open Holding (the picture where the clamp is dragged), and a rotary job whose blank
+   * is not a cylinder opens the Stock step.
    */
-  openHolding?: boolean;
+  openWizardStep?: 'holding' | 'stock';
 }
 
 /** A sentence a disabled Generate carries, and the control that resolves it. */
@@ -587,13 +588,20 @@ interface GenerateBlocker {
  *
  * #725 B4 — the bed's generation-time refusals (a clamp in the cut's path, a cut into an arm) are
  * fixed on the Holding step's picture, so those codes open Holding rather than an item row.
+ *
+ * #725 review — a `rotary-` PREFIX is not a fix: `rotary-unsupported` is per-item (its row), and
+ * `rotary-y-off-axis` / `rotary-rapid-engaged` / `rotary-turn-in-stock` are PROGRAM defects of ours
+ * (`null`: no Fix at all — never send the operator to re-seat the work for a software gap). Only
+ * `rotary-stock` has an operator fix, and it is the Stock step.
  */
-function findingFix(f: { code: string; labelId?: string }): PanelFix {
+export function findingFix(f: { code: string; labelId?: string }): PanelFix | null {
   const code = f.code;
-  if (HOLD_FIX_CODES.has(code) || code.startsWith('rotary-')) {
-    return { group: 'engrave-group-hold', openHolding: true };
+  if (PROGRAM_DEFECT_CODES.has(code)) return null;
+  if (HOLD_FIX_CODES.has(code)) {
+    return { group: 'engrave-group-hold', openWizardStep: 'holding' };
   }
   if (f.labelId !== undefined) return { group: 'engrave-group-job', itemId: f.labelId };
+  if (code === 'rotary-stock') return { group: 'engrave-group-job', openWizardStep: 'stock' };
   if (code === 'tool-missing') return { group: 'engrave-group-cutter', focusTestid: 'engrave-tool' };
   if (code === 'no-items') {
     return { group: 'engrave-group-job', openDetails: 'engrave-add-menu', focusTestid: 'engrave-add-summary' };
@@ -614,6 +622,19 @@ function findingFix(f: { code: string; labelId?: string }): PanelFix {
 }
 
 /**
+ * #725 review — the codes whose refusal is the SOFTWARE's, not the operator's: a rotary program
+ * that turns or traverses while the tip is in the cut, leaves the axis, or cannot prove the sector
+ * between two indexed positions. The sentence stays (the run's row), but there is no control to
+ * offer: asking an operator to re-seat the work for a program defect is the one thing a Fix must
+ * never do.
+ */
+const PROGRAM_DEFECT_CODES: ReadonlySet<string> = new Set([
+  'rotary-y-off-axis',
+  'rotary-rapid-engaged',
+  'rotary-turn-in-stock',
+]);
+
+/**
  * #725 B4 — the bed's codes whose fix is the Hold picture (§3.7). `clamp-in-path` and
  * `bracket-in-path` are the verifier's; the tape/board ones are the document gate's. They open
  * the Holding step, where the clamp is dragged and the board chosen.
@@ -622,6 +643,7 @@ const HOLD_FIX_CODES: ReadonlySet<string> = new Set([
   'clamp-in-path',
   'bracket-in-path',
   'clamps-overlap',
+  'clamp-off-stock',
   'tape-hold-stock',
   'tape-hold-piece',
   'tape-tall-stock',
@@ -827,9 +849,9 @@ export function EngravePanel(): JSX.Element {
   function applyFix(fix: PanelFix): void {
     setGroupsOpen((m) => ({ ...m, [fix.group]: true }));
     if (fix.itemId !== undefined) expandEngraveRow(fix.itemId);
-    // #725 B4 — the bed's clamp/arm refusals are fixed on the Holding step's picture, not by a
-    // field in this panel: open that step, where the clamp is dragged.
-    if (fix.openHolding === true) useStartWizardStore.getState().openWizard('holding');
+    // #725 B4 — the bed's clamp/arm refusals are fixed on Holding's picture, and a non-cylinder
+    // rotary blank on the Stock step: open the step, not a field of this panel.
+    if (fix.openWizardStep !== undefined) useStartWizardStore.getState().openWizard(fix.openWizardStep);
     // A fresh object each press: the same Fix pressed twice must run twice.
     setFixRequest({ ...fix });
   }
@@ -837,8 +859,8 @@ export function EngravePanel(): JSX.Element {
     const request = fixRequest;
     if (request === null) return;
     setFixRequest(null);
-    // The Holding step is its own modal over the panel: nothing behind it takes focus.
-    if (request.openHolding === true) return;
+    // The wizard is its own modal over the panel: nothing behind it takes focus.
+    if (request.openWizardStep !== undefined) return;
     const root = panelRef.current;
     if (root === null) return;
     if (request.openDetails !== undefined) {
@@ -1457,7 +1479,9 @@ export function EngravePanel(): JSX.Element {
    */
   const generateBlocker: GenerateBlocker | null = (() => {
     const finding = errors[0];
-    if (finding !== undefined) return { sentence: sentenceCase(finding.message), fix: findingFix(finding) };
+    if (finding !== undefined) {
+      return { sentence: sentenceCase(finding.message), fix: findingFix(finding) ?? { group: 'engrave-group-job' } };
+    }
     if (feeds === null || feeds.ok || tool === null) return null;
     if (feeds.cause === 'values') {
       return {

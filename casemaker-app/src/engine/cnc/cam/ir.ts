@@ -35,7 +35,20 @@ import type { Tool } from '../tool';
  * sites — and the round trip of every pre-#240 document — byte-compatible.
  */
 export type CamMove =
-  | { kind: 'rapid'; x: number; y: number; z: number; a?: number }
+  | {
+      kind: 'rapid';
+      x: number;
+      y: number;
+      z: number;
+      a?: number;
+      /**
+       * #727 F4 — a DRILL's chip-clear retract, at the hole it is already cutting. It is a full
+       * retract only in the drill's own sense (out to the hop to clear chips), never travel: the
+       * raise over a mount leaves it where the drill put it, or every peck would climb to the
+       * clamp height and back (time on a hole the clamps never reach).
+       */
+      peck?: boolean;
+    }
   | { kind: 'feed'; x: number; y: number; z: number; f: number; a?: number };
 
 /**
@@ -257,7 +270,9 @@ export function raiseTravelOver(ir: ToolpathIR, travelZ: number | null, rapid?: 
   const at = (z: number): number => Math.round(z * 1000) / 1000;
   const travelHeights = new Set([HOP_Z, SAFE_Z, hopNow]);
   const raise = (m: CamMove): CamMove =>
-    m.kind === 'rapid' && at(m.z) < travel && travelHeights.has(at(m.z)) ? { ...m, z: travel } : m;
+    m.kind === 'rapid' && m.peck !== true && at(m.z) < travel && travelHeights.has(at(m.z))
+      ? { ...m, z: travel }
+      : m;
   return {
     ...ir,
     safeZ: Math.max(ir.safeZ, travel),

@@ -179,6 +179,55 @@ describe('#712 through the pipeline: the tag on each surface (§6 fixture 2)', (
     expect(vise.sacrificial?.under ?? null).toBeNull();
   });
 
+  it('#727 F5 — a through DRILL’s point is part of what enters the wasteboard', () => {
+    // A 3 mm 118° drill bit through a 0.3 mm breakthrough: its tip stands 0.901 mm below the full
+    // diameter, so it enters the wasteboard ~1.2 mm — more than the 0.5 mm limit, and it used to
+    // be judged by the breakthrough alone (0.3 ≤ 0.5) and pass unflagged.
+    const bit = flatEndMill(3, {
+      name: '3 mm drill',
+      typeText: 'Drill',
+      shape: 'drill',
+      tipDiameter: 3,
+      diameter: 3,
+      cornerRadius: null,
+      angle: null,
+      centreCutting: null,
+    });
+    const drilled = sheet({
+      shapes: [],
+      tool: bit,
+      drills: [
+        {
+          id: 'hole',
+          kind: 'drill',
+          name: 'port',
+          position: { x: 40, y: 30 },
+          rotation: 0,
+          depth: 2.3,
+          enabled: true,
+          through: true,
+        } as EngraveJob['drills'][number],
+      ],
+    });
+    const f = validateJob(drilled, { deg: 118, source: 'test' }, { bed: WASTEBOARD }).find((x) => x.code === 'wasteboard-depth');
+    expect(f?.severity).toBe('error');
+    expect(f?.message).toContain('1.201 mm');
+  });
+
+  it('#727 F8 — only the depth PAST the operator’s own board enters the wasteboard', () => {
+    // A 0.5 mm board under the part and a 0.7 mm breakthrough: the board takes 0.5 of it, so the
+    // wasteboard sees 0.2 mm — inside the 0.5 mm limit. Judged by the raw breakthrough (0.7) it
+    // used to be refused.
+    const board = {
+      under: { thickness: 0.5, overhang: { left: 0, right: 0, front: 0, back: 0 }, attach: 'tape' as const },
+      sides: { left: null, right: null, front: null, back: null },
+      source: 'saved' as const,
+    };
+    const job = sheet({ sacrificial: board, breakthrough: 0.7 });
+    const codes = validateJob(job, null, { bed: WASTEBOARD }).map((x) => x.code);
+    expect(codes).not.toContain('wasteboard-depth');
+  });
+
   it('a cut-out that frees a piece on a bare bed is refused like any through cut', () => {
     const cut: EngraveCutout = {
       kind: 'cutout',

@@ -217,10 +217,11 @@ export type JobFindingCode =
   // enter the wasteboard only to the shop's depth limit.
   | 'board-too-small'
   | 'wasteboard-depth'
-  // #725 W12 — two clamps on a bracket job placed on top of each other: the mount does not hold,
-  // and Generate refuses it before any path is planned (the Holding step's own check, raised here
-  // so the document gate and the step cannot disagree).
+  // #725 W12/#727 F6 — the bracket's own clamps: two on top of each other, or one hanging past the
+  // edge of the stock (it would not hold). Both are the Holding step's own checks, raised here too
+  // so the document gate and the step cannot disagree, and Generate refuses before a path exists.
   | 'clamps-overlap'
+  | 'clamp-off-stock'
   // #434 — a drill bit is the cutter of a DRILL-ONLY program. Hand-edited work that pairs one with
   // a region, trace or thread is refused by name: a drill cannot open a region, and one program has
   // one tool, so the other work has to move to a cutter that can make it.
@@ -1167,14 +1168,23 @@ export function validateJob(
           `this plate is ${extent} — tape it to the wasteboard, or choose a larger board.`,
       });
     }
-    if (have < need && wasteboardTakesBed(bed, need) && job.breakthrough > bed.wasteboardLimitMm) {
-      findings.push({
-        severity: 'error',
-        code: 'wasteboard-depth',
-        message:
-          `A through cut goes ${fmt3(job.breakthrough)} mm into the wasteboard, deeper than the ` +
-          `${fmt3(bed.wasteboardLimitMm)} mm limit — reduce the breakthrough, or put a board under the part.`,
-      });
+    // #727 F5/F8 — the depth that ENTERS the wasteboard is the deepest reach less whatever the
+    // operator's own board already absorbs: a drill bit's TIP stands a point length below its full
+    // diameter (`drillBit.ts`), and a board under the part takes its own thickness first. Judged by
+    // the raw breakthrough, a 3 mm 118° drill passed at 0.3 mm while its tip went 1.2 mm in, and a
+    // 0.5 mm board that covers all but 0.2 mm of the cut was refused as if it covered none.
+    if (wasteboardTakesBed(bed, need)) {
+      const throughDrillPoint = enabledDrills.some((d) => d.through) ? drillPointLength : 0;
+      const intoWasteboard = Math.round(Math.max(0, job.breakthrough + throughDrillPoint - have) * 1000) / 1000;
+      if (intoWasteboard > bed.wasteboardLimitMm) {
+        findings.push({
+          severity: 'error',
+          code: 'wasteboard-depth',
+          message:
+            `A through cut goes ${fmt3(intoWasteboard)} mm into the wasteboard, deeper than the ` +
+            `${fmt3(bed.wasteboardLimitMm)} mm limit — reduce the breakthrough, or put a board under the part.`,
+        });
+      }
     }
   }
   // #725 W12 — the bracket's own clamps: two on top of each other is a mount that does not hold.
@@ -1187,8 +1197,8 @@ export function validateJob(
       job.workholding.bracket.clamps,
       read,
     )) {
-      if (m.code === 'clamps-overlap') {
-        findings.push({ severity: 'error', code: 'clamps-overlap', message: m.text });
+      if (m.code === 'clamps-overlap' || m.code === 'clamp-off-stock') {
+        findings.push({ severity: 'error', code: m.code, message: m.text });
       }
     }
   }
