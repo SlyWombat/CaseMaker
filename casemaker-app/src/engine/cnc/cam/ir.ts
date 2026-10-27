@@ -210,6 +210,57 @@ export const SAFE_Z = 5;
 export const HOP_Z = 1;
 
 /**
+ * #710 — the travel height a program on a mount needs, mm above the stock's top: the tallest
+ * clamp or arm that stands above it, plus the fixture clearance. `null` when nothing stands above
+ * the stock (a vise, tape, or a bracket whose arms sit below a taller blank's top) — and then the
+ * CAM's own `HOP_Z`/`SAFE_Z` stand.
+ *
+ * The design makes this the PROGRAM's height rather than a per-move clearance
+ * (`docs/design/bed-mounts-flow.md` §3.7): a bracket job's hops and retracts run above the clamps,
+ * so a clamp cannot be hit by ordinary travel at all, and a rapid that still passes below a
+ * clamp's top is refused as a cutting move is.
+ */
+export function travelHeightOver(obstacles: readonly { topZ: number }[], clearanceMm: number): number | null {
+  if (obstacles.length === 0) return null;
+  const tallest = Math.max(...obstacles.map((o) => o.topZ));
+  if (!(tallest > 0)) return null;
+  const clearance = Number.isFinite(clearanceMm) ? Math.max(0, clearanceMm) : 0;
+  return Math.round((tallest + clearance) * 1000) / 1000;
+}
+
+/**
+ * #710 — the same IR with every TRAVEL rapid raised to `travelZ` when that is higher than the
+ * CAM's own floors, and its `safeZ`/`hopZ` carried with them so the post and the verifier judge
+ * one height.
+ *
+ * "Travel rapid" is exact, not a guess: the CAM's own `HOP_Z` hops, its `SAFE_Z` retracts, and the
+ * hop a fitted surface already lifted to (`ir.hopZ`). A drill's PECK retract stands at its own
+ * depth-plus-clearance and is NOT travel — raising it would turn every peck into a full retract —
+ * so it is left exactly where the drill put it.
+ */
+export function raiseTravelOver(ir: ToolpathIR, travelZ: number | null, rapid?: RapidEstimate): ToolpathIR {
+  if (travelZ === null) return ir;
+  const travel = Math.round(travelZ * 1000) / 1000;
+  const hopNow = Math.round(ir.hopZ * 1000) / 1000;
+  if (travel <= Math.max(hopNow, ir.safeZ)) return ir;
+  const at = (z: number): number => Math.round(z * 1000) / 1000;
+  const travelHeights = new Set([HOP_Z, SAFE_Z, hopNow]);
+  const raise = (m: CamMove): CamMove =>
+    m.kind === 'rapid' && at(m.z) < travel && travelHeights.has(at(m.z)) ? { ...m, z: travel } : m;
+  return {
+    ...ir,
+    safeZ: Math.max(ir.safeZ, travel),
+    hopZ: Math.max(hopNow, travel),
+    // The Z travel a raised rapid adds is real time: a caller with the machine's rapid model gets
+    // the operation's estimate recomputed, so the panel's cycle figure counts the climb.
+    operations: ir.operations.map((op) => {
+      const moves = op.moves.map(raise);
+      return rapid === undefined ? { ...op, moves } : { ...op, moves, estimatedSeconds: estimateCycleSeconds(moves, rapid) };
+    }),
+  };
+}
+
+/**
  * Estimated CUTTING time in seconds for one operation's moves, as the closed-form sum:
  * FEED moves only, `Σ distance / f × 60`, with no acceleration term. This is the cutting
  * COMPONENT of the cycle estimate (`estimateCycleSeconds`); #242's single number is the cycle

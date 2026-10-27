@@ -311,6 +311,11 @@ export interface MountObstacle {
   label: string;
   /** What to do about a toolpath that crosses it, in physical words. */
   fix: string;
+  /**
+   * The stock edge it stands along (#710): a clamp on its free edge, an arm along the front or the
+   * left. The refusal reads it back to the operator ("keep the cut 2.688 mm inside the front edge").
+   */
+  edge?: ClampEdge | 'front' | 'left';
   /** Its footprint, work XY. */
   min: [number, number];
   max: [number, number];
@@ -348,7 +353,10 @@ export function clampObstacles(stock: StockSize, placements: ClampPlacement[], s
       id: `clamp-${i + 1}`,
       kind: 'clamp' as const,
       label: clampLabel(p, stock, c.width),
-      fix: `slide it along the ${p.edge} edge, or move it to the other free edge (${p.edge === 'back' ? 'the right' : 'the back'}), clear of the cut — the bracket holds the front and left`,
+      // #710 — the design's fix, in the operator's words (§3.7): the two free edges are the only
+      // places a clamp can go, and the sentence says so without a clause about the bracket.
+      fix: `slide the clamp along the ${p.edge} edge, or move it to the ${p.edge === 'back' ? 'right' : 'back'} edge, clear of the cut`,
+      edge: p.edge,
       min,
       max,
       topZ: c.height,
@@ -364,9 +372,11 @@ export function bracketObstacles(stock: StockSize, s: BracketSettings, underMm =
   const top = r3(-stock.z - underMm + s.height);
   const w = s.armWidth;
   const keep = 'keep the cut inside the stock’s edge on that side — the bracket does not move';
+  // The labels name the arm and nothing else: the refusal puts them in a sentence (#710), and the
+  // edge the cut has to stay inside is `edge`, not a parenthetical in the name.
   return [
-    { id: 'bracket-front-arm', kind: 'bracket', label: 'the bracket’s front arm (along the front edge, nearest you)', fix: keep, min: [-w, -w], max: [s.armLengthX, 0], topZ: top },
-    { id: 'bracket-left-arm', kind: 'bracket', label: 'the bracket’s left arm (along the left edge)', fix: keep, min: [-w, -w], max: [0, s.armLengthY], topZ: top },
+    { id: 'bracket-front-arm', kind: 'bracket', label: 'the bracket’s front arm', fix: keep, edge: 'front' as const, min: [-w, -w], max: [s.armLengthX, 0], topZ: top },
+    { id: 'bracket-left-arm', kind: 'bracket', label: 'the bracket’s left arm', fix: keep, edge: 'left' as const, min: [-w, -w], max: [0, s.armLengthY], topZ: top },
   ];
 }
 

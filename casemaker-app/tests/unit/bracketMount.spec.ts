@@ -161,8 +161,11 @@ describe('#427 clamp-in-path, on the segment', () => {
     const f = mountInPath([seg([0, 96, -0.5], [60, 96, -0.5])], clamps, opts);
     expect(f).toHaveLength(1);
     expect(f[0]).toMatchObject({ code: 'clamp-in-path', line: 7, obstacleId: 'clamp-1' });
-    expect(f[0]!.message).toContain('the clamp on the back edge, 15 mm in from the left-hand corner');
-    expect(f[0]!.message).toContain('slide it along the back edge');
+    // #710 — the refusal is the design's sentence: subject, the clamp's landmark place, the fix.
+    expect(f[0]!.message).toBe(
+      'a cutting move runs under the clamp on the back edge, 15 mm in from the left-hand corner — ' +
+        'slide the clamp along the back edge, or move it to the right edge, clear of the cut.',
+    );
   });
 
   it('a rapid below a clamp’s top is found; one above it, and a path that misses, are not', () => {
@@ -173,11 +176,12 @@ describe('#427 clamp-in-path, on the segment', () => {
     expect(mountInPath([seg([0, 90.5, -1], [100, 90.5, -1])], clamps, opts)).toHaveLength(2);
   });
 
-  it('counts the further moves under one finding per obstacle', () => {
+  it('ONE finding per obstacle, at the first move that reaches it', () => {
+    // #710 — the sentence the operator reads names the first move's line; the further moves under
+    // the same clamp are the same refusal, not a second one (the panel shows a blocker once).
     const f = mountInPath([seg([20, 50, -1], [20, 99, -1], 'cut', 3), seg([22, 99, -1], [22, 50, -1], 'cut', 4), seg([24, 50, -1], [24, 99, -1], 'cut', 5)], clamps, opts);
     expect(f).toHaveLength(1);
     expect(f[0]!.line).toBe(3);
-    expect(f[0]!.message).toContain('(and 2 more moves)');
   });
 
   it('the bracket’s arms: a move past the left edge below the arm’s top', () => {

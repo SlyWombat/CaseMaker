@@ -68,8 +68,12 @@ export interface VerifyContext {
   /**
    * #427 — the mount's obstacles: the bracket's arms and the top clamps, work frame, with the mount's
    * uncertainty. OPTIONAL: absent means this mount has none modelled, and nothing here changes.
+   *
+   * #710 — `clearance` is the FIXTURE CLEARANCE (the job's jaw clearance, renamed because it now
+   * covers the clamps and the arms too): the boxes are grown by it on top of the fit, for every
+   * move, so a cut passes clear of what holds it rather than merely not touching it. Absent: 0.
    */
-  mountObstacles?: { obstacles: MountObstacle[]; uncertainty: number };
+  mountObstacles?: { obstacles: MountObstacle[]; uncertainty: number; clearance?: number };
 }
 
 export interface VerifyFinding {
@@ -331,8 +335,34 @@ export function verifyProgram(text: string, ctx: VerifyContext): VerifyReport {
   const bboxMin: Vec3 = [Infinity, Infinity, Infinity];
   const bboxMax: Vec3 = [-Infinity, -Infinity, -Infinity];
   let sawAnyPoint = false;
-  /** Every move with both ends known, for the mount's in-path test (#427). */
+  /**
+   * Every move with both ends known, for the mount's in-path test (#427). #710 — each carries the
+   * toolpath number in force, so a refusal can name the operation (and the item in it) from the
+   * program's own header.
+   */
   const segments: PathSegment[] = [];
+  let currentToolpath: number | null = null;
+  /** The `;@MKR|TOOLPATH` names, by number (#710): the header's own words for each operation. */
+  const operationNames = new Map<number, string>();
+  for (const r of parse.header?.records ?? []) {
+    if (r.tag !== 'TOOLPATH') continue;
+    const n = Number(r.fields.number);
+    const name = r.fields.name;
+    if (Number.isInteger(n) && typeof name === 'string' && name.length > 0) operationNames.set(n, name);
+  }
+  /**
+   * The subject of a mount refusal: the ITEM's own name from the operation ("“Tray”" out of
+   * `Pocket "Tray" 2.0mm`), else the operation's words without its tool and depth, else null —
+   * and then the refusal keeps "a rapid / a cutting move" rather than inventing a name.
+   */
+  const mountSubject = (seg: PathSegment): string | null => {
+    const name = seg.toolpath === null || seg.toolpath === undefined ? undefined : operationNames.get(seg.toolpath);
+    if (name === undefined) return null;
+    const quoted = /"([^"]+)"/.exec(name);
+    if (quoted !== null) return `“${quoted[1]}”`;
+    const bare = name.replace(/^\[T\d+\]/, '').replace(/\s+\d+(?:\.\d+)?mm$/, '').trim();
+    return bare.length > 0 ? bare : null;
+  };
   /** Moves with an end the program never placed: the lowest Z known on them (null: none), and the line. */
   const unplaced: { line: number | null; lowZ: number | null }[] = [];
 
@@ -396,6 +426,8 @@ export function verifyProgram(text: string, ctx: VerifyContext): VerifyReport {
         // SOURCE ONLY: the tool-change macro carries a synthetic `tlo-calibrate` step of its own,
         // and that one is exactly as uncertain as the change it belongs to.
         if ((ev.kind === 'home' || ev.kind === 'tlo-calibrate') && ev.synthetic === undefined) zUnproven = false;
+        // #710 — the operation a move belongs to, for the mount refusal's subject.
+        if (ev.kind === 'toolpath-start' && ev.synthetic === undefined) currentToolpath = ev.number;
         state = applyEvent(state, ev, ctx.setup);
         continue;
       }
@@ -417,7 +449,7 @@ export function verifyProgram(text: string, ctx: VerifyContext): VerifyReport {
         collect(bboxMin, bboxMax, toW);
         sawAnyPoint = true;
       }
-      if (known3(fromW) && known3(toW)) segments.push({ line: m.line, mode: m.mode, from: fromW, to: toW });
+      if (known3(fromW) && known3(toW)) segments.push({ line: m.line, mode: m.mode, from: fromW, to: toW, toolpath: currentToolpath });
       // A firmware macro's own steps travel at its clearance, and a line that commands no X or Y moves
       // straight up or down: neither sweeps sideways into a clamp. Anything else unplaced is recorded.
       else if (m.synthetic === undefined && (m.commanded[0] || m.commanded[1])) {
@@ -563,19 +595,27 @@ export function verifyProgram(text: string, ctx: VerifyContext): VerifyReport {
     // alongside a clamp is its body — the shank or the cutting diameter, whichever is larger.
     const mount = ctx.mountObstacles;
     if (mount && mount.obstacles.length > 0) {
+      // #710 — the growth: the tool's widest part beside the mount, the fit, and the fixture
+      // clearance (the job's jaw clearance, which now covers the clamps and the arms too).
+      const clearance = mount.clearance ?? 0;
       const widths = [ctx.tool.handleDiameter, ctx.tool.diameter, ctx.tool.tipDiameter, cuttingDiameter(ctx.tool)].filter(
         (d): d is number => d !== null && d > 0,
       );
       if (widths.length === 0) {
         push('clamp-unchecked', null, 'the tool states no diameter, so the clamps and the bracket could not be checked against the toolpath');
       } else {
-        for (const f of mountInPath(segments, mount.obstacles, { radius: Math.max(...widths) / 2, uncertainty: mount.uncertainty })) {
+        for (const f of mountInPath(segments, mount.obstacles, {
+          radius: Math.max(...widths) / 2,
+          uncertainty: mount.uncertainty,
+          clearance,
+          subjectOf: mountSubject,
+        })) {
           push(f.code, f.line, f.message);
         }
       }
       // A move with an end the program never placed cannot be clipped. It is safe only when both its ends
       // are known to be above every obstacle's top; otherwise it is reported, never silently left out.
-      const highest = Math.max(...mount.obstacles.map((o) => o.topZ)) + mount.uncertainty;
+      const highest = Math.max(...mount.obstacles.map((o) => o.topZ)) + mount.uncertainty + clearance;
       const blind = unplaced.filter((u) => u.lowZ === null || u.lowZ < highest);
       if (blind.length > 0) {
         push(
@@ -603,7 +643,7 @@ export function verifyProgram(text: string, ctx: VerifyContext): VerifyReport {
               from: [sg.from[0], sg.from[1], sg.from[2] + stickout] as [number, number, number],
               to: [sg.to[0], sg.to[1], sg.to[2] + stickout] as [number, number, number],
             }));
-            for (const f of mountInPath(raised, mount.obstacles, { radius: nut.nutDiameter / 2, uncertainty: mount.uncertainty })) {
+            for (const f of mountInPath(raised, mount.obstacles, { radius: nut.nutDiameter / 2, uncertainty: mount.uncertainty, clearance })) {
               push(f.code, f.line, `the collet nut (${fmt(stickout)} mm above the tip): ${f.message}`);
             }
           }

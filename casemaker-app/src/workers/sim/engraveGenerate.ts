@@ -128,7 +128,7 @@ import {
 import { buildThroughMask, type MaskCutout } from '@/engine/cnc/engrave/throughMask';
 import { generateChamfer, type ChamferCut } from '@/engine/cnc/cam/chamfer';
 import type { Polygons } from '@/engine/cnc/cam/pocket';
-import { concatToolpathIR, estimateCycleSeconds, HOP_Z, toolNumberFor, travelStats, type CamMove, type ToolpathIR } from '@/engine/cnc/cam/ir';
+import { concatToolpathIR, estimateCycleSeconds, HOP_Z, raiseTravelOver, toolNumberFor, travelHeightOver, travelStats, type CamMove, type ToolpathIR } from '@/engine/cnc/cam/ir';
 import {
   DEFAULT_STOCK_TO_LEAVE_MM,
   generateSurface3dForGoal,
@@ -2109,8 +2109,13 @@ export function frameCorners(ir: ToolpathIR, radius: number, z: number): CamMove
  * The verifier's view of the mount (#442's #427 item): the obstacles and the fit, or nothing at all
  * when the job is held in the vise — and then `verify.ts` behaves exactly as it did before #427.
  */
-function mountCtx(mount: MountObstacles | null | undefined): { mountObstacles?: { obstacles: MountObstacles['obstacles']; uncertainty: number } } {
-  return mount ? { mountObstacles: { obstacles: mount.obstacles, uncertainty: mount.uncertainty } } : {};
+function mountCtx(
+  mount: MountObstacles | null | undefined,
+  clearanceMm: number,
+): { mountObstacles?: { obstacles: MountObstacles['obstacles']; uncertainty: number; clearance: number } } {
+  // #710 — the fixture clearance (the job's jaw clearance) rides with the obstacles, so the verifier
+  // grows every clamp and arm by the tool, the fit AND it, in one place.
+  return mount ? { mountObstacles: { obstacles: mount.obstacles, uncertainty: mount.uncertainty, clearance: clearanceMm } } : {};
 }
 
 function frameProgram(
@@ -2121,6 +2126,7 @@ function frameProgram(
   tool: Tool,
   limit: DepthLimit,
   mount: MountObstacles | null | undefined,
+  clearanceMm: number,
 ): { nc: string; verify: VerifyReport } | { error: string } {
   // The cutter's footprint in XY, grown by the SAME rule the corner box has always been built with
   // (#244): the disc the toolpath removes. A V-bit's is the groove at the DEEPEST cut in the program
@@ -2164,7 +2170,7 @@ function frameProgram(
   };
   const posted = postZ1(frameIr, ctx, machine, { vacuum: 'none' });
   if (!posted.ok) return { error: posted.errors.join('; ') };
-  const verify = verifyProgram(posted.text, { setup, machine, tool, depthLimit: limit, minRapidZ: frameIr.hopZ, ...mountCtx(mount) });
+  const verify = verifyProgram(posted.text, { setup, machine, tool, depthLimit: limit, minRapidZ: frameIr.hopZ, ...mountCtx(mount, clearanceMm) });
   return { nc: posted.text, verify };
 }
 
@@ -2262,12 +2268,18 @@ function facingProgram(
     air: feeds.params.air,
   };
   try {
-    const ir = generateFacing(
-      { length: job.stock.length, width: job.stock.width },
-      tool,
-      feeds.params,
+    const ir = raiseTravelOver(
+      generateFacing(
+        { length: job.stock.length, width: job.stock.width },
+        tool,
+        feeds.params,
+        machine.rapidEstimate,
+        depth,
+      ),
+      // #710 — the skim's hops and retracts clear the mount too: the raster crosses the whole top,
+      // so a clamp would otherwise be refused by every facing pass on a bracket job.
+      travelHeightOver(mount?.obstacles ?? [], job.jawClearance),
       machine.rapidEstimate,
-      depth,
     );
     const posted = postZ1(ir, { ...ctx, toolKey }, machine, { vacuum: span });
     if (!posted.ok) {
@@ -2279,7 +2291,7 @@ function facingProgram(
       tool,
       depthLimit: limit,
       minRapidZ: ir.hopZ,
-      ...mountCtx(mount),
+      ...mountCtx(mount, job.jawClearance),
     });
     const refused = verify.findings.filter((f) => f.severity === 'error');
     if (refused.length > 0) {
@@ -2292,6 +2304,10 @@ function facingProgram(
       const bands =
         atMount && mount
           ? unfacedBands(mount.obstacles, { x: job.stock.length, y: job.stock.width }, {
+              // The band is PHYSICAL: the strips the cutter cannot reach because the clamp stands
+              // over them (its footprint grown by the tool and the fit). The fixture clearance is a
+              // path rule, not a reach: adding it here would claim the cutter cannot reach strips
+              // it can, and the refusal above already says the skim runs into the mount (#710).
               radius: (cuttingDiameter(tool) ?? 0) / 2,
               uncertainty: mount.uncertainty,
             })
@@ -4051,6 +4067,14 @@ function generateOneProgram(
     });
   }
 
+  // #710 — THE TRAVEL HEIGHT CLEARS THE MOUNT. A bracket job's clamps stand above the stock's
+  // top; a rapid at the CAM's 1 mm hop would drive through them. The design makes the TRAVEL HEIGHT
+  // the tallest clamp (or arm) top plus the fixture clearance — 13 mm above the plate for the
+  // defaults — so every hop and retract runs above the clamps, and the verifier (which checks
+  // rapids as it checks cuts) refuses any rapid that still passes below one. A vise or tape job has
+  // nothing above the stock and keeps the CAM's own floors.
+  ir = raiseTravelOver(ir, travelHeightOver(shop.mount?.obstacles ?? [], job.jawClearance), mill.rapidEstimate);
+
   // #432 — FACING IS ITS OWN PROGRAM, and this one is untouched by it.
   //
   // The skim is posted against the blank's PROBED top and posted as its own file (below, beside the
@@ -4185,7 +4209,7 @@ function generateOneProgram(
   // 8. the verifier (#174) on the TEXT. The stack holds wasm cross-sections, so it is released
   // when this function returns — it is read again by the verifier calls below and by the frame's.
   try {
-    const verify = verifyProgram(nc, { setup, machine: mill, tool, depthLimit: limit, minRapidZ, ...(limitReasonAt ? { limitReasonAt } : {}), ...mountCtx(shop.mount) });
+    const verify = verifyProgram(nc, { setup, machine: mill, tool, depthLimit: limit, minRapidZ, ...(limitReasonAt ? { limitReasonAt } : {}), ...mountCtx(shop.mount, job.jawClearance) });
     if (verify.findings.some((f) => f.severity === 'error')) {
       errors.push({ stage: 'verify', message: `${verify.findings.filter((f) => f.severity === 'error').length} verifier error(s)` });
       return { ok: false, stage: 'verify', findings, feeds, threads: threadPlans, threadMachining, drill: drillFacts, cam, nc, verify, frameNc: null, frameVerify: null, facingNc: null, facingVerify: null, facingToolKey: null, facingError: null, facingCam: null, predicted: predictedForRun, errors };
@@ -4194,7 +4218,7 @@ function generateOneProgram(
     // 9. the frame file (#244): the job's XY extent traced in the air, beside the job. Produced by
     // THIS gated action from the same toolpath, and checked by the SAME verifier — a frame the
     // operator cannot run at the wrong Z, because the Z is in the file.
-    const frame = frameProgram(ir, ctx, mill, setup, tool, limit, shop.mount);
+    const frame = frameProgram(ir, ctx, mill, setup, tool, limit, shop.mount, job.jawClearance);
     if ('error' in frame) {
       errors.push({ stage: 'verify', message: `the frame file could not be produced: ${frame.error}` });
       return { ok: false, stage: 'verify', findings, feeds, threads: threadPlans, threadMachining, drill: drillFacts, cam, nc, verify, frameNc: null, frameVerify: null, facingNc: facing.nc, facingVerify: facing.verify, facingToolKey: facing.toolKey, facingError: facing.error, facingCam: facing.cam, predicted: predictedForRun, errors };
