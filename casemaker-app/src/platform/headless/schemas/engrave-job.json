@@ -6449,10 +6449,12 @@
                   "description": "The diameter the jaws close on, in millimetres, or null when the chuck does not state it."
                 },
                 "jawMode": {
-                  "description": "Which jaws are fitted: reverse is the module default, standard is for small parts.",
+                  "description": "Which jaws are fitted, by Makera's rule by diameter: 'standard' under ⌀20 mm, 'reverse-inner' from ⌀20 to ⌀35, 'reverse-outer' over ⌀35. A legacy 'reverse' reads as 'reverse-inner'.",
                   "enum": [
                     "standard",
-                    "reverse"
+                    "reverse",
+                    "reverse-inner",
+                    "reverse-outer"
                   ],
                   "type": "string"
                 },

@@ -382,7 +382,14 @@ export function mountOptions(args: MountOptionArgs): MountOption[] {
         });
         continue;
       }
-      out.push({ ...base, hint: null, disabled: false, reason: null, escape: null });
+      // #714 — the chuck's own line, the mockup's words: the rod turns, the cutter does not.
+      out.push({
+        ...base,
+        hint: 'the rod turns about X; the cutter stays over it',
+        disabled: false,
+        reason: null,
+        escape: null,
+      });
       continue;
     }
 

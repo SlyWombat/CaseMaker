@@ -50,7 +50,7 @@ const CODE =
 const CHUCK: RotaryChuck = {
   stickout: 85,
   gripDiameter: null,
-  jawMode: 'reverse',
+  jawMode: 'reverse-inner',
   tailstock: true,
   source: 'test',
 };
@@ -104,7 +104,7 @@ function thinRod(): EngraveJob {
     stock: { length: 60, width: 6, thickness: 6, material: 'pla', shape: 'cylinder', diameter: 6 },
     workholding: {
       kind: 'rotary-chuck',
-      rotary: { stickout: 50, gripDiameter: null, jawMode: 'reverse', tailstock: false, source: 'test' },
+      rotary: { stickout: 50, gripDiameter: null, jawMode: 'reverse-inner', tailstock: false, source: 'test' },
     },
     labels: [],
     shapes: [{ ...THIN_RECT }],

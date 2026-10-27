@@ -36,7 +36,7 @@ import type { EngraveJob, RotaryChuck } from '@/types/engraveJob';
 const CHUCK: RotaryChuck = {
   stickout: 30,
   gripDiameter: null,
-  jawMode: 'reverse',
+  jawMode: 'reverse-inner',
   tailstock: true,
   source: 'Makera Z1 wiki, 4-axis accessory',
 };

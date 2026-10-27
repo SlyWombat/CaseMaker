@@ -34,6 +34,7 @@ import type {
   FieldSource,
   JobWorkholding,
   RotaryChuck,
+  RotaryJawMode,
   Sacrificial,
   StockMaterial,
   ViseParams,
@@ -94,23 +95,54 @@ export function materialOptionsFor(machine?: MillProfile): MaterialOption[] {
 export type WorkholdingChoice = 'vise' | 'rotary';
 
 /**
- * The chuck facts a rotary job starts from, with the wiki's own gaps kept gaps (#240,
+ * The chuck facts a rotary job starts from, with the wiki's own gaps kept gaps (#240/#714,
  * `/Rotary.md` §3.4): the page names reverse jaws fitted by default and a tailstock; the jaw
- * capacity is not stated, so `gripDiameter` is null rather than an invented millimetre. `stickout`
- * is the rod's own length on first selection — the whole rod is the cuttable span until slice 3's
- * grip split refines it.
+ * capacity is not stated, so `gripDiameter` is null rather than an invented millimetre.
+ *
+ * #714 — the jaws follow Makera's rule by the rod's DIAMETER, and the stick-out is the rod's
+ * length less the GRIP. The grip's default is the shop's `rotary.gripMm`; Makera publishes no jaw
+ * depth, so it is Case Maker's figure until a bench measurement replaces it (`ROTARY_GRIP_FALLBACK_MM`
+ * is the same number the setting seeds, and only a caller with no location reads it).
  */
 export const ROTARY_CHUCK_SOURCE = 'Makera Z1 wiki, 4-axis accessory (wiki.makera.com/en/Z1/Accessories/4Axis)';
 
-export function defaultRotaryChuck(job: Pick<EngraveJob, 'stock'>): RotaryChuck {
-  // The rod's own length as the job's box states it, whichever way it faces: a standing rod is
-  // D × D × L, an axis-frame rod is L × D × D. The whole rod is the cuttable span until slice 3's
-  // grip split refines it; the diameter is already the box's own number.
-  const length = job.stock.shape === 'cylinder' ? job.stock.length : job.stock.thickness;
+/** The shop's `rotary.gripMm` fallback, mm — what a caller with no location reads. */
+export const ROTARY_GRIP_FALLBACK_MM = 15;
+
+/**
+ * Makera's jaw rule by the rod's diameter (`docs/design/rotary-flow.md` §3.4, from the decompiled
+ * Studio): standard under ⌀20 mm; reverse with the inner teeth from ⌀20 to ⌀35; reverse with the
+ * outer teeth over ⌀35. The wiki's "reverse jaws fitted by default for larger work" agrees.
+ */
+export function rotaryJawModeFor(diameterMm: number): RotaryJawMode {
+  if (diameterMm < 20) return 'standard';
+  if (diameterMm <= 35) return 'reverse-inner';
+  return 'reverse-outer';
+}
+
+const round3 = (n: number): number => Math.round(n * 1000) / 1000;
+
+/** The rod's own length along the axis and its diameter, from the job's box either way it faces. */
+export function rodAxisOf(
+  stock: Pick<EngraveJob['stock'], 'length' | 'width' | 'thickness' | 'shape' | 'diameter'>,
+): { length: number; diameter: number } {
+  // A standing rod is D × D × L, an axis-frame rod is L × D × D (the same two boxes
+  // `rotaryBoxForRod`/`standingBoxForRod` own); the diameter is the box's own number.
+  return stock.shape === 'cylinder'
+    ? { length: stock.length, diameter: stock.diameter ?? stock.width }
+    : { length: stock.thickness, diameter: stock.width };
+}
+
+export function defaultRotaryChuck(
+  job: Pick<EngraveJob, 'stock'>,
+  gripMm: number = ROTARY_GRIP_FALLBACK_MM,
+): RotaryChuck {
+  const { length, diameter } = rodAxisOf(job.stock);
+  const grip = Math.min(Math.max(0, gripMm), Math.max(0, length - 0.1));
   return {
-    stickout: length,
+    stickout: round3(Math.max(0.1, length - grip)),
     gripDiameter: null,
-    jawMode: 'reverse',
+    jawMode: rotaryJawModeFor(diameter),
     tailstock: true,
     source: ROTARY_CHUCK_SOURCE,
   };

@@ -1051,20 +1051,27 @@ export interface ViseParams {
  */
 export interface RotaryChuck {
   /**
-   * How far the rod stands out of the chuck jaws along X, mm — the cuttable length. On first
-   * selection it is the rod's own length (the axis-frame box's `length`); the grip split is the
-   * operator's to state once the module is measured (slice 3).
+   * How far the rod stands out of the chuck jaws along X, mm — the cuttable length
+   * (`rotaryMapOf`: grip = the rest of the rod). The Holding step asks the GRIP and derives this
+   * (#714): stick-out = the rod's length − grip.
    */
   stickout: Mm;
   /** The diameter the jaws close on, mm, or `null` when the chuck does not state its capacity. */
   gripDiameter: Mm | null;
-  /** Reverse jaws are fitted by default on the module; standard jaws are for small parts. */
-  jawMode: 'standard' | 'reverse';
+  /**
+   * Which jaws are fitted, by Makera's rule by diameter (#714, `docs/design/rotary-flow.md`
+   * §3.4): `standard` under ⌀20 mm, `reverse-inner` from ⌀20 to ⌀35, `reverse-outer` over ⌀35.
+   * A document written before the rule stores `'reverse'`, which reads as `reverse-inner`.
+   */
+  jawMode: RotaryJawMode;
   /** Whether the tailstock supports the free end. The wiki recommends a centre hole when it does. */
   tailstock: boolean;
   /** The page these facts come from, so a shipped default is never read as a measurement. */
   source: string;
 }
+
+/** The chuck's jaws, by Makera's rule by the rod's diameter (#714). */
+export type RotaryJawMode = 'standard' | 'reverse-inner' | 'reverse-outer';
 
 /**
  * A job held on the bed under tape (#707 BM-1, `docs/design/bed-mounts-flow.md` §3.4).

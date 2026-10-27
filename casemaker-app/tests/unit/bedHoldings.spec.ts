@@ -147,7 +147,7 @@ describe('#709 BM-1 the mount readers read the JOB', () => {
     expect(jobMount(tapedJob())).toBe('tape');
     expect(jobMount(bracketJob())).toBe('bracket');
     // #240's compatibility answer is untouched: a rotary job still reads as the flat vise here.
-    const rotary = { ...plate(), workholding: { kind: 'rotary-chuck' as const, rotary: { stickout: 30, gripDiameter: null, jawMode: 'reverse' as const, tailstock: true, source: 'wiki' } } };
+    const rotary = { ...plate(), workholding: { kind: 'rotary-chuck' as const, rotary: { stickout: 30, gripDiameter: null, jawMode: 'reverse-inner' as const, tailstock: true, source: 'wiki' } } };
     expect(jobMount(rotary)).toBe('vise');
     // A stored setup's mount is the document's own (#419).
     const stored = {

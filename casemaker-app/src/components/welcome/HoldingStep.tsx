@@ -28,7 +28,11 @@
  */
 
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type JSX, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
+import { rotaryFits } from '@/engine/cnc/setups/plan';
+import { ROTARY_JAW_KEEP_OUT_MM, ROTARY_TAILSTOCK_BAND_MM } from '@/engine/cnc/rotary/wrap';
 import {
+  defaultRotaryChuck,
+  rodAxisOf,
   stepFindings,
   withVise,
   type SetupAnswers,
@@ -55,7 +59,7 @@ import { useLocationStore } from '@/store/locationStore';
 import { useSettingsStore } from '@/store/settingsStore';
 import { useShopDefaultsStore } from '@/store/shopDefaultsStore';
 import { openMachineChange } from '@/components/machine-change';
-import type { BracketHold, EngraveJob, JobStockForm, RotaryChuck, TapeHold, ViseParams } from '@/types/engraveJob';
+import type { BracketHold, EngraveJob, JobStockForm, RotaryChuck, RotaryJawMode, TapeHold, ViseParams } from '@/types/engraveJob';
 import {
   HOLDING_MOUNT_LABELS,
   HOLDING_MOUNT_WORDS,
@@ -95,6 +99,7 @@ import {
 } from './holdingMounts';
 
 const MUTED: CSSProperties = { fontSize: 11, color: '#9aa4b0', lineHeight: 1.5, margin: '4px 0' };
+const round3 = (n: number): number => Math.round(n * 1000) / 1000;
 const FIELD_LABEL: CSSProperties = { display: 'flex', alignItems: 'flex-start', gap: 6, fontSize: 12, margin: '2px 0' };
 const SEVERITY_COLOR: Record<JobFinding['severity'], string> = { error: '#f0b4ad', warning: '#e0c07a', info: '#7fa6c9' };
 
@@ -113,6 +118,16 @@ function FindingRow({ finding, testid }: { finding: JobFinding; testid: string }
 const SVG_TEXT = { fontFamily: 'IBM Plex Sans, sans-serif', fontSize: 10, fill: '#d1d5db' } as const;
 const SVG_MUTED = { ...SVG_TEXT, fill: '#9aa4b0' } as const;
 const SVG_MONO = { fontFamily: 'IBM Plex Mono, monospace', fontSize: 11, fill: '#d1d5db' } as const;
+
+/** #714 — the front view's numbers, from the job's own chuck and rod. */
+export interface RotaryPicture {
+  diameterMm: number;
+  lengthMm: number;
+  gripMm: number;
+  stickoutMm: number;
+  jawMode: RotaryJawMode;
+  tailstock: boolean;
+}
 
 /** #715 — everything the bed pictures draw and the handles they move, from the job's own model. */
 export interface BedPicture {
@@ -158,6 +173,7 @@ export function HoldingPicture({
   note = null,
   bed = null,
   checks = [],
+  rotary = null,
 }: {
   mount?: HoldingMount;
   stock: { length: number; width: number; thickness: number };
@@ -172,6 +188,8 @@ export function HoldingPicture({
   bed?: BedPicture | null;
   /** #715 — the bed mount's own checks, under the picture. */
   checks?: readonly { severity: 'error' | 'warning' | 'info'; text: string }[];
+  /** #714 — the chuck and the rod, for the front view. */
+  rotary?: RotaryPicture | null;
 }): JSX.Element {
   const mechanism = mechanismOf(mount);
   const round = form === 'disc' || form === 'rod';
@@ -192,7 +210,7 @@ export function HoldingPicture({
       case 'bed-bracket':
         return `Top view. The ${formWord} sits in the bed's corner bracket, clamped.`;
       case 'rotary':
-        return `Top view. The chuck is on the left; the ${formWord} runs along the axis.`;
+        return `Front view. The chuck is on the left; X runs along the ${formWord} from the jaws, and A turns it.`;
     }
   })();
 
@@ -314,21 +332,18 @@ export function HoldingPicture({
             </text>
           </>
         ) : (
-          <>
-            <circle cx="50" cy="75" r="34" fill="#39424c" stroke="#5b6672" />
-            <path d="M50 41 v18 M26 92 l16 -10 M74 92 l-16 -10" stroke="#5b6672" strokeWidth="5" />
-            <rect x="84" y="61" width="112" height="28" fill="#1e3a4a" stroke="#6aa6c9" strokeWidth="1.5" />
-            <text x="140" y="79" textAnchor="middle" {...SVG_MONO}>
-              {dims}
-            </text>
-            <text x="50" y="122" textAnchor="middle" {...SVG_MUTED}>
-              chuck
-            </text>
-            <path d="M92 128 H204" stroke="#d1d5db" strokeWidth="1" markerEnd="url(#holding-x-arrow)" />
-            <text x="148" y="142" textAnchor="middle" {...SVG_TEXT}>
-              the axis runs along X
-            </text>
-          </>
+          <RotaryFrontView
+            rotary={
+              rotary ?? {
+                diameterMm: stock.width,
+                lengthMm: stock.thickness,
+                gripMm: 0,
+                stickoutMm: stock.thickness,
+                jawMode: 'standard',
+                tailstock: true,
+              }
+            }
+          />
         )}
       </svg>
       <p className="hint" style={{ margin: 0 }} data-testid="engrave-setup-holding-caption">
@@ -341,6 +356,70 @@ export function HoldingPicture({
         </p>
       )}
     </div>
+  );
+}
+
+// ── #714: the front view — looking along Y at the X–Z plane the cutter lives in ───────────────
+
+/**
+ * The rotary job's front view (design §3.4, station 3): the chuck on the left with its jaws and the
+ * GRIP, the rod with its STICK-OUT, the tailstock on the right where it is in, X from the jaws and
+ * the A arrow around the rod. The diameter is drawn to a readable height, not to scale — the
+ * lengths along X are scaled together, so grip and stick-out compare honestly.
+ */
+function RotaryFrontView({ rotary }: { rotary: RotaryPicture }): JSX.Element {
+  const length = Math.max(0.1, rotary.lengthMm);
+  const scale = Math.min(1.5, 150 / length);
+  const gripPx = Math.max(0, Math.min(rotary.gripMm, length)) * scale;
+  const stickoutPx = Math.max(0, Math.min(rotary.stickoutMm, length)) * scale;
+  const jawFace = 52;
+  const rodStart = jawFace;
+  const rodEnd = Math.min(228, rodStart + stickoutPx);
+  const rodTop = 62;
+  const rodBottom = 84;
+  const tail = rotary.tailstock;
+  return (
+    <>
+      {/* The chuck block and its two jaws; the grip sits inside them. */}
+      <rect x="12" y="40" width="30" height="70" fill="#39424c" stroke="#5b6672" />
+      <rect x={jawFace - 8} y={rodTop - 12} width="8" height="14" fill="#5b6672" />
+      <rect x={jawFace - 8} y={rodBottom - 2} width="8" height="14" fill="#5b6672" />
+      <text x="27" y="126" textAnchor="middle" {...SVG_MUTED}>
+        chuck
+      </text>
+      {/* The rod, and the grip hidden in the jaws. */}
+      <rect x={Math.max(20, rodStart - gripPx)} y={rodTop} width={rodEnd - Math.max(20, rodStart - gripPx)} height={rodBottom - rodTop} fill="#1e3a4a" stroke="#6aa6c9" strokeWidth="1.5" />
+      <text x={(rodStart + rodEnd) / 2} y={(rodTop + rodBottom) / 2 + 4} textAnchor="middle" {...SVG_MONO}>
+        rod ⌀{fmt(rotary.diameterMm)}
+      </text>
+      {/* The grip and the stick-out, under the rod. */}
+      <path d={`M${rodStart - gripPx} 96 H${rodStart}`} stroke="#9aa4b0" strokeWidth="1" />
+      <text x={rodStart - gripPx} y="108" {...SVG_MUTED}>
+        grip {fmt(rotary.gripMm)} mm
+      </text>
+      <path d={`M${rodStart} 118 H${rodEnd}`} stroke="#d1d5db" strokeWidth="1" markerEnd="url(#holding-x-arrow)" />
+      <text x={(rodStart + rodEnd) / 2} y="114" textAnchor="middle" {...SVG_TEXT}>
+        stick-out {fmt(rotary.stickoutMm)} mm
+      </text>
+      {/* The tailstock, where it is in. */}
+      {tail ? (
+        <>
+          <path d={`M${rodEnd + 12} ${rodTop} L${rodEnd} ${(rodTop + rodBottom) / 2} L${rodEnd + 12} ${rodBottom} Z`} fill="#39424c" stroke="#5b6672" />
+          <text x={rodEnd + 4} y="126" {...SVG_MUTED}>
+            tailstock
+          </text>
+        </>
+      ) : null}
+      {/* X from the jaws, and A around the rod. */}
+      <path d={`M${rodStart} 138 H228`} stroke="#d1d5db" strokeWidth="1" markerEnd="url(#holding-x-arrow)" />
+      <text x={rodStart} y="150" {...SVG_MUTED}>
+        X 0 at the jaws
+      </text>
+      <path d={`M${(rodStart + rodEnd) / 2 - 14} ${rodTop - 8} a 14 8 0 1 0 28 0`} fill="none" stroke="#6aa6c9" strokeWidth="1" markerEnd="url(#holding-x-arrow)" />
+      <text x={(rodStart + rodEnd) / 2} y="44" textAnchor="middle" {...SVG_TEXT}>
+        A turns the rod about X
+      </text>
+    </>
   );
 }
 
@@ -849,6 +928,8 @@ export function HoldingStep({ job, answers, onAnswers, onRotary, onBedHold }: Ho
   const accessories = location?.accessories ?? [];
   const calibration = useSettingsStore((s) => s.machineCalibration);
   const shopDefaults = useShopDefaultsStore((s) => s.defaults);
+  // #714 — the grip's default is the shop's own number (Makera publishes no jaw depth).
+  const shopGrip = readDefault(shopDefaults ?? null, 'rotary.gripMm');
   const now = useMemo(() => machineNow(machine), [machine]);
   const profile = now?.profile ?? null;
   const rotaryEnvelope = useMemo(() => jobMachine(job, calibration).rotary?.envelope, [job, calibration]);
@@ -946,11 +1027,33 @@ export function HoldingStep({ job, answers, onAnswers, onRotary, onBedHold }: Ho
     if (applied.current) return;
     applied.current = true;
     if (job.workholding.kind !== 'vise') return;
-    if (now !== null && now.mount === 'bed') return;
+    // With the bed or the rotary on the pins, their own effects decide (#715, #714).
+    if (now !== null && now.mount !== 'vise') return;
     const next = applyRecommendedMount(answers, boardMm);
     if (next !== answers) onAnswers(next);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // #714 — with the module on the pins and a round rod that fits, the CHUCK is the default mount
+  // (§3.4). Like the bed's default, it applies to an unasserted setup only, and once per bed
+  // profile — an operator's own answer is never overwritten.
+  const rotaryArrived = useRef<string | null>(null);
+  useEffect(() => {
+    if (now === null || now.mount !== 'rotary') return;
+    if (rotaryArrived.current === now.profile.id) return;
+    rotaryArrived.current = now.profile.id;
+    if (job.workholding.kind !== 'vise') return;
+    if (answers.vise.source !== 'default' || answers.sacrificial.under !== null) return;
+    const round = job.stockEntry?.form === 'rod' || job.stock.shape === 'cylinder';
+    if (!round) return;
+    const fits = rotaryFits(
+      { x: answers.stock.length, y: answers.stock.width, z: answers.stock.thickness },
+      rotaryEnvelope ?? { diameter: 80, length: 150 },
+    );
+    if (!fits) return;
+    onRotary(defaultRotaryChuck(job, shopGrip.value), answers);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [now, job.workholding.kind, job.stockEntry?.form, answers.stock]);
 
   // #715 — a job still in the vise takes the bed's default mount when nothing is on the pins
   // (§3.2): the profile's preferred mount for this stock among those the bed carries, else sheet
@@ -1002,9 +1105,14 @@ export function HoldingStep({ job, answers, onAnswers, onRotary, onBedHold }: Ho
 
   function choose(mount: HoldingMount, mm: number = boardMm): void {
     // #240 — the chuck holds a rod; the vise answers describe the vise. Either switch is the one
-    // store write that also turns the stock box to the frame the mount holds it in.
+    // store write that also turns the stock box to the frame the mount holds it in. #714 — a rod
+    // joining the chuck starts on the shop's grip and Makera's jaw rule for its diameter.
     if (mount === 'rotary') {
-      onRotary(answers.rotary, answers);
+      const chuck =
+        job.workholding.kind === 'rotary-chuck'
+          ? job.workholding.rotary
+          : defaultRotaryChuck(job, shopGrip.value);
+      onRotary(chuck, answers);
       return;
     }
     // #715 — the two bed mounts are the job's own writes, with the board under them.
@@ -1295,6 +1403,110 @@ export function HoldingStep({ job, answers, onAnswers, onRotary, onBedHold }: Ho
     );
   }
 
+  /** #714 — the chuck's four answers, indented under its radio (design §3.4, station 3). */
+  function rotaryFields(): JSX.Element {
+    const chuck =
+      job.workholding.kind === 'rotary-chuck' ? job.workholding.rotary : defaultRotaryChuck(job, shopGrip.value);
+    const rod = rodAxisOf(job.stock);
+    const grip = round3(Math.max(0, rod.length - chuck.stickout));
+    const write = (patch: Partial<RotaryChuck>): void => onRotary({ ...chuck, ...patch }, answers);
+    const axisDatum = profile?.datums.rotaryAxis ?? null;
+    return (
+      <div data-testid="engrave-setup-rotary-fields" style={BED_FIELDS}>
+        <FieldRow label="Jaws">
+          <select
+            className="fld"
+            aria-label="Jaws"
+            data-testid="engrave-setup-rotary-jaws"
+            value={chuck.jawMode}
+            onChange={(e) => write({ jawMode: e.target.value as RotaryJawMode })}
+          >
+            <option value="standard">standard</option>
+            <option value="reverse-inner">reverse, inner teeth</option>
+            <option value="reverse-outer">reverse, outer teeth</option>
+          </select>
+          <span className="hint" style={{ flexBasis: '100%' }} data-testid="engrave-setup-rotary-rule">
+            Makera’s rule for ⌀{fmt(rod.diameter)}: standard under ⌀20, reverse inner 20–35, reverse outer over 35
+          </span>
+        </FieldRow>
+        <FieldRow label="Grip">
+          <label style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+            <input
+              type="number"
+              className="fld"
+              aria-label="Grip in the jaws"
+              data-testid="engrave-setup-rotary-grip"
+              min="0"
+              max={fmt(rod.length)}
+              step="1"
+              value={grip}
+              style={{ width: 64 }}
+              onChange={(e) => {
+                const g = Number(e.target.value);
+                if (!Number.isFinite(g) || g < 0) return;
+                const clamped = Math.min(g, Math.max(0, rod.length - 0.1));
+                write({ stickout: round3(Math.max(0.1, rod.length - clamped)) });
+              }}
+            />{' '}
+            mm in the jaws
+          </label>
+          <span data-testid="engrave-setup-rotary-stickout">Stick-out {fmt(chuck.stickout)} mm</span>
+        </FieldRow>
+        <FieldRow label="Tailstock">
+          <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+            <input
+              type="checkbox"
+              aria-label="Tailstock in"
+              data-testid="engrave-setup-rotary-tailstock"
+              checked={chuck.tailstock}
+              onChange={(e) => write({ tailstock: e.target.checked })}
+            />
+            {chuck.tailstock ? 'in — drill a centre hole in the free end first' : 'out — the free end is unsupported'}
+          </label>
+        </FieldRow>
+        <details data-testid="engrave-setup-rotary-technical">
+          <summary style={{ fontSize: 12, cursor: 'pointer' }}>Technical</summary>
+          <div style={{ marginTop: 4 }}>
+            <p style={MUTED}>
+              Envelope: ⌀{fmt(rotaryEnvelope?.diameter ?? 80)} × {fmt(rotaryEnvelope?.length ?? 150)} mm — Makera’s figure
+            </p>
+            <p style={MUTED}>Jaws: Makera’s rule by diameter (the decompiled Studio), not measured on this chuck</p>
+            <p style={MUTED} data-testid="engrave-setup-rotary-grip-source">
+              Grip: {fmt(shopGrip.value)} mm —{' '}
+              {shopGrip.source === 'measured'
+                ? 'measured on this machine'
+                : shopGrip.source === 'chosen'
+                  ? 'the shop’s setting'
+                  : 'the shop’s seeded default, not measured'}
+              ; the stick-out is the rod less it
+            </p>
+            <p style={MUTED}>Tailstock: in — Makera’s shipped value (Studio’s rotary relief)</p>
+            <p style={MUTED}>
+              Keep-out: {fmt(ROTARY_JAW_KEEP_OUT_MM)} mm from the jaws, a {fmt(ROTARY_TAILSTOCK_BAND_MM)} mm
+              tailstock band — Case Maker’s defaults until measured
+            </p>
+            <p style={MUTED} data-testid="engrave-setup-rotary-axis-datum">
+              Axis datum:{' '}
+              {axisDatum === null ? 'shipped value — not measured on this machine' : `measured ${axisDatum.measuredAt}`}
+            </p>
+          </div>
+        </details>
+      </div>
+    );
+  }
+
+  // #714 — the front view's numbers, from the chuck the job holds (or the one it would get).
+  const rotaryChuck =
+    job.workholding.kind === 'rotary-chuck' ? job.workholding.rotary : defaultRotaryChuck(job, shopGrip.value);
+  const rotaryRod = rodAxisOf(job.stock);
+  const rotaryPicture: RotaryPicture = {
+    diameterMm: rotaryRod.diameter,
+    lengthMm: rotaryRod.length,
+    gripMm: round3(Math.max(0, rotaryRod.length - rotaryChuck.stickout)),
+    stickoutMm: rotaryChuck.stickout,
+    jawMode: rotaryChuck.jawMode,
+    tailstock: rotaryChuck.tailstock,
+  };
 
   return (
     <div data-testid="engrave-setup-step-holding" style={{ marginTop: 8 }}>
@@ -1386,19 +1598,35 @@ export function HoldingStep({ job, answers, onAnswers, onRotary, onBedHold }: Ho
                     />
                   ) : null
                 }
-                details={isBedMount(option.mount) && !option.disabled ? bedFields(option.mount) : null}
+                details={
+                  isBedMount(option.mount) && !option.disabled
+                    ? bedFields(option.mount)
+                    : option.mount === 'rotary' && !option.disabled
+                      ? rotaryFields()
+                      : null
+                }
               />
             ))}
           </div>
 
           {hasFace && (
             <details data-testid="engrave-setup-orientation">
-              <summary style={{ fontSize: 12, cursor: 'pointer' }}>Which way round</summary>
-              <ul style={{ ...MUTED, margin: '4px 0 0 18px', padding: 0 }}>
-                <li>Face up: the printed face.</li>
-                <li>Against the fixed jaw: the long edge.</li>
-                <li>Nearest you: the left end.</li>
-              </ul>
+              <summary style={{ fontSize: 12, cursor: 'pointer' }}>
+                {current === 'rotary' ? 'Which end is in the jaws' : 'Which way round'}
+              </summary>
+              {current === 'rotary' ? (
+                // #714 — a round rod has no face or edge to square; the only landmark is its ends,
+                // and either end will do unless they differ (design §3.4).
+                <ul style={{ ...MUTED, margin: '4px 0 0 18px', padding: 0 }}>
+                  <li>Either end — unless the ends differ: a printed rod's layers, a tube's chamfer.</li>
+                </ul>
+              ) : (
+                <ul style={{ ...MUTED, margin: '4px 0 0 18px', padding: 0 }}>
+                  <li>Face up: the printed face.</li>
+                  <li>Against the fixed jaw: the long edge.</li>
+                  <li>Nearest you: the left end.</li>
+                </ul>
+              )}
             </details>
           )}
 
@@ -1442,6 +1670,7 @@ export function HoldingStep({ job, answers, onAnswers, onRotary, onBedHold }: Ho
           note={drawnNote}
           bed={isBedMount(drawnMount) ? bedPicture : null}
           checks={bedChecks}
+          rotary={drawnMount === 'rotary' ? rotaryPicture : null}
         />
       </div>
 

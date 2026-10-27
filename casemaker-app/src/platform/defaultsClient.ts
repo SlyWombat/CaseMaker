@@ -315,6 +315,10 @@ export const KNOWN_DEFAULTS: Readonly<Record<string, KnownDefault>> = {
   'sim.spindleOffProximityMm': { label: 'spindle-off clearance to material (chosen)', unit: 'mm', rule: z.number().min(0.05).max(5), fallback: 1.0 },
   'sim.columnPitchXMm': { label: 'simulation grid X pitch (chosen)', unit: 'mm', rule: z.number().min(0.05).max(0.5), fallback: 0.1 },
   'sim.rotaryPitchDeg': { label: 'rotary simulation grid pitch (chosen)', unit: 'deg', rule: z.number().min(0.05).max(5), fallback: 0.25 },
+  // #714 — how much of a rod sits in the rotary chuck's jaws. Makera publishes no jaw depth, so
+  // this is Case Maker's figure until a bench measurement replaces it; the Holding step asks the
+  // grip and derives the stick-out as the rod's length less it.
+  'rotary.gripMm': { label: 'grip in the rotary chuck (chosen, not measured)', unit: 'mm', rule: z.number().min(0).max(100), fallback: 15 },
   // ── #451 sim resolutions (end)
   // ── #451 runSheet (begin) — the blank-size tolerance the sheet prints in its first instruction.
   'runSheet.blankToleranceMm': { label: 'blank-size tolerance the sheet prints (chosen)', unit: 'mm', rule: z.number().min(0.05).max(5), fallback: 0.5 },

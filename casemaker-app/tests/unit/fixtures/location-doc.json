@@ -977,6 +977,13 @@
       "unit": "mm",
       "note": "chosen, not measured: the tape strips stop this far in from every edge of the stock"
     },
+    "rotary.gripMm": {
+      "value": 15.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm",
+      "note": "chosen, not measured: how much of the rod sits inside the rotary chuck's jaws; Makera publishes no jaw depth"
+    },
     "margins.boundaryMarginMm": {
       "value": 0.2,
       "source": "seeded",

@@ -48,7 +48,7 @@ import type { EngraveJob, RotaryChuck } from '@/types/engraveJob';
 const CHUCK: RotaryChuck = {
   stickout: 85,
   gripDiameter: null,
-  jawMode: 'reverse',
+  jawMode: 'reverse-inner',
   tailstock: true,
   source: 'test',
 };

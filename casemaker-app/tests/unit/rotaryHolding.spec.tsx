@@ -1,0 +1,292 @@
+// @vitest-environment jsdom
+// #714 (R-UI-2 of #545) — Holding writes the rotary chuck: Makera's jaw rule by diameter, the grip
+// (a shop setting), the derived stick-out, the tailstock, and the front view (design
+// `docs/design/rotary-flow.md` §3.4, station 3).
+//
+// THE MACHINE CARRIES THE ROTARY: the location's first machine has the module on its pins and the
+// house owns it, so "In the rotary chuck" is a real choice for a round rod. The step's write is the
+// store's own `setRotaryHolding` (#240 slice 1), which turns the stock box into the axis frame.
+
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+import { StartWizard } from '@/components/welcome/StartWizard';
+import { MachineChangeWizard } from '@/components/machine-change';
+import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
+import { defaultRotaryChuck, rotaryJawModeFor } from '@/engine/cnc/engrave/setupFlow';
+import { engraveJobSchema } from '@/store/engraveJobSchema';
+import { useEngraveJobStore } from '@/store/engraveJobStore';
+import { resetStartWizard, useStartWizardStore } from '@/store/startWizardStore';
+import { resetMachineChange } from '@/store/machineChangeStore';
+import { resetLocationStore, useLocationStore } from '@/store/locationStore';
+import { resetMachineStore } from '@/store/machineStore';
+import { useSettingsStore } from '@/store/settingsStore';
+import {
+  MachineRecordSchema,
+  type FixtureRecord,
+  type LocationView,
+  type MachineRecord,
+} from '@/platform/locationClient';
+import type { EngraveJob, JobStockEntry } from '@/types/engraveJob';
+
+const HERE = dirname(fileURLToPath(import.meta.url));
+const FIXTURE = join(HERE, 'fixtures', 'location-doc.json');
+const DOC = JSON.parse(readFileSync(FIXTURE, 'utf8')) as {
+  id: string;
+  name: string;
+  createdAt: string;
+  machines: unknown[];
+  accessories: FixtureRecord[];
+};
+
+const caps = vi.hoisted(() => ({ drive: true }));
+vi.mock('@/platform/capabilities', async (orig) => {
+  const real = await orig<typeof import('@/platform/capabilities')>();
+  return {
+    ...real,
+    get canDriveMachine() {
+      return caps.drive;
+    },
+  };
+});
+
+(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+
+const ROTARY: FixtureRecord = {
+  id: 'fx-rotary-1',
+  kind: 'rotary-module',
+  product: 'makera-4th-axis',
+  variant: null,
+  constants: {},
+  unit: {},
+  provenance: {},
+  whereabouts: { kind: 'machine', machineId: 'makera-z1-1a2b3c', since: '2026-10-27T09:00:00.000Z' },
+  history: [],
+};
+
+/** The fixture's machine with the 4th axis on its pins and a bare bed (Makera, #717). */
+function rotaryMachine(): MachineRecord {
+  const machine = MachineRecordSchema.parse(JSON.parse(JSON.stringify(DOC.machines[0])));
+  const profile = machine.bedProfiles![0]!;
+  profile.placements = [
+    {
+      id: 'pl-rotary',
+      fixture: 'fx-rotary-1',
+      where: { kind: 'pins', pins: 'rotary', anchor: null },
+      count: null,
+      frame: null,
+      provenance: {},
+    },
+  ];
+  profile.surface = {
+    kind: 'bare-bed',
+    material: null,
+    length: null,
+    width: null,
+    thickness: null,
+    position: null,
+    provenance: {},
+    scars: [],
+    lastResurfacedAt: null,
+  };
+  profile.consumables = null;
+  return machine;
+}
+
+function seedLocation(machine: MachineRecord): void {
+  const location = {
+    kind: 'casemaker-location',
+    schemaVersion: 1,
+    id: DOC.id,
+    name: DOC.name,
+    createdAt: DOC.createdAt,
+    machines: [machine],
+    accessories: [...DOC.accessories, ROTARY],
+  } as unknown as LocationView;
+  act(() => {
+    useLocationStore.setState({ status: 'present', location, etag: '"e1"', reason: null });
+  });
+}
+
+const ROD_ENTRY: JobStockEntry = { kind: 'made', shelfId: null, file: null, form: 'rod', finish: 'unknown', conductive: false };
+
+/** A ⌀20 × 100 mm rod standing on its end (#683): D × D × L. */
+function rod(): EngraveJob {
+  const job = defaultEngraveJob();
+  return { ...job, stock: { ...job.stock, length: 20, width: 20, thickness: 100, material: 'pla' }, stockEntry: ROD_ENTRY, labels: [] };
+}
+
+function openHolding(job: EngraveJob): void {
+  act(() => {
+    useEngraveJobStore.setState({ job });
+    useStartWizardStore.getState().openWizard('holding');
+  });
+  render(
+    <>
+      <StartWizard />
+      <MachineChangeWizard />
+    </>,
+  );
+}
+
+const job = (): EngraveJob => useEngraveJobStore.getState().job;
+function radio(mount: string): HTMLInputElement {
+  return screen.getByTestId(`engrave-setup-mount-${mount}`) as HTMLInputElement;
+}
+
+beforeEach(() => {
+  caps.drive = true;
+  resetStartWizard();
+  resetMachineChange();
+  resetLocationStore();
+  resetMachineStore();
+  useSettingsStore.getState().resetSettings();
+  act(() => {
+    useEngraveJobStore.setState({ job: rod() });
+  });
+});
+
+afterEach(() => {
+  cleanup();
+  resetMachineChange();
+  resetLocationStore();
+});
+
+describe('#714 Makera’s jaw rule by diameter (§3.4)', () => {
+  it('standard under ⌀20, reverse inner 20–35, reverse outer over 35', () => {
+    expect(rotaryJawModeFor(19.99)).toBe('standard');
+    expect(rotaryJawModeFor(20)).toBe('reverse-inner');
+    expect(rotaryJawModeFor(35)).toBe('reverse-inner');
+    expect(rotaryJawModeFor(35.01)).toBe('reverse-outer');
+  });
+
+  it('a new chuck takes the shop’s grip, and its stick-out is the rod less it', () => {
+    const chuck = defaultRotaryChuck(rod(), 15);
+    expect(chuck.stickout).toBe(85);
+    expect(chuck.jawMode).toBe('reverse-inner'); // ⌀20
+    expect(chuck.tailstock).toBe(true);
+  });
+
+  it('a rod shorter than the grip keeps a positive stick-out', () => {
+    const short = { ...rod(), stock: { ...rod().stock, length: 10, width: 10, thickness: 10 } };
+    const chuck = defaultRotaryChuck(short, 15);
+    expect(chuck.stickout).toBeGreaterThan(0);
+    expect(chuck.stickout).toBeLessThanOrEqual(10);
+    expect(chuck.jawMode).toBe('standard');
+  });
+
+  it('a document written before the rule reads its reverse jaws as the inner teeth', () => {
+    const base = rod();
+    const parsed = engraveJobSchema.parse({
+      ...base,
+      workholding: {
+        kind: 'rotary-chuck',
+        rotary: { stickout: 85, gripDiameter: null, jawMode: 'reverse', tailstock: true, source: 'wiki' },
+      },
+    });
+    expect(parsed.workholding.kind).toBe('rotary-chuck');
+    if (parsed.workholding.kind === 'rotary-chuck') expect(parsed.workholding.rotary.jawMode).toBe('reverse-inner');
+  });
+});
+
+describe('#714 the rotary option and its four lines (station 3)', () => {
+  it('a rod on a rotary machine opens IN THE CHUCK, with the grip, the jaw rule and the tailstock', () => {
+    seedLocation(rotaryMachine());
+    openHolding(rod());
+
+    // #714 — the module on the pins and a round rod that fits: the chuck is the default mount.
+    expect(radio('rotary').disabled).toBe(false);
+    expect(radio('rotary').checked).toBe(true);
+    expect(screen.getByTestId('engrave-setup-mount-row-rotary').textContent).toContain(
+      'the rod turns about X; the cutter stays over it',
+    );
+
+    const held = job().workholding;
+    expect(held.kind).toBe('rotary-chuck');
+    if (held.kind === 'rotary-chuck') {
+      expect(held.rotary.stickout).toBe(85);
+      expect(held.rotary.jawMode).toBe('reverse-inner');
+      expect(held.rotary.tailstock).toBe(true);
+    }
+    // The axis frame: length along X, diameter twice across (#240 slice 1).
+    expect(job().stock).toMatchObject({ length: 100, width: 20, thickness: 20, shape: 'cylinder', diameter: 20 });
+
+    // The four lines, under the checked option.
+    expect((screen.getByTestId('engrave-setup-rotary-jaws') as HTMLSelectElement).value).toBe('reverse-inner');
+    expect(screen.getByTestId('engrave-setup-rotary-rule').textContent).toBe(
+      'Makera’s rule for ⌀20: standard under ⌀20, reverse inner 20–35, reverse outer over 35',
+    );
+    expect((screen.getByTestId('engrave-setup-rotary-grip') as HTMLInputElement).value).toBe('15');
+    expect(screen.getByTestId('engrave-setup-rotary-stickout').textContent).toBe('Stick-out 85 mm');
+    expect((screen.getByTestId('engrave-setup-rotary-tailstock') as HTMLInputElement).checked).toBe(true);
+    expect(screen.getByTestId('engrave-setup-rotary-fields').textContent).toContain(
+      'drill a centre hole in the free end first',
+    );
+
+    // The front view: the chuck and jaws, the grip, the rod and its stick-out, the tailstock, X and A.
+    const svg = screen.getByTestId('engrave-setup-holding-picture');
+    expect(svg.getAttribute('data-mount')).toBe('rotary');
+    expect(svg.textContent).toContain('rod ⌀20');
+    expect(svg.textContent).toContain('grip 15 mm');
+    expect(svg.textContent).toContain('stick-out 85 mm');
+    expect(svg.textContent).toContain('tailstock');
+    expect(svg.textContent).toContain('X 0 at the jaws');
+    expect(svg.textContent).toContain('A turns the rod about X');
+    expect(screen.getByTestId('engrave-setup-holding-caption').textContent).toContain('Front view.');
+    expect(screen.getByTestId('engrave-setup-holding-caption').textContent).toContain('A turns it');
+  });
+
+  it('the grip edits the stick-out, the jaws and the tailstock write what they say', () => {
+    seedLocation(rotaryMachine());
+    openHolding(rod());
+
+    fireEvent.change(screen.getByTestId('engrave-setup-rotary-grip'), { target: { value: '20' } });
+    let held = job().workholding;
+    if (held.kind === 'rotary-chuck') expect(held.rotary.stickout).toBe(80);
+    expect(screen.getByTestId('engrave-setup-rotary-stickout').textContent).toBe('Stick-out 80 mm');
+
+    fireEvent.change(screen.getByTestId('engrave-setup-rotary-jaws'), { target: { value: 'reverse-outer' } });
+    held = job().workholding;
+    if (held.kind === 'rotary-chuck') expect(held.rotary.jawMode).toBe('reverse-outer');
+
+    fireEvent.click(screen.getByTestId('engrave-setup-rotary-tailstock'));
+    held = job().workholding;
+    if (held.kind === 'rotary-chuck') expect(held.rotary.tailstock).toBe(false);
+    // The picture follows: no tailstock at the rod's end.
+    expect(screen.getByTestId('engrave-setup-holding-picture').textContent).not.toContain('tailstock');
+  });
+
+  it('the Technical fold names each source', () => {
+    seedLocation(rotaryMachine());
+    openHolding(rod());
+
+    const technical = screen.getByTestId('engrave-setup-rotary-technical');
+    expect(technical.textContent).toContain('⌀80 × 150 mm — Makera’s figure');
+    expect(technical.textContent).toContain('Makera’s rule by diameter');
+    expect(screen.getByTestId('engrave-setup-rotary-grip-source').textContent).toContain('the shop’s seeded default, not measured');
+    expect(technical.textContent).toContain('Makera’s shipped value');
+    expect(screen.getByTestId('engrave-setup-rotary-axis-datum').textContent).toContain('shipped value');
+  });
+
+  it('reloading a rotary job shows its own chuck, not a fresh default', () => {
+    seedLocation(rotaryMachine());
+    const base = rod();
+    openHolding({
+      ...base,
+      stock: { ...base.stock, length: 100, width: 25, thickness: 25, shape: 'cylinder', diameter: 25 },
+      workholding: {
+        kind: 'rotary-chuck',
+        rotary: { stickout: 60, gripDiameter: null, jawMode: 'reverse-outer', tailstock: false, source: 'test' },
+      },
+    });
+
+    expect(radio('rotary').checked).toBe(true);
+    expect((screen.getByTestId('engrave-setup-rotary-grip') as HTMLInputElement).value).toBe('40');
+    expect(screen.getByTestId('engrave-setup-rotary-stickout').textContent).toBe('Stick-out 60 mm');
+    expect((screen.getByTestId('engrave-setup-rotary-jaws') as HTMLSelectElement).value).toBe('reverse-outer');
+    expect((screen.getByTestId('engrave-setup-rotary-tailstock') as HTMLInputElement).checked).toBe(false);
+  });
+});

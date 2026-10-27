@@ -1023,8 +1023,13 @@ const rotaryChuckSchema = z.object({
     .nullable()
     .describe('The diameter the jaws close on, in millimetres, or null when the chuck does not state it.'),
   jawMode: z
-    .enum(['standard', 'reverse'])
-    .describe('Which jaws are fitted: reverse is the module default, standard is for small parts.'),
+    .enum(['standard', 'reverse', 'reverse-inner', 'reverse-outer'])
+    // #714 — a job written before the three-way rule stores `'reverse'`; the inner teeth are the
+    // module's fitted default, and that is the honest reading of an unstated reverse jaw.
+    .transform((v): 'standard' | 'reverse-inner' | 'reverse-outer' => (v === 'reverse' ? 'reverse-inner' : v))
+    .describe(
+      "Which jaws are fitted, by Makera's rule by diameter: 'standard' under ⌀20 mm, 'reverse-inner' from ⌀20 to ⌀35, 'reverse-outer' over ⌀35. A legacy 'reverse' reads as 'reverse-inner'.",
+    ),
   tailstock: z.boolean().describe('Whether the tailstock supports the free end of the rod.'),
   source: z.string().min(1).describe('The page these chuck facts come from.'),
 });

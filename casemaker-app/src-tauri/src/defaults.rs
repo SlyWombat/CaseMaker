@@ -299,6 +299,10 @@ pub const UNMEASURED_SEEDS: &[(&str, f64, &str, &str)] = &[
     ("sim.columnPitchXMm", 0.1, "mm", "chosen, not measured: the simulation grid's X pitch; the sim's memory and time grow with 1/pitch"),
     ("sim.rotaryPitchDeg", 0.25, "deg", "chosen, not measured: the rotary simulation grid's theta pitch; the sim's memory and time grow with 1/pitch"),
     // ── #451 sim resolutions (end)
+    // ── #714 — how much of a rod sits in the rotary chuck's jaws. Makera publishes no jaw depth, so
+    // this is Case Maker's figure until a bench measurement replaces it; the Holding step asks the
+    // grip and derives the stick-out as the rod's length less it.
+    ("rotary.gripMm", 15.0, "mm", "chosen, not measured: how much of the rod sits inside the rotary chuck's jaws; Makera publishes no jaw depth"),
     // ── #451 runSheet (begin) — the blank-size tolerance the sheet prints in its first instruction.
     ("runSheet.blankToleranceMm", 0.5, "mm", "chosen, not measured: how far a measured blank may differ from the job's stated size before the sheet tells the operator to change the job and regenerate"),
     // ── #451 runSheet (end)
@@ -950,6 +954,7 @@ fn known_rule(key: &str, n: Option<f64>) -> Option<Result<(), String>> {
             "0.05 to 5 degrees",
         )),
         // ── #451 sim resolutions (end)
+        "rotary.gripMm" => Some(need(n.is_some_and(|v| (0.0..=100.0).contains(&v)), "0 to 100 mm")),
         // ── #451 sim starting values (begin) — `defaultsClient.ts` states the same bounds. The
         // playback speed is one of the transport's multipliers, not any number in a range.
         "sim.playbackSpeed" => Some(need(
