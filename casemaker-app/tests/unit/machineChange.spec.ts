@@ -227,6 +227,10 @@ describe('#693 what is on the machine', () => {
     ];
     expect(fitSteps('bed', { bracket: 1 })?.title).toBe('Fit the bracket');
     expect(fitSteps('bed', { bracket: 1 })?.items).toEqual(bracketItems);
+    // #718 — a bracket-only fit never powered the machine off, so nothing switches it on.
+    expect(fitSteps('bed', { bracket: 1, switchBackOn: false })?.items).toEqual(
+      bracketItems.slice(0, -1),
+    );
     expect(fitSteps('bed', { wasteboard: 'back', bracket: 2 })?.items).toEqual([
       'the wasteboard back on',
       'its screws',

@@ -137,6 +137,12 @@ export interface MountStepOptions {
   wasteboard?: 'off' | 'back' | null;
   /** #718 — the anchor a bracket is being FITTED at (the profile carries none yet), or null. */
   bracket?: 1 | 2 | null;
+  /**
+   * #718 — the machine was switched OFF for this change, so its fit ends by switching it on
+   * (`changePowersOff`). False for a bracket-only fit — nothing on the pins already, so the machine
+   * never went off. Absent reads as true: every other fit is a power-off one.
+   */
+  switchBackOn?: boolean;
 }
 
 /**
@@ -242,7 +248,9 @@ export function fitSteps(to: MachineMountKind, opts: MountStepOptions = {}): Ste
         );
       }
       if (items.length === 0) return null;
-      items.push('switch the machine on');
+      // #718 — only a change that POWERED OFF ends by switching the machine on: a bracket fitted
+      // while nothing moved on the pins leaves a machine that was never off.
+      if (opts.switchBackOn !== false) items.push('switch the machine on');
       return { title: opts.bracket !== undefined && opts.bracket !== null ? 'Fit the bracket' : 'Put the wasteboard back on', items };
     }
   }

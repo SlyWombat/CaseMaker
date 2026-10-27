@@ -281,6 +281,8 @@ function Wizard({
       : fitSteps(target, {
           wasteboard: plannedWasteboard === 'back' ? 'back' : null,
           bracket: bracketFit ? bracketAnchor : null,
+          // #718 — a bracket-only fit (bed → bed) never powered the machine off.
+          switchBackOn: changePowersOff(from, target),
         });
   // #717 — a change that touches the vise or the rotary is made with the machine off at its own
   // switch (Makera's page for each), so step 2 carries the switch and the work light line moves to

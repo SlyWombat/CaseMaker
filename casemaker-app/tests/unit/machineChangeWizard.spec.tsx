@@ -659,11 +659,12 @@ describe('#693 walking the change', () => {
       'its two 4 mm dowels',
       'its three M5 × 20 screws',
       'two top clamps in the tray',
-      'switch the machine on',
     ]) {
       expect(fitText).toContain(word);
     }
-    for (let i = 0; i < 5; i++) clickCheck(`machine-change-fit-${i}`);
+    // #718 — the machine never went off for this fit, so the list does not switch it back on.
+    expect(fitText).not.toContain('switch the machine on');
+    for (let i = 0; i < 4; i++) clickCheck(`machine-change-fit-${i}`);
     fireEvent.click(screen.getByTestId('machine-change-fit-done'));
 
     // 5 · Confirm names the bracket, and the write carries the placement and the record.
