@@ -26,6 +26,10 @@ import { tl } from './helpers/manifoldExec';
 import { generate } from './helpers/engravePipeline';
 import { DEFAULT_FONT_ID } from '@/engine/fonts/registry';
 import { defaultEngraveJob, newEngraveLabelId } from '@/engine/cnc/engrave/defaults';
+import { defaultRotaryChuck } from '@/engine/cnc/engrave/setupFlow';
+import { jobVise } from '@/engine/cnc/fixture';
+import { rotaryBoxForRod } from '@/engine/cnc/stockStart';
+import { useEngraveJobStore } from '@/store/engraveJobStore';
 import { jobTool, toSetup } from '@/engine/cnc/engrave/jobSetup';
 import { flatEndMill } from '@/engine/cnc/tool';
 import { Z1 } from '@/engine/cnc/machine';
@@ -39,6 +43,7 @@ import {
   arcToAngle,
   aroundOpeningRadius,
   facetTerm,
+  rotaryFreeSpan,
   rotaryMapOf,
   type RotaryMap,
 } from '@/engine/cnc/rotary/wrap';
@@ -259,6 +264,66 @@ describe('#724 B2 — a rapid never passes through material', () => {
     } finally {
       session.dispose();
     }
+  }, 120_000);
+});
+
+// ---- #724 B3 — the shipped layout can be cut ------------------------------------
+
+describe('#724 B3 — the shipped layout lands on the free span', () => {
+  /**
+   * The exercise's blocker: a ⌀20 × 100 rod in the chuck, every default, and the shipped label at
+   * X 50 — the 100 mm plate's middle. On the map that is 50 mm from the jaws, where "Zoomba" at
+   * its default reaches X 80.171 and runs into the tailstock's band (75–85). The wizard's own
+   * write now places the layout on the free span's centre (39), so the default job its own
+   * defaults produce is a cuttable one.
+   */
+  it('refuses the shipped layout at X 50, and cuts it once the write places it on the span', () => {
+    const base = defaultEngraveJob();
+    const rod: EngraveJob = {
+      ...base,
+      stock: { ...base.stock, length: 20, width: 20, thickness: 100, material: 'pla', shape: 'cylinder', diameter: 20 },
+      // The exercise's item: one line at the shipped label's placement, 0.5 mm deep — a line
+      // sized for the 100 mm plate it was typed on (the step-4 seed fits the blank), so it is
+      // ~60 mm long and at X 50 it reaches into the tailstock's band.
+      labels: [{ ...(base.labels[0] as EngraveJob['labels'][number]), text: 'Zoomba', size: 12, depth: 0.5 }],
+      shapes: [],
+      toolKey: 'flat-1.0',
+    };
+
+    // The exercise's pre-state: the job is in the chuck (stick-out 85, tailstock in) and the
+    // label still sits where the plate default had it — X 50, the 100 mm plate's middle.
+    const chuck = defaultRotaryChuck(rod);
+    expect(chuck.stickout).toBe(85);
+    const inChuck = (labels: EngraveJob['labels']): EngraveJob => ({
+      ...rod,
+      stock: { ...rotaryBoxForRod(20, 100), material: 'pla' },
+      workholding: { kind: 'rotary-chuck', rotary: chuck },
+      labels,
+    });
+    const refused = generate(tl, inChuck(rod.labels));
+    expect(refused.ok).toBe(false);
+    const band = refused.findings.filter((f) => f.severity === 'error' && f.message.includes("tailstock's band"));
+    expect(band).toHaveLength(1);
+    // The sentence names the band it entered and the span: X 75–85 on this stick-out.
+    expect(band[0]!.message).toContain('X 75–85 mm');
+
+    // The store's own transition places the layout on the free span's centre, and it cuts.
+    const store = useEngraveJobStore.getState();
+    store.reset();
+    store.replace(rod);
+    store.setRotaryHolding(chuck, jobVise(rod));
+
+    const job = useEngraveJobStore.getState().job;
+    expect(job.workholding.kind).toBe('rotary-chuck');
+    expect(job.labels[0]!.position.x).toBe(39);
+    // The span's ends, from the one definition the findings judge: 3–75 for stick-out 85.
+    const map = rotaryMapOf(job);
+    expect(map).not.toBeNull();
+    expect(rotaryFreeSpan(map!)).toEqual({ from: 3, to: 75, centre: 39 });
+
+    const g = generate(tl, job);
+    expect(g.ok).toBe(true);
+    expect([...g.findings, ...(g.verify?.findings ?? [])].filter((f) => f.severity === 'error')).toEqual([]);
   }, 120_000);
 });
 

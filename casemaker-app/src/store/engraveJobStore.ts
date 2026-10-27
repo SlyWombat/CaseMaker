@@ -18,6 +18,7 @@ import {
 } from '@/engine/cnc/engrave/defaults';
 import { defaultStockProud, jobVise, seatedVise, todayISODate, viseForNewJob } from '@/engine/cnc/fixture';
 import { cylinderFrameOf, rodDimsOf, rotaryBoxForRod, standingBoxForRod } from '@/engine/cnc/stockStart';
+import { rotaryFreeSpan, rotaryMapOf } from '@/engine/cnc/rotary/wrap';
 import { sacrificialForNewJob } from '@/engine/cnc/sacrificial';
 import { resolveTool } from '@/engine/cnc/toolRegistry';
 import { cuttingDiameter } from '@/engine/cnc/tool';
@@ -514,6 +515,29 @@ function viseAfterStockEdit(job: EngraveJob, patch: Partial<EngraveJob['stock']>
  */
 function rodSizeOf(stock: EngraveJob['stock']): { diameter: number; length: number } | null {
   return rodDimsOf(stock);
+}
+
+/**
+ * #724 B3 — THE LAYOUT MOVES TO THE FREE SPAN when a job enters the chuck. A plate's item
+ * positions are meaningless on the map: X is millimetres from the jaw face along the stick-out,
+ * where the cuttable span runs from the jaws' keep-out to the tailstock's band. A layout centred
+ * on the stock's own middle reaches into the longer band (10 mm at the free end against 3 mm at
+ * the jaws) and the job is refused on every default. The layout keeps its arrangement and its Y —
+ * only its X centre is re-stated, on the span the findings pass judges (`rotaryFreeSpan`).
+ */
+function centredOnRotaryFreeSpan(job: EngraveJob): EngraveJob {
+  const map = rotaryMapOf(job);
+  if (map === null) return job;
+  const xs = [...job.labels, ...job.shapes].map((item) => item.position.x);
+  if (xs.length === 0) return job;
+  const centre = (Math.min(...xs) + Math.max(...xs)) / 2;
+  const shift = rotaryFreeSpan(map).centre - centre;
+  if (!(Math.abs(shift) > 1e-9)) return job;
+  const moved = <T extends { position: { x: number; y: number } }>(item: T): T => ({
+    ...item,
+    position: { ...item.position, x: item.position.x + shift },
+  });
+  return { ...job, labels: job.labels.map(moved), shapes: job.shapes.map(moved) };
 }
 
 /** The job with a source stamped on each of `keys` in `sources.stock` (#254). */
@@ -2367,11 +2391,15 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
         if (size === null) return job;
         const { shape: _shape, diameter: _diameter, ...box } = job.stock;
         if (rotary !== null) {
-          return {
+          const next: EngraveJob = {
             ...job,
             stock: { ...box, ...rotaryBoxForRod(size.diameter, size.length) },
             workholding: { kind: 'rotary-chuck', rotary: { ...rotary } },
           };
+          // The layout is re-stated on the map ONCE, at the frame change. A later edit to the
+          // chuck's own numbers (stick-out, jaw mode, tailstock) leaves items where the operator
+          // has them: the findings then say which band a moved item entered.
+          return job.workholding.kind === 'rotary-chuck' ? next : centredOnRotaryFreeSpan(next);
         }
         // Back in the vise: the standing rod again, with the answers' vise and sacrificial.
         if (job.workholding.kind !== 'rotary-chuck') return job;

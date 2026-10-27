@@ -36,9 +36,8 @@ import type { PartPlan } from '@/engine/cnc/engrave/partPlan';
 import { itemLabel, type JobFinding } from '@/engine/cnc/engrave/jobSetup';
 import { findItem } from '@/engine/cnc/engrave/recommendTool';
 import {
-  ROTARY_JAW_KEEP_OUT_MM,
-  ROTARY_TAILSTOCK_BAND_MM,
   jawsSentence,
+  rotaryFreeSpan,
   rotaryMapOf,
   tailstockSentence,
   throughCentreSentence,
@@ -122,7 +121,9 @@ export function rotaryJobFindings(
   // 3. The two end bands, judged on each item's OPENED region — the cut's own edge. A region that
   // reaches into a band is refused AT ITS ROW, with the same sentence the verifier would raise
   // against the moves (design §3.7, §6.4).
-  const tailEnd = map.stickout - ROTARY_TAILSTOCK_BAND_MM;
+  // The span the placement centres on too (`rotaryFreeSpan`): one definition, so moving the
+  // default layout into the free span cannot drift from the sentence that refuses a band.
+  const span = rotaryFreeSpan(map);
   for (const region of opened) {
     if (region.polygons.length === 0) continue;
     let xMin = Infinity;
@@ -137,7 +138,7 @@ export function rotaryJobFindings(
     const item = findItem(job, region.labelId);
     if (item === undefined) continue;
     const who = itemLabel(item);
-    if (xMin < ROTARY_JAW_KEEP_OUT_MM) {
+    if (xMin < span.from) {
       findings.push({
         severity: 'error',
         code: 'wrap-into-clamp',
@@ -145,7 +146,7 @@ export function rotaryJobFindings(
         message: `${who} ${jawsSentence(xMin)}.`,
       });
     }
-    if (map.tailstock && xMax > tailEnd) {
+    if (xMax > span.to) {
       findings.push({
         severity: 'error',
         code: 'wrap-into-clamp',

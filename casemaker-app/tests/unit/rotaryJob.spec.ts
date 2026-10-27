@@ -12,6 +12,7 @@ import { fileURLToPath } from 'node:url';
 
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { defaultRotaryChuck, applyHoldAnswers } from '@/engine/cnc/engrave/setupFlow';
+import { rotaryFreeSpan, rotaryMapOf } from '@/engine/cnc/rotary/wrap';
 import { freezePackage } from '@/engine/cnc/engrave/package';
 import { programHash } from '@/engine/cnc/programHash';
 import { parseEngraveJob } from '@/store/engraveJobSchema';
@@ -20,7 +21,7 @@ import { mountOptions } from '@/components/welcome/holdingMounts';
 import { buildTimeline, parseGcode, stubSetup, type Setup } from '@/engine/cnc';
 import { unliftTimeline } from '@/workers/geometry/sweep';
 import { MachineRecordSchema, type FixtureRecord, type MachineRecord } from '@/platform/locationClient';
-import type { EngraveJob, RotaryChuck, Sacrificial, ViseParams } from '@/types/engraveJob';
+import type { EngraveJob, EngraveShape, RotaryChuck, Sacrificial, ViseParams } from '@/types/engraveJob';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const LOCATION = join(HERE, 'fixtures', 'location-doc.json');
@@ -178,6 +179,81 @@ describe('the holding write (#240 §2)', () => {
     expect(after.workholding).toEqual({ kind: 'rotary-chuck', rotary: CHUCK });
     // The sacrificial is still the answers': it is not the holding kind.
     expect(after.sacrificial).toEqual(NONE);
+  });
+});
+
+// #724 B3 — the layout's X is re-stated on the free span at the frame change. The shipped labels
+// sit at X 50, the 100 mm plate's middle; on the map that is 50 mm from the jaws, and "Zoomba" at
+// its default reaches X 80.171 — inside the tailstock's band (75–85 for stick-out 85). Every
+// default job was refused at its row, so the default the app writes must be a cuttable one.
+describe('#724 B3 — entering the chuck lands the layout on the free span', () => {
+  const ROD = { length: 20, width: 20, thickness: 100, shape: 'cylinder' as const, diameter: 20, material: 'pla' as const };
+
+  /** The exercise's job: the shipped labels, on a ⌀20 × 100 rod standing in the vise. */
+  function rodJob(over: Partial<EngraveJob> = {}): EngraveJob {
+    const base = defaultEngraveJob();
+    return { ...base, stock: { ...base.stock, ...ROD }, ...over };
+  }
+
+  beforeEach(() => {
+    useEngraveJobStore.getState().reset();
+  });
+
+  it('moves the shipped layout from the rod’s middle (50) to the free span’s centre (39)', () => {
+    useEngraveJobStore.getState().replace(rodJob());
+    const chuck = defaultRotaryChuck(useEngraveJobStore.getState().job);
+    // Every default: grip 15, so stick-out 85, tailstock in — the exercise's job.
+    expect(chuck.stickout).toBe(85);
+    expect(chuck.tailstock).toBe(true);
+    useEngraveJobStore.getState().setRotaryHolding(chuck, VISE);
+
+    const job = useEngraveJobStore.getState().job;
+    // The free span is 3–75 (jaws' keep-out to the tailstock's band); its centre is 39.
+    const map = rotaryMapOf(job);
+    expect(map).not.toBeNull();
+    expect(rotaryFreeSpan(map!)).toEqual({ from: 3, to: 75, centre: 39 });
+    expect(job.labels.map((l) => l.position.x)).toEqual([39, 39, 39]);
+    // Y is the map's around axis — arc millimetres — and the frame change leaves it alone.
+    expect(job.labels.map((l) => l.position.y)).toEqual([43, 26, 10]);
+  });
+
+  it('with the tailstock out the span runs to the stick-out, and the layout follows', () => {
+    useEngraveJobStore.getState().replace(rodJob());
+    const chuck = { ...defaultRotaryChuck(useEngraveJobStore.getState().job), tailstock: false };
+    useEngraveJobStore.getState().setRotaryHolding(chuck, VISE);
+    expect(useEngraveJobStore.getState().job.labels.map((l) => l.position.x)).toEqual([44, 44, 44]);
+  });
+
+  it('moves labels and shapes by ONE shift, keeping the arrangement', () => {
+    const shape: EngraveShape = {
+      id: 'shp-1',
+      kind: 'rect',
+      position: { x: 70, y: 20 },
+      rotation: 0,
+      depth: 0.5,
+      enabled: true,
+      width: 10,
+      height: 6,
+      cornerRadius: 0,
+    };
+    useEngraveJobStore.getState().replace(rodJob({ shapes: [shape] }));
+    useEngraveJobStore.getState().setRotaryHolding(defaultRotaryChuck(useEngraveJobStore.getState().job), VISE);
+
+    const job = useEngraveJobStore.getState().job;
+    // The layout ran 50–70, centre 60; the span's centre is 39, so every item moves by −21.
+    expect(job.labels.map((l) => l.position.x)).toEqual([29, 29, 29]);
+    expect(job.shapes[0]!.position.x).toBe(49);
+    expect(job.shapes[0]!.position.y).toBe(20);
+  });
+
+  it('a later edit to the chuck’s own numbers moves nothing', () => {
+    useEngraveJobStore.getState().replace(rodJob());
+    useEngraveJobStore.getState().setRotaryHolding(defaultRotaryChuck(useEngraveJobStore.getState().job), VISE);
+    const placed = useEngraveJobStore.getState().job.labels.map((l) => l.position.x);
+
+    const shorter = { ...defaultRotaryChuck(useEngraveJobStore.getState().job), stickout: 70, tailstock: false };
+    useEngraveJobStore.getState().setRotaryHolding(shorter, VISE);
+    expect(useEngraveJobStore.getState().job.labels.map((l) => l.position.x)).toEqual(placed);
   });
 });
 

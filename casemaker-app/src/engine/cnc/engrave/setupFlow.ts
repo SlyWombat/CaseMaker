@@ -39,6 +39,7 @@ import type {
   StockMaterial,
   ViseParams,
 } from '@/types/engraveJob';
+import { rodDimsOf } from '@/engine/cnc/stockStart';
 
 /** One material the flow offers: the value it writes into the job and the word it shows. */
 export interface MaterialOption {
@@ -127,10 +128,12 @@ export function rodAxisOf(
   stock: Pick<EngraveJob['stock'], 'length' | 'width' | 'thickness' | 'shape' | 'diameter'>,
 ): { length: number; diameter: number } {
   // A standing rod is D × D × L, an axis-frame rod is L × D × D (the same two boxes
-  // `rotaryBoxForRod`/`standingBoxForRod` own); the diameter is the box's own number.
-  return stock.shape === 'cylinder'
-    ? { length: stock.length, diameter: stock.diameter ?? stock.width }
-    : { length: stock.thickness, diameter: stock.width };
+  // `rotaryBoxForRod`/`standingBoxForRod` own). #724 B3 — the rule that tells them apart is
+  // `rodDimsOf`'s, and there is only one: `shape: 'cylinder'` does not say WHICH box the job is
+  // in, so reading `length` off it took a typed standing rod's DIAMETER for its length and gave a
+  // 100 mm rod a 5 mm stick-out. The fallback is the old non-round reading, for a box the chuck
+  // never holds (its row is disabled for anything but round stock).
+  return rodDimsOf(stock) ?? { length: stock.thickness, diameter: stock.width };
 }
 
 export function defaultRotaryChuck(

@@ -96,6 +96,20 @@ export function isRotaryJob(job: EngraveJob): boolean {
   return rotaryMapOf(job) !== null;
 }
 
+/**
+ * The span of the map a cut may use, mm along X (#724 B3): past the jaws' keep-out at the jaw
+ * face, and short of the tailstock's band when the tailstock is in. Its CENTRE is where a layout
+ * belongs by default — the stock's own middle is not it, because the two bands are not equal
+ * (3 mm at the jaws against 10 mm at the free end), and a layout centred on the stock reaches
+ * into the longer one. The findings pass judges the same span, so a placement and the sentence
+ * that refuses it cannot disagree.
+ */
+export function rotaryFreeSpan(map: RotaryMap): { from: number; to: number; centre: number } {
+  const from = Math.min(ROTARY_JAW_KEEP_OUT_MM, map.stickout);
+  const to = map.tailstock ? Math.max(from, map.stickout - ROTARY_TAILSTOCK_BAND_MM) : map.stickout;
+  return { from, to, centre: (from + to) / 2 };
+}
+
 /** Arc length at `radius`, mm → unwound degrees (R9: never wrapped, never moduloed). */
 export function arcToAngle(arc: number, radius: number): number {
   return (arc / radius) * (180 / Math.PI);
