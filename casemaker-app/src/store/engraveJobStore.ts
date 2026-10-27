@@ -99,6 +99,8 @@ import type {
 import { pruneRunLog } from '@/engine/cnc/engrave/package';
 import { withSource } from '@/engine/cnc/engrave/jobSources';
 import { parseEngraveJob, type ParseEngraveJobResult } from './engraveJobSchema';
+import { machineForJob } from '@/platform/bedProfiles';
+import { useLocationStore } from './locationStore';
 import { useSettingsStore } from './settingsStore';
 
 /**
@@ -264,7 +266,12 @@ function persist(job: EngraveJob): void {
  */
 function newDefaultJob(): EngraveJob {
   const { fixtures, margins } = useSettingsStore.getState();
-  const job = defaultEngraveJob(viseForNewJob(fixtures.vise), margins);
+  // #726 W21 — the house's MEASURED vise seeds a new job when the operator's settings hold none:
+  // the machine's own `fixtures.vise` is decision 28's measured tier, below the saved one. Without
+  // this the Design panel read "shipped · not measured here" on a machine that HAD measured it.
+  const machine = machineForJob(useLocationStore.getState().location, null);
+  const houseVise = machine?.fixtures?.vise ?? undefined;
+  const job = defaultEngraveJob(viseForNewJob(fixtures.vise ?? houseVise), margins);
   // #508 — a fresh job's default vise is seated on the stock it is about to cut: `viseForNewJob`
   // knows no stock, so without this the job would carry `DEFAULT_VISE`'s placeholder proud.
   const vise = seatedVise(jobVise(job), job.stock.thickness);

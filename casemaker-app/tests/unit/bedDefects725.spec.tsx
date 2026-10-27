@@ -737,3 +737,41 @@ describe('#730 — the bed facts follow the job’s machine', () => {
     expect((screen.getByTestId('engrave-generate') as HTMLButtonElement).disabled).toBe(true);
   });
 });
+
+describe('#726 W21 — the house’s measured vise seeds a new job', () => {
+  it('a new job takes the machine’s measured vise when the operator saved none', () => {
+    // The fixture machine carries `fixtures.vise` source 'measured' (2026-10-13). A fresh job used
+    // to start from the shipped default and the Design panel read "shipped · not measured here".
+    seedLocation(bedMachine({ vise: true }));
+    act(() => useEngraveJobStore.getState().reset());
+    const held = useEngraveJobStore.getState().job.workholding;
+    expect(held.kind).toBe('vise');
+    if (held.kind === 'vise') {
+      expect(held.vise.source).toBe('measured');
+      expect(held.vise.measuredAt).toBe('2026-10-13T12:00:00.000Z');
+      expect(held.vise.fixedJawThickness).toBe(10);
+    }
+  });
+
+  it('an operator’s SAVED vise still wins over the machine’s', () => {
+    seedLocation(bedMachine({ vise: true }));
+    act(() => {
+      useSettingsStore.getState().setVise({
+        seat: 'ledge',
+        stockProud: 2.5,
+        fixedJawThickness: 12,
+        movingJawThickness: 12,
+        jawLength: 90,
+        jawStartY: -9,
+        uncertainty: 0.2,
+        source: 'saved',
+      });
+    });
+    act(() => useEngraveJobStore.getState().reset());
+    const held = useEngraveJobStore.getState().job.workholding;
+    if (held.kind === 'vise') {
+      expect(held.vise.source).toBe('saved');
+      expect(held.vise.fixedJawThickness).toBe(12);
+    }
+  });
+});
