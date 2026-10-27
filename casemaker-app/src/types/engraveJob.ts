@@ -5,6 +5,7 @@ import type { FastenerSize } from '@/engine/compiler/fasteners';
 import type { Tool } from '@/engine/cnc/tool';
 import type { Mount, MountSpec, Orientation, RemountStep } from '@/engine/cnc/setups/types';
 import type { RegistrationPlan } from '@/engine/cnc/registration/plan';
+import type { ClampPlacement } from '@/engine/cnc/mounts/bracket';
 
 /**
  * The CNC-2 job document (#200): a rectangular blank of wood held in the vise with text
@@ -1066,14 +1067,90 @@ export interface RotaryChuck {
 }
 
 /**
- * How the job's stock is held. A discriminated union on `kind` (#240 §1): the vise keeps exactly
- * the shape every pre-rotary document has, and the rotary chuck is the module's own arm. Readers
- * that need the vise's numbers for a non-vise job go through `jobVise` (`engine/cnc/fixture.ts`),
- * which answers the neutral shipped vise rather than inventing a measurement.
+ * A job held on the bed under tape (#707 BM-1, `docs/design/bed-mounts-flow.md` §3.4).
+ *
+ * The values are a SNAPSHOT of the setup the job was authored against — the roll's width, the
+ * tape's thickness under the stock, where the stock was expected — so a later edit to the bed
+ * profile does not silently rewrite a job already cut. `source` says which of the three they are
+ * (decision 28: a default is never a measurement).
+ *
+ * The BOARD UNDER the stock (a 2 mm MDF board taped to the bed, the stock taped to it) is
+ * `sacrificial.under` — the existing record, with its own thickness and `attach: 'tape'`
+ * (`bed-mounts-flow.md` §3.2's write table). It is deliberately NOT a second field here: two records of
+ * one board could disagree, and every engine reader (`through-needs-board`, the sweep's second
+ * body, the stack the registration expects) already reads that one.
+ */
+export interface TapeHold {
+  /** The roll's width, mm — the house roll (Makera's 20 mm tape, §5). */
+  width: Mm;
+  /** The tape's thickness under the stock, mm — typed on the bed profile; 0.1 mm is the design's. */
+  thickness: Mm;
+  /** How far in from every edge the strips stop, mm (2 mm, §3.4: the edge scans land just past them). */
+  inset: Mm;
+  /**
+   * Where on the surface the stock is expected — its front-left corner in MACHINE X/Y, mm — or
+   * `null` for the middle of the surface. The probe finds the real position; this is the
+   * expectation the picture draws and the registration starts from.
+   */
+  where: { x: Mm; y: Mm } | null;
+  /** What the tape keeps square: the bed's front edge. The program is never rotated (§3.4). */
+  squareTo: 'front';
+  /** Where these numbers came from — the same provenance rule as the vise (decision 28). */
+  source: 'default' | 'saved' | 'measured';
+}
+
+/**
+ * A job pushed into the bracket's corner and clamped (#707 BM-1, §3.6).
+ *
+ * The CLAMP PLACES are the job's own: the CAM, the verifier and the simulation check these, never
+ * the shop's default pair (the defect #707 found in `bracketMount`). Sizes — length, width, reach,
+ * height — stay the shop's `clamps.top*` defaults with their provenance, and the bracket's own
+ * sizes come from `bracketSettings` the same way; §9 moves the PLACES into the job, not the sizes.
+ */
+export interface BracketHold {
+  /** The anchor the bracket is pinned at — Makera's origin is "relative to Anchor 1" (§5). */
+  anchor: 1 | 2;
+  /** The bracket fitted, as its fixture record names it — `thin`, the Makera kit's L-bracket. */
+  variant: string;
+  /**
+   * The clamp places, on the free edges: `back` and `right` (the bracket holds the front and the
+   * left). One to four, in the order the operator sees them.
+   */
+  clamps: ClampPlacement[];
+  /** Where these came from — the same provenance rule as the vise (decision 28). */
+  source: 'default' | 'saved' | 'measured';
+}
+
+/**
+ * The bed profile a job was set up on (#513, folded into the bed-mounts umbrella #707). The
+ * version is the `at` of the profile's last history line (bed-mounts-flow §10 Q12): the profile
+ * carries no version field, and every change to it adds a line.
+ */
+export interface JobBedBinding {
+  /** The active bed profile's id. */
+  profileId: string;
+  /** The profile's version: the `at` of its last history line. */
+  profileVersion: string;
+}
+
+/**
+ * How the job's stock is held. A discriminated union on `kind` (#240 §1, #707 BM-1): the vise
+ * keeps exactly the shape every pre-rotary document has; the rotary chuck and the two bed mounts
+ * (taped, and the bracket with its clamps) are the arms added since. The kind words `tape` and
+ * `bracket` are the ones the setups engine, the registration planner and `bracketMount` already
+ * use (`Mount = 'vise' | 'bracket' | 'tape'`), so the job and its first setup name the mount one
+ * way.
+ *
+ * Readers that need the VISE's numbers for a non-vise job go through `jobVise`
+ * (`engine/cnc/fixture.ts`), which answers the neutral shipped vise rather than inventing a
+ * measurement — and the vise-only checks (jaw reach, jaw collision, the vise envelope) are the
+ * vise arm's, skipped for the others.
  */
 export type JobWorkholding =
   | { kind: 'vise'; vise: ViseParams }
-  | { kind: 'rotary-chuck'; rotary: RotaryChuck };
+  | { kind: 'rotary-chuck'; rotary: RotaryChuck }
+  | { kind: 'tape'; tape: TapeHold }
+  | { kind: 'bracket'; bracket: BracketHold };
 
 /**
  * A sacrificial board UNDER the part (#213): material the job may cut into, with the work
@@ -1595,6 +1672,13 @@ export interface EngraveJob {
    * field read the old keys and describe setup 0.
    */
   setups?: JobSetup[];
+  /**
+   * The bed profile this job was set up on (#513, folded into #707 BM-1). OPTIONAL and absent on
+   * every document that predates it: an older job keeps its exact shape and round-trips
+   * byte-for-byte. Its readers (the `bed-changed` findings, the receipt) are BM-11's; the field is
+   * here so a bed job can say WHERE it was set up from the moment it is authored.
+   */
+  bed?: JobBedBinding;
   /** Material that must remain under the deepest cut, mm. */
   minFloor: Mm;
   /** No label may come closer than this to a stock edge, mm (measured from the cut edge). */

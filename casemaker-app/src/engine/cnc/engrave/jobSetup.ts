@@ -38,7 +38,10 @@ import { textureNumbers, textureStrokes } from './texture';
 import { fluteNumbers, fluteOperationName } from './flute';
 import { prismNumbers } from './prism';
 import { reliefNumbers } from '@/engine/cnc/cam/relief';
+import { bracketSettings, defaultClampPlacements, type ClampPlacement, type StockSize } from '@/engine/cnc/mounts/bracket';
+import type { ShopDefaults } from '@/platform/defaultsClient';
 import type {
+  BracketHold,
   EngraveAnyItem,
   EngraveChamfer,
   EngraveCutout,
@@ -51,9 +54,10 @@ import type {
   EngraveThread,
   EngraveTraceItem,
   JobSetup,
+  TapeHold,
   TextureMark,
 } from '@/types/engraveJob';
-import type { Mount, Orientation } from '@/engine/cnc/setups/types';
+import type { Mount, MountSpec, Orientation } from '@/engine/cnc/setups/types';
 
 /**
  * The two pure derivations that turn an `EngraveJob` into the emulator's inputs (#200).
@@ -443,8 +447,21 @@ export function jobTool(job: EngraveJob): Tool | null {
  * on the part's own edges exactly as before.
  */
 export function workholdingFor(job: EngraveJob): Workholding {
-  const { length, thickness } = job.stock;
+  const { length, width, thickness } = job.stock;
   const shift = viseJawShift(job.sacrificial);
+  // #707 BM-1 — the BED mounts are their own workholdings, and the registration planner already
+  // knows both: tape gives no datum at all (left edge twice, front edge), the bracket gives XY and
+  // squareness from its corner. Reading them here is what makes a bed job's plan the bed's plan
+  // instead of the vise's.
+  if (job.workholding.kind === 'tape') {
+    // The tape holds along the whole underside: the contact IS the stock's footprint.
+    return { kind: 'tape-down', contact: rectProfile(length, width) };
+  }
+  if (job.workholding.kind === 'bracket') {
+    // Makera's origin is "relative to Anchor 1, X offset 0, Y offset 0" (§5): the bracket's corner
+    // IS the stock's front-left corner until the offset is measured (BM-9's confirming touch).
+    return { kind: 'anchor-bracket', anchor: job.workholding.bracket.anchor, offset: [0, 0] };
+  }
   // #240 — slice 1 is the MODEL, not the rotary cut. A job in the chuck is read through the vise
   // answers' neutral seat (`jobVise`), so the emulator, the registration plan and the part view
   // keep one flat frame until slice 2's unrolled map and slice 3's rotary run sheet replace it.
@@ -528,7 +545,10 @@ export function jobSetups(job: EngraveJob): JobSetup[] {
       // A copy: the derived setup is built fresh on every call, so no caller can mutate the
       // identity through one job and change the answer for the next.
       orientation: { ...IDENTITY_ORIENTATION },
-      mount: { kind: 'vise' },
+      // #707 BM-1 — the derived setup's mount is the JOB's, in the setups engine's own word; a
+      // taped or bracket job's one setup is that mount, and its `board` flag says the stock stands
+      // on the sacrificial under-board.
+      mount: derivedMount(job),
       itemIds,
       // #516 item 5 — no cutter chosen yet means no tools for the implicit setup; the fallback in
       // `setupTools` then posts no program rather than one that names the empty key.
@@ -548,9 +568,85 @@ export function jobSetups(job: EngraveJob): JobSetup[] {
  * (`bracketMount` answers `null`). A caller reading a program passes its `setupIndex - 1`.
  */
 export function jobMount(job: EngraveJob, setupIndex = 0): Mount {
+  // A stored setup's mount is the document's own (#419), so it wins where the document reaches.
+  const stored = job.setups?.[setupIndex]?.mount.kind;
+  if (stored !== undefined) return stored;
+  // #707 BM-1 — a derived setup for a bed job is the job's own mount: the workholding names it
+  // with the same word the setups engine does (`tape` / `bracket`).
+  if (job.workholding.kind === 'tape' || job.workholding.kind === 'bracket') return job.workholding.kind;
   // #240 — a derived setup for a rotary job is still read as the flat vise in slice 1 (see
-  // `workholdingFor`); a stored setup's mount is the document's own.
-  return job.setups?.[setupIndex]?.mount.kind ?? 'vise';
+  // `workholdingFor`).
+  return 'vise';
+}
+
+/** The mount the implicit setup carries (#707 BM-1): `jobMount`'s word, with the board flag. */
+function derivedMount(job: EngraveJob): MountSpec {
+  const kind = jobMount(job);
+  return kind === 'vise' ? { kind } : { kind, board: job.sacrificial.under !== null };
+}
+
+/**
+ * The clamp places THIS JOB states, or null when it is not a bracket job (#707 BM-1).
+ *
+ * The one reader the CAM, the verifier, the simulation and the registration share, so a job's own
+ * clamps are what is checked and the shop's default pair is only ever the STARTING PLACE a new
+ * bracket job is given (`defaultBracketHold`).
+ */
+export function clampPlacementsFor(job: Pick<EngraveJob, 'workholding'>): ClampPlacement[] | null {
+  return job.workholding.kind === 'bracket' ? job.workholding.bracket.clamps : null;
+}
+
+/**
+ * The tape a new taped job starts from (#707 §5, each number with its source):
+ *
+ *   - width 20 mm — Makera's 20 mm double-sided tape (the accessory list); the house roll's own
+ *     `consumables.tape.widthMm` replaces it when the bed profile states one (R);
+ *   - thickness 0.1 mm — TYPED on the bed profile, `/Fabrication.md` §7.3 gives 0.1–0.2 for this
+ *     kind of tape; measured only by a bench coupon;
+ *   - inset 2 mm — Case Maker's own (the edge scans land just past each edge, §3.4), so tape past
+ *     an edge would be read as a step.
+ */
+export interface TapeDefaults {
+  widthMm: number;
+  thicknessMm: number;
+  insetMm: number;
+  /** Where these numbers came from, in words, for the Technical fold's provenance line. */
+  provenance: string;
+}
+
+export const TAPE_DEFAULTS: TapeDefaults = {
+  widthMm: 20,
+  thicknessMm: 0.1,
+  insetMm: 2,
+  provenance: "Makera's 20 mm tape; 0.1 mm typed, not measured; 2 mm in from every edge",
+};
+
+/** A new taped job's holding: the design's defaults, `source: 'default'`, nothing measured. */
+export function defaultTapeHold(defaults: TapeDefaults = TAPE_DEFAULTS): TapeHold {
+  return {
+    width: defaults.widthMm,
+    thickness: defaults.thicknessMm,
+    inset: defaults.insetMm,
+    where: null,
+    squareTo: 'front',
+    source: 'default',
+  };
+}
+
+/**
+ * A new bracket job's holding: the Makera kit's thin bracket at anchor 1, with the QuickStart's
+ * default clamp places (two on the back edge, `clamps.topInFromCornerMm` in from each corner).
+ * `source: 'default'` — none of it is measured, and the sizes behind the places stay the shop's
+ * own with their provenance.
+ */
+export function defaultBracketHold(stock: StockSize, defaults: ShopDefaults | null): BracketHold {
+  const b = bracketSettings(defaults);
+  return {
+    anchor: 1,
+    variant: 'thin',
+    clamps: defaultClampPlacements(stock, b.settings),
+    source: 'default',
+  };
 }
 
 /**
@@ -564,15 +660,21 @@ export function toSetup(job: EngraveJob, machine: MillProfile, fixture?: Fixture
   const { length, width, thickness } = job.stock;
   const vise = jobVise(job);
   const workholding = workholdingFor(job);
+  // #707 BM-1 — the vise's envelope is the VISE's. A bracket job's obstacles are its arms and THE
+  // JOB'S clamps, which the caller passes as `fixture` because their sizes live in the location's
+  // defaults; a tape job puts nothing above the part. Handing a bed job the vise's jaws would
+  // check it against a fixture that is not in the machine — the same false refusal the bracket
+  // defect produced, one step earlier.
+  const defaultFixture = jobMount(job) === 'vise' ? viseEnvelope(job.stock, vise, job.sacrificial) : undefined;
   return stubSetup(
     { kind: 'prism', outline: rectProfile(length, width), thickness },
     workholding,
     // The default job's tool is number 1 (`flat-1.0`); the starting tool is stated because a
     // program cannot know the machine's active tool (/Simulation.md §1.1). The fixture is the
-    // vise's obstacle envelope (#203), carried with its provenance so the emulator never
+    // mount's obstacle envelope (#203), carried with its provenance so the emulator never
     // mistakes a default for a measurement. The sacrificial model rides along (#213) so the
     // sweep can model it as a second body; absent, every pre-#213 caller is unchanged.
-    { startingTool: 1, fixture: fixture ?? viseEnvelope(job.stock, vise, job.sacrificial), sacrificial: job.sacrificial },
+    { startingTool: 1, fixture: fixture ?? defaultFixture, sacrificial: job.sacrificial },
     machine,
   );
 }

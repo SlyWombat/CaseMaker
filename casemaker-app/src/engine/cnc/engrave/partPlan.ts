@@ -1694,6 +1694,13 @@ const JAW_TIE_EPSILON: Mm = 1e-6;
  * `validateJob`, `stockProud − clearance` in the recommendation — which is where it belongs.
  */
 export function labelJawReach(job: EngraveJob, label: EngraveLabel): JawReach {
+  // #707 BM-1 — A BED JOB HAS NO JAWS. The reach is the vise's: the floor it recommends ("the line
+  // comes within … mm of the fixed jaw") is a clearance over a jaw that a taped or bracket job does
+  // not have, and the neutral vise `jobVise` answers with would invent one around the part. No
+  // reach, so no jaw floor is recommended from it — the mount's own obstacles are BM-6's checks.
+  if (job.workholding.kind === 'tape' || job.workholding.kind === 'bracket') {
+    return { jaw: 'fixed', gap: Infinity, reaches: false, overJaw: false };
+  }
   const measure = labelGlyphMeasure(job.customFonts ?? []);
   const box = labelFootprint(label, inkBoxOf(label.text, label.font, label.weight, label.size, measure));
   // The box's own bounds, as an axis-aligned box that CONTAINS it: a label's rotation turns the

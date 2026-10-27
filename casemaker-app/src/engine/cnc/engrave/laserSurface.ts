@@ -30,7 +30,7 @@ import type { EngraveJob } from '@/types/engraveJob';
 import { jobMachine } from '@/engine/cnc/calibration';
 import { jobVise } from '@/engine/cnc/fixture';
 import { bracketMount } from '@/engine/cnc/mounts/bracket';
-import { jobMount } from './jobSetup';
+import { clampPlacementsFor, jobMount } from './jobSetup';
 
 const r3 = (n: number) => Math.round(n * 1000) / 1000;
 
@@ -75,6 +75,9 @@ export function laserSurfaceBound(
       jobMount(job, setupIndex),
       defaults,
       job.sacrificial.under?.thickness ?? 0,
+      // #707 BM-1 — the job's own clamp places (per-setup clamp places are not modelled; the job
+      // states its bracket's clamps once, and a non-bracket mount answers null here anyway).
+      clampPlacementsFor(job),
     );
     for (const o of mount?.obstacles ?? []) {
       candidates.push({ label: o.label, machineZ: r3(surfaceMachineZ + o.topZ) });

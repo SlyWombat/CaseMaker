@@ -1030,9 +1030,66 @@ const rotaryChuckSchema = z.object({
 });
 
 /**
- * How the stock is held (#240 §1). The same two arms as {@link JobWorkholding}, discriminated on
- * `kind`: the vise arm is byte-for-byte the pre-rotary object, and the rotary arm carries the
- * chuck. Version 3 is the first version that accepts the rotary arm; v1/v2 stay vise-only.
+ * One clamp's place on a free edge (#707 §3.6). The place only — its size, reach and height are
+ * the shop's `clamps.top*` defaults with their provenance, not the job's.
+ */
+const clampPlacementSchema = z.object({
+  edge: z
+    .enum(['back', 'right'])
+    .describe("The free edge the clamp holds: 'back' or 'right'. The bracket holds the front and the left."),
+  at: z
+    .number()
+    .finite()
+    .nonnegative()
+    .describe(
+      "The clamp's centre along its edge, in millimetres from the edge's left end (back edge) or front end (right edge).",
+    ),
+});
+
+/**
+ * A job held on the bed under tape (#707 BM-1, `docs/design/bed-mounts-flow.md` §3.4). The board
+ * UNDER the stock is `sacrificial.under`, not a field here — one record of one board.
+ */
+const tapeHoldSchema = z.object({
+  width: z.number().finite().positive().describe('The tape roll width in millimetres.'),
+  thickness: z.number().finite().positive().describe("The tape's thickness under the stock, in millimetres."),
+  inset: z
+    .number()
+    .finite()
+    .nonnegative()
+    .describe('How far in from every edge the tape strips stop, in millimetres.'),
+  where: z
+    .object({
+      x: z.number().finite().describe("Machine X of the stock's expected front-left corner, in millimetres."),
+      y: z.number().finite().describe("Machine Y of the stock's expected front-left corner, in millimetres."),
+    })
+    .nullable()
+    .describe('Where on the surface the stock is expected, in machine X/Y, or null for the middle of the surface.'),
+  squareTo: z.literal('front').describe("What the tape keeps square: the bed's front edge. The program is never rotated."),
+  source: z
+    .enum(['default', 'saved', 'measured'])
+    .describe('Where these tape numbers came from: a default, a saved setup, or a measurement.'),
+});
+
+/** A job pushed into the bracket's corner and clamped (#707 BM-1, §3.6). */
+const bracketHoldSchema = z.object({
+  anchor: z.union([z.literal(1), z.literal(2)]).describe('The anchor the bracket is pinned at; Makera\'s origin is relative to Anchor 1.'),
+  variant: z.string().min(1).describe("The bracket fitted, as its fixture record names it — 'thin' is the Makera kit's L-bracket."),
+  clamps: z
+    .array(clampPlacementSchema)
+    .min(1)
+    .max(4)
+    .describe('The clamp places the job was set up with, on the free edges. One to four.'),
+  source: z
+    .enum(['default', 'saved', 'measured'])
+    .describe('Where these bracket numbers came from: a default, a saved setup, or a measurement.'),
+});
+
+/**
+ * How the stock is held (#240 §1, #707 BM-1). The four arms of {@link JobWorkholding},
+ * discriminated on `kind`: the vise arm is byte-for-byte the pre-rotary object; the rotary arm
+ * carries the chuck; `tape` and `bracket` are the bed mounts (the setups engine's own words).
+ * Version 3 is the first version that accepts any arm beyond the vise; v1/v2 stay vise-only.
  */
 const jobWorkholdingSchema = z.discriminatedUnion('kind', [
   z.object({
@@ -1043,7 +1100,24 @@ const jobWorkholdingSchema = z.discriminatedUnion('kind', [
     kind: z.literal('rotary-chuck').describe("Held in the rotary module's three-jaw chuck."),
     rotary: rotaryChuckSchema.describe('The chuck facts the job was set up with.'),
   }),
+  z.object({
+    kind: z.literal('tape').describe('Held on the bed under tape.'),
+    tape: tapeHoldSchema.describe('The tape the job was set up with.'),
+  }),
+  z.object({
+    kind: z.literal('bracket').describe('Held on the bed pushed into the bracket\'s corner and clamped.'),
+    bracket: bracketHoldSchema.describe('The bracket and the clamp places the job was set up with.'),
+  }),
 ]);
+
+/** The bed profile a job was set up on (#513, folded into #707 BM-1). */
+const jobBedBindingSchema = z.object({
+  profileId: z.string().min(1).describe('The active bed profile\'s id.'),
+  profileVersion: z
+    .string()
+    .min(1)
+    .describe("The profile's version: the time of its last history line, which is how a change to the bed is detected."),
+});
 
 /**
  * One side strip (#213). `height` is 'flush' (level with the part's top) or a positive height
@@ -2107,6 +2181,12 @@ const engraveJobV3Schema = engraveJobV2Schema
     package: frozenPackageSchema
       .optional()
       .describe('The programs and setups frozen by Cut; omit before a cut is frozen.'),
+    // #707 BM-1 — the bed profile the job was set up on. OPTIONAL and not defaulted, so every
+    // document that predates the bed mounts keeps its exact shape; `schemaVersion` stays 3 because
+    // nothing existing is renamed or retyped.
+    bed: jobBedBindingSchema
+      .optional()
+      .describe('The bed profile the job was set up on, with its version; omit for a job that names none.'),
     runLog: z
       .array(jobRunLogEntrySchema)
       .optional()

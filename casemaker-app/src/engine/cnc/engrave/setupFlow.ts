@@ -205,6 +205,17 @@ export function sacrificialForChoice(choice: SacrificialChoice, current: Sacrifi
 }
 
 /**
+ * #707 BM-1 — A BED JOB STAYS ON THE BED. The answers describe the vise (and, since #240, the
+ * rotary); writing them onto a taped or bracket job would silently change the fixture under the
+ * operator — the rotary guard's sibling, one arm further out. Selecting another holding is the
+ * store's explicit write, which the bed options get in BM-2; these functions never perform that
+ * conversion.
+ */
+function bedHolding(job: EngraveJob): JobWorkholding | null {
+  return job.workholding.kind === 'tape' || job.workholding.kind === 'bracket' ? job.workholding : null;
+}
+
+/**
  * The one write path (#254). Applies every answer to the job and stamps the stock provenance. The
  * vise and sacrificial carry their own `source`, so nothing this function writes is untagged — the
  * acceptance the guided setup promises. #516: the cutter is NOT an answer — the flow collects the
@@ -213,9 +224,10 @@ export function sacrificialForChoice(choice: SacrificialChoice, current: Sacrifi
  */
 export function applyAnswers(job: EngraveJob, a: SetupAnswers): EngraveJob {
   const workholding: JobWorkholding =
-    a.workholding === 'rotary'
+    bedHolding(job) ??
+    (a.workholding === 'rotary'
       ? { kind: 'rotary-chuck', rotary: { ...a.rotary } }
-      : { kind: 'vise', vise: { ...a.vise } };
+      : { kind: 'vise', vise: { ...a.vise } });
   return {
     ...job,
     stock: { ...a.stock },
@@ -244,9 +256,8 @@ export function applyAnswers(job: EngraveJob, a: SetupAnswers): EngraveJob {
  */
 export function applyHoldAnswers(job: EngraveJob, a: SetupAnswers): EngraveJob {
   const workholding: JobWorkholding =
-    job.workholding.kind === 'rotary-chuck'
-      ? job.workholding
-      : { kind: 'vise', vise: { ...a.vise } };
+    bedHolding(job) ??
+    (job.workholding.kind === 'rotary-chuck' ? job.workholding : { kind: 'vise', vise: { ...a.vise } });
   return {
     ...job,
     workholding,

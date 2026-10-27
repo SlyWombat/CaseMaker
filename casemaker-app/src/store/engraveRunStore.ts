@@ -22,7 +22,7 @@ import type { EngraveGenerated, EngraveShopOpts } from '@/workers/sim/engraveGen
 import type { OraclePredicted, OracleReport } from '@/engine/cnc/engrave/oracle';
 import type { SimDiagnostic } from '@/workers/sim/session';
 import type { SimStatus } from './simStore';
-import { jobMount, jobTool, toSetup } from '@/engine/cnc/engrave/jobSetup';
+import { clampPlacementsFor, jobMount, jobTool, toSetup } from '@/engine/cnc/engrave/jobSetup';
 import { bracketMount } from '@/engine/cnc/mounts/bracket';
 import { isVShape } from '@/engine/cnc/vProfile';
 import { feedCatalogueRows, resolvedFeedsTable } from '@/engine/cnc/feeds';
@@ -245,6 +245,9 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
       jobMount(job),
       shopDefaults,
       job.sacrificial.under?.thickness ?? 0,
+      // #707 BM-1 — the job's OWN clamps. The default pair is only the starting place a new
+      // bracket job is given, never what an edited job is checked against.
+      clampPlacementsFor(job),
     );
     const shop: EngraveShopOpts = {
       lostDetailWarnRatio: shopDefault('engrave.lostDetailWarnRatio').value,

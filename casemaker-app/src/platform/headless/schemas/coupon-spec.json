@@ -6,6 +6,26 @@
       "additionalProperties": {},
       "description": "The base job inline. Give exactly one of \"base\" or \"basePath\".",
       "properties": {
+        "bed": {
+          "description": "The bed profile the job was set up on, with its version; omit for a job that names none.",
+          "properties": {
+            "profileId": {
+              "description": "The active bed profile's id.",
+              "minLength": 1,
+              "type": "string"
+            },
+            "profileVersion": {
+              "description": "The profile's version: the time of its last history line, which is how a change to the bed is detected.",
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          "required": [
+            "profileId",
+            "profileVersion"
+          ],
+          "type": "object"
+        },
         "breakthrough": {
           "description": "How far a through cut goes past the blank's bottom face, in millimetres.",
           "minimum": 0,
@@ -6467,6 +6487,169 @@
               "required": [
                 "kind",
                 "rotary"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "kind": {
+                  "const": "tape",
+                  "description": "Held on the bed under tape.",
+                  "type": "string"
+                },
+                "tape": {
+                  "description": "The tape the job was set up with.",
+                  "properties": {
+                    "inset": {
+                      "description": "How far in from every edge the tape strips stop, in millimetres.",
+                      "minimum": 0,
+                      "type": "number"
+                    },
+                    "source": {
+                      "description": "Where these tape numbers came from: a default, a saved setup, or a measurement.",
+                      "enum": [
+                        "default",
+                        "saved",
+                        "measured"
+                      ],
+                      "type": "string"
+                    },
+                    "squareTo": {
+                      "const": "front",
+                      "description": "What the tape keeps square: the bed's front edge. The program is never rotated.",
+                      "type": "string"
+                    },
+                    "thickness": {
+                      "description": "The tape's thickness under the stock, in millimetres.",
+                      "exclusiveMinimum": 0,
+                      "type": "number"
+                    },
+                    "where": {
+                      "anyOf": [
+                        {
+                          "properties": {
+                            "x": {
+                              "description": "Machine X of the stock's expected front-left corner, in millimetres.",
+                              "type": "number"
+                            },
+                            "y": {
+                              "description": "Machine Y of the stock's expected front-left corner, in millimetres.",
+                              "type": "number"
+                            }
+                          },
+                          "required": [
+                            "x",
+                            "y"
+                          ],
+                          "type": "object"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "Where on the surface the stock is expected, in machine X/Y, or null for the middle of the surface."
+                    },
+                    "width": {
+                      "description": "The tape roll width in millimetres.",
+                      "exclusiveMinimum": 0,
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "width",
+                    "thickness",
+                    "inset",
+                    "where",
+                    "squareTo",
+                    "source"
+                  ],
+                  "type": "object"
+                }
+              },
+              "required": [
+                "kind",
+                "tape"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "bracket": {
+                  "description": "The bracket and the clamp places the job was set up with.",
+                  "properties": {
+                    "anchor": {
+                      "anyOf": [
+                        {
+                          "const": 1,
+                          "type": "number"
+                        },
+                        {
+                          "const": 2,
+                          "type": "number"
+                        }
+                      ],
+                      "description": "The anchor the bracket is pinned at; Makera's origin is relative to Anchor 1."
+                    },
+                    "clamps": {
+                      "description": "The clamp places the job was set up with, on the free edges. One to four.",
+                      "items": {
+                        "properties": {
+                          "at": {
+                            "description": "The clamp's centre along its edge, in millimetres from the edge's left end (back edge) or front end (right edge).",
+                            "minimum": 0,
+                            "type": "number"
+                          },
+                          "edge": {
+                            "description": "The free edge the clamp holds: 'back' or 'right'. The bracket holds the front and the left.",
+                            "enum": [
+                              "back",
+                              "right"
+                            ],
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "edge",
+                          "at"
+                        ],
+                        "type": "object"
+                      },
+                      "maxItems": 4,
+                      "minItems": 1,
+                      "type": "array"
+                    },
+                    "source": {
+                      "description": "Where these bracket numbers came from: a default, a saved setup, or a measurement.",
+                      "enum": [
+                        "default",
+                        "saved",
+                        "measured"
+                      ],
+                      "type": "string"
+                    },
+                    "variant": {
+                      "description": "The bracket fitted, as its fixture record names it — 'thin' is the Makera kit's L-bracket.",
+                      "minLength": 1,
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "anchor",
+                    "variant",
+                    "clamps",
+                    "source"
+                  ],
+                  "type": "object"
+                },
+                "kind": {
+                  "const": "bracket",
+                  "description": "Held on the bed pushed into the bracket's corner and clamped.",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "kind",
+                "bracket"
               ],
               "type": "object"
             }

@@ -408,18 +408,28 @@ export interface MountObstacles {
  *
  * `underMm` is the board the stock stands on (#213): it lifts the stock, so the bracket's own top
  * stands that much further below the stock's top. The clamps sit on the stock and do not move.
+ *
+ * THE CLAMPS ARE THE JOB'S (#707 BM-1). `clamps` is the job's own places — `clampPlacementsFor(job)`
+ * in `engrave/jobSetup.ts` — and the QuickStart's default pair is used ONLY when the caller passes
+ * none (`undefined`/`null`), i.e. a caller with no job in hand. Before this, every mount was
+ * checked against the two defaults whatever the operator had actually placed: a clamp dragged clear
+ * of the cut still refused it, and a clamp dragged INTO the cut was never seen.
  */
 export function bracketMount(
   stock: StockSize,
   mount: 'vise' | 'bracket' | 'tape',
   defaults: ShopDefaults | null,
   underMm = 0,
+  clamps?: readonly ClampPlacement[] | null,
 ): MountObstacles | null {
   if (mount !== 'bracket') return null;
   const b = bracketSettings(defaults);
+  // An EMPTY array is a real answer (a bracket job that states no clamps has none to check); only
+  // an absent one falls back to the starting pair.
+  const placements = clamps === undefined || clamps === null ? defaultClampPlacements(stock, b.settings) : [...clamps];
   const obstacles: MountObstacle[] = [
     ...bracketObstacles(stock, b.settings, underMm),
-    ...clampObstacles(stock, defaultClampPlacements(stock, b.settings), b.settings),
+    ...clampObstacles(stock, placements, b.settings),
   ];
   return {
     obstacles,

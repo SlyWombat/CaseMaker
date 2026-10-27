@@ -18,7 +18,7 @@ import { useEngraveRegistrationStore } from '@/store/engraveRegistrationStore';
 import { useShopDefaultsStore } from '@/store/shopDefaultsStore';
 import { useSettingsStore } from '@/store/settingsStore';
 import { useMachineStore } from '@/store/machineStore';
-import { jobMount } from '@/engine/cnc/engrave/jobSetup';
+import { clampPlacementsFor, jobMount } from '@/engine/cnc/engrave/jobSetup';
 import { jobVise } from '@/engine/cnc/fixture';
 import { useToolRegistry } from '@/hooks/useToolRegistry';
 import { expandEngraveRow } from '@/store/engraveRowStore';
@@ -158,8 +158,11 @@ function planRegistrationAttempt(args: {
     const expected = bracketExpectedSurface(defaults, dims.z, under);
     if (!expected.ok) return { kind: 'refused', reason: expected.reason };
     const stock = { x: dims.x, y: dims.y, z: dims.z };
+    // #707 BM-1 — the registration's confirm scans are planned around the JOB's clamps (the default
+    // pair only when the job states none), so the taps it offers match the clamps on the machine.
+    const placementFor = clampPlacementsFor(job);
     const obstacles: PlanObstacle[] = [
-      ...clampObstacles(stock, defaultClampPlacements(stock, sizes.settings), sizes.settings),
+      ...clampObstacles(stock, placementFor ?? defaultClampPlacements(stock, sizes.settings), sizes.settings),
       ...bracketObstacles(stock, sizes.settings, under),
     ].map((o) => ({ kind: o.kind, label: o.label, min: o.min, max: o.max, topZ: o.topZ }));
     input = {
