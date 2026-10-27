@@ -45,6 +45,7 @@ import type { MountObstacle } from './mounts/bracket';
 import { cuttingDiameter, cuttingRadiusForSweep, traceRadiusAt, type Tool } from './tool';
 import {
   envelopeSentence,
+  freeEndSentence,
   jawsSentence,
   offAxisSentence,
   tailstockSentence,
@@ -662,6 +663,13 @@ export function verifyProgram(text: string, ctx: VerifyContext): VerifyReport {
             }
             if (rotary.tailstock && p[0] + edgeRadius > rotary.stickout - ROTARY_TAILSTOCK_BAND_MM) {
               push('wrap-into-clamp', m.line, tailstockSentence(p[0] + edgeRadius, rotary.stickout));
+              break;
+            }
+            // #724 B3 review — the tailstock-out twin: the map ends at the stick-out, and past it
+            // there is no stock. Its own code, because naming a tailstock that is not fitted
+            // would be a false sentence.
+            if (!rotary.tailstock && p[0] + edgeRadius > rotary.stickout) {
+              push('wrap-off-free-end', m.line, freeEndSentence(p[0] + edgeRadius, rotary.stickout));
               break;
             }
           }

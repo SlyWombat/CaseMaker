@@ -34,6 +34,7 @@ import {
   offAxisSentence,
   rotaryMapOf,
   scalePolygonsAround,
+  freeEndSentence,
   tailstockSentence,
   throughCentreSentence,
   toRotaryIR,
@@ -320,6 +321,10 @@ describe('the refusal sentences (§4, §6.4) — operator words, units, no codes
     expect(jaws).toContain(`first ${ROTARY_JAW_KEEP_OUT_MM} mm of the stick-out`);
     noCode(jaws);
 
+    const free = freeEndSentence(87.3, 85);
+    expect(free).toContain('runs off the free end of the rod');
+    expect(free).toContain('X 87.3 mm');
+    expect(free).toContain('stick-out is 85 mm');
     const tail = tailstockSentence(75.571, 85);
     expect(tail).toContain("runs into the tailstock's band");
     expect(tail).toContain('X 75.571 mm');

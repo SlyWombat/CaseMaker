@@ -19,7 +19,8 @@
  *     map's left end, or into the tailstock's band at the free end while the tailstock is in
  *     (design §3.7: "an item that enters a band is refused at its row"). The opening IS the cut's
  *     edge, so its X extent is the edge the sentence names. The verifier checks the same bands on
- *     the emitted moves, and both read the same two sentences.
+ *     the emitted moves, and both read the same two sentences. `wrap-off-free-end` is the
+ *     tailstock-out twin: the map ends at the stick-out, and past it there is no stock (#724).
  *
  * The other §6.4 refusals are NOT here: "leaves the line over the axis", "turns the stock while
  * the cutter is in it" and "does not fit the rotary's ⌀80 × 150 mm" are read off the PROGRAM by
@@ -36,6 +37,7 @@ import type { PartPlan } from '@/engine/cnc/engrave/partPlan';
 import { itemLabel, type JobFinding } from '@/engine/cnc/engrave/jobSetup';
 import { findItem } from '@/engine/cnc/engrave/recommendTool';
 import {
+  freeEndSentence,
   jawsSentence,
   rotaryFreeSpan,
   rotaryMapOf,
@@ -146,12 +148,22 @@ export function rotaryJobFindings(
         message: `${who} ${jawsSentence(xMin)}.`,
       });
     }
-    if (xMax > span.to) {
+    if (map.tailstock && xMax > span.to) {
       findings.push({
         severity: 'error',
         code: 'wrap-into-clamp',
         labelId: region.labelId,
         message: `${who} ${tailstockSentence(xMax, map.stickout)}.`,
+      });
+    } else if (xMax > map.stickout) {
+      // #724 B3 review — with the tailstock OUT there is no band to name, but the map still ends
+      // at the stick-out: past it there is no stock, so the cut would carve air. Its own sentence
+      // and code, because "runs into the tailstock's band" would name a tailstock that is absent.
+      findings.push({
+        severity: 'error',
+        code: 'wrap-off-free-end',
+        labelId: region.labelId,
+        message: `${who} ${freeEndSentence(xMax, map.stickout)}.`,
       });
     }
   }

@@ -19,7 +19,7 @@ import { flatEndMill } from '@/engine/cnc/tool';
 import { Z1 } from '@/engine/cnc/machine';
 
 const CODE =
-  /axis-crossing|rotary-y-off-axis|wrap-into-clamp|rotary-rapid-engaged|stock-exceeds-module|rotary-unsupported/;
+  /axis-crossing|rotary-y-off-axis|wrap-into-clamp|wrap-off-free-end|rotary-rapid-engaged|stock-exceeds-module|rotary-unsupported/;
 
 function cyl(diameter = 20, length = 100): Setup {
   return stubSetup(
@@ -127,6 +127,23 @@ describe('the rotary refusals — operator words, at the step', () => {
     expect(f!.message).toContain('last 10 mm of the stick-out');
     expect(f!.message).toContain('X 75–85 mm');
     expect(f!.message).not.toMatch(CODE);
+  });
+
+  it('the cutter past the free end with the tailstock OUT — “runs off the free end of the rod”', () => {
+    // The move ends at X 84.6 with a 1 mm cutter: the edge is at X 85.1, past the stick-out, and
+    // with no tailstock there is nothing at the end to name.
+    const body = ['G0 X70 Z15 A0', 'G1 Z9.5 F100', 'G1 X84.6 F500'];
+    const OUT = { rotary: { radius: 10, stickout: 85, tailstock: false } } as const;
+    const f = finding(body, 'wrap-off-free-end', OUT);
+    expect(f).toBeDefined();
+    expect(f!.line).toBe(lineOf(body, 'G1 X84.6'));
+    expect(f!.message).toContain('runs off the free end of the rod');
+    expect(f!.message).toContain('X 85.1 mm');
+    expect(f!.message).toContain('stick-out is 85 mm');
+    expect(f!.message).not.toContain('tailstock');
+    expect(f!.message).not.toMatch(CODE);
+    // With the tailstock in, the same move is the band's, as it always was.
+    expect(finding(body, 'wrap-into-clamp')).toBeDefined();
   });
 
   it('a rapid that TURNS the stock in the cut — “turns the stock while the cutter is in it”', () => {

@@ -284,10 +284,13 @@ export type JobFindingCode =
   // wrap does not cut yet (cut-outs, traces, drills, threads, chamfers, facing, through regions,
   // inlays, prisms, voids), refused BY NAME with the action that clears it. `wrap-into-clamp` —
   // an item's opened region reaches into the jaws' or the tailstock's band (the verifier raises
-  // the same code against the moves). Codes are data: the operator sentence never carries one.
+  // the same code against the moves). `wrap-off-free-end` — it reaches past the stick-out with
+  // the tailstock out, where the map ends and there is no stock (#724). Codes are data: the
+  // operator sentence never carries one.
   | 'axis-crossing'
   | 'rotary-unsupported'
-  | 'wrap-into-clamp';
+  | 'wrap-into-clamp'
+  | 'wrap-off-free-end';
 
 export interface JobFinding {
   /**

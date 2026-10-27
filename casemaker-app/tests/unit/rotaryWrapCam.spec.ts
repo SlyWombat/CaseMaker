@@ -50,7 +50,7 @@ import {
 import type { EngraveJob, EngraveShape, RotaryChuck } from '@/types/engraveJob';
 
 const CODE =
-  /axis-crossing|rotary-y-off-axis|wrap-into-clamp|rotary-rapid-engaged|stock-exceeds-module|rotary-unsupported/;
+  /axis-crossing|rotary-y-off-axis|wrap-into-clamp|wrap-off-free-end|rotary-rapid-engaged|stock-exceeds-module|rotary-unsupported/;
 
 const CHUCK: RotaryChuck = {
   stickout: 85,
@@ -503,6 +503,29 @@ describe('an item that reaches a band is refused at its row', () => {
     expect(out.findings.some((x) => x.code === 'wrap-into-clamp')).toBe(false);
     expect(out.ok).toBe(true);
   });
+
+  it('runs off the free end with the tailstock out — its own sentence, never a tailstock', () => {
+    // At X 75 the opening ends past the 85 mm stick-out. With the tailstock out there is no band
+    // to name — but there is no stock there either, so the cut would carve air.
+    const outJob = dowel({}, { position: { x: 75, y: 0 } });
+    outJob.workholding = { kind: 'rotary-chuck', rotary: { ...CHUCK, tailstock: false } };
+    const out = generate(tl, outJob);
+    expect(out.ok).toBe(false);
+    expect(out.findings.some((x) => x.code === 'wrap-into-clamp')).toBe(false);
+    const f = out.findings.find((x) => x.code === 'wrap-off-free-end');
+    expect(f).toBeDefined();
+    expect(f!.severity).toBe('error');
+    expect(f!.labelId).toBeDefined();
+    expect(f!.message).toContain('runs off the free end of the rod');
+    expect(f!.message).toContain('stick-out is 85 mm');
+    expect(f!.message).not.toContain('tailstock');
+    expect(f!.message).not.toMatch(CODE);
+
+    // The same item with the tailstock IN is the band's, at its row, as before.
+    const band = generate(tl, dowel({}, { position: { x: 75, y: 0 } })).findings.find((x) => x.code === 'wrap-into-clamp');
+    expect(band?.message).toContain("runs into the tailstock's band");
+  });
+
 });
 
 // ---- The axis -------------------------------------------------------------------

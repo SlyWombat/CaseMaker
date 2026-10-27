@@ -267,6 +267,14 @@ export function jawsSentence(x: number): string {
   return `runs into the jaws: it reaches X ${Math.round(x * 1000) / 1000} mm, inside the first ${ROTARY_JAW_KEEP_OUT_MM} mm of the stick-out, where the chuck's jaws are`;
 }
 
+/**
+ * "runs off the free end of the rod" — a cut past the stick-out with the tailstock OUT: the map
+ * ends at the stick-out, and beyond it there is no stock at all (#724).
+ */
+export function freeEndSentence(x: number, stickout: number): string {
+  return `runs off the free end of the rod: it reaches X ${Math.round(x * 1000) / 1000} mm, and the stick-out is ${Math.round(stickout * 1000) / 1000} mm long`;
+}
+
 /** "runs into the tailstock's band" — a cut in the free end's keep-out. */
 export function tailstockSentence(x: number, stickout: number): string {
   const from = Math.round((stickout - ROTARY_TAILSTOCK_BAND_MM) * 1000) / 1000;
