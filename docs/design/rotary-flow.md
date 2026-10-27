@@ -157,7 +157,7 @@ Unchanged. Two facts the step already reads matter more on a rotary job and are 
  ◉ In the rotary chuck                          │  X 0 at the jaws ─────────────────▶ X           │
      the rod turns about X; the cutter stays    │            A turns the rod about X              │
      over it                                    └─────────────────────────────────────────────┘
-   Jaws        ( reverse ▾ )   standard for a rod under ⌀ … (not published)
+   Jaws        ( reverse, inner teeth ▾ )   Makera's rule for ⌀20: standard under ⌀20, reverse inner 20–35, reverse outer over 35
    Grip        [ 15 ] mm in the jaws     Stick-out  85 mm
    Tailstock   ☑ in — drill a centre hole in the free end first
  ▸ Technical: the chuck and tailstock (Makera's figures and Case Maker's defaults) · the axis datum
@@ -169,10 +169,11 @@ Unchanged. Two facts the step already reads matter more on a rotary job and are 
   machine…` (already built, `holdingMounts.ts`). Selecting it **writes the job** (`workholding: rotary-chuck`) —
   the answer #697 waits for; the "the job is held in the vise" sentence goes.
 - **The four chuck answers**, each one line, each defaulted:
-  - **Jaws** — `reverse` / `standard`. Default **reverse**: *"reverse jaws fitted by default for larger work;
-    standard jaws for small parts"* (Z1 wiki, `/Rotary.md` §1.4). The jaw range in either mode is **not
-    published**; until the bench calipers it (§9 row 7) the only size gate is the ⌀80 × 150 envelope, and the
-    Technical fold says "jaw range: not published by Makera — measured at the bench".
+  - **Jaws** — `standard` / `reverse, inner teeth` / `reverse, outer teeth`. Default **from the diameter, by
+    Makera's own rule** (the decompiled Studio, `/Rotary.md` §9 row 7, evidence pass 08ea46ff): under ⌀20 mm
+    standard; ⌀20–35 mm reverse with the inner teeth; over ⌀35 mm reverse with the outer teeth. The wiki's
+    *"reverse jaws fitted by default for larger work"* agrees. The chuck's physical clamping limits are still
+    the bench's (§9 row 7); until then the size gate is the ⌀80 × 150 envelope.
   - **Grip** — how much of the stock is in the jaws, mm. Default **15 mm**, a Case Maker default (§9 Q3):
     Makera publishes no jaw depth. Typed over in place; the shelf entry can carry it.
   - **Stick-out** — derived, `length − grip`, shown not asked (`Workholding.rotary-chuck.stickout`).
@@ -183,8 +184,8 @@ Unchanged. Two facts the step already reads matter more on a rotary job and are 
   rotary view, R11a): the chuck on the left with the jaws and the grip, the stock with its stick-out, the
   tailstock on the right, X from the jaws, and the A arrow round the stock. The chuck on the left is the wiki's
   *"zero point preset … at the centre of the right edge"* read as the chuck's right face (§9 Q5).
-- **Technical fold** (provenance, one sentence each): envelope ⌀80 × 150 mm — Makera's figure; jaws reverse —
-  Makera's guide; tailstock in — Makera's shipped value (Studio's rotary relief); grip 15 mm and the 3 mm
+- **Technical fold** (provenance, one sentence each): envelope ⌀80 × 150 mm — Makera's figure; the jaws —
+  Makera's rule by diameter (Studio); tailstock in — Makera's shipped value (Studio's rotary relief); grip 15 mm and the 3 mm
   keep-out from the jaws and 10 mm tailstock band — Case Maker's defaults until measured; the axis datum — as
   the change wizard left it ("shipped value ±0.5" or "measured 09:20").
 - The orientation fold of the vise ("face up · against the fixed jaw · nearest you") does not apply: a round
@@ -493,7 +494,7 @@ what), **T** typed (Case Maker's default or the operator's), **R** read from the
 | Stock | Fits the rotary | ⌀ ≤ 80, length ≤ 150 | M `t_MachineType` (Makera library database) | yes, §9 row 7 |
 | Stock | Rod in the vise vs the chuck | the vise up to 20 mm long | D `VISE_FLOOR_DEPTH` (`ROD_VISE_MAX_LENGTH_MM`) | — |
 | Holding | The mount | the one on the pins that holds this stock | R the active bed profile | — |
-| Holding | Jaws | reverse | M Z1 wiki (`/Rotary.md` §1.4) | jaw range, §9 row 7 |
+| Holding | Jaws | by diameter: standard < ⌀20 · reverse inner 20–35 · reverse outer > 35 | M Makera's rule (Studio, `/Rotary.md` §9 row 7) | clamping limits, §9 row 7 |
 | Holding | Grip | 15 mm | T Case Maker's default (§9 Q3); Makera publishes no jaw depth | yes |
 | Holding | Stick-out | length − grip | D | — |
 | Holding | Tailstock | in | M Studio `RotationReliefPath.json` `haveTailTop: true` (§1.3) | reach, §9 row 7 |

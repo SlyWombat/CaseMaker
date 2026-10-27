@@ -350,7 +350,7 @@ header.top .status { width: auto; max-width: 100%; justify-self: start; }
               <span class="radio dis"><span>In the vise, on its end<br><span class="hint">needs the vise on the pins · <span style="color:var(--accent)">Change the machine…</span></span></span></span>
               <span class="radio on"><span><b>In the rotary chuck</b><br><span class="hint">the rod turns about X; the cutter stays over it</span></span></span>
               <div class="frow" style="grid-template-columns:90px minmax(0,1fr);margin-left:22px">
-                <label>Jaws</label><div class="v"><span class="in sel">reverse</span></div>
+                <label>Jaws</label><div class="v"><span class="in sel">reverse, inner teeth</span><span class="hint">Makera's rule for ⌀20</span></div>
                 <label>Grip</label><div class="v"><span class="in"><span class="n">15</span><span class="u">mm</span></span><span class="hint">in the jaws · stick-out <span class="mono">85 mm</span></span></div>
                 <label>Tailstock</label><div class="v"><span class="hint" style="color:var(--fg)">☑ in — drill a centre hole in the free end first</span></div>
               </div>
@@ -382,7 +382,7 @@ header.top .status { width: auto; max-width: 100%; justify-self: start; }
       </div></div>
     </div>
     <aside class="notes"><h3>Defaults and where they come from</h3>
-      <ul><li><b>Jaws reverse</b> — Makera's guide: reverse jaws fitted by default for larger work; standard for small parts. The jaw range is not published; until the bench calipers it, ⌀80 × 150 is the only gate.</li><li><b>Grip 15 mm</b> — Case Maker's default, a shop setting. Makera publishes no jaw depth.</li><li><b>Stick-out</b> — derived: length − grip. Shown, not asked.</li><li><b>Tailstock in</b> — Makera's shipped value (Studio's rotary relief, <span class="mono">haveTailTop: true</span>); the centre hole is Makera's guide.</li><li><b>Chuck on the left, X 0 at the jaws</b> — Makera's preset zero "at the centre of the right edge", read as the chuck's face.</li></ul>
+      <ul><li><b>Jaws by diameter</b> — Makera's own rule, read from Studio: under ⌀20 standard; ⌀20–35 reverse with the inner teeth; over ⌀35 reverse with the outer teeth. The chuck's physical clamping limits are the bench's; until then ⌀80 × 150 is the size gate.</li><li><b>Grip 15 mm</b> — Case Maker's default, a shop setting. Makera publishes no jaw depth.</li><li><b>Stick-out</b> — derived: length − grip. Shown, not asked.</li><li><b>Tailstock in</b> — Makera's shipped value (Studio's rotary relief, <span class="mono">haveTailTop: true</span>); the centre hole is Makera's guide.</li><li><b>Chuck on the left, X 0 at the jaws</b> — Makera's preset zero "at the centre of the right edge", read as the chuck's face.</li></ul>
       <h3>Replaces</h3><ul><li>The chuck option that reads <q>the job is held in the vise</q> and writes nothing. Selecting it now stores the chuck.</li></ul>
       <h3>Work item</h3><p class="issue">R-UI-2 (answers #697)</p>
     </aside>
@@ -671,7 +671,7 @@ header.top .status { width: auto; max-width: 100%; justify-self: start; }
       <tr><td>Stock</td><td>Fits the rotary</td><td class="mono">⌀ ≤ 80 · length ≤ 150</td><td>M Makera's database row</td><td>jaw range</td></tr>
       <tr><td>Stock</td><td>Rod in the vise vs the chuck</td><td class="mono">vise ≤ 20 mm long</td><td>D the vise's floor depth</td><td></td></tr>
       <tr><td>Holding</td><td>Mount</td><td>the one on the pins that holds it</td><td>R the active bed</td><td></td></tr>
-      <tr><td>Holding</td><td>Jaws</td><td>reverse</td><td>M Makera's guide</td><td>✓</td></tr>
+      <tr><td>Holding</td><td>Jaws</td><td>by diameter: standard &lt; ⌀20 · reverse inner 20–35 · reverse outer &gt; 35</td><td>M Makera's rule (Studio)</td><td>limits</td></tr>
       <tr><td>Holding</td><td>Grip</td><td class="mono">15 mm</td><td>T shop setting</td><td>✓</td></tr>
       <tr><td>Holding</td><td>Stick-out</td><td>length − grip</td><td>D</td><td></td></tr>
       <tr><td>Holding</td><td>Tailstock</td><td>in</td><td>M Studio's rotary relief default</td><td>reach</td></tr>
