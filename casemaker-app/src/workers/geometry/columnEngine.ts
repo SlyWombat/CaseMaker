@@ -602,25 +602,100 @@ export const ROTARY: ColumnParameterisation = {
     let written = 0;
     const iLo = Math.max(0, Math.floor((xLo - rt - u0) / du));
     const iHi = Math.min(nu - 1, Math.ceil((xHi + rt - u0) / du));
-    for (let i = iLo; i <= iHi; i++) {
-      const x = u0 + i * du;
-      const dx = x < xLo ? xLo - x : x > xHi ? x - xHi : 0;
-      if (dx > rt) continue;
-      const reff = Math.sqrt(Math.max(0, rt * rt - dx * dx));
-      const phiMax = zt > 0 ? Math.atan2(reff, zt) / DEG : 90; // degrees
-      // θ window: φ = θ − A ∈ [−φmax, φmax] for some A in the sweep ⇒ θ ∈ [aLo−φmax, aHi+φmax].
-      let jLo = Math.floor((aLo - phiMax) / dv);
-      let jHi = Math.ceil((aHi + phiMax) / dv);
+    // #240 slice 2 — THE FOOTPRINT IS SWEPT ALONG THE MOVE'S OWN SEGMENT. §4.2's half-strip
+    // `|y| ≤ r_t, z ≥ Z_t` is, on the near side at angle φ, the WEDGE `|dx| ≤ r_t` by
+    // `|Z_t·tan φ| ≤ r_eff` (the cross-section plane's `y` is `Z_t·tan φ`), and the material it
+    // leaves there is `ρ = Z_t/cos φ` up to the facet at `φ_max = atan(r_t/Z_t)`. A move advances
+    // X and A together, so a column is cut when it lies within `r_t` of the move's own segment IN
+    // THE (x, Z_t·tan φ) PLANE — the tool's work plane at the tip's height. Reading the two axes
+    // separately (X against the move's X range, φ against its A range) cuts the corner of every
+    // diagonal move — up to `(√2 − 1)·r_t` past where the tool ever goes — and the column-space
+    // oracle reports exactly that as an over-cut outside the opened region. This is FLAT's #405
+    // rule read in the rotary frame: the cut must use the segment the gouge check reads.
+    const perDeg = zt * DEG; // mm of arc at Z_t per degree of A — the linearised foot search only
+    const phiMax = (Math.atan2(rt, zt) * 180) / Math.PI; // §4.2's atan(r_t/Z_t)
+    const dxs = m.u1 - m.u0;
+    const das = (m.v1 - m.v0) * perDeg;
+    const len2 = dxs * dxs + das * das;
+    // A clamped dip (Z_t = 0) has no floor radius to scale A into, and its footprint no longer
+    // couples X with A: every column in the X band and within a quarter turn of the swept A is
+    // removed outright. The interval reading is exact there, so it keeps that branch.
+    const clampedDip = !(zt > 0);
+    if (clampedDip) {
+      for (let i = iLo; i <= iHi; i++) {
+        const x = u0 + i * du;
+        const dx = x < xLo ? xLo - x : x > xHi ? x - xHi : 0;
+        if (dx > rt) continue;
+        let jLo = Math.floor((aLo - 90) / dv);
+        let jHi = Math.ceil((aHi + 90) / dv);
+        if (jHi - jLo >= nv) {
+          jLo = 0;
+          jHi = nv - 1;
+        }
+        for (let jj = jLo; jj <= jHi; jj++) {
+          const j = ((jj % nv) + nv) % nv;
+          if (Math.abs(closestAngularOffset(j * dv, aLo, aHi)) > 90) continue;
+          const idx = j * nu + i;
+          if (0 < (h[idx] as number)) {
+            h[idx] = 0;
+            written++;
+          }
+        }
+      }
+      return { written, crossed: null, clamped };
+    }
+    // θ window: the nearest point can be anywhere on the segment, so θ is within φ_max of the
+    // swept A interval. A span of a full turn or more covers every column.
+    const fullTurn = aHi - aLo >= 360;
+    let jLo = 0;
+    let jHi = nv - 1;
+    if (!fullTurn) {
+      jLo = Math.floor((aLo - phiMax) / dv);
+      jHi = Math.ceil((aHi + phiMax) / dv);
       if (jHi - jLo >= nv) {
         jLo = 0;
         jHi = nv - 1;
       }
-      for (let jj = jLo; jj <= jHi; jj++) {
-        const j = ((jj % nv) + nv) % nv;
-        const theta = j * dv;
-        const phi = closestAngularOffset(theta, aLo, aHi);
-        if (Math.abs(phi) > phiMax) continue;
-        const floor = zt > 0 ? zt / Math.cos(phi * DEG) : 0;
+    }
+    for (let jj = jLo; jj <= jHi; jj++) {
+      const j = ((jj % nv) + nv) % nv;
+      const theta = j * dv;
+      // The segment is not repeated on the unrolled cylinder, so the copies a turn either side
+      // of the column are what a closeness test near the seam must see — and a move that spans
+      // more than a turn passes each column once per turn, so its copies are all of them.
+      const kLo = Math.floor((aLo - theta - phiMax) / 360);
+      const kHi = Math.ceil((aHi - theta + phiMax) / 360);
+      for (let i = iLo; i <= iHi; i++) {
+        const x = u0 + i * du;
+        let best2 = Infinity;
+        let bestPhi = 0;
+        for (let k = kLo; k <= kHi; k++) {
+          const th = theta + k * 360;
+          // The candidate points: the foot of the perpendicular in the arc-at-Z_t plane (exact
+          // for a purely axial or a purely angular move, and the CAM's diagonal moves are short),
+          // plus the segment's two ends. The footprint test itself is the WEDGE the arc plane is
+          // an approximation of, `dx² + (Z_t·tan φ)² ≤ r_t²`, and the floor is `Z_t/cos φ`.
+          let t = 0;
+          if (len2 > 0) {
+            t = ((x - m.u0) * dxs + (th - m.v0) * perDeg * das) / len2;
+            t = t < 0 ? 0 : t > 1 ? 1 : t;
+          }
+          for (let c = 0; c < 3; c++) {
+            const tc = c === 0 ? t : c === 1 ? 0 : 1;
+            const phi = th - (m.v0 + tc * (m.v1 - m.v0));
+            const phiRad = phi * DEG;
+            if (phiRad <= -Math.PI / 2 || phiRad >= Math.PI / 2) continue;
+            const dx = x - (m.u0 + tc * dxs);
+            const dy = zt * Math.tan(phiRad);
+            const d2 = dx * dx + dy * dy;
+            if (d2 < best2) {
+              best2 = d2;
+              bestPhi = phi;
+            }
+          }
+        }
+        if (best2 > rt * rt) continue;
+        const floor = zt / Math.cos(bestPhi * DEG);
         const idx = j * nu + i;
         if (floor < (h[idx] as number)) {
           h[idx] = floor;

@@ -44,6 +44,7 @@ import {
   toolNumberFor,
 } from './ir';
 import { pocketLoops, type OffsetFn, type Polygons } from './pocket';
+import { aroundScale, scalePolygonsAround } from '../rotary/wrap';
 import { tourNearest, twoOptOrder } from './tour';
 
 /**
@@ -518,6 +519,14 @@ function entryTravel(
  * #668 — `boreRampAngleDeg` is the shop's `bore.rampAngleDeg` (how steeply a bore's helix descends),
  * read on the main thread like `peckClearanceMm`; `null`/absent leaves the labelled fallback in
  * charge. It reaches only the bore path — a job with no bore is byte-identical whatever it is.
+ *
+ * #240 — `rotary` says these regions are authored on a rotary MAP and must be pocketed with the
+ * anisotropic opening (R10). Each region's polygons are scaled into the TOOL FOOTPRINT's frame by
+ * `aroundScale(R, depth, r_t)` before `pocketLoops` runs — an isotropic offset there is `r_t` along
+ * X and the footprint's own around arc — and every ring is scaled BACK to map millimetres before
+ * it becomes a move, so the IR stays the map's and `toRotaryIR` is a pure map → frame conversion.
+ * The first erosion is therefore exactly the footprint the oracle's facet allowance describes.
+ * Absent (a flat job), every number is exactly as before.
  */
 export function generateEngrave(
   tl: ManifoldToplevel,
@@ -529,6 +538,7 @@ export function generateEngrave(
   peckClearanceMm: number | null = null,
   finish: FinishPassSpec | null = null,
   boreRampAngleDeg: number | null = null,
+  rotary: { radius: number } | null = null,
 ): ToolpathIR {
   const usable = cuttingForTrace(tool);
   if (!usable.ok) throw new Error(`generateEngrave: ${usable.reason}`);
@@ -553,7 +563,22 @@ export function generateEngrave(
    * radius is `pocketLoops`' bound.
    */
   const ringsFor = (label: EngraveRegion, extraRadius = 0): Polygons[] => {
-    if (cone === null) return pocketLoops(label.polygons, flatRadius + extraRadius, params.stepOver, offset);
+    if (cone === null) {
+      // #240 — a rotary region is pocketed in the TOOL FOOTPRINT's frame (see the header): the
+      // around axis is scaled by `r_t/(R·atan(r_t/(R − d)))`, so an isotropic offset there is
+      // `r_t` along X and the footprint's own around arc, and the step-over is an arc at the floor
+      // radius (to 0.1 % at engraving angles). The rings come back to MAP millimetres here, so
+      // everything downstream — ordering, rapids, `toRotaryIR` — is the map's own space.
+      if (rotary === null) return pocketLoops(label.polygons, flatRadius + extraRadius, params.stepOver, offset);
+      const sy = aroundScale(rotary.radius, label.depth, flatRadius);
+      const rings = pocketLoops(
+        scalePolygonsAround(label.polygons, sy),
+        flatRadius + extraRadius,
+        params.stepOver,
+        offset,
+      );
+      return rings.map((ring) => scalePolygonsAround(ring, 1 / sy));
+    }
     const planeRadius = label.vCarve?.planeRadius ?? cone.tipRadius;
     // #673 — AN INLAY's passes move the flank down a plane radius that stands on the design, so
     // the pitch is bounded by the GLUE GAP rather than by the tip (an inlay bit may state its tip
@@ -815,7 +840,9 @@ export function generateEngrave(
   }
 
   return {
-    // The 3-axis work frame. A rotary IR has its own frame (#237); nothing emits one yet.
+    // The MAP work frame: a rotary job's IR is authored on the unrolled surface and belongs to the
+    // FLAT frame until `toRotaryIR` (rotary/wrap.ts) turns it into a rotary IR after the CAM
+    // (#240); every move here is still map millimetres with a flat Z.
     frame: 'flat',
     tool,
     toolNumber,

@@ -73,6 +73,12 @@ export function executeProfile(tl: ManifoldToplevel, p: Profile): CrossSectionIn
       child.delete();
       return result;
     }
+    case 'p-scale': {
+      const child = executeProfile(tl, p.child);
+      const result = child.scale(p.scale);
+      child.delete();
+      return result;
+    }
     case 'p-mirror': {
       const child = executeProfile(tl, p.child);
       const result = child.mirror(p.normal);

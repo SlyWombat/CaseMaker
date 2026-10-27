@@ -453,6 +453,9 @@ function profileSignature(p: Profile): string {
       return `pt(${p.offset.join(',')})|${profileSignature(p.child)}`;
     case 'p-rotate':
       return `pr(${p.degrees})|${profileSignature(p.child)}`;
+    // #240 — the wrap's anisotropic opening scales an axis; the signature carries both factors.
+    case 'p-scale':
+      return `sc(${p.scale.join(',')})|${profileSignature(p.child)}`;
     case 'p-union':
     case 'p-difference':
     case 'p-intersection':

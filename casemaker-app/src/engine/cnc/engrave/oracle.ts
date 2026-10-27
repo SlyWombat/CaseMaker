@@ -37,6 +37,7 @@
  */
 
 import { ARC_CHORD_TOLERANCE_MM, SWEEP_SIMPLIFY_EPS_MM, segmentsForRadius } from '@/engine/compiler/arcResolution';
+import { angleToArc, facetTerm } from '@/engine/cnc/rotary/wrap';
 import { grooveRadiusAt, type VCone } from '@/engine/cnc/vProfile';
 import { traceSweptProfile } from '@/engine/cnc/engrave/partPlan';
 import { executeProfile, type ManifoldToplevel } from '@/workers/geometry/evaluateOp';
@@ -702,6 +703,276 @@ export function computeOracle(
   // bound for a job whose resolution is finer (or one swept by the exact engine, with no grid).
   const cellArea = threadGrid === null || threadGrid === undefined ? 0 : threadGrid.du * threadGrid.dv;
   const areaFloor = Math.max(ORACLE_AREA_FLOOR, cellArea * ORACLE_AREA_FLOOR_CELLS);
+  return {
+    ok: worstUnder <= areaFloor && worstOver <= areaFloor,
+    band,
+    levels,
+    worst: { underCut: worstUnder, overCut: worstOver, underAt: worstUnderAt, overAt: worstOverAt },
+    areaFloor,
+  };
+}
+
+// ---------------------------------------------------------------------------------------------
+// #240 §4.5 — THE ROTARY ORACLE. A COLUMN prediction, never a flat area comparison.
+// ---------------------------------------------------------------------------------------------
+
+/**
+ * The columns a rotary run is judged on (#240 slice 2, `/Rotary.md` §4.5).
+ *
+ * A rotary sweep is a height field over (X, θ): each column holds the material's remaining RADIUS.
+ * The prediction is correspondingly per column, and it is not the flat oracle's question. A flat
+ * pocket repeats the same 2D region at every level above its floor, so comparing AREAS at a level
+ * is the same question as comparing the region. On a round stock the tool's flat tip is a wedge
+ * (R-2): at angular offset φ from a pass the floor it leaves is `Z_t / cos φ`, so only the
+ * centreline reaches the nominal floor `R − d` and the stroke edges sit up to the FACET term
+ * `√(Z_t² + r_t²) − Z_t` higher. A level's area is therefore a thin, model-shaped sliver of the
+ * region, and slicing at the nominal floor would call almost the whole region an under-cut.
+ *
+ * The design's test is the honest one:
+ *
+ *   - inside the opened region the floor radius is between `R − d` and `R − d + e` (e = the facet
+ *     term at the level's own `Z_t = R − d`), outside it is `R`;
+ *   - the tolerance is ONE GRID CELL each way (a cell's centre carries its whole square, so a
+ *     column whose centre is within half a cell diagonal of the region's boundary may be on either
+ *     side — {@link columnBandTerm}) plus the facet term in Z;
+ *   - under-cut is material left standing INSIDE the region (a step-over gap along the arc, a
+ *     stroke the passes missed); over-cut is material removed OUTSIDE it (a wrong `A = s/R`
+ *     mapping, which no flat test can catch). Both report.
+ *
+ * The region polygons are in MAP millimetres (`rotary/wrap.ts`): x along the axis from the jaws, y
+ * the surface arc at `R`. The map wraps at the seam, so a prediction authored across 0/C is tested
+ * at `y`, `y − C` and `y + C` — the same one-turn fold the session applies for the flat area path,
+ * here as three contour copies instead of three Clipper sections.
+ *
+ * The report keeps the flat oracle's shape (`ok`, per-level areas and bboxes, the worst pair, the
+ * band); only the meaning of a level's numbers changes: they are sums of whole columns' squares,
+ * with `predictedArea` the analytic opened region and `simulatedArea` the columns the sweep cut to
+ * that level. `band` is the cell term plus the largest facet term over the levels.
+ */
+export interface RotaryOracleInput {
+  /** The grid the run was swept with: `u` = work X mm, `v` = θ degrees, `h` = remaining radius mm. */
+  grid: ColumnGrid;
+  /** The stock's radius, mm — R6's Z datum; every column is measured against it. */
+  radius: number;
+  /** The cutter's radius at the tip, mm — `r_t` of the facet term. */
+  toolRadius: number;
+  /** The predictions, in MAP millimetres: x along the axis from the jaws, y the surface arc at R. */
+  predicted: readonly OraclePredicted[];
+}
+
+/**
+ * One polygon of a periodic region: its points, the map shift applied to its second axis, and the
+ * bbox that shift puts it in — the point tests reject on the bbox before touching an edge.
+ */
+interface ContourBox {
+  pts: readonly OraclePoint[];
+  shiftY: number;
+  minX: number;
+  maxX: number;
+  minY: number;
+  maxY: number;
+}
+
+function contourBoxOf(pts: readonly OraclePoint[], shiftY: number): ContourBox {
+  let minX = Infinity;
+  let maxX = -Infinity;
+  let minY = Infinity;
+  let maxY = -Infinity;
+  for (const [x, y] of pts) {
+    if (x < minX) minX = x;
+    if (x > maxX) maxX = x;
+    const yy = y + shiftY;
+    if (yy < minY) minY = yy;
+    if (yy > maxY) maxY = yy;
+  }
+  return { pts, shiftY, minX, maxX, minY, maxY };
+}
+
+/** A region's contours at the three periodic images a one-turn map can put a column on. */
+function periodicContours(polygons: readonly OraclePolygon[], circumference: number): ContourBox[] {
+  const contours: ContourBox[] = [];
+  for (const shift of [-circumference, 0, circumference]) {
+    for (const pts of polygons) {
+      if (pts.length >= 3) contours.push(contourBoxOf(pts, shift));
+    }
+  }
+  return contours;
+}
+
+/**
+ * Even-odd point test over a region's contours. CrossSection's polygons are outers and holes, which
+ * even-odd reads correctly. The three periodic copies are the SAME region seen wrapped, so the
+ * answer is their UNION — and they are not always disjoint: a region that spans the seam (its map
+ * `y` crosses 0/360) overlaps its own ±C image by that span. Running one even-odd parity over every
+ * copy would cancel exactly those overlapped cells and call the middle of a wrapped cut "outside".
+ * So each shift is tested on its own (even-odd is right within one copy, holes included) and the
+ * answers are OR-ed.
+ */
+function pointInContours(contours: readonly ContourBox[], x: number, y: number): boolean {
+  const shifts = new Set<number>();
+  for (const c of contours) shifts.add(c.shiftY);
+  for (const shift of shifts) {
+    let inside = false;
+    for (const c of contours) {
+      if (c.shiftY !== shift) continue;
+      if (x < c.minX || x > c.maxX || y < c.minY || y > c.maxY) continue;
+      const yl = y - c.shiftY;
+      const pts = c.pts;
+      for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+        const xi = (pts[i] as OraclePoint)[0];
+        const yi = (pts[i] as OraclePoint)[1];
+        const xj = (pts[j] as OraclePoint)[0];
+        const yj = (pts[j] as OraclePoint)[1];
+        if ((yi > yl) !== (yj > yl)) {
+          const at = xj + ((yl - yj) * (xi - xj)) / (yi - yj);
+          if (x < at) inside = !inside;
+        }
+      }
+    }
+    if (inside) return true;
+  }
+  return false;
+}
+
+/**
+ * The rotary oracle (#240 slice 2, `/Rotary.md` §4.5, `rotary-flow.md` §3.9). See
+ * {@link RotaryOracleInput} for the model and the tolerances.
+ */
+export function computeRotaryOracle(tl: ManifoldToplevel, input: RotaryOracleInput): OracleReport {
+  const CS = tl.CrossSection;
+  const { grid, radius, toolRadius, predicted } = input;
+  // The map's pitches for this grid: a θ cell is an arc at the DESIGN radius, which is the length
+  // the prediction's Y is in.
+  const dvArc = angleToArc(grid.dv, radius);
+  const circumference = angleToArc(360, radius);
+  const cellBand = Math.hypot(grid.du, dvArc) / 2;
+  const cellArea = grid.du * dvArc;
+  const areaFloor = Math.max(ORACLE_AREA_FLOOR, cellArea * ORACLE_AREA_FLOOR_CELLS);
+  const roundSegments = segmentsForRadius(cellBand);
+
+  for (const p of predicted) {
+    if (p.groove !== undefined || p.thread !== undefined || p.vRegion !== undefined) {
+      throw new Error(
+        "oracle: a rotary prediction is a flat end mill's opened region in map millimetres; a groove, thread or V region has no rotary column form",
+      );
+    }
+  }
+
+  const entries = predicted.filter((p) => p.depth > 0 && p.polygons.length > 0);
+  const depths = [...new Set(entries.map((p) => p.depth))].sort((a, b) => a - b);
+  // The DEEPEST level has the smallest `Z_t` and so the largest facet term; the report's single
+  // band carries the largest, exactly as the flat report carries the worst checkpoints' term.
+  let maxFacet = 0;
+  for (const p of entries) maxFacet = Math.max(maxFacet, facetTerm(radius - p.depth, toolRadius));
+  const band = cellBand + maxFacet;
+
+  const levels: OracleLevel[] = [];
+  let worstUnder = 0;
+  let worstOver = 0;
+  let worstUnderAt: { z: number; bbox: OracleBbox } | null = null;
+  let worstOverAt: { z: number; bbox: OracleBbox } | null = null;
+
+  for (const depth of depths) {
+    const z = -depth;
+    // The highest radius a column cut to THIS level may read: the nominal floor plus the level's
+    // own facet term, plus the slice lift so a floor exactly on the level counts as cut.
+    const reach = radius - depth + facetTerm(radius - depth, toolRadius) + ORACLE_SLICE_LIFT_MM;
+    const parts: CrossSectionInstance[] = [];
+    for (const p of entries) {
+      if (!(p.depth + 1e-9 >= depth)) continue;
+      parts.push(CS.ofPolygons(p.polygons));
+    }
+    if (parts.length === 0) continue;
+
+    let region: CrossSectionInstance | null = null;
+    let inner: CrossSectionInstance | null = null;
+    let outer: CrossSectionInstance | null = null;
+    let predictedArea = 0;
+    let simulatedCells = 0;
+    let underCells = 0;
+    let overCells = 0;
+    let uMinX = Infinity;
+    let uMaxX = -Infinity;
+    let uMinY = Infinity;
+    let uMaxY = -Infinity;
+    let oMinX = Infinity;
+    let oMaxX = -Infinity;
+    let oMinY = Infinity;
+    let oMaxY = -Infinity;
+    try {
+      region = parts.length === 1 ? (parts.shift() as CrossSectionInstance) : CS.union(parts);
+      predictedArea = region.area();
+      // The two shells of ambiguity: inside `inner` a column is certainly in the region; outside
+      // `outer` it is certainly not. Between them one cell could have gone either way.
+      inner = region.offset(-cellBand, 'Round', 2, roundSegments);
+      outer = region.offset(cellBand, 'Round', 2, roundSegments);
+      const innerContours = periodicContours(inner.toPolygons() as OraclePolygon[], circumference);
+      const outerContours = periodicContours(outer.toPolygons() as OraclePolygon[], circumference);
+
+      for (let j = 0; j < grid.nv; j++) {
+        // The column's position on the MAP. The map's y is the surface arc at R, and the engine's
+        // θ is the program's A, so this is `s = R·A_rad` read back (wrap.ts's `angleToArc`).
+        const y = angleToArc(grid.v0 + j * grid.dv, radius);
+        for (let i = 0; i < grid.nu; i++) {
+          const x = grid.u0 + i * grid.du;
+          const rho = grid.h[j * grid.nu + i] as number;
+          const cutToLevel = rho <= reach;
+          if (cutToLevel) simulatedCells++;
+          if (pointInContours(innerContours, x, y)) {
+            // Inside the region: every column within one cell of the boundary that could not be
+            // reached is expected (the shell above), so anything here above the facet allowance is
+            // material the passes left standing.
+            if (rho > reach) {
+              underCells++;
+              if (x - grid.du / 2 < uMinX) uMinX = x - grid.du / 2;
+              if (x + grid.du / 2 > uMaxX) uMaxX = x + grid.du / 2;
+              if (y - dvArc / 2 < uMinY) uMinY = y - dvArc / 2;
+              if (y + dvArc / 2 > uMaxY) uMaxY = y + dvArc / 2;
+            }
+          } else if (!pointInContours(outerContours, x, y) && cutToLevel) {
+            // Outside the region, nothing should reach this level at all.
+            overCells++;
+            if (x - grid.du / 2 < oMinX) oMinX = x - grid.du / 2;
+            if (x + grid.du / 2 > oMaxX) oMaxX = x + grid.du / 2;
+            if (y - dvArc / 2 < oMinY) oMinY = y - dvArc / 2;
+            if (y + dvArc / 2 > oMaxY) oMaxY = y + dvArc / 2;
+          }
+        }
+      }
+    } finally {
+      for (const p of parts) p.delete();
+      region?.delete();
+      inner?.delete();
+      outer?.delete();
+    }
+
+    const predictedAreaValue = predictedArea;
+    const simulatedArea = simulatedCells * cellArea;
+    const underCut = underCells * cellArea;
+    const overCut = overCells * cellArea;
+    const underBbox: OracleBbox | null =
+      underCells > 0 ? { min: [uMinX, uMinY], max: [uMaxX, uMaxY] } : null;
+    const overBbox: OracleBbox | null =
+      overCells > 0 ? { min: [oMinX, oMinY], max: [oMaxX, oMaxY] } : null;
+    levels.push({
+      z,
+      predictedArea: predictedAreaValue,
+      simulatedArea,
+      underCut,
+      overCut,
+      underBbox,
+      overBbox,
+    });
+    if (underCut > worstUnder) {
+      worstUnder = underCut;
+      worstUnderAt = underBbox === null ? null : { z, bbox: underBbox };
+    }
+    if (overCut > worstOver) {
+      worstOver = overCut;
+      worstOverAt = overBbox === null ? null : { z, bbox: overBbox };
+    }
+  }
+
   return {
     ok: worstUnder <= areaFloor && worstOver <= areaFloor,
     band,

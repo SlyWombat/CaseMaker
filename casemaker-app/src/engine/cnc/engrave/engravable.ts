@@ -1,5 +1,5 @@
 import { segmentsForRadius } from '@/engine/compiler/arcResolution';
-import { pOffset, type Profile } from '@/engine/compiler/profile';
+import { pOffset, pScale, type Profile } from '@/engine/compiler/profile';
 
 /**
  * The reachable region of a glyph — the stock-agnostic half of #171 (#201).
@@ -16,13 +16,29 @@ import { pOffset, type Profile } from '@/engine/compiler/profile';
  * 0.146 mm of chord error (#190). `segmentsForRadius` picks the count from a chord-error
  * target instead, so the same 0.005 mm of sagitta holds at a 0.5 mm tool radius and a
  * 25 mm fillet.
+ *
+ * ROTARY (#240, R10): a wrapped engraving's opening is ANISOTROPIC on its map — `r` along X,
+ * `r·R/(R − d)` around (the small-angle form of `R·atan(r/(R − d))`), because the map's around
+ * axis is an arc at the full radius while the footprint it is cut with stands on the floor at
+ * `R − d`. Pass `wrap.aroundScale = aroundScale(R, d, r)` — the tool's own footprint frame, in
+ * which a Y distance IS the tool's work-plane offset — and the opening is built there: scale Y
+ * into that frame, open isotropically, and scale the result back. The region this comes out as
+ * is exactly the anisotropic one, with no second offset algorithm and no hand-set around radius.
+ * The pocket's first erosion uses the same frame (`generateEngrave`), so the region and the path
+ * that cuts it cannot disagree. Without `wrap` the profile tree is unchanged.
  */
-export function engravableProfile(glyph: Profile, toolRadius: number): Profile {
+export function engravableProfile(
+  glyph: Profile,
+  toolRadius: number,
+  wrap?: { aroundScale: number },
+): Profile {
   const segments = segmentsForRadius(toolRadius);
-  return pOffset(
-    pOffset(glyph, -toolRadius, 'round', { segments }),
+  const glyphOnFloor = wrap ? pScale([1, wrap.aroundScale], glyph) : glyph;
+  const opened = pOffset(
+    pOffset(glyphOnFloor, -toolRadius, 'round', { segments }),
     toolRadius,
     'round',
     { segments },
   );
+  return wrap ? pScale([1, 1 / wrap.aroundScale], opened) : opened;
 }

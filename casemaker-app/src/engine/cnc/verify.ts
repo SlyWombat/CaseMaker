@@ -43,6 +43,19 @@ import type { Setup } from './setup';
 import { mountInPath, type PathSegment } from './mounts/inPath';
 import type { MountObstacle } from './mounts/bracket';
 import { cuttingDiameter, cuttingRadiusForSweep, traceRadiusAt, type Tool } from './tool';
+import {
+  envelopeSentence,
+  jawsSentence,
+  offAxisSentence,
+  tailstockSentence,
+  throughCentreSentence,
+  turningInCutSentence,
+  ROTARY_CLEARANCE_MM,
+  ROTARY_JAW_KEEP_OUT_MM,
+  ROTARY_MAX_DIAMETER_MM,
+  ROTARY_MAX_LENGTH_MM,
+  ROTARY_TAILSTOCK_BAND_MM,
+} from './rotary/wrap';
 
 /** Deepest permitted cut (positive mm below the top face) at a work-frame XY. 0 = no cutting allowed here. */
 export type DepthLimit = (x: number, y: number) => number;
@@ -74,6 +87,22 @@ export interface VerifyContext {
    * move, so a cut passes clear of what holds it rather than merely not touching it. Absent: 0.
    */
   mountObstacles?: { obstacles: MountObstacle[]; uncertainty: number; clearance?: number };
+  /**
+   * #240 slice 2 — THE ROTARY FRAME, when this file is a wrapped program. Its presence switches
+   * the frame's own rules on and the flat frame's off: Z is a RADIUS from the axis (so the top
+   * face is R and a floor `d` below it is `R − d`), Y is identically 0, and X runs along the axis
+   * from the jaws. The four refusals below are design §3.9's, worded in `rotary/wrap.ts` so the
+   * finding panel and the file cannot disagree. ABSENT means a flat program, whose checks are
+   * exactly what they were.
+   */
+  rotary?: {
+    /** The stock's radius, mm — the surface every Z is measured from. */
+    radius: number;
+    /** The cuttable stick-out, mm — the map's X extent. */
+    stickout: number;
+    /** The tailstock is in, so the last {@link ROTARY_TAILSTOCK_BAND_MM} mm are a keep-out. */
+    tailstock: boolean;
+  };
 }
 
 export interface VerifyFinding {
@@ -270,6 +299,13 @@ const known3 = (p: Pos): p is [number, number, number] => p[0] !== null && p[1] 
  * injected limit, (5) the stock outline under the tool edge, (6) cutting with the spindle
  * off, (7) feed ceiling and missing feed, (8) spindle ceiling and a spindle start with no Z
  * established (#396), (9) low XY rapids, (10) the preamble, (11) the ending, (12) single tool.
+ *
+ * #240 — A ROTARY FILE (`ctx.rotary`) is the same parser and runner read in another frame. Rules
+ * 4 and 5 are flat quantities and are replaced by the rotary ones: a floor at the axis, the jaws'
+ * and tailstock's bands, a rapid that turns or traverses while the cutter is in the stock, and
+ * the module's ⌀80 × 150 mm envelope. Rule 9 becomes the turning rule; the mount block does not
+ * apply (a chuck is not a bracket). Rule 8, the spindle and feed rules and the dialect checks in
+ * their rotary form all still run.
  */
 export function verifyProgram(text: string, ctx: VerifyContext): VerifyReport {
   const findings: VerifyFinding[] = [];
@@ -286,19 +322,43 @@ export function verifyProgram(text: string, ctx: VerifyContext): VerifyReport {
 
   const lines = text.split(/\r\n|\n|\r/);
   const words = sourceWords(lines);
+  // #240 slice 2 — the frame this FILE claims. A rotary context admits the rotary post's words
+  // and turns on the rotary frame's own rules below; absent, this verifier is exactly the flat
+  // one it has always been, byte for byte.
+  const rotary = ctx.rotary ?? null;
 
   // ---- 2. not-our-dialect. A strict whitelist: our post writes only these words.
   for (const w of words) {
     const shown = `${w.letter}${w.text}`;
     if (w.letter === 'G') {
       const c = numParts(w.text);
-      if (c === null || c.sub !== 0 || !G_ALLOWED.has(c.code)) {
-        push('not-our-dialect', w.line, `the word '${shown}' is not in the post's dialect (G0 G1 G21 G28 G53 G90)`);
+      // `G17`/`G54` are the rotary preamble's plane and work offset; `G92.4` is SUB-CODED (the
+      // unwind reset the rotary post ends with), so the `sub === 0` whitelist refuses it by
+      // construction. Both are admitted only for a rotary file.
+      const rotaryWord =
+        rotary !== null &&
+        c !== null &&
+        ((c.code === 17 && c.sub === 0) || (c.code === 54 && c.sub === 0) || (c.code === 92 && c.sub === 4));
+      if ((c === null || c.sub !== 0 || !G_ALLOWED.has(c.code)) && !rotaryWord) {
+        push(
+          'not-our-dialect',
+          w.line,
+          rotary === null
+            ? `the word '${shown}' is not in the post's dialect (G0 G1 G21 G28 G53 G90)`
+            : `the word '${shown}' is not in the rotary post's dialect (G0 G1 G17 G21 G28 G53 G54 G90 G92.4)`,
+        );
       }
     } else if (w.letter === 'M') {
       const c = numParts(w.text);
-      if (c === null || c.sub !== 0 || !M_ALLOWED.has(c.code)) {
-        push('not-our-dialect', w.line, `the word '${shown}' is not in the post's dialect (M2 M3 M5 M6 M7 M9 M331 M332)`);
+      const rotaryWord = rotary !== null && c !== null && c.sub === 0 && c.code === 30;
+      if ((c === null || c.sub !== 0 || !M_ALLOWED.has(c.code)) && !rotaryWord) {
+        push(
+          'not-our-dialect',
+          w.line,
+          rotary === null
+            ? `the word '${shown}' is not in the post's dialect (M2 M3 M5 M6 M7 M9 M331 M332)`
+            : `the word '${shown}' is not in the rotary post's dialect (M2 M3 M5 M6 M7 M9 M30 M331 M332)`,
+        );
       }
     } else if (w.letter === 'N') {
       // #385 — A NUMBERED LINE IS NOT A DIALECT QUESTION, IT IS A LINE THE MACHINE WILL NOT RUN.
@@ -314,8 +374,25 @@ export function verifyProgram(text: string, ctx: VerifyContext): VerifyReport {
         w.line,
         `the word '${shown}' numbers this line, and the firmware executes NOTHING on a numbered line: it strips the number but keeps testing 'N', which matches none of its branches, and answers 'ok - ignore: [M5]' (bench 2026-10-12). A numbered program runs as a stream of silently skipped lines`,
       );
-    } else if (!PARAM_LETTERS.has(w.letter)) {
-      push('not-our-dialect', w.line, `the word '${shown}' is not in the post's dialect (only G, M, T, S, F, X, Y, Z words)`);
+    } else if (!PARAM_LETTERS.has(w.letter) && !(rotary !== null && w.letter === 'A')) {
+      push(
+        'not-our-dialect',
+        w.line,
+        rotary === null
+          ? `the word '${shown}' is not in the post's dialect (only G, M, T, S, F, X, Y, Z words)`
+          : `the word '${shown}' is not in the rotary post's dialect (only G, M, T, S, F, X, Y, Z, A words)`,
+      );
+    }
+  }
+
+  // ---- #240 — the MODULE's envelope: Makera publishes ⌀80 × 150 mm for the rotary. Read from
+  // the SETUP (the part this program cuts), so no caller can pass a program for a stock the
+  // module cannot hold without being told. A setup that is not a cylinder is not this check's;
+  // `toSetup` builds one for every rotary job.
+  if (rotary !== null && ctx.setup.part.kind === 'cylinder') {
+    const stock = ctx.setup.part;
+    if (stock.diameter > ROTARY_MAX_DIAMETER_MM || stock.length > ROTARY_MAX_LENGTH_MM) {
+      push('stock-exceeds-module', null, envelopeSentence(stock.diameter, stock.length));
     }
   }
 
@@ -385,6 +462,9 @@ export function verifyProgram(text: string, ctx: VerifyContext): VerifyReport {
     // a move the PROGRAM wrote that commands Z, or a `G28`/`M491` (certain macros) — clears it,
     // and the two established-Z checks below read it alongside the state.
     let zUnproven = false;
+    // #240 — the A the previous move left the stock at (unwound, R9). The runner tracks X/Y/Z in
+    // its work state; A is only on the moves, so a turn is visible by comparing them.
+    let lastA: number | null = null;
 
     for (const ev of timeline.events) {
       if (ev.kind === 'tool-change') {
@@ -441,6 +521,18 @@ export function verifyProgram(text: string, ctx: VerifyContext): VerifyReport {
       const toW = after.work;
       const isCut = m.mode === 'cut' && state.spindle !== 'off';
 
+      // ---- #240 — "leaves the line over the axis". A rotary program keeps the cutter over the
+      // axis (R1): every Y is 0, on any move, cutting or not. Checked on both ends so a diagonal
+      // that leaves and returns is caught at either end.
+      if (rotary !== null) {
+        for (const y of [fromW[1], toW[1]]) {
+          if (y !== null && Math.abs(y) > 1e-6) {
+            push('rotary-y-off-axis', m.line, offAxisSentence(y));
+            break;
+          }
+        }
+      }
+
       if (known3(fromW)) {
         collect(bboxMin, bboxMax, fromW);
         sawAnyPoint = true;
@@ -469,10 +561,17 @@ export function verifyProgram(text: string, ctx: VerifyContext): VerifyReport {
         if (known3(fromW) && known3(toW)) {
           points.push([(fromW[0] + toW[0]) / 2, (fromW[1] + toW[1]) / 2, (fromW[2] + toW[2]) / 2]);
         }
+        //
+        // #240 — the depth limit and the stock outline are FLAT-frame quantities: Z = 0 is the
+        // top face and X/Y the stock rectangle. In the rotary frame Z is a RADIUS from the axis
+        // and X runs along it, so rules 4 and 5 do not translate; the rotary frame's own checks
+        // (below, still inside this cutting branch) replace them.
         let worst: { p: [number, number, number]; over: number } | null = null;
-        for (const p of points) {
-          const over = -p[2] - ctx.depthLimit(p[0], p[1]);
-          if (over > 1e-6 && (worst === null || over > worst.over)) worst = { p, over };
+        if (rotary === null) {
+          for (const p of points) {
+            const over = -p[2] - ctx.depthLimit(p[0], p[1]);
+            if (over > 1e-6 && (worst === null || over > worst.over)) worst = { p, over };
+          }
         }
         if (worst !== null) {
           const [x, y, z] = worst.p;
@@ -498,25 +597,27 @@ export function verifyProgram(text: string, ctx: VerifyContext): VerifyReport {
         // stock by 0.27 mm unnoticed. The move's lowest point is the honest reading, so the depth
         // comes from the endpoints' own Z rather than from a bound taken over the whole file.
         let outside: { x: number; y: number; radius: number } | null = null;
-        const deepestOfMove = Math.min(
-          fromW[2] ?? 0,
-          toW[2] ?? 0,
-        );
-        const edgeRadius = toolRadiusOf(ctx.tool, Math.max(0, -deepestOfMove));
-        for (const p of [fromW, toW]) {
-          if (p[0] === null || p[1] === null) continue;
-          for (const [px, py] of [
-            [p[0] + edgeRadius, p[1]],
-            [p[0] - edgeRadius, p[1]],
-            [p[0], p[1] + edgeRadius],
-            [p[0], p[1] - edgeRadius],
-          ] as [number, number][]) {
-            if (ctx.depthLimit(px, py) <= 0) {
-              outside = { x: px, y: py, radius: edgeRadius };
-              break;
+        if (rotary === null) {
+          const deepestOfMove = Math.min(
+            fromW[2] ?? 0,
+            toW[2] ?? 0,
+          );
+          const edgeRadius = toolRadiusOf(ctx.tool, Math.max(0, -deepestOfMove));
+          for (const p of [fromW, toW]) {
+            if (p[0] === null || p[1] === null) continue;
+            for (const [px, py] of [
+              [p[0] + edgeRadius, p[1]],
+              [p[0] - edgeRadius, p[1]],
+              [p[0], p[1] + edgeRadius],
+              [p[0], p[1] - edgeRadius],
+            ] as [number, number][]) {
+              if (ctx.depthLimit(px, py) <= 0) {
+                outside = { x: px, y: py, radius: edgeRadius };
+                break;
+              }
             }
+            if (outside !== null) break;
           }
-          if (outside !== null) break;
         }
         if (outside !== null) {
           push(
@@ -524,6 +625,33 @@ export function verifyProgram(text: string, ctx: VerifyContext): VerifyReport {
             m.line,
             `the ${fmt(outside.radius)} mm-radius cutter edge reaches (${fmt(outside.x)}, ${fmt(outside.y)}), outside the stock`,
           );
+        }
+
+        // ---- #240 slice 2 — the ROTARY frame's cutting refusals, design §3.9/§4 and /Rotary.md
+        // §6.4. Sentences come from `rotary/wrap.ts` so the finding panel says the same words.
+        if (rotary !== null) {
+          // "cuts through the centre": a cutting floor at or below the axis. The LOWEST end is
+          // the honest reading, the same rule the flat tool-edge check takes.
+          const zs = [fromW[2], toW[2]].filter((z): z is number => z !== null);
+          if (zs.length > 0 && Math.min(...zs) <= 1e-6) {
+            push('axis-crossing', m.line, throughCentreSentence(Math.min(...zs)));
+          }
+          // "runs into the jaws" / "runs into the tailstock's band": the cutter EDGE, at the
+          // move's lowest point (a V-bit's edge widens with depth, the flat rule's own reasoning).
+          const lowest = Math.min(fromW[2] ?? rotary.radius, toW[2] ?? rotary.radius);
+          const edgeRadius = toolRadiusOf(ctx.tool, Math.max(0, rotary.radius - lowest));
+          for (const p of [fromW, toW]) {
+            if (p[0] === null) continue;
+            const left = p[0] - edgeRadius;
+            if (left < ROTARY_JAW_KEEP_OUT_MM) {
+              push('wrap-into-clamp', m.line, jawsSentence(left));
+              break;
+            }
+            if (rotary.tailstock && p[0] + edgeRadius > rotary.stickout - ROTARY_TAILSTOCK_BAND_MM) {
+              push('wrap-into-clamp', m.line, tailstockSentence(p[0] + edgeRadius, rotary.stickout));
+              break;
+            }
+          }
         }
 
         // ---- 7. feed-too-high / feed-missing.
@@ -561,22 +689,42 @@ export function verifyProgram(text: string, ctx: VerifyContext): VerifyReport {
       if (m.mode === 'rapid') {
         const movedX = axisMoved(fromW[0], toW[0]);
         const movedY = axisMoved(fromW[1], toW[1]);
-        if (movedX || movedY) {
-          // #396 follow-up — `zUnproven` gates the PROGRAM's rapids only. The steps of an expanded
-          // macro are the FIRMWARE's moves: it traverses at its own clearance Z, which on the
-          // branch where the macro runs it really reaches, so a macro step is never refused for
-          // starting at a Z the FILE did not place.
-          if (fromW[2] === null || (zUnproven && m.synthetic === undefined)) {
-            const ends = toW[2] === null ? '' : ` (stating only where it ends, Z=${fmt(toW[2])}, places nothing: the tool travels to that end from wherever it was)`;
-            push('rapid-too-low', m.line, `an X/Y rapid starts at a Z the program never established: nothing lifts the tool to a known height first, so the move runs diagonally from an unknown height${ends}`);
-          } else {
-            const zLow = toW[2] === null ? fromW[2] : Math.min(fromW[2], toW[2]);
-            if (zLow < minRapidZ) {
-              push('rapid-too-low', m.line, `an X/Y rapid runs at Z=${fmt(zLow)}, below the permitted rapid height Z=${fmt(minRapidZ)}`);
+        if (rotary === null) {
+          if (movedX || movedY) {
+            // #396 follow-up — `zUnproven` gates the PROGRAM's rapids only. The steps of an expanded
+            // macro are the FIRMWARE's moves: it traverses at its own clearance Z, which on the
+            // branch where the macro runs it really reaches, so a macro step is never refused for
+            // starting at a Z the FILE did not place.
+            if (fromW[2] === null || (zUnproven && m.synthetic === undefined)) {
+              const ends = toW[2] === null ? '' : ` (stating only where it ends, Z=${fmt(toW[2])}, places nothing: the tool travels to that end from wherever it was)`;
+              push('rapid-too-low', m.line, `an X/Y rapid starts at a Z the program never established: nothing lifts the tool to a known height first, so the move runs diagonally from an unknown height${ends}`);
+            } else {
+              const zLow = toW[2] === null ? fromW[2] : Math.min(fromW[2], toW[2]);
+              if (zLow < minRapidZ) {
+                push('rapid-too-low', m.line, `an X/Y rapid runs at Z=${fmt(zLow)}, below the permitted rapid height Z=${fmt(minRapidZ)}`);
+              }
+            }
+          }
+        } else {
+          // ---- #240 — "turns the stock while the cutter is in it". In the rotary frame a RAPID
+          // that changes A (it turns) or X (it traverses along the axis) must start clear of the
+          // stock by {@link ROTARY_CLEARANCE_MM}: a retract and a pure-Z lift are allowed at any
+          // height, the same shape as the flat rule. The START is what is judged — the turn
+          // begins where the tool is, not where it ends (the flat rule's #392 reasoning).
+          const turns = m.a !== null && Math.abs(m.a - (lastA ?? 0)) > 1e-6;
+          if (turns || movedX) {
+            const zStart = fromW[2];
+            const clear = rotary.radius + ROTARY_CLEARANCE_MM;
+            if (zStart === null || zStart < clear - 1e-6) {
+              push('rotary-rapid-engaged', m.line, turningInCutSentence(zStart ?? (toW[2] ?? 0), rotary.radius));
             }
           }
         }
       }
+      // #240 — every move that states A becomes the reference the next rapid's turn is read
+      // against. Feeds turn the stock on purpose (a wrapped cut follows the arc); only a rapid's
+      // turn is this frame's hazard, checked above.
+      if (m.a !== null) lastA = m.a;
 
       // #396 follow-up — a move the PROGRAM wrote that commands Z places the tool itself, for the
       // events that FOLLOW it. The moves of an expanded macro are synthetic (the runner's own
@@ -593,7 +741,9 @@ export function verifyProgram(text: string, ctx: VerifyContext): VerifyReport {
 
     // ---- 12. clamp-in-path / bracket-in-path (#427). The widest part of the tool that can pass
     // alongside a clamp is its body — the shank or the cutting diameter, whichever is larger.
-    const mount = ctx.mountObstacles;
+    // #240 — a rotary job is in the CHUCK, not on the bracket or under the clamps: those
+    // obstacles are flat-mount geometry in the work XY frame and have no rotary counterpart.
+    const mount = rotary === null ? ctx.mountObstacles : undefined;
     if (mount && mount.obstacles.length > 0) {
       // #710 — the growth: the tool's widest part beside the mount, the fit, and the fixture
       // clearance (the job's jaw clearance, which now covers the clamps and the arms too).

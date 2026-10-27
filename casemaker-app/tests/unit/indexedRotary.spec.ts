@@ -82,9 +82,11 @@ function removedBy(sweep: SweepResult, k: number): number {
  * The whole pipeline the acceptance names: generate → post → parse/build (verify) → sweep.
  * Every stage is asserted on the way through rather than only at the end.
  *
- * The POST opens with a fed move to the safe height before any X/Y (the vendor's own order), so
- * the timeline carries one extra checkpoint at `Z = radius + safeZ` with `a = null`, which the
- * sweep skips: `checkpointsSkipped` is asserted at one below.
+ * The POST feeds to the safe height BEFORE the spindle starts (#396's `spindle-at-unknown-z`
+ * rule, #240 slice 2), so those opening feeds are not cutting moves and the timeline carries no
+ * skipped checkpoint of them: `checkpointsSkipped` is asserted at zero below. (Before that order,
+ * the fed move with the spindle already on made one checkpoint above the stock that the sweep
+ * skipped — a structural detail of the post's preamble, not a property of the job.)
  */
 function runPipeline(spec: IndexedSpec) {
   const ir = generateIndexed(spec);
@@ -101,14 +103,27 @@ function runPipeline(spec: IndexedSpec) {
   const out = sweepTimeline(tl, timeline, spec.tool, setup());
   if (!out.ok) throw new Error(`the sweep refused the indexed program: ${JSON.stringify(out.diagnostics)}`);
   expect(out.value.stats.engine).toBe('exact');
-  expect(out.value.stats.checkpointsSkipped).toBe(1);
+  expect(out.value.stats.checkpointsSkipped).toBe(0);
   expect(out.value.diagnostics.filter((d) => d.severity === 'error')).toEqual([]);
   return { ir, posted, timeline, sweep: out.value };
 }
 
-/** The runs that cut the stock (everything but the post's opening feed to the safe height). */
+/** The runs that cut the stock — every checkpoint at or below the surface. */
 const cuttingRuns = (timeline: { checkpoints: { a: number | null; z: number }[] }) =>
   timeline.checkpoints.filter((cp) => cp.z < RADIUS).map((cp) => ({ a: cp.a, z: cp.z }));
+
+/**
+ * The checkpoint index of the (single) run at this A. Derived from the timeline rather than
+ * hard-coded: the post's preamble order decides whether an extra non-cutting checkpoint exists
+ * (#240 slice 2 feeds to the safe height before the spindle starts, so there is none), and a
+ * fixture that indexed absolute checkpoints broke on that change while saying nothing about the
+ * job.
+ */
+const runAt = (timeline: { checkpoints: { a: number | null }[] }, a: number): number => {
+  const hits = timeline.checkpoints.flatMap((cp, i) => (cp.a === a ? [i] : []));
+  expect(hits.length, `checkpoints at A ${a}`).toBeGreaterThan(0);
+  return hits[0]!;
+};
 
 describe('#241 the indexed CAM produces a rotary IR the post and the timeline agree on', () => {
   it('cuts a face in constant-Z levels, shallowest first, A held on every move', () => {
@@ -168,8 +183,8 @@ describe('#241 fixture: TWO FLATS, 0° and 180°, 1 mm deep on ⌀20 (rotary-flo
     // segment's 5.87 — about 0.5 %), which is the only approximation in the geometry: the pass's
     // rectangle is exact and lies wholly inside the chord.
     const perFace = segmentArea(RADIUS, 1) * LENGTH;
-    expectWithin(removedBy(sweep, 1), perFace, 0.01, 'face 0');
-    expectWithin(removedBy(sweep, 2), perFace, 0.01, 'face 180');
+    expectWithin(removedBy(sweep, runAt(timeline, 0)), perFace, 0.01, 'face 0');
+    expectWithin(removedBy(sweep, runAt(timeline, 180)), perFace, 0.01, 'face 180');
     expectWithin(sweep.stats.removedVolume, 2 * perFace, 0.01, 'both faces');
     // The accounting is the sweep's own and must close exactly.
     expect(sweep.stats.resultVolume).toBeCloseTo(sweep.stats.stockVolume - sweep.stats.removedVolume, 6);
@@ -210,7 +225,7 @@ describe('#241 fixture: HEX ALL ROUND, six faces, across flats 17.321 on ⌀20 (
     expectWithin(sweep.stats.removedVolume, ring, 0.005, 'hex ring');
     // Each face's own removal is its share of the ring: one sixth, give or take where the
     // neighbouring faces' segments reach past the shared hexagon vertex.
-    for (let k = 1; k <= 6; k++) expectWithin(removedBy(sweep, k), ring / 6, 0.02, `face ${k - 1}`);
+    for (let k = 0; k < 6; k++) expectWithin(removedBy(sweep, runAt(timeline, k * 60)), ring / 6, 0.02, `face ${k}`);
     // The remaining cross-section at every X is the hexagon: the result is the hexagon solid.
     expectWithin(sweep.stats.resultVolume, hexArea * LENGTH, 0.005, 'hexagon solid');
     dispose(sweep);
@@ -237,7 +252,7 @@ describe('#241 fixture: CROSS-HOLE, ⌀3 through at 90° (rotary-flow §6)', () 
     // changes the hole's LENGTH by its chord error, 0.01 mm in 20: 0.05 %.
     const holeArea = polygonArea(HOLE_R, segmentsForRadius(HOLE_R));
     const want = holeArea * 2 * RADIUS;
-    expectWithin(removedBy(sweep, 1), want, 0.005, 'hole');
+    expectWithin(removedBy(sweep, runAt(timeline, 90)), want, 0.005, 'hole');
     expectWithin(sweep.stats.removedVolume, want, 0.005, 'hole (stats)');
     expect(sweep.stats.resultVolume).toBeCloseTo(sweep.stats.stockVolume - sweep.stats.removedVolume, 6);
     dispose(sweep);

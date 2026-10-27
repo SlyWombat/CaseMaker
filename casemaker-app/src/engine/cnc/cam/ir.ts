@@ -398,8 +398,17 @@ const JUNCTION_COS = Math.cos((JUNCTION_CORNER_DEG * Math.PI) / 180);
  * brings its own numbers, and a default would be a second source for a number this file exists to
  * keep single. As in `estimateSeconds`, the first move contributes nothing — the IR does not carry
  * the start point, and a run begins with a rapid in practice.
+ *
+ * ROTARY (#240): pass the stock radius and the A axis joins the in-plane travel — `dy` becomes the
+ * ARC `Δa·π/180·R`, so a feed that turns the stock a full turn is timed as the 62.8 mm it travels
+ * at the surface rather than as a stationary move, and the junction direction reads the same
+ * (X, arc) plane the flat model reads as (X, Y). Omitting it keeps the flat path byte-identical.
  */
-export function estimateCycleSeconds(moves: readonly CamMove[], rapid: RapidEstimate): number {
+export function estimateCycleSeconds(
+  moves: readonly CamMove[],
+  rapid: RapidEstimate,
+  rotaryRadius?: number,
+): number {
   let seconds = 0;
   let previous: CamMove | null = null;
   /** The feed run being accumulated — its `f`, the running length, and the direction of its last XY segment. */
@@ -416,7 +425,10 @@ export function estimateCycleSeconds(moves: readonly CamMove[], rapid: RapidEsti
       continue;
     }
     const dx = move.x - previous.x;
-    const dy = move.y - previous.y;
+    const dy =
+      rotaryRadius === undefined
+        ? move.y - previous.y
+        : (((move.a ?? 0) - (previous.a ?? 0)) * Math.PI * rotaryRadius) / 180;
     const dz = move.z - previous.z;
     const distance = Math.hypot(dx, dy, dz);
     if (move.kind === 'feed') {
@@ -460,7 +472,10 @@ export function estimateCycleSeconds(moves: readonly CamMove[], rapid: RapidEsti
  * each operation is the same function, so the panel, the sheet and the header agree.
  */
 export function estimateIRCycleSeconds(ir: ToolpathIR, rapid: RapidEstimate): number {
-  return ir.operations.reduce((s, op) => s + estimateCycleSeconds(op.moves, rapid), 0);
+  return ir.operations.reduce(
+    (s, op) => s + estimateCycleSeconds(op.moves, rapid, ir.rotary?.radius),
+    0,
+  );
 }
 
 /** The machine state two IRs must share for their moves to belong to one program. */

@@ -37,6 +37,7 @@ import { isVShape } from '@/engine/cnc/vProfile';
 import {
   columnOracleBand,
   computeOracle,
+  computeRotaryOracle,
   gridSliceAt,
   oracleBand,
   removalSliceAt,
@@ -219,6 +220,12 @@ interface LiveColumn {
   column: ColumnSweepOk;
   timeline: Timeline;
   setup: Setup;
+  /**
+   * #240 slice 2 — the cutter the run was swept with. The rotary oracle derives its FACET
+   * allowance from it (`√(Z_t² + r_t²) − Z_t`), the same term the R-2 column model implies, so
+   * the tolerance is the run's own number rather than a hand-set millimetre.
+   */
+  tool: Tool;
 }
 type Live = LiveSwept | LivePath | LiveColumn;
 
@@ -366,12 +373,13 @@ export interface SimSession {
    * removal against the CAM's `predicted` regions, level by level. The session owns the removal
    * solid, so this is the only place the comparison can be made without shipping wasm handles.
    *
-   * Throws when nothing SWEPT is loaded — a path-only refusal owns no removal at all — and for a
-   * ROTARY column live, whose grid's second axis is the stock angle rather than the work frame's Y,
-   * so no 2D region can be read off it. A FLAT column live is judged off its grid (#408), which is
-   * what lets a V-bit trace reach this at all: the cone's removal has no solid to slice either, and
-   * its prediction is a groove rather than one region per item. The caller only reaches this after
-   * a load that reported `ok`.
+   * Throws when nothing SWEPT is loaded — a path-only refusal owns no removal at all. A COLUMN
+   * live is judged off its grid (#408): a FLAT one against the work frame's (X, Y), which is what
+   * lets a V-bit trace reach this at all (its prediction is a groove rather than one region per
+   * item), and a ROTARY one against the MAP's (X, arc) column by column (`computeRotaryOracle`,
+   * #240 slice 2, `/Rotary.md` §4.5) — never the flat area comparison, because the R-2 column
+   * model's flat tip is a wedge whose floor only meets the nominal value under each pass. The
+   * caller only reaches this after a load that reported `ok`.
    *
    * #623 — judged in the frame the LOAD was given: a `surface` load reads the sweep with the fitted
    * lift subtracted at each XY and stamps `frame: 'surface'` on the report, so a program posted
@@ -542,7 +550,7 @@ export function createSimSession(tl: ManifoldToplevel, hooks?: SimSessionHooks):
         solid.delete();
       }
       diagnostics.push(...col.diagnostics.map(tagSweep));
-      live = { kind: 'column', column: col, timeline: surfaceTimeline, setup: setupArg };
+      live = { kind: 'column', column: col, timeline: surfaceTimeline, setup: setupArg, tool };
       return {
         ok: true,
         diagnostics,
@@ -698,15 +706,16 @@ export function createSimSession(tl: ManifoldToplevel, hooks?: SimSessionHooks):
    * can model (#405) and whose prediction is a GROOVE rather than one 2D region per item — the two
    * halves of the same piece.
    *
-   * A ROTARY column is still refused, and for a reason no band can answer: its second grid axis is
-   * the stock ANGLE, so its cells are not a picture of the work frame's XY. A 2D region cannot be
-   * read off it at all — the comparison would be between a grid over (X, θ) and polygons over
-   * (X, Y). The refusal names the axis rather than claiming nothing can be done, which was the old
-   * message's overreach: a FLAT column sweep can be compared, and now is.
+   * A WRAPPED rotary column is judged by `computeRotaryOracle` (#240 slice 2, `/Rotary.md` §4.5):
+   * a COLUMN prediction in the map's frame. The flat comparison cannot be used for it — the grid's
+   * second axis is the stock ANGLE, so its cells are not a picture of the work frame's XY, and the
+   * R-2 column model's flat tip is a wedge, so a level's area says nothing about the region. The
+   * session's part is to name the run's own grid, radius and cutter; the model, the cell + facet
+   * tolerance and the seam fold live in the oracle.
    *
-   * An INDEXED rotary sweep (#241) is refused for the sibling reason: its removal is in the stock
-   * frame, one rotated solid per face, and a prediction is a work-frame region of ONE face — the
-   * comparison needs the face's own rotation, which the per-face oracle slice will own.
+   * An INDEXED rotary sweep (#241) is refused: its removal is in the stock frame, one rotated
+   * solid per face, and a prediction is a work-frame region of ONE face — the comparison needs the
+   * face's own rotation, which the per-face oracle slice will own.
    */
   const oracle = (predicted: readonly OraclePredicted[]): OracleReport => {
     // #623 — the frame the loaded program speaks. A flat post is judged exactly as it always was;
@@ -717,9 +726,21 @@ export function createSimSession(tl: ManifoldToplevel, hooks?: SimSessionHooks):
     if (l && l.kind === 'column') {
       const grid = l.column.grid;
       if (grid.kind !== 'flat') {
-        throw new Error(
-          'oracle: this is a ROTARY column sweep, whose grid runs over (X, θ): a 2D region in the work frame cannot be read off it, so the CAM\'s predicted regions cannot be compared with the material it left',
-        );
+        // #240 slice 2 — the column prediction. R is the grid's own untouched radius (the carve's
+        // `column.radius`), so the frame the oracle speaks is the frame the sweep made; the
+        // prediction is already in map millimetres, which is the frame it is compared in.
+        const radius = l.column.radius;
+        const sweep = cuttingRadiusForSweep(l.tool);
+        if (!sweep.ok) {
+          throw new Error(`oracle: a rotary run is a flat end mill's, and this run's cutter has no sweep radius: ${sweep.reason}`);
+        }
+        const report = computeRotaryOracle(tl, {
+          grid,
+          radius,
+          toolRadius: sweep.radius,
+          predicted,
+        });
+        return { ...report, frame: surface === null ? 'work' : 'surface' };
       }
       const report = computeOracle(tl, gridSliceAt(tl, grid), predicted, columnOracleBand(worstContours(l.timeline), grid), grid);
       return { ...report, frame: surface === null ? 'work' : 'surface' };

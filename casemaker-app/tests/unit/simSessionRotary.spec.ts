@@ -64,18 +64,79 @@ describe('session routing — rotary', () => {
     s.dispose();
   });
 
-  it('refuses to check a prediction against a rotary sweep, naming the axis (#408 review 3)', () => {
-    // #408 taught the oracle to judge a FLAT column live off its grid, which is what lets a V-bit
-    // trace be checked at all. A ROTARY column cannot be judged the same way, and the reason is
-    // geometrical rather than a missing feature: its second grid axis is the stock ANGLE, so its
-    // cells are a picture of (X, θ) — comparing one with a region in the work frame's (X, Y) would
-    // be comparing two different planes. The refusal must therefore say so rather than claim the
-    // sampled engine is unpinnable, which was the old message's overreach.
+  it('judges a rotary prediction COLUMN by COLUMN, in the map frame (#240, §4.5)', () => {
+    // #408 taught the oracle to judge a FLAT column live off its grid. A ROTARY column's second
+    // grid axis is the stock ANGLE, so the grid is a picture of (X, θ) — the map's (x, arc at R),
+    // which is exactly the frame the prediction is authored in (§3.7). So the same live reading
+    // works, provided the comparison is the column one: the R-2 model's flat tip is a wedge, and
+    // a full-turn pass at Z_t = 5 leaves a floor of 5 under each pass and the facet term's excess
+    // toward the stroke edges, never a flat level worth an area comparison.
     const s = createSimSession(tl);
     const r = s.load(WRAPPED, setup(), tool, null);
     expect(r.ok).toBe(true);
-    expect(() => s.oracle([])).toThrow(/ROTARY column sweep/);
-    expect(() => s.oracle([])).toThrow(/\(X, θ\)/);
+    // The cut is one circumferential band, 2·r_t wide, at the pass: the tool's footprint disc in
+    // the map plane. Half a cell of slack each side is the engine's own resolution, not a number.
+    const halfWidth = 3.175 / 2;
+    const circumference = 2 * Math.PI * 10;
+    const report = s.oracle([
+      {
+        depth: 5,
+        polygons: [
+          [
+            [-halfWidth, 0],
+            [halfWidth, 0],
+            [halfWidth, circumference],
+            [-halfWidth, circumference],
+          ] as [number, number][],
+        ],
+      },
+    ]);
+    expect(report.ok).toBe(true);
+    expect(report.frame).toBe('work');
+    expect(report.levels).toHaveLength(1);
+    expect(report.levels[0]!.z).toBe(-5);
+    // The band carries the CELL term plus the derived facet term of Z_t = 5, r_t = 1.5875:
+    // `sqrt(25 + 1.5875²) − 5` = 0.24692 mm, plus this grid's half cell diagonal (~0.05 mm).
+    // Nothing here is hand-set; the upper bound only says the cell term is a cell, not a fudge.
+    expect(report.band).toBeGreaterThan(0.24692);
+    expect(report.band).toBeLessThan(0.24692 + 0.1);
+    s.dispose();
+  });
+
+  it('reports BOTH an under-cut inside the region and an over-cut outside it', () => {
+    // The prediction band is shifted from the pass: 20°..280° predicted, 60°..300° cut (both at
+    // X = 0, Z = 5 on ⌀20). Inside the region the missing 20°..60° is material left standing;
+    // outside it the cut's own 280°..300° (plus its footprint past the end) is material removed
+    // where the map says none should be. A flat area comparison cannot tell these apart.
+    const s = createSimSession(tl);
+    const SHIFTED = ['S1000 M3', 'G0 X0 Y0 Z30 A60', 'G1 Z5 F100', 'G1 A300 F500', 'G0 Z30'].join('\n');
+    const r = s.load(SHIFTED, setup(), tool, null);
+    expect(r.ok).toBe(true);
+    const arc = (deg: number): number => (deg * Math.PI * 10) / 180;
+    const report = s.oracle([
+      {
+        depth: 5,
+        polygons: [
+          [
+            [-1.5875, arc(20)],
+            [1.5875, arc(20)],
+            [1.5875, arc(280)],
+            [-1.5875, arc(280)],
+          ] as [number, number][],
+        ],
+      },
+    ]);
+    expect(report.ok).toBe(false);
+    const level = report.levels[0]!;
+    expect(level.underCut).toBeGreaterThan(report.areaFloor!);
+    expect(level.overCut).toBeGreaterThan(report.areaFloor!);
+    // The under-cut sits where the prediction runs ahead of the pass (arc of 20°..60°)…
+    const under = level.underBbox!;
+    const over = level.overBbox!;
+    expect(under.min[1]!).toBeLessThan(arc(30));
+    expect(under.max[1]!).toBeGreaterThan(arc(45));
+    // …and the over-cut where the pass runs past the prediction (280° and beyond).
+    expect(over.max[1]!).toBeGreaterThan(arc(285));
     s.dispose();
   });
 

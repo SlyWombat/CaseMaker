@@ -49,6 +49,7 @@ import { grooveWidthAt, vCone } from '@/engine/cnc/vProfile';
 import { defaultBoundaryMargin, voidFloor, voidMargin } from '@/engine/cnc/engrave/depthBounds';
 import { inkBoxOf, type InkBox, type InkMeasure } from '@/engine/cnc/engrave/inkBox';
 import { printedLayerGridOf, voidCeilingFor } from '@/engine/cnc/layerStack';
+import { rotaryMapOf, type RotaryMap } from '@/engine/cnc/rotary/wrap';
 import type { DepthLimit, ThroughMask } from '@/engine/cnc/verify';
 import { sacrificialDepthLimit } from '@/engine/cnc/verify';
 
@@ -1974,8 +1975,30 @@ export interface DerivedEngrave {
   depth: Mm;
 }
 
+/**
+ * The map region `measureLabels` judges a rotary item against (#240).
+ *
+ * It is deliberately larger than the map itself. The around axis is PERIODIC, so a region across
+ * the seam is authored on either side of 0/C and is not "off the stock"; and the X ends are the BAND
+ * findings' to judge, in their own operator sentence ("runs into the jaws"), rather than this
+ * stage's generic "beyond the supported material". Covering a turn either side of the seam and the
+ * whole stick-out leaves `item-outside-stock` inert on a rotary job, so each refusal has one owner
+ * and one sentence.
+ */
+function rotaryMapSupport(map: RotaryMap): Profile {
+  const around = map.circumference;
+  return pTranslate([-around, -around], rectProfile(map.stickout + 2 * around, 3 * around));
+}
+
 export function toPartPlan(job: EngraveJob, options: PartPlanOptions = {}): PartPlan {
-  const stockOutline = rectProfile(job.stock.length, job.stock.width);
+  // #240 — a job in the rotary chuck is planned on its MAP: X along the axis from the jaws, Y the
+  // surface arc at the design radius, over the stick-out the jaws leave free. The same document
+  // items, the same funnels; only the stock those coordinates are measured against changes. A
+  // flat job reads its blank exactly as before.
+  const rotary = rotaryMapOf(job);
+  const stockOutline = rotary
+    ? rectProfile(rotary.stickout, rotary.circumference)
+    : rectProfile(job.stock.length, job.stock.width);
   const { order } = resolveItems(job);
   // Read once: `labelGlyphMeasure` answers `null` for a face that is not parsed, which is the cue
   // to fall back. It is only built when the caller asked for the fallback, so the compile path
@@ -2216,13 +2239,17 @@ export function toPartPlan(job: EngraveJob, options: PartPlanOptions = {}): Part
 
   // #432 — the job's facing choice, as a depth or nothing. A toggle that is on with a zero depth
   // (the field not filled in yet) is NOT a facing pass: it removes nothing, and the plan says so
-  // with `null` rather than handing CAM a zero-depth operation.
-  const facing = job.facing !== undefined && job.facing.enabled && job.facing.depth > 0 ? { depth: job.facing.depth } : null;
+  // with `null` rather than handing CAM a zero-depth operation. #240 — a rod in the chuck is not
+  // faced in this frame at all: a skim is a flat-blank pass, and the rotary findings refuse one.
+  const facing =
+    rotary === null && job.facing !== undefined && job.facing.enabled && job.facing.depth > 0
+      ? { depth: job.facing.depth }
+      : null;
 
   return {
     stock: {
       outline: stockOutline,
-      supported: supportedFootprint(job.stock, job.sacrificial),
+      supported: rotary ? rotaryMapSupport(rotary) : supportedFootprint(job.stock, job.sacrificial),
       thickness: job.stock.thickness,
       keepOuts,
       // #492 — the two-colour facts, copied in the plan's own frame. A laminate carries `split`

@@ -51,6 +51,12 @@ export type Profile =
   | { kind: 'p-translate'; offset: Vec2; child: Profile }
   | { kind: 'p-rotate'; degrees: number; child: Profile }
   /**
+   * Non-uniform scale about the origin (#240, R10). The one profile operation a wrap needs: a
+   * rotary engraving's opening is anisotropic, and scaling the AROUND axis into the floor's own
+   * radius turns that opening into an isotropic one that Clipper2 can build.
+   */
+  | { kind: 'p-scale'; scale: Vec2; child: Profile }
+  /**
    * Reflect across the line through the origin whose NORMAL is `normal`
    * (so [1, 0] flips x, [0, 1] flips y).
    */
@@ -141,6 +147,14 @@ export function pTranslate(offset: Vec2, child: Profile): Profile {
 
 export function pRotate(degrees: number, child: Profile): Profile {
   return { kind: 'p-rotate', degrees, child };
+}
+
+/**
+ * Scale each axis independently about the origin (#240). A NEGATIVE factor mirrors, and the
+ * bounds function swaps that axis' corners to match.
+ */
+export function pScale(scale: Vec2, child: Profile): Profile {
+  return { kind: 'p-scale', scale, child };
 }
 
 export function pMirror(normal: Vec2, child: Profile): Profile {
@@ -257,6 +271,17 @@ export function aabbOfProfile(p: Profile): Aabb2 | null {
           if (ry > maxY) maxY = ry;
         }
       return { min: [minX, minY], max: [maxX, maxY] };
+    }
+    case 'p-scale': {
+      const b = aabbOfProfile(p.child);
+      if (!b) return null;
+      // Scaling maps corners to corners; a negative factor swaps which corner is the min, so take
+      // the min/max of the two mapped values on each axis rather than assuming the sign.
+      const [sx, sy] = p.scale;
+      return {
+        min: [Math.min(b.min[0] * sx, b.max[0] * sx), Math.min(b.min[1] * sy, b.max[1] * sy)],
+        max: [Math.max(b.min[0] * sx, b.max[0] * sx), Math.max(b.min[1] * sy, b.max[1] * sy)],
+      };
     }
     case 'p-rotate': {
       const b = aabbOfProfile(p.child);

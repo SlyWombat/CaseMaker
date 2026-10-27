@@ -225,12 +225,15 @@ function postRotary(
     'G17 G21 G54 G90',
     'M5',
     `T${ir.toolNumber}M6`,
-    `M3 S${axis(ir.spindleRpm)}`,
-    // A FED move to a known height BEFORE any XY travel, as the vendor does: after the manual
-    // tool change the head's height is unknown, and the feed establishes it without a rapid.
+    // A FED move to a known height BEFORE the spindle starts (and before any XY travel), as the
+    // vendor does: after the manual tool change the head's height is unknown, and the feed
+    // establishes it without a rapid. The spindle comes on AFTER this move — the verifier's
+    // `spindle-at-unknown-z` rule (#396) is right that `M3` before any Z is established spins the
+    // cutter up wherever the last job left it, and a feed at the safe height cuts nothing.
     `G01 Z${safeWord} F${feed(preambleFeed)}`,
     // Y is stated here ONCE and is never a word again in this file (see `emit`).
     `G01 Y0 Z${safeWord}`,
+    `M3 S${axis(ir.spindleRpm)}`,
     // Provenance, as `;@CM|` records the machine's reader ignores. There is deliberately no
     // `;@MKR` header: see the module header for the round-stock candidate and why it is not
     // written until the bench reads a Studio-generated rotary file.

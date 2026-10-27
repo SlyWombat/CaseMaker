@@ -12,6 +12,7 @@ import {
   type Tool,
 } from '@/engine/cnc/tool';
 import { jobVise, viseEnvelope } from '@/engine/cnc/fixture';
+import { rotaryMapOf } from '@/engine/cnc/rotary/wrap';
 import { validateSacrificial, viseJawShift } from '@/engine/cnc/sacrificial';
 import { stubSetup, type FixtureEnvelope, type Setup, type Workholding } from '@/engine/cnc/setup';
 import {
@@ -271,7 +272,17 @@ export type JobFindingCode =
   // #649 — the fitted surface lifts the blank more than the nominal hop, so every rapid in this
   // program runs higher than usual. A warning: the program is safe (the hop was raised for it), but
   // the operator may prefer to level the top with G32 and keep the nominal clearance.
-  | 'surface-hop-raised';
+  | 'surface-hop-raised'
+  // Rotary (#240 slice 2). `axis-crossing` — an engrave whose depth reaches or passes the stock's
+  // radius, so the floor would be at or below the axis; the message is the design's "cuts through
+  // the centre" (rotary-flow.md §4). `rotary-unsupported` — the document carries a cut class the
+  // wrap does not cut yet (cut-outs, traces, drills, threads, chamfers, facing, through regions,
+  // inlays, prisms, voids), refused BY NAME with the action that clears it. `wrap-into-clamp` —
+  // an item's opened region reaches into the jaws' or the tailstock's band (the verifier raises
+  // the same code against the moves). Codes are data: the operator sentence never carries one.
+  | 'axis-crossing'
+  | 'rotary-unsupported'
+  | 'wrap-into-clamp';
 
 export interface JobFinding {
   /**
@@ -454,10 +465,6 @@ export function jobTool(job: EngraveJob): Tool | null {
 export function workholdingFor(job: EngraveJob): Workholding {
   const { length, width, thickness } = job.stock;
   const shift = viseJawShift(job.sacrificial);
-  // #707 BM-1 — the BED mounts are their own workholdings, and the registration planner already
-  // knows both: tape gives no datum at all (left edge twice, front edge), the bracket gives XY and
-  // squareness from its corner. Reading them here is what makes a bed job's plan the bed's plan
-  // instead of the vise's.
   if (job.workholding.kind === 'tape') {
     // The tape holds along the whole underside: the contact IS the stock's footprint.
     return { kind: 'tape-down', contact: rectProfile(length, width) };
@@ -467,9 +474,10 @@ export function workholdingFor(job: EngraveJob): Workholding {
     // IS the stock's front-left corner until the offset is measured (BM-9's confirming touch).
     return { kind: 'anchor-bracket', anchor: job.workholding.bracket.anchor, offset: [0, 0] };
   }
-  // #240 — slice 1 is the MODEL, not the rotary cut. A job in the chuck is read through the vise
-  // answers' neutral seat (`jobVise`), so the emulator, the registration plan and the part view
-  // keep one flat frame until slice 2's unrolled map and slice 3's rotary run sheet replace it.
+  // #240 — the SETUP's neutral seat is the flat vise's: a job in the chuck is read through
+  // `jobVise` here, because the emulator's view of the chuck is slice 3's rotary run sheet. The
+  // unrolled map slice 2 builds lives in the CAM, the verifier and the column oracle, not in this
+  // seat.
   const vise = jobVise(job);
   return {
     kind: 'vise',
@@ -579,7 +587,7 @@ export function jobMount(job: EngraveJob, setupIndex = 0): Mount {
   // #707 BM-1 — a derived setup for a bed job is the job's own mount: the workholding names it
   // with the same word the setups engine does (`tape` / `bracket`).
   if (job.workholding.kind === 'tape' || job.workholding.kind === 'bracket') return job.workholding.kind;
-  // #240 — a derived setup for a rotary job is still read as the flat vise in slice 1 (see
+  // #240 — a derived setup for a rotary job is still read as the flat vise (see
   // `workholdingFor`).
   return 'vise';
 }
@@ -663,6 +671,24 @@ export function defaultBracketHold(stock: StockSize, defaults: ShopDefaults | nu
  */
 export function toSetup(job: EngraveJob, machine: MillProfile, fixture?: FixtureEnvelope): Setup {
   const { length, width, thickness } = job.stock;
+  // #240 slice 2 — a ROTARY job's part is a cylinder on the chuck: there is no vise to model, no
+  // sacrificial board under it, and the work origin is the axis (`stubSetup` places a cylinder's
+  // WCS there — the slice-1 fix). The chuck's facts are the job's own; the jaw diameter is the
+  // stock's unless the job states the capacity it closes on.
+  const rotary = rotaryMapOf(job);
+  if (rotary !== null) {
+    const chuck = job.workholding.kind === 'rotary-chuck' ? job.workholding.rotary : null;
+    return stubSetup(
+      { kind: 'cylinder', diameter: rotary.radius * 2, length: rotary.length },
+      {
+        kind: 'rotary-chuck',
+        jawDiameter: chuck?.gripDiameter ?? rotary.radius * 2,
+        stickout: rotary.stickout,
+      },
+      { startingTool: 1 },
+      machine,
+    );
+  }
   const vise = jobVise(job);
   const workholding = workholdingFor(job);
   // #707 BM-1 — the vise's envelope is the VISE's. A bracket job's obstacles are its arms and THE

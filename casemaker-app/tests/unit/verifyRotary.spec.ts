@@ -1,0 +1,171 @@
+/**
+ * The verifier's rotary refusals (#240 slice 2, `/Rotary.md` §6.4 and design §3.9/§4).
+ *
+ * A rotary program is checked on the FILE, not on the job: each refusal carries the step's line
+ * and the SAME sentence the findings panel and the map use (`rotary/wrap.ts`), so the picture and
+ * the file cannot word one fault two ways. The rotary frame's rules replace the flat ones — a
+ * depth limit and a stock rectangle are flat-frame quantities and do not translate — so each test
+ * below writes a program the flat checks would wave through and asserts the rotary one.
+ *
+ * CODES ARE DATA. Every refusal is asserted on the operator's sentence; the internal code is read
+ * from the finding and must NOT appear in its message (first-job §4's no-codes rule).
+ */
+
+import { describe, expect, it } from 'vitest';
+
+import { verifyProgram, type VerifyContext } from '@/engine/cnc/verify';
+import { stubSetup, type Setup } from '@/engine/cnc/setup';
+import { flatEndMill } from '@/engine/cnc/tool';
+import { Z1 } from '@/engine/cnc/machine';
+
+const CODE =
+  /axis-crossing|rotary-y-off-axis|wrap-into-clamp|rotary-rapid-engaged|stock-exceeds-module|rotary-unsupported/;
+
+function cyl(diameter = 20, length = 100): Setup {
+  return stubSetup(
+    { kind: 'cylinder', diameter, length },
+    { kind: 'rotary-chuck', jawDiameter: diameter, stickout: 85 },
+    { startingTool: 1 },
+    Z1,
+  );
+}
+
+function ctx(over: Partial<VerifyContext> = {}): VerifyContext {
+  return {
+    setup: cyl(),
+    machine: Z1,
+    tool: flatEndMill(1),
+    depthLimit: () => 0, // a flat-frame quantity; the rotary checks never read it
+    minRapidZ: 1,
+    rotary: { radius: 10, stickout: 85, tailstock: true },
+    ...over,
+  };
+}
+
+/** The post's own shape: the preamble, the spindle after a known Z, and the rotary ending. */
+const HEAD = ['%', 'G17 G21 G54 G90', 'M5', 'T1M6', 'G01 Z15 F200', 'G01 Y0 Z15', 'M3 S12000'];
+const TAIL = ['G0 Z15', 'G92.4A0S0', 'M9', 'M5', 'M30'];
+const program = (body: string[]): string => [...HEAD, ...body, ...TAIL].join('\n');
+
+function report(body: string[], over: Partial<VerifyContext> = {}): ReturnType<typeof verifyProgram> {
+  return verifyProgram(program(body), ctx(over));
+}
+
+const finding = (body: string[], code: string, over: Partial<VerifyContext> = {}) =>
+  report(body, over).findings.find((f) => f.code === code);
+
+/** The 1-based source line of the first program line containing `needle`. */
+function lineOf(body: string[], needle: string): number {
+  return program(body).split('\n').findIndex((l) => l.includes(needle)) + 1;
+}
+
+describe('the rotary dialect', () => {
+  it('admits A words — and only a rotary program does', () => {
+    const body = ['G0 X20 Z15 A0', 'G1 Z9.5 F100', 'G1 X30 A10 F500', 'G0 Z15'];
+    expect(report(body).findings.some((f) => f.code === 'not-our-dialect')).toBe(false);
+    // The same words without the rotary frame are foreign words, as they were before #240.
+    expect(report(body, { rotary: undefined }).findings.some((f) => f.code === 'not-our-dialect')).toBe(true);
+  });
+
+  it('a clean wrapped program passes every check', () => {
+    const r = report(['G0 X20 Z15 A0', 'G1 Z9.5 F100', 'G1 X30 A10 F500', 'G0 Z15']);
+    expect(r.findings).toEqual([]);
+    expect(r.ok).toBe(true);
+  });
+});
+
+describe('the rotary refusals — operator words, at the step', () => {
+  it('Y off the axis — “leaves the line over the axis”', () => {
+    const body = ['G0 X20 Z15 A0', 'G1 Z9.5 F100', 'G1 Y1 A20 F500'];
+    const f = finding(body, 'rotary-y-off-axis');
+    expect(f).toBeDefined();
+    expect(f!.severity).toBe('error');
+    expect(f!.line).toBe(lineOf(body, 'G1 Y1 A20'));
+    expect(f!.message).toContain('leaves the line over the axis');
+    expect(f!.message).toContain('(Y 1 mm)');
+    expect(f!.message).toContain('every Y is 0');
+    expect(f!.message).not.toMatch(CODE);
+  });
+
+  it('a tip past the axis — “cuts through the centre”, with how far past', () => {
+    const body = ['G0 X20 Z15 A0', 'G1 Z-2 F100'];
+    const f = finding(body, 'axis-crossing');
+    expect(f).toBeDefined();
+    expect(f!.line).toBe(lineOf(body, 'G1 Z-2'));
+    expect(f!.message).toContain('cuts through the centre');
+    expect(f!.message).toContain('reaches 2 mm past the axis');
+    expect(f!.message).toContain('use a shallower depth or a larger diameter');
+    expect(f!.message).not.toMatch(CODE);
+  });
+
+  it('a tip on the axis — the exact case has its own sentence', () => {
+    const f = finding(['G0 X20 Z15 A0', 'G1 Z0 F100'], 'axis-crossing');
+    expect(f).toBeDefined();
+    expect(f!.message).toContain('reaches the axis exactly');
+    expect(f!.message).not.toContain('0 mm past the axis');
+    expect(f!.message).not.toMatch(CODE);
+  });
+
+  it('the cutter EDGE into the jaws’ band — “runs into the jaws”', () => {
+    // The move ends at X 3.4 with a 1 mm cutter: the edge is at X 2.9, inside the 3 mm keep-out.
+    const body = ['G0 X20 Z15 A0', 'G1 Z9.5 F100', 'G1 X3.4 F500'];
+    const f = finding(body, 'wrap-into-clamp');
+    expect(f).toBeDefined();
+    expect(f!.line).toBe(lineOf(body, 'G1 X3.4'));
+    expect(f!.message).toContain('runs into the jaws');
+    expect(f!.message).toContain('X 2.9 mm');
+    expect(f!.message).toContain('first 3 mm of the stick-out');
+    expect(f!.message).not.toMatch(CODE);
+  });
+
+  it('the cutter EDGE into the tailstock’s band — “runs into the tailstock’s band”', () => {
+    const body = ['G0 X70 Z15 A0', 'G1 Z9.5 F100', 'G1 X84.6 F500'];
+    const f = finding(body, 'wrap-into-clamp');
+    expect(f).toBeDefined();
+    expect(f!.message).toContain("runs into the tailstock's band");
+    expect(f!.message).toContain('X 85.1 mm');
+    expect(f!.message).toContain('last 10 mm of the stick-out');
+    expect(f!.message).toContain('X 75–85 mm');
+    expect(f!.message).not.toMatch(CODE);
+  });
+
+  it('a rapid that TURNS the stock in the cut — “turns the stock while the cutter is in it”', () => {
+    const body = ['G0 X20 Z15 A0', 'G1 Z9.5 F100', 'G0 A90'];
+    const f = finding(body, 'rotary-rapid-engaged');
+    expect(f).toBeDefined();
+    expect(f!.line).toBe(lineOf(body, 'G0 A90'));
+    expect(f!.message).toContain('turns the stock while the cutter is in it');
+    expect(f!.message).toContain('0.5 mm inside the stock');
+    expect(f!.message).toContain('Z 9.5 mm');
+    expect(f!.message).toContain('3 mm of clearance');
+    expect(f!.message).toContain('Z 13 mm');
+    expect(f!.message).not.toMatch(CODE);
+
+    // Clear of the stock by the 3 mm the rule asks, the same turn is fine.
+    expect(finding(['G0 X20 Z15 A0', 'G0 A90'], 'rotary-rapid-engaged')).toBeUndefined();
+  });
+
+  it('a rapid that TRAVERSES along the axis in the cut is the same hazard', () => {
+    const f = finding(['G0 X20 Z15 A0', 'G1 Z9.5 F100', 'G0 X40'], 'rotary-rapid-engaged');
+    expect(f).toBeDefined();
+    expect(f!.message).toContain('turns the stock while the cutter is in it');
+    expect(f!.message).not.toMatch(CODE);
+  });
+
+  it('a stock outside the module’s ⌀80 × 150 — “does not fit the rotary’s ⌀80 × 150 mm”', () => {
+    const body = ['G0 X20 Z15 A0', 'G1 Z9.5 F100', 'G1 X30 F500'];
+    const tooFat = finding(body, 'stock-exceeds-module', {
+      setup: cyl(90, 100),
+      rotary: { radius: 45, stickout: 85, tailstock: true },
+    });
+    expect(tooFat).toBeDefined();
+    expect(tooFat!.message).toContain("does not fit the rotary's ⌀80 × 150 mm");
+    expect(tooFat!.message).toContain('⌀90 × 100 mm');
+    expect(tooFat!.message).not.toMatch(CODE);
+
+    const tooLong = finding(body, 'stock-exceeds-module', { setup: cyl(20, 160) });
+    expect(tooLong).toBeDefined();
+    expect(tooLong!.message).toContain('⌀20 × 160 mm');
+    expect(tooLong!.message).not.toMatch(CODE);
+  });
+});

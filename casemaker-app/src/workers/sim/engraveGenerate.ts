@@ -160,6 +160,8 @@ import {
   type PerCharGlyph,
 } from './engraveGeometry';
 import { colourBoundaryFor, stackDepthLimit, type StackDepthLimit } from './stackDepthLimit';
+import { rotaryJobFindings } from '@/engine/cnc/rotary/findings';
+import { rotaryMapOf, toRotaryIR } from '@/engine/cnc/rotary/wrap';
 import { ceilingName, effectiveMargins, MARGIN_DEFAULTS } from '@/engine/cnc/engrave/depthBounds';
 import { ORACLE_SHALLOW_DEPTH_FRACTION, type OraclePredicted, type OracleThreadMove } from '@/engine/cnc/engrave/oracle';
 import type { SurfaceProgramCheck } from '@/engine/cnc/uploadGate';
@@ -556,9 +558,10 @@ export interface EngraveGenerated {
   /** The exact text to be saved. */
   nc: string | null;
   /**
-   * #240 — the frame the POST wrote program 1 in (`'flat'` today; `'rotary'` once the wrap CAM
-   * lands). Absent on results stored before the field existed, which read as flat; each
-   * `EngraveProgram` carries its own, because a run is a list of files.
+   * #240 — the frame the POST wrote program 1 in: `'rotary'` when the job was cut on its unrolled
+   * map and `toRotaryIR` converted it, `'flat'` otherwise. Absent on results stored before the
+   * field existed, which read as flat; each `EngraveProgram` carries its own, because a run is a
+   * list of files.
    */
   frame?: 'flat' | 'rotary';
   /** #174. */
@@ -1329,11 +1332,31 @@ export function engraveRegions(
     for (const engrave of plan.engraves) planeRadiusFor(engrave.id);
   }
 
+  // #240 slice 2 — a rotary job measures on its MAP, and the opening is ANISOTROPIC there
+  // (R10): `r_t` along X, `r_t·R/(R − d)` around. The measurement reads the same radius/depth
+  // pair `generateEngrave` scales the CAM by, so what the panel calls reachable and what the
+  // file cuts cannot disagree. The flat path passes nothing and is unchanged.
+  const rotaryMap = rotaryMapOf(job);
+  const wrapFor =
+    rotaryMap === null
+      ? undefined
+      : (labelId: string): { radius: number; depth: number } => ({
+          radius: rotaryMap.radius,
+          depth: engraveById.get(labelId)?.depth ?? 0,
+        });
   const measureRadius = radius ?? cone?.tipRadius ?? null;
   const measured =
     measureRadius === null
       ? []
-      : measureLabels(tl, plan, measureRadius, job.edgeMargin, perChar, cone === null ? undefined : planeRadiusFor);
+      : measureLabels(
+          tl,
+          plan,
+          measureRadius,
+          job.edgeMargin,
+          perChar,
+          cone === null ? undefined : planeRadiusFor,
+          wrapFor,
+        );
   const ratioAt =
     cone === null
       ? ratioAtFor(tl, job, radius ?? 0)
@@ -1643,6 +1666,11 @@ export function engraveRegions(
     ...(job.workholding.kind === 'vise'
       ? validateVise(job.stock, job.workholding.vise, job.sacrificial)
       : []),
+    // #240 slice 2 — the surface wrap's own document checks: a floor at or past the axis, a cut
+    // class the wrap does not cut yet, and an item opening that reaches into either end band (at
+    // its row). `measured` carries each item's OPENED region in map millimetres. Empty for a flat
+    // job.
+    ...rotaryJobFindings(job, plan, measured),
     ...engFindings,
     ...metalLineFindings(job, tool),
     ...carveFindings,
@@ -2210,7 +2238,7 @@ function frameProgram(
   const moves = frameCorners(ir, radius, FRAME_Z);
   if (moves === null) return { error: 'the toolpath has no positioned move to trace' };
   const frameIr: ToolpathIR = {
-    frame: 'flat', // the frame trace is a flat-frame air move; no rotary frame exists yet (#237)
+    frame: 'flat', // an air trace of a flat blank; a rotary job has no frame file in this slice (#240, slice 3)
     tool: ir.tool,
     toolNumber: ir.toolNumber,
     spindleRpm: ir.spindleRpm,
@@ -3737,6 +3765,10 @@ function generateOneProgram(
    */
   let predictedForRun = predicted;
   const errors: EngraveFailure[] = [];
+  // #240 slice 2 — the map this job is authored on, or null for a flat job. Every rotary branch
+  // below reads this ONE value, `rotaryMapOf`'s, so the CAM, the post, the verifier and the
+  // success result cannot disagree about whether this run is wrapped.
+  const rotaryMap = rotaryMapOf(job);
 
   const stop = (
     stage: EngraveStage,
@@ -4017,6 +4049,10 @@ function generateOneProgram(
             shop.peckClearanceMm ?? null,
             finishSpec,
             boreRamp.value,
+            // #240 slice 2 — a rotary region is pocketed on its MAP, with the around axis scaled
+            // to the floor's own radius (R10's anisotropic opening). The moves stay map-space
+            // until `toRotaryIR` below turns them into A.
+            rotaryMap === null ? null : { radius: rotaryMap.radius },
           );
       // #287 — single-line traces (#219) are their own CAM: the cutter's centre follows the path,
       // so there is no region to open, no offset and no pocketing. They are appended AFTER the
@@ -4129,13 +4165,23 @@ function generateOneProgram(
     }
   }
 
+  // #240 slice 2 — THE MAP BECOMES THE ROTARY FRAME HERE, ONCE. Everything above is an ordinary
+  // flat toolpath authored in map millimetres: X along the axis, Y around the surface at R, Z the
+  // map's own height. `toRotaryIR` turns each move's `y` into an unwound A (R9), sets Y to 0,
+  // makes Z the radius above the axis, and lifts rapids clear of the stock. The prediction stays
+  // in MAP space: the oracle judges it there against the column sweep unfolded the same way.
+  if (rotaryMap !== null) ir = toRotaryIR(ir, rotaryMap.radius, mill.rapidEstimate);
+
   // #649 — THE HOP CLEARS A LIFTED TOP. `applySurfaceLift` shifts FEED moves only, so a rapid that
   // ends at the CAM's fixed `HOP_Z` sits inside a blank the tilt lifts more than that — where the
   // lift exceeds 1 mm the "plunge" starts cutting from inside the material. One number for the
   // whole program: the CAM's hop plus the plane's HIGHEST lift over the stock, applied to every
   // rapid that stands at the hop (a `SAFE_Z` retract is already clear), and carried on the IR so
   // the post's air rule and the verifier's rapid floor judge the same height.
-  const surfaceFrame = shop.surface ?? null;
+  //
+  // #240 — a rotary job has no fitted top face to lift: registration measures a FLAT blank's
+  // tilt, and the wrapped frame's Z is a radius. The surface frame is therefore not read at all.
+  const surfaceFrame = rotaryMap === null ? (shop.surface ?? null) : null;
   const liftOverStock =
     surfaceFrame === null ? 0 : maxSurfaceLift(surfaceFrame.plane, surfaceFrame.z0, job.stock.length, job.stock.width);
   if (liftOverStock > 0) {
@@ -4243,7 +4289,9 @@ function generateOneProgram(
     jobName: job.name,
     stock: { length: job.stock.length, width: job.stock.width, thickness: job.stock.thickness },
     materialName: job.stock.material,
-    zDatum: 'probed-top-face',
+    // #240 — the rotary frame measures every Z from the AXIS (R6); the post refuses the wrong
+    // datum rather than writing a file whose heights mean something else.
+    zDatum: rotaryMap === null ? 'probed-top-face' : 'rotary-axis',
     origin: 'topFrontLeft',
     camVersion: CAM_VERSION,
     // #332: the key the JOB names, not anything off the `Tool` — a clone's rendered cutter carries
@@ -4288,12 +4336,12 @@ function generateOneProgram(
   // posted against: the FEED moves' Z follow the plane so the colour plane stays at the programmed
   // depth under the tilted top. The CAM's IR is untouched otherwise; the shift happens here, at the
   // one seam where the document frame meets the file's Z.
-  const postIr = shop.surface ? applySurfaceLift(ir, shop.surface.plane, shop.surface.z0) : ir;
+  const postIr = surfaceFrame !== null ? applySurfaceLift(ir, surfaceFrame.plane, surfaceFrame.z0) : ir;
   let nc: string;
   try {
     // #624 — hand the post the fitted frame so its air-cut check judges the lifted feeds against
     // the local top `lift(x, y)` rather than the flat work Z0.
-    const posted = postZ1(postIr, { ...ctx, surface: shop.surface ?? null }, mill, {
+    const posted = postZ1(postIr, { ...ctx, surface: surfaceFrame }, mill, {
       vacuum: facing.nc !== null ? spanAfterFacing(span) : span,
     });
     if (!posted.ok) return stop('post', { feeds, message: posted.errors.join('; '), facing });
@@ -4305,7 +4353,20 @@ function generateOneProgram(
   // 8. the verifier (#174) on the TEXT. The stack holds wasm cross-sections, so it is released
   // when this function returns — it is read again by the verifier calls below and by the frame's.
   try {
-    const verify = verifyProgram(nc, { setup, machine: mill, tool, depthLimit: limit, minRapidZ, ...(limitReasonAt ? { limitReasonAt } : {}), ...mountCtx(shop.mount, job.jawClearance) });
+    // #240 slice 2 — a rotary file is verified in its OWN frame: the frame's refusals (the axis,
+    // the jaws' and tailstock's bands, a turn in the cut, the module's envelope) replace the flat
+    // depth/structure rules, and the mount's obstacles do not apply (a chuck is not a bracket).
+    const verify = verifyProgram(nc, {
+      setup,
+      machine: mill,
+      tool,
+      depthLimit: limit,
+      minRapidZ,
+      ...(limitReasonAt ? { limitReasonAt } : {}),
+      ...(rotaryMap === null
+        ? mountCtx(shop.mount, job.jawClearance)
+        : { rotary: { radius: rotaryMap.radius, stickout: rotaryMap.stickout, tailstock: rotaryMap.tailstock } }),
+    });
     if (verify.findings.some((f) => f.severity === 'error')) {
       errors.push({ stage: 'verify', message: `${verify.findings.filter((f) => f.severity === 'error').length} verifier error(s)` });
       return { ok: false, stage: 'verify', findings, feeds, threads: threadPlans, threadMachining, drill: drillFacts, cam, nc, verify, frameNc: null, frameVerify: null, facingNc: null, facingVerify: null, facingToolKey: null, facingError: null, facingCam: null, predicted: predictedForRun, errors };
@@ -4314,15 +4375,25 @@ function generateOneProgram(
     // 9. the frame file (#244): the job's XY extent traced in the air, beside the job. Produced by
     // THIS gated action from the same toolpath, and checked by the SAME verifier — a frame the
     // operator cannot run at the wrong Z, because the Z is in the file.
-    const frame = frameProgram(ir, ctx, mill, setup, tool, limit, shop.mount, job.jawClearance);
-    if ('error' in frame) {
-      errors.push({ stage: 'verify', message: `the frame file could not be produced: ${frame.error}` });
-      return { ok: false, stage: 'verify', findings, feeds, threads: threadPlans, threadMachining, drill: drillFacts, cam, nc, verify, frameNc: null, frameVerify: null, facingNc: facing.nc, facingVerify: facing.verify, facingToolKey: facing.toolKey, facingError: facing.error, facingCam: facing.cam, predicted: predictedForRun, errors };
-    }
-    const frameErrors = frame.verify.findings.filter((f) => f.severity === 'error');
-    if (frameErrors.length > 0) {
-      errors.push({ stage: 'verify', message: `the frame file has ${frameErrors.length} verifier error(s)` });
-      return { ok: false, stage: 'verify', findings, feeds, threads: threadPlans, threadMachining, drill: drillFacts, cam, nc, verify, frameNc: frame.nc, frameVerify: frame.verify, facingNc: facing.nc, facingVerify: facing.verify, facingToolKey: facing.toolKey, facingError: facing.error, facingCam: facing.cam, predicted: predictedForRun, errors };
+    //
+    // #240 — a ROTARY job has no frame file in this slice: the frame is the flat stock's XY
+    // rectangle traced in the air, and the wrapped frame has no such rectangle (X runs along the
+    // axis, the surface wraps into A). Slice 3's rotary run sheet owns the rotary equivalent.
+    let frameNc: string | null = null;
+    let frameVerify: VerifyReport | null = null;
+    if (rotaryMap === null) {
+      const frame = frameProgram(ir, ctx, mill, setup, tool, limit, shop.mount, job.jawClearance);
+      if ('error' in frame) {
+        errors.push({ stage: 'verify', message: `the frame file could not be produced: ${frame.error}` });
+        return { ok: false, stage: 'verify', findings, feeds, threads: threadPlans, threadMachining, drill: drillFacts, cam, nc, verify, frameNc: null, frameVerify: null, facingNc: facing.nc, facingVerify: facing.verify, facingToolKey: facing.toolKey, facingError: facing.error, facingCam: facing.cam, predicted: predictedForRun, errors };
+      }
+      const frameErrors = frame.verify.findings.filter((f) => f.severity === 'error');
+      if (frameErrors.length > 0) {
+        errors.push({ stage: 'verify', message: `the frame file has ${frameErrors.length} verifier error(s)` });
+        return { ok: false, stage: 'verify', findings, feeds, threads: threadPlans, threadMachining, drill: drillFacts, cam, nc, verify, frameNc: frame.nc, frameVerify: frame.verify, facingNc: facing.nc, facingVerify: facing.verify, facingToolKey: facing.toolKey, facingError: facing.error, facingCam: facing.cam, predicted: predictedForRun, errors };
+      }
+      frameNc = frame.nc;
+      frameVerify = frame.verify;
     }
 
     return {
@@ -4342,8 +4413,8 @@ function generateOneProgram(
       // #240 — the frame the post actually wrote, carried to the run and the frozen package.
       frame: postIr.frame,
       verify,
-      frameNc: frame.nc,
-      frameVerify: frame.verify,
+      frameNc,
+      frameVerify,
       facingNc: facing.nc,
       facingVerify: facing.verify,
       facingToolKey: facing.toolKey,

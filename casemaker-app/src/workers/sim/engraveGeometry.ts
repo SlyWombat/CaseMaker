@@ -15,6 +15,7 @@
 import type { PartPlan } from '@/engine/cnc/engrave/partPlan';
 import { keepOutMembrane, primitiveLabel, traceSweptProfile } from '@/engine/cnc/engrave/partPlan';
 import { engravableProfile } from '@/engine/cnc/engrave/engravable';
+import { aroundScale, hasFloor } from '@/engine/cnc/rotary/wrap';
 import {
   boundsFor,
   checkBounds,
@@ -89,6 +90,13 @@ export interface LabelEngravability {
   outsideArea: number;
   /** The opened region as plain polygons, work-frame XY — what #172 pockets and what the preview draws. */
   polygons: [number, number][][];
+  /**
+   * #240 — the item's cut reaches or passes the rotary AXIS, so it has no floor to measure on and
+   * every area above is zero by construction, not by geometry. Its refusal is
+   * `rotaryJobFindings`' "cuts through the centre"; the empty-item findings would blame the
+   * cutter for a job the depth already refuses.
+   */
+  noFloor?: true;
 }
 
 /**
@@ -107,6 +115,12 @@ export interface LabelEngravability {
  * `rPlane = tipRadius + (depth − film)·tanHalf`, which differs from item to item on a design whose
  * regions state different depths. Absent, every item uses `toolRadius`, exactly as before.
  *
+ * `wrapFor(labelId)` says an item is authored on a ROTARY MAP (#240): `{radius, depth}` is the
+ * stock's radius and the item's floor depth, and the opening is then the anisotropic one (R10),
+ * built in the floor's own frame via `aroundScale`. Every polygon this returns STAYS IN MAP
+ * MILLIMETRES — X along the axis, Y the surface arc at `R` — because that is the space the CAM,
+ * the preview and the oracle all speak; `toRotaryIR` is the one place the map becomes `A`.
+ *
  * Every `CrossSection` created here (glyph, opening, stock inset, per-character opening) is
  * deleted exactly once.
  */
@@ -117,8 +131,20 @@ export function measureLabels(
   edgeMargin: number,
   perChar: (labelId: string) => PerCharGlyph[],
   radiusFor?: (labelId: string) => number,
+  wrapFor?: (labelId: string) => { radius: number; depth: number } | null | undefined,
 ): LabelEngravability[] {
   const CS = tl.CrossSection;
+  /**
+   * The tool footprint's frame for one item, or `'no-floor'` when its depth reaches or passes the
+   * axis (#240). A no-floor item measures EMPTY here: its refusal is the findings stage's
+   * "cuts through the centre", and `aroundScale`'s own throw would pre-empt that sentence.
+   * `toolRadius` is the item's own opening radius (a V's plane radius differs per item, #221).
+   */
+  const wrapOf = (labelId: string, toolRadius: number): { aroundScale: number } | 'no-floor' | undefined => {
+    const w = wrapFor?.(labelId);
+    if (!w) return undefined;
+    return hasFloor(w.radius, w.depth) ? { aroundScale: aroundScale(w.radius, w.depth, toolRadius) } : 'no-floor';
+  };
   // The safe region: the SUPPORTED FOOTPRINT eroded by the edge margin (#213 §3). With no
   // sacrificial material that footprint is the part outline, so this is today's check; with a
   // strip or board beside the part it is the union, which is what lets an item run over an edge.
@@ -132,10 +158,17 @@ export function measureLabels(
       // plane radius depends on the item's own depth (#221). A non-positive radius has no opening
       // at all, so the item measures empty — the findings stage refuses it by name.
       const itemRadius = radiusFor?.(engrave.id) ?? toolRadius;
+      // The tool footprint's frame, when this item is authored on a rotary map (#240, R10). One
+      // lookup for the region AND its per-character openings, so the two are measured on one
+      // opening, at this item's own radius.
+      const wrap = wrapOf(engrave.id, itemRadius);
       // A whitespace label is a `p-poly` with no contours, kept in the plan so it can be
       // reported (`labelProfile`). Manifold's `ofPolygons([])` throws, and every area is
-      // zero anyway, so an empty profile short-circuits the whole evaluation.
-      const isEmpty = aabbOfProfile(engrave.profile) === null || !(itemRadius > 0);
+      // zero anyway, so an empty profile short-circuits the whole evaluation. The same holds for
+      // a floor at or past the axis (see `wrapOf`).
+      const isEmpty = aabbOfProfile(engrave.profile) === null || !(itemRadius > 0) || wrap === 'no-floor';
+      // Inside the `!isEmpty` block and the character loop below, `wrap` is a real floor frame.
+      const openingWrap = wrap === 'no-floor' ? undefined : wrap;
       let glyphArea = 0;
       let openedArea = 0;
       let outsideArea = 0;
@@ -146,7 +179,7 @@ export function measureLabels(
         glyphArea = glyphCS.area();
         glyphCS.delete();
 
-        const openedCS = executeProfile(tl, engravableProfile(engrave.profile, itemRadius));
+        const openedCS = executeProfile(tl, engravableProfile(engrave.profile, itemRadius, openingWrap));
         openedArea = openedCS.area();
         // toPolygons() returns each contour as [x, y][]; that is the work-frame shape #172 wants.
         polygons = openedCS.toPolygons() as [number, number][][];
@@ -159,12 +192,14 @@ export function measureLabels(
 
       const emptyChars: { index: number; char: string }[] = [];
       perChar(engrave.id).forEach((entry, index) => {
+        // A no-floor item has no opening to measure at all; the depth finding names it.
+        if (wrap === 'no-floor') return;
         if (entry.char.trim() === '') return;
         if (aabbOfProfile(entry.profile) === null) {
           emptyChars.push({ index, char: entry.char });
           return;
         }
-        const charCS = executeProfile(tl, engravableProfile(entry.profile, itemRadius));
+        const charCS = executeProfile(tl, engravableProfile(entry.profile, itemRadius, openingWrap));
         const charArea = charCS.area();
         charCS.delete();
         if (charArea === 0) emptyChars.push({ index, char: entry.char });
@@ -178,6 +213,7 @@ export function measureLabels(
         emptyChars,
         outsideArea,
         polygons,
+        ...(wrap === 'no-floor' ? { noFloor: true as const } : {}),
       });
     }
   } finally {
@@ -276,6 +312,8 @@ export function engravabilityFindings(
   const bar = lostDetailRatioFrom(lostDetailWarnRatio);
 
   for (const row of m) {
+    // #240 — a rotary item with no floor was never measurable; the depth finding names it.
+    if (row.noFloor === true) continue;
     const src = findItem(job, row.labelId);
     const primitive = src === undefined ? findPrimitive(job, row.labelId) : undefined;
     const label = src && !isShapeItem(src) ? src : null;

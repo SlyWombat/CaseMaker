@@ -64,6 +64,21 @@ describe('rotary footprint (§4.2)', () => {
     expect(grid.h[Math.round(180 / grid.dv) * grid.nu + i]).toBe(10);
   });
 
+  it('sweeps the move’s OWN segment: a diagonal move does not cut the corner of its X/A box', () => {
+    // #240 slice 2 — the box reading (X against the move's X range, φ against its A range) cuts
+    // the corner (X = 0, A = 20°) of the move (0 mm, 0°) → (10 mm, 20°), where the tool never
+    // goes: its nearest pass point is 1.72 mm away at a 1.5875 mm tool radius. The segment
+    // reading leaves it untouched and still cuts the segment's own midpoint.
+    const g = ROTARY.buildGrid(cyl(10, 30), CUT, [], { dx: 0.1, dThetaDeg: 0.25 });
+    const res = ROTARY.applyMove(g, move({ u0: 0, u1: 10, v0: 0, v1: 20, z: 5 }), CUT);
+    expect(res.written).toBeGreaterThan(0);
+    const at = (x: number, deg: number): number =>
+      g.h[Math.round(deg / g.dv) * g.nu + Math.round((x - g.u0) / g.du)] as number;
+    expect(at(0, 20)).toBeCloseTo(10, 5); // the box corner: outside the swept stadium
+    expect(at(10, 0)).toBeCloseTo(10, 5); // the other corner
+    expect(at(5, 10)).toBeCloseTo(5, 2); // on the segment: cut to Z_t
+  });
+
   it('removes nothing from a move that is above the stock', () => {
     const g = ROTARY.buildGrid(cyl(10, 30), CUT, [move({ z: 30 })], { dx: 0.1, dThetaDeg: 0.25 });
     ROTARY.applyMove(g, move({ z: 30 }), CUT);
