@@ -21,7 +21,7 @@ import { useStockStore } from '@/store/stockStore';
 import { expandEngraveRow } from '@/store/engraveRowStore';
 import { addOperationOfType, jobHasOperations } from '@/components/panels/operationTypes';
 import type { Project } from '@/types/project';
-import type { EngraveJob, JobStockEntry, RotaryChuck } from '@/types/engraveJob';
+import type { BracketHold, EngraveJob, JobStockEntry, RotaryChuck, TapeHold } from '@/types/engraveJob';
 import { defaultSetupAnswers, type SetupAnswers } from '@/engine/cnc/engrave/setupFlow';
 import { facingSeed, facingShopFrom, jobItemCount } from '@/engine/cnc/stockStart';
 import { useShopDefaultsStore } from '@/store/shopDefaultsStore';
@@ -305,6 +305,16 @@ export function StartWizard(): JSX.Element {
    */
   function applyRotaryHolding(rotary: RotaryChuck | null, next: SetupAnswers): void {
     useEngraveJobStore.getState().setRotaryHolding(rotary, next.vise, next.sacrificial);
+    setAnswers(defaultSetupAnswers(useEngraveJobStore.getState().job));
+  }
+
+  /**
+   * #715 — selecting a bed mount (or the vise again) is ONE store write: the workholding and the
+   * board under it are one fact. The answers are re-seeded from the job that write produced,
+   * because the default board under a through cut is part of that write.
+   */
+  function applyBedHolding(hold: TapeHold | BracketHold | null, next: SetupAnswers): void {
+    useEngraveJobStore.getState().setBedHold(hold, next.vise, next.sacrificial);
     setAnswers(defaultSetupAnswers(useEngraveJobStore.getState().job));
   }
 
@@ -661,6 +671,7 @@ export function StartWizard(): JSX.Element {
           answers={answers}
           onAnswers={applyHoldAnswers}
           onRotary={applyRotaryHolding}
+          onBedHold={applyBedHolding}
         />
       )}
 

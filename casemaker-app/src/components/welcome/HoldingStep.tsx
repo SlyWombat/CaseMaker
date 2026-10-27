@@ -27,38 +27,71 @@
  * is still shown here, with the seated value that resolves it.
  */
 
-import { useEffect, useMemo, useRef, useState, type CSSProperties, type JSX } from 'react';
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type JSX, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
 import {
   stepFindings,
   withVise,
   type SetupAnswers,
 } from '@/engine/cnc/engrave/setupFlow';
-import { dedupeFindings, type JobFinding } from '@/engine/cnc/engrave/jobSetup';
+import { dedupeFindings, validateJob, type JobFinding } from '@/engine/cnc/engrave/jobSetup';
 import { LEDGE_STEP, VISE_FLOOR_DEPTH } from '@/engine/cnc/fixture';
 import { jobMachine } from '@/engine/cnc/calibration';
 import { formLabel } from '@/engine/cnc/stockStart';
+import {
+  bracketSettings,
+  anchorFrom,
+  validateBracketMount,
+  type BracketSettings,
+  type ClampEdge,
+  type ClampPlacement,
+} from '@/engine/cnc/mounts/bracket';
+import { TAPE_DEFAULTS } from '@/engine/cnc/engrave/jobSetup';
+import { KNOWN_DEFAULTS, readDefault } from '@/platform/defaultsClient';
 import { canDriveMachine } from '@/platform/capabilities';
-import type { MachineMountKind } from '@/platform/machineChange';
+import { bedUnderFacts } from '@/platform/bedProfiles';
+import { surfaceWords, type MachineMountKind } from '@/platform/machineChange';
+import type { BedProfile } from '@/platform/locationClient';
 import { useLocationStore } from '@/store/locationStore';
 import { useSettingsStore } from '@/store/settingsStore';
+import { useShopDefaultsStore } from '@/store/shopDefaultsStore';
 import { openMachineChange } from '@/components/machine-change';
-import type { EngraveJob, JobStockForm, RotaryChuck, ViseParams } from '@/types/engraveJob';
+import type { BracketHold, EngraveJob, JobStockForm, RotaryChuck, TapeHold, ViseParams } from '@/types/engraveJob';
 import {
   HOLDING_MOUNT_LABELS,
   HOLDING_MOUNT_WORDS,
   applyMount,
   applyRecommendedMount,
+  armsAboveStock,
+  bedAnchor,
+  bedBracketHold,
+  bedTapeHold,
   boardChoices,
   boardProvenance,
+  clampLabelFor,
+  clampPlacementAtPointer,
+  clampRectFor,
   currentMount,
+  defaultBedBoardMm,
+  defaultBedMount,
   defaultBoardMm,
   fmt,
+  isBedMount,
+  jobHasThroughCut,
   machineNow,
   mechanismOf,
   mountOptions,
   seatedProud,
+  centredStockRect,
+  stockRectFor,
+  tapeStripRects,
+  tapeWhereAtPointer,
+  tapeWhereWords,
+  underFieldWords,
+  underWords,
+  type BedMount,
   type HoldingMount,
   type MountOption,
+  type PictureRect,
 } from './holdingMounts';
 
 const MUTED: CSSProperties = { fontSize: 11, color: '#9aa4b0', lineHeight: 1.5, margin: '4px 0' };
@@ -81,6 +114,26 @@ const SVG_TEXT = { fontFamily: 'IBM Plex Sans, sans-serif', fontSize: 10, fill: 
 const SVG_MUTED = { ...SVG_TEXT, fill: '#9aa4b0' } as const;
 const SVG_MONO = { fontFamily: 'IBM Plex Mono, monospace', fontSize: 11, fill: '#d1d5db' } as const;
 
+/** #715 — everything the bed pictures draw and the handles they move, from the job's own model. */
+export interface BedPicture {
+  surface: BedProfile['surface'] | null;
+  tape: TapeHold | null;
+  bracket: BracketHold | null;
+  /** The board under the part, mm — the dashed slab under the stock. */
+  boardMm: number | null;
+  /** The bracket's and the clamps' sizes, from the shop's defaults. */
+  clamps: BracketSettings;
+  /** The clamp the caption names. */
+  selectedClamp: number;
+  /** Only a selected, enabled bed mount's handles move; a hovered preview is read-only. */
+  interactive: boolean;
+  onSelectClamp?: (index: number) => void;
+  onMoveClamp?: (index: number, placement: ClampPlacement) => void;
+  onRemoveClamp?: (index: number) => void;
+  /** The tape's expected position, machine XY. */
+  onMoveWhere?: (where: { x: number; y: number }) => void;
+}
+
 /**
  * #705 — the top view of the mount the step's radio is showing, and a side strip for the height
  * the top view cannot show. The mount decides the drawing (ledge / a waste board / gripped as a
@@ -90,6 +143,11 @@ const SVG_MONO = { fontFamily: 'IBM Plex Mono, monospace', fontSize: 11, fill: '
  * The stock's FORM decides its outline: a disc, and a rod standing on its end, are round seen
  * from above — the job plans them as the D × D square around them (#683) — so the picture must
  * not draw that square. Every rectangular form keeps the rectangle and its two numbers.
+ *
+ * #715 — the two bed mounts draw the bed from above as the design's stations 2–3 do: the surface
+ * (the wasteboard with its scars, or the bare bed), the stock where it will go, the tape's strips
+ * under it, the board under when one is chosen, and for the bracket its two arms, the origin at
+ * its corner and each clamp AT ITS PLACE — a handle dragged along its free edge.
  */
 export function HoldingPicture({
   mount = 'ledge',
@@ -98,6 +156,8 @@ export function HoldingPicture({
   proudMm = null,
   boardMm = null,
   note = null,
+  bed = null,
+  checks = [],
 }: {
   mount?: HoldingMount;
   stock: { length: number; width: number; thickness: number };
@@ -108,6 +168,10 @@ export function HoldingPicture({
   boardMm?: number | null;
   /** A disabled option's one line (why it cannot be chosen), shown beside the drawing. */
   note?: string | null;
+  /** #715 — the bed's own model, for the two bed mounts. */
+  bed?: BedPicture | null;
+  /** #715 — the bed mount's own checks, under the picture. */
+  checks?: readonly { severity: 'error' | 'warning' | 'info'; text: string }[];
 }): JSX.Element {
   const mechanism = mechanismOf(mount);
   const round = form === 'disc' || form === 'rod';
@@ -137,11 +201,65 @@ export function HoldingPicture({
   ) : (
     <rect x="52" y="52" width="136" height="46" fill="#1e3a4a" stroke="#6aa6c9" strokeWidth="1.5" />
   );
-  const bedStock = round ? (
-    <circle cx="127" cy="75" r="30" fill="#1e3a4a" stroke="#6aa6c9" strokeWidth="1.5" />
-  ) : (
-    <rect x="74" y="50" width="106" height="50" fill="#1e3a4a" stroke="#6aa6c9" strokeWidth="1.5" />
-  );
+
+  // #715 — the two bed mounts draw their scene, and its handles, from the bed's own model.
+  if (mechanism === 'bed') {
+    const selected =
+      bed !== null && mount === 'bed-bracket' && bed.bracket !== null
+        ? bed.bracket.clamps[Math.min(bed.selectedClamp, bed.bracket.clamps.length - 1)] ?? null
+        : null;
+    return (
+      <div style={{ display: 'grid', gap: 6 }}>
+        <BedTopView mount={mount as BedMount} stock={stock} form={form} bed={bed} />
+        <p className="hint" style={{ margin: 0 }} data-testid="engrave-setup-holding-caption">
+          {caption}
+        </p>
+        {selected !== null && bed !== null && (
+          <p style={{ fontSize: 11, color: '#9aa4b0', lineHeight: 1.5, margin: 0 }} data-testid="engrave-setup-holding-clamp-label">
+            Selected clamp: <b style={{ color: '#d1d5db' }}>{clampLabelFor(stock, selected, bed.clamps)}</b>. Drag it along the edge,
+            round the corner onto the right edge
+            {bed.interactive && bed.bracket !== null && bed.bracket.clamps.length > 1 && (
+              <>
+                , or{' '}
+                <button
+                  type="button"
+                  className="btn btn--sm"
+                  data-testid="engrave-setup-clamp-remove"
+                  onClick={() => bed.onRemoveClamp?.(bed.selectedClamp)}
+                >
+                  remove
+                </button>
+              </>
+            )}
+            .
+          </p>
+        )}
+        {checks.length > 0 && (
+          <div data-testid="engrave-setup-holding-checks" style={{ display: 'grid', gap: 2 }}>
+            {checks.map((c, i) => (
+              <p
+                key={i}
+                style={{
+                  fontSize: 11,
+                  lineHeight: 1.45,
+                  margin: 0,
+                  color: c.severity === 'error' ? '#f0b4ad' : c.severity === 'warning' ? '#e0c07a' : '#9aa4b0',
+                }}
+              >
+                {c.text}
+              </p>
+            ))}
+          </div>
+        )}
+        <HoldingSideView mount={mount} proudMm={proudMm} />
+        {note !== null && (
+          <p className="hint" style={{ margin: 0 }} data-testid="engrave-setup-holding-note">
+            {note}
+          </p>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div style={{ display: 'grid', gap: 6 }}>
@@ -149,7 +267,7 @@ export function HoldingPicture({
         viewBox="0 0 240 150"
         style={{ width: '100%', maxWidth: '100%', display: 'block', border: '1px solid #2a2f36', background: '#10151b' }}
         role="img"
-        aria-label={`Top view of the ${mechanism === 'bed' ? 'bed' : mechanism === 'rotary' ? 'rotary' : 'vise'}`}
+        aria-label={`Top view of the ${mechanism === 'rotary' ? 'rotary' : 'vise'}`}
         data-testid="engrave-setup-holding-picture"
         data-mechanism={mechanism}
         data-mount={mount}
@@ -195,63 +313,6 @@ export function HoldingPicture({
               Y
             </text>
           </>
-        ) : mechanism === 'bed' ? (
-          <>
-            <rect x="24" y="26" width="192" height="98" fill="#141a21" stroke="#5b6672" />
-            {mount === 'bed-bracket' ? (
-              <>
-                <path d="M24 96 h34 v28" fill="none" stroke="#5b6672" strokeWidth="4" />
-                <text x="46" y="20" textAnchor="middle" {...SVG_MUTED}>
-                  bracket
-                </text>
-                <rect
-                  data-testid="engrave-setup-holding-picture-clamp"
-                  x="58"
-                  y="42"
-                  width="22"
-                  height="10"
-                  fill="#5b6672"
-                />
-                <rect
-                  data-testid="engrave-setup-holding-picture-clamp"
-                  x="174"
-                  y="42"
-                  width="22"
-                  height="10"
-                  fill="#5b6672"
-                />
-              </>
-            ) : (
-              <>
-                <rect
-                  data-testid="engrave-setup-holding-picture-tape"
-                  x="58"
-                  y="42"
-                  width="138"
-                  height="7"
-                  fill="#d8c48a"
-                  opacity="0.65"
-                />
-                <rect
-                  data-testid="engrave-setup-holding-picture-tape"
-                  x="58"
-                  y="101"
-                  width="138"
-                  height="7"
-                  fill="#d8c48a"
-                  opacity="0.65"
-                />
-              </>
-            )}
-            {bedStock}
-            <text x="127" y="79" textAnchor="middle" {...SVG_MONO}>
-              {dims}
-            </text>
-            <path d="M40 130 H200" stroke="#d1d5db" strokeWidth="1" markerEnd="url(#holding-x-arrow)" />
-            <text x="120" y="144" textAnchor="middle" {...SVG_TEXT}>
-              X along the bed
-            </text>
-          </>
         ) : (
           <>
             <circle cx="50" cy="75" r="34" fill="#39424c" stroke="#5b6672" />
@@ -280,6 +341,364 @@ export function HoldingPicture({
         </p>
       )}
     </div>
+  );
+}
+
+// ── #715: the bed from above, with its handles ─────────────────────────────────────────────────
+
+const VB = { w: 300, h: 230 } as const;
+const STOCK_FILL = '#1e3a4a';
+const STOCK_EDGE = '#6aa6c9';
+const FIXTURE_FILL = '#39424c';
+const FIXTURE_EDGE = '#5b6672';
+const TAPE_FILL = '#d8c48a';
+const BOARD_FILL = '#3a3325';
+const BOARD_EDGE = '#7a6a45';
+const SCAR_EDGE = '#44505c';
+
+/** The surface footprint the picture can place the stock on, when the record states one. */
+function footprintOf(
+  surface: BedProfile['surface'] | null,
+): { length: number; width: number; frontLeft: [number, number] } | null {
+  if (surface === null || surface.length === null || surface.width === null || surface.position === null) return null;
+  return { length: surface.length, width: surface.width, frontLeft: surface.position.frontLeft };
+}
+
+/** Fit a surface of this size inside `frame`, its aspect kept and centred. */
+function fitWithin(frame: PictureRect, size: { length: number; width: number }): PictureRect {
+  const scale = Math.min(frame.w / Math.max(size.length, 1e-9), frame.h / Math.max(size.width, 1e-9));
+  const w = size.length * scale;
+  const h = size.width * scale;
+  return { x: frame.x + (frame.w - w) / 2, y: frame.y + (frame.h - h) / 2, w, h };
+}
+
+/** `rect` grown by `pad` px on every side, never past `within`. */
+function expandWithin(rect: PictureRect, within: PictureRect, pad: number): PictureRect {
+  const x = Math.max(within.x, rect.x - pad);
+  const y = Math.max(within.y, rect.y - pad);
+  return {
+    x,
+    y,
+    w: Math.min(within.x + within.w, rect.x + rect.w + pad) - x,
+    h: Math.min(within.y + within.h, rect.y + rect.h + pad) - y,
+  };
+}
+
+/** Keep the drag's pointer on this element, so its release is seen outside the picture too. */
+function capturePointer(e: ReactPointerEvent<SVGElement>): void {
+  (e.currentTarget as Element & { setPointerCapture?: (id: number) => void }).setPointerCapture?.(e.pointerId);
+}
+
+/** A pointer event in the picture's own units (the viewBox), from the element's client rect. */
+function picturePoint(svg: SVGSVGElement, e: ReactPointerEvent): { px: number; py: number } {
+  const r = svg.getBoundingClientRect();
+  const sx = r.width === 0 ? 1 : VB.w / r.width;
+  const sy = r.height === 0 ? 1 : VB.h / r.height;
+  return { px: (e.clientX - r.left) * sx, py: (e.clientY - r.top) * sy };
+}
+
+/**
+ * The bed seen from above: the surface (the wasteboard with its scars, or the bare bed), the stock
+ * where it will go, the tape's strips dashed under it (taped) or the bracket's arms and each clamp
+ * at its place (bracket). The handles are the model: dragging the stock writes its expected
+ * position; dragging a clamp moves it along the free edge it is nearest, round the corner included.
+ */
+function BedTopView({
+  mount,
+  stock,
+  form,
+  bed,
+}: {
+  mount: BedMount;
+  stock: { length: number; width: number; thickness: number };
+  form: JobStockForm | null;
+  bed: BedPicture | null;
+}): JSX.Element {
+  const svgRef = useRef<SVGSVGElement | null>(null);
+  const [drag, setDrag] = useState<{ kind: 'clamp'; index: number } | { kind: 'where' } | null>(null);
+  const [liveClamp, setLiveClamp] = useState<ClampPlacement | null>(null);
+  const [liveWhere, setLiveWhere] = useState<{ x: number; y: number } | null>(null);
+  const interactive = bed?.interactive === true;
+  const surface = bed?.surface ?? null;
+  const footprint = footprintOf(surface);
+  const tape = bed?.tape ?? null;
+  const bracket = bed?.bracket ?? null;
+  const settings = bed?.clamps ?? bracketSettings(null).settings;
+  const boardMm = bed?.boardMm ?? null;
+  const dims =
+    form === 'disc' || form === 'rod' ? `⌀ ${fmt(stock.length)}` : `${fmt(stock.length)} × ${fmt(stock.width)}`;
+  const formWord = form === 'rod' ? 'rod' : form === 'disc' ? 'disc' : 'blank';
+  // #705 — a disc, and a rod on end, are round seen from above: the picture draws the circle.
+  const round = form === 'disc' || form === 'rod';
+
+  const end = (): void => {
+    setDrag(null);
+    setLiveClamp(null);
+    setLiveWhere(null);
+  };
+  const move = (e: ReactPointerEvent): void => {
+    if (drag === null || svgRef.current === null) return;
+    const { px, py } = picturePoint(svgRef.current, e);
+    if (drag.kind === 'clamp') setLiveClamp(clampPlacementAtPointer(stockRect, stock, px, py));
+    else if (footprint !== null) setLiveWhere(tapeWhereAtPointer(surfaceRect, stock, footprint, px, py));
+  };
+  const release = (): void => {
+    if (drag === null) {
+      end();
+      return;
+    }
+    if (drag.kind === 'clamp' && liveClamp !== null) bed?.onMoveClamp?.(drag.index, liveClamp);
+    else if (drag.kind === 'where' && liveWhere !== null) bed?.onMoveWhere?.(liveWhere);
+    end();
+  };
+
+  // The surface's rect: its stated footprint fitted into the frame, or the whole bed when the
+  // record states no size (the bare bed has none).
+  const frame: PictureRect =
+    mount === 'bed-tape' ? { x: 18, y: 14, w: 264, h: 192 } : { x: 52, y: 26, w: 236, h: 168 };
+  const surfaceRect: PictureRect = footprint === null ? frame : fitWithin(frame, footprint);
+  const stockRect: PictureRect =
+    mount === 'bed-tape'
+      ? footprint === null
+        ? centredStockRect(surfaceRect, stock, 0.55)
+        : stockRectFor(surfaceRect, stock, footprint, liveWhere ?? tape?.where ?? null)
+      : (() => {
+          const scale = Math.min(
+            Math.max(frame.w - 12, 1) / Math.max(stock.length, 1e-9),
+            Math.max(frame.h - 12, 1) / Math.max(stock.width, 1e-9),
+          );
+          return { x: frame.x + 10, y: frame.y, w: stock.length * scale, h: stock.width * scale };
+        })();
+
+  const scars =
+    mount === 'bed-tape' && footprint !== null && surface !== null
+      ? surface.scars.map((s, i) => {
+          const sx = surfaceRect.w / Math.max(footprint.length, 1e-9);
+          const sy = surfaceRect.h / Math.max(footprint.width, 1e-9);
+          return {
+            key: i,
+            x: surfaceRect.x + (s.x - footprint.frontLeft[0]) * sx,
+            y: surfaceRect.y + surfaceRect.h - (s.y - footprint.frontLeft[1] + s.height) * sy,
+            w: s.width * sx,
+            h: s.height * sy,
+          };
+        })
+      : [];
+
+  const armPx = Math.max(6, settings.armWidth * (stockRect.w / Math.max(stock.length, 1e-9)));
+  const clampRects =
+    mount === 'bed-bracket' && bracket !== null
+      ? bracket.clamps.map((p, i) => ({
+          key: i,
+          placement: drag?.kind === 'clamp' && drag.index === i && liveClamp !== null ? liveClamp : p,
+          rect: clampRectFor(stockRect, stock, settings.clamp, drag?.kind === 'clamp' && drag.index === i && liveClamp !== null ? liveClamp : p),
+        }))
+      : [];
+
+  return (
+    <svg
+      ref={svgRef}
+      viewBox={`0 0 ${VB.w} ${VB.h}`}
+      style={{
+        width: '100%',
+        maxWidth: '100%',
+        display: 'block',
+        border: '1px solid #2a2f36',
+        background: '#10151b',
+        touchAction: 'none',
+        cursor: drag === null ? 'default' : 'grabbing',
+      }}
+      role="img"
+      aria-label={`Top view of the bed with the ${formWord}`}
+      data-testid="engrave-setup-holding-picture"
+      data-mechanism="bed"
+      data-mount={mount}
+      data-form={form ?? undefined}
+      onPointerMove={move}
+      onPointerUp={release}
+      onPointerCancel={end}
+    >
+        <rect
+          data-testid="engrave-setup-holding-picture-surface"
+          data-surface={surface?.kind ?? 'bare-bed'}
+          x={surfaceRect.x}
+          y={surfaceRect.y}
+          width={surfaceRect.w}
+          height={surfaceRect.h}
+          fill="#141a21"
+          stroke={FIXTURE_EDGE}
+        />
+        <text x={surfaceRect.x + 6} y={surfaceRect.y + 12} {...SVG_MUTED}>
+          {surface === null || surface.kind === 'bare-bed' ? 'bed' : surfaceWords(surface).replace(' under', '')}
+        </text>
+        {scars.map((s) => (
+          <rect key={s.key} x={s.x} y={s.y} width={s.w} height={s.h} fill="none" stroke={SCAR_EDGE} strokeDasharray="2 2" />
+        ))}
+        {mount === 'bed-tape' ? (
+          <>
+            {boardMm !== null && footprint !== null && (
+              <rect
+                data-testid="engrave-setup-holding-picture-board"
+                x={expandWithin(stockRect, surfaceRect, 4).x}
+                y={expandWithin(stockRect, surfaceRect, 4).y}
+                width={expandWithin(stockRect, surfaceRect, 4).w}
+                height={expandWithin(stockRect, surfaceRect, 4).h}
+                fill={BOARD_FILL}
+                stroke={BOARD_EDGE}
+              />
+            )}
+            {round ? (
+              <ellipse
+                cx={stockRect.x + stockRect.w / 2}
+                cy={stockRect.y + stockRect.h / 2}
+                rx={stockRect.w / 2}
+                ry={stockRect.h / 2}
+                fill={STOCK_FILL}
+                stroke={STOCK_EDGE}
+                strokeWidth={1.5}
+                style={interactive && footprint !== null ? { cursor: 'grab' } : undefined}
+                onPointerDown={(e) => {
+                  if (!interactive || footprint === null) return;
+                  e.preventDefault();
+                  capturePointer(e);
+                  setDrag({ kind: 'where' });
+                }}
+              />
+            ) : (
+              <rect
+                x={stockRect.x}
+                y={stockRect.y}
+                width={stockRect.w}
+                height={stockRect.h}
+                fill={STOCK_FILL}
+                stroke={STOCK_EDGE}
+                strokeWidth={1.5}
+                style={interactive && footprint !== null ? { cursor: 'grab' } : undefined}
+                onPointerDown={(e) => {
+                  if (!interactive || footprint === null) return;
+                  e.preventDefault();
+                  capturePointer(e);
+                  setDrag({ kind: 'where' });
+                }}
+              />
+            )}
+            {tape !== null &&
+              tapeStripRects(stockRect, stock, tape)
+                .filter((r) => r.w > 0 && r.h > 0)
+                .map((r, i) => (
+                  <rect
+                    key={i}
+                    data-testid="engrave-setup-holding-picture-tape"
+                    x={r.x}
+                    y={r.y}
+                    width={r.w}
+                    height={r.h}
+                    fill={TAPE_FILL}
+                    opacity={0.55}
+                    stroke={TAPE_FILL}
+                    strokeDasharray="3 2"
+                  />
+                ))}
+            <text x={stockRect.x + stockRect.w / 2} y={stockRect.y + stockRect.h / 2 + 4} textAnchor="middle" {...SVG_MONO}>
+              {dims}
+            </text>
+            <path
+              d={`M${stockRect.x} ${stockRect.y + stockRect.h + 16} H${stockRect.x + stockRect.w}`}
+              stroke="#d1d5db"
+              strokeDasharray="3 3"
+            />
+            <text x={stockRect.x + stockRect.w / 2} y={stockRect.y + stockRect.h + 28} textAnchor="middle" {...SVG_TEXT}>
+              square to the front edge
+            </text>
+          </>
+        ) : (
+          <>
+            {/* The bracket: its left and front arms outside the stock's front-left corner. */}
+            <rect x={stockRect.x - armPx} y={stockRect.y} width={armPx} height={stockRect.h + armPx} fill={FIXTURE_FILL} stroke={FIXTURE_EDGE} />
+            <rect x={stockRect.x - armPx} y={stockRect.y + stockRect.h} width={stockRect.w + armPx} height={armPx} fill={FIXTURE_FILL} stroke={FIXTURE_EDGE} />
+            {boardMm !== null && (
+              <rect
+                data-testid="engrave-setup-holding-picture-board"
+                x={stockRect.x - 3}
+                y={stockRect.y - 3}
+                width={stockRect.w + 6}
+                height={stockRect.h + 6}
+                fill={BOARD_FILL}
+                stroke={BOARD_EDGE}
+              />
+            )}
+            {round ? (
+              <ellipse
+                cx={stockRect.x + stockRect.w / 2}
+                cy={stockRect.y + stockRect.h / 2}
+                rx={stockRect.w / 2}
+                ry={stockRect.h / 2}
+                fill={STOCK_FILL}
+                stroke={STOCK_EDGE}
+                strokeWidth={1.5}
+              />
+            ) : (
+              <rect
+                x={stockRect.x}
+                y={stockRect.y}
+                width={stockRect.w}
+                height={stockRect.h}
+                fill={STOCK_FILL}
+                stroke={STOCK_EDGE}
+                strokeWidth={1.5}
+              />
+            )}
+            <text x={stockRect.x - armPx / 2} y={stockRect.y + stockRect.h / 2} textAnchor="middle" transform={`rotate(-90 ${stockRect.x - armPx / 2} ${stockRect.y + stockRect.h / 2})`} {...SVG_MUTED}>
+              left arm
+            </text>
+            <text x={stockRect.x + stockRect.w / 2 - armPx} y={stockRect.y + stockRect.h + armPx - 2} textAnchor="middle" {...SVG_MUTED}>
+              front arm
+            </text>
+            <text x={stockRect.x + stockRect.w / 2} y={stockRect.y + stockRect.h / 2 + 4} textAnchor="middle" {...SVG_MONO}>
+              {dims}
+            </text>
+            {clampRects.map((c) => (
+              <rect
+                key={c.key}
+                data-testid="engrave-setup-holding-picture-clamp"
+                data-edge={c.placement.edge}
+                data-at={c.placement.at}
+                x={c.rect.x}
+                y={c.rect.y}
+                width={c.rect.w}
+                height={c.rect.h}
+                fill={FIXTURE_FILL}
+                stroke={bed?.selectedClamp === c.key ? '#6aa6c9' : FIXTURE_EDGE}
+                strokeWidth={bed?.selectedClamp === c.key ? 2 : 1}
+                style={interactive ? { cursor: 'grab' } : undefined}
+                onPointerDown={(e) => {
+                  if (!interactive) return;
+                  e.preventDefault();
+                  capturePointer(e);
+                  bed?.onSelectClamp?.(c.key);
+                  setDrag({ kind: 'clamp', index: c.key });
+                }}
+              />
+            ))}
+            <circle cx={stockRect.x} cy={stockRect.y + stockRect.h} r={4} fill="#f08a83" />
+            <text x={stockRect.x + 8} y={stockRect.y + stockRect.h - 6} {...SVG_TEXT}>
+              X 0 · Y 0 at the bracket’s corner
+            </text>
+            <text
+              x={stockRect.x + stockRect.w + 14}
+              y={stockRect.y + stockRect.h / 2}
+              textAnchor="middle"
+              transform={`rotate(90 ${stockRect.x + stockRect.w + 14} ${stockRect.y + stockRect.h / 2})`}
+              {...SVG_MUTED}
+            >
+              right edge — free
+            </text>
+          </>
+        )}
+        <text x={VB.w - 12} y={VB.h - 8} textAnchor="end" {...SVG_TEXT}>
+          front · you
+        </text>
+    </svg>
   );
 }
 
@@ -400,16 +819,38 @@ export interface HoldingStepProps {
    * the answers' vise and sacrificial for that write.
    */
   onRotary: (rotary: RotaryChuck | null, next: SetupAnswers) => void;
+  /**
+   * #715 — selecting a bed mount (or the vise again) is ONE store write: the workholding and the
+   * board under it are one fact. `hold` null is the vise, with `next`'s vise and sacrificial.
+   */
+  onBedHold: (hold: TapeHold | BracketHold | null, next: SetupAnswers) => void;
 }
 
-export function HoldingStep({ job, answers, onAnswers, onRotary }: HoldingStepProps): JSX.Element {
+/** The answers with a board under the part, or none — the bed's own field, as the design writes it. */
+function withBedSacrificial(a: SetupAnswers, mm: number | null): SetupAnswers {
+  return {
+    ...a,
+    sacrificial: {
+      ...a.sacrificial,
+      under:
+        mm === null
+          ? null
+          : { thickness: mm, overhang: { left: 0, right: 0, front: 0, back: 0 }, attach: 'tape' },
+      source: 'saved',
+    },
+  };
+}
+
+export function HoldingStep({ job, answers, onAnswers, onRotary, onBedHold }: HoldingStepProps): JSX.Element {
   const location = useLocationStore((s) => s.location);
   // The machine-change wizard reads the location's first machine (#693); the step reads the same
   // record so the line and the escape describe one machine.
   const machine = location?.machines[0] ?? null;
   const accessories = location?.accessories ?? [];
   const calibration = useSettingsStore((s) => s.machineCalibration);
+  const shopDefaults = useShopDefaultsStore((s) => s.defaults);
   const now = useMemo(() => machineNow(machine), [machine]);
+  const profile = now?.profile ?? null;
   const rotaryEnvelope = useMemo(() => jobMachine(job, calibration).rotary?.envelope, [job, calibration]);
 
   const boards = useMemo(() => boardChoices(now?.profile ?? null), [now]);
@@ -421,6 +862,28 @@ export function HoldingStep({ job, answers, onAnswers, onRotary }: HoldingStepPr
   const boardIndex = boards.findIndex((b) => b.thickness === boardMm);
   const boardValue = boardIndex >= 0 ? `loc:${boardIndex}` : 'typed';
 
+  // ── #715 — the bed's own model ────────────────────────────────────────────────────────────────
+  const jobHold = job.workholding.kind === 'tape' || job.workholding.kind === 'bracket' ? job.workholding : null;
+  /** The tape the step draws and writes: the job's own when it is taped, else the house roll's. */
+  const tape = useMemo(
+    () => bedTapeHold(profile, job.workholding.kind === 'tape' ? job.workholding.tape : null),
+    [profile, job.workholding],
+  );
+  const bracketRead = useMemo(() => bracketSettings(shopDefaults ?? null), [shopDefaults]);
+  /** The bracket the step draws and writes: the job's own when it is bracketed, else the default. */
+  const bracketHold = useMemo(
+    () =>
+      bedBracketHold(
+        answers.stock,
+        shopDefaults ?? null,
+        job.workholding.kind === 'bracket' ? job.workholding.bracket : null,
+      ),
+    [answers.stock, shopDefaults, job.workholding],
+  );
+  const [selectedClamp, setSelectedClamp] = useState(0);
+  const throughCut = jobHasThroughCut(job);
+  const boardFieldShown = profile !== null && (profile.surface.kind === 'wasteboard' || throughCut);
+
   const options = useMemo(
     () =>
       mountOptions({
@@ -430,33 +893,112 @@ export function HoldingStep({ job, answers, onAnswers, onRotary }: HoldingStepPr
         boardMm,
         rotaryEnvelope,
         round: job.stockEntry?.form === 'rod' || job.stock.shape === 'cylinder',
+        tape,
       }),
-    [machine, accessories, answers.stock, boardMm, rotaryEnvelope, job],
+    [machine, accessories, answers.stock, boardMm, rotaryEnvelope, job, tape],
   );
-  // #240 — the answers' mount is the rotary when the job is in the chuck; otherwise the vise
-  // answers' seat and board name it.
-  const current: HoldingMount = answers.workholding === 'rotary' ? 'rotary' : currentMount(answers);
+  // #240/#715 — the mount the job is IN: the job's own workholding first (a rotary, or one of the
+  // bed's two arms), the vise's seat and board otherwise.
+  const current: HoldingMount =
+    job.workholding.kind === 'tape'
+      ? 'bed-tape'
+      : job.workholding.kind === 'bracket'
+        ? 'bed-bracket'
+        : answers.workholding === 'rotary'
+          ? 'rotary'
+          : currentMount(answers);
   // #705 — the picture follows the radio: the operator's chosen mount, or the option under the
   // pointer/focus when it is a disabled one that needs a machine change (drawn with its cost line).
   const [previewMount, setPreviewMount] = useState<HoldingMount | null>(null);
   const drawnMount: HoldingMount = previewMount ?? current;
+  const drawnOption = options.find((o) => o.mount === drawnMount) ?? null;
+  const bedInteractive = drawnMount === current && isBedMount(current) && jobHold !== null;
 
   // The machine-only options have no way out when this build cannot drive a machine; a disabled
-  // control with no escape is hidden (A10), not narrated.
-  const shown = options.filter((o) => canDriveMachine || mechanismOf(o.mount) === 'vise');
+  // control with no escape is hidden (A10), not narrated. A writable mount the machine already
+  // carries needs no escape and stays on offer.
+  const shown = options.filter(
+    (o) =>
+      canDriveMachine ||
+      mechanismOf(o.mount) === 'vise' ||
+      (!o.disabled && now !== null && now.mount === mechanismOf(o.mount)),
+  );
+  // #715 — when the vise is not on the pins, its three seat choices are one line: none of them
+  // can be used anyway, and the bed step's radio list is the two bed mounts' (mockup station 2).
+  const rows =
+    now !== null && now.mount !== 'vise'
+      ? (() => {
+          const vise = shown.find((o) => mechanismOf(o.mount) === 'vise');
+          if (vise === undefined) return shown;
+          return [
+            { ...vise, label: 'In the vise, …', hint: null },
+            ...shown.filter((o) => mechanismOf(o.mount) !== 'vise'),
+          ];
+        })()
+      : shown;
 
   // First arrival at the step: the mount the stock calls for, unless someone has asserted a setup.
   // Deliberately once per mount of the step — a later answer is the operator's. A rotary job is
-  // already asserted: the vise's seat and board say nothing about it (#240).
+  // already asserted: the vise's seat and board say nothing about it (#240). With nothing on the
+  // pins the BED's own effect below decides (#715).
   const applied = useRef(false);
   useEffect(() => {
     if (applied.current) return;
     applied.current = true;
     if (job.workholding.kind !== 'vise') return;
+    if (now !== null && now.mount === 'bed') return;
     const next = applyRecommendedMount(answers, boardMm);
     if (next !== answers) onAnswers(next);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // #715 — a job still in the vise takes the bed's default mount when nothing is on the pins
+  // (§3.2): the profile's preferred mount for this stock among those the bed carries, else sheet
+  // ≤ 3 mm on tape, plates and blocks in the bracket, else tape. It runs when the change wizard
+  // presents a NEW bed profile inside this step (the profile id is the key), and only for a job
+  // nobody has asserted: an operator's saved vise is not replaced by a machine change under it —
+  // the bed options are there to be chosen. `wantedBed` remembers the bed row whose Change the
+  // machine… opened the wizard, so asking for the bracket comes back with the bracket.
+  const bedArrived = useRef<string | null>(null);
+  const wantedBed = useRef<BedMount | null>(null);
+  useEffect(() => {
+    if (now === null || now.mount !== 'bed') return;
+    if (bedArrived.current === now.profile.id) return;
+    bedArrived.current = now.profile.id;
+    if (job.workholding.kind !== 'vise') return;
+    const wanted = wantedBed.current;
+    wantedBed.current = null;
+    if (wanted === null && answers.vise.source !== 'default') return;
+    const mount = wanted ?? defaultBedMount(profile, answers.stock, job.stockEntry?.form ?? null);
+    if (mount === 'bed-tape') onBedHold(bedTapeHold(profile, null), answers);
+    else onBedHold(bedBracketHold(answers.stock, shopDefaults ?? null, null), answers);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [now, job.workholding.kind, answers.stock, answers.vise.source]);
+
+  // #715 — on the bare bed a through cut needs a board under it, and the field's default is the
+  // thinnest house board thick enough (§3.5). Once offered, the operator's "none" stands.
+  const boardDefaulted = useRef(false);
+  const bareBedNeedsBoard =
+    jobHold !== null &&
+    throughCut &&
+    profile !== null &&
+    profile.surface.kind !== 'wasteboard' &&
+    answers.sacrificial.under === null;
+  useEffect(() => {
+    if (!bareBedNeedsBoard || boardDefaulted.current) return;
+    boardDefaulted.current = true;
+    const mm = defaultBedBoardMm(profile, job.breakthrough + 1);
+    if (mm !== null) onAnswers(withBedSacrificial(answers, mm));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bareBedNeedsBoard]);
+
+  /** The answers with the board a through cut needs on this surface, when one is chosen for it. */
+  function bedAnswers(a: SetupAnswers): SetupAnswers {
+    if (profile === null || profile.surface.kind === 'wasteboard') return a;
+    if (!throughCut || a.sacrificial.under !== null) return a;
+    const mm = defaultBedBoardMm(profile, job.breakthrough + 1);
+    return mm === null ? a : withBedSacrificial(a, mm);
+  }
 
   function choose(mount: HoldingMount, mm: number = boardMm): void {
     // #240 — the chuck holds a rod; the vise answers describe the vise. Either switch is the one
@@ -465,13 +1007,60 @@ export function HoldingStep({ job, answers, onAnswers, onRotary }: HoldingStepPr
       onRotary(answers.rotary, answers);
       return;
     }
-    if (mount === 'bed-tape' || mount === 'bed-bracket') return; // never enabled in this build
+    // #715 — the two bed mounts are the job's own writes, with the board under them.
+    if (mount === 'bed-tape') {
+      onBedHold(bedTapeHold(profile, job.workholding.kind === 'tape' ? job.workholding.tape : null), bedAnswers(answers));
+      return;
+    }
+    if (mount === 'bed-bracket') {
+      onBedHold(
+        bedBracketHold(answers.stock, shopDefaults ?? null, job.workholding.kind === 'bracket' ? job.workholding.bracket : null),
+        bedAnswers(answers),
+      );
+      return;
+    }
     const next = applyMount(answers, mount, mm);
     if (job.workholding.kind === 'rotary-chuck') onRotary(null, next);
+    // #715 — taking the bed job back to the vise is the bed write with `null`.
+    else if (jobHold !== null) onBedHold(null, next);
     else onAnswers(next);
   }
 
-  function changeMachine(target: MachineMountKind | null, holding: string): void {
+  /** Write the job's tape (a moved position, a changed board) through the bed's own action. */
+  function writeTape(next: TapeHold): void {
+    onBedHold({ ...next, source: 'saved' }, answers);
+  }
+
+  /** Write the job's bracket (a dragged clamp, one added or removed) through the bed's own action. */
+  function writeBracket(next: BracketHold): void {
+    onBedHold({ ...next, source: 'saved' }, answers);
+  }
+
+  function moveClamp(index: number, placement: ClampPlacement): void {
+    const clamps = bracketHold.clamps.map((c, i) => (i === index ? placement : c));
+    writeBracket({ ...bracketHold, clamps });
+  }
+
+  function addClamp(): void {
+    if (bracketHold.clamps.length >= 4) return;
+    // "+ clamp adds one on the longer free edge" (§3.6), at its middle.
+    const edge: ClampEdge = answers.stock.length >= answers.stock.width ? 'back' : 'right';
+    const len = edge === 'back' ? answers.stock.length : answers.stock.width;
+    const clamps = [...bracketHold.clamps, { edge, at: Math.round(len / 2 * 1000) / 1000 }];
+    setSelectedClamp(clamps.length - 1);
+    writeBracket({ ...bracketHold, clamps });
+  }
+
+  function removeClamp(index: number): void {
+    if (bracketHold.clamps.length <= 1) return;
+    const clamps = bracketHold.clamps.filter((_, i) => i !== index);
+    setSelectedClamp(Math.max(0, Math.min(index, clamps.length - 1)));
+    writeBracket({ ...bracketHold, clamps });
+  }
+
+  function changeMachine(target: MachineMountKind | null, holding: string, wanted: BedMount | null = null): void {
+    // Asking for a bed mount opens the wizard from that row; the step comes back with it selected.
+    if (wanted !== null) wantedBed.current = wanted;
     openMachineChange({
       ...(target === null ? {} : { target }),
       forJob: { name: job.name, holding },
@@ -494,9 +1083,10 @@ export function HoldingStep({ job, answers, onAnswers, onRotary }: HoldingStepPr
 
   // The #231 fix, seated on the mount the answers are actually in: the board under the part is
   // part of the height (a 12 mm board is not ignored just because the seat is the ledge). A job in
-  // the chuck has no vise seat to fix (#240).
+  // the chuck has no vise seat to fix (#240), and neither has a bed job (#715) — its answers carry
+  // the neutral shipped vise, which is not the fixture under it.
   const fix: ViseParams | null =
-    answers.workholding === 'rotary' || answers.vise.stockProud < answers.stock.thickness
+    job.workholding.kind !== 'vise' || answers.vise.stockProud < answers.stock.thickness
       ? null
       : {
           ...answers.vise,
@@ -514,13 +1104,197 @@ export function HoldingStep({ job, answers, onAnswers, onRotary }: HoldingStepPr
   // #705 — WHAT THE PICTURE DRAWS: the mount on show (the radio, or a hovered/focused option), the
   // option's own proud figure and board, and — for a disabled option — the line naming what it
   // needs, so an unavailable mount can be looked at without pretending it can be chosen.
-  const drawnOption = options.find((o) => o.mount === drawnMount) ?? null;
   const drawnProud =
     drawnMount === 'ledge' || drawnMount === 'board' || drawnMount === 'block'
       ? seatedProud(answers, drawnMount)
       : null;
-  const drawnBoard = drawnMount === 'board' ? (answers.sacrificial.under?.thickness ?? boardMm) : null;
+  const drawnBoard =
+    drawnMount === 'board'
+      ? answers.sacrificial.under?.thickness ?? boardMm
+      : isBedMount(drawnMount)
+        ? answers.sacrificial.under?.thickness ?? null
+        : null;
   const drawnNote = drawnOption?.disabled === true ? drawnOption.reason : null;
+
+  // #715 — the bed's picture data: one model for the drawing and its handles. Only the job's OWN
+  // bed mount's handles move; a hovered preview is read-only.
+  const bedPicture: BedPicture = {
+    surface: profile?.surface ?? null,
+    tape,
+    bracket: bracketHold,
+    boardMm: answers.sacrificial.under?.thickness ?? null,
+    clamps: bracketRead.settings,
+    selectedClamp,
+    interactive: bedInteractive,
+    onSelectClamp: setSelectedClamp,
+    onMoveClamp: moveClamp,
+    onMoveWhere: (where) => {
+      if (job.workholding.kind === 'tape') writeTape({ ...job.workholding.tape, where });
+    },
+    onRemoveClamp: removeClamp,
+  };
+  // The bracket's own checks, under the picture (§3.6): a clamp hanging past its edge, two clamps
+  // on top of each other, a stock longer than the arm. The sizes' provenance is Technical's.
+  const bedChecks =
+    drawnMount === 'bed-bracket'
+      ? validateBracketMount(
+          { x: answers.stock.length, y: answers.stock.width, z: answers.stock.thickness },
+          bracketHold.clamps,
+          bracketRead,
+        ).filter((c) => c.code !== 'mount-unmeasured')
+      : [];
+  // #712's board-size refusal, at the field that causes it (§3.5): the house board must cover the
+  // stock, and the sentence names the board's own size.
+  const boardTooSmall = useMemo(() => {
+    if (jobHold === null || profile === null) return null;
+    const bed = bedUnderFacts(machine, shopDefaults ?? null, job.breakthrough + 1);
+    if (bed === null) return null;
+    return validateJob(job, null, { bed }).find((f) => f.code === 'board-too-small') ?? null;
+  }, [job, machine, shopDefaults, jobHold, profile]);
+
+  // #715 — the Technical fold's provenance, each fact in its own place.
+  const holdRatio = readDefault(shopDefaults ?? null, 'tape.holdRatio');
+  const tapeProvenance = profile?.consumables?.tape?.provenance ?? TAPE_DEFAULTS.provenance;
+  const surfaceTop = profile?.datums.surfaceTopZ ?? null;
+  const surfaceTopWords =
+    surfaceTop === null
+      ? 'not measured — the first touch in Cut measures it'
+      : `${fmt(surfaceTop.value)} mm, measured ${surfaceTop.measuredAt}`;
+  const anchor = bedAnchor(profile) ?? 1;
+  const anchorRead = machine === null ? null : anchorFrom(calibration, machine.id, anchor);
+  const bedBoardValue =
+    answers.sacrificial.under === null
+      ? 'none'
+      : boards.findIndex((b) => b.thickness === answers.sacrificial.under?.thickness) >= 0
+        ? `loc:${boards.findIndex((b) => b.thickness === answers.sacrificial.under?.thickness)}`
+        : 'typed';
+
+  /** The fields the selected bed option shows, indented under its radio (§3.4, §3.6). */
+  function bedFields(mount: BedMount): JSX.Element {
+    const boardRow = boardFieldShown && (
+      <FieldRow label="Board under">
+        <BedBoardSelect
+          value={bedBoardValue}
+          boards={boards}
+          mm={answers.sacrificial.under?.thickness ?? defaultBedBoardMm(profile, job.breakthrough + 1) ?? 2}
+          onSelect={(value) => {
+            if (value === 'none') {
+              onAnswers(withBedSacrificial(answers, null));
+              return;
+            }
+            if (value === 'typed') {
+              onAnswers(withBedSacrificial(answers, defaultBedBoardMm(profile, job.breakthrough + 1) ?? 2));
+              return;
+            }
+            const board = boards[Number(value.slice('loc:'.length))];
+            if (board !== undefined) onAnswers(withBedSacrificial(answers, board.thickness));
+          }}
+          onMm={(mm) => {
+            if (Number.isFinite(mm) && mm > 0) onAnswers(withBedSacrificial(answers, mm));
+          }}
+        />
+        {profile !== null && profile.surface.kind !== 'wasteboard' && (
+          <>
+            {throughCut && (
+              <span className="hint" style={{ flexBasis: '100%' }}>
+                the through cut goes into the board, not the bed
+              </span>
+            )}
+            <span className="hint" style={{ flexBasis: '100%' }}>
+              tape the board to the bed, then the plate to the board
+            </span>
+          </>
+        )}
+      </FieldRow>
+    );
+
+    if (mount === 'bed-tape') {
+      return (
+        <div data-testid="engrave-setup-bed-fields-bed-tape" style={BED_FIELDS}>
+          <FieldRow label="Under it">{underFieldWords(profile) ?? 'the bed'}</FieldRow>
+          {boardRow}
+          <FieldRow label="Where">
+            <span data-testid="engrave-setup-tape-where">{tapeWhereWords(tape)}</span>
+            {footprintOf(profile?.surface ?? null) !== null && (
+              <span className="hint">(drag on the picture)</span>
+            )}
+          </FieldRow>
+          <FieldRow label="Square to">the front edge of the bed</FieldRow>
+          {boardTooSmall !== null && (
+            <p style={BED_ERROR} data-testid="engrave-setup-board-too-small">
+              {boardTooSmall.message}
+            </p>
+          )}
+          <details data-testid="engrave-setup-bed-technical">
+            <summary style={{ fontSize: 12, cursor: 'pointer' }}>Technical</summary>
+            <div style={{ marginTop: 4 }}>
+              <p style={MUTED}>
+                Tape: {fmt(tape.width)} mm wide, {fmt(tape.thickness)} mm thick — {tapeProvenance}
+              </p>
+              <p style={MUTED}>
+                The hold rule: taped area ≥ {fmt(holdRatio.value)} × (cutter ⌀ × step-down) —{' '}
+                {KNOWN_DEFAULTS['tape.holdRatio']!.label}
+              </p>
+              <p style={MUTED}>
+                Under it: {underWords(profile) ?? 'the bed'} — the surface’s top is {surfaceTopWords}
+              </p>
+            </div>
+          </details>
+        </div>
+      );
+    }
+
+    const count = bracketHold.clamps.length;
+    const arms = armsAboveStock(answers.stock, answers.sacrificial.under?.thickness ?? 0, bracketRead.settings);
+    return (
+      <div data-testid="engrave-setup-bed-fields-bed-bracket" style={BED_FIELDS}>
+        <FieldRow label="Bracket">thin, at anchor {anchor}</FieldRow>
+        <FieldRow label="Clamps">
+          <span data-testid="engrave-setup-clamp-count">
+            {count} top clamp{count === 1 ? '' : 's'} · {fmt(bracketRead.settings.clamp.height)} mm tall
+          </span>
+          <span className="hint" style={{ flexBasis: '100%' }}>
+            drag a clamp along the back or right edge
+            {count < 4 && (
+              <>
+                {' · '}
+                <button type="button" className="btn btn--sm" data-testid="engrave-setup-clamp-add" onClick={addClamp}>
+                  + clamp
+                </button>
+              </>
+            )}
+          </span>
+        </FieldRow>
+        {boardRow}
+        {arms > 0 && (
+          <p className="hint" style={{ margin: 0 }} data-testid="engrave-setup-arms-above">
+            the arms stand {fmt(arms)} mm above the plate
+          </p>
+        )}
+        {boardTooSmall !== null && (
+          <p style={BED_ERROR} data-testid="engrave-setup-board-too-small">
+            {boardTooSmall.message}
+          </p>
+        )}
+        <details data-testid="engrave-setup-bed-technical">
+          <summary style={{ fontSize: 12, cursor: 'pointer' }}>Technical</summary>
+          <div style={{ marginTop: 4 }}>
+            <p style={MUTED}>
+              The bracket’s and the clamps’ sizes: {fmt(bracketRead.settings.armLengthX)} mm arms ·{' '}
+              {fmt(bracketRead.settings.armWidth)} mm wide · {fmt(bracketRead.settings.height)} mm tall · clamps{' '}
+              {fmt(bracketRead.settings.clamp.length)} × {fmt(bracketRead.settings.clamp.width)} mm, reaching{' '}
+              {fmt(bracketRead.settings.clamp.reach)} mm onto the plate —{' '}
+              {bracketRead.unmeasured.length === 0 ? 'measured' : 'defaults, not measured'}
+            </p>
+            <p style={MUTED} data-testid="engrave-setup-bracket-anchor">
+              anchor {anchor}: {anchorRead === null ? 'Makera’s own' : anchorRead.ok ? anchorRead.anchor.from : anchorRead.reason}
+            </p>
+          </div>
+        </details>
+      </div>
+    );
+  }
+
 
   return (
     <div data-testid="engrave-setup-step-holding" style={{ marginTop: 8 }}>
@@ -576,7 +1350,7 @@ export function HoldingStep({ job, answers, onAnswers, onRotary }: HoldingStepPr
           </span>
 
           <div data-testid="engrave-setup-holding-vise" style={{ display: 'grid', gap: 7 }}>
-            {shown.map((option) => (
+            {rows.map((option) => (
               <MountRow
                 key={option.mount}
                 option={option}
@@ -584,7 +1358,9 @@ export function HoldingStep({ job, answers, onAnswers, onRotary }: HoldingStepPr
                 onChoose={() => choose(option.mount)}
                 onPreview={setPreviewMount}
                 onMachineChange={() => {
-                  if (option.escape !== null) changeMachine(option.escape, option.holdingWords);
+                  if (option.escape !== null) {
+                    changeMachine(option.escape, option.holdingWords, isBedMount(option.mount) ? option.mount : null);
+                  }
                 }}
                 boardControl={
                   option.mount === 'board' && !option.disabled ? (
@@ -610,6 +1386,7 @@ export function HoldingStep({ job, answers, onAnswers, onRotary }: HoldingStepPr
                     />
                   ) : null
                 }
+                details={isBedMount(option.mount) && !option.disabled ? bedFields(option.mount) : null}
               />
             ))}
           </div>
@@ -625,6 +1402,8 @@ export function HoldingStep({ job, answers, onAnswers, onRotary }: HoldingStepPr
             </details>
           )}
 
+          {/* #715 — a bed job's provenance lives in its own option's Technical fold. */}
+          {jobHold === null && (
           <details data-testid="engrave-setup-holding-technical">
             <summary style={{ fontSize: 12, cursor: 'pointer' }}>Technical</summary>
             <div style={{ marginTop: 4 }}>
@@ -651,6 +1430,7 @@ export function HoldingStep({ job, answers, onAnswers, onRotary }: HoldingStepPr
               )}
             </div>
           </details>
+          )}
         </div>
 
         <HoldingPicture
@@ -660,6 +1440,8 @@ export function HoldingStep({ job, answers, onAnswers, onRotary }: HoldingStepPr
           proudMm={drawnProud}
           boardMm={drawnBoard}
           note={drawnNote}
+          bed={isBedMount(drawnMount) ? bedPicture : null}
+          checks={bedChecks}
         />
       </div>
 
@@ -703,6 +1485,7 @@ function MountRow({
   onPreview,
   onMachineChange,
   boardControl,
+  details = null,
 }: {
   option: MountOption;
   checked: boolean;
@@ -711,6 +1494,8 @@ function MountRow({
   onPreview: (mount: HoldingMount | null) => void;
   onMachineChange: () => void;
   boardControl: JSX.Element | null;
+  /** #715 — the selected bed option's own fields, indented under its radio. */
+  details?: JSX.Element | null;
 }): JSX.Element {
   const hint =
     option.disabled && option.reason !== null
@@ -760,7 +1545,82 @@ function MountRow({
       {option.mount === 'board' && boardControl !== null && (
         <div style={{ marginLeft: 22, marginTop: 2 }}>{boardControl}</div>
       )}
+      {checked && details !== null && <div style={{ marginLeft: 22, marginTop: 4 }}>{details}</div>}
     </div>
+  );
+}
+
+// ── #715: the bed's field rows and its board select ───────────────────────────────────────────
+
+const BED_FIELDS: CSSProperties = { display: 'grid', gap: 4, margin: '2px 0 4px' };
+const BED_ERROR: CSSProperties = { fontSize: 12, lineHeight: 1.45, margin: '2px 0', color: '#f0b4ad' };
+
+/** One labelled row of the bed option's fields, the mockup's "Under it | wasteboard". */
+function FieldRow({ label, children }: { label: string; children: ReactNode }): JSX.Element {
+  return (
+    <div
+      style={{
+        display: 'grid',
+        gridTemplateColumns: '96px minmax(0, 1fr)',
+        gap: 6,
+        alignItems: 'baseline',
+        fontSize: 12,
+      }}
+    >
+      <span style={{ ...MUTED, margin: 0 }}>{label}</span>
+      <span style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center', minWidth: 0 }}>{children}</span>
+    </div>
+  );
+}
+
+/** The bed's board under: none, a house board, or a typed thickness (§3.5). */
+function BedBoardSelect({
+  value,
+  boards,
+  mm,
+  onSelect,
+  onMm,
+}: {
+  value: string;
+  boards: readonly { thickness: number; material: string; count: number }[];
+  mm: number;
+  onSelect: (value: string) => void;
+  onMm: (value: number) => void;
+}): JSX.Element {
+  return (
+    <span style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+      <select
+        className="fld"
+        aria-label="Board under the part"
+        data-testid="engrave-setup-bed-board"
+        value={value}
+        onChange={(e) => onSelect(e.target.value)}
+      >
+        <option value="none">none</option>
+        {boards.map((board, i) => (
+          <option key={`${board.material}-${board.thickness}-${i}`} value={`loc:${i}`}>
+            {fmt(board.thickness)} mm {board.material}
+          </option>
+        ))}
+        <option value="typed">Other thickness…</option>
+      </select>
+      {value === 'typed' && (
+        <label style={{ ...FIELD_LABEL, margin: 0 }}>
+          <input
+            type="number"
+            className="fld"
+            aria-label="Board thickness"
+            data-testid="engrave-setup-bed-board-thickness"
+            min="0.1"
+            step="0.1"
+            value={mm}
+            style={{ width: 64 }}
+            onChange={(e) => onMm(Number(e.target.value))}
+          />{' '}
+          mm
+        </label>
+      )}
+    </span>
   );
 }
 

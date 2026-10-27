@@ -45,6 +45,7 @@ import type { BlankParams } from '@/types/blank';
 import { materializeSetups } from '@/engine/cnc/setups/authoring';
 import type { CutParams } from '@/engine/cnc/feeds';
 import type {
+  BracketHold,
   EngraveBorderShape,
   EngraveBoxPrimitive,
   EngraveCircleShape,
@@ -90,6 +91,7 @@ import type {
   JobSource,
   RotaryChuck,
   Sacrificial,
+  TapeHold,
   ViseParams,
 } from '@/types/engraveJob';
 import { pruneRunLog } from '@/engine/cnc/engrave/package';
@@ -903,6 +905,14 @@ export interface EngraveJobState {
    * own rule is what says the rotary needs a rod.
    */
   setRotaryHolding: (rotary: RotaryChuck | null, vise: ViseParams, sacrificial?: Sacrificial) => void;
+  /**
+   * #715 — hold the job on the BED (taped, or in the bracket with its clamps), or take it back to
+   * the vise, in ONE undoable write. The workholding and the sacrificial are one fact: the board
+   * under the part belongs to the mount it is taped to. `null` is the vise, with the answers'
+   * vise and sacrificial. A rod lying in the rotary's axis frame is stood on its end again, so the
+   * job never keeps a box that says it is in a chuck nobody selected.
+   */
+  setBedHold: (hold: TapeHold | BracketHold | null, vise: ViseParams, sacrificial: Sacrificial) => void;
   /** Add a default shape of `kind` (#214) and return its id. */
   addShape: (kind: EngraveShape['kind']) => string;
   /** Merge a hand edit into one shape (#214). A partial `position` is merged, not replaced. */
@@ -2277,6 +2287,31 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
           workholding: { kind: 'vise', vise: { ...vise } },
           ...(sacrificial === undefined ? {} : { sacrificial }),
         };
+      }),
+
+    // #715 — the bed-mount write. One store write, one undo entry: the workholding, the sacrificial
+    // it is taped to, and (for a rod still in the axis frame) the standing box go together. A job
+    // taken back to the vise writes the answers' vise and sacrificial with it.
+    setBedHold: (hold, vise, sacrificial) =>
+      apply((job) => {
+        const size = rodSizeOf(job.stock);
+        const { shape: _shape, diameter: _diameter, ...prism } = job.stock;
+        const box: EngraveJob['stock'] =
+          job.stock.shape === 'cylinder' && size !== null
+            ? { ...prism, ...standingBoxForRod(size.diameter, size.length) }
+            : job.stock;
+        if (hold !== null) {
+          return {
+            ...job,
+            stock: box,
+            workholding:
+              'clamps' in hold
+                ? { kind: 'bracket', bracket: { ...hold, clamps: hold.clamps.map((c) => ({ ...c })) } }
+                : { kind: 'tape', tape: { ...hold, where: hold.where === null ? null : { ...hold.where } } },
+            sacrificial,
+          };
+        }
+        return { ...job, stock: box, workholding: { kind: 'vise', vise: { ...vise } }, sacrificial };
       }),
 
     // #205: hand edits sit ON TOP of the computed values, field by field. `undefined` clears one

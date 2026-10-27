@@ -16,15 +16,14 @@
  * pins · Change the machine…`). An accessory the house does not own reads `not owned`, and nothing
  * more: there is no fixture to fit and so no change to offer.
  *
- * WHAT THIS BUILD CAN WRITE. The job model holds the stock in the vise, seated three ways, or in
- * the rotary module's three-jaw chuck (#240) — and the chuck holds ROUND stock only: a rod in step
- * 2, or a box already in the axis frame. The three VISE options are always writable; the rotary
- * option is writable when the machine carries it and the stock is round, and says why not when the
- * stock is not (`the rotary holds round stock — say a rod in step 2`). The bed options are offered
- * because the machine and the design have them, but the job model does not hold a part on the bed,
- * so while the machine gives one of them the option says what the job will actually do — `held in
- * the vise` — rather than pretending a selection would change the cut. The top-line Change the
- * machine… is the way out either way.
+ * WHAT THIS BUILD CAN WRITE. The job model holds the stock in the vise, seated three ways; in the
+ * rotary module's chuck (#240), which holds ROUND stock only; or on the bed, taped or in the
+ * bracket (#709/#715). The three VISE options are always writable; the rotary option is writable
+ * when the machine carries it and the stock is round, and says why not when the stock is not
+ * (`the rotary holds round stock — say a rod in step 2`). The bed options are writable when
+ * NOTHING IS ON THE PINS, and each writes the job's own `workholding` (`tape`, or `bracket` with
+ * its clamp places) and the board under it — the model below is what that write and its picture
+ * are made of. The top-line Change the machine… is the way out of any other state.
  */
 
 import {
@@ -34,6 +33,15 @@ import {
 } from '@/engine/cnc/fixture';
 import { rotaryFits } from '@/engine/cnc/setups/plan';
 import type { SetupAnswers } from '@/engine/cnc/engrave/setupFlow';
+import { TAPE_DEFAULTS, defaultBracketHold, defaultTapeHold } from '@/engine/cnc/engrave/jobSetup';
+import {
+  clampObstacles,
+  type BracketSettings,
+  type ClampEdge,
+  type ClampPlacement,
+  type StockSize,
+} from '@/engine/cnc/mounts/bracket';
+import type { ShopDefaults } from '@/platform/defaultsClient';
 import type { BedProfile, FixtureRecord, MachineRecord } from '@/platform/locationClient';
 import {
   MACHINE_MOUNT_WORDS,
@@ -43,6 +51,7 @@ import {
   surfaceWords,
   type MachineMountKind,
 } from '@/platform/machineChange';
+import type { BracketHold, EngraveJob, JobStockForm, TapeHold } from '@/types/engraveJob';
 
 /** The six mounts the step offers, in the mockup's order. */
 export type HoldingMount = 'ledge' | 'board' | 'block' | 'bed-tape' | 'bed-bracket' | 'rotary';
@@ -270,6 +279,8 @@ export interface MountOptionArgs {
    * points back at step 2.
    */
   round?: boolean;
+  /** #715 — the tape the job would be held with, for the bed tape option's own line. */
+  tape?: TapeHold | null;
 }
 
 const Z1_ROTARY_ENVELOPE = { diameter: 80, length: 150 } as const;
@@ -374,9 +385,19 @@ export function mountOptions(args: MountOptionArgs): MountOption[] {
       continue;
     }
 
-    // The bed is a machine mount, not a job mount in this build.
+    // The bed is a machine mount and a JOB mount (#715): with nothing on the pins the two bed
+    // options are real choices, and each says what it does for this stock. The bracket needs the
+    // bracket at an anchor on the bed (BM-3's fit step records one; until then the row says so).
     if (mechanism === 'bed') {
-      out.push({ ...base, hint: null, disabled: true, reason: 'the job is held in the vise', escape: null });
+      if (mount === 'bed-bracket' && bedAnchor(now.profile) === null) {
+        out.push({ ...base, hint: null, disabled: true, reason: 'needs the bracket at anchor 1', escape: null });
+        continue;
+      }
+      const hint =
+        mount === 'bed-tape'
+          ? tapeStripsLine(args.tape ?? defaultTapeHold(), stock)
+          : bracketHint(now.profile, stock);
+      out.push({ ...base, hint, disabled: false, reason: null, escape: null });
       continue;
     }
 
@@ -419,4 +440,326 @@ function hintFor(mount: HoldingMount, stock: { thickness: number }, boardMm: num
  */
 export function boardProvenance(mm: number, choices: readonly BoardChoice[]): 'typed' | 'location' {
   return choices.some((b) => b.thickness === mm) ? 'location' : 'typed';
+}
+
+// ── #715: the two bed mounts, as the step writes them ──────────────────────────────────────────
+//
+// With nothing on the pins the bed's two mounts are the job's REAL choices (`bed-mounts-flow.md`
+// §3.2): "On the bed, taped" writes `workholding.tape`, "On the bed, bracket and clamps" writes
+// `workholding.bracket` with the job's own clamp places. What is under the part is the active bed
+// profile's surface, read and never asked — the step's own line for it is `underWords`.
+
+/** The two mounts a bed job can be held in. */
+export type BedMount = 'bed-tape' | 'bed-bracket';
+
+export function isBedMount(mount: HoldingMount): mount is BedMount {
+  return mount === 'bed-tape' || mount === 'bed-bracket';
+}
+
+/** What is under the part, in the record's words ("wasteboard under", "bare bed"). */
+export function underWords(profile: BedProfile | null): string | null {
+  return profile === null ? null : surfaceWords(profile.surface);
+}
+
+/** The same fact at the FIELD's length (§3.4's "Under it  wasteboard"): "wasteboard" / "bare bed". */
+export function underFieldWords(profile: BedProfile | null): string | null {
+  const words = underWords(profile);
+  return words === null ? null : words.replace(' under', '');
+}
+
+/**
+ * The tape a bed job starts from: the house roll the profile states (`consumables.tape`), else
+ * Makera's 20 mm at the typed 0.1 mm. A job already taped keeps its own hold — reloading the step
+ * shows what the job stores, not a fresh default.
+ */
+export function bedTapeHold(profile: BedProfile | null, keep: TapeHold | null): TapeHold {
+  if (keep !== null) return { ...keep, where: keep.where === null ? null : { ...keep.where } };
+  const roll = profile?.consumables?.tape ?? null;
+  if (roll === null) return defaultTapeHold();
+  return defaultTapeHold({
+    widthMm: roll.widthMm,
+    thicknessMm: roll.thicknessMm,
+    insetMm: TAPE_DEFAULTS.insetMm,
+    provenance: roll.provenance,
+  });
+}
+
+/** The bracket a bed job starts from: the Makera kit's thin bracket at anchor 1 and the default clamps. */
+export function bedBracketHold(
+  stock: { length: number; width: number; thickness: number },
+  defaults: ShopDefaults | null,
+  keep: BracketHold | null,
+): BracketHold {
+  if (keep !== null) return { ...keep, clamps: keep.clamps.map((c) => ({ ...c })) };
+  return defaultBracketHold({ x: stock.length, y: stock.width, z: stock.thickness }, defaults);
+}
+
+const NUMBER_WORDS = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten'] as const;
+
+/**
+ * The tape's strips across the stock: `ceil((width − 2 × inset) / tape width)` (§3.4), the last
+ * trimmed. Two for the badge's 38.1 mm on the 20 mm roll.
+ */
+export function tapeStrips(tape: Pick<TapeHold, 'width' | 'inset'>, stock: { width: number }): number {
+  const span = Math.max(0, stock.width - 2 * tape.inset);
+  return Math.max(1, Math.ceil(span / tape.width));
+}
+
+/** The tape's line under its option: "two strips of the 20 mm tape, 2 mm in from every edge". */
+export function tapeStripsLine(tape: TapeHold, stock: { width: number }): string {
+  const n = tapeStrips(tape, stock);
+  const count = n < NUMBER_WORDS.length ? NUMBER_WORDS[n]! : String(n);
+  return `${count} ${n === 1 ? 'strip' : 'strips'} of the ${fmt(tape.width)} mm tape, ${fmt(tape.inset)} mm in from every edge`;
+}
+
+/** The bed's anchor placement, when the bed carries the bracket: 1 or 2; null when it carries none. */
+export function bedAnchor(profile: BedProfile | null): 1 | 2 | null {
+  const placement = profile?.placements.find((p) => p.where.kind === 'anchor');
+  if (placement === undefined) return null;
+  return (placement.where.anchor ?? 1) === 2 ? 2 : 1;
+}
+
+/** The bracket option's line: which bracket, at which anchor. */
+export function bracketHint(profile: BedProfile | null, _stock: { length: number; width: number }): string {
+  return `the plate in the bracket's corner at anchor ${bedAnchor(profile) ?? 1}`;
+}
+
+/**
+ * Does a profile row's stock class name this stock? The bed wizard's own classes
+ * (`bed-profiles.md` S4): `sheet<=3mm`, `plate|block`, `rod|tube`, or a bare form word. A class
+ * this build does not understand matches nothing — a preferred mount is a convenience, never a
+ * guess about a stock it cannot place.
+ */
+function stockClassMatches(expr: string, stock: { thickness: number }, form: JobStockForm | null): boolean {
+  return expr.split('|').some((alternative) => {
+    const word = alternative.trim().toLowerCase();
+    if (word === '') return false;
+    const bounded = /^([a-z-]+)\s*<=\s*([\d.]+)\s*mm$/.exec(word);
+    if (bounded !== null) {
+      const cls = bounded[1]!;
+      // "sheet" is the thin member of the plate family: a plate no thicker than the bound is
+      // the same stock class, which is how a 2 mm plate gets tape.
+      const fits = form === cls || (cls === 'sheet' && (form === 'plate' || form === 'sheet'));
+      return fits && stock.thickness <= Number(bounded[2]);
+    }
+    if (word === 'tube') return form === 'rod';
+    return form === word;
+  });
+}
+
+/** The mount the active profile prefers for this stock, among those the bed can give as it stands. */
+export function preferredBedMount(
+  profile: BedProfile | null,
+  stock: { thickness: number },
+  form: JobStockForm | null,
+): BedMount | null {
+  for (const row of profile?.preferredMounting ?? []) {
+    if (!stockClassMatches(row.stock, stock, form)) continue;
+    if (row.mount.manner === 'tape') return 'bed-tape';
+    if (row.mount.manner === 'corner+clamps' && bedAnchor(profile) !== null) return 'bed-bracket';
+  }
+  return null;
+}
+
+/**
+ * The bed mount a job gets when nobody has chosen one (§3.2): the profile's preferred mount when
+ * it names this stock and the bed carries it; else sheet ≤ 3 mm on tape, plates and blocks in the
+ * bracket, and tape when the bed has no bracket at an anchor. On the house's profile after the
+ * vise comes off, that is tape.
+ */
+export function defaultBedMount(
+  profile: BedProfile | null,
+  stock: { thickness: number },
+  form: JobStockForm | null,
+): BedMount {
+  const preferred = preferredBedMount(profile, stock, form);
+  if (preferred !== null) return preferred;
+  if (stock.thickness <= 3) return 'bed-tape';
+  return bedAnchor(profile) === null ? 'bed-tape' : 'bed-bracket';
+}
+
+/** How far the bracket's arms stand above the stock's top, mm — negative when they sit below it. */
+export function armsAboveStock(
+  stock: { thickness: number },
+  underMm: number,
+  settings: BracketSettings,
+): number {
+  return Math.round((settings.height - stock.thickness - underMm) * 1000) / 1000;
+}
+
+/** A clamp's landmark sentence, from the one owner of that label (`clampObstacles`). */
+export function clampLabelFor(
+  stock: { length: number; width: number; thickness: number },
+  placement: ClampPlacement,
+  settings: BracketSettings,
+): string {
+  const size: StockSize = { x: stock.length, y: stock.width, z: stock.thickness };
+  return clampObstacles(size, [placement], settings)[0]!.label;
+}
+
+/** The thinnest house board a through cut needs on this surface, mm; null when the house has none. */
+export function defaultBedBoardMm(profile: BedProfile | null, needMm: number): number | null {
+  const boards = (profile?.consumables?.boards ?? [])
+    .filter((b) => b.count > 0 && b.size[2] >= needMm)
+    .sort((a, b) => a.size[2] - b.size[2]);
+  return boards[0]?.size[2] ?? null;
+}
+
+/** Does this job cut through its stock anywhere (a through shape, a cut-out, a through drill)? */
+export function jobHasThroughCut(job: Pick<EngraveJob, 'shapes' | 'cutouts' | 'drills'>): boolean {
+  if (job.shapes.some((s) => s.enabled && s.through === true)) return true;
+  if ((job.cutouts ?? []).some((c) => c.enabled)) return true;
+  return (job.drills ?? []).some((d) => d.enabled && d.through);
+}
+
+/** Where the tape expects the stock: the middle of the bed, or the corner it was dragged to. */
+export function tapeWhereWords(tape: TapeHold): string {
+  if (tape.where === null) return 'the middle of the bed';
+  return `X ${fmt(tape.where.x)} · Y ${fmt(tape.where.y)} mm on the bed`;
+}
+
+// ── The picture's own geometry, as pure arithmetic ─────────────────────────────────────────────
+//
+// The bed pictures are schematic, but their HANDLES are the model: a clamp dragged on the picture
+// lands at a place in the work frame, and the same arithmetic draws it back. These functions are
+// the one mapping both use, so a test can pin the drag without a browser.
+
+/** A rectangle in the picture's own units (SVG user units). */
+export interface PictureRect {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+const r3 = (n: number): number => Math.round(n * 1000) / 1000;
+
+/** Where (px, py) sits on a stock drawn as `rect`, mm from its front-left corner (X right, Y back). */
+export function stockPointFromPicture(
+  rect: PictureRect,
+  stock: { length: number; width: number },
+  px: number,
+  py: number,
+): { x: number; y: number } {
+  const sx = rect.w === 0 ? 1 : stock.length / rect.w;
+  const sy = rect.h === 0 ? 1 : stock.width / rect.h;
+  return { x: (px - rect.x) * sx, y: (rect.y + rect.h - py) * sy };
+}
+
+/**
+ * The placement a clamp takes when it is dragged to (px, py): the edge it is nearer of the two
+ * free ones (back and right), and its centre along that edge clamped to the edge's own length —
+ * which still lets it hang past an end, the mount check that refuses a clamp that would not hold.
+ */
+export function clampPlacementAtPointer(
+  rect: PictureRect,
+  stock: { length: number; width: number },
+  px: number,
+  py: number,
+): ClampPlacement {
+  const p = stockPointFromPicture(rect, stock, px, py);
+  const edge: ClampEdge = stock.width - p.y <= stock.length - p.x ? 'back' : 'right';
+  const len = edge === 'back' ? stock.length : stock.width;
+  const at = Math.min(len, Math.max(0, edge === 'back' ? p.x : p.y));
+  return { edge, at: r3(at) };
+}
+
+/**
+ * The stock's expected front-left corner (machine XY) when the stock is dragged to (px, py) on a
+ * surface drawn as `rect`: the pointer takes the stock's middle, and the stock stays on the
+ * surface.
+ */
+export function tapeWhereAtPointer(
+  rect: PictureRect,
+  stock: { length: number; width: number },
+  surface: { length: number; width: number; frontLeft: [number, number] },
+  px: number,
+  py: number,
+): { x: number; y: number } {
+  const p = stockPointFromPicture(rect, surface, px, py);
+  const x = Math.min(Math.max(0, surface.length - stock.length), Math.max(0, p.x - stock.length / 2));
+  const y = Math.min(Math.max(0, surface.width - stock.width), Math.max(0, p.y - stock.width / 2));
+  return { x: r3(surface.frontLeft[0] + x), y: r3(surface.frontLeft[1] + y) };
+}
+
+/** The stock's rect on a surface drawn as `rect`: centred when `where` is null, else where it is. */
+export function stockRectFor(
+  rect: PictureRect,
+  stock: { length: number; width: number },
+  surface: { length: number; width: number; frontLeft: [number, number] },
+  where: { x: number; y: number } | null,
+): PictureRect {
+  const sx = surface.length === 0 ? 1 : rect.w / surface.length;
+  const sy = surface.width === 0 ? 1 : rect.h / surface.width;
+  const w = Math.max(0, stock.length * sx);
+  const h = Math.max(0, stock.width * sy);
+  if (where === null) return { x: rect.x + (rect.w - w) / 2, y: rect.y + (rect.h - h) / 2, w, h };
+  const x = Math.min(Math.max(rect.x, rect.x + (where.x - surface.frontLeft[0]) * sx), rect.x + rect.w - w);
+  const y = Math.min(Math.max(rect.y, rect.y + rect.h - (where.y - surface.frontLeft[1]) * sy - h), rect.y + rect.h - h);
+  return { x, y, w, h };
+}
+
+/** The tape's strips under a stock drawn as `stockRect`, along its length, the last trimmed. */
+export function tapeStripRects(
+  stockRect: PictureRect,
+  stock: { length: number; width: number },
+  tape: Pick<TapeHold, 'width' | 'inset'>,
+): PictureRect[] {
+  const sx = stockRect.w === 0 ? 1 : stockRect.w / stock.length;
+  const sy = stockRect.h === 0 ? 1 : stockRect.h / stock.width;
+  const out: PictureRect[] = [];
+  for (let i = 0; i < tapeStrips(tape, stock); i++) {
+    const y0 = tape.inset + i * tape.width;
+    const y1 = Math.min(tape.inset + (i + 1) * tape.width, stock.width - tape.inset);
+    if (y1 <= y0) continue;
+    out.push({
+      x: stockRect.x + tape.inset * sx,
+      y: stockRect.y + stockRect.h - y1 * sy,
+      w: Math.max(0, stock.length - 2 * tape.inset) * sx,
+      h: (y1 - y0) * sy,
+    });
+  }
+  return out;
+}
+
+/** A clamp's rect on a stock drawn as `stockRect`: it reaches `reach` mm onto the stock. */
+export function clampRectFor(
+  stockRect: PictureRect,
+  stock: { length: number; width: number },
+  clamp: { width: number; length: number; reach: number },
+  p: ClampPlacement,
+): PictureRect {
+  const sx = stockRect.w === 0 ? 1 : stockRect.w / stock.length;
+  const sy = stockRect.h === 0 ? 1 : stockRect.h / stock.width;
+  if (p.edge === 'back') {
+    const yMin = stock.width - clamp.reach;
+    return {
+      x: stockRect.x + (p.at - clamp.width / 2) * sx,
+      y: stockRect.y + stockRect.h - (yMin + clamp.length) * sy,
+      w: clamp.width * sx,
+      h: clamp.length * sy,
+    };
+  }
+  const xMin = stock.length - clamp.reach;
+  return {
+    x: stockRect.x + xMin * sx,
+    y: stockRect.y + stockRect.h - (p.at + clamp.width / 2) * sy,
+    w: clamp.length * sx,
+    h: clamp.width * sy,
+  };
+}
+
+/** The stock's rect centred in `rect`, its aspect kept and at most `fill` of the frame. */
+export function centredStockRect(
+  rect: PictureRect,
+  stock: { length: number; width: number },
+  fill = 0.6,
+): PictureRect {
+  const scale = Math.min(
+    (rect.w * fill) / Math.max(stock.length, 1e-9),
+    (rect.h * fill) / Math.max(stock.width, 1e-9),
+  );
+  const w = stock.length * scale;
+  const h = stock.width * scale;
+  return { x: rect.x + (rect.w - w) / 2, y: rect.y + (rect.h - h) / 2, w, h };
 }
