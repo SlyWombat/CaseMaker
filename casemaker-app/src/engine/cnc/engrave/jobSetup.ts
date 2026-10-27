@@ -893,6 +893,40 @@ export function validateGoalObject(
 }
 
 /**
+ * How a too-deep sentence ends, in the frame the job is cut in (#724 W4). It names the limit the
+ * cut crossed, never a delta from a limit it did not reach:
+ *
+ *   - a plate: the floor left under the item, against the minimum;
+ *   - a solid rod short of the centre: the floor left above the AXIS (the limit is the radius);
+ *   - a solid rod past the centre: how far past it the tip would go;
+ *   - a tube: the bore its wall holds back — the sentence says the wall is broken, not the axis.
+ */
+function overDepthClause(job: EngraveJob, depth: number, facingDepth: number, floorAllowed: number): string {
+  const map = rotaryMapOf(job);
+  if (map !== null) {
+    const wall = job.stock.wall;
+    if (wall !== undefined && wall > 0 && wall < map.radius) {
+      return (
+        `it breaks through the tube's ${fmt3(wall)} mm wall into its bore; ` +
+        `at most ${fmt3(floorAllowed)} mm here`
+      );
+    }
+    if (depth > map.radius) {
+      return (
+        `the cutter tip would reach ${fmt3(depth - map.radius)} mm past the axis, ` +
+        `and a rotary cut keeps its floor above it — at most ${fmt3(floorAllowed)} mm here`
+      );
+    }
+    return (
+      `it leaves less than the ${fmt3(job.minFloor)} mm floor above the axis; ` +
+      `at most ${fmt3(floorAllowed)} mm here`
+    );
+  }
+  const remaining = job.stock.thickness - facingDepth - depth;
+  return `only ${fmt3(remaining)} mm of floor would remain on a ${job.stock.thickness} mm stock, below the ${job.minFloor} mm minimum`;
+}
+
+/**
  * The goal object a PURE 3D-surfacing job carries (#534, #535), or `null`.
  *
  * A pure goal job carries an enabled `role: 'goal'` mesh and NO authoring items — no labels,
@@ -992,19 +1026,6 @@ export function validateJob(
         `or start from thicker stock.`,
     });
   }
-/** How a too-deep sentence ends, in the frame the job is cut in (#724 W4). */
-function overDepthClause(job: EngraveJob, depth: number, facingDepth: number, floorAllowed: number): string {
-  const map = rotaryMapOf(job);
-  if (map !== null) {
-    return (
-      `the cutter tip would be ${fmt3(depth - map.radius)} mm past the rod's ${fmt3(map.radius)} mm radius, ` +
-      `and a rotary cut keeps its floor above the axis — at most ${fmt3(floorAllowed)} mm here`
-    );
-  }
-  const remaining = job.stock.thickness - facingDepth - depth;
-  return `only ${fmt3(remaining)} mm of floor would remain on a ${job.stock.thickness} mm stock, below the ${job.minFloor} mm minimum`;
-}
-
   // #724 W4 — the floor allowed is the BLANK's ceiling, facing taken: on a plate the thickness
   // less the floor, on a rotary job the RADIUS (or a tube's wall) less the floor — a ⌀20 rod's
   // limit is 9 mm, and 19 has no stock under it at all. The same number the row's field, its

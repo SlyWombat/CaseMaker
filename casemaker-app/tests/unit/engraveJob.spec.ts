@@ -489,6 +489,41 @@ describe('validateJob (#200)', () => {
     expect(validateJob(job).some((f) => f.code === 'depth-exceeds-stock')).toBe(false);
   });
 
+  // #724 W4 — the same rule on a rotary blank, where the floor is a RADIUS above the axis. The
+  // sentence names the limit that was crossed, and never a delta from a limit not yet reached.
+  it('a rod’s too-deep sentence names the axis, the centre or the bore — never a negative', () => {
+    const rod = (over: Partial<EngraveJob['stock']> = {}, depth = 9.5): EngraveJob => {
+      const base = defaultEngraveJob();
+      return {
+        ...base,
+        stock: { ...base.stock, length: 100, width: 20, thickness: 20, material: 'pla', shape: 'cylinder', diameter: 20, ...over },
+        workholding: {
+          kind: 'rotary-chuck',
+          rotary: { stickout: 85, gripDiameter: null, jawMode: 'reverse-inner', tailstock: true, source: 'test' },
+        },
+        labels: [{ ...base.labels[0]!, depth, position: { x: 39, y: 30 } }],
+      };
+    };
+    const message = (job: EngraveJob): string => validateJob(job).find((f) => f.code === 'depth-exceeds-stock')!.message;
+
+    // Between the ceiling (9) and the radius (10): the floor above the axis is under the minimum.
+    const short = message(rod({}, 9.5));
+    expect(short).toContain('leaves less than the 1 mm floor above the axis');
+    expect(short).toContain('at most 9 mm here');
+    expect(short).not.toContain('-');
+    // Past the centre: a positive distance past the axis.
+    const through = message(rod({}, 12));
+    expect(through).toContain('reach 2 mm past the axis');
+    expect(through).not.toContain('-2');
+    // A tube: the WALL is the limit, and the bore is what the cut breaks into.
+    const tube = message(rod({ diameter: 25, width: 25, thickness: 25, wall: 3 }, 2.5));
+    expect(tube).toContain("breaks through the tube's 3 mm wall into its bore");
+    expect(tube).toContain('at most 2 mm here');
+    expect(tube).not.toContain('axis');
+    // The boundary itself is allowed, as it is on a plate.
+    expect(validateJob(rod({}, 9)).some((f) => f.code === 'depth-exceeds-stock')).toBe(false);
+  });
+
   it('leaves the unmeasured-vise warning to `validateVise`, and the merged list carries it once (#353)', () => {
     const job = defaultEngraveJob();
     // One owner: the vise validator says it, `validateJob` does not repeat it.
