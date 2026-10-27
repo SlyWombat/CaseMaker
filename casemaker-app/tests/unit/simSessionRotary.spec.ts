@@ -94,3 +94,46 @@ describe('session routing — rotary', () => {
     s.dispose();
   });
 });
+
+// #241 — R-4: an INDEXED job holds A through every run, so each run is an ordinary 2.5D cut on a
+// round stock turned by that run's angle. It goes to the EXACT sweeper (not the column engine),
+// and its playback is per FACE.
+const INDEXED = [
+  'S1000 M3',
+  'G0 X-5 Y0 Z15 A0',
+  'G1 Z9 F200',
+  'G1 X35 F800',
+  'G0 Z15',
+  'G0 A180',
+  'G1 Z9 F200',
+  'G1 X-5 F800',
+  'G0 Z15',
+].join('\n');
+
+describe('session routing — INDEXED rotary (#241)', () => {
+  it('routes an indexed rotary job to the exact sweeper and plays it back per face', () => {
+    const s = createSimSession(tl);
+    const wide = flatEndMill(10, { shoulderLength: 20, fluteLength: 15 });
+    const r = s.load(INDEXED, setup(), wide, null);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    const ok = r as SimLoadOk;
+    expect(ok.summary.rotary).toBe(true);
+    expect(ok.summary.rotaryClass).toBe('indexed');
+    // The EXACT engine, not the column grid: it carries a removal ghost and per-run solids.
+    expect(ok.stats.engine).toBe('exact');
+    expect(ok.meshes.removal).not.toBeNull();
+    expect(ok.checkpoints.map((c) => c.a)).toEqual([0, 180]);
+
+    // Per-face playback: after the 0° face the cut is at the top of the stock; after the 180°
+    // face the removal reaches the bottom. One solid per face is exactly what that means.
+    const afterFirst = s.frameAt(0, 1);
+    const afterSecond = s.frameAt(1, 2);
+    // (The removal solids carry the sweep's 0.01 mm overshoot above the stock top.)
+    expect(afterFirst?.removalSoFar?.bbox.max[2]).toBeGreaterThan(10);
+    expect(afterFirst?.removalSoFar?.bbox.min[2]).toBeGreaterThan(-1);
+    expect(afterSecond?.removalSoFar?.bbox.min[2]).toBeLessThan(-10);
+    expect(afterSecond?.removalSoFar?.bbox.max[2]).toBeGreaterThan(10);
+    s.dispose();
+  });
+});

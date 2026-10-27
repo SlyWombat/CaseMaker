@@ -58,7 +58,10 @@ export interface MachineState {
   g92: Pos;
   work: Pos;
   machine: Pos;
-  /** Rotary axis, tracked only. */
+  /**
+   * Rotary axis, degrees. Tracked on work-frame moves; a machine-frame move does not turn it
+   * (`applyEvent`). An INDEXED job holds it through every run and changes it between them (#241).
+   */
   a: number | null;
 }
 
@@ -164,6 +167,16 @@ export interface AirMove {
   from: [number, number, number];
   to: [number, number, number];
   /**
+   * #241 — the rotary axis in degrees at each end of the move (R6: work Y ≡ 0, Z is the radius
+   * above the axis). Both `null` for a program that never commands A, and for a machine-frame
+   * move, which the reducer does not turn. An INDEXED job holds A still for every cut and turns
+   * between them, so an air move whose two values differ is an index turn: the exact sweep tests
+   * the tool at both ends in the frame each belongs to, and refuses a turn taken below the
+   * stock's top rather than approximating the sector it would sweep.
+   */
+  aFrom?: number | null;
+  aTo?: number | null;
+  /**
    * #653 — the same move in the POSTED (lifted) frame, set only on a surface-frame un-lift
    * (`unliftTimeline`): `from`/`to` are its un-lifted image, which is the frame the REMOVAL is
    * compared against, while this is the motion the machine really makes — the frame the checks
@@ -200,8 +213,26 @@ export interface Timeline {
     airMoves: number;
     /** An `M321` ran: a laser job. The sweep refuses it. */
     laser: boolean;
-    /** An A word moved: rotary work. V1's sweep refuses it. */
+    /** An A word moved: rotary work. */
     rotary: boolean;
+    /**
+     * #241 — what KIND of rotary job this is, the discriminant the session routes on
+     * (`/Rotary.md` §2, R4):
+     *
+     *   - `'none'`    no move commands A (every flat and every pre-rotary file);
+     *   - `'indexed'` A is held constant through every cut and changes only BETWEEN runs —
+     *                 an index turn — so each run is an ordinary 2.5D cut on a rotated stock
+     *                 and the exact sweeper takes it (§4.6);
+     *   - `'wrapped'` some CUTTING move changes A, so the tool follows a helix the exact
+     *                 sweeper cannot represent; the column engine takes it (§4.1).
+     *
+     * A cutting move that commands A as the program's FIRST A word counts as `'wrapped'`: the
+     * machine's angle before that word is unknown, so a cut that interpolates it cannot be
+     * proven to have held one face. That is why the rotary post states each operation's A on a
+     * rapid before its first cut. `rotary` stays the boolean it always was; this says which
+     * engine.
+     */
+    rotaryClass: 'none' | 'indexed' | 'wrapped';
     /** The TRUE number of diagnostics raised per code, including those past `DIAGNOSTIC_CAP` that were folded away. */
     diagnosticCounts: Record<string, number>;
   };
@@ -581,6 +612,8 @@ export function buildTimeline(parse: ParseResult, setup: Setup, machine?: MillPr
   const airMoves: AirMove[] = [];
   let sawLaser = false;
   let sawRotary = false;
+  /** #241 — a CUTTING move changed A (see `TimelineSummary.rotaryClass`). */
+  let wrappedCut = false;
 
   let state = initialState(setup);
   snapshots.push(state); // snapshot[0] is the state before step 0
@@ -663,10 +696,25 @@ export function buildTimeline(parse: ParseResult, setup: Setup, machine?: MillPr
         // and only the geometry can say (the maintainer's rule: a spindle-off move is a fault
         // only near the material, the fixture or the bed). Collected for the sweep.
         if (known(fromW) && known(toW)) {
-          airMoves.push({ step: i, line: m.line, kind: m.mode === 'rapid' ? 'rapid' : 'feed-spindle-off', from: [fromW[0], fromW[1], fromW[2]], to: [toW[0], toW[1], toW[2]] });
+          airMoves.push({
+            step: i,
+            line: m.line,
+            kind: m.mode === 'rapid' ? 'rapid' : 'feed-spindle-off',
+            from: [fromW[0], fromW[1], fromW[2]],
+            to: [toW[0], toW[1], toW[2]],
+            // #241 — the A in force at each end. A machine-frame move carries no `a` through the
+            // reducer (`applyEvent`), so its end angle is the one it started with.
+            aFrom: state.a,
+            aTo: m.frame === 'work' ? m.a : state.a,
+          });
         }
       }
       if (isCut) {
+        // #241 — an INDEXED job holds A across every cut and turns only between them; a cut
+        // that changes A is a helix the exact sweeper cannot take. The program's FIRST A word
+        // on a cutting move is a change from an unstated angle, so it counts as `wrapped` too:
+        // whether that cut held one face cannot be proven (see `TimelineSummary.rotaryClass`).
+        if (m.a !== null && (state.a === null || m.a !== state.a)) wrappedCut = true;
         cuttingMoves++;
         const z = lowestKnownZ(toW[2], fromW[2]);
         if (toW[2] === null || z === null) {
@@ -764,6 +812,7 @@ export function buildTimeline(parse: ParseResult, setup: Setup, machine?: MillPr
       airMoves: airMoves.length,
       laser: sawLaser,
       rotary: sawRotary,
+      rotaryClass: sawRotary ? (wrappedCut ? 'wrapped' : 'indexed') : 'none',
       diagnosticCounts: Object.fromEntries(counts),
     },
   };

@@ -168,7 +168,7 @@ function fakeTimeline(moves: CutMove[], rotary = true, y = 0): Timeline {
     checkpoints: [cp],
     diagnostics: [],
     stateAt: (i: number) => ({ a: moves[Math.min(i, moves.length - 1)]?.v1 ?? 0 }) as ReturnType<Timeline['stateAt']>,
-    summary: { steps: moves.length, segments: 1, pauses: 0, checkpoints: 1, cuttingMoves: moves.length, unsweptMoves: 0, airMoves: 0, laser: false, rotary, diagnosticCounts: {} },
+    summary: { steps: moves.length, segments: 1, pauses: 0, checkpoints: 1, cuttingMoves: moves.length, unsweptMoves: 0, airMoves: 0, laser: false, rotary, rotaryClass: rotary ? 'wrapped' : 'none', diagnosticCounts: {} },
   };
 }
 

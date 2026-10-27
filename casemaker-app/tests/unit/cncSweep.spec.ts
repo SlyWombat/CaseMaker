@@ -191,8 +191,26 @@ describe('stock from the setup', () => {
     st.stock.delete();
   });
 
-  it('refuses a non-prism stock in V1', () => {
-    const st = stockFromSetup(tl, stubSetup({ kind: 'cylinder', diameter: 30, length: 50 }, { kind: 'rotary-chuck', jawDiameter: 80, stickout: 10 }));
+  // #241 — a CYLINDER stock, for an indexed rotary job: along work X, its axis through the work
+  // origin's Y and Z (R6 — the work Z is the radius above the axis, so the top is the RADIUS).
+  it('builds a cylinder stock along X with its axis on the work origin, and its top at the radius', () => {
+    const st = stockFromSetup(tl, stubSetup({ kind: 'cylinder', diameter: 20, length: 30 }, { kind: 'rotary-chuck', jawDiameter: 25, stickout: 30 }));
+    if ('severity' in st) throw new Error(st.message);
+    expect(st.topZ).toBeCloseTo(10, 6);
+    const bb = st.stock.boundingBox();
+    expect(bb.min[0]).toBeCloseTo(0, 9);
+    expect(bb.max[0]).toBeCloseTo(30, 9);
+    expect(bb.min[1]).toBeCloseTo(-10, 6);
+    expect(bb.max[1]).toBeCloseTo(10, 6);
+    expect(bb.min[2]).toBeCloseTo(-10, 6);
+    expect(bb.max[2]).toBeCloseTo(10, 6);
+    // The polygonised cylinder is within the chord tolerance of the closed form.
+    expect(Math.abs(st.stock.volume() - Math.PI * 100 * 30) / (Math.PI * 100 * 30)).toBeLessThan(0.002);
+    st.stock.delete();
+  });
+
+  it('refuses a part kind that is neither a prism nor a cylinder', () => {
+    const st = stockFromSetup(tl, stubSetup({ kind: 'node', id: 'n1' }, HOLD));
     expect('severity' in st && st.code).toBe('stock-unsupported');
   });
 });
@@ -302,10 +320,15 @@ describe('the must-FAIL list (§7.1): refusals and the gates that need the stock
     if (!out.ok) expect(out.diagnostics[0]?.code).toBe('laser-job');
   });
 
-  it('a rotary job is REFUSED in V1', () => {
+  it('a WRAPPED rotary job is refused by name, and the message says only indexed work is taken (#241)', () => {
+    // The first A word lands on a cutting move, so A changes INSIDE a cut: a helix the hull of
+    // two tool placements cannot represent. (Its own `rotaryClass` is asserted in cncTimeline.)
     const { out } = sweep('S1000 M3\nG0 X20 Y30 Z0\nG1 X40 A90 F100\n');
     expect(out.ok).toBe(false);
-    if (!out.ok) expect(out.diagnostics[0]?.code).toBe('rotary-job');
+    if (!out.ok) {
+      expect(out.diagnostics[0]?.code).toBe('rotary-job');
+      expect(out.diagnostics[0]?.message).toMatch(/INDEXED/);
+    }
   });
 
   it('HOLDER: a cut deeper than the shoulder length is an error naming the tool', () => {

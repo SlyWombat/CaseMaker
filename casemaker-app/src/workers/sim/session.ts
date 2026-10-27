@@ -73,6 +73,13 @@ export interface CheckpointInfo {
   lastStep: number;
   moveCount: number;
   nonConstantZ: boolean;
+  /**
+   * #241 — the rotary index this run was cut at, degrees (`null` for a flat program). Constant
+   * through the run: an indexed job's playback is per FACE, so a consumer that draws the stock
+   * in the orientation being cut (deferred to the viewport slice) reads it here rather than
+   * re-deriving it from the program.
+   */
+  a: number | null;
 }
 
 export interface SimGougeMesh {
@@ -472,10 +479,18 @@ export function createSimSession(tl: ManifoldToplevel, hooks?: SimSessionHooks):
       ...parse.diagnostics.map((d): SimDiagnostic => ({ source: 'parser', severity: d.severity, code: d.code, message: d.message, line: d.line })),
       ...timeline.diagnostics.map((d): SimDiagnostic => ({ source: 'runner', severity: d.severity, code: d.code, message: d.message, line: d.line, step: d.step })),
     ];
-    // A rotary job is swept by the COLUMN engine (#239, `/Rotary.md` §4.1), never the exact
-    // 2.5D sweeper: the exact one refuses it by name and its `MAX_CHECKPOINTS` gate would refuse
-    // the vendor files as dense 3D anyway. Routing here also means the dense-3D classifier never
-    // applies to a rotary job, whose checkpoint count is expected to exceed it.
+    // A WRAPPED rotary job — one whose cutting moves change A — is swept by the COLUMN engine
+    // (#239, `/Rotary.md` §4.1): the tool follows a helix the exact 2.5D sweeper cannot
+    // represent, and the vendor files' checkpoint count is expected to exceed the exact one's
+    // gate. Routing here also means the dense-3D classifier never applies to a wrapped rotary
+    // job, whose checkpoint count is expected to exceed it.
+    //
+    // An INDEXED rotary job (#241, R-4) goes the other way, to the EXACT sweeper: A is held
+    // across every run and changes only between them (the timeline's `rotaryClass`), so each
+    // run is an ordinary 2.5D cut on a stock rotated by its own `a`, which `sweepTimeline`
+    // rotates the removal back out of (§4.6). A rotary V-bit or drill still routes here through
+    // `sweepsOnColumn` and is refused by that engine by name; an indexed job with a FLAT tool
+    // and no V/drill is the one rotary shape the exact path takes.
     //
     // A V-BIT traces the same way and for the same kind of reason (#405, the hook #221 reserved):
     // the exact sweeper's contract is one flat cutting radius (`cuttingRadiusForSweep`), and a
@@ -490,7 +505,8 @@ export function createSimSession(tl: ManifoldToplevel, hooks?: SimSessionHooks):
     // `dense-3d-refused` for crossing `MAX_CHECKPOINTS`, leaving a 3D/relief file path-only, but
     // the FLAT dexel draws it — `denseFlatRoutesToColumn` gates this on a genuine flat end mill and
     // on its not being a rest pass, so a ball/bull (#532) and a rest pass keep their old refusals.
-    if (timeline.summary.rotary || sweepsOnColumn(tool) || denseFlatRoutesToColumn(surfaceTimeline, tool, opts)) {
+    const rotaryClass = timeline.summary.rotaryClass;
+    if (rotaryClass === 'wrapped' || sweepsOnColumn(tool) || denseFlatRoutesToColumn(surfaceTimeline, tool, opts)) {
       // A rest pass is measured against the material a previous program left, and only the exact
       // sweeper can start from it. Silently sweeping the blank instead would draw a cut nobody is
       // going to make, so the pair is refused by name (#410).
@@ -544,6 +560,7 @@ export function createSimSession(tl: ManifoldToplevel, hooks?: SimSessionHooks):
           lastStep: cp.steps[cp.steps.length - 1] as number,
           moveCount: cp.steps.length,
           nonConstantZ: cp.nonConstantZ,
+          a: cp.a,
         })),
         pauses: surfaceTimeline.pauses,
         segments: surfaceTimeline.segments,
@@ -611,6 +628,7 @@ export function createSimSession(tl: ManifoldToplevel, hooks?: SimSessionHooks):
           lastStep: cp.steps[cp.steps.length - 1] as number,
           moveCount: cp.steps.length,
           nonConstantZ: cp.nonConstantZ,
+          a: cp.a,
         })),
         pauses: surfaceTimeline.pauses,
         segments: surfaceTimeline.segments,
@@ -685,6 +703,10 @@ export function createSimSession(tl: ManifoldToplevel, hooks?: SimSessionHooks):
    * read off it at all — the comparison would be between a grid over (X, θ) and polygons over
    * (X, Y). The refusal names the axis rather than claiming nothing can be done, which was the old
    * message's overreach: a FLAT column sweep can be compared, and now is.
+   *
+   * An INDEXED rotary sweep (#241) is refused for the sibling reason: its removal is in the stock
+   * frame, one rotated solid per face, and a prediction is a work-frame region of ONE face — the
+   * comparison needs the face's own rotation, which the per-face oracle slice will own.
    */
   const oracle = (predicted: readonly OraclePredicted[]): OracleReport => {
     // #623 — the frame the loaded program speaks. A flat post is judged exactly as it always was;
@@ -703,6 +725,15 @@ export function createSimSession(tl: ManifoldToplevel, hooks?: SimSessionHooks):
       return { ...report, frame: surface === null ? 'work' : 'surface' };
     }
     if (!l || l.kind !== 'swept') throw new Error('oracle: no swept program is loaded');
+    // #241 — an INDEXED rotary sweep is exact, but its removal is in the STOCK frame (each run's
+    // solid was rotated back out of its index), while a prediction names work-frame regions on
+    // one face. Comparing the two would compare different planes, and the per-face comparison
+    // needs the prediction rotated into that face's frame — the oracle slice that will own it.
+    if (l.timeline.summary.rotary) {
+      throw new Error(
+        'oracle: this is an INDEXED rotary sweep — its removal is in the stock frame, while the prediction names work-frame regions of one face; the two cannot be compared until the oracle reads a face at a time',
+      );
+    }
     const removal = l.sweep.removal;
     if (!removal) throw new Error('oracle: the loaded program removed no material');
     // #625 — the exact engine swept the SURFACE-FRAME image of the program (the load un-lifted every

@@ -445,11 +445,42 @@ export function unionCapsules(tl: ManifoldToplevel, polys: Polygon[]): CrossSect
   return level[0] as CrossSectionInstance;
 }
 
-/** The stock, in WORK coordinates, from the setup's part. V1: prisms only. */
+/**
+ * The stock, in WORK coordinates, from the setup's part: a prism, or — for an INDEXED rotary job
+ * (#241, R6) — a cylinder.
+ *
+ * A CYLINDER is built along work X with its axis through the work origin's Y and Z, which is
+ * where `stubSetup` puts a round stock's work origin (`setup.ts`: on the AXIS, not the top face).
+ * That frame is the rotary one: work Z is the radius above the axis, so the stock's top — the
+ * `topZ` every checkpoint is measured against — is the RADIUS, and the placed part spans
+ * Z ∈ [−R, R] about it. Its resolution is the same chord tolerance every cutter cap here uses.
+ */
 export function stockFromSetup(tl: ManifoldToplevel, setup: Setup): { stock: ManifoldInstance; topZ: number } | SweepDiagnostic {
   const part = setup.part;
+  if (part.kind === 'cylinder') {
+    const radius = part.diameter / 2;
+    if (!(radius > 0)) {
+      return { severity: 'error', code: 'stock-invalid', message: `stock diameter must be positive, got ${part.diameter}` };
+    }
+    if (!(part.length > 0)) {
+      return { severity: 'error', code: 'stock-invalid', message: `stock length must be positive, got ${part.length}` };
+    }
+    // Manifold's cylinder rises along +Z from z = 0; a rotary part lies along +X, so it is turned
+    // a quarter turn about Y before the placement's own Rz and translation, exactly as the prism
+    // path applies them.
+    const raw = tl.Manifold.cylinder(part.length, radius, radius, segmentsForRadius(radius), false);
+    const alongX = raw.rotate([0, 90, 0]);
+    raw.delete();
+    const origin = partToWork(setup, [0, 0, 0]);
+    const rotated = alongX.rotate([0, 0, setup.placement.rotationZ]);
+    alongX.delete();
+    const stock = rotated.translate([origin[0], origin[1], origin[2]]);
+    rotated.delete();
+    const bb = stock.boundingBox();
+    return { stock, topZ: bb.max[2] };
+  }
   if (part.kind !== 'prism') {
-    return { severity: 'error', code: 'stock-unsupported', message: `V1 sweeps a prism stock only; the setup's part is a ${part.kind}` };
+    return { severity: 'error', code: 'stock-unsupported', message: `the exact sweep takes a prism or a cylinder stock; the setup's part is a ${part.kind}` };
   }
   if (!(part.thickness > 0)) {
     return { severity: 'error', code: 'stock-invalid', message: `stock thickness must be positive, got ${part.thickness}` };
@@ -464,6 +495,27 @@ export function stockFromSetup(tl: ManifoldToplevel, setup: Setup): { stock: Man
   rotated.delete();
   const bb = stock.boundingBox();
   return { stock, topZ: bb.max[2] };
+}
+
+/**
+ * #241 — one run's removal, turned from the WORK frame into the STOCK frame by `−a`
+ * (`/Rotary.md` §4.6).
+ *
+ * The stock at index `a` is the cylinder turned about X by `a`, so a work point (x, y, z) lies on
+ * the stock point `R_x(−a)·(x, y, z)`; at a = 0 that is directly on the top (θ = 0 is under the
+ * tool, §5.1). Turning the REMOVAL the other way puts it where `stock − ∪ removal` and playback
+ * need it, and costs one transform per run.
+ *
+ * The result is materialised into a true leaf: a lazy transform shares its input's children, and
+ * the work-frame handle is deleted here (the ONE MANIFOLD TRAP, playback.ts). The caller owns the
+ * result, and the input is consumed.
+ */
+function intoStockFrame(tl: ManifoldToplevel, workSolid: ManifoldInstance, a: number): ManifoldInstance {
+  const turned = workSolid.rotate([-a, 0, 0]);
+  const leaf = new tl.Manifold(turned.getMesh());
+  turned.delete();
+  workSolid.delete();
+  return leaf;
 }
 
 function isDiag(x: unknown): x is SweepDiagnostic {
@@ -583,6 +635,14 @@ export function boxSolid(tl: ManifoldToplevel, box: ObstacleBox): ManifoldInstan
  * caller passes the (inflated, unioned) fixture and each move's exact tool body is intersected
  * with it as well — `rapid-into-fixture` / `feed-into-fixture`. `fixtureTop` widens `zTop` so a
  * fixture that rises above the stock top is still covered.
+ *
+ * FRAMES (#241). The material of an INDEXED rotary job is in the STOCK frame — each run's
+ * removal was turned back by its own A — while a move is written in the work frame. So the body
+ * meets the material turned by `−a` (the move's `aTo`), and every prefix part is turned the same
+ * way as it is built. The FIXTURE is fixed to the machine, so its check stays in the work frame.
+ * A move that CHANGES A is an index turn: both end positions are tested exactly, the retract
+ * shortcut is disabled (a climbing turn still sweeps a sector), and a turn taken below the
+ * stock's top is reported `rotary-turn-in-stock` rather than approved.
  */
 export function checkAirMoves(
   tl: ManifoldToplevel,
@@ -687,7 +747,9 @@ export function checkAirMoves(
         if (Math.min(z0, z1) >= topZ) continue;
         if (z0 !== z1 && (x0 !== x1 || y0 !== y1)) {
           const ramp = sweptToolBody(tl, [x0, y0, z0], [x1, y1, z1], radius, nCap, zTop);
-          pf.ramps.push({ solid: ramp, box: ramp.boundingBox() });
+          // #241 — a ramp on an indexed run turns into the stock frame with the run's own A.
+          const placed = pf.cp.a === null || pf.cp.a === 0 ? ramp : intoStockFrame(tl, ramp, pf.cp.a);
+          pf.ramps.push({ solid: placed, box: placed.boundingBox() });
           continue;
         }
         const z = Math.min(z0, z1);
@@ -716,12 +778,15 @@ export function checkAirMoves(
         const col = tl.Manifold.extrude(g.region, zTop - g.z);
         const solid = col.translate([0, 0, g.z]);
         col.delete();
+        // #241 — the prefix parts must be in the frame the MATERIAL is in, so an indexed run's
+        // column turns back by its A exactly as the sweep turns its own solid.
+        const placed = pf.cp.a === null || pf.cp.a === 0 ? solid : intoStockFrame(tl, solid, pf.cp.a);
         // The old column is a subset of the new one, so it can never overlap a move that the
         // new one does not: replacing it cannot lose a hit. Retired, not deleted now — a lazy
         // subtract may still refer to it until it is forced.
         if (g.solid) retired.push(g.solid);
-        g.solid = solid;
-        g.box = solid.boundingBox();
+        g.solid = placed;
+        g.box = placed.boundingBox();
       }
     }
   };
@@ -754,6 +819,11 @@ export function checkAirMoves(
     // the move itself. `mv` remains the un-lifted image for the stock check, whose removal is in
     // that frame.
     const real = mv.lifted ?? mv;
+    // #241 — the rotary angle at each end of the move. A move that holds one A is tested in that
+    // face's frame; one that CHANGES A is an index turn (see the turn rule below).
+    const aFrom = mv.aFrom ?? null;
+    const aTo = mv.aTo ?? null;
+    const turn = aFrom !== aTo;
     const zLo = Math.min(real.from[2], real.to[2]) - margin;
     if (zLo < bedZ) {
       diagnostics.push(
@@ -772,7 +842,9 @@ export function checkAirMoves(
     // body nor a boolean. Every other move takes the geometric path below. Gated on
     // `retractCoveredByColumn`: the argument needs the retract to stay inside the cut's column,
     // which fails as soon as a fixture rises above the stock top (#204 follow-up).
-    if (retractCoveredByColumn && mv.kind === 'rapid' && mv.to[2] > mv.from[2] && mv.to[0] === mv.from[0] && mv.to[1] === mv.from[1]) {
+    // A TURN is never a plain retract (#241): the move may climb in Z and still sweep a sector
+    // of material at other angles, which the cut's own column does not cover.
+    if (!turn && retractCoveredByColumn && mv.kind === 'rapid' && mv.to[2] > mv.from[2] && mv.to[0] === mv.from[0] && mv.to[1] === mv.from[1]) {
       const end = cutEndByStep.get(mv.step - 1);
       if (end && mv.from[0] === end[0] && mv.from[1] === end[1] && mv.from[2] === end[2]) {
         cleared++;
@@ -788,7 +860,6 @@ export function checkAirMoves(
       spindleOff ? nMargin : nCap,
       zTop + margin,
     );
-    const hit = body.intersect(stock);
     // (b) The same exact tool body against the fixture (#204), before the body is deleted. Both
     // solids are exact — the body a hull of cylinders, the fixture a union of boxes — so
     // anything above float dust is real, no derived floor needed.
@@ -817,7 +888,22 @@ export function checkAirMoves(
         );
       }
     }
+    // #241 — the MATERIAL is in the STOCK frame, so the tool body meets it turned by `−a`. A move
+    // that holds one A has one frame. An INDEX TURN (A changes across the move) has one at each
+    // end, and the two end positions are not the sector between them: both ends are tested here
+    // exactly, and a turn taken below the stock's top is refused below rather than approved.
+    const frameOf = (a: number | null): ManifoldInstance => (a === null || a === 0 ? body : body.rotate([-a, 0, 0]));
+    const stockBodies = (turn ? [aFrom, aTo] : [aTo]).map(frameOf);
+    let hit = (stockBodies[0] as ManifoldInstance).intersect(stock);
+    for (let k = 1; k < stockBodies.length; k++) {
+      const more = (stockBodies[k] as ManifoldInstance).intersect(stock);
+      const u = tl.Manifold.union([hit, more]);
+      hit.delete();
+      more.delete();
+      hit = u;
+    }
     body.delete();
+    for (const b of stockBodies) if (b !== body) b.delete();
     let vol = hit.volume();
     // The solid that is actually in the way, for a rapid: what survives the re-test below.
     let gouge: ManifoldInstance | null = null;
@@ -867,6 +953,17 @@ export function checkAirMoves(
       if (vol > 0 && gouges.length < MAX_GOUGES) gouges.push({ step: mv.step, line: mv.line, solid: gouge });
       else gouge.delete();
     }
+    // #241 — a TURN taken below the stock's top cannot be proven clear. The two end positions are
+    // tested exactly above; the sector between them is neither, and the exact sweep has no body
+    // for it. A correctly posted indexed job retracts to the safe height before every index
+    // turn, so this is a refused FILE, not a refused design.
+    if (turn && vol <= 0 && zLo < topZ) {
+      diagnostics.push({
+        severity: 'error',
+        code: 'rotary-turn-in-stock',
+        message: `line ${mv.line}: A turns from ${aFrom ?? 'an unstated angle'} to ${aTo ?? 'an unstated angle'} with the tool tip at Z ${Math.min(real.from[2], real.to[2]).toFixed(3)}, below the stock top (${topZ.toFixed(3)}): the sector the turn sweeps between those angles is not either end position, so clearance cannot be proven — retract above the stock before an index turn`,
+      });
+    }
     // Between rechecks is as fine-grained as this can be: one synchronous call cannot be
     // interrupted from inside, so the client's timer is what bounds a single overrun (#194).
     if (overBudget()) {
@@ -914,7 +1011,69 @@ export function holderGate(tool: Tool, deepestCutDepth: number | null): SweepDia
 export function sweepTimeline(tl: ManifoldToplevel, timeline: Timeline, tool: Tool, setup: Setup, opts?: SweepOpts): SweepOutcome {
   const diagnostics: SweepDiagnostic[] = [];
   if (timeline.summary.laser) return { ok: false, diagnostics: [{ severity: 'error', code: 'laser-job', message: 'this is a laser job (M321): a mill simulation refuses it rather than drawing a cut' }] };
-  if (timeline.summary.rotary) return { ok: false, diagnostics: [{ severity: 'error', code: 'rotary-job', message: 'this job moves the A axis: the EXACT 2.5D sweep does not take rotary work — a rotary job is swept by the column engine instead' }] };
+  // #241 — the blanket rotary refusal is narrowed to its real subject: a WRAPPED job, whose
+  // cutting moves change A (a helix the hull of two placements cannot represent). An INDEXED
+  // job holds A through every run and turns only between them, so each run is an ordinary 2.5D
+  // cut on the stock turned by that run's `a` (§4.6) and this sweep takes it.
+  if (timeline.summary.rotary && timeline.summary.rotaryClass !== 'indexed') {
+    return {
+      ok: false,
+      diagnostics: [
+        {
+          severity: 'error',
+          code: 'rotary-job',
+          message:
+            'this job changes A inside a cut: the EXACT 2.5D sweep takes only INDEXED rotary work, where every run holds one A and its removal turns back into the stock frame. A wrapped rotary job is swept by the column engine instead',
+        },
+      ],
+    };
+  }
+  // A rest pass starts from the material a previous program left, which for an indexed job would
+  // have to be in the STOCK frame that this sweep's own removals are turned into. The seed path
+  // subtracts a work-frame mesh from a stock it then sweeps face by face, so it is refused by
+  // name rather than started from the wrong frame.
+  if (opts?.priorRemoval && timeline.summary.rotary) {
+    return {
+      ok: false,
+      diagnostics: [
+        {
+          severity: 'error',
+          code: 'prior-removal-rotary',
+          message:
+            'an indexed rotary job cannot be a rest pass yet: the material a previous program left would have to be read in the stock frame the faces are turned back into, and this sweep starts every rotary job from the blank',
+        },
+      ],
+    };
+  }
+  // The stock's KIND must agree with the job's FRAME (#241): a rotary program's Zs are radii
+  // above the axis, a flat program's are depths below a prism's top face, and the two readings
+  // describe different planes. A mismatch is refused by name — the same codes the column engine
+  // raises — rather than swept into a plausible picture of the wrong surface.
+  if (timeline.summary.rotary && setup.part.kind !== 'cylinder') {
+    return {
+      ok: false,
+      diagnostics: [
+        {
+          severity: 'error',
+          code: 'rotary-stock',
+          message: `an indexed rotary job needs a cylindrical stock, whose work origin sits on the axis; the setup's part is a ${setup.part.kind}`,
+        },
+      ],
+    };
+  }
+  if (!timeline.summary.rotary && setup.part.kind === 'cylinder') {
+    return {
+      ok: false,
+      diagnostics: [
+        {
+          severity: 'error',
+          code: 'flat-stock',
+          message:
+            'the exact sweep was handed a cylindrical stock for a program that never commands A: on a cylinder the work Z is the radius above the axis, not a depth below a top face, so the program and the stock describe different planes',
+        },
+      ],
+    };
+  }
   const rr = cuttingRadiusForSweep(tool);
   if (!rr.ok) return { ok: false, diagnostics: [{ severity: 'error', code: 'tool-refused', message: rr.reason }] };
   const radius = rr.radius;
@@ -969,6 +1128,22 @@ export function sweepTimeline(tl: ManifoldToplevel, timeline: Timeline, tool: To
   // when the job has none — and then every path below is byte-for-byte the pre-#213 sweep.
   let sacrificial: ManifoldInstance | null = null;
   if (setup.sacrificial && hasSacrificial(setup.sacrificial)) {
+    // A round stock has no sacrificial model: the under-board is expressed against a RECTANGULAR
+    // blank's bbox (`length × width × thickness`), and on a cylinder that box is the part's
+    // diameter in every direction, not a board. Refused by name rather than computed wrong.
+    if (setup.part.kind === 'cylinder') {
+      stock.delete();
+      return {
+        ok: false,
+        diagnostics: [
+          {
+            severity: 'error',
+            code: 'sacrificial-rotary',
+            message: 'a cylindrical stock cannot carry an under-board: the sacrificial model is a rectangular blank\'s, and a rotary job has none',
+          },
+        ],
+      };
+    }
     // The part occupies work X [0, L], Y [0, W], Z [-T, 0] by construction (`stockFromSetup`
     // anchors the top-front-left corner at the work origin). Its bounding box is the stock size
     // the pure `sacrificialBoxes` is expressed against.
@@ -1167,19 +1342,22 @@ export function sweepTimeline(tl: ManifoldToplevel, timeline: Timeline, tool: To
         const height = topZ - cp.z + OVERSHOOT_MM;
         const column = tl.Manifold.extrude(region, height);
         region.delete();
-        const solid = column.translate([0, 0, cp.z]);
+        // The removal as the tool makes it, in the WORK frame (#241): this run's column at its Z.
+        const workSolid = column.translate([0, 0, cp.z]);
         column.delete();
         // Force evaluation so the timing is real (Manifold is lazy).
-        void solid.numTri();
+        void workSolid.numTri();
         msExtrude += performance.now() - b;
-        perCheckpoint.push(solid);
-        solids.push(solid);
         // (a) Cutter into fixture (#204): the removal column this checkpoint already built,
         // intersected with the fixture. The jaws are below the stock top, so a column that rises
         // from cp.z past the top already covers any fixture a cutting move can reach. Culled by
         // bounding box, so a checkpoint nowhere near the vise costs one cheap test.
-        if (fixture && fixtureBB && boxesOverlap(solid.boundingBox(), fixtureBB)) {
-          const hit = solid.intersect(fixture);
+        //
+        // In the WORK frame on purpose (#241): the fixture is fixed to the machine and the stock
+        // turns under it, so an indexed run's column is tested where the tool really goes. The
+        // turn into the stock frame happens below, once the checks are done.
+        if (fixture && fixtureBB && boxesOverlap(workSolid.boundingBox(), fixtureBB)) {
+          const hit = workSolid.intersect(fixture);
           const vol = hit.volume();
           hit.delete();
           if (vol > SLIVER_MM3) {
@@ -1188,7 +1366,7 @@ export function sweepTimeline(tl: ManifoldToplevel, timeline: Timeline, tool: To
             let named: ObstacleBox | null = null;
             let best = 0;
             for (const fb of fixtureBoxes) {
-              const one = solid.intersect(fb.solid);
+              const one = workSolid.intersect(fb.solid);
               const v = one.volume();
               one.delete();
               if (v > best) { best = v; named = fb.box; }
@@ -1201,6 +1379,11 @@ export function sweepTimeline(tl: ManifoldToplevel, timeline: Timeline, tool: To
             });
           }
         }
+        // #241 — into the STOCK frame, where playback and `stock − ∪ removal` live. A flat run
+        // (a === null) and the a = 0 face are already there.
+        const solid = cp.a === null || cp.a === 0 ? workSolid : intoStockFrame(tl, workSolid, cp.a);
+        perCheckpoint.push(solid);
+        solids.push(solid);
         if (cp.nonConstantZ) {
           diagnostics.push({ severity: 'info', code: 'ramp-over-removed', checkpoint: idx, message: `checkpoint ${idx} has moves that change Z; swept at its lowest Z, which removes more than the machine would` });
         }
@@ -1243,8 +1426,14 @@ export function sweepTimeline(tl: ManifoldToplevel, timeline: Timeline, tool: To
   // job's Y pitch does (#438). A zero would mean "touching counts as near", which is not the rule.
   const askedProximity = opts?.spindleOffProximityMm;
   const proximity = typeof askedProximity === 'number' && Number.isFinite(askedProximity) && askedProximity > 0 ? askedProximity : SPINDLE_OFF_PROXIMITY_FALLBACK_MM;
+  // #241 — a ROUND stock has no bed plane under the part. Its bbox's underside is the far side of
+  // the cylinder, and an indexed cut is allowed to reach it (a cross-hole is drilled THROUGH, and
+  // the retract out of one starts below it). The material body still catches every rapid through
+  // what is really there; the chuck and the table are the fixture's business, and the sweep says
+  // `fixture-unchecked` when none is modelled.
+  const bedZ = setup.part.kind === 'cylinder' ? Number.NEGATIVE_INFINITY : bb.min[2];
   const a0 = performance.now();
-  const air = checkAirMoves(tl, airMaterial, topZ, bb.min[2], timeline.airMoves, timeline.checkpoints, radius, deadline, fixture, fixtureTop, (d) => fixtureDiag.push(d), proximity);
+  const air = checkAirMoves(tl, airMaterial, topZ, bedZ, timeline.airMoves, timeline.checkpoints, radius, deadline, fixture, fixtureTop, (d) => fixtureDiag.push(d), proximity);
   if (airMaterial !== stock) airMaterial.delete();
   const msAir = performance.now() - a0;
   if (air.budgetExceeded) {

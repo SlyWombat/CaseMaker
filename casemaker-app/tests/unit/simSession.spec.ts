@@ -117,7 +117,7 @@ describe('what a load returns', () => {
       expect(m.indices.length).toBe(m.triangleCount * 3);
     }
     expect(r.checkpoints).toHaveLength(3);
-    expect(r.checkpoints[0]).toEqual({ segment: 0, z: -0.5, run: 0, firstStep: expect.any(Number), lastStep: expect.any(Number), moveCount: expect.any(Number), nonConstantZ: false });
+    expect(r.checkpoints[0]).toEqual({ segment: 0, z: -0.5, run: 0, firstStep: expect.any(Number), lastStep: expect.any(Number), moveCount: expect.any(Number), nonConstantZ: false, a: null });
     expect(r.checkpoints.every((c) => c.lastStep >= c.firstStep && c.moveCount >= 1)).toBe(true);
     expect(r.summary.diagnosticCounts).toBeDefined();
     session.dispose();
@@ -485,8 +485,10 @@ describe('refusals: a refused SWEEP leaves a path-only session, even over a good
     expect(sweepCodes(refusal(THREE, setup(), flatEndMill(1, { name: 'Bull', cornerRadius: 0.2 })))).toEqual(['tool-refused']);
   });
 
-  it('a bad stock: a cylinder, and a zero-thickness prism', () => {
-    expect(sweepCodes(refusal(THREE, setup({ part: { kind: 'cylinder', diameter: 20, length: 50 } })))).toEqual(['stock-unsupported']);
+  it('a bad stock: a cylinder for a FLAT program, and a zero-thickness prism', () => {
+    // #241 — a cylinder is a valid stock now, but only for a ROTARY program: its work Z is the
+    // radius above the axis, so the flat program's depths would be read on the wrong plane.
+    expect(sweepCodes(refusal(THREE, setup({ part: { kind: 'cylinder', diameter: 20, length: 50 } })))).toEqual(['flat-stock']);
     expect(sweepCodes(refusal(THREE, setup({ part: { ...SLAB, thickness: 0 } })))).toEqual(['stock-invalid']);
   });
 

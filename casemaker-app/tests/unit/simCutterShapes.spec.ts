@@ -202,7 +202,7 @@ function rotaryTimeline(): Timeline {
     checkpoints: [{ segment: 0, tool: 1, zKey: 5000, a: null, z: 5, run: 0, zs: [5, 5], steps: [0], xy: [0, 0, 0, 0], nonConstantZ: false }],
     diagnostics: [],
     stateAt: () => ({ a: m.v1 }) as ReturnType<Timeline['stateAt']>,
-    summary: { steps: 1, segments: 1, pauses: 0, checkpoints: 1, cuttingMoves: 1, unsweptMoves: 0, airMoves: 0, laser: false, rotary: true, diagnosticCounts: {} },
+    summary: { steps: 1, segments: 1, pauses: 0, checkpoints: 1, cuttingMoves: 1, unsweptMoves: 0, airMoves: 0, laser: false, rotary: true, rotaryClass: 'wrapped', diagnosticCounts: {} },
   };
 }
 
@@ -331,7 +331,7 @@ function flatTimeline(moves: CutMove[]): Timeline {
     ],
     diagnostics: [],
     stateAt: () => ({ a: null }) as unknown as ReturnType<Timeline['stateAt']>,
-    summary: { steps: moves.length, segments: 1, pauses: 0, checkpoints: 1, cuttingMoves: moves.length, unsweptMoves: 0, airMoves: 0, laser: false, rotary: false, diagnosticCounts: {} },
+    summary: { steps: moves.length, segments: 1, pauses: 0, checkpoints: 1, cuttingMoves: moves.length, unsweptMoves: 0, airMoves: 0, laser: false, rotary: false, rotaryClass: 'none', diagnosticCounts: {} },
   };
 }
 

@@ -36,6 +36,7 @@ function timeline(checkpoints: Checkpoint[], airMoves: AirMove[] = []): Timeline
       airMoves: airMoves.length,
       laser: false,
       rotary: false,
+      rotaryClass: 'none',
       diagnosticCounts: {},
     },
   };

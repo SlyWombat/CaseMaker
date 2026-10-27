@@ -102,6 +102,7 @@ describe('checkpointAtStep', () => {
     lastStep: firstStep,
     moveCount: 1,
     nonConstantZ: false,
+    a: null,
   });
   const checkpoints = [cp(10), cp(20), cp(30)];
 

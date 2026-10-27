@@ -721,12 +721,46 @@ describe('air moves: what the sweep checks against the stock and the bed', () =>
   it('an A word flags rotary', () => {
     expect(run('G1 X1 A90 F100\n').summary.rotary).toBe(true);
   });
+
+  // #241 — the three-valued discriminant the session routes on (`/Rotary.md` §2, R4). A quiet
+  // program is `'none'`; a program that turns A BETWEEN cuts is `'indexed'` (the exact sweeper's
+  // class); one whose cutting moves change A is `'wrapped'` (the column engine's).
+  it('classifies a program with no A as none', () => {
+    expect(run('S1000 M3\nG0 X0 Y0 Z2\nG1 Z-1 F100\nG1 X10\n').summary.rotaryClass).toBe('none');
+  });
+
+  it('classifies G0 A90 between two passes as INDEXED: the turn happens between cuts', () => {
+    const tl = run('S1000 M3\nG0 X0 Y0 Z2 A0\nG1 Z-1 F100\nG1 X10\nG0 Z2\nG0 A90\nG1 Z-1 F100\nG1 X20\n', {});
+    expect(tl.summary.rotary).toBe(true);
+    expect(tl.summary.rotaryClass).toBe('indexed');
+  });
+
+  it('classifies a cutting move that changes A as WRAPPED', () => {
+    expect(run('S1000 M3\nG0 X0 Y0 Z2 A0\nG1 X10 Z0 A90 F300\n').summary.rotaryClass).toBe('wrapped');
+  });
+
+  it("classifies the program's FIRST A word on a cut as WRAPPED: the angle it started from is unknown", () => {
+    // The vendor's rotary files and our own post state A on a rapid first; a file that commands
+    // A for the first time INSIDE a cut cannot be proven to have held one face.
+    expect(run('S1000 M3\nG0 X0 Y0 Z2\nG1 X10 Z0 A90 F300\n').summary.rotaryClass).toBe('wrapped');
+  });
+
+  it('a turn between two cuts at one Z makes TWO checkpoints, one per face (R4)', () => {
+    const tl = run('S1000 M3\nG0 X0 Y0 Z2 A0\nG1 Z-1 F100\nG1 X10\nG0 Z2\nG0 A90\nG1 Z-1 F100\nG1 X10\n');
+    // Two runs at the SAME Z, split by the turn alone — with A0 stated on the rapid before the
+    // first cut. (A program that states no A before its first cut carries `null` for it: the
+    // machine's angle is unstated, and the timeline never invents one.)
+    expect(tl.checkpoints.map((cp) => ({ a: cp.a, z: cp.z }))).toEqual([
+      { a: 0, z: -1 },
+      { a: 90, z: -1 },
+    ]);
+  });
 });
 
 describe('summary', () => {
   it('counts steps, segments, pauses, checkpoints and cutting moves', () => {
     const tl = run('T1M6\nS1000 M3\nG0 X0 Y0 Z0\nG1 Z-1 F100\nG1 X5\nG0 Z5\n', { startingTool: 'unknown' });
-    expect(tl.summary).toEqual({ steps: 6, segments: 1, pauses: 1, checkpoints: 1, cuttingMoves: 2, unsweptMoves: 0, airMoves: 1, laser: false, rotary: false, diagnosticCounts: { 'tool-change-ambiguous': 1 } });
+    expect(tl.summary).toEqual({ steps: 6, segments: 1, pauses: 1, checkpoints: 1, cuttingMoves: 2, unsweptMoves: 0, airMoves: 1, laser: false, rotary: false, rotaryClass: 'none', diagnosticCounts: { 'tool-change-ambiguous': 1 } });
   });
 });
 
