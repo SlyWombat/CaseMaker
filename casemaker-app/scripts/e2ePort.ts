@@ -1,5 +1,5 @@
 /**
- * #704 — THE DEV-SERVER PORT BELONGS TO THE CHECKOUT, not to one shared number.
+ * #704 — THE E2E DEV-SERVER PORT BELONGS TO THE CHECKOUT, not to one shared number.
  *
  * `playwright.config.ts` reuses an existing dev server outside CI. With a fixed port, two Playwright
  * runs from different worktrees on this machine shared :5173: the second run attached to the FIRST
@@ -7,17 +7,15 @@
  * test (observed 2026-10-26; see #704).
  *
  * So each checkout gets a stable port derived from its own path, in a band clear of Vite's 5173 and
- * the kernel-reserved ports this host has shown (8000–8002). The derivation is used by BOTH
- * `playwright.config.ts` (the runner's base URL and webServer) and `vite.config.ts` (a hand-started
- * `npm run dev`), so the two agree without an environment variable.
+ * the kernel-reserved ports this host has shown (8000–8002). ONLY the Playwright runner uses it:
+ * its `webServer` command passes `--port ${PORT}` and `--strictPort` to the server it starts, so the
+ * runner and its own server agree. A hand-started `npm run dev` stays on Vite's 5173 on purpose —
+ * that is the URL the maintainer knows, and this change must not move it.
  *
  * Precedence, in order:
  *   1. an explicit `CASEMAKER_PORT` — it always wins (and a bad value fails loudly);
  *   2. CI — the standard 5173, unchanged: one job, one checkout, nothing to share;
  *   3. the checkout path's derived port.
- *
- * Desktop mode is deliberately NOT derived: `vite --mode desktop` must bind exactly the `devUrl` in
- * `src-tauri/tauri.conf.json` (127.0.0.1:5173), so `vite.config.ts` keeps 5173 there (see #292).
  */
 import path from 'node:path';
 
@@ -52,8 +50,8 @@ export function portForCheckout(checkoutPath: string): number {
 }
 
 /**
- * The dev-server port for this process. `env` and `cwd` are parameters so the rule is testable
- * without mutating the real environment.
+ * The e2e runner's dev-server port (playwright.config.ts's base URL and webServer). `env` and `cwd`
+ * are parameters so the rule is testable without mutating the real environment.
  */
 export function devServerPort(env: NodeJS.ProcessEnv = process.env, cwd: string = process.cwd()): number {
   const explicit = env.CASEMAKER_PORT;
