@@ -773,3 +773,33 @@ describe('#746 a setup’s later cutters cut the items they own, as those items'
     expect(grooves, 'the engraver must not re-cut the earlier cutters’ work').not.toContain('-4.3');
   }, 240_000);
 });
+
+// #747 — THE FRAME'S Z IS THE MACHINE'S, NOT A CONSTANT. `fx-frame-pocket` is a 22.8 mm hardwood
+// bracket job whose own program verified, but whose frame trace was refused with five
+// `outside-envelope` errors, none of which the receipt carried, and the whole run stopped at
+// verify with no file written. The cause is arithmetic, not the fixture: the stub puts every
+// blank's top face at the machine's tool-change safe Z, so a frame at work Z 20 lands exactly on
+// the envelope's top; for a 22.8 mm blank the WCS origin is -19.999999999999996 and 20 + origin is
+// +3.6e-15 mm — outside by femtometres. The frame now traces at the highest work Z that posts
+// inside the envelope (19.999 here, machine -0.001).
+describe('#747 the frame is traced inside the envelope, and never gates a verified program', () => {
+  it('fx-frame-pocket (22.8 mm hardwood): the frame is written at a reachable Z', async () => {
+    const { code, receipt } = await cut('fx-frame-pocket.json', REAL_JOBS);
+    if (receipt.command !== 'engrave') throw new Error('expected the engrave receipt');
+    // Before #747: exit 1, stage verify, "the frame file has 5 verifier error(s)", no program and
+    // no frame file in `outputs`, and the five findings absent from `diagnostics`.
+    expect(code, allDiagnostics(receipt)).toBe(0);
+    expect(receipt.refusals, allDiagnostics(receipt)).toEqual([]);
+    expect(receipt.diagnostics.filter((d) => d.message.includes('outside-envelope'))).toEqual([]);
+    expect(receipt.details.programs[0]!.frameFile).toBe('fx-frame-pocket-frame.nc');
+    const frame = receipt.outputs.find((o) => o.path.endsWith('-frame.nc'));
+    expect(frame, 'the frame file the operator loads must be written').toBeDefined();
+    // The POSTED height, to the dialect's three decimals: 19.999 + the 22.8 mm WCS origin is
+    // machine Z -0.001, inside the envelope; 20 would be +3.6e-15 and refused.
+    const frameText = readFileSync(frame!.path, 'utf8');
+    expect(frameText).toContain('G0 Z19.999');
+    // ... and the sheet prints the height in the file, never the 20 mm constant.
+    const sheetPath = receipt.outputs.find((o) => o.path.endsWith('-run-sheet.md'))!.path;
+    expect(readFileSync(sheetPath, 'utf8')).toContain('19.999 mm above the work');
+  }, 150_000);
+});

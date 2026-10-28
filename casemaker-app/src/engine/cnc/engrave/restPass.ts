@@ -354,6 +354,11 @@ export interface RestProgram {
   /** Its dry-run frame file, or null when the generator produced none. */
   frame: string | null;
   /**
+   * #747 — the work Z its frame traces at, as the worker computed it. Optional: a caller that
+   * predates #747 does not fill it, and the sheet then reads the design's `FRAME_Z`.
+   */
+  frameZ?: number | null;
+  /**
    * The cutting parameters this program was generated with, or null when its feeds did not resolve
    * (#437 item 8). The sheet states each program's own numbers: the two programs are different
    * cutters in the same material, so program 1's RPM and step-over are not program 2's, and a sheet

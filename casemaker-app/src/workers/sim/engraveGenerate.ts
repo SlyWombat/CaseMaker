@@ -396,6 +396,8 @@ export interface EngraveProgram {
   /** This program's own frame file (#244), checked by the same verifier; null when not produced. */
   frameNc: string | null;
   frameVerify: VerifyReport | null;
+  /** #747 — this program's frame height in work Z; null when no frame was produced. */
+  frameZ?: Mm | null;
   /** FNV-1a over `nc` — `programHash` in `engine/cnc/programHash.ts`. */
   programHash: string;
   cam: EngraveCamSummary | null;
@@ -603,14 +605,22 @@ export interface EngraveGenerated {
   /** #174. */
   verify: VerifyReport | null;
   /**
-   * #244 — the frame file: a tiny air trace of the job's XY extent at `FRAME_Z`, emitted as
-   * `<job>-frame.nc` beside the job. Null when the run never reached the post (nothing to
-   * trace) or the job was refused. It is produced by THIS gated action, from the same toolpath,
-   * and checked below by the same verifier.
+   * #244 — the frame file: a tiny air trace of the job's XY extent at `frameZ`, emitted as
+   * `<job>-frame.nc` beside the job. Null when the run never reached the post (nothing to trace)
+   * or the job was refused. It is produced by THIS gated action, from the same toolpath, and
+   * checked by the same verifier.
    */
   frameNc: string | null;
-  /** #244 — `verifyProgram`'s report on `frameNc`, or null when no frame was produced. */
+  /** #244 — `verifyProgram`'s report on `frameNc`, or null when no frame was posted. */
   frameVerify: VerifyReport | null;
+  /**
+   * #747 — the WORK Z the frame traced at, in mm above the blank's top face. `frameTraceZ` clamps
+   * the design's 20 mm air clearance to what this setup can reach inside the machine's Z envelope
+   * (a thick blank's WCS origin, or a measured one, can be a float hair below the ceiling), so the
+   * sheet prints this number rather than the constant. Null when no frame file was produced.
+   * Optional: a result stored before #747 reads as `FRAME_Z`, which is what it was traced at.
+   */
+  frameZ?: Mm | null;
   /**
    * #432 slice 2 — the FACING program, as its own `.nc` beside the job: the skim of the blank's
    * top, posted against the PROBED top (Z = 0 is the blank as the probe found it) with its own
@@ -2506,6 +2516,82 @@ function mountCtx(
     : {};
 }
 
+/**
+ * #747 — THE ONE PLACE THE FRAME'S TRACE HEIGHT IS COMPUTED, in WORK Z (the frame the document and
+ * the sheet speak), and the reason it cannot be traced when there is none.
+ *
+ * It used to be the constant `FRAME_Z` (20), full stop. But the stub places every blank's TOP FACE
+ * at the machine's tool-change safe height (`machinePlacement`: `safeZ - thickness`, then the WCS
+ * puts the origin back on the top face), so the work Z a frame can reach is `envelope.z.max - wcs.z`
+ * — 20 for a Z1, but reached through a subtraction and an addition of the blank's thickness that
+ * do not cancel exactly in floating point for every thickness. On a 22.8 mm blank the WCS origin
+ * lands on -19.999999999999996, so a trace at work Z 20 posts to machine Z 0.0000000000000036:
+ * five femtometres above the envelope's top, refused by the verifier as five `outside-envelope`
+ * errors that print as `0.000` (#747). The rule is therefore not "always 20": it is the lower of
+ * the design's 20 mm air clearance and the highest WORK height whose POSTED form (the machine's
+ * own axis precision, three decimals on the Z1) still lands inside the machine's Z envelope — with
+ * a margin below the envelope top if the float does not agree.
+ *
+ * AND IT MUST CLEAR THE MOUNT (#710's rule, the same `travelHeightOver` the job's own travel uses):
+ * the frame's rapids are checked against the clamps by the same verifier, so a trace below the
+ * clamp top is refused. The mount's fit and the fixture clearance are in the requirement, not
+ * discovered by the verifier.
+ *
+ * A frame that cannot meet both is WITHHELD, not guessed at: `error` says which bound failed. The
+ * caller keeps the verified program; a frame is an aid, not a gate (#747).
+ */
+export function frameTraceZ(
+  setup: Setup,
+  machine: MillProfile,
+  mount: MountObstacles | null | undefined,
+  /** The job's fixture clearance, mm (the same number the mount's verifier gets). */
+  clearanceMm: number,
+  /** #727 F2 — the fitted top's highest lift, which raises the clamps this trace must clear. */
+  topLiftMm = 0,
+): { z: Mm } | { error: string } {
+  const ceiling = machine.envelope.z.max;
+  const origin = setup.wcs.origin[2];
+  // The POST's own precision, not a remembered three: the value must survive `formatFixed` to the
+  // machine's decimals. A profile that wrote two would round 19.999 up to 20.000 and put the
+  // breach straight back.
+  const decimals =
+    Number.isInteger(machine.dialect.axisPrecision) && machine.dialect.axisPrecision > 0
+      ? machine.dialect.axisPrecision
+      : 3;
+  const scale = 10 ** decimals;
+  const step = 1 / scale;
+  const round = (v: number): number => Math.round(v * scale) / scale;
+  if (!Number.isFinite(ceiling) || !Number.isFinite(origin)) {
+    return { error: `the work origin and the ${machine.name}'s Z envelope cannot be compared` };
+  }
+  // The reachable WORK Z is FLOORED to the posted precision: rounding up would post a height above
+  // the ceiling by less than the last decimal.
+  const reach = Math.floor((ceiling - origin) * scale) / scale;
+  let z = Math.min(FRAME_Z, Number.isFinite(reach) ? reach : FRAME_Z);
+  // The floor and the divide are floats too. Ask the machine's own comparison, in the machine
+  // frame the emulator will use, and step down one posted unit if the sum still lands above the top.
+  while (z > 0 && z + origin > ceiling) z = round(z - step);
+  if (!(z > 0)) {
+    return {
+      error:
+        `no height above the work is inside the ${machine.name}'s Z envelope — the work origin ` +
+        `sits at machine Z ${round(origin)}, and the envelope tops out at ${round(ceiling)}`,
+    };
+  }
+  // #710/#727 F2 — the same rule the job's own travel is raised by, so the frame's height and the
+  // verifier's clamp check cannot disagree about what "clear" is. `travelHeightOver` is rounded to
+  // the post's precision already.
+  const minZ = travelHeightOver(mount?.obstacles ?? [], clearanceMm + topLiftMm, mount?.uncertainty ?? 0);
+  if (minZ !== null && z < minZ) {
+    return {
+      error:
+        `its air trace would run below the mount: the trace can reach ${round(z)} mm above the ` +
+        `work, but the clamps need ${round(minZ)} mm`,
+    };
+  }
+  return { z };
+}
+
 function frameProgram(
   ir: ToolpathIR,
   ctx: PostContext,
@@ -2517,7 +2603,13 @@ function frameProgram(
   clearanceMm: number,
   /** #727 F2 — the fitted top's highest lift: the frame trace rides above the lifted clamps too. */
   topLiftMm = 0,
-): { nc: string; verify: VerifyReport } | { error: string } {
+): { nc: string; verify: VerifyReport; z: Mm } | { error: string } {
+  // #747 — the trace height is computed HERE, once, for the file, the sheet and the receipt. The
+  // design's `FRAME_Z` is the height wanted; this clamps it to what the setup's WCS can reach and
+  // refuses a height the mount would not clear.
+  const height = frameTraceZ(setup, machine, mount, clearanceMm, topLiftMm);
+  if ('error' in height) return height;
+  const { z } = height;
   // The cutter's footprint in XY, grown by the SAME rule the corner box has always been built with
   // (#244): the disc the toolpath removes. A V-bit's is the groove at the DEEPEST cut in the program
   // (#405) — a cone's opening widens with depth, and the frame has to cover the widest cut it makes,
@@ -2529,7 +2621,7 @@ function frameProgram(
   // otherwise trace the tool's CENTRE path and miss the cutter's own radius. Growing by the
   // cutting radius is the same rule the disc gets; it is an air trace, so nothing else changes.
   const radius = traceRadiusAt(tool, deepestCut) ?? (tool.shape === 'thread' ? (cuttingDiameter(tool) ?? 0) / 2 : 0);
-  const moves = frameCorners(ir, radius, FRAME_Z);
+  const moves = frameCorners(ir, radius, z);
   if (moves === null) return { error: 'the toolpath has no positioned move to trace' };
   const frameIr: ToolpathIR = {
     frame: 'flat', // an air trace of a flat blank; a rotary job has no frame file in this slice (#240, slice 3)
@@ -2541,11 +2633,11 @@ function frameProgram(
     // (or an `M331` switch it on and leave the mode changed after an operator's own check). The
     // span below is belt and braces: `air: false` alone would already suppress both words.
     air: false,
-    // The trace IS the safe height: the preamble retracts to FRAME_Z and every trace rapid is at
-    // FRAME_Z, so there is no operator offset to set or clear. `hopZ` stays HOP_Z (the job's own
-    // rapid floor): the post's fixed ending retracts to Z15 and homes, so the frame's verifier
-    // must not demand a rapid floor above the post's own ending.
-    safeZ: FRAME_Z,
+    // The trace IS the safe height: the preamble retracts to the computed work Z and every trace
+    // rapid is at it, so there is no operator offset to set or clear. `hopZ` stays HOP_Z (the
+    // job's own rapid floor): the post's fixed ending retracts to Z15 and homes, so the frame's
+    // verifier must not demand a rapid floor above the post's own ending.
+    safeZ: z,
     hopZ: HOP_Z,
     operations: [
       {
@@ -2561,7 +2653,7 @@ function frameProgram(
   const posted = postZ1(frameIr, ctx, machine, { vacuum: 'none' });
   if (!posted.ok) return { error: posted.errors.join('; ') };
   const verify = verifyProgram(posted.text, { setup, machine, tool, depthLimit: limit, minRapidZ: frameIr.hopZ, ...mountCtx(mount, clearanceMm, topLiftMm) });
-  return { nc: posted.text, verify };
+  return { nc: posted.text, verify, z };
 }
 
 /**
@@ -4143,6 +4235,7 @@ function programOf(one: OneProgram, ref: JobProgramRef): EngraveProgram {
     verify: one.verify!,
     frameNc: one.frameNc,
     frameVerify: one.frameVerify,
+    frameZ: one.frameZ ?? null,
     programHash: programHash(nc),
     cam: one.cam,
     drill: one.drill ?? null,
@@ -5011,8 +5104,13 @@ function generateOneProgram(
     // #240 — a ROTARY job has no frame file in this slice: the frame is the flat stock's XY
     // rectangle traced in the air, and the wrapped frame has no such rectangle (X runs along the
     // axis, the surface wraps into A). Slice 3's rotary run sheet owns the rotary equivalent.
+    //
+    // #747 — the trace height is `frameTraceZ`'s, in WORK Z: the design's `FRAME_Z` clamped to
+    // what this setup's WCS can reach inside the machine's Z envelope and raised over the mount.
+    // It rides with the file (`frameZ`) so the sheet prints the height that is in the G-code.
     let frameNc: string | null = null;
     let frameVerify: VerifyReport | null = null;
+    let frameZ: Mm | null = null;
     if (rotaryMap === null) {
       const frame = frameProgram(ir, ctx, mill, setup, tool, limit, shop.mount, job.jawClearance, liftOverStock);
       if ('error' in frame) {
@@ -5026,6 +5124,7 @@ function generateOneProgram(
       }
       frameNc = frame.nc;
       frameVerify = frame.verify;
+      frameZ = frame.z;
     }
 
     return {
@@ -5047,6 +5146,9 @@ function generateOneProgram(
       verify,
       frameNc,
       frameVerify,
+      // #747 — the height the frame was actually traced at (work Z): the sheet prints this, so
+      // the number the operator reads is the one in the file.
+      frameZ,
       facingNc: facing.nc,
       facingVerify: facing.verify,
       facingToolKey: facing.toolKey,

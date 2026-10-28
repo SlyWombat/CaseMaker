@@ -230,6 +230,12 @@ export interface RunSheetProgram {
   nc: string;
   /** This program's own frame file, or null when none was produced. */
   frameNc: string | null;
+  /**
+   * #747 — the work Z the frame file traces at, as the worker computed it (`frameTraceZ`). Absent
+   * on a result stored before #747, which traced at `FRAME_Z`; the sheet reads it and never
+   * recomputes the height.
+   */
+  frameZ?: Mm | null;
   /** What the CAM did, for the run step's estimate. */
   cam: RunSheetCamSummary | null;
   /**
@@ -433,6 +439,11 @@ export interface RunSheetGenerated {
    * exists (#273) — the app only writes a frame it actually produced.
    */
   frameNc: string | null;
+  /**
+   * #747 — the WORK Z program 1's frame traces at, as the worker computed it; absent on a result
+   * stored before #747, which traced at `FRAME_Z`. The sheet prints this, never its own arithmetic.
+   */
+  frameZ?: Mm | null;
   /**
    * #445 — the thread plans this sheet prints, reduced to what it says and never carrying `moves`.
    * Absent or null on a job with no thread; `EngraveGenerated` satisfies this as it stands.
@@ -779,10 +790,13 @@ export function formatDuration(seconds: number): string {
 }
 
 /**
- * The height the frame file traces at, mm above the top face (#244). This is #207 §6's 20 mm air
- * clearance, now baked into the generated frame file instead of an offset the operator sets and
- * must remember to clear: the trace cannot be run at the wrong Z. Fixed, not derived from the
- * job — tall enough to clear the cutter holder over the default stock.
+ * The height the frame file WANTS to trace at, mm above the top face (#244): #207 §6's 20 mm air
+ * clearance, baked into the file instead of an offset the operator sets and must remember to
+ * clear. It is a design height, not always the height in the file: `frameTraceZ` (in
+ * `workers/sim/engraveGenerate.ts`) clamps it to the highest work Z this setup can reach inside the
+ * machine's Z envelope and withholds the trace when the mount cannot be cleared (#747). The sheet
+ * reads the height the worker actually used (`frameZ`), never this constant, so the printed number
+ * and the G-code cannot disagree.
  */
 export const FRAME_Z: Mm = 20;
 
@@ -2483,9 +2497,9 @@ function restSwapSteps(facts: RestPassFacts, labels?: RestProgramLabels): RunShe
       : {
           text:
             `Load ${rest.frame} and run it. It traces ${restPossAscii} outline in the air, the same ` +
-            `${fmtNum(FRAME_Z)} mm above the work — no Z offset to set. If the trace is not where the ` +
+            `${fmtNum(rest.frameZ ?? FRAME_Z)} mm above the work — no Z offset to set. If the trace is not where the ` +
             'rest should land, stop.',
-          value: `${fmtNum(FRAME_Z)} mm above the work`,
+          value: `${fmtNum(rest.frameZ ?? FRAME_Z)} mm above the work`,
           unverified: '#443',
         },
     {
@@ -2864,12 +2878,13 @@ function programRunSteps(program: RunSheetProgram, number: number): RunSheetStep
       bold: true,
     });
   } else {
+    const z = program.frameZ ?? FRAME_Z;
     steps.push({
       text:
         `Load ${program.frameNc} and run it. It traces program ${number}'s outline in the air, the ` +
-        `same ${fmtNum(FRAME_Z)} mm above the work — no Z offset to set. If the trace is not where ` +
+        `same ${fmtNum(z)} mm above the work — no Z offset to set. If the trace is not where ` +
         'the program should land, stop.',
-      value: `${fmtNum(FRAME_Z)} mm above the work`,
+      value: `${fmtNum(z)} mm above the work`,
     });
   }
   const cam = program.cam;
@@ -3612,8 +3627,8 @@ export function buildRunSheet(
   // ---- 6 · Dry run ---------------------------------------------------------------------------
   // #244 — the frame file replaces the manual "raise Z by 20 mm" offset. Its Z is baked in, so
   // there is nothing for the operator to set (or to forget to clear), and it is a separate file,
-  // so it cannot be confused with the job. The 20 mm height itself is `FRAME_Z` above, the figure
-  // #207 specified.
+  // so it cannot be confused with the job. The height printed is the worker's own `frameZ`
+  // (#747): the design's `FRAME_Z` clamped to what the machine and any mount can reach.
   //
   // A null `frameNc` is not hypothetical (#273): a job program the verifier refuses comes back
   // with `nc` and `verify` populated but NO frame (the frame is derived after both gates), and
@@ -3635,9 +3650,9 @@ export function buildRunSheet(
           {
             text:
               `Load ${runSheetFrameFileName(job.name)} and run it. The cutter traces the job's outline in ` +
-              `the air, ${fmtNum(FRAME_Z)} mm above the work — no Z offset to set. Watch that the trace ` +
+              `the air, ${fmtNum(generated.frameZ ?? FRAME_Z)} mm above the work — no Z offset to set. Watch that the trace ` +
               'stays over the blank and clear of the jaws.',
-            value: `${fmtNum(FRAME_Z)} mm above the work`,
+            value: `${fmtNum(generated.frameZ ?? FRAME_Z)} mm above the work`,
           },
           {
             text:

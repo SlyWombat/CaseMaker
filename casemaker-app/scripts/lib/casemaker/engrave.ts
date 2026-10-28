@@ -1770,6 +1770,9 @@ async function engraveJobBody(argv: string[], options: CommandOptions): Promise<
             reason: roughReason,
             nc: `${stem1}.nc`,
             frame: p1.generated.frameNc === null ? null : runSheetFrameFileName(job.name),
+            // #747 — the height the worker actually traced at. It is the worker's, never
+            // re-derived here.
+            frameZ: p1.generated.frameZ ?? null,
             params: cutParams(p1.generated),
             passes: passCount(p1.generated),
             traceOnly: traceOnlyOf(job),
@@ -1784,6 +1787,7 @@ async function engraveJobBody(argv: string[], options: CommandOptions): Promise<
             reason: restChosen.reason,
             nc: `${stem2}.nc`,
             frame: p2.generated.frameNc === null ? null : runSheetFrameFileName(restJob.name),
+            frameZ: p2.generated.frameZ ?? null,
             params: cutParams(p2.generated),
             passes: passCount(p2.generated),
             traceOnly: traceOnlyOf(restJob),

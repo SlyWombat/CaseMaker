@@ -4,6 +4,8 @@
 
 import { describe, it, expect } from 'vitest';
 import { jobVise } from '@/engine/cnc/fixture';
+import { stubSetup, type Setup } from '@/engine/cnc/setup';
+import { rectProfile } from '@/engine/compiler/profile';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -11,7 +13,7 @@ import { fileURLToPath } from 'node:url';
 import { parseEngraveJob } from '@/store/engraveJobSchema';
 import { tl } from './helpers/manifoldExec';
 import { generate, regions } from './helpers/engravePipeline';
-import { frameCorners, engraveGenerate } from '@/workers/sim/engraveGenerate';
+import { frameCorners, frameTraceZ, engraveGenerate } from '@/workers/sim/engraveGenerate';
 import type { EngraveShopOpts } from '@/workers/sim/engraveGenerate';
 import type { MountObstacle, MountObstacles } from '@/engine/cnc/mounts';
 import { TOOL_LIBRARY, type ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
@@ -921,6 +923,60 @@ describe('the frame file (#244)', () => {
     // positive, so the whole body is clear of the stock.
     expect(g.frameVerify!.stats.bbox.max[2]).toBeCloseTo(20, 6);
     expect(g.frameVerify!.stats.bbox.min[2]).toBeGreaterThan(0);
+  });
+
+  // #747 — THE TRACE HEIGHT IS THE MACHINE'S, NOT A CONSTANT. The stub puts every blank's top
+  // face at the tool-change safe Z, so the work Z a frame can reach is `-wcs.z` (20 on a Z1),
+  // reached by `(-20 - thickness) + thickness`. That does not cancel exactly for every thickness:
+  // on 22.8 mm the origin is -19.999999999999996 and a trace at work Z 20 posts to machine Z
+  // +3.6e-15, outside the envelope. The clamp lowers it one thousandth — the post's precision —
+  // while a thickness whose float does cancel keeps the design height, and therefore every
+  // existing frame byte-identical.
+  it('clamps the trace to a work Z the posted file can reach (#747)', () => {
+    const setup = (thickness: number): Setup =>
+      stubSetup(
+        { kind: 'prism', outline: rectProfile(100, 100), thickness },
+        { kind: 'tape-down', contact: rectProfile(100, 100) },
+        { startingTool: 1 },
+        Z1,
+      );
+    const trace = (thickness: number): { z: number; machineZ: number } => {
+      const s = setup(thickness);
+      const h = frameTraceZ(s, Z1, null, 0);
+      if ('error' in h) throw new Error(h.error);
+      return { z: h.z, machineZ: h.z + s.wcs.origin[2] };
+    };
+    expect(trace(22.8).z).toBe(19.999);
+    expect(trace(21.3).z).toBe(19.999);
+    expect(trace(22.8).machineZ).toBeLessThanOrEqual(Z1.envelope.z.max);
+    expect(trace(21.3).machineZ).toBeLessThanOrEqual(Z1.envelope.z.max);
+    // The design's own 20 mm, untouched, where the arithmetic is exact.
+    expect(trace(6).z).toBe(20);
+    expect(trace(18).z).toBe(20);
+  });
+
+  it('withholds the trace when the mount stands above every reachable height (#747)', () => {
+    const setup = stubSetup(
+      { kind: 'prism', outline: rectProfile(100, 100), thickness: 12 },
+      { kind: 'tape-down', contact: rectProfile(100, 100) },
+      { startingTool: 1 },
+      Z1,
+    );
+    const mount: MountObstacles = {
+      obstacles: [
+        { id: 'clamp', kind: 'clamp', label: 'the clamp', fix: 'move it', min: [0, 0], max: [10, 10], topZ: 30 },
+      ],
+      uncertainty: 0.1,
+      fixture: { boxes: [], source: 'default', uncertainty: 0.1 },
+    };
+    const h = frameTraceZ(setup, Z1, mount, 1);
+    expect('error' in h).toBe(true);
+    if ('error' in h) {
+      // The reason names both bounds: the highest place the file can go and the height the
+      // clamps need (top 30 + fit 0.1 + clearance 1).
+      expect(h.error).toContain('20 mm above the work');
+      expect(h.error).toContain('31.1 mm');
+    }
   });
 
   it('offers no frame when the job is refused', () => {
