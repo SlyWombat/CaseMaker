@@ -183,8 +183,13 @@ export interface OraclePredicted {
    * mouth, a chamfer's bevel) while the simulation removed the wider mouth: an over-cut that is
    * the prediction's fault, not the file's. `polygons` stays the floor, so the entry's OWN level is
    * unchanged and the common case pays no offset.
+   *
+   * #741 — `maxGrow` bounds that growth at the cutter's own flank: the radial run from the tip's
+   * edge to the cylindrical body (`outerRadius − tipRadius`). Above the height where the cone
+   * meets its body the bit cuts a VERTICAL wall, so the section stops growing there. Absent when
+   * the record states no diameter wider than its tip, which is the pre-#741 open flank.
    */
-  vRegion?: { tanHalf: number };
+  vRegion?: { tanHalf: number; maxGrow?: number };
 }
 
 /** The comparison at one distinct floor Z. */
@@ -649,7 +654,14 @@ export function computeOracle(
           ? (threadSlices[pi]?.(z + ORACLE_SLICE_LIFT_MM) ?? null)
           : p.polygons.length > 0
             ? p.vRegion !== undefined && p.depth > depth + 1e-9
-              ? vRegionAt(tl, p.polygons, (p.depth - depth) * p.vRegion.tanHalf, roundSegments)
+              ? vRegionAt(
+                  tl,
+                  p.polygons,
+                  // #741 — the flank rises only until it meets the body; past that the section is
+                  // the body's own vertical wall, so the growth stops at the flank's radial run.
+                  Math.min((p.depth - depth) * p.vRegion.tanHalf, p.vRegion.maxGrow ?? Infinity),
+                  roundSegments,
+                )
               : CS.ofPolygons(p.polygons)
             : null;
       if (cs) parts.push(cs);

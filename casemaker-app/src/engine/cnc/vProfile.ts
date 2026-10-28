@@ -121,24 +121,31 @@ export function coneHeight(cone: VCone): number | null {
 
 /** The groove's width at `depth` below the tip plane, mm — the TOP OPENING, not the floor. */
 export function grooveWidthAt(cone: VCone, depth: number): number {
-  return cone.tipRadius * 2 + 2 * depth * cone.tanHalf;
+  const unbounded = cone.tipRadius * 2 + 2 * depth * cone.tanHalf;
+  // #741 — the flank cannot open wider than the cutter's body. Without this the model went on
+  // widening the cone past the shank, so a 5.1 mm-deep cut on a 3.175 mm bit was predicted
+  // 10.3 mm wide. With no stated diameter the flank has no stated end (see `VCone.outerRadius`).
+  return cone.outerRadius === undefined ? unbounded : Math.min(unbounded, cone.outerRadius * 2);
 }
 
 /**
  * The inverse: the depth at which the groove's top opening is `width` wide, mm. `null` for a
- * narrower width than the tip itself, which no depth reaches — the tip's own flat is the floor of
- * what this cutter can do.
+ * narrower width than the tip itself, or a wider one than the cutter's own body, which no depth
+ * reaches — the tip's flat and the body's diameter are the two ends of what this cutter can do.
  */
 export function depthForWidth(cone: VCone, width: number): number | null {
+  if (cone.outerRadius !== undefined && width > cone.outerRadius * 2 + 1e-9) return null;
   const d = (width - cone.tipRadius * 2) / (2 * cone.tanHalf);
   return d >= 0 ? d : null;
 }
 
 /**
  * The flank's height ABOVE the tip plane at radial distance `ρ` from the tool axis, mm: 0 inside
- * the tip's flat, rising at `1/tan` outside it. Unbounded — the caller bounds it by the stock.
+ * the tip's flat, rising at `1/tan` outside it. Past the cutter's body (`outerRadius`) there is
+ * no cutter at all, so the surface there is left untouched — `Infinity`.
  */
 export function flankHeightAboveTip(cone: VCone, rho: number): number {
+  if (cone.outerRadius !== undefined && rho > cone.outerRadius) return Infinity;
   const h = (rho - cone.tipRadius) / cone.tanHalf;
   return h > 0 ? h : 0;
 }

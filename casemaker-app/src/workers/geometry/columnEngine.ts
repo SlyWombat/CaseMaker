@@ -295,7 +295,23 @@ export function columnCutterFor(tool: Tool, drillDefault?: DrillPointDefault | n
   const trace = cuttingForTrace(tool);
   if (!trace.ok) return trace;
   return trace.tool.shape === 'v'
-    ? { ok: true, kind: 'v', cutter: { radius: trace.tool.cone.tipRadius, tanHalf: trace.tool.cone.tanHalf }, diagnostics: [] }
+    ? {
+        ok: true,
+        kind: 'v',
+        cutter: {
+          radius: trace.tool.cone.tipRadius,
+          tanHalf: trace.tool.cone.tanHalf,
+          // #741 — THE CONE ENDS AT THE BIT'S BODY. `outerRadius` is the stated diameter's radius;
+          // past it `surfaceAboveTip` says `Infinity` (no cutter reaches that column) and
+          // `cutterReach` stops the sweep's footprint there. Without it the engine went on
+          // widening the flank past the shank: a 5.1 mm-deep cut on a 3.175 mm bit removed a
+          // 10.3 mm-wide V, 1431 mm³ where the physical cone takes 971.
+          ...(trace.tool.cone.outerRadius === undefined
+            ? {}
+            : { outerRadius: trace.tool.cone.outerRadius }),
+        },
+        diagnostics: [],
+      }
     : { ok: true, kind: 'flat', cutter: { radius: trace.tool.radius, tanHalf: null }, diagnostics: [] };
 }
 

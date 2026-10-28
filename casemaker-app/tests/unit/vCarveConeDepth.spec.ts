@@ -230,4 +230,25 @@ describe('#741 the bench’s over-deep V-carves are refused by name', () => {
     expect(gen.findings.filter((f) => f.code === 'vcarve-depth-beyond-cone')).toEqual([]);
     expect(gen.ok, JSON.stringify(gen.findings.map((f) => `${f.severity}:${f.code}`))).toBe(true);
   });
+
+  it('the prediction carries the cone’s body, so its region stops where the flank does (#741)', () => {
+    // The oracle grows a V region's floor by the flank's rise at each level above it; `maxGrow`
+    // is the radial run from the tip's edge to the body, and without it the oracle would predict
+    // a mouth the bit cannot cut. This is the same `VCone.outerRadius` the column engine reads.
+    const gen = generate(shallowJob(1, CHAMFER_90), CHAMFER_90);
+    const region = gen.predicted.find((p) => p.vRegion !== undefined);
+    expect(region).toBeDefined();
+    expect(region!.vRegion!.tanHalf).toBeCloseTo(Math.tan(Math.PI / 4), 9);
+    expect(region!.vRegion!.maxGrow).toBeCloseTo(3.175 / 2 - 0.05, 9);
+  });
+
+  it('states no maxGrow when the record states no body — the pre-#741 open flank', () => {
+    // The degenerate-record rule: a diameter not wider than the tip is no body, so there is no
+    // radius at which the prediction may stop growing.
+    const noBody: Tool = { ...CHAMFER_90, diameter: 0.1 };
+    const gen = generate(shallowJob(1, noBody), noBody);
+    const region = gen.predicted.find((p) => p.vRegion !== undefined);
+    expect(region).toBeDefined();
+    expect(region!.vRegion!.maxGrow).toBeUndefined();
+  });
 });

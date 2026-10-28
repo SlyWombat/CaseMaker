@@ -29,6 +29,7 @@ import { createSimSession, type SimSession } from '@/workers/sim/session';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import {
   ORACLE_AREA_FLOOR,
+  ORACLE_SHALLOW_DEPTH_FRACTION,
   columnBandTerm,
   columnOracleBand,
   computeOracle,
@@ -283,6 +284,67 @@ describe('the V-trace prediction is a groove (#408 item 1)', () => {
     // it is not a level the plan cuts to).
     const flat = computeOracle(tl, () => null, [{ depth: 1, polygons: [] }], 0);
     expect(flat.levels).toEqual([]);
+  });
+});
+
+/**
+ * #741 — THE PREDICTED V REGION STOPS AT THE BIT'S BODY TOO.
+ *
+ * A V-carve region's floor is grown by the flank's rise at each level above it. That rise ends
+ * where the flank meets the cutter's cylindrical body: past `maxGrow = outerRadius − tipRadius`
+ * the bit cuts a vertical wall, so the predicted section must stop growing. Without the cap a
+ * 5.1 mm-deep pocket on the 3.175 mm chamfer was predicted 10.3 mm wider than the floor at the
+ * shallow level — a mouth the bit cannot cut, which would make the verifier's own prediction the
+ * thing that is wrong rather than the program.
+ *
+ * The level comes from a shallow GROOVE in the same report: a V region's floor alone only asks
+ * the section at its own depth, where the cone's rise is zero and no cap can bind.
+ */
+describe('the V-region prediction stops at the bit’s body (#741)', () => {
+  const square: [number, number][] = [
+    [40, 40],
+    [50, 40],
+    [50, 50],
+    [40, 50],
+  ];
+  const bodyR = 3.175 / 2;
+  const maxGrow = bodyR - 0.05; // the chamfer's 0.1 mm tip: outer radius − tip radius
+  const deep: OraclePredicted = {
+    depth: 5.1,
+    polygons: [square],
+    itemId: 'pocket',
+    vRegion: { tanHalf: 1, maxGrow },
+  };
+  const band = 0.1;
+  const shallow = -0.5 * ORACLE_SHALLOW_DEPTH_FRACTION; // the groove's own derived level
+
+  /** The region one entry contributes at a level: the report with it, less the report without. */
+  function regionAreaAt(level: number): number {
+    const withRegion = computeOracle(tl, () => null, [groove(0.5), deep], band);
+    const without = computeOracle(tl, () => null, [groove(0.5)], band);
+    const at = (report: { levels: { z: number; predictedArea: number }[] }, z: number): number =>
+      report.levels.find((l) => Math.abs(l.z - z) < 1e-9)?.predictedArea ?? NaN;
+    return at(withRegion, level) - at(without, level);
+  }
+
+  it('grows the floor by the flank’s run to the body and no further', () => {
+    const cs = tl.CrossSection.ofPolygons([square]);
+    const capped = cs.offset(maxGrow, 'Round', 2, segmentsForRadius(band));
+    const expected = capped.area();
+    cs.delete();
+    capped.delete();
+
+    expect(regionAreaAt(shallow)).toBeCloseTo(expected, 3);
+  });
+
+  it('is not the uncapped flank — which is more than twice the area', () => {
+    const cs = tl.CrossSection.ofPolygons([square]);
+    const unbounded = cs.offset((5.1 - 0.05) * 1, 'Round', 2, segmentsForRadius(band));
+    const wide = unbounded.area();
+    cs.delete();
+    unbounded.delete();
+
+    expect(wide).toBeGreaterThan(regionAreaAt(shallow) * 2);
   });
 });
 

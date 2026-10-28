@@ -2091,7 +2091,18 @@ export function engraveRegions(
           depth: c.depth,
           polygons: c.vCarve?.floor ?? c.polygons,
           itemId: c.id,
-          ...(c.vCarve !== undefined && cone !== null ? { vRegion: { tanHalf: cone.tanHalf } } : {}),
+          ...(c.vCarve !== undefined && cone !== null
+            ? {
+                vRegion: {
+                  tanHalf: cone.tanHalf,
+                  // #741 — the flank stops growing where it meets the bit's body (a vertical wall
+                  // above it, never a wider V). Absent when the record states no wider diameter.
+                  ...(cone.outerRadius === undefined
+                    ? {}
+                    : { maxGrow: cone.outerRadius - cone.tipRadius }),
+                },
+              }
+            : {}),
         },
       ];
     }),

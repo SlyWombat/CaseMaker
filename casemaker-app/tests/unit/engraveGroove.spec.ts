@@ -9,7 +9,7 @@ import { describe, it, expect } from 'vitest';
 
 import { tl } from './helpers/manifoldExec';
 import { vGrooveSolid } from '@/workers/sim/engraveGroove';
-import { vCone, grooveRadiusAt, type VCone } from '@/engine/cnc/vProfile';
+import { coneHeight, vCone, grooveRadiusAt, type VCone } from '@/engine/cnc/vProfile';
 import { segmentsForRadius } from '@/engine/compiler/arcResolution';
 import type { Tool } from '@/engine/cnc/tool';
 
@@ -136,6 +136,42 @@ describe('vGrooveSolid (#420 slice 4)', () => {
     expect(ring.volume()).toBeGreaterThan(straight * 0.9);
     expect(Number.isFinite(ring.volume())).toBe(true);
     ring.delete();
+  });
+
+  it('stops the flank at the bit’s body and cuts a vertical wall above it (#741)', () => {
+    // The bench's 90° chamfer at the star pocket's depth: tip 0.1 mm, 3.175 mm body, so the cone
+    // is 1.5375 mm tall and a 5.1 mm trace leaves the body cutting a vertical wall for the last
+    // 3.5625 mm. The old builder carried the flank on to `0.05 + 5.1·tan 45°` = 5.15 mm — a mouth
+    // ten times the bit's body — and removed 2.4× the volume.
+    const chamfer = vCone({ ...bit(), shape: 'chamfer', tipDiameter: 0.1, angle: 90, halfAngle: 45 })!;
+    const deep = 5.1;
+    const bodyR = chamfer.outerRadius!;
+    const flank = coneHeight(chamfer)!;
+    expect(flank).toBeCloseTo(1.5375, 9);
+    const n = segmentsForRadius(bodyR);
+    const solid = vGrooveSolid(tl, paths, [false], chamfer, deep, 0)!;
+    const conePart = capsuleSweepVolume(10, chamfer, flank, discFactor(n));
+    const bodyPart = (deep - flank) * (2 * 10 * bodyR + discFactor(n) * bodyR * bodyR);
+    expect(solid.volume()).toBeCloseTo(conePart + bodyPart, 6);
+
+    // The unbounded flank would be wider: the regression is the difference, not a tolerance.
+    const mouthR = chamfer.tipRadius + chamfer.tanHalf * deep;
+    const unbounded = capsuleSweepVolume(10, chamfer, deep, discFactor(segmentsForRadius(mouthR)));
+    expect(unbounded).toBeGreaterThan((conePart + bodyPart) * 2);
+    expect(solid.volume()).toBeLessThan(unbounded * 0.5);
+
+    const sliceArea = (z: number): number => {
+      const cs = solid.slice(z);
+      const area = cs.area();
+      cs.delete();
+      return area;
+    };
+    // Just under the top face the section is the body's constant 3.175 mm band; a continued taper
+    // would be `0.05 + 5.05·tan 45° = 5.10` mm half-wide there.
+    expect(sliceArea(-0.05)).toBeCloseTo(2 * 10 * bodyR + discFactor(n) * bodyR * bodyR, 5);
+    // Below the flank it is still narrowing toward the tip.
+    expect(sliceArea(-deep + flank - 0.1)).toBeLessThan(sliceArea(-0.05));
+    solid.delete();
   });
 
   it('returns nothing when there is no path, no depth, or no cone reach', () => {

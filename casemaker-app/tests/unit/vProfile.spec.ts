@@ -7,7 +7,7 @@
  * to a cell; this is where the number itself is stated.
  */
 import { describe, expect, it } from 'vitest';
-import { depthForWidth, flankHeightAboveTip, grooveRadiusAt, grooveWidthAt, grooveWidthForTool, isVShape, vCone, type VCone } from '@/engine/cnc/vProfile';
+import { coneHeight, depthForWidth, flankHeightAboveTip, grooveRadiusAt, grooveWidthAt, grooveWidthForTool, isVShape, vCone, type VCone } from '@/engine/cnc/vProfile';
 import { flatEndMill, toolFromMkrRecord, type Tool } from '@/engine/cnc/tool';
 
 /** The 30° engraving bit: 30° INCLUDED, so 15° from the axis, 0.3 mm tip, 3.175 mm shank. */
@@ -129,5 +129,54 @@ describe('the flank profile the column engine writes', () => {
     for (const d of [0.25, 1, 2.5]) {
       expect(flankHeightAboveTip(cone, grooveRadiusAt(cone, d))).toBeCloseTo(d, 9);
     }
+  });
+});
+
+/**
+ * #741 — THE FLANK ENDS AT THE BIT'S BODY. The bench bit's `diameter` is the 3.175 mm shank the
+ * cone flares to, so its flank stops at 1.5875 mm radius — 5.3648 mm above the tip. Past that the
+ * body cuts a vertical wall, so the model must not keep opening the V (which is how a 5.1 mm cut
+ * was simulated 10.3 mm wide). All three readers — the width, its inverse, and the column
+ * engine's flank profile — must stop at the SAME radius; this block pins the one owner.
+ */
+describe('the flank ends at the bit’s body (#741)', () => {
+  const cone = vCone(bit30());
+  if (!cone) throw new Error('the bench bit must have a cone');
+  const bodyRadius = 3.175 / 2;
+  const flank = (bodyRadius - 0.15) / Math.tan(Math.PI / 12);
+
+  it('caps the groove’s width at the body diameter', () => {
+    expect(cone.outerRadius).toBeCloseTo(bodyRadius, 9);
+    expect(coneHeight(cone)).toBeCloseTo(flank, 9);
+    expect(grooveWidthAt(cone, flank)).toBeCloseTo(3.175, 9);
+    // Deeper than the cone, the opening is the body's own diameter — not 0.3 + 2·d·tan.
+    expect(grooveWidthAt(cone, flank + 1)).toBeCloseTo(3.175, 9);
+    expect(grooveWidthAt(cone, 50)).toBeCloseTo(3.175, 9);
+    expect(0.3 + 2 * (flank + 1) * Math.tan(Math.PI / 12)).toBeGreaterThan(3.175);
+  });
+
+  it('answers “no depth reaches it” for a width wider than the body', () => {
+    expect(depthForWidth(cone, 3.175)).toBeCloseTo(flank, 9);
+    expect(depthForWidth(cone, 3.2)).toBeNull();
+    expect(depthForWidth(cone, 10)).toBeNull();
+    // Inside the cone the inverse is unchanged.
+    expect(depthForWidth(cone, 0.8359)).toBeCloseTo(1.0, 3);
+  });
+
+  it('leaves no cutter past the body in the flank profile', () => {
+    expect(flankHeightAboveTip(cone, bodyRadius)).toBeCloseTo(flank, 9);
+    expect(flankHeightAboveTip(cone, bodyRadius + 1e-9)).toBe(Infinity);
+    expect(flankHeightAboveTip(cone, 3)).toBe(Infinity);
+  });
+
+  it('leaves a record with no body stated open, as before #741', () => {
+    // The degenerate-record rule: a diameter the width of the tip is not a body. The model keeps
+    // reading an open flank rather than inventing a 0 mm cone (which would forbid every V-cut).
+    const open = vCone({ ...bit30(), diameter: 0.3 })!;
+    expect(open.outerRadius).toBeUndefined();
+    expect(coneHeight(open)).toBeNull();
+    expect(grooveWidthAt(open, 5.1)).toBeCloseTo(0.3 + 2 * 5.1 * Math.tan(Math.PI / 12), 9);
+    expect(depthForWidth(open, 10)).toBeCloseTo((10 - 0.3) / (2 * Math.tan(Math.PI / 12)), 9);
+    expect(flankHeightAboveTip(open, 3)).toBeCloseTo((3 - 0.15) / Math.tan(Math.PI / 12), 9);
   });
 });
