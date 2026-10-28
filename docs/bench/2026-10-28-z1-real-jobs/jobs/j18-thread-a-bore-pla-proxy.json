@@ -1,0 +1,71 @@
+{
+ "schemaVersion": 3,
+ "name": "j18-thread-a-bore-pla-proxy",
+ "machineId": "Z1",
+ "stock": {
+  "length": 40,
+  "width": 30,
+  "thickness": 8,
+  "material": "pla"
+ },
+ "labels": [],
+ "toolKey": "inv:kz-corn-2-0-10-5",
+ "minFloor": 1,
+ "edgeMargin": 1,
+ "customFonts": [],
+ "sacrificial": {
+  "under": null,
+  "sides": {
+   "left": null,
+   "right": null,
+   "front": null,
+   "back": null
+  },
+  "source": "default"
+ },
+ "breakthrough": 0.3,
+ "jawClearance": 1,
+ "shapes": [],
+ "workholding": {
+  "kind": "vise",
+  "vise": {
+   "stockProud": 4,
+   "fixedJawThickness": 10,
+   "movingJawThickness": 10,
+   "jawLength": 100,
+   "jawStartY": -10,
+   "source": "default",
+   "uncertainty": 0.5
+  }
+ },
+ "drills": [
+  {
+   "id": "b0",
+   "kind": "drill",
+   "position": {
+    "x": 12,
+    "y": 15
+   },
+   "rotation": 0,
+   "depth": 6,
+   "enabled": true,
+   "through": false,
+   "mode": "bore",
+   "diameter": 2.6
+  },
+  {
+   "id": "b1",
+   "kind": "drill",
+   "position": {
+    "x": 28,
+    "y": 15
+   },
+   "rotation": 0,
+   "depth": 6,
+   "enabled": true,
+   "through": false,
+   "mode": "bore",
+   "diameter": 2.6
+  }
+ ]
+}

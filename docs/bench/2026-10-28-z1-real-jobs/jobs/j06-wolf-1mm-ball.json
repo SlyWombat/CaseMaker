@@ -1,0 +1,60 @@
+{
+ "schemaVersion": 3,
+ "name": "j06-wolf-1mm-ball",
+ "machineId": "Z1",
+ "stock": {
+  "length": 100,
+  "width": 100,
+  "thickness": 12,
+  "material": "pla"
+ },
+ "labels": [],
+ "toolKey": "inv:kz-ball-nose-1-4",
+ "minFloor": 1,
+ "edgeMargin": 1,
+ "customFonts": [],
+ "sacrificial": {
+  "under": null,
+  "sides": {
+   "left": null,
+   "right": null,
+   "front": null,
+   "back": null
+  },
+  "source": "default"
+ },
+ "breakthrough": 0.3,
+ "jawClearance": 1,
+ "shapes": [],
+ "workholding": {
+  "kind": "vise",
+  "vise": {
+   "stockProud": 5,
+   "fixedJawThickness": 10,
+   "movingJawThickness": 10,
+   "jawLength": 100,
+   "jawStartY": -10,
+   "source": "default",
+   "uncertainty": 0.5
+  }
+ },
+ "targetObject": {
+  "id": "g1",
+  "name": "wolf-relief.stl",
+  "format": "stl",
+  "sha256": "8d6ff1f6fd273f263b875a381c33a54ea1e2c01ea5141ed6f652ce8952b6cc88",
+  "size": {
+   "x": 80,
+   "y": 82.457,
+   "z": 3.5
+  },
+  "position": {
+   "x": 50,
+   "y": 50,
+   "z": 0
+  },
+  "rotation": 180,
+  "enabled": true,
+  "role": "goal"
+ }
+}

@@ -1,0 +1,55 @@
+{
+ "schemaVersion": 3,
+ "name": "j05-sign-pla-proxy",
+ "machineId": "Z1",
+ "stock": {
+  "length": 190,
+  "width": 80,
+  "thickness": 1.6,
+  "material": "pla"
+ },
+ "labels": [
+  {
+   "id": "t1",
+   "text": "CNX Software",
+   "font": "sans-default",
+   "weight": "bold",
+   "size": 20,
+   "position": {
+    "x": 95,
+    "y": 40
+   },
+   "rotation": 0,
+   "depth": 0.4,
+   "enabled": true
+  }
+ ],
+ "toolKey": "inv:kz-o-flute-3-175-25",
+ "minFloor": 1,
+ "edgeMargin": 1,
+ "customFonts": [],
+ "sacrificial": {
+  "under": null,
+  "sides": {
+   "left": null,
+   "right": null,
+   "front": null,
+   "back": null
+  },
+  "source": "default"
+ },
+ "breakthrough": 0.3,
+ "jawClearance": 1,
+ "shapes": [],
+ "workholding": {
+  "kind": "tape",
+  "tape": {
+   "width": 25,
+   "thickness": 0.1,
+   "inset": 2,
+   "where": null,
+   "squareTo": "front",
+   "source": "default"
+  }
+ }
+}

@@ -1,0 +1,130 @@
+{
+ "schemaVersion": 3,
+ "name": "j17-faceplate-alu",
+ "machineId": "Z1",
+ "stock": {
+  "length": 112,
+  "width": 61,
+  "thickness": 3,
+  "material": "aluminium-6061"
+ },
+ "labels": [],
+ "toolKey": "inv:kz-o-flute-m-3-175-12",
+ "minFloor": 1,
+ "edgeMargin": 1,
+ "customFonts": [],
+ "sacrificial": {
+  "under": {
+   "thickness": 6,
+   "overhang": {
+    "left": 0,
+    "right": 0,
+    "front": 0,
+    "back": 0
+   },
+   "attach": "tape"
+  },
+  "sides": {
+   "left": null,
+   "right": null,
+   "front": null,
+   "back": null
+  },
+  "source": "default"
+ },
+ "breakthrough": 0.3,
+ "jawClearance": 1,
+ "shapes": [
+  {
+   "id": "window",
+   "kind": "rect",
+   "position": {
+    "x": 56,
+    "y": 25
+   },
+   "rotation": 0,
+   "depth": 3,
+   "enabled": true,
+   "width": 30,
+   "height": 10,
+   "cornerRadius": 1.6,
+   "through": true
+  }
+ ],
+ "workholding": {
+  "kind": "bracket",
+  "bracket": {
+   "anchor": 1,
+   "variant": "thin",
+   "clamps": [
+    {
+     "edge": "back",
+     "at": 100
+    },
+    {
+     "edge": "right",
+     "at": 50
+    }
+   ],
+   "source": "default"
+  }
+ },
+ "drills": [
+  {
+   "id": "pot0",
+   "kind": "drill",
+   "position": {
+    "x": 28,
+    "y": 40
+   },
+   "rotation": 0,
+   "depth": 3,
+   "enabled": true,
+   "through": true,
+   "mode": "bore",
+   "diameter": 7.2
+  },
+  {
+   "id": "pot1",
+   "kind": "drill",
+   "position": {
+    "x": 56,
+    "y": 40
+   },
+   "rotation": 0,
+   "depth": 3,
+   "enabled": true,
+   "through": true,
+   "mode": "bore",
+   "diameter": 7.2
+  },
+  {
+   "id": "pot2",
+   "kind": "drill",
+   "position": {
+    "x": 84,
+    "y": 40
+   },
+   "rotation": 0,
+   "depth": 3,
+   "enabled": true,
+   "through": true,
+   "mode": "bore",
+   "diameter": 7.2
+  },
+  {
+   "id": "dc",
+   "kind": "drill",
+   "position": {
+    "x": 56,
+    "y": 12
+   },
+   "rotation": 0,
+   "depth": 3,
+   "enabled": true,
+   "through": true,
+   "mode": "bore",
+   "diameter": 8.1
+  }
+ ]
+}

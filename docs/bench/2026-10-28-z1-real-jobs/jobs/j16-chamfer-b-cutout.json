@@ -1,0 +1,80 @@
+{
+ "schemaVersion": 3,
+ "name": "j16-chamfer-b-cutout",
+ "machineId": "Z1",
+ "stock": {
+  "length": 70,
+  "width": 50,
+  "thickness": 6,
+  "material": "pla"
+ },
+ "labels": [],
+ "toolKey": "inv:kz-o-flute-3-175-25",
+ "minFloor": 1,
+ "edgeMargin": 1,
+ "customFonts": [],
+ "sacrificial": {
+  "under": {
+   "thickness": 6,
+   "overhang": {
+    "left": 0,
+    "right": 0,
+    "front": 0,
+    "back": 0
+   },
+   "attach": "tape"
+  },
+  "sides": {
+   "left": null,
+   "right": null,
+   "front": null,
+   "back": null
+  },
+  "source": "default"
+ },
+ "breakthrough": 0.3,
+ "jawClearance": 1,
+ "shapes": [
+  {
+   "id": "part",
+   "kind": "rect",
+   "position": {
+    "x": 35,
+    "y": 25
+   },
+   "rotation": 0,
+   "depth": 6,
+   "enabled": true,
+   "width": 50,
+   "height": 30,
+   "cornerRadius": 4,
+   "construction": true
+  }
+ ],
+ "workholding": {
+  "kind": "tape",
+  "tape": {
+   "width": 25,
+   "thickness": 0.1,
+   "inset": 2,
+   "where": null,
+   "squareTo": "front",
+   "source": "default"
+  }
+ },
+ "cutouts": [
+  {
+   "kind": "cutout",
+   "id": "profile",
+   "enabled": true,
+   "of": "part",
+   "side": "outside",
+   "inset": 0,
+   "tabs": {
+    "count": 2,
+    "width": 4,
+    "height": 1
+   }
+  }
+ ]
+}

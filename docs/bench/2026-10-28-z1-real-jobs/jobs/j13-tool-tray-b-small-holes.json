@@ -1,0 +1,107 @@
+{
+ "schemaVersion": 3,
+ "name": "j13-tool-tray-b-small-holes",
+ "machineId": "Z1",
+ "stock": {
+  "length": 186,
+  "width": 200,
+  "thickness": 19,
+  "material": "pla"
+ },
+ "labels": [],
+ "toolKey": "inv:kz-corn-2-0-10-5",
+ "minFloor": 1,
+ "edgeMargin": 1,
+ "customFonts": [],
+ "sacrificial": {
+  "under": {
+   "thickness": 6,
+   "overhang": {
+    "left": 0,
+    "right": 0,
+    "front": 0,
+    "back": 0
+   },
+   "attach": "tape"
+  },
+  "sides": {
+   "left": null,
+   "right": null,
+   "front": null,
+   "back": null
+  },
+  "source": "default"
+ },
+ "breakthrough": 0.3,
+ "jawClearance": 1,
+ "shapes": [],
+ "workholding": {
+  "kind": "tape",
+  "tape": {
+   "width": 25,
+   "thickness": 0.1,
+   "inset": 2,
+   "where": null,
+   "squareTo": "front",
+   "source": "default"
+  }
+ },
+ "drills": [
+  {
+   "id": "h02",
+   "kind": "drill",
+   "position": {
+    "x": 156.2,
+    "y": 183.0
+   },
+   "rotation": 0,
+   "depth": 10,
+   "enabled": true,
+   "through": false,
+   "mode": "bore",
+   "diameter": 3.3
+  },
+  {
+   "id": "h12",
+   "kind": "drill",
+   "position": {
+    "x": 156.2,
+    "y": 166.2
+   },
+   "rotation": 0,
+   "depth": 10,
+   "enabled": true,
+   "through": false,
+   "mode": "bore",
+   "diameter": 3.3
+  },
+  {
+   "id": "h22",
+   "kind": "drill",
+   "position": {
+    "x": 156.2,
+    "y": 147.8
+   },
+   "rotation": 0,
+   "depth": 10,
+   "enabled": true,
+   "through": false,
+   "mode": "bore",
+   "diameter": 3.3
+  },
+  {
+   "id": "lh2",
+   "kind": "drill",
+   "position": {
+    "x": 161.0,
+    "y": 56.2
+   },
+   "rotation": 0,
+   "depth": 10,
+   "enabled": true,
+   "through": false,
+   "mode": "bore",
+   "diameter": 2.9
+  }
+ ]
+}

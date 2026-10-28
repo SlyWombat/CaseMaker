@@ -1,0 +1,104 @@
+{
+ "schemaVersion": 3,
+ "name": "j11-inlay-female-30v",
+ "machineId": "Z1",
+ "stock": {
+  "length": 80,
+  "width": 80,
+  "thickness": 12,
+  "material": "pla"
+ },
+ "labels": [
+  {
+   "id": "ff",
+   "text": "FF",
+   "font": "serif-default",
+   "weight": "bold",
+   "size": 22,
+   "position": {
+    "x": 40,
+    "y": 40
+   },
+   "rotation": 0,
+   "depth": 5.1,
+   "enabled": true
+  }
+ ],
+ "toolKey": "inv:kz-engrave-30-0-5",
+ "minFloor": 1,
+ "edgeMargin": 1,
+ "customFonts": [],
+ "sacrificial": {
+  "under": null,
+  "sides": {
+   "left": null,
+   "right": null,
+   "front": null,
+   "back": null
+  },
+  "source": "default"
+ },
+ "breakthrough": 0.3,
+ "jawClearance": 1,
+ "shapes": [
+  {
+   "id": "ring-outer",
+   "kind": "circle",
+   "position": {
+    "x": 40,
+    "y": 40
+   },
+   "rotation": 0,
+   "depth": 5.1,
+   "enabled": true,
+   "diameter": 60,
+   "construction": true
+  },
+  {
+   "id": "ring-inner",
+   "kind": "circle",
+   "position": {
+    "x": 40,
+    "y": 40
+   },
+   "rotation": 0,
+   "depth": 5.1,
+   "enabled": true,
+   "diameter": 52,
+   "construction": true
+  }
+ ],
+ "workholding": {
+  "kind": "vise",
+  "vise": {
+   "stockProud": 5,
+   "fixedJawThickness": 10,
+   "movingJawThickness": 10,
+   "jawLength": 100,
+   "jawStartY": -10,
+   "source": "default",
+   "uncertainty": 0.5
+  }
+ },
+ "combined": [
+  {
+   "id": "ring",
+   "kind": "cutaway",
+   "position": {
+    "x": 0,
+    "y": 0
+   },
+   "rotation": 0,
+   "depth": 5.1,
+   "enabled": true,
+   "outer": "ring-outer",
+   "islands": [
+    "ring-inner"
+   ],
+   "inlay": {
+    "role": "female",
+    "glueGapMm": 1.3
+   }
+  }
+ ]
+}

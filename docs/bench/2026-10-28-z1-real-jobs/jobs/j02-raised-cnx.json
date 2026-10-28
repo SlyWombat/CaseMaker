@@ -1,0 +1,106 @@
+{
+ "schemaVersion": 3,
+ "name": "j02-raised-cnx",
+ "machineId": "Z1",
+ "stock": {
+  "length": 100,
+  "width": 90,
+  "thickness": 10,
+  "material": "pla"
+ },
+ "labels": [
+  {
+   "id": "cnx",
+   "text": "CNX",
+   "font": "sans-default",
+   "weight": "bold",
+   "size": 24,
+   "position": {
+    "x": 50,
+    "y": 56
+   },
+   "rotation": 0,
+   "depth": 1.0,
+   "enabled": true,
+   "construction": true
+  },
+  {
+   "id": "software",
+   "text": "Software",
+   "font": "sans-default",
+   "weight": "bold",
+   "size": 14,
+   "position": {
+    "x": 50,
+    "y": 27
+   },
+   "rotation": 0,
+   "depth": 1.0,
+   "enabled": true,
+   "construction": true
+  }
+ ],
+ "toolKey": "inv:kz-o-flute-3-175-25",
+ "minFloor": 1,
+ "edgeMargin": 1,
+ "customFonts": [],
+ "sacrificial": {
+  "under": null,
+  "sides": {
+   "left": null,
+   "right": null,
+   "front": null,
+   "back": null
+  },
+  "source": "default"
+ },
+ "breakthrough": 0.3,
+ "jawClearance": 1,
+ "shapes": [
+  {
+   "id": "field",
+   "kind": "rect",
+   "position": {
+    "x": 50,
+    "y": 45
+   },
+   "rotation": 0,
+   "depth": 1.0,
+   "enabled": true,
+   "width": 92,
+   "height": 82,
+   "cornerRadius": 2,
+   "construction": true
+  }
+ ],
+ "workholding": {
+  "kind": "vise",
+  "vise": {
+   "stockProud": 5,
+   "fixedJawThickness": 10,
+   "movingJawThickness": 10,
+   "jawLength": 100,
+   "jawStartY": -10,
+   "source": "default",
+   "uncertainty": 0.5
+  }
+ },
+ "combined": [
+  {
+   "id": "clear",
+   "kind": "cutaway",
+   "position": {
+    "x": 0,
+    "y": 0
+   },
+   "rotation": 0,
+   "depth": 1.0,
+   "enabled": true,
+   "outer": "field",
+   "islands": [
+    "cnx",
+    "software"
+   ]
+  }
+ ]
+}

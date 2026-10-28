@@ -1,0 +1,104 @@
+{
+ "schemaVersion": 3,
+ "name": "j04-coin-pla-proxy",
+ "machineId": "Z1",
+ "stock": {
+  "length": 32,
+  "width": 32,
+  "thickness": 3,
+  "material": "pla"
+ },
+ "labels": [
+  {
+   "id": "cnx",
+   "text": "CNX",
+   "font": "sans-default",
+   "weight": "bold",
+   "size": 7,
+   "position": {
+    "x": 16,
+    "y": 19.5
+   },
+   "rotation": 0,
+   "depth": 0.4,
+   "enabled": true,
+   "construction": true
+  },
+  {
+   "id": "software",
+   "text": "Software",
+   "font": "sans-default",
+   "weight": "bold",
+   "size": 3.6,
+   "position": {
+    "x": 16,
+    "y": 11.5
+   },
+   "rotation": 0,
+   "depth": 0.4,
+   "enabled": true,
+   "construction": true
+  }
+ ],
+ "toolKey": "inv:kz-corn-1-7",
+ "minFloor": 1,
+ "edgeMargin": 1,
+ "customFonts": [],
+ "sacrificial": {
+  "under": null,
+  "sides": {
+   "left": null,
+   "right": null,
+   "front": null,
+   "back": null
+  },
+  "source": "default"
+ },
+ "breakthrough": 0.3,
+ "jawClearance": 1,
+ "shapes": [
+  {
+   "id": "field",
+   "kind": "circle",
+   "position": {
+    "x": 16,
+    "y": 16
+   },
+   "rotation": 0,
+   "depth": 0.4,
+   "enabled": true,
+   "diameter": 26,
+   "construction": true
+  }
+ ],
+ "workholding": {
+  "kind": "vise",
+  "vise": {
+   "stockProud": 1.5,
+   "fixedJawThickness": 10,
+   "movingJawThickness": 10,
+   "jawLength": 100,
+   "jawStartY": -10,
+   "source": "default",
+   "uncertainty": 0.5
+  }
+ },
+ "combined": [
+  {
+   "id": "clear",
+   "kind": "cutaway",
+   "position": {
+    "x": 0,
+    "y": 0
+   },
+   "rotation": 0,
+   "depth": 0.4,
+   "enabled": true,
+   "outer": "field",
+   "islands": [
+    "cnx",
+    "software"
+   ]
+  }
+ ]
+}

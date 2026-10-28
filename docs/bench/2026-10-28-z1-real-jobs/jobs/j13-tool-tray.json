@@ -1,0 +1,597 @@
+{
+ "schemaVersion": 3,
+ "name": "j13-tool-tray",
+ "machineId": "Z1",
+ "stock": {
+  "length": 186,
+  "width": 200,
+  "thickness": 19,
+  "material": "pla"
+ },
+ "labels": [],
+ "toolKey": "inv:kz-o-flute-3-175-25",
+ "minFloor": 1,
+ "edgeMargin": 1,
+ "customFonts": [],
+ "sacrificial": {
+  "under": {
+   "thickness": 6,
+   "overhang": {
+    "left": 0,
+    "right": 0,
+    "front": 0,
+    "back": 0
+   },
+   "attach": "tape"
+  },
+  "sides": {
+   "left": null,
+   "right": null,
+   "front": null,
+   "back": null
+  },
+  "source": "default"
+ },
+ "breakthrough": 0.3,
+ "jawClearance": 1,
+ "shapes": [
+  {
+   "id": "outline",
+   "kind": "rect",
+   "position": {
+    "x": 93,
+    "y": 100
+   },
+   "rotation": 0,
+   "depth": 19,
+   "enabled": true,
+   "width": 172,
+   "height": 190,
+   "cornerRadius": 6,
+   "construction": true
+  },
+  {
+   "id": "bin0",
+   "kind": "rect",
+   "position": {
+    "x": 27.8,
+    "y": 184.2
+   },
+   "rotation": 0,
+   "depth": 8,
+   "enabled": true,
+   "width": 16,
+   "height": 16,
+   "cornerRadius": 1.6
+  },
+  {
+   "id": "bin1",
+   "kind": "rect",
+   "position": {
+    "x": 49.0,
+    "y": 184.2
+   },
+   "rotation": 0,
+   "depth": 8,
+   "enabled": true,
+   "width": 16,
+   "height": 16,
+   "cornerRadius": 1.6
+  },
+  {
+   "id": "bin2",
+   "kind": "rect",
+   "position": {
+    "x": 70.2,
+    "y": 184.2
+   },
+   "rotation": 0,
+   "depth": 8,
+   "enabled": true,
+   "width": 16,
+   "height": 16,
+   "cornerRadius": 1.6
+  },
+  {
+   "id": "bin3",
+   "kind": "rect",
+   "position": {
+    "x": 91.0,
+    "y": 184.2
+   },
+   "rotation": 0,
+   "depth": 8,
+   "enabled": true,
+   "width": 16,
+   "height": 16,
+   "cornerRadius": 1.6
+  },
+  {
+   "id": "bin4",
+   "kind": "rect",
+   "position": {
+    "x": 27.8,
+    "y": 163.0
+   },
+   "rotation": 0,
+   "depth": 8,
+   "enabled": true,
+   "width": 16,
+   "height": 16,
+   "cornerRadius": 1.6
+  },
+  {
+   "id": "bin5",
+   "kind": "rect",
+   "position": {
+    "x": 49.0,
+    "y": 163.0
+   },
+   "rotation": 0,
+   "depth": 8,
+   "enabled": true,
+   "width": 16,
+   "height": 16,
+   "cornerRadius": 1.6
+  },
+  {
+   "id": "bin6",
+   "kind": "rect",
+   "position": {
+    "x": 70.2,
+    "y": 163.0
+   },
+   "rotation": 0,
+   "depth": 8,
+   "enabled": true,
+   "width": 16,
+   "height": 16,
+   "cornerRadius": 1.6
+  },
+  {
+   "id": "bin7",
+   "kind": "rect",
+   "position": {
+    "x": 91.0,
+    "y": 163.0
+   },
+   "rotation": 0,
+   "depth": 8,
+   "enabled": true,
+   "width": 16,
+   "height": 16,
+   "cornerRadius": 1.6
+  },
+  {
+   "id": "bin8",
+   "kind": "rect",
+   "position": {
+    "x": 27.8,
+    "y": 143.0
+   },
+   "rotation": 0,
+   "depth": 8,
+   "enabled": true,
+   "width": 16,
+   "height": 16,
+   "cornerRadius": 1.6
+  },
+  {
+   "id": "bin9",
+   "kind": "rect",
+   "position": {
+    "x": 49.0,
+    "y": 143.0
+   },
+   "rotation": 0,
+   "depth": 8,
+   "enabled": true,
+   "width": 16,
+   "height": 16,
+   "cornerRadius": 1.6
+  },
+  {
+   "id": "bin10",
+   "kind": "rect",
+   "position": {
+    "x": 70.2,
+    "y": 143.0
+   },
+   "rotation": 0,
+   "depth": 8,
+   "enabled": true,
+   "width": 16,
+   "height": 16,
+   "cornerRadius": 1.6
+  },
+  {
+   "id": "bin11",
+   "kind": "rect",
+   "position": {
+    "x": 91.0,
+    "y": 143.0
+   },
+   "rotation": 0,
+   "depth": 8,
+   "enabled": true,
+   "width": 16,
+   "height": 16,
+   "cornerRadius": 1.6
+  },
+  {
+   "id": "bin12",
+   "kind": "rect",
+   "position": {
+    "x": 27.8,
+    "y": 122.2
+   },
+   "rotation": 0,
+   "depth": 8,
+   "enabled": true,
+   "width": 16,
+   "height": 16,
+   "cornerRadius": 1.6
+  },
+  {
+   "id": "bin13",
+   "kind": "rect",
+   "position": {
+    "x": 49.0,
+    "y": 122.2
+   },
+   "rotation": 0,
+   "depth": 8,
+   "enabled": true,
+   "width": 16,
+   "height": 16,
+   "cornerRadius": 1.6
+  },
+  {
+   "id": "bin14",
+   "kind": "rect",
+   "position": {
+    "x": 70.2,
+    "y": 122.2
+   },
+   "rotation": 0,
+   "depth": 8,
+   "enabled": true,
+   "width": 16,
+   "height": 16,
+   "cornerRadius": 1.6
+  },
+  {
+   "id": "bin15",
+   "kind": "rect",
+   "position": {
+    "x": 91.0,
+    "y": 122.2
+   },
+   "rotation": 0,
+   "depth": 8,
+   "enabled": true,
+   "width": 16,
+   "height": 16,
+   "cornerRadius": 1.6
+  },
+  {
+   "id": "bin16",
+   "kind": "rect",
+   "position": {
+    "x": 27.8,
+    "y": 101.8
+   },
+   "rotation": 0,
+   "depth": 8,
+   "enabled": true,
+   "width": 16,
+   "height": 16,
+   "cornerRadius": 1.6
+  },
+  {
+   "id": "bin17",
+   "kind": "rect",
+   "position": {
+    "x": 49.0,
+    "y": 101.8
+   },
+   "rotation": 0,
+   "depth": 8,
+   "enabled": true,
+   "width": 16,
+   "height": 16,
+   "cornerRadius": 1.6
+  },
+  {
+   "id": "bin18",
+   "kind": "rect",
+   "position": {
+    "x": 70.2,
+    "y": 101.8
+   },
+   "rotation": 0,
+   "depth": 8,
+   "enabled": true,
+   "width": 16,
+   "height": 16,
+   "cornerRadius": 1.6
+  },
+  {
+   "id": "bin19",
+   "kind": "rect",
+   "position": {
+    "x": 91.0,
+    "y": 101.8
+   },
+   "rotation": 0,
+   "depth": 8,
+   "enabled": true,
+   "width": 16,
+   "height": 16,
+   "cornerRadius": 1.6
+  },
+  {
+   "id": "bin20",
+   "kind": "rect",
+   "position": {
+    "x": 27.8,
+    "y": 80.6
+   },
+   "rotation": 0,
+   "depth": 8,
+   "enabled": true,
+   "width": 16,
+   "height": 16,
+   "cornerRadius": 1.6
+  },
+  {
+   "id": "bin21",
+   "kind": "rect",
+   "position": {
+    "x": 49.0,
+    "y": 80.6
+   },
+   "rotation": 0,
+   "depth": 8,
+   "enabled": true,
+   "width": 16,
+   "height": 16,
+   "cornerRadius": 1.6
+  },
+  {
+   "id": "bin22",
+   "kind": "rect",
+   "position": {
+    "x": 70.2,
+    "y": 80.6
+   },
+   "rotation": 0,
+   "depth": 8,
+   "enabled": true,
+   "width": 16,
+   "height": 16,
+   "cornerRadius": 1.6
+  },
+  {
+   "id": "big",
+   "kind": "rect",
+   "position": {
+    "x": 137.0,
+    "y": 99.0
+   },
+   "rotation": 0,
+   "depth": 10,
+   "enabled": true,
+   "width": 67,
+   "height": 71,
+   "cornerRadius": 1.6,
+   "construction": true
+  },
+  {
+   "id": "notch",
+   "kind": "circle",
+   "position": {
+    "x": 111.0,
+    "y": 71.0
+   },
+   "rotation": 0,
+   "depth": 10,
+   "enabled": true,
+   "diameter": 30,
+   "construction": true
+  },
+  {
+   "id": "notchpocket",
+   "kind": "circle",
+   "position": {
+    "x": 111.0,
+    "y": 71.0
+   },
+   "rotation": 0,
+   "depth": 10,
+   "enabled": true,
+   "diameter": 30
+  },
+  {
+   "id": "slot1",
+   "kind": "slot",
+   "position": {
+    "x": 93.0,
+    "y": 42.2
+   },
+   "rotation": 0,
+   "depth": 6,
+   "enabled": true,
+   "length": 155,
+   "width": 5.9
+  },
+  {
+   "id": "slot2",
+   "kind": "slot",
+   "position": {
+    "x": 93.0,
+    "y": 21.0
+   },
+   "rotation": 0,
+   "depth": 6,
+   "enabled": true,
+   "length": 155,
+   "width": 5.9
+  }
+ ],
+ "workholding": {
+  "kind": "tape",
+  "tape": {
+   "width": 25,
+   "thickness": 0.1,
+   "inset": 2,
+   "where": null,
+   "squareTo": "front",
+   "source": "default"
+  }
+ },
+ "combined": [
+  {
+   "id": "bigpocket",
+   "kind": "cutaway",
+   "position": {
+    "x": 0,
+    "y": 0
+   },
+   "rotation": 0,
+   "depth": 10,
+   "enabled": true,
+   "outer": "big",
+   "islands": []
+  }
+ ],
+ "drills": [
+  {
+   "id": "h00",
+   "kind": "drill",
+   "position": {
+    "x": 119.8,
+    "y": 183.0
+   },
+   "rotation": 0,
+   "depth": 10,
+   "enabled": true,
+   "through": false,
+   "mode": "bore",
+   "diameter": 6.7
+  },
+  {
+   "id": "h01",
+   "kind": "drill",
+   "position": {
+    "x": 138.2,
+    "y": 183.0
+   },
+   "rotation": 0,
+   "depth": 10,
+   "enabled": true,
+   "through": false,
+   "mode": "bore",
+   "diameter": 6.7
+  },
+  {
+   "id": "h10",
+   "kind": "drill",
+   "position": {
+    "x": 119.8,
+    "y": 166.2
+   },
+   "rotation": 0,
+   "depth": 10,
+   "enabled": true,
+   "through": false,
+   "mode": "bore",
+   "diameter": 6.7
+  },
+  {
+   "id": "h11",
+   "kind": "drill",
+   "position": {
+    "x": 138.2,
+    "y": 166.2
+   },
+   "rotation": 0,
+   "depth": 10,
+   "enabled": true,
+   "through": false,
+   "mode": "bore",
+   "diameter": 6.7
+  },
+  {
+   "id": "h20",
+   "kind": "drill",
+   "position": {
+    "x": 119.8,
+    "y": 147.8
+   },
+   "rotation": 0,
+   "depth": 10,
+   "enabled": true,
+   "through": false,
+   "mode": "bore",
+   "diameter": 6.7
+  },
+  {
+   "id": "h21",
+   "kind": "drill",
+   "position": {
+    "x": 138.2,
+    "y": 147.8
+   },
+   "rotation": 0,
+   "depth": 10,
+   "enabled": true,
+   "through": false,
+   "mode": "bore",
+   "diameter": 6.7
+  },
+  {
+   "id": "lh0",
+   "kind": "drill",
+   "position": {
+    "x": 83.0,
+    "y": 59.8
+   },
+   "rotation": 0,
+   "depth": 10,
+   "enabled": true,
+   "through": false,
+   "mode": "bore",
+   "diameter": 11.7
+  },
+  {
+   "id": "lh1",
+   "kind": "drill",
+   "position": {
+    "x": 141.0,
+    "y": 57.0
+   },
+   "rotation": 0,
+   "depth": 10,
+   "enabled": true,
+   "through": false,
+   "mode": "bore",
+   "diameter": 5.9
+  }
+ ],
+ "cutouts": [
+  {
+   "kind": "cutout",
+   "id": "profile",
+   "enabled": true,
+   "of": "outline",
+   "side": "outside",
+   "inset": 0,
+   "tabs": {
+    "count": 4,
+    "width": 5,
+    "height": 2
+   }
+  }
+ ]
+}
