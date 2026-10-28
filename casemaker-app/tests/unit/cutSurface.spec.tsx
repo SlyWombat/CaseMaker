@@ -143,6 +143,17 @@ function shelfJob(): EngraveJob {
   return job;
 }
 
+/** #724 W6 — a rod in the chuck: the job whose frozen mount is the FRAME, not the setup's word. */
+function rotaryJob(): EngraveJob {
+  const job = defaultEngraveJob();
+  job.stock = { ...job.stock, length: 100, width: 20, thickness: 20, shape: 'cylinder', diameter: 20, material: 'pla' };
+  job.workholding = {
+    kind: 'rotary-chuck',
+    rotary: { stickout: 85, gripDiameter: null, jawMode: 'reverse-inner', tailstock: true, source: 'test' },
+  };
+  return job;
+}
+
 /** A job whose first setup carries an approved vise registration, so step ③ renders its Start. */
 function plannedJob(): EngraveJob {
   const job = defaultEngraveJob();
@@ -932,6 +943,48 @@ describe('#419 §3 the Cut surface', () => {
       'the programs match the design',
     );
     expect(screen.getByTestId('engrave-package').dataset.state).toBe('current');
+  });
+
+  // #724 W6 — THE FROZEN MOUNT READS THE FRAME. A chuck job's derived setup carries the setups
+  // engine's word (`vise`), because that vocabulary has no rotary (#240). Before this, step 1
+  // said "frozen for the vise" and called the package stale on a machine holding the right thing.
+  it('#724 W6 — a rotary-framed package reads as the rotary it was frozen for, not the setup’s vise', () => {
+    const job = rotaryJob();
+    const rotaryProgram = { ...P1, frame: 'rotary' as const };
+    const pkg = frozen(job, [rotaryProgram]);
+    // The defect's input, stated: the frozen setup itself says vise.
+    expect(pkg.setups[0]?.mount.kind).toBe('vise');
+
+    // On the rotary the job was frozen for there is no disagreement: step 1 is clear, step 2 current.
+    useLocationStore.setState({ status: 'ready', location: locationWith('rotary'), etag: '"loc-1"' } as never);
+    draw({ job, report: reportOf(), pkg, generated: generated([rotaryProgram]) });
+
+    expect(screen.queryByTestId('engrave-cut-mount')).toBeNull();
+    expect(screen.getByTestId('engrave-cut-step-1-summary').textContent).not.toContain('no longer holds');
+    expect(screen.getByTestId('engrave-package').dataset.state).toBe('current');
+  });
+
+  it('#724 W6 — on a machine holding the vise, a rotary-framed package names the rotary', () => {
+    const job = rotaryJob();
+    const rotaryProgram = { ...P1, frame: 'rotary' as const };
+    const pkg = frozen(job, [rotaryProgram]);
+    useLocationStore.setState({ status: 'ready', location: locationWith('vise'), etag: '"loc-1"' } as never);
+    draw({ job, report: reportOf(), pkg, generated: generated([rotaryProgram]) });
+
+    const sentence = screen.getByTestId('engrave-cut-mount-sentence').textContent ?? '';
+    expect(sentence).toContain('frozen for the rotary');
+    expect(sentence).toContain('the vise on the pins');
+
+    // The one action asks the wizard for the rotary, and the request says what the job is frozen for.
+    fireEvent.click(screen.getByTestId('engrave-cut-change-machine'));
+    const request = useMachineChangeStore.getState().request;
+    expect(request.target).toBe('rotary');
+    expect(request.forJob).toEqual({
+      name: job.name,
+      holding: 'frozen for the rotary',
+      frozen: true,
+      frozenMount: 'rotary',
+    });
   });
 });
 

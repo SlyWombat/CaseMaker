@@ -60,6 +60,7 @@ import { useEngraveRunStore } from '@/store/engraveRunStore';
 import {
   ROTARY_NO_MODULE_REFUSAL,
   ROTARY_UNMEASURED_REFUSAL,
+  programFrame,
   requiredAckCodes,
   surfaceRepostBlocker,
   withPeriod,
@@ -371,7 +372,13 @@ export function EngraveCutSurface({
   // gone must not read as current: step 1 names the disagreement with the one action that can fix
   // it, and step 2 treats the package as stale. With no location read there is no profile to
   // judge, and nothing is claimed.
-  const frozenMount = pkg?.setups[0]?.mount.kind ?? null;
+  // #724 W6 — THE FROZEN MOUNT READS THE FRAME. A rotary job's derived setup carries the setups
+  // engine's word for it, and that vocabulary has no rotary (#240): it said `vise`, so step 1 read
+  // a chuck job as "frozen for the vise" and called it GONE on a machine holding exactly the right
+  // thing. The frame each frozen program states is the recorded fact, and it decides the mount.
+  const frozenSetupMount = pkg?.setups[0]?.mount.kind ?? null;
+  const frozenRotary = (pkg?.programs ?? []).some((p) => programFrame(p) === 'rotary');
+  const frozenMount = frozenRotary ? 'rotary' : frozenSetupMount;
   const activeProfile =
     locationMachine === null
       ? null
