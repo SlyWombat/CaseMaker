@@ -74,6 +74,11 @@ export type JobFindingCode =
   | 'depth-exceeds-stock'
   | 'no-items'
   | 'tool-missing'
+  // #740 — a POINTED cutter whose tip the record does not state. A V-bit's tip is the width that
+  // reaches the design; for a chamfer and an engraver `diameter` is the shank, so there is no honest
+  // geometry sentence to write about the item. Raised where the plane model would otherwise judge
+  // it (`item-empty`, `vcarve-groove-too-narrow`), asking for the field instead.
+  | 'tool-tip-unrecorded'
   | 'vise-jaw-collision'
   | 'vise-default'
   | 'vise-stock-not-proud'

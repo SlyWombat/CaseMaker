@@ -230,6 +230,33 @@ export function statedCuttingSize(tool: Tool): number | null {
 }
 
 /**
+ * #740 — true when this is a POINTED cutter (a V-bit) whose TIP the record does not state, so no
+ * honest width can be computed for it.
+ *
+ * `cuttingDiameter` answers `diameter` for these kinds because that is the right best effort when
+ * matching a FILE against a cutter. But Makera writes the 3.175 mm SHANK into `diameter` for an
+ * engraver and a chamfer, and a finding that reads that fallback as the cutting width states a bit
+ * that exists nowhere ("every stroke is thinner than a 3.175 mm 90° V-bit", "A 4.5 mm hole cannot
+ * be cut with a 3.175 mm 90° V-bit"). The geometry both the measurement and the CAM use is the cone
+ * (`vCone`), and for a chamfer with no tip it is a POINT (#669) — an assumption of the kind, not a
+ * size the operator ever recorded.
+ *
+ * This is the ONE place that decides a tip is UNKNOWN. A finding that has to judge a region by the
+ * cutter's width asks this first and, when it is true, asks the operator for the field instead of
+ * writing geometry from the shank. Zero and negative are unstated, the same convention as
+ * {@link statedCuttingSize}.
+ *
+ * A cutter with no resolvable cone is NOT this case: an engraver with no tip and no angle is refused
+ * by the cone's own sentence, which is the more useful refusal, and a chamfer with neither a tip nor
+ * an angle cannot be a cone at all.
+ */
+export function tipNotRecorded(tool: Tool): boolean {
+  if (!isVShape(tool)) return false;
+  if (tool.tipDiameter !== null && tool.tipDiameter > 0) return false;
+  return vCone(tool) !== null;
+}
+
+/**
  * The vendor `g_ID` a tool actually STATES, or null when it has none (#316 review).
  *
  * `Tool.id` is the `id=` field verbatim, and a cutter with no vendor id does not leave the field

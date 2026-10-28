@@ -27,7 +27,7 @@ import {
 import { printedLayerGridOf, voidCeilingFor } from '@/engine/cnc/layerStack';
 import type { JobFinding } from '@/engine/cnc/engrave/jobSetup';
 import { itemLabel } from '@/engine/cnc/engrave/jobSetup';
-import { cuttingDiameter, type Tool } from '@/engine/cnc/tool';
+import { statedCuttingSize, type Tool } from '@/engine/cnc/tool';
 import { vCone } from '@/engine/cnc/vProfile';
 import { aabbOfProfile, pOffset, type Profile } from '@/engine/compiler/profile';
 import type {
@@ -271,7 +271,11 @@ export type LabelRatioAt = (labelId: string, size: number) => number;
  */
 function cutterPhrase(tool: Tool | null): string {
   if (tool === null) return 'the cutter';
-  const diameter = cuttingDiameter(tool);
+  // #740 — the size the record STATES. `cuttingDiameter` answers the shank for an engraver,
+  // chamfer or drill with no tip, and a sentence that called that the cutter would name a width it
+  // does not cut with. A record that states no size gets the cutter without a number, never an
+  // invented one; the worker asks for the tip before an item is judged (`tool-tip-unrecorded`).
+  const diameter = statedCuttingSize(tool);
   if (diameter === null) return 'the cutter';
   const cone = vCone(tool);
   if (cone !== null) return `a ${diameter} mm ${Math.round(cone.halfAngleDeg * 2)}° V-bit`;

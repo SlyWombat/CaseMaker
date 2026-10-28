@@ -50,6 +50,7 @@ import {
   drillPointAngle,
   flatEndMill,
   pointLength,
+  tipNotRecorded,
   traceRadiusAt,
   type Tool,
 } from '@/engine/cnc/tool';
@@ -1393,8 +1394,44 @@ export function engraveRegions(
   // opening ratio and the empty check describe a colour-plane carve it does not make.
   const inlayIds = new Set(plan.engraves.filter((e) => e.inlay !== undefined).map((e) => e.id));
   const derivedIds = new Set((derivedCores ?? []).map((core) => core.id));
+  // #740 — THE PLANE-MODEL ITEMS: the ones the colour-plane reach and groove findings judge. A
+  // variable-depth carve (#665), an inlay (#673) and a prism (#674) have their own geometry — their
+  // flank stands on the design at the top face, not at a colour plane — and a derived core (#677) is
+  // the flat cutter's. Only these ask the cutter for ONE width at the plane, so only these can be
+  // told "the cutter cannot reach it".
+  const planeModelIds = new Set(
+    plan.engraves
+      .filter(
+        (e) =>
+          e.variableDepth !== true &&
+          e.inlay === undefined &&
+          e.prism === undefined &&
+          !derivedIds.has(e.id),
+      )
+      .map((e) => e.id),
+  );
+  // #740 — a pointed cutter whose tip the record does not state has no width to judge an item with.
+  // The cone both the measurement and the CAM read has a POINT there (#669), never the 3.175 mm
+  // shank `cuttingDiameter` falls back to, so every plane sentence written from that fallback would
+  // name a cutter that does not exist. Ask for the tip instead — ONE finding naming the cutter, the
+  // field and its unit — and leave the plane model's sentences unsaid until it is recorded.
+  const tipUnrecorded = tool !== null && planeModelIds.size > 0 && tipNotRecorded(tool);
+  const tipFindings: JobFinding[] =
+    tipUnrecorded && tool !== null
+      ? [
+          {
+            severity: 'error',
+            code: 'tool-tip-unrecorded',
+            message:
+              `The cutter "${tool.name}" records no tip ⌀ (mm). A V-bit cuts with its tip — for a ` +
+              'chamfer or an engraver the diameter field is its shank — so the width it reaches the ' +
+              'design with is unknown. Record the tip ⌀ (mm) for this cutter in Manage → Tools or ' +
+              'in the inventory’s cutter record, then regenerate.',
+          },
+        ]
+      : [];
   const engFindings =
-    measured.length === 0
+    tipUnrecorded || measured.length === 0
       ? []
       : engravabilityFindings(job, measured, ratioAt, tool, shop.lostDetailWarnRatio ?? null).filter(
           (f) =>
@@ -1512,7 +1549,7 @@ export function engraveRegions(
     }
   }
   const carveFindings =
-    cone === null
+    cone === null || tipUnrecorded
       ? []
       : vCarveFindings(
           tl,
@@ -1693,6 +1730,9 @@ export function engraveRegions(
     // its row). `measured` carries each item's OPENED region in map millimetres. Empty for a flat
     // job.
     ...rotaryJobFindings(job, plan, measured),
+    // #740 — the tip the record does not state, in place of the plane sentences that would have
+    // read the shank as the cutter.
+    ...tipFindings,
     ...engFindings,
     ...metalLineFindings(job, tool, catalogue),
     ...carveFindings,
