@@ -50,8 +50,9 @@ import { surfaceLift, type SurfaceFrame } from '@/engine/cnc/engrave/surfacePlan
 import type { ManifoldToplevel } from '../geometry/evaluateOp';
 import { meshOutputOf, type NodeMeshOutput } from '../geometry/meshOutput';
 import { createPlayback, type Playback } from '../geometry/playback';
-import { boxSolid, isDenseForExactSweep, sweepTimeline, unliftTimeline, type SweepDiagnostic, type SweepResult, type SweepStats } from '../geometry/sweep';
+import { boxSolid, isDenseForExactSweep, sweepTimeline, unliftTimeline, type SweepDiagnostic, type SweepOpts, type SweepResult, type SweepStats } from '../geometry/sweep';
 import { columnSweep, type ColumnSweepOk, type DrillPointDefault } from '../geometry/columnEngine';
+import { unionRemoval } from './engraveRest';
 import type { SimThreadSpec } from '@/engine/cnc/cam/threadMill';
 
 export type DiagnosticSource = 'parser' | 'runner' | 'sweep';
@@ -247,16 +248,20 @@ export interface SimLoadOpts {
    */
   calibration?: MachineCalibration | null;
   /**
-   * The material a PREVIOUS program left, as the removal mesh its own sweep produced (#410, the
-   * rest pass). This program is then swept starting from that part rather than from the blank —
-   * see `SweepOpts.priorRemoval`, which is where the subtraction happens. The EXACT sweeper
-   * takes it; a V-bit or a WRAPPED rotary job (the column engine) is REFUSED with
-   * `prior-removal-column`, and an INDEXED rotary job by the exact sweep itself with
+   * The material PREVIOUS programs left, as the removal meshes their own sweeps produced (#410,
+   * the rest pass; #744, every program of a multi-program run). This program is then swept
+   * starting from that part rather than from the blank — see `SweepOpts.priorRemoval`, which is
+   * where the subtraction happens. A single mesh is one earlier program; a LIST is the cumulative
+   * material of several, which this load unions before the exact sweep. An EMPTY list means no
+   * seed (not a rest pass).
+   *
+   * The EXACT sweeper takes it; a V-bit or a WRAPPED rotary job (the column engine) is REFUSED
+   * with `prior-removal-column`, and an INDEXED rotary job by the exact sweep itself with
    * `prior-removal-rotary` (#241) — its prior material would have to be read in the stock frame
    * the faces are turned back into — rather than swept without it, because a rest pass simulated
    * against the wrong stock is a picture of a cut that will not happen.
    */
-  priorRemoval?: NodeMeshOutput;
+  priorRemoval?: NodeMeshOutput | readonly NodeMeshOutput[];
   /**
    * The shop's `drill.pointAngleDeg` as the app read it from the location, for a drill whose record
    * states no point angle (#382). Absent: the registry's labelled fallback (source `fallback`).
@@ -551,6 +556,19 @@ export function createSimSession(tl: ManifoldToplevel, hooks?: SimSessionHooks):
     // rule is exact. A flat load (no surface) is untouched either way.
     const surface = opts?.surface ?? null;
     surfaceFrame = surface;
+    // #744 — the seed may be a LIST (one entry per earlier program). Normalize once, here, so the
+    // routing below asks "is there a seed at all" as one boolean and never as a truthy array: an
+    // EMPTY list must not read as a rest pass, which would take a dense flat job off the column
+    // route and then sweep it from the blank with no seed at all.
+    const priorList: NodeMeshOutput[] =
+      opts?.priorRemoval === undefined
+        ? []
+        : Array.isArray(opts.priorRemoval)
+          ? [...(opts.priorRemoval as readonly NodeMeshOutput[])]
+          : [opts.priorRemoval as NodeMeshOutput];
+    const hasPrior = priorList.length > 0;
+    const routingOpts: SimLoadOpts | undefined =
+      opts === undefined ? undefined : { ...opts, priorRemoval: hasPrior ? priorList : undefined };
     let machine;
     if (machineId !== null) {
       const base = MACHINES[machineId];
@@ -599,11 +617,11 @@ export function createSimSession(tl: ManifoldToplevel, hooks?: SimSessionHooks):
     // the FLAT dexel draws it — `denseFlatRoutesToColumn` gates this on a genuine flat end mill and
     // on its not being a rest pass, so a ball/bull (#532) and a rest pass keep their old refusals.
     const rotaryClass = timeline.summary.rotaryClass;
-    if (rotaryClass === 'wrapped' || sweepsOnColumn(tool) || denseFlatRoutesToColumn(surfaceTimeline, tool, opts)) {
+    if (rotaryClass === 'wrapped' || sweepsOnColumn(tool) || denseFlatRoutesToColumn(surfaceTimeline, tool, routingOpts)) {
       // A rest pass is measured against the material a previous program left, and only the exact
       // sweeper can start from it. Silently sweeping the blank instead would draw a cut nobody is
       // going to make, so the pair is refused by name (#410).
-      if (opts?.priorRemoval) {
+      if (hasPrior) {
         return refuse(
           'prior-removal-column',
           timeline.summary.rotary
@@ -614,7 +632,7 @@ export function createSimSession(tl: ManifoldToplevel, hooks?: SimSessionHooks):
       // #628 — the column engine sweeps the UN-LIFTED (surface-frame) program on the flat stock,
       // exactly as the exact engine does since #625. See the load's comment for why the seat + grid
       // lift this replaces could not be exact.
-      const col = columnSweep(surfaceTimeline, tool, setupArg, opts);
+      const col = columnSweep(surfaceTimeline, tool, setupArg, routingOpts);
       if (!col.ok) {
         // Same contract as a refused exact sweep (#194): keep the runner's work, draw the path,
         // show no material. A rotary refusal owns no wasm handle.
@@ -666,7 +684,26 @@ export function createSimSession(tl: ManifoldToplevel, hooks?: SimSessionHooks):
     }
     // The EXACT 2.5D sweep: the surface-frame (un-lifted) program on the un-seated stock — the flat
     // program the job really is, so the removal and the oracle's band are the flat post's own.
-    const out = sweepTimeline(tl, surfaceTimeline, tool, setupArg, machine ? { ...opts, machine } : opts);
+    // #744 — the exact sweeper takes ONE seed mesh. Union the cumulative list here, in the realm
+    // that owns the wasm toplevel, so the app and the command line share one seed semantic; a
+    // single mesh is passed straight through (no copy) and an invalid one still reaches
+    // `sweep.ts`'s own `prior-removal-invalid` refusal. If the union produced nothing, the first
+    // mesh is passed for the same reason: refuse the seed by name rather than sweep the blank in
+    // silence.
+    // The exact sweeper takes ONE seed mesh (`SweepOpts.priorRemoval`). Drop the list form here and
+    // add the one mesh back below, so the field never carries an array into `sweep.ts` — which
+    // would be a different option shape, not a seed.
+    let baseOpts: SweepOpts | undefined;
+    if (routingOpts !== undefined) {
+      const { priorRemoval: _prior, ...rest } = routingOpts;
+      baseOpts = rest;
+    }
+    let sweepOpts: SweepOpts | undefined = baseOpts;
+    if (hasPrior) {
+      const seed = priorList.length === 1 ? priorList[0]! : unionRemoval(tl, priorList);
+      sweepOpts = { ...baseOpts, priorRemoval: seed ?? priorList[0]! };
+    }
+    const out = sweepTimeline(tl, surfaceTimeline, tool, setupArg, machine ? { ...sweepOpts, machine } : sweepOpts);
     if (!out.ok) {
       // The runner's work is cheap and worth keeping on its own: a refused sweep still yields
       // the path, the pauses and the segments, so the viewport can draw the path with no

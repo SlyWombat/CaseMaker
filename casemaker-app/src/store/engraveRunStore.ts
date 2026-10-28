@@ -30,7 +30,7 @@ import { isVShape } from '@/engine/cnc/vProfile';
 import { feedCatalogueRows, resolvedFeedsTable } from '@/engine/cnc/feeds';
 import type { FeedCatalogueRow } from '@/engine/cnc/feeds';
 import { jobMachine } from '@/engine/cnc/calibration';
-import { getTools } from '@/engine/cnc/toolRegistry';
+import { getTools, entryFor } from '@/engine/cnc/toolRegistry';
 import { inventoryConditions } from '@/engine/cnc/toolCondition';
 import type { MachineCalibration } from '@/engine/cnc';
 import { effectiveMargins } from '@/engine/cnc/engrave/depthBounds';
@@ -58,6 +58,17 @@ import { useToolRegistryStore } from './toolRegistryStore';
 import { useEngraveRegistrationStore } from './engraveRegistrationStore';
 import { drillSettings } from '@/engine/cnc/cam/drillBit';
 import type { EngraveRunPhase } from './engraveRunGate';
+import {
+  programLabel,
+  refusalSummary,
+  sweepPrograms,
+  sweepSummary,
+  type ProgramSweepFailure,
+  type ProgramSweepOutcome,
+  type ProgramSweepSummary,
+  type SweepProgram,
+} from '@/engine/cnc/engrave/programSweep';
+import { simErrors } from '@/engine/cnc/simGate';
 
 /**
  * The gates on the run's result, and the shape they read (#395), from their own module — re-exported
@@ -157,6 +168,12 @@ export interface EngraveRunState {
    * states the grid THIS run was checked on, not whatever the Simulate panel loaded afterwards.
    */
   simGridPitchMm: number | null;
+  /**
+   * #744 — EVERY program's sweep result, in cut order, for the panels and the run sheet. The
+   * diagnostics are unprefixed here; `simDiagnostics` is the attributed projection the gate reads.
+   * Empty before a run, and for a run whose first load never produced a sweep.
+   */
+  simPrograms: ProgramSweepSummary[];
   phase: EngraveRunPhase;
   /** The clearance acknowledgement (see `ACKNOWLEDGE_CODES`), reset on every Generate. */
   acknowledged: boolean;
@@ -201,6 +218,7 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
     pathOnly: false,
     simEngine: null as 'exact' | 'column' | null,
     simGridPitchMm: null as number | null,
+    simPrograms: [] as ProgramSweepSummary[],
     acknowledged: false,
     staleSince: null as number | null,
     staleReason: null as EngraveInputKey | null,
@@ -400,81 +418,185 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
     }
 
     set({ phase: 'simulating' });
+
+    // #744 — ONE SWEEP PER PROGRAM, IN CUT ORDER, ON THE STOCK THE EARLIER ONES LEFT. The walk is
+    // the command line's own (`engine/cnc/engrave/programSweep.ts`, #733 item 4 extracted, so the
+    // two realms cannot disagree). This adapter supplies what is THIS realm's: the worker load,
+    // the setup, the machine and the package's frame and floor, and the oracle while the first
+    // engraving program is still the session's live one.
+    const setup = toSetup(job, jobMachine(job, calibration), mount?.fixture, bed);
+    const firstEngravingIndex = generated.programs.findIndex((p) => (p.kind ?? 'engrave') !== 'facing');
+    const multiProgram = generated.programs.length > 1;
+    // #445 §4 — the thread facts belong to the first engraving program, the one
+    // `generated.threads` describes; a facing pass or a later program states none.
+    const threadsFor = (index: number) =>
+      index === firstEngravingIndex ? (generated.threads?.flatMap((t) => t.simThreads) ?? []) : [];
+    // A holder, not a `let`: the assignment happens inside the walk's `afterLoad` callback, which
+    // TypeScript's control-flow analysis cannot see through.
+    const oracleBox: { report: OracleReport | null } = { report: null };
+    let outcome: ProgramSweepOutcome;
     try {
-      await useSimStore
-        .getState()
-        .loadProgram(
-          generated.nc,
-          // #725 B7 — the wasteboard is the setup's under-board for a bed job: a through cut may
-          // enter it, and the sweep's bed floor is the board's underside.
-          toSetup(job, jobMachine(job, calibration), mount?.fixture, bed),
-          tool,
-          job.machineId,
-          calibration,
-          // The threads this program mills (#445 §4): plain dimensions the column engine can state
-          // the annular band from. Empty for every non-thread job, leaving today's behaviour.
-          generated.threads?.flatMap((t) => t.simThreads) ?? [],
-          // #434 — the point angle the drill PLAN used, when this program is a drill bit's: the
-          // column engine sweeps the point the CAM planned instead of re-reading the setting.
-          generated.drill?.simDrillPoint ?? null,
-          // #506 — this load belongs to the engrave run, not the Simulate panel. Both share
-          // `simStore` (so the viewport shows the sweep); the origin is what stops the panel
-          // presenting this finished Result under its own empty file row.
-          'engrave',
-          // #623 — the package's OWN frame, not the `surface` argument this call was made with:
-          // the generator decides whether a program is posted against the fitted plane (a pure
-          // goal job, for one, is not), and the simulation must be seated and judged in the frame
-          // the file actually speaks. `generated.surface` is that answer; null is a flat post.
-          generated.surface ?? null,
-          // #629 — half the job's smallest level step, from the predicted items' distinct depths,
-          // so the column engine names a ramp that crosses a level (null for a non-column job).
-          rampThresholdMm(generated.predicted, tool),
-          // #734 — the floor the CAM posted a through move against: `thickness + breakthrough`.
-          // Without it the sweep's floor is the blank's bottom and a correct through cut reads as
-          // a rapid through material (j17's false `rapid-through-stock`).
-          job.breakthrough,
-        );
+      outcome = await sweepPrograms<SweepProgram>({
+        programs: generated.programs,
+        // The sim store applies the shop's `drill.pointAngleDeg` when a program states no point,
+        // so this realm's fallback is null (the command line reads the shop itself).
+        shopDrillPoint: null,
+        cutterFor: (program) =>
+          program.toolKey === job.toolKey ? tool : (entryFor(program.toolKey)?.tool ?? null),
+        load: async ({ program, index, cutter, drillPoint, priorRemoval }) => {
+          try {
+            const result = await useSimStore.getState().loadProgram(
+              program.nc,
+              // #725 B7 — the wasteboard is the setup's under-board for a bed job: a through cut
+              // may enter it, and the sweep's bed floor is the board's underside.
+              setup,
+              cutter,
+              job.machineId,
+              calibration,
+              threadsFor(index),
+              // #434 — THIS program's planned point; the store falls back to the shop's for null.
+              drillPoint,
+              // #506 — this load belongs to the engrave run, not the Simulate panel. Both share
+              // `simStore` (so the viewport shows the sweep); the origin is what stops the panel
+              // presenting this finished Result under its own empty file row.
+              'engrave',
+              // #623 — the package's OWN frame, not the `surface` argument this call was made with.
+              generated.surface ?? null,
+              // #629 — the ramp the column engine should name, for THIS cutter.
+              rampThresholdMm(generated.predicted, cutter),
+              // #734 — the floor the CAM posted a through move against.
+              job.breakthrough,
+              // #744 — the cumulative stock the earlier programs left.
+              priorRemoval,
+            );
+            if (result !== null) return result;
+            const sim = useSimStore.getState();
+            // null means this load no longer owns the session: a newer run/panel load stopped it
+            // (the walk stops quietly), or the worker failed (block, naming this program).
+            if (sim.status !== 'error') return null;
+            return {
+              ok: false as const,
+              pathOnly: false,
+              diagnostics: [
+                {
+                  source: 'sweep' as const,
+                  severity: 'error' as const,
+                  code: 'sim-error',
+                  message: `${programLabel(generated.programs, index)}: ${sim.error ?? 'the simulation failed'}`,
+                },
+              ],
+            };
+          } catch (e) {
+            return {
+              ok: false as const,
+              pathOnly: false,
+              diagnostics: [
+                {
+                  source: 'sweep' as const,
+                  severity: 'error' as const,
+                  code: 'sim-error',
+                  message: `${programLabel(generated.programs, index)}: ${e instanceof Error ? e.message : String(e)}`,
+                },
+              ],
+            };
+          }
+        },
+        afterLoad: async ({ index }) => {
+          // THE PREDICTION IS THE FIRST ENGRAVING PROGRAM'S. The oracle compares it against the
+          // sweep of THAT program, so it runs while that program is still the session's live one —
+          // the walk awaits this hook before loading the next.
+          if (index === firstEngravingIndex) oracleBox.report = await client.simOracle(generated.predicted);
+        },
+        aborted: () => mine !== seq,
+      });
     } catch (e) {
       if (mine === seq) set({ phase: 'blocked', error: e instanceof Error ? e.message : String(e) });
       return;
     }
     if (mine !== seq) return;
 
+    // The unattributed facts first, then the one projection the gate reads. In a MULTI-program run
+    // every diagnostic carries its program's label, so Save/Upload/Release return the failing
+    // program's own sentence; a single-program run keeps exactly the text it has always had.
+    const summaries: ProgramSweepSummary[] = outcome.sweeps.map(sweepSummary);
+    if (!outcome.ok && outcome.failed !== null) {
+      const failure: ProgramSweepFailure = outcome.failed;
+      if (failure.sweep !== null) {
+        summaries.push(sweepSummary(failure.sweep));
+      } else {
+        // The program that stopped the walk produced no sweep. Its refusal is still a reason, and
+        // the gate has to name the program — so a refusal with no error text gains one.
+        const diagnostics =
+          simErrors(failure.diagnostics).length > 0
+            ? failure.diagnostics
+            : [
+                ...failure.diagnostics,
+                { source: 'sweep' as const, severity: 'error' as const, code: 'simulation-refused', message: 'the simulation refused this program' },
+              ];
+        summaries.push(refusalSummary({ ...failure, diagnostics }));
+      }
+    }
+    const attribute = (summary: ProgramSweepSummary): SimDiagnostic[] => {
+      const load = multiProgram
+        ? summary.diagnostics.map((d) => ({
+            ...d,
+            // A diagnostic that already names its program (the walk's `no-cutter` sentence) is not
+            // given the label a second time.
+            message: d.message.startsWith(summary.label) ? d.message : `${summary.label}: ${d.message}`,
+          }))
+        : summary.diagnostics;
+      // The from-blank note names its program itself; prefixing it would say it twice.
+      return [...load, ...summary.notes];
+    };
+    const simDiagnostics = summaries.flatMap(attribute);
+    const firstSwept = summaries.find((s) => s.index === firstEngravingIndex) ?? summaries[0] ?? null;
     const sim = useSimStore.getState();
-    if (sim.status !== 'ready') {
-      set({ phase: 'blocked', simStatus: sim.status, simDiagnostics: sim.diagnostics, pathOnly: sim.pathOnly, error: sim.status === 'error' ? sim.error : null });
+
+    if (!outcome.ok) {
+      set({
+        phase: 'blocked',
+        simPrograms: summaries,
+        simDiagnostics,
+        // A sweep that RAN with errors is 'ready' — the gate reads the errors. Only a refusal (or a
+        // worker failure) is anything else, exactly as the single-program run has always read it.
+        simStatus: outcome.failed?.kind === 'diagnostics' ? 'ready' : sim.status === 'error' ? 'error' : 'refused',
+        pathOnly: outcome.failed?.pathOnly ?? false,
+        simEngine: firstSwept?.engine ?? null,
+        simGridPitchMm: firstSwept?.gridPitchMm ?? null,
+        error: sim.status === 'error' ? sim.error : null,
+      });
       return;
     }
-    set({ phase: 'checking', simStatus: sim.status, simDiagnostics: sim.diagnostics, pathOnly: sim.pathOnly, simEngine: sim.info?.stats.engine ?? null });
-    // #535 — the grid the sweep ran on, for a goal program's check sentence. `resolution.dThetaDeg`
-    // is the FLAT Y pitch in mm; on a rotary grid it is degrees, so it is null there.
-    const gridPitch =
-      sim.info?.stats.engine === 'column' &&
-      sim.info.summary.rotary !== true &&
-      typeof sim.info.stats.resolution?.dThetaDeg === 'number'
-        ? sim.info.stats.resolution.dThetaDeg
-        : null;
-    set({ simGridPitchMm: gridPitch });
-    // #535 — THE CHECK RECORDS THE SWEEP THAT RAN. A surface program's check was written at
-    // generate time with the heightfield pitch; the dexel grid is the simulation's own (sometimes
-    // coarser, often the same), and the frozen package must state the grid the material was
-    // actually swept on. The program is the result's own entry, so every reader (the Cut screen,
-    // the release step, the upload gate) sees the stamped value.
+
+    set({
+      phase: 'checking',
+      simStatus: 'ready',
+      simDiagnostics,
+      pathOnly: false,
+      simEngine: firstSwept?.engine ?? null,
+      simGridPitchMm: firstSwept?.gridPitchMm ?? null,
+      simPrograms: summaries,
+    });
+    // #535 — THE CHECK RECORDS THE SWEEP THAT RAN, PER PROGRAM. Each surface program states the dexel
+    // grid ITS OWN sweep used (a later program can be a different engine from the first).
     if (generated.programs.some((p) => p.surfaceCheck != null)) {
+      const pitch = new Map(summaries.map((s) => [s.index, s.gridPitchMm] as const));
       set({
         generated: {
           ...generated,
-          programs: generated.programs.map((p) =>
-            p.surfaceCheck == null
-              ? p
-              : { ...p, surfaceCheck: { ...p.surfaceCheck, gridPitchMm: gridPitch } },
+          programs: generated.programs.map((p, i) =>
+            p.surfaceCheck == null ? p : { ...p, surfaceCheck: { ...p.surfaceCheck, gridPitchMm: pitch.get(i) ?? null } },
           ),
         },
       });
     }
 
     try {
-      const oracle = await client.simOracle(generated.predicted);
+      // The walk ran the oracle while program 1 was live. A run with no first engraving program
+      // cannot reach here (`generated.nc` IS that program), but say so rather than compare the
+      // wrong session.
+      if (oracleBox.report === null) throw new Error('the prediction was not checked');
+      const oracle = oracleBox.report;
       if (mine !== seq) return;
       set({ oracle, phase: oracle.ok ? 'ready' : 'blocked' });
     } catch (e) {
@@ -490,6 +612,7 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
     pathOnly: false,
     simEngine: null,
     simGridPitchMm: null,
+    simPrograms: [],
     phase: 'idle',
     acknowledged: false,
     staleSince: null,

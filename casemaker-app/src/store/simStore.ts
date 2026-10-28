@@ -24,7 +24,8 @@ import { stepAtTime, timeAtStep, totalTime } from '@/engine/cnc/playbackClock';
 import { generateRestart as buildRestart, stockFromSetup, type RestartResult } from '@/engine/cnc/restart';
 import type { Tool } from '@/engine/cnc/tool';
 import { checkpointAtStep } from '@/components/viewport/simGeometry';
-import type { SimDiagnostic, SimFrame, SimLoadOk, SimPath } from '@/workers/sim/session';
+import type { SimDiagnostic, SimFrame, SimLoadOk, SimLoadResult, SimPath } from '@/workers/sim/session';
+import type { NodeMeshOutput } from '@/workers/geometry/meshOutput';
 import type { SurfaceFrame } from '@/engine/cnc/engrave/surfacePlane';
 // Type-only: erased at build time, so it does not pull the worker client into the graph.
 import type { SimLoadPhase } from '@/engine/jobs/simClient';
@@ -222,7 +223,14 @@ export interface SimState {
      * blank's bottom, unchanged for every non-engrave load.
      */
     breakthroughMm?: number | null,
-  ): Promise<void>;
+    /**
+     * #744 — the material earlier programs of this run left, one removal mesh each. Every program
+     * after the first is swept on the stock the earlier ones left; the session unions the list.
+     * Omitted/null/empty: the blank. The RETURNED result is what the multi-program walk reads;
+     * `null` means this load no longer owned the session (a newer load superseded it).
+     */
+    priorRemoval?: NodeMeshOutput | readonly NodeMeshOutput[] | null,
+  ): Promise<SimLoadResult | null>;
   /** Run the last load again with twice the time limit (#194). No-op when nothing has been loaded. */
   retryWithLongerBudget(): Promise<void>;
   /**
@@ -353,11 +361,16 @@ interface LoadArgs {
    * not an engrave job, which keeps the pre-#734 blank-bottom floor.
    */
   breakthroughMm: number | null;
+  /**
+   * #744 — the cumulative removal earlier programs of this run left, one mesh each. Kept with the
+   * load for the same reason `surface` is: a retry judges the same stock the program was cut on.
+   */
+  priorRemoval: NodeMeshOutput[] | null;
 }
 let lastLoad: LoadArgs | null = null;
 
 export const useSimStore = create<SimState>()((set, get) => {
-  async function run(args: LoadArgs, budgetMs: number): Promise<void> {
+  async function run(args: LoadArgs, budgetMs: number): Promise<SimLoadResult | null> {
     const mine = ++loadSeq;
     // A load starts the session's speed at the shop's seed, as it always reset to 20 before #451.
     set({ ...EMPTY, speed: startingSpeed(), status: 'loading', budgetMs, phase: 'sweep', origin: args.origin, loadedProgram: args.gcodeText, loadedAt: Date.now(), tool: args.tool });
@@ -389,30 +402,31 @@ export const useSimStore = create<SimState>()((set, get) => {
         surface: args.surface,
         rampThresholdMm: args.rampThresholdMm,
         breakthroughMm: args.breakthroughMm,
+        priorRemoval: args.priorRemoval,
       });
-      if (mine !== loadSeq) return; // superseded by a newer load or a dispose
+      if (mine !== loadSeq) return null; // superseded by a newer load or a dispose
       if (!r.ok) {
         set({ status: 'refused', diagnostics: r.diagnostics, pathOnly: r.pathOnly, progress: null, phase: null, info: null });
         // A path-only session owns no material but DOES own the timeline, so the path can be drawn
         // with no stock (#194). Fetch it after the state is set so the panel shows immediately.
         if (r.pathOnly) {
           const path = await client.simPath();
-          if (mine === loadSeq)
-            set({
-              path,
-              step: Math.max(0, (r.summary?.steps ?? 1) - 1),
-              stepCount: r.summary?.steps ?? 1,
-              pauses: r.pauses ?? [],
-              seconds: totalTime(path),
-            });
+          if (mine !== loadSeq) return null;
+          set({
+            path,
+            step: Math.max(0, (r.summary?.steps ?? 1) - 1),
+            stepCount: r.summary?.steps ?? 1,
+            pauses: r.pauses ?? [],
+            seconds: totalTime(path),
+          });
         }
-        return;
+        return r;
       }
       const { ok: _ok, diagnostics, meshes, ...info } = r;
       // One fetch of the whole path, once per load (#197). Fetched before `status: 'ready'` so the
       // first render already has it; the step defaults to the last one, i.e. the finished part.
       const path = await client.simPath();
-      if (mine !== loadSeq) return;
+      if (mine !== loadSeq) return null;
       const stepCount = info.summary.steps ?? 1;
       set({
         status: 'ready',
@@ -427,8 +441,10 @@ export const useSimStore = create<SimState>()((set, get) => {
         progress: null,
         phase: null,
       });
+      return r;
     } catch (e) {
       if (mine === loadSeq) set({ status: 'error', error: e instanceof Error ? e.message : String(e), progress: null, phase: null });
+      return null;
     }
   }
 
@@ -436,7 +452,7 @@ export const useSimStore = create<SimState>()((set, get) => {
     ...EMPTY,
     speed: startingSpeed(),
     budgetMs: startingBudgetMs(),
-    async loadProgram(gcodeText, setup, tool, machineId, calibrationOverride, threads = [], drillPointDefault = null, origin = 'panel', surface = null, rampThresholdMm = null, breakthroughMm = null) {
+    async loadProgram(gcodeText, setup, tool, machineId, calibrationOverride, threads = [], drillPointDefault = null, origin = 'panel', surface = null, rampThresholdMm = null, breakthroughMm = null, priorRemoval = null) {
       // The saved read of the machine's own frame, if the user has one (#279). Resolved HERE so
       // every load path — a panel, the engrave run, the QA harness — simulates the same machine,
       // and so a retry or a restart cannot drift onto a different frame than the job was loaded on.
@@ -471,8 +487,9 @@ export const useSimStore = create<SimState>()((set, get) => {
         surface,
         rampThresholdMm,
         breakthroughMm,
+        priorRemoval: priorRemoval === null ? null : Array.isArray(priorRemoval) ? [...priorRemoval] : [priorRemoval as NodeMeshOutput],
       };
-      await run(lastLoad, fresh ? startingBudgetMs() : get().budgetMs);
+      return run(lastLoad, fresh ? startingBudgetMs() : get().budgetMs);
     },
     async retryWithLongerBudget() {
       if (!lastLoad) return;

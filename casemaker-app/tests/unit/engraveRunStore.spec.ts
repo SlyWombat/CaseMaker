@@ -94,9 +94,38 @@ function clean(): EngraveGenerated {
     facingError: null,
   facingCam: null,
     predicted: [],
-    programs: [],
+    // #744 — a run of one program is the shape the walk reads; `nc` above is that program's file.
+    programs: [
+      {
+        setupIndex: 1,
+        setupId: 'setup-1',
+        toolKey: 'flat-1.0',
+        nc: 'G90\nM02',
+        verify: null,
+        frameNc: null,
+        frameVerify: null,
+        programHash: 'clean-program',
+        cam: null,
+      },
+    ],
     errors: [],
   };
+}
+
+/**
+ * What a fake `loadProgram` hands the sweep (#744): a swept program with no findings. The store
+ * reads the RESULT now (it walks every program), not only the sim store's published state.
+ */
+function swept(over: Partial<SimLoadOk> = {}): SimLoadOk {
+  return {
+    ok: true,
+    diagnostics: [],
+    summary: { rotary: false },
+    stats: { engine: 'exact', removedVolume: 0 },
+    count: 1,
+    meshes: { removal: null },
+    ...over,
+  } as unknown as SimLoadOk;
 }
 
 describe('engraveRunStore (#206)', () => {
@@ -250,7 +279,7 @@ describe('engraveRunStore (#206)', () => {
 
     it('the store captures the FLAT grid the sweep ran on, and no grid for a rotary one', async () => {
       const load = useSimStore.getState().loadProgram;
-      const ready = (rotary: boolean): void => {
+      const ready = (rotary: boolean): SimLoadOk => {
         useSimStore.setState({
           status: 'ready',
           diagnostics: [],
@@ -260,6 +289,10 @@ describe('engraveRunStore (#206)', () => {
             summary: { rotary },
           } as unknown as SimLoadOk,
         });
+        return swept({
+          stats: { engine: 'column', removedVolume: 0, resolution: { dx: 0.1, dThetaDeg: 0.12 } },
+          summary: { rotary },
+        } as unknown as Partial<SimLoadOk>);
       };
       try {
         useSimStore.setState({
@@ -502,6 +535,7 @@ describe('engraveRunStore (#206)', () => {
     useSimStore.setState({
       loadProgram: async () => {
         loads += 1;
+        return swept();
       },
     });
     setEngraveRunClientLoader(async () => ({
@@ -539,6 +573,7 @@ describe('engraveRunStore (#206)', () => {
     useSimStore.setState({
       loadProgram: async (_nc, _setup, _tool, _id, calibration) => {
         loadedWith = calibration;
+        return swept();
       },
     });
     setEngraveRunClientLoader(async () => ({
@@ -566,6 +601,7 @@ describe('engraveRunStore (#206)', () => {
     useSimStore.setState({
       loadProgram: async (_nc, _setup, _tool, _id, _cal, _threads, _drill, _origin, _surface, threshold) => {
         loadedThreshold = threshold;
+        return swept();
       },
     });
     const generated: EngraveGenerated = {
@@ -575,6 +611,9 @@ describe('engraveRunStore (#206)', () => {
         { depth: 2, polygons: [] },
         { depth: 3, polygons: [] },
       ],
+      // #744 — the program names the job's own cutter; the sweep resolves it from the job, not
+      // from the registry the rest of this fake package happens to name.
+      programs: [{ ...clean().programs[0]!, toolKey: 'inv:engrave-30-0-5' }],
     };
     setEngraveRunClientLoader(async () => ({
       engraveGenerate: async () => generated,
@@ -629,6 +668,7 @@ describe('engraveRunStore (#206)', () => {
       useSimStore.setState({
         loadProgram: async () => {
           useSimStore.setState({ status: 'ready', diagnostics: [], pathOnly: false });
+          return swept();
         },
       });
       setEngraveRunClientLoader(async () => ({
@@ -751,6 +791,7 @@ describe('engraveRunStore (#206)', () => {
     useSimStore.setState({
       loadProgram: async () => {
         loads += 1;
+        return swept();
       },
     });
     setEngraveRunClientLoader(async () => ({
@@ -812,6 +853,7 @@ describe('engraveRunStore (#206)', () => {
     useSimStore.setState({
       loadProgram: async (_nc, _setup, _tool, _id, calibration) => {
         loadedWith = calibration;
+        return swept();
       },
     });
     setEngraveRunClientLoader(async () => ({
@@ -1046,5 +1088,117 @@ describe('#642 the run watches every input it stamps', () => {
       .getState()
       .record(useEngraveJobStore.getState().job.id, TARGET, {} as never, {} as never, null);
     expect(useEngraveRunStore.getState().staleSince).toBeNull();
+  });
+
+  // #744 — THE APP'S HALF OF THE PER-PROGRAM SWEEP. Before this, only program 1 was loaded, so a
+  // later cutter's rapid through stock (or its cutter, or its drill point) was never checked.
+  describe('#744 every program is swept, and a failure names its program', () => {
+    const OK = { ok: true, band: 0.016, levels: [], worst: { underCut: 0, overCut: 0 } };
+    function prog(
+      toolKey: string,
+      nc: string,
+      extra: Partial<EngraveGenerated['programs'][number]> = {},
+    ): EngraveGenerated['programs'][number] {
+      return {
+        setupIndex: 1,
+        setupId: 'setup-1',
+        toolKey,
+        nc,
+        verify: null,
+        frameNc: null,
+        frameVerify: null,
+        programHash: `hash-${nc}`,
+        cam: null,
+        ...extra,
+      };
+    }
+    /** A two-cutter job: the job's own 1 mm flat, then a second setup's 3.175 mm flat. */
+    function twoCutters(): EngraveGenerated {
+      return { ...clean(), programs: [prog('flat-1.0', 'G90 P1'), prog('flat-3.175x12-metal', 'G90 P2')] };
+    }
+
+    it('a second program’s rapid through stock blocks Save, Upload and Release, naming that program', async () => {
+      const realLoad = useSimStore.getState().loadProgram;
+      const rapid = {
+        source: 'sweep' as const,
+        severity: 'error' as const,
+        code: 'rapid-through-stock',
+        message: 'a rapid passes through 2.01 mm³ of stock (line 7)',
+      };
+      useSimStore.setState({
+        loadProgram: async (nc) => {
+          if (nc === 'G90 P1') return swept();
+          useSimStore.setState({ status: 'ready', diagnostics: [rapid], pathOnly: false });
+          return swept({ diagnostics: [rapid] } as unknown as Partial<SimLoadOk>);
+        },
+      });
+      setEngraveRunClientLoader(async () => ({ engraveGenerate: async () => twoCutters(), simOracle: async () => OK }));
+      try {
+        await useEngraveRunStore.getState().generate();
+      } finally {
+        useSimStore.setState({ loadProgram: realLoad });
+      }
+      const state = useEngraveRunStore.getState();
+      expect(state.phase).toBe('blocked');
+      // EVERY program's result is kept, in cut order, not just the first.
+      expect(state.simPrograms.map((s) => s.label)).toEqual([
+        'program 1 (flat-1.0)',
+        'program 2 (flat-3.175x12-metal)',
+      ]);
+      const sentence = 'program 2 (flat-3.175x12-metal): a rapid passes through 2.01 mm³ of stock (line 7)';
+      expect(saveBlocker(state)).toBe(sentence);
+      expect(uploadBlocker(state)).toBe(sentence);
+      expect(releaseBlocker(state)).toBe(sentence);
+      expect(state.simDiagnostics.map((d) => d.message)).toContain(sentence);
+    });
+
+    it('hands each program its own cutter and drill point, and the stock the earlier one left', async () => {
+      const POINT = { deg: 118, source: 'the drill plan' };
+      const REMOVAL = {
+        positions: new Float32Array(),
+        indices: new Uint32Array(),
+        vertexCount: 0,
+        triangleCount: 0,
+        bbox: { min: [0, 0, 0] as [number, number, number], max: [0, 0, 0] as [number, number, number] },
+      };
+      const seen: {
+        nc: string;
+        cutter: Tool;
+        drill: { deg: number; source: string } | null;
+        seed: readonly unknown[];
+      }[] = [];
+      const realLoad = useSimStore.getState().loadProgram;
+      useSimStore.setState({
+        loadProgram: async (nc, _setup, cutter, _machine, _cal, _threads, drill, _origin, _surface, _ramp, _floor, seed) => {
+          // The store hands the walk's list through; the session is what accepts one mesh or many.
+          const seeds = seed === null || seed === undefined ? [] : Array.isArray(seed) ? seed : [seed];
+          seen.push({ nc, cutter, drill: drill ?? null, seed: seeds });
+          return swept({
+            meshes: { removal: nc === 'G90 P1' ? REMOVAL : null },
+          } as unknown as Partial<SimLoadOk>);
+        },
+      });
+      const generated = twoCutters();
+      generated.programs[1] = {
+        ...generated.programs[1]!,
+        drill: { simDrillPoint: POINT } as never,
+      };
+      setEngraveRunClientLoader(async () => ({ engraveGenerate: async () => generated, simOracle: async () => OK }));
+      try {
+        await useEngraveRunStore.getState().generate();
+      } finally {
+        useSimStore.setState({ loadProgram: realLoad });
+      }
+      expect(seen).toHaveLength(2);
+      // The job's own cutter for the job's key; the registry's for a setup's later key.
+      expect(seen[0]!.cutter.diameter).toBe(1.0);
+      expect(seen[1]!.cutter.diameter).toBeCloseTo(3.175);
+      // The second program's own plan point, not the first's and not a shop fallback.
+      expect(seen[0]!.drill).toBeNull();
+      expect(seen[1]!.drill).toEqual(POINT);
+      // The second sweep starts on the stock the first left.
+      expect(seen[0]!.seed).toEqual([]);
+      expect(seen[1]!.seed).toEqual([REMOVAL]);
+    });
   });
 });

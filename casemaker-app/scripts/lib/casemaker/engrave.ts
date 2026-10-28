@@ -98,7 +98,8 @@ import {
 import { releaseFileName } from '../../../src/engine/cnc/engrave/release';
 import { drillSettings } from '../../../src/engine/cnc/cam/drillBit';
 import { parseEngraveJob } from '../../../src/store/engraveJobSchema';
-import { simErrors, simulationProblem } from '../../../src/engine/cnc/simGate';
+import { simulationProblem } from '../../../src/engine/cnc/simGate';
+import { sweepPrograms } from '../../../src/engine/cnc/engrave/programSweep';
 import { buildCouponPrograms, type CouponRecord, type CouponRecordRow, type CouponSpec } from '../../../src/engine/cnc/engrave/couponJob';
 import { entryFor, getTools } from '../../../src/engine/cnc/toolRegistry';
 import {
@@ -673,7 +674,7 @@ async function engraveJobBody(argv: string[], options: CommandOptions): Promise<
    * material that sweep says was removed. So the pipeline runs twice, with the second sweep seeded by
    * the first's result, and only then is anything written.
    */
-  function prepare(job: EngraveJob, opts: { priorRemoval?: NodeMeshOutput } = {}): PrepareResult {
+  async function prepare(job: EngraveJob, opts: { priorRemoval?: NodeMeshOutput } = {}): Promise<PrepareResult> {
     // #732 — the house catalogue read above is the SAME list the app's worker is handed: the
     // vendor's row for this cutter and material answers before the starting table, and the
     // machine's clamp still has the last word (a thread's S/F comes through #445's
@@ -732,10 +733,6 @@ async function engraveJobBody(argv: string[], options: CommandOptions): Promise<
     if (sweptIndex < 0 || generated.programs[sweptIndex]!.nc !== nc) {
       fail('the generator did not list the program this run swept');
     }
-    const sweeps: ProgramSweep[] = [];
-    const simNotes: ReceiptDiagnostic[] = [];
-    let prior: NodeMeshOutput | null = opts.priorRemoval ?? null;
-    let sweptLoad: SimLoadOk | null = null;
     /** A program's sweep stopped the run, in the same words program 1 has always used (#393). */
     const simStop = (diagnostics: readonly SimDiagnostic[], problem: string | null): PrepareResult => {
       session.dispose();
@@ -760,92 +757,99 @@ async function engraveJobBody(argv: string[], options: CommandOptions): Promise<
         },
       };
     };
-    /** One load of one program, seeded with `seed` and handed this program's point (#434). */
-    const loadProgram = (
-      gcode: string,
-      cutter: Tool,
-      point: { deg: number; source: string } | null,
-      seed: NodeMeshOutput | null,
-    ): ReturnType<SimSession['load']> =>
-      session.load(gcode, toSetup(job, Z1), cutter, Z1.id, {
-        // #734 — the CAM posts a through move to `thickness + breakthrough`, so the sweep's floor
-        // must be the same: without it a correct through cut's retract reads as a rapid through
-        // material (j17 reproduced the bench's `rapid-through-stock` on 7 vertical retracts).
-        // #733 item 4 sweeps every program with this same helper, so every program gets the floor.
-        breakthroughMm: job.breakthrough,
-        ...(seed === null ? {} : { priorRemoval: seed }),
-        ...(point === null ? {} : { drillPointDefault: point }),
-      });
-
-    for (const [i, program] of generated.programs.entries()) {
+    // #744 — THE WALK IS SHARED WITH THE APP. `engine/cnc/engrave/programSweep.ts` owns the cut
+    // order, the cumulative seed, each program's own cutter and point, the from-blank retry and the
+    // #393 gate; this command supplies its synchronous session load and its own shop drill point.
+    // The web run store runs the same function, so the two realms cannot disagree about what
+    // "every program swept" means.
+    const sweptBox: { load: SimLoadOk | null } = { load: null };
+    const outcome = await sweepPrograms({
+      programs: generated.programs,
+      shopDrillPoint,
       // `toolForProgram`'s reading: the job's own snapshot for the job's key, the registry for a
-      // setup's later cutter. The generator resolved this program, so a miss here is a defect.
-      const cutter = program.toolKey === job.toolKey ? tool : (entryFor(program.toolKey)?.tool ?? null);
-      if (cutter === null) {
+      // setup's later cutter.
+      cutterFor: (program) =>
+        program.toolKey === job.toolKey ? tool : (entryFor(program.toolKey)?.tool ?? null),
+      load: async ({ program, cutter, drillPoint, priorRemoval }) =>
+        session.load(program.nc, toSetup(job, Z1), cutter, Z1.id, {
+          // #734 — the CAM posts a through move to `thickness + breakthrough`, so the sweep's floor
+          // must be the same: without it a correct through cut's retract reads as a rapid through
+          // material (j17 reproduced the bench's `rapid-through-stock` on 7 vertical retracts).
+          // Every program gets the floor, not only the first.
+          breakthroughMm: job.breakthrough,
+          // #744 — the list as the earlier programs left it; the session unions it into the one seed
+          // mesh the exact sweeper takes. An empty list is no seed.
+          ...(priorRemoval.length === 0 ? {} : { priorRemoval }),
+          ...(drillPoint === null ? {} : { drillPointDefault: drillPoint }),
+        }),
+      afterLoad: ({ index, result }) => {
+        if (index === sweptIndex) sweptBox.load = result;
+      },
+      initialRemoval: opts.priorRemoval === undefined ? [] : [opts.priorRemoval],
+    });
+
+    if (!outcome.ok) {
+      const failure = outcome.failed;
+      if (failure === null) {
+        // The walk stops before the first program only when its load is cancelled, which this
+        // synchronous caller never does. Refuse rather than write a half-checked run.
         session.dispose();
         return {
           ok: false,
           failure: {
             stage: 'simulated',
             gate: 'simulated',
-            diagnostics: [
-              diagnostic(
-                'tool-refused',
-                'error',
-                `program ${i + 1} names ${program.toolKey}, which is not on this bench`,
-                'simulation',
-                job.name,
-              ),
-            ],
-            refusals: [{ code: 'tool-refused', reason: `cutter ${program.toolKey} is not in the tool library` }],
+            diagnostics: [],
+            refusals: [{ code: 'simulation-refused', reason: 'simulation stopped before the first program' }],
           },
         };
       }
-      const point = program.drill?.simDrillPoint ?? shopDrillPoint;
-      let load = loadProgram(program.nc, cutter, point, prior);
-      if (!load.ok && prior !== null) {
-        const refused = load.diagnostics.find(
-          (d) => d.code === 'prior-removal-column' || d.code === 'prior-removal-rotary',
-        );
-        if (refused !== undefined) {
-          load = loadProgram(program.nc, cutter, point, null);
-          if (load.ok) {
-            simNotes.push(
-              diagnostic(
-                refused.code,
-                'info',
-                `program ${i + 1} (${program.toolKey}) was swept from the blank: this program’s engine cannot start from the material the previous program left, so its result covers its own cuts only`,
-                'simulation',
-                job.name,
-              ),
-            );
-          }
-        }
+      if (failure.kind === 'no-cutter') {
+        session.dispose();
+        return {
+          ok: false,
+          failure: {
+            stage: 'simulated',
+            gate: 'simulated',
+            diagnostics: failure.diagnostics.map((d) =>
+              diagnostic(d.code, d.severity, d.message, 'simulation', job.name),
+            ),
+            refusals: [{ code: 'tool-refused', reason: `cutter ${failure.toolKey} is not in the tool library` }],
+          },
+        };
       }
-      if (!load.ok) return simStop(load.diagnostics, null);
-      // #393 — THE OTHER HALF OF THE GATE, and the one that was missing. `load.ok` means the sweep
+      // #393 — THE OTHER HALF OF THE GATE, and the one that was missing. `ok` means the sweep
       // produced material, NOT that the program is safe: a run that drove the cutter 0.97 mm³ into
       // the fixed jaw is `ok: true` with a `tool-into-fixture` ERROR among its diagnostics, because
       // the panel has to be able to DRAW that cut (`simGate.ts`). Trusting `ok` alone wrote four
       // 11.5 mm coupons whose own simulation said they hit the jaw, and receipted them "all
-      // generated". The same gate now covers every program, not only the first.
-      const problem = simulationProblem(load.diagnostics);
-      if (problem !== null) return simStop(load.diagnostics, problem);
-      sweeps.push({
-        engine: load.stats.engine,
-        count: load.count,
-        removedVolume: load.stats.removedVolume,
-        errorCount: simErrors(load.diagnostics).length,
-        diagnostics: load.diagnostics,
-      });
-      if (i === sweptIndex) sweptLoad = load;
-      // The cumulative stock the NEXT program starts from. With no seed yet this program's own
-      // removal IS the cumulative set (no copy); afterwards the union is what "the stock the last
-      // one left" means on the sweeps that can take it.
-      prior = prior === null ? load.meshes.removal : unionRemoval(tl, [prior, load.meshes.removal]);
+      // generated". The shared walk applies `simulationProblem` to every program; a refusal has no
+      // problem sentence, exactly as program 1 has always read.
+      return simStop(failure.diagnostics, failure.kind === 'refused' ? null : simulationProblem(failure.diagnostics));
     }
 
+    const sweptLoad = sweptBox.load;
     if (sweptLoad === null) fail('the generator did not list the program this run swept');
+    // One receipt entry per program, aligned with `generated.programs` (the writer checks that the
+    // two line up). The removal meshes stay behind; only the cumulative stock is returned, below.
+    const sweeps: ProgramSweep[] = outcome.sweeps.map((s) => ({
+      engine: s.engine,
+      count: s.count,
+      removedVolume: s.removedVolume,
+      errorCount: s.errorCount,
+      diagnostics: s.diagnostics,
+    }));
+    const simNotes: ReceiptDiagnostic[] = outcome.sweeps.flatMap((s) =>
+      s.notes.map((d) => diagnostic(d.code, d.severity, d.message, 'simulation', job.name)),
+    );
+    // The material the run leaves, cumulative: the rest route's seed plus every program's removal,
+    // unioned once here. Null when nothing was removed.
+    const removal: NodeMeshOutput | null =
+      outcome.priorRemoval.length === 0
+        ? null
+        : outcome.priorRemoval.length === 1
+          ? outcome.priorRemoval[0]!
+          : unionRemoval(tl, outcome.priorRemoval);
     return {
       ok: true,
       job,
@@ -855,7 +859,7 @@ async function engraveJobBody(argv: string[], options: CommandOptions): Promise<
       generated,
       load: sweptLoad,
       sweeps,
-      removal: prior,
+      removal,
       simNotes,
       session,
     };
@@ -1088,7 +1092,7 @@ async function engraveJobBody(argv: string[], options: CommandOptions): Promise<
   }
 
   /** Generate, verify, simulate and write one job — the two calls above, in order. */
-  function runJob(
+  async function runJob(
     job: EngraveJob,
     outDir: string,
     opts: {
@@ -1098,8 +1102,8 @@ async function engraveJobBody(argv: string[], options: CommandOptions): Promise<
       unreachable?: { row: ReachRow; cutters: number }[];
       preview?: boolean;
     },
-  ): JobResult {
-    const prepared = prepare(job);
+  ): Promise<JobResult> {
+    const prepared = await prepare(job);
     if (!prepared.ok) return prepared;
     return {
       ok: true,
@@ -1179,7 +1183,7 @@ async function engraveJobBody(argv: string[], options: CommandOptions): Promise<
     }
     outDir = args.out ?? dirname(path);
     mkdirSync(outDir, { recursive: true });
-    const result = runJob(parsed.job, outDir, {
+    const result = await runJob(parsed.job, outDir, {
       writeJobDocument: false,
       note: `*Generated from \`${basename(path)}\` by \`casemaker engrave\`; the app’s \`RunSheetView\` renders the same \`buildRunSheet\` structure. No result is recorded here.*`,
     });
@@ -1446,7 +1450,7 @@ async function engraveJobBody(argv: string[], options: CommandOptions): Promise<
     // asked for the single-program answer — which is byte-for-byte what this route wrote before the
     // scope note, so the earlier acceptance still holds over the same input.
     if (restChosen === null) {
-      const result = runJob(job, outDir, {
+      const result = await runJob(job, outDir, {
         writeJobDocument: true,
         // #410 — the measurements this route already made ARE the run sheet's reachability section, and
         // they are handed over rather than re-measured: the sheet must print the numbers that chose the
@@ -1469,7 +1473,7 @@ async function engraveJobBody(argv: string[], options: CommandOptions): Promise<
       // Nothing is written yet. The rest region cannot be computed until this program has been swept,
       // because it is measured against the material the sweep says was removed — so the pipeline runs
       // twice and only then does anything reach the disk.
-      const p1 = prepare(job);
+      const p1 = await prepare(job);
       if (!p1.ok) return stop(p1.failure);
 
       // ---- WHAT PROGRAM 1 LEFT ---------------------------------------------------------------
@@ -1619,7 +1623,7 @@ async function engraveJobBody(argv: string[], options: CommandOptions): Promise<
         // the stock the operator will actually have under the cutter (#410: "Both programs must be
         // simulated together: tool 2's sweep runs on tool 1's result").
         const removal1 = p1.load.meshes.removal;
-        const prepared = prepare(restJob, removal1 === null ? {} : { priorRemoval: removal1 });
+        const prepared = await prepare(restJob, removal1 === null ? {} : { priorRemoval: removal1 });
         if (!prepared.ok) return stop(prepared.failure);
         p2 = prepared;
 
@@ -1819,7 +1823,7 @@ async function engraveJobBody(argv: string[], options: CommandOptions): Promise<
     const rows: CouponRecordRow[] = [];
     let allOk = true;
     for (const program of couponPrograms) {
-      const result = runJob(program.job, outDir, {
+      const result = await runJob(program.job, outDir, {
         writeJobDocument: true,
         note:
           `*Coupon program \`${program.id}\` of \`${spec.title}\` (#248): ${program.description}. ` +

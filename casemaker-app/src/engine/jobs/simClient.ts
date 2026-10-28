@@ -19,6 +19,7 @@ import type { SimWorkerApi, SimFrame, SimLoadResult, SimPath, EngravePreview, En
 import type { EngraveShopOpts } from '@/workers/sim/engraveGenerate';
 import type { OraclePredicted, OracleReport } from '@/engine/cnc/engrave/oracle';
 import type { SurfaceFrame } from '@/engine/cnc/engrave/surfacePlane';
+import type { NodeMeshOutput } from '@/workers/geometry/meshOutput';
 import type { DesignJobPatch, DesignReadingDirection } from '@/engine/cnc/engrave/fromDesign';
 import { liveShopDefaults, readDefault } from '@/platform/defaultsClient';
 import type { ProbeResiduals } from '@/engine/cnc/probePlan';
@@ -131,6 +132,13 @@ export interface SimLoadOpts {
    * blank's bottom, the pre-#734 reading every non-engrave load keeps.
    */
   breakthroughMm?: number | null;
+  /**
+   * #744 — the material earlier programs of THIS run left, one removal mesh each, so this program
+   * is swept on the stock they left rather than the blank. The session unions the list; an empty
+   * list is no seed. The meshes are structured-cloned (not transferred), because the caller keeps
+   * them for the later programs' seeds.
+   */
+  priorRemoval?: NodeMeshOutput | readonly NodeMeshOutput[] | null;
 }
 
 /** The two stages of a load (#224). */
@@ -193,6 +201,7 @@ export async function loadSim(gcodeText: string, setup: Setup, tool: Tool, machi
             surface: opts?.surface ?? null,
             rampThresholdMm: opts?.rampThresholdMm ?? null,
             breakthroughMm: opts?.breakthroughMm ?? null,
+            priorRemoval: opts?.priorRemoval ?? undefined,
           },
           opts?.onProgress ? Comlink.proxy(opts.onProgress) : undefined,
         )
