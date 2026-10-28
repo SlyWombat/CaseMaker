@@ -232,7 +232,13 @@ export function collect(input: PreflightInput): PreflightRow[] {
   // collector reads it, it does not call `verifyProgram` (that needs the text, the setup, the depth
   // limit and the tool — a Generate's work, not a keystroke's). Both reports are read: `verify` is
   // the job's program, `frameVerify` the frame file's (#244), and both are files the machine runs.
-  const reports: (VerifyReport | null | undefined)[] = [input.generated?.verify, input.generated?.frameVerify];
+  //
+  // #747 — UNLESS THE FRAME WAS WITHHELD. A withheld frame is not a file the machine runs; its
+  // report is kept on the generated result so the receipt can carry every finding, but it is not a
+  // gate answer. The program it belongs to passed verification, so its findings must not block the
+  // cut; the absence is stated once, in the worker's own words, by the `no-frame` warning below.
+  const withheldFrame = gen !== null && gen.frameNc === null && gen.frameError != null;
+  const reports: (VerifyReport | null | undefined)[] = [gen?.verify, withheldFrame ? null : gen?.frameVerify];
   for (const report of reports) {
     for (const finding of report?.findings ?? []) {
       rows.push({
@@ -247,11 +253,12 @@ export function collect(input: PreflightInput): PreflightRow[] {
 
   // #747 — A FRAME WITHHELD FROM A VERIFIED PROGRAM IS NOT A REFUSAL. The program above passed,
   // so the run is still savable and runnable; the frame is absent and the Generate says why (it
-  // could not be traced at a reachable height, or the post refused it). That sentence is nowhere
-  // else: with a good program the `!gen.ok` branch below does not fire, and a frame withheld
-  // without a verify report has no findings to carry. Warning, because the CUT never depended on
-  // the trace — only the dry-run confirmation of the work origin did.
-  if (gen !== null && gen.ok && gen.nc !== null && gen.frameNc === null && gen.frameVerify === null && gen.frameError != null) {
+  // could not be traced at a reachable height, the post refused it, or its verifier did). That
+  // sentence is nowhere else: with a good program the `!gen.ok` branch below does not fire, and a
+  // withheld frame with a report has had its findings routed to the receipt instead of here.
+  // Warning, because the CUT never depended on the trace — only the dry-run confirmation of the
+  // work origin did.
+  if (gen !== null && gen.ok && gen.nc !== null && gen.frameNc === null && gen.frameError != null) {
     rows.push({
       severity: 'warning',
       code: 'no-frame',

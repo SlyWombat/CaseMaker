@@ -215,6 +215,23 @@ describe('preflight: the program (the verifier, or the gate before one exists)',
     expect(rows.filter((r) => r.severity === 'error')).toEqual([]);
   });
 
+  it('does not re-block a verified program with the withheld frame`s verifier findings (#747)', () => {
+    // The frame the worker WITHHELD because its own verifier refused it keeps its report on the
+    // generated result so the receipt can carry every finding (#747). That report is not a file
+    // the machine runs, so it must not become an error row here: the program it belongs to passed
+    // verification and the Cut gate must stay green apart from the withheld-frame warning.
+    const frameReport = verifyProgram('G2 X0 Y0', VERIFY_CTX);
+    expect(frameReport.findings.some((f) => f.severity === 'error')).toBe(true);
+    const reason = `The frame file was withheld: its verifier found ${frameReport.findings.filter((f) => f.severity === 'error').length} errors.`;
+    const rows = rowsFor(defaultEngraveJob(), {
+      generated: generatedWith({ ok: true, nc: 'G90 G21\n', frameNc: null, frameVerify: frameReport, frameError: reason }),
+    });
+    expect(rows.filter((r) => r.owner === 'verify' && r.severity === 'error')).toEqual([]);
+    const row = withCode(rows, 'no-frame')[0]!;
+    expect(row.severity).toBe('warning');
+    expect(row.message).toBe(reason);
+  });
+
   it('with no Generate, reports the GATE`s own sentence rather than a re-worded one', () => {
     const rows = rowsFor(defaultEngraveJob()); // generated: null — Cut requires a Generate (§2.2).
     const row = rows.find((r) => r.owner === 'engraveRunGate')!;
