@@ -320,5 +320,112 @@ describe('#737 — the run sheet says where to saw', () => {
     const texts = buildRunSheet(job, g, null).sections.flatMap((s) => s.steps.map((st) => st.text));
     expect(texts.some((t) => /Saw the part off/.test(t))).toBe(false);
   });
+});
 
+// ---- The refusals ---------------------------------------------------------------
+
+/**
+ * The neck's four wrong states, each refused at the FINDINGS stage — before a toolpath exists —
+ * in the operator's own words. `rotaryJobFindings` is the one owner: the generator calls it, so a
+ * refusal here is a run that never posts. Every sentence carries its numbers and units, and none
+ * of them says the internal code.
+ */
+describe('#737 — a neck that cannot hold the part is refused in words', () => {
+  /** The finding, checked to be an error at the neck's own row with no code in its text. */
+  function neckError(job: EngraveJob, code: string) {
+    const g = gen(job);
+    expect(g.ok).toBe(false);
+    expect(g.stage).toBe('findings');
+    const f = g.findings.find((x) => x.code === code);
+    expect(f).toBeDefined();
+    expect(f!.severity).toBe('error');
+    expect(f!.labelId).toBe('rotary-neck');
+    expect(f!.message).not.toContain(code);
+    expect(f!.message).not.toContain('rotary-neck');
+    return f!;
+  }
+
+  it('refuses a neck thinner than the carried piece calls for — as a labelled default', () => {
+    // Chuck-side ⌀2 mm: the saw frees the whole part beyond the saw line, X 5.5–85 (79.5 mm). The
+    // tailstock centre holds its far end, so the check counts half of it, 39.75 mm, where PLA's
+    // default minimum is ⌀5.13 mm (10 N side load, 30 MPa allowable bending stress).
+    const f = neckError(dowel({ end: 'chuck', diameter: 2, length: 5 }), 'neck-thin');
+    expect(f.message).toContain('The neck for parting is too thin');
+    expect(f.message).toContain('the neck is ⌀2 mm');
+    expect(f.message).toContain('PLA with the whole part beyond the saw line is 79.5 mm long');
+    expect(f.message).toContain('held at both ends — by the neck and the tailstock centre');
+    expect(f.message).toContain('the bending is shared and the check counts half of it (39.75 mm)');
+    expect(f.message).toContain('needs at least ⌀5.13 mm');
+    expect(f.message).toContain('The 10 N load acts sideways at the free end of that piece');
+    expect(f.message).toContain('30 MPa is the allowable bending stress for plastic');
+    expect(f.message).toContain("Those numbers are Case Maker's defaults, not measurements");
+    expect(f.message).toContain('the neck is cut last, with the part still held');
+    expect(f.message).toContain(
+      'deliberately rough check and the minimum is a guess until the bench confirms it (#238)',
+    );
+    expect(f.message).toContain('Make the neck thicker, shorten the part, or choose a stronger stock');
+  });
+
+  it('judges the carried piece as a cantilever when the tailstock is out', () => {
+    // Tailstock out and the neck at the free end: the saw frees only the 2.5 mm nub beyond the saw
+    // line, and nothing holds its far end, so the check counts all of it. A ⌀1 mm neck is refused
+    // against PLA's 2.04 mm minimum.
+    const job = dowel(
+      { end: 'tailstock', diameter: 1, length: 5 },
+      {
+        workholding: {
+          kind: 'rotary-chuck',
+          rotary: { ...CHUCK, tailstock: false, neck: { end: 'tailstock', diameter: 1, length: 5 } },
+        },
+      },
+    );
+    const f = neckError(job, 'neck-thin');
+    expect(f.message).toContain('the stub beyond the saw line is 2.5 mm long and hangs free');
+    expect(f.message).toContain('the check counts all of it (2.5 mm)');
+    expect(f.message).toContain('needs at least ⌀2.04 mm');
+  });
+
+  it('allows the default neck the panel offers', () => {
+    // The default ⌀4 mm at the tailstock side is allowed: the saw frees a 12.5 mm stub, the
+    // tailstock centre shares the bending so the check counts 6.25 mm, and PLA's minimum there is
+    // ⌀2.77 mm. This is the default the panel offers, so it must not refuse.
+    const g = gen(dowel());
+    expect(g.ok).toBe(true);
+  });
+
+  it('refuses a neck shorter than the saw can cut off cleanly', () => {
+    const f = neckError(dowel({ end: 'tailstock', diameter: 4, length: 1 }), 'neck-too-short');
+    expect(f.message).toContain('The neck for parting is too short');
+    expect(f.message).toContain('the neck is 1 mm long');
+    expect(f.message).toContain('a saw needs at least 2.5 mm');
+    expect(f.message).toContain('0.5 mm of kerf');
+    expect(f.message).toContain('1 mm clear either side');
+  });
+
+  it('refuses a neck in the jaws’ keep-out — a tailstock-side neck longer than the free span', () => {
+    // The free span is X 3–75 mm; an 80 mm neck from the tailstock side reaches X −5 mm.
+    const f = neckError(dowel({ end: 'tailstock', diameter: 4, length: 80 }), 'neck-in-band');
+    expect(f.message).toContain('The neck for parting runs into the jaws');
+    expect(f.message).toContain('it reaches X -5 mm');
+    expect(f.message).toContain('inside the first 3 mm of the stick-out');
+    expect(f.message).toContain("where the chuck's jaws are");
+  });
+
+  it('refuses a neck in the tailstock’s band — a chuck-side neck past the free span', () => {
+    // A 80 mm neck from the jaws' line reaches X 83 mm, inside the tailstock's X 75–85 mm band.
+    const f = neckError(dowel({ end: 'chuck', diameter: 4, length: 80 }), 'neck-in-band');
+    expect(f.message).toContain("The neck for parting runs into the tailstock's band");
+    expect(f.message).toContain('it reaches X 83 mm');
+    expect(f.message).toContain('the tailstock holds the last 10 mm of the stick-out');
+    expect(f.message).toContain('X 75–85 mm');
+  });
+
+  it('refuses a neck as wide as the part — the cutter could not cut it down all the way round', () => {
+    const f = neckError(dowel({ end: 'tailstock', diameter: 20, length: 5 }), 'neck-wider-than-part');
+    expect(f.message).toContain('The neck for parting is wrong');
+    expect(f.message).toContain('the neck is ⌀20 mm');
+    expect(f.message).toContain('the part at that end is ⌀20 mm');
+    expect(f.message).toContain('a neck has to be narrower than the part it holds');
+    expect(f.message).toContain('all the way round');
+  });
 });

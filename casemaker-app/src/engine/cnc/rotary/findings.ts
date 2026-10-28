@@ -37,6 +37,16 @@ import type { PartPlan } from '@/engine/cnc/engrave/partPlan';
 import { itemLabel, type JobFinding } from '@/engine/cnc/engrave/jobSetup';
 import { findItem } from '@/engine/cnc/engrave/recommendTool';
 import {
+  ROTARY_NECK_ID,
+  ROTARY_NECK_MIN_LENGTH_MM,
+  neckIntoBandSentence,
+  neckThinnerSentence,
+  neckTooShortSentence,
+  neckWiderSentence,
+  rotaryNeckFacts,
+  rotaryNeckMinDiameterMm,
+} from './neck';
+import {
   freeEndSentence,
   jawsSentence,
   rotaryFreeSpan,
@@ -165,6 +175,50 @@ export function rotaryJobFindings(
         labelId: region.labelId,
         message: `${who} ${freeEndSentence(xMax, map.stickout)}.`,
       });
+    }
+  }
+
+  // 4. THE NECK FOR PARTING (#737). Placed on the SAME free span the two bands above are judged
+  // on, and refused with the same sentences: the neck is the operator's chosen cut, so a neck that
+  // cannot sit clear of the jaws or the tailstock is refused before any toolpath exists. The safe
+  // minimum is a labelled default (neck.ts), refused in words with every number and its unit.
+  const neck = rotaryNeckFacts(job);
+  if (neck !== null) {
+    const stockDiameter = map.radius * 2;
+    if (neck.diameterMm >= stockDiameter) {
+      findings.push({
+        severity: 'error',
+        code: 'neck-wider-than-part',
+        labelId: ROTARY_NECK_ID,
+        message: `The neck for parting is wrong: ${neckWiderSentence(neck.diameterMm, stockDiameter)}.`,
+      });
+    } else if (neck.lengthMm < ROTARY_NECK_MIN_LENGTH_MM) {
+      findings.push({
+        severity: 'error',
+        code: 'neck-too-short',
+        labelId: ROTARY_NECK_ID,
+        message: `The neck for parting is too short: ${neckTooShortSentence(neck.lengthMm)}.`,
+      });
+    } else {
+      const band = neckIntoBandSentence(map, neck);
+      if (band !== '') {
+        findings.push({
+          severity: 'error',
+          code: 'neck-in-band',
+          labelId: ROTARY_NECK_ID,
+          message: `The neck for parting ${band}.`,
+        });
+      } else {
+        const min = rotaryNeckMinDiameterMm(job.stock.material, neck.effectiveMm);
+        if (neck.diameterMm < min.diameterMm) {
+          findings.push({
+            severity: 'error',
+            code: 'neck-thin',
+            labelId: ROTARY_NECK_ID,
+            message: `The neck for parting is too thin: ${neckThinnerSentence(job.stock.material, neck.diameterMm, { ...neck, tailstock: map.tailstock }, min.diameterMm)}.`,
+          });
+        }
+      }
     }
   }
 
