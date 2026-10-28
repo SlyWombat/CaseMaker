@@ -221,3 +221,67 @@ describe('#740 — one owner for the tip, one diameter for the feeds row', () =>
   });
 });
 
+describe('#740 — an unrecorded tip on a cone carve is a warning, not a silent point', () => {
+  const assumedPoint = (gen: EngraveGenerated) =>
+    gen.findings.filter((f) => f.code === 'tool-tip-assumed-point');
+
+  /** j10 with every design item on the variable-depth carve (#665), the cone's own geometry. */
+  function variableJ10(tip: number | null): EngraveJob {
+    const job = benchJob('j10-plaque-90v.json', tip);
+    job.labels = job.labels.map((l) => ({ ...l, vCarveDepth: 'variable' as const }));
+    job.shapes = job.shapes.map((s) => ({ ...s, vCarveDepth: 'variable' as const }));
+    return job;
+  }
+
+  it('warns that j10’s variable-depth carve is planned as a sharp point, without the plane error', () => {
+    const gen = generate(tl, variableJ10(null));
+    const warning = assumedPoint(gen);
+    expect(warning).toHaveLength(1);
+    expect(warning[0]!.severity).toBe('warning');
+    // The cutter by name, the field with its unit, and the assumption in plain words. A finding
+    // code never leaks into the sentence.
+    expect(warning[0]!.message).toContain('C1-BIT-CHAMFER-90');
+    expect(warning[0]!.message).toContain('tip ⌀');
+    expect(warning[0]!.message).toContain('mm');
+    expect(warning[0]!.message).toContain('SHARP POINT');
+    expect(warning[0]!.message).not.toContain('tool-tip-assumed-point');
+    // The plane-model ERROR is not duplicated: no item here is judged at a colour plane.
+    expect(codes(gen)).not.toContain('tool-tip-unrecorded');
+  }, 180_000);
+
+  it('drops the warning when j10’s tip is stated', () => {
+    const gen = generate(tl, variableJ10(0.1));
+    expect(codes(gen)).not.toContain('tool-tip-assumed-point');
+  }, 180_000);
+
+  it('warns for j11’s inlay while its plane-model label keeps the error', () => {
+    const gen = generate(tl, benchJob('j11-inlay-female-90v.json', null));
+    expect(assumedPoint(gen)).toHaveLength(1);
+    expect(assumedPoint(gen)[0]!.message).toContain('C1-BIT-CHAMFER-90');
+    // Distinct items, distinct findings: the FF label is judged at the plane (error), the inlay
+    // ring follows the cone (warning). Neither sentence is written twice.
+    const error = gen.findings.filter((f) => f.code === 'tool-tip-unrecorded');
+    expect(error).toHaveLength(1);
+    expect(error[0]!.severity).toBe('error');
+
+    const stated = generate(tl, benchJob('j11-inlay-female-90v.json', 0.1));
+    expect(codes(stated)).not.toContain('tool-tip-assumed-point');
+  }, 180_000);
+
+  it('warns for a prism with an unrecorded tip, and not once the tip is stated', () => {
+    // j10 has no prism fixture; its one shape is marked as one (#674). Labels are removed so no
+    // item is judged at a colour plane and the warning is the prism's own.
+    const prismJob = (tip: number | null): EngraveJob => {
+      const job = benchJob('j10-plaque-90v.json', tip);
+      job.labels = [];
+      job.shapes = [{ ...job.shapes[0]!, prism: {} }];
+      return job;
+    };
+    const gen = generate(tl, prismJob(null));
+    expect(assumedPoint(gen)).toHaveLength(1);
+    expect(codes(gen)).not.toContain('tool-tip-unrecorded');
+    const stated = generate(tl, prismJob(0.1));
+    expect(codes(stated)).not.toContain('tool-tip-assumed-point');
+  }, 180_000);
+});
+

@@ -1391,6 +1391,8 @@ export function engraveRegions(
   // #673 — an inlay's floor is the design eroded by its own depth, not a cutter-width limit: the
   // opening ratio and the empty check describe a colour-plane carve it does not make.
   const inlayIds = new Set(plan.engraves.filter((e) => e.inlay !== undefined).map((e) => e.id));
+  // #674 — a prism's flank is the cone's, so it is not a colour-plane carve either.
+  const prismIds = new Set(plan.engraves.filter((e) => e.prism !== undefined).map((e) => e.id));
   const derivedIds = new Set((derivedCores ?? []).map((core) => core.id));
   // #740 — THE PLANE-MODEL ITEMS: the ones the colour-plane reach and groove findings judge. A
   // variable-depth carve (#665), an inlay (#673) and a prism (#674) have their own geometry — their
@@ -1414,12 +1416,20 @@ export function engraveRegions(
   // name a cutter that does not exist. Ask for the tip instead — ONE finding naming the cutter, the
   // field and its unit — and leave the plane model's sentences unsaid until it is recorded.
   const tipUnrecorded = tool !== null && planeModelIds.size > 0 && tipNotRecorded(tool);
-  const tipFindings: JobFinding[] =
-    tipUnrecorded && tool !== null
+  // #740 — THE CONE-CARVED ITEMS THE PLANE MODEL DOES NOT JUDGE: a variable-depth carve, an inlay
+  // and a prism cut with the cone's flank, so `vCone` reads an unrecorded tip as the POINT it
+  // assumes (#669). That plan is slightly DEEPER than a cutter with a real tip, and the operator is
+  // entitled to know: a warning names the cutter and the assumption. It is not the plane model's
+  // error — these items are not judged against the shank at all — so the two findings never
+  // describe the same item.
+  const assumedPointIds = new Set([...variableIds, ...inlayIds, ...prismIds].filter((id) => !derivedIds.has(id)));
+  const tipAssumedPoint = tool !== null && assumedPointIds.size > 0 && tipNotRecorded(tool);
+  const tipFindings: JobFinding[] = [
+    ...(tipUnrecorded && tool !== null
       ? [
           {
-            severity: 'error',
-            code: 'tool-tip-unrecorded',
+            severity: 'error' as const,
+            code: 'tool-tip-unrecorded' as const,
             message:
               `The cutter "${tool.name}" records no tip ⌀ (mm). A V-bit cuts with its tip — for a ` +
               'chamfer or an engraver the diameter field is its shank — so the width it reaches the ' +
@@ -1427,7 +1437,22 @@ export function engraveRegions(
               'in the inventory’s cutter record, then regenerate.',
           },
         ]
-      : [];
+      : []),
+    ...(tipAssumedPoint && tool !== null
+      ? [
+          {
+            severity: 'warning' as const,
+            code: 'tool-tip-assumed-point' as const,
+            message:
+              `The cutter "${tool.name}" records no tip ⌀ (mm). Its variable-depth, inlay and ` +
+              'prism cuts follow the cone, so the plan assumes a SHARP POINT (0 mm tip) and will ' +
+              'cut slightly deeper than a cutter with a real tip. Record the tip ⌀ (mm) for this ' +
+              'cutter in Manage → Tools or in the inventory’s cutter record to plan the tip ' +
+              'itself, then regenerate.',
+          },
+        ]
+      : []),
+  ];
   const engFindings =
     tipUnrecorded || measured.length === 0
       ? []

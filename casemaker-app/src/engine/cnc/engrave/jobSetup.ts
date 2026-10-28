@@ -79,6 +79,10 @@ export type JobFindingCode =
   // geometry sentence to write about the item. Raised where the plane model would otherwise judge
   // it (`item-empty`, `vcarve-groove-too-narrow`), asking for the field instead.
   | 'tool-tip-unrecorded'
+  // #740 — the tip is unrecorded and the job's variable-depth, inlay or prism items cut with the
+  // cone, so the plan assumes a SHARP POINT. A warning, not the error above: those items are not
+  // judged at a colour plane, and the carve proceeds with the assumption stated.
+  | 'tool-tip-assumed-point'
   | 'vise-jaw-collision'
   | 'vise-default'
   | 'vise-stock-not-proud'
