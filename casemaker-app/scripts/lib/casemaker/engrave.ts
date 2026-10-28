@@ -612,6 +612,17 @@ async function engraveJobBody(argv: string[], options: CommandOptions): Promise<
       ...(generated.verify?.findings ?? []).map((f) =>
         diagnostic(f.code, f.severity, f.message, 'verify', job.name),
       ),
+      // #747 — THE FRAME'S OWN REPORT, with every finding, exactly as the program's. It is a file
+      // this machine runs, so a warning or error it raised is a fact about the run; before this,
+      // the report existed on the generated result and never reached a single operator.
+      ...(generated.frameVerify?.findings ?? []).map((f) =>
+        diagnostic(f.code, f.severity, f.message, 'verify', job.name),
+      ),
+      // #747 — and WHY a frame is absent when the program itself is good. A withheld frame is a
+      // warning, not a refusal: the verified program stays runnable.
+      ...(generated.frameNc === null && generated.frameError != null
+        ? [diagnostic('no-frame', 'warning', generated.frameError, 'verify', job.name)]
+        : []),
       ...(load?.diagnostics ?? []).map((d) =>
         diagnostic(d.code, d.severity, d.message, 'simulation', job.name),
       ),
@@ -1114,6 +1125,14 @@ async function engraveJobBody(argv: string[], options: CommandOptions): Promise<
           ...(program.verify?.findings ?? []).map((f) =>
             diagnostic(f.code, f.severity, f.message, 'verify', job.name),
           ),
+          // #747 — a later program's frame report and its withheld reason, on the same rule as the
+          // swept program's: every file the machine runs is checked, and every check is carried.
+          ...(program.frameVerify?.findings ?? []).map((f) =>
+            diagnostic(f.code, f.severity, f.message, 'verify', job.name),
+          ),
+          ...(program.frameNc === null && program.frameError != null
+            ? [diagnostic('no-frame', 'warning', program.frameError, 'verify', job.name)]
+            : []),
           ...sweep.diagnostics.map((d) =>
             diagnostic(d.code, d.severity, d.message, 'simulation', job.name),
           ),
@@ -1770,9 +1789,10 @@ async function engraveJobBody(argv: string[], options: CommandOptions): Promise<
             reason: roughReason,
             nc: `${stem1}.nc`,
             frame: p1.generated.frameNc === null ? null : runSheetFrameFileName(job.name),
-            // #747 — the height the worker actually traced at. It is the worker's, never
-            // re-derived here.
+            // #747 — the height the worker actually traced at, and why a frame was withheld from a
+            // program that is still runnable. Both are the worker's, never re-derived here.
             frameZ: p1.generated.frameZ ?? null,
+            frameError: p1.generated.frameError ?? null,
             params: cutParams(p1.generated),
             passes: passCount(p1.generated),
             traceOnly: traceOnlyOf(job),
@@ -1788,6 +1808,7 @@ async function engraveJobBody(argv: string[], options: CommandOptions): Promise<
             nc: `${stem2}.nc`,
             frame: p2.generated.frameNc === null ? null : runSheetFrameFileName(restJob.name),
             frameZ: p2.generated.frameZ ?? null,
+            frameError: p2.generated.frameError ?? null,
             params: cutParams(p2.generated),
             passes: passCount(p2.generated),
             traceOnly: traceOnlyOf(restJob),

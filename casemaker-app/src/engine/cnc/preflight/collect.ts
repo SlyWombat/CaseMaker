@@ -245,17 +245,35 @@ export function collect(input: PreflightInput): PreflightRow[] {
     }
   }
 
+  // #747 — A FRAME WITHHELD FROM A VERIFIED PROGRAM IS NOT A REFUSAL. The program above passed,
+  // so the run is still savable and runnable; the frame is absent and the Generate says why (it
+  // could not be traced at a reachable height, or the post refused it). That sentence is nowhere
+  // else: with a good program the `!gen.ok` branch below does not fire, and a frame withheld
+  // without a verify report has no findings to carry. Warning, because the CUT never depended on
+  // the trace — only the dry-run confirmation of the work origin did.
+  if (gen !== null && gen.ok && gen.nc !== null && gen.frameNc === null && gen.frameVerify === null && gen.frameError != null) {
+    rows.push({
+      severity: 'warning',
+      code: 'no-frame',
+      message: gen.frameError,
+      owner: 'verify',
+      cause: causeFor(scope),
+    });
+  }
+
   // THE GENERATE'S OWN REFUSAL, under its own owner. `saveBlocker` reads `nc`, `findings` and
   // `verify` and NOTHING ELSE of the generated result — never `ok`, never `errors` — so a Generate
   // that stopped without producing a program is on the gate only as an error COUNT ("N errors
   // outstanding") or as the bare "no program was produced", and WHY it stopped is nowhere. The
   // Generate states it itself in `errors`, one sentence per stoppage, so it is carried here verbatim.
   //
-  // THE FRAME THAT COULD NOT BE BUILT is the case that made this a blocker (review, 2026-10-16):
-  // `engraveGenerate`'s `'error' in frame` return keeps `nc`, leaves `frameVerify` null and says why
-  // only in `errors`. With a program in hand the gate's `no program was produced` clause does not
-  // fire and the clauses after it are the RUN's, which `collect()` has no run to answer from — so the
-  // hub read the job as CLEAN while the machine had no frame file to trace. `no-frame` names it.
+  // A FRAME THAT COULD NOT BE BUILT while the GENERATE stopped for its own reason is the case that
+  // made this a code (review, 2026-10-16): the Generate keeps `nc`, leaves `frameVerify` null and
+  // says why only in `errors`. With a program in hand the gate's `no program was produced` clause
+  // does not fire, so `no-frame` names the absent trace instead of leaving the job reading CLEAN.
+  // Since #747 a frame fault alone never makes `ok` false — the program is verified and the frame
+  // is withheld as a warning (see the block above) — so this branch is reached only when a program
+  // was refused before or alongside the frame, or for a result stored by an older build.
   //
   // WHY THE TWO VERIFIER STOPPAGES ARE NOT RE-STATED HERE: when the program's own report found
   // errors, or the frame's did, the rows above already carry every one of them, each with its line,

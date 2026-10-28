@@ -396,8 +396,9 @@ export interface EngraveProgram {
   /** This program's own frame file (#244), checked by the same verifier; null when not produced. */
   frameNc: string | null;
   frameVerify: VerifyReport | null;
-  /** #747 — this program's frame height in work Z; null when no frame was produced. */
+  /** #747 — this program's frame height in work Z, and why it was withheld when it was. */
   frameZ?: Mm | null;
+  frameError?: string | null;
   /** FNV-1a over `nc` — `programHash` in `engine/cnc/programHash.ts`. */
   programHash: string;
   cam: EngraveCamSummary | null;
@@ -606,12 +607,19 @@ export interface EngraveGenerated {
   verify: VerifyReport | null;
   /**
    * #244 — the frame file: a tiny air trace of the job's XY extent at `frameZ`, emitted as
-   * `<job>-frame.nc` beside the job. Null when the run never reached the post (nothing to trace)
-   * or the job was refused. It is produced by THIS gated action, from the same toolpath, and
-   * checked by the same verifier.
+   * `<job>-frame.nc` beside the job. It is produced by THIS gated action, from the same toolpath,
+   * and checked by the same verifier.
+   *
+   * NULL when the run never reached the frame, when the job was refused — and, since #747, when
+   * the frame alone was withheld (see `frameError`). A withheld frame does NOT refuse the run:
+   * the verified program is still produced and savable.
    */
   frameNc: string | null;
-  /** #244 — `verifyProgram`'s report on `frameNc`, or null when no frame was posted. */
+  /**
+   * #244 — `verifyProgram`'s report on the posted frame, or null when no frame was posted. Since
+   * #747 it is retained when the report's errors WITHHELD the file, so every finding can reach the
+   * receipt and the run sheet instead of only the error count.
+   */
   frameVerify: VerifyReport | null;
   /**
    * #747 — the WORK Z the frame traced at, in mm above the blank's top face. `frameTraceZ` clamps
@@ -621,6 +629,13 @@ export interface EngraveGenerated {
    * Optional: a result stored before #747 reads as `FRAME_Z`, which is what it was traced at.
    */
   frameZ?: Mm | null;
+  /**
+   * #747 — why the frame file is absent even though the program is good: no reachable height
+   * cleared the mount, or the frame's own verifier refused it. Null when a frame was produced (or
+   * when the program itself never reached this stage). A frame fault NEVER stops the run: the
+   * verified program stays, the frame is withheld, and this sentence says why.
+   */
+  frameError?: string | null;
   /**
    * #432 slice 2 — the FACING program, as its own `.nc` beside the job: the skim of the blank's
    * top, posted against the PROBED top (Z = 0 is the blank as the probe found it) with its own
@@ -4236,6 +4251,7 @@ function programOf(one: OneProgram, ref: JobProgramRef): EngraveProgram {
     frameNc: one.frameNc,
     frameVerify: one.frameVerify,
     frameZ: one.frameZ ?? null,
+    frameError: one.frameError ?? null,
     programHash: programHash(nc),
     cam: one.cam,
     drill: one.drill ?? null,
@@ -5105,26 +5121,34 @@ function generateOneProgram(
     // rectangle traced in the air, and the wrapped frame has no such rectangle (X runs along the
     // axis, the surface wraps into A). Slice 3's rotary run sheet owns the rotary equivalent.
     //
-    // #747 — the trace height is `frameTraceZ`'s, in WORK Z: the design's `FRAME_Z` clamped to
-    // what this setup's WCS can reach inside the machine's Z envelope and raised over the mount.
-    // It rides with the file (`frameZ`) so the sheet prints the height that is in the G-code.
+    // #747 — A FRAME FAULT NEVER FAILS THE RUN. The program above has already passed the verifier;
+    // a frame is an aid to the dry run, not a gate on a verified program. When the frame cannot be
+    // produced at a height the machine can reach and the mount clears, or its own verifier refuses
+    // it, the file is WITHHELD (`frameNc` null) with the reason in `frameError` and the report (when
+    // there is one) kept in `frameVerify`, so the receipt, the sheet and the panel can say what
+    // happened. The frame's Z is computed by `frameTraceZ`, the one owner of that rule.
     let frameNc: string | null = null;
     let frameVerify: VerifyReport | null = null;
     let frameZ: Mm | null = null;
+    let frameError: string | null = null;
     if (rotaryMap === null) {
       const frame = frameProgram(ir, ctx, mill, setup, tool, limit, shop.mount, job.jawClearance, liftOverStock);
       if ('error' in frame) {
-        errors.push({ stage: 'verify', message: `the frame file could not be produced: ${frame.error}` });
-        return { ok: false, stage: 'verify', findings, feeds, threads: threadPlans, threadMachining, drill: drillFacts, cam, nc, verify, frameNc: null, frameVerify: null, facingNc: facing.nc, facingVerify: facing.verify, facingToolKey: facing.toolKey, facingError: facing.error, facingCam: facing.cam, predicted: predictedForRun, errors };
+        frameError = `The frame file could not be produced: ${frame.error}.`;
+      } else {
+        frameVerify = frame.verify;
+        const frameErrors = frame.verify.findings.filter((f) => f.severity === 'error');
+        if (frameErrors.length > 0) {
+          // The posted frame is withheld: no unchecked program is handed over (#432's rule, and
+          // #174's). The report stays attached so every finding is carried, not just the count.
+          frameError =
+            `The frame file was withheld: its verifier found ${frameErrors.length} ` +
+            `error${frameErrors.length === 1 ? '' : 's'}.`;
+        } else {
+          frameNc = frame.nc;
+          frameZ = frame.z;
+        }
       }
-      const frameErrors = frame.verify.findings.filter((f) => f.severity === 'error');
-      if (frameErrors.length > 0) {
-        errors.push({ stage: 'verify', message: `the frame file has ${frameErrors.length} verifier error(s)` });
-        return { ok: false, stage: 'verify', findings, feeds, threads: threadPlans, threadMachining, drill: drillFacts, cam, nc, verify, frameNc: frame.nc, frameVerify: frame.verify, facingNc: facing.nc, facingVerify: facing.verify, facingToolKey: facing.toolKey, facingError: facing.error, facingCam: facing.cam, predicted: predictedForRun, errors };
-      }
-      frameNc = frame.nc;
-      frameVerify = frame.verify;
-      frameZ = frame.z;
     }
 
     return {
@@ -5146,9 +5170,10 @@ function generateOneProgram(
       verify,
       frameNc,
       frameVerify,
-      // #747 — the height the frame was actually traced at (work Z): the sheet prints this, so
-      // the number the operator reads is the one in the file.
+      // #747 — the height the frame was actually traced at (work Z), and, when the frame was
+      // withheld despite a good program, why. Both travel to the sheet and the receipt.
       frameZ,
+      frameError,
       facingNc: facing.nc,
       facingVerify: facing.verify,
       facingToolKey: facing.toolKey,

@@ -236,6 +236,12 @@ export interface RunSheetProgram {
    * recomputes the height.
    */
   frameZ?: Mm | null;
+  /**
+   * #747 — why the frame was withheld even though this program verified (the trace could not clear
+   * the mount inside the machine's Z envelope, or its own verifier refused it). Null/absent when a
+   * frame was produced, or on a result stored before #747.
+   */
+  frameError?: string | null;
   /** What the CAM did, for the run step's estimate. */
   cam: RunSheetCamSummary | null;
   /**
@@ -444,6 +450,11 @@ export interface RunSheetGenerated {
    * stored before #747, which traced at `FRAME_Z`. The sheet prints this, never its own arithmetic.
    */
   frameZ?: Mm | null;
+  /**
+   * #747 — why program 1's frame was withheld even though the program verified. Null/absent when a
+   * frame was produced, or when the program itself never verified.
+   */
+  frameError?: string | null;
   /**
    * #445 — the thread plans this sheet prints, reduced to what it says and never carrying `moves`.
    * Absent or null on a job with no thread; `EngraveGenerated` satisfies this as it stands.
@@ -2486,14 +2497,25 @@ function restSwapSteps(facts: RestPassFacts, labels?: RestProgramLabels): RunShe
     // hypothetical (#273): a program the verifier refuses is generated but has no frame, and naming
     // a file that was never produced is the failure mode the Dry run section already documents.
     rest.frame === null
-      ? {
-          text:
-            'There is no frame file for this program: it did not pass verification, so the trace was ' +
-            `never produced. Do not run ${rest.nc} — clear the errors, regenerate, and the frame ` +
-            'comes back with the program.',
-          bold: true,
-          unverified: '#443',
-        }
+      ? rest.frameError != null
+        ? {
+            // #747 — the frame was withheld from a program that verified; the trace is the aid, not
+            // the cut, so the program is still runnable and the sheet says so.
+            text:
+              `There is no frame file for this program. ${rest.frameError} ${rest.nc} itself passed ` +
+              'verification, so it can still be cut — but there is no air trace to check the work ' +
+              'origin, so look at the origin and the clamps before you start.',
+            bold: true,
+            unverified: '#443',
+          }
+        : {
+            text:
+              'There is no frame file for this program: it did not pass verification, so the trace was ' +
+              `never produced. Do not run ${rest.nc} — clear the errors, regenerate, and the frame ` +
+              'comes back with the program.',
+            bold: true,
+            unverified: '#443',
+          }
       : {
           text:
             `Load ${rest.frame} and run it. It traces ${restPossAscii} outline in the air, the same ` +
@@ -2870,13 +2892,26 @@ function surfaceSteps(facts: GoalSurfaceFacts): RunSheetStep[] {
 function programRunSteps(program: RunSheetProgram, number: number): RunSheetStep[] {
   const steps: RunSheetStep[] = [];
   if (program.frameNc === null) {
-    steps.push({
-      text:
-        `There is no frame file for program ${number}: it did not pass verification, so the trace ` +
-        `was never produced. Do not run ${program.nc} — clear the errors, regenerate, and the frame ` +
-        'comes back with the program.',
-      bold: true,
-    });
+    // #747 — two different absences. A frame WITHHELD from a program that verified says so, names
+    // the worker's reason and lets the operator decide; only a program that itself failed is a
+    // "do not run".
+    steps.push(
+      program.frameError != null
+        ? {
+            text:
+              `There is no frame file for program ${number}. ${program.frameError} ${program.nc} ` +
+              'itself passed verification, so it can still be cut — but there is no air trace to ' +
+              'check the work origin, so look at the origin and the clamps before you start.',
+            bold: true,
+          }
+        : {
+            text:
+              `There is no frame file for program ${number}: it did not pass verification, so the trace ` +
+              `was never produced. Do not run ${program.nc} — clear the errors, regenerate, and the frame ` +
+              'comes back with the program.',
+            bold: true,
+          },
+    );
   } else {
     const z = program.frameZ ?? FRAME_Z;
     steps.push({
@@ -3632,19 +3667,31 @@ export function buildRunSheet(
   //
   // A null `frameNc` is not hypothetical (#273): a job program the verifier refuses comes back
   // with `nc` and `verify` populated but NO frame (the frame is derived after both gates), and
-  // the sheet opens on exactly that — it is only blocked when the job has since changed. Telling
-  // the operator here to load a file that was never produced is worse than saying nothing, so the
-  // step is replaced rather than augmented.
+  // the sheet opens on exactly that — it is only blocked when the job has since changed. Since
+  // #747 a good program can also have NO frame because the trace was withheld, and `frameError`
+  // says why: that is not a refused program, so the step says the file can still be cut.
   const dryRunSteps: RunSheetStep[] =
     generated.frameNc === null
       ? [
-          {
-            text:
-              'There is no frame file for this job: the program above did not pass verification, so ' +
-              'the trace was never produced. Do not run this file — clear the errors, regenerate, and ' +
-              'the frame comes back with the program.',
-            bold: true,
-          },
+          // #747 — a frame WITHHELD from a program that verified is not a failed program. The
+          // reason is the worker's own sentence; the operator may still cut the file, without the
+          // trace that would have confirmed the origin, and the sheet says exactly that.
+          generated.frameError != null
+            ? {
+                text:
+                  `There is no frame file for this job. ${generated.frameError} The program ` +
+                  `${header.fileName} itself passed verification, so it can still be cut — but there ` +
+                  'is no air trace to check the work origin, so look at the origin and the clamps ' +
+                  'before you start.',
+                bold: true,
+              }
+            : {
+                text:
+                  'There is no frame file for this job: the program above did not pass verification, so ' +
+                  'the trace was never produced. Do not run this file — clear the errors, regenerate, and ' +
+                  'the frame comes back with the program.',
+                bold: true,
+              },
         ]
       : [
           {

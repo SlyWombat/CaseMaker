@@ -175,7 +175,7 @@ function generatedForScope(generated: EngraveGenerated | null, scope: PreflightS
     (p) => p.setupIndex === scope.setupIndex + 1 && p.toolKey === scope.toolKey,
   );
   if (program === undefined) {
-    return { ...generated, nc: null, verify: null, frameNc: null, frameVerify: null };
+    return { ...generated, nc: null, verify: null, frameNc: null, frameVerify: null, frameZ: null, frameError: null };
   }
   return {
     ...generated,
@@ -185,6 +185,10 @@ function generatedForScope(generated: EngraveGenerated | null, scope: PreflightS
     verify: program.verify,
     frameNc: program.frameNc,
     frameVerify: program.frameVerify,
+    // #747 — the frame facts are PROGRAM facts, like the file and its report; a scope must not
+    // report program 1's withheld frame against setup 2.
+    frameZ: program.frameZ ?? null,
+    frameError: program.frameError ?? null,
   };
 }
 

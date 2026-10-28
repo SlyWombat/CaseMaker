@@ -781,7 +781,8 @@ describe('#746 a setup’s later cutters cut the items they own, as those items'
 // blank's top face at the machine's tool-change safe Z, so a frame at work Z 20 lands exactly on
 // the envelope's top; for a 22.8 mm blank the WCS origin is -19.999999999999996 and 20 + origin is
 // +3.6e-15 mm — outside by femtometres. The frame now traces at the highest work Z that posts
-// inside the envelope (19.999 here, machine -0.001).
+// inside the envelope (19.999 here, machine -0.001), and a frame that cannot be traced at all is
+// withheld with its findings on the receipt while the verified program is still written.
 describe('#747 the frame is traced inside the envelope, and never gates a verified program', () => {
   it('fx-frame-pocket (22.8 mm hardwood): the frame is written at a reachable Z', async () => {
     const { code, receipt } = await cut('fx-frame-pocket.json', REAL_JOBS);
@@ -801,5 +802,62 @@ describe('#747 the frame is traced inside the envelope, and never gates a verifi
     // ... and the sheet prints the height in the file, never the 20 mm constant.
     const sheetPath = receipt.outputs.find((o) => o.path.endsWith('-run-sheet.md'))!.path;
     expect(readFileSync(sheetPath, 'utf8')).toContain('19.999 mm above the work');
+  }, 150_000);
+
+  it('a frame that leaves the envelope is WITHHELD with its findings on the receipt, and the program is still written', async () => {
+    // The forced case: a 200 mm blank fills the envelope exactly, its under-board overhangs 6 mm
+    // to the right, and a 5 mm pocket sits at the right edge. The job's own cutter CENTRE path
+    // stays inside (machine X <= 0), so its verifier passes; the frame is the cutter's FOOTPRINT,
+    // grown by its radius, and reaches machine X +1.494 — outside. The overhang keeps the depth
+    // limit positive where the footprint reaches, so `cut-outside-stock` stays happy: this is the
+    // frame's failure alone.
+    const parsed = parseEngraveJob(JSON.parse(readFileSync(join(REAL_JOBS, 'fx-frame-pocket.json'), 'utf8')));
+    if (!parsed.ok) throw new Error(parsed.errors.join('; '));
+    const job = parsed.job;
+    job.name = 'fx-frame-outside';
+    job.stock.length = 200;
+    job.stock.thickness = 12;
+    if (job.sacrificial?.under == null) throw new Error('the fixture must carry its under-board');
+    job.sacrificial.under.thickness = 3;
+    job.sacrificial.under.overhang = { left: 0, right: 6, front: 0, back: 0 };
+    const hold = job.workholding;
+    if (hold.kind !== 'bracket') throw new Error('the fixture must hold with the bracket');
+    const shape = job.shapes[0]!;
+    if (shape.kind !== 'circle') throw new Error('the fixture shape must be the circle pocket');
+    shape.diameter = 5;
+    shape.depth = 2;
+    shape.position = { x: 199, y: 67 };
+    for (const clamp of hold.bracket.clamps) clamp.at = clamp.edge === 'back' ? 100 : 67;
+    writeFileSync(join(SCRATCH, 'fx-frame-outside.json'), JSON.stringify(job, null, 2));
+
+    const { code, receipt } = await cut('fx-frame-outside.json', SCRATCH);
+    if (receipt.command !== 'engrave') throw new Error('expected the engrave receipt');
+    // Before #747 this run STOPPED: the frame's two errors made the whole result `ok: false`, no
+    // program was written, and the findings never reached the receipt.
+    expect(code, allDiagnostics(receipt)).toBe(0);
+    expect(receipt.refusals, allDiagnostics(receipt)).toEqual([]);
+    const program = receipt.details.programs[0]!;
+    expect(program.frameFile, 'a refused frame is withheld, not handed over').toBeNull();
+    expect(receipt.outputs.some((o) => o.path.endsWith('-frame.nc')), 'no frame file may be written').toBe(false);
+    expect(
+      receipt.outputs.some((o) => o.path.endsWith('.nc') && !o.path.endsWith('-frame.nc')),
+      'the verified program itself is still written',
+    ).toBe(true);
+    // The frame's findings, with their machine coordinates, are on the receipt like the program's.
+    const frameErrors = receipt.diagnostics.filter(
+      (d) => d.severity === 'error' && d.source === 'verify' && d.message.includes('outside-envelope'),
+    );
+    expect(frameErrors.length, allDiagnostics(receipt)).toBeGreaterThan(0);
+    expect(frameErrors[0]!.message).toContain("leaves the Makera Z1's envelope");
+    // ... and why the frame is absent: a warning, because the program never depended on the trace.
+    const withheld = receipt.diagnostics.find((d) => d.code === 'no-frame');
+    expect(withheld, allDiagnostics(receipt)).toBeDefined();
+    expect(withheld!.severity).toBe('warning');
+    expect(withheld!.message).toContain('withheld');
+    // The sheet says the program can still be cut, rather than "do not run this file".
+    const sheetPath = receipt.outputs.find((o) => o.path.endsWith('-run-sheet.md'))!.path;
+    const sheet = readFileSync(sheetPath, 'utf8');
+    expect(sheet).toContain('itself passed verification, so it can still be cut');
+    expect(sheet).not.toContain('Do not run this file');
   }, 150_000);
 });

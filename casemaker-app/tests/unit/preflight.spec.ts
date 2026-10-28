@@ -197,6 +197,24 @@ describe('preflight: the program (the verifier, or the gate before one exists)',
     expect(rows).toHaveLength(report.findings.length * 2);
   });
 
+  it('offers a WITHHELD frame as a warning, not a blocked cut (#747)', () => {
+    // #747: a verified program whose frame could not be traced comes back with `ok: true`, no
+    // frame and the worker's reason. The cut never depended on the trace, so the row is a warning
+    // with the Generate's own sentence — the program stays savable and runnable. Before #747 this
+    // state could not exist: a frame fault made `ok` false and the run stopped.
+    const reason = 'The frame file was withheld: its verifier found 2 errors.';
+    const rows = rowsFor(defaultEngraveJob(), {
+      generated: generatedWith({ ok: true, nc: 'G90 G21\n', frameNc: null, frameVerify: null, frameError: reason }),
+    });
+    const row = withCode(rows, 'no-frame')[0]!;
+    expect(row).toBeDefined();
+    expect(row.owner).toBe('verify');
+    expect(row.severity).toBe('warning');
+    expect(row.message).toBe(reason);
+    // Nothing else on the gate turned that absence into an error.
+    expect(rows.filter((r) => r.severity === 'error')).toEqual([]);
+  });
+
   it('with no Generate, reports the GATE`s own sentence rather than a re-worded one', () => {
     const rows = rowsFor(defaultEngraveJob()); // generated: null — Cut requires a Generate (§2.2).
     const row = rows.find((r) => r.owner === 'engraveRunGate')!;

@@ -359,6 +359,11 @@ export interface RestProgram {
    */
   frameZ?: number | null;
   /**
+   * #747 — why the frame was withheld although the program itself verified, or null/absent. The
+   * sheet must not call a withheld frame a failed program.
+   */
+  frameError?: string | null;
+  /**
    * The cutting parameters this program was generated with, or null when its feeds did not resolve
    * (#437 item 8). The sheet states each program's own numbers: the two programs are different
    * cutters in the same material, so program 1's RPM and step-over are not program 2's, and a sheet
