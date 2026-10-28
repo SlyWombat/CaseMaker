@@ -1,0 +1,69 @@
+{
+ "schemaVersion": 3,
+ "name": "fx-frame-pocket",
+ "machineId": "Z1",
+ "stock": {
+  "length": 146,
+  "width": 134,
+  "thickness": 22.8,
+  "material": "hardwood"
+ },
+ "labels": [],
+ "toolKey": "inv:kz-o-flute-3-175-25",
+ "minFloor": 1,
+ "edgeMargin": 1,
+ "customFonts": [],
+ "sacrificial": {
+  "under": {
+   "thickness": 3,
+   "overhang": {
+    "left": 0,
+    "right": 0,
+    "front": 0,
+    "back": 0
+   },
+   "attach": "tape"
+  },
+  "sides": {
+   "left": null,
+   "right": null,
+   "front": null,
+   "back": null
+  },
+  "source": "default"
+ },
+ "breakthrough": 0.3,
+ "jawClearance": 1,
+ "shapes": [
+  {
+   "id": "pocket",
+   "kind": "circle",
+   "position": {
+    "x": 73,
+    "y": 67
+   },
+   "rotation": 0,
+   "depth": 10,
+   "enabled": true,
+   "diameter": 93
+  }
+ ],
+ "workholding": {
+  "kind": "bracket",
+  "bracket": {
+   "anchor": 1,
+   "variant": "thin",
+   "clamps": [
+    {
+     "edge": "back",
+     "at": 73
+    },
+    {
+     "edge": "right",
+     "at": 67
+    }
+   ],
+   "source": "default"
+  }
+ }
+}

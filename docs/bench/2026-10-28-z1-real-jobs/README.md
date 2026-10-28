@@ -46,3 +46,48 @@ Each issue names its job files in `jobs/`:
 - #743: j04-coin-pla-proxy
 - #734: j15-vader-pla-proxy-b-engrave, j17-faceplate-pla-proxy, j13-tool-tray (a false positive of the sweep floor, not a surfacing defect)
 - #735: j13-tool-tray-b-small-holes, j18-thread-a-bore-pla-proxy
+
+## Second set (2026-10-28, later the same day)
+
+Seven more jobs, from sources that publish the finished part and something real to build from:
+- **CutRocket** (Carbide 3D's project site): the maker's own Carbide Create `.c2d` design file.
+- **Makerables** (Makera's project library): the maker's stated sizes, artwork or photos.
+
+They cover categories the first set did not: a Z1 accuracy sample in aluminium, a hardwood tray with a raised letter, an epoxy-inlay coaster, a compartment tray, a two-colour laminate sign, and two aluminium bike tools.
+
+- Main **9538601f** (#744 landed afterwards, at 3cce07a2), `casemaker cut <job> --json --location <bench location>`.
+- **Location:** the desktop app's `location.json`, with each owned cutter's Makera match confirmed as an operator would in Manage → Tools (#732), and the synced `catalogue.json` beside it. `tools/set2/bench_location.py` rebuilds it, and its table lists every owned cutter → Makera id.
+- **Verdicts:** 0 match the photo, 4 partly, 3 fail. `manifest.json` → `set2` holds each card's verdict, sentence, runs and issues.
+
+| Verdict | Jobs |
+|---|---|
+| Partly | j19 accuracy sample (raised text pitted; one job refused, #746), j22 snack tray (flat floors, no roundover), j23 laminate sign (one job refused, #746; tabs refused on the traced outline, #736), j25 truing wrench (one job refused, #746) |
+| Fails | j20 spoon rest (tab read as a loose piece, #750; frame outside the machine, #747), j21 coaster (frame, #747; V-carve judged from the top face, #748; the whole job ran >15 min), j24 spoke wrench (the cut-out crashes the command, #749; one job refused, #746) |
+
+**Issues filed:** #746 (a later cutter can only rest-machine), #747 (frame file outside the envelope blocks a verified program), #748 (engraving on a pocket floor judged from the top face), #749 (wasm crash on a disc cut-out), #750 (a tab reported as a loose piece). A comment on #736 adds tabs on traced straight sides.
+
+### Inputs not in the repository (set 2)
+
+These jobs' files are not committed: their sources' licence is unstated or forbids modified copies. Rebuild them with `tools/set2/jobs3.py`, after placing the downloads where it expects them:
+- **j20 spoon rest:** `https://cutrocket.com/api/project/4htqf68iz0lle/download/4htqf68iz0lle_Personalized-Spoon-Rest.c2d`, read with `tools/set2/c2d.py` into `x/4htqf68iz0lle/`.
+- **j21 coaster:** `https://cutrocket.com/api/project/qljwa0rs3485g/download/qljwa0rs3485g_Coaster-with-initial-and-script-name.c2d`, read into `x/qljwa0rs3485g/`. The first coaster (x < 130 mm) is the one used.
+- **j23 sign:** the maker's artwork, `https://cdn.makerables.com/cdn-cgi/image/format=auto/projects/gallery/blue_shell_sign-mqwrjwus.png` (CC BY-NC-ND 4.0). Ink = pixels with R+G+B < 200, outline = pixels with min channel < 230, written as RGBA and traced by `tools/set2/bench-import-outline.mts` (the app's `traceRaster`) at 110 mm wide.
+
+### Fixtures (set 2)
+
+- #746: j19-accuracy-sample, j24-spoke-wrench, j25-truing-wrench (the `-a/-b/-c/-z` files are the hand split that generates)
+- #747: fx-frame-pocket
+- #748: j24-spoke-wrench-c (after -a)
+- #749: j24-spoke-wrench-z
+- #750: fx-hex-svg-import (from `hex-cw.svg` through the app's SVG importer), fx-hexv (passes)
+
+### Not run (set 2)
+
+- **Elephant puzzle (Makerables):** it is carved as well as cut; its files need a login, and the photo cannot be traced faithfully.
+- **Nordic iceberg, Morgan coin and Wild Spirit (Makerables):** 3D reliefs whose model files need a login.
+- **Box hinges (CutRocket):** a Carbide Create 3D component, which cannot be read here.
+- **Morakniv template (CutRocket):** an open knife outline, not a region.
+- **Nomad wasteboard and table (CutRocket):** bigger than the Z1's bed, and shown only as renders.
+- **Gear, stencil, clock face, ruler, Eurorack panel, phone stand, two-sided part, rotary pawn:** no source had both a photo of the finished part and inputs that could be obtained.
+
+The "after" pictures use `tools/set2/render.py` (v2's sweep, plus a two-colour laminate). Each program of a split job is swept in order onto the same stock.

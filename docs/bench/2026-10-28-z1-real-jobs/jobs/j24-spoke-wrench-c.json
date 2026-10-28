@@ -1,0 +1,130 @@
+{
+ "schemaVersion": 3,
+ "name": "j24-spoke-wrench-c",
+ "machineId": "Z1",
+ "stock": {
+  "length": 60,
+  "width": 60,
+  "thickness": 10,
+  "material": "aluminium-6061"
+ },
+ "labels": [
+  {
+   "id": "lab-13G",
+   "text": "13G",
+   "font": "sans-default",
+   "weight": "bold",
+   "size": 2.6,
+   "position": {
+    "x": 40.153897317877664,
+    "y": 35.398922972037745
+   },
+   "rotation": -62.0,
+   "depth": 4.25,
+   "enabled": true
+  },
+  {
+   "id": "lab-14G",
+   "text": "14G",
+   "font": "sans-default",
+   "weight": "bold",
+   "size": 2.6,
+   "position": {
+    "x": 24.60107702796226,
+    "y": 40.153897317877664
+   },
+   "rotation": 27.999999999999986,
+   "depth": 4.25,
+   "enabled": true
+  },
+  {
+   "id": "lab-15G",
+   "text": "15G",
+   "font": "sans-default",
+   "weight": "bold",
+   "size": 2.6,
+   "position": {
+    "x": 19.84610268212234,
+    "y": 24.60107702796226
+   },
+   "rotation": 118.0,
+   "depth": 4.25,
+   "enabled": true
+  },
+  {
+   "id": "lab-16G",
+   "text": "16G",
+   "font": "sans-default",
+   "weight": "bold",
+   "size": 2.6,
+   "position": {
+    "x": 35.39892297203774,
+    "y": 19.84610268212234
+   },
+   "rotation": 208.0,
+   "depth": 4.25,
+   "enabled": true
+  }
+ ],
+ "toolKey": "inv:kz-engrave-m-30-0-2",
+ "minFloor": 1,
+ "edgeMargin": 1,
+ "customFonts": [],
+ "sacrificial": {
+  "under": {
+   "thickness": 2,
+   "overhang": {
+    "left": 0,
+    "right": 0,
+    "front": 0,
+    "back": 0
+   },
+   "attach": "tape"
+  },
+  "sides": {
+   "left": null,
+   "right": null,
+   "front": null,
+   "back": null
+  },
+  "source": "default"
+ },
+ "breakthrough": 0.3,
+ "jawClearance": 1,
+ "shapes": [
+  {
+   "id": "puck",
+   "kind": "circle",
+   "position": {
+    "x": 30,
+    "y": 30
+   },
+   "rotation": 0,
+   "depth": 10,
+   "enabled": true,
+   "diameter": 44,
+   "construction": true
+  }
+ ],
+ "workholding": {
+  "kind": "bracket",
+  "bracket": {
+   "anchor": 1,
+   "variant": "thin",
+   "clamps": [
+    {
+     "edge": "back",
+     "at": 30
+    },
+    {
+     "edge": "right",
+     "at": 30
+    }
+   ],
+   "source": "default"
+  }
+ },
+ "drills": [],
+ "vectors": [],
+ "cutouts": []
+}

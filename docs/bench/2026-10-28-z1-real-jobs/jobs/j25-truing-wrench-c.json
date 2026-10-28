@@ -1,0 +1,180 @@
+{
+ "schemaVersion": 3,
+ "name": "j25-truing-wrench-c",
+ "machineId": "Z1",
+ "stock": {
+  "length": 170,
+  "width": 40,
+  "thickness": 4,
+  "material": "aluminium-6061"
+ },
+ "labels": [],
+ "toolKey": "inv:kz-engrave-m-30-0-2",
+ "minFloor": 1,
+ "edgeMargin": 1,
+ "customFonts": [],
+ "sacrificial": {
+  "under": {
+   "thickness": 2,
+   "overhang": {
+    "left": 0,
+    "right": 0,
+    "front": 0,
+    "back": 0
+   },
+   "attach": "tape"
+  },
+  "sides": {
+   "left": null,
+   "right": null,
+   "front": null,
+   "back": null
+  },
+  "source": "default"
+ },
+ "breakthrough": 0.3,
+ "jawClearance": 1,
+ "shapes": [],
+ "workholding": {
+  "kind": "bracket",
+  "bracket": {
+   "anchor": 1,
+   "variant": "thin",
+   "clamps": [
+    {
+     "edge": "back",
+     "at": 85
+    },
+    {
+     "edge": "right",
+     "at": 20
+    }
+   ],
+   "source": "default"
+  }
+ },
+ "vectors": [
+  {
+   "id": "bar",
+   "kind": "vector",
+   "position": {
+    "x": 83.5,
+    "y": 20.0
+   },
+   "rotation": 0,
+   "depth": 4,
+   "enabled": true,
+   "sourceName": "bar",
+   "contours": [
+    [
+     [
+      -73.5,
+      -7.0
+     ],
+     [
+      36.5,
+      -9.0
+     ],
+     [
+      74.5,
+      -11.0
+     ],
+     [
+      77.5,
+      0.0
+     ],
+     [
+      74.5,
+      11.0
+     ],
+     [
+      36.5,
+      9.0
+     ],
+     [
+      -73.5,
+      7.0
+     ],
+     [
+      -77.5,
+      0.0
+     ]
+    ]
+   ],
+   "fillRule": "NonZero",
+   "width": 155,
+   "height": 22,
+   "construction": true
+  }
+ ],
+ "drills": [],
+ "traces": [
+  {
+   "id": "groove0",
+   "kind": "line",
+   "position": {
+    "x": 77.0,
+    "y": 16.15
+   },
+   "rotation": 0,
+   "depth": 0.3,
+   "enabled": true,
+   "points": [
+    [
+     -51.0,
+     0.35
+    ],
+    [
+     51.0,
+     -0.35
+    ]
+   ],
+   "closed": false
+  },
+  {
+   "id": "groove1",
+   "kind": "line",
+   "position": {
+    "x": 77.0,
+    "y": 20.0
+   },
+   "rotation": 0,
+   "depth": 0.3,
+   "enabled": true,
+   "points": [
+    [
+     -51.0,
+     0.0
+    ],
+    [
+     51.0,
+     0.0
+    ]
+   ],
+   "closed": false
+  },
+  {
+   "id": "groove2",
+   "kind": "line",
+   "position": {
+    "x": 77.0,
+    "y": 23.85
+   },
+   "rotation": 0,
+   "depth": 0.3,
+   "enabled": true,
+   "points": [
+    [
+     -51.0,
+     -0.35
+    ],
+    [
+     51.0,
+     0.35
+    ]
+   ],
+   "closed": false
+  }
+ ],
+ "cutouts": []
+}

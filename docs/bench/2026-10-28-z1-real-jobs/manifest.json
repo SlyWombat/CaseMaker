@@ -594,5 +594,657 @@
     }
    ]
   }
- ]
+ ],
+ "set2": {
+  "run": "2026-10-28",
+  "main": "9538601f",
+  "location": "house location with each owned cutter's Makera match confirmed (#732), catalogue.json beside it; rebuilt by tools/set2/bench_location.py",
+  "counts": {
+   "Partly": 4,
+   "Fails": 3
+  },
+  "jobs": [
+   {
+    "id": "j19",
+    "title": "CNC accuracy test sample, aluminium (made for the Z1)",
+    "category": "feature test in aluminium",
+    "source": {
+     "url": "https://www.makerables.com/project/cnc-accuracy-test-sample",
+     "title": "Makerables — CNC Accuracy Test Sample",
+     "credit": "Molodos (CC BY-NC-ND 4.0)"
+    },
+    "verdict": "Partly",
+    "sentence": "Cut as four one-cutter jobs, every feature of the maker's sample is there: the keyring hole, the four slanted slots with 3/2/1.5/1 mm walls, the six thin floors, the 2–5 mm holes, the engraved logo and the tabbed outline. The raised \"CNC\" comes out as pitted stubs, because the 1.5 mm cutter cannot get between letters 4 mm tall. As one three-cutter job, as drawn, it is refused.",
+    "modelled": "The maker's stated sizes (a 40 × 70 × 4 part from a 5 mm plate; walls 3/2/1.5/1; floors 0.2–1.2; holes 2/3/4/5), placed by measuring the annotated photo. The angled slide is a flat 2 mm pocket here (there is no sloped-floor operation).",
+    "material": "Aluminium 6061",
+    "stock": "86 × 56 × 5 mm, 2 mm board",
+    "held": "bracket",
+    "cutters": "3.175 metal O-flute, 1.5 mm metal flat, 0.2 mm 30° metal engraver",
+    "issues": [
+     746
+    ],
+    "jobFilesCommitted": true,
+    "runs": [
+     {
+      "title": "As drawn: one job, three cutters",
+      "jobs": [
+       "jobs/j19-accuracy-sample.json"
+      ],
+      "results": [
+       {
+        "job": "j19-accuracy-sample",
+        "exit": "exit=1 wall=17.4s",
+        "result": "refused",
+        "refusal": "depth-exceeds-stock: Imported vector \"rest of Pocket outline\" \"rest of Pocket outline\" 7.824×5.828 cuts 5.3 mm deep; only -0.3 mm of floor would remain on a 5 mm stock, below the 0.2 mm minimum.",
+        "programs": []
+       }
+      ]
+     },
+     {
+      "title": "Split by cutter: skim, details, engraving, cut-out",
+      "jobs": [
+       "jobs/j19-accuracy-sample-a.json",
+       "jobs/j19-accuracy-sample-b.json",
+       "jobs/j19-accuracy-sample-c.json",
+       "jobs/j19-accuracy-sample-z.json"
+      ],
+      "results": [
+       {
+        "job": "j19-accuracy-sample-a",
+        "exit": "exit=0 wall=1.9s",
+        "result": "generated",
+        "refusal": null,
+        "programs": [
+         {
+          "nc": "j19-accuracy-sample-a.nc",
+          "estimated": "25 min 54 s",
+          "removedMm3": 3741.748347570425
+         }
+        ]
+       },
+       {
+        "job": "j19-accuracy-sample-b",
+        "exit": "exit=0 wall=3.2s",
+        "result": "generated",
+        "refusal": null,
+        "programs": [
+         {
+          "nc": "j19-accuracy-sample-b.nc",
+          "estimated": "1 h 41 min",
+          "removedMm3": 2113.9460016203034
+         }
+        ]
+       },
+       {
+        "job": "j19-accuracy-sample-c",
+        "exit": "exit=0 wall=1.7s",
+        "result": "generated",
+        "refusal": null,
+        "programs": [
+         {
+          "nc": "j19-accuracy-sample-c.nc",
+          "estimated": "24 min 54 s",
+          "removedMm3": 230.25707316334962
+         }
+        ]
+       },
+       {
+        "job": "j19-accuracy-sample-z",
+        "exit": "exit=0 wall=12.7s",
+        "result": "generated",
+        "refusal": null,
+        "programs": [
+         {
+          "nc": "j19-accuracy-sample-z.nc",
+          "estimated": "25 min 36 s",
+          "removedMm3": 3531.979195535012
+         }
+        ]
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "id": "j20",
+    "title": "Personalised spoon rest, hardwood hexagon",
+    "category": "tray with raised letter",
+    "source": {
+     "url": "https://cutrocket.com/p/4htqf68iz0lle",
+     "title": "CutRocket — Personalize Spoon Rest",
+     "credit": "CutRocket (licence not stated)"
+    },
+    "verdict": "Fails",
+    "sentence": "No program. With its four tabs the job is refused because one tab is counted as a loose 38 mm² piece; without tabs, the frame file is refused because it would move outside the machine at Z 0.",
+    "modelled": "Read from the maker's Carbide Create file: the 145 mm hexagon, the rest pocket and the handle notch. The file pockets with a 3D component (a sloped floor) that cannot be read here, so the rest is a flat 6 mm pocket around a raised serif M (the photo's letter).",
+    "material": "Hardwood",
+    "stock": "152.4 × 152.4 × 21.3 mm, 3 mm board",
+    "held": "bracket",
+    "cutters": "3.175 O-flute",
+    "issues": [
+     750,
+     747
+    ],
+    "jobFilesCommitted": false,
+    "runs": [
+     {
+      "title": "As drawn, four tabs",
+      "jobs": [
+       null
+      ],
+      "results": [
+       {
+        "job": "j20-spoon-rest",
+        "exit": "exit=1 wall=1.3s",
+        "result": "refused",
+        "refusal": "loose-piece: The through cuts leave a piece of the blank (38 mm²) disconnected from the material the mount holds. It can move under the cutter after being freed; leave a connecting bridge of material, move the cut away from the blank’s edges, or add holding tabs.",
+        "programs": []
+       }
+      ]
+     },
+     {
+      "title": "Without tabs",
+      "jobs": [
+       null
+      ],
+      "results": [
+       {
+        "job": "j20-spoon-rest-notabs",
+        "exit": "exit=1 wall=1.8s",
+        "result": "refused",
+        "refusal": "the frame file has 5 verifier error(s)",
+        "programs": []
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "id": "j21",
+    "title": "Coaster with an epoxy inlay, hardwood",
+    "category": "pocket, V-carved name, chamfers, cut-out",
+    "source": {
+     "url": "https://cutrocket.com/p/qljwa0rs3485g",
+     "title": "CutRocket — Coaster with epoxy inlay",
+     "credit": "CutRocket (licence not stated)"
+    },
+    "verdict": "Fails",
+    "sentence": "No program. As one job it ran 15 minutes with no result. Split by cutter, the pocket, the cut-out and the chamfers are each blocked by a frame file outside the machine. The V-carved initial and name are judged as if they started at the top face, not the pocket floor. The house's 3.175 mm chamfer bit reaches 1.5 mm, not the 2–2.5 mm drawn, which is a correct refusal.",
+    "modelled": "The first of the file's seven coasters: a ⌀93 pocket 10 mm deep, the initial and the script name V-carved 4 mm into its floor, 45° chamfers on the rim (2.5) and outside (2), cut out at ⌀107. The maker used a 1/4\" end mill and a 1/2\" chamfer bit; the house cutters are used here.",
+    "material": "Hardwood",
+    "stock": "146 × 134 × 22.8 mm, 3 mm board",
+    "held": "bracket",
+    "cutters": "3.175 O-flute, 0.5 mm 30° engraver, 3.175 mm 90° chamfer",
+    "issues": [
+     747,
+     748
+    ],
+    "jobFilesCommitted": false,
+    "runs": [
+     {
+      "title": "As drawn: one job, three cutters",
+      "jobs": [
+       null
+      ],
+      "results": [
+       {
+        "job": "j21-coaster-inlay",
+        "exit": "exit=124 wall=963.8s",
+        "result": "timeout",
+        "detail": null
+       }
+      ]
+     },
+     {
+      "title": "Pocket only",
+      "jobs": [
+       null
+      ],
+      "results": [
+       {
+        "job": "j21-coaster-inlay-a",
+        "exit": "exit=1 wall=75.7s",
+        "result": "refused",
+        "refusal": "the frame file has 5 verifier error(s)",
+        "programs": []
+       }
+      ]
+     },
+     {
+      "title": "V-carve only",
+      "jobs": [
+       null
+      ],
+      "results": [
+       {
+        "job": "j21-coaster-inlay-b",
+        "exit": "exit=1 wall=19.7s",
+        "result": "refused",
+        "refusal": "the frame file has 5 verifier error(s)",
+        "programs": []
+       }
+      ]
+     },
+     {
+      "title": "Chamfers at 1.5 mm",
+      "jobs": [
+       null
+      ],
+      "results": [
+       {
+        "job": "j21-coaster-inlay-c-15",
+        "exit": "exit=1 wall=1.9s",
+        "result": "refused",
+        "refusal": "the frame file has 5 verifier error(s)",
+        "programs": []
+       }
+      ]
+     },
+     {
+      "title": "Cut-out only",
+      "jobs": [
+       null
+      ],
+      "results": [
+       {
+        "job": "j21-coaster-inlay-z",
+        "exit": "exit=1 wall=516.2s",
+        "result": "refused",
+        "refusal": "the frame file has 5 verifier error(s)",
+        "programs": []
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "id": "j22",
+    "title": "Square snack tray, three compartments",
+    "category": "pocketed tray",
+    "source": {
+     "url": "https://www.makerables.com/project/square-snack-tray",
+     "title": "Makerables — Square Snack Tray",
+     "credit": "MakeHaven (CC0 1.0)"
+    },
+    "verdict": "Partly",
+    "sentence": "The layout, depths and outline match the photo. The photo's compartments have rounded floors and its outer edge is rounded over; here the floors are flat and the walls square.",
+    "modelled": "Estimated from the maker's photo: about 140 × 140 × 18, two square compartments over one wide one, 12 mm deep, 9 mm corner radii.",
+    "material": "Hardwood",
+    "stock": "150 × 150 × 18 mm, 3 mm board",
+    "held": "bracket",
+    "cutters": "3.175 O-flute",
+    "issues": [],
+    "jobFilesCommitted": true,
+    "runs": [
+     {
+      "title": "As drawn",
+      "jobs": [
+       "jobs/j22-snack-tray.json"
+      ],
+      "results": [
+       {
+        "job": "j22-snack-tray",
+        "exit": "exit=0 wall=33.6s",
+        "result": "generated",
+        "refusal": null,
+        "programs": [
+         {
+          "nc": "j22-snack-tray.nc",
+          "estimated": "2 h 31 min",
+          "removedMm3": 179920.0599256458
+         }
+        ]
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "id": "j23",
+    "title": "Blue Shell warning sign, two-colour laminate",
+    "category": "two-colour sign",
+    "source": {
+     "url": "https://www.makerables.com/project/blue-shell-warning-sign",
+     "title": "Makerables — Blue Shell Warning Sign",
+     "credit": "Makerables author (CC BY-NC-ND 4.0)"
+    },
+    "verdict": "Partly",
+    "sentence": "Cut as two jobs, the lines and the diamond outline come out as in the photo. As one job it is refused: a V-bit cannot be followed by the flat cut-out. The outline can only be cut without tabs, because tabs are refused on its traced straight sides.",
+    "modelled": "The maker's own artwork PNG traced by the app's raster importer; the black lines milled 0.35 mm through a 0.2 mm yellow cap, the sign 110 mm across, cut out of 1.6 mm laminate. Cap thickness and size are assumed.",
+    "material": "Plastic laminate (yellow over black)",
+    "stock": "130 × 130 × 1.6 mm, taped, 3 mm board",
+    "held": "tape",
+    "cutters": "0.5 mm 30° engraver, 3.175 O-flute",
+    "issues": [
+     746,
+     736
+    ],
+    "jobFilesCommitted": false,
+    "runs": [
+     {
+      "title": "As drawn: one job, two cutters",
+      "jobs": [
+       null
+      ],
+      "results": [
+       {
+        "job": "j23-shell-sign",
+        "exit": "exit=1 wall=2.3s",
+        "result": "refused",
+        "refusal": "setup-rest-unavailable: Setup 1 names inv:kz-engrave-30-0-5 first and then another cutter, but a V-bit is not a rest cutter here — on a region job it is the V-carve cutter itself, not a second program. The V-carve is the whole region job; remove the later cutter from the setup, or name a flat cutter first.",
+        "programs": []
+       }
+      ]
+     },
+     {
+      "title": "Lines only",
+      "jobs": [
+       null
+      ],
+      "results": [
+       {
+        "job": "j23-shell-sign-a",
+        "exit": "exit=0 wall=2.1s",
+        "result": "generated",
+        "refusal": null,
+        "programs": [
+         {
+          "nc": "j23-shell-sign-a.nc",
+          "estimated": "15 min 30 s",
+          "removedMm3": 581.670350843528
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "title": "Cut-out with tabs",
+      "jobs": [
+       null
+      ],
+      "results": [
+       {
+        "job": "j23-shell-sign-z",
+        "exit": "exit=1 wall=1.3s",
+        "result": "refused",
+        "refusal": "tab-unplaceable: Cut-out \"Cut out outside Pocket outline (1 contour, 110×110mm)\" asks for 4 holding tabs 3 mm wide, but 4 could not be placed on a straight edge long enough; the part would be released where that tab was meant to hold it. Use a smaller tab width or count.",
+        "programs": []
+       }
+      ]
+     },
+     {
+      "title": "Cut-out without tabs",
+      "jobs": [
+       null
+      ],
+      "results": [
+       {
+        "job": "j23-shell-sign-z-notabs",
+        "exit": "exit=0 wall=4.7s",
+        "result": "generated",
+        "refusal": null,
+        "programs": [
+         {
+          "nc": "j23-shell-sign-z-notabs.nc",
+          "estimated": "2 min 45 s",
+          "removedMm3": 1658.665182495748
+         }
+        ]
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "id": "j24",
+    "title": "Bicycle spoke wrench, aluminium",
+    "category": "turned-look puck from plate",
+    "source": {
+     "url": "https://www.makerables.com/project/bicycle-spoke-wrench",
+     "title": "Makerables — Bicycle spoke wrench",
+     "credit": "Makerables author (CC0 1.0)"
+    },
+    "verdict": "Fails",
+    "sentence": "The recess, centre hole, four nipple notches and the gauge labels are cut, but the puck is never freed: the cut-out crashes the command with no result. As one job it is refused (the bore and cut-out are given to the big cutter, the notches to the small one).",
+    "modelled": "Estimated from the maker's photos: a ⌀44 × 10 puck, a ⌀34 recess 4 deep, a ⌀14 hole, notches for 13G/14G/15G/16G (3.9/3.4/3.2/3.0 mm, typical nipple flats), each size engraved on the recess floor.",
+    "material": "Aluminium 6061",
+    "stock": "60 × 60 × 10 mm, 2 mm board",
+    "held": "bracket",
+    "cutters": "3.175 metal O-flute, 1.5 mm metal flat, 0.2 mm 30° metal engraver",
+    "issues": [
+     749,
+     746,
+     748
+    ],
+    "jobFilesCommitted": true,
+    "runs": [
+     {
+      "title": "As drawn: one job, three cutters",
+      "jobs": [
+       "jobs/j24-spoke-wrench.json"
+      ],
+      "results": [
+       {
+        "job": "j24-spoke-wrench",
+        "exit": "exit=1 wall=17.0s",
+        "result": "refused",
+        "refusal": "depth-exceeds-stock: Imported vector \"rest of Bore ⌀14\" \"rest of Bore ⌀14\" 14×14 cuts 10.3 mm deep; only -0.3 mm of floor would remain on a 10 mm stock, below the 1 mm minimum.",
+        "programs": []
+       }
+      ]
+     },
+     {
+      "title": "Split: recess and hole, notches, labels",
+      "jobs": [
+       "jobs/j24-spoke-wrench-a.json",
+       "jobs/j24-spoke-wrench-b.json",
+       "jobs/j24-spoke-wrench-c.json"
+      ],
+      "results": [
+       {
+        "job": "j24-spoke-wrench-a",
+        "exit": "exit=0 wall=3.4s",
+        "result": "generated",
+        "refusal": null,
+        "programs": [
+         {
+          "nc": "j24-spoke-wrench-a.nc",
+          "estimated": "44 min 35 s",
+          "removedMm3": 4552.327711549502
+         }
+        ]
+       },
+       {
+        "job": "j24-spoke-wrench-b",
+        "exit": "exit=0 wall=3.5s",
+        "result": "generated",
+        "refusal": null,
+        "programs": [
+         {
+          "nc": "j24-spoke-wrench-b.nc",
+          "estimated": "15 min 58 s",
+          "removedMm3": 369.6644469470484
+         }
+        ]
+       },
+       {
+        "job": "j24-spoke-wrench-c",
+        "exit": "exit=0 wall=2.3s",
+        "result": "generated",
+        "refusal": null,
+        "programs": [
+         {
+          "nc": "j24-spoke-wrench-c.nc",
+          "estimated": "38 min 39 s",
+          "removedMm3": 360.47883614469873
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "title": "Cut-out",
+      "jobs": [
+       "jobs/j24-spoke-wrench-z.json"
+      ],
+      "results": [
+       {
+        "job": "j24-spoke-wrench-z",
+        "exit": "exit=1 wall=99.8s",
+        "result": "crashed",
+        "detail": "RuntimeError: memory access out of bounds"
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "id": "j25",
+    "title": "Disc-brake truing wrench, aluminium",
+    "category": "flat tool from plate",
+    "source": {
+     "url": "https://www.makerables.com/project/disc-brake-truing-wrench",
+     "title": "Makerables — Disc brake truing wrench",
+     "credit": "Makerables author (CC0 1.0)"
+    },
+    "verdict": "Partly",
+    "sentence": "Cut as four one-cutter jobs, the bar, hanging hole, rotor slot and grooves come out and the bar is freed on tabs. The maker's fork has three slots and curved grooves; this model has one slot and straight grooves. As one job it is refused.",
+    "modelled": "Estimated from the maker's photo: about 155 × 22 × 4, a ⌀8 hanging hole, a 1.9 mm rotor slot at the fork end, three engraved grooves.",
+    "material": "Aluminium 6061",
+    "stock": "170 × 40 × 4 mm, 2 mm board",
+    "held": "bracket",
+    "cutters": "3.175 metal O-flute, 1.5 mm metal flat, 0.2 mm 30° metal engraver",
+    "issues": [
+     746
+    ],
+    "jobFilesCommitted": true,
+    "runs": [
+     {
+      "title": "As drawn: one job, three cutters",
+      "jobs": [
+       "jobs/j25-truing-wrench.json"
+      ],
+      "results": [
+       {
+        "job": "j25-truing-wrench",
+        "exit": "exit=1 wall=4.1s",
+        "result": "refused",
+        "refusal": "depth-exceeds-stock: Imported vector \"rest of Pocket outline\" \"rest of Pocket outline\" 22×1.9 cuts 4.3 mm deep; only -0.3 mm of floor would remain on a 4 mm stock, below the 1 mm minimum.",
+        "programs": []
+       }
+      ]
+     },
+     {
+      "title": "Split: hole, slot, grooves, cut-out",
+      "jobs": [
+       "jobs/j25-truing-wrench-a.json",
+       "jobs/j25-truing-wrench-b.json",
+       "jobs/j25-truing-wrench-c.json",
+       "jobs/j25-truing-wrench-z.json"
+      ],
+      "results": [
+       {
+        "job": "j25-truing-wrench-a",
+        "exit": "exit=0 wall=1.5s",
+        "result": "generated",
+        "refusal": null,
+        "programs": [
+         {
+          "nc": "j25-truing-wrench-a.nc",
+          "estimated": "2 min 34 s",
+          "removedMm3": 200.89522523902997
+         }
+        ]
+       },
+       {
+        "job": "j25-truing-wrench-b",
+        "exit": "exit=0 wall=2.0s",
+        "result": "generated",
+        "refusal": null,
+        "programs": [
+         {
+          "nc": "j25-truing-wrench-b.nc",
+          "estimated": "4 min 44 s",
+          "removedMm3": 165.1161121492005
+         }
+        ]
+       },
+       {
+        "job": "j25-truing-wrench-c",
+        "exit": "exit=0 wall=1.4s",
+        "result": "generated",
+        "refusal": null,
+        "programs": [
+         {
+          "nc": "j25-truing-wrench-c.nc",
+          "estimated": "1 min 34 s",
+          "removedMm3": 25.652424822298272
+         }
+        ]
+       },
+       {
+        "job": "j25-truing-wrench-z",
+        "exit": "exit=0 wall=6.6s",
+        "result": "generated",
+        "refusal": null,
+        "programs": [
+         {
+          "nc": "j25-truing-wrench-z.nc",
+          "estimated": "31 min 2 s",
+          "removedMm3": 4344.49127191168
+         }
+        ]
+       }
+      ]
+     }
+    ]
+   }
+  ],
+  "notRun": [
+   {
+    "what": "Elephant animal puzzle (Makerables, CC0)",
+    "why": "a carved relief as well as puzzle pieces; its files need a Makerables login and the photo cannot be traced faithfully."
+   },
+   {
+    "what": "Nordic iceberg mould, Relief Morgan coin, Wild Spirit relief (Makerables)",
+    "why": "3D reliefs whose model files need a Makerables login."
+   },
+   {
+    "what": "Box hinges (CutRocket)",
+    "why": "a 3D carving stored as a Carbide Create 3D component, which cannot be read here."
+   },
+   {
+    "what": "Morakniv knife-handle template (CutRocket)",
+    "why": "the DXF is an open outline of the knife, not a closed region to pocket."
+   },
+   {
+    "what": "Nomad 3/883 wasteboard and Nomad 4 table cover (CutRocket)",
+    "why": "bigger than the Z1's bed, and the photos are renders."
+   },
+   {
+    "what": "A spur gear, a stencil, a clock face, a ruler, a Eurorack panel, a phone stand, a two-sided part, a rotary pawn",
+    "why": "no source was found with both a photo of the finished part and inputs that could be obtained."
+   }
+  ],
+  "fixtures": {
+   "746": [
+    "j19-accuracy-sample",
+    "j24-spoke-wrench",
+    "j25-truing-wrench"
+   ],
+   "747": [
+    "fx-frame-pocket"
+   ],
+   "748": [
+    "j24-spoke-wrench-c"
+   ],
+   "749": [
+    "j24-spoke-wrench-z"
+   ],
+   "750": [
+    "fx-hex-svg-import",
+    "fx-hexv"
+   ]
+  }
+ }
 }

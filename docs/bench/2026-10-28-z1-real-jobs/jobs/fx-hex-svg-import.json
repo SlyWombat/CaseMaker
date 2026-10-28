@@ -1,0 +1,110 @@
+{
+ "schemaVersion": 3,
+ "name": "fx-hex-svg-import",
+ "machineId": "Z1",
+ "stock": {
+  "length": 152.4,
+  "width": 152.4,
+  "thickness": 10,
+  "material": "hardwood"
+ },
+ "labels": [],
+ "toolKey": "inv:kz-o-flute-3-175-25",
+ "minFloor": 1,
+ "edgeMargin": 1,
+ "customFonts": [],
+ "sacrificial": {
+  "under": {
+   "thickness": 3,
+   "overhang": {
+    "left": 0,
+    "right": 0,
+    "front": 0,
+    "back": 0
+   },
+   "attach": "tape"
+  },
+  "sides": {
+   "left": null,
+   "right": null,
+   "front": null,
+   "back": null
+  },
+  "source": "default"
+ },
+ "breakthrough": 0.3,
+ "jawClearance": 1,
+ "shapes": [],
+ "workholding": {
+  "kind": "tape",
+  "tape": {
+   "width": 25,
+   "thickness": 0.1,
+   "inset": 2,
+   "where": null,
+   "squareTo": "front",
+   "source": "default"
+  }
+ },
+ "vectors": [
+  {
+   "id": "hex",
+   "kind": "vector",
+   "position": {
+    "x": 76.2,
+    "y": 76.2
+   },
+   "rotation": 0,
+   "depth": 10,
+   "enabled": true,
+   "sourceName": "hex-cw.svg",
+   "contours": [
+    [
+     [
+      72.60799999999999,
+      -1.4210854715202004e-14
+     ],
+     [
+      36.304,
+      -62.881
+     ],
+     [
+      -36.304,
+      -62.881
+     ],
+     [
+      -72.608,
+      -1.4210854715202004e-14
+     ],
+     [
+      -36.304,
+      62.880999999999986
+     ],
+     [
+      36.304,
+      62.880999999999986
+     ]
+    ]
+   ],
+   "fillRule": "NonZero",
+   "width": 145.2,
+   "height": 125.7,
+   "construction": true
+  }
+ ],
+ "cutouts": [
+  {
+   "kind": "cutout",
+   "id": "profile",
+   "enabled": true,
+   "of": "hex",
+   "side": "outside",
+   "inset": 0,
+   "tabs": {
+    "count": 4,
+    "width": 12,
+    "height": 3
+   }
+  }
+ ]
+}

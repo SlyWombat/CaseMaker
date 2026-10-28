@@ -1,0 +1,87 @@
+{
+ "schemaVersion": 3,
+ "name": "j24-spoke-wrench-z",
+ "machineId": "Z1",
+ "stock": {
+  "length": 60,
+  "width": 60,
+  "thickness": 10,
+  "material": "aluminium-6061"
+ },
+ "labels": [],
+ "toolKey": "inv:kz-o-flute-m-3-175-12",
+ "minFloor": 1,
+ "edgeMargin": 1,
+ "customFonts": [],
+ "sacrificial": {
+  "under": {
+   "thickness": 2,
+   "overhang": {
+    "left": 0,
+    "right": 0,
+    "front": 0,
+    "back": 0
+   },
+   "attach": "tape"
+  },
+  "sides": {
+   "left": null,
+   "right": null,
+   "front": null,
+   "back": null
+  },
+  "source": "default"
+ },
+ "breakthrough": 0.3,
+ "jawClearance": 1,
+ "shapes": [
+  {
+   "id": "puck",
+   "kind": "circle",
+   "position": {
+    "x": 30,
+    "y": 30
+   },
+   "rotation": 0,
+   "depth": 10,
+   "enabled": true,
+   "diameter": 44,
+   "construction": true
+  }
+ ],
+ "workholding": {
+  "kind": "bracket",
+  "bracket": {
+   "anchor": 1,
+   "variant": "thin",
+   "clamps": [
+    {
+     "edge": "back",
+     "at": 30
+    },
+    {
+     "edge": "right",
+     "at": 30
+    }
+   ],
+   "source": "default"
+  }
+ },
+ "drills": [],
+ "vectors": [],
+ "cutouts": [
+  {
+   "kind": "cutout",
+   "id": "puck-out",
+   "enabled": true,
+   "of": "puck",
+   "side": "outside",
+   "inset": 0,
+   "tabs": {
+    "count": 0,
+    "width": 3,
+    "height": 0.8
+   }
+  }
+ ]
+}

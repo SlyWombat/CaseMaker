@@ -1,0 +1,602 @@
+{
+ "schemaVersion": 3,
+ "name": "j19-accuracy-sample-b",
+ "machineId": "Z1",
+ "stock": {
+  "length": 86,
+  "width": 56,
+  "thickness": 5,
+  "material": "aluminium-6061"
+ },
+ "labels": [
+  {
+   "id": "cnc-raised",
+   "text": "CNC",
+   "font": "sans-default",
+   "weight": "bold",
+   "size": 4.2,
+   "position": {
+    "x": 63,
+    "y": 42.25
+   },
+   "rotation": 0,
+   "depth": 1.6,
+   "enabled": true,
+   "construction": true
+  }
+ ],
+ "toolKey": "inv:kz-o-flute-m-1-5-6",
+ "minFloor": 0.2,
+ "edgeMargin": 1,
+ "customFonts": [],
+ "sacrificial": {
+  "under": {
+   "thickness": 2,
+   "overhang": {
+    "left": 0,
+    "right": 0,
+    "front": 0,
+    "back": 0
+   },
+   "attach": "tape"
+  },
+  "sides": {
+   "left": null,
+   "right": null,
+   "front": null,
+   "back": null
+  },
+  "source": "default"
+ },
+ "breakthrough": 0.3,
+ "jawClearance": 1,
+ "shapes": [
+  {
+   "id": "part",
+   "kind": "rect",
+   "position": {
+    "x": 43,
+    "y": 28
+   },
+   "rotation": 0,
+   "depth": 5,
+   "enabled": true,
+   "width": 70,
+   "height": 40,
+   "cornerRadius": 3,
+   "construction": true
+  },
+  {
+   "id": "textbox",
+   "kind": "rect",
+   "position": {
+    "x": 63,
+    "y": 42.25
+   },
+   "rotation": 0,
+   "depth": 1.6,
+   "enabled": true,
+   "width": 24,
+   "height": 6.5,
+   "cornerRadius": 0.8,
+   "construction": true
+  },
+  {
+   "id": "slide",
+   "kind": "rect",
+   "position": {
+    "x": 45,
+    "y": 21.7
+   },
+   "rotation": 0,
+   "depth": 3.0,
+   "enabled": true,
+   "width": 5,
+   "height": 24.3,
+   "cornerRadius": 0.8
+  }
+ ],
+ "workholding": {
+  "kind": "bracket",
+  "bracket": {
+   "anchor": 1,
+   "variant": "thin",
+   "clamps": [
+    {
+     "edge": "back",
+     "at": 70
+    },
+    {
+     "edge": "right",
+     "at": 40
+    }
+   ],
+   "source": "default"
+  }
+ },
+ "vectors": [
+  {
+   "id": "keyring",
+   "kind": "vector",
+   "position": {
+    "x": 15.75,
+    "y": 42.25
+   },
+   "rotation": 0,
+   "depth": 5,
+   "enabled": true,
+   "sourceName": "keyring",
+   "contours": [
+    [
+     [
+      -4.75,
+      -3.25
+     ],
+     [
+      4.75,
+      3.25
+     ],
+     [
+      -4.75,
+      3.25
+     ]
+    ]
+   ],
+   "fillRule": "NonZero",
+   "width": 9.5,
+   "height": 6.5,
+   "through": true
+  },
+  {
+   "id": "slot1",
+   "kind": "vector",
+   "position": {
+    "x": 25.75,
+    "y": 42.25
+   },
+   "rotation": 0,
+   "depth": 5,
+   "enabled": true,
+   "sourceName": "slot1",
+   "contours": [
+    [
+     [
+      -3.75,
+      -3.25
+     ],
+     [
+      0.75,
+      -3.25
+     ],
+     [
+      3.75,
+      3.25
+     ],
+     [
+      -0.75,
+      3.25
+     ]
+    ]
+   ],
+   "fillRule": "NonZero",
+   "width": 7.5,
+   "height": 6.5,
+   "through": true
+  },
+  {
+   "id": "slot2",
+   "kind": "vector",
+   "position": {
+    "x": 33.25,
+    "y": 42.25
+   },
+   "rotation": 0,
+   "depth": 5,
+   "enabled": true,
+   "sourceName": "slot2",
+   "contours": [
+    [
+     [
+      -3.75,
+      -3.25
+     ],
+     [
+      0.75,
+      -3.25
+     ],
+     [
+      3.75,
+      3.25
+     ],
+     [
+      -0.75,
+      3.25
+     ]
+    ]
+   ],
+   "fillRule": "NonZero",
+   "width": 7.5,
+   "height": 6.5,
+   "through": true
+  },
+  {
+   "id": "slot3",
+   "kind": "vector",
+   "position": {
+    "x": 39.75,
+    "y": 42.25
+   },
+   "rotation": 0,
+   "depth": 5,
+   "enabled": true,
+   "sourceName": "slot3",
+   "contours": [
+    [
+     [
+      -3.75,
+      -3.25
+     ],
+     [
+      0.75,
+      -3.25
+     ],
+     [
+      3.75,
+      3.25
+     ],
+     [
+      -0.75,
+      3.25
+     ]
+    ]
+   ],
+   "fillRule": "NonZero",
+   "width": 7.5,
+   "height": 6.5,
+   "through": true
+  },
+  {
+   "id": "slot4",
+   "kind": "vector",
+   "position": {
+    "x": 45.75,
+    "y": 42.25
+   },
+   "rotation": 0,
+   "depth": 5,
+   "enabled": true,
+   "sourceName": "slot4",
+   "contours": [
+    [
+     [
+      -3.75,
+      -3.25
+     ],
+     [
+      0.75,
+      -3.25
+     ],
+     [
+      3.75,
+      3.25
+     ],
+     [
+      -0.75,
+      3.25
+     ]
+    ]
+   ],
+   "fillRule": "NonZero",
+   "width": 7.5,
+   "height": 6.5,
+   "through": true
+  },
+  {
+   "id": "floor0.2",
+   "kind": "vector",
+   "position": {
+    "x": 24.312,
+    "y": 28.75
+   },
+   "rotation": 0,
+   "depth": 4.8,
+   "enabled": true,
+   "sourceName": "floor0.2",
+   "contours": [
+    [
+     [
+      -3.209,
+      -3.705
+     ],
+     [
+      3.209,
+      0.0
+     ],
+     [
+      -3.209,
+      3.705
+     ]
+    ]
+   ],
+   "fillRule": "NonZero",
+   "width": 6.417,
+   "height": 7.41
+  },
+  {
+   "id": "floor0.4",
+   "kind": "vector",
+   "position": {
+    "x": 16.688,
+    "y": 28.75
+   },
+   "rotation": 0,
+   "depth": 4.6,
+   "enabled": true,
+   "sourceName": "floor0.4",
+   "contours": [
+    [
+     [
+      3.209,
+      -3.705
+     ],
+     [
+      3.209,
+      3.705
+     ],
+     [
+      -3.209,
+      0.0
+     ]
+    ]
+   ],
+   "fillRule": "NonZero",
+   "width": 6.417,
+   "height": 7.41
+  },
+  {
+   "id": "floor0.6",
+   "kind": "vector",
+   "position": {
+    "x": 16.085,
+    "y": 24.0
+   },
+   "rotation": 0,
+   "depth": 4.4,
+   "enabled": true,
+   "sourceName": "floor0.6",
+   "contours": [
+    [
+     [
+      3.209,
+      0.0
+     ],
+     [
+      -3.209,
+      3.705
+     ],
+     [
+      -3.209,
+      -3.705
+     ]
+    ]
+   ],
+   "fillRule": "NonZero",
+   "width": 6.417,
+   "height": 7.41
+  },
+  {
+   "id": "floor0.8",
+   "kind": "vector",
+   "position": {
+    "x": 16.688,
+    "y": 19.25
+   },
+   "rotation": 0,
+   "depth": 4.2,
+   "enabled": true,
+   "sourceName": "floor0.8",
+   "contours": [
+    [
+     [
+      3.209,
+      3.705
+     ],
+     [
+      -3.209,
+      0.0
+     ],
+     [
+      3.209,
+      -3.705
+     ]
+    ]
+   ],
+   "fillRule": "NonZero",
+   "width": 6.417,
+   "height": 7.41
+  },
+  {
+   "id": "floor1.0",
+   "kind": "vector",
+   "position": {
+    "x": 24.312,
+    "y": 19.25
+   },
+   "rotation": 0,
+   "depth": 4.0,
+   "enabled": true,
+   "sourceName": "floor1.0",
+   "contours": [
+    [
+     [
+      -3.209,
+      3.705
+     ],
+     [
+      -3.209,
+      -3.705
+     ],
+     [
+      3.209,
+      -0.0
+     ]
+    ]
+   ],
+   "fillRule": "NonZero",
+   "width": 6.417,
+   "height": 7.41
+  },
+  {
+   "id": "floor1.2",
+   "kind": "vector",
+   "position": {
+    "x": 24.915,
+    "y": 24.0
+   },
+   "rotation": 0,
+   "depth": 3.8,
+   "enabled": true,
+   "sourceName": "floor1.2",
+   "contours": [
+    [
+     [
+      -3.209,
+      0.0
+     ],
+     [
+      3.209,
+      -3.705
+     ],
+     [
+      3.209,
+      3.705
+     ]
+    ]
+   ],
+   "fillRule": "NonZero",
+   "width": 6.417,
+   "height": 7.41
+  },
+  {
+   "id": "hexhole",
+   "kind": "vector",
+   "position": {
+    "x": 20.5,
+    "y": 24.0
+   },
+   "rotation": 0,
+   "depth": 5,
+   "enabled": true,
+   "sourceName": "hexhole",
+   "contours": [
+    [
+     [
+      1.905,
+      1.1
+     ],
+     [
+      0.0,
+      2.2
+     ],
+     [
+      -1.905,
+      1.1
+     ],
+     [
+      -1.905,
+      -1.1
+     ],
+     [
+      0.0,
+      -2.2
+     ],
+     [
+      1.905,
+      -1.1
+     ]
+    ]
+   ],
+   "fillRule": "NonZero",
+   "width": 3.811,
+   "height": 4.4,
+   "through": true
+  }
+ ],
+ "traces": [],
+ "drills": [
+  {
+   "id": "hole2",
+   "kind": "drill",
+   "position": {
+    "x": 36.5,
+    "y": 32
+   },
+   "rotation": 0,
+   "depth": 5,
+   "enabled": true,
+   "through": true,
+   "mode": "bore",
+   "diameter": 2
+  },
+  {
+   "id": "hole3",
+   "kind": "drill",
+   "position": {
+    "x": 36.5,
+    "y": 26.8
+   },
+   "rotation": 0,
+   "depth": 5,
+   "enabled": true,
+   "through": true,
+   "mode": "bore",
+   "diameter": 3
+  },
+  {
+   "id": "hole4",
+   "kind": "drill",
+   "position": {
+    "x": 36.5,
+    "y": 19.7
+   },
+   "rotation": 0,
+   "depth": 5,
+   "enabled": true,
+   "through": true,
+   "mode": "bore",
+   "diameter": 4
+  },
+  {
+   "id": "hole5",
+   "kind": "drill",
+   "position": {
+    "x": 36.5,
+    "y": 14.1
+   },
+   "rotation": 0,
+   "depth": 5,
+   "enabled": true,
+   "through": true,
+   "mode": "bore",
+   "diameter": 5
+  }
+ ],
+ "combined": [
+  {
+   "id": "textfield",
+   "kind": "cutaway",
+   "position": {
+    "x": 0,
+    "y": 0
+   },
+   "rotation": 0,
+   "depth": 1.6,
+   "enabled": true,
+   "outer": "textbox",
+   "islands": [
+    "cnc-raised"
+   ]
+  }
+ ],
+ "cutouts": []
+}

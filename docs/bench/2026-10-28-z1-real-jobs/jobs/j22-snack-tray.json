@@ -1,0 +1,129 @@
+{
+ "schemaVersion": 3,
+ "name": "j22-snack-tray",
+ "machineId": "Z1",
+ "stock": {
+  "length": 150,
+  "width": 150,
+  "thickness": 18,
+  "material": "hardwood"
+ },
+ "labels": [],
+ "toolKey": "inv:kz-o-flute-3-175-25",
+ "minFloor": 1,
+ "edgeMargin": 1,
+ "customFonts": [],
+ "sacrificial": {
+  "under": {
+   "thickness": 3,
+   "overhang": {
+    "left": 0,
+    "right": 0,
+    "front": 0,
+    "back": 0
+   },
+   "attach": "tape"
+  },
+  "sides": {
+   "left": null,
+   "right": null,
+   "front": null,
+   "back": null
+  },
+  "source": "default"
+ },
+ "breakthrough": 0.3,
+ "jawClearance": 1,
+ "shapes": [
+  {
+   "id": "part",
+   "kind": "rect",
+   "position": {
+    "x": 75,
+    "y": 75
+   },
+   "rotation": 0,
+   "depth": 18,
+   "enabled": true,
+   "width": 140,
+   "height": 140,
+   "cornerRadius": 10,
+   "construction": true
+  },
+  {
+   "id": "left",
+   "kind": "rect",
+   "position": {
+    "x": 41.5,
+    "y": 103
+   },
+   "rotation": 0,
+   "depth": 12,
+   "enabled": true,
+   "width": 57,
+   "height": 54,
+   "cornerRadius": 9
+  },
+  {
+   "id": "right",
+   "kind": "rect",
+   "position": {
+    "x": 108.5,
+    "y": 103
+   },
+   "rotation": 0,
+   "depth": 12,
+   "enabled": true,
+   "width": 57,
+   "height": 54,
+   "cornerRadius": 9
+  },
+  {
+   "id": "bottom",
+   "kind": "rect",
+   "position": {
+    "x": 75,
+    "y": 41
+   },
+   "rotation": 0,
+   "depth": 12,
+   "enabled": true,
+   "width": 124,
+   "height": 52,
+   "cornerRadius": 9
+  }
+ ],
+ "workholding": {
+  "kind": "bracket",
+  "bracket": {
+   "anchor": 1,
+   "variant": "thin",
+   "clamps": [
+    {
+     "edge": "back",
+     "at": 75
+    },
+    {
+     "edge": "right",
+     "at": 75
+    }
+   ],
+   "source": "default"
+  }
+ },
+ "cutouts": [
+  {
+   "kind": "cutout",
+   "id": "profile",
+   "enabled": true,
+   "of": "part",
+   "side": "outside",
+   "inset": 0,
+   "tabs": {
+    "count": 4,
+    "width": 10,
+    "height": 3
+   }
+  }
+ ]
+}
