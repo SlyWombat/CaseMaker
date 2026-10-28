@@ -14,7 +14,7 @@ This run replaces `docs/bench/2026-10-27-z1-typical-jobs/` as the record of whet
 |---|---|
 | Matches the photo | j03 |
 | Partly | j02 (raised "Software" fuses, #739), j06 (wolf relief only 3.5 mm deep, #738) |
-| Fails | j01, j04, j05, j12, j14, j15, j17 (no feeds for the material, #732); j07, j13 (own simulation refuses the program, #738); j08, j09 (cannot be described, #723, #743); j10, j11 (V-bit planning and inlay plug, #740, #741, #742) |
+| Fails | j01, j04, j05, j12, j14, j15, j17 (no feeds for the material, #732); j07 (own simulation refuses the program, #738); j13 (own simulation refuses the program; a false positive of the sweep floor, #734 item 1); j08, j09 (cannot be described, #723, #743); j10, j11 (V-bit planning and inlay plug, #740, #741, #742) |
 | No photo to compare | j16, j18 |
 
 On a PLA stand-in, the Top Clamp (j01) comes out matching Makera's own program, and so do the sign (j05) and the wrench plate (j12). The coin (j04) and the keychain outline (j15) come out partly.
@@ -38,11 +38,11 @@ The 2026-10-27 sweep drew every ball and drill at its 3.175 mm shank, not its cu
 
 Each issue names its job files in `jobs/`:
 
-- #738: j06-wolf-2mm-ball, j07-photo-relief, j07-photo-relief-1mm-ball, j13-tool-tray
+- #738: j06-wolf-2mm-ball, j07-photo-relief, j07-photo-relief-1mm-ball
 - #739: j02-raised-cnx, j04-coin-pla-proxy
 - #740: j10-plaque-90v, j11-inlay-female-90v
 - #741: j11-v1-star-female-90, j11-v1-star-male-90, j11-inlay-female-30v
 - #742: j11-inlay-female-30v
 - #743: j04-coin-pla-proxy
-- #734: j15-vader-pla-proxy-b-engrave, j17-faceplate-pla-proxy
+- #734: j15-vader-pla-proxy-b-engrave, j17-faceplate-pla-proxy, j13-tool-tray (a false positive of the sweep floor, not a surfacing defect)
 - #735: j13-tool-tray-b-small-holes, j18-thread-a-bore-pla-proxy
