@@ -266,8 +266,10 @@ export function statedCuttingSize(tool: Tool): number | null {
  *
  * This is the ONE place that decides a tip is UNKNOWN. A finding that has to judge a region by the
  * cutter's width asks this first and, when it is true, asks the operator for the field instead of
- * writing geometry from the shank. Zero and negative are unstated, the same convention as
- * {@link statedCuttingSize}.
+ * writing geometry from the shank. Only an ABSENT field is unknown: the Type door records a blank as
+ * `null` and refuses a typed `0` because a number is a CLAIM (`registerCutter`), and `vCone` reads a
+ * stated 0 as the point it is — the plane model's own 0 µm groove refusal (#221) is the true
+ * sentence for that cutter, not an ask to record a tip that is already stated.
  *
  * A cutter with no resolvable cone is NOT this case: an engraver with no tip and no angle is refused
  * by the cone's own sentence, which is the more useful refusal, and a chamfer with neither a tip nor
@@ -275,7 +277,7 @@ export function statedCuttingSize(tool: Tool): number | null {
  */
 export function tipNotRecorded(tool: Tool): boolean {
   if (!isVShape(tool)) return false;
-  if (tool.tipDiameter !== null && tool.tipDiameter > 0) return false;
+  if (tool.tipDiameter !== null) return false;
   return vCone(tool) !== null;
 }
 

@@ -157,7 +157,10 @@ describe('#740 — the Makera row’s 0.1 mm tip V-carves what the shank refused
 describe('#740 — one owner for the tip, one diameter for the feeds row', () => {
   it('tipNotRecorded is true only for a pointed cutter whose tip the record leaves empty', () => {
     expect(tipNotRecorded(chamfer(null))).toBe(true);
-    expect(tipNotRecorded(chamfer(0))).toBe(true); // zero is unstated, not a size
+    // A stated 0 is a POINT, not an unknown: `vCone` reads it as one, and the plane model's own
+    // 0 µm groove refusal (#221) is the true sentence for that cutter. The Type door records a
+    // blank as null and refuses a typed 0 as a claim, so only an absent field is asked for.
+    expect(tipNotRecorded(chamfer(0))).toBe(false);
     expect(tipNotRecorded(chamfer(0.1))).toBe(false);
     // A flat end mill records its whole face as the tip; that is a stated size, not this case.
     expect(tipNotRecorded(flatEndMill(3.175))).toBe(false);
