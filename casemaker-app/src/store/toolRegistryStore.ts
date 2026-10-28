@@ -56,7 +56,12 @@
 import { create } from 'zustand';
 import { getTools, inventoryKey, setInventoryEntries, setRegistry } from '@/engine/cnc/toolRegistry';
 import { resetInventoryConditions, setInventoryConditions } from '@/engine/cnc/toolCondition';
-import { clearFeedCatalogue, setFeedCatalogue } from '@/engine/cnc/feeds';
+import {
+  clearFeedCatalogue,
+  feedCatalogueSnapshot,
+  setFeedCatalogue,
+  withCatalogueGeometry,
+} from '@/engine/cnc/feeds';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import { tierOf } from '@/engine/cnc/toolTiers';
 import {
@@ -237,15 +242,27 @@ export const useToolRegistryStore = create<ToolRegistryState>((set, get) => ({
         read.kind === 'ok'
           ? { entries: read.entries, etag: read.etag }
           : { entries: get().entries, etag: get().etag };
+      // #732 — the catalogue's own cutter records. Each feed row is joined to the geometry of the
+      // cutter it names, so the feeds can refuse a confirmed id whose cutter has since changed.
+      const cutters = tools.entries
+        .filter((entry) => tierOf(entry.key) === 'catalogue')
+        .map((entry) => entry.tool);
 
       // The catalogue is read second, and only once there IS a tool list: its rows are keyed by
       // cutter id, so without the cutters they name not one of them could ever be reached.
       const feeds = await houseFeeds(get().feedEtag, opts);
       let feed: { count: number; etag: string | null; error: string | null };
       if (feeds.kind === 'ok') {
-        setFeedCatalogue(feeds.rows);
+        setFeedCatalogue(withCatalogueGeometry(feeds.rows, cutters));
         feed = { count: feeds.rows.length, etag: feeds.etag, error: null };
       } else if (feeds.kind === 'unchanged') {
+        // A 304 says the ROWS are unchanged; it says nothing about the cutters they name, and a
+        // corrected geometry does not touch the feeds document (#732). Re-join the rows already
+        // loaded to the tool list just read, keeping their sync date. The join returns the same
+        // array when nothing moved, so an ordinary 304 does not churn the snapshot.
+        const existing = feedCatalogueSnapshot();
+        const joined = withCatalogueGeometry(existing.rows, cutters);
+        if (joined !== existing.rows) setFeedCatalogue(joined, existing.syncedOn ?? undefined);
         feed = { count: get().feedCount, etag: get().feedEtag, error: null };
       } else {
         // Same rule as the tool list: a catalogue from a service we can no longer read is a claim

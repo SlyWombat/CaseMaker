@@ -92,7 +92,7 @@
 
 import { z } from 'zod';
 import { cuttingDiameter, cuttingForTrace, vendorId } from './tool';
-import type { Tool } from './tool';
+import type { Tool, ToolShape } from './tool';
 import { DEFAULT_V_CARVE_STEPOVER_RATIO } from './vCarveGeometry';
 import { CLAMP_REFUSE_FRACTION_FALLBACK, clampToMachine } from './machine';
 import type { ClampDiagnostic, MillProfile } from './machine';
@@ -592,6 +592,75 @@ export interface FeedCatalogueRow {
   plungeFeed: number;
   /** mm per depth pass. */
   stepDown: number;
+  /**
+   * #732 — the GEOMETRY of the cutter this row names, joined from the catalogue's own tool list by
+   * {@link withCatalogueGeometry}. NOT a served field: `GET /feeds` states the four numbers and
+   * nothing about the cutter, so a row straight from the service — or one a test assembles — has no
+   * `cutter`, and the geometry rule has nothing to compare. Rows that carry it are compared with
+   * the cutter in hand before any of their numbers are used.
+   */
+  cutter?: CutterGeometry;
+}
+
+/**
+ * What a catalogue cutter states about its cuttable geometry (#732): enough to tell whether the
+ * cutter an operator confirmed an id for is still the cutter the row is about. A V-bit's cutting
+ * size is its `tipDiameter`; a flat end mill's is its `diameter`. Both are kept, because either one
+ * moving means the id now names a different cutter.
+ */
+export interface CutterGeometry {
+  shape: ToolShape;
+  diameter: number | null;
+  tipDiameter: number | null;
+}
+
+/**
+ * Join each served catalogue row to the geometry of the cutter it names, from the catalogue's own
+ * tool list (#732). The feeds document states only `cutterId` and four numbers; the geometry lives
+ * in the tool list under the same `g_ID`, so the two documents are joined here, once, on the main
+ * thread. The annotated rows then cross the worker boundary by structured clone like the bare ones
+ * did (#324), which is why the geometry rides on the row rather than beside it.
+ *
+ * A row whose cutter the current tool list does not carry carries no geometry: a partial sync says
+ * nothing about that cutter, and an annotation from an earlier list may be wrong, so the join drops
+ * it rather than vouching for it (and the geometry rule, seeing nothing, refuses nothing). Returns
+ * `rows` itself when nothing changed, so a 304 refresh does not churn the snapshot a panel renders
+ * from.
+ */
+export function withCatalogueGeometry(
+  rows: readonly FeedCatalogueRow[],
+  cutters: readonly Tool[],
+): readonly FeedCatalogueRow[] {
+  const byId = new Map<string, CutterGeometry>();
+  for (const cutter of cutters) {
+    const id = vendorId(cutter);
+    if (id !== null && !byId.has(id)) {
+      byId.set(id, { shape: cutter.shape, diameter: cutter.diameter, tipDiameter: cutter.tipDiameter });
+    }
+  }
+  let changed = false;
+  const joined = rows.map((row) => {
+    const cutter = byId.get(row.cutterId);
+    if (cutter === undefined) {
+      if (row.cutter === undefined) return row;
+      changed = true;
+      const dropped = { ...row };
+      delete dropped.cutter;
+      return dropped;
+    }
+    const already = row.cutter;
+    if (
+      already !== undefined &&
+      already.shape === cutter.shape &&
+      already.diameter === cutter.diameter &&
+      already.tipDiameter === cutter.tipDiameter
+    ) {
+      return row;
+    }
+    changed = true;
+    return { ...row, cutter };
+  });
+  return changed ? joined : rows;
 }
 
 /**
@@ -708,6 +777,11 @@ export const CATALOGUE_MATERIAL_ALIASES: Readonly<Partial<Record<StockMaterial, 
  *   - `unlisted`: no row names this cutter at all. Three reasons, and they are not the same claim:
  *     the cutter carries no vendor id, so no row CAN name it; the catalogue has no rows loaded, so
  *     nothing can be said; or the loaded catalogue does not list it.
+ *   - `mismatched`: a row names this cutter's id, but the catalogue's own tool list now states a
+ *     different diameter or tip for that id from the one the cutter in hand carries (#732). The
+ *     row is about a DIFFERENT cutter — a catalogue sync may have reissued the id — so none of its
+ *     numbers can be used. Rows with no joined geometry (`withCatalogueGeometry`, or a partial
+ *     tool list) cannot be compared and are covered as before.
  *
  * An UNLISTED cutter is NOT refused. A cutter of the operator's own, or a Makera cutter missing
  * from a partial sync, is one the catalogue cannot speak to — and "cannot speak to it" is not
@@ -717,7 +791,35 @@ export const CATALOGUE_MATERIAL_ALIASES: Readonly<Partial<Record<StockMaterial, 
 export type CatalogueCoverage =
   | { kind: 'covered'; row: FeedCatalogueRow; via: StockMaterial | null }
   | { kind: 'not-for-material'; listedFor: readonly string[] }
-  | { kind: 'unlisted'; why: 'no-vendor-id' | 'no-catalogue' | 'cutter-absent' };
+  | { kind: 'unlisted'; why: 'no-vendor-id' | 'no-catalogue' | 'cutter-absent' }
+  | {
+      kind: 'mismatched';
+      cutterId: string;
+      /** Which stated size moved: the shank `diameter`, or the V-bit's `tipDiameter`. */
+      field: 'diameter' | 'tip';
+      owned: number;
+      catalogue: number;
+    };
+
+/** A size a record states: zero and negative are unstated, the rule `statedCuttingSize` keeps. */
+function statedSize(value: number | null): number | null {
+  return value !== null && value > 0 ? value : null;
+}
+
+/**
+ * Both values when a stated size differs by more than a label's micron, else null (#732). A side
+ * that states nothing cannot have "changed": a clone's blank field is not a claim about the cutter,
+ * and refusing on it would turn a missing number into an accusation.
+ */
+function sizeChanged(
+  owned: number | null,
+  catalogue: number | null,
+): { owned: number; catalogue: number } | null {
+  const a = statedSize(owned);
+  const b = statedSize(catalogue);
+  if (a === null || b === null || Math.abs(a - b) < 0.01) return null;
+  return { owned: a, catalogue: b };
+}
 
 /**
  * The catalogue's coverage of a cutter for a material (#455). `catalogue` is the caller's rows,
@@ -738,6 +840,17 @@ export function catalogueCoverageFor(
   if (catalogue.length === 0) return { kind: 'unlisted', why: 'no-catalogue' };
   const rows = catalogue.filter((row) => row.cutterId === cutterId);
   if (rows.length === 0) return { kind: 'unlisted', why: 'cutter-absent' };
+  // #732 — the row names the cutter by id, so the id's own geometry has to agree with the cutter in
+  // hand. A catalogue sync that reissued the id at another diameter or tip makes every row for it a
+  // row about a different cutter. The geometry is on the row (`withCatalogueGeometry`); a row that
+  // carries none — the service's own rows, before the join — says nothing and falls through.
+  const stated = rows.find((row) => row.cutter !== undefined)?.cutter;
+  if (stated !== undefined) {
+    const diameter = sizeChanged(tool.diameter, stated.diameter);
+    if (diameter !== null) return { kind: 'mismatched', cutterId, field: 'diameter', ...diameter };
+    const tip = sizeChanged(tool.tipDiameter, stated.tipDiameter);
+    if (tip !== null) return { kind: 'mismatched', cutterId, field: 'tip', ...tip };
+  }
   const direct = rows.find((row) => catalogueMaterialFor(row.material) === material);
   if (direct) return { kind: 'covered', row: direct, via: null };
   for (const stand of CATALOGUE_MATERIAL_ALIASES[material] ?? []) {
@@ -756,9 +869,11 @@ function listMaterials(names: readonly string[]): string {
 /**
  * What {@link CatalogueCoverage} means for a RECOMMENDATION, in one sentence (#455).
  *
- * `recommend: false` is the issue's rule and only one case reaches it: the catalogue lists this
- * cutter and the job's material is not among its materials. The rest are notes, because a catalogue
- * that cannot vouch for a cutter must not take it away from an operator who knows better:
+ * `recommend: false` is the issue's rule, and two cases reach it: the catalogue lists this cutter
+ * and the job's material is not among its materials, and — #732 — the confirmed id's cutter has
+ * changed geometry since the match was made, so its rows are about a different cutter. The rest are
+ * notes, because a catalogue that cannot vouch for a cutter must not take it away from an operator
+ * who knows better:
  *
  *   - an owned cutter, or one missing from a partial sync, "rests on the operator, with an honest
  *     note" — the issue's words;
@@ -798,6 +913,15 @@ export function catalogueStandingFor(
         note:
           `${CATALOGUE_LABEL} lists ${toolName} for ${listMaterials(coverage.listedFor)}, not ` +
           `${label}, so it is not recommended for this material.`,
+      };
+    case 'mismatched':
+      return {
+        recommend: false,
+        note:
+          `${CATALOGUE_LABEL} now states cutter id ${coverage.cutterId} with a ` +
+          `${num3(coverage.catalogue)} mm ${coverage.field}, but ${toolName} states ` +
+          `${num3(coverage.owned)} mm — its rows are for a different cutter, so it is not ` +
+          `recommended. Clear the match in Manage → Tools and confirm the cutter again.`,
       };
     case 'unlisted':
       if (coverage.why === 'no-catalogue') return { recommend: true, note: null };
@@ -1083,6 +1207,25 @@ function catalogueOnlyRow(
   };
 }
 
+/**
+ * The refusal for a row whose cutter no longer matches the confirmed id (#732). It names the id,
+ * both stated sizes and which of them moved, and it says outright that none of the row's numbers
+ * are used: the operator confirmed an id, and the catalogue has since answered that id with a
+ * different cutter, so the confirmation no longer licenses the row.
+ */
+function changedGeometryReason(
+  named: string,
+  coverage: Extract<CatalogueCoverage, { kind: 'mismatched' }>,
+): string {
+  return (
+    `no cutting parameters for ${named}: this cutter carries Makera id ${coverage.cutterId}, and ` +
+    `${CATALOGUE_LABEL} now states that id with a ${num3(coverage.catalogue)} mm ${coverage.field}, ` +
+    `not the ${num3(coverage.owned)} mm this cutter states — its rows are for a different cutter, ` +
+    `so none of their numbers are used. Clear the match in Manage → Tools and confirm the cutter ` +
+    `again.`
+  );
+}
+
 /** The row a job resolves against, and whether that row came from the catalogue alone (#347). */
 type EntryChoice =
   | { ok: true; entry: FeedsEntry; catalogueOnly: boolean }
@@ -1133,6 +1276,11 @@ function entryFor(
   const label = MATERIAL_LABELS[material];
   const named = `a ${num3(diameter)} mm ${edge === 'v' ? 'V-bit' : 'cutter'} in ${label}`;
   const coverage = catalogueCoverageFor(snapshot.rows, material, tool);
+  // #732 — a confirmed id whose catalogue cutter no longer states the same diameter or tip: the
+  // row is about a different cutter, so there is no answer here to give, even though the row exists.
+  if (coverage.kind === 'mismatched') {
+    return { ok: false, cause: 'no-feeds', reason: changedGeometryReason(named, coverage) };
+  }
   // The cutter has to carry Makera's own id for any of their rows to name it (#332: a clone's
   // rendered cutter carries no identity of its own — and neither does a `0`, which is what a file
   // with no `g_ID` writes there: `vendorId`).
@@ -1348,6 +1496,22 @@ export function feedsFor(
   // `catalogueCoverageFor`, so a printed-blank plastic takes the nearest plastic row — and the
   // provenance below says it is a mapping.
   const cover = entry.status === 'measured' ? null : catalogueCoverageFor(snapshot.rows, material, tool);
+  // #732 — the starting table answered, and a catalogue row would have been merged over it — but
+  // only if that row is about the cutter in hand. A confirmed id whose cutter has changed geometry
+  // refuses the job here too, rather than quietly cutting on the table's numbers as if the match
+  // still stood: the operator's confirmation is what licenses Makera's numbers, and the catalogue
+  // has contradicted it. A measured row never reaches this: it is not overridden by a catalogue row
+  // in the first place, so there is no confirmation being relied on.
+  if (cover?.kind === 'mismatched') {
+    return {
+      ok: false,
+      cause: 'no-feeds',
+      reason: changedGeometryReason(
+        `a ${num3(diameter)} mm ${edge === 'v' ? 'V-bit' : 'cutter'} in ${MATERIAL_LABELS[material]}`,
+        cover,
+      ),
+    };
+  }
   const row = cover?.kind === 'covered' ? cover.row : null;
   const mappedFor = cover?.kind === 'covered' && cover.via !== null ? material : null;
 

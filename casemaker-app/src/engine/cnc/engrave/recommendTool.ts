@@ -419,12 +419,12 @@ function handPickedNote(
 ): string | null {
   const entry = tools.find((e) => e.key === job.toolKey);
   if (!entry) return null;
-  const standing = catalogueStandingFor(
-    catalogueCoverageFor(catalogue, job.stock.material, entry.tool),
-    job.stock.material,
-    entry.tool.name,
-  );
+  const coverage = catalogueCoverageFor(catalogue, job.stock.material, entry.tool);
+  const standing = catalogueStandingFor(coverage, job.stock.material, entry.tool.name);
   if (standing.recommend || standing.note === null) return null;
+  // #732 — a mismatched id is not a caution beside a hand pick: the feeds REFUSE the job rather
+  // than cut on the row's numbers, so the "still cuts if you run it" half would be false.
+  if (coverage.kind === 'mismatched') return standing.note;
   return (
     `${standing.note} This job names it by hand, so it still cuts if you run it — check the bit ` +
     `and the feeds first.`

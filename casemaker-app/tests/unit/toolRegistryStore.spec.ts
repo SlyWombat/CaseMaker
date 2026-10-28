@@ -263,6 +263,52 @@ describe('the feed catalogue (#310)', () => {
     expect(state().feedEtag).toBeNull();
   });
 
+  it('joins each row to the catalogue cutter’s geometry, and follows a geometry change on a 304 (#732)', async () => {
+    const entry = (diameter: number): ToolLibraryEntry => ({
+      key: 'cat:00000000-0000-0000-0000-00000000000c',
+      provenance: 'Makera catalogue',
+      tool: {
+        ...USER.tool,
+        id: FEED_ROW.cutterId,
+        name: '3.175*12mm Flat End(Metal)',
+        shape: 'flat',
+        tipDiameter: diameter,
+        diameter,
+      },
+    });
+    let diameter = 3.175;
+    let listed = true;
+    setHouseClientLoader(async () =>
+      fakeClient({
+        probe: { kind: 'present', health: { ...HEALTH, feedRows: 1 }, base: '' },
+        tools: () => ({
+          kind: 'ok',
+          etag: `"e-${diameter}-${listed}"`,
+          entries: listed ? [entry(diameter)] : [],
+        }),
+        feeds: (etag) => (etag ? { kind: 'unchanged' } : { kind: 'ok', etag: '"f1"', rows: [FEED_ROW] }),
+      }),
+    );
+    await state().refresh();
+    expect(feedCatalogueRows()).toEqual([
+      { ...FEED_ROW, cutter: { shape: 'flat', diameter: 3.175, tipDiameter: 3.175 } },
+    ]);
+
+    // The feeds document is byte-identical (a 304), but the cutter it names was reissued at 6 mm.
+    // The join must follow the tool list, or the feeds would keep vouching for the old geometry.
+    diameter = 6;
+    await state().refresh();
+    expect(feedCatalogueRows()).toEqual([
+      { ...FEED_ROW, cutter: { shape: 'flat', diameter: 6, tipDiameter: 6 } },
+    ]);
+
+    // The tool list stops carrying the cutter: the join has no current geometry to state, so the
+    // old annotation goes rather than vouching for a cutter this list no longer describes.
+    listed = false;
+    await state().refresh();
+    expect(feedCatalogueRows()).toEqual([FEED_ROW]);
+  });
+
   it('a 304 on the catalogue keeps the rows already loaded', async () => {
     setHouseClientLoader(async () =>
       fakeClient({

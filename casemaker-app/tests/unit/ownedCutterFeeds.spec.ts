@@ -17,7 +17,7 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { catalogueCoverageFor, feedsFor, type FeedCatalogueRow } from '@/engine/cnc/feeds';
+import { catalogueCoverageFor, feedsFor, withCatalogueGeometry, type FeedCatalogueRow } from '@/engine/cnc/feeds';
 import { Z1 } from '@/engine/cnc/machine';
 import { suggestMakeraMatch, withMakeraId } from '@/engine/cnc/registerCutter';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
@@ -329,6 +329,68 @@ describe('#732 the suggestion reads the cutter’s own evidence and never applie
 
   it('does not suggest an owned row that already carries a confirmed id', () => {
     expect(suggestMakeraMatch(confirmed(METAL_FLAT_3_175_12, G_METAL_FLAT_3_175_12), CATALOGUE_ENTRIES)).toBeNull();
+  });
+});
+
+describe('#732 a confirmed id whose catalogue cutter has changed geometry is refused', () => {
+  it('refuses when the catalogue’s DIAMETER for the id no longer matches, on a material the table covers', () => {
+    const proven = confirmed(PLAIN_FLAT_3_175_25, G_PLAIN_FLAT_3_175_25).tool;
+    // Hardwood has a starting-table row, so the answer would exist without the catalogue. That is
+    // what makes this the sharp case: the refusal must stop the row's numbers being merged in.
+    const rows = [row(G_PLAIN_FLAT_3_175_25, 'Hardwood', 10000, 1000, 300, 1)];
+    const before = feedsFor(rows, 'hardwood', proven, Z1);
+    if (!before.ok) throw new Error(before.reason);
+    expect(before.params.rpm).toBe(10000);
+
+    // The catalogue has reissued the id at 6 mm since the operator confirmed it: the row now
+    // describes a different cutter, so none of its numbers may run.
+    const moved = withCatalogueGeometry(rows, [
+      ownedTool({ id: G_PLAIN_FLAT_3_175_25, name: '6*?mm Flat End', shape: 'flat', diameter: 6, tipDiameter: 6 }),
+    ]);
+    expect(catalogueCoverageFor(moved, 'hardwood', proven)).toMatchObject({
+      kind: 'mismatched',
+      cutterId: G_PLAIN_FLAT_3_175_25,
+      field: 'diameter',
+      owned: 3.175,
+      catalogue: 6,
+    });
+
+    const after = feedsFor(moved, 'hardwood', proven, Z1);
+    expect(after.ok).toBe(false);
+    if (after.ok) throw new Error('a row whose cutter no longer matches the confirmed id must not run');
+    expect(after.reason).toContain(G_PLAIN_FLAT_3_175_25);
+    expect(after.reason).toContain('6 mm');
+    expect(after.reason).toContain('3.175 mm');
+    expect(after.reason).toContain('Clear the match');
+    expect('params' in after).toBe(false);
+  });
+
+  it('refuses when it is the TIP that moved, on the catalogue-only material j14 cuts', () => {
+    const proven = confirmed(METAL_ENGRAVER_60_01, G_METAL_ENGRAVER_60_01).tool;
+    const moved = withCatalogueGeometry(
+      CATALOGUE,
+      CATALOGUE_ENTRIES.map((entry) => entry.tool).map((tool) =>
+        tool.id === G_METAL_ENGRAVER_60_01 ? { ...tool, tipDiameter: 0.2 } : tool,
+      ),
+    );
+    const after = feedsFor(moved, 'aluminium-6061', proven, Z1);
+    expect(after.ok).toBe(false);
+    if (after.ok) throw new Error('a row whose cutter tip changed must not run');
+    expect(after.reason).toContain('tip');
+    expect(after.reason).toContain('0.2 mm');
+    expect(after.reason).toContain('0.1 mm');
+    expect('params' in after).toBe(false);
+  });
+
+  it('still answers when the joined geometry agrees with the cutter the id was confirmed for', () => {
+    const rows = withCatalogueGeometry(
+      CATALOGUE,
+      CATALOGUE_ENTRIES.map((entry) => entry.tool),
+    );
+    const res = feedsFor(rows, 'acrylic', confirmed(PLAIN_FLAT_3_175_25, G_PLAIN_FLAT_3_175_25).tool, Z1);
+    if (!res.ok) throw new Error(res.reason);
+    expect(res.params.feed).toBe(1000);
+    expect(res.catalogue?.cutterId).toBe(G_PLAIN_FLAT_3_175_25);
   });
 });
 

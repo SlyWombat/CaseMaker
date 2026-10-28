@@ -496,6 +496,24 @@ describe('recommendTool and the catalogue’s material list (#455)', () => {
     expect(candidate(rec, 'inv:corn').excluded).toBe('no-catalogue-row');
   });
 
+  it('does not promise a cut when the confirmed id’s cutter has changed geometry (#732)', () => {
+    const job = plaJob();
+    job.toolKey = 'inv:corn';
+    // The catalogue's own tool list now says this id is a 6 mm cutter; the owned bit is 0.6 mm.
+    const stale: FeedCatalogueRow = {
+      ...catRow('900000000001', 'ABS'),
+      cutter: { shape: 'flat', diameter: 6, tipDiameter: 6 },
+    };
+    const rec = recommendTool(job, [corn('inv:corn')], [stale], allRows(1));
+
+    expect(rec.selectedNote).toContain('900000000001');
+    expect(rec.selectedNote).toContain('6 mm');
+    expect(rec.selectedNote).toContain('0.6 mm');
+    expect(rec.selectedNote).toContain('Clear the match');
+    // The feeds now refuse the job outright, so the hand-pick warning must not say it still cuts.
+    expect(rec.selectedNote).not.toContain('still cuts');
+  });
+
   it('adds no note when the catalogue row is the material’s own', () => {
     const job = jobWithLabel('l1', 'CASE', 1);
     job.stock = { ...job.stock, material: 'abs' };
