@@ -396,6 +396,271 @@ export function engravabilityFindings(
 }
 
 /**
+ * Area below which a glyph contour, or a glyph's overlap with one kept component, is Clipper
+ * dust rather than material, mm² (#739).
+ */
+export const RAISED_TEXT_AREA_TOLERANCE_MM2 = 0.001;
+
+/**
+ * Bisection steps for the smallest radius that joins a raised label's letters. The search runs
+ * over the job's own cutter radius (a few millimetres at most), so sixteen halvings resolve the
+ * threshold to far below the micron the sentence prints (#739).
+ */
+const RAISED_TEXT_BISECTION_STEPS = 16;
+
+/** One glyph component of a raised label, evaluated once and kept for every fusion test (#739). */
+interface RaisedIslandPart {
+  labelId: string;
+  cs: ReturnType<typeof executeProfile>;
+  /** Holes the glyph itself has — its counters. A kept component with fewer has filled one. */
+  holes: number;
+}
+
+/**
+ * One raised label the cutter cannot keep apart (#739).
+ *
+ * It exists only for a label that DOES fuse at the job's cutter: the measurement is the answer
+ * to "how much smaller must the cutter be", not a survey of every raised label.
+ */
+export interface RaisedTextMeasurement {
+  /** The cutaway that clears the field. */
+  cutawayId: string;
+  labelId: string;
+  /** The label's own text, for the sentence. */
+  text: string;
+  /** Its cap height in the document, mm. */
+  size: number;
+  /** The radius the cutaway is cut with, mm — a flat cutter's radius, or a V's radius at its plane. */
+  cutterRadius: number;
+  /** The measured narrowest gap the letters keep, mm: twice the smallest joining radius. */
+  gap: number;
+  /** Two or more glyph components end up in one kept component: letters run together. */
+  joined: boolean;
+  /** A kept component holding one glyph has fewer holes than the glyph: a counter fills in. */
+  counterFilled: boolean;
+  /**
+   * The smallest whole-millimetre cap height whose gaps clear this cutter, or `null` when the
+   * label's letters already touch at the document's size (a joined script, not a gap).
+   */
+  minSize: number | null;
+}
+
+/**
+ * #739 — measure the raised labels the cutter joins, in the profile algebra the CAM already uses.
+ *
+ * A cutaway pocket is `field = outer − ⋃islands`, and the cutter removes its OPENING
+ * `O(r) = offset(offset(field, −r), +r)` — the same `engravableProfile` every other reachability
+ * check is built on. What stands at full height is therefore `⋃islands ∪ (field − O(r))`: the
+ * labels themselves, plus any sliver of the field the cutter's radius could not clear. A label
+ * has FUSED when one kept component holds two or more of its glyph components (letters bridged
+ * into one), or when a kept component holding a single glyph has fewer holes than that glyph
+ * (a counter filled in). Extra kept components and extra holes are ignored: they are loose
+ * slivers and enclosed cleared pockets, not a letter losing its shape.
+ *
+ * This is a STRUCTURAL test, not a pairwise distance. "CNX" in the j02 bench job has an N–X gap
+ * of 3.1137 mm — narrower than the 3.175 mm cutter — yet the opening still clears the pinch
+ * because a disc of that radius reaches it from the sides, and the letters stay three separate
+ * components. A minimum-distance rule would warn about a job the bench cut correctly.
+ *
+ * `gap` is twice the smallest radius at which the label fuses, found by bisection between zero
+ * and the cutter's own radius (fusion is monotone: a larger radius removes more of the field and
+ * can only add material to what stands). The suggested cap height is linear because the glyph
+ * outline is: `size × (2·cutterRadius) / gap`, rounded up to a whole millimetre. That is the
+ * measured threshold, not a table of sizes.
+ *
+ * `radiusFor` is the cutter radius the CUTAWAY is cut with. It is handed in for the same reason
+ * `measureLabels` takes one: a flat cutter has one radius for the job, while a V's plane radius
+ * follows the cutaway's own depth (#221). The sentence names the cutter with `cutterPhrase`;
+ * for a V-bit the number compared is that plane width, not the tip.
+ *
+ * Every `CrossSection` this creates — the field, each glyph component, each opening, each kept
+ * component and each overlap test — is deleted exactly once.
+ */
+export function measureRaisedTexts(
+  tl: ManifoldToplevel,
+  job: EngraveJob,
+  raisedTexts: PartPlan['raisedTexts'],
+  radiusFor: (cutawayId: string) => number | null,
+): RaisedTextMeasurement[] {
+  if (raisedTexts.length === 0) return [];
+  const CS = tl.CrossSection;
+  const labelById = new Map(job.labels.map((label) => [label.id, label] as const));
+  const out: RaisedTextMeasurement[] = [];
+
+  for (const raised of raisedTexts) {
+    const cutterRadius = radiusFor(raised.id);
+    // No width, no gap: a tool that cannot be sized for this cut has no sentence to make.
+    if (cutterRadius === null || !(cutterRadius > 0)) continue;
+
+    const fieldCS = executeProfile(tl, raised.field);
+    const parts: RaisedIslandPart[] = [];
+    try {
+      if (fieldCS.area() <= RAISED_TEXT_AREA_TOLERANCE_MM2) continue;
+
+      for (const island of raised.islands) {
+        const islandCS = executeProfile(tl, island.profile);
+        try {
+          for (const part of islandCS.decompose()) {
+            if (part.area() <= RAISED_TEXT_AREA_TOLERANCE_MM2) {
+              part.delete();
+              continue;
+            }
+            parts.push({ labelId: island.labelId, cs: part, holes: part.numContour() - 1 });
+          }
+        } finally {
+          islandCS.delete();
+        }
+      }
+      if (parts.length === 0) continue;
+
+      /**
+       * What fuses at radius `r`, by label. One evaluation of the kept region serves every
+       * label: a kept component with two glyph components flags BOTH labels it joins, and one
+       * with a single glyph flags that label only when its counters were filled.
+       */
+      const fusedAt = (r: number): Map<string, { joined: boolean; counterFilled: boolean }> => {
+        const islands = CS.compose(parts.map((part) => part.cs));
+        let kept = islands;
+        if (r > 0) {
+          const opened = executeProfile(tl, engravableProfile(raised.field, r));
+          const leftover = CS.difference([fieldCS, opened]);
+          opened.delete();
+          kept = CS.union([islands, leftover]);
+          leftover.delete();
+          islands.delete();
+        }
+        const fused = new Map<string, { joined: boolean; counterFilled: boolean }>();
+        const flag = (labelId: string, key: 'joined' | 'counterFilled'): void => {
+          const cur = fused.get(labelId) ?? { joined: false, counterFilled: false };
+          fused.set(labelId, { ...cur, [key]: true });
+        };
+        try {
+          for (const part of kept.decompose()) {
+            try {
+              const inside = parts.filter((island) => {
+                const hit = CS.intersection([part, island.cs]);
+                try {
+                  return hit.area() > island.cs.area() * 0.5;
+                } finally {
+                  hit.delete();
+                }
+              });
+              if (inside.length > 1) {
+                for (const island of inside) flag(island.labelId, 'joined');
+              } else if (inside.length === 1) {
+                const island = inside[0]!;
+                if (part.numContour() - 1 < island.holes) flag(island.labelId, 'counterFilled');
+              }
+            } finally {
+              part.delete();
+            }
+          }
+        } finally {
+          kept.delete();
+        }
+        return fused;
+      };
+
+      const fusedAtCutter = fusedAt(cutterRadius);
+      if (fusedAtCutter.size === 0) continue;
+      const fusedAtZero = fusedAt(0);
+      for (const labelId of new Set(parts.map((part) => part.labelId))) {
+        const cause = fusedAtCutter.get(labelId);
+        if (cause === undefined) continue;
+        const label = labelById.get(labelId);
+        if (label === undefined) continue;
+
+        // The smallest radius that joins THIS label. Zero when the letters already touch with
+        // no cutter at all — then there is no gap to quote and no size to suggest.
+        let fuseRadius = 0;
+        if (!fusedAtZero.has(labelId)) {
+          let lo = 0;
+          let hi = cutterRadius;
+          for (let i = 0; i < RAISED_TEXT_BISECTION_STEPS; i++) {
+            const mid = (lo + hi) / 2;
+            if (fusedAt(mid).has(labelId)) hi = mid;
+            else lo = mid;
+          }
+          fuseRadius = hi;
+        }
+        const gap = 2 * fuseRadius;
+        // Glyph geometry scales exactly with the cap height (the font is laid out at that size),
+        // so the gap does too; the epsilon keeps an exact multiple from rounding up a millimetre.
+        const minSize =
+          gap > 0 ? Math.ceil((label.size * (2 * cutterRadius)) / gap - 1e-9) : null;
+        out.push({
+          cutawayId: raised.id,
+          labelId,
+          text: label.text,
+          size: label.size,
+          cutterRadius,
+          gap,
+          joined: cause.joined,
+          counterFilled: cause.counterFilled,
+          minSize,
+        });
+      }
+    } finally {
+      for (const part of parts) part.cs.delete();
+      fieldCS.delete();
+    }
+  }
+  return out;
+}
+
+/**
+ * The sentences for the raised labels the cutter joins (#739).
+ *
+ * A WARNING, not an error: the cut still runs, and the operator may want the joined look. The
+ * sentence names the text, its size, the measured gap, the width that cannot clear it, and the
+ * two measured ways out. Every number carries its unit through `fmtMm` (three decimals at most,
+ * trailing zeros dropped); the finding code stays in the diagnostic data and never in the words.
+ */
+export function raisedTextFindings(
+  measurements: readonly RaisedTextMeasurement[],
+  tool: Tool | null,
+): JobFinding[] {
+  const cutter = cutterPhrase(tool);
+  // What the gap was measured AGAINST. For a flat cutter that is its own diameter; for a V it is
+  // the WIDTH AT THE CUTAWAY'S DEPTH, not the tip (`planeRadiusFor`, the plane the CAM and the
+  // reachability measurement use). Saying "narrower than a 0.3 mm V-bit" about a 1.6 mm gap would
+  // be false, so the row's own radius supplies the number and the tip only names the tool.
+  const cone = tool === null ? null : vCone(tool);
+  return measurements.map((m) => {
+    const gap = fmtMm(m.gap);
+    const compared =
+      cone === null ? cutter : `the ${fmtMm(2 * m.cutterRadius)} mm width ${cutter} cuts at that depth`;
+    // A V's way out is a width at depth too, because that is the number the warning compared.
+    const narrower =
+      cone === null ? `a cutter ${gap} mm or smaller` : `a cutter no wider than ${gap} mm at that depth`;
+    // The sentence says which measured thing happened, not a generic "it fails": two letters
+    // bridged into one is a different picture from a counter filled in, and both are possible.
+    const what =
+      m.joined && m.counterFilled
+        ? 'the letters will join and a counter will fill in'
+        : m.joined
+          ? 'the letters will join'
+          : m.counterFilled
+            ? 'a counter will fill in'
+            : 'the raised text will lose its gaps';
+    const advice =
+      m.minSize !== null
+        ? `Use ${narrower}, or text ${m.minSize} mm or more.`
+        : m.joined
+          ? `Use ${narrower}, or space the letters apart.`
+          : `Use ${narrower}, or use larger text.`;
+    return {
+      severity: 'warning' as const,
+      code: 'raised-text-fused' as const,
+      labelId: m.labelId,
+      message:
+        `Raised text "${m.text}" at ${fmtMm(m.size)} mm has gaps down to ${gap} mm, ` +
+        `narrower than ${compared}; ${what}. ${advice}`,
+    };
+  });
+}
+
+/**
  * Surface area below which an overlap is the two regions sharing an edge rather than covering
  * each other, mm² (#171). Same order as `OUTSIDE_AREA_TOLERANCE_MM2` and far above the ~1e-8 mm²
  * Clipper2 noise floor `ofPolygons` leaves behind.

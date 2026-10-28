@@ -109,6 +109,11 @@ export type JobFindingCode =
   | 'item-chars-lost'
   | 'item-detail-lost'
   | 'item-outside-stock'
+  // Raised text (#739): a cutaway leaves construction labels standing, and at the cutter's own
+  // radius the field's opening no longer separates them — letters bridge, or a counter fills.
+  // A warning, measured from the same `engravableProfile` opening the CAM cuts, and expressed
+  // as the measured gap plus the cutter or cap height that clears it.
+  | 'raised-text-fused'
   // A cut off the round FACE of a disc or a rod (#683). The job plans in the square around the
   // round stock, and that square's corners are air: a cut whose extent reaches one passes over
   // nothing, or into the jaw zone the square says is stock. The face is the inscribed circle of

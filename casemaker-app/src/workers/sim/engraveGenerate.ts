@@ -155,6 +155,8 @@ import {
   engravabilityFindings,
   keepOutFindings,
   measureLabels,
+  measureRaisedTexts,
+  raisedTextFindings,
   traceCutRegions,
   type CutRegion,
   type LabelEngravability,
@@ -1462,6 +1464,19 @@ export function engraveRegions(
             (!variableIds.has(f.labelId) && !inlayIds.has(f.labelId) && !derivedIds.has(f.labelId)),
         );
 
+  // #739 — RAISED TEXT. A cutaway leaves its construction labels standing at full height; the
+  // cutter opens the field with the SAME radius the region stage cuts it at (`measureRadius` for
+  // a flat cutter, the V's plane radius otherwise), and the measurement asks whether the opening
+  // lets the letters stay apart. The radius is captured as a const so the callback and the
+  // measurement below cannot resolve two different cutters.
+  const flatRadius = measureRadius;
+  const raisedRadiusFor =
+    flatRadius === null
+      ? null
+      : (cutawayId: string): number => (cone === null ? flatRadius : planeRadiusFor(cutawayId));
+  const raisedMeasured =
+    raisedRadiusFor === null ? [] : measureRaisedTexts(tl, job, plan.raisedTexts, raisedRadiusFor);
+
   // #171/#345 — the cut regions a void check reads are built ONCE, below: the engrave openings,
   // the swept traces (#270) and — since #218 — each cut-out's kerf. A void-free job is the common
   // case and pays for nothing here — sweeping the traces means wasm, and #205 calls this on a
@@ -1758,6 +1773,7 @@ export function engraveRegions(
     // read the shank as the cutter.
     ...tipFindings,
     ...engFindings,
+    ...raisedTextFindings(raisedMeasured, tool),
     ...metalLineFindings(job, tool, catalogue),
     ...carveFindings,
     ...voidFindings,

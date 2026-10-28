@@ -102,6 +102,18 @@ export interface PartPlan {
     /** The first layer's own height, mm (#285); absent = the same as `layerHeight`. */
     firstLayerHeight?: Mm;
   };
+  /**
+   * #739 — RAISED TEXT: every enabled CUTAWAY that leaves construction labels standing. `field`
+   * is the cutaway's own profile — its outer less every island, exactly the region the CAM
+   * pockets — and `islands` are the construction labels' resolved profiles. Carried here so the
+   * raised-text measurement opens the SAME profile the cutter does, rather than re-typesetting
+   * the labels in the worker. Empty for a job with no such cutaway.
+   */
+  raisedTexts: {
+    id: string;
+    field: Profile;
+    islands: { labelId: string; profile: Profile }[];
+  }[];
   engraves: {
     id: string;
     name: string;
@@ -2018,6 +2030,12 @@ export function toPartPlan(job: EngraveJob, options: PartPlanOptions = {}): Part
   /** The human name of each resolved item, for a cut-out's operation name (#218). */
   const names = new Map<string, string>();
   const engraves: PartPlan['engraves'] = [];
+  // #739 — the construction labels a cutaway can leave standing, by id. A cutaway island that
+  // is not one of these is an ordinary item the job cuts in its own operation, not raised text.
+  const constructionLabels = new Map(
+    job.labels.filter((label) => label.construction === true).map((label) => [label.id, label] as const),
+  );
+  const raisedTexts: PartPlan['raisedTexts'] = [];
   const ctx: ItemReferenceContext = {
     stockOutline,
     profileOf: (id) => profiles.get(id) ?? null,
@@ -2038,6 +2056,17 @@ export function toPartPlan(job: EngraveJob, options: PartPlanOptions = {}): Part
     names.set(item.id, itemOperationName(item));
     // A construction item is reference-only (#215): it resolves, but cuts nothing.
     if (item.construction) continue;
+    // #739 — a CUTAWAY around construction labels leaves RAISED TEXT standing: the panel is
+    // cleared and the letters stay at full height. Carry the field it clears and those labels'
+    // resolved profiles (only the islands that are construction labels), so the measurement
+    // opens exactly the profile the CAM pockets.
+    if (isShape(item) && item.kind === 'cutaway') {
+      const islands = item.islands.flatMap((id) => {
+        const island = profiles.get(id);
+        return constructionLabels.has(id) && island !== undefined ? [{ labelId: id, profile: island }] : [];
+      });
+      if (islands.length > 0) raisedTexts.push({ id: item.id, field: profile, islands });
+    }
     // #674 — a PRISM is not pocketed: the V cuts the RING around the shape, so the shape stands.
     // The ring is DERIVED here (pure profile algebra: an outward offset less the shape), from the
     // same `prismNumbers` the row, the findings and the sheet read. Its design is the TOP boundary
@@ -2266,6 +2295,7 @@ export function toPartPlan(job: EngraveJob, options: PartPlanOptions = {}): Part
           }
         : {}),
     },
+    raisedTexts,
     engraves,
     cutouts,
     chamfers,

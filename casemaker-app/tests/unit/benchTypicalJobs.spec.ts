@@ -77,6 +77,33 @@ const BENCH_CUTTERS = [
     addedAt: '2026-10-27T00:00:00.000Z',
     notes: null,
   },
+  // #739 — the real-jobs exercise's 1 mm corn bit (j03, j04), as its inventory holds it: a flat
+  // 1 mm cutting diameter on a 1/8" shank with a 7 mm flute.
+  {
+    id: 'kz-corn-1-7',
+    tool: {
+      number: null,
+      id: null,
+      name: 'Corn Bit - 1/8" Shank 1mm * 7mm',
+      typeText: 'Flat End',
+      shape: 'flat',
+      handleDiameter: 3.175,
+      tipDiameter: 1,
+      diameter: 1,
+      cornerRadius: 0,
+      angle: null,
+      halfAngle: null,
+      fluteLength: 7,
+      shoulderLength: null,
+      stickout: null,
+      centreCutting: null,
+    },
+    origin: null,
+    quantity: 1,
+    codes: [],
+    addedAt: '2026-10-28T00:00:00.000Z',
+    notes: null,
+  },
   {
     id: 'kz-engrave-30-0-3',
     tool: {
@@ -348,5 +375,49 @@ describe('#738 the real jobs leave no rapid through material', () => {
     const rapid = receipt.diagnostics.filter((d) => d.code === 'rapid-through-stock');
     expect(rapid, 'the rapids the bench recorded must not come back').toEqual([]);
     expect(code, 'a clean job must not be refused by its own simulation').toBe(0);
+  }, 150_000);
+});
+
+/** Every diagnostic in one string, so a failed length assertion prints the whole finding list. */
+const allDiagnostics = (receipt: Receipt): string =>
+  receipt.diagnostics.map((d) => `${d.severity} ${d.code}: ${d.message}`).join('\n');
+
+// #739 — RAISED TEXT NARROWER THAN THE CUTTER. j02 clears a 92 × 82 mm panel 1 mm deep with a
+// 3.175 mm flat and leaves two construction labels standing: "CNX" at 24 mm survives as three
+// separate letters, while "Software" at 14 mm fuses into one blob — the bench saw it and the
+// engine said nothing. j04 is the same failure in the coin proxy: "Software" at 3.6 mm with a
+// 1 mm flat. The trigger must be the measured geometry, not a size threshold: "CNX" is smaller
+// than the cutter in pairwise places (N–X come within 3.11 mm) yet the opening still clears the
+// gaps, which is why it must stay silent.
+describe('#739 raised text warns when its gaps are narrower than the cutter', () => {
+  it('j02 raised CNX: "Software" fuses at the 3.175 mm cutter, and "CNX" is left alone', async () => {
+    const { code, receipt } = await cut('j02-raised-cnx.json', REAL_JOBS);
+    const fused = receipt.diagnostics.filter((d) => d.code === 'raised-text-fused');
+    expect(fused, allDiagnostics(receipt)).toHaveLength(1);
+    const warning = fused[0]!;
+    expect(warning.severity, 'a narrowed gap is a warning, not a refusal').toBe('warning');
+    expect(warning.message).toContain('"Software"');
+    expect(warning.message).toContain('14 mm');
+    expect(warning.message).toContain('1.08 mm');
+    expect(warning.message).toContain('3.175 mm');
+    expect(warning.message).toContain('42 mm');
+    expect(allDiagnostics(receipt), '"CNX" survives the same cutter and must not be warned about').not.toContain(
+      '"CNX"',
+    );
+    expect(code, 'a warning must not refuse the job').toBe(0);
+  }, 150_000);
+
+  it('j04 coin proxy: "Software" at 3.6 mm fuses at the 1 mm corn bit', async () => {
+    const { code, receipt } = await cut('j04-coin-pla-proxy.json', REAL_JOBS);
+    const fused = receipt.diagnostics.filter((d) => d.code === 'raised-text-fused');
+    expect(fused, allDiagnostics(receipt)).toHaveLength(1);
+    const warning = fused[0]!;
+    expect(warning.message).toContain('"Software"');
+    expect(warning.message).toContain('3.6 mm');
+    expect(warning.message).toContain('0.278 mm');
+    expect(warning.message).toContain('1 mm cutter');
+    expect(warning.message).toContain('13 mm');
+    expect(allDiagnostics(receipt), '"CNX" at 7 mm survives the same cutter').not.toContain('"CNX"');
+    expect(code, 'a warning must not refuse the job').toBe(0);
   }, 150_000);
 });
