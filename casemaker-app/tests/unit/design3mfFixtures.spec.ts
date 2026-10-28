@@ -1024,7 +1024,12 @@ describe('the thick fixture acceptance gates (#221)', () => {
       // Two floors (0.985 text, 0.998 logo), the accepted band, and NO under- or over-cut.
       const oracle = session.oracle(g.predicted);
       expect(oracle.ok, JSON.stringify({ worst: oracle.worst, levels: oracle.levels })).toBe(true);
-      expect(oracle.band).toBeCloseTo(0.090622, 6);
+      // #734 — the band is DERIVED from the program's worst checkpoint contour count
+      // (`oracleBand`), and the pocket fix that stops ring offsets compounding (see
+      // `cam/pocket.ts`) leaves this job's program one simplify level simpler: the band is one
+      // `SWEEP_SIMPLIFY_EPS_MM` narrower than the pre-#734 program's 0.090622. The verdict above
+      // and the zero under/over-cut below are unchanged — a smaller band is strictly stricter.
+      expect(oracle.band).toBeCloseTo(0.088622, 6);
       expect(oracle.levels).toHaveLength(2);
       expect(oracle.worst.underCut).toBe(0);
       expect(oracle.worst.overCut).toBe(0);

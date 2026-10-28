@@ -14,7 +14,14 @@ import { fileURLToPath } from 'node:url';
 
 import { afterAll, afterEach, describe, expect, it } from 'vitest';
 
+import { tl } from './helpers/manifoldExec';
+import { flatEndMill, type Tool } from '@/engine/cnc/tool';
+import { makeClipperOffset } from '@/engine/cnc/cam/engraveJob';
+import { pocketLoops, type Polygons } from '@/engine/cnc/cam/pocket';
 import { resetRegistry } from '@/engine/cnc/toolRegistry';
+import { engraveRegions } from '@/workers/sim/engraveGenerate';
+import { parseEngraveJob } from '@/store/engraveJobSchema';
+import type { EngraveJob } from '@/types/engraveJob';
 import { engraveJobMain } from '../../scripts/lib/casemaker/engrave';
 import { HUMAN, type CommandOptions } from '../../scripts/lib/casemaker/output';
 import { parseReceipt, type Receipt } from '../../src/platform/headless/receipt';
@@ -158,6 +165,36 @@ async function cut(jobFile: string): Promise<Run> {
   return { code, receipt: parseReceipt(receipt!), progress };
 }
 
+/**
+ * The exercise ran each job under a 600 s command timeout; j05 and j11 hit it (exit 124) before
+ * #734's pocket fix. Both now finish the whole generate → verify → simulate pipeline in under
+ * 0.3 s (measured by the tests below), so a minute is ample headroom for a slow runner and still
+ * an unambiguous regression: the pre-fix run never finished at all.
+ */
+const BUDGET_MS = 60_000;
+
+/** The j05 cutter as the bench inventory states it: a 30° V-bit with a 0.3 mm flat tip. */
+function benchEngraver(tipDiameter: number): Tool {
+  return flatEndMill(tipDiameter, {
+    name: `Single Flute Engraving Bit - 1/8" Shank 30° * ${tipDiameter}mm`,
+    typeText: 'Engraving',
+    shape: 'engraving',
+    diameter: 3.175,
+    halfAngle: 15,
+    angle: 30,
+  });
+}
+
+/** Parse a bench job file the way the CLI does. */
+function benchJob(jobFile: string): EngraveJob {
+  const parsed = parseEngraveJob(JSON.parse(readFileSync(join(JOBS, jobFile), 'utf8')));
+  if (!parsed.ok) throw new Error(`${jobFile}: ${parsed.errors.join('; ')}`);
+  return parsed.job;
+}
+
+/** Total vertices across a region's contours. */
+const vertexCount = (region: Polygons): number => region.reduce((n, contour) => n + contour.length, 0);
+
 describe('#734 the typical jobs run clean through the cut pipeline', () => {
   it('j17 PLA proxy: no rapid crosses material still present, so the cut is not refused', async () => {
     // The bench recorded: {"code":"rapid-through-stock","sentence":"7 rapids pass through
@@ -168,4 +205,47 @@ describe('#734 the typical jobs run clean through the cut pipeline', () => {
     expect(rapid, 'the false rapids the bench recorded must not come back').toEqual([]);
     expect(code, 'a clean job must not be refused by its own simulation').toBe(0);
   }, 120_000);
+
+  it('j05 V-carve region: a pocket ring is offset from the original region, so its vertices cannot compound', () => {
+    // The bench job's "OPEN" glyph outline is ONE region of 555 vertices. `pocketLoops` used to
+    // offset each ring from the PREVIOUS ring, and Clipper's round joins at the glyph's reflex
+    // corners add vertices that the next offset doubles again: at this pitch (a coarse 0.5 mm
+    // cutter / 0.4 mm step-over, chosen so the old growth is visible in milliseconds) the old
+    // rings grow 494 → 886 → 1678 → 3262, and at the job's real 0.15 mm pitch a ring reached
+    // 342 494 vertices — which is why the cut never finished. Each ring now offsets the ORIGINAL
+    // region and stays near the input's own count (measured 494–553 here). A ring carrying more
+    // than twice the input is the compounding defect, not a legitimate offset.
+    const job = benchJob('j05-two-colour-sign-adjusted.json');
+    const { regions } = engraveRegions(tl, job, benchEngraver(0.3));
+    expect(regions.length).toBeGreaterThan(0);
+    const region = regions[0]!.polygons;
+    const inputVerts = vertexCount(region);
+    expect(inputVerts).toBeGreaterThan(300); // the real glyph outline, not a stand-in
+
+    const rings = pocketLoops(region, 0.5, 0.4, makeClipperOffset(tl));
+    expect(rings.length).toBeGreaterThan(1);
+    rings.forEach((ring, k) => {
+      expect(vertexCount(ring), `ring ${k} of ${rings.length}`).toBeLessThanOrEqual(2 * inputVerts);
+    });
+  });
+
+  it('j05 two-colour sign: the 30° 0.3 V-bit job finishes inside the 600 s budget', async () => {
+    const started = Date.now();
+    const { code, receipt } = await cut('j05-two-colour-sign-adjusted.json');
+    const elapsed = Date.now() - started;
+    const errors = receipt.diagnostics.filter((d) => d.severity === 'error');
+    expect(errors, 'the bench job must cut without an error diagnostic').toEqual([]);
+    expect(code, 'a clean job must complete, not be refused').toBe(0);
+    expect(elapsed, `cut took ${elapsed} ms`).toBeLessThan(BUDGET_MS);
+  }, 150_000);
+
+  it('j11 inlay female: the 30° 0.5 V-bit inlay finishes inside the 600 s budget', async () => {
+    const started = Date.now();
+    const { code, receipt } = await cut('j11-inlay-female.json');
+    const elapsed = Date.now() - started;
+    const errors = receipt.diagnostics.filter((d) => d.severity === 'error');
+    expect(errors, 'the bench job must cut without an error diagnostic').toEqual([]);
+    expect(code, 'a clean job must complete, not be refused').toBe(0);
+    expect(elapsed, `cut took ${elapsed} ms`).toBeLessThan(BUDGET_MS);
+  }, 150_000);
 });

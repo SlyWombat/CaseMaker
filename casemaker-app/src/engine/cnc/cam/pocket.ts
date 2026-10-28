@@ -65,9 +65,15 @@ function maxExtent(region: Polygons): number {
 }
 
 /**
- * Concentric pocketing rings for one region: the first ring is the region eroded by
- * `toolRadius`, then each subsequent ring erodes the previous by `stepOver`, until the
- * offset comes back empty.
+ * Concentric pocketing rings for one region: ring k is the ORIGINAL region eroded by
+ * `toolRadius + k × stepOver`, until the offset comes back empty.
+ *
+ * Each ring is offset from the ORIGINAL region, not from the previous ring. Both give the same
+ * concentric geometry, but a chained offset re-runs Clipper on the previous ring's output, and
+ * the round joins at every reflex corner add vertices that the next offset doubles again:
+ * #734 measured a real glyph outline (555 vertices) growing 713 → 1053 → 1605 → 3101 → 6104 …
+ * to 342 494 vertices by its tenth ring, so a 22-ring V-carve pocket never finished. Offsetting
+ * the original every time keeps each ring's vertex count bounded by the input's.
  *
  * Returns the rings OUTERMOST FIRST — ring 0 is the one nearest the wall. A ring is a set of
  * closed contours, because a shrinking region can split into several islands (and a ring
@@ -105,6 +111,7 @@ export function pocketLoops(
 
   const rings: Polygons[] = [];
   const maxRings = Math.ceil(maxExtent(region) / stepOver) + 4;
+  let ring = 0;
   let current = offset(region, -toolRadius);
   while (!isEmptyRegion(current)) {
     rings.push(current);
@@ -114,7 +121,8 @@ export function pocketLoops(
           `not shrinking the region (a bug, not a long job)`,
       );
     }
-    current = offset(current, -stepOver);
+    ring += 1;
+    current = offset(region, -(toolRadius + ring * stepOver));
   }
   return rings;
 }
