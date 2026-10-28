@@ -100,6 +100,9 @@ export function generateChamfer(
       name: `[T${toolNumber}]${cut.name} ${cut.depth.toFixed(1)}mm`,
       labelId: cut.id,
       depth: cut.depth,
+      // #735 — every ring of this cut is one bevel at one Z: a single depth pass.
+      depthPasses: 1,
+      passStepMm: cut.depth,
       moves,
       estimatedSeconds: estimateCycleSeconds(moves, rapid),
     });

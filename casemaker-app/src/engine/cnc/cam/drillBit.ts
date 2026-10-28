@@ -213,6 +213,9 @@ export function drillBitIR(
     name: input.name,
     labelId: input.labelId,
     depth: r.plan.tipDepth,
+    // #735 — one depth pass per peck of every hole, at the peck depth the plan resolved.
+    depthPasses: peckDepths(r.plan.tipDepth, r.plan.peck).length * r.plan.holes.length,
+    passStepMm: r.plan.peck,
     moves: r.plan.moves,
     estimatedSeconds: estimateCycleSeconds(r.plan.moves, input.rapid),
   };

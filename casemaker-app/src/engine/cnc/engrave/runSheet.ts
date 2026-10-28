@@ -1,4 +1,4 @@
-import type { RapidEstimate } from '@/engine/cnc/cam/ir';
+import type { CamPassStep, RapidEstimate } from '@/engine/cnc/cam/ir';
 import { aabbOfProfile } from '@/engine/compiler/profile';
 import { itemLabel, jobSetups, jobTool, type JobFinding } from '@/engine/cnc/engrave/jobSetup';
 import {
@@ -177,6 +177,12 @@ export interface RunSheetCamSummary {
   /** #250 — how many of this program's operations rough and finish. Optional like the travel numbers. */
   roughOperations?: number;
   finishOperations?: number;
+  /**
+   * #735 — the program's depth passes by the step each took, deepest first. Present when every
+   * operation declared its passes; absent on an older stored result, and the sheet then prints its
+   * pre-#735 single-step-down wording from `passes` and the feeds row.
+   */
+  passSteps?: CamPassStep[];
 }
 
 /**
@@ -3630,6 +3636,16 @@ export function buildRunSheet(
     const traceOnly =
       items.length === 0 && (job.traces?.some((t) => t.enabled && !t.construction) ?? false);
     const surfaceFacts = generated.surface3d ?? null;
+    // #735 — the CAM states each operation's depth passes and the step it took, so a program that
+    // runs two step-downs names both (j01: 11 × 0.5 mm and 22 × 0.25 mm) and a bore prints its
+    // helix pitch rather than the 3648 chords a helix changes Z on. An older stored result has no
+    // tally and keeps the pre-#735 single-step wording from the feeds row.
+    const passSteps = generated.cam?.passSteps ?? null;
+    const passesText =
+      passSteps !== null && passSteps.length > 1
+        ? `${generated.cam?.passes ?? 0} depth passes — ` +
+          passSteps.map((t) => `${t.passes} × ${fmtNum(t.stepMm)} mm`).join(', ')
+        : `${generated.cam?.passes ?? 1} × ${fmtNum(passSteps?.[0]?.stepMm ?? params.stepDown)} mm passes`;
     const step: RunSheetStep =
       surfaceFacts !== null
         ? {
@@ -3649,7 +3665,7 @@ export function buildRunSheet(
               text: `Spindle, feed, plunge, passes and step-down. Vacuum ${params.air ? 'on' : 'off'}.`,
               value:
                 `${params.rpm} RPM · ${fmtNum(params.feed)} mm/min feed · ${fmtNum(params.plungeFeed)} mm/min ` +
-                `plunge · ${generated.cam?.passes ?? 1} × ${fmtNum(params.stepDown)} mm passes · ` +
+                `plunge · ${passesText} · ` +
                 `${fmtNum(params.stepOver)} mm step-over`,
             };
     cutSteps.push(step);

@@ -124,10 +124,10 @@ function orderNearest(items: readonly TracePaths[]): TracePaths[] {
  * profile's steps are the plan's (`flute.ts` subdivides them), and both sweep engines apply a move
  * at the move's own Z, so the file, the sim and the oracle describe the same staircase.
  */
-function buildTraceMoves(trace: TracePaths, params: CutParams): CamMove[] {
+function buildTraceMoves(trace: TracePaths, params: CutParams, levels: readonly number[]): CamMove[] {
   const moves: CamMove[] = [];
   let last: [number, number] = [0, 0];
-  for (const z of zPasses(trace.depth, params.stepDown)) {
+  for (const z of levels) {
     // The positive depth this pass may reach — the flute profile is clamped to it, so a deep
     // groove is still stepped rather than cut in one plunge-free dive.
     const limit = -z;
@@ -211,12 +211,16 @@ export function generateTrace(
   const ordered = strategies[order](traces.filter(hasCuts));
 
   const operations: CamOperation[] = ordered.map((trace, index) => {
-    const moves = buildTraceMoves(trace, params);
+    const levels = zPasses(trace.depth, params.stepDown);
+    const moves = buildTraceMoves(trace, params, levels);
     return {
       number: index + 1,
       name: `[T${toolNumber}]${trace.name ?? 'Trace'} ${trace.depth.toFixed(1)}mm`,
       labelId: trace.id,
       depth: trace.depth,
+      // #735 — one pass per `zPasses` level, at the feeds row's step-down.
+      depthPasses: levels.length,
+      passStepMm: params.stepDown,
       moves,
       estimatedSeconds: estimateCycleSeconds(moves, rapid),
     };

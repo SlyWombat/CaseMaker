@@ -77,6 +77,23 @@ export interface CamOperation {
    * absent on every operation that is not part of such a pair (see {@link CamPassKind}).
    */
   passKind?: CamPassKind;
+  /**
+   * #735 — how many DEPTH PASSES this operation makes: one per descent to a new cutting depth. A
+   * level's cleanup laps are part of its pass; the chords of a helix are NOT passes. Declared by
+   * every CAM that can be read wrongly by counting distinct feed Z values — a bore or a thread
+   * helix changes Z on every chord, and a helical climb repeats a depth at each radial pass.
+   *
+   * Absent on an operation whose depth levels are its feed Z values (a pocket, a profile, a
+   * chamfer, the surface relief), where the summary counts those levels; absent and
+   * {@link passStepMm} absent together, always.
+   */
+  depthPasses?: number;
+  /**
+   * #735 — the descent one of this operation's depth passes took, mm (positive): a bore's helix
+   * pitch, a drill's peck, a profile's (possibly halved) step-down, a thread's pitch. Present
+   * exactly when {@link depthPasses} is.
+   */
+  passStepMm?: number;
   moves: CamMove[];
   /**
    * The operation's CYCLE estimate in seconds — cutting PLUS rapids, every move through the
@@ -84,6 +101,25 @@ export interface CamOperation {
    * run sheet and the post's `TIME` record all read, so they cannot disagree.
    */
   estimatedSeconds: number;
+}
+
+/**
+ * #735 — one step-down and the depth passes a program ran at it, mm. The run sheet prints a single
+ * "N × s mm passes" when there is one entry and names each step when there is more than one: a
+ * program's cut-out slot runs at the profile row's halved step-down, and printing the feeds row's
+ * number beside the combined count was true for only some of the passes (j01's "33 × 0.5 mm").
+ */
+export interface CamPassStep {
+  /** The descent one pass took, mm. */
+  stepMm: number;
+  /** How many of the program's depth passes descended by `stepMm`. */
+  passes: number;
+}
+
+/** #735 — what an operation declares about its depth passes (see `CamOperation.depthPasses`). */
+export interface CamDepthPasses {
+  depthPasses: number;
+  passStepMm: number;
 }
 
 export interface ToolpathIR {

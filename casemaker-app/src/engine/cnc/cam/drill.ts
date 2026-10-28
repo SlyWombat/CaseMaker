@@ -24,7 +24,7 @@
  * arrives POSITIVE (mm) from `EngraveJob`, and every emitted `z` is NEGATIVE work Z.
  */
 
-import { HOP_Z, SAFE_Z, type CamMove } from './ir';
+import { HOP_Z, SAFE_Z, type CamDepthPasses, type CamMove } from './ir';
 import type { CutParams } from '../feeds';
 import { segmentsForRadius } from '@/engine/compiler/arcResolution';
 
@@ -196,6 +196,42 @@ export function boreLevels(depth: number, pitch: number, bottomDepth: number | n
     z = next;
   }
   return levels;
+}
+
+/**
+ * #735 — the DEPTH PASSES a bore makes, as its operation declares them: one pass per descent of
+ * the helix's pitch, per hole. A helix changes Z on every chord, so counting distinct feed Z
+ * values read j18's two ⌀2.6 mm bores as 3648 passes when each is 92 turns.
+ *
+ * The pitch is `borePitchMm` — the same call `boreMoves` makes, from the same inputs — and the
+ * levels are `boreLevels`: the wide case is cut level by level with the blank's bottom split in,
+ * and the plain case is one continuous helix whose revolutions step the same pitch, so the level
+ * list is its count too.
+ *
+ * Called only after `boreMoves` has accepted the geometry (it throws on a hole no wider than the
+ * cutter, or a zero pitch); the guard here keeps a direct caller from spinning in `boreLevels`.
+ */
+export function borePasses(
+  holeCount: number,
+  depth: number,
+  holeRadius: number,
+  cutterRadius: number,
+  params: CutParams,
+  rampAngleDeg: number | null = null,
+  bottomDepth: number | null = null,
+): CamDepthPasses {
+  const centreRadius = holeRadius - cutterRadius;
+  const pitch = borePitchMm(params.stepDown, centreRadius, boreRampAngleFrom(rampAngleDeg));
+  if (!(centreRadius > 0) || !(pitch > 0)) {
+    throw new Error(
+      'borePasses: this hole has no helix to count — it is not wider than the cutter, or its pitch is zero',
+    );
+  }
+  // The wide case is cut level by level (`boreMoves`' `spiralNeeded`); the plain case's
+  // revolutions step the same pitch, with no bottom split because it never levels.
+  const levels =
+    centreRadius > cutterRadius ? boreLevels(depth, pitch, bottomDepth) : boreLevels(depth, pitch);
+  return { depthPasses: levels.length * holeCount, passStepMm: pitch };
 }
 
 /**

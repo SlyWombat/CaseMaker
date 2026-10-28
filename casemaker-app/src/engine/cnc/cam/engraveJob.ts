@@ -31,11 +31,12 @@ import type { ManifoldToplevel } from '@/workers/geometry/evaluateOp';
 import type { CutParams } from '../feeds';
 import { cuttingForTrace, type Tool } from '../tool';
 import { vCarveLevels, vCarvePassPitch } from '../vCarveGeometry';
-import { boreMoves, drillMoves, orderHolesNearest } from './drill';
+import { boreMoves, borePasses, drillMoves, orderHolesNearest, peckDepths } from './drill';
 import {
   estimateCycleSeconds,
   HOP_Z,
   SAFE_Z,
+  type CamDepthPasses,
   type CamMove,
   type CamOperation,
   type CamPassKind,
@@ -283,6 +284,12 @@ interface PreparedPass {
   rings: Polygons[];
   /** Negative work Z, shallowest first. */
   passes: number[];
+  /**
+   * #735 — the descent this pass takes, mm (positive), for the operation's `passStepMm`. The levels
+   * `passes` are not evenly spaced (the last lands exactly on the floor), so the CAM states the
+   * nominal step it asked for; the sheet prints this, not a difference between two Z values.
+   */
+  stepMm: number;
   /** `rough`/`finish` when the item was split; absent on a one-pass cut. */
   passKind?: Extract<CamPassKind, 'rough' | 'finish'>;
 }
@@ -294,6 +301,8 @@ interface Prepared {
   firstCut: [number, number];
   /** A drilled region's moves, computed at prepare time (#220). Present => `buildMoves` is not used. */
   drillMoves?: CamMove[];
+  /** #735 — a drilled or bored region's depth passes, declared where its moves are made. */
+  drillPasses?: CamDepthPasses;
   /**
    * #665 — a variable V-carve's level sets, shallowest first: each rung its own rings and its own
    * single Z. Kept apart from `passList` because the ladder pairs ONE ring set with ONE depth per
@@ -643,6 +652,8 @@ export function generateEngrave(
           );
         }
         const first = holes[0];
+        // A through bore clears its core to the blank's underside before crossing it.
+        const bottom = label.through === true ? (label.stockThickness ?? null) : null;
         return {
           label,
           passList: [],
@@ -654,8 +665,17 @@ export function generateEngrave(
             flatRadius,
             params,
             boreRampAngleDeg,
-            // A through bore clears its core to the blank's underside before crossing it.
-            label.through === true ? (label.stockThickness ?? null) : null,
+            bottom,
+          ),
+          // #735 — the helix's DEPTH PASSES, not its chords: `boreMoves` changes Z on every chord.
+          drillPasses: borePasses(
+            holes.length,
+            label.depth,
+            bore.radius,
+            flatRadius,
+            params,
+            boreRampAngleDeg,
+            bottom,
           ),
         };
       }
@@ -669,6 +689,9 @@ export function generateEngrave(
         passList: [],
         firstCut: holes[0] ?? [0, 0],
         drillMoves: drillMoves(holes, label.depth, peck, params, peckClearanceMm),
+        // #735 — one depth pass per peck of every hole, not one per distinct feed Z (which would
+        // read a hole's pecks as passes and ignore that every hole repeats them).
+        drillPasses: { depthPasses: peckDepths(label.depth, peck).length * holes.length, passStepMm: peck },
       };
     }
     if (label.vCarve?.variable === true) {
@@ -694,7 +717,7 @@ export function generateEngrave(
       for (const level of vCarveLevels(cone, label.depth, pitch)) {
         const rings = offset(label.polygons, -level.radius);
         if (rings.length === 0) continue; // this level's contour has collapsed into the medial axis
-        ladder.push({ rings: [rings], passes: [-level.depth] });
+        ladder.push({ rings: [rings], passes: [-level.depth], stepMm: pitch });
       }
       if (ladder.length === 0) {
         throw new Error(
@@ -707,6 +730,7 @@ export function generateEngrave(
     const onePass: PreparedPass = {
       rings: ringsFor(label),
       passes: zPasses(label.depth, params.stepDown),
+      stepMm: params.stepDown,
     };
     if (!finishOn || finish === null) {
       return { label, passList: [onePass], firstCut: firstCuttingPoint(onePass.rings) };
@@ -720,12 +744,13 @@ export function generateEngrave(
       passList.push({
         rings: ringsFor(label, leave),
         passes: zPasses(roughDepth, params.stepDown),
+        stepMm: params.stepDown,
         passKind: 'rough',
       });
     }
     if (finish.mode !== 'rough-only') {
       // The finishing pass is the ideal region at the cutter's own radius, one full-depth pass.
-      passList.push({ rings: ringsFor(label), passes: [-label.depth], passKind: 'finish' });
+      passList.push({ rings: ringsFor(label), passes: [-label.depth], stepMm: label.depth, passKind: 'finish' });
     }
     // A cut shallower than the allowance has no roughing pass to make; keeping the one-pass cut is
     // better than writing an item with no operation at all (#250 review).
@@ -767,6 +792,11 @@ export function generateEngrave(
         name: `[T${toolNumber}]${descriptor} ${item.label.depth.toFixed(1)}mm`,
         labelId: item.label.id,
         depth: item.label.depth,
+        // #735 — a drill or bore declares its depth passes; `summarize` reads them instead of the
+        // distinct feed Z values, which a helix changes on every chord.
+        ...(item.drillPasses === undefined
+          ? {}
+          : { depthPasses: item.drillPasses.depthPasses, passStepMm: item.drillPasses.passStepMm }),
         moves,
         estimatedSeconds: estimateCycleSeconds(moves, rapid),
       });
@@ -803,6 +833,9 @@ export function generateEngrave(
         name: `[T${toolNumber}]${descriptor} ${item.label.depth.toFixed(1)}mm`,
         labelId: item.label.id,
         depth: item.label.depth,
+        // #735 — one depth pass per ladder rung (each rung is one Z), at the ladder's own pitch.
+        depthPasses: item.ladder.length,
+        passStepMm: item.ladder[0]!.stepMm,
         moves,
         estimatedSeconds: estimateCycleSeconds(moves, rapid),
       });
@@ -833,6 +866,10 @@ export function generateEngrave(
         labelId: item.label.id,
         depth: item.label.depth,
         ...(kind === undefined ? {} : { passKind: kind }),
+        // #735 — this pass's own depth levels, at the step it was prepared with (a rough at the
+        // row's step-down, a full-depth finish as its one pass).
+        depthPasses: pass.passes.length,
+        passStepMm: pass.stepMm,
         moves,
         estimatedSeconds: estimateCycleSeconds(moves, rapid),
       });

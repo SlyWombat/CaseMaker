@@ -408,6 +408,10 @@ export function threadMillIR(
     name: `[T${toolNumber}]${input.descriptor} ${r.plan.threadDepth.toFixed(1)}mm`,
     labelId: input.labelId,
     depth: r.plan.tipDepth,
+    // #735 — the helix climbs one PITCH per revolution, so each revolution is a depth pass; the
+    // radial passes repeat them. The climb's G1 chords are not passes (j18's 530 read 22).
+    depthPasses: Math.max(1, Math.ceil(r.plan.tipDepth / r.plan.pitch - 1e-9)) * r.plan.passRadii.length,
+    passStepMm: r.plan.pitch,
     moves: r.plan.moves,
     estimatedSeconds: estimateCycleSeconds(r.plan.moves, input.rapid),
   };

@@ -444,6 +444,9 @@ export function generateProfile(
       name: `[T${toolNumber}]${cut.name} ${cut.depth.toFixed(1)}mm`,
       labelId: cut.id,
       depth: cut.depth,
+      // #735 — one pass per `zPasses` level, at the feeds row's step-down.
+      depthPasses: passes.length,
+      passStepMm: params.stepDown,
       moves,
       estimatedSeconds: estimateCycleSeconds(moves, rapid),
       passKind: 'through',

@@ -130,7 +130,7 @@ import { tapeHoldFindings, type TapedPiece } from '@/engine/cnc/engrave/tapeHold
 import type { BedUnderFacts } from '@/engine/cnc/engrave/jobSetup';
 import { generateChamfer, type ChamferCut } from '@/engine/cnc/cam/chamfer';
 import type { Polygons } from '@/engine/cnc/cam/pocket';
-import { concatToolpathIR, estimateCycleSeconds, HOP_Z, raiseTravelOver, toolNumberFor, travelHeightOver, travelStats, type CamMove, type ToolpathIR } from '@/engine/cnc/cam/ir';
+import { concatToolpathIR, estimateCycleSeconds, HOP_Z, raiseTravelOver, toolNumberFor, travelHeightOver, travelStats, type CamMove, type CamPassStep, type ToolpathIR } from '@/engine/cnc/cam/ir';
 import {
   DEFAULT_STOCK_TO_LEAVE_MM,
   generateSurface3dForGoal,
@@ -319,6 +319,14 @@ export interface EngraveCamSummary {
    * reads as "not recorded"; `summarize` always fills it.
    */
   throughOperations?: number;
+  /**
+   * #735 — the program's depth passes grouped by the step each took, deepest step first. Present
+   * only when EVERY operation declared both its pass count and its step, so the sheet can print
+   * "33 depth passes — 11 × 0.5 mm, 22 × 0.25 mm" instead of one feeds-row number that was true
+   * for some of them. Absent (an old stored result, or a program with an undeclared operation):
+   * the sheet prints its pre-#735 wording from `passes` and the feeds row.
+   */
+  passSteps?: CamPassStep[];
 }
 
 /**
@@ -2130,6 +2138,11 @@ function summarize(ir: ReturnType<typeof generateEngrave>): EngraveCamSummary {
   let roughOperations = 0;
   let finishOperations = 0;
   let throughOperations = 0;
+  // #735 — the per-step tally, kept only when every operation declares its own depth passes. One
+  // undeclared operation (a surface relief, say) makes the run sheet's single-step wording wrong
+  // again, so the sheet falls back to it rather than printing a tally that omits a cut.
+  const passSteps: CamPassStep[] = [];
+  let everyOperationDeclared = ir.operations.length > 0;
   for (const op of ir.operations) {
     if (op.passKind === 'rough') roughOperations++;
     else if (op.passKind === 'finish') finishOperations++;
@@ -2141,7 +2154,15 @@ function summarize(ir: ReturnType<typeof generateEngrave>): EngraveCamSummary {
       cuttingMoves++;
       zs.add(m.z);
     }
-    passes += zs.size;
+    if (op.depthPasses !== undefined && op.passStepMm !== undefined) {
+      passes += op.depthPasses;
+      addPassStep(passSteps, op.passStepMm, op.depthPasses);
+    } else {
+      // No declaration: a pocket's distinct feed Z values ARE its depth passes, so this is the
+      // pre-#735 reading rather than a guess.
+      everyOperationDeclared = false;
+      passes += zs.size;
+    }
   }
   // #487 — the program's own travel, and the same program had its region loops been placed in
   // document order. The report's two region numbers differ by exactly the ordering's doing, so
@@ -2152,6 +2173,7 @@ function summarize(ir: ReturnType<typeof generateEngrave>): EngraveCamSummary {
     ordering === undefined
       ? travel.rapidMm
       : travel.rapidMm - ordering.rapidMm + ordering.baselineRapidMm;
+  passSteps.sort((a, b) => b.stepMm - a.stepMm);
   return {
     operations: ir.operations.length,
     cuttingMoves,
@@ -2164,7 +2186,15 @@ function summarize(ir: ReturnType<typeof generateEngrave>): EngraveCamSummary {
     roughOperations,
     finishOperations,
     throughOperations,
+    ...(everyOperationDeclared && passSteps.length > 0 ? { passSteps } : {}),
   };
+}
+
+/** #735 — fold one operation's declared passes into the step tally, meters within 1e-6 mm. */
+function addPassStep(tally: CamPassStep[], stepMm: number, passes: number): void {
+  const entry = tally.find((t) => Math.abs(t.stepMm - stepMm) <= 1e-6);
+  if (entry !== undefined) entry.passes += passes;
+  else tally.push({ stepMm, passes });
 }
 
 /**
