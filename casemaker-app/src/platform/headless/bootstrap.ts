@@ -16,6 +16,11 @@
  * scripts stop carrying copies that drift. `bootstrap()` performs all three and returns the
  * handles; a caller that only wants the document calls `loadLocation()`.
  *
+ * Makera's own catalogue (`catalogue.json`, #308) is read here too, by `loadCatalogue()`, because
+ * it is the same kind of machine document from the same directory. `bootstrap()` deliberately does
+ * NOT read it: an entry point that resolves no feeds has no reason to fail over a file it never
+ * uses, and the CLI is the caller that does.
+ *
  * NODE, WITHOUT `node:*` IMPORTS. This module sits under `src/`, which the browser tsconfig also
  * compiles, so it reaches Node through `process.getBuiltinModule` (Node ≥ 22.3) with local
  * structural types — the same seam `src/utils/nodeGlobJson.ts` uses to stay typecheckable with and
@@ -24,11 +29,16 @@
  */
 import ManifoldModule, { type ManifoldToplevel } from 'manifold-3d';
 
+import { FeedCatalogueSchema, withCatalogueGeometry, type FeedCatalogueRow } from '@/engine/cnc/feeds';
 import { ToolLibrarySchema, type ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import { setInventoryEntries, setRegistry } from '@/engine/cnc/toolRegistry';
 import { BUNDLED_FONT_KEYS, registerBundledFontBytes } from '@/engine/fonts/registry';
 import type { ShopDefaults } from '@/platform/defaultsClient';
-import { InventorySchema, type InventoryItem } from '@/platform/houseClient';
+import {
+  HOUSE_SCHEMA_VERSION,
+  InventorySchema,
+  type InventoryItem,
+} from '@/platform/houseClient';
 import { checkLocationImport, type FixtureRecord, type MachineRecord } from '@/platform/locationClient';
 import type { StockItem } from '@/platform/stockClient';
 import { inventoryEntryFor } from '@/store/toolRegistryStore';
@@ -137,6 +147,11 @@ function defaultDocPaths(): string[] {
 /** `node:path.join`, through the same builtin seam (no static `node:path` import). */
 function joinPath(...parts: string[]): string {
   return (builtin<{ join(...p: string[]): string }>('node:path').join)(...parts);
+}
+
+/** `node:path.dirname`, through the same seam. */
+function dirnamePath(path: string): string {
+  return (builtin<{ dirname(p: string): string }>('node:path').dirname)(path);
 }
 
 /**
@@ -253,6 +268,129 @@ export function loadLocation(path?: string | readonly string[]): LoadedLocation 
   setRegistry(tools);
   setInventoryEntries(inventory.map(inventoryEntryFor));
   return { path: found, kind, name, tools, inventory, machines, stock, accessories, defaults };
+}
+
+// ---------------------------------------------------------------------------------------------
+// 4. Makera's catalogue (#308)
+// ---------------------------------------------------------------------------------------------
+
+/**
+ * The catalogue document the house service writes beside the machine's own documents: the file
+ * name and `kind` are `CATALOGUE_FILE`/`CATALOGUE_KIND` in `src-tauri/src/house.rs` and
+ * `src-tauri/src/catalogue.rs`.
+ */
+const CATALOGUE_FILE = 'catalogue.json';
+const CATALOGUE_KIND = 'casemaker-catalogue';
+
+/**
+ * A catalogue that is present but does not match this build. Absent is not an error — running on
+ * the starting table is what a machine that never synced Makera's library does — but a corrupted or
+ * half-written one must stop the run rather than quietly become "no catalogue": the numbers it
+ * holds are the vendor's, and falling back to a seed without saying so is how a wrong feed reaches
+ * a cutter.
+ */
+export class CatalogueDocumentError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'CatalogueDocumentError';
+  }
+}
+
+/** The house catalogue, as this run read it. */
+export interface LoadedCatalogue {
+  /** The file it was read from. */
+  path: string;
+  /** Makera's cutters (`cat:` entries), validated as the tool list the house serves. */
+  tools: ToolLibraryEntry[];
+  /**
+   * The feed matrix as `feedsFor`/`engraveGenerate` take it, each row joined to the geometry of the
+   * cutter it names ({@link withCatalogueGeometry}). The join is what lets a confirmed Makera id
+   * whose cutter changed size REFUSE the row rather than cut on it (#732).
+   */
+  rows: readonly FeedCatalogueRow[];
+  /** When the last sync ran, as the document states it; null when it does not say. */
+  syncedOn: string | null;
+}
+
+/** `catalogue.json` in the default data directory — beside `location.json` and `house.json`. */
+function defaultCataloguePath(): string | null {
+  const docs = defaultDocPaths();
+  if (docs.length === 0) return null;
+  return joinPath(dirnamePath(docs[0]!), CATALOGUE_FILE);
+}
+
+/**
+ * Read the house catalogue (#308) into the rows the feeds tiers resolve against.
+ *
+ * `path` names the catalogue itself. Absent means {@link defaultCataloguePath}; a caller that read
+ * a document from somewhere else — the CLI's `--location <file>` — asks for the `catalogue.json`
+ * beside THAT document, so a fixture and its catalogue travel together.
+ *
+ * Nothing on disk answers null: a headless run without Makera's numbers is the starting table,
+ * which is a normal state. A file that IS there is held to the same rules the Rust reader applies
+ * to it: `kind`, `schemaVersion`, and the two arrays through the very schemas the house client
+ * validates its own responses with. The tools are validated for their keys and geometry, and each
+ * feed row is joined to its cutter's geometry by `g_ID`, because a row by itself cannot say whether
+ * the id it names still belongs to the cutter in hand.
+ */
+export function loadCatalogue(path?: string): LoadedCatalogue | null {
+  const found = path ?? defaultCataloguePath();
+  if (found === null) return null;
+  const fs = builtin<FsLike>('node:fs');
+  if (!fs.existsSync(found)) return null;
+
+  let raw: string;
+  try {
+    raw = fs.readFileSync(found, 'utf8');
+  } catch (e) {
+    throw new CatalogueDocumentError(`${found}: ${(e as Error).message}`);
+  }
+  let json: unknown;
+  try {
+    json = JSON.parse(raw);
+  } catch (e) {
+    throw new CatalogueDocumentError(`${found} is not readable JSON: ${(e as Error).message}`);
+  }
+  const doc = json as {
+    kind?: unknown;
+    schemaVersion?: unknown;
+    syncedAt?: unknown;
+    tools?: unknown;
+    feeds?: unknown;
+  };
+  const kind = typeof doc.kind === 'string' ? doc.kind : '';
+  if (kind !== CATALOGUE_KIND) {
+    throw new CatalogueDocumentError(
+      `${found} says it is ${JSON.stringify(kind)}; this file must be ${JSON.stringify(CATALOGUE_KIND)}`,
+    );
+  }
+  const version = typeof doc.schemaVersion === 'number' ? doc.schemaVersion : 0;
+  if (version !== HOUSE_SCHEMA_VERSION) {
+    throw new CatalogueDocumentError(
+      `${found} is version ${version}; this build reads version ${HOUSE_SCHEMA_VERSION}`,
+    );
+  }
+  const parsedTools = ToolLibrarySchema.safeParse(doc.tools ?? []);
+  if (!parsedTools.success) {
+    throw new CatalogueDocumentError(
+      `${found} does not match its own schema: "tools" is not a tool list:\n  ${parsedTools.error.message}`,
+    );
+  }
+  const parsedFeeds = FeedCatalogueSchema.safeParse(doc.feeds ?? []);
+  if (!parsedFeeds.success) {
+    throw new CatalogueDocumentError(
+      `${found} does not match its own schema: "feeds" is not a feed catalogue:\n  ${parsedFeeds.error.message}`,
+    );
+  }
+  return {
+    path: found,
+    tools: parsedTools.data,
+    rows: withCatalogueGeometry(
+      parsedFeeds.data,
+      parsedTools.data.map((entry) => entry.tool),
+    ),
+    syncedOn: typeof doc.syncedAt === 'string' ? doc.syncedAt : null,
+  };
 }
 
 // ---------------------------------------------------------------------------------------------

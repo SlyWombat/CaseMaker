@@ -26,10 +26,11 @@ import { runSheetFileName } from '../../src/engine/cnc/engrave/runSheet';
 import { defaultEngraveJob } from '../../src/engine/cnc/engrave/defaults';
 import { toSetup } from '../../src/engine/cnc/engrave/jobSetup';
 import { Z1 } from '../../src/engine/cnc/machine';
-import { flatEndMill } from '../../src/engine/cnc/tool';
+import { flatEndMill, type Tool } from '../../src/engine/cnc/tool';
 import { entryFor } from '../../src/engine/cnc/toolRegistry';
 import { bootstrap } from '../../src/platform/headless/bootstrap';
 import { parseReceipt, type Receipt } from '../../src/platform/headless/receipt';
+import { parseEngraveJob } from '../../src/store/engraveJobSchema';
 import { createSimSession } from '../../src/workers/sim/session';
 import type { EngraveDrill, EngraveJob, JobSetup } from '../../src/types/engraveJob';
 
@@ -50,6 +51,8 @@ interface CutRun {
   code: number;
   receipt: Receipt | null;
   outDir: string;
+  /** The human channel, captured instead of printed (#732's provenance line is read here). */
+  progress: string[];
 }
 
 async function cut(job: EngraveJob, name: string, location = LOCATION): Promise<CutRun> {
@@ -58,17 +61,19 @@ async function cut(job: EngraveJob, name: string, location = LOCATION): Promise<
   const jobPath = join(outDir, 'job.json');
   writeFileSync(jobPath, JSON.stringify(job, null, 2) + '\n');
   let receipt: Receipt | null = null;
+  const progress: string[] = [];
   const options: CommandOptions = {
     json: true,
     now: NOW,
     sink: {
+      progress: (line) => progress.push(line),
       receipt: (r) => {
         receipt = r;
       },
     },
   };
   const code = await engraveJobMain([jobPath, '--out', outDir, '--location', location], options);
-  return { code, receipt, outDir };
+  return { code, receipt, outDir, progress };
 }
 
 /** The fixture location, re-stating its drill point angle (its own document already has 118°). */
@@ -309,6 +314,110 @@ describe('#733 the location’s drill point angle reaches the CLI', () => {
     const nc118 = readFileSync(join(fallback.outDir, ncFile), 'utf8');
     expect(nc118).toContain('Z-2.901');
     expect(nc118).not.toMatch(/Z-3\.5\b/);
+  }, 120_000);
+});
+
+// #732 — THE CLI READS THE HOUSE CATALOGUE (#308), NOT AN EMPTY LIST.
+//
+// The bench's j18 run was generated at the thread placeholders — 10000 RPM / 300 mm/min — while
+// the manifest's own note says "Makera's catalogue says 15000 / 60 for this bit in 6061". The
+// catalogue was the one tier a headless run could not reach (`scanReach` and `engraveGenerate` were
+// handed `[]`). It is read now: `catalogue.json` beside the machine's document, validated, and each
+// row joined to its cutter's geometry, so the same job posts the row's numbers — clamped by the
+// machine (the Z1's 13000 RPM ceiling).
+const J18 = join(APP, '..', 'docs', 'bench', '2026-10-27-z1-typical-jobs', 'jobs', 'j18-thread-b-mill.json');
+/** Makera's `g_ID` the owned thread mill in this fixture confirms. */
+const THREAD_ID = '112111313870';
+
+/**
+ * The owned M3 thread mill, and the catalogue's row for it — ONE geometry, so the catalogue's own
+ * cutter agrees with the cutter in hand (a disagreement is the refusal #732's other test pins).
+ */
+function threadMill(id: string | null): Tool {
+  return flatEndMill(2, {
+    id,
+    name: 'Thread Milling Bit - 1/8" Shank',
+    typeText: 'Thread',
+    shape: 'thread',
+    tipDiameter: 2,
+    diameter: 2,
+    fluteLength: 12,
+  });
+}
+
+/** A location carrying the owned thread mill, with the house catalogue in the same directory. */
+function threadLocation(): string {
+  const dir = join(SCRATCH, 'j18-catalogue');
+  mkdirSync(dir, { recursive: true });
+  const doc = JSON.parse(readFileSync(LOCATION, 'utf8')) as { inventory: unknown[] };
+  doc.inventory.push({
+    id: 'kz-thread-m3-9',
+    tool: threadMill(THREAD_ID),
+    origin: { id: '00000000-0000-4000-8000-0000000000c1', syncedAt: '2026-10-20T08:00:00.000Z' },
+    quantity: 1,
+    codes: [],
+    addedAt: '2026-10-20T08:00:00.000Z',
+    notes: null,
+    copies: [],
+    colletFits: null,
+  });
+  const path = join(dir, 'location.json');
+  writeFileSync(path, JSON.stringify(doc, null, 2) + '\n');
+  writeFileSync(
+    join(dir, 'catalogue.json'),
+    JSON.stringify(
+      {
+        kind: 'casemaker-catalogue',
+        schemaVersion: 1,
+        syncedAt: '2026-10-20T08:00:00.000Z',
+        tools: [
+          {
+            key: 'cat:fixture-thread-m3',
+            tool: threadMill(THREAD_ID),
+            provenance: 'Makera Studio — fixture row for #732',
+            contentHash: 'fixture-thread-m3',
+          },
+        ],
+        feeds: [
+          { cutterId: THREAD_ID, material: '6061 Aluminum', rpm: 15000, feed: 60, plungeFeed: 60, stepDown: 0.5 },
+        ],
+      },
+      null,
+      2,
+    ) + '\n',
+  );
+  return path;
+}
+
+describe('#732 the CLI reads the house catalogue', () => {
+  it('posts the catalogue row’s S/F for the owned thread mill, clamped by the machine (j18)', async () => {
+    const parsed = parseEngraveJob(JSON.parse(readFileSync(J18, 'utf8')));
+    if (!parsed.ok) throw new Error(parsed.errors.join('\n'));
+    const job = parsed.job;
+    const locationPath = threadLocation();
+    const run = await cut(job, 'j18-catalogue', locationPath);
+    expect(
+      run.code,
+      JSON.stringify({ refusals: run.receipt?.refusals ?? null, diagnostics: run.receipt?.diagnostics ?? null }),
+    ).toBe(0);
+    expect(run.receipt).not.toBeNull();
+    expect(run.receipt!.ok).toBe(true);
+    if (run.receipt!.command !== 'engrave') throw new Error('expected the engrave receipt');
+
+    // The run read the catalogue, and the receipt states the file with its hash (#478).
+    const cataloguePath = join(dirname(locationPath), 'catalogue.json');
+    expect(run.receipt!.inputs).toContainEqual(expect.objectContaining({ path: cataloguePath }));
+    // The human channel names it and what it carried, before any program is posted.
+    expect(run.progress.some((line) => line.includes(cataloguePath)), run.progress.join('\n')).toBe(true);
+    expect(run.progress.some((line) => line.includes('1 feed row')), run.progress.join('\n')).toBe(true);
+
+    // The file the machine would run carries Makera's numbers: 15000 RPM clamped to the Z1's
+    // 13000 ceiling, and the row's 60 mm/min — NOT the thread placeholders (10000 / 300).
+    const nc = readFileSync(join(run.outDir, runSheetFileName(job.name)), 'utf8');
+    expect(nc).toMatch(/\bS13000\b/);
+    expect(nc).toMatch(/\bF60\b/);
+    expect(nc).not.toMatch(/\bS10000\b/);
+    expect(nc).not.toMatch(/\bF300\b/);
   }, 120_000);
 });
 

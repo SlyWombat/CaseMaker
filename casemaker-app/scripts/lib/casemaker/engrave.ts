@@ -45,11 +45,14 @@
 // does (`dirs::data_dir()/casemaker/`), so a job naming a cutter the user OWNS (`inv:…`) resolves
 // here instead of failing as an unknown key. SINCE #412 that file is `location.json`, with
 // `house.json` — what it was before the location migration — as the fallback; a run on a machine
-// that has never been opened by a #412 build is exactly what it always was. Absent files are not an
+// that has never been opened by a #412 build is exactly what it always was. SINCE #732 Makera's own
+// catalogue (`catalogue.json`, #308) is read from the same directory, so the vendor's feed rows —
+// not only the starting table — answer for a cutter carrying a Makera id. Absent files are not an
 // error — the built-in tier is what a headless run falls back to, the way the app itself does with
 // no house service. `--location <file>` names one instead; the document's own `kind` says which of
-// the two it is. The reading — with the wasm module and the bundled fonts — is the shared headless
-// bootstrap (#476), so the CLI and the MCP server start the same way this script does.
+// the two it is, and the catalogue is sought beside it. The reading — with the wasm module and the
+// bundled fonts — is the shared headless bootstrap (#476), so the CLI and the MCP server start the
+// same way this script does.
 //
 // For each program it writes, into `--out` (default: the document's own directory, or the working
 // directory for `--from-3mf`, which has no document to sit beside):
@@ -111,13 +114,13 @@ import {
 import { MARGIN_DEFAULTS } from '../../../src/engine/cnc/engrave/depthBounds';
 import { engraveRegions, measureEngraving } from '../../../src/workers/sim/engraveGenerate';
 import { cuttingDiameter } from '../../../src/engine/cnc/tool';
-import { feedsFor, type CutParams } from '../../../src/engine/cnc/feeds';
+import { feedsFor, type CutParams, type FeedCatalogueRow } from '../../../src/engine/cnc/feeds';
 import { jobMachine } from '../../../src/engine/cnc/calibration';
 import { executeProfile } from '../../../src/workers/geometry/evaluateOp';
 import { engravePreviewSvg } from '../engravePreviewSvg';
 import { svgToPng } from '../svgToPng';
 import { KNOWN_DEFAULTS, readDefault } from '../../../src/platform/defaultsClient';
-import { bootstrap } from '../../../src/platform/headless/bootstrap';
+import { bootstrap, loadCatalogue, type LoadedCatalogue } from '../../../src/platform/headless/bootstrap';
 import { defaultEngraveJob } from '../../../src/engine/cnc/engrave/defaults';
 import { viseForNewJob } from '../../../src/engine/cnc/fixture';
 import { designJobFor, type DesignReadingDirection } from '../../../src/engine/cnc/engrave/fromDesign';
@@ -402,6 +405,37 @@ async function engraveJobBody(argv: string[], options: CommandOptions): Promise<
     }
   }
 
+  // #732 — MAKERA'S OWN NUMBERS, READ RATHER THAN AN EMPTY LIST. The house service keeps its
+  // catalogue (#308) as `catalogue.json` beside `location.json`; this run reads THAT file — the
+  // sibling of the document `--location` named, or the app's own data directory — validates it
+  // exactly as the house client validates its responses, and joins each feed row to the geometry
+  // of the cutter it names. From here every tier that can use the vendor's numbers gets them:
+  // the reachability pre-filter and the "not for this material" caution (#455), the generator's
+  // feeds (a thread's S/F included, #445 D6), and the three feed lookups below.
+  //
+  // A file that is there but wrong STOPS the run (`loadCatalogue` throws): a half-written
+  // catalogue read as "no catalogue" would silently swap the vendor's numbers for seeds. No file
+  // is not an error — the starting table and the shop's labelled defaults are what a machine that
+  // has never synced Makera's library runs on.
+  let catalogue: LoadedCatalogue | null;
+  try {
+    catalogue = loadCatalogue(
+      boot.location === null ? undefined : join(dirname(boot.location.path), 'catalogue.json'),
+    );
+  } catch (e) {
+    fail((e as Error).message);
+  }
+  const catalogueRows: readonly FeedCatalogueRow[] = catalogue?.rows ?? [];
+  if (catalogue !== null) {
+    recordInput(catalogue.path);
+    const cutters = catalogue.tools.length;
+    const rows = catalogue.rows.length;
+    out.progress(
+      `Makera's catalogue: ${catalogue.path} — ${cutters} cutter${cutters === 1 ? '' : 's'}, ` +
+        `${rows} feed row${rows === 1 ? '' : 's'}${catalogue.syncedOn === null ? '' : `, synced ${catalogue.syncedOn}`}`,
+    );
+  }
+
   const readJson = (path: string): unknown => {
     try {
       return JSON.parse(readFileSync(path, 'utf8'));
@@ -417,19 +451,14 @@ async function engraveJobBody(argv: string[], options: CommandOptions): Promise<
   /**
    * Measure every cutter the registry offers against this job's items.
    *
-   * The catalogue is `[]`, the same empty list `engraveGenerate` is handed on this path: no Makera
-   * feed rows reach a headless run (#324), so the pre-filter asks the starting table and the machine
-   * and nothing else. That is a deliberate narrowing, and it is why `--tool` exists — a cutter the
-   * house's catalogue alone can vouch for will not be chosen here, but it can still be named.
-   *
-   * #455's material-list rule therefore cannot fire on this path either: it is the CATALOGUE saying
-   * "not for this material", and there is no catalogue here to say it. Nothing is lost from the
-   * reporting side — `reachTable` prints a `no-catalogue-row` cutter with the catalogue's own sentence
-   * (`CutterReach.excludedNote`), so a caller that HAS rows gets the why in the same table and column
-   * as every other exclusion. Loading a catalogue into the CLI would be new plumbing, not this rule.
+   * The catalogue is the house's own `catalogue.json` (#308), read beside the machine's document
+   * above and annotated with each cutter's geometry (#732): the pre-filter asks the vendor's rows
+   * first, then the starting table and the machine, exactly as the app does. So a cutter Makera
+   * states a row for is measured in a headless run — and #455's material-list rule can fire here
+   * too, as the `not-for-material` caution `printReach` prints below.
    */
   function scanReach(job: EngraveJob): ReturnType<typeof reachabilityFor> {
-    return reachabilityFor(job, getTools(), [], (key) => {
+    return reachabilityFor(job, getTools(), catalogueRows, (key) => {
       const entry = entryFor(key);
       return entry === null ? [] : measureEngraving(tl, job, entry.tool);
     });
@@ -462,8 +491,7 @@ async function engraveJobBody(argv: string[], options: CommandOptions): Promise<
       out.progress(`  → #211 picks ${pick}, and no smaller cutter reaches more: one program is enough.`);
     }
     // #455 — a caution about the cutter the job NAMES, when it is not one the catalogue recommends.
-    // Always null on this path (no catalogue is loaded; see `scanReach`), but printed here rather
-    // than in each caller so a run that does have rows cannot silently drop it.
+    // Printed here rather than in each caller so a run that has rows cannot silently drop it.
     if (reach.recommendation.selectedNote !== null) out.progress(`  ! ${reach.recommendation.selectedNote}`);
   }
 
@@ -637,10 +665,13 @@ async function engraveJobBody(argv: string[], options: CommandOptions): Promise<
    * the first's result, and only then is anything written.
    */
   function prepare(job: EngraveJob, opts: { priorRemoval?: NodeMeshOutput } = {}): PrepareResult {
-    // No Makera feed rows in a headless run (#324): the catalogue tier needs a house service.
-    // #733 — `shop.tools` is the registry snapshot; without it a setup's later cutter (a `user:` or
-    // `inv:` key) is not on the worker's bench and the run stops at `setup-rest-unavailable`.
-    const generated = engraveGenerate(tl, job, jobTool(job), [], null, undefined, shop);
+    // #732 — the house catalogue read above is the SAME list the app's worker is handed: the
+    // vendor's row for this cutter and material answers before the starting table, and the
+    // machine's clamp still has the last word (a thread's S/F comes through #445's
+    // `threadSettings`). #733 — `shop.tools` is the registry snapshot; without it a setup's later
+    // cutter (a `user:` or `inv:` key) is not on the worker's bench and the run stops at
+    // `setup-rest-unavailable`.
+    const generated = engraveGenerate(tl, job, jobTool(job), catalogueRows, null, undefined, shop);
     if (!generated.ok || generated.nc === null) {
       return {
         ok: false,
@@ -1226,7 +1257,7 @@ async function engraveJobBody(argv: string[], options: CommandOptions): Promise<
     const namedKey = args.tool ?? null;
     const named = namedKey === null ? null : entryFor(namedKey);
     const namedFeeds =
-      named === null ? null : feedsFor([], job.stock.material, named.tool, jobMachine(job), undefined);
+      named === null ? null : feedsFor(catalogueRows, job.stock.material, named.tool, jobMachine(job), undefined);
     for (const { row, cutters } of unreachable) {
       const item = (job.vectors ?? []).find((v) => v.id === row.itemId);
       if (item) item.enabled = false;
@@ -1463,13 +1494,13 @@ async function engraveJobBody(argv: string[], options: CommandOptions): Promise<
       // `restChosen` is non-null in this branch, so `restTool` resolved — this is the type's own guard,
       // and it fails rather than falling through, because a rest program without its cutter is not one.
       if (restTool === null) fail(`--rest "${restChosen.key}" did not resolve to a cutter`);
-      const restFeeds = feedsFor([], job.stock.material, restTool, jobMachine(job), undefined);
+      const restFeeds = feedsFor(catalogueRows, job.stock.material, restTool, jobMachine(job), undefined);
       const stepOver2 = restFeeds.ok ? restFeeds.params.stepOver : null;
       // The FIRST cutter's step-over shapes the residue the band has to make cuttable, so it comes
       // from the same feeds table through the same resolver as the second one — never from a number
       // typed into this file.
       const tool1 = jobTool(job);
-      const roughFeeds = tool1 === null ? null : feedsFor([], job.stock.material, tool1, jobMachine(job), undefined);
+      const roughFeeds = tool1 === null ? null : feedsFor(catalogueRows, job.stock.material, tool1, jobMachine(job), undefined);
       const stepOver1 = roughFeeds !== null && roughFeeds.ok ? roughFeeds.params.stepOver : null;
       // The stored number and where it came from, together — never the number alone (#436).
       const overlapRead = readDefault(shopDefaults, REST_OVERLAP_KEY);

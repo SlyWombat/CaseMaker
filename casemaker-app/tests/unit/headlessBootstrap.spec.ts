@@ -12,7 +12,13 @@ import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { resetRegistry, getTools } from '@/engine/cnc/toolRegistry';
 import { BUNDLED_FONTS, labelFontsLoaded } from '@/engine/fonts/registry';
-import { bootstrap, loadLocation, LocationDocumentError } from '@/platform/headless/bootstrap';
+import {
+  bootstrap,
+  CatalogueDocumentError,
+  loadCatalogue,
+  loadLocation,
+  LocationDocumentError,
+} from '@/platform/headless/bootstrap';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const FIXTURE = join(HERE, 'fixtures', 'location-doc.json');
@@ -117,5 +123,84 @@ describe('#476 the headless bootstrap', () => {
     const before = getTools();
     expect(loadLocation(join(scratch, 'absent.json'))).toBeNull();
     expect(getTools()).toBe(before);
+  });
+});
+
+// #732 — THE CLI'S CATALOGUE READER (#308). `loadCatalogue` turns the house's `catalogue.json`
+// into the rows every feeds tier takes. The geometry join is load-bearing: a row alone cannot say
+// whether the id it names still describes the cutter in hand, and that comparison is what REFUSES
+// a stale match rather than cutting on it.
+describe('#732 the house catalogue reader', () => {
+  const MILL_ID = '112111313870';
+
+  const catalogue = (over: Record<string, unknown> = {}): Record<string, unknown> => ({
+    kind: 'casemaker-catalogue',
+    schemaVersion: 1,
+    syncedAt: '2026-10-20T08:00:00.000Z',
+    tools: [
+      {
+        key: 'cat:fixture-mill',
+        provenance: 'fixture',
+        contentHash: 'fixture',
+        tool: {
+          number: 1,
+          id: MILL_ID,
+          name: 'fixture thread mill',
+          typeText: 'Thread',
+          shape: 'thread',
+          handleDiameter: 3.175,
+          tipDiameter: null,
+          diameter: 2,
+          cornerRadius: null,
+          angle: null,
+          halfAngle: null,
+          fluteLength: 12,
+          shoulderLength: null,
+          stickout: null,
+          centreCutting: null,
+        },
+      },
+    ],
+    feeds: [
+      { cutterId: MILL_ID, material: '6061 Aluminum', rpm: 15000, feed: 60, plungeFeed: 60, stepDown: 0.5 },
+    ],
+    ...over,
+  });
+
+  it('reads and validates the catalogue, joining each row to its cutter’s geometry', () => {
+    const path = write('catalogue.json', catalogue());
+    const loaded = loadCatalogue(path)!;
+    expect(loaded.path).toBe(path);
+    expect(loaded.syncedOn).toBe('2026-10-20T08:00:00.000Z');
+    expect(loaded.tools).toHaveLength(1);
+    expect(loaded.rows).toHaveLength(1);
+    expect(loaded.rows[0]!.cutter).toEqual({ shape: 'thread', diameter: 2, tipDiameter: null });
+  });
+
+  it('answers null when the file is not there, and refuses one that is not this build’s', () => {
+    // No catalogue on this machine is a normal state — the starting table answers.
+    expect(loadCatalogue(join(scratch, 'absent-catalogue.json'))).toBeNull();
+
+    const wrongKind = write('catalogue-wrong-kind.json', catalogue({ kind: 'casemaker-location' }));
+    expect(() => loadCatalogue(wrongKind)).toThrow(CatalogueDocumentError);
+    expect(() => loadCatalogue(wrongKind)).toThrow(
+      `${wrongKind} says it is "casemaker-location"; this file must be "casemaker-catalogue"`,
+    );
+
+    const wrongVersion = write('catalogue-wrong-version.json', catalogue({ schemaVersion: 2 }));
+    expect(() => loadCatalogue(wrongVersion)).toThrow(
+      `${wrongVersion} is version 2; this build reads version 1`,
+    );
+
+    // A row no cut can use is refused WITH its section named, not silently dropped.
+    const badFeeds = write(
+      'catalogue-bad-feeds.json',
+      catalogue({
+        feeds: [{ cutterId: MILL_ID, material: '6061 Aluminum', rpm: 0, feed: 60, plungeFeed: 60, stepDown: 0.5 }],
+      }),
+    );
+    expect(() => loadCatalogue(badFeeds)).toThrow(
+      `${badFeeds} does not match its own schema: "feeds" is not a feed catalogue:`,
+    );
   });
 });
