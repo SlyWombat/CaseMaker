@@ -313,13 +313,18 @@ export type JobFindingCode =
   | 'wrap-off-free-end'
   // #737 — the neck for parting's refusals. `neck-thin` — below the material-and-overhang minimum;
   // `neck-in-band` — it does not fit the free span, so it would run into the jaws or the tailstock;
-  // `neck-wider-than-part` — no narrower than the stock, so there is nothing to cut; `neck-too-short`
-  // — less than a saw kerf plus clearance either side; `neck-not-cut` — the run's cutter cannot
-  // leave a flat-bottomed band (a cone or a drill).
+  // `neck-cuts-item` — a design item's opened region overlaps the neck's span, so the cut would
+  // erase it; `neck-wider-than-part` — no narrower than the stock, so there is nothing to cut;
+  // `neck-too-short` — less than a saw kerf plus clearance either side; `neck-too-narrow-for-cutter`
+  // — the neck is no longer than the last cutter is wide, so the cut pockets the neck away instead
+  // of leaving a floor; `neck-not-cut` — no posted program carries the neck (the run's cutter cannot
+  // leave a flat-bottomed band, or the program that would cut it was not posted).
   | 'neck-thin'
   | 'neck-in-band'
+  | 'neck-cuts-item'
   | 'neck-wider-than-part'
   | 'neck-too-short'
+  | 'neck-too-narrow-for-cutter'
   | 'neck-not-cut';
 
 export interface JobFinding {

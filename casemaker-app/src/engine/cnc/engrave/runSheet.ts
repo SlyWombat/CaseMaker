@@ -102,7 +102,7 @@ import { coverageDisclaimer, type SimCoverageInput, type SimRunOutcome } from '@
 // #737 — the neck's facts are the ROTARY module's (the span, the saw line and the floor, from
 // `rotaryFreeSpan`): the coverage sentence the sheet and the panel print quotes them, never a
 // second reading of the job.
-import { rotaryNeckFacts } from '@/engine/cnc/rotary/neck';
+import { neckCarriedBy } from '@/engine/cnc/rotary/neck';
 import type { EngraveJob, EngraveMargins, JobStockFinish, ViseParams } from '@/types/engraveJob';
 import type { Mm } from '@/types/units';
 
@@ -1278,9 +1278,11 @@ function coverageFor(job: EngraveJob, generated: RunSheetGenerated, sim: RunShee
           })),
           expectedPrograms: generated.programs?.length ?? sim.programs.length,
         }),
-    // #737 — the sheet's coverage warning says the part stays on its neck. Null on every job
-    // without one, so a flat job's sheet is byte-identical to the one before the neck existed.
-    rotaryNeck: rotaryNeckFacts(job),
+    // #737 — the sheet's coverage warning says the part stays on its neck. Read from the programs
+    // that were generated, not from the job: a run that dropped its last rest program carries no
+    // neck, and the sentence must not promise one nothing cut. The top-level `neck` is program 1's,
+    // for a stored result whose `programs` list is absent.
+    rotaryNeck: neckCarriedBy(generated.programs) ?? generated.neck ?? null,
   };
 }
 

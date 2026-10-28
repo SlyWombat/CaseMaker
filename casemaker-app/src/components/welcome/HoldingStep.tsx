@@ -1886,10 +1886,15 @@ export function HoldingStep({ job, answers, onAnswers, onRotary, onBedHold }: Ho
                 : `The program’s last operation cuts it down to ⌀${fmt(neck.diameter)} mm all the way round with the ` +
                   `part’s own cutter, and you saw the part off at X ${fmt(neckSpan.sawAtMm)} mm — the neck runs ` +
                   `X ${fmt(neckSpan.fromMm)}–${fmt(neckSpan.toMm)} mm on the ${neckEndLabel(neck.end)}. ` +
+                  (neck.end === 'chuck'
+                    ? 'The stock goes into the jaws at the chuck side, so the saw frees the whole part. '
+                    : 'The stock goes into the jaws at the chuck side, so a neck here frees only the scrap ' +
+                      'stub: the part stays joined to the stock in the chuck and is not parted off. ') +
                   `Case Maker starts the neck at ⌀${ROTARY_NECK_DIAMETER_MM} mm and ${ROTARY_NECK_LENGTH_MM} mm long ` +
                   `(a saw needs at least ${ROTARY_NECK_MIN_LENGTH_MM} mm): those are labelled defaults, not ` +
                   `measurements. ` +
-                  `The saw frees the ${neck.end === 'chuck' ? 'whole part' : 'stub'}, ${fmt(neckSpan.carriedMm)} mm long; ` +
+                  `The saw frees the ${neck.end === 'chuck' ? 'whole part' : 'stub'}, which runs ` +
+                  `${fmt(neckSpan.carriedMm)} mm from the neck’s root at X ${fmt(neckSpan.fromMm)} mm to the free end; ` +
                   (neckMap.tailstock
                     ? `the neck and the tailstock centre hold its ends, so the bending is shared and the check ` +
                       `counts half its length (${fmt(neckSpan.effectiveMm)} mm). `
@@ -1898,7 +1903,11 @@ export function HoldingStep({ job, answers, onAnswers, onRotary, onBedHold }: Ho
                   `The safe minimum is ⌀${Number(neckMin.diameterMm.toFixed(2))} mm — Case Maker’s defaults ` +
                   `(${neckMin.loadN} N sideways at its free end, ${neckMin.stressMpa} MPa allowable bending ` +
                   `stress), not measurements: the neck is cut last, with the part still held, so this is a ` +
-                  'rough check and the minimum is a guess until the bench confirms it (#238).'}
+                  'rough check and the minimum is a guess until it is checked on the machine.' +
+                  (neck.diameter < neckMin.diameterMm
+                    ? ` This ⌀${fmt(neck.diameter)} mm neck is below that minimum — make it thicker, shorten ` +
+                      'the part, or choose a stronger stock.'
+                    : '')}
             </span>
           </FieldRow>
         )}

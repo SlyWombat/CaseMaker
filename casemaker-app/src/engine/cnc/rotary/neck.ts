@@ -30,8 +30,19 @@ import {
   type RotaryMap,
 } from './wrap';
 
-/** The neck's diameter Case Maker offers first, mm. Labelled default, not a bench result (#238). */
-export const ROTARY_NECK_DIAMETER_MM = 4;
+/**
+ * The neck's diameter Case Maker offers first, mm. Labelled default, not a bench result (#238).
+ *
+ * Seven, not the four the first draft offered: the default end is the CHUCK side (the stock goes
+ * into the jaws there, so the saw frees the whole part rather than only the scrap stub), and the
+ * strength check measures the cantilever to the neck's ROOT at the jaws' edge. On the design's
+ * ⌀20 × 85 mm stick-out that piece is 82 mm long — 41 mm effective with the tailstock centre
+ * sharing the bending — so PLA asks ⌀5.18 mm and softwood ⌀6.53 mm. A 4 mm default would be
+ * refused by the app's own check; 7 mm clears PLA, softwood and metal. Both ends remain
+ * available: the tailstock side is still the right end for some work, but it does not part the
+ * part off, which the panel says.
+ */
+export const ROTARY_NECK_DIAMETER_MM = 7;
 
 /** The neck's length Case Maker offers first, mm: the kerf plus clearance either side, and a bit. */
 export const ROTARY_NECK_LENGTH_MM = 5;
@@ -102,8 +113,10 @@ export interface RotaryNeckSpan {
   /** The floor's depth below the surface: `R − diameter / 2`, mm. */
   depthMm: number;
   /**
-   * The piece the saw frees, mm: from the saw line to the free end of the rod. On the tailstock
-   * side that is the stub beyond the neck; on the chuck side it is the whole part beyond the neck.
+   * The piece the strength check treats as carried, mm: from the neck's ROOT — its chuck-side
+   * edge, the end nearest the stock the part is held by — to the free end of the rod. The peak
+   * bending moment is at that root, not at the saw line; measuring from the saw line understates
+   * the arm by half the neck's length and errs unsafe.
    */
   carriedMm: number;
   /**
@@ -122,10 +135,17 @@ export interface RotaryNeckFacts extends RotaryNeckSpan {
   lengthMm: Mm;
 }
 
-/** The neck Case Maker offers first: off until the operator turns it on, with labelled defaults. */
+/**
+ * The neck Case Maker offers first: off until the operator turns it on, with labelled defaults.
+ *
+ * The CHUCK side is the default because that is where the stock goes into the jaws: sawing a
+ * tailstock-side neck frees only the scrap stub beyond it and leaves the part joined to the stock
+ * in the chuck, so it does not part the part off. The tailstock side remains available for the
+ * work that wants it; the panel states that consequence.
+ */
 export function defaultRotaryNeck(): RotaryNeck {
   return {
-    end: 'tailstock',
+    end: 'chuck',
     diameter: ROTARY_NECK_DIAMETER_MM,
     length: ROTARY_NECK_LENGTH_MM,
   };
@@ -155,7 +175,10 @@ export function rotaryNeckSpan(map: RotaryMap, neck: RotaryNeck): RotaryNeckSpan
   const from = neck.end === 'chuck' ? free.from : free.to - neck.length;
   const to = neck.end === 'chuck' ? free.from + neck.length : free.to;
   const sawAt = (from + to) / 2;
-  const carried = Math.max(0, map.stickout - sawAt);
+  // The cantilever is anchored at the neck's ROOT, X `from` — the end nearest the stock held in
+  // the chuck. The peak moment is there, not at the saw line, so the arm runs from the root to the
+  // free end. (The first draft measured from the saw line and understated it by half the neck.)
+  const carried = Math.max(0, map.stickout - from);
   return {
     fromMm: from,
     toMm: to,
@@ -174,6 +197,29 @@ export function rotaryNeckFacts(job: EngraveJob): RotaryNeckFacts | null {
   const span = rotaryNeckSpan(map, neck);
   if (span === null) return null;
   return { ...span, end: neck.end, diameterMm: neck.diameter, lengthMm: neck.length };
+}
+
+/**
+ * The neck a RUN leaves: the one a POSTED program carries, or null when no posted program cut one.
+ *
+ * The job's setting is not the same fact. A rest program can be dropped with `setup-rest-nothing`,
+ * leaving a job that still names a neck but a run that never cuts it; the saw step and the
+ * coverage sentence must follow the programs, never the job. Structurally the worker's
+ * `EngraveProgram` (or the sheet's `RunSheetProgram`), so both callers share one reader.
+ */
+export interface NeckCarryingProgram {
+  neck?: RotaryNeckFacts | null;
+}
+
+/** The first posted program's neck, or null. See {@link NeckCarryingProgram}. */
+export function neckCarriedBy(
+  programs: readonly NeckCarryingProgram[] | null | undefined,
+): RotaryNeckFacts | null {
+  if (programs === null || programs === undefined) return null;
+  for (const program of programs) {
+    if (program.neck !== undefined && program.neck !== null) return program.neck;
+  }
+  return null;
 }
 
 /** The material group the safe minimum reads. */
@@ -271,6 +317,11 @@ function round2(v: number): number {
   return Math.round(v * 100) / 100;
 }
 
+/** At most three decimals, trailing zeros dropped, for an operator sentence. */
+function mm3(v: number): number {
+  return Math.round(v * 1000) / 1000;
+}
+
 /** One word for the end, so a refusal and the panel's control say the same thing. */
 export function neckEndLabel(end: RotaryNeck['end']): string {
   return end === 'chuck' ? 'chuck side' : 'tailstock side';
@@ -298,18 +349,20 @@ export function neckWiderSentence(diameterMm: number, stockDiameterMm: number): 
 }
 
 /**
- * "the neck is ⌀2 mm, and PLA with the whole part beyond the saw line is 79.5 mm long and held at
- * both ends — by the neck and the tailstock centre — so the bending is shared and the check counts
- * half of it (39.75 mm) needs at least ⌀5.13 mm …"
+ * "the neck is ⌀2 mm, and PLA with the whole part beyond the neck runs 82 mm from the neck’s root
+ * at X 3 mm to the free end, and is held at both ends — by the neck and the tailstock centre — so
+ * the bending is shared and the check counts half of it (41 mm), so it needs at least ⌀5.18 mm …"
  *
  * The sentence names the load, its direction and its basis, the support the carried piece gets,
- * the allowable stress and #238's pending confirmation — in plain words, so an operator can see
- * this is a deliberately rough check built from chosen numbers, not a measurement.
+ * the allowable stress and the fact that this is a still-to-be-checked default — in plain words,
+ * so an operator can see this is a deliberately rough check built from chosen numbers, not a
+ * measurement. The length is measured from the neck's ROOT, where the peak moment is; measuring
+ * from the saw line would err unsafe by half the neck.
  */
 export function neckThinnerSentence(
   material: StockMaterial,
   diameterMm: number,
-  span: Pick<RotaryNeckSpan, 'carriedMm' | 'effectiveMm'> & {
+  span: Pick<RotaryNeckSpan, 'fromMm' | 'carriedMm' | 'effectiveMm'> & {
     end: RotaryNeck['end'];
     tailstock: boolean;
   },
@@ -317,37 +370,90 @@ export function neckThinnerSentence(
 ): string {
   const group = rotaryNeckMaterialGroup(material);
   const stressMpa = ROTARY_NECK_ALLOWABLE_MPA[group];
+  const root = Math.round(span.fromMm * 1000) / 1000;
   const carried = Math.round(span.carriedMm * 1000) / 1000;
   const effective = Math.round(span.effectiveMm * 1000) / 1000;
-  const piece = span.end === 'chuck' ? 'the whole part beyond the saw line' : 'the stub beyond the saw line';
+  const piece = span.end === 'chuck' ? 'the whole part beyond the neck' : 'the stub beyond the neck';
   const support = span.tailstock
-    ? `${piece} is ${carried} mm long and held at both ends — by the neck and the tailstock centre — so the ` +
-      `bending is shared and the check counts half of it (${effective} mm)`
-    : `${piece} is ${carried} mm long and hangs free, so the check counts all of it (${effective} mm)`;
+    ? `${piece} runs ${carried} mm from the neck’s root at X ${root} mm to the free end, and is held at ` +
+      `both ends — by the neck and the tailstock centre — so the bending is shared and the check counts ` +
+      `half of it (${effective} mm)`
+    : `${piece} runs ${carried} mm from the neck’s root at X ${root} mm to the free end and hangs free, ` +
+      `so the check counts all of it (${effective} mm)`;
   const groupWord = group === 'metal' ? 'metal' : group === 'plastic' ? 'plastic' : 'wood';
   return (
     `the neck is ⌀${Math.round(diameterMm * 1000) / 1000} mm, and ${MATERIAL_LABELS[material]} with ` +
-    `${support} needs at least ⌀${round2(minDiameterMm)} mm. The ${ROTARY_NECK_LOAD_N} N load acts ` +
+    `${support}, so it needs at least ⌀${round2(minDiameterMm)} mm. The ${ROTARY_NECK_LOAD_N} N load acts ` +
     `sideways at the free end of that piece, and ${stressMpa} MPa is the allowable bending stress for ` +
     `${groupWord}. Those numbers are Case Maker's defaults, not measurements: the neck is cut last, ` +
     'with the part still held, so this is a deliberately rough check and the minimum is a guess until ' +
-    'the bench confirms it (#238). Make the neck thicker, shorten the part, or choose a stronger stock'
+    'it is checked on the machine. Make the neck thicker, shorten the part, or choose a stronger stock'
   );
 }
 
 /**
- * "runs into the tailstock's band …" — the neck does not fit the free span, as the map's own band
- * sentence says it. The caller's subject is "the neck for parting", so this returns the predicate
- * alone; the band sentences name the X the neck reaches and the band it reaches into.
+ * "the neck runs X 70–75 mm, and Engrave text \"I\" reaches X 71.7–72.3 mm, so the neck would cut
+ * through it." The neck is the operator's own cut, but it may not erase a design item: the item
+ * and the neck cannot both occupy the same X, and the refusal names both extents so either can
+ * move.
  */
+export function neckCutsItemSentence(
+  who: string,
+  itemXMin: number,
+  itemXMax: number,
+  span: Pick<RotaryNeckSpan, 'fromMm' | 'toMm'>,
+): string {
+  return (
+    `the neck runs X ${mm3(span.fromMm)}–${mm3(span.toMm)} mm, and ${who} reaches X ` +
+    `${mm3(itemXMin)}–${mm3(itemXMax)} mm, so the neck would cut through it`
+  );
+}
+
+/**
+ * "the neck is 5 mm long, and \"6 mm flat\" is ⌀6 mm wide: a cutter as wide as the neck or wider
+ * cannot leave a floor along it — it cuts the whole neck away instead." A flat cutter needs at
+ * least its own diameter of floor to move along; a neck no longer than that is not a neck.
+ */
+export function neckCutterTooWideSentence(
+  lengthMm: number,
+  cutterName: string,
+  cutterDiameterMm: number,
+): string {
+  return (
+    `the neck is ${mm3(lengthMm)} mm long, and "${cutterName}" is ⌀${mm3(cutterDiameterMm)} mm wide: ` +
+    'a cutter as wide as the neck or wider cannot leave a floor along it — it cuts the whole neck ' +
+    `away instead. Make the neck longer than ⌀${mm3(cutterDiameterMm)} mm, use a narrower cutter for ` +
+    'the last cut, or turn the neck off'
+  );
+}
+
+/**
+ * "The neck for parting is set, but no program in this run cuts it …" — the RUN-level refusal for
+ * a neck the operator asked for that no posted program leaves. The case that exposed it: a rest
+ * pair whose only rest program was dropped with `setup-rest-nothing`, so the rough-only program
+ * posted without the neck, `neck-not-cut` never fired, and every sentence still said the part was
+ * on a neck.
+ */
+export function neckNoProgramSentence(): string {
+  return (
+    'The neck for parting is set, but no program in this run cuts it: the program that would have ' +
+    'left the neck was not posted. Turn the neck off, or keep a program that cuts it and leave that ' +
+    'program last.'
+  );
+}
+
 export function neckIntoBandSentence(map: RotaryMap, span: RotaryNeckSpan): string {
   const free = rotaryFreeSpan(map);
-  if (span.fromMm < free.from) {
+  // A span EDGE that lands on a band edge is exactly on the line, not inside the band. Floating
+  // subtraction can leave 2.999999999999993 for `free.to - length`; without this the band sentence
+  // would say the neck "reaches X 3 mm, inside the first 3 mm" — true only of the last bit.
+  const EPS_MM = 1e-6;
+  if (span.fromMm < free.from - EPS_MM) {
     // The neck's chuck-side edge crossed the jaws' line: a tailstock-side neck longer than the
     // free span, or a free span shorter than the jaws' own keep-out.
     return jawsSentence(span.fromMm);
   }
-  if (span.toMm > free.to) {
+  if (span.toMm > free.to + EPS_MM) {
     // A chuck-side neck ran past the free span's far edge — into the tailstock's band, or off the
     // rod when the tailstock is out. One sentence per case, the map's own.
     return map.tailstock ? tailstockSentence(span.toMm, map.stickout) : freeEndSentence(span.toMm, map.stickout);

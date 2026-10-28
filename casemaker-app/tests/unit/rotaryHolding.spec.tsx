@@ -333,34 +333,45 @@ describe('#737 the neck for parting (station 3)', () => {
     fireEvent.click(toggle);
 
     held = job().workholding;
-    if (held.kind === 'rotary-chuck') expect(held.rotary.neck).toEqual({ end: 'tailstock', diameter: 4, length: 5 });
-    expect((screen.getByTestId('engrave-setup-rotary-neck-end') as HTMLSelectElement).value).toBe('tailstock');
-    expect((screen.getByTestId('engrave-setup-rotary-neck-diameter') as HTMLInputElement).value).toBe('4');
+    if (held.kind === 'rotary-chuck') expect(held.rotary.neck).toEqual({ end: 'chuck', diameter: 7, length: 5 });
+    expect((screen.getByTestId('engrave-setup-rotary-neck-end') as HTMLSelectElement).value).toBe('chuck');
+    expect((screen.getByTestId('engrave-setup-rotary-neck-diameter') as HTMLInputElement).value).toBe('7');
     expect((screen.getByTestId('engrave-setup-rotary-neck-length') as HTMLInputElement).value).toBe('5');
     const note = screen.getByTestId('engrave-setup-rotary-neck-note').textContent ?? '';
-    expect(note).toContain('The program’s last operation cuts it down to ⌀4 mm');
-    expect(note).toContain('you saw the part off at X 72.5 mm');
-    expect(note).toContain('X 70–75 mm on the tailstock side');
-    expect(note).toContain('Case Maker starts the neck at ⌀4 mm and 5 mm long');
+    expect(note).toContain('The program’s last operation cuts it down to ⌀7 mm');
+    expect(note).toContain('you saw the part off at X 5.5 mm');
+    expect(note).toContain('X 3–8 mm on the chuck side');
+    expect(note).toContain('The stock goes into the jaws at the chuck side, so the saw frees the whole part.');
+    expect(note).toContain('Case Maker starts the neck at ⌀7 mm and 5 mm long');
     expect(note).toContain('a saw needs at least 2.5 mm');
     expect(note).toContain('those are labelled defaults, not measurements');
-    expect(note).toContain('The saw frees the stub, 12.5 mm long');
+    expect(note).toContain('runs 82 mm from the neck’s root at X 3 mm to the free end');
     expect(note).toContain('the neck and the tailstock centre hold its ends');
-    expect(note).toContain('the bending is shared and the check counts half its length (6.25 mm)');
-    expect(note).toContain('The safe minimum is ⌀2.77 mm');
+    expect(note).toContain('the bending is shared and the check counts half its length (41 mm)');
+    expect(note).toContain('The safe minimum is ⌀5.18 mm');
     expect(note).toContain('Case Maker’s defaults (10 N sideways at its free end, 30 MPa allowable bending stress)');
     expect(note).toContain('not measurements');
-    expect(note).toContain('a rough check and the minimum is a guess until the bench confirms it (#238)');
+    expect(note).toContain('a rough check and the minimum is a guess until it is checked on the machine');
+    expect(note).not.toContain('(#238)');
+    expect(note).not.toContain('below that minimum');
 
-    fireEvent.change(screen.getByTestId('engrave-setup-rotary-neck-end'), { target: { value: 'chuck' } });
+    fireEvent.change(screen.getByTestId('engrave-setup-rotary-neck-end'), { target: { value: 'tailstock' } });
     held = job().workholding;
-    if (held.kind === 'rotary-chuck') expect(held.rotary.neck).toEqual({ end: 'chuck', diameter: 4, length: 5 });
-    expect(screen.getByTestId('engrave-setup-rotary-neck-note').textContent).toContain('X 3–8 mm on the chuck side');
+    if (held.kind === 'rotary-chuck') expect(held.rotary.neck).toEqual({ end: 'tailstock', diameter: 7, length: 5 });
+    const tailNote = screen.getByTestId('engrave-setup-rotary-neck-note').textContent ?? '';
+    expect(tailNote).toContain('X 70–75 mm on the tailstock side');
+    expect(tailNote).toContain('runs 15 mm from the neck’s root at X 70 mm to the free end');
+    expect(tailNote).toContain('the bending is shared and the check counts half its length (7.5 mm)');
+    expect(tailNote).toContain(
+      'The stock goes into the jaws at the chuck side, so a neck here frees only the scrap stub: ' +
+        'the part stays joined to the stock in the chuck and is not parted off.',
+    );
+    expect(tailNote).toContain('The safe minimum is ⌀2.94 mm');
 
     fireEvent.change(screen.getByTestId('engrave-setup-rotary-neck-diameter'), { target: { value: '6' } });
     fireEvent.change(screen.getByTestId('engrave-setup-rotary-neck-length'), { target: { value: '8' } });
     held = job().workholding;
-    if (held.kind === 'rotary-chuck') expect(held.rotary.neck).toEqual({ end: 'chuck', diameter: 6, length: 8 });
+    if (held.kind === 'rotary-chuck') expect(held.rotary.neck).toEqual({ end: 'tailstock', diameter: 6, length: 8 });
 
     fireEvent.click(screen.getByTestId('engrave-setup-rotary-neck'));
     held = job().workholding;
@@ -391,6 +402,12 @@ describe('#737 the neck for parting (station 3)', () => {
     expect((screen.getByTestId('engrave-setup-rotary-neck-end') as HTMLSelectElement).value).toBe('chuck');
     expect((screen.getByTestId('engrave-setup-rotary-neck-diameter') as HTMLInputElement).value).toBe('3');
     expect((screen.getByTestId('engrave-setup-rotary-neck-length') as HTMLInputElement).value).toBe('4');
-    expect(screen.getByTestId('engrave-setup-rotary-neck-note').textContent).toContain('X 3–7 mm on the chuck side');
+    const note = screen.getByTestId('engrave-setup-rotary-neck-note').textContent ?? '';
+    expect(note).toContain('X 3–7 mm on the chuck side');
+    expect(note).toContain('runs 82 mm from the neck’s root at X 3 mm to the free end');
+    // The panel says when the chosen neck is below the check's minimum, rather than leaving the
+    // operator to discover it at Generate.
+    expect(note).toContain('This ⌀3 mm neck is below that minimum');
+    expect(note).toContain('make it thicker, shorten the part, or choose a stronger stock');
   });
 });

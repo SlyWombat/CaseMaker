@@ -39,6 +39,7 @@ import { findItem } from '@/engine/cnc/engrave/recommendTool';
 import {
   ROTARY_NECK_ID,
   ROTARY_NECK_MIN_LENGTH_MM,
+  neckCutsItemSentence,
   neckIntoBandSentence,
   neckThinnerSentence,
   neckTooShortSentence,
@@ -136,6 +137,9 @@ export function rotaryJobFindings(
   // The span the placement centres on too (`rotaryFreeSpan`): one definition, so moving the
   // default layout into the free span cannot drift from the sentence that refuses a band.
   const span = rotaryFreeSpan(map);
+  // One X extent per OPENED region, shared by the band checks and the neck's overlap check: both
+  // judge the cut's own edge, and both must read the same numbers.
+  const extents: { region: RotaryOpenedRegion; xMin: number; xMax: number }[] = [];
   for (const region of opened) {
     if (region.polygons.length === 0) continue;
     let xMin = Infinity;
@@ -147,6 +151,9 @@ export function rotaryJobFindings(
       }
     }
     if (!Number.isFinite(xMin)) continue;
+    extents.push({ region, xMin, xMax });
+  }
+  for (const { region, xMin, xMax } of extents) {
     const item = findItem(job, region.labelId);
     if (item === undefined) continue;
     const who = itemLabel(item);
@@ -209,14 +216,33 @@ export function rotaryJobFindings(
           message: `The neck for parting ${band}.`,
         });
       } else {
-        const min = rotaryNeckMinDiameterMm(job.stock.material, neck.effectiveMm);
-        if (neck.diameterMm < min.diameterMm) {
+        // The neck and a design item cannot occupy the same X: the neck is cut after the engrave,
+        // so any item whose OPENED region overlaps [from, to] is erased by the cut. This is the
+        // item's own edge against the neck's, and the sentence names both extents.
+        const overlap = extents.find(
+          ({ region, xMin, xMax }) =>
+            xMin < neck.toMm && xMax > neck.fromMm && findItem(job, region.labelId) !== undefined,
+        );
+        if (overlap !== undefined) {
+          const item = findItem(job, overlap.region.labelId)!;
           findings.push({
             severity: 'error',
-            code: 'neck-thin',
+            code: 'neck-cuts-item',
             labelId: ROTARY_NECK_ID,
-            message: `The neck for parting is too thin: ${neckThinnerSentence(job.stock.material, neck.diameterMm, { ...neck, tailstock: map.tailstock }, min.diameterMm)}.`,
+            message:
+              `The neck for parting is wrong: ${neckCutsItemSentence(itemLabel(item), overlap.xMin, overlap.xMax, neck)}. ` +
+              'Move the item clear of the neck, or shorten or move the neck.',
           });
+        } else {
+          const min = rotaryNeckMinDiameterMm(job.stock.material, neck.effectiveMm);
+          if (neck.diameterMm < min.diameterMm) {
+            findings.push({
+              severity: 'error',
+              code: 'neck-thin',
+              labelId: ROTARY_NECK_ID,
+              message: `The neck for parting is too thin: ${neckThinnerSentence(job.stock.material, neck.diameterMm, { ...neck, tailstock: map.tailstock }, min.diameterMm)}.`,
+            });
+          }
         }
       }
     }

@@ -167,9 +167,12 @@ import { colourBoundaryFor, stackDepthLimit, type StackDepthLimit } from './stac
 import { rotaryJobFindings } from '@/engine/cnc/rotary/findings';
 import {
   ROTARY_NECK_ID,
+  neckCutterTooWideSentence,
+  neckNoProgramSentence,
   rotaryNeckBand,
   rotaryNeckCutRegion,
   rotaryNeckFacts,
+  rotaryNeckOf,
   type RotaryNeckFacts,
 } from '@/engine/cnc/rotary/neck';
 import { rotaryMapOf, toRotaryIR } from '@/engine/cnc/rotary/wrap';
@@ -3806,9 +3809,21 @@ export function engraveGenerate(
   });
 
   const restPass = restLink === null ? null : assembleRestFacts(restLink, posted);
-  const restErrors = restFindings.filter((f) => f.severity === 'error');
   const first = attempts[0]!;
   const stopped = attempts.find((one) => !one.ok);
+  // #737 review item 1 — the neck is carried by a PROGRAM, not by the job. A run that drops its
+  // last rest program (`setup-rest-nothing`) posts nothing that cuts the neck, and the per-program
+  // check never fires because no program was asked to carry it. Refuse the run itself here, so the
+  // panels' "the part stays on a neck" sentence is never shown for a neck nothing cut.
+  if (stopped === undefined && rotaryNeckOf(job) !== null && !posted.some((p) => p.one.neck != null)) {
+    restFindings.push({
+      severity: 'error',
+      code: 'neck-not-cut',
+      labelId: ROTARY_NECK_ID,
+      message: neckNoProgramSentence(),
+    });
+  }
+  const restErrors = restFindings.filter((f) => f.severity === 'error');
   return {
     // The adapter: the top-level fields describe the FIRST program, which is the file the panels
     // upload, simulate and save today. Multi-program upload is #419 §3's, not this slice's.
@@ -4040,6 +4055,29 @@ function generateOneProgram(
       errors,
     };
   };
+
+  // #737 review item 3 — a cutter as wide as the neck or wider cuts the whole band away instead of
+  // pocketing a floor along it. That used to surface as `neck-not-cut` ("the cutter cannot leave a
+  // flat floor"), which blames a cone's shape for a length that is simply too short. The check is
+  // here, where `withNeck` and the program's own tool are both known, and before the gate below so
+  // the refusal is `neck-too-narrow-for-cutter` at the findings stage. A V-bit or a drill has no
+  // flat radius and is left to the existing `neck-not-cut` post-check.
+  if (withNeck && neck !== null && tool !== null) {
+    const neckCutter = cuttingForTrace(tool);
+    if (neckCutter.ok && neckCutter.tool.shape === 'flat') {
+      const cutterDiameter = neckCutter.tool.radius * 2;
+      if (neck.lengthMm <= cutterDiameter) {
+        findings.push({
+          severity: 'error',
+          code: 'neck-too-narrow-for-cutter',
+          labelId: ROTARY_NECK_ID,
+          message:
+            'The neck for parting is too short for the cutter: ' +
+            `${neckCutterTooWideSentence(neck.lengthMm, tool.name, cutterDiameter)}.`,
+        });
+      }
+    }
+  }
 
   // 1. findings (#200/#201/#203). Any error stops before feeds are even resolved.
   if (findings.some((f) => f.severity === 'error')) return stop('findings');

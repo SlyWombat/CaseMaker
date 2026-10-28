@@ -10,7 +10,7 @@ import { useEngraveJobStore } from '@/store/engraveJobStore';
 import { oracleSentence, useEngraveRunStore } from '@/store/engraveRunStore';
 import { jobVise, viseEnvelope } from '@/engine/cnc/fixture';
 import { rotaryBandFacts, rotaryMapOf } from '@/engine/cnc/rotary/wrap';
-import { rotaryNeckFacts } from '@/engine/cnc/rotary/neck';
+import { neckCarriedBy } from '@/engine/cnc/rotary/neck';
 import { hasSacrificial } from '@/engine/cnc/sacrificial';
 import type { StartingTool } from '@/engine/cnc';
 import type { DiagnosticSource, SimDiagnostic } from '@/workers/sim/session';
@@ -290,9 +290,10 @@ export function SimPanel() {
               // The EFFECTIVE lengths, clamped by the stick-out (`rotaryFreeSpan`): the sentence
               // must name the band the findings judge, not the labelled default.
               : rotaryBandFacts(rotary),
-          // #737 — the saw is at the bench; the simulation ends on the neck. Null on every job
-          // without one, and `rotaryNeckFacts` is the one owner of the span the sentence quotes.
-          rotaryNeck: rotary === null ? null : rotaryNeckFacts(job),
+          // #737 — the saw is at the bench; the simulation ends on the neck. Read from the programs
+          // that were POSTED, not from the job: a run that dropped its last rest program carries no
+          // neck, and the sentence must not promise one nothing cut.
+          rotaryNeck: neckCarriedBy(run.generated?.programs),
           fixtureSource: jobVise(job).source,
           sacrificialModelled: rotary === null && hasSacrificial(job.sacrificial),
           toolName: jobToolEntry === null ? null : toolDisplayName(jobToolEntry.tool),

@@ -3,10 +3,12 @@
  *
  * The fixture is the rotary design's own (#240 W, `rotary-flow.md` §3.6, §3.11): a PLA rod
  * ⌀20 × 100 in the chuck, 85 mm out, tailstock in, one "Zoomba" engrave, a ⌀1 mm flat end. Its
- * free span is X 3–75 mm, so the default neck grows in from the tailstock side: X 70–75 mm, saw
- * at X 72.5 mm, floor at r 2 mm (⌀4 mm). The starter is also where the 4 mm default just clears
- * the safe minimum for PLA with the tailstock-side stub's 6.25 mm effective length (2.77 mm), so
- * the default is not silently refused.
+ * free span is X 3–75 mm. The DEFAULT neck is on the CHUCK side — the stock goes into the jaws
+ * there, so the saw frees the whole part rather than only the scrap stub — and runs X 3–8 mm, saw
+ * at X 5.5 mm, floor at r 6.5 mm (⌀7 mm). The strength check measures the cantilever to the
+ * neck's ROOT (X 3), so the default's effective length is 41 mm and PLA asks ⌀5.18 mm: the ⌀7 mm
+ * default is not silently refused. A tailstock-side neck (X 70–75, saw 72.5, ⌀4) is still
+ * available and is used where the test is about that end.
  *
  * Codes are data: every refusal is asserted on the operator's sentence with its numbers and
  * units. The neck's operation is asserted where the machine reads it — in the posted `.nc`.
@@ -25,17 +27,19 @@ import { toSetup } from '@/engine/cnc/engrave/jobSetup';
 import { createSimSession } from '@/workers/sim/session';
 import { engraveGenerate, type EngraveGenerated } from '@/workers/sim/engraveGenerate';
 import { flatEndMill } from '@/engine/cnc/tool';
+import { type ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import { rotaryFreeSpan, rotaryMapOf } from '@/engine/cnc/rotary/wrap';
 import {
   ROTARY_NECK_DIAMETER_MM,
   ROTARY_NECK_MIN_LENGTH_MM,
   defaultRotaryNeck,
+  neckCarriedBy,
   rotaryNeckFacts,
   rotaryNeckMinDiameterMm,
   rotaryNeckSpan,
 } from '@/engine/cnc/rotary/neck';
 import { parseEngraveJob } from '@/store/engraveJobSchema';
-import type { EngraveJob, RotaryChuck, RotaryNeck } from '@/types/engraveJob';
+import type { EngraveJob, EngraveShape, JobSetup, RotaryChuck, RotaryNeck } from '@/types/engraveJob';
 
 const CHUCK: RotaryChuck = {
   stickout: 85,
@@ -114,10 +118,42 @@ function gen(job: EngraveJob): EngraveGenerated {
   return generate(tl, job);
 }
 
+const IDENTITY = {
+  top: 'top',
+  bottom: 'bottom',
+  left: 'left',
+  right: 'right',
+  front: 'front',
+  back: 'back',
+} as const;
+
+/** One setup with the given cutters, in use order, and the items it cuts. */
+function setup(tools: string[], itemIds: string[]): JobSetup {
+  return { id: 'setup-1', orientation: { ...IDENTITY }, mount: { kind: 'vise' }, itemIds, tools };
+}
+
+/** A small second item, so a test can put an engrave where the neck runs. */
+function labelAt(text: string, x: number): EngraveJob['labels'][number] {
+  return {
+    id: newEngraveLabelId(),
+    text,
+    font: DEFAULT_FONT_ID,
+    weight: 'bold',
+    size: 5,
+    position: { x, y: Math.PI * 10 },
+    rotation: 0,
+    depth: 0.5,
+    enabled: true,
+  };
+}
+
 describe('#737 — the neck setting and its geometry', () => {
-  it('offers the labelled defaults: tailstock side, ⌀4 mm, 5 mm long', () => {
-    expect(defaultRotaryNeck()).toEqual({ end: 'tailstock', diameter: 4, length: 5 });
-    expect(ROTARY_NECK_DIAMETER_MM).toBe(4);
+  it('offers the labelled defaults: chuck side, ⌀7 mm, 5 mm long', () => {
+    // The stock goes into the jaws at the chuck side, so the saw there frees the whole part. ⌀7 mm
+    // is the thinnest round default that clears the corrected root-length check for PLA, softwood
+    // and metal on the design's ⌀20 × 85 mm stick-out.
+    expect(defaultRotaryNeck()).toEqual({ end: 'chuck', diameter: 7, length: 5 });
+    expect(ROTARY_NECK_DIAMETER_MM).toBe(7);
     // The shortest sawable neck: 0.5 mm kerf plus 1 mm clear either side.
     expect(ROTARY_NECK_MIN_LENGTH_MM).toBe(2.5);
   });
@@ -130,36 +166,61 @@ describe('#737 — the neck setting and its geometry', () => {
     expect(tail.toMm).toBe(75);
     expect(tail.sawAtMm).toBe(72.5);
     expect(tail.depthMm).toBe(8); // R 10 − ⌀4/2
-    // The saw frees the stub from the saw line (X 72.5) to the free end (X 85): 12.5 mm. With the
-    // tailstock centre holding its far end the check counts half of it, where the bending is shared.
-    expect(tail.carriedMm).toBe(12.5);
-    expect(tail.effectiveMm).toBe(6.25);
+    // The root is the neck's chuck-side edge, X 70 — not the saw line. The piece the check treats
+    // as carried runs from that root to the free end (X 85): 15 mm. With the tailstock centre
+    // holding its far end the check counts half of it, where the bending is shared.
+    expect(tail.carriedMm).toBe(15);
+    expect(tail.effectiveMm).toBe(7.5);
 
     const chuck = rotaryNeckSpan(map, { end: 'chuck', diameter: 4, length: 5 })!;
     expect([chuck.fromMm, chuck.toMm, chuck.sawAtMm]).toEqual([3, 8, 5.5]);
-    // The whole part beyond the saw line: X 5.5–85.
-    expect(chuck.carriedMm).toBe(79.5);
-    expect(chuck.effectiveMm).toBe(39.75);
+    // The root is the jaws' edge, X 3: 82 mm to the free end.
+    expect(chuck.carriedMm).toBe(82);
+    expect(chuck.effectiveMm).toBe(41);
+  });
+
+  it('reads the neck the RUN leaves from its programs, not from the job', () => {
+    const facts = rotaryNeckFacts(dowel())!;
+    expect(neckCarriedBy(undefined)).toBeNull();
+    expect(neckCarriedBy([])).toBeNull();
+    expect(neckCarriedBy([{ neck: null }, { neck: null }])).toBeNull();
+    // A dropped rest program leaves the earlier program's null: the job still names a neck, but
+    // the run does not. The last program that does carry it is the run's.
+    expect(neckCarriedBy([{ neck: null }, { neck: facts }])).toEqual(facts);
   });
 
   it('computes the safe minimum from the material and the effective cantilever, as a labelled default', () => {
-    // d = cbrt(32·F·L / (π·σ)) with F = 10 N, L in metres, σ in Pa; 6.25 mm is the default
-    // tailstock-side stub's effective length (12.5 mm carried, halved with the tailstock engaged).
-    const pla = rotaryNeckMinDiameterMm('pla', 6.25);
+    // d = cbrt(32·F·L / (π·σ)) with F = 10 N, L in metres, σ in Pa; 7.5 mm is the tailstock-side
+    // neck's effective length (15 mm from the root, halved with the tailstock engaged).
+    const pla = rotaryNeckMinDiameterMm('pla', 7.5);
     expect(pla.group).toBe('plastic');
     expect(pla.stressMpa).toBe(30);
-    expect(pla.diameterMm).toBeCloseTo(2.7686, 3);
-    // The default ⌀4 mm clears it, which is why 4 mm is the default.
-    expect(pla.diameterMm).toBeLessThan(ROTARY_NECK_DIAMETER_MM);
+    expect(pla.diameterMm).toBeCloseTo(2.942, 3);
 
-    const softwood = rotaryNeckMinDiameterMm('softwood', 6.25);
-    expect(softwood.diameterMm).toBeCloseTo(3.488, 3);
-    const metal = rotaryNeckMinDiameterMm('aluminium-6061', 6.25);
+    const softwood = rotaryNeckMinDiameterMm('softwood', 7.5);
+    expect(softwood.diameterMm).toBeCloseTo(3.707, 3);
+    const metal = rotaryNeckMinDiameterMm('aluminium-6061', 7.5);
     expect(metal.group).toBe('metal');
-    expect(metal.diameterMm).toBeCloseTo(1.853, 3);
+    expect(metal.diameterMm).toBeCloseTo(1.9695, 3);
     // Stronger stock needs a thinner neck, for the same carried piece.
     expect(metal.diameterMm).toBeLessThan(pla.diameterMm);
     expect(softwood.diameterMm).toBeGreaterThan(pla.diameterMm);
+  });
+
+  it('measures the default chuck-side neck from its root, and the default clears the minimum', () => {
+    // The default's root is X 3, 82 mm from the free end. The tailstock shares the bending, so the
+    // check counts 41 mm; PLA asks ⌀5.18 mm, softwood ⌀6.53 mm and metal ⌀3.47 mm, and the ⌀7 mm
+    // default clears all three. This is why the default is 7 mm and not the 4 mm of a shorter end.
+    const facts = rotaryNeckFacts(dowel())!;
+    expect(facts).toMatchObject({ end: 'chuck', fromMm: 3, toMm: 8, sawAtMm: 5.5, diameterMm: 7 });
+    expect(facts.carriedMm).toBe(82);
+    expect(facts.effectiveMm).toBe(41);
+    expect(rotaryNeckMinDiameterMm('pla', facts.effectiveMm).diameterMm).toBeCloseTo(5.183, 3);
+    expect(rotaryNeckMinDiameterMm('softwood', facts.effectiveMm).diameterMm).toBeCloseTo(6.53, 2);
+    expect(rotaryNeckMinDiameterMm('aluminium-6061', facts.effectiveMm).diameterMm).toBeCloseTo(3.47, 2);
+    expect(rotaryNeckMinDiameterMm('softwood', facts.effectiveMm).diameterMm).toBeLessThan(
+      ROTARY_NECK_DIAMETER_MM,
+    );
   });
 
   it('keeps an old document without a neck byte-for-byte, and parses one that has it', () => {
@@ -174,7 +235,7 @@ describe('#737 — the neck setting and its geometry', () => {
     const parsedNeck = parseEngraveJob(dowel());
     expect(parsedNeck.ok).toBe(true);
     if (!parsedNeck.ok || parsedNeck.job.workholding.kind !== 'rotary-chuck') return;
-    expect(parsedNeck.job.workholding.rotary.neck).toEqual({ end: 'tailstock', diameter: 4, length: 5 });
+    expect(parsedNeck.job.workholding.rotary.neck).toEqual({ end: 'chuck', diameter: 7, length: 5 });
   });
 
   it('refuses a neck with no diameter or no length at the document gate', () => {
@@ -203,7 +264,9 @@ describe('#737 — the neck is the program’s last operation, all the way round
   });
 
   it('cuts the neck to its floor at Z 2 mm, full circumference, and ends on it', () => {
-    const g = gen(dowel());
+    // The tailstock-side neck is explicit here: its floor is below the default's, so the geometry
+    // is unambiguous. It is still a neck the corrected root check allows (⌀4 against ⌀2.94).
+    const g = gen(dowel({ end: 'tailstock', diameter: 4, length: 5 }));
     expect(g.ok).toBe(true);
     const cuts = cuttingLines(g.nc ?? '');
     // The engrave is at r 9.5; the neck's floor is r 2 (⌀4 mm on a ⌀20 rod).
@@ -226,14 +289,15 @@ describe('#737 — the neck is the program’s last operation, all the way round
   });
 
   it('leaves the neck facts on the program, with the span the findings judged', () => {
-    const g = gen(dowel());
+    const job = dowel({ end: 'tailstock', diameter: 4, length: 5 });
+    const g = gen(job);
     expect(g.ok).toBe(true);
     expect(g.programs).toHaveLength(1);
     const facts = g.programs[0]!.neck;
     expect(facts).not.toBeNull();
     expect(facts).toMatchObject({ end: 'tailstock', diameterMm: 4, lengthMm: 5, fromMm: 70, toMm: 75, sawAtMm: 72.5 });
     // The generator's facts and the job's are the same object shape, from one span.
-    expect(rotaryNeckFacts(dowel())).toMatchObject(facts!);
+    expect(rotaryNeckFacts(job)).toMatchObject(facts!);
   });
 
   it('cuts nothing extra when the neck is off', () => {
@@ -248,7 +312,7 @@ describe('#737 — the neck is the program’s last operation, all the way round
   });
 
   it('simulates the neck with no under- or over-cut at its floor', () => {
-    const job = dowel();
+    const job = dowel({ end: 'tailstock', diameter: 4, length: 5 });
     const g = gen(job);
     expect(g.ok).toBe(true);
     const tool = jobTool(job);
@@ -300,7 +364,7 @@ describe('#737 — the neck is the program’s last operation, all the way round
 
 describe('#737 — the run sheet says where to saw', () => {
   it('ends the Cut section with the saw line, naming the neck’s size', () => {
-    const job = dowel();
+    const job = dowel({ end: 'tailstock', diameter: 4, length: 5 });
     const g = gen(job);
     expect(g.ok).toBe(true);
     const sheet = buildRunSheet(job, g, null);
@@ -313,11 +377,65 @@ describe('#737 — the run sheet says where to saw', () => {
     expect(last.value).toBe('⌀4 × 5 mm neck');
   });
 
+  it('puts the saw step in the last program’s own section, not program 1’s', () => {
+    // Two setups, one item each. Only the run's last program is asked to leave the neck, so the
+    // saw step must sit at the end of the SECOND Cut section — program 1 ends with its engrave.
+    const first = dowel();
+    const second = {
+      ...first.labels[0]!,
+      id: newEngraveLabelId(),
+      position: { x: 55, y: Math.PI * 10 },
+    };
+    const itemA = first.labels[0]!.id;
+    const job: EngraveJob = {
+      ...first,
+      labels: [first.labels[0]!, second],
+      setups: [
+        setup([first.toolKey], [itemA]),
+        { ...setup([first.toolKey], [second.id]), id: 'setup-2' },
+      ],
+    };
+    const g = generate(tl, job);
+    expect(
+      g.ok,
+      JSON.stringify({ stage: g.stage, findings: g.findings.filter((f) => f.severity === 'error') }),
+    ).toBe(true);
+    expect(g.programs).toHaveLength(2);
+    expect(g.programs[0]!.neck ?? null).toBeNull();
+    expect(g.programs[1]!.neck).not.toBeNull();
+
+    const sheet = buildRunSheet(job, g, null);
+    const cut1 = sheet.sections.find((s) => s.id === 'cut')!;
+    const cut2 = sheet.sections.find((s) => s.id === 'cut-2')!;
+    expect(cut1.steps.some((step) => /Saw the part off/.test(step.text))).toBe(false);
+    const last = cut2.steps[cut2.steps.length - 1]!;
+    expect(last.text).toMatch(/^Saw the part off at X 5\.5 mm \(the neck\)/);
+    expect(last.text).toContain('⌀7 mm');
+  });
+
   it('says nothing about a saw when the job has no neck', () => {
     const job = dowel(null);
     const g = gen(job);
     expect(g.ok).toBe(true);
     const texts = buildRunSheet(job, g, null).sections.flatMap((s) => s.steps.map((st) => st.text));
+    expect(texts.some((t) => /Saw the part off/.test(t))).toBe(false);
+  });
+
+  it('builds the coverage warning from the generated programs, not from the job', () => {
+    // The job still names a neck, but no generated program carries one (the dropped rest program
+    // of the first case above). The sheet must not claim the part is left on a neck it never cut.
+    const job = dowel();
+    const g = gen(job);
+    expect(g.ok).toBe(true);
+    const withNeck = buildRunSheet(job, g, { diagnostics: [] });
+    const withTexts = withNeck.sections.flatMap((s) => s.steps.map((st) => st.text));
+    expect(withTexts.some((t) => t.includes('The part stays on a'))).toBe(true);
+
+    const noNeckPrograms = g.programs.map((program) => ({ ...program, neck: null }));
+    const stripped = { ...g, programs: noNeckPrograms, neck: null };
+    const sheet = buildRunSheet(job, stripped, { diagnostics: [] });
+    const texts = sheet.sections.flatMap((s) => s.steps.map((st) => st.text));
+    expect(texts.some((t) => t.includes('The part stays on a'))).toBe(false);
     expect(texts.some((t) => /Saw the part off/.test(t))).toBe(false);
   });
 });
@@ -346,30 +464,30 @@ describe('#737 — a neck that cannot hold the part is refused in words', () => 
   }
 
   it('refuses a neck thinner than the carried piece calls for — as a labelled default', () => {
-    // Chuck-side ⌀2 mm: the saw frees the whole part beyond the saw line, X 5.5–85 (79.5 mm). The
-    // tailstock centre holds its far end, so the check counts half of it, 39.75 mm, where PLA's
-    // default minimum is ⌀5.13 mm (10 N side load, 30 MPa allowable bending stress).
+    // Chuck-side ⌀2 mm: the root is X 3, so the piece the check treats as carried runs 82 mm to
+    // the free end. The tailstock centre holds its far end, so the check counts half of it, 41 mm,
+    // where PLA's default minimum is ⌀5.18 mm (10 N side load, 30 MPa allowable bending stress).
     const f = neckError(dowel({ end: 'chuck', diameter: 2, length: 5 }), 'neck-thin');
     expect(f.message).toContain('The neck for parting is too thin');
     expect(f.message).toContain('the neck is ⌀2 mm');
-    expect(f.message).toContain('PLA with the whole part beyond the saw line is 79.5 mm long');
+    expect(f.message).toContain('PLA with the whole part beyond the neck runs 82 mm');
+    expect(f.message).toContain('from the neck’s root at X 3 mm to the free end');
     expect(f.message).toContain('held at both ends — by the neck and the tailstock centre');
-    expect(f.message).toContain('the bending is shared and the check counts half of it (39.75 mm)');
-    expect(f.message).toContain('needs at least ⌀5.13 mm');
+    expect(f.message).toContain('the bending is shared and the check counts half of it (41 mm)');
+    expect(f.message).toContain('so it needs at least ⌀5.18 mm');
     expect(f.message).toContain('The 10 N load acts sideways at the free end of that piece');
     expect(f.message).toContain('30 MPa is the allowable bending stress for plastic');
     expect(f.message).toContain("Those numbers are Case Maker's defaults, not measurements");
     expect(f.message).toContain('the neck is cut last, with the part still held');
-    expect(f.message).toContain(
-      'deliberately rough check and the minimum is a guess until the bench confirms it (#238)',
-    );
+    expect(f.message).toContain('the minimum is a guess until it is checked on the machine');
+    expect(f.message).not.toContain('(#238)');
     expect(f.message).toContain('Make the neck thicker, shorten the part, or choose a stronger stock');
   });
 
   it('judges the carried piece as a cantilever when the tailstock is out', () => {
-    // Tailstock out and the neck at the free end: the saw frees only the 2.5 mm nub beyond the saw
-    // line, and nothing holds its far end, so the check counts all of it. A ⌀1 mm neck is refused
-    // against PLA's 2.04 mm minimum.
+    // Tailstock out and the neck at the free end: the root is X 80, so the piece runs 5 mm to the
+    // free end, and nothing holds its far end, so the check counts all of it. A ⌀1 mm neck is
+    // refused against PLA's 2.57 mm minimum.
     const job = dowel(
       { end: 'tailstock', diameter: 1, length: 5 },
       {
@@ -380,15 +498,34 @@ describe('#737 — a neck that cannot hold the part is refused in words', () => 
       },
     );
     const f = neckError(job, 'neck-thin');
-    expect(f.message).toContain('the stub beyond the saw line is 2.5 mm long and hangs free');
-    expect(f.message).toContain('the check counts all of it (2.5 mm)');
-    expect(f.message).toContain('needs at least ⌀2.04 mm');
+    expect(f.message).toContain('the stub beyond the neck runs 5 mm');
+    expect(f.message).toContain('from the neck’s root at X 80 mm to the free end and hangs free');
+    expect(f.message).toContain('the check counts all of it (5 mm)');
+    expect(f.message).toContain('needs at least ⌀2.57 mm');
+  });
+
+  it('measures the cantilever to the root, not the saw line — the reviewer’s 20 mm example', () => {
+    // Tailstock out, a 20 mm neck at the free end (X 65–85), so the saw is at X 75. The old
+    // saw-line model used 10 mm and accepted ⌀3.5 mm; the root model uses 20 mm and requires
+    // ⌀4.08 mm for PLA.
+    const neck: RotaryNeck = { end: 'tailstock', diameter: 3.5, length: 20 };
+    const job = dowel(neck, {
+      workholding: { kind: 'rotary-chuck', rotary: { ...CHUCK, tailstock: false, neck } },
+    });
+    const facts = rotaryNeckFacts(job)!;
+    expect([facts.fromMm, facts.toMm, facts.sawAtMm]).toEqual([65, 85, 75]);
+    expect(facts.carriedMm).toBe(20);
+    expect(facts.effectiveMm).toBe(20);
+    expect(rotaryNeckMinDiameterMm('pla', facts.effectiveMm).diameterMm).toBeCloseTo(4.08, 2);
+    const f = neckError(job, 'neck-thin');
+    expect(f.message).toContain('runs 20 mm from the neck’s root at X 65 mm');
+    expect(f.message).toContain('needs at least ⌀4.08 mm');
   });
 
   it('allows the default neck the panel offers', () => {
-    // The default ⌀4 mm at the tailstock side is allowed: the saw frees a 12.5 mm stub, the
-    // tailstock centre shares the bending so the check counts 6.25 mm, and PLA's minimum there is
-    // ⌀2.77 mm. This is the default the panel offers, so it must not refuse.
+    // The default ⌀7 mm at the chuck side is allowed: the root is X 3, the piece runs 82 mm, the
+    // tailstock centre shares the bending so the check counts 41 mm, and PLA's minimum there is
+    // ⌀5.18 mm. This is the default the panel offers, so it must not refuse.
     const g = gen(dowel());
     expect(g.ok).toBe(true);
   });
@@ -427,5 +564,97 @@ describe('#737 — a neck that cannot hold the part is refused in words', () => 
     expect(f.message).toContain('the part at that end is ⌀20 mm');
     expect(f.message).toContain('a neck has to be narrower than the part it holds');
     expect(f.message).toContain('all the way round');
+  });
+
+  it('refuses a neck strictly wider than the part too', () => {
+    const f = neckError(dowel({ end: 'tailstock', diameter: 21, length: 5 }), 'neck-wider-than-part');
+    expect(f.message).toContain('the neck is ⌀21 mm');
+    expect(f.message).toContain('the part at that end is ⌀20 mm');
+    expect(f.message).toContain('a neck has to be narrower than the part it holds');
+  });
+
+  it('refuses a neck that would cut through an item on the part', () => {
+    // A tailstock-side neck X 70–75 runs straight through an engrave at X 72. The neck is the
+    // operator's chosen cut, but it must not erase a design item: the refusal names the item, its
+    // X extent, and the neck's.
+    const base = dowel({ end: 'tailstock', diameter: 4, length: 5 });
+    const atNeck = labelAt('M', 72);
+    const job = {
+      ...base,
+      labels: [base.labels[0]!, atNeck],
+      setups: [setup([base.toolKey], [base.labels[0]!.id, atNeck.id])],
+    };
+    const f = neckError(job, 'neck-cuts-item');
+    expect(f.message).toContain('The neck for parting is wrong');
+    expect(f.message).toContain('Engrave text "M"');
+    expect(f.message).toContain('the neck runs X 70–75 mm');
+    expect(f.message).toContain('reaches X');
+    expect(f.message).toContain('would cut through it');
+    expect(f.message).toContain('Move the item clear of the neck, or shorten or move the neck');
+  });
+
+  it('refuses a neck no longer than the cutter is wide, in its own words', () => {
+    // A ⌀6 mm flat is as wide as the 5 mm neck. The pocket cannot be opened by a tool that does
+    // not fit between the neck's edges, so the neck would be cut away rather than left as a floor.
+    const pocket: EngraveShape = {
+      id: 'pocket-1',
+      name: 'pocket',
+      kind: 'rect',
+      position: { x: 40, y: Math.PI * 10 },
+      rotation: 0,
+      depth: 0.5,
+      enabled: true,
+      width: 12,
+      height: 8,
+      cornerRadius: 0,
+    };
+    const job = dowel(
+      { end: 'tailstock', diameter: 4, length: 5 },
+      { labels: [], shapes: [pocket] },
+    );
+    const cutter = flatEndMill(6, { name: '6 mm flat' });
+    const g = engraveGenerate(tl, job, cutter, [], null);
+    expect(g.ok).toBe(false);
+    expect(g.stage).toBe('findings');
+    const f = g.findings.find((x) => x.code === 'neck-too-narrow-for-cutter');
+    expect(f).toBeDefined();
+    expect(f!.severity).toBe('error');
+    expect(f!.labelId).toBe('rotary-neck');
+    expect(f!.message).toContain('The neck for parting is too short for the cutter');
+    expect(f!.message).toContain('the neck is 5 mm long');
+    expect(f!.message).toContain('"6 mm flat" is ⌀6 mm wide');
+    expect(f!.message).toContain('as wide as the neck or wider cannot leave a floor');
+    expect(f!.message).toContain('Make the neck longer than ⌀6 mm');
+    expect(f!.message).toContain('use a narrower cutter for the last cut');
+    expect(f!.message).toContain('turn the neck off');
+    expect(f!.message).not.toContain('neck-too-narrow-for-cutter');
+  });
+
+  it('refuses a run whose only neck-carrying rest program was dropped', () => {
+    // A setup naming the same ⌀1 mm cutter twice: the rough program removes everything the rest
+    // cutter could open, so the measured rest pass is dropped with `setup-rest-nothing`. The neck
+    // was assigned to that rest program only; without the run-level check the rough-only program
+    // posts, no neck is cut, and every sentence still says the part is on one.
+    const base = dowel();
+    const itemId = base.labels[0]!.id;
+    const rest: ToolLibraryEntry = {
+      key: 'user:flat-8-rest-nothing',
+      tool: flatEndMill(8.0, { name: '8 mm flat (cannot enter the engrave)' }),
+      provenance: 'test',
+    };
+    const job: EngraveJob = { ...base, setups: [setup([base.toolKey, rest.key], [itemId])] };
+    const g = generate(tl, job, null, [], undefined, { tools: [rest] });
+    expect(g.findings.find((f) => f.code === 'setup-rest-nothing')).toBeDefined();
+    expect(g.programs).toHaveLength(1);
+    expect(g.programs[0]!.neck ?? null).toBeNull();
+    expect(g.ok).toBe(false);
+    expect(g.stage).toBe('findings');
+    const f = g.findings.find((x) => x.code === 'neck-not-cut');
+    expect(f).toBeDefined();
+    expect(f!.severity).toBe('error');
+    expect(f!.labelId).toBe('rotary-neck');
+    expect(f!.message).toContain('The neck for parting is set, but no program in this run cuts it');
+    expect(f!.message).toContain('Turn the neck off');
+    expect(f!.message).not.toContain('neck-not-cut');
   });
 });
