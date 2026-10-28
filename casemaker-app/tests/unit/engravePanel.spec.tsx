@@ -151,6 +151,15 @@ describe('EngravePanel (#205)', () => {
     expect(screen.getByTestId('engrave-label-finding-0-depth-exceeds-stock')).toBeTruthy();
   });
 
+  it('#726 P4 — the depth ceiling is stated once, at the field', () => {
+    render(<EngravePanel />);
+    expand('engrave-label');
+    expect(screen.getByTestId('engrave-label-maxdepth-0').textContent).toContain('Max depth 11 mm here');
+    // The old section line ("Depth keeps the 1 mm minimum floor — at most 11 mm on this stock.")
+    // said the same thing a second time, away from the field it is about.
+    expect(screen.getByTestId('engrave-panel').textContent).not.toContain('mm on this stock');
+  });
+
   it('updates the “strokes thinner than” hint when the tool changes', () => {
     render(<EngravePanel />);
     // #686 — every printed figure is the wizard's three-decimal `fmt`, which drops a trailing

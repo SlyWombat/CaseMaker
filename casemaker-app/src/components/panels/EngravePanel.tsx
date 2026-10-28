@@ -2923,7 +2923,8 @@ export function EngravePanel(): JSX.Element {
           onRemove={() => removeVector(shape.id)}
         />
       ))}
-      <p style={MUTED}>Depth keeps the {fmt(job.minFloor)} mm minimum floor — at most {fmt(maxDepth)} mm on this stock.</p>
+      {/* #726 P4 — the depth ceiling is stated by the row BESIDE the depth field ("Max depth N mm
+          here — …"), not again here: the same number twice read as two rules. */}
 
       {/* 2b — the target object (#435), a closed one-line row carrying its count (#686, design §2).
           It is deliberately NOT in the item list or the item count: it is never cut, and
