@@ -234,19 +234,26 @@ interface EngraveFailure {
 }
 
 /**
- * #733 item 3 — AN INVALID JOB IS A RESULT, NOT AN EXCEPTION. `--json` promises stdout is exactly
- * one receipt (#478), and a document the schema refuses is a run that stopped before any stage.
- * The full words still go to stderr for the operator; the receipt carries the same reason as a
- * refusal and as a diagnostic, so a caller can read why without scraping stderr.
+ * #733 item 3 / #732 follow-up — A DOCUMENT THE RUN CANNOT USE IS A RESULT, NOT AN EXCEPTION.
+ * `--json` promises stdout is exactly one receipt (#478), and a document the schema refuses is a
+ * run that stopped before any stage. The full words still go to stderr for the operator; the
+ * receipt carries the same reason as a refusal and as a diagnostic, so a caller can read why
+ * without scraping stderr. `code` names WHICH document was refused (`invalid-job`,
+ * `invalid-catalogue`) so a caller can tell the two apart without parsing prose.
  */
-function invalidJob(message: string): EngraveFailure {
+function invalidDocument(code: string, message: string): EngraveFailure {
   console.error(`casemaker cut: ${message}`);
   return {
     stage: null,
     gate: null,
-    diagnostics: [diagnostic('invalid-job', 'error', message, 'findings', null)],
-    refusals: [{ code: 'invalid-job', reason: message }],
+    diagnostics: [diagnostic(code, 'error', message, 'findings', null)],
+    refusals: [{ code, reason: message }],
   };
+}
+
+/** A job document the command cannot read or the schema refuses (#733 item 3). */
+function invalidJob(message: string): EngraveFailure {
+  return invalidDocument('invalid-job', message);
 }
 
 /**
@@ -416,14 +423,16 @@ async function engraveJobBody(argv: string[], options: CommandOptions): Promise<
   // A file that is there but wrong STOPS the run (`loadCatalogue` throws): a half-written
   // catalogue read as "no catalogue" would silently swap the vendor's numbers for seeds. No file
   // is not an error — the starting table and the shop's labelled defaults are what a machine that
-  // has never synced Makera's library runs on.
+  // has never synced Makera's library runs on. The stop still answers `--json` with one receipt
+  // (#478), naming the catalogue and the validation failure: `fail()` threw before `emit()` and
+  // left stdout empty, which is the same hole #733 item 3 closed for the job document.
   let catalogue: LoadedCatalogue | null;
   try {
     catalogue = loadCatalogue(
       boot.location === null ? undefined : join(dirname(boot.location.path), 'catalogue.json'),
     );
   } catch (e) {
-    fail((e as Error).message);
+    return stop(invalidDocument('invalid-catalogue', `Makera's catalogue ${(e as Error).message}`));
   }
   const catalogueRows: readonly FeedCatalogueRow[] = catalogue?.rows ?? [];
   if (catalogue !== null) {

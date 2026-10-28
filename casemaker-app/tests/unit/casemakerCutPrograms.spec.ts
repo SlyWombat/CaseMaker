@@ -465,3 +465,66 @@ describe('#733 an invalid job answers --json on stdout', () => {
     expect(r.stderr).toContain('is not a valid engrave job');
   }, 120_000);
 });
+
+// #732 follow-up — A BROKEN CATALOGUE STILL PRINTS ITS RECEIPT.
+//
+// `catalogue.json` is read before the job is parsed, and a file that is there but wrong stops the
+// run rather than silently falling back to seed feeds. That stop used to go through `fail()`,
+// which throws `CliExit` before `emit()`: with `--json` stdout was empty, breaking #478's contract
+// exactly where #733 item 3 fixed it for an invalid job. The refusal shape is the same; the code
+// differs so a caller can tell a bad job from a bad catalogue without reading prose.
+describe('#732 a broken catalogue answers --json on stdout', () => {
+  it('prints one parseable receipt naming the catalogue and its validation failure', () => {
+    const dir = join(SCRATCH, 'broken-catalogue');
+    mkdirSync(dir, { recursive: true });
+    // The catalogue is sought beside the location the run was given, so the location lives here.
+    const locationPath = join(dir, 'location.json');
+    writeFileSync(locationPath, readFileSync(LOCATION, 'utf8'));
+    // A job the schema accepts: this run must reach the catalogue read, which happens after the
+    // location is bootstrapped and before the job's own parse.
+    const jobPath = join(dir, 'job.json');
+    writeFileSync(jobPath, JSON.stringify(defaultEngraveJob(), null, 2) + '\n');
+    const cataloguePath = join(dir, 'catalogue.json');
+    // Valid JSON of the right kind and version, but `feeds` is not a list: the schema refuses it.
+    writeFileSync(
+      cataloguePath,
+      JSON.stringify(
+        { kind: 'casemaker-catalogue', schemaVersion: 1, tools: [], feeds: 'not a list' },
+        null,
+        2,
+      ) + '\n',
+    );
+
+    const r = spawnSync(
+      process.execPath,
+      ['--import', TSX, join(APP, 'scripts', 'casemaker.ts'), 'cut', jobPath, '--json', '--location', locationPath],
+      {
+        cwd: APP,
+        encoding: 'utf8',
+        timeout: 120_000,
+        env: { ...process.env, TSX_TSCONFIG_PATH: join(APP, 'tsconfig.scripts.json') },
+      },
+    );
+
+    expect(r.status, r.stderr).toBe(1);
+    // stdout is exactly the receipt: JSON.parse of the whole stream, not a substring of it.
+    expect(r.stdout.trim(), `stdout was ${r.stdout.length} bytes`).not.toBe('');
+    const receipt = parseReceipt(JSON.parse(r.stdout));
+    expect(receipt.ok).toBe(false);
+    expect(receipt.command).toBe('engrave');
+    // Stopped before any stage ran.
+    expect(receipt.stage).toBeNull();
+    expect(receipt.gate).toBeNull();
+    expect(receipt.refusals.map((x) => x.code)).toEqual(['invalid-catalogue']);
+    expect(receipt.refusals[0]!.reason).toContain(cataloguePath);
+    expect(receipt.refusals[0]!.reason).toContain('does not match its own schema');
+    expect(receipt.refusals[0]!.reason).toContain('"feeds" is not a feed catalogue');
+    expect(receipt.diagnostics).toContainEqual(
+      expect.objectContaining({ code: 'invalid-catalogue', severity: 'error', source: 'findings' }),
+    );
+    // The operator's copy names the same file and the same failure on stderr.
+    expect(r.stderr).toContain('casemaker cut:');
+    expect(r.stderr).toContain(cataloguePath);
+    expect(r.stderr).toContain('does not match its own schema');
+  }, 120_000);
+});
