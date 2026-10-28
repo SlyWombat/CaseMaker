@@ -22,8 +22,9 @@ import { engraveJobMain } from '../../scripts/lib/casemaker/engrave';
 import type { CommandOptions } from '../../scripts/lib/casemaker/output';
 import { runSheetFileName } from '../../src/engine/cnc/engrave/runSheet';
 import { defaultEngraveJob } from '../../src/engine/cnc/engrave/defaults';
+import { flatEndMill } from '../../src/engine/cnc/tool';
 import type { Receipt } from '../../src/platform/headless/receipt';
-import type { EngraveJob, JobSetup } from '../../src/types/engraveJob';
+import type { EngraveDrill, EngraveJob, JobSetup } from '../../src/types/engraveJob';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const APP = join(HERE, '..', '..');
@@ -42,7 +43,7 @@ interface CutRun {
   outDir: string;
 }
 
-async function cut(job: EngraveJob, name: string): Promise<CutRun> {
+async function cut(job: EngraveJob, name: string, location = LOCATION): Promise<CutRun> {
   const outDir = join(SCRATCH, name);
   mkdirSync(outDir, { recursive: true });
   const jobPath = join(outDir, 'job.json');
@@ -57,8 +58,19 @@ async function cut(job: EngraveJob, name: string): Promise<CutRun> {
       },
     },
   };
-  const code = await engraveJobMain([jobPath, '--out', outDir, '--location', LOCATION], options);
+  const code = await engraveJobMain([jobPath, '--out', outDir, '--location', location], options);
   return { code, receipt, outDir };
+}
+
+/** The fixture location, re-stating its drill point angle (its own document already has 118°). */
+function locationWithPointAngle(deg: number): string {
+  const doc = JSON.parse(readFileSync(LOCATION, 'utf8')) as {
+    defaults: Record<string, { value: unknown }>;
+  };
+  doc.defaults['drill.pointAngleDeg']!.value = deg;
+  const path = join(SCRATCH, `location-${deg}.json`);
+  writeFileSync(path, JSON.stringify(doc, null, 2) + '\n');
+  return path;
 }
 
 /** A softwood job whose one setup names two cutters, each owning one of its two labels (#472). */
@@ -124,5 +136,77 @@ describe('#733 a job posts one program per cutter', () => {
     // One sheet per job — the setup's one truth — carried by the program it names in its header.
     expect(details.programs[0]!.sheet?.file).toBe(`${stemNoExt}-run-sheet.md`);
     expect(details.programs[1]!.sheet).toBeNull();
+  }, 120_000);
+});
+
+// #733 item 2 — THE LOCATION'S DRILL POINT ANGLE IS NOT DROPPED ON THE CLI PATH.
+//
+// A drill-shaped cutter has no `angle` of its own (`angle: null`), so the included point angle comes
+// from the shop: the browser's `engraveRunStore` passes `drill: drillSettings(shopDefaults)` (#434).
+// The CLI passed no drill settings at all, so every hole was planned with the 118° fallback even
+// when the location said otherwise. The tip goes `pointLength(⌀, angle)` below the full diameter:
+// for a 3 mm drill that is 0.901 mm at 118° and 1.5 mm at 90°, so a 2 mm blind hole feeds to
+// Z-2.901 or Z-3.5 — one number in the posted file that says which document the plan read.
+const DRILL_KEY = 'inv:733-drill-3';
+const DRILL = flatEndMill(3, {
+  name: '3 mm drill',
+  typeText: 'Drill',
+  shape: 'drill',
+  tipDiameter: 3,
+  diameter: 3,
+  cornerRadius: null,
+  angle: null,
+  centreCutting: null,
+});
+
+/** A job whose only work is a 2 mm blind hole, cut with the drill-shaped cutter above. */
+function drilledJob(): EngraveJob {
+  const base = defaultEngraveJob();
+  const hole: EngraveDrill = {
+    id: 'hole-2',
+    kind: 'drill',
+    name: '2 mm hole',
+    position: { x: 50, y: 30 },
+    rotation: 0,
+    depth: 2,
+    enabled: true,
+    through: false,
+  };
+  return {
+    ...base,
+    name: 'drill point angle bench job',
+    labels: [],
+    shapes: [],
+    drills: [hole],
+    toolKey: DRILL_KEY,
+    tool: DRILL,
+  };
+}
+
+describe('#733 the location’s drill point angle reaches the CLI', () => {
+  it('posts the hole at the location’s 90° tip, not the built-in 118° fallback', async () => {
+    const job = drilledJob();
+    const ncFile = runSheetFileName(job.name);
+
+    const ninety = await cut(job, 'drill-90', locationWithPointAngle(90));
+    expect(
+      ninety.code,
+      JSON.stringify({ refusals: ninety.receipt?.refusals ?? null, diagnostics: ninety.receipt?.diagnostics ?? null }),
+    ).toBe(0);
+    const nc90 = readFileSync(join(ninety.outDir, ncFile), 'utf8');
+    // pointLength(3 mm, 90°) = 1.5 mm → 2 + 1.5 = 3.5 mm below the top.
+    expect(nc90).toMatch(/Z-3\.5\b/);
+    expect(nc90).not.toContain('Z-2.901');
+
+    // The same job against the fixture's own 118° document: the difference is the location's number,
+    // not the cutter or the hole.
+    const fallback = await cut(job, 'drill-118', LOCATION);
+    expect(
+      fallback.code,
+      JSON.stringify({ refusals: fallback.receipt?.refusals ?? null, diagnostics: fallback.receipt?.diagnostics ?? null }),
+    ).toBe(0);
+    const nc118 = readFileSync(join(fallback.outDir, ncFile), 'utf8');
+    expect(nc118).toContain('Z-2.901');
+    expect(nc118).not.toMatch(/Z-3\.5\b/);
   }, 120_000);
 });

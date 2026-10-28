@@ -93,6 +93,7 @@ import {
   type RunSheetOptions,
 } from '../../../src/engine/cnc/engrave/runSheet';
 import { releaseFileName } from '../../../src/engine/cnc/engrave/release';
+import { drillSettings } from '../../../src/engine/cnc/cam/drillBit';
 import { parseEngraveJob } from '../../../src/store/engraveJobSchema';
 import { simErrors, simulationProblem } from '../../../src/engine/cnc/simGate';
 import { buildCouponPrograms, type CouponRecord, type CouponRecordRow, type CouponSpec } from '../../../src/engine/cnc/engrave/couponJob';
@@ -359,8 +360,14 @@ async function engraveJobBody(argv: string[], options: CommandOptions): Promise<
    * location lives on this side), so a setup whose LATER cutter is a `user:`/`inv:` key resolves
    * nowhere without the snapshot. Passing it is what lets one job document post one program per
    * cutter instead of the operator splitting the job into one file per cutter.
+   *
+   * #733 item 2 — AND THE LOCATION'S DRILL POINT ANGLE. A drill-shaped cutter states no angle of
+   * its own; the shop's `drill.pointAngleDeg` is what puts the tip at the right depth, and the
+   * simulation refuses the file without it. The browser resolves it the same way (#434,
+   * `drillSettings(shopDefaults)` in `engraveRunStore`); this side did not, so every drill job
+   * stopped at `tool-refused` or planned at the 118° fallback whatever the location said.
    */
-  const shop: EngraveShopOpts = { tools: getTools() };
+  const shop: EngraveShopOpts = { tools: getTools(), drill: drillSettings(shopDefaults) };
   if (boot.location !== null) {
     const where = boot.location;
     recordInput(where.path);
@@ -617,12 +624,24 @@ async function engraveJobBody(argv: string[], options: CommandOptions): Promise<
     }
     const nc = generated.nc;
     const session = createSimSession(tl);
+    // #733 item 2 — THE POINT THE PLAN USED, ON TO THE SWEEP. The worker cannot read the location
+    // (#382); the browser hands it the drill program's own `simDrillPoint`, or the shop's number for
+    // any other load. Without this the sweep refuses a drill-shaped cutter outright
+    // (`tool-refused`), which is what stopped every drill job before the fix.
+    const drillPoint =
+      generated.drill?.simDrillPoint ??
+      (shop.drill === undefined || shop.drill === null
+        ? null
+        : { deg: shop.drill.settings.pointAngleDeg, source: shop.drill.sources.pointAngleDeg });
     const load = session.load(
       generated.nc,
       toSetup(job, Z1),
       tool,
       Z1.id,
-      opts.priorRemoval === undefined ? {} : { priorRemoval: opts.priorRemoval },
+      {
+        ...(opts.priorRemoval === undefined ? {} : { priorRemoval: opts.priorRemoval }),
+        ...(drillPoint === null ? {} : { drillPointDefault: drillPoint }),
+      },
     );
     if (!load.ok) {
       session.dispose();
