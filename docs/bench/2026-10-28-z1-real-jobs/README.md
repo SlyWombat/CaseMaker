@@ -57,6 +57,7 @@ They cover categories the first set did not: a Z1 accuracy sample in aluminium, 
 
 - Main **9538601f** (#744 landed afterwards, at 3cce07a2), `casemaker cut <job> --json --location <bench location>`.
 - **Location:** the desktop app's `location.json`, with each owned cutter's Makera match confirmed as an operator would in Manage → Tools (#732), and the synced `catalogue.json` beside it. `tools/set2/bench_location.py` rebuilds it, and its table lists every owned cutter → Makera id.
+- **Wood:** the three wood jobs (spoon rest, coaster, tray) are cut in PLA, as in set 1, because this shop cuts printed plastics, not wood. Their refusals were the same in hardwood.
 - **Verdicts:** 0 match the photo, 4 partly, 3 fail. `manifest.json` → `set2` holds each card's verdict, sentence, runs and issues.
 
 | Verdict | Jobs |

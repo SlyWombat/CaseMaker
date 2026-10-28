@@ -627,9 +627,6 @@
     "runs": [
      {
       "title": "As drawn: one job, three cutters",
-      "jobs": [
-       "jobs/j19-accuracy-sample.json"
-      ],
       "results": [
        {
         "job": "j19-accuracy-sample",
@@ -642,12 +639,6 @@
      },
      {
       "title": "Split by cutter: skim, details, engraving, cut-out",
-      "jobs": [
-       "jobs/j19-accuracy-sample-a.json",
-       "jobs/j19-accuracy-sample-b.json",
-       "jobs/j19-accuracy-sample-c.json",
-       "jobs/j19-accuracy-sample-z.json"
-      ],
       "results": [
        {
         "job": "j19-accuracy-sample-a",
@@ -707,7 +698,7 @@
    },
    {
     "id": "j20",
-    "title": "Personalised spoon rest, hardwood hexagon",
+    "title": "Personalised spoon rest, a hexagon with a raised letter",
     "category": "tray with raised letter",
     "source": {
      "url": "https://cutrocket.com/p/4htqf68iz0lle",
@@ -717,7 +708,7 @@
     "verdict": "Fails",
     "sentence": "No program. With its four tabs the job is refused because one tab is counted as a loose 38 mm² piece; without tabs, the frame file is refused because it would move outside the machine at Z 0.",
     "modelled": "Read from the maker's Carbide Create file: the 145 mm hexagon, the rest pocket and the handle notch. The file pockets with a 3D component (a sloped floor) that cannot be read here, so the rest is a flat 6 mm pocket around a raised serif M (the photo's letter).",
-    "material": "Hardwood",
+    "material": "PLA (the maker cut hardwood; this shop cuts printed plastics, not wood)",
     "stock": "152.4 × 152.4 × 21.3 mm, 3 mm board",
     "held": "bracket",
     "cutters": "3.175 O-flute",
@@ -729,13 +720,10 @@
     "runs": [
      {
       "title": "As drawn, four tabs",
-      "jobs": [
-       null
-      ],
       "results": [
        {
         "job": "j20-spoon-rest",
-        "exit": "exit=1 wall=1.3s",
+        "exit": "exit=1 wall=1.4s",
         "result": "refused",
         "refusal": "loose-piece: The through cuts leave a piece of the blank (38 mm²) disconnected from the material the mount holds. It can move under the cutter after being freed; leave a connecting bridge of material, move the cut away from the blank’s edges, or add holding tabs.",
         "programs": []
@@ -744,13 +732,10 @@
      },
      {
       "title": "Without tabs",
-      "jobs": [
-       null
-      ],
       "results": [
        {
         "job": "j20-spoon-rest-notabs",
-        "exit": "exit=1 wall=1.8s",
+        "exit": "exit=1 wall=1.7s",
         "result": "refused",
         "refusal": "the frame file has 5 verifier error(s)",
         "programs": []
@@ -761,7 +746,7 @@
    },
    {
     "id": "j21",
-    "title": "Coaster with an epoxy inlay, hardwood",
+    "title": "Coaster with an epoxy inlay",
     "category": "pocket, V-carved name, chamfers, cut-out",
     "source": {
      "url": "https://cutrocket.com/p/qljwa0rs3485g",
@@ -771,7 +756,7 @@
     "verdict": "Fails",
     "sentence": "No program. As one job it ran 15 minutes with no result. Split by cutter, the pocket, the cut-out and the chamfers are each blocked by a frame file outside the machine. The V-carved initial and name are judged as if they started at the top face, not the pocket floor. The house's 3.175 mm chamfer bit reaches 1.5 mm, not the 2–2.5 mm drawn, which is a correct refusal.",
     "modelled": "The first of the file's seven coasters: a ⌀93 pocket 10 mm deep, the initial and the script name V-carved 4 mm into its floor, 45° chamfers on the rim (2.5) and outside (2), cut out at ⌀107. The maker used a 1/4\" end mill and a 1/2\" chamfer bit; the house cutters are used here.",
-    "material": "Hardwood",
+    "material": "PLA (the maker cut hardwood)",
     "stock": "146 × 134 × 22.8 mm, 3 mm board",
     "held": "bracket",
     "cutters": "3.175 O-flute, 0.5 mm 30° engraver, 3.175 mm 90° chamfer",
@@ -783,27 +768,20 @@
     "runs": [
      {
       "title": "As drawn: one job, three cutters",
-      "jobs": [
-       null
-      ],
       "results": [
        {
         "job": "j21-coaster-inlay",
-        "exit": "exit=124 wall=963.8s",
-        "result": "timeout",
-        "detail": null
+        "exit": "exit=124 wall=959.7s",
+        "result": "timeout"
        }
       ]
      },
      {
       "title": "Pocket only",
-      "jobs": [
-       null
-      ],
       "results": [
        {
         "job": "j21-coaster-inlay-a",
-        "exit": "exit=1 wall=75.7s",
+        "exit": "exit=1 wall=88.9s",
         "result": "refused",
         "refusal": "the frame file has 5 verifier error(s)",
         "programs": []
@@ -812,13 +790,10 @@
      },
      {
       "title": "V-carve only",
-      "jobs": [
-       null
-      ],
       "results": [
        {
         "job": "j21-coaster-inlay-b",
-        "exit": "exit=1 wall=19.7s",
+        "exit": "exit=1 wall=16.6s",
         "result": "refused",
         "refusal": "the frame file has 5 verifier error(s)",
         "programs": []
@@ -827,9 +802,6 @@
      },
      {
       "title": "Chamfers at 1.5 mm",
-      "jobs": [
-       null
-      ],
       "results": [
        {
         "job": "j21-coaster-inlay-c-15",
@@ -842,13 +814,10 @@
      },
      {
       "title": "Cut-out only",
-      "jobs": [
-       null
-      ],
       "results": [
        {
         "job": "j21-coaster-inlay-z",
-        "exit": "exit=1 wall=516.2s",
+        "exit": "exit=1 wall=555.7s",
         "result": "refused",
         "refusal": "the frame file has 5 verifier error(s)",
         "programs": []
@@ -869,7 +838,7 @@
     "verdict": "Partly",
     "sentence": "The layout, depths and outline match the photo. The photo's compartments have rounded floors and its outer edge is rounded over; here the floors are flat and the walls square.",
     "modelled": "Estimated from the maker's photo: about 140 × 140 × 18, two square compartments over one wide one, 12 mm deep, 9 mm corner radii.",
-    "material": "Hardwood",
+    "material": "PLA (the maker cut beech)",
     "stock": "150 × 150 × 18 mm, 3 mm board",
     "held": "bracket",
     "cutters": "3.175 O-flute",
@@ -878,13 +847,10 @@
     "runs": [
      {
       "title": "As drawn",
-      "jobs": [
-       "jobs/j22-snack-tray.json"
-      ],
       "results": [
        {
         "job": "j22-snack-tray",
-        "exit": "exit=0 wall=33.6s",
+        "exit": "exit=0 wall=34.4s",
         "result": "generated",
         "refusal": null,
         "programs": [
@@ -923,9 +889,6 @@
     "runs": [
      {
       "title": "As drawn: one job, two cutters",
-      "jobs": [
-       null
-      ],
       "results": [
        {
         "job": "j23-shell-sign",
@@ -938,9 +901,6 @@
      },
      {
       "title": "Lines only",
-      "jobs": [
-       null
-      ],
       "results": [
        {
         "job": "j23-shell-sign-a",
@@ -959,9 +919,6 @@
      },
      {
       "title": "Cut-out with tabs",
-      "jobs": [
-       null
-      ],
       "results": [
        {
         "job": "j23-shell-sign-z",
@@ -974,9 +931,6 @@
      },
      {
       "title": "Cut-out without tabs",
-      "jobs": [
-       null
-      ],
       "results": [
        {
         "job": "j23-shell-sign-z-notabs",
@@ -1020,9 +974,6 @@
     "runs": [
      {
       "title": "As drawn: one job, three cutters",
-      "jobs": [
-       "jobs/j24-spoke-wrench.json"
-      ],
       "results": [
        {
         "job": "j24-spoke-wrench",
@@ -1035,11 +986,6 @@
      },
      {
       "title": "Split: recess and hole, notches, labels",
-      "jobs": [
-       "jobs/j24-spoke-wrench-a.json",
-       "jobs/j24-spoke-wrench-b.json",
-       "jobs/j24-spoke-wrench-c.json"
-      ],
       "results": [
        {
         "job": "j24-spoke-wrench-a",
@@ -1084,15 +1030,11 @@
      },
      {
       "title": "Cut-out",
-      "jobs": [
-       "jobs/j24-spoke-wrench-z.json"
-      ],
       "results": [
        {
         "job": "j24-spoke-wrench-z",
         "exit": "exit=1 wall=99.8s",
-        "result": "crashed",
-        "detail": "RuntimeError: memory access out of bounds"
+        "result": "crashed"
        }
       ]
      }
@@ -1121,9 +1063,6 @@
     "runs": [
      {
       "title": "As drawn: one job, three cutters",
-      "jobs": [
-       "jobs/j25-truing-wrench.json"
-      ],
       "results": [
        {
         "job": "j25-truing-wrench",
@@ -1136,12 +1075,6 @@
      },
      {
       "title": "Split: hole, slot, grooves, cut-out",
-      "jobs": [
-       "jobs/j25-truing-wrench-a.json",
-       "jobs/j25-truing-wrench-b.json",
-       "jobs/j25-truing-wrench-c.json",
-       "jobs/j25-truing-wrench-z.json"
-      ],
       "results": [
        {
         "job": "j25-truing-wrench-a",
@@ -1245,6 +1178,7 @@
     "fx-hex-svg-import",
     "fx-hexv"
    ]
-  }
+  },
+  "note": "Wood jobs (j20 spoon rest, j21 coaster, j22 tray) are cut in PLA, as in set 1: this shop cuts printed plastics, not wood. Their refusals were the same in hardwood."
  }
 }

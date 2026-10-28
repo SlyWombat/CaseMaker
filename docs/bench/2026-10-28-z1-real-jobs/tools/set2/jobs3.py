@@ -127,7 +127,7 @@ def spoonrest():
         if e['geometryType'] == 'regular_polygon': hexr = ps
         elif e['geometryType'] == 'path' and abs(area(ps[0])) > 5000: pocket = ps
         elif e['geometryType'] == 'path': notch = ps
-    j = base('j20-spoon-rest', 152.4, 152.4, 21.3, 'hardwood', O_NM, hold='bracket',
+    j = base('j20-spoon-rest', 152.4, 152.4, 21.3, 'pla', O_NM, hold='bracket',
              clamps=[{"edge": "back", "at": 76}, {"edge": "right", "at": 76}])
     j['sacrificial']['under'] = BOARD(3)
     j['vectors'] = [vector('hex', [ccw(r) for r in hexr], 21.3, construction=True),
@@ -155,7 +155,7 @@ def coaster():
     carve = [r for ps in first('Edmonds carve') for r in ps if abs(area(r)) > 1.0]
     initial = [r for r in carve if abs(area(r)) > 500]
     script = [r for r in carve if abs(area(r)) <= 500]
-    j = base('j21-coaster-inlay', 146, 134, 22.8, 'hardwood', O_NM, hold='bracket',
+    j = base('j21-coaster-inlay', 146, 134, 22.8, 'pla', O_NM, hold='bracket',
              clamps=[{"edge": "back", "at": 73}, {"edge": "right", "at": 67}])
     j['sacrificial']['under'] = BOARD(3)
     j['vectors'] = [vector('pocket', [ccw(r) for r in pocket], 10.0),
@@ -178,7 +178,7 @@ NOTES['j21-coaster-inlay'] = ("Geometry and depths from the maker's file (the fi
 # j22 Square snack tray (Makerables, MakeHaven, CC0). From the photo: about 140 x 140 x 18 beech, two square
 # compartments over one wide one, about 12 deep with large corner radii; cut out with rounded corners.
 def tray():
-    j = base('j22-snack-tray', 150, 150, 18, 'hardwood', O_NM, hold='bracket',
+    j = base('j22-snack-tray', 150, 150, 18, 'pla', O_NM, hold='bracket',
              clamps=[{"edge": "back", "at": 75}, {"edge": "right", "at": 75}])
     j['sacrificial']['under'] = BOARD(3)
     j['shapes'] = [rect('part', 75, 75, 140, 140, 18, r=10, construction=True),
