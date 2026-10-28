@@ -741,3 +741,55 @@ describe('generateGoalProgram — the extra finishing passes reach the program a
     expect(parseEngraveJob(withSha({ pencilCreaseDeg: 0.5 })).ok).toBe(false);
   });
 });
+
+describe('generateSurface3dIR — every hop out of a cut is two moves (#738)', () => {
+  /**
+   * The house rule is stated at `rapidRate` in `ir.ts`: a stroke hops in TWO moves — a Z-only
+   * retract to `HOP_Z` at the end of one stroke, then an XY-only traverse to the next stroke's
+   * start. A rapid that changes X/Y on its way OUT of a cut is a `G0 X.. Z..` that climbs away
+   * diagonally through material standing beside the cut — what the Z1 bench's sweep refused on
+   * j06 (16 rapids) and j07 (5 and 63). Only an operation's ENTRY move may combine axes: it is
+   * move 0 here, and the post times it as travel from the previous operation's `safeZ`.
+   */
+  function combinedRapids(moves: readonly CamMove[], op: string): string[] {
+    const bad: string[] = [];
+    for (let i = 1; i < moves.length; i++) {
+      const m = moves[i]!;
+      const prev = moves[i - 1]!;
+      if (m.kind !== 'rapid' || (m.x === prev.x && m.y === prev.y)) continue;
+      // An XY traverse must start where a rapid already lifted to this same Z.
+      if (prev.kind === 'rapid' && Math.abs(prev.z - m.z) < 1e-9) continue;
+      bad.push(
+        `${op} move ${i}: rapid to (${m.x}, ${m.y}, ${m.z}) from ${prev.kind} (${prev.x}, ${prev.y}, ${prev.z})`,
+      );
+    }
+    return bad;
+  }
+
+  it('the dome’s roughing gaps retract Z-only first — and none of the four passes combines axes', () => {
+    // The dome makes the defect's site inescapable: at a roughing layer the material still to
+    // remove is an ANNULUS, so a raster row cuts, crosses the apex where there is nothing to
+    // remove, and cuts again. That gap is where roughing used to emit `G0 X.. Z..` straight out
+    // of a cut. (A ramp or a step opens at most one gap per row and never re-enters it.)
+    const hf = sampleGoalHeightfield(goal(domeTris(5)), { pitchMm: 0.2 });
+    const { ir, roughing } = generateSurface3dIR({
+      heightfield: hf,
+      tool: BALL,
+      toolObj: flatEndMill(1, { shape: 'ball', name: 'ball' }),
+      toolNumber: 1,
+      spindleRpm: 12000,
+      air: true,
+      feeds: FEEDS,
+      rapid: RAPID,
+      labelId: 'goal-1',
+      opts: { scallop: true, pencil: true },
+    });
+    // The program really does hop out of a cut, or the rule below is vacuous.
+    const hops = roughing.moves.filter(
+      (m, i) => i > 0 && m.kind === 'rapid' && m.z === ir.hopZ && roughing.moves[i - 1]!.kind === 'feed',
+    );
+    expect(hops.length).toBeGreaterThan(0);
+    const bad = ir.operations.flatMap((op) => combinedRapids(op.moves, op.name));
+    expect(bad).toEqual([]);
+  });
+});

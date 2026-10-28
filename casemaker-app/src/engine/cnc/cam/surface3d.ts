@@ -855,6 +855,11 @@ function alongColumns(hf: GoalHeightfield, iStart: number, iEnd: number, alongSt
  * rasters the footprint; at each sample its tip rides at the layer Z, clamped UP to `H + allowance`
  * so it never reaches the goal surface. A sample where the clamp reaches the stock top has no
  * material to remove and opens a gap — the pass retracts and re-enters.
+ *
+ * #738 — every hop out of a cut is TWO moves, as the house rule in `ir.ts` (`rapidRate`) states:
+ * a Z-only retract at the point the cut stopped, then the next span's XY traverse at `hopZ`. A
+ * single `G0 X.. Z..` from a cut depth climbs away diagonally through material the program has
+ * not removed yet, which the geometry check refuses (j06/j07 on the bench).
  */
 function roughingMoves(
   hf: GoalHeightfield,
@@ -888,6 +893,11 @@ function roughingMoves(
   for (let L = topZ - feeds.stepDown; L > deepest + 1e-9; L -= feeds.stepDown) levels.push(L);
   levels.push(deepest); // the final layer rides the allowance surface exactly
   const rows = rasterRows(hf, feeds.roughStepOver);
+  /** #738 — a Z-only retract at the point the cut stopped; the traverse comes after it. */
+  const retract = (z: number): void => {
+    const last = moves[moves.length - 1]!;
+    moves.push({ kind: 'rapid', x: last.x, y: last.y, z });
+  };
 
   for (const L of levels) {
     let flip = false;
@@ -913,20 +923,22 @@ function roughingMoves(
               moves.push({ kind: 'feed', x, y, z: tip, f: feeds.feed });
             }
           } else if (open) {
-            moves.push({ kind: 'rapid', x, y, z: hopZ });
+            // Lift clear where the cut stopped. The rapid to the current (no-material) column
+            // is gone: the next span's start traverse already runs at `hopZ` from here, and going
+            // to the gap first would have meant lifting diagonally to reach it (#738).
+            retract(hopZ);
             open = false;
           }
         }
         if (open) {
           // Retract at the run's end.
-          const last = moves[moves.length - 1]!;
-          moves.push({ kind: 'rapid', x: last.x, y: last.y, z: hopZ });
+          retract(hopZ);
         }
       }
       flip = !flip;
     }
   }
-  if (moves.length > 0) moves.push({ kind: 'rapid', x: moves[moves.length - 1]!.x, y: moves[moves.length - 1]!.y, z: safeZ });
+  if (moves.length > 0) retract(safeZ);
   return { moves, layers: levels.length };
 }
 

@@ -6,6 +6,10 @@
 // rewrites them. The bench's own location document is not committed (it is the operator's machine),
 // so the cutters those jobs name are built here from the same inventory entries the exercise used.
 // The rest of the document is the committed test fixture.
+//
+// #738 — the follow-up exercise's jobs (`2026-10-28-z1-real-jobs`) join the same harness: the
+// relief jobs' rapids-through-stock refusal was a surfacing CAM defect, and the tool tray was the
+// #734 item-1 false positive. Their two ball-nose cutters are added to the same location document.
 
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -30,6 +34,7 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const APP = join(HERE, '..', '..');
 const REPO = join(APP, '..');
 const JOBS = join(REPO, 'docs', 'bench', '2026-10-27-z1-typical-jobs', 'jobs');
+const REAL_JOBS = join(REPO, 'docs', 'bench', '2026-10-28-z1-real-jobs', 'jobs');
 const LOCATION_FIXTURE = join(HERE, 'fixtures', 'location-doc.json');
 
 const SCRATCH = mkdtempSync(join(tmpdir(), 'casemaker-bench-734-'));
@@ -122,6 +127,57 @@ const BENCH_CUTTERS = [
     addedAt: '2026-10-27T00:00:00.000Z',
     notes: null,
   },
+  // #738 — the real-jobs exercise's ball noses, as `2026-10-28-z1-real-jobs` used them.
+  {
+    id: 'kz-ball-nose-2-12',
+    tool: {
+      number: null,
+      id: null,
+      name: 'Two Flute Ball Nose Bit - 1/8" Shank 2mm * 12mm',
+      typeText: 'Ball Nose',
+      shape: 'ball',
+      handleDiameter: 3.175,
+      tipDiameter: 2,
+      diameter: 3.175,
+      cornerRadius: 1,
+      angle: null,
+      halfAngle: null,
+      fluteLength: 12,
+      shoulderLength: null,
+      stickout: null,
+      centreCutting: null,
+    },
+    origin: null,
+    quantity: 1,
+    codes: [],
+    addedAt: '2026-10-12T00:00:00.000Z',
+    notes: null,
+  },
+  {
+    id: 'kz-ball-nose-1-4',
+    tool: {
+      number: null,
+      id: null,
+      name: 'Two Flute Ball Nose Bit - 1/8" Shank 1mm * 4mm',
+      typeText: 'Ball Nose',
+      shape: 'ball',
+      handleDiameter: 3.175,
+      tipDiameter: 1,
+      diameter: 3.175,
+      cornerRadius: 0.5,
+      angle: null,
+      halfAngle: null,
+      fluteLength: 4,
+      shoulderLength: null,
+      stickout: null,
+      centreCutting: null,
+    },
+    origin: null,
+    quantity: 1,
+    codes: [],
+    addedAt: '2026-10-12T00:00:00.000Z',
+    notes: null,
+  },
 ];
 
 let locationPath: string | null = null;
@@ -143,7 +199,7 @@ interface Run {
 }
 
 /** Run `casemaker cut <job>` the way the CLI does, capturing its receipt and progress lines. */
-async function cut(jobFile: string): Promise<Run> {
+async function cut(jobFile: string, jobsDir: string = JOBS): Promise<Run> {
   const outDir = join(SCRATCH, jobFile.replace(/\.json$/, ''));
   mkdirSync(outDir, { recursive: true });
   let receipt: Receipt | null = null;
@@ -158,7 +214,7 @@ async function cut(jobFile: string): Promise<Run> {
     },
   };
   const code = await engraveJobMain(
-    [asArg(join(JOBS, jobFile)), '--out', outDir, '--location', asArg(benchLocation())],
+    [asArg(join(jobsDir, jobFile)), '--out', outDir, '--location', asArg(benchLocation())],
     options,
   );
   expect(receipt, 'the command must emit a receipt, even on a refusal').not.toBeNull();
@@ -247,5 +303,50 @@ describe('#734 the typical jobs run clean through the cut pipeline', () => {
     expect(errors, 'the bench job must cut without an error diagnostic').toEqual([]);
     expect(code, 'a clean job must complete, not be refused').toBe(0);
     expect(elapsed, `cut took ${elapsed} ms`).toBeLessThan(BUDGET_MS);
+  }, 150_000);
+});
+
+// #738 — THE REAL JOBS' RAPIDS. The bench refused four jobs for `rapid-through-stock`. Splitting
+// the refusal by cause is the point of these tests:
+//
+//   j13 tool tray (10 rapids) — #734 item 1's false positive, not a CAM defect: a taped through
+//     cut reaches `thickness + breakthrough`, and the sweep's floor was the blank's bottom. The
+//     fix that passes `breakthroughMm` to the sweep clears it; it is pinned here so it cannot
+//     regress.
+//   j06 wolf and j07 photo relief (16, 5 and 63 rapids) — ONE genuine surfacing CAM defect:
+//     `roughingMoves` emerged from a gap with a single `G0 X.. Z..` rapid instead of the house
+//     two-move hop (a Z-only retract, then the XY traverse at `HOP_Z`), so the tool climbed away
+//     diagonally through material still standing beside the cut. Both goals run through the same
+//     `surface3d.ts` pass. j06's STL bytes are deliberately not committed (the exercise README
+//     says how to rebuild them), so its committed job cannot be surfaced by a test; the IR-level
+//     rule is asserted for the same code path in `surface3d.spec.ts`.
+//
+// The exercise ran each job under a 600 s timeout. The surfacing jobs measured here generate in
+// 1.3–2.0 s and sweep in 5.8–6.6 s (j06's uncommitted bench copy: 10.5 s), so 150 s is ample.
+describe('#738 the real jobs leave no rapid through material', () => {
+  it('j07 photo relief (2 mm ball): a gap retract lifts before it travels', async () => {
+    // Recorded: "5 rapids pass through material still present ... (first at line 72655)", that
+    // line being `G0 X49.5 Z1` straight out of `G1 X49.6 Z-0.794`.
+    const { code, receipt } = await cut('j07-photo-relief.json', REAL_JOBS);
+    const rapid = receipt.diagnostics.filter((d) => d.code === 'rapid-through-stock');
+    expect(rapid, 'the rapids the bench recorded must not come back').toEqual([]);
+    expect(code, 'a clean job must not be refused by its own simulation').toBe(0);
+  }, 150_000);
+
+  it('j07 photo relief (1 mm ball): the same roughing hop at the finer cutter', async () => {
+    // Recorded: 63 rapids, first at line 26169.
+    const { code, receipt } = await cut('j07-photo-relief-1mm-ball.json', REAL_JOBS);
+    const rapid = receipt.diagnostics.filter((d) => d.code === 'rapid-through-stock');
+    expect(rapid, 'the rapids the bench recorded must not come back').toEqual([]);
+    expect(code, 'a clean job must not be refused by its own simulation').toBe(0);
+  }, 150_000);
+
+  it('j13 tool tray: the through cuts’ breakthrough keeps the sweep’s floor below them', async () => {
+    // Recorded: 10 rapids. This job is 2.5D (no surfacing): its refusals were #734 item 1's false
+    // positive, and this test pins the `breakthroughMm` plumbing that cleared them.
+    const { code, receipt } = await cut('j13-tool-tray.json', REAL_JOBS);
+    const rapid = receipt.diagnostics.filter((d) => d.code === 'rapid-through-stock');
+    expect(rapid, 'the rapids the bench recorded must not come back').toEqual([]);
+    expect(code, 'a clean job must not be refused by its own simulation').toBe(0);
   }, 150_000);
 });
