@@ -21,6 +21,20 @@ export function rowSummary(value: number, unit = 'mm'): string {
 }
 
 /**
+ * #726 P13 — an operation name as the ROW shows it, never as the program exports it.
+ *
+ * `itemOperationName` (`engine/cnc/engrave/partPlan.ts`) is the exported name: the program's
+ * `;@MKR|TOOLPATH` comment and the run sheet quote it verbatim, and the verified bench files were
+ * cut with those exact bytes. The row is for the operator, and `Pocket rect` reads as jargon
+ * beside the shape's own fields, so the display layer says `Rectangle pocket` instead. The map
+ * lives HERE so a wording change on the row cannot drift into the exported name. Only the leading
+ * descriptor changes; a user-given name and the dimensions are the operation's own facts.
+ */
+export function rowOperationName(exported: string): string {
+  return exported.replace(/^Pocket rect(?=\s|$)/, 'Rectangle pocket');
+}
+
+/**
  * The intent word that follows the number on the same line (#170, §5.3's list): `surface`,
  * `reveal`, or nothing at all.
  *

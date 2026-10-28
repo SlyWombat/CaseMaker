@@ -29,7 +29,7 @@ import {
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { MARGIN_DEFAULTS, checkBounds, splitBound } from '@/engine/cnc/engrave/depthBounds';
 import { assessSurfaceSpread } from '@/engine/cnc/engrave/surfaceSpread';
-import { jobDepthLimit } from '@/engine/cnc/engrave/partPlan';
+import { itemOperationName, jobDepthLimit } from '@/engine/cnc/engrave/partPlan';
 import { BADGE_POCKET_KEEP_OUT_ID, badgeBlankFor } from '@/engine/cnc/engrave/fromBadge';
 import { defaultBadgeParams, type BadgeParams } from '@/types/badge';
 import { parseEngraveJob } from '@/store/engraveJobSchema';
@@ -424,6 +424,36 @@ describe('EngravePanel (#205)', () => {
     expect(field('engrave-target-y-0')).toBe('Ymm');
     expect(field('engrave-target-z-0')).toBe('Zmm');
     expect(field('engrave-target-rotation-0')).toBe('rot°');
+  });
+
+  it('#726 P13 — the row shows a plain name; the exported operation name is unchanged', () => {
+    const base = defaultEngraveJob();
+    const shape: EngraveShape = {
+      id: 'shape-1',
+      name: 'Tray',
+      kind: 'rect',
+      position: { x: 50, y: 40 },
+      rotation: 0,
+      enabled: true,
+      width: 70,
+      height: 30,
+      cornerRadius: 2,
+      depth: 2,
+    };
+    act(() => {
+      useEngraveJobStore.setState({ job: { ...base, shapes: [shape] } });
+    });
+    render(<EngravePanel />);
+
+    // The operator reads a plain word on the row …
+    const row = screen.getByTestId('engrave-shape-row-0').textContent ?? '';
+    expect(row).toContain('Rectangle pocket "Tray" 70×30');
+    expect(row).not.toContain('Pocket rect');
+
+    // … while the EXPORTED name — what the program's ;@MKR|TOOLPATH line and the run sheet quote
+    // verbatim, and the verified bench files were cut with — stays exactly as it was. The map is
+    // at the display layer, not in partPlan's naming.
+    expect(itemOperationName(shape)).toBe('Pocket rect "Tray" 70×30');
   });
 
   it('updates the “strokes thinner than” hint when the tool changes', () => {

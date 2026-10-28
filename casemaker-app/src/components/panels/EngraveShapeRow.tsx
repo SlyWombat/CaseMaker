@@ -3,7 +3,7 @@ import { EngraveItemRow } from '@/components/panels/EngraveItemRow';
 import { RestCutterControl, type RestChoice } from '@/components/panels/RestCutterControl';
 import { itemOperationName } from '@/engine/cnc/engrave/partPlan';
 import { regionChipLabel, useRegionOperationType } from '@/components/panels/operationTypes';
-import { rowSummary } from '@/components/panels/engraveRowText';
+import { rowOperationName, rowSummary } from '@/components/panels/engraveRowText';
 import type { JobFinding } from '@/engine/cnc/engrave/jobSetup';
 import type { ShapePatch } from '@/store/engraveJobStore';
 import type { EngraveShape, TexturePattern } from '@/types/engraveJob';
@@ -235,13 +235,15 @@ export function EngraveShapeRow({
               ? 'V-carve (variable)'
               : regionChipLabel(shape.through, region)
       }
-      name={
+      // #726 P13 — the row shows the display name; the program and run sheet keep the exported
+      // one (`rowOperationName` maps only the descriptor, at the display layer).
+      name={rowOperationName(
         raisePrism
           ? itemOperationName(shape, 'Prism')
           : shape.texture === undefined
             ? itemOperationName(shape)
-            : textureOperationName(mark?.pattern ?? shape.texture.pattern)
-      }
+            : textureOperationName(mark?.pattern ?? shape.texture.pattern),
+      )}
       summary={shape.through === true ? 'through' : rowSummary(shape.depth)}
       enabled={shape.enabled}
       enabledTitle="A disabled shape is kept in the job but not cut."
