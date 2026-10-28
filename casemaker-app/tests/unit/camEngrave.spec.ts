@@ -17,8 +17,8 @@ import { flatEndMill } from '@/engine/cnc/tool';
 import { Z1 } from '@/engine/cnc/machine';
 import type { CutParams } from '@/engine/cnc/feeds';
 import { postZ1, type PostContext } from '@/engine/cnc/post/z1';
-import type { EngraveLabel, EngraveShape } from '@/types/engraveJob';
-import { itemOperationName, labelProfile } from '@/engine/cnc/engrave/partPlan';
+import type { EngraveCutout, EngraveLabel, EngraveShape } from '@/types/engraveJob';
+import { cutoutOperationName, itemOperationName, labelProfile } from '@/engine/cnc/engrave/partPlan';
 import { engravableProfile } from '@/engine/cnc/engrave/engravable';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { executeProfile } from '@/workers/geometry/evaluateOp';
@@ -322,6 +322,20 @@ describe('operation names (#214 work item 4)', () => {
       ],
     };
     expect(itemOperationName(poly)).toBe('Pocket polygon (4 points)');
+  });
+
+  it('#726 P13 — a cut-out states its inset as a number and a unit, not one word', () => {
+    const cutout: EngraveCutout = {
+      kind: 'cutout',
+      id: 'c',
+      enabled: true,
+      of: 'stock-inset',
+      side: 'outside',
+      inset: 0,
+      tabs: { count: 4, width: 4, height: 1 },
+    };
+    // "inset 0mm" read as one word; every other length in the app has the space.
+    expect(cutoutOperationName(cutout, null)).toBe('Cut out outside stock inset 0 mm');
   });
 
   it("composes the region's ready-made name into the IR and the emitted .nc TOOLPATH line", () => {

@@ -2446,7 +2446,7 @@ describe('through-cuts and cut-outs (#218)', () => {
       cutouts: [
         {
           id: 'cut-1',
-          name: 'Cut out "Badge" inside stock inset 5mm',
+          name: 'Cut out "Badge" inside stock inset 5 mm',
           tabs: { count: 4, widthMm: 4, heightMm: 1 },
           spans: 4,
           unplaceable: 0,
@@ -2465,7 +2465,7 @@ describe('through-cuts and cut-outs (#218)', () => {
     // The tab removal is its OWN step and names the count and dimensions.
     expect(text).toContain('Only after the program ends');
     expect(text).toContain('4 tabs to cut by hand');
-    expect(text).toContain('Cut out "Badge" inside stock inset 5mm: 4 tabs, 4 mm wide and 1 mm high');
+    expect(text).toContain('Cut out "Badge" inside stock inset 5 mm: 4 tabs, 4 mm wide and 1 mm high');
   });
 
   it('the oracle predicts the material an interrupted pass LEAVES, not a square tab (#218)', () => {

@@ -538,9 +538,9 @@ function primitiveProfile(primitive: EngravePrimitive): Profile {
 
 /**
  * The operation name a profile cut-out reads (#218): `Cut out "badge" outside Pocket rect
- * 30×20`, or for the blank's own edge `Cut out stock inset 3mm`. It parallels
- * `itemOperationName`, but the referenced item's name is supplied by the caller because the
- * cut-out itself holds only an id.
+ * 30×20`, or for the blank's own edge `Cut out stock inset 3 mm` (#726 P13 — the unit is a
+ * separate word, as it is on every other length). It parallels `itemOperationName`, but the
+ * referenced item's name is supplied by the caller because the cut-out itself holds only an id.
  */
 /**
  * The operation's display name for a chamfer (#669) — the descriptor only, without the `[T#]`
@@ -556,7 +556,7 @@ export function cutoutOperationName(cutout: EngraveCutout, targetName: string | 
   const named = cutout.name ? ` "${cutout.name}"` : '';
   const target =
     cutout.of === 'stock-inset'
-      ? `stock inset ${cutout.inset}mm`
+      ? `stock inset ${cutout.inset} mm`
       : (targetName ?? 'referenced item');
   return `Cut out${named} ${cutout.side} ${target}`;
 }
