@@ -784,9 +784,11 @@ describe('recommendTool — the computed pick states its size and its material r
       }),
       provenance: 'k3 house inventory',
     });
-    // A plastic row for each, so #455 and the feeds pre-filter pass both cutters: the ONLY thing
-    // that separates them in this fixture is the job's own material gate.
-    const gateCatalogue = [plasticRow(METAL_PLA_ID), plasticRow(PLAIN_PLA_ID)];
+    // A plastic row for the PLAIN cutter, so #455 and the feeds pre-filter pass it. The metal
+    // cutter deliberately has no PLA row: a catalogue row rating it for plastic is what WAIVES the
+    // #572 gate now (#732 — a refusal Makera would not make is our gap), so the fixture keeps the
+    // gate live by not claiming Makera rates this bit for PLA.
+    const gateCatalogue = [plasticRow(PLAIN_PLA_ID)];
 
     it('picks the plain 1 mm flat, and the metal one carries its own refusal', () => {
       const rec = recommendTool(badgeJob(), [metalFlat(), plainFlat()], gateCatalogue, (_key) => [

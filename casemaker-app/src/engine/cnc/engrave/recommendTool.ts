@@ -558,8 +558,11 @@ export function recommendTool(
     // the plain one and Generate then refused it on PLA. The predicate is the SAME one the
     // program uses (`cutterRefusedOnMaterial`), so this filter and the finding cannot disagree;
     // and the operator's double-confirmed override (#572) keeps the cutter in the list, because
-    // the job's gate allows it then.
-    if (cutterRefusedOnMaterial(tool, job.stock.material, job.metalLineOverride)) {
+    // the job's gate allows it then. #732 — a pair Makera's catalogue has a feed row for is not
+    // refused at all; the coverage computed once here is the same verdict `catalogueStandingFor`
+    // uses below, so the two cannot disagree about what the catalogue covers.
+    const coverage = catalogueCoverageFor(catalogue, job.stock.material, tool);
+    if (cutterRefusedOnMaterial(tool, job.stock.material, job.metalLineOverride, coverage.kind === 'covered')) {
       return {
         ...base,
         qualifies: false,
@@ -581,11 +584,7 @@ export function recommendTool(
     // material words in `catalogueNote`; an owned cutter it cannot name stays in with the note. The
     // rest-pair's second tool comes from these same survivors (`finerThan`), so the rule covers it
     // without a second copy.
-    const catalogueStanding = catalogueStandingFor(
-      catalogueCoverageFor(catalogue, job.stock.material, tool),
-      job.stock.material,
-      tool.name,
-    );
+    const catalogueStanding = catalogueStandingFor(coverage, job.stock.material, tool.name);
     if (!catalogueStanding.recommend) {
       return {
         ...base,

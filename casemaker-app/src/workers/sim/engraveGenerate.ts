@@ -42,7 +42,7 @@ import { segmentsForRadius } from '@/engine/compiler/arcResolution';
 import { version as CAM_VERSION } from '../../../package.json';
 import type { MillProfile } from '@/engine/cnc/machine';
 import { jobMachine, type MachineCalibration } from '@/engine/cnc/calibration';
-import { feedsFor, type FeedsEntry, type FeedsResult, type FeedCatalogueRow } from '@/engine/cnc/feeds';
+import { catalogueCoverageFor, feedsFor, type FeedsEntry, type FeedsResult, type FeedCatalogueRow } from '@/engine/cnc/feeds';
 import {
   cuttingDiameter,
   cuttingForTrace,
@@ -894,8 +894,14 @@ function cutterWords(toolKey: string): string | null {
   return entry === null ? null : toolDisplayName(entry.tool);
 }
 
-function metalLineFindings(job: EngraveJob, tool: Tool | null): JobFinding[] {
-  if (tool === null || !cutterOnMetalLine(tool, job.stock.material)) return [];
+function metalLineFindings(job: EngraveJob, tool: Tool | null, catalogue: readonly FeedCatalogueRow[]): JobFinding[] {
+  if (tool === null) return [];
+  // #732 — the finding is not raised for a pair the vendor's catalogue RATES: a `covered` row is
+  // Makera's own feed row for this cutter on this material (direct, or through the labelled plastic
+  // mapping), and the finding's premise — "no feed row was written for it on this material" — is
+  // then false. The coverage rule is `catalogueCoverageFor`, the same one the feeds resolve with.
+  const covered = catalogueCoverageFor(catalogue, job.stock.material, tool).kind === 'covered';
+  if (!cutterOnMetalLine(tool, job.stock.material, covered)) return [];
   const overridden = job.metalLineOverride === true;
   return [
     {
@@ -1688,7 +1694,7 @@ export function engraveRegions(
     // job.
     ...rotaryJobFindings(job, plan, measured),
     ...engFindings,
-    ...metalLineFindings(job, tool),
+    ...metalLineFindings(job, tool, catalogue),
     ...carveFindings,
     ...voidFindings,
     // #345 — every item judged against every bound under its footprint: the split on the side its

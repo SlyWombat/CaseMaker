@@ -50,6 +50,7 @@ import { useToolRegistryStore } from '@/store/toolRegistryStore';
 import { formatDay, mm } from './display';
 import { cloneOf, useSelectedEntry, useSelectedItem } from './selection';
 import { CutterFields } from './doors/CutterFields';
+import { MakeraMatch } from './MakeraMatch';
 import { RegisterDoor } from './RegisterDoor';
 import { ToolCopies } from './ToolCopies';
 
@@ -254,6 +255,11 @@ function Detail({ entry, item }: { entry: ToolLibraryEntry; item: InventoryItem 
           item={item}
         />
       )}
+      {/* #732 — which Makera cutter this possession physically is. The id is suggested from the
+          row's own evidence and saved only on the operator's confirmation; the feeds read it off
+          `item.tool.id` (`withMakeraId`), so this block is the one place a silent match could have
+          happened and the one place it cannot. */}
+      {item !== null && <MakeraMatch item={item} />}
       {/* #415 — the copies (condition, where each is) and the collet fits. Keyed on what it is seeded
           from, as the editor above is. */}
       {item !== null && (

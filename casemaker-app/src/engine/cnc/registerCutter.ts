@@ -20,7 +20,7 @@
 
 import type { Coded, HouseHealth, InventoryItem, Origin } from '@/platform/houseClient';
 import { newId } from '@/utils/id';
-import { isMetalCutterName, shapeFromType, type Tool, type ToolShape } from './tool';
+import { isMetalCutterName, shapeFromType, statedCuttingSize, vendorId, type Tool, type ToolShape } from './tool';
 import type { ToolLibraryEntry } from './toolLibrary';
 import { catalogueIdOf, tierOf } from './toolTiers';
 import { vFluteLength } from './vProfile';
@@ -344,7 +344,7 @@ export function isMetalTool(tool: Tool): boolean {
 }
 
 /**
- * What the user's code names: a cutter they already have, catalogue rows that fit it, or nothing.
+ * Whether a catalogue row fits a box reading.
  *
  * **The candidate rule, decided (#309 "ask first"): match on the tip and let the user pick; ignore
  * the flute.** The label's two numbers are not the same kind of statement as a catalogue row's: the
@@ -355,6 +355,44 @@ export function isMetalTool(tool: Tool): boolean {
  * the tip over-suggests instead, and the mockup (G2) already draws that outcome: two rows fit, pick
  * the one on the label. `shape` is matched when the label named one — a word we could not read
  * leaves the shape free rather than excluding every row.
+ *
+ * ONE statement of the rule, shared by the Scan door ({@link resolveCode}) and the owned cutter's
+ * Makera match ({@link suggestMakeraMatch}): an owned row that was registered from a box must
+ * suggest the same rows the box's own scan would have. A second fit rule would be a second answer
+ * to "which Makera cutter is this".
+ */
+function fitsReading(entry: ToolLibraryEntry, reading: BoxCode): boolean {
+  if (tierOf(entry.key) !== 'catalogue') return false;
+  if (reading.shape !== 'unknown' && entry.tool.shape !== reading.shape) return false;
+  // A label that stated no tip cannot be narrowed by it; the user picks.
+  return reading.tipDiameter === null || sameLength(entry.tool.tipDiameter, reading.tipDiameter);
+}
+
+/**
+ * The catalogue rows that fit a reading, the same Makera line AHEAD of the other.
+ *
+ * The box says which LINE it is, and the two lines are different cutters — a bit ground for
+ * aluminium is not the one a PLA job wants, and its dimensions do not tell them apart — so the
+ * same line is offered ahead of the other when both fit (#379 review).
+ *
+ * AHEAD OF, not instead of, and this is now the code rather than the comment: the list was once
+ * `sameLine.length > 0 ? sameLine : fits`, which dropped every row on the other line as soon as
+ * one row matched — so a metal box hid a plain row, and a metal row whose NAME states no line (a
+ * clone under a house name, or a catalogue row that does not use Makera's `(Metal)` convention,
+ * #398) was hidden from a metal box. Ranked second is not hidden: `rows.length === fits.length`,
+ * so the rule that does not bend still holds — there is always one to pick, which is also why the
+ * flute is ignored above.
+ */
+function rowsForReading(entries: readonly ToolLibraryEntry[], reading: BoxCode): ToolLibraryEntry[] {
+  const fits = entries.filter((entry) => fitsReading(entry, reading));
+  return [
+    ...fits.filter((entry) => isMetalRow(entry) === reading.metal),
+    ...fits.filter((entry) => isMetalRow(entry) !== reading.metal),
+  ];
+}
+
+/**
+ * What the user's code names: a cutter they already have, catalogue rows that fit it, or nothing.
  */
 export function resolveCode(
   value: string,
@@ -367,30 +405,126 @@ export function resolveCode(
   const prefill = parseBoxCode(value);
   if (!prefill) return { kind: 'unknown', prefill: null };
 
-  const fits = entries.filter((entry) => {
-    if (tierOf(entry.key) !== 'catalogue') return false;
-    if (prefill.shape !== 'unknown' && entry.tool.shape !== prefill.shape) return false;
-    // A label that stated no tip cannot be narrowed by it; the user picks.
-    return prefill.tipDiameter === null || sameLength(entry.tool.tipDiameter, prefill.tipDiameter);
-  });
-
-  // The box says which LINE it is, and the two lines are different cutters — a bit ground for
-  // aluminium is not the one a PLA job wants, and its dimensions do not tell them apart — so the
-  // same line is offered AHEAD of the other when both fit (#379 review).
-  //
-  // AHEAD OF, not instead of, and this is now the code rather than the comment: the list was once
-  // `sameLine.length > 0 ? sameLine : fits`, which dropped every row on the other line as soon as
-  // one row matched — so a metal box hid a plain row, and a metal row whose NAME states no line (a
-  // clone under a house name, or a catalogue row that does not use Makera's `(Metal)` convention,
-  // #398) was hidden from a metal box. Ranked second is not hidden: `rows.length === fits.length`,
-  // so the rule that does not bend still holds — there is always one to pick, which is also why the
-  // flute is ignored above.
-  const rows = [
-    ...fits.filter((entry) => isMetalRow(entry) === prefill.metal),
-    ...fits.filter((entry) => isMetalRow(entry) !== prefill.metal),
-  ];
-
+  const rows = rowsForReading(entries, prefill);
   return rows.length > 0 ? { kind: 'candidates', rows, prefill } : { kind: 'unknown', prefill };
+}
+
+/** One catalogue row offered as the Makera cutter an owned row physically is (#732). */
+export interface MakeraMatch {
+  /** The catalogue row — `cat:<catalogue uuid>`. Its `tool.id` is Makera's own `g_ID`. */
+  entry: ToolLibraryEntry;
+  /**
+   * The `g_ID` an operator's confirmation stores on the inventory row (`item.tool.id`). Never
+   * null: a row with no `g_ID` cannot be named by a feed row either (`catalogueCoverageFor`),
+   * so offering it would be offering a match that changes nothing.
+   */
+  cutterId: string;
+  /** Whether the row is on the same Makera line as the cutter's evidence. Ranked first, not a filter. */
+  sameLine: boolean;
+}
+
+/** What an owned cutter's own evidence suggests, and where the evidence came from (#732). */
+export interface MakeraSuggestion {
+  /** What was read, in the box code's vocabulary — a code's reading, or the record's own fields. */
+  reading: BoxCode;
+  /**
+   * `'code'` when a printed code supplied the reading; `'tool'` when the record's own shape, tip
+   * and metal line did. The panel says which, because a code is the box's word and a record is the
+   * operator's.
+   */
+  from: 'code' | 'tool';
+  /** The code the reading came from, when `from === 'code'`. */
+  code: string | null;
+  /** Catalogue rows that fit, the same line first. Possibly empty. */
+  matches: readonly MakeraMatch[];
+}
+
+/**
+ * The Makera cutters an owned row could be (#732, maintainer decision 2026-10-28).
+ *
+ * **SUGGESTS, NEVER MATCHES.** The answer is drawn and the operator confirms one row; nothing here
+ * writes, and no caller may store a match the operator did not choose. A physical cutter's label
+ * and its Makera catalogue row are two statements of the same bit, and only the person holding the
+ * box can say they are.
+ *
+ * The evidence is the cutter's OWN, in this order:
+ *
+ *   1. a PRINTED CODE on the row (`InventoryItem.codes`), read by {@link parseBoxCode} — the same
+ *      reader the Scan door uses, never a second parser;
+ *   2. failing a readable code, the record itself: its shape, its tip (`statedCuttingSize`) and
+ *      its metal line (`isMetalTool`), written into the same {@link BoxCode} so the fit rule above
+ *      applies unchanged.
+ *
+ * The fit is then {@link rowsForReading}'s: shape and tip, same Makera line first. The box's flute
+ * and angle are shown in the reading but do not narrow — the rule #309 settled, and the reason a
+ * single disagreement cannot hide the right row.
+ *
+ * `null` when there is nothing to suggest: the row already carries a confirmed id (`vendorId`), or
+ * its record states neither a readable shape nor a tip. A catalogue row with no `g_ID` is never
+ * offered: storing it could not match a feed row.
+ */
+export function suggestMakeraMatch(
+  item: InventoryItem,
+  entries: readonly ToolLibraryEntry[],
+): MakeraSuggestion | null {
+  // Already confirmed: the rail shows the id and a way to clear it, not a list to pick from again.
+  if (vendorId(item.tool) !== null) return null;
+
+  let reading: BoxCode;
+  let from: 'code' | 'tool';
+  let code: string | null = null;
+  const printed = item.codes
+    .map((coded) => ({ code: coded.value.trim(), reading: parseBoxCode(coded.value) }))
+    .find((candidate): candidate is { code: string; reading: BoxCode } => candidate.reading !== null);
+  if (printed) {
+    reading = printed.reading;
+    from = 'code';
+    code = printed.code;
+  } else {
+    const tool = item.tool;
+    const tip = statedCuttingSize(tool);
+    // Nothing names a cutter: an unknown shape with no cutting size is not evidence, and every
+    // catalogue row would be "a match".
+    if (tool.shape === 'unknown' && tip === null) return null;
+    reading = {
+      shape: tool.shape,
+      metal: isMetalTool(tool),
+      tipDiameter: tip,
+      fluteLength: tool.fluteLength,
+      // The label prints the INCLUDED angle; the record keeps an engraver's half angle and a
+      // chamfer's straight one (see {@link BoxCode.includedAngle}).
+      includedAngle:
+        tool.shape === 'engraving' && tool.halfAngle !== null ? tool.halfAngle * 2 : tool.angle,
+      threadSpec: null,
+    };
+    from = 'tool';
+  }
+
+  const matches = rowsForReading(entries, reading)
+    .filter((entry) => vendorId(entry.tool) !== null)
+    .map((entry) => ({
+      entry,
+      cutterId: vendorId(entry.tool) as string,
+      sameLine: isMetalRow(entry) === reading.metal,
+    }));
+  return { reading, from, code, matches };
+}
+
+/**
+ * The inventory row with Makera's own cutter id confirmed (or cleared) (#732).
+ *
+ * THE ID LIVES ON `tool.id`, deliberately — the field `vendorId` reads for every consumer that
+ * asks "which Makera cutter is this": `feeds.catalogueCoverageFor`, the `.nc` header
+ * (`post/z1.ts`) and the header matcher. A second field on the inventory row would be a second
+ * home for one fact, and the service's Zod/Rust schemas already carry this one. `Origin.id` is a
+ * different id — Studio's catalogue row UUID — and stays where it is.
+ *
+ * The whole row is returned so the caller PATCHes it with the rest of the possession untouched;
+ * `null` clears a wrong match, and feeds go back to saying the cutter carries no Makera id until
+ * the operator confirms another.
+ */
+export function withMakeraId(item: InventoryItem, cutterId: string | null): InventoryItem {
+  return { ...item, tool: { ...item.tool, id: cutterId } };
 }
 
 /** What the Scan door knows about a cutter it is about to register. */
