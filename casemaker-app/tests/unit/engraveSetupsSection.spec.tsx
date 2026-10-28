@@ -369,6 +369,8 @@ describe('#471 registration — planned only after approval, refused with the en
 
     expect(screen.getByTestId('engrave-setup-reg-unplanned-1')).toBeTruthy();
     fireEvent.click(screen.getByTestId('engrave-setups-use-typed-seat'));
+    // #726 P6 — the expert seat is a machine Z, and says so in millimetres.
+    expect(screen.getByTestId('engrave-setup-seat-1').closest('label')?.textContent).toContain('mm');
     fireEvent.change(screen.getByTestId('engrave-setup-seat-1'), { target: { value: '-66' } });
     fireEvent.click(screen.getByTestId('engrave-setup-plan-reg-1'));
     expect(screen.getByTestId('engrave-setup-reg-summary-1').textContent).toContain('Home, fit the wired probe');

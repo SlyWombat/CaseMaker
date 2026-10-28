@@ -430,6 +430,8 @@ export function EngraveSetupRow(props: EngraveSetupRowProps): JSX.Element {
                           setPreview(null);
                         }}
                       />
+                      {/* #726 P6 — the seat is a machine Z, millimetres like every other length. */}
+                      <span>mm</span>
                       <span style={{ ...MUTED, margin: 0 }}>
                         {seatHint}
                       </span>

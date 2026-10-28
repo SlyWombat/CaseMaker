@@ -129,6 +129,8 @@ export function EngraveTraceRow({
           if (Number.isFinite(v)) onChange({ [key]: v } as TracePatch);
         }}
       />
+      {/* #726 P6 — cap height is millimetres, rotation degrees. */}
+      <span>{key === 'rotation' ? '°' : 'mm'}</span>
     </label>
   );
 
@@ -152,6 +154,7 @@ export function EngraveTraceRow({
           if (Number.isFinite(v)) onChange({ position: { ...trace.position, [axis]: v } });
         }}
       />
+      <span>mm</span>
     </label>
   );
 

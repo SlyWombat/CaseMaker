@@ -103,6 +103,7 @@ export function EngravePrimitiveRow({
           if (Number.isFinite(v)) onChange({ position: { [axis]: v } });
         }}
       />
+      <span>mm</span>
     </label>
   );
 
@@ -144,6 +145,8 @@ export function EngravePrimitiveRow({
             onChange({ [field]: v } as PrimitivePatch);
           }}
         />
+        {/* #726 P6 — width, height and every diameter are millimetres, like the position beside them. */}
+        <span>mm</span>
       </label>
     );
   };
@@ -201,6 +204,7 @@ export function EngravePrimitiveRow({
               if (Number.isFinite(v)) onChange({ rotation: v });
             }}
           />
+          <span>°</span>
         </label>
         <label style={FIELD_LABEL}>
           <span>axis</span>
@@ -251,6 +255,7 @@ export function EngravePrimitiveRow({
                 onChange({ tipDiameter: v });
               }}
             />
+            <span>mm</span>
           </label>
         )}
       </div>

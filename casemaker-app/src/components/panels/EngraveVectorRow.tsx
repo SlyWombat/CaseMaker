@@ -86,6 +86,7 @@ export function EngraveVectorRow({
           if (Number.isFinite(v)) onChange({ position: { ...shape.position, [axis]: v } });
         }}
       />
+      <span>mm</span>
     </label>
   );
 
@@ -161,6 +162,7 @@ export function EngraveVectorRow({
               if (Number.isFinite(v)) onChange({ rotation: v });
             }}
           />
+          <span>°</span>
         </label>
         <label style={FIELD_LABEL}>
           <span>depth</span>

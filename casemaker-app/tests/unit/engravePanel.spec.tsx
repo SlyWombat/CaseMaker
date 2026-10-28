@@ -44,7 +44,19 @@ import { flatEndMill } from '@/engine/cnc/tool';
 import { vCone } from '@/engine/cnc/vProfile';
 import { vCarvePlane, vCarveStepover, vCarveStepoverClampNote } from '@/engine/cnc/vCarveGeometry';
 import { itemName, V_BIT_CARVE_SENTENCE, type ToolRecommendation } from '@/engine/cnc/engrave/recommendTool';
-import type { EngraveDrill, EngraveJob, EngraveShape, EngraveTargetObject, EngraveTraceItem } from '@/types/engraveJob';
+import type {
+  EngraveCombinedShape,
+  EngraveCutout,
+  EngraveDrill,
+  EngraveJob,
+  EngraveKeepOut,
+  EngravePrimitive,
+  EngraveShape,
+  EngraveTargetObject,
+  EngraveThread,
+  EngraveTraceItem,
+  EngraveVectorShape,
+} from '@/types/engraveJob';
 import type { EngravePreview } from '@/workers/sim/engravePreview';
 import type { EngraveGenerated, EngraveProgram } from '@/workers/sim/engraveGenerate';
 
@@ -158,6 +170,260 @@ describe('EngravePanel (#205)', () => {
     // The old section line ("Depth keeps the 1 mm minimum floor — at most 11 mm on this stock.")
     // said the same thing a second time, away from the field it is about.
     expect(screen.getByTestId('engrave-panel').textContent).not.toContain('mm on this stock');
+  });
+
+  it('#726 P6 — every number carries its unit: mm on the spans, ° on rot', () => {
+    const base = defaultEngraveJob();
+    const labelId = base.labels[0]!.id;
+    const shape: EngraveShape = {
+      id: 'shape-1',
+      name: 'Tray',
+      kind: 'rect',
+      position: { x: 50, y: 40 },
+      rotation: 90,
+      enabled: true,
+      width: 70,
+      height: 30,
+      cornerRadius: 2,
+      depth: 2,
+    };
+    const border: EngraveCombinedShape = {
+      id: 'border-1',
+      kind: 'border',
+      position: { x: 50, y: 30 },
+      rotation: 0,
+      enabled: true,
+      inset: 2,
+      width: 3,
+      depth: 1,
+    };
+    const frame: EngraveCombinedShape = {
+      id: 'frame-1',
+      kind: 'frame',
+      position: { x: 50, y: 30 },
+      rotation: 0,
+      enabled: true,
+      around: labelId,
+      gap: 1,
+      width: 2,
+      depth: 1,
+    };
+    const stroke: EngraveTraceItem = {
+      id: 'trace-1',
+      kind: 'stroke-label',
+      text: 'Hi',
+      font: 'hershey-simplex',
+      size: 5,
+      position: { x: 50, y: 20 },
+      rotation: 90,
+      depth: 1,
+      enabled: true,
+    };
+    const holes: EngraveDrill = {
+      id: 'holes-1',
+      kind: 'drill-array',
+      position: { x: 20, y: 20 },
+      rotation: 15,
+      depth: 3,
+      enabled: true,
+      through: false,
+      count: { x: 2, y: 2 },
+      pitch: { x: 5, y: 6 },
+    };
+    const thread: EngraveThread = {
+      kind: 'thread',
+      id: 'thread-1',
+      position: { x: 70, y: 20 },
+      enabled: true,
+      size: 'M5',
+      standard: 'metric',
+      classFit: '6H',
+      depth: 4,
+      through: false,
+    };
+    const box: EngravePrimitive = {
+      id: 'box-1',
+      kind: 'box',
+      position: { x: 30, y: 40 },
+      rotation: 5,
+      enabled: true,
+      width: 10,
+      height: 8,
+      depth: 2,
+    };
+    const cone: EngravePrimitive = {
+      id: 'cone-1',
+      kind: 'cone',
+      position: { x: 40, y: 40 },
+      rotation: 5,
+      enabled: true,
+      diameter: 6,
+      tipDiameter: 1,
+      depth: 2,
+    };
+    const voidRect: EngraveKeepOut = {
+      id: 'void-1',
+      kind: 'rect',
+      position: { x: 50, y: 10 },
+      rotation: 0,
+      enabled: true,
+      zCeiling: 2,
+      width: 5,
+      height: 5,
+      cornerRadius: 0.5,
+    };
+    const cutout: EngraveCutout = {
+      kind: 'cutout',
+      id: 'cut-1',
+      enabled: true,
+      of: 'stock-inset',
+      side: 'outside',
+      inset: 0,
+      tabs: { count: 4, width: 5, height: 1 },
+    };
+    const vector: EngraveVectorShape = {
+      id: 'vec-1',
+      kind: 'vector',
+      position: { x: 75, y: 45 },
+      rotation: 0,
+      enabled: true,
+      sourceName: 'badge.svg',
+      contours: [
+        [
+          [0, 0],
+          [10, 0],
+          [10, 10],
+          [0, 10],
+        ],
+      ],
+      fillRule: 'NonZero',
+      width: 10,
+      height: 10,
+      depth: 1,
+    };
+    const target: EngraveTargetObject = {
+      id: 'tgt-1',
+      name: 'bracket.stl',
+      format: 'stl',
+      sha256: 'a'.repeat(64),
+      data: 'AAAA',
+      size: { x: 10, y: 8, z: 4 },
+      position: { x: 50, y: 30, z: 0 },
+      rotation: 0,
+      enabled: true,
+    };
+
+    act(() => {
+      useEngraveJobStore.setState({
+        job: {
+          ...base,
+          shapes: [shape],
+          combined: [border, frame],
+          traces: [stroke],
+          drills: [holes],
+          threads: [thread],
+          primitives: [box, cone],
+          keepOuts: [voidRect],
+          cutouts: [cutout],
+          vectors: [vector],
+          targetObject: target,
+        },
+      });
+    });
+    render(<EngravePanel />);
+    const field = (testid: string): string => screen.getByTestId(testid).closest('label')?.textContent ?? '';
+
+    // A label's numbers: cap · X · Y · depth in mm, rot in degrees.
+    expand('engrave-label');
+    expect(field('engrave-label-size-0')).toBe('capmm');
+    expect(field('engrave-label-x-0')).toBe('Xmm');
+    expect(field('engrave-label-y-0')).toBe('Ymm');
+    expect(field('engrave-label-rotation-0')).toBe('rot°');
+    expect(field('engrave-label-depth-0')).toBe('depthmm');
+
+    // A shape's: width · height · corner r · X · Y · depth in mm, rot in degrees.
+    expand('engrave-shape');
+    expect(field('engrave-shape-width-0')).toBe('widthmm');
+    expect(field('engrave-shape-height-0')).toBe('heightmm');
+    expect(field('engrave-shape-cornerRadius-0')).toBe('corner rmm');
+    expect(field('engrave-shape-x-0')).toBe('Xmm');
+    expect(field('engrave-shape-y-0')).toBe('Ymm');
+    expect(field('engrave-shape-rotation-0')).toBe('rot°');
+    expect(field('engrave-shape-depth-0')).toBe('depthmm');
+
+    // Combined shapes: inset, ring wall, gap and depth are lengths.
+    expand('engrave-combined', 0);
+    expect(field('engrave-combined-inset-0')).toBe('insetmm');
+    expect(field('engrave-combined-width-0')).toBe('widthmm');
+    expect(field('engrave-combined-depth-0')).toBe('depthmm');
+    expand('engrave-combined', 1);
+    expect(field('engrave-combined-gap-1')).toBe('gapmm');
+    expect(field('engrave-combined-width-1')).toBe('widthmm');
+
+    // A trace: cap · X · depth in mm, rot in degrees.
+    expand('engrave-trace');
+    expect(field('engrave-trace-size-0')).toBe('capmm');
+    expect(field('engrave-trace-rotation-0')).toBe('rot°');
+    expect(field('engrave-trace-x-0')).toBe('Xmm');
+    expect(field('engrave-trace-depth-0')).toBe('depthmm');
+
+    // A drill array: X · Y · pitch · depth in mm, rot in degrees — a COUNT carries no unit.
+    expand('engrave-drill');
+    expect(field('engrave-drill-x-0')).toBe('Xmm');
+    expect(field('engrave-drill-y-0')).toBe('Ymm');
+    expect(field('engrave-drill-pitch-x-0')).toBe('pitch Xmm');
+    expect(field('engrave-drill-pitch-y-0')).toBe('pitch Ymm');
+    expect(field('engrave-drill-rotation-0')).toBe('rot°');
+    expect(field('engrave-drill-depth-0')).toBe('depthmm');
+    expect(field('engrave-drill-count-x-0')).toBe('X');
+
+    // A thread: X · Y · depth in mm.
+    expand('engrave-thread');
+    expect(field('engrave-thread-x-0')).toBe('Xmm');
+    expect(field('engrave-thread-y-0')).toBe('Ymm');
+    expect(field('engrave-thread-depth-0')).toBe('depthmm');
+
+    // Primitives: X · Y · depth and every size in mm, rot in degrees.
+    expand('engrave-primitive', 0);
+    expect(field('engrave-primitive-x-0')).toBe('Xmm');
+    expect(field('engrave-primitive-y-0')).toBe('Ymm');
+    expect(field('engrave-primitive-rotation-0')).toBe('rot°');
+    expect(field('engrave-primitive-width-0')).toBe('widthmm');
+    expect(field('engrave-primitive-height-0')).toBe('heightmm');
+    expect(field('engrave-primitive-depth-0')).toBe('depthmm');
+    expand('engrave-primitive', 1);
+    expect(field('engrave-primitive-diameter-1')).toBe('base ⌀mm');
+    expect(field('engrave-primitive-tip-diameter-1')).toBe('tip ⌀mm');
+
+    // A void: width · height · corner r · X in mm; the ceiling is mm from the bottom face.
+    expand('engrave-keepout');
+    expect(field('engrave-keepout-width-0')).toBe('widthmm');
+    expect(field('engrave-keepout-height-0')).toBe('heightmm');
+    expect(field('engrave-keepout-cornerRadius-0')).toBe('corner rmm');
+    expect(field('engrave-keepout-x-0')).toBe('Xmm');
+    expect(field('engrave-keepout-rotation-0')).toBe('rot°');
+    expect(field('engrave-keepout-zceiling-0')).toBe('ceilingmm from the bottom');
+
+    // A cut-out: inset · tab width · tab height in mm — the tab COUNT carries no unit.
+    expand('engrave-cutout');
+    expect(field('engrave-cutout-inset-0')).toBe('insetmm');
+    expect(field('engrave-cutout-tabs-width-0')).toBe('widthmm');
+    expect(field('engrave-cutout-tabs-height-0')).toBe('heightmm');
+    expect(field('engrave-cutout-tabs-count-0')).toBe('tabs');
+
+    // An imported outline: X · Y · depth in mm, rot in degrees.
+    expand('engrave-vector');
+    expect(field('engrave-vector-x-0')).toBe('Xmm');
+    expect(field('engrave-vector-y-0')).toBe('Ymm');
+    expect(field('engrave-vector-rotation-0')).toBe('rot°');
+    expect(field('engrave-vector-depth-0')).toBe('depthmm');
+
+    // The target object: X · Y · Z in mm, rot in degrees.
+    expand('engrave-target');
+    expect(field('engrave-target-x-0')).toBe('Xmm');
+    expect(field('engrave-target-y-0')).toBe('Ymm');
+    expect(field('engrave-target-z-0')).toBe('Zmm');
+    expect(field('engrave-target-rotation-0')).toBe('rot°');
   });
 
   it('updates the “strokes thinner than” hint when the tool changes', () => {

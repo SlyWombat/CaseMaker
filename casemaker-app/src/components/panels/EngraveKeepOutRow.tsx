@@ -156,6 +156,7 @@ export function EngraveKeepOutRow({
           if (Number.isFinite(v)) onChange({ [key]: v } as KeepOutPatch);
         }}
       />
+      <span>{key === 'rotation' ? '°' : 'mm'}</span>
     </label>
   );
 
@@ -177,6 +178,7 @@ export function EngraveKeepOutRow({
           if (Number.isFinite(v)) onChange({ position: { ...keepOut.position, [axis]: v } });
         }}
       />
+      <span>mm</span>
     </label>
   );
 

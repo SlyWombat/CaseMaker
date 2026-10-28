@@ -122,6 +122,8 @@ export function EngraveCombinedRow({
             if (Number.isFinite(v)) onChange({ [key]: v } as CombinedPatch);
           }}
         />
+        {/* #726 P6 — inset, ring wall and gap are all lengths, like the depth below them. */}
+        <span>mm</span>
       </label>
     );
   };

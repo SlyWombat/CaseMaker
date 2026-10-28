@@ -227,6 +227,7 @@ export function EngraveTargetObjectRow({
           if (Number.isFinite(v)) onChange({ position: { [axis]: v } });
         }}
       />
+      <span>mm</span>
     </label>
   );
 
@@ -288,6 +289,7 @@ export function EngraveTargetObjectRow({
               if (Number.isFinite(v)) onChange({ rotation: v });
             }}
           />
+          <span>°</span>
         </label>
       </div>
 

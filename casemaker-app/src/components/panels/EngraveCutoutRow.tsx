@@ -172,6 +172,7 @@ export function EngraveCutoutRow({
               if (Number.isFinite(v) && v > 0) onChange({ tabs: { width: v } });
             }}
           />
+          <span>mm</span>
         </label>
         <label style={FIELD_LABEL}>
           <span>height</span>

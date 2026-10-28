@@ -135,6 +135,7 @@ export function EngraveDrillRow({
           if (Number.isFinite(v)) onChange({ position: { ...drill.position, [axis]: v } });
         }}
       />
+      <span>mm</span>
     </label>
   );
 
@@ -166,6 +167,8 @@ export function EngraveDrillRow({
             }
           }}
         />
+        {/* #726 P6 — the pitch is a length; a count is not, so only the pitch carries a unit. */}
+        {group === 'pitch' && <span>mm</span>}
       </label>
     );
   };
@@ -273,6 +276,7 @@ export function EngraveDrillRow({
                   if (Number.isFinite(v)) onChange({ rotation: v });
                 }}
               />
+              <span>°</span>
             </label>
           </>
         )}

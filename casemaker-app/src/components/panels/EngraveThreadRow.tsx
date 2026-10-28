@@ -87,6 +87,7 @@ export function EngraveThreadRow({
           if (Number.isFinite(v)) onChange({ position: { ...thread.position, [axis]: v } });
         }}
       />
+      <span>mm</span>
     </label>
   );
 

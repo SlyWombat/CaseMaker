@@ -188,6 +188,7 @@ export function EngraveShapeRow({
           if (Number.isFinite(v)) onChange({ [key]: v } as ShapePatch);
         }}
       />
+      <span>{key === 'rotation' ? '°' : 'mm'}</span>
     </label>
   );
 
@@ -209,6 +210,7 @@ export function EngraveShapeRow({
           if (Number.isFinite(v)) onChange({ position: { ...shape.position, [axis]: v } });
         }}
       />
+      <span>mm</span>
     </label>
   );
 

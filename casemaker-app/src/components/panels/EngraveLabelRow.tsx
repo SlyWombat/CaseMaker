@@ -155,6 +155,9 @@ export function EngraveLabelRow({
           if (Number.isFinite(v)) onChange({ [key]: v } as Partial<EngraveLabel>);
         }}
       />
+      {/* #726 P6 — the unit sits after the number, as on every other field: a bare "cap" beside
+          "X mm" reads as a different kind of number. */}
+      <span>{key === 'rotation' ? '°' : 'mm'}</span>
     </label>
   );
 
@@ -176,6 +179,7 @@ export function EngraveLabelRow({
           if (Number.isFinite(v)) onChange({ position: { ...label.position, [axis]: v } });
         }}
       />
+      <span>mm</span>
     </label>
   );
 
