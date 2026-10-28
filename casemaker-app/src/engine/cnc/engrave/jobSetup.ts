@@ -310,7 +310,17 @@ export type JobFindingCode =
   | 'axis-crossing'
   | 'rotary-unsupported'
   | 'wrap-into-clamp'
-  | 'wrap-off-free-end';
+  | 'wrap-off-free-end'
+  // #737 — the neck for parting's refusals. `neck-thin` — below the material-and-overhang minimum;
+  // `neck-in-band` — it does not fit the free span, so it would run into the jaws or the tailstock;
+  // `neck-wider-than-part` — no narrower than the stock, so there is nothing to cut; `neck-too-short`
+  // — less than a saw kerf plus clearance either side; `neck-not-cut` — the run's cutter cannot
+  // leave a flat-bottomed band (a cone or a drill).
+  | 'neck-thin'
+  | 'neck-in-band'
+  | 'neck-wider-than-part'
+  | 'neck-too-short'
+  | 'neck-not-cut';
 
 export interface JobFinding {
   /**

@@ -1008,6 +1008,18 @@ const viseSchema = z.object({
 });
 
 /**
+ * The neck a rotary job is left on for sawing off (#737). Optional on the chuck, and absent means
+ * OFF — an old document keeps its exact shape rather than gaining a neck on load.
+ */
+const rotaryNeckSchema = z.object({
+  end: z
+    .enum(['chuck', 'tailstock'])
+    .describe("The end of the free span the neck is cut at: 'chuck' or 'tailstock'."),
+  diameter: z.number().finite().positive().describe('The diameter the part is held on, in millimetres.'),
+  length: z.number().finite().positive().describe('How long the neck runs along the stock, in millimetres.'),
+});
+
+/**
  * The rotary module's chuck, as the job states it (#240 §1, `/Rotary.md` §3.4). The wiki's facts
  * with the wiki's gaps kept gaps: `gripDiameter` is nullable because Makera does not state the jaw
  * capacity in either jaw mode. `source` names the page, so a shipped fact is never a measurement.
@@ -1034,6 +1046,9 @@ const rotaryChuckSchema = z.object({
     ),
   tailstock: z.boolean().describe('Whether the tailstock supports the free end of the rod.'),
   source: z.string().min(1).describe('The page these chuck facts come from.'),
+  // #737 — optional and absent-is-off, so a document written before the neck existed round-trips
+  // byte-for-byte; an additive optional field does not bump the schema version.
+  neck: rotaryNeckSchema.optional().describe('The neck to leave the part on for sawing off, when one is wanted.'),
 });
 
 /**

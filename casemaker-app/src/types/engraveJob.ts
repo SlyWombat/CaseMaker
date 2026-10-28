@@ -1082,6 +1082,32 @@ export interface RotaryChuck {
   tailstock: boolean;
   /** The page these facts come from, so a shipped default is never read as a measurement. */
   source: string;
+  /**
+   * #737 — the NECK FOR PARTING: a full-circumference cut down to {@link RotaryNeck.diameter} at
+   * one end of the free span, made as the program's last operation and sawn through afterwards.
+   *
+   * OPTIONAL, and absent is OFF: a document written before this field existed has no neck and
+   * keeps its exact shape (the same absent-not-defaulted rule the rotary block itself follows).
+   */
+  neck?: RotaryNeck;
+}
+
+/**
+ * The neck a rotary job is left on for sawing off (#737, `rotary-flow.md` §3.6, §3.11).
+ *
+ * The map is the authority for WHERE: the neck sits at one end of {@link rotaryFreeSpan} — the
+ * chuck side (the jaws' keep-out) or the tailstock side (the tailstock band's edge). Its depth is
+ * `R − diameter/2`, so the part is held on a cylinder of exactly `diameter`. Both numbers are the
+ * operator's, with Case Maker's labelled defaults; the safe minimum is a separate, material- and
+ * overhang-dependent default (see `rotary/neck.ts`), never a measurement.
+ */
+export interface RotaryNeck {
+  /** Which end of the free span the neck is cut at. */
+  end: 'chuck' | 'tailstock';
+  /** The diameter the part is held on, mm — the neck's floor. */
+  diameter: Mm;
+  /** How long the neck runs along the stock, mm — at least the saw kerf plus a clearance each side. */
+  length: Mm;
 }
 
 /** The chuck's jaws, by Makera's rule by the rod's diameter (#714). */

@@ -6476,6 +6476,35 @@
                       ],
                       "type": "string"
                     },
+                    "neck": {
+                      "description": "The neck to leave the part on for sawing off, when one is wanted.",
+                      "properties": {
+                        "diameter": {
+                          "description": "The diameter the part is held on, in millimetres.",
+                          "exclusiveMinimum": 0,
+                          "type": "number"
+                        },
+                        "end": {
+                          "description": "The end of the free span the neck is cut at: 'chuck' or 'tailstock'.",
+                          "enum": [
+                            "chuck",
+                            "tailstock"
+                          ],
+                          "type": "string"
+                        },
+                        "length": {
+                          "description": "How long the neck runs along the stock, in millimetres.",
+                          "exclusiveMinimum": 0,
+                          "type": "number"
+                        }
+                      },
+                      "required": [
+                        "end",
+                        "diameter",
+                        "length"
+                      ],
+                      "type": "object"
+                    },
                     "source": {
                       "description": "The page these chuck facts come from.",
                       "minLength": 1,

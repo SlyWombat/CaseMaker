@@ -261,6 +261,29 @@ export interface RunSheetProgram {
    * `CoreProgramFacts`; absent on every program that pockets no core.
    */
   core?: RunSheetCoreFacts | null;
+  /**
+   * #737 — the neck for parting THIS program leaves, when it leaves one. Structurally the worker's
+   * `RotaryNeckFacts`, so the generated object is assignable unchanged; absent on every program
+   * that cuts no neck, and on a result stored by an older build.
+   */
+  neck?: RunSheetNeckFacts | null;
+}
+
+/**
+ * #737 — the neck for parting, as the sheet states it: where its edges and saw line are, how thick
+ * and long it is. Structurally `RotaryNeckFacts` from `rotary/neck.ts` — one definition of the
+ * span, so the sheet cannot print a saw line the CAM did not cut.
+ */
+export interface RunSheetNeckFacts {
+  end: 'chuck' | 'tailstock';
+  diameterMm: number;
+  lengthMm: number;
+  fromMm: number;
+  toMm: number;
+  sawAtMm: number;
+  depthMm: number;
+  carriedMm: number;
+  effectiveMm: number;
 }
 
 /**
@@ -461,6 +484,12 @@ export interface RunSheetGenerated {
    * before facing existed. `EngraveGenerated` satisfies this as it stands.
    */
   facingNc?: string | null;
+  /**
+   * #737 — the neck the FIRST program leaves (the top-level result describes program 1, exactly as
+   * `drill` does). A later program's facts travel on `programs[n].neck`. Optional because a result
+   * stored by an older build has none.
+   */
+  neck?: RunSheetNeckFacts | null;
   /** #432 — why the facing file is absent, in the worker's own words; null with no reason. */
   facingError?: string | null;
   /**
@@ -2892,6 +2921,28 @@ function throughCutSteps(facts: RunSheetThroughFacts | null | undefined): RunShe
   return steps;
 }
 
+/**
+ * #737 — the saw step for a rotary part left on a neck. It belongs to the program that cut the
+ * neck, and it is the LAST physical action of that file: the neck is cut to depth all the way
+ * round, and the part is sawn through it after the program ends.
+ *
+ * The words are the issue's own — "Saw the part off at X … mm (the neck)" — with the neck's size
+ * after them, every number carrying its unit. Empty for a program with no neck, so every
+ * pre-#737 sheet is unchanged.
+ */
+function neckSawSteps(facts: RunSheetNeckFacts | null | undefined): RunSheetStep[] {
+  if (facts === null || facts === undefined) return [];
+  return [
+    {
+      text:
+        `Saw the part off at X ${fmtNum(facts.sawAtMm)} mm (the neck) — ⌀${fmtNum(facts.diameterMm)} mm ` +
+        `and ${fmtNum(facts.lengthMm)} mm long, from X ${fmtNum(facts.fromMm)} mm to X ${fmtNum(facts.toMm)} mm, ` +
+        `and ${fmtNum(facts.depthMm)} mm deep. It is the program's last cut, made all the way round.`,
+      value: `⌀${fmtNum(facts.diameterMm)} × ${fmtNum(facts.lengthMm)} mm neck`,
+    },
+  ];
+}
+
 /** A drill program's own section — point, `drill.*` numbers and provenance, holes, then the file. */
 function drillProgramSectionSteps(
   program: RunSheetProgram,
@@ -2998,6 +3049,7 @@ function engraveProgramSectionSteps(program: RunSheetProgram, number: number): R
     ...(program.core == null ? [] : coreSteps(program.core)),
     ...programRunSteps(program, number),
     ...throughCutSteps(program.through),
+    ...neckSawSteps(program.neck),
   ];
 }
 
@@ -3033,6 +3085,7 @@ function restProgramSection(program: RunSheetProgram, facts: RestPassFacts, labe
     ...(program.finish == null ? [] : [finishAllowanceStep(program.finish)]),
     ...restProgramSectionSteps(facts, labels),
     ...throughCutSteps(program.through),
+    ...neckSawSteps(program.neck),
   ];
 }
 
@@ -3899,6 +3952,10 @@ export function buildRunSheet(
   if (options.restPass !== undefined && !restInOwnSection) {
     cutSteps.push(...restSwapSteps(options.restPass));
   }
+  // #737 — the saw comes after the run's last cut, never before it: the neck is only cut in that
+  // last program, so the part is still on it until the file ends. Program 1's own fact (the
+  // single-program case); a later program's neck is printed in its own section below.
+  cutSteps.push(...neckSawSteps(generated.neck));
 
   // ---- per-program Cut sections (#419) ------------------------------------------------------
   // Program 1 is the `cut` section above, fed from the top-level result. Every later ENGRAVING

@@ -104,7 +104,11 @@ export function isRotaryJob(job: EngraveJob): boolean {
  * into the longer one. The findings pass judges the same span, so a placement and the sentence
  * that refuses it cannot disagree.
  */
-export function rotaryFreeSpan(map: RotaryMap): { from: number; to: number; centre: number } {
+export function rotaryFreeSpan(map: Pick<RotaryMap, 'stickout' | 'tailstock'>): {
+  from: number;
+  to: number;
+  centre: number;
+} {
   const from = Math.min(ROTARY_JAW_KEEP_OUT_MM, map.stickout);
   const to = map.tailstock ? Math.max(from, map.stickout - ROTARY_TAILSTOCK_BAND_MM) : map.stickout;
   return { from, to, centre: (from + to) / 2 };

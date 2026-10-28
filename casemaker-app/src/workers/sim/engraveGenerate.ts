@@ -165,6 +165,13 @@ import {
 } from './engraveGeometry';
 import { colourBoundaryFor, stackDepthLimit, type StackDepthLimit } from './stackDepthLimit';
 import { rotaryJobFindings } from '@/engine/cnc/rotary/findings';
+import {
+  ROTARY_NECK_ID,
+  rotaryNeckBand,
+  rotaryNeckCutRegion,
+  rotaryNeckFacts,
+  type RotaryNeckFacts,
+} from '@/engine/cnc/rotary/neck';
 import { rotaryMapOf, toRotaryIR } from '@/engine/cnc/rotary/wrap';
 import { ceilingName, effectiveMargins, MARGIN_DEFAULTS } from '@/engine/cnc/engrave/depthBounds';
 import { ORACLE_SHALLOW_DEPTH_FRACTION, type OraclePredicted, type OracleThreadMove } from '@/engine/cnc/engrave/oracle';
@@ -421,6 +428,12 @@ export interface EngraveProgram {
    * pockets the core, and the areas are the ones the CAM cut rather than a second measurement.
    */
   core?: CoreProgramFacts | null;
+  /**
+   * #737 — the neck for parting HERE, when this program leaves one. Null/absent on every other
+   * file: the saw step belongs to the program that cut the neck, and the numbers are the ones the
+   * findings judged and the CAM cut.
+   */
+  neck?: RotaryNeckFacts | null;
 }
 
 /** #677 — one program's clearance of the standing cores, one entry per variable region. */
@@ -839,6 +852,12 @@ export interface EngraveRegions {
    */
   cores: CoreCut[];
   predicted: OraclePredicted[];
+  /**
+   * #737 — the neck this job leaves for sawing off, in map millimetres, or null when it has none.
+   * Carried on the measured regions so `generateOneProgram` cuts exactly the span the findings
+   * judged, and the run sheet prints the same numbers.
+   */
+  neck: RotaryNeckFacts | null;
   tool: Tool | null;
   radius: number | null;
   findings: JobFinding[];
@@ -1360,6 +1379,10 @@ export function engraveRegions(
   // pair `generateEngrave` scales the CAM by, so what the panel calls reachable and what the
   // file cuts cannot disagree. The flat path passes nothing and is unchanged.
   const rotaryMap = rotaryMapOf(job);
+  // #737 — the neck for parting, as the plan places it. Null when the job is not rotary or has no
+  // neck. The bands it must clear are the map's own, so the REFUSALS read this exact span
+  // (`rotaryJobFindings`), the CAM cuts this exact span and the run sheet states it.
+  const neck = rotaryNeckFacts(job);
   const wrapFor =
     rotaryMap === null
       ? undefined
@@ -2053,6 +2076,18 @@ export function engraveRegions(
     ...cutoutPredicted,
     // #669 — a chamfer's wedge is predicted as the RING the bevel removes at the shallow level.
     ...chamferPredicted,
+    // #737 — the neck is predicted as the BAND its cut leaves at the floor's full depth, all the
+    // way round: the same rectangle the CAM's outer ring reaches (seam included). An itemId that is
+    // not a document item keeps it out of the per-item reports; the oracle reads the polygons.
+    ...(neck === null || rotaryMap === null || !(neck.depthMm > 0)
+      ? []
+      : [
+          {
+            depth: neck.depthMm,
+            polygons: rotaryNeckBand(rotaryMap, neck),
+            itemId: ROTARY_NECK_ID,
+          } satisfies OraclePredicted,
+        ]),
   ];
 
   // #218 — the verifier's through mask, built from the SAME geometry: every through region's
@@ -2113,6 +2148,7 @@ export function engraveRegions(
     chamfers: chamferCuts,
     cores,
     predicted,
+    neck,
     tool,
     radius,
     findings: [...findings, ...looseFindings],
@@ -2584,6 +2620,12 @@ export function depthLimitReason(stack: StackDepthLimit, job: EngraveJob, x: Mm,
  * One program's result, before the list is assembled. `generateOneProgram`'s return shape.
  */
 type OneProgram = Omit<EngraveGenerated, 'programs'> & {
+  /**
+   * #737 — the neck for parting THIS program leaves, or null/absent on a program that cuts no
+   * neck. The run sheet's saw step belongs to the file that leaves it; the top-level field is the
+   * first program's (the single-program adapter), so a multi-program sheet reads each program's.
+   */
+  neck?: RotaryNeckFacts | null;
   /** #677 — the cores this program's V left standing, for the run to hand to the flat cutter. */
   cores?: readonly CoreCut[];
   /** #677 — the cores THIS program cleared: the core-clearance program's own sheet facts. */
@@ -2850,6 +2892,11 @@ function generateRestPair(
   margins: EngraveMargins,
   shop: EngraveShopOpts,
   withFacing: boolean,
+  /**
+   * #737 — this pair is the RUN'S LAST CUT, so its last program leaves the neck for parting. The
+   * rough program never does: the neck comes after every finish pass.
+   */
+  withNeck: boolean,
   cursor: number,
   refCount: number,
   findings: JobFinding[],
@@ -2873,7 +2920,7 @@ function generateRestPair(
   if (roughTool === null || group.length < 2) {
     const roughJob = jobForSetup(job, roughRef, roughTool);
     const makeRough = (span: VacuumSpan): OneProgram =>
-      generateOneProgram(tl, roughJob, roughTool, catalogue, calibration, margins, shop, span, withFacing, 'rough-and-finish');
+      generateOneProgram(tl, roughJob, roughTool, catalogue, calibration, margins, shop, span, withFacing, 'rough-and-finish', withNeck);
     const roughOne = makeRough(roughSpan);
     attempts.push(roughOne);
     if (roughOne.ok && roughOne.nc !== null && roughOne.verify !== null) {
@@ -2897,7 +2944,7 @@ function generateRestPair(
   if (vCone(roughTool) !== null && flatRef !== null && !laterOwnsItems && variableWork) {
     const vJob = jobForSetup(job, roughRef, roughTool);
     const makeV = (span: VacuumSpan): OneProgram =>
-      generateOneProgram(tl, vJob, roughTool, catalogue, calibration, margins, shop, span, withFacing, 'rough-and-finish');
+      generateOneProgram(tl, vJob, roughTool, catalogue, calibration, margins, shop, span, withFacing, 'rough-and-finish', false);
     const vOne = makeV(roughSpan);
     attempts.push(vOne);
     if (!vOne.ok || vOne.nc === null || vOne.verify === null) {
@@ -2970,6 +3017,7 @@ function generateRestPair(
           span,
           false,
           'rough-and-finish',
+          withNeck,
           cuttable,
         );
       const coreOne = makeCore(coreSpan);
@@ -3009,7 +3057,7 @@ function generateRestPair(
   const roughRefKept: JobProgramRef = { ...roughRef, itemIds: roughRef.itemIds.filter((id) => !unroughedIds.has(id)) };
   const roughJobKept = jobForSetup(job, roughRefKept, roughTool);
   const makeRoughKept = (span: VacuumSpan): OneProgram =>
-    generateOneProgram(tl, roughJobKept, roughTool, catalogue, calibration, margins, shop, span, withFacing, 'rough-only');
+    generateOneProgram(tl, roughJobKept, roughTool, catalogue, calibration, margins, shop, span, withFacing, 'rough-only', false);
   const keptOne = makeRoughKept(roughSpan);
   attempts.push(keptOne);
   if (!keptOne.ok || keptOne.nc === null || keptOne.verify === null) {
@@ -3140,7 +3188,20 @@ function generateRestPair(
     // the route resolved on this realm's side, so it is materialised exactly as `jobForSetup` does.
     const restJob: EngraveJob = { ...restJobBase, tool: restTool };
     const makeRest = (span: VacuumSpan): OneProgram =>
-      generateOneProgram(tl, restJob, restTool, catalogue, calibration, margins, shop, span, false, 'finish-only');
+      generateOneProgram(
+        tl,
+        restJob,
+        restTool,
+        catalogue,
+        calibration,
+        margins,
+        shop,
+        span,
+        false,
+        'finish-only',
+        // Only the LAST rest program of a pair that ends the run leaves the neck.
+        withNeck && r === restTools.length - 1,
+      );
     const restOne = makeRest(restSpan);
     nextCursor += 1;
     attempts.push(restOne);
@@ -3574,7 +3635,7 @@ export function engraveGenerate(
   // drop disabled and construction items from the CAM's input, which is a behaviour change this
   // issue does not own.
   if (job.setups === undefined) {
-    const one = generateOneProgram(tl, job, tool, catalogue, calibration, margins, shop, 'whole', true, 'rough-and-finish');
+    const one = generateOneProgram(tl, job, tool, catalogue, calibration, margins, shop, 'whole', true, 'rough-and-finish', true);
     // #677 — a legacy document names ONE cutter, so a variable carve's core cannot be cleared: it
     // stands, and the warning says what to add. A job that has setups gets the same sentence from
     // the loop below, with the setup's number on it.
@@ -3658,6 +3719,9 @@ export function engraveGenerate(
 
     for (const segment of segments) {
       const segmentRefs = segment.refs;
+      // #737 — only the last segment of the last setup is the RUN'S last cut, so only its last
+      // program leaves the neck; every earlier program cuts the part alone.
+      const lastGroup = s === setups.length - 1 && segment === segments[segments.length - 1];
       if (segment.drill || segmentRefs.length <= 1) {
         const ref = segmentRefs[0];
         if (ref === undefined) continue;
@@ -3678,6 +3742,7 @@ export function engraveGenerate(
             nextSpan,
             cursor === 0,
             'rough-and-finish',
+            lastGroup,
           );
         const one = make(span);
         attempts.push(one);
@@ -3707,6 +3772,7 @@ export function engraveGenerate(
         margins,
         shop,
         cursor === 0,
+        lastGroup,
         cursor,
         refs.length,
         restFindings,
@@ -3789,6 +3855,7 @@ function programOf(one: OneProgram, ref: JobProgramRef): EngraveProgram {
     bore: one.bore ?? null,
     chamfer: one.chamfer ?? null,
     core: one.core ?? null,
+    neck: one.neck ?? null,
   };
 }
 
@@ -3884,6 +3951,12 @@ function generateOneProgram(
    */
   finishMode: FinishPassMode = 'rough-and-finish',
   /**
+   * #737 — this program is the RUN'S LAST CUT, so it leaves the neck for parting. Only the last
+   * program carries it: the neck must come after every finish pass and be cut once, by the cutter
+   * that cut the part. False on every other program, and on a rough-only half of a rest pair.
+   */
+  withNeck = false,
+  /**
    * #677 — the cores this program clears: the derived regions a variable V-carve leaves standing,
    * handed over by the run's generator. Present only on the core-clearance program, whose sub-job
    * has no items of its own.
@@ -3895,7 +3968,7 @@ function generateOneProgram(
   // which is the only post this app has; a second mill is a second post, and this line is where a
   // job naming it would have to be refused until there is one.
   const mill = jobMachine(job, calibration);
-  const { plan, regions, profiles, throughMask, chamfers, cores, predicted, findings, releasedPieces } = engraveRegions(
+  const { plan, regions, profiles, throughMask, chamfers, cores, predicted, findings, releasedPieces, neck } = engraveRegions(
     tl,
     job,
     tool,
@@ -4005,6 +4078,9 @@ function generateOneProgram(
   // #669 — the chamfer facts the run sheet prints: the width, the derived tip depth and which kind
   // of rim each bevel breaks. Filled where the CAM is built, from the same plan and cone.
   let chamferFacts: ChamferProgramFacts | null = null;
+  // #737 — the neck facts when THIS program cut the neck. Null on every other program: the sheet's
+  // saw step belongs to the file that leaves the neck, not to the run as a whole.
+  let neckProgram: RotaryNeckFacts | null = null;
   // #432 — the facing depth the plan carries, or 0 when the job does not face. It decides whether
   // the facing artefact is built at all; it never touches the ENGRAVING program, which stays in the
   // document's frame (Z0 = the faced surface) because the re-touch re-zeros Z there between the two
@@ -4268,6 +4344,44 @@ function generateOneProgram(
           }),
         };
       }
+
+      // #737 — THE NECK FOR PARTING, APPENDED LAST. Everything above this line is the part: the
+      // regions, traces, chamfers and cut-outs, and this program is the run's last cut and not a
+      // rough half (the caller passes `withNeck` only there). The neck's own region is a plain
+      // full-circumference rectangle on the map, cut at its full depth in one program — no rough
+      // split and no restatement, so no pass ever leaves it half-cut. The cut is made with the
+      // SAME cutter that cut the part, and the appended IR is renumbered by `concatToolpathIR`,
+      // which makes it the file's last operation. `toRotaryIR` below turns it into A like the rest.
+      if (withNeck && neck !== null && rotaryMap !== null) {
+        const neckCutter = cuttingForTrace(tool);
+        // A cone leaves a groove, not the flat floor a saw needs; its own refusal is raised below.
+        if (neckCutter.ok && neckCutter.tool.shape !== 'v' && neck.depthMm > 0) {
+          const neckRegion: EngraveRegion = {
+            id: ROTARY_NECK_ID,
+            text: '',
+            name: 'Neck for sawing off',
+            depth: neck.depthMm,
+            polygons: rotaryNeckCutRegion(rotaryMap, neck, neckCutter.tool.radius),
+          };
+          const neckIr = generateEngrave(
+            tl,
+            [neckRegion],
+            tool,
+            resolved.params,
+            mill.rapidEstimate,
+            'nearest',
+            shop.peckClearanceMm ?? null,
+            // No rough/finish split: the neck is cut to its floor once, after every finish pass.
+            null,
+            null,
+            { radius: rotaryMap.radius },
+          );
+          if (neckIr.operations.some((op) => op.moves.length > 0)) {
+            ir = ir.operations.length === 0 ? neckIr : concatToolpathIR(ir, neckIr);
+            neckProgram = neck;
+          }
+        }
+      }
     } catch (e) {
       return stop('cam', { feeds, message: e instanceof Error ? e.message : String(e) });
     }
@@ -4316,6 +4430,27 @@ function generateOneProgram(
       }
       if (items.length > 0) chamferFacts = { items };
     }
+  }
+
+  // #737 — A NECK THE LAST PROGRAM COULD NOT CUT IS A REFUSAL, not a quiet omission. Every branch
+  // above either cut it (the engraving program, with a flat cutter) or could not: a cone's tip
+  // leaves a groove, a drill's point leaves a cone, and neither is the flat floor a saw needs.
+  if (withNeck && neck !== null && neckProgram === null) {
+    const why =
+      tool === null
+        ? 'the job has no usable cutter'
+        : tool.shape === 'drill'
+          ? `"${tool.name}" is a drill bit, whose point leaves a cone, not the flat floor a saw needs`
+          : tool.shape === 'engraving' || tool.shape === 'chamfer'
+            ? `"${tool.name}" is a V-bit, whose point leaves a groove, not the flat floor a saw needs`
+            : `"${tool.name}" cannot cut a flat-bottomed band`;
+    findings.push({
+      severity: 'error',
+      code: 'neck-not-cut',
+      labelId: ROTARY_NECK_ID,
+      message: `The neck for parting is set, but ${why}. Use a flat end mill for the part, or turn the neck off.`,
+    });
+    return stop('findings', { message: 'the neck for parting could not be cut by this program' });
   }
 
   // #240 slice 2 — THE MAP BECOMES THE ROTARY FRAME HERE, ONCE. Everything above is an ordinary
@@ -4594,6 +4729,8 @@ function generateOneProgram(
       facingError: facing.error,
       facingCam: facing.cam,
       predicted: predictedForRun,
+      // #737 — the neck this program leaves, for the run sheet's saw step.
+      neck: neckProgram,
       // #677 — the V program's derived cores go UP to the run (which alone can see the setup's
       // later cutter); the core program's own facts go ON the program (the sheet's step).
       cores,
