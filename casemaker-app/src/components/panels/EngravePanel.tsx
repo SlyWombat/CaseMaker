@@ -1674,9 +1674,12 @@ export function EngravePanel(): JSX.Element {
             // holds a recommendation, not the measured table. Null leaves `recommendTool`'s verdict
             // unstated rather than guessing it, so `no-cutter` stays unwired here.
             reach: null,
+            // #735 — the same bed facts the Design fallback reads (#725 B7): the gate's through-cut
+            // owner must judge a taped job by the bed it is taped to, not in the pre-#712 vise words.
+            bed: bedFacts,
           })
         : null,
-    [mode, job, run.generated, run.staleSince, run.staleReason, jobPackage, calibration, shelfItem],
+    [mode, job, run.generated, run.staleSince, run.staleReason, jobPackage, calibration, shelfItem, bedFacts],
   );
 
   const backToDesign = (cause: PreflightCause | null): void => {

@@ -29,6 +29,7 @@
 
 import type { EngraveJob } from '@/types/engraveJob';
 import { staleSentence, type EngraveInputKey } from '@/engine/cnc/engrave/runInputs';
+import type { BedUnderFacts } from '@/engine/cnc/engrave/jobSetup';
 import type { MachineCalibration } from '@/engine/cnc/calibration';
 import type { StockItem } from '@/platform/stockClient';
 import type { Reachability } from '@/engine/cnc/engrave/reachability';
@@ -72,6 +73,13 @@ export interface PreflightHubInput {
    * unstated rather than guessing it (see `collect.ts`'s OWNERS NOT WIRED).
    */
   reach?: Reachability | null;
+  /**
+   * #735 — what the machine's bed carries under the stock, read by the Cut surface from the active
+   * bed profile (`bedUnderFacts`, #712). It is handed to every scope's collector, so the through-cut
+   * owner judges a taped job by the bed it is taped to; absent (`null`/`undefined`) keeps the
+   * pre-#712 sentences. The hub reads no store, so this arrives as data like the rest.
+   */
+  bed?: BedUnderFacts | null;
 }
 
 /** One scope's rows, in the collector's own order. */
@@ -130,6 +138,7 @@ export function preflightHub(input: PreflightHubInput): PreflightHubReport {
       calibration: input.calibration,
       shelfItem: input.shelfItem,
       reach: input.reach ?? null,
+      bed: input.bed ?? null,
     }),
   }));
 

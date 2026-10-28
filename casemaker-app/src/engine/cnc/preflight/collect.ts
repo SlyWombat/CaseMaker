@@ -36,7 +36,7 @@
 import type { EngraveJob } from '@/types/engraveJob';
 import type { MachineCalibration } from '@/engine/cnc/calibration';
 import { jobMachine } from '@/engine/cnc/calibration';
-import { validateJob, type JobFinding } from '@/engine/cnc/engrave/jobSetup';
+import { validateJob, type BedUnderFacts, type JobFinding } from '@/engine/cnc/engrave/jobSetup';
 import { validateVise } from '@/engine/cnc/fixture';
 import { validateSacrificial } from '@/engine/cnc/sacrificial';
 import { stockFromShelf } from '@/engine/cnc/stockStart';
@@ -106,6 +106,17 @@ export interface PreflightInput {
    * been asked of the bench yet.
    */
   reach?: Reachability | null;
+  /**
+   * #735 — what the machine's bed carries under the stock (`BedUnderFacts`), built by the caller
+   * from the active bed profile exactly as the panel's fallback and the Generate build it (#712,
+   * #725 B7). It is DATA for the same reason `bedUnderFacts` lives outside the engine: the active
+   * profile is in the location, which the collector must not read. Absent (`null`/`undefined`):
+   * no location, and the through sentences are the pre-#712 ones — the vise's.
+   *
+   * Without it a taped through cut with no under-board of its own was refused in the vise's words
+   * even over a wasteboard deep enough to take the cut, on a job the Generate accepts.
+   */
+  bed?: BedUnderFacts | null;
 }
 
 /**
@@ -153,7 +164,9 @@ export function collect(input: PreflightInput): PreflightRow[] {
   // ...validateVise])` (`EngravePanel.tsx`) — loses that attribution. Reported to the maintainer.
   const tagged: { owner: PreflightOwner; finding: JobFinding }[] = [
     ...validateSacrificial(job).map((finding) => ({ owner: 'sacrificial' as const, finding })),
-    ...validateJob(job).map((finding) => ({ owner: 'jobSetup' as const, finding })),
+    // #735 — the bed's facts ride to their owner (`validateJob`, #712); the collector still decides
+    // nothing, it only hands the owner the data the caller read from the location.
+    ...validateJob(job, null, { bed: input.bed ?? null }).map((finding) => ({ owner: 'jobSetup' as const, finding })),
     // #240 — the fixture's own findings are the VISE's. A rotary job's holding checks are slice 3's.
     ...(job.workholding.kind === 'vise'
       ? validateVise(job.stock, job.workholding.vise, job.sacrificial).map((finding) => ({
