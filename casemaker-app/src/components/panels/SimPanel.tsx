@@ -9,7 +9,7 @@ import { useToolRegistry } from '@/hooks/useToolRegistry';
 import { useEngraveJobStore } from '@/store/engraveJobStore';
 import { oracleSentence, useEngraveRunStore } from '@/store/engraveRunStore';
 import { jobVise, viseEnvelope } from '@/engine/cnc/fixture';
-import { ROTARY_JAW_KEEP_OUT_MM, ROTARY_TAILSTOCK_BAND_MM, rotaryMapOf } from '@/engine/cnc/rotary/wrap';
+import { rotaryBandFacts, rotaryMapOf } from '@/engine/cnc/rotary/wrap';
 import { hasSacrificial } from '@/engine/cnc/sacrificial';
 import type { StartingTool } from '@/engine/cnc';
 import type { DiagnosticSource, SimDiagnostic } from '@/workers/sim/session';
@@ -286,7 +286,9 @@ export function SimPanel() {
           rotaryBands:
             rotary === null
               ? null
-              : { jawsMm: ROTARY_JAW_KEEP_OUT_MM, tailstockMm: ROTARY_TAILSTOCK_BAND_MM, tailstock: rotary.tailstock },
+              // The EFFECTIVE lengths, clamped by the stick-out (`rotaryFreeSpan`): the sentence
+              // must name the band the findings judge, not the labelled default.
+              : rotaryBandFacts(rotary),
           fixtureSource: jobVise(job).source,
           sacrificialModelled: rotary === null && hasSacrificial(job.sacrificial),
           toolName: jobToolEntry === null ? null : toolDisplayName(jobToolEntry.tool),

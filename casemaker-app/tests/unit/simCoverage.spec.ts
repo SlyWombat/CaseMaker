@@ -79,6 +79,13 @@ describe('coverageDisclaimer', () => {
     expect(noTail).toContain('The jaws are checked as a keep-out band on the map — the first 3 mm');
     expect(noTail).not.toContain('the last 10 mm');
     expect(noTail).not.toContain('the tailstock');
+
+    // A stick-out under the jaws' keep-out: the clamped figure, and no tailstock band (#724 W7
+    // review) — the sentence never names a band longer than the stock.
+    const shortRod = text({ rotaryBands: { jawsMm: 2, tailstockMm: 0, tailstock: false } });
+    expect(shortRod).toContain('the first 2 mm of the stick-out');
+    expect(shortRod).not.toContain('the first 3 mm');
+    expect(shortRod).not.toContain('the tailstock');
   });
 
   it('says a path-only run checked nothing but the path', () => {

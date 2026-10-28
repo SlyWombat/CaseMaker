@@ -43,6 +43,7 @@ import {
   arcToAngle,
   aroundOpeningRadius,
   facetTerm,
+  rotaryBandFacts,
   rotaryFreeSpan,
   rotaryMapOf,
   type RotaryMap,
@@ -325,6 +326,34 @@ describe('#724 B3 — the shipped layout lands on the free span', () => {
     expect(g.ok).toBe(true);
     expect([...g.findings, ...(g.verify?.findings ?? [])].filter((f) => f.severity === 'error')).toEqual([]);
   }, 120_000);
+});
+
+// #724 W7 review — the Simulate disclaimer states the bands the findings judge, so the figures
+// are the EFFECTIVE ones: `rotaryFreeSpan` clamps both to the stick-out.
+describe('#724 W7 review — the stated bands are the clamped ones', () => {
+  const mapOf = (stickout: number, tailstock: boolean): RotaryMap => ({
+    radius: 10,
+    circumference: 2 * Math.PI * 10,
+    stickout,
+    grip: Math.max(0, 100 - stickout),
+    length: 100,
+    tailstock,
+  });
+
+  it('names the labelled defaults when the stick-out holds both bands', () => {
+    expect(rotaryBandFacts(mapOf(85, true))).toEqual({ jawsMm: 3, tailstockMm: 10, tailstock: true });
+    // Tailstock out: nothing is judged at the free end, so the sentence has no tailstock clause.
+    expect(rotaryBandFacts(mapOf(85, false))).toEqual({ jawsMm: 3, tailstockMm: 0, tailstock: false });
+  });
+
+  it('clamps each band to the stick-out', () => {
+    // 12 mm: the two labelled bands would overlap by 1 mm; the free span wins, so the tailstock's
+    // band is the last 9 mm — the figure its refusal uses.
+    expect(rotaryBandFacts(mapOf(12, true))).toEqual({ jawsMm: 3, tailstockMm: 9, tailstock: true });
+    // 2 mm: the whole stick-out is inside the jaws' keep-out. Saying "the first 3 mm" would name
+    // a band longer than the stock, and "the last 0 mm" would be no band at all.
+    expect(rotaryBandFacts(mapOf(2, true))).toEqual({ jawsMm: 2, tailstockMm: 0, tailstock: false });
+  });
 });
 
 // ---- The acceptance fixture -----------------------------------------------------

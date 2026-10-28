@@ -446,7 +446,18 @@ describe('the material-first start (#418)', () => {
     );
     expect((screen.getByTestId('start-wizard-stock-next') as HTMLButtonElement).disabled).toBe(true);
 
+    // The envelope's other end, at the same field: a 200 mm rod is past the module's 150 mm span.
+    // The refusal is ONE sentence on screen — not a second copy under the size or in the footer.
+    fireEvent.change(screen.getByTestId('start-wizard-make-diameter'), { target: { value: '40' } });
+    fireEvent.change(screen.getByTestId('start-wizard-make-length'), { target: { value: '200' } });
+    expect(screen.getByTestId('start-wizard-stock-problem').textContent).toBe(
+      "200 mm does not fit the rotary's ⌀80 × 150 mm.",
+    );
+    expect(screen.getAllByText(/does not fit the rotary/)).toHaveLength(1);
+    expect((screen.getByTestId('start-wizard-stock-next') as HTMLButtonElement).disabled).toBe(true);
+
     // Inside it again, Next goes on, and the tube writes the cylinder stock with its wall.
+    fireEvent.change(screen.getByTestId('start-wizard-make-length'), { target: { value: '100' } });
     fireEvent.change(screen.getByTestId('start-wizard-make-diameter'), { target: { value: '40' } });
     await act(async () => {
       fireEvent.click(screen.getByTestId('start-wizard-stock-next'));

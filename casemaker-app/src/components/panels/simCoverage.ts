@@ -54,7 +54,9 @@ export interface SimCoverageInput {
    * #724 W7 — a rotary job's workholding is the map's two keep-out BANDS, not a vise envelope.
    * Its cuts are refused where they enter them (the findings and the verifier), which is a
    * different check from a fixture modelled as a solid — so the facts say that, and never name a
-   * vise whose envelope belongs to a mount that is not on the machine.
+   * vise whose envelope belongs to a mount that is not on the machine. The two lengths are the
+   * EFFECTIVE bands (`rotaryBandFacts`): already clamped by the stick-out, so a short rod's
+   * sentence names the figure the findings judge.
    */
   rotaryBands?: { jawsMm: number; tailstockMm: number; tailstock: boolean } | null;
 }

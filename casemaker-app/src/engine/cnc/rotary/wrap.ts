@@ -110,6 +110,21 @@ export function rotaryFreeSpan(map: RotaryMap): { from: number; to: number; cent
   return { from, to, centre: (from + to) / 2 };
 }
 
+/**
+ * The two keep-out bands as the Simulate disclaimer states them (#724 W7 review), mm.
+ *
+ * The sentence must name the bands the findings and the verifier actually judge, so these are the
+ * EFFECTIVE lengths — {@link rotaryFreeSpan}'s clamped ends, not the labelled defaults. A stick-out
+ * shorter than the jaws' keep-out (3 mm) is all jaws, and it leaves no tailstock band at all: the
+ * tailstock is then reported out, so the sentence never says "the last 0 mm" about a rod whose
+ * every millimetre is already behind the jaws' line.
+ */
+export function rotaryBandFacts(map: RotaryMap): { jawsMm: number; tailstockMm: number; tailstock: boolean } {
+  const span = rotaryFreeSpan(map);
+  const tailstockMm = map.stickout - span.to;
+  return { jawsMm: span.from, tailstockMm, tailstock: map.tailstock && tailstockMm > 0 };
+}
+
 /** Arc length at `radius`, mm → unwound degrees (R9: never wrapped, never moduloed). */
 export function arcToAngle(arc: number, radius: number): number {
   return (arc / radius) * (180 / Math.PI);
