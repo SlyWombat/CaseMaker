@@ -433,6 +433,22 @@ describe('#419 §3 the Cut surface', () => {
     expect(step4).not.toContain(totalTime);
   });
 
+  it('#726 P16 — a step number and its title stay on one line', () => {
+    const job = defaultEngraveJob();
+    const pkg = frozen(job, [P1]);
+    draw({ job, report: reportOf(), pkg, generated: generated([P1]) });
+
+    // The summary beside the label wraps; the label itself never does — "4 / Run" across two
+    // lines read as two steps.
+    const title = screen.getByTestId('engrave-cut-step-4-title');
+    expect(title.textContent).toContain('4 Run');
+    expect(title.style.whiteSpace).toBe('nowrap');
+    expect(title.style.flexShrink).toBe('0');
+    // #720 moved the mesh bytes out of the document: the Cut surface states no 4 MB cap, and
+    // nothing here should reintroduce it.
+    expect(screen.getByTestId('engrave-cut-surface').textContent).not.toContain('4 MB');
+  });
+
   it('#726 W20 — step 1 is ONE line; the gate’s rows are its details fold', () => {
     const job = plannedJob();
     const pkg = frozen(job, [P1]);

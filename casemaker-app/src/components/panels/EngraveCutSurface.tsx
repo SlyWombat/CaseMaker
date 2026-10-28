@@ -170,10 +170,21 @@ function Step({
         data-testid={`engrave-cut-step-${number}-summary`}
         style={{ cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 8 }}
       >
-        <span style={{ fontSize: 12, fontWeight: 600, color: done ? OK : current ? '#e6edf5' : '#9aa4b0' }}>
+        {/* #726 P16 — the step's number and title are one label and never break between them:
+            the summary beside them wraps instead ("4 / Run" on two lines read as two steps). */}
+        <span
+          data-testid={`engrave-cut-step-${number}-title`}
+          style={{
+            fontSize: 12,
+            fontWeight: 600,
+            color: done ? OK : current ? '#e6edf5' : '#9aa4b0',
+            whiteSpace: 'nowrap',
+            flexShrink: 0,
+          }}
+        >
           {done ? '✓' : current ? '●' : '○'} {number} {title}
         </span>
-        <span style={{ ...MUTED, margin: 0, textAlign: 'right' }}>{summary}</span>
+        <span style={{ ...MUTED, margin: 0, textAlign: 'right', minWidth: 0 }}>{summary}</span>
       </summary>
       <div style={{ marginTop: 4 }}>{children}</div>
     </details>
