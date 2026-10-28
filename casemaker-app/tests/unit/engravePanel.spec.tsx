@@ -40,7 +40,7 @@ import { clearFeedCatalogue, setFeedCatalogue, type FeedCatalogueRow } from '@/e
 import { setInventoryEntries, resetRegistry } from '@/engine/cnc/toolRegistry';
 import { setJobFileIO, useEngraveJobFileStore } from '@/store/engraveJobFileStore';
 import { resetStartWizard, useStartWizardStore } from '@/store/startWizardStore';
-import { flatEndMill } from '@/engine/cnc/tool';
+import { flatEndMill, type Tool } from '@/engine/cnc/tool';
 import { vCone } from '@/engine/cnc/vProfile';
 import { vCarvePlane, vCarveStepover, vCarveStepoverClampNote } from '@/engine/cnc/vCarveGeometry';
 import { itemName, V_BIT_CARVE_SENTENCE, type ToolRecommendation } from '@/engine/cnc/engrave/recommendTool';
@@ -4044,5 +4044,63 @@ describe('EngravePanel — the Design main path (#686)', () => {
     expect(footer.contains(screen.getByTestId('engrave-generate-fix'))).toBe(true);
     expect(screen.getByTestId('engrave-generate-blocker').textContent).toContain('▸ Fix');
     expect(footer.parentElement?.lastElementChild).toBe(footer);
+  });
+});
+
+// #740 — the "strokes thinner than" hint is a claim about the cutter's cutting width. A pointed
+// cutter whose record states no tip has no width to claim, and `cuttingDiameter`'s fallback would
+// print the 3.175 mm SHANK Makera writes into `diameter` for an engraver or a chamfer.
+describe('#740 EngravePanel — an unstated tip is not a width', () => {
+  const CHAMFER = flatEndMill(3.175, {
+    name: 'C1-BIT-CHAMFER-90',
+    typeText: 'Chamfer',
+    shape: 'chamfer',
+    tipDiameter: null,
+    diameter: 3.175,
+    angle: 90,
+    halfAngle: 45,
+  });
+
+  it('does not claim the shank as the width a stroke must beat', () => {
+    act(() =>
+      setInventoryEntries([{ key: 'inv:chamfer-740', tool: CHAMFER, provenance: 'EngravePanel #740 spec' }]),
+    );
+    const base = defaultEngraveJob();
+    act(() => {
+      useEngraveJobStore.setState({
+        job: {
+          ...base,
+          toolKey: 'inv:chamfer-740',
+          tool: CHAMFER,
+          // No region item: the hint only renders for the trace/relief path (`!vCarveJob`), which
+          // is where a flat cutter's width is a real claim about the stroke.
+          labels: base.labels.map((label) => ({ ...label, enabled: false })),
+        },
+      });
+    });
+
+    render(<EngravePanel />);
+    expect(screen.queryByTestId('engrave-thin-strokes')).toBeNull();
+  });
+
+  it('still claims the stated 0.1 mm tip', () => {
+    const tipped: Tool = { ...CHAMFER, tipDiameter: 0.1 };
+    act(() =>
+      setInventoryEntries([{ key: 'inv:chamfer-740-tip', tool: tipped, provenance: 'EngravePanel #740 spec' }]),
+    );
+    const base = defaultEngraveJob();
+    act(() => {
+      useEngraveJobStore.setState({
+        job: {
+          ...base,
+          toolKey: 'inv:chamfer-740-tip',
+          tool: tipped,
+          labels: base.labels.map((label) => ({ ...label, enabled: false })),
+        },
+      });
+    });
+
+    render(<EngravePanel />);
+    expect(screen.getByTestId('engrave-thin-strokes').textContent).toContain('0.1 mm');
   });
 });

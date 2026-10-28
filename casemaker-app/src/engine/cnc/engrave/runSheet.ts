@@ -28,7 +28,7 @@ import {
   type MarginSettings,
 } from '@/engine/cnc/engrave/depthBounds';
 import { printedLayerGridOf } from '@/engine/cnc/layerStack';
-import { cuttingDiameter } from '@/engine/cnc/tool';
+import { statedCuttingSize } from '@/engine/cnc/tool';
 import { cutterLegend, cutterProfileSvg } from '@/engine/cnc/cutterProfile';
 // #221 — the V-carve facts are the CAM's own arithmetic and cone resolution, imported rather than
 // re-derived: the sheet, the panel and the program must not print different plane radii or pitches.
@@ -3173,7 +3173,11 @@ export function buildRunSheet(
         : `The nearest cut, ${nearestCut.name}, comes within ${fmtNum(nearestCut.gap)} mm of the ` +
           `${nearestCut.jaw} jaw face — inside the ${fmtNum(job.jawClearance)} mm the job keeps clear.`;
   const tool = jobTool(job);
-  const diameter = tool ? cuttingDiameter(tool) : null;
+  // #740 — what the record STATES it cuts with. `cuttingDiameter` falls back to `diameter`, which
+  // for an engraver and a chamfer is the SHANK: printing that as the cutting size was another way
+  // of telling the operator the bit is 3.175 mm wide. No stated size prints as unknown, not as the
+  // shank.
+  const diameter = tool ? statedCuttingSize(tool) : null;
   const params = generated.feeds && generated.feeds.ok ? generated.feeds.params : null;
   // #221 — the V-carve facts are resolved ONCE, with the engine's own functions: the cone from the
   // job's cutter, and the colour plane from the print grid the plan carries. A V-carve job is a V

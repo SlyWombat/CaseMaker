@@ -36,7 +36,7 @@ import {
 } from '@/engine/cnc/toolTiers';
 import { inventoryKey } from '@/engine/cnc/toolRegistry';
 import { TOOL_LIBRARY, type ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
-import { cuttingDiameter } from '@/engine/cnc/tool';
+import { statedCuttingSize } from '@/engine/cnc/tool';
 import { cutterProfileScale } from '@/engine/cnc/cutterProfile';
 import { CutterProfile } from '@/components/ui/CutterProfile';
 import { caseSwatch, copyCaseSummary, distinctCases } from '@/engine/cnc/caseColour';
@@ -602,7 +602,9 @@ function Rows({
         const possession = item.get(entry.key) ?? null;
         const detail = possession === null ? null : codeLine(possession);
         const t = entry.tool;
-        const tip = cuttingDiameter(t);
+        // #740 — the Tip column is the tip the record STATES, never `diameter` (the shank for an
+        // engraver and a chamfer). An unstated tip reads as unstated.
+        const tip = statedCuttingSize(t);
         const dim = (v: number | null) => (v === null ? 'num dim' : 'num');
         return (
           <tr

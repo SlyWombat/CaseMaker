@@ -126,3 +126,48 @@ describe('#500 the Tools row shows cutter fields, not free-text notes', () => {
     expect(row.textContent).not.toContain('TopClamp');
   });
 });
+
+// #740 — the Tip column and the detail's `tip ⌀` row state what the record RECORDS. For an
+// engraver and a chamfer Makera writes the 3.175 mm SHANK into `diameter`, and `cuttingDiameter`
+// falls back to it — which made the list claim a tip the cutter does not have.
+describe('#740 the Tools list states a tip the record actually records', () => {
+  const chamfer = (tip: number | null) =>
+    flatEndMill(3.175, {
+      name: 'C1-BIT-CHAMFER-90',
+      typeText: 'Chamfer',
+      shape: 'chamfer',
+      tipDiameter: tip,
+      diameter: 3.175,
+      angle: 90,
+      halfAngle: 45,
+    });
+
+  const tipCell = (key: string): string | null | undefined =>
+    screen
+      .getByTestId(`manage-tools-row-inv:${key}`)
+      .querySelectorAll('td')[3]!.textContent;
+
+  it('shows no tip when the record states none, never the shank', () => {
+    seed({ ...ITEM, id: 'inv-chamfer', tool: chamfer(null) });
+    render(<ToolsScope />);
+
+    expect(tipCell('inv-chamfer')).toBe('—');
+
+    // The rail's `tip ⌀` row says the same thing (its `mm` helper prints an em dash for null).
+    fireEvent.click(screen.getByTestId('manage-tools-pick-inv:inv-chamfer'));
+    const th = [...document.querySelectorAll('th')].find((e) => e.textContent === 'tip ⌀');
+    expect(th).toBeDefined();
+    expect(th!.nextElementSibling!.textContent).toBe('— mm');
+  });
+
+  it('shows the stated 0.1 mm tip by its number', () => {
+    seed({ ...ITEM, id: 'inv-chamfer-tip', tool: chamfer(0.1) });
+    render(<ToolsScope />);
+
+    expect(tipCell('inv-chamfer-tip')).toBe('0.1');
+
+    fireEvent.click(screen.getByTestId('manage-tools-pick-inv:inv-chamfer-tip'));
+    const th = [...document.querySelectorAll('th')].find((e) => e.textContent === 'tip ⌀');
+    expect(th!.nextElementSibling!.textContent).toBe('0.1 mm');
+  });
+});

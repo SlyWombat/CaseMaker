@@ -39,7 +39,7 @@ import {
   type CutterSpec,
 } from '@/engine/cnc/registerCutter';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
-import { cuttingDiameter, type Tool } from '@/engine/cnc/tool';
+import { statedCuttingSize, type Tool } from '@/engine/cnc/tool';
 import type { CutterField } from '@/engine/cnc/cutterProfile';
 import { CutterProfile } from '@/components/ui/CutterProfile';
 import { CutterProfileFields } from '@/components/ui/CutterProfileFields';
@@ -175,7 +175,8 @@ function Detail({ entry, item }: { entry: ToolLibraryEntry; item: InventoryItem 
               </tr>
               <tr>
                 <th>tip ⌀</th>
-                <td>{mm(cuttingDiameter(t))} mm</td>
+                {/* #740 — the stated tip, not `cuttingDiameter`'s shank fallback. */}
+                <td>{mm(statedCuttingSize(t))} mm</td>
               </tr>
               <tr>
                 <th>shank ⌀</th>

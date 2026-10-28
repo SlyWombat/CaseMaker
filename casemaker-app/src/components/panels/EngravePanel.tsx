@@ -36,7 +36,7 @@ import { machineRecordByProfile, useLocationStore } from '@/store/locationStore'
 import { mountNameFor, probeNameFor } from '@/engine/cnc/registration/mountContext';
 import { useToolRegistry } from '@/hooks/useToolRegistry';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
-import { cuttingDiameter, drillPointAngle, pointLength } from '@/engine/cnc/tool';
+import { cuttingDiameter, drillPointAngle, pointLength, statedCuttingSize } from '@/engine/cnc/tool';
 import { drillSettings } from '@/engine/cnc/cam/drillBit';
 import { borePitchMm, boreRampAngleFrom } from '@/engine/cnc/cam/drill';
 import { readDefault } from '@/platform/defaultsClient';
@@ -978,7 +978,9 @@ export function EngravePanel(): JSX.Element {
   const tools = useToolRegistry();
   const tool = jobTool(job);
   const toolEntry = tools.find((e) => e.key === job.toolKey) ?? null;
-  const diameter = toolEntry ? cuttingDiameter(toolEntry.tool) : null;
+  // #740 — the size the record STATES, for the thin-strokes sentence and the import dialog. A
+  // pointed cutter with no tip has no width to claim: `cuttingDiameter` would print its shank.
+  const diameter = toolEntry ? statedCuttingSize(toolEntry.tool) : null;
   // #667 — THE REST PAIR, for the region rows' control. The engine's unit is the SETUP (its second
   // tool is the measured rest pass), so a row asks the setup that owns its item. The options are
   // the flat cutters smaller than the rough one: a region CAM's rest pass runs a flat bit, and a

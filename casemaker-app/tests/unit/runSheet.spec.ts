@@ -2183,3 +2183,30 @@ describe('runSheet — a goal job’s surface lines (#535)', () => {
     expect(steps.some((s) => (s.value ?? '').includes('passes ·'))).toBe(true);
   });
 });
+
+// #740 — the cutter step's value is the size the record STATES. `cuttingDiameter` falls back to
+// `diameter`, which for an engraver and a chamfer is the SHANK Makera writes, so a sheet could
+// state "⌀ 3.175 mm cutting" for a bit whose tip nobody recorded.
+describe('#740 the cutter step states a tip the record actually records', () => {
+  const chamfer = (tip: number | null): Tool =>
+    flatEndMill(3.175, {
+      name: 'C1-BIT-CHAMFER-90',
+      typeText: 'Chamfer',
+      shape: 'chamfer',
+      tipDiameter: tip,
+      diameter: 3.175,
+      angle: 90,
+      halfAngle: 45,
+      fluteLength: 1.6,
+    });
+  const cutterStep = (job: EngraveJob) =>
+    section(sheetFor(job), 'need').steps.find((s) => s.text.startsWith('The cutter'))!;
+
+  it('says the cutting diameter is unknown when a pointed cutter states no tip', () => {
+    expect(cutterStep({ ...dj(), tool: chamfer(null) }).value).toBe('cutting diameter unknown');
+  });
+
+  it('prints the stated tip, with its unit', () => {
+    expect(cutterStep({ ...dj(), tool: chamfer(0.1) }).value).toBe('⌀ 0.1 mm cutting');
+  });
+});
