@@ -61,6 +61,26 @@ describe('coverageDisclaimer', () => {
     expect(s).toContain('no shoulder or flute length');
   });
 
+  // #724 W7 — a rotary job's workholding is the map's two keep-out bands. The sweep models no
+  // solid for them, so the facts say which check DOES stand instead of naming a vise that is not
+  // on the machine — and the blind-spot line must not then claim the workholding is unchecked.
+  it('states a rotary job’s keep-out bands instead of a modelled vise fixture', () => {
+    const s = text({ rotaryBands: { jawsMm: 3, tailstockMm: 10, tailstock: true } });
+    expect(s).toContain('Checked: the tool against the stock.');
+    expect(s).toContain('The jaws and the tailstock are checked as keep-out bands on the map');
+    expect(s).toContain('the first 3 mm of the stick-out at the jaws');
+    expect(s).toContain('the last 10 mm at the free end');
+    expect(s).toContain('the findings and the verifier refuse a cut into them');
+    expect(s).not.toContain('the modelled fixture');
+    expect(s).not.toContain('any fixture — none is modelled');
+
+    // No tailstock: one band, one check, and the sentence says only that.
+    const noTail = text({ rotaryBands: { jawsMm: 3, tailstockMm: 10, tailstock: false } });
+    expect(noTail).toContain('The jaws are checked as a keep-out band on the map — the first 3 mm');
+    expect(noTail).not.toContain('the last 10 mm');
+    expect(noTail).not.toContain('the tailstock');
+  });
+
   it('says a path-only run checked nothing but the path', () => {
     const sentences = coverageDisclaimer({ ...base, outcome: 'path-only' });
     expect(sentences).toHaveLength(1);

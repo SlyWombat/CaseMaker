@@ -9,6 +9,7 @@ import { useToolRegistry } from '@/hooks/useToolRegistry';
 import { useEngraveJobStore } from '@/store/engraveJobStore';
 import { oracleSentence, useEngraveRunStore } from '@/store/engraveRunStore';
 import { jobVise, viseEnvelope } from '@/engine/cnc/fixture';
+import { ROTARY_JAW_KEEP_OUT_MM, ROTARY_TAILSTOCK_BAND_MM, rotaryMapOf } from '@/engine/cnc/rotary/wrap';
 import { hasSacrificial } from '@/engine/cnc/sacrificial';
 import type { StartingTool } from '@/engine/cnc';
 import type { DiagnosticSource, SimDiagnostic } from '@/workers/sim/session';
@@ -266,6 +267,11 @@ export function SimPanel() {
   // comparison for it: that sentence contradicted the oracle row's own "No 2.5D check for a
   // surface program" one line later. The surface check is stated by the oracle row instead.
   const jobSurfaceRun = run.generated?.surface3d != null;
+  // #724 W7 — a rotary job has no vise to model (`toSetup` gives the sweep a cylinder on the
+  // chuck, not an envelope), so its workholding facts are the map's two keep-out bands and the
+  // coverage sentence says so instead of naming a vise whose envelope is not on the machine. The
+  // sacrificial board is dropped with it: the rotary setup carries none into the sweep.
+  const rotary = rotaryMapOf(job);
   const jobCoverage =
     run.simStatus === null
       ? []
@@ -273,9 +279,16 @@ export function SimPanel() {
           outcome: run.simStatus === 'ready' ? 'swept' : run.pathOnly ? 'path-only' : 'refused',
           engine: run.simEngine ?? undefined,
           oracleBand: jobSurfaceRun ? undefined : run.oracle?.band,
-          fixtureLabels: viseEnvelope(job.stock, jobVise(job), job.sacrificial).boxes.map((b) => b.label),
+          fixtureLabels:
+            rotary === null
+              ? viseEnvelope(job.stock, jobVise(job), job.sacrificial).boxes.map((b) => b.label)
+              : [],
+          rotaryBands:
+            rotary === null
+              ? null
+              : { jawsMm: ROTARY_JAW_KEEP_OUT_MM, tailstockMm: ROTARY_TAILSTOCK_BAND_MM, tailstock: rotary.tailstock },
           fixtureSource: jobVise(job).source,
-          sacrificialModelled: hasSacrificial(job.sacrificial),
+          sacrificialModelled: rotary === null && hasSacrificial(job.sacrificial),
           toolName: jobToolEntry === null ? null : toolDisplayName(jobToolEntry.tool),
           codes: run.simDiagnostics.map((d) => d.code),
         });

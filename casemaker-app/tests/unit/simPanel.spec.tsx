@@ -765,6 +765,36 @@ describe('SimPanel', () => {
       expect(technical).not.toContain('two engines');
       expect(technical).toContain('Not checked:');
     });
+
+    // #724 W7 — the sweep was given a cylinder on the chuck (`toSetup`), not a vise envelope. The
+    // facts used to name the vise fixture anyway; they now state the map's own keep-out bands.
+    it('#724 W7 — a rotary job’s facts name the keep-out bands, not a vise fixture', () => {
+      act(() => {
+        const base = defaultEngraveJob();
+        useEngraveJobStore.getState().replace({
+          ...base,
+          stock: { ...base.stock, length: 100, width: 20, thickness: 20, shape: 'cylinder', diameter: 20, material: 'pla' },
+          workholding: {
+            kind: 'rotary-chuck',
+            rotary: { stickout: 85, gripDiameter: null, jawMode: 'reverse-inner', tailstock: true, source: 'test' },
+          },
+        });
+        useEngraveRunStore.setState({ ...JOB_RUN });
+      });
+      render(<SimPanel />);
+
+      // The main path's one sentence holds for a rotary job too: the tool against the stock.
+      expect(screen.getByTestId('sim-job-checked').textContent).toContain('Checked: the tool against the stock.');
+      // The workholding prose reads in Technical (#726 W9) — and it never names a vise.
+      const coverage = screen.getByTestId('sim-job-coverage').textContent ?? '';
+      expect(coverage).not.toContain('the modelled fixture');
+      expect(coverage).not.toContain('vise');
+      expect(coverage).toContain('checked as keep-out bands on the map');
+      expect(coverage).toContain('the first 3 mm of the stick-out at the jaws');
+      expect(coverage).toContain('the last 10 mm at the free end');
+      // The workholding IS checked (as bands), so the "none is modelled" blind spot cannot stand.
+      expect(coverage).not.toContain('any fixture — none is modelled');
+    });
   });
 
   // #687/#691 — the Tool select draws the one display-name form, grouped by kind; the vendor's

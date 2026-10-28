@@ -14,6 +14,8 @@
  * worker. The physics sentence stays a constant in the panel; this is the part that changes per run.
  */
 
+import { rowSummary } from '@/components/panels/engraveRowText';
+
 /** What the load did: a full sweep, the runner only (sweep refused), or nothing at all. */
 export type SimRunOutcome = 'swept' | 'path-only' | 'refused';
 
@@ -48,6 +50,13 @@ export interface SimCoverageInput {
   toolName?: string | null;
   /** The codes this run reported, so "cannot be proven" is named from the run, not from prose. */
   codes: readonly string[];
+  /**
+   * #724 W7 — a rotary job's workholding is the map's two keep-out BANDS, not a vise envelope.
+   * Its cuts are refused where they enter them (the findings and the verifier), which is a
+   * different check from a fixture modelled as a solid — so the facts say that, and never name a
+   * vise whose envelope belongs to a mount that is not on the machine.
+   */
+  rotaryBands?: { jawsMm: number; tailstockMm: number; tailstock: boolean } | null;
 }
 
 /** `a`, `a and b`, `a, b and c`. */
@@ -68,6 +77,18 @@ export function coverageDisclaimer(input: SimCoverageInput): string[] {
     if (input.sacrificialModelled) obstacles.push('the sacrificial material');
     if (input.fixtureLabels.length > 0) obstacles.push(`the modelled fixture (${input.fixtureLabels.join(', ')})`);
     out.push(`Checked: the tool against ${joinAnd(obstacles)}.`);
+    // #724 W7 — the rotary's own facts. The chuck and tailstock are the map's bands; the sweep
+    // models no solid for them, and the sentence says which check stands instead of naming a vise
+    // that is not on the machine. (#729 will swap "as keep-out bands" for "as solids".)
+    const bands = input.rotaryBands ?? null;
+    if (bands !== null) {
+      const jaws = rowSummary(bands.jawsMm);
+      out.push(
+        bands.tailstock
+          ? `The jaws and the tailstock are checked as keep-out bands on the map — the first ${jaws} of the stick-out at the jaws, and the last ${rowSummary(bands.tailstockMm)} at the free end — the findings and the verifier refuse a cut into them, and the sweep models neither as a solid.`
+          : `The jaws are checked as a keep-out band on the map — the first ${jaws} of the stick-out — the findings and the verifier refuse a cut into it, and the sweep models no chuck body as a solid.`,
+      );
+    }
 
     // #405 — a rotary job or a V-bit trace keeps its material as a sampled grid, so its numbers
     // carry a resolution the exact boolean sweeper's do not. The claim is about the NUMBERS, not a
@@ -98,7 +119,7 @@ export function coverageDisclaimer(input: SimCoverageInput): string[] {
       'the spindle body, head and gantry',
       'anything on the bed other than the declared stock, workholding and sacrificial material',
     ];
-    if (input.fixtureLabels.length === 0) {
+    if (input.fixtureLabels.length === 0 && bands === null) {
       blind.push('any fixture — none is modelled as an obstacle, so the workholding is not checked');
     }
     // #314 — from the run's own codes, like the shank caveat below. The sweep raises
