@@ -29,7 +29,16 @@
 
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type JSX, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
 import { rotaryFits } from '@/engine/cnc/setups/plan';
-import { ROTARY_JAW_KEEP_OUT_MM, ROTARY_TAILSTOCK_BAND_MM } from '@/engine/cnc/rotary/wrap';
+import { ROTARY_JAW_KEEP_OUT_MM, ROTARY_TAILSTOCK_BAND_MM, type RotaryMap } from '@/engine/cnc/rotary/wrap';
+import {
+  ROTARY_NECK_DIAMETER_MM,
+  ROTARY_NECK_LENGTH_MM,
+  ROTARY_NECK_MIN_LENGTH_MM,
+  defaultRotaryNeck,
+  neckEndLabel,
+  rotaryNeckMinDiameterMm,
+  rotaryNeckSpan,
+} from '@/engine/cnc/rotary/neck';
 import {
   defaultRotaryChuck,
   rodAxisOf,
@@ -61,7 +70,7 @@ import { useShopDefaultsStore } from '@/store/shopDefaultsStore';
 import { useMediaQuery } from '@/hooks/useMediaQuery';
 import { NARROW_QUERY } from './wizardLayout';
 import { openMachineChange } from '@/components/machine-change';
-import type { BracketHold, EngraveJob, JobStockForm, RotaryChuck, RotaryJawMode, TapeHold, ViseParams } from '@/types/engraveJob';
+import type { BracketHold, EngraveJob, JobStockForm, RotaryChuck, RotaryJawMode, RotaryNeck, TapeHold, ViseParams } from '@/types/engraveJob';
 import {
   HOLDING_MOUNT_LABELS,
   HOLDING_MOUNT_WORDS,
@@ -1732,6 +1741,20 @@ export function HoldingStep({ job, answers, onAnswers, onRotary, onBedHold }: Ho
     const rod = rodAxisOf(job.stock);
     const grip = round3(Math.max(0, rod.length - chuck.stickout));
     const write = (patch: Partial<RotaryChuck>): void => onRotary({ ...chuck, ...patch }, answers);
+    // #737 — the neck's placement and its safe minimum are the ENGINE's (`rotary/neck.ts`), read
+    // here off the chuck on screen so the sentence quotes the span the findings and the CAM will
+    // use — including while the rotary option is merely previewed and the job is still a vise.
+    const neck = chuck.neck;
+    const neckMap: RotaryMap = {
+      radius: rod.diameter / 2,
+      circumference: Math.PI * rod.diameter,
+      stickout: chuck.stickout,
+      grip,
+      length: rod.length,
+      tailstock: chuck.tailstock,
+    };
+    const neckSpan = neck === undefined ? null : rotaryNeckSpan(neckMap, neck);
+    const neckMin = neckSpan === null ? null : rotaryNeckMinDiameterMm(job.stock.material, neckSpan.effectiveMm);
     const axisDatum = profile?.datums.rotaryAxis ?? null;
     return (
       <div data-testid="engrave-setup-rotary-fields" style={BED_FIELDS}>
@@ -1786,6 +1809,99 @@ export function HoldingStep({ job, answers, onAnswers, onRotary, onBedHold }: Ho
             {chuck.tailstock ? 'in — drill a centre hole in the free end first' : 'out — the free end is unsupported'}
           </label>
         </FieldRow>
+        <FieldRow label="Neck for parting">
+          <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+            <input
+              type="checkbox"
+              aria-label="Neck for parting"
+              data-testid="engrave-setup-rotary-neck"
+              checked={neck !== undefined}
+              onChange={(e) => {
+                if (e.target.checked) {
+                  write({ neck: defaultRotaryNeck() });
+                } else {
+                  // Absent is OFF (the document rule): the key goes, rather than a false flag a
+                  // later reader would have to know to ignore.
+                  const cleared = { ...chuck };
+                  delete cleared.neck;
+                  onRotary(cleared, answers);
+                }
+              }}
+            />
+            {neck === undefined ? 'off — the part is not cut down for sawing' : 'on — leave the part on a neck and saw it off'}
+          </label>
+        </FieldRow>
+        {neck !== undefined && (
+          <FieldRow label="Neck size">
+            <select
+              className="fld"
+              aria-label="Neck side"
+              data-testid="engrave-setup-rotary-neck-end"
+              value={neck.end}
+              onChange={(e) => write({ neck: { ...neck, end: e.target.value as RotaryNeck['end'] } })}
+            >
+              <option value="tailstock">tailstock side</option>
+              <option value="chuck">chuck side</option>
+            </select>
+            <label style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+              ⌀
+              <input
+                type="number"
+                className="fld"
+                aria-label="Neck diameter"
+                data-testid="engrave-setup-rotary-neck-diameter"
+                min="0.1"
+                step="0.1"
+                value={neck.diameter}
+                style={{ width: 64 }}
+                onChange={(e) => {
+                  const d = Number(e.target.value);
+                  if (!Number.isFinite(d) || d <= 0) return;
+                  write({ neck: { ...neck, diameter: d } });
+                }}
+              />
+              mm
+            </label>
+            <label style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+              <input
+                type="number"
+                className="fld"
+                aria-label="Neck length"
+                data-testid="engrave-setup-rotary-neck-length"
+                min="0.1"
+                step="0.1"
+                value={neck.length}
+                style={{ width: 64 }}
+                onChange={(e) => {
+                  const l = Number(e.target.value);
+                  if (!Number.isFinite(l) || l <= 0) return;
+                  write({ neck: { ...neck, length: l } });
+                }}
+              />
+              mm long
+            </label>
+            <span className="hint" style={{ flexBasis: '100%' }} data-testid="engrave-setup-rotary-neck-note">
+              {neckSpan === null || neckMin === null
+                ? 'The neck needs a length and a diameter above 0 mm.'
+                : `The program’s last operation cuts it down to ⌀${fmt(neck.diameter)} mm all the way round with the ` +
+                  `part’s own cutter, and you saw the part off at X ${fmt(neckSpan.sawAtMm)} mm — the neck runs ` +
+                  `X ${fmt(neckSpan.fromMm)}–${fmt(neckSpan.toMm)} mm on the ${neckEndLabel(neck.end)}. ` +
+                  `Case Maker starts the neck at ⌀${ROTARY_NECK_DIAMETER_MM} mm and ${ROTARY_NECK_LENGTH_MM} mm long ` +
+                  `(a saw needs at least ${ROTARY_NECK_MIN_LENGTH_MM} mm): those are labelled defaults, not ` +
+                  `measurements. ` +
+                  `The saw frees the ${neck.end === 'chuck' ? 'whole part' : 'stub'}, ${fmt(neckSpan.carriedMm)} mm long; ` +
+                  (neckMap.tailstock
+                    ? `the neck and the tailstock centre hold its ends, so the bending is shared and the check ` +
+                      `counts half its length (${fmt(neckSpan.effectiveMm)} mm). `
+                    : `nothing holds its far end, so it hangs free and the check counts the whole length ` +
+                      `(${fmt(neckSpan.effectiveMm)} mm). `) +
+                  `The safe minimum is ⌀${Number(neckMin.diameterMm.toFixed(2))} mm — Case Maker’s defaults ` +
+                  `(${neckMin.loadN} N sideways at its free end, ${neckMin.stressMpa} MPa allowable bending ` +
+                  `stress), not measurements: the neck is cut last, with the part still held, so this is a ` +
+                  'rough check and the minimum is a guess until the bench confirms it (#238).'}
+            </span>
+          </FieldRow>
+        )}
         <details data-testid="engrave-setup-rotary-technical">
           <summary style={{ fontSize: 12, cursor: 'pointer' }}>Technical</summary>
           <div style={{ marginTop: 4 }}>

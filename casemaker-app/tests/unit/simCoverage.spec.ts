@@ -223,3 +223,47 @@ describe('#744 coverageDisclaimer — a run of several programs', () => {
     expect(coverageDisclaimer({ ...base, programs: [swept('program 1 (flat-1)')] })).toEqual(flat);
   });
 });
+
+// #737 — the saw is at the bench: the simulation ends with the part on its neck, and the facts
+// say so in the run's own numbers rather than leaving a green sweep to read as a finished part.
+describe('the neck for parting (#737)', () => {
+  const neck = {
+    end: 'tailstock' as const,
+    diameterMm: 4,
+    lengthMm: 5,
+    fromMm: 70,
+    toMm: 75,
+    sawAtMm: 72.5,
+    depthMm: 8,
+    carriedMm: 12.5,
+    effectiveMm: 6.25,
+  };
+
+  it('says the part stays on the neck, where the saw goes, and that the simulation stops there', () => {
+    const s = text({ rotaryNeck: neck });
+    expect(s).toContain('The part stays on a ⌀4 mm neck at X 72.5 mm, to be sawn off');
+    expect(s).toContain('the neck runs from X 70 mm to X 75 mm');
+    expect(s).toContain('the simulation ends with the part still on it');
+  });
+
+  it('says it for a run of several programs too, after their checks', () => {
+    // #744's whole-run sentence replaces the single-file one, so the neck fact has to be carried
+    // by that path as well: the last program leaves the neck whether the run has one file or five.
+    const s = text({
+      rotaryNeck: neck,
+      programs: [
+        { label: 'program 1 (flat-1)', outcome: 'swept', engine: 'exact', errorCount: 0 },
+        { label: 'program 2 (flat-4)', outcome: 'swept', engine: 'exact', errorCount: 0 },
+      ],
+      expectedPrograms: 2,
+    });
+    expect(s).toContain('Checked: all 2 programs in the run');
+    expect(s).toContain('The part stays on a ⌀4 mm neck at X 72.5 mm, to be sawn off');
+    expect(s).toContain('the simulation ends with the part still on it');
+  });
+
+  it('says nothing about a saw when the job has no neck', () => {
+    expect(text({})).not.toContain('to be sawn off');
+    expect(text({ rotaryNeck: null })).not.toContain('to be sawn off');
+  });
+});

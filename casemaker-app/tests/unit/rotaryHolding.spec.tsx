@@ -314,3 +314,83 @@ describe('#714 the rotary option and its four lines (station 3)', () => {
     expect((screen.getByTestId('engrave-setup-rotary-tailstock') as HTMLInputElement).checked).toBe(false);
   });
 });
+
+// #737 — THE NECK FOR PARTING lives beside the chuck's own facts (design §3.6, §3.11): off until
+// the operator turns it on, then the side, the ⌀ and the length, with the sentence the findings
+// and the run sheet will use.
+describe('#737 the neck for parting (station 3)', () => {
+  it('is off by default, then writes its side, diameter and length — and clears back to absent', () => {
+    seedLocation(rotaryMachine());
+    openHolding(rod());
+
+    const toggle = screen.getByTestId('engrave-setup-rotary-neck') as HTMLInputElement;
+    expect(toggle.checked).toBe(false);
+    expect(screen.queryByTestId('engrave-setup-rotary-neck-end')).toBeNull();
+    let held = job().workholding;
+    expect(held.kind).toBe('rotary-chuck');
+    if (held.kind === 'rotary-chuck') expect('neck' in held.rotary).toBe(false);
+
+    fireEvent.click(toggle);
+
+    held = job().workholding;
+    if (held.kind === 'rotary-chuck') expect(held.rotary.neck).toEqual({ end: 'tailstock', diameter: 4, length: 5 });
+    expect((screen.getByTestId('engrave-setup-rotary-neck-end') as HTMLSelectElement).value).toBe('tailstock');
+    expect((screen.getByTestId('engrave-setup-rotary-neck-diameter') as HTMLInputElement).value).toBe('4');
+    expect((screen.getByTestId('engrave-setup-rotary-neck-length') as HTMLInputElement).value).toBe('5');
+    const note = screen.getByTestId('engrave-setup-rotary-neck-note').textContent ?? '';
+    expect(note).toContain('The program’s last operation cuts it down to ⌀4 mm');
+    expect(note).toContain('you saw the part off at X 72.5 mm');
+    expect(note).toContain('X 70–75 mm on the tailstock side');
+    expect(note).toContain('Case Maker starts the neck at ⌀4 mm and 5 mm long');
+    expect(note).toContain('a saw needs at least 2.5 mm');
+    expect(note).toContain('those are labelled defaults, not measurements');
+    expect(note).toContain('The saw frees the stub, 12.5 mm long');
+    expect(note).toContain('the neck and the tailstock centre hold its ends');
+    expect(note).toContain('the bending is shared and the check counts half its length (6.25 mm)');
+    expect(note).toContain('The safe minimum is ⌀2.77 mm');
+    expect(note).toContain('Case Maker’s defaults (10 N sideways at its free end, 30 MPa allowable bending stress)');
+    expect(note).toContain('not measurements');
+    expect(note).toContain('a rough check and the minimum is a guess until the bench confirms it (#238)');
+
+    fireEvent.change(screen.getByTestId('engrave-setup-rotary-neck-end'), { target: { value: 'chuck' } });
+    held = job().workholding;
+    if (held.kind === 'rotary-chuck') expect(held.rotary.neck).toEqual({ end: 'chuck', diameter: 4, length: 5 });
+    expect(screen.getByTestId('engrave-setup-rotary-neck-note').textContent).toContain('X 3–8 mm on the chuck side');
+
+    fireEvent.change(screen.getByTestId('engrave-setup-rotary-neck-diameter'), { target: { value: '6' } });
+    fireEvent.change(screen.getByTestId('engrave-setup-rotary-neck-length'), { target: { value: '8' } });
+    held = job().workholding;
+    if (held.kind === 'rotary-chuck') expect(held.rotary.neck).toEqual({ end: 'chuck', diameter: 6, length: 8 });
+
+    fireEvent.click(screen.getByTestId('engrave-setup-rotary-neck'));
+    held = job().workholding;
+    if (held.kind === 'rotary-chuck') expect('neck' in held.rotary).toBe(false);
+    expect(screen.queryByTestId('engrave-setup-rotary-neck-note')).toBeNull();
+  });
+
+  it('reloading a job that already has a neck shows its own numbers', () => {
+    seedLocation(rotaryMachine());
+    const base = rod();
+    openHolding({
+      ...base,
+      stock: { ...base.stock, length: 100, width: 20, thickness: 20, shape: 'cylinder', diameter: 20 },
+      workholding: {
+        kind: 'rotary-chuck',
+        rotary: {
+          stickout: 85,
+          gripDiameter: null,
+          jawMode: 'reverse-inner',
+          tailstock: true,
+          source: 'test',
+          neck: { end: 'chuck', diameter: 3, length: 4 },
+        },
+      },
+    });
+
+    expect((screen.getByTestId('engrave-setup-rotary-neck') as HTMLInputElement).checked).toBe(true);
+    expect((screen.getByTestId('engrave-setup-rotary-neck-end') as HTMLSelectElement).value).toBe('chuck');
+    expect((screen.getByTestId('engrave-setup-rotary-neck-diameter') as HTMLInputElement).value).toBe('3');
+    expect((screen.getByTestId('engrave-setup-rotary-neck-length') as HTMLInputElement).value).toBe('4');
+    expect(screen.getByTestId('engrave-setup-rotary-neck-note').textContent).toContain('X 3–7 mm on the chuck side');
+  });
+});

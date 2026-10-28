@@ -23,6 +23,7 @@
  */
 
 import { rowSummary } from '@/components/panels/engraveRowText';
+import type { RotaryNeckFacts } from '@/engine/cnc/rotary/neck';
 
 /** What the load did: a full sweep, the runner only (sweep refused), or nothing at all. */
 export type SimRunOutcome = 'swept' | 'path-only' | 'refused';
@@ -98,6 +99,12 @@ export interface SimCoverageInput {
    * stopped part-way reports fewer results than the run has files. Defaults to `programs.length`.
    */
   expectedPrograms?: number;
+  /**
+   * #737 — the neck the part is left on for sawing off. The simulation cannot show the saw: it
+   * ends with the part still on the neck, so the facts say that in words. Absent/null when the
+   * job has no neck, and the disclaimer then says nothing about one.
+   */
+  rotaryNeck?: RotaryNeckFacts | null;
 }
 
 /** `a`, `a and b`, `a, b and c`. */
@@ -126,6 +133,22 @@ function rotaryBandSentence(input: SimCoverageInput): string | null {
   return bands.tailstock
     ? `The jaws and the tailstock are checked as keep-out bands on the map — the first ${jaws} of the stick-out at the jaws, and the last ${rowSummary(bands.tailstockMm)} at the free end — the findings and the verifier refuse a cut into them, and the sweep models neither as a solid.`
     : `The jaws are checked as a keep-out band on the map — the first ${jaws} of the stick-out — the findings and the verifier refuse a cut into it, and the sweep models no chuck body as a solid.`;
+}
+
+/**
+ * #737 — THE SAW IS NOT IN THE SIMULATION. The program ends with the part on its neck; the cut
+ * that frees it happens at the bench. The facts say where the part is left and where the saw goes,
+ * in the run's own numbers, so a green simulation is not read as a finished part. Null on every job
+ * without a neck, so its sentences are unchanged.
+ */
+function neckSentence(input: SimCoverageInput): string | null {
+  const neck = input.rotaryNeck ?? null;
+  if (neck === null) return null;
+  return (
+    `The part stays on a ⌀${rowSummary(neck.diameterMm)} neck at X ${rowSummary(neck.sawAtMm)}, ` +
+    `to be sawn off — the neck runs from X ${rowSummary(neck.fromMm)} to X ${rowSummary(neck.toMm)}, ` +
+    `and the simulation ends with the part still on it.`
+  );
 }
 
 /**
@@ -240,6 +263,11 @@ function wholeRunDisclaimer(
   const bands = rotaryBandSentence(input);
   if (bands !== null) out.push(bands);
 
+  // #737 — the run ends on the neck whichever program left it, so a multi-program run states the
+  // same fact the single-file sentence does.
+  const neck = neckSentence(input);
+  if (neck !== null) out.push(neck);
+
   // #405 — a rotary job or a V-bit trace keeps its material as a sampled grid, so its numbers carry
   // a resolution the exact boolean sweeper's do not. Per program, because a run can mix engines.
   const column = programs.filter((p) => p.engine === 'column').map((p) => p.label);
@@ -293,6 +321,12 @@ export function coverageDisclaimer(input: SimCoverageInput): string[] {
     out.push(`Checked: the tool against ${obstacleWords(input)}.`);
     const bands = rotaryBandSentence(input);
     if (bands !== null) out.push(bands);
+
+    // #737 — THE SAW IS NOT IN THE SIMULATION. The program ends with the part on its neck; the
+    // cut that frees it happens at the bench. The facts say where the part is left and where the
+    // saw goes, in the run's own numbers, so a green simulation is not read as a finished part.
+    const neck = neckSentence(input);
+    if (neck !== null) out.push(neck);
 
     // #405 — a rotary job or a V-bit trace keeps its material as a sampled grid, so its numbers
     // carry a resolution the exact boolean sweeper's do not. The claim is about the NUMBERS, not a
