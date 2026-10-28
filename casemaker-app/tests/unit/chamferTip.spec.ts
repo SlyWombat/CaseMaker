@@ -28,7 +28,12 @@ import { join } from 'node:path';
 import { tl } from './helpers/manifoldExec';
 import { generate } from './helpers/engravePipeline';
 import { parseEngraveJob } from '@/store/engraveJobSchema';
-import { flatEndMill, type Tool } from '@/engine/cnc/tool';
+import { feedRowDiameter, flatEndMill, tipNotRecorded, type Tool } from '@/engine/cnc/tool';
+import {
+  DEFAULT_V_CARVE_STEPOVER_RATIO,
+  vCarveRowStepover,
+} from '@/engine/cnc/vCarveGeometry';
+import { vCone } from '@/engine/cnc/vProfile';
 import type { EngraveJob } from '@/types/engraveJob';
 import type { EngraveGenerated } from '@/workers/sim/engraveGenerate';
 
@@ -120,3 +125,96 @@ describe('#740 — an unrecorded tip is asked for, not invented', () => {
     expect(codes(gen)).not.toContain('tool-tip-unrecorded');
   }, 180_000);
 });
+
+describe('#740 — the Makera row’s 0.1 mm tip V-carves what the shank refused', () => {
+  it('generates j10 with the tip stated', () => {
+    const gen = generate(tl, benchJob('j10-plaque-90v.json', 0.1));
+
+    expect(codes(gen)).not.toContain('tool-tip-unrecorded');
+    expect(codes(gen)).not.toContain('item-empty');
+    expect(codes(gen)).not.toContain('vcarve-groove-too-narrow');
+    expect(gen.findings.some((f) => SHANK_READ_AS_CUTTER.test(f.message))).toBe(false);
+    // The old step-over arithmetic divided the chamfer's flat-row step-over by the 0.1 mm tip
+    // width (ratio 14.2875) and the CAM refused it. The row's own diameter is the denominator.
+    expect(gen.errors).toEqual([]);
+    expect(gen.ok).toBe(true);
+    expect(gen.programs.length).toBeGreaterThan(0);
+  }, 180_000);
+
+  it('generates j11 with the tip stated', () => {
+    const gen = generate(tl, benchJob('j11-inlay-female-90v.json', 0.1));
+
+    expect(codes(gen)).not.toContain('tool-tip-unrecorded');
+    expect(codes(gen)).not.toContain('item-empty');
+    expect(codes(gen)).not.toContain('vcarve-groove-too-narrow');
+    expect(gen.findings.some((f) => SHANK_READ_AS_CUTTER.test(f.message))).toBe(false);
+    expect(gen.errors).toEqual([]);
+    expect(gen.ok).toBe(true);
+    expect(gen.programs.length).toBeGreaterThan(0);
+  }, 180_000);
+});
+
+describe('#740 — one owner for the tip, one diameter for the feeds row', () => {
+  it('tipNotRecorded is true only for a pointed cutter whose tip the record leaves empty', () => {
+    expect(tipNotRecorded(chamfer(null))).toBe(true);
+    expect(tipNotRecorded(chamfer(0))).toBe(true); // zero is unstated, not a size
+    expect(tipNotRecorded(chamfer(0.1))).toBe(false);
+    // A flat end mill records its whole face as the tip; that is a stated size, not this case.
+    expect(tipNotRecorded(flatEndMill(3.175))).toBe(false);
+    // A pointed cutter with no resolvable cone is the cone's own refusal, not this one.
+    expect(tipNotRecorded(flatEndMill(3.175, { shape: 'engraving', tipDiameter: null, angle: null, halfAngle: null }))).toBe(
+      false,
+    );
+  });
+
+  it('feedRowDiameter is the base a chamfer row is resolved on and the tip an engraver’s', () => {
+    expect(feedRowDiameter(chamfer(null))).toBe(3.175); // the shank, never 0
+    expect(feedRowDiameter(chamfer(0.1))).toBe(3.175);
+    const engraver = flatEndMill(3.175, {
+      shape: 'engraving',
+      tipDiameter: 0.3,
+      angle: 30,
+      halfAngle: 15,
+    });
+    expect(feedRowDiameter(engraver)).toBe(0.3);
+    expect(feedRowDiameter(flatEndMill(6))).toBe(6);
+  });
+
+  it('vCarveRowStepover reads a chamfer’s flat-row number against its base, not its tip', () => {
+    const tool = chamfer(0.1);
+    const cone = vCone(tool);
+    expect(cone).not.toBeNull();
+    // 0.45 × 3.175 mm is exactly what `feedsFor` resolves for the chamfer's flat row.
+    const step = vCarveRowStepover(tool, 0.45 * 3.175, 0.2, cone!);
+    expect(step).not.toBeNull();
+    expect(step!.requested).toBeCloseTo(2 * 0.2 * 0.45, 12);
+    // The 0.1 mm tip still bounds the FLOOR, so the effective pitch is its 0.05 mm radius.
+    expect(step!.effective).toBeCloseTo(0.05, 12);
+    expect(step!.clamped).toBe(true);
+    // The old reader measured the same row number against the tip width: ratio 14.2875, outside
+    // (0, 1], which the CAM threw on. Nothing about that number is fed back in as a fraction.
+    expect((0.45 * 3.175) / (2 * cone!.tipRadius)).toBeCloseTo(14.2875, 10);
+    expect(vCarveRowStepover(tool, feedRowDiameter(tool)! + 0.1, 0.2, cone!)).toBeNull();
+  });
+
+  it('vCarveRowStepover leaves an engraver’s established numbers where they were', () => {
+    const engraver = flatEndMill(3.175, {
+      shape: 'engraving',
+      tipDiameter: 0.3,
+      angle: 30,
+      halfAngle: 15,
+    });
+    const cone = vCone(engraver)!;
+    const step = vCarveRowStepover(engraver, DEFAULT_V_CARVE_STEPOVER_RATIO * 0.3, 0.2, cone)!;
+    expect(step.requested).toBeCloseTo(2 * 0.2 * DEFAULT_V_CARVE_STEPOVER_RATIO, 12);
+    expect(step.clamped).toBe(true); // 0.24 mm request vs the 0.15 mm tip radius
+  });
+
+  it('vCarveRowStepover answers null, not a throw, for a tip that is not stated', () => {
+    const tool = chamfer(null);
+    const cone = vCone(tool)!;
+    expect(cone.tipRadius).toBe(0);
+    expect(vCarveRowStepover(tool, 0.45 * 3.175, 0.2, cone)).toBeNull();
+  });
+});
+

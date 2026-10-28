@@ -42,7 +42,7 @@ import {
 } from './texture';
 import { FLUTE_RAMP_STEPS, fluteNumbers, fluteOperationName } from './flute';
 import { prismNumbers } from './prism';
-import { vCarveLevels, vCarvePlane, vCarveStepover } from '@/engine/cnc/vCarveGeometry';
+import { vCarveLevels, vCarvePlane, vCarveRowStepover } from '@/engine/cnc/vCarveGeometry';
 import { colourBoundaryDepthFor } from '@/engine/cnc/layerStack';
 import { axesWord, describeTouch, kindWord, PROBE_SPEC, readsWord, registrationFor, sideWords } from '@/engine/cnc/engrave/registration';
 import {
@@ -3773,10 +3773,10 @@ export function buildRunSheet(
     }
     if (vCarveJob && cone !== null) {
       // #221 — the per-item V facts are the CAM's own numbers: the plane from `vCarvePlane`, the
-      // pitch from `vCarveStepover` at the ratio the feeds row's step-over states (the same ratio
-      // the `vcarve-stepover-clamped` finding reads). The design is correct at the colour plane, so
-      // the floor inset and the surface outset are what the operator should expect to see in the
-      // blank; the effective pitch is what the program actually runs.
+      // pitch from `vCarveRowStepover` at the fraction the feeds row's step-over states (the same
+      // fraction the `vcarve-stepover-clamped` finding reads). The design is correct at the colour
+      // plane, so the floor inset and the surface outset are what the operator should expect to see
+      // in the blank; the effective pitch is what the program actually runs.
       // #665 — a VARIABLE-depth item is the medial-axis carve: the depth follows the design's
       // width, cut as a ladder of level sets, and the floor's core is a flat end mill pocket's —
       // the run's own core program (#677). Its step replaces the plane statement, which describes
@@ -3817,12 +3817,13 @@ export function buildRunSheet(
         continue;
       }
       const plane = vCarvePlane(cone, item.depth, film);
-      const ratio =
-        params === null || cone.tipRadius <= 0 ? null : params.stepOver / (2 * cone.tipRadius);
+      // #740 — the row's fraction is its step-over over the diameter it was resolved on (a
+      // chamfer's base, an engraver's tip), read back by the same function the CAM and the finding
+      // use; dividing by the tip width refused a chamfer's flat-row number as ratio 14.2875.
       const stepover =
-        ratio !== null && Number.isFinite(ratio) && ratio > 0 && ratio <= 1
-          ? vCarveStepover(plane.planeRadius, cone, ratio)
-          : null;
+        tool === null || params === null
+          ? null
+          : vCarveRowStepover(tool, params.stepOver, plane.planeRadius, cone);
       // The clamp sentence is the finding's own, not a softer paraphrase: the sheet, the panel and
       // §8 must agree that this is a note about a correct cut, not a fault. §8 carries the full
       // finding verbatim; this line states the same fact beside the item's numbers.

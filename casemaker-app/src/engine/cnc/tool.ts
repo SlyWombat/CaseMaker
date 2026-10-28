@@ -208,6 +208,29 @@ export function cuttingDiameter(tool: Tool): number | null {
 }
 
 /**
+ * The diameter a FEEDS ROW was resolved and scaled against, mm, or null when the record states
+ * none (#740).
+ *
+ * `CutParams.stepOver` is `row.stepOverFraction × this diameter`, so it is a FRACTION of THIS
+ * number, not of a tip width the row never named. A reader that wants the fraction back — the
+ * CAM, the clamp note, the run sheet, the Engrave panel — asks here; dividing by the tip instead
+ * was #740's second defect: the chamfer's flat row was resolved on its 3.175 mm base, and a
+ * 1.42875 mm step-over divided by the 0.1 mm tip gave a ratio of 14.2875 that the CAM refused.
+ *
+ * A CHAMFER resolves the FLAT row (feeds.ts says why: what it engages is the cone's flank up to
+ * its base), matched on the vendor `diameter` — never its tip, which would ask the table for a
+ * 0.2 mm flat row. Every other trace-capable cutter resolves against `cuttingDiameter`, which is
+ * an engraver's tip. This is the ONE copy of that choice, shared by the resolver and its readers,
+ * so a step-over cannot be measured against a diameter the row was not resolved on.
+ */
+export function feedRowDiameter(tool: Tool): number | null {
+  if (tool.shape === 'chamfer') {
+    return tool.diameter !== null && tool.diameter > 0 ? tool.diameter : cuttingDiameter(tool);
+  }
+  return cuttingDiameter(tool);
+}
+
+/**
  * #699 — the cutting size the record honestly STATES, mm, or null when it states none.
  *
  * `cuttingDiameter` is a best effort and is right for matching a FILE against a cutter: a

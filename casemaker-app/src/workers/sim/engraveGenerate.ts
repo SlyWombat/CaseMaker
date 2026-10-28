@@ -66,7 +66,7 @@ import {
   coreOffsetRadius,
   vCarveGrooveRefusal,
   vCarvePlane,
-  vCarveStepover,
+  vCarveRowStepover,
   vCarveStepoverClampNote,
   type VCarvePlane,
 } from '@/engine/cnc/vCarveGeometry';
@@ -1065,7 +1065,7 @@ function intersectionArea(tl: ManifoldToplevel, a: Polygons, b: Polygons): numbe
  *
  * THE STEP-OVER NOTE (#221 slice D) says which number set the pass pitch. The feeds row asks for
  * a step-over at the colour plane; the floor allows at most the tip radius, so the CAM runs the
- * smaller of the two ({@link vCarveStepover}). When the clamp wins, the operator is told both
+ * smaller of the two ({@link vCarveRowStepover}). When the clamp wins, the operator is told both
  * numbers and why — the cut is correct either way, so the finding is worded as a note, not a
  * fault. `requestedStepOver` is the feeds resolver's own answer (`feedsFor(...).params.stepOver`),
  * passed in by `engraveRegions`; when feeds refuse, the CAM will refuse at its own gate and no
@@ -1085,6 +1085,7 @@ function intersectionArea(tl: ManifoldToplevel, a: Polygons, b: Polygons): numbe
 function vCarveFindings(
   tl: ManifoldToplevel,
   plan: PartPlan,
+  tool: Tool,
   cone: VCone,
   film: number | null,
   machine: MillProfile,
@@ -1109,21 +1110,18 @@ function vCarveFindings(
     if (plane === undefined) continue;
 
     if (requestedStepOver !== null) {
-      // The CAM's ratio is `params.stepOver / tipWidth` (#221); the same two numbers here, so the
-      // note and the program cannot name different pitches. A request outside (0, 1] cannot
-      // produce a note: the feeds gate refuses it before the CAM is reached.
-      const ratio = requestedStepOver / (2 * cone.tipRadius);
-      if (Number.isFinite(ratio) && ratio > 0 && ratio <= 1) {
-        const stepover = vCarveStepover(plane.planeRadius, cone, ratio);
-        if (stepover.clamped) {
-          findings.push({
-            severity: 'warning',
-            code: 'vcarve-stepover-clamped',
-            labelId: item.id,
-            // One sentence, shared with the panel: the clamp note is the finding's own words.
-            message: vCarveStepoverClampNote(item.name, stepover, cone.tipRadius),
-          });
-        }
+      // The CAM's fraction is `params.stepOver` over the diameter the row was resolved on — a
+      // chamfer's base, an engraver's tip — never the tip width (#740). A row number that cannot
+      // be expressed as a fraction raises no note: the feeds gate refuses it before the CAM.
+      const stepover = vCarveRowStepover(tool, requestedStepOver, plane.planeRadius, cone);
+      if (stepover !== null && stepover.clamped) {
+        findings.push({
+          severity: 'warning',
+          code: 'vcarve-stepover-clamped',
+          labelId: item.id,
+          // One sentence, shared with the panel: the clamp note is the finding's own words.
+          message: vCarveStepoverClampNote(item.name, stepover, cone.tipRadius),
+        });
       }
     }
 
@@ -1549,11 +1547,12 @@ export function engraveRegions(
     }
   }
   const carveFindings =
-    cone === null || tipUnrecorded
+    cone === null || tool === null || tipUnrecorded
       ? []
       : vCarveFindings(
           tl,
           plan,
+          tool,
           cone,
           colourBoundaryDepth,
           mill,

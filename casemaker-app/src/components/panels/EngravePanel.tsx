@@ -52,7 +52,7 @@ import {
 import { vCone, vFluteLength } from '@/engine/cnc/vProfile';
 import {
   vCarvePlane,
-  vCarveStepover,
+  vCarveRowStepover,
   vCarveStepoverClampNote,
 } from '@/engine/cnc/vCarveGeometry';
 import { jobVise, validateVise } from '@/engine/cnc/fixture';
@@ -1070,8 +1070,8 @@ export function EngravePanel(): JSX.Element {
   const params: CutParams | null = feeds && feeds.ok ? feeds.params : null;
   // #221 — the V-carve strategy's facts, all READ from the engine: the cone from the cutter, the
   // colour plane the preview resolved from the print (the same `colourBoundaryDepth` the sheet and
-  // the CAM use), and the pass spacing from `vCarveStepover` at the feeds row's own ratio. None of
-  // this is re-derived here; the panel only places the numbers the CAM already states.
+  // the CAM use), and the pass spacing from `vCarveRowStepover` at the feeds row's own fraction.
+  // None of this is re-derived here; the panel only places the numbers the CAM already states.
   const cone = tool ? vCone(tool) : null;
   // #665 — the variable V-carve's level pitch, from the same two row numbers the CAM uses
   // (`min(stepDown, stepOver / tanHalf)`); null until the feeds row and the cone are both known.
@@ -1100,8 +1100,10 @@ export function EngravePanel(): JSX.Element {
       : filmPending
         ? null
         : (preview?.colourBoundaryDepth ?? null);
-  const vCarveRatio =
-    cone !== null && cone.tipRadius > 0 && params !== null ? params.stepOver / (2 * cone.tipRadius) : null;
+  // #740 — the row's step-over over the diameter the row was resolved on (a chamfer's base, an
+  // engraver's tip), never over the tip width: a chamfer's flat-row number divided by its 0.1 mm
+  // tip is the 14.2875 ratio the CAM used to refuse.
+  const vCarveRow = tool !== null && params !== null ? { tool, stepOverMm: params.stepOver } : null;
   // #435 — a cuttable primitive is a region the V-carve pockets too, so its colour-plane numbers
   // belong here beside the labels and shapes. The list is normalised to id/name/depth because a
   // primitive is not an `EngraveAnyItem` (it has no text and no `itemName` wording).
@@ -1125,13 +1127,9 @@ export function EngravePanel(): JSX.Element {
     if (item === undefined || cone === null) return null;
     const plane = filmPending ? null : vCarvePlane(cone, item.depth, film);
     const stepover =
-      plane === null ||
-      vCarveRatio === null ||
-      !Number.isFinite(vCarveRatio) ||
-      vCarveRatio <= 0 ||
-      vCarveRatio > 1
+      plane === null || vCarveRow === null
         ? null
-        : vCarveStepover(plane.planeRadius, cone, vCarveRatio);
+        : vCarveRowStepover(vCarveRow.tool, vCarveRow.stepOverMm, plane.planeRadius, cone);
     return (
       <>
         <p style={{ ...MUTED, color: '#c8d3de' }} data-testid={`engrave-vcarve-depth-note-${item.id}`}>

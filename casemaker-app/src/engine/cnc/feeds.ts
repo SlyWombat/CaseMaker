@@ -91,7 +91,7 @@
  */
 
 import { z } from 'zod';
-import { cuttingDiameter, cuttingForTrace, vendorId } from './tool';
+import { cuttingForTrace, feedRowDiameter, vendorId } from './tool';
 import type { Tool, ToolShape } from './tool';
 import { DEFAULT_V_CARVE_STEPOVER_RATIO } from './vCarveGeometry';
 import { CLAMP_REFUSE_FRACTION_FALLBACK, clampToMachine } from './machine';
@@ -1480,11 +1480,9 @@ export function feedsFor(
   const edge: 'flat' | 'v' = !chamfer && usable.tool.shape === 'v' ? 'v' : 'flat';
   // A chamfer's row is matched on the cone's BASE (`diameter` — the shank Makera writes there),
   // never `cuttingDiameter`, which answers with the TIP and would ask for a 0.2 mm flat row.
-  const diameter = chamfer
-    ? (tool.diameter !== null && tool.diameter > 0 ? tool.diameter : (cuttingDiameter(tool) ?? 0))
-    : usable.tool.shape === 'v'
-      ? usable.tool.cone.tipRadius * 2
-      : usable.tool.radius * 2;
+  // `feedRowDiameter` is the one copy of that choice (#740): the CAM, the clamp note, the run sheet
+  // and the panel read the same diameter back when they turn `params.stepOver` into a fraction.
+  const diameter = feedRowDiameter(tool) ?? 0;
 
   const choice = entryFor(snapshot, material, tool, diameter, machine, table, edge, refuseFraction);
   if (!choice.ok) return { ok: false, cause: choice.cause, reason: choice.reason };

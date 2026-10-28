@@ -30,7 +30,7 @@ import { segmentsForRadius } from '@/engine/compiler/arcResolution';
 import type { ManifoldToplevel } from '@/workers/geometry/evaluateOp';
 import type { CutParams } from '../feeds';
 import { cuttingForTrace, type Tool } from '../tool';
-import { vCarveLevels, vCarvePassPitch } from '../vCarveGeometry';
+import { vCarveLevels, vCarveRowStepover } from '../vCarveGeometry';
 import { boreMoves, borePasses, drillMoves, orderHolesNearest, peckDepths } from './drill';
 import {
   estimateCycleSeconds,
@@ -497,8 +497,9 @@ function entryTravel(
  * the caller (`engraveRegions`); a V region without that block has no film, so the plane is the
  * floor and the tip radius is the offset. `params` arrive from `feedsFor` (#202) — this module
  * owns no feeds, RPM or step values. The V row's stepover fraction is applied to the groove's
- * width AT THE PLANE (`2 × rPlane`), so the pitch is per region: `params.stepOver` was resolved
- * against the tip diameter, and the fraction is `params.stepOver / tipWidth`. The floor is
+ * width AT THE PLANE (`2 × rPlane`), so the pitch is per region: `params.stepOver` is a fraction
+ * of the diameter the row was resolved on (`feedRowDiameter` — a chamfer's base, an engraver's
+ * tip) and that fraction is read back by `vCarveRowStepover` (#740). The floor is
  * cleared by the tip disc, so that plane pitch is then clamped to the TIP RADIUS
  * (`vCarvePassPitch`): a wider pitch leaves a ridge across every stroke whose level sets stop
  * between passes. `rapid` is the machine's
@@ -565,9 +566,10 @@ export function generateEngrave(
   /**
    * The rings for one region. A flat cutter uses its radius and the resolved step-over. A V uses
    * the plane offset, and its stepover is the row's FRACTION applied to the groove's width at that
-   * plane (`vCarvePlaneStepover`): `params.stepOver` was resolved against the tip diameter, so the
-   * fraction is `params.stepOver / tipWidth` and the request grows with `planeRadius / tipRadius`.
-   * The floor is cleared by the TIP disc, so `vCarvePassPitch` clamps the pitch to the tip radius
+   * plane (`vCarvePlaneStepover`): `params.stepOver` was resolved against the diameter the row was
+   * matched on (`feedRowDiameter` — a chamfer's base, an engraver's tip), and `vCarveRowStepover`
+   * reads that fraction back (#740). The floor is cleared by the TIP disc, so
+   * `vCarvePassPitch` clamps the pitch to the tip radius
    * (#191's flat rule, which a stroke's centreline makes stricter than the tip width) and the same
    * radius is `pocketLoops`' bound.
    */
@@ -616,7 +618,17 @@ export function generateEngrave(
           `trace or cut deeper`,
       );
     }
-    const pitch = vCarvePassPitch(planeRadius, cone, params.stepOver / tipWidth);
+    const stepover = vCarveRowStepover(tool, params.stepOver, planeRadius, cone);
+    if (stepover === null) {
+      // The feeds gate validated the row against this same diameter before the CAM was reached,
+      // so a null here is a programming error, not an operator's: say which numbers disagree.
+      throw new Error(
+        `generateEngrave: "${label.name ?? label.text}" — the row's ${params.stepOver} mm step-over ` +
+          `is not a fraction of the diameter it was resolved on for tool "${tool.name}", or the ` +
+          'cutter has no tip width to clamp it to',
+      );
+    }
+    const pitch = stepover.effective;
     if (!(pitch > 0)) {
       throw new Error(`generateEngrave: the V-carve step-over resolved to ${pitch} mm; it must be > 0`);
     }

@@ -31,6 +31,7 @@
  * stepover uses the plane groove's real width, not a cone treated as a flat end mill.
  */
 
+import { feedRowDiameter, type Tool } from './tool';
 import { flankHeightAboveTip, type VCone } from './vProfile';
 
 /** One rung: the contour offset `radius`, traced at `depth` below the tip plane. */
@@ -263,6 +264,40 @@ export function vCarvePassPitch(
   ratio: number = DEFAULT_V_CARVE_STEPOVER_RATIO,
 ): number {
   return vCarveStepover(planeRadius, cone, ratio).effective;
+}
+
+/**
+ * The feed row's step-over turned back into a V-carve fraction, then applied at the plane
+ * ({@link vCarveStepover}) — the one arithmetic the CAM, the clamp note, the run sheet and the
+ * panel share (#740).
+ *
+ * `rowStepOverMm` is `feedsFor(...).params.stepOver`, which the resolver computed as
+ * `row.stepOverFraction × feedRowDiameter(tool)`. The fraction is therefore
+ * `rowStepOverMm / feedRowDiameter(tool)` — the chamfer's FLAT row's fraction, not its tip's —
+ * and the request at the plane is that fraction of the plane groove's width. Dividing by
+ * `2·tipRadius` instead, as every reader did before #740, read a chamfer's 1.42875 mm flat-row
+ * step-over against its 0.1 mm tip as a ratio of 14.2875, which `vCarveStepover` refused.
+ *
+ * Returns `null` — never throws — when the row's number cannot be expressed as a fraction of the
+ * cutter it was resolved on (no diameter, a row step-over that is not a positive finite number, a
+ * fraction outside `(0, 1]`, or no tip width to clamp against). That is the display callers' "the
+ * pass pitch was not resolved for this job"; the CAM, whose feeds gate has already validated the
+ * row, treats a `null` here as a programming error and says so. `planeRadius` must be positive,
+ * the same contract as {@link vCarveStepover}.
+ */
+export function vCarveRowStepover(
+  tool: Tool,
+  rowStepOverMm: number,
+  planeRadius: number,
+  cone: VCone,
+): VCarveStepover | null {
+  const diameter = feedRowDiameter(tool);
+  if (diameter === null || !(diameter > 0)) return null;
+  if (!Number.isFinite(rowStepOverMm) || !(rowStepOverMm > 0)) return null;
+  const ratio = rowStepOverMm / diameter;
+  if (!Number.isFinite(ratio) || !(ratio > 0) || ratio > 1) return null;
+  if (!(cone.tipRadius > 0)) return null;
+  return vCarveStepover(planeRadius, cone, ratio);
 }
 
 /**
