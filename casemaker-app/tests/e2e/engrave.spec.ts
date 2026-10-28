@@ -260,6 +260,11 @@ test('a filled run record shows its measured run beside the estimate', async ({ 
 
   await page.getByTestId('engrave-generate').click();
   await expect(page.getByTestId('engrave-run-oracle')).toHaveAttribute('data-state', 'tick', { timeout: 180_000 });
+  // #726 P7 — the planning figure says "about …" once; "(estimated)" is not repeated on the end.
+  // Capture it before the record is opened, so the beside-never-in-place check below compares
+  // against the very number the Generate row showed.
+  const planned = await page.getByTestId('engrave-run-time').textContent();
+  expect(planned).toMatch(/^about \d+ min \d+ s$/);
   // #688 — the acknowledgement lives in Cut step 1 now; the Save path is still gated on it.
   await acknowledgeClearance(page);
   await expect(page.getByTestId('engrave-save')).toBeEnabled();
@@ -314,7 +319,9 @@ test('a filled run record shows its measured run beside the estimate', async ({ 
   // measured figure sits beside the planning figure, and neither one replaces the other.
   const estimate = await page.getByTestId('engrave-run-time').textContent();
   expect(estimate).not.toContain('12 min 30 s');
-  expect(estimate).toMatch(/^about .+ \(estimated\)$/);
+  // #726 P7 — the same planning figure, unchanged: opening the record added the measured line
+  // beside it, restated no estimate, and the "(estimated)" suffix did not come back.
+  expect(estimate).toBe(planned);
 
   // The rule, end to end: the same readings with the date deleted are refused, and the line stays
   // as it was. A measurement with no date is a number nobody can place.

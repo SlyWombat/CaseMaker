@@ -138,7 +138,7 @@ describe('SimTransport (#198)', () => {
     setStore({ origin: 'engrave' });
     render(<SimTransport />);
     const readout = screen.getByTestId('sim-time');
-    expect(readout.textContent).toBe('about 2 min 16 s (estimated)');
+    expect(readout.textContent).toBe('about 2 min 16 s');
     expect(readout.getAttribute('title')).toContain('Generate row');
     expect(readout.textContent).not.toContain('simulated');
 

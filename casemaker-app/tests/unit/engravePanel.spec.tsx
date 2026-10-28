@@ -1062,7 +1062,7 @@ describe('EngravePanel — the run sheet mount (#207)', () => {
 
     // ONE time, and it says whose number it is: the program's own estimate, the same figure the
     // run sheet prints. The simulator's separate readout is not shown beside it as a rival.
-    expect(screen.getByTestId('engrave-run-time').textContent).toBe('about 5 s (estimated)');
+    expect(screen.getByTestId('engrave-run-time').textContent).toBe('about 5 s');
 
     // What moved out, has moved out.
     expect(screen.queryByTestId('engrave-sim-coverage')).toBeNull();
@@ -1084,6 +1084,15 @@ describe('EngravePanel — the run sheet mount (#207)', () => {
     fireEvent.click(screen.getByTestId('engrave-save-fix'));
     expect(useCncModeStore.getState().mode).toBe('cut');
     act(() => resetCncMode());
+  });
+
+  it('#726 P7 — a blocked sentence carries one full stop, not two', () => {
+    render(<EngravePanel />);
+    // No Generate yet, so the gate's own sentence is "Generate first." — one that already ends in
+    // a stop. The panel used to append a second one unconditionally, printing "Generate first..".
+    expect(screen.getByTestId('engrave-save-blocked').textContent).toBe(
+      'Save is disabled — Generate first. ',
+    );
   });
 
   it('opens the sheet for a verified job, and Save writes the sheet’s file name', async () => {

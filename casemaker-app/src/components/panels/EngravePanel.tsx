@@ -1924,7 +1924,8 @@ export function EngravePanel(): JSX.Element {
    * said "3:40"; this is the program's own estimate, the same number the run sheet prints, and it
    * says in words that it is an estimate.
    */
-  const runTimeText = cam === null ? null : `about ${formatDuration(cam.estimatedSeconds)} (estimated)`;
+  // #726 P7 — "about" is the estimate word; "(estimated)" said it a second time on every time.
+  const runTimeText = cam === null ? null : `about ${formatDuration(cam.estimatedSeconds)}`;
 
   // #432 review R11 — a FACING job has a second program, and a withheld facing file must not be
   // invisible: Save writes one file fewer than the sheet says, and the sheet's own sentence is the

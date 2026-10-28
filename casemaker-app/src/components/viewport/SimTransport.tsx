@@ -151,7 +151,7 @@ function TransportBar() {
   const jobEstimateSeconds = useEngraveRunStore((s) => s.generated?.cam?.estimatedSeconds ?? null);
   const jobTime =
     origin === 'engrave' && jobEstimateSeconds !== null
-      ? `about ${formatDuration(jobEstimateSeconds)} (estimated)`
+      ? `about ${formatDuration(jobEstimateSeconds)}`
       : null;
 
   const lastStep = stepCount > 0 ? stepCount - 1 : 0;

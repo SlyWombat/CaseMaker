@@ -411,7 +411,7 @@ describe('#419 §3 the Cut surface', () => {
     const job = defaultEngraveJob();
     const pkg = frozen(job, [P1]);
     // The program's cycle estimate — the number the Generate row and the simulator show — is 86 s:
-    // "about 1 min 26 s (estimated)". The plan's own total is a different figure (setup plus the
+    // "about 1 min 26 s". The plan's own total is a different figure (setup plus the
     // cut), and it keeps its place in the plan's fold.
     const made: EngraveGenerated = {
       ...generated([P1]),
@@ -421,8 +421,8 @@ describe('#419 §3 the Cut surface', () => {
 
     const step1 = screen.getByTestId('engrave-cut-step-1-summary').textContent ?? '';
     const step4 = screen.getByTestId('engrave-cut-step-4-summary').textContent ?? '';
-    expect(step1).toContain('about 1 min 26 s (estimated)');
-    expect(step4).toContain('about 1 min 26 s (estimated)');
+    expect(step1).toContain('about 1 min 26 s');
+    expect(step4).toContain('about 1 min 26 s');
 
     // The fold still says the plan's setup-inclusive total, and the two step lines never print it:
     // one cut has one time (audit B15).

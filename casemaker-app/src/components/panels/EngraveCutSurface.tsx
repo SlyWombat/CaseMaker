@@ -618,7 +618,7 @@ export function EngraveCutSurface({
   // PROGRAM's cycle estimate instead, in the same words the Generate row and the simulator use
   // (#688); the setup-inclusive total stays in the plan's own fold, where the phase table names it.
   const cutEstimate =
-    generated?.cam == null ? null : `about ${formatDuration(generated.cam.estimatedSeconds)} (estimated)`;
+    generated?.cam == null ? null : `about ${formatDuration(generated.cam.estimatedSeconds)}`;
   const step1Meta: string[] = [];
   if (programCount > 0) step1Meta.push(`${programCount} program${programCount === 1 ? '' : 's'}`);
   if (cutEstimate !== null) step1Meta.push(cutEstimate);
