@@ -237,11 +237,16 @@ test.describe('first job acceptance (§6)', () => {
     await expect(page.getByTestId('start-wizard-progress')).toHaveText('Step 4 of 4 · What are you cutting?');
     await tap(page, 'engrave-setup-what-engrave');
     await page.getByTestId('start-wizard-op-text').fill('Zoomba');
-    await capture(page, 'wizard-4-operation');
+    // #745 — typing is the operation here; its terminal state is Create being offered. The capture
+    // waits for that state, never scanning the beat between the field's commit and the footer's.
     await expect(page.getByTestId('start-wizard-create')).toBeEnabled();
+    await capture(page, 'wizard-4-operation');
     await tap(page, 'start-wizard-create');
     await expect(page.getByTestId('start-wizard')).toHaveCount(0);
     await expect(page.getByTestId('engrave-panel')).toBeVisible();
+    // #745 — the panel settles before the screen is scanned: Generate is the next action, so the
+    // capture waits for it to be offered rather than reading a panel still being built.
+    await expect(page.getByTestId('engrave-generate')).toBeEnabled();
     await capture(page, 'engrave-panel');
 
     // Generate: four ticks, each its own state. The oracle is the last to land.
@@ -249,11 +254,16 @@ test.describe('first job acceptance (§6)', () => {
     for (const id of ['engrave-run-toolpath', 'engrave-run-verified', 'engrave-run-simulated', 'engrave-run-oracle']) {
       await expect(page.getByTestId(id), id).toHaveAttribute('data-state', 'tick', { timeout: 180_000 });
     }
+    // #745 — the run's terminal state, in the button's own word: "Working…" is a run still in
+    // flight, and a capture must never scan that. The ticks are the result; this is the run over.
+    await expect(page.getByTestId('engrave-generate')).toHaveText('Generate');
     await capture(page, 'engrave-panel-generated');
 
     // Cut: the four lines, with the plan's facts.
     await tap(page, 'cnc-mode-cut');
     await expect(page.getByTestId('engrave-cut-surface')).toBeVisible();
+    // #745 — the surface freezes the package on mount; wait for the freeze to land before scanning.
+    await expect(page.getByTestId('engrave-package')).toHaveAttribute('data-state', 'current');
     await capture(page, 'cut');
 
     // Line 1: eight operator clicks or fewer from the door to the Cut surface, and the count is

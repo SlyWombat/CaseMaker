@@ -154,6 +154,34 @@ describe('#685 — step 4, what are you cutting', () => {
     expect(useEngraveJobStore.getState().job.labels).toHaveLength(0);
   });
 
+  it('#745 — typing the text turns Create on in the same task; no beat with a wordless disabled Create', () => {
+    openOperationStep();
+    const create = screen.getByTestId('start-wizard-create') as HTMLButtonElement;
+    const text = screen.getByTestId('start-wizard-op-text') as HTMLInputElement;
+    expect(create.disabled).toBe(true);
+    expect(screen.getByTestId('start-wizard-create-unblock').textContent).toBe(
+      'Type the text to engrave.',
+    );
+
+    // A real browser's input event, outside act(): the field's commit is synchronous, but a passive
+    // effect (useEffect) does not run until after this task — and the acceptance walk's capture is a
+    // page evaluation in exactly that window. Create and its sentence must change together. The act
+    // flag is off only around the dispatch so React's "wrap it in act" advice does not drown the
+    // output; the assertion is what the browser would see at that instant.
+    const g = globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean };
+    const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!;
+    g.IS_REACT_ACT_ENVIRONMENT = false;
+    try {
+      setValue.call(text, 'Zoomba');
+      text.dispatchEvent(new Event('input', { bubbles: true }));
+    } finally {
+      g.IS_REACT_ACT_ENVIRONMENT = true;
+    }
+
+    expect(create.disabled).toBe(false);
+    expect(screen.queryByTestId('start-wizard-create-unblock')).toBeNull();
+  });
+
   it('makes the engraving with the text, depth and font that were given — never a placeholder', () => {
     openOperationStep();
     const depth = newItemDepthFor(useEngraveJobStore.getState().job);

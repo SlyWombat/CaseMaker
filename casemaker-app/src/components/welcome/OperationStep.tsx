@@ -17,7 +17,7 @@
  * exit.
  */
 
-import { useEffect, useState, type CSSProperties, type JSX } from 'react';
+import { useLayoutEffect, useState, type CSSProperties, type JSX } from 'react';
 import { DEFAULT_FONT_ID } from '@/engine/fonts/registry';
 import { newItemDepthFor, newTargetObjectId } from '@/store/engraveJobStore';
 import { readGoalObjectFile } from '@/engine/import/targetObject';
@@ -76,7 +76,14 @@ export function OperationStep({ job, hasOperations, onChoiceChange }: OperationS
 
   // Report on every input change: the footer's Create is the shell's, and it enables the moment the
   // answer is one that can be made. Keyed on the fields, not the object, so it does not re-fire.
-  useEffect(() => {
+  //
+  // #745 — a LAYOUT effect, not a passive one. The shell's Create is disabled from the answer it
+  // was last told, while the sentence beside the field is drawn from `choice` right here. With a
+  // passive effect there is a commit — long enough to be painted, and to be caught by a page
+  // evaluation, under load — where the text has arrived (so this sentence is gone) but the shell
+  // still holds the empty answer (so Create is disabled with no words). The layout effect hands the
+  // answer over in the same commit, before paint, so the button and its sentence never disagree.
+  useLayoutEffect(() => {
     onChoiceChange(choice);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [picked, text, depth, font, surface, onChoiceChange]);
