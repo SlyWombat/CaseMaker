@@ -52,6 +52,7 @@ import type { EngraveJob } from '@/types/engraveJob';
 import type { Orientation } from '@/engine/cnc/setups/types';
 import { flatEndMill, type Tool } from '@/engine/cnc/tool';
 import type { ThreadPlanFacts, ThreadSettingsResult } from '@/engine/cnc/cam/threadMill';
+import type { ProgramSweepSummary } from '@/engine/cnc/engrave/programSweep';
 import { renderRunSheetMarkdown } from '../../scripts/runSheetMarkdown';
 
 const NOW = new Date('2026-10-04T00:00:00Z');
@@ -2085,6 +2086,146 @@ describe('runSheet — every program gets its own Cut section (#419)', () => {
     expect(section(sheet, 'cut-2')).toBeTruthy();
     expect(sectionText(sheet, 'cut-2')).toContain('Program 2 is');
     expect(sheet.sections.some((s) => s.id === 'cut-3')).toBe(false);
+  });
+});
+
+// #744 — THE SHEET IS HANDED EVERY PROGRAM'S SWEEP, NOT PROGRAM 1'S. A later program's warning is
+// carried under its own label, and the coverage sentence speaks for the whole run — which programs
+// were checked, on whose stock, and where a stopped walk left off. A caller that hands a list of
+// one program (or no list at all) gets the sheet it always got, byte for byte.
+describe('runSheet — the run’s simulation covers every program (#744)', () => {
+  const ENGR = 'inv:engraver-0.2';
+  const OTHER = 'inv:o-flute-0.6';
+  const OTHER_NC = 'G21 G90\nT1 M6\nS18000\nG1 Z-0.300 F420\nM2';
+  const OTHER_FRAME = 'G21 G90\nT1 M6\nG1 Z1.000\nM2';
+
+  const program = (nc: string, frameNc: string | null, toolKey: string) => ({
+    setupIndex: 1,
+    toolKey,
+    nc,
+    frameNc,
+    cam: { operations: 2, cuttingMoves: 40, estimatedSeconds: 30, passes: 1 },
+  });
+
+  const summary = (
+    over: Partial<ProgramSweepSummary> & { index: number; label: string; toolKey: string },
+  ): ProgramSweepSummary => ({
+    program: over.index + 1,
+    outcome: 'swept',
+    engine: 'exact',
+    count: 10,
+    removedVolume: 1,
+    errorCount: 0,
+    diagnostics: [],
+    notes: [],
+    fromBlank: false,
+    fromBlankCode: null,
+    gridPitchMm: null,
+    ...over,
+  });
+
+  const twoPrograms = (job: EngraveJob): RunSheetGenerated => ({
+    ...stubGenerated(job),
+    programs: [program(NC, `${NC}\n;frame\n`, ENGR), program(OTHER_NC, OTHER_FRAME, OTHER)],
+  });
+
+  it('carries a later program’s warning under its own label, and the run’s coverage', () => {
+    const job = dj();
+    const shank = {
+      source: 'sweep' as const,
+      severity: 'warning' as const,
+      code: 'holder-unproven',
+      message: 'The shank is unproven.',
+    };
+    const sim: RunSheetSim = {
+      diagnostics: [],
+      programs: [
+        summary({ index: 0, label: `program 1 (${ENGR})`, toolKey: ENGR }),
+        summary({ index: 1, label: `program 2 (${OTHER})`, toolKey: OTHER, diagnostics: [shank] }),
+      ],
+    };
+    const warnings = section(buildRunSheet(job, twoPrograms(job), sim, NOW), 'warnings').steps.map((s) => s.text);
+    expect(warnings).toContain(`program 2 (${OTHER}): The shank is unproven.`);
+    expect(warnings.some((t) => t.startsWith('Checked: all 2 programs in the run'))).toBe(true);
+    // The blind spot names the program whose cutter it is, not program 1's tool.
+    expect(warnings.some((t) => t.includes(`the shank of the cutter in program 2 (${OTHER})`))).toBe(true);
+  });
+
+  it('says where a multi-program walk stopped and never claims the rest of the run', () => {
+    const job = dj();
+    const error = {
+      source: 'sweep' as const,
+      severity: 'error' as const,
+      code: 'rapid-through-stock',
+      message: 'A rapid passes through stock.',
+    };
+    const sim: RunSheetSim = {
+      diagnostics: [error],
+      programs: [
+        summary({ index: 0, label: `program 1 (${ENGR})`, toolKey: ENGR }),
+        summary({ index: 1, label: `program 2 (${OTHER})`, toolKey: OTHER, errorCount: 1, diagnostics: [error] }),
+      ],
+    };
+    const warnings = section(buildRunSheet(job, twoPrograms(job), sim, NOW), 'warnings').steps.map((s) => s.text);
+    expect(warnings.some((t) => t.startsWith("Checked: 1 of the run's 2 programs"))).toBe(true);
+    expect(warnings.some((t) => t.includes(`The run stopped at program 2 (${OTHER}) — its sweep reported an error.`))).toBe(true);
+    expect(warnings.some((t) => t.startsWith('Checked: all'))).toBe(false);
+  });
+
+  // #744 review — a walk stopped at its FIRST program leaves one result for a two-file run; that
+  // result's warning is still attributed, and the app's flat (already-attributed) copy prints once.
+  it('names the program that stopped the walk at its first file', () => {
+    const job = dj();
+    const error = {
+      source: 'sweep' as const,
+      severity: 'error' as const,
+      code: 'rapid-through-stock',
+      message: 'A rapid passes through stock.',
+    };
+    const warning = {
+      source: 'sweep' as const,
+      severity: 'warning' as const,
+      code: 'holder-unproven',
+      message: 'The shank is unproven.',
+    };
+    const named = `program 1 (${ENGR}): The shank is unproven.`;
+    const sim: RunSheetSim = {
+      diagnostics: [{ ...warning, message: named }],
+      programs: [
+        summary({
+          index: 0,
+          label: `program 1 (${ENGR})`,
+          toolKey: ENGR,
+          errorCount: 1,
+          diagnostics: [warning, error],
+        }),
+      ],
+    };
+    const warnings = section(buildRunSheet(job, twoPrograms(job), sim, NOW), 'warnings').steps.map((s) => s.text);
+    expect(warnings.filter((t) => t === named)).toHaveLength(1);
+    expect(warnings.some((t) => t.startsWith('The run stopped at program 1'))).toBe(true);
+    expect(warnings.some((t) => t.startsWith('Checked: all'))).toBe(false);
+  });
+
+  it('keeps a one-program result byte-identical when the list is handed in', () => {
+    const job = dj();
+    const warning = {
+      source: 'sweep' as const,
+      severity: 'warning' as const,
+      code: 'fixture-unchecked',
+      message: 'The fixture was not checked.',
+    };
+    const flat = buildRunSheet(job, stubGenerated(job), { diagnostics: [warning] }, NOW);
+    const listed = buildRunSheet(
+      job,
+      stubGenerated(job),
+      {
+        diagnostics: [warning],
+        programs: [summary({ index: 0, label: `program 1 (${ENGR})`, toolKey: ENGR, diagnostics: [warning] })],
+      },
+      NOW,
+    );
+    expect(listed).toEqual(flat);
   });
 });
 

@@ -151,6 +151,15 @@ describe('#733 a job posts one program per cutter', () => {
     expect(details.programs[0]!.sheet?.file).toBe(`${stemNoExt}-run-sheet.md`);
     expect(details.programs[1]!.sheet).toBeNull();
 
+    // #744 — THE SHEET IS HANDED EVERY PROGRAM'S SWEEP. Its §8 coverage speaks for the run: both
+    // programs were checked, in cut order, each on the stock the earlier one left — not only the
+    // file the header names.
+    const sheetMd = readFileSync(join(run.outDir, `${stemNoExt}-run-sheet.md`), 'utf8');
+    expect(sheetMd).toContain('Checked: all 2 programs in the run');
+    expect(sheetMd).toContain(`program 1 (${FIRST})`);
+    expect(sheetMd).toContain(`program 2 (${SECOND})`);
+    expect(sheetMd).toContain('in cut order, each on the stock the earlier programs left');
+
     // #733 item 4 — EVERY program was swept, not only the first. `sim: null` on the second program
     // was the hole the manager refused: a rapid through stock there went unchecked.
     for (const program of details.programs) {

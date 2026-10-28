@@ -181,6 +181,34 @@ export function sweepSummary(sweep: ProgramSweepResult): ProgramSweepSummary {
   return summary;
 }
 
+/**
+ * The run's diagnostics, every program's own grouped under its label (#744).
+ *
+ * THE ONE WORDING the app's run row, the run sheet and the command line share: a diagnostic that
+ * already names its program (the walk's `no-cutter` sentence) keeps its text, and the from-blank
+ * note — which names its program itself — is never prefixed. A SINGLE-program run is returned
+ * exactly as the load raised it, so its sentences are byte-for-byte what they have always been.
+ *
+ * `multiProgram` is the RUN's program count, not `summaries.length`: a walk that STOPS at its first
+ * program hands back one summary, and that program's sentence still has to say which file it is —
+ * the run has more than one (#744). The caller knows the count (`generated.programs`); the default
+ * keeps a list-only caller reading its own length.
+ */
+export function attributedDiagnostics(
+  summaries: readonly ProgramSweepSummary[],
+  multiProgram: boolean = summaries.length > 1,
+): SimDiagnostic[] {
+  return summaries.flatMap((summary) => {
+    const load = multiProgram
+      ? summary.diagnostics.map((d) => ({
+          ...d,
+          message: d.message.startsWith(summary.label) ? d.message : `${summary.label}: ${d.message}`,
+        }))
+      : summary.diagnostics;
+    return [...load, ...summary.notes];
+  });
+}
+
 /** A refused/path-only program as a summary, so a stopped run still names the program that stopped. */
 export function refusalSummary(failure: ProgramSweepFailure): ProgramSweepSummary {
   return {

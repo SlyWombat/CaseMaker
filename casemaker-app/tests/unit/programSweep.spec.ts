@@ -11,9 +11,11 @@ import { rectProfile } from '@/engine/compiler/profile';
 import { flatEndMill, type Tool } from '@/engine/cnc/tool';
 import type { NodeMeshOutput } from '@/workers/geometry/meshOutput';
 import {
+  attributedDiagnostics,
   programLabel,
   sweepPrograms,
   type ProgramLoadArgs,
+  type ProgramSweepSummary,
   type SweepProgram,
 } from '@/engine/cnc/engrave/programSweep';
 
@@ -216,5 +218,42 @@ describe('#744 one sweep per program, shared with the command line', () => {
     expect(programLabel(programs, 0)).toBe('the facing pass (fly-22)');
     expect(programLabel(programs, 1)).toBe('program 1 (flat-2)');
     expect(programLabel(programs, 2)).toBe('program 2 (flat-1)');
+  });
+
+  // #744 — the run's LENGTH, not the result count, decides attribution. A walk that stops at its
+  // first program hands back one summary, and that program's sentence still has to name it.
+  it('attributes a stopped first program when the RUN has more than one file', () => {
+    const only: ProgramSweepSummary = {
+      index: 0,
+      program: null,
+      label: 'the facing pass (fly-22)',
+      toolKey: 'fly-22',
+      outcome: 'swept',
+      engine: 'exact',
+      count: 1,
+      removedVolume: 1,
+      errorCount: 1,
+      diagnostics: [
+        { source: 'sweep', severity: 'error', code: 'holder-collision', message: 'the shank would rub (0.1 mm shoulder)' },
+      ],
+      notes: [],
+      fromBlank: false,
+      fromBlankCode: null,
+      gridPitchMm: null,
+    };
+    // One result and no run count: a single-program run's sentence, byte for byte.
+    expect(attributedDiagnostics([only]).map((d) => d.message)).toEqual(['the shank would rub (0.1 mm shoulder)']);
+    // The same one result in a run of several: the failing program is named.
+    expect(attributedDiagnostics([only], true).map((d) => d.message)).toEqual([
+      'the facing pass (fly-22): the shank would rub (0.1 mm shoulder)',
+    ]);
+    // A message that already names its program is never prefixed twice.
+    const named: ProgramSweepSummary = {
+      ...only,
+      diagnostics: [{ ...only.diagnostics[0]!, message: 'the facing pass (fly-22) names fly-22, which is not on this bench' }],
+    };
+    expect(attributedDiagnostics([named], true).map((d) => d.message)).toEqual([
+      'the facing pass (fly-22) names fly-22, which is not on this bench',
+    ]);
   });
 });

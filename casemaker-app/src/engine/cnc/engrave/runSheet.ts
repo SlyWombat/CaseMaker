@@ -70,6 +70,7 @@ import {
 } from '@/engine/cnc/engrave/reachability';
 import { fmtDiameter } from '@/engine/cnc/engrave/recommendTool';
 import type { RestPassFacts, RestProgram } from '@/engine/cnc/engrave/restPass';
+import { attributedDiagnostics, type ProgramSweepSummary } from '@/engine/cnc/engrave/programSweep';
 import {
   assessSurfaceSpread,
   domeAcceptSentence,
@@ -529,6 +530,15 @@ export interface RunSheetSim {
    * is dominated by its grid pitch). Omitted when no prediction was checked.
    */
   oracleBand?: number;
+  /**
+   * #744 — EVERY program's sweep, in cut order, as the shared walk summarised it
+   * (`engine/cnc/engrave/programSweep.ts`). The sheet's §8 then reads the run rather than its first
+   * file: each program's diagnostics are carried under its label, and the coverage sentence states
+   * which programs were checked, on whose stock, which were re-swept from the blank and where a
+   * stopped walk left off. OPTIONAL and append-only: a caller without the list (the bench scripts,
+   * an older stored run) gets exactly the single-file sheet it got before.
+   */
+  programs?: readonly ProgramSweepSummary[];
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1203,6 +1213,13 @@ function coverageFor(job: EngraveJob, generated: RunSheetGenerated, sim: RunShee
   for (const f of generated.findings) codes.add(f.code);
   for (const f of generated.verify?.findings ?? []) codes.add(f.code);
   for (const d of sim?.diagnostics ?? []) codes.add(d.code);
+  // #744 — a later program's blind spots are the RUN's: a code raised only by program 3 names a
+  // limit of this check just as much as program 1's does. The list is grouped per program below so
+  // the shank caveat can name the program whose cutter states no lengths.
+  for (const program of sim?.programs ?? []) {
+    for (const d of program.diagnostics) codes.add(d.code);
+    for (const d of program.notes) codes.add(d.code);
+  }
   const envelope = viseEnvelope(job.stock, jobVise(job), job.sacrificial);
   return {
     outcome: sim?.outcome ?? 'swept',
@@ -1213,6 +1230,21 @@ function coverageFor(job: EngraveJob, generated: RunSheetGenerated, sim: RunShee
     sacrificialModelled: hasSacrificial(job.sacrificial),
     toolName: jobTool(job)?.name ?? null,
     codes: [...codes],
+    // #744 — the run's programs as the coverage builder reads them, and how many files the RUN has:
+    // a walk that stopped part-way carries fewer results than the job has programs.
+    ...(sim?.programs === undefined
+      ? {}
+      : {
+          programs: sim.programs.map((p) => ({
+            label: p.label,
+            outcome: p.outcome,
+            engine: p.engine,
+            fromBlank: p.fromBlank,
+            errorCount: p.errorCount,
+            codes: [...p.diagnostics, ...p.notes].map((d) => d.code),
+          })),
+          expectedPrograms: generated.programs?.length ?? sim.programs.length,
+        }),
   };
 }
 
@@ -3941,7 +3973,16 @@ export function buildRunSheet(
     }
   }
   if (sim) {
-    for (const d of sim.diagnostics) {
+    // #744 — EVERY PROGRAM'S SWEEP. When the caller hands the run's programs, each one's own
+    // diagnostics are carried under its label (the app's run store and the command line both build
+    // the flat list with the same `attributedDiagnostics`, so the duplicate check keeps one copy).
+    // A flat `diagnostics` list is still read for what no program owns — the panel's crash (#490).
+    const expectedPrograms = generated.programs?.length ?? sim.programs?.length ?? 0;
+    const diagnostics =
+      sim.programs === undefined
+        ? sim.diagnostics
+        : [...attributedDiagnostics(sim.programs, expectedPrograms > 1), ...sim.diagnostics];
+    for (const d of diagnostics) {
       // #490 — a panel crash is an `error`, but section 8 is where the sheet says what the app
       // could not do, so it is carried beside the warnings rather than dropped.
       if (d.severity === 'warning' || d.code === PANEL_RENDER_ERROR_CODE) pushWarning(d.code, d.message);

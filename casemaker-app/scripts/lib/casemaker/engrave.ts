@@ -99,7 +99,12 @@ import { releaseFileName } from '../../../src/engine/cnc/engrave/release';
 import { drillSettings } from '../../../src/engine/cnc/cam/drillBit';
 import { parseEngraveJob } from '../../../src/store/engraveJobSchema';
 import { simulationProblem } from '../../../src/engine/cnc/simGate';
-import { sweepPrograms } from '../../../src/engine/cnc/engrave/programSweep';
+import {
+  attributedDiagnostics,
+  sweepPrograms,
+  sweepSummary,
+  type ProgramSweepSummary,
+} from '../../../src/engine/cnc/engrave/programSweep';
 import { buildCouponPrograms, type CouponRecord, type CouponRecordRow, type CouponSpec } from '../../../src/engine/cnc/engrave/couponJob';
 import { entryFor, getTools } from '../../../src/engine/cnc/toolRegistry';
 import {
@@ -631,6 +636,12 @@ async function engraveJobBody(argv: string[], options: CommandOptions): Promise<
      */
     sweeps: ProgramSweep[];
     /**
+     * #744 — every program's sweep as the RUN SHEET reads it: labels in cut order, each program's
+     * engine, whether it had to be swept from the blank, and the summary the coverage sentence
+     * counts. `sweeps` above is the receipt's reduction of the same list.
+     */
+    simPrograms: ProgramSweepSummary[];
+    /**
      * The material the run leaves, cumulative — `priorRemoval` (the rest route's seed) plus every
      * program's own removal. Null when nothing was removed.
      */
@@ -859,6 +870,7 @@ async function engraveJobBody(argv: string[], options: CommandOptions): Promise<
       generated,
       load: sweptLoad,
       sweeps,
+      simPrograms: outcome.sweeps.map(sweepSummary),
       removal,
       simNotes,
       session,
@@ -914,7 +926,7 @@ async function engraveJobBody(argv: string[], options: CommandOptions): Promise<
     outDir: string,
     opts: WriteOpts,
   ): { files: JobFiles; programs: EngraveProgram[]; diagnostics: ReceiptDiagnostic[] } {
-    const { job, tool, nc, diameter, generated, load, sweeps, simNotes } = prepared;
+    const { job, tool, nc, diameter, generated, load, sweeps, simNotes, simPrograms } = prepared;
     const writeSheet = opts.sheet !== false;
     // The stem is claimed through `stemFor`, which refuses a name already used this run: the rest
     // program of a two-tool job is written from a job named `<name> rest`, so the two programs land
@@ -945,7 +957,16 @@ async function engraveJobBody(argv: string[], options: CommandOptions): Promise<
     const sheet = buildRunSheet(
       job,
       { ...generated, programs: sheetPrograms },
-      { diagnostics: load.diagnostics, outcome: 'swept', engine: load.stats.engine },
+      {
+        // #744 — EVERY program's diagnostics, under its own label, not only the first file's: a
+        // warning raised by program 3 is a fact about this run, and the app's run store builds the
+        // same list with the same function, so the sheet and the panel cannot word it differently.
+        diagnostics: attributedDiagnostics(simPrograms, generated.programs.length > 1),
+        outcome: 'swept',
+        engine: load.stats.engine,
+        // #744 — and every program's RESULT, so the coverage sentence speaks for the whole run.
+        programs: simPrograms,
+      },
       // The run's one clock (#484): a caller may pin it so a committed fixture stays byte-stable;
       // absent, this is the wall clock the command has always used.
       options.now ?? new Date(),

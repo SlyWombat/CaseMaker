@@ -293,6 +293,22 @@ export function SimPanel() {
           sacrificialModelled: rotary === null && hasSacrificial(job.sacrificial),
           toolName: jobToolEntry === null ? null : toolDisplayName(jobToolEntry.tool),
           codes: run.simDiagnostics.map((d) => d.code),
+          // #744 — the RUN's programs, not program 1's file: the coverage sentence says which
+          // programs were checked, which had to start from the blank, and where a stopped walk
+          // left off. `expectedPrograms` is the job's own program count, so a walk that stopped
+          // part-way cannot be presented as the whole run.
+          programs: run.simPrograms.map((p) => ({
+            label: p.label,
+            outcome: p.outcome,
+            engine: p.engine,
+            fromBlank: p.fromBlank,
+            errorCount: p.errorCount,
+            codes: [...p.diagnostics, ...p.notes].map((d) => d.code),
+          })),
+          // `programs` is not optional on `EngraveGenerated`, but a run restored from an older
+          // build (and the panel's own tests, which build a partial generated object) can arrive
+          // without it; the sweep's own list is then the only count there is.
+          expectedPrograms: run.generated?.programs?.length ?? run.simPrograms.length,
         });
   // #535 — a goal (surface) program has no 2.5D prediction to compare, so its sentence states the
   // check that WAS made and never wears "Matches prediction" over a comparison of nothing (#691).

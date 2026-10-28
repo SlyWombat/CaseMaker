@@ -2,7 +2,7 @@
 // store or a worker, so the sentence a user reads is a function of data, not of prose.
 
 import { describe, it, expect } from 'vitest';
-import { coverageDisclaimer, type SimCoverageInput } from '@/components/panels/simCoverage';
+import { coverageDisclaimer, type SimCoverageInput, type SimSweptProgram } from '@/components/panels/simCoverage';
 
 const base: SimCoverageInput = {
   outcome: 'swept',
@@ -99,5 +99,127 @@ describe('coverageDisclaimer', () => {
     const sentences = coverageDisclaimer({ ...base, outcome: 'refused' });
     expect(sentences).toHaveLength(1);
     expect(sentences[0]).toContain('Nothing was swept');
+  });
+});
+
+// #744 — THE COVERAGE SENTENCE SPEAKS FOR THE RUN, NOT ITS FIRST FILE. Every program is swept in cut
+// order on the stock the earlier ones left; a program the column engine cannot seed is re-swept from
+// the blank and named; a walk that stopped says where, and never presents the rest as checked. The
+// oracle's comparison is program 1's alone. A single-program caller's output is unchanged.
+describe('#744 coverageDisclaimer — a run of several programs', () => {
+  const swept = (label: string, over: Partial<SimSweptProgram> = {}): SimSweptProgram => ({
+    label,
+    outcome: 'swept',
+    engine: 'exact',
+    errorCount: 0,
+    ...over,
+  });
+
+  it('states every program in cut order, each on the stock the earlier ones left', () => {
+    const s = text({
+      programs: [
+        swept('the facing pass (fly-22)'),
+        swept('program 1 (flat-1)'),
+        swept('program 2 (inv:drill-2)', { engine: 'column' }),
+      ],
+      expectedPrograms: 3,
+    });
+    expect(s).toContain(
+      'Checked: all 3 programs in the run — the facing pass (fly-22), program 1 (flat-1) and program 2 (inv:drill-2) — in cut order, each on the stock the earlier programs left, against the stock.',
+    );
+    // The sampled engine is named per program, not attributed to the whole run.
+    expect(s).toContain('The material was swept by the sampled column engine for program 2 (inv:drill-2)');
+    expect(s).toContain('Not checked:');
+  });
+
+  it('names every program the simulator could not seed, and why its result is narrower', () => {
+    const s = text({
+      programs: [
+        swept('program 1 (flat-1)'),
+        swept('program 2 (inv:drill-2)', { engine: 'column', fromBlank: true }),
+      ],
+      expectedPrograms: 2,
+    });
+    expect(s).toContain(
+      'Swept from the blank: program 2 (inv:drill-2) — its engine cannot start from the material the earlier programs left, so its result covers its own cuts only.',
+    );
+  });
+
+  it('names the programs whose cutters were not seeded together', () => {
+    const s = text({
+      programs: [
+        swept('program 1 (flat-1)'),
+        swept('program 2 (inv:drill-2)', { engine: 'column', fromBlank: true }),
+        swept('the facing pass (fly-22)', { engine: 'column', fromBlank: true }),
+      ],
+      expectedPrograms: 3,
+    });
+    expect(s).toContain(
+      'Swept from the blank: program 2 (inv:drill-2) and the facing pass (fly-22) — their engines cannot start from the material the earlier programs left, so each result covers its own cuts only.',
+    );
+  });
+
+  it('never claims the whole run when the walk stopped part-way', () => {
+    const s = text({
+      programs: [
+        swept('program 1 (flat-1)'),
+        swept('program 2 (flat-4)', { errorCount: 2 }),
+      ],
+      expectedPrograms: 3,
+    });
+    expect(s).toContain(
+      "Checked: 1 of the run's 3 programs — program 1 (flat-1) — in cut order, each on the stock the earlier programs left, against the stock.",
+    );
+    expect(s).toContain(
+      'The run stopped at program 2 (flat-4) — its sweep reported 2 errors — so the program after it was not checked.',
+    );
+    expect(s).not.toContain('Checked: all');
+  });
+
+  it('says nothing was checked when the first program stopped the walk', () => {
+    const s = text({
+      programs: [swept('program 1 (flat-4)', { errorCount: 1 })],
+      expectedPrograms: 2,
+    });
+    expect(s).not.toContain('Checked:');
+    expect(s).toContain(
+      'The run stopped at program 1 (flat-4) — its sweep reported an error — so the program after it was not checked.',
+    );
+  });
+
+  it('scopes the oracle comparison to program 1', () => {
+    const s = text({
+      oracleBand: 0.1,
+      programs: [swept('program 1 (flat-1)'), swept('program 2 (flat-4)')],
+      expectedPrograms: 2,
+    });
+    expect(s).toContain('band is 0.1 mm');
+    expect(s).toContain('The comparison covers program 1 only: the later programs have no predicted regions to compare.');
+  });
+
+  it('names the program whose cutter has an unmeasured shank, not program 1’s tool', () => {
+    const s = text({
+      codes: ['holder-unproven'],
+      toolName: '3 mm flat',
+      programs: [
+        swept('program 1 (flat-1)'),
+        swept('program 2 (flat-4)', { codes: ['holder-unproven'] }),
+      ],
+      expectedPrograms: 2,
+    });
+    expect(s).toContain('the shank of the cutter in program 2 (flat-4)');
+    expect(s).not.toContain('“3 mm flat”');
+  });
+
+  it('keeps a one-program run’s sentences byte-for-byte', () => {
+    const flat = coverageDisclaimer(base);
+    const listed = coverageDisclaimer({
+      ...base,
+      programs: [swept('program 1 (flat-1)')],
+      expectedPrograms: 1,
+    });
+    expect(listed).toEqual(flat);
+    // And a list with no expected count is its own length, so it is one program too.
+    expect(coverageDisclaimer({ ...base, programs: [swept('program 1 (flat-1)')] })).toEqual(flat);
   });
 });

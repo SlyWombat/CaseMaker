@@ -1745,7 +1745,14 @@ export function EngravePanel(): JSX.Element {
         // #408 — the band the prediction was judged to, so the sheet states the tolerance behind its
         // "matches prediction" claim next to the engine sentence. Undefined until the check ran, and
         // the sheet then claims nothing about a comparison.
-        { diagnostics: run.simDiagnostics, engine: run.simEngine ?? undefined, oracleBand: run.oracle?.band },
+        // #744 — EVERY program's result, so §8's coverage says how many programs were checked, on
+        // whose stock, and where a stopped walk left off — not only what program 1's sweep saw.
+        {
+          diagnostics: run.simDiagnostics,
+          engine: run.simEngine ?? undefined,
+          oracleBand: run.oracle?.band,
+          programs: run.simPrograms,
+        },
         new Date(),
         houseMargins,
         // #475 — a measured run hands its own touch count and readings in; with none, the sheet

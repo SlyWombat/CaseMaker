@@ -59,6 +59,7 @@ import { useEngraveRegistrationStore } from './engraveRegistrationStore';
 import { drillSettings } from '@/engine/cnc/cam/drillBit';
 import type { EngraveRunPhase } from './engraveRunGate';
 import {
+  attributedDiagnostics,
   programLabel,
   refusalSummary,
   sweepPrograms,
@@ -426,7 +427,6 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
     // engraving program is still the session's live one.
     const setup = toSetup(job, jobMachine(job, calibration), mount?.fixture, bed);
     const firstEngravingIndex = generated.programs.findIndex((p) => (p.kind ?? 'engrave') !== 'facing');
-    const multiProgram = generated.programs.length > 1;
     // #445 §4 — the thread facts belong to the first engraving program, the one
     // `generated.threads` describes; a facing pass or a later program states none.
     const threadsFor = (index: number) =>
@@ -536,19 +536,10 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
         summaries.push(refusalSummary({ ...failure, diagnostics }));
       }
     }
-    const attribute = (summary: ProgramSweepSummary): SimDiagnostic[] => {
-      const load = multiProgram
-        ? summary.diagnostics.map((d) => ({
-            ...d,
-            // A diagnostic that already names its program (the walk's `no-cutter` sentence) is not
-            // given the label a second time.
-            message: d.message.startsWith(summary.label) ? d.message : `${summary.label}: ${d.message}`,
-          }))
-        : summary.diagnostics;
-      // The from-blank note names its program itself; prefixing it would say it twice.
-      return [...load, ...summary.notes];
-    };
-    const simDiagnostics = summaries.flatMap(attribute);
+    // #744 — the attribution rule is the shared one (`programSweep.attributedDiagnostics`), so the
+    // run row, the run sheet and the command line number a program's sentence the same way. The
+    // count is the RUN's files, not the results: a walk stopped at its first program still names it.
+    const simDiagnostics = attributedDiagnostics(summaries, generated.programs.length > 1);
     const firstSwept = summaries.find((s) => s.index === firstEngravingIndex) ?? summaries[0] ?? null;
     const sim = useSimStore.getState();
 

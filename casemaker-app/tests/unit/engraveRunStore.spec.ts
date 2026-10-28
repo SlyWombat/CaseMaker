@@ -1152,6 +1152,42 @@ describe('#642 the run watches every input it stamps', () => {
       expect(state.simDiagnostics.map((d) => d.message)).toContain(sentence);
     });
 
+    // #744 review — a walk that stops at its FIRST program hands back one result, and the run has
+    // two files: the blocker still has to say which program is the bad one.
+    it('names a first program that stopped the walk, from the run’s own file count', async () => {
+      const realLoad = useSimStore.getState().loadProgram;
+      const rapid = {
+        source: 'sweep' as const,
+        severity: 'error' as const,
+        code: 'rapid-through-stock',
+        message: 'a rapid passes through 2.01 mm³ of stock (line 7)',
+      };
+      useSimStore.setState({
+        loadProgram: async (nc) => {
+          if (nc === 'G90 P1') {
+            useSimStore.setState({ status: 'ready', diagnostics: [rapid], pathOnly: false });
+            return swept({ diagnostics: [rapid] } as unknown as Partial<SimLoadOk>);
+          }
+          return swept();
+        },
+      });
+      setEngraveRunClientLoader(async () => ({ engraveGenerate: async () => twoCutters(), simOracle: async () => OK }));
+      try {
+        await useEngraveRunStore.getState().generate();
+      } finally {
+        useSimStore.setState({ loadProgram: realLoad });
+      }
+      const state = useEngraveRunStore.getState();
+      expect(state.phase).toBe('blocked');
+      // The walk stopped at program 1, so its result is the only one — and it is labelled.
+      expect(state.simPrograms.map((s) => s.label)).toEqual(['program 1 (flat-1.0)']);
+      const sentence = 'program 1 (flat-1.0): a rapid passes through 2.01 mm³ of stock (line 7)';
+      expect(saveBlocker(state)).toBe(sentence);
+      expect(uploadBlocker(state)).toBe(sentence);
+      expect(releaseBlocker(state)).toBe(sentence);
+      expect(state.simDiagnostics.map((d) => d.message)).toContain(sentence);
+    });
+
     it('hands each program its own cutter and drill point, and the stock the earlier one left', async () => {
       const POINT = { deg: 118, source: 'the drill plan' };
       const REMOVAL = {
