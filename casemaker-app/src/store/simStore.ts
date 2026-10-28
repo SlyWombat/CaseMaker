@@ -216,6 +216,12 @@ export interface SimState {
      * that can cross a level. Omitted/null: the ramp check is off.
      */
     rampThresholdMm?: number | null,
+    /**
+     * #734 — how far the job's through cuts may reach below the blank, mm (the engrave document's
+     * `breakthrough`), so the sweep's floor is the floor the CAM posted against. Omitted/null: the
+     * blank's bottom, unchanged for every non-engrave load.
+     */
+    breakthroughMm?: number | null,
   ): Promise<void>;
   /** Run the last load again with twice the time limit (#194). No-op when nothing has been loaded. */
   retryWithLongerBudget(): Promise<void>;
@@ -341,6 +347,12 @@ interface LoadArgs {
    * the same threshold. `null` for a job with one level (or none) and for a non-column job.
    */
   rampThresholdMm: number | null;
+  /**
+   * #734 — how far the job's through cuts may reach below the blank, mm. Kept with the load for
+   * the same reason `surface` is: a retry must judge the same floor. `null` for every load that is
+   * not an engrave job, which keeps the pre-#734 blank-bottom floor.
+   */
+  breakthroughMm: number | null;
 }
 let lastLoad: LoadArgs | null = null;
 
@@ -376,6 +388,7 @@ export const useSimStore = create<SimState>()((set, get) => {
         threads: args.threads,
         surface: args.surface,
         rampThresholdMm: args.rampThresholdMm,
+        breakthroughMm: args.breakthroughMm,
       });
       if (mine !== loadSeq) return; // superseded by a newer load or a dispose
       if (!r.ok) {
@@ -423,7 +436,7 @@ export const useSimStore = create<SimState>()((set, get) => {
     ...EMPTY,
     speed: startingSpeed(),
     budgetMs: startingBudgetMs(),
-    async loadProgram(gcodeText, setup, tool, machineId, calibrationOverride, threads = [], drillPointDefault = null, origin = 'panel', surface = null, rampThresholdMm = null) {
+    async loadProgram(gcodeText, setup, tool, machineId, calibrationOverride, threads = [], drillPointDefault = null, origin = 'panel', surface = null, rampThresholdMm = null, breakthroughMm = null) {
       // The saved read of the machine's own frame, if the user has one (#279). Resolved HERE so
       // every load path — a panel, the engrave run, the QA harness — simulates the same machine,
       // and so a retry or a restart cannot drift onto a different frame than the job was loaded on.
@@ -457,6 +470,7 @@ export const useSimStore = create<SimState>()((set, get) => {
         threads,
         surface,
         rampThresholdMm,
+        breakthroughMm,
       };
       await run(lastLoad, fresh ? startingBudgetMs() : get().budgetMs);
     },

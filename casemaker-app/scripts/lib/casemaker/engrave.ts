@@ -768,6 +768,11 @@ async function engraveJobBody(argv: string[], options: CommandOptions): Promise<
       seed: NodeMeshOutput | null,
     ): ReturnType<SimSession['load']> =>
       session.load(gcode, toSetup(job, Z1), cutter, Z1.id, {
+        // #734 — the CAM posts a through move to `thickness + breakthrough`, so the sweep's floor
+        // must be the same: without it a correct through cut's retract reads as a rapid through
+        // material (j17 reproduced the bench's `rapid-through-stock` on 7 vertical retracts).
+        // #733 item 4 sweeps every program with this same helper, so every program gets the floor.
+        breakthroughMm: job.breakthrough,
         ...(seed === null ? {} : { priorRemoval: seed }),
         ...(point === null ? {} : { drillPointDefault: point }),
       });

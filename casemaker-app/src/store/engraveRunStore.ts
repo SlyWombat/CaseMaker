@@ -429,6 +429,10 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
           // #629 — half the job's smallest level step, from the predicted items' distinct depths,
           // so the column engine names a ramp that crosses a level (null for a non-column job).
           rampThresholdMm(generated.predicted, tool),
+          // #734 — the floor the CAM posted a through move against: `thickness + breakthrough`.
+          // Without it the sweep's floor is the blank's bottom and a correct through cut reads as
+          // a rapid through material (j17's false `rapid-through-stock`).
+          job.breakthrough,
         );
     } catch (e) {
       if (mine === seq) set({ phase: 'blocked', error: e instanceof Error ? e.message : String(e) });

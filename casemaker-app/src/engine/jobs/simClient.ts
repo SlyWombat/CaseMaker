@@ -123,6 +123,14 @@ export interface SimLoadOpts {
    * that can cross a level. Absent/null: the ramp check is off.
    */
   rampThresholdMm?: number | null;
+  /**
+   * #734 — how far a THROUGH cut may reach below the blank's underside, mm (the engrave job's
+   * `breakthrough`). The column engine's floor is `base − breakthroughMm`, the same floor the CAM
+   * posted the through moves against (#218), so a correct through cut is judged against the
+   * material it really removes instead of the blank's bottom face. Absent/null: the floor is the
+   * blank's bottom, the pre-#734 reading every non-engrave load keeps.
+   */
+  breakthroughMm?: number | null;
 }
 
 /** The two stages of a load (#224). */
@@ -184,6 +192,7 @@ export async function loadSim(gcodeText: string, setup: Setup, tool: Tool, machi
             threads: opts?.threads ?? null,
             surface: opts?.surface ?? null,
             rampThresholdMm: opts?.rampThresholdMm ?? null,
+            breakthroughMm: opts?.breakthroughMm ?? null,
           },
           opts?.onProgress ? Comlink.proxy(opts.onProgress) : undefined,
         )

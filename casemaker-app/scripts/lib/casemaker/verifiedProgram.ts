@@ -192,7 +192,12 @@ export async function prepareVerifiedProgram(
   if (programNc !== null) {
     const session = createSimSession(tl);
     try {
-      const sim = session.load(programNc, toSetup(job, mill), tool, mill.id, { calibration });
+      // #734 — the generator posted this program against the job's floor, so the sweep judges it
+      // against the same floor (`thickness + breakthrough`), not the blank's bottom face.
+      const sim = session.load(programNc, toSetup(job, mill), tool, mill.id, {
+        calibration,
+        breakthroughMm: job.breakthrough,
+      });
       run.simStatus = sim.ok ? 'ready' : 'refused';
       run.simDiagnostics = sim.diagnostics;
       if (sim.ok) run.oracle = session.oracle(generated.predicted);
