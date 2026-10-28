@@ -191,15 +191,17 @@ describe('feedsFor and the V-bit row (#405)', () => {
     expect(res.reason).toContain('0.4 mm');
   });
 
-  it('refuses a V-bit in a material with no V row, and says which row is missing', () => {
+  it('refuses a V-bit in a material with no V row, by the catalogue rule every cutter obeys', () => {
     const res = feedsFor([], 'softwood', vBit30(0.3), Z1);
     expect(res.ok).toBe(false);
     if (res.ok) throw new Error('expected a refusal');
-    // Not the flat cutter's "no row in this range" sentence: a cone is never asked of the vendor
-    // table at all (#405), so the refusal names the missing row rather than a tier that would
-    // never have answered.
+    // #732 — a cone has no special "the catalogue cannot answer it" refusal. It reaches the same
+    // catalogue coverage as a flat end mill; with no Makera id, that is the same sentence. (The
+    // sentence this replaces claimed the catalogue states "a flat end mill's numbers, never a
+    // cone's", which is false — its rows are keyed by `g_ID` and are shape-agnostic.)
     expect(res.reason).toContain('V-bit');
-    expect(res.reason).toContain('PLA, PETG and plastic only');
+    expect(res.reason).toContain("matched by Makera's own cutter id");
+    expect(res.reason).not.toContain('never a cone');
   });
 
   it('refuses the metal bit’s 0.1 mm tip: outside every V row, so no numbers, no job', () => {

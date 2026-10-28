@@ -366,8 +366,9 @@ describe('recommendTool and V-bits (#405)', () => {
   });
 
   it('still excludes a V-bit with no V row for the material', () => {
-    // The V row is PLA's alone (#405): a softwood trace job has no numbers for a cone, and Makera's
-    // own rows state a flat end mill's numbers, never a cone's — so there is nothing to fall back on.
+    // The V row is PLA's alone (#405): a softwood trace job has no numbers for a cone, and this
+    // V-bit carries no Makera id for a catalogue row to name it by (#732), so there is nothing to
+    // fall back on. (The catalogue does state engraving rows — for cutters that carry an id.)
     const rec = recommendTool(traceJob('softwood'), [vBit()], [], allRows(1));
     expect(candidate(rec, 'inv:v30').excluded).toBe('no-feeds');
     expect(rec.key).toBeNull();

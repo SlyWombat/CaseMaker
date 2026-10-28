@@ -1123,23 +1123,15 @@ function entryFor(
       reason: `no cutting parameters for a ${num3(diameter)} mm ${edge === 'v' ? 'V-bit' : 'cutter'} in ${material}`,
     };
   }
-  // A V-bit with no row for its MATERIAL at all: the vendor's catalogue cannot answer it either —
-  // Makera's rows are keyed by `g_ID` and state a flat end mill's numbers, and a cone's cutting
-  // properties are not one of `CATALOGUE_FIELDS` (#405). So the refusal says which row is missing
-  // rather than marching the cutter through a tier that was never written for it.
-  if (edge === 'v') {
-    return {
-      ok: false,
-      cause: 'no-feeds',
-      reason:
-        `no cutting parameters for a ${num3(diameter)} mm V-bit in ${MATERIAL_LABELS[material]}: the starting ` +
-        `table has a V-bit row for PLA, PETG and plastic only, and ${CATALOGUE_LABEL} states a flat end mill's numbers, ` +
-        `never a cone's. Pick PLA, PETG or plastic, or a flat end mill for this material.`,
-    };
-  }
+  // A V-bit whose material has no table row goes on to the catalogue exactly as a flat end mill
+  // does (#732). Makera's rows are keyed by `g_ID` and state the same four numbers whatever the
+  // cutter's shape (`CATALOGUE_FIELDS`), so a cone Makera sells has a row like any other; before
+  // #732 this branch refused it with a sentence claiming the catalogue "states a flat end mill's
+  // numbers, never a cone's", which was false. A V-bit carrying no Makera id is refused below by the
+  // one `no-vendor-id` sentence, which is just as true of it as of a flat end mill.
 
   const label = MATERIAL_LABELS[material];
-  const named = `a ${num3(diameter)} mm cutter in ${label}`;
+  const named = `a ${num3(diameter)} mm ${edge === 'v' ? 'V-bit' : 'cutter'} in ${label}`;
   const coverage = catalogueCoverageFor(snapshot.rows, material, tool);
   // The cutter has to carry Makera's own id for any of their rows to name it (#332: a clone's
   // rendered cutter carries no identity of its own — and neither does a `0`, which is what a file
@@ -1273,10 +1265,13 @@ export type FeedsResult =
  * those are the cutters this app can generate a toolpath for (`tool.ts`). The cutter's cutting
  * diameter selects a row: for a flat end mill the diameter, for a V-bit its TIP, since a cone's
  * shank is not what cuts. The row is matched on the cutter's EDGE as well as its material and
- * diameter, so a cone can never resolve to a flat end mill's numbers and vice versa. No row means no
- * cut — with one exception, and it is a MATERIAL's (#347): a material the starting table has no row
- * for at all is answered by the user's own catalogue row (`entryFor`, Route A), which then stands
- * ALONE, so a vendor number this job cannot use refuses the job instead of being passed over.
+ * diameter, so in the STARTING TABLE a cone can never resolve to a flat end mill's numbers and vice
+ * versa. No row means no cut — with one exception, and it is a MATERIAL's (#347): a material the
+ * starting table has no row for at all is answered by the user's own catalogue row (`entryFor`,
+ * Route A), which then stands ALONE, so a vendor number this job cannot use refuses the job instead
+ * of being passed over. That route is keyed by Makera's cutter id and states the same four fields for
+ * every cutter, so a V-bit carrying a confirmed id (#732) reads its engraving rows by it; the edge
+ * distinction above is the starting table's rule, not the catalogue's.
  *
  * THE TIERS, in the order this function consults them (#310's precedence, minus the rung that has
  * no writer yet): the row a coupon measured answers alone; otherwise Makera's catalogue answers —

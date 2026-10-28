@@ -267,6 +267,35 @@ describe('#732 a confirmed Makera id resolves the owned cutter from the catalogu
   });
 });
 
+describe('#732 a V-bit with a confirmed Makera id uses Makera’s engraving rows (j14)', () => {
+  it('j14 (dog tag, 6061): the refusal names the missing id, not a false claim about cones', () => {
+    const material = jobMaterial('j14-dog-tag');
+    const refused = feedsFor(CATALOGUE, material, METAL_ENGRAVER_60_01.tool, Z1);
+    expect(refused.ok).toBe(false);
+    if (refused.ok) throw new Error('an owned V-bit with no Makera id must not reach a catalogue row');
+    expect(refused.reason).toContain('V-bit');
+    expect(refused.reason).toContain("matched by Makera's own cutter id");
+    // The bench run (2026-10-27) recorded the false half of this sentence. Makera's catalogue is
+    // keyed by `g_ID` and states the same four numbers for every cutter, cones included (#405's
+    // `CATALOGUE_FIELDS`); there is no cone-shaped hole in it to name.
+    expect(refused.reason).not.toContain("never a cone's");
+    expect(refused.reason).not.toContain("states a flat end mill's numbers");
+  });
+
+  it('j14: the engraver’s confirmed id resolves Makera’s 6061 engraving row', () => {
+    const material = jobMaterial('j14-dog-tag');
+    const res = feedsFor(CATALOGUE, material, confirmed(METAL_ENGRAVER_60_01, G_METAL_ENGRAVER_60_01).tool, Z1);
+    if (!res.ok) throw new Error(res.reason);
+    expect(res.params.rpm).toBe(12000);
+    expect(res.params.feed).toBe(500);
+    expect(res.params.plungeFeed).toBe(200);
+    expect(res.params.stepDown).toBe(0.2);
+    expect(res.catalogue?.cutterId).toBe(G_METAL_ENGRAVER_60_01);
+    expect(res.sources.rpm).toBe('catalogue');
+    expect(res.sources.feed).toBe('catalogue');
+  });
+});
+
 describe('#732 the suggestion reads the cutter’s own evidence and never applies itself', () => {
   it('suggests catalogue rows by the label’s shape and tip, the same line first', () => {
     const suggestion = suggestMakeraMatch(METAL_FLAT_3_175_12, CATALOGUE_ENTRIES);
