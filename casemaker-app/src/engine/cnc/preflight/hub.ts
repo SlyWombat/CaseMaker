@@ -60,7 +60,7 @@ export interface PreflightHubInput {
    * (decision 2).
    */
   package: FrozenPackage | null;
-  /** The saved machine calibration; the stock owner resolves its profile from the job's machine. */
+  /** The saved machine calibration; the stock owner and the gate both resolve the job's profile through it. */
   calibration: MachineCalibration | null;
   /**
    * The shelf entry the job's stock came from, or null (not a shelf pick, or not resolved yet).

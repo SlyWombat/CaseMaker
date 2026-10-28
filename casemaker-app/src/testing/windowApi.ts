@@ -437,7 +437,7 @@ export function installCaseMakerTestApi(): void {
       // #724 W5 — the gate needs the machine and the holding. Without them a rotary job read as
       // one for a machine with no module ("no rotary module" on a profile that has one).
       const job = useEngraveJobStore.getState().job;
-      const view = gateViewFor(r, jobMachine(job), job.workholding.kind === 'rotary-chuck');
+      const view = gateViewFor(r, jobMachine(job, useSettingsStore.getState().machineCalibration ?? null), job.workholding.kind === 'rotary-chuck');
       return {
         phase: r.phase,
         stale: r.staleSince !== null,

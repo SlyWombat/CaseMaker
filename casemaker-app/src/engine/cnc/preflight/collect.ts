@@ -91,7 +91,7 @@ export interface PreflightInput {
    * view, is where that statement belongs; it is not invented here.
    */
   generated: EngraveGenerated | null;
-  /** The saved machine calibration; the stock owner resolves its profile from the job's machine. */
+  /** The saved machine calibration; the stock owner and the gate both resolve the job's profile through it. */
   calibration: MachineCalibration | null;
   /**
    * The SHELF ENTRY the job's stock came from — `job.stockEntry.shelfId` resolved against the
@@ -304,7 +304,7 @@ export function collect(input: PreflightInput): PreflightRow[] {
     const block = saveBlocker(
       gateViewFor(
         gen === null ? NO_RUN_VIEW : { ...NO_RUN_VIEW, generated: gen },
-        jobMachine(input.job),
+        jobMachine(input.job, input.calibration),
         input.job.workholding.kind === 'rotary-chuck',
       ),
     );
