@@ -69,7 +69,7 @@ import { writeFileSync, mkdirSync, readFileSync } from 'node:fs';
 import { dirname, join, basename, isAbsolute } from 'node:path';
 
 import { engraveGenerate, type EngraveGenerated, type EngraveShopOpts } from '../../../src/workers/sim/engraveGenerate';
-import { createSimSession, type SimLoadOk, type SimSession } from '../../../src/workers/sim/session';
+import { createSimSession, type SimDiagnostic, type SimLoadOk, type SimSession } from '../../../src/workers/sim/session';
 import { unionRemoval, restMachining } from '../../../src/workers/sim/engraveRest';
 import { restJobFor, roughPick, restToolPick, unroughedItems, vBitRestRefusal, type RestPassFacts } from '../../../src/engine/cnc/engrave/restPass';
 import {
@@ -559,6 +559,15 @@ async function engraveJobBody(argv: string[], options: CommandOptions): Promise<
     | { ok: true; files: JobFiles; programs: EngraveProgram[]; diagnostics: ReceiptDiagnostic[] }
     | { ok: false; failure: EngraveFailure };
 
+  /** One program's sweep, reduced to the facts a receipt entry and the diagnostics carry (#733). */
+  interface ProgramSweep {
+    engine: SimLoadOk['stats']['engine'];
+    count: number;
+    removedVolume: number;
+    errorCount: number;
+    diagnostics: SimDiagnostic[];
+  }
+
   /** A program that has been generated, verified and simulated — and not yet written anywhere. */
   interface Prepared {
     /**
@@ -574,12 +583,29 @@ async function engraveJobBody(argv: string[], options: CommandOptions): Promise<
     /** `cuttingDiameter(tool)`, resolved once here so no caller re-derives it (#410's two programs). */
     diameter: number;
     generated: EngraveGenerated;
+    /** The first ENGRAVING program's sweep — the adapter the run sheet and receipt read. */
     load: SimLoadOk;
     /**
-     * LIVE, and the caller's to dispose. It is handed back rather than disposed here because a
-     * two-tool job needs what it owns: `load.meshes.removal` is the material the SECOND program's
-     * sweep has to start from (`priorRemoval`), and a mesh that was freed with the session cannot
-     * seed anything.
+     * #733 item 4 — EVERY PROGRAM'S SWEEP, IN CUT ORDER: `sweeps[i]` is `generated.programs[i]`.
+     * Program 1's entry repeats `load`; a later program's is its own, taken on the stock the
+     * previous one left. Reduced to what a receipt entry prints, so the meshes of programs the
+     * caller does not use can be collected.
+     */
+    sweeps: ProgramSweep[];
+    /**
+     * The material the run leaves, cumulative — `priorRemoval` (the rest route's seed) plus every
+     * program's own removal. Null when nothing was removed.
+     */
+    removal: NodeMeshOutput | null;
+    /**
+     * Reports from sweeps that could not start from the previous program's stock (the simulator's
+     * own prior-removal refusals), so the receipt says which program was checked from the blank.
+     */
+    simNotes: ReceiptDiagnostic[];
+    /**
+     * LIVE, and the caller's to dispose. `load.meshes.removal` is the material the swept program
+     * leaves; every program's sweep ran on this session, and only the swept program's meshes are
+     * retained here.
      */
     session: SimSession;
   }
@@ -644,64 +670,150 @@ async function engraveJobBody(argv: string[], options: CommandOptions): Promise<
     // (#382); the browser hands it the drill program's own `simDrillPoint`, or the shop's number for
     // any other load. Without this the sweep refuses a drill-shaped cutter outright
     // (`tool-refused`), which is what stopped every drill job before the fix.
-    const drillPoint =
-      generated.drill?.simDrillPoint ??
-      (shop.drill === undefined || shop.drill === null
+    const shopDrillPoint =
+      shop.drill === undefined || shop.drill === null
         ? null
-        : { deg: shop.drill.settings.pointAngleDeg, source: shop.drill.sources.pointAngleDeg });
-    const load = session.load(
-      generated.nc,
-      toSetup(job, Z1),
+        : { deg: shop.drill.settings.pointAngleDeg, source: shop.drill.sources.pointAngleDeg };
+
+    // #733 item 4 — ONE SWEEP PER PROGRAM, ON THE STOCK THE LAST ONE LEFT. Program 1's sweep has
+    // always gated the run; writing every program without sweeping it meant a later cutter's rapid
+    // through stock went unchecked (`sim: null` in its receipt entry). Each program is now loaded
+    // in cut order, seeded with the cumulative removal so far — the same `priorRemoval` the rest
+    // passes have always used — and a program whose sweep fails is refused exactly as program 1 is.
+    //
+    // THE ONE EXCEPTION IS THE SIMULATOR'S OWN REFUSAL TO SEED A PROGRAM: the column engine (V-bit,
+    // drill, thread, wrapped rotary) and an indexed rotary exact sweep cannot start from a previous
+    // program's material (`prior-removal-column` / `prior-removal-rotary`; session.ts states why a
+    // rest pass against the wrong stock is not a picture of the cut). Those programs are swept from
+    // the blank instead — still checked for fixture, stock and rapid collisions — and the receipt
+    // carries an info note naming the program, rather than refusing a good drill or V job over a
+    // limitation of the sweep.
+    const sweptIndex = generated.programs.findIndex((p) => (p.kind ?? 'engrave') !== 'facing');
+    if (sweptIndex < 0 || generated.programs[sweptIndex]!.nc !== nc) {
+      fail('the generator did not list the program this run swept');
+    }
+    const sweeps: ProgramSweep[] = [];
+    const simNotes: ReceiptDiagnostic[] = [];
+    let prior: NodeMeshOutput | null = opts.priorRemoval ?? null;
+    let sweptLoad: SimLoadOk | null = null;
+    /** A program's sweep stopped the run, in the same words program 1 has always used (#393). */
+    const simStop = (diagnostics: readonly SimDiagnostic[], problem: string | null): PrepareResult => {
+      session.dispose();
+      return {
+        ok: false,
+        failure: {
+          stage: 'simulated',
+          gate: 'simulated',
+          diagnostics: diagnostics.map((d) =>
+            diagnostic(d.code, d.severity, d.message, 'simulation', job.name),
+          ),
+          refusals:
+            problem === null
+              ? [{ code: 'simulation-refused', reason: 'simulation refused the file' }]
+              : [
+                  { code: 'simulation-refused', reason: problem },
+                  {
+                    code: 'nothing-written',
+                    reason: 'nothing written: a job the simulation refuses is a document to fix, not a file',
+                  },
+                ],
+        },
+      };
+    };
+    /** One load of one program, seeded with `seed` and handed this program's point (#434). */
+    const loadProgram = (
+      gcode: string,
+      cutter: Tool,
+      point: { deg: number; source: string } | null,
+      seed: NodeMeshOutput | null,
+    ): ReturnType<SimSession['load']> =>
+      session.load(gcode, toSetup(job, Z1), cutter, Z1.id, {
+        ...(seed === null ? {} : { priorRemoval: seed }),
+        ...(point === null ? {} : { drillPointDefault: point }),
+      });
+
+    for (const [i, program] of generated.programs.entries()) {
+      // `toolForProgram`'s reading: the job's own snapshot for the job's key, the registry for a
+      // setup's later cutter. The generator resolved this program, so a miss here is a defect.
+      const cutter = program.toolKey === job.toolKey ? tool : (entryFor(program.toolKey)?.tool ?? null);
+      if (cutter === null) {
+        session.dispose();
+        return {
+          ok: false,
+          failure: {
+            stage: 'simulated',
+            gate: 'simulated',
+            diagnostics: [
+              diagnostic(
+                'tool-refused',
+                'error',
+                `program ${i + 1} names ${program.toolKey}, which is not on this bench`,
+                'simulation',
+                job.name,
+              ),
+            ],
+            refusals: [{ code: 'tool-refused', reason: `cutter ${program.toolKey} is not in the tool library` }],
+          },
+        };
+      }
+      const point = program.drill?.simDrillPoint ?? shopDrillPoint;
+      let load = loadProgram(program.nc, cutter, point, prior);
+      if (!load.ok && prior !== null) {
+        const refused = load.diagnostics.find(
+          (d) => d.code === 'prior-removal-column' || d.code === 'prior-removal-rotary',
+        );
+        if (refused !== undefined) {
+          load = loadProgram(program.nc, cutter, point, null);
+          if (load.ok) {
+            simNotes.push(
+              diagnostic(
+                refused.code,
+                'info',
+                `program ${i + 1} (${program.toolKey}) was swept from the blank: this program’s engine cannot start from the material the previous program left, so its result covers its own cuts only`,
+                'simulation',
+                job.name,
+              ),
+            );
+          }
+        }
+      }
+      if (!load.ok) return simStop(load.diagnostics, null);
+      // #393 — THE OTHER HALF OF THE GATE, and the one that was missing. `load.ok` means the sweep
+      // produced material, NOT that the program is safe: a run that drove the cutter 0.97 mm³ into
+      // the fixed jaw is `ok: true` with a `tool-into-fixture` ERROR among its diagnostics, because
+      // the panel has to be able to DRAW that cut (`simGate.ts`). Trusting `ok` alone wrote four
+      // 11.5 mm coupons whose own simulation said they hit the jaw, and receipted them "all
+      // generated". The same gate now covers every program, not only the first.
+      const problem = simulationProblem(load.diagnostics);
+      if (problem !== null) return simStop(load.diagnostics, problem);
+      sweeps.push({
+        engine: load.stats.engine,
+        count: load.count,
+        removedVolume: load.stats.removedVolume,
+        errorCount: simErrors(load.diagnostics).length,
+        diagnostics: load.diagnostics,
+      });
+      if (i === sweptIndex) sweptLoad = load;
+      // The cumulative stock the NEXT program starts from. With no seed yet this program's own
+      // removal IS the cumulative set (no copy); afterwards the union is what "the stock the last
+      // one left" means on the sweeps that can take it.
+      prior = prior === null ? load.meshes.removal : unionRemoval(tl, [prior, load.meshes.removal]);
+    }
+
+    if (sweptLoad === null) fail('the generator did not list the program this run swept');
+    return {
+      ok: true,
+      job,
       tool,
-      Z1.id,
-      {
-        ...(opts.priorRemoval === undefined ? {} : { priorRemoval: opts.priorRemoval }),
-        ...(drillPoint === null ? {} : { drillPointDefault: drillPoint }),
-      },
-    );
-    if (!load.ok) {
-      session.dispose();
-      return {
-        ok: false,
-        failure: {
-          stage: 'simulated',
-          gate: 'simulated',
-          diagnostics: load.diagnostics.map((d) =>
-            diagnostic(d.code, d.severity, d.message, 'simulation', job.name),
-          ),
-          refusals: [{ code: 'simulation-refused', reason: 'simulation refused the file' }],
-        },
-      };
-    }
-
-    // #393 — THE OTHER HALF OF THE GATE, and the one that was missing. `load.ok` means the sweep
-    // produced material, NOT that the program is safe: a run that drove the cutter 0.97 mm³ into the
-    // fixed jaw is `ok: true` with a `tool-into-fixture` ERROR among its diagnostics, because the
-    // panel has to be able to DRAW that cut (`simGate.ts`). Trusting `ok` alone wrote four 11.5 mm
-    // coupons whose own simulation said they hit the jaw, and receipted them "all generated".
-    const simProblem = simulationProblem(load.diagnostics);
-    if (simProblem !== null) {
-      session.dispose();
-      return {
-        ok: false,
-        failure: {
-          stage: 'simulated',
-          gate: 'simulated',
-          diagnostics: load.diagnostics.map((d) =>
-            diagnostic(d.code, d.severity, d.message, 'simulation', job.name),
-          ),
-          refusals: [
-            { code: 'simulation-refused', reason: simProblem },
-            {
-              code: 'nothing-written',
-              reason: 'nothing written: a job the simulation refuses is a document to fix, not a file',
-            },
-          ],
-        },
-      };
-    }
-
-    return { ok: true, job, tool, nc, diameter, generated, load, session };
+      nc,
+      diameter,
+      generated,
+      load: sweptLoad,
+      sweeps,
+      removal: prior,
+      simNotes,
+      session,
+    };
   }
 
   /** One program as the generator returned it, with every field the writer needs. */
@@ -753,7 +865,7 @@ async function engraveJobBody(argv: string[], options: CommandOptions): Promise<
     outDir: string,
     opts: WriteOpts,
   ): { files: JobFiles; programs: EngraveProgram[]; diagnostics: ReceiptDiagnostic[] } {
-    const { job, tool, nc, diameter, generated, load } = prepared;
+    const { job, tool, nc, diameter, generated, load, sweeps, simNotes } = prepared;
     const writeSheet = opts.sheet !== false;
     // The stem is claimed through `stemFor`, which refuses a name already used this run: the rest
     // program of a two-tool job is written from a job named `<name> rest`, so the two programs land
@@ -765,6 +877,10 @@ async function engraveJobBody(argv: string[], options: CommandOptions): Promise<
     const sweptIndex = generated.programs.findIndex((p) => (p.kind ?? 'engrave') !== 'facing');
     if (sweptIndex < 0 || generated.programs[sweptIndex]!.nc !== nc) {
       fail('the generator did not list the program this run swept');
+    }
+    // One sweep per program, in the same order (`prepare` walks `generated.programs`).
+    if (sweeps.length !== generated.programs.length) {
+      fail('the generator’s program list and the sweeps do not line up');
     }
     // #243: the run sheet's §8 carries the coverage sentence, so the sheet must be handed the run's
     // outcome and diagnostics — exactly what the Simulate panel would. This run swept.
@@ -791,10 +907,10 @@ async function engraveJobBody(argv: string[], options: CommandOptions): Promise<
       fail(`run sheet file name drifted: expected ${names[sweptIndex]!.ncFile}, got ${sheet.header.fileName}`);
     }
 
-    // #733 — WRITE THE RUN, IN CUT ORDER. The swept program carries the sim, the sheet and the
-    // job's preview; the generator verified every later program (and a rest program is measured
-    // against the first one's simulated removal), so their receipt entries state their own CAM and
-    // verifier facts with `sim: null` — no second sweep was run for them here.
+    // #733 — WRITE THE RUN, IN CUT ORDER. Every program carries its OWN sweep result (#733 item 4):
+    // the swept program additionally carries the sheet and the job's preview. A later program's
+    // sweep runs on the stock the previous one left, so its entry's number is the material that
+    // program removes FROM THAT STOCK, not a second blank.
     const written: EngraveProgram[] = [];
     const laterDiagnostics: ReceiptDiagnostic[] = [];
     const sheetEntry = writeSheet
@@ -810,6 +926,7 @@ async function engraveJobBody(argv: string[], options: CommandOptions): Promise<
         runOutputs.push(fileReceipt(join(outDir, frameFile)));
       }
       const swept = i === sweptIndex;
+      const sweep = sweeps[i]!;
       const cam = program.cam;
       written.push({
         name: job.name,
@@ -830,25 +947,27 @@ async function engraveJobBody(argv: string[], options: CommandOptions): Promise<
                 cutMm: cam.cutMm ?? null,
                 baselineRapidMm: cam.baselineRapidMm ?? null,
               },
-        sim: swept
-          ? {
-              ok: load.ok,
-              engine: load.stats.engine,
-              count: load.count,
-              removedVolumeMm3: load.stats.removedVolume,
-              errorCount: simErrors(load.diagnostics).length,
-            }
-          : null,
+        sim: {
+          ok: true,
+          engine: sweep.engine,
+          count: sweep.count,
+          removedVolumeMm3: sweep.removedVolume,
+          errorCount: sweep.errorCount,
+        },
         sheet: swept ? sheetEntry : null,
         previews: [],
         images: [],
       });
       if (!swept) {
-        // The swept program's report is already in `generatedDiagnostics`; the later programs'
-        // reports have to be carried here or the receipt would drop a warning the file raised.
+        // The swept program's reports are already in `generatedDiagnostics`; every other program's
+        // verifier AND sweep reports have to be carried here or the receipt would drop a warning
+        // the file or its sweep raised.
         laterDiagnostics.push(
           ...(program.verify?.findings ?? []).map((f) =>
             diagnostic(f.code, f.severity, f.message, 'verify', job.name),
+          ),
+          ...sweep.diagnostics.map((d) =>
+            diagnostic(d.code, d.severity, d.message, 'simulation', job.name),
           ),
         );
       }
@@ -919,7 +1038,7 @@ async function engraveJobBody(argv: string[], options: CommandOptions): Promise<
         previews,
       },
       programs: written,
-      diagnostics: [...generatedDiagnostics(job, generated, load), ...laterDiagnostics],
+      diagnostics: [...generatedDiagnostics(job, generated, load), ...simNotes, ...laterDiagnostics],
     };
   }
 

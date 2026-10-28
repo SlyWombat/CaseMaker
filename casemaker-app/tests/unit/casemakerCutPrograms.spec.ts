@@ -24,8 +24,13 @@ import { engraveJobMain } from '../../scripts/lib/casemaker/engrave';
 import type { CommandOptions } from '../../scripts/lib/casemaker/output';
 import { runSheetFileName } from '../../src/engine/cnc/engrave/runSheet';
 import { defaultEngraveJob } from '../../src/engine/cnc/engrave/defaults';
+import { toSetup } from '../../src/engine/cnc/engrave/jobSetup';
+import { Z1 } from '../../src/engine/cnc/machine';
 import { flatEndMill } from '../../src/engine/cnc/tool';
+import { entryFor } from '../../src/engine/cnc/toolRegistry';
+import { bootstrap } from '../../src/platform/headless/bootstrap';
 import { parseReceipt, type Receipt } from '../../src/platform/headless/receipt';
+import { createSimSession } from '../../src/workers/sim/session';
 import type { EngraveDrill, EngraveJob, JobSetup } from '../../src/types/engraveJob';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -140,7 +145,99 @@ describe('#733 a job posts one program per cutter', () => {
     // One sheet per job — the setup's one truth — carried by the program it names in its header.
     expect(details.programs[0]!.sheet?.file).toBe(`${stemNoExt}-run-sheet.md`);
     expect(details.programs[1]!.sheet).toBeNull();
+
+    // #733 item 4 — EVERY program was swept, not only the first. `sim: null` on the second program
+    // was the hole the manager refused: a rapid through stock there went unchecked.
+    for (const program of details.programs) {
+      expect(program.sim, `${program.ncFile} carries its own sweep`).not.toBeNull();
+      expect(program.sim!.ok).toBe(true);
+      expect(program.sim!.errorCount).toBe(0);
+      expect(program.sim!.count).toBeGreaterThan(0);
+      expect(program.sim!.removedVolumeMm3).not.toBeNull();
+    }
   }, 120_000);
+});
+
+// #733 item 4 — EVERY PROGRAM IS SIMULATED ON THE STOCK THE LAST ONE LEFT.
+//
+// Writing every program is only half of item 1: posting the rest of the run without sweeping it is
+// how a rapid through material goes unchecked (`sim: null` on every later entry). Each program is
+// now swept in cut order, each seeded with the material the previous one left — the same
+// `priorRemoval` the rest passes have always used. The second program of a rest pair is the test's
+// witness: from the blank its paths cut 27 mm³; on the stock the rough cutter leaves they cut
+// 2.2 mm³, so the receipt stating the smaller number is proof the seed was used.
+//
+// A rest pair (no `toolItems`) is the shape that makes the difference visible: the second cutter
+// re-traverses the seam band the first one cleared, which is exactly what `priorRemoval` models.
+
+/** A setup whose one item is rough-cut by 3.175 mm and cleaned up by 2 mm: a rest pair (#410). */
+function restPairJob(): EngraveJob {
+  const base = defaultEngraveJob();
+  // Large enough for the 3.175 mm rough cutter to keep its characters; the rest pass is measured
+  // against what that cutter really removed, not against a design it cannot reach.
+  const label = { ...base.labels[0]!, text: 'AE', size: 24, position: { x: 50, y: 32 }, depth: 0.5 };
+  const setup: JobSetup = {
+    id: 'setup-1',
+    orientation: { top: 'top', bottom: 'bottom', left: 'left', right: 'right', front: 'front', back: 'back' },
+    mount: { kind: 'vise' },
+    itemIds: [label.id],
+    // No `toolItems`: the first cutter owns the item, the second is a rest pass (#472).
+    tools: [SECOND, FIRST],
+  };
+  return { ...base, name: 'rest pair bench job', toolKey: SECOND, labels: [label], setups: [setup] };
+}
+
+describe('#733 every program is simulated on the stock the last one left', () => {
+  it('sweeps the rest program from the first program’s material, and states its own result', async () => {
+    const job = restPairJob();
+    const run = await cut(job, 'rest-pair');
+    expect(
+      run.code,
+      JSON.stringify({ refusals: run.receipt?.refusals ?? null, diagnostics: run.receipt?.diagnostics ?? null }),
+    ).toBe(0);
+    expect(run.receipt).not.toBeNull();
+    if (run.receipt!.command !== 'engrave') throw new Error('expected the engrave receipt');
+    const programs = run.receipt!.details.programs;
+    expect(programs.map((p) => p.ncFile)).toHaveLength(2);
+
+    // Every entry carries its own sweep result — including the rest program.
+    for (const program of programs) {
+      expect(program.sim, `${program.ncFile} has its own sweep`).not.toBeNull();
+      expect(program.sim!.ok).toBe(true);
+      expect(program.sim!.count).toBeGreaterThan(0);
+      expect(program.sim!.errorCount).toBe(0);
+    }
+
+    // Replay the two loads the CLI runs and require the receipt to state the SEEDED volume. This
+    // is the difference between "a sweep ran" and "a sweep ran on the stock the last program left".
+    const { manifold } = await bootstrap({ location: LOCATION });
+    const session = createSimSession(manifold);
+    try {
+      const setup = toSetup(job, Z1);
+      const rough = entryFor(SECOND)!.tool;
+      const rest = entryFor(FIRST)!.tool;
+      const ncRough = readFileSync(join(run.outDir, programs[0]!.ncFile), 'utf8');
+      const ncRest = readFileSync(join(run.outDir, programs[1]!.ncFile), 'utf8');
+      const first = session.load(ncRough, setup, rough, Z1.id, {});
+      expect(first.ok).toBe(true);
+      if (!first.ok) throw new Error(first.diagnostics.map((d) => d.message).join('\n'));
+      const seeded = session.load(ncRest, setup, rest, Z1.id, {
+        ...(first.meshes.removal === null ? {} : { priorRemoval: first.meshes.removal }),
+      });
+      const blank = session.load(ncRest, setup, rest, Z1.id, {});
+      expect(seeded.ok).toBe(true);
+      expect(blank.ok).toBe(true);
+      if (!seeded.ok || !blank.ok) throw new Error('the rest program did not sweep');
+      // The pair's own numbers: the rest paths re-traverse cleared seam band, so the blank sweep
+      // removes an order of magnitude more material than the seeded one.
+      expect(blank.stats.removedVolume).toBeGreaterThan(seeded.stats.removedVolume * 2);
+      const stated = programs[1]!.sim!.removedVolumeMm3!;
+      expect(stated).toBeCloseTo(seeded.stats.removedVolume, 3);
+      expect(stated).not.toBeCloseTo(blank.stats.removedVolume, 3);
+    } finally {
+      session.dispose();
+    }
+  }, 180_000);
 });
 
 // #733 item 2 — THE LOCATION'S DRILL POINT ANGLE IS NOT DROPPED ON THE CLI PATH.
