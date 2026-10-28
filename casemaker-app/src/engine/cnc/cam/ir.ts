@@ -437,6 +437,14 @@ const JUNCTION_COS = Math.cos((JUNCTION_CORNER_DEG * Math.PI) / 180);
  * read the `estimatedSeconds` this populates, and `postZ1` writes its program-wide sum into
  * `;@MKR|TIME`, so all three come from this function and cannot disagree.
  *
+ * WHAT IT IS NOT. It times the MOVES of the program at the commanded feeds and the machine's rapid
+ * model, and nothing else: no spindle spin-up, no tool change, no probing or operator time, and the
+ * junctions are the constant below rather than the controller's real `junction_deviation`. A
+ * wall-clock figure quoted for "the same job" is comparable only when its path and machine
+ * constants are known — the bench set's j02 is the recorded example (2.0 min here against a 7-10
+ * min source; the source's band at F500 implies 4.4-6.3x this program's 792 mm of cutting, #735
+ * item 4), not like-for-like.
+ *
  * CUTTING IS TIMED PER RUN, rapids per move (#281, the review of 62fa025). A run is a maximal
  * stretch of consecutive feed moves at the same `f` with no rapid between them, and its trapezoid
  * is charged once, on the sum of its segments. The controller does not stop at every junction —
