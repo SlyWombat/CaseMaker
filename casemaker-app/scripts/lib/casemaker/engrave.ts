@@ -222,12 +222,28 @@ const USAGE =
   '       [--location <location.json|house.json>]  (any input; default: the app’s own location)\n' +
   '       (casemaker engrave is the same command under its old name; the receipt is the same)';
 
-/** A pipeline that stopped, as the receipt needs it (#478). */
+/** A pipeline that stopped, as the receipt needs it (#478). `stage` is null when none ran. */
 interface EngraveFailure {
-  stage: string;
+  stage: string | null;
   gate: Receipt['gate'];
   diagnostics: ReceiptDiagnostic[];
   refusals: ReceiptRefusal[];
+}
+
+/**
+ * #733 item 3 — AN INVALID JOB IS A RESULT, NOT AN EXCEPTION. `--json` promises stdout is exactly
+ * one receipt (#478), and a document the schema refuses is a run that stopped before any stage.
+ * The full words still go to stderr for the operator; the receipt carries the same reason as a
+ * refusal and as a diagnostic, so a caller can read why without scraping stderr.
+ */
+function invalidJob(message: string): EngraveFailure {
+  console.error(`casemaker cut: ${message}`);
+  return {
+    stage: null,
+    gate: null,
+    diagnostics: [diagnostic('invalid-job', 'error', message, 'findings', null)],
+    refusals: [{ code: 'invalid-job', reason: message }],
+  };
 }
 
 /**
@@ -986,8 +1002,17 @@ async function engraveJobBody(argv: string[], options: CommandOptions): Promise<
 
   if (args.job) {
     const path = args.job;
-    const parsed = parseEngraveJob(readJson(path));
-    if (!parsed.ok) fail(`${path} is not a valid engrave job:\n  ${parsed.errors.join('\n  ')}`);
+    // #733 item 3 — read and validate through `invalidJob`, so `--json` still gets its receipt.
+    let raw: unknown;
+    try {
+      raw = JSON.parse(readFileSync(path, 'utf8'));
+    } catch (e) {
+      return stop(invalidJob(`${path} cannot be read: ${(e as Error).message}`));
+    }
+    const parsed = parseEngraveJob(raw);
+    if (!parsed.ok) {
+      return stop(invalidJob(`${path} is not a valid engrave job:\n  ${parsed.errors.join('\n  ')}`));
+    }
     outDir = args.out ?? dirname(path);
     mkdirSync(outDir, { recursive: true });
     const result = runJob(parsed.job, outDir, {

@@ -11,10 +11,12 @@
 // cutters (#472's `toolItems`) makes the second program's cut a measured region rather than a
 // rest-of-everything prediction, which is the shape the faceplate and relief jobs have.
 
+import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { afterAll, describe, expect, it } from 'vitest';
 
@@ -23,12 +25,14 @@ import type { CommandOptions } from '../../scripts/lib/casemaker/output';
 import { runSheetFileName } from '../../src/engine/cnc/engrave/runSheet';
 import { defaultEngraveJob } from '../../src/engine/cnc/engrave/defaults';
 import { flatEndMill } from '../../src/engine/cnc/tool';
-import type { Receipt } from '../../src/platform/headless/receipt';
+import { parseReceipt, type Receipt } from '../../src/platform/headless/receipt';
 import type { EngraveDrill, EngraveJob, JobSetup } from '../../src/types/engraveJob';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const APP = join(HERE, '..', '..');
 const LOCATION = join(APP, 'tests', 'unit', 'fixtures', 'location-doc.json');
+const require = createRequire(import.meta.url);
+const TSX = pathToFileURL(require.resolve('tsx')).href;
 /** The fixture location's two owned flat cutters: 2 mm and a 3.175 mm clone. */
 const FIRST = 'user:1a2b3c4d5e';
 const SECOND = 'user:6f7a8b9c0d';
@@ -208,5 +212,50 @@ describe('#733 the location’s drill point angle reaches the CLI', () => {
     const nc118 = readFileSync(join(fallback.outDir, ncFile), 'utf8');
     expect(nc118).toContain('Z-2.901');
     expect(nc118).not.toMatch(/Z-3\.5\b/);
+  }, 120_000);
+});
+
+// #733 item 3 — AN INVALID JOB STILL PRINTS ITS RECEIPT.
+//
+// #478's contract: with `--json`, stdout is exactly one receipt — progress and diagnostics go to
+// stderr. A job the schema refuses is a RESULT (the run stopped), not an exception, so it has to
+// answer on stdout like every other stop. Spawn-based: the property is what a bench user's shell
+// captures, and the in-process sink bypasses stdout by design.
+describe('#733 an invalid job answers --json on stdout', () => {
+  it('prints one parseable receipt naming the reason, not an empty stdout', () => {
+    const dir = join(SCRATCH, 'invalid-job');
+    mkdirSync(dir, { recursive: true });
+    const jobPath = join(dir, 'job.json');
+    // Valid JSON, invalid job: no schemaVersion/stock/tool/labels — `parseEngraveJob` refuses it.
+    writeFileSync(jobPath, JSON.stringify({ name: 'broken bench job' }, null, 2) + '\n');
+
+    const r = spawnSync(
+      process.execPath,
+      ['--import', TSX, join(APP, 'scripts', 'casemaker.ts'), 'cut', jobPath, '--json', '--location', LOCATION],
+      {
+        cwd: APP,
+        encoding: 'utf8',
+        timeout: 120_000,
+        env: { ...process.env, TSX_TSCONFIG_PATH: join(APP, 'tsconfig.scripts.json') },
+      },
+    );
+
+    expect(r.status, r.stderr).toBe(1);
+    // stdout is exactly the receipt: JSON.parse of the whole stream, not a substring of it.
+    expect(r.stdout.trim(), `stdout was ${r.stdout.length} bytes`).not.toBe('');
+    const receipt = parseReceipt(JSON.parse(r.stdout));
+    expect(receipt.ok).toBe(false);
+    expect(receipt.command).toBe('engrave');
+    // Stopped before any stage ran.
+    expect(receipt.stage).toBeNull();
+    expect(receipt.gate).toBeNull();
+    expect(receipt.refusals.map((x) => x.code)).toEqual(['invalid-job']);
+    expect(receipt.refusals[0]!.reason).toContain('is not a valid engrave job');
+    expect(receipt.diagnostics).toContainEqual(
+      expect.objectContaining({ code: 'invalid-job', severity: 'error', source: 'findings' }),
+    );
+    // The operator's copy stays on stderr, in the words `fail` used.
+    expect(r.stderr).toContain('casemaker cut:');
+    expect(r.stderr).toContain('is not a valid engrave job');
   }, 120_000);
 });
