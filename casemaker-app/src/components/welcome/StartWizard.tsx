@@ -760,11 +760,10 @@ export function StartWizard(): JSX.Element {
         {/* #348 — the actions are their own region, not a row tucked under the last field: a native
             `<select>`'s popup paints over what is under it, so the buttons get clearance. */}
         <div style={FOOTER}>
-          {step === 'machine' ? (
-            <button type="button" data-testid="start-wizard-cancel" onClick={closeWizard}>
-              Cancel
-            </button>
-          ) : (
+          {/* #726 P10 — step 1 has no Back, and its footer Cancel repeated the header's Close:
+              two controls, one action. The header's Close is the one every step carries, so it
+              is the one that stays; the footer offers only what moves the flow. */}
+          {step !== 'machine' && (
             <button type="button" data-testid="start-wizard-back" onClick={back}>
               ← Back
             </button>

@@ -251,7 +251,7 @@ describe('#280/#682 — step 1, the machine check', () => {
     expect(screen.getByTestId('start-wizard-step-stock')).toBeDefined();
   });
 
-  it('a build with no socket does not ask to connect one: the note, Cancel, Continue (#346)', () => {
+  it('a build with no socket does not ask to connect one: the note, Close, Continue (#346)', () => {
     caps.drive = false;
     try {
       render(<StartWizard />);
@@ -275,11 +275,14 @@ describe('#280/#682 — step 1, the machine check', () => {
     }
   });
 
-  it('Cancel on the no-socket step puts the wizard away (#346)', () => {
+  it('#726 P10 — the first step has one way out: Close, not a second Cancel', () => {
     caps.drive = false;
     try {
       render(<StartWizard />);
-      fireEvent.click(screen.getByTestId('start-wizard-cancel'));
+      // The header's Close is on every step; the footer's Cancel repeated it on step 1 only.
+      expect(screen.getByTestId('start-wizard-close')).toBeTruthy();
+      expect(screen.queryByTestId('start-wizard-cancel')).toBeNull();
+      fireEvent.click(screen.getByTestId('start-wizard-close'));
       expect(useStartWizardStore.getState().open).toBe(false);
     } finally {
       caps.drive = true;
