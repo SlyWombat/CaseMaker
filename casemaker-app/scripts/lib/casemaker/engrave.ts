@@ -68,7 +68,7 @@
 import { writeFileSync, mkdirSync, readFileSync } from 'node:fs';
 import { dirname, join, basename, isAbsolute } from 'node:path';
 
-import { engraveGenerate, type EngraveGenerated } from '../../../src/workers/sim/engraveGenerate';
+import { engraveGenerate, type EngraveGenerated, type EngraveShopOpts } from '../../../src/workers/sim/engraveGenerate';
 import { createSimSession, type SimLoadOk, type SimSession } from '../../../src/workers/sim/session';
 import { unionRemoval, restMachining } from '../../../src/workers/sim/engraveRest';
 import { restJobFor, roughPick, restToolPick, unroughedItems, vBitRestRefusal, type RestPassFacts } from '../../../src/engine/cnc/engrave/restPass';
@@ -89,8 +89,10 @@ import {
   buildRunSheet,
   runSheetFileName,
   runSheetFrameFileName,
+  runSheetFaceFileName,
   type RunSheetOptions,
 } from '../../../src/engine/cnc/engrave/runSheet';
+import { releaseFileName } from '../../../src/engine/cnc/engrave/release';
 import { parseEngraveJob } from '../../../src/store/engraveJobSchema';
 import { simErrors, simulationProblem } from '../../../src/engine/cnc/simGate';
 import { buildCouponPrograms, type CouponRecord, type CouponRecordRow, type CouponSpec } from '../../../src/engine/cnc/engrave/couponJob';
@@ -352,6 +354,13 @@ async function engraveJobBody(argv: string[], options: CommandOptions): Promise<
    * same thing the app itself does with no house service.
    */
   const shopDefaults = boot.location?.defaults ?? null;
+  /**
+   * #733 — THE SHOP THE GENERATOR CANNOT READ FOR ITSELF. Its realm has no tool registry (the
+   * location lives on this side), so a setup whose LATER cutter is a `user:`/`inv:` key resolves
+   * nowhere without the snapshot. Passing it is what lets one job document post one program per
+   * cutter instead of the operator splitting the job into one file per cutter.
+   */
+  const shop: EngraveShopOpts = { tools: getTools() };
   if (boot.location !== null) {
     const where = boot.location;
     recordInput(where.path);
@@ -524,7 +533,7 @@ async function engraveJobBody(argv: string[], options: CommandOptions): Promise<
     previews: { svg: string; svgFile: string; pngFile: string }[];
   }
   type JobResult =
-    | { ok: true; files: JobFiles; program: EngraveProgram; diagnostics: ReceiptDiagnostic[] }
+    | { ok: true; files: JobFiles; programs: EngraveProgram[]; diagnostics: ReceiptDiagnostic[] }
     | { ok: false; failure: EngraveFailure };
 
   /** A program that has been generated, verified and simulated — and not yet written anywhere. */
@@ -580,7 +589,9 @@ async function engraveJobBody(argv: string[], options: CommandOptions): Promise<
    */
   function prepare(job: EngraveJob, opts: { priorRemoval?: NodeMeshOutput } = {}): PrepareResult {
     // No Makera feed rows in a headless run (#324): the catalogue tier needs a house service.
-    const generated = engraveGenerate(tl, job, jobTool(job), []);
+    // #733 — `shop.tools` is the registry snapshot; without it a setup's later cutter (a `user:` or
+    // `inv:` key) is not on the worker's bench and the run stops at `setup-rest-unavailable`.
+    const generated = engraveGenerate(tl, job, jobTool(job), [], null, undefined, shop);
     if (!generated.ok || generated.nc === null) {
       return {
         ok: false,
@@ -658,27 +669,82 @@ async function engraveJobBody(argv: string[], options: CommandOptions): Promise<
     return { ok: true, job, tool, nc, diameter, generated, load, session };
   }
 
+  /** One program as the generator returned it, with every field the writer needs. */
+  type GeneratedProgram = EngraveGenerated['programs'][number];
+
   /**
-   * Write one prepared program: the `.nc`, its frame, its run sheet, and — for the routes that build
-   * a document rather than read one — the job JSON. Disposes the session on the way out, so a
-   * prepared program cannot outlive its sweep by accident.
+   * The file names for a job's programs, in cut order (#733).
+   *
+   * THE RUN SHEET NAMES THE FILES, so these names come from its vocabulary: the sheet's header
+   * names `<job>.nc`, its facing section names `<job>-face.nc`, and its later-program sections are
+   * handed the names below. The first ENGRAVING program therefore keeps the job's own file name
+   * (exactly what Save writes for a one-program job), the blank's skim takes `-face`, and only a
+   * later engraving program takes the release step's `-p<n>` suffix (`releaseFileName` owns that
+   * form). A one-program job is byte-identical to what this command wrote before #733.
+   */
+  function programFileNames(
+    jobName: string,
+    programs: readonly GeneratedProgram[],
+  ): { ncFile: string; frameFile: string | null }[] {
+    const engravingTotal = programs.filter((p) => (p.kind ?? 'engrave') !== 'facing').length;
+    let engravingIndex = 0;
+    return programs.map((program) => {
+      if ((program.kind ?? 'engrave') === 'facing') {
+        // #473 — the skim is its own file; it is never given a frame (its own dry run is the sheet).
+        return { ncFile: runSheetFaceFileName(jobName), frameFile: null };
+      }
+      engravingIndex += 1;
+      const ncFile =
+        engravingIndex === 1
+          ? runSheetFileName(jobName)
+          : releaseFileName(jobName, engravingIndex, engravingTotal);
+      // The frame is named after its program; for program 1 that is `runSheetFrameFileName`'s name.
+      return { ncFile, frameFile: `${ncFile.slice(0, -'.nc'.length)}-frame.nc` };
+    });
+  }
+
+  /**
+   * Write one prepared job: every program it generated, in cut order — each `.nc`, its frame — plus
+   * the job's one run sheet and (for the routes that build a document rather than read one) the job
+   * JSON. Disposes the session on the way out, so a prepared program cannot outlive its sweep by
+   * accident.
+   *
+   * #733 — THE JOB'S PROGRAM LIST, NOT ITS FIRST PROGRAM. For a one-cutter job the list is
+   * `[generated.nc]` and this is the writer it always was. A multi-cutter job's list is every
+   * cutter's own file; writing only the adapter dropped the rest of the run.
    */
   function writeProgram(
     prepared: Prepared,
     outDir: string,
     opts: WriteOpts,
-  ): { files: JobFiles; program: EngraveProgram; diagnostics: ReceiptDiagnostic[] } {
+  ): { files: JobFiles; programs: EngraveProgram[]; diagnostics: ReceiptDiagnostic[] } {
     const { job, tool, nc, diameter, generated, load } = prepared;
     const writeSheet = opts.sheet !== false;
     // The stem is claimed through `stemFor`, which refuses a name already used this run: the rest
     // program of a two-tool job is written from a job named `<name> rest`, so the two programs land
     // as `<stem>.nc` and `<stem>-rest.nc` and a collision is a defect rather than a silent overwrite.
     const stem = stemFor(job);
+    const names = programFileNames(job.name, generated.programs);
+    // The program `prepare` swept is the first ENGRAVING program: the top-level adapter is that
+    // program, and the face file, when there is one, precedes it in the list.
+    const sweptIndex = generated.programs.findIndex((p) => (p.kind ?? 'engrave') !== 'facing');
+    if (sweptIndex < 0 || generated.programs[sweptIndex]!.nc !== nc) {
+      fail('the generator did not list the program this run swept');
+    }
     // #243: the run sheet's §8 carries the coverage sentence, so the sheet must be handed the run's
     // outcome and diagnostics — exactly what the Simulate panel would. This run swept.
+    //
+    // #733 — `RunSheetProgram.nc` is "the file to load", so the sheet is handed the names this
+    // command writes rather than the program texts. Without this a later program's section would
+    // paste its whole G-code into the markdown.
+    const sheetPrograms = generated.programs.map((program, i) => ({
+      ...program,
+      nc: names[i]!.ncFile,
+      frameNc: program.frameNc === null ? null : names[i]!.frameFile,
+    }));
     const sheet = buildRunSheet(
       job,
-      generated,
+      { ...generated, programs: sheetPrograms },
       { diagnostics: load.diagnostics, outcome: 'swept', engine: load.stats.engine },
       // The run's one clock (#484): a caller may pin it so a committed fixture stays byte-stable;
       // absent, this is the wall clock the command has always used.
@@ -686,18 +752,74 @@ async function engraveJobBody(argv: string[], options: CommandOptions): Promise<
       MARGIN_DEFAULTS,
       opts.sheetOptions ?? {},
     );
-    if (sheet.header.fileName !== `${stem}.nc`) {
-      fail(`run sheet file name drifted: expected ${stem}.nc, got ${sheet.header.fileName}`);
+    if (sheet.header.fileName !== names[sweptIndex]!.ncFile) {
+      fail(`run sheet file name drifted: expected ${names[sweptIndex]!.ncFile}, got ${sheet.header.fileName}`);
     }
 
-    const ncFile = sheet.header.fileName;
-    const frameFile = runSheetFrameFileName(job.name);
-    writeFileSync(join(outDir, ncFile), nc);
-    runOutputs.push(fileReceipt(join(outDir, ncFile)));
-    if (generated.frameNc !== null) {
-      writeFileSync(join(outDir, frameFile), generated.frameNc);
-      runOutputs.push(fileReceipt(join(outDir, frameFile)));
-    }
+    // #733 — WRITE THE RUN, IN CUT ORDER. The swept program carries the sim, the sheet and the
+    // job's preview; the generator verified every later program (and a rest program is measured
+    // against the first one's simulated removal), so their receipt entries state their own CAM and
+    // verifier facts with `sim: null` — no second sweep was run for them here.
+    const written: EngraveProgram[] = [];
+    const laterDiagnostics: ReceiptDiagnostic[] = [];
+    const sheetEntry = writeSheet
+      ? { file: `${stem}-run-sheet.md`, ncHash: sheet.header.fileHash, estimatedTime: sheet.header.estimatedTime }
+      : null;
+    generated.programs.forEach((program, i) => {
+      const file = names[i]!;
+      writeFileSync(join(outDir, file.ncFile), program.nc);
+      runOutputs.push(fileReceipt(join(outDir, file.ncFile)));
+      const frameFile = program.frameNc === null ? null : file.frameFile;
+      if (frameFile !== null) {
+        writeFileSync(join(outDir, frameFile), program.frameNc!);
+        runOutputs.push(fileReceipt(join(outDir, frameFile)));
+      }
+      const swept = i === sweptIndex;
+      const cam = program.cam;
+      written.push({
+        name: job.name,
+        stage: generated.stage,
+        ok: generated.ok,
+        ncFile: file.ncFile,
+        ncLines: program.nc.split('\n').length,
+        frameFile,
+        cam:
+          cam === null
+            ? null
+            : {
+                operations: cam.operations,
+                cuttingMoves: cam.cuttingMoves,
+                passes: cam.passes,
+                estimatedSeconds: cam.estimatedSeconds,
+                rapidMm: cam.rapidMm ?? null,
+                cutMm: cam.cutMm ?? null,
+                baselineRapidMm: cam.baselineRapidMm ?? null,
+              },
+        sim: swept
+          ? {
+              ok: load.ok,
+              engine: load.stats.engine,
+              count: load.count,
+              removedVolumeMm3: load.stats.removedVolume,
+              errorCount: simErrors(load.diagnostics).length,
+            }
+          : null,
+        sheet: swept ? sheetEntry : null,
+        previews: [],
+        images: [],
+      });
+      if (!swept) {
+        // The swept program's report is already in `generatedDiagnostics`; the later programs'
+        // reports have to be carried here or the receipt would drop a warning the file raised.
+        laterDiagnostics.push(
+          ...(program.verify?.findings ?? []).map((f) =>
+            diagnostic(f.code, f.severity, f.message, 'verify', job.name),
+          ),
+        );
+      }
+    });
+    const sweptProgram = written[sweptIndex]!;
+
     if (writeSheet) {
       writeFileSync(join(outDir, `${stem}-run-sheet.md`), renderRunSheetMarkdown(sheet, opts.note));
       runOutputs.push(fileReceipt(join(outDir, `${stem}-run-sheet.md`)));
@@ -706,15 +828,24 @@ async function engraveJobBody(argv: string[], options: CommandOptions): Promise<
       writeFileSync(join(outDir, `${stem}.job.json`), JSON.stringify(job, null, 2) + '\n');
       runOutputs.push(fileReceipt(join(outDir, `${stem}.job.json`)));
     }
-    // The cutter's own number, so the receipt says where the program's width came from.
+    // The cutter's own number, so the receipt says where each program's width came from.
     noteProvenance(provenance(`tool.${job.toolKey}.diameter`, diameter, 'mm', 'seeded'));
+    for (const [i, program] of generated.programs.entries()) {
+      if (i === sweptIndex || (program.kind ?? 'engrave') === 'facing') continue;
+      const entry = entryFor(program.toolKey);
+      const d = entry === null ? null : cuttingDiameter(entry.tool);
+      if (d !== null && d > 0) {
+        noteProvenance(provenance(`tool.${program.toolKey}.diameter`, d, 'mm', 'seeded'));
+      }
+    }
 
     // #410 — THE PREDICTED CUT, DRAWN AT THE CUTTER'S REAL WIDTH. The table says a percentage; a
     // percentage does not show WHICH strokes survive, and that is the thing that decides whether the
     // badge reads. Everything here comes from `engraveRegions`, the ONE place the cut classes are
     // enumerated (#288) — so the opening, the swept trace and the drill in the picture are the ones in
     // the program, and the void rings are the same footprints the depth limit is computed against.
-    // It costs one more evaluation of the job, which is why it is opt-in.
+    // It costs one more evaluation of the job, which is why it is opt-in. The picture is the SWEPT
+    // program's: it is drawn from the job and cutter that program ran.
     const previews: JobFiles['previews'] = [];
     if (opts.preview === true) {
       const drawn = engraveRegions(tl, job, tool);
@@ -737,54 +868,23 @@ async function engraveJobBody(argv: string[], options: CommandOptions): Promise<
       writeFileSync(join(outDir, svgFile), svg);
       runOutputs.push(fileReceipt(join(outDir, svgFile)));
       previews.push({ svg, svgFile, pngFile: `${stem}-preview.png` });
+      sweptProgram.previews.push(svgFile);
+      for (const p of previews) imageTargets.push({ svgFile: p.svgFile, pngFile: p.pngFile, program: sweptProgram });
     }
 
-    const cam = generated.cam;
-    const program: EngraveProgram = {
-      name: job.name,
-      stage: generated.stage,
-      ok: generated.ok,
-      ncFile,
-      ncLines: nc.split('\n').length,
-      frameFile: generated.frameNc !== null ? frameFile : null,
-      cam:
-        cam === null
-          ? null
-          : {
-              operations: cam.operations,
-              cuttingMoves: cam.cuttingMoves,
-              passes: cam.passes,
-              estimatedSeconds: cam.estimatedSeconds,
-              rapidMm: cam.rapidMm ?? null,
-              cutMm: cam.cutMm ?? null,
-              baselineRapidMm: cam.baselineRapidMm ?? null,
-            },
-      sim: {
-        ok: load.ok,
-        engine: load.stats.engine,
-        count: load.count,
-        removedVolumeMm3: load.stats.removedVolume,
-        errorCount: simErrors(load.diagnostics).length,
-      },
-      sheet: writeSheet
-        ? { file: `${stem}-run-sheet.md`, ncHash: sheet.header.fileHash, estimatedTime: sheet.header.estimatedTime }
-        : null,
-      previews: previews.map((p) => p.svgFile),
-      images: [],
-    };
-    for (const p of previews) imageTargets.push({ svgFile: p.svgFile, pngFile: p.pngFile, program });
     prepared.session.dispose();
+    const sweptNames = names[sweptIndex]!;
     return {
       files: {
         ok: true,
-        ncFile,
-        frameFile: generated.frameNc !== null ? frameFile : null,
+        ncFile: sweptNames.ncFile,
+        frameFile: generated.programs[sweptIndex]!.frameNc === null ? null : sweptNames.frameFile,
         sheetFile: writeSheet ? `${stem}-run-sheet.md` : null,
         hash: sheet.header.fileHash,
         previews,
       },
-      program,
-      diagnostics: generatedDiagnostics(job, generated, load),
+      programs: written,
+      diagnostics: [...generatedDiagnostics(job, generated, load), ...laterDiagnostics],
     };
   }
 
@@ -876,7 +976,7 @@ async function engraveJobBody(argv: string[], options: CommandOptions): Promise<
       note: `*Generated from \`${basename(path)}\` by \`casemaker engrave\`; the app’s \`RunSheetView\` renders the same \`buildRunSheet\` structure. No result is recorded here.*`,
     });
     if (result.ok) {
-      programs.push(result.program);
+      programs.push(...result.programs);
       runDiagnostics.push(...result.diagnostics);
     } else return stop(result.failure);
   } else if (args.from3mf) {
@@ -1152,7 +1252,7 @@ async function engraveJobBody(argv: string[], options: CommandOptions): Promise<
         note,
       });
       if (result.ok) {
-        programs.push(result.program);
+        programs.push(...result.programs);
         runDiagnostics.push(...result.diagnostics);
         previews.push(...result.files.previews);
       } else return stop(result.failure);
@@ -1438,7 +1538,7 @@ async function engraveJobBody(argv: string[], options: CommandOptions): Promise<
         preview: true,
       });
       previews.push(...w1.files.previews);
-      programs.push(w1.program);
+      programs.push(...w1.programs);
       runDiagnostics.push(...w1.diagnostics);
 
       if (p2 === null || facts === null) {
@@ -1449,7 +1549,7 @@ async function engraveJobBody(argv: string[], options: CommandOptions): Promise<
       } else {
         const w2 = writeProgram(p2, outDir, { writeJobDocument: true, note, sheet: false, preview: true });
         previews.push(...w2.files.previews);
-        programs.push(w2.program);
+        programs.push(...w2.programs);
         runDiagnostics.push(...w2.diagnostics);
         // #478 — the pair is result data. `renderReceipt` prints it, third-tool answer included, from
         // `details.pair`; the numbers here are the ones the sheet's two-tool section was given.
@@ -1519,7 +1619,7 @@ async function engraveJobBody(argv: string[], options: CommandOptions): Promise<
           `then \`scripts/feeds-readback.ts\` flips the matching \`feeds.ts\` row to measured from it.*`,
       });
       if (result.ok) {
-        programs.push(result.program);
+        programs.push(...result.programs);
         runDiagnostics.push(...result.diagnostics);
         // `sheetFile` is nullable since #410 — a two-tool job writes one sheet, for program 1 — but a
         // coupon always asks for its own, and a record row pointing at a sheet that was never written
