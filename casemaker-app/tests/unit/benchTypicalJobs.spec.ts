@@ -430,9 +430,10 @@ function programText(run: Run, ncFile: string): string {
 
 /**
  * The exercise ran each job under a 600 s command timeout; j05 and j11 hit it (exit 124) before
- * #734's pocket fix. Both now finish the whole generate → verify → simulate pipeline in under
- * 0.3 s (measured by the tests below), so a minute is ample headroom for a slow runner and still
- * an unambiguous regression: the pre-fix run never finished at all.
+ * #734's pocket fix. j05 now finishes the whole generate → verify → simulate pipeline in under
+ * 0.3 s (measured by the test below), so a minute is ample headroom for a slow runner and still an
+ * unambiguous regression: the pre-fix run never finished at all. j11 no longer reaches the
+ * pipeline: #741 refuses its 5.1 mm pocket on its cutter's 4.992 mm cone (see below).
  */
 const BUDGET_MS = 60_000;
 
@@ -502,15 +503,22 @@ describe('#734 the typical jobs run clean through the cut pipeline', () => {
     expect(elapsed, `cut took ${elapsed} ms`).toBeLessThan(BUDGET_MS);
   }, 150_000);
 
-  it('j11 inlay female: the 30° 0.5 V-bit inlay finishes inside the 600 s budget', async () => {
-    const started = Date.now();
+  it('j11 inlay female: the 5.1 mm pocket is refused on the cutter’s 4.992 mm cone (#741)', async () => {
+    // The bench's own recipe asks for a 5.1 mm pocket with a 30° × 0.5 mm engraver whose cone
+    // reaches its ⌀3.175 mm body at 4.9916 mm. Above the cone the bit's BODY cuts a vertical wall,
+    // not a V, so the pocket would not be the inlay it claims to be. #741 refuses it by name, and
+    // the refusal comes before any program is written — which is why the finish-time budget #734
+    // pinned no longer applies to this job; j05 above still pins the ring-growth fix.
     const { code, receipt } = await cut('j11-inlay-female.json');
-    const elapsed = Date.now() - started;
-    const errors = receipt.diagnostics.filter((d) => d.severity === 'error');
-    expect(errors, 'the bench job must cut without an error diagnostic').toEqual([]);
-    expect(code, 'a clean job must complete, not be refused').toBe(0);
-    expect(elapsed, `cut took ${elapsed} ms`).toBeLessThan(BUDGET_MS);
-  }, 150_000);
+    const depth = receipt.diagnostics.filter((d) => d.code === 'vcarve-depth-beyond-cone');
+    expect(depth.map((d) => d.severity), JSON.stringify(receipt.diagnostics)).toEqual(['error']);
+    expect(depth[0]!.message).toContain('5.1 mm');
+    expect(depth[0]!.message).toContain('4.992 mm');
+    expect(receipt.command).toBe('engrave');
+    if (receipt.command !== 'engrave') return;
+    expect(receipt.details.programs, 'a refused job writes no program').toEqual([]);
+    expect(code, 'a refused job exits non-zero').toBe(1);
+  }, 60_000);
 });
 
 // #738 — THE REAL JOBS' RAPIDS. The bench refused four jobs for `rapid-through-stock`. Splitting

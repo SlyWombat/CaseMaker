@@ -31,6 +31,7 @@ import type { ManifoldToplevel } from '@/workers/geometry/evaluateOp';
 import type { CutParams } from '../feeds';
 import { cuttingForTrace, type Tool } from '../tool';
 import { vCarveLevels, vCarveRowStepover } from '../vCarveGeometry';
+import { vDepthLimit, vDepthRefusal } from '../vProfile';
 import { boreMoves, borePasses, drillMoves, orderHolesNearest, peckDepths } from './drill';
 import {
   estimateCycleSeconds,
@@ -91,6 +92,13 @@ export interface VCarveRegion {
    * bounded by it — a pass ridge higher than the gap would bottom the plug out.
    */
   inlay?: { role: 'female' | 'male'; glueGapMm: number };
+  /**
+   * #741 — a PRISM's region. The depth rule (`vDepthLimit`) refuses a V-cut deeper than the
+   * cutter's cone, but a prism's HEIGHT is the prism model's own number (#674): its tests set
+   * 2 mm against a 1.4875 mm cone by design, so the prism feature's model owns that bound. The
+   * marker is what lets the CAM's guard and the finding tell a prism from an ordinary V-carve.
+   */
+  prism?: true;
 }
 
 /**
@@ -574,6 +582,19 @@ export function generateEngrave(
    * radius is `pocketLoops`' bound.
    */
   const ringsFor = (label: EngraveRegion, extraRadius = 0): Polygons[] => {
+    // #741 — THE DEPTH RULE, enforced here as well as in the findings, from the ONE owner
+    // (`vDepthLimit` / `vDepthRefusal` in `vProfile.ts`): a V-carve or inlay deeper than the
+    // cutter's cone is not a V-cut, so no program is written for it. A PRISM is exempt — its
+    // height is the prism model's own bound (#674). The pipeline's findings gate normally stops
+    // this job before the CAM; this guard is what keeps a direct caller honest.
+    if (cone !== null && label.vCarve !== undefined && label.vCarve.prism === undefined) {
+      const limit = vDepthLimit(tool);
+      if (limit !== null && label.depth > limit.limitMm + 1e-9) {
+        throw new Error(
+          `generateEngrave: ${vDepthRefusal(label.name ?? label.text, label.depth, tool, limit)}`,
+        );
+      }
+    }
     if (cone === null) {
       // #240 — a rotary region is pocketed in the TOOL FOOTPRINT's frame (see the header): the
       // around axis is scaled by `r_t/(R·atan(r_t/(R − d)))`, so an isotropic offset there is

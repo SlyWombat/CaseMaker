@@ -43,7 +43,10 @@ import type {
 
 const TOOL_KEY = 'chamfer-90-vcarve';
 
-/** A 90° V: tan(halfAngle) = 1, point tip. */
+/**
+ * A 90° V: tan(halfAngle) = 1, point tip. Its 3.175 mm body puts the top of its cone at
+ * (3.175 − 0) / (2·tan 45°) = 1.5875 mm — see `POCKET_MM` for why the fixture cuts 1.5 mm (#741).
+ */
 const V_TOOL: Tool = flatEndMill(3.175, {
   id: null,
   name: '3.175 mm 90° V',
@@ -56,6 +59,15 @@ const V_TOOL: Tool = flatEndMill(3.175, {
 });
 
 const CONE = vCone(V_TOOL)!;
+
+/**
+ * #741 — THE FIXTURE'S POCKET DEPTH, and why it is 1.5 mm rather than the 2 mm it used to be. The
+ * 3.175 mm 90° bit's cone is only 1.5875 mm tall; a 2 mm pocket on it is the over-deep V-carve the
+ * depth rule now refuses (above the cone the bit's body cuts a vertical wall, not a V — the same
+ * defect the bench's j11 fixtures show). The pocket is therefore kept inside the cone. The ANGLE is
+ * unchanged, so the fit's geometry (all derived from `tanHalf`) is the same shape, one depth less.
+ */
+const POCKET_MM = 1.5;
 
 /** A 60° included-angle V: tan(30°) = 0.577…, so sin and cos cannot hide behind 45°. */
 const V60_TOOL: Tool = flatEndMill(6.35, {
@@ -77,7 +89,7 @@ function rect(id = 'design', extra: Partial<EngraveRectShape> = {}): EngraveRect
     kind: 'rect',
     position: { x: 20, y: 15 },
     rotation: 0,
-    depth: 2,
+    depth: POCKET_MM,
     enabled: true,
     width: 20,
     height: 10,
@@ -95,7 +107,7 @@ function lShape(id = 'design'): EngravePolygonShape {
     kind: 'polygon',
     position: { x: 20, y: 15 },
     rotation: 0,
-    depth: 2,
+    depth: POCKET_MM,
     enabled: true,
     points: [
       [-10, -7],
@@ -179,32 +191,32 @@ function label(over: Partial<EngraveLabel> = {}): EngraveLabel {
 
 describe('inlayNumbers — one derivation, with the gap bounded', () => {
   it('derives the plug, its insets and the wall clearance from F, g and the cone', () => {
-    const check = inlayNumbers(CONE, 2, 0.2);
+    const check = inlayNumbers(CONE, POCKET_MM, 0.2);
     expect(check.ok).toBe(true);
     if (!check.ok) return;
     const n = check.numbers;
-    expect(n.plugDepthMm).toBeCloseTo(1.8, 9);
+    expect(n.plugDepthMm).toBeCloseTo(POCKET_MM - 0.2, 9);
     expect(n.topInsetMm).toBeCloseTo(0.2, 9);
-    expect(n.endInsetMm).toBeCloseTo(2, 9);
+    expect(n.endInsetMm).toBeCloseTo(POCKET_MM, 9);
     expect(n.wallClearanceMm).toBeCloseTo(0.2 / Math.SQRT2, 9);
     // SQUARE to the flank it is `g·sinθ`, not `g·cosθ`: at 60° included (θ = 30°) the clearance is
     // 0.1 mm, where a cosine rule would still say 0.173 — and a near-vertical flank (θ → 0) gives
     // ~0, not ~g.
-    const sixty = inlayNumbers(CONE60, 2, 0.2);
+    const sixty = inlayNumbers(CONE60, POCKET_MM, 0.2);
     expect(sixty.ok).toBe(true);
     if (!sixty.ok) return;
     expect(sixty.numbers.wallClearanceMm).toBeCloseTo(0.1, 9);
-    expect(sixty.numbers.plugDepthMm).toBeCloseTo(1.8, 9);
+    expect(sixty.numbers.plugDepthMm).toBeCloseTo(POCKET_MM - 0.2, 9);
     expect(sixty.numbers.topInsetMm).toBeCloseTo(0.2 * Math.tan(Math.PI / 6), 9);
-    expect(sixty.numbers.endInsetMm).toBeCloseTo(2 * Math.tan(Math.PI / 6), 9);
+    expect(sixty.numbers.endInsetMm).toBeCloseTo(POCKET_MM * Math.tan(Math.PI / 6), 9);
   });
 
   it('refuses a gap of zero, a gap at the pocket depth, and a pocket with no depth', () => {
-    expect(inlayNumbers(CONE, 2, 0).ok).toBe(false);
-    expect(inlayNumbers(CONE, 2, 2).ok).toBe(false);
+    expect(inlayNumbers(CONE, POCKET_MM, 0).ok).toBe(false);
+    expect(inlayNumbers(CONE, POCKET_MM, POCKET_MM).ok).toBe(false);
     expect(inlayNumbers(CONE, 0, 0.2).ok).toBe(false);
     // The default gap derives.
-    expect(inlayNumbers(CONE, 2, DEFAULT_INLAY_GLUE_GAP_MM).ok).toBe(true);
+    expect(inlayNumbers(CONE, POCKET_MM, DEFAULT_INLAY_GLUE_GAP_MM).ok).toBe(true);
   });
 });
 
@@ -218,7 +230,7 @@ describe('the male document — its own job, its own blank, the design mirrored'
 
   it('builds the male: a construction island, one cutaway, the numbers it was built for', () => {
     const female = femaleJob();
-    const check = inlayNumbers(CONE, 2, 0.2);
+    const check = inlayNumbers(CONE, POCKET_MM, 0.2);
     if (!check.ok) throw new Error(check.reason);
     const male = inlayMaleJob(female, CONE);
     expect(male.ok).toBe(true);
@@ -237,9 +249,9 @@ describe('the male document — its own job, its own blank, the design mirrored'
     expect(job.combined).toHaveLength(1);
     const cut = job.combined![0]!;
     if (cut.kind !== 'cutaway') throw new Error('the male operation is not a cutaway');
-    expect(cut.depth).toBeCloseTo(1.8, 9);
+    expect(cut.depth).toBeCloseTo(POCKET_MM - 0.2, 9);
     expect(cut.inlay?.role).toBe('male');
-    expect(cut.inlay?.islandInsetMm).toBeCloseTo(2, 9);
+    expect(cut.inlay?.islandInsetMm).toBeCloseTo(POCKET_MM, 9);
     // And the derived job is a document the schema accepts unchanged.
     const parsed = parseEngraveJob(job);
     expect(parsed.ok, parsed.ok ? '' : parsed.errors.join('; ')).toBe(true);
@@ -355,7 +367,7 @@ describe('the fit — a mirrored male closes onto the female with the gap (#673)
       if (cone === null) throw new Error('no cone');
       const female = femaleJob(rect(), {}, bit);
       const design = rings(toPartPlan(female).engraves[0]!.profile);
-      const check = inlayNumbers(cone, 2, 0.2);
+      const check = inlayNumbers(cone, POCKET_MM, 0.2);
       if (!check.ok) throw new Error(check.reason);
       const n = check.numbers;
       const male = inlayMaleJob(female, cone);
@@ -391,23 +403,23 @@ describe('the fit — a mirrored male closes onto the female with the gap (#673)
 
   it('[90°] the base at the male’s floor is the visible ring, and the tip is the floor’s extent', () => {
     const female = femaleJob();
-    const check = inlayNumbers(CONE, 2, 0.2);
+    const check = inlayNumbers(CONE, POCKET_MM, 0.2);
     if (!check.ok) throw new Error(check.reason);
     const n = check.numbers;
     const male = inlayMaleJob(female, CONE);
     if (!male.ok) throw new Error(male.reason);
-    // The tip (the island at the male's top face) is the female floor's extent: 16 × 6 at 90°
-    // (the design eroded by F·tanθ). Extents, not areas: the cut rounds the island's corners.
+    // The tip (the island at the male's top face) is the female floor's extent: 17 × 7 at 90°
+    // (the 20 × 10 design eroded by POCKET_MM·tanθ). Extents, not areas: the cut rounds the island's corners.
     const tip = measure(islandAtMaleDepth(male.job, 0, n.tanHalf)).bounds;
-    expect(tip[2] - tip[0]).toBeCloseTo(16, 1);
-    expect(tip[3] - tip[1]).toBeCloseTo(6, 1);
+    expect(tip[2] - tip[0]).toBeCloseTo(20 - 2 * POCKET_MM, 1);
+    expect(tip[3] - tip[1]).toBeCloseTo(10 - 2 * POCKET_MM, 1);
     // The base (at the male's floor) is the visible ring's extent: 19.6 × 9.6.
     const base = measure(mirrorBack(islandAtMaleDepth(male.job, n.plugDepthMm, n.tanHalf), male.job.stock.width)).bounds;
     expect(base[2] - base[0]).toBeCloseTo(19.6, 1);
     expect(base[3] - base[1]).toBeCloseTo(9.6, 1);
     // The tip's own area: the cut's inward offset leaves the island's top corners sharp (an
     // inward offset of a convex region needs no join), so it is exactly the floor's extent.
-    expect(areaOf(islandAtMaleDepth(male.job, 0, n.tanHalf))).toBeCloseTo(16 * 6, 1);
+    expect(areaOf(islandAtMaleDepth(male.job, 0, n.tanHalf))).toBeCloseTo((20 - 2 * POCKET_MM) * (10 - 2 * POCKET_MM), 1);
   }, 90_000);
 
   it('the OLD inset (the ring, not the tip) pokes the base out through the cavity mouth', () => {
@@ -415,7 +427,7 @@ describe('the fit — a mirrored male closes onto the female with the gap (#673)
     // BASE at the tip's cross-section, so at the male's floor the base is `design ⊕ (F − 2g)·tanθ`
     // — 1.6 mm outside the design for this fixture, which is the female's mouth.
     const female = femaleJob();
-    const check = inlayNumbers(CONE, 2, 0.2);
+    const check = inlayNumbers(CONE, POCKET_MM, 0.2);
     if (!check.ok) throw new Error(check.reason);
     const n = check.numbers;
     const male = inlayMaleJob(female, CONE);
@@ -441,7 +453,7 @@ describe('the fit — a mirrored male closes onto the female with the gap (#673)
   it('an UNMIRRORED island on an asymmetric design pokes through the cavity wall', () => {
     const female = femaleJob(lShape());
     const design = rings(toPartPlan(female).engraves[0]!.profile);
-    const check = inlayNumbers(CONE, 2, 0.2);
+    const check = inlayNumbers(CONE, POCKET_MM, 0.2);
     if (!check.ok) throw new Error(check.reason);
     const n = check.numbers;
     const male = inlayMaleJob(female, CONE);
@@ -494,7 +506,7 @@ describe('the inlay findings (#673)', () => {
     // And a male marker with no stored inset is refused too.
     const noInset: EngraveJob = {
       ...male.job,
-      combined: [{ ...cut, inlay: { role: 'male', glueGapMm: 0.2, pocketDepthMm: 2 } }],
+      combined: [{ ...cut, inlay: { role: 'male', glueGapMm: 0.2, pocketDepthMm: POCKET_MM } }],
     };
     expect(validateJob(noInset).map((f) => f.code)).toContain('inlay-gap');
   });
@@ -515,9 +527,9 @@ describe('the documents round-trip, and say nothing more (#673)', () => {
     const cut = parsedMale.job.combined![0]!;
     expect(cut.inlay?.role).toBe('male');
     expect(cut.inlay?.glueGapMm).toBeCloseTo(0.2, 9);
-    expect(cut.inlay?.pocketDepthMm).toBeCloseTo(2, 9);
+    expect(cut.inlay?.pocketDepthMm).toBeCloseTo(POCKET_MM, 9);
     expect(cut.inlay?.tanHalf).toBeCloseTo(1, 9);
-    expect(cut.inlay?.islandInsetMm).toBeCloseTo(2, 9);
+    expect(cut.inlay?.islandInsetMm).toBeCloseTo(POCKET_MM, 9);
     // An unknown role, and a gap outside the schema's bounds, are refused outright.
     expect(
       parseEngraveJob(femaleJob(rect('design', { inlay: { role: 'sideways' } as never }))).ok,
@@ -536,7 +548,7 @@ describe('the run sheet names each half (#673)', () => {
     const femaleTexts = buildRunSheet(female, gF, null).sections.flatMap((s) => s.steps.map((st) => st.text));
     const femaleStep = femaleTexts.find((t) => t.includes('FEMALE blank'));
     expect(femaleStep).toBeDefined();
-    expect(femaleStep).toContain('2 mm deep with a 0.2 mm glue gap');
+    expect(femaleStep).toContain('1.5 mm deep with a 0.2 mm glue gap');
     expect(femaleStep).toContain('0.2 mm inside the design');
 
     const male = inlayMaleJob(female, CONE);
@@ -546,7 +558,7 @@ describe('the run sheet names each half (#673)', () => {
     const maleTexts = buildRunSheet(male.job, gM, null).sections.flatMap((s) => s.steps.map((st) => st.text));
     const maleStep = maleTexts.find((t) => t.includes('MALE blank'));
     expect(maleStep).toBeDefined();
-    expect(maleStep).toContain('1.8 mm proud');
+    expect(maleStep).toContain('1.3 mm proud');
     expect(maleStep).toContain('plane the male blank away');
   }, 120_000);
 });

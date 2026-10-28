@@ -60,7 +60,7 @@ import { borePitchMm, boreRampAngleFrom } from '@/engine/cnc/cam/drill';
 import { readDefault, type ShopDefaults } from '@/platform/defaultsClient';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import type { ConditionSummary } from '@/engine/cnc/toolCondition';
-import { vCone, type VCone } from '@/engine/cnc/vProfile';
+import { vCone, vDepthLimit, vDepthRefusal, type VCone } from '@/engine/cnc/vProfile';
 import { minimumXyStepMm } from '@/engine/cnc/machine';
 import {
   coreOffsetRadius,
@@ -1078,6 +1078,44 @@ function intersectionArea(tl: ManifoldToplevel, a: Polygons, b: Polygons): numbe
 }
 
 /**
+ * #741 — A V-CARVE OR INLAY DEEPER THAN THE CUTTER'S CONE IS REFUSED.
+ *
+ * A V-bit is a cone only up to the height where its flank meets its cylindrical body: the bench's
+ * 3.175 mm 90° chamfer reaches its ⌀3.175 mm body at (3.175 − 0.1) / (2·tan 45°) = 1.5375 mm, and
+ * the 30° 0.5 mm engraver at 4.9916 mm. Below that height the flank cuts a V; ABOVE it the body
+ * cuts a vertical wall, so the pocket is no longer a V and an inlay's plug will not seat in it.
+ * (The simulation's cone is capped at the same body, the other half of #741 — but a modelled
+ * wrong cut is still a wrong part.)
+ *
+ * REFUSED, not capped: the depth IS the design. An inlay's female depth and its derived plug are
+ * one number, so a silent cap would change the part and desynchronise the pair; and the panel's
+ * sentence can then name the way out instead of quietly doing something else. The limit and the
+ * sentence are the ONE owner in `vProfile.ts` (`vDepthLimit` / `vDepthRefusal`), which the CAM's
+ * own guard (`generateEngrave`) also reads, so the finding, the guard and the panel cannot name
+ * two different heights.
+ *
+ * A STATED flute shorter than the cone binds instead, and is named. A PRISM is out of scope: its
+ * height is the prism model's own (`#674`, whose tests set 2 mm against a 1.4875 mm cone by
+ * design), so the prism feature's model owns that bound rather than this rule.
+ */
+function vCarveDepthFindings(plan: PartPlan, tool: Tool): JobFinding[] {
+  const limit = vDepthLimit(tool);
+  if (limit === null) return [];
+  const findings: JobFinding[] = [];
+  for (const item of plan.engraves) {
+    if (item.prism !== undefined) continue;
+    if (!(item.depth > limit.limitMm + 1e-9)) continue;
+    findings.push({
+      severity: 'error',
+      code: 'vcarve-depth-beyond-cone',
+      labelId: item.id,
+      message: vDepthRefusal(item.name, item.depth, tool, limit),
+    });
+  }
+  return findings;
+}
+
+/**
  * What a V-BIT in a job means, now that it cuts regions (#221): the two findings the colour-plane
  * model needs, both about the geometry rather than about the cutter.
  *
@@ -1568,6 +1606,9 @@ export function engraveRegions(
         ...(engrave.variableDepth === true ? { variable: true } : {}),
         // #673 — an inlay half: the CAM bounds the floor's pass pitch by the glue gap.
         ...(engrave.inlay === undefined ? {} : { inlay: engrave.inlay }),
+        // #741 — a PRISM is out of the depth rule's scope (its height is #674's own bound), and
+        // this marker is how the CAM's guard tells it from an ordinary V-carve.
+        ...(engrave.prism === undefined ? {} : { prism: true as const }),
         // With no film (or a cut that never reaches it) the plane IS the floor, so the design
         // outline is drawn at the cut depth; otherwise it sits at the colour boundary.
         planeDepth: plane.film > 0 && engrave.depth >= plane.film ? plane.film : engrave.depth,
@@ -1627,6 +1668,9 @@ export function engraveRegions(
           surfaceById,
           requestedStepOver,
         );
+  // #741 — the depth rule runs whatever the tip's record state: a cutter with no stated tip still
+  // has a stated body and angle, and a V-cut past its cone is refused on those.
+  const depthFindings = tool === null ? [] : vCarveDepthFindings(plan, tool);
 
   // #218 — CUT-OUTS: each one's offset centre path, its tab spans, the kerf the oracle expects
   // and the finding a tab that could not be placed raises. Built here, with the same injected
@@ -1813,6 +1857,8 @@ export function engraveRegions(
     ...engFindings,
     ...raisedTextFindings(raisedMeasured, tool),
     ...metalLineFindings(job, tool, catalogue),
+    // #741 — a V-cut past the cutter's cone is not a V, so it is refused by name before the CAM.
+    ...depthFindings,
     ...carveFindings,
     ...voidFindings,
     // #345 — every item judged against every bound under its footprint: the split on the side its

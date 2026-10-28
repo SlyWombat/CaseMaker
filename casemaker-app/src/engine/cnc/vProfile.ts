@@ -35,6 +35,16 @@ export interface VCone {
   halfAngleDeg: number;
   /** `tan(halfAngle)`: the flank's rise per mm of radial distance from the tip's edge. */
   tanHalf: number;
+  /**
+   * #741 — the radius where the flank meets the cutter's CYLINDRICAL BODY, mm: the stated
+   * `diameter / 2`. For an engraver and a chamfer `diameter` is the shank the cone flares to, so
+   * this is the end of the cone — above it the bit cuts a vertical wall, not a V.
+   *
+   * Absent when the record states no diameter WIDER THAN THE TIP: a shank the width of its own
+   * tip is not a body the cone flares to, so the record states no cone end, and the model keeps
+   * the pre-#741 reading (an open flank bounded only by the stock) rather than guessing one.
+   */
+  outerRadius?: number;
 }
 
 const DEG = Math.PI / 180;
@@ -82,7 +92,31 @@ export function vCone(tool: Tool): VCone | null {
   const included = statedAngle(tool.angle);
   const half = statedAngle(tool.halfAngle) ?? (included === null ? null : included / 2);
   if (half === null || !(half > 0) || !(half < 90)) return null;
-  return { tipRadius: tip / 2, halfAngleDeg: half, tanHalf: Math.tan(half * DEG) };
+  // #741 — the BODY the flank runs into. An engraver's and a chamfer's `diameter` is the shank,
+  // so it is the cone's outer end and not a cutting width (`cuttingDiameter` falls back to it
+  // only for a shape with no tip). A stated 0 is "unset" in this vocabulary, like an angle — and
+  // so is a diameter NOT WIDER THAN THE TIP: a shank the width of its own tip states no cone at
+  // all, which is a record this module cannot read as a body rather than a body with zero height.
+  // Records like that exist in the tests' shorthand and in hand-entered cutters; reading them as
+  // a 0 mm cone would make every V-cut with them impossible rather than geometrically wrong.
+  const body = tool.diameter !== null && tool.diameter > tip ? tool.diameter / 2 : null;
+  return {
+    tipRadius: tip / 2,
+    halfAngleDeg: half,
+    tanHalf: Math.tan(half * DEG),
+    ...(body === null ? {} : { outerRadius: body }),
+  };
+}
+
+/**
+ * #741 — the height of the cone: where the flank reaches the cutter's body, mm, or `null` when
+ * the record states no diameter. `(diameter/2 − tipRadius)/tanHalf`, derived from the cutter's
+ * own geometry — never a table or a catalogue's flute claim.
+ */
+export function coneHeight(cone: VCone): number | null {
+  if (cone.outerRadius === undefined) return null;
+  const h = (cone.outerRadius - cone.tipRadius) / cone.tanHalf;
+  return h > 0 ? h : 0;
 }
 
 /** The groove's width at `depth` below the tip plane, mm — the TOP OPENING, not the floor. */
@@ -141,10 +175,82 @@ export function vConeGeometry(tool: Tool): VCone | null {
 export function vFluteLength(tool: Tool): number | null {
   const cone = vConeGeometry(tool);
   if (cone === null) return null;
-  const shank = tool.diameter;
-  if (shank === null || !(shank > 0)) return null;
-  const height = flankHeightAboveTip(cone, shank / 2);
-  return height > 0 ? height : null;
+  // #741 — one derivation: the cone's own body radius (`VCone.outerRadius`) is the height's input,
+  // so `vDepthLimit`, the chamfer reach and the panel cannot read two different cones.
+  const height = coneHeight(cone);
+  return height !== null && height > 0 ? height : null;
+}
+
+/**
+ * #741 — THE DEPTH LIMIT OF A V-BIT, as one statement: the height at which its cone reaches its
+ * cylindrical body (the "cone height"), the flute length the record states, and the smaller of the
+ * two, which is the deepest V the cutter can cut.
+ *
+ * A V-cut deeper than the cone's height is no longer a V: the cylindrical body cuts vertical walls
+ * below it. A cut deeper than a STATED flute length has no cutting edge at all. The cone height is
+ * derived from the tool's own geometry ({@link coneHeight}); the stated flute is the record's
+ * claim, used only when it is SHORTER than the cone (a longer claim adds nothing — the body still
+ * ends the cone). `null` when the record states neither, in which case no depth can be refused
+ * honestly.
+ *
+ * ONE owner, read by the V-carve findings, the CAM's own guard and the panel, so no two of them
+ * can name a different number. Never read a catalogue or a table here.
+ */
+export interface VDepthLimit {
+  /** Where the flank meets the cutter's body, mm; `null` with no stated diameter. */
+  coneHeightMm: number | null;
+  /** The flute length the record states, positive mm, or `null`. */
+  statedFluteMm: number | null;
+  /** The deepest V the cutter can cut, mm — `min(coneHeightMm, statedFluteMm)`. */
+  limitMm: number;
+  /** Which of the two set `limitMm`. */
+  boundBy: 'cone' | 'flute';
+}
+
+export function vDepthLimit(tool: Tool): VDepthLimit | null {
+  const cone = vConeGeometry(tool);
+  const coneHeightMm = cone === null ? null : coneHeight(cone);
+  const stated = tool.fluteLength !== null && Number.isFinite(tool.fluteLength) && tool.fluteLength > 0
+    ? tool.fluteLength
+    : null;
+  const bounds: { mm: number; by: 'cone' | 'flute' }[] = [];
+  if (coneHeightMm !== null) bounds.push({ mm: coneHeightMm, by: 'cone' });
+  if (stated !== null) bounds.push({ mm: stated, by: 'flute' });
+  if (bounds.length === 0) return null;
+  // The smaller bound binds; on a tie the CONE is named — it is the geometry this module holds,
+  // and a record backfilled from it (`registerCutter`) is the same number restated.
+  let binding = bounds[0]!;
+  for (const b of bounds) if (b.mm < binding.mm - 1e-12) binding = b;
+  return { coneHeightMm, statedFluteMm: stated, limitMm: binding.mm, boundBy: binding.by };
+}
+
+/**
+ * #741 — WHY a V-carve or inlay is deeper than its cutter can cut, in words the panel shows
+ * verbatim. ONE sentence builder, so the finding, the CAM's guard and the panel cannot paraphrase
+ * the same fact differently: the item, its depth, the cutter, the binding height, and the way out,
+ * every number with its unit.
+ */
+export function vDepthRefusal(itemName: string, depthMm: number, tool: Tool, limit: VDepthLimit): string {
+  const mm = (v: number): string => String(Math.round(v * 1000) / 1000);
+  const cone = vConeGeometry(tool);
+  const included = cone === null ? null : cone.halfAngleDeg * 2;
+  const angle = included === null ? '' : `${mm(included)}° `;
+  const body = cone?.outerRadius === undefined ? null : `⌀${mm(cone.outerRadius * 2)} mm`;
+  const reason =
+    limit.boundBy === 'flute'
+      ? `it has a ${mm(limit.limitMm)} mm flute` +
+        (limit.coneHeightMm === null || body === null
+          ? ''
+          : ` (its ${angle}cone would reach ${mm(limit.coneHeightMm)} mm at the ${body} body)`) +
+        ', so deeper than that there is no cutting edge'
+      : `its ${angle}cone reaches the ${body ?? 'cutter’s'} body at ${mm(limit.limitMm)} mm, and ` +
+        'deeper than that the body cuts a vertical wall instead of a V' +
+        (limit.statedFluteMm === null ? '' : ` (the record states a ${mm(limit.statedFluteMm)} mm flute)`);
+  return (
+    `${itemName} is ${mm(depthMm)} mm deep, but the cutter "${tool.name}" can only V-carve ` +
+    `${mm(limit.limitMm)} mm deep: ${reason}. Cut no deeper than ${mm(limit.limitMm)} mm, or use a ` +
+    `cutter that reaches ${mm(depthMm)} mm.`
+  );
 }
 
 /**

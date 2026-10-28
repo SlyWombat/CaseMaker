@@ -135,6 +135,14 @@ export type JobFindingCode =
   // must be the one the CAM runs. The seed still states the request; this says when the tip
   // radius, not the seed, set the pitch.
   | 'vcarve-stepover-clamped'
+  // #741 — A V-CARVE DEEPER THAN ITS CUTTER'S CONE. A V-bit is a cone only up to the height where
+  // its flank meets its cylindrical body — (diameter − tip) / (2·tan halfAngle), 1.5375 mm for the
+  // bench's 3.175 mm 90° chamfer. Deeper than that the BODY cuts a vertical wall, so the pocket is
+  // no longer a V (and an inlay's plug cannot seat in it). Refused rather than capped: the depth is
+  // the design, and a silent cap would change the part and desynchronise an inlay pair. The number
+  // and the sentence come from one owner, `vDepthLimit` / `vDepthRefusal` in `vProfile.ts`, which
+  // the CAM's own guard reads too.
+  | 'vcarve-depth-beyond-cone'
   // A cutter Makera NAMES for metal, on a job cutting something that is not (#405). The line is a
   // property of the pair — the bit and the blank — so it cannot live on either side alone, and no
   // feed table can enforce it: a metal bit will happily cut PLA, badly, at numbers nobody measured.
