@@ -94,6 +94,7 @@ function coinJob(): EngraveJob {
       kind: 'vise',
       vise: {
         stockProud: 1.5,
+        seat: 'ledge',
         fixedJawThickness: 10,
         movingJawThickness: 10,
         jawLength: 100,
@@ -199,8 +200,11 @@ describe('#766 A — the coin’s three rest choices, scored by what they leave'
     expect(tightest.edgeLossMm).toBeLessThan(0.03);
     expect(tightest.separated).toBe(true);
     expect(clear.fidelity).toBeGreaterThan(0.99);
-    // The V route's POSTING is the generator's current fact, not the evaluator's score.
-    if (!out.ok) expect(out.refusal).not.toBeNull();
+    // COARSE says the plan is evaluable; whether it POSTS is the full level's verdict, and today
+    // the #486 rule still refuses a V as a rest cutter (the engine half of #765).
+    expect(out.ok).toBe(true);
+    const full = evaluatePlan(coinJob(), plan(VENTRY), CTX, { level: 'full' });
+    if (!full.ok) expect(full.refusal).toMatch(/V-bit is not a rest cutter/);
   });
 
   it('the fidelity order the bench found by hand: ⌀1 < 0.6 corn ≤ V', () => {
@@ -250,12 +254,29 @@ describe('#766 A — the plan is a document change, and the verdict is cached', 
     expect(out.refusal).toContain('not in the tool list');
   });
 
-  it('reports time, tool changes and the reach margin', () => {
-    const out = evaluatePlan(coinJob(), plan(CORN), CTX);
-    expect(out.toolChanges).toBe(1);
-    expect(out.seconds).toBeGreaterThan(0);
-    expect(out.risk.reachMarginMm).not.toBeNull();
-    expect(out.risk.holderClearanceMm).toBe(out.risk.reachMarginMm);
-    expect(out.risk.chipLoadRatio).toBeNull();
+  it('the coarse level is measure-only: no run time; full adds the CAM and its time', () => {
+    const job = coinJob();
+    const coarse = evaluatePlan(job, plan(CORN), CTX);
+    expect(coarse.toolChanges).toBe(1);
+    expect(coarse.seconds).toBeNull();
+    expect(coarse.risk.reachMarginMm).not.toBeNull();
+    expect(coarse.risk.holderClearanceMm).toBe(coarse.risk.reachMarginMm);
+    expect(coarse.risk.chipLoadRatio).toBeNull();
+    const full = evaluatePlan(job, plan(CORN), CTX, { level: 'full' });
+    expect(full.ok).toBe(true);
+    expect(full.seconds).toBeGreaterThan(0);
+    // Every program was seeded on the stock the last one left, so the run has a swept verdict.
+    expect(full.sweep?.worstUnderMm2).toBeGreaterThanOrEqual(0);
+    expect(full.sweep?.worstOverMm2).toBeGreaterThanOrEqual(0);
+    expect(full.sweep?.bandMm).toBeGreaterThan(0);
+  });
+
+  it('a plan that does not post says so at full, while its measures still stand', () => {
+    const out = evaluatePlan(coinJob(), plan(VENTRY), CTX, { level: 'full' });
+    // Today's generator refuses the V rest (#486); the measured fidelity is still returned.
+    expect(out.ok).toBe(false);
+    expect(out.refusal).toBeTruthy();
+    expect(clearRow(out).pinches.length).toBeGreaterThan(0);
+    expect(out.sweep).toBeNull();
   });
 });
