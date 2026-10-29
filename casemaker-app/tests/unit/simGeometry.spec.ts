@@ -9,6 +9,7 @@ import {
   geometryFromMesh,
   pathBounds,
   segmentGeometry,
+  splitMapPath,
   splitPath,
   toolPositionAt,
   vertexIndexAtStep,
@@ -66,6 +67,65 @@ describe('splitPath', () => {
     expect(s.rapids).toHaveLength(0);
     expect(s.cutStep).toHaveLength(0);
     expect(s.rapidStep).toHaveLength(0);
+  });
+});
+
+describe('splitMapPath (#716 slice 2)', () => {
+  const R = 10;
+  const C = 2 * Math.PI * R;
+
+  /** A path of one vertex per angle, X stepping by 1 mm, cutting at the surface (z = R). */
+  function helix(angles: number[]): SimPath {
+    const step: number[] = [];
+    const xyz: number[] = [];
+    const kind: number[] = [];
+    const t: number[] = [];
+    angles.forEach((_, i) => {
+      step.push(i);
+      xyz.push(i, 0, R);
+      kind.push(i === 0 ? 0 : 1);
+      t.push(i);
+    });
+    return {
+      xyz: Float32Array.from(xyz),
+      step: Uint32Array.from(step),
+      kind: Uint8Array.from(kind),
+      t: Float32Array.from(t),
+      a: Float64Array.from(angles),
+    };
+  }
+
+  const ys = (buffer: Float32Array): number[] => {
+    const out: number[] = [];
+    for (let i = 1; i < buffer.length; i += 3) out.push(buffer[i] as number);
+    return out;
+  };
+
+  it('keeps every turn on the map: a 2.5-turn helix stays in 0…2πR', () => {
+    const split = splitMapPath(helix([0, 180, 360, 540, 720, 900]), R);
+    expect(split.cutStep).toHaveLength(5); // one segment per move; seams are the endpoints
+    for (const y of ys(split.cuts)) {
+      expect(y).toBeGreaterThanOrEqual(0);
+      expect(y).toBeLessThanOrEqual(C + 1e-6);
+    }
+  });
+
+  it('a segment that crosses 360°→0° ends on the 360 edge and the next piece starts at 0', () => {
+    // The unwound A runs 350° → 370°, so the cut crosses the seam once.
+    const split = splitMapPath(helix([350, 370]), R);
+    expect(Array.from(split.cutStep)).toEqual([1, 1]);
+    const seg = (k: number): number[] => Array.from(split.cuts.slice(k * 6, k * 6 + 6));
+    expect(seg(0)[1]).toBeCloseTo((350 * Math.PI * R) / 180, 5);
+    expect(seg(0)[4]).toBeCloseTo(C, 5); // the 360° edge
+    expect(seg(1)[1]).toBeCloseTo(0, 9); // the 0° edge
+    expect(seg(1)[4]).toBeCloseTo((10 * Math.PI * R) / 180, 5);
+  });
+
+  it('a negative A wraps onto the map rather than going off it', () => {
+    const split = splitMapPath(helix([-10, 0]), R);
+    const y = ys(split.cuts);
+    expect(y[0]).toBeCloseTo((350 * Math.PI * R) / 180, 5); // −10° is 350° on the map
+    expect(y[1]).toBeCloseTo(C, 5); // arriving at 0° from below is the 360° edge
   });
 });
 

@@ -204,7 +204,18 @@ export interface SimFrame {
    * minus the cumulative removal thereafter.
    */
   sacrificial: NodeMeshOutput | null;
+  /**
+   * #716 slice 2 — which frame `stock` is in: the wrapped rod (default) or the unrolled map
+   * (Unroll). Absent means stock, so a hand-built frame in a spec keeps its old shape.
+   */
+  design?: SimDesign;
 }
+
+/**
+ * #716 slice 2 — how a rotary simulation's material is drawn: the rod in the chuck (`stock`,
+ * default) or the same columns unrolled onto the map (`map`, Unroll).
+ */
+export type SimDesign = 'stock' | 'map';
 
 /** A swept session: the geometry AND the path. */
 interface LiveSwept {
@@ -383,7 +394,7 @@ export interface SimSession {
    */
   warmup(): void;
   /** `null` when `gen` is older than one already seen, or when nothing is loaded. */
-  frameAt(k: number, gen: number): SimFrame | null;
+  frameAt(k: number, gen: number, design?: SimDesign): SimFrame | null;
   stateAt(step: number): MachineState | null;
   /** Work-frame [x, y, z, …] of the tool after each step in [from, to] whose position is fully known. */
   toolPath(fromStep: number, toStep: number): Float32Array;
@@ -876,7 +887,7 @@ export function createSimSession(tl: ManifoldToplevel, hooks?: SimSessionHooks):
     if (l && l.kind === 'swept') l.playback.warmup();
   };
 
-  const frameAt = (k: number, gen: number): SimFrame | null => {
+  const frameAt = (k: number, gen: number, design: SimDesign = 'stock'): SimFrame | null => {
     if (gen < latestGen) return null;
     latestGen = gen;
     const l = live;
@@ -886,7 +897,12 @@ export function createSimSession(tl: ManifoldToplevel, hooks?: SimSessionHooks):
       // The column engine regenerates the surface straight from the grid — no booleans, no
       // removal ghost (#239, `/Rotary.md` §4.4). Both are null by construction.
       const kc = Math.max(-1, Math.min(l.column.count - 1, Math.trunc(k)));
-      return { k: kc, stock: l.column.meshAt(kc), removalSoFar: null, sacrificial: null };
+      // #716 slice 2 — Unroll re-meshes the SAME columns onto the map; a flat grid has no map.
+      const unrolled = design === 'map' && l.timeline.summary.rotary && l.column.meshAtMap !== null;
+      const stock = unrolled
+        ? (l.column.meshAtMap as (kk: number) => NodeMeshOutput)(kc)
+        : l.column.meshAt(kc);
+      return { k: kc, design: unrolled ? 'map' : 'stock', stock, removalSoFar: null, sacrificial: null };
     }
     const kk = Math.max(-1, Math.min(l.playback.count - 1, Math.trunc(k)));
     // Both handles are the playback's and evictable: mesh them here, keep neither.
@@ -907,7 +923,7 @@ export function createSimSession(tl: ManifoldToplevel, hooks?: SimSessionHooks):
         sacrificial = meshOutputOf(l.sweep.sacrificial);
       }
     }
-    return { k: kk, stock, removalSoFar: removal ? meshOutputOf(removal) : null, sacrificial };
+    return { k: kk, design: 'stock', stock, removalSoFar: removal ? meshOutputOf(removal) : null, sacrificial };
   };
 
   /**

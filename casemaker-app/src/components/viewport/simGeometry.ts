@@ -132,6 +132,92 @@ export function splitPath(path: SimPath): SplitPath {
 }
 
 /**
+ * #716 slice 2 — the same path split for the MAP (**Unroll**): each vertex is placed by its own A
+ * (the machine angle at the step that produced it), at the arc R·A and the radius lost below the
+ * surface (z − R). A segment whose endpoints predate the first A word uses 0° — those are the
+ * approach moves before any rotary motion, and the cut path proper is always after an A word.
+ * The cut/rapid split and the step arrays are the same shape `splitPath` returns, so the scrub's
+ * drawRange logic is unchanged.
+ *
+ * #716 review — the machine's A is UNWOUND (a multi-turn pass reads 1 234.5°), while the material
+ * `meshRotaryMap` meshes stays in one turn, 0…2πR. So A is wrapped into [0, 360) per vertex, and
+ * a segment that straddles the seam is SPLIT there — the piece arriving at the seam ends on the
+ * 360° edge and the piece leaving it starts on the 0° edge. A line drawn straight back across the
+ * whole map (62.8 mm of "cut" that never happened) is what this prevents.
+ */
+export function splitMapPath(path: SimPath, radius: number): SplitPath {
+  const n = path.kind.length;
+  const cuts: number[] = [];
+  const rapids: number[] = [];
+  const cutStep: number[] = [];
+  const rapidStep: number[] = [];
+  const circumference = 2 * Math.PI * radius;
+  const DEG = Math.PI / 180;
+  const wrap = (deg: number): number => ((deg % 360) + 360) % 360;
+  const knownA = (i: number): number => {
+    const a = path.a?.[i];
+    return a === undefined || Number.isNaN(a) ? 0 : a;
+  };
+  /** A point on the map, with a whole-turn endpoint on the edge the motion arrives at. */
+  const mapY = (deg: number, pieceStart: boolean, moveUp: boolean): number => {
+    const w = wrap(deg);
+    if (w !== 0) return radius * w * DEG;
+    // On a seam multiple: a + turn arrives at 360° and leaves at 0°; a − turn the other way
+    // round. A zero-length piece has no direction, and either edge is the same point.
+    const ending = !pieceStart;
+    return (moveUp ? ending : !ending) ? circumference : 0;
+  };
+  for (let i = 1; i < n; i++) {
+    const rapid = path.kind[i] === 0;
+    const dst = rapid ? rapids : cuts;
+    const dstStep = rapid ? rapidStep : cutStep;
+    const a0 = knownA(i - 1);
+    const a1 = knownA(i);
+    const x0 = path.xyz[(i - 1) * 3] as number;
+    const z0 = path.xyz[(i - 1) * 3 + 2] as number;
+    const x1 = path.xyz[i * 3] as number;
+    const z1 = path.xyz[i * 3 + 2] as number;
+    if (Math.abs(a1 - a0) < 1e-9) {
+      const y = mapY(a0, true, true);
+      dst.push(x0, y, z0 - radius, x1, y, z1 - radius);
+      dstStep.push(path.step[i] as number);
+      continue;
+    }
+    const moveUp = a1 > a0;
+    const lo = Math.min(a0, a1);
+    const hi = Math.max(a0, a1);
+    // Every whole turn strictly between the ends is a seam the segment crosses.
+    const seams: number[] = [];
+    for (let k = Math.floor(lo / 360); k <= Math.ceil(hi / 360); k++) {
+      const b = k * 360;
+      if (b > lo + 1e-9 && b < hi - 1e-9) seams.push(b);
+    }
+    const params = [a0, ...seams, a1];
+    for (let p = 0; p < params.length - 1; p++) {
+      const u = params[p] as number;
+      const v = params[p + 1] as number;
+      const fu = (u - a0) / (a1 - a0);
+      const fv = (v - a0) / (a1 - a0);
+      dst.push(
+        x0 + (x1 - x0) * fu,
+        mapY(u, true, moveUp),
+        z0 + (z1 - z0) * fu - radius,
+        x0 + (x1 - x0) * fv,
+        mapY(v, false, moveUp),
+        z0 + (z1 - z0) * fv - radius,
+      );
+      dstStep.push(path.step[i] as number);
+    }
+  }
+  return {
+    cuts: Float32Array.from(cuts),
+    rapids: Float32Array.from(rapids),
+    cutStep: Uint32Array.from(cutStep),
+    rapidStep: Uint32Array.from(rapidStep),
+  };
+}
+
+/**
  * How many entries of `stepArray` are at or before `step` (upper bound). For `path.step` this is
  * a count of vertices; for a split buffer's step array it is a count of SEGMENTS, which is what a
  * `LineSegments` `drawRange` needs once doubled. A step with no vertex (an unknown position) is

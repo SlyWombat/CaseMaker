@@ -81,9 +81,13 @@ function framingDistance(camera: THREE.PerspectiveCamera, diag: number): number 
 /** The boxes the simulation currently draws: its stock, plus one per fixture obstacle (#204). */
 function simBoxesOf(s: SimState): SceneBox[] {
   const boxes: SceneBox[] = [];
-  if (s.meshes) {
-    boxes.push(s.meshes.stock.bbox);
-    for (const f of s.meshes.fixture) boxes.push(f.mesh.bbox);
+  // #716 slice 2 — frame what is ON SCREEN. After Stock | Unroll the delivered frame is the
+  // picture (the rod at its checkpoint, or the unrolled map), and the load's own stock mesh is
+  // only the final wrapped state; frame that instead wherever a frame has arrived.
+  const shown = s.frame?.stock.bbox ?? s.meshes?.stock.bbox ?? null;
+  if (shown !== null) {
+    boxes.push(shown);
+    for (const f of s.meshes?.fixture ?? []) boxes.push(f.mesh.bbox);
   } else if (s.path) {
     const b = pathBounds(s.path);
     if (b) boxes.push(b);

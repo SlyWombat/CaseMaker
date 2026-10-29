@@ -10,7 +10,7 @@
 // and hands the time back through `seekSeconds`; it never runs a Manifold boolean and never
 // touches the material, which changes only when `checkpointAtStep` does.
 
-import { useEffect, type CSSProperties } from 'react';
+import { useEffect, useMemo, type CSSProperties } from 'react';
 import { advance, lineAtStep, totalTime } from '@/engine/cnc/playbackClock';
 import { formatDuration } from '@/engine/cnc/plan/format';
 import { isSimSceneActive, SIM_SPEEDS, useSimStore, type SimSpeed } from '@/store/simStore';
@@ -129,6 +129,29 @@ const TICK: CSSProperties = {
   transform: 'translateX(-1px)',
 };
 const READOUT: CSSProperties = { fontFamily: 'monospace', fontSize: 11, color: '#d1d5db', whiteSpace: 'nowrap' };
+/** #716 slice 2 — Stock | Unroll, the simulation's one view switch (design §3.9). */
+const VIEW_GROUP: CSSProperties = { display: 'flex', border: '1px solid #3a4552', borderRadius: 3, overflow: 'hidden' };
+function viewSeg(on: boolean): CSSProperties {
+  return {
+    font: '600 11px ui-monospace, SFMono-Regular, Menlo, monospace',
+    padding: '2px 8px',
+    border: 0,
+    cursor: 'pointer',
+    background: on ? '#2f5da8' : '#1b2027',
+    color: on ? '#ffffff' : '#9aa4b0',
+  };
+}
+/** #241/#716 — an INDEXED job's face boundary on the scrubber, distinct from a pause tick. */
+const FACE_TICK: CSSProperties = {
+  position: 'absolute',
+  top: -8,
+  width: 2,
+  height: 15,
+  background: '#7fb3e8',
+  opacity: 0.9,
+  borderRadius: 1,
+  transform: 'translateX(-1px)',
+};
 const READOUT_MUTED: CSSProperties = { ...READOUT, color: '#9aa4b0' };
 const CALLOUT: CSSProperties = {
   position: 'absolute',
@@ -157,6 +180,9 @@ function TransportBar() {
   const stoppedAt = useSimStore((s) => s.stoppedAt);
   const info = useSimStore((s) => s.info);
   const origin = useSimStore((s) => s.origin);
+  // #716 slice 2 — Stock | Unroll (rotary jobs only) and the indexed job's face ticks.
+  const design = useSimStore((s) => s.design);
+  const setDesign = useSimStore((s) => s.setDesign);
   // #691 — ONE time for the cut. A simulation the engrave run loaded for the job's own program has
   // a CAM estimate, and the Generate row already states it; printing the playback clock's own total
   // beside it gave two durations for one cut (audit B15). So the job's session borrows the run's
@@ -176,6 +202,22 @@ function TransportBar() {
   const rotaryProgram = path?.a !== undefined;
   const rotaryAngle = path ? angleAtStep(path, step) : null;
   const tip = path ? toolPositionAt(path, step) : null;
+  const rotaryJob = info !== null && info.summary?.rotary === true;
+  // #241 — the faces an INDEXED job is cut on: one tick where each new A begins. A wrapped job's
+  // A changes within its cuts, so no face boundaries exist to mark.
+  const faces = useMemo(() => {
+    if (info === null || info.summary?.rotaryClass !== 'indexed') return [];
+    const out: { step: number; a: number }[] = [];
+    let prev: number | null = null;
+    for (const cp of info.checkpoints) {
+      if (cp.a === null) continue;
+      if (prev === null || Math.abs(cp.a - prev) > 1e-6) {
+        out.push({ step: cp.firstStep, a: cp.a });
+        prev = cp.a;
+      }
+    }
+    return out;
+  }, [info]);
 
   // One frame loop, live only while `playing`. It reads the store non-reactively each frame so a
   // new `seconds`/`speed` never restarts it, and it stops itself on `end`/`pause` by not asking
@@ -301,6 +343,28 @@ function TransportBar() {
             </option>
           ))}
         </select>
+        {rotaryJob && (
+          <div style={VIEW_GROUP} role="group" aria-label="Simulation view">
+            <button
+              type="button"
+              style={viewSeg(design === 'stock')}
+              aria-pressed={design === 'stock'}
+              data-testid="sim-view-stock"
+              onClick={() => setDesign('stock')}
+            >
+              Stock
+            </button>
+            <button
+              type="button"
+              style={viewSeg(design === 'map')}
+              aria-pressed={design === 'map'}
+              data-testid="sim-view-unroll"
+              onClick={() => setDesign('map')}
+            >
+              Unroll
+            </button>
+          </div>
+        )}
         <div style={SCRUB_WRAP}>
           <input
             data-testid="sim-scrubber"
@@ -321,6 +385,14 @@ function TransportBar() {
                 key={`${p.step}-${i}`}
                 data-testid="sim-pause-tick"
                 style={{ ...TICK, left: `${lastStep > 0 ? (p.step / lastStep) * 100 : 0}%` }}
+              />
+            ))}
+            {faces.map((f) => (
+              <span
+                key={`face-${f.step}`}
+                data-testid="sim-face-tick"
+                title={`Face at A ${Number(f.a.toFixed(1))}°`}
+                style={{ ...FACE_TICK, left: `${lastStep > 0 ? (f.step / lastStep) * 100 : 0}%` }}
               />
             ))}
           </div>

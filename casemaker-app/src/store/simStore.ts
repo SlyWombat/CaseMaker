@@ -24,7 +24,7 @@ import { stepAtTime, timeAtStep, totalTime } from '@/engine/cnc/playbackClock';
 import { generateRestart as buildRestart, stockFromSetup, type RestartResult } from '@/engine/cnc/restart';
 import type { Tool } from '@/engine/cnc/tool';
 import { checkpointAtStep } from '@/components/viewport/simGeometry';
-import type { SimDiagnostic, SimFrame, SimLoadOk, SimLoadResult, SimPath } from '@/workers/sim/session';
+import type { SimDesign, SimDiagnostic, SimFrame, SimLoadOk, SimLoadResult, SimPath } from '@/workers/sim/session';
 import type { NodeMeshOutput } from '@/workers/geometry/meshOutput';
 import type { SurfaceFrame } from '@/engine/cnc/engrave/surfacePlane';
 // Type-only: erased at build time, so it does not pull the worker client into the graph.
@@ -143,6 +143,11 @@ export interface SimState {
   /** The frame on screen, and the checkpoint it is for. */
   frame: SimFrame | null;
   k: number;
+  /**
+   * #716 slice 2 — how the material is drawn: the rod in the chuck (`stock`, default) or the same
+   * columns unrolled onto the map (`map`, Unroll). A view, not a document value.
+   */
+  design: SimDesign;
   /** The whole path with kinds and times, fetched once per load (#197). */
   path: SimPath | null;
   /**
@@ -245,6 +250,11 @@ export interface SimState {
   /** Show checkpoint k (-1 = uncut). Coalesced by the client. */
   seek(k: number): void;
   /**
+   * #716 slice 2 — switch Stock | Unroll. Re-asks the client for the SAME checkpoint in the new
+   * frame; nothing about the session, the program or the checkpoint changes.
+   */
+  setDesign(design: SimDesign): void;
+  /**
    * Move the current step (#197): sets `step`, derives the checkpoint `k = checkpointAtStep(...)`
    * and seeks to it ONLY when `k` changed, so scrubbing within one checkpoint costs no seek.
    * Also snaps `seconds` to the step's program time (#198) and clears any pause callout.
@@ -299,6 +309,7 @@ const EMPTY = {
   tool: null as Tool | null,
   frame: null,
   k: -1,
+  design: 'stock' as SimDesign,
   path: null,
   step: -1,
   stepCount: 0,
@@ -406,7 +417,7 @@ export const useSimStore = create<SimState>()((set, get) => {
       });
       if (mine !== loadSeq) return null; // superseded by a newer load or a dispose
       if (!r.ok) {
-        set({ status: 'refused', diagnostics: r.diagnostics, pathOnly: r.pathOnly, progress: null, phase: null, info: null });
+        set({ status: 'refused', diagnostics: r.diagnostics, pathOnly: r.pathOnly, progress: null, phase: null, info: null, design: 'stock' });
         // A path-only session owns no material but DOES own the timeline, so the path can be drawn
         // with no stock (#194). Fetch it after the state is set so the panel shows immediately.
         if (r.pathOnly) {
@@ -440,6 +451,7 @@ export const useSimStore = create<SimState>()((set, get) => {
         seconds: totalTime(path),
         progress: null,
         phase: null,
+        design: 'stock',
       });
       return r;
     } catch (e) {
@@ -588,6 +600,15 @@ export const useSimStore = create<SimState>()((set, get) => {
       if (get().status !== 'ready') return;
       set({ k });
       void clientLoader().then((c) => c.requestFrame(k));
+    },
+    setDesign(design) {
+      const s = get();
+      if (s.design === design) return;
+      set({ design });
+      // The SAME checkpoint in a different frame — never a seek to another step.
+      if (s.status === 'ready' && s.info !== null) {
+        void clientLoader().then((c) => c.requestFrame(s.k, design));
+      }
     },
     setStep(step) {
       const s = get();

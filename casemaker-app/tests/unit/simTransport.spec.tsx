@@ -7,7 +7,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { SimTransport } from '@/components/viewport/SimTransport';
-import { setSimClientLoader, useSimStore, type SimClient, type SimState } from '@/store/simStore';
+import { setSimClientLoader, useSimStore, type SimClient, type SimLoadInfo, type SimState } from '@/store/simStore';
 import { useEngraveRunStore } from '@/store/engraveRunStore';
 import type { EngraveGenerated } from '@/workers/sim/engraveGenerate';
 import type { PausePoint } from '@/engine/cnc';
@@ -126,6 +126,40 @@ describe('SimTransport (#198)', () => {
     expect(timed.textContent).not.toContain('(feeds only)');
     expect(timed.getAttribute('title')).toContain('rapids');
     expect(timed.getAttribute('title')).not.toContain('untimed');
+  });
+
+  it('a rotary job offers Stock | Unroll, and an indexed job marks its faces (#716, #241)', () => {
+    const info = {
+      summary: { steps: 101, rotary: true, rotaryClass: 'indexed' },
+      checkpoints: [
+        { firstStep: 0, a: 0 },
+        { firstStep: 40, a: 90 },
+        { firstStep: 60, a: 90 },
+        { firstStep: 80, a: 180 },
+      ],
+      count: 4,
+      pauses: [],
+      segments: [],
+      stockTopZ: 10,
+      radius: 10,
+      stats: {},
+      axisClamped: null,
+    } as unknown as SimLoadInfo;
+    setStore({ info, path: fakePath(), k: 0 });
+    render(<SimTransport />);
+    // Three faces — A 0°, 90° and 180°; the second 90° checkpoint is the same face.
+    expect(screen.getAllByTestId('sim-face-tick')).toHaveLength(3);
+    expect(screen.getByTestId('sim-view-stock').getAttribute('aria-pressed')).toBe('true');
+    fireEvent.click(screen.getByTestId('sim-view-unroll'));
+    expect(useSimStore.getState().design).toBe('map');
+    expect(screen.getByTestId('sim-view-unroll').getAttribute('aria-pressed')).toBe('true');
+
+    // A flat job has neither the switch nor face ticks.
+    cleanup();
+    setStore({ info: null });
+    render(<SimTransport />);
+    expect(screen.queryByTestId('sim-view-unroll')).toBeNull();
+    expect(screen.queryAllByTestId('sim-face-tick')).toHaveLength(0);
   });
 
   it('a rotary path reads A within the turn plus the turns, and Z above the axis (#716)', () => {

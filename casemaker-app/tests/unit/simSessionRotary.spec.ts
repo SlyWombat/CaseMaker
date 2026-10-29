@@ -39,14 +39,27 @@ describe('session routing — rotary', () => {
     expect(ok.checkpoints.length).toBeGreaterThan(0);
   });
 
-  it('the path carries the machine’s A at every vertex (#716 slice 2)', () => {
-    const s = createSimSession(tl);
+  it('the path carries the machine’s A at every vertex (#716 slice 2)', () => {    const s = createSimSession(tl);
     const r = s.load(WRAPPED, setup(), tool, null);
     expect(r.ok).toBe(true);
     const p = s.simPath();
     expect(p.a).toBeDefined();
     // G0 … A0, the plunge at A0, the turn to A360, the retract at A360.
     expect(Array.from(p.a!)).toEqual([0, 0, 360, 360]);
+    s.dispose();
+  });
+
+  it('Unroll asks the same checkpoint in the map frame (#716 slice 2)', () => {
+    const s = createSimSession(tl);
+    const r = s.load(WRAPPED, setup(), tool, null);
+    expect(r.ok).toBe(true);
+    const rod = s.frameAt(-1, 1);
+    expect(rod?.design).toBe('stock');
+    expect(rod?.stock.bbox.max[1]).toBeCloseTo(10, 3); // the wrapped rod: its radius
+    const map = s.frameAt(-1, 2, 'map');
+    expect(map?.design).toBe('map');
+    expect(map?.stock.bbox.max[1]).toBeCloseTo(2 * Math.PI * 10, 3); // the map: around 62.832
+    expect(map?.stock.bbox.max[2]).toBeCloseTo(0, 6); // uncut: the surface is the map's z = 0
     s.dispose();
   });
 

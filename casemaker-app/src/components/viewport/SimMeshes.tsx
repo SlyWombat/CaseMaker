@@ -32,6 +32,7 @@ import {
   SACRIFICIAL_COLOR,
   sacrificialMesh,
   segmentGeometry,
+  splitMapPath,
   splitPath,
   toolPositionAt,
   vertexIndexAtStep,
@@ -123,14 +124,28 @@ export function SimMeshes() {
   const layers = useSimStore((s) => s.layers);
   const info = useSimStore((s) => s.info);
   const tool = useSimStore((s) => s.tool);
+  // #716 slice 2 — Stock (the rod in the chuck) | Unroll (the same columns on the map).
+  const design = useSimStore((s) => s.design);
 
   const lastStep = info ? info.summary.steps - 1 : -1;
   // Issue #197: on a fresh load the step is already the last one but no frame has been delivered
   // yet (the client's warm-up seek is silent), so the stock comes from the load's own `result`
   // mesh; before the first cut the frame is null and the uncut `stock` mesh is right.
   const finished = lastStep >= 0 && step >= lastStep;
-  const stockMesh = meshes ? (finished ? meshes.result : frame?.stock ?? meshes.stock) : null;
-  const removalMesh = finished ? meshes?.removal ?? null : frame?.removalSoFar ?? null;
+  // A frame is only drawn in the design it was meshed for: a frame still in flight from before a
+  // Stock | Unroll switch is not the same picture, and showing it would flash the wrong view.
+  const mapView = design === 'map';
+  const frameForDesign = frame !== null && (frame.design ?? 'stock') === design ? frame : null;
+  // The map's arc is at the stock's own radius; the column engine reports it as `stockTopZ` (R6).
+  const stockRadius = info !== null && info.summary?.rotary === true ? info.stockTopZ : null;
+  const stockMesh = mapView
+    ? frameForDesign?.stock ?? null
+    : meshes
+      ? finished
+        ? meshes.result
+        : frameForDesign?.stock ?? meshes.stock
+      : null;
+  const removalMesh = mapView ? null : finished ? meshes?.removal ?? null : frameForDesign?.removalSoFar ?? null;
 
   // #552 — the COLUMN (dexel) stock carries the per-column side skirts that read as a comb; the
   // exact sweeper's Manifold stock is already clean and its vertical faces (pocket walls) must be
@@ -143,10 +158,13 @@ export function SimMeshes() {
   // Null when the job has none, so nothing is drawn; before the first frame lands the load's uncut
   // body stands in, the same warm-up fallback the stock uses above. Independent of the workholding
   // ("fixture") layer, so hiding the jaws never hides the material, and vice versa.
-  const sacrificialGeom = useMeshGeometry(sacrificialMesh(frame, meshes));
+  const sacrificialGeom = useMeshGeometry(mapView ? null : sacrificialMesh(frameForDesign, meshes));
   const showSacrificial = drawsSacrificial(layers, sacrificialGeom !== null);
 
-  const split = useMemo(() => (path ? splitPath(path) : null), [path]);
+  const split = useMemo(
+    () => (path ? (mapView && stockRadius !== null ? splitMapPath(path, stockRadius) : splitPath(path)) : null),
+    [path, mapView, stockRadius],
+  );
   const cutSegments = split ? vertexIndexAtStep(split.cutStep, step) : 0;
   const rapidSegments = split ? vertexIndexAtStep(split.rapidStep, step) : 0;
 
@@ -173,7 +191,8 @@ export function SimMeshes() {
   // and the path turn with A(step) in ONE group; the cutter, the fixture and the touches stay. The
   // stock's bounding box is invariant under the rotation, so the camera never chases it. A flat
   // program (no A on the path) turns by 0 — its scene is exactly what it was.
-  const turning = path ? angleAtStep(path, step) : null;
+  // Unroll already IS the map — the rod's turn would rotate an opened surface out of its frame.
+  const turning = path && !mapView ? angleAtStep(path, step) : null;
   const turningRad = turning === null ? 0 : turningRadians(turning);
 
   return (
@@ -205,7 +224,7 @@ export function SimMeshes() {
         )}
       </group>
 
-      {showSacrificial && sacrificialGeom && (
+      {!mapView && showSacrificial && sacrificialGeom && (
         // #213 §4 — the sacrificial material as cut. OPAQUE: it is stock the cutter is meant to
         // reach, not a ghost.
         <mesh geometry={sacrificialGeom} name="sim-sacrificial">
@@ -213,7 +232,7 @@ export function SimMeshes() {
         </mesh>
       )}
 
-      {layers.tool && (
+      {!mapView && layers.tool && (
         <LiveToolHead
           at={placement?.at ?? null}
           tool={tool}
@@ -223,11 +242,12 @@ export function SimMeshes() {
         />
       )}
 
-      {layers.fixture &&
+      {!mapView &&
+        layers.fixture &&
         meshes?.fixture.map((f) => <FixtureBox key={f.id} mesh={f.mesh} label={f.label} />)}
 
       {/* #519 item 1 — the registration's touch dots, in the work frame this scene draws in. */}
-      {layers.touches && <TouchMarkers />}
+      {!mapView && layers.touches && <TouchMarkers />}
     </group>
   );
 }

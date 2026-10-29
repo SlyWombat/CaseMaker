@@ -20,7 +20,7 @@ import type { EngraveJob, EngraveMargins } from '@/types/engraveJob';
 import { ensureFontsLoaded, fontKeysForLabels } from '@/engine/fonts/registry';
 import { getToplevel } from './geometry/ManifoldRuntime';
 import type { NodeMeshOutput } from './geometry/meshOutput';
-import { createSimSession, type SimFrame, type SimLoadOpts, type SimLoadResult, type SimPath, type SimSession } from './sim/session';
+import { createSimSession, type SimDesign, type SimFrame, type SimLoadOpts, type SimLoadResult, type SimPath, type SimSession } from './sim/session';
 import type { ConditionSummary } from '@/engine/cnc/toolCondition';
 import { createEngravePreviewer, type EngravePreview, type EngravePreviewer } from './sim/engravePreview';
 import type { ProbeResiduals } from '@/engine/cnc/probePlan';
@@ -73,8 +73,8 @@ const api = {
     return Comlink.transfer(result, buffersOf([m.stock, m.result, m.removal, ...m.gouges.map((g) => g.mesh)]));
   },
   /** The stock and the removal so far at checkpoint `k`; null if `gen` is stale or nothing is loaded. */
-  async simFrameAt(k: number, gen: number): Promise<SimFrame | null> {
-    const f = (await getSession()).frameAt(k, gen);
+  async simFrameAt(k: number, gen: number, design?: SimDesign): Promise<SimFrame | null> {
+    const f = (await getSession()).frameAt(k, gen, design);
     return f ? Comlink.transfer(f, buffersOf([f.stock, f.removalSoFar])) : null;
   },
   /**
@@ -209,6 +209,6 @@ const api = {
 };
 
 export type SimWorkerApi = typeof api;
-export type { SimFrame, SimLoadResult, SimPath, EngravePreview, EngraveGenerated };
+export type { SimDesign, SimFrame, SimLoadResult, SimPath, EngravePreview, EngraveGenerated };
 
 Comlink.expose(api);

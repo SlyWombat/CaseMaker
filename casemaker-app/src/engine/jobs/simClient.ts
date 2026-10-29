@@ -16,6 +16,7 @@ import type { FeedCatalogueRow } from '@/engine/cnc/feeds';
 import type { ConditionSummary } from '@/engine/cnc/toolCondition';
 import type { EngraveJob, EngraveMargins } from '@/types/engraveJob';
 import type { SimWorkerApi, SimFrame, SimLoadResult, SimPath, EngravePreview, EngraveGenerated } from '@/workers/sim.worker';
+import type { SimDesign } from '@/workers/sim/session';
 import type { EngraveShopOpts } from '@/workers/sim/engraveGenerate';
 import type { OraclePredicted, OracleReport } from '@/engine/cnc/engrave/oracle';
 import type { SurfaceFrame } from '@/engine/cnc/engrave/surfacePlane';
@@ -38,8 +39,15 @@ export function getSimApi(): Comlink.Remote<SimWorkerApi> {
   return simApi;
 }
 
+/**
+ * #716 slice 2 — which frame the next `simFrameAt` asks for (Stock or Unroll). A view state, so
+ * it lives beside the coalescer rather than in any request: the request still names only the
+ * checkpoint, and the newest view wins even while a request is in flight.
+ */
+let frameDesign: SimDesign = 'stock';
+
 const frames = createFrameCoalescer<SimFrame>({
-  fetch: (k, gen) => getSimApi().simFrameAt(k, gen),
+  fetch: (k, gen) => getSimApi().simFrameAt(k, gen, frameDesign),
   deliver: (k, f) => frameSink?.(k, f),
   onError: (e) => errorSink?.(e),
 });
@@ -47,6 +55,7 @@ const frames = createFrameCoalescer<SimFrame>({
 /** Kill the worker (cancelling any load in progress) and forget its session. */
 export function terminateSim(): void {
   frames.reset();
+  frameDesign = 'stock';
   simWorker?.terminate();
   simWorker = null;
   simApi = null;
@@ -155,6 +164,7 @@ export type SimLoadPhase = 'sweep' | 'playback';
  */
 export async function loadSim(gcodeText: string, setup: Setup, tool: Tool, machineId: string | null, opts?: SimLoadOpts): Promise<SimLoadResult> {
   frames.reset();
+  frameDesign = 'stock'; // a new session opens on the rod, whatever the last one was showing
   // #451 — the one seed, read at the load: the caller's explicit budget, else the shop's.
   const budgetMs = opts?.budgetMs ?? readDefault(liveShopDefaults(), 'sim.budgetMs').value;
   const sweepBudget = Math.max(1, budgetMs - SIM_BUDGET_GRACE_MS);
@@ -224,7 +234,8 @@ export async function loadSim(gcodeText: string, setup: Setup, tool: Tool, machi
 }
 
 /** Ask for checkpoint k (-1 = uncut). Coalesced: at most one in flight, newest k wins. */
-export function requestFrame(k: number): void {
+export function requestFrame(k: number, design?: SimDesign): void {
+  if (design !== undefined) frameDesign = design;
   frames.request(k);
 }
 

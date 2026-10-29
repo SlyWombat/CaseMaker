@@ -7,7 +7,7 @@
  * removes the annulus `[z, R]` wherever the tool reaches, i.e. `π (R² − z²) · 2 r_t`.
  */
 import { describe, expect, it } from 'vitest';
-import { ROTARY, FLAT, columnSweep, closestAngularOffset, cutterReach, meshRotary, meshFlat, surfaceAboveTip, threadCutter, type ColumnCutter, type ColumnGrid, type CutMove } from '@/workers/geometry/columnEngine';
+import { ROTARY, FLAT, columnSweep, closestAngularOffset, cutterReach, meshRotary, meshRotaryMap, meshFlat, surfaceAboveTip, threadCutter, type ColumnCutter, type ColumnGrid, type CutMove } from '@/workers/geometry/columnEngine';
 import { stubSetup, type Setup } from '@/engine/cnc/setup';
 import { flatEndMill, type Tool } from '@/engine/cnc/tool';
 import { rectProfile } from '@/engine/compiler/profile';
@@ -155,6 +155,39 @@ describe('display mesh (§4.4)', () => {
     expect(m.bbox.max[2]).toBeCloseTo(10, 3);
     expect(m.bbox.min[2]).toBeCloseTo(-10, 3);
     expect(m.bbox.max[0] - m.bbox.min[0]).toBeGreaterThan(30); // spans the axial extent
+  });
+});
+
+describe('display mesh, unrolled (#716 slice 2)', () => {
+  it('lays the same columns out on the map: arc around, radius lost below the surface', () => {
+    // 1 mm along, quarter turns around, R = 10; the θ = 180° column is cut to radius 5.
+    const grid: ColumnGrid = {
+      kind: 'rotary',
+      nu: 1,
+      nv: 4,
+      u0: 0.5,
+      du: 1,
+      v0: 0,
+      dv: 90,
+      initial: 10,
+      base: 0,
+      h: Float32Array.from([10, 10, 5, 10]),
+    };
+    const m = meshRotaryMap(grid, { dx: 1, dThetaDeg: 90 });
+    // Display grid: nx = 2, ny = 5; vertex (I, J) is at index I·5 + J.
+    const top = (I: number, J: number): [number, number, number] => {
+      const v = (I * 5 + J) * 3;
+      return [m.positions[v] as number, m.positions[v + 1] as number, m.positions[v + 2] as number];
+    };
+    const cut = top(0, 2); // θ = 180°
+    expect(cut[1]).toBeCloseTo(10 * Math.PI, 5); // the arc at R
+    expect(cut[2]).toBeCloseTo(-5, 6); // 5 mm of radius left: 5 mm lost
+    const seam = top(0, 4); // θ = 360° samples the 0° column: the map closes on itself
+    expect(seam[1]).toBeCloseTo(20 * Math.PI, 5);
+    expect(seam[2]).toBeCloseTo(0, 6);
+    // The solid closes down to the axis; the map is as wide as the circumference.
+    expect(m.bbox.min[2]).toBeCloseTo(-10, 6);
+    expect(m.bbox.max[1]).toBeCloseTo(20 * Math.PI, 5);
   });
 });
 

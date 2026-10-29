@@ -431,6 +431,11 @@ export interface ColumnParameterisation {
   applyMove(grid: ColumnGrid, m: CutMove, cutter: ColumnCutter): MoveResult;
   /** The grid's surface at display resolution. */
   mesh(grid: ColumnGrid, res: ColumnResolution): NodeMeshOutput;
+  /**
+   * #716 slice 2 — the same columns UNROLLED onto the map (x, arc at the stock radius, radius lost
+   * below the surface). Rotary only: a flat grid has no second cylindrical axis to unroll.
+   */
+  meshMap?(grid: ColumnGrid, res: ColumnResolution): NodeMeshOutput;
   /** Removed and (uncut) stock volume, mm³, from the grid. */
   volume(grid: ColumnGrid): { removed: number; stock: number; sacrificialRemoved?: number };
 }
@@ -525,6 +530,11 @@ export interface ColumnSweepOk {
   axisClamped: { count: number; deepestZ: number } | null;
   /** The stock after checkpoints 0..k, display resolution; `k = -1` (or < 0) is uncut. */
   meshAt(k: number): NodeMeshOutput;
+  /**
+   * #716 slice 2 — the same checkpoint UNROLLED onto the map (Unroll in the simulation), or null
+   * for a flat grid: a flat job has no second cylindrical axis to unroll.
+   */
+  meshAtMap: ((k: number) => NodeMeshOutput) | null;
 }
 
 export interface ColumnSweepRefused {
@@ -724,6 +734,10 @@ export const ROTARY: ColumnParameterisation = {
 
   mesh(grid, res) {
     return meshRotary(grid, res);
+  },
+
+  meshMap(grid, res) {
+    return meshRotaryMap(grid, res);
   },
 
   volume(grid) {
@@ -975,6 +989,108 @@ export function meshRotary(grid: ColumnGrid, res: ColumnResolution): NodeMeshOut
     idx.push(cap1, nuD * nvD + J, nuD * nvD + Jn);
   }
 
+  const indices = Uint32Array.from(idx);
+  let minX = Infinity,
+    minY = Infinity,
+    minZ = Infinity,
+    maxX = -Infinity,
+    maxY = -Infinity,
+    maxZ = -Infinity;
+  for (let v = 0; v < vertexCount; v++) {
+    const x = positions[v * 3] as number,
+      y = positions[v * 3 + 1] as number,
+      z = positions[v * 3 + 2] as number;
+    if (x < minX) minX = x;
+    if (y < minY) minY = y;
+    if (z < minZ) minZ = z;
+    if (x > maxX) maxX = x;
+    if (y > maxY) maxY = y;
+    if (z > maxZ) maxZ = z;
+  }
+  return {
+    positions,
+    indices,
+    triangleCount: indices.length / 3,
+    vertexCount,
+    bbox: { min: [minX, minY, minZ], max: [maxX, maxY, maxZ] },
+    componentCount: 1,
+  };
+}
+
+/**
+ * #716 slice 2 — mesh a rotary grid UNROLLED onto the map (§3.9's **Unroll**; design §5.1d).
+ *
+ * The same columns as `meshRotary`, read in the map's frame instead of around the rod: x along,
+ * y the arc at the stock's own radius (R·θ, so the map is as wide as the circumference), and
+ * z the radius LOST below the surface (ρ − R; the uncut map is flat at 0, a cut is negative like
+ * the engrave preview's depths). The solid is closed down to the axis (−R) like the flat column
+ * mesh closes to the blank's bottom, with four side skirts; a clamped cut that reaches the axis
+ * becomes a degenerate column, handled by the same `through` rule the flat mesh uses.
+ */
+export function meshRotaryMap(grid: ColumnGrid, res: ColumnResolution): NodeMeshOutput {
+  const R = grid.initial;
+  const xMin = grid.u0 - grid.du / 2;
+  const xMax = grid.u0 + (grid.nu - 0.5) * grid.du;
+  const L = Math.max(1e-6, xMax - xMin);
+  const nuD = Math.max(1, Math.round(L / res.dx));
+  const nvD = Math.max(3, Math.round(360 / res.dThetaDeg));
+  const nx = nuD + 1;
+  const ny = nvD + 1;
+  const topCount = nx * ny;
+  const vertexCount = topCount * 2; // a top grid and a bottom grid
+  const base = -R;
+  const positions = new Float32Array(vertexCount * 3);
+  /** Each display column's top Z on the map (radius lost, so ≤ 0). */
+  const tops = new Float32Array(topCount);
+  const put = (v: number, x: number, y: number, z: number): void => {
+    positions[v * 3] = x;
+    positions[v * 3 + 1] = y;
+    positions[v * 3 + 2] = z;
+  };
+  // θ is periodic: the map's two edges are the same seam, so a display node at 360° samples the
+  // grid's 0° column and the map closes on itself without a seam gap.
+  const sample = (x: number, theta: number): number => {
+    const i = Math.min(grid.nu - 1, Math.max(0, Math.round((x - grid.u0) / grid.du)));
+    const j = ((Math.round(theta / grid.dv) % grid.nv) + grid.nv) % grid.nv;
+    return grid.h[j * grid.nu + i] as number;
+  };
+  const idxOf = (I: number, J: number): number => I * ny + J;
+  for (let I = 0; I <= nuD; I++) {
+    const x = xMin + (I / nuD) * L;
+    for (let J = 0; J <= nvD; J++) {
+      const theta = (J / nvD) * 360;
+      const y = R * theta * DEG;
+      // The map's surface is the radius lost: the uncut stock sits at z = 0 and a cut goes down.
+      const top = Math.min(R, sample(x, theta)) - R;
+      tops[idxOf(I, J)] = top;
+      put(idxOf(I, J), x, y, top);
+      put(topCount + idxOf(I, J), x, y, top < base ? top : base);
+    }
+  }
+  const idx: number[] = [];
+  const quad = (a: number, b: number, c: number, d: number): void => {
+    idx.push(a, b, c, a, c, d);
+  };
+  const through = (I: number, J: number): boolean => (tops[idxOf(I, J)] as number) < base;
+  for (let I = 0; I < nuD; I++) {
+    for (let J = 0; J < nvD; J++) {
+      quad(idxOf(I, J), idxOf(I + 1, J), idxOf(I + 1, J + 1), idxOf(I, J + 1)); // top, +Z
+      if (!through(I, J) && !through(I + 1, J) && !through(I + 1, J + 1) && !through(I, J + 1)) {
+        quad(topCount + idxOf(I, J), topCount + idxOf(I, J + 1), topCount + idxOf(I + 1, J + 1), topCount + idxOf(I + 1, J)); // bottom, −Z
+      }
+    }
+  }
+  const side = (t0: number, t1: number, b0: number, b1: number): void => {
+    idx.push(t0, t1, b0, t0, b0, b1);
+  };
+  for (let J = 0; J < nvD; J++) {
+    side(idxOf(0, J), idxOf(0, J + 1), topCount + idxOf(0, J), topCount + idxOf(0, J + 1)); // axial −X
+    side(idxOf(nuD, J + 1), idxOf(nuD, J), topCount + idxOf(nuD, J + 1), topCount + idxOf(nuD, J)); // axial +X
+  }
+  for (let I = 0; I < nuD; I++) {
+    side(idxOf(I + 1, 0), idxOf(I, 0), topCount + idxOf(I + 1, 0), topCount + idxOf(I, 0)); // seam 0°
+    side(idxOf(I, nvD), idxOf(I + 1, nvD), topCount + idxOf(I, nvD), topCount + idxOf(I + 1, nvD)); // seam 360°
+  }
   const indices = Uint32Array.from(idx);
   let minX = Infinity,
     minY = Infinity,
@@ -1490,8 +1606,8 @@ export function columnSweep(timeline: Timeline, tool: Tool, setup: Setup, opts?:
   stats.ms.total = performance.now() - t0;
   void tBuild;
 
-  const meshAt = (k: number): NodeMeshOutput => {
-    if (k < 0 || count === 0) return param.mesh(stockGrid, displayRes);
+  const gridAt = (k: number): ColumnGrid => {
+    if (k < 0 || count === 0) return stockGrid;
     const kk = Math.min(count - 1, Math.trunc(k));
     let a = -1;
     for (let i = kk; i >= 0; i--) {
@@ -1504,8 +1620,11 @@ export function columnSweep(timeline: Timeline, tool: Tool, setup: Setup, opts?:
     const from = a >= 0 ? a : 0;
     if (a < 0) scratch.h.fill(grid.initial);
     for (let i = from; i <= kk; i++) for (const m of perCheckpoint[i] as CutMove[]) param.applyMove(scratch, m, cutter);
-    return param.mesh(scratch, displayRes);
+    return scratch;
   };
+  const meshAt = (k: number): NodeMeshOutput => param.mesh(gridAt(k), displayRes);
+  const meshMap = param.meshMap;
+  const meshAtMap = meshMap === undefined ? null : (k: number): NodeMeshOutput => meshMap(gridAt(k), displayRes);
 
   return {
     ok: true,
@@ -1519,6 +1638,7 @@ export function columnSweep(timeline: Timeline, tool: Tool, setup: Setup, opts?:
     result,
     gouges,
     meshAt,
+    meshAtMap,
     axisClamped: clampedMoves > 0 ? { count: clampedMoves, deepestZ: clampedWorst } : null,
   };
 }
