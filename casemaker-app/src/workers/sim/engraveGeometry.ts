@@ -13,7 +13,7 @@
  */
 
 import type { PartPlan } from '@/engine/cnc/engrave/partPlan';
-import { keepOutMembrane, primitiveLabel, traceSweptProfile } from '@/engine/cnc/engrave/partPlan';
+import { keepOutMembrane, labelProfile, primitiveLabel, traceSweptProfile } from '@/engine/cnc/engrave/partPlan';
 import { engravableProfile } from '@/engine/cnc/engrave/engravable';
 import { aroundScale, hasFloor } from '@/engine/cnc/rotary/wrap';
 import {
@@ -607,6 +607,338 @@ export function measureRaisedTexts(
     }
   }
   return out;
+}
+
+/**
+ * #765/#766 — HOW MUCH EDGE A CONE MAY TAKE OFF A RAISED LETTER, mm per side. A few hundredths:
+ * the coin's 0.1 mm 30° engraver at 0.4 mm deep opens 0.31 mm at the top face against a 0.278 mm
+ * pinch — 0.016 mm a side, which is invisible on the part (#765's measurement). A V within this
+ * tolerance is SEPARATED at that pinch, and the row says how much edge it takes instead of
+ * calling the word fused.
+ */
+export const RAISED_EDGE_LOSS_TOLERANCE_MM = 0.03;
+
+/**
+ * #765/#766 — ONE PINCH a raised label keeps: the two glyph components it stands between, the
+ * design's clearance there, and what the cutter leaves or takes.
+ */
+export interface RaisedTextPinch {
+  /** The two components, by character when they can be named (`'glyph 2'` otherwise). */
+  a: string;
+  b: string;
+  /** The design's clearance at this pinch, mm — twice the smallest joining radius. */
+  gapMm: number;
+  /** True when the cutter leaves no field bridging the two components (a V within tolerance included). */
+  separated: boolean;
+  /** Per side, mm: how far a cone's top-face opening overshoots the half-gap (0 for a flat). */
+  edgeLossMm: number;
+  /** The field still standing in the pinch, mm² (0 when `separated`). */
+  areaMm2: number;
+}
+
+/**
+ * #765/#766 — ONE RAISED LABEL's measured detail, from the SAME profile algebra as
+ * {@link measureRaisedTexts}: the fields the pick scores, the pinch list the sentence names, and
+ * the cone's edge loss.
+ *
+ * The model is the measure's own. A cutter removes its opening `O(r)` from the cutaway field; what
+ * stands at full height is `⋃islands ∪ (field − O(r))`. A kept component holding two or more glyph
+ * components is a PINCH: the field it still bridges is its own area less the letter parts inside
+ * it. A pinch's clearance is found by bisection — the smallest radius at which its two letters
+ * would join — with only those two letters as islands, so the number belongs to that pair and not
+ * only to the label's tightest gap.
+ *
+ * A CONE's opening at the TOP FACE is wider than the plane it cuts at (the caller hands its
+ * top-face radius, the #760 rule). Where that opening overshoots a pinch's half-gap by at most
+ * {@link RAISED_EDGE_LOSS_TOLERANCE_MM} per side, the flank crosses the pinch and the letters
+ * read separated; the row carries the edge loss. The sliver that the strict model would leave is
+ * then NOT counted, so a good V scores like the clean cut it makes.
+ *
+ * `fidelity` is 1 − (the bridging field + the letter area a cone shaves) / the label's letter
+ * area, clamped 0…1 — the "share of the gap opened" #765 asks for, as one comparable number. The
+ * components are authoritative; the scalar is for ranking.
+ */
+export interface RaisedTextDetail {
+  cutawayId: string;
+  labelId: string;
+  text: string;
+  size: number;
+  /** The radius the cutaway is measured at (a cone's TOP-FACE radius, as #760 hands it). */
+  cutterRadius: number;
+  /** The raised letters' own area, mm². */
+  letterAreaMm2: number;
+  /** Field standing between letters, mm² — the material that keeps them joined. */
+  sliverAreaMm2: number;
+  /** Letter area a cone's flank shaves, mm² (0 for a flat — its opening never enters a letter). */
+  letterLossMm2: number;
+  /** The label's tightest measured pinch, mm (0 when no pinch was found). */
+  gapMm: number;
+  joined: boolean;
+  counterFilled: boolean;
+  pinches: RaisedTextPinch[];
+  fidelity: number;
+}
+
+/**
+ * #765/#766 — the per-pinch detail behind a raised label's measure. Pure; every `CrossSection`
+ * created is deleted exactly once.
+ */
+export function measureRaisedTextDetail(
+  tl: ManifoldToplevel,
+  job: EngraveJob,
+  raisedTexts: PartPlan['raisedTexts'],
+  radiusFor: (cutawayId: string) => number | null,
+  opts: { cone?: boolean; edgeLossToleranceMm?: number } = {},
+): RaisedTextDetail[] {
+  if (raisedTexts.length === 0) return [];
+  const tolerance = opts.edgeLossToleranceMm ?? RAISED_EDGE_LOSS_TOLERANCE_MM;
+  const CS = tl.CrossSection;
+  const labelById = new Map(job.labels.map((label) => [label.id, label] as const));
+  const out: RaisedTextDetail[] = [];
+  type Part = { labelId: string; char: string; cs: ReturnType<typeof executeProfile>; area: number; holes: number };
+
+  for (const raised of raisedTexts) {
+    const cutterRadius = radiusFor(raised.id);
+    if (cutterRadius === null || !(cutterRadius > 0)) continue;
+    const field = executeProfile(tl, raised.field);
+    const parts: Part[] = [];
+    try {
+      if (field.area() <= RAISED_TEXT_AREA_TOLERANCE_MM2) continue;
+      // One per-character evaluation per label, built once and reused for every component (and
+      // deleted with the rest in the outer finally).
+      type CharShape = { char: string; cs: ReturnType<typeof executeProfile>; area: number; holes: number; w: number; h: number };
+      const charCs = new Map<string, CharShape[]>();
+      const charsOf = (labelId: string): CharShape[] => {
+        const hit = charCs.get(labelId);
+        if (hit !== undefined) return hit;
+        const label = labelById.get(labelId);
+        const built: CharShape[] =
+          label === undefined
+            ? []
+            : [...label.text]
+                .filter((ch) => ch.trim().length > 0)
+                .map((ch) => {
+                  const cs = executeProfile(tl, labelProfile({ ...label, text: ch }, job.customFonts));
+                  const b = cs.bounds();
+                  return { char: ch, cs, area: cs.area(), holes: cs.numContour() - 1, w: b.max[0] - b.min[0], h: b.max[1] - b.min[1] };
+                });
+        charCs.set(labelId, built);
+        return built;
+      };
+      /**
+       * Name a component by the single glyph it IS: the character whose own outline matches its
+       * area, width and height (a merged pair matches none — it is named by its ordinal). Shape
+       * matching rather than an intersection, because a single character's own typeset profile
+       * sits at the label's centre, not where the word lays it out.
+       */
+      const namePart = (partCS: ReturnType<typeof executeProfile>, area: number, holes: number, chars: CharShape[]): string => {
+        const b = partCS.bounds();
+        const w = b.max[0] - b.min[0];
+        const h = b.max[1] - b.min[1];
+        let best: CharShape | null = null;
+        let bestScore = Infinity;
+        for (const c of chars) {
+          if (c.holes !== holes) continue;
+          const da = Math.abs(c.area - area) / Math.max(1e-9, c.area);
+          if (da > 0.2) continue;
+          const score = Math.abs(c.w - w) + Math.abs(c.h - h) + da * Math.max(c.w, w);
+          if (score < bestScore) {
+            best = c;
+            bestScore = score;
+          }
+        }
+        return best?.char ?? '';
+      };
+      try {
+        for (const island of raised.islands) {
+          const islandCS = executeProfile(tl, island.profile);
+          try {
+            const chars = charsOf(island.labelId);
+            for (const partCS of islandCS.decompose()) {
+              const area = partCS.area();
+              if (area <= RAISED_TEXT_AREA_TOLERANCE_MM2) {
+                partCS.delete();
+                continue;
+              }
+              const char = namePart(partCS, area, partCS.numContour() - 1, chars);
+              const ordinal = parts.filter((p) => p.labelId === island.labelId).length + 1;
+              parts.push({
+                labelId: island.labelId,
+                char: char === '' ? `glyph ${ordinal}` : char,
+                cs: partCS,
+                area,
+                holes: partCS.numContour() - 1,
+              });
+            }
+          } finally {
+            islandCS.delete();
+          }
+        }
+      } finally {
+        for (const list of charCs.values()) for (const c of list) c.cs.delete();
+      }
+      if (parts.length === 0) continue;
+
+      // The kept region at this cutter width, exactly as `measureRaisedTexts` builds it.
+      const islands = CS.compose(parts.map((part) => part.cs));
+      const opened = executeProfile(tl, engravableProfile(raised.field, cutterRadius));
+      const leftover = CS.difference([field, opened]);
+      opened.delete();
+      const kept = CS.union([islands, leftover]);
+      leftover.delete();
+      islands.delete();
+
+      type Group = { parts: Part[]; sliverArea: number };
+      const groups: Group[] = [];
+      const counterFilled = new Set<string>();
+      try {
+        for (const comp of kept.decompose()) {
+          try {
+            const inside = parts.filter((part) => {
+              const hit = CS.intersection([comp, part.cs]);
+              try {
+                return hit.area() > part.area * 0.5;
+              } finally {
+                hit.delete();
+              }
+            });
+            if (inside.length > 1) {
+              const letterArea = inside.reduce((sum, part) => sum + part.area, 0);
+              groups.push({ parts: inside, sliverArea: Math.max(0, comp.area() - letterArea) });
+            } else if (inside.length === 1 && comp.numContour() - 1 < inside[0]!.holes) {
+              counterFilled.add(inside[0]!.labelId);
+            }
+          } finally {
+            comp.delete();
+          }
+        }
+      } finally {
+        kept.delete();
+      }
+
+      for (const labelId of new Set(parts.map((part) => part.labelId))) {
+        const label = labelById.get(labelId);
+        if (label === undefined) continue;
+        const mine = parts.filter((part) => part.labelId === labelId);
+        const letterArea = mine.reduce((sum, part) => sum + part.area, 0);
+        if (!(letterArea > 0)) continue;
+        const pinches: RaisedTextPinch[] = [];
+        let sliver = 0;
+        for (const group of groups) {
+          const inGroup = group.parts.filter((part) => part.labelId === labelId);
+          if (inGroup.length < 2) continue;
+          // Only pairs the cutter's own width ACTUALLY bridges are pinches. A component can hold
+          // several letters through one bridged pair; the others are apart, and naming them would
+          // say “joined” about letters the operator can see are not.
+          const joinedPairs: { a: (typeof inGroup)[number]; b: (typeof inGroup)[number]; gapMm: number }[] = [];
+          for (let i = 0; i < inGroup.length; i++) {
+            for (let j = i + 1; j < inGroup.length; j++) {
+              const a = inGroup[i]!;
+              const b = inGroup[j]!;
+              const gapMm = pairGapMm(tl, raised.field, a.cs, b.cs, cutterRadius);
+              if (gapMm !== null) joinedPairs.push({ a, b, gapMm });
+            }
+          }
+          if (joinedPairs.length === 0) continue;
+          const share = group.sliverArea / joinedPairs.length;
+          for (const pair of joinedPairs) {
+            // A cone's top-face opening overshoots the pinch's half-gap; within the tolerance its
+            // flank has crossed the pinch and the letters read apart.
+            const edgeLossMm = opts.cone === true ? Math.max(0, cutterRadius - pair.gapMm / 2) : 0;
+            const separated = opts.cone === true && edgeLossMm <= tolerance + 1e-9;
+            const areaMm2 = separated ? 0 : share;
+            pinches.push({ a: pair.a.char, b: pair.b.char, gapMm: pair.gapMm, separated, edgeLossMm, areaMm2 });
+            sliver += areaMm2;
+          }
+        }
+        const gapMm = pinches.length === 0 ? 0 : Math.min(...pinches.map((p) => p.gapMm));
+        const fidelity = Math.min(1, Math.max(0, 1 - (sliver + 0) / letterArea));
+        out.push({
+          cutawayId: raised.id,
+          labelId,
+          text: label.text,
+          size: label.size,
+          cutterRadius,
+          letterAreaMm2: letterArea,
+          sliverAreaMm2: sliver,
+          letterLossMm2: 0,
+          gapMm,
+          joined: pinches.some((p) => !p.separated),
+          counterFilled: counterFilled.has(labelId),
+          pinches,
+          fidelity,
+        });
+      }
+    } finally {
+      for (const part of parts) part.cs.delete();
+      field.delete();
+    }
+  }
+  return out;
+}
+
+/**
+ * The smallest radius at which two glyph components JOIN through the field, mm — the pinch's own
+ * clearance, measured with only those two letters as islands. Zero when they already touch with no
+ * cutter at all (a joined script): there is no gap to quote. NULL when the cutter's own radius does
+ * not join them: the pair is not a pinch of this cutter, however many letters a bigger component
+ * happens to hold. Bisection because fusion is monotone.
+ */
+function pairGapMm(
+  tl: ManifoldToplevel,
+  fieldProfile: Profile,
+  a: ReturnType<typeof executeProfile>,
+  b: ReturnType<typeof executeProfile>,
+  hi: number,
+): number | null {
+  const CS = tl.CrossSection;
+  const field = executeProfile(tl, fieldProfile);
+  const areaA = a.area();
+  const areaB = b.area();
+  const joinedAt = (radius: number): boolean => {
+    const opened = executeProfile(tl, engravableProfile(fieldProfile, radius));
+    const leftover = CS.difference([field, opened]);
+    opened.delete();
+    const pair = CS.compose([a, b]);
+    const kept = CS.union([pair, leftover]);
+    leftover.delete();
+    pair.delete();
+    let joined = false;
+    try {
+      for (const comp of kept.decompose()) {
+        try {
+          const hitA = CS.intersection([comp, a]);
+          const hitB = CS.intersection([comp, b]);
+          try {
+            if (hitA.area() > areaA * 0.5 && hitB.area() > areaB * 0.5) joined = true;
+          } finally {
+            hitA.delete();
+            hitB.delete();
+          }
+        } finally {
+          comp.delete();
+        }
+        if (joined) break;
+      }
+    } finally {
+      kept.delete();
+    }
+    return joined;
+  };
+  try {
+    if (joinedAt(0)) return 0;
+    if (!joinedAt(hi)) return null;
+    let lo = 0;
+    let high = hi;
+    for (let i = 0; i < RAISED_TEXT_BISECTION_STEPS; i++) {
+      const mid = (lo + high) / 2;
+      if (joinedAt(mid)) high = mid;
+      else lo = mid;
+    }
+    return 2 * high;
+  } finally {
+    field.delete();
+  }
 }
 
 /**
