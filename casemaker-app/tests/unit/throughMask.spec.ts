@@ -96,6 +96,58 @@ describe('buildThroughMask (#218)', () => {
     expect(mask(25.5, 10)).toBe(THROUGH);
   });
 
+  it('reads the arc at the NEAREST path point, not the first segment within the kerf', () => {
+    // The bottom edge is split at x = 24.7, so the span's end at x = 25 is 0.3 mm past a vertex —
+    // inside the 1 mm kerf of the segment before it. That segment's arc (14.7) is inside the tab,
+    // but the nearest path point to (25, 10) is the span end itself (arc 15), where the span is
+    // exclusive. Reading the earlier segment read the plunge at the tab's end as inside the tab.
+    const split: Polygons = [
+      [
+        [10, 10],
+        [24.7, 10],
+        [30, 10],
+        [30, 30],
+        [10, 30],
+      ],
+    ];
+    const mask = buildThroughMask({
+      thickness: T,
+      breakthrough: B,
+      cutouts: [{ path: split, spans: [[SPAN]], toolRadius: 1, tabHeight: 1 }],
+    })!;
+    expect(mask(25, 10)).toBe(THROUGH);
+    expect(mask(20, 10)).toBe(T - 1);
+  });
+
+  it('a tab span that crosses the contour seam covers both sides of it (#736)', () => {
+    // The square's arc 0 is its first vertex (10, 10). A span from arc 75 to 85 runs over the
+    // contour's start: the left edge from (10, 15) down to (10, 10), then the bottom edge from
+    // (10, 10) to (15, 10). Its arc interval is `[75, 80) ∪ [0, 5)`; an unwrapped test sees only
+    // the first half and reads the cutter's plunge on the other side as a through cut.
+    const wrapped = {
+      startArc: 75,
+      endArc: 85,
+      start: [10, 15] as [number, number],
+      end: [15, 10] as [number, number],
+      points: [
+        [10, 15],
+        [10, 10],
+        [15, 10],
+      ] as [number, number][],
+    };
+    const mask = buildThroughMask({
+      thickness: T,
+      breakthrough: B,
+      cutouts: [{ path: SQUARE, spans: [[wrapped]], toolRadius: 1, tabHeight: 1 }],
+    })!;
+    // Left-edge midpoint of the span (arc 77.5) and bottom-edge midpoint (arc 2.5).
+    expect(mask(10, 12.5)).toBe(T - 1);
+    expect(mask(12.5, 10)).toBe(T - 1);
+    // Just outside it on either edge the kerf is through again.
+    expect(mask(10, 17)).toBe(THROUGH);
+    expect(mask(18, 10)).toBe(THROUGH);
+  });
+
   it('a second span on another contour is keyed to that contour’s own arc length', () => {
     const other: Polygons[number] = [
       [50, 10],

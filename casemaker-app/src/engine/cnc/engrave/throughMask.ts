@@ -89,14 +89,34 @@ function closestOnSegment(
  */
 const SPAN_END_TOLERANCE_MM = 0.001;
 
-/** Is arc `s` inside one of the (non-wrapping) span intervals, clear of both ends? */
-function inTabSpan(spans: readonly ProfileSpan[], s: number): boolean {
+/**
+ * Is arc `s` inside one of the span intervals, clear of both ends? A span may wrap past the
+ * perimeter when it crosses the contour's first vertex (#736); `perimeter` puts the two on the
+ * same turn of the circle.
+ */
+function inTabSpan(spans: readonly ProfileSpan[], s: number, perimeter: number): boolean {
   for (const span of spans) {
-    if (s > span.startArc + SPAN_END_TOLERANCE_MM && s < span.endArc - SPAN_END_TOLERANCE_MM) {
+    if (perimeter > 0 && span.endArc > perimeter) {
+      // The span covers [startArc, perimeter) and [0, endArc - perimeter).
+      const end = span.endArc - perimeter;
+      if (s > span.startArc + SPAN_END_TOLERANCE_MM && s <= perimeter) return true;
+      if (s < end - SPAN_END_TOLERANCE_MM) return true;
+    } else if (s > span.startArc + SPAN_END_TOLERANCE_MM && s < span.endArc - SPAN_END_TOLERANCE_MM) {
       return true;
     }
   }
   return false;
+}
+
+/** The contour's closed length, mm. */
+function perimeterOf(contour: Polygons[number]): number {
+  let perimeter = 0;
+  for (let i = 0; i < contour.length; i++) {
+    const a = contour[i]!;
+    const b = contour[(i + 1) % contour.length]!;
+    perimeter += Math.hypot(b[0] - a[0], b[1] - a[1]);
+  }
+  return perimeter;
 }
 
 /**
@@ -116,18 +136,30 @@ export function buildThroughMask(geometry: MaskGeometry): ThroughMask | null {
       for (let c = 0; c < cutout.path.length; c++) {
         const contour = cutout.path[c]!;
         const spans = cutout.spans[c] ?? [];
+        const perimeter = perimeterOf(contour);
+        // The arc is the one at the NEAREST point on the path, not the first segment within the
+        // cutter radius. On a polygonised arc a span end is a fraction of a millimetre from the
+        // previous vertex; returning that earlier segment's arc read the plunge at the span's end
+        // as inside the tab (it is 0.3 mm back from the end) and refused the through cut as too
+        // deep. The nearest point to a span end is the end itself, at distance 0.
         let arc = 0;
+        let bestDistance = Infinity;
+        let bestArc = 0;
         for (let i = 0; i < contour.length; i++) {
           const a = contour[i]!;
           const b = contour[(i + 1) % contour.length]!;
           const length = Math.hypot(b[0] - a[0], b[1] - a[1]);
           const hit = closestOnSegment(x, y, a, b);
-          if (hit.distance <= cutout.toolRadius + 1e-6) {
-            return inTabSpan(spans, arc + hit.t * length)
-              ? geometry.thickness - cutout.tabHeight
-              : throughLimit;
+          if (hit.distance <= cutout.toolRadius + 1e-6 && hit.distance < bestDistance) {
+            bestDistance = hit.distance;
+            bestArc = arc + hit.t * length;
           }
           arc += length;
+        }
+        if (bestDistance <= cutout.toolRadius + 1e-6) {
+          return inTabSpan(spans, bestArc, perimeter)
+            ? geometry.thickness - cutout.tabHeight
+            : throughLimit;
         }
       }
     }
