@@ -1561,52 +1561,65 @@ export function sweepTimeline(tl: ManifoldToplevel, timeline: Timeline, tool: To
   }
   // #729 — A ROUND STOCK IN THE CHUCK. The rod runs X 0 → its length with X 0 at the jaws' face
   // (#714), so the chuck (jaws and body) is everything at X < 0. Neither is modelled as a solid
-  // yet, but that half-space is enough to refuse the dangerous cases: a cut or a rapid whose tool
-  // reaches past the jaw line (X − radius < 0) while below the rod's top (Z < the radius above the
-  // axis). Above the rod the tool is over the chuck at a height the rod itself clears.
-  // The tailstock is not modelled at all, and the sweep says so.
+  // yet; the half-space is checked up to the JAWS' reach — half the jaw diameter above the axis, or
+  // the rod's top if that is higher — which is the height a tool over the chuck must clear. Any
+  // move whose cutter edge is past the jaw face (X − radius < 0) below that height is refused,
+  // tested along the WHOLE straight move (a rapid can cross the zone between two clear ends).
+  // The chuck body above the jaws and the tailstock are not modelled, and the sweep says so.
   if (setup.part.kind === 'cylinder') {
+    const jawReach =
+      setup.workholding.kind === 'rotary-chuck' ? Math.max(topZ, setup.workholding.jawDiameter / 2) : topZ;
+    /** Whether the straight move (x0,z0)→(x1,z1) enters {x − radius < 0, z < jawReach}. */
+    const crosses = (x0: number, z0: number, x1: number, z1: number): boolean => {
+      const span = (p0: number, p1: number, limit: number): [number, number] | null => {
+        // The t ∈ [0, 1] where p(t) < limit, as an interval, or null.
+        const d = p1 - p0;
+        if (Math.abs(d) < 1e-12) return p0 < limit - 1e-6 ? [0, 1] : null;
+        const t = (limit - 1e-6 - p0) / d;
+        return d > 0 ? (t > 0 ? [0, Math.min(1, t)] : null) : t < 1 ? [Math.max(0, t), 1] : null;
+      };
+      const sx = span(x0, x1, radius);
+      const sz = span(z0, z1, jawReach);
+      return sx !== null && sz !== null && Math.max(sx[0], sz[0]) < Math.min(sx[1], sz[1]) + 1e-12;
+    };
     const jawHits: { line: number; x: number; z: number; kind: string }[] = [];
-    const reaches = (x: number, z: number): boolean => x - radius < -1e-6 && z < topZ - 1e-6;
     for (const m of timeline.airMoves) {
-      for (const p of [m.from, m.to]) {
-        if (reaches(p[0], p[2])) {
-          jawHits.push({ line: m.line, x: p[0], z: p[2], kind: m.kind === 'rapid' ? 'rapid' : 'spindle-off move' });
-          break;
-        }
+      if (crosses(m.from[0], m.from[2], m.to[0], m.to[2])) {
+        const at = m.from[0] < m.to[0] ? m.from : m.to;
+        jawHits.push({ line: m.line, x: at[0], z: Math.min(m.from[2], m.to[2]), kind: m.kind === 'rapid' ? 'rapid' : 'spindle-off move' });
       }
     }
     for (const cp of timeline.checkpoints) {
       for (let k = 0; k < cp.steps.length; k++) {
         const x0 = cp.xy[4 * k] as number;
         const x1 = cp.xy[4 * k + 2] as number;
-        const z = Math.min(cp.zs[2 * k] as number, cp.zs[2 * k + 1] as number);
-        const x = Math.min(x0, x1);
-        if (reaches(x, z)) {
-          jawHits.push({ line: timeline.events[cp.steps[k] as number]?.line ?? 0, x, z, kind: 'cut' });
+        const z0 = cp.zs[2 * k] as number;
+        const z1 = cp.zs[2 * k + 1] as number;
+        if (crosses(x0, z0, x1, z1)) {
+          jawHits.push({ line: timeline.events[cp.steps[k] as number]?.line ?? 0, x: Math.min(x0, x1), z: Math.min(z0, z1), kind: 'cut' });
           break;
         }
       }
     }
     if (jawHits.length > 0) {
-      jawHits.sort((a, b) => a.line - b.line);
+      jawHits.sort((p, q) => p.line - q.line);
       const first = jawHits[0]!;
       diagnostics.push({
         severity: 'error',
         code: 'rotary-into-chuck',
         message:
-          `a ${first.kind} reaches the chuck: at X ${first.x.toFixed(3)} mm the ⌀${(2 * radius).toFixed(3)} mm ` +
-          `cutter's edge is past the jaw face (X 0) while ${(topZ - first.z).toFixed(3)} mm below the rod's ` +
-          `top (line ${first.line}${jawHits.length > 1 ? `; ${jawHits.length} moves in all` : ''}). Keep every ` +
-          `move at or below the rod's top at least a cutter radius clear of the jaws.`,
+          `line ${first.line}: a ${first.kind} reaches the chuck — the ⌀${(2 * radius).toFixed(3)} mm cutter's ` +
+          `edge goes past the jaw face (X 0) below Z ${jawReach.toFixed(3)} mm, the height the jaws reach above ` +
+          `the axis${jawHits.length > 1 ? ` (${jawHits.length} moves in all)` : ''}. Keep every pass a cutter ` +
+          `radius clear of the jaw face, and move over the chuck only above the jaws.`,
       });
     }
     diagnostics.push({
       severity: 'info',
       code: 'fixture-unchecked',
       message:
-        "the rotary's tailstock is not modelled as an obstacle yet: the cutter's proximity to it is NOT checked " +
-        '(the chuck is checked only as the space beyond the jaw face)',
+        "the rotary's tailstock and the chuck body above its jaws are not modelled as obstacles yet: the " +
+        "cutter's proximity to them is NOT checked (the jaws are checked only as the space beyond the jaw face)",
     });
   }
   // Every check against it is done; the fixture is not part of the result, so release it now.

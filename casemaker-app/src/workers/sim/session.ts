@@ -468,8 +468,8 @@ const UNPLANNED_FACE_DEPTH_MM = 0.05;
 const UNPLANNED_FACE_FLOOR_MM2 = 0.01;
 
 function indexedFaceOracle(tl: ManifoldToplevel, l: { timeline: Timeline; sweep: SweepResult }, predicted: readonly OraclePredicted[]): OracleReport {
-  // #729 — no prediction at all is not a pass: the flat path cannot judge an unplanned program
-  // either. Every face the program cuts must be one the plan named.
+  // #729 — no prediction at all is not a pass: every face an indexed program cuts must be one the
+  // plan named. (The flat path returns an empty report instead; an indexed one refuses.)
   if (predicted.length === 0) {
     throw new Error('oracle: an indexed rotary program with no predicted face cannot be judged');
   }

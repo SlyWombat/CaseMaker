@@ -260,12 +260,18 @@ describe('#241 fixture: HEX ALL ROUND, six faces, across flats 17.321 on ⌀20 (
     const ringArea = polygonArea(RADIUS, N_STOCK) - hexArea;
     const facecap = capVolume(JAW_CLEAR, RADIUS / 2, (y) => Math.sqrt(RADIUS * RADIUS - y * y) - APOTHEM);
     const ring = ringArea * (LENGTH - JAW_CLEAR) + 6 * facecap;
-    expectWithin(sweep.stats.removedVolume, ring, 0.01, 'hex ring');
+    expectWithin(sweep.stats.removedVolume, ring, 0.005, 'hex ring');
     // Each face's own removal is its share: one sixth, give or take where the neighbouring faces'
     // segments reach past the shared hexagon vertex.
     for (let k = 0; k < 6; k++) expectWithin(removedBy(sweep, runAt(timeline, k * 60)), ring / 6, 0.02, `face ${k}`);
-    // The remaining solid is the hexagon past the clearance, plus what the caps left near the jaws.
-    expectWithin(sweep.stats.resultVolume, sweep.stats.stockVolume - ring, 0.01, 'hexagon solid');
+    // The remaining solid, derived independently: the hexagon past the clearance, the rod's own
+    // n-gon within it, less what the six caps took there.
+    expectWithin(
+      sweep.stats.resultVolume,
+      hexArea * (LENGTH - JAW_CLEAR) + polygonArea(RADIUS, N_STOCK) * JAW_CLEAR - 6 * facecap,
+      0.005,
+      'hexagon solid',
+    );
     dispose(sweep);
   });
 });
@@ -332,12 +338,14 @@ describe('#241 the air gate on an indexed job', () => {
 
   it('#729 — clears a lift-and-turn with the cutter wholly past the rod’s free end', () => {
     // The rod is X 0 → 30; the ⌀10 cutter at X 36 is clear of it by 1 mm, so a turn at Z 9 sweeps
-    // nothing even though it is below the rod's top.
+    // nothing of the ROD even though it is below the rod's top. That is where a tailstock sits, which
+    // is not modelled — the sweep's `fixture-unchecked` names the tailstock (asserted below).
     const src = ['S1000 M3', 'G0 X36 Y0 Z15 A0', 'G0 Z9', 'G0 A90', 'G0 Z15'].join('\n');
     const timeline = buildTimeline(parseGcode(src), setup());
     const out = sweepTimeline(tl, timeline, WIDE, setup());
     if (!out.ok) throw new Error(JSON.stringify(out.diagnostics));
     expect(out.value.diagnostics.some((d) => d.code === 'rotary-turn-in-stock')).toBe(false);
+    expect(out.value.diagnostics.some((d) => d.code === 'fixture-unchecked' && /tailstock/.test(d.message))).toBe(true);
     dispose(out.value);
   });
 
@@ -360,7 +368,8 @@ describe('#729 — the retroactive review: the chuck, an unstated A, and face ma
     const diags = out.ok ? out.value.diagnostics : out.diagnostics;
     const chuck = diags.find((d) => d.code === 'rotary-into-chuck');
     expect(chuck?.severity).toBe('error');
-    expect(chuck?.message).toContain('at X -10.000 mm');
+    // Line 3 moves over the chuck at Z 15, above the jaws' reach (12.5): clear. Line 4 drops into them.
+    expect(chuck?.message).toContain('line 4: a rapid reaches the chuck');
     if (out.ok) dispose(out.value);
   });
 
@@ -370,9 +379,35 @@ describe('#729 — the retroactive review: the chuck, an unstated A, and face ma
     const timeline = buildTimeline(parseGcode(src), setup());
     const out = sweepTimeline(tl, timeline, WIDE, setup());
     if (!out.ok) throw new Error(JSON.stringify(out.diagnostics));
-    expect(out.value.diagnostics.find((d) => d.code === 'rotary-into-chuck')?.message).toContain('a cut reaches the chuck');
+    expect(out.value.diagnostics.find((d) => d.code === 'rotary-into-chuck')?.message).toContain('line 3: a cut reaches the chuck');
     expect(out.value.diagnostics.some((d) => d.code === 'fixture-unchecked' && /tailstock/.test(d.message))).toBe(true);
     dispose(out.value);
+  });
+
+  it('refuses a rapid that crosses the jaw zone between two clear ends (D1)', () => {
+    // From above-and-beyond the jaws down to beside the rod: both ends are clear, the line is not.
+    const src = ['S1000 M3', 'G0 X-10 Y20 Z14 A0', 'G0 X5 Y20 Z5', 'G0 Z15'].join('\n');
+    const timeline = buildTimeline(parseGcode(src), setup());
+    const out = sweepTimeline(tl, timeline, WIDE, setup());
+    const diags = out.ok ? out.value.diagnostics : out.diagnostics;
+    expect(diags.find((d) => d.code === 'rotary-into-chuck')?.severity).toBe('error');
+    if (out.ok) dispose(out.value);
+  });
+
+  it('refuses a move over the jaws above the rod top but below the jaws’ reach (D2)', () => {
+    // The fixture's jaws are ⌀25 (reach 12.5) on a ⌀20 rod (top 10): Z 12 is above the rod, in the jaws.
+    const src = ['S1000 M3', 'G0 X15 Y0 Z15 A0', 'G0 X-10 Z12', 'G0 Z15'].join('\n');
+    const timeline = buildTimeline(parseGcode(src), setup());
+    const out = sweepTimeline(tl, timeline, WIDE, setup());
+    const diags = out.ok ? out.value.diagnostics : out.diagnostics;
+    expect(diags.find((d) => d.code === 'rotary-into-chuck')?.message).toContain('below Z 12.500 mm');
+    if (out.ok) dispose(out.value);
+    // Above the jaws it is clear.
+    const high = buildTimeline(parseGcode(['S1000 M3', 'G0 X15 Y0 Z15 A0', 'G0 X-10 Z15', 'G0 X15'].join('\n')), setup());
+    const ok = sweepTimeline(tl, high, WIDE, setup());
+    if (!ok.ok) throw new Error(JSON.stringify(ok.diagnostics));
+    expect(ok.value.diagnostics.some((d) => d.code === 'rotary-into-chuck')).toBe(false);
+    dispose(ok.value);
   });
 
   it('a pass one cutter radius clear of the jaws is not refused', () => {
