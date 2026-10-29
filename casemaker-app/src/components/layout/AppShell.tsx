@@ -20,6 +20,7 @@ import { undoProject, redoProject, useProjectStore } from '@/store/projectStore'
 // eager bundle already, so reaching for it here costs nothing and the shortcut needs it at keypress.
 import { undoEngraveRemoval } from '@/store/engraveJobStore';
 import { useStartWizardStore } from '@/store/startWizardStore';
+import { sweepUnusedMeshBlobs } from '@/store/meshBlobSweep';
 import { startRecentJobTracking } from '@/store/recentJobsStore';
 import { useManageModeStore } from '@/store/manageModeStore';
 
@@ -51,6 +52,8 @@ export function AppShell() {
   // Started here, once: the record must be kept whether or not the welcome overlay is on screen.
   useEffect(() => {
     startRecentJobTracking();
+    // #728 — and drop the stored meshes neither the open job nor a recent one refers to.
+    void sweepUnusedMeshBlobs();
   }, []);
   const welcomeMode = useProjectStore((s) => s.welcomeMode);
   // #280 — the wizard mounts HERE, not inside the welcome overlay: its step 2 creates the project,

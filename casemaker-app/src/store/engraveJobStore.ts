@@ -1207,14 +1207,49 @@ export interface EngraveJobState {
   /**
    * #720 — where the target mesh's bytes are: absent (no target), 'loading' (the persisted job
    * names a hash and the blob store is being asked), 'ready' (the open job holds them), or
-   * 'missing' (this browser no longer has them — the job says so and asks for an import again).
+   * 'missing' (this browser no longer has them — the job says so and asks for an import again),
+   * or 'unstored' (#728: the open job holds them but the blob store refused the copy — quota, a
+   * private window — so a reload would lose them; the job says so and asks for a file save).
    * Store state, never persisted: the document carries only hash, size and name.
    */
   targetBlob: TargetBlobState;
 }
 
 /** #720 — the target mesh's byte state in this session (see `EngraveJobState.targetBlob`). */
-export type TargetBlobState = 'none' | 'loading' | 'ready' | 'missing';
+export type TargetBlobState = 'none' | 'loading' | 'ready' | 'missing' | 'unstored';
+
+/**
+ * #728 — write a mesh's bytes to the blob store, and say so when it is refused. The write was
+ * fire-and-forget: a quota or private-window refusal lost the mesh at the next reload without a
+ * word. A refusal now marks the open target 'unstored' (if it is still the one written), which
+ * the findings turn into a sentence. A write that dies with the tab still reads 'missing' on the
+ * next start-up, as before.
+ */
+function storeTargetMesh(sha256: string, data: string): void {
+  void putMeshBlob(sha256, data).catch(() => {
+    const s = useEngraveJobStore.getState();
+    if (s.job.targetObject?.sha256 === sha256 && s.job.targetObject.data !== undefined) {
+      useEngraveJobStore.setState({ targetBlob: 'unstored' });
+    }
+  });
+}
+
+/**
+ * #728 — after a write that may have put a target back (an undo), the blob state follows the
+ * target: bytes in hand are ready, a hash alone is fetched again, none is none. Undoing a removal
+ * made while the mesh was still loading used to leave it detached for good.
+ */
+function syncTargetBlob(): void {
+  const target = useEngraveJobStore.getState().job.targetObject;
+  if (target === undefined) {
+    useEngraveJobStore.setState({ targetBlob: 'none' });
+  } else if (target.data === undefined) {
+    useEngraveJobStore.setState({ targetBlob: 'loading' });
+    void reattachTargetBlob();
+  } else if (useEngraveJobStore.getState().targetBlob !== 'unstored') {
+    useEngraveJobStore.setState({ targetBlob: 'ready' });
+  }
+}
 
 /**
  * #720 — ask the blob store for the mesh the persisted job names, and put it back into the open
@@ -1263,7 +1298,7 @@ function initialTargetBlob(job: EngraveJob): TargetBlobState {
 export function adoptInitialTargetBlob(job: EngraveJob): void {
   const target = job.targetObject;
   if (target === undefined) return;
-  if (target.data !== undefined) void putMeshBlob(target.sha256, target.data).catch(() => undefined);
+  if (target.data !== undefined) storeTargetMesh(target.sha256, target.data);
   else void reattachTargetBlob();
 }
 
@@ -1823,8 +1858,8 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
       // #720 — the bytes go BESIDE the job in the same write: the open job holds them, the
       // persisted copy keeps the hash and the blob store keeps the mesh.
       if (typeof target.data === 'string') {
-        void putMeshBlob(target.sha256, target.data).catch(() => undefined);
         set({ targetBlob: 'ready' });
+        storeTargetMesh(target.sha256, target.data);
       } else {
         set({ targetBlob: 'loading' });
       }
@@ -1893,6 +1928,7 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
         (job) => ({ ...job, targetObject: target }),
         'target',
       );
+      set({ targetBlob: 'none' });
     },
 
     addCutout: () => {
@@ -2514,8 +2550,8 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
     replace: (job) => {
       const target = job.targetObject;
       if (target?.data !== undefined) {
-        void putMeshBlob(target.sha256, target.data).catch(() => undefined);
         set({ targetBlob: 'ready' });
+        storeTargetMesh(target.sha256, target.data);
       } else {
         set({ targetBlob: target === undefined ? 'none' : 'loading' });
       }
@@ -2539,6 +2575,7 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
       // undo's own. An undo cannot be undone into a second removal: the restore re-inserts the item
       // and arms nothing.
       top.restore();
+      syncTargetBlob();
       set({ removalUndo: stack.slice(0, -1) });
       armUndoWindow();
     },

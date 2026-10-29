@@ -35,6 +35,7 @@ import {
   type SaveTextOutcome,
 } from './persistence';
 import { useEngraveJobStore } from './engraveJobStore';
+import type { EngraveJob } from '@/types/engraveJob';
 
 /** How long after an edit a bound file is written. Save and Ctrl-S write immediately. */
 export const JOB_FILE_AUTOSAVE_MS = 750;
@@ -133,15 +134,17 @@ function cancelAutosave(): void {
 async function autosaveNow(): Promise<void> {
   const { handle, busy } = useEngraveJobFileStore.getState();
   if (handle === null || busy || autosaveWriting) return;
-  const text = serializeJobFile(useEngraveJobStore.getState().job);
+  const job = useEngraveJobStore.getState().job;
+  const text = serializeJobFile(job);
+  const written = rememberSaved(job, text);
   autosaveWriting = true;
   try {
     await io.write(handle, text);
-    const current = serializeJobFile(useEngraveJobStore.getState().job);
+    const current = comparable(useEngraveJobStore.getState().job);
     useEngraveJobFileStore.setState({
       savedText: text,
       savedAt: Date.now(),
-      dirty: current !== text,
+      dirty: current !== written,
       notice: { kind: 'ok', text: `Saved ${useEngraveJobFileStore.getState().fileName ?? 'the job'}` },
     });
   } catch (error) {
@@ -191,17 +194,19 @@ export const useEngraveJobFileStore = create<EngraveJobFileState>()((set, get) =
       await get().saveAs();
       return;
     }
-    const text = serializeJobFile(useEngraveJobStore.getState().job);
+    const job = useEngraveJobStore.getState().job;
+    const text = serializeJobFile(job);
+    const written = rememberSaved(job, text);
     cancelAutosave();
     set({ busy: true, notice: null });
     try {
       await io.write(state.handle, text);
-      const current = serializeJobFile(useEngraveJobStore.getState().job);
+      const current = comparable(useEngraveJobStore.getState().job);
       set({
         busy: false,
         savedText: text,
         savedAt: Date.now(),
-        dirty: current !== text,
+        dirty: current !== written,
         notice: { kind: 'ok', text: `Saved ${state.fileName ?? 'the job'}` },
       });
     } catch (error) {
@@ -213,6 +218,7 @@ export const useEngraveJobFileStore = create<EngraveJobFileState>()((set, get) =
     if (get().busy) return;
     const job = useEngraveJobStore.getState().job;
     const text = serializeJobFile(job);
+    const written = rememberSaved(job, text);
     const suggested = jobFileName(job.name);
     cancelAutosave();
     set({ busy: true, notice: null });
@@ -222,7 +228,7 @@ export const useEngraveJobFileStore = create<EngraveJobFileState>()((set, get) =
         set({ busy: false, notice: { kind: 'info', text: 'Save cancelled — the job was not written.' } });
         return;
       }
-      const current = serializeJobFile(useEngraveJobStore.getState().job);
+      const current = comparable(useEngraveJobStore.getState().job);
       if (outcome.kind === 'downloaded') {
         // No reusable handle: the browser put the file in Downloads, and the next Save asks again.
         set({
@@ -231,7 +237,7 @@ export const useEngraveJobFileStore = create<EngraveJobFileState>()((set, get) =
           fileName: suggested,
           savedText: text,
           savedAt: Date.now(),
-          dirty: current !== text,
+          dirty: current !== written,
           notice: { kind: 'info', text: `Downloaded ${suggested}.` },
         });
         return;
@@ -242,7 +248,7 @@ export const useEngraveJobFileStore = create<EngraveJobFileState>()((set, get) =
         fileName: handleName(outcome.handle, suggested),
         savedText: text,
         savedAt: Date.now(),
-        dirty: current !== text,
+        dirty: current !== written,
         notice: { kind: 'ok', text: `Saved ${handleName(outcome.handle, suggested)}` },
       });
     } catch (error) {
@@ -287,8 +293,11 @@ export const useEngraveJobFileStore = create<EngraveJobFileState>()((set, get) =
       adopting = false;
     }
     const saved = serializeJobFile(parsed.job);
+    rememberSaved(parsed.job, saved);
     const packageError = parsed.package !== null && !parsed.package.ok ? parsed.package.reason : null;
-    const problems = [packageError, parsed.sourceError].filter((line): line is string => line !== null);
+    const problems = [packageError, parsed.sourceError, parsed.meshNote ?? null].filter(
+      (line): line is string => line !== null,
+    );
     set({
       busy: false,
       handle: picked.handle,
@@ -333,12 +342,46 @@ export const useEngraveJobFileStore = create<EngraveJobFileState>()((set, get) =
  * every edit lands on. The comparison is against the text last written, so a change and its undo
  * end clean rather than leaving a phantom dot.
  */
+/**
+ * #728 — the document as compared for the dirty marker: the target mesh's bytes left out. Its
+ * SHA-256 stays in, and names them (verified when a file is opened), so the comparison is the
+ * same — without stringifying a 65 MB mesh on every edit, and without a bytes-less document
+ * reading as changed (and autosaving) the moment its mesh is re-attached from this browser.
+ */
+function comparable(job: EngraveJob): string {
+  if (job.targetObject?.data === undefined) return serializeJobFile(job);
+  const { data: _data, ...target } = job.targetObject;
+  return serializeJobFile({ ...job, targetObject: target });
+}
+
+/** The last saved text's comparable form, computed once per saved text. */
+let savedComparable: { text: string; key: string } | null = null;
+
+/** Note the comparable form of a text just written from `job`, so it is never re-parsed. */
+function rememberSaved(job: EngraveJob, text: string): string {
+  savedComparable = { text, key: comparable(job) };
+  return savedComparable.key;
+}
+
+function savedKey(text: string): string | null {
+  if (savedComparable?.text === text) return savedComparable.key;
+  let job: EngraveJob;
+  try {
+    job = JSON.parse(text) as EngraveJob;
+  } catch {
+    return null;
+  }
+  return rememberSaved(job, text);
+}
+
 useEngraveJobStore.subscribe((state, previous) => {
   if (state.job === previous.job) return;
   const file = useEngraveJobFileStore.getState();
-  const text = serializeJobFile(state.job);
+  const key = comparable(state.job);
+  // A change that only put the mesh's bytes back is not an edit: nothing to mark or autosave.
+  if (key === comparable(previous.job)) return;
   useEngraveJobFileStore.setState({
-    dirty: file.savedText === null ? true : text !== file.savedText,
+    dirty: file.savedText === null ? true : key !== savedKey(file.savedText),
     // A document that is no longer the opened one has not had its integrity/problem report
     // re-derived; clearing is honest (the reports describe the file that was opened).
     packageError: null,

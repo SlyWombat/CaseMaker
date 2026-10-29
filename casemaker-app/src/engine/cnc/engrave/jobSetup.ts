@@ -2656,6 +2656,49 @@ export function setupProgramFindings(job: EngraveJob): JobFinding[] {
 }
 
 /**
+ * #728 — the findings as the open session sees the target mesh. The job alone cannot tell a mesh
+ * this browser no longer holds from one the blob store has not answered for yet, so
+ * `target-mesh-missing` read "Import it again" for a moment on every reload. While the store is
+ * being asked it is an info line instead; once the store refused a copy of bytes the job holds,
+ * a warning says a reload would lose them. The other states change nothing.
+ */
+export function withTargetBlobState(
+  findings: readonly JobFinding[],
+  job: EngraveJob,
+  state: 'none' | 'loading' | 'ready' | 'missing' | 'unstored',
+): JobFinding[] {
+  const target = job.targetObject;
+  if (target === undefined || !target.enabled) return [...findings];
+  const role = (target.role ?? 'reference') === 'goal' ? 'goal' : 'reference';
+  if (state === 'loading') {
+    return findings.map((f) =>
+      f.code === 'target-mesh-missing'
+        ? {
+            severity: 'info' as const,
+            code: 'target-mesh-loading',
+            labelId: target.id,
+            message: `The ${role} mesh “${target.name}” is loading from this browser’s store.`,
+          }
+        : f,
+    );
+  }
+  if (state === 'unstored') {
+    return [
+      ...findings,
+      {
+        severity: 'warning',
+        code: 'target-mesh-unstored',
+        labelId: target.id,
+        message:
+          `This browser would not keep a copy of the ${role} mesh “${target.name}” (it may be full, ` +
+          `or a private window): it is open now, but a reload loses it. Save the job to a file to keep it.`,
+      },
+    ];
+  }
+  return [...findings];
+}
+
+/**
  * The one de-duplicator for a merged finding list (#353). `validateJob` and `validateVise` are
  * separate passes with separate subjects, and a code can be answered by both — `vise-default` was
  * the shipped case, listed twice on the setup flow's blank step until this ran between them.

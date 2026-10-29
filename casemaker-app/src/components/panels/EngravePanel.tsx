@@ -41,7 +41,7 @@ import { drillSettings } from '@/engine/cnc/cam/drillBit';
 import { borePitchMm, boreRampAngleFrom } from '@/engine/cnc/cam/drill';
 import { readDefault } from '@/platform/defaultsClient';
 import { caseWordsForKey } from '@/engine/cnc/toolCondition';
-import { dedupeFindings, itemKindWord, itemRowName, jobSetups, jobTool, validateJob, type JobFinding } from '@/engine/cnc/engrave/jobSetup';
+import { dedupeFindings, withTargetBlobState, itemKindWord, itemRowName, jobSetups, jobTool, validateJob, type JobFinding } from '@/engine/cnc/engrave/jobSetup';
 import { toolForJob } from '@/engine/cnc/toolRegistry';
 import { bedUnderFacts, machineForJob } from '@/platform/bedProfiles';
 import type { RestChoice } from '@/components/panels/RestCutterControl';
@@ -963,7 +963,8 @@ export function EngravePanel(): JSX.Element {
       }),
     [locationMachine, shopDefaults, job.breakthrough],
   );
-  const findings: JobFinding[] =
+  const targetBlob = useEngraveJobStore((s) => s.targetBlob);
+  const jobOnlyFindings: JobFinding[] =
     preview?.findings ??
     dedupeFindings([
       ...validateJob(job, null, { bed: bedFacts, defaults: shopDefaults }),
@@ -973,6 +974,9 @@ export function EngravePanel(): JSX.Element {
         ? validateVise(job.stock, job.workholding.vise, job.sacrificial)
         : []),
     ]);
+  // #728 — the mesh's load state is the session's, not the job's: "Import it again" only once
+  // this browser has answered that it does not hold the mesh.
+  const findings = withTargetBlobState(jobOnlyFindings, job, targetBlob);
   const jobFindings = findings.filter((f) => f.labelId === undefined);
   const findingsFor = (labelId: string): JobFinding[] => findings.filter((f) => f.labelId === labelId);
 

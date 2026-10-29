@@ -23,6 +23,9 @@ const STORE = 'meshes';
 export interface MeshBlobIO {
   put: (sha256: string, data: string) => Promise<void>;
   get: (sha256: string) => Promise<string | null>;
+  /** #728 — every hash held; optional so a spec's double need not keep one. */
+  keys?: () => Promise<string[]>;
+  delete?: (sha256: string) => Promise<void>;
 }
 
 let io: MeshBlobIO | null = null;
@@ -74,6 +77,44 @@ export async function getMeshBlob(sha256: string): Promise<string | null> {
       const request = tx.objectStore(STORE).get(sha256);
       request.onsuccess = () => resolve(typeof request.result === 'string' ? request.result : null);
       request.onerror = () => reject(request.error ?? new Error('the mesh could not be read'));
+    });
+  } finally {
+    db.close();
+  }
+}
+
+/**
+ * #728 — delete every stored mesh whose hash `keep` refuses; returns how many went. Nothing
+ * deleted a mesh before, so a browser kept every model ever imported. The caller decides what is
+ * still referred to (the open job, the recent jobs) — asked per key at delete time, so a mesh
+ * imported while the sweep was gathering is not lost; a store that cannot list its keys sweeps
+ * nothing.
+ */
+export async function sweepMeshBlobs(keep: (sha256: string) => boolean): Promise<number> {
+  if (io !== null) {
+    if (io.keys === undefined || io.delete === undefined) return 0;
+    const gone = (await io.keys()).filter((k) => !keep(k));
+    for (const k of gone) await io.delete(k);
+    return gone.length;
+  }
+  const db = await openDatabase();
+  try {
+    return await new Promise<number>((resolve, reject) => {
+      const tx = db.transaction(STORE, 'readwrite');
+      const store = tx.objectStore(STORE);
+      let deleted = 0;
+      const request = store.getAllKeys();
+      request.onsuccess = () => {
+        for (const key of request.result) {
+          if (typeof key === 'string' && !keep(key)) {
+            store.delete(key);
+            deleted += 1;
+          }
+        }
+      };
+      tx.oncomplete = () => resolve(deleted);
+      tx.onerror = () => reject(tx.error ?? new Error('the mesh store could not be swept'));
+      tx.onabort = () => reject(tx.error ?? new Error('the mesh store could not be swept'));
     });
   } finally {
     db.close();

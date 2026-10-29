@@ -301,6 +301,31 @@ describe('the dirty marker and autosave (#425 §6)', () => {
     expect(useEngraveJobFileStore.getState().dirty).toBe(false);
   });
 
+  it('#728 — a bytes-less document whose mesh is put back from this browser stays clean and is not written', async () => {
+    const SHA = 'b'.repeat(64);
+    const target = {
+      id: 'tgt-1',
+      name: 'Dragon.3mf',
+      format: '3mf' as const,
+      sha256: SHA,
+      size: { x: 40, y: 30, z: 6 },
+      position: { x: 50, y: 30, z: 0 },
+      rotation: 0,
+      enabled: true,
+      role: 'goal' as const,
+    };
+    await openDoc({ ...defaultEngraveJob(), targetObject: target });
+    const opened = useEngraveJobStore.getState().job;
+    // The re-attach is a job write that only adds the bytes.
+    useEngraveJobStore.setState({ job: { ...opened, targetObject: { ...target, data: 'QUJD' } } });
+    expect(useEngraveJobFileStore.getState().dirty).toBe(false);
+    await flushJobFileAutosave();
+    expect(bed.writes).toHaveLength(0);
+    // A real edit after it is still an edit.
+    useEngraveJobStore.getState().replace({ ...useEngraveJobStore.getState().job, name: 'Changed' });
+    expect(useEngraveJobFileStore.getState().dirty).toBe(true);
+  });
+
   it('writes a bound file on the debounce, and an unbound job not at all', async () => {
     // Unbound: edits are not written anywhere.
     useEngraveJobStore.getState().replace({ ...useEngraveJobStore.getState().job, name: 'No file' });

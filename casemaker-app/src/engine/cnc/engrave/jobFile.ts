@@ -26,6 +26,8 @@ import {
   verifyJobSources,
   type SourceCheck,
 } from '@/engine/cnc/engrave/jobSources';
+import { base64ToArrayBuffer } from '@/engine/import/base64';
+import { sha256Hex } from '@/engine/import/meshStock';
 import { parseEngraveJob } from '@/store/engraveJobSchema';
 import type { EngraveJob } from '@/types/engraveJob';
 
@@ -63,6 +65,13 @@ export interface JobFileReport {
    * null when nothing is required or every required source verified.
    */
   sourceError: string | null;
+  /**
+   * #728 — set when the embedded target mesh's bytes do not hash to the SHA-256 the document
+   * states. The hash is the mesh's identity (the blob store's key, the parse cache's key), so a
+   * wrong one would overwrite another model's stored bytes; the job opens with the hash of the
+   * bytes it actually carries, and this says so.
+   */
+  meshNote?: string | null;
 }
 
 export type JobFileParseResult =
@@ -86,11 +95,27 @@ export async function parseJobFile(text: string): Promise<JobFileParseResult> {
   }
   const parsed = parseEngraveJob(raw);
   if (!parsed.ok) return parsed;
-  const job = parsed.job;
+  let job = parsed.job;
   const sources = await verifyJobSources(job);
+  let meshNote: string | null = null;
+  const target = job.targetObject;
+  if (target?.data !== undefined) {
+    // Undecodable bytes are not judged here: the mesh parser refuses them with its own sentence.
+    const data = target.data;
+    const actual = await Promise.resolve()
+      .then(() => sha256Hex(base64ToArrayBuffer(data)))
+      .catch(() => null);
+    if (actual !== null && actual !== target.sha256) {
+      job = { ...job, targetObject: { ...target, sha256: actual } };
+      meshNote =
+        `The mesh “${target.name}” in this file does not match the fingerprint the file gives it; ` +
+        `it opens as the mesh the file carries. Save the job to write the right fingerprint.`;
+    }
+  }
   return {
     ok: true,
     job,
+    meshNote,
     package: job.package === undefined ? null : validatePackage(job.package),
     sources,
     sourceError: sourceRefusal(sources, requiredSourceHashes(job)),

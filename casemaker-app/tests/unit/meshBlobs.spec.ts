@@ -22,7 +22,9 @@ const backing = new Map<string, string>();
 } as Storage;
 
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
-import { validateJob } from '@/engine/cnc/engrave/jobSetup';
+import { validateJob, withTargetBlobState } from '@/engine/cnc/engrave/jobSetup';
+import { parseJobFile, serializeJobFile } from '@/engine/cnc/engrave/jobFile';
+import { sweepUnusedMeshBlobs } from '@/store/meshBlobSweep';
 import { parseEngraveJob } from '@/store/engraveJobSchema';
 import { adoptInitialTargetBlob, ENGRAVE_JOB_KEY, reattachTargetBlob, useEngraveJobStore } from '@/store/engraveJobStore';
 import { setMeshBlobIO } from '@/platform/meshBlobs';
@@ -143,5 +145,84 @@ describe('#720 the bytes live beside the job', () => {
     const withBytes = parseEngraveJob(JSON.parse(JSON.stringify({ ...defaultEngraveJob(), targetObject: { ...TARGET } })));
     expect(withBytes.ok).toBe(true);
     if (withBytes.ok) expect(withBytes.job.targetObject?.data).toBe('QUJD');
+  });
+});
+
+describe('#728 the blob store review', () => {
+  it('a refused write is a sentence: the open job keeps the mesh, a reload would not', async () => {
+    setMeshBlobIO({
+      put: async () => {
+        throw new Error('QuotaExceededError');
+      },
+      get: async () => null,
+    });
+    useEngraveJobStore.getState().setTargetObject({ ...TARGET });
+    await vi.waitFor(() => expect(blobState()).toBe('unstored'));
+    expect(job().targetObject?.data).toBe('QUJD');
+    const findings = withTargetBlobState(validateJob(job()), job(), blobState());
+    const unstored = findings.find((f) => f.code === 'target-mesh-unstored');
+    expect(unstored?.severity).toBe('warning');
+    expect(unstored?.message).toContain('Save the job to a file');
+  });
+
+  it('while the store is being asked, the mesh is loading — not "Import it again"', () => {
+    const findings = validateJob({ ...defaultEngraveJob(), targetObject: { ...NO_BYTES } });
+    expect(findings.some((f) => f.code === 'target-mesh-missing')).toBe(true);
+    const loading = withTargetBlobState(findings, { ...defaultEngraveJob(), targetObject: { ...NO_BYTES } }, 'loading');
+    expect(loading.some((f) => f.code === 'target-mesh-missing')).toBe(false);
+    expect(loading.find((f) => f.code === 'target-mesh-loading')?.severity).toBe('info');
+    // Once the store has answered that it does not hold it, the sentence is the import door again.
+    const missing = withTargetBlobState(findings, { ...defaultEngraveJob(), targetObject: { ...NO_BYTES } }, 'missing');
+    expect(missing.find((f) => f.code === 'target-mesh-missing')?.message).toContain('Import it again');
+  });
+
+  it('undoing a removal made while the mesh was loading fetches it again', async () => {
+    blobs.set(SHA, 'QUJD');
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((r) => (release = r));
+    setMeshBlobIO({
+      put: async (sha256, data) => void blobs.set(sha256, data),
+      get: async (sha256) => {
+        await gate;
+        return blobs.get(sha256) ?? null;
+      },
+    });
+    useEngraveJobStore.getState().setTargetObject({ ...NO_BYTES });
+    expect(blobState()).toBe('loading');
+    useEngraveJobStore.getState().removeTargetObject();
+    expect(blobState()).toBe('none');
+    release();
+    await Promise.resolve();
+    useEngraveJobStore.getState().undoRemove();
+    await vi.waitFor(() => expect(blobState()).toBe('ready'));
+    expect(job().targetObject?.data).toBe('QUJD');
+  });
+
+  it('the sweep drops every stored mesh nothing refers to', async () => {
+    blobs.set(SHA, 'QUJD');
+    blobs.set('c'.repeat(64), 'REVG');
+    setMeshBlobIO({
+      put: async (sha256, data) => void blobs.set(sha256, data),
+      get: async (sha256) => blobs.get(sha256) ?? null,
+      keys: async () => [...blobs.keys()],
+      delete: async (sha256) => void blobs.delete(sha256),
+    });
+    useEngraveJobStore.getState().setTargetObject({ ...TARGET });
+    expect(await sweepUnusedMeshBlobs()).toBe(1);
+    expect([...blobs.keys()]).toEqual([SHA]);
+  });
+
+  it('a file whose mesh does not match its fingerprint opens under the fingerprint of its bytes', async () => {
+    const text = serializeJobFile({ ...defaultEngraveJob(), targetObject: { ...TARGET } });
+    const parsed = await parseJobFile(text);
+    if (!parsed.ok) throw new Error(parsed.errors.join('; '));
+    // 'QUJD' is "ABC".
+    const abc = 'b5d4045c3f466fa91fe2cc6abe79232a1a57cdf104f7a26e716e0a1e2789df78';
+    expect(parsed.job.targetObject?.sha256).toBe(abc);
+    expect(parsed.meshNote).toContain('does not match');
+    const honest = await parseJobFile(
+      serializeJobFile({ ...defaultEngraveJob(), targetObject: { ...TARGET, sha256: abc } }),
+    );
+    expect(honest.ok && honest.meshNote).toBeNull();
   });
 });
