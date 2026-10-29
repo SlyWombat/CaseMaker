@@ -422,7 +422,9 @@ export function EngraveTargetObjectRow({
       <p style={MUTED}>
         Imported {target.format.toUpperCase()} — embedded in the job ({target.sha256.slice(0, 12)}…).
         {goal
-          ? ` The object is the goal: the shape to make, roughed and finished in 3D. Its size is ${sizeText}.`
+          ? target.goalMode === 'mold' && target.format !== 'png'
+            ? ` The object is the goal, made as a MOLD: its shape is cut as a cavity to cast it in, ${fmt(size.z)} mm deep. Its size is ${sizeText}.`
+            : ` The object is the goal: the shape to make, roughed and finished in 3D. Its size is ${sizeText}.`
           : ` The object is a reference, not a cut; its size is ${sizeText}.`}
       </p>
 
@@ -448,6 +450,23 @@ export function EngraveTargetObjectRow({
           <span>°</span>
         </label>
       </div>
+
+      {/* #721 — what the goal makes: the part, or a mold to cast it in. A picture is a relief only. */}
+      {goal && target.format !== 'png' && (
+        <label style={ROW_INLINE}>
+          <span style={{ fontSize: 11, color: '#9aa4b0' }}>make</span>
+          <select
+            value={target.goalMode === 'mold' ? 'mold' : 'item'}
+            data-testid={`engrave-target-goal-mode-${index}`}
+            aria-label="What the goal makes"
+            title="Make the part (material is removed down to its surface), or a mold of it (its shape is cut as a cavity to cast it in)."
+            onChange={(e) => onChange({ goalMode: e.target.value === 'mold' ? 'mold' : undefined })}
+          >
+            <option value="item">Make the part</option>
+            <option value="mold">Make a mold of it</option>
+          </select>
+        </label>
+      )}
 
       {/* #722 — a mesh's size on the blank; a picture keeps its own width field below. */}
       {target.format !== 'png' && (

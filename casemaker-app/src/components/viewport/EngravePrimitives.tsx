@@ -22,7 +22,8 @@ import * as THREE from 'three';
 import { useEngraveJobStore } from '@/store/engraveJobStore';
 import { useViewportStore, isEngraveItemSelected } from '@/store/viewportStore';
 import { targetObjectMesh } from '@/engine/import/targetObject';
-import { targetScale } from '@/engine/cnc/engrave/targetScale';
+import { placedSize, targetScale } from '@/engine/cnc/engrave/targetScale';
+import { isMold } from '@/engine/cnc/cam/surface3d';
 import type { EngravePrimitive, EngraveTargetObject } from '@/types/engraveJob';
 import { activateEngraveItem } from './engravePick';
 
@@ -179,16 +180,21 @@ function TargetObjectMesh({ target }: { target: EngraveTargetObject }) {
   useEffect(() => () => geom?.dispose(), [geom]);
   const selected = useViewportStore((s) => isEngraveItemSelected(s.selection, target.id));
   const scale = targetScale(target);
+  // #721 — a MOLD draws the part as its cavity: turned over about X (y and z negated about the
+  // geometry's origin, which is the bbox centre and TOP) and dropped so its base sits at the stock
+  // top and its top is the cavity floor — the same transform the heightfield's mold applies.
+  const mold = isMold(target) && (target.role ?? 'reference') === 'goal';
+  const height = placedSize(target).z;
   if (geom === null) return null;
 
   return (
     <mesh
       geometry={geom}
-      position={[target.position.x, target.position.y, target.position.z]}
+      position={[target.position.x, target.position.y, mold ? target.position.z - height : target.position.z]}
       rotation={[0, 0, target.rotation * DEG]}
       // #722 — the geometry's origin is the bbox centre in X/Y and its top in Z, the same anchor
       // the heightfield scales about, so the drawn mesh and the cut agree.
-      scale={[scale.x, scale.y, scale.z]}
+      scale={mold ? [scale.x, -scale.y, -scale.z] : [scale.x, scale.y, scale.z]}
       name={`engrave-target-${target.id}`}
       userData={{ engraveTarget: target.id }}
       onClick={(e) => {

@@ -264,5 +264,22 @@ describe('#685 — step 4, what are you cutting', () => {
     expect(job.targetObject).toMatchObject({ name: 'tet.stl', format: 'stl', role: 'goal' });
     expect(job.labels).toHaveLength(0);
     expect(job.shapes).toHaveLength(0);
+    // #721 — the default is the part itself: no mold key on the goal.
+    expect('goalMode' in job.targetObject!).toBe(false);
+  });
+
+  it('#721 — Surface a mesh can make a mold of the part instead', async () => {
+    openOperationStep();
+    fireEvent.click(screen.getByTestId('engrave-setup-what-surface'));
+    expect((screen.getByTestId('start-wizard-op-surface-make-part') as HTMLInputElement).checked).toBe(true);
+    fireEvent.click(screen.getByTestId('start-wizard-op-surface-make-mold'));
+    expect(screen.getByTestId('start-wizard-op-surface-mold-note').textContent).toContain('two-part mold');
+    const input = screen.getByTestId('start-wizard-op-surface-file') as HTMLInputElement;
+    fireEvent.change(input, { target: { files: [new File([ASCII_STL], 'tet.stl')] } });
+    await waitFor(() => {
+      expect((screen.getByTestId('start-wizard-create') as HTMLButtonElement).disabled).toBe(false);
+    }, { timeout: 15_000 });
+    fireEvent.click(screen.getByTestId('start-wizard-create'));
+    expect(useEngraveJobStore.getState().job.targetObject).toMatchObject({ role: 'goal', goalMode: 'mold' });
   });
 });

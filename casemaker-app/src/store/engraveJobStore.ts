@@ -189,7 +189,7 @@ export type PrimitivePatch = Partial<Omit<EngraveBoxPrimitive, 'kind' | 'positio
  * #535 — a goal's `surface` settings patch in the same way: a PARTIAL is merged, and a key set to
  * `undefined` is REMOVED, which is how the row's reset returns one number to the engine default.
  */
-export type TargetObjectPatch = Partial<Pick<EngraveTargetObject, 'name' | 'rotation' | 'enabled'>> & {
+export type TargetObjectPatch = Partial<Pick<EngraveTargetObject, 'name' | 'rotation' | 'enabled' | 'goalMode'>> & {
   /** A partial placement: the store merges it into the object's own X/Y/Z. */
   position?: Partial<EngraveTargetObject['position']>;
   /** A partial of the goal operation's settings; `undefined` on a key clears it. */
@@ -1843,6 +1843,8 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
           // Merge a partial position rather than replacing the whole object.
           position: patch.position ? { ...target.position, ...patch.position } : target.position,
         };
+        // #721 — 'item' is the default, so it is stored as an absent key, never `undefined` or 'item'.
+        if ('goalMode' in patch && patch.goalMode !== 'mold') delete next.goalMode;
         // #722 — `null` (or a scale of exactly 1 on every axis) drops the key: the file's own size.
         if (scalePatch !== undefined) {
           const unit =

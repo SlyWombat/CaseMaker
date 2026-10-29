@@ -63,12 +63,18 @@ export function OperationStep({ job, hasOperations, onChoiceChange }: OperationS
   const [surface, setSurface] = useState<EngraveTargetObject | null>(null);
   const [surfaceError, setSurfaceError] = useState<string | null>(null);
   const [surfaceReading, setSurfaceReading] = useState(false);
+  // #721 — what the goal makes: the part itself, or a mold to cast it in.
+  const [makeMold, setMakeMold] = useState(false);
 
   const choice: OperationChoice | null =
     picked === 'engrave'
       ? { type: 'engrave', text, depth, font }
       : picked === 'surface'
-        ? { type: 'surface', target: surface }
+        ? {
+            type: 'surface',
+            target:
+              surface === null || !makeMold || surface.format === 'png' ? surface : { ...surface, goalMode: 'mold' },
+          }
         : picked === null
           ? null
           : { type: picked };
@@ -86,7 +92,7 @@ export function OperationStep({ job, hasOperations, onChoiceChange }: OperationS
   useLayoutEffect(() => {
     onChoiceChange(choice);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [picked, text, depth, font, surface, onChoiceChange]);
+  }, [picked, text, depth, font, surface, makeMold, onChoiceChange]);
 
   async function chooseGoal(file: File): Promise<void> {
     setSurfaceError(null);
@@ -173,6 +179,36 @@ export function OperationStep({ job, hasOperations, onChoiceChange }: OperationS
             {surfaceReading && <span style={MUTED}>Reading the mesh…</span>}
             {surface !== null && !surfaceReading && <span style={MUTED}>{surface.name}</span>}
           </div>
+          {surface?.format !== 'png' && (
+            <div style={FIELDS} role="radiogroup" aria-label="What to make">
+              <label style={FIELD_LABEL}>
+                <input
+                  type="radio"
+                  name="start-wizard-op-surface-make"
+                  checked={!makeMold}
+                  data-testid="start-wizard-op-surface-make-part"
+                  onChange={() => setMakeMold(false)}
+                />
+                <span>Make the part</span>
+              </label>
+              <label style={FIELD_LABEL}>
+                <input
+                  type="radio"
+                  name="start-wizard-op-surface-make"
+                  checked={makeMold}
+                  data-testid="start-wizard-op-surface-make-mold"
+                  onChange={() => setMakeMold(true)}
+                />
+                <span>Make a mold of it</span>
+              </label>
+            </div>
+          )}
+          {makeMold && surface?.format !== 'png' && (
+            <p style={MUTED} data-testid="start-wizard-op-surface-mold-note">
+              The part's shape is cut as a cavity from the top, turned over so a casting reads the
+              right way round. One side only: a part with undercuts needs a two-part mold.
+            </p>
+          )}
           {surfaceError !== null && (
             <p style={ERROR} data-testid="start-wizard-op-surface-error">
               {surfaceError}

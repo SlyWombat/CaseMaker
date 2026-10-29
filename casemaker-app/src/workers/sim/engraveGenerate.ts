@@ -139,6 +139,8 @@ import { concatToolpathIR, estimateCycleSeconds, HOP_Z, raiseTravelOver, toolNum
 import {
   DEFAULT_STOCK_TO_LEAVE_MM,
   generateSurface3dForGoal,
+  isMold,
+  steepestWallDeg,
   type GoalSurfaceFacts,
   type SurfaceFeeds,
 } from '@/engine/cnc/cam/surface3d';
@@ -3880,6 +3882,13 @@ function emptyGoalResult(): Omit<EngraveGenerated, 'ok' | 'stage' | 'findings' |
  * but is NOT promoted into `programs`, exactly as the single-file adapter already leaves an
  * unverified program out. The dry proof that the toolpath reproduces the goal is the unit spec.
  */
+/**
+ * #721 — the steepest cavity wall a mold is cut with before it is warned as having no draft, degrees
+ * from horizontal. A labelled default: casting practice wants a degree or more of draft, and the
+ * grid's own staircase reads a true vertical wall as a little under 90°.
+ */
+export const MOLD_DRAFT_LIMIT_DEG = 85;
+
 export function generateGoalProgram(
   job: EngraveJob,
   goal: EngraveTargetObject,
@@ -3915,7 +3924,7 @@ export function generateGoalProgram(
   // `goal-object-oversize`/zero-volume check (#533) never reaches a goal that is surfaced here.
   // Run the SAME validation and refuse an unmakeable goal with its blocking finding, rather than
   // sampling and posting a program the Cut gate would otherwise have to catch with no finding.
-  const goalFindings = validateGoalObject(goal, job.stock);
+  const goalFindings = validateGoalObject(goal, job.stock, { minFloor: job.minFloor, edgeMargin: job.edgeMargin });
   const blocking = goalFindings.filter((f) => f.severity === 'error');
   if (blocking.length > 0) {
     return {
@@ -3988,6 +3997,33 @@ export function generateGoalProgram(
     return fail('cam', `the goal "${goal.name}" lies at or above the stock top, so there is no surface to cut`, resolved);
   }
 
+  // #721 — a MOLD's honest limits, said once. It is one-sided (cut from the top, so the cavity is
+  // the part's top surface and the casting's underside is the flat pour face), and a wall with no
+  // draft holds the casting: warn past the labelled limit, naming the steepest wall found.
+  const moldFindings: JobFinding[] = [];
+  if (isMold(goal)) {
+    const steepest = steepestWallDeg(surfaced.heightfield);
+    moldFindings.push({
+      severity: 'info',
+      code: 'goal-mold-one-sided',
+      message:
+        `The mold of "${goal.name}" is cut from the top only: the cavity is the part's top surface, ` +
+        'turned over so the casting reads the right way round, and the casting\'s underside is the ' +
+        'flat face you pour into. A part with undercuts, or one shaped on both sides, needs a ' +
+        'two-part mold — two setups.',
+    });
+    if (steepest > MOLD_DRAFT_LIMIT_DEG) {
+      moldFindings.push({
+        severity: 'warning',
+        code: 'goal-mold-no-draft',
+        message:
+          `The mold of "${goal.name}" has a wall at ${Number(steepest.toFixed(1))}° — steeper than ` +
+          `${MOLD_DRAFT_LIMIT_DEG}°, so it has little or no draft and may hold the casting. Give the ` +
+          'part tapered sides, or use a flexible casting material.',
+      });
+    }
+  }
+
   const ctx: PostContext = {
     jobName: job.name,
     stock: { length: job.stock.length, width: job.stock.width, thickness: job.stock.thickness },
@@ -4043,7 +4079,7 @@ export function generateGoalProgram(
     ...base,
     ok: true,
     stage: 'done',
-    findings: documentFindings(),
+    findings: dedupeFindings([...documentFindings(), ...moldFindings]),
     feeds: resolved,
     cam,
     nc,

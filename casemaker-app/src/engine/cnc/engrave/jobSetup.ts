@@ -284,6 +284,10 @@ export type JobFindingCode =
   // generation (slice D, #534) is not built yet, so this job posts no cut for it — the goal's
   // counterpart to the reference's `target-object-not-cut`, answering "why is my goal not cut?".
   | 'goal-object-oversize'
+  | 'goal-mold-rim'
+  | 'goal-mold-floor'
+  | 'goal-mold-one-sided'
+  | 'goal-mold-no-draft'
   | 'goal-object-no-toolpath'
   // Facing (#432). The job's facing depth is taken off the same blank every item is measured
   // against, so the check is one number against the stock's minimum floor — not a per-item one.
@@ -897,10 +901,14 @@ function sacrificialWithBedBoard(job: EngraveJob, bed?: BedUnderFacts | null): E
 export function validateGoalObject(
   target: EngraveTargetObject,
   stock: { length: number; width: number; thickness: number },
-  opts: { mixed?: boolean } = {},
+  opts: { mixed?: boolean; minFloor?: number; edgeMargin?: number } = {},
 ): JobFinding[] {
   const findings: JobFinding[] = [];
   const { length, width, thickness } = stock;
+  // #721 — a MOLD is a cavity: it needs a rim of stock round it and a floor of stock under it,
+  // which the item's "fits the blank" test does not ask. The rim is the job's edge margin, the
+  // floor its minimum floor — the same two numbers every other pocket keeps.
+  const mold = target.goalMode === 'mold' && target.format !== 'png' && (target.role ?? 'reference') === 'goal';
   // #672 — a PICTURE goal's depth is its relief map's, not `size.z`: the operator states
   // `relief.maxDepthMm` (or takes the labelled default), and the blank must hold it.
   // #722 — a mesh's PLACED size (parsed bbox × scale), the size the heightfield samples.
@@ -929,6 +937,26 @@ export function validateGoalObject(
         `${fmt3(placed.x)}×${fmt3(placed.y)}×${fmt3(depth)} mm, larger than the ` +
         `${fmt3(length)}×${fmt3(width)}×${fmt3(thickness)} mm blank it would be carved from; ` +
         `it cannot be reproduced from this stock. Use a larger blank, or scale the goal (Fit to the stock).`,
+    });
+  } else if (mold && (footprint.x + 2 * (opts.edgeMargin ?? 0) > length + 1e-9 || footprint.y + 2 * (opts.edgeMargin ?? 0) > width + 1e-9)) {
+    const rim = opts.edgeMargin ?? 0;
+    findings.push({
+      severity: 'error',
+      code: 'goal-mold-rim',
+      message:
+        `The mold of "${target.name}" is ${fmt3(footprint.x)}×${fmt3(footprint.y)} mm across, and a ` +
+        `cavity needs a ${fmt3(rim)} mm rim of stock all round it (the edge margin) on the ` +
+        `${fmt3(length)}×${fmt3(width)} mm blank. Scale the part down, or use a larger blank.`,
+    });
+  } else if (mold && depth > thickness - (opts.minFloor ?? 0) + 1e-9) {
+    const floor = opts.minFloor ?? 0;
+    findings.push({
+      severity: 'error',
+      code: 'goal-mold-floor',
+      message:
+        `The mold of "${target.name}" is ${fmt3(depth)} mm deep, and a cavity must leave the ` +
+        `${fmt3(floor)} mm minimum floor under it in the ${fmt3(thickness)} mm blank — at most ` +
+        `${fmt3(Math.max(0, thickness - floor))} mm deep here. Scale the part down, or use a thicker blank.`,
     });
   } else if (opts.mixed === true) {
     // #535 — the MIXED path's note: one job's program is the item work, so this goal is validated
@@ -1187,7 +1215,13 @@ export function validateJob(
       // A GOAL (#533) IS the work, so it is never warned as uncut. It is validated instead
       // ({@link validateGoalObject}), which the pure-goal generate path reuses (#539). #535 — the
       // "posts no cut for it" info belongs to a MIXED job only; a pure goal job is surfaced.
-      findings.push(...validateGoalObject(target, job.stock, { mixed: pureGoalObject(job) === null }));
+      findings.push(
+        ...validateGoalObject(target, job.stock, {
+          mixed: pureGoalObject(job) === null,
+          minFloor: job.minFloor,
+          edgeMargin: job.edgeMargin,
+        }),
+      );
     } else {
       // A REFERENCE (#435). Saying so once, as a warning, keeps "why is my imported part not being
       // cut?" from being answered by silence; it never blocks the other work.

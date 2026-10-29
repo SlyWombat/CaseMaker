@@ -5525,6 +5525,14 @@
               ],
               "type": "string"
             },
+            "goalMode": {
+              "description": "What a goal mesh makes: 'item' (the part stands proud; the default when absent) or 'mold' (the part cut as a cavity to cast it in).",
+              "enum": [
+                "item",
+                "mold"
+              ],
+              "type": "string"
+            },
             "id": {
               "description": "Unique id for the reference object.",
               "minLength": 1,

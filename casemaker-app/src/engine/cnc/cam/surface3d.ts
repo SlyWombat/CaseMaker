@@ -37,7 +37,7 @@
 
 import type { EngraveTargetObject } from '@/types/engraveJob';
 import { targetObjectMesh } from '@/engine/import/targetObject';
-import { targetScale } from '@/engine/cnc/engrave/targetScale';
+import { placedSize, targetScale } from '@/engine/cnc/engrave/targetScale';
 import { base64ToArrayBuffer } from '@/engine/import/base64';
 import { decodePng } from '@/engine/import/png';
 import { reliefDepthMm, reliefNumbers } from './relief';
@@ -722,6 +722,73 @@ export function generateSurface3dIR(args: Surface3dArgs): Surface3dResult {
   return { ir, roughing, finishing, roughingLayers: rough.layers, scallop, pencil, notes };
 }
 
+/** #721 — true for a goal MESH marked as a mold (a PNG relief and an item are never molds). */
+export function isMold(target: Pick<EngraveTargetObject, 'format' | 'goalMode'>): boolean {
+  return target.goalMode === 'mold' && target.format !== 'png';
+}
+
+/**
+ * #721 — turn an ITEM heightfield into the MOLD of the same part.
+ *
+ * The part's height above its own base at each covered cell (`z − baseZ`) becomes the cavity's
+ * depth below the stock top, and the rows are mirrored about the footprint's centre line in Y: the
+ * part is turned over about its X axis, as one pressed face-down into the stock, so a casting taken
+ * from the cavity reads the right way round (a reflection would cast its mirror image). Cells the
+ * part does not cover stay at the stock top (uncut — the rim). Pure: returns a new field.
+ */
+export function moldHeightfield(hf: GoalHeightfield, centreY: number, baseZ: number): GoalHeightfield {
+  const { nx, ny } = hf;
+  const z = new Float32Array(nx * ny);
+  z.fill(hf.topZ);
+  const covered = new Uint8Array(nx * ny);
+  let minZ = hf.topZ;
+  for (let j = 0; j < ny; j++) {
+    const src = ny - 1 - j;
+    for (let i = 0; i < nx; i++) {
+      const k = src * nx + i;
+      if (hf.covered[k] !== 1) continue;
+      const depth = Math.max(0, (hf.z[k] as number) - baseZ);
+      const v = hf.topZ - depth;
+      z[j * nx + i] = v;
+      covered[j * nx + i] = 1;
+      if (v < minZ) minZ = v;
+    }
+  }
+  // Row j now holds the source row (ny − 1 − j), mirrored about `centreY`.
+  const y0 = 2 * centreY - hf.y0 - (ny - 1) * hf.pitch;
+  return { ...hf, y0, z, covered, minZ };
+}
+
+/**
+ * #721 — the steepest wall of a cavity, degrees from horizontal, between neighbouring covered
+ * cells of a field. A mold wants draft (walls short of vertical) to release a casting; 90° means a
+ * wall that rises within one cell.
+ */
+export function steepestWallDeg(hf: GoalHeightfield): number {
+  const { nx, ny, z, covered, pitch } = hf;
+  let worst = 0;
+  for (let j = 0; j < ny; j++) {
+    for (let i = 0; i < nx; i++) {
+      const k = j * nx + i;
+      const here = z[k] as number;
+      for (const [di, dj] of [[1, 0], [-1, 0], [0, 1], [0, -1]] as const) {
+        const ii = i + di;
+        const jj = j + dj;
+        // Off the grid is uncut stock at the top: the grid ends at the footprint, so a covered
+        // border cell's outer neighbour is the cavity's rim wall.
+        const inside = ii >= 0 && jj >= 0 && ii < nx && jj < ny;
+        const kk = jj * nx + ii;
+        if (covered[k] !== 1 && (!inside || covered[kk] !== 1)) continue;
+        const there = inside ? (z[kk] as number) : hf.topZ;
+        const dz = Math.abs(here - there);
+        const deg = (Math.atan2(dz, pitch) * 180) / Math.PI;
+        if (deg > worst) worst = deg;
+      }
+    }
+  }
+  return worst;
+}
+
 /**
  * Build the surfacing IR straight from a goal `EngraveTargetObject` and a `Tool` (the dispatch's
  * convenience entry). Returns `null` when the field covers nothing — a goal entirely at or above
@@ -730,7 +797,7 @@ export function generateSurface3dIR(args: Surface3dArgs): Surface3dResult {
 export function generateSurface3dForGoal(args: {
   target: Pick<
     EngraveTargetObject,
-    'id' | 'sha256' | 'format' | 'data' | 'position' | 'rotation' | 'size' | 'relief' | 'scale'
+    'id' | 'sha256' | 'format' | 'data' | 'position' | 'rotation' | 'size' | 'relief' | 'scale' | 'goalMode'
   >;
   tool: Tool;
   toolNumber: number;
@@ -741,8 +808,14 @@ export function generateSurface3dForGoal(args: {
   sample?: SampleGoalOpts;
   opts?: SurfaceOpts;
 }): (Surface3dResult & { heightfield: GoalHeightfield }) | null {
-  const heightfield = sampleGoalHeightfield(args.target, args.sample);
-  if (heightfield.coveredCount === 0) return null;
+  const sampled = sampleGoalHeightfield(args.target, args.sample);
+  if (sampled.coveredCount === 0) return null;
+  // #721 — a MOLD is the same part turned over and sunk from the stock top. The part's base is its
+  // placed top less its placed height (the scale is the one #722 applies).
+  const heightfield =
+    isMold(args.target)
+      ? moldHeightfield(sampled, args.target.position.y, args.target.position.z - placedSize(args.target).z)
+      : sampled;
   const d = cuttingDiameter(args.tool);
   const radius = d !== null && d > 0 ? d / 2 : 0;
   const surfaceTool: SurfaceTool = { radius, ball: args.tool.shape === 'ball' || args.tool.shape === 'bull' };

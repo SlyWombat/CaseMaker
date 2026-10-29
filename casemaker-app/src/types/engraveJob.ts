@@ -627,6 +627,14 @@ export interface EngraveTargetObject {
    */
   surface?: EngraveSurfaceSettings;
   /**
+   * #721 — what a GOAL mesh makes: `'item'` (the default when absent) removes material down to the
+   * mesh's top surface, so the part stands proud; `'mold'` cuts the part as a CAVITY — the mesh
+   * turned over about its X axis (as a part pressed face-down) and sunk from the stock's top face,
+   * so a casting from the cavity reproduces the part. One-sided: 3-axis from the top, no undercuts.
+   * Ignored for a reference and for a PNG relief.
+   */
+  goalMode?: 'item' | 'mold';
+  /**
    * #672 — a PNG goal's relief map: the depth the darkest (or, inverted, the lightest) tone is cut
    * to and which end of the greys sits at the top face. Absent = the engine's labelled defaults.
    */

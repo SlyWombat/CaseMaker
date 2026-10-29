@@ -907,6 +907,11 @@ const targetObjectSchema = z
     // #535 — the goal's own surfacing settings. Optional like `role`: an absent block is the
     // engine's defaults, and a document written before this slice round-trips unchanged. The key
     // MUST live here as well as in `types/engraveJob.ts`, or the strict schema strips it.
+    // #721 — optional like `role`: absent is 'item', so older documents round-trip unchanged.
+    goalMode: z
+      .enum(['item', 'mold'])
+      .optional()
+      .describe("What a goal mesh makes: 'item' (the part stands proud; the default when absent) or 'mold' (the part cut as a cavity to cast it in)."),
     surface: surfaceSettingsSchema
       .optional()
       .describe('The goal mesh’s surfacing settings (step-down, step-overs, grid pitch, allowance); omit every key to use the defaults.'),
