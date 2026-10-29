@@ -137,6 +137,9 @@ import { generateChamfer, type ChamferCut } from '@/engine/cnc/cam/chamfer';
 import type { Polygons } from '@/engine/cnc/cam/pocket';
 import { concatToolpathIR, estimateCycleSeconds, HOP_Z, raiseTravelOver, toolNumberFor, travelHeightOver, travelStats, type CamMove, type CamPassStep, type ToolpathIR } from '@/engine/cnc/cam/ir';
 import {
+  DEFAULT_GRID_PITCH_MM,
+  DEFAULT_MAX_CELLS,
+  DEFAULT_MAX_FINISH_TIP_OPS,
   DEFAULT_STOCK_TO_LEAVE_MM,
   generateSurface3dForGoal,
   isMold,
@@ -3968,14 +3971,23 @@ export function generateGoalProgram(
     // operation states its own.
     finishStepOver: settings.finishStepOverMm ?? resolved.params.stepOver,
   };
+  // #755 — A FINISH FINER THAN THE SHAPE IS KNOWN BUYS NOTHING. When the finish's step-over is
+  // finer than the grid the goal would be sampled on, sample at the step-over instead: the passes
+  // then follow a surface known at the resolution they cut at. A COARSER step-over does not
+  // coarsen the grid. Two caps can still stop the refinement — the heightfield's cell count and
+  // the finishing tip field's evaluation budget — and they relax it rather than refuse the job;
+  // the run then says which pitch it settled on and why (inform, never refuse).
+  const finishStepOverMm = feeds.finishStepOver;
+  const basePitchMm = gridPitchMm ?? DEFAULT_GRID_PITCH_MM;
+  const refinedPitchMm = finishStepOverMm > 0 && finishStepOverMm < basePitchMm ? finishStepOverMm : basePitchMm;
   // #671 — the two extra finishing passes are OPT-IN: absent = today's rough + parallel finish.
   const scallop = settings.scallop === true;
   const pencil = settings.pencil === true;
   const pencilCreaseDeg = settings.pencilCreaseDeg;
 
-  let surfaced: ReturnType<typeof generateSurface3dForGoal>;
-  try {
-    surfaced = generateSurface3dForGoal({
+  type Surfaced = ReturnType<typeof generateSurface3dForGoal>;
+  const surfaceAt = (pitchMm: number): Surfaced =>
+    generateSurface3dForGoal({
       target: goal,
       tool,
       toolNumber: toolNumberFor(tool),
@@ -3983,7 +3995,7 @@ export function generateGoalProgram(
       air: job.cutOverride?.air ?? true,
       feeds,
       rapid: mill.rapidEstimate,
-      sample: gridPitchMm === null ? undefined : { pitchMm: gridPitchMm },
+      sample: { pitchMm },
       opts: {
         stockToLeaveMm,
         scallop,
@@ -3991,8 +4003,22 @@ export function generateGoalProgram(
         ...(pencilCreaseDeg === undefined ? {} : { pencilCreaseDeg }),
       },
     });
+  let surfaced: Surfaced;
+  let budgetBound = false;
+  try {
+    surfaced = surfaceAt(refinedPitchMm);
   } catch (e) {
-    return fail('cam', e instanceof Error ? e.message : String(e), resolved);
+    const message = e instanceof Error ? e.message : String(e);
+    // The finishing tip field's own cap (#540) is a cost limit, not a fault: settle at the grid
+    // the job would have used and let the finding below state the pitch the run really took.
+    const budget = refinedPitchMm !== basePitchMm && /tip evaluations/.test(message) && /budget/.test(message);
+    if (!budget) return fail('cam', message, resolved);
+    try {
+      surfaced = surfaceAt(basePitchMm);
+      budgetBound = true;
+    } catch (e2) {
+      return fail('cam', e2 instanceof Error ? e2.message : String(e2), resolved);
+    }
   }
   if (surfaced === null) {
     return fail('cam', `the goal "${goal.name}" lies at or above the stock top, so there is no surface to cut`, resolved);
@@ -4002,6 +4028,24 @@ export function generateGoalProgram(
   // the part's top surface and the casting's underside is the flat pour face), and a wall with no
   // draft holds the casting: warn past the labelled limit, naming the steepest wall found.
   const moldFindings: JobFinding[] = [];
+  // #755 — the grid the sampler SETTLED on, against the finish the job asked for. The cap is the
+  // heightfield's own (4 M cells); a coarser settled pitch means the passes are finer than the
+  // shape is known, and the operator should hear it once, with the number the run really used.
+  const gridFindings: JobFinding[] = [];
+  const settledPitchMm = surfaced.heightfield.pitch;
+  if (finishStepOverMm > 0 && settledPitchMm > finishStepOverMm + 1e-9) {
+    const trim = (n: number): string => String(Number(n.toFixed(4)));
+    const why = budgetBound
+      ? `a ball at that spacing would ask the finishing tip field for more than its ${DEFAULT_MAX_FINISH_TIP_OPS.toLocaleString('en-US')} evaluations`
+      : `the heightfield's ${DEFAULT_MAX_CELLS.toLocaleString('en-US')} cells settle the grid there`;
+    gridFindings.push({
+      severity: 'warning',
+      code: 'goal-finish-finer-than-grid',
+      message:
+        `the finish passes are ${trim(finishStepOverMm)} mm apart but the shape is known every ${trim(settledPitchMm)} mm — ` +
+        `${why}, so the finer passes buy at most that accuracy; set a step-over at or above it, or surface a smaller blank`,
+    });
+  }
   if (isMold(goal)) {
     const steepest = steepestWallDeg(surfaced.heightfield);
     moldFindings.push({
@@ -4080,7 +4124,7 @@ export function generateGoalProgram(
     ...base,
     ok: true,
     stage: 'done',
-    findings: dedupeFindings([...documentFindings(), ...moldFindings]),
+    findings: dedupeFindings([...documentFindings(), ...moldFindings, ...gridFindings]),
     feeds: resolved,
     cam,
     nc,

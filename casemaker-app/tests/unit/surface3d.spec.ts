@@ -386,8 +386,10 @@ describe('generateGoalProgram — the goal operation’s own numbers (#535)', ()
     expect(facts.stepDownMm).toBe(0.25);
     expect(facts.roughStepOverMm).toBe(1.2);
     expect(facts.finishStepOverMm).toBe(0.15);
-    expect(facts.gridPitchMm).toBe(0.5);
-    expect(facts.resolutionNote).toContain('0.5');
+    // #755 — a finish finer than the grid the operation stated refines it: the run sampled at the
+    // step-over, not the coarser 0.5, and the facts report the pitch it really used.
+    expect(facts.gridPitchMm).toBe(0.15);
+    expect(facts.resolutionNote).toContain('0.15');
     expect(facts.stockToLeaveMm).toBe(0);
     // The ramp's top is at the stock top and its deepest point 1.0 mm down (K·20); with a 0.25 mm
     // step-down and no allowance the layers are −0.25, −0.5, −0.75 and the floor −1.0.

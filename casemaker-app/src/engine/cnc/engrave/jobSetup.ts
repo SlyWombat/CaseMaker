@@ -293,6 +293,7 @@ export type JobFindingCode =
   | 'goal-mold-floor'
   | 'goal-mold-one-sided'
   | 'goal-mold-no-draft'
+  | 'goal-finish-finer-than-grid'
   | 'goal-object-no-toolpath'
   // Facing (#432). The job's facing depth is taken off the same blank every item is measured
   // against, so the check is one number against the stock's minimum floor — not a per-item one.

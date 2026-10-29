@@ -273,14 +273,37 @@ describe('#754 the mirror finish — a 0.05 mm step-over', () => {
     expect(BALL_R - Math.sqrt(BALL_R ** 2 - 0.025 ** 2)).toBeLessThan(0.00025);
   });
 
-  // #755 — the passes are 0.05 mm apart but the shape is sampled every 0.1 mm (the shop's grid), and
-  // nothing says so. Flips to passing when the grid follows the step-over or the run states it.
-  it.fails('#755 — a finish step-over finer than the sampled grid is resolved or stated', () => {
+  // #755 — the grid follows the finish when it can: a 0.05 mm finish on a ⌀3 ball would need more
+  // finishing tip-field evaluations than the run's budget allows, so the job settles at the grid it
+  // would have used and STATES that pitch and the cap that bound — never refusing the job.
+  it('#755 — a finish step-over finer than the sampled grid is followed or the cap that bound is stated', () => {
     const out = fine();
+    expect(out.ok).toBe(true);
     const grid = out.surface3d!.gridPitchMm;
-    const stated = out.findings.some((f) => /grid|known every/i.test(f.message));
-    expect(grid <= 0.05 || stated).toBe(true);
+    const stated = out.findings.find((f) => f.code === 'goal-finish-finer-than-grid');
+    if (grid > 0.05) {
+      expect(stated).toBeDefined();
+      expect(stated!.message).toContain('the finish passes are 0.05 mm apart');
+      expect(stated!.message).toContain('tip field');
+    } else {
+      expect(stated).toBeUndefined();
+    }
   });
+
+  // #755 — and when the heightfield's cell cap binds, the run STATES the pitch it settled on rather
+  // than refusing the job (the maintainer's rule: inform, don't refuse).
+  it('#755 — a cap-bound grid is stated with the pitch it settled on, not refused', () => {
+    const j = job(goal(zOut, { surface: { finishStepOverMm: 0.005, scallop: false } }));
+    const out = generateGoalProgram(j, j.targetObject!, BALL_TOOL, [], null, {});
+    expect(out.ok).toBe(true);
+    const f = out.findings.find((x) => x.code === 'goal-finish-finer-than-grid');
+    expect(f).toBeDefined();
+    expect(f!.severity).toBe('warning');
+    expect(f!.message).toContain('the finish passes are 0.005 mm apart');
+    const settled = Number(out.surface3d!.gridPitchMm.toFixed(4));
+    expect(f!.message).toContain(`known every ${settled} mm`);
+    expect(out.surface3d!.gridPitchMm).toBeGreaterThan(0.005);
+  }, 120_000);
 });
 
 // ── The pins ────────────────────────────────────────────────────────────────────────────────────
