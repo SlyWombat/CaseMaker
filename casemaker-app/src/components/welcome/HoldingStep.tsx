@@ -460,7 +460,7 @@ function RotaryFrontView({ rotary }: { rotary: RotaryPicture }): JSX.Element {
   );
 }
 
-// ── #715: the bed from above, with its handles ─────────────────────────────────────────────────
+// ── The pictures' palette, shared by the mount picture and the orientation fold ───────────────
 
 const VB = { w: 300, h: 230 } as const;
 const STOCK_FILL = '#1e3a4a';
@@ -471,6 +471,209 @@ const TAPE_FILL = '#d8c48a';
 const BOARD_FILL = '#3a3325';
 const BOARD_EDGE = '#7a6a45';
 const SCAR_EDGE = '#44505c';
+/** The one colour that is not the stock's or the fixture's: "this is the edge/face I mean". */
+const LANDMARK_EDGE = '#e0c07a';
+
+// ── #698: the orientation fold's three landmarks ──────────────────────────────────────────────
+
+/** The three stated orientation facts a rectangular blank has in the vise (#698's decision). */
+type OrientationLandmark = 'face-up' | 'fixed-jaw' | 'nearest';
+
+/**
+ * #698 — the orientation fold is the operator's bench instruction, so its pictures are drawn in
+ * the SAME frame as the step's own top view: X left-right between the jaws, the FIXED JAW on the
+ * LEFT, and the operator's front at the BOTTOM. The stock keeps its own aspect (the badge blank
+ * is 38.1 mm across the jaws and 76.2 mm along them, #383), so the left edge is the long edge for
+ * the blank this fold is usually about.
+ *
+ * The three facts are stated, not chosen: the job document has no orientation field (#698), so
+ * there is no select here (A10, no dead controls). The pictures only show what the words say.
+ */
+function OrientationPicture({
+  landmark,
+  stock,
+  faceWord,
+}: {
+  landmark: OrientationLandmark;
+  stock: { length: number; width: number; thickness: number };
+  faceWord: string;
+}): JSX.Element {
+  const view = { w: 120, h: 86 } as const;
+  const svgStyle = {
+    width: '100%',
+    maxWidth: '100%',
+    display: 'block',
+    border: '1px solid #2a2f36',
+    background: '#10151b',
+  } as const;
+  const caption =
+    landmark === 'face-up'
+      ? `Side view: the ${faceWord} is on top, where the cutter reaches it.`
+      : landmark === 'fixed-jaw'
+        ? 'Top view: the fixed jaw is on the left, and the stock’s left edge is flat against it.'
+        : 'Top view: the fixed jaw is on the left; the stock’s front edge is at the bottom, nearest you.';
+
+  if (landmark === 'face-up') {
+    // A SIDE view: the printed/finished layer is the top of the stock, and the cutter is above it.
+    return (
+      <svg
+        viewBox={`0 0 ${view.w} ${view.h}`}
+        style={svgStyle}
+        role="img"
+        aria-label={caption}
+        data-testid="engrave-setup-orientation-picture-face-up"
+        data-landmark={landmark}
+      >
+        {/* The cutter, above the face the operator must turn up. */}
+        <rect data-role="cutter" x="52" y="2" width="16" height="7" fill={FIXTURE_FILL} stroke={FIXTURE_EDGE} />
+        <path d="M56 9 L60 18 L64 9 Z" fill={FIXTURE_FILL} stroke={FIXTURE_EDGE} />
+        <text x="72" y="9" {...SVG_MUTED} fontSize={8.5}>
+          cutter
+        </text>
+        {/* Up, from the face to the cutter. */}
+        <path
+          data-role="face-up-arrow"
+          d="M60 42 V26 M55 31 L60 24 L65 31"
+          fill="none"
+          stroke="#d1d5db"
+          strokeWidth={1.2}
+        />
+        <text x="67" y="40" {...SVG_MUTED} fontSize={8.5}>
+          up
+        </text>
+        {/* The stock, its printed or finished layer on top. */}
+        <rect
+          data-role="stock-slab"
+          x="10"
+          y="46"
+          width="100"
+          height="22"
+          fill={STOCK_FILL}
+          stroke={STOCK_EDGE}
+          strokeWidth={1.5}
+        />
+        <rect data-role="face-layer" x="10" y="46" width="100" height="6" fill={STOCK_EDGE} fillOpacity={0.45} />
+        <text x="60" y="64" textAnchor="middle" {...SVG_TEXT} fontSize={9}>
+          {faceWord}
+        </text>
+      </svg>
+    );
+  }
+
+  // The two TOP views share one scene: the fixed jaw on the left, the stock in its own aspect,
+  // the moving jaw on the right. The landmark's own edge is the one in LANDMARK_EDGE.
+  const maxW = 44;
+  const maxH = 48;
+  const scale = Math.min(maxW / Math.max(stock.length, 0.001), maxH / Math.max(stock.width, 0.001));
+  const w = Math.max(12, Math.min(maxW, stock.length * scale));
+  const h = Math.max(12, Math.min(maxH, stock.width * scale));
+  const start = (view.w - (16 + w + 16)) / 2;
+  const y = 10 + (maxH - h) / 2;
+  const stockX = start + 16;
+  const movingX = stockX + w;
+  const bottom = y + h;
+  const jawLabel = { ...SVG_MUTED, fontSize: 8 } as const;
+  const scene = (
+    <>
+      <rect data-role="fixed-jaw" x={start} y={y} width="16" height={h} fill={FIXTURE_EDGE} />
+      <text x={start + 8} y="7" textAnchor="middle" {...jawLabel}>
+        fixed jaw
+      </text>
+      <rect
+        data-role="stock"
+        x={stockX}
+        y={y}
+        width={w}
+        height={h}
+        fill={STOCK_FILL}
+        stroke={STOCK_EDGE}
+        strokeWidth={1.5}
+      />
+      <rect
+        data-role="moving-jaw"
+        x={movingX}
+        y={y}
+        width="16"
+        height={h}
+        fill={FIXTURE_FILL}
+        stroke={FIXTURE_EDGE}
+      />
+      <text x={movingX + 8} y="7" textAnchor="middle" {...jawLabel}>
+        moving
+      </text>
+    </>
+  );
+
+  if (landmark === 'fixed-jaw') {
+    return (
+      <svg
+        viewBox={`0 0 ${view.w} ${view.h}`}
+        style={svgStyle}
+        role="img"
+        aria-label={caption}
+        data-testid="engrave-setup-orientation-picture-fixed-jaw"
+        data-landmark={landmark}
+      >
+        {scene}
+        {/* The stock's LEFT edge, pressed flat on the fixed jaw (the jaw itself does not move). */}
+        <line
+          data-role="left-edge"
+          x1={stockX}
+          y1={y}
+          x2={stockX}
+          y2={bottom}
+          stroke={LANDMARK_EDGE}
+          strokeWidth={3}
+          strokeLinecap="round"
+        />
+        <text x={view.w / 2} y="76" textAnchor="middle" {...SVG_TEXT} fontSize={9}>
+          left edge
+        </text>
+      </svg>
+    );
+  }
+
+  // Nearest you: the front edge is the BOTTOM of the top view, and the operator stands below it.
+  const centre = stockX + w / 2;
+  return (
+    <svg
+      viewBox={`0 0 ${view.w} ${view.h}`}
+      style={svgStyle}
+      role="img"
+      aria-label={caption}
+      data-testid="engrave-setup-orientation-picture-nearest"
+      data-landmark={landmark}
+    >
+      {scene}
+      <line
+        data-role="front-edge"
+        x1={stockX}
+        y1={bottom}
+        x2={movingX}
+        y2={bottom}
+        stroke={LANDMARK_EDGE}
+        strokeWidth={3}
+        strokeLinecap="round"
+      />
+      <text x={centre} y={bottom - 5} textAnchor="middle" {...SVG_TEXT} fontSize={8}>
+        front
+      </text>
+      {/* The operator, at the front of the machine — below the near edge, never to its left. */}
+      <circle data-role="operator" cx={centre} cy="70" r="4" fill="#9aa4b0" />
+      <path
+        d={`M${centre - 8} 84 Q${centre} 74 ${centre + 8} 84`}
+        fill="none"
+        stroke="#9aa4b0"
+        strokeWidth={1.2}
+      />
+      <text x={centre + 10} y="76" {...SVG_MUTED} fontSize={8}>
+        nearest you
+      </text>
+    </svg>
+  );
+}
+
+// ── #715: the bed from above, with its handles ─────────────────────────────────────────────────
 
 /** The surface footprint the picture can place the stock on, when the record states one. */
 function footprintOf(
@@ -1299,6 +1502,31 @@ export function HoldingStep({ job, answers, onAnswers, onRotary, onBedHold }: Ho
 
   const finish = job.stockEntry?.finish;
   const hasFace = (finish !== undefined && finish !== 'unknown') || job.stock.colour !== undefined;
+  // #698 — the fold's three stated landmarks, in the operator's own words. The face is named only
+  // when the job says which face is special; a plain blank still gets the landmark, not a colour.
+  const faceWord =
+    finish === 'printed' || job.stock.colour?.kind === 'printed'
+      ? 'printed face'
+      : finish === 'finished' || job.stock.colour?.kind === 'laminate'
+        ? 'finished face'
+        : 'face you want cut';
+  const orientationCards = [
+    {
+      key: 'face-up',
+      label: 'Face up',
+      caption: `The ${faceWord} is up, where the cutter can reach it.`,
+    },
+    {
+      key: 'fixed-jaw',
+      label: 'Against the fixed jaw',
+      caption: 'The left edge is flat against the fixed jaw — the jaw that does not move.',
+    },
+    {
+      key: 'nearest',
+      label: 'Nearest you',
+      caption: 'The front edge is closest to you, at the bottom of the top view.',
+    },
+  ] as const;
 
   // #705 — WHAT THE PICTURE DRAWS: the mount on show (the radio, or a hovered/focused option), the
   // option's own proud figure and board, and — for a disabled option — the line naming what it
@@ -1721,11 +1949,43 @@ export function HoldingStep({ job, answers, onAnswers, onRotary, onBedHold }: Ho
                   <li>Either end — unless the ends differ: a printed rod's layers, a tube's chamfer.</li>
                 </ul>
               ) : (
-                <ul style={{ ...MUTED, margin: '4px 0 0 18px', padding: 0 }}>
-                  <li>Face up: the printed face.</li>
-                  <li>Against the fixed jaw: the long edge.</li>
-                  <li>Nearest you: the left end.</li>
-                </ul>
+                // #698 — three pictures, not three bullets: the operator is told what to LOOK AT at
+                // the vise. Each is drawn in the step's own top-view frame (fixed jaw LEFT, the
+                // operator's front BOTTOM), so the words and the picture name the same side.
+                <div
+                  data-testid="engrave-setup-orientation-pictures"
+                  style={{ display: 'grid', gap: 10, marginTop: 8 }}
+                >
+                  {orientationCards.map((card) => (
+                    <figure
+                      key={card.key}
+                      data-testid={`engrave-setup-orientation-${card.key}`}
+                      style={{
+                        display: 'grid',
+                        gridTemplateColumns: '104px minmax(0, 1fr)',
+                        gap: 10,
+                        alignItems: 'center',
+                        margin: 0,
+                      }}
+                    >
+                      <OrientationPicture landmark={card.key} stock={answers.stock} faceWord={faceWord} />
+                      <figcaption style={{ display: 'grid', gap: 2, minWidth: 0 }}>
+                        <b
+                          data-testid={`engrave-setup-orientation-label-${card.key}`}
+                          style={{ fontSize: 12, color: '#d1d5db' }}
+                        >
+                          {card.label}
+                        </b>
+                        <span
+                          data-testid={`engrave-setup-orientation-caption-${card.key}`}
+                          style={{ ...MUTED, margin: 0 }}
+                        >
+                          {card.caption}
+                        </span>
+                      </figcaption>
+                    </figure>
+                  ))}
+                </div>
               )}
             </details>
           )}
